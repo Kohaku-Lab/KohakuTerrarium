@@ -1,57 +1,8 @@
 <template>
-  <div v-if="instance" class="flex flex-col h-full bg-warm-50 dark:bg-warm-900">
-    <!-- Header -->
-    <div class="flex items-center gap-3 px-4 py-2 border-b border-warm-200 dark:border-warm-700 bg-white dark:bg-warm-800">
-      <StatusDot :status="instance.status" />
-      <span class="font-medium text-warm-700 dark:text-warm-300">{{
-        instance.config_name
-      }}</span>
-      <span
-        v-if="chat.sessionInfo.model || instance?.model"
-        class="px-2 py-0.5 rounded-md text-[11px] font-mono bg-iolite/10 dark:bg-iolite/15 text-iolite dark:text-iolite-light"
-      >{{ chat.sessionInfo.model || instance?.model }}</span>
-      <span class="text-xs text-warm-400 font-mono truncate">{{
-        instance.pwd
-      }}</span>
-      <div class="flex-1" />
-      <el-tooltip content="Open in Editor" placement="bottom">
-        <button
-          class="nav-item !w-7 !h-7 text-iolite hover:!text-iolite-shadow"
-          @click="router.push(`/editor/${route.params.id}`)"
-        >
-          <div class="i-carbon-code text-sm" />
-        </button>
-      </el-tooltip>
-      <el-tooltip content="Stop instance" placement="bottom">
-        <button
-          class="nav-item !w-7 !h-7 text-coral hover:!text-coral-shadow"
-          @click="showStopConfirm = true"
-        >
-          <div class="i-carbon-stop-filled text-sm" />
-        </button>
-      </el-tooltip>
-    </div>
+  <div v-if="instance" class="h-full overflow-hidden">
+    <WorkspaceShell :instance-id="route.params.id" @stop="showStopConfirm = true" />
 
-    <!-- Main content: Chat + StatusDashboard side by side -->
-    <div class="flex-1 overflow-hidden">
-      <SplitPane
-        :initial-size="65"
-        :min-size="30"
-        persist-key="main"
-      >
-        <template #first>
-          <ChatPanel :instance="instance" />
-        </template>
-        <template #second>
-          <StatusDashboard
-            :instance="instance"
-            :on-open-tab="handleOpenTab"
-          />
-        </template>
-      </SplitPane>
-    </div>
-
-    <!-- Stop confirmation dialog -->
+    <!-- Stop confirmation dialog (triggered from the status bar or nav) -->
     <el-dialog
       v-model="showStopConfirm"
       title="Stop Instance"
@@ -76,27 +27,58 @@
 </template>
 
 <script setup>
-import StatusDot from "@/components/common/StatusDot.vue";
-import SplitPane from "@/components/common/SplitPane.vue";
-import ChatPanel from "@/components/chat/ChatPanel.vue";
-import StatusDashboard from "@/components/status/StatusDashboard.vue";
-import { useInstancesStore } from "@/stores/instances";
+import { computed, onMounted, provide, ref, watch } from "vue";
+
+import WorkspaceShell from "@/components/layout/WorkspaceShell.vue";
 import { useChatStore } from "@/stores/chat";
+import { useEditorStore } from "@/stores/editor";
+import { useInstancesStore } from "@/stores/instances";
+import { useLayoutStore } from "@/stores/layout";
 
 const route = useRoute();
 const router = useRouter();
 const instances = useInstancesStore();
 const chat = useChatStore();
+const editor = useEditorStore();
+const layout = useLayoutStore();
 
 const instance = computed(() => instances.current);
 const showStopConfirm = ref(false);
 const stopping = ref(false);
 
-onMounted(() => {
-  loadInstance();
+// Runtime prop map for panels mounted inside the shell's zones.
+const panelProps = computed(() => ({
+  chat: { instance: instance.value },
+  "status-dashboard": {
+    instance: instance.value,
+    onOpenTab: handleOpenTab,
+  },
+  activity: { instance: instance.value },
+  state: { instance: instance.value },
+  creatures: { instance: instance.value },
+  files: {
+    root: instance.value?.pwd || "",
+    onSelect: (path) => editor.openFile(path),
+  },
+  "file-tree": {
+    root: instance.value?.pwd || "",
+    onSelect: (path) => editor.openFile(path),
+  },
+  settings: { instance: instance.value },
+  debug: { instance: instance.value },
+  terminal: { instance: instance.value },
+}));
+provide("panelProps", panelProps);
+
+onMounted(async () => {
+  await loadInstance();
+  applyPresetForInstance();
 });
 
-watch(() => route.params.id, loadInstance);
+watch(() => route.params.id, async () => {
+  await loadInstance();
+  applyPresetForInstance();
+});
 
 async function loadInstance() {
   const id = route.params.id;
@@ -106,6 +88,31 @@ async function loadInstance() {
     chat.initForInstance(instance.value);
   }
 }
+
+function applyPresetForInstance() {
+  const id = route.params.id;
+  if (!id) return;
+  layout.loadInstanceOverrides(id);
+  const remembered = layout.getInstancePresetId(id);
+  if (remembered && layout.allPresets[remembered]) {
+    layout.switchPreset(remembered);
+    return;
+  }
+  const fallback =
+    instance.value?.type === "terrarium" ? "multi-creature" : "chat-focus";
+  layout.switchPreset(fallback);
+}
+
+// Persist preset changes against this instance id.
+watch(
+  () => layout.activePresetId,
+  (id) => {
+    const instId = route.params.id;
+    if (id && instId && !id.startsWith("legacy-")) {
+      layout.rememberInstancePreset(instId, id);
+    }
+  },
+);
 
 function handleOpenTab(tabKey) {
   chat.openTab(tabKey);

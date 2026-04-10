@@ -377,7 +377,7 @@ Full-screen Textual app with:
 
 ### Web Dashboard
 
-Vue 3 frontend with real-time streaming:
+Vue 3 frontend with configurable split-tree layout:
 
 ```bash
 pip install -e ".[web]"
@@ -387,14 +387,29 @@ npm run dev --prefix src/kohakuterrarium-frontend     # Frontend on :5173
 
 Features:
 
-- topology graph
-- multi-tab chat
-- tool accordion
-- running tasks panel
-- session resume
-- channel message feed
-- token tracking
-- dark / light mode
+- **Configurable layout**: binary split tree with draggable handles.
+  Six default presets (Chat Focus, Workspace, Multi-creature, Canvas,
+  Debug, Settings) plus user-created presets via edit mode
+- **Multi-tab chat** with message edit+rerun, regenerate, tool call
+  accordion, sub-agent nesting
+- **Integrated editor**: Monaco with file tabs, Vditor rich markdown
+  mode toggle for .md files
+- **Terminal panel**: xterm.js PTY shell in the agent's working directory
+  with Nerd Font support
+- **Canvas**: auto-detects long code blocks from assistant output,
+  syntax highlighting with line numbers, copy + download
+- **Activity panel**: session info, token usage with context bar,
+  running jobs with stop button
+- **State panel**: scratchpad viewer, tool history, memory search
+  (FTS5 + semantic via model2vec), compaction history
+- **Debug panel**: live log tail (WebSocket), tool trace waterfall,
+  system prompt viewer with diff, event firehose
+- **Settings panel**: extensions, triggers, cost estimate, environment
+- **Command palette** (Ctrl+K): fuzzy search across all commands and
+  panels
+- **Dark / light theme** across all components including Vditor and
+  xterm.js
+- Session resume, channel message feed, token tracking
 
 ### Interrupt System
 

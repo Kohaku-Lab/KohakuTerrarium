@@ -1,6 +1,10 @@
 """Standalone agent routes."""
 
+import os
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from kohakuterrarium.api.deps import get_manager
 from kohakuterrarium.api.schemas import (
@@ -12,6 +16,36 @@ from kohakuterrarium.api.schemas import (
 )
 
 router = APIRouter()
+
+
+# Env var keys that must be filtered out of /env responses (case-insensitive).
+_ENV_REDACT_SUBSTRINGS = (
+    "secret",
+    "key",
+    "token",
+    "password",
+    "pass",
+    "private",
+    "auth",
+    "credential",
+)
+
+
+def _redacted_env() -> dict[str, str]:
+    """Return a sanitized copy of os.environ with credentials filtered out."""
+    out = {}
+    for k, v in os.environ.items():
+        lk = k.lower()
+        if any(sub in lk for sub in _ENV_REDACT_SUBSTRINGS):
+            continue
+        out[k] = v
+    return out
+
+
+class ScratchpadPatch(BaseModel):
+    """Scratchpad update payload. Null value → delete the key."""
+
+    updates: dict[str, str | None]
 
 
 @router.post("")
@@ -203,3 +237,88 @@ async def chat_agent(agent_id: str, req: AgentChat, manager=Depends(get_manager)
         return {"response": "".join(chunks)}
     except ValueError as e:
         raise HTTPException(404, str(e))
+
+
+# ----------------------------------------------------------------------
+# Read-only inspection endpoints (added for frontend refactor Phase 1).
+# Every endpoint below is a thin wrapper over existing agent runtime
+# state. None of them add new backend behavior; they only expose state
+# the manager already tracks.
+# ----------------------------------------------------------------------
+
+
+@router.get("/{agent_id}/scratchpad")
+async def get_scratchpad(agent_id: str, manager=Depends(get_manager)) -> dict[str, str]:
+    """Return the agent's current scratchpad as a dict."""
+    session = manager._agents.get(agent_id)
+    if not session:
+        raise HTTPException(404, f"Agent {agent_id} not found")
+    return session.agent.scratchpad.to_dict()
+
+
+@router.patch("/{agent_id}/scratchpad")
+async def patch_scratchpad(
+    agent_id: str, req: ScratchpadPatch, manager=Depends(get_manager)
+) -> dict[str, str]:
+    """Merge updates into the scratchpad.
+
+    Each entry in ``req.updates`` either sets a key to the given string
+    value or, when the value is ``None``, deletes the key.
+    """
+    session = manager._agents.get(agent_id)
+    if not session:
+        raise HTTPException(404, f"Agent {agent_id} not found")
+    pad = session.agent.scratchpad
+    for key, value in req.updates.items():
+        if value is None:
+            pad.delete(key)
+        else:
+            pad.set(key, value)
+    return pad.to_dict()
+
+
+@router.get("/{agent_id}/triggers")
+async def list_agent_triggers(
+    agent_id: str, manager=Depends(get_manager)
+) -> list[dict[str, Any]]:
+    """Return the active triggers on an agent (read-only)."""
+    session = manager._agents.get(agent_id)
+    if not session:
+        raise HTTPException(404, f"Agent {agent_id} not found")
+    tm = session.agent.trigger_manager
+    if tm is None:
+        return []
+    return [
+        {
+            "trigger_id": info.trigger_id,
+            "trigger_type": info.trigger_type,
+            "running": info.running,
+            "created_at": info.created_at.isoformat(),
+        }
+        for info in tm.list()
+    ]
+
+
+@router.get("/{agent_id}/env")
+async def get_agent_env(agent_id: str, manager=Depends(get_manager)) -> dict[str, Any]:
+    """Return the agent's working directory and redacted environment."""
+    session = manager._agents.get(agent_id)
+    if not session:
+        raise HTTPException(404, f"Agent {agent_id} not found")
+    agent = session.agent
+    pwd = getattr(agent, "_working_dir", None) or os.getcwd()
+    return {
+        "pwd": str(pwd),
+        "env": _redacted_env(),
+    }
+
+
+@router.get("/{agent_id}/system-prompt")
+async def get_agent_system_prompt(
+    agent_id: str, manager=Depends(get_manager)
+) -> dict[str, str]:
+    """Return the agent's current assembled system prompt."""
+    session = manager._agents.get(agent_id)
+    if not session:
+        raise HTTPException(404, f"Agent {agent_id} not found")
+    return {"text": session.agent.get_system_prompt()}

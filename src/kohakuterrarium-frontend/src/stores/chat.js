@@ -945,13 +945,16 @@ export const useChatStore = defineStore("chat", {
 
     /** Regenerate the last assistant response using current settings. */
     async regenerateLastResponse() {
-      if (!this._instanceId || this._instanceType !== "agent") {
-        console.warn("Regenerate only supported for agent instances currently");
+      if (!this._instanceId || this._instanceType === "terrarium") {
+        console.warn("Regenerate only supported for standalone creature instances currently");
         return;
       }
       try {
         const { agentAPI } = await import("@/utils/api");
+        // Re-fetch history BEFORE triggering regen so the frontend
+        // state matches the backend's truncated conversation.
         await agentAPI.regenerate(this._instanceId);
+        await this._resyncHistory();
       } catch (e) {
         console.warn("Failed to regenerate:", e);
       }
@@ -959,11 +962,12 @@ export const useChatStore = defineStore("chat", {
 
     /** Edit a user message and re-run from that point. */
     async editMessage(messageIdx, newContent) {
-      if (!this._instanceId || this._instanceType !== "agent") return;
+      if (!this._instanceId || this._instanceType === "terrarium") return;
       if (messageIdx == null) return;
       try {
         const { agentAPI } = await import("@/utils/api");
         await agentAPI.editMessage(this._instanceId, messageIdx, newContent);
+        await this._resyncHistory();
       } catch (e) {
         console.warn("Failed to edit message:", e);
       }
@@ -971,12 +975,32 @@ export const useChatStore = defineStore("chat", {
 
     /** Rewind conversation to a point (drop later messages). */
     async rewindTo(messageIdx) {
-      if (!this._instanceId || this._instanceType !== "agent") return;
+      if (!this._instanceId || this._instanceType === "terrarium") return;
       try {
         const { agentAPI } = await import("@/utils/api");
         await agentAPI.rewindTo(this._instanceId, messageIdx);
+        await this._resyncHistory();
       } catch (e) {
         console.warn("Failed to rewind:", e);
+      }
+    },
+
+    /** Re-fetch conversation history from the backend and rebuild the
+     *  local message list. Called after edit/regenerate/rewind so the
+     *  frontend matches the backend's truncated conversation. */
+    async _resyncHistory() {
+      if (!this._instanceId) return;
+      try {
+        const { agentAPI } = await import("@/utils/api");
+        const data = await agentAPI.getHistory(this._instanceId);
+        const tab = this.activeTab;
+        if (!tab || !data?.events) return;
+        // Rebuild messages from the event history.
+        const events = data.events;
+        const { messages } = _replayEvents([], events);
+        this.messagesByTab[tab] = messages;
+      } catch (e) {
+        console.warn("Failed to resync history:", e);
       }
     },
 

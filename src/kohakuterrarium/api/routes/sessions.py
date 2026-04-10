@@ -2,10 +2,13 @@
 
 import time
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
 from kohakuterrarium.api.deps import get_manager
+from kohakuterrarium.session.embedding import create_embedder
+from kohakuterrarium.session.memory import SessionMemory
 from kohakuterrarium.session.resume import (
     detect_session_type,
     resume_agent,
@@ -229,3 +232,120 @@ async def resume_session(session_name: str):
             }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Resume failed: {e}")
+
+
+def _resolve_session_path(session_name: str) -> Path | None:
+    """Shared session file lookup (name, prefix, or full path)."""
+    for ext in (".kohakutr", ".kt"):
+        candidate = _SESSION_DIR / f"{session_name}{ext}"
+        if candidate.exists():
+            return candidate
+    matches = [
+        p
+        for p in list(_SESSION_DIR.glob("*.kohakutr")) + list(_SESSION_DIR.glob("*.kt"))
+        if p.stem == session_name
+        or p.stem.startswith(session_name)
+        or session_name in p.stem
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+@router.get("/{session_name}/memory/search")
+async def search_session_memory(
+    session_name: str,
+    q: str,
+    mode: str = "auto",
+    k: int = 10,
+    agent: str | None = None,
+) -> dict[str, Any]:
+    """Search a session's memory via FTS5 or semantic / hybrid modes.
+
+    Read-only. Wraps the existing ``SessionMemory.search()`` — no new
+    indexing behavior. Modes: ``auto`` (default), ``fts``, ``semantic``,
+    ``hybrid``.
+    """
+    path = _resolve_session_path(session_name)
+    if path is None:
+        raise HTTPException(404, f"Session not found: {session_name}")
+
+    try:
+        # Find the live agent session (if running) to reuse its store
+        # and embedder — same pattern as the search_memory builtin tool.
+        manager = get_manager()
+        live_agent = None
+        live_store = None
+        for _sid, session in manager._agents.items():
+            ag = getattr(session, "agent", None)
+            if ag and hasattr(ag, "session_store") and ag.session_store:
+                ss = ag.session_store
+                if str(path) in str(getattr(ss, "_path", "")):
+                    live_agent = ag
+                    live_store = ss
+                    break
+
+        if live_store:
+            store = live_store
+            store.flush()
+        else:
+            store = SessionStore(path)
+
+        # Load embedder config from session state or agent config
+        # (mirrors builtins/tools/search_memory.py _load_embed_config)
+        embed_config: dict[str, Any] | None = None
+        try:
+            saved = store.state.get("embedding_config")
+            if isinstance(saved, dict):
+                embed_config = saved
+        except (KeyError, Exception):
+            pass
+        if embed_config is None and live_agent and hasattr(live_agent, "config"):
+            memory_cfg = getattr(live_agent.config, "memory", None)
+            if isinstance(memory_cfg, dict) and "embedding" in memory_cfg:
+                embed_config = memory_cfg["embedding"]
+        if embed_config is None:
+            embed_config = {"provider": "auto"}
+
+        try:
+            embedder = create_embedder(embed_config)
+        except Exception:
+            embedder = None
+
+        memory = SessionMemory(str(path), embedder=embedder, store=store)
+
+        # Index unindexed events (idempotent — skips already indexed)
+        meta = store.load_meta()
+        for agent_name in meta.get("agents", []):
+            events = store.get_events(agent_name)
+            if events:
+                memory.index_events(agent_name, events)
+
+        results = memory.search(query=q, mode=mode, k=k, agent=agent)
+
+        if not live_store:
+            store.close(update_status=False)
+    except Exception as e:
+        raise HTTPException(500, f"Memory search failed: {e}")
+
+    return {
+        "session_name": path.stem,
+        "query": q,
+        "mode": mode,
+        "k": k,
+        "count": len(results),
+        "results": [
+            {
+                "content": r.content,
+                "round": r.round_num,
+                "block": r.block_num,
+                "agent": r.agent,
+                "block_type": r.block_type,
+                "score": r.score,
+                "ts": r.ts,
+                "tool_name": r.tool_name,
+                "channel": r.channel,
+            }
+            for r in results
+        ],
+    }

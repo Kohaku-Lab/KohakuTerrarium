@@ -9,4 +9,5 @@ Practical how-to guides for building agents and terrariums.
 - [Sessions](sessions.md) — persistence, resume, `.kohakutr` files, memory search
 - [Custom Modules](custom-modules.md) — build custom tools, inputs, outputs, triggers, sub-agents
 - [Plugins](plugins.md) — intercept agent flows with prompt plugins and lifecycle hooks
+- [Frontend Layout](frontend-layout.md) — split tree layout, presets, edit mode, panels, shortcuts
 - [Examples](examples.md) — walkthrough of included example agents and terrariums

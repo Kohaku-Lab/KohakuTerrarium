@@ -196,71 +196,9 @@
         </div>
       </div>
 
-      <!-- ── Divider ── -->
-      <div class="border-t border-warm-200 dark:border-warm-700" />
-
-      <!-- ── Model Section ── -->
-      <div class="rounded-lg border border-warm-200 dark:border-warm-700 p-3">
-        <div class="section-label">Model</div>
-        <div class="flex items-center gap-2">
-          <el-select
-            v-model="selectedModel"
-            placeholder="Select model"
-            class="flex-1"
-            size="small"
-            :loading="modelsLoading"
-            @change="handleModelSwitch"
-          >
-            <el-option
-              v-for="m in availableModels"
-              :key="m.name"
-              :label="`${m.name}  (${m.login_provider})`"
-              :value="m.name"
-            />
-          </el-select>
-          <el-button
-            size="small"
-            :icon="SettingIcon"
-            circle
-            class="model-config-btn"
-            title="Model Config"
-            @click="openModelConfig"
-          />
-        </div>
-        <div v-if="modelSwitchError" class="text-coral text-[10px] mt-1">
-          {{ modelSwitchError }}
-        </div>
-      </div>
+      <!-- Model switching is in the StatusBar at the bottom. -->
     </div>
 
-    <!-- ── Model Config Dialog ── -->
-    <el-dialog
-      v-model="configDialogVisible"
-      title="Model Config"
-      width="480px"
-      :close-on-click-modal="false"
-      class="model-config-dialog"
-    >
-      <div class="text-xs text-warm-400 mb-2">
-        Edit LLM profile settings as JSON. Changes apply to the current session.
-      </div>
-      <el-input
-        v-model="configJson"
-        type="textarea"
-        :rows="14"
-        class="config-textarea"
-        spellcheck="false"
-      />
-      <div v-if="configJsonError" class="text-coral text-[10px] mt-1">
-        {{ configJsonError }}
-      </div>
-      <template #footer>
-        <el-button size="small" @click="configDialogVisible = false">Cancel</el-button>
-        <el-button size="small" type="primary" class="save-btn" @click="saveModelConfig">
-          Save
-        </el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
