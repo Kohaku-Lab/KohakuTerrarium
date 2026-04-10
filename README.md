@@ -149,16 +149,16 @@ cd KohakuTerrarium
 pip install -e .
 
 # Install the default packaged creatures / terrariums
-kt install https://github.com/Kohaku-Lab/kohaku-creatures.git
+kt install https://github.com/Kohaku-Lab/kt-defaults.git
 
 # Authenticate for the bundled SWE configs (uses ChatGPT subscription via Codex OAuth)
 kt login codex
 
 # Run a single creature
-kt run @kohaku-creatures/creatures/swe
+kt run @kt-defaults/creatures/swe
 
 # Run a multi-agent terrarium (full TUI with tabs)
-kt terrarium run @kohaku-creatures/terrariums/swe_team
+kt terrarium run @kt-defaults/terrariums/swe_team
 ```
 
 The framework is not limited to Codex OAuth. It also supports OpenRouter, OpenAI, Anthropic, and Google Gemini APIs.
@@ -180,7 +180,7 @@ kt model list
 kt model default claude-sonnet-4.6
 
 # Override per-run
-kt run @kohaku-creatures/creatures/swe --llm gemini
+kt run @kt-defaults/creatures/swe --llm gemini
 ```
 
 Agent configs reference profiles by name:
@@ -440,14 +440,14 @@ kt run @cool-creatures/creatures/my-agent
 kt terrarium run @cool-creatures/terrariums/my-team
 
 # Edit a config
-kt edit @kohaku-creatures/creatures/general
+kt edit @kt-defaults/creatures/general
 ```
 
 Packages use `@package-name/path` references for cross-package inheritance:
 
 ```yaml
 # config.yaml
-base_config: "@kohaku-creatures/creatures/swe"
+base_config: "@kt-defaults/creatures/swe"
 ```
 
 A package typically looks like this:
@@ -466,7 +466,7 @@ my-package/
 
 ## Default Creatures and Terrariums
 
-The repository includes default configs under `creatures/` and `terrariums/`, and the same defaults are also distributed as the installable `kohaku-creatures` package.
+The repository includes default configs under `creatures/` and `terrariums/`, and the same defaults are also distributed as the installable `kt-defaults` package.
 
 ### Creatures
 
@@ -649,7 +649,7 @@ src/kohakuterrarium/
 
 src/kohakuterrarium-frontend/  # Vue 3 web frontend (Vite + Element Plus + Pinia)
 
-kohaku-creatures/ # Installable package form of the default configs
+kt-defaults/ # Installable package form of the default configs
 examples/         # Example agent apps, terrariums, and code samples
 docs/             # Concepts, architecture, guides, API reference
 ```

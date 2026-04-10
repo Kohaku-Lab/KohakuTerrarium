@@ -106,7 +106,7 @@ def resolve_package_path(ref: str) -> Path:
     """Resolve a @package/path reference to an absolute path.
 
     Args:
-        ref: Reference like "@kohaku-creatures/creatures/swe"
+        ref: Reference like "@kt-defaults/creatures/swe"
 
     Returns:
         Absolute path to the resolved location.

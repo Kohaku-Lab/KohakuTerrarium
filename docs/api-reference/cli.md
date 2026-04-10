@@ -62,8 +62,8 @@ kt model list
 kt model default gpt-5.4
 
 # 4. Run an agent (uses default model, or override with --llm)
-kt run @kohaku-creatures/creatures/swe
-kt run @kohaku-creatures/creatures/swe --llm claude-sonnet-4
+kt run @kt-defaults/creatures/swe
+kt run @kt-defaults/creatures/swe --llm claude-sonnet-4
 ```
 
 ## Model Management
@@ -122,7 +122,7 @@ kt run <agent_path> [options]
 
 Start an agent from a config folder and enter the interactive event loop. The agent folder must contain a `config.yaml` or `config.yml` file.
 
-Paths starting with `@` are resolved as package references (e.g., `@kohaku-creatures/creatures/swe`).
+Paths starting with `@` are resolved as package references (e.g., `@kt-defaults/creatures/swe`).
 
 **Arguments:**
 
@@ -149,13 +149,13 @@ Paths starting with `@` are resolved as package references (e.g., `@kohaku-creat
 kt run examples/agent-apps/swe_agent
 
 # Run a package agent in the full-screen Textual TUI
-kt run @kohaku-creatures/creatures/swe --mode tui
+kt run @kt-defaults/creatures/swe --mode tui
 
 # Run in dumb stdout mode (for CI / piping)
-kt run @kohaku-creatures/creatures/swe --mode plain
+kt run @kt-defaults/creatures/swe --mode plain
 
 # Override the LLM profile
-kt run @kohaku-creatures/creatures/swe --llm gemini
+kt run @kt-defaults/creatures/swe --llm gemini
 
 # Disable session recording
 kt run examples/agent-apps/swe_agent --no-session
@@ -505,8 +505,8 @@ Open a creature or terrarium config file in your editor (`$EDITOR`, `$VISUAL`, o
 The target uses the `@package/path` format. The leading `@` is optional.
 
 ```bash
-kt edit @kohaku-creatures/creatures/swe
-kt edit kohaku-creatures/terrariums/novel
+kt edit @kt-defaults/creatures/swe
+kt edit kt-defaults/terrariums/novel
 ```
 
 The command locates the config file (`config.yaml`, `config.yml`, `terrarium.yaml`, or `terrarium.yml`) inside the resolved path and opens it.
@@ -538,7 +538,7 @@ Display detailed information about a specific package's extension modules, inclu
 **Example:**
 
 ```bash
-kt extension info kohaku-creatures
+kt extension info kt-defaults
 ```
 
 ## Web and Desktop

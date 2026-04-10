@@ -513,8 +513,8 @@ Discover available creature configs from configured directories.
 **Response:**
 ```json
 [
-  {"name": "swe", "path": "@kohaku-creatures/creatures/swe", "description": "Software engineer"},
-  {"name": "reviewer", "path": "@kohaku-creatures/creatures/reviewer", "description": "Code reviewer"}
+  {"name": "swe", "path": "@kt-defaults/creatures/swe", "description": "Software engineer"},
+  {"name": "reviewer", "path": "@kt-defaults/creatures/reviewer", "description": "Code reviewer"}
 ]
 ```
 

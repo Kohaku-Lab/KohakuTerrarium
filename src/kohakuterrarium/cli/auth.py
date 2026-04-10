@@ -51,7 +51,7 @@ def _login_api_key(provider: str) -> int:
     print(f"\nSaved {provider} API key to ~/.kohakuterrarium/api_keys.yaml")
     print(f"You can now use {provider} models:")
     print(f"  kt model list")
-    print(f"  kt run @kohaku-creatures/creatures/swe --llm <model>")
+    print(f"  kt run @kt-defaults/creatures/swe --llm <model>")
     return 0
 
 
