@@ -86,7 +86,7 @@ class TestFormatToolCallExample:
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SWE_TEAM_DIR = PROJECT_ROOT / "terrariums" / "swe_team"
-MANAGED_TUI_DIR = PROJECT_ROOT / "examples" / "terrariums" / "swe_team_managed_tui"
+CODE_REVIEW_DIR = PROJECT_ROOT / "examples" / "terrariums" / "code_review_team"
 
 
 class TestUnifiedCreatureConfig:
@@ -109,16 +109,17 @@ class TestUnifiedCreatureConfig:
         assert config.root is not None
         assert config.root.config_data.get("base_config") == "creatures/root"
 
-    def test_managed_tui_has_root(self):
-        config = load_terrarium_config(MANAGED_TUI_DIR)
+    def test_code_review_team_has_root(self):
+        config = load_terrarium_config(CODE_REVIEW_DIR)
         assert config.root is not None
         assert isinstance(config.root.config_data, dict)
         assert "base_config" in config.root.config_data
 
-    def test_managed_tui_root_has_tui_io(self):
-        config = load_terrarium_config(MANAGED_TUI_DIR)
-        root_input = config.root.config_data.get("input", {})
-        assert root_input.get("type") == "tui"
+    def test_code_review_team_has_three_creatures(self):
+        config = load_terrarium_config(CODE_REVIEW_DIR)
+        assert len(config.creatures) == 3
+        names = {c.name for c in config.creatures}
+        assert names == {"developer", "reviewer", "tester"}
 
     @pytest.mark.skipif(
         not SWE_TEAM_DIR.exists(), reason="terrariums/swe_team not present"

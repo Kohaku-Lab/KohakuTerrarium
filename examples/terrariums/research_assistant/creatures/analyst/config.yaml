@@ -1,0 +1,9 @@
+base_config: "@kt-defaults/creatures/general"
+
+name: analyst
+system_prompt_file: prompts/system.md
+
+tools:
+  - { name: think, type: builtin }
+  - { name: write, type: builtin }
+  - { name: send_message, type: builtin }

@@ -1,0 +1,44 @@
+# Research Assistant Terrarium
+# A coordinator dispatches research queries to a searcher, then an
+# analyst synthesizes findings into a report.
+#
+# Topology: star with coordinator
+#   questions -> coordinator -> search_tasks -> searcher -> findings -> analyst -> reports
+#   coordinator manages the flow and decides when enough research is done
+#
+# Usage:
+#   kt terrarium run examples/terrariums/research_assistant/
+
+terrarium:
+  name: research_assistant
+
+  root:
+    base_config: "@kt-defaults/creatures/root"
+
+  creatures:
+    - name: coordinator
+      config: ./creatures/coordinator/
+      channels:
+        listen: [questions, findings, reports, team_chat]
+        can_send: [search_tasks, analysis_tasks, results, team_chat]
+
+    - name: searcher
+      config: ./creatures/searcher/
+      channels:
+        listen: [search_tasks, team_chat]
+        can_send: [findings, team_chat]
+
+    - name: analyst
+      config: ./creatures/analyst/
+      channels:
+        listen: [analysis_tasks, team_chat]
+        can_send: [reports, team_chat]
+
+  channels:
+    questions:      { type: queue, description: "Research questions from user" }
+    search_tasks:   { type: queue, description: "Search queries from coordinator" }
+    findings:       { type: queue, description: "Raw findings from searcher" }
+    analysis_tasks: { type: queue, description: "Analysis requests with findings" }
+    reports:        { type: queue, description: "Synthesized reports from analyst" }
+    results:        { type: queue, description: "Final results to user" }
+    team_chat:      { type: broadcast, description: "Team coordination" }

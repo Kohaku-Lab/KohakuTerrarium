@@ -1,0 +1,44 @@
+# Code Review Team Terrarium
+# Three creatures collaborate on code changes with review cycles:
+#   tasks -> developer (writes code) -> review -> reviewer (reviews)
+#   reviewer sends feedback or approval -> developer revises or tester tests
+#   tester runs tests and reports results
+#
+# Topology: loop with gate (reviewer approves → tester, or rejects → developer)
+#
+# Usage:
+#   kt terrarium run examples/terrariums/code_review_team/
+
+terrarium:
+  name: code_review_team
+
+  root:
+    base_config: "@kt-defaults/creatures/root"
+
+  creatures:
+    - name: developer
+      config: ./creatures/developer/
+      channels:
+        listen: [tasks, feedback, team_chat]
+        can_send: [review, team_chat]
+
+    - name: reviewer
+      config: ./creatures/reviewer/
+      channels:
+        listen: [review, test_results, team_chat]
+        can_send: [feedback, approved, team_chat]
+
+    - name: tester
+      config: ./creatures/tester/
+      channels:
+        listen: [approved, team_chat]
+        can_send: [test_results, results, team_chat]
+
+  channels:
+    tasks:        { type: queue, description: "Incoming coding tasks" }
+    review:       { type: queue, description: "Code submitted for review" }
+    feedback:     { type: queue, description: "Review feedback to developer" }
+    approved:     { type: queue, description: "Approved code sent to tester" }
+    test_results: { type: queue, description: "Test results back to reviewer" }
+    results:      { type: queue, description: "Final verified results" }
+    team_chat:    { type: broadcast, description: "Team coordination" }

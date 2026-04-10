@@ -1,0 +1,16 @@
+base_config: "@kt-defaults/creatures/swe"
+
+name: developer
+
+system_prompt_file: prompts/system.md
+
+tools:
+  - { name: read, type: builtin }
+  - { name: write, type: builtin }
+  - { name: edit, type: builtin }
+  - { name: bash, type: builtin }
+  - { name: glob, type: builtin }
+  - { name: grep, type: builtin }
+  - { name: tree, type: builtin }
+  - { name: think, type: builtin }
+  - { name: send_message, type: builtin }

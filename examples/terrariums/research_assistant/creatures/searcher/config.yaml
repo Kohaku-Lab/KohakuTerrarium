@@ -1,0 +1,10 @@
+base_config: "@kt-defaults/creatures/researcher"
+
+name: searcher
+system_prompt_file: prompts/system.md
+
+tools:
+  - { name: web_search, type: builtin }
+  - { name: web_fetch, type: builtin }
+  - { name: think, type: builtin }
+  - { name: send_message, type: builtin }
