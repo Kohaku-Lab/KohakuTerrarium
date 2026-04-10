@@ -1,39 +1,37 @@
 """
-Programmatic chat - send messages to an agent and get responses.
+Programmatic chat — the simplest agent-as-library pattern.
 
-Shows how to embed an agent in your own application by injecting
-events and collecting output programmatically.
+When your application needs to send a message and get a response —
+not run an interactive loop. This is the baseline for all embedding
+use cases: your code controls when the agent speaks.
+
+AgentSession wraps Agent with streaming: send a message, iterate
+chunks. This is what the web API uses internally.
 """
 
 import asyncio
 
-from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.core.events import TriggerEvent, EventType
+from kohakuterrarium.serving.agent_session import AgentSession
 
 
 async def main() -> None:
-    agent = Agent.from_path("examples/agent-apps/swe_agent")
-    await agent.start()
+    session = await AgentSession.from_path("@kt-defaults/creatures/general")
 
     try:
-        # Inject a user message as a trigger event
-        event = TriggerEvent(
-            type=EventType.USER_INPUT,
-            content="What files are in the src/ directory?",
-        )
-
-        # Process the event (runs LLM + tools, returns when done)
-        await agent.process_event(event)
-
-        # The agent's conversation now contains the response
-        history = agent.conversation.messages
-        for msg in history[-2:]:
-            role = msg.role
-            text = msg.content[:200] if msg.content else "(no content)"
-            print(f"[{role}] {text}")
+        # Your code decides when to call the agent
+        questions = [
+            "What is a terrarium?",
+            "How would you build one for tropical plants?",
+        ]
+        for q in questions:
+            print(f"\nQ: {q}")
+            print("A: ", end="", flush=True)
+            async for chunk in session.chat(q):
+                print(chunk, end="", flush=True)
+            print()
 
     finally:
-        await agent.stop()
+        await session.stop()
 
 
 if __name__ == "__main__":

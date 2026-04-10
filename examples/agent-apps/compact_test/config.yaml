@@ -1,6 +1,6 @@
 name: compact_test
 version: "1.0"
-base_config: "@kohaku-creatures/creatures/swe"
+base_config: "@kt-defaults/creatures/swe"
 
 controller:
   model: gpt-5.4

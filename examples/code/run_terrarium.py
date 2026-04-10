@@ -1,5 +1,5 @@
 """
-Terrarium usage - run a multi-agent team and observe channel traffic.
+Run a terrarium — start a multi-agent team and observe channel traffic.
 
 Shows how to start a terrarium, inject a seed prompt, and observe
 the channel messages flowing between creatures.
@@ -13,9 +13,8 @@ from kohakuterrarium.terrarium.runtime import TerrariumRuntime
 
 
 async def main() -> None:
-    config = load_terrarium_config("terrariums/swe_team")
+    config = load_terrarium_config("@kt-defaults/terrariums/swe_team")
     runtime = TerrariumRuntime(config)
-
     await runtime.start()
 
     # Inject a task into the tasks channel
@@ -29,7 +28,6 @@ async def main() -> None:
         print(f"Injected task: {msg.content}")
 
     try:
-        # Run all creatures until they finish or we interrupt
         await runtime.run()
     except KeyboardInterrupt:
         print("\nStopping terrarium...")
