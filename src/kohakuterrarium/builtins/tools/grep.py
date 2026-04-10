@@ -1,5 +1,8 @@
 """
 Grep tool - search file contents.
+
+Respects ``.gitignore`` by default and stops early once enough matches
+are found, avoiding full-tree scans on large projects.
 """
 
 import re
@@ -15,6 +18,7 @@ from kohakuterrarium.modules.tool.base import (
     ToolResult,
 )
 from kohakuterrarium.utils.file_guard import is_binary_file
+from kohakuterrarium.utils.file_walk import iter_matching_files
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -67,6 +71,11 @@ class GrepTool(BaseTool):
         file_pattern = args.get("glob", "**/*")
         limit = int(args.get("limit", 50))
         case_insensitive = args.get("ignore_case", False)
+        follow_gitignore = str(args.get("gitignore", "true")).lower() not in (
+            "false",
+            "no",
+            "0",
+        )
 
         # Compile regex
         try:
@@ -76,17 +85,20 @@ class GrepTool(BaseTool):
             return ToolResult(error=f"Invalid regex: {e}")
 
         try:
-            matches = []
+            matches: list[dict[str, Any]] = []
             total_matches = 0
             files_searched = 0
+            hit_cap = False
 
-            # Find files to search
+            # Find files to search — gitignore-aware, early-terminating
             if base.is_file():
-                files = [base]
+                files_iter = iter([base])
             else:
-                files = list(base.glob(file_pattern))
+                files_iter = iter_matching_files(
+                    base, file_pattern, gitignore=follow_gitignore
+                )
 
-            for file_path in files:
+            for file_path in files_iter:
                 if not file_path.is_file():
                     continue
 
@@ -127,6 +139,13 @@ class GrepTool(BaseTool):
                 except Exception:
                     continue
 
+                # Early termination: once we have limit matches, stop
+                # scanning more files.  We sacrifice the exact total count
+                # but avoid reading thousands of irrelevant files.
+                if total_matches >= limit:
+                    hit_cap = True
+                    break
+
             # Format output
             output_lines = []
             for match in matches:
@@ -136,10 +155,11 @@ class GrepTool(BaseTool):
 
             output = "\n".join(output_lines)
 
-            if total_matches > limit:
+            if hit_cap:
                 output += (
-                    f"\n\nShowing first {limit} of {total_matches} matches. "
-                    "Narrow your pattern or use glob first."
+                    f"\n\n(Showing {len(matches)} matches from "
+                    f"{files_searched} files; more may exist. "
+                    "Narrow your pattern or glob to refine.)"
                 )
             else:
                 output += f"\n\n({total_matches} matches in {files_searched} files)"

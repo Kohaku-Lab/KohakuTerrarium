@@ -1,5 +1,8 @@
 """
 Glob tool - find files matching patterns.
+
+Respects ``.gitignore`` by default and caps collection to avoid
+materialising the entire directory tree on large projects.
 """
 
 import asyncio
@@ -12,6 +15,7 @@ from kohakuterrarium.modules.tool.base import (
     ExecutionMode,
     ToolResult,
 )
+from kohakuterrarium.utils.file_walk import iter_matching_files
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -60,29 +64,54 @@ class GlobTool(BaseTool):
         if not base.exists():
             return ToolResult(error=f"Path not found: {base_path}")
 
-        # Get limit
+        # Get options
         limit = int(args.get("limit", 100))
+        follow_gitignore = str(args.get("gitignore", "true")).lower() not in (
+            "false",
+            "no",
+            "0",
+        )
 
         try:
-            # Run blocking glob/stat in thread pool
-            result = await asyncio.to_thread(self._find_files, base, pattern, limit)
+            # Run blocking walk/stat in thread pool
+            result = await asyncio.to_thread(
+                self._find_files, base, pattern, limit, follow_gitignore
+            )
             return result
 
         except Exception as e:
             logger.error("Glob failed", error=str(e))
             return ToolResult(error=str(e))
 
-    def _find_files(self, base: Path, pattern: str, limit: int) -> ToolResult:
+    def _find_files(
+        self,
+        base: Path,
+        pattern: str,
+        limit: int,
+        follow_gitignore: bool,
+    ) -> ToolResult:
         """Synchronous file finding (runs in thread pool)."""
-        # Use glob to find files
-        matches = list(base.glob(pattern))
+        # Collect files with a cap to avoid materialising enormous trees.
+        # Cap at 10× the display limit (or 5 000), whichever is larger.
+        cap = max(limit * 10, 5_000) if limit > 0 else 50_000
 
-        # Sort by modification time (newest first)
+        matches: list[Path] = list(
+            iter_matching_files(
+                base,
+                pattern,
+                gitignore=follow_gitignore,
+                cap=cap,
+            )
+        )
+        hit_cap = len(matches) >= cap
+
+        # Sort by modification time (newest first).
+        # stat() only runs on the capped subset, not every file on disk.
         matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
 
-        # Apply limit
+        # Apply display limit
         total = len(matches)
-        if limit > 0 and len(matches) > limit:
+        if limit > 0 and total > limit:
             matches = matches[:limit]
 
         # Format output
@@ -96,7 +125,12 @@ class GlobTool(BaseTool):
 
         output = "\n".join(output_lines)
 
-        if total > len(matches):
+        if hit_cap:
+            output += (
+                f"\n\n... (showing {len(matches)} of {total} collected, "
+                f"capped at {cap}; more may exist — narrow your pattern)"
+            )
+        elif total > len(matches):
             output += f"\n\n... ({total} total, showing {len(matches)})"
 
         logger.debug(

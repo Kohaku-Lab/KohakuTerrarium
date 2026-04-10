@@ -6,7 +6,6 @@ Respects .gitignore by default and limits output to avoid flooding context.
 """
 
 import re
-from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
 
@@ -18,25 +17,17 @@ from kohakuterrarium.modules.tool.base import (
     ExecutionMode,
     ToolResult,
 )
+from kohakuterrarium.utils.file_walk import (
+    is_ignored,
+    parse_gitignore,
+    should_skip_dir,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 # Regex to extract YAML frontmatter
 FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
-
-# Common directories to always skip (even without .gitignore)
-_ALWAYS_SKIP = {
-    ".git",
-    "__pycache__",
-    ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
-    "node_modules",
-    ".tox",
-    ".eggs",
-    "*.egg-info",
-}
 
 
 def parse_frontmatter(content: str) -> dict[str, Any]:
@@ -85,47 +76,6 @@ def parse_frontmatter(content: str) -> dict[str, Any]:
     return frontmatter
 
 
-def _parse_gitignore(gitignore_path: Path) -> list[str]:
-    """Read a .gitignore file and return non-empty, non-comment patterns."""
-    try:
-        text = gitignore_path.read_text(encoding="utf-8", errors="ignore")
-    except (OSError, PermissionError):
-        return []
-    patterns = []
-    for line in text.splitlines():
-        line = line.strip()
-        if line and not line.startswith("#"):
-            patterns.append(line)
-    return patterns
-
-
-def _is_ignored(
-    name: str,
-    is_dir: bool,
-    patterns: list[str],
-) -> bool:
-    """Check if a file/dir name matches any gitignore-style pattern.
-
-    Simplified matching: works on the entry name (not full relative path).
-    Handles trailing ``/`` (dir-only patterns) and leading ``!`` (negation
-    is NOT supported — negated patterns are skipped for simplicity).
-    """
-    for pat in patterns:
-        if pat.startswith("!"):
-            continue  # negation not supported in simplified matcher
-
-        # Dir-only pattern
-        if pat.endswith("/"):
-            if is_dir and fnmatch(name, pat.rstrip("/")):
-                return True
-            continue
-
-        if fnmatch(name, pat):
-            return True
-
-    return False
-
-
 class _TreeBuilder:
     """Stateful tree builder with line limit and gitignore support."""
 
@@ -146,7 +96,7 @@ class _TreeBuilder:
         self.truncated = False
         self.total_skipped = 0
         # Collect gitignore patterns per directory (inherited + local)
-        self._ignore_stack: list[list[str]] = [list(_ALWAYS_SKIP)]
+        self._ignore_stack: list[list[str]] = [[]]
         self.ignored_dirs: list[str] = []
 
     def _current_patterns(self) -> list[str]:
@@ -178,7 +128,7 @@ class _TreeBuilder:
         if self.follow_gitignore:
             gi = path / ".gitignore"
             if gi.is_file():
-                local_patterns = _parse_gitignore(gi)
+                local_patterns = parse_gitignore(gi)
         self._ignore_stack.append(local_patterns)
 
         try:
@@ -194,18 +144,22 @@ class _TreeBuilder:
         if not self.show_hidden:
             entries = [e for e in entries if not e.name.startswith(".")]
 
-        # Filter by gitignore patterns
-        if self.follow_gitignore:
-            patterns = self._current_patterns()
-            filtered = []
-            for e in entries:
-                if _is_ignored(e.name, e.is_dir(), patterns):
-                    if e.is_dir():
-                        self.ignored_dirs.append(e.name)
-                    self.total_skipped += 1
-                else:
-                    filtered.append(e)
-            entries = filtered
+        # Filter unconditionally-skipped directories + gitignore patterns
+        patterns = self._current_patterns() if self.follow_gitignore else []
+        filtered = []
+        for e in entries:
+            if should_skip_dir(e.name):
+                if e.is_dir():
+                    self.ignored_dirs.append(e.name)
+                self.total_skipped += 1
+                continue
+            if self.follow_gitignore and is_ignored(e.name, e.is_dir(), patterns):
+                if e.is_dir():
+                    self.ignored_dirs.append(e.name)
+                self.total_skipped += 1
+                continue
+            filtered.append(e)
+        entries = filtered
 
         for i, entry in enumerate(entries):
             if self.truncated:
