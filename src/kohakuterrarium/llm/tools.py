@@ -77,6 +77,10 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
         "properties": {
             "pattern": {"type": "string", "description": "Glob pattern (e.g. **/*.py)"},
             "path": {"type": "string", "description": "Base directory (optional)"},
+            "gitignore": {
+                "type": "boolean",
+                "description": "Follow .gitignore rules (default true)",
+            },
         },
         "required": ["pattern"],
     },
@@ -86,6 +90,10 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
             "pattern": {"type": "string", "description": "Regex pattern to search"},
             "path": {"type": "string", "description": "Directory or file to search"},
             "glob": {"type": "string", "description": "File glob filter (optional)"},
+            "gitignore": {
+                "type": "boolean",
+                "description": "Follow .gitignore rules (default true)",
+            },
         },
         "required": ["pattern"],
     },
