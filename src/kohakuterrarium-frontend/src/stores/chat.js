@@ -564,6 +564,8 @@ export const useChatStore = defineStore("chat", {
     _instanceType: null,
     /** @type {WebSocket | null} Single WS for the instance */
     _ws: null,
+    /** @type {Array<{id: string, content: string, timestamp: string}>} Messages queued while agent is processing */
+    queuedMessages: [],
   }),
 
   getters: {
@@ -585,6 +587,7 @@ export const useChatStore = defineStore("chat", {
       this.tokenUsage = {};
       this.runningJobs = {};
       this.unreadCounts = {};
+      this.queuedMessages = [];
       this.processing = false;
       this.sessionInfo = {
         sessionId: "",
@@ -688,14 +691,20 @@ export const useChatStore = defineStore("chat", {
       if (!this.activeTab || !text.trim() || !this._ws) return;
 
       const tab = this.activeTab;
-      const isQueued = this.processing;
-      this._addMsg(tab, {
+      const msg = {
         id: "u_" + Date.now(),
         role: "user",
         content: text,
         timestamp: new Date().toISOString(),
-        queued: isQueued || undefined,
-      });
+      };
+
+      if (this.processing) {
+        // Don't put in main chat — hold in queue, shown above input box
+        msg.queued = true;
+        this.queuedMessages.push(msg);
+      } else {
+        this._addMsg(tab, msg);
+      }
 
       if (tab.startsWith("ch:")) {
         const chName = tab.slice(3);
@@ -1350,44 +1359,32 @@ export const useChatStore = defineStore("chat", {
       }
     },
 
-    /** Promote queued user messages to normal (agent picked them up). */
+    /** Move queued messages from the hold queue into the main chat. */
     _promoteQueuedMessages(source) {
+      if (!this.queuedMessages.length) return;
       const msgs = this.messagesByTab[source];
       if (!msgs) return;
-      for (const msg of msgs) {
-        if (msg.role === "user" && msg.queued) {
-          delete msg.queued;
-        }
+      for (const msg of this.queuedMessages) {
+        delete msg.queued;
+        msgs.push(msg);
       }
+      this.queuedMessages = [];
     },
 
     _ensureAssistantMsg(msgs) {
-      // Find the last streaming assistant message, skipping any queued
-      // user messages that may have been appended during processing.
-      for (let i = msgs.length - 1; i >= 0; i--) {
-        if (msgs[i].role === "assistant" && msgs[i]._streaming) {
-          if (!msgs[i].parts) msgs[i].parts = [];
-          return msgs[i];
-        }
-        // Stop searching if we hit a non-queued user message or system msg
-        if (msgs[i].role === "user" && !msgs[i].queued) break;
-        if (msgs[i].role === "system") break;
+      let last = msgs[msgs.length - 1];
+      if (!last || last.role !== "assistant" || !last._streaming) {
+        last = {
+          id: "m_" + Date.now(),
+          role: "assistant",
+          parts: [],
+          timestamp: new Date().toISOString(),
+          _streaming: true,
+        };
+        msgs.push(last);
       }
-      // No streaming assistant found — create one.
-      // Insert BEFORE any queued user messages so the stream stays above them.
-      let insertIdx = msgs.length;
-      while (insertIdx > 0 && msgs[insertIdx - 1].role === "user" && msgs[insertIdx - 1].queued) {
-        insertIdx--;
-      }
-      const newMsg = {
-        id: "m_" + Date.now(),
-        role: "assistant",
-        parts: [],
-        timestamp: new Date().toISOString(),
-        _streaming: true,
-      };
-      msgs.splice(insertIdx, 0, newMsg);
-      return newMsg;
+      if (!last.parts) last.parts = [];
+      return last;
     },
 
     _appendStreamChunk(source, content) {

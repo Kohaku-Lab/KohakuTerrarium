@@ -157,6 +157,22 @@
         </div>
       </div>
 
+      <!-- Queued messages: shown above input, not in main chat -->
+      <div
+        v-if="chat.queuedMessages.length"
+        class="px-4 pt-2 flex flex-col gap-1.5"
+      >
+        <div
+          v-for="qm in chat.queuedMessages"
+          :key="qm.id"
+          class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber/5 dark:bg-amber/5 border border-amber/20 text-sm"
+        >
+          <span class="i-carbon-time text-amber/60 text-xs flex-shrink-0" />
+          <span class="text-warm-500 dark:text-warm-400 truncate">{{ qm.content }}</span>
+          <span class="text-warm-300 dark:text-warm-600 text-xs flex-shrink-0 ml-auto">queued</span>
+        </div>
+      </div>
+
       <!-- Input: sits inside bubble, with subtle top border -->
       <div
         class="px-4 pb-4 pt-2 border-t border-t-warm-100 dark:border-t-warm-800"
