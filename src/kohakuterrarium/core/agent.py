@@ -208,6 +208,7 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
 
         # Initialize MCP client manager if mcp_servers configured
         await self._init_mcp()
+        self._inject_mcp_tools_into_prompt()
 
         self._init_compact_manager()
         self._init_plugins()
@@ -322,6 +323,54 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
                     server=srv_data.get("name", ""),
                     error=str(e),
                 )
+
+    def _inject_mcp_tools_into_prompt(self) -> None:
+        """Inject available MCP tool descriptions into the system prompt.
+
+        After MCP servers connect, the agent should know what tools are
+        available without needing to call mcp_list first.  We append the
+        tool listing to the system prompt so the agent can use mcp_call
+        directly.
+        """
+        if not self._mcp_manager:
+            return
+        servers = self._mcp_manager.list_servers()
+        if not servers:
+            return
+
+        lines = ["\n## Available MCP Tools\n"]
+        lines.append("Call these with: mcp_call(server=<server>, tool=<tool>, args={...})\n")
+
+        for srv in servers:
+            if srv["status"] != "connected":
+                continue
+            lines.append(f"### Server: {srv['name']}")
+            for t in srv["tools"]:
+                desc = f" — {t['description']}" if t.get("description") else ""
+                lines.append(f"- **{t['name']}**{desc}")
+                schema = t.get("input_schema", {})
+                props = schema.get("properties", {})
+                required = set(schema.get("required", []))
+                for pname, pinfo in props.items():
+                    ptype = pinfo.get("type", "any")
+                    pdesc = pinfo.get("description", "")
+                    req = " (required)" if pname in required else ""
+                    param_line = f"  - `{pname}`: {ptype}{req}"
+                    if pdesc:
+                        param_line += f" — {pdesc}"
+                    lines.append(param_line)
+            lines.append("")
+
+        if len(lines) <= 2:
+            return
+
+        mcp_section = "\n".join(lines)
+        self.update_system_prompt(mcp_section)
+        logger.info(
+            "MCP tools injected into prompt",
+            servers=len(servers),
+            tools=sum(len(s["tools"]) for s in servers),
+        )
 
     def _init_compact_manager(self) -> None:
         """Initialize the auto-compact manager.
