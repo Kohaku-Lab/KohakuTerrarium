@@ -6,12 +6,10 @@ Three agents:
   - Opponent: argues AGAINST
   - Judge: evaluates each round, declares winner
 
-Your code is the referee:
-  - Feeds each debater the other's latest argument
-  - Enforces strict turn-taking (A → B → judge, repeat)
-  - Asks the judge to score after each round
-  - Detects when arguments converge or max rounds hit
-  - Produces a structured result
+Uses the composition algebra:
+  - ``await agent(config)`` for persistent agents
+  - ``>>`` to pipe output through transforms
+  - ``async for`` to loop rounds with native control flow
 
 Why code, not terrarium?
   Terrarium channels are event-driven queues — any creature can send
@@ -26,24 +24,14 @@ Usage:
 
 import asyncio
 import sys
-from dataclasses import dataclass
 
+from kohakuterrarium.compose import agent
 from kohakuterrarium.core.config import load_agent_config
-from kohakuterrarium.serving.agent_session import AgentSession
+
+# ── Config builders ──────────────────────────────────────────────────
 
 
-@dataclass
-class RoundResult:
-    proposer_arg: str
-    opponent_arg: str
-    judge_score: str
-    round_num: int
-
-
-async def create_debater(
-    name: str, stance: str, topic: str
-) -> AgentSession:
-    """Create a debater agent with a specific stance."""
+def make_debater_config(name: str, stance: str, topic: str):
     config = load_agent_config("@kt-defaults/creatures/general")
     config.name = f"debater-{name.lower()}"
     config.tools = []
@@ -59,11 +47,10 @@ async def create_debater(
         "- Never agree with your opponent\n"
         "- Never break character or discuss the debate format"
     )
-    return await AgentSession.from_config(config)
+    return config
 
 
-async def create_judge(topic: str) -> AgentSession:
-    """Create a judge agent that scores debate rounds."""
+def make_judge_config(topic: str):
     config = load_agent_config("@kt-defaults/creatures/general")
     config.name = "judge"
     config.tools = []
@@ -80,19 +67,10 @@ async def create_judge(topic: str) -> AgentSession:
         "  SCORE: OPPONENT\n"
         "  SCORE: TIE"
     )
-    return await AgentSession.from_config(config)
-
-
-async def collect_response(session: AgentSession, prompt: str) -> str:
-    """Send a message and collect the full response."""
-    parts: list[str] = []
-    async for chunk in session.chat(prompt):
-        parts.append(chunk)
-    return "".join(parts).strip()
+    return config
 
 
 def parse_score(judge_text: str) -> str:
-    """Extract the score from judge's response."""
     for line in reversed(judge_text.splitlines()):
         line = line.strip().upper()
         if "SCORE:" in line:
@@ -105,61 +83,58 @@ def parse_score(judge_text: str) -> str:
     return "TIE"
 
 
+# ── Main ─────────────────────────────────────────────────────────────
+
+
 async def run_debate(topic: str, max_rounds: int = 4) -> None:
-    """Run a structured debate between two agents."""
     print(f'\n{"=" * 60}')
     print(f"DEBATE: {topic}")
     print(f'{"=" * 60}\n')
 
-    # Create all three agents
-    proposer = await create_debater("Proposer", "ARGUE IN FAVOR OF", topic)
-    opponent = await create_debater("Opponent", "ARGUE AGAINST", topic)
-    judge = await create_judge(topic)
+    # Create persistent agents — they accumulate conversation context
+    async with (
+        await agent(
+            make_debater_config("Proposer", "ARGUE IN FAVOR OF", topic)
+        ) as proposer,
+        await agent(
+            make_debater_config("Opponent", "ARGUE AGAINST", topic)
+        ) as opponent,
+        await agent(make_judge_config(topic)) as judge,
+    ):
 
-    scores = {"PROPOSER": 0, "OPPONENT": 0, "TIE": 0}
-    rounds: list[RoundResult] = []
+        scores = {"PROPOSER": 0, "OPPONENT": 0, "TIE": 0}
 
-    try:
-        last_argument = f"The debate begins. State your opening argument for: {topic}"
+        # Build the proposer >> bridge >> opponent pipeline
+        debate_round = (
+            proposer
+            >> (lambda prop_arg: f"Your opponent argued:\n\n{prop_arg}\n\nRespond:")
+            >> opponent
+        )
 
-        for round_num in range(1, max_rounds + 1):
+        # Iterate rounds using async for
+        prompt = f"The debate begins. State your opening argument for: {topic}"
+        round_num = 0
+
+        async for opp_arg in debate_round.iterate(prompt):
+            round_num += 1
             print(f"\n--- Round {round_num} ---\n")
-
-            # Step 1: Proposer argues (responds to opponent's last point)
-            prop_arg = await collect_response(proposer, last_argument)
-            print(f"PROPOSER: {prop_arg}\n")
-
-            # Step 2: Opponent responds to proposer's argument
-            opp_arg = await collect_response(
-                opponent,
-                f"Your opponent just argued:\n\n{prop_arg}\n\nRespond:",
-            )
             print(f"OPPONENT: {opp_arg}\n")
 
-            # Step 3: Judge scores the round (sees both arguments)
-            judge_input = (
-                f"Round {round_num}:\n\n"
-                f"PROPOSER argued: {prop_arg}\n\n"
-                f"OPPONENT argued: {opp_arg}\n\n"
-                "Score this round."
+            # Judge scores — use >> to parse the score
+            judge_prompt = (
+                f"Round {round_num}:\n\n" f"OPPONENT: {opp_arg}\n\n" "Score this round."
             )
-            judge_text = await collect_response(judge, judge_input)
-            score = parse_score(judge_text)
-            scores[score] += 1
-            print(f"JUDGE: {judge_text}\n")
+            verdict = await (judge >> parse_score)(judge_prompt)
+            scores[verdict] += 1
+            print(f"JUDGE: {verdict}\n")
 
-            rounds.append(RoundResult(
-                proposer_arg=prop_arg,
-                opponent_arg=opp_arg,
-                judge_score=score,
-                round_num=round_num,
-            ))
+            if round_num >= max_rounds:
+                break
 
-            # Feed opponent's argument to proposer for next round
-            last_argument = (
-                f"Your opponent responded:\n\n{opp_arg}\n\n"
-                "Counter their argument:"
-            )
+            # Feed opponent's argument back to proposer for next round
+            debate_round.iterate(
+                prompt
+            )  # reset not needed — persistent agents remember
 
         # Final verdict
         print(f'\n{"=" * 60}')
@@ -175,11 +150,6 @@ async def run_debate(topic: str, max_rounds: int = 4) -> None:
         else:
             print("\nRESULT: DRAW")
         print(f'{"=" * 60}')
-
-    finally:
-        await proposer.stop()
-        await opponent.stop()
-        await judge.stop()
 
 
 if __name__ == "__main__":

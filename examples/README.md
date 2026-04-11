@@ -56,10 +56,33 @@ The key distinction from config-based usage: **your program is the
 orchestrator, agents are workers you invoke.** The agent doesn't run
 itself — you control when, what, and how it processes.
 
-| Script | Pattern | Why code, not config? |
+Uses the **composition algebra** (`kohakuterrarium.compose`):
+
+```python
+from kohakuterrarium.compose import agent, factory
+
+# Persistent agent (reused across calls, accumulates context)
+async with await agent("@kt-defaults/creatures/swe") as swe:
+    result = await (swe >> extract_code >> reviewer)(task)
+
+# Ephemeral agent (fresh per call, no state carry-over)
+specialist = factory(make_config("coder"))
+result = await (specialist >> validate)(task)
+
+# Operators: >> (sequence), & (parallel), | (fallback), * (retry)
+safe = (expert * 2) | generalist
+results = await (analyst & writer & designer)(task)
+
+# Loop with native control flow
+async for result in (writer >> reviewer).iterate(task):
+    if "APPROVED" in result:
+        break
+```
+
+| Script | Pattern | Compose features used |
 |--------|---------|----------------------|
-| programmatic_chat | Agent as library (baseline) | Your code controls the conversation loop |
-| run_terrarium | Terrarium from code | Programmatic terrarium lifecycle |
-| discord_adventure_bot | Bot-owned interaction | discord.py owns the loop; agents are NPCs created/destroyed dynamically; game state machine in bot code; Discord UI (buttons/embeds) is the interface |
-| debate_arena | Multi-agent turn-taking | Strict A→B→judge ordering that channels can't express; external convergence detection; your code is the referee |
-| task_orchestrator | Dynamic agent topology | Number/type of specialists computed at runtime; DAG dependency execution; ephemeral agents created per sub-task |
+| programmatic_chat | Agent as library (baseline) | `AgentSession.chat()` |
+| run_terrarium | Terrarium from code | `TerrariumRuntime` API |
+| discord_adventure_bot | Bot-owned interaction | `agent()`, dynamic creation, game state |
+| debate_arena | Multi-agent turn-taking | `agent()`, `>>`, `async for`, `async with` |
+| task_orchestrator | Dynamic agent topology | `factory()`, `>>`, `asyncio.gather` |
