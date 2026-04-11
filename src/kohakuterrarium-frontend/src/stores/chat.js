@@ -1362,19 +1362,32 @@ export const useChatStore = defineStore("chat", {
     },
 
     _ensureAssistantMsg(msgs) {
-      let last = msgs[msgs.length - 1];
-      if (!last || last.role !== "assistant" || !last._streaming) {
-        last = {
-          id: "m_" + Date.now(),
-          role: "assistant",
-          parts: [],
-          timestamp: new Date().toISOString(),
-          _streaming: true,
-        };
-        msgs.push(last);
+      // Find the last streaming assistant message, skipping any queued
+      // user messages that may have been appended during processing.
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === "assistant" && msgs[i]._streaming) {
+          if (!msgs[i].parts) msgs[i].parts = [];
+          return msgs[i];
+        }
+        // Stop searching if we hit a non-queued user message or system msg
+        if (msgs[i].role === "user" && !msgs[i].queued) break;
+        if (msgs[i].role === "system") break;
       }
-      if (!last.parts) last.parts = [];
-      return last;
+      // No streaming assistant found — create one.
+      // Insert BEFORE any queued user messages so the stream stays above them.
+      let insertIdx = msgs.length;
+      while (insertIdx > 0 && msgs[insertIdx - 1].role === "user" && msgs[insertIdx - 1].queued) {
+        insertIdx--;
+      }
+      const newMsg = {
+        id: "m_" + Date.now(),
+        role: "assistant",
+        parts: [],
+        timestamp: new Date().toISOString(),
+        _streaming: true,
+      };
+      msgs.splice(insertIdx, 0, newMsg);
+      return newMsg;
     },
 
     _appendStreamChunk(source, content) {
