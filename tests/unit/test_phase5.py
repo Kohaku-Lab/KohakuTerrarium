@@ -44,7 +44,7 @@ class TestConfigLoading:
         """Test config default values."""
         config = AgentConfig(name="test")
         assert config.version == "1.0"
-        assert config.api_key_env == "OPENROUTER_API_KEY"
+        assert config.api_key_env == ""  # empty default, resolved via profile system
         assert config.input.type == "cli"
         assert config.output.type == "stdout"
 

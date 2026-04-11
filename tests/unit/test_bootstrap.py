@@ -218,6 +218,7 @@ class TestBootstrapLLM:
 
         config = AgentConfig(
             name="test",
+            model="test-model",
             auth_mode="api-key",
             api_key_env="NONEXISTENT_KEY_BOOTSTRAP_TEST_XYZ",
         )
