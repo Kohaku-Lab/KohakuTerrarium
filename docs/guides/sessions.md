@@ -195,7 +195,7 @@ store.flush()
 store.close()
 ```
 
-For the full `SessionStore` API, see [Python API Reference](../api-reference/python.md).
+For the full `SessionStore` API, see [Python API Reference](../reference/python.md).
 
 ### Resume Functions
 

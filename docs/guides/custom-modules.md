@@ -285,7 +285,7 @@ name: my_agent
 version: "1.0"
 
 controller:
-  model: openai/gpt-4o-mini
+  llm: gpt-5.4
   temperature: 0.5
   tool_format: bracket
 
@@ -621,7 +621,7 @@ name: slack_bot
 version: "1.0"
 
 controller:
-  model: openai/gpt-4o-mini
+  llm: gpt-5.4
   temperature: 0.7
 
 input:
@@ -1134,7 +1134,7 @@ name: watcher_agent
 version: "1.0"
 
 controller:
-  model: openai/gpt-4o-mini
+  llm: gpt-5.4
   temperature: 0.3
 
 system_prompt: >

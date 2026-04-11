@@ -161,7 +161,7 @@ terrarium:
 
 Creatures point to standalone agent configs. The terrarium adds the wiring. The creature configs do not change.
 
-See [Configuration Reference](../guide/configuration.md) for all fields. See [Channels](channels.md) for channel types and semantics.
+See [Configuration Reference](../guides/configuration.md) for all fields. See [Channels](channels.md) for channel types and semantics.
 
 ---
 
@@ -319,7 +319,7 @@ Agent-level methods (`add_trigger`, `remove_trigger`, `update_system_prompt`, `g
 
 Terrarium-level methods (`add_creature`, `remove_creature`, `add_channel`, `wire_channel`) coordinate across multiple agents and handle the wiring that the runtime normally performs at startup.
 
-For method signatures and code examples, see [Python API Reference](../api-reference/python.md).
+For method signatures and code examples, see [Python API Reference](../reference/python.md).
 
 ## Observer Pattern
 
@@ -373,4 +373,4 @@ Three groups of operations:
 
 The API integrates with the observer: when `send_to_channel()` is called, the message is recorded in the observer automatically.
 
-For full method signatures, see [Python API Reference](../api-reference/python.md).
+For full method signatures, see [Python API Reference](../reference/python.md).

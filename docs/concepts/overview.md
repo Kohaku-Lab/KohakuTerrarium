@@ -1,88 +1,276 @@
-# Concepts
+# Concepts Overview
 
-KohakuTerrarium builds on one core insight: **agent systems need two different coordination mechanisms**, and mixing them causes problems.
+Concepts are where KohakuTerrarium defines what each thing is.
 
-```
-                         KohakuTerrarium
-                               |
-              +----------------+----------------+
-              |                                 |
-         Creature                          Terrarium
-    (vertical hierarchy)              (horizontal peers)
-              |                                 |
-    Controller delegates              Channels connect
-    to sub-agents for                 independent creatures
-    task decomposition                for collaboration
-```
+That means a good concept page should answer questions like:
 
-**Creatures** handle the vertical: one controller orchestrating sub-agents and tools to decompose a task. This is hierarchical, tightly coupled, with shared context.
+- what is this thing
+- what boundary does it own
+- what kind of composition does it represent
+- what is it not
+- how does it relate to the other concepts
 
-**Terrariums** handle the horizontal: independent creatures communicating through channels as peers. This is flat, loosely coupled, with opaque boundaries.
+This matters because KohakuTerrarium is not just a bag of features. It is a framework with a specific way of defining agent systems.
 
-A creature built for standalone use works identically in a terrarium. It does not know it is in one.
+## The central idea
 
-## The Five Concepts
+KohakuTerrarium separates several different kinds of structure that many systems blur together.
 
-### [Creature](agents.md) - The Self-Contained Agent
+At a high level, the framework defines:
 
-A creature is a complete agent: LLM controller, tools, sub-agents, memory. It receives input, thinks, acts, and produces output. Every creature is built from five systems: input, triggers, controller, tools, and output.
+- what a standalone agent is
+- how agent internals are composed
+- how multiple agents are wired together
+- how runtime boundaries are isolated
+- how extensibility works at both block level and connection level
+- how programmatic composition differs from runtime topology
 
-Think of it as a microservice: private internals, well-defined interface.
+That separation is the heart of the architecture.
 
-### [Terrarium](terrariums.md) - The Wiring Layer
+## The major concepts
 
-A terrarium places creatures in a shared environment and connects them through channels. It has no intelligence of its own. It just moves messages.
+## 1. Creature
 
-Think of it as a service mesh: routing, lifecycle, observability, but no business logic.
+See [Agents](agents.md).
 
-### [Channels](channels.md) - The Communication Primitive
+A **creature** is the framework's definition of a standalone agent.
 
-Two types of named message conduits:
-- **Queue** (SubAgentChannel): one consumer per message. For task dispatch, pipelines, request-response.
-- **Broadcast** (AgentChannel): all subscribers receive every message. For group chat, shared awareness.
+It is a complete unit with its own:
 
-Channels are the only way creatures communicate. Communication is always explicit via `send_message`.
+- controller
+- tools
+- sub-agents
+- triggers
+- input and output
+- prompts
+- session-scoped state
 
-### [Environment-Session](environment.md) - The Isolation Boundary
+A creature defines the **internal composition** of an agent.
 
-Two-level isolation for safe multi-user operation:
-- **Environment**: shared state per terrarium (inter-creature channels)
-- **Session**: private state per creature (scratchpad, sub-agent channels)
+### A creature is
 
-Two users running the same terrarium get separate environments. Two creatures in the same terrarium share channels but not scratchpads.
+- a self-contained agent abstraction
+- the place where agent identity and behavior live
+- the owner of internal orchestration
 
-### [Tool Formats](tool-formats.md) - How LLMs Call Tools
+### A creature is not
 
-Three ways for an LLM to invoke tools:
-- **Native**: the LLM API's built-in function calling (most reliable)
-- **Bracket**: `[/tool]content[tool/]` text format
-- **XML**: `<tool>content</tool>` text format
+- a multi-agent team
+- just a prompt
+- just a tool list
+- just a workflow node
 
-Configurable per agent. Native is recommended for models that support it.
+## 2. Terrarium
 
-## How They Compose
+See [Terrariums](terrariums.md).
 
-```
-User Request
-     |
-     v
-+--------------------+     +------------------------+
-|    Terrarium       |     |   Environment          |
-|    (wiring)        |     |   (isolation)           |
-|                    |     |                         |
-|  brainstorm -------+-queue--> planner              |
-|       |            |     |       |                 |
-|       +--broadcast-+-all-+       +--queue--> writer|
-|                    |     |                         |
-+--------------------+     +------------------------+
-     |                              |
-     v                              v
-  Each creature                  Each creature
-  is a full agent:               has private:
-  - LLM controller               - Session
-  - Tools (native/bracket/xml)    - Scratchpad
-  - Sub-agents                    - Sub-agent channels
-  - Memory
-```
+A **terrarium** is the framework's definition of a multi-agent wiring layer.
 
-For details on the execution model, see [Execution](execution.md). For the serving layer, see [Serving](serving.md). For API usage, see [API Reference](../api-reference/python.md).
+It connects creatures through channels, manages lifecycle, and provides topology and observation.
+
+A terrarium defines **external composition between creatures**.
+
+### A terrarium is
+
+- a topology
+- a collaboration layer
+- a runtime world for creatures
+
+### A terrarium is not
+
+- another reasoning agent
+- the place where creature internals are defined
+- a replacement for the creature abstraction
+
+## 3. Channels
+
+See [Channels](channels.md).
+
+A **channel** is the communication primitive between creatures.
+
+Channels are how messages move across the terrarium-level topology.
+
+### A channel is
+
+- an explicit communication path
+- either queue-like or broadcast-like
+- part of the wiring layer
+
+### A channel is not
+
+- a creature internal
+- an implicit shared mind
+- a hidden coupling mechanism
+
+## 4. Environment and Session
+
+See [Environment and Session](environment.md).
+
+These define runtime boundaries.
+
+- **Environment** is shared runtime state at the collaboration level
+- **Session** is private runtime state at the creature level
+
+This separation defines **where state is shared and where it is isolated**.
+
+### Environment is
+
+- shared terrarium-facing state
+- the home of shared channels and common runtime context
+
+### Session is
+
+- creature-private operational state
+- the home of scratchpad and other local runtime state
+
+### They are not
+
+- the same thing
+- interchangeable storage scopes
+
+## 5. Tool formats
+
+See [Tool Formats](tool-formats.md).
+
+Tool formats define how the model expresses actions.
+
+This matters because the same creature abstraction can work with different model capabilities and invocation styles.
+
+### Tool formats are
+
+- the action-call surface between model output and runtime execution
+- part of the controller-to-tool interaction contract
+
+### Tool formats are not
+
+- the tool system itself
+- the full execution model
+
+## 6. Modules
+
+See [Custom Modules](../guides/custom-modules.md).
+
+Modules are the framework's way of defining the major blocks inside the creature abstraction.
+
+These include:
+
+- input
+- output
+- tool
+- trigger
+- sub-agent
+
+A module defines **what kind of block exists in the creature**.
+
+### Modules are
+
+- block-level customization
+- capability-level extension points
+
+### Modules are not
+
+- the connection logic between blocks
+
+## 7. Plugins
+
+See [Plugins and Extensibility](plugins.md).
+
+Plugins are the framework's way of defining how blocks interact.
+
+If modules customize the nodes of the creature, plugins customize the edges between those nodes.
+
+A plugin defines **connection-level customization**.
+
+### Plugins are
+
+- connection-level behavior
+- interception, transformation, policy, and adaptive layers
+
+### Plugins are not
+
+- replacements for all modules
+- just logging hooks
+
+## 8. Composition algebra
+
+See [Composition Algebra](composition-algebra.md).
+
+Composition algebra defines programmatic composition in Python.
+
+It exists alongside creatures and terrariums, but it is not the same as either.
+
+### Composition algebra is
+
+- application-owned orchestration in code
+- composition of agentic runnables and transforms
+
+### Composition algebra is not
+
+- the creature abstraction itself
+- the terrarium topology model
+
+## Three different composition axes
+
+One reason KohakuTerrarium is powerful is that it supports more than one kind of composition.
+
+### Internal composition
+
+Inside a creature.
+
+This is where controller, tools, triggers, sub-agents, inputs, and outputs fit together.
+
+### Topological composition
+
+Across creatures in a terrarium.
+
+This is where channels, collaboration, and team structure live.
+
+### Programmatic composition
+
+Inside Python code through composition algebra.
+
+This is where your application becomes the orchestrator.
+
+These are related, but they are not the same thing.
+
+## Why the extensibility model is special
+
+KohakuTerrarium does not only let you customize blocks.
+It also lets you customize connections.
+
+That gives the system two distinct extension layers:
+
+- **modules customize blocks**
+- **plugins customize connections**
+
+And both can themselves contain agentic logic because the runtime can be called programmatically.
+
+That means:
+
+- a custom tool can internally run an agent
+- a custom trigger can use an agent to decide whether to fire
+- a plugin can use an agent to decide what context to inject
+- a plugin can use an agent to decide whether a tool call should proceed
+
+This is one of the reasons the framework can support sophisticated adaptive behavior without collapsing everything into one giant controller.
+
+## A compact mental model
+
+If you want one short summary, use this:
+
+- **creature** defines what one agent is
+- **terrarium** defines how multiple creatures are wired together
+- **channels** define how creatures communicate
+- **environment and session** define where state is shared or isolated
+- **modules** define the major blocks in a creature
+- **plugins** define the connections between those blocks
+- **composition algebra** defines programmatic orchestration in Python
+
+## Where to go next
+
+- [Agents](agents.md)
+- [Terrariums](terrariums.md)
+- [Channels](channels.md)
+- [Plugins and Extensibility](plugins.md)
+- [Composition Algebra](composition-algebra.md)
+- [Environment and Session](environment.md)

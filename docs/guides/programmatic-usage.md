@@ -878,7 +878,7 @@ from kohakuterrarium.core.config_types import (
 
 config = AgentConfig(
     name="from-scratch-agent",
-    model="openai/gpt-4o-mini",
+    llm_profile="gpt-5.4",
     system_prompt="You are a helpful assistant.",
     input=InputConfig(type="none"),  # No interactive input
     output=OutputConfig(type="stdout"),

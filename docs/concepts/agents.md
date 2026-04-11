@@ -109,7 +109,7 @@ subagents:
 
 The system prompt defines personality and workflow. The tool list and call syntax are auto-generated; never write them in the prompt manually. For details on prompt assembly, see [Prompt System](prompts.md).
 
-See [Configuration Reference](../guide/configuration.md) for all fields. See [Examples](../guide/examples.md) for walkthroughs.
+See [Configuration Reference](../guides/configuration.md) for all fields. See [Examples](../guides/examples.md) for walkthroughs.
 
 ---
 
@@ -137,7 +137,7 @@ await agent.stop()                           # Cleanup
 
 ### Bootstrap Package (`bootstrap/`)
 
-Agent initialization is split into focused factory modules that each create one subsystem from an `AgentConfig`. This reduces the import fan-out of `agent_init.py` and keeps each factory independently testable.
+Agent initialization is split into focused factory modules that each create one subsystem from an `AgentConfig`. This reduces the import fan-out of `bootstrap/agent_init.py` and keeps each factory independently testable.
 
 | Module | Responsibility |
 |--------|---------------|
@@ -217,7 +217,7 @@ When an agent's conversation approaches the model's token limit, the `CompactMan
 
 The two-zone model splits the conversation into a "compact zone" (old messages, eligible for summarization) and a "live zone" (recent turns, kept verbatim). After compaction, the compact zone is replaced by a single summary message.
 
-Configure auto-compaction in the agent's `compact` section. See [Configuration Reference](../guide/configuration.md) for all options (`max_tokens`, `threshold`, `target`, `keep_recent_turns`, `compact_model`).
+Configure auto-compaction in the agent's `compact` section. See [Configuration Reference](../guides/configuration.md) for all options (`max_tokens`, `threshold`, `target`, `keep_recent_turns`, `compact_model`).
 
 ### Session Registry (`core/session.py`)
 

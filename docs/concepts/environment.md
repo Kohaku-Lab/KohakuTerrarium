@@ -185,7 +185,7 @@ messages = store.load_conversation("my_agent")
 scratchpad = store.load_scratchpad("my_agent")
 ```
 
-For full API, see [Python API Reference](../api-reference/python.md).
+For full API, see [Python API Reference](../reference/python.md).
 
 ## Shared State Registration
 

@@ -1,46 +1,136 @@
 # KohakuTerrarium Documentation
 
-## Guide
+KohakuTerrarium has two hierarchies that matter:
 
-Practical how-to guides for building agents and terrariums.
+- the **documentation hierarchy**, which is organized around reader intent
+- the **codebase hierarchy**, which is organized around runtime subsystems and packages
 
-- [Getting Started](guide/getting-started.md): install, configure, run your first agent
-- [Configuration Reference](guide/configuration.md): agent YAML, terrarium YAML, all fields
-- [Creatures](guide/creatures.md): pre-built creatures, inheritance, creating your own
-- [Terrariums](guide/terrariums.md): multi-agent setup, channel wiring, root agent binding
-- [Sessions](guide/sessions.md): persistence, resume, `.kohakutr` files
-- [Programmatic Usage](guide/programmatic-usage.md): embed agents in scripts, composition algebra, KohakuManager
-- [Custom Modules](guide/custom-modules.md): build custom tools, inputs, outputs, triggers, sub-agents
-- [Plugins](guide/plugins.md): intercept agent flows with prompt and lifecycle plugins
-- [Frontend Layout](guide/frontend-layout.md): split tree layout, presets, edit mode, panels, shortcuts
-- [Examples](guide/examples.md): walkthrough of included example agents and terrariums
+This `docs/` tree is the reader-facing side. It answers:
 
-## Concepts
+1. What is this framework?
+2. How do I get something running?
+3. How do I build a specific thing?
+4. How does the system work?
+5. Where do I look up exact commands, APIs, and config fields?
+6. How do I contribute to the framework itself?
 
-Conceptual foundations and architecture internals: what the abstractions are, how they relate, and how the system works under the hood.
+## Start here
 
-- [Overview](concepts/overview.md): five major systems, event model, composition levels
-- [Agents](concepts/agents.md): creature lifecycle, controller as orchestrator, sub-agents
-- [Terrariums](concepts/terrariums.md): pure wiring layer, root agent, horizontal composition
-- [Channels](concepts/channels.md): queue/broadcast types, channel triggers, on_send callbacks
-- [Execution Model](concepts/execution.md): event sources, processing loop, tool modes
-- [Prompt System](concepts/prompts.md): system prompt aggregation, skill modes, topology injection
-- [Serving Layer](concepts/serving.md): KohakuManager, unified WebSocket, session recording
-- [Environment-Session](concepts/environment.md): isolation, shared state, session lifecycle
-- [Tool Formats](concepts/tool-formats.md): call syntax, parsing, format configuration
+- New to the project: [Quick start](guides/getting-started.md)
+- Building a creature: [Guides / Creatures](guides/creatures.md)
+- Building a terrarium: [Guides / Terrariums](guides/terrariums.md)
+- Embedding in Python: [Guides / Programmatic Usage](guides/programmatic-usage.md)
+- Learning the architecture: [Concepts](concepts/README.md)
+- Looking up commands or APIs: [Reference](reference/README.md)
+- Working on the framework: [Development](dev/README.md)
 
-## API Reference
+## Documentation hierarchy
 
-Lookup tables for specific methods, endpoints, and commands.
+### Tutorials
 
-- [Python API](api-reference/python.md): Agent, SessionStore, TerrariumRuntime, all modules
-- [HTTP API](api-reference/http.md): REST + unified WebSocket + config discovery
-- [CLI Reference](api-reference/cli.md): kt run, kt resume, kt terrarium run, kt login
+Step-by-step learning paths for readers who want a guided way into the system.
 
-## Contributing
+- [Tutorials home](tutorials/README.md)
+- [First Creature](tutorials/first-creature.md)
+- [First Terrarium](tutorials/first-terrarium.md)
+- [First Python Embedding](tutorials/first-python-embedding.md)
 
-Work on the framework itself.
+### Guides
 
-- [Testing](develop/testing.md): test infrastructure, unit/integration coverage, behavior docs
-- [Framework Internals](develop/internals.md): import analysis, internal decisions, technical notes
-- [Frontend Architecture](develop/frontend.md): component tree, stores, WebSocket protocols, adding panels
+Task-oriented documentation for building, configuring, and operating creatures and terrariums.
+
+- [Guides home](guides/README.md)
+- [Getting Started](guides/getting-started.md)
+- [Configuration](guides/configuration.md)
+- [Creatures](guides/creatures.md)
+- [Terrariums](guides/terrariums.md)
+- [Sessions](guides/sessions.md)
+- [Programmatic Usage](guides/programmatic-usage.md)
+- [Custom Modules](guides/custom-modules.md)
+- [Plugins](guides/plugins.md)
+- [Frontend Layout](guides/frontend-layout.md)
+- [Examples](guides/examples.md)
+
+### Concepts
+
+Mental models and architectural explanations.
+
+- [Concepts home](concepts/README.md)
+- [Overview](concepts/overview.md)
+- [Agents](concepts/agents.md)
+- [Terrariums](concepts/terrariums.md)
+- [Channels](concepts/channels.md)
+- [Execution Model](concepts/execution.md)
+- [Prompt System](concepts/prompts.md)
+- [Plugins and Extensibility](concepts/plugins.md)
+- [Composition Algebra](concepts/composition-algebra.md)
+- [Serving Layer](concepts/serving.md)
+- [Environment and Session](concepts/environment.md)
+- [Tool Formats](concepts/tool-formats.md)
+
+### Reference
+
+Exact lookup docs for commands, APIs, and interfaces.
+
+- [Reference home](reference/README.md)
+- [CLI Reference](reference/cli.md)
+- [HTTP API](reference/http.md)
+- [Python API](reference/python.md)
+
+### Development
+
+Contributor-facing docs for working on the codebase itself.
+
+- [Development home](dev/README.md)
+- [Testing](dev/testing.md)
+- [Framework Internals](dev/internals.md)
+- [Frontend Architecture](dev/frontend.md)
+
+## Codebase hierarchy
+
+The codebase itself is organized by runtime subsystem, not by reader intent. The main packages are:
+
+```text
+src/kohakuterrarium/
+  core/           # Agent runtime, controller, executor, events, environment
+  bootstrap/      # Agent initialization factories for LLM, tools, I/O, triggers
+  cli/            # CLI command handlers
+  terrarium/      # Multi-agent runtime, topology wiring, hot-plug, persistence
+  builtins/       # Built-in tools, sub-agents, I/O modules, TUI, user commands
+  builtin_skills/ # Markdown skill manifests for on-demand docs
+  session/        # Session persistence, memory search, embeddings
+  serving/        # Transport-agnostic service manager and event streaming
+  api/            # FastAPI HTTP and WebSocket server
+  modules/        # Base protocols for tools, inputs, outputs, triggers, sub-agents
+  llm/            # LLM providers, profiles, API key management
+  parsing/        # Tool-call parsing and streaming
+  prompt/         # Prompt assembly, aggregation, plugins, skill loading
+  testing/        # Test infrastructure
+```
+
+Many of these packages also include local `README.md` files. Those package-local READMEs are the maintainer-facing side of the docs system. They explain file responsibilities, dependency direction, and subsystem internals near the code.
+
+## Recommended reading order
+
+### If you are evaluating the project
+
+1. [Root README](../README.md)
+2. [Getting Started](guides/getting-started.md)
+3. [Overview](concepts/overview.md)
+4. [Examples](guides/examples.md)
+
+### If you are building with the framework
+
+1. [Getting Started](guides/getting-started.md)
+2. [Creatures](guides/creatures.md)
+3. [Terrariums](guides/terrariums.md)
+4. [Plugins and Extensibility](concepts/plugins.md)
+5. [Composition Algebra](concepts/composition-algebra.md)
+6. [Programmatic Usage](guides/programmatic-usage.md)
+
+### If you are contributing to the framework
+
+1. [Development home](dev/README.md)
+2. [Testing](dev/testing.md)
+3. [Framework Internals](dev/internals.md)
+4. package READMEs under `src/kohakuterrarium/`
