@@ -19,6 +19,7 @@ import secrets
 import time
 import webbrowser
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from threading import Thread
@@ -233,7 +234,13 @@ async def _device_code_flow() -> CodexTokens:
     device_auth_id = data["device_auth_id"]
     user_code = data["user_code"]
     interval = int(data.get("interval", 5))
-    expires_in = int(data.get("expires_in", 900))
+    if "expires_at" in data:
+        expires_at_dt = datetime.fromisoformat(data["expires_at"])
+        expires_in = max(
+            60, int(expires_at_dt.astimezone(timezone.utc).timestamp() - time.time())
+        )
+    else:
+        expires_in = int(data.get("expires_in", 900))
 
     print(f"[Device] Or visit: {DEVICE_VERIFY_URL}")
     print(f"  Code: {user_code}")
@@ -279,17 +286,30 @@ async def _device_code_flow() -> CodexTokens:
             if resp.status_code in (403, 400, 428):
                 try:
                     error_data = resp.json()
-                    error = error_data.get("error", "")
+                    raw_error = error_data.get("error", "")
+                    # error field may be a string or a dict {"message": ..., "type": ...}
+                    if isinstance(raw_error, dict):
+                        error = raw_error.get("code", raw_error.get("type", "unknown"))
+                        error_msg = raw_error.get("message", str(raw_error))
+                    else:
+                        error = raw_error
+                        error_msg = error
                 except Exception as e:
                     logger.debug("Failed to parse error response JSON", error=str(e))
                     continue
-                if error in ("authorization_pending", "pending"):
+                if error in (
+                    "authorization_pending",
+                    "pending",
+                    "deviceauth_authorization_unknown",  # user hasn't completed yet
+                ):
                     continue
                 if error == "slow_down":
                     interval += 5  # slow down
                     continue
                 if error in ("expired_token", "access_denied"):
                     raise RuntimeError(f"Device code auth failed: {error}")
+                # Any other unrecognised error is fatal — don't loop until timeout
+                raise RuntimeError(f"Device code auth error: {error_msg}")
 
     raise RuntimeError("Device code auth timed out")
 
@@ -351,33 +371,34 @@ async def oauth_login() -> CodexTokens:
     - Local machine: browser opens, redirect catches it
     - SSH/headless: user visits URL on another device, enters code
     - Remote desktop: either flow may work
+    - Windows reserved port: browser fails fast, device code continues
     """
     # Start both flows as concurrent tasks
     browser_task = asyncio.create_task(_browser_flow_safe())
     device_task = asyncio.create_task(_device_code_flow())
 
-    # Wait for EITHER to complete
-    done, pending = await asyncio.wait(
-        [browser_task, device_task],
-        return_when=asyncio.FIRST_COMPLETED,
-    )
+    tasks = {browser_task, device_task}
+    last_error: Exception | None = None
 
-    # Cancel the other
-    for task in pending:
-        task.cancel()
-        try:
-            await task
-        except (asyncio.CancelledError, Exception):
-            pass
+    while tasks:
+        done, tasks = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            try:
+                tokens = task.result()
+                # Success — cancel the remaining task if any
+                for remaining in tasks:
+                    remaining.cancel()
+                    try:
+                        await remaining
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                return tokens
+            except Exception as e:
+                logger.warning("Auth flow failed", error=str(e))
+                last_error = e
+                # Other task may still succeed — keep waiting
 
-    # Get the result from whichever succeeded
-    for task in done:
-        try:
-            return task.result()
-        except Exception as e:
-            logger.warning("Auth flow failed", error=str(e))
-
-    raise RuntimeError("All authentication flows failed")
+    raise RuntimeError(f"All authentication flows failed: {last_error}")
 
 
 async def _browser_flow_safe() -> CodexTokens:
@@ -385,11 +406,9 @@ async def _browser_flow_safe() -> CodexTokens:
     try:
         return await _browser_flow()
     except OSError as e:
-        # Port already in use or similar
+        # Port already in use / permission denied (e.g. Windows reserved ports)
         logger.debug("Browser flow unavailable", error=str(e))
-        # Wait forever so device code flow can win
-        await asyncio.Event().wait()
-        raise  # unreachable
+        raise RuntimeError(f"Browser flow unavailable: {e}") from e
 
 
 async def refresh_tokens(tokens: CodexTokens) -> CodexTokens:
