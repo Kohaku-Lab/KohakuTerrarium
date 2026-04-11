@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   build-wheel:
@@ -108,6 +109,17 @@ jobs:
         with:
           name: desktop-${{ matrix.platform }}
           path: artifacts/
+
+  publish-pypi:
+    needs: [build-wheel]
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
 
   github-release:
     needs: [build-wheel, build-desktop]
