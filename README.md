@@ -665,6 +665,7 @@ Full documentation lives in [`docs/`](docs/README.md). Key starting points:
 - [Creatures](docs/guide/creatures.md): pre-built creatures, inheritance, creating your own
 - [Terrariums](docs/guide/terrariums.md): multi-agent setup, channel wiring, root agent
 - [Sessions](docs/guide/sessions.md): persistence, resume, memory search
+- [Programmatic Usage](docs/guide/programmatic-usage.md): embed agents in scripts, composition algebra, KohakuManager
 - [Custom Modules](docs/guide/custom-modules.md): build custom tools, inputs, outputs, triggers, sub-agents
 - [Plugins](docs/guide/plugins.md): intercept agent flows with prompt and lifecycle plugins
 - [Examples](docs/guide/examples.md): walkthrough of included example agents and terrariums
