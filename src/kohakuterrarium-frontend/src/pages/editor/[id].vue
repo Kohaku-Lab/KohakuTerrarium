@@ -45,10 +45,13 @@ onMounted(async () => {
   applyPreset();
 });
 
-watch(() => route.params.id, async () => {
-  await loadInstance();
-  applyPreset();
-});
+watch(
+  () => route.params.id,
+  async () => {
+    await loadInstance();
+    applyPreset();
+  },
+);
 
 function applyPreset() {
   const id = route.params.id;

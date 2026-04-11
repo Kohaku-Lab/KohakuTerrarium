@@ -5,7 +5,7 @@
     <!-- Instance name + status -->
     <div class="status-seg flex items-center gap-1.5 shrink-0">
       <StatusDot v-if="instance" :status="instance.status" class="scale-75" />
-      <span class="truncate max-w-40">{{ instance?.config_name || '—' }}</span>
+      <span class="truncate max-w-40">{{ instance?.config_name || "—" }}</span>
     </div>
 
     <div class="seg-sep" />
@@ -14,8 +14,9 @@
     <ModelSwitcher />
     <button
       class="w-4 h-4 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors"
-      title="Settings"
-      @click="layout.switchPreset('settings')"
+      title="Model config"
+      aria-label="Open model configuration"
+      @click="openModelConfig"
     >
       <div class="i-carbon-settings text-[10px]" />
     </button>
@@ -52,7 +53,6 @@
       <span>{{ runtimeStr }}</span>
     </div>
   </div>
-
 </template>
 
 <script setup>
@@ -63,6 +63,7 @@ import StatusDot from "@/components/common/StatusDot.vue";
 import { useChatStore } from "@/stores/chat";
 import { useInstancesStore } from "@/stores/instances";
 import { useLayoutStore } from "@/stores/layout";
+import { fireModelConfigOpen } from "@/utils/layoutEvents";
 
 const instances = useInstancesStore();
 const chat = useChatStore();
@@ -83,7 +84,9 @@ const jobCount = computed(() => Object.keys(chat.runningJobs || {}).length);
 const now = ref(Date.now());
 let tick = null;
 onMounted(() => {
-  tick = setInterval(() => { now.value = Date.now(); }, 1000);
+  tick = setInterval(() => {
+    now.value = Date.now();
+  }, 1000);
 });
 onUnmounted(() => {
   if (tick) clearInterval(tick);
@@ -103,12 +106,15 @@ const runtimeStr = computed(() => {
   return `${s}s`;
 });
 
+function openModelConfig() {
+  fireModelConfigOpen();
+}
+
 function copySession() {
   const s = sessionId.value;
   if (!s || typeof navigator === "undefined" || !navigator.clipboard) return;
   navigator.clipboard.writeText(s).catch(() => {});
 }
-
 </script>
 
 <style scoped>

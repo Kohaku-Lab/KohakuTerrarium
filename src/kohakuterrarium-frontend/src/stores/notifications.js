@@ -18,7 +18,13 @@ export const useNotificationsStore = defineStore("notifications", () => {
 
   let nextId = 1;
 
-  function push({ level = "info", title = "", body = "", actions = [], timeoutMs = DEFAULT_TIMEOUT } = {}) {
+  function push({
+    level = "info",
+    title = "",
+    body = "",
+    actions = [],
+    timeoutMs = DEFAULT_TIMEOUT,
+  } = {}) {
     const id = `n${nextId++}`;
     const entry = {
       id,

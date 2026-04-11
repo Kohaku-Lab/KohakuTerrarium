@@ -5,18 +5,42 @@ import { useLayoutStore } from "./layout.js";
 
 const stub = (name) => ({ name, render: () => null });
 
-vi.mock("@/components/chat/ChatPanel.vue", () => ({ default: stub("ChatPanel") }));
-vi.mock("@/components/editor/EditorMain.vue", () => ({ default: stub("EditorMain") }));
-vi.mock("@/components/editor/EditorStatus.vue", () => ({ default: stub("EditorStatus") }));
-vi.mock("@/components/editor/FileTree.vue", () => ({ default: stub("FileTree") }));
-vi.mock("@/components/panels/ActivityPanel.vue", () => ({ default: stub("ActivityPanel") }));
-vi.mock("@/components/panels/CanvasPanel.vue", () => ({ default: stub("CanvasPanel") }));
-vi.mock("@/components/panels/CreaturesPanel.vue", () => ({ default: stub("CreaturesPanel") }));
-vi.mock("@/components/panels/DebugPanel.vue", () => ({ default: stub("DebugPanel") }));
-vi.mock("@/components/panels/FilesPanel.vue", () => ({ default: stub("FilesPanel") }));
-vi.mock("@/components/panels/SettingsPanel.vue", () => ({ default: stub("SettingsPanel") }));
-vi.mock("@/components/panels/StatePanel.vue", () => ({ default: stub("StatePanel") }));
-vi.mock("@/components/status/StatusDashboard.vue", () => ({ default: stub("StatusDashboard") }));
+vi.mock("@/components/chat/ChatPanel.vue", () => ({
+  default: stub("ChatPanel"),
+}));
+vi.mock("@/components/editor/EditorMain.vue", () => ({
+  default: stub("EditorMain"),
+}));
+vi.mock("@/components/editor/EditorStatus.vue", () => ({
+  default: stub("EditorStatus"),
+}));
+vi.mock("@/components/editor/FileTree.vue", () => ({
+  default: stub("FileTree"),
+}));
+vi.mock("@/components/panels/ActivityPanel.vue", () => ({
+  default: stub("ActivityPanel"),
+}));
+vi.mock("@/components/panels/CanvasPanel.vue", () => ({
+  default: stub("CanvasPanel"),
+}));
+vi.mock("@/components/panels/CreaturesPanel.vue", () => ({
+  default: stub("CreaturesPanel"),
+}));
+vi.mock("@/components/panels/DebugPanel.vue", () => ({
+  default: stub("DebugPanel"),
+}));
+vi.mock("@/components/panels/FilesPanel.vue", () => ({
+  default: stub("FilesPanel"),
+}));
+vi.mock("@/components/panels/SettingsPanel.vue", () => ({
+  default: stub("SettingsPanel"),
+}));
+vi.mock("@/components/panels/StatePanel.vue", () => ({
+  default: stub("StatePanel"),
+}));
+vi.mock("@/components/status/StatusDashboard.vue", () => ({
+  default: stub("StatusDashboard"),
+}));
 
 beforeEach(() => {
   setActivePinia(createPinia());
@@ -29,9 +53,18 @@ describe("layoutPanels — registerBuiltinPanels", () => {
     registerBuiltinPanels();
     const store = useLayoutStore();
     const expected = [
-      "chat", "status-dashboard", "file-tree", "monaco-editor",
-      "editor-status", "files", "activity", "state", "creatures",
-      "canvas", "settings", "debug",
+      "chat",
+      "status-dashboard",
+      "file-tree",
+      "monaco-editor",
+      "editor-status",
+      "files",
+      "activity",
+      "state",
+      "creatures",
+      "canvas",
+      "settings",
+      "debug",
     ];
     for (const id of expected) {
       const p = store.getPanel(id);
@@ -44,7 +77,14 @@ describe("layoutPanels — registerBuiltinPanels", () => {
     const { registerBuiltinPanels } = await import("./layoutPanels.js");
     registerBuiltinPanels();
     const store = useLayoutStore();
-    for (const id of ["chat-focus", "workspace", "multi-creature", "canvas", "debug", "settings"]) {
+    for (const id of [
+      "chat-focus",
+      "workspace",
+      "multi-creature",
+      "canvas",
+      "debug",
+      "settings",
+    ]) {
       const p = store.allPresets[id];
       expect(p, `preset ${id} should exist`).toBeDefined();
       expect(p.tree, `preset ${id} should have a tree`).toBeDefined();

@@ -89,7 +89,9 @@ const panel = computed(() => layout.getPanel(props.slotInfo.panelId));
 
 const resolvedProps = computed(() => {
   const source =
-    typeof props.panelProps === "function" ? props.panelProps() : props.panelProps;
+    typeof props.panelProps === "function"
+      ? props.panelProps()
+      : props.panelProps;
   const fromMap = source?.[props.slotInfo.panelId] || {};
   const defaults = panel.value?.props || {};
   return { ...defaults, ...fromMap };

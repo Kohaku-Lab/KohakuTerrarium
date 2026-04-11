@@ -14,10 +14,7 @@
 import { onMounted, onUnmounted } from "vue";
 
 import { useLayoutStore } from "@/stores/layout";
-import {
-  fireLayoutEditRequested,
-  firePaletteOpen,
-} from "@/utils/layoutEvents";
+import { fireLayoutEditRequested, firePaletteOpen } from "@/utils/layoutEvents";
 
 const PRESET_ORDER = [
   "chat-focus",
@@ -30,7 +27,11 @@ const PRESET_ORDER = [
 
 function _isEditable(el) {
   if (!el) return false;
-  if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT") {
+  if (
+    el.tagName === "INPUT" ||
+    el.tagName === "TEXTAREA" ||
+    el.tagName === "SELECT"
+  ) {
     return true;
   }
   if (el.isContentEditable) return true;

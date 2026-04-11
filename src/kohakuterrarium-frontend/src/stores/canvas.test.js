@@ -13,9 +13,13 @@ describe("canvas store — artifact detection", () => {
     const msg = {
       id: "m1",
       role: "assistant",
-      parts: [{ type: "text", content:
-        "Here is the file:\n##canvas name=hello lang=py##\nprint('hi')\n##canvas##\nDone.",
-      }],
+      parts: [
+        {
+          type: "text",
+          content:
+            "Here is the file:\n##canvas name=hello lang=py##\nprint('hi')\n##canvas##\nDone.",
+        },
+      ],
     };
     store.scanMessage(msg);
     expect(store.artifacts).toHaveLength(1);
@@ -31,7 +35,9 @@ describe("canvas store — artifact detection", () => {
     const msg = {
       id: "m2",
       role: "assistant",
-      parts: [{ type: "text", content: "See below:\n```python\n" + body + "\n```\n" }],
+      parts: [
+        { type: "text", content: "See below:\n```python\n" + body + "\n```\n" },
+      ],
     };
     store.scanMessage(msg);
     expect(store.artifacts).toHaveLength(1);

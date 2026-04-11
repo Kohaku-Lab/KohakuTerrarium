@@ -9,6 +9,8 @@
   >
     <!-- Header -->
     <div
+      role="button"
+      tabindex="0"
       class="flex items-center gap-2 text-xs px-3 py-1.5 cursor-pointer select-none min-w-0"
       :class="
         tc.kind === 'subagent'
@@ -16,6 +18,8 @@
           : 'bg-sapphire/8 dark:bg-sapphire/12'
       "
       @click="$emit('toggle')"
+      @keydown.enter="$emit('toggle')"
+      @keydown.space.prevent="$emit('toggle')"
     >
       <span :class="statusIcon.class">{{ statusIcon.icon }}</span>
       <span
@@ -41,10 +45,18 @@
         v-if="canPromote"
         class="text-[10px] px-1.5 py-0.5 rounded bg-iolite/15 text-iolite hover:bg-iolite/25 shrink-0 font-mono"
         title="Move to background — agent continues working"
+        aria-label="Move task to background"
         @click.stop="chat.promoteTask(tc.jobId || tc.id)"
-      >→ bg</button>
+      >
+        → bg
+      </button>
       <span
-        v-if="tc.result || tc.tools_used?.length || tc.children?.length || tc.status === 'running'"
+        v-if="
+          tc.result ||
+          tc.tools_used?.length ||
+          tc.children?.length ||
+          tc.status === 'running'
+        "
         class="i-carbon-chevron-down text-warm-400 transition-transform text-[10px] shrink-0"
         :class="{ 'rotate-180': expanded }"
       />
@@ -89,22 +101,44 @@
         >
           (interrupted)
         </div>
-        <div v-else-if="tc.status === 'running'" class="px-3 py-2 text-xs text-warm-400 bg-taaffeite/4 dark:bg-taaffeite/6">(running...)</div>
+        <div
+          v-else-if="tc.status === 'running'"
+          class="px-3 py-2 text-xs text-warm-400 bg-taaffeite/4 dark:bg-taaffeite/6"
+        >
+          (running...)
+        </div>
         <!-- Sub-agent stats bar (solid dark strip) -->
         <div
-          v-if="tc.turns || tc.total_tokens || tc.duration || tc.status === 'running'"
+          v-if="
+            tc.turns ||
+            tc.total_tokens ||
+            tc.duration ||
+            tc.status === 'running'
+          "
           class="px-3 py-1 text-[10px] text-taaffeite-shadow dark:text-taaffeite-light font-mono border-t border-taaffeite/20 dark:border-taaffeite/25 bg-taaffeite/15 dark:bg-taaffeite/20 flex gap-3"
         >
           <template v-if="tc.status === 'running'">
-            <span v-if="tc.children?.length">{{ tc.children.length }} tool calls</span>
-            <span v-if="tc.total_tokens">{{ tc.total_tokens.toLocaleString() }} tokens</span>
-            <span v-if="tc.prompt_tokens">({{ tc.prompt_tokens.toLocaleString() }} in / {{ (tc.completion_tokens || 0).toLocaleString() }} out)</span>
+            <span v-if="tc.children?.length"
+              >{{ tc.children.length }} tool calls</span
+            >
+            <span v-if="tc.total_tokens"
+              >{{ tc.total_tokens.toLocaleString() }} tokens</span
+            >
+            <span v-if="tc.prompt_tokens"
+              >({{ tc.prompt_tokens.toLocaleString() }} in /
+              {{ (tc.completion_tokens || 0).toLocaleString() }} out)</span
+            >
             <span v-if="elapsed">{{ elapsed }}</span>
           </template>
           <template v-else>
             <span v-if="tc.turns">{{ tc.turns }} turns</span>
-            <span v-if="tc.total_tokens">{{ tc.total_tokens.toLocaleString() }} tokens</span>
-            <span v-if="tc.prompt_tokens">({{ tc.prompt_tokens.toLocaleString() }} in / {{ (tc.completion_tokens || 0).toLocaleString() }} out)</span>
+            <span v-if="tc.total_tokens"
+              >{{ tc.total_tokens.toLocaleString() }} tokens</span
+            >
+            <span v-if="tc.prompt_tokens"
+              >({{ tc.prompt_tokens.toLocaleString() }} in /
+              {{ (tc.completion_tokens || 0).toLocaleString() }} out)</span
+            >
             <span v-if="tc.duration">{{ tc.duration.toFixed(1) }}s</span>
           </template>
         </div>

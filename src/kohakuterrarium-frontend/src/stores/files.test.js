@@ -78,11 +78,15 @@ describe("files store — touched set", () => {
     seedChat([
       {
         id: "m1",
-        tool_calls: [{ name: "read", args: { file_path: "/a" }, status: "done" }],
+        tool_calls: [
+          { name: "read", args: { file_path: "/a" }, status: "done" },
+        ],
       },
       {
         id: "m2",
-        tool_calls: [{ name: "write", args: { file_path: "/a" }, status: "done" }],
+        tool_calls: [
+          { name: "write", args: { file_path: "/a" }, status: "done" },
+        ],
       },
     ]);
     const store = useFilesStore();

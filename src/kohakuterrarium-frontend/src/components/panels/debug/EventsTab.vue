@@ -19,12 +19,7 @@
         clearable
         style="width: 160px"
       >
-        <el-option
-          v-for="t in knownTypes"
-          :key="t"
-          :label="t"
-          :value="t"
-        />
+        <el-option v-for="t in knownTypes" :key="t" :label="t" :value="t" />
       </el-select>
     </div>
 
@@ -36,12 +31,17 @@
         class="px-3 py-1 border-b border-warm-200/50 dark:border-warm-700/50"
       >
         <div class="flex items-center gap-2">
-          <span class="text-warm-400 shrink-0">{{ formatTs(e.timestamp) }}</span>
+          <span class="text-warm-400 shrink-0">{{
+            formatTs(e.timestamp)
+          }}</span>
           <span
             class="shrink-0 px-1 rounded"
             :class="typeClass(e.role || e.type)"
-          >{{ e.role || e.type || '?' }}</span>
-          <span class="truncate text-warm-700 dark:text-warm-300">{{ eventPreview(e) }}</span>
+            >{{ e.role || e.type || "?" }}</span
+          >
+          <span class="truncate text-warm-700 dark:text-warm-300">{{
+            eventPreview(e)
+          }}</span>
           <span class="flex-1" />
           <button
             class="text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 shrink-0"
@@ -49,7 +49,9 @@
             @click="expanded = expanded === i ? null : i"
           >
             <div
-              :class="expanded === i ? 'i-carbon-chevron-up' : 'i-carbon-chevron-down'"
+              :class="
+                expanded === i ? 'i-carbon-chevron-up' : 'i-carbon-chevron-down'
+              "
               class="text-[11px]"
             />
           </button>
@@ -57,12 +59,10 @@
         <pre
           v-if="expanded === i"
           class="mt-1 text-[10px] bg-warm-100 dark:bg-warm-800 p-2 rounded whitespace-pre-wrap break-words text-warm-600 dark:text-warm-400"
-        >{{ JSON.stringify(e, null, 2) }}</pre>
+          >{{ JSON.stringify(e, null, 2) }}</pre
+        >
       </div>
-      <div
-        v-if="visible.length === 0"
-        class="text-warm-400 text-center py-6"
-      >
+      <div v-if="visible.length === 0" class="text-warm-400 text-center py-6">
         No events match the current filter
       </div>
     </div>
@@ -105,7 +105,8 @@ const knownTypes = computed(() => {
 const visible = computed(() => {
   const q = query.value.trim().toLowerCase();
   return events.value.filter((e) => {
-    if (typeFilter.value && (e.role || e.type) !== typeFilter.value) return false;
+    if (typeFilter.value && (e.role || e.type) !== typeFilter.value)
+      return false;
     if (!q) return true;
     const s = JSON.stringify(e).toLowerCase();
     return s.includes(q);
@@ -123,12 +124,14 @@ function formatTs(ts) {
 }
 
 function typeClass(t) {
-  return {
-    user: "bg-iolite/10 text-iolite",
-    assistant: "bg-aquamarine/10 text-aquamarine",
-    compact: "bg-amber/10 text-amber",
-    tool: "bg-warm-200 dark:bg-warm-800",
-  }[t] || "bg-warm-100 dark:bg-warm-800 text-warm-500";
+  return (
+    {
+      user: "bg-iolite/10 text-iolite",
+      assistant: "bg-aquamarine/10 text-aquamarine",
+      compact: "bg-amber/10 text-amber",
+      tool: "bg-warm-200 dark:bg-warm-800",
+    }[t] || "bg-warm-100 dark:bg-warm-800 text-warm-500"
+  );
 }
 
 function eventPreview(e) {

@@ -53,7 +53,11 @@ export function useAutoTriggers() {
         const last = msgs[msgs.length - 1];
         // Heuristic: a compact error shows up as a compact msg with
         // status !== 'done' and a summary that mentions "error".
-        if (last && last.role === "system" && /error/i.test(last.content || "")) {
+        if (
+          last &&
+          last.role === "system" &&
+          /error/i.test(last.content || "")
+        ) {
           return msgs.length;
         }
         return 0;

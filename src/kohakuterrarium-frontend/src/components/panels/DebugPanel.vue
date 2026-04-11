@@ -8,9 +8,11 @@
         v-for="t in tabs"
         :key="t.id"
         class="px-2 py-0.5 rounded transition-colors"
-        :class="activeTab === t.id
-          ? 'bg-iolite/10 text-iolite'
-          : 'text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800'"
+        :class="
+          activeTab === t.id
+            ? 'bg-iolite/10 text-iolite'
+            : 'text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800'
+        "
         @click="activeTab = t.id"
       >
         <div :class="t.icon" class="inline-block text-[12px] mr-1" />

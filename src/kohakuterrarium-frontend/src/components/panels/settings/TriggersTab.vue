@@ -1,15 +1,9 @@
 <template>
   <div class="p-4 text-xs">
-    <div
-      v-if="loading"
-      class="text-warm-400 text-center py-6"
-    >
+    <div v-if="loading" class="text-warm-400 text-center py-6">
       Loading triggers...
     </div>
-    <div
-      v-else-if="error"
-      class="text-coral py-2"
-    >
+    <div v-else-if="error" class="text-coral py-2">
       {{ error }}
     </div>
     <div
@@ -29,8 +23,12 @@
           :class="t.running ? 'bg-aquamarine kohaku-pulse' : 'bg-warm-400'"
         />
         <div class="flex-1 min-w-0">
-          <div class="font-medium text-warm-700 dark:text-warm-300">{{ t.trigger_type }}</div>
-          <div class="text-[10px] font-mono text-warm-400 truncate">{{ t.trigger_id }}</div>
+          <div class="font-medium text-warm-700 dark:text-warm-300">
+            {{ t.trigger_type }}
+          </div>
+          <div class="text-[10px] font-mono text-warm-400 truncate">
+            {{ t.trigger_id }}
+          </div>
         </div>
         <div class="text-[10px] text-warm-500 font-mono shrink-0">
           {{ formatTs(t.created_at) }}

@@ -30,12 +30,28 @@ onMounted(() => {
     height: "100%",
     toolbarConfig: { pin: true },
     toolbar: [
-      "headings", "bold", "italic", "strike", "|",
-      "list", "ordered-list", "check", "|",
-      "quote", "code", "inline-code", "|",
-      "link", "table", "|",
-      "undo", "redo", "|",
-      "edit-mode", "outline", "fullscreen",
+      "headings",
+      "bold",
+      "italic",
+      "strike",
+      "|",
+      "list",
+      "ordered-list",
+      "check",
+      "|",
+      "quote",
+      "code",
+      "inline-code",
+      "|",
+      "link",
+      "table",
+      "|",
+      "undo",
+      "redo",
+      "|",
+      "edit-mode",
+      "outline",
+      "fullscreen",
     ],
     cache: { enable: false },
     theme: theme.dark ? "dark" : "classic",
@@ -115,9 +131,15 @@ onUnmounted(() => {
   word-wrap: break-word !important;
   overflow-wrap: break-word !important;
 }
-.vditor-ir pre.vditor-reset h1 { font-size: 1.4em !important; }
-.vditor-ir pre.vditor-reset h2 { font-size: 1.25em !important; }
-.vditor-ir pre.vditor-reset h3 { font-size: 1.1em !important; }
+.vditor-ir pre.vditor-reset h1 {
+  font-size: 1.4em !important;
+}
+.vditor-ir pre.vditor-reset h2 {
+  font-size: 1.25em !important;
+}
+.vditor-ir pre.vditor-reset h3 {
+  font-size: 1.1em !important;
+}
 .vditor-toolbar {
   font-size: 12px !important;
   padding: 2px 4px !important;

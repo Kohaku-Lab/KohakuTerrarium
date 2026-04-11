@@ -21,7 +21,8 @@ import { computed, ref } from "vue";
 function _score(entry, query) {
   if (!query) return 1;
   const q = query.toLowerCase();
-  const hay = `${entry.label} ${entry.id} ${entry.keywords || ""}`.toLowerCase();
+  const hay =
+    `${entry.label} ${entry.id} ${entry.keywords || ""}`.toLowerCase();
   // Exact substring gets the best score.
   if (hay.includes(q)) return 10 - Math.max(0, hay.indexOf(q) / 20);
   // Character-subsequence fallback: every query char appears in order.

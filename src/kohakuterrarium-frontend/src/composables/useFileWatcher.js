@@ -83,20 +83,29 @@ export function useFileWatcher(agentIdRef) {
       retryTimer = null;
     }
     if (ws) {
-      try { ws.close(); } catch { /* ignore */ }
+      try {
+        ws.close();
+      } catch {
+        /* ignore */
+      }
       ws = null;
     }
     connected.value = false;
   }
 
   // Auto-connect when agentId changes.
-  watch(agentIdRef, (id) => {
-    if (id) connect(id);
-    else disconnect();
-  }, { immediate: true });
+  watch(
+    agentIdRef,
+    (id) => {
+      if (id) connect(id);
+      else disconnect();
+    },
+    { immediate: true },
+  );
 
   onMounted(() => {
-    const id = typeof agentIdRef === "function" ? agentIdRef() : agentIdRef?.value;
+    const id =
+      typeof agentIdRef === "function" ? agentIdRef() : agentIdRef?.value;
     if (id) connect(id);
   });
 

@@ -14,14 +14,19 @@
               @click="onOpenTab(c.name)"
             >
               <StatusDot :status="c.status" />
-              <span class="font-medium text-warm-700 dark:text-warm-300">{{ c.name }}</span>
+              <span class="font-medium text-warm-700 dark:text-warm-300">{{
+                c.name
+              }}</span>
               <span class="flex-1" />
               <span
                 class="text-[10px] px-1.5 py-0.5 rounded"
-                :class="c.status === 'running'
-                  ? 'bg-aquamarine/10 text-aquamarine'
-                  : 'bg-warm-100 dark:bg-warm-800 text-warm-400'"
-              >{{ c.status }}</span>
+                :class="
+                  c.status === 'running'
+                    ? 'bg-aquamarine/10 text-aquamarine'
+                    : 'bg-warm-100 dark:bg-warm-800 text-warm-400'
+                "
+                >{{ c.status }}</span
+              >
             </div>
           </div>
         </div>
@@ -38,17 +43,23 @@
             >
               <span
                 class="w-2 h-2 rounded-sm shrink-0"
-                :class="ch.type === 'broadcast' ? 'bg-taaffeite' : 'bg-aquamarine'"
+                :class="
+                  ch.type === 'broadcast' ? 'bg-taaffeite' : 'bg-aquamarine'
+                "
               />
-              <span class="font-medium text-warm-700 dark:text-warm-300">{{ ch.name }}</span>
+              <span class="font-medium text-warm-700 dark:text-warm-300">{{
+                ch.name
+              }}</span>
               <span class="flex-1" />
               <GemBadge
                 v-if="ch.message_count"
                 :gem="ch.type === 'broadcast' ? 'taaffeite' : 'aquamarine'"
-              >{{ ch.message_count }}</GemBadge>
+                >{{ ch.message_count }}</GemBadge
+              >
               <span
                 class="text-[10px] px-1.5 py-0.5 rounded bg-warm-100 dark:bg-warm-800 text-warm-400"
-              >{{ ch.type }}</span>
+                >{{ ch.type }}</span
+              >
             </div>
           </div>
         </div>
@@ -59,7 +70,9 @@
         <div class="rounded-lg border border-warm-200 dark:border-warm-700 p-4">
           <div class="flex items-center gap-2 mb-3">
             <StatusDot :status="instance?.status" />
-            <span class="font-semibold text-warm-700 dark:text-warm-300 text-sm">
+            <span
+              class="font-semibold text-warm-700 dark:text-warm-300 text-sm"
+            >
               {{ instance?.config_name }}
             </span>
           </div>
@@ -72,8 +85,10 @@
             </div>
             <div class="flex items-center gap-2">
               <span class="text-warm-400 w-12">Model</span>
-              <span class="text-warm-600 dark:text-warm-400 font-mono text-[11px]">
-                {{ chat.sessionInfo.model || 'default' }}
+              <span
+                class="text-warm-600 dark:text-warm-400 font-mono text-[11px]"
+              >
+                {{ chat.sessionInfo.model || "default" }}
               </span>
             </div>
           </div>
@@ -91,25 +106,31 @@
           <div class="flex items-center gap-2">
             <span class="text-warm-400 w-16">Agent</span>
             <span class="text-warm-600 dark:text-warm-400">
-              {{ chat.sessionInfo.agentName || instance?.config_name || '--' }}
+              {{ chat.sessionInfo.agentName || instance?.config_name || "--" }}
             </span>
           </div>
           <div class="flex items-center gap-2">
             <span class="text-warm-400 w-16">Model</span>
             <span class="text-iolite font-mono text-[11px]">
-              {{ chat.sessionInfo.model || instance?.model || '--' }}
+              {{ chat.sessionInfo.model || instance?.model || "--" }}
             </span>
           </div>
           <div class="flex items-center gap-2">
             <span class="text-warm-400 w-16">Provider</span>
             <span class="text-warm-600 dark:text-warm-400 text-[11px]">
-              {{ currentModelProfile?.login_provider || instance?.provider || '--' }}
+              {{
+                currentModelProfile?.login_provider ||
+                instance?.provider ||
+                "--"
+              }}
             </span>
           </div>
           <div class="flex items-center gap-2">
             <span class="text-warm-400 w-16">Session</span>
-            <span class="text-warm-600 dark:text-warm-400 font-mono text-[10px] truncate max-w-32">
-              {{ chat.sessionInfo.sessionId || instance?.session_id || '--' }}
+            <span
+              class="text-warm-600 dark:text-warm-400 font-mono text-[10px] truncate max-w-32"
+            >
+              {{ chat.sessionInfo.sessionId || instance?.session_id || "--" }}
             </span>
           </div>
         </div>
@@ -143,14 +164,30 @@
               <span class="text-warm-400">Context</span>
               <span
                 class="font-mono text-[10px]"
-                :class="contextPct >= 80 ? 'text-coral' : contextPct >= 60 ? 'text-amber' : 'text-warm-500'"
-              >{{ formatTokens(totalUsage.lastPrompt) }} / {{ formatTokens(maxContext) }} ({{ contextPct }}%)</span>
+                :class="
+                  contextPct >= 80
+                    ? 'text-coral'
+                    : contextPct >= 60
+                      ? 'text-amber'
+                      : 'text-warm-500'
+                "
+                >{{ formatTokens(totalUsage.lastPrompt) }} /
+                {{ formatTokens(maxContext) }} ({{ contextPct }}%)</span
+              >
             </div>
-            <div class="relative w-full h-1.5 rounded-full bg-warm-100 dark:bg-warm-800 overflow-hidden">
+            <div
+              class="relative w-full h-1.5 rounded-full bg-warm-100 dark:bg-warm-800 overflow-hidden"
+            >
               <!-- Usage fill -->
               <div
                 class="h-full rounded-full transition-all duration-300"
-                :class="contextPct >= 80 ? 'bg-coral' : contextPct >= 60 ? 'bg-amber' : 'bg-aquamarine'"
+                :class="
+                  contextPct >= 80
+                    ? 'bg-coral'
+                    : contextPct >= 60
+                      ? 'bg-amber'
+                      : 'bg-aquamarine'
+                "
                 :style="{ width: Math.min(contextPct, 100) + '%' }"
               />
               <!-- Compact threshold marker line -->
@@ -168,7 +205,10 @@
       <!-- Running jobs -->
       <div class="rounded-lg border border-warm-200 dark:border-warm-700 p-3">
         <div class="section-label">Running Jobs</div>
-        <div v-if="Object.keys(chat.runningJobs).length === 0" class="text-warm-400 py-2 text-center">
+        <div
+          v-if="Object.keys(chat.runningJobs).length === 0"
+          class="text-warm-400 py-2 text-center"
+        >
           No running jobs
         </div>
         <div v-else class="flex flex-col gap-1.5">
@@ -177,8 +217,12 @@
             :key="jobId"
             class="flex items-center gap-2 px-2 py-1.5 rounded-md bg-amber/10 group"
           >
-            <span class="w-1.5 h-1.5 rounded-full bg-amber kohaku-pulse shrink-0" />
-            <span class="font-mono text-[11px] text-amber-shadow dark:text-amber-light truncate">
+            <span
+              class="w-1.5 h-1.5 rounded-full bg-amber kohaku-pulse shrink-0"
+            />
+            <span
+              class="font-mono text-[11px] text-amber-shadow dark:text-amber-light truncate"
+            >
               {{ job.name }}
             </span>
             <span class="flex-1" />
@@ -188,6 +232,7 @@
             <button
               class="text-warm-400 hover:text-coral transition-colors opacity-0 group-hover:opacity-100"
               title="Stop task"
+              aria-label="Stop task"
               @click="stopTask(jobId, job.name)"
             >
               <span class="i-carbon-close text-[10px]" />
@@ -198,13 +243,10 @@
 
       <!-- Model switching is in the StatusBar at the bottom. -->
     </div>
-
   </div>
 </template>
 
 <script setup>
-import { Setting as SettingIcon } from "@element-plus/icons-vue";
-
 import StatusDot from "@/components/common/StatusDot.vue";
 import GemBadge from "@/components/common/GemBadge.vue";
 import { useChatStore } from "@/stores/chat";
@@ -247,7 +289,6 @@ watch(
   { immediate: true },
 );
 
-
 const totalUsage = computed(() => {
   let prompt = 0;
   let completion = 0;
@@ -258,13 +299,14 @@ const totalUsage = computed(() => {
     completion += usage.completion || 0;
     cached += usage.cached || 0;
     // Context = last call's prompt_tokens (not accumulated sum)
-    if ((usage.lastPrompt || 0) > lastPrompt) lastPrompt = usage.lastPrompt || 0;
+    if ((usage.lastPrompt || 0) > lastPrompt)
+      lastPrompt = usage.lastPrompt || 0;
   }
   return { prompt, completion, cached, lastPrompt };
 });
 
 const maxContext = computed(
-  () => chat.sessionInfo.maxContext || props.instance?.max_context || 0
+  () => chat.sessionInfo.maxContext || props.instance?.max_context || 0,
 );
 
 const contextPct = computed(() => {
@@ -273,16 +315,21 @@ const contextPct = computed(() => {
 });
 
 const compactThreshold = computed(
-  () => chat.sessionInfo.compactThreshold || props.instance?.compact_threshold || 0
+  () =>
+    chat.sessionInfo.compactThreshold || props.instance?.compact_threshold || 0,
 );
 
 const compactThresholdPct = computed(() => {
   if (!maxContext.value || !compactThreshold.value) return 0;
-  return Math.min(100, Math.round((compactThreshold.value / maxContext.value) * 100));
+  return Math.min(
+    100,
+    Math.round((compactThreshold.value / maxContext.value) * 100),
+  );
 });
 
 const currentModelProfile = computed(() => {
-  const modelName = selectedModel.value || chat.sessionInfo.model || instance?.model || "";
+  const modelName =
+    selectedModel.value || chat.sessionInfo.model || instance?.model || "";
   return availableModels.value.find((m) => m.name === modelName) || null;
 });
 
@@ -295,7 +342,8 @@ function formatTokens(n) {
 
 function formatElapsed(startedAt) {
   const elapsed = Math.floor((Date.now() - startedAt) / 1000);
-  if (elapsed >= 60) return Math.floor(elapsed / 60) + "m " + (elapsed % 60) + "s";
+  if (elapsed >= 60)
+    return Math.floor(elapsed / 60) + "m " + (elapsed % 60) + "s";
   return elapsed + "s";
 }
 
@@ -303,7 +351,11 @@ async function stopTask(jobId, jobName) {
   try {
     const tab = chat.activeTab;
     if (chat._instanceType === "terrarium") {
-      await terrariumAPI.stopCreatureTask(chat._instanceId, tab || "root", jobId);
+      await terrariumAPI.stopCreatureTask(
+        chat._instanceId,
+        tab || "root",
+        jobId,
+      );
     } else {
       await agentAPI.stopTask(chat._instanceId, jobId);
     }
@@ -333,13 +385,18 @@ async function handleModelSwitch(modelId) {
   try {
     if (props.instance.type === "terrarium") {
       const target = chat.activeTab || "root";
-      await terrariumAPI.switchCreatureModel(props.instance.id, target, modelId);
+      await terrariumAPI.switchCreatureModel(
+        props.instance.id,
+        target,
+        modelId,
+      );
     } else {
       await agentAPI.switchModel(props.instance.id, modelId);
     }
     // Backend sends session_info event via WS which updates chat.sessionInfo
   } catch (err) {
-    modelSwitchError.value = err.response?.data?.detail || "Failed to switch model";
+    modelSwitchError.value =
+      err.response?.data?.detail || "Failed to switch model";
     selectedModel.value = chat.sessionInfo.model || "";
   }
 }
@@ -371,7 +428,6 @@ function saveModelConfig() {
   configJsonError.value = "";
   try {
     const parsed = JSON.parse(configJson.value);
-    console.log("[StatusDashboard] Model config saved:", parsed);
     configDialogVisible.value = false;
   } catch (e) {
     configJsonError.value = "Invalid JSON: " + e.message;
@@ -394,8 +450,8 @@ function saveModelConfig() {
 /* Model config gear button - iolite accent */
 .model-config-btn {
   --el-button-hover-bg-color: rgba(90, 79, 207, 0.1);
-  --el-button-hover-border-color: #5A4FCF;
-  --el-button-hover-text-color: #5A4FCF;
+  --el-button-hover-border-color: #5a4fcf;
+  --el-button-hover-text-color: #5a4fcf;
   color: var(--color-text-muted);
 }
 
@@ -419,7 +475,8 @@ function saveModelConfig() {
 }
 
 :deep(.config-textarea .el-textarea__inner) {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-size: 12px;
   line-height: 1.5;
   resize: vertical;
@@ -427,9 +484,9 @@ function saveModelConfig() {
 
 /* Save button iolite accent */
 .save-btn {
-  --el-button-bg-color: #5A4FCF;
-  --el-button-border-color: #5A4FCF;
-  --el-button-hover-bg-color: #4A3FBF;
-  --el-button-hover-border-color: #4A3FBF;
+  --el-button-bg-color: #5a4fcf;
+  --el-button-border-color: #5a4fcf;
+  --el-button-hover-bg-color: #4a3fbf;
+  --el-button-hover-border-color: #4a3fbf;
 }
 </style>

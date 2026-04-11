@@ -13,9 +13,15 @@
       />
       <div
         class="shrink-0"
-        :class="expanded ? 'i-carbon-folder-open text-amber' : 'i-carbon-folder text-amber/70'"
+        :class="
+          expanded
+            ? 'i-carbon-folder-open text-amber'
+            : 'i-carbon-folder text-amber/70'
+        "
       />
-      <span class="truncate text-warm-600 dark:text-warm-300">{{ node.name }}</span>
+      <span class="truncate text-warm-600 dark:text-warm-300">{{
+        node.name
+      }}</span>
     </div>
 
     <!-- Directory children -->
@@ -33,9 +39,11 @@
     <div
       v-if="node.type === 'file'"
       class="flex items-center gap-1 px-2 py-1 cursor-pointer select-none transition-colors"
-      :class="isActive
-        ? 'bg-iolite/10 dark:bg-iolite/15 text-iolite dark:text-iolite-light'
-        : 'hover:bg-warm-100 dark:hover:bg-warm-800 text-warm-600 dark:text-warm-400'"
+      :class="
+        isActive
+          ? 'bg-iolite/10 dark:bg-iolite/15 text-iolite dark:text-iolite-light'
+          : 'hover:bg-warm-100 dark:hover:bg-warm-800 text-warm-600 dark:text-warm-400'
+      "
       :style="{ paddingLeft: depth * 14 + 22 + 'px' }"
       @click="$emit('select', node.path)"
     >

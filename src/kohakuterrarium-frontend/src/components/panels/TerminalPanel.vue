@@ -1,7 +1,17 @@
 <template>
-  <div class="h-full w-full flex flex-col overflow-hidden" :class="themeStore.dark ? 'bg-[#1a1a2e]' : 'bg-[#f7f5f2]'">
+  <div
+    class="h-full w-full flex flex-col overflow-hidden"
+    :class="themeStore.dark ? 'bg-[#1a1a2e]' : 'bg-[#f7f5f2]'"
+  >
     <!-- Header -->
-    <div class="flex items-center gap-2 px-2 h-6 border-b text-[10px] shrink-0" :class="themeStore.dark ? 'bg-warm-900 border-warm-800 text-warm-400' : 'bg-warm-100 border-warm-200 text-warm-500'">
+    <div
+      class="flex items-center gap-2 px-2 h-6 border-b text-[10px] shrink-0"
+      :class="
+        themeStore.dark
+          ? 'bg-warm-900 border-warm-800 text-warm-400'
+          : 'bg-warm-100 border-warm-200 text-warm-500'
+      "
+    >
       <span class="i-carbon-terminal text-[11px]" />
       <span>Terminal</span>
       <span
@@ -60,7 +70,9 @@ let fitAddon = null;
 let ws = null;
 let resizeObserver = null;
 
-const agentId = computed(() => props.instance?.id || instances.current?.id || null);
+const agentId = computed(
+  () => props.instance?.id || instances.current?.id || null,
+);
 
 function wsUrl(path) {
   if (typeof window === "undefined") return path;
@@ -76,11 +88,13 @@ function connect() {
     connected.value = true;
     // Send initial resize.
     if (term) {
-      ws.send(JSON.stringify({
-        type: "resize",
-        rows: term.rows,
-        cols: term.cols,
-      }));
+      ws.send(
+        JSON.stringify({
+          type: "resize",
+          rows: term.rows,
+          cols: term.cols,
+        }),
+      );
     }
   };
 
@@ -110,7 +124,11 @@ function connect() {
 
 function disconnect() {
   if (ws) {
-    try { ws.close(); } catch { /* ignore */ }
+    try {
+      ws.close();
+    } catch {
+      /* ignore */
+    }
     ws = null;
   }
   connected.value = false;
@@ -120,7 +138,8 @@ onMounted(async () => {
   term = new Terminal({
     cursorBlink: true,
     fontSize: 13,
-    fontFamily: "'Consolas NF', 'CaskaydiaCove NF', 'CaskaydiaCove Nerd Font', 'JetBrainsMono NF', 'FiraCode NF', 'Hack NF', 'JetBrains Mono', 'Fira Code', Consolas, monospace",
+    fontFamily:
+      "'Consolas NF', 'CaskaydiaCove NF', 'CaskaydiaCove Nerd Font', 'JetBrainsMono NF', 'FiraCode NF', 'Hack NF', 'JetBrains Mono', 'Fira Code', Consolas, monospace",
     theme: themeStore.dark ? DARK_THEME : LIGHT_THEME,
   });
 

@@ -1,13 +1,18 @@
 <template>
   <!-- Leaf node: render the panel -->
-  <div v-if="node.type === 'leaf'" class="layout-leaf h-full w-full overflow-hidden flex flex-col">
+  <div
+    v-if="node.type === 'leaf'"
+    class="layout-leaf h-full w-full overflow-hidden flex flex-col"
+  >
     <!-- Edit mode: panel label bar with replace/split/close -->
     <div
       v-if="layout.editMode"
       class="flex items-center gap-1 px-2 h-6 border-b border-amber/30 bg-amber/10 text-[10px] shrink-0"
     >
-      <span class="font-medium text-amber-shadow dark:text-amber-light truncate flex-1">
-        {{ panel?.label || node.panelId || 'empty' }}
+      <span
+        class="font-medium text-amber-shadow dark:text-amber-light truncate flex-1"
+      >
+        {{ panel?.label || node.panelId || "empty" }}
       </span>
       <button
         class="px-1 py-0.5 rounded text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800"
@@ -58,16 +63,13 @@
           </button>
         </template>
         <template v-else>
-          {{ node.panelId ? `no such panel: ${node.panelId}` : 'empty slot' }}
+          {{ node.panelId ? `no such panel: ${node.panelId}` : "empty slot" }}
         </template>
       </div>
     </div>
 
     <!-- Panel picker modal -->
-    <PanelPicker
-      v-model="pickerOpen"
-      @select="onPick"
-    />
+    <PanelPicker v-model="pickerOpen" @select="onPick" />
   </div>
 
   <!-- Split node: two children separated by a draggable handle -->
@@ -134,11 +136,14 @@ const injectedProps = inject("panelProps", null);
 const panelRuntimeProps = computed(() => {
   if (props.node.type !== "leaf") return {};
   const panelId = props.node.panelId;
-  const map = props.panelPropsMap
-    || (injectedProps && typeof injectedProps === "object" && "value" in injectedProps
+  const map =
+    props.panelPropsMap ||
+    (injectedProps &&
+    typeof injectedProps === "object" &&
+    "value" in injectedProps
       ? injectedProps.value
-      : injectedProps)
-    || {};
+      : injectedProps) ||
+    {};
   return map[panelId] || {};
 });
 
@@ -153,8 +158,8 @@ const firstStyle = computed(() =>
 
 const secondStyle = computed(() =>
   props.node.direction === "horizontal"
-    ? { width: (100 - ratio.value) + "%", height: "100%" }
-    : { height: (100 - ratio.value) + "%", width: "100%" },
+    ? { width: 100 - ratio.value + "%", height: "100%" }
+    : { height: 100 - ratio.value + "%", width: "100%" },
 );
 
 const handleClass = computed(() =>
@@ -174,9 +179,10 @@ function onPointerDown(e) {
   const onMove = (ev) => {
     if (!dragging.value || !containerEl.value) return;
     const rect = containerEl.value.getBoundingClientRect();
-    const pct = props.node.direction === "horizontal"
-      ? ((ev.clientX - rect.left) / rect.width) * 100
-      : ((ev.clientY - rect.top) / rect.height) * 100;
+    const pct =
+      props.node.direction === "horizontal"
+        ? ((ev.clientX - rect.left) / rect.width) * 100
+        : ((ev.clientY - rect.top) / rect.height) * 100;
     layout.setTreeRatio(props.node, pct);
   };
 

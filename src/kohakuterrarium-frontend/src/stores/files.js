@@ -55,7 +55,8 @@ export const useFilesStore = defineStore("files", () => {
           let action = null;
           if (READ_TOOLS.has(tc.name)) action = "read";
           else if (WRITE_TOOLS.has(tc.name)) action = "wrote";
-          else if (EXEC_TOOLS.has(tc.name) && String(path).includes("/")) action = "exec";
+          else if (EXEC_TOOLS.has(tc.name) && String(path).includes("/"))
+            action = "exec";
           if (!action) continue;
           if (tc.status === "error" || tc.error) action = "errored";
           entries.push({

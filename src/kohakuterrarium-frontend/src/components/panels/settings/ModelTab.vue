@@ -4,7 +4,7 @@
       <div class="text-[10px] text-warm-400 uppercase tracking-wider mb-1">
         Current model
       </div>
-      <div class="text-base font-mono text-iolite">{{ current || '—' }}</div>
+      <div class="text-base font-mono text-iolite">{{ current || "—" }}</div>
     </div>
 
     <div class="mb-4">
@@ -18,7 +18,7 @@
       <div class="flex items-center gap-2">
         <span class="text-warm-400 w-24">Provider</span>
         <span class="text-warm-700 dark:text-warm-300">
-          {{ profile.login_provider || profile.provider || '—' }}
+          {{ profile.login_provider || profile.provider || "—" }}
         </span>
       </div>
       <div class="flex items-center gap-2">
@@ -60,8 +60,9 @@ async function loadProfile() {
   try {
     const models = await configAPI.getModels();
     profile.value =
-      (Array.isArray(models) ? models : []).find((m) => m.name === current.value) ||
-      null;
+      (Array.isArray(models) ? models : []).find(
+        (m) => m.name === current.value,
+      ) || null;
   } catch {
     profile.value = null;
   }

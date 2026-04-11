@@ -27,7 +27,8 @@ const INSTANCE_OVERRIDE_PREFIX = "kt.layout.instance.";
 /** Safe JSON.parse with fallback. */
 function _readJson(key, fallback) {
   try {
-    const raw = typeof localStorage !== "undefined" ? localStorage.getItem(key) : null;
+    const raw =
+      typeof localStorage !== "undefined" ? localStorage.getItem(key) : null;
     if (raw == null) return fallback;
     return JSON.parse(raw);
   } catch {
@@ -527,7 +528,11 @@ export const useLayoutStore = defineStore("layout", () => {
   /** Attach a detached-window descriptor (Phase 11 will consume this). */
   function markDetached(panelId, instanceId) {
     const entry = { panelId, instanceId };
-    if (detachedPanels.value.some((d) => d.panelId === panelId && d.instanceId === instanceId)) {
+    if (
+      detachedPanels.value.some(
+        (d) => d.panelId === panelId && d.instanceId === instanceId,
+      )
+    ) {
       return;
     }
     detachedPanels.value = [...detachedPanels.value, entry];

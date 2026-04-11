@@ -18,11 +18,7 @@
     </span>
 
     <!-- Kebab menu, edit mode only -->
-    <el-dropdown
-      v-if="layout.editMode"
-      trigger="click"
-      @command="onCommand"
-    >
+    <el-dropdown v-if="layout.editMode" trigger="click" @command="onCommand">
       <button
         class="w-5 h-5 flex items-center justify-center rounded hover:bg-warm-200 dark:hover:bg-warm-800 text-warm-500"
         title="Panel menu"
@@ -32,16 +28,19 @@
       <template #dropdown>
         <el-dropdown-menu>
           <el-dropdown-item command="replace">
-            <div class="i-carbon-switcher mr-1" /> Replace…
+            <div class="i-carbon-switcher mr-1" />
+            Replace…
           </el-dropdown-item>
           <el-dropdown-item command="close" divided>
-            <div class="i-carbon-close mr-1" /> Close
+            <div class="i-carbon-close mr-1" />
+            Close
           </el-dropdown-item>
           <el-dropdown-item
             command="pop-out"
             :disabled="!panel?.supportsDetach"
           >
-            <div class="i-carbon-launch mr-1" /> Pop out
+            <div class="i-carbon-launch mr-1" />
+            Pop out
           </el-dropdown-item>
         </el-dropdown-menu>
       </template>

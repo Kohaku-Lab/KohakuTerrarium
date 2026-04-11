@@ -16,7 +16,10 @@
           >
             No configs installed.
           </div>
-          <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div
+            v-else
+            class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+          >
             <ConfigCard
               v-for="cfg in localConfigs"
               :key="cfg.name"
@@ -37,7 +40,10 @@
           >
             No remote configs available.
           </div>
-          <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div
+            v-else
+            class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+          >
             <ConfigCard
               v-for="repo in remoteRepos"
               :key="repo.url || repo.name"
@@ -66,7 +72,9 @@ const remoteRepos = ref([]);
 const loadingLocal = ref(false);
 const loadingRemote = ref(false);
 const installingSet = ref(new Set());
-const localNames = computed(() => new Set(localConfigs.value.map((c) => c.name)));
+const localNames = computed(
+  () => new Set(localConfigs.value.map((c) => c.name)),
+);
 
 function isInstalled(name) {
   return localNames.value.has(name);
@@ -104,7 +112,9 @@ async function handleInstall(repo) {
     ElMessage.success(`Installed ${repo.name}`);
     await fetchLocal();
   } catch (err) {
-    ElMessage.error(`Install failed: ${err.response?.data?.detail || err.message}`);
+    ElMessage.error(
+      `Install failed: ${err.response?.data?.detail || err.message}`,
+    );
   } finally {
     const cleared = new Set(installingSet.value);
     cleared.delete(repo.url);
@@ -118,7 +128,9 @@ async function handleUninstall(cfg) {
     ElMessage.success(`Uninstalled ${cfg.name}`);
     await fetchLocal();
   } catch (err) {
-    ElMessage.error(`Uninstall failed: ${err.response?.data?.detail || err.message}`);
+    ElMessage.error(
+      `Uninstall failed: ${err.response?.data?.detail || err.message}`,
+    );
   }
 }
 

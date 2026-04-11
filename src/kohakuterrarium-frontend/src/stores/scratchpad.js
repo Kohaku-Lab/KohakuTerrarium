@@ -9,7 +9,9 @@ import { ref } from "vue";
 import { agentAPI } from "@/utils/api";
 
 export const useScratchpadStore = defineStore("scratchpad", () => {
-  const byAgent = ref(/** @type {Record<string, Record<string, string>>} */ ({}));
+  const byAgent = ref(
+    /** @type {Record<string, Record<string, string>>} */ ({}),
+  );
   const loading = ref(/** @type {Record<string, boolean>} */ ({}));
   const error = ref(/** @type {Record<string, string>} */ ({}));
 

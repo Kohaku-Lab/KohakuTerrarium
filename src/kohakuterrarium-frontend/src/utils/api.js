@@ -105,9 +105,7 @@ export const terrariumAPI = {
   },
 
   async listCreatureJobs(id, name) {
-    const { data } = await api.get(
-      `/terrariums/${id}/creatures/${name}/jobs`,
-    );
+    const { data } = await api.get(`/terrariums/${id}/creatures/${name}/jobs`);
     return data;
   },
 
@@ -210,7 +208,9 @@ export const agentAPI = {
 
   /** Toggle a plugin's enabled state */
   async togglePlugin(id, pluginName) {
-    const { data } = await api.post(`/agents/${id}/plugins/${pluginName}/toggle`);
+    const { data } = await api.post(
+      `/agents/${id}/plugins/${pluginName}/toggle`,
+    );
     return data;
   },
 
@@ -222,10 +222,9 @@ export const agentAPI = {
 
   /** Edit a user message at a given index and re-run */
   async editMessage(id, msgIdx, content) {
-    const { data } = await api.post(
-      `/agents/${id}/messages/${msgIdx}/edit`,
-      { content },
-    );
+    const { data } = await api.post(`/agents/${id}/messages/${msgIdx}/edit`, {
+      content,
+    });
     return data;
   },
 
@@ -323,7 +322,10 @@ export const sessionAPI = {
    * @param {string} sessionName
    * @param {{q: string, mode?: string, k?: number, agent?: string}} opts
    */
-  async searchMemory(sessionName, { q, mode = "auto", k = 10, agent = null } = {}) {
+  async searchMemory(
+    sessionName,
+    { q, mode = "auto", k = 10, agent = null } = {},
+  ) {
     const params = { q, mode, k };
     if (agent) params.agent = agent;
     const { data } = await api.get(`/sessions/${sessionName}/memory/search`, {

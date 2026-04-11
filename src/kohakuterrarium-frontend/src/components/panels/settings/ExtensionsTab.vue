@@ -1,21 +1,12 @@
 <template>
   <div class="p-4 text-xs">
-    <div
-      v-if="loading"
-      class="text-warm-400 text-center py-6"
-    >
+    <div v-if="loading" class="text-warm-400 text-center py-6">
       Loading extensions...
     </div>
-    <div
-      v-else-if="error"
-      class="text-coral py-2"
-    >
+    <div v-else-if="error" class="text-coral py-2">
       {{ error }}
     </div>
-    <div
-      v-else-if="items.length === 0"
-      class="text-warm-400 text-center py-6"
-    >
+    <div v-else-if="items.length === 0" class="text-warm-400 text-center py-6">
       No packages installed.
     </div>
     <div v-else class="flex flex-col gap-1">
@@ -25,14 +16,13 @@
         class="rounded border border-warm-200 dark:border-warm-700 px-3 py-2"
       >
         <div class="flex items-center gap-2">
-          <div
-            :class="typeIcon(p.type)"
-            class="text-[13px] text-warm-500"
-          />
-          <span class="font-medium text-warm-700 dark:text-warm-300">{{ p.name }}</span>
+          <div :class="typeIcon(p.type)" class="text-[13px] text-warm-500" />
+          <span class="font-medium text-warm-700 dark:text-warm-300">{{
+            p.name
+          }}</span>
           <span class="flex-1" />
           <span class="text-[10px] font-mono text-warm-400">
-            {{ p.version || 'local' }}
+            {{ p.version || "local" }}
           </span>
         </div>
         <div
@@ -41,10 +31,7 @@
         >
           {{ p.origin || p.path }}
         </div>
-        <div
-          v-if="p.description"
-          class="text-[10px] text-warm-500 mt-0.5"
-        >
+        <div v-if="p.description" class="text-[10px] text-warm-500 mt-0.5">
           {{ p.description }}
         </div>
       </div>
@@ -62,12 +49,14 @@ const loading = ref(false);
 const error = ref("");
 
 function typeIcon(t) {
-  return {
-    creature: "i-carbon-bot",
-    terrarium: "i-carbon-network-4",
-    tool: "i-carbon-tools",
-    plugin: "i-carbon-plug",
-  }[t] || "i-carbon-cube";
+  return (
+    {
+      creature: "i-carbon-bot",
+      terrarium: "i-carbon-network-4",
+      tool: "i-carbon-tools",
+      plugin: "i-carbon-plug",
+    }[t] || "i-carbon-cube"
+  );
 }
 
 async function load() {

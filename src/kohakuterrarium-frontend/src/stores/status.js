@@ -53,11 +53,16 @@ export const useStatusStore = defineStore("status", {
         }
       } else if (at === "token_usage") {
         this.tokenUsage = {
-          promptTokens: this.tokenUsage.promptTokens + (data.prompt_tokens || 0),
-          completionTokens: this.tokenUsage.completionTokens + (data.completion_tokens || 0),
-          cachedTokens: this.tokenUsage.cachedTokens + (data.cached_tokens || 0),
-          contextPercent: data.context_percent ?? this.tokenUsage.contextPercent,
-          compactThreshold: data.compact_threshold ?? this.tokenUsage.compactThreshold,
+          promptTokens:
+            this.tokenUsage.promptTokens + (data.prompt_tokens || 0),
+          completionTokens:
+            this.tokenUsage.completionTokens + (data.completion_tokens || 0),
+          cachedTokens:
+            this.tokenUsage.cachedTokens + (data.cached_tokens || 0),
+          contextPercent:
+            data.context_percent ?? this.tokenUsage.contextPercent,
+          compactThreshold:
+            data.compact_threshold ?? this.tokenUsage.compactThreshold,
         };
       } else if (at === "tool_start") {
         const jobId = data.job_id || `job_${Date.now()}`;
@@ -131,8 +136,19 @@ export const useStatusStore = defineStore("status", {
     /** Reset all status state (e.g. when switching instances) */
     reset() {
       this._clearElapsedTimer();
-      this.sessionInfo = { agentName: "", sessionId: "", model: "", startTime: null };
-      this.tokenUsage = { promptTokens: 0, completionTokens: 0, cachedTokens: 0, contextPercent: 0, compactThreshold: 0 };
+      this.sessionInfo = {
+        agentName: "",
+        sessionId: "",
+        model: "",
+        startTime: null,
+      };
+      this.tokenUsage = {
+        promptTokens: 0,
+        completionTokens: 0,
+        cachedTokens: 0,
+        contextPercent: 0,
+        compactThreshold: 0,
+      };
       this.runningJobs = [];
       this.scratchpad = {};
     },

@@ -1,15 +1,14 @@
 <template>
-  <div class="fixed bottom-4 right-4 flex flex-col gap-2 z-[9999] pointer-events-none">
+  <div
+    class="fixed bottom-4 right-4 flex flex-col gap-2 z-[9999] pointer-events-none"
+  >
     <div
       v-for="t in notifications.toasts.slice(-6)"
       :key="t.id"
       class="min-w-64 max-w-96 rounded-lg border px-3 py-2 text-xs shadow-lg backdrop-blur bg-white/95 dark:bg-warm-900/95 pointer-events-auto flex items-start gap-2"
       :class="levelBorder(t.level)"
     >
-      <div
-        :class="levelIcon(t.level)"
-        class="text-base shrink-0 mt-0.5"
-      />
+      <div :class="levelIcon(t.level)" class="text-base shrink-0 mt-0.5" />
       <div class="flex-1 min-w-0">
         <div
           v-if="t.title"
@@ -41,20 +40,24 @@ import { useNotificationsStore } from "@/stores/notifications";
 const notifications = useNotificationsStore();
 
 function levelBorder(l) {
-  return {
-    info: "border-iolite/30",
-    ok: "border-aquamarine/30",
-    warn: "border-amber/40",
-    error: "border-coral/40",
-  }[l] || "border-warm-200 dark:border-warm-700";
+  return (
+    {
+      info: "border-iolite/30",
+      ok: "border-aquamarine/30",
+      warn: "border-amber/40",
+      error: "border-coral/40",
+    }[l] || "border-warm-200 dark:border-warm-700"
+  );
 }
 
 function levelIcon(l) {
-  return {
-    info: "i-carbon-information text-iolite",
-    ok: "i-carbon-checkmark text-aquamarine",
-    warn: "i-carbon-warning-alt text-amber",
-    error: "i-carbon-error text-coral",
-  }[l] || "i-carbon-information text-warm-400";
+  return (
+    {
+      info: "i-carbon-information text-iolite",
+      ok: "i-carbon-checkmark text-aquamarine",
+      warn: "i-carbon-warning-alt text-amber",
+      error: "i-carbon-error text-coral",
+    }[l] || "i-carbon-information text-warm-400"
+  );
 }
 </script>

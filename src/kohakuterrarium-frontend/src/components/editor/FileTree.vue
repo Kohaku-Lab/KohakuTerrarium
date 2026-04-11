@@ -15,9 +15,7 @@
       <div v-else-if="loading" class="px-3 py-4 text-warm-400 text-center">
         Loading...
       </div>
-      <div v-else class="px-3 py-4 text-warm-400 text-center">
-        No files
-      </div>
+      <div v-else class="px-3 py-4 text-warm-400 text-center">No files</div>
     </div>
   </div>
 </template>

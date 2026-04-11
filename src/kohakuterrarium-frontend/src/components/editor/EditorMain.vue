@@ -9,9 +9,11 @@
         v-for="filePath in editor.openFilePaths"
         :key="filePath"
         class="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] cursor-pointer select-none transition-colors max-w-40 shrink-0"
-        :class="editor.activeFilePath === filePath
-          ? 'bg-iolite/10 dark:bg-iolite/15 text-iolite dark:text-iolite-light'
-          : 'text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-700'"
+        :class="
+          editor.activeFilePath === filePath
+            ? 'bg-iolite/10 dark:bg-iolite/15 text-iolite dark:text-iolite-light'
+            : 'text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-700'
+        "
         @click="editor.activeFilePath = filePath"
       >
         <span
@@ -33,14 +35,21 @@
       <button
         v-if="isMarkdown"
         class="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] transition-colors shrink-0"
-        :class="useVditor
-          ? 'bg-iolite/15 text-iolite'
-          : 'text-warm-400 hover:text-warm-600 dark:hover:text-warm-300'"
-        :title="useVditor ? 'Switch to code editor' : 'Switch to rich markdown editor'"
+        :class="
+          useVditor
+            ? 'bg-iolite/15 text-iolite'
+            : 'text-warm-400 hover:text-warm-600 dark:hover:text-warm-300'
+        "
+        :title="
+          useVditor ? 'Switch to code editor' : 'Switch to rich markdown editor'
+        "
         @click="useVditor = !useVditor"
       >
-        <span :class="useVditor ? 'i-carbon-document' : 'i-carbon-code'" class="text-[11px]" />
-        <span>{{ useVditor ? 'Rich' : 'Code' }}</span>
+        <span
+          :class="useVditor ? 'i-carbon-document' : 'i-carbon-code'"
+          class="text-[11px]"
+        />
+        <span>{{ useVditor ? "Rich" : "Code" }}</span>
       </button>
     </div>
 

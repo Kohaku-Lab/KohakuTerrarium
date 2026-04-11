@@ -19,7 +19,9 @@ function _wsUrl(path) {
 }
 
 export function useLogStream() {
-  const lines = ref(/** @type {Array<{ts: string, level: string, module: string, text: string}>} */ ([]));
+  const lines = ref(
+    /** @type {Array<{ts: string, level: string, module: string, text: string}>} */ ([]),
+  );
   const meta = ref(/** @type {{path: string, pid: number} | null} */ (null));
   const connected = ref(false);
   const error = ref("");

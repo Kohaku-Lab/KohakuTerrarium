@@ -1,6 +1,9 @@
 <template>
   <div v-if="instance" class="h-full overflow-hidden">
-    <WorkspaceShell :instance-id="route.params.id" @stop="showStopConfirm = true" />
+    <WorkspaceShell
+      :instance-id="route.params.id"
+      @stop="showStopConfirm = true"
+    />
 
     <!-- Stop confirmation dialog (triggered from the status bar or nav) -->
     <el-dialog
@@ -10,17 +13,20 @@
       :close-on-click-modal="true"
     >
       <p class="text-warm-600 dark:text-warm-300">
-        Stop <strong>{{ instance.config_name }}</strong>?
-        This will terminate the {{ instance.type }} and all its processes.
+        Stop <strong>{{ instance.config_name }}</strong
+        >? This will terminate the {{ instance.type }} and all its processes.
       </p>
       <template #footer>
-        <el-button size="small" @click="showStopConfirm = false">Cancel</el-button>
+        <el-button size="small" @click="showStopConfirm = false"
+          >Cancel</el-button
+        >
         <el-button
           size="small"
           type="danger"
           :loading="stopping"
           @click="confirmStop"
-        >Stop</el-button>
+          >Stop</el-button
+        >
       </template>
     </el-dialog>
   </div>
@@ -75,10 +81,13 @@ onMounted(async () => {
   applyPresetForInstance();
 });
 
-watch(() => route.params.id, async () => {
-  await loadInstance();
-  applyPresetForInstance();
-});
+watch(
+  () => route.params.id,
+  async () => {
+    await loadInstance();
+    applyPresetForInstance();
+  },
+);
 
 async function loadInstance() {
   const id = route.params.id;

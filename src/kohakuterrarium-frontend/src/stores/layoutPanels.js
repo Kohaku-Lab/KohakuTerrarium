@@ -29,11 +29,21 @@ function leaf(panelId) {
 }
 
 function hsplit(ratio, left, right) {
-  return { type: "split", direction: "horizontal", ratio, children: [left, right] };
+  return {
+    type: "split",
+    direction: "horizontal",
+    ratio,
+    children: [left, right],
+  };
 }
 
 function vsplit(ratio, top, bottom) {
-  return { type: "split", direction: "vertical", ratio, children: [top, bottom] };
+  return {
+    type: "split",
+    direction: "vertical",
+    ratio,
+    children: [top, bottom],
+  };
 }
 
 // ─── Presets ─────────────────────────────────────────────────────
@@ -44,7 +54,8 @@ const CHAT_FOCUS_PRESET = {
   id: "chat-focus",
   label: "Chat Focus",
   shortcut: "Ctrl+1",
-  tree: hsplit(70,
+  tree: hsplit(
+    70,
     leaf("chat"),
     vsplit(65, leaf("status-dashboard"), leaf("state")),
   ),
@@ -55,9 +66,11 @@ const WORKSPACE_PRESET = {
   id: "workspace",
   label: "Workspace",
   shortcut: "Ctrl+2",
-  tree: hsplit(20,
+  tree: hsplit(
+    20,
     leaf("files"),
-    hsplit(62,
+    hsplit(
+      62,
       vsplit(70, leaf("monaco-editor"), leaf("terminal")),
       vsplit(65, leaf("chat"), leaf("activity")),
     ),
@@ -69,12 +82,10 @@ const MULTI_CREATURE_PRESET = {
   id: "multi-creature",
   label: "Multi-creature",
   shortcut: "Ctrl+3",
-  tree: hsplit(18,
+  tree: hsplit(
+    18,
     leaf("creatures"),
-    hsplit(66,
-      leaf("chat"),
-      vsplit(50, leaf("activity"), leaf("state")),
-    ),
+    hsplit(66, leaf("chat"), vsplit(50, leaf("activity"), leaf("state"))),
   ),
 };
 
@@ -83,10 +94,7 @@ const CANVAS_PRESET = {
   id: "canvas",
   label: "Canvas",
   shortcut: "Ctrl+4",
-  tree: hsplit(45,
-    leaf("chat"),
-    vsplit(70, leaf("canvas"), leaf("activity")),
-  ),
+  tree: hsplit(45, leaf("chat"), vsplit(70, leaf("canvas"), leaf("activity"))),
 };
 
 /** Debug — chat + state + debug drawer. */
@@ -94,10 +102,7 @@ const DEBUG_PRESET = {
   id: "debug",
   label: "Debug",
   shortcut: "Ctrl+5",
-  tree: vsplit(55,
-    hsplit(60, leaf("chat"), leaf("state")),
-    leaf("debug"),
-  ),
+  tree: vsplit(55, hsplit(60, leaf("chat"), leaf("state")), leaf("debug")),
 };
 
 /** Settings — escape hatch. */
@@ -119,9 +124,11 @@ const LEGACY_INSTANCE_PRESET = {
 const LEGACY_EDITOR_PRESET = {
   id: "legacy-editor",
   label: "Legacy Editor",
-  tree: hsplit(20,
+  tree: hsplit(
+    20,
     leaf("file-tree"),
-    hsplit(60,
+    hsplit(
+      60,
       leaf("monaco-editor"),
       vsplit(70, leaf("chat"), leaf("editor-status")),
     ),
@@ -144,19 +151,55 @@ export function registerBuiltinPanels() {
 
   // ── Panels ──
   layout.registerPanel({ id: "chat", label: "Chat", component: ChatPanel });
-  layout.registerPanel({ id: "status-dashboard", label: "Status", component: StatusDashboard });
-  layout.registerPanel({ id: "file-tree", label: "File Tree", component: FileTree });
-  layout.registerPanel({ id: "monaco-editor", label: "Editor", component: EditorMain });
+  layout.registerPanel({
+    id: "status-dashboard",
+    label: "Status",
+    component: StatusDashboard,
+  });
+  layout.registerPanel({
+    id: "file-tree",
+    label: "File Tree",
+    component: FileTree,
+  });
+  layout.registerPanel({
+    id: "monaco-editor",
+    label: "Editor",
+    component: EditorMain,
+  });
   // Legacy alias — legacy-editor preset references this id.
-  layout.registerPanel({ id: "editor-status", label: "Activity", component: EditorStatus });
+  layout.registerPanel({
+    id: "editor-status",
+    label: "Activity",
+    component: EditorStatus,
+  });
   layout.registerPanel({ id: "files", label: "Files", component: FilesPanel });
-  layout.registerPanel({ id: "activity", label: "Activity", component: EditorStatus });
+  layout.registerPanel({
+    id: "activity",
+    label: "Activity",
+    component: EditorStatus,
+  });
   layout.registerPanel({ id: "state", label: "State", component: StatePanel });
-  layout.registerPanel({ id: "creatures", label: "Creatures", component: CreaturesPanel });
-  layout.registerPanel({ id: "canvas", label: "Canvas", component: CanvasPanel });
-  layout.registerPanel({ id: "settings", label: "Settings", component: SettingsPanel });
+  layout.registerPanel({
+    id: "creatures",
+    label: "Creatures",
+    component: CreaturesPanel,
+  });
+  layout.registerPanel({
+    id: "canvas",
+    label: "Canvas",
+    component: CanvasPanel,
+  });
+  layout.registerPanel({
+    id: "settings",
+    label: "Settings",
+    component: SettingsPanel,
+  });
   layout.registerPanel({ id: "debug", label: "Debug", component: DebugPanel });
-  layout.registerPanel({ id: "terminal", label: "Terminal", component: TerminalPanel });
+  layout.registerPanel({
+    id: "terminal",
+    label: "Terminal",
+    component: TerminalPanel,
+  });
 
   // ── Presets ──
   layout.registerBuiltinPreset(LEGACY_INSTANCE_PRESET);

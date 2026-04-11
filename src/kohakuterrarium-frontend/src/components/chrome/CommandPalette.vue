@@ -18,7 +18,9 @@
           placeholder="Type a command…  (> @ # /)"
           @keydown="onKey"
         />
-        <span class="text-[10px] text-warm-400 uppercase tracking-wider font-mono">
+        <span
+          class="text-[10px] text-warm-400 uppercase tracking-wider font-mono"
+        >
           {{ palette.parsed.prefix }}
         </span>
       </div>
@@ -29,17 +31,15 @@
         v-for="(r, idx) in results"
         :key="r.id"
         class="flex items-center gap-3 w-full px-3 py-2 text-left rounded transition-colors"
-        :class="idx === highlighted
-          ? 'bg-iolite/10 text-iolite'
-          : 'text-warm-600 dark:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800'"
+        :class="
+          idx === highlighted
+            ? 'bg-iolite/10 text-iolite'
+            : 'text-warm-600 dark:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800'
+        "
         @click="commit(r)"
         @mouseenter="highlighted = idx"
       >
-        <div
-          v-if="r.icon"
-          :class="r.icon"
-          class="text-[14px] shrink-0"
-        />
+        <div v-if="r.icon" :class="r.icon" class="text-[14px] shrink-0" />
         <div class="flex-1 min-w-0">
           <div class="font-medium truncate">{{ r.label }}</div>
           <div v-if="r.description" class="text-[9px] text-warm-400 truncate">
@@ -49,7 +49,8 @@
         <span
           v-if="r.shortcut"
           class="text-[9px] font-mono text-warm-400 shrink-0"
-        >{{ r.shortcut }}</span>
+          >{{ r.shortcut }}</span
+        >
       </button>
       <div
         v-if="results.length === 0"
@@ -65,10 +66,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 
 import { usePaletteStore } from "@/stores/palette";
-import {
-  LAYOUT_EVENTS,
-  onLayoutEvent,
-} from "@/utils/layoutEvents";
+import { LAYOUT_EVENTS, onLayoutEvent } from "@/utils/layoutEvents";
 
 const palette = usePaletteStore();
 

@@ -59,8 +59,16 @@ describe("layout store — panel registry", () => {
 
   it("registerPanel is idempotent (replaces existing)", () => {
     const store = useLayoutStore();
-    store.registerPanel({ id: "chat", label: "v1", component: fakeComponent("A") });
-    store.registerPanel({ id: "chat", label: "v2", component: fakeComponent("B") });
+    store.registerPanel({
+      id: "chat",
+      label: "v1",
+      component: fakeComponent("A"),
+    });
+    store.registerPanel({
+      id: "chat",
+      label: "v2",
+      component: fakeComponent("B"),
+    });
     expect(store.getPanel("chat").label).toBe("v2");
   });
 });
@@ -256,13 +264,13 @@ describe("layout store — edit mode", () => {
     const store = setupWithActive();
     store.enterEditMode();
     store.replaceSlotPanel("main", "chat", "status-dashboard");
-    expect(store.activePreset.slots.find((s) => s.zoneId === "main").panelId).toBe(
-      "status-dashboard",
-    );
+    expect(
+      store.activePreset.slots.find((s) => s.zoneId === "main").panelId,
+    ).toBe("status-dashboard");
     store.revertEditMode();
-    expect(store.activePreset.slots.find((s) => s.zoneId === "main").panelId).toBe(
-      "chat",
-    );
+    expect(
+      store.activePreset.slots.find((s) => s.zoneId === "main").panelId,
+    ).toBe("chat");
     expect(store.editModeDirty).toBe(false);
   });
 });

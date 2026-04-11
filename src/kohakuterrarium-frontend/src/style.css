@@ -4,26 +4,28 @@
   /* Font families */
   --font-sans: "Inter", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
-  --font-terminal: "Consolas NF", "CaskaydiaCove NF", "JetBrainsMono NF", "FiraCode NF", "Hack NF", "JetBrains Mono", "Fira Code", "Consolas", monospace;
+  --font-terminal:
+    "Consolas NF", "CaskaydiaCove NF", "JetBrainsMono NF", "FiraCode NF",
+    "Hack NF", "JetBrains Mono", "Fira Code", "Consolas", monospace;
 
   /* Light mode surfaces */
-  --color-bg: #F7F5F2;
-  --color-surface: #FFFFFF;
-  --color-surface-alt: #EFECE7;
-  --color-border: #E0DBD4;
-  --color-text: #3A3632;
-  --color-text-muted: #8A8480;
-  --color-text-faint: #B5B0AA;
+  --color-bg: #f7f5f2;
+  --color-surface: #ffffff;
+  --color-surface-alt: #efece7;
+  --color-border: #e0dbd4;
+  --color-text: #3a3632;
+  --color-text-muted: #8a8480;
+  --color-text-faint: #b5b0aa;
 }
 
 html.dark {
-  --color-bg: #1A1816;
+  --color-bg: #1a1816;
   --color-surface: #252220;
-  --color-surface-alt: #1E1C1A;
-  --color-border: #3D3835;
-  --color-text: #E8E0D8;
-  --color-text-muted: #8A8078;
-  --color-text-faint: #5A5550;
+  --color-surface-alt: #1e1c1a;
+  --color-border: #3d3835;
+  --color-text: #e8e0d8;
+  --color-text-muted: #8a8078;
+  --color-text-faint: #5a5550;
 }
 
 * {
@@ -62,7 +64,9 @@ body {
   min-height: 100vh;
 }
 
-code, pre, .font-mono {
+code,
+pre,
+.font-mono {
   font-family: var(--font-mono);
 }
 
@@ -87,12 +91,12 @@ code, pre, .font-mono {
 
 /* Element Plus — warm theme overrides for both modes */
 :root {
-  --el-color-primary: #5A4FCF;
-  --el-color-primary-light-3: #8B83DB;
-  --el-color-primary-light-5: #ADA8E7;
-  --el-color-primary-light-7: #CEC9F0;
-  --el-color-primary-light-9: #EEEDFA;
-  --el-color-primary-dark-2: #4840A6;
+  --el-color-primary: #5a4fcf;
+  --el-color-primary-light-3: #8b83db;
+  --el-color-primary-light-5: #ada8e7;
+  --el-color-primary-light-7: #cec9f0;
+  --el-color-primary-light-9: #eeedfa;
+  --el-color-primary-dark-2: #4840a6;
   --el-bg-color: var(--color-surface);
   --el-bg-color-overlay: var(--color-surface);
   --el-bg-color-page: var(--color-bg);
@@ -113,18 +117,18 @@ code, pre, .font-mono {
 html.dark {
   --el-bg-color: #252220;
   --el-bg-color-overlay: #252220;
-  --el-bg-color-page: #1A1816;
+  --el-bg-color-page: #1a1816;
   --el-fill-color-blank: #252220;
-  --el-fill-color: #1E1C1A;
-  --el-fill-color-light: #1E1C1A;
-  --el-fill-color-lighter: #1A1816;
-  --el-border-color: #3D3835;
-  --el-border-color-light: #3D3835;
-  --el-border-color-lighter: #3D3835;
-  --el-text-color-primary: #E8E0D8;
-  --el-text-color-regular: #E8E0D8;
-  --el-text-color-secondary: #8A8078;
-  --el-text-color-placeholder: #5A5550;
+  --el-fill-color: #1e1c1a;
+  --el-fill-color-light: #1e1c1a;
+  --el-fill-color-lighter: #1a1816;
+  --el-border-color: #3d3835;
+  --el-border-color-light: #3d3835;
+  --el-border-color-lighter: #3d3835;
+  --el-text-color-primary: #e8e0d8;
+  --el-text-color-regular: #e8e0d8;
+  --el-text-color-secondary: #8a8078;
+  --el-text-color-placeholder: #5a5550;
   --el-mask-color: rgba(0, 0, 0, 0.7);
 }
 
@@ -166,7 +170,9 @@ html.dark {
 
 .slide-enter-active,
 .slide-leave-active {
-  transition: transform 0.2s ease, opacity 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    opacity 0.2s ease;
 }
 
 .slide-enter-from {
@@ -181,8 +187,13 @@ html.dark {
 
 /* KohakUwUing animation */
 @keyframes amber-pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .kohaku-pulse {
@@ -190,8 +201,13 @@ html.dark {
 }
 
 @keyframes amber-glow {
-  0%, 100% { box-shadow: 0 0 4px rgba(212, 146, 10, 0.2); }
-  50% { box-shadow: 0 0 12px rgba(212, 146, 10, 0.5); }
+  0%,
+  100% {
+    box-shadow: 0 0 4px rgba(212, 146, 10, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 12px rgba(212, 146, 10, 0.5);
+  }
 }
 
 .kohaku-glow {

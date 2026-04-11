@@ -4,13 +4,16 @@
   >
     <!-- Instance info -->
     <StatusDot v-if="instance" :status="instance.status" />
-    <span class="font-medium text-warm-700 dark:text-warm-300 truncate max-w-48">
-      {{ instance?.config_name || '—' }}
+    <span
+      class="font-medium text-warm-700 dark:text-warm-300 truncate max-w-48"
+    >
+      {{ instance?.config_name || "—" }}
     </span>
     <span
       v-if="instance?.type"
       class="text-[9px] px-1.5 py-0.5 rounded bg-warm-100 dark:bg-warm-800 text-warm-400"
-    >{{ instance.type }}</span>
+      >{{ instance.type }}</span
+    >
 
     <div class="seg-sep" />
 
@@ -33,7 +36,11 @@
           >
             <div class="flex items-center gap-2 text-[11px]">
               <span>{{ p.label }}</span>
-              <span v-if="p.shortcut" class="text-[9px] font-mono text-warm-400">{{ p.shortcut }}</span>
+              <span
+                v-if="p.shortcut"
+                class="text-[9px] font-mono text-warm-400"
+                >{{ p.shortcut }}</span
+              >
             </div>
           </el-dropdown-item>
         </el-dropdown-menu>
@@ -97,7 +104,12 @@ const presetLabel = computed(() => {
 });
 
 const PRESET_ORDER = [
-  "chat-focus", "workspace", "multi-creature", "canvas", "debug", "settings",
+  "chat-focus",
+  "workspace",
+  "multi-creature",
+  "canvas",
+  "debug",
+  "settings",
 ];
 
 const presets = computed(() => {

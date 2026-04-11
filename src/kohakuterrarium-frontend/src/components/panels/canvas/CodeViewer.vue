@@ -8,7 +8,9 @@
         v-for="n in lineCount"
         :key="n"
         class="px-2 text-[11px] font-mono leading-[1.4] text-warm-400"
-      >{{ n }}</div>
+      >
+        {{ n }}
+      </div>
     </div>
     <!-- Code content -->
     <pre
@@ -34,20 +36,35 @@ import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
 
 const LANG_MAP = {
-  bash, sh: bash, shell: bash,
+  bash,
+  sh: bash,
+  shell: bash,
   css,
-  js: javascript, javascript,
-  ts: typescript, typescript,
+  js: javascript,
+  javascript,
+  ts: typescript,
+  typescript,
   json,
-  md: markdown, markdown,
-  py: python, python,
-  rs: rust, rust,
-  sql, xml, html: xml, svg: xml,
-  yaml, yml: yaml,
+  md: markdown,
+  markdown,
+  py: python,
+  python,
+  rs: rust,
+  rust,
+  sql,
+  xml,
+  html: xml,
+  svg: xml,
+  yaml,
+  yml: yaml,
 };
 
 for (const [name, lang] of Object.entries(LANG_MAP)) {
-  try { hljs.registerLanguage(name, lang); } catch { /* skip */ }
+  try {
+    hljs.registerLanguage(name, lang);
+  } catch {
+    /* skip */
+  }
 }
 
 import "highlight.js/styles/github-dark.css";

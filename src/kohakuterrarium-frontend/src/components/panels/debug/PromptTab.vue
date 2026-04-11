@@ -4,7 +4,7 @@
       class="flex items-center gap-2 px-3 py-1 border-b border-warm-200 dark:border-warm-700 shrink-0 text-[10px]"
     >
       <span class="text-warm-400">
-        {{ lastLoaded ? `fetched ${lastLoaded}` : '—' }}
+        {{ lastLoaded ? `fetched ${lastLoaded}` : "—" }}
       </span>
       <span class="flex-1" />
       <button
@@ -25,9 +25,11 @@
       <button
         v-if="previousText"
         class="px-2 py-0.5 rounded transition-colors"
-        :class="showDiff
-          ? 'bg-iolite/15 text-iolite'
-          : 'bg-warm-100 dark:bg-warm-800 text-warm-600 dark:text-warm-300 hover:text-iolite'"
+        :class="
+          showDiff
+            ? 'bg-iolite/15 text-iolite'
+            : 'bg-warm-100 dark:bg-warm-800 text-warm-600 dark:text-warm-300 hover:text-iolite'
+        "
         @click="showDiff = !showDiff"
       >
         Diff
@@ -46,14 +48,17 @@
           class="whitespace-pre-wrap break-words leading-tight"
           :class="diffClass(line.kind)"
         >
-          <span class="inline-block w-3 opacity-60">{{ diffSymbol(line.kind) }}</span>
+          <span class="inline-block w-3 opacity-60">{{
+            diffSymbol(line.kind)
+          }}</span>
           {{ line.text }}
         </div>
       </template>
       <pre
         v-else
         class="whitespace-pre-wrap break-words text-warm-700 dark:text-warm-300"
-      >{{ promptText }}</pre>
+        >{{ promptText }}</pre
+      >
     </div>
   </div>
 </template>
@@ -122,11 +127,13 @@ const diffLines = computed(() => {
 });
 
 function diffClass(kind) {
-  return {
-    add: "bg-aquamarine/10 text-aquamarine",
-    del: "bg-coral/10 text-coral",
-    same: "text-warm-600 dark:text-warm-400",
-  }[kind] || "";
+  return (
+    {
+      add: "bg-aquamarine/10 text-aquamarine",
+      del: "bg-coral/10 text-coral",
+      same: "text-warm-600 dark:text-warm-400",
+    }[kind] || ""
+  );
 }
 
 function diffSymbol(kind) {

@@ -49,7 +49,9 @@ export const useEditorStore = defineStore("editor", {
       delete this.openFiles[path];
       if (this.activeFilePath === path) {
         const remaining = Object.keys(this.openFiles);
-        this.activeFilePath = remaining.length ? remaining[remaining.length - 1] : null;
+        this.activeFilePath = remaining.length
+          ? remaining[remaining.length - 1]
+          : null;
       }
     },
 

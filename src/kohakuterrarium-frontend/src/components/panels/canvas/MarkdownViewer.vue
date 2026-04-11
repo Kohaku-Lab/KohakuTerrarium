@@ -5,18 +5,22 @@
     >
       <button
         class="px-2 py-0.5 rounded transition-colors"
-        :class="mode === 'preview'
-          ? 'bg-iolite/15 text-iolite'
-          : 'text-warm-500 hover:text-warm-700'"
+        :class="
+          mode === 'preview'
+            ? 'bg-iolite/15 text-iolite'
+            : 'text-warm-500 hover:text-warm-700'
+        "
         @click="mode = 'preview'"
       >
         Preview
       </button>
       <button
         class="px-2 py-0.5 rounded transition-colors"
-        :class="mode === 'raw'
-          ? 'bg-iolite/15 text-iolite'
-          : 'text-warm-500 hover:text-warm-700'"
+        :class="
+          mode === 'raw'
+            ? 'bg-iolite/15 text-iolite'
+            : 'text-warm-500 hover:text-warm-700'
+        "
         @click="mode = 'raw'"
       >
         Raw
@@ -24,15 +28,12 @@
     </div>
 
     <div class="flex-1 min-h-0 overflow-auto p-4 text-xs">
-      <div
-        v-if="mode === 'preview'"
-        class="markdown-body"
-        v-html="rendered"
-      />
+      <div v-if="mode === 'preview'" class="markdown-body" v-html="rendered" />
       <pre
         v-else
         class="font-mono text-[11px] whitespace-pre-wrap break-words text-warm-700 dark:text-warm-300"
-      >{{ content }}</pre>
+        >{{ content }}</pre
+      >
     </div>
   </div>
 </template>

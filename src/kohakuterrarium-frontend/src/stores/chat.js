@@ -52,7 +52,8 @@ function _convertHistory(messages) {
  * but never received a done/error event (still running or interrupted).
  */
 function _replayEvents(messages, events) {
-  if (!events?.length) return { messages: _convertHistory(messages), pendingJobs: {} };
+  if (!events?.length)
+    return { messages: _convertHistory(messages), pendingJobs: {} };
 
   const result = [];
   let cur = null;
@@ -63,7 +64,12 @@ function _replayEvents(messages, events) {
 
   function ensureCur() {
     if (!cur) {
-      cur = { id: "h_" + result.length, role: "assistant", parts: [], timestamp: "" };
+      cur = {
+        id: "h_" + result.length,
+        role: "assistant",
+        parts: [],
+        timestamp: "",
+      };
       result.push(cur);
     }
     return cur;
@@ -110,7 +116,8 @@ function _replayEvents(messages, events) {
         if (!msg.parts) continue;
         for (let j = msg.parts.length - 1; j >= 0; j--) {
           const p = msg.parts[j];
-          if (p.type === "tool" && p.kind === "subagent" && p.jobId === jobId) return p;
+          if (p.type === "tool" && p.kind === "subagent" && p.jobId === jobId)
+            return p;
         }
       }
     }
@@ -122,7 +129,12 @@ function _replayEvents(messages, events) {
         for (let j = msg.parts.length - 1; j >= 0; j--) {
           const p = msg.parts[j];
           if (p.type !== "tool" || p.kind !== "subagent") continue;
-          if (p.name === saName || p.name.includes(saName) || saName.includes(p.name)) return p;
+          if (
+            p.name === saName ||
+            p.name.includes(saName) ||
+            saName.includes(p.name)
+          )
+            return p;
         }
       }
     }
@@ -142,8 +154,14 @@ function _replayEvents(messages, events) {
     const sa = findSubagent(saName, saJobId);
     if (sa) {
       const tool = {
-        type: "tool", id: `tool_${_n++}`, name, kind: "tool",
-        args: args || {}, status: "done", result: "", tools_used: [],
+        type: "tool",
+        id: `tool_${_n++}`,
+        name,
+        kind: "tool",
+        args: args || {},
+        status: "done",
+        result: "",
+        tools_used: [],
       };
       if (!sa.children) sa.children = [];
       sa.children.push(tool);
@@ -169,7 +187,9 @@ function _replayEvents(messages, events) {
     for (let i = result.length - 1; i >= 0; i--) {
       const msg = result[i];
       if (!msg.parts) continue;
-      const tc = [...msg.parts].reverse().find((p) => p.type === "tool" && p.jobId === jobId);
+      const tc = [...msg.parts]
+        .reverse()
+        .find((p) => p.type === "tool" && p.jobId === jobId);
       if (tc) return tc;
     }
     return null;
@@ -181,16 +201,25 @@ function _replayEvents(messages, events) {
       tc = findToolByJobId(jobId);
     }
     if (!tc && cur) {
-      tc = [...cur.parts].reverse().find((p) => p.type === "tool" && p.name === name);
+      tc = [...cur.parts]
+        .reverse()
+        .find((p) => p.type === "tool" && p.name === name);
     }
     if (!tc) {
       // Search all messages as final fallback (name match, or partial match for sub-agents)
       for (let i = result.length - 1; i >= 0 && !tc; i--) {
         const msg = result[i];
         if (!msg.parts) continue;
-        tc = [...msg.parts].reverse().find((p) =>
-          p.type === "tool" && (p.name === name || p.name.startsWith(name) || name.startsWith(p.name)) && !p.result
-        );
+        tc = [...msg.parts]
+          .reverse()
+          .find(
+            (p) =>
+              p.type === "tool" &&
+              (p.name === name ||
+                p.name.startsWith(name) ||
+                name.startsWith(p.name)) &&
+              !p.result,
+          );
       }
     }
     if (tc) {
@@ -201,7 +230,8 @@ function _replayEvents(messages, events) {
       if (opts?.duration != null) tc.duration = opts.duration;
       if (opts?.total_tokens != null) tc.total_tokens = opts.total_tokens;
       if (opts?.prompt_tokens != null) tc.prompt_tokens = opts.prompt_tokens;
-      if (opts?.completion_tokens != null) tc.completion_tokens = opts.completion_tokens;
+      if (opts?.completion_tokens != null)
+        tc.completion_tokens = opts.completion_tokens;
       // Track completion for pending-job detection
       if (tc.jobId) completedJobs.add(tc.jobId);
       if (jobId) completedJobs.add(jobId);
@@ -214,9 +244,19 @@ function _replayEvents(messages, events) {
     // ── Common types (both formats) ──
     if (t === "user_input") {
       cur = null;
-      result.push({ id: "h_" + result.length, role: "user", content: evt.content || "", timestamp: "" });
+      result.push({
+        id: "h_" + result.length,
+        role: "user",
+        content: evt.content || "",
+        timestamp: "",
+      });
     } else if (t === "processing_start") {
-      cur = { id: "h_" + result.length, role: "assistant", parts: [], timestamp: "" };
+      cur = {
+        id: "h_" + result.length,
+        role: "assistant",
+        parts: [],
+        timestamp: "",
+      };
       result.push(cur);
     } else if (t === "text") {
       appendText(evt.content || "");
@@ -230,7 +270,7 @@ function _replayEvents(messages, events) {
       }
       cur = null;
 
-    // ── StreamOutput format (live WS): type="activity" wrapper ──
+      // ── StreamOutput format (live WS): type="activity" wrapper ──
     } else if (t === "activity") {
       const at = evt.activity_type;
       if (at === "trigger_fired") {
@@ -238,42 +278,67 @@ function _replayEvents(messages, events) {
         const ch = evt.channel || "";
         const sender = evt.sender || "";
         result.push({
-          id: "h_" + result.length, role: "trigger",
-          content: ch ? `channel: ${ch}${sender ? ` from ${sender}` : ""}` : evt.name,
-          triggerContent: evt.content || "", channel: ch, sender, timestamp: "",
+          id: "h_" + result.length,
+          role: "trigger",
+          content: ch
+            ? `channel: ${ch}${sender ? ` from ${sender}` : ""}`
+            : evt.name,
+          triggerContent: evt.content || "",
+          channel: ch,
+          sender,
+          timestamp: "",
         });
       } else if (at === "token_usage" || at === "processing_complete") {
         // skip
       } else if (at === "context_cleared") {
         cur = null;
         result.push({
-          id: "clear_" + result.length, role: "clear",
+          id: "clear_" + result.length,
+          role: "clear",
           messagesCleared: evt.messages_cleared || 0,
           timestamp: "",
         });
       } else if (at === "processing_error") {
         cur = null;
         result.push({
-          id: "err_" + result.length, role: "error",
+          id: "err_" + result.length,
+          role: "error",
           errorType: evt.error_type || "Error",
           content: evt.error || evt.detail || "Unknown error",
           timestamp: "",
         });
       } else if (at === "subagent_start") {
-        addTool(evt.name, "subagent", evt.args || { info: evt.detail }, evt.job_id);
+        addTool(
+          evt.name,
+          "subagent",
+          evt.args || { info: evt.detail },
+          evt.job_id,
+        );
       } else if (at === "subagent_done") {
-        updateTool(evt.name, evt.result || evt.detail, {
-          tools_used: evt.tools_used,
-          turns: evt.turns, duration: evt.duration,
-          total_tokens: evt.total_tokens, prompt_tokens: evt.prompt_tokens,
-          completion_tokens: evt.completion_tokens,
-        }, evt.job_id);
+        updateTool(
+          evt.name,
+          evt.result || evt.detail,
+          {
+            tools_used: evt.tools_used,
+            turns: evt.turns,
+            duration: evt.duration,
+            total_tokens: evt.total_tokens,
+            prompt_tokens: evt.prompt_tokens,
+            completion_tokens: evt.completion_tokens,
+          },
+          evt.job_id,
+        );
       } else if (at === "subagent_error") {
         updateTool(evt.name, evt.detail, { error: true }, evt.job_id);
       } else if (at === "tool_start") {
         addTool(evt.name, "tool", evt.args || { info: evt.detail }, evt.job_id);
       } else if (at === "tool_done") {
-        updateTool(evt.name, evt.result || evt.output || evt.detail, { tools_used: evt.tools_used }, evt.job_id);
+        updateTool(
+          evt.name,
+          evt.result || evt.output || evt.detail,
+          { tools_used: evt.tools_used },
+          evt.job_id,
+        );
       } else if (at === "tool_error") {
         updateTool(evt.name, evt.detail, { error: true }, evt.job_id);
       } else if (at?.startsWith("subagent_tool_")) {
@@ -282,37 +347,64 @@ function _replayEvents(messages, events) {
         const saName = evt.subagent || "";
         const saJobId = evt.job_id || "";
         if (subAct === "tool_start") {
-          addSubagentTool(toolName, { info: evt.detail || "" }, saName, saJobId);
+          addSubagentTool(
+            toolName,
+            { info: evt.detail || "" },
+            saName,
+            saJobId,
+          );
         } else if (subAct === "tool_done") {
           updateSubagentTool(toolName, evt.detail || "", null, saName, saJobId);
         } else if (subAct === "tool_error") {
-          updateSubagentTool(toolName, evt.detail || "", { error: true }, saName, saJobId);
+          updateSubagentTool(
+            toolName,
+            evt.detail || "",
+            { error: true },
+            saName,
+            saJobId,
+          );
         }
       }
 
-    // ── SessionStore format (persistent): direct type names ──
+      // ── SessionStore format (persistent): direct type names ──
     } else if (t === "trigger_fired") {
       cur = null;
       const ch = evt.channel || "";
       const sender = evt.sender || "";
       result.push({
-        id: "h_" + result.length, role: "trigger",
+        id: "h_" + result.length,
+        role: "trigger",
         content: ch ? `channel: ${ch}${sender ? ` from ${sender}` : ""}` : "",
-        triggerContent: evt.content || "", channel: ch, sender, timestamp: "",
+        triggerContent: evt.content || "",
+        channel: ch,
+        sender,
+        timestamp: "",
       });
     } else if (t === "tool_call") {
       addTool(evt.name, "tool", evt.args || {}, evt.call_id || evt.job_id);
     } else if (t === "tool_result") {
-      updateTool(evt.name, evt.output || "", { error: evt.error ? true : false }, evt.call_id || evt.job_id);
+      updateTool(
+        evt.name,
+        evt.output || "",
+        { error: evt.error ? true : false },
+        evt.call_id || evt.job_id,
+      );
     } else if (t === "subagent_call") {
       addTool(evt.name, "subagent", { task: evt.task || "" }, evt.job_id);
     } else if (t === "subagent_result") {
-      updateTool(evt.name, evt.output || "", {
-        tools_used: evt.tools_used,
-        turns: evt.turns, duration: evt.duration,
-        total_tokens: evt.total_tokens, prompt_tokens: evt.prompt_tokens,
-        completion_tokens: evt.completion_tokens,
-      }, evt.job_id);
+      updateTool(
+        evt.name,
+        evt.output || "",
+        {
+          tools_used: evt.tools_used,
+          turns: evt.turns,
+          duration: evt.duration,
+          total_tokens: evt.total_tokens,
+          prompt_tokens: evt.prompt_tokens,
+          completion_tokens: evt.completion_tokens,
+        },
+        evt.job_id,
+      );
     } else if (t === "subagent_tool") {
       const toolName = evt.tool_name || "";
       const saName = evt.subagent || "";
@@ -322,7 +414,13 @@ function _replayEvents(messages, events) {
       } else if (evt.activity === "tool_done") {
         updateSubagentTool(toolName, evt.detail || "", null, saName, saJobId);
       } else if (evt.activity === "tool_error") {
-        updateSubagentTool(toolName, evt.detail || "", { error: true }, saName, saJobId);
+        updateSubagentTool(
+          toolName,
+          evt.detail || "",
+          { error: true },
+          saName,
+          saJobId,
+        );
       }
     } else if (t === "channel_message") {
       result.push({
@@ -345,7 +443,8 @@ function _replayEvents(messages, events) {
     } else if (t === "processing_error") {
       cur = null;
       result.push({
-        id: "err_" + result.length, role: "error",
+        id: "err_" + result.length,
+        role: "error",
         errorType: evt.error_type || "Error",
         content: evt.error || "",
         timestamp: "",
@@ -353,11 +452,16 @@ function _replayEvents(messages, events) {
     } else if (t === "context_cleared") {
       cur = null;
       result.push({
-        id: "clear_" + result.length, role: "clear",
+        id: "clear_" + result.length,
+        role: "clear",
         messagesCleared: evt.messages_cleared || 0,
         timestamp: "",
       });
-    } else if (t === "token_usage" || t === "processing_complete" || t === "compact_start") {
+    } else if (
+      t === "token_usage" ||
+      t === "processing_complete" ||
+      t === "compact_start"
+    ) {
       // skip
     }
   }
@@ -390,7 +494,13 @@ function _replayEvents(messages, events) {
   // (legacy events without job_id) AND have no result
   for (const msg of result) {
     for (const part of msg.parts || []) {
-      if (part.type === "tool" && part.kind === "subagent" && part.status === "done" && !part.result && !part.jobId) {
+      if (
+        part.type === "tool" &&
+        part.kind === "subagent" &&
+        part.status === "done" &&
+        !part.result &&
+        !part.jobId
+      ) {
         part.status = "interrupted";
       }
     }
@@ -438,7 +548,12 @@ export const useChatStore = defineStore("chat", {
     /** @type {Object<string, number>} Unread message counts per tab */
     unreadCounts: {},
     /** @type {{sessionId: string, model: string, agentName: string, compactThreshold: number}} Session metadata */
-    sessionInfo: { sessionId: "", model: "", agentName: "", compactThreshold: 0 },
+    sessionInfo: {
+      sessionId: "",
+      model: "",
+      agentName: "",
+      compactThreshold: 0,
+    },
     /** Reactive tick counter - incremented every second when jobs are running */
     _jobTick: 0,
     /** @type {number | null} */
@@ -471,7 +586,13 @@ export const useChatStore = defineStore("chat", {
       this.runningJobs = {};
       this.unreadCounts = {};
       this.processing = false;
-      this.sessionInfo = { sessionId: "", model: "", agentName: "", compactThreshold: 0, maxContext: 0 };
+      this.sessionInfo = {
+        sessionId: "",
+        model: "",
+        agentName: "",
+        compactThreshold: 0,
+        maxContext: 0,
+      };
 
       // Reset status store too
       const statusStore = useStatusStore();
@@ -511,6 +632,18 @@ export const useChatStore = defineStore("chat", {
         this.tabs.push(key);
         this.messagesByTab[key] = [];
       }
+    },
+
+    closeTab(tab) {
+      const idx = this.tabs.indexOf(tab);
+      if (idx === -1) return;
+      this.tabs = this.tabs.filter((_, i) => i !== idx);
+      if (this.activeTab === tab) {
+        this.setActiveTab(
+          this.tabs[Math.min(idx, this.tabs.length - 1)] || null,
+        );
+      }
+      this._saveTabs();
     },
 
     setActiveTab(tab) {
@@ -567,14 +700,21 @@ export const useChatStore = defineStore("chat", {
       if (tab.startsWith("ch:")) {
         const chName = tab.slice(3);
         try {
-          await terrariumAPI.sendToChannel(this._instanceId, chName, text, "human");
+          await terrariumAPI.sendToChannel(
+            this._instanceId,
+            chName,
+            text,
+            "human",
+          );
         } catch (err) {
           console.error("Channel send failed:", err);
         }
       } else {
         const target = tab;
         if (this._ws.readyState === WebSocket.OPEN) {
-          this._ws.send(JSON.stringify({ type: "input", target, message: text }));
+          this._ws.send(
+            JSON.stringify({ type: "input", target, message: text }),
+          );
           this.processing = true;
         }
       }
@@ -582,9 +722,15 @@ export const useChatStore = defineStore("chat", {
 
     async _loadHistory(target) {
       try {
-        const { messages, events } = await terrariumAPI.getHistory(this._instanceId, target);
+        const { messages, events } = await terrariumAPI.getHistory(
+          this._instanceId,
+          target,
+        );
         if (events?.length) {
-          const { messages: msgs, pendingJobs } = _replayEvents(messages, events);
+          const { messages: msgs, pendingJobs } = _replayEvents(
+            messages,
+            events,
+          );
           this.messagesByTab[target] = msgs;
           this._restoreTokenUsage(target, events);
           this._restoreRunningState(pendingJobs);
@@ -667,7 +813,10 @@ export const useChatStore = defineStore("chat", {
       try {
         const { messages, events } = await agentAPI.getHistory(agentId);
         if (events?.length) {
-          const { messages: msgs, pendingJobs } = _replayEvents(messages, events);
+          const { messages: msgs, pendingJobs } = _replayEvents(
+            messages,
+            events,
+          );
           this.messagesByTab[tabKey] = msgs;
           this._restoreTokenUsage(tabKey, events);
           this._restoreRunningState(pendingJobs);
@@ -704,7 +853,13 @@ export const useChatStore = defineStore("chat", {
           (evt.type === "activity" && evt.activity_type === "token_usage") ||
           evt.type === "token_usage";
         if (isTokenEvt) {
-          const prev = this.tokenUsage[source] || { prompt: 0, completion: 0, total: 0, cached: 0, lastPrompt: 0 };
+          const prev = this.tokenUsage[source] || {
+            prompt: 0,
+            completion: 0,
+            total: 0,
+            cached: 0,
+            lastPrompt: 0,
+          };
           this.tokenUsage[source] = {
             prompt: prev.prompt + (evt.prompt_tokens || 0),
             completion: prev.completion + (evt.completion_tokens || 0),
@@ -762,13 +917,21 @@ export const useChatStore = defineStore("chat", {
         if (data.session_id) this.sessionInfo.sessionId = data.session_id;
         if (data.model) this.sessionInfo.model = data.model;
         if (data.agent_name) this.sessionInfo.agentName = data.agent_name;
-        if (data.max_context != null) this.sessionInfo.maxContext = data.max_context;
-        if (data.compact_threshold != null) this.sessionInfo.compactThreshold = data.compact_threshold;
+        if (data.max_context != null)
+          this.sessionInfo.maxContext = data.max_context;
+        if (data.compact_threshold != null)
+          this.sessionInfo.compactThreshold = data.compact_threshold;
         return;
       }
 
       if (at === "token_usage") {
-        const prev = this.tokenUsage[source] || { prompt: 0, completion: 0, total: 0, cached: 0, lastPrompt: 0 };
+        const prev = this.tokenUsage[source] || {
+          prompt: 0,
+          completion: 0,
+          total: 0,
+          cached: 0,
+          lastPrompt: 0,
+        };
         this.tokenUsage[source] = {
           prompt: prev.prompt + (data.prompt_tokens || 0),
           completion: prev.completion + (data.completion_tokens || 0),
@@ -906,7 +1069,8 @@ export const useChatStore = defineStore("chat", {
           if (data.duration != null) tc.duration = data.duration;
           if (data.total_tokens != null) tc.total_tokens = data.total_tokens;
           if (data.prompt_tokens != null) tc.prompt_tokens = data.prompt_tokens;
-          if (data.completion_tokens != null) tc.completion_tokens = data.completion_tokens;
+          if (data.completion_tokens != null)
+            tc.completion_tokens = data.completion_tokens;
           delete this.runningJobs[tc.jobId || tc.id];
           this._checkJobTimer();
         }
@@ -926,7 +1090,8 @@ export const useChatStore = defineStore("chat", {
         if (sa) {
           if (data.total_tokens) sa.total_tokens = data.total_tokens;
           if (data.prompt_tokens) sa.prompt_tokens = data.prompt_tokens;
-          if (data.completion_tokens) sa.completion_tokens = data.completion_tokens;
+          if (data.completion_tokens)
+            sa.completion_tokens = data.completion_tokens;
         }
       } else if (at?.startsWith("subagent_tool_")) {
         // Sub-agent internal tool activity: find parent by job_id or name
@@ -940,17 +1105,30 @@ export const useChatStore = defineStore("chat", {
           const subAct = at.replace("subagent_", "");
           if (subAct === "tool_start" && toolName) {
             sa.children.push({
-              type: "tool", name: toolName, kind: "tool",
+              type: "tool",
+              name: toolName,
+              kind: "tool",
               args: { info: data.detail || "" },
-              status: "running", result: "",
+              status: "running",
+              result: "",
             });
             if (!sa.tools_used.includes(toolName)) sa.tools_used.push(toolName);
           } else if (subAct === "tool_done" && toolName) {
-            const child = [...sa.children].reverse().find(c => c.name === toolName && c.status === "running");
-            if (child) { child.status = "done"; child.result = data.detail || ""; }
+            const child = [...sa.children]
+              .reverse()
+              .find((c) => c.name === toolName && c.status === "running");
+            if (child) {
+              child.status = "done";
+              child.result = data.detail || "";
+            }
           } else if (subAct === "tool_error" && toolName) {
-            const child = [...sa.children].reverse().find(c => c.name === toolName && c.status === "running");
-            if (child) { child.status = "error"; child.result = data.detail || ""; }
+            const child = [...sa.children]
+              .reverse()
+              .find((c) => c.name === toolName && c.status === "running");
+            if (child) {
+              child.status = "error";
+              child.result = data.detail || "";
+            }
           }
         }
       } else if (at === "task_promoted") {
@@ -973,7 +1151,11 @@ export const useChatStore = defineStore("chat", {
           const target = this.activeTab;
           if (target && !target.startsWith("ch:")) {
             const { terrariumAPI } = await import("@/utils/api");
-            await terrariumAPI.promoteCreatureTask(this._instanceId, target, jobId);
+            await terrariumAPI.promoteCreatureTask(
+              this._instanceId,
+              target,
+              jobId,
+            );
           }
         } else {
           const { agentAPI } = await import("@/utils/api");
@@ -987,7 +1169,9 @@ export const useChatStore = defineStore("chat", {
     /** Regenerate the last assistant response using current settings. */
     async regenerateLastResponse() {
       if (!this._instanceId || this._instanceType === "terrarium") {
-        console.warn("Regenerate only supported for standalone creature instances currently");
+        console.warn(
+          "Regenerate only supported for standalone creature instances currently",
+        );
         return;
       }
       try {
@@ -1066,7 +1250,8 @@ export const useChatStore = defineStore("chat", {
         if (!msg.parts) continue;
         for (let j = msg.parts.length - 1; j >= 0; j--) {
           const p = msg.parts[j];
-          if (p.type === "tool" && p.name === name && p.status === "running") return p;
+          if (p.type === "tool" && p.name === name && p.status === "running")
+            return p;
         }
       }
       return null;
@@ -1083,7 +1268,12 @@ export const useChatStore = defineStore("chat", {
           if (!msg.parts) continue;
           for (let j = msg.parts.length - 1; j >= 0; j--) {
             const p = msg.parts[j];
-            if (p.type === "tool" && p.kind === "subagent" && p.jobId === saJobId) return p;
+            if (
+              p.type === "tool" &&
+              p.kind === "subagent" &&
+              p.jobId === saJobId
+            )
+              return p;
           }
         }
       }
@@ -1094,7 +1284,12 @@ export const useChatStore = defineStore("chat", {
           if (!msg.parts) continue;
           for (let j = msg.parts.length - 1; j >= 0; j--) {
             const p = msg.parts[j];
-            if (p.type !== "tool" || p.kind !== "subagent" || p.status !== "running") continue;
+            if (
+              p.type !== "tool" ||
+              p.kind !== "subagent" ||
+              p.status !== "running"
+            )
+              continue;
             if (p.name === saName) return p;
             // Partial match: "researcher" in "agent_researcher[abc123]"
             if (p.name.includes(saName)) return p;
@@ -1107,7 +1302,12 @@ export const useChatStore = defineStore("chat", {
         if (!msg.parts) continue;
         for (let j = msg.parts.length - 1; j >= 0; j--) {
           const p = msg.parts[j];
-          if (p.type === "tool" && p.kind === "subagent" && p.status === "running") return p;
+          if (
+            p.type === "tool" &&
+            p.kind === "subagent" &&
+            p.status === "running"
+          )
+            return p;
         }
       }
       return null;
@@ -1143,7 +1343,9 @@ export const useChatStore = defineStore("chat", {
 
       const instStore = useInstancesStore();
       if (instStore.current) {
-        const ch = instStore.current.channels.find((c) => c.name === data.channel);
+        const ch = instStore.current.channels.find(
+          (c) => c.name === data.channel,
+        );
         if (ch) ch.message_count = (ch.message_count || 0) + 1;
       }
     },
@@ -1179,7 +1381,8 @@ export const useChatStore = defineStore("chat", {
       const msgs = this.messagesByTab[source];
       if (!msgs) return;
       const last = this._ensureAssistantMsg(msgs);
-      const tail = last.parts.length > 0 ? last.parts[last.parts.length - 1] : null;
+      const tail =
+        last.parts.length > 0 ? last.parts[last.parts.length - 1] : null;
       if (tail && tail.type === "text" && tail._streaming) {
         tail.content += content;
       } else {
@@ -1218,7 +1421,10 @@ export const useChatStore = defineStore("chat", {
 
     /** Stop timer if no more running jobs. */
     _checkJobTimer() {
-      if (Object.keys(this.runningJobs).length === 0 && this._jobTimer !== null) {
+      if (
+        Object.keys(this.runningJobs).length === 0 &&
+        this._jobTimer !== null
+      ) {
         clearInterval(this._jobTimer);
         this._jobTimer = null;
       }
@@ -1247,10 +1453,13 @@ export const useChatStore = defineStore("chat", {
     _saveTabs() {
       if (!this._instanceId) return;
       const key = `chat-tabs-${this._instanceId}`;
-      localStorage.setItem(key, JSON.stringify({
-        tabs: this.tabs,
-        activeTab: this.activeTab,
-      }));
+      localStorage.setItem(
+        key,
+        JSON.stringify({
+          tabs: this.tabs,
+          activeTab: this.activeTab,
+        }),
+      );
     },
 
     _restoreTabs() {

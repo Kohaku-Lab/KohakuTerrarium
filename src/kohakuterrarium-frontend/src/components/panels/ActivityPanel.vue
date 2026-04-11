@@ -5,11 +5,14 @@
       class="flex items-center gap-2 px-3 py-2 border-b border-warm-200 dark:border-warm-700 shrink-0"
     >
       <div class="i-carbon-pulse text-sm text-warm-500" />
-      <span class="text-xs font-medium text-warm-500 dark:text-warm-400 flex-1">Activity</span>
+      <span class="text-xs font-medium text-warm-500 dark:text-warm-400 flex-1"
+        >Activity</span
+      >
       <span
         v-if="jobCount > 0"
         class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber/15 text-amber"
-      >{{ jobCount }}</span>
+        >{{ jobCount }}</span
+      >
     </div>
 
     <!-- Context bar + model -->
@@ -17,30 +20,43 @@
       class="px-3 py-2 border-b border-warm-200/70 dark:border-warm-700/70 text-[11px] flex flex-col gap-1.5"
     >
       <div class="flex items-center gap-2">
-        <span class="font-mono text-iolite truncate">{{ model || '—' }}</span>
+        <span class="font-mono text-iolite truncate">{{ model || "—" }}</span>
         <span class="flex-1" />
         <span
           v-if="chat.processing || jobCount > 0"
           class="flex items-center gap-1 text-amber"
         >
           <span class="w-1.5 h-1.5 rounded-full bg-amber kohaku-pulse" />
-          <span class="text-[10px]">{{ chat.processing ? 'processing' : jobCount + ' jobs' }}</span>
+          <span class="text-[10px]">{{
+            chat.processing ? "processing" : jobCount + " jobs"
+          }}</span>
         </span>
       </div>
       <!-- Context usage bar -->
-      <div v-if="maxContext > 0" class="flex items-center gap-2 text-[10px] text-warm-500">
+      <div
+        v-if="maxContext > 0"
+        class="flex items-center gap-2 text-[10px] text-warm-500"
+      >
         <span class="shrink-0 w-12">Context</span>
         <div
           class="relative flex-1 h-1.5 rounded-full bg-warm-100 dark:bg-warm-800 overflow-hidden"
         >
           <div
             class="absolute left-0 top-0 h-full rounded-full transition-all duration-300"
-            :class="contextPct >= 80 ? 'bg-coral' : contextPct >= 60 ? 'bg-amber' : 'bg-aquamarine'"
+            :class="
+              contextPct >= 80
+                ? 'bg-coral'
+                : contextPct >= 60
+                  ? 'bg-amber'
+                  : 'bg-aquamarine'
+            "
             :style="{ width: Math.min(contextPct, 100) + '%' }"
           />
         </div>
         <span class="font-mono shrink-0">
-          {{ formatTokens(totals.lastPrompt) }}/{{ formatTokens(maxContext) }}
+          {{ formatTokens(totals.lastPrompt) }}/{{
+            formatTokens(maxContext)
+          }}
           ({{ contextPct }}%)
         </span>
       </div>
@@ -60,10 +76,13 @@
           :key="jobId"
           class="flex items-center gap-2 px-2 py-1.5 rounded-md bg-amber/10 group"
         >
-          <span class="w-1.5 h-1.5 rounded-full bg-amber kohaku-pulse shrink-0" />
+          <span
+            class="w-1.5 h-1.5 rounded-full bg-amber kohaku-pulse shrink-0"
+          />
           <span
             class="font-mono text-[11px] text-amber-shadow dark:text-amber-light truncate"
-          >{{ job.name }}</span>
+            >{{ job.name }}</span
+          >
           <span class="flex-1" />
           <span class="text-warm-400 font-mono text-[10px]">
             {{ chat.getJobElapsed(job) }}
@@ -85,13 +104,22 @@
     >
       <span class="text-warm-400 text-[9px]">Total</span>
       <span>
-        in <span class="font-mono text-warm-600 dark:text-warm-400">{{ formatTokens(totals.prompt) }}</span>
+        in
+        <span class="font-mono text-warm-600 dark:text-warm-400">{{
+          formatTokens(totals.prompt)
+        }}</span>
       </span>
       <span>
-        out <span class="font-mono text-warm-600 dark:text-warm-400">{{ formatTokens(totals.completion) }}</span>
+        out
+        <span class="font-mono text-warm-600 dark:text-warm-400">{{
+          formatTokens(totals.completion)
+        }}</span>
       </span>
       <span v-if="totals.cached > 0">
-        cache <span class="font-mono text-aquamarine">{{ formatTokens(totals.cached) }}</span>
+        cache
+        <span class="font-mono text-aquamarine">{{
+          formatTokens(totals.cached)
+        }}</span>
       </span>
     </div>
   </div>
@@ -110,7 +138,10 @@ const props = defineProps({
 const chat = useChatStore();
 
 const jobCount = computed(() => Object.keys(chat.runningJobs || {}).length);
-const model = computed(() => chat.sessionInfo.model || props.instance?.model || "");
+const model = computed(
+  () =>
+    chat.sessionInfo.model || props.instance?.model || "(no model - frontend)",
+);
 const maxContext = computed(
   () => chat.sessionInfo.maxContext || props.instance?.max_context || 0,
 );

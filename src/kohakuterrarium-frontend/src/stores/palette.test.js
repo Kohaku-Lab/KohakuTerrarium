@@ -31,7 +31,11 @@ describe("palette store — registry", () => {
 
   it("filters by prefix + fuzzy matches by label", () => {
     const store = usePaletteStore();
-    store.register({ id: "a", label: "Open Activity Panel", handler: () => {} });
+    store.register({
+      id: "a",
+      label: "Open Activity Panel",
+      handler: () => {},
+    });
     store.register({ id: "b", label: "Open State Panel", handler: () => {} });
     store.register({ id: "c", label: "Mode: Workspace", handler: () => {} });
     store.query = "act";
@@ -41,8 +45,18 @@ describe("palette store — registry", () => {
 
   it("honors the > @ # / prefix switch", () => {
     const store = usePaletteStore();
-    store.register({ id: "a", label: "Command A", prefix: ">", handler: () => {} });
-    store.register({ id: "s", label: "session", prefix: "#", handler: () => {} });
+    store.register({
+      id: "a",
+      label: "Command A",
+      prefix: ">",
+      handler: () => {},
+    });
+    store.register({
+      id: "s",
+      label: "session",
+      prefix: "#",
+      handler: () => {},
+    });
     store.query = "#ses";
     const ids = store.results.map((r) => r.id);
     expect(ids).toContain("s");

@@ -23,7 +23,9 @@
         @click="select(p.id)"
       >
         <div class="flex-1 min-w-0">
-          <div class="text-xs font-medium text-warm-700 dark:text-warm-300 truncate">
+          <div
+            class="text-xs font-medium text-warm-700 dark:text-warm-300 truncate"
+          >
             {{ p.label }}
           </div>
           <div class="text-[10px] text-warm-400 font-mono truncate">
@@ -37,7 +39,11 @@
           </div>
         </div>
         <div
-          v-if="zoneId && p.preferredZones?.length && !p.preferredZones.includes(zoneId)"
+          v-if="
+            zoneId &&
+            p.preferredZones?.length &&
+            !p.preferredZones.includes(zoneId)
+          "
           class="text-amber text-[9px] flex items-center gap-0.5 shrink-0"
           :title="`Prefers ${p.preferredZones[0]}`"
         >

@@ -7,10 +7,13 @@
   -->
   <div class="h-full flex flex-col bg-warm-100 dark:bg-[#211F1D]">
     <!-- Tab bar on panel bg -->
-    <div class="flex items-end gap-0 px-4 pt-2 shrink-0">
+    <div role="tablist" class="flex items-end gap-0 px-4 pt-2 shrink-0">
       <div
         v-for="tab in chat.tabs"
         :key="tab"
+        role="tab"
+        tabindex="0"
+        :aria-selected="chat.activeTab === tab"
         class="relative flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium cursor-pointer select-none rounded-t-lg -mb-px transition-colors"
         :class="
           chat.activeTab === tab
@@ -18,6 +21,8 @@
             : 'text-warm-400 dark:text-warm-500 hover:text-warm-600 dark:hover:text-warm-400 border border-transparent'
         "
         @click="chat.setActiveTab(tab)"
+        @keydown.enter="chat.setActiveTab(tab)"
+        @keydown.space.prevent="chat.setActiveTab(tab)"
       >
         <template v-if="tab === 'root'">
           <span class="w-2 h-2 rounded-full bg-amber shrink-0" />
@@ -40,6 +45,7 @@
         <button
           v-if="tab !== 'root' && chat.tabs.length > 1"
           class="ml-1 w-4 h-4 flex items-center justify-center rounded-sm text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors"
+          :aria-label="`Close ${tab} tab`"
           @click.stop="closeTab(tab)"
         >
           <div class="i-carbon-close text-[10px]" />
@@ -52,21 +58,41 @@
         class="flex items-center gap-2 px-2 py-2 -mb-px text-[10px] text-warm-400 font-mono"
       >
         <template v-if="chat.sessionInfo.model">
-          <span class="text-warm-500 dark:text-warm-400">{{ chat.sessionInfo.model }}</span>
+          <span class="text-warm-500 dark:text-warm-400">{{
+            chat.sessionInfo.model
+          }}</span>
           <span class="text-warm-300 dark:text-warm-600">|</span>
         </template>
         <template v-if="activeTokens > 0">
           <span class="i-carbon-meter text-amber" />
-          <span title="Cumulative input tokens">In: {{ formatTokens(activeUsage.prompt) }}</span>
-          <span v-if="activeUsage.cached > 0" class="text-aquamarine" title="Cached input tokens">(cache {{ formatTokens(activeUsage.cached) }})</span>
-          <span title="Cumulative output tokens">Out: {{ formatTokens(activeUsage.completion) }}</span>
+          <span title="Cumulative input tokens"
+            >In: {{ formatTokens(activeUsage.prompt) }}</span
+          >
+          <span
+            v-if="activeUsage.cached > 0"
+            class="text-aquamarine"
+            title="Cached input tokens"
+            >(cache {{ formatTokens(activeUsage.cached) }})</span
+          >
+          <span title="Cumulative output tokens"
+            >Out: {{ formatTokens(activeUsage.completion) }}</span
+          >
         </template>
-        <template v-if="chat.sessionInfo.compactThreshold > 0 && activeUsage.prompt > 0">
+        <template
+          v-if="chat.sessionInfo.compactThreshold > 0 && activeUsage.prompt > 0"
+        >
           <span class="text-warm-300 dark:text-warm-600">|</span>
           <span
-            :class="contextPct >= 80 ? 'text-coral' : contextPct >= 60 ? 'text-amber' : ''"
+            :class="
+              contextPct >= 80
+                ? 'text-coral'
+                : contextPct >= 60
+                  ? 'text-amber'
+                  : ''
+            "
             :title="`Context: ${formatTokens(activeUsage.lastPrompt || 0)} / ${formatTokens(chat.sessionInfo.compactThreshold)}`"
-          >Ctx: {{ contextPct }}%</span>
+            >Ctx: {{ contextPct }}%</span
+          >
         </template>
       </div>
 
@@ -84,7 +110,11 @@
       />
 
       <!-- Messages -->
-      <div ref="messagesEl" class="flex-1 overflow-y-auto px-5 py-4" @scroll="onMessagesScroll">
+      <div
+        ref="messagesEl"
+        class="flex-1 overflow-y-auto px-5 py-4"
+        @scroll="onMessagesScroll"
+      >
         <div class="flex flex-col gap-3">
           <template v-if="chat.currentMessages.length === 0">
             <div class="text-center py-16">
@@ -149,6 +179,7 @@
           <button
             class="w-7 h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-iolite dark:hover:text-iolite-light hover:bg-iolite/10"
             title="Compact context"
+            aria-label="Compact context"
             @click="triggerCompact"
           >
             <span class="i-carbon-collapse-all text-xs" />
@@ -156,6 +187,7 @@
           <button
             class="w-7 h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-coral hover:bg-coral/10"
             title="Clear context"
+            aria-label="Clear context"
             @click="triggerClear"
           >
             <span class="i-carbon-clean text-xs" />
@@ -164,6 +196,7 @@
             v-if="chat.processing || chat.hasRunningJobs"
             class="w-8 h-8 flex items-center justify-center rounded-lg transition-all shrink-0 mb-0.5 bg-coral/90 text-white hover:bg-coral shadow-sm shadow-coral/20"
             title="Stop generation (Esc)"
+            aria-label="Stop generation"
             @click="chat.interrupt()"
           >
             <span class="i-carbon-stop-filled text-sm" />
@@ -177,6 +210,7 @@
                 : 'text-warm-300 dark:text-warm-600 cursor-not-allowed'
             "
             :disabled="!inputText.trim()"
+            aria-label="Send message"
             @click="send"
           >
             <span class="i-carbon-send text-sm" />
@@ -237,12 +271,7 @@ function getCreatureStatus(name) {
 }
 
 function closeTab(tab) {
-  const idx = chat.tabs.indexOf(tab);
-  if (idx === -1) return;
-  chat.tabs.splice(idx, 1);
-  if (chat.activeTab === tab) {
-    chat.setActiveTab(chat.tabs[Math.min(idx, chat.tabs.length - 1)] || null);
-  }
+  chat.closeTab(tab);
 }
 
 function onInputKeydown(e) {
@@ -315,7 +344,11 @@ async function triggerCompact() {
   try {
     const tab = chat.activeTab;
     if (chat._instanceType === "terrarium") {
-      await terrariumAPI.executeCreatureCommand(chat._instanceId, tab || "root", "compact");
+      await terrariumAPI.executeCreatureCommand(
+        chat._instanceId,
+        tab || "root",
+        "compact",
+      );
     } else {
       await agentAPI.executeCommand(chat._instanceId, "compact");
     }
@@ -325,11 +358,21 @@ async function triggerCompact() {
 }
 
 async function triggerClear() {
-  if (!confirm("Clear conversation context? Chat history will be preserved in the session.")) return;
+  if (
+    !confirm(
+      "Clear conversation context? Chat history will be preserved in the session.",
+    )
+  )
+    return;
   try {
     const tab = chat.activeTab;
     if (chat._instanceType === "terrarium") {
-      await terrariumAPI.executeCreatureCommand(chat._instanceId, tab || "root", "clear", "--force");
+      await terrariumAPI.executeCreatureCommand(
+        chat._instanceId,
+        tab || "root",
+        "clear",
+        "--force",
+      );
     } else {
       await agentAPI.executeCommand(chat._instanceId, "clear", "--force");
     }
@@ -342,7 +385,11 @@ async function stopTask(jobId, jobName) {
   try {
     const tab = chat.activeTab;
     if (chat._instanceType === "terrarium") {
-      await terrariumAPI.stopCreatureTask(chat._instanceId, tab || "root", jobId);
+      await terrariumAPI.stopCreatureTask(
+        chat._instanceId,
+        tab || "root",
+        jobId,
+      );
     } else {
       await agentAPI.stopTask(chat._instanceId, jobId);
     }

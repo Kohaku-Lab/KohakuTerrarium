@@ -66,7 +66,9 @@ const zoneMeta = computed(() => preset.value?.zones?.[props.zoneId] || {});
 
 const isVisible = computed(() => zoneMeta.value.visible !== false);
 
-const slots = computed(() => layout.slotsForZone(props.zoneId, props.instanceId));
+const slots = computed(() =>
+  layout.slotsForZone(props.zoneId, props.instanceId),
+);
 
 function slotSize(slot, idx) {
   if (typeof slot.size === "number") return slot.size;

@@ -8,9 +8,11 @@
         v-for="t in tabs"
         :key="t.id"
         class="flex items-center gap-2 px-2 py-1.5 rounded text-left text-[11px] transition-colors"
-        :class="activeTab === t.id
-          ? 'bg-iolite/10 text-iolite'
-          : 'text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800'"
+        :class="
+          activeTab === t.id
+            ? 'bg-iolite/10 text-iolite'
+            : 'text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800'
+        "
         @click="activeTab = t.id"
       >
         <div :class="t.icon" class="text-[13px] shrink-0" />
@@ -32,7 +34,10 @@
         <ModelTab v-if="activeTab === 'model'" :instance="instance" />
         <PluginsTab v-else-if="activeTab === 'plugins'" :instance="instance" />
         <ExtensionsTab v-else-if="activeTab === 'extensions'" />
-        <TriggersTab v-else-if="activeTab === 'triggers'" :instance="instance" />
+        <TriggersTab
+          v-else-if="activeTab === 'triggers'"
+          :instance="instance"
+        />
         <CostTab v-else-if="activeTab === 'cost'" :instance="instance" />
         <EnvTab v-else-if="activeTab === 'env'" :instance="instance" />
         <AutoOpenTab v-else-if="activeTab === 'auto-open'" />

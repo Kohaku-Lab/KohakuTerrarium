@@ -176,7 +176,11 @@ async function startInstance() {
   if (!canStart.value) return;
   starting.value = true;
   try {
-    const id = await instances.create(selectedType.value, selectedConfig.value, pwd.value);
+    const id = await instances.create(
+      selectedType.value,
+      selectedConfig.value,
+      pwd.value,
+    );
     ElMessage.success(`Started ${selectedType.value}`);
     router.push(`/instances/${id}`);
   } catch (err) {

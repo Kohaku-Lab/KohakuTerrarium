@@ -87,17 +87,20 @@
       :close-on-click-modal="true"
     >
       <p class="text-warm-600 dark:text-warm-300">
-        Stop <strong>{{ stopTarget?.config_name }}</strong>?
-        This will terminate the {{ stopTarget?.type }} and all its processes.
+        Stop <strong>{{ stopTarget?.config_name }}</strong
+        >? This will terminate the {{ stopTarget?.type }} and all its processes.
       </p>
       <template #footer>
-        <el-button size="small" @click="showStopConfirm = false">Cancel</el-button>
+        <el-button size="small" @click="showStopConfirm = false"
+          >Cancel</el-button
+        >
         <el-button
           size="small"
           type="danger"
           :loading="stopping"
           @click="confirmStop"
-        >Stop</el-button>
+          >Stop</el-button
+        >
       </template>
     </el-dialog>
   </div>
@@ -155,10 +158,16 @@ async function confirmStop() {
   stopping.value = true;
   try {
     await instances.stop(stopTarget.value.id);
-    ElMessage({ message: `Stopped ${stopTarget.value.config_name}`, type: "success" });
+    ElMessage({
+      message: `Stopped ${stopTarget.value.config_name}`,
+      type: "success",
+    });
     showStopConfirm.value = false;
   } catch (err) {
-    ElMessage({ message: `Failed to stop: ${err.message || "Unknown error"}`, type: "error" });
+    ElMessage({
+      message: `Failed to stop: ${err.message || "Unknown error"}`,
+      type: "error",
+    });
   } finally {
     stopping.value = false;
   }

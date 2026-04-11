@@ -8,13 +8,13 @@
  * (command palette) add more handlers.
  */
 
-const target =
-  typeof window !== "undefined" ? window : /** @type {any} */ ({});
+const target = typeof window !== "undefined" ? window : /** @type {any} */ ({});
 
 const LAYOUT_EVENTS = Object.freeze({
   EDIT_REQUESTED: "layout:edit-requested",
   SAVE_AS_REQUESTED: "layout:save-as-requested",
   PALETTE_OPEN: "palette:open",
+  MODEL_CONFIG_OPEN: "model:config-open",
 });
 
 function _dispatch(name, detail) {
@@ -32,6 +32,10 @@ export function fireLayoutSaveAsRequested(detail = {}) {
 
 export function firePaletteOpen(detail = {}) {
   _dispatch(LAYOUT_EVENTS.PALETTE_OPEN, detail);
+}
+
+export function fireModelConfigOpen(detail = {}) {
+  _dispatch(LAYOUT_EVENTS.MODEL_CONFIG_OPEN, detail);
 }
 
 export function onLayoutEvent(name, handler) {

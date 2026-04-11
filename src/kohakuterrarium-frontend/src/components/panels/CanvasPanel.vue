@@ -4,19 +4,18 @@
     <div
       class="flex items-center gap-0.5 px-2 h-8 border-b border-warm-200 dark:border-warm-700 overflow-x-auto shrink-0 text-[11px]"
     >
-      <div
-        v-if="canvas.artifacts.length === 0"
-        class="text-warm-400 italic"
-      >
+      <div v-if="canvas.artifacts.length === 0" class="text-warm-400 italic">
         No artifacts yet
       </div>
       <button
         v-for="a in canvas.artifacts"
         :key="a.id"
         class="flex items-center gap-1 px-2 py-0.5 rounded transition-colors shrink-0"
-        :class="canvas.activeId === a.id
-          ? 'bg-iolite/15 text-iolite'
-          : 'text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800'"
+        :class="
+          canvas.activeId === a.id
+            ? 'bg-iolite/15 text-iolite'
+            : 'text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800'
+        "
         :title="`${a.name} · ${a.type}`"
         @click="canvas.setActive(a.id)"
       >
@@ -62,7 +61,11 @@
       </div>
 
       <CodeViewer
-        v-else-if="viewerType === 'code' || viewerType === 'svg' || viewerType === 'diagram'"
+        v-else-if="
+          viewerType === 'code' ||
+          viewerType === 'svg' ||
+          viewerType === 'diagram'
+        "
         :content="canvas.activeArtifact.content"
         :lang="canvas.activeArtifact.lang"
       />
@@ -86,7 +89,7 @@
       v-if="canvas.activeArtifact"
       class="flex items-center gap-2 px-2 h-6 border-t border-warm-200 dark:border-warm-700 text-[10px] text-warm-500 shrink-0"
     >
-      <span class="font-mono">{{ canvas.activeArtifact?.lang || 'text' }}</span>
+      <span class="font-mono">{{ canvas.activeArtifact?.lang || "text" }}</span>
       <span class="opacity-50">·</span>
       <span>{{ lineCount }} lines</span>
     </div>
@@ -110,14 +113,16 @@ const lineCount = computed(() => {
 });
 
 function typeIcon(t) {
-  return {
-    code: "i-carbon-code",
-    markdown: "i-carbon-document",
-    html: "i-carbon-html",
-    svg: "i-carbon-image",
-    diagram: "i-carbon-flow-connection",
-    table: "i-carbon-data-table",
-  }[t] || "i-carbon-document";
+  return (
+    {
+      code: "i-carbon-code",
+      markdown: "i-carbon-document",
+      html: "i-carbon-html",
+      svg: "i-carbon-image",
+      diagram: "i-carbon-flow-connection",
+      table: "i-carbon-data-table",
+    }[t] || "i-carbon-document"
+  );
 }
 
 function copyContent() {
@@ -130,15 +135,17 @@ function downloadContent() {
   const art = canvas.activeArtifact;
   const ver = canvas.activeArtifact;
   if (!art || !ver) return;
-  const ext = {
-    code: ver.lang || "txt",
-    markdown: "md",
-    html: "html",
-    svg: "svg",
-    diagram: "mmd",
-    table: "csv",
-  }[art.type] || "txt";
-  const name = (art.name || "artifact").replace(/[^a-zA-Z0-9_.-]/g, "_") + "." + ext;
+  const ext =
+    {
+      code: ver.lang || "txt",
+      markdown: "md",
+      html: "html",
+      svg: "svg",
+      diagram: "mmd",
+      table: "csv",
+    }[art.type] || "txt";
+  const name =
+    (art.name || "artifact").replace(/[^a-zA-Z0-9_.-]/g, "_") + "." + ext;
   const blob = new Blob([ver.content], { type: "text/plain" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");

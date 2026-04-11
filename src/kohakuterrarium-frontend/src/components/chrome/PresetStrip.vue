@@ -27,7 +27,8 @@
               <span
                 v-if="p.shortcut"
                 class="text-[9px] font-mono text-warm-400"
-              >{{ p.shortcut }}</span>
+                >{{ p.shortcut }}</span
+              >
             </div>
           </el-dropdown-item>
         </el-dropdown-menu>

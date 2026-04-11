@@ -9,7 +9,9 @@
         :class="stream.connected ? 'bg-aquamarine kohaku-pulse' : 'bg-warm-400'"
       />
       <span class="text-warm-400 font-mono truncate max-w-64">
-        {{ stream.meta?.path || (stream.connected ? 'connected' : 'connecting…') }}
+        {{
+          stream.meta?.path || (stream.connected ? "connected" : "connecting…")
+        }}
       </span>
       <el-select
         v-model="level"
@@ -50,17 +52,18 @@
         class="flex gap-2 items-start py-[1px]"
       >
         <span class="text-warm-400 shrink-0">{{ line.ts }}</span>
+        <span class="shrink-0 uppercase w-12" :class="levelColor(line.level)">{{
+          line.level
+        }}</span>
+        <span class="text-iolite shrink-0 max-w-40 truncate">{{
+          line.module
+        }}</span>
         <span
-          class="shrink-0 uppercase w-12"
-          :class="levelColor(line.level)"
-        >{{ line.level }}</span>
-        <span class="text-iolite shrink-0 max-w-40 truncate">{{ line.module }}</span>
-        <span class="text-warm-700 dark:text-warm-300 flex-1 break-all whitespace-pre-wrap">{{ line.text }}</span>
+          class="text-warm-700 dark:text-warm-300 flex-1 break-all whitespace-pre-wrap"
+          >{{ line.text }}</span
+        >
       </div>
-      <div
-        v-if="visible.length === 0"
-        class="text-warm-400 text-center py-6"
-      >
+      <div v-if="visible.length === 0" class="text-warm-400 text-center py-6">
         No log lines yet
       </div>
     </div>

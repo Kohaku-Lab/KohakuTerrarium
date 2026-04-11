@@ -3,29 +3,18 @@
     <div
       class="px-3 py-1 border-b border-warm-200 dark:border-warm-700 shrink-0 text-[10px] text-warm-400"
     >
-      Tool call timings for the current tab. Bars scale to the widest
-      span.
+      Tool call timings for the current tab. Bars scale to the widest span.
     </div>
     <div class="flex-1 overflow-y-auto px-3 py-2 text-[10px]">
-      <div
-        v-if="spans.length === 0"
-        class="text-warm-400 text-center py-6"
-      >
+      <div v-if="spans.length === 0" class="text-warm-400 text-center py-6">
         No tool calls in this tab yet.
       </div>
-      <div
-        v-else
-        class="flex flex-col gap-0.5"
-      >
-        <div
-          v-for="(s, i) in spans"
-          :key="i"
-          class="flex items-center gap-2"
-        >
-          <span class="font-mono text-iolite shrink-0 w-24 truncate">{{ s.name }}</span>
-          <div
-            class="flex-1 relative h-3 bg-warm-100 dark:bg-warm-800 rounded"
-          >
+      <div v-else class="flex flex-col gap-0.5">
+        <div v-for="(s, i) in spans" :key="i" class="flex items-center gap-2">
+          <span class="font-mono text-iolite shrink-0 w-24 truncate">{{
+            s.name
+          }}</span>
+          <div class="flex-1 relative h-3 bg-warm-100 dark:bg-warm-800 rounded">
             <div
               class="absolute top-0 h-full rounded"
               :class="s.errored ? 'bg-coral' : 'bg-aquamarine'"
@@ -69,7 +58,11 @@ const spans = computed(() => {
       const start = tc.startedAt || tc.started_at;
       const end = tc.endedAt || tc.ended_at || tc.completedAt;
       const startMs = typeof start === "number" ? start : Date.parse(start);
-      const endMs = end ? (typeof end === "number" ? end : Date.parse(end)) : startMs;
+      const endMs = end
+        ? typeof end === "number"
+          ? end
+          : Date.parse(end)
+        : startMs;
       if (!Number.isFinite(startMs)) continue;
       raw.push({
         name: tc.name,

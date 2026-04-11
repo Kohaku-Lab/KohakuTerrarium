@@ -12,19 +12,15 @@
       </div>
 
       <!-- Loading state -->
-      <div
-        v-if="loading"
-        class="card p-12 text-center text-secondary"
-      >
-        <div class="i-carbon-renew kohaku-pulse text-2xl mx-auto mb-3 text-amber" />
+      <div v-if="loading" class="card p-12 text-center text-secondary">
+        <div
+          class="i-carbon-renew kohaku-pulse text-2xl mx-auto mb-3 text-amber"
+        />
         <div>Loading sessions...</div>
       </div>
 
       <!-- Error state -->
-      <div
-        v-else-if="error"
-        class="card p-8 text-center"
-      >
+      <div v-else-if="error" class="card p-8 text-center">
         <div class="i-carbon-warning-alt text-2xl mx-auto mb-3 text-coral" />
         <div class="text-warm-700 dark:text-warm-300 mb-3">
           Failed to load sessions
@@ -41,7 +37,9 @@
         class="card p-12 text-center text-secondary"
       >
         <div class="i-carbon-time text-3xl mx-auto mb-3 text-warm-400" />
-        <div class="text-warm-600 dark:text-warm-400 mb-1">No saved sessions</div>
+        <div class="text-warm-600 dark:text-warm-400 mb-1">
+          No saved sessions
+        </div>
         <div class="text-xs">
           Sessions are saved automatically when instances run.
         </div>
@@ -58,105 +56,141 @@
           />
         </div>
 
-        <div v-if="sessions.length === 0" class="card p-8 text-center text-secondary">
+        <div
+          v-if="sessions.length === 0"
+          class="card p-8 text-center text-secondary"
+        >
           No sessions match "{{ searchQuery }}"
         </div>
 
         <div v-else class="flex flex-col gap-2">
           <div
             v-for="session in sessions"
-          :key="session.name"
-          class="card-hover p-4 flex items-center gap-4"
-        >
-          <!-- Icon -->
-          <div
-            :class="session.config_type === 'terrarium' ? 'i-carbon-network-4' : 'i-carbon-bot'"
-            class="text-lg shrink-0"
-            :style="{ color: session.config_type === 'terrarium' ? '#5A4FCF' : '#4C9989' }"
-          />
-
-          <!-- Info -->
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-0.5">
-              <span class="font-medium text-warm-800 dark:text-warm-200 truncate">
-                {{ session.name }}
-              </span>
-              <GemBadge :gem="session.config_type === 'terrarium' ? 'iolite' : 'aquamarine'">
-                {{ session.config_type }}
-              </GemBadge>
-            </div>
-            <div class="flex items-center gap-3 text-xs text-secondary">
-              <span v-if="session.config_path" class="font-mono truncate">
-                {{ session.config_path }}
-              </span>
-              <span v-if="session.agents && session.agents.length > 0">
-                {{ session.agents.length }} agent{{ session.agents.length !== 1 ? "s" : "" }}
-              </span>
-              <span v-if="session.pwd" class="font-mono truncate text-warm-400" :title="session.pwd">
-                {{ session.pwd }}
-              </span>
-            </div>
+            :key="session.name"
+            class="card-hover p-4 flex items-center gap-4"
+          >
+            <!-- Icon -->
             <div
-              v-if="session.preview"
-              class="text-xs text-warm-400 dark:text-warm-500 mt-1 truncate italic"
-              :title="session.preview"
-            >
-              "{{ session.preview }}"
+              :class="
+                session.config_type === 'terrarium'
+                  ? 'i-carbon-network-4'
+                  : 'i-carbon-bot'
+              "
+              class="text-lg shrink-0"
+              :style="{
+                color:
+                  session.config_type === 'terrarium' ? '#5A4FCF' : '#4C9989',
+              }"
+            />
+
+            <!-- Info -->
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 mb-0.5">
+                <span
+                  class="font-medium text-warm-800 dark:text-warm-200 truncate"
+                >
+                  {{ session.name }}
+                </span>
+                <GemBadge
+                  :gem="
+                    session.config_type === 'terrarium'
+                      ? 'iolite'
+                      : 'aquamarine'
+                  "
+                >
+                  {{ session.config_type }}
+                </GemBadge>
+              </div>
+              <div class="flex items-center gap-3 text-xs text-secondary">
+                <span v-if="session.config_path" class="font-mono truncate">
+                  {{ session.config_path }}
+                </span>
+                <span v-if="session.agents && session.agents.length > 0">
+                  {{ session.agents.length }} agent{{
+                    session.agents.length !== 1 ? "s" : ""
+                  }}
+                </span>
+                <span
+                  v-if="session.pwd"
+                  class="font-mono truncate text-warm-400"
+                  :title="session.pwd"
+                >
+                  {{ session.pwd }}
+                </span>
+              </div>
+              <div
+                v-if="session.preview"
+                class="text-xs text-warm-400 dark:text-warm-500 mt-1 truncate italic"
+                :title="session.preview"
+              >
+                "{{ session.preview }}"
+              </div>
+            </div>
+
+            <!-- Last active time -->
+            <div class="text-xs text-warm-400 shrink-0 text-right min-w-24">
+              <div>{{ formatTime(session.last_active) }}</div>
+              <div class="text-warm-400/60">
+                {{ formatDate(session.last_active) }}
+              </div>
+            </div>
+
+            <!-- Resume + Delete buttons -->
+            <div class="flex gap-2 shrink-0">
+              <button
+                class="btn-primary flex items-center gap-1"
+                :disabled="resuming === session.name"
+                :class="{
+                  'opacity-50 cursor-not-allowed': resuming === session.name,
+                }"
+                @click="resumeSession(session)"
+              >
+                <span
+                  :class="
+                    resuming === session.name
+                      ? 'i-carbon-renew kohaku-pulse'
+                      : 'i-carbon-play'
+                  "
+                />
+                {{ resuming === session.name ? "Resuming..." : "Resume" }}
+              </button>
+              <button
+                class="btn-secondary flex items-center gap-1 text-coral hover:bg-coral/10"
+                title="Delete session"
+                @click="deleteSession(session)"
+              >
+                <span class="i-carbon-trash-can" />
+              </button>
             </div>
           </div>
 
-          <!-- Last active time -->
-          <div class="text-xs text-warm-400 shrink-0 text-right min-w-24">
-            <div>{{ formatTime(session.last_active) }}</div>
-            <div class="text-warm-400/60">{{ formatDate(session.last_active) }}</div>
+          <!-- Pagination -->
+          <div
+            class="flex items-center justify-between mt-4 text-xs text-warm-400"
+          >
+            <span>{{ totalSessions }} sessions total</span>
+            <div class="flex gap-2">
+              <button
+                class="btn-secondary"
+                :disabled="!hasPrev"
+                @click="prevPage"
+              >
+                <span class="i-carbon-chevron-left" /> Prev
+              </button>
+              <span class="py-1 px-2">
+                {{ currentOffset + 1 }}-{{
+                  Math.min(currentOffset + pageSize, totalSessions)
+                }}
+              </span>
+              <button
+                class="btn-secondary"
+                :disabled="!hasMore"
+                @click="nextPage"
+              >
+                Next <span class="i-carbon-chevron-right" />
+              </button>
+            </div>
           </div>
-
-          <!-- Resume + Delete buttons -->
-          <div class="flex gap-2 shrink-0">
-            <button
-              class="btn-primary flex items-center gap-1"
-              :disabled="resuming === session.name"
-              :class="{ 'opacity-50 cursor-not-allowed': resuming === session.name }"
-              @click="resumeSession(session)"
-            >
-              <span
-                :class="resuming === session.name ? 'i-carbon-renew kohaku-pulse' : 'i-carbon-play'"
-              />
-              {{ resuming === session.name ? "Resuming..." : "Resume" }}
-            </button>
-            <button
-              class="btn-secondary flex items-center gap-1 text-coral hover:bg-coral/10"
-              title="Delete session"
-              @click="deleteSession(session)"
-            >
-              <span class="i-carbon-trash-can" />
-            </button>
-          </div>
-        </div>
-
-        <!-- Pagination -->
-        <div class="flex items-center justify-between mt-4 text-xs text-warm-400">
-          <span>{{ totalSessions }} sessions total</span>
-          <div class="flex gap-2">
-            <button
-              class="btn-secondary"
-              :disabled="!hasPrev"
-              @click="prevPage"
-            >
-              <span class="i-carbon-chevron-left" /> Prev
-            </button>
-            <span class="py-1 px-2">
-              {{ currentOffset + 1 }}-{{ Math.min(currentOffset + pageSize, totalSessions) }}
-            </span>
-            <button
-              class="btn-secondary"
-              :disabled="!hasMore"
-              @click="nextPage"
-            >
-              Next <span class="i-carbon-chevron-right" />
-            </button>
-          </div>
-        </div>
         </div>
       </template>
     </div>
@@ -190,7 +224,9 @@ watch(searchQuery, () => {
   }, 300);
 });
 
-const hasMore = computed(() => currentOffset.value + pageSize < totalSessions.value);
+const hasMore = computed(
+  () => currentOffset.value + pageSize < totalSessions.value,
+);
 const hasPrev = computed(() => currentOffset.value > 0);
 
 async function fetchSessions() {

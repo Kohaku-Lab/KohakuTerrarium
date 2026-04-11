@@ -6,16 +6,23 @@
     <div class="i-carbon-settings-edit text-base" />
     <span class="font-medium">Layout edit mode</span>
     <span class="text-warm-500">·</span>
-    <span class="text-warm-600 dark:text-warm-400">{{ activePresetLabel }}</span>
+    <span class="text-warm-600 dark:text-warm-400">{{
+      activePresetLabel
+    }}</span>
     <span
       v-if="layout.editModeDirty"
       class="text-amber font-semibold text-[10px] uppercase"
-    >● unsaved</span>
+      >● unsaved</span
+    >
     <div class="flex-1" />
     <button
       class="px-2 py-0.5 rounded bg-amber/20 hover:bg-amber/30 text-amber-shadow transition-colors"
       :disabled="!canSave"
-      :title="canSave ? 'Save changes' : 'Builtin presets cannot be overwritten — use Save as new'"
+      :title="
+        canSave
+          ? 'Save changes'
+          : 'Builtin presets cannot be overwritten — use Save as new'
+      "
       @click="onSave"
     >
       Save
