@@ -39,7 +39,6 @@ def print_events(store: SessionStore, agent: str | None = None) -> None:
 
     for i, evt in enumerate(events):
         etype = evt.get("type", "?")
-        ts = evt.get("ts", 0)
 
         # Format based on type
         match etype:

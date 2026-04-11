@@ -311,7 +311,6 @@ def render_plot(runtime: dict[str, set[str]], all_mods: set[str]):
 
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-        import matplotlib.patches as mpatches
         import math
     except ImportError:
         print("matplotlib not installed. Install with: pip install matplotlib")

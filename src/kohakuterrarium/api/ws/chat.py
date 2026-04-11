@@ -246,14 +246,16 @@ async def ws_creature(websocket: WebSocket, agent_id: str):
     session.agent.output_router.add_secondary(out)
 
     # Send session_info so the frontend knows which agent this is
-    await websocket.send_json({
-        "type": "activity",
-        "activity_type": "session_info",
-        "source": session.agent.config.name,
-        "model": session.agent.config.model,
-        "agent_name": session.agent.config.name,
-        "ts": time.time(),
-    })
+    await websocket.send_json(
+        {
+            "type": "activity",
+            "activity_type": "session_info",
+            "source": session.agent.config.name,
+            "model": session.agent.config.model,
+            "agent_name": session.agent.config.name,
+            "ts": time.time(),
+        }
+    )
 
     fwd_task = asyncio.create_task(_forward_queue(queue, websocket))
 
