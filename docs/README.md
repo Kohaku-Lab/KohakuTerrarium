@@ -9,6 +9,9 @@ Practical how-to guides for building agents and terrariums.
 - [Creatures](guide/creatures.md): pre-built creatures, inheritance, creating your own
 - [Terrariums](guide/terrariums.md): multi-agent setup, channel wiring, root agent binding
 - [Sessions](guide/sessions.md): persistence, resume, `.kohakutr` files
+- [Custom Modules](guide/custom-modules.md): build custom tools, inputs, outputs, triggers, sub-agents
+- [Plugins](guide/plugins.md): intercept agent flows with prompt and lifecycle plugins
+- [Frontend Layout](guide/frontend-layout.md): split tree layout, presets, edit mode, panels, shortcuts
 - [Examples](guide/examples.md): walkthrough of included example agents and terrariums
 
 ## Concepts
@@ -39,3 +42,4 @@ Work on the framework itself.
 
 - [Testing](develop/testing.md): test infrastructure, unit/integration coverage, behavior docs
 - [Framework Internals](develop/internals.md): import analysis, internal decisions, technical notes
+- [Frontend Architecture](develop/frontend.md): component tree, stores, WebSocket protocols, adding panels
