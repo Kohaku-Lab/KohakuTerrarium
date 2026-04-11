@@ -1,9 +1,9 @@
 <p align="center">
-  <h1 align="center">KohakuTerrarium</h1>
-  <p align="center"><strong>A universal agent-level abstraction framework.</strong></p>
-  <p align="center">Define what an agent is. Build any kind. Compose them into teams.</p>
+  <img src="images/banner.png" alt="KohakuTerrarium" width="800">
 </p>
-
+<p align="center">
+  <strong>Define what an agent is. Build any kind. Compose them into teams.</strong>
+</p>
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python 3.12+">
   <img src="https://img.shields.io/badge/license-KohakuTerrarium--1.0-green" alt="License">
