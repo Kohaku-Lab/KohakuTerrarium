@@ -34,7 +34,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         run: |
-          pip install -e ".[all-no-browser]"
+          pip install -e ".[minimal,dev]"
       - name: Run tests
         run: pytest tests/unit/ -v --tb=short
 

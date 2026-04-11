@@ -49,24 +49,16 @@ Issues = "https://github.com/Kohaku-Lab/KohakuTerrarium/issues"
 kt = "kohakuterrarium.__main__:main"
 
 [project.optional-dependencies]
+# ── minimal: everything needed for full functionality ────────────────
+# Web API server
 api = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",
 ]
-dev = [
-    "pytest>=9.0.0",
-    "pytest-asyncio>=1.3.0",
-    "black>=26.3.0",
-    "ruff>=0.9.0",
-]
-discord = [
-    "discord.py>=2.0.0",
-    "Pillow>=12.2.0",
-]
-asr = [
-    "openai-whisper>=20250625",
-    "sounddevice>=0.4.0",
-    "numpy>=2.4.0",
+# Web tools: fetch pages + search
+web = [
+    "trafilatura>=2.0.0",
+    "ddgs>=9.0.0",
 ]
 # PDF reading in the read tool
 pdf = [
@@ -76,31 +68,52 @@ pdf = [
 mcp = [
     "mcp>=1.0.0",
 ]
-# Web tools: fetch pages + search
-web = [
-    "trafilatura>=2.0.0",
-    "ddgs>=9.0.0",
-]
-# Full browser rendering for web_fetch
-browser = [
-    "crawl4ai>=0.8.0",
-]
-# Embedding models for session memory search
-embeddings-light = [
+# Lightweight embeddings for session memory (no pytorch)
+embeddings = [
     "model2vec>=0.8.0",
 ]
-embeddings = [
-    "sentence-transformers>=5.0.0",
-]
+# Desktop app (native webview window)
 desktop = [
     "pywebview==6.1",
 ]
-all = [
-    "KohakuTerrarium[api,dev,web,browser,pdf,mcp,desktop,embeddings,embeddings-light]",
+# Minimal = all core functionality (no pytorch, no heavy extras)
+minimal = [
+    "KohakuTerrarium[api,web,pdf,mcp,embeddings,desktop]",
 ]
-# Like "all" but without browser (crawl4ai needs lxml which lacks 3.14 wheels)
-all-no-browser = [
-    "KohakuTerrarium[api,dev,web,pdf,mcp,desktop,embeddings,embeddings-light]",
+
+# ── demo: example agent-apps that need extra deps ────────────────────
+discord = [
+    "discord.py>=2.0.0",
+    "Pillow>=12.2.0",
+]
+asr = [
+    "openai-whisper>=20250625",
+    "sounddevice>=0.4.0",
+    "numpy>=2.4.0",
+]
+demo = [
+    "KohakuTerrarium[discord,asr]",
+]
+
+# ── browser: full browser rendering for web_fetch (heavy: lxml) ──────
+browser = [
+    "crawl4ai>=0.8.0",
+]
+
+# ── full: everything including pytorch-based embeddings ──────────────
+embeddings-heavy = [
+    "sentence-transformers>=5.0.0",
+]
+full = [
+    "KohakuTerrarium[minimal,demo,browser,embeddings-heavy]",
+]
+
+# ── dev: testing and linting ─────────────────────────────────────────
+dev = [
+    "pytest>=9.0.0",
+    "pytest-asyncio>=1.3.0",
+    "black>=26.3.0",
+    "ruff>=0.9.0",
 ]
 
 [tool.setuptools]
@@ -136,25 +149,30 @@ icon = "src/kohakuterrarium/app_icon"
 sources = ["src/kohakuterrarium"]
 startup_module = "kohakuterrarium.__briefcase__"
 requires = [
+    # Core deps (same as [project] dependencies)
     "httpx>=0.27.0",
     "openai>=2.0.0",
     "pydantic>=2.0.0",
     "rich>=14.0.0",
     "pyyaml>=6.0.0",
     "jinja2>=3.1.0",
-    "aiofiles>=25.0.0",
+    "aiofiles>=25.1.0",
     "python-dotenv>=1.0.0",
     "kohakuvault>=0.7.0",
     "textual>=8.0.0",
     "html2text>=2025.0.0",
     "gitpython>=3.1.0",
+    # [minimal] extras
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",
     "pywebview==6.1",
     "trafilatura>=2.0.0",
     "ddgs>=9.0.0",
+    "pymupdf>=1.24.0",
+    "model2vec>=0.8.0",
 ]
-# NOTE: torch-dependent extras (asr, embeddings) deliberately excluded
+# NOTE: demo (discord, asr), browser (crawl4ai), embeddings-heavy
+# (sentence-transformers/pytorch) deliberately excluded for binary size
 # proxy_tools (pywebview dep) only has sdist on PyPI — pre-build wheel in CI
 requirement_installer_args = ["--find-links", "wheels"]
 
