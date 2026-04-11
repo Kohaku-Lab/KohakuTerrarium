@@ -24,6 +24,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Application Frameworks",
 ]
 dependencies = [
+    # Core
     "httpx>=0.27.0",
     "openai>=2.0.0",
     "pydantic>=2.0.0",
@@ -33,10 +34,24 @@ dependencies = [
     "jinja2>=3.1.0",
     "aiofiles>=25.1.0",
     "python-dotenv>=1.0.0",
-    "kohakuvault>=0.7.0",
+    "kohakuvault>=0.8.1",
     "textual>=8.0.0",
     "html2text>=2025.0.0",
     "gitpython>=3.1.0",
+    # API server
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    # Web tools
+    "trafilatura>=2.0.0",
+    "ddgs>=9.0.0",
+    # PDF reading
+    "pymupdf>=1.24.0",
+    # MCP client
+    "mcp>=1.0.0",
+    # Lightweight embeddings (no pytorch)
+    "model2vec>=0.8.0",
+    # Desktop webview
+    "pywebview==6.1",
 ]
 
 [project.urls]
@@ -49,38 +64,6 @@ Issues = "https://github.com/Kohaku-Lab/KohakuTerrarium/issues"
 kt = "kohakuterrarium.__main__:main"
 
 [project.optional-dependencies]
-# ── minimal: everything needed for full functionality ────────────────
-# Web API server
-api = [
-    "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.34.0",
-]
-# Web tools: fetch pages + search
-web = [
-    "trafilatura>=2.0.0",
-    "ddgs>=9.0.0",
-]
-# PDF reading in the read tool
-pdf = [
-    "pymupdf>=1.24.0",
-]
-# MCP (Model Context Protocol) client support
-mcp = [
-    "mcp>=1.0.0",
-]
-# Lightweight embeddings for session memory (no pytorch)
-embeddings = [
-    "model2vec>=0.8.0",
-]
-# Desktop app (native webview window)
-desktop = [
-    "pywebview==6.1",
-]
-# Minimal = all core functionality (no pytorch, no heavy extras)
-minimal = [
-    "KohakuTerrarium[api,web,pdf,mcp,embeddings,desktop]",
-]
-
 # ── demo: example agent-apps that need extra deps ────────────────────
 discord = [
     "discord.py>=2.0.0",
@@ -105,7 +88,7 @@ embeddings-heavy = [
     "sentence-transformers>=5.0.0",
 ]
 full = [
-    "KohakuTerrarium[minimal,demo,browser,embeddings-heavy]",
+    "KohakuTerrarium[demo,browser,embeddings-heavy]",
 ]
 
 # ── dev: testing and linting ─────────────────────────────────────────
@@ -149,30 +132,30 @@ icon = "src/kohakuterrarium/app_icon"
 sources = ["src/kohakuterrarium"]
 startup_module = "kohakuterrarium.__briefcase__"
 requires = [
-    # Core deps (same as [project] dependencies)
+    # All base dependencies are in [project].dependencies.
+    # Briefcase doesn't support extras, so we list them explicitly.
     "httpx>=0.27.0",
     "openai>=2.0.0",
     "pydantic>=2.0.0",
     "rich>=14.0.0",
+    "prompt_toolkit>=3.0.0",
     "pyyaml>=6.0.0",
     "jinja2>=3.1.0",
     "aiofiles>=25.1.0",
     "python-dotenv>=1.0.0",
-    "kohakuvault>=0.7.0",
+    "kohakuvault>=0.8.1",
     "textual>=8.0.0",
     "html2text>=2025.0.0",
     "gitpython>=3.1.0",
-    # [minimal] extras
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",
     "pywebview==6.1",
     "trafilatura>=2.0.0",
     "ddgs>=9.0.0",
     "pymupdf>=1.24.0",
+    "mcp>=1.0.0",
     "model2vec>=0.8.0",
 ]
-# NOTE: demo (discord, asr), browser (crawl4ai), embeddings-heavy
-# (sentence-transformers/pytorch) deliberately excluded for binary size
 # proxy_tools (pywebview dep) only has sdist on PyPI — pre-build wheel in CI
 requirement_installer_args = ["--find-links", "wheels"]
 
