@@ -78,7 +78,13 @@ jobs:
         run: briefcase build
 
       - name: Package briefcase app
-        run: briefcase package --no-sign
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" = "macOS" ]; then
+            briefcase package --adhoc-sign
+          else
+            briefcase package
+          fi
 
       - name: Collect artifacts
         shell: bash
