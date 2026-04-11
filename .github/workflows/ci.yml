@@ -25,6 +25,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.12", "3.13", "3.14"]
+        exclude:
+          # pythonnet (pywebview Windows backend) has no 3.14 wheel
+          - os: windows-latest
+            python-version: "3.14"
     steps:
       - uses: actions/checkout@v4
         with:
