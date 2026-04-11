@@ -118,25 +118,32 @@ User input  | System  |   |    (Main LLM)    |<--| with tools |
 ## Quick start
 
 ```bash
-# Install
+# Install from PyPI
+pip install kohakuterrarium
+
+# Or install from source (for development)
 git clone https://github.com/Kohaku-Lab/KohakuTerrarium.git
 cd KohakuTerrarium
-pip install -e .
+pip install -e ".[dev]"
 
-# Install the default packaged creatures and terrariums
+# Install the default creatures, terrariums, and plugins
 kt install https://github.com/Kohaku-Lab/kt-defaults.git
 
-# Authenticate for the bundled SWE configs
-kt login codex
+# Set up LLM access (pick one)
+kt login codex          # Codex OAuth (no API key needed)
+kt model default gpt-5.4  # or configure any OpenAI-compatible API
 
 # Run a single creature
 kt run @kt-defaults/creatures/swe
 
 # Run a multi-agent terrarium
 kt terrarium run @kt-defaults/terrariums/swe_team
+
+# Launch the web dashboard
+kt serve
 ```
 
-KohakuTerrarium is not limited to Codex OAuth. It also supports OpenRouter, OpenAI, Anthropic, and Google Gemini APIs.
+Supports OpenRouter, OpenAI, Anthropic, Google Gemini, and any OpenAI-compatible API.
 
 ## Choose your path
 
