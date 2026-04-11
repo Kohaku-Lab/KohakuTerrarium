@@ -159,6 +159,7 @@ requires = [
 requirement_installer_args = ["--find-links", "wheels"]
 
 [tool.briefcase.app.kohakuterrarium.macOS]
+universal_build = false
 requires = [
     "std-nslog~=1.0.0",
 ]
