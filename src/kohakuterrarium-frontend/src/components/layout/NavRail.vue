@@ -9,17 +9,20 @@
       :class="expanded ? 'justify-between' : 'justify-center'"
     >
       <div class="flex items-center gap-2 min-w-0" v-if="expanded">
-        <div
-          class="w-7 h-7 rounded-lg rounded-md bg-gradient-to-br from-amber-light via-amber to-amber-shadow shrink-0"
+        <img
+          src="/kohaku-icon.png"
+          alt="Kohaku"
+          class="w-7 h-7 rounded-full shrink-0 object-cover"
         />
-        <span
-          class="text-sm font-semibold text-warm-700 dark:text-warm-300 truncate"
-          >Kohaku</span
-        >
+        <span class="text-sm truncate">
+          <span class="font-bold text-amber">Kohaku</span><span class="font-light text-iolite-light dark:text-iolite-light">Terrarium</span>
+        </span>
       </div>
-      <div
+      <img
         v-else
-        class="w-7 h-7 rounded-lg rounded-md bg-gradient-to-br from-amber-light via-amber to-amber-shadow"
+        src="/kohaku-icon.png"
+        alt="Kohaku"
+        class="w-7 h-7 rounded-full object-cover"
       />
       <button
         class="w-6 h-6 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors shrink-0"
