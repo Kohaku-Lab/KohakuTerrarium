@@ -339,7 +339,9 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
             return
 
         lines = ["\n## Available MCP Tools\n"]
-        lines.append("Call these with: mcp_call(server=<server>, tool=<tool>, args={...})\n")
+        lines.append(
+            "Call these with: mcp_call(server=<server>, tool=<tool>, args={...})\n"
+        )
 
         for srv in servers:
             if srv["status"] != "connected":
