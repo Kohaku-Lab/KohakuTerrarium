@@ -155,6 +155,8 @@ requires = [
     "ddgs>=9.0.0",
 ]
 # NOTE: torch-dependent extras (asr, embeddings) deliberately excluded
+# proxy_tools (pywebview dep) only has sdist on PyPI — pre-build wheel in CI
+requirement_installer_args = ["--find-links", "wheels"]
 
 [tool.briefcase.app.kohakuterrarium.macOS]
 requires = [

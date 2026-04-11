@@ -71,6 +71,12 @@ jobs:
       - name: Install briefcase
         run: pip install briefcase
 
+      - name: Pre-build wheels for sdist-only deps
+        shell: bash
+        run: |
+          mkdir -p wheels
+          pip wheel proxy_tools -w wheels --no-deps
+
       - name: Create briefcase project
         run: briefcase create
 
