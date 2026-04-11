@@ -11,16 +11,15 @@ authors = [
 ]
 license = { text = "KohakuTerrarium-1.0" }
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 keywords = ["ai", "agent", "llm", "multi-agent", "terrarium", "framework"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development :: Libraries :: Application Frameworks",
 ]
@@ -37,7 +36,6 @@ dependencies = [
     "kohakuvault>=0.7.0",
     "textual>=8.0.0",
     "html2text>=2025.0.0",
-    "tomli>=2.0.0; python_version<'3.11'",
     "gitpython>=3.1.0",
 ]
 
