@@ -86,3 +86,7 @@ async for result in (writer >> reviewer).iterate(task):
 | discord_adventure_bot | Bot-owned interaction | `agent()`, dynamic creation, game state |
 | debate_arena | Multi-agent turn-taking | `agent()`, `>>`, `async for`, `async with` |
 | task_orchestrator | Dynamic agent topology | `factory()`, `>>`, `asyncio.gather` |
+| ensemble_voting | Redundancy through diversity | `&` (parallel), `>>` auto-wrap, `\|` fallback, `*` retry |
+| review_loop | Write → review → revise cycle | `async for` iterate, `>>` transforms, persistent `agent()` |
+| smart_router | Classify → route to specialist | `>> dict` routing, `factory()`, `\|` fallback |
+| pipeline_transforms | Data extraction pipeline | `>>` auto-wrap (json.loads, lambdas), mix agents + functions |
