@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "KohakuTerrarium"
-version = "1.0.0rc1"
+version = "1.0.0rc1.post1"
 description = "A universal agent framework for building self-driven AI agents and multi-agent teams"
 authors = [
     { name = "Shih-Ying Yeh (KohakuBlueLeaf)", email = "apolloyeh0123@gmail.com" },
@@ -119,7 +119,7 @@ select = ["F401", "F841"]
 [tool.briefcase]
 project_name = "KohakuTerrarium"
 bundle = "com.kohaku.terrarium"
-version = "1.0.0rc1"
+version = "1.0.0rc1.post1"
 url = "https://github.com/Kohaku-Lab/KohakuTerrarium"
 license.file = "LICENSE"
 author = "Shih-Ying Yeh (KohakuBlueLeaf)"
