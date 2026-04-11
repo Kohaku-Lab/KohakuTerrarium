@@ -598,27 +598,60 @@ export const useChatStore = defineStore("chat", {
 
     /** Connect single WS for terrarium */
     _connectTerrarium(terrariumId) {
+      this._historyLoaded = false;
+      this._wsBuffer = [];
+
       const ws = new WebSocket(wsUrl(`/ws/terrariums/${terrariumId}`));
-      ws.onmessage = (event) => this._onMessage(JSON.parse(event.data));
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (this._historyLoaded) {
+          this._onMessage(data);
+        } else {
+          this._wsBuffer.push(data);
+        }
+      };
       ws.onclose = () => {
         this.processing = false;
       };
       this._ws = ws;
 
+      // Load all tab histories, then flush WS buffer
+      const loads = [];
       if (this.tabs[0]) {
-        this._loadHistory(this.tabs[0]);
+        loads.push(this._loadHistory(this.tabs[0]));
       }
       for (const tab of this.tabs) {
         if (tab.startsWith("ch:")) {
-          this._loadHistory(tab);
+          loads.push(this._loadHistory(tab));
         }
       }
+      Promise.all(loads).then(() => {
+        this._historyLoaded = true;
+        if (this._wsBuffer) {
+          for (const data of this._wsBuffer) {
+            this._onMessage(data);
+          }
+          this._wsBuffer = [];
+        }
+      });
     },
 
     /** Connect single WS for standalone creature */
     _connectCreature(agentId) {
+      // Buffer WS events until history loads to avoid race condition
+      // (WS events arriving before history overwrites them)
+      this._historyLoaded = false;
+      this._wsBuffer = [];
+
       const ws = new WebSocket(wsUrl(`/ws/creatures/${agentId}`));
-      ws.onmessage = (event) => this._onMessage(JSON.parse(event.data));
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (this._historyLoaded) {
+          this._onMessage(data);
+        } else {
+          this._wsBuffer.push(data);
+        }
+      };
       ws.onclose = () => {
         this.processing = false;
       };
@@ -643,6 +676,14 @@ export const useChatStore = defineStore("chat", {
         }
       } catch {
         /* no history yet */
+      }
+      // History loaded — flush buffered WS events
+      this._historyLoaded = true;
+      if (this._wsBuffer) {
+        for (const data of this._wsBuffer) {
+          this._onMessage(data);
+        }
+        this._wsBuffer = [];
       }
     },
 
