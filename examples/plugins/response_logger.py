@@ -76,8 +76,7 @@ class ResponseLoggerPlugin(BasePlugin):
             preview = response[: self._max_preview] + "..."
 
         self._write(
-            f"LLM [{model}] {prompt_tok}→{completion_tok} tokens | "
-            f"{preview}"
+            f"LLM [{model}] {prompt_tok}→{completion_tok} tokens | " f"{preview}"
         )
 
     async def on_event(self, event: Any = None) -> None:

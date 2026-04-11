@@ -42,9 +42,7 @@ class PromptInjectorPlugin(BasePlugin):
     async def on_load(self, context: PluginContext) -> None:
         self._ctx = context
 
-    async def pre_llm_call(
-        self, messages: list[dict], **kwargs
-    ) -> list[dict] | None:
+    async def pre_llm_call(self, messages: list[dict], **kwargs) -> list[dict] | None:
         """Inject additional context as a system message before the LLM call.
 
         The messages list is the full conversation that will be sent.

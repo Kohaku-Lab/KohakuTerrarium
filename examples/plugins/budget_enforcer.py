@@ -59,9 +59,7 @@ class BudgetEnforcerPlugin(BasePlugin):
             used=self._total,
         )
 
-    async def pre_llm_call(
-        self, messages: list[dict], **kwargs
-    ) -> list[dict] | None:
+    async def pre_llm_call(self, messages: list[dict], **kwargs) -> list[dict] | None:
         """Block the LLM call if budget is exhausted.
 
         Instead of raising an error (which would crash the agent), we

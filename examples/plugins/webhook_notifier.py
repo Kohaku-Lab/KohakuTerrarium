@@ -91,7 +91,9 @@ class WebhookNotifierPlugin(BasePlugin):
 
     async def on_compact_start(self, context_length: int) -> None:
         """Before compaction — optionally downgrade to a cheaper model."""
-        await self._send("compact", {"context_length": context_length, "phase": "start"})
+        await self._send(
+            "compact", {"context_length": context_length, "phase": "start"}
+        )
 
         # Auto-downgrade model when context is very large
         # This demonstrates switch_model(): you might want a cheaper model

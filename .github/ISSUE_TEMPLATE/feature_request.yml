@@ -1,0 +1,47 @@
+name: Feature Request
+description: Suggest a new feature or improvement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for your idea! Please describe what you'd like to see.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or motivation
+      description: What problem does this solve? What's the use case?
+      placeholder: I want to... / It would be useful if...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How do you think this should work? Include code examples if helpful.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Have you tried other approaches? What workarounds exist?
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the framework is this about?
+      options:
+        - Core (agent, controller, tools)
+        - Terrarium (multi-agent)
+        - CLI (kt commands)
+        - Web dashboard / API
+        - Plugins
+        - Compose (composition algebra)
+        - Packages / ecosystem
+        - Documentation
+        - Other
