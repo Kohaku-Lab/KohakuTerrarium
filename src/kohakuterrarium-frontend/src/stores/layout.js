@@ -23,6 +23,7 @@ import { computed, markRaw, ref } from "vue";
 
 const USER_PRESETS_KEY = "kt.presets.user";
 const ACTIVE_PRESET_KEY = "kt.layout.activePreset";
+const PRESET_TREE_PREFIX = "kt.layout.tree.";
 const INSTANCE_OVERRIDE_PREFIX = "kt.layout.instance.";
 
 /** Safe JSON.parse with fallback. */
@@ -128,13 +129,16 @@ export const useLayoutStore = defineStore("layout", () => {
 
   // ---------- actions ----------
 
-  /** Register a built-in preset. Overwrites an existing entry with the same id. */
+  /** Register a built-in preset. Overwrites an existing entry with the same id.
+   *  Restores user-saved tree ratios from localStorage if available. */
   function registerBuiltinPreset(preset) {
     if (!preset || !preset.id) return;
     builtinPresets.value = {
       ...builtinPresets.value,
       [preset.id]: { ...preset, builtin: true },
     };
+    // Restore saved splitter ratios for this preset
+    _restoreTreeRatios(preset.id);
   }
 
   /** Switch to a new active preset. Unknown ids are ignored. */
@@ -142,6 +146,7 @@ export const useLayoutStore = defineStore("layout", () => {
     if (allPresets.value[id]) {
       activePresetId.value = id;
       _writeJson(ACTIVE_PRESET_KEY, id);
+      _restoreTreeRatios(id);
     }
   }
 
@@ -528,6 +533,37 @@ export const useLayoutStore = defineStore("layout", () => {
     // on structural changes (replace/remove/split).
   }
 
+  /** Persist the current tree ratios to localStorage (call on drag end). */
+  function persistTreeRatios() {
+    const p = activePreset.value;
+    if (!p?.tree) return;
+    _writeJson(PRESET_TREE_PREFIX + p.id, p.tree);
+  }
+
+  /** Restore saved tree ratios for a preset from localStorage. */
+  function _restoreTreeRatios(presetId) {
+    const saved = _readJson(PRESET_TREE_PREFIX + presetId, null);
+    if (!saved) return;
+    // Apply saved ratios onto the current preset's tree
+    const p = allPresets.value[presetId];
+    if (!p?.tree) return;
+    _applyRatios(p.tree, saved);
+  }
+
+  /** Recursively apply saved ratio values onto a tree structure.
+   *  Only updates ratios — does not change tree topology. */
+  function _applyRatios(target, saved) {
+    if (!target || !saved) return;
+    if (target.type === "split" && saved.type === "split") {
+      if (saved.ratio != null) target.ratio = saved.ratio;
+      if (target.children && saved.children) {
+        for (let i = 0; i < target.children.length && i < saved.children.length; i++) {
+          _applyRatios(target.children[i], saved.children[i]);
+        }
+      }
+    }
+  }
+
   /** Attach a detached-window descriptor (Phase 11 will consume this). */
   function markDetached(panelId, instanceId) {
     const entry = { panelId, instanceId };
@@ -595,5 +631,6 @@ export const useLayoutStore = defineStore("layout", () => {
     removeTreeNode,
     splitTreeNode,
     setTreeRatio,
+    persistTreeRatios,
   };
 });

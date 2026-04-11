@@ -192,6 +192,8 @@ function onPointerDown(e) {
     ev.target.removeEventListener("pointermove", onMove);
     ev.target.removeEventListener("pointerup", onUp);
     ev.target.removeEventListener("pointercancel", onUp);
+    // Persist the adjusted ratios to localStorage
+    layout.persistTreeRatios();
   };
 
   e.target.addEventListener("pointermove", onMove);
