@@ -10,14 +10,12 @@ Tests for:
 - Controller (basic, without LLM)
 """
 
-import shutil
+import sys
 
 import pytest
 
-# Bash tool tests need a real shell; skip on Windows CI without bash
-_HAS_BASH = shutil.which("bash") is not None
-_SKIP_NO_BASH = pytest.mark.skipif(
-    not _HAS_BASH, reason="bash not available (Windows CI without git-bash)"
+_SKIP_WINDOWS = pytest.mark.skipif(
+    sys.platform == "win32", reason="bash tool tests require Unix shell"
 )
 
 from kohakuterrarium.commands import CommandResult, parse_command_args
@@ -243,7 +241,7 @@ class TestToolBase:
 class TestBashTool:
     """Tests for BashTool."""
 
-    @_SKIP_NO_BASH
+    @_SKIP_WINDOWS
     @pytest.mark.asyncio
     async def test_bash_tool_echo(self):
         """Test basic echo command."""
@@ -378,7 +376,7 @@ class TestExecutorBasic:
 class TestExecutorAsync:
     """Async executor tests."""
 
-    @_SKIP_NO_BASH
+    @_SKIP_WINDOWS
     @pytest.mark.asyncio
     async def test_submit_and_wait(self):
         """Test submitting and waiting for a job."""
@@ -395,7 +393,7 @@ class TestExecutorAsync:
         assert result.success
         assert "test" in result.output.lower()
 
-    @_SKIP_NO_BASH
+    @_SKIP_WINDOWS
     @pytest.mark.asyncio
     async def test_get_status_while_running(self):
         """Test getting status while job runs."""

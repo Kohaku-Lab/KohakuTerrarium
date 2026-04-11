@@ -98,6 +98,10 @@ desktop = [
 all = [
     "KohakuTerrarium[api,dev,web,browser,pdf,mcp,desktop,embeddings,embeddings-light]",
 ]
+# Like "all" but without browser (crawl4ai needs lxml which lacks 3.14 wheels)
+all-no-browser = [
+    "KohakuTerrarium[api,dev,web,pdf,mcp,desktop,embeddings,embeddings-light]",
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

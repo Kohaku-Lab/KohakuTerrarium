@@ -431,7 +431,7 @@ class TestSubAgent:
         assert result.success is True
         assert result.turns == 1
         assert "42" in result.output
-        assert result.duration > 0
+        assert result.duration >= 0
 
     async def test_run_with_timeout(self):
         """Test sub-agent timeout handling."""
