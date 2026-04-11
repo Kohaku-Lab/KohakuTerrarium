@@ -109,6 +109,7 @@ const PRESET_ORDER = [
   "multi-creature",
   "canvas",
   "debug",
+  "chat-terminal",
   "settings",
 ];
 

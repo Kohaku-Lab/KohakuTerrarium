@@ -22,6 +22,7 @@ import { defineStore } from "pinia";
 import { computed, markRaw, ref } from "vue";
 
 const USER_PRESETS_KEY = "kt.presets.user";
+const ACTIVE_PRESET_KEY = "kt.layout.activePreset";
 const INSTANCE_OVERRIDE_PREFIX = "kt.layout.instance.";
 
 /** Safe JSON.parse with fallback. */
@@ -73,7 +74,7 @@ export const useLayoutStore = defineStore("layout", () => {
   /** @type {import('vue').Ref<Record<string, any>>} */
   const userPresets = ref(_readJson(USER_PRESETS_KEY, {}));
   /** @type {import('vue').Ref<string | null>} */
-  const activePresetId = ref(null);
+  const activePresetId = ref(_readJson(ACTIVE_PRESET_KEY, null));
 
   // panels keyed by id. Stored via markRaw so Vue reactivity doesn't
   // wrap the component object (which breaks Element Plus + Monaco).
@@ -140,6 +141,7 @@ export const useLayoutStore = defineStore("layout", () => {
   function switchPreset(id) {
     if (allPresets.value[id]) {
       activePresetId.value = id;
+      _writeJson(ACTIVE_PRESET_KEY, id);
     }
   }
 
@@ -222,6 +224,7 @@ export const useLayoutStore = defineStore("layout", () => {
     userPresets.value = { ...userPresets.value, [newId]: snapshot };
     _writeJson(USER_PRESETS_KEY, userPresets.value);
     activePresetId.value = newId;
+    _writeJson(ACTIVE_PRESET_KEY, newId);
     return snapshot;
   }
 

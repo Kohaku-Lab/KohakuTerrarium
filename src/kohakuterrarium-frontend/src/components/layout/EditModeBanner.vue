@@ -17,15 +17,14 @@
     <div class="flex-1" />
     <button
       class="px-2 py-0.5 rounded bg-amber/20 hover:bg-amber/30 text-amber-shadow transition-colors"
-      :disabled="!canSave"
       :title="
         canSave
           ? 'Save changes'
-          : 'Builtin presets cannot be overwritten — use Save as new'
+          : 'Builtin preset — will open Save As'
       "
       @click="onSave"
     >
-      Save
+      {{ canSave ? 'Save' : 'Save as...' }}
     </button>
     <button
       class="px-2 py-0.5 rounded bg-warm-100 dark:bg-warm-800 hover:bg-warm-200 dark:hover:bg-warm-700 text-warm-700 dark:text-warm-300 transition-colors"
@@ -73,6 +72,11 @@ const canSave = computed(
 );
 
 function onSave() {
+  if (layout.activePreset?.builtin) {
+    // Can't overwrite builtins — redirect to Save As
+    fireLayoutSaveAsRequested();
+    return;
+  }
   layout.saveEditMode();
   layout.exitEditMode();
 }

@@ -61,7 +61,7 @@ const CHAT_FOCUS_PRESET = {
   ),
 };
 
-/** Workspace — files + editor + chat + terminal for code-work creatures. */
+/** Workspace — files + editor + chat for code-work creatures. */
 const WORKSPACE_PRESET = {
   id: "workspace",
   label: "Workspace",
@@ -71,9 +71,21 @@ const WORKSPACE_PRESET = {
     leaf("files"),
     hsplit(
       62,
-      vsplit(70, leaf("monaco-editor"), leaf("terminal")),
+      leaf("monaco-editor"),
       vsplit(65, leaf("chat"), leaf("activity")),
     ),
+  ),
+};
+
+/** Chat + Terminal — chat on left, terminal on top-right, status on bottom-right. */
+const CHAT_TERMINAL_PRESET = {
+  id: "chat-terminal",
+  label: "Chat + Terminal",
+  shortcut: "Ctrl+6",
+  tree: hsplit(
+    55,
+    leaf("chat"),
+    vsplit(70, leaf("terminal"), leaf("status-dashboard")),
   ),
 };
 
@@ -141,6 +153,7 @@ export const DEFAULT_PRESETS = [
   MULTI_CREATURE_PRESET,
   CANVAS_PRESET,
   DEBUG_PRESET,
+  CHAT_TERMINAL_PRESET,
   SETTINGS_PRESET,
 ];
 
