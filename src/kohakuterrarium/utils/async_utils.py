@@ -186,8 +186,9 @@ async def first_result(
 
         # Return first result (or raise its exception)
         return done.pop().result()
-    except Exception:
-        # Ensure all tasks are cancelled on error
+    except Exception as e:
+        # Ensure all tasks are cancelled on error; re-raised below
+        logger.debug("race() failed, cancelling remaining tasks", error=str(e))
         for task in tasks:
             if not task.done():
                 task.cancel()

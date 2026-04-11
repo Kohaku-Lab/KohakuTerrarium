@@ -253,8 +253,10 @@ class ReadTool(BaseTool):
                         source_name=f"{file_path.name} p{page_num + 1}",
                     )
                 )
-            except Exception:
-                pass  # Skip render on failure, text is still available
+            except Exception as e:
+                logger.debug(
+                    "PDF page render failed, text still available", error=str(e)
+                )
 
         doc.close()
 

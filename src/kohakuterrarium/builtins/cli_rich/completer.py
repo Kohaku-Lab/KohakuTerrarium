@@ -57,7 +57,8 @@ class SlashCommandCompleter(Completer):
                 return
             try:
                 suggestions = arg_completer(arg_part)
-            except Exception:
+            except Exception as e:
+                _ = e  # fallback: completer must not raise into prompt_toolkit
                 return
             for value, meta in suggestions:
                 yield Completion(

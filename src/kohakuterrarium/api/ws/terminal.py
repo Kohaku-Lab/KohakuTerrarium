@@ -222,9 +222,9 @@ async def terminal_ws(websocket: WebSocket, agent_id: str):
         await _pty_session(websocket, str(cwd))
     except WebSocketDisconnect:
         pass
-    except Exception:
-        logger.debug("terminal WS error", exc_info=True)
+    except Exception as e:
+        logger.debug("terminal WS error", error=str(e), exc_info=True)
         try:
             await websocket.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to close terminal WS", error=str(e), exc_info=True)

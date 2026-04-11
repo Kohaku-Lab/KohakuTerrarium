@@ -125,9 +125,9 @@ async def tail_logs(websocket: WebSocket):
         await _tail_file(path, websocket)
     except WebSocketDisconnect:
         pass
-    except Exception:
-        logger.debug("log WS error", exc_info=True)
+    except Exception as e:
+        logger.debug("log WS error", error=str(e), exc_info=True)
         try:
             await websocket.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to close log WS", error=str(e), exc_info=True)

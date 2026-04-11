@@ -82,8 +82,8 @@ class ScrollbackCommitter:
                 if not ansi.endswith("\n"):
                     sys.stdout.write("\n")
                 sys.stdout.flush()
-            except Exception:
-                logger.exception("scrollback write failed")
+            except Exception as e:
+                logger.exception("scrollback write failed", error=str(e))
 
         if self.app.app is None:
             # Application not running yet — write directly. Stdout still
@@ -93,20 +93,20 @@ class ScrollbackCommitter:
             return
         try:
             spawn(self._run_in_terminal(_emit))
-        except Exception:
-            logger.exception("commit failed")
+        except Exception as e:
+            logger.exception("commit failed", error=str(e))
 
     async def _run_in_terminal(self, fn) -> None:
         if self.app.app is None:
             try:
                 fn()
-            except Exception:
-                logger.exception("scrollback emit failed")
+            except Exception as e:
+                logger.exception("scrollback emit failed", error=str(e))
             return
         try:
             await run_in_terminal(fn, in_executor=False)
-        except Exception:
-            logger.exception("run_in_terminal failed")
+        except Exception as e:
+            logger.exception("run_in_terminal failed", error=str(e))
 
 
 class SessionReplay:

@@ -267,7 +267,8 @@ class RichCLIApp:
             return DEFAULT_WIDTH
         try:
             return self.app.output.get_size().columns
-        except Exception:
+        except Exception as e:
+            logger.debug("Could not determine terminal width", error=str(e))
             return DEFAULT_WIDTH
 
     # ── Submission ──
@@ -303,8 +304,8 @@ class RichCLIApp:
         async def _send():
             try:
                 await self.agent.inject_input(text, source="cli")
-            except Exception:
-                logger.exception("Error processing input")
+            except Exception as e:
+                logger.exception("Error processing input", error=str(e))
             finally:
                 self._processing = False
                 self.live_region.set_processing(False)
@@ -534,8 +535,8 @@ class RichCLIApp:
         if self._processing and self.agent:
             try:
                 self.agent.interrupt()
-            except Exception:
-                logger.exception("Interrupt failed")
+            except Exception as e:
+                logger.exception("Interrupt failed", error=str(e))
 
     def _on_backgroundify(self) -> None:
         """Promote the latest running direct tool/sub-agent to background."""
@@ -547,8 +548,8 @@ class RichCLIApp:
             return
         try:
             promote(job_id)
-        except Exception:
-            logger.exception("backgroundify failed")
+        except Exception as e:
+            logger.exception("backgroundify failed", error=str(e))
 
     def _on_cancel_bg(self) -> None:
         """Cancel the most recent backgrounded job."""
@@ -561,8 +562,8 @@ class RichCLIApp:
             return
         try:
             cancel(job_id, name)
-        except Exception:
-            logger.exception("cancel-bg failed")
+        except Exception as e:
+            logger.exception("cancel-bg failed", error=str(e))
 
     def _on_exit(self) -> None:
         self._exit_requested = True

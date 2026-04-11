@@ -128,6 +128,14 @@ def create_llm_from_profile_name(name: str) -> LLMProvider:
 
 def _create_from_inline(config: AgentConfig) -> LLMProvider:
     """Create LLM provider from inline controller config (backward compat)."""
+    if not config.model:
+        raise ValueError(
+            "No LLM model configured and no default model set. "
+            "Use 'kt login <provider>' to authenticate, then "
+            "'kt model default <name>' to set a default, "
+            "or add 'llm: <profile>' to your creature config."
+        )
+
     if config.auth_mode == "codex-oauth":
         provider = CodexOAuthProvider(
             model=config.model,

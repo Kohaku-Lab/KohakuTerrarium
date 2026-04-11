@@ -234,7 +234,8 @@ def _load_mcp_config() -> list[dict]:
         with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
             return data.get("servers", []) if isinstance(data, dict) else []
-    except Exception:
+    except Exception as e:
+        _ = e  # MCP config unreadable
         return []
 
 

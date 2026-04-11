@@ -265,8 +265,8 @@ class WhisperASR(ASRModule):
                 audio_tensor = torch.from_numpy(audio_chunk)
                 speech_prob = self._vad_model(audio_tensor, self._sample_rate).item()
                 return speech_prob >= self.whisper_config.vad_threshold
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Silero VAD inference failed", error=str(e), exc_info=True)
 
         # Fallback: energy-based detection
         energy = np.sqrt(np.mean(audio_chunk**2))

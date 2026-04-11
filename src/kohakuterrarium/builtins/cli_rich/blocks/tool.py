@@ -6,7 +6,6 @@ children), background promotion, and language-aware syntax highlighting.
 """
 
 import time
-from typing import Optional
 
 from rich.console import Group, RenderableType
 from rich.padding import Padding
@@ -219,7 +218,8 @@ class ToolCallBlock:
                     line_numbers=False,
                     word_wrap=True,
                 )
-            except Exception:
+            except Exception as e:
+                _ = e  # fallback: syntax highlighting failed, render as plain text
                 rendered = Text(body)
         else:
             rendered = Text(body)
@@ -230,7 +230,7 @@ class ToolCallBlock:
             )
         return rendered
 
-    def _live_body(self) -> Optional[RenderableType]:
+    def _live_body(self) -> RenderableType | None:
         # Collapsed by default: tool calls show only the header line
         # (status icon + name + args + elapsed). Children of sub-agents
         # take over as the progress indicator.
@@ -246,7 +246,7 @@ class ToolCallBlock:
             return Text(self.error or "error", style=COLOR_ERROR)
         return None
 
-    def _committed_body(self) -> Optional[RenderableType]:
+    def _committed_body(self) -> RenderableType | None:
         # Errors always get the message.
         if self.status == "error":
             return Text(self.error or "error", style=COLOR_ERROR)
@@ -262,7 +262,7 @@ class ToolCallBlock:
 
     def _render_children(
         self, max_visible: int = LIVE_MAX_CHILDREN
-    ) -> Optional[RenderableType]:
+    ) -> RenderableType | None:
         """Render children indented, capped at ``max_visible`` most recent."""
         if not self.children:
             return None

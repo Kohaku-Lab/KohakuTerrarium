@@ -189,8 +189,10 @@ class _TreeBuilder:
                             summary = f" - {fm['description']}"
                         if fm.get("protected"):
                             summary = f" [protected]{summary}"
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(
+                            "Failed to read frontmatter", error=str(e), exc_info=True
+                        )
 
                 if not self._add_line(f"{prefix}{connector}{entry.name}{summary}"):
                     break

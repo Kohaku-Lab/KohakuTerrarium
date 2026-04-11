@@ -145,8 +145,8 @@ class AgentSession:
             try:
                 meta = self.agent.session_store.load_meta()
                 session_id = meta.get("session_id", "")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to load session meta", error=str(e), exc_info=True)
 
         # Working directory from executor
         pwd = ""

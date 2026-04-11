@@ -90,8 +90,8 @@ def enable_enhanced_keyboard() -> None:
     try:
         sys.stdout.write(ENABLE_ENHANCED_KEYBOARD)
         sys.stdout.flush()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Failed to enable enhanced keyboard", error=str(e))
 
 
 def disable_enhanced_keyboard() -> None:
@@ -99,8 +99,8 @@ def disable_enhanced_keyboard() -> None:
     try:
         sys.stdout.write(DISABLE_ENHANCED_KEYBOARD)
         sys.stdout.flush()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Failed to disable enhanced keyboard", error=str(e))
 
 
 def make_output() -> Output | None:
@@ -123,5 +123,6 @@ def make_output() -> Output | None:
         return None
     try:
         return Vt100_Output.from_pty(sys.stdout, term=term or "xterm-256color")
-    except Exception:
+    except Exception as e:
+        logger.debug("Vt100 output creation failed", error=str(e))
         return None

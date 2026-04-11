@@ -89,5 +89,6 @@ def _load_api_keys() -> dict[str, str]:
         with open(KEYS_PATH) as f:
             data = yaml.safe_load(f)
             return data if isinstance(data, dict) else {}
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to load API keys file", error=str(e))
         return {}

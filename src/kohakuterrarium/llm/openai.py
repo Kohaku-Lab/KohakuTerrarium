@@ -51,7 +51,7 @@ class OpenAIProvider(BaseLLMProvider):
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = "gpt-4o-mini",
+        model: str = "",
         base_url: str = OPENAI_BASE_URL,
         *,
         temperature: float = 0.7,

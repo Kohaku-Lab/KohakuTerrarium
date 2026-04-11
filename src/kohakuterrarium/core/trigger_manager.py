@@ -134,8 +134,8 @@ class TriggerManager:
                 await task
             except asyncio.CancelledError:
                 pass
-            except Exception:
-                logger.debug("Trigger task cleanup error", exc_info=True)
+            except Exception as e:
+                logger.debug("Trigger task cleanup error", error=str(e), exc_info=True)
 
         await trigger.stop()
         self._created_at.pop(trigger_id, None)
@@ -224,9 +224,11 @@ class TriggerManager:
                     if self.on_trigger_fired:
                         try:
                             self.on_trigger_fired(trigger_id, event)
-                        except Exception:
+                        except Exception as e:
                             logger.debug(
-                                "on_trigger_fired callback error", exc_info=True
+                                "on_trigger_fired callback error",
+                                error=str(e),
+                                exc_info=True,
                             )
                     await self._process_event(event)
             except asyncio.CancelledError:

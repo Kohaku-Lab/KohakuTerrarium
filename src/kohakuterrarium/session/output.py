@@ -268,8 +268,10 @@ class SessionOutput(OutputModule):
                     "last_prompt_tokens": prompt,
                 },
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(
+                "Failed to save token usage state", error=str(e), exc_info=True
+            )
 
     def _handle_compact_start(self, name: str, detail: str, metadata: dict) -> None:
         self._record(

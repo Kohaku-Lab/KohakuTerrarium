@@ -218,8 +218,12 @@ class CompactManager:
                         self._agent_name,
                         conversation.to_messages(),
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(
+                        "Failed to save compacted conversation",
+                        error=str(e),
+                        exc_info=True,
+                    )
 
                 # Persist compact_count for resume continuity
                 try:
@@ -227,8 +231,12 @@ class CompactManager:
                         self._agent_name,
                         compact_count=self._compact_count,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(
+                        "Failed to save compact_count state",
+                        error=str(e),
+                        exc_info=True,
+                    )
 
             logger.info(
                 "Auto-compact complete",

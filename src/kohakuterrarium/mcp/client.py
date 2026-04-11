@@ -148,16 +148,18 @@ class MCPClientManager:
             try:
                 # ClientSession doesn't have a close method in all versions
                 pass
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to close MCP session", error=str(e), exc_info=True)
 
         # Exit the transport context manager
         ctx = self._stdio_contexts.pop(name, None)
         if ctx:
             try:
                 await ctx.__aexit__(None, None, None)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "Failed to exit MCP transport context", error=str(e), exc_info=True
+                )
 
         self._transports.pop(name, None)
 

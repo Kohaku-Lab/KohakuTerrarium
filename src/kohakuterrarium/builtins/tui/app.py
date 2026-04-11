@@ -10,6 +10,8 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Footer, Header, Static, TabbedContent, TabPane
 
+from kohakuterrarium.utils.logging import get_logger
+
 from kohakuterrarium.builtins.tui.widgets import (
     ChatInput,
     LoadOlderButton,
@@ -20,6 +22,8 @@ from kohakuterrarium.builtins.tui.widgets import (
     TerrariumPanel,
     UserMessage,
 )
+
+logger = get_logger(__name__)
 
 IDLE_STATUS = "\u25cf KohakUwU"
 
@@ -132,8 +136,10 @@ class AgentTUI(App):
             self._queued_widgets.append(qw)
             try:
                 self.query_one("#queued-area", Vertical).mount(qw)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "Failed to mount queued widget", error=str(e), exc_info=True
+                )
         else:
             chat = self._get_active_chat()
             if chat:
@@ -149,8 +155,8 @@ class AgentTUI(App):
                 status.update(event.hint)
             elif not self._is_processing:
                 status.update(IDLE_STATUS)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to update command hint", error=str(e), exc_info=True)
 
     def on_chat_input_edit_queued(self, event: ChatInput.EditQueued) -> None:
         """Pull the last queued message back into the input box for editing."""
@@ -171,16 +177,18 @@ class AgentTUI(App):
                 items.pop()  # remove the last (most recent queued message)
             for item in items:
                 self._input_queue.put_nowait(item)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to rebuild input queue", error=str(e), exc_info=True)
         # Put text back in input box
         try:
             inp = self.query_one("#input-box", ChatInput)
             inp.clear()
             inp.insert(text)
             inp.focus()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(
+                "Failed to restore text to input box", error=str(e), exc_info=True
+            )
 
     def on_load_older_button_clicked(self, event: LoadOlderButton.Clicked) -> None:
         """Handle 'Load older' button click."""
@@ -213,7 +221,10 @@ class AgentTUI(App):
                     scroll_id = active.replace("tab-", "chat-")
                     return self.query_one(f"#{scroll_id}", VerticalScroll)
             return self.query_one("#chat-scroll", VerticalScroll)
-        except Exception:
+        except Exception as e:
+            logger.debug(
+                "Failed to get active chat scroll", error=str(e), exc_info=True
+            )
             return None
 
     def get_active_tab_name(self) -> str:
@@ -225,8 +236,8 @@ class AgentTUI(App):
             active_id = tabs.active  # "tab-root"
             if active_id:
                 return _id_to_name(active_id.replace("tab-", ""))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to get active tab name", error=str(e), exc_info=True)
         return self._terrarium_tabs[0] if self._terrarium_tabs else ""
 
     def action_interrupt(self) -> None:
@@ -256,8 +267,10 @@ class AgentTUI(App):
         self._thinking_active = False
         try:
             self.call_from_thread(self._clear_status)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(
+                "Failed to clear status on stop thinking", error=str(e), exc_info=True
+            )
 
     def _thinking_loop(self) -> None:
         idx = 0
@@ -265,7 +278,10 @@ class AgentTUI(App):
             frame = THINKING_FRAMES[idx % len(THINKING_FRAMES)]
             try:
                 self.call_from_thread(self._set_status_text, frame)
-            except Exception:
+            except Exception as e:
+                logger.debug(
+                    "Thinking animation loop ended", error=str(e), exc_info=True
+                )
                 break
             idx += 1
             time.sleep(0.3)
@@ -273,14 +289,14 @@ class AgentTUI(App):
     def _set_status_text(self, text: str) -> None:
         try:
             self.query_one("#quick-status", Static).update(text)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to set status text", error=str(e), exc_info=True)
 
     def _clear_status(self) -> None:
         try:
             self.query_one("#quick-status", Static).update("")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to clear status", error=str(e), exc_info=True)
 
 
 # ── Helpers ─────────────────────────────────────────────────────

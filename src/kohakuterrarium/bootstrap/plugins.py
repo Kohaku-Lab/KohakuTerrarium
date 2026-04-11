@@ -84,8 +84,10 @@ def _load_one(
             plugin.name = name
         return plugin
 
-    except Exception:
-        logger.warning("Failed to load plugin", plugin_name=name, exc_info=True)
+    except Exception as e:
+        logger.warning(
+            "Failed to load plugin", plugin_name=name, error=str(e), exc_info=True
+        )
         return None
 
 
@@ -95,7 +97,10 @@ def _discover_package_plugins(
     """Scan installed packages and register undiscovered plugins as disabled."""
     try:
         packages = list_packages()
-    except Exception:
+    except Exception as e:
+        logger.debug(
+            "Failed to list packages for plugin discovery", error=str(e), exc_info=True
+        )
         return
 
     for pkg in packages:
@@ -127,6 +132,8 @@ def _resolve_from_packages(name: str) -> tuple[str, str] | None:
                     cls = pdef.get("class") or pdef.get("class_name", "")
                     if module and cls:
                         return (module, cls)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(
+            "Failed to resolve plugin from packages", error=str(e), exc_info=True
+        )
     return None

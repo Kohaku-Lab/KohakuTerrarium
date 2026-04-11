@@ -772,8 +772,8 @@ def _merge_package_presets() -> dict[str, dict[str, Any]]:
                 # Build preset dict from the entry (exclude 'name' key)
                 preset_data = {k: v for k, v in preset.items() if k != "name"}
                 merged[preset_name] = preset_data
-    except Exception:
-        logger.debug("Failed to load package presets", exc_info=True)
+    except Exception as e:
+        logger.debug("Failed to load package presets", error=str(e), exc_info=True)
 
     return merged
 

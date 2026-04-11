@@ -60,8 +60,9 @@ def _parse_creature_detail(config_dir: Path) -> dict | None:
             "tools": tools_list,
             "path": str(config_dir),
         }
-    except Exception:
+    except Exception as e:
         # Fallback: parse raw YAML for basic info
+        _ = e  # full config parse failed, try raw YAML
         try:
             data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
             return {
@@ -76,7 +77,8 @@ def _parse_creature_detail(config_dir: Path) -> dict | None:
                 ],
                 "path": str(config_dir),
             }
-        except Exception:
+        except Exception as e:
+            _ = e  # config unreadable, skip
             return None
 
 
@@ -102,7 +104,8 @@ def _parse_terrarium_detail(config_dir: Path) -> dict | None:
             "creatures": creature_names,
             "path": str(config_dir),
         }
-    except Exception:
+    except Exception as e:
+        _ = e  # config unreadable, skip
         return None
 
 

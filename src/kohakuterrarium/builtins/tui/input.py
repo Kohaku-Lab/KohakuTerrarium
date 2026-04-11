@@ -127,8 +127,10 @@ class TUIInput(BaseInputModule):
             try:
                 inp = self._tui._app.query_one("#input-box", ChatInput)
                 inp.command_names = hint_names
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "Failed to set command hints on input", error=str(e), exc_info=True
+                )
 
         logger.debug("TUI input started", session_key=self._session_key)
 

@@ -108,11 +108,12 @@ class TUISession:
             return
         try:
             self._app.call_later(fn, *args)
-        except Exception:
+        except Exception as e:
+            _ = e  # call_later failed, try call_from_thread
             try:
                 self._app.call_from_thread(fn, *args)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("TUI safe_call failed", error=str(e), exc_info=True)
 
     def _get_chat_scroll_id(self, target: str = "") -> str:
         """Get the chat scroll widget ID for a target."""
@@ -133,8 +134,8 @@ class TUISession:
                 if scroll:
                     chat.scroll_end(animate=False)
                 self._cull_chat_widgets(chat)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("TUI safe_mount failed", error=str(e), exc_info=True)
 
         self._safe_call(_do)
 
@@ -227,8 +228,8 @@ class TUISession:
                         chat.mount(w)
                 # Add new button if more available
                 self._update_load_older_button(chat, target)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("TUI load_older_batch failed", error=str(e), exc_info=True)
 
         self._safe_call(_do)
 
@@ -277,8 +278,10 @@ class TUISession:
             def _do():
                 try:
                     block.mark_done(summary)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(
+                        "TUI update_compact_summary failed", error=str(e), exc_info=True
+                    )
 
             self._safe_call(_do)
         else:
@@ -299,8 +302,10 @@ class TUISession:
             try:
                 panel = self._app.query_one("#session-panel", SessionInfoPanel)
                 panel.add_usage(prompt_tokens, completion_tokens, total, cached_tokens)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "TUI update_token_usage failed", error=str(e), exc_info=True
+                )
 
         self._safe_call(_do)
 
@@ -315,8 +320,10 @@ class TUISession:
             try:
                 panel = self._app.query_one("#session-panel", SessionInfoPanel)
                 panel.restore_usage(total_in, total_out, last_prompt, total_cached)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "TUI restore_token_usage failed", error=str(e), exc_info=True
+                )
 
         self._safe_call(_do)
 
@@ -339,8 +346,10 @@ class TUISession:
             def _do():
                 try:
                     sa.add_tool_line(tool_name, args_preview)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(
+                        "TUI add_tool_block failed", error=str(e), exc_info=True
+                    )
 
             self._safe_call(_do)
             return None
@@ -383,8 +392,10 @@ class TUISession:
                         else:
                             child.mark_done(output)
                         return
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "TUI update_tool_block failed", error=str(e), exc_info=True
+                )
 
         self._safe_call(_do)
 
@@ -459,8 +470,8 @@ class TUISession:
                     widget.append(chunk)
                     chat = self._app.query_one(f"#{scroll_id}", VerticalScroll)
                     chat.scroll_end(animate=False)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("TUI append_stream failed", error=str(e), exc_info=True)
 
         self._safe_call(_do)
 
@@ -490,8 +501,8 @@ class TUISession:
                     chat.scroll_end(animate=False)
                 # Cull old widgets if too many
                 self._cull_chat_widgets(chat)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("TUI end_streaming failed", error=str(e), exc_info=True)
 
         self._safe_call(_do)
 
@@ -514,8 +525,8 @@ class TUISession:
                     panel.remove_item(item_id)
                 else:
                     panel.add_item(item_id, label, promotable=promotable)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("TUI update_running failed", error=str(e), exc_info=True)
 
         self._safe_call(_do)
 
@@ -526,8 +537,8 @@ class TUISession:
         def _do():
             try:
                 self._app.query_one("#running-panel", RunningPanel).clear()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("TUI clear_running failed", error=str(e), exc_info=True)
 
         self._safe_call(_do)
 
@@ -540,8 +551,10 @@ class TUISession:
                 self._app.query_one("#scratchpad-panel", ScratchpadPanel).update_data(
                     data
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "TUI update_scratchpad failed", error=str(e), exc_info=True
+                )
 
         self._safe_call(_do)
 
@@ -558,8 +571,10 @@ class TUISession:
                 self._app.query_one("#session-panel", SessionInfoPanel).set_info(
                     session_id, model, agent_name
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "TUI update_session_info failed", error=str(e), exc_info=True
+                )
 
         self._safe_call(_do)
 
@@ -572,8 +587,10 @@ class TUISession:
             try:
                 panel = self._app.query_one("#session-panel", SessionInfoPanel)
                 panel.set_context_limits(max_context, compact_threshold)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "TUI set_context_limits failed", error=str(e), exc_info=True
+                )
 
         self._safe_call(_do)
 
@@ -599,8 +616,8 @@ class TUISession:
                 self._app.query_one("#session-panel", SessionInfoPanel).add_tokens(
                     count
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("TUI add_tokens failed", error=str(e), exc_info=True)
 
         self._safe_call(_do)
 
@@ -613,8 +630,8 @@ class TUISession:
             try:
                 panel = self._app.query_one("#terrarium-panel", TerrariumPanel)
                 panel.set_topology(creatures, channels)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("TUI update_terrarium failed", error=str(e), exc_info=True)
 
         self._safe_call(_do)
 
@@ -636,30 +653,38 @@ class TUISession:
                         qw.remove()
                         if chat:
                             chat.mount(UserMessage(text))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(
+                            "TUI start_thinking queue promote failed",
+                            error=str(e),
+                            exc_info=True,
+                        )
                 if chat:
                     chat.scroll_end(animate=False)
                 self._app._queued_widgets.clear()
             try:
                 self._app.start_thinking_animation()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "TUI start_thinking_animation failed", error=str(e), exc_info=True
+                )
 
     def stop_thinking(self) -> None:
         if self._app and self._app.is_running:
             try:
                 self._app.stop_thinking_animation()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "TUI stop_thinking_animation failed", error=str(e), exc_info=True
+                )
 
     def set_idle(self) -> None:
         if self._app and self._app.is_running:
             self._app._is_processing = False
             try:
                 self._app.query_one("#quick-status", Static).update(IDLE_STATUS)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("TUI set_idle failed", error=str(e), exc_info=True)
 
     # ── Lifecycle ───────────────────────────────────────────────
 

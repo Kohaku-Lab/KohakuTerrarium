@@ -340,8 +340,10 @@ class TerrariumRuntime(HotPlugMixin):
                 try:
                     meta = self._root_agent.session_store.load_meta()
                     status["root_session_id"] = meta.get("session_id", "")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(
+                        "Failed to load root session meta", error=str(e), exc_info=True
+                    )
             compact = getattr(self._root_agent, "compact_manager", None)
             if compact:
                 status["root_max_context"] = compact.config.max_tokens

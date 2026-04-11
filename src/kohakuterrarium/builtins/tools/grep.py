@@ -108,36 +108,13 @@ class GrepTool(BaseTool):
 
                 files_searched += 1
 
-                try:
-                    async with aiofiles.open(
-                        file_path, encoding="utf-8", errors="replace"
-                    ) as f:
-                        line_num = 0
-                        async for line in f:
-                            line_num += 1
-                            if regex.search(line):
-                                total_matches += 1
-
-                                if len(matches) < limit:
-                                    content = line.rstrip()
-                                    # Truncate long lines
-                                    if len(content) > 2000:
-                                        content = content[:2000] + " ... (truncated)"
-
-                                    try:
-                                        rel_path = file_path.relative_to(base)
-                                    except ValueError:
-                                        rel_path = file_path
-
-                                    matches.append(
-                                        {
-                                            "file": str(rel_path),
-                                            "line": line_num,
-                                            "content": content,
-                                        }
-                                    )
-                except Exception:
-                    continue
+                file_matches = await _search_single_file(
+                    file_path, regex, base, limit - len(matches)
+                )
+                for m in file_matches:
+                    total_matches += 1
+                    if len(matches) < limit:
+                        matches.append(m)
 
                 # Early termination: once we have limit matches, stop
                 # scanning more files.  We sacrifice the exact total count
@@ -176,3 +153,47 @@ class GrepTool(BaseTool):
         except Exception as e:
             logger.error("Grep failed", error=str(e))
             return ToolResult(error=str(e))
+
+
+async def _search_single_file(
+    path: Path,
+    regex: "re.Pattern",
+    base: Path,
+    remaining_limit: int,
+) -> list[dict[str, Any]]:
+    """Search a single file for regex matches.
+
+    Returns a list of match dicts with 'file', 'line', and 'content' keys.
+    Only collects up to ``remaining_limit`` detailed matches, but counts
+    all occurrences for the total.
+    """
+    matches: list[dict[str, Any]] = []
+    try:
+        async with aiofiles.open(path, encoding="utf-8", errors="replace") as f:
+            line_num = 0
+            async for line in f:
+                line_num += 1
+                if not regex.search(line):
+                    continue
+
+                # Always append a match entry (caller counts total_matches
+                # from len); but only include full content up to the limit.
+                content = line.rstrip()
+                if len(content) > 2000:
+                    content = content[:2000] + " ... (truncated)"
+
+                try:
+                    rel_path = path.relative_to(base)
+                except ValueError:
+                    rel_path = path
+
+                matches.append(
+                    {
+                        "file": str(rel_path),
+                        "line": line_num,
+                        "content": content,
+                    }
+                )
+    except Exception as e:
+        logger.debug("Failed to search file for matches", error=str(e), exc_info=True)
+    return matches

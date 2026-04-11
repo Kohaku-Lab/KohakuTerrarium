@@ -35,16 +35,16 @@ class RichCLIOutput(BaseOutputModule):
             return
         try:
             self.app.on_text_chunk(content)
-        except Exception:
-            logger.exception("write failed")
+        except Exception as e:
+            logger.exception("write failed", error=str(e))
 
     async def write_stream(self, chunk: str) -> None:
         if not chunk or self.app is None:
             return
         try:
             self.app.on_text_chunk(chunk)
-        except Exception:
-            logger.exception("write_stream failed")
+        except Exception as e:
+            logger.exception("write_stream failed", error=str(e))
 
     async def flush(self) -> None:
         pass
@@ -54,16 +54,16 @@ class RichCLIOutput(BaseOutputModule):
             return
         try:
             self.app.on_processing_start()
-        except Exception:
-            logger.exception("on_processing_start failed")
+        except Exception as e:
+            logger.exception("on_processing_start failed", error=str(e))
 
     async def on_processing_end(self) -> None:
         if self.app is None:
             return
         try:
             self.app.on_processing_end()
-        except Exception:
-            logger.exception("on_processing_end failed")
+        except Exception as e:
+            logger.exception("on_processing_end failed", error=str(e))
 
     async def on_user_input(self, text: str) -> None:
         # The CLI app already prints user input when it receives it from
@@ -80,8 +80,12 @@ class RichCLIOutput(BaseOutputModule):
         """Dispatch activity events to the appropriate app callback."""
         try:
             self._dispatch(activity_type, detail, metadata)
-        except Exception:
-            logger.exception("Activity dispatch failed", activity_type=activity_type)
+        except Exception as e:
+            logger.exception(
+                "Activity dispatch failed",
+                activity_type=activity_type,
+                error=str(e),
+            )
 
     def _dispatch(
         self, activity_type: str, detail: str, metadata: dict[str, Any]

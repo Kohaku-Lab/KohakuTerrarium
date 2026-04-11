@@ -25,8 +25,8 @@ from kohakuterrarium.cli.resume import resume_cli
 from kohakuterrarium.cli.run import run_agent_cli
 
 
-def main() -> int:
-    """Main CLI entry point."""
+def _build_parser() -> argparse.ArgumentParser:
+    """Build and return the CLI argument parser with all subcommands."""
     parser = argparse.ArgumentParser(
         prog="kt",
         description="KohakuTerrarium - Universal Agent Framework",
@@ -255,6 +255,115 @@ def main() -> int:
         "--agent", required=True, help="Path to agent config folder"
     )
 
+    return parser
+
+
+def _dispatch_run(args: argparse.Namespace) -> int:
+    """Handle the 'run' command."""
+    agent_path = args.agent_path
+    if agent_path.startswith("@"):
+        agent_path = str(resolve_package_path(agent_path))
+    session = None if args.no_session else args.session
+    return run_agent_cli(
+        agent_path,
+        args.log_level,
+        session=session,
+        io_mode=args.mode,
+        llm_override=args.llm,
+    )
+
+
+def _dispatch_resume(args: argparse.Namespace) -> int:
+    """Handle the 'resume' command."""
+    return resume_cli(
+        args.session,
+        args.pwd,
+        args.log_level,
+        last=args.last,
+        io_mode=args.mode,
+        llm_override=args.llm,
+    )
+
+
+def _dispatch_terrarium(args: argparse.Namespace) -> int:
+    """Handle the 'terrarium' command with @package path resolution."""
+    if hasattr(args, "terrarium_path") and args.terrarium_path:
+        if args.terrarium_path.startswith("@"):
+            args.terrarium_path = str(resolve_package_path(args.terrarium_path))
+    return handle_terrarium_command(args)
+
+
+def _dispatch_embedding(args: argparse.Namespace) -> int:
+    """Handle the 'embedding' command."""
+    return embedding_cli(args.session, args.provider, args.model, args.dimensions)
+
+
+def _dispatch_search(args: argparse.Namespace) -> int:
+    """Handle the 'search' command."""
+    return search_cli(args.session, args.query, args.mode, args.agent, args.k)
+
+
+def _dispatch_web(args: argparse.Namespace) -> int:
+    """Handle the 'web' command."""
+    run_web_server(host=args.host, port=args.port, dev=args.dev)
+    return 0
+
+
+def _dispatch_app(args: argparse.Namespace) -> int:
+    """Handle the 'app' command."""
+    run_desktop_app(port=args.port)
+    return 0
+
+
+def _dispatch_extension(args: argparse.Namespace) -> int:
+    """Handle the 'extension' command group."""
+    sub = getattr(args, "extension_command", None)
+    if sub == "list":
+        return extension_list_cli()
+    elif sub == "info":
+        return extension_info_cli(args.name)
+    else:
+        # Print help for extension subparser; re-parse to get the parser
+        parser = _build_parser()
+        parser.parse_args(["extension", "--help"])
+        return 0
+
+
+def _dispatch_mcp(args: argparse.Namespace) -> int:
+    """Handle the 'mcp' command group."""
+    sub = getattr(args, "mcp_command", None)
+    if sub == "list":
+        return mcp_list_cli(args.agent)
+    else:
+        parser = _build_parser()
+        parser.parse_args(["mcp", "--help"])
+        return 0
+
+
+# Command dispatch table: command name -> handler function
+COMMANDS: dict[str, callable] = {
+    "run": _dispatch_run,
+    "resume": _dispatch_resume,
+    "list": lambda args: list_cli(args.path),
+    "info": lambda args: show_agent_info_cli(args.agent_path),
+    "terrarium": _dispatch_terrarium,
+    "login": lambda args: login_cli(args.provider),
+    "install": lambda args: install_cli(args.source, args.editable, args.name),
+    "uninstall": lambda args: uninstall_cli(args.name),
+    "edit": lambda args: edit_cli(args.target),
+    "embedding": _dispatch_embedding,
+    "search": _dispatch_search,
+    "web": _dispatch_web,
+    "app": _dispatch_app,
+    "model": lambda args: model_cli(args),
+    "extension": _dispatch_extension,
+    "mcp": _dispatch_mcp,
+}
+
+
+def main() -> int:
+    """Main CLI entry point."""
+    parser = _build_parser()
     args = parser.parse_args()
 
     # No command given: launch desktop app (used by Briefcase and double-click)
@@ -262,74 +371,9 @@ def main() -> int:
         run_desktop_app()
         return 0
 
-    if args.command == "run":
-        # Resolve @package references in agent_path
-        agent_path = args.agent_path
-        if agent_path.startswith("@"):
-            agent_path = str(resolve_package_path(agent_path))
-        session = None if args.no_session else args.session
-        return run_agent_cli(
-            agent_path,
-            args.log_level,
-            session=session,
-            io_mode=args.mode,
-            llm_override=args.llm,
-        )
-    elif args.command == "resume":
-        return resume_cli(
-            args.session,
-            args.pwd,
-            args.log_level,
-            last=args.last,
-            io_mode=args.mode,
-            llm_override=args.llm,
-        )
-    elif args.command == "list":
-        return list_cli(args.path)
-    elif args.command == "info":
-        return show_agent_info_cli(args.agent_path)
-    elif args.command == "terrarium":
-        # Resolve @package references in terrarium path
-        if hasattr(args, "terrarium_path") and args.terrarium_path:
-            if args.terrarium_path.startswith("@"):
-                args.terrarium_path = str(resolve_package_path(args.terrarium_path))
-        return handle_terrarium_command(args)
-    elif args.command == "login":
-        return login_cli(args.provider)
-    elif args.command == "install":
-        return install_cli(args.source, args.editable, args.name)
-    elif args.command == "uninstall":
-        return uninstall_cli(args.name)
-    elif args.command == "edit":
-        return edit_cli(args.target)
-    elif args.command == "embedding":
-        return embedding_cli(args.session, args.provider, args.model, args.dimensions)
-    elif args.command == "search":
-        return search_cli(args.session, args.query, args.mode, args.agent, args.k)
-    elif args.command == "web":
-        run_web_server(host=args.host, port=args.port, dev=args.dev)
-        return 0
-    elif args.command == "app":
-        run_desktop_app(port=args.port)
-        return 0
-    elif args.command == "model":
-        return model_cli(args)
-    elif args.command == "extension":
-        sub = getattr(args, "extension_command", None)
-        if sub == "list":
-            return extension_list_cli()
-        elif sub == "info":
-            return extension_info_cli(args.name)
-        else:
-            ext_parser.print_help()
-            return 0
-    elif args.command == "mcp":
-        sub = getattr(args, "mcp_command", None)
-        if sub == "list":
-            return mcp_list_cli(args.agent)
-        else:
-            mcp_parser.print_help()
-            return 0
-    else:
-        parser.print_help()
-        return 0
+    handler = COMMANDS.get(args.command)
+    if handler:
+        return handler(args)
+
+    parser.print_help()
+    return 0

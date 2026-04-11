@@ -415,8 +415,12 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
             try:
                 meta = self.session_store.load_meta()
                 session_id = meta.get("session_id", "")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "Failed to load session meta for session_id",
+                    error=str(e),
+                    exc_info=True,
+                )
 
         # Save LLM profile name to session state for resume
         if self.session_store and self._llm_override:
@@ -442,11 +446,11 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
             if embed_cfg:
                 self.session_store.state["embedding_config"] = embed_cfg
 
-        # Get the actual model name from the LLM provider (not config, which may be default)
+        # Get the actual model name from the LLM provider
         model = (
             getattr(self.llm, "model", "")
             or getattr(getattr(self.llm, "config", None), "model", "")
-            or getattr(self.config, "model", "")
+            or "(no model - backend)"
         )
         compact_cfg = self.compact_manager.config
         max_context = compact_cfg.max_tokens
@@ -705,8 +709,10 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
                     f"\n[Fatal Error] {error_type}: {e}\n"
                 )
                 await self.output_router.on_processing_end()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "Failed to write fatal error to output", error=str(e), exc_info=True
+                )
             raise
         finally:
             await self.stop()

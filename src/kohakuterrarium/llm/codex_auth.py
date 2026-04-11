@@ -280,7 +280,8 @@ async def _device_code_flow() -> CodexTokens:
                 try:
                     error_data = resp.json()
                     error = error_data.get("error", "")
-                except Exception:
+                except Exception as e:
+                    logger.debug("Failed to parse error response JSON", error=str(e))
                     continue
                 if error in ("authorization_pending", "pending"):
                     continue

@@ -92,7 +92,8 @@ def _scan_creature_configs() -> list[dict]:
                         "description": data.get("description", ""),
                     }
                 )
-            except Exception:
+            except Exception as e:
+                _ = e  # fallback: creature config parse failed, return minimal entry
                 results.append(
                     {
                         "name": child.name,
@@ -127,7 +128,8 @@ def _scan_terrarium_configs() -> list[dict]:
                         "description": terrarium.get("description", ""),
                     }
                 )
-            except Exception:
+            except Exception as e:
+                _ = e  # fallback: terrarium config parse failed, return minimal entry
                 results.append(
                     {
                         "name": child.name,

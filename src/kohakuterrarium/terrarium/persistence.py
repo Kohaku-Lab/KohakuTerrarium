@@ -75,8 +75,10 @@ def attach_session_store(runtime: TerrariumRuntime, store: Any) -> None:
                             "ts": ts,
                         },
                     )
-                except Exception:
-                    logger.debug("Channel message persistence error", exc_info=True)
+                except Exception as e:
+                    logger.debug(
+                        "Channel message persistence error", error=str(e), exc_info=True
+                    )
 
             return _cb
 

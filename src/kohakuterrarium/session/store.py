@@ -180,8 +180,8 @@ class SessionStore:
                         "type": event_type,
                     },
                 )
-            except Exception:
-                pass  # FTS indexing is best-effort
+            except Exception as e:
+                logger.debug("FTS indexing failed", error=str(e), exc_info=True)
 
         return key
 
@@ -196,8 +196,8 @@ class SessionStore:
         for key_bytes in sorted(self.events.keys(prefix=prefix)):
             try:
                 result.append(self.events[key_bytes])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to read event", error=str(e), exc_info=True)
         return result
 
     def get_all_events(self) -> list[tuple[str, dict]]:
@@ -212,8 +212,12 @@ class SessionStore:
             try:
                 evt = self.events[key_bytes]
                 all_events.append((key, evt))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "Failed to read event in get_all_events",
+                    error=str(e),
+                    exc_info=True,
+                )
         all_events.sort(key=lambda x: x[1].get("ts", 0))
         return all_events
 
@@ -332,8 +336,10 @@ class SessionStore:
                         "type": "channel",
                     },
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "FTS indexing channel message failed", error=str(e), exc_info=True
+                )
 
         return key
 
@@ -344,8 +350,10 @@ class SessionStore:
         for key_bytes in sorted(self.channels.keys(prefix=prefix)):
             try:
                 result.append(self.channels[key_bytes])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "Failed to read channel message", error=str(e), exc_info=True
+                )
         return result
 
     # ─── Sub-Agent Conversations ────────────────────────────────────
@@ -461,8 +469,8 @@ class SessionStore:
             key = key_bytes.decode() if isinstance(key_bytes, bytes) else key_bytes
             try:
                 result[key] = self.meta[key_bytes]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to read meta key", error=str(e), exc_info=True)
         return result
 
     # ─── Search ─────────────────────────────────────────────────────
@@ -502,8 +510,12 @@ class SessionStore:
         if update_status:
             try:
                 self.update_status("paused")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "Failed to update session status on close",
+                    error=str(e),
+                    exc_info=True,
+                )
         self.events.close()
         self.meta.close()
         self.state.close()

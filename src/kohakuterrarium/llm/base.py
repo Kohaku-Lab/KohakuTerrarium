@@ -217,7 +217,7 @@ class BaseLLMProvider:
     """
 
     def __init__(self, config: LLMConfig | None = None):
-        self.config = config or LLMConfig(model="gpt-4o-mini")
+        self.config = config or LLMConfig(model="")
         self._last_tool_calls: list[NativeToolCall] = []
 
     @property

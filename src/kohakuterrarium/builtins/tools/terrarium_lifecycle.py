@@ -165,7 +165,8 @@ class TerrariumStatusTool(BaseTool):
                     lines.append(
                         f"  {tid}: {len(creatures)} creatures ({', '.join(creatures)})"
                     )
-                except Exception:
+                except Exception as e:
+                    logger.debug("Error reading terrarium status", error=str(e))
                     lines.append(f"  {tid}: (error reading status)")
             return ToolResult(output="\n".join(lines), exit_code=0)
 

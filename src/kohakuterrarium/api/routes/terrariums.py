@@ -5,6 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from kohakuterrarium.api.deps import get_manager
 from kohakuterrarium.api.events import get_event_log
 from kohakuterrarium.api.schemas import AgentChat, ChannelAdd, TerrariumCreate
+from kohakuterrarium.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -103,8 +106,10 @@ async def terrarium_history(
         if hasattr(agent, "session_store") and agent.session_store:
             try:
                 events = agent.session_store.get_events(target)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "Failed to load session events", error=str(e), exc_info=True
+                )
 
         # Fallback to in-memory log
         if not events:

@@ -1,10 +1,12 @@
 """CLI memory commands — build embeddings and search sessions."""
 
+from kohakuterrarium.cli.run import _resolve_session
 from kohakuterrarium.session.embedding import create_embedder
 from kohakuterrarium.session.memory import SessionMemory
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.utils.logging import get_logger
 
-from kohakuterrarium.cli.run import _resolve_session
+logger = get_logger(__name__)
 
 
 def embedding_cli(
@@ -83,8 +85,10 @@ def search_cli(
         if mode in ("semantic", "hybrid", "auto"):
             try:
                 embedder = create_embedder({"provider": "auto"})
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "Failed to create embedder for search", error=str(e), exc_info=True
+                )
 
         # SessionMemory discovers existing vector tables via saved dimensions
         memory = SessionMemory(str(path), embedder=embedder, store=store)

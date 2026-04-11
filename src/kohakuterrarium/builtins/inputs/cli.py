@@ -237,5 +237,6 @@ class NonBlockingCLIInput(BaseInputModule):
         try:
             line = sys.stdin.readline()
             return line if line else None
-        except Exception:
+        except Exception as e:
+            logger.debug("stdin readline failed", error=str(e))
             return None

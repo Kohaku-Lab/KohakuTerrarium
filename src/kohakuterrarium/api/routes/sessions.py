@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from kohakuterrarium.api.deps import get_manager
+from kohakuterrarium.utils.logging import get_logger
 from kohakuterrarium.session.embedding import create_embedder
 from kohakuterrarium.session.memory import SessionMemory
 from kohakuterrarium.session.resume import (
@@ -15,6 +16,8 @@ from kohakuterrarium.session.resume import (
     resume_terrarium,
 )
 from kohakuterrarium.session.store import SessionStore
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -54,8 +57,10 @@ def _build_session_index() -> list[dict]:
                         if evt.get("type") == "user_input":
                             preview = (evt.get("content") or "")[:200]
                             break
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "Failed to read session preview", error=str(e), exc_info=True
+                )
 
             store.close(update_status=False)
 
@@ -74,7 +79,8 @@ def _build_session_index() -> list[dict]:
                     "pwd": meta.get("pwd", ""),
                 }
             )
-        except Exception:
+        except Exception as e:
+            _ = e  # corrupt session file, show as error entry
             results.append({"name": path.stem, "filename": path.name, "error": True})
 
     results.sort(
@@ -309,7 +315,8 @@ async def search_session_memory(
 
         try:
             embedder = create_embedder(embed_config)
-        except Exception:
+        except Exception as e:
+            _ = e  # embedding unavailable, continue without
             embedder = None
 
         memory = SessionMemory(str(path), embedder=embedder, store=store)

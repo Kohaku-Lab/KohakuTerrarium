@@ -14,6 +14,9 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from kohakuterrarium.api.deps import get_manager
 from kohakuterrarium.api.events import StreamOutput, get_event_log
+from kohakuterrarium.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -26,8 +29,8 @@ async def _forward_queue(queue: asyncio.Queue, ws: WebSocket) -> None:
             if msg is None:
                 break
             await ws.send_json(msg)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("WS forward queue error", error=str(e), exc_info=True)
 
 
 # -- Terrarium WebSocket helpers ------------------------------------------
@@ -175,13 +178,17 @@ def _cleanup_terrarium_ws(
     for _, out, agent in attached:
         try:
             agent.output_router.remove_secondary(out)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(
+                "Failed to remove secondary output", error=str(e), exc_info=True
+            )
     for ch, cb in channel_cbs:
         try:
             ch.remove_on_send(cb)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(
+                "Failed to remove channel callback", error=str(e), exc_info=True
+            )
 
 
 # -- /ws/terrariums/{terrarium_id} ----------------------------------------
@@ -211,8 +218,8 @@ async def ws_terrarium(websocket: WebSocket, terrarium_id: str):
         await _handle_terrarium_input(websocket, manager, terrarium_id)
     except WebSocketDisconnect:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Terrarium WS error", error=str(e), exc_info=True)
     finally:
         queue.put_nowait(None)
         fwd_task.cancel()
@@ -285,15 +292,19 @@ async def ws_creature(websocket: WebSocket, agent_id: str):
             )
     except WebSocketDisconnect:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Creature WS error", error=str(e), exc_info=True)
     finally:
         queue.put_nowait(None)
         fwd_task.cancel()
         try:
             session.agent.output_router.remove_secondary(out)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(
+                "Failed to remove secondary output on cleanup",
+                error=str(e),
+                exc_info=True,
+            )
         try:
             await websocket.close()
         except RuntimeError:

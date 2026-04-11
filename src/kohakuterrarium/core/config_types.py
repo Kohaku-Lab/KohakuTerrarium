@@ -102,10 +102,10 @@ class AgentConfig:
     llm_profile: str = ""  # Profile name; empty = use inline settings or default
 
     # LLM settings (inline, backward compat; overridden by llm_profile if set)
-    model: str = "openai/gpt-4o-mini"
-    auth_mode: str = "api-key"  # "api-key" (default) or "codex-oauth"
-    api_key_env: str = "OPENROUTER_API_KEY"
-    base_url: str = "https://openrouter.ai/api/v1"
+    model: str = ""  # empty = resolve via profile system
+    auth_mode: str = ""  # empty = resolve via profile; "codex-oauth" for ChatGPT sub
+    api_key_env: str = ""  # empty = resolve via profile
+    base_url: str = ""  # empty = resolve via profile
     temperature: float = 0.7
     max_tokens: int | None = None  # None = let the API decide
     reasoning_effort: str = "medium"  # none/minimal/low/medium/high/xhigh

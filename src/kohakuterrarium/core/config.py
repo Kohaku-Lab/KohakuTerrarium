@@ -398,18 +398,12 @@ def _construct_agent_config(
         name=config_data.get("name", agent_path.name),
         version=config_data.get("version", "1.0"),
         llm_profile=controller_data.get("llm", config_data.get("llm", "")),
-        model=controller_data.get(
-            "model", config_data.get("model", "openai/gpt-4o-mini")
-        ),
-        auth_mode=controller_data.get(
-            "auth_mode", config_data.get("auth_mode", "api-key")
-        ),
+        model=controller_data.get("model", config_data.get("model", "")),
+        auth_mode=controller_data.get("auth_mode", config_data.get("auth_mode", "")),
         api_key_env=controller_data.get(
-            "api_key_env", config_data.get("api_key_env", "OPENROUTER_API_KEY")
+            "api_key_env", config_data.get("api_key_env", "")
         ),
-        base_url=controller_data.get(
-            "base_url", config_data.get("base_url", "https://openrouter.ai/api/v1")
-        ),
+        base_url=controller_data.get("base_url", config_data.get("base_url", "")),
         temperature=controller_data.get(
             "temperature", config_data.get("temperature", 0.7)
         ),

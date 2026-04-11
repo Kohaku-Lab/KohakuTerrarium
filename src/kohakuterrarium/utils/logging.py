@@ -53,7 +53,8 @@ def _supports_color() -> bool:
             # Enable ANSI escape sequences on Windows
             kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
             return True
-        except Exception:
+        except Exception as e:
+            _ = e  # intentionally suppressed: Windows console mode unsupported
             return False
     return True
 
@@ -280,8 +281,8 @@ class TUILogHandler(logging.Handler):
         try:
             msg = self.format(record)
             self._write_func(msg)
-        except Exception:
-            pass  # Don't let logging errors crash the app
+        except Exception as e:
+            _ = e  # intentionally suppressed: logging errors must not crash the app
 
 
 _tui_handler: logging.Handler | None = None

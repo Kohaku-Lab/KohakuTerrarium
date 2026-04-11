@@ -11,7 +11,9 @@ from kohakuterrarium.builtins.cli_rich.output import RichCLIOutput
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.session.resume import _create_io_modules
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.utils.logging import set_level
+from kohakuterrarium.utils.logging import get_logger, set_level
+
+logger = get_logger(__name__)
 
 _SESSION_DIR = Path.home() / ".kohakuterrarium" / "sessions"
 
@@ -38,8 +40,8 @@ async def _run_agent_rich_cli(agent: Agent) -> None:
     if pending:
         try:
             app.replay_session(pending)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to replay session history", error=str(e))
         agent._pending_resume_events = None
 
     try:
@@ -235,5 +237,6 @@ def _session_preview(path: Path) -> str:
         config_path = meta.get("config_path", "")
         name = Path(config_path).name if config_path else "?"
         return f"({config_type}: {name})"
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to read session label", error=str(e))
         return ""

@@ -101,7 +101,8 @@ class ToolBlock(Collapsible):
         if output:
             try:
                 self._output_widget.update(output[:3000])
-            except Exception:
+            except Exception as e:
+                _ = e  # fallback: Textual markup parse failure, use raw Content
                 # Escape markup-like content that Textual can't parse
                 from textual.content import Content
 
@@ -116,7 +117,8 @@ class ToolBlock(Collapsible):
         if error:
             try:
                 self._output_widget.update(error[:3000])
-            except Exception:
+            except Exception as e:
+                _ = e  # fallback: Textual markup parse failure, use raw Content
                 from textual.content import Content
 
                 self._output_widget.update(Content(error[:3000]))
@@ -252,7 +254,8 @@ class SubAgentBlock(Collapsible):
         self._tool_name_keys.setdefault(tool_name, []).append(key)
         try:
             self._tools_container.mount(line)
-        except Exception:
+        except Exception as e:
+            _ = e  # fallback: widget not yet mounted, defer to on_mount
             if not hasattr(self, "_pending_tool_lines"):
                 self._pending_tool_lines = []
             self._pending_tool_lines.append(line)

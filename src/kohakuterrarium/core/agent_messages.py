@@ -55,8 +55,12 @@ class AgentMessagesMixin:
                 self.session_store.save_conversation(
                     self.config.name, conv.to_messages()
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "Failed to save conversation after rewind",
+                    error=str(e),
+                    exc_info=True,
+                )
 
     async def _rerun_from_last(self) -> None:
         """Trigger a new LLM turn from the current conversation state."""

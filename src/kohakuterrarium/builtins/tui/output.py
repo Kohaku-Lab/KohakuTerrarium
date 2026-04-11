@@ -524,6 +524,29 @@ def _build_resume_widgets(turns: list[dict]) -> list:
     return widgets
 
 
+def _find_matching_block(
+    widgets: list, tool_name: str, call_id: str
+) -> "ToolBlock | None":
+    """Find a ToolBlock matching the given call_id or tool name.
+
+    Searches in reverse order. Tries call_id first, then falls back
+    to matching by name among still-running tools.
+    """
+    if call_id:
+        for w in reversed(widgets):
+            if isinstance(w, ToolBlock) and w.tool_id == call_id:
+                return w
+    # Fallback: match by name among still-running tools
+    for w in reversed(widgets):
+        if (
+            isinstance(w, ToolBlock)
+            and w.tool_name == tool_name
+            and w.state == "running"
+        ):
+            return w
+    return None
+
+
 def _build_turn_widgets(
     turn: dict,
     current_subagent: SubAgentBlock | None,
@@ -578,25 +601,7 @@ def _build_turn_widgets(
                     name, done=not error, error=bool(error)
                 )
             else:
-                # Find the matching ToolBlock in widgets.
-                # Try call_id match first, then fall back to name match.
-                matched = None
-                for w in reversed(widgets):
-                    if not isinstance(w, ToolBlock):
-                        continue
-                    if call_id and w.tool_id == call_id:
-                        matched = w
-                        break
-                if matched is None:
-                    # Fallback: match by name among still-running tools
-                    for w in reversed(widgets):
-                        if (
-                            isinstance(w, ToolBlock)
-                            and w.tool_name == name
-                            and w.state == "running"
-                        ):
-                            matched = w
-                            break
+                matched = _find_matching_block(widgets, name, call_id)
                 if matched is not None:
                     if error:
                         matched.mark_error(str(error))

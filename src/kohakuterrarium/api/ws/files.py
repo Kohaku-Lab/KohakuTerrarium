@@ -106,5 +106,5 @@ async def watch_files(websocket: WebSocket, agent_id: str):
         try:
             await websocket.send_json({"type": "error", "text": str(e)})
             await websocket.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to close file watch WS", error=str(e), exc_info=True)

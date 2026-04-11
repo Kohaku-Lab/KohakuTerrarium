@@ -244,9 +244,7 @@ def resolve_controller_llm(
     # 3. Default model (only when agent didn't set an explicit inline model)
     if not name:
         inline_model = controller_config.get("model", "")
-        default_model = "openai/gpt-4o-mini"
-        has_explicit_model = inline_model and inline_model != default_model
-        if not has_explicit_model:
+        if not inline_model:
             name = get_default_model()
 
     if not name:

@@ -30,6 +30,6 @@ async def channel_stream(websocket: WebSocket, terrarium_id: str):
             )
     except WebSocketDisconnect:
         pass
-    except Exception:
-        logger.debug("WebSocket close error", exc_info=True)
+    except Exception as e:
+        logger.debug("WebSocket close error", error=str(e), exc_info=True)
         await websocket.close()

@@ -69,6 +69,158 @@ async def _render_command_data(tui: "TUISession", data: dict) -> str | None:
     return None
 
 
+def _setup_terrarium_tui(
+    runtime: TerrariumRuntime,
+) -> tuple["TUISession", "TUIOutput"]:
+    """Create the TUI session, wire outputs to root and all creatures.
+
+    Returns (tui, root_tui_output) so the caller can replay history and
+    run the input loop.
+    """
+    root = runtime.root_agent
+
+    # Build tab list
+    tui_tabs = ["root"]
+    tui_tabs.extend(h.name for h in runtime.creatures.values())
+    for ch_info in runtime.list_channels():
+        tui_tabs.append(f"#{ch_info['name']}")
+
+    # Create terrarium-level TUI
+    terrarium_name = getattr(runtime.config, "name", "terrarium")
+    tui = TUISession(agent_name=terrarium_name)
+    tui.set_terrarium_tabs(tui_tabs)
+
+    # Wire root agent output to TUI "root" tab
+    tui_output = TUIOutput(session_key="root")
+    tui_output._tui = tui
+    tui_output._running = True
+    tui_output._default_target = "root"
+    root.output_router.default_output = tui_output
+
+    # Wire each creature's output to its TUI tab
+    for name, handle in runtime.creatures.items():
+        creature_out = TUIOutput(session_key=name)
+        creature_out._tui = tui
+        creature_out._running = True
+        creature_out._default_target = name
+        handle.agent.output_router.default_output = creature_out
+
+    # Wire Escape interrupt, click-to-cancel, click-to-promote
+    if tui._app:
+        tui._app.on_interrupt = root.interrupt
+    tui.on_cancel_job = root._cancel_job
+    tui.on_promote_job = root._promote_handle
+
+    return tui, tui_output
+
+
+def _wire_channel_callbacks(runtime: TerrariumRuntime, tui: "TUISession") -> None:
+    """Wire channel on_send callbacks to display messages in channel tabs."""
+    for ch in runtime.environment.shared_channels._channels.values():
+        ch_name = ch.name
+
+        def _make_ch_cb(channel_name: str):
+            def _cb(cn: str, message) -> None:
+                sender = message.sender if hasattr(message, "sender") else ""
+                content = (
+                    message.content if hasattr(message, "content") else str(message)
+                )
+                tui.add_trigger_message(
+                    f"[{channel_name}] {sender}",
+                    str(content)[:500],
+                    target=f"#{channel_name}",
+                )
+
+            return _cb
+
+        ch.on_send(_make_ch_cb(ch_name))
+
+
+async def _replay_terrarium_history(
+    runtime: TerrariumRuntime, tui: "TUISession", tui_output: "TUIOutput"
+) -> None:
+    """Replay resume history from SessionStore into TUI tabs (if available)."""
+    session_store = runtime.session_store
+    if not session_store:
+        return
+
+    # Root agent events -> root tab
+    root_events = session_store.get_events("root")
+    if root_events and tui_output:
+        await tui_output.on_resume(root_events)
+
+    # Creature events -> creature tabs
+    for name, handle in runtime.creatures.items():
+        creature_events = session_store.get_events(name)
+        if creature_events:
+            creature_out = handle.agent.output_router.default_output
+            if hasattr(creature_out, "on_resume"):
+                await creature_out.on_resume(creature_events)
+
+    # Channel messages -> channel tabs
+    for ch_info in runtime.list_channels():
+        ch_name = ch_info["name"]
+        ch_messages = session_store.get_channel_messages(ch_name)
+        if ch_messages:
+            tab_target = f"#{ch_name}"
+            for msg in ch_messages:
+                sender = msg.get("sender", "")
+                content = msg.get("content", "")
+                tui.add_trigger_message(
+                    f"[{ch_name}] {sender}",
+                    str(content)[:500],
+                    target=tab_target,
+                )
+
+
+async def _handle_terrarium_command(
+    text: str,
+    tui: "TUISession",
+    commands: dict,
+    aliases: dict[str, str],
+    cmd_context: "UserCommandContext",
+) -> bool | None:
+    """Handle a slash command in the terrarium TUI.
+
+    Returns:
+        True if the command was consumed (skip sending to agent),
+        False if the caller should break out of the main loop,
+        None if the text was not a recognized command (fall through).
+    """
+    cmd_name, cmd_args = parse_slash_command(text)
+    canonical = aliases.get(cmd_name, cmd_name)
+    cmd = commands.get(canonical)
+    if not cmd:
+        return None
+
+    result = await cmd.execute(cmd_args, cmd_context)
+    if result.output:
+        tui.add_system_notice(result.output, command=cmd_name)
+    if result.error:
+        tui.add_system_notice(result.error, command=cmd_name, error=True)
+
+    # Handle interactive data (modals)
+    if result.data and not result.consumed:
+        chosen = await _render_command_data(tui, result.data)
+        if chosen is not None:
+            action = result.data.get("action", "")
+            follow_cmd = commands.get(aliases.get(action, action))
+            if follow_cmd:
+                result2 = await follow_cmd.execute(chosen, cmd_context)
+                if result2.output:
+                    tui.add_system_notice(result2.output, command=cmd_name)
+                if result2.error:
+                    tui.add_system_notice(result2.error, command=cmd_name, error=True)
+
+    # Check if exit was requested (e.g. /exit command)
+    if canonical == "exit":
+        return False
+    if result.consumed:
+        return True
+
+    return None
+
+
 async def run_terrarium_with_tui(runtime: TerrariumRuntime) -> None:
     """Run a terrarium with a full TUI (tabs, terrarium panel, etc.).
 
@@ -93,50 +245,16 @@ async def run_terrarium_with_tui(runtime: TerrariumRuntime) -> None:
         runtime_task.cancel()
         raise RuntimeError("Root agent not available after runtime start")
 
-    # Build tab list
-    tui_tabs = ["root"]
-    tui_tabs.extend(h.name for h in runtime.creatures.values())
-    for ch_info in runtime.list_channels():
-        tui_tabs.append(f"#{ch_info['name']}")
-
-    # Create terrarium-level TUI
-    terrarium_name = getattr(runtime.config, "name", "terrarium")
-    tui = TUISession(agent_name=terrarium_name)
-    tui.set_terrarium_tabs(tui_tabs)
+    tui, tui_output = _setup_terrarium_tui(runtime)
     await tui.start()
-
     suppress_logging()
-
-    # Wire root agent output to TUI "root" tab
-    tui_output = TUIOutput(session_key="root")
-    tui_output._tui = tui
-    tui_output._running = True
-    tui_output._default_target = "root"
-    root.output_router.default_output = tui_output
-
-    # Wire each creature's output to its TUI tab
-    for name, handle in runtime.creatures.items():
-        creature_out = TUIOutput(session_key=name)
-        creature_out._tui = tui
-        creature_out._running = True
-        creature_out._default_target = name
-        handle.agent.output_router.default_output = creature_out
-
-    # Wire Escape interrupt, click-to-cancel, click-to-promote. Promote
-    # and cancel go through the TUISession attributes (session relays
-    # them into the app), matching how single-creature TUI wires things
-    # in core/agent.py. Escape is an app-level handler so it's wired on
-    # the app directly.
-    if tui._app:
-        tui._app.on_interrupt = root.interrupt
-    tui.on_cancel_job = root._cancel_job
-    tui.on_promote_job = root._promote_handle
 
     # Start TUI app
     _app_task = asyncio.create_task(tui.run_app())  # noqa: F841
     await tui.wait_ready()
 
     # Emit session info for the root agent
+    terrarium_name = getattr(runtime.config, "name", "terrarium")
     model = getattr(root.llm, "model", "") or getattr(
         getattr(root.llm, "config", None), "model", ""
     )
@@ -145,8 +263,10 @@ async def run_terrarium_with_tui(runtime: TerrariumRuntime) -> None:
         try:
             meta = runtime.session_store.load_meta()
             session_id = meta.get("session_id", "")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(
+                "Failed to load session meta for TUI", error=str(e), exc_info=True
+            )
     tui.update_session_info(
         session_id=session_id, model=model, agent_name=terrarium_name
     )
@@ -169,60 +289,12 @@ async def run_terrarium_with_tui(runtime: TerrariumRuntime) -> None:
         )
     tui.update_terrarium(creature_info, runtime.list_channels())
 
-    # Wire channel on_send callbacks to display messages in channel tabs
-    for ch in runtime.environment.shared_channels._channels.values():
-        ch_name = ch.name
-
-        def _make_ch_cb(channel_name: str):
-            def _cb(cn: str, message) -> None:
-                sender = message.sender if hasattr(message, "sender") else ""
-                content = (
-                    message.content if hasattr(message, "content") else str(message)
-                )
-                tui.add_trigger_message(
-                    f"[{channel_name}] {sender}",
-                    str(content)[:500],
-                    target=f"#{channel_name}",
-                )
-
-            return _cb
-
-        ch.on_send(_make_ch_cb(ch_name))
-
-    # Replay resume history from SessionStore (if available)
-    session_store = runtime.session_store
-    if session_store:
-        # Root agent events -> root tab
-        root_events = session_store.get_events("root")
-        if root_events and tui_output:
-            await tui_output.on_resume(root_events)
-
-        # Creature events -> creature tabs
-        for name, handle in runtime.creatures.items():
-            creature_events = session_store.get_events(name)
-            if creature_events:
-                creature_out = handle.agent.output_router.default_output
-                if hasattr(creature_out, "on_resume"):
-                    await creature_out.on_resume(creature_events)
-
-        # Channel messages -> channel tabs
-        for ch_info in runtime.list_channels():
-            ch_name = ch_info["name"]
-            ch_messages = session_store.get_channel_messages(ch_name)
-            if ch_messages:
-                tab_target = f"#{ch_name}"
-                for msg in ch_messages:
-                    sender = msg.get("sender", "")
-                    content = msg.get("content", "")
-                    tui.add_trigger_message(
-                        f"[{ch_name}] {sender}",
-                        str(content)[:500],
-                        target=tab_target,
-                    )
+    _wire_channel_callbacks(runtime, tui)
+    await _replay_terrarium_history(runtime, tui, tui_output)
 
     # Build user command registry for slash commands
     _commands = {n: get_builtin_user_command(n) for n in list_builtin_user_commands()}
-    _cmd_aliases = {}
+    _cmd_aliases: dict[str, str] = {}
     for n, cmd in _commands.items():
         for alias in getattr(cmd, "aliases", []):
             _cmd_aliases[alias] = n
@@ -234,8 +306,10 @@ async def run_terrarium_with_tui(runtime: TerrariumRuntime) -> None:
         try:
             inp = tui._app.query_one("#input-box", ChatInput)
             inp.command_names = list(_commands.keys())
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(
+                "Failed to set command hints on TUI input", error=str(e), exc_info=True
+            )
 
     # Main loop: TUI input -> root agent via inject_input
     try:
@@ -246,41 +320,14 @@ async def run_terrarium_with_tui(runtime: TerrariumRuntime) -> None:
 
             # Handle slash commands
             if text.startswith("/"):
-                cmd_name, cmd_args = parse_slash_command(text)
-                canonical = _cmd_aliases.get(cmd_name, cmd_name)
-                cmd = _commands.get(canonical)
-                if cmd:
-                    result = await cmd.execute(cmd_args, _cmd_context)
-                    if result.output:
-                        tui.add_system_notice(result.output, command=cmd_name)
-                    if result.error:
-                        tui.add_system_notice(
-                            result.error, command=cmd_name, error=True
-                        )
-                    # Handle interactive data (modals)
-                    if result.data and not result.consumed:
-                        chosen = await _render_command_data(tui, result.data)
-                        if chosen is not None:
-                            action = result.data.get("action", "")
-                            follow_cmd = _commands.get(_cmd_aliases.get(action, action))
-                            if follow_cmd:
-                                result2 = await follow_cmd.execute(chosen, _cmd_context)
-                                if result2.output:
-                                    tui.add_system_notice(
-                                        result2.output, command=cmd_name
-                                    )
-                                if result2.error:
-                                    tui.add_system_notice(
-                                        result2.error,
-                                        command=cmd_name,
-                                        error=True,
-                                    )
-                    # Check if exit was requested (e.g. /exit command)
-                    if canonical == "exit":
-                        break
-                    if result.consumed:
-                        continue
-                # Unknown slash command — fall through to send as text
+                cmd_result = await _handle_terrarium_command(
+                    text, tui, _commands, _cmd_aliases, _cmd_context
+                )
+                if cmd_result is False:
+                    break
+                if cmd_result is True:
+                    continue
+                # None means unknown command — fall through to send as text
 
             active_tab = tui.get_active_tab()
 

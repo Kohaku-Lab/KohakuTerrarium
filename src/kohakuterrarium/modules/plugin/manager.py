@@ -107,10 +107,11 @@ class PluginManager:
                     _plugin_name=getattr(plugin, "name", "unnamed"),
                 )
                 await _call_method(plugin, "on_load", context=ctx)
-            except Exception:
+            except Exception as e:
                 logger.warning(
                     "Plugin on_load failed",
                     plugin_name=getattr(plugin, "name", "?"),
+                    error=str(e),
                     exc_info=True,
                 )
 
@@ -132,10 +133,11 @@ class PluginManager:
                     _plugin_name=pname,
                 )
                 await _call_method(plugin, "on_load", context=ctx)
-            except Exception:
+            except Exception as e:
                 logger.warning(
                     "on_load failed for runtime-enabled plugin",
                     plugin_name=pname,
+                    error=str(e),
                     exc_info=True,
                 )
         self._needs_load.clear()
@@ -144,10 +146,11 @@ class PluginManager:
         for plugin in reversed(self._plugins):
             try:
                 await _call_method(plugin, "on_unload")
-            except Exception:
+            except Exception as e:
                 logger.debug(
                     "Plugin on_unload failed",
                     plugin_name=getattr(plugin, "name", "?"),
+                    error=str(e),
                     exc_info=True,
                 )
 
@@ -212,11 +215,12 @@ class PluginManager:
                             first_arg = modified
                     except PluginBlockError:
                         raise
-                    except Exception:
+                    except Exception as e:
                         logger.warning(
                             "Plugin pre-hook failed",
                             plugin_name=getattr(plugin, "name", "?"),
                             hook=pre_hook,
+                            error=str(e),
                             exc_info=True,
                         )
 
@@ -237,11 +241,12 @@ class PluginManager:
                         )
                         if modified is not None:
                             result = modified
-                    except Exception:
+                    except Exception as e:
                         logger.warning(
                             "Plugin post-hook failed",
                             plugin_name=getattr(plugin, "name", "?"),
                             hook=post_hook,
+                            error=str(e),
                             exc_info=True,
                         )
 
@@ -267,11 +272,12 @@ class PluginManager:
                     value = modified
             except PluginBlockError:
                 raise
-            except Exception:
+            except Exception as e:
                 logger.warning(
                     "Plugin pre-hook failed",
                     plugin_name=getattr(plugin, "name", "?"),
                     hook=hook_name,
+                    error=str(e),
                     exc_info=True,
                 )
         return value
@@ -287,11 +293,12 @@ class PluginManager:
                 continue
             try:
                 await _call_method(plugin, callback_name, **kwargs)
-            except Exception:
+            except Exception as e:
                 logger.warning(
                     "Plugin callback failed",
                     plugin_name=getattr(plugin, "name", "?"),
                     callback=callback_name,
+                    error=str(e),
                     exc_info=True,
                 )
 

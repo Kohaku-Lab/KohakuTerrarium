@@ -63,9 +63,9 @@ class AgentHandlersMixin(AgentToolsMixin):
 
                 # Wire registry/session for ChannelTrigger
                 if hasattr(trigger, "_registry") and trigger._registry is None:
-                    if hasattr(self, "environment") and self.environment:
+                    if self.environment is not None:
                         trigger._registry = self.environment.shared_channels
-                    elif hasattr(self, "session") and self.session:
+                    elif self.session is not None:
                         trigger._registry = self.session.channels
 
                 await self.trigger_manager.add(trigger, trigger_id=trigger_id)
@@ -106,11 +106,7 @@ class AgentHandlersMixin(AgentToolsMixin):
         one LLM call runs at a time.
         """
         # Record user input to session store
-        if (
-            hasattr(self, "session_store")
-            and self.session_store
-            and event.type == "user_input"
-        ):
+        if self.session_store is not None and event.type == "user_input":
             content = (
                 event.get_text_content()
                 if hasattr(event, "is_multimodal") and event.is_multimodal()
@@ -121,7 +117,7 @@ class AgentHandlersMixin(AgentToolsMixin):
             )
 
         # Notify output of user input (for inline panel rendering)
-        if event.type == "user_input" and hasattr(self, "output_router"):
+        if event.type == "user_input" and self.output_router is not None:
             content = (
                 event.get_text_content()
                 if hasattr(event, "is_multimodal") and event.is_multimodal()
@@ -129,7 +125,7 @@ class AgentHandlersMixin(AgentToolsMixin):
             )
             await self.output_router.on_user_input(content)
 
-        if hasattr(self, "plugins") and self.plugins:
+        if self.plugins is not None:
             await self.plugins.notify("on_event", event=event)
         async with self._processing_lock:
             if not self._running:
@@ -553,7 +549,7 @@ class AgentHandlersMixin(AgentToolsMixin):
             controller.flush()
 
         # Check if auto-compact should trigger
-        if hasattr(self, "compact_manager") and self.compact_manager:
+        if self.compact_manager is not None:
             last_usage = getattr(controller, "_last_usage", {})
             prompt_tokens = last_usage.get("prompt_tokens", 0)
             if self.compact_manager.should_compact(prompt_tokens):

@@ -239,11 +239,12 @@ class Fallback(BaseRunnable):
     async def run(self, input: Any) -> Any:
         try:
             return await self._primary.run(input)
-        except Exception:
+        except Exception as e:
             logger.debug(
                 "Fallback triggered",
                 primary=repr(self._primary),
                 fallback=repr(self._fallback),
+                error=str(e),
             )
             return await self._fallback.run(input)
 
