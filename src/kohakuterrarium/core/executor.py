@@ -134,6 +134,7 @@ class Executor:
 
         # Start task
         task = asyncio.create_task(self._run_tool(job_id, tool, args, is_direct))
+        task.add_done_callback(lambda _: self._tasks.pop(job_id, None))
         self._tasks[job_id] = task
 
         logger.info("Running tool: %s", tool_name)
@@ -240,6 +241,32 @@ class Executor:
 
             return job_result
 
+        except asyncio.CancelledError:
+            error_msg = "User manually interrupted this job."
+            logger.info("Tool cancelled by user", job_id=job_id)
+
+            self.job_store.update_status(
+                job_id,
+                state=JobState.CANCELLED,
+                error=error_msg,
+            )
+
+            job_result = JobResult(job_id=job_id, error=error_msg)
+            self.job_store.store_result(job_result)
+            self._results[job_id] = job_result
+
+            if not is_direct:
+                event = create_tool_complete_event(
+                    job_id=job_id,
+                    content="",
+                    error=error_msg,
+                )
+                if self._on_complete:
+                    self._on_complete(event)
+                await self._event_queue.put(event)
+
+            return job_result
+
         except Exception as e:
             logger.error("Tool execution failed", job_id=job_id, error=str(e))
 
@@ -251,6 +278,7 @@ class Executor:
             )
 
             job_result = JobResult(job_id=job_id, error=str(e))
+            self.job_store.store_result(job_result)
             self._results[job_id] = job_result
 
             if not is_direct:

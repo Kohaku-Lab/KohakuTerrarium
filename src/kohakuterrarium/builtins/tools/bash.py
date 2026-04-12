@@ -8,6 +8,7 @@ On all platforms, prefers bash (git bash available on Windows).
 import asyncio
 import os
 import shutil
+import signal
 import sys
 from typing import Any
 
@@ -37,6 +38,54 @@ _SHELL_SPECS: dict[str, tuple[str, list[str]]] = {
 }
 
 _AVAILABLE_SHELLS: list[str] | None = None
+
+
+async def _terminate_process_tree(process: asyncio.subprocess.Process) -> None:
+    """Terminate a subprocess and its children best-effort."""
+    try:
+        if process.returncode is not None:
+            return
+
+        if sys.platform == "win32":
+            # Kill the full process tree on Windows.
+            killer = await asyncio.create_subprocess_exec(
+                "taskkill",
+                "/PID",
+                str(process.pid),
+                "/T",
+                "/F",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await killer.wait()
+        else:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                return
+            except Exception:
+                process.terminate()
+
+            try:
+                await asyncio.wait_for(process.wait(), timeout=3)
+                return
+            except asyncio.TimeoutError:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    return
+                except Exception:
+                    process.kill()
+
+        await asyncio.wait_for(process.wait(), timeout=5)
+    except ProcessLookupError:
+        pass
+    except Exception:
+        try:
+            process.kill()
+            await asyncio.wait_for(process.wait(), timeout=5)
+        except Exception:
+            pass
 
 
 def _get_available_shells() -> list[str]:
@@ -156,13 +205,24 @@ class ShellTool(BaseTool):
         else:
             cwd = self.config.working_dir or os.getcwd()
 
+        process = None
         try:
+            popen_kwargs: dict[str, Any] = {
+                "stdout": asyncio.subprocess.PIPE,
+                "stderr": asyncio.subprocess.STDOUT,
+                "cwd": cwd,
+                "env": env,
+            }
+            if sys.platform == "win32":
+                popen_kwargs["creationflags"] = getattr(
+                    __import__("subprocess"), "CREATE_NEW_PROCESS_GROUP", 0
+                )
+            else:
+                popen_kwargs["start_new_session"] = True
+
             process = await asyncio.create_subprocess_exec(
                 *full_command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                cwd=cwd,
-                env=env,
+                **popen_kwargs,
             )
 
             try:
@@ -171,12 +231,14 @@ class ShellTool(BaseTool):
                     timeout=self.config.timeout if self.config.timeout > 0 else None,
                 )
             except asyncio.TimeoutError:
-                process.kill()
-                await process.wait()
+                await _terminate_process_tree(process)
                 return ToolResult(
                     error=f"Command timed out after {self.config.timeout}s",
                     exit_code=-1,
                 )
+            except asyncio.CancelledError:
+                await _terminate_process_tree(process)
+                raise
 
             output = stdout.decode("utf-8", errors="replace") if stdout else ""
 
@@ -208,8 +270,13 @@ class ShellTool(BaseTool):
             return ToolResult(error=f"Shell not found: {exe}")
         except PermissionError:
             return ToolResult(error="Permission denied")
+        except asyncio.CancelledError:
+            logger.info("Command cancelled", shell=shell_type, command=command[:100])
+            raise
         except Exception as e:
             logger.error("Command execution failed", error=str(e))
+            if process is not None:
+                await _terminate_process_tree(process)
             return ToolResult(error=str(e))
 
 
