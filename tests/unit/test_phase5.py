@@ -52,8 +52,7 @@ class TestConfigLoading:
         """Test loading config from YAML."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yaml"
-            config_path.write_text(
-                """
+            config_path.write_text("""
 name: yaml_agent
 version: "2.0"
 model: test-model
@@ -66,8 +65,7 @@ tools:
     type: builtin
 output:
   type: stdout
-"""
-            )
+""")
 
             config = load_agent_config(tmpdir)
             assert config.name == "yaml_agent"
@@ -84,12 +82,10 @@ output:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yaml"
-            config_path.write_text(
-                """
+            config_path.write_text("""
 name: env_test
 model: "${TEST_MODEL}"
-"""
-            )
+""")
 
             config = load_agent_config(tmpdir)
             assert config.model == "env-model"
@@ -104,12 +100,10 @@ model: "${TEST_MODEL}"
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yaml"
-            config_path.write_text(
-                """
+            config_path.write_text("""
 name: default_test
 model: "${NONEXISTENT_VAR:default-model}"
-"""
-            )
+""")
 
             config = load_agent_config(tmpdir)
             assert config.model == "default-model"
@@ -134,12 +128,10 @@ model: "${NONEXISTENT_VAR:default-model}"
             )
 
             # Create config
-            (tmpdir / "config.yaml").write_text(
-                """
+            (tmpdir / "config.yaml").write_text("""
 name: prompt_test
 system_prompt_file: prompts/system.md
-"""
-            )
+""")
 
             config = load_agent_config(tmpdir)
             assert "Test Prompt" in config.system_prompt
