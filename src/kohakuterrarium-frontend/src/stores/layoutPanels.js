@@ -18,6 +18,7 @@ import FilesPanel from "@/components/panels/FilesPanel.vue"
 import StatePanel from "@/components/panels/StatePanel.vue"
 import TerminalPanel from "@/components/panels/TerminalPanel.vue"
 import StatusDashboard from "@/components/status/StatusDashboard.vue"
+import StatusDashboardTab from "@/components/status/StatusDashboardTab.vue"
 
 import { useLayoutStore } from "@/stores/layout"
 
@@ -68,12 +69,16 @@ const WORKSPACE_PRESET = {
   ),
 }
 
-/** Chat + Terminal — chat on left, terminal on top-right, status on bottom-right. */
+/** Chat + Terminal — chat left, terminal top-right, state + status bottom-right. */
 const CHAT_TERMINAL_PRESET = {
   id: "chat-terminal",
   label: "Chat + Terminal",
   shortcut: "Ctrl+6",
-  tree: hsplit(55, leaf("chat"), vsplit(70, leaf("terminal"), leaf("status-dashboard"))),
+  tree: hsplit(
+    50,
+    leaf("chat"),
+    vsplit(65, leaf("terminal"), hsplit(50, leaf("state"), leaf("status-tab"))),
+  ),
 }
 
 /** Multi-creature — default for terrarium instances. */
@@ -177,6 +182,11 @@ export function registerBuiltinPanels() {
     component: CanvasPanel,
   })
   layout.registerPanel({ id: "debug", label: "Debug", component: DebugPanel })
+  layout.registerPanel({
+    id: "status-tab",
+    label: "Status",
+    component: StatusDashboardTab,
+  })
   layout.registerPanel({
     id: "terminal",
     label: "Terminal",

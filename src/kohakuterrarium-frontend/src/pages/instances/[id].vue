@@ -3,21 +3,14 @@
     <WorkspaceShell :instance-id="route.params.id" @stop="showStopConfirm = true" />
 
     <!-- Stop confirmation dialog (triggered from the status bar or nav) -->
-    <el-dialog
-      v-model="showStopConfirm"
-      title="Stop Instance"
-      width="400px"
-      :close-on-click-modal="true"
-    >
+    <el-dialog v-model="showStopConfirm" title="Stop Instance" width="400px" :close-on-click-modal="true">
       <p class="text-warm-600 dark:text-warm-300">
         Stop <strong>{{ instance.config_name }}</strong
         >? This will terminate the {{ instance.type }} and all its processes.
       </p>
       <template #footer>
         <el-button size="small" @click="showStopConfirm = false">Cancel</el-button>
-        <el-button size="small" type="danger" :loading="stopping" @click="confirmStop"
-          >Stop</el-button
-        >
+        <el-button size="small" type="danger" :loading="stopping" @click="confirmStop">Stop</el-button>
       </template>
     </el-dialog>
   </div>
@@ -64,6 +57,10 @@ const panelProps = computed(() => ({
   settings: { instance: instance.value },
   debug: { instance: instance.value },
   terminal: { instance: instance.value },
+  "status-tab": {
+    instance: instance.value,
+    onOpenTab: handleOpenTab,
+  },
 }))
 provide("panelProps", panelProps)
 
