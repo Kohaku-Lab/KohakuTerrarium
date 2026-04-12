@@ -8,59 +8,59 @@
  * text}`, or `{type: "error", text}`.
  */
 
-import { onMounted, onUnmounted, ref } from "vue";
+import { onMounted, onUnmounted, ref } from "vue"
 
-const BUFFER_SIZE = 5000;
+const BUFFER_SIZE = 5000
 
 function _wsUrl(path) {
-  if (typeof window === "undefined") return path;
-  const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${scheme}//${window.location.host}${path}`;
+  if (typeof window === "undefined") return path
+  const scheme = window.location.protocol === "https:" ? "wss:" : "ws:"
+  return `${scheme}//${window.location.host}${path}`
 }
 
 export function useLogStream() {
   const lines = ref(
     /** @type {Array<{ts: string, level: string, module: string, text: string}>} */ ([]),
-  );
-  const meta = ref(/** @type {{path: string, pid: number} | null} */ (null));
-  const connected = ref(false);
-  const error = ref("");
+  )
+  const meta = ref(/** @type {{path: string, pid: number} | null} */ (null))
+  const connected = ref(false)
+  const error = ref("")
 
-  let ws = null;
-  let retryTimer = null;
-  let retryDelay = 500;
-  let closedByCaller = false;
+  let ws = null
+  let retryTimer = null
+  let retryDelay = 500
+  let closedByCaller = false
 
   function connect() {
-    closedByCaller = false;
+    closedByCaller = false
     try {
-      ws = new WebSocket(_wsUrl("/ws/logs"));
+      ws = new WebSocket(_wsUrl("/ws/logs"))
     } catch (err) {
-      error.value = String(err);
-      scheduleReconnect();
-      return;
+      error.value = String(err)
+      scheduleReconnect()
+      return
     }
 
     ws.onopen = () => {
-      connected.value = true;
-      error.value = "";
-      retryDelay = 500;
-    };
+      connected.value = true
+      error.value = ""
+      retryDelay = 500
+    }
 
     ws.onmessage = (ev) => {
-      let data;
+      let data
       try {
-        data = JSON.parse(ev.data);
+        data = JSON.parse(ev.data)
       } catch {
-        return;
+        return
       }
       if (data.type === "meta") {
-        meta.value = { path: data.path, pid: data.pid };
-        return;
+        meta.value = { path: data.path, pid: data.pid }
+        return
       }
       if (data.type === "error") {
-        error.value = data.text || "";
-        return;
+        error.value = data.text || ""
+        return
       }
       if (data.type === "line") {
         lines.value.push({
@@ -68,56 +68,56 @@ export function useLogStream() {
           level: data.level || "info",
           module: data.module || "",
           text: data.text || "",
-        });
+        })
         // Circular trim
         if (lines.value.length > BUFFER_SIZE) {
-          lines.value = lines.value.slice(-BUFFER_SIZE);
+          lines.value = lines.value.slice(-BUFFER_SIZE)
         }
       }
-    };
+    }
 
     ws.onerror = () => {
-      error.value = "WebSocket error";
-    };
+      error.value = "WebSocket error"
+    }
 
     ws.onclose = () => {
-      connected.value = false;
-      ws = null;
-      if (!closedByCaller) scheduleReconnect();
-    };
+      connected.value = false
+      ws = null
+      if (!closedByCaller) scheduleReconnect()
+    }
   }
 
   function scheduleReconnect() {
-    if (retryTimer) clearTimeout(retryTimer);
+    if (retryTimer) clearTimeout(retryTimer)
     retryTimer = setTimeout(() => {
-      retryDelay = Math.min(retryDelay * 2, 5000);
-      connect();
-    }, retryDelay);
+      retryDelay = Math.min(retryDelay * 2, 5000)
+      connect()
+    }, retryDelay)
   }
 
   function disconnect() {
-    closedByCaller = true;
+    closedByCaller = true
     if (retryTimer) {
-      clearTimeout(retryTimer);
-      retryTimer = null;
+      clearTimeout(retryTimer)
+      retryTimer = null
     }
     if (ws) {
       try {
-        ws.close();
+        ws.close()
       } catch {
         // ignore
       }
-      ws = null;
+      ws = null
     }
-    connected.value = false;
+    connected.value = false
   }
 
   function clear() {
-    lines.value = [];
+    lines.value = []
   }
 
-  onMounted(connect);
-  onUnmounted(disconnect);
+  onMounted(connect)
+  onUnmounted(disconnect)
 
-  return { lines, meta, connected, error, clear, connect, disconnect };
+  return { lines, meta, connected, error, clear, connect, disconnect }
 }

@@ -5,9 +5,7 @@
       class="flex items-center gap-2 px-3 py-2 border-b border-warm-200 dark:border-warm-700 shrink-0"
     >
       <div class="i-carbon-network-4 text-sm text-warm-500" />
-      <span class="text-xs font-medium text-warm-500 dark:text-warm-400 flex-1"
-        >Creatures</span
-      >
+      <span class="text-xs font-medium text-warm-500 dark:text-warm-400 flex-1">Creatures</span>
       <span
         v-if="creatures.length"
         class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-warm-100 dark:bg-warm-800 text-warm-400"
@@ -19,9 +17,7 @@
     <div class="flex-1 overflow-y-auto px-3 py-2 text-xs">
       <template v-if="isTerrarium">
         <div class="mb-3">
-          <div
-            class="text-[10px] uppercase tracking-wider text-warm-400 font-medium mb-1"
-          >
+          <div class="text-[10px] uppercase tracking-wider text-warm-400 font-medium mb-1">
             Creatures
           </div>
           <div class="flex flex-col gap-1">
@@ -33,10 +29,9 @@
               @click="onOpenTab(c.name)"
             >
               <StatusDot :status="c.status" />
-              <span
-                class="font-medium text-warm-700 dark:text-warm-300 truncate"
-                >{{ c.name }}</span
-              >
+              <span class="font-medium text-warm-700 dark:text-warm-300 truncate">{{
+                c.name
+              }}</span>
               <span class="flex-1" />
               <span
                 class="text-[10px] px-1.5 py-0.5 rounded"
@@ -52,9 +47,7 @@
         </div>
 
         <div v-if="channels.length">
-          <div
-            class="text-[10px] uppercase tracking-wider text-warm-400 font-medium mb-1"
-          >
+          <div class="text-[10px] uppercase tracking-wider text-warm-400 font-medium mb-1">
             Channels
           </div>
           <div class="flex flex-col gap-1">
@@ -67,14 +60,11 @@
             >
               <span
                 class="w-2 h-2 rounded-sm shrink-0"
-                :class="
-                  ch.type === 'broadcast' ? 'bg-taaffeite' : 'bg-aquamarine'
-                "
+                :class="ch.type === 'broadcast' ? 'bg-taaffeite' : 'bg-aquamarine'"
               />
-              <span
-                class="font-medium text-warm-700 dark:text-warm-300 truncate"
-                >{{ ch.name }}</span
-              >
+              <span class="font-medium text-warm-700 dark:text-warm-300 truncate">{{
+                ch.name
+              }}</span>
               <span class="flex-1" />
               <span
                 class="text-[10px] px-1.5 py-0.5 rounded bg-warm-100 dark:bg-warm-800 text-warm-400"
@@ -95,23 +85,23 @@
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed } from "vue"
 
-import StatusDot from "@/components/common/StatusDot.vue";
-import { useChatStore } from "@/stores/chat";
+import StatusDot from "@/components/common/StatusDot.vue"
+import { useChatStore } from "@/stores/chat"
 
 const props = defineProps({
   instance: { type: Object, default: null },
-});
+})
 
-const chat = useChatStore();
+const chat = useChatStore()
 
-const isTerrarium = computed(() => props.instance?.type === "terrarium");
-const creatures = computed(() => props.instance?.creatures || []);
-const channels = computed(() => props.instance?.channels || []);
-const activeTab = computed(() => chat.activeTab);
+const isTerrarium = computed(() => props.instance?.type === "terrarium")
+const creatures = computed(() => props.instance?.creatures || [])
+const channels = computed(() => props.instance?.channels || [])
+const activeTab = computed(() => chat.activeTab)
 
 function onOpenTab(tabKey) {
-  chat.openTab(tabKey);
+  chat.openTab(tabKey)
 }
 </script>

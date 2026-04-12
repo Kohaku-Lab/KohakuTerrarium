@@ -9,17 +9,9 @@
         :class="stream.connected ? 'bg-aquamarine kohaku-pulse' : 'bg-warm-400'"
       />
       <span class="text-warm-400 font-mono truncate max-w-64">
-        {{
-          stream.meta?.path || (stream.connected ? "connected" : "connecting…")
-        }}
+        {{ stream.meta?.path || (stream.connected ? "connected" : "connecting…") }}
       </span>
-      <el-select
-        v-model="level"
-        placeholder="level"
-        size="small"
-        clearable
-        style="width: 100px"
-      >
+      <el-select v-model="level" placeholder="level" size="small" clearable style="width: 100px">
         <el-option label="debug" value="debug" />
         <el-option label="info" value="info" />
         <el-option label="warning" value="warning" />
@@ -42,61 +34,49 @@
     </div>
 
     <!-- Log lines -->
-    <div
-      ref="scrollEl"
-      class="flex-1 overflow-y-auto font-mono text-[10px] px-3 py-1"
-    >
-      <div
-        v-for="(line, i) in visible"
-        :key="i"
-        class="flex gap-2 items-start py-[1px]"
-      >
+    <div ref="scrollEl" class="flex-1 overflow-y-auto font-mono text-[10px] px-3 py-1">
+      <div v-for="(line, i) in visible" :key="i" class="flex gap-2 items-start py-[1px]">
         <span class="text-warm-400 shrink-0">{{ line.ts }}</span>
         <span class="shrink-0 uppercase w-12" :class="levelColor(line.level)">{{
           line.level
         }}</span>
-        <span class="text-iolite shrink-0 max-w-40 truncate">{{
-          line.module
+        <span class="text-iolite shrink-0 max-w-40 truncate">{{ line.module }}</span>
+        <span class="text-warm-700 dark:text-warm-300 flex-1 break-all whitespace-pre-wrap">{{
+          line.text
         }}</span>
-        <span
-          class="text-warm-700 dark:text-warm-300 flex-1 break-all whitespace-pre-wrap"
-          >{{ line.text }}</span
-        >
       </div>
-      <div v-if="visible.length === 0" class="text-warm-400 text-center py-6">
-        No log lines yet
-      </div>
+      <div v-if="visible.length === 0" class="text-warm-400 text-center py-6">No log lines yet</div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue"
 
-import { useLogStream } from "@/composables/useLogStream";
+import { useLogStream } from "@/composables/useLogStream"
 
 defineProps({
   instance: { type: Object, default: null },
-});
+})
 
-const stream = useLogStream();
+const stream = useLogStream()
 
-const level = ref("");
-const query = ref("");
-const scrollEl = ref(null);
+const level = ref("")
+const query = ref("")
+const scrollEl = ref(null)
 
 const visible = computed(() => {
-  const q = query.value.trim().toLowerCase();
+  const q = query.value.trim().toLowerCase()
   return stream.lines.value.filter((l) => {
-    if (level.value && l.level !== level.value) return false;
-    if (!q) return true;
+    if (level.value && l.level !== level.value) return false
+    if (!q) return true
     return (
       l.text.toLowerCase().includes(q) ||
       l.module.toLowerCase().includes(q) ||
       l.level.toLowerCase().includes(q)
-    );
-  });
-});
+    )
+  })
+})
 
 function levelColor(l) {
   return (
@@ -107,7 +87,7 @@ function levelColor(l) {
       error: "text-coral",
       unknown: "text-warm-400",
     }[l] || "text-warm-500"
-  );
+  )
 }
 
 // Auto-scroll to bottom on new lines if already near the bottom.
@@ -115,14 +95,13 @@ watch(
   () => visible.value.length,
   () => {
     nextTick(() => {
-      const el = scrollEl.value;
-      if (!el) return;
-      const distanceFromBottom =
-        el.scrollHeight - el.scrollTop - el.clientHeight;
+      const el = scrollEl.value
+      if (!el) return
+      const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
       if (distanceFromBottom < 200) {
-        el.scrollTop = el.scrollHeight;
+        el.scrollTop = el.scrollHeight
       }
-    });
+    })
   },
-);
+)
 </script>

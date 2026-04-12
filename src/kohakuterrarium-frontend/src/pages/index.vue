@@ -3,12 +3,9 @@
     <div class="container-page">
       <!-- Header -->
       <div class="mb-8">
-        <h1 class="text-2xl font-bold text-warm-800 dark:text-warm-200 mb-1">
-          KohakuTerrarium
-        </h1>
+        <h1 class="text-2xl font-bold text-warm-800 dark:text-warm-200 mb-1">KohakuTerrarium</h1>
         <p class="text-secondary">
-          Build agents that work alone. Compose them into teams that work
-          together.
+          Build agents that work alone. Compose them into teams that work together.
         </p>
       </div>
 
@@ -25,10 +22,7 @@
       <!-- Running instances -->
       <div class="mb-8">
         <h2 class="section-title">Running Instances</h2>
-        <div
-          v-if="instances.running.length === 0"
-          class="card p-8 text-center text-secondary"
-        >
+        <div v-if="instances.running.length === 0" class="card p-8 text-center text-secondary">
           No instances running. Start one to get going.
         </div>
         <div v-else class="flex flex-col gap-3">
@@ -47,15 +41,11 @@
                 {{ inst.pwd }}
               </div>
             </div>
-            <GemBadge
-              :gem="inst.type === 'terrarium' ? 'iolite' : 'aquamarine'"
-            >
+            <GemBadge :gem="inst.type === 'terrarium' ? 'iolite' : 'aquamarine'">
               {{ inst.type }}
             </GemBadge>
             <div class="text-secondary text-xs">
-              {{ inst.creatures.length }} creature{{
-                inst.creatures.length !== 1 ? "s" : ""
-              }}
+              {{ inst.creatures.length }} creature{{ inst.creatures.length !== 1 ? "s" : "" }}
             </div>
             <button
               class="btn-icon text-coral hover:text-coral-dark flex-shrink-0"
@@ -91,14 +81,8 @@
         >? This will terminate the {{ stopTarget?.type }} and all its processes.
       </p>
       <template #footer>
-        <el-button size="small" @click="showStopConfirm = false"
-          >Cancel</el-button
-        >
-        <el-button
-          size="small"
-          type="danger"
-          :loading="stopping"
-          @click="confirmStop"
+        <el-button size="small" @click="showStopConfirm = false">Cancel</el-button>
+        <el-button size="small" type="danger" :loading="stopping" @click="confirmStop"
           >Stop</el-button
         >
       </template>
@@ -107,23 +91,23 @@
 </template>
 
 <script setup>
-import { ElMessage } from "element-plus";
-import StatusDot from "@/components/common/StatusDot.vue";
-import GemBadge from "@/components/common/GemBadge.vue";
-import { useInstancesStore } from "@/stores/instances";
+import { ElMessage } from "element-plus"
+import StatusDot from "@/components/common/StatusDot.vue"
+import GemBadge from "@/components/common/GemBadge.vue"
+import { useInstancesStore } from "@/stores/instances"
 
-const instances = useInstancesStore();
-instances.fetchAll();
+const instances = useInstancesStore()
+instances.fetchAll()
 
 // Start auto-refresh polling
-instances.startPolling();
+instances.startPolling()
 onUnmounted(() => {
-  instances.stopPolling();
-});
+  instances.stopPolling()
+})
 
-const showStopConfirm = ref(false);
-const stopTarget = ref(null);
-const stopping = ref(false);
+const showStopConfirm = ref(false)
+const stopTarget = ref(null)
+const stopping = ref(false)
 
 const stats = computed(() => [
   {
@@ -146,30 +130,30 @@ const stats = computed(() => [
     value: instances.list.reduce((acc, i) => acc + i.channels.length, 0),
     color: "text-amber",
   },
-]);
+])
 
 function handleStop(inst) {
-  stopTarget.value = inst;
-  showStopConfirm.value = true;
+  stopTarget.value = inst
+  showStopConfirm.value = true
 }
 
 async function confirmStop() {
-  if (!stopTarget.value) return;
-  stopping.value = true;
+  if (!stopTarget.value) return
+  stopping.value = true
   try {
-    await instances.stop(stopTarget.value.id);
+    await instances.stop(stopTarget.value.id)
     ElMessage({
       message: `Stopped ${stopTarget.value.config_name}`,
       type: "success",
-    });
-    showStopConfirm.value = false;
+    })
+    showStopConfirm.value = false
   } catch (err) {
     ElMessage({
       message: `Failed to stop: ${err.message || "Unknown error"}`,
       type: "error",
-    });
+    })
   } finally {
-    stopping.value = false;
+    stopping.value = false
   }
 }
 </script>

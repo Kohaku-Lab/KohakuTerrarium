@@ -15,23 +15,17 @@
           class="w-7 h-7 rounded-full shrink-0 object-cover"
         />
         <span class="text-sm truncate">
-          <span class="font-bold text-amber">Kohaku</span><span class="font-light text-iolite-light dark:text-iolite-light">Terrarium</span>
+          <span class="font-bold text-amber">Kohaku</span
+          ><span class="font-light text-iolite-light dark:text-iolite-light">Terrarium</span>
         </span>
       </div>
-      <img
-        v-else
-        src="/kohaku-icon.png"
-        alt="Kohaku"
-        class="w-7 h-7 rounded-full object-cover"
-      />
+      <img v-else src="/kohaku-icon.png" alt="Kohaku" class="w-7 h-7 rounded-full object-cover" />
       <button
         class="w-6 h-6 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors shrink-0"
         @click="expanded = !expanded"
       >
         <div
-          :class="
-            expanded ? 'i-carbon-side-panel-close' : 'i-carbon-side-panel-open'
-          "
+          :class="expanded ? 'i-carbon-side-panel-close' : 'i-carbon-side-panel-open'"
           class="text-sm"
         />
       </button>
@@ -54,18 +48,13 @@
 
     <!-- Running instances directly listed -->
     <div v-if="expanded" class="px-3 mb-1">
-      <span
-        class="text-[10px] text-warm-400 uppercase tracking-wider font-medium"
-        >Running</span
-      >
+      <span class="text-[10px] text-warm-400 uppercase tracking-wider font-medium">Running</span>
     </div>
 
     <div class="flex-1 overflow-y-auto flex flex-col gap-0.5 min-h-0">
       <div v-if="instances.list.length === 0" class="px-3 py-2">
         <span v-if="expanded" class="text-xs text-warm-400">No instances</span>
-        <span v-else class="text-warm-400 text-[10px] text-center block"
-          >--</span
-        >
+        <span v-else class="text-warm-400 text-[10px] text-center block">--</span>
       </div>
       <router-link
         v-for="inst in instances.list"
@@ -77,9 +66,7 @@
         <NavItem
           :expanded="expanded"
           :active="isActive"
-          :icon="
-            inst.type === 'terrarium' ? 'i-carbon-network-4' : 'i-carbon-bot'
-          "
+          :icon="inst.type === 'terrarium' ? 'i-carbon-network-4' : 'i-carbon-bot'"
           :label="inst.config_name"
           :status="inst.status"
           @click="navigate"
@@ -149,15 +136,15 @@
 </template>
 
 <script setup>
-import { useThemeStore } from "@/stores/theme";
-import { useInstancesStore } from "@/stores/instances";
+import { useThemeStore } from "@/stores/theme"
+import { useInstancesStore } from "@/stores/instances"
 
-const theme = useThemeStore();
-const instances = useInstancesStore();
+const theme = useThemeStore()
+const instances = useInstancesStore()
 
-const expanded = ref(localStorage.getItem("nav-expanded") !== "false");
+const expanded = ref(localStorage.getItem("nav-expanded") !== "false")
 
 watch(expanded, (v) => {
-  localStorage.setItem("nav-expanded", v ? "true" : "false");
-});
+  localStorage.setItem("nav-expanded", v ? "true" : "false")
+})
 </script>

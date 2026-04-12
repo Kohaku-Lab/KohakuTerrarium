@@ -8,21 +8,12 @@
   </div>
 
   <!-- Context cleared banner -->
-  <div
-    v-else-if="message.role === 'clear'"
-    class="flex items-center gap-3 py-2"
-  >
-    <div
-      class="flex-1 border-t border-warm-300 dark:border-warm-600 border-dashed"
-    />
+  <div v-else-if="message.role === 'clear'" class="flex items-center gap-3 py-2">
+    <div class="flex-1 border-t border-warm-300 dark:border-warm-600 border-dashed" />
     <span class="text-xs text-warm-400 dark:text-warm-500 shrink-0">
-      Context Cleared{{
-        message.messagesCleared ? ` — ${message.messagesCleared} messages` : ""
-      }}
+      Context Cleared{{ message.messagesCleared ? ` — ${message.messagesCleared} messages` : "" }}
     </span>
-    <div
-      class="flex-1 border-t border-warm-300 dark:border-warm-600 border-dashed"
-    />
+    <div class="flex-1 border-t border-warm-300 dark:border-warm-600 border-dashed" />
   </div>
 
   <!-- Context compacted (accordion) -->
@@ -93,9 +84,7 @@
       @keydown.space.prevent="errorExpanded = !errorExpanded"
     >
       <span class="text-coral font-bold text-sm">&#x2717;</span>
-      <span
-        class="text-coral dark:text-coral-light font-semibold text-xs flex-1"
-      >
+      <span class="text-coral dark:text-coral-light font-semibold text-xs flex-1">
         {{ message.errorType || "Processing Error" }}
       </span>
       <span
@@ -128,12 +117,8 @@
       class="flex items-center gap-2 py-1.5 px-3"
       :class="message.triggerContent ? 'cursor-pointer select-none' : ''"
       @click="message.triggerContent && toggleTool('trig_' + message.id)"
-      @keydown.enter="
-        message.triggerContent && toggleTool('trig_' + message.id)
-      "
-      @keydown.space.prevent="
-        message.triggerContent && toggleTool('trig_' + message.id)
-      "
+      @keydown.enter="message.triggerContent && toggleTool('trig_' + message.id)"
+      @keydown.space.prevent="message.triggerContent && toggleTool('trig_' + message.id)"
     >
       <span class="w-1.5 h-1.5 rounded-full bg-amber shrink-0" />
       <span class="text-xs text-amber-shadow dark:text-amber-light flex-1">
@@ -154,10 +139,7 @@
   </div>
 
   <!-- User message -->
-  <div
-    v-else-if="message.role === 'user'"
-    class="ml-auto max-w-[80%] group relative"
-  >
+  <div v-else-if="message.role === 'user'" class="ml-auto max-w-[80%] group relative">
     <div
       class="card px-4 py-3 border-l-3"
       :class="
@@ -208,12 +190,7 @@
       v-if="!editing && !message.queued && messageIdx != null"
       class="absolute -bottom-5 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
     >
-      <button
-        class="msg-action-btn"
-        @click="copyMessage"
-        title="Copy"
-        aria-label="Copy message"
-      >
+      <button class="msg-action-btn" @click="copyMessage" title="Copy" aria-label="Copy message">
         <span class="i-carbon-copy text-xs" />
       </button>
       <button
@@ -228,10 +205,7 @@
   </div>
 
   <!-- Assistant message (parts-based: ordered text + tools) -->
-  <div
-    v-else-if="message.role === 'assistant' && message.parts"
-    class="max-w-[90%] group relative"
-  >
+  <div v-else-if="message.role === 'assistant' && message.parts" class="max-w-[90%] group relative">
     <template v-for="(part, pi) in message.parts" :key="pi">
       <!-- Text part -->
       <div v-if="part.type === 'text' && part.content" class="text-body mb-1">
@@ -288,11 +262,7 @@
 
   <!-- Channel message (group chat style) -->
   <div v-else-if="message.role === 'channel'" class="max-w-[90%]">
-    <div
-      v-if="showSenderHeader"
-      class="flex items-center gap-2 mb-1"
-      :class="{ 'mt-2': !isFirst }"
-    >
+    <div v-if="showSenderHeader" class="flex items-center gap-2 mb-1" :class="{ 'mt-2': !isFirst }">
       <span
         class="w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold text-white"
         :style="{ background: senderGemColor }"
@@ -311,10 +281,10 @@
 </template>
 
 <script setup>
-import MarkdownRenderer from "@/components/common/MarkdownRenderer.vue";
-import ToolCallBlock from "@/components/chat/ToolCallBlock.vue";
-import { GEM } from "@/utils/colors";
-import { useChatStore } from "@/stores/chat";
+import MarkdownRenderer from "@/components/common/MarkdownRenderer.vue"
+import ToolCallBlock from "@/components/chat/ToolCallBlock.vue"
+import { GEM } from "@/utils/colors"
+import { useChatStore } from "@/stores/chat"
 
 const props = defineProps({
   message: { type: Object, required: true },
@@ -322,29 +292,29 @@ const props = defineProps({
   isFirst: { type: Boolean, default: false },
   messageIdx: { type: Number, default: null },
   isLastAssistant: { type: Boolean, default: false },
-});
+})
 
-const expandedTools = reactive({});
-const editing = ref(false);
-const editText = ref("");
-const errorExpanded = ref(false);
+const expandedTools = reactive({})
+const editing = ref(false)
+const editText = ref("")
+const errorExpanded = ref(false)
 
 const errorFirstLine = computed(() => {
-  if (props.message.role !== "error") return "";
-  const content = props.message.content || "";
-  const firstLine = content.split("\n")[0] || "";
-  return firstLine.length > 80 ? firstLine.slice(0, 80) + "…" : firstLine;
-});
+  if (props.message.role !== "error") return ""
+  const content = props.message.content || ""
+  const firstLine = content.split("\n")[0] || ""
+  return firstLine.length > 80 ? firstLine.slice(0, 80) + "…" : firstLine
+})
 
 function toggleTool(id) {
-  expandedTools[id] = !expandedTools[id];
+  expandedTools[id] = !expandedTools[id]
 }
 
 const showSenderHeader = computed(() => {
-  if (props.message.role !== "channel") return false;
-  if (!props.prevMessage || props.prevMessage.role !== "channel") return true;
-  return props.prevMessage.sender !== props.message.sender;
-});
+  if (props.message.role !== "channel") return false
+  if (!props.prevMessage || props.prevMessage.role !== "channel") return true
+  return props.prevMessage.sender !== props.message.sender
+})
 
 const SENDER_GEMS = [
   GEM.iolite.main,
@@ -352,63 +322,63 @@ const SENDER_GEMS = [
   GEM.taaffeite.main,
   GEM.amber.main,
   GEM.sapphire.main,
-];
-const senderColorCache = {};
-let nextColorIdx = 0;
+]
+const senderColorCache = {}
+let nextColorIdx = 0
 
 const senderGemColor = computed(() => {
-  const name = props.message.sender;
-  if (!name) return GEM.iolite.main;
+  const name = props.message.sender
+  if (!name) return GEM.iolite.main
   if (!senderColorCache[name]) {
-    senderColorCache[name] = SENDER_GEMS[nextColorIdx % SENDER_GEMS.length];
-    nextColorIdx++;
+    senderColorCache[name] = SENDER_GEMS[nextColorIdx % SENDER_GEMS.length]
+    nextColorIdx++
   }
-  return senderColorCache[name];
-});
+  return senderColorCache[name]
+})
 
 // ── Message actions (copy / edit / regenerate) ──
 
-const chat = useChatStore();
+const chat = useChatStore()
 
 function copyMessage() {
-  const text = props.message.content || "";
-  navigator.clipboard.writeText(text);
+  const text = props.message.content || ""
+  navigator.clipboard.writeText(text)
 }
 
 function copyAssistantText() {
-  let text = "";
+  let text = ""
   if (props.message.parts) {
     for (const part of props.message.parts) {
       if (part.type === "text" && part.content) {
-        text += part.content;
+        text += part.content
       }
     }
   } else if (props.message.content) {
-    text = props.message.content;
+    text = props.message.content
   }
-  navigator.clipboard.writeText(text);
+  navigator.clipboard.writeText(text)
 }
 
 function startEdit() {
-  editText.value = props.message.content || "";
-  editing.value = true;
+  editText.value = props.message.content || ""
+  editing.value = true
 }
 
 function cancelEdit() {
-  editing.value = false;
-  editText.value = "";
+  editing.value = false
+  editText.value = ""
 }
 
 function confirmEdit() {
-  const newContent = editText.value.trim();
-  if (!newContent) return;
-  chat.editMessage(props.messageIdx, newContent);
-  editing.value = false;
-  editText.value = "";
+  const newContent = editText.value.trim()
+  if (!newContent) return
+  chat.editMessage(props.messageIdx, newContent)
+  editing.value = false
+  editText.value = ""
 }
 
 function regenerate() {
-  chat.regenerateLastResponse();
+  chat.regenerateLastResponse()
 }
 </script>
 

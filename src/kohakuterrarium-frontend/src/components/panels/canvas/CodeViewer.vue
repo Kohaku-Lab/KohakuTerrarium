@@ -20,20 +20,20 @@
 </template>
 
 <script setup>
-import { computed } from "vue";
-import hljs from "highlight.js/lib/core";
+import { computed } from "vue"
+import hljs from "highlight.js/lib/core"
 
-import bash from "highlight.js/lib/languages/bash";
-import css from "highlight.js/lib/languages/css";
-import javascript from "highlight.js/lib/languages/javascript";
-import json from "highlight.js/lib/languages/json";
-import markdown from "highlight.js/lib/languages/markdown";
-import python from "highlight.js/lib/languages/python";
-import rust from "highlight.js/lib/languages/rust";
-import sql from "highlight.js/lib/languages/sql";
-import typescript from "highlight.js/lib/languages/typescript";
-import xml from "highlight.js/lib/languages/xml";
-import yaml from "highlight.js/lib/languages/yaml";
+import bash from "highlight.js/lib/languages/bash"
+import css from "highlight.js/lib/languages/css"
+import javascript from "highlight.js/lib/languages/javascript"
+import json from "highlight.js/lib/languages/json"
+import markdown from "highlight.js/lib/languages/markdown"
+import python from "highlight.js/lib/languages/python"
+import rust from "highlight.js/lib/languages/rust"
+import sql from "highlight.js/lib/languages/sql"
+import typescript from "highlight.js/lib/languages/typescript"
+import xml from "highlight.js/lib/languages/xml"
+import yaml from "highlight.js/lib/languages/yaml"
 
 const LANG_MAP = {
   bash,
@@ -57,44 +57,41 @@ const LANG_MAP = {
   svg: xml,
   yaml,
   yml: yaml,
-};
+}
 
 for (const [name, lang] of Object.entries(LANG_MAP)) {
   try {
-    hljs.registerLanguage(name, lang);
+    hljs.registerLanguage(name, lang)
   } catch {
     /* skip */
   }
 }
 
-import "highlight.js/styles/github-dark.css";
+import "highlight.js/styles/github-dark.css"
 
 const props = defineProps({
   content: { type: String, default: "" },
   lang: { type: String, default: "text" },
-});
+})
 
 const lineCount = computed(() => {
-  if (!props.content) return 1;
-  return props.content.split("\n").length;
-});
+  if (!props.content) return 1
+  return props.content.split("\n").length
+})
 
 const highlighted = computed(() => {
-  const lang = (props.lang || "").toLowerCase();
+  const lang = (props.lang || "").toLowerCase()
   if (LANG_MAP[lang]) {
     try {
-      return hljs.highlight(props.content, { language: lang }).value;
+      return hljs.highlight(props.content, { language: lang }).value
     } catch {
-      return escapeHtml(props.content);
+      return escapeHtml(props.content)
     }
   }
-  return escapeHtml(props.content);
-});
+  return escapeHtml(props.content)
+})
 
 function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 </script>

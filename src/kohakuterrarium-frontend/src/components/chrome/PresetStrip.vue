@@ -24,11 +24,9 @@
           >
             <div class="flex items-center gap-2 text-[11px]">
               <span class="truncate max-w-40">{{ p.label }}</span>
-              <span
-                v-if="p.shortcut"
-                class="text-[9px] font-mono text-warm-400"
-                >{{ p.shortcut }}</span
-              >
+              <span v-if="p.shortcut" class="text-[9px] font-mono text-warm-400">{{
+                p.shortcut
+              }}</span>
             </div>
           </el-dropdown-item>
         </el-dropdown-menu>
@@ -49,47 +47,40 @@
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed } from "vue"
 
-import { useLayoutStore } from "@/stores/layout";
-import { fireLayoutEditRequested } from "@/utils/layoutEvents";
+import { useLayoutStore } from "@/stores/layout"
+import { fireLayoutEditRequested } from "@/utils/layoutEvents"
 
-const layout = useLayoutStore();
+const layout = useLayoutStore()
 
-const PRESET_ORDER = [
-  "chat-focus",
-  "workspace",
-  "multi-creature",
-  "canvas",
-  "debug",
-  "settings",
-];
+const PRESET_ORDER = ["chat-focus", "workspace", "multi-creature", "canvas", "debug", "settings"]
 
 const presets = computed(() => {
-  const all = layout.allPresets;
-  const out = [];
+  const all = layout.allPresets
+  const out = []
   for (const id of PRESET_ORDER) {
-    if (all[id]) out.push(all[id]);
+    if (all[id]) out.push(all[id])
   }
   for (const preset of Object.values(all)) {
     if (!PRESET_ORDER.includes(preset.id) && !preset.id.startsWith("legacy-")) {
-      out.push(preset);
+      out.push(preset)
     }
   }
-  return out;
-});
+  return out
+})
 
-const active = computed(() => layout.activePresetId);
+const active = computed(() => layout.activePresetId)
 const activeLabel = computed(() => {
-  const p = layout.activePreset;
-  return p?.label || p?.id || "—";
-});
+  const p = layout.activePreset
+  return p?.label || p?.id || "—"
+})
 
 function onSelect(id) {
-  layout.switchPreset(id);
+  layout.switchPreset(id)
 }
 
 function onEdit() {
-  fireLayoutEditRequested();
+  fireLayoutEditRequested()
 }
 </script>

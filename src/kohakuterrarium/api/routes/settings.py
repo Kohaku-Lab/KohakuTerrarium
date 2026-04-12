@@ -1,7 +1,13 @@
 """Settings routes - API keys, custom model profiles, default model."""
 
+import datetime
+
+import httpx
+import yaml
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
+from kohakuterrarium.llm.codex_auth import CodexTokens, refresh_tokens
 
 from kohakuterrarium.llm.profiles import (
     PROVIDER_KEY_MAP,
@@ -225,8 +231,6 @@ def _mcp_config_path():
 
 
 def _load_mcp_config() -> list[dict]:
-    import yaml
-
     path = _mcp_config_path()
     if not path.exists():
         return []
@@ -240,9 +244,86 @@ def _load_mcp_config() -> list[dict]:
 
 
 def _save_mcp_config(servers: list[dict]) -> None:
-    import yaml
-
     path = _mcp_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         yaml.dump({"servers": servers}, f, default_flow_style=False, sort_keys=False)
+
+
+# ── Codex usage ──
+
+
+@router.get("/codex-usage")
+async def get_codex_usage() -> dict:
+    """Fetch Codex quota/usage from chatgpt.com using stored OAuth token.
+
+    Requires the user to be logged in via ``kt login codex``.
+    Returns rate limit windows, credits, and plan info.
+    """
+    tokens = CodexTokens.load()
+    if not tokens:
+        raise HTTPException(
+            status_code=401,
+            detail="Not logged in with Codex. Run: kt login codex",
+        )
+
+    if tokens.is_expired():
+        try:
+            tokens = await refresh_tokens(tokens)
+        except Exception as e:
+            raise HTTPException(
+                status_code=401,
+                detail=f"Codex token expired and could not be refreshed: {e}",
+            )
+
+    url = "https://chatgpt.com/backend-api/wham/usage"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                url,
+                headers={
+                    "Authorization": f"Bearer {tokens.access_token}",
+                    "User-Agent": "codex-cli",
+                    "Content-Type": "application/json",
+                },
+            )
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=503, detail=f"Request failed: {e}")
+
+    if resp.status_code == 401:
+        raise HTTPException(
+            status_code=401,
+            detail="Codex token rejected — re-login with: kt login codex",
+        )
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=resp.status_code, detail="Failed to fetch Codex usage"
+        )
+
+    data = resp.json()
+
+    # Enrich windows with human-readable reset timestamps
+    def _enrich_window(w: dict | None) -> dict | None:
+        if not w:
+            return None
+        return {**w, "reset_at_iso": _unix_to_iso(w.get("reset_at", 0))}
+
+    rl = data.get("rate_limit", {})
+    return {
+        "logged_in": True,
+        "email": data.get("email", ""),
+        "plan_type": data.get("plan_type", ""),
+        "allowed": rl.get("allowed", True),
+        "limit_reached": rl.get("limit_reached", False),
+        "primary_window": _enrich_window(rl.get("primary_window")),
+        "secondary_window": _enrich_window(rl.get("secondary_window")),
+        "credits": data.get("credits"),
+        "additional_rate_limits": data.get("additional_rate_limits", []),
+        "spend_control": data.get("spend_control"),
+    }
+
+
+def _unix_to_iso(ts: float | int) -> str:
+    if not ts:
+        return ""
+    return datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).isoformat()

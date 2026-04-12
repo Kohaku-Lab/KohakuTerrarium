@@ -1,9 +1,5 @@
 <template>
-  <div
-    ref="container"
-    class="split-pane"
-    :class="horizontal ? 'split-pane--h' : 'split-pane--v'"
-  >
+  <div ref="container" class="split-pane" :class="horizontal ? 'split-pane--h' : 'split-pane--v'">
     <div class="split-pane__first" :style="firstStyle">
       <slot name="first" />
     </div>
@@ -31,56 +27,56 @@ const props = defineProps({
   minSize: { type: Number, default: 15 },
   /** localStorage key for persisting size (optional) */
   persistKey: { type: String, default: "" },
-});
+})
 
 const _saved = props.persistKey
   ? parseFloat(localStorage.getItem(`split-${props.persistKey}`) || "0")
-  : 0;
-const size = ref(_saved || props.initialSize);
-const dragging = ref(false);
-const container = ref(null);
+  : 0
+const size = ref(_saved || props.initialSize)
+const dragging = ref(false)
+const container = ref(null)
 
 const firstStyle = computed(() =>
   props.horizontal
     ? { height: `${size.value}%`, minHeight: 0 }
     : { width: `${size.value}%`, minWidth: 0 },
-);
+)
 
 const secondStyle = computed(() =>
   props.horizontal
     ? { height: `${100 - size.value}%`, minHeight: 0 }
     : { width: `${100 - size.value}%`, minWidth: 0 },
-);
+)
 
 function onPointerDown(e) {
-  dragging.value = true;
-  e.target.setPointerCapture(e.pointerId);
-  e.target.addEventListener("pointermove", onPointerMove);
-  e.target.addEventListener("pointerup", onPointerUp);
-  e.target.addEventListener("pointercancel", onPointerUp);
+  dragging.value = true
+  e.target.setPointerCapture(e.pointerId)
+  e.target.addEventListener("pointermove", onPointerMove)
+  e.target.addEventListener("pointerup", onPointerUp)
+  e.target.addEventListener("pointercancel", onPointerUp)
 }
 
 function onPointerMove(e) {
-  if (!dragging.value || !container.value) return;
-  const rect = container.value.getBoundingClientRect();
-  let pct;
+  if (!dragging.value || !container.value) return
+  const rect = container.value.getBoundingClientRect()
+  let pct
   if (props.horizontal) {
-    pct = ((e.clientY - rect.top) / rect.height) * 100;
+    pct = ((e.clientY - rect.top) / rect.height) * 100
   } else {
-    pct = ((e.clientX - rect.left) / rect.width) * 100;
+    pct = ((e.clientX - rect.left) / rect.width) * 100
   }
-  size.value = Math.max(props.minSize, Math.min(100 - props.minSize, pct));
+  size.value = Math.max(props.minSize, Math.min(100 - props.minSize, pct))
 }
 
 function onPointerUp(e) {
-  dragging.value = false;
-  e.target.releasePointerCapture(e.pointerId);
+  dragging.value = false
+  e.target.releasePointerCapture(e.pointerId)
   if (props.persistKey) {
-    localStorage.setItem(`split-${props.persistKey}`, String(size.value));
+    localStorage.setItem(`split-${props.persistKey}`, String(size.value))
   }
-  e.target.removeEventListener("pointermove", onPointerMove);
-  e.target.removeEventListener("pointerup", onPointerUp);
-  e.target.removeEventListener("pointercancel", onPointerUp);
+  e.target.removeEventListener("pointermove", onPointerMove)
+  e.target.removeEventListener("pointerup", onPointerUp)
+  e.target.removeEventListener("pointercancel", onPointerUp)
 }
 </script>
 

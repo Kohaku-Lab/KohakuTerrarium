@@ -1,4 +1,4 @@
-import { terrariumAPI, agentAPI } from "@/utils/api";
+import { terrariumAPI, agentAPI } from "@/utils/api"
 
 export const useInstancesStore = defineStore("instances", {
   state: () => ({
@@ -22,51 +22,48 @@ export const useInstancesStore = defineStore("instances", {
   actions: {
     /** Fetch all running instances (both terrariums and standalone agents) */
     async fetchAll() {
-      this.loading = true;
+      this.loading = true
       try {
-        const [terrariums, agents] = await Promise.all([
-          terrariumAPI.list(),
-          agentAPI.list(),
-        ]);
+        const [terrariums, agents] = await Promise.all([terrariumAPI.list(), agentAPI.list()])
 
-        const tInstances = terrariums.map((t) => _mapTerrarium(t));
-        const aInstances = agents.map((a) => _mapAgent(a));
-        this.list = [...tInstances, ...aInstances];
+        const tInstances = terrariums.map((t) => _mapTerrarium(t))
+        const aInstances = agents.map((a) => _mapAgent(a))
+        this.list = [...tInstances, ...aInstances]
       } catch (err) {
-        console.error("Failed to fetch instances:", err);
+        console.error("Failed to fetch instances:", err)
       } finally {
-        this.loading = false;
+        this.loading = false
       }
     },
 
     /** Fetch a single instance by ID */
     async fetchOne(id) {
-      this.loading = true;
+      this.loading = true
       try {
         if (id.startsWith("terrarium_")) {
-          const data = await terrariumAPI.get(id);
-          this.current = _mapTerrarium(data);
+          const data = await terrariumAPI.get(id)
+          this.current = _mapTerrarium(data)
         } else if (id.startsWith("agent_")) {
-          const data = await agentAPI.get(id);
-          this.current = _mapAgent(data);
+          const data = await agentAPI.get(id)
+          this.current = _mapAgent(data)
         }
       } catch (err) {
-        console.error("Failed to fetch instance:", err);
+        console.error("Failed to fetch instance:", err)
       } finally {
-        this.loading = false;
+        this.loading = false
       }
     },
 
     /** Create a new instance */
     async create(type, configPath, pwd) {
       if (type === "terrarium") {
-        const { terrarium_id } = await terrariumAPI.create(configPath, pwd);
-        await this.fetchAll();
-        return terrarium_id;
+        const { terrarium_id } = await terrariumAPI.create(configPath, pwd)
+        await this.fetchAll()
+        return terrarium_id
       } else {
-        const { agent_id } = await agentAPI.create(configPath, pwd);
-        await this.fetchAll();
-        return agent_id;
+        const { agent_id } = await agentAPI.create(configPath, pwd)
+        await this.fetchAll()
+        return agent_id
       }
     },
 
@@ -74,41 +71,41 @@ export const useInstancesStore = defineStore("instances", {
     async stop(id) {
       try {
         if (id.startsWith("terrarium_")) {
-          await terrariumAPI.stop(id);
+          await terrariumAPI.stop(id)
         } else if (id.startsWith("agent_")) {
-          await agentAPI.stop(id);
+          await agentAPI.stop(id)
         }
         // Only remove after successful API response
-        this.list = this.list.filter((i) => i.id !== id);
+        this.list = this.list.filter((i) => i.id !== id)
         if (this.current?.id === id) {
-          this.current = null;
+          this.current = null
         }
       } catch (err) {
-        console.error("Failed to stop instance:", err);
-        throw err;
+        console.error("Failed to stop instance:", err)
+        throw err
       }
     },
 
     /** Start auto-refresh polling. Called when a component mounts. */
     startPolling() {
-      this._subscribers++;
+      this._subscribers++
       if (this._pollInterval === null) {
         this._pollInterval = setInterval(() => {
-          this.fetchAll();
-        }, 5000);
+          this.fetchAll()
+        }, 5000)
       }
     },
 
     /** Stop auto-refresh polling. Called when a component unmounts. */
     stopPolling() {
-      this._subscribers = Math.max(0, this._subscribers - 1);
+      this._subscribers = Math.max(0, this._subscribers - 1)
       if (this._subscribers === 0 && this._pollInterval !== null) {
-        clearInterval(this._pollInterval);
-        this._pollInterval = null;
+        clearInterval(this._pollInterval)
+        this._pollInterval = null
       }
     },
   },
-});
+})
 
 /** Map terrarium API response to frontend InstanceInfo */
 function _mapTerrarium(data) {
@@ -137,7 +134,7 @@ function _mapTerrarium(data) {
       description: ch.description || "",
       message_count: ch.qsize || 0,
     })),
-  };
+  }
 }
 
 /** Map agent API response to frontend InstanceInfo */
@@ -164,5 +161,5 @@ function _mapAgent(data) {
       },
     ],
     channels: [],
-  };
+  }
 }

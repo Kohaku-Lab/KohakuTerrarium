@@ -3,26 +3,26 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref, watch } from "vue";
-import Vditor from "vditor";
-import "vditor/dist/index.css";
+import { onMounted, onUnmounted, ref, watch } from "vue"
+import Vditor from "vditor"
+import "vditor/dist/index.css"
 
-import { useThemeStore } from "@/stores/theme";
+import { useThemeStore } from "@/stores/theme"
 
 const props = defineProps({
   content: { type: String, default: "" },
   filePath: { type: String, default: "" },
-});
+})
 
-const emit = defineEmits(["change", "save"]);
+const emit = defineEmits(["change", "save"])
 
-const theme = useThemeStore();
-const editorEl = ref(null);
-let vd = null;
-let suppressChange = false;
+const theme = useThemeStore()
+const editorEl = ref(null)
+let vd = null
+let suppressChange = false
 
 onMounted(() => {
-  if (!editorEl.value) return;
+  if (!editorEl.value) return
 
   vd = new Vditor(editorEl.value, {
     mode: "ir", // instant rendering (WYSIWYG-ish)
@@ -62,56 +62,56 @@ onMounted(() => {
     },
     input: (value) => {
       if (!suppressChange) {
-        emit("change", value);
+        emit("change", value)
       }
     },
     ctrlEnter: () => {
-      emit("save");
+      emit("save")
     },
     after: () => {
-      vd?.focus();
+      vd?.focus()
     },
-  });
+  })
 
   // Ctrl+S to save (Vditor doesn't have a native hook for this).
   editorEl.value.addEventListener("keydown", (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-      e.preventDefault();
-      emit("save");
+      e.preventDefault()
+      emit("save")
     }
-  });
-});
+  })
+})
 
 // Sync external content changes (e.g. file revert).
 watch(
   () => props.content,
   (newVal) => {
-    if (!vd) return;
-    const current = vd.getValue();
+    if (!vd) return
+    const current = vd.getValue()
     if (current !== newVal) {
-      suppressChange = true;
-      vd.setValue(newVal);
-      suppressChange = false;
+      suppressChange = true
+      vd.setValue(newVal)
+      suppressChange = false
     }
   },
-);
+)
 
 // React to theme toggle.
 watch(
   () => theme.dark,
   (dark) => {
     if (vd) {
-      vd.setTheme(dark ? "dark" : "classic", dark ? "dark" : "light");
+      vd.setTheme(dark ? "dark" : "classic", dark ? "dark" : "light")
     }
   },
-);
+)
 
 onUnmounted(() => {
   if (vd) {
-    vd.destroy();
-    vd = null;
+    vd.destroy()
+    vd = null
   }
-});
+})
 </script>
 
 <style>

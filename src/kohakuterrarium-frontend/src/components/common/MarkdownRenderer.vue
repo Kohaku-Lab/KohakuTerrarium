@@ -3,33 +3,33 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref, watch } from "vue";
-import MarkdownIt from "markdown-it";
-import mk from "markdown-it-katex";
-import hljs from "highlight.js";
+import { computed, nextTick, ref, watch } from "vue"
+import MarkdownIt from "markdown-it"
+import mk from "markdown-it-katex"
+import hljs from "highlight.js"
 
 const props = defineProps({
   content: { type: String, default: "" },
-});
+})
 
-const rootEl = ref(null);
+const rootEl = ref(null)
 
 const md = new MarkdownIt({
   html: false,
   linkify: true,
   typographer: false,
   highlight(str, lang) {
-    const displayLang = lang || "text";
-    const langClass = lang && hljs.getLanguage(lang) ? lang : "";
-    let highlighted;
+    const displayLang = lang || "text"
+    const langClass = lang && hljs.getLanguage(lang) ? lang : ""
+    let highlighted
     if (langClass) {
       try {
-        highlighted = hljs.highlight(str, { language: lang }).value;
+        highlighted = hljs.highlight(str, { language: lang }).value
       } catch {
-        highlighted = md.utils.escapeHtml(str);
+        highlighted = md.utils.escapeHtml(str)
       }
     } else {
-      highlighted = md.utils.escapeHtml(str);
+      highlighted = md.utils.escapeHtml(str)
     }
     // Wrap with header (language label + copy button)
     return (
@@ -40,36 +40,35 @@ const md = new MarkdownIt({
       `</div>` +
       `<pre class="hljs"><code>${highlighted}</code></pre>` +
       `</div>`
-    );
+    )
   },
-});
+})
 
-md.use(mk);
+md.use(mk)
 
 function onClick(e) {
-  const btn = e.target.closest(".code-copy-btn");
-  if (!btn) return;
-  const raw = btn.getAttribute("data-copy") || "";
+  const btn = e.target.closest(".code-copy-btn")
+  if (!btn) return
+  const raw = btn.getAttribute("data-copy") || ""
   // Decode HTML entities
-  const decoded = new DOMParser().parseFromString(raw, "text/html").body
-    .textContent;
+  const decoded = new DOMParser().parseFromString(raw, "text/html").body.textContent
   navigator.clipboard.writeText(decoded || "").then(() => {
-    const orig = btn.textContent;
-    btn.textContent = "Copied!";
-    btn.classList.add("copied");
+    const orig = btn.textContent
+    btn.textContent = "Copied!"
+    btn.classList.add("copied")
     setTimeout(() => {
-      btn.textContent = orig;
-      btn.classList.remove("copied");
-    }, 1500);
-  });
+      btn.textContent = orig
+      btn.classList.remove("copied")
+    }, 1500)
+  })
 }
 
 watch(
   () => props.content,
   async () => {
-    await nextTick();
+    await nextTick()
   },
-);
+)
 
 /**
  * Pre-process content to normalize LaTeX delimiters:
@@ -78,28 +77,25 @@ watch(
  * - Ensure $$ blocks have blank lines around them
  */
 function preprocessLatex(text) {
-  if (!text) return "";
+  if (!text) return ""
 
   // Convert \( ... \) to $ ... $ for inline math
-  text = text.replace(/\\\((.+?)\\\)/g, (_, math) => `$${math}$`);
+  text = text.replace(/\\\((.+?)\\\)/g, (_, math) => `$${math}$`)
 
   // Convert \[ ... \] to $$ ... $$ for block math (may span lines)
-  text = text.replace(
-    /\\\[([\s\S]*?)\\\]/g,
-    (_, math) => `\n$$${math.trim()}$$\n`,
-  );
+  text = text.replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => `\n$$${math.trim()}$$\n`)
 
   // Ensure $$ blocks are surrounded by blank lines for proper parsing
-  text = text.replace(/([^\n])(\n\$\$)/g, "$1\n$2");
-  text = text.replace(/(\$\$\n)([^\n])/g, "$1\n$2");
+  text = text.replace(/([^\n])(\n\$\$)/g, "$1\n$2")
+  text = text.replace(/(\$\$\n)([^\n])/g, "$1\n$2")
 
-  return text;
+  return text
 }
 
 const rendered = computed(() => {
-  if (!props.content) return "";
-  return md.render(preprocessLatex(props.content));
-});
+  if (!props.content) return ""
+  return md.render(preprocessLatex(props.content))
+})
 </script>
 
 <style>

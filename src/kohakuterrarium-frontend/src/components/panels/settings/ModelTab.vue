@@ -1,16 +1,12 @@
 <template>
   <div class="p-4 text-xs">
     <div class="mb-4">
-      <div class="text-[10px] text-warm-400 uppercase tracking-wider mb-1">
-        Current model
-      </div>
+      <div class="text-[10px] text-warm-400 uppercase tracking-wider mb-1">Current model</div>
       <div class="text-base font-mono text-iolite">{{ current || "—" }}</div>
     </div>
 
     <div class="mb-4">
-      <div class="text-[10px] text-warm-400 uppercase tracking-wider mb-2">
-        Switch
-      </div>
+      <div class="text-[10px] text-warm-400 uppercase tracking-wider mb-2">Switch</div>
       <ModelSwitcher />
     </div>
 
@@ -38,42 +34,38 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue"
 
-import ModelSwitcher from "@/components/chrome/ModelSwitcher.vue";
-import { useChatStore } from "@/stores/chat";
-import { configAPI } from "@/utils/api";
+import ModelSwitcher from "@/components/chrome/ModelSwitcher.vue"
+import { useChatStore } from "@/stores/chat"
+import { configAPI } from "@/utils/api"
 
 const props = defineProps({
   instance: { type: Object, default: null },
-});
+})
 
-const chat = useChatStore();
+const chat = useChatStore()
 
-const current = computed(
-  () => chat.sessionInfo.model || props.instance?.model || "",
-);
+const current = computed(() => chat.sessionInfo.model || props.instance?.model || "")
 
-const profile = ref(null);
+const profile = ref(null)
 
 async function loadProfile() {
   try {
-    const models = await configAPI.getModels();
+    const models = await configAPI.getModels()
     profile.value =
-      (Array.isArray(models) ? models : []).find(
-        (m) => m.name === current.value,
-      ) || null;
+      (Array.isArray(models) ? models : []).find((m) => m.name === current.value) || null
   } catch {
-    profile.value = null;
+    profile.value = null
   }
 }
 
-onMounted(loadProfile);
+onMounted(loadProfile)
 
 function formatTokens(n) {
-  if (!n) return "—";
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + "k";
-  return String(n);
+  if (!n) return "—"
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M"
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + "k"
+  return String(n)
 }
 </script>

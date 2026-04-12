@@ -4,9 +4,7 @@
     <div
       class="flex items-center gap-0.5 px-2 h-8 border-b border-warm-200 dark:border-warm-700 overflow-x-auto shrink-0 text-[11px]"
     >
-      <div v-if="canvas.artifacts.length === 0" class="text-warm-400 italic">
-        No artifacts yet
-      </div>
+      <div v-if="canvas.artifacts.length === 0" class="text-warm-400 italic">No artifacts yet</div>
       <button
         v-for="a in canvas.artifacts"
         :key="a.id"
@@ -61,11 +59,7 @@
       </div>
 
       <CodeViewer
-        v-else-if="
-          viewerType === 'code' ||
-          viewerType === 'svg' ||
-          viewerType === 'diagram'
-        "
+        v-else-if="viewerType === 'code' || viewerType === 'svg' || viewerType === 'diagram'"
         :content="canvas.activeArtifact.content"
         :lang="canvas.activeArtifact.lang"
       />
@@ -73,10 +67,7 @@
         v-else-if="viewerType === 'markdown'"
         :content="canvas.activeArtifact.content"
       />
-      <HtmlViewer
-        v-else-if="viewerType === 'html'"
-        :content="canvas.activeArtifact.content"
-      />
+      <HtmlViewer v-else-if="viewerType === 'html'" :content="canvas.activeArtifact.content" />
       <CodeViewer
         v-else
         :content="canvas.activeArtifact.content"
@@ -97,20 +88,20 @@
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed } from "vue"
 
-import CodeViewer from "@/components/panels/canvas/CodeViewer.vue";
-import HtmlViewer from "@/components/panels/canvas/HtmlViewer.vue";
-import MarkdownViewer from "@/components/panels/canvas/MarkdownViewer.vue";
-import { useCanvasStore } from "@/stores/canvas";
+import CodeViewer from "@/components/panels/canvas/CodeViewer.vue"
+import HtmlViewer from "@/components/panels/canvas/HtmlViewer.vue"
+import MarkdownViewer from "@/components/panels/canvas/MarkdownViewer.vue"
+import { useCanvasStore } from "@/stores/canvas"
 
-const canvas = useCanvasStore();
+const canvas = useCanvasStore()
 
-const viewerType = computed(() => canvas.activeArtifact?.type || "code");
+const viewerType = computed(() => canvas.activeArtifact?.type || "code")
 const lineCount = computed(() => {
-  const c = canvas.activeArtifact?.content;
-  return c ? c.split("\n").length : 0;
-});
+  const c = canvas.activeArtifact?.content
+  return c ? c.split("\n").length : 0
+})
 
 function typeIcon(t) {
   return (
@@ -122,19 +113,19 @@ function typeIcon(t) {
       diagram: "i-carbon-flow-connection",
       table: "i-carbon-data-table",
     }[t] || "i-carbon-document"
-  );
+  )
 }
 
 function copyContent() {
-  const text = canvas.activeArtifact?.content;
-  if (!text) return;
-  navigator.clipboard?.writeText(text).catch(() => {});
+  const text = canvas.activeArtifact?.content
+  if (!text) return
+  navigator.clipboard?.writeText(text).catch(() => {})
 }
 
 function downloadContent() {
-  const art = canvas.activeArtifact;
-  const ver = canvas.activeArtifact;
-  if (!art || !ver) return;
+  const art = canvas.activeArtifact
+  const ver = canvas.activeArtifact
+  if (!art || !ver) return
   const ext =
     {
       code: ver.lang || "txt",
@@ -143,15 +134,14 @@ function downloadContent() {
       svg: "svg",
       diagram: "mmd",
       table: "csv",
-    }[art.type] || "txt";
-  const name =
-    (art.name || "artifact").replace(/[^a-zA-Z0-9_.-]/g, "_") + "." + ext;
-  const blob = new Blob([ver.content], { type: "text/plain" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(url);
+    }[art.type] || "txt"
+  const name = (art.name || "artifact").replace(/[^a-zA-Z0-9_.-]/g, "_") + "." + ext
+  const blob = new Blob([ver.content], { type: "text/plain" })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = name
+  a.click()
+  URL.revokeObjectURL(url)
 }
 </script>

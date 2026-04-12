@@ -34,10 +34,7 @@
         <ModelTab v-if="activeTab === 'model'" :instance="instance" />
         <PluginsTab v-else-if="activeTab === 'plugins'" :instance="instance" />
         <ExtensionsTab v-else-if="activeTab === 'extensions'" />
-        <TriggersTab
-          v-else-if="activeTab === 'triggers'"
-          :instance="instance"
-        />
+        <TriggersTab v-else-if="activeTab === 'triggers'" :instance="instance" />
         <CostTab v-else-if="activeTab === 'cost'" :instance="instance" />
         <EnvTab v-else-if="activeTab === 'env'" :instance="instance" />
         <AutoOpenTab v-else-if="activeTab === 'auto-open'" />
@@ -47,19 +44,19 @@
 </template>
 
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref } from "vue"
 
-import AutoOpenTab from "./settings/AutoOpenTab.vue";
-import CostTab from "./settings/CostTab.vue";
-import EnvTab from "./settings/EnvTab.vue";
-import ExtensionsTab from "./settings/ExtensionsTab.vue";
-import ModelTab from "./settings/ModelTab.vue";
-import PluginsTab from "./settings/PluginsTab.vue";
-import TriggersTab from "./settings/TriggersTab.vue";
+import AutoOpenTab from "./settings/AutoOpenTab.vue"
+import CostTab from "./settings/CostTab.vue"
+import EnvTab from "./settings/EnvTab.vue"
+import ExtensionsTab from "./settings/ExtensionsTab.vue"
+import ModelTab from "./settings/ModelTab.vue"
+import PluginsTab from "./settings/PluginsTab.vue"
+import TriggersTab from "./settings/TriggersTab.vue"
 
 defineProps({
   instance: { type: Object, default: null },
-});
+})
 
 const tabs = [
   { id: "model", label: "Model", icon: "i-carbon-chip" },
@@ -69,11 +66,9 @@ const tabs = [
   { id: "cost", label: "Cost", icon: "i-carbon-currency-dollar" },
   { id: "env", label: "Environment", icon: "i-carbon-cloud" },
   { id: "auto-open", label: "Auto-open", icon: "i-carbon-launch" },
-];
+]
 
-const activeTab = ref("model");
+const activeTab = ref("model")
 
-const activeLabel = computed(
-  () => tabs.find((t) => t.id === activeTab.value)?.label || "",
-);
+const activeLabel = computed(() => tabs.find((t) => t.id === activeTab.value)?.label || "")
 </script>

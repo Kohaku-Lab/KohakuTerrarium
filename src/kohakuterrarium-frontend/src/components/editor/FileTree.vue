@@ -12,45 +12,43 @@
           @select="onSelect"
         />
       </template>
-      <div v-else-if="loading" class="px-3 py-4 text-warm-400 text-center">
-        Loading...
-      </div>
+      <div v-else-if="loading" class="px-3 py-4 text-warm-400 text-center">Loading...</div>
       <div v-else class="px-3 py-4 text-warm-400 text-center">No files</div>
     </div>
   </div>
 </template>
 
 <script setup>
-import FileTreeNode from "@/components/editor/FileTreeNode.vue";
-import { useEditorStore } from "@/stores/editor";
+import FileTreeNode from "@/components/editor/FileTreeNode.vue"
+import { useEditorStore } from "@/stores/editor"
 
 const props = defineProps({
   root: { type: String, required: true },
-});
+})
 
-const emit = defineEmits(["select"]);
-const editor = useEditorStore();
+const emit = defineEmits(["select"])
+const editor = useEditorStore()
 
-const tree = computed(() => editor.treeData);
-const loading = ref(false);
+const tree = computed(() => editor.treeData)
+const loading = ref(false)
 
 watch(
   () => props.root,
   (val) => {
     if (val) {
-      editor.setTreeRoot(val);
+      editor.setTreeRoot(val)
     }
   },
   { immediate: true },
-);
+)
 
 function onSelect(path) {
-  emit("select", path);
+  emit("select", path)
 }
 
 function refresh() {
-  editor.refreshTree();
+  editor.refreshTree()
 }
 
-defineExpose({ refresh });
+defineExpose({ refresh })
 </script>

@@ -1,15 +1,10 @@
 <template>
   <div class="p-4 text-xs">
-    <div v-if="loading" class="text-warm-400 text-center py-6">
-      Loading triggers...
-    </div>
+    <div v-if="loading" class="text-warm-400 text-center py-6">Loading triggers...</div>
     <div v-else-if="error" class="text-coral py-2">
       {{ error }}
     </div>
-    <div
-      v-else-if="triggers.length === 0"
-      class="text-warm-400 text-center py-6"
-    >
+    <div v-else-if="triggers.length === 0" class="text-warm-400 text-center py-6">
       No active triggers.
     </div>
     <div v-else class="flex flex-col gap-1">
@@ -39,46 +34,46 @@
 </template>
 
 <script setup>
-import { onMounted, ref, watch } from "vue";
+import { onMounted, ref, watch } from "vue"
 
-import { agentAPI } from "@/utils/api";
+import { agentAPI } from "@/utils/api"
 
 const props = defineProps({
   instance: { type: Object, default: null },
-});
+})
 
-const triggers = ref([]);
-const loading = ref(false);
-const error = ref("");
+const triggers = ref([])
+const loading = ref(false)
+const error = ref("")
 
 async function load() {
-  const id = props.instance?.id;
+  const id = props.instance?.id
   if (!id) {
-    triggers.value = [];
-    return;
+    triggers.value = []
+    return
   }
-  loading.value = true;
-  error.value = "";
+  loading.value = true
+  error.value = ""
   try {
-    const data = await agentAPI.listTriggers(id);
-    triggers.value = Array.isArray(data) ? data : [];
+    const data = await agentAPI.listTriggers(id)
+    triggers.value = Array.isArray(data) ? data : []
   } catch (err) {
-    error.value = err?.response?.data?.detail || err?.message || String(err);
-    triggers.value = [];
+    error.value = err?.response?.data?.detail || err?.message || String(err)
+    triggers.value = []
   } finally {
-    loading.value = false;
+    loading.value = false
   }
 }
 
 function formatTs(ts) {
-  if (!ts) return "—";
+  if (!ts) return "—"
   try {
-    return new Date(ts).toLocaleString();
+    return new Date(ts).toLocaleString()
   } catch {
-    return ts;
+    return ts
   }
 }
 
-onMounted(load);
-watch(() => props.instance?.id, load);
+onMounted(load)
+watch(() => props.instance?.id, load)
 </script>

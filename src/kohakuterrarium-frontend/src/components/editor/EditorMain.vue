@@ -40,15 +40,10 @@
             ? 'bg-iolite/15 text-iolite'
             : 'text-warm-400 hover:text-warm-600 dark:hover:text-warm-300'
         "
-        :title="
-          useVditor ? 'Switch to code editor' : 'Switch to rich markdown editor'
-        "
+        :title="useVditor ? 'Switch to code editor' : 'Switch to rich markdown editor'"
         @click="useVditor = !useVditor"
       >
-        <span
-          :class="useVditor ? 'i-carbon-document' : 'i-carbon-code'"
-          class="text-[11px]"
-        />
+        <span :class="useVditor ? 'i-carbon-document' : 'i-carbon-code'" class="text-[11px]" />
         <span>{{ useVditor ? "Rich" : "Code" }}</span>
       </button>
     </div>
@@ -74,10 +69,7 @@
           @save="onSave"
         />
       </template>
-      <div
-        v-else
-        class="h-full flex items-center justify-center text-warm-400 text-sm"
-      >
+      <div v-else class="h-full flex items-center justify-center text-warm-400 text-sm">
         <div class="text-center">
           <div class="i-carbon-document text-3xl mb-2 mx-auto opacity-30" />
           <p>Select a file to edit</p>
@@ -88,44 +80,44 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, ref, watch } from "vue"
 
-import MonacoEditor from "@/components/editor/MonacoEditor.vue";
-import VditorEditor from "@/components/editor/VditorEditor.vue";
-import { useEditorStore } from "@/stores/editor";
+import MonacoEditor from "@/components/editor/MonacoEditor.vue"
+import VditorEditor from "@/components/editor/VditorEditor.vue"
+import { useEditorStore } from "@/stores/editor"
 
-const editor = useEditorStore();
+const editor = useEditorStore()
 
 // Per-file mode preference (persists while files are open).
-const vditorFiles = ref(new Set());
+const vditorFiles = ref(new Set())
 const useVditor = computed({
   get: () => vditorFiles.value.has(editor.activeFilePath),
   set: (val) => {
-    const next = new Set(vditorFiles.value);
-    if (val) next.add(editor.activeFilePath);
-    else next.delete(editor.activeFilePath);
-    vditorFiles.value = next;
+    const next = new Set(vditorFiles.value)
+    if (val) next.add(editor.activeFilePath)
+    else next.delete(editor.activeFilePath)
+    vditorFiles.value = next
   },
-});
+})
 
 const isMarkdown = computed(() => {
-  const p = editor.activeFilePath || "";
-  return /\.(md|markdown|mdx)$/i.test(p);
-});
+  const p = editor.activeFilePath || ""
+  return /\.(md|markdown|mdx)$/i.test(p)
+})
 
 function fileName(path) {
-  return path.split("/").pop() || path.split("\\").pop() || path;
+  return path.split("/").pop() || path.split("\\").pop() || path
 }
 
 function onChange(content) {
   if (editor.activeFilePath) {
-    editor.updateContent(editor.activeFilePath, content);
+    editor.updateContent(editor.activeFilePath, content)
   }
 }
 
 function onSave() {
   if (editor.activeFilePath) {
-    editor.saveFile(editor.activeFilePath);
+    editor.saveFile(editor.activeFilePath)
   }
 }
 </script>

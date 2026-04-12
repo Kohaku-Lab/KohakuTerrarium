@@ -1,47 +1,45 @@
-import { terrariumAPI, agentAPI } from "@/utils/api";
-import { useMessagesStore } from "@/stores/messages";
-import { useInstancesStore } from "@/stores/instances";
-import { useStatusStore } from "@/stores/status";
+import { terrariumAPI, agentAPI } from "@/utils/api"
+import { useMessagesStore } from "@/stores/messages"
+import { useInstancesStore } from "@/stores/instances"
+import { useStatusStore } from "@/stores/status"
 
 /**
  * Convert OpenAI-format conversation history to frontend messages.
  */
 function _convertHistory(messages) {
-  const result = [];
-  const toolResults = {};
+  const result = []
+  const toolResults = {}
   for (const msg of messages) {
-    if (msg.role === "tool") toolResults[msg.tool_call_id] = msg.content;
+    if (msg.role === "tool") toolResults[msg.tool_call_id] = msg.content
   }
   for (const msg of messages) {
-    if (msg.role === "system" || msg.role === "tool") continue;
+    if (msg.role === "system" || msg.role === "tool") continue
     if (msg.role === "user") {
       result.push({
         id: "h_" + result.length,
         role: "user",
         content: msg.content || "",
         timestamp: "",
-      });
+      })
     } else if (msg.role === "assistant") {
       const tcs = (msg.tool_calls || []).map((tc) => ({
         id: tc.id,
         name: tc.function?.name || "unknown",
-        kind: (tc.function?.name || "").startsWith("agent_")
-          ? "subagent"
-          : "tool",
+        kind: (tc.function?.name || "").startsWith("agent_") ? "subagent" : "tool",
         args: _parseArgs(tc.function?.arguments),
         status: "done",
         result: toolResults[tc.id] || "",
-      }));
+      }))
       result.push({
         id: "h_" + result.length,
         role: "assistant",
         content: msg.content || "",
         timestamp: "",
         tool_calls: tcs.length ? tcs : undefined,
-      });
+      })
     }
   }
-  return result;
+  return result
 }
 
 /**
@@ -52,15 +50,14 @@ function _convertHistory(messages) {
  * but never received a done/error event (still running or interrupted).
  */
 function _replayEvents(messages, events) {
-  if (!events?.length)
-    return { messages: _convertHistory(messages), pendingJobs: {} };
+  if (!events?.length) return { messages: _convertHistory(messages), pendingJobs: {} }
 
-  const result = [];
-  let cur = null;
-  let _n = 0;
+  const result = []
+  let cur = null
+  let _n = 0
   // Track job lifecycle: started jobs and completed jobs
-  const startedJobs = {}; // jobId -> tool part reference
-  const completedJobs = new Set(); // jobIds that received done/error
+  const startedJobs = {} // jobId -> tool part reference
+  const completedJobs = new Set() // jobIds that received done/error
 
   function ensureCur() {
     if (!cur) {
@@ -69,26 +66,26 @@ function _replayEvents(messages, events) {
         role: "assistant",
         parts: [],
         timestamp: "",
-      };
-      result.push(cur);
+      }
+      result.push(cur)
     }
-    return cur;
+    return cur
   }
 
   function appendText(content) {
-    const c = ensureCur();
-    const tail = c.parts.length ? c.parts[c.parts.length - 1] : null;
+    const c = ensureCur()
+    const tail = c.parts.length ? c.parts[c.parts.length - 1] : null
     if (tail && tail.type === "text") {
-      tail.content += content;
+      tail.content += content
     } else {
-      c.parts.push({ type: "text", content });
+      c.parts.push({ type: "text", content })
     }
   }
 
   function addTool(name, kind, args, jobId) {
-    const c = ensureCur();
-    const tail = c.parts.length ? c.parts[c.parts.length - 1] : null;
-    if (tail && tail.type === "text") tail._streaming = false;
+    const c = ensureCur()
+    const tail = c.parts.length ? c.parts[c.parts.length - 1] : null
+    if (tail && tail.type === "text") tail._streaming = false
     const tool = {
       type: "tool",
       id: `tool_${_n++}`,
@@ -100,10 +97,10 @@ function _replayEvents(messages, events) {
       result: "",
       tools_used: [],
       children: [],
-    };
-    c.parts.push(tool);
-    if (jobId) startedJobs[jobId] = tool;
-    return tool;
+    }
+    c.parts.push(tool)
+    if (jobId) startedJobs[jobId] = tool
+    return tool
   }
 
   // Search ALL messages for a sub-agent part.
@@ -112,46 +109,40 @@ function _replayEvents(messages, events) {
     // Pass 1: match by job_id (most reliable)
     if (jobId) {
       for (let i = result.length - 1; i >= 0; i--) {
-        const msg = result[i];
-        if (!msg.parts) continue;
+        const msg = result[i]
+        if (!msg.parts) continue
         for (let j = msg.parts.length - 1; j >= 0; j--) {
-          const p = msg.parts[j];
-          if (p.type === "tool" && p.kind === "subagent" && p.jobId === jobId)
-            return p;
+          const p = msg.parts[j]
+          if (p.type === "tool" && p.kind === "subagent" && p.jobId === jobId) return p
         }
       }
     }
     // Pass 2: match by name (exact, startsWith, or includes)
     if (saName) {
       for (let i = result.length - 1; i >= 0; i--) {
-        const msg = result[i];
-        if (!msg.parts) continue;
+        const msg = result[i]
+        if (!msg.parts) continue
         for (let j = msg.parts.length - 1; j >= 0; j--) {
-          const p = msg.parts[j];
-          if (p.type !== "tool" || p.kind !== "subagent") continue;
-          if (
-            p.name === saName ||
-            p.name.includes(saName) ||
-            saName.includes(p.name)
-          )
-            return p;
+          const p = msg.parts[j]
+          if (p.type !== "tool" || p.kind !== "subagent") continue
+          if (p.name === saName || p.name.includes(saName) || saName.includes(p.name)) return p
         }
       }
     }
     // Pass 3: any sub-agent (last resort)
     for (let i = result.length - 1; i >= 0; i--) {
-      const msg = result[i];
-      if (!msg.parts) continue;
+      const msg = result[i]
+      if (!msg.parts) continue
       for (let j = msg.parts.length - 1; j >= 0; j--) {
-        const p = msg.parts[j];
-        if (p.type === "tool" && p.kind === "subagent") return p;
+        const p = msg.parts[j]
+        if (p.type === "tool" && p.kind === "subagent") return p
       }
     }
-    return null;
+    return null
   }
 
   function addSubagentTool(name, args, saName, saJobId) {
-    const sa = findSubagent(saName, saJobId);
+    const sa = findSubagent(saName, saJobId)
     if (sa) {
       const tool = {
         type: "tool",
@@ -162,158 +153,144 @@ function _replayEvents(messages, events) {
         status: "done",
         result: "",
         tools_used: [],
-      };
-      if (!sa.children) sa.children = [];
-      sa.children.push(tool);
-      return tool;
+      }
+      if (!sa.children) sa.children = []
+      sa.children.push(tool)
+      return tool
     }
-    return addTool(name, "tool", args);
+    return addTool(name, "tool", args)
   }
 
   function updateSubagentTool(name, result, opts, saName, saJobId) {
-    const sa = findSubagent(saName, saJobId);
+    const sa = findSubagent(saName, saJobId)
     if (sa?.children?.length) {
-      const tc = [...sa.children].reverse().find((p) => p.name === name);
+      const tc = [...sa.children].reverse().find((p) => p.name === name)
       if (tc) {
-        tc.result = result || "";
-        if (opts?.error) tc.status = "error";
-        return;
+        tc.result = result || ""
+        if (opts?.error) tc.status = "error"
+        return
       }
     }
-    updateTool(name, result, opts);
+    updateTool(name, result, opts)
   }
 
   function findToolByJobId(jobId) {
     for (let i = result.length - 1; i >= 0; i--) {
-      const msg = result[i];
-      if (!msg.parts) continue;
-      const tc = [...msg.parts]
-        .reverse()
-        .find((p) => p.type === "tool" && p.jobId === jobId);
-      if (tc) return tc;
+      const msg = result[i]
+      if (!msg.parts) continue
+      const tc = [...msg.parts].reverse().find((p) => p.type === "tool" && p.jobId === jobId)
+      if (tc) return tc
     }
-    return null;
+    return null
   }
 
   function updateTool(name, result, opts, jobId) {
-    let tc = null;
+    let tc = null
     if (jobId) {
-      tc = findToolByJobId(jobId);
+      tc = findToolByJobId(jobId)
     }
     if (!tc && cur) {
-      tc = [...cur.parts]
-        .reverse()
-        .find((p) => p.type === "tool" && p.name === name);
+      tc = [...cur.parts].reverse().find((p) => p.type === "tool" && p.name === name)
     }
     if (!tc) {
       // Search all messages as final fallback (name match, or partial match for sub-agents)
       for (let i = result.length - 1; i >= 0 && !tc; i--) {
-        const msg = result[i];
-        if (!msg.parts) continue;
+        const msg = result[i]
+        if (!msg.parts) continue
         tc = [...msg.parts]
           .reverse()
           .find(
             (p) =>
               p.type === "tool" &&
-              (p.name === name ||
-                p.name.startsWith(name) ||
-                name.startsWith(p.name)) &&
+              (p.name === name || p.name.startsWith(name) || name.startsWith(p.name)) &&
               !p.result,
-          );
+          )
       }
     }
     if (tc) {
-      tc.result = result || "";
-      if (opts?.error) tc.status = "error";
-      if (opts?.tools_used) tc.tools_used = opts.tools_used;
-      if (opts?.turns != null) tc.turns = opts.turns;
-      if (opts?.duration != null) tc.duration = opts.duration;
-      if (opts?.total_tokens != null) tc.total_tokens = opts.total_tokens;
-      if (opts?.prompt_tokens != null) tc.prompt_tokens = opts.prompt_tokens;
-      if (opts?.completion_tokens != null)
-        tc.completion_tokens = opts.completion_tokens;
+      tc.result = result || ""
+      if (opts?.error) tc.status = "error"
+      if (opts?.tools_used) tc.tools_used = opts.tools_used
+      if (opts?.turns != null) tc.turns = opts.turns
+      if (opts?.duration != null) tc.duration = opts.duration
+      if (opts?.total_tokens != null) tc.total_tokens = opts.total_tokens
+      if (opts?.prompt_tokens != null) tc.prompt_tokens = opts.prompt_tokens
+      if (opts?.completion_tokens != null) tc.completion_tokens = opts.completion_tokens
       // Track completion for pending-job detection
-      if (tc.jobId) completedJobs.add(tc.jobId);
-      if (jobId) completedJobs.add(jobId);
+      if (tc.jobId) completedJobs.add(tc.jobId)
+      if (jobId) completedJobs.add(jobId)
     }
   }
 
   for (const evt of events) {
-    const t = evt.type;
+    const t = evt.type
 
     // ── Common types (both formats) ──
     if (t === "user_input") {
-      cur = null;
+      cur = null
       result.push({
         id: "h_" + result.length,
         role: "user",
         content: evt.content || "",
         timestamp: "",
-      });
+      })
     } else if (t === "processing_start") {
       cur = {
         id: "h_" + result.length,
         role: "assistant",
         parts: [],
         timestamp: "",
-      };
-      result.push(cur);
+      }
+      result.push(cur)
     } else if (t === "text") {
-      appendText(evt.content || "");
+      appendText(evt.content || "")
     } else if (t === "processing_end" || t === "idle") {
       // Do NOT clear cur if sub-agents might still be adding tools to this message
       // But mark text as done
       if (cur) {
         for (const p of cur.parts) {
-          if (p.type === "text") p._streaming = false;
+          if (p.type === "text") p._streaming = false
         }
       }
-      cur = null;
+      cur = null
 
       // ── StreamOutput format (live WS): type="activity" wrapper ──
     } else if (t === "activity") {
-      const at = evt.activity_type;
+      const at = evt.activity_type
       if (at === "trigger_fired") {
-        cur = null;
-        const ch = evt.channel || "";
-        const sender = evt.sender || "";
+        cur = null
+        const ch = evt.channel || ""
+        const sender = evt.sender || ""
         result.push({
           id: "h_" + result.length,
           role: "trigger",
-          content: ch
-            ? `channel: ${ch}${sender ? ` from ${sender}` : ""}`
-            : evt.name,
+          content: ch ? `channel: ${ch}${sender ? ` from ${sender}` : ""}` : evt.name,
           triggerContent: evt.content || "",
           channel: ch,
           sender,
           timestamp: "",
-        });
+        })
       } else if (at === "token_usage" || at === "processing_complete") {
         // skip
       } else if (at === "context_cleared") {
-        cur = null;
+        cur = null
         result.push({
           id: "clear_" + result.length,
           role: "clear",
           messagesCleared: evt.messages_cleared || 0,
           timestamp: "",
-        });
+        })
       } else if (at === "processing_error") {
-        cur = null;
+        cur = null
         result.push({
           id: "err_" + result.length,
           role: "error",
           errorType: evt.error_type || "Error",
           content: evt.error || evt.detail || "Unknown error",
           timestamp: "",
-        });
+        })
       } else if (at === "subagent_start") {
-        addTool(
-          evt.name,
-          "subagent",
-          evt.args || { info: evt.detail },
-          evt.job_id,
-        );
+        addTool(evt.name, "subagent", evt.args || { info: evt.detail }, evt.job_id)
       } else if (at === "subagent_done") {
         updateTool(
           evt.name,
@@ -327,50 +304,39 @@ function _replayEvents(messages, events) {
             completion_tokens: evt.completion_tokens,
           },
           evt.job_id,
-        );
+        )
       } else if (at === "subagent_error") {
-        updateTool(evt.name, evt.detail, { error: true }, evt.job_id);
+        updateTool(evt.name, evt.detail, { error: true }, evt.job_id)
       } else if (at === "tool_start") {
-        addTool(evt.name, "tool", evt.args || { info: evt.detail }, evt.job_id);
+        addTool(evt.name, "tool", evt.args || { info: evt.detail }, evt.job_id)
       } else if (at === "tool_done") {
         updateTool(
           evt.name,
           evt.result || evt.output || evt.detail,
           { tools_used: evt.tools_used },
           evt.job_id,
-        );
+        )
       } else if (at === "tool_error") {
-        updateTool(evt.name, evt.detail, { error: true }, evt.job_id);
+        updateTool(evt.name, evt.detail, { error: true }, evt.job_id)
       } else if (at?.startsWith("subagent_tool_")) {
-        const subAct = at.replace("subagent_", "");
-        const toolName = evt.tool || evt.name || "";
-        const saName = evt.subagent || "";
-        const saJobId = evt.job_id || "";
+        const subAct = at.replace("subagent_", "")
+        const toolName = evt.tool || evt.name || ""
+        const saName = evt.subagent || ""
+        const saJobId = evt.job_id || ""
         if (subAct === "tool_start") {
-          addSubagentTool(
-            toolName,
-            { info: evt.detail || "" },
-            saName,
-            saJobId,
-          );
+          addSubagentTool(toolName, { info: evt.detail || "" }, saName, saJobId)
         } else if (subAct === "tool_done") {
-          updateSubagentTool(toolName, evt.detail || "", null, saName, saJobId);
+          updateSubagentTool(toolName, evt.detail || "", null, saName, saJobId)
         } else if (subAct === "tool_error") {
-          updateSubagentTool(
-            toolName,
-            evt.detail || "",
-            { error: true },
-            saName,
-            saJobId,
-          );
+          updateSubagentTool(toolName, evt.detail || "", { error: true }, saName, saJobId)
         }
       }
 
       // ── SessionStore format (persistent): direct type names ──
     } else if (t === "trigger_fired") {
-      cur = null;
-      const ch = evt.channel || "";
-      const sender = evt.sender || "";
+      cur = null
+      const ch = evt.channel || ""
+      const sender = evt.sender || ""
       result.push({
         id: "h_" + result.length,
         role: "trigger",
@@ -379,18 +345,18 @@ function _replayEvents(messages, events) {
         channel: ch,
         sender,
         timestamp: "",
-      });
+      })
     } else if (t === "tool_call") {
-      addTool(evt.name, "tool", evt.args || {}, evt.call_id || evt.job_id);
+      addTool(evt.name, "tool", evt.args || {}, evt.call_id || evt.job_id)
     } else if (t === "tool_result") {
       updateTool(
         evt.name,
         evt.output || "",
         { error: evt.error ? true : false },
         evt.call_id || evt.job_id,
-      );
+      )
     } else if (t === "subagent_call") {
-      addTool(evt.name, "subagent", { task: evt.task || "" }, evt.job_id);
+      addTool(evt.name, "subagent", { task: evt.task || "" }, evt.job_id)
     } else if (t === "subagent_result") {
       updateTool(
         evt.name,
@@ -404,23 +370,17 @@ function _replayEvents(messages, events) {
           completion_tokens: evt.completion_tokens,
         },
         evt.job_id,
-      );
+      )
     } else if (t === "subagent_tool") {
-      const toolName = evt.tool_name || "";
-      const saName = evt.subagent || "";
-      const saJobId = evt.job_id || "";
+      const toolName = evt.tool_name || ""
+      const saName = evt.subagent || ""
+      const saJobId = evt.job_id || ""
       if (evt.activity === "tool_start") {
-        addSubagentTool(toolName, { info: evt.detail || "" }, saName, saJobId);
+        addSubagentTool(toolName, { info: evt.detail || "" }, saName, saJobId)
       } else if (evt.activity === "tool_done") {
-        updateSubagentTool(toolName, evt.detail || "", null, saName, saJobId);
+        updateSubagentTool(toolName, evt.detail || "", null, saName, saJobId)
       } else if (evt.activity === "tool_error") {
-        updateSubagentTool(
-          toolName,
-          evt.detail || "",
-          { error: true },
-          saName,
-          saJobId,
-        );
+        updateSubagentTool(toolName, evt.detail || "", { error: true }, saName, saJobId)
       }
     } else if (t === "channel_message") {
       result.push({
@@ -429,9 +389,9 @@ function _replayEvents(messages, events) {
         sender: evt.sender || "",
         content: evt.content || "",
         timestamp: "",
-      });
+      })
     } else if (t === "compact_summary" || t === "compact_complete") {
-      cur = null;
+      cur = null
       result.push({
         id: "compact_" + result.length,
         role: "compact",
@@ -439,51 +399,47 @@ function _replayEvents(messages, events) {
         summary: evt.summary || "",
         messagesCompacted: evt.messages_compacted || 0,
         timestamp: "",
-      });
+      })
     } else if (t === "processing_error") {
-      cur = null;
+      cur = null
       result.push({
         id: "err_" + result.length,
         role: "error",
         errorType: evt.error_type || "Error",
         content: evt.error || "",
         timestamp: "",
-      });
+      })
     } else if (t === "context_cleared") {
-      cur = null;
+      cur = null
       result.push({
         id: "clear_" + result.length,
         role: "clear",
         messagesCleared: evt.messages_cleared || 0,
         timestamp: "",
-      });
-    } else if (
-      t === "token_usage" ||
-      t === "processing_complete" ||
-      t === "compact_start"
-    ) {
+      })
+    } else if (t === "token_usage" || t === "processing_complete" || t === "compact_start") {
       // skip
     }
   }
 
   // Determine which jobs are still pending (started but no done/error).
   // Mark them as "running" so live WS events can update them.
-  const pendingJobs = {};
+  const pendingJobs = {}
   for (const [jobId, toolPart] of Object.entries(startedJobs)) {
     if (!completedJobs.has(jobId)) {
       // Still running
-      toolPart.status = "running";
-      toolPart.startedAt = Date.now(); // approximate
+      toolPart.status = "running"
+      toolPart.startedAt = Date.now() // approximate
       pendingJobs[jobId] = {
         name: toolPart.name,
         type: toolPart.kind === "subagent" ? "subagent" : "tool",
         startedAt: Date.now(),
-      };
+      }
       // Also mark children that are still running
       if (toolPart.children) {
         for (const child of toolPart.children) {
           if (child.status === "done" && !child.result) {
-            child.status = "running";
+            child.status = "running"
           }
         }
       }
@@ -501,35 +457,35 @@ function _replayEvents(messages, events) {
         !part.result &&
         !part.jobId
       ) {
-        part.status = "interrupted";
+        part.status = "interrupted"
       }
     }
   }
 
   // Clean up empty parts
   for (const msg of result) {
-    if (msg.parts?.length === 0) delete msg.parts;
+    if (msg.parts?.length === 0) delete msg.parts
   }
-  return { messages: result, pendingJobs };
+  return { messages: result, pendingJobs }
 }
 
 function _parseArgs(args) {
-  if (!args) return {};
+  if (!args) return {}
   if (typeof args === "string") {
     try {
-      return JSON.parse(args);
+      return JSON.parse(args)
     } catch {
-      return { raw: args };
+      return { raw: args }
     }
   }
-  return args;
+  return args
 }
 
 function wsUrl(path) {
-  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  const isDev = location.port === "5173" || location.port === "5174";
-  const host = isDev ? `${location.hostname}:8001` : location.host;
-  return `${protocol}//${host}${path}`;
+  const protocol = location.protocol === "https:" ? "wss:" : "ws:"
+  const isDev = location.port === "5173" || location.port === "5174"
+  const host = isDev ? `${location.hostname}:8001` : location.host
+  return `${protocol}//${host}${path}`
 }
 
 export const useChatStore = defineStore("chat", {
@@ -570,102 +526,100 @@ export const useChatStore = defineStore("chat", {
 
   getters: {
     currentMessages: (state) => {
-      if (!state.activeTab) return [];
-      return state.messagesByTab[state.activeTab] || [];
+      if (!state.activeTab) return []
+      return state.messagesByTab[state.activeTab] || []
     },
     hasRunningJobs: (state) => Object.keys(state.runningJobs).length > 0,
   },
 
   actions: {
     initForInstance(instance) {
-      if (this._instanceId === instance.id) return;
-      this._cleanup();
-      this._instanceId = instance.id;
-      this._instanceType = instance.type;
-      this.tabs = [];
-      this.messagesByTab = {};
-      this.tokenUsage = {};
-      this.runningJobs = {};
-      this.unreadCounts = {};
-      this.queuedMessages = [];
-      this.processing = false;
+      if (this._instanceId === instance.id) return
+      this._cleanup()
+      this._instanceId = instance.id
+      this._instanceType = instance.type
+      this.tabs = []
+      this.messagesByTab = {}
+      this.tokenUsage = {}
+      this.runningJobs = {}
+      this.unreadCounts = {}
+      this.queuedMessages = []
+      this.processing = false
       this.sessionInfo = {
         sessionId: "",
         model: "",
         agentName: "",
         compactThreshold: 0,
         maxContext: 0,
-      };
+      }
 
       // Reset status store too
-      const statusStore = useStatusStore();
-      statusStore.reset();
+      const statusStore = useStatusStore()
+      statusStore.reset()
 
       if (instance.type === "terrarium") {
         if (instance.has_root) {
-          this._addTab("root");
+          this._addTab("root")
         } else {
-          this._addTab("ch:tasks");
+          this._addTab("ch:tasks")
         }
-        this._connectTerrarium(instance.id);
+        this._connectTerrarium(instance.id)
       } else {
-        const name = instance.creatures[0]?.name || instance.config_name;
-        this._addTab(name);
-        this._connectCreature(instance.id);
+        const name = instance.creatures[0]?.name || instance.config_name
+        this._addTab(name)
+        this._connectCreature(instance.id)
       }
 
       // Restore saved tabs/active tab for this instance
-      this._restoreTabs();
-      if (!this.activeTab) this.activeTab = this.tabs[0] || null;
+      this._restoreTabs()
+      if (!this.activeTab) this.activeTab = this.tabs[0] || null
     },
 
     openTab(tabKey) {
-      this._addTab(tabKey);
-      this.activeTab = tabKey;
-      this._saveTabs();
+      this._addTab(tabKey)
+      this.activeTab = tabKey
+      this._saveTabs()
 
       // Load history for creature/root tabs
       if (this._instanceType === "terrarium") {
-        this._loadHistory(tabKey);
+        this._loadHistory(tabKey)
       }
     },
 
     _addTab(key) {
       if (!this.tabs.includes(key)) {
-        this.tabs.push(key);
-        this.messagesByTab[key] = [];
+        this.tabs.push(key)
+        this.messagesByTab[key] = []
       }
     },
 
     closeTab(tab) {
-      const idx = this.tabs.indexOf(tab);
-      if (idx === -1) return;
-      this.tabs = this.tabs.filter((_, i) => i !== idx);
+      const idx = this.tabs.indexOf(tab)
+      if (idx === -1) return
+      this.tabs = this.tabs.filter((_, i) => i !== idx)
       if (this.activeTab === tab) {
-        this.setActiveTab(
-          this.tabs[Math.min(idx, this.tabs.length - 1)] || null,
-        );
+        this.setActiveTab(this.tabs[Math.min(idx, this.tabs.length - 1)] || null)
       }
-      this._saveTabs();
+      this._saveTabs()
     },
 
     setActiveTab(tab) {
-      this.activeTab = tab;
-      if (tab) delete this.unreadCounts[tab];
-      this._saveTabs();
+      this.activeTab = tab
+      if (tab) delete this.unreadCounts[tab]
+      this._saveTabs()
       if (tab && this._instanceType === "terrarium") {
-        const msgs = this.messagesByTab[tab];
+        const msgs = this.messagesByTab[tab]
         if (msgs && msgs.length === 0) {
-          this._loadHistory(tab);
+          this._loadHistory(tab)
         }
       }
     },
 
     /** Interrupt the active agent. Also stops all running sub-agent jobs. */
     async interrupt() {
-      if (!this._instanceId) return;
-      const target = this.activeTab;
-      if (!target || target.startsWith("ch:")) return;
+      if (!this._instanceId) return
+      const target = this.activeTab
+      if (!target || target.startsWith("ch:")) return
 
       try {
         // Interrupt the main agent processing only.
@@ -674,77 +628,64 @@ export const useChatStore = defineStore("chat", {
         // via stopTask() from the running jobs panel.
         if (this.processing) {
           if (this._instanceType === "terrarium") {
-            await terrariumAPI.interruptCreature(this._instanceId, target);
+            await terrariumAPI.interruptCreature(this._instanceId, target)
           } else {
-            await agentAPI.interrupt(this._instanceId);
+            await agentAPI.interrupt(this._instanceId)
           }
-          this.processing = false;
+          this.processing = false
         }
         // Do NOT mark running parts as interrupted or remove running jobs.
         // The backend will send proper done/error events when jobs complete.
       } catch (err) {
-        console.error("Interrupt failed:", err);
+        console.error("Interrupt failed:", err)
       }
     },
 
     async send(text) {
-      if (!this.activeTab || !text.trim() || !this._ws) return;
+      if (!this.activeTab || !text.trim() || !this._ws) return
 
-      const tab = this.activeTab;
+      const tab = this.activeTab
       const msg = {
         id: "u_" + Date.now(),
         role: "user",
         content: text,
         timestamp: new Date().toISOString(),
-      };
+      }
 
       if (this.processing) {
         // Don't put in main chat — hold in queue, shown above input box
-        msg.queued = true;
-        this.queuedMessages.push(msg);
+        msg.queued = true
+        this.queuedMessages.push(msg)
       } else {
-        this._addMsg(tab, msg);
+        this._addMsg(tab, msg)
       }
 
       if (tab.startsWith("ch:")) {
-        const chName = tab.slice(3);
+        const chName = tab.slice(3)
         try {
-          await terrariumAPI.sendToChannel(
-            this._instanceId,
-            chName,
-            text,
-            "human",
-          );
+          await terrariumAPI.sendToChannel(this._instanceId, chName, text, "human")
         } catch (err) {
-          console.error("Channel send failed:", err);
+          console.error("Channel send failed:", err)
         }
       } else {
-        const target = tab;
+        const target = tab
         if (this._ws.readyState === WebSocket.OPEN) {
-          this._ws.send(
-            JSON.stringify({ type: "input", target, message: text }),
-          );
-          this.processing = true;
+          this._ws.send(JSON.stringify({ type: "input", target, message: text }))
+          this.processing = true
         }
       }
     },
 
     async _loadHistory(target) {
       try {
-        const { messages, events } = await terrariumAPI.getHistory(
-          this._instanceId,
-          target,
-        );
+        const { messages, events } = await terrariumAPI.getHistory(this._instanceId, target)
         if (events?.length) {
-          const { messages: msgs, pendingJobs } = _replayEvents(
-            messages,
-            events,
-          );
-          this.messagesByTab[target] = msgs;
-          this._restoreTokenUsage(target, events);
-          this._restoreRunningState(pendingJobs);
+          const { messages: msgs, pendingJobs } = _replayEvents(messages, events)
+          this.messagesByTab[target] = msgs
+          this._restoreTokenUsage(target, events)
+          this._restoreRunningState(pendingJobs)
         } else if (messages?.length) {
-          this.messagesByTab[target] = _convertHistory(messages);
+          this.messagesByTab[target] = _convertHistory(messages)
         }
       } catch {
         /* no history yet */
@@ -753,105 +694,102 @@ export const useChatStore = defineStore("chat", {
 
     /** Connect single WS for terrarium */
     _connectTerrarium(terrariumId) {
-      this._historyLoaded = false;
-      this._wsBuffer = [];
+      this._historyLoaded = false
+      this._wsBuffer = []
 
-      const ws = new WebSocket(wsUrl(`/ws/terrariums/${terrariumId}`));
+      const ws = new WebSocket(wsUrl(`/ws/terrariums/${terrariumId}`))
       ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
+        const data = JSON.parse(event.data)
         if (this._historyLoaded) {
-          this._onMessage(data);
+          this._onMessage(data)
         } else {
-          this._wsBuffer.push(data);
+          this._wsBuffer.push(data)
         }
-      };
+      }
       ws.onclose = () => {
-        this.processing = false;
-      };
-      this._ws = ws;
+        this.processing = false
+      }
+      this._ws = ws
 
       // Load all tab histories, then flush WS buffer
-      const loads = [];
+      const loads = []
       if (this.tabs[0]) {
-        loads.push(this._loadHistory(this.tabs[0]));
+        loads.push(this._loadHistory(this.tabs[0]))
       }
       for (const tab of this.tabs) {
         if (tab.startsWith("ch:")) {
-          loads.push(this._loadHistory(tab));
+          loads.push(this._loadHistory(tab))
         }
       }
       Promise.all(loads).then(() => {
-        this._historyLoaded = true;
+        this._historyLoaded = true
         if (this._wsBuffer) {
           for (const data of this._wsBuffer) {
-            this._onMessage(data);
+            this._onMessage(data)
           }
-          this._wsBuffer = [];
+          this._wsBuffer = []
         }
-      });
+      })
     },
 
     /** Connect single WS for standalone creature */
     _connectCreature(agentId) {
       // Buffer WS events until history loads to avoid race condition
       // (WS events arriving before history overwrites them)
-      this._historyLoaded = false;
-      this._wsBuffer = [];
+      this._historyLoaded = false
+      this._wsBuffer = []
 
-      const ws = new WebSocket(wsUrl(`/ws/creatures/${agentId}`));
+      const ws = new WebSocket(wsUrl(`/ws/creatures/${agentId}`))
       ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
+        const data = JSON.parse(event.data)
         if (this._historyLoaded) {
-          this._onMessage(data);
+          this._onMessage(data)
         } else {
-          this._wsBuffer.push(data);
+          this._wsBuffer.push(data)
         }
-      };
+      }
       ws.onclose = () => {
-        this.processing = false;
-      };
-      this._ws = ws;
+        this.processing = false
+      }
+      this._ws = ws
 
-      const tabKey = this.tabs[0];
+      const tabKey = this.tabs[0]
       if (tabKey) {
-        this._loadAgentHistory(agentId, tabKey);
+        this._loadAgentHistory(agentId, tabKey)
       }
     },
 
     async _loadAgentHistory(agentId, tabKey) {
       try {
-        const { messages, events } = await agentAPI.getHistory(agentId);
+        const { messages, events } = await agentAPI.getHistory(agentId)
         if (events?.length) {
-          const { messages: msgs, pendingJobs } = _replayEvents(
-            messages,
-            events,
-          );
-          this.messagesByTab[tabKey] = msgs;
-          this._restoreTokenUsage(tabKey, events);
-          this._restoreRunningState(pendingJobs);
+          const { messages: msgs, pendingJobs } = _replayEvents(messages, events)
+          this.messagesByTab[tabKey] = msgs
+          this._restoreTokenUsage(tabKey, events)
+          this._restoreRunningState(pendingJobs)
         } else if (messages?.length) {
-          this.messagesByTab[tabKey] = _convertHistory(messages);
+          this.messagesByTab[tabKey] = _convertHistory(messages)
         }
       } catch {
         /* no history yet */
       }
       // History loaded — flush buffered WS events
-      this._historyLoaded = true;
+      this._historyLoaded = true
       if (this._wsBuffer) {
         for (const data of this._wsBuffer) {
-          this._onMessage(data);
+          this._onMessage(data)
         }
-        this._wsBuffer = [];
+        this._wsBuffer = []
       }
     },
 
     /** Restore running jobs from replay result. */
     _restoreRunningState(pendingJobs) {
       for (const [jobId, job] of Object.entries(pendingJobs)) {
-        this.runningJobs[jobId] = job;
+        this.runningJobs[jobId] = job
       }
       if (Object.keys(pendingJobs).length > 0) {
-        this._ensureJobTimer();
+        this._ensureJobTimer()
       }
     },
 
@@ -860,7 +798,7 @@ export const useChatStore = defineStore("chat", {
       for (const evt of events) {
         const isTokenEvt =
           (evt.type === "activity" && evt.activity_type === "token_usage") ||
-          evt.type === "token_usage";
+          evt.type === "token_usage"
         if (isTokenEvt) {
           const prev = this.tokenUsage[source] || {
             prompt: 0,
@@ -868,69 +806,68 @@ export const useChatStore = defineStore("chat", {
             total: 0,
             cached: 0,
             lastPrompt: 0,
-          };
+          }
           this.tokenUsage[source] = {
             prompt: prev.prompt + (evt.prompt_tokens || 0),
             completion: prev.completion + (evt.completion_tokens || 0),
             total: prev.total + (evt.total_tokens || 0),
             cached: prev.cached + (evt.cached_tokens || 0),
             lastPrompt: evt.prompt_tokens || prev.lastPrompt,
-          };
+          }
         }
       }
     },
 
     /** Handle ALL incoming WS messages */
     _onMessage(data) {
-      const source = data.source || "";
+      const source = data.source || ""
 
       if (data.type === "text") {
         // If we get text chunks but processing is false (e.g. reconnect mid-stream),
         // set processing to true so the UI shows "KohakUwUing"
-        if (!this.processing) this.processing = true;
-        this._appendStreamChunk(source, data.content);
+        if (!this.processing) this.processing = true
+        this._appendStreamChunk(source, data.content)
       } else if (data.type === "processing_start") {
-        this.processing = true;
+        this.processing = true
         // Promote queued user messages (agent is now processing them)
-        this._promoteQueuedMessages(source);
+        this._promoteQueuedMessages(source)
       } else if (data.type === "processing_end") {
-        this._finishStream(source);
+        this._finishStream(source)
       } else if (data.type === "idle") {
-        this.processing = false;
-        this._finishStream(source);
+        this.processing = false
+        this._finishStream(source)
       } else if (data.type === "activity") {
-        this._handleActivity(source, data);
+        this._handleActivity(source, data)
       } else if (data.type === "channel_message") {
-        this._handleChannelMessage(data);
+        this._handleChannelMessage(data)
       } else if (data.type === "error") {
         this._addMsg(source, {
           id: "err_" + Date.now(),
           role: "system",
           content: "Error: " + (data.content || ""),
           timestamp: new Date().toISOString(),
-        });
-        this.processing = false;
+        })
+        this.processing = false
       }
     },
 
     _handleActivity(source, data) {
-      const at = data.activity_type;
-      const name = data.name || "unknown";
+      const at = data.activity_type
+      const name = data.name || "unknown"
 
       // Forward ALL activities to status store for dashboard
-      const statusStore = useStatusStore();
-      statusStore.handleActivity(data);
+      const statusStore = useStatusStore()
+      statusStore.handleActivity(data)
 
       if (at === "session_info") {
         // Merge — update fields present in the event, keep existing for absent ones
-        if (data.session_id) this.sessionInfo.sessionId = data.session_id;
-        if (data.model) this.sessionInfo.model = data.model;
-        if (data.agent_name) this.sessionInfo.agentName = data.agent_name;
-        if (data.max_context != null)
-          this.sessionInfo.maxContext = data.max_context;
+        if (data.session_id) this.sessionInfo.sessionId = data.session_id
+        if (data.model) this.sessionInfo.model = data.model
+        if (data.agent_name) this.sessionInfo.agentName = data.agent_name
+        if (data.max_context != null) this.sessionInfo.maxContext = data.max_context
         if (data.compact_threshold != null)
-          this.sessionInfo.compactThreshold = data.compact_threshold;
-        return;
+          this.sessionInfo.compactThreshold = data.compact_threshold
+        return
       }
 
       if (at === "token_usage") {
@@ -940,24 +877,24 @@ export const useChatStore = defineStore("chat", {
           total: 0,
           cached: 0,
           lastPrompt: 0,
-        };
+        }
         this.tokenUsage[source] = {
           prompt: prev.prompt + (data.prompt_tokens || 0),
           completion: prev.completion + (data.completion_tokens || 0),
           total: prev.total + (data.total_tokens || 0),
           cached: prev.cached + (data.cached_tokens || 0),
           lastPrompt: data.prompt_tokens || prev.lastPrompt,
-        };
-        return;
+        }
+        return
       }
 
       // Ensure we have a tab for this source
-      if (!this.messagesByTab[source]) return;
-      const msgs = this.messagesByTab[source];
+      if (!this.messagesByTab[source]) return
+      const msgs = this.messagesByTab[source]
 
       if (at === "compact_start") {
         // Show a "compacting..." placeholder immediately
-        const round = data.round || 0;
+        const round = data.round || 0
         msgs.push({
           id: "compact_" + round + "_" + Date.now(),
           role: "compact",
@@ -966,19 +903,19 @@ export const useChatStore = defineStore("chat", {
           status: "running",
           messagesCompacted: 0,
           timestamp: new Date().toISOString(),
-        });
-        return;
+        })
+        return
       }
 
       if (at === "compact_complete") {
         // Find the running compact message and update it
-        const round = data.round || 0;
+        const round = data.round || 0
         for (let i = msgs.length - 1; i >= 0; i--) {
           if (msgs[i].role === "compact" && msgs[i].status === "running") {
-            msgs[i].summary = data.summary || "";
-            msgs[i].messagesCompacted = data.messages_compacted || 0;
-            msgs[i].status = "done";
-            return;
+            msgs[i].summary = data.summary || ""
+            msgs[i].messagesCompacted = data.messages_compacted || 0
+            msgs[i].status = "done"
+            return
           }
         }
         // Fallback: no running compact found, just push a new one
@@ -990,8 +927,8 @@ export const useChatStore = defineStore("chat", {
           status: "done",
           messagesCompacted: data.messages_compacted || 0,
           timestamp: new Date().toISOString(),
-        });
-        return;
+        })
+        return
       }
 
       if (at === "context_cleared") {
@@ -1000,29 +937,29 @@ export const useChatStore = defineStore("chat", {
           role: "clear",
           messagesCleared: data.messages_cleared || 0,
           timestamp: new Date().toISOString(),
-        });
-        return;
+        })
+        return
       }
 
       if (at === "processing_error") {
-        const errorType = data.error_type || "Error";
-        const errorMsg = data.error || data.detail || "Unknown error";
+        const errorType = data.error_type || "Error"
+        const errorMsg = data.error || data.detail || "Unknown error"
         msgs.push({
           id: "err_" + Date.now(),
           role: "error",
           errorType,
           content: errorMsg,
           timestamp: new Date().toISOString(),
-        });
-        this.processing = false;
-        return;
+        })
+        this.processing = false
+        return
       }
 
       if (at === "trigger_fired") {
-        const channel = data.channel || "";
-        const sender = data.sender || "";
-        const label = channel ? `channel: ${channel}` : name;
-        const from = sender ? ` from ${sender}` : "";
+        const channel = data.channel || ""
+        const sender = data.sender || ""
+        const label = channel ? `channel: ${channel}` : name
+        const from = sender ? ` from ${sender}` : ""
         msgs.push({
           id: "trig_" + Date.now(),
           role: "trigger",
@@ -1031,20 +968,20 @@ export const useChatStore = defineStore("chat", {
           channel,
           sender,
           timestamp: new Date().toISOString(),
-        });
-        return;
+        })
+        return
       }
 
       if (at === "tool_start" || at === "subagent_start") {
         // Tool/subagent activity means the agent is processing
-        if (!this.processing) this.processing = true;
-        const last = this._ensureAssistantMsg(msgs);
+        if (!this.processing) this.processing = true
+        const last = this._ensureAssistantMsg(msgs)
         if (last.parts.length > 0) {
-          const tail = last.parts[last.parts.length - 1];
-          if (tail.type === "text") tail._streaming = false;
+          const tail = last.parts[last.parts.length - 1]
+          if (tail.type === "text") tail._streaming = false
         }
-        const toolId = data.id || "tc_" + Date.now();
-        const jobId = data.job_id || "";
+        const toolId = data.id || "tc_" + Date.now()
+        const jobId = data.job_id || ""
         last.parts.push({
           type: "tool",
           id: toolId,
@@ -1057,61 +994,59 @@ export const useChatStore = defineStore("chat", {
           tools_used: data.tools_used || [],
           children: [],
           startedAt: Date.now(),
-        });
+        })
         // Track all tasks as running jobs (direct tasks are promotable)
-        const runKey = jobId || toolId;
-        const isBg = data.background || false;
+        const runKey = jobId || toolId
+        const isBg = data.background || false
         this.runningJobs[runKey] = {
           name,
           type: at === "subagent_start" ? "subagent" : "tool",
           startedAt: Date.now(),
           promotable: !isBg,
-        };
-        this._ensureJobTimer();
+        }
+        this._ensureJobTimer()
       } else if (at === "tool_done" || at === "subagent_done") {
-        const tc = this._findToolPart(msgs, name, data.job_id);
+        const tc = this._findToolPart(msgs, name, data.job_id)
         if (tc) {
-          tc.status = "done";
-          tc.result = data.result || data.output || data.detail || "";
-          if (data.tools_used) tc.tools_used = data.tools_used;
-          if (data.turns != null) tc.turns = data.turns;
-          if (data.duration != null) tc.duration = data.duration;
-          if (data.total_tokens != null) tc.total_tokens = data.total_tokens;
-          if (data.prompt_tokens != null) tc.prompt_tokens = data.prompt_tokens;
-          if (data.completion_tokens != null)
-            tc.completion_tokens = data.completion_tokens;
-          delete this.runningJobs[tc.jobId || tc.id];
-          this._checkJobTimer();
+          tc.status = "done"
+          tc.result = data.result || data.output || data.detail || ""
+          if (data.tools_used) tc.tools_used = data.tools_used
+          if (data.turns != null) tc.turns = data.turns
+          if (data.duration != null) tc.duration = data.duration
+          if (data.total_tokens != null) tc.total_tokens = data.total_tokens
+          if (data.prompt_tokens != null) tc.prompt_tokens = data.prompt_tokens
+          if (data.completion_tokens != null) tc.completion_tokens = data.completion_tokens
+          delete this.runningJobs[tc.jobId || tc.id]
+          this._checkJobTimer()
         }
       } else if (at === "tool_error" || at === "subagent_error") {
-        const tc = this._findToolPart(msgs, name, data.job_id);
+        const tc = this._findToolPart(msgs, name, data.job_id)
         if (tc) {
-          tc.status = "error";
-          tc.result = data.detail || "";
-          delete this.runningJobs[tc.jobId || tc.id];
-          this._checkJobTimer();
+          tc.status = "error"
+          tc.result = data.detail || ""
+          delete this.runningJobs[tc.jobId || tc.id]
+          this._checkJobTimer()
         }
       } else if (at === "subagent_token_update") {
         // Live token usage update from a running sub-agent
-        const saName = data.subagent || "";
-        const saJobId = data.job_id || "";
-        const sa = this._findSubagentPart(msgs, saName, saJobId);
+        const saName = data.subagent || ""
+        const saJobId = data.job_id || ""
+        const sa = this._findSubagentPart(msgs, saName, saJobId)
         if (sa) {
-          if (data.total_tokens) sa.total_tokens = data.total_tokens;
-          if (data.prompt_tokens) sa.prompt_tokens = data.prompt_tokens;
-          if (data.completion_tokens)
-            sa.completion_tokens = data.completion_tokens;
+          if (data.total_tokens) sa.total_tokens = data.total_tokens
+          if (data.prompt_tokens) sa.prompt_tokens = data.prompt_tokens
+          if (data.completion_tokens) sa.completion_tokens = data.completion_tokens
         }
       } else if (at?.startsWith("subagent_tool_")) {
         // Sub-agent internal tool activity: find parent by job_id or name
-        const saName = data.subagent || "";
-        const saJobId = data.job_id || "";
-        const sa = this._findSubagentPart(msgs, saName, saJobId);
+        const saName = data.subagent || ""
+        const saJobId = data.job_id || ""
+        const sa = this._findSubagentPart(msgs, saName, saJobId)
         if (sa) {
-          if (!sa.children) sa.children = [];
-          if (!sa.tools_used) sa.tools_used = [];
-          const toolName = data.tool || data.detail || "";
-          const subAct = at.replace("subagent_", "");
+          if (!sa.children) sa.children = []
+          if (!sa.tools_used) sa.tools_used = []
+          const toolName = data.tool || data.detail || ""
+          const subAct = at.replace("subagent_", "")
           if (subAct === "tool_start" && toolName) {
             sa.children.push({
               type: "tool",
@@ -1120,102 +1055,96 @@ export const useChatStore = defineStore("chat", {
               args: { info: data.detail || "" },
               status: "running",
               result: "",
-            });
-            if (!sa.tools_used.includes(toolName)) sa.tools_used.push(toolName);
+            })
+            if (!sa.tools_used.includes(toolName)) sa.tools_used.push(toolName)
           } else if (subAct === "tool_done" && toolName) {
             const child = [...sa.children]
               .reverse()
-              .find((c) => c.name === toolName && c.status === "running");
+              .find((c) => c.name === toolName && c.status === "running")
             if (child) {
-              child.status = "done";
-              child.result = data.detail || "";
+              child.status = "done"
+              child.result = data.detail || ""
             }
           } else if (subAct === "tool_error" && toolName) {
             const child = [...sa.children]
               .reverse()
-              .find((c) => c.name === toolName && c.status === "running");
+              .find((c) => c.name === toolName && c.status === "running")
             if (child) {
-              child.status = "error";
-              child.result = data.detail || "";
+              child.status = "error"
+              child.result = data.detail || ""
             }
           }
         }
       } else if (at === "task_promoted") {
         // Task promoted to background — mark as no longer promotable
-        const promJobId = data.job_id || "";
+        const promJobId = data.job_id || ""
         if (promJobId && this.runningJobs[promJobId]) {
-          this.runningJobs[promJobId].promotable = false;
+          this.runningJobs[promJobId].promotable = false
         }
       }
     },
 
     /** Promote a running direct task to background via API. */
     async promoteTask(jobId) {
-      if (!this._instanceId || !this._instanceType) return;
+      if (!this._instanceId || !this._instanceType) return
       if (this.runningJobs[jobId]) {
-        this.runningJobs[jobId].promotable = false;
+        this.runningJobs[jobId].promotable = false
       }
       try {
         if (this._instanceType === "terrarium") {
-          const target = this.activeTab;
+          const target = this.activeTab
           if (target && !target.startsWith("ch:")) {
-            const { terrariumAPI } = await import("@/utils/api");
-            await terrariumAPI.promoteCreatureTask(
-              this._instanceId,
-              target,
-              jobId,
-            );
+            const { terrariumAPI } = await import("@/utils/api")
+            await terrariumAPI.promoteCreatureTask(this._instanceId, target, jobId)
           }
         } else {
-          const { agentAPI } = await import("@/utils/api");
-          await agentAPI.promote(this._instanceId, jobId);
+          const { agentAPI } = await import("@/utils/api")
+          await agentAPI.promote(this._instanceId, jobId)
         }
       } catch (e) {
-        console.warn("Failed to promote task:", e);
+        console.warn("Failed to promote task:", e)
       }
     },
 
     /** Regenerate the last assistant response using current settings. */
     async regenerateLastResponse() {
       if (!this._instanceId || this._instanceType === "terrarium") {
-        console.warn(
-          "Regenerate only supported for standalone creature instances currently",
-        );
-        return;
+        console.warn("Regenerate only supported for standalone creature instances currently")
+        return
       }
       try {
-        const { agentAPI } = await import("@/utils/api");
+        const { agentAPI } = await import("@/utils/api")
         // Re-fetch history BEFORE triggering regen so the frontend
         // state matches the backend's truncated conversation.
-        await agentAPI.regenerate(this._instanceId);
-        await this._resyncHistory();
+        await agentAPI.regenerate(this._instanceId)
+        await this._resyncHistory()
       } catch (e) {
-        console.warn("Failed to regenerate:", e);
+        console.warn("Failed to regenerate:", e)
       }
     },
 
     /** Edit a user message and re-run from that point. */
     async editMessage(messageIdx, newContent) {
-      if (!this._instanceId || this._instanceType === "terrarium") return;
-      if (messageIdx == null) return;
+      if (!this._instanceId || this._instanceType === "terrarium") return
+      if (messageIdx == null) return
       try {
-        const { agentAPI } = await import("@/utils/api");
-        await agentAPI.editMessage(this._instanceId, messageIdx, newContent);
-        await this._resyncHistory();
+        const { agentAPI } = await import("@/utils/api")
+        await agentAPI.editMessage(this._instanceId, messageIdx, newContent)
+        await this._resyncHistory()
       } catch (e) {
-        console.warn("Failed to edit message:", e);
+        console.warn("Failed to edit message:", e)
       }
     },
 
     /** Rewind conversation to a point (drop later messages). */
     async rewindTo(messageIdx) {
-      if (!this._instanceId || this._instanceType === "terrarium") return;
+      if (!this._instanceId || this._instanceType === "terrarium") return
       try {
-        const { agentAPI } = await import("@/utils/api");
-        await agentAPI.rewindTo(this._instanceId, messageIdx);
-        await this._resyncHistory();
+        const { agentAPI } = await import("@/utils/api")
+        await agentAPI.rewindTo(this._instanceId, messageIdx)
+        await this._resyncHistory()
       } catch (e) {
-        console.warn("Failed to rewind:", e);
+        console.warn("Failed to rewind:", e)
       }
     },
 
@@ -1223,18 +1152,18 @@ export const useChatStore = defineStore("chat", {
      *  local message list. Called after edit/regenerate/rewind so the
      *  frontend matches the backend's truncated conversation. */
     async _resyncHistory() {
-      if (!this._instanceId) return;
+      if (!this._instanceId) return
       try {
-        const { agentAPI } = await import("@/utils/api");
-        const data = await agentAPI.getHistory(this._instanceId);
-        const tab = this.activeTab;
-        if (!tab || !data?.events) return;
+        const { agentAPI } = await import("@/utils/api")
+        const data = await agentAPI.getHistory(this._instanceId)
+        const tab = this.activeTab
+        if (!tab || !data?.events) return
         // Rebuild messages from the event history.
-        const events = data.events;
-        const { messages } = _replayEvents([], events);
-        this.messagesByTab[tab] = messages;
+        const events = data.events
+        const { messages } = _replayEvents([], events)
+        this.messagesByTab[tab] = messages
       } catch (e) {
-        console.warn("Failed to resync history:", e);
+        console.warn("Failed to resync history:", e)
       }
     },
 
@@ -1244,26 +1173,25 @@ export const useChatStore = defineStore("chat", {
      */
     _findToolPart(msgs, name, jobId) {
       for (let i = msgs.length - 1; i >= 0; i--) {
-        const msg = msgs[i];
-        if (!msg.parts) continue;
+        const msg = msgs[i]
+        if (!msg.parts) continue
         for (let j = msg.parts.length - 1; j >= 0; j--) {
-          const p = msg.parts[j];
-          if (p.type !== "tool") continue;
+          const p = msg.parts[j]
+          if (p.type !== "tool") continue
           // Match by job_id: any status (handles replay "running" + live "running")
-          if (jobId && p.jobId === jobId) return p;
+          if (jobId && p.jobId === jobId) return p
         }
       }
       // Fallback: match by name, running status only
       for (let i = msgs.length - 1; i >= 0; i--) {
-        const msg = msgs[i];
-        if (!msg.parts) continue;
+        const msg = msgs[i]
+        if (!msg.parts) continue
         for (let j = msg.parts.length - 1; j >= 0; j--) {
-          const p = msg.parts[j];
-          if (p.type === "tool" && p.name === name && p.status === "running")
-            return p;
+          const p = msg.parts[j]
+          if (p.type === "tool" && p.name === name && p.status === "running") return p
         }
       }
-      return null;
+      return null
     },
 
     /**
@@ -1273,62 +1201,47 @@ export const useChatStore = defineStore("chat", {
       // 1. Match by job_id (most reliable - connects sub-agent tool events to parent)
       if (saJobId) {
         for (let i = msgs.length - 1; i >= 0; i--) {
-          const msg = msgs[i];
-          if (!msg.parts) continue;
+          const msg = msgs[i]
+          if (!msg.parts) continue
           for (let j = msg.parts.length - 1; j >= 0; j--) {
-            const p = msg.parts[j];
-            if (
-              p.type === "tool" &&
-              p.kind === "subagent" &&
-              p.jobId === saJobId
-            )
-              return p;
+            const p = msg.parts[j]
+            if (p.type === "tool" && p.kind === "subagent" && p.jobId === saJobId) return p
           }
         }
       }
       // 2. Match by name (exact or partial - handles "researcher" matching "agent_researcher[abc]")
       if (saName) {
         for (let i = msgs.length - 1; i >= 0; i--) {
-          const msg = msgs[i];
-          if (!msg.parts) continue;
+          const msg = msgs[i]
+          if (!msg.parts) continue
           for (let j = msg.parts.length - 1; j >= 0; j--) {
-            const p = msg.parts[j];
-            if (
-              p.type !== "tool" ||
-              p.kind !== "subagent" ||
-              p.status !== "running"
-            )
-              continue;
-            if (p.name === saName) return p;
+            const p = msg.parts[j]
+            if (p.type !== "tool" || p.kind !== "subagent" || p.status !== "running") continue
+            if (p.name === saName) return p
             // Partial match: "researcher" in "agent_researcher[abc123]"
-            if (p.name.includes(saName)) return p;
+            if (p.name.includes(saName)) return p
           }
         }
       }
       // 3. Last resort: any running sub-agent
       for (let i = msgs.length - 1; i >= 0; i--) {
-        const msg = msgs[i];
-        if (!msg.parts) continue;
+        const msg = msgs[i]
+        if (!msg.parts) continue
         for (let j = msg.parts.length - 1; j >= 0; j--) {
-          const p = msg.parts[j];
-          if (
-            p.type === "tool" &&
-            p.kind === "subagent" &&
-            p.status === "running"
-          )
-            return p;
+          const p = msg.parts[j]
+          if (p.type === "tool" && p.kind === "subagent" && p.status === "running") return p
         }
       }
-      return null;
+      return null
     },
 
     _handleChannelMessage(data) {
-      const tabKey = `ch:${data.channel}`;
+      const tabKey = `ch:${data.channel}`
 
       if (this.messagesByTab[tabKey]) {
-        const existing = this.messagesByTab[tabKey];
+        const existing = this.messagesByTab[tabKey]
         if (data.message_id && existing.some((m) => m.id === data.message_id)) {
-          return;
+          return
         }
         this.messagesByTab[tabKey].push({
           id: data.message_id || "ch_" + Date.now(),
@@ -1336,43 +1249,41 @@ export const useChatStore = defineStore("chat", {
           sender: data.sender,
           content: data.content,
           timestamp: data.timestamp,
-        });
+        })
         if (this.activeTab !== tabKey) {
-          this.unreadCounts[tabKey] = (this.unreadCounts[tabKey] || 0) + 1;
+          this.unreadCounts[tabKey] = (this.unreadCounts[tabKey] || 0) + 1
         }
       }
 
-      const msgStore = useMessagesStore();
+      const msgStore = useMessagesStore()
       msgStore.addChannelMessage(data.channel, {
         channel: data.channel,
         sender: data.sender,
         content: data.content,
         timestamp: data.timestamp,
-      });
+      })
 
-      const instStore = useInstancesStore();
+      const instStore = useInstancesStore()
       if (instStore.current) {
-        const ch = instStore.current.channels.find(
-          (c) => c.name === data.channel,
-        );
-        if (ch) ch.message_count = (ch.message_count || 0) + 1;
+        const ch = instStore.current.channels.find((c) => c.name === data.channel)
+        if (ch) ch.message_count = (ch.message_count || 0) + 1
       }
     },
 
     /** Move queued messages from the hold queue into the main chat. */
     _promoteQueuedMessages(source) {
-      if (!this.queuedMessages.length) return;
-      const msgs = this.messagesByTab[source];
-      if (!msgs) return;
+      if (!this.queuedMessages.length) return
+      const msgs = this.messagesByTab[source]
+      if (!msgs) return
       for (const msg of this.queuedMessages) {
-        delete msg.queued;
-        msgs.push(msg);
+        delete msg.queued
+        msgs.push(msg)
       }
-      this.queuedMessages = [];
+      this.queuedMessages = []
     },
 
     _ensureAssistantMsg(msgs) {
-      let last = msgs[msgs.length - 1];
+      let last = msgs[msgs.length - 1]
       if (!last || last.role !== "assistant" || !last._streaming) {
         last = {
           id: "m_" + Date.now(),
@@ -1380,109 +1291,105 @@ export const useChatStore = defineStore("chat", {
           parts: [],
           timestamp: new Date().toISOString(),
           _streaming: true,
-        };
-        msgs.push(last);
+        }
+        msgs.push(last)
       }
-      if (!last.parts) last.parts = [];
-      return last;
+      if (!last.parts) last.parts = []
+      return last
     },
 
     _appendStreamChunk(source, content) {
-      const msgs = this.messagesByTab[source];
-      if (!msgs) return;
-      const last = this._ensureAssistantMsg(msgs);
-      const tail =
-        last.parts.length > 0 ? last.parts[last.parts.length - 1] : null;
+      const msgs = this.messagesByTab[source]
+      if (!msgs) return
+      const last = this._ensureAssistantMsg(msgs)
+      const tail = last.parts.length > 0 ? last.parts[last.parts.length - 1] : null
       if (tail && tail.type === "text" && tail._streaming) {
-        tail.content += content;
+        tail.content += content
       } else {
-        last.parts.push({ type: "text", content, _streaming: true });
+        last.parts.push({ type: "text", content, _streaming: true })
       }
     },
 
     _finishStream(source) {
-      this.processing = false;
-      const msgs = this.messagesByTab[source];
+      this.processing = false
+      const msgs = this.messagesByTab[source]
       if (msgs) {
-        const last = msgs[msgs.length - 1];
+        const last = msgs[msgs.length - 1]
         if (last?._streaming) {
-          last._streaming = false;
+          last._streaming = false
           for (const p of last.parts || []) {
-            if (p.type === "text") p._streaming = false;
+            if (p.type === "text") p._streaming = false
           }
         }
       }
     },
 
     _addMsg(tabKey, msg) {
-      if (!this.messagesByTab[tabKey]) this.messagesByTab[tabKey] = [];
-      this.messagesByTab[tabKey].push(msg);
+      if (!this.messagesByTab[tabKey]) this.messagesByTab[tabKey] = []
+      this.messagesByTab[tabKey].push(msg)
     },
 
     // ── Job timer (reactive elapsed tracking) ──
 
     /** Start 1s interval to tick _jobTick, making elapsed times reactive. */
     _ensureJobTimer() {
-      if (this._jobTimer !== null) return;
+      if (this._jobTimer !== null) return
       this._jobTimer = setInterval(() => {
-        this._jobTick++;
-      }, 1000);
+        this._jobTick++
+      }, 1000)
     },
 
     /** Stop timer if no more running jobs. */
     _checkJobTimer() {
-      if (
-        Object.keys(this.runningJobs).length === 0 &&
-        this._jobTimer !== null
-      ) {
-        clearInterval(this._jobTimer);
-        this._jobTimer = null;
+      if (Object.keys(this.runningJobs).length === 0 && this._jobTimer !== null) {
+        clearInterval(this._jobTimer)
+        this._jobTimer = null
       }
     },
 
     /** Get elapsed seconds for a job (reactive via _jobTick). */
     getJobElapsed(job) {
       // Reference _jobTick to make this reactive
-      void this._jobTick;
-      if (!job?.startedAt) return "";
-      const secs = Math.floor((Date.now() - job.startedAt) / 1000);
-      return secs > 0 ? `${secs}s` : "";
+      void this._jobTick
+      if (!job?.startedAt) return ""
+      const secs = Math.floor((Date.now() - job.startedAt) / 1000)
+      return secs > 0 ? `${secs}s` : ""
     },
 
     _cleanup() {
       if (this._ws) {
-        this._ws.close();
-        this._ws = null;
+        this._ws.close()
+        this._ws = null
       }
       if (this._jobTimer !== null) {
-        clearInterval(this._jobTimer);
-        this._jobTimer = null;
+        clearInterval(this._jobTimer)
+        this._jobTimer = null
       }
     },
 
     _saveTabs() {
-      if (!this._instanceId) return;
-      const key = `chat-tabs-${this._instanceId}`;
+      if (!this._instanceId) return
+      const key = `chat-tabs-${this._instanceId}`
       localStorage.setItem(
         key,
         JSON.stringify({
           tabs: this.tabs,
           activeTab: this.activeTab,
         }),
-      );
+      )
     },
 
     _restoreTabs() {
-      if (!this._instanceId) return;
-      const key = `chat-tabs-${this._instanceId}`;
+      if (!this._instanceId) return
+      const key = `chat-tabs-${this._instanceId}`
       try {
-        const saved = JSON.parse(localStorage.getItem(key) || "null");
+        const saved = JSON.parse(localStorage.getItem(key) || "null")
         if (saved?.tabs?.length) {
           for (const tab of saved.tabs) {
-            this._addTab(tab);
+            this._addTab(tab)
           }
           if (saved.activeTab && this.tabs.includes(saved.activeTab)) {
-            this.activeTab = saved.activeTab;
+            this.activeTab = saved.activeTab
           }
         }
       } catch {
@@ -1490,4 +1397,4 @@ export const useChatStore = defineStore("chat", {
       }
     },
   },
-});
+})

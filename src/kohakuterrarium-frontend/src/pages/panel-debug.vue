@@ -21,40 +21,22 @@
 
     <!-- Panel body -->
     <div class="flex-1 min-h-0 overflow-hidden">
-      <ChatPanel
-        v-if="active === 'chat' && fakeInstance"
-        :instance="fakeInstance"
-      />
-      <ActivityPanel
-        v-else-if="active === 'activity'"
-        :instance="fakeInstance"
-      />
+      <ChatPanel v-if="active === 'chat' && fakeInstance" :instance="fakeInstance" />
+      <ActivityPanel v-else-if="active === 'activity'" :instance="fakeInstance" />
       <StatePanel v-else-if="active === 'state'" :instance="fakeInstance" />
-      <CreaturesPanel
-        v-else-if="active === 'creatures'"
-        :instance="fakeInstance"
-      />
+      <CreaturesPanel v-else-if="active === 'creatures'" :instance="fakeInstance" />
       <FilesPanel
         v-else-if="active === 'files'"
         :root="fakeInstance?.pwd || '/'"
         :on-select="() => {}"
       />
       <CanvasPanel v-else-if="active === 'canvas'" />
-      <SettingsPanel
-        v-else-if="active === 'settings'"
-        :instance="fakeInstance"
-      />
+      <SettingsPanel v-else-if="active === 'settings'" :instance="fakeInstance" />
       <DebugPanel v-else-if="active === 'debug'" :instance="fakeInstance" />
-      <StatusDashboard
-        v-else-if="active === 'status-dashboard'"
-        :instance="fakeInstance"
-      />
+      <StatusDashboard v-else-if="active === 'status-dashboard'" :instance="fakeInstance" />
       <StatusBar v-else-if="active === 'status-bar'" />
       <EditorMain v-else-if="active === 'editor'" />
-      <div
-        v-else
-        class="h-full flex items-center justify-center text-warm-400 text-sm"
-      >
+      <div v-else class="h-full flex items-center justify-center text-warm-400 text-sm">
         Select a panel tab above
       </div>
     </div>
@@ -62,22 +44,22 @@
 </template>
 
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref } from "vue"
 
-import ChatPanel from "@/components/chat/ChatPanel.vue";
-import StatusBar from "@/components/chrome/StatusBar.vue";
-import EditorMain from "@/components/editor/EditorMain.vue";
-import ActivityPanel from "@/components/panels/ActivityPanel.vue";
-import CanvasPanel from "@/components/panels/CanvasPanel.vue";
-import CreaturesPanel from "@/components/panels/CreaturesPanel.vue";
-import DebugPanel from "@/components/panels/DebugPanel.vue";
-import FilesPanel from "@/components/panels/FilesPanel.vue";
-import SettingsPanel from "@/components/panels/SettingsPanel.vue";
-import StatePanel from "@/components/panels/StatePanel.vue";
-import StatusDashboard from "@/components/status/StatusDashboard.vue";
-import { useInstancesStore } from "@/stores/instances";
+import ChatPanel from "@/components/chat/ChatPanel.vue"
+import StatusBar from "@/components/chrome/StatusBar.vue"
+import EditorMain from "@/components/editor/EditorMain.vue"
+import ActivityPanel from "@/components/panels/ActivityPanel.vue"
+import CanvasPanel from "@/components/panels/CanvasPanel.vue"
+import CreaturesPanel from "@/components/panels/CreaturesPanel.vue"
+import DebugPanel from "@/components/panels/DebugPanel.vue"
+import FilesPanel from "@/components/panels/FilesPanel.vue"
+import SettingsPanel from "@/components/panels/SettingsPanel.vue"
+import StatePanel from "@/components/panels/StatePanel.vue"
+import StatusDashboard from "@/components/status/StatusDashboard.vue"
+import { useInstancesStore } from "@/stores/instances"
 
-const instances = useInstancesStore();
+const instances = useInstancesStore()
 const fakeInstance = computed(
   () =>
     instances.current || {
@@ -90,7 +72,7 @@ const fakeInstance = computed(
       creatures: [],
       channels: [],
     },
-);
+)
 
 const tabs = [
   { id: "chat", label: "Chat" },
@@ -104,7 +86,7 @@ const tabs = [
   { id: "status-dashboard", label: "StatusDashboard (old)" },
   { id: "status-bar", label: "StatusBar" },
   { id: "editor", label: "EditorMain" },
-];
+]
 
-const active = ref("activity");
+const active = ref("activity")
 </script>

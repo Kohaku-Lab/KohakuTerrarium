@@ -18,9 +18,7 @@
           placeholder="Type a command…  (> @ # /)"
           @keydown="onKey"
         />
-        <span
-          class="text-[10px] text-warm-400 uppercase tracking-wider font-mono"
-        >
+        <span class="text-[10px] text-warm-400 uppercase tracking-wider font-mono">
           {{ palette.parsed.prefix }}
         </span>
       </div>
@@ -46,16 +44,11 @@
             {{ r.description }}
           </div>
         </div>
-        <span
-          v-if="r.shortcut"
-          class="text-[9px] font-mono text-warm-400 shrink-0"
-          >{{ r.shortcut }}</span
-        >
+        <span v-if="r.shortcut" class="text-[9px] font-mono text-warm-400 shrink-0">{{
+          r.shortcut
+        }}</span>
       </button>
-      <div
-        v-if="results.length === 0"
-        class="text-warm-400 text-center py-6 italic"
-      >
+      <div v-if="results.length === 0" class="text-warm-400 text-center py-6 italic">
         No matches
       </div>
     </div>
@@ -63,62 +56,61 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
 
-import { usePaletteStore } from "@/stores/palette";
-import { LAYOUT_EVENTS, onLayoutEvent } from "@/utils/layoutEvents";
+import { usePaletteStore } from "@/stores/palette"
+import { LAYOUT_EVENTS, onLayoutEvent } from "@/utils/layoutEvents"
 
-const palette = usePaletteStore();
+const palette = usePaletteStore()
 
 const open = computed({
   get: () => palette.open,
   set: (v) => (v ? palette.openPalette(palette.query) : palette.closePalette()),
-});
+})
 const query = computed({
   get: () => palette.query,
   set: (v) => (palette.query = v),
-});
+})
 
-const results = computed(() => palette.results);
-const highlighted = ref(0);
-const inputEl = ref(null);
+const results = computed(() => palette.results)
+const highlighted = ref(0)
+const inputEl = ref(null)
 
 watch(
   () => results.value,
   () => {
-    highlighted.value = 0;
+    highlighted.value = 0
   },
-);
+)
 
 function commit(entry) {
-  if (!entry) return;
-  palette.run(entry.id);
+  if (!entry) return
+  palette.run(entry.id)
 }
 
 function onKey(e) {
   if (e.key === "ArrowDown") {
-    e.preventDefault();
+    e.preventDefault()
     if (results.value.length) {
-      highlighted.value = (highlighted.value + 1) % results.value.length;
+      highlighted.value = (highlighted.value + 1) % results.value.length
     }
   } else if (e.key === "ArrowUp") {
-    e.preventDefault();
+    e.preventDefault()
     if (results.value.length) {
-      highlighted.value =
-        (highlighted.value - 1 + results.value.length) % results.value.length;
+      highlighted.value = (highlighted.value - 1 + results.value.length) % results.value.length
     }
   } else if (e.key === "Enter") {
-    e.preventDefault();
-    const r = results.value[highlighted.value];
-    if (r) commit(r);
+    e.preventDefault()
+    const r = results.value[highlighted.value]
+    if (r) commit(r)
   } else if (e.key === "Escape") {
-    e.preventDefault();
-    palette.closePalette();
+    e.preventDefault()
+    palette.closePalette()
   }
 }
 
 function onClose() {
-  palette.closePalette();
+  palette.closePalette()
 }
 
 // Focus the input when the palette opens.
@@ -126,22 +118,22 @@ watch(
   () => palette.open,
   async (v) => {
     if (v) {
-      await nextTick();
-      inputEl.value?.focus();
+      await nextTick()
+      inputEl.value?.focus()
     }
   },
-);
+)
 
 // Listen for Ctrl+K / palette:open events from the keyboard composable.
-let unsub = () => {};
+let unsub = () => {}
 onMounted(() => {
   unsub = onLayoutEvent(LAYOUT_EVENTS.PALETTE_OPEN, () => {
-    palette.openPalette("");
-  });
-});
+    palette.openPalette("")
+  })
+})
 onUnmounted(() => {
-  unsub();
-});
+  unsub()
+})
 </script>
 
 <style>

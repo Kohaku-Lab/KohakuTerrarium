@@ -15,29 +15,29 @@ export const useMessagesStore = defineStore("messages", {
   actions: {
     addChannelMessage(channelName, msg) {
       if (!this.channelMessages[channelName]) {
-        this.channelMessages[channelName] = [];
+        this.channelMessages[channelName] = []
       }
-      this.channelMessages[channelName].push(msg);
+      this.channelMessages[channelName].push(msg)
     },
 
     addCreatureOutput(creatureName, line) {
       if (!this.creatureOutput[creatureName]) {
-        this.creatureOutput[creatureName] = [];
+        this.creatureOutput[creatureName] = []
       }
-      this.creatureOutput[creatureName].push(line);
+      this.creatureOutput[creatureName].push(line)
     },
 
     getChannelMessages(channelName) {
-      return this.channelMessages[channelName] || [];
+      return this.channelMessages[channelName] || []
     },
 
     getCreatureOutput(creatureName) {
-      return this.creatureOutput[creatureName] || [];
+      return this.creatureOutput[creatureName] || []
     },
 
     clearForInstance() {
-      this.channelMessages = {};
-      this.creatureOutput = {};
+      this.channelMessages = {}
+      this.creatureOutput = {}
     },
   },
-});
+})

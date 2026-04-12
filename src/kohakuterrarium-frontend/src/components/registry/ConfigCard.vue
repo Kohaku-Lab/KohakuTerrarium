@@ -2,9 +2,7 @@
   <div class="card-hover rounded-xl p-5 flex flex-col gap-3">
     <!-- Header: name + type badge -->
     <div class="flex items-center gap-2">
-      <span
-        class="font-semibold text-warm-800 dark:text-warm-200 truncate flex-1"
-      >
+      <span class="font-semibold text-warm-800 dark:text-warm-200 truncate flex-1">
         {{ config.name }}
       </span>
       <GemBadge :gem="typeBadgeGem">
@@ -27,10 +25,7 @@
         <span class="i-carbon-machine-learning-model" />
         <span class="font-mono">{{ config.model }}</span>
       </div>
-      <div
-        v-if="config.tools && config.tools.length"
-        class="flex flex-wrap gap-1"
-      >
+      <div v-if="config.tools && config.tools.length" class="flex flex-wrap gap-1">
         <el-tag
           v-for="tool in config.tools"
           :key="tool"
@@ -42,36 +37,18 @@
           {{ tool }}
         </el-tag>
       </div>
-      <div
-        v-if="config.path"
-        class="text-xs text-warm-400 font-mono truncate"
-        :title="config.path"
-      >
+      <div v-if="config.path" class="text-xs text-warm-400 font-mono truncate" :title="config.path">
         {{ config.path }}
       </div>
     </template>
 
     <!-- Remote mode: url + tags -->
     <template v-if="mode === 'remote'">
-      <div
-        v-if="config.url"
-        class="text-xs text-warm-400 font-mono truncate"
-        :title="config.url"
-      >
+      <div v-if="config.url" class="text-xs text-warm-400 font-mono truncate" :title="config.url">
         {{ config.url }}
       </div>
-      <div
-        v-if="config.tags && config.tags.length"
-        class="flex flex-wrap gap-1"
-      >
-        <el-tag
-          v-for="tag in config.tags"
-          :key="tag"
-          size="small"
-          type="info"
-          effect="plain"
-          round
-        >
+      <div v-if="config.tags && config.tags.length" class="flex flex-wrap gap-1">
+        <el-tag v-for="tag in config.tags" :key="tag" size="small" type="info" effect="plain" round>
           {{ tag }}
         </el-tag>
       </div>
@@ -108,23 +85,23 @@
 </template>
 
 <script setup>
-import GemBadge from "@/components/common/GemBadge.vue";
+import GemBadge from "@/components/common/GemBadge.vue"
 
 const props = defineProps({
   config: { type: Object, required: true },
   mode: { type: String, default: "local" },
   installed: { type: Boolean, default: false },
   installing: { type: Boolean, default: false },
-});
+})
 
-defineEmits(["install", "uninstall"]);
+defineEmits(["install", "uninstall"])
 
 const typeBadgeGem = computed(() => {
-  const t = props.config.config_type || props.config.type || "";
-  return t === "terrarium" ? "taaffeite" : "iolite";
-});
+  const t = props.config.config_type || props.config.type || ""
+  return t === "terrarium" ? "taaffeite" : "iolite"
+})
 
 const typeBadgeLabel = computed(() => {
-  return props.config.config_type || props.config.type || "creature";
-});
+  return props.config.config_type || props.config.type || "creature"
+})
 </script>

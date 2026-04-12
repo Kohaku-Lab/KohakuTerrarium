@@ -6,9 +6,7 @@
       <button
         class="px-2 py-0.5 rounded transition-colors"
         :class="
-          mode === 'preview'
-            ? 'bg-iolite/15 text-iolite'
-            : 'text-warm-500 hover:text-warm-700'
+          mode === 'preview' ? 'bg-iolite/15 text-iolite' : 'text-warm-500 hover:text-warm-700'
         "
         @click="mode = 'preview'"
       >
@@ -16,11 +14,7 @@
       </button>
       <button
         class="px-2 py-0.5 rounded transition-colors"
-        :class="
-          mode === 'raw'
-            ? 'bg-iolite/15 text-iolite'
-            : 'text-warm-500 hover:text-warm-700'
-        "
+        :class="mode === 'raw' ? 'bg-iolite/15 text-iolite' : 'text-warm-500 hover:text-warm-700'"
         @click="mode = 'raw'"
       >
         Raw
@@ -39,22 +33,22 @@
 </template>
 
 <script setup>
-import { computed, ref } from "vue";
-import MarkdownIt from "markdown-it";
+import { computed, ref } from "vue"
+import MarkdownIt from "markdown-it"
 
 const props = defineProps({
   content: { type: String, default: "" },
-});
+})
 
-const mode = ref("preview");
+const mode = ref("preview")
 
 const md = new MarkdownIt({
   html: false,
   linkify: true,
   breaks: true,
-});
+})
 
-const rendered = computed(() => md.render(props.content || ""));
+const rendered = computed(() => md.render(props.content || ""))
 </script>
 
 <style scoped>

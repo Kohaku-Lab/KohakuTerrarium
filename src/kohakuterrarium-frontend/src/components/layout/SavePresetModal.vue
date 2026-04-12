@@ -9,12 +9,7 @@
     <div class="flex flex-col gap-3 text-xs">
       <div>
         <label class="block text-warm-500 mb-1">Name</label>
-        <el-input
-          v-model="name"
-          placeholder="My layout"
-          size="small"
-          autofocus
-        />
+        <el-input v-model="name" placeholder="My layout" size="small" autofocus />
       </div>
       <div>
         <label class="block text-warm-500 mb-1">Shortcut (optional)</label>
@@ -25,12 +20,7 @@
           clearable
           class="w-full"
         >
-          <el-option
-            v-for="s in availableShortcuts"
-            :key="s"
-            :label="s"
-            :value="s"
-          />
+          <el-option v-for="s in availableShortcuts" :key="s" :label="s" :value="s" />
         </el-select>
       </div>
       <div v-if="errorMsg" class="text-coral text-[11px]">{{ errorMsg }}</div>
@@ -38,12 +28,7 @@
 
     <template #footer>
       <el-button size="small" @click="$emit('cancel')">Cancel</el-button>
-      <el-button
-        size="small"
-        type="primary"
-        :disabled="!name.trim()"
-        @click="onSave"
-      >
+      <el-button size="small" type="primary" :disabled="!name.trim()" @click="onSave">
         Save
       </el-button>
     </template>
@@ -51,32 +36,32 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, ref, watch } from "vue"
 
-import { useLayoutStore } from "@/stores/layout";
+import { useLayoutStore } from "@/stores/layout"
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
-});
+})
 
-const emit = defineEmits(["update:modelValue", "saved", "cancel"]);
+const emit = defineEmits(["update:modelValue", "saved", "cancel"])
 
-const layout = useLayoutStore();
+const layout = useLayoutStore()
 
-const open = ref(props.modelValue);
+const open = ref(props.modelValue)
 watch(
   () => props.modelValue,
   (v) => {
-    open.value = v;
+    open.value = v
   },
-);
+)
 watch(open, (v) => {
-  emit("update:modelValue", v);
-});
+  emit("update:modelValue", v)
+})
 
-const name = ref("");
-const shortcut = ref("");
-const errorMsg = ref("");
+const name = ref("")
+const shortcut = ref("")
+const errorMsg = ref("")
 
 // Shortcuts not already taken by existing presets.
 const ALL_SHORTCUTS = [
@@ -89,31 +74,31 @@ const ALL_SHORTCUTS = [
   "Ctrl+7",
   "Ctrl+8",
   "Ctrl+9",
-];
+]
 const availableShortcuts = computed(() => {
   const taken = new Set(
     Object.values(layout.allPresets || {})
       .map((p) => p?.shortcut)
       .filter(Boolean),
-  );
-  return ALL_SHORTCUTS.filter((s) => !taken.has(s));
-});
+  )
+  return ALL_SHORTCUTS.filter((s) => !taken.has(s))
+})
 
 function onSave() {
-  const n = name.value.trim();
-  if (!n) return;
-  const id = n.toLowerCase().replace(/[^a-z0-9-_]+/g, "-");
+  const n = name.value.trim()
+  if (!n) return
+  const id = n.toLowerCase().replace(/[^a-z0-9-_]+/g, "-")
   if (layout.allPresets[id]) {
-    errorMsg.value = `A preset named "${id}" already exists.`;
-    return;
+    errorMsg.value = `A preset named "${id}" already exists.`
+    return
   }
-  const saved = layout.saveAsNewPreset(id, n, shortcut.value || "");
+  const saved = layout.saveAsNewPreset(id, n, shortcut.value || "")
   if (saved) {
-    emit("saved", saved);
-    open.value = false;
-    name.value = "";
-    shortcut.value = "";
-    errorMsg.value = "";
+    emit("saved", saved)
+    open.value = false
+    name.value = ""
+    shortcut.value = ""
+    errorMsg.value = ""
   }
 }
 </script>

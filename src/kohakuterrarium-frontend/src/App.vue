@@ -14,29 +14,29 @@
 </template>
 
 <script setup>
-import CommandPalette from "@/components/chrome/CommandPalette.vue";
-import ToastCenter from "@/components/chrome/ToastCenter.vue";
-import NavRail from "@/components/layout/NavRail.vue";
-import { useArtifactDetector } from "@/composables/useArtifactDetector";
-import { useAutoTriggers } from "@/composables/useAutoTriggers";
-import { useBuiltinCommands } from "@/composables/useBuiltinCommands";
-import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts";
-import { useInstancesStore } from "@/stores/instances";
-import { useThemeStore } from "@/stores/theme";
+import CommandPalette from "@/components/chrome/CommandPalette.vue"
+import ToastCenter from "@/components/chrome/ToastCenter.vue"
+import NavRail from "@/components/layout/NavRail.vue"
+import { useArtifactDetector } from "@/composables/useArtifactDetector"
+import { useAutoTriggers } from "@/composables/useAutoTriggers"
+import { useBuiltinCommands } from "@/composables/useBuiltinCommands"
+import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts"
+import { useInstancesStore } from "@/stores/instances"
+import { useThemeStore } from "@/stores/theme"
 
-const theme = useThemeStore();
-theme.init();
+const theme = useThemeStore()
+theme.init()
 
-const instances = useInstancesStore();
-instances.fetchAll();
+const instances = useInstancesStore()
+instances.fetchAll()
 
 // Global Ctrl+1..6 preset switcher, Ctrl+Shift+L edit mode, Ctrl+K palette.
-useKeyboardShortcuts();
+useKeyboardShortcuts()
 // Register every built-in palette command.
-useBuiltinCommands();
+useBuiltinCommands()
 // Auto-trigger rules: canvas first-artifact notification, processing
 // error → focus debug preset.
-useAutoTriggers();
+useAutoTriggers()
 // Scan assistant messages for canvas artifacts regardless of active preset.
-useArtifactDetector();
+useArtifactDetector()
 </script>

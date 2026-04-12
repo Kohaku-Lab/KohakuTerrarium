@@ -1,4 +1,4 @@
-import { configAPI } from "@/utils/api";
+import { configAPI } from "@/utils/api"
 
 export const useConfigsStore = defineStore("configs", {
   state: () => ({
@@ -12,21 +12,21 @@ export const useConfigsStore = defineStore("configs", {
 
   actions: {
     async fetchAll() {
-      if (this.fetched) return;
-      this.loading = true;
+      if (this.fetched) return
+      this.loading = true
       try {
         const [creatures, terrariums] = await Promise.all([
           configAPI.listCreatures(),
           configAPI.listTerrariums(),
-        ]);
-        this.creatures = creatures;
-        this.terrariums = terrariums;
-        this.fetched = true;
+        ])
+        this.creatures = creatures
+        this.terrariums = terrariums
+        this.fetched = true
       } catch (err) {
-        console.error("Failed to fetch configs:", err);
+        console.error("Failed to fetch configs:", err)
       } finally {
-        this.loading = false;
+        this.loading = false
       }
     },
   },
-});
+})

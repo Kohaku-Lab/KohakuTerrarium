@@ -31,17 +31,11 @@
         class="px-3 py-1 border-b border-warm-200/50 dark:border-warm-700/50"
       >
         <div class="flex items-center gap-2">
-          <span class="text-warm-400 shrink-0">{{
-            formatTs(e.timestamp)
+          <span class="text-warm-400 shrink-0">{{ formatTs(e.timestamp) }}</span>
+          <span class="shrink-0 px-1 rounded" :class="typeClass(e.role || e.type)">{{
+            e.role || e.type || "?"
           }}</span>
-          <span
-            class="shrink-0 px-1 rounded"
-            :class="typeClass(e.role || e.type)"
-            >{{ e.role || e.type || "?" }}</span
-          >
-          <span class="truncate text-warm-700 dark:text-warm-300">{{
-            eventPreview(e)
-          }}</span>
+          <span class="truncate text-warm-700 dark:text-warm-300">{{ eventPreview(e) }}</span>
           <span class="flex-1" />
           <button
             class="text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 shrink-0"
@@ -49,9 +43,7 @@
             @click="expanded = expanded === i ? null : i"
           >
             <div
-              :class="
-                expanded === i ? 'i-carbon-chevron-up' : 'i-carbon-chevron-down'
-              "
+              :class="expanded === i ? 'i-carbon-chevron-up' : 'i-carbon-chevron-down'"
               class="text-[11px]"
             />
           </button>
@@ -70,56 +62,55 @@
 </template>
 
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref } from "vue"
 
-import { useChatStore } from "@/stores/chat";
+import { useChatStore } from "@/stores/chat"
 
 defineProps({
   instance: { type: Object, default: null },
-});
+})
 
-const chat = useChatStore();
+const chat = useChatStore()
 
 // Flatten every tab's messages, newest first.
 const events = computed(() => {
-  const out = [];
+  const out = []
   for (const msgs of Object.values(chat.messagesByTab || {})) {
-    for (const m of msgs) out.push(m);
+    for (const m of msgs) out.push(m)
   }
-  out.sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
-  return out;
-});
+  out.sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)))
+  return out
+})
 
-const query = ref("");
-const typeFilter = ref("");
-const expanded = ref(/** @type {number | null} */ (null));
+const query = ref("")
+const typeFilter = ref("")
+const expanded = ref(/** @type {number | null} */ (null))
 
 const knownTypes = computed(() => {
-  const s = new Set();
+  const s = new Set()
   for (const e of events.value) {
-    s.add(e.role || e.type || "");
+    s.add(e.role || e.type || "")
   }
-  return [...s].filter(Boolean).sort();
-});
+  return [...s].filter(Boolean).sort()
+})
 
 const visible = computed(() => {
-  const q = query.value.trim().toLowerCase();
+  const q = query.value.trim().toLowerCase()
   return events.value.filter((e) => {
-    if (typeFilter.value && (e.role || e.type) !== typeFilter.value)
-      return false;
-    if (!q) return true;
-    const s = JSON.stringify(e).toLowerCase();
-    return s.includes(q);
-  });
-});
+    if (typeFilter.value && (e.role || e.type) !== typeFilter.value) return false
+    if (!q) return true
+    const s = JSON.stringify(e).toLowerCase()
+    return s.includes(q)
+  })
+})
 
 function formatTs(ts) {
-  if (!ts) return "—";
+  if (!ts) return "—"
   try {
-    const d = new Date(ts);
-    return d.toLocaleTimeString();
+    const d = new Date(ts)
+    return d.toLocaleTimeString()
   } catch {
-    return String(ts).slice(-8);
+    return String(ts).slice(-8)
   }
 }
 
@@ -131,15 +122,15 @@ function typeClass(t) {
       compact: "bg-amber/10 text-amber",
       tool: "bg-warm-200 dark:bg-warm-800",
     }[t] || "bg-warm-100 dark:bg-warm-800 text-warm-500"
-  );
+  )
 }
 
 function eventPreview(e) {
-  if (typeof e.content === "string") return e.content.slice(0, 200);
+  if (typeof e.content === "string") return e.content.slice(0, 200)
   if (Array.isArray(e.tool_calls) && e.tool_calls.length) {
-    return e.tool_calls.map((tc) => tc.name).join(", ");
+    return e.tool_calls.map((tc) => tc.name).join(", ")
   }
-  if (e.summary) return e.summary.slice(0, 200);
-  return "";
+  if (e.summary) return e.summary.slice(0, 200)
+  return ""
 }
 </script>

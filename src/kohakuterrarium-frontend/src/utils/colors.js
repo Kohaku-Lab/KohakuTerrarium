@@ -11,21 +11,21 @@ export const GEM = {
   amber: { light: "#F5E6C8", main: "#D4920A", shadow: "#8B5E00" },
   coral: { light: "#F5D5D5", main: "#D46B6B", shadow: "#8B3A3A" },
   sage: { light: "#D5E8DA", main: "#5A9E6F", shadow: "#3A6B48" },
-};
+}
 
 /** Map creature status to gem color */
 export function statusColor(status) {
   switch (status) {
     case "running":
     case "processing":
-      return GEM.aquamarine;
+      return GEM.aquamarine
     case "idle":
     case "done":
-      return GEM.amber;
+      return GEM.amber
     case "error":
-      return GEM.coral;
+      return GEM.coral
     default:
-      return GEM.amber;
+      return GEM.amber
   }
 }
 
@@ -33,10 +33,10 @@ export function statusColor(status) {
 export function channelColor(type) {
   switch (type) {
     case "queue":
-      return GEM.aquamarine;
+      return GEM.aquamarine
     case "broadcast":
-      return GEM.taaffeite;
+      return GEM.taaffeite
     default:
-      return GEM.aquamarine;
+      return GEM.aquamarine
   }
 }

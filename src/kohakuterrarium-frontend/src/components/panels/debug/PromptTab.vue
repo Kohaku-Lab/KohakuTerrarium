@@ -37,9 +37,7 @@
     </div>
 
     <div class="flex-1 overflow-auto p-3 text-[11px] font-mono">
-      <div v-if="loading" class="text-warm-400 text-center py-6">
-        Loading...
-      </div>
+      <div v-if="loading" class="text-warm-400 text-center py-6">Loading...</div>
       <div v-else-if="error" class="text-coral">{{ error }}</div>
       <template v-else-if="showDiff && previousText">
         <div
@@ -48,83 +46,79 @@
           class="whitespace-pre-wrap break-words leading-tight"
           :class="diffClass(line.kind)"
         >
-          <span class="inline-block w-3 opacity-60">{{
-            diffSymbol(line.kind)
-          }}</span>
+          <span class="inline-block w-3 opacity-60">{{ diffSymbol(line.kind) }}</span>
           {{ line.text }}
         </div>
       </template>
-      <pre
-        v-else
-        class="whitespace-pre-wrap break-words text-warm-700 dark:text-warm-300"
-        >{{ promptText }}</pre
-      >
+      <pre v-else class="whitespace-pre-wrap break-words text-warm-700 dark:text-warm-300">{{
+        promptText
+      }}</pre>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue"
 
-import { agentAPI } from "@/utils/api";
+import { agentAPI } from "@/utils/api"
 
 const props = defineProps({
   instance: { type: Object, default: null },
-});
+})
 
-const promptText = ref("");
-const previousText = ref("");
-const loading = ref(false);
-const error = ref("");
-const showDiff = ref(false);
-const lastLoaded = ref("");
+const promptText = ref("")
+const previousText = ref("")
+const loading = ref(false)
+const error = ref("")
+const showDiff = ref(false)
+const lastLoaded = ref("")
 
 async function load() {
-  const id = props.instance?.id;
-  if (!id) return;
-  loading.value = true;
-  error.value = "";
+  const id = props.instance?.id
+  if (!id) return
+  loading.value = true
+  error.value = ""
   try {
-    const data = await agentAPI.getSystemPrompt(id);
-    if (promptText.value) previousText.value = promptText.value;
-    promptText.value = data?.text || "";
-    lastLoaded.value = new Date().toLocaleTimeString();
+    const data = await agentAPI.getSystemPrompt(id)
+    if (promptText.value) previousText.value = promptText.value
+    promptText.value = data?.text || ""
+    lastLoaded.value = new Date().toLocaleTimeString()
   } catch (err) {
-    error.value = err?.response?.data?.detail || err?.message || String(err);
+    error.value = err?.response?.data?.detail || err?.message || String(err)
   } finally {
-    loading.value = false;
+    loading.value = false
   }
 }
 
 function copy() {
-  if (!promptText.value) return;
+  if (!promptText.value) return
   if (typeof navigator !== "undefined" && navigator.clipboard) {
-    navigator.clipboard.writeText(promptText.value).catch(() => {});
+    navigator.clipboard.writeText(promptText.value).catch(() => {})
   }
 }
 
 // Minimal line-based diff. Not a proper longest-common-subseq but
 // good enough to visualize small changes in the system prompt.
 const diffLines = computed(() => {
-  if (!previousText.value || !promptText.value) return [];
-  const a = previousText.value.split("\n");
-  const b = promptText.value.split("\n");
-  const setA = new Set(a);
-  const setB = new Set(b);
-  const out = [];
-  const max = Math.max(a.length, b.length);
+  if (!previousText.value || !promptText.value) return []
+  const a = previousText.value.split("\n")
+  const b = promptText.value.split("\n")
+  const setA = new Set(a)
+  const setB = new Set(b)
+  const out = []
+  const max = Math.max(a.length, b.length)
   for (let i = 0; i < max; i++) {
-    const la = a[i];
-    const lb = b[i];
+    const la = a[i]
+    const lb = b[i]
     if (la === lb) {
-      if (la !== undefined) out.push({ kind: "same", text: la });
-      continue;
+      if (la !== undefined) out.push({ kind: "same", text: la })
+      continue
     }
-    if (la !== undefined && !setB.has(la)) out.push({ kind: "del", text: la });
-    if (lb !== undefined && !setA.has(lb)) out.push({ kind: "add", text: lb });
+    if (la !== undefined && !setB.has(la)) out.push({ kind: "del", text: la })
+    if (lb !== undefined && !setA.has(lb)) out.push({ kind: "add", text: lb })
   }
-  return out;
-});
+  return out
+})
 
 function diffClass(kind) {
   return (
@@ -133,13 +127,13 @@ function diffClass(kind) {
       del: "bg-coral/10 text-coral",
       same: "text-warm-600 dark:text-warm-400",
     }[kind] || ""
-  );
+  )
 }
 
 function diffSymbol(kind) {
-  return { add: "+", del: "-", same: " " }[kind] || " ";
+  return { add: "+", del: "-", same: " " }[kind] || " "
 }
 
-onMounted(load);
-watch(() => props.instance?.id, load);
+onMounted(load)
+watch(() => props.instance?.id, load)
 </script>

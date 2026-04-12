@@ -14,9 +14,7 @@
               @click="onOpenTab(c.name)"
             >
               <StatusDot :status="c.status" />
-              <span class="font-medium text-warm-700 dark:text-warm-300">{{
-                c.name
-              }}</span>
+              <span class="font-medium text-warm-700 dark:text-warm-300">{{ c.name }}</span>
               <span class="flex-1" />
               <span
                 class="text-[10px] px-1.5 py-0.5 rounded"
@@ -43,13 +41,9 @@
             >
               <span
                 class="w-2 h-2 rounded-sm shrink-0"
-                :class="
-                  ch.type === 'broadcast' ? 'bg-taaffeite' : 'bg-aquamarine'
-                "
+                :class="ch.type === 'broadcast' ? 'bg-taaffeite' : 'bg-aquamarine'"
               />
-              <span class="font-medium text-warm-700 dark:text-warm-300">{{
-                ch.name
-              }}</span>
+              <span class="font-medium text-warm-700 dark:text-warm-300">{{ ch.name }}</span>
               <span class="flex-1" />
               <GemBadge
                 v-if="ch.message_count"
@@ -70,9 +64,7 @@
         <div class="rounded-lg border border-warm-200 dark:border-warm-700 p-4">
           <div class="flex items-center gap-2 mb-3">
             <StatusDot :status="instance?.status" />
-            <span
-              class="font-semibold text-warm-700 dark:text-warm-300 text-sm"
-            >
+            <span class="font-semibold text-warm-700 dark:text-warm-300 text-sm">
               {{ instance?.config_name }}
             </span>
           </div>
@@ -85,9 +77,7 @@
             </div>
             <div class="flex items-center gap-2">
               <span class="text-warm-400 w-12">Model</span>
-              <span
-                class="text-warm-600 dark:text-warm-400 font-mono text-[11px]"
-              >
+              <span class="text-warm-600 dark:text-warm-400 font-mono text-[11px]">
                 {{ chat.sessionInfo.model || "default" }}
               </span>
             </div>
@@ -118,18 +108,12 @@
           <div class="flex items-center gap-2">
             <span class="text-warm-400 w-16">Provider</span>
             <span class="text-warm-600 dark:text-warm-400 text-[11px]">
-              {{
-                currentModelProfile?.login_provider ||
-                instance?.provider ||
-                "--"
-              }}
+              {{ currentModelProfile?.login_provider || instance?.provider || "--" }}
             </span>
           </div>
           <div class="flex items-center gap-2">
             <span class="text-warm-400 w-16">Session</span>
-            <span
-              class="text-warm-600 dark:text-warm-400 font-mono text-[10px] truncate max-w-32"
-            >
+            <span class="text-warm-600 dark:text-warm-400 font-mono text-[10px] truncate max-w-32">
               {{ chat.sessionInfo.sessionId || instance?.session_id || "--" }}
             </span>
           </div>
@@ -171,8 +155,9 @@
                       ? 'text-amber'
                       : 'text-warm-500'
                 "
-                >{{ formatTokens(totalUsage.lastPrompt) }} /
-                {{ formatTokens(maxContext) }} ({{ contextPct }}%)</span
+                >{{ formatTokens(totalUsage.lastPrompt) }} / {{ formatTokens(maxContext) }} ({{
+                  contextPct
+                }}%)</span
               >
             </div>
             <div
@@ -182,11 +167,7 @@
               <div
                 class="h-full rounded-full transition-all duration-300"
                 :class="
-                  contextPct >= 80
-                    ? 'bg-coral'
-                    : contextPct >= 60
-                      ? 'bg-amber'
-                      : 'bg-aquamarine'
+                  contextPct >= 80 ? 'bg-coral' : contextPct >= 60 ? 'bg-amber' : 'bg-aquamarine'
                 "
                 :style="{ width: Math.min(contextPct, 100) + '%' }"
               />
@@ -217,12 +198,8 @@
             :key="jobId"
             class="flex items-center gap-2 px-2 py-1.5 rounded-md bg-amber/10 group"
           >
-            <span
-              class="w-1.5 h-1.5 rounded-full bg-amber kohaku-pulse shrink-0"
-            />
-            <span
-              class="font-mono text-[11px] text-amber-shadow dark:text-amber-light truncate"
-            >
+            <span class="w-1.5 h-1.5 rounded-full bg-amber kohaku-pulse shrink-0" />
+            <span class="font-mono text-[11px] text-amber-shadow dark:text-amber-light truncate">
               {{ job.name }}
             </span>
             <span class="flex-1" />
@@ -247,166 +224,148 @@
 </template>
 
 <script setup>
-import StatusDot from "@/components/common/StatusDot.vue";
-import GemBadge from "@/components/common/GemBadge.vue";
-import { useChatStore } from "@/stores/chat";
-import { useStatusStore } from "@/stores/status";
-import { configAPI, agentAPI, terrariumAPI } from "@/utils/api";
+import StatusDot from "@/components/common/StatusDot.vue"
+import GemBadge from "@/components/common/GemBadge.vue"
+import { useChatStore } from "@/stores/chat"
+import { useStatusStore } from "@/stores/status"
+import { configAPI, agentAPI, terrariumAPI } from "@/utils/api"
 
 const props = defineProps({
   instance: { type: Object, default: null },
   onOpenTab: { type: Function, default: () => {} },
-});
+})
 
-const chat = useChatStore();
-const status = useStatusStore();
+const chat = useChatStore()
+const status = useStatusStore()
 
-const selectedModel = ref("");
-const modelsLoading = ref(false);
-const modelSwitchError = ref("");
+const selectedModel = ref("")
+const modelsLoading = ref(false)
+const modelSwitchError = ref("")
 
 /** @type {import('vue').Ref<{id: string, name: string}[]>} */
-const availableModels = ref([]);
+const availableModels = ref([])
 
 // Model config dialog state
-const configDialogVisible = ref(false);
-const configJson = ref("");
-const configJsonError = ref("");
+const configDialogVisible = ref(false)
+const configJson = ref("")
+const configJsonError = ref("")
 
 onMounted(() => {
-  loadModels();
-});
+  loadModels()
+})
 
 // Init model from instance data (available immediately) or session info (from WS)
 watch(
   [() => props.instance?.model, () => chat.sessionInfo.model],
   ([instanceModel, sessionModel]) => {
-    const best = sessionModel || instanceModel || "";
+    const best = sessionModel || instanceModel || ""
     if (best && best !== selectedModel.value) {
-      selectedModel.value = best;
+      selectedModel.value = best
     }
   },
   { immediate: true },
-);
+)
 
 const totalUsage = computed(() => {
-  let prompt = 0;
-  let completion = 0;
-  let cached = 0;
-  let lastPrompt = 0;
+  let prompt = 0
+  let completion = 0
+  let cached = 0
+  let lastPrompt = 0
   for (const usage of Object.values(chat.tokenUsage)) {
-    prompt += usage.prompt || 0;
-    completion += usage.completion || 0;
-    cached += usage.cached || 0;
+    prompt += usage.prompt || 0
+    completion += usage.completion || 0
+    cached += usage.cached || 0
     // Context = last call's prompt_tokens (not accumulated sum)
-    if ((usage.lastPrompt || 0) > lastPrompt)
-      lastPrompt = usage.lastPrompt || 0;
+    if ((usage.lastPrompt || 0) > lastPrompt) lastPrompt = usage.lastPrompt || 0
   }
-  return { prompt, completion, cached, lastPrompt };
-});
+  return { prompt, completion, cached, lastPrompt }
+})
 
-const maxContext = computed(
-  () => chat.sessionInfo.maxContext || props.instance?.max_context || 0,
-);
+const maxContext = computed(() => chat.sessionInfo.maxContext || props.instance?.max_context || 0)
 
 const contextPct = computed(() => {
-  if (!maxContext.value || !totalUsage.value.lastPrompt) return 0;
-  return Math.round((totalUsage.value.lastPrompt / maxContext.value) * 100);
-});
+  if (!maxContext.value || !totalUsage.value.lastPrompt) return 0
+  return Math.round((totalUsage.value.lastPrompt / maxContext.value) * 100)
+})
 
 const compactThreshold = computed(
-  () =>
-    chat.sessionInfo.compactThreshold || props.instance?.compact_threshold || 0,
-);
+  () => chat.sessionInfo.compactThreshold || props.instance?.compact_threshold || 0,
+)
 
 const compactThresholdPct = computed(() => {
-  if (!maxContext.value || !compactThreshold.value) return 0;
-  return Math.min(
-    100,
-    Math.round((compactThreshold.value / maxContext.value) * 100),
-  );
-});
+  if (!maxContext.value || !compactThreshold.value) return 0
+  return Math.min(100, Math.round((compactThreshold.value / maxContext.value) * 100))
+})
 
 const currentModelProfile = computed(() => {
-  const modelName =
-    selectedModel.value || chat.sessionInfo.model || instance?.model || "";
-  return availableModels.value.find((m) => m.name === modelName) || null;
-});
+  const modelName = selectedModel.value || chat.sessionInfo.model || instance?.model || ""
+  return availableModels.value.find((m) => m.name === modelName) || null
+})
 
 function formatTokens(n) {
-  if (!n) return "0";
-  if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
-  if (n >= 1000) return (n / 1000).toFixed(1) + "K";
-  return String(n);
+  if (!n) return "0"
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + "M"
+  if (n >= 1000) return (n / 1000).toFixed(1) + "K"
+  return String(n)
 }
 
 function formatElapsed(startedAt) {
-  const elapsed = Math.floor((Date.now() - startedAt) / 1000);
-  if (elapsed >= 60)
-    return Math.floor(elapsed / 60) + "m " + (elapsed % 60) + "s";
-  return elapsed + "s";
+  const elapsed = Math.floor((Date.now() - startedAt) / 1000)
+  if (elapsed >= 60) return Math.floor(elapsed / 60) + "m " + (elapsed % 60) + "s"
+  return elapsed + "s"
 }
 
 async function stopTask(jobId, jobName) {
   try {
-    const tab = chat.activeTab;
+    const tab = chat.activeTab
     if (chat._instanceType === "terrarium") {
-      await terrariumAPI.stopCreatureTask(
-        chat._instanceId,
-        tab || "root",
-        jobId,
-      );
+      await terrariumAPI.stopCreatureTask(chat._instanceId, tab || "root", jobId)
     } else {
-      await agentAPI.stopTask(chat._instanceId, jobId);
+      await agentAPI.stopTask(chat._instanceId, jobId)
     }
     // Mark as cancelling for visual feedback — backend event will remove it
-    const job = chat.runningJobs[jobId];
-    if (job) job.cancelling = true;
+    const job = chat.runningJobs[jobId]
+    if (job) job.cancelling = true
   } catch (err) {
-    console.error("Failed to stop task:", err);
+    console.error("Failed to stop task:", err)
   }
 }
 
 async function loadModels() {
-  modelsLoading.value = true;
+  modelsLoading.value = true
   try {
-    const models = await configAPI.getModels();
-    availableModels.value = (models || []).filter((m) => m.available !== false);
+    const models = await configAPI.getModels()
+    availableModels.value = (models || []).filter((m) => m.available !== false)
   } catch {
-    availableModels.value = [];
+    availableModels.value = []
   } finally {
-    modelsLoading.value = false;
+    modelsLoading.value = false
   }
 }
 
 async function handleModelSwitch(modelId) {
-  if (!props.instance?.id) return;
-  modelSwitchError.value = "";
+  if (!props.instance?.id) return
+  modelSwitchError.value = ""
   try {
     if (props.instance.type === "terrarium") {
-      const target = chat.activeTab || "root";
-      await terrariumAPI.switchCreatureModel(
-        props.instance.id,
-        target,
-        modelId,
-      );
+      const target = chat.activeTab || "root"
+      await terrariumAPI.switchCreatureModel(props.instance.id, target, modelId)
     } else {
-      await agentAPI.switchModel(props.instance.id, modelId);
+      await agentAPI.switchModel(props.instance.id, modelId)
     }
     // Backend sends session_info event via WS which updates chat.sessionInfo
   } catch (err) {
-    modelSwitchError.value =
-      err.response?.data?.detail || "Failed to switch model";
-    selectedModel.value = chat.sessionInfo.model || "";
+    modelSwitchError.value = err.response?.data?.detail || "Failed to switch model"
+    selectedModel.value = chat.sessionInfo.model || ""
   }
 }
 
 /** Open the model config dialog with the selected model's full profile */
 function openModelConfig() {
-  configJsonError.value = "";
+  configJsonError.value = ""
   // Find the full profile for the currently selected model
-  const modelName = selectedModel.value || chat.sessionInfo.model || "";
-  const fullProfile = availableModels.value.find((m) => m.name === modelName);
+  const modelName = selectedModel.value || chat.sessionInfo.model || ""
+  const fullProfile = availableModels.value.find((m) => m.name === modelName)
   const profile = fullProfile
     ? {
         model: fullProfile.model,
@@ -418,19 +377,19 @@ function openModelConfig() {
         extra_body: fullProfile.extra_body || {},
         base_url: fullProfile.base_url || "",
       }
-    : { model: modelName, extra_body: {} };
-  configJson.value = JSON.stringify(profile, null, 2);
-  configDialogVisible.value = true;
+    : { model: modelName, extra_body: {} }
+  configJson.value = JSON.stringify(profile, null, 2)
+  configDialogVisible.value = true
 }
 
 /** Validate and save model config (currently logs to console) */
 function saveModelConfig() {
-  configJsonError.value = "";
+  configJsonError.value = ""
   try {
-    const parsed = JSON.parse(configJson.value);
-    configDialogVisible.value = false;
+    const parsed = JSON.parse(configJson.value)
+    configDialogVisible.value = false
   } catch (e) {
-    configJsonError.value = "Invalid JSON: " + e.message;
+    configJsonError.value = "Invalid JSON: " + e.message
   }
 }
 </script>
@@ -475,8 +434,7 @@ function saveModelConfig() {
 }
 
 :deep(.config-textarea .el-textarea__inner) {
-  font-family:
-    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-size: 12px;
   line-height: 1.5;
   resize: vertical;

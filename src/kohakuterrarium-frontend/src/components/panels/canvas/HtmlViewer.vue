@@ -6,9 +6,7 @@
       <button
         class="px-2 py-0.5 rounded transition-colors"
         :class="
-          mode === 'render'
-            ? 'bg-iolite/15 text-iolite'
-            : 'text-warm-500 hover:text-warm-700'
+          mode === 'render' ? 'bg-iolite/15 text-iolite' : 'text-warm-500 hover:text-warm-700'
         "
         @click="mode = 'render'"
       >
@@ -17,9 +15,7 @@
       <button
         class="px-2 py-0.5 rounded transition-colors"
         :class="
-          mode === 'source'
-            ? 'bg-iolite/15 text-iolite'
-            : 'text-warm-500 hover:text-warm-700'
+          mode === 'source' ? 'bg-iolite/15 text-iolite' : 'text-warm-500 hover:text-warm-700'
         "
         @click="mode = 'source'"
       >
@@ -48,11 +44,11 @@
 </template>
 
 <script setup>
-import { ref } from "vue";
+import { ref } from "vue"
 
 defineProps({
   content: { type: String, default: "" },
-});
+})
 
-const mode = ref("render");
+const mode = ref("render")
 </script>

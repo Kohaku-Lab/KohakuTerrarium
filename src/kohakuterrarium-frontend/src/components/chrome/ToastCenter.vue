@@ -1,7 +1,5 @@
 <template>
-  <div
-    class="fixed bottom-4 right-4 flex flex-col gap-2 z-[9999] pointer-events-none"
-  >
+  <div class="fixed bottom-4 right-4 flex flex-col gap-2 z-[9999] pointer-events-none">
     <div
       v-for="t in notifications.toasts.slice(-6)"
       :key="t.id"
@@ -10,16 +8,10 @@
     >
       <div :class="levelIcon(t.level)" class="text-base shrink-0 mt-0.5" />
       <div class="flex-1 min-w-0">
-        <div
-          v-if="t.title"
-          class="font-medium text-warm-700 dark:text-warm-300 truncate"
-        >
+        <div v-if="t.title" class="font-medium text-warm-700 dark:text-warm-300 truncate">
           {{ t.title }}
         </div>
-        <div
-          v-if="t.body"
-          class="text-warm-600 dark:text-warm-400 whitespace-pre-wrap break-words"
-        >
+        <div v-if="t.body" class="text-warm-600 dark:text-warm-400 whitespace-pre-wrap break-words">
           {{ t.body }}
         </div>
       </div>
@@ -35,9 +27,9 @@
 </template>
 
 <script setup>
-import { useNotificationsStore } from "@/stores/notifications";
+import { useNotificationsStore } from "@/stores/notifications"
 
-const notifications = useNotificationsStore();
+const notifications = useNotificationsStore()
 
 function levelBorder(l) {
   return (
@@ -47,7 +39,7 @@ function levelBorder(l) {
       warn: "border-amber/40",
       error: "border-coral/40",
     }[l] || "border-warm-200 dark:border-warm-700"
-  );
+  )
 }
 
 function levelIcon(l) {
@@ -58,6 +50,6 @@ function levelIcon(l) {
       warn: "i-carbon-warning-alt text-amber",
       error: "i-carbon-error text-coral",
     }[l] || "i-carbon-information text-warm-400"
-  );
+  )
 }
 </script>

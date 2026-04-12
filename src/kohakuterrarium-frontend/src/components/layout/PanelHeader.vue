@@ -35,10 +35,7 @@
             <div class="i-carbon-close mr-1" />
             Close
           </el-dropdown-item>
-          <el-dropdown-item
-            command="pop-out"
-            :disabled="!panel?.supportsDetach"
-          >
+          <el-dropdown-item command="pop-out" :disabled="!panel?.supportsDetach">
             <div class="i-carbon-launch mr-1" />
             Pop out
           </el-dropdown-item>
@@ -49,22 +46,22 @@
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed } from "vue"
 
-import { useLayoutStore } from "@/stores/layout";
+import { useLayoutStore } from "@/stores/layout"
 
 const props = defineProps({
   panelId: { type: String, required: true },
   zoneId: { type: String, required: true },
   instanceId: { type: String, default: "" },
-});
+})
 
-const emit = defineEmits(["replace", "close", "pop-out"]);
+const emit = defineEmits(["replace", "close", "pop-out"])
 
-const layout = useLayoutStore();
+const layout = useLayoutStore()
 
-const panel = computed(() => layout.getPanel(props.panelId));
-const label = computed(() => panel.value?.label || props.panelId);
+const panel = computed(() => layout.getPanel(props.panelId))
+const label = computed(() => panel.value?.label || props.panelId)
 const icon = computed(() => {
   // Panel metadata doesn't yet carry icons — pick a sensible default.
   const map = {
@@ -78,25 +75,25 @@ const icon = computed(() => {
     "monaco-editor": "i-carbon-code",
     "editor-status": "i-carbon-information",
     "status-bar": "i-carbon-information-square",
-  };
-  return map[props.panelId] || "i-carbon-panel-expansion";
-});
+  }
+  return map[props.panelId] || "i-carbon-panel-expansion"
+})
 
 const misplaced = computed(() => {
-  const p = panel.value;
-  if (!p || !p.preferredZones || p.preferredZones.length === 0) return false;
-  return !p.preferredZones.includes(props.zoneId);
-});
+  const p = panel.value
+  if (!p || !p.preferredZones || p.preferredZones.length === 0) return false
+  return !p.preferredZones.includes(props.zoneId)
+})
 
 const preferredZoneLabel = computed(() => {
-  const p = panel.value;
-  if (!p || !p.preferredZones?.length) return "";
-  return p.preferredZones[0];
-});
+  const p = panel.value
+  if (!p || !p.preferredZones?.length) return ""
+  return p.preferredZones[0]
+})
 
 function onCommand(cmd) {
-  if (cmd === "replace") emit("replace");
-  else if (cmd === "close") emit("close");
-  else if (cmd === "pop-out") emit("pop-out");
+  if (cmd === "replace") emit("replace")
+  else if (cmd === "close") emit("close")
+  else if (cmd === "pop-out") emit("pop-out")
 }
 </script>

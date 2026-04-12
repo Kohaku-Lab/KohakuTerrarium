@@ -8,11 +8,11 @@
 </template>
 
 <script setup>
-import Zone from "./Zone.vue";
+import Zone from "./Zone.vue"
 
 defineProps({
   zoneId: { type: String, default: "drawer" },
   instanceId: { type: String, default: null },
   showEmpty: { type: Boolean, default: false },
-});
+})
 </script>

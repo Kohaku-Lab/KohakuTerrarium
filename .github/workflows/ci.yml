@@ -53,4 +53,40 @@ jobs:
         with:
           node-version: "20"
       - run: npm ci
+      - run: npm run format:check
       - run: npm run build
+      - name: Verify frontend build output
+        working-directory: .
+        run: test -f src/kohakuterrarium/web_dist/index.html
+
+  package-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Build frontend
+        working-directory: src/kohakuterrarium-frontend
+        run: |
+          npm ci
+          npm run build
+      - name: Verify frontend build output
+        run: test -f src/kohakuterrarium/web_dist/index.html
+      - name: Build wheel
+        run: |
+          pip install build
+          python -m build --wheel
+      - name: Verify built wheel install
+        run: |
+          python -m venv .venv-wheel-test
+          source .venv-wheel-test/bin/activate
+          pip install --upgrade pip
+          pip install dist/*.whl
+          kt --help
+          kt app --help

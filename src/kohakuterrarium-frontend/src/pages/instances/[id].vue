@@ -1,9 +1,6 @@
 <template>
   <div v-if="instance" class="h-full overflow-hidden">
-    <WorkspaceShell
-      :instance-id="route.params.id"
-      @stop="showStopConfirm = true"
-    />
+    <WorkspaceShell :instance-id="route.params.id" @stop="showStopConfirm = true" />
 
     <!-- Stop confirmation dialog (triggered from the status bar or nav) -->
     <el-dialog
@@ -17,14 +14,8 @@
         >? This will terminate the {{ instance.type }} and all its processes.
       </p>
       <template #footer>
-        <el-button size="small" @click="showStopConfirm = false"
-          >Cancel</el-button
-        >
-        <el-button
-          size="small"
-          type="danger"
-          :loading="stopping"
-          @click="confirmStop"
+        <el-button size="small" @click="showStopConfirm = false">Cancel</el-button>
+        <el-button size="small" type="danger" :loading="stopping" @click="confirmStop"
           >Stop</el-button
         >
       </template>
@@ -33,24 +24,24 @@
 </template>
 
 <script setup>
-import { computed, onMounted, provide, ref, watch } from "vue";
+import { computed, onMounted, provide, ref, watch } from "vue"
 
-import WorkspaceShell from "@/components/layout/WorkspaceShell.vue";
-import { useChatStore } from "@/stores/chat";
-import { useEditorStore } from "@/stores/editor";
-import { useInstancesStore } from "@/stores/instances";
-import { useLayoutStore } from "@/stores/layout";
+import WorkspaceShell from "@/components/layout/WorkspaceShell.vue"
+import { useChatStore } from "@/stores/chat"
+import { useEditorStore } from "@/stores/editor"
+import { useInstancesStore } from "@/stores/instances"
+import { useLayoutStore } from "@/stores/layout"
 
-const route = useRoute();
-const router = useRouter();
-const instances = useInstancesStore();
-const chat = useChatStore();
-const editor = useEditorStore();
-const layout = useLayoutStore();
+const route = useRoute()
+const router = useRouter()
+const instances = useInstancesStore()
+const chat = useChatStore()
+const editor = useEditorStore()
+const layout = useLayoutStore()
 
-const instance = computed(() => instances.current);
-const showStopConfirm = ref(false);
-const stopping = ref(false);
+const instance = computed(() => instances.current)
+const showStopConfirm = ref(false)
+const stopping = ref(false)
 
 // Runtime prop map for panels mounted inside the shell's zones.
 const panelProps = computed(() => ({
@@ -73,70 +64,69 @@ const panelProps = computed(() => ({
   settings: { instance: instance.value },
   debug: { instance: instance.value },
   terminal: { instance: instance.value },
-}));
-provide("panelProps", panelProps);
+}))
+provide("panelProps", panelProps)
 
 onMounted(async () => {
-  await loadInstance();
-  applyPresetForInstance();
-});
+  await loadInstance()
+  applyPresetForInstance()
+})
 
 watch(
   () => route.params.id,
   async () => {
-    await loadInstance();
-    applyPresetForInstance();
+    await loadInstance()
+    applyPresetForInstance()
   },
-);
+)
 
 async function loadInstance() {
-  const id = route.params.id;
-  if (!id) return;
-  await instances.fetchOne(id);
+  const id = route.params.id
+  if (!id) return
+  await instances.fetchOne(id)
   if (instance.value) {
-    chat.initForInstance(instance.value);
+    chat.initForInstance(instance.value)
   }
 }
 
 function applyPresetForInstance() {
-  const id = route.params.id;
-  if (!id) return;
-  layout.loadInstanceOverrides(id);
-  const remembered = layout.getInstancePresetId(id);
+  const id = route.params.id
+  if (!id) return
+  layout.loadInstanceOverrides(id)
+  const remembered = layout.getInstancePresetId(id)
   if (remembered && layout.allPresets[remembered]) {
-    layout.switchPreset(remembered);
-    return;
+    layout.switchPreset(remembered)
+    return
   }
-  const fallback =
-    instance.value?.type === "terrarium" ? "multi-creature" : "chat-focus";
-  layout.switchPreset(fallback);
+  const fallback = instance.value?.type === "terrarium" ? "multi-creature" : "chat-focus"
+  layout.switchPreset(fallback)
 }
 
 // Persist preset changes against this instance id.
 watch(
   () => layout.activePresetId,
   (id) => {
-    const instId = route.params.id;
+    const instId = route.params.id
     if (id && instId && !id.startsWith("legacy-")) {
-      layout.rememberInstancePreset(instId, id);
+      layout.rememberInstancePreset(instId, id)
     }
   },
-);
+)
 
 function handleOpenTab(tabKey) {
-  chat.openTab(tabKey);
+  chat.openTab(tabKey)
 }
 
 async function confirmStop() {
-  stopping.value = true;
+  stopping.value = true
   try {
-    await instances.stop(route.params.id);
-    showStopConfirm.value = false;
-    router.push("/");
+    await instances.stop(route.params.id)
+    showStopConfirm.value = false
+    router.push("/")
   } catch (err) {
-    console.error("Stop failed:", err);
+    console.error("Stop failed:", err)
   } finally {
-    stopping.value = false;
+    stopping.value = false
   }
 }
 </script>

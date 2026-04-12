@@ -58,38 +58,23 @@
         class="flex items-center gap-2 px-2 py-2 -mb-px text-[10px] text-warm-400 font-mono"
       >
         <template v-if="chat.sessionInfo.model">
-          <span class="text-warm-500 dark:text-warm-400">{{
-            chat.sessionInfo.model
-          }}</span>
+          <span class="text-warm-500 dark:text-warm-400">{{ chat.sessionInfo.model }}</span>
           <span class="text-warm-300 dark:text-warm-600">|</span>
         </template>
         <template v-if="activeTokens > 0">
           <span class="i-carbon-meter text-amber" />
-          <span title="Cumulative input tokens"
-            >In: {{ formatTokens(activeUsage.prompt) }}</span
-          >
-          <span
-            v-if="activeUsage.cached > 0"
-            class="text-aquamarine"
-            title="Cached input tokens"
+          <span title="Cumulative input tokens">In: {{ formatTokens(activeUsage.prompt) }}</span>
+          <span v-if="activeUsage.cached > 0" class="text-aquamarine" title="Cached input tokens"
             >(cache {{ formatTokens(activeUsage.cached) }})</span
           >
           <span title="Cumulative output tokens"
             >Out: {{ formatTokens(activeUsage.completion) }}</span
           >
         </template>
-        <template
-          v-if="chat.sessionInfo.compactThreshold > 0 && activeUsage.prompt > 0"
-        >
+        <template v-if="chat.sessionInfo.compactThreshold > 0 && activeUsage.prompt > 0">
           <span class="text-warm-300 dark:text-warm-600">|</span>
           <span
-            :class="
-              contextPct >= 80
-                ? 'text-coral'
-                : contextPct >= 60
-                  ? 'text-amber'
-                  : ''
-            "
+            :class="contextPct >= 80 ? 'text-coral' : contextPct >= 60 ? 'text-amber' : ''"
             :title="`Context: ${formatTokens(activeUsage.lastPrompt || 0)} / ${formatTokens(chat.sessionInfo.compactThreshold)}`"
             >Ctx: {{ contextPct }}%</span
           >
@@ -105,29 +90,19 @@
       class="flex-1 mx-4 mb-4 bg-white dark:bg-warm-900 rounded-b-xl rounded-tr-xl border border-warm-200 dark:border-warm-700 border-t-0 overflow-hidden flex flex-col shadow-sm"
     >
       <!-- Decorative top accent: subtle gem gradient -->
-      <div
-        class="h-0.5 w-full bg-gradient-to-r from-iolite/30 via-taaffeite/20 to-aquamarine/30"
-      />
+      <div class="h-0.5 w-full bg-gradient-to-r from-iolite/30 via-taaffeite/20 to-aquamarine/30" />
 
       <!-- Messages -->
-      <div
-        ref="messagesEl"
-        class="flex-1 overflow-y-auto px-5 py-4"
-        @scroll="onMessagesScroll"
-      >
+      <div ref="messagesEl" class="flex-1 overflow-y-auto px-5 py-4" @scroll="onMessagesScroll">
         <div class="flex flex-col gap-3">
           <template v-if="chat.currentMessages.length === 0">
             <div class="text-center py-16">
               <div
                 class="w-12 h-12 rounded-2xl bg-gradient-to-br from-iolite/10 to-amber/10 dark:from-iolite/5 dark:to-amber/5 flex items-center justify-center mx-auto mb-3"
               >
-                <div
-                  class="i-carbon-chat text-xl text-iolite/40 dark:text-iolite-light/30"
-                />
+                <div class="i-carbon-chat text-xl text-iolite/40 dark:text-iolite-light/30" />
               </div>
-              <p class="text-warm-400 dark:text-warm-500 text-sm">
-                No messages yet
-              </p>
+              <p class="text-warm-400 dark:text-warm-500 text-sm">No messages yet</p>
               <p class="text-warm-300 dark:text-warm-600 text-xs mt-1">
                 Send a message to get started
               </p>
@@ -140,28 +115,17 @@
             :prev-message="idx > 0 ? chat.currentMessages[idx - 1] : null"
             :is-first="idx === 0"
             :message-idx="idx"
-            :is-last-assistant="
-              msg.role === 'assistant' &&
-              idx === chat.currentMessages.length - 1
-            "
+            :is-last-assistant="msg.role === 'assistant' && idx === chat.currentMessages.length - 1"
           />
-          <div
-            v-if="chat.processing"
-            class="flex items-center gap-2.5 py-2 pl-1"
-          >
+          <div v-if="chat.processing" class="flex items-center gap-2.5 py-2 pl-1">
             <span class="w-2 h-2 rounded-full bg-amber kohaku-glow" />
-            <span class="text-sm text-amber/80 kohaku-pulse"
-              >KohakUwUing...</span
-            >
+            <span class="text-sm text-amber/80 kohaku-pulse">KohakUwUing...</span>
           </div>
         </div>
       </div>
 
       <!-- Queued messages: shown above input, not in main chat -->
-      <div
-        v-if="chat.queuedMessages.length"
-        class="px-4 pt-2 flex flex-col gap-1.5"
-      >
+      <div v-if="chat.queuedMessages.length" class="px-4 pt-2 flex flex-col gap-1.5">
         <div
           v-for="qm in chat.queuedMessages"
           :key="qm.id"
@@ -174,9 +138,7 @@
       </div>
 
       <!-- Input: sits inside bubble, with subtle top border -->
-      <div
-        class="px-4 pb-4 pt-2 border-t border-t-warm-100 dark:border-t-warm-800"
-      >
+      <div class="px-4 pb-4 pt-2 border-t border-t-warm-100 dark:border-t-warm-800">
         <div
           class="flex gap-2 px-3 py-1.5 rounded-xl bg-warm-50 dark:bg-warm-800 border border-warm-200 dark:border-warm-700 focus-within:border-iolite/40 dark:focus-within:border-iolite-light/30 transition-colors"
           :class="inputText.includes('\n') ? 'items-end' : 'items-center'"
@@ -238,90 +200,89 @@
 </template>
 
 <script setup>
-import StatusDot from "@/components/common/StatusDot.vue";
-import ChatMessage from "@/components/chat/ChatMessage.vue";
-import { useChatStore } from "@/stores/chat";
-import { terrariumAPI, agentAPI } from "@/utils/api";
+import StatusDot from "@/components/common/StatusDot.vue"
+import ChatMessage from "@/components/chat/ChatMessage.vue"
+import { useChatStore } from "@/stores/chat"
+import { terrariumAPI, agentAPI } from "@/utils/api"
 
 const props = defineProps({
   instance: { type: Object, required: true },
-});
+})
 
-const chat = useChatStore();
-const inputText = ref("");
-const messagesEl = ref(null);
-const inputEl = ref(null);
+const chat = useChatStore()
+const inputText = ref("")
+const messagesEl = ref(null)
+const inputEl = ref(null)
 
 const activeUsage = computed(() => {
-  const tab = chat.activeTab;
-  if (!tab) return { prompt: 0, completion: 0, total: 0 };
-  return chat.tokenUsage[tab] || { prompt: 0, completion: 0, total: 0 };
-});
+  const tab = chat.activeTab
+  if (!tab) return { prompt: 0, completion: 0, total: 0 }
+  return chat.tokenUsage[tab] || { prompt: 0, completion: 0, total: 0 }
+})
 
-const activeTokens = computed(() => activeUsage.value.total);
+const activeTokens = computed(() => activeUsage.value.total)
 
 const contextPct = computed(() => {
-  const threshold = chat.sessionInfo.compactThreshold;
-  const lastPrompt = activeUsage.value.lastPrompt || 0;
-  if (!threshold || !lastPrompt) return 0;
-  return Math.round((lastPrompt / threshold) * 100);
-});
+  const threshold = chat.sessionInfo.compactThreshold
+  const lastPrompt = activeUsage.value.lastPrompt || 0
+  if (!threshold || !lastPrompt) return 0
+  return Math.round((lastPrompt / threshold) * 100)
+})
 
 function formatTokens(n) {
-  if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
-  if (n >= 1000) return (n / 1000).toFixed(1) + "K";
-  return String(n);
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + "M"
+  if (n >= 1000) return (n / 1000).toFixed(1) + "K"
+  return String(n)
 }
 
 const inputPlaceholder = computed(() => {
-  if (!chat.activeTab) return "Select a tab...";
-  if (chat.activeTab === "root") return "Message the root agent...";
-  if (chat.activeTab.startsWith("ch:"))
-    return `Send to ${chat.activeTab.slice(3)} channel...`;
-  return `Message ${chat.activeTab}...`;
-});
+  if (!chat.activeTab) return "Select a tab..."
+  if (chat.activeTab === "root") return "Message the root agent..."
+  if (chat.activeTab.startsWith("ch:")) return `Send to ${chat.activeTab.slice(3)} channel...`
+  return `Message ${chat.activeTab}...`
+})
 
 function getCreatureStatus(name) {
-  const creature = props.instance.creatures.find((c) => c.name === name);
-  return creature?.status || "idle";
+  const creature = props.instance.creatures.find((c) => c.name === name)
+  return creature?.status || "idle"
 }
 
 function closeTab(tab) {
-  chat.closeTab(tab);
+  chat.closeTab(tab)
 }
 
 function onInputKeydown(e) {
   // Skip if IME composition is active (e.g. Chinese/Japanese/Korean input).
   // During composition, Enter confirms the selected candidate — not send.
-  if (e.isComposing || e.keyCode === 229) return;
+  if (e.isComposing || e.keyCode === 229) return
 
   if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey) {
-    e.preventDefault();
-    send();
+    e.preventDefault()
+    send()
   }
   // Shift+Enter and Ctrl+Enter insert newline (default textarea behavior)
 }
 
 function autoResize() {
-  const el = inputEl.value;
-  if (!el) return;
-  el.style.height = "auto";
-  el.style.height = Math.min(el.scrollHeight, 128) + "px";
+  const el = inputEl.value
+  if (!el) return
+  el.style.height = "auto"
+  el.style.height = Math.min(el.scrollHeight, 128) + "px"
 }
 
 // Auto-scroll: track if user is near bottom
-const isNearBottom = ref(true);
+const isNearBottom = ref(true)
 
 function onMessagesScroll() {
-  const el = messagesEl.value;
-  if (!el) return;
+  const el = messagesEl.value
+  if (!el) return
   // "Near bottom" = within 80px of the bottom
-  isNearBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  isNearBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 80
 }
 
 function scrollToBottom() {
-  const el = messagesEl.value;
-  if (el) el.scrollTop = el.scrollHeight;
+  const el = messagesEl.value
+  if (el) el.scrollTop = el.scrollHeight
 }
 
 // Watch messages for changes — auto-scroll if user was at bottom
@@ -329,102 +290,84 @@ watch(
   () => chat.currentMessages,
   () => {
     if (isNearBottom.value) {
-      nextTick(scrollToBottom);
+      nextTick(scrollToBottom)
     }
   },
   { deep: true },
-);
+)
 
 // Also scroll when processing starts (KohakUwUing appears)
 watch(
   () => chat.processing,
   (val) => {
     if (val && isNearBottom.value) {
-      nextTick(scrollToBottom);
+      nextTick(scrollToBottom)
     }
   },
-);
+)
 
 function send() {
-  if (!inputText.value.trim()) return;
-  chat.send(inputText.value);
-  inputText.value = "";
-  isNearBottom.value = true; // force scroll after send
+  if (!inputText.value.trim()) return
+  chat.send(inputText.value)
+  inputText.value = ""
+  isNearBottom.value = true // force scroll after send
   nextTick(() => {
-    if (inputEl.value) inputEl.value.style.height = "auto";
-    scrollToBottom();
-  });
+    if (inputEl.value) inputEl.value.style.height = "auto"
+    scrollToBottom()
+  })
 }
 
 async function triggerCompact() {
   try {
-    const tab = chat.activeTab;
+    const tab = chat.activeTab
     if (chat._instanceType === "terrarium") {
-      await terrariumAPI.executeCreatureCommand(
-        chat._instanceId,
-        tab || "root",
-        "compact",
-      );
+      await terrariumAPI.executeCreatureCommand(chat._instanceId, tab || "root", "compact")
     } else {
-      await agentAPI.executeCommand(chat._instanceId, "compact");
+      await agentAPI.executeCommand(chat._instanceId, "compact")
     }
   } catch (err) {
-    console.error("Compact failed:", err);
+    console.error("Compact failed:", err)
   }
 }
 
 async function triggerClear() {
-  if (
-    !confirm(
-      "Clear conversation context? Chat history will be preserved in the session.",
-    )
-  )
-    return;
+  if (!confirm("Clear conversation context? Chat history will be preserved in the session.")) return
   try {
-    const tab = chat.activeTab;
+    const tab = chat.activeTab
     if (chat._instanceType === "terrarium") {
-      await terrariumAPI.executeCreatureCommand(
-        chat._instanceId,
-        tab || "root",
-        "clear",
-        "--force",
-      );
+      await terrariumAPI.executeCreatureCommand(chat._instanceId, tab || "root", "clear", "--force")
     } else {
-      await agentAPI.executeCommand(chat._instanceId, "clear", "--force");
+      await agentAPI.executeCommand(chat._instanceId, "clear", "--force")
     }
   } catch (err) {
-    console.error("Clear failed:", err);
+    console.error("Clear failed:", err)
   }
 }
 
 async function stopTask(jobId, jobName) {
   try {
-    const tab = chat.activeTab;
+    const tab = chat.activeTab
     if (chat._instanceType === "terrarium") {
-      await terrariumAPI.stopCreatureTask(
-        chat._instanceId,
-        tab || "root",
-        jobId,
-      );
+      await terrariumAPI.stopCreatureTask(chat._instanceId, tab || "root", jobId)
     } else {
-      await agentAPI.stopTask(chat._instanceId, jobId);
+      await agentAPI.stopTask(chat._instanceId, jobId)
     }
     // Don't eagerly remove from runningJobs — the backend will send a
     // subagent_done/subagent_error or tool_done/tool_error event which
     // handles the removal properly. Just mark as cancelling for visual feedback.
-    const job = chat.runningJobs[jobId];
-    if (job) job.cancelling = true;
+    const job = chat.runningJobs[jobId]
+    if (job) job.cancelling = true
   } catch (err) {
-    console.error("Failed to stop task:", err);
+    console.error("Failed to stop task:", err)
   }
 }
 
 // Escape key interrupt
 function onGlobalKeydown(e) {
   if (e.key === "Escape" && (chat.processing || chat.hasRunningJobs)) {
-    chat.interrupt();
+    chat.interrupt()
   }
 }
-onMounted(() => window.addEventListener("keydown", onGlobalKeydown));
-onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown));
+onMounted(() => window.addEventListener("keydown", onGlobalKeydown))
+onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown))
 </script>

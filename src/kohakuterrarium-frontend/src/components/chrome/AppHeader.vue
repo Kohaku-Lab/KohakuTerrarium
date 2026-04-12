@@ -4,9 +4,7 @@
   >
     <!-- Instance info -->
     <StatusDot v-if="instance" :status="instance.status" />
-    <span
-      class="font-medium text-warm-700 dark:text-warm-300 truncate max-w-48"
-    >
+    <span class="font-medium text-warm-700 dark:text-warm-300 truncate max-w-48">
       {{ instance?.config_name || "—" }}
     </span>
     <span
@@ -14,6 +12,16 @@
       class="text-[9px] px-1.5 py-0.5 rounded bg-warm-100 dark:bg-warm-800 text-warm-400"
       >{{ instance.type }}</span
     >
+
+    <!-- Instance settings gear -->
+    <button
+      v-if="instance"
+      class="w-5 h-5 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors"
+      title="Instance settings"
+      @click="settingsOpen = true"
+    >
+      <div class="i-carbon-settings text-[11px]" />
+    </button>
 
     <div class="seg-sep" />
 
@@ -36,11 +44,9 @@
           >
             <div class="flex items-center gap-2 text-[11px]">
               <span>{{ p.label }}</span>
-              <span
-                v-if="p.shortcut"
-                class="text-[9px] font-mono text-warm-400"
-                >{{ p.shortcut }}</span
-              >
+              <span v-if="p.shortcut" class="text-[9px] font-mono text-warm-400">{{
+                p.shortcut
+              }}</span>
             </div>
           </el-dropdown-item>
         </el-dropdown-menu>
@@ -81,27 +87,33 @@
       <div class="i-carbon-stop-filled text-[11px]" />
     </button>
   </div>
+
+  <!-- Instance settings modal -->
+  <InstanceSettingsModal v-if="instance" v-model="settingsOpen" :instance="instance" />
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed, ref } from "vue"
 
-import StatusDot from "@/components/common/StatusDot.vue";
-import { useInstancesStore } from "@/stores/instances";
-import { useLayoutStore } from "@/stores/layout";
-import { fireLayoutEditRequested, firePaletteOpen } from "@/utils/layoutEvents";
+import InstanceSettingsModal from "@/components/chrome/InstanceSettingsModal.vue"
+import StatusDot from "@/components/common/StatusDot.vue"
+import { useInstancesStore } from "@/stores/instances"
+import { useLayoutStore } from "@/stores/layout"
+import { fireLayoutEditRequested, firePaletteOpen } from "@/utils/layoutEvents"
 
-defineEmits(["stop"]);
+defineEmits(["stop"])
 
-const instances = useInstancesStore();
-const layout = useLayoutStore();
+const settingsOpen = ref(false)
 
-const instance = computed(() => instances.current);
+const instances = useInstancesStore()
+const layout = useLayoutStore()
+
+const instance = computed(() => instances.current)
 
 const presetLabel = computed(() => {
-  const p = layout.activePreset;
-  return p?.label || "—";
-});
+  const p = layout.activePreset
+  return p?.label || "—"
+})
 
 const PRESET_ORDER = [
   "chat-focus",
@@ -110,25 +122,24 @@ const PRESET_ORDER = [
   "canvas",
   "debug",
   "chat-terminal",
-  "settings",
-];
+]
 
 const presets = computed(() => {
-  const all = layout.allPresets;
-  const out = [];
+  const all = layout.allPresets
+  const out = []
   for (const id of PRESET_ORDER) {
-    if (all[id]) out.push(all[id]);
+    if (all[id]) out.push(all[id])
   }
   for (const preset of Object.values(all)) {
     if (!PRESET_ORDER.includes(preset.id) && !preset.id.startsWith("legacy-")) {
-      out.push(preset);
+      out.push(preset)
     }
   }
-  return out;
-});
+  return out
+})
 
 function onPreset(id) {
-  layout.switchPreset(id);
+  layout.switchPreset(id)
 }
 </script>
 

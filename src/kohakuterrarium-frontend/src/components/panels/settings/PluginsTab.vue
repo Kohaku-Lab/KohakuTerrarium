@@ -1,15 +1,10 @@
 <template>
   <div class="p-4 text-xs">
-    <div v-if="loading" class="text-warm-400 text-center py-6">
-      Loading plugins...
-    </div>
+    <div v-if="loading" class="text-warm-400 text-center py-6">Loading plugins...</div>
     <div v-else-if="error" class="text-coral py-2">
       {{ error }}
     </div>
-    <div
-      v-else-if="plugins.length === 0"
-      class="text-warm-400 text-center py-6"
-    >
+    <div v-else-if="plugins.length === 0" class="text-warm-400 text-center py-6">
       No plugins loaded.
     </div>
     <div v-else class="flex flex-col gap-1.5">
@@ -23,9 +18,7 @@
             class="w-1.5 h-1.5 rounded-full shrink-0"
             :class="p.enabled ? 'bg-aquamarine' : 'bg-warm-400'"
           />
-          <span class="font-medium text-warm-700 dark:text-warm-300">{{
-            p.name
-          }}</span>
+          <span class="font-medium text-warm-700 dark:text-warm-300">{{ p.name }}</span>
           <span class="flex-1" />
           <span
             class="text-[10px] font-mono"
@@ -45,34 +38,34 @@
 </template>
 
 <script setup>
-import { onMounted, ref, watch } from "vue";
+import { onMounted, ref, watch } from "vue"
 
-import { agentAPI } from "@/utils/api";
+import { agentAPI } from "@/utils/api"
 
 const props = defineProps({
   instance: { type: Object, default: null },
-});
+})
 
-const plugins = ref([]);
-const loading = ref(false);
-const error = ref("");
+const plugins = ref([])
+const loading = ref(false)
+const error = ref("")
 
 async function load() {
-  const id = props.instance?.id;
-  if (!id) return;
-  loading.value = true;
-  error.value = "";
+  const id = props.instance?.id
+  if (!id) return
+  loading.value = true
+  error.value = ""
   try {
-    const data = await agentAPI.listPlugins(id);
-    plugins.value = Array.isArray(data) ? data : [];
+    const data = await agentAPI.listPlugins(id)
+    plugins.value = Array.isArray(data) ? data : []
   } catch (err) {
-    error.value = err?.response?.data?.detail || err?.message || String(err);
-    plugins.value = [];
+    error.value = err?.response?.data?.detail || err?.message || String(err)
+    plugins.value = []
   } finally {
-    loading.value = false;
+    loading.value = false
   }
 }
 
-onMounted(load);
-watch(() => props.instance?.id, load);
+onMounted(load)
+watch(() => props.instance?.id, load)
 </script>

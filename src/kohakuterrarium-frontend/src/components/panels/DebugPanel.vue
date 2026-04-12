@@ -32,23 +32,23 @@
 </template>
 
 <script setup>
-import { ref } from "vue";
+import { ref } from "vue"
 
-import EventsTab from "./debug/EventsTab.vue";
-import LogsTab from "./debug/LogsTab.vue";
-import PromptTab from "./debug/PromptTab.vue";
-import TraceTab from "./debug/TraceTab.vue";
+import EventsTab from "./debug/EventsTab.vue"
+import LogsTab from "./debug/LogsTab.vue"
+import PromptTab from "./debug/PromptTab.vue"
+import TraceTab from "./debug/TraceTab.vue"
 
 defineProps({
   instance: { type: Object, default: null },
-});
+})
 
 const tabs = [
   { id: "logs", label: "Logs", icon: "i-carbon-catalog" },
   { id: "trace", label: "Trace", icon: "i-carbon-flow-connection" },
   { id: "prompt", label: "Prompt", icon: "i-carbon-document" },
   { id: "events", label: "Events", icon: "i-carbon-event" },
-];
+]
 
-const activeTab = ref("logs");
+const activeTab = ref("logs")
 </script>

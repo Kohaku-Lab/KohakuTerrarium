@@ -1,15 +1,11 @@
 <template>
   <div class="h-full overflow-y-auto">
     <div class="container-page max-w-3xl">
-      <h1 class="text-xl font-bold text-warm-800 dark:text-warm-200 mb-6">
-        Start New Instance
-      </h1>
+      <h1 class="text-xl font-bold text-warm-800 dark:text-warm-200 mb-6">Start New Instance</h1>
 
       <!-- Working directory -->
       <div class="card p-5 mb-6">
-        <label
-          class="block text-sm font-medium text-warm-700 dark:text-warm-300 mb-2"
-        >
+        <label class="block text-sm font-medium text-warm-700 dark:text-warm-300 mb-2">
           Working Directory
         </label>
         <div class="flex gap-2">
@@ -38,11 +34,7 @@
           "
           @click="selectedType = t.key"
         >
-          <div
-            :class="t.icon"
-            class="text-2xl mx-auto mb-2"
-            :style="{ color: t.color }"
-          />
+          <div :class="t.icon" class="text-2xl mx-auto mb-2" :style="{ color: t.color }" />
           <div class="font-medium text-warm-800 dark:text-warm-200">
             {{ t.label }}
           </div>
@@ -52,13 +44,8 @@
 
       <!-- Config selection -->
       <div class="card p-5 mb-6">
-        <h2 class="text-sm font-medium text-warm-700 dark:text-warm-300 mb-3">
-          Available Configs
-        </h2>
-        <div
-          v-if="availableConfigs.length === 0"
-          class="text-secondary text-sm py-4 text-center"
-        >
+        <h2 class="text-sm font-medium text-warm-700 dark:text-warm-300 mb-3">Available Configs</h2>
+        <div v-if="availableConfigs.length === 0" class="text-secondary text-sm py-4 text-center">
           No {{ selectedType }} configs found.
         </div>
         <div v-else class="flex flex-col gap-1">
@@ -116,30 +103,30 @@
 </template>
 
 <script setup>
-import { configAPI } from "@/utils/api";
-import { useConfigsStore } from "@/stores/configs";
-import { useInstancesStore } from "@/stores/instances";
-import { ElMessage } from "element-plus";
+import { configAPI } from "@/utils/api"
+import { useConfigsStore } from "@/stores/configs"
+import { useInstancesStore } from "@/stores/instances"
+import { ElMessage } from "element-plus"
 
-const router = useRouter();
-const configs = useConfigsStore();
-const instances = useInstancesStore();
-configs.fetchAll();
+const router = useRouter()
+const configs = useConfigsStore()
+const instances = useInstancesStore()
+configs.fetchAll()
 
-const pwd = ref("");
+const pwd = ref("")
 
 // Fetch server cwd as default working directory
 onMounted(async () => {
   try {
-    const info = await configAPI.getServerInfo();
-    if (info.cwd && !pwd.value) pwd.value = info.cwd;
+    const info = await configAPI.getServerInfo()
+    if (info.cwd && !pwd.value) pwd.value = info.cwd
   } catch {
     /* ignore — user can type manually */
   }
-});
-const selectedType = ref("creature");
-const selectedConfig = ref(null);
-const starting = ref(false);
+})
+const selectedType = ref("creature")
+const selectedConfig = ref(null)
+const starting = ref(false)
 
 const types = [
   {
@@ -156,39 +143,31 @@ const types = [
     icon: "i-carbon-network-4",
     color: "#5A4FCF",
   },
-];
+]
 
 const availableConfigs = computed(() => {
-  return selectedType.value === "creature"
-    ? configs.creatures
-    : configs.terrariums;
-});
+  return selectedType.value === "creature" ? configs.creatures : configs.terrariums
+})
 
 const canStart = computed(() => {
-  return pwd.value.trim() && selectedConfig.value && !starting.value;
-});
+  return pwd.value.trim() && selectedConfig.value && !starting.value
+})
 
 watch(selectedType, () => {
-  selectedConfig.value = null;
-});
+  selectedConfig.value = null
+})
 
 async function startInstance() {
-  if (!canStart.value) return;
-  starting.value = true;
+  if (!canStart.value) return
+  starting.value = true
   try {
-    const id = await instances.create(
-      selectedType.value,
-      selectedConfig.value,
-      pwd.value,
-    );
-    ElMessage.success(`Started ${selectedType.value}`);
-    router.push(`/instances/${id}`);
+    const id = await instances.create(selectedType.value, selectedConfig.value, pwd.value)
+    ElMessage.success(`Started ${selectedType.value}`)
+    router.push(`/instances/${id}`)
   } catch (err) {
-    ElMessage.error(
-      `Failed to start: ${err.response?.data?.detail || err.message}`,
-    );
+    ElMessage.error(`Failed to start: ${err.response?.data?.detail || err.message}`)
   } finally {
-    starting.value = false;
+    starting.value = false
   }
 }
 </script>

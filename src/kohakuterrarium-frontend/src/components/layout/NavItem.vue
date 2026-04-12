@@ -19,9 +19,7 @@
     </div>
     <div v-else :class="icon" class="text-base shrink-0" />
 
-    <span v-if="expanded" class="text-xs font-medium truncate">{{
-      label
-    }}</span>
+    <span v-if="expanded" class="text-xs font-medium truncate">{{ label }}</span>
   </div>
 </template>
 
@@ -32,20 +30,20 @@ const props = defineProps({
   icon: { type: String, required: true },
   label: { type: String, default: "" },
   status: { type: String, default: null },
-});
+})
 
-defineEmits(["click"]);
+defineEmits(["click"])
 
 const statusDotClass = computed(() => {
   switch (props.status) {
     case "running":
-      return "bg-aquamarine";
+      return "bg-aquamarine"
     case "idle":
-      return "bg-amber";
+      return "bg-amber"
     case "error":
-      return "bg-coral";
+      return "bg-coral"
     default:
-      return "bg-warm-400";
+      return "bg-warm-400"
   }
-});
+})
 </script>
