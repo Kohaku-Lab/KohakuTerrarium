@@ -15,7 +15,7 @@ import httpx
 
 from kohakuterrarium.builtins.tools.registry import register_builtin
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
-from kohakuterrarium.utils.logging import DEFAULT_LOG_DIR, get_logger
+from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -127,13 +127,11 @@ async def _fetch_crawl4ai(url: str) -> str:
         raise _SkipBackend
 
     from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
-    from crawl4ai.async_logger import AsyncFileLogger
 
-    browser_cfg = BrowserConfig(headless=True, verbose=False)
-    run_cfg = CrawlerRunConfig(verbose=False, log_console=False)
-    crawl4ai_logger = AsyncFileLogger(str(DEFAULT_LOG_DIR / "crawl4ai.log"))
+    browser_cfg = BrowserConfig(headless=True)
+    run_cfg = CrawlerRunConfig()
 
-    async with AsyncWebCrawler(config=browser_cfg, logger=crawl4ai_logger) as crawler:
+    async with AsyncWebCrawler(config=browser_cfg) as crawler:
         result = await crawler.arun(url=url, config=run_cfg)
         if not result.success:
             raise _SkipBackend

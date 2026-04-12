@@ -126,10 +126,6 @@ git clone https://github.com/Kohaku-Lab/KohakuTerrarium.git
 cd KohakuTerrarium
 pip install -e ".[dev]"
 
-# Build the web frontend for `kt web` / `kt app`
-npm install --prefix src/kohakuterrarium-frontend
-npm run build --prefix src/kohakuterrarium-frontend
-
 # Install the default creatures, terrariums, and plugins
 kt install https://github.com/Kohaku-Lab/kt-defaults.git
 
