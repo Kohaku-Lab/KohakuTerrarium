@@ -239,16 +239,12 @@ def _run_desktop_app_blocking(port: int = 8001) -> None:
     )
     server_thread.start()
 
-    # Resolve window icon — .ico for Windows, .png for others
+    # Resolve icon paths
     icons_dir = Path(__file__).parent.parent / "app_icons"
-    if sys.platform == "win32":
-        icon_path = str(icons_dir / "window.ico")
-    else:
-        icon_path = str(icons_dir / "window.png")
-    if not Path(icon_path).exists():
-        icon_path = None
+    icon_ico = icons_dir / "window.ico"
+    icon_png = icons_dir / "window.png"
 
-    webview.create_window(
+    window = webview.create_window(
         "KohakuTerrarium",
         f"http://127.0.0.1:{port}",
         width=1280,
@@ -259,7 +255,51 @@ def _run_desktop_app_blocking(port: int = 8001) -> None:
         confirm_close=True,
         background_color="#1a1a2e",
     )
-    webview.start(icon=icon_path)
+
+    def _set_icon_windows():
+        """Set window + taskbar icon on Windows via win32 API."""
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            user32 = ctypes.windll.user32
+            WM_SETICON = 0x0080
+            ICON_SMALL = 0
+            ICON_BIG = 1
+
+            # Load icon from .ico file
+            ico = str(icon_ico) if icon_ico.exists() else None
+            if not ico:
+                return
+
+            hicon = user32.LoadImageW(
+                None, ico, 1, 0, 0, 0x00000010  # IMAGE_ICON  # LR_LOADFROMFILE
+            )
+            if not hicon:
+                return
+
+            # Find the pywebview window by title
+            hwnd = user32.FindWindowW(None, "KohakuTerrarium")
+            if hwnd:
+                user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, hicon)
+                user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, hicon)
+        except Exception:
+            pass
+
+    if sys.platform == "win32":
+        # Set icon after window is shown (slight delay for window creation)
+        def _on_shown():
+            import time
+
+            time.sleep(0.5)
+            _set_icon_windows()
+
+        window.events.shown += _on_shown
+        webview.start()
+    else:
+        # GTK/QT: icon parameter works natively
+        icon_path = str(icon_png) if icon_png.exists() else None
+        webview.start(icon=icon_path)
 
 
 if __name__ == "__main__":
