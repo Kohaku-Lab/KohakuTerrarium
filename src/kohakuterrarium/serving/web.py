@@ -227,8 +227,12 @@ def _run_desktop_app_blocking(port: int = 8001) -> None:
     )
     server_thread.start()
 
-    # Resolve window icon path
-    icon_path = str(Path(__file__).parent.parent / "app_icons" / "window.png")
+    # Resolve window icon — .ico for Windows, .png for others
+    icons_dir = Path(__file__).parent.parent / "app_icons"
+    if sys.platform == "win32":
+        icon_path = str(icons_dir / "window.ico")
+    else:
+        icon_path = str(icons_dir / "window.png")
     if not Path(icon_path).exists():
         icon_path = None
 
