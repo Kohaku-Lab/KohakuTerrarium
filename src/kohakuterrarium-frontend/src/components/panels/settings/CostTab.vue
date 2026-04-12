@@ -1,8 +1,6 @@
 <template>
   <div class="p-4 text-xs">
-    <div class="mb-3 text-[10px] text-warm-400 italic">
-      Cost shown when a price is known for the active model. Tokens alone are always visible.
-    </div>
+    <div class="mb-3 text-[10px] text-warm-400 italic">Cost shown when a price is known for the active model. Tokens alone are always visible.</div>
 
     <div class="grid grid-cols-2 gap-2 mb-4">
       <div class="rounded border border-warm-200 dark:border-warm-700 px-3 py-2">
@@ -17,10 +15,7 @@
           {{ formatTokens(totals.completion) }}
         </div>
       </div>
-      <div
-        v-if="totals.cached > 0"
-        class="rounded border border-warm-200 dark:border-warm-700 px-3 py-2"
-      >
+      <div v-if="totals.cached > 0" class="rounded border border-warm-200 dark:border-warm-700 px-3 py-2">
         <div class="text-[9px] uppercase tracking-wider text-warm-400">Cached</div>
         <div class="font-mono text-lg text-aquamarine">
           {{ formatTokens(totals.cached) }}
@@ -38,9 +33,7 @@
       Model:
       <span class="font-mono text-warm-700 dark:text-warm-300">{{ model || "default" }}</span>
     </div>
-    <div v-if="!cost && model" class="text-[10px] text-warm-400 mt-1">
-      No price table entry for this model. Add one in the settings to see cost estimates.
-    </div>
+    <div v-if="!cost && model" class="text-[10px] text-warm-400 mt-1">No price table entry for this model. Add one in the settings to see cost estimates.</div>
   </div>
 </template>
 

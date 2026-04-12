@@ -12,37 +12,16 @@
 
       <div class="mb-2">
         <div class="flex items-center gap-2 mb-2">
-          <div class="text-[9px] uppercase tracking-wider text-warm-400 flex-1">
-            Environment ({{ envCount }} vars)
-          </div>
-          <el-input
-            v-model="query"
-            placeholder="Filter..."
-            size="small"
-            clearable
-            style="width: 160px"
-          />
+          <div class="text-[9px] uppercase tracking-wider text-warm-400 flex-1">Environment ({{ envCount }} vars)</div>
+          <el-input v-model="query" placeholder="Filter..." size="small" clearable style="width: 160px" />
         </div>
-        <div class="text-[9px] text-amber mb-1">
-          Credential-like keys (secret, token, key, password, …) are filtered server-side before
-          this response.
-        </div>
+        <div class="text-[9px] text-amber mb-1">Credential-like keys (secret, token, key, password, …) are filtered server-side before this response.</div>
         <div class="max-h-96 overflow-y-auto border border-warm-200 dark:border-warm-700 rounded">
-          <div
-            v-for="[k, v] in filteredEnv"
-            :key="k"
-            class="flex items-center gap-2 px-2 py-1 border-b border-warm-200/60 dark:border-warm-700/60 last:border-b-0"
-          >
-            <span class="font-mono text-[10px] text-iolite shrink-0 max-w-40 truncate">{{
-              k
-            }}</span>
-            <span class="font-mono text-[10px] text-warm-600 dark:text-warm-400 truncate">{{
-              v
-            }}</span>
+          <div v-for="[k, v] in filteredEnv" :key="k" class="flex items-center gap-2 px-2 py-1 border-b border-warm-200/60 dark:border-warm-700/60 last:border-b-0">
+            <span class="font-mono text-[10px] text-iolite shrink-0 max-w-40 truncate">{{ k }}</span>
+            <span class="font-mono text-[10px] text-warm-600 dark:text-warm-400 truncate">{{ v }}</span>
           </div>
-          <div v-if="filteredEnv.length === 0" class="text-warm-400 text-center py-4 text-[11px]">
-            No matches
-          </div>
+          <div v-if="filteredEnv.length === 0" class="text-warm-400 text-center py-4 text-[11px]">No matches</div>
         </div>
       </div>
     </template>
@@ -88,9 +67,7 @@ const filteredEnv = computed(() => {
   const q = query.value.trim().toLowerCase()
   const sorted = Object.entries(env.value).sort(([a], [b]) => a.localeCompare(b))
   if (!q) return sorted
-  return sorted.filter(
-    ([k, v]) => k.toLowerCase().includes(q) || String(v).toLowerCase().includes(q),
-  )
+  return sorted.filter(([k, v]) => k.toLowerCase().includes(q) || String(v).toLowerCase().includes(q))
 })
 
 onMounted(load)

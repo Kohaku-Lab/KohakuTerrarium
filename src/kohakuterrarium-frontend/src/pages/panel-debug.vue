@@ -1,20 +1,8 @@
 <template>
   <div class="h-full flex flex-col bg-warm-50 dark:bg-warm-900">
     <!-- Tab bar -->
-    <div
-      class="flex items-center gap-0.5 px-2 py-1 border-b border-warm-200 dark:border-warm-700 overflow-x-auto shrink-0"
-    >
-      <button
-        v-for="t in tabs"
-        :key="t.id"
-        class="px-3 py-1 rounded text-xs whitespace-nowrap transition-colors"
-        :class="
-          active === t.id
-            ? 'bg-iolite/15 text-iolite font-medium'
-            : 'text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800'
-        "
-        @click="active = t.id"
-      >
+    <div class="flex items-center gap-0.5 px-2 py-1 border-b border-warm-200 dark:border-warm-700 overflow-x-auto shrink-0">
+      <button v-for="t in tabs" :key="t.id" class="px-3 py-1 rounded text-xs whitespace-nowrap transition-colors" :class="active === t.id ? 'bg-iolite/15 text-iolite font-medium' : 'text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800'" @click="active = t.id">
         {{ t.label }}
       </button>
     </div>
@@ -25,20 +13,14 @@
       <ActivityPanel v-else-if="active === 'activity'" :instance="fakeInstance" />
       <StatePanel v-else-if="active === 'state'" :instance="fakeInstance" />
       <CreaturesPanel v-else-if="active === 'creatures'" :instance="fakeInstance" />
-      <FilesPanel
-        v-else-if="active === 'files'"
-        :root="fakeInstance?.pwd || '/'"
-        :on-select="() => {}"
-      />
+      <FilesPanel v-else-if="active === 'files'" :root="fakeInstance?.pwd || '/'" :on-select="() => {}" />
       <CanvasPanel v-else-if="active === 'canvas'" />
       <SettingsPanel v-else-if="active === 'settings'" :instance="fakeInstance" />
       <DebugPanel v-else-if="active === 'debug'" :instance="fakeInstance" />
       <StatusDashboard v-else-if="active === 'status-dashboard'" :instance="fakeInstance" />
       <StatusBar v-else-if="active === 'status-bar'" />
       <EditorMain v-else-if="active === 'editor'" />
-      <div v-else class="h-full flex items-center justify-center text-warm-400 text-sm">
-        Select a panel tab above
-      </div>
+      <div v-else class="h-full flex items-center justify-center text-warm-400 text-sm">Select a panel tab above</div>
     </div>
   </div>
 </template>

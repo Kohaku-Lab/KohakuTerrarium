@@ -4,9 +4,7 @@
       <!-- Header -->
       <div class="mb-8">
         <h1 class="text-2xl font-bold text-warm-800 dark:text-warm-200 mb-1">KohakuTerrarium</h1>
-        <p class="text-secondary">
-          Build agents that work alone. Compose them into teams that work together.
-        </p>
+        <p class="text-secondary">Build agents that work alone. Compose them into teams that work together.</p>
       </div>
 
       <!-- Stats cards -->
@@ -22,16 +20,9 @@
       <!-- Running instances -->
       <div class="mb-8">
         <h2 class="section-title">Running Instances</h2>
-        <div v-if="instances.running.length === 0" class="card p-8 text-center text-secondary">
-          No instances running. Start one to get going.
-        </div>
+        <div v-if="instances.running.length === 0" class="card p-8 text-center text-secondary">No instances running. Start one to get going.</div>
         <div v-else class="flex flex-col gap-3">
-          <div
-            v-for="inst in instances.running"
-            :key="inst.id"
-            class="card-hover p-4 flex items-center gap-4"
-            @click="$router.push(`/instances/${inst.id}`)"
-          >
+          <div v-for="inst in instances.running" :key="inst.id" class="card-hover p-4 flex items-center gap-4" @click="$router.push(`/instances/${inst.id}`)">
             <StatusDot :status="inst.status" />
             <div class="flex-1 min-w-0">
               <div class="font-medium text-warm-800 dark:text-warm-200">
@@ -44,14 +35,8 @@
             <GemBadge :gem="inst.type === 'terrarium' ? 'iolite' : 'aquamarine'">
               {{ inst.type }}
             </GemBadge>
-            <div class="text-secondary text-xs">
-              {{ inst.creatures.length }} creature{{ inst.creatures.length !== 1 ? "s" : "" }}
-            </div>
-            <button
-              class="btn-icon text-coral hover:text-coral-dark flex-shrink-0"
-              title="Stop instance"
-              @click.stop="handleStop(inst)"
-            >
+            <div class="text-secondary text-xs">{{ inst.creatures.length }} creature{{ inst.creatures.length !== 1 ? "s" : "" }}</div>
+            <button class="btn-icon text-coral hover:text-coral-dark flex-shrink-0" title="Stop instance" @click.stop="handleStop(inst)">
               <span class="i-carbon-stop-filled" />
             </button>
           </div>
@@ -62,29 +47,20 @@
       <div>
         <h2 class="section-title">Quick Start</h2>
         <div class="flex flex-wrap gap-3">
-          <button class="btn-primary" @click="$router.push('/new')">
-            <span class="i-carbon-add mr-1" /> Start New Instance
-          </button>
+          <button class="btn-primary" @click="$router.push('/new')"><span class="i-carbon-add mr-1" /> Start New Instance</button>
         </div>
       </div>
     </div>
 
     <!-- Stop confirmation dialog -->
-    <el-dialog
-      v-model="showStopConfirm"
-      title="Stop Instance"
-      width="400px"
-      :close-on-click-modal="true"
-    >
+    <el-dialog v-model="showStopConfirm" title="Stop Instance" width="400px" :close-on-click-modal="true">
       <p class="text-warm-600 dark:text-warm-300">
         Stop <strong>{{ stopTarget?.config_name }}</strong
         >? This will terminate the {{ stopTarget?.type }} and all its processes.
       </p>
       <template #footer>
         <el-button size="small" @click="showStopConfirm = false">Cancel</el-button>
-        <el-button size="small" type="danger" :loading="stopping" @click="confirmStop"
-          >Stop</el-button
-        >
+        <el-button size="small" type="danger" :loading="stopping" @click="confirmStop">Stop</el-button>
       </template>
     </el-dialog>
   </div>

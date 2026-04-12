@@ -1,21 +1,13 @@
 <template>
   <div class="h-full w-full overflow-auto bg-warm-50 dark:bg-warm-950 flex">
     <!-- Line numbers -->
-    <div
-      class="code-lines shrink-0 py-3 pr-2 text-right select-none border-r border-warm-200/50 dark:border-warm-700/50 bg-warm-100/50 dark:bg-warm-900/50"
-    >
-      <div
-        v-for="n in lineCount"
-        :key="n"
-        class="px-2 text-[11px] font-mono leading-[1.4] text-warm-400"
-      >
+    <div class="code-lines shrink-0 py-3 pr-2 text-right select-none border-r border-warm-200/50 dark:border-warm-700/50 bg-warm-100/50 dark:bg-warm-900/50">
+      <div v-for="n in lineCount" :key="n" class="px-2 text-[11px] font-mono leading-[1.4] text-warm-400">
         {{ n }}
       </div>
     </div>
     <!-- Code content -->
-    <pre
-      class="flex-1 m-0 py-3 pl-3 pr-3 text-[11px] font-mono text-warm-700 dark:text-warm-300 whitespace-pre leading-[1.4]"
-    ><code v-html="highlighted" /></pre>
+    <pre class="flex-1 m-0 py-3 pl-3 pr-3 text-[11px] font-mono text-warm-700 dark:text-warm-300 whitespace-pre leading-[1.4]"><code v-html="highlighted" /></pre>
   </div>
 </template>
 

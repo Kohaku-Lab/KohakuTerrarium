@@ -1,7 +1,5 @@
 <template>
-  <div
-    class="status-bar flex items-center gap-2 px-3 h-6 text-[10px] font-mono bg-warm-100 dark:bg-warm-950 border-t border-warm-200 dark:border-warm-700 text-warm-500 overflow-hidden shrink-0"
-  >
+  <div class="status-bar flex items-center gap-2 px-3 h-6 text-[10px] font-mono bg-warm-100 dark:bg-warm-950 border-t border-warm-200 dark:border-warm-700 text-warm-500 overflow-hidden shrink-0">
     <!-- Instance name + status -->
     <div class="status-seg flex items-center gap-1.5 shrink-0">
       <StatusDot v-if="instance" :status="instance.status" class="scale-75" />
@@ -12,23 +10,14 @@
 
     <!-- Model quick switcher + config gear -->
     <ModelSwitcher />
-    <button
-      class="w-4 h-4 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors"
-      title="Model config"
-      aria-label="Open model configuration"
-      @click="openModelConfig"
-    >
+    <button class="w-4 h-4 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" title="Model config" aria-label="Open model configuration" @click="openModelConfig">
       <div class="i-carbon-settings text-[10px]" />
     </button>
 
     <div class="seg-sep" />
 
     <!-- Session id (click to copy) -->
-    <button
-      class="status-seg flex items-center gap-1 hover:text-warm-700 dark:hover:text-warm-300 transition-colors shrink-0"
-      :title="sessionId || ''"
-      @click="copySession"
-    >
+    <button class="status-seg flex items-center gap-1 hover:text-warm-700 dark:hover:text-warm-300 transition-colors shrink-0" :title="sessionId || ''" @click="copySession">
       <span class="i-carbon-id text-[11px]" />
       <span class="truncate max-w-28">{{ sessionIdShort }}</span>
     </button>

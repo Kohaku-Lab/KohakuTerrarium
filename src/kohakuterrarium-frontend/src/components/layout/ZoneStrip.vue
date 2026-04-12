@@ -1,10 +1,5 @@
 <template>
-  <Zone
-    :zone-id="zoneId"
-    :instance-id="instanceId"
-    :show-empty="showEmpty"
-    class="zone--strip bg-white dark:bg-warm-800 border-t border-warm-200 dark:border-warm-700 text-[11px]"
-  />
+  <Zone :zone-id="zoneId" :instance-id="instanceId" :show-empty="showEmpty" class="zone--strip bg-white dark:bg-warm-800 border-t border-warm-200 dark:border-warm-700 text-[11px]" />
 </template>
 
 <script setup>

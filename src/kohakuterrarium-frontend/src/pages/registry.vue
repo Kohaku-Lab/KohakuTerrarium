@@ -6,37 +6,17 @@
       <el-tabs v-model="activeTab">
         <el-tab-pane label="Local" name="local">
           <div v-if="loadingLocal" class="py-8 text-center text-secondary">Loading configs...</div>
-          <div v-else-if="localConfigs.length === 0" class="card p-8 text-center text-secondary">
-            No configs installed.
-          </div>
+          <div v-else-if="localConfigs.length === 0" class="card p-8 text-center text-secondary">No configs installed.</div>
           <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <ConfigCard
-              v-for="cfg in localConfigs"
-              :key="cfg.name"
-              :config="cfg"
-              mode="local"
-              @uninstall="handleUninstall"
-            />
+            <ConfigCard v-for="cfg in localConfigs" :key="cfg.name" :config="cfg" mode="local" @uninstall="handleUninstall" />
           </div>
         </el-tab-pane>
 
         <el-tab-pane label="Available" name="available">
-          <div v-if="loadingRemote" class="py-8 text-center text-secondary">
-            Loading available configs...
-          </div>
-          <div v-else-if="remoteRepos.length === 0" class="card p-8 text-center text-secondary">
-            No remote configs available.
-          </div>
+          <div v-if="loadingRemote" class="py-8 text-center text-secondary">Loading available configs...</div>
+          <div v-else-if="remoteRepos.length === 0" class="card p-8 text-center text-secondary">No remote configs available.</div>
           <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <ConfigCard
-              v-for="repo in remoteRepos"
-              :key="repo.url || repo.name"
-              :config="repo"
-              mode="remote"
-              :installed="isInstalled(repo.name)"
-              :installing="installingSet.has(repo.url)"
-              @install="handleInstall"
-            />
+            <ConfigCard v-for="repo in remoteRepos" :key="repo.url || repo.name" :config="repo" mode="remote" :installed="isInstalled(repo.name)" :installing="installingSet.has(repo.url)" @install="handleInstall" />
           </div>
         </el-tab-pane>
       </el-tabs>

@@ -1,31 +1,15 @@
 <template>
   <div class="zone-slot h-full w-full flex flex-col overflow-hidden">
     <!-- Edit-mode header overlay: kebab menu + orientation warning -->
-    <PanelHeader
-      v-if="layout.editMode && panel"
-      :panel-id="slotInfo.panelId"
-      :zone-id="slotInfo.zoneId"
-      :instance-id="instanceId || ''"
-      @replace="onReplace"
-      @close="onClose"
-      @pop-out="onPopOut"
-    />
+    <PanelHeader v-if="layout.editMode && panel" :panel-id="slotInfo.panelId" :zone-id="slotInfo.zoneId" :instance-id="instanceId || ''" @replace="onReplace" @close="onClose" @pop-out="onPopOut" />
 
     <div class="flex-1 min-h-0">
       <component :is="panel.component" v-if="panel && panel.component" v-bind="resolvedProps" />
-      <div v-else class="h-full w-full flex items-center justify-center text-[11px] text-warm-400">
-        no such panel: {{ slotInfo.panelId }}
-      </div>
+      <div v-else class="h-full w-full flex items-center justify-center text-[11px] text-warm-400">no such panel: {{ slotInfo.panelId }}</div>
     </div>
 
     <!-- Panel picker modal (edit mode replace action) -->
-    <PanelPicker
-      v-if="layout.editMode"
-      v-model="pickerOpen"
-      :zone-id="slotInfo.zoneId"
-      :current-panel-id="slotInfo.panelId"
-      @select="onPick"
-    />
+    <PanelPicker v-if="layout.editMode" v-model="pickerOpen" :zone-id="slotInfo.zoneId" :current-panel-id="slotInfo.panelId" @select="onPick" />
   </div>
 </template>
 
@@ -63,11 +47,7 @@ function onPopOut() {
   const inst = props.instanceId || "global"
   const panelId = props.slotInfo.panelId
   const url = `/detached/${encodeURIComponent(inst)}--${encodeURIComponent(panelId)}`
-  const popup = window.open(
-    url,
-    `kt-${inst}-${panelId}`,
-    "width=720,height=520,menubar=no,toolbar=no",
-  )
+  const popup = window.open(url, `kt-${inst}-${panelId}`, "width=720,height=520,menubar=no,toolbar=no")
   if (popup) {
     layout.markDetached(panelId, inst)
     layout.removeSlot(props.slotInfo.zoneId, panelId)

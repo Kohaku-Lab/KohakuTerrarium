@@ -1,23 +1,9 @@
 <template>
-  <el-dialog
-    v-model="open"
-    :show-close="false"
-    :close-on-click-modal="true"
-    width="520px"
-    class="command-palette-dialog"
-    align-center
-    @close="onClose"
-  >
+  <el-dialog v-model="open" :show-close="false" :close-on-click-modal="true" width="520px" class="command-palette-dialog" align-center @close="onClose">
     <template #header>
       <div class="flex items-center gap-2">
         <div class="i-carbon-search text-warm-400" />
-        <input
-          ref="inputEl"
-          v-model="query"
-          class="flex-1 bg-transparent outline-none text-sm text-warm-700 dark:text-warm-300"
-          placeholder="Type a command…  (> @ # /)"
-          @keydown="onKey"
-        />
+        <input ref="inputEl" v-model="query" class="flex-1 bg-transparent outline-none text-sm text-warm-700 dark:text-warm-300" placeholder="Type a command…  (> @ # /)" @keydown="onKey" />
         <span class="text-[10px] text-warm-400 uppercase tracking-wider font-mono">
           {{ palette.parsed.prefix }}
         </span>
@@ -25,18 +11,7 @@
     </template>
 
     <div class="max-h-80 overflow-y-auto text-xs">
-      <button
-        v-for="(r, idx) in results"
-        :key="r.id"
-        class="flex items-center gap-3 w-full px-3 py-2 text-left rounded transition-colors"
-        :class="
-          idx === highlighted
-            ? 'bg-iolite/10 text-iolite'
-            : 'text-warm-600 dark:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800'
-        "
-        @click="commit(r)"
-        @mouseenter="highlighted = idx"
-      >
+      <button v-for="(r, idx) in results" :key="r.id" class="flex items-center gap-3 w-full px-3 py-2 text-left rounded transition-colors" :class="idx === highlighted ? 'bg-iolite/10 text-iolite' : 'text-warm-600 dark:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800'" @click="commit(r)" @mouseenter="highlighted = idx">
         <div v-if="r.icon" :class="r.icon" class="text-[14px] shrink-0" />
         <div class="flex-1 min-w-0">
           <div class="font-medium truncate">{{ r.label }}</div>
@@ -44,13 +19,9 @@
             {{ r.description }}
           </div>
         </div>
-        <span v-if="r.shortcut" class="text-[9px] font-mono text-warm-400 shrink-0">{{
-          r.shortcut
-        }}</span>
+        <span v-if="r.shortcut" class="text-[9px] font-mono text-warm-400 shrink-0">{{ r.shortcut }}</span>
       </button>
-      <div v-if="results.length === 0" class="text-warm-400 text-center py-6 italic">
-        No matches
-      </div>
+      <div v-if="results.length === 0" class="text-warm-400 text-center py-6 italic">No matches</div>
     </div>
   </el-dialog>
 </template>

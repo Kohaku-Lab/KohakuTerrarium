@@ -1,43 +1,17 @@
 <template>
-  <div
-    v-if="layout.editMode"
-    class="edit-banner flex items-center gap-3 px-4 h-9 text-xs bg-amber/15 border-b border-amber/40 text-amber-shadow dark:text-amber-light"
-  >
+  <div v-if="layout.editMode" class="edit-banner flex items-center gap-3 px-4 h-9 text-xs bg-amber/15 border-b border-amber/40 text-amber-shadow dark:text-amber-light">
     <div class="i-carbon-settings-edit text-base" />
     <span class="font-medium">Layout edit mode</span>
     <span class="text-warm-500">·</span>
     <span class="text-warm-600 dark:text-warm-400">{{ activePresetLabel }}</span>
-    <span v-if="layout.editModeDirty" class="text-amber font-semibold text-[10px] uppercase"
-      >● unsaved</span
-    >
+    <span v-if="layout.editModeDirty" class="text-amber font-semibold text-[10px] uppercase">● unsaved</span>
     <div class="flex-1" />
-    <button
-      class="px-2 py-0.5 rounded bg-amber/20 hover:bg-amber/30 text-amber-shadow transition-colors"
-      :title="canSave ? 'Save changes' : 'Builtin preset — will open Save As'"
-      @click="onSave"
-    >
+    <button class="px-2 py-0.5 rounded bg-amber/20 hover:bg-amber/30 text-amber-shadow transition-colors" :title="canSave ? 'Save changes' : 'Builtin preset — will open Save As'" @click="onSave">
       {{ canSave ? "Save" : "Save as..." }}
     </button>
-    <button
-      class="px-2 py-0.5 rounded bg-warm-100 dark:bg-warm-800 hover:bg-warm-200 dark:hover:bg-warm-700 text-warm-700 dark:text-warm-300 transition-colors"
-      @click="onSaveAs"
-    >
-      Save as new
-    </button>
-    <button
-      class="px-2 py-0.5 rounded bg-warm-100 dark:bg-warm-800 hover:bg-warm-200 dark:hover:bg-warm-700 text-warm-700 dark:text-warm-300 transition-colors"
-      :disabled="!layout.editModeDirty"
-      @click="onRevert"
-    >
-      Revert
-    </button>
-    <button
-      class="px-2 py-0.5 rounded bg-warm-100 dark:bg-warm-800 hover:bg-warm-200 dark:hover:bg-warm-700 text-warm-700 dark:text-warm-300 transition-colors"
-      title="Exit edit mode (Esc)"
-      @click="onExit"
-    >
-      Exit
-    </button>
+    <button class="px-2 py-0.5 rounded bg-warm-100 dark:bg-warm-800 hover:bg-warm-200 dark:hover:bg-warm-700 text-warm-700 dark:text-warm-300 transition-colors" @click="onSaveAs">Save as new</button>
+    <button class="px-2 py-0.5 rounded bg-warm-100 dark:bg-warm-800 hover:bg-warm-200 dark:hover:bg-warm-700 text-warm-700 dark:text-warm-300 transition-colors" :disabled="!layout.editModeDirty" @click="onRevert">Revert</button>
+    <button class="px-2 py-0.5 rounded bg-warm-100 dark:bg-warm-800 hover:bg-warm-200 dark:hover:bg-warm-700 text-warm-700 dark:text-warm-300 transition-colors" title="Exit edit mode (Esc)" @click="onExit">Exit</button>
   </div>
 </template>
 
@@ -49,9 +23,7 @@ import { LAYOUT_EVENTS, fireLayoutSaveAsRequested, onLayoutEvent } from "@/utils
 
 const layout = useLayoutStore()
 
-const activePresetLabel = computed(
-  () => layout.activePreset?.label || layout.activePreset?.id || "—",
-)
+const activePresetLabel = computed(() => layout.activePreset?.label || layout.activePreset?.id || "—")
 
 // Builtin presets can't be saved over (they reset on reload). Force
 // users to Save as new in that case.

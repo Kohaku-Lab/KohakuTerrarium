@@ -7,63 +7,23 @@
         <!-- API Keys tab -->
         <el-tab-pane label="API Keys" name="keys">
           <div class="flex flex-col gap-3 max-w-xl">
-            <p class="text-xs text-warm-400 mb-2">
-              API keys are stored in ~/.kohakuterrarium/api_keys.yaml
-            </p>
+            <p class="text-xs text-warm-400 mb-2">API keys are stored in ~/.kohakuterrarium/api_keys.yaml</p>
             <div v-for="p in providers" :key="p.provider" class="card p-4 flex items-center gap-3">
               <div class="flex-1">
                 <div class="flex items-center gap-2 mb-1">
                   <span class="font-medium text-warm-700 dark:text-warm-300">{{ p.provider }}</span>
-                  <span
-                    class="text-[10px] px-1.5 py-0.5 rounded"
-                    :class="
-                      p.available
-                        ? 'bg-aquamarine/15 text-aquamarine'
-                        : 'bg-warm-200 dark:bg-warm-700 text-warm-400'
-                    "
-                    >{{ p.available ? "Active" : "No key" }}</span
-                  >
+                  <span class="text-[10px] px-1.5 py-0.5 rounded" :class="p.available ? 'bg-aquamarine/15 text-aquamarine' : 'bg-warm-200 dark:bg-warm-700 text-warm-400'">{{ p.available ? "Active" : "No key" }}</span>
                 </div>
-                <div
-                  v-if="p.masked_key && p.provider !== 'codex'"
-                  class="text-[11px] text-warm-400 font-mono"
-                >
+                <div v-if="p.masked_key && p.provider !== 'codex'" class="text-[11px] text-warm-400 font-mono">
                   {{ p.masked_key }}
                 </div>
-                <div v-if="p.provider === 'codex'" class="text-[11px] text-warm-400">
-                  OAuth login — use <code class="font-mono">kt login</code> in terminal
-                </div>
+                <div v-if="p.provider === 'codex'" class="text-[11px] text-warm-400">OAuth login — use <code class="font-mono">kt login</code> in terminal</div>
               </div>
               <template v-if="p.provider !== 'codex'">
-                <el-input
-                  v-if="editingKey === p.provider"
-                  v-model="keyInput"
-                  size="small"
-                  type="password"
-                  show-password
-                  placeholder="Enter API key"
-                  class="!w-60"
-                  @keyup.enter="saveKey(p.provider)"
-                />
-                <el-button
-                  v-if="editingKey === p.provider"
-                  size="small"
-                  type="primary"
-                  @click="saveKey(p.provider)"
-                  >Save</el-button
-                >
-                <el-button v-if="editingKey === p.provider" size="small" @click="editingKey = ''"
-                  >Cancel</el-button
-                >
-                <el-button
-                  v-else
-                  size="small"
-                  @click="
-                    editingKey = p.provider
-                    keyInput = ''
-                  "
-                  >{{ p.has_key ? "Change" : "Set Key" }}</el-button
-                >
+                <el-input v-if="editingKey === p.provider" v-model="keyInput" size="small" type="password" show-password placeholder="Enter API key" class="!w-60" @keyup.enter="saveKey(p.provider)" />
+                <el-button v-if="editingKey === p.provider" size="small" type="primary" @click="saveKey(p.provider)">Save</el-button>
+                <el-button v-if="editingKey === p.provider" size="small" @click="editingKey = ''">Cancel</el-button>
+                <el-button v-else size="small" @click="startEditKey(p.provider)">{{ p.has_key ? "Change" : "Set Key" }}</el-button>
               </template>
             </div>
           </div>
@@ -72,18 +32,13 @@
         <!-- Custom Models tab -->
         <el-tab-pane label="Custom Models" name="models">
           <div class="flex flex-col gap-3 max-w-2xl">
-            <p class="text-xs text-warm-400 mb-2">
-              Custom model profiles are stored in ~/.kohakuterrarium/llm_profiles.yaml
-            </p>
+            <p class="text-xs text-warm-400 mb-2">Custom model profiles are stored in ~/.kohakuterrarium/llm_profiles.yaml</p>
 
             <!-- Existing profiles -->
             <div v-for="p in profiles" :key="p.name" class="card p-4">
               <div class="flex items-center gap-2 mb-2">
                 <span class="font-medium text-warm-700 dark:text-warm-300">{{ p.name }}</span>
-                <span
-                  class="text-[10px] px-1.5 py-0.5 rounded bg-iolite/15 text-iolite font-mono"
-                  >{{ p.model }}</span
-                >
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-iolite/15 text-iolite font-mono">{{ p.model }}</span>
                 <span class="text-[10px] text-warm-400">{{ p.provider }}</span>
                 <div class="flex-1" />
                 <el-button size="small" @click="editProfile(p)">Edit</el-button>
@@ -100,9 +55,7 @@
               </div>
             </div>
 
-            <div v-if="profiles.length === 0" class="text-warm-400 text-sm py-4 text-center">
-              No custom profiles yet
-            </div>
+            <div v-if="profiles.length === 0" class="text-warm-400 text-sm py-4 text-center">No custom profiles yet</div>
 
             <!-- Add / Edit form -->
             <div class="card p-4 border-l-3 border-l-iolite dark:border-l-iolite-light">
@@ -112,12 +65,7 @@
               <div class="grid grid-cols-2 gap-3">
                 <div>
                   <label class="text-[11px] text-warm-400 mb-1 block">Profile Name *</label>
-                  <el-input
-                    v-model="form.name"
-                    size="small"
-                    placeholder="my-model"
-                    :disabled="!!editingProfile"
-                  />
+                  <el-input v-model="form.name" size="small" placeholder="my-model" :disabled="!!editingProfile" />
                 </div>
                 <div>
                   <label class="text-[11px] text-warm-400 mb-1 block">Model ID *</label>
@@ -135,40 +83,19 @@
                 </div>
                 <div>
                   <label class="text-[11px] text-warm-400 mb-1 block">Base URL (optional)</label>
-                  <el-input
-                    v-model="form.base_url"
-                    size="small"
-                    placeholder="https://api.openai.com/v1"
-                  />
+                  <el-input v-model="form.base_url" size="small" placeholder="https://api.openai.com/v1" />
                 </div>
                 <div>
                   <label class="text-[11px] text-warm-400 mb-1 block">Max Context</label>
-                  <el-input-number
-                    v-model="form.max_context"
-                    size="small"
-                    :min="1000"
-                    :step="1000"
-                  />
+                  <el-input-number v-model="form.max_context" size="small" :min="1000" :step="1000" />
                 </div>
                 <div>
                   <label class="text-[11px] text-warm-400 mb-1 block">Temperature</label>
-                  <el-input-number
-                    v-model="form.temperature"
-                    size="small"
-                    :min="0"
-                    :max="2"
-                    :step="0.1"
-                    :precision="1"
-                  />
+                  <el-input-number v-model="form.temperature" size="small" :min="0" :max="2" :step="0.1" :precision="1" />
                 </div>
               </div>
               <div class="flex gap-2 mt-3">
-                <el-button
-                  type="primary"
-                  size="small"
-                  @click="saveProfile"
-                  :disabled="!form.name || !form.model"
-                >
+                <el-button type="primary" size="small" :disabled="!form.name || !form.model" @click="saveProfile">
                   {{ editingProfile ? "Update" : "Add Profile" }}
                 </el-button>
                 <el-button v-if="editingProfile" size="small" @click="resetForm">Cancel</el-button>
@@ -179,18 +106,13 @@
         <!-- MCP Servers tab -->
         <el-tab-pane label="MCP Servers" name="mcp">
           <div class="flex flex-col gap-3 max-w-2xl">
-            <p class="text-xs text-warm-400 mb-2">
-              MCP servers provide external tools to agents via the Model Context Protocol. Agents
-              access them through mcp_list / mcp_call tools.
-            </p>
+            <p class="text-xs text-warm-400 mb-2">MCP servers provide external tools to agents via the Model Context Protocol. Agents access them through mcp_list / mcp_call tools.</p>
 
             <!-- Existing servers -->
             <div v-for="srv in mcpServers" :key="srv.name" class="card p-4">
               <div class="flex items-center gap-2 mb-2">
                 <span class="font-medium text-warm-700 dark:text-warm-300">{{ srv.name }}</span>
-                <span
-                  class="text-[10px] px-1.5 py-0.5 rounded bg-sapphire/15 text-sapphire dark:text-sapphire-light font-mono"
-                >
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-sapphire/15 text-sapphire dark:text-sapphire-light font-mono">
                   {{ srv.transport }}
                 </span>
                 <div class="flex-1" />
@@ -206,9 +128,7 @@
               </div>
             </div>
 
-            <div v-if="mcpServers.length === 0" class="text-warm-400 text-sm py-4 text-center">
-              No MCP servers configured
-            </div>
+            <div v-if="mcpServers.length === 0" class="text-warm-400 text-sm py-4 text-center">No MCP servers configured</div>
 
             <!-- Add form -->
             <div class="card p-4 border-l-3 border-l-sapphire dark:border-l-sapphire-light">
@@ -231,32 +151,15 @@
                 </div>
                 <div v-if="mcpForm.transport === 'stdio'">
                   <label class="text-[11px] text-warm-400 mb-1 block">Args (space-separated)</label>
-                  <el-input
-                    v-model="mcpForm.argsStr"
-                    size="small"
-                    placeholder="-y @modelcontextprotocol/server-filesystem ./"
-                  />
+                  <el-input v-model="mcpForm.argsStr" size="small" placeholder="-y @modelcontextprotocol/server-filesystem ./" />
                 </div>
                 <div v-if="mcpForm.transport === 'http'" class="col-span-2">
                   <label class="text-[11px] text-warm-400 mb-1 block">URL *</label>
-                  <el-input
-                    v-model="mcpForm.url"
-                    size="small"
-                    placeholder="https://mcp.example.com/api"
-                  />
+                  <el-input v-model="mcpForm.url" size="small" placeholder="https://mcp.example.com/api" />
                 </div>
               </div>
               <div class="flex gap-2 mt-3">
-                <el-button
-                  type="primary"
-                  size="small"
-                  @click="addMCPServer"
-                  :disabled="
-                    !mcpForm.name ||
-                    (mcpForm.transport === 'stdio' ? !mcpForm.command : !mcpForm.url)
-                  "
-                  >Add Server</el-button
-                >
+                <el-button type="primary" size="small" :disabled="!mcpForm.name || (mcpForm.transport === 'stdio' ? !mcpForm.command : !mcpForm.url)" @click="addMCPServer">Add Server</el-button>
               </div>
             </div>
           </div>
@@ -264,21 +167,15 @@
         <!-- Account (Codex) tab -->
         <el-tab-pane label="Account" name="account">
           <div class="flex flex-col gap-4 max-w-xl">
-            <div v-if="codexUsageLoading" class="text-warm-400 text-sm py-4 text-center">
-              Loading…
-            </div>
+            <div v-if="codexUsageLoading" class="text-warm-400 text-sm py-4 text-center">Loading…</div>
             <div v-else-if="codexUsageError" class="card p-4 border-l-3 border-l-coral">
               <p class="text-sm text-warm-600 dark:text-warm-400">{{ codexUsageError }}</p>
-              <p class="text-xs text-warm-400 mt-1">
-                Run <code class="font-mono">kt login codex</code> to authenticate.
-              </p>
+              <p class="text-xs text-warm-400 mt-1">Run <code class="font-mono">kt login codex</code> to authenticate.</p>
             </div>
             <template v-else-if="codexUsage">
               <!-- Plan header -->
               <div class="card p-4 flex items-center gap-3">
-                <div
-                  class="w-8 h-8 rounded-full bg-iolite/15 flex items-center justify-center shrink-0"
-                >
+                <div class="w-8 h-8 rounded-full bg-iolite/15 flex items-center justify-center shrink-0">
                   <div class="i-carbon-user-avatar text-iolite text-sm" />
                 </div>
                 <div>
@@ -287,9 +184,7 @@
                   </div>
                   <div class="text-[11px] text-warm-400 capitalize">
                     {{ codexUsage.plan_type || "Unknown plan" }}
-                    <span v-if="codexUsage.limit_reached" class="ml-2 text-coral"
-                      >⚠ Limit reached</span
-                    >
+                    <span v-if="codexUsage.limit_reached" class="ml-2 text-coral">⚠ Limit reached</span>
                   </div>
                 </div>
               </div>
@@ -297,47 +192,25 @@
               <!-- Primary window -->
               <div v-if="codexUsage.primary_window" class="card p-4">
                 <div class="flex items-center justify-between mb-2">
-                  <span class="text-xs font-medium text-warm-600 dark:text-warm-400"
-                    >Short-term window</span
-                  >
-                  <span class="text-[11px] text-warm-400"
-                    >Resets {{ formatReset(codexUsage.primary_window.reset_after_seconds) }}</span
-                  >
+                  <span class="text-xs font-medium text-warm-600 dark:text-warm-400">Short-term window</span>
+                  <span class="text-[11px] text-warm-400">Resets {{ formatReset(codexUsage.primary_window.reset_after_seconds) }}</span>
                 </div>
                 <div class="h-2 rounded-full bg-warm-200 dark:bg-warm-700 overflow-hidden">
-                  <div
-                    class="h-full rounded-full transition-all"
-                    :class="codexUsage.primary_window.used_percent > 80 ? 'bg-coral' : 'bg-iolite'"
-                    :style="`width: ${codexUsage.primary_window.used_percent}%`"
-                  />
+                  <div class="h-full rounded-full transition-all" :class="codexUsage.primary_window.used_percent > 80 ? 'bg-coral' : 'bg-iolite'" :style="`width: ${codexUsage.primary_window.used_percent}%`" />
                 </div>
-                <div class="text-[11px] text-warm-400 mt-1">
-                  {{ codexUsage.primary_window.used_percent }}% used
-                </div>
+                <div class="text-[11px] text-warm-400 mt-1">{{ codexUsage.primary_window.used_percent }}% used</div>
               </div>
 
               <!-- Secondary window -->
               <div v-if="codexUsage.secondary_window" class="card p-4">
                 <div class="flex items-center justify-between mb-2">
-                  <span class="text-xs font-medium text-warm-600 dark:text-warm-400"
-                    >Weekly window</span
-                  >
-                  <span class="text-[11px] text-warm-400"
-                    >Resets {{ formatReset(codexUsage.secondary_window.reset_after_seconds) }}</span
-                  >
+                  <span class="text-xs font-medium text-warm-600 dark:text-warm-400">Weekly window</span>
+                  <span class="text-[11px] text-warm-400">Resets {{ formatReset(codexUsage.secondary_window.reset_after_seconds) }}</span>
                 </div>
                 <div class="h-2 rounded-full bg-warm-200 dark:bg-warm-700 overflow-hidden">
-                  <div
-                    class="h-full rounded-full transition-all"
-                    :class="
-                      codexUsage.secondary_window.used_percent > 80 ? 'bg-coral' : 'bg-taaffeite'
-                    "
-                    :style="`width: ${codexUsage.secondary_window.used_percent}%`"
-                  />
+                  <div class="h-full rounded-full transition-all" :class="codexUsage.secondary_window.used_percent > 80 ? 'bg-coral' : 'bg-taaffeite'" :style="`width: ${codexUsage.secondary_window.used_percent}%`" />
                 </div>
-                <div class="text-[11px] text-warm-400 mt-1">
-                  {{ codexUsage.secondary_window.used_percent }}% used
-                </div>
+                <div class="text-[11px] text-warm-400 mt-1">{{ codexUsage.secondary_window.used_percent }}% used</div>
               </div>
 
               <!-- Credits -->
@@ -345,15 +218,9 @@
                 <div class="text-xs font-medium text-warm-600 dark:text-warm-400 mb-2">Credits</div>
                 <div class="text-sm text-warm-700 dark:text-warm-300">
                   <span v-if="codexUsage.credits.unlimited">Unlimited</span>
-                  <span v-else-if="codexUsage.credits.has_credits"
-                    >Balance: {{ codexUsage.credits.balance }}</span
-                  >
+                  <span v-else-if="codexUsage.credits.has_credits">Balance: {{ codexUsage.credits.balance }}</span>
                   <span v-else class="text-warm-400">No credits</span>
-                  <span
-                    v-if="codexUsage.credits.overage_limit_reached"
-                    class="ml-2 text-coral text-[11px]"
-                    >Overage limit reached</span
-                  >
+                  <span v-if="codexUsage.credits.overage_limit_reached" class="ml-2 text-coral text-[11px]">Overage limit reached</span>
                 </div>
               </div>
 
@@ -369,12 +236,7 @@
               <div class="font-medium text-warm-700 dark:text-warm-300 mb-3">Appearance</div>
               <div class="flex items-center justify-between">
                 <span class="text-sm text-warm-600 dark:text-warm-400">Theme</span>
-                <el-switch
-                  :model-value="theme.dark"
-                  active-text="Dark"
-                  inactive-text="Light"
-                  @change="theme.toggle()"
-                />
+                <el-switch :model-value="theme.dark" active-text="Dark" inactive-text="Light" @change="theme.toggle()" />
               </div>
             </div>
           </div>
@@ -428,6 +290,11 @@ async function loadKeys() {
   } catch {
     /* ignore */
   }
+}
+
+function startEditKey(provider) {
+  editingKey.value = provider
+  keyInput.value = ""
 }
 
 async function saveKey(provider) {

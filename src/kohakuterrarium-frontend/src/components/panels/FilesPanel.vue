@@ -1,42 +1,20 @@
 <template>
   <div class="h-full flex flex-col bg-warm-50 dark:bg-warm-900">
     <!-- Panel header -->
-    <div
-      class="flex items-center gap-2 px-3 py-2 border-b border-warm-200 dark:border-warm-700 shrink-0"
-    >
+    <div class="flex items-center gap-2 px-3 py-2 border-b border-warm-200 dark:border-warm-700 shrink-0">
       <div class="i-carbon-folder text-sm text-warm-500" />
-      <span class="text-xs font-medium text-warm-500 dark:text-warm-400 truncate flex-1"
-        >Files</span
-      >
-      <button
-        class="w-6 h-6 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors"
-        title="Refresh"
-        @click="treeRef?.refresh()"
-      >
+      <span class="text-xs font-medium text-warm-500 dark:text-warm-400 truncate flex-1">Files</span>
+      <button class="w-6 h-6 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" title="Refresh" @click="treeRef?.refresh()">
         <div class="i-carbon-renew text-sm" />
       </button>
     </div>
 
     <!-- Tree / Touched segmented control -->
     <div class="flex items-center gap-0.5 px-3 pt-2 pb-1 shrink-0 text-[10px]">
-      <button
-        class="px-2 py-0.5 rounded transition-colors"
-        :class="view === 'tree' ? 'bg-iolite/15 text-iolite' : 'text-warm-400 hover:text-warm-600'"
-        @click="view = 'tree'"
-      >
-        Tree
-      </button>
-      <button
-        class="px-2 py-0.5 rounded transition-colors"
-        :class="
-          view === 'touched' ? 'bg-iolite/15 text-iolite' : 'text-warm-400 hover:text-warm-600'
-        "
-        @click="view = 'touched'"
-      >
+      <button class="px-2 py-0.5 rounded transition-colors" :class="view === 'tree' ? 'bg-iolite/15 text-iolite' : 'text-warm-400 hover:text-warm-600'" @click="view = 'tree'">Tree</button>
+      <button class="px-2 py-0.5 rounded transition-colors" :class="view === 'touched' ? 'bg-iolite/15 text-iolite' : 'text-warm-400 hover:text-warm-600'" @click="view = 'touched'">
         Touched
-        <span v-if="touchedCount > 0" class="ml-1 text-[9px] font-mono opacity-70">{{
-          touchedCount
-        }}</span>
+        <span v-if="touchedCount > 0" class="ml-1 text-[9px] font-mono opacity-70">{{ touchedCount }}</span>
       </button>
     </div>
 
@@ -44,9 +22,7 @@
     <div class="flex-1 min-h-0">
       <FileTree v-if="view === 'tree'" ref="treeRef" :root="root" @select="onSelect" />
       <div v-else class="h-full overflow-y-auto px-3 py-2 text-[11px]">
-        <div v-if="touchedCount === 0" class="text-warm-400 text-center py-6">
-          No files touched yet
-        </div>
+        <div v-if="touchedCount === 0" class="text-warm-400 text-center py-6">No files touched yet</div>
         <template v-else>
           <template v-for="action in ['wrote', 'read', 'errored', 'exec']" :key="action">
             <div v-if="files.grouped[action].length > 0" class="mb-3">
@@ -55,18 +31,9 @@
                 <span class="opacity-60">({{ files.grouped[action].length }})</span>
               </div>
               <div class="flex flex-col gap-0.5">
-                <button
-                  v-for="entry in files.grouped[action]"
-                  :key="entry.turn + entry.path"
-                  class="flex items-center gap-2 px-2 py-1 rounded hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors text-left"
-                  @click="onSelect(entry.path)"
-                >
-                  <span class="w-3 shrink-0 text-center" :class="actionColor(action)">{{
-                    actionSymbol(action)
-                  }}</span>
-                  <span class="font-mono text-warm-700 dark:text-warm-300 truncate">{{
-                    shortPath(entry.path)
-                  }}</span>
+                <button v-for="entry in files.grouped[action]" :key="entry.turn + entry.path" class="flex items-center gap-2 px-2 py-1 rounded hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors text-left" @click="onSelect(entry.path)">
+                  <span class="w-3 shrink-0 text-center" :class="actionColor(action)">{{ actionSymbol(action) }}</span>
+                  <span class="font-mono text-warm-700 dark:text-warm-300 truncate">{{ shortPath(entry.path) }}</span>
                   <span class="flex-1" />
                   <span class="text-warm-400 text-[9px] font-mono">
                     {{ entry.tool }}

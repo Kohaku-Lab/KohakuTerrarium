@@ -1,28 +1,19 @@
 <template>
-  <div
-    class="panel-header flex items-center gap-1 px-2 h-6 border-b border-warm-200/70 dark:border-warm-700/70 bg-warm-100/60 dark:bg-warm-900/60 text-[10px] text-warm-500 shrink-0"
-  >
+  <div class="panel-header flex items-center gap-1 px-2 h-6 border-b border-warm-200/70 dark:border-warm-700/70 bg-warm-100/60 dark:bg-warm-900/60 text-[10px] text-warm-500 shrink-0">
     <div v-if="icon" :class="icon" class="text-[12px]" />
     <span class="font-medium truncate">{{ label || panelId }}</span>
 
     <div class="flex-1" />
 
     <!-- Orientation warning (edit mode only) -->
-    <span
-      v-if="layout.editMode && misplaced"
-      class="text-amber text-[9px] flex items-center gap-0.5"
-      :title="`Prefers ${preferredZoneLabel}`"
-    >
+    <span v-if="layout.editMode && misplaced" class="text-amber text-[9px] flex items-center gap-0.5" :title="`Prefers ${preferredZoneLabel}`">
       <span class="i-carbon-warning-alt text-[11px]" />
       <span>prefers {{ preferredZoneLabel }}</span>
     </span>
 
     <!-- Kebab menu, edit mode only -->
     <el-dropdown v-if="layout.editMode" trigger="click" @command="onCommand">
-      <button
-        class="w-5 h-5 flex items-center justify-center rounded hover:bg-warm-200 dark:hover:bg-warm-800 text-warm-500"
-        title="Panel menu"
-      >
+      <button class="w-5 h-5 flex items-center justify-center rounded hover:bg-warm-200 dark:hover:bg-warm-800 text-warm-500" title="Panel menu">
         <div class="i-carbon-overflow-menu-vertical text-[11px]" />
       </button>
       <template #dropdown>

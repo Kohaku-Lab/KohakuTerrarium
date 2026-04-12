@@ -1,35 +1,19 @@
 <template>
   <div class="h-full flex bg-warm-50 dark:bg-warm-900 overflow-hidden">
     <!-- Vertical tab rail on the left -->
-    <div
-      class="flex flex-col gap-1 py-2 px-1 border-r border-warm-200 dark:border-warm-700 shrink-0"
-    >
-      <button
-        v-for="t in tabs"
-        :key="t.id"
-        class="w-8 h-8 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors"
-        :class="activeTab === t.id ? 'bg-iolite/10 text-iolite' : ''"
-        :title="t.label"
-        @click="activeTab = t.id"
-      >
+    <div class="flex flex-col gap-1 py-2 px-1 border-r border-warm-200 dark:border-warm-700 shrink-0">
+      <button v-for="t in tabs" :key="t.id" class="w-8 h-8 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" :class="activeTab === t.id ? 'bg-iolite/10 text-iolite' : ''" :title="t.label" @click="activeTab = t.id">
         <div :class="t.icon" class="text-sm" />
       </button>
     </div>
 
     <!-- Tab body -->
     <div class="flex-1 min-w-0 flex flex-col overflow-hidden">
-      <div
-        class="flex items-center gap-2 px-3 py-2 border-b border-warm-200 dark:border-warm-700 shrink-0"
-      >
+      <div class="flex items-center gap-2 px-3 py-2 border-b border-warm-200 dark:border-warm-700 shrink-0">
         <span class="text-xs font-medium text-warm-500 dark:text-warm-400 flex-1">
           {{ activeLabel }}
         </span>
-        <button
-          v-if="activeTab === 'scratchpad'"
-          class="w-6 h-6 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors"
-          title="Refresh"
-          @click="refreshScratchpad"
-        >
+        <button v-if="activeTab === 'scratchpad'" class="w-6 h-6 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" title="Refresh" @click="refreshScratchpad">
           <div class="i-carbon-renew text-sm" />
         </button>
       </div>
@@ -37,29 +21,17 @@
       <div class="flex-1 overflow-y-auto px-3 py-2 text-xs">
         <!-- Scratchpad tab -->
         <template v-if="activeTab === 'scratchpad'">
-          <div v-if="loading && !entries.length" class="text-warm-400 py-6 text-center">
-            Loading...
-          </div>
+          <div v-if="loading && !entries.length" class="text-warm-400 py-6 text-center">Loading...</div>
           <div v-else-if="errorMsg" class="text-coral py-4 text-[11px]">
             {{ errorMsg }}
           </div>
-          <div v-else-if="entries.length === 0" class="text-warm-400 py-6 text-center">
-            Scratchpad is empty
-          </div>
+          <div v-else-if="entries.length === 0" class="text-warm-400 py-6 text-center">Scratchpad is empty</div>
           <div v-else class="flex flex-col gap-2">
-            <div
-              v-for="[key, value] in entries"
-              :key="key"
-              class="flex flex-col gap-0.5 rounded border border-warm-200 dark:border-warm-700 px-2 py-1.5"
-            >
+            <div v-for="[key, value] in entries" :key="key" class="flex flex-col gap-0.5 rounded border border-warm-200 dark:border-warm-700 px-2 py-1.5">
               <div class="flex items-center gap-2">
                 <span class="text-iolite font-mono text-[10px]">{{ key }}</span>
                 <span class="flex-1" />
-                <button
-                  class="text-warm-400 hover:text-coral transition-colors"
-                  title="Delete"
-                  @click="deleteKey(key)"
-                >
+                <button class="text-warm-400 hover:text-coral transition-colors" title="Delete" @click="deleteKey(key)">
                   <div class="i-carbon-close text-[10px]" />
                 </button>
               </div>
@@ -73,13 +45,7 @@
         <!-- Memory tab -->
         <template v-else-if="activeTab === 'memory'">
           <div class="flex flex-col gap-2">
-            <el-input
-              v-model="memQuery"
-              placeholder="Search session memory..."
-              size="small"
-              clearable
-              @keyup.enter="runMemorySearch"
-            >
+            <el-input v-model="memQuery" placeholder="Search session memory..." size="small" clearable @keyup.enter="runMemorySearch">
               <template #append>
                 <el-button @click="runMemorySearch">
                   <div class="i-carbon-search text-[11px]" />
@@ -87,46 +53,21 @@
               </template>
             </el-input>
             <div class="flex items-center gap-1">
-              <button
-                v-for="m in ['auto', 'fts', 'semantic', 'hybrid']"
-                :key="m"
-                class="px-2 py-0.5 rounded text-[10px] transition-colors"
-                :class="
-                  memMode === m ? 'bg-iolite/10 text-iolite' : 'text-warm-400 hover:text-warm-600'
-                "
-                @click="
-                  memMode = m
-                  if (memSearched) runMemorySearch()
-                "
-              >
+              <button v-for="m in ['auto', 'fts', 'semantic', 'hybrid']" :key="m" class="px-2 py-0.5 rounded text-[10px] transition-colors" :class="memMode === m ? 'bg-iolite/10 text-iolite' : 'text-warm-400 hover:text-warm-600'" @click="setMemMode(m)">
                 {{ m }}
               </button>
             </div>
-            <div v-if="memLoading" class="text-warm-400 text-center py-4 text-[11px]">
-              Searching...
-            </div>
+            <div v-if="memLoading" class="text-warm-400 text-center py-4 text-[11px]">Searching...</div>
             <div v-else-if="memError" class="text-coral text-[11px] py-2">
               {{ memError }}
             </div>
-            <div
-              v-else-if="memSearched && memResults.length === 0"
-              class="text-warm-400 text-center py-4 text-[11px]"
-            >
-              No results for "{{ memQuery }}"
-            </div>
+            <div v-else-if="memSearched && memResults.length === 0" class="text-warm-400 text-center py-4 text-[11px]">No results for "{{ memQuery }}"</div>
             <div v-else-if="!memSearched" class="text-warm-400 text-center py-4 text-[11px]">
               <p>Type a query and press Enter to search.</p>
-              <p class="mt-1 text-[9px] opacity-70">
-                Memory search works on indexed sessions. Running sessions may not have indexed
-                events yet.
-              </p>
+              <p class="mt-1 text-[9px] opacity-70">Memory search works on indexed sessions. Running sessions may not have indexed events yet.</p>
             </div>
             <div v-else class="flex flex-col gap-1.5">
-              <div
-                v-for="(r, i) in memResults"
-                :key="i"
-                class="flex flex-col gap-0.5 rounded border border-warm-200 dark:border-warm-700 px-2 py-1.5"
-              >
+              <div v-for="(r, i) in memResults" :key="i" class="flex flex-col gap-0.5 rounded border border-warm-200 dark:border-warm-700 px-2 py-1.5">
                 <div class="flex items-center gap-2 text-[9px] text-warm-400 font-mono">
                   <span>{{ r.agent || "agent" }}</span>
                   <span>·</span>
@@ -146,25 +87,10 @@
 
         <!-- Tool History tab — shows tool calls from chat store -->
         <template v-else-if="activeTab === 'tools'">
-          <div v-if="toolCalls.length === 0" class="text-warm-400 py-6 text-center text-[11px]">
-            No tool calls in this session yet.
-          </div>
+          <div v-if="toolCalls.length === 0" class="text-warm-400 py-6 text-center text-[11px]">No tool calls in this session yet.</div>
           <div v-else class="flex flex-col gap-1">
-            <div
-              v-for="(tc, i) in toolCalls"
-              :key="i"
-              class="flex items-center gap-2 px-2 py-1 rounded text-[11px] hover:bg-warm-100 dark:hover:bg-warm-800"
-            >
-              <span
-                class="w-1.5 h-1.5 rounded-full shrink-0"
-                :class="
-                  tc.status === 'done'
-                    ? 'bg-aquamarine'
-                    : tc.status === 'error'
-                      ? 'bg-coral'
-                      : 'bg-amber kohaku-pulse'
-                "
-              />
+            <div v-for="(tc, i) in toolCalls" :key="i" class="flex items-center gap-2 px-2 py-1 rounded text-[11px] hover:bg-warm-100 dark:hover:bg-warm-800">
+              <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="tc.status === 'done' ? 'bg-aquamarine' : tc.status === 'error' ? 'bg-coral' : 'bg-amber kohaku-pulse'" />
               <span class="font-mono text-iolite truncate">{{ tc.name }}</span>
               <span class="flex-1" />
               <span class="text-warm-400 text-[9px] font-mono">{{ tc.status }}</span>
@@ -174,34 +100,17 @@
 
         <!-- Compaction tab — reads chat store's compact messages -->
         <template v-else-if="activeTab === 'compact'">
-          <div v-if="compactions.length === 0" class="text-warm-400 py-6 text-center text-[11px]">
-            No compactions in this session yet.
-          </div>
+          <div v-if="compactions.length === 0" class="text-warm-400 py-6 text-center text-[11px]">No compactions in this session yet.</div>
           <div v-else class="flex flex-col gap-2">
-            <div
-              v-for="c in compactions"
-              :key="c.id"
-              class="rounded border border-warm-200 dark:border-warm-700 px-2 py-1.5 text-[11px]"
-            >
+            <div v-for="c in compactions" :key="c.id" class="rounded border border-warm-200 dark:border-warm-700 px-2 py-1.5 text-[11px]">
               <div class="flex items-center gap-2 text-[9px] text-warm-400 font-mono">
                 <span>round {{ c.round }}</span>
                 <span>·</span>
                 <span>{{ c.messagesCompacted }} messages</span>
                 <span class="flex-1" />
-                <span
-                  class="px-1 rounded"
-                  :class="
-                    c.status === 'done'
-                      ? 'bg-aquamarine/10 text-aquamarine'
-                      : 'bg-amber/10 text-amber'
-                  "
-                  >{{ c.status }}</span
-                >
+                <span class="px-1 rounded" :class="c.status === 'done' ? 'bg-aquamarine/10 text-aquamarine' : 'bg-amber/10 text-amber'">{{ c.status }}</span>
               </div>
-              <div
-                v-if="c.summary"
-                class="mt-1 text-warm-600 dark:text-warm-400 break-words line-clamp-4"
-              >
+              <div v-if="c.summary" class="mt-1 text-warm-600 dark:text-warm-400 break-words line-clamp-4">
                 {{ c.summary }}
               </div>
             </div>
@@ -298,6 +207,11 @@ const memResults = ref([])
 const memLoading = ref(false)
 const memError = ref("")
 const memSearched = ref(false)
+
+function setMemMode(m) {
+  memMode.value = m
+  if (memSearched.value) runMemorySearch()
+}
 
 async function runMemorySearch() {
   const q = memQuery.value.trim()

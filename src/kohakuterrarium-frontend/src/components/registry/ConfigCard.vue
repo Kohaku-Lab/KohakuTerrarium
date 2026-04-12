@@ -18,22 +18,12 @@
 
     <!-- Local mode: model + tools + source -->
     <template v-if="mode === 'local'">
-      <div
-        v-if="config.model"
-        class="flex items-center gap-1.5 text-xs text-warm-500 dark:text-warm-400"
-      >
+      <div v-if="config.model" class="flex items-center gap-1.5 text-xs text-warm-500 dark:text-warm-400">
         <span class="i-carbon-machine-learning-model" />
         <span class="font-mono">{{ config.model }}</span>
       </div>
       <div v-if="config.tools && config.tools.length" class="flex flex-wrap gap-1">
-        <el-tag
-          v-for="tool in config.tools"
-          :key="tool"
-          size="small"
-          type="info"
-          effect="plain"
-          round
-        >
+        <el-tag v-for="tool in config.tools" :key="tool" size="small" type="info" effect="plain" round>
           {{ tool }}
         </el-tag>
       </div>
@@ -57,28 +47,14 @@
     <!-- Actions -->
     <div class="flex justify-end mt-auto pt-1">
       <template v-if="mode === 'local'">
-        <el-popconfirm
-          title="Uninstall this config?"
-          confirm-button-text="Uninstall"
-          cancel-button-text="Cancel"
-          @confirm="$emit('uninstall', config)"
-        >
+        <el-popconfirm title="Uninstall this config?" confirm-button-text="Uninstall" cancel-button-text="Cancel" @confirm="$emit('uninstall', config)">
           <template #reference>
-            <el-button size="small" type="danger" plain>
-              <span class="i-carbon-trash-can mr-1" /> Uninstall
-            </el-button>
+            <el-button size="small" type="danger" plain> <span class="i-carbon-trash-can mr-1" /> Uninstall </el-button>
           </template>
         </el-popconfirm>
       </template>
       <template v-if="mode === 'remote' && !installed">
-        <el-button
-          size="small"
-          type="primary"
-          :loading="installing"
-          @click="$emit('install', config)"
-        >
-          <span v-if="!installing" class="i-carbon-download mr-1" /> Install
-        </el-button>
+        <el-button size="small" type="primary" :loading="installing" @click="$emit('install', config)"> <span v-if="!installing" class="i-carbon-download mr-1" /> Install </el-button>
       </template>
     </div>
   </div>

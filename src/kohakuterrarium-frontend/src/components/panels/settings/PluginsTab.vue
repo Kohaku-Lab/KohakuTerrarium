@@ -4,27 +4,14 @@
     <div v-else-if="error" class="text-coral py-2">
       {{ error }}
     </div>
-    <div v-else-if="plugins.length === 0" class="text-warm-400 text-center py-6">
-      No plugins loaded.
-    </div>
+    <div v-else-if="plugins.length === 0" class="text-warm-400 text-center py-6">No plugins loaded.</div>
     <div v-else class="flex flex-col gap-1.5">
-      <div
-        v-for="p in plugins"
-        :key="p.name"
-        class="rounded border border-warm-200 dark:border-warm-700 px-3 py-2"
-      >
+      <div v-for="p in plugins" :key="p.name" class="rounded border border-warm-200 dark:border-warm-700 px-3 py-2">
         <div class="flex items-center gap-2">
-          <span
-            class="w-1.5 h-1.5 rounded-full shrink-0"
-            :class="p.enabled ? 'bg-aquamarine' : 'bg-warm-400'"
-          />
+          <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="p.enabled ? 'bg-aquamarine' : 'bg-warm-400'" />
           <span class="font-medium text-warm-700 dark:text-warm-300">{{ p.name }}</span>
           <span class="flex-1" />
-          <span
-            class="text-[10px] font-mono"
-            :class="p.enabled ? 'text-aquamarine' : 'text-warm-400'"
-            >{{ p.enabled ? "enabled" : "disabled" }}</span
-          >
+          <span class="text-[10px] font-mono" :class="p.enabled ? 'text-aquamarine' : 'text-warm-400'">{{ p.enabled ? "enabled" : "disabled" }}</span>
         </div>
         <div v-if="p.description" class="text-[10px] text-warm-500 mt-0.5">
           {{ p.description }}

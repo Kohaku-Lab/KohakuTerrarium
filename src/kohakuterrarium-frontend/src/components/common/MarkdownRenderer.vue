@@ -1,11 +1,11 @@
 <template>
-  <div ref="rootEl" class="md-content" v-html="rendered" @click="onClick" />
+  <div ref="rootEl" class="md-content" @click="onClick" v-html="rendered" />
 </template>
 
 <script setup>
 import { computed, nextTick, ref, watch } from "vue"
 import MarkdownIt from "markdown-it"
-import mk from "markdown-it-katex"
+import mk from "@vscode/markdown-it-katex"
 import hljs from "highlight.js"
 
 const props = defineProps({
@@ -32,15 +32,7 @@ const md = new MarkdownIt({
       highlighted = md.utils.escapeHtml(str)
     }
     // Wrap with header (language label + copy button)
-    return (
-      `<div class="code-block">` +
-      `<div class="code-header">` +
-      `<span class="code-lang">${displayLang}</span>` +
-      `<button class="code-copy-btn" data-copy="${md.utils.escapeHtml(str).replace(/"/g, "&quot;")}" title="Copy">Copy</button>` +
-      `</div>` +
-      `<pre class="hljs"><code>${highlighted}</code></pre>` +
-      `</div>`
-    )
+    return `<div class="code-block">` + `<div class="code-header">` + `<span class="code-lang">${displayLang}</span>` + `<button class="code-copy-btn" data-copy="${md.utils.escapeHtml(str).replace(/"/g, "&quot;")}" title="Copy">Copy</button>` + `</div>` + `<pre class="hljs"><code>${highlighted}</code></pre>` + `</div>`
   },
 })
 

@@ -1,10 +1,6 @@
 <template>
   <el-dropdown trigger="click" @command="onPick" @visible-change="onVisibleChange">
-    <button
-      class="flex items-center gap-1 px-1 py-0 rounded transition-colors hover:text-warm-700 dark:hover:text-warm-300"
-      :disabled="!instanceId"
-      :title="currentModel"
-    >
+    <button class="flex items-center gap-1 px-1 py-0 rounded transition-colors hover:text-warm-700 dark:hover:text-warm-300" :disabled="!instanceId" :title="currentModel">
       <span class="i-carbon-chip text-[11px]" />
       <span class="truncate max-w-40 font-mono">{{ currentModel || "default" }}</span>
       <span class="i-carbon-chevron-down text-[9px] opacity-50" />
@@ -12,46 +8,25 @@
     <template #dropdown>
       <el-dropdown-menu class="model-switcher-dropdown">
         <div v-if="loading" class="px-4 py-2 text-[11px] text-warm-400">Loading…</div>
-        <el-dropdown-item
-          v-for="m in models"
-          v-else
-          :key="m.name"
-          :command="m.name"
-          :disabled="m.name === currentModel"
-        >
+        <el-dropdown-item v-for="m in models" v-else :key="m.name" :command="m.name" :disabled="m.name === currentModel">
           <div class="flex items-center gap-2">
             <span class="font-mono text-[11px]">{{ m.name }}</span>
-            <span v-if="m.login_provider" class="text-[9px] text-warm-400">{{
-              m.login_provider
-            }}</span>
+            <span v-if="m.login_provider" class="text-[9px] text-warm-400">{{ m.login_provider }}</span>
           </div>
         </el-dropdown-item>
-        <div v-if="!loading && models.length === 0" class="px-4 py-2 text-[11px] text-warm-400">
-          No models available
-        </div>
+        <div v-if="!loading && models.length === 0" class="px-4 py-2 text-[11px] text-warm-400">No models available</div>
       </el-dropdown-menu>
     </template>
   </el-dropdown>
 
   <!-- Model config dialog (opened by gear button in StatusBar) -->
-  <el-dialog
-    v-model="configDialogVisible"
-    title="Model Configuration"
-    width="500px"
-    :close-on-click-modal="true"
-  >
+  <el-dialog v-model="configDialogVisible" title="Model Configuration" width="500px" :close-on-click-modal="true">
     <div class="flex flex-col gap-2">
       <p class="text-xs text-warm-400">
         JSON profile for
-        <strong class="text-warm-600 dark:text-warm-300">{{
-          currentModel || "current model"
-        }}</strong>
+        <strong class="text-warm-600 dark:text-warm-300">{{ currentModel || "current model" }}</strong>
       </p>
-      <textarea
-        v-model="configJson"
-        class="w-full h-48 bg-warm-50 dark:bg-warm-800 border border-warm-200 dark:border-warm-700 rounded p-2 font-mono text-xs resize-y"
-        spellcheck="false"
-      />
+      <textarea v-model="configJson" class="w-full h-48 bg-warm-50 dark:bg-warm-800 border border-warm-200 dark:border-warm-700 rounded p-2 font-mono text-xs resize-y" spellcheck="false" />
       <p v-if="configJsonError" class="text-coral text-xs">
         {{ configJsonError }}
       </p>

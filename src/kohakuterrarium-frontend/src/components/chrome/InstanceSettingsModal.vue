@@ -1,26 +1,9 @@
 <template>
-  <el-dialog
-    v-model="open"
-    :title="`${instance?.config_name || 'Instance'} Settings`"
-    width="640px"
-    :close-on-click-modal="true"
-  >
+  <el-dialog v-model="open" :title="`${instance?.config_name || 'Instance'} Settings`" width="640px" :close-on-click-modal="true">
     <div class="flex gap-0 h-96 -mx-4 -mb-4 overflow-hidden">
       <!-- Sidebar -->
-      <div
-        class="flex flex-col gap-0.5 py-2 px-1.5 border-r border-warm-200 dark:border-warm-700 shrink-0 w-32"
-      >
-        <button
-          v-for="t in tabs"
-          :key="t.id"
-          class="flex items-center gap-2 px-2 py-1.5 rounded text-left text-[11px] transition-colors"
-          :class="
-            activeTab === t.id
-              ? 'bg-iolite/10 text-iolite'
-              : 'text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800'
-          "
-          @click="activeTab = t.id"
-        >
+      <div class="flex flex-col gap-0.5 py-2 px-1.5 border-r border-warm-200 dark:border-warm-700 shrink-0 w-32">
+        <button v-for="t in tabs" :key="t.id" class="flex items-center gap-2 px-2 py-1.5 rounded text-left text-[11px] transition-colors" :class="activeTab === t.id ? 'bg-iolite/10 text-iolite' : 'text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800'" @click="activeTab = t.id">
           <div :class="t.icon" class="text-[13px] shrink-0" />
           <span class="truncate">{{ t.label }}</span>
         </button>

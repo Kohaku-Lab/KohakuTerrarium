@@ -1,9 +1,5 @@
 <template>
-  <div
-    v-if="isVisible && slots.length > 0"
-    class="zone h-full w-full overflow-hidden"
-    :data-zone-id="zoneId"
-  >
+  <div v-if="isVisible && slots.length > 0" class="zone h-full w-full overflow-hidden" :data-zone-id="zoneId">
     <!-- Single slot: render panel directly, no splitter. -->
     <template v-if="slots.length === 1">
       <ZoneSlot :slot-info="slots[0]" :instance-id="instanceId" :panel-props="panelProps" />
@@ -12,21 +8,14 @@
          honoring a per-slot size if provided. -->
     <template v-else>
       <Splitpanes horizontal class="zone__split" :dbl-click-splitter="false">
-        <Pane
-          v-for="(slot, idx) in slots"
-          :key="slot.panelId + ':' + idx"
-          :size="slotSize(slot, idx)"
-        >
+        <Pane v-for="(slot, idx) in slots" :key="slot.panelId + ':' + idx" :size="slotSize(slot, idx)">
           <ZoneSlot :slot-info="slot" :instance-id="instanceId" :panel-props="panelProps" />
         </Pane>
       </Splitpanes>
     </template>
   </div>
   <!-- Edit-mode empty placeholder (Phase 5 will enable). -->
-  <div
-    v-else-if="showEmpty"
-    class="zone zone--empty flex items-center justify-center text-xs text-warm-400 h-full"
-  >
+  <div v-else-if="showEmpty" class="zone zone--empty flex items-center justify-center text-xs text-warm-400 h-full">
     <span>no panel · {{ zoneId }}</span>
   </div>
 </template>

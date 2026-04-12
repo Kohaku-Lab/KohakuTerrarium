@@ -4,15 +4,9 @@
     <div v-else-if="error" class="text-coral py-2">
       {{ error }}
     </div>
-    <div v-else-if="items.length === 0" class="text-warm-400 text-center py-6">
-      No packages installed.
-    </div>
+    <div v-else-if="items.length === 0" class="text-warm-400 text-center py-6">No packages installed.</div>
     <div v-else class="flex flex-col gap-1">
-      <div
-        v-for="p in items"
-        :key="p.name + ':' + (p.version || '')"
-        class="rounded border border-warm-200 dark:border-warm-700 px-3 py-2"
-      >
+      <div v-for="p in items" :key="p.name + ':' + (p.version || '')" class="rounded border border-warm-200 dark:border-warm-700 px-3 py-2">
         <div class="flex items-center gap-2">
           <div :class="typeIcon(p.type)" class="text-[13px] text-warm-500" />
           <span class="font-medium text-warm-700 dark:text-warm-300">{{ p.name }}</span>

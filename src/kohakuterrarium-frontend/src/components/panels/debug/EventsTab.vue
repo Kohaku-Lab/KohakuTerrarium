@@ -1,62 +1,29 @@
 <template>
   <div class="h-full flex flex-col overflow-hidden">
     <!-- Filter row -->
-    <div
-      class="flex items-center gap-2 px-3 py-1 border-b border-warm-200 dark:border-warm-700 shrink-0 text-[10px]"
-    >
+    <div class="flex items-center gap-2 px-3 py-1 border-b border-warm-200 dark:border-warm-700 shrink-0 text-[10px]">
       <span class="text-warm-400">{{ events.length }} events</span>
-      <el-input
-        v-model="query"
-        placeholder="filter..."
-        size="small"
-        clearable
-        style="flex: 1; max-width: 320px"
-      />
-      <el-select
-        v-model="typeFilter"
-        placeholder="type"
-        size="small"
-        clearable
-        style="width: 160px"
-      >
+      <el-input v-model="query" placeholder="filter..." size="small" clearable style="flex: 1; max-width: 320px" />
+      <el-select v-model="typeFilter" placeholder="type" size="small" clearable style="width: 160px">
         <el-option v-for="t in knownTypes" :key="t" :label="t" :value="t" />
       </el-select>
     </div>
 
     <!-- Events list -->
     <div class="flex-1 overflow-y-auto font-mono text-[10px]">
-      <div
-        v-for="(e, i) in visible"
-        :key="i"
-        class="px-3 py-1 border-b border-warm-200/50 dark:border-warm-700/50"
-      >
+      <div v-for="(e, i) in visible" :key="i" class="px-3 py-1 border-b border-warm-200/50 dark:border-warm-700/50">
         <div class="flex items-center gap-2">
           <span class="text-warm-400 shrink-0">{{ formatTs(e.timestamp) }}</span>
-          <span class="shrink-0 px-1 rounded" :class="typeClass(e.role || e.type)">{{
-            e.role || e.type || "?"
-          }}</span>
+          <span class="shrink-0 px-1 rounded" :class="typeClass(e.role || e.type)">{{ e.role || e.type || "?" }}</span>
           <span class="truncate text-warm-700 dark:text-warm-300">{{ eventPreview(e) }}</span>
           <span class="flex-1" />
-          <button
-            class="text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 shrink-0"
-            :title="expanded === i ? 'Collapse' : 'Expand'"
-            @click="expanded = expanded === i ? null : i"
-          >
-            <div
-              :class="expanded === i ? 'i-carbon-chevron-up' : 'i-carbon-chevron-down'"
-              class="text-[11px]"
-            />
+          <button class="text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 shrink-0" :title="expanded === i ? 'Collapse' : 'Expand'" @click="expanded = expanded === i ? null : i">
+            <div :class="expanded === i ? 'i-carbon-chevron-up' : 'i-carbon-chevron-down'" class="text-[11px]" />
           </button>
         </div>
-        <pre
-          v-if="expanded === i"
-          class="mt-1 text-[10px] bg-warm-100 dark:bg-warm-800 p-2 rounded whitespace-pre-wrap break-words text-warm-600 dark:text-warm-400"
-          >{{ JSON.stringify(e, null, 2) }}</pre
-        >
+        <pre v-if="expanded === i" class="mt-1 text-[10px] bg-warm-100 dark:bg-warm-800 p-2 rounded whitespace-pre-wrap break-words text-warm-600 dark:text-warm-400">{{ JSON.stringify(e, null, 2) }}</pre>
       </div>
-      <div v-if="visible.length === 0" class="text-warm-400 text-center py-6">
-        No events match the current filter
-      </div>
+      <div v-if="visible.length === 0" class="text-warm-400 text-center py-6">No events match the current filter</div>
     </div>
   </div>
 </template>

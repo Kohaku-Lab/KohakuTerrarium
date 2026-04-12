@@ -1,20 +1,8 @@
 <template>
   <div class="h-full flex flex-col bg-warm-50 dark:bg-warm-900 overflow-hidden">
     <!-- Horizontal tab bar -->
-    <div
-      class="flex items-center gap-0.5 px-2 h-7 border-b border-warm-200 dark:border-warm-700 shrink-0 text-[11px]"
-    >
-      <button
-        v-for="t in tabs"
-        :key="t.id"
-        class="px-2 py-0.5 rounded transition-colors"
-        :class="
-          activeTab === t.id
-            ? 'bg-iolite/10 text-iolite'
-            : 'text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800'
-        "
-        @click="activeTab = t.id"
-      >
+    <div class="flex items-center gap-0.5 px-2 h-7 border-b border-warm-200 dark:border-warm-700 shrink-0 text-[11px]">
+      <button v-for="t in tabs" :key="t.id" class="px-2 py-0.5 rounded transition-colors" :class="activeTab === t.id ? 'bg-iolite/10 text-iolite' : 'text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800'" @click="activeTab = t.id">
         <div :class="t.icon" class="inline-block text-[12px] mr-1" />
         {{ t.label }}
       </button>

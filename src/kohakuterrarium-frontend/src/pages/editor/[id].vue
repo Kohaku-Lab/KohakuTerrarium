@@ -83,10 +83,7 @@ watch(
     const last = msgs[msgs.length - 1]
     if (!last.tool_calls) return
     for (const tc of last.tool_calls) {
-      if (
-        tc.status === "done" &&
-        (tc.name === "write" || tc.name === "edit" || tc.name === "bash")
-      ) {
+      if (tc.status === "done" && (tc.name === "write" || tc.name === "edit" || tc.name === "bash")) {
         editor.refreshTree()
         if (editor.activeFilePath) {
           editor.revertFile(editor.activeFilePath)

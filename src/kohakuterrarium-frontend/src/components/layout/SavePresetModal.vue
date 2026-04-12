@@ -1,11 +1,5 @@
 <template>
-  <el-dialog
-    v-model="open"
-    title="Save layout as new preset"
-    width="420px"
-    :close-on-click-modal="true"
-    @close="$emit('cancel')"
-  >
+  <el-dialog v-model="open" title="Save layout as new preset" width="420px" :close-on-click-modal="true" @close="$emit('cancel')">
     <div class="flex flex-col gap-3 text-xs">
       <div>
         <label class="block text-warm-500 mb-1">Name</label>
@@ -13,13 +7,7 @@
       </div>
       <div>
         <label class="block text-warm-500 mb-1">Shortcut (optional)</label>
-        <el-select
-          v-model="shortcut"
-          placeholder="No shortcut"
-          size="small"
-          clearable
-          class="w-full"
-        >
+        <el-select v-model="shortcut" placeholder="No shortcut" size="small" clearable class="w-full">
           <el-option v-for="s in availableShortcuts" :key="s" :label="s" :value="s" />
         </el-select>
       </div>
@@ -28,9 +16,7 @@
 
     <template #footer>
       <el-button size="small" @click="$emit('cancel')">Cancel</el-button>
-      <el-button size="small" type="primary" :disabled="!name.trim()" @click="onSave">
-        Save
-      </el-button>
+      <el-button size="small" type="primary" :disabled="!name.trim()" @click="onSave"> Save </el-button>
     </template>
   </el-dialog>
 </template>
@@ -64,17 +50,7 @@ const shortcut = ref("")
 const errorMsg = ref("")
 
 // Shortcuts not already taken by existing presets.
-const ALL_SHORTCUTS = [
-  "Ctrl+1",
-  "Ctrl+2",
-  "Ctrl+3",
-  "Ctrl+4",
-  "Ctrl+5",
-  "Ctrl+6",
-  "Ctrl+7",
-  "Ctrl+8",
-  "Ctrl+9",
-]
+const ALL_SHORTCUTS = ["Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4", "Ctrl+5", "Ctrl+6", "Ctrl+7", "Ctrl+8", "Ctrl+9"]
 const availableShortcuts = computed(() => {
   const taken = new Set(
     Object.values(layout.allPresets || {})

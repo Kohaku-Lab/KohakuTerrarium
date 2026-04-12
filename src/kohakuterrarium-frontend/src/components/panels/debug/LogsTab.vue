@@ -1,13 +1,8 @@
 <template>
   <div class="h-full flex flex-col overflow-hidden">
     <!-- Filter row -->
-    <div
-      class="flex items-center gap-2 px-3 py-1 border-b border-warm-200 dark:border-warm-700 shrink-0 text-[10px]"
-    >
-      <span
-        class="w-1.5 h-1.5 rounded-full shrink-0"
-        :class="stream.connected ? 'bg-aquamarine kohaku-pulse' : 'bg-warm-400'"
-      />
+    <div class="flex items-center gap-2 px-3 py-1 border-b border-warm-200 dark:border-warm-700 shrink-0 text-[10px]">
+      <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="stream.connected ? 'bg-aquamarine kohaku-pulse' : 'bg-warm-400'" />
       <span class="text-warm-400 font-mono truncate max-w-64">
         {{ stream.meta?.path || (stream.connected ? "connected" : "connecting…") }}
       </span>
@@ -17,18 +12,8 @@
         <el-option label="warning" value="warning" />
         <el-option label="error" value="error" />
       </el-select>
-      <el-input
-        v-model="query"
-        placeholder="filter text..."
-        size="small"
-        clearable
-        style="flex: 1; max-width: 320px"
-      />
-      <button
-        class="w-5 h-5 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300"
-        title="Clear"
-        @click="stream.clear()"
-      >
+      <el-input v-model="query" placeholder="filter text..." size="small" clearable style="flex: 1; max-width: 320px" />
+      <button class="w-5 h-5 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300" title="Clear" @click="stream.clear()">
         <div class="i-carbon-close-outline text-[12px]" />
       </button>
     </div>
@@ -37,13 +22,9 @@
     <div ref="scrollEl" class="flex-1 overflow-y-auto font-mono text-[10px] px-3 py-1">
       <div v-for="(line, i) in visible" :key="i" class="flex gap-2 items-start py-[1px]">
         <span class="text-warm-400 shrink-0">{{ line.ts }}</span>
-        <span class="shrink-0 uppercase w-12" :class="levelColor(line.level)">{{
-          line.level
-        }}</span>
+        <span class="shrink-0 uppercase w-12" :class="levelColor(line.level)">{{ line.level }}</span>
         <span class="text-iolite shrink-0 max-w-40 truncate">{{ line.module }}</span>
-        <span class="text-warm-700 dark:text-warm-300 flex-1 break-all whitespace-pre-wrap">{{
-          line.text
-        }}</span>
+        <span class="text-warm-700 dark:text-warm-300 flex-1 break-all whitespace-pre-wrap">{{ line.text }}</span>
       </div>
       <div v-if="visible.length === 0" class="text-warm-400 text-center py-6">No log lines yet</div>
     </div>
@@ -70,11 +51,7 @@ const visible = computed(() => {
   return stream.lines.value.filter((l) => {
     if (level.value && l.level !== level.value) return false
     if (!q) return true
-    return (
-      l.text.toLowerCase().includes(q) ||
-      l.module.toLowerCase().includes(q) ||
-      l.level.toLowerCase().includes(q)
-    )
+    return l.text.toLowerCase().includes(q) || l.module.toLowerCase().includes(q) || l.level.toLowerCase().includes(q)
   })
 })
 

@@ -12,15 +12,8 @@
     <!-- Main content area: the split tree fills all remaining space -->
     <div class="flex-1 relative min-h-0">
       <div class="absolute inset-0">
-        <LayoutNode
-          v-if="treeRoot"
-          :key="layout.activePresetId || 'none'"
-          :node="treeRoot"
-          :instance-id="instanceId"
-        />
-        <div v-else class="h-full w-full flex items-center justify-center text-warm-400 text-sm">
-          No layout preset active. Pick one from the dropdown above.
-        </div>
+        <LayoutNode v-if="treeRoot" :key="layout.activePresetId || 'none'" :node="treeRoot" :instance-id="instanceId" />
+        <div v-else class="h-full w-full flex items-center justify-center text-warm-400 text-sm">No layout preset active. Pick one from the dropdown above.</div>
       </div>
     </div>
 

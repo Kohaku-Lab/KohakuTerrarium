@@ -5,8 +5,8 @@
   --font-sans: "Inter", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
   --font-terminal:
-    "Consolas NF", "CaskaydiaCove NF", "JetBrainsMono NF", "FiraCode NF",
-    "Hack NF", "JetBrains Mono", "Fira Code", "Consolas", monospace;
+    "Consolas NF", "CaskaydiaCove NF", "JetBrainsMono NF", "FiraCode NF", "Hack NF",
+    "JetBrains Mono", "Fira Code", "Consolas", monospace;
 
   /* Light mode surfaces */
   --color-bg: #f7f5f2;

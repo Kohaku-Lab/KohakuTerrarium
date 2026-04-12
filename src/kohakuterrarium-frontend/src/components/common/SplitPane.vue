@@ -3,14 +3,7 @@
     <div class="split-pane__first" :style="firstStyle">
       <slot name="first" />
     </div>
-    <div
-      class="split-pane__splitter"
-      :class="[
-        horizontal ? 'split-pane__splitter--h' : 'split-pane__splitter--v',
-        dragging ? 'split-pane__splitter--active' : '',
-      ]"
-      @pointerdown.prevent="onPointerDown"
-    />
+    <div class="split-pane__splitter" :class="[horizontal ? 'split-pane__splitter--h' : 'split-pane__splitter--v', dragging ? 'split-pane__splitter--active' : '']" @pointerdown.prevent="onPointerDown" />
     <div class="split-pane__second" :style="secondStyle">
       <slot name="second" />
     </div>
@@ -29,24 +22,14 @@ const props = defineProps({
   persistKey: { type: String, default: "" },
 })
 
-const _saved = props.persistKey
-  ? parseFloat(localStorage.getItem(`split-${props.persistKey}`) || "0")
-  : 0
+const _saved = props.persistKey ? parseFloat(localStorage.getItem(`split-${props.persistKey}`) || "0") : 0
 const size = ref(_saved || props.initialSize)
 const dragging = ref(false)
 const container = ref(null)
 
-const firstStyle = computed(() =>
-  props.horizontal
-    ? { height: `${size.value}%`, minHeight: 0 }
-    : { width: `${size.value}%`, minWidth: 0 },
-)
+const firstStyle = computed(() => (props.horizontal ? { height: `${size.value}%`, minHeight: 0 } : { width: `${size.value}%`, minWidth: 0 }))
 
-const secondStyle = computed(() =>
-  props.horizontal
-    ? { height: `${100 - size.value}%`, minHeight: 0 }
-    : { width: `${100 - size.value}%`, minWidth: 0 },
-)
+const secondStyle = computed(() => (props.horizontal ? { height: `${100 - size.value}%`, minHeight: 0 } : { width: `${100 - size.value}%`, minWidth: 0 }))
 
 function onPointerDown(e) {
   dragging.value = true

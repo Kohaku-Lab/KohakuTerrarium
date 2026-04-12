@@ -1,10 +1,5 @@
 <template>
-  <Zone
-    :zone-id="zoneId"
-    :instance-id="instanceId"
-    :show-empty="showEmpty"
-    class="zone--sidebar bg-warm-50 dark:bg-warm-900"
-  />
+  <Zone :zone-id="zoneId" :instance-id="instanceId" :show-empty="showEmpty" class="zone--sidebar bg-warm-50 dark:bg-warm-900" />
 </template>
 
 <script setup>

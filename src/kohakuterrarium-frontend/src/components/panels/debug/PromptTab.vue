@@ -1,58 +1,31 @@
 <template>
   <div class="h-full flex flex-col overflow-hidden">
-    <div
-      class="flex items-center gap-2 px-3 py-1 border-b border-warm-200 dark:border-warm-700 shrink-0 text-[10px]"
-    >
+    <div class="flex items-center gap-2 px-3 py-1 border-b border-warm-200 dark:border-warm-700 shrink-0 text-[10px]">
       <span class="text-warm-400">
         {{ lastLoaded ? `fetched ${lastLoaded}` : "—" }}
       </span>
       <span class="flex-1" />
-      <button
-        class="px-2 py-0.5 rounded bg-warm-100 dark:bg-warm-800 text-warm-600 dark:text-warm-300 hover:text-iolite"
-        @click="load"
-      >
+      <button class="px-2 py-0.5 rounded bg-warm-100 dark:bg-warm-800 text-warm-600 dark:text-warm-300 hover:text-iolite" @click="load">
         <div class="i-carbon-renew inline-block text-[11px] mr-1" />
         Refresh
       </button>
-      <button
-        class="px-2 py-0.5 rounded bg-warm-100 dark:bg-warm-800 text-warm-600 dark:text-warm-300 hover:text-iolite"
-        :disabled="!promptText"
-        @click="copy"
-      >
+      <button class="px-2 py-0.5 rounded bg-warm-100 dark:bg-warm-800 text-warm-600 dark:text-warm-300 hover:text-iolite" :disabled="!promptText" @click="copy">
         <div class="i-carbon-copy inline-block text-[11px] mr-1" />
         Copy
       </button>
-      <button
-        v-if="previousText"
-        class="px-2 py-0.5 rounded transition-colors"
-        :class="
-          showDiff
-            ? 'bg-iolite/15 text-iolite'
-            : 'bg-warm-100 dark:bg-warm-800 text-warm-600 dark:text-warm-300 hover:text-iolite'
-        "
-        @click="showDiff = !showDiff"
-      >
-        Diff
-      </button>
+      <button v-if="previousText" class="px-2 py-0.5 rounded transition-colors" :class="showDiff ? 'bg-iolite/15 text-iolite' : 'bg-warm-100 dark:bg-warm-800 text-warm-600 dark:text-warm-300 hover:text-iolite'" @click="showDiff = !showDiff">Diff</button>
     </div>
 
     <div class="flex-1 overflow-auto p-3 text-[11px] font-mono">
       <div v-if="loading" class="text-warm-400 text-center py-6">Loading...</div>
       <div v-else-if="error" class="text-coral">{{ error }}</div>
       <template v-else-if="showDiff && previousText">
-        <div
-          v-for="(line, i) in diffLines"
-          :key="i"
-          class="whitespace-pre-wrap break-words leading-tight"
-          :class="diffClass(line.kind)"
-        >
+        <div v-for="(line, i) in diffLines" :key="i" class="whitespace-pre-wrap break-words leading-tight" :class="diffClass(line.kind)">
           <span class="inline-block w-3 opacity-60">{{ diffSymbol(line.kind) }}</span>
           {{ line.text }}
         </div>
       </template>
-      <pre v-else class="whitespace-pre-wrap break-words text-warm-700 dark:text-warm-300">{{
-        promptText
-      }}</pre>
+      <pre v-else class="whitespace-pre-wrap break-words text-warm-700 dark:text-warm-300">{{ promptText }}</pre>
     </div>
   </div>
 </template>

@@ -1,19 +1,13 @@
 <template>
   <div class="h-screen w-screen flex flex-col bg-warm-50 dark:bg-warm-950 overflow-hidden">
     <!-- Minimal top bar with panel label + reattach -->
-    <div
-      class="flex items-center gap-2 px-3 h-7 border-b border-warm-200 dark:border-warm-700 bg-white dark:bg-warm-900 text-xs shrink-0"
-    >
+    <div class="flex items-center gap-2 px-3 h-7 border-b border-warm-200 dark:border-warm-700 bg-white dark:bg-warm-900 text-xs shrink-0">
       <div :class="panelIcon" class="text-[12px] text-warm-500" />
       <span class="font-medium text-warm-700 dark:text-warm-300">{{ panelLabel }}</span>
       <span class="text-warm-400">·</span>
       <span class="text-warm-500 truncate max-w-64">{{ instance?.config_name || "—" }}</span>
       <span class="flex-1" />
-      <button
-        class="px-2 py-0.5 rounded bg-warm-100 dark:bg-warm-800 text-warm-600 dark:text-warm-300 hover:text-iolite transition-colors"
-        title="Close this window (the panel returns to the main window)"
-        @click="onReattach"
-      >
+      <button class="px-2 py-0.5 rounded bg-warm-100 dark:bg-warm-800 text-warm-600 dark:text-warm-300 hover:text-iolite transition-colors" title="Close this window (the panel returns to the main window)" @click="onReattach">
         <div class="i-carbon-chevron-right inline-block text-[11px] mr-1" />
         Reattach
       </button>

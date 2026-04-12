@@ -4,13 +4,7 @@
          the parent (FilesPanel or the old editor page). -->
     <div class="flex-1 overflow-y-auto py-1 text-xs">
       <template v-if="tree">
-        <FileTreeNode
-          v-for="child in tree.children || []"
-          :key="child.path"
-          :node="child"
-          :depth="0"
-          @select="onSelect"
-        />
+        <FileTreeNode v-for="child in tree.children || []" :key="child.path" :node="child" :depth="0" @select="onSelect" />
       </template>
       <div v-else-if="loading" class="px-3 py-4 text-warm-400 text-center">Loading...</div>
       <div v-else class="px-3 py-4 text-warm-400 text-center">No files</div>

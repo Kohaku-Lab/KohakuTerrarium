@@ -53,8 +53,7 @@ const profile = ref(null)
 async function loadProfile() {
   try {
     const models = await configAPI.getModels()
-    profile.value =
-      (Array.isArray(models) ? models : []).find((m) => m.name === current.value) || null
+    profile.value = (Array.isArray(models) ? models : []).find((m) => m.name === current.value) || null
   } catch {
     profile.value = null
   }

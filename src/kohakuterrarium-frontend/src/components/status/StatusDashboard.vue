@@ -7,24 +7,11 @@
         <div>
           <div class="section-label">Creatures</div>
           <div class="flex flex-col gap-1 max-h-48 overflow-y-auto">
-            <div
-              v-for="c in instance.creatures"
-              :key="c.name"
-              class="flex items-center gap-2 px-2.5 py-2 rounded-lg cursor-pointer transition-colors hover:bg-warm-100 dark:hover:bg-warm-800"
-              @click="onOpenTab(c.name)"
-            >
+            <div v-for="c in instance.creatures" :key="c.name" class="flex items-center gap-2 px-2.5 py-2 rounded-lg cursor-pointer transition-colors hover:bg-warm-100 dark:hover:bg-warm-800" @click="onOpenTab(c.name)">
               <StatusDot :status="c.status" />
               <span class="font-medium text-warm-700 dark:text-warm-300">{{ c.name }}</span>
               <span class="flex-1" />
-              <span
-                class="text-[10px] px-1.5 py-0.5 rounded"
-                :class="
-                  c.status === 'running'
-                    ? 'bg-aquamarine/10 text-aquamarine'
-                    : 'bg-warm-100 dark:bg-warm-800 text-warm-400'
-                "
-                >{{ c.status }}</span
-              >
+              <span class="text-[10px] px-1.5 py-0.5 rounded" :class="c.status === 'running' ? 'bg-aquamarine/10 text-aquamarine' : 'bg-warm-100 dark:bg-warm-800 text-warm-400'">{{ c.status }}</span>
             </div>
           </div>
         </div>
@@ -33,27 +20,12 @@
         <div>
           <div class="section-label">Channels</div>
           <div class="flex flex-col gap-1 max-h-48 overflow-y-auto">
-            <div
-              v-for="ch in instance.channels"
-              :key="ch.name"
-              class="flex items-center gap-2 px-2.5 py-2 rounded-lg cursor-pointer transition-colors hover:bg-warm-100 dark:hover:bg-warm-800"
-              @click="onOpenTab('ch:' + ch.name)"
-            >
-              <span
-                class="w-2 h-2 rounded-sm shrink-0"
-                :class="ch.type === 'broadcast' ? 'bg-taaffeite' : 'bg-aquamarine'"
-              />
+            <div v-for="ch in instance.channels" :key="ch.name" class="flex items-center gap-2 px-2.5 py-2 rounded-lg cursor-pointer transition-colors hover:bg-warm-100 dark:hover:bg-warm-800" @click="onOpenTab('ch:' + ch.name)">
+              <span class="w-2 h-2 rounded-sm shrink-0" :class="ch.type === 'broadcast' ? 'bg-taaffeite' : 'bg-aquamarine'" />
               <span class="font-medium text-warm-700 dark:text-warm-300">{{ ch.name }}</span>
               <span class="flex-1" />
-              <GemBadge
-                v-if="ch.message_count"
-                :gem="ch.type === 'broadcast' ? 'taaffeite' : 'aquamarine'"
-                >{{ ch.message_count }}</GemBadge
-              >
-              <span
-                class="text-[10px] px-1.5 py-0.5 rounded bg-warm-100 dark:bg-warm-800 text-warm-400"
-                >{{ ch.type }}</span
-              >
+              <GemBadge v-if="ch.message_count" :gem="ch.type === 'broadcast' ? 'taaffeite' : 'aquamarine'">{{ ch.message_count }}</GemBadge>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-warm-100 dark:bg-warm-800 text-warm-400">{{ ch.type }}</span>
             </div>
           </div>
         </div>
@@ -146,38 +118,13 @@
           <div v-if="maxContext > 0" class="mt-1">
             <div class="flex items-center justify-between mb-1">
               <span class="text-warm-400">Context</span>
-              <span
-                class="font-mono text-[10px]"
-                :class="
-                  contextPct >= 80
-                    ? 'text-coral'
-                    : contextPct >= 60
-                      ? 'text-amber'
-                      : 'text-warm-500'
-                "
-                >{{ formatTokens(totalUsage.lastPrompt) }} / {{ formatTokens(maxContext) }} ({{
-                  contextPct
-                }}%)</span
-              >
+              <span class="font-mono text-[10px]" :class="contextPct >= 80 ? 'text-coral' : contextPct >= 60 ? 'text-amber' : 'text-warm-500'">{{ formatTokens(totalUsage.lastPrompt) }} / {{ formatTokens(maxContext) }} ({{ contextPct }}%)</span>
             </div>
-            <div
-              class="relative w-full h-1.5 rounded-full bg-warm-100 dark:bg-warm-800 overflow-hidden"
-            >
+            <div class="relative w-full h-1.5 rounded-full bg-warm-100 dark:bg-warm-800 overflow-hidden">
               <!-- Usage fill -->
-              <div
-                class="h-full rounded-full transition-all duration-300"
-                :class="
-                  contextPct >= 80 ? 'bg-coral' : contextPct >= 60 ? 'bg-amber' : 'bg-aquamarine'
-                "
-                :style="{ width: Math.min(contextPct, 100) + '%' }"
-              />
+              <div class="h-full rounded-full transition-all duration-300" :class="contextPct >= 80 ? 'bg-coral' : contextPct >= 60 ? 'bg-amber' : 'bg-aquamarine'" :style="{ width: Math.min(contextPct, 100) + '%' }" />
               <!-- Compact threshold marker line -->
-              <div
-                v-if="compactThresholdPct > 0"
-                class="absolute top-0 h-full w-0.5 bg-amber opacity-60"
-                :style="{ left: compactThresholdPct + '%' }"
-                :title="'Compact at ' + formatTokens(compactThreshold)"
-              />
+              <div v-if="compactThresholdPct > 0" class="absolute top-0 h-full w-0.5 bg-amber opacity-60" :style="{ left: compactThresholdPct + '%' }" :title="'Compact at ' + formatTokens(compactThreshold)" />
             </div>
           </div>
         </div>
@@ -186,18 +133,9 @@
       <!-- Running jobs -->
       <div class="rounded-lg border border-warm-200 dark:border-warm-700 p-3">
         <div class="section-label">Running Jobs</div>
-        <div
-          v-if="Object.keys(chat.runningJobs).length === 0"
-          class="text-warm-400 py-2 text-center"
-        >
-          No running jobs
-        </div>
+        <div v-if="Object.keys(chat.runningJobs).length === 0" class="text-warm-400 py-2 text-center">No running jobs</div>
         <div v-else class="flex flex-col gap-1.5">
-          <div
-            v-for="(job, jobId) in chat.runningJobs"
-            :key="jobId"
-            class="flex items-center gap-2 px-2 py-1.5 rounded-md bg-amber/10 group"
-          >
+          <div v-for="(job, jobId) in chat.runningJobs" :key="jobId" class="flex items-center gap-2 px-2 py-1.5 rounded-md bg-amber/10 group">
             <span class="w-1.5 h-1.5 rounded-full bg-amber kohaku-pulse shrink-0" />
             <span class="font-mono text-[11px] text-amber-shadow dark:text-amber-light truncate">
               {{ job.name }}
@@ -206,12 +144,7 @@
             <span class="text-warm-400 font-mono text-[10px]">
               {{ chat.getJobElapsed(job) }}
             </span>
-            <button
-              class="text-warm-400 hover:text-coral transition-colors opacity-0 group-hover:opacity-100"
-              title="Stop task"
-              aria-label="Stop task"
-              @click="stopTask(jobId, job.name)"
-            >
+            <button class="text-warm-400 hover:text-coral transition-colors opacity-0 group-hover:opacity-100" title="Stop task" aria-label="Stop task" @click="stopTask(jobId, job.name)">
               <span class="i-carbon-close text-[10px]" />
             </button>
           </div>
@@ -288,9 +221,7 @@ const contextPct = computed(() => {
   return Math.round((totalUsage.value.lastPrompt / maxContext.value) * 100)
 })
 
-const compactThreshold = computed(
-  () => chat.sessionInfo.compactThreshold || props.instance?.compact_threshold || 0,
-)
+const compactThreshold = computed(() => chat.sessionInfo.compactThreshold || props.instance?.compact_threshold || 0)
 
 const compactThresholdPct = computed(() => {
   if (!maxContext.value || !compactThreshold.value) return 0

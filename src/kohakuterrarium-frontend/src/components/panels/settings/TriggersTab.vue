@@ -4,19 +4,10 @@
     <div v-else-if="error" class="text-coral py-2">
       {{ error }}
     </div>
-    <div v-else-if="triggers.length === 0" class="text-warm-400 text-center py-6">
-      No active triggers.
-    </div>
+    <div v-else-if="triggers.length === 0" class="text-warm-400 text-center py-6">No active triggers.</div>
     <div v-else class="flex flex-col gap-1">
-      <div
-        v-for="t in triggers"
-        :key="t.trigger_id"
-        class="rounded border border-warm-200 dark:border-warm-700 px-3 py-2 flex items-center gap-2"
-      >
-        <span
-          class="w-1.5 h-1.5 rounded-full shrink-0"
-          :class="t.running ? 'bg-aquamarine kohaku-pulse' : 'bg-warm-400'"
-        />
+      <div v-for="t in triggers" :key="t.trigger_id" class="rounded border border-warm-200 dark:border-warm-700 px-3 py-2 flex items-center gap-2">
+        <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="t.running ? 'bg-aquamarine kohaku-pulse' : 'bg-warm-400'" />
         <div class="flex-1 min-w-0">
           <div class="font-medium text-warm-700 dark:text-warm-300">
             {{ t.trigger_type }}
