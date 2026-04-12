@@ -65,7 +65,7 @@ const WORKSPACE_PRESET = {
   tree: hsplit(
     20,
     leaf("files"),
-    hsplit(62, leaf("monaco-editor"), vsplit(65, leaf("chat"), leaf("activity"))),
+    hsplit(62, leaf("monaco-editor"), vsplit(65, leaf("chat"), leaf("status-tab"))),
   ),
 }
 
@@ -89,16 +89,16 @@ const MULTI_CREATURE_PRESET = {
   tree: hsplit(
     18,
     leaf("creatures"),
-    hsplit(66, leaf("chat"), vsplit(50, leaf("activity"), leaf("state"))),
+    hsplit(66, leaf("chat"), vsplit(50, leaf("status-tab"), leaf("state"))),
   ),
 }
 
-/** Canvas — chat on left, canvas + activity on right. */
+/** Canvas — chat on left, canvas + status on right. */
 const CANVAS_PRESET = {
   id: "canvas",
   label: "Canvas",
   shortcut: "Ctrl+4",
-  tree: hsplit(45, leaf("chat"), vsplit(70, leaf("canvas"), leaf("activity"))),
+  tree: hsplit(45, leaf("chat"), vsplit(70, leaf("canvas"), leaf("status-tab"))),
 }
 
 /** Debug — chat + state + debug drawer. */
@@ -165,11 +165,6 @@ export function registerBuiltinPanels() {
     component: EditorStatus,
   })
   layout.registerPanel({ id: "files", label: "Files", component: FilesPanel })
-  layout.registerPanel({
-    id: "activity",
-    label: "Activity",
-    component: EditorStatus,
-  })
   layout.registerPanel({ id: "state", label: "State", component: StatePanel })
   layout.registerPanel({
     id: "creatures",
