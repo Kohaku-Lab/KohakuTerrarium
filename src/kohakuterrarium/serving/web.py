@@ -181,6 +181,18 @@ def run_desktop_app(port: int = 8001) -> None:
 
 def _run_desktop_app_blocking(port: int = 8001) -> None:
     """Actually run the desktop app (blocking). Called by the child process."""
+    # Set AppUserModelID on Windows so the taskbar shows our icon
+    # instead of the generic python.exe icon.
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "KohakuLab.KohakuTerrarium"
+            )
+        except Exception:
+            pass
+
     try:
         import webview
     except ImportError:
