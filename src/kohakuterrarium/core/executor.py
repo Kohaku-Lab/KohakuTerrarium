@@ -170,17 +170,26 @@ class Executor:
                 and tool.require_manual_read
                 and not tool._manual_read
             ):
-                return JobResult(
-                    job_id=job_id,
-                    output=(
-                        f"Tool '{tool.tool_name}' requires reading its documentation "
-                        f"before first use. Call: info(name={tool.tool_name})\n"
-                        f"This is NOT about reading a file. Use the 'info' tool to "
-                        f"load the tool's usage manual, then retry your call."
-                    ),
-                    exit_code=1,
-                    error=f"Call info(name={tool.tool_name}) first to read tool docs",
+                error_msg = f"Call info(name={tool.tool_name}) first to read tool docs"
+                output_msg = (
+                    f"Tool '{tool.tool_name}' requires reading its documentation "
+                    f"before first use. Call: info(name={tool.tool_name})\n"
+                    f"This is NOT about reading a file. Use the 'info' tool to "
+                    f"load the tool's usage manual, then retry your call."
                 )
+                self.job_store.update_status(
+                    job_id,
+                    state=JobState.ERROR,
+                    error=error_msg,
+                )
+                job_result = JobResult(
+                    job_id=job_id,
+                    output=output_msg,
+                    exit_code=1,
+                    error=error_msg,
+                )
+                self._results[job_id] = job_result
+                return job_result
 
             # Build ToolContext for tools that need it
             context = None
