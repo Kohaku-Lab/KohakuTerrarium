@@ -52,6 +52,8 @@ dependencies = [
     "model2vec>=0.8.0",
     # Desktop webview
     "pywebview==6.1",
+    # Windows PTY for terminal panel (Nerd Font / PowerShell theme support)
+    "pywinpty>=2.0.0; sys_platform == 'win32'",
 ]
 
 [project.urls]
@@ -166,4 +168,6 @@ requires = [
 ]
 
 [tool.briefcase.app.kohakuterrarium.windows]
-requires = []
+requires = [
+    "pywinpty>=2.0.0",
+]
