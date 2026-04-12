@@ -5,10 +5,12 @@ Web server and desktop app launcher for KohakuTerrarium.
 ``kt app``  — Same, but wrapped in a native pywebview window.
 """
 
+import ctypes
 import os
 import socket
 import sys
 import threading
+import time
 from pathlib import Path
 
 from kohakuterrarium.utils.logging import get_logger
@@ -185,8 +187,6 @@ def _run_desktop_app_blocking(port: int = 8001) -> None:
     # instead of the generic python.exe icon.
     if sys.platform == "win32":
         try:
-            import ctypes
-
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
                 "KohakuLab.KohakuTerrarium"
             )
@@ -259,9 +259,6 @@ def _run_desktop_app_blocking(port: int = 8001) -> None:
     def _set_icon_windows():
         """Set window + taskbar icon on Windows via win32 API."""
         try:
-            import ctypes
-            from ctypes import wintypes
-
             user32 = ctypes.windll.user32
             WM_SETICON = 0x0080
             ICON_SMALL = 0
@@ -289,9 +286,6 @@ def _run_desktop_app_blocking(port: int = 8001) -> None:
     if sys.platform == "win32":
         # Set icon after window is shown (slight delay for window creation)
         def _on_shown():
-            import time
-
-            time.sleep(0.5)
             _set_icon_windows()
 
         window.events.shown += _on_shown
