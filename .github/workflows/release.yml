@@ -30,10 +30,25 @@ jobs:
           npm ci
           npm run build
 
+      - name: Verify frontend build output
+        shell: bash
+        run: |
+          test -f src/kohakuterrarium/web_dist/index.html
+
       - name: Build wheel and sdist
         run: |
           pip install build
           python -m build
+
+      - name: Verify built wheel install
+        shell: bash
+        run: |
+          python -m venv .venv-wheel-test
+          source .venv-wheel-test/bin/activate
+          pip install --upgrade pip
+          pip install dist/*.whl
+          kt --help
+          kt app --help
 
       - uses: actions/upload-artifact@v4
         with:
@@ -68,6 +83,11 @@ jobs:
         run: |
           npm ci
           npm run build
+
+      - name: Verify frontend build output
+        shell: bash
+        run: |
+          test -f src/kohakuterrarium/web_dist/index.html
 
       - name: Install briefcase
         run: pip install briefcase
@@ -104,6 +124,8 @@ jobs:
           cp dist/*.zip artifacts/ 2>/dev/null || true
           # Fallback: grab anything briefcase produced
           find dist/ -maxdepth 1 -type f \( -name "*.msi" -o -name "*.dmg" -o -name "*.zip" -o -name "*.exe" -o -name "*.app" \) -exec cp {} artifacts/ \; 2>/dev/null || true
+          ls -la artifacts/
+          test -n "$(find artifacts -maxdepth 1 -type f | head -n 1)"
 
       - uses: actions/upload-artifact@v4
         with:
