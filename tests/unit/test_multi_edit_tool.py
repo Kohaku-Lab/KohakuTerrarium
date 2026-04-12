@@ -1,5 +1,4 @@
 import os
-import time
 from pathlib import Path
 
 from kohakuterrarium.builtins.tools.multi_edit import MultiEditTool
