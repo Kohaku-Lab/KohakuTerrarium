@@ -327,6 +327,28 @@ class TestBuildToolSchemas:
         assert api_format["function"]["description"] == "Tool with custom schema"
         assert "query" in api_format["function"]["parameters"]["properties"]
 
+    def test_builtin_multi_edit_schema_present(self):
+        """Builtin multi_edit tool should use the hardcoded schema."""
+        registry = Registry()
+        from kohakuterrarium.builtins.tools import get_builtin_tool
+
+        tool = get_builtin_tool("multi_edit")
+        assert tool is not None
+        registry.register_tool(tool)
+
+        schemas = build_tool_schemas(registry)
+        schema = next(s for s in schemas if s.name == "multi_edit")
+        props = schema.parameters["properties"]
+
+        assert "path" in props
+        assert "edits" in props
+        assert "strict" in props
+        assert "best_effort" in props
+        item_props = props["edits"]["items"]["properties"]
+        assert "old" in item_props
+        assert "new" in item_props
+        assert "replace_all" in item_props
+
 
 # =============================================================================
 # OpenAIProvider Configuration Tests

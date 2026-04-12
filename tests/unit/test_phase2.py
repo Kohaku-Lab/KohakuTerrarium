@@ -39,7 +39,7 @@ from kohakuterrarium.parsing import (
 )
 
 # Test helper: common tools for parsing tests
-TEST_KNOWN_TOOLS = {"bash", "python", "read", "write", "edit", "glob", "grep", "tree"}
+TEST_KNOWN_TOOLS = {"bash", "python", "read", "write", "edit", "multi_edit", "glob", "grep", "tree"}
 
 
 def get_test_parser() -> StreamParser:
@@ -141,7 +141,7 @@ class TestXMLParsing:
 
     def test_is_tool_tag(self):
         """Test tool tag detection with known_tools set."""
-        known_tools = {"bash", "python", "read", "write", "edit"}
+        known_tools = {"bash", "python", "read", "write", "edit", "multi_edit"}
         assert is_tool_tag("bash", known_tools)
         assert is_tool_tag("python", known_tools)
         assert is_tool_tag("read", known_tools)
@@ -411,6 +411,7 @@ class TestKnownTags:
         """Test that default content arg map has expected tools."""
         expected = {"bash", "python", "read", "write", "edit", "glob", "grep", "tree"}
         assert expected.issubset(set(DEFAULT_CONTENT_ARG_MAP.keys()))
+        assert "multi_edit" not in DEFAULT_CONTENT_ARG_MAP
 
     def test_known_commands(self):
         """Test that all expected commands are in DEFAULT_COMMANDS."""

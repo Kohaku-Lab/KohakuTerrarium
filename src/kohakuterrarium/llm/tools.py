@@ -72,6 +72,37 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
         },
         "required": ["path"],
     },
+    "multi_edit": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File path to edit"},
+            "edits": {
+                "type": "array",
+                "description": "Ordered list of search/replace edits applied to one file",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "old": {"type": "string", "description": "Exact text to find"},
+                        "new": {"type": "string", "description": "Replacement text"},
+                        "replace_all": {
+                            "type": "boolean",
+                            "description": "Replace all occurrences for this edit (default false)",
+                        },
+                    },
+                    "required": ["old", "new"],
+                },
+            },
+            "strict": {
+                "type": "boolean",
+                "description": "If true (default), any failed edit aborts the whole operation and leaves the file unchanged",
+            },
+            "best_effort": {
+                "type": "boolean",
+                "description": "If true, keep going after failed edits. Cannot be combined with strict=true",
+            },
+        },
+        "required": ["path", "edits"],
+    },
     "glob": {
         "type": "object",
         "properties": {

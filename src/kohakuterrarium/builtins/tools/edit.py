@@ -11,6 +11,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from difflib import unified_diff
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,8 @@ from kohakuterrarium.utils.file_guard import check_read_before_write, is_binary_
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+MAX_RESULT_DIFF_LINES = 200
 
 
 @dataclass
@@ -207,6 +210,56 @@ def apply_hunks(original: str, hunks: list[DiffHunk]) -> str:
     return result
 
 
+def check_edit_guards(file_path: Path, context: Any) -> ToolResult | None:
+    """Run all pre-edit guards. Returns ToolResult on failure, None on success."""
+    if is_binary_file(file_path):
+        return ToolResult(
+            error=f"Binary file detected ({file_path.suffix}). "
+            "Use bash with xxd, file, or other tools to inspect binary files."
+        )
+    if context and context.path_guard:
+        msg = context.path_guard.check(str(file_path))
+        if msg:
+            return ToolResult(error=msg)
+    msg = check_read_before_write(
+        context.file_read_state if context else None, str(file_path)
+    )
+    if msg:
+        return ToolResult(error=msg)
+    return None
+
+
+def update_edit_read_state(file_path: Path, context: Any) -> None:
+    """Update file read state after a successful edit."""
+    if context and context.file_read_state:
+        mtime_ns = os.stat(file_path).st_mtime_ns
+        context.file_read_state.record_read(
+            str(file_path), mtime_ns, False, time.time()
+        )
+
+
+def build_result_diff(path: Path, original: str, new_content: str) -> str:
+    """Build a unified diff of the actual content change for tool output."""
+    diff_lines = list(
+        unified_diff(
+            original.splitlines(),
+            new_content.splitlines(),
+            fromfile=f"a/{path.as_posix()}",
+            tofile=f"b/{path.as_posix()}",
+            lineterm="",
+        )
+    )
+    if not diff_lines:
+        return ""
+    if len(diff_lines) > MAX_RESULT_DIFF_LINES:
+        shown = "\n".join(diff_lines[:MAX_RESULT_DIFF_LINES])
+        return (
+            f"{shown}\n"
+            f"... diff truncated ({len(diff_lines) - MAX_RESULT_DIFF_LINES} more lines)"
+        )
+    return "\n".join(diff_lines)
+
+
 @register_builtin("edit")
 class EditTool(BaseTool):
     """
@@ -228,7 +281,10 @@ class EditTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Edit file via search/replace (path, old, new) or unified diff (path, diff). Use info(edit) first."
+        return (
+            "Edit file via search/replace (path, old, new) or unified diff (path, diff). "
+            "Prefer multi_edit for multiple same-file search/replace edits. Use info(edit) first."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:
@@ -267,30 +323,10 @@ class EditTool(BaseTool):
         )
 
     def _check_guards(self, file_path: Path, context: Any) -> ToolResult | None:
-        """Run all pre-edit guards. Returns ToolResult on failure, None on success."""
-        if is_binary_file(file_path):
-            return ToolResult(
-                error=f"Binary file detected ({file_path.suffix}). "
-                "Use bash with xxd, file, or other tools to inspect binary files."
-            )
-        if context and context.path_guard:
-            msg = context.path_guard.check(str(file_path))
-            if msg:
-                return ToolResult(error=msg)
-        msg = check_read_before_write(
-            context.file_read_state if context else None, str(file_path)
-        )
-        if msg:
-            return ToolResult(error=msg)
-        return None
+        return check_edit_guards(file_path, context)
 
     def _update_read_state(self, file_path: Path, context: Any) -> None:
-        """Update file read state after a successful edit."""
-        if context and context.file_read_state:
-            mtime_ns = os.stat(file_path).st_mtime_ns
-            context.file_read_state.record_read(
-                str(file_path), mtime_ns, False, time.time()
-            )
+        update_edit_read_state(file_path, context)
 
     async def _execute_search_replace(
         self, path: str, args: dict[str, Any], context: Any

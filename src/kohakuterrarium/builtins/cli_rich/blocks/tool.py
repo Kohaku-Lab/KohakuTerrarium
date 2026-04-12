@@ -47,6 +47,7 @@ _TOOL_LANG_HINTS = {
     "read": None,  # let extension drive it
     "write": None,
     "edit": "diff",
+    "multi_edit": "diff",
     "patch": "diff",
     "grep": None,
     "glob": None,
