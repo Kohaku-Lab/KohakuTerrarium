@@ -4,7 +4,6 @@ Write tool - write content to files.
 
 import os
 import time
-from pathlib import Path
 from typing import Any
 
 import aiofiles
@@ -14,6 +13,7 @@ from kohakuterrarium.modules.tool.base import (
     BaseTool,
     ExecutionMode,
     ToolResult,
+    resolve_tool_path,
 )
 from kohakuterrarium.utils.file_guard import check_read_before_write
 from kohakuterrarium.utils.logging import get_logger
@@ -54,7 +54,7 @@ class WriteTool(BaseTool):
             return ToolResult(error="No path provided")
 
         # Resolve path
-        file_path = Path(path).expanduser().resolve()
+        file_path = resolve_tool_path(path, context)
 
         # Path boundary guard
         if context and context.path_guard:

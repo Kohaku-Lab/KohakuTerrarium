@@ -16,6 +16,7 @@ from kohakuterrarium.modules.tool.base import (
     BaseTool,
     ExecutionMode,
     ToolResult,
+    resolve_tool_path,
 )
 from kohakuterrarium.utils.file_guard import is_binary_file
 from kohakuterrarium.utils.file_walk import iter_matching_files
@@ -56,7 +57,7 @@ class GrepTool(BaseTool):
 
         # Get base path
         base_path = args.get("path", ".")
-        base = Path(base_path).expanduser().resolve()
+        base = resolve_tool_path(base_path, context)
 
         # Path boundary guard
         if context and context.path_guard:

@@ -1,13 +1,17 @@
 """JSON read tool - read and query JSON files."""
 
 import json
-from pathlib import Path
 from typing import Any
 
 import aiofiles
 
 from kohakuterrarium.builtins.tools.registry import register_builtin
-from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
+from kohakuterrarium.modules.tool.base import (
+    BaseTool,
+    ExecutionMode,
+    ToolResult,
+    resolve_tool_path,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -63,6 +67,8 @@ def _resolve_path(data: Any, query: str) -> Any:
 class JsonReadTool(BaseTool):
     """Read and query JSON files with path expressions."""
 
+    needs_context = True
+
     @property
     def tool_name(self) -> str:
         return "json_read"
@@ -77,13 +83,14 @@ class JsonReadTool(BaseTool):
 
     async def _execute(self, args: dict[str, Any], **kwargs: Any) -> ToolResult:
         """Read and optionally query a JSON file."""
+        context = kwargs.get("context")
         path = args.get("path", "")
         query = args.get("query", ".")
 
         if not path:
             return ToolResult(error="Path is required")
 
-        file_path = Path(path).expanduser().resolve()
+        file_path = resolve_tool_path(path, context)
         if not file_path.exists():
             return ToolResult(error=f"File not found: {path}")
 

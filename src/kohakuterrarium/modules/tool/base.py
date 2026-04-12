@@ -72,10 +72,31 @@ class ToolContext:
         """Backward-compatible accessor for session.channels."""
         return self.session.channels if self.session else None
 
+    def resolve_path(self, path_str: str) -> Path:
+        """Resolve a path relative to the agent's working directory.
+
+        If *path_str* is relative, it is anchored to ``self.working_dir``
+        instead of the process cwd.
+        """
+        p = Path(path_str).expanduser()
+        if not p.is_absolute():
+            return (self.working_dir / p).resolve()
+        return p.resolve()
+
     @property
     def scratchpad(self) -> Any:
         """Backward-compatible accessor for session.scratchpad."""
         return self.session.scratchpad if self.session else None
+
+
+def resolve_tool_path(path_str: str, context: ToolContext | None = None) -> Path:
+    """Resolve *path_str* against the agent's working directory.
+
+    Convenience wrapper for tools that may or may not have a context.
+    """
+    if context:
+        return context.resolve_path(path_str)
+    return Path(path_str).expanduser().resolve()
 
 
 @dataclass

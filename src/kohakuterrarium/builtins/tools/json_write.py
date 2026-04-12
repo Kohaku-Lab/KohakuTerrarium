@@ -1,13 +1,17 @@
 """JSON write tool - modify JSON files."""
 
 import json
-from pathlib import Path
 from typing import Any
 
 import aiofiles
 
 from kohakuterrarium.builtins.tools.registry import register_builtin
-from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
+from kohakuterrarium.modules.tool.base import (
+    BaseTool,
+    ExecutionMode,
+    ToolResult,
+    resolve_tool_path,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -62,6 +66,8 @@ def _set_path(data: Any, query: str, value: Any) -> Any:
 class JsonWriteTool(BaseTool):
     """Modify JSON files with path expressions."""
 
+    needs_context = True
+
     @property
     def tool_name(self) -> str:
         return "json_write"
@@ -76,6 +82,7 @@ class JsonWriteTool(BaseTool):
 
     async def _execute(self, args: dict[str, Any], **kwargs: Any) -> ToolResult:
         """Write/modify a JSON file."""
+        context = kwargs.get("context")
         path = args.get("path", "")
         query = args.get("query", ".")
         value_str = args.get("value", "")
@@ -91,7 +98,7 @@ class JsonWriteTool(BaseTool):
         except json.JSONDecodeError:
             value = value_str
 
-        file_path = Path(path).expanduser().resolve()
+        file_path = resolve_tool_path(path, context)
 
         # Read existing file or start with empty dict
         if file_path.exists():

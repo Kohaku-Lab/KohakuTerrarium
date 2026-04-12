@@ -16,6 +16,7 @@ from kohakuterrarium.modules.tool.base import (
     BaseTool,
     ExecutionMode,
     ToolResult,
+    resolve_tool_path,
 )
 from kohakuterrarium.utils.file_walk import (
     is_ignored,
@@ -246,7 +247,7 @@ class TreeTool(BaseTool):
         context = kwargs.get("context")
 
         path_str = args.get("path") or args.get("_body", ".").strip() or "."
-        path = Path(path_str).expanduser().resolve()
+        path = resolve_tool_path(path_str, context)
 
         # Path boundary guard
         if context and context.path_guard:

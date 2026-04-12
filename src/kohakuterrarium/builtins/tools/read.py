@@ -16,6 +16,7 @@ from kohakuterrarium.modules.tool.base import (
     BaseTool,
     ExecutionMode,
     ToolResult,
+    resolve_tool_path,
 )
 from kohakuterrarium.utils.file_guard import is_binary_file
 from kohakuterrarium.utils.logging import get_logger
@@ -54,7 +55,7 @@ class ReadTool(BaseTool):
             return ToolResult(error="No path provided")
 
         # Resolve path
-        file_path = Path(path).expanduser().resolve()
+        file_path = resolve_tool_path(path, context)
 
         # Image files: return as multimodal content
         if _is_image_file(file_path):

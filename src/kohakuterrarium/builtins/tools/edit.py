@@ -21,6 +21,7 @@ from kohakuterrarium.modules.tool.base import (
     BaseTool,
     ExecutionMode,
     ToolResult,
+    resolve_tool_path,
 )
 from kohakuterrarium.utils.file_guard import check_read_before_write, is_binary_file
 from kohakuterrarium.utils.logging import get_logger
@@ -302,7 +303,7 @@ class EditTool(BaseTool):
         if not old:
             return ToolResult(error="old is empty. Provide the exact text to find.")
 
-        file_path = Path(path).expanduser().resolve()
+        file_path = resolve_tool_path(path, context)
 
         guard = self._check_guards(file_path, context)
         if guard:
@@ -372,7 +373,7 @@ class EditTool(BaseTool):
         """Unified diff mode: apply hunks from a standard diff."""
         diff = args.get("diff", "")
 
-        file_path = Path(path).expanduser().resolve()
+        file_path = resolve_tool_path(path, context)
 
         guard = self._check_guards(file_path, context)
         if guard:
