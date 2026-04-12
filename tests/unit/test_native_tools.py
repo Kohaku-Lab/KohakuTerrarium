@@ -222,10 +222,10 @@ class TestBashShellResolution:
         monkeypatch.setenv("ProgramFiles(x86)", r"C:\Program Files (x86)")
         monkeypatch.setenv("LOCALAPPDATA", r"C:\Users\apoll\AppData\Local")
 
-        candidates = _windows_git_bash_candidates()
+        candidates = [path.replace("\\", "/") for path in _windows_git_bash_candidates()]
 
-        assert any(path.endswith(r"Git\bin\bash.exe") for path in candidates)
-        assert any(path.endswith(r"Git\usr\bin\bash.exe") for path in candidates)
+        assert any(path.endswith("Git/bin/bash.exe") for path in candidates)
+        assert any(path.endswith("Git/usr/bin/bash.exe") for path in candidates)
 
     def test_resolve_shell_executable_prefers_override(self, monkeypatch):
         monkeypatch.setenv("KT_BASH_PATH", "/custom/bash")
