@@ -227,6 +227,11 @@ def _run_desktop_app_blocking(port: int = 8001) -> None:
     )
     server_thread.start()
 
+    # Resolve window icon path
+    icon_path = str(Path(__file__).parent.parent / "app_icons" / "window.png")
+    if not Path(icon_path).exists():
+        icon_path = None
+
     webview.create_window(
         "KohakuTerrarium",
         f"http://127.0.0.1:{port}",
@@ -238,7 +243,7 @@ def _run_desktop_app_blocking(port: int = 8001) -> None:
         confirm_close=True,
         background_color="#1a1a2e",
     )
-    webview.start()
+    webview.start(icon=icon_path)
 
 
 if __name__ == "__main__":

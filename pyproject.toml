@@ -107,7 +107,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "kohakuterrarium.builtin_skills" = ["**/*.md"]
-"kohakuterrarium" = ["web_dist/**/*"]
+"kohakuterrarium" = ["web_dist/**/*", "app_icons/*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
