@@ -8,8 +8,15 @@ Tests for:
 - OpenAIProvider initialization and configuration
 """
 
+from pathlib import Path
+
 import pytest
 
+from kohakuterrarium.builtins.tools.bash import (
+    _resolve_shell_executable,
+    _shell_override_env,
+    _windows_git_bash_candidates,
+)
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.base import NativeToolCall, ToolSchema
 from kohakuterrarium.llm.tools import build_tool_schemas
@@ -193,6 +200,61 @@ class _DummyToolWithSchema(BaseTool):
 
     async def _execute(self, args, **kwargs):
         return ToolResult(output="ok")
+
+
+class TestBashShellResolution:
+    def test_shell_override_prefers_specific_env(self, monkeypatch):
+        monkeypatch.setenv("KT_BASH_PATH", "/custom/bash")
+        monkeypatch.setenv("KT_SHELL_PATH", "/generic/shell")
+        monkeypatch.setenv("SHELL", "/bin/zsh")
+
+        assert _shell_override_env("bash") == "/custom/bash"
+
+    def test_shell_override_falls_back_to_shell_env_for_posix_shells(self, monkeypatch):
+        monkeypatch.delenv("KT_BASH_PATH", raising=False)
+        monkeypatch.delenv("KT_SHELL_PATH", raising=False)
+        monkeypatch.setenv("SHELL", "/usr/bin/bash")
+
+        assert _shell_override_env("bash") == "/usr/bin/bash"
+
+    def test_windows_git_bash_candidates_include_common_locations(self, monkeypatch):
+        monkeypatch.setenv("ProgramFiles", r"C:\Program Files")
+        monkeypatch.setenv("ProgramFiles(x86)", r"C:\Program Files (x86)")
+        monkeypatch.setenv("LOCALAPPDATA", r"C:\Users\apoll\AppData\Local")
+
+        candidates = _windows_git_bash_candidates()
+
+        assert any(path.endswith(r"Git\bin\bash.exe") for path in candidates)
+        assert any(path.endswith(r"Git\usr\bin\bash.exe") for path in candidates)
+
+    def test_resolve_shell_executable_prefers_override(self, monkeypatch):
+        monkeypatch.setenv("KT_BASH_PATH", "/custom/bash")
+        monkeypatch.setattr(
+            "kohakuterrarium.builtins.tools.bash.shutil.which", lambda exe: exe
+        )
+        monkeypatch.setattr("kohakuterrarium.builtins.tools.bash.sys.platform", "linux")
+
+        assert _resolve_shell_executable("bash") == "/custom/bash"
+
+    def test_resolve_shell_executable_prefers_git_bash_on_windows(self, monkeypatch):
+        monkeypatch.delenv("KT_BASH_PATH", raising=False)
+        monkeypatch.delenv("KT_SHELL_PATH", raising=False)
+        monkeypatch.delenv("SHELL", raising=False)
+        monkeypatch.setattr("kohakuterrarium.builtins.tools.bash.sys.platform", "win32")
+        monkeypatch.setattr(
+            "kohakuterrarium.builtins.tools.bash._windows_git_bash_candidates",
+            lambda: [r"C:\Program Files\Git\bin\bash.exe"],
+        )
+        monkeypatch.setattr(
+            Path,
+            "exists",
+            lambda self: str(self) == r"C:\Program Files\Git\bin\bash.exe",
+        )
+        monkeypatch.setattr(
+            "kohakuterrarium.builtins.tools.bash.shutil.which", lambda exe: None
+        )
+
+        assert _resolve_shell_executable("bash") == r"C:\Program Files\Git\bin\bash.exe"
 
 
 class TestBuildToolSchemas:
