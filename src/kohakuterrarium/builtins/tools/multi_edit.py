@@ -66,7 +66,9 @@ def _validate_edits(edits: Any) -> list[dict[str, Any]]:
     return normalized
 
 
-def _apply_single_edit(content: str, edit: dict[str, Any], index: int) -> tuple[str, str, int]:
+def _apply_single_edit(
+    content: str, edit: dict[str, Any], index: int
+) -> tuple[str, str, int]:
     old = edit["old"]
     new = edit["new"]
     replace_all = edit["replace_all"]

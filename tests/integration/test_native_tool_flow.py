@@ -166,7 +166,16 @@ class TestRunInBackground:
         """All builtin tools default to DIRECT execution mode."""
         from kohakuterrarium.builtins.tools import get_builtin_tool
 
-        for name in ["bash", "python", "read", "write", "edit", "multi_edit", "glob", "grep"]:
+        for name in [
+            "bash",
+            "python",
+            "read",
+            "write",
+            "edit",
+            "multi_edit",
+            "glob",
+            "grep",
+        ]:
             tool = get_builtin_tool(name)
             if tool and isinstance(tool, BaseTool):
                 assert (

@@ -222,7 +222,9 @@ class TestBashShellResolution:
         monkeypatch.setenv("ProgramFiles(x86)", r"C:\Program Files (x86)")
         monkeypatch.setenv("LOCALAPPDATA", r"C:\Users\apoll\AppData\Local")
 
-        candidates = [path.replace("\\", "/") for path in _windows_git_bash_candidates()]
+        candidates = [
+            path.replace("\\", "/") for path in _windows_git_bash_candidates()
+        ]
 
         assert any(path.endswith("Git/bin/bash.exe") for path in candidates)
         assert any(path.endswith("Git/usr/bin/bash.exe") for path in candidates)

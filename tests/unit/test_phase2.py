@@ -39,7 +39,17 @@ from kohakuterrarium.parsing import (
 )
 
 # Test helper: common tools for parsing tests
-TEST_KNOWN_TOOLS = {"bash", "python", "read", "write", "edit", "multi_edit", "glob", "grep", "tree"}
+TEST_KNOWN_TOOLS = {
+    "bash",
+    "python",
+    "read",
+    "write",
+    "edit",
+    "multi_edit",
+    "glob",
+    "grep",
+    "tree",
+}
 
 
 def get_test_parser() -> StreamParser:

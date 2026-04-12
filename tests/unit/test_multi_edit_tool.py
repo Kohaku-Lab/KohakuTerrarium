@@ -135,7 +135,9 @@ class TestMultiEditStrictMode:
         assert "strict mode" in result.error
         assert target.read_text() == original
         assert "No changes made" in result.output
-        assert "edit[1]: error: old not found in file after prior edits" in result.output
+        assert (
+            "edit[1]: error: old not found in file after prior edits" in result.output
+        )
 
     async def test_old_equals_new_is_success(self, tmp_path: Path):
         target = tmp_path / "code.py"
@@ -204,7 +206,9 @@ class TestMultiEditBestEffortMode:
         assert not result.success
         assert target.read_text() == "ALPHA\nbeta\nGAMMA\n"
         assert "mode: best_effort" in result.output
-        assert "edit[1]: error: old not found in file after prior edits" in result.output
+        assert (
+            "edit[1]: error: old not found in file after prior edits" in result.output
+        )
         assert "edit[2]: ok: 1 replacement" in result.output
         assert "+GAMMA" in result.output
 
