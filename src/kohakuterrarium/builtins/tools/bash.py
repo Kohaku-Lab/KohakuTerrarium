@@ -9,7 +9,10 @@ import asyncio
 import os
 import shutil
 import signal
+import subprocess
 import sys
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.builtins.tools.registry import register_builtin
@@ -40,6 +43,92 @@ _SHELL_SPECS: dict[str, tuple[str, list[str]]] = {
 _AVAILABLE_SHELLS: list[str] | None = None
 
 
+def _shell_override_env(shell_type: str) -> str | None:
+    specific = os.environ.get(f"KT_{shell_type.upper()}_PATH")
+    if specific:
+        return specific
+    generic = os.environ.get("KT_SHELL_PATH")
+    if generic:
+        return generic
+    if shell_type in {"bash", "zsh", "sh"}:
+        env_shell = os.environ.get("SHELL")
+        if env_shell and any(
+            name in env_shell.lower() for name in ("bash", "zsh", "sh")
+        ):
+            return env_shell
+    return None
+
+
+def _windows_git_bash_candidates() -> list[str]:
+    candidates: list[str] = []
+    program_files = [
+        os.environ.get("ProgramW6432"),
+        os.environ.get("ProgramFiles"),
+        os.environ.get("ProgramFiles(x86)"),
+    ]
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    home = os.environ.get("USERPROFILE") or os.path.expanduser("~")
+
+    for base in [p for p in program_files if p]:
+        candidates.extend(
+            [
+                str(Path(base) / "Git" / "bin" / "bash.exe"),
+                str(Path(base) / "Git" / "usr" / "bin" / "bash.exe"),
+            ]
+        )
+    if local_app_data:
+        candidates.append(
+            str(Path(local_app_data) / "Programs" / "Git" / "bin" / "bash.exe")
+        )
+    if home:
+        candidates.extend(
+            [
+                str(
+                    Path(home)
+                    / "AppData"
+                    / "Local"
+                    / "Programs"
+                    / "Git"
+                    / "bin"
+                    / "bash.exe"
+                ),
+                str(
+                    Path(home)
+                    / "scoop"
+                    / "apps"
+                    / "git"
+                    / "current"
+                    / "bin"
+                    / "bash.exe"
+                ),
+            ]
+        )
+
+    seen: set[str] = set()
+    unique: list[str] = []
+    for candidate in candidates:
+        key = candidate.lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(candidate)
+    return unique
+
+
+def _resolve_shell_executable(shell_type: str) -> str | None:
+    override = _shell_override_env(shell_type)
+    if override and shutil.which(override):
+        return shutil.which(override)
+    if override and Path(override).exists():
+        return override
+
+    exe = _SHELL_SPECS[shell_type][0]
+    if sys.platform == "win32" and shell_type == "bash":
+        for candidate in _windows_git_bash_candidates():
+            if Path(candidate).exists():
+                return candidate
+    return shutil.which(exe)
+
+
 async def _terminate_process_tree(process: asyncio.subprocess.Process) -> None:
     """Terminate a subprocess and its children best-effort."""
     try:
@@ -47,7 +136,6 @@ async def _terminate_process_tree(process: asyncio.subprocess.Process) -> None:
             return
 
         if sys.platform == "win32":
-            # Kill the full process tree on Windows.
             killer = await asyncio.create_subprocess_exec(
                 "taskkill",
                 "/PID",
@@ -88,12 +176,38 @@ async def _terminate_process_tree(process: asyncio.subprocess.Process) -> None:
             pass
 
 
+def _create_output_file() -> tuple[Path, Any]:
+    output_dir = Path(tempfile.gettempdir()) / "kohakuterrarium-bash"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    handle = tempfile.NamedTemporaryFile(
+        mode="w+b",
+        prefix="bash_",
+        suffix=".log",
+        dir=output_dir,
+        delete=False,
+    )
+    return Path(handle.name), handle
+
+
+def _read_output_file(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+def _truncate_output(output: str, max_output: int) -> str:
+    if max_output > 0 and len(output) > max_output:
+        return (
+            output[:max_output]
+            + f"\n... (truncated, {len(output) - max_output} chars omitted)"
+        )
+    return output
+
+
 def _get_available_shells() -> list[str]:
-    """Return shell types whose executable is on PATH (cached)."""
+    """Return shell types whose executable can be resolved (cached)."""
     global _AVAILABLE_SHELLS
     if _AVAILABLE_SHELLS is None:
         _AVAILABLE_SHELLS = [
-            name for name, (exe, _) in _SHELL_SPECS.items() if shutil.which(exe)
+            name for name in _SHELL_SPECS if _resolve_shell_executable(name)
         ]
     return _AVAILABLE_SHELLS
 
@@ -177,20 +291,21 @@ class ShellTool(BaseTool):
                 f"Available: {', '.join(available) or 'none found'}"
             )
 
-        exe, prefix_args = _SHELL_SPECS[shell_type]
-        if not shutil.which(exe):
+        spec_exe, prefix_args = _SHELL_SPECS[shell_type]
+        resolved_exe = _resolve_shell_executable(shell_type)
+        if not resolved_exe:
             available = _get_available_shells()
             return ToolResult(
                 error=(
-                    f"Shell '{shell_type}' ({exe}) not found on PATH. "
+                    f"Shell '{shell_type}' ({spec_exe}) not found. "
                     f"Available shells: {', '.join(available) or 'none found'}. "
                     f'Try: bash(type="{available[0]}", ...)'
                     if available
-                    else f"No shells found on PATH."
+                    else "No shells found."
                 )
             )
 
-        full_command = [exe, *prefix_args, command]
+        full_command = [resolved_exe, *prefix_args, command]
 
         logger.debug("Executing command", shell=shell_type, command=command[:100])
 
@@ -206,17 +321,19 @@ class ShellTool(BaseTool):
             cwd = self.config.working_dir or os.getcwd()
 
         process = None
+        output_path = None
+        output_handle = None
         try:
+            output_path, output_handle = _create_output_file()
+
             popen_kwargs: dict[str, Any] = {
-                "stdout": asyncio.subprocess.PIPE,
-                "stderr": asyncio.subprocess.STDOUT,
+                "stdout": output_handle,
+                "stderr": subprocess.STDOUT,
                 "cwd": cwd,
                 "env": env,
             }
             if sys.platform == "win32":
-                popen_kwargs["creationflags"] = getattr(
-                    __import__("subprocess"), "CREATE_NEW_PROCESS_GROUP", 0
-                )
+                popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
             else:
                 popen_kwargs["start_new_session"] = True
 
@@ -225,31 +342,39 @@ class ShellTool(BaseTool):
                 **popen_kwargs,
             )
 
+            if output_handle is not None:
+                output_handle.close()
+                output_handle = None
+
             try:
-                stdout, _ = await asyncio.wait_for(
-                    process.communicate(),
+                await asyncio.wait_for(
+                    process.wait(),
                     timeout=self.config.timeout if self.config.timeout > 0 else None,
                 )
             except asyncio.TimeoutError:
                 await _terminate_process_tree(process)
+                output = _truncate_output(
+                    _read_output_file(output_path), self.config.max_output
+                )
                 return ToolResult(
+                    output=output,
                     error=f"Command timed out after {self.config.timeout}s",
                     exit_code=-1,
+                    metadata={
+                        "raw_output_path": str(output_path),
+                        "shell_type": shell_type,
+                        "shell_executable": resolved_exe,
+                        "shell_override": _shell_override_env(shell_type),
+                        "home": env.get("HOME"),
+                    },
                 )
             except asyncio.CancelledError:
                 await _terminate_process_tree(process)
                 raise
 
-            output = stdout.decode("utf-8", errors="replace") if stdout else ""
-
-            # Truncate if needed
-            if self.config.max_output > 0 and len(output) > self.config.max_output:
-                output = output[: self.config.max_output]
-                output += (
-                    f"\n... (truncated, "
-                    f"{len(stdout) - self.config.max_output} bytes omitted)"
-                )
-
+            output = _truncate_output(
+                _read_output_file(output_path), self.config.max_output
+            )
             exit_code = process.returncode or 0
 
             logger.debug(
@@ -264,10 +389,17 @@ class ShellTool(BaseTool):
                 error=(
                     None if exit_code == 0 else f"Command exited with code {exit_code}"
                 ),
+                metadata={
+                    "raw_output_path": str(output_path),
+                    "shell_type": shell_type,
+                    "shell_executable": resolved_exe,
+                    "shell_override": _shell_override_env(shell_type),
+                    "home": env.get("HOME"),
+                },
             )
 
         except FileNotFoundError:
-            return ToolResult(error=f"Shell not found: {exe}")
+            return ToolResult(error=f"Shell not found: {resolved_exe or spec_exe}")
         except PermissionError:
             return ToolResult(error="Permission denied")
         except asyncio.CancelledError:
@@ -277,7 +409,29 @@ class ShellTool(BaseTool):
             logger.error("Command execution failed", error=str(e))
             if process is not None:
                 await _terminate_process_tree(process)
-            return ToolResult(error=str(e))
+            error_output = (
+                _truncate_output(_read_output_file(output_path), self.config.max_output)
+                if output_path and output_path.exists()
+                else ""
+            )
+            return ToolResult(
+                output=error_output,
+                error=str(e),
+                metadata=(
+                    {
+                        "raw_output_path": str(output_path),
+                        "shell_type": shell_type,
+                        "shell_executable": resolved_exe,
+                        "shell_override": _shell_override_env(shell_type),
+                        "home": env.get("HOME"),
+                    }
+                    if output_path
+                    else {}
+                ),
+            )
+        finally:
+            if output_handle is not None:
+                output_handle.close()
 
 
 # Backward-compatible alias
