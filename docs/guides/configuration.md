@@ -194,12 +194,13 @@ tools:
 | `python` | Execute Python code | `scratchpad` | Session key-value memory |
 | `read` | Read file contents | `send_message` | Send to named channel |
 | `write` | Create/overwrite files | `web_fetch` | Fetch and read web pages |
-| `edit` | Search-replace in files | `web_search` | Search the web (DuckDuckGo) |
-| `glob` | Find files by pattern | `ask_user` | Prompt user for input |
-| `grep` | Regex search in files | `json_read` | Query JSON files |
-| `tree` | Directory structure | `json_write` | Modify JSON files |
-| `info` | Load tool/sub-agent docs | `list_triggers` | Show active triggers |
-| `search_memory` | Search session history | `create_trigger` | Create trigger at runtime |
+| `edit` | Single-file search/replace or unified diff edit | `web_search` | Search the web (DuckDuckGo) |
+| `multi_edit` | Ordered multi-step search/replace in one file with strict/partial/best-effort policies | `ask_user` | Prompt user for input |
+| `glob` | Find files by pattern | `json_read` | Query JSON files |
+| `grep` | Regex search in files | `json_write` | Modify JSON files |
+| `tree` | Directory structure | `list_triggers` | Show active triggers |
+| `info` | Load tool/sub-agent docs | `create_trigger` | Create trigger at runtime |
+| `search_memory` | Search session history | | |
 | `stop_task` | Cancel a running background task | | |
 
 **Terrarium management tools (9):** Used by the `root` creature for managing terrariums.
@@ -243,7 +244,7 @@ subagents:
 |------|-------------|-------|
 | `explore` | Search and analyze codebase | glob, grep, read |
 | `plan` | Create implementation plans | glob, grep, read |
-| `worker` | Implement changes | read, write, edit, bash, glob, grep |
+| `worker` | Implement changes | read, write, edit, multi_edit, bash, glob, grep |
 | `critic` | Review and critique | read, glob, grep |
 | `summarize` | Condense content | (none) |
 | `research` | Web + file research | http, read, glob, grep |
@@ -262,7 +263,7 @@ subagents:
 | `tools` | list | [] | Allowed tool names |
 | `system_prompt` | string | "" | Inline system prompt |
 | `prompt_file` | string | None | Path to prompt file |
-| `can_modify` | bool | false | Allow write/edit tools |
+| `can_modify` | bool | false | Allow file-modifying tools such as write/edit/multi_edit |
 | `stateless` | bool | true | No persistent state |
 | `interactive` | bool | false | Long-lived with context updates |
 | `context_mode` | string | "interrupt_restart" | How to handle updates |

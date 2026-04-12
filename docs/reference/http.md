@@ -296,7 +296,7 @@ GET /api/agents/{agent_id}
   "agent_id": "agent_abc12345",
   "name": "swe_agent",
   "running": true,
-  "tools": ["bash", "read", "write", "edit", "glob", "grep", "think"],
+  "tools": ["bash", "read", "write", "edit", "multi_edit", "glob", "grep", "think"],
   "subagents": ["explore", "plan", "worker"]
 }
 ```

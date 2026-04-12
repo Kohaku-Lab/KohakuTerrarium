@@ -235,7 +235,7 @@ That keeps team communication shared while creature internals stay isolated.
 
 KohakuTerrarium already includes a broad runtime surface:
 
-- built-in file, shell, web, JSON, channel, trigger, and introspection tools
+- built-in file, shell, web, JSON, channel, trigger, and introspection tools, including single-edit and multi-edit file mutation primitives
 - built-in sub-agents for exploration, planning, implementation, review, summarization, and research
 - background tool execution and non-blocking agent flow
 - session persistence with resumable operational state, not just chat history

@@ -77,7 +77,7 @@ Controller (full access)
   |
   +-- explore sub-agent (read-only tools: glob, grep, read)
   |
-  +-- worker sub-agent (write tools: edit, write, bash)
+  +-- worker sub-agent (write tools: edit, multi_edit, write, bash)
   |
   +-- critic sub-agent (read-only, reviews worker's output)
 ```

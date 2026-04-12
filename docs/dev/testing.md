@@ -216,7 +216,7 @@ Sub-agents are always background jobs. The parent agent loop reports "RUNNING" s
 
 **Sub-agent isolation:**
 - Own Registry with only the allowed tools
-- `can_modify=False` filters out write/edit/bash tools
+- `can_modify=False` filters out file-modifying tools such as write/edit/multi_edit/bash
 - Output goes to `SubAgentResult.output` only, never to parent's OutputRouter
 - Max nesting depth configurable (default 3)
 
