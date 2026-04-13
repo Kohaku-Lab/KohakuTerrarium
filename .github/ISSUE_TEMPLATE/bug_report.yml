@@ -32,8 +32,14 @@ body:
     id: logs
     attributes:
       label: Relevant logs or error messages
-      description: Paste any error output, tracebacks, or screenshots.
+      description: Paste any error output or tracebacks.
       render: text
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots / recordings
+      description: Drag and drop screenshots here, paste image links, or add short recordings.
 
   - type: dropdown
     id: interface
