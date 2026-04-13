@@ -196,9 +196,11 @@ class SessionOutput(OutputModule):
             {
                 "name": name,
                 "call_id": metadata.get("job_id", ""),
-                "output": detail,
+                "output": metadata.get("result", detail),
                 "exit_code": 1,
-                "error": detail,
+                "error": metadata.get("error", detail),
+                "interrupted": bool(metadata.get("interrupted", False)),
+                "final_state": metadata.get("final_state", "error"),
             },
         )
 
@@ -235,9 +237,17 @@ class SessionOutput(OutputModule):
             {
                 "name": name,
                 "job_id": metadata.get("job_id", ""),
-                "output": detail,
-                "error": detail,
+                "output": metadata.get("result", detail),
+                "error": metadata.get("error", detail),
                 "success": False,
+                "interrupted": bool(metadata.get("interrupted", False)),
+                "final_state": metadata.get("final_state", "error"),
+                "tools_used": metadata.get("tools_used", []),
+                "turns": metadata.get("turns", 0),
+                "duration": metadata.get("duration", 0),
+                "total_tokens": metadata.get("total_tokens", 0),
+                "prompt_tokens": metadata.get("prompt_tokens", 0),
+                "completion_tokens": metadata.get("completion_tokens", 0),
             },
         )
 

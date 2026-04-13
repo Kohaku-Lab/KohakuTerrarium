@@ -142,6 +142,8 @@ class StreamOutput(OutputModule):
                 "background",
                 "subagent",
                 "tool",
+                "interrupted",
+                "final_state",
             ):
                 if k in metadata:
                     msg[k] = metadata[k]

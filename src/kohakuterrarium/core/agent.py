@@ -126,6 +126,9 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
 
         # Active backgroundify handles (for TUI/frontend promotion access)
         self._active_handles: dict[str, Any] = {}
+        # Direct jobs tracked by the current processing run; interrupted/cancelled
+        # here, background jobs are excluded.
+        self._direct_job_meta: dict[str, dict[str, Any]] = {}
 
         self.compact_manager: Any = None
         self.plugins: Any = None  # PluginManager | None
@@ -524,6 +527,9 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
         Cancels the processing task directly, which propagates
         CancelledError through whatever is awaiting (LLM stream,
         tool gather, etc.). The agent stays alive for the next input.
+
+        Only direct jobs owned by the active processing cycle are cancelled.
+        Background jobs keep running.
         """
         self._interrupt_requested = True
         self.controller._interrupted = True
@@ -533,15 +539,9 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
         if processing and not processing.done():
             processing.cancel()
 
-        # Also cancel running direct (non-background) tool tasks
-        for job_id, task in list(self.executor._tasks.items()):
-            status = self.executor.get_status(job_id)
-            if status and status.state.value == "running" and not task.done():
-                task.cancel()
-
-        # NOTE: Background sub-agents are NOT cancelled by interrupt.
-        # They have their own lifecycle and must be cancelled individually
-        # via _cancel_job() (TUI click / frontend stopTask API).
+        # Cancel only direct, non-promoted jobs from the active run.
+        for job_id in list(self._active_handles.keys()):
+            self._interrupt_direct_job(job_id)
 
         # Plugin callback (fire-and-forget, non-blocking)
         if self.plugins:
@@ -554,24 +554,25 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
 
         Called from the TUI running panel click handler.
         """
-        cancelled = False
+        cancelled = self._interrupt_direct_job(job_id)
 
-        # Try executor (tools) first
-        task = self.executor._tasks.get(job_id)
-        if task and not task.done():
-            task.cancel()
-            self.executor.job_store.update_status(job_id, state=JobState.CANCELLED)
-            cancelled = True
-
-        # Try sub-agent manager
         if not cancelled:
-            sa_task = self.subagent_manager._tasks.get(job_id)
-            if sa_task and not sa_task.done():
-                sa_task.cancel()
-                self.subagent_manager.job_store.update_status(
-                    job_id, state=JobState.CANCELLED
-                )
+            # Try executor (tools) first
+            task = self.executor._tasks.get(job_id)
+            if task and not task.done():
+                task.cancel()
+                self.executor.job_store.update_status(job_id, state=JobState.CANCELLED)
                 cancelled = True
+
+            # Try sub-agent manager
+            if not cancelled:
+                sa_task = self.subagent_manager._tasks.get(job_id)
+                if sa_task and not sa_task.done():
+                    sa_task.cancel()
+                    self.subagent_manager.job_store.update_status(
+                        job_id, state=JobState.CANCELLED
+                    )
+                    cancelled = True
 
         if cancelled:
             logger.info(
@@ -586,6 +587,22 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
                 f"Cancelled: {job_name}",
                 metadata={"job_id": job_id, "job_name": job_name},
             )
+
+    def _interrupt_direct_job(self, job_id: str) -> bool:
+        """Cancel and finalize a direct job tracked by the current run."""
+        meta = self._direct_job_meta.get(job_id)
+        handle = self._active_handles.get(job_id)
+        if not meta or not handle or handle.promoted or handle.done:
+            return False
+
+        if meta.get("kind") == "subagent":
+            job = self.subagent_manager._jobs.get(job_id)
+            if job and hasattr(job, "subagent"):
+                job.subagent.cancel()
+
+        handle.task.cancel()
+        asyncio.create_task(self._finalize_interrupted_direct_job(job_id))
+        return True
 
     def _promote_handle(self, job_id: str) -> bool:
         """Promote a direct task to background. Thread-safe (TUI + API)."""

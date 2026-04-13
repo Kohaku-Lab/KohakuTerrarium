@@ -331,6 +331,12 @@ class AgentHandlersMixin(AgentToolsMixin):
             handles[job_id] = handle
             handle_order.append(job_id)
             self._active_handles[job_id] = handle
+            self._register_direct_job(
+                job_id,
+                kind="tool",
+                name=parse_event.name,
+                tool_call_id=tool_call_id,
+            )
 
         logger.debug(
             "Tool started",
@@ -380,6 +386,12 @@ class AgentHandlersMixin(AgentToolsMixin):
             handles[job_id] = handle
             handle_order.append(job_id)
             self._active_handles[job_id] = handle
+            self._register_direct_job(
+                job_id,
+                kind="subagent",
+                name=parse_event.name,
+                tool_call_id=sa_tool_call_id,
+            )
             if sa_tool_call_id and native_tool_call_ids is not None:
                 native_tool_call_ids[job_id] = sa_tool_call_id
 

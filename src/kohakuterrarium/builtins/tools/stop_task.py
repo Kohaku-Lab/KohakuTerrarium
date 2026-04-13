@@ -56,6 +56,11 @@ class StopTaskTool(BaseTool):
 
         agent = context.agent
 
+        # Try current direct-run jobs first so interruption is finalized and persisted
+        if agent._interrupt_direct_job(job_id):
+            logger.info("Direct task cancelled", job_id=job_id)
+            return ToolResult(output=f"Cancelled task: {job_id}", exit_code=0)
+
         # Try executor first (background tools)
         cancelled = await agent.executor.cancel(job_id)
         if cancelled:

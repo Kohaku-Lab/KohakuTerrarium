@@ -161,6 +161,8 @@ class KohakuManager:
         session = self._agents.get(agent_id)
         if not session:
             raise ValueError(f"Agent not found: {agent_id}")
+        if session.agent._interrupt_direct_job(job_id):
+            return True
         # Try executor (tools) first, then sub-agent manager
         if await session.agent.executor.cancel(job_id):
             return True
@@ -571,6 +573,8 @@ class KohakuManager:
         )
         if agent is None:
             raise ValueError(f"Creature not found: {name}")
+        if agent._interrupt_direct_job(job_id):
+            return True
         if await agent.executor.cancel(job_id):
             return True
         return await agent.subagent_manager.cancel(job_id)
