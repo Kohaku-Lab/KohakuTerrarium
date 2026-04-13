@@ -23,6 +23,9 @@ class _FakeHandle:
         self.task = task
         self.promoted = promoted
 
+    async def wait(self):
+        return await self.task
+
     @property
     def done(self):
         return self.task.done()
@@ -63,6 +66,67 @@ class _FakeAgentTools(AgentToolsMixin):
         self._direct_job_meta = {}
         self.executor = _FakeExecutor()
         self.subagent_manager = _FakeSubagentManager()
+
+
+@pytest.mark.asyncio
+async def test_wait_handles_emits_direct_completion_as_each_job_finishes():
+    agent = _FakeAgentTools()
+    controller = SimpleNamespace(
+        conversation=SimpleNamespace(append=lambda *args, **kwargs: None)
+    )
+
+    fast_done = asyncio.Event()
+    release_slow = asyncio.Event()
+
+    async def fast_job():
+        fast_done.set()
+        return JobResult(job_id="bash_fast", output="fast done")
+
+    async def slow_job():
+        await release_slow.wait()
+        return JobResult(job_id="bash_slow", output="slow done")
+
+    fast_task = asyncio.create_task(fast_job())
+    slow_task = asyncio.create_task(slow_job())
+    agent._active_handles["bash_fast"] = _FakeHandle(fast_task)
+    agent._active_handles["bash_slow"] = _FakeHandle(slow_task)
+    agent._register_direct_job("bash_fast", kind="tool", name="bash")
+    agent._register_direct_job("bash_slow", kind="tool", name="bash")
+
+    wait_task = asyncio.create_task(
+        agent._wait_handles(
+            {
+                "bash_fast": agent._active_handles["bash_fast"],
+                "bash_slow": agent._active_handles["bash_slow"],
+            },
+            ["bash_fast", "bash_slow"],
+            controller,
+            {},
+            False,
+        )
+    )
+
+    await fast_done.wait()
+    for _ in range(20):
+        if agent.output_router.activities:
+            break
+        await asyncio.sleep(0)
+
+    assert [activity[2]["job_id"] for activity in agent.output_router.activities] == [
+        "bash_fast"
+    ]
+    assert "bash_fast" not in agent._active_handles
+    assert "bash_slow" in agent._active_handles
+
+    release_slow.set()
+    results, had_promotions = await wait_task
+
+    assert had_promotions is False
+    assert list(results) == ["bash_fast", "bash_slow"]
+    assert [activity[2]["job_id"] for activity in agent.output_router.activities] == [
+        "bash_fast",
+        "bash_slow",
+    ]
 
 
 @pytest.mark.asyncio
