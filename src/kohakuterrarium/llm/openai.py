@@ -163,6 +163,7 @@ class OpenAIProvider(BaseLLMProvider):
 
         logger.debug("Starting streaming request", model=create_kwargs["model"])
 
+        self._last_usage = {}
         pending_calls: dict[int, dict[str, str]] = {}
 
         stream = await self._client.chat.completions.create(**create_kwargs)

@@ -269,6 +269,7 @@ class CodexOAuthProvider(BaseLLMProvider):
     ) -> AsyncIterator[str]:
         """Stream response from Codex backend using AsyncOpenAI SDK."""
         self._last_tool_calls = []
+        self._last_usage = {}
         await self._ensure_valid_token()
 
         if not self._client:
