@@ -45,7 +45,10 @@ def _force_rmtree(path: Path) -> None:
         os.chmod(fpath, stat.S_IWRITE)
         os.unlink(fpath)
 
-    shutil.rmtree(path, onexc=_on_error)
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_on_error)
+    else:
+        shutil.rmtree(path, onerror=_on_error)
 
 
 def _read_link(name: str) -> Path | None:

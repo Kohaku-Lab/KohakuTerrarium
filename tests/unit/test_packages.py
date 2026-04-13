@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+import kohakuterrarium.packages as pkg_mod
 from kohakuterrarium.packages import (
     install_package,
     is_package_ref,
@@ -76,6 +77,40 @@ class TestIsPackageRef:
 
     def test_empty(self):
         assert not is_package_ref("")
+
+
+class TestForceRmtree:
+    def test_uses_onexc_on_python_312_plus(self, monkeypatch, tmp_path):
+        called = {}
+
+        def fake_rmtree(path, **kwargs):
+            called["path"] = path
+            called.update(kwargs)
+
+        monkeypatch.setattr(pkg_mod.shutil, "rmtree", fake_rmtree)
+        monkeypatch.setattr(pkg_mod.sys, "version_info", (3, 12, 0))
+
+        pkg_mod._force_rmtree(tmp_path)
+
+        assert called["path"] == tmp_path
+        assert "onexc" in called
+        assert "onerror" not in called
+
+    def test_uses_onerror_before_python_312(self, monkeypatch, tmp_path):
+        called = {}
+
+        def fake_rmtree(path, **kwargs):
+            called["path"] = path
+            called.update(kwargs)
+
+        monkeypatch.setattr(pkg_mod.shutil, "rmtree", fake_rmtree)
+        monkeypatch.setattr(pkg_mod.sys, "version_info", (3, 11, 0))
+
+        pkg_mod._force_rmtree(tmp_path)
+
+        assert called["path"] == tmp_path
+        assert "onerror" in called
+        assert "onexc" not in called
 
 
 class TestInstallLocal:
