@@ -95,19 +95,19 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         results: dict[str, Any] = {}
         had_promotions = False
         pending = dict(handles)
+        waiters = {
+            jid: asyncio.create_task(handle.wait()) for jid, handle in pending.items()
+        }
 
-        while pending:
-            futures = {
-                asyncio.ensure_future(h.wait()): jid for jid, h in pending.items()
-            }
-
+        while waiters:
             done, _ = await asyncio.wait(
-                futures.keys(), return_when=asyncio.FIRST_COMPLETED
+                waiters.values(), return_when=asyncio.FIRST_COMPLETED
             )
 
-            for future in done:
-                jid = futures[future]
-                pending.pop(jid)
+            finished_job_ids = [jid for jid, task in waiters.items() if task in done]
+            for jid in finished_job_ids:
+                future = waiters.pop(jid)
+                pending.pop(jid, None)
                 try:
                     result = future.result()
                 except (asyncio.CancelledError, Exception) as exc:
@@ -119,11 +119,8 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                     had_promotions = True
                 else:
                     results[jid] = result
+                    self._emit_direct_completion_activity(jid, result)
                     self._clear_direct_job_tracking(jid)
-
-            for f in futures:
-                if f not in done:
-                    f.cancel()
 
         return results, had_promotions
 
@@ -296,6 +293,91 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
 
         self._on_bg_complete(event)
 
+    def _emit_direct_completion_activity(self, job_id: str, result: Any) -> None:
+        """Emit terminal activity immediately when a direct job finishes."""
+        meta = self._direct_job_meta.get(job_id, {})
+        kind = meta.get("kind", "subagent" if job_id.startswith("agent_") else "tool")
+        _, label = _make_job_label(job_id)
+        is_subagent = kind == "subagent"
+        done_activity = "subagent_done" if is_subagent else "tool_done"
+        error_activity = "subagent_error" if is_subagent else "tool_error"
+
+        if isinstance(result, Exception):
+            interrupted = isinstance(result, asyncio.CancelledError)
+            error_text = (
+                "User manually interrupted this job." if interrupted else str(result)
+            )
+            metadata: dict[str, Any] = {
+                "job_id": job_id,
+                "interrupted": interrupted,
+                "final_state": "interrupted" if interrupted else "error",
+                "error": error_text,
+            }
+            if is_subagent:
+                metadata["result"] = error_text
+            self.output_router.notify_activity(
+                error_activity,
+                f"[{label}] {'INTERRUPTED' if interrupted else 'FAILED'}: {error_text}",
+                metadata=metadata,
+            )
+            return
+
+        if result is not None and hasattr(result, "error") and result.error:
+            output = result.output or ""
+            interrupted = result.error == "User manually interrupted this job."
+            metadata = {
+                "job_id": job_id,
+                "interrupted": interrupted,
+                "final_state": "interrupted" if interrupted else "error",
+                "error": result.error,
+                "result": output,
+            }
+            if is_subagent:
+                metadata["turns"] = getattr(result, "turns", 0)
+                metadata["duration"] = getattr(result, "duration", 0)
+                metadata["total_tokens"] = getattr(result, "total_tokens", 0)
+                metadata["prompt_tokens"] = getattr(result, "prompt_tokens", 0)
+                metadata["completion_tokens"] = getattr(result, "completion_tokens", 0)
+                metadata["tools_used"] = getattr(result, "metadata", {}).get(
+                    "tools_used", []
+                )
+            self.output_router.notify_activity(
+                error_activity,
+                f"[{label}] {'INTERRUPTED' if interrupted else 'ERROR'}: {result.error}",
+                metadata=metadata,
+            )
+            return
+
+        output = (
+            result.output
+            if hasattr(result, "output")
+            else str(result) if result else ""
+        )
+        output = output or ""
+        exit_code = getattr(result, "exit_code", 0)
+        status = "OK" if exit_code == 0 else f"exit={exit_code}"
+        preview = (
+            result.get_text_output()[:5000]
+            if hasattr(result, "get_text_output")
+            else str(output)[:5000]
+        )
+        metadata = {"job_id": job_id, "output": preview}
+        if is_subagent:
+            metadata["result"] = preview
+            metadata["turns"] = getattr(result, "turns", 0)
+            metadata["duration"] = getattr(result, "duration", 0)
+            metadata["total_tokens"] = getattr(result, "total_tokens", 0)
+            metadata["prompt_tokens"] = getattr(result, "prompt_tokens", 0)
+            metadata["completion_tokens"] = getattr(result, "completion_tokens", 0)
+            metadata["tools_used"] = getattr(result, "metadata", {}).get(
+                "tools_used", []
+            )
+        self.output_router.notify_activity(
+            done_activity,
+            f"[{label}] {status}",
+            metadata=metadata,
+        )
+
     # ------------------------------------------------------------------
     # Result processing (native and text format)
     # ------------------------------------------------------------------
@@ -313,7 +395,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                 continue  # Was promoted — placeholder already added
 
             result = results[job_id]
-            tool_name, label = _make_job_label(job_id)
+            tool_name, _ = _make_job_label(job_id)
             tool_call_id = tool_call_ids.get(job_id, job_id)
 
             if isinstance(result, Exception):
@@ -324,62 +406,14 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                     else str(result)
                 )
                 content = f"Error: {error_text}"
-                self.output_router.notify_activity(
-                    "tool_error",
-                    f"[{label}] {'INTERRUPTED' if interrupted else 'FAILED'}: {error_text}",
-                    metadata={
-                        "job_id": job_id,
-                        "interrupted": interrupted,
-                        "final_state": "interrupted" if interrupted else "error",
-                        "error": error_text,
-                    },
-                )
             elif result is not None and hasattr(result, "error") and result.error:
                 output = result.output or ""
                 content = f"Error: {result.error}"
                 if output:
                     content += f"\n{output}"
-                self.output_router.notify_activity(
-                    "tool_error",
-                    f"[{label}] {'INTERRUPTED' if getattr(result, 'error', None) == 'User manually interrupted this job.' else 'ERROR'}: {result.error}",
-                    metadata={
-                        "job_id": job_id,
-                        "interrupted": getattr(result, "error", None)
-                        == "User manually interrupted this job.",
-                        "final_state": (
-                            "interrupted"
-                            if getattr(result, "error", None)
-                            == "User manually interrupted this job."
-                            else "error"
-                        ),
-                        "error": result.error,
-                        "result": output,
-                    },
-                )
             elif result is not None:
                 content = result.output if hasattr(result, "output") else str(result)
                 content = content or ""
-                exit_code = getattr(result, "exit_code", 0)
-                status = "OK" if exit_code == 0 else f"exit={exit_code}"
-                preview = (
-                    result.get_text_output()[:5000]
-                    if hasattr(result, "get_text_output")
-                    else str(content)[:5000]
-                )
-                is_subagent = job_id.startswith("agent_")
-                activity = "subagent_done" if is_subagent else "tool_done"
-                meta: dict = {"job_id": job_id, "output": preview}
-                if is_subagent:
-                    meta["result"] = preview
-                    meta["turns"] = getattr(result, "turns", 0)
-                    meta["duration"] = getattr(result, "duration", 0)
-                    meta["total_tokens"] = getattr(result, "total_tokens", 0)
-                    meta["tools_used"] = getattr(result, "metadata", {}).get(
-                        "tools_used", []
-                    )
-                self.output_router.notify_activity(
-                    activity, f"[{label}] {status}", metadata=meta
-                )
             else:
                 content = ""
 
@@ -399,7 +433,6 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                 continue  # Was promoted
 
             result = results[job_id]
-            _, label = _make_job_label(job_id)
 
             if isinstance(result, Exception):
                 interrupted = isinstance(result, asyncio.CancelledError)
@@ -411,43 +444,16 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                 result_strs.append(
                     f"## {job_id} - {'INTERRUPTED' if interrupted else 'FAILED'}\n{error_text}"
                 )
-                self.output_router.notify_activity(
-                    "tool_error",
-                    f"[{label}] {'INTERRUPTED' if interrupted else 'FAILED'}: {error_text}",
-                    metadata={
-                        "job_id": job_id,
-                        "interrupted": interrupted,
-                        "final_state": "interrupted" if interrupted else "error",
-                        "error": error_text,
-                    },
-                )
             elif result is not None:
                 output = result.output if hasattr(result, "output") else str(result)
                 output = output or ""
                 error = getattr(result, "error", None)
                 if error:
                     result_strs.append(f"## {job_id} - ERROR\n{error}\n{output}")
-                    interrupted = error == "User manually interrupted this job."
-                    self.output_router.notify_activity(
-                        "tool_error",
-                        f"[{label}] {'INTERRUPTED' if interrupted else 'ERROR'}: {error}",
-                        metadata={
-                            "job_id": job_id,
-                            "interrupted": interrupted,
-                            "final_state": "interrupted" if interrupted else "error",
-                            "error": error,
-                            "result": output,
-                        },
-                    )
                 else:
                     exit_code = getattr(result, "exit_code", 0)
                     status = "OK" if exit_code == 0 else f"exit={exit_code}"
                     result_strs.append(f"## {job_id} - {status}\n{output}")
-                    self.output_router.notify_activity(
-                        "tool_done",
-                        f"[{label}] {status}",
-                        metadata={"job_id": job_id, "result": output[:5000]},
-                    )
 
         return "\n\n".join(result_strs) if result_strs else ""
 
