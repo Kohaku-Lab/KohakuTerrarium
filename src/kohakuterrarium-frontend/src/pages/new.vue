@@ -47,7 +47,7 @@
 
       <!-- Actions -->
       <div class="flex justify-end gap-3">
-        <button class="btn-secondary" @click="$router.push('/')">Cancel</button>
+        <button class="btn-secondary" @click="$router.push(isMobile ? '/mobile' : '/')">Cancel</button>
         <button class="btn-primary" :disabled="!canStart" :class="{ 'opacity-50 cursor-not-allowed': !canStart }" @click="startInstance"><span class="i-carbon-play mr-1" /> Start Instance</button>
       </div>
     </div>
@@ -60,6 +60,7 @@ import { useConfigsStore } from "@/stores/configs"
 import { useInstancesStore } from "@/stores/instances"
 import { ElMessage } from "element-plus"
 
+const isMobile = inject("mobileLayout", false)
 const router = useRouter()
 const configs = useConfigsStore()
 const instances = useInstancesStore()
@@ -115,7 +116,7 @@ async function startInstance() {
   try {
     const id = await instances.create(selectedType.value, selectedConfig.value, pwd.value)
     ElMessage.success(`Started ${selectedType.value}`)
-    router.push(`/instances/${id}`)
+    router.push(isMobile ? `/mobile/${id}` : `/instances/${id}`)
   } catch (err) {
     ElMessage.error(`Failed to start: ${err.response?.data?.detail || err.message}`)
   } finally {

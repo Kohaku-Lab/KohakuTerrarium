@@ -116,6 +116,7 @@ import { sessionAPI } from "@/utils/api"
 import { useInstancesStore } from "@/stores/instances"
 import { ElMessage } from "element-plus"
 
+const isMobile = inject("mobileLayout", false)
 const router = useRouter()
 const instances = useInstancesStore()
 
@@ -175,7 +176,7 @@ async function resumeSession(session) {
     const result = await sessionAPI.resume(session.name)
     await instances.fetchAll()
     ElMessage.success(`Resumed session: ${session.name}`)
-    router.push(`/instances/${result.instance_id}`)
+    router.push(isMobile ? `/mobile/${result.instance_id}` : `/instances/${result.instance_id}`)
   } catch (err) {
     ElMessage.error(`Failed to resume: ${err.response?.data?.detail || err.message}`)
   } finally {
