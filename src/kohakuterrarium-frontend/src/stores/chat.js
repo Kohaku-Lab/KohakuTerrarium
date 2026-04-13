@@ -554,6 +554,8 @@ export const useChatStore = defineStore("chat", {
     _ws: null,
     /** @type {Array<{id: string, content: string, timestamp: string}>} Messages queued while agent is processing */
     queuedMessages: [],
+    /** @type {number} Monotonic token to ignore stale history/WS callbacks after instance switches */
+    _instanceGeneration: 0,
   }),
 
   getters: {
@@ -566,8 +568,9 @@ export const useChatStore = defineStore("chat", {
 
   actions: {
     initForInstance(instance) {
-      if (this._instanceId === instance.id) return
+      if (this._instanceId === instance.id && this._ws) return
       this._cleanup()
+      const generation = ++this._instanceGeneration
       this._instanceId = instance.id
       this._instanceType = instance.type
       this.tabs = []
@@ -595,11 +598,11 @@ export const useChatStore = defineStore("chat", {
         } else {
           this._addTab("ch:tasks")
         }
-        this._connectTerrarium(instance.id)
+        this._connectTerrarium(instance.id, generation)
       } else {
         const name = instance.creatures[0]?.name || instance.config_name
         this._addTab(name)
-        this._connectCreature(instance.id)
+        this._connectCreature(instance.id, generation)
       }
 
       // Restore saved tabs/active tab for this instance
@@ -642,7 +645,7 @@ export const useChatStore = defineStore("chat", {
       if (tab && this._instanceType === "terrarium") {
         const msgs = this.messagesByTab[tab]
         if (msgs && msgs.length === 0) {
-          this._loadHistory(tab)
+          this._loadHistory(tab, this._instanceGeneration)
         }
       }
     },
@@ -708,9 +711,10 @@ export const useChatStore = defineStore("chat", {
       }
     },
 
-    async _loadHistory(target) {
+    async _loadHistory(target, generation = this._instanceGeneration) {
       try {
         const { messages, events } = await terrariumAPI.getHistory(this._instanceId, target)
+        if (generation !== this._instanceGeneration) return
         if (events?.length) {
           const { messages: msgs, pendingJobs } = _replayEvents(messages, events)
           this.messagesByTab[target] = msgs
@@ -725,12 +729,13 @@ export const useChatStore = defineStore("chat", {
     },
 
     /** Connect single WS for terrarium */
-    _connectTerrarium(terrariumId) {
+    _connectTerrarium(terrariumId, generation) {
       this._historyLoaded = false
       this._wsBuffer = []
 
       const ws = new WebSocket(wsUrl(`/ws/terrariums/${terrariumId}`))
       ws.onmessage = (event) => {
+        if (generation !== this._instanceGeneration || ws !== this._ws) return
         const data = JSON.parse(event.data)
         if (this._historyLoaded) {
           this._onMessage(data)
@@ -739,6 +744,7 @@ export const useChatStore = defineStore("chat", {
         }
       }
       ws.onclose = () => {
+        if (generation !== this._instanceGeneration || ws !== this._ws) return
         this.processing = false
       }
       this._ws = ws
@@ -754,6 +760,7 @@ export const useChatStore = defineStore("chat", {
         }
       }
       Promise.all(loads).then(() => {
+        if (generation !== this._instanceGeneration || ws !== this._ws) return
         this._historyLoaded = true
         if (this._wsBuffer) {
           for (const data of this._wsBuffer) {
@@ -765,7 +772,7 @@ export const useChatStore = defineStore("chat", {
     },
 
     /** Connect single WS for standalone creature */
-    _connectCreature(agentId) {
+    _connectCreature(agentId, generation) {
       // Buffer WS events until history loads to avoid race condition
       // (WS events arriving before history overwrites them)
       this._historyLoaded = false
@@ -773,6 +780,7 @@ export const useChatStore = defineStore("chat", {
 
       const ws = new WebSocket(wsUrl(`/ws/creatures/${agentId}`))
       ws.onmessage = (event) => {
+        if (generation !== this._instanceGeneration || ws !== this._ws) return
         const data = JSON.parse(event.data)
         if (this._historyLoaded) {
           this._onMessage(data)
@@ -781,19 +789,21 @@ export const useChatStore = defineStore("chat", {
         }
       }
       ws.onclose = () => {
+        if (generation !== this._instanceGeneration || ws !== this._ws) return
         this.processing = false
       }
       this._ws = ws
 
       const tabKey = this.tabs[0]
       if (tabKey) {
-        this._loadAgentHistory(agentId, tabKey)
+        this._loadAgentHistory(agentId, tabKey, generation)
       }
     },
 
-    async _loadAgentHistory(agentId, tabKey) {
+    async _loadAgentHistory(agentId, tabKey, generation = this._instanceGeneration) {
       try {
         const { messages, events } = await agentAPI.getHistory(agentId)
+        if (generation !== this._instanceGeneration) return
         if (events?.length) {
           const { messages: msgs, pendingJobs } = _replayEvents(messages, events)
           this.messagesByTab[tabKey] = msgs
@@ -806,6 +816,7 @@ export const useChatStore = defineStore("chat", {
         /* no history yet */
       }
       // History loaded — flush buffered WS events
+      if (generation !== this._instanceGeneration) return
       this._historyLoaded = true
       if (this._wsBuffer) {
         for (const data of this._wsBuffer) {
@@ -1423,6 +1434,9 @@ export const useChatStore = defineStore("chat", {
     },
 
     _cleanup() {
+      this.activeTab = null
+      this._historyLoaded = false
+      this._wsBuffer = []
       if (this._ws) {
         this._ws.close()
         this._ws = null
