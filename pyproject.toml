@@ -11,7 +11,7 @@ authors = [
 ]
 license = { text = "KohakuTerrarium-1.0" }
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 keywords = ["ai", "agent", "llm", "multi-agent", "terrarium", "framework"]
 classifiers = [
     "Development Status :: 4 - Beta",
