@@ -1,5 +1,4 @@
 import asyncio
-from typing import Any
 
 from kohakuterrarium.core.backgroundify import BackgroundifyHandle
 from kohakuterrarium.core.controller import Controller
@@ -102,7 +101,9 @@ class AgentRuntimeToolsMixin:
         job_id = getattr(event, "job_id", "")
         is_subagent = job_id.startswith("agent_")
         error = event.context.get("error") if event.context else None
-        content = event.content if isinstance(event.content, str) else str(event.content)
+        content = (
+            event.content if isinstance(event.content, str) else str(event.content)
+        )
         _, label = _make_job_label(job_id)
         activity_done, activity_error = (
             ("subagent_done", "subagent_error")

@@ -403,7 +403,6 @@ class AgentHandlersMixin(AgentToolsMixin):
             metadata={"job_id": job_id, "task": full_task, "background": is_bg},
         )
 
-
     def _check_termination(self, round_text: list[str]) -> bool:
         """Check if termination conditions are met. Returns True to stop."""
         if not self._termination_checker:
@@ -530,4 +529,3 @@ class AgentHandlersMixin(AgentToolsMixin):
             prompt_tokens = last_usage.get("prompt_tokens", 0)
             if self.compact_manager.should_compact(prompt_tokens):
                 self.compact_manager.trigger_compact()
-
