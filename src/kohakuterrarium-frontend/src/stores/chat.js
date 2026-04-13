@@ -49,7 +49,7 @@ function _convertHistory(messages) {
  * jobId -> { name, type, startedAt } for tools/sub-agents that started
  * but never received a done/error event (still running or interrupted).
  */
-function _replayEvents(messages, events) {
+export function _replayEvents(messages, events) {
   if (!events?.length) return { messages: _convertHistory(messages), pendingJobs: {} }
 
   const result = []
@@ -209,7 +209,8 @@ function _replayEvents(messages, events) {
     }
     if (tc) {
       tc.result = result || ""
-      if (opts?.error) tc.status = "error"
+      if (opts?.interrupted || opts?.finalState === "interrupted") tc.status = "interrupted"
+      else if (opts?.error) tc.status = "error"
       if (opts?.tools_used) tc.tools_used = opts.tools_used
       if (opts?.turns != null) tc.turns = opts.turns
       if (opts?.duration != null) tc.duration = opts.duration
@@ -306,7 +307,22 @@ function _replayEvents(messages, events) {
           evt.job_id,
         )
       } else if (at === "subagent_error") {
-        updateTool(evt.name, evt.detail, { error: true }, evt.job_id)
+        updateTool(
+          evt.name,
+          evt.result || evt.error || evt.detail,
+          {
+            error: true,
+            interrupted: !!evt.interrupted,
+            finalState: evt.final_state,
+            tools_used: evt.tools_used,
+            turns: evt.turns,
+            duration: evt.duration,
+            total_tokens: evt.total_tokens,
+            prompt_tokens: evt.prompt_tokens,
+            completion_tokens: evt.completion_tokens,
+          },
+          evt.job_id,
+        )
       } else if (at === "tool_start") {
         addTool(evt.name, "tool", evt.args || { info: evt.detail }, evt.job_id)
       } else if (at === "tool_done") {
@@ -317,7 +333,16 @@ function _replayEvents(messages, events) {
           evt.job_id,
         )
       } else if (at === "tool_error") {
-        updateTool(evt.name, evt.detail, { error: true }, evt.job_id)
+        updateTool(
+          evt.name,
+          evt.result || evt.error || evt.detail,
+          {
+            error: true,
+            interrupted: !!evt.interrupted,
+            finalState: evt.final_state,
+          },
+          evt.job_id,
+        )
       } else if (at?.startsWith("subagent_tool_")) {
         const subAct = at.replace("subagent_", "")
         const toolName = evt.tool || evt.name || ""
@@ -351,8 +376,12 @@ function _replayEvents(messages, events) {
     } else if (t === "tool_result") {
       updateTool(
         evt.name,
-        evt.output || "",
-        { error: evt.error ? true : false },
+        evt.output || evt.error || "",
+        {
+          error: evt.error ? true : false,
+          interrupted: !!evt.interrupted,
+          finalState: evt.final_state,
+        },
         evt.call_id || evt.job_id,
       )
     } else if (t === "subagent_call") {
@@ -360,8 +389,11 @@ function _replayEvents(messages, events) {
     } else if (t === "subagent_result") {
       updateTool(
         evt.name,
-        evt.output || "",
+        evt.output || evt.error || "",
         {
+          error: evt.error ? true : false,
+          interrupted: !!evt.interrupted,
+          finalState: evt.final_state,
           tools_used: evt.tools_used,
           turns: evt.turns,
           duration: evt.duration,
@@ -1022,8 +1054,15 @@ export const useChatStore = defineStore("chat", {
       } else if (at === "tool_error" || at === "subagent_error") {
         const tc = this._findToolPart(msgs, name, data.job_id)
         if (tc) {
-          tc.status = "error"
-          tc.result = data.detail || ""
+          tc.status =
+            data.interrupted || data.final_state === "interrupted" ? "interrupted" : "error"
+          tc.result = data.result || data.error || data.detail || ""
+          if (data.tools_used) tc.tools_used = data.tools_used
+          if (data.turns != null) tc.turns = data.turns
+          if (data.duration != null) tc.duration = data.duration
+          if (data.total_tokens != null) tc.total_tokens = data.total_tokens
+          if (data.prompt_tokens != null) tc.prompt_tokens = data.prompt_tokens
+          if (data.completion_tokens != null) tc.completion_tokens = data.completion_tokens
           delete this.runningJobs[tc.jobId || tc.id]
           this._checkJobTimer()
         }
