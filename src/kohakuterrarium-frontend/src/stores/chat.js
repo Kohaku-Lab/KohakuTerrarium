@@ -1038,34 +1038,61 @@ export const useChatStore = defineStore("chat", {
         }
         this._ensureJobTimer()
       } else if (at === "tool_done" || at === "subagent_done") {
-        const tc = this._findToolPart(msgs, name, data.job_id)
-        if (tc) {
-          tc.status = "done"
-          tc.result = data.result || data.output || data.detail || ""
-          if (data.tools_used) tc.tools_used = data.tools_used
-          if (data.turns != null) tc.turns = data.turns
-          if (data.duration != null) tc.duration = data.duration
-          if (data.total_tokens != null) tc.total_tokens = data.total_tokens
-          if (data.prompt_tokens != null) tc.prompt_tokens = data.prompt_tokens
-          if (data.completion_tokens != null) tc.completion_tokens = data.completion_tokens
-          delete this.runningJobs[tc.jobId || tc.id]
-          this._checkJobTimer()
+        let tc = this._findToolPart(msgs, name, data.job_id)
+        if (!tc) {
+          const last = this._ensureAssistantMsg(msgs)
+          tc = {
+            type: "tool",
+            id: data.id || "tc_" + Date.now(),
+            jobId: data.job_id || "",
+            name,
+            kind: at === "subagent_done" ? "subagent" : "tool",
+            args: {},
+            status: "done",
+            result: "",
+            tools_used: [],
+            children: [],
+          }
+          last.parts.push(tc)
         }
+        tc.status = "done"
+        tc.result = data.result || data.output || data.detail || ""
+        if (data.tools_used) tc.tools_used = data.tools_used
+        if (data.turns != null) tc.turns = data.turns
+        if (data.duration != null) tc.duration = data.duration
+        if (data.total_tokens != null) tc.total_tokens = data.total_tokens
+        if (data.prompt_tokens != null) tc.prompt_tokens = data.prompt_tokens
+        if (data.completion_tokens != null) tc.completion_tokens = data.completion_tokens
+        delete this.runningJobs[tc.jobId || tc.id]
+        this._checkJobTimer()
       } else if (at === "tool_error" || at === "subagent_error") {
-        const tc = this._findToolPart(msgs, name, data.job_id)
-        if (tc) {
-          tc.status =
-            data.interrupted || data.final_state === "interrupted" ? "interrupted" : "error"
-          tc.result = data.result || data.error || data.detail || ""
-          if (data.tools_used) tc.tools_used = data.tools_used
-          if (data.turns != null) tc.turns = data.turns
-          if (data.duration != null) tc.duration = data.duration
-          if (data.total_tokens != null) tc.total_tokens = data.total_tokens
-          if (data.prompt_tokens != null) tc.prompt_tokens = data.prompt_tokens
-          if (data.completion_tokens != null) tc.completion_tokens = data.completion_tokens
-          delete this.runningJobs[tc.jobId || tc.id]
-          this._checkJobTimer()
+        let tc = this._findToolPart(msgs, name, data.job_id)
+        if (!tc) {
+          const last = this._ensureAssistantMsg(msgs)
+          tc = {
+            type: "tool",
+            id: data.id || "tc_" + Date.now(),
+            jobId: data.job_id || "",
+            name,
+            kind: at === "subagent_error" ? "subagent" : "tool",
+            args: {},
+            status: "error",
+            result: "",
+            tools_used: [],
+            children: [],
+          }
+          last.parts.push(tc)
         }
+        tc.status = data.interrupted || data.final_state === "interrupted" ? "interrupted" : "error"
+        tc.result = data.result || data.error || data.detail || ""
+        if (data.tools_used) tc.tools_used = data.tools_used
+        if (data.turns != null) tc.turns = data.turns
+        if (data.duration != null) tc.duration = data.duration
+        if (data.total_tokens != null) tc.total_tokens = data.total_tokens
+        if (data.prompt_tokens != null) tc.prompt_tokens = data.prompt_tokens
+        if (data.completion_tokens != null) tc.completion_tokens = data.completion_tokens
+        delete this.runningJobs[tc.jobId || tc.id]
+        this._checkJobTimer()
       } else if (at === "subagent_token_update") {
         // Live token usage update from a running sub-agent
         const saName = data.subagent || ""
