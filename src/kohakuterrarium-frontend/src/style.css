@@ -54,14 +54,16 @@ html {
   background: var(--color-bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  height: 100%;
 }
 
 body {
-  min-height: 100vh;
+  height: 100%;
 }
 
 #app {
-  min-height: 100vh;
+  height: 100%;
+  overflow: hidden;
 }
 
 code,

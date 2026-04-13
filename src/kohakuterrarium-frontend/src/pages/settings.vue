@@ -234,9 +234,33 @@
           <div class="flex flex-col gap-4 max-w-xl">
             <div class="card p-4">
               <div class="font-medium text-warm-700 dark:text-warm-300 mb-3">Appearance</div>
-              <div class="flex items-center justify-between">
+              <div class="flex items-center justify-between mb-3">
                 <span class="text-sm text-warm-600 dark:text-warm-400">Theme</span>
                 <el-switch :model-value="theme.dark" active-text="Dark" inactive-text="Light" @change="theme.toggle()" />
+              </div>
+              <div class="flex items-center justify-between mb-2">
+                <div>
+                  <span class="text-sm text-warm-600 dark:text-warm-400">Desktop Zoom</span>
+                  <span class="text-[11px] text-warm-400 ml-2">{{ Math.round(theme.desktopZoom * 100) }}%</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button class="w-7 h-7 rounded border border-warm-300 dark:border-warm-600 text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 flex items-center justify-center text-sm" @click="theme.setDesktopZoom(theme.desktopZoom - 0.05)">-</button>
+                  <input type="range" :value="theme.desktopZoom" min="0.7" max="1.5" step="0.05" class="w-28 accent-iolite" @input="theme.setDesktopZoom(parseFloat($event.target.value))" />
+                  <button class="w-7 h-7 rounded border border-warm-300 dark:border-warm-600 text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 flex items-center justify-center text-sm" @click="theme.setDesktopZoom(theme.desktopZoom + 0.05)">+</button>
+                  <button class="text-[11px] text-warm-400 hover:text-iolite px-1" @click="theme.setDesktopZoom(1.15)">Reset</button>
+                </div>
+              </div>
+              <div class="flex items-center justify-between">
+                <div>
+                  <span class="text-sm text-warm-600 dark:text-warm-400">Mobile Zoom</span>
+                  <span class="text-[11px] text-warm-400 ml-2">{{ Math.round(theme.mobileZoom * 100) }}%</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button class="w-7 h-7 rounded border border-warm-300 dark:border-warm-600 text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 flex items-center justify-center text-sm" @click="theme.setMobileZoom(theme.mobileZoom - 0.05)">-</button>
+                  <input type="range" :value="theme.mobileZoom" min="0.7" max="1.5" step="0.05" class="w-28 accent-iolite" @input="theme.setMobileZoom(parseFloat($event.target.value))" />
+                  <button class="w-7 h-7 rounded border border-warm-300 dark:border-warm-600 text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 flex items-center justify-center text-sm" @click="theme.setMobileZoom(theme.mobileZoom + 0.05)">+</button>
+                  <button class="text-[11px] text-warm-400 hover:text-iolite px-1" @click="theme.setMobileZoom(1.25)">Reset</button>
+                </div>
               </div>
             </div>
           </div>
