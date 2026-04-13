@@ -9,7 +9,11 @@ from kohakuterrarium.core.controller import Controller
 from kohakuterrarium.core.events import TriggerEvent, create_tool_complete_event
 from kohakuterrarium.core.job import JobResult
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode
-from kohakuterrarium.parsing import SubAgentCallEvent, ToolCallEvent
+from kohakuterrarium.parsing import (
+    CommandResultEvent,
+    SubAgentCallEvent,
+    ToolCallEvent,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -173,6 +177,20 @@ class AgentToolsMixin:
             f"[{label}] Moved to background",
             metadata={"job_id": job_id},
         )
+
+    def _interrupt_direct_job(self, job_id: str) -> bool:
+        """Cancel and finalize a direct job tracked by the current run."""
+        meta = self._direct_job_meta.get(job_id)
+        handle = self._active_handles.get(job_id)
+        if not meta or not handle or handle.promoted or handle.done:
+            return False
+        if meta.get("kind") == "subagent":
+            job = self.subagent_manager._jobs.get(job_id)
+            if job and hasattr(job, "subagent"):
+                job.subagent.cancel()
+        handle.task.cancel()
+        asyncio.create_task(self._finalize_interrupted_direct_job(job_id))
+        return True
 
     def _register_direct_job(
         self,
@@ -447,6 +465,67 @@ class AgentToolsMixin:
     # ------------------------------------------------------------------
     # Sub-agent execution
     # ------------------------------------------------------------------
+
+    def _notify_command_result(self, parse_event: CommandResultEvent) -> None:
+        """Route command results to activity log (not user-facing output)."""
+        activity = "command_error" if parse_event.error else "command_done"
+        detail = (
+            f"[{parse_event.command}] {parse_event.error}"
+            if parse_event.error
+            else f"[{parse_event.command}] OK"
+        )
+        self.output_router.notify_activity(activity, detail)
+
+    def _notify_tool_start(
+        self, parse_event: ToolCallEvent, job_id: str, is_direct: bool
+    ) -> None:
+        """Notify output of a tool start with a human-readable preview."""
+        _, label = _make_job_label(job_id)
+        full_args, arg_parts = {}, []
+        for k, v in (parse_event.args or {}).items():
+            if k.startswith("_"):
+                continue
+            full_args[k] = v
+            arg_parts.append(f"{k}={str(v)[:40]}")
+        bg_tag = " (bg)" if not is_direct else ""
+        self.output_router.notify_activity(
+            "tool_start",
+            f"[{label}]{bg_tag} {' '.join(arg_parts)[:80]}",
+            metadata={"job_id": job_id, "args": full_args, "background": not is_direct},
+        )
+
+    def _emit_token_usage(self, controller: Controller) -> None:
+        """Emit token usage from the last LLM turn to output."""
+        usage = getattr(controller, "_last_usage", {})
+        if usage:
+            self.output_router.notify_activity(
+                "token_usage",
+                f"tokens: {usage.get('prompt_tokens', 0)} in, "
+                f"{usage.get('completion_tokens', 0)} out",
+                metadata=usage,
+            )
+
+    def _cancel_handles(self, handles: dict[str, BackgroundifyHandle]) -> None:
+        """Cancel all non-promoted handles (on interrupt)."""
+        for job_id, handle in handles.items():
+            if handle.promoted:
+                logger.debug("Skipping promoted handle", job_id=job_id)
+                continue
+            if not handle.done:
+                handle.task.cancel()
+                logger.debug("Cancelled direct handle", job_id=job_id)
+
+    def _reset_output_state(self) -> None:
+        """Reset output router and default output for a new iteration."""
+        self.output_router.reset()
+        if hasattr(self.output_router.default_output, "reset"):
+            self.output_router.default_output.reset()
+
+    async def _flush_output(self) -> None:
+        """Flush buffered output and reset default output."""
+        await self.output_router.flush()
+        if hasattr(self.output_router.default_output, "reset"):
+            self.output_router.default_output.reset()
 
     async def _start_subagent_async(self, event: SubAgentCallEvent) -> tuple[str, bool]:
         """Start a sub-agent execution.

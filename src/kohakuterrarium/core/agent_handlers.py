@@ -403,42 +403,6 @@ class AgentHandlersMixin(AgentToolsMixin):
             metadata={"job_id": job_id, "task": full_task, "background": is_bg},
         )
 
-    def _notify_command_result(self, parse_event: CommandResultEvent) -> None:
-        """Route command results to activity log (not user-facing output)."""
-        if parse_event.error:
-            self.output_router.notify_activity(
-                "command_error",
-                f"[{parse_event.command}] {parse_event.error}",
-            )
-        else:
-            self.output_router.notify_activity(
-                "command_done",
-                f"[{parse_event.command}] OK",
-            )
-
-    def _notify_tool_start(
-        self, parse_event: ToolCallEvent, job_id: str, is_direct: bool
-    ) -> None:
-        """Notify output of a tool start with a human-readable preview."""
-        _, label = _make_job_label(job_id)
-
-        full_args: dict = {}
-        arg_preview = ""
-        if parse_event.args:
-            arg_parts = []
-            for k, v in parse_event.args.items():
-                if k.startswith("_"):
-                    continue
-                full_args[k] = v
-                arg_parts.append(f"{k}={str(v)[:40]}")
-            arg_preview = " ".join(arg_parts)[:80]
-
-        bg_tag = " (bg)" if not is_direct else ""
-        self.output_router.notify_activity(
-            "tool_start",
-            f"[{label}]{bg_tag} {arg_preview}",
-            metadata={"job_id": job_id, "args": full_args, "background": not is_direct},
-        )
 
     def _check_termination(self, round_text: list[str]) -> bool:
         """Check if termination conditions are met. Returns True to stop."""
@@ -567,42 +531,3 @@ class AgentHandlersMixin(AgentToolsMixin):
             if self.compact_manager.should_compact(prompt_tokens):
                 self.compact_manager.trigger_compact()
 
-    def _emit_token_usage(self, controller: Controller) -> None:
-        """Emit token usage from the last LLM turn to output."""
-        usage = getattr(controller, "_last_usage", {})
-        if usage:
-            self.output_router.notify_activity(
-                "token_usage",
-                f"tokens: {usage.get('prompt_tokens', 0)} in, "
-                f"{usage.get('completion_tokens', 0)} out",
-                metadata=usage,
-            )
-
-    def _cancel_handles(self, handles: dict[str, BackgroundifyHandle]) -> None:
-        """Cancel all non-promoted handles (on interrupt).
-
-        Promoted handles are already background — they keep running.
-        """
-        for job_id, handle in handles.items():
-            if handle.promoted:
-                logger.debug("Skipping promoted handle", job_id=job_id)
-                continue
-            if not handle.done:
-                handle.task.cancel()
-                logger.debug("Cancelled direct handle", job_id=job_id)
-
-    # ------------------------------------------------------------------
-    # Output helpers
-    # ------------------------------------------------------------------
-
-    def _reset_output_state(self) -> None:
-        """Reset output router and default output for a new iteration."""
-        self.output_router.reset()
-        if hasattr(self.output_router.default_output, "reset"):
-            self.output_router.default_output.reset()
-
-    async def _flush_output(self) -> None:
-        """Flush buffered output and reset default output."""
-        await self.output_router.flush()
-        if hasattr(self.output_router.default_output, "reset"):
-            self.output_router.default_output.reset()

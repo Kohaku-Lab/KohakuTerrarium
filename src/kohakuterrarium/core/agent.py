@@ -124,10 +124,7 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
         self._interrupt_requested = False
         self._processing_task: asyncio.Task | None = None
 
-        # Active backgroundify handles (for TUI/frontend promotion access)
         self._active_handles: dict[str, Any] = {}
-        # Direct jobs tracked by the current processing run; interrupted/cancelled
-        # here, background jobs are excluded.
         self._direct_job_meta: dict[str, dict[str, Any]] = {}
 
         self.compact_manager: Any = None
@@ -587,22 +584,6 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
                 f"Cancelled: {job_name}",
                 metadata={"job_id": job_id, "job_name": job_name},
             )
-
-    def _interrupt_direct_job(self, job_id: str) -> bool:
-        """Cancel and finalize a direct job tracked by the current run."""
-        meta = self._direct_job_meta.get(job_id)
-        handle = self._active_handles.get(job_id)
-        if not meta or not handle or handle.promoted or handle.done:
-            return False
-
-        if meta.get("kind") == "subagent":
-            job = self.subagent_manager._jobs.get(job_id)
-            if job and hasattr(job, "subagent"):
-                job.subagent.cancel()
-
-        handle.task.cancel()
-        asyncio.create_task(self._finalize_interrupted_direct_job(job_id))
-        return True
 
     def _promote_handle(self, job_id: str) -> bool:
         """Promote a direct task to background. Thread-safe (TUI + API)."""
