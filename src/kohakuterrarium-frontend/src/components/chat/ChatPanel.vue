@@ -145,9 +145,8 @@ function formatTokens(n) {
 
 const inputPlaceholder = computed(() => {
   if (!chat.activeTab) return "Select a tab..."
-  if (chat.activeTab === "root") return "Message the root agent..."
   if (chat.activeTab.startsWith("ch:")) return `Send to ${chat.activeTab.slice(3)} channel...`
-  return `Message ${chat.activeTab}...`
+  return "Message ..."
 })
 
 function getCreatureStatus(name) {
