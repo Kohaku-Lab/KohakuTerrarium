@@ -1,14 +1,19 @@
 <template>
   <nav class="h-full flex flex-col border-r border-warm-200 dark:border-warm-700 bg-warm-100 dark:bg-warm-950 shrink-0 transition-all duration-200 overflow-hidden" :class="expanded ? 'w-52' : 'w-14'">
     <!-- Logo + toggle -->
-    <div class="flex items-center gap-2 px-3 py-3" :class="expanded ? 'justify-between' : 'justify-center'">
-      <div v-if="expanded" class="flex items-center gap-2 min-w-0">
+    <div v-if="expanded" class="flex items-center gap-2 px-3 py-3 justify-between">
+      <div class="flex items-center gap-2 min-w-0">
         <img src="/kohaku-icon.png" alt="Kohaku" class="w-7 h-7 rounded-full shrink-0 object-cover" />
         <span class="text-sm truncate"> <span class="font-bold text-amber">Kohaku</span><span class="font-light text-iolite-light dark:text-iolite-light">Terrarium</span> </span>
       </div>
-      <img v-else src="/kohaku-icon.png" alt="Kohaku" class="w-7 h-7 rounded-full object-cover" />
-      <button class="w-6 h-6 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors shrink-0" @click="expanded = !expanded">
-        <div :class="expanded ? 'i-carbon-side-panel-close' : 'i-carbon-side-panel-open'" class="text-sm" />
+      <button class="w-6 h-6 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors shrink-0" @click="expanded = false">
+        <div class="i-carbon-side-panel-close text-sm" />
+      </button>
+    </div>
+    <div v-else class="flex flex-col items-center gap-1 py-3">
+      <img src="/kohaku-icon.png" alt="Kohaku" class="w-7 h-7 rounded-full object-cover" />
+      <button class="w-6 h-6 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" @click="expanded = true">
+        <div class="i-carbon-side-panel-open text-sm" />
       </button>
     </div>
 
