@@ -4,6 +4,7 @@ const backendCache = new Map()
 let loadPromise = null
 let saveTimer = null
 const pending = new Map()
+let backendWriteDisabled = false
 
 function hasLocalStorage() {
   return typeof localStorage !== "undefined"
@@ -37,17 +38,22 @@ export function writeLocalJsonPref(key, value) {
 }
 
 function scheduleBackendFlush() {
-  if (saveTimer != null) return
+  if (backendWriteDisabled || saveTimer != null) return
   saveTimer = setTimeout(async () => {
     saveTimer = null
-    if (pending.size === 0) return
+    if (backendWriteDisabled || pending.size === 0) return
     const values = Object.fromEntries(pending)
     pending.clear()
     try {
       const data = await settingsAPI.updateUIPrefs(values)
       const merged = data?.values || {}
       for (const [key, value] of Object.entries(merged)) backendCache.set(key, value)
-    } catch {
+    } catch (error) {
+      const status = error?.response?.status
+      if (status === 404 || status === 405 || status === 501) {
+        backendWriteDisabled = true
+        return
+      }
       for (const [key, value] of Object.entries(values)) pending.set(key, value)
     }
   }, 50)
@@ -92,21 +98,26 @@ export function setHybridPref(key, value, opts = {}) {
   if (json) writeLocalJsonPref(key, value)
   else writeLocalPref(key, value)
   backendCache.set(key, value)
-  pending.set(key, value)
-  scheduleBackendFlush()
+  if (!backendWriteDisabled) {
+    pending.set(key, value)
+    scheduleBackendFlush()
+  }
 }
 
 export function removeHybridPref(key) {
   writeLocalPref(key, null)
   backendCache.delete(key)
-  pending.set(key, null)
-  scheduleBackendFlush()
+  if (!backendWriteDisabled) {
+    pending.set(key, null)
+    scheduleBackendFlush()
+  }
 }
 
 export function _resetUIPrefsForTests() {
   backendCache.clear()
   pending.clear()
   loadPromise = null
+  backendWriteDisabled = false
   if (saveTimer != null) {
     clearTimeout(saveTimer)
     saveTimer = null

@@ -293,7 +293,8 @@ watch(
 
 watch(
   () => [props.instance?.id, chat.activeTab],
-  ([instanceId, tab], [prevInstanceId, prevTab]) => {
+  ([instanceId, tab], previous) => {
+    const [prevInstanceId, prevTab] = previous || []
     if (prevInstanceId && prevTab) saveScrollPosition(prevInstanceId, prevTab)
     restoreDraft()
     nextTick(() => {
