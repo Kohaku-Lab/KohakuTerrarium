@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createPinia, setActivePinia } from "pinia"
 
 import { useLayoutStore } from "./layout.js"
+import { _resetUIPrefsForTests } from "@/utils/uiPrefs.js"
 
 function makeBuiltinPreset(id = "legacy-instance") {
   return {
@@ -23,12 +24,22 @@ function fakeComponent(name) {
   return { name, render: () => null }
 }
 
+let storage
+
 beforeEach(() => {
-  // Fresh pinia + fresh localStorage for every test.
+  _resetUIPrefsForTests()
   setActivePinia(createPinia())
-  if (typeof localStorage !== "undefined") {
-    localStorage.clear()
-  }
+  storage = new Map()
+  vi.stubGlobal("localStorage", {
+    getItem: (key) => (storage.has(key) ? storage.get(key) : null),
+    setItem: (key, value) => storage.set(key, String(value)),
+    removeItem: (key) => storage.delete(key),
+    clear: () => storage.clear(),
+  })
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
 })
 
 describe("layout store — panel registry", () => {
@@ -83,6 +94,7 @@ describe("layout store — preset switching", () => {
   })
 
   it("ignores unknown preset ids", () => {
+    localStorage.removeItem("kt.layout.activePreset")
     const store = useLayoutStore()
     store.switchPreset("ghost")
     expect(store.activePresetId).toBeNull()

@@ -245,9 +245,9 @@
                 </div>
                 <div class="flex items-center gap-2">
                   <button class="w-7 h-7 rounded border border-warm-300 dark:border-warm-600 text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 flex items-center justify-center text-sm" @click="theme.setDesktopZoom(theme.desktopZoom - 0.05)">-</button>
-                  <input type="range" :value="theme.desktopZoom" min="0.7" max="1.5" step="0.05" class="w-28 accent-iolite" @input="theme.setDesktopZoom(parseFloat($event.target.value))" />
+                  <input type="range" :value="theme.desktopZoom" :min="MIN_UI_ZOOM" :max="MAX_UI_ZOOM" step="0.05" class="w-28 accent-iolite" @input="theme.setDesktopZoom(parseFloat($event.target.value))" />
                   <button class="w-7 h-7 rounded border border-warm-300 dark:border-warm-600 text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 flex items-center justify-center text-sm" @click="theme.setDesktopZoom(theme.desktopZoom + 0.05)">+</button>
-                  <button class="text-[11px] text-warm-400 hover:text-iolite px-1" @click="theme.setDesktopZoom(1.15)">Reset</button>
+                  <button class="text-[11px] text-warm-400 hover:text-iolite px-1" @click="theme.setDesktopZoom(DEFAULT_DESKTOP_ZOOM)">Reset</button>
                 </div>
               </div>
               <div class="flex items-center justify-between">
@@ -257,9 +257,9 @@
                 </div>
                 <div class="flex items-center gap-2">
                   <button class="w-7 h-7 rounded border border-warm-300 dark:border-warm-600 text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 flex items-center justify-center text-sm" @click="theme.setMobileZoom(theme.mobileZoom - 0.05)">-</button>
-                  <input type="range" :value="theme.mobileZoom" min="0.7" max="1.5" step="0.05" class="w-28 accent-iolite" @input="theme.setMobileZoom(parseFloat($event.target.value))" />
+                  <input type="range" :value="theme.mobileZoom" :min="MIN_UI_ZOOM" :max="MAX_UI_ZOOM" step="0.05" class="w-28 accent-iolite" @input="theme.setMobileZoom(parseFloat($event.target.value))" />
                   <button class="w-7 h-7 rounded border border-warm-300 dark:border-warm-600 text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 flex items-center justify-center text-sm" @click="theme.setMobileZoom(theme.mobileZoom + 0.05)">+</button>
-                  <button class="text-[11px] text-warm-400 hover:text-iolite px-1" @click="theme.setMobileZoom(1.25)">Reset</button>
+                  <button class="text-[11px] text-warm-400 hover:text-iolite px-1" @click="theme.setMobileZoom(DEFAULT_MOBILE_ZOOM)">Reset</button>
                 </div>
               </div>
             </div>
@@ -271,7 +271,7 @@
 </template>
 
 <script setup>
-import { useThemeStore } from "@/stores/theme"
+import { DEFAULT_DESKTOP_ZOOM, DEFAULT_MOBILE_ZOOM, MAX_UI_ZOOM, MIN_UI_ZOOM, useThemeStore } from "@/stores/theme"
 import { settingsAPI } from "@/utils/api"
 
 const theme = useThemeStore()

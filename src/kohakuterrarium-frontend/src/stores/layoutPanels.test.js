@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createPinia, setActivePinia } from "pinia"
 
 import { useLayoutStore } from "./layout.js"
+import { _resetUIPrefsForTests } from "@/utils/uiPrefs.js"
 
 const stub = (name) => ({ name, render: () => null })
 
@@ -42,9 +43,22 @@ vi.mock("@/components/status/StatusDashboard.vue", () => ({
   default: stub("StatusDashboard"),
 }))
 
+let storage
+
 beforeEach(() => {
+  _resetUIPrefsForTests()
   setActivePinia(createPinia())
-  if (typeof localStorage !== "undefined") localStorage.clear()
+  storage = new Map()
+  vi.stubGlobal("localStorage", {
+    getItem: (key) => (storage.has(key) ? storage.get(key) : null),
+    setItem: (key, value) => storage.set(key, String(value)),
+    removeItem: (key) => storage.delete(key),
+    clear: () => storage.clear(),
+  })
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
 })
 
 describe("layoutPanels — registerBuiltinPanels", () => {

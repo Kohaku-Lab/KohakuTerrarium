@@ -430,6 +430,14 @@ export const settingsAPI = {
     const { data } = await api.get("/settings/codex-usage")
     return data
   },
+  async getUIPrefs() {
+    const { data } = await api.get("/settings/ui-prefs")
+    return data
+  },
+  async updateUIPrefs(values) {
+    const { data } = await api.post("/settings/ui-prefs", { values })
+    return data
+  },
 }
 
 /** Registry browser */

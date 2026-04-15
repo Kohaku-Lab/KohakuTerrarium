@@ -11,6 +11,8 @@
 </template>
 
 <script setup>
+import { getHybridPrefSync, setHybridPref } from "@/utils/uiPrefs"
+
 const props = defineProps({
   /** true = top/bottom split, false = left/right split */
   horizontal: { type: Boolean, default: false },
@@ -22,7 +24,8 @@ const props = defineProps({
   persistKey: { type: String, default: "" },
 })
 
-const _saved = props.persistKey ? parseFloat(localStorage.getItem(`split-${props.persistKey}`) || "0") : 0
+const splitPrefs = getHybridPrefSync("kt.splitPane", {}, { json: true }) || {}
+const _saved = props.persistKey ? Number(splitPrefs[props.persistKey] || 0) : 0
 const size = ref(_saved || props.initialSize)
 const dragging = ref(false)
 const container = ref(null)
@@ -55,7 +58,8 @@ function onPointerUp(e) {
   dragging.value = false
   e.target.releasePointerCapture(e.pointerId)
   if (props.persistKey) {
-    localStorage.setItem(`split-${props.persistKey}`, String(size.value))
+    const currentPrefs = getHybridPrefSync("kt.splitPane", {}, { json: true }) || {}
+    setHybridPref("kt.splitPane", { ...currentPrefs, [props.persistKey]: size.value }, { json: true })
   }
   e.target.removeEventListener("pointermove", onPointerMove)
   e.target.removeEventListener("pointerup", onPointerUp)

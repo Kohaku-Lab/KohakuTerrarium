@@ -1,11 +1,14 @@
 """Settings routes - API keys, custom model profiles, default model."""
 
 import datetime
+import json
+from pathlib import Path
+from typing import Any
 
 import httpx
 import yaml
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from kohakuterrarium.llm.codex_auth import CodexTokens, refresh_tokens
 
@@ -50,6 +53,51 @@ class ProfileRequest(BaseModel):
 
 class DefaultModelRequest(BaseModel):
     name: str
+
+
+class UIPrefsUpdateRequest(BaseModel):
+    values: dict[str, Any] = Field(default_factory=dict)
+
+
+def _ui_prefs_path() -> Path:
+    return Path.home() / ".kohakuterrarium" / "ui_prefs.json"
+
+
+_UI_PREF_DEFAULTS: dict[str, Any] = {
+    "theme": "system",
+    "kt-desktop-zoom": 1.15,
+    "kt-mobile-zoom": 1.25,
+    "nav-expanded": True,
+    "kt-force-desktop": False,
+    "kt.presets.user": {},
+    "kt.layout.activePreset": None,
+    "kt.layout.trees": {},
+    "kt.layout.instances": {},
+    "kt.splitPane": {},
+}
+
+
+def _load_ui_prefs() -> dict[str, Any]:
+    path = _ui_prefs_path()
+    if not path.exists():
+        return dict(_UI_PREF_DEFAULTS)
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return dict(_UI_PREF_DEFAULTS)
+        return {**_UI_PREF_DEFAULTS, **data}
+    except Exception:
+        return dict(_UI_PREF_DEFAULTS)
+
+
+def _save_ui_prefs(values: dict[str, Any]) -> dict[str, Any]:
+    merged = {**_load_ui_prefs(), **values}
+    path = _ui_prefs_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(merged, f, ensure_ascii=False, indent=2, sort_keys=True)
+    return merged
 
 
 # ── API keys ──
@@ -179,6 +227,18 @@ async def set_default(req: DefaultModelRequest):
 async def get_all_models():
     """List all available models (presets + user profiles) with status."""
     return list_all()
+
+
+@router.get("/ui-prefs")
+async def get_ui_prefs():
+    """Return persisted UI preferences used as backend fallback for the frontend."""
+    return {"values": _load_ui_prefs()}
+
+
+@router.post("/ui-prefs")
+async def update_ui_prefs(req: UIPrefsUpdateRequest):
+    """Merge and persist UI preferences in ~/.kohakuterrarium/ui_prefs.json."""
+    return {"values": _save_ui_prefs(req.values or {})}
 
 
 # ── MCP server configs (global, saved in ~/.kohakuterrarium/mcp_servers.yaml) ──

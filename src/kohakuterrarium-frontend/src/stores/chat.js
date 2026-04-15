@@ -2,6 +2,7 @@ import { terrariumAPI, agentAPI } from "@/utils/api"
 import { useMessagesStore } from "@/stores/messages"
 import { useInstancesStore } from "@/stores/instances"
 import { useStatusStore } from "@/stores/status"
+import { getHybridPrefSync, setHybridPref } from "@/utils/uiPrefs"
 
 /**
  * Convert OpenAI-format conversation history to frontend messages.
@@ -1482,30 +1483,27 @@ export const useChatStore = defineStore("chat", {
     _saveTabs() {
       if (!this._instanceId) return
       const key = `chat-tabs-${this._instanceId}`
-      localStorage.setItem(
+      setHybridPref(
         key,
-        JSON.stringify({
+        {
           tabs: this.tabs,
           activeTab: this.activeTab,
-        }),
+        },
+        { json: true },
       )
     },
 
     _restoreTabs() {
       if (!this._instanceId) return
       const key = `chat-tabs-${this._instanceId}`
-      try {
-        const saved = JSON.parse(localStorage.getItem(key) || "null")
-        if (saved?.tabs?.length) {
-          for (const tab of saved.tabs) {
-            this._addTab(tab)
-          }
-          if (saved.activeTab && this.tabs.includes(saved.activeTab)) {
-            this.activeTab = saved.activeTab
-          }
+      const saved = getHybridPrefSync(key, null, { json: true })
+      if (saved?.tabs?.length) {
+        for (const tab of saved.tabs) {
+          this._addTab(tab)
         }
-      } catch {
-        // ignore corrupt data
+        if (saved.activeTab && this.tabs.includes(saved.activeTab)) {
+          this.activeTab = saved.activeTab
+        }
       }
     },
   },

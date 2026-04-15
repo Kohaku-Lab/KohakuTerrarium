@@ -5,6 +5,7 @@ import { routes } from "vue-router/auto-routes"
 import App from "./App.vue"
 
 import { registerBuiltinPanels } from "@/stores/layoutPanels"
+import { ensureUIPrefsLoaded } from "@/utils/uiPrefs"
 
 import "element-plus/es/components/message/style/css"
 import "element-plus/es/components/message-box/style/css"
@@ -17,16 +18,18 @@ const router = createRouter({
   routes,
 })
 
-const pinia = createPinia()
-const app = createApp(App)
+async function bootstrap() {
+  await ensureUIPrefsLoaded()
 
-app.use(pinia)
-app.use(router)
+  const pinia = createPinia()
+  const app = createApp(App)
 
-// Register the canonical panel definitions + builtin presets in the layout
-// store. MUST run synchronously after `app.use(pinia)` — if this were async
-// the route component would mount before presets exist and `switchPreset()`
-// would silently fail.
-registerBuiltinPanels()
+  app.use(pinia)
+  app.use(router)
 
-app.mount("#app")
+  registerBuiltinPanels()
+
+  app.mount("#app")
+}
+
+bootstrap()

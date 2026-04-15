@@ -21,30 +21,29 @@
 import { defineStore } from "pinia"
 import { computed, markRaw, ref } from "vue"
 
+import { getHybridPrefSync, removeHybridPref, setHybridPref } from "@/utils/uiPrefs"
+
 const USER_PRESETS_KEY = "kt.presets.user"
 const ACTIVE_PRESET_KEY = "kt.layout.activePreset"
 const PRESET_TREE_PREFIX = "kt.layout.tree."
 const INSTANCE_OVERRIDE_PREFIX = "kt.layout.instance."
+const BACKEND_TREES_KEY = "kt.layout.trees"
+const BACKEND_INSTANCES_KEY = "kt.layout.instances"
 
-/** Safe JSON.parse with fallback. */
 function _readJson(key, fallback) {
-  try {
-    const raw = typeof localStorage !== "undefined" ? localStorage.getItem(key) : null
-    if (raw == null) return fallback
-    return JSON.parse(raw)
-  } catch {
-    return fallback
-  }
+  return getHybridPrefSync(key, fallback, { json: true })
 }
 
 function _writeJson(key, value) {
-  try {
-    if (typeof localStorage === "undefined") return
-    localStorage.setItem(key, JSON.stringify(value))
-  } catch {
-    // Quota or private mode — silently skip. The app still works, just
-    // loses persistence for this key.
-  }
+  setHybridPref(key, value, { json: true })
+}
+
+function _readBackendMap(key) {
+  return getHybridPrefSync(key, {}, { json: true }) || {}
+}
+
+function _writeBackendMap(key, value) {
+  setHybridPref(key, value, { json: true })
 }
 
 /** Deep clone helper (presets are plain data, no functions). */
@@ -265,12 +264,16 @@ export const useLayoutStore = defineStore("layout", () => {
   /** Load per-instance overrides from localStorage. */
   function loadInstanceOverrides(instanceId) {
     if (!instanceId) return
-    const data = _readJson(INSTANCE_OVERRIDE_PREFIX + instanceId, null)
+    const data =
+      _readJson(INSTANCE_OVERRIDE_PREFIX + instanceId, null) ||
+      _readBackendMap(BACKEND_INSTANCES_KEY)[instanceId] ||
+      null
     if (data) {
       instanceOverrides.value = {
         ...instanceOverrides.value,
         [instanceId]: data,
       }
+      _writeJson(INSTANCE_OVERRIDE_PREFIX + instanceId, data)
     }
   }
 
@@ -288,6 +291,7 @@ export const useLayoutStore = defineStore("layout", () => {
     const current =
       instanceOverrides.value[instanceId] ||
       _readJson(INSTANCE_OVERRIDE_PREFIX + instanceId, {}) ||
+      _readBackendMap(BACKEND_INSTANCES_KEY)[instanceId] ||
       {}
     const next = { ...current, presetId }
     instanceOverrides.value = {
@@ -295,6 +299,10 @@ export const useLayoutStore = defineStore("layout", () => {
       [instanceId]: next,
     }
     _writeJson(INSTANCE_OVERRIDE_PREFIX + instanceId, next)
+    _writeBackendMap(BACKEND_INSTANCES_KEY, {
+      ..._readBackendMap(BACKEND_INSTANCES_KEY),
+      [instanceId]: next,
+    })
   }
 
   /** Set a per-instance override patch (merged into active preset). */
@@ -305,6 +313,10 @@ export const useLayoutStore = defineStore("layout", () => {
       [instanceId]: patch,
     }
     _writeJson(INSTANCE_OVERRIDE_PREFIX + instanceId, patch)
+    _writeBackendMap(BACKEND_INSTANCES_KEY, {
+      ..._readBackendMap(BACKEND_INSTANCES_KEY),
+      [instanceId]: patch,
+    })
   }
 
   /** Clear all overrides for an instance. */
@@ -313,13 +325,10 @@ export const useLayoutStore = defineStore("layout", () => {
     const next = { ...instanceOverrides.value }
     delete next[instanceId]
     instanceOverrides.value = next
-    try {
-      if (typeof localStorage !== "undefined") {
-        localStorage.removeItem(INSTANCE_OVERRIDE_PREFIX + instanceId)
-      }
-    } catch {
-      // ignore
-    }
+    removeHybridPref(INSTANCE_OVERRIDE_PREFIX + instanceId)
+    const backendMap = { ..._readBackendMap(BACKEND_INSTANCES_KEY) }
+    delete backendMap[instanceId]
+    _writeBackendMap(BACKEND_INSTANCES_KEY, backendMap)
   }
 
   /** Internal: patch a single zone inside an instance (or global) override. */
@@ -534,16 +543,20 @@ export const useLayoutStore = defineStore("layout", () => {
     const p = activePreset.value
     if (!p?.tree) return
     _writeJson(PRESET_TREE_PREFIX + p.id, p.tree)
+    _writeBackendMap(BACKEND_TREES_KEY, { ..._readBackendMap(BACKEND_TREES_KEY), [p.id]: p.tree })
   }
 
   /** Restore saved tree ratios for a preset from localStorage. */
   function _restoreTreeRatios(presetId) {
-    const saved = _readJson(PRESET_TREE_PREFIX + presetId, null)
+    const saved =
+      _readJson(PRESET_TREE_PREFIX + presetId, null) ||
+      _readBackendMap(BACKEND_TREES_KEY)[presetId] ||
+      null
     if (!saved) return
-    // Apply saved ratios onto the current preset's tree
     const p = allPresets.value[presetId]
     if (!p?.tree) return
     _applyRatios(p.tree, saved)
+    _writeJson(PRESET_TREE_PREFIX + presetId, saved)
   }
 
   /** Recursively apply saved ratio values onto a tree structure.

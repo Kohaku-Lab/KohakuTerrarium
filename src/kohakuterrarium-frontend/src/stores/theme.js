@@ -1,13 +1,31 @@
+import { getHybridPrefSync, setHybridPref } from "@/utils/uiPrefs"
+
+export const MIN_UI_ZOOM = 0.6
+export const MAX_UI_ZOOM = 2
+export const DEFAULT_DESKTOP_ZOOM = 1
+export const DEFAULT_MOBILE_ZOOM = 1
+
+function clampZoom(value, fallback) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.round(Math.max(MIN_UI_ZOOM, Math.min(MAX_UI_ZOOM, parsed)) * 100) / 100
+}
+
 export const useThemeStore = defineStore("theme", {
   state: () => ({
-    dark: localStorage.getItem("theme") === "dark",
-    desktopZoom: parseFloat(localStorage.getItem("kt-desktop-zoom")) || 1.15,
-    mobileZoom: parseFloat(localStorage.getItem("kt-mobile-zoom")) || 1.25,
+    dark: getHybridPrefSync("theme", "system") === "dark",
+    desktopZoom: clampZoom(
+      getHybridPrefSync("kt-desktop-zoom", DEFAULT_DESKTOP_ZOOM),
+      DEFAULT_DESKTOP_ZOOM,
+    ),
+    mobileZoom: clampZoom(
+      getHybridPrefSync("kt-mobile-zoom", DEFAULT_MOBILE_ZOOM),
+      DEFAULT_MOBILE_ZOOM,
+    ),
     _isMobile: false,
   }),
 
   getters: {
-    /** The active zoom level based on current layout mode. */
     uiZoom: (state) => (state._isMobile ? state.mobileZoom : state.desktopZoom),
   },
 
@@ -23,18 +41,17 @@ export const useThemeStore = defineStore("theme", {
     },
 
     setDesktopZoom(value) {
-      this.desktopZoom = Math.round(Math.max(0.5, Math.min(2.0, value)) * 100) / 100
-      localStorage.setItem("kt-desktop-zoom", String(this.desktopZoom))
+      this.desktopZoom = clampZoom(value, DEFAULT_DESKTOP_ZOOM)
+      setHybridPref("kt-desktop-zoom", this.desktopZoom)
       this.applyZoom()
     },
 
     setMobileZoom(value) {
-      this.mobileZoom = Math.round(Math.max(0.5, Math.min(2.0, value)) * 100) / 100
-      localStorage.setItem("kt-mobile-zoom", String(this.mobileZoom))
+      this.mobileZoom = clampZoom(value, DEFAULT_MOBILE_ZOOM)
+      setHybridPref("kt-mobile-zoom", this.mobileZoom)
       this.applyZoom()
     },
 
-    /** Convenience — sets whichever zoom is currently active. */
     setZoom(value) {
       if (this._isMobile) {
         this.setMobileZoom(value)
@@ -46,18 +63,32 @@ export const useThemeStore = defineStore("theme", {
     applyZoom() {
       const el = document.getElementById("app")
       if (!el) return
-      const z = this.uiZoom
+      const z = clampZoom(this.uiZoom, this._isMobile ? DEFAULT_MOBILE_ZOOM : DEFAULT_DESKTOP_ZOOM)
       el.style.zoom = z === 1.0 ? "" : String(z)
     },
 
     apply() {
       document.documentElement.classList.toggle("dark", this.dark)
-      localStorage.setItem("theme", this.dark ? "dark" : "light")
+      setHybridPref("theme", this.dark ? "dark" : "light")
     },
 
     init() {
-      if (!localStorage.getItem("theme")) {
-        this.dark = window.matchMedia("(prefers-color-scheme: dark)").matches
+      const storedTheme = getHybridPrefSync("theme", "system")
+      this.dark =
+        storedTheme === "dark" ||
+        (storedTheme !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches)
+      this.desktopZoom = clampZoom(
+        getHybridPrefSync("kt-desktop-zoom", DEFAULT_DESKTOP_ZOOM),
+        DEFAULT_DESKTOP_ZOOM,
+      )
+      this.mobileZoom = clampZoom(
+        getHybridPrefSync("kt-mobile-zoom", DEFAULT_MOBILE_ZOOM),
+        DEFAULT_MOBILE_ZOOM,
+      )
+      setHybridPref("kt-desktop-zoom", this.desktopZoom)
+      setHybridPref("kt-mobile-zoom", this.mobileZoom)
+      if (storedTheme !== "system") {
+        setHybridPref("theme", this.dark ? "dark" : "light")
       }
       this.apply()
       this.applyZoom()

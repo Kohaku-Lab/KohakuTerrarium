@@ -33,6 +33,7 @@ import { useBuiltinCommands } from "@/composables/useBuiltinCommands"
 import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts"
 import { useInstancesStore } from "@/stores/instances"
 import { useThemeStore } from "@/stores/theme"
+import { getHybridPrefSync, removeHybridPref, setHybridPref } from "@/utils/uiPrefs"
 
 const MOBILE_WIDTH = 768
 const route = useRoute()
@@ -40,7 +41,7 @@ const router = useRouter()
 
 const isMobileRoute = computed(() => route.path.startsWith("/mobile"))
 const windowWidth = ref(window.innerWidth)
-const forceDesktop = ref(localStorage.getItem("kt-force-desktop") === "true")
+const forceDesktop = ref(getHybridPrefSync("kt-force-desktop", false) === true)
 
 // Show "switch to mobile" hint only when: small screen + user explicitly left mobile + on desktop route
 const showMobileHint = computed(() => windowWidth.value < MOBILE_WIDTH && forceDesktop.value && !isMobileRoute.value)
@@ -91,7 +92,7 @@ function toDesktopRoute(path) {
 
 function switchToMobile() {
   forceDesktop.value = false
-  localStorage.removeItem("kt-force-desktop")
+  removeHybridPref("kt-force-desktop")
   const mobileRoute = toMobileRoute(route.path)
   if (mobileRoute) router.replace(mobileRoute)
 }
@@ -99,7 +100,7 @@ function switchToMobile() {
 // Exposed for MobileShell to call
 function switchToDesktop() {
   forceDesktop.value = true
-  localStorage.setItem("kt-force-desktop", "true")
+  setHybridPref("kt-force-desktop", true)
   const desktopRoute = toDesktopRoute(route.path)
   router.replace(desktopRoute)
 }

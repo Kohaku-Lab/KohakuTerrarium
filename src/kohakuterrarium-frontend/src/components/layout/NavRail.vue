@@ -75,13 +75,14 @@
 <script setup>
 import { useThemeStore } from "@/stores/theme"
 import { useInstancesStore } from "@/stores/instances"
+import { getHybridPrefSync, setHybridPref } from "@/utils/uiPrefs"
 
 const theme = useThemeStore()
 const instances = useInstancesStore()
 
-const expanded = ref(localStorage.getItem("nav-expanded") !== "false")
+const expanded = ref(getHybridPrefSync("nav-expanded", true) !== false)
 
 watch(expanded, (v) => {
-  localStorage.setItem("nav-expanded", v ? "true" : "false")
+  setHybridPref("nav-expanded", v)
 })
 </script>
