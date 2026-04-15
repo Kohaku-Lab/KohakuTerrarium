@@ -1,7 +1,7 @@
-import { defineConfig } from "vitest/config";
-import vue from "@vitejs/plugin-vue";
-import AutoImport from "unplugin-auto-import/vite";
-import { fileURLToPath, URL } from "node:url";
+import { defineConfig } from "vitest/config"
+import vue from "@vitejs/plugin-vue"
+import AutoImport from "unplugin-auto-import/vite"
+import { fileURLToPath, URL } from "node:url"
 
 // Minimal vitest config — shares a subset of vite's plugins so .vue
 // files and pinia/vue auto-imports work in tests.
@@ -25,4 +25,4 @@ export default defineConfig({
     // jsdom is flagged unstable for form elements — suppress the noise.
     silent: false,
   },
-});
+})
