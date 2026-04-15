@@ -82,6 +82,8 @@ def _load_one(
 
         if not getattr(plugin, "name", "") or plugin.name == "unnamed":
             plugin.name = name
+        if not getattr(plugin, "description", "") and cfg.get("description"):
+            plugin.description = cfg["description"]
         return plugin
 
     except Exception as e:

@@ -157,6 +157,13 @@ export const terrariumAPI = {
     return data
   },
 
+  async togglePlugin(id, target, pluginName) {
+    const { data } = await api.post(
+      `/terrariums/${id}/plugins/${encodeTarget(target)}/${encodeURIComponent(pluginName)}/toggle`,
+    )
+    return data
+  },
+
   async listTriggers(id, target) {
     const { data } = await api.get(`/terrariums/${id}/triggers/${encodeTarget(target)}`)
     return data
@@ -235,7 +242,9 @@ export const agentAPI = {
 
   /** Toggle a plugin's enabled state */
   async togglePlugin(id, pluginName) {
-    const { data } = await api.post(`/agents/${id}/plugins/${pluginName}/toggle`)
+    const { data } = await api.post(
+      `/agents/${id}/plugins/${encodeURIComponent(pluginName)}/toggle`,
+    )
     return data
   },
 

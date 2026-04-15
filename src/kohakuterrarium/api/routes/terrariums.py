@@ -212,6 +212,22 @@ async def terrarium_plugins(
     return session.agent.plugins.list_plugins()
 
 
+@router.post("/{terrarium_id}/plugins/{target}/{plugin_name}/toggle")
+async def terrarium_toggle_plugin(
+    terrarium_id: str, target: str, plugin_name: str, manager=Depends(get_manager)
+):
+    session = _mount_target(manager, terrarium_id, target)
+    if not session.agent.plugins:
+        raise HTTPException(404, "No plugins loaded")
+    mgr = session.agent.plugins
+    if mgr.is_enabled(plugin_name):
+        mgr.disable(plugin_name)
+        return {"name": plugin_name, "enabled": False}
+    mgr.enable(plugin_name)
+    await mgr.load_pending()
+    return {"name": plugin_name, "enabled": True}
+
+
 @router.get("/{terrarium_id}/env/{target}")
 async def terrarium_env(terrarium_id: str, target: str, manager=Depends(get_manager)):
     session = _mount_target(manager, terrarium_id, target)

@@ -60,8 +60,8 @@ from kohakuterrarium.builtins.cli_rich.runtime import (
 )
 from kohakuterrarium.builtins.cli_rich.theme import COLOR_BANNER
 from kohakuterrarium.builtins.user_commands import (
-    _BUILTIN_COMMANDS,
     get_builtin_user_command,
+    list_builtin_user_commands,
 )
 from kohakuterrarium.modules.user_command.base import (
     UserCommandContext,
@@ -317,23 +317,25 @@ class RichCLIApp:
 
     def _wire_command_registry(self) -> None:
         registry: dict = {}
-        for name in _BUILTIN_COMMANDS:
+        for name in list_builtin_user_commands():
             cmd = get_builtin_user_command(name)
             if cmd:
                 registry[name] = cmd
         self.composer.set_command_registry(registry)
+        self.composer.set_command_context(agent=self.agent)
         self._command_registry = registry
 
     async def _handle_slash(self, text: str) -> None:
         name, args = parse_slash_command(text)
-        cmd = get_builtin_user_command(name)
+        cmd = self._command_registry.get(name) or get_builtin_user_command(name)
         if cmd is None:
             self._commit_text(f"[red]Unknown command:[/red] /{name}")
             return
 
         ctx = UserCommandContext(
             agent=self.agent,
-            terrarium=None,
+            session=getattr(self.agent, "session", None),
+            input_module=getattr(self.agent, "input", None),
             extra={"command_registry": self._command_registry},
         )
         try:

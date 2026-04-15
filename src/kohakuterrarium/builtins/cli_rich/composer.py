@@ -132,6 +132,10 @@ class Composer:
         """Wire the slash command completer to the user command registry."""
         self._completer.set_registry(registry)
 
+    def set_command_context(self, *, agent=None) -> None:
+        """Provide live runtime context for argument completion."""
+        self._completer.set_agent(agent)
+
     def _build_key_bindings(self) -> KeyBindings:
         kb = KeyBindings()
 

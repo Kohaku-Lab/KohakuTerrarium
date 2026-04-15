@@ -80,6 +80,7 @@ class PluginManager:
                 "name": getattr(p, "name", "?"),
                 "priority": getattr(p, "priority", 50),
                 "enabled": getattr(p, "name", "") not in self._disabled,
+                "description": getattr(p, "description", ""),
             }
             for p in self._plugins
         ]

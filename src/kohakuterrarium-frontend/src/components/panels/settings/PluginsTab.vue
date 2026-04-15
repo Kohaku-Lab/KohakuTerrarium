@@ -10,8 +10,12 @@
         <div class="flex items-center gap-2">
           <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="p.enabled ? 'bg-aquamarine' : 'bg-warm-400'" />
           <span class="font-medium text-warm-700 dark:text-warm-300">{{ p.name }}</span>
+          <span class="text-[10px] text-warm-400 font-mono">p{{ p.priority }}</span>
           <span class="flex-1" />
           <span class="text-[10px] font-mono" :class="p.enabled ? 'text-aquamarine' : 'text-warm-400'">{{ p.enabled ? "enabled" : "disabled" }}</span>
+          <button class="ml-2 px-2 py-1 rounded border text-[10px] font-medium transition-colors" :class="p.enabled ? 'border-coral/30 text-coral hover:bg-coral/8' : 'border-aquamarine/30 text-aquamarine hover:bg-aquamarine/8'" :disabled="toggling[p.name]" @click="togglePlugin(p)">
+            {{ toggling[p.name] ? "Working..." : p.enabled ? "Disable" : "Enable" }}
+          </button>
         </div>
         <div v-if="p.description" class="text-[10px] text-warm-500 mt-0.5">
           {{ p.description }}
@@ -39,6 +43,7 @@ const chat = useChatStore()
 const plugins = ref([])
 const loading = ref(false)
 const error = ref("")
+const toggling = ref({})
 const terrariumTarget = computed(() => (props.instance?.type === "terrarium" ? chat.terrariumTarget : null))
 
 async function load() {
@@ -59,6 +64,25 @@ async function load() {
     plugins.value = []
   } finally {
     loading.value = false
+  }
+}
+
+async function togglePlugin(plugin) {
+  const id = props.instance?.id
+  if (!id) return
+  toggling.value = { ...toggling.value, [plugin.name]: true }
+  error.value = ""
+  try {
+    if (props.instance?.type === "terrarium") {
+      await terrariumAPI.togglePlugin(id, terrariumTarget.value, plugin.name)
+    } else {
+      await agentAPI.togglePlugin(id, plugin.name)
+    }
+    await load()
+  } catch (err) {
+    error.value = err?.response?.data?.detail || err?.message || String(err)
+  } finally {
+    toggling.value = { ...toggling.value, [plugin.name]: false }
   }
 }
 

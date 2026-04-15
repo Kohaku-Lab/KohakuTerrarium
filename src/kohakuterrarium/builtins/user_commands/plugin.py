@@ -6,7 +6,7 @@ from kohakuterrarium.modules.user_command.base import (
     CommandLayer,
     UserCommandContext,
     UserCommandResult,
-    ui_info_panel,
+    ui_select,
 )
 
 
@@ -62,21 +62,35 @@ class PluginCommand(BaseUserCommand):
         if not plugins:
             return UserCommandResult(output="No plugins loaded.")
 
-        fields = []
+        lines = []
+        options = []
         for p in plugins:
             status = "enabled" if p["enabled"] else "disabled"
-            fields.append(
-                {"key": p["name"], "value": f"{status} (priority {p['priority']})"}
+            description = p.get("description") or "No description"
+            lines.append(
+                f"{status:>8}  {p['name']:<24} p{p['priority']}  {description}"
+            )
+            options.append(
+                {
+                    "value": f"toggle {p['name']}",
+                    "label": p["name"],
+                    "description": description,
+                    "status": status,
+                    "priority": p["priority"],
+                    "selected": p["enabled"],
+                }
             )
 
-        lines = [
-            f"{'enabled' if p['enabled'] else 'disabled':>8}  {p['name']}"
-            for p in plugins
-        ]
         lines.append("")
-        lines.append("Use /plugin toggle <name> to enable/disable")
+        lines.append(
+            "Select a plugin to toggle it, or use /plugin enable|disable <name>"
+        )
 
         return UserCommandResult(
             output="\n".join(lines),
-            data=ui_info_panel("Plugins", fields),
+            data=ui_select(
+                "Plugins",
+                options,
+                action="plugin",
+            ),
         )

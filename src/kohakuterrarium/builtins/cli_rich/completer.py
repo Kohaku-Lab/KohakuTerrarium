@@ -8,13 +8,15 @@ After the command name, if the command exposes an
 method, those suggestions are surfaced as well.
 """
 
+from typing import Any
+
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.document import Document
 
 from kohakuterrarium.llm.presets import PRESETS
 
 
-def _model_completions(prefix: str) -> list[tuple[str, str]]:
+def _model_completions(prefix: str, agent: Any | None = None) -> list[tuple[str, str]]:
     """Suggest LLM profile names for /model."""
     out: list[tuple[str, str]] = []
     for name, preset in PRESETS.items():
@@ -27,21 +29,64 @@ def _model_completions(prefix: str) -> list[tuple[str, str]]:
     return out
 
 
+def _plugin_completions(prefix: str, agent: Any | None = None) -> list[tuple[str, str]]:
+    """Suggest /plugin subcommands and plugin names from live agent state."""
+    suggestions: list[tuple[str, str]] = []
+    stripped = prefix.lstrip()
+
+    subcommands = [
+        ("enable", "Enable a plugin"),
+        ("disable", "Disable a plugin"),
+        ("toggle", "Toggle a plugin"),
+    ]
+
+    if not stripped or " " not in stripped:
+        for name, meta in subcommands:
+            if name.startswith(stripped):
+                suggestions.append((name, meta))
+        return suggestions
+
+    subcmd, _, name_prefix = stripped.partition(" ")
+    if subcmd not in {"enable", "disable", "toggle"}:
+        return suggestions
+
+    plugin_manager = getattr(agent, "plugins", None) if agent else None
+    if not plugin_manager:
+        return suggestions
+
+    for plugin in plugin_manager.list_plugins():
+        name = plugin.get("name", "")
+        if not name.startswith(name_prefix):
+            continue
+        description = plugin.get("description") or ""
+        status = "enabled" if plugin.get("enabled") else "disabled"
+        suggestions.append(
+            (f"{subcmd} {name}", f"{status} · {description}".strip(" ·"))
+        )
+    return suggestions
+
+
 # Built-in argument completers — keyed by canonical command name.
 _ARG_COMPLETERS = {
     "model": _model_completions,
+    "plugin": _plugin_completions,
+    "plugins": _plugin_completions,
 }
 
 
 class SlashCommandCompleter(Completer):
     """prompt_toolkit Completer for builtin slash commands and arguments."""
 
-    def __init__(self, registry: dict | None = None):
+    def __init__(self, registry: dict | None = None, agent: Any | None = None):
         # registry: name -> command instance (with .name, .description, .aliases)
         self._registry = registry or {}
+        self._agent = agent
 
     def set_registry(self, registry: dict) -> None:
         self._registry = registry
+
+    def set_agent(self, agent: Any | None) -> None:
+        self._agent = agent
 
     def get_completions(self, document: Document, complete_event):
         text = document.text_before_cursor
@@ -56,7 +101,7 @@ class SlashCommandCompleter(Completer):
             if arg_completer is None:
                 return
             try:
-                suggestions = arg_completer(arg_part)
+                suggestions = arg_completer(arg_part, self._agent)
             except Exception as e:
                 _ = e  # fallback: completer must not raise into prompt_toolkit
                 return
