@@ -3,12 +3,12 @@
     <el-select :model-value="selectedTarget" size="small" class="status-select target-select" :disabled="!instanceId" @change="onPickTarget">
       <el-option v-for="target in targetOptions" :key="target.value" :label="target.label" :value="target.value" />
     </el-select>
-    <el-select :model-value="currentModel" size="small" class="status-select model-select" :disabled="!canPickModel" :loading="loading" placeholder="Select model" @visible-change="onVisibleChange" @change="onPick">
-      <el-option v-for="m in models" :key="m.name" :label="m.name" :value="m.name" :disabled="m.name === currentModel" />
+    <el-select :model-value="currentModel" size="small" class="status-select model-select" :disabled="!canPickModel" :loading="loading" placeholder="Search model" filterable default-first-option :reserve-keyword="false" @visible-change="onVisibleChange" @change="onPick">
+      <el-option v-for="m in availableModels" :key="m.name" :label="modelLabel(m)" :value="m.name" :disabled="m.name === currentModel" />
     </el-select>
   </div>
-  <el-select v-else :model-value="currentModel" size="small" class="status-select model-select" :disabled="!instanceId" :loading="loading" placeholder="Select model" @visible-change="onVisibleChange" @change="onPick">
-    <el-option v-for="m in models" :key="m.name" :label="m.name" :value="m.name" :disabled="m.name === currentModel" />
+  <el-select v-else :model-value="currentModel" size="small" class="status-select model-select" :disabled="!instanceId" :loading="loading" placeholder="Search model" filterable default-first-option :reserve-keyword="false" @visible-change="onVisibleChange" @change="onPick">
+    <el-option v-for="m in availableModels" :key="m.name" :label="modelLabel(m)" :value="m.name" :disabled="m.name === currentModel" />
   </el-select>
 
   <!-- Model config dialog (opened by gear button in StatusBar) -->
@@ -45,6 +45,7 @@ const instances = useInstancesStore()
 
 const models = ref([])
 const loading = ref(false)
+const availableModels = computed(() => models.value.filter((model) => model.available !== false))
 
 // Config dialog state
 const configDialogVisible = ref(false)
@@ -97,6 +98,11 @@ function onVisibleChange(open) {
   if (open && models.value.length === 0) loadModels()
 }
 
+function modelLabel(model) {
+  const provider = model.login_provider || model.provider || ""
+  return provider ? `${model.name} · ${provider}` : model.name
+}
+
 function onPickTarget(target) {
   if (!target || !isTerrarium.value) return
   if (chat.tabs.includes(target)) chat.setActiveTab(target)
@@ -134,7 +140,7 @@ function openModelConfig() {
   configJsonError.value = ""
   if (models.value.length === 0) loadModels()
   const modelName = currentModel.value
-  const fullProfile = models.value.find((m) => m.name === modelName)
+  const fullProfile = availableModels.value.find((m) => m.name === modelName) || models.value.find((m) => m.name === modelName)
   const profile = fullProfile
     ? {
         model: fullProfile.model,
