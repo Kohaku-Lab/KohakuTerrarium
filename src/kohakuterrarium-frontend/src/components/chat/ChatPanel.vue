@@ -125,6 +125,38 @@ const inputText = ref("")
 const messagesEl = ref(null)
 const inputEl = ref(null)
 
+function draftKey() {
+  const instanceId = props.instance?.id || chat._instanceId || ""
+  const tab = chat.activeTab || ""
+  if (!instanceId || !tab || props.readOnly) return ""
+  return `kt.chat.draft.${instanceId}.${tab}`
+}
+
+function restoreDraft() {
+  const key = draftKey()
+  if (!key) {
+    inputText.value = ""
+    return
+  }
+  try {
+    inputText.value = localStorage.getItem(key) || ""
+  } catch {
+    inputText.value = ""
+  }
+  nextTick(autoResize)
+}
+
+function persistDraft() {
+  const key = draftKey()
+  if (!key) return
+  try {
+    if (inputText.value) localStorage.setItem(key, inputText.value)
+    else localStorage.removeItem(key)
+  } catch {
+    // ignore storage failures
+  }
+}
+
 const activeUsage = computed(() => {
   const tab = chat.activeTab
   if (!tab) return { prompt: 0, completion: 0, total: 0 }
@@ -223,6 +255,7 @@ watch(
 watch(
   () => [props.instance?.id, chat.activeTab],
   () => {
+    restoreDraft()
     forceScrollOnNextMessageUpdate.value = true
     isNearBottom.value = true
     nextTick(scrollToBottom)
@@ -230,10 +263,15 @@ watch(
   { immediate: true },
 )
 
+watch(inputText, () => {
+  persistDraft()
+})
+
 function send() {
   if (props.readOnly || !inputText.value.trim()) return
   chat.send(inputText.value)
   inputText.value = ""
+  persistDraft()
   isNearBottom.value = true // force scroll after send
   nextTick(() => {
     if (inputEl.value) inputEl.value.style.height = "auto"
