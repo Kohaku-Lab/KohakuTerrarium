@@ -29,8 +29,8 @@ AI tooling usually lives at different layers:
 |  | Product | Framework | Utility / Wrapper |
 |--|---------|-----------|-------------------|
 | **LLM App** | ChatGPT, Claude.ai | LangChain, LangGraph, Dify | DSPy |
-| **Agent** | Claude Code, Codex, OpenCode, **kt-defaults** | smolagents (thin), **KohakuTerrarium** | - |
-| **Multi-Agent** | - | **KohakuTerrarium** | CrewAI, AutoGen |
+| **Agent** | ***kt-defaults***, Claude Code, Codex, OpenCode, OpenClaw, Hermes Agent... | ***KohakuTerrarium***, smolagents | - |
+| **Multi-Agent** | ***kt-defaults*** | ***KohakuTerrarium*** | CrewAI, AutoGen |
 
 Most frameworks either operate below the agent layer, or they jump straight to multi-agent orchestration with a very thin idea of what an agent is.
 
