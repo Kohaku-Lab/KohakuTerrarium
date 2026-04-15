@@ -1,19 +1,16 @@
 <template>
   <div class="h-full overflow-y-auto">
     <div class="container-page max-w-5xl">
-      <!-- Header -->
       <div class="mb-6">
         <h1 class="text-xl font-bold text-warm-800 dark:text-warm-200 mb-1">Saved Sessions</h1>
         <p class="text-secondary">Resume a previous agent or terrarium session.</p>
       </div>
 
-      <!-- Loading state -->
       <div v-if="loading" class="card p-12 text-center text-secondary">
         <div class="i-carbon-renew kohaku-pulse text-2xl mx-auto mb-3 text-amber" />
         <div>Loading sessions...</div>
       </div>
 
-      <!-- Error state -->
       <div v-else-if="error" class="card p-8 text-center">
         <div class="i-carbon-warning-alt text-2xl mx-auto mb-3 text-coral" />
         <div class="text-warm-700 dark:text-warm-300 mb-3">Failed to load sessions</div>
@@ -21,14 +18,12 @@
         <button class="btn-secondary" @click="fetchSessions"><span class="i-carbon-renew mr-1" /> Retry</button>
       </div>
 
-      <!-- Empty state (truly no sessions at all, not just filtered) -->
       <div v-else-if="totalSessions === 0 && !searchQuery" class="card p-12 text-center text-secondary">
         <div class="i-carbon-time text-3xl mx-auto mb-3 text-warm-400" />
         <div class="text-warm-600 dark:text-warm-400 mb-1">No saved sessions</div>
         <div class="text-xs">Sessions are saved automatically when instances run.</div>
       </div>
 
-      <!-- Search + Session list (always show search once we have any sessions or a query) -->
       <template v-else>
         <div class="mb-4">
           <input v-model="searchQuery" type="text" class="input-field w-full" placeholder="Search sessions by name, config, agents, preview..." />
@@ -38,7 +33,6 @@
 
         <div v-else class="flex flex-col gap-2">
           <div v-for="session in sessions" :key="session.name" class="card-hover p-4 flex items-center gap-4">
-            <!-- Icon -->
             <div
               :class="session.config_type === 'terrarium' ? 'i-carbon-network-4' : 'i-carbon-bot'"
               class="text-lg shrink-0"
@@ -47,7 +41,6 @@
               }"
             />
 
-            <!-- Info -->
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2 mb-0.5">
                 <span class="font-medium text-warm-800 dark:text-warm-200 truncate">
@@ -69,7 +62,6 @@
               <div v-if="session.preview" class="text-xs text-warm-400 dark:text-warm-500 mt-1 truncate italic" :title="session.preview">"{{ session.preview }}"</div>
             </div>
 
-            <!-- Last active time -->
             <div class="text-xs text-warm-400 shrink-0 text-right min-w-24">
               <div>{{ formatTime(session.last_active) }}</div>
               <div class="text-warm-400/60">
@@ -77,7 +69,6 @@
               </div>
             </div>
 
-            <!-- View / Resume / Delete buttons -->
             <div class="flex gap-2 shrink-0">
               <button class="btn-secondary flex items-center gap-1" @click="viewSession(session)">
                 <span class="i-carbon-view" />
@@ -100,7 +91,6 @@
             </div>
           </div>
 
-          <!-- Pagination -->
           <div class="flex items-center justify-between mt-4 text-xs text-warm-400">
             <span>{{ totalSessions }} sessions total</span>
             <div class="flex gap-2">
@@ -134,7 +124,6 @@ const resuming = ref(null)
 const searchQuery = ref("")
 let _searchTimer = null
 
-// Debounced server-side search
 watch(searchQuery, () => {
   clearTimeout(_searchTimer)
   _searchTimer = setTimeout(() => {
