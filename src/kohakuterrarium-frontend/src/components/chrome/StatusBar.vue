@@ -51,11 +51,17 @@ import { useInstancesStore } from "@/stores/instances"
 import { useLayoutStore } from "@/stores/layout"
 import { fireModelConfigOpen } from "@/utils/layoutEvents"
 
+const route = useRoute()
 const instances = useInstancesStore()
 const chat = useChatStore()
 const layout = useLayoutStore()
 
-const instance = computed(() => instances.current)
+const instance = computed(() => {
+  const id = String(route.params.id || "")
+  if (!id) return instances.current
+  if (instances.current?.id === id) return instances.current
+  return instances.list.find((item) => item.id === id) || null
+})
 const sessionId = computed(() => chat.sessionInfo.sessionId || instance.value?.session_id || "")
 const sessionIdShort = computed(() => {
   const s = sessionId.value

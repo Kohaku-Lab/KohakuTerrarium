@@ -14,7 +14,7 @@
       </template>
     </el-dialog>
   </div>
-  <div v-else-if="instances.loading" class="h-full flex items-center justify-center text-secondary">Loading instance...</div>
+  <div v-else class="h-full flex items-center justify-center text-secondary">Loading instance...</div>
 </template>
 
 <script setup>
@@ -33,7 +33,14 @@ const chat = useChatStore()
 const editor = useEditorStore()
 const layout = useLayoutStore()
 
-const instance = computed(() => instances.current)
+const loadedInstance = ref(null)
+const instance = computed(() => {
+  const id = String(route.params.id || "")
+  if (!id) return null
+  if (loadedInstance.value?.id === id) return loadedInstance.value
+  if (instances.current?.id === id) return instances.current
+  return instances.list.find((item) => item.id === id) || null
+})
 const showStopConfirm = ref(false)
 const stopping = ref(false)
 let refreshTimer = null
@@ -83,16 +90,16 @@ watch(
 )
 
 async function loadInstance() {
-  const id = route.params.id
+  const id = String(route.params.id || "")
   if (!id) return
   const loaded = await instances.fetchOne(id)
   if (!loaded) {
+    loadedInstance.value = null
     router.replace("/")
     return
   }
-  if (instance.value) {
-    chat.initForInstance(instance.value)
-  }
+  loadedInstance.value = loaded
+  chat.initForInstance(loaded)
 }
 
 function applyPresetForInstance() {

@@ -40,14 +40,22 @@ export const useInstancesStore = defineStore("instances", {
     async fetchOne(id) {
       this.loading = true
       try {
+        let loaded = null
         if (id.startsWith("terrarium_")) {
           const data = await terrariumAPI.get(id)
-          this.current = _mapTerrarium(data)
+          loaded = _mapTerrarium(data)
         } else if (id.startsWith("agent_")) {
           const data = await agentAPI.get(id)
-          this.current = _mapAgent(data)
+          loaded = _mapAgent(data)
+        } else {
+          this.current = null
+          return null
         }
-        return this.current
+        this.current = loaded
+        const idx = this.list.findIndex((item) => item.id === loaded.id)
+        if (idx >= 0) this.list.splice(idx, 1, loaded)
+        else this.list.unshift(loaded)
+        return loaded
       } catch (err) {
         if (err?.response?.status === 404) {
           this.list = this.list.filter((i) => i.id !== id)

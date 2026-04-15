@@ -39,6 +39,7 @@ import { useInstancesStore } from "@/stores/instances"
 import { agentAPI, terrariumAPI, configAPI } from "@/utils/api"
 import { onLayoutEvent, LAYOUT_EVENTS } from "@/utils/layoutEvents"
 
+const route = useRoute()
 const chat = useChatStore()
 const instances = useInstancesStore()
 
@@ -50,18 +51,24 @@ const configDialogVisible = ref(false)
 const configJson = ref("")
 const configJsonError = ref("")
 
-const instanceId = computed(() => instances.current?.id || null)
-const isTerrarium = computed(() => instances.current?.type === "terrarium")
+const currentInstance = computed(() => {
+  const id = String(route.params.id || "")
+  if (!id) return instances.current
+  if (instances.current?.id === id) return instances.current
+  return instances.list.find((item) => item.id === id) || null
+})
+const instanceId = computed(() => currentInstance.value?.id || null)
+const isTerrarium = computed(() => currentInstance.value?.type === "terrarium")
 const terrariumTarget = computed(() => (isTerrarium.value ? chat.terrariumTarget : null))
 const targetOptions = computed(() => {
-  const inst = instances.current
+  const inst = currentInstance.value
   if (inst?.type !== "terrarium") return []
   return [...(inst.has_root ? [{ value: "root", label: "root" }] : []), ...(inst.creatures || []).map((c) => ({ value: c.name, label: c.name }))]
 })
 const selectedTarget = computed(() => terrariumTarget.value || targetOptions.value[0]?.value || null)
 const canPickModel = computed(() => !!instanceId.value && (!isTerrarium.value || !!selectedTarget.value))
 const currentModel = computed(() => {
-  const inst = instances.current
+  const inst = currentInstance.value
   if (inst?.type === "terrarium") {
     const target = selectedTarget.value
     if (target === "root") return terrariumTarget.value === target ? chat.sessionInfo.model || inst.model || "" : inst.model || ""
@@ -100,7 +107,7 @@ async function onPick(modelName) {
   const id = instanceId.value
   if (!id || !modelName || modelName === currentModel.value) return
   try {
-    const inst = instances.current
+    const inst = currentInstance.value
     if (inst?.type === "terrarium") {
       const target = selectedTarget.value
       if (!target) {

@@ -86,7 +86,14 @@ const instances = useInstancesStore()
 const chat = useChatStore()
 const editor = useEditorStore()
 
-const instance = computed(() => instances.current)
+const loadedInstance = ref(null)
+const instance = computed(() => {
+  const id = String(route.params.id || "")
+  if (!id) return null
+  if (loadedInstance.value?.id === id) return loadedInstance.value
+  if (instances.current?.id === id) return instances.current
+  return instances.list.find((item) => item.id === id) || null
+})
 const activeTab = ref("chat")
 const showStatus = ref(false)
 const showFiles = ref(false)
@@ -129,11 +136,14 @@ function onFileSelect(path) {
 }
 
 async function loadInstance() {
-  const id = route.params.id
+  const id = String(route.params.id || "")
   if (!id) return
-  await instances.fetchOne(id)
-  if (instance.value) {
-    chat.initForInstance(instance.value)
+  const loaded = await instances.fetchOne(id)
+  if (loaded) {
+    loadedInstance.value = loaded
+    chat.initForInstance(loaded)
+  } else {
+    loadedInstance.value = null
   }
 }
 
