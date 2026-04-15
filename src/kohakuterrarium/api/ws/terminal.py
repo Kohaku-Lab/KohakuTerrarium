@@ -320,6 +320,13 @@ async def _pipe_session(websocket: WebSocket, cwd: str) -> None:
         pass
 
 
+def _session_cwd(session) -> str:
+    cwd = None
+    if hasattr(session.agent, "executor"):
+        cwd = getattr(session.agent.executor, "_working_dir", None)
+    return str(cwd or os.getcwd())
+
+
 @router.websocket("/ws/terminal/{agent_id}")
 async def terminal_ws(websocket: WebSocket, agent_id: str):
     """Interactive terminal in the agent's working directory."""
@@ -334,19 +341,45 @@ async def terminal_ws(websocket: WebSocket, agent_id: str):
         await websocket.close()
         return
 
-    cwd = None
-    if hasattr(session.agent, "executor"):
-        cwd = getattr(session.agent.executor, "_working_dir", None)
-    if not cwd:
-        cwd = os.getcwd()
-    logger.info("Terminal session", agent_id=agent_id, cwd=str(cwd))
+    cwd = _session_cwd(session)
+    logger.info("Terminal session", agent_id=agent_id, cwd=cwd)
 
     try:
-        await _pty_session(websocket, str(cwd))
+        await _pty_session(websocket, cwd)
     except WebSocketDisconnect:
         pass
     except Exception as e:
         logger.error("terminal WS error", error=str(e), exc_info=True)
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
+@router.websocket("/ws/terminal/terrariums/{terrarium_id}/{target}")
+async def terminal_terrarium_ws(websocket: WebSocket, terrarium_id: str, target: str):
+    """Interactive terminal in the working directory of a terrarium root/creature."""
+    await websocket.accept()
+
+    manager = get_manager()
+    try:
+        session = manager.terrarium_mount(terrarium_id, target)
+    except ValueError as e:
+        await websocket.send_json({"type": "error", "data": str(e)})
+        await websocket.close()
+        return
+
+    cwd = _session_cwd(session)
+    logger.info(
+        "Terrarium terminal session", terrarium_id=terrarium_id, target=target, cwd=cwd
+    )
+
+    try:
+        await _pty_session(websocket, cwd)
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.error("terrarium terminal WS error", error=str(e), exc_info=True)
         try:
             await websocket.close()
         except Exception:

@@ -1,6 +1,9 @@
 """Terrarium CRUD + lifecycle + chat routes."""
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+
+from kohakuterrarium.api.routes.agents import _redacted_env
 
 from kohakuterrarium.api.deps import get_manager
 from kohakuterrarium.api.events import get_event_log
@@ -10,6 +13,19 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+
+class ScratchpadPatch(BaseModel):
+    updates: dict[str, str | None]
+
+
+def _mount_target(manager, terrarium_id: str, target: str):
+    if target.startswith("ch:"):
+        raise HTTPException(400, f"Target {target} is a channel, not an agent")
+    try:
+        return manager.terrarium_mount(terrarium_id, target)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
 
 
 @router.post("")
@@ -140,3 +156,73 @@ async def chat_terrarium(
         return {"response": "".join(chunks)}
     except ValueError as e:
         raise HTTPException(404, str(e))
+
+
+@router.get("/{terrarium_id}/scratchpad/{target}")
+async def terrarium_scratchpad(
+    terrarium_id: str, target: str, manager=Depends(get_manager)
+):
+    session = _mount_target(manager, terrarium_id, target)
+    return session.agent.scratchpad.to_dict()
+
+
+@router.patch("/{terrarium_id}/scratchpad/{target}")
+async def patch_terrarium_scratchpad(
+    terrarium_id: str,
+    target: str,
+    req: ScratchpadPatch,
+    manager=Depends(get_manager),
+):
+    session = _mount_target(manager, terrarium_id, target)
+    pad = session.agent.scratchpad
+    for key, value in req.updates.items():
+        if value is None:
+            pad.delete(key)
+        else:
+            pad.set(key, value)
+    return pad.to_dict()
+
+
+@router.get("/{terrarium_id}/triggers/{target}")
+async def terrarium_triggers(
+    terrarium_id: str, target: str, manager=Depends(get_manager)
+):
+    session = _mount_target(manager, terrarium_id, target)
+    tm = session.agent.trigger_manager
+    if tm is None:
+        return []
+    return [
+        {
+            "trigger_id": info.trigger_id,
+            "trigger_type": info.trigger_type,
+            "running": info.running,
+            "created_at": info.created_at.isoformat(),
+        }
+        for info in tm.list()
+    ]
+
+
+@router.get("/{terrarium_id}/plugins/{target}")
+async def terrarium_plugins(
+    terrarium_id: str, target: str, manager=Depends(get_manager)
+):
+    session = _mount_target(manager, terrarium_id, target)
+    if not session.agent.plugins:
+        return []
+    return session.agent.plugins.list_plugins()
+
+
+@router.get("/{terrarium_id}/env/{target}")
+async def terrarium_env(terrarium_id: str, target: str, manager=Depends(get_manager)):
+    session = _mount_target(manager, terrarium_id, target)
+    agent = session.agent
+    pwd = getattr(agent, "_working_dir", None)
+    return {"pwd": str(pwd) if pwd is not None else "", "env": _redacted_env()}
+
+
+@router.get("/{terrarium_id}/system-prompt/{target}")
+async def terrarium_system_prompt(
+    terrarium_id: str, target: str, manager=Depends(get_manager)
+):
+    session = _mount_target(manager, terrarium_id, target)
+    return {"text": session.agent.get_system_prompt()}

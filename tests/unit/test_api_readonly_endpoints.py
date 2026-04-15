@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from kohakuterrarium.api.deps import get_manager
 from kohakuterrarium.api.routes import agents as agents_route
 from kohakuterrarium.api.routes import sessions as sessions_route
+from kohakuterrarium.api.routes import terrariums as terrariums_route
 from kohakuterrarium.core.scratchpad import Scratchpad
 from kohakuterrarium.core.trigger_manager import TriggerInfo
 from datetime import datetime
@@ -54,6 +55,26 @@ def _make_client(fake_agent, *, agent_id: str = "test-agent") -> TestClient:
         return fake_manager
 
     app.dependency_overrides[get_manager] = _override_manager
+    return TestClient(app)
+
+
+def _make_terrarium_client(
+    fake_agent, *, terrarium_id: str = "terrarium_test"
+) -> TestClient:
+    app = FastAPI()
+    app.include_router(terrariums_route.router, prefix="/api/terrariums")
+
+    fake_session = SimpleNamespace(agent=fake_agent)
+
+    class _FakeManager:
+        def terrarium_mount(self, tid, target):
+            if tid != terrarium_id:
+                raise ValueError(f"Terrarium not found: {tid}")
+            if target in {"root", "worker"}:
+                return fake_session
+            raise ValueError(f"Creature not found: {target}")
+
+    app.dependency_overrides[get_manager] = lambda: _FakeManager()
     return TestClient(app)
 
 
@@ -177,6 +198,84 @@ def test_get_system_prompt_returns_text():
     resp = client.get("/api/agents/test-agent/system-prompt")
     assert resp.status_code == 200
     assert resp.json() == {"text": "You are the agent. Be helpful."}
+
+
+# ----------------------------------------------------------------------
+# Terrarium inspection endpoints
+# ----------------------------------------------------------------------
+
+
+def test_terrarium_get_scratchpad_returns_target_dict():
+    sp = Scratchpad()
+    sp.set("answer", "42")
+    client = _make_terrarium_client(_make_fake_agent(scratchpad=sp))
+
+    resp = client.get("/api/terrariums/terrarium_test/scratchpad/root")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"answer": "42"}
+
+
+def test_terrarium_patch_scratchpad_merges_updates_and_deletes_nulls():
+    sp = Scratchpad()
+    sp.set("keep", "yes")
+    sp.set("drop", "gone-after-patch")
+    client = _make_terrarium_client(_make_fake_agent(scratchpad=sp))
+
+    resp = client.patch(
+        "/api/terrariums/terrarium_test/scratchpad/worker",
+        json={"updates": {"new": "hello", "drop": None}},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"keep": "yes", "new": "hello"}
+
+
+def test_terrarium_get_env_filters_credentials(monkeypatch):
+    monkeypatch.setenv("MY_SECRET", "hidden")
+    monkeypatch.setenv("SAFE_VAR", "visible")
+    client = _make_terrarium_client(_make_fake_agent(working_dir="/tmp/terrarium-cwd"))
+
+    resp = client.get("/api/terrariums/terrarium_test/env/root")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["pwd"] == "/tmp/terrarium-cwd"
+    assert "MY_SECRET" not in body["env"]
+    assert body["env"].get("SAFE_VAR") == "visible"
+
+
+def test_terrarium_list_triggers_returns_expected_shape():
+    triggers = [
+        TriggerInfo(
+            trigger_id="trigger_abc123",
+            trigger_type="ChannelTrigger",
+            running=True,
+            created_at=datetime(2026, 4, 10, 12, 34, 56),
+        ),
+    ]
+    client = _make_terrarium_client(_make_fake_agent(triggers=triggers))
+
+    resp = client.get("/api/terrariums/terrarium_test/triggers/root")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body[0]["trigger_id"] == "trigger_abc123"
+
+
+def test_terrarium_get_system_prompt_returns_text():
+    client = _make_terrarium_client(
+        _make_fake_agent(system_prompt="You are the terrarium root. Be helpful.")
+    )
+    resp = client.get("/api/terrariums/terrarium_test/system-prompt/root")
+    assert resp.status_code == 200
+    assert resp.json() == {"text": "You are the terrarium root. Be helpful."}
+
+
+def test_terrarium_agent_only_endpoint_rejects_channel_target():
+    client = _make_terrarium_client(_make_fake_agent())
+    resp = client.get("/api/terrariums/terrarium_test/env/ch:tasks")
+    assert resp.status_code == 400
 
 
 # ----------------------------------------------------------------------

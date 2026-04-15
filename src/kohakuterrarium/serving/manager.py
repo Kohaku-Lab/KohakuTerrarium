@@ -39,6 +39,18 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _normalize_pwd(pwd: str | None) -> str | None:
+    if pwd is None:
+        return None
+    resolved = str(Path(pwd).expanduser().resolve())
+    path = Path(resolved)
+    if not path.exists():
+        raise ValueError(f"Working directory does not exist: {pwd}")
+    if not path.is_dir():
+        raise ValueError(f"Working directory is not a directory: {pwd}")
+    return resolved
+
+
 class KohakuManager:
     """Unified service manager for agents and terrariums.
 
@@ -72,6 +84,7 @@ class KohakuManager:
         pwd: str | None = None,
     ) -> str:
         """Create and start a standalone agent. Returns agent_id."""
+        pwd = _normalize_pwd(pwd)
         if config_path:
             if is_package_ref(config_path):
                 config_path = str(resolve_package_path(config_path))
@@ -277,6 +290,7 @@ class KohakuManager:
         pwd: str | None = None,
     ) -> str:
         """Create and start a terrarium. Returns terrarium_id."""
+        pwd = _normalize_pwd(pwd)
         if config_path:
             if is_package_ref(config_path):
                 config_path = str(resolve_package_path(config_path))
