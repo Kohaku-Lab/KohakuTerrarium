@@ -14,6 +14,7 @@
 import { onMounted, onUnmounted } from "vue"
 
 import { useLayoutStore } from "@/stores/layout"
+import { DEFAULT_DESKTOP_ZOOM, DEFAULT_MOBILE_ZOOM, useThemeStore } from "@/stores/theme"
 import { fireLayoutEditRequested, firePaletteOpen } from "@/utils/layoutEvents"
 
 const PRESET_ORDER = ["chat-focus", "workspace", "multi-creature", "canvas", "debug", "settings"]
@@ -29,6 +30,7 @@ function _isEditable(el) {
 
 export function useKeyboardShortcuts() {
   const layout = useLayoutStore()
+  const theme = useThemeStore()
 
   function onKeyDown(e) {
     const ctrl = e.ctrlKey || e.metaKey
@@ -36,21 +38,36 @@ export function useKeyboardShortcuts() {
 
     const editable = _isEditable(e.target)
 
-    // Ctrl+K always wins — opens the command palette.
     if (e.key === "k" || e.key === "K") {
       e.preventDefault()
       firePaletteOpen()
       return
     }
 
-    // Ctrl+Shift+L toggles edit mode.
     if (e.shiftKey && (e.key === "l" || e.key === "L")) {
       e.preventDefault()
       fireLayoutEditRequested()
       return
     }
 
-    // Ctrl+1..6 — preset switch. Block in editable fields.
+    if (e.shiftKey && (e.key === ">" || e.key === ".")) {
+      e.preventDefault()
+      theme.setZoom(theme.uiZoom + 0.05)
+      return
+    }
+
+    if (e.shiftKey && (e.key === "<" || e.key === ",")) {
+      e.preventDefault()
+      theme.setZoom(theme.uiZoom - 0.05)
+      return
+    }
+
+    if (e.shiftKey && (e.key === ")" || e.key === "0")) {
+      e.preventDefault()
+      theme.setZoom(theme._isMobile ? DEFAULT_MOBILE_ZOOM : DEFAULT_DESKTOP_ZOOM)
+      return
+    }
+
     if (!e.shiftKey && !editable) {
       const idx = Number(e.key) - 1
       if (idx >= 0 && idx < PRESET_ORDER.length) {

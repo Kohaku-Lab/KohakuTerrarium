@@ -112,6 +112,7 @@ import StatusDot from "@/components/common/StatusDot.vue"
 import ChatMessage from "@/components/chat/ChatMessage.vue"
 import { useChatStore } from "@/stores/chat"
 import { terrariumAPI, agentAPI } from "@/utils/api"
+import { getHybridPref, removeHybridPref, setHybridPref } from "@/utils/uiPrefs"
 
 const props = defineProps({
   instance: { type: Object, required: true },
@@ -132,29 +133,21 @@ function draftKey() {
   return `kt.chat.draft.${instanceId}.${tab}`
 }
 
-function restoreDraft() {
+async function restoreDraft() {
   const key = draftKey()
   if (!key) {
     inputText.value = ""
     return
   }
-  try {
-    inputText.value = localStorage.getItem(key) || ""
-  } catch {
-    inputText.value = ""
-  }
+  inputText.value = (await getHybridPref(key, "")) || ""
   nextTick(autoResize)
 }
 
 function persistDraft() {
   const key = draftKey()
   if (!key) return
-  try {
-    if (inputText.value) localStorage.setItem(key, inputText.value)
-    else localStorage.removeItem(key)
-  } catch {
-    // ignore storage failures
-  }
+  if (inputText.value) setHybridPref(key, inputText.value)
+  else removeHybridPref(key)
 }
 
 const activeUsage = computed(() => {
@@ -214,35 +207,81 @@ function autoResize() {
   el.style.height = Math.min(el.scrollHeight, 128) + "px"
 }
 
-// Auto-scroll: track if user is near bottom
+// Auto-scroll: only when new visible content arrives and the user is already near bottom.
 const isNearBottom = ref(true)
 const forceScrollOnNextMessageUpdate = ref(true)
+const scrollPositions = new Map()
 
-function onMessagesScroll() {
+function getScrollKey(instanceId = props.instance?.id || chat._instanceId, tab = chat.activeTab) {
+  if (!instanceId || !tab) return ""
+  return `${instanceId}:${tab}`
+}
+
+function updateNearBottom() {
   const el = messagesEl.value
   if (!el) return
-  // "Near bottom" = within 80px of the bottom
   isNearBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+}
+
+function saveScrollPosition(instanceId = props.instance?.id || chat._instanceId, tab = chat.activeTab) {
+  const el = messagesEl.value
+  const key = getScrollKey(instanceId, tab)
+  if (!el || !key) return
+  scrollPositions.set(key, el.scrollTop)
+}
+
+function restoreScrollPosition(instanceId = props.instance?.id || chat._instanceId, tab = chat.activeTab) {
+  const el = messagesEl.value
+  const key = getScrollKey(instanceId, tab)
+  if (!el || !key) return false
+  const saved = scrollPositions.get(key)
+  if (saved == null) {
+    el.scrollTop = el.scrollHeight
+    updateNearBottom()
+    return false
+  }
+  el.scrollTop = Math.max(0, Math.min(saved, el.scrollHeight - el.clientHeight))
+  updateNearBottom()
+  return true
+}
+
+function onMessagesScroll() {
+  updateNearBottom()
+  saveScrollPosition()
 }
 
 function scrollToBottom() {
   const el = messagesEl.value
-  if (el) el.scrollTop = el.scrollHeight
+  if (!el) return
+  el.scrollTop = el.scrollHeight
+  updateNearBottom()
+  saveScrollPosition()
 }
 
-// Watch messages for changes — auto-scroll if user was at bottom
-watch(
-  () => chat.currentMessages,
-  () => {
-    if (forceScrollOnNextMessageUpdate.value || isNearBottom.value) {
-      forceScrollOnNextMessageUpdate.value = false
-      nextTick(scrollToBottom)
-    }
-  },
-  { deep: true },
-)
+const messageTailSignature = computed(() => {
+  const messages = chat.currentMessages
+  const last = messages[messages.length - 1]
+  if (!last) return "0"
+  const contentLen = typeof last.content === "string" ? last.content.length : 0
+  const parts = Array.isArray(last.parts)
+    ? last.parts
+        .map((part) => {
+          if (part.type === "text") return `t:${part.content?.length || 0}`
+          return `o:${part.status || ""}:${part.result?.length || 0}:${part.children?.length || 0}`
+        })
+        .join("|")
+    : ""
+  return `${messages.length}:${last.id}:${last.role}:${contentLen}:${parts}`
+})
 
-// Also scroll when processing starts (KohakUwUing appears)
+watch(messageTailSignature, (nextSig, prevSig) => {
+  if (!prevSig || nextSig === prevSig) return
+  if (forceScrollOnNextMessageUpdate.value || isNearBottom.value) {
+    forceScrollOnNextMessageUpdate.value = false
+    nextTick(scrollToBottom)
+  }
+})
+
 watch(
   () => chat.processing,
   (val) => {
@@ -254,11 +293,13 @@ watch(
 
 watch(
   () => [props.instance?.id, chat.activeTab],
-  () => {
+  ([instanceId, tab], [prevInstanceId, prevTab]) => {
+    if (prevInstanceId && prevTab) saveScrollPosition(prevInstanceId, prevTab)
     restoreDraft()
-    forceScrollOnNextMessageUpdate.value = true
-    isNearBottom.value = true
-    nextTick(scrollToBottom)
+    nextTick(() => {
+      const hadSavedScroll = restoreScrollPosition(instanceId, tab)
+      forceScrollOnNextMessageUpdate.value = !hadSavedScroll
+    })
   },
   { immediate: true },
 )

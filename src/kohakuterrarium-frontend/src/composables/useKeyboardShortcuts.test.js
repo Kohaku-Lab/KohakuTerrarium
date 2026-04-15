@@ -13,6 +13,7 @@ import { defineComponent, h } from "vue"
 
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts.js"
 import { useLayoutStore } from "@/stores/layout.js"
+import { DEFAULT_DESKTOP_ZOOM, useThemeStore } from "@/stores/theme.js"
 import { LAYOUT_EVENTS } from "@/utils/layoutEvents.js"
 
 function makePreset(id) {
@@ -41,13 +42,21 @@ const Harness = defineComponent({
 })
 
 let wrapper
+let storage
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  localStorage.clear()
+  storage = new Map()
+  vi.stubGlobal("localStorage", {
+    getItem: (key) => (storage.has(key) ? storage.get(key) : null),
+    setItem: (key, value) => storage.set(key, String(value)),
+    removeItem: (key) => storage.delete(key),
+    clear: () => storage.clear(),
+  })
 })
 
 afterEach(() => {
+  vi.unstubAllGlobals()
   if (wrapper) {
     wrapper.unmount()
     wrapper = null
@@ -121,6 +130,44 @@ describe("useKeyboardShortcuts", () => {
     document.body.appendChild(input)
     press("2", { ctrl: true, target: input })
     expect(store.activePresetId).toBe("chat-focus") // unchanged
+  })
+
+  it("Ctrl+Shift+. zooms in globally", () => {
+    setupStoreWithPresets()
+    const theme = useThemeStore()
+    mountHarness()
+    const before = theme.desktopZoom
+    press(".", { ctrl: true, shift: true })
+    expect(theme.desktopZoom).toBe(before + 0.05)
+  })
+
+  it("Ctrl+Shift+, zooms out globally", () => {
+    setupStoreWithPresets()
+    const theme = useThemeStore()
+    theme.setDesktopZoom(1.2)
+    mountHarness()
+    press(",", { ctrl: true, shift: true })
+    expect(theme.desktopZoom).toBe(1.15)
+  })
+
+  it("Ctrl+Shift+0 resets zoom globally", () => {
+    setupStoreWithPresets()
+    const theme = useThemeStore()
+    theme.setDesktopZoom(1.8)
+    mountHarness()
+    press("0", { ctrl: true, shift: true })
+    expect(theme.desktopZoom).toBe(DEFAULT_DESKTOP_ZOOM)
+  })
+
+  it("zoom shortcuts still work when an input is focused", () => {
+    setupStoreWithPresets()
+    const theme = useThemeStore()
+    theme.setDesktopZoom(DEFAULT_DESKTOP_ZOOM)
+    mountHarness()
+    const input = document.createElement("input")
+    document.body.appendChild(input)
+    press(".", { ctrl: true, shift: true, target: input })
+    expect(theme.desktopZoom).toBe(DEFAULT_DESKTOP_ZOOM + 0.05)
   })
 
   it("Ctrl+K still fires even when an input is focused", () => {
