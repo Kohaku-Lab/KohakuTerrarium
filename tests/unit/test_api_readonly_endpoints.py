@@ -296,7 +296,9 @@ def test_files_browse_lists_roots(tmp_path: Path, monkeypatch):
     root_a.mkdir()
     root_b.mkdir()
     monkeypatch.setattr(
-        files_route, "_allowed_roots", [root_a.resolve(), root_b.resolve()]
+        files_route,
+        "_list_browse_roots",
+        lambda: [root_a.resolve(), root_b.resolve()],
     )
     client = _make_files_client()
 
@@ -319,7 +321,7 @@ def test_files_browse_lists_child_directories_only(tmp_path: Path, monkeypatch):
     (root / "beta").mkdir()
     (root / "notes.txt").write_text("hello", encoding="utf-8")
     (root / ".git").mkdir()
-    monkeypatch.setattr(files_route, "_allowed_roots", [root.resolve()])
+    monkeypatch.setattr(files_route, "_list_browse_roots", lambda: [root.resolve()])
     client = _make_files_client()
 
     resp = client.get("/api/files/browse", params={"path": str(root)})
@@ -327,15 +329,19 @@ def test_files_browse_lists_child_directories_only(tmp_path: Path, monkeypatch):
     assert resp.status_code == 200
     body = resp.json()
     assert body["current"]["path"] == str(root.resolve())
-    assert body["parent"] is None
+    assert body["parent"] == str(root.resolve().parent)
     assert [entry["name"] for entry in body["directories"]] == ["alpha", "beta"]
 
 
-def test_files_browse_returns_parent_within_allowed_root(tmp_path: Path, monkeypatch):
+def test_files_browse_returns_parent_directory(tmp_path: Path, monkeypatch):
     root = tmp_path / "workspace"
     nested = root / "alpha" / "deep"
     nested.mkdir(parents=True)
-    monkeypatch.setattr(files_route, "_allowed_roots", [root.resolve()])
+    monkeypatch.setattr(
+        files_route,
+        "_list_browse_roots",
+        lambda: [root.anchor and Path(root.anchor) or root.resolve()],
+    )
     client = _make_files_client()
 
     resp = client.get("/api/files/browse", params={"path": str(nested)})

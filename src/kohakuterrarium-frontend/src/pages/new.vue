@@ -57,6 +57,7 @@
   <el-dialog v-model="pickerOpen" title="Choose working directory" width="720px" :close-on-click-modal="true">
     <div class="flex items-center gap-2 mb-3">
       <button class="btn-secondary" :disabled="!browseParent || browseLoading" @click="browseTo(browseParent)"><span class="i-carbon-arrow-up mr-1" /> Up</button>
+      <button class="btn-secondary" :disabled="browseLoading" @click="browseTo(null)"><span class="i-carbon-data-base mr-1" /> Roots</button>
       <div class="flex-1 px-3 py-2 rounded border border-warm-200 dark:border-warm-700 bg-warm-50 dark:bg-warm-900 font-mono text-xs truncate">
         {{ browseCurrent?.path || "Choose a root directory" }}
       </div>
@@ -66,7 +67,7 @@
     <div v-if="browseError" class="mb-3 text-sm text-red-500">{{ browseError }}</div>
 
     <div v-if="!browseCurrent" class="space-y-2">
-      <div class="text-xs uppercase tracking-wider text-warm-400">Allowed roots</div>
+      <div class="text-xs uppercase tracking-wider text-warm-400">Available roots</div>
       <button v-for="root in browseRoots" :key="root.path" class="w-full text-left px-3 py-2 rounded border border-warm-200 dark:border-warm-700 hover:border-iolite hover:bg-warm-50 dark:hover:bg-warm-800" @click="browseTo(root.path)">
         <div class="flex items-center gap-2">
           <span class="i-carbon-folder text-amber" />

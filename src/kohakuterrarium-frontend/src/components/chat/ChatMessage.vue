@@ -73,7 +73,7 @@
           <button class="px-2 py-0.5 rounded bg-sapphire text-white hover:bg-sapphire-dark" @click="confirmEdit">Save & Rerun</button>
         </div>
       </div>
-      <div v-else class="text-body whitespace-pre-wrap">
+      <div v-else class="text-body whitespace-pre-wrap break-words overflow-wrap-anywhere min-w-0">
         {{ message.content }}
       </div>
     </div>

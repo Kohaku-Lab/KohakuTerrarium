@@ -1,6 +1,7 @@
 """File operations routes - tree browsing, reading, writing for editor mode."""
 
 import shutil
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -71,44 +72,33 @@ _SKIP_NAMES: set[str] = {
     ".eggs",
 }
 
-# Allowed root directories for path validation
-_allowed_roots: list[Path] = []
-
-
-def _init_allowed_roots() -> list[Path]:
-    """Lazily initialize allowed roots: cwd + home directory."""
-    global _allowed_roots
-    if not _allowed_roots:
-        _allowed_roots = [
-            Path.cwd().resolve(),
-            Path.home().resolve(),
-        ]
-    return _allowed_roots
-
 
 def _validate_path(path_str: str) -> Path:
-    """Validate and resolve a file path, ensuring it's within allowed roots.
-
-    Raises HTTPException(400) if the path escapes allowed directories.
-    """
+    """Validate and resolve a file path."""
     try:
-        p = Path(path_str).resolve()
+        return Path(path_str).resolve()
     except (ValueError, OSError) as e:
         raise HTTPException(400, f"Invalid path: {e}")
 
-    roots = _init_allowed_roots()
-    for root in roots:
-        try:
-            p.relative_to(root)
-            return p
-        except ValueError:
-            continue
 
-    raise HTTPException(
-        400,
-        f"Path is outside allowed directories. "
-        f"Must be under cwd ({roots[0]}) or home ({roots[1]}).",
-    )
+def _list_browse_roots() -> list[Path]:
+    """Return top-level filesystem roots for the current platform."""
+    if sys.platform == "win32":
+        roots = []
+        for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+            drive = Path(f"{letter}:/")
+            if drive.exists():
+                roots.append(drive)
+        return roots
+
+    return [Path("/")]
+
+
+def _parent_directory(path: Path) -> str | None:
+    parent = path.parent
+    if parent == path:
+        return None
+    return str(parent)
 
 
 def _should_skip(name: str) -> bool:
@@ -189,8 +179,8 @@ async def get_file_tree(root: str, depth: int = 3):
 
 @router.get("/browse")
 async def browse_directories(path: str | None = None):
-    """Return browsable directories under the allowed roots."""
-    roots = _init_allowed_roots()
+    """Return browsable directories under the local filesystem."""
+    roots = _list_browse_roots()
     if path:
         current = _validate_path(path)
         if not current.exists():
@@ -205,18 +195,9 @@ async def browse_directories(path: str | None = None):
                 directories.append(_dir_entry(entry))
         except PermissionError:
             directories = []
-        parent = None
-        for root in roots:
-            try:
-                current.relative_to(root)
-                if current != root:
-                    parent = str(current.parent)
-                break
-            except ValueError:
-                continue
         return {
             "current": _dir_entry(current),
-            "parent": parent,
+            "parent": _parent_directory(current),
             "roots": [_dir_entry(root) for root in roots],
             "directories": directories,
         }
