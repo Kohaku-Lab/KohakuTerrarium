@@ -130,7 +130,7 @@ author_email = "apolloyeh0123@gmail.com"
 [tool.briefcase.app.kohakuterrarium]
 formal_name = "KohakuTerrarium"
 description = "Universal Agent Framework - Desktop App"
-icon = "src/kohakuterrarium/app_icon"
+icon = "src/kohakuterrarium/app_icons/app"
 sources = ["src/kohakuterrarium"]
 startup_module = "kohakuterrarium.__briefcase__"
 requires = [

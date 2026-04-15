@@ -256,25 +256,17 @@ def _run_desktop_app_blocking(port: int = 8001) -> None:
     )
 
     def _set_icon_windows():
-        """Set window + taskbar icon on Windows via win32 API."""
         try:
             user32 = ctypes.windll.user32
             WM_SETICON = 0x0080
             ICON_SMALL = 0
             ICON_BIG = 1
-
-            # Load icon from .ico file
             ico = str(icon_ico) if icon_ico.exists() else None
             if not ico:
                 return
-
-            hicon = user32.LoadImageW(
-                None, ico, 1, 0, 0, 0x00000010  # IMAGE_ICON  # LR_LOADFROMFILE
-            )
+            hicon = user32.LoadImageW(None, ico, 1, 0, 0, 0x00000010)
             if not hicon:
                 return
-
-            # Find the pywebview window by title
             hwnd = user32.FindWindowW(None, "KohakuTerrarium")
             if hwnd:
                 user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, hicon)
@@ -282,15 +274,34 @@ def _run_desktop_app_blocking(port: int = 8001) -> None:
         except Exception:
             pass
 
+    def _set_icon_macos():
+        try:
+            if not icon_png.exists():
+                return
+            from AppKit import NSApp, NSApplication, NSImage
+
+            app = NSApp() or NSApplication.sharedApplication()
+            image = NSImage.alloc().initWithContentsOfFile_(str(icon_png))
+            if image:
+                app.setApplicationIconImage_(image)
+        except Exception:
+            pass
+
     if sys.platform == "win32":
-        # Set icon after window is shown (slight delay for window creation)
+
         def _on_shown():
             _set_icon_windows()
 
         window.events.shown += _on_shown
         webview.start()
+    elif sys.platform == "darwin":
+
+        def _on_shown():
+            _set_icon_macos()
+
+        window.events.shown += _on_shown
+        webview.start(gui="cocoa")
     else:
-        # GTK/QT: icon parameter works natively
         icon_path = str(icon_png) if icon_png.exists() else None
         webview.start(icon=icon_path)
 
