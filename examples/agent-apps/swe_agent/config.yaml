@@ -1,0 +1,15 @@
+version: "1.0"
+base_config: "@kt-defaults/creatures/swe"
+
+controller:
+  model: gpt-5.4
+  auth_mode: codex-oauth
+  tool_format: native
+
+input:
+  type: tui
+  prompt: "> "
+
+output:
+  type: tui
+  controller_direct: true

@@ -310,6 +310,13 @@ export const agentAPI = {
 
 /** File operations */
 export const filesAPI = {
+  async browseDirectories(path = null) {
+    const params = {}
+    if (path) params.path = path
+    const { data } = await api.get("/files/browse", { params })
+    return data
+  },
+
   async getTree(root, depth = 3) {
     const { data } = await api.get("/files/tree", { params: { root, depth } })
     return data
@@ -353,6 +360,16 @@ export const sessionAPI = {
     const { data } = await api.get(`/sessions/${sessionName}/memory/search`, {
       params,
     })
+    return data
+  },
+
+  async getHistoryIndex(sessionName) {
+    const { data } = await api.get(`/sessions/${sessionName}/history`)
+    return data
+  },
+
+  async getHistory(sessionName, target) {
+    const { data } = await api.get(`/sessions/${sessionName}/history/${encodeTarget(target)}`)
     return data
   },
 

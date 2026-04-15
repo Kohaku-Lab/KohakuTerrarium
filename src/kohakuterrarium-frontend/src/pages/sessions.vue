@@ -77,8 +77,12 @@
               </div>
             </div>
 
-            <!-- Resume + Delete buttons -->
+            <!-- View / Resume / Delete buttons -->
             <div class="flex gap-2 shrink-0">
+              <button class="btn-secondary flex items-center gap-1" @click="viewSession(session)">
+                <span class="i-carbon-view" />
+                View
+              </button>
               <button
                 class="btn-primary flex items-center gap-1"
                 :disabled="resuming === session.name"
@@ -169,6 +173,10 @@ function nextPage() {
 function prevPage() {
   currentOffset.value = Math.max(0, currentOffset.value - pageSize)
   fetchSessions()
+}
+
+function viewSession(session) {
+  router.push(isMobile ? `/mobile/sessions/${session.name}` : `/sessions/${session.name}`)
 }
 
 async function resumeSession(session) {

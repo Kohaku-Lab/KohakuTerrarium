@@ -14,6 +14,7 @@
       </template>
     </el-dialog>
   </div>
+  <div v-else-if="instances.loading" class="h-full flex items-center justify-center text-secondary">Loading instance...</div>
 </template>
 
 <script setup>

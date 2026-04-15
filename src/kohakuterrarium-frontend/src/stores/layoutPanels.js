@@ -15,6 +15,8 @@ import CanvasPanel from "@/components/panels/CanvasPanel.vue"
 import CreaturesPanel from "@/components/panels/CreaturesPanel.vue"
 import DebugPanel from "@/components/panels/DebugPanel.vue"
 import FilesPanel from "@/components/panels/FilesPanel.vue"
+import ActivityPanel from "@/components/panels/ActivityPanel.vue"
+import SettingsPanel from "@/components/panels/SettingsPanel.vue"
 import StatePanel from "@/components/panels/StatePanel.vue"
 import TerminalPanel from "@/components/panels/TerminalPanel.vue"
 import StatusDashboard from "@/components/status/StatusDashboard.vue"
@@ -89,7 +91,7 @@ const MULTI_CREATURE_PRESET = {
   tree: hsplit(
     18,
     leaf("creatures"),
-    hsplit(66, leaf("chat"), vsplit(50, leaf("status-tab"), leaf("state"))),
+    hsplit(66, leaf("chat"), vsplit(50, leaf("status-dashboard"), leaf("state"))),
   ),
 }
 
@@ -98,7 +100,7 @@ const CANVAS_PRESET = {
   id: "canvas",
   label: "Canvas",
   shortcut: "Ctrl+4",
-  tree: hsplit(45, leaf("chat"), vsplit(70, leaf("canvas"), leaf("status-tab"))),
+  tree: hsplit(45, leaf("chat"), vsplit(70, leaf("canvas"), leaf("status-dashboard"))),
 }
 
 /** Debug — chat + state + debug drawer. */
@@ -107,6 +109,12 @@ const DEBUG_PRESET = {
   label: "Debug",
   shortcut: "Ctrl+5",
   tree: vsplit(55, hsplit(60, leaf("chat"), leaf("state")), leaf("debug")),
+}
+
+const SETTINGS_PRESET = {
+  id: "settings",
+  label: "Settings",
+  tree: hsplit(62, leaf("chat"), vsplit(55, leaf("settings"), leaf("activity"))),
 }
 
 /** Legacy instance (old layout compat). */
@@ -133,6 +141,7 @@ export const DEFAULT_PRESETS = [
   MULTI_CREATURE_PRESET,
   CANVAS_PRESET,
   DEBUG_PRESET,
+  SETTINGS_PRESET,
   CHAT_TERMINAL_PRESET,
 ]
 
@@ -165,6 +174,8 @@ export function registerBuiltinPanels() {
     component: EditorStatus,
   })
   layout.registerPanel({ id: "files", label: "Files", component: FilesPanel })
+  layout.registerPanel({ id: "activity", label: "Activity", component: ActivityPanel })
+  layout.registerPanel({ id: "settings", label: "Settings", component: SettingsPanel })
   layout.registerPanel({ id: "state", label: "State", component: StatePanel })
   layout.registerPanel({
     id: "creatures",

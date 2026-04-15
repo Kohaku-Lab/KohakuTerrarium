@@ -1,38 +1,8 @@
 <template>
   <div class="h-full overflow-y-auto bg-white dark:bg-warm-900">
     <div class="flex flex-col gap-3 p-3 text-xs">
-      <!-- ── Overview Section ── -->
-      <template v-if="instance?.type === 'terrarium'">
-        <!-- Creature list -->
-        <div>
-          <div class="section-label">Creatures</div>
-          <div class="flex flex-col gap-1 max-h-48 overflow-y-auto">
-            <div v-for="c in instance.creatures" :key="c.name" class="flex items-center gap-2 px-2.5 py-2 rounded-lg cursor-pointer transition-colors hover:bg-warm-100 dark:hover:bg-warm-800" @click="onOpenTab(c.name)">
-              <StatusDot :status="c.status" />
-              <span class="font-medium text-warm-700 dark:text-warm-300">{{ c.name }}</span>
-              <span class="flex-1" />
-              <span class="text-[10px] px-1.5 py-0.5 rounded" :class="c.status === 'running' ? 'bg-aquamarine/10 text-aquamarine' : 'bg-warm-100 dark:bg-warm-800 text-warm-400'">{{ c.status }}</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Channel list -->
-        <div>
-          <div class="section-label">Channels</div>
-          <div class="flex flex-col gap-1 max-h-48 overflow-y-auto">
-            <div v-for="ch in instance.channels" :key="ch.name" class="flex items-center gap-2 px-2.5 py-2 rounded-lg cursor-pointer transition-colors hover:bg-warm-100 dark:hover:bg-warm-800" @click="onOpenTab('ch:' + ch.name)">
-              <span class="w-2 h-2 rounded-sm shrink-0" :class="ch.type === 'broadcast' ? 'bg-taaffeite' : 'bg-aquamarine'" />
-              <span class="font-medium text-warm-700 dark:text-warm-300">{{ ch.name }}</span>
-              <span class="flex-1" />
-              <GemBadge v-if="ch.message_count" :gem="ch.type === 'broadcast' ? 'taaffeite' : 'aquamarine'">{{ ch.message_count }}</GemBadge>
-              <span class="text-[10px] px-1.5 py-0.5 rounded bg-warm-100 dark:bg-warm-800 text-warm-400">{{ ch.type }}</span>
-            </div>
-          </div>
-        </div>
-      </template>
-
       <!-- Standalone creature: agent info card -->
-      <template v-else>
+      <template v-if="instance?.type !== 'terrarium'">
         <div class="rounded-lg border border-warm-200 dark:border-warm-700 p-4">
           <div class="flex items-center gap-2 mb-3">
             <StatusDot :status="instance?.status" />
@@ -60,6 +30,39 @@
       <!-- ── Divider ── -->
       <div class="border-t border-warm-200 dark:border-warm-700" />
 
+      <div v-if="instance?.type === 'terrarium'" class="rounded-lg border border-warm-200 dark:border-warm-700 p-3">
+        <div class="section-label">Target</div>
+        <div class="flex flex-col gap-1.5">
+          <div class="flex items-center gap-2">
+            <span class="text-warm-400 w-16">Type</span>
+            <span class="text-warm-600 dark:text-warm-400 capitalize">{{ currentTargetKindLabel }}</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-warm-400 w-16">Name</span>
+            <span class="text-warm-600 dark:text-warm-400 font-mono text-[11px] break-all">{{ currentTargetLabel }}</span>
+          </div>
+          <div v-if="canSwitchTargetModel" class="flex items-start gap-2">
+            <span class="text-warm-400 w-16 pt-1">Model</span>
+            <div class="flex-1 min-w-0 flex flex-col gap-2">
+              <span class="text-iolite font-mono text-[11px] break-all">{{ sessionModel || instance?.model || "--" }}</span>
+              <div class="flex items-center gap-2">
+                <el-select v-model="selectedModel" size="small" class="flex-1 min-w-0" placeholder="Select model" :loading="modelsLoading" @change="handleModelSwitch">
+                  <el-option v-for="m in availableModels" :key="m.name" :label="m.name" :value="m.name" />
+                </el-select>
+                <el-button size="small" text class="model-config-btn" title="Model config" aria-label="Open model configuration" @click="openModelConfig">
+                  <span class="i-carbon-settings text-[12px]" />
+                </el-button>
+              </div>
+              <div v-if="modelSwitchError" class="text-coral text-[10px]">{{ modelSwitchError }}</div>
+            </div>
+          </div>
+          <div v-else class="flex items-center gap-2">
+            <span class="text-warm-400 w-16">Model</span>
+            <span class="text-warm-500 dark:text-warm-400 text-[11px]">Model switching is available on root and creature tabs.</span>
+          </div>
+        </div>
+      </div>
+
       <!-- ── Status Section ── -->
       <!-- Session info card -->
       <div class="rounded-lg border border-warm-200 dark:border-warm-700 p-3">
@@ -73,7 +76,7 @@
           </div>
           <div class="flex items-center gap-2">
             <span class="text-warm-400 w-16">Model</span>
-            <span class="text-iolite font-mono text-[11px]">
+            <span class="text-iolite font-mono text-[11px] break-all">
               {{ chat.sessionInfo.model || instance?.model || "--" }}
             </span>
           </div>
@@ -187,18 +190,6 @@ onMounted(() => {
   loadModels()
 })
 
-// Init model from instance data (available immediately) or session info (from WS)
-watch(
-  [() => props.instance?.model, () => chat.sessionInfo.model],
-  ([instanceModel, sessionModel]) => {
-    const best = sessionModel || instanceModel || ""
-    if (best && best !== selectedModel.value) {
-      selectedModel.value = best
-    }
-  },
-  { immediate: true },
-)
-
 const totalUsage = computed(() => {
   let prompt = 0
   let completion = 0
@@ -228,10 +219,59 @@ const compactThresholdPct = computed(() => {
   return Math.min(100, Math.round((compactThreshold.value / maxContext.value) * 100))
 })
 
+const currentTarget = computed(() => {
+  if (props.instance?.type !== "terrarium") return null
+  return chat.terrariumTarget
+})
+
+const currentTargetKindLabel = computed(() => {
+  const target = currentTarget.value
+  if (target === "root") return "root"
+  if (target?.startsWith("ch:")) return "channel"
+  if (target) return "creature"
+  return "session"
+})
+
+const currentTargetLabel = computed(() => {
+  const target = currentTarget.value
+  if (target === "root") return props.instance?.config_name || "root"
+  if (target?.startsWith("ch:")) return target.slice(3)
+  if (target) return target
+  return "No target selected"
+})
+
+const canSwitchTargetModel = computed(() => {
+  if (props.instance?.type !== "terrarium") return !!props.instance?.id
+  const target = currentTarget.value
+  return !!props.instance?.id && !!target && !target.startsWith("ch:")
+})
+
+const sessionModel = computed(() => {
+  if (props.instance?.type !== "terrarium") return chat.sessionInfo.model || props.instance?.model || ""
+  if (currentTarget.value === "root") return chat.sessionInfo.model || props.instance?.model || ""
+  if (currentTarget.value) {
+    const creature = props.instance.creatures?.find((c) => c.name === currentTarget.value)
+    return chat.sessionInfo.model || creature?.model || ""
+  }
+  return ""
+})
+
 const currentModelProfile = computed(() => {
-  const modelName = selectedModel.value || chat.sessionInfo.model || instance?.model || ""
+  const modelName = selectedModel.value || sessionModel.value || props.instance?.model || ""
   return availableModels.value.find((m) => m.name === modelName) || null
 })
+
+// Init model from instance data (available immediately) or session info (from WS)
+watch(
+  [() => props.instance, sessionModel],
+  ([instanceValue, activeModel]) => {
+    const best = activeModel || instanceValue?.model || ""
+    if (best !== selectedModel.value) {
+      selectedModel.value = best
+    }
+  },
+  { immediate: true },
+)
 
 function formatTokens(n) {
   if (!n) return "0"
@@ -279,7 +319,11 @@ async function handleModelSwitch(modelId) {
   modelSwitchError.value = ""
   try {
     if (props.instance.type === "terrarium") {
-      const target = chat.activeTab || "root"
+      const target = currentTarget.value
+      if (!target) {
+        modelSwitchError.value = "Model switching is only available for root/creature tabs"
+        return
+      }
       await terrariumAPI.switchCreatureModel(props.instance.id, target, modelId)
     } else {
       await agentAPI.switchModel(props.instance.id, modelId)
@@ -287,7 +331,7 @@ async function handleModelSwitch(modelId) {
     // Backend sends session_info event via WS which updates chat.sessionInfo
   } catch (err) {
     modelSwitchError.value = err.response?.data?.detail || "Failed to switch model"
-    selectedModel.value = chat.sessionInfo.model || ""
+    selectedModel.value = sessionModel.value || ""
   }
 }
 
@@ -295,7 +339,7 @@ async function handleModelSwitch(modelId) {
 function openModelConfig() {
   configJsonError.value = ""
   // Find the full profile for the currently selected model
-  const modelName = selectedModel.value || chat.sessionInfo.model || ""
+  const modelName = selectedModel.value || sessionModel.value || ""
   const fullProfile = availableModels.value.find((m) => m.name === modelName)
   const profile = fullProfile
     ? {

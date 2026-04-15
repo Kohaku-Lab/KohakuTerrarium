@@ -8,6 +8,7 @@
         <label class="block text-sm font-medium text-warm-700 dark:text-warm-300 mb-2"> Working Directory </label>
         <div class="flex gap-2">
           <input v-model="pwd" type="text" class="input-field flex-1 font-mono" placeholder="/home/user/my-project" />
+          <button class="btn-secondary shrink-0" :disabled="browseLoading" @click="openPicker">Browse…</button>
         </div>
         <p class="text-xs text-warm-400 mt-2">The creature/terrarium will run with this as its working directory.</p>
       </div>
@@ -52,10 +53,51 @@
       </div>
     </div>
   </div>
+
+  <el-dialog v-model="pickerOpen" title="Choose working directory" width="720px" :close-on-click-modal="true">
+    <div class="flex items-center gap-2 mb-3">
+      <button class="btn-secondary" :disabled="!browseParent || browseLoading" @click="browseTo(browseParent)"><span class="i-carbon-arrow-up mr-1" /> Up</button>
+      <div class="flex-1 px-3 py-2 rounded border border-warm-200 dark:border-warm-700 bg-warm-50 dark:bg-warm-900 font-mono text-xs truncate">
+        {{ browseCurrent?.path || "Choose a root directory" }}
+      </div>
+      <button class="btn-primary" :disabled="!browseCurrent?.path" @click="selectDirectory(browseCurrent?.path)">Use this folder</button>
+    </div>
+
+    <div v-if="browseError" class="mb-3 text-sm text-red-500">{{ browseError }}</div>
+
+    <div v-if="!browseCurrent" class="space-y-2">
+      <div class="text-xs uppercase tracking-wider text-warm-400">Allowed roots</div>
+      <button v-for="root in browseRoots" :key="root.path" class="w-full text-left px-3 py-2 rounded border border-warm-200 dark:border-warm-700 hover:border-iolite hover:bg-warm-50 dark:hover:bg-warm-800" @click="browseTo(root.path)">
+        <div class="flex items-center gap-2">
+          <span class="i-carbon-folder text-amber" />
+          <span class="font-medium text-warm-800 dark:text-warm-200">{{ root.name }}</span>
+          <span class="text-xs text-warm-400 font-mono truncate">{{ root.path }}</span>
+        </div>
+      </button>
+    </div>
+
+    <div v-else class="space-y-2 max-h-96 overflow-y-auto">
+      <button v-for="dir in browseDirectories" :key="dir.path" class="w-full text-left px-3 py-2 rounded border transition-colors" :class="selectedBrowsePath === dir.path ? 'border-iolite bg-iolite/10 dark:bg-iolite/15' : 'border-warm-200 dark:border-warm-700 hover:border-iolite hover:bg-warm-50 dark:hover:bg-warm-800'" @click="selectedBrowsePath = dir.path" @dblclick="browseTo(dir.path)">
+        <div class="flex items-center gap-2">
+          <span class="i-carbon-folder text-amber" />
+          <span class="font-medium text-warm-800 dark:text-warm-200">{{ dir.name }}</span>
+          <span class="text-xs text-warm-400 font-mono truncate">{{ dir.path }}</span>
+        </div>
+      </button>
+      <div v-if="!browseLoading && browseDirectories.length === 0" class="text-sm text-secondary py-6 text-center">No subdirectories available here.</div>
+    </div>
+
+    <template #footer>
+      <div class="flex justify-between gap-3">
+        <button class="btn-secondary" @click="pickerOpen = false">Close</button>
+        <button class="btn-primary" :disabled="!selectedBrowsePath" @click="selectDirectory(selectedBrowsePath)">Select highlighted folder</button>
+      </div>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup>
-import { configAPI } from "@/utils/api"
+import { configAPI, filesAPI } from "@/utils/api"
 import { useConfigsStore } from "@/stores/configs"
 import { useInstancesStore } from "@/stores/instances"
 import { ElMessage } from "element-plus"
@@ -67,6 +109,14 @@ const instances = useInstancesStore()
 configs.fetchAll()
 
 const pwd = ref("")
+const pickerOpen = ref(false)
+const browseLoading = ref(false)
+const browseError = ref("")
+const browseCurrent = ref(null)
+const browseParent = ref(null)
+const browseRoots = ref([])
+const browseDirectories = ref([])
+const selectedBrowsePath = ref("")
 
 // Fetch server cwd as default working directory
 onMounted(async () => {
@@ -110,11 +160,52 @@ watch(selectedType, () => {
   selectedConfig.value = null
 })
 
+async function openPicker() {
+  pickerOpen.value = true
+  const initialPath = pwd.value.trim()
+  if (!initialPath) {
+    await browseTo(null)
+    return
+  }
+  const ok = await browseTo(initialPath)
+  if (!ok) await browseTo(null)
+}
+
+async function browseTo(path = null) {
+  browseLoading.value = true
+  browseError.value = ""
+  try {
+    const data = await filesAPI.browseDirectories(path)
+    browseCurrent.value = data.current || null
+    browseParent.value = data.parent || null
+    browseRoots.value = data.roots || []
+    browseDirectories.value = data.directories || []
+    selectedBrowsePath.value = data.current?.path || ""
+    return true
+  } catch (err) {
+    browseError.value = err?.response?.data?.detail || err?.message || String(err)
+    browseCurrent.value = null
+    browseParent.value = null
+    browseDirectories.value = []
+    if (!path) browseRoots.value = []
+    return false
+  } finally {
+    browseLoading.value = false
+  }
+}
+
+function selectDirectory(path) {
+  if (!path) return
+  pwd.value = path
+  pickerOpen.value = false
+}
+
 async function startInstance() {
   if (!canStart.value) return
   starting.value = true
   try {
     const id = await instances.create(selectedType.value, selectedConfig.value, pwd.value)
+    await instances.fetchOne(id)
     ElMessage.success(`Started ${selectedType.value}`)
     router.push(isMobile ? `/mobile/${id}` : `/instances/${id}`)
   } catch (err) {

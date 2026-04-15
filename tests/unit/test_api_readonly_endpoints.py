@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.deps import get_manager
 from kohakuterrarium.api.routes import agents as agents_route
+from kohakuterrarium.api.routes import files as files_route
 from kohakuterrarium.api.routes import sessions as sessions_route
 from kohakuterrarium.api.routes import terrariums as terrariums_route
 from kohakuterrarium.core.scratchpad import Scratchpad
@@ -75,6 +76,12 @@ def _make_terrarium_client(
             raise ValueError(f"Creature not found: {target}")
 
     app.dependency_overrides[get_manager] = lambda: _FakeManager()
+    return TestClient(app)
+
+
+def _make_files_client() -> TestClient:
+    app = FastAPI()
+    app.include_router(files_route.router, prefix="/api/files")
     return TestClient(app)
 
 
@@ -276,6 +283,176 @@ def test_terrarium_agent_only_endpoint_rejects_channel_target():
     client = _make_terrarium_client(_make_fake_agent())
     resp = client.get("/api/terrariums/terrarium_test/env/ch:tasks")
     assert resp.status_code == 400
+
+
+# ----------------------------------------------------------------------
+# Files browse endpoint
+# ----------------------------------------------------------------------
+
+
+def test_files_browse_lists_roots(tmp_path: Path, monkeypatch):
+    root_a = tmp_path / "workspace"
+    root_b = tmp_path / "home"
+    root_a.mkdir()
+    root_b.mkdir()
+    monkeypatch.setattr(
+        files_route, "_allowed_roots", [root_a.resolve(), root_b.resolve()]
+    )
+    client = _make_files_client()
+
+    resp = client.get("/api/files/browse")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["current"] is None
+    assert body["parent"] is None
+    assert [entry["path"] for entry in body["roots"]] == [
+        str(root_a.resolve()),
+        str(root_b.resolve()),
+    ]
+
+
+def test_files_browse_lists_child_directories_only(tmp_path: Path, monkeypatch):
+    root = tmp_path / "workspace"
+    root.mkdir()
+    (root / "alpha").mkdir()
+    (root / "beta").mkdir()
+    (root / "notes.txt").write_text("hello", encoding="utf-8")
+    (root / ".git").mkdir()
+    monkeypatch.setattr(files_route, "_allowed_roots", [root.resolve()])
+    client = _make_files_client()
+
+    resp = client.get("/api/files/browse", params={"path": str(root)})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["current"]["path"] == str(root.resolve())
+    assert body["parent"] is None
+    assert [entry["name"] for entry in body["directories"]] == ["alpha", "beta"]
+
+
+def test_files_browse_returns_parent_within_allowed_root(tmp_path: Path, monkeypatch):
+    root = tmp_path / "workspace"
+    nested = root / "alpha" / "deep"
+    nested.mkdir(parents=True)
+    monkeypatch.setattr(files_route, "_allowed_roots", [root.resolve()])
+    client = _make_files_client()
+
+    resp = client.get("/api/files/browse", params={"path": str(nested)})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["parent"] == str((root / "alpha").resolve())
+
+
+# ----------------------------------------------------------------------
+# Saved session history endpoints
+# ----------------------------------------------------------------------
+
+
+def test_session_history_index_lists_targets(tmp_path: Path, monkeypatch):
+    fake_session = tmp_path / "history-session.kohakutr"
+    fake_session.write_bytes(b"")
+    monkeypatch.setattr(sessions_route, "_SESSION_DIR", tmp_path)
+
+    class _FakeStore:
+        def __init__(self, path):
+            pass
+
+        def load_meta(self):
+            return {
+                "agents": ["root", "worker"],
+                "terrarium_channels": [{"name": "tasks", "type": "queue"}],
+            }
+
+        def close(self, update_status=False):
+            pass
+
+    monkeypatch.setattr(sessions_route, "SessionStore", _FakeStore)
+    app = FastAPI()
+    app.include_router(sessions_route.router, prefix="/api/sessions")
+    client = TestClient(app)
+
+    resp = client.get("/api/sessions/history-session/history")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["targets"] == ["root", "worker", "ch:tasks"]
+
+
+def test_session_history_returns_agent_messages_and_events(tmp_path: Path, monkeypatch):
+    fake_session = tmp_path / "history-session.kohakutr"
+    fake_session.write_bytes(b"")
+    monkeypatch.setattr(sessions_route, "_SESSION_DIR", tmp_path)
+
+    class _FakeStore:
+        def __init__(self, path):
+            pass
+
+        def load_meta(self):
+            return {"agents": ["root"]}
+
+        def load_conversation(self, agent):
+            return [{"role": "user", "content": "hello"}]
+
+        def get_events(self, agent):
+            return [{"type": "user_input", "content": "hello", "ts": 1.0}]
+
+        def close(self, update_status=False):
+            pass
+
+    monkeypatch.setattr(sessions_route, "SessionStore", _FakeStore)
+    app = FastAPI()
+    app.include_router(sessions_route.router, prefix="/api/sessions")
+    client = TestClient(app)
+
+    resp = client.get("/api/sessions/history-session/history/root")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["messages"] == [{"role": "user", "content": "hello"}]
+    assert body["events"][0]["type"] == "user_input"
+
+
+def test_session_history_returns_channel_messages_as_events(
+    tmp_path: Path, monkeypatch
+):
+    fake_session = tmp_path / "history-session.kohakutr"
+    fake_session.write_bytes(b"")
+    monkeypatch.setattr(sessions_route, "_SESSION_DIR", tmp_path)
+
+    class _FakeStore:
+        def __init__(self, path):
+            pass
+
+        def load_meta(self):
+            return {"agents": ["root"], "terrarium_channels": [{"name": "tasks"}]}
+
+        def get_channel_messages(self, channel):
+            return [{"sender": "root", "content": "queued", "ts": 1.0}]
+
+        def close(self, update_status=False):
+            pass
+
+    monkeypatch.setattr(sessions_route, "SessionStore", _FakeStore)
+    app = FastAPI()
+    app.include_router(sessions_route.router, prefix="/api/sessions")
+    client = TestClient(app)
+
+    resp = client.get("/api/sessions/history-session/history/ch%3Atasks")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["messages"] == []
+    assert body["events"] == [
+        {
+            "type": "channel_message",
+            "channel": "tasks",
+            "sender": "root",
+            "content": "queued",
+            "ts": 1.0,
+        }
+    ]
 
 
 # ----------------------------------------------------------------------

@@ -306,6 +306,8 @@ class TerrariumRuntime(HotPlugMixin):
         for name, handle in self._creatures.items():
             creature_states[name] = {
                 "running": handle.is_running,
+                "model": getattr(handle.agent.llm, "model", "")
+                or getattr(getattr(handle.agent.llm, "config", None), "model", ""),
                 "listen_channels": handle.listen_channels,
                 "send_channels": handle.send_channels,
             }

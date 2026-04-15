@@ -17,30 +17,6 @@
       <div class="flex-1 overflow-y-auto px-3 py-2 text-xs">
         <!-- Session tab -->
         <template v-if="activeTab === 'session'">
-          <!-- Terrarium: creatures + channels -->
-          <template v-if="instance?.type === 'terrarium'">
-            <div class="section-label">Creatures</div>
-            <div class="flex flex-col gap-1 mb-3">
-              <div v-for="c in instance.creatures" :key="c.name" class="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors hover:bg-warm-100 dark:hover:bg-warm-800" @click="onOpenTab(c.name)">
-                <StatusDot :status="c.status" />
-                <span class="font-medium text-warm-700 dark:text-warm-300 text-[11px]">{{ c.name }}</span>
-                <span class="flex-1" />
-                <span class="text-[10px] px-1.5 py-0.5 rounded" :class="c.status === 'running' ? 'bg-aquamarine/10 text-aquamarine' : 'bg-warm-100 dark:bg-warm-800 text-warm-400'">{{ c.status }}</span>
-              </div>
-            </div>
-            <div v-if="instance.channels?.length" class="mb-3">
-              <div class="section-label">Channels</div>
-              <div class="flex flex-col gap-1">
-                <div v-for="ch in instance.channels" :key="ch.name" class="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors hover:bg-warm-100 dark:hover:bg-warm-800" @click="onOpenTab('ch:' + ch.name)">
-                  <span class="w-2 h-2 rounded-sm shrink-0" :class="ch.type === 'broadcast' ? 'bg-taaffeite' : 'bg-aquamarine'" />
-                  <span class="font-medium text-warm-700 dark:text-warm-300 text-[11px]">{{ ch.name }}</span>
-                  <span class="flex-1" />
-                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-warm-100 dark:bg-warm-800 text-warm-400">{{ ch.type }}</span>
-                </div>
-              </div>
-            </div>
-          </template>
-          <!-- Standalone agent info -->
           <div class="flex flex-col gap-1.5">
             <div class="flex items-center gap-2">
               <span class="text-warm-400 w-16">Agent</span>

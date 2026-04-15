@@ -120,13 +120,17 @@ def _should_skip(name: str) -> bool:
     return False
 
 
-def _build_tree(path: Path, depth: int) -> dict:
-    """Recursively build a file tree dict."""
-    node: dict = {
-        "name": path.name,
+def _dir_entry(path: Path) -> dict:
+    return {
+        "name": path.name or str(path),
         "path": str(path),
         "type": "directory" if path.is_dir() else "file",
     }
+
+
+def _build_tree(path: Path, depth: int) -> dict:
+    """Recursively build a file tree dict."""
+    node = _dir_entry(path)
 
     if path.is_file():
         try:
@@ -181,6 +185,48 @@ async def get_file_tree(root: str, depth: int = 3):
     if depth > 10:
         depth = 10
     return _build_tree(root_path, depth)
+
+
+@router.get("/browse")
+async def browse_directories(path: str | None = None):
+    """Return browsable directories under the allowed roots."""
+    roots = _init_allowed_roots()
+    if path:
+        current = _validate_path(path)
+        if not current.exists():
+            raise HTTPException(404, f"Not found: {path}")
+        if not current.is_dir():
+            raise HTTPException(400, f"Not a directory: {path}")
+        directories = []
+        try:
+            for entry in sorted(current.iterdir(), key=lambda e: e.name.lower()):
+                if not entry.is_dir() or _should_skip(entry.name):
+                    continue
+                directories.append(_dir_entry(entry))
+        except PermissionError:
+            directories = []
+        parent = None
+        for root in roots:
+            try:
+                current.relative_to(root)
+                if current != root:
+                    parent = str(current.parent)
+                break
+            except ValueError:
+                continue
+        return {
+            "current": _dir_entry(current),
+            "parent": parent,
+            "roots": [_dir_entry(root) for root in roots],
+            "directories": directories,
+        }
+
+    return {
+        "current": None,
+        "parent": None,
+        "roots": [_dir_entry(root) for root in roots],
+        "directories": [],
+    }
 
 
 @router.get("/read")

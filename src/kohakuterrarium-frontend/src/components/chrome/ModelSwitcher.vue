@@ -1,23 +1,15 @@
 <template>
-  <el-dropdown trigger="click" @command="onPick" @visible-change="onVisibleChange">
-    <button class="flex items-center gap-1 px-1 py-0 rounded transition-colors hover:text-warm-700 dark:hover:text-warm-300" :disabled="!instanceId" :title="currentModel">
-      <span class="i-carbon-chip text-[11px]" />
-      <span class="truncate max-w-40 font-mono">{{ currentModel || "default" }}</span>
-      <span class="i-carbon-chevron-down text-[9px] opacity-50" />
-    </button>
-    <template #dropdown>
-      <el-dropdown-menu class="model-switcher-dropdown">
-        <div v-if="loading" class="px-4 py-2 text-[11px] text-warm-400">Loading…</div>
-        <el-dropdown-item v-for="m in models" v-else :key="m.name" :command="m.name" :disabled="m.name === currentModel">
-          <div class="flex items-center gap-2">
-            <span class="font-mono text-[11px]">{{ m.name }}</span>
-            <span v-if="m.login_provider" class="text-[9px] text-warm-400">{{ m.login_provider }}</span>
-          </div>
-        </el-dropdown-item>
-        <div v-if="!loading && models.length === 0" class="px-4 py-2 text-[11px] text-warm-400">No models available</div>
-      </el-dropdown-menu>
-    </template>
-  </el-dropdown>
+  <div v-if="isTerrarium" class="flex items-center gap-2 min-w-0">
+    <el-select :model-value="selectedTarget" size="small" class="status-select target-select" :disabled="!instanceId" @change="onPickTarget">
+      <el-option v-for="target in targetOptions" :key="target.value" :label="target.label" :value="target.value" />
+    </el-select>
+    <el-select :model-value="currentModel" size="small" class="status-select model-select" :disabled="!canPickModel" :loading="loading" placeholder="Select model" @visible-change="onVisibleChange" @change="onPick">
+      <el-option v-for="m in models" :key="m.name" :label="m.name" :value="m.name" :disabled="m.name === currentModel" />
+    </el-select>
+  </div>
+  <el-select v-else :model-value="currentModel" size="small" class="status-select model-select" :disabled="!instanceId" :loading="loading" placeholder="Select model" @visible-change="onVisibleChange" @change="onPick">
+    <el-option v-for="m in models" :key="m.name" :label="m.name" :value="m.name" :disabled="m.name === currentModel" />
+  </el-select>
 
   <!-- Model config dialog (opened by gear button in StatusBar) -->
   <el-dialog v-model="configDialogVisible" title="Model Configuration" width="500px" :close-on-click-modal="true">
@@ -59,7 +51,28 @@ const configJson = ref("")
 const configJsonError = ref("")
 
 const instanceId = computed(() => instances.current?.id || null)
-const currentModel = computed(() => chat.sessionInfo.model || instances.current?.model || "")
+const isTerrarium = computed(() => instances.current?.type === "terrarium")
+const terrariumTarget = computed(() => (isTerrarium.value ? chat.terrariumTarget : null))
+const targetOptions = computed(() => {
+  const inst = instances.current
+  if (inst?.type !== "terrarium") return []
+  return [...(inst.has_root ? [{ value: "root", label: "root" }] : []), ...(inst.creatures || []).map((c) => ({ value: c.name, label: c.name }))]
+})
+const selectedTarget = computed(() => terrariumTarget.value || targetOptions.value[0]?.value || null)
+const canPickModel = computed(() => !!instanceId.value && (!isTerrarium.value || !!selectedTarget.value))
+const currentModel = computed(() => {
+  const inst = instances.current
+  if (inst?.type === "terrarium") {
+    const target = selectedTarget.value
+    if (target === "root") return terrariumTarget.value === target ? chat.sessionInfo.model || inst.model || "" : inst.model || ""
+    if (target) {
+      const creature = inst.creatures?.find((c) => c.name === target)
+      return terrariumTarget.value === target ? chat.sessionInfo.model || creature?.model || "" : creature?.model || ""
+    }
+    return ""
+  }
+  return chat.sessionInfo.model || inst?.model || ""
+})
 
 async function loadModels() {
   loading.value = true
@@ -77,18 +90,32 @@ function onVisibleChange(open) {
   if (open && models.value.length === 0) loadModels()
 }
 
+function onPickTarget(target) {
+  if (!target || !isTerrarium.value) return
+  if (chat.tabs.includes(target)) chat.setActiveTab(target)
+  else chat.openTab(target)
+}
+
 async function onPick(modelName) {
   const id = instanceId.value
   if (!id || !modelName || modelName === currentModel.value) return
   try {
     const inst = instances.current
     if (inst?.type === "terrarium") {
-      const tab = chat.activeTab || "root"
-      await terrariumAPI.switchCreatureModel(id, tab, modelName)
+      const target = selectedTarget.value
+      if (!target) {
+        ElMessage.error("Select a root or creature first")
+        return
+      }
+      await terrariumAPI.switchCreatureModel(id, target, modelName)
+      await instances.fetchOne(id)
+      if (terrariumTarget.value === target) {
+        chat.sessionInfo.model = modelName
+      }
     } else {
       await agentAPI.switchModel(id, modelName)
+      chat.sessionInfo.model = modelName
     }
-    chat.sessionInfo.model = modelName
     ElMessage.success(`Switched to ${modelName}`)
   } catch (err) {
     ElMessage.error(`Model switch failed: ${err?.message || err}`)
@@ -140,9 +167,19 @@ onUnmounted(() => {
 </script>
 
 <style>
-/* Constrain the model dropdown so it scrolls rather than pushing the layout */
-.model-switcher-dropdown {
-  max-height: 360px;
-  overflow-y: auto;
+.status-select {
+  --el-input-bg-color: transparent;
+  --el-fill-color-blank: transparent;
+  --el-border-color: rgba(120, 109, 98, 0.25);
+  --el-border-color-hover: rgba(120, 109, 98, 0.4);
+  --el-text-color-regular: currentColor;
+}
+
+.target-select {
+  width: 8.5rem;
+}
+
+.model-select {
+  width: 12rem;
 }
 </style>

@@ -258,6 +258,83 @@ def _resolve_session_path(session_name: str) -> Path | None:
     return None
 
 
+def _session_history_payload(store: SessionStore, target: str) -> dict[str, Any]:
+    if target.startswith("ch:"):
+        channel = target[3:]
+        messages = store.get_channel_messages(channel)
+        return {
+            "target": target,
+            "messages": [],
+            "events": [
+                {
+                    "type": "channel_message",
+                    "channel": channel,
+                    "sender": m.get("sender", ""),
+                    "content": m.get("content", ""),
+                    "ts": m.get("ts", 0),
+                }
+                for m in messages
+            ],
+        }
+
+    return {
+        "target": target,
+        "messages": store.load_conversation(target) or [],
+        "events": store.get_events(target),
+    }
+
+
+@router.get("/{session_name}/history")
+async def get_session_history_index(session_name: str) -> dict[str, Any]:
+    """Return session metadata and available read-only history targets."""
+    path = _resolve_session_path(session_name)
+    if path is None:
+        raise HTTPException(404, f"Session not found: {session_name}")
+
+    try:
+        store = SessionStore(path)
+        meta = store.load_meta()
+        targets = list(meta.get("agents", []))
+        targets.extend(
+            f"ch:{ch.get('name', '')}"
+            for ch in meta.get("terrarium_channels", [])
+            if ch.get("name")
+        )
+        store.close(update_status=False)
+        return {"session_name": path.stem, "meta": meta, "targets": targets}
+    except Exception as e:
+        raise HTTPException(500, f"History index load failed: {e}")
+
+
+@router.get("/{session_name}/history/{target}")
+async def get_session_history(session_name: str, target: str) -> dict[str, Any]:
+    """Return read-only saved history for an agent/root/channel target."""
+    path = _resolve_session_path(session_name)
+    if path is None:
+        raise HTTPException(404, f"Session not found: {session_name}")
+
+    try:
+        store = SessionStore(path)
+        meta = store.load_meta()
+        valid_targets = set(meta.get("agents", []))
+        valid_targets.update(
+            f"ch:{ch.get('name', '')}"
+            for ch in meta.get("terrarium_channels", [])
+            if ch.get("name")
+        )
+        if target not in valid_targets:
+            raise HTTPException(404, f"Target not found in session: {target}")
+        payload = _session_history_payload(store, target)
+        payload["session_name"] = path.stem
+        payload["meta"] = meta
+        store.close(update_status=False)
+        return payload
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"History load failed: {e}")
+
+
 @router.get("/{session_name}/memory/search")
 async def search_session_memory(
     session_name: str,

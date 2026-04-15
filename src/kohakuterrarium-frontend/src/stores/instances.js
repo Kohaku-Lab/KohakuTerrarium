@@ -131,7 +131,7 @@ function _mapTerrarium(data) {
     creatures: Object.entries(data.creatures || {}).map(([name, info]) => ({
       name,
       status: info.running ? "running" : "idle",
-      model: "",
+      model: info.model || "",
       listen_channels: info.listen_channels || [],
       send_channels: info.send_channels || [],
     })),

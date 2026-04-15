@@ -5,7 +5,7 @@
 <script setup>
 import { computed, nextTick, ref, watch } from "vue"
 import MarkdownIt from "markdown-it"
-import mk from "@vscode/markdown-it-katex"
+import markdownItKatex from "@vscode/markdown-it-katex"
 import hljs from "highlight.js"
 
 const props = defineProps({
@@ -36,7 +36,10 @@ const md = new MarkdownIt({
   },
 })
 
-md.use(mk)
+const katexPlugin = typeof markdownItKatex === "function" ? markdownItKatex : markdownItKatex?.default
+if (typeof katexPlugin === "function") {
+  md.use(katexPlugin)
+}
 
 function onClick(e) {
   const btn = e.target.closest(".code-copy-btn")
