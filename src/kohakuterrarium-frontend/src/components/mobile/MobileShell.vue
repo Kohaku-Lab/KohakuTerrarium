@@ -9,7 +9,7 @@
       <span class="text-sm font-medium text-warm-700 dark:text-warm-200 truncate flex-1">{{ title }}</span>
       <slot name="actions" />
       <!-- Switch to desktop button -->
-      <button class="w-8 h-8 flex items-center justify-center rounded text-warm-400 hover:text-iolite transition-colors shrink-0" title="Desktop view" @click="goDesktop">
+      <button class="w-8 h-8 flex items-center justify-center rounded text-warm-400 hover:text-iolite transition-colors shrink-0" :title="t('common.desktopView')" @click="goDesktop">
         <div class="i-carbon-laptop text-base" />
       </button>
     </div>
@@ -26,12 +26,14 @@
 import { inject, provide } from "vue"
 
 import MobileNav from "./MobileNav.vue"
+import { useI18n } from "@/utils/i18n"
 
 defineProps({
   title: { type: String, default: "KohakuTerrarium" },
 })
 
 provide("mobileLayout", true)
+const { t } = useI18n()
 
 const switchToDesktop = inject("switchToDesktop", null)
 

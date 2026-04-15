@@ -2,34 +2,34 @@
   <div class="h-full overflow-y-auto">
     <div class="container-page max-w-5xl">
       <div class="mb-6">
-        <h1 class="text-xl font-bold text-warm-800 dark:text-warm-200 mb-1">Saved Sessions</h1>
-        <p class="text-secondary">Resume a previous agent or terrarium session.</p>
+        <h1 class="text-xl font-bold text-warm-800 dark:text-warm-200 mb-1">{{ t("sessions.title") }}</h1>
+        <p class="text-secondary">{{ t("sessions.subtitle") }}</p>
       </div>
 
       <div v-if="loading" class="card p-12 text-center text-secondary">
         <div class="i-carbon-renew kohaku-pulse text-2xl mx-auto mb-3 text-amber" />
-        <div>Loading sessions...</div>
+        <div>{{ t("sessions.loading") }}</div>
       </div>
 
       <div v-else-if="error" class="card p-8 text-center">
         <div class="i-carbon-warning-alt text-2xl mx-auto mb-3 text-coral" />
-        <div class="text-warm-700 dark:text-warm-300 mb-3">Failed to load sessions</div>
+        <div class="text-warm-700 dark:text-warm-300 mb-3">{{ t("sessions.failedTitle") }}</div>
         <div class="text-secondary text-xs mb-4">{{ error }}</div>
-        <button class="btn-secondary" @click="fetchSessions"><span class="i-carbon-renew mr-1" /> Retry</button>
+        <button class="btn-secondary" @click="fetchSessions"><span class="i-carbon-renew mr-1" /> {{ t("common.retry") }}</button>
       </div>
 
       <div v-else-if="totalSessions === 0 && !searchQuery" class="card p-12 text-center text-secondary">
         <div class="i-carbon-time text-3xl mx-auto mb-3 text-warm-400" />
-        <div class="text-warm-600 dark:text-warm-400 mb-1">No saved sessions</div>
-        <div class="text-xs">Sessions are saved automatically when instances run.</div>
+        <div class="text-warm-600 dark:text-warm-400 mb-1">{{ t("sessions.noSaved") }}</div>
+        <div class="text-xs">{{ t("sessions.noSavedHint") }}</div>
       </div>
 
       <template v-else>
         <div class="mb-4">
-          <input v-model="searchQuery" type="text" class="input-field w-full" placeholder="Search sessions by name, config, agents, preview..." />
+          <input v-model="searchQuery" type="text" class="input-field w-full" :placeholder="t('sessions.searchPlaceholder')" />
         </div>
 
-        <div v-if="sessions.length === 0" class="card p-8 text-center text-secondary">No sessions match "{{ searchQuery }}"</div>
+        <div v-if="sessions.length === 0" class="card p-8 text-center text-secondary">{{ t("sessions.noMatch", { query: searchQuery }) }}</div>
 
         <div v-else class="flex flex-col gap-2">
           <div v-for="session in sessions" :key="session.name" class="card-hover p-4 flex items-center gap-4">
@@ -54,7 +54,7 @@
                 <span v-if="session.config_path" class="font-mono truncate">
                   {{ session.config_path }}
                 </span>
-                <span v-if="session.agents && session.agents.length > 0"> {{ session.agents.length }} agent{{ session.agents.length !== 1 ? "s" : "" }} </span>
+                <span v-if="session.agents && session.agents.length > 0"> {{ t("sessions.agentCount", { count: session.agents.length }) }} </span>
                 <span v-if="session.pwd" class="font-mono truncate text-warm-400" :title="session.pwd">
                   {{ session.pwd }}
                 </span>
@@ -72,7 +72,7 @@
             <div class="flex gap-2 shrink-0">
               <button class="btn-secondary flex items-center gap-1" @click="viewSession(session)">
                 <span class="i-carbon-view" />
-                View
+                {{ t("common.view") }}
               </button>
               <button
                 class="btn-primary flex items-center gap-1"
@@ -83,20 +83,20 @@
                 @click="resumeSession(session)"
               >
                 <span :class="resuming === session.name ? 'i-carbon-renew kohaku-pulse' : 'i-carbon-play'" />
-                {{ resuming === session.name ? "Resuming..." : "Resume" }}
+                {{ resuming === session.name ? t("sessions.resuming") : t("common.resume") }}
               </button>
-              <button class="btn-secondary flex items-center gap-1 text-coral hover:bg-coral/10" title="Delete session" @click="deleteSession(session)">
+              <button class="btn-secondary flex items-center gap-1 text-coral hover:bg-coral/10" :title="t('common.delete')" @click="deleteSession(session)">
                 <span class="i-carbon-trash-can" />
               </button>
             </div>
           </div>
 
           <div class="flex items-center justify-between mt-4 text-xs text-warm-400">
-            <span>{{ totalSessions }} sessions total</span>
+            <span>{{ t("sessions.total", { count: totalSessions }) }}</span>
             <div class="flex gap-2">
-              <button class="btn-secondary" :disabled="!hasPrev" @click="prevPage"><span class="i-carbon-chevron-left" /> Prev</button>
+              <button class="btn-secondary" :disabled="!hasPrev" @click="prevPage"><span class="i-carbon-chevron-left" /> {{ t("sessions.prev") }}</button>
               <span class="py-1 px-2"> {{ currentOffset + 1 }}-{{ Math.min(currentOffset + pageSize, totalSessions) }} </span>
-              <button class="btn-secondary" :disabled="!hasMore" @click="nextPage">Next <span class="i-carbon-chevron-right" /></button>
+              <button class="btn-secondary" :disabled="!hasMore" @click="nextPage">{{ t("sessions.next") }} <span class="i-carbon-chevron-right" /></button>
             </div>
           </div>
         </div>
@@ -106,13 +106,17 @@
 </template>
 
 <script setup>
-import { sessionAPI } from "@/utils/api"
-import { useInstancesStore } from "@/stores/instances"
 import { ElMessage } from "element-plus"
+
+import GemBadge from "@/components/common/GemBadge.vue"
+import { useInstancesStore } from "@/stores/instances"
+import { useI18n } from "@/utils/i18n"
+import { sessionAPI } from "@/utils/api"
 
 const isMobile = inject("mobileLayout", false)
 const router = useRouter()
 const instances = useInstancesStore()
+const { t } = useI18n()
 
 const sessions = ref([])
 const totalSessions = ref(0)
@@ -122,11 +126,11 @@ const loading = ref(false)
 const error = ref(null)
 const resuming = ref(null)
 const searchQuery = ref("")
-let _searchTimer = null
+let searchTimer = null
 
 watch(searchQuery, () => {
-  clearTimeout(_searchTimer)
-  _searchTimer = setTimeout(() => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
     currentOffset.value = 0
     fetchSessions()
   }, 300)
@@ -173,23 +177,23 @@ async function resumeSession(session) {
   try {
     const result = await sessionAPI.resume(session.name)
     await instances.fetchAll()
-    ElMessage.success(`Resumed session: ${session.name}`)
+    ElMessage.success(t("sessions.resumed", { name: session.name }))
     router.push(isMobile ? `/mobile/${result.instance_id}` : `/instances/${result.instance_id}`)
   } catch (err) {
-    ElMessage.error(`Failed to resume: ${err.response?.data?.detail || err.message}`)
+    ElMessage.error(t("sessions.resumeFailed", { message: err.response?.data?.detail || err.message }))
   } finally {
     resuming.value = null
   }
 }
 
 async function deleteSession(session) {
-  if (!confirm(`Delete session "${session.name}"?`)) return
+  if (!confirm(t("sessions.deleteConfirm", { name: session.name }))) return
   try {
     await sessionAPI.delete(session.name)
-    ElMessage.success("Session deleted")
+    ElMessage.success(t("sessions.deleted"))
     await fetchSessions()
   } catch (err) {
-    ElMessage.error(`Failed to delete: ${err.response?.data?.detail || err.message}`)
+    ElMessage.error(t("sessions.deleteFailed", { message: err.response?.data?.detail || err.message }))
   }
 }
 
@@ -211,9 +215,9 @@ function formatDate(dateStr) {
   const diffMs = now.getTime() - d.getTime()
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
 
-  if (diffDays === 0) return "Today"
-  if (diffDays === 1) return "Yesterday"
-  if (diffDays < 7) return `${diffDays}d ago`
+  if (diffDays === 0) return t("sessions.today")
+  if (diffDays === 1) return t("sessions.yesterday")
+  if (diffDays < 7) return t("sessions.daysAgo", { count: diffDays })
   return d.toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",

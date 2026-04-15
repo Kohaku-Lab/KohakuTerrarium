@@ -3,18 +3,17 @@
     <WorkspaceShell :instance-id="route.params.id" @stop="showStopConfirm = true" />
 
     <!-- Stop confirmation dialog (triggered from the status bar or nav) -->
-    <el-dialog v-model="showStopConfirm" title="Stop Instance" width="400px" :close-on-click-modal="true">
+    <el-dialog v-model="showStopConfirm" :title="t('home.stopDialogTitle')" width="400px" :close-on-click-modal="true">
       <p class="text-warm-600 dark:text-warm-300">
-        Stop <strong>{{ instance.config_name }}</strong
-        >? This will terminate the {{ instance.type }} and all its processes.
+        {{ t("home.stopDialogBody", { name: instance.config_name, type: instanceTypeLabel }) }}
       </p>
       <template #footer>
-        <el-button size="small" @click="showStopConfirm = false">Cancel</el-button>
-        <el-button size="small" type="danger" :loading="stopping" @click="confirmStop">Stop</el-button>
+        <el-button size="small" @click="showStopConfirm = false">{{ t("common.cancel") }}</el-button>
+        <el-button size="small" type="danger" :loading="stopping" @click="confirmStop">{{ t("common.stop") }}</el-button>
       </template>
     </el-dialog>
   </div>
-  <div v-else class="h-full flex items-center justify-center text-secondary">Loading instance...</div>
+  <div v-else class="h-full flex items-center justify-center text-secondary">{{ t("common.loading") }}</div>
 </template>
 
 <script setup>
@@ -25,6 +24,7 @@ import { useChatStore } from "@/stores/chat"
 import { useEditorStore } from "@/stores/editor"
 import { useInstancesStore } from "@/stores/instances"
 import { useLayoutStore } from "@/stores/layout"
+import { useI18n } from "@/utils/i18n"
 
 const route = useRoute()
 const router = useRouter()
@@ -32,6 +32,7 @@ const instances = useInstancesStore()
 const chat = useChatStore()
 const editor = useEditorStore()
 const layout = useLayoutStore()
+const { t } = useI18n()
 
 const loadedInstance = ref(null)
 const instance = computed(() => {
@@ -44,6 +45,11 @@ const instance = computed(() => {
 const showStopConfirm = ref(false)
 const stopping = ref(false)
 let refreshTimer = null
+
+const instanceTypeLabel = computed(() => {
+  if (!instance.value?.type) return t("common.creature")
+  return instance.value.type === "terrarium" ? t("common.terrarium") : t("common.creature")
+})
 
 // Runtime prop map for panels mounted inside the shell's zones.
 const panelProps = computed(() => ({

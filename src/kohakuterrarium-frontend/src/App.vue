@@ -14,7 +14,7 @@
     <!-- "Switch to mobile" button — only shown when user manually left mobile on a small screen -->
     <button v-if="showMobileHint" class="fixed bottom-4 right-4 z-50 px-3 py-2 rounded-lg bg-iolite text-white text-xs shadow-lg flex items-center gap-1.5 hover:bg-iolite/90 transition-colors" @click="switchToMobile">
       <div class="i-carbon-mobile text-sm" />
-      <span>Mobile view</span>
+      <span>{{ t("common.mobileView") }}</span>
     </button>
     <CommandPalette />
     <ToastCenter />
@@ -32,12 +32,16 @@ import { useAutoTriggers } from "@/composables/useAutoTriggers"
 import { useBuiltinCommands } from "@/composables/useBuiltinCommands"
 import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts"
 import { useInstancesStore } from "@/stores/instances"
+import { useLocaleStore } from "@/stores/locale"
 import { useThemeStore } from "@/stores/theme"
+import { useI18n } from "@/utils/i18n"
 import { getHybridPrefSync, removeHybridPref, setHybridPref } from "@/utils/uiPrefs"
 
 const MOBILE_WIDTH = 768
 const route = useRoute()
 const router = useRouter()
+const locale = useLocaleStore()
+const { t } = useI18n()
 
 const isMobileRoute = computed(() => route.path.startsWith("/mobile"))
 const windowWidth = ref(window.innerWidth)
@@ -109,6 +113,7 @@ provide("switchToDesktop", switchToDesktop)
 
 const theme = useThemeStore()
 theme.init()
+locale.init()
 
 // Sync mobile mode flag to theme store so it applies the correct zoom level.
 watch(isMobileRoute, (m) => theme.setMobileMode(m), { immediate: true })

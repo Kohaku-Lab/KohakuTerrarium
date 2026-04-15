@@ -1,10 +1,7 @@
 <template>
-  <!-- Compact strip: preset dropdown + edit/save buttons. ~24px total.
-       NOT a row of tabs — doesn't eat vertical space. -->
   <div class="preset-strip flex items-center gap-1 px-2 h-6 border-b border-warm-200 dark:border-warm-700 bg-warm-50 dark:bg-warm-900 text-[10px]">
     <div class="i-carbon-layout text-[12px] text-warm-400 mr-0.5" />
 
-    <!-- Dropdown for the active preset (replaces old chip row) -->
     <el-dropdown trigger="click" size="small" @command="onSelect">
       <button class="flex items-center gap-1 px-1.5 py-0.5 rounded text-warm-700 dark:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors">
         <span class="font-medium truncate max-w-40">{{ activeLabel }}</span>
@@ -12,10 +9,10 @@
       </button>
       <template #dropdown>
         <el-dropdown-menu>
-          <el-dropdown-item v-for="p in presets" :key="p.id" :command="p.id" :disabled="active === p.id">
+          <el-dropdown-item v-for="preset in presets" :key="preset.id" :command="preset.id" :disabled="active === preset.id">
             <div class="flex items-center gap-2 text-[11px]">
-              <span class="truncate max-w-40">{{ p.label }}</span>
-              <span v-if="p.shortcut" class="text-[9px] font-mono text-warm-400">{{ p.shortcut }}</span>
+              <span class="truncate max-w-40">{{ preset.localizedLabel }}</span>
+              <span v-if="preset.shortcut" class="text-[9px] font-mono text-warm-400">{{ preset.shortcut }}</span>
             </div>
           </el-dropdown-item>
         </el-dropdown-menu>
@@ -24,8 +21,7 @@
 
     <div class="flex-1" />
 
-    <!-- Edit layout -->
-    <button class="w-5 h-5 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" title="Customize layout (Ctrl+Shift+L)" @click="onEdit">
+    <button class="w-5 h-5 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" :title="t('appHeader.customizeLayout')" @click="onEdit">
       <div class="i-carbon-edit text-[11px]" />
     </button>
   </div>
@@ -35,30 +31,33 @@
 import { computed } from "vue"
 
 import { useLayoutStore } from "@/stores/layout"
+import { useI18n } from "@/utils/i18n"
 import { fireLayoutEditRequested } from "@/utils/layoutEvents"
 
 const layout = useLayoutStore()
+const { t, presetLabel: translatePreset } = useI18n()
 
 const PRESET_ORDER = ["chat-focus", "workspace", "multi-creature", "canvas", "debug", "settings"]
 
 const presets = computed(() => {
   const all = layout.allPresets
-  const out = []
+  const output = []
   for (const id of PRESET_ORDER) {
-    if (all[id]) out.push(all[id])
+    if (all[id]) output.push({ ...all[id], localizedLabel: translatePreset(all[id].id, all[id].label || all[id].id) })
   }
   for (const preset of Object.values(all)) {
     if (!PRESET_ORDER.includes(preset.id) && !preset.id.startsWith("legacy-")) {
-      out.push(preset)
+      output.push({ ...preset, localizedLabel: translatePreset(preset.id, preset.label || preset.id) })
     }
   }
-  return out
+  return output
 })
 
 const active = computed(() => layout.activePresetId)
 const activeLabel = computed(() => {
-  const p = layout.activePreset
-  return p?.label || p?.id || "—"
+  const preset = layout.activePreset
+  if (!preset) return "—"
+  return translatePreset(preset.id, preset.label || preset.id)
 })
 
 function onSelect(id) {

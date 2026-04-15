@@ -4,7 +4,7 @@
       <!-- Header -->
       <div class="mb-8">
         <h1 class="text-2xl font-bold text-warm-800 dark:text-warm-200 mb-1">KohakuTerrarium</h1>
-        <p class="text-secondary">Build agents that work alone. Compose them into teams that work together.</p>
+        <p class="text-secondary">{{ t("home.subtitle") }}</p>
       </div>
 
       <!-- Stats cards -->
@@ -19,8 +19,8 @@
 
       <!-- Running instances -->
       <div class="mb-8">
-        <h2 class="section-title">Running Instances</h2>
-        <div v-if="instances.running.length === 0" class="card p-8 text-center text-secondary">No instances running. Start one to get going.</div>
+        <h2 class="section-title">{{ t("home.runningInstances") }}</h2>
+        <div v-if="instances.running.length === 0" class="card p-8 text-center text-secondary">{{ t("home.noRunningInstances") }}</div>
         <div v-else class="flex flex-col gap-3">
           <div v-for="inst in instances.running" :key="inst.id" class="card-hover p-4 flex items-center gap-4" @click="$router.push(`/instances/${inst.id}`)">
             <StatusDot :status="inst.status" />
@@ -35,8 +35,8 @@
             <GemBadge :gem="inst.type === 'terrarium' ? 'iolite' : 'aquamarine'">
               {{ inst.type }}
             </GemBadge>
-            <div class="text-secondary text-xs">{{ inst.creatures.length }} creature{{ inst.creatures.length !== 1 ? "s" : "" }}</div>
-            <button class="btn-icon text-coral hover:text-coral-dark flex-shrink-0" title="Stop instance" @click.stop="handleStop(inst)">
+            <div class="text-secondary text-xs">{{ t("sessions.agentCount", { count: inst.creatures.length }) }}</div>
+            <button class="btn-icon text-coral hover:text-coral-dark flex-shrink-0" :title="t('home.stopInstance')" @click.stop="handleStop(inst)">
               <span class="i-carbon-stop-filled" />
             </button>
           </div>
@@ -45,22 +45,21 @@
 
       <!-- Quick start -->
       <div>
-        <h2 class="section-title">Quick Start</h2>
+        <h2 class="section-title">{{ t("home.quickStart") }}</h2>
         <div class="flex flex-wrap gap-3">
-          <button class="btn-primary" @click="$router.push('/new')"><span class="i-carbon-add mr-1" /> Start New Instance</button>
+          <button class="btn-primary" @click="$router.push('/new')"><span class="i-carbon-add mr-1" /> {{ t("home.startNewInstance") }}</button>
         </div>
       </div>
     </div>
 
     <!-- Stop confirmation dialog -->
-    <el-dialog v-model="showStopConfirm" title="Stop Instance" width="400px" :close-on-click-modal="true">
+    <el-dialog v-model="showStopConfirm" :title="t('home.stopDialogTitle')" width="400px" :close-on-click-modal="true">
       <p class="text-warm-600 dark:text-warm-300">
-        Stop <strong>{{ stopTarget?.config_name }}</strong
-        >? This will terminate the {{ stopTarget?.type }} and all its processes.
+        {{ t("home.stopDialogBody", { name: stopTarget?.config_name || "", type: stopTarget?.type || "" }) }}
       </p>
       <template #footer>
-        <el-button size="small" @click="showStopConfirm = false">Cancel</el-button>
-        <el-button size="small" type="danger" :loading="stopping" @click="confirmStop">Stop</el-button>
+        <el-button size="small" @click="showStopConfirm = false">{{ t("common.cancel") }}</el-button>
+        <el-button size="small" type="danger" :loading="stopping" @click="confirmStop">{{ t("common.stop") }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -71,8 +70,10 @@ import { ElMessage } from "element-plus"
 import StatusDot from "@/components/common/StatusDot.vue"
 import GemBadge from "@/components/common/GemBadge.vue"
 import { useInstancesStore } from "@/stores/instances"
+import { useI18n } from "@/utils/i18n"
 
 const instances = useInstancesStore()
+const { t } = useI18n()
 instances.fetchAll()
 
 // Start auto-refresh polling
@@ -87,22 +88,22 @@ const stopping = ref(false)
 
 const stats = computed(() => [
   {
-    label: "Running",
+    label: t("home.stats.running"),
     value: instances.running.length,
     color: "text-aquamarine",
   },
   {
-    label: "Terrariums",
+    label: t("home.stats.terrariums"),
     value: instances.terrariums.length,
     color: "text-iolite dark:text-iolite-light",
   },
   {
-    label: "Creatures",
+    label: t("home.stats.creatures"),
     value: instances.list.reduce((acc, i) => acc + i.creatures.length, 0),
     color: "text-taaffeite dark:text-taaffeite-light",
   },
   {
-    label: "Channels",
+    label: t("home.stats.channels"),
     value: instances.list.reduce((acc, i) => acc + i.channels.length, 0),
     color: "text-amber",
   },
@@ -119,13 +120,13 @@ async function confirmStop() {
   try {
     await instances.stop(stopTarget.value.id)
     ElMessage({
-      message: `Stopped ${stopTarget.value.config_name}`,
+      message: t("home.stoppedMessage", { name: stopTarget.value.config_name }),
       type: "success",
     })
     showStopConfirm.value = false
   } catch (err) {
     ElMessage({
-      message: `Failed to stop: ${err.message || "Unknown error"}`,
+      message: t("home.stopFailedMessage", { message: err.message || "Unknown error" }),
       type: "error",
     })
   } finally {

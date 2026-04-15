@@ -21,19 +21,19 @@
 
     <!-- Home -->
     <router-link v-slot="{ navigate, isExactActive }" to="/" custom>
-      <NavItem :expanded="expanded" :active="isExactActive" icon="i-carbon-home" label="Home" @click="navigate" />
+      <NavItem :expanded="expanded" :active="isExactActive" icon="i-carbon-home" :label="t('common.home')" @click="navigate" />
     </router-link>
 
     <div class="mx-2 border-t border-warm-200 dark:border-warm-700 mt-1 mb-1" />
 
     <!-- Running instances directly listed -->
     <div v-if="expanded" class="px-3 mb-1">
-      <span class="text-[10px] text-warm-400 uppercase tracking-wider font-medium">Running</span>
+      <span class="text-[10px] text-warm-400 uppercase tracking-wider font-medium">{{ t("common.running") }}</span>
     </div>
 
     <div class="flex-1 overflow-y-auto flex flex-col gap-0.5 min-h-0">
       <div v-if="instances.list.length === 0" class="px-3 py-2">
-        <span v-if="expanded" class="text-xs text-warm-400">No instances</span>
+        <span v-if="expanded" class="text-xs text-warm-400">{{ t("common.noInstances") }}</span>
         <span v-else class="text-warm-400 text-[10px] text-center block">--</span>
       </div>
       <router-link v-for="inst in instances.list" :key="inst.id" v-slot="{ navigate, isActive }" :to="`/instances/${inst.id}`" custom>
@@ -45,28 +45,28 @@
 
     <!-- Start new -->
     <router-link v-slot="{ navigate, isExactActive }" to="/new" custom>
-      <NavItem :expanded="expanded" :active="isExactActive" icon="i-carbon-add-large" label="Start New" @click="navigate" />
+      <NavItem :expanded="expanded" :active="isExactActive" icon="i-carbon-add-large" :label="t('common.startNew')" @click="navigate" />
     </router-link>
 
     <!-- Saved sessions -->
     <router-link v-slot="{ navigate, isExactActive }" to="/sessions" custom>
-      <NavItem :expanded="expanded" :active="isExactActive" icon="i-carbon-recently-viewed" label="Sessions" @click="navigate" />
+      <NavItem :expanded="expanded" :active="isExactActive" icon="i-carbon-recently-viewed" :label="t('common.sessions')" @click="navigate" />
     </router-link>
 
     <!-- Registry browser -->
     <router-link v-slot="{ navigate, isExactActive }" to="/registry" custom>
-      <NavItem :expanded="expanded" :active="isExactActive" icon="i-carbon-catalog" label="Registry" @click="navigate" />
+      <NavItem :expanded="expanded" :active="isExactActive" icon="i-carbon-catalog" :label="t('common.registry')" @click="navigate" />
     </router-link>
 
     <!-- Settings -->
     <router-link v-slot="{ navigate, isExactActive }" to="/settings" custom>
-      <NavItem :expanded="expanded" :active="isExactActive" icon="i-carbon-settings" label="Settings" @click="navigate" />
+      <NavItem :expanded="expanded" :active="isExactActive" icon="i-carbon-settings" :label="t('common.settings')" @click="navigate" />
     </router-link>
 
     <div class="mx-2 border-t border-warm-200 dark:border-warm-700 mt-1 mb-1" />
 
     <!-- Theme toggle -->
-    <NavItem :expanded="expanded" :active="false" :icon="theme.dark ? 'i-carbon-sun' : 'i-carbon-moon'" :label="theme.dark ? 'Light Mode' : 'Dark Mode'" @click="theme.toggle()" />
+    <NavItem :expanded="expanded" :active="false" :icon="theme.dark ? 'i-carbon-sun' : 'i-carbon-moon'" :label="theme.dark ? t('common.lightMode') : t('common.darkMode')" @click="theme.toggle()" />
 
     <div class="h-2" />
   </nav>
@@ -75,10 +75,12 @@
 <script setup>
 import { useThemeStore } from "@/stores/theme"
 import { useInstancesStore } from "@/stores/instances"
+import { useI18n } from "@/utils/i18n"
 import { getHybridPrefSync, setHybridPref } from "@/utils/uiPrefs"
 
 const theme = useThemeStore()
 const instances = useInstancesStore()
+const { t } = useI18n()
 
 const expanded = ref(getHybridPrefSync("nav-expanded", true) !== false)
 

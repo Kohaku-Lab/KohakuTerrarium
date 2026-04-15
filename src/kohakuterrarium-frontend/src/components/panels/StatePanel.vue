@@ -13,7 +13,7 @@
         <span class="text-xs font-medium text-warm-500 dark:text-warm-400 flex-1">
           {{ activeLabel }}
         </span>
-        <button v-if="activeTab === 'scratchpad'" class="w-6 h-6 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" title="Refresh" @click="refreshScratchpad">
+        <button v-if="activeTab === 'scratchpad'" class="w-6 h-6 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" :title="t('common.refresh')" @click="refreshScratchpad">
           <div class="i-carbon-renew text-sm" />
         </button>
       </div>
@@ -21,17 +21,17 @@
       <div class="flex-1 overflow-y-auto px-3 py-2 text-xs">
         <!-- Scratchpad tab -->
         <template v-if="activeTab === 'scratchpad'">
-          <div v-if="loading && !entries.length" class="text-warm-400 py-6 text-center">Loading...</div>
+          <div v-if="loading && !entries.length" class="text-warm-400 py-6 text-center">{{ t("state.loading") }}</div>
           <div v-else-if="errorMsg" class="text-coral py-4 text-[11px]">
             {{ errorMsg }}
           </div>
-          <div v-else-if="entries.length === 0" class="text-warm-400 py-6 text-center">Scratchpad is empty</div>
+          <div v-else-if="entries.length === 0" class="text-warm-400 py-6 text-center">{{ t("state.scratchpadEmpty") }}</div>
           <div v-else class="flex flex-col gap-2">
             <div v-for="[key, value] in entries" :key="key" class="flex flex-col gap-0.5 rounded border border-warm-200 dark:border-warm-700 px-2 py-1.5">
               <div class="flex items-center gap-2">
                 <span class="text-iolite font-mono text-[10px]">{{ key }}</span>
                 <span class="flex-1" />
-                <button class="text-warm-400 hover:text-coral transition-colors" title="Delete" @click="deleteKey(key)">
+                <button class="text-warm-400 hover:text-coral transition-colors" :title="t('state.deleteEntry')" @click="deleteKey(key)">
                   <div class="i-carbon-close text-[10px]" />
                 </button>
               </div>
@@ -45,7 +45,7 @@
         <!-- Memory tab -->
         <template v-else-if="activeTab === 'memory'">
           <div class="flex flex-col gap-2">
-            <el-input v-model="memQuery" placeholder="Search session memory..." size="small" clearable @keyup.enter="runMemorySearch">
+            <el-input v-model="memQuery" :placeholder="t('state.searchMemory')" size="small" clearable @keyup.enter="runMemorySearch">
               <template #append>
                 <el-button @click="runMemorySearch">
                   <div class="i-carbon-search text-[11px]" />
@@ -57,25 +57,25 @@
                 {{ m }}
               </button>
             </div>
-            <div v-if="memLoading" class="text-warm-400 text-center py-4 text-[11px]">Searching...</div>
+            <div v-if="memLoading" class="text-warm-400 text-center py-4 text-[11px]">{{ t("state.searching") }}</div>
             <div v-else-if="memError" class="text-coral text-[11px] py-2">
               {{ memError }}
             </div>
-            <div v-else-if="memSearched && memResults.length === 0" class="text-warm-400 text-center py-4 text-[11px]">No results for "{{ memQuery }}"</div>
+            <div v-else-if="memSearched && memResults.length === 0" class="text-warm-400 text-center py-4 text-[11px]">{{ t("state.noMemoryResults", { query: memQuery }) }}</div>
             <div v-else-if="!memSearched" class="text-warm-400 text-center py-4 text-[11px]">
-              <p>Type a query and press Enter to search.</p>
-              <p class="mt-1 text-[9px] opacity-70">Memory search works on indexed sessions. Running sessions may not have indexed events yet.</p>
+              <p>{{ t("state.memoryPrompt") }}</p>
+              <p class="mt-1 text-[9px] opacity-70">{{ t("state.memoryHint") }}</p>
             </div>
             <div v-else class="flex flex-col gap-1.5">
               <div v-for="(r, i) in memResults" :key="i" class="flex flex-col gap-0.5 rounded border border-warm-200 dark:border-warm-700 px-2 py-1.5">
                 <div class="flex items-center gap-2 text-[9px] text-warm-400 font-mono">
-                  <span>{{ r.agent || "agent" }}</span>
+                  <span>{{ r.agent || t("state.agentFallback") }}</span>
                   <span>·</span>
                   <span>{{ r.block_type }}</span>
                   <span>·</span>
                   <span>r{{ r.round }}b{{ r.block }}</span>
                   <span class="flex-1" />
-                  <span>score {{ r.score?.toFixed ? r.score.toFixed(2) : r.score }}</span>
+                  <span>{{ t("state.score") }} {{ r.score?.toFixed ? r.score.toFixed(2) : r.score }}</span>
                 </div>
                 <div class="text-[11px] text-warm-700 dark:text-warm-300 break-words line-clamp-3">
                   {{ r.content }}
@@ -87,28 +87,28 @@
 
         <!-- Tool History tab — shows tool calls from chat store -->
         <template v-else-if="activeTab === 'tools'">
-          <div v-if="toolCalls.length === 0" class="text-warm-400 py-6 text-center text-[11px]">No tool calls in this session yet.</div>
+          <div v-if="toolCalls.length === 0" class="text-warm-400 py-6 text-center text-[11px]">{{ t("state.noToolCalls") }}</div>
           <div v-else class="flex flex-col gap-1">
             <div v-for="(tc, i) in toolCalls" :key="i" class="flex items-center gap-2 px-2 py-1 rounded text-[11px] hover:bg-warm-100 dark:hover:bg-warm-800">
               <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="tc.status === 'done' ? 'bg-aquamarine' : tc.status === 'error' ? 'bg-coral' : 'bg-amber kohaku-pulse'" />
               <span class="font-mono text-iolite truncate">{{ tc.name }}</span>
               <span class="flex-1" />
-              <span class="text-warm-400 text-[9px] font-mono">{{ tc.status }}</span>
+              <span class="text-warm-400 text-[9px] font-mono">{{ statusLabel(tc.status, tc.status) }}</span>
             </div>
           </div>
         </template>
 
         <!-- Compaction tab — reads chat store's compact messages -->
         <template v-else-if="activeTab === 'compact'">
-          <div v-if="compactions.length === 0" class="text-warm-400 py-6 text-center text-[11px]">No compactions in this session yet.</div>
+          <div v-if="compactions.length === 0" class="text-warm-400 py-6 text-center text-[11px]">{{ t("state.noCompactions") }}</div>
           <div v-else class="flex flex-col gap-2">
             <div v-for="c in compactions" :key="c.id" class="rounded border border-warm-200 dark:border-warm-700 px-2 py-1.5 text-[11px]">
               <div class="flex items-center gap-2 text-[9px] text-warm-400 font-mono">
-                <span>round {{ c.round }}</span>
-                <span>·</span>
-                <span>{{ c.messagesCompacted }} messages</span>
+                <span>{{ t("state.roundMessages", { round: c.round, count: c.messagesCompacted }) }}</span>
                 <span class="flex-1" />
-                <span class="px-1 rounded" :class="c.status === 'done' ? 'bg-aquamarine/10 text-aquamarine' : 'bg-amber/10 text-amber'">{{ c.status }}</span>
+                <span class="px-1 rounded" :class="c.status === 'done' ? 'bg-aquamarine/10 text-aquamarine' : 'bg-amber/10 text-amber'">
+                  {{ statusLabel(c.status, c.status) }}
+                </span>
               </div>
               <div v-if="c.summary" class="mt-1 text-warm-600 dark:text-warm-400 break-words line-clamp-4">
                 {{ c.summary }}
@@ -126,6 +126,7 @@ import { computed, onMounted, ref, watch } from "vue"
 
 import { useChatStore } from "@/stores/chat"
 import { useScratchpadStore } from "@/stores/scratchpad"
+import { useI18n } from "@/utils/i18n"
 import { sessionAPI } from "@/utils/api"
 
 const props = defineProps({
@@ -134,16 +135,17 @@ const props = defineProps({
 
 const scratchpad = useScratchpadStore()
 const chat = useChatStore()
+const { t, statusLabel } = useI18n()
 
-const tabs = [
-  { id: "scratchpad", label: "Scratchpad", icon: "i-carbon-notebook" },
-  { id: "tools", label: "Tool History", icon: "i-carbon-tools" },
-  { id: "memory", label: "Memory", icon: "i-carbon-data-base" },
-  { id: "compact", label: "Compaction", icon: "i-carbon-compare" },
-]
+const tabs = computed(() => [
+  { id: "scratchpad", label: t("state.tab.scratchpad"), icon: "i-carbon-notebook" },
+  { id: "tools", label: t("state.tab.tools"), icon: "i-carbon-tools" },
+  { id: "memory", label: t("state.tab.memory"), icon: "i-carbon-data-base" },
+  { id: "compact", label: t("state.tab.compact"), icon: "i-carbon-compare" },
+])
 const activeTab = ref("scratchpad")
 
-const activeLabel = computed(() => tabs.find((t) => t.id === activeTab.value)?.label || "")
+const activeLabel = computed(() => tabs.value.find((t) => t.id === activeTab.value)?.label || "")
 
 const instanceId = computed(() => props.instance?.id || null)
 const terrariumTarget = computed(() => (props.instance?.type === "terrarium" ? chat.terrariumTarget : null))
@@ -169,7 +171,7 @@ const loading = computed(() => {
 
 const errorMsg = computed(() => {
   if (props.instance?.type === "terrarium" && !scratchpadTarget.value) {
-    return "Scratchpad is only available for root/creature tabs."
+    return t("state.scratchpadUnavailable")
   }
   const key = scratchpadKey.value
   return key ? scratchpad.error[key] || "" : ""
@@ -231,7 +233,7 @@ async function runMemorySearch() {
   }
   const name = chat.sessionInfo.sessionId || props.instance?.session_id || props.instance?.id
   if (!name) {
-    memError.value = "No session id available"
+    memError.value = t("state.noSessionId")
     return
   }
   memLoading.value = true

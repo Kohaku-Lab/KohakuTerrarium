@@ -1,33 +1,30 @@
 <template>
   <div class="h-full overflow-y-auto">
     <div class="container-page max-w-3xl">
-      <h1 class="text-xl font-bold text-warm-800 dark:text-warm-200 mb-6">Start New Instance</h1>
+      <h1 class="text-xl font-bold text-warm-800 dark:text-warm-200 mb-6">{{ t("new.title") }}</h1>
 
-      <!-- Working directory -->
       <div class="card p-5 mb-6">
-        <label class="block text-sm font-medium text-warm-700 dark:text-warm-300 mb-2"> Working Directory </label>
+        <label class="block text-sm font-medium text-warm-700 dark:text-warm-300 mb-2">{{ t("new.workingDirectory") }}</label>
         <div class="flex gap-2">
           <input v-model="pwd" type="text" class="input-field flex-1 font-mono" placeholder="/home/user/my-project" />
-          <button class="btn-secondary shrink-0" :disabled="browseLoading" @click="openPicker">Browse…</button>
+          <button class="btn-secondary shrink-0" :disabled="browseLoading" @click="openPicker">{{ t("new.browse") }}</button>
         </div>
-        <p class="text-xs text-warm-400 mt-2">The creature/terrarium will run with this as its working directory.</p>
+        <p class="text-xs text-warm-400 mt-2">{{ t("new.workingDirectoryHint") }}</p>
       </div>
 
-      <!-- Type selection -->
       <div class="flex gap-3 mb-6">
-        <button v-for="t in types" :key="t.key" class="flex-1 card p-4 text-center transition-all" :class="selectedType === t.key ? 'border-iolite dark:border-iolite-light ring-1 ring-iolite/20' : 'hover:border-warm-300 dark:hover:border-warm-600 cursor-pointer'" @click="selectedType = t.key">
-          <div :class="t.icon" class="text-2xl mx-auto mb-2" :style="{ color: t.color }" />
+        <button v-for="type in types" :key="type.key" class="flex-1 card p-4 text-center transition-all" :class="selectedType === type.key ? 'border-iolite dark:border-iolite-light ring-1 ring-iolite/20' : 'hover:border-warm-300 dark:hover:border-warm-600 cursor-pointer'" @click="selectedType = type.key">
+          <div :class="type.icon" class="text-2xl mx-auto mb-2" :style="{ color: type.color }" />
           <div class="font-medium text-warm-800 dark:text-warm-200">
-            {{ t.label }}
+            {{ type.label }}
           </div>
-          <div class="text-xs text-secondary mt-1">{{ t.desc }}</div>
+          <div class="text-xs text-secondary mt-1">{{ type.desc }}</div>
         </button>
       </div>
 
-      <!-- Config selection -->
       <div class="card p-5 mb-6">
-        <h2 class="text-sm font-medium text-warm-700 dark:text-warm-300 mb-3">Available Configs</h2>
-        <div v-if="availableConfigs.length === 0" class="text-secondary text-sm py-4 text-center">No {{ selectedType }} configs found.</div>
+        <h2 class="text-sm font-medium text-warm-700 dark:text-warm-300 mb-3">{{ t("new.availableConfigs") }}</h2>
+        <div v-if="availableConfigs.length === 0" class="text-secondary text-sm py-4 text-center">{{ t("new.noConfigs", { type: selectedType }) }}</div>
         <div v-else class="flex flex-col gap-1">
           <div v-for="config in availableConfigs" :key="config.path" class="flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors" :class="selectedConfig === config.path ? 'bg-iolite/10 dark:bg-iolite/15' : 'hover:bg-warm-50 dark:hover:bg-warm-800'" @click="selectedConfig = config.path">
             <div class="w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors" :class="selectedConfig === config.path ? 'border-iolite dark:border-iolite-light' : 'border-warm-300 dark:border-warm-600'">
@@ -46,28 +43,27 @@
         </div>
       </div>
 
-      <!-- Actions -->
       <div class="flex justify-end gap-3">
-        <button class="btn-secondary" @click="$router.push(isMobile ? '/mobile' : '/')">Cancel</button>
-        <button class="btn-primary" :disabled="!canStart" :class="{ 'opacity-50 cursor-not-allowed': !canStart }" @click="startInstance"><span class="i-carbon-play mr-1" /> Start Instance</button>
+        <button class="btn-secondary" @click="$router.push(isMobile ? '/mobile' : '/')">{{ t("new.cancel") }}</button>
+        <button class="btn-primary" :disabled="!canStart" :class="{ 'opacity-50 cursor-not-allowed': !canStart }" @click="startInstance"><span class="i-carbon-play mr-1" /> {{ t("new.startInstance") }}</button>
       </div>
     </div>
   </div>
 
-  <el-dialog v-model="pickerOpen" title="Choose working directory" width="720px" :close-on-click-modal="true">
+  <el-dialog v-model="pickerOpen" :title="t('new.chooseWorkingDirectory')" width="720px" :close-on-click-modal="true">
     <div class="flex items-center gap-2 mb-3">
-      <button class="btn-secondary" :disabled="!browseParent || browseLoading" @click="browseTo(browseParent)"><span class="i-carbon-arrow-up mr-1" /> Up</button>
-      <button class="btn-secondary" :disabled="browseLoading" @click="browseTo(null)"><span class="i-carbon-data-base mr-1" /> Roots</button>
+      <button class="btn-secondary" :disabled="!browseParent || browseLoading" @click="browseTo(browseParent)"><span class="i-carbon-arrow-up mr-1" /> {{ t("new.up") }}</button>
+      <button class="btn-secondary" :disabled="browseLoading" @click="browseTo(null)"><span class="i-carbon-data-base mr-1" /> {{ t("new.roots") }}</button>
       <div class="flex-1 px-3 py-2 rounded border border-warm-200 dark:border-warm-700 bg-warm-50 dark:bg-warm-900 font-mono text-xs truncate">
-        {{ browseCurrent?.path || "Choose a root directory" }}
+        {{ browseCurrent?.path || t("new.chooseRootDirectory") }}
       </div>
-      <button class="btn-primary" :disabled="!browseCurrent?.path" @click="selectDirectory(browseCurrent?.path)">Use this folder</button>
+      <button class="btn-primary" :disabled="!browseCurrent?.path" @click="selectDirectory(browseCurrent?.path)">{{ t("new.useThisFolder") }}</button>
     </div>
 
     <div v-if="browseError" class="mb-3 text-sm text-red-500">{{ browseError }}</div>
 
     <div v-if="!browseCurrent" class="space-y-2">
-      <div class="text-xs uppercase tracking-wider text-warm-400">Available roots</div>
+      <div class="text-xs uppercase tracking-wider text-warm-400">{{ t("new.allowedRoots") }}</div>
       <button v-for="root in browseRoots" :key="root.path" class="w-full text-left px-3 py-2 rounded border border-warm-200 dark:border-warm-700 hover:border-iolite hover:bg-warm-50 dark:hover:bg-warm-800" @click="browseTo(root.path)">
         <div class="flex items-center gap-2">
           <span class="i-carbon-folder text-amber" />
@@ -85,28 +81,31 @@
           <span class="text-xs text-warm-400 font-mono truncate">{{ dir.path }}</span>
         </div>
       </button>
-      <div v-if="!browseLoading && browseDirectories.length === 0" class="text-sm text-secondary py-6 text-center">No subdirectories available here.</div>
+      <div v-if="!browseLoading && browseDirectories.length === 0" class="text-sm text-secondary py-6 text-center">{{ t("new.noSubdirectories") }}</div>
     </div>
 
     <template #footer>
       <div class="flex justify-between gap-3">
-        <button class="btn-secondary" @click="pickerOpen = false">Close</button>
-        <button class="btn-primary" :disabled="!selectedBrowsePath" @click="selectDirectory(selectedBrowsePath)">Select highlighted folder</button>
+        <button class="btn-secondary" @click="pickerOpen = false">{{ t("common.close") }}</button>
+        <button class="btn-primary" :disabled="!selectedBrowsePath" @click="selectDirectory(selectedBrowsePath)">{{ t("new.selectHighlightedFolder") }}</button>
       </div>
     </template>
   </el-dialog>
 </template>
 
 <script setup>
-import { configAPI, filesAPI } from "@/utils/api"
+import { ElMessage } from "element-plus"
+
 import { useConfigsStore } from "@/stores/configs"
 import { useInstancesStore } from "@/stores/instances"
-import { ElMessage } from "element-plus"
+import { useI18n } from "@/utils/i18n"
+import { configAPI, filesAPI } from "@/utils/api"
 
 const isMobile = inject("mobileLayout", false)
 const router = useRouter()
 const configs = useConfigsStore()
 const instances = useInstancesStore()
+const { t } = useI18n()
 configs.fetchAll()
 
 const pwd = ref("")
@@ -119,35 +118,35 @@ const browseRoots = ref([])
 const browseDirectories = ref([])
 const selectedBrowsePath = ref("")
 
-// Fetch server cwd as default working directory
 onMounted(async () => {
   try {
     const info = await configAPI.getServerInfo()
     if (info.cwd && !pwd.value) pwd.value = info.cwd
   } catch {
-    /* ignore — user can type manually */
+    /* ignore */
   }
 })
+
 const selectedType = ref("creature")
 const selectedConfig = ref(null)
 const starting = ref(false)
 
-const types = [
+const types = computed(() => [
   {
     key: "creature",
-    label: "Creature",
-    desc: "Single agent",
+    label: t("common.creature"),
+    desc: t("new.creatureDesc"),
     icon: "i-carbon-bot",
     color: "#4C9989",
   },
   {
     key: "terrarium",
-    label: "Terrarium",
-    desc: "Multi-agent team",
+    label: t("common.terrarium"),
+    desc: t("new.terrariumDesc"),
     icon: "i-carbon-network-4",
     color: "#5A4FCF",
   },
-]
+])
 
 const availableConfigs = computed(() => {
   return selectedType.value === "creature" ? configs.creatures : configs.terrariums
@@ -208,10 +207,10 @@ async function startInstance() {
     const id = await instances.create(selectedType.value, selectedConfig.value, pwd.value)
     const loaded = await instances.fetchOne(id)
     if (!loaded) throw new Error("Instance did not become available")
-    ElMessage.success(`Started ${selectedType.value}`)
+    ElMessage.success(t("new.started", { type: selectedType.value }))
     router.replace(isMobile ? `/mobile/${id}` : `/instances/${id}`)
   } catch (err) {
-    ElMessage.error(`Failed to start: ${err.response?.data?.detail || err.message}`)
+    ElMessage.error(t("new.startFailed", { message: err.response?.data?.detail || err.message }))
   } finally {
     starting.value = false
   }

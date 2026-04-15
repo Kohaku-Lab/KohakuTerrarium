@@ -24,17 +24,17 @@
         <!-- Home -->
         <a class="flex items-center gap-3 px-4 py-3 text-sm transition-colors cursor-pointer" :class="route.path === '/mobile' ? 'text-iolite bg-iolite/10' : 'text-warm-600 dark:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800'" @click="go('/mobile')">
           <div class="i-carbon-home text-base" />
-          <span>Home</span>
+          <span>{{ t("common.home") }}</span>
         </a>
 
         <div class="mx-3 border-t border-warm-200 dark:border-warm-700" />
 
         <!-- Running instances -->
         <div class="px-4 py-2">
-          <span class="text-[10px] text-warm-400 uppercase tracking-wider font-medium">Running</span>
+          <span class="text-[10px] text-warm-400 uppercase tracking-wider font-medium">{{ t("common.running") }}</span>
         </div>
         <div class="flex-1 overflow-y-auto min-h-0">
-          <div v-if="instances.list.length === 0" class="px-4 py-3 text-xs text-warm-400">No instances</div>
+          <div v-if="instances.list.length === 0" class="px-4 py-3 text-xs text-warm-400">{{ t("common.noInstances") }}</div>
           <a v-for="inst in instances.list" :key="inst.id" class="flex items-center gap-3 px-4 py-2.5 text-sm cursor-pointer transition-colors" :class="route.params.id === inst.id ? 'text-iolite bg-iolite/10' : 'text-warm-600 dark:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800'" @click="go(`/mobile/${inst.id}`)">
             <div :class="inst.type === 'terrarium' ? 'i-carbon-network-4' : 'i-carbon-bot'" class="text-base" />
             <span class="flex-1 truncate">{{ inst.config_name }}</span>
@@ -47,19 +47,19 @@
         <!-- Bottom actions -->
         <a class="flex items-center gap-3 px-4 py-2.5 text-sm text-warm-600 dark:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800 cursor-pointer" @click="go('/mobile/new')">
           <div class="i-carbon-add-large text-base" />
-          <span>Start New</span>
+          <span>{{ t("common.startNew") }}</span>
         </a>
         <a class="flex items-center gap-3 px-4 py-2.5 text-sm text-warm-600 dark:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800 cursor-pointer" @click="go('/mobile/sessions')">
           <div class="i-carbon-recently-viewed text-base" />
-          <span>Sessions</span>
+          <span>{{ t("common.sessions") }}</span>
         </a>
         <a class="flex items-center gap-3 px-4 py-2.5 text-sm text-warm-600 dark:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800 cursor-pointer" @click="go('/mobile/registry')">
           <div class="i-carbon-catalog text-base" />
-          <span>Registry</span>
+          <span>{{ t("common.registry") }}</span>
         </a>
         <a class="flex items-center gap-3 px-4 py-2.5 text-sm text-warm-600 dark:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800 cursor-pointer" @click="go('/mobile/settings')">
           <div class="i-carbon-settings text-base" />
-          <span>Settings</span>
+          <span>{{ t("common.settings") }}</span>
         </a>
 
         <div class="mx-3 border-t border-warm-200 dark:border-warm-700 mt-1" />
@@ -67,7 +67,7 @@
         <!-- Theme toggle -->
         <button class="flex items-center gap-3 px-4 py-2.5 mb-2 text-sm text-warm-600 dark:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800 w-full" @click="theme.toggle()">
           <div :class="theme.dark ? 'i-carbon-sun' : 'i-carbon-moon'" class="text-base" />
-          <span>{{ theme.dark ? "Light Mode" : "Dark Mode" }}</span>
+          <span>{{ theme.dark ? t("common.lightMode") : t("common.darkMode") }}</span>
         </button>
       </nav>
     </div>
@@ -79,11 +79,13 @@ import { ref } from "vue"
 
 import { useInstancesStore } from "@/stores/instances"
 import { useThemeStore } from "@/stores/theme"
+import { useI18n } from "@/utils/i18n"
 
 const route = useRoute()
 const router = useRouter()
 const instances = useInstancesStore()
 const theme = useThemeStore()
+const { t } = useI18n()
 
 const open = ref(false)
 
