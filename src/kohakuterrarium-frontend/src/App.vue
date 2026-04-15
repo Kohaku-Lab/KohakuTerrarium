@@ -9,11 +9,7 @@
   <div v-else class="h-full flex overflow-hidden bg-warm-50 dark:bg-warm-950">
     <NavRail />
     <main class="flex-1 overflow-hidden">
-      <router-view v-slot="{ Component }">
-        <transition name="fade" mode="out-in">
-          <component :is="Component" />
-        </transition>
-      </router-view>
+      <router-view />
     </main>
     <!-- "Switch to mobile" button — only shown when user manually left mobile on a small screen -->
     <button v-if="showMobileHint" class="fixed bottom-4 right-4 z-50 px-3 py-2 rounded-lg bg-iolite text-white text-xs shadow-lg flex items-center gap-1.5 hover:bg-iolite/90 transition-colors" @click="switchToMobile">

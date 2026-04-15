@@ -205,9 +205,10 @@ async function startInstance() {
   starting.value = true
   try {
     const id = await instances.create(selectedType.value, selectedConfig.value, pwd.value)
-    await instances.fetchOne(id)
+    const loaded = await instances.fetchOne(id)
+    if (!loaded) throw new Error("Instance did not become available")
     ElMessage.success(`Started ${selectedType.value}`)
-    router.push(isMobile ? `/mobile/${id}` : `/instances/${id}`)
+    router.replace(isMobile ? `/mobile/${id}` : `/instances/${id}`)
   } catch (err) {
     ElMessage.error(`Failed to start: ${err.response?.data?.detail || err.message}`)
   } finally {
