@@ -430,7 +430,19 @@ export function _replayEvents(messages, events) {
         role: "compact",
         round: evt.compact_round || evt.round || 0,
         summary: evt.summary || "",
+        status: "done",
         messagesCompacted: evt.messages_compacted || 0,
+        timestamp: "",
+      })
+    } else if (t === "compact_start") {
+      cur = null
+      result.push({
+        id: "compact_" + result.length,
+        role: "compact",
+        round: evt.compact_round || evt.round || 0,
+        summary: "",
+        status: "running",
+        messagesCompacted: 0,
         timestamp: "",
       })
     } else if (t === "processing_error") {
@@ -450,7 +462,7 @@ export function _replayEvents(messages, events) {
         messagesCleared: evt.messages_cleared || 0,
         timestamp: "",
       })
-    } else if (t === "token_usage" || t === "processing_complete" || t === "compact_start") {
+    } else if (t === "token_usage" || t === "processing_complete") {
       // skip
     }
   }
