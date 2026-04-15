@@ -6,7 +6,7 @@ import { useStatusStore } from "@/stores/status"
 /**
  * Convert OpenAI-format conversation history to frontend messages.
  */
-function _convertHistory(messages) {
+export function _convertHistory(messages) {
   const result = []
   const toolResults = {}
   for (const msg of messages) {
@@ -556,6 +556,8 @@ export const useChatStore = defineStore("chat", {
     queuedMessages: [],
     /** @type {number} Monotonic token to ignore stale history/WS callbacks after instance switches */
     _instanceGeneration: 0,
+    /** @type {Record<string, number>} Recent user message signatures for cross-tab dedupe */
+    _recentUserInputs: {},
   }),
 
   getters: {
@@ -586,6 +588,7 @@ export const useChatStore = defineStore("chat", {
       this.unreadCounts = {}
       this.queuedMessages = []
       this.processing = false
+      this._recentUserInputs = {}
       this.sessionInfo = {
         sessionId: "",
         model: "",
@@ -686,13 +689,15 @@ export const useChatStore = defineStore("chat", {
       if (!this.activeTab || !text.trim() || !this._ws) return
 
       const tab = this.activeTab
+      const now = Date.now()
       const msg = {
-        id: "u_" + Date.now(),
+        id: "u_" + now,
         role: "user",
         content: text,
-        timestamp: new Date().toISOString(),
+        timestamp: new Date(now).toISOString(),
       }
 
+      this._recentUserInputs[`${tab}:${text}`] = now
       if (this.processing) {
         // Don't put in main chat — hold in queue, shown above input box
         msg.queued = true
@@ -871,7 +876,9 @@ export const useChatStore = defineStore("chat", {
     _onMessage(data) {
       const source = data.source || ""
 
-      if (data.type === "text") {
+      if (data.type === "user_input") {
+        this._handleUserInput(source, data)
+      } else if (data.type === "text") {
         // If we get text chunks but processing is false (e.g. reconnect mid-stream),
         // set processing to true so the UI shows "KohakUwUing"
         if (!this.processing) this.processing = true
@@ -1316,6 +1323,27 @@ export const useChatStore = defineStore("chat", {
         }
       }
       return null
+    },
+
+    _handleUserInput(source, data) {
+      if (!source || !this.messagesByTab[source]) return
+      const signature = `${source}:${data.content || ""}`
+      const now = Date.now()
+      const seenAt = this._recentUserInputs[signature] || 0
+      if (now - seenAt < 2000) return
+      const msgs = this.messagesByTab[source]
+      const last = msgs[msgs.length - 1]
+      if (last?.role === "user" && last.content === (data.content || "")) {
+        this._recentUserInputs[signature] = now
+        return
+      }
+      this._recentUserInputs[signature] = now
+      this._addMsg(source, {
+        id: `u_sync_${now}`,
+        role: "user",
+        content: data.content || "",
+        timestamp: data.timestamp || new Date((data.ts || now / 1000) * 1000).toISOString(),
+      })
     },
 
     _handleChannelMessage(data) {

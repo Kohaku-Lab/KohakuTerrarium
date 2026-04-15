@@ -134,7 +134,6 @@ class Executor:
 
         # Start task
         task = asyncio.create_task(self._run_tool(job_id, tool, args, is_direct))
-        task.add_done_callback(lambda _: self._tasks.pop(job_id, None))
         self._tasks[job_id] = task
 
         logger.info("Running tool: %s", tool_name)

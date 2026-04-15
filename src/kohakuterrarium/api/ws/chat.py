@@ -149,14 +149,14 @@ async def _handle_terrarium_input(ws: WebSocket, manager, terrarium_id: str) -> 
         try:
             session = manager.terrarium_mount(terrarium_id, target)
             log = get_event_log(f"{terrarium_id}:{target}")
-            log.append(
-                {
-                    "type": "user_input",
-                    "source": target,
-                    "content": message,
-                    "ts": time.time(),
-                }
-            )
+            user_evt = {
+                "type": "user_input",
+                "source": target,
+                "content": message,
+                "ts": time.time(),
+            }
+            log.append(user_evt)
+            await queue.put(user_evt)
             await session.agent.inject_input(message, source="web")
             await ws.send_json({"type": "idle", "source": target, "ts": time.time()})
         except ValueError as e:
@@ -274,14 +274,14 @@ async def ws_creature(websocket: WebSocket, agent_id: str):
             message = data.get("message", "")
             if not message:
                 continue
-            log.append(
-                {
-                    "type": "user_input",
-                    "source": session.agent.config.name,
-                    "content": message,
-                    "ts": time.time(),
-                }
-            )
+            user_evt = {
+                "type": "user_input",
+                "source": session.agent.config.name,
+                "content": message,
+                "ts": time.time(),
+            }
+            log.append(user_evt)
+            await queue.put(user_evt)
             await session.agent.inject_input(message, source="web")
             await websocket.send_json(
                 {

@@ -63,8 +63,8 @@
               <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-iolite/10 to-amber/10 dark:from-iolite/5 dark:to-amber/5 flex items-center justify-center mx-auto mb-3">
                 <div class="i-carbon-chat text-xl text-iolite/40 dark:text-iolite-light/30" />
               </div>
-              <p class="text-warm-400 dark:text-warm-500 text-sm">No messages yet</p>
-              <p class="text-warm-300 dark:text-warm-600 text-xs mt-1">Send a message to get started</p>
+              <p class="text-warm-400 dark:text-warm-500 text-sm">{{ emptyTitle }}</p>
+              <p class="text-warm-300 dark:text-warm-600 text-xs mt-1">{{ emptySubtitle }}</p>
             </div>
           </template>
           <ChatMessage v-for="(msg, idx) in chat.currentMessages" :key="msg.id" :message="msg" :prev-message="idx > 0 ? chat.currentMessages[idx - 1] : null" :is-first="idx === 0" :message-idx="idx" :is-last-assistant="msg.role === 'assistant' && idx === chat.currentMessages.length - 1" />
@@ -76,7 +76,7 @@
       </div>
 
       <!-- Queued messages: shown above input, not in main chat -->
-      <div v-if="chat.queuedMessages.length" class="px-4 pt-2 flex flex-col gap-1.5">
+      <div v-if="!readOnly && chat.queuedMessages.length" class="px-4 pt-2 flex flex-col gap-1.5">
         <div v-for="qm in chat.queuedMessages" :key="qm.id" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber/5 dark:bg-amber/5 border border-amber/20 text-sm">
           <span class="i-carbon-time text-amber/60 text-xs flex-shrink-0" />
           <span class="text-warm-500 dark:text-warm-400 truncate">{{ qm.content }}</span>
@@ -85,7 +85,7 @@
       </div>
 
       <!-- Input: sits inside bubble, with subtle top border -->
-      <div class="px-4 pb-4 pt-2 border-t border-t-warm-100 dark:border-t-warm-800">
+      <div v-if="!readOnly" class="px-4 pb-4 pt-2 border-t border-t-warm-100 dark:border-t-warm-800">
         <div class="flex gap-2 px-3 py-1.5 rounded-xl bg-warm-50 dark:bg-warm-800 border border-warm-200 dark:border-warm-700 focus-within:border-iolite/40 dark:focus-within:border-iolite-light/30 transition-colors" :class="inputText.includes('\n') ? 'items-end' : 'items-center'">
           <textarea ref="inputEl" v-model="inputText" rows="1" class="flex-1 bg-transparent border-none outline-none text-sm text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 resize-none max-h-32 leading-relaxed py-1" style="min-height: 2em" :placeholder="inputPlaceholder" @keydown="onInputKeydown" @input="autoResize" />
           <!-- Compact/Clear actions -->
@@ -115,6 +115,9 @@ import { terrariumAPI, agentAPI } from "@/utils/api"
 
 const props = defineProps({
   instance: { type: Object, required: true },
+  readOnly: { type: Boolean, default: false },
+  emptyTitle: { type: String, default: "No messages yet" },
+  emptySubtitle: { type: String, default: "Send a message to get started" },
 })
 
 const chat = useChatStore()
@@ -155,10 +158,12 @@ function getCreatureStatus(name) {
 }
 
 function closeTab(tab) {
+  if (props.readOnly) return
   chat.closeTab(tab)
 }
 
 function onInputKeydown(e) {
+  if (props.readOnly) return
   // Skip if IME composition is active (e.g. Chinese/Japanese/Korean input).
   // During composition, Enter confirms the selected candidate — not send.
   if (e.isComposing || e.keyCode === 229) return
@@ -179,6 +184,7 @@ function autoResize() {
 
 // Auto-scroll: track if user is near bottom
 const isNearBottom = ref(true)
+const forceScrollOnNextMessageUpdate = ref(true)
 
 function onMessagesScroll() {
   const el = messagesEl.value
@@ -196,7 +202,8 @@ function scrollToBottom() {
 watch(
   () => chat.currentMessages,
   () => {
-    if (isNearBottom.value) {
+    if (forceScrollOnNextMessageUpdate.value || isNearBottom.value) {
+      forceScrollOnNextMessageUpdate.value = false
       nextTick(scrollToBottom)
     }
   },
@@ -213,8 +220,18 @@ watch(
   },
 )
 
+watch(
+  () => [props.instance?.id, chat.activeTab],
+  () => {
+    forceScrollOnNextMessageUpdate.value = true
+    isNearBottom.value = true
+    nextTick(scrollToBottom)
+  },
+  { immediate: true },
+)
+
 function send() {
-  if (!inputText.value.trim()) return
+  if (props.readOnly || !inputText.value.trim()) return
   chat.send(inputText.value)
   inputText.value = ""
   isNearBottom.value = true // force scroll after send
@@ -225,6 +242,7 @@ function send() {
 }
 
 async function triggerCompact() {
+  if (props.readOnly) return
   try {
     const tab = chat.activeTab
     if (chat._instanceType === "terrarium") {
@@ -238,6 +256,7 @@ async function triggerCompact() {
 }
 
 async function triggerClear() {
+  if (props.readOnly) return
   if (!confirm("Clear conversation context? Chat history will be preserved in the session.")) return
   try {
     const tab = chat.activeTab
@@ -271,6 +290,7 @@ async function stopTask(jobId, jobName) {
 
 // Escape key interrupt
 function onGlobalKeydown(e) {
+  if (props.readOnly) return
   if (e.key === "Escape" && (chat.processing || chat.hasRunningJobs)) {
     chat.interrupt()
   }
