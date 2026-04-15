@@ -21,6 +21,7 @@ from kohakuterrarium.cli.packages import (
     list_cli,
     show_agent_info_cli,
     uninstall_cli,
+    update_cli,
 )
 from kohakuterrarium.cli.resume import resume_cli
 from kohakuterrarium.cli.run import run_agent_cli
@@ -166,6 +167,22 @@ def _build_parser() -> argparse.ArgumentParser:
         "uninstall", help="Remove an installed package"
     )
     uninstall_parser.add_argument("name", help="Package name to remove")
+
+    # Update command
+    update_parser = subparsers.add_parser(
+        "update", help="Update installed package repositories"
+    )
+    update_parser.add_argument(
+        "target",
+        nargs="?",
+        default=None,
+        help="Package name or @package reference",
+    )
+    update_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Update all installed git-backed packages",
+    )
 
     # Edit command
     edit_parser = subparsers.add_parser(
@@ -398,6 +415,7 @@ COMMANDS: dict[str, callable] = {
     "login": lambda args: login_cli(args.provider),
     "install": lambda args: install_cli(args.source, args.editable, args.name),
     "uninstall": lambda args: uninstall_cli(args.name),
+    "update": lambda args: update_cli(args.target, args.all),
     "edit": lambda args: edit_cli(args.target),
     "embedding": _dispatch_embedding,
     "search": _dispatch_search,

@@ -147,6 +147,85 @@ def uninstall_cli(name: str) -> int:
         return 1
 
 
+def _normalize_package_name(target: str) -> str:
+    target = target.strip()
+    if not target:
+        return ""
+    if target.startswith("@"):
+        target = target[1:]
+    if "/" in target:
+        target = target.split("/", 1)[0]
+    return target
+
+
+def _update_package(name: str) -> int:
+    packages = {pkg["name"]: pkg for pkg in list_packages()}
+    pkg = packages.get(name)
+    if not pkg:
+        print(f"Package not found: {name}")
+        return 1
+    if pkg["editable"]:
+        print(f"Skipped editable package: {name}")
+        return 0
+
+    path = Path(pkg["path"])
+    git_dir = path / ".git"
+    if not git_dir.exists():
+        print(f"Skipped non-git package: {name}")
+        return 0
+
+    try:
+        install_package(str(path))
+    except Exception as e:
+        print(f"Failed to update {name}: {e}")
+        return 1
+
+    print(f"Updated: {name}")
+    return 0
+
+
+def update_cli(target: str | None = None, update_all: bool = False) -> int:
+    """Update installed git-backed packages."""
+    if update_all:
+        packages = list_packages()
+        if not packages:
+            print(f"No packages installed in {PACKAGES_DIR}")
+            return 0
+
+        exit_code = 0
+        updated = 0
+        skipped = 0
+        for pkg in packages:
+            if pkg["editable"]:
+                print(f"Skipped editable package: {pkg['name']}")
+                skipped += 1
+                continue
+            path = Path(pkg["path"])
+            if not (path / ".git").exists():
+                print(f"Skipped non-git package: {pkg['name']}")
+                skipped += 1
+                continue
+            code = _update_package(pkg["name"])
+            if code == 0:
+                updated += 1
+            else:
+                exit_code = code
+        print()
+        print(f"Update summary: {updated} updated, {skipped} skipped")
+        return exit_code
+
+    if not target:
+        print("Usage: kt update @package")
+        print("   or: kt update --all")
+        return 1
+
+    name = _normalize_package_name(target)
+    if not name:
+        print("Package name is required.")
+        return 1
+    return _update_package(name)
+
+
 def edit_cli(target: str) -> int:
     """Open a creature/terrarium config in editor."""
     if not target.startswith("@"):
