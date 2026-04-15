@@ -74,7 +74,7 @@ discord = [
 asr = [
     "openai-whisper>=20250625",
     "sounddevice>=0.4.0",
-    "numpy>=2.4.0",
+    "numpy",
 ]
 demo = [
     "KohakuTerrarium[discord,asr]",
