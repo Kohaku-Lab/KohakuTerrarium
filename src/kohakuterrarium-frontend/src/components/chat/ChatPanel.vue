@@ -11,7 +11,7 @@
       <div v-for="tab in chat.tabs" :key="tab" role="tab" tabindex="0" :aria-selected="chat.activeTab === tab" class="relative flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium cursor-pointer select-none rounded-t-lg -mb-px transition-colors" :class="chat.activeTab === tab ? 'bg-white dark:bg-warm-900 text-warm-800 dark:text-warm-200 border border-warm-200 dark:border-warm-700 border-b-white dark:border-b-warm-900 z-10' : 'text-warm-400 dark:text-warm-500 hover:text-warm-600 dark:hover:text-warm-400 border border-transparent'" @click="chat.setActiveTab(tab)" @keydown.enter="chat.setActiveTab(tab)" @keydown.space.prevent="chat.setActiveTab(tab)">
         <template v-if="tab === 'root'">
           <span class="w-2 h-2 rounded-full bg-amber shrink-0" />
-          <span>Root Agent</span>
+          <span>{{ t("common.rootAgent") }}</span>
         </template>
         <template v-else-if="tab.startsWith('ch:')">
           <span class="text-aquamarine font-bold shrink-0">&rarr;</span>
@@ -23,7 +23,7 @@
           <span>{{ tab }}</span>
         </template>
 
-        <button v-if="tab !== 'root' && chat.tabs.length > 1" class="ml-1 w-4 h-4 flex items-center justify-center rounded-sm text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" :aria-label="`Close ${tab} tab`" @click.stop="closeTab(tab)">
+        <button v-if="tab !== 'root' && chat.tabs.length > 1" class="ml-1 w-4 h-4 flex items-center justify-center rounded-sm text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" :aria-label="t('chat.closeTab', { tab })" @click.stop="closeTab(tab)">
           <div class="i-carbon-close text-[10px]" />
         </button>
       </div>
@@ -36,13 +36,13 @@
         </template>
         <template v-if="activeTokens > 0">
           <span class="i-carbon-meter text-amber" />
-          <span title="Cumulative input tokens">In: {{ formatTokens(activeUsage.prompt) }}</span>
-          <span v-if="activeUsage.cached > 0" class="text-aquamarine" title="Cached input tokens">(cache {{ formatTokens(activeUsage.cached) }})</span>
-          <span title="Cumulative output tokens">Out: {{ formatTokens(activeUsage.completion) }}</span>
+          <span :title="t('chat.cumulativeInputTokens')">{{ t("common.in") }}: {{ formatTokens(activeUsage.prompt) }}</span>
+          <span v-if="activeUsage.cached > 0" class="text-aquamarine" :title="t('chat.cachedInputTokens')">(cache {{ formatTokens(activeUsage.cached) }})</span>
+          <span :title="t('chat.cumulativeOutputTokens')">{{ t("common.out") }}: {{ formatTokens(activeUsage.completion) }}</span>
         </template>
         <template v-if="chat.sessionInfo.compactThreshold > 0 && activeUsage.prompt > 0">
           <span class="text-warm-300 dark:text-warm-600">|</span>
-          <span :class="contextPct >= 80 ? 'text-coral' : contextPct >= 60 ? 'text-amber' : ''" :title="`Context: ${formatTokens(activeUsage.lastPrompt || 0)} / ${formatTokens(chat.sessionInfo.compactThreshold)}`">Ctx: {{ contextPct }}%</span>
+          <span :class="contextPct >= 80 ? 'text-coral' : contextPct >= 60 ? 'text-amber' : ''" :title="t('chat.contextTitle', { current: formatTokens(activeUsage.lastPrompt || 0), limit: formatTokens(chat.sessionInfo.compactThreshold) })">{{ t("common.context") }}: {{ contextPct }}%</span>
         </template>
       </div>
 
@@ -63,14 +63,14 @@
               <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-iolite/10 to-amber/10 dark:from-iolite/5 dark:to-amber/5 flex items-center justify-center mx-auto mb-3">
                 <div class="i-carbon-chat text-xl text-iolite/40 dark:text-iolite-light/30" />
               </div>
-              <p class="text-warm-400 dark:text-warm-500 text-sm">{{ emptyTitle }}</p>
-              <p class="text-warm-300 dark:text-warm-600 text-xs mt-1">{{ emptySubtitle }}</p>
+              <p class="text-warm-400 dark:text-warm-500 text-sm">{{ resolvedEmptyTitle }}</p>
+              <p class="text-warm-300 dark:text-warm-600 text-xs mt-1">{{ resolvedEmptySubtitle }}</p>
             </div>
           </template>
           <ChatMessage v-for="(msg, idx) in chat.currentMessages" :key="msg.id" :message="msg" :prev-message="idx > 0 ? chat.currentMessages[idx - 1] : null" :is-first="idx === 0" :message-idx="idx" :is-last-assistant="msg.role === 'assistant' && idx === chat.currentMessages.length - 1" />
           <div v-if="chat.processing" class="flex items-center gap-2.5 py-2 pl-1">
             <span class="w-2 h-2 rounded-full bg-amber kohaku-glow" />
-            <span class="text-sm text-amber/80 kohaku-pulse">KohakUwUing...</span>
+            <span class="text-sm text-amber/80 kohaku-pulse">{{ t("chat.processing") }}</span>
           </div>
         </div>
       </div>
@@ -80,7 +80,7 @@
         <div v-for="qm in chat.queuedMessages" :key="qm.id" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber/5 dark:bg-amber/5 border border-amber/20 text-sm">
           <span class="i-carbon-time text-amber/60 text-xs flex-shrink-0" />
           <span class="text-warm-500 dark:text-warm-400 truncate">{{ qm.content }}</span>
-          <span class="text-warm-300 dark:text-warm-600 text-xs flex-shrink-0 ml-auto">queued</span>
+          <span class="text-warm-300 dark:text-warm-600 text-xs flex-shrink-0 ml-auto">{{ t("chat.queued") }}</span>
         </div>
       </div>
 
@@ -89,16 +89,16 @@
         <div class="flex gap-2 px-3 py-1.5 rounded-xl bg-warm-50 dark:bg-warm-800 border border-warm-200 dark:border-warm-700 focus-within:border-iolite/40 dark:focus-within:border-iolite-light/30 transition-colors" :class="inputText.includes('\n') ? 'items-end' : 'items-center'">
           <textarea ref="inputEl" v-model="inputText" rows="1" class="flex-1 bg-transparent border-none outline-none text-sm text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 resize-none max-h-32 leading-relaxed py-1" style="min-height: 2em" :placeholder="inputPlaceholder" @keydown="onInputKeydown" @input="autoResize" />
           <!-- Compact/Clear actions -->
-          <button class="w-7 h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-iolite dark:hover:text-iolite-light hover:bg-iolite/10" title="Compact context" aria-label="Compact context" @click="triggerCompact">
+          <button class="w-7 h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-iolite dark:hover:text-iolite-light hover:bg-iolite/10" :title="t('chat.compactContext')" :aria-label="t('chat.compactContext')" @click="triggerCompact">
             <span class="i-carbon-collapse-all text-xs" />
           </button>
-          <button class="w-7 h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-coral hover:bg-coral/10" title="Clear context" aria-label="Clear context" @click="triggerClear">
+          <button class="w-7 h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-coral hover:bg-coral/10" :title="t('chat.clearContext')" :aria-label="t('chat.clearContext')" @click="triggerClear">
             <span class="i-carbon-clean text-xs" />
           </button>
-          <button v-if="chat.processing || chat.hasRunningJobs" class="w-8 h-8 flex items-center justify-center rounded-lg transition-all shrink-0 mb-0.5 bg-coral/90 text-white hover:bg-coral shadow-sm shadow-coral/20" title="Stop generation (Esc)" aria-label="Stop generation" @click="chat.interrupt()">
+          <button v-if="chat.processing || chat.hasRunningJobs" class="w-8 h-8 flex items-center justify-center rounded-lg transition-all shrink-0 mb-0.5 bg-coral/90 text-white hover:bg-coral shadow-sm shadow-coral/20" :title="`${t('chat.stopGeneration')} (Esc)`" :aria-label="t('chat.stopGeneration')" @click="chat.interrupt()">
             <span class="i-carbon-stop-filled text-sm" />
           </button>
-          <button v-else class="w-8 h-8 flex items-center justify-center rounded-lg transition-all shrink-0 mb-0.5" :class="inputText.trim() ? 'bg-iolite text-white hover:bg-iolite-shadow shadow-sm shadow-iolite/20' : 'text-warm-300 dark:text-warm-600 cursor-not-allowed'" :disabled="!inputText.trim()" aria-label="Send message" @click="send">
+          <button v-else class="w-8 h-8 flex items-center justify-center rounded-lg transition-all shrink-0 mb-0.5" :class="inputText.trim() ? 'bg-iolite text-white hover:bg-iolite-shadow shadow-sm shadow-iolite/20' : 'text-warm-300 dark:text-warm-600 cursor-not-allowed'" :disabled="!inputText.trim()" :aria-label="t('chat.sendMessage')" @click="send">
             <span class="i-carbon-send text-sm" />
           </button>
         </div>
@@ -111,17 +111,19 @@
 import StatusDot from "@/components/common/StatusDot.vue"
 import ChatMessage from "@/components/chat/ChatMessage.vue"
 import { useChatStore } from "@/stores/chat"
+import { useI18n } from "@/utils/i18n"
 import { terrariumAPI, agentAPI } from "@/utils/api"
 import { getHybridPref, removeHybridPref, setHybridPref } from "@/utils/uiPrefs"
 
 const props = defineProps({
   instance: { type: Object, required: true },
   readOnly: { type: Boolean, default: false },
-  emptyTitle: { type: String, default: "No messages yet" },
-  emptySubtitle: { type: String, default: "Send a message to get started" },
+  emptyTitle: { type: String, default: "" },
+  emptySubtitle: { type: String, default: "" },
 })
 
 const chat = useChatStore()
+const { t } = useI18n()
 const inputText = ref("")
 const messagesEl = ref(null)
 const inputEl = ref(null)
@@ -172,10 +174,13 @@ function formatTokens(n) {
 }
 
 const inputPlaceholder = computed(() => {
-  if (!chat.activeTab) return "Select a tab..."
-  if (chat.activeTab.startsWith("ch:")) return `Send to ${chat.activeTab.slice(3)} channel...`
-  return "Message ..."
+  if (!chat.activeTab) return t("chat.selectTab")
+  if (chat.activeTab.startsWith("ch:")) return t("chat.sendToChannel", { channel: chat.activeTab.slice(3) })
+  return t("chat.messagePlaceholder")
 })
+
+const resolvedEmptyTitle = computed(() => props.emptyTitle || t("chat.noMessagesYet"))
+const resolvedEmptySubtitle = computed(() => props.emptySubtitle || t("chat.getStarted"))
 
 function getCreatureStatus(name) {
   const creature = props.instance.creatures.find((c) => c.name === name)
@@ -337,7 +342,7 @@ async function triggerCompact() {
 
 async function triggerClear() {
   if (props.readOnly) return
-  if (!confirm("Clear conversation context? Chat history will be preserved in the session.")) return
+  if (!confirm(t("chat.clearConfirm"))) return
   try {
     const tab = chat.activeTab
     if (chat._instanceType === "terrarium") {

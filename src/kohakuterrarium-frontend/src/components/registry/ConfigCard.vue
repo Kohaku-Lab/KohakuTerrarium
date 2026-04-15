@@ -8,7 +8,7 @@
       <GemBadge :gem="typeBadgeGem">
         {{ typeBadgeLabel }}
       </GemBadge>
-      <GemBadge v-if="installed" gem="aquamarine"> Installed </GemBadge>
+      <GemBadge v-if="installed" gem="aquamarine"> {{ t("common.installed") }} </GemBadge>
     </div>
 
     <!-- Description -->
@@ -47,14 +47,14 @@
     <!-- Actions -->
     <div class="flex justify-end mt-auto pt-1">
       <template v-if="mode === 'local'">
-        <el-popconfirm title="Uninstall this config?" confirm-button-text="Uninstall" cancel-button-text="Cancel" @confirm="$emit('uninstall', config)">
+        <el-popconfirm :title="t('registry.uninstallConfirm')" :confirm-button-text="t('registry.uninstall')" :cancel-button-text="t('common.cancel')" @confirm="$emit('uninstall', config)">
           <template #reference>
-            <el-button size="small" type="danger" plain> <span class="i-carbon-trash-can mr-1" /> Uninstall </el-button>
+            <el-button size="small" type="danger" plain> <span class="i-carbon-trash-can mr-1" /> {{ t("registry.uninstall") }} </el-button>
           </template>
         </el-popconfirm>
       </template>
       <template v-if="mode === 'remote' && !installed">
-        <el-button size="small" type="primary" :loading="installing" @click="$emit('install', config)"> <span v-if="!installing" class="i-carbon-download mr-1" /> Install </el-button>
+        <el-button size="small" type="primary" :loading="installing" @click="$emit('install', config)"> <span v-if="!installing" class="i-carbon-download mr-1" /> {{ t("registry.install") }} </el-button>
       </template>
     </div>
   </div>
@@ -62,6 +62,7 @@
 
 <script setup>
 import GemBadge from "@/components/common/GemBadge.vue"
+import { useI18n } from "@/utils/i18n"
 
 const props = defineProps({
   config: { type: Object, required: true },
@@ -71,6 +72,7 @@ const props = defineProps({
 })
 
 defineEmits(["install", "uninstall"])
+const { t } = useI18n()
 
 const typeBadgeGem = computed(() => {
   const t = props.config.config_type || props.config.type || ""

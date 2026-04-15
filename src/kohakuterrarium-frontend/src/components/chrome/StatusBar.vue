@@ -10,7 +10,7 @@
 
     <!-- Model quick switcher + config gear -->
     <ModelSwitcher />
-    <button class="w-4 h-4 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" title="Model config" aria-label="Open model configuration" @click="openModelConfig">
+    <button class="w-4 h-4 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" :title="t('status.modelConfig')" :aria-label="t('status.openModelConfig')" @click="openModelConfig">
       <div class="i-carbon-settings text-[10px]" />
     </button>
 
@@ -48,13 +48,13 @@ import ModelSwitcher from "@/components/chrome/ModelSwitcher.vue"
 import StatusDot from "@/components/common/StatusDot.vue"
 import { useChatStore } from "@/stores/chat"
 import { useInstancesStore } from "@/stores/instances"
-import { useLayoutStore } from "@/stores/layout"
+import { useI18n } from "@/utils/i18n"
 import { fireModelConfigOpen } from "@/utils/layoutEvents"
 
 const route = useRoute()
 const instances = useInstancesStore()
 const chat = useChatStore()
-const layout = useLayoutStore()
+const { t } = useI18n()
 
 const instance = computed(() => {
   const id = String(route.params.id || "")

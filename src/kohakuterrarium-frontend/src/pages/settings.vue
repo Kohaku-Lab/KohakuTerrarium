@@ -1,78 +1,87 @@
 <template>
   <div class="h-full overflow-y-auto">
     <div class="container-page">
-      <h1 class="text-xl font-semibold text-warm-800 dark:text-warm-200 mb-4">Settings</h1>
+      <h1 class="text-xl font-semibold text-warm-800 dark:text-warm-200 mb-4">{{ t("common.settings") }}</h1>
 
       <el-tabs v-model="activeTab">
-        <!-- API Keys tab -->
-        <el-tab-pane label="API Keys" name="keys">
+        <el-tab-pane :label="t('settings.tabs.keys')" name="keys">
           <div class="flex flex-col gap-3 max-w-xl">
-            <p class="text-xs text-warm-400 mb-2">API keys are stored in ~/.kohakuterrarium/api_keys.yaml</p>
-            <div v-for="p in providers" :key="p.provider" class="card p-4 flex items-center gap-3">
+            <p class="text-xs text-warm-400 mb-2">{{ t("settings.keys.storageHint") }}</p>
+            <div v-for="provider in providers" :key="provider.provider" class="card p-4 flex items-center gap-3">
               <div class="flex-1">
                 <div class="flex items-center gap-2 mb-1">
-                  <span class="font-medium text-warm-700 dark:text-warm-300">{{ p.provider }}</span>
-                  <span class="text-[10px] px-1.5 py-0.5 rounded" :class="p.available ? 'bg-aquamarine/15 text-aquamarine' : 'bg-warm-200 dark:bg-warm-700 text-warm-400'">{{ p.available ? "Active" : "No key" }}</span>
+                  <span class="font-medium text-warm-700 dark:text-warm-300">{{ provider.provider }}</span>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded" :class="provider.available ? 'bg-aquamarine/15 text-aquamarine' : 'bg-warm-200 dark:bg-warm-700 text-warm-400'">
+                    {{ provider.available ? t("settings.keys.active") : t("settings.keys.noKey") }}
+                  </span>
                 </div>
-                <div v-if="p.masked_key && p.provider !== 'codex'" class="text-[11px] text-warm-400 font-mono">
-                  {{ p.masked_key }}
+                <div v-if="provider.masked_key && provider.provider !== 'codex'" class="text-[11px] text-warm-400 font-mono">
+                  {{ provider.masked_key }}
                 </div>
-                <div v-if="p.provider === 'codex'" class="text-[11px] text-warm-400">OAuth login — use <code class="font-mono">kt login</code> in terminal</div>
+                <div v-if="provider.provider === 'codex'" class="text-[11px] text-warm-400">
+                  {{ t("settings.keys.oauthHint") }}
+                </div>
               </div>
-              <template v-if="p.provider !== 'codex'">
-                <el-input v-if="editingKey === p.provider" v-model="keyInput" size="small" type="password" show-password placeholder="Enter API key" class="!w-60" @keyup.enter="saveKey(p.provider)" />
-                <el-button v-if="editingKey === p.provider" size="small" type="primary" @click="saveKey(p.provider)">Save</el-button>
-                <el-button v-if="editingKey === p.provider" size="small" @click="editingKey = ''">Cancel</el-button>
-                <el-button v-else size="small" @click="startEditKey(p.provider)">{{ p.has_key ? "Change" : "Set Key" }}</el-button>
+              <template v-if="provider.provider !== 'codex'">
+                <el-input
+                  v-if="editingKey === provider.provider"
+                  v-model="keyInput"
+                  size="small"
+                  type="password"
+                  show-password
+                  :placeholder="t('settings.keys.enterKey')"
+                  class="!w-60"
+                  @keyup.enter="saveKey(provider.provider)"
+                />
+                <el-button v-if="editingKey === provider.provider" size="small" type="primary" @click="saveKey(provider.provider)">{{ t("common.save") }}</el-button>
+                <el-button v-if="editingKey === provider.provider" size="small" @click="editingKey = ''">{{ t("common.cancel") }}</el-button>
+                <el-button v-else size="small" @click="startEditKey(provider.provider)">{{ provider.has_key ? t("settings.keys.change") : t("settings.keys.setKey") }}</el-button>
               </template>
             </div>
           </div>
         </el-tab-pane>
 
-        <!-- Custom Models tab -->
-        <el-tab-pane label="Custom Models" name="models">
+        <el-tab-pane :label="t('settings.tabs.models')" name="models">
           <div class="flex flex-col gap-3 max-w-2xl">
-            <p class="text-xs text-warm-400 mb-2">Custom model profiles are stored in ~/.kohakuterrarium/llm_profiles.yaml</p>
+            <p class="text-xs text-warm-400 mb-2">{{ t("settings.models.storageHint") }}</p>
 
-            <!-- Existing profiles -->
-            <div v-for="p in profiles" :key="p.name" class="card p-4">
+            <div v-for="profile in profiles" :key="profile.name" class="card p-4">
               <div class="flex items-center gap-2 mb-2">
-                <span class="font-medium text-warm-700 dark:text-warm-300">{{ p.name }}</span>
-                <span class="text-[10px] px-1.5 py-0.5 rounded bg-iolite/15 text-iolite font-mono">{{ p.model }}</span>
-                <span class="text-[10px] text-warm-400">{{ p.provider }}</span>
+                <span class="font-medium text-warm-700 dark:text-warm-300">{{ profile.name }}</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-iolite/15 text-iolite font-mono">{{ profile.model }}</span>
+                <span class="text-[10px] text-warm-400">{{ profile.provider }}</span>
                 <div class="flex-1" />
-                <el-button size="small" @click="editProfile(p)">Edit</el-button>
-                <el-popconfirm title="Delete this profile?" @confirm="deleteProfile(p.name)">
+                <el-button size="small" @click="editProfile(profile)">{{ t("common.edit") }}</el-button>
+                <el-popconfirm :title="t('settings.models.deleteConfirm')" @confirm="deleteProfile(profile.name)">
                   <template #reference>
-                    <el-button size="small" type="danger">Delete</el-button>
+                    <el-button size="small" type="danger">{{ t("common.delete") }}</el-button>
                   </template>
                 </el-popconfirm>
               </div>
               <div class="text-[11px] text-warm-400 font-mono flex gap-4">
-                <span v-if="p.base_url">url: {{ p.base_url }}</span>
-                <span>ctx: {{ (p.max_context / 1000).toFixed(0) }}K</span>
-                <span v-if="p.temperature != null">temp: {{ p.temperature }}</span>
+                <span v-if="profile.base_url">{{ t("settings.models.baseUrlShort") }}: {{ profile.base_url }}</span>
+                <span>{{ t("settings.models.contextShort") }}: {{ (profile.max_context / 1000).toFixed(0) }}K</span>
+                <span v-if="profile.temperature != null">{{ t("settings.models.temperatureShort") }}: {{ profile.temperature }}</span>
               </div>
             </div>
 
-            <div v-if="profiles.length === 0" class="text-warm-400 text-sm py-4 text-center">No custom profiles yet</div>
+            <div v-if="profiles.length === 0" class="text-warm-400 text-sm py-4 text-center">{{ t("settings.models.none") }}</div>
 
-            <!-- Add / Edit form -->
             <div class="card p-4 border-l-3 border-l-iolite dark:border-l-iolite-light">
               <div class="font-medium text-warm-700 dark:text-warm-300 mb-3">
-                {{ editingProfile ? "Edit Profile" : "Add Custom Model" }}
+                {{ editingProfile ? t("settings.models.editProfile") : t("settings.models.addCustomModel") }}
               </div>
               <div class="grid grid-cols-2 gap-3">
                 <div>
-                  <label class="text-[11px] text-warm-400 mb-1 block">Profile Name *</label>
+                  <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.models.profileName") }}</label>
                   <el-input v-model="form.name" size="small" placeholder="my-model" :disabled="!!editingProfile" />
                 </div>
                 <div>
-                  <label class="text-[11px] text-warm-400 mb-1 block">Model ID *</label>
+                  <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.models.modelId") }}</label>
                   <el-input v-model="form.model" size="small" placeholder="gpt-4o" />
                 </div>
                 <div>
-                  <label class="text-[11px] text-warm-400 mb-1 block">Provider</label>
+                  <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.models.provider") }}</label>
                   <el-select v-model="form.provider" size="small" class="w-full">
                     <el-option value="openai" label="OpenAI" />
                     <el-option value="anthropic" label="Anthropic" />
@@ -82,98 +91,95 @@
                   </el-select>
                 </div>
                 <div>
-                  <label class="text-[11px] text-warm-400 mb-1 block">Base URL (optional)</label>
+                  <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.models.baseUrlOptional") }}</label>
                   <el-input v-model="form.base_url" size="small" placeholder="https://api.openai.com/v1" />
                 </div>
                 <div>
-                  <label class="text-[11px] text-warm-400 mb-1 block">Max Context</label>
+                  <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.models.maxContext") }}</label>
                   <el-input-number v-model="form.max_context" size="small" :min="1000" :step="1000" />
                 </div>
                 <div>
-                  <label class="text-[11px] text-warm-400 mb-1 block">Temperature</label>
+                  <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.models.temperature") }}</label>
                   <el-input-number v-model="form.temperature" size="small" :min="0" :max="2" :step="0.1" :precision="1" />
                 </div>
               </div>
               <div class="flex gap-2 mt-3">
                 <el-button type="primary" size="small" :disabled="!form.name || !form.model" @click="saveProfile">
-                  {{ editingProfile ? "Update" : "Add Profile" }}
+                  {{ editingProfile ? t("settings.models.update") : t("settings.models.addProfile") }}
                 </el-button>
-                <el-button v-if="editingProfile" size="small" @click="resetForm">Cancel</el-button>
+                <el-button v-if="editingProfile" size="small" @click="resetForm">{{ t("common.cancel") }}</el-button>
               </div>
             </div>
           </div>
         </el-tab-pane>
-        <!-- MCP Servers tab -->
-        <el-tab-pane label="MCP Servers" name="mcp">
-          <div class="flex flex-col gap-3 max-w-2xl">
-            <p class="text-xs text-warm-400 mb-2">MCP servers provide external tools to agents via the Model Context Protocol. Agents access them through mcp_list / mcp_call tools.</p>
 
-            <!-- Existing servers -->
-            <div v-for="srv in mcpServers" :key="srv.name" class="card p-4">
+        <el-tab-pane :label="t('settings.tabs.mcp')" name="mcp">
+          <div class="flex flex-col gap-3 max-w-2xl">
+            <p class="text-xs text-warm-400 mb-2">{{ t("settings.mcp.description") }}</p>
+
+            <div v-for="server in mcpServers" :key="server.name" class="card p-4">
               <div class="flex items-center gap-2 mb-2">
-                <span class="font-medium text-warm-700 dark:text-warm-300">{{ srv.name }}</span>
+                <span class="font-medium text-warm-700 dark:text-warm-300">{{ server.name }}</span>
                 <span class="text-[10px] px-1.5 py-0.5 rounded bg-sapphire/15 text-sapphire dark:text-sapphire-light font-mono">
-                  {{ srv.transport }}
+                  {{ server.transport }}
                 </span>
                 <div class="flex-1" />
-                <el-popconfirm title="Remove this MCP server?" @confirm="removeMCPServer(srv.name)">
+                <el-popconfirm :title="t('settings.mcp.deleteConfirm')" @confirm="removeMCPServer(server.name)">
                   <template #reference>
-                    <el-button size="small" type="danger" plain>Remove</el-button>
+                    <el-button size="small" type="danger" plain>{{ t("common.remove") }}</el-button>
                   </template>
                 </el-popconfirm>
               </div>
               <div class="text-[11px] text-warm-400 font-mono">
-                <span v-if="srv.command">{{ srv.command }} {{ (srv.args || []).join(" ") }}</span>
-                <span v-if="srv.url">{{ srv.url }}</span>
+                <span v-if="server.command">{{ server.command }} {{ (server.args || []).join(" ") }}</span>
+                <span v-if="server.url">{{ server.url }}</span>
               </div>
             </div>
 
-            <div v-if="mcpServers.length === 0" class="text-warm-400 text-sm py-4 text-center">No MCP servers configured</div>
+            <div v-if="mcpServers.length === 0" class="text-warm-400 text-sm py-4 text-center">{{ t("settings.mcp.none") }}</div>
 
-            <!-- Add form -->
             <div class="card p-4 border-l-3 border-l-sapphire dark:border-l-sapphire-light">
-              <div class="font-medium text-warm-700 dark:text-warm-300 mb-3">Add MCP Server</div>
+              <div class="font-medium text-warm-700 dark:text-warm-300 mb-3">{{ t("settings.mcp.addServer") }}</div>
               <div class="grid grid-cols-2 gap-3">
                 <div>
-                  <label class="text-[11px] text-warm-400 mb-1 block">Name *</label>
+                  <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.mcp.name") }}</label>
                   <el-input v-model="mcpForm.name" size="small" placeholder="my-server" />
                 </div>
                 <div>
-                  <label class="text-[11px] text-warm-400 mb-1 block">Transport</label>
+                  <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.mcp.transport") }}</label>
                   <el-select v-model="mcpForm.transport" size="small" class="w-full">
-                    <el-option value="stdio" label="stdio (subprocess)" />
-                    <el-option value="http" label="HTTP/SSE (remote)" />
+                    <el-option value="stdio" :label="t('settings.mcp.transportStdio')" />
+                    <el-option value="http" :label="t('settings.mcp.transportHttp')" />
                   </el-select>
                 </div>
                 <div v-if="mcpForm.transport === 'stdio'">
-                  <label class="text-[11px] text-warm-400 mb-1 block">Command *</label>
+                  <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.mcp.command") }}</label>
                   <el-input v-model="mcpForm.command" size="small" placeholder="npx" />
                 </div>
                 <div v-if="mcpForm.transport === 'stdio'">
-                  <label class="text-[11px] text-warm-400 mb-1 block">Args (space-separated)</label>
+                  <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.mcp.args") }}</label>
                   <el-input v-model="mcpForm.argsStr" size="small" placeholder="-y @modelcontextprotocol/server-filesystem ./" />
                 </div>
                 <div v-if="mcpForm.transport === 'http'" class="col-span-2">
-                  <label class="text-[11px] text-warm-400 mb-1 block">URL *</label>
+                  <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.mcp.url") }}</label>
                   <el-input v-model="mcpForm.url" size="small" placeholder="https://mcp.example.com/api" />
                 </div>
               </div>
               <div class="flex gap-2 mt-3">
-                <el-button type="primary" size="small" :disabled="!mcpForm.name || (mcpForm.transport === 'stdio' ? !mcpForm.command : !mcpForm.url)" @click="addMCPServer">Add Server</el-button>
+                <el-button type="primary" size="small" :disabled="!mcpForm.name || (mcpForm.transport === 'stdio' ? !mcpForm.command : !mcpForm.url)" @click="addMCPServer">{{ t("settings.mcp.addServerButton") }}</el-button>
               </div>
             </div>
           </div>
         </el-tab-pane>
-        <!-- Account (Codex) tab -->
-        <el-tab-pane label="Account" name="account">
+
+        <el-tab-pane :label="t('settings.tabs.account')" name="account">
           <div class="flex flex-col gap-4 max-w-xl">
-            <div v-if="codexUsageLoading" class="text-warm-400 text-sm py-4 text-center">Loading…</div>
+            <div v-if="codexUsageLoading" class="text-warm-400 text-sm py-4 text-center">{{ t("common.loading") }}</div>
             <div v-else-if="codexUsageError" class="card p-4 border-l-3 border-l-coral">
               <p class="text-sm text-warm-600 dark:text-warm-400">{{ codexUsageError }}</p>
-              <p class="text-xs text-warm-400 mt-1">Run <code class="font-mono">kt login codex</code> to authenticate.</p>
+              <p class="text-xs text-warm-400 mt-1">{{ t("settings.account.loginHint") }}</p>
             </div>
             <template v-else-if="codexUsage">
-              <!-- Plan header -->
               <div class="card p-4 flex items-center gap-3">
                 <div class="w-8 h-8 rounded-full bg-iolite/15 flex items-center justify-center shrink-0">
                   <div class="i-carbon-user-avatar text-iolite text-sm" />
@@ -183,83 +189,88 @@
                     {{ codexUsage.email }}
                   </div>
                   <div class="text-[11px] text-warm-400 capitalize">
-                    {{ codexUsage.plan_type || "Unknown plan" }}
-                    <span v-if="codexUsage.limit_reached" class="ml-2 text-coral">⚠ Limit reached</span>
+                    {{ codexUsage.plan_type || t("settings.account.unknownPlan") }}
+                    <span v-if="codexUsage.limit_reached" class="ml-2 text-coral">{{ t("settings.account.limitReached") }}</span>
                   </div>
                 </div>
               </div>
 
-              <!-- Primary window -->
               <div v-if="codexUsage.primary_window" class="card p-4">
                 <div class="flex items-center justify-between mb-2">
-                  <span class="text-xs font-medium text-warm-600 dark:text-warm-400">Short-term window</span>
-                  <span class="text-[11px] text-warm-400">Resets {{ formatReset(codexUsage.primary_window.reset_after_seconds) }}</span>
+                  <span class="text-xs font-medium text-warm-600 dark:text-warm-400">{{ t("settings.account.shortTermWindow") }}</span>
+                  <span class="text-[11px] text-warm-400">{{ t("settings.account.resets", { value: formatReset(codexUsage.primary_window.reset_after_seconds) }) }}</span>
                 </div>
                 <div class="h-2 rounded-full bg-warm-200 dark:bg-warm-700 overflow-hidden">
                   <div class="h-full rounded-full transition-all" :class="codexUsage.primary_window.used_percent > 80 ? 'bg-coral' : 'bg-iolite'" :style="`width: ${codexUsage.primary_window.used_percent}%`" />
                 </div>
-                <div class="text-[11px] text-warm-400 mt-1">{{ codexUsage.primary_window.used_percent }}% used</div>
+                <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.account.used", { value: codexUsage.primary_window.used_percent }) }}</div>
               </div>
 
-              <!-- Secondary window -->
               <div v-if="codexUsage.secondary_window" class="card p-4">
                 <div class="flex items-center justify-between mb-2">
-                  <span class="text-xs font-medium text-warm-600 dark:text-warm-400">Weekly window</span>
-                  <span class="text-[11px] text-warm-400">Resets {{ formatReset(codexUsage.secondary_window.reset_after_seconds) }}</span>
+                  <span class="text-xs font-medium text-warm-600 dark:text-warm-400">{{ t("settings.account.weeklyWindow") }}</span>
+                  <span class="text-[11px] text-warm-400">{{ t("settings.account.resets", { value: formatReset(codexUsage.secondary_window.reset_after_seconds) }) }}</span>
                 </div>
                 <div class="h-2 rounded-full bg-warm-200 dark:bg-warm-700 overflow-hidden">
                   <div class="h-full rounded-full transition-all" :class="codexUsage.secondary_window.used_percent > 80 ? 'bg-coral' : 'bg-taaffeite'" :style="`width: ${codexUsage.secondary_window.used_percent}%`" />
                 </div>
-                <div class="text-[11px] text-warm-400 mt-1">{{ codexUsage.secondary_window.used_percent }}% used</div>
+                <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.account.used", { value: codexUsage.secondary_window.used_percent }) }}</div>
               </div>
 
-              <!-- Credits -->
               <div v-if="codexUsage.credits" class="card p-4">
-                <div class="text-xs font-medium text-warm-600 dark:text-warm-400 mb-2">Credits</div>
+                <div class="text-xs font-medium text-warm-600 dark:text-warm-400 mb-2">{{ t("settings.account.credits") }}</div>
                 <div class="text-sm text-warm-700 dark:text-warm-300">
-                  <span v-if="codexUsage.credits.unlimited">Unlimited</span>
-                  <span v-else-if="codexUsage.credits.has_credits">Balance: {{ codexUsage.credits.balance }}</span>
-                  <span v-else class="text-warm-400">No credits</span>
-                  <span v-if="codexUsage.credits.overage_limit_reached" class="ml-2 text-coral text-[11px]">Overage limit reached</span>
+                  <span v-if="codexUsage.credits.unlimited">{{ t("settings.account.unlimited") }}</span>
+                  <span v-else-if="codexUsage.credits.has_credits">{{ t("settings.account.balance", { value: codexUsage.credits.balance }) }}</span>
+                  <span v-else class="text-warm-400">{{ t("settings.account.noCredits") }}</span>
+                  <span v-if="codexUsage.credits.overage_limit_reached" class="ml-2 text-coral text-[11px]">{{ t("settings.account.overageLimitReached") }}</span>
                 </div>
               </div>
 
-              <el-button size="small" @click="loadCodexUsage">Refresh</el-button>
+              <el-button size="small" @click="loadCodexUsage">{{ t("common.refresh") }}</el-button>
             </template>
           </div>
         </el-tab-pane>
 
-        <!-- Preferences tab -->
-        <el-tab-pane label="Preferences" name="prefs">
+        <el-tab-pane :label="t('settings.tabs.prefs')" name="prefs">
           <div class="flex flex-col gap-4 max-w-xl">
             <div class="card p-4">
-              <div class="font-medium text-warm-700 dark:text-warm-300 mb-3">Appearance</div>
+              <div class="font-medium text-warm-700 dark:text-warm-300 mb-3">{{ t("settings.prefs.appearance") }}</div>
               <div class="flex items-center justify-between mb-3">
-                <span class="text-sm text-warm-600 dark:text-warm-400">Theme</span>
-                <el-switch :model-value="theme.dark" active-text="Dark" inactive-text="Light" @change="theme.toggle()" />
+                <span class="text-sm text-warm-600 dark:text-warm-400">{{ t("common.theme") }}</span>
+                <el-switch :model-value="theme.dark" :active-text="t('common.dark')" :inactive-text="t('common.light')" @change="theme.toggle()" />
+              </div>
+              <div class="flex items-start justify-between mb-3 gap-4">
+                <div>
+                  <div class="text-sm text-warm-600 dark:text-warm-400">{{ t("common.language") }}</div>
+                  <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.languageHint") }}</div>
+                </div>
+                <el-select :model-value="localeStore.locale" size="small" class="!w-40 shrink-0" @change="localeStore.setLocale">
+                  <el-option v-for="option in localeOptions" :key="option.value" :label="option.label" :value="option.value" />
+                </el-select>
               </div>
               <div class="flex items-center justify-between mb-2">
                 <div>
-                  <span class="text-sm text-warm-600 dark:text-warm-400">Desktop Zoom</span>
+                  <span class="text-sm text-warm-600 dark:text-warm-400">{{ t("settings.prefs.desktopZoom") }}</span>
                   <span class="text-[11px] text-warm-400 ml-2">{{ Math.round(theme.desktopZoom * 100) }}%</span>
                 </div>
                 <div class="flex items-center gap-2">
                   <button class="w-7 h-7 rounded border border-warm-300 dark:border-warm-600 text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 flex items-center justify-center text-sm" @click="theme.setDesktopZoom(theme.desktopZoom - 0.05)">-</button>
                   <input type="range" :value="theme.desktopZoom" :min="MIN_UI_ZOOM" :max="MAX_UI_ZOOM" step="0.05" class="w-28 accent-iolite" @input="theme.setDesktopZoom(parseFloat($event.target.value))" />
                   <button class="w-7 h-7 rounded border border-warm-300 dark:border-warm-600 text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 flex items-center justify-center text-sm" @click="theme.setDesktopZoom(theme.desktopZoom + 0.05)">+</button>
-                  <button class="text-[11px] text-warm-400 hover:text-iolite px-1" @click="theme.setDesktopZoom(DEFAULT_DESKTOP_ZOOM)">Reset</button>
+                  <button class="text-[11px] text-warm-400 hover:text-iolite px-1" @click="theme.setDesktopZoom(DEFAULT_DESKTOP_ZOOM)">{{ t("common.reset") }}</button>
                 </div>
               </div>
               <div class="flex items-center justify-between">
                 <div>
-                  <span class="text-sm text-warm-600 dark:text-warm-400">Mobile Zoom</span>
+                  <span class="text-sm text-warm-600 dark:text-warm-400">{{ t("settings.prefs.mobileZoom") }}</span>
                   <span class="text-[11px] text-warm-400 ml-2">{{ Math.round(theme.mobileZoom * 100) }}%</span>
                 </div>
                 <div class="flex items-center gap-2">
                   <button class="w-7 h-7 rounded border border-warm-300 dark:border-warm-600 text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 flex items-center justify-center text-sm" @click="theme.setMobileZoom(theme.mobileZoom - 0.05)">-</button>
                   <input type="range" :value="theme.mobileZoom" :min="MIN_UI_ZOOM" :max="MAX_UI_ZOOM" step="0.05" class="w-28 accent-iolite" @input="theme.setMobileZoom(parseFloat($event.target.value))" />
                   <button class="w-7 h-7 rounded border border-warm-300 dark:border-warm-600 text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 flex items-center justify-center text-sm" @click="theme.setMobileZoom(theme.mobileZoom + 0.05)">+</button>
-                  <button class="text-[11px] text-warm-400 hover:text-iolite px-1" @click="theme.setMobileZoom(DEFAULT_MOBILE_ZOOM)">Reset</button>
+                  <button class="text-[11px] text-warm-400 hover:text-iolite px-1" @click="theme.setMobileZoom(DEFAULT_MOBILE_ZOOM)">{{ t("common.reset") }}</button>
                 </div>
               </div>
             </div>
@@ -271,13 +282,23 @@
 </template>
 
 <script setup>
+import { LOCALE_DISPLAY_NAMES, SUPPORTED_LOCALES, useLocaleStore } from "@/stores/locale"
 import { DEFAULT_DESKTOP_ZOOM, DEFAULT_MOBILE_ZOOM, MAX_UI_ZOOM, MIN_UI_ZOOM, useThemeStore } from "@/stores/theme"
+import { useI18n } from "@/utils/i18n"
 import { settingsAPI } from "@/utils/api"
 
 const theme = useThemeStore()
+const localeStore = useLocaleStore()
+const { t } = useI18n()
 const activeTab = ref("keys")
 
-// ── Codex account/usage ──
+const localeOptions = computed(() =>
+  SUPPORTED_LOCALES.map((value) => ({
+    value,
+    label: LOCALE_DISPLAY_NAMES[value] || value,
+  })),
+)
+
 const codexUsage = ref(null)
 const codexUsageLoading = ref(false)
 const codexUsageError = ref("")
@@ -288,21 +309,20 @@ async function loadCodexUsage() {
   try {
     codexUsage.value = await settingsAPI.getCodexUsage()
   } catch (err) {
-    codexUsageError.value = err.response?.data?.detail || "Failed to load Codex usage"
+    codexUsageError.value = err.response?.data?.detail || t("settings.account.loadFailed")
   } finally {
     codexUsageLoading.value = false
   }
 }
 
 function formatReset(seconds) {
-  if (!seconds) return "soon"
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  if (h > 0) return `in ${h}h ${m}m`
-  return `in ${m}m`
+  if (!seconds) return t("settings.account.soon")
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  if (hours > 0) return t("settings.account.inHoursMinutes", { hours, minutes })
+  return t("settings.account.inMinutes", { minutes })
 }
 
-// ── API Keys ──
 const providers = ref([])
 const editingKey = ref("")
 const keyInput = ref("")
@@ -325,16 +345,15 @@ async function saveKey(provider) {
   if (!keyInput.value) return
   try {
     await settingsAPI.saveKey(provider, keyInput.value)
-    ElMessage.success(`API key saved for ${provider}`)
+    ElMessage.success(t("settings.keys.saved", { provider }))
     editingKey.value = ""
     keyInput.value = ""
     await loadKeys()
   } catch (err) {
-    ElMessage.error(err.response?.data?.detail || "Failed to save key")
+    ElMessage.error(err.response?.data?.detail || t("settings.keys.saveFailed"))
   }
 }
 
-// ── Custom Models ──
 const profiles = ref([])
 const editingProfile = ref(null)
 const form = reactive({
@@ -355,14 +374,14 @@ async function loadProfiles() {
   }
 }
 
-function editProfile(p) {
-  editingProfile.value = p.name
-  form.name = p.name
-  form.model = p.model
-  form.provider = p.provider
-  form.base_url = p.base_url || ""
-  form.max_context = p.max_context || 128000
-  form.temperature = p.temperature
+function editProfile(profile) {
+  editingProfile.value = profile.name
+  form.name = profile.name
+  form.model = profile.model
+  form.provider = profile.provider
+  form.base_url = profile.base_url || ""
+  form.max_context = profile.max_context || 128000
+  form.temperature = profile.temperature
 }
 
 function resetForm() {
@@ -379,25 +398,24 @@ async function saveProfile() {
   if (!form.name || !form.model) return
   try {
     await settingsAPI.saveProfile({ ...form })
-    ElMessage.success(`Profile "${form.name}" saved`)
+    ElMessage.success(t("settings.models.saved", { name: form.name }))
     resetForm()
     await loadProfiles()
   } catch (err) {
-    ElMessage.error(err.response?.data?.detail || "Failed to save profile")
+    ElMessage.error(err.response?.data?.detail || t("settings.models.saveFailed"))
   }
 }
 
 async function deleteProfile(name) {
   try {
     await settingsAPI.deleteProfile(name)
-    ElMessage.success(`Profile "${name}" deleted`)
+    ElMessage.success(t("settings.models.deleted", { name }))
     await loadProfiles()
   } catch (err) {
-    ElMessage.error(err.response?.data?.detail || "Failed to delete")
+    ElMessage.error(err.response?.data?.detail || t("settings.models.deleteFailed"))
   }
 }
 
-// ── MCP Servers ──
 const mcpServers = ref([])
 const mcpForm = reactive({
   name: "",
@@ -427,24 +445,24 @@ async function addMCPServer() {
       url: mcpForm.url,
     }
     await settingsAPI.addMCP(payload)
-    ElMessage.success(`MCP server "${mcpForm.name}" added`)
+    ElMessage.success(t("settings.mcp.added", { name: mcpForm.name }))
     mcpForm.name = ""
     mcpForm.command = ""
     mcpForm.argsStr = ""
     mcpForm.url = ""
     await loadMCP()
   } catch (err) {
-    ElMessage.error(err.response?.data?.detail || "Failed to add MCP server")
+    ElMessage.error(err.response?.data?.detail || t("settings.mcp.addFailed"))
   }
 }
 
 async function removeMCPServer(name) {
   try {
     await settingsAPI.removeMCP(name)
-    ElMessage.success(`MCP server "${name}" removed`)
+    ElMessage.success(t("settings.mcp.removed", { name }))
     await loadMCP()
   } catch (err) {
-    ElMessage.error(err.response?.data?.detail || "Failed to remove")
+    ElMessage.error(err.response?.data?.detail || t("settings.mcp.removeFailed"))
   }
 }
 
