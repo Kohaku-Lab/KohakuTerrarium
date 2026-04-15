@@ -314,10 +314,11 @@ def _session_history_payload(store: SessionStore, target: str) -> dict[str, Any]
             ],
         }
 
+    get_events = getattr(store, "get_resumable_events", None) or store.get_events
     return {
         "target": target,
         "messages": store.load_conversation(target) or [],
-        "events": store.get_resumable_events(target),
+        "events": get_events(target),
     }
 
 
