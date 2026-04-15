@@ -17,7 +17,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, provide, ref, watch } from "vue"
+import { computed, onMounted, onUnmounted, provide, ref, watch } from "vue"
 
 import WorkspaceShell from "@/components/layout/WorkspaceShell.vue"
 import { useChatStore } from "@/stores/chat"
@@ -35,6 +35,7 @@ const layout = useLayoutStore()
 const instance = computed(() => instances.current)
 const showStopConfirm = ref(false)
 const stopping = ref(false)
+let refreshTimer = null
 
 // Runtime prop map for panels mounted inside the shell's zones.
 const panelProps = computed(() => ({
@@ -67,6 +68,9 @@ provide("panelProps", panelProps)
 onMounted(async () => {
   await loadInstance()
   applyPresetForInstance()
+  refreshTimer = setInterval(() => {
+    loadInstance().catch((err) => console.error("Instance refresh failed:", err))
+  }, 5000)
 })
 
 watch(
@@ -80,7 +84,11 @@ watch(
 async function loadInstance() {
   const id = route.params.id
   if (!id) return
-  await instances.fetchOne(id)
+  const loaded = await instances.fetchOne(id)
+  if (!loaded) {
+    router.replace("/")
+    return
+  }
   if (instance.value) {
     chat.initForInstance(instance.value)
   }
@@ -126,4 +134,11 @@ async function confirmStop() {
     stopping.value = false
   }
 }
+
+onUnmounted(() => {
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+    refreshTimer = null
+  }
+})
 </script>

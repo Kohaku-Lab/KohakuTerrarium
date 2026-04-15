@@ -25,17 +25,21 @@
 </template>
 
 <script setup>
-import { onMounted, ref, watch } from "vue"
+import { computed, onMounted, ref, watch } from "vue"
 
-import { agentAPI } from "@/utils/api"
+import { useChatStore } from "@/stores/chat"
+import { agentAPI, terrariumAPI } from "@/utils/api"
 
 const props = defineProps({
   instance: { type: Object, default: null },
 })
 
+const chat = useChatStore()
+
 const triggers = ref([])
 const loading = ref(false)
 const error = ref("")
+const terrariumTarget = computed(() => (props.instance?.type === "terrarium" ? chat.terrariumTarget : null))
 
 async function load() {
   const id = props.instance?.id
@@ -43,10 +47,15 @@ async function load() {
     triggers.value = []
     return
   }
+  if (props.instance?.type === "terrarium" && !terrariumTarget.value) {
+    error.value = "Triggers are only available for root/creature tabs."
+    triggers.value = []
+    return
+  }
   loading.value = true
   error.value = ""
   try {
-    const data = await agentAPI.listTriggers(id)
+    const data = props.instance?.type === "terrarium" ? await terrariumAPI.listTriggers(id, terrariumTarget.value) : await agentAPI.listTriggers(id)
     triggers.value = Array.isArray(data) ? data : []
   } catch (err) {
     error.value = err?.response?.data?.detail || err?.message || String(err)
@@ -66,5 +75,5 @@ function formatTs(ts) {
 }
 
 onMounted(load)
-watch(() => props.instance?.id, load)
+watch(() => [props.instance?.id, terrariumTarget.value], load)
 </script>

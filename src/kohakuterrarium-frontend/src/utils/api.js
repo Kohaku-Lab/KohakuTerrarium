@@ -4,6 +4,10 @@
 
 import axios from "axios"
 
+function encodeTarget(target) {
+  return encodeURIComponent(target)
+}
+
 const api = axios.create({
   baseURL: "/api",
   timeout: 30000,
@@ -93,7 +97,7 @@ export const terrariumAPI = {
    * Returns { messages: [...], events: [...] }
    */
   async getHistory(id, target) {
-    const { data } = await api.get(`/terrariums/${id}/history/${target}`)
+    const { data } = await api.get(`/terrariums/${id}/history/${encodeTarget(target)}`)
     return data
   },
 
@@ -128,6 +132,38 @@ export const terrariumAPI = {
       command,
       args,
     })
+    return data
+  },
+
+  async getScratchpad(id, target) {
+    const { data } = await api.get(`/terrariums/${id}/scratchpad/${encodeTarget(target)}`)
+    return data
+  },
+
+  async patchScratchpad(id, target, updates) {
+    const { data } = await api.patch(`/terrariums/${id}/scratchpad/${encodeTarget(target)}`, {
+      updates,
+    })
+    return data
+  },
+
+  async getEnv(id, target) {
+    const { data } = await api.get(`/terrariums/${id}/env/${encodeTarget(target)}`)
+    return data
+  },
+
+  async listPlugins(id, target) {
+    const { data } = await api.get(`/terrariums/${id}/plugins/${encodeTarget(target)}`)
+    return data
+  },
+
+  async listTriggers(id, target) {
+    const { data } = await api.get(`/terrariums/${id}/triggers/${encodeTarget(target)}`)
+    return data
+  },
+
+  async getSystemPrompt(id, target) {
+    const { data } = await api.get(`/terrariums/${id}/system-prompt/${encodeTarget(target)}`)
     return data
   },
 }

@@ -25,25 +25,34 @@
 </template>
 
 <script setup>
-import { onMounted, ref, watch } from "vue"
+import { computed, onMounted, ref, watch } from "vue"
 
-import { agentAPI } from "@/utils/api"
+import { useChatStore } from "@/stores/chat"
+import { agentAPI, terrariumAPI } from "@/utils/api"
 
 const props = defineProps({
   instance: { type: Object, default: null },
 })
 
+const chat = useChatStore()
+
 const plugins = ref([])
 const loading = ref(false)
 const error = ref("")
+const terrariumTarget = computed(() => (props.instance?.type === "terrarium" ? chat.terrariumTarget : null))
 
 async function load() {
   const id = props.instance?.id
   if (!id) return
+  if (props.instance?.type === "terrarium" && !terrariumTarget.value) {
+    error.value = "Plugins are only available for root/creature tabs."
+    plugins.value = []
+    return
+  }
   loading.value = true
   error.value = ""
   try {
-    const data = await agentAPI.listPlugins(id)
+    const data = props.instance?.type === "terrarium" ? await terrariumAPI.listPlugins(id, terrariumTarget.value) : await agentAPI.listPlugins(id)
     plugins.value = Array.isArray(data) ? data : []
   } catch (err) {
     error.value = err?.response?.data?.detail || err?.message || String(err)
@@ -54,5 +63,5 @@ async function load() {
 }
 
 onMounted(load)
-watch(() => props.instance?.id, load)
+watch(() => [props.instance?.id, terrariumTarget.value], load)
 </script>

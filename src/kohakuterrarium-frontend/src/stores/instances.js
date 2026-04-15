@@ -47,8 +47,15 @@ export const useInstancesStore = defineStore("instances", {
           const data = await agentAPI.get(id)
           this.current = _mapAgent(data)
         }
+        return this.current
       } catch (err) {
+        if (err?.response?.status === 404) {
+          this.list = this.list.filter((i) => i.id !== id)
+          if (this.current?.id === id) this.current = null
+          return null
+        }
         console.error("Failed to fetch instance:", err)
+        throw err
       } finally {
         this.loading = false
       }

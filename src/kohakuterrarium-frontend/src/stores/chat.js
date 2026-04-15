@@ -564,6 +564,12 @@ export const useChatStore = defineStore("chat", {
       return state.messagesByTab[state.activeTab] || []
     },
     hasRunningJobs: (state) => Object.keys(state.runningJobs).length > 0,
+    terrariumTarget: (state) => {
+      if (state._instanceType !== "terrarium") return null
+      const tab = state.activeTab
+      if (!tab || tab.startsWith("ch:")) return null
+      return tab
+    },
   },
 
   actions: {

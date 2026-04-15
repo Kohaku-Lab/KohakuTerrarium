@@ -33,11 +33,14 @@
 <script setup>
 import { computed, onMounted, ref, watch } from "vue"
 
-import { agentAPI } from "@/utils/api"
+import { useChatStore } from "@/stores/chat"
+import { agentAPI, terrariumAPI } from "@/utils/api"
 
 const props = defineProps({
   instance: { type: Object, default: null },
 })
+
+const chat = useChatStore()
 
 const promptText = ref("")
 const previousText = ref("")
@@ -45,14 +48,20 @@ const loading = ref(false)
 const error = ref("")
 const showDiff = ref(false)
 const lastLoaded = ref("")
+const terrariumTarget = computed(() => (props.instance?.type === "terrarium" ? chat.terrariumTarget : null))
 
 async function load() {
   const id = props.instance?.id
   if (!id) return
+  if (props.instance?.type === "terrarium" && !terrariumTarget.value) {
+    error.value = "System prompt is only available for root/creature tabs."
+    promptText.value = ""
+    return
+  }
   loading.value = true
   error.value = ""
   try {
-    const data = await agentAPI.getSystemPrompt(id)
+    const data = props.instance?.type === "terrarium" ? await terrariumAPI.getSystemPrompt(id, terrariumTarget.value) : await agentAPI.getSystemPrompt(id)
     if (promptText.value) previousText.value = promptText.value
     promptText.value = data?.text || ""
     lastLoaded.value = new Date().toLocaleTimeString()
@@ -108,5 +117,5 @@ function diffSymbol(kind) {
 }
 
 onMounted(load)
-watch(() => props.instance?.id, load)
+watch(() => [props.instance?.id, terrariumTarget.value], load)
 </script>

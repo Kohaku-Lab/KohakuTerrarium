@@ -68,7 +68,7 @@
 import { computed } from "vue"
 
 import { useChatStore } from "@/stores/chat"
-import { agentAPI } from "@/utils/api"
+import { agentAPI, terrariumAPI } from "@/utils/api"
 
 const props = defineProps({
   instance: { type: Object, default: null },
@@ -107,10 +107,16 @@ function formatTokens(n) {
 }
 
 async function stopJob(jobId, name) {
-  const agentId = props.instance?.id
-  if (!agentId) return
+  const instanceId = props.instance?.id
+  if (!instanceId) return
   try {
-    await agentAPI.stopTask(agentId, jobId)
+    if (props.instance?.type === "terrarium") {
+      const target = chat.terrariumTarget
+      if (!target) return
+      await terrariumAPI.stopCreatureTask(instanceId, target, jobId)
+    } else {
+      await agentAPI.stopTask(instanceId, jobId)
+    }
   } catch (err) {
     console.error("Failed to stop job", name, err)
   }

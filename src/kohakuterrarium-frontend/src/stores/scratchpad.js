@@ -6,38 +6,45 @@
 import { defineStore } from "pinia"
 import { ref } from "vue"
 
-import { agentAPI } from "@/utils/api"
+import { agentAPI, terrariumAPI } from "@/utils/api"
 
 export const useScratchpadStore = defineStore("scratchpad", () => {
   const byAgent = ref(/** @type {Record<string, Record<string, string>>} */ ({}))
   const loading = ref(/** @type {Record<string, boolean>} */ ({}))
   const error = ref(/** @type {Record<string, string>} */ ({}))
 
-  async function fetch(agentId) {
+  async function fetch(agentId, target = null) {
     if (!agentId) return
-    loading.value = { ...loading.value, [agentId]: true }
+    const key = target ? `${agentId}:${target}` : agentId
+    loading.value = { ...loading.value, [key]: true }
     try {
-      const data = await agentAPI.getScratchpad(agentId)
-      byAgent.value = { ...byAgent.value, [agentId]: data }
+      const data = target
+        ? await terrariumAPI.getScratchpad(agentId, target)
+        : await agentAPI.getScratchpad(agentId)
+      byAgent.value = { ...byAgent.value, [key]: data }
       const next = { ...error.value }
-      delete next[agentId]
+      delete next[key]
       error.value = next
     } catch (err) {
-      error.value = { ...error.value, [agentId]: String(err?.message || err) }
+      error.value = { ...error.value, [key]: String(err?.message || err) }
     } finally {
-      loading.value = { ...loading.value, [agentId]: false }
+      loading.value = { ...loading.value, [key]: false }
     }
   }
 
-  async function patch(agentId, updates) {
+  async function patch(agentId, updates, target = null) {
     if (!agentId) return
-    const data = await agentAPI.patchScratchpad(agentId, updates)
-    byAgent.value = { ...byAgent.value, [agentId]: data }
+    const key = target ? `${agentId}:${target}` : agentId
+    const data = target
+      ? await terrariumAPI.patchScratchpad(agentId, target, updates)
+      : await agentAPI.patchScratchpad(agentId, updates)
+    byAgent.value = { ...byAgent.value, [key]: data }
     return data
   }
 
-  function getFor(agentId) {
-    return byAgent.value[agentId] || {}
+  function getFor(agentId, target = null) {
+    const key = target ? `${agentId}:${target}` : agentId
+    return byAgent.value[key] || {}
   }
 
   return { byAgent, loading, error, fetch, patch, getFor }

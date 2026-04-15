@@ -150,6 +150,7 @@ async function fetchSessions() {
       limit: pageSize,
       offset: currentOffset.value,
       search: searchQuery.value.trim(),
+      refresh: true,
     })
     sessions.value = result.sessions || []
     totalSessions.value = result.total || 0

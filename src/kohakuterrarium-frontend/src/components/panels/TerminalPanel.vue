@@ -22,6 +22,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links"
 import { WebglAddon } from "@xterm/addon-webgl"
 import "@xterm/xterm/css/xterm.css"
 
+import { useChatStore } from "@/stores/chat"
 import { useInstancesStore } from "@/stores/instances"
 import { useThemeStore } from "@/stores/theme"
 
@@ -29,6 +30,7 @@ const props = defineProps({
   instance: { type: Object, default: null },
 })
 
+const chat = useChatStore()
 const instances = useInstancesStore()
 const themeStore = useThemeStore()
 
@@ -54,6 +56,16 @@ let ws = null
 let resizeObserver = null
 
 const agentId = computed(() => props.instance?.id || instances.current?.id || null)
+const terminalPath = computed(() => {
+  const id = agentId.value
+  if (!id) return null
+  if (props.instance?.type === "terrarium") {
+    const target = chat.terrariumTarget
+    if (!target) return null
+    return `/ws/terminal/terrariums/${id}/${encodeURIComponent(target)}`
+  }
+  return `/ws/terminal/${id}`
+})
 
 function wsUrl(path) {
   if (typeof window === "undefined") return path
@@ -64,8 +76,8 @@ function wsUrl(path) {
 let unmounted = false
 
 function connect() {
-  if (!agentId.value || ws || unmounted) return
-  ws = new WebSocket(wsUrl(`/ws/terminal/${agentId.value}`))
+  if (!terminalPath.value || ws || unmounted) return
+  ws = new WebSocket(wsUrl(terminalPath.value))
 
   ws.onopen = () => {
     connected.value = true
@@ -193,8 +205,8 @@ watch(
   },
 )
 
-watch(agentId, (id, prev) => {
-  if (prev) disconnect()
+watch([agentId, terminalPath], ([id], [prevId]) => {
+  if (prevId) disconnect()
   if (id) connect()
 })
 

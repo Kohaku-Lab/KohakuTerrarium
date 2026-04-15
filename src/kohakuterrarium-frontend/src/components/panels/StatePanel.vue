@@ -145,33 +145,43 @@ const activeTab = ref("scratchpad")
 
 const activeLabel = computed(() => tabs.find((t) => t.id === activeTab.value)?.label || "")
 
-const agentId = computed(() => props.instance?.id || null)
+const instanceId = computed(() => props.instance?.id || null)
+const terrariumTarget = computed(() => (props.instance?.type === "terrarium" ? chat.terrariumTarget : null))
+const scratchpadTarget = computed(() => terrariumTarget.value)
+const scratchpadKey = computed(() => {
+  const id = instanceId.value
+  if (!id) return null
+  return scratchpadTarget.value ? `${id}:${scratchpadTarget.value}` : id
+})
+const canInspectScratchpad = computed(() => !!instanceId.value && (props.instance?.type !== "terrarium" || !!scratchpadTarget.value))
 
 // ── Scratchpad ────────────────────────────────────────────────
 const entries = computed(() => {
-  const id = agentId.value
-  if (!id) return []
-  // Filter out the reserved _plan key — it lives in the Plan tab.
-  return Object.entries(scratchpad.getFor(id)).filter(([k]) => k !== "_plan")
+  const id = instanceId.value
+  if (!id || !canInspectScratchpad.value) return []
+  return Object.entries(scratchpad.getFor(id, scratchpadTarget.value)).filter(([k]) => k !== "_plan")
 })
 
 const loading = computed(() => {
-  const id = agentId.value
-  return id ? !!scratchpad.loading[id] : false
+  const key = scratchpadKey.value
+  return key ? !!scratchpad.loading[key] : false
 })
 
 const errorMsg = computed(() => {
-  const id = agentId.value
-  return id ? scratchpad.error[id] || "" : ""
+  if (props.instance?.type === "terrarium" && !scratchpadTarget.value) {
+    return "Scratchpad is only available for root/creature tabs."
+  }
+  const key = scratchpadKey.value
+  return key ? scratchpad.error[key] || "" : ""
 })
 
 function refreshScratchpad() {
-  if (agentId.value) scratchpad.fetch(agentId.value)
+  if (instanceId.value && canInspectScratchpad.value) scratchpad.fetch(instanceId.value, scratchpadTarget.value)
 }
 
 async function deleteKey(key) {
-  if (!agentId.value) return
-  await scratchpad.patch(agentId.value, { [key]: null })
+  if (!instanceId.value || !canInspectScratchpad.value) return
+  await scratchpad.patch(instanceId.value, { [key]: null }, scratchpadTarget.value)
 }
 
 // ── Tool History ──────────────────────────────────────────────
@@ -252,9 +262,9 @@ const compactions = computed(() => {
 
 // Fetch on mount and when agentId changes.
 watch(
-  agentId,
-  (id) => {
-    if (id) scratchpad.fetch(id)
+  [instanceId, scratchpadTarget],
+  ([id]) => {
+    if (id && canInspectScratchpad.value) scratchpad.fetch(id, scratchpadTarget.value)
   },
   { immediate: true },
 )
@@ -267,8 +277,8 @@ watch(
   ([processing, _jobCount], [prevProcessing]) => {
     // Refetch when processing ends (agent finished a turn) or
     // when a job completes (job count decreased).
-    if ((!processing && prevProcessing) || agentId.value) {
-      scratchpad.fetch(agentId.value)
+    if ((!processing && prevProcessing) || instanceId.value) {
+      refreshScratchpad()
     }
   },
 )
@@ -280,11 +290,11 @@ watch(
     return chat.messagesByTab?.[tab]?.length || 0
   },
   () => {
-    if (agentId.value) scratchpad.fetch(agentId.value)
+    refreshScratchpad()
   },
 )
 
 onMounted(() => {
-  if (agentId.value) scratchpad.fetch(agentId.value)
+  refreshScratchpad()
 })
 </script>
