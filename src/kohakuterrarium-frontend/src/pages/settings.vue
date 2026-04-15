@@ -23,16 +23,7 @@
                 </div>
               </div>
               <template v-if="provider.provider !== 'codex'">
-                <el-input
-                  v-if="editingKey === provider.provider"
-                  v-model="keyInput"
-                  size="small"
-                  type="password"
-                  show-password
-                  :placeholder="t('settings.keys.enterKey')"
-                  class="!w-60"
-                  @keyup.enter="saveKey(provider.provider)"
-                />
+                <el-input v-if="editingKey === provider.provider" v-model="keyInput" size="small" type="password" show-password :placeholder="t('settings.keys.enterKey')" class="!w-60" @keyup.enter="saveKey(provider.provider)" />
                 <el-button v-if="editingKey === provider.provider" size="small" type="primary" @click="saveKey(provider.provider)">{{ t("common.save") }}</el-button>
                 <el-button v-if="editingKey === provider.provider" size="small" @click="editingKey = ''">{{ t("common.cancel") }}</el-button>
                 <el-button v-else size="small" @click="startEditKey(provider.provider)">{{ provider.has_key ? t("settings.keys.change") : t("settings.keys.setKey") }}</el-button>

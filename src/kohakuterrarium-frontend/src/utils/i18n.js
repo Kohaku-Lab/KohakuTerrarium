@@ -91,7 +91,8 @@ const messages = {
 
     "new.title": "Start New Instance",
     "new.workingDirectory": "Working Directory",
-    "new.workingDirectoryHint": "The creature or terrarium will run with this as its working directory.",
+    "new.workingDirectoryHint":
+      "The creature or terrarium will run with this as its working directory.",
     "new.browse": "Browse...",
     "new.creatureDesc": "Single agent",
     "new.terrariumDesc": "Multi-agent team",
@@ -165,7 +166,8 @@ const messages = {
     "settings.keys.setKey": "Set Key",
     "settings.keys.saved": "API key saved for {provider}",
     "settings.keys.saveFailed": "Failed to save key",
-    "settings.models.storageHint": "Custom model profiles are stored in ~/.kohakuterrarium/llm_profiles.yaml",
+    "settings.models.storageHint":
+      "Custom model profiles are stored in ~/.kohakuterrarium/llm_profiles.yaml",
     "settings.models.deleteConfirm": "Delete this profile?",
     "settings.models.none": "No custom profiles yet",
     "settings.models.editProfile": "Edit Profile",
@@ -185,7 +187,8 @@ const messages = {
     "settings.models.baseUrlShort": "url",
     "settings.models.contextShort": "ctx",
     "settings.models.temperatureShort": "temp",
-    "settings.mcp.description": "MCP servers provide external tools to agents via the Model Context Protocol. Agents access them through mcp_list and mcp_call tools.",
+    "settings.mcp.description":
+      "MCP servers provide external tools to agents via the Model Context Protocol. Agents access them through mcp_list and mcp_call tools.",
     "settings.mcp.deleteConfirm": "Remove this MCP server?",
     "settings.mcp.none": "No MCP servers configured",
     "settings.mcp.addServer": "Add MCP Server",
@@ -230,7 +233,8 @@ const messages = {
     "chat.clearContext": "Clear context",
     "chat.stopGeneration": "Stop generation",
     "chat.sendMessage": "Send message",
-    "chat.clearConfirm": "Clear conversation context? Chat history will be preserved in the session.",
+    "chat.clearConfirm":
+      "Clear conversation context? Chat history will be preserved in the session.",
     "chat.cumulativeInputTokens": "Cumulative input tokens",
     "chat.cachedInputTokens": "Cached input tokens",
     "chat.cumulativeOutputTokens": "Cumulative output tokens",
@@ -252,7 +256,8 @@ const messages = {
     "state.searching": "Searching...",
     "state.noMemoryResults": 'No results for "{query}"',
     "state.memoryPrompt": "Type a query and press Enter to search.",
-    "state.memoryHint": "Memory search works on indexed sessions. Running sessions may not have indexed events yet.",
+    "state.memoryHint":
+      "Memory search works on indexed sessions. Running sessions may not have indexed events yet.",
     "state.noSessionId": "No session id available",
     "state.noToolCalls": "No tool calls in this session yet.",
     "state.noCompactions": "No compactions in this session yet.",
@@ -451,7 +456,7 @@ const messages = {
     "sessions.daysAgo": ({ count }) => `${count} 天前`,
     "sessions.resumed": "已恢复会话：{name}",
     "sessions.resumeFailed": "恢复失败：{message}",
-    "sessions.deleteConfirm": '删除会话“{name}”？',
+    "sessions.deleteConfirm": "删除会话“{name}”？",
     "sessions.deleted": "会话已删除",
     "sessions.deleteFailed": "删除失败：{message}",
 
@@ -500,14 +505,15 @@ const messages = {
     "settings.models.temperature": "Temperature",
     "settings.models.update": "更新",
     "settings.models.addProfile": "添加配置",
-    "settings.models.saved": '已保存配置“{name}”',
+    "settings.models.saved": "已保存配置“{name}”",
     "settings.models.saveFailed": "保存配置失败",
-    "settings.models.deleted": '已删除配置“{name}”',
+    "settings.models.deleted": "已删除配置“{name}”",
     "settings.models.deleteFailed": "删除失败",
     "settings.models.baseUrlShort": "地址",
     "settings.models.contextShort": "上下文",
     "settings.models.temperatureShort": "温度",
-    "settings.mcp.description": "MCP 服务器通过 Model Context Protocol 为代理提供外部工具。代理会通过 mcp_list 和 mcp_call 工具访问它们。",
+    "settings.mcp.description":
+      "MCP 服务器通过 Model Context Protocol 为代理提供外部工具。代理会通过 mcp_list 和 mcp_call 工具访问它们。",
     "settings.mcp.deleteConfirm": "移除这个 MCP 服务器？",
     "settings.mcp.none": "没有已配置的 MCP 服务器",
     "settings.mcp.addServer": "添加 MCP 服务器",
@@ -517,9 +523,9 @@ const messages = {
     "settings.mcp.args": "参数（空格分隔）",
     "settings.mcp.url": "URL *",
     "settings.mcp.addServerButton": "添加服务器",
-    "settings.mcp.added": '已添加 MCP 服务器“{name}”',
+    "settings.mcp.added": "已添加 MCP 服务器“{name}”",
     "settings.mcp.addFailed": "添加 MCP 服务器失败",
-    "settings.mcp.removed": '已移除 MCP 服务器“{name}”',
+    "settings.mcp.removed": "已移除 MCP 服务器“{name}”",
     "settings.mcp.removeFailed": "移除失败",
     "settings.mcp.transportStdio": "stdio（子进程）",
     "settings.mcp.transportHttp": "HTTP/SSE（远程）",
@@ -572,7 +578,7 @@ const messages = {
     "state.scratchpadUnavailable": "Scratchpad 仅在 root 和 creature 标签页可用。",
     "state.searchMemory": "搜索会话记忆...",
     "state.searching": "搜索中...",
-    "state.noMemoryResults": '没有找到“{query}”的结果',
+    "state.noMemoryResults": "没有找到“{query}”的结果",
     "state.memoryPrompt": "输入查询内容后按 Enter 开始搜索。",
     "state.memoryHint": "记忆搜索依赖已建立索引的会话。正在运行的会话可能还没有完成索引。",
     "state.noSessionId": "没有可用的 session id",
@@ -718,14 +724,16 @@ const messages = {
     "common.type": "Typ",
     "common.view": "Ansehen",
 
-    "home.subtitle": "Baue Agenten, die allein arbeiten. Kombiniere sie zu Teams, die zusammenarbeiten.",
+    "home.subtitle":
+      "Baue Agenten, die allein arbeiten. Kombiniere sie zu Teams, die zusammenarbeiten.",
     "home.runningInstances": "Laufende Instanzen",
     "home.noRunningInstances": "Keine Instanzen laufen. Starte eine, um loszulegen.",
     "home.quickStart": "Schnellstart",
     "home.startNewInstance": "Neue Instanz starten",
     "home.stopInstance": "Instanz stoppen",
     "home.stopDialogTitle": "Instanz stoppen",
-    "home.stopDialogBody": "{name} stoppen? Dadurch werden das {type} und alle zugehoerigen Prozesse beendet.",
+    "home.stopDialogBody":
+      "{name} stoppen? Dadurch werden das {type} und alle zugehoerigen Prozesse beendet.",
     "home.stoppedMessage": "{name} gestoppt",
     "home.stopFailedMessage": "Stoppen fehlgeschlagen: {message}",
     "home.stats.running": "Laufend",
@@ -735,7 +743,8 @@ const messages = {
 
     "new.title": "Neue Instanz starten",
     "new.workingDirectory": "Arbeitsverzeichnis",
-    "new.workingDirectoryHint": "Die Kreatur oder das Terrarium wird mit diesem Arbeitsverzeichnis ausgefuehrt.",
+    "new.workingDirectoryHint":
+      "Die Kreatur oder das Terrarium wird mit diesem Arbeitsverzeichnis ausgefuehrt.",
     "new.browse": "Durchsuchen...",
     "new.creatureDesc": "Einzelner Agent",
     "new.terrariumDesc": "Multi-Agenten-Team",
@@ -760,7 +769,8 @@ const messages = {
     "sessions.failedTitle": "Sitzungen konnten nicht geladen werden",
     "sessions.noSaved": "Keine gespeicherten Sitzungen",
     "sessions.noSavedHint": "Sitzungen werden automatisch gespeichert, waehrend Instanzen laufen.",
-    "sessions.searchPlaceholder": "Sitzungen nach Name, Konfiguration, Agenten oder Vorschau durchsuchen...",
+    "sessions.searchPlaceholder":
+      "Sitzungen nach Name, Konfiguration, Agenten oder Vorschau durchsuchen...",
     "sessions.noMatch": 'Keine Sitzungen fuer "{query}" gefunden',
     "sessions.agentCount": ({ count }) => `${count} Agent${count === 1 ? "" : "en"}`,
     "sessions.view": "Ansehen",
@@ -782,7 +792,8 @@ const messages = {
     "registry.loadingAvailable": "Verfuegbare Konfigurationen werden geladen...",
     "registry.noRemoteConfigs": "Keine entfernten Konfigurationen verfuegbar.",
     "registry.loadLocalFailed": "Lokale Konfigurationen konnten nicht geladen werden: {message}",
-    "registry.loadRemoteFailed": "Entfernte Konfigurationen konnten nicht geladen werden: {message}",
+    "registry.loadRemoteFailed":
+      "Entfernte Konfigurationen konnten nicht geladen werden: {message}",
     "registry.installedMessage": "{name} installiert",
     "registry.installFailed": "Installation fehlgeschlagen: {message}",
     "registry.uninstalledMessage": "{name} deinstalliert",
@@ -800,7 +811,8 @@ const messages = {
     "settings.prefs.appearance": "Darstellung",
     "settings.prefs.desktopZoom": "Desktop-Zoom",
     "settings.prefs.mobileZoom": "Mobile-Zoom",
-    "settings.keys.storageHint": "API-Schluessel werden in ~/.kohakuterrarium/api_keys.yaml gespeichert",
+    "settings.keys.storageHint":
+      "API-Schluessel werden in ~/.kohakuterrarium/api_keys.yaml gespeichert",
     "settings.keys.active": "Aktiv",
     "settings.keys.noKey": "Kein Schluessel",
     "settings.keys.oauthHint": "OAuth-Anmeldung, benutze `kt login` im Terminal",
@@ -809,7 +821,8 @@ const messages = {
     "settings.keys.setKey": "Schluessel setzen",
     "settings.keys.saved": "API-Schluessel fuer {provider} gespeichert",
     "settings.keys.saveFailed": "Speichern des API-Schluessels fehlgeschlagen",
-    "settings.models.storageHint": "Benutzerdefinierte Modellprofile werden in ~/.kohakuterrarium/llm_profiles.yaml gespeichert",
+    "settings.models.storageHint":
+      "Benutzerdefinierte Modellprofile werden in ~/.kohakuterrarium/llm_profiles.yaml gespeichert",
     "settings.models.deleteConfirm": "Dieses Profil loeschen?",
     "settings.models.none": "Noch keine benutzerdefinierten Profile",
     "settings.models.editProfile": "Profil bearbeiten",
@@ -829,7 +842,8 @@ const messages = {
     "settings.models.baseUrlShort": "URL",
     "settings.models.contextShort": "Kontext",
     "settings.models.temperatureShort": "Temp",
-    "settings.mcp.description": "MCP-Server stellen Agenten externe Werkzeuge ueber das Model Context Protocol bereit. Agenten greifen ueber mcp_list und mcp_call darauf zu.",
+    "settings.mcp.description":
+      "MCP-Server stellen Agenten externe Werkzeuge ueber das Model Context Protocol bereit. Agenten greifen ueber mcp_list und mcp_call darauf zu.",
     "settings.mcp.deleteConfirm": "Diesen MCP-Server entfernen?",
     "settings.mcp.none": "Keine MCP-Server konfiguriert",
     "settings.mcp.addServer": "MCP-Server hinzufuegen",
@@ -889,7 +903,8 @@ const messages = {
     "activity.jobs": ({ count }) => `${count} Aufgaben`,
     "activity.context": "Kontext",
 
-    "creatures.notTerrarium": "Dies ist kein Terrarium. Eine einzelne Kreatur laeuft eigenstaendig.",
+    "creatures.notTerrarium":
+      "Dies ist kein Terrarium. Eine einzelne Kreatur laeuft eigenstaendig.",
 
     "panelHeader.prefersTitle": "Bevorzugt {zone}",
     "panelHeader.prefers": "bevorzugt {zone}",

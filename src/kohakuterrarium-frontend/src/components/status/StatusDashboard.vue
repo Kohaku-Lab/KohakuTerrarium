@@ -119,12 +119,7 @@
             </div>
             <div class="relative w-full h-1.5 rounded-full bg-warm-100 dark:bg-warm-800 overflow-hidden">
               <div class="h-full rounded-full transition-all duration-300" :class="contextPct >= 80 ? 'bg-coral' : contextPct >= 60 ? 'bg-amber' : 'bg-aquamarine'" :style="{ width: Math.min(contextPct, 100) + '%' }" />
-              <div
-                v-if="compactThresholdPct > 0"
-                class="absolute top-0 h-full w-0.5 bg-amber opacity-60"
-                :style="{ left: compactThresholdPct + '%' }"
-                :title="t('status.compactAt', { value: formatTokens(compactThreshold) })"
-              />
+              <div v-if="compactThresholdPct > 0" class="absolute top-0 h-full w-0.5 bg-amber opacity-60" :style="{ left: compactThresholdPct + '%' }" :title="t('status.compactAt', { value: formatTokens(compactThreshold) })" />
             </div>
           </div>
         </div>

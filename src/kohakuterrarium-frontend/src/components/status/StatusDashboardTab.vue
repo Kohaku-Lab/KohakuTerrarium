@@ -1,14 +1,7 @@
 <template>
   <div class="h-full flex bg-warm-50 dark:bg-warm-900 overflow-hidden">
     <div class="flex flex-col gap-1 py-2 px-1 border-r border-warm-200 dark:border-warm-700 shrink-0">
-      <button
-        v-for="tab in visibleTabs"
-        :key="tab.id"
-        class="relative w-8 h-8 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors"
-        :class="activeTab === tab.id ? 'bg-iolite/10 text-iolite' : ''"
-        :title="tab.label"
-        @click="activeTab = tab.id"
-      >
+      <button v-for="tab in visibleTabs" :key="tab.id" class="relative w-8 h-8 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" :class="activeTab === tab.id ? 'bg-iolite/10 text-iolite' : ''" :title="tab.label" @click="activeTab = tab.id">
         <div :class="tab.icon" class="text-sm" />
         <span v-if="tab.id === 'jobs' && jobCount > 0" class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-amber text-white text-[8px] font-bold flex items-center justify-center">{{ jobCount > 9 ? "9+" : jobCount }}</span>
       </button>
@@ -66,12 +59,7 @@
               </div>
               <div class="relative w-full h-1.5 rounded-full bg-warm-100 dark:bg-warm-800 overflow-hidden">
                 <div class="h-full rounded-full transition-all duration-300" :class="contextPct >= 80 ? 'bg-coral' : contextPct >= 60 ? 'bg-amber' : 'bg-aquamarine'" :style="{ width: Math.min(contextPct, 100) + '%' }" />
-                <div
-                  v-if="compactThresholdPct > 0"
-                  class="absolute top-0 h-full w-0.5 bg-amber opacity-60"
-                  :style="{ left: compactThresholdPct + '%' }"
-                  :title="t('status.compactAt', { value: formatTokens(compactThreshold) })"
-                />
+                <div v-if="compactThresholdPct > 0" class="absolute top-0 h-full w-0.5 bg-amber opacity-60" :style="{ left: compactThresholdPct + '%' }" :title="t('status.compactAt', { value: formatTokens(compactThreshold) })" />
               </div>
             </div>
           </div>

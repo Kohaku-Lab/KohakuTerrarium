@@ -1,13 +1,7 @@
 <template>
   <div class="h-full flex flex-col bg-white dark:bg-warm-900 overflow-hidden">
     <div class="flex items-center gap-0 border-b border-warm-200 dark:border-warm-700 shrink-0">
-      <button
-        v-for="tab in tabs"
-        :key="tab.key"
-        class="px-3 py-1.5 text-[11px] font-medium transition-colors border-b-2 -mb-px"
-        :class="activeTab === tab.key ? 'text-iolite dark:text-iolite-light border-iolite dark:border-iolite-light' : 'text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 border-transparent'"
-        @click="activeTab = tab.key"
-      >
+      <button v-for="tab in tabs" :key="tab.key" class="px-3 py-1.5 text-[11px] font-medium transition-colors border-b-2 -mb-px" :class="activeTab === tab.key ? 'text-iolite dark:text-iolite-light border-iolite dark:border-iolite-light' : 'text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 border-transparent'" @click="activeTab = tab.key">
         {{ tab.label }}
         <span v-if="tab.key === 'jobs' && jobCount > 0" class="ml-1 px-1 py-0.5 rounded-full bg-amber/15 text-amber text-[9px] leading-none">{{ jobCount }}</span>
       </button>

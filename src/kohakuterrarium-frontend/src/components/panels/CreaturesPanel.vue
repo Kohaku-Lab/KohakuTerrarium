@@ -11,13 +11,7 @@
         <div class="mb-3">
           <div class="text-[10px] uppercase tracking-wider text-warm-400 font-medium mb-1">{{ t("common.creatures") }}</div>
           <div class="flex flex-col gap-1">
-            <div
-              v-for="creature in creatures"
-              :key="creature.name"
-              class="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors hover:bg-warm-100 dark:hover:bg-warm-800"
-              :class="activeTab === creature.name ? 'bg-iolite/10' : ''"
-              @click="onOpenTab(creature.name)"
-            >
+            <div v-for="creature in creatures" :key="creature.name" class="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors hover:bg-warm-100 dark:hover:bg-warm-800" :class="activeTab === creature.name ? 'bg-iolite/10' : ''" @click="onOpenTab(creature.name)">
               <StatusDot :status="creature.status" />
               <span class="font-medium text-warm-700 dark:text-warm-300 truncate">{{ creature.name }}</span>
               <span class="flex-1" />
@@ -31,13 +25,7 @@
         <div v-if="channels.length">
           <div class="text-[10px] uppercase tracking-wider text-warm-400 font-medium mb-1">{{ t("common.channels") }}</div>
           <div class="flex flex-col gap-1">
-            <div
-              v-for="channel in channels"
-              :key="channel.name"
-              class="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors hover:bg-warm-100 dark:hover:bg-warm-800"
-              :class="activeTab === `ch:${channel.name}` ? 'bg-taaffeite/10' : ''"
-              @click="onOpenTab(`ch:${channel.name}`)"
-            >
+            <div v-for="channel in channels" :key="channel.name" class="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors hover:bg-warm-100 dark:hover:bg-warm-800" :class="activeTab === `ch:${channel.name}` ? 'bg-taaffeite/10' : ''" @click="onOpenTab(`ch:${channel.name}`)">
               <span class="w-2 h-2 rounded-sm shrink-0" :class="channel.type === 'broadcast' ? 'bg-taaffeite' : 'bg-aquamarine'" />
               <span class="font-medium text-warm-700 dark:text-warm-300 truncate">{{ channel.name }}</span>
               <span class="flex-1" />
