@@ -2,7 +2,7 @@
   <img src="images/banner.png" alt="KohakuTerrarium" width="800">
 </p>
 <p align="center">
-  <strong>Define what an agent is. Build any kind. Compose them into teams.</strong>
+  <strong>Define what an agent is. Build any kind. Use useful ones out of the box.</strong>
 </p>
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+">
@@ -20,6 +20,8 @@ Its core abstraction is the **creature**: a standalone agent with its own contro
 
 The goal is simple: make agent systems modular enough to model serious products, while still staying configurable, composable, and hackable.
 
+With [**kt-defaults**](https://github.com/Kohaku-Lab/kt-defaults), its official OOTB creature pack and plugin set, you can use KohakuTerrarium directly as a powerful coding agent runtime through the CLI, TUI, web app, or desktop app, without needing to understand the whole framework first.
+
 ## Where it fits
 
 AI tooling usually lives at different layers:
@@ -27,7 +29,7 @@ AI tooling usually lives at different layers:
 |  | Product | Framework | Utility / Wrapper |
 |--|---------|-----------|-------------------|
 | **LLM App** | ChatGPT, Claude.ai | LangChain, LangGraph, Dify | DSPy |
-| **Agent** | Claude Code, Codex, OpenCode | smolagents (thin), **KohakuTerrarium** | - |
+| **Agent** | Claude Code, Codex, OpenCode, **kt-defaults** | smolagents (thin), **KohakuTerrarium** | - |
 | **Multi-Agent** | - | **KohakuTerrarium** | CrewAI, AutoGen |
 
 Most frameworks either operate below the agent layer, or they jump straight to multi-agent orchestration with a very thin idea of what an agent is.
@@ -45,81 +47,39 @@ A creature is made of:
 
 Then a terrarium composes multiple creatures horizontally through channels, lifecycle management, and observability.
 
-## Why the split matters
+KohakuTerrarium is not only something you build from scratch. It also supports an installable ecosystem of reusable creatures, terrariums, plugins, and other modules. The official package for that is [`kt-defaults/`](kt-defaults/README.md), which provides useful out-of-the-box creatures plus a practical plugin pack.
 
-A lot of systems blur internal agent logic and external multi-agent wiring into one abstraction. KohakuTerrarium keeps them separate on purpose.
+## Key features
 
-<table>
-  <tr>
-    <td valign="top" width="50%">
-      <strong>Inside a creature</strong><br>
-      One controller delegates to tools and sub-agents.<br>
-      This is the agent-level abstraction.
-    </td>
-    <td valign="top" width="50%">
-      <strong>Between creatures</strong><br>
-      Independent creatures communicate through channels.<br>
-      This is the multi-agent wiring layer.
-    </td>
-  </tr>
-</table>
-
-That separation lets you:
-
-- build a creature once and run it solo or in a team
-- change tools, prompts, triggers, or outputs without redesigning the whole system
-- reason about single-agent behavior separately from team topology
-- keep the multi-agent layer simple instead of turning it into another hidden controller
-
-## Architecture at a glance
-
-### Terrarium view
-
-```text
-  +---------+       +---------------------------+
-  |  User   |<----->|        Root Agent         |
-  +---------+       |  (terrarium tools, TUI)   |
-                    +---------------------------+
-                          |               ^
-            sends tasks   |               |  observes results
-                          v               |
-                    +---------------------------+
-                    |     Terrarium Layer       |
-                    |   (pure wiring, no LLM)   |
-                    ├-------┬----------┬--------┤
-                    |  swe  | reviewer |  ....  |
-                    +-------┴----------┴--------+
-```
-
-### Creature view
-
-```text
-    List, Create, Delete  +------------------+
-                    +-----|   Tools System   |
-      +---------+   |     +------------------+
-      |  Input  |   |          ^        |
-      +---------+   V          |        v
-        |   +---------+   +------------------+   +------------+
-        +-->| Trigger |-->|    Controller    |-->| Sub Agents |
-User input  | System  |   |    (Main LLM)    |<--| with tools |
-            +---------+   +------------------+   +------------+
-                ^             |          |
-                |             v          v
-                |         +--------+  +------+
-                +---------|Channels|  |Output|
-                 Receive  +--------+  +------+
-                             |  ^
-                             v  |
-                          +------------------+
-                          | Other Creatures  |
-                          +------------------+
-```
+- **Modular agent architecture**
+  - The core framework feature.
+  - Build your own creature by writing config, prompts, and only the custom modules you actually need.
+  - You do not need to rebuild the whole agent runtime from scratch.
+- **Built-in session persistence and resume**
+  - Sessions store operational state, not just chat history.
+- **Built-in scratchpad and persistent session history**
+  - Session history is stored not only for resume, but also as a searchable knowledge base.
+  - Past runs can be searched in FTS or vector form, including by agents through built-in memory search tools.
+- **Built-in non-blocking auto-compaction**
+  - Long-running agents can keep operating while context is compacted in the background.
+- **Comprehensive built-in tools and sub-agents**
+  - File, shell, web, JSON, search, editing, planning, review, research, and more.
+- **Multiple built-in runtime surfaces**
+  - CLI, TUI, web, and desktop app support out of the box.
+- **Useful OOTB creatures through `kt-defaults`**
+  - You can start by using strong default agents, then customize or inherit from them later.
+- **Strong programmatic usage path**
+  - Use agents directly from Python.
+  - Compose them with the composition algebra when your application is the orchestrator.
 
 ## Quick start
+
+### 1. Install KohakuTerrarium
 
 ```bash
 # Install from PyPI
 pip install kohakuterrarium
+# Or: pip install "kohakuterrarium[full]" for more optional dependencies
 
 # Or install from source (for development)
 git clone https://github.com/Kohaku-Lab/KohakuTerrarium.git
@@ -127,24 +87,46 @@ cd KohakuTerrarium
 pip install -e ".[dev]"
 
 # Build the web frontend for `kt web` / `kt app`
+# Required when running from source
 npm install --prefix src/kohakuterrarium-frontend
 npm run build --prefix src/kohakuterrarium-frontend
+```
 
-# Install the default creatures, terrariums, and plugins
+### 2. Install OOTB creatures and plugins
+
+```bash
+# Install the official OOTB creature and plugin pack
 kt install https://github.com/Kohaku-Lab/kt-defaults.git
 
-# Set up LLM access (pick one)
-kt login codex          # Codex OAuth (no API key needed)
-kt model default gpt-5.4  # or configure any OpenAI-compatible API
+# You can also install shared third-party packages
+kt install <git-url>
+```
 
+### 3. Authenticate a model provider
+
+```bash
+# Codex OAuth (no API key needed)
+kt login codex
+kt model default gpt-5.4
+
+# Or configure another OpenAI-compatible provider
+```
+
+### 4. Run something useful
+
+```bash
 # Run a single creature
-kt run @kt-defaults/creatures/swe
+kt run @kt-defaults/creatures/swe --mode cli
+kt run @kt-defaults/creatures/reviewer
 
-# Run a multi-agent terrarium
+# Optional: run a multi-agent terrarium
 kt terrarium run @kt-defaults/terrariums/swe_team
 
-# Launch the web dashboard
-kt serve
+# Launch the web server
+kt serve start
+
+# Launch the desktop app
+kt app
 ```
 
 Supports OpenRouter, OpenAI, Anthropic, Google Gemini, and any OpenAI-compatible API.
@@ -154,6 +136,7 @@ Supports OpenRouter, OpenAI, Anthropic, Google Gemini, and any OpenAI-compatible
 ### I want to run something now
 
 - Start with [Getting Started](docs/guides/getting-started.md)
+- Browse [`kt-defaults/`](kt-defaults/README.md)
 - Browse [CLI Reference](docs/reference/cli.md)
 - See included [examples](examples/README.md)
 
@@ -164,7 +147,7 @@ Supports OpenRouter, OpenAI, Anthropic, Google Gemini, and any OpenAI-compatible
 - See [Custom Modules](docs/guides/custom-modules.md)
 - See [Plugins](docs/guides/plugins.md)
 
-### I want to build a terrarium
+### I want optional multi-agent composition
 
 - Read [Terrariums](docs/guides/terrariums.md)
 - Read [Channels](docs/concepts/channels.md)
@@ -187,19 +170,53 @@ Supports OpenRouter, OpenAI, Anthropic, Google Gemini, and any OpenAI-compatible
 
 ### Creature
 
+```text
+    List, Create, Delete  +------------------+
+                    +-----|   Tools System   |
+      +---------+   |     +------------------+
+      |  Input  |   |          ^        |
+      +---------+   V          |        v
+        |   +---------+   +------------------+   +--------+
+        +-->| Trigger |-->|    Controller    |-->| Output |
+User input  | System  |   |    (Main LLM)    |   +--------+
+            +---------+   +------------------+
+                              |          ^
+                              v          |
+                          +------------------+
+                          |    Sub Agents    |
+                          +------------------+
+```
+
 A creature is a standalone agent with its own runtime, tools, sub-agents, prompts, and state.
+
+The creature is the first-class abstraction in KohakuTerrarium.
 
 You can run it directly:
 
 ```bash
 kt run path/to/creature
+kt run @package/path/to/creature
 ```
 
 ### Terrarium
 
-A terrarium is a composition layer that wires creatures together through channels and manages their lifecycle.
+```text
+  +---------+       +---------------------------+
+  |  User   |<----->|        Root Agent         |
+  +---------+       |  (terrarium tools, TUI)   |
+                    +---------------------------+
+                          |               ^
+            sends tasks   |               |  observes results
+                          v               |
+                    +---------------------------+
+                    |     Terrarium Layer       |
+                    |   (pure wiring, no LLM)   |
+                    +-------+----------+--------+
+                    |  swe  | reviewer |  ....  |
+                    +-------+----------+--------+
+```
 
-It does not add a second reasoning loop.
+A terrarium is a composition layer that wires creatures together through channels and manages their lifecycle.
 
 ### Root agent
 
@@ -239,7 +256,7 @@ KohakuTerrarium already includes a broad runtime surface:
 - built-in sub-agents for exploration, planning, implementation, review, summarization, and research
 - background tool execution and non-blocking agent flow
 - session persistence with resumable operational state, not just chat history
-- package installation for creatures and terrariums
+- package installation for creatures, plugins, terrariums, and reusable agent packs
 - Python embedding through `Agent`, `TerrariumRuntime`, and `KohakuManager`
 - HTTP and WebSocket serving
 - web dashboard and native desktop app
@@ -247,7 +264,7 @@ KohakuTerrarium already includes a broad runtime surface:
 
 ## Programmatic usage
 
-Use agents and terrariums as libraries — your code is the orchestrator:
+Use agents and terrariums as libraries, with your code as the orchestrator:
 
 ```python
 import asyncio
@@ -277,7 +294,7 @@ asyncio.run(main())
 
 ### Composition algebra
 
-Compose agents with Python operators — `>>` (sequence), `&` (parallel), `|` (fallback), `*` (retry), `async for` (loop):
+Compose agents with Python operators: `>>` (sequence), `&` (parallel), `|` (fallback), `*` (retry), `async for` (loop):
 
 ```python
 import asyncio
@@ -357,6 +374,8 @@ kt resume swe_team
 
 Session files use the `.kohakutr` format and store operational state such as:
 
+That history is not only for resuming a past session. It also acts as a knowledge database that can be searched later, including through full-text search and vector search. Agents can use the built-in memory search tools to retrieve useful history from prior work, similar to querying a RAG-style store.
+
 - conversation history
 - tool call metadata
 - event logs
@@ -370,6 +389,8 @@ Session files use the `.kohakutr` format and store operational state such as:
 See [Sessions](docs/guides/sessions.md).
 
 ## Packages, defaults, and examples
+
+One of the important practical ideas in KohakuTerrarium is that creatures are meant to be packaged, installed, reused, and shared. You can use official defaults directly, inherit from them, or install someone else's creature/plugin package and run it as-is.
 
 Install creature and terrarium packages from Git or local paths:
 
@@ -388,10 +409,10 @@ kt terrarium run @cool-creatures/terrariums/my-team
 
 Included resources:
 
-- `kt-defaults/` contains installable default creatures and terrariums
-- `examples/agent-apps/` contains config-driven examples
+- `kt-defaults/` contains official OOTB creatures, installable terrariums, and a useful plugin pack
+- `examples/agent-apps/` contains config-driven creature examples
 - `examples/code/` contains Python usage examples
-- `examples/terrariums/` contains multi-agent examples
+- `examples/terrariums/` contains optional multi-agent examples
 - `examples/plugins/` contains plugin examples
 
 See [examples/README.md](examples/README.md) and [kt-defaults/README.md](kt-defaults/README.md).
@@ -416,8 +437,8 @@ src/kohakuterrarium/
   testing/        # Test infrastructure
 
 src/kohakuterrarium-frontend/  # Vue web frontend
-kt-defaults/                   # Installable defaults package
-examples/                      # Example agents, terrariums, code samples, plugins
+kt-defaults/                   # Official OOTB creatures, terrariums, and plugin pack
+examples/                      # Example creatures, terrariums, code samples, plugins
 docs/                          # Guides, concepts, API reference, contributor docs
 ```
 

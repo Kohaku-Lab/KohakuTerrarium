@@ -1,24 +1,25 @@
 # KohakuTerrarium Documentation
 
-KohakuTerrarium has two hierarchies that matter:
+KohakuTerrarium is a framework for building real agents, not just LLM wrappers.
 
-- the **documentation hierarchy**, which is organized around reader intent
-- the **codebase hierarchy**, which is organized around runtime subsystems and packages
+The core abstraction is the **creature**: a standalone agent with its own controller, tools, sub-agents, triggers, memory, and I/O. A creature can run by itself, inherit from another creature, or be packaged and reused directly. A **terrarium** is the optional multi-agent wiring layer that composes creatures through channels.
 
-This `docs/` tree is the reader-facing side. It answers:
+This means the docs should be read creature-first:
 
-1. What is this framework?
-2. How do I get something running?
-3. How do I build a specific thing?
-4. How does the system work?
+1. What can I run right now?
+2. How do I use or customize a creature?
+3. How do packages, session memory, and runtime surfaces work?
+4. If I want multi-agent composition, how do terrariums fit in?
 5. Where do I look up exact commands, APIs, and config fields?
-6. How do I contribute to the framework itself?
+6. How do I work on the framework itself?
 
 ## Start here
 
-- New to the project: [Quick start](guides/getting-started.md)
-- Building a creature: [Guides / Creatures](guides/creatures.md)
-- Building a terrarium: [Guides / Terrariums](guides/terrariums.md)
+- New to the project: [Getting Started](guides/getting-started.md)
+- I want useful OOTB agents: [`kt-defaults`](../kt-defaults/README.md)
+- Building or customizing a creature: [Guides / Creatures](guides/creatures.md)
+- Sessions, resume, and searchable memory: [Guides / Sessions](guides/sessions.md)
+- Optional multi-agent composition: [Guides / Terrariums](guides/terrariums.md)
 - Embedding in Python: [Guides / Programmatic Usage](guides/programmatic-usage.md)
 - Learning the architecture: [Concepts](concepts/README.md)
 - Looking up commands or APIs: [Reference](reference/README.md)
@@ -37,17 +38,17 @@ Step-by-step learning paths for readers who want a guided way into the system.
 
 ### Guides
 
-Task-oriented documentation for building, configuring, and operating creatures and terrariums.
+Task-oriented documentation for using, configuring, extending, and operating creatures, packages, sessions, and terrariums.
 
 - [Guides home](guides/README.md)
 - [Getting Started](guides/getting-started.md)
-- [Configuration](guides/configuration.md)
 - [Creatures](guides/creatures.md)
-- [Terrariums](guides/terrariums.md)
 - [Sessions](guides/sessions.md)
+- [Configuration](guides/configuration.md)
 - [Programmatic Usage](guides/programmatic-usage.md)
 - [Custom Modules](guides/custom-modules.md)
 - [Plugins](guides/plugins.md)
+- [Terrariums](guides/terrariums.md)
 - [Frontend Layout](guides/frontend-layout.md)
 - [Examples](guides/examples.md)
 
@@ -116,17 +117,18 @@ Many of these packages also include local `README.md` files. Those package-local
 
 1. [Root README](../README.md)
 2. [Getting Started](guides/getting-started.md)
-3. [Overview](concepts/overview.md)
+3. [`kt-defaults`](../kt-defaults/README.md)
 4. [Examples](guides/examples.md)
+5. [Overview](concepts/overview.md)
 
 ### If you are building with the framework
 
 1. [Getting Started](guides/getting-started.md)
 2. [Creatures](guides/creatures.md)
-3. [Terrariums](guides/terrariums.md)
+3. [Sessions](guides/sessions.md)
 4. [Plugins and Extensibility](concepts/plugins.md)
-5. [Composition Algebra](concepts/composition-algebra.md)
-6. [Programmatic Usage](guides/programmatic-usage.md)
+5. [Programmatic Usage](guides/programmatic-usage.md)
+6. [Terrariums](guides/terrariums.md)
 
 ### If you are contributing to the framework
 
