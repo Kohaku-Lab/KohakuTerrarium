@@ -31,7 +31,7 @@ def save_api_key(provider: str, key: str) -> None:
     KEYS_PATH.parent.mkdir(parents=True, exist_ok=True)
     keys = _load_api_keys()
     keys[provider] = key
-    with open(KEYS_PATH, "w") as f:
+    with open(KEYS_PATH, "w", encoding="utf-8") as f:
         yaml.dump(keys, f, default_flow_style=False)
     logger.info("API key saved", provider=provider)
 
@@ -86,7 +86,7 @@ def _load_api_keys() -> dict[str, str]:
     if not KEYS_PATH.exists():
         return {}
     try:
-        with open(KEYS_PATH) as f:
+        with open(KEYS_PATH, encoding="utf-8") as f:
             data = yaml.safe_load(f)
             return data if isinstance(data, dict) else {}
     except Exception as e:

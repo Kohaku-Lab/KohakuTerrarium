@@ -384,7 +384,7 @@ def _load_manifest(pkg_dir: Path) -> dict:
     if not manifest_file.exists():
         return {"name": pkg_dir.name}
 
-    with open(manifest_file) as f:
+    with open(manifest_file, encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
 
 

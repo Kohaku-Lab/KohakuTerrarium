@@ -224,6 +224,45 @@ export function _replayEvents(messages, events) {
     }
   }
 
+  function findCompactMessage(round, preferRunning = false) {
+    for (let i = result.length - 1; i >= 0; i--) {
+      const msg = result[i]
+      if (msg.role !== "compact") continue
+      if (round && msg.round === round) {
+        if (!preferRunning || msg.status === "running") return msg
+      }
+    }
+    if (!preferRunning) return null
+    for (let i = result.length - 1; i >= 0; i--) {
+      const msg = result[i]
+      if (msg.role === "compact" && msg.status === "running") return msg
+    }
+    return null
+  }
+
+  function upsertCompactMessage(round, summary, status, messagesCompacted) {
+    const existing =
+      findCompactMessage(round, status === "done") || findCompactMessage(round, false)
+    if (existing) {
+      existing.round = round
+      existing.summary = summary
+      existing.status = status
+      existing.messagesCompacted = messagesCompacted
+      return existing
+    }
+    const compact = {
+      id: "compact_" + result.length,
+      role: "compact",
+      round,
+      summary,
+      status,
+      messagesCompacted,
+      timestamp: "",
+    }
+    result.push(compact)
+    return compact
+  }
+
   for (const evt of events) {
     const t = evt.type
 
@@ -425,26 +464,15 @@ export function _replayEvents(messages, events) {
       })
     } else if (t === "compact_summary" || t === "compact_complete") {
       cur = null
-      result.push({
-        id: "compact_" + result.length,
-        role: "compact",
-        round: evt.compact_round || evt.round || 0,
-        summary: evt.summary || "",
-        status: "done",
-        messagesCompacted: evt.messages_compacted || 0,
-        timestamp: "",
-      })
+      upsertCompactMessage(
+        evt.compact_round || evt.round || 0,
+        evt.summary || "",
+        "done",
+        evt.messages_compacted || 0,
+      )
     } else if (t === "compact_start") {
       cur = null
-      result.push({
-        id: "compact_" + result.length,
-        role: "compact",
-        round: evt.compact_round || evt.round || 0,
-        summary: "",
-        status: "running",
-        messagesCompacted: 0,
-        timestamp: "",
-      })
+      upsertCompactMessage(evt.compact_round || evt.round || 0, "", "running", 0)
     } else if (t === "processing_error") {
       cur = null
       result.push({
@@ -960,32 +988,40 @@ export const useChatStore = defineStore("chat", {
       const msgs = this.messagesByTab[source]
 
       if (at === "compact_start") {
-        // Show a "compacting..." placeholder immediately
-        const round = data.round || 0
-        msgs.push({
-          id: "compact_" + round + "_" + Date.now(),
-          role: "compact",
-          round,
-          summary: "",
-          status: "running",
-          messagesCompacted: 0,
-          timestamp: new Date().toISOString(),
-        })
+        const round = data.compact_round || data.round || 0
+        const existing = [...msgs]
+          .reverse()
+          .find((msg) => msg.role === "compact" && msg.round === round)
+        if (existing) {
+          existing.summary = ""
+          existing.status = "running"
+          existing.messagesCompacted = 0
+        } else {
+          msgs.push({
+            id: "compact_" + round + "_" + Date.now(),
+            role: "compact",
+            round,
+            summary: "",
+            status: "running",
+            messagesCompacted: 0,
+            timestamp: new Date().toISOString(),
+          })
+        }
         return
       }
 
       if (at === "compact_complete") {
-        // Find the running compact message and update it
-        const round = data.round || 0
-        for (let i = msgs.length - 1; i >= 0; i--) {
-          if (msgs[i].role === "compact" && msgs[i].status === "running") {
-            msgs[i].summary = data.summary || ""
-            msgs[i].messagesCompacted = data.messages_compacted || 0
-            msgs[i].status = "done"
-            return
-          }
+        const round = data.compact_round || data.round || 0
+        const existing =
+          [...msgs].reverse().find((msg) => msg.role === "compact" && msg.round === round) ||
+          [...msgs].reverse().find((msg) => msg.role === "compact" && msg.status === "running")
+        if (existing) {
+          existing.round = round
+          existing.summary = data.summary || ""
+          existing.messagesCompacted = data.messages_compacted || 0
+          existing.status = "done"
+          return
         }
-        // Fallback: no running compact found, just push a new one
         msgs.push({
           id: "compact_" + round + "_" + Date.now(),
           role: "compact",

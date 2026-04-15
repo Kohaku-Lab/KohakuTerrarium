@@ -75,7 +75,7 @@ def show_agent_info_cli(agent_path: str) -> int:
 
     try:
 
-        with open(config_file) as f:
+        with open(config_file, encoding="utf-8") as f:
             config = yaml.safe_load(f)
 
         print(f"Agent: {config.get('name', path.name)}")

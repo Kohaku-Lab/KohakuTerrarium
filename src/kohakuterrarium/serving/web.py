@@ -168,7 +168,7 @@ def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
     # Redirect stderr to a log file so crashes aren't silent
     log_dir = Path.home() / ".kohakuterrarium"
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = open(log_dir / "app.log", "w")  # noqa: SIM115
+    log_file = open(log_dir / "app.log", "w", encoding="utf-8")  # noqa: SIM115
 
     kwargs: dict[str, object] = {
         "stdin": subprocess.DEVNULL,

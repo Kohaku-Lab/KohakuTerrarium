@@ -93,3 +93,55 @@ describe("chat store — interrupted task handling", () => {
     expect(chat.runningJobs.job_1).toBeUndefined()
   })
 })
+
+describe("chat store — compact round handling", () => {
+  it("replays compact start/complete as a single merged compact message", () => {
+    const { messages: replayed } = _replayEvents(
+      [],
+      [
+        { type: "compact_start", round: 9 },
+        {
+          type: "compact_complete",
+          round: 9,
+          summary: "summary text",
+          messages_compacted: 7,
+        },
+      ],
+    )
+
+    expect(replayed).toHaveLength(1)
+    expect(replayed[0]).toMatchObject({
+      role: "compact",
+      round: 9,
+      summary: "summary text",
+      status: "done",
+      messagesCompacted: 7,
+    })
+  })
+
+  it("merges live compact start/complete for the same round", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = { main: [] }
+    chat.activeTab = "main"
+
+    chat._handleActivity("main", {
+      activity_type: "compact_start",
+      round: 2,
+    })
+    chat._handleActivity("main", {
+      activity_type: "compact_complete",
+      round: 2,
+      summary: "merged summary",
+      messages_compacted: 12,
+    })
+
+    expect(chat.messagesByTab.main).toHaveLength(1)
+    expect(chat.messagesByTab.main[0]).toMatchObject({
+      role: "compact",
+      round: 2,
+      summary: "merged summary",
+      status: "done",
+      messagesCompacted: 12,
+    })
+  })
+})

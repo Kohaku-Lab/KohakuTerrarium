@@ -100,7 +100,7 @@ def _load_yaml() -> dict[str, Any]:
     if not PROFILES_PATH.exists():
         return {}
     try:
-        with open(PROFILES_PATH) as f:
+        with open(PROFILES_PATH, encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
     except Exception as e:
         logger.warning("Failed to load LLM profiles", error=str(e))
@@ -110,7 +110,7 @@ def _load_yaml() -> dict[str, Any]:
 def _save_yaml(data: dict[str, Any]) -> None:
     """Save the profiles YAML file."""
     PROFILES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(PROFILES_PATH, "w") as f:
+    with open(PROFILES_PATH, "w", encoding="utf-8") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
 
