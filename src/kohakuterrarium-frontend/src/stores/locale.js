@@ -1,11 +1,14 @@
 import { getHybridPrefSync, setHybridPref } from "@/utils/uiPrefs"
 
 export const DEFAULT_LOCALE = "en"
-export const SUPPORTED_LOCALES = ["en", "zh-CN", "de"]
+export const SUPPORTED_LOCALES = ["en", "zh-TW", "zh-CN", "ja", "de", "ko"]
 export const LOCALE_DISPLAY_NAMES = {
   en: "English",
+  "zh-TW": "繁體中文",
   "zh-CN": "简体中文",
+  ja: "日本語",
   de: "Deutsch",
+  ko: "한국어",
 }
 const LOCALE_PREF_KEY = "kt-locale"
 
