@@ -12,7 +12,7 @@ import sys
 import threading
 from pathlib import Path
 
-from kohakuterrarium.utils.logging import get_logger
+from kohakuterrarium.utils.logging import get_logger, set_level
 
 logger = get_logger(__name__)
 
@@ -88,6 +88,7 @@ def run_web_server(
     host: str = "127.0.0.1",
     port: int = 8001,
     dev: bool = False,
+    log_level: str = "INFO",
 ) -> None:
     """Start the FastAPI server, optionally serving the built frontend.
 
@@ -100,6 +101,7 @@ def run_web_server(
 
     from kohakuterrarium.api.app import create_app
 
+    set_level(log_level)
     static_dir = None if dev else WEB_DIST_DIR
 
     if not dev and not (static_dir and static_dir.is_dir()):
@@ -137,7 +139,7 @@ def run_web_server(
     uvicorn.run(app, host=host, port=port)
 
 
-def run_desktop_app(port: int = 8001) -> None:
+def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
     """Launch the desktop app as a detached process and return immediately.
 
     The caller's terminal is released right away. The child process
@@ -153,7 +155,15 @@ def run_desktop_app(port: int = 8001) -> None:
 
     # Always use sys.executable — it's the Python that's running kt right now,
     # guaranteed to have the correct env (works with uv, micromamba, venv, etc.)
-    cmd = [sys.executable, "-m", "kohakuterrarium.serving.web", "--port", str(port)]
+    cmd = [
+        sys.executable,
+        "-m",
+        "kohakuterrarium.serving.web",
+        "--port",
+        str(port),
+        "--log-level",
+        str(log_level),
+    ]
 
     # Redirect stderr to a log file so crashes aren't silent
     log_dir = Path.home() / ".kohakuterrarium"
@@ -180,7 +190,7 @@ def run_desktop_app(port: int = 8001) -> None:
     print(f"  Log: {log_dir / 'app.log'}")
 
 
-def _run_desktop_app_blocking(port: int = 8001) -> None:
+def _run_desktop_app_blocking(port: int = 8001, log_level: str = "INFO") -> None:
     """Actually run the desktop app (blocking). Called by the child process."""
     # Set AppUserModelID on Windows so the taskbar shows our icon
     # instead of the generic python.exe icon.
@@ -191,6 +201,8 @@ def _run_desktop_app_blocking(port: int = 8001) -> None:
             )
         except Exception:
             pass
+
+    set_level(log_level)
 
     try:
         import webview
@@ -311,5 +323,10 @@ if __name__ == "__main__":
 
     _parser = _ap.ArgumentParser()
     _parser.add_argument("--port", type=int, default=8001)
+    _parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+    )
     _args = _parser.parse_args()
-    _run_desktop_app_blocking(port=_args.port)
+    _run_desktop_app_blocking(port=_args.port, log_level=_args.log_level)

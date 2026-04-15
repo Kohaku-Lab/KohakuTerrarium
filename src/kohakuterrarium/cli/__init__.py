@@ -1,15 +1,7 @@
 """KohakuTerrarium CLI — command dispatch and argument parsing."""
 
 import argparse
-import importlib.metadata
-import os
-import platform
-import site
-import subprocess
-import sys
-from pathlib import Path
 
-from kohakuterrarium import __version__
 from kohakuterrarium.packages import resolve_package_path
 from kohakuterrarium.serving.web import run_desktop_app, run_web_server
 from kohakuterrarium.terrarium.cli import (
@@ -18,6 +10,7 @@ from kohakuterrarium.terrarium.cli import (
 )
 
 from kohakuterrarium.cli.auth import login_cli
+from kohakuterrarium.cli.config import add_config_subparser, config_cli
 from kohakuterrarium.cli.extension import extension_info_cli, extension_list_cli
 from kohakuterrarium.cli.mcp import mcp_list_cli
 from kohakuterrarium.cli.memory import embedding_cli, search_cli
@@ -31,81 +24,8 @@ from kohakuterrarium.cli.packages import (
 )
 from kohakuterrarium.cli.resume import resume_cli
 from kohakuterrarium.cli.run import run_agent_cli
-
-
-def _detect_install_source() -> str:
-    """Best-effort detection of how KohakuTerrarium is installed."""
-    try:
-        dist = importlib.metadata.distribution("KohakuTerrarium")
-    except importlib.metadata.PackageNotFoundError:
-        return "source checkout (not installed as a distribution)"
-
-    direct_url = None
-    try:
-        direct_url = dist.read_text("direct_url.json")
-    except FileNotFoundError:
-        direct_url = None
-
-    if direct_url:
-        direct_url_lower = direct_url.lower()
-        if '"editable": true' in direct_url_lower:
-            return "editable install"
-        if '"url": "file://' in direct_url_lower:
-            return "local path install"
-        if '"vcs_info"' in direct_url_lower:
-            return "vcs install"
-
-    package_path = Path(__file__).resolve()
-    site_roots = []
-    try:
-        site_roots.extend(Path(p).resolve() for p in site.getsitepackages())
-    except Exception:
-        pass
-    user_site = site.getusersitepackages()
-    if user_site:
-        site_roots.append(Path(user_site).resolve())
-
-    if any(root in package_path.parents for root in site_roots):
-        return "installed distribution"
-    return "source checkout"
-
-
-def _detect_git_revision() -> str:
-    repo_root = Path(__file__).resolve().parents[3]
-    git_dir = repo_root / ".git"
-    if not git_dir.exists():
-        return "n/a"
-    try:
-        proc = subprocess.run(
-            ["git", "-C", str(repo_root), "rev-parse", "--short", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return proc.stdout.strip() or "unknown"
-    except Exception:
-        return "unknown"
-
-
-def _format_version_report() -> str:
-    package_path = Path(__file__).resolve().parents[1]
-    lines = [
-        f"KohakuTerrarium {__version__}",
-        f"install: {_detect_install_source()}",
-        f"package path: {package_path}",
-        f"python: {sys.version.splitlines()[0]} ({sys.executable})",
-        f"platform: {platform.platform()}",
-        f"system: {platform.system()} {platform.release()} ({platform.machine()})",
-        f"processor: {platform.processor() or 'unknown'}",
-        f"cwd: {Path.cwd()}",
-        f"git revision: {_detect_git_revision()}",
-    ]
-
-    virtual_env = os.environ.get("VIRTUAL_ENV")
-    if virtual_env:
-        lines.append(f"venv: {virtual_env}")
-
-    return "\n".join(lines)
+from kohakuterrarium.cli.serve import add_serve_subparser, serve_cli
+from kohakuterrarium.cli.version import format_version_report
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -117,7 +37,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="store_true",
-        help="Show KohakuTerrarium version and environment information",
+        help="Show KohakuTerrarium version and runtime identity information",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show additional details for commands that support verbose output",
     )
     subparsers = parser.add_subparsers(dest="command", help="Commands")
 
@@ -304,6 +229,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="API-only mode (run vite dev server separately)",
     )
+    web_parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+        help="Logging level",
+    )
 
     # Desktop app command
     app_parser = subparsers.add_parser(
@@ -311,6 +242,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     app_parser.add_argument(
         "--port", type=int, default=8001, help="Internal server port"
+    )
+    app_parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+        help="Logging level",
     )
 
     # Model command
@@ -341,6 +278,24 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     mcp_list_parser.add_argument(
         "--agent", required=True, help="Path to agent config folder"
+    )
+
+    # Config command group
+    add_config_subparser(subparsers)
+
+    # Serve command group
+    add_serve_subparser(subparsers)
+
+    internal_serve_parser = subparsers.add_parser(
+        "__run-server", help=argparse.SUPPRESS
+    )
+    internal_serve_parser.add_argument("--host", default="127.0.0.1")
+    internal_serve_parser.add_argument("--port", type=int, default=8001)
+    internal_serve_parser.add_argument("--dev", action="store_true")
+    internal_serve_parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
     )
 
     return parser
@@ -393,13 +348,18 @@ def _dispatch_search(args: argparse.Namespace) -> int:
 
 def _dispatch_web(args: argparse.Namespace) -> int:
     """Handle the 'web' command."""
-    run_web_server(host=args.host, port=args.port, dev=args.dev)
+    run_web_server(
+        host=args.host,
+        port=args.port,
+        dev=args.dev,
+        log_level=args.log_level,
+    )
     return 0
 
 
 def _dispatch_app(args: argparse.Namespace) -> int:
     """Handle the 'app' command."""
-    run_desktop_app(port=args.port)
+    run_desktop_app(port=args.port, log_level=args.log_level)
     return 0
 
 
@@ -444,6 +404,17 @@ COMMANDS: dict[str, callable] = {
     "web": _dispatch_web,
     "app": _dispatch_app,
     "model": lambda args: model_cli(args),
+    "config": lambda args: config_cli(args),
+    "serve": lambda args: serve_cli(args),
+    "__run-server": lambda args: serve_cli(
+        argparse.Namespace(
+            serve_command="__run-server",
+            host=args.host,
+            port=args.port,
+            dev=args.dev,
+            log_level=args.log_level,
+        )
+    ),
     "extension": _dispatch_extension,
     "mcp": _dispatch_mcp,
 }
@@ -455,12 +426,12 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.version:
-        print(_format_version_report())
+        print(format_version_report(verbose=args.verbose))
         return 0
 
     # No command given: launch desktop app (used by Briefcase and double-click)
     if not args.command:
-        run_desktop_app()
+        run_desktop_app(log_level="INFO")
         return 0
 
     handler = COMMANDS.get(args.command)
