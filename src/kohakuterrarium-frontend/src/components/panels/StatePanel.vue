@@ -2,8 +2,8 @@
   <div class="h-full flex bg-warm-50 dark:bg-warm-900 overflow-hidden">
     <!-- Vertical tab rail on the left -->
     <div class="flex flex-col gap-1 py-2 px-1 border-r border-warm-200 dark:border-warm-700 shrink-0">
-      <button v-for="t in tabs" :key="t.id" class="w-8 h-8 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" :class="activeTab === t.id ? 'bg-iolite/10 text-iolite' : ''" :title="t.label" @click="activeTab = t.id">
-        <div :class="t.icon" class="text-sm" />
+      <button v-for="tab in tabs" :key="tab.id" class="w-8 h-8 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" :class="activeTab === tab.id ? 'bg-iolite/10 text-iolite' : ''" :title="tab.label" @click="activeTab = tab.id">
+        <div :class="tab.icon" class="text-sm" />
       </button>
     </div>
 
