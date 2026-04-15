@@ -1,8 +1,8 @@
 # Concepts Overview
 
-Concepts are where KohakuTerrarium defines what each thing is.
+Concepts are where KohakuTerrarium defines what each thing is and how the pieces fit together.
 
-That means a good concept page should answer questions like:
+A good concept page should answer questions like:
 
 - what is this thing
 - what boundary does it own
@@ -10,22 +10,14 @@ That means a good concept page should answer questions like:
 - what is it not
 - how does it relate to the other concepts
 
-This matters because KohakuTerrarium is not just a bag of features. It is a framework with a specific way of defining agent systems.
-
 ## The central idea
 
-KohakuTerrarium separates several different kinds of structure that many systems blur together.
+KohakuTerrarium is a framework for building real agents, not just LLM wrappers.
 
-At a high level, the framework defines:
+Its central abstraction is the **creature**: a standalone agent with its own controller, tools, sub-agents, triggers, memory, and I/O. A **terrarium** exists on top of that as an optional multi-agent wiring layer.
 
-- what a standalone agent is
-- how agent internals are composed
-- how multiple agents are wired together
-- how runtime boundaries are isolated
-- how extensibility works at both block level and connection level
-- how programmatic composition differs from runtime topology
-
-That separation is the heart of the architecture.
+That means the architecture starts with the single agent first.
+Terrarium-level composition is important, but it is not the main conceptual center.
 
 ## The major concepts
 
@@ -44,6 +36,7 @@ It is a complete unit with its own:
 - input and output
 - prompts
 - session-scoped state
+- searchable operational history
 
 A creature defines the **internal composition** of an agent.
 
@@ -52,6 +45,7 @@ A creature defines the **internal composition** of an agent.
 - a self-contained agent abstraction
 - the place where agent identity and behavior live
 - the owner of internal orchestration
+- the main reusable unit you can package, install, inherit from, and run directly
 
 ### A creature is not
 
@@ -64,7 +58,7 @@ A creature defines the **internal composition** of an agent.
 
 See [Terrariums](terrariums.md).
 
-A **terrarium** is the framework's definition of a multi-agent wiring layer.
+A **terrarium** is the framework's multi-agent wiring layer.
 
 It connects creatures through channels, manages lifecycle, and provides topology and observation.
 
@@ -75,12 +69,14 @@ A terrarium defines **external composition between creatures**.
 - a topology
 - a collaboration layer
 - a runtime world for creatures
+- optional composition around creatures, not a replacement for them
 
 ### A terrarium is not
 
 - another reasoning agent
 - the place where creature internals are defined
 - a replacement for the creature abstraction
+- the main conceptual center of the framework
 
 ## 3. Channels
 
@@ -111,22 +107,13 @@ These define runtime boundaries.
 - **Environment** is shared runtime state at the collaboration level
 - **Session** is private runtime state at the creature level
 
-This separation defines **where state is shared and where it is isolated**.
+This separation defines where state is shared and where it is isolated.
 
-### Environment is
+It also matters for stored history:
 
-- shared terrarium-facing state
-- the home of shared channels and common runtime context
-
-### Session is
-
-- creature-private operational state
-- the home of scratchpad and other local runtime state
-
-### They are not
-
-- the same thing
-- interchangeable storage scopes
+- session history supports resume
+- session history can also be searched later through FTS and vector-based memory search
+- agents can retrieve useful history from prior work through memory search tools
 
 ## 5. Tool formats
 
@@ -233,7 +220,7 @@ This is where your application becomes the orchestrator.
 
 These are related, but they are not the same thing.
 
-## Why the extensibility model is special
+## Why the extensibility model matters
 
 KohakuTerrarium does not only let you customize blocks.
 It also lets you customize connections.
@@ -262,6 +249,7 @@ If you want one short summary, use this:
 - **terrarium** defines how multiple creatures are wired together
 - **channels** define how creatures communicate
 - **environment and session** define where state is shared or isolated
+- **session history** is both resumable state and a searchable knowledge base
 - **modules** define the major blocks in a creature
 - **plugins** define the connections between those blocks
 - **composition algebra** defines programmatic orchestration in Python
@@ -271,6 +259,6 @@ If you want one short summary, use this:
 - [Agents](agents.md)
 - [Terrariums](terrariums.md)
 - [Channels](channels.md)
+- [Environment and Session](environment.md)
 - [Plugins and Extensibility](plugins.md)
 - [Composition Algebra](composition-algebra.md)
-- [Environment and Session](environment.md)

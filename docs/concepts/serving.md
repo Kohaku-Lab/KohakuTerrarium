@@ -1,6 +1,6 @@
 # Serving Layer
 
-The serving layer (`src/kohakuterrarium/serving/`) provides a transport-agnostic Python API for hosting and managing agents and terrariums. It sits between the core framework and any interface layer (HTTP API, CLI, Web UI).
+The serving layer (`src/kohakuterrarium/serving/`) provides a transport-agnostic Python API for hosting and managing creatures and terrariums. It sits between the core framework and interface layers such as the HTTP API, web UI, desktop app, and CLI-managed service surfaces.
 
 ## Key Difference: Serving vs HTTP API
 
@@ -18,7 +18,7 @@ The serving layer is the single source of truth for all runtime operations. The 
 ```python
 from kohakuterrarium.serving import KohakuManager
 
-manager = KohakuManager(session_dir=".kohaku/sessions")
+manager = KohakuManager(session_dir="~/.kohakuterrarium/sessions")
 ```
 
 ### Standalone Agent Operations
@@ -148,15 +148,17 @@ Represents an agent output event (text chunk, tool activity).
 | `timestamp` | `datetime` | When created |
 | `metadata` | `dict` | Extra data |
 
-## Session Persistence
+## Session persistence
 
 When `session_dir` is provided, `KohakuManager` automatically creates a `SessionStore` for each terrarium. The store records:
 
-- All creature events (text, tool calls, tool results, trigger fires)
-- Conversation snapshots (raw `list[dict]` via msgpack, preserving tool_calls metadata)
-- Agent state (scratchpad, token usage)
-- Channel messages (via `on_send` callbacks)
-- Sub-agent conversations and metadata
+- all creature events (text, tool calls, tool results, trigger fires)
+- conversation snapshots
+- creature state such as scratchpad and related runtime metadata
+- channel messages via `on_send` callbacks
+- sub-agent conversations and metadata
+
+That stored history is useful not only for resume. It also becomes searchable session history that can later be queried through FTS or vector-based memory search.
 
 The recording uses `SessionOutput`, an `OutputModule` added as a secondary output on each creature's output router. This captures events without modifying the processing loop, following the same pattern as the WebSocket `StreamOutput`. See [Execution Model](execution.md) for more on secondary outputs.
 
