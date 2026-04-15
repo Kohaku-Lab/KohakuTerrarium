@@ -1,18 +1,32 @@
 # Creatures
 
-A **creature** is KohakuTerrarium's unit of agent definition.
+A **creature** is KohakuTerrarium's definition of a standalone agent.
 
-It is not just a prompt or a tool list. A creature is a complete standalone agent with its own controller, tools, sub-agents, triggers, prompts, and state.
+It is not just a prompt, not just a tool list, and not just a workflow node. A creature is a complete agent runtime with its own controller, tools, sub-agents, triggers, prompts, session state, and I/O surfaces.
 
-You can run a creature directly with:
+You can run a creature directly:
 
 ```bash
 kt run <path>
+kt run @package/path/to/creature
 ```
 
 You can also place the same creature inside a terrarium without changing its internal logic.
 
 For the architecture behind this split, see [Agents](../concepts/agents.md) and [Terrariums](../concepts/terrariums.md).
+
+## Creature first, not terrarium first
+
+The creature is the main reusable unit in KohakuTerrarium.
+
+That means the normal workflow is:
+
+1. use a creature directly
+2. customize or inherit from a creature
+3. package and share creatures
+4. optionally compose them into a terrarium later
+
+This matters because many people assume they need to start with a multi-agent setup. In KohakuTerrarium, you usually do not.
 
 ## What lives in a creature
 
@@ -25,6 +39,7 @@ A creature config usually defines:
 - `subagents` for nested delegation
 - `triggers` for automatic wake-up behavior
 - `termination` and `compact` for runtime control
+- session-related behavior such as searchable history and memory usage
 
 A typical creature folder looks like this:
 
@@ -37,15 +52,11 @@ my-creature/
   memory/           # optional
 ```
 
-## Two kinds of creature usage
+## The most common ways to use creatures
 
-There are really two common ways to work with creatures.
-
-### 1. Use a packaged or default creature
+### 1. Run an existing creature directly
 
 This is the fastest path.
-
-Examples:
 
 ```bash
 kt run @kt-defaults/creatures/general
@@ -53,11 +64,40 @@ kt run @kt-defaults/creatures/swe
 kt run @kt-defaults/creatures/reviewer
 ```
 
-### 2. Create your own creature or creature-based agent
+You can also run local creatures from this repository or from your own package.
 
-You can create a new config from scratch, or inherit from an existing creature and only override what differs.
+### 2. Inherit from an existing creature
 
-That inheritance model is one of the most important parts of the system.
+This is the most common real-world customization path.
+
+```yaml
+name: my_team_coder
+base_config: "@kt-defaults/creatures/swe"
+
+controller:
+  llm: claude-sonnet-4.6
+
+system_prompt_file: prompts/system.md
+```
+
+Use this when you want to keep most of an existing creature, but change:
+
+- the model
+- prompt additions
+- tools or sub-agents
+- runtime surfaces
+- project-specific behavior
+
+### 3. Build a creature from scratch
+
+This is useful when you really want a new standalone agent identity and capability profile.
+
+## CLI terminology note
+
+The product concept is **creature**, but some CLI help text and internal code paths still use the older word **agent** for standalone creature operations.
+
+For example, `kt run` and `kt info` may describe a standalone creature as an "agent" in help output.
+In practice, for user-facing architecture, you should think in terms of creatures.
 
 ## Inheritance model
 
@@ -91,14 +131,14 @@ At a high level:
 |---------------|----------------|
 | scalar values | child overrides base |
 | dictionaries | child keys override matching base keys |
-| tools / subagents | child list extends base list, typically by name |
+| tools / subagents | child list extends the base list, typically by name |
 | prompt files | base prompt comes first, child prompt is appended |
 
 That gives you a practical workflow:
 
 - put shared behavior in a base creature
 - put specialization in child creatures
-- put app-specific overrides in the final agent config
+- put app-specific overrides in the final creature config
 
 ## Prompt layering
 
@@ -106,15 +146,15 @@ Prompt inheritance is additive.
 
 If a specialized creature inherits from a base creature, the base prompt is loaded first and the specialized prompt is appended after it.
 
-That is important because it lets you separate:
+That lets you separate:
 
 - general behavior and safety rules
 - domain-specific methodology
 - app-specific instructions
 
-## Default creature roles
+## Official default creatures
 
-The repo ships a defaults package with several reusable creature profiles.
+The official [`kt-defaults`](../../kt-defaults/README.md) package ships several reusable creature profiles.
 
 ### `general`
 
@@ -124,13 +164,13 @@ Use it when you want a capable general-purpose agent with the standard built-in 
 
 ### `swe`
 
-Software engineering focused creature.
+Software-engineering focused creature.
 
-Use it for coding, repository work, and implementation-heavy tasks.
+Use it for coding, repository work, debugging, and implementation-heavy tasks.
 
 ### `reviewer`
 
-Code review focused creature.
+Review-focused creature.
 
 Use it when you want a stricter review posture and structured findings.
 
@@ -154,7 +194,7 @@ Use it for storytelling, drafting, and creative collaboration.
 
 ### `root`
 
-Terrarium management creature.
+Terrarium-management creature.
 
 Use it when you want a root agent that operates a team through terrarium management tools.
 
@@ -210,33 +250,6 @@ Run it with:
 kt run path/to/my_agent
 ```
 
-## Creating a creature by inheriting
-
-This is the more common path for real usage.
-
-```yaml
-name: my_team_coder
-base_config: "@kt-defaults/creatures/swe"
-
-controller:
-  llm: gemini
-
-system_prompt_file: prompts/system.md
-
-input:
-  type: cli
-
-output:
-  type: stdout
-```
-
-Use this when you want to keep the default creature behavior, but customize:
-
-- the model
-- the prompt additions
-- some tools or sub-agents
-- runtime surfaces
-
 ## Extending tools and sub-agents
 
 A child creature can add more capabilities on top of its base:
@@ -257,6 +270,27 @@ Use this when the specialization is capability-based, not just prompt-based.
 
 For the full extension model, see [Custom Modules](custom-modules.md).
 
+## Package-based creature workflow
+
+One of the important practical ideas in KohakuTerrarium is that creatures are meant to be packaged, installed, reused, and shared.
+
+Typical workflow:
+
+1. install an official or third-party package
+2. run a creature directly with `@package/...`
+3. inherit from that creature if you need customization
+4. publish your own package later if needed
+
+Examples:
+
+```bash
+kt install https://github.com/Kohaku-Lab/kt-defaults.git
+kt install https://github.com/someone/cool-creatures.git
+
+kt run @kt-defaults/creatures/swe
+kt run @cool-creatures/creatures/my-agent
+```
+
 ## Creatures inside terrariums
 
 When a creature is used inside a terrarium, the terrarium runtime handles the wiring around it:
@@ -264,6 +298,7 @@ When a creature is used inside a terrarium, the terrarium runtime handles the wi
 - channel triggers are injected based on terrarium topology
 - communication happens through channels
 - the terrarium manages lifecycle and observation
+- send/listen behavior is determined by terrarium wiring, not by rewriting the creature itself
 
 The key idea is that the creature still remains a creature. The terrarium does not turn it into a different abstraction.
 
@@ -304,6 +339,7 @@ If the difference is topology and communication, it is probably a terrarium conc
 
 - [Getting Started](getting-started.md)
 - [Configuration](configuration.md)
+- [Sessions](sessions.md)
 - [Terrariums](terrariums.md)
 - [Agents Concept](../concepts/agents.md)
 - [Terrariums Concept](../concepts/terrariums.md)

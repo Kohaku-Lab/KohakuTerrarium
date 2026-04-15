@@ -1,211 +1,202 @@
 # Sessions
 
-KohakuTerrarium persists sessions to `.kohakutr` files (SQLite via KohakuVault). A session captures everything needed to inspect, search, and resume an agent or terrarium.
+KohakuTerrarium persists sessions to `.kohakutr` files. A session captures everything needed to inspect, resume, search, and reuse past agent or terrarium work.
 
-## What Gets Saved
+A session is not only a resume file.
+It is also a searchable knowledge store for prior work, similar in spirit to a RAG database built from your agent history.
+
+## Where sessions live
+
+By default, sessions are stored under:
+
+```text
+~/.kohakuterrarium/sessions/
+```
+
+KohakuTerrarium creates session files automatically unless disabled.
+
+## What gets saved
+
+A session stores much more than a transcript.
 
 | Data | Description |
 |------|-------------|
-| Conversation snapshots | Raw `list[dict]` via msgpack, preserving full `tool_calls` metadata |
-| Event log | Append-only log of every text chunk, tool call, tool result, trigger fire, token usage |
-| Scratchpad state | Key-value pairs from the `scratchpad` tool |
-| Token usage | Cumulative prompt/completion/total token counts per agent |
-| Sub-agent conversations | Saved before sub-agent destruction, including run metadata |
-| Channel messages | All messages sent through channels (via `on_send` callbacks) |
+| Conversation history | Message history, including tool-call metadata |
+| Event log | Streaming text, tool calls, tool results, trigger activity, and runtime events |
+| Scratchpad state | Key-value state from the scratchpad tool |
+| Sub-agent state | Saved sub-agent runs and related metadata |
+| Channel messages | Messages sent through terrarium channels |
+| Jobs | Background tool and sub-agent job records |
 | Resumable triggers | Trigger state for restoring autonomous behavior |
+| Config metadata | Session type, config path, runtime metadata, topology details |
 
-## Automatic Session Creation
+Session metadata also records useful runtime context such as the config path, working directory, host and Python version, and whether the session came from a standalone creature or a terrarium.
 
-When you pass `--session` to `kt run` or `kt terrarium run`, a `.kohakutr` file is created in `.kohaku/sessions/`:
+## Automatic session creation
 
-```bash
-kt run examples/agent-apps/swe_agent --session
-# Creates: .kohaku/sessions/swe_agent_20260404_120000.kohakutr
+When sessions are enabled, the runtime creates `.kohakutr` files automatically.
+
+The filename pattern is based on the config name plus a generated ID, for example:
+
+```text
+swe_team_a1b2c3d4e5f6.kohakutr
 ```
 
-The filename includes the agent (or terrarium) name and a timestamp.
+This applies to both standalone creature runs and terrarium runs.
 
-## Resuming a Session
+## Resume a session
 
 ```bash
-# Resume a specific session file
-kt resume .kohaku/sessions/swe_agent_20260404_120000.kohakutr
-
-# Resume the most recent session
+kt resume
 kt resume --last
+kt resume swe_team
+kt resume ~/.kohakuterrarium/sessions/swe_team_a1b2c3d4e5f6.kohakutr
 ```
 
-Resume rebuilds the agent from its original config and injects the saved conversation. The agent picks up right where it left off, with full context of previous tool calls and responses.
+Resume rebuilds the runtime from the original config and restores the saved operational state.
 
-## Listing and Inspecting Sessions
+For standalone creatures, this means restoring the creature conversation and runtime state.
+For terrariums, this means restoring the terrarium session, including root events, creature events, and channel history.
+
+Terrarium sessions are resumed into the terrarium TUI.
+
+## Creature sessions vs terrarium sessions
+
+### Creature sessions
+
+A standalone creature session captures the creature's runtime history and state, including:
+
+- conversation history
+- tool calls and results
+- scratchpad state
+- sub-agent runs
+- resumable triggers
+
+### Terrarium sessions
+
+A terrarium session captures the whole multi-creature runtime, including:
+
+- root-agent events if a root exists
+- events from every creature
+- conversation snapshots for each creature
+- channel messages across the terrarium
+- per-creature state and metadata
+- terrarium topology metadata such as creature names and declared channels
+
+This makes terrarium sessions especially useful for later inspection and memory search.
+
+## Searchable session history
+
+Session history is stored not only for resume, but also as a searchable knowledge base.
+Agents can search prior work directly through the built-in memory search tools, and users can search sessions from the CLI.
+
+### Search modes
+
+KohakuTerrarium supports several search modes over session history:
+
+| Mode | Description |
+|------|-------------|
+| `fts` | Full-text keyword search. Good for identifiers, filenames, error strings, and exact terms. |
+| `semantic` | Vector similarity search. Good for natural-language queries and conceptual recall. |
+| `hybrid` | Combines FTS and semantic search. |
+| `auto` | Uses hybrid when vectors are available, otherwise falls back to FTS. This is the default behavior. |
+
+### Agent memory search
+
+When a session is active, agents can use the built-in memory search tools to retrieve useful history from prior work.
+
+This is especially useful when:
+
+- earlier work has been compacted out of the live context
+- a previous session already solved a similar problem
+- a terrarium produced useful intermediate results you want to recall later
+
+### CLI session search
+
+You can search saved sessions from the command line:
 
 ```bash
-# List all saved sessions
-kt list
+kt search "auth bug"
+kt search "deploy failure after websocket reconnect" --mode fts
+kt search "a similar incident involving retries and backoff" --mode semantic
 ```
 
-### Inspect Script
+Search defaults to `auto`, not plain FTS.
+
+Depending on your CLI usage, you can also filter or narrow searches by session or agent when supported by the command.
+
+## Embeddings for semantic search
+
+Semantic and hybrid search use embeddings.
+
+Check status or rebuild embeddings with:
+
+```bash
+kt embedding status
+kt embedding rebuild
+```
+
+Embedding provider selection defaults to `auto`.
+That mode prefers locally available providers such as `model2vec`, then `sentence-transformer`, before falling back to no vector support.
+
+### Common embedding providers
+
+| Provider | Description |
+|----------|-------------|
+| `model2vec` | Lightweight local embeddings and a common auto-selected default when installed |
+| `sentence-transformer` | Higher-quality local semantic embeddings |
+| `api` | OpenAI-compatible embedding APIs |
+
+FTS search remains available even if no embedding provider is installed.
+
+## Inspecting sessions
 
 For deeper inspection, use the included script:
 
 ```bash
-# Show everything (events, conversations, metadata)
-python scripts/inspect_session.py session.kohakutr --all
-
-# Full-text search across all session content
-python scripts/inspect_session.py session.kohakutr --search "auth bug"
+python scripts/inspect_session.py ~/.kohakuterrarium/sessions/my_session.kohakutr --all
+python scripts/inspect_session.py ~/.kohakuterrarium/sessions/my_session.kohakutr --search "auth bug"
 ```
 
-The inspect script reads the `.kohakutr` SQLite file and prints formatted event logs, conversation history, token usage, and channel messages.
+This is useful for examining event logs, metadata, channel messages, and stored conversation history.
 
-## Terrarium Sessions
+## Web and service integration
 
-When a terrarium runs with `--session`, the `KohakuManager` creates a single `SessionStore` for the entire terrarium. This store records:
+The serving layer and web UI can also use session storage.
 
-- Events from every creature (keyed by creature name)
-- Conversation snapshots for each creature independently
-- All channel messages across the terrarium
-- Per-creature scratchpad and token usage
+The API/server side uses the same session directory model and can replay saved runtime history into the UI. For terrariums, this includes:
 
-Each creature gets a `SessionOutput` module added as a secondary output on its output router. This captures events without modifying the creature's processing loop.
+- root tab state
+- creature tabs
+- `#channel` tabs for channel history
 
-```bash
-# Start terrarium with session
-kt terrarium run terrariums/swe_team/ --session
+See [Serving](../concepts/serving.md) and [HTTP API](../reference/http.md).
 
-# Resume terrarium session
-kt resume .kohaku/sessions/swe_team_20260404_120000.kohakutr
-```
-
-The resume function detects whether a `.kohakutr` file contains an agent or terrarium session and rebuilds accordingly.
-
-## Web Dashboard
-
-A Vue 3 web frontend provides real-time management of agents and terrariums:
-
-```bash
-# Start API server
-cd KohakuTerrarium && python -m kohakuterrarium.api.main
-
-# Start frontend dev server
-npm run dev --prefix src/kohakuterrarium-frontend
-```
-
-Features: terrarium topology graph, multi-tab chat (root + creatures + channels), real-time streaming, sub-agent tool activity, channel message feed, token usage tracking, dark/light mode with gemstone color theme.
-
-The API server uses `KohakuManager` (from `src/kohakuterrarium/serving/`) which automatically records sessions when `session_dir` is configured. See [Concepts: Serving](../concepts/serving.md) for the serving layer architecture.
-
-## Memory Search
-
-Sessions support full-text (FTS5) and semantic (vector) search over the event history. This lets agents recall specific details from earlier in the conversation, even after context compaction.
-
-### The `search_memory` Tool
-
-Agents automatically have access to `search_memory` when a session is active. It searches the session's indexed event log.
-
-Search modes:
-
-| Mode | Description |
-|------|-------------|
-| `fts` | Keyword search via SQLite FTS5. Fast, good for identifiers, error codes, file paths. |
-| `semantic` | Vector similarity search. Requires an embedding model. Good for natural-language queries. |
-| `hybrid` | Combines FTS + semantic with reciprocal rank fusion. Best overall quality. |
-| `auto` | Uses `hybrid` if vectors are available, otherwise falls back to `fts`. This is the default. |
-
-Example tool call (bracket format):
-
-```
-[/search_memory]
-query: authentication token refresh
-mode: auto
-k: 5
-[search_memory/]
-```
-
-Results include the matched content, round number, timestamp, block type (user, text, tool), and relevance score.
-
-### CLI: Searching Sessions
-
-Search a session file from the command line:
-
-```bash
-# Basic search (uses FTS by default)
-kt search .kohaku/sessions/my_session.kohakutr "auth bug"
-
-# Semantic search with result limit
-kt search .kohaku/sessions/my_session.kohakutr "how did we fix the login issue" --mode semantic -k 5
-
-# Filter by agent name (useful for terrarium sessions)
-kt search .kohaku/sessions/my_session.kohakutr "deploy" --agent swe
-```
-
-### CLI: Building Embeddings
-
-Before semantic or hybrid search works, you need to build embeddings for a session:
-
-```bash
-# Build embeddings with the default provider (model2vec if installed)
-kt embedding .kohaku/sessions/my_session.kohakutr
-
-# Use a specific provider and model
-kt embedding .kohaku/sessions/my_session.kohakutr --provider sentence-transformer --model jinaai/jina-embeddings-v5-text-nano
-
-# Use OpenAI API embeddings with custom dimensions
-kt embedding .kohaku/sessions/my_session.kohakutr --provider api --model text-embedding-3-small --dimensions 512
-```
-
-### Embedding Providers
-
-| Provider | Description | Install |
-|----------|-------------|---------|
-| `model2vec` | Lightweight static embeddings (~8 MB, microsecond inference). Default when available. | `pip install model2vec` |
-| `sentence-transformer` | Higher quality (Jina, Gemma, bge, etc.). Better for nuanced queries. | `pip install sentence-transformers` |
-| `api` | OpenAI-compatible `/v1/embeddings` endpoint. Works with OpenAI, Google, Jina. | (none, uses httpx) |
-
-FTS keyword search is always available without any embedding setup.
-
-For embedding configuration in agent YAML, see the `memory.embedding` section in [Configuration Reference](configuration.md).
-
-## Programmatic Usage
+## Programmatic usage
 
 ```python
 from kohakuterrarium.session.store import SessionStore
 
-# Open or create a session file
-store = SessionStore(".kohaku/sessions/my_session.kohakutr")
+store = SessionStore("my_session.kohakutr")
 
-# Record events
-store.append_event("swe_agent", "text", {"content": "Hello"})
-
-# Save conversation snapshot
-store.save_conversation("swe_agent", messages)
-
-# Save agent state
-store.save_state("swe_agent", scratchpad={"key": "value"}, token_usage={"total": 1500})
-
-# Full-text search across all content
+# Search stored history
 results = store.search("authentication bug", k=10)
 
-# Channel messages
-store.save_channel_message("ideas", {"sender": "brainstorm", "content": "..."})
-messages = store.get_channel_messages("ideas")
-
-# Cleanup
+# Flush and close when done
 store.flush()
 store.close()
 ```
 
-For the full `SessionStore` API, see [Python API Reference](../reference/python.md).
+For the full API surface, see [Python API Reference](../reference/python.md).
 
-### Resume Functions
+## Why this matters
 
-```python
-from kohakuterrarium.session.resume import resume_agent, resume_terrarium, detect_session_type
+Sessions are one of the reasons KohakuTerrarium feels like a real agent runtime instead of only a prompt runner.
 
-# Detect session type
-session_type = detect_session_type("session.kohakutr")  # "agent" or "terrarium"
+They let you:
 
-# Resume
-agent = resume_agent("session.kohakutr")
-runtime = resume_terrarium("session.kohakutr")
-```
+- resume work later
+- inspect what happened operationally
+- search prior runs like a knowledge base
+- let agents recall useful history directly
+- preserve both standalone creature behavior and terrarium-level collaboration history

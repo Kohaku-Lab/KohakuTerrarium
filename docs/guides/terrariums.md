@@ -2,12 +2,14 @@
 
 A **terrarium** is KohakuTerrarium's multi-agent composition layer.
 
-It wires standalone creatures together through channels, manages lifecycle, and provides observability. It does not add its own LLM reasoning layer.
+It wires standalone creatures together through channels, manages lifecycle, and provides observation surfaces. It does not add its own LLM reasoning layer.
 
 That distinction matters:
 
-- a creature is an agent
-- a terrarium is the runtime that connects agents
+- a creature is the actual agent
+- a terrarium is the runtime that connects creatures
+
+Terrariums are useful, but they are not the main concept of the framework. The intelligence-bearing unit is still the creature.
 
 For the deeper architectural model, see [Terrariums Concept](../concepts/terrariums.md).
 
@@ -106,9 +108,9 @@ Good for:
 
 See [Channels](../concepts/channels.md) for the full conceptual model.
 
-## Two common terrarium patterns
+## Common terrarium patterns
 
-## 1. Pipeline
+### Pipeline
 
 One creature hands work to the next.
 
@@ -116,9 +118,7 @@ One creature hands work to the next.
 tasks -> analyst -> notes -> writer -> drafts -> reviewer
 ```
 
-Use this when work has a natural stage order.
-
-## 2. Team with shared chat
+### Team with shared chat
 
 Creatures have specialized roles and share a broadcast channel.
 
@@ -128,8 +128,6 @@ team_chat (broadcast)
   reviewer
   planner
 ```
-
-Use this when you want coordination rather than strict stage-by-stage handoff.
 
 In practice, many useful terrariums combine both.
 
@@ -147,13 +145,36 @@ Run an installed terrarium:
 kt terrarium run @kt-defaults/terrariums/swe_team
 ```
 
+`kt terrarium run` defaults to `tui`.
+
 Useful options:
 
 ```bash
 kt terrarium run @kt-defaults/terrariums/swe_team --mode tui
+kt terrarium run @kt-defaults/terrariums/swe_team --mode cli
+kt terrarium run path/to/terrarium --mode plain --observe
 kt terrarium run path/to/terrarium --no-session
 kt terrarium run path/to/terrarium --log-level DEBUG
 ```
+
+### Mode behavior
+
+#### `tui`
+
+The default terrarium runtime surface.
+Best when you want the full terrarium UI.
+
+#### `cli`
+
+If the terrarium defines a root agent, `cli` mode mounts that root agent.
+If there is no root agent, `cli` mode auto-mounts the first creature and warns that the output of other creatures is not directly surfaced there.
+
+#### `plain`
+
+Minimal terminal surface.
+Useful for automation, logs, and service-style operation.
+
+In plain mode, you can explicitly enable or disable channel observation with `--observe` and `--no-observe`.
 
 For exact command syntax, see [CLI Reference](../reference/cli.md).
 
@@ -169,7 +190,7 @@ Use this when you want:
 
 - one main point of interaction
 - orchestration through a controlling creature
-- an experience closer to interacting with a single top-level agent that manages a team under the hood
+- an experience closer to interacting with one top-level agent that manages a team underneath
 
 ### Without a root agent
 
@@ -181,11 +202,11 @@ Use this when you want:
 - service-style orchestration
 - explicit channel-level control
 
+In some non-root flows, the runtime can seed an initial message into a channel for startup.
+
 ## Creature reuse inside a terrarium
 
 A terrarium should reuse creatures rather than redefine them.
-
-That is one of the strongest design properties in this codebase.
 
 A good terrarium config says:
 
@@ -194,6 +215,8 @@ A good terrarium config says:
 - what that creature can send
 
 It should not restate the creature's internal behavior.
+
+This is one of the strongest design properties in KohakuTerrarium.
 
 ## Practical design advice
 
@@ -214,7 +237,7 @@ Examples:
 - whether there is a root agent
 - whether outputs are observed or logged
 
-That split keeps your architecture understandable as the system grows.
+That split keeps the system understandable as it grows.
 
 ## Example terrarium design
 
@@ -255,44 +278,40 @@ This is a good example of hierarchy:
 - creature configs define agent behavior
 - the terrarium defines collaboration topology
 
-## Terrarium persistence and observation
+## Terrarium sessions and observation
 
 Terrariums can be persisted and resumed just like standalone creatures.
 
-Typical operations:
+A terrarium session can include:
 
-```bash
-kt terrarium run @kt-defaults/terrariums/swe_team
-kt resume
-kt resume --last
-```
+- root-agent events
+- per-creature events
+- conversation snapshots for each creature
+- channel message history
+- topology metadata such as creatures and channels
 
-The runtime can also observe channel traffic and expose status through service APIs and UI surfaces.
+When resumed into the terrarium UI, these histories can be replayed into root tabs, creature tabs, and channel tabs.
 
-See:
+See [Sessions](sessions.md).
 
-- [Sessions](sessions.md)
-- [Serving Layer](../concepts/serving.md)
-- [HTTP API](../reference/http.md)
+## When to use a terrarium
 
-## When to split into multiple terrariums
+Use a terrarium when you need:
 
-If one terrarium starts doing too many unrelated jobs, split it.
+- multiple creatures with distinct roles
+- explicit communication through channels
+- reusable team topologies
+- observation across a multi-agent runtime
 
-A good terrarium usually has one collaboration purpose, such as:
-
-- software delivery workflow
-- research workflow
-- writing workflow
-- monitoring workflow
-
-If you find yourself inventing many disconnected channels for unrelated tasks, that is often a sign the system boundary is too large.
+Do not start with a terrarium just because you assume multi-agent is the default.
+In KohakuTerrarium, it usually is not.
+Start with a creature unless your problem is truly about multi-creature collaboration.
 
 ## Related reading
 
 - [Getting Started](getting-started.md)
 - [Creatures](creatures.md)
-- [Configuration](configuration.md)
+- [Sessions](sessions.md)
 - [Channels](../concepts/channels.md)
 - [Terrariums Concept](../concepts/terrariums.md)
 - [Examples](examples.md)

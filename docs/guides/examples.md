@@ -2,12 +2,12 @@
 
 The `examples/` directory is one of the best ways to understand how KohakuTerrarium is meant to be used in practice.
 
-It shows the framework from four angles:
+Read it from a creature-first perspective:
 
 - config-driven creatures in `examples/agent-apps/`
 - programmatic usage in `examples/code/`
 - plugin examples in `examples/plugins/`
-- multi-agent systems in `examples/terrariums/`
+- optional multi-agent systems in `examples/terrariums/`
 
 For the raw directory overview, see [`examples/README.md`](../../examples/README.md).
 
@@ -20,7 +20,13 @@ Read them as architecture patterns:
 - what kind of creature is this
 - what runtime surface does it use
 - what capability or extension point is it demonstrating
-- is this a standalone creature or a terrarium topology
+- is this a standalone creature or an optional terrarium topology
+
+## Start with `kt-defaults` first
+
+If your goal is to run something useful quickly, start with [`kt-defaults`](../../kt-defaults/README.md) before digging through examples.
+
+The examples are especially good when you want to study patterns, integration, or extension points.
 
 ## Agent app examples
 
@@ -34,7 +40,7 @@ kt run examples/agent-apps/rp_agent
 
 ### `planner_agent`
 
-A good example when you want to study planning-oriented behavior and internal task structure.
+A good example for planning-oriented behavior and internal task structure.
 
 Look here if you want to understand:
 
@@ -49,7 +55,7 @@ A trigger-oriented example.
 Look here if you want to understand:
 
 - agents that are not primarily user-input driven
-- timer or monitoring style behavior
+- timer or monitoring-style behavior
 - automation-oriented creature design
 
 ### `discord_bot`
@@ -96,6 +102,8 @@ Look here if you want to understand:
 
 These are for using KohakuTerrarium as a Python framework, not just as a CLI app.
 
+The key distinction from config-based usage is simple: your program is the orchestrator, and the agents are runtime components your code invokes.
+
 Important examples include:
 
 ### `programmatic_chat.py`
@@ -124,7 +132,8 @@ Useful for understanding multiple-agent coordination patterns driven directly fr
 
 ## Terrarium examples
 
-These are the best examples for understanding topology.
+These examples are about topology and collaboration between creatures.
+They are useful, but they are not the first place most users should start.
 
 Run them with:
 
@@ -136,7 +145,7 @@ kt terrarium run examples/terrariums/research_assistant
 
 ### `code_review_team`
 
-A software workflow style terrarium.
+A software workflow terrarium.
 
 Look here if you want to understand:
 
@@ -152,7 +161,7 @@ Look here if you want to understand:
 
 - staged handoff through channels
 - how different creative roles can be composed
-- pipeline-like multi-agent structures
+- pipeline-style multi-agent structures
 
 ### `research_assistant`
 
@@ -186,9 +195,10 @@ Important patterns shown there include:
 
 ### If you want to build a coding creature
 
-1. `examples/agent-apps/planner_agent`
-2. `examples/code/programmatic_chat.py`
-3. `examples/terrariums/code_review_team`
+1. [`kt-defaults`](../../kt-defaults/README.md)
+2. `examples/agent-apps/planner_agent`
+3. `examples/code/programmatic_chat.py`
+4. [Creatures](creatures.md)
 
 ### If you want to build a custom integration
 
@@ -196,7 +206,7 @@ Important patterns shown there include:
 2. `examples/plugins/`
 3. [Custom Modules](custom-modules.md)
 
-### If you want to understand multi-agent composition
+### If you want to understand optional multi-agent composition
 
 1. `examples/terrariums/code_review_team`
 2. `examples/terrariums/research_assistant`
@@ -212,6 +222,7 @@ Important patterns shown there include:
 
 ## Main takeaway
 
-The examples directory is not a bonus folder. It is one of the clearest expressions of the framework's actual shape.
+The examples directory is not a bonus folder.
+It is one of the clearest expressions of how the framework is actually meant to be used.
 
-If the documentation tells you the theory, the examples tell you how the theory is meant to be used.
+But if your goal is simply to get a useful agent running, start with `kt-defaults`, then come back to the examples when you want patterns and implementation ideas.
