@@ -145,7 +145,7 @@ def resume_agent(
         logger.info("Scratchpad restored", agent=agent_name, keys=len(pad_data))
 
     # Load events for output replay on resume
-    resume_events = store.get_events(agent_name)
+    resume_events = store.get_resumable_events(agent_name)
     if resume_events:
         agent._pending_resume_events = resume_events
         logger.info("Resume events loaded", agent=agent_name, count=len(resume_events))
@@ -223,7 +223,7 @@ def resume_terrarium(
             "conversation": store.load_conversation(name),
             "scratchpad": store.load_scratchpad(name),
         }
-        events = store.get_events(name)
+        events = store.get_resumable_events(name)
         if events:
             resume_events[name] = events
         triggers = store.load_triggers(name)

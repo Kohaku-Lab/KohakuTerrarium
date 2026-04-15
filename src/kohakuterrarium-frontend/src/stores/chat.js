@@ -47,7 +47,7 @@ export function _convertHistory(messages) {
  *
  * Returns { messages, pendingJobs } where pendingJobs is a map of
  * jobId -> { name, type, startedAt } for tools/sub-agents that started
- * but never received a done/error event (still running or interrupted).
+ * but never received a done/error event.
  */
 export function _replayEvents(messages, events) {
   if (!events?.length) return { messages: _convertHistory(messages), pendingJobs: {} }
@@ -459,7 +459,6 @@ export function _replayEvents(messages, events) {
   const pendingJobs = {}
   for (const [jobId, toolPart] of Object.entries(startedJobs)) {
     if (!completedJobs.has(jobId)) {
-      // Still running
       toolPart.status = "running"
       toolPart.startedAt = Date.now() // approximate
       pendingJobs[jobId] = {
@@ -467,7 +466,6 @@ export function _replayEvents(messages, events) {
         type: toolPart.kind === "subagent" ? "subagent" : "tool",
         startedAt: Date.now(),
       }
-      // Also mark children that are still running
       if (toolPart.children) {
         for (const child of toolPart.children) {
           if (child.status === "done" && !child.result) {

@@ -121,7 +121,7 @@ async def terrarium_history(
         agent = session.agent
         if hasattr(agent, "session_store") and agent.session_store:
             try:
-                events = agent.session_store.get_events(target)
+                events = agent.session_store.get_resumable_events(target)
             except Exception as e:
                 logger.debug(
                     "Failed to load session events", error=str(e), exc_info=True

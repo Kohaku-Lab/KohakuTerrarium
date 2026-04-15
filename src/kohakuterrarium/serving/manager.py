@@ -222,7 +222,7 @@ class KohakuManager:
             raise ValueError(f"Agent not found: {agent_id}")
         store = self._session_stores.get(agent_id)
         if store:
-            return store.get_events(session.agent.config.name)
+            return store.get_resumable_events(session.agent.config.name)
         return session.agent.conversation_history
 
     # =================================================================
