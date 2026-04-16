@@ -308,18 +308,21 @@ class Controller:
         """
         text_parts: list[str] = []
         image_parts: list[ImagePart] = []
+        file_parts: list[FilePart] = []
         has_multimodal = False
 
         for event in events:
             if event.type == "user_input":
                 if isinstance(event.content, list):
                     has_multimodal = True
-                    # Extract text and images from multimodal content
+                    # Extract text and non-text parts from multimodal content
                     for part in event.content:
                         if isinstance(part, TextPart):
                             text_parts.append(part.text)
                         elif isinstance(part, ImagePart):
                             image_parts.append(part)
+                        elif isinstance(part, FilePart):
+                            file_parts.append(part)
                 elif isinstance(event.content, str):
                     text_parts.append(event.content)
             elif event.type == "tool_complete":
@@ -335,10 +338,11 @@ class Controller:
         # Combine text
         combined_text = "\n\n".join(text_parts)
 
-        # Return multimodal if we have images
-        if has_multimodal and image_parts:
+        # Return multimodal if we have non-text parts
+        if has_multimodal and (image_parts or file_parts):
             result: list[ContentPart] = [TextPart(text=combined_text)]
             result.extend(image_parts)
+            result.extend(file_parts)
             return result
 
         return combined_text
@@ -358,6 +362,7 @@ class Controller:
         """
         text_context_parts: list[str] = []
         image_context_parts: list[ImagePart] = []
+        file_context_parts: list[FilePart] = []
 
         if self.config.include_job_status:
             job_context = self.job_store.format_context()
@@ -370,18 +375,21 @@ class Controller:
         if isinstance(event_content, str):
             text_context_parts.append(event_content)
         else:
-            # Multimodal content: extract text and images
+            # Multimodal content: extract text and keep non-text parts
             for part in event_content:
                 if isinstance(part, TextPart):
                     text_context_parts.append(part.text)
                 elif isinstance(part, ImagePart):
                     image_context_parts.append(part)
+                elif isinstance(part, FilePart):
+                    file_context_parts.append(part)
 
         combined_text = "\n\n".join(text_context_parts)
 
-        if image_context_parts:
+        if image_context_parts or file_context_parts:
             user_content: str | list[ContentPart] = [TextPart(text=combined_text)]
             user_content.extend(image_context_parts)
+            user_content.extend(file_context_parts)
         else:
             user_content = combined_text
 
