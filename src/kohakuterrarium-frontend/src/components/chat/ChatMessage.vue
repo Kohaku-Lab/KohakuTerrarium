@@ -74,7 +74,17 @@
         </div>
       </div>
       <div v-else class="text-body whitespace-pre-wrap break-words overflow-wrap-anywhere min-w-0">
-        {{ message.content }}
+        <template v-if="message.contentParts?.length">
+          <div class="flex flex-col gap-2">
+            <template v-for="(part, i) in message.contentParts" :key="i">
+              <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" />
+              <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="max-w-full rounded-lg border border-warm-200 dark:border-warm-700" />
+            </template>
+          </div>
+        </template>
+        <template v-else>
+          {{ message.content }}
+        </template>
       </div>
     </div>
     <!-- Hover actions for user messages -->
@@ -131,7 +141,15 @@
       <span class="text-[10px] text-warm-400">{{ message.timestamp }}</span>
     </div>
     <div class="pl-7 text-body">
-      <MarkdownRenderer :content="message.content" />
+      <template v-if="message.contentParts?.length">
+        <div class="flex flex-col gap-2">
+          <template v-for="(part, i) in message.contentParts" :key="i">
+            <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" />
+            <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="max-w-full rounded-lg border border-warm-200 dark:border-warm-700" />
+          </template>
+        </div>
+      </template>
+      <MarkdownRenderer v-else :content="message.content" />
     </div>
   </div>
 </template>
@@ -141,6 +159,18 @@ import MarkdownRenderer from "@/components/common/MarkdownRenderer.vue"
 import ToolCallBlock from "@/components/chat/ToolCallBlock.vue"
 import { GEM } from "@/utils/colors"
 import { useChatStore } from "@/stores/chat"
+
+/** Extract plain text from content that may be a string or array of content parts. */
+function contentToText(content) {
+  if (typeof content === "string") return content
+  if (Array.isArray(content)) {
+    return content
+      .filter((p) => p?.type === "text")
+      .map((p) => p.text || "")
+      .join("\n")
+  }
+  return ""
+}
 
 const props = defineProps({
   message: { type: Object, required: true },
@@ -157,7 +187,7 @@ const errorExpanded = ref(false)
 
 const errorFirstLine = computed(() => {
   if (props.message.role !== "error") return ""
-  const content = props.message.content || ""
+  const content = contentToText(props.message.content)
   const firstLine = content.split("\n")[0] || ""
   return firstLine.length > 80 ? firstLine.slice(0, 80) + "…" : firstLine
 })
@@ -191,7 +221,7 @@ const senderGemColor = computed(() => {
 const chat = useChatStore()
 
 function copyMessage() {
-  const text = props.message.content || ""
+  const text = contentToText(props.message.contentParts || props.message.content)
   navigator.clipboard.writeText(text)
 }
 
@@ -210,7 +240,7 @@ function copyAssistantText() {
 }
 
 function startEdit() {
-  editText.value = props.message.content || ""
+  editText.value = contentToText(props.message.contentParts || props.message.content)
   editing.value = true
 }
 

@@ -94,6 +94,13 @@ function typeClass(t) {
 
 function eventPreview(e) {
   if (typeof e.content === "string") return e.content.slice(0, 200)
+  if (Array.isArray(e.content)) {
+    const text = e.content
+      .filter((p) => p?.type === "text")
+      .map((p) => p.text || "")
+      .join(" ")
+    if (text) return text.slice(0, 200)
+  }
   if (Array.isArray(e.tool_calls) && e.tool_calls.length) {
     return e.tool_calls.map((tc) => tc.name).join(", ")
   }

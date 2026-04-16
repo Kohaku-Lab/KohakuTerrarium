@@ -86,7 +86,20 @@
 
       <!-- Input: sits inside bubble, with subtle top border -->
       <div v-if="!readOnly" class="px-4 pb-4 pt-2 border-t border-t-warm-100 dark:border-t-warm-800">
+        <div v-if="attachments.length" class="mb-2 flex flex-wrap gap-2">
+          <div v-for="(file, idx) in attachments" :key="file.name + ':' + idx" class="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-iolite/8 dark:bg-iolite/12 border border-iolite/20 text-xs">
+            <span class="i-carbon-image text-iolite dark:text-iolite-light" />
+            <span class="text-warm-700 dark:text-warm-200 max-w-40 truncate">{{ file.name }}</span>
+            <button class="text-warm-400 hover:text-coral" @click="removeAttachment(idx)">
+              <span class="i-carbon-close" />
+            </button>
+          </div>
+        </div>
         <div class="flex gap-2 px-3 py-1.5 rounded-xl bg-warm-50 dark:bg-warm-800 border border-warm-200 dark:border-warm-700 focus-within:border-iolite/40 dark:focus-within:border-iolite-light/30 transition-colors" :class="inputText.includes('\n') ? 'items-end' : 'items-center'">
+          <input ref="fileInputEl" type="file" accept="image/*" class="hidden" @change="onFileChange" />
+          <button class="w-7 h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-iolite dark:hover:text-iolite-light hover:bg-iolite/10" :title="t('chat.attachImage')" :aria-label="t('chat.attachImage')" @click="fileInputEl?.click()">
+            <span class="i-carbon-image text-xs" />
+          </button>
           <textarea ref="inputEl" v-model="inputText" rows="1" class="flex-1 bg-transparent border-none outline-none text-sm text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 resize-none max-h-32 leading-relaxed py-1" style="min-height: 2em" :placeholder="inputPlaceholder" @keydown="onInputKeydown" @input="autoResize" />
           <!-- Compact/Clear actions -->
           <button class="w-7 h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-iolite dark:hover:text-iolite-light hover:bg-iolite/10" :title="t('chat.compactContext')" :aria-label="t('chat.compactContext')" @click="triggerCompact">
@@ -127,6 +140,8 @@ const { t } = useI18n()
 const inputText = ref("")
 const messagesEl = ref(null)
 const inputEl = ref(null)
+const fileInputEl = ref(null)
+const attachments = ref([])
 
 function draftKey() {
   const instanceId = props.instance?.id || chat._instanceId || ""
@@ -267,7 +282,7 @@ const messageTailSignature = computed(() => {
   const messages = chat.currentMessages
   const last = messages[messages.length - 1]
   if (!last) return "0"
-  const contentLen = typeof last.content === "string" ? last.content.length : 0
+  const contentLen = typeof last.content === "string" ? last.content.length : Array.isArray(last.content) ? last.content.length : 0
   const parts = Array.isArray(last.parts)
     ? last.parts
         .map((part) => {
@@ -314,10 +329,43 @@ watch(inputText, () => {
   persistDraft()
 })
 
-function send() {
-  if (props.readOnly || !inputText.value.trim()) return
-  chat.send(inputText.value)
+async function fileToPart(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      resolve({
+        type: "image_url",
+        image_url: { url: reader.result, detail: "low" },
+        meta: { source_type: "attachment", source_name: file.name },
+      })
+    }
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
+async function onFileChange(e) {
+  const files = Array.from(e.target.files || [])
+  for (const file of files) {
+    attachments.value.push(file)
+  }
+  e.target.value = ""
+}
+
+function removeAttachment(index) {
+  attachments.value.splice(index, 1)
+}
+
+async function send() {
+  if (props.readOnly || (!inputText.value.trim() && attachments.value.length === 0)) return
+  const parts = []
+  if (inputText.value.trim()) parts.push({ type: "text", text: inputText.value })
+  for (const file of attachments.value) {
+    parts.push(await fileToPart(file))
+  }
+  chat.send(parts)
   inputText.value = ""
+  attachments.value = []
   persistDraft()
   isNearBottom.value = true // force scroll after send
   nextTick(() => {

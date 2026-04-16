@@ -22,7 +22,15 @@
         <!-- Sub-agent result (taaffeite tinted) -->
         <div v-if="tc.result && tc.status !== 'interrupted'" class="relative">
           <div class="px-3 py-2 bg-taaffeite/8 dark:bg-taaffeite/12 text-xs max-h-48 overflow-y-auto scroll-smooth sa-result">
-            <MarkdownRenderer :content="tc.result" />
+            <template v-if="tc.resultParts?.length">
+              <div class="flex flex-col gap-2">
+                <template v-for="(part, i) in tc.resultParts" :key="i">
+                  <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" />
+                  <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="max-w-full rounded-lg border border-warm-200 dark:border-warm-700" />
+                </template>
+              </div>
+            </template>
+            <MarkdownRenderer v-else :content="tc.result" />
           </div>
         </div>
         <div v-else-if="tc.status === 'interrupted'" class="px-3 py-2 text-xs text-amber dark:text-amber-light bg-amber/6 dark:bg-amber/10">(interrupted)</div>
@@ -46,7 +54,17 @@
       <template v-else>
         <!-- Tool raw output, scrollable accordion -->
         <div class="text-xs font-mono px-3 py-2 text-warm-500 dark:text-warm-400 whitespace-pre-wrap max-h-64 overflow-y-auto overflow-x-hidden bg-sapphire/4 dark:bg-sapphire/6 min-w-0 break-all">
-          {{ tc.result || "(no output)" }}
+          <template v-if="tc.resultParts?.length">
+            <div class="flex flex-col gap-2">
+              <template v-for="(part, i) in tc.resultParts" :key="i">
+                <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" />
+                <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="max-w-full rounded-lg border border-warm-200 dark:border-warm-700" />
+              </template>
+            </div>
+          </template>
+          <template v-else>
+            {{ tc.result || "(no output)" }}
+          </template>
         </div>
       </template>
     </div>

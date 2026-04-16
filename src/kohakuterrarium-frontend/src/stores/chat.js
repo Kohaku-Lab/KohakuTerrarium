@@ -4,6 +4,28 @@ import { useInstancesStore } from "@/stores/instances"
 import { useStatusStore } from "@/stores/status"
 import { getHybridPrefSync, setHybridPref } from "@/utils/uiPrefs"
 
+function normalizeContentParts(content) {
+  if (!Array.isArray(content)) return null
+  return content.filter((part) => part && typeof part === "object" && typeof part.type === "string")
+}
+
+function extractTextContent(content) {
+  if (typeof content === "string") return content
+  if (!Array.isArray(content)) return ""
+  return content
+    .filter((part) => part?.type === "text")
+    .map((part) => part.text || "")
+    .join("\n")
+}
+
+function normalizeMessageContent(content) {
+  const contentParts = normalizeContentParts(content)
+  return {
+    content: typeof content === "string" ? content : extractTextContent(content),
+    contentParts,
+  }
+}
+
 /**
  * Convert OpenAI-format conversation history to frontend messages.
  */
@@ -16,10 +38,12 @@ export function _convertHistory(messages) {
   for (const msg of messages) {
     if (msg.role === "system" || msg.role === "tool") continue
     if (msg.role === "user") {
+      const normalized = normalizeMessageContent(msg.content)
       result.push({
         id: "h_" + result.length,
         role: "user",
-        content: msg.content || "",
+        content: normalized.content,
+        contentParts: normalized.contentParts,
         timestamp: "",
       })
     } else if (msg.role === "assistant") {
@@ -31,10 +55,12 @@ export function _convertHistory(messages) {
         status: "done",
         result: toolResults[tc.id] || "",
       }))
+      const normalized = normalizeMessageContent(msg.content)
       result.push({
         id: "h_" + result.length,
         role: "assistant",
-        content: msg.content || "",
+        content: normalized.content,
+        contentParts: normalized.contentParts,
         timestamp: "",
         tool_calls: tcs.length ? tcs : undefined,
       })
@@ -269,10 +295,12 @@ export function _replayEvents(messages, events) {
     // ── Common types (both formats) ──
     if (t === "user_input") {
       cur = null
+      const normalized = normalizeMessageContent(evt.content)
       result.push({
         id: "h_" + result.length,
         role: "user",
-        content: evt.content || "",
+        content: normalized.content,
+        contentParts: normalized.contentParts,
         timestamp: "",
       })
     } else if (t === "processing_start") {
@@ -455,11 +483,13 @@ export function _replayEvents(messages, events) {
         updateSubagentTool(toolName, evt.detail || "", { error: true }, saName, saJobId)
       }
     } else if (t === "channel_message") {
+      const normalized = normalizeMessageContent(evt.content)
       result.push({
         id: "ch_" + result.length,
         role: "channel",
         sender: evt.sender || "",
-        content: evt.content || "",
+        content: normalized.content,
+        contentParts: normalized.contentParts,
         timestamp: "",
       })
     } else if (t === "compact_summary" || t === "compact_complete") {
@@ -725,18 +755,22 @@ export const useChatStore = defineStore("chat", {
     },
 
     async send(text) {
-      if (!this.activeTab || !text.trim() || !this._ws) return
+      if (!this.activeTab || !this._ws) return
+      if (typeof text === "string" ? !text.trim() : !text.length) return
 
       const tab = this.activeTab
       const now = Date.now()
+      const contentParts = typeof text === "string" ? [{ type: "text", text }] : text
+      const normalized = normalizeMessageContent(contentParts)
       const msg = {
         id: "u_" + now,
         role: "user",
-        content: text,
+        content: normalized.content,
+        contentParts: normalized.contentParts,
         timestamp: new Date(now).toISOString(),
       }
 
-      this._recentUserInputs[`${tab}:${text}`] = now
+      this._recentUserInputs[`${tab}:${normalized.content}`] = now
       if (this.processing) {
         // Don't put in main chat — hold in queue, shown above input box
         msg.queued = true
@@ -748,14 +782,14 @@ export const useChatStore = defineStore("chat", {
       if (tab.startsWith("ch:")) {
         const chName = tab.slice(3)
         try {
-          await terrariumAPI.sendToChannel(this._instanceId, chName, text, "human")
+          await terrariumAPI.sendToChannel(this._instanceId, chName, contentParts, "human")
         } catch (err) {
           console.error("Channel send failed:", err)
         }
       } else {
         const target = tab
         if (this._ws.readyState === WebSocket.OPEN) {
-          this._ws.send(JSON.stringify({ type: "input", target, message: text }))
+          this._ws.send(JSON.stringify({ type: "input", target, content: contentParts }))
           this.processing = true
         }
       }
@@ -1128,6 +1162,7 @@ export const useChatStore = defineStore("chat", {
         }
         tc.status = "done"
         tc.result = data.result || data.output || data.detail || ""
+        tc.resultParts = normalizeContentParts(tc.result)
         if (data.tools_used) tc.tools_used = data.tools_used
         if (data.turns != null) tc.turns = data.turns
         if (data.duration != null) tc.duration = data.duration
@@ -1156,6 +1191,7 @@ export const useChatStore = defineStore("chat", {
         }
         tc.status = data.interrupted || data.final_state === "interrupted" ? "interrupted" : "error"
         tc.result = data.result || data.error || data.detail || ""
+        tc.resultParts = normalizeContentParts(tc.result)
         if (data.tools_used) tc.tools_used = data.tools_used
         if (data.turns != null) tc.turns = data.turns
         if (data.duration != null) tc.duration = data.duration
@@ -1374,13 +1410,14 @@ export const useChatStore = defineStore("chat", {
 
     _handleUserInput(source, data) {
       if (!source || !this.messagesByTab[source]) return
-      const signature = `${source}:${data.content || ""}`
+      const normalized = normalizeMessageContent(data.content)
+      const signature = `${source}:${normalized.content}`
       const now = Date.now()
       const seenAt = this._recentUserInputs[signature] || 0
       if (now - seenAt < 2000) return
       const msgs = this.messagesByTab[source]
       const last = msgs[msgs.length - 1]
-      if (last?.role === "user" && last.content === (data.content || "")) {
+      if (last?.role === "user" && last.content === normalized.content) {
         this._recentUserInputs[signature] = now
         return
       }
@@ -1388,7 +1425,8 @@ export const useChatStore = defineStore("chat", {
       this._addMsg(source, {
         id: `u_sync_${now}`,
         role: "user",
-        content: data.content || "",
+        content: normalized.content,
+        contentParts: normalized.contentParts,
         timestamp: data.timestamp || new Date((data.ts || now / 1000) * 1000).toISOString(),
       })
     },
@@ -1401,11 +1439,13 @@ export const useChatStore = defineStore("chat", {
         if (data.message_id && existing.some((m) => m.id === data.message_id)) {
           return
         }
+        const normalized = normalizeMessageContent(data.content)
         this.messagesByTab[tabKey].push({
           id: data.message_id || "ch_" + Date.now(),
           role: "channel",
           sender: data.sender,
-          content: data.content,
+          content: normalized.content,
+          contentParts: normalized.contentParts,
           timestamp: data.timestamp,
         })
         if (this.activeTab !== tabKey) {
@@ -1414,10 +1454,12 @@ export const useChatStore = defineStore("chat", {
       }
 
       const msgStore = useMessagesStore()
+      const normalized = normalizeMessageContent(data.content)
       msgStore.addChannelMessage(data.channel, {
         channel: data.channel,
         sender: data.sender,
-        content: data.content,
+        content: normalized.content,
+        contentParts: normalized.contentParts,
         timestamp: data.timestamp,
       })
 

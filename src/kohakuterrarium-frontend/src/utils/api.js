@@ -214,7 +214,8 @@ export const agentAPI = {
 
   /** Non-streaming chat */
   async chat(id, message) {
-    const { data } = await api.post(`/agents/${id}/chat`, { message })
+    const body = Array.isArray(message) ? { content: message } : { message }
+    const { data } = await api.post(`/agents/${id}/chat`, body)
     return data
   },
 
