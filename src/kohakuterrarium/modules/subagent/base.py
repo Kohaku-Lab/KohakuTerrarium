@@ -233,6 +233,7 @@ class SubAgent:
                 return SubAgentResult(
                     success=False,
                     error="User manually interrupted this job.",
+                    interrupted=True,
                     turns=self._turns,
                     duration=self._calculate_duration(),
                     total_tokens=self._total_tokens,
@@ -255,6 +256,7 @@ class SubAgent:
                 return SubAgentResult(
                     success=False,
                     error="User manually interrupted this job.",
+                    interrupted=True,
                     turns=self._turns,
                     duration=self._calculate_duration(),
                     total_tokens=self._total_tokens,

@@ -74,6 +74,8 @@ class SubAgentResult:
     output: str = ""
     success: bool = True
     error: str | None = None
+    interrupted: bool = False
+    cancelled: bool = False
     turns: int = 0
     duration: float = 0.0
     total_tokens: int = 0  # Total tokens used across all turns
@@ -107,8 +109,12 @@ class SubAgentJob:
 
     def to_job_status(self) -> JobStatus:
         """Create job status for this sub-agent run."""
-        if self._result and not self._result.success:
+        if self._result and (self._result.interrupted or self._result.cancelled):
+            state = JobState.CANCELLED
+        elif self._result and not self._result.success:
             state = JobState.ERROR
+        elif not self._result and self.subagent._cancelled:
+            state = JobState.CANCELLED
         elif self.subagent.is_running:
             state = JobState.RUNNING
         else:

@@ -320,7 +320,12 @@ class SubAgentManager(InteractiveManagerMixin):
             self._results[job_id] = result
 
             # Update status
-            state = JobState.DONE if result.success else JobState.ERROR
+            if result.interrupted or result.cancelled:
+                state = JobState.CANCELLED
+            elif result.success:
+                state = JobState.DONE
+            else:
+                state = JobState.ERROR
             self.job_store.update_status(
                 job_id,
                 state=state,
@@ -364,13 +369,13 @@ class SubAgentManager(InteractiveManagerMixin):
             return result
 
         except asyncio.CancelledError:
-            error_msg = "User manually interrupted this job."
+            error_msg = "Background sub-agent was cancelled by user."
             logger.info(
                 "Sub-agent cancelled by user",
                 job_id=job_id,
             )
 
-            result = SubAgentResult(success=False, error=error_msg)
+            result = SubAgentResult(success=False, error=error_msg, cancelled=True)
             self._results[job_id] = result
 
             self.job_store.update_status(
