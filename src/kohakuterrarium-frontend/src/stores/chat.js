@@ -6,7 +6,13 @@ import { getHybridPrefSync, setHybridPref } from "@/utils/uiPrefs"
 
 function normalizeContentParts(content) {
   if (!Array.isArray(content)) return null
-  return content.filter((part) => part && typeof part === "object" && typeof part.type === "string")
+  return content.filter(
+    (part) =>
+      part &&
+      typeof part === "object" &&
+      typeof part.type === "string" &&
+      ["text", "image_url", "file"].includes(part.type),
+  )
 }
 
 function extractTextContent(content) {

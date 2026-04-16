@@ -79,6 +79,10 @@
             <template v-for="(part, i) in message.contentParts" :key="i">
               <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" />
               <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="max-w-full rounded-lg border border-warm-200 dark:border-warm-700" />
+              <div v-else-if="part.type === 'file'" class="px-3 py-2 rounded-lg border border-aquamarine/20 bg-aquamarine/5 text-xs text-warm-600 dark:text-warm-300">
+                <span class="i-carbon-document mr-1 text-aquamarine" />
+                {{ part.file?.name || part.file?.path || "file" }}
+              </div>
             </template>
           </div>
         </template>
@@ -146,6 +150,10 @@
           <template v-for="(part, i) in message.contentParts" :key="i">
             <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" />
             <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="max-w-full rounded-lg border border-warm-200 dark:border-warm-700" />
+            <div v-else-if="part.type === 'file'" class="px-3 py-2 rounded-lg border border-aquamarine/20 bg-aquamarine/5 text-xs text-warm-600 dark:text-warm-300">
+              <span class="i-carbon-document mr-1 text-aquamarine" />
+              {{ part.file?.name || part.file?.path || "file" }}
+            </div>
           </template>
         </div>
       </template>

@@ -88,32 +88,39 @@
       <div v-if="!readOnly" class="px-4 pb-4 pt-2 border-t border-t-warm-100 dark:border-t-warm-800">
         <div v-if="attachments.length" class="mb-2 flex flex-wrap gap-2">
           <div v-for="(file, idx) in attachments" :key="file.name + ':' + idx" class="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-iolite/8 dark:bg-iolite/12 border border-iolite/20 text-xs">
-            <span class="i-carbon-image text-iolite dark:text-iolite-light" />
+            <span :class="file.kind === 'image' ? 'i-carbon-image text-iolite dark:text-iolite-light' : 'i-carbon-document text-aquamarine'" />
             <span class="text-warm-700 dark:text-warm-200 max-w-40 truncate">{{ file.name }}</span>
             <button class="text-warm-400 hover:text-coral" @click="removeAttachment(idx)">
               <span class="i-carbon-close" />
             </button>
           </div>
         </div>
-        <div class="flex gap-2 px-3 py-1.5 rounded-xl bg-warm-50 dark:bg-warm-800 border border-warm-200 dark:border-warm-700 focus-within:border-iolite/40 dark:focus-within:border-iolite-light/30 transition-colors" :class="inputText.includes('\n') ? 'items-end' : 'items-center'">
-          <input ref="fileInputEl" type="file" accept="image/*" class="hidden" @change="onFileChange" />
-          <button class="w-7 h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-iolite dark:hover:text-iolite-light hover:bg-iolite/10" :title="t('chat.attachImage')" :aria-label="t('chat.attachImage')" @click="fileInputEl?.click()">
-            <span class="i-carbon-image text-xs" />
-          </button>
-          <textarea ref="inputEl" v-model="inputText" rows="1" class="flex-1 bg-transparent border-none outline-none text-sm text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 resize-none max-h-32 leading-relaxed py-1" style="min-height: 2em" :placeholder="inputPlaceholder" @keydown="onInputKeydown" @input="autoResize" />
-          <!-- Compact/Clear actions -->
-          <button class="w-7 h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-iolite dark:hover:text-iolite-light hover:bg-iolite/10" :title="t('chat.compactContext')" :aria-label="t('chat.compactContext')" @click="triggerCompact">
-            <span class="i-carbon-collapse-all text-xs" />
-          </button>
-          <button class="w-7 h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-coral hover:bg-coral/10" :title="t('chat.clearContext')" :aria-label="t('chat.clearContext')" @click="triggerClear">
-            <span class="i-carbon-clean text-xs" />
-          </button>
-          <button v-if="chat.processing || chat.hasRunningJobs" class="w-8 h-8 flex items-center justify-center rounded-lg transition-all shrink-0 mb-0.5 bg-coral/90 text-white hover:bg-coral shadow-sm shadow-coral/20" :title="`${t('chat.stopGeneration')} (Esc)`" :aria-label="t('chat.stopGeneration')" @click="chat.interrupt()">
-            <span class="i-carbon-stop-filled text-sm" />
-          </button>
-          <button v-else class="w-8 h-8 flex items-center justify-center rounded-lg transition-all shrink-0 mb-0.5" :class="inputText.trim() ? 'bg-iolite text-white hover:bg-iolite-shadow shadow-sm shadow-iolite/20' : 'text-warm-300 dark:text-warm-600 cursor-not-allowed'" :disabled="!inputText.trim()" :aria-label="t('chat.sendMessage')" @click="send">
-            <span class="i-carbon-send text-sm" />
-          </button>
+        <div class="flex gap-2 pl-2 pr-3 py-2 rounded-xl bg-warm-50 dark:bg-warm-800 border border-warm-200 dark:border-warm-700 focus-within:border-iolite/40 dark:focus-within:border-iolite-light/30 transition-colors items-end">
+          <input ref="imageInputEl" type="file" accept="image/*" class="hidden" @change="(e) => onFileChange(e, 'image')" />
+          <input ref="fileInputEl" type="file" class="hidden" @change="(e) => onFileChange(e, 'file')" />
+          <div class="flex items-center gap-0 shrink-0 mb-0.5">
+            <button class="w-7 h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-aquamarine dark:hover:text-aquamarine hover:bg-aquamarine/10" title="Attach file" aria-label="Attach file" @click="fileInputEl?.click()">
+              <span class="i-carbon-add text-xs" />
+            </button>
+            <button class="w-7 h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-iolite dark:hover:text-iolite-light hover:bg-iolite/10" :title="t('chat.attachImage')" :aria-label="t('chat.attachImage')" @click="imageInputEl?.click()">
+              <span class="i-carbon-image text-xs" />
+            </button>
+          </div>
+          <textarea ref="inputEl" v-model="inputText" rows="1" class="flex-1 bg-transparent border-none outline-none text-sm text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 resize-none max-h-32 leading-relaxed py-1 min-w-0" style="min-height: 2em" :placeholder="inputPlaceholder" @keydown="onInputKeydown" @input="autoResize" />
+          <div class="flex items-center gap-1 shrink-0 mb-0.5">
+            <button class="w-7 h-7 flex items-center justify-center rounded-md transition-colors text-warm-400 hover:text-iolite dark:hover:text-iolite-light hover:bg-iolite/10" :title="t('chat.compactContext')" :aria-label="t('chat.compactContext')" @click="triggerCompact">
+              <span class="i-carbon-collapse-all text-xs" />
+            </button>
+            <button class="w-7 h-7 flex items-center justify-center rounded-md transition-colors text-warm-400 hover:text-coral hover:bg-coral/10" :title="t('chat.clearContext')" :aria-label="t('chat.clearContext')" @click="triggerClear">
+              <span class="i-carbon-clean text-xs" />
+            </button>
+            <button v-if="chat.processing || chat.hasRunningJobs" class="w-8 h-8 flex items-center justify-center rounded-lg transition-all bg-coral/90 text-white hover:bg-coral shadow-sm shadow-coral/20" :title="`${t('chat.stopGeneration')} (Esc)`" :aria-label="t('chat.stopGeneration')" @click="chat.interrupt()">
+              <span class="i-carbon-stop-filled text-sm" />
+            </button>
+            <button v-else class="w-8 h-8 flex items-center justify-center rounded-lg transition-all" :class="inputCanSend ? 'bg-iolite text-white hover:bg-iolite-shadow shadow-sm shadow-iolite/20' : 'text-warm-300 dark:text-warm-600 cursor-not-allowed'" :disabled="!inputCanSend" :aria-label="t('chat.sendMessage')" @click="send">
+              <span class="i-carbon-send text-sm" />
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -140,6 +147,7 @@ const { t } = useI18n()
 const inputText = ref("")
 const messagesEl = ref(null)
 const inputEl = ref(null)
+const imageInputEl = ref(null)
 const fileInputEl = ref(null)
 const attachments = ref([])
 
@@ -174,6 +182,7 @@ const activeUsage = computed(() => {
 })
 
 const activeTokens = computed(() => activeUsage.value.total)
+const inputCanSend = computed(() => inputText.value.trim() || attachments.value.length > 0)
 
 const contextPct = computed(() => {
   const threshold = chat.sessionInfo.compactThreshold
@@ -329,7 +338,7 @@ watch(inputText, () => {
   persistDraft()
 })
 
-async function fileToPart(file) {
+async function imageFileToPart(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => {
@@ -344,10 +353,55 @@ async function fileToPart(file) {
   })
 }
 
-async function onFileChange(e) {
+async function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : ""
+      resolve(result.includes(",") ? result.split(",", 2)[1] : result)
+    }
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
+async function genericFileToPart(file) {
+  const mime = file.type || "application/octet-stream"
+  const textLike = mime.startsWith("text/") || ["application/json", "application/xml", "application/javascript", "image/svg+xml"].includes(mime) || /\.(md|txt|py|js|ts|tsx|jsx|json|yaml|yml|toml|ini|cfg|csv|tsv|html|css|xml|sh|rs|go|java|c|cc|cpp|h|hpp)$/i.test(file.name)
+
+  if (textLike) {
+    return {
+      type: "file",
+      file: {
+        name: file.name,
+        mime,
+        path: null,
+        content: await file.text(),
+        data_base64: null,
+        encoding: "utf-8",
+        is_inline: true,
+      },
+    }
+  }
+
+  return {
+    type: "file",
+    file: {
+      name: file.name,
+      mime,
+      path: null,
+      content: null,
+      data_base64: await fileToBase64(file),
+      encoding: "base64",
+      is_inline: true,
+    },
+  }
+}
+
+async function onFileChange(e, kind = "file") {
   const files = Array.from(e.target.files || [])
   for (const file of files) {
-    attachments.value.push(file)
+    attachments.value.push({ file, name: file.name, kind })
   }
   e.target.value = ""
 }
@@ -360,8 +414,8 @@ async function send() {
   if (props.readOnly || (!inputText.value.trim() && attachments.value.length === 0)) return
   const parts = []
   if (inputText.value.trim()) parts.push({ type: "text", text: inputText.value })
-  for (const file of attachments.value) {
-    parts.push(await fileToPart(file))
+  for (const attachment of attachments.value) {
+    parts.push(attachment.kind === "image" ? await imageFileToPart(attachment.file) : await genericFileToPart(attachment.file))
   }
   chat.send(parts)
   inputText.value = ""
