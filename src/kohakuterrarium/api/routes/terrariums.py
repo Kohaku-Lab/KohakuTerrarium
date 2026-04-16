@@ -150,8 +150,9 @@ async def chat_terrarium(
 ):
     """Non-streaming chat with a creature or root agent."""
     try:
+        content = req.content if req.content is not None else (req.message or "")
         chunks = []
-        async for chunk in manager.terrarium_chat(terrarium_id, target, req.message):
+        async for chunk in manager.terrarium_chat(terrarium_id, target, content):
             chunks.append(chunk)
         return {"response": "".join(chunks)}
     except ValueError as e:

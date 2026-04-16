@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from kohakuterrarium.core.events import EventContent
+
 
 @dataclass
 class ChannelEvent:
@@ -12,7 +14,7 @@ class ChannelEvent:
     terrarium_id: str
     channel: str
     sender: str
-    content: str
+    content: EventContent
     message_id: str
     timestamp: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -33,6 +35,6 @@ class OutputEvent:
 
     agent_id: str
     event_type: str
-    content: str
+    content: EventContent
     timestamp: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)

@@ -132,7 +132,9 @@ class KohakuManager:
         if session:
             await session.stop()
 
-    async def agent_chat(self, agent_id: str, message: str) -> AsyncIterator[str]:
+    async def agent_chat(
+        self, agent_id: str, message: str | list[dict]
+    ) -> AsyncIterator[str]:
         """Send a message and stream the response."""
         session = self._agents.get(agent_id)
         if not session:
@@ -252,7 +254,11 @@ class KohakuManager:
         }
 
     async def agent_channel_send(
-        self, agent_id: str, channel: str, content: str, sender: str = "human"
+        self,
+        agent_id: str,
+        channel: str,
+        content: str | list[dict],
+        sender: str = "human",
     ) -> str:
         """Send a message to a standalone agent's channel. Returns message_id."""
         session = self._agents.get(agent_id)
@@ -422,7 +428,7 @@ class KohakuManager:
         return session
 
     async def terrarium_chat(
-        self, terrarium_id: str, target: str, message: str
+        self, terrarium_id: str, target: str, message: str | list[dict]
     ) -> AsyncIterator[str]:
         """Chat with any creature (or root) in a terrarium.
 
@@ -476,7 +482,11 @@ class KohakuManager:
         }
 
     async def terrarium_channel_send(
-        self, terrarium_id: str, channel: str, content: str, sender: str = "human"
+        self,
+        terrarium_id: str,
+        channel: str,
+        content: str | list[dict],
+        sender: str = "human",
     ) -> str:
         """Send a message to a shared terrarium channel. Returns message_id."""
         runtime = self._get_runtime(terrarium_id)
@@ -628,7 +638,7 @@ class KohakuManager:
         terrarium_id: str,
         creature: str,
         channel: str,
-        content: str,
+        content: str | list[dict],
         sender: str = "human",
     ) -> str:
         """Send a message to a creature's private channel. Returns message_id."""
@@ -676,11 +686,7 @@ class KohakuManager:
                     terrarium_id=source_id,
                     channel=msg.channel,
                     sender=msg.sender,
-                    content=(
-                        msg.content
-                        if isinstance(msg.content, str)
-                        else str(msg.content)
-                    ),
+                    content=msg.content,
                     message_id=msg.message_id,
                     timestamp=msg.timestamp,
                 )

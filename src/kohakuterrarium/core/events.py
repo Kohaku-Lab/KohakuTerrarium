@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from kohakuterrarium.llm.message import ContentPart, TextPart
+from kohakuterrarium.llm.message import ContentPart, TextPart, normalize_content_parts
 
 # Type alias for event content (text or multimodal)
 EventContent = str | list[ContentPart]
@@ -141,14 +141,15 @@ class EventType:
 
 
 def create_user_input_event(
-    content: str,
+    content: EventContent,
     source: str = "cli",
     **extra_context: Any,
 ) -> TriggerEvent:
     """Create a user input event with standard context."""
+    normalized = normalize_content_parts(content)
     return TriggerEvent(
         type=EventType.USER_INPUT,
-        content=content,
+        content=normalized if normalized is not None else "",
         context={"source": source, **extra_context},
         stackable=True,
     )

@@ -22,6 +22,7 @@ from kohakuterrarium.modules.plugin.base import PluginContext
 from kohakuterrarium.core.config import AgentConfig, load_agent_config
 from kohakuterrarium.core.job import JobState
 from kohakuterrarium.core.events import TriggerEvent, create_user_input_event
+from kohakuterrarium.llm.message import ContentPart
 from kohakuterrarium.core.loader import ModuleLoader
 from kohakuterrarium.core.session import Session
 from kohakuterrarium.core.termination import TerminationChecker, TerminationConfig
@@ -790,9 +791,13 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
         """Get conversation history as list of message dicts."""
         return self.controller.conversation.to_messages()
 
-    async def inject_input(self, text: str, source: str = "programmatic") -> None:
+    async def inject_input(
+        self,
+        content: str | list[ContentPart],
+        source: str = "programmatic",
+    ) -> None:
         """Inject user input programmatically (bypasses input module)."""
-        event = create_user_input_event(text, source=source)
+        event = create_user_input_event(content, source=source)
         await self._process_event(event)
 
     async def inject_event(self, event: TriggerEvent) -> None:

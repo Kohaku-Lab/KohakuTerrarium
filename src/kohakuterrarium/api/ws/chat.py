@@ -9,16 +9,30 @@ callbacks (works for both queue and broadcast channels).
 
 import asyncio
 import time
+from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from kohakuterrarium.api.deps import get_manager
 from kohakuterrarium.api.events import StreamOutput, get_event_log
+from kohakuterrarium.llm.message import content_parts_to_dicts, normalize_content_parts
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+
+def _normalize_input_content(data: dict[str, Any]) -> str | list[dict[str, Any]]:
+    """Normalize incoming websocket input payload."""
+    content = data.get("content")
+    if isinstance(content, list):
+        parts = normalize_content_parts(content) or []
+        return content_parts_to_dicts(parts)
+    if isinstance(content, str):
+        return content
+    message = data.get("message", "")
+    return message if isinstance(message, str) else ""
 
 
 async def _forward_queue(queue: asyncio.Queue, ws: WebSocket) -> None:
@@ -87,11 +101,7 @@ def _register_channel_callbacks(
                     "source": "channel",
                     "channel": channel_name,
                     "sender": message.sender,
-                    "content": (
-                        message.content
-                        if isinstance(message.content, str)
-                        else str(message.content)
-                    ),
+                    "content": message.content,
                     "message_id": message.message_id,
                     "timestamp": ts,
                     "ts": time.time(),
@@ -123,11 +133,7 @@ async def _send_channel_history(ws: WebSocket, runtime) -> None:
                     "source": "channel",
                     "channel": ch.name,
                     "sender": msg.sender,
-                    "content": (
-                        msg.content
-                        if isinstance(msg.content, str)
-                        else str(msg.content)
-                    ),
+                    "content": msg.content,
                     "message_id": msg.message_id,
                     "timestamp": ts,
                     "ts": time.time(),
@@ -143,8 +149,8 @@ async def _handle_terrarium_input(ws: WebSocket, manager, terrarium_id: str) -> 
         if data.get("type") != "input":
             continue
         target = data.get("target", "root")
-        message = data.get("message", "")
-        if not message:
+        content = _normalize_input_content(data)
+        if not content:
             continue
         try:
             session = manager.terrarium_mount(terrarium_id, target)
@@ -152,12 +158,12 @@ async def _handle_terrarium_input(ws: WebSocket, manager, terrarium_id: str) -> 
             user_evt = {
                 "type": "user_input",
                 "source": target,
-                "content": message,
+                "content": content,
                 "ts": time.time(),
             }
             log.append(user_evt)
             await queue.put(user_evt)
-            await session.agent.inject_input(message, source="web")
+            await session.agent.inject_input(content, source="web")
             await ws.send_json({"type": "idle", "source": target, "ts": time.time()})
         except ValueError as e:
             await ws.send_json(
@@ -271,18 +277,18 @@ async def ws_creature(websocket: WebSocket, agent_id: str):
             data = await websocket.receive_json()
             if data.get("type") != "input":
                 continue
-            message = data.get("message", "")
-            if not message:
+            content = _normalize_input_content(data)
+            if not content:
                 continue
             user_evt = {
                 "type": "user_input",
                 "source": session.agent.config.name,
-                "content": message,
+                "content": content,
                 "ts": time.time(),
             }
             log.append(user_evt)
             await queue.put(user_evt)
-            await session.agent.inject_input(message, source="web")
+            await session.agent.inject_input(content, source="web")
             await websocket.send_json(
                 {
                     "type": "idle",

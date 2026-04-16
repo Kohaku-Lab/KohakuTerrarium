@@ -53,13 +53,19 @@ class ImagePart:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to OpenAI API format."""
-        return {
+        result = {
             "type": "image_url",
             "image_url": {
                 "url": self.url,
                 "detail": self.detail,
             },
         }
+        if self.source_type or self.source_name:
+            result["meta"] = {
+                "source_type": self.source_type,
+                "source_name": self.source_name,
+            }
+        return result
 
     def get_description(self) -> str:
         """Get human-readable description of the image source."""
@@ -72,6 +78,42 @@ class ImagePart:
 
 # Union type for content parts
 ContentPart = TextPart | ImagePart
+RawContentPart = dict[str, Any]
+
+
+def content_part_from_dict(data: dict[str, Any]) -> ContentPart | None:
+    """Convert a raw content-part dict into a typed ContentPart."""
+    part_type = data.get("type")
+    if part_type == "text":
+        return TextPart(text=data.get("text", ""))
+    if part_type == "image_url":
+        img_data = data.get("image_url", {})
+        meta = data.get("meta") or {}
+        return ImagePart(
+            url=img_data.get("url", ""),
+            detail=img_data.get("detail", "low"),
+            source_type=meta.get("source_type"),
+            source_name=meta.get("source_name"),
+        )
+    return None
+
+
+def normalize_content_parts(
+    content: str | list[ContentPart | RawContentPart] | None,
+) -> str | list[ContentPart] | None:
+    """Normalize content into typed parts where applicable."""
+    if content is None or isinstance(content, str):
+        return content
+
+    parts: list[ContentPart] = []
+    for item in content:
+        if isinstance(item, (TextPart, ImagePart)):
+            parts.append(item)
+        elif isinstance(item, dict):
+            part = content_part_from_dict(item)
+            if part is not None:
+                parts.append(part)
+    return parts
 
 
 def content_parts_to_dicts(parts: list[ContentPart]) -> list[dict[str, Any]]:
@@ -138,19 +180,7 @@ class Message:
 
         # Handle multimodal content from API
         if isinstance(content, list):
-            parts: list[ContentPart] = []
-            for item in content:
-                if item.get("type") == "text":
-                    parts.append(TextPart(text=item.get("text", "")))
-                elif item.get("type") == "image_url":
-                    img_data = item.get("image_url", {})
-                    parts.append(
-                        ImagePart(
-                            url=img_data.get("url", ""),
-                            detail=img_data.get("detail", "low"),
-                        )
-                    )
-            content = parts
+            content = normalize_content_parts(content) or []
 
         return cls(
             role=data["role"],

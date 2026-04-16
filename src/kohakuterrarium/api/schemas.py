@@ -1,5 +1,7 @@
 """Pydantic request/response models for the HTTP API."""
 
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -30,10 +32,34 @@ class CreatureAdd(BaseModel):
     send_channels: list[str] = []
 
 
+class TextPartPayload(BaseModel):
+    type: Literal["text"]
+    text: str
+
+
+class ImageUrlPayload(BaseModel):
+    url: str
+    detail: Literal["auto", "low", "high"] = "low"
+
+
+class ContentMetaPayload(BaseModel):
+    source_type: str | None = None
+    source_name: str | None = None
+
+
+class ImagePartPayload(BaseModel):
+    type: Literal["image_url"]
+    image_url: ImageUrlPayload
+    meta: ContentMetaPayload | None = None
+
+
+ContentPartPayload = TextPartPayload | ImagePartPayload
+
+
 class ChannelSend(BaseModel):
     """Request body for sending a message to a channel."""
 
-    content: str
+    content: str | list[ContentPartPayload]
     sender: str = "human"
 
 
@@ -69,7 +95,8 @@ class ModelSwitch(BaseModel):
 class AgentChat(BaseModel):
     """Request body for sending a chat message to an agent."""
 
-    message: str
+    message: str | None = None
+    content: list[ContentPartPayload] | None = None
 
 
 class MessageEdit(BaseModel):

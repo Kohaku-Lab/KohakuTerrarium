@@ -31,7 +31,7 @@ class ChannelMessage:
     """A message sent through a channel."""
 
     sender: str
-    content: str | dict
+    content: str | dict | list[dict]
     metadata: dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)
     message_id: str = field(default_factory=generate_message_id)

@@ -80,7 +80,7 @@ class AgentSession:
         await self.agent.stop()
         logger.info("Agent session stopped", agent_id=self.agent_id)
 
-    async def chat(self, message: str) -> AsyncIterator[str]:
+    async def chat(self, message: str | list[dict]) -> AsyncIterator[str]:
         """Send a message and stream the response.
 
         Injects input, then yields output chunks as they arrive.

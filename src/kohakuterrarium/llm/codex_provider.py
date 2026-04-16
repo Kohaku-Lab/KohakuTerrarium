@@ -157,18 +157,34 @@ class CodexOAuthProvider(BaseLLMProvider):
                                         "image_url": part["image_url"]["url"],
                                     }
                                 )
-                    items.append({"role": "user", "content": input_content})
+                    if input_content:
+                        items.append({"role": "user", "content": input_content})
 
             elif role == "assistant":
                 # Text part (if any)
                 if content:
-                    text = content if isinstance(content, str) else str(content)
-                    items.append(
-                        {
-                            "role": "assistant",
-                            "content": [{"type": "output_text", "text": text}],
-                        }
-                    )
+                    if isinstance(content, str):
+                        text = content
+                    else:
+                        text_parts = []
+                        image_count = 0
+                        for part in content:
+                            if not isinstance(part, dict):
+                                continue
+                            if part.get("type") == "text":
+                                text_parts.append(part.get("text", ""))
+                            elif part.get("type") == "image_url":
+                                image_count += 1
+                        text = "\n".join(text_parts)
+                        if image_count and not text:
+                            text = f"[assistant multimodal content: {image_count} image(s)]"
+                    if text:
+                        items.append(
+                            {
+                                "role": "assistant",
+                                "content": [{"type": "output_text", "text": text}],
+                            }
+                        )
 
                 # Tool calls become separate top-level function_call items
                 for tc in msg.get("tool_calls", []):
@@ -183,11 +199,26 @@ class CodexOAuthProvider(BaseLLMProvider):
                     )
 
             elif role == "tool":
+                if isinstance(content, str):
+                    output = content
+                else:
+                    text_parts = []
+                    image_count = 0
+                    for part in content:
+                        if not isinstance(part, dict):
+                            continue
+                        if part.get("type") == "text":
+                            text_parts.append(part.get("text", ""))
+                        elif part.get("type") == "image_url":
+                            image_count += 1
+                    output = "\n".join(text_parts)
+                    if image_count and not output:
+                        output = f"[tool multimodal output: {image_count} image(s)]"
                 items.append(
                     {
                         "type": "function_call_output",
                         "call_id": msg.get("tool_call_id", ""),
-                        "output": content if isinstance(content, str) else str(content),
+                        "output": output,
                     }
                 )
 

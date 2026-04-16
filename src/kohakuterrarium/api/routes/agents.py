@@ -231,8 +231,9 @@ async def execute_command(
 async def chat_agent(agent_id: str, req: AgentChat, manager=Depends(get_manager)):
     """Non-streaming chat with an agent."""
     try:
+        content = req.content if req.content is not None else (req.message or "")
         chunks = []
-        async for chunk in manager.agent_chat(agent_id, req.message):
+        async for chunk in manager.agent_chat(agent_id, content):
             chunks.append(chunk)
         return {"response": "".join(chunks)}
     except ValueError as e:
