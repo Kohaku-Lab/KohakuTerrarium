@@ -11,13 +11,18 @@ Supports multimodal content (text + images).
 """
 
 import asyncio
+import base64
+import re
+import tempfile
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
 if TYPE_CHECKING:
     from kohakuterrarium.llm.base import ToolSchema
 
-from kohakuterrarium.llm.message import ContentPart, ImagePart, TextPart
+from kohakuterrarium.builtins.tools.read import ReadTool
+from kohakuterrarium.llm.message import ContentPart, FilePart, ImagePart, TextPart
 from kohakuterrarium.llm.tools import build_tool_schemas
 from kohakuterrarium.parsing import (
     CommandEvent,
@@ -47,6 +52,7 @@ from kohakuterrarium.parsing.format import BRACKET_FORMAT, XML_FORMAT
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+_FILE_PLACEHOLDER_RE = re.compile(r"\[\[file:(?P<ref>[^\]]+)\]\]")
 
 
 @dataclass
@@ -523,6 +529,139 @@ class Controller:
                 total_tokens=usage.get("total_tokens", 0),
             )
 
+    async def _materialize_inline_file(self, part: FilePart) -> str | None:
+        """Materialize inline browser-uploaded content to a temp file for ReadTool."""
+        suffix = Path(part.name or "upload").suffix
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        try:
+            if part.data_base64 is not None:
+                temp_file.write(base64.b64decode(part.data_base64))
+            elif part.content is not None:
+                temp_file.write(part.content.encode("utf-8"))
+            else:
+                return None
+            temp_file.flush()
+            return temp_file.name
+        finally:
+            temp_file.close()
+
+    async def _resolve_file_part(self, part: FilePart) -> list[ContentPart]:
+        """Resolve a custom file part using the internal read tool."""
+        temp_path: str | None = None
+        path = part.path
+        if (part.is_inline or part.data_base64 is not None) and not path:
+            temp_path = await self._materialize_inline_file(part)
+            path = temp_path
+        elif part.content is not None and not path:
+            label = part.name or part.path or "uploaded file"
+            return [TextPart(text=f"File: {label}\n{part.content}")]
+
+        if not path:
+            return [TextPart(text="[File reference missing path/content]")]
+
+        tool = self.registry.get_tool("read") if self.registry else None
+        if tool is None:
+            tool = ReadTool()
+        if self.executor:
+            context = self.executor._build_tool_context()
+        else:
+            return [TextPart(text=f"[Unable to resolve file without executor context: {path}]")]
+
+        try:
+            result = await tool.execute({"path": path}, context=context)
+            if result.error:
+                return [TextPart(text=f"[File read failed: {part.name or path}: {result.error}]")]
+            if isinstance(result.output, str):
+                return [TextPart(text=result.output)]
+            return result.output
+        finally:
+            if temp_path:
+                try:
+                    Path(temp_path).unlink(missing_ok=True)
+                except OSError:
+                    logger.debug("Failed to clean temp upload", path=temp_path)
+
+    async def _resolve_message_files(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Resolve custom file parts in messages before provider send."""
+        resolved_messages: list[dict[str, Any]] = []
+        for msg in messages:
+            content = msg.get("content")
+            if not isinstance(content, list):
+                resolved_messages.append(msg)
+                continue
+
+            raw_parts = []
+            file_parts = []
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "file":
+                    file_data = item.get("file", {})
+                    file_parts.append(
+                        FilePart(
+                            path=file_data.get("path"),
+                            name=file_data.get("name"),
+                            content=file_data.get("content"),
+                            mime=file_data.get("mime"),
+                            data_base64=file_data.get("data_base64"),
+                            encoding=file_data.get("encoding"),
+                            is_inline=bool(file_data.get("is_inline", False)),
+                        )
+                    )
+                else:
+                    raw_parts.append(item)
+
+            if not file_parts:
+                resolved_messages.append(msg)
+                continue
+
+            resolved_parts: list[ContentPart] = []
+            file_map: dict[str, list[ContentPart]] = {}
+            for idx, fp in enumerate(file_parts):
+                resolved = await self._resolve_file_part(fp)
+                file_map[str(idx)] = resolved
+                if fp.name:
+                    file_map[fp.name] = resolved
+                if fp.path:
+                    file_map[fp.path] = resolved
+
+            inserted = False
+            for item in raw_parts:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    text = item.get("text", "")
+                    pos = 0
+                    for match in _FILE_PLACEHOLDER_RE.finditer(text):
+                        if match.start() > pos:
+                            resolved_parts.append(TextPart(text=text[pos:match.start()]))
+                        ref = match.group("ref")
+                        replacement = file_map.get(ref)
+                        if replacement:
+                            resolved_parts.extend(replacement)
+                            inserted = True
+                        else:
+                            resolved_parts.append(TextPart(text=match.group(0)))
+                        pos = match.end()
+                    if pos < len(text):
+                        resolved_parts.append(TextPart(text=text[pos:]))
+                elif isinstance(item, dict) and item.get("type") == "image_url":
+                    img = item.get("image_url", {})
+                    meta = item.get("meta") or {}
+                    resolved_parts.append(
+                        ImagePart(
+                            url=img.get("url", ""),
+                            detail=img.get("detail", "low"),
+                            source_type=meta.get("source_type"),
+                            source_name=meta.get("source_name"),
+                        )
+                    )
+
+            if not inserted:
+                for fp in file_parts:
+                    resolved_parts.extend(file_map.get(fp.name) or file_map.get(fp.path or "") or file_map.get(str(file_parts.index(fp)), []))
+
+            resolved_msg = dict(msg)
+            resolved_msg["content"] = [part.to_dict() for part in resolved_parts]
+            resolved_messages.append(resolved_msg)
+        return resolved_messages
+
     async def run_once(self) -> AsyncIterator[ParseEvent]:
         """
         Run one controller turn.
@@ -547,6 +686,7 @@ class Controller:
             self.conversation.append("user", user_content)
 
         messages = self.conversation.to_messages()
+        messages = await self._resolve_message_files(messages)
 
         # Plugin pre-hook: transform messages before LLM call
         if self.plugins:

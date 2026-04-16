@@ -53,7 +53,22 @@ class ImagePartPayload(BaseModel):
     meta: ContentMetaPayload | None = None
 
 
-ContentPartPayload = TextPartPayload | ImagePartPayload
+class FilePayload(BaseModel):
+    path: str | None = None
+    name: str | None = None
+    content: str | None = None
+    mime: str | None = None
+    data_base64: str | None = None
+    encoding: Literal["utf-8", "base64"] | None = None
+    is_inline: bool = False
+
+
+class FilePartPayload(BaseModel):
+    type: Literal["file"]
+    file: FilePayload
+
+
+ContentPartPayload = TextPartPayload | ImagePartPayload | FilePartPayload
 
 
 class ChannelSend(BaseModel):

@@ -30,6 +30,34 @@ class TextPart:
 
 
 @dataclass
+class FilePart:
+    """Custom file reference part resolved before LLM calls."""
+
+    path: str | None = None
+    name: str | None = None
+    content: str | None = None
+    mime: str | None = None
+    data_base64: str | None = None
+    encoding: Literal["utf-8", "base64"] | None = None
+    is_inline: bool = False
+    type: Literal["file"] = "file"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": "file",
+            "file": {
+                "path": self.path,
+                "name": self.name,
+                "content": self.content,
+                "mime": self.mime,
+                "data_base64": self.data_base64,
+                "encoding": self.encoding,
+                "is_inline": self.is_inline,
+            },
+        }
+
+
+@dataclass
 class ImagePart:
     """
     Image content part for multimodal messages.
@@ -77,7 +105,7 @@ class ImagePart:
 
 
 # Union type for content parts
-ContentPart = TextPart | ImagePart
+ContentPart = TextPart | ImagePart | FilePart
 RawContentPart = dict[str, Any]
 
 
@@ -95,6 +123,17 @@ def content_part_from_dict(data: dict[str, Any]) -> ContentPart | None:
             source_type=meta.get("source_type"),
             source_name=meta.get("source_name"),
         )
+    if part_type == "file":
+        file_data = data.get("file", {})
+        return FilePart(
+            path=file_data.get("path"),
+            name=file_data.get("name"),
+            content=file_data.get("content"),
+            mime=file_data.get("mime"),
+            data_base64=file_data.get("data_base64"),
+            encoding=file_data.get("encoding"),
+            is_inline=bool(file_data.get("is_inline", False)),
+        )
     return None
 
 
@@ -107,7 +146,7 @@ def normalize_content_parts(
 
     parts: list[ContentPart] = []
     for item in content:
-        if isinstance(item, (TextPart, ImagePart)):
+        if isinstance(item, (TextPart, ImagePart, FilePart)):
             parts.append(item)
         elif isinstance(item, dict):
             part = content_part_from_dict(item)
