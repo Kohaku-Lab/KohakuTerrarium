@@ -209,6 +209,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         activity_meta: dict[str, Any] = {
             "job_id": job_id,
             "interrupted": True,
+            "cancelled": False,
             "final_state": "interrupted",
             "error": error,
         }
@@ -249,7 +250,9 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
 
         if result is None:
             result = JobResult(
-                job_id=job_id, error="User manually interrupted this job."
+                job_id=job_id,
+                error="User manually interrupted this job.",
+                metadata={"interrupted": True, "final_state": "interrupted"},
             )
 
         self._emit_interrupted_activity(job_id, result)
@@ -263,16 +266,29 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         """
         if isinstance(result, Exception):
             error = str(result)
+            extra_context: dict[str, Any] = {}
             if isinstance(result, asyncio.CancelledError):
                 error = "User manually interrupted this job."
-            event = create_tool_complete_event(job_id=job_id, content="", error=error)
+                extra_context = {"interrupted": True, "final_state": "interrupted"}
+            event = create_tool_complete_event(
+                job_id=job_id, content="", error=error, **extra_context
+            )
         elif hasattr(result, "output"):
             # JobResult or SubAgentResult
+            extra_context = {
+                "interrupted": bool(getattr(result, "interrupted", False)),
+                "cancelled": bool(getattr(result, "cancelled", False)),
+            }
+            if extra_context["interrupted"]:
+                extra_context["final_state"] = "interrupted"
+            elif extra_context["cancelled"]:
+                extra_context["final_state"] = "cancelled"
             event = create_tool_complete_event(
                 job_id=job_id,
                 content=result.output or "",
                 exit_code=getattr(result, "exit_code", 0),
                 error=result.error if hasattr(result, "error") else None,
+                **extra_context,
             )
             # Attach sub-agent metadata if present
             if hasattr(result, "turns"):
@@ -285,6 +301,8 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                     "total_tokens": getattr(result, "total_tokens", 0),
                     "prompt_tokens": getattr(result, "prompt_tokens", 0),
                     "completion_tokens": getattr(result, "completion_tokens", 0),
+                    "interrupted": bool(getattr(result, "interrupted", False)),
+                    "cancelled": bool(getattr(result, "cancelled", False)),
                 }
         else:
             event = create_tool_complete_event(
@@ -310,6 +328,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             metadata: dict[str, Any] = {
                 "job_id": job_id,
                 "interrupted": interrupted,
+                "cancelled": False,
                 "final_state": "interrupted" if interrupted else "error",
                 "error": error_text,
             }
@@ -324,11 +343,16 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
 
         if result is not None and hasattr(result, "error") and result.error:
             output = result.output or ""
-            interrupted = result.error == "User manually interrupted this job."
+            interrupted = bool(getattr(result, "interrupted", False))
+            cancelled = bool(getattr(result, "cancelled", False))
+            final_state = (
+                "interrupted" if interrupted else "cancelled" if cancelled else "error"
+            )
             metadata = {
                 "job_id": job_id,
                 "interrupted": interrupted,
-                "final_state": "interrupted" if interrupted else "error",
+                "cancelled": cancelled,
+                "final_state": final_state,
                 "error": result.error,
                 "result": output,
             }
@@ -341,9 +365,12 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                 metadata["tools_used"] = getattr(result, "metadata", {}).get(
                     "tools_used", []
                 )
+            state_label = (
+                "INTERRUPTED" if interrupted else "CANCELLED" if cancelled else "ERROR"
+            )
             self.output_router.notify_activity(
                 error_activity,
-                f"[{label}] {'INTERRUPTED' if interrupted else 'ERROR'}: {result.error}",
+                f"[{label}] {state_label}: {result.error}",
                 metadata=metadata,
             )
             return
@@ -405,10 +432,18 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                     if interrupted
                     else str(result)
                 )
-                content = f"Error: {error_text}"
+                prefix = "Interrupted" if interrupted else "Error"
+                content = f"{prefix}: {error_text}"
             elif result is not None and hasattr(result, "error") and result.error:
                 output = result.output or ""
-                content = f"Error: {result.error}"
+                interrupted = bool(getattr(result, "interrupted", False))
+                cancelled = bool(getattr(result, "cancelled", False))
+                prefix = (
+                    "Interrupted"
+                    if interrupted
+                    else "Cancelled" if cancelled else "Error"
+                )
+                content = f"{prefix}: {result.error}"
                 if output:
                     content += f"\n{output}"
             elif result is not None:
@@ -449,7 +484,14 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                 output = output or ""
                 error = getattr(result, "error", None)
                 if error:
-                    result_strs.append(f"## {job_id} - ERROR\n{error}\n{output}")
+                    interrupted = bool(getattr(result, "interrupted", False))
+                    cancelled = bool(getattr(result, "cancelled", False))
+                    state = (
+                        "INTERRUPTED"
+                        if interrupted
+                        else "CANCELLED" if cancelled else "ERROR"
+                    )
+                    result_strs.append(f"## {job_id} - {state}\n{error}\n{output}")
                 else:
                     exit_code = getattr(result, "exit_code", 0)
                     status = "OK" if exit_code == 0 else f"exit={exit_code}"

@@ -114,10 +114,33 @@ class AgentRuntimeToolsMixin:
         tools_used = sa_meta.get("tools_used", [])
 
         if error:
+            interrupted = (
+                bool(event.context.get("interrupted")) if event.context else False
+            )
+            cancelled = bool(event.context.get("cancelled")) if event.context else False
+            final_state = (
+                "interrupted" if interrupted else "cancelled" if cancelled else "error"
+            )
+            state_label = (
+                "INTERRUPTED" if interrupted else "CANCELLED" if cancelled else "ERROR"
+            )
             self.output_router.notify_activity(
                 activity_error,
-                f"[{label}] ERROR: {error}",
-                metadata={"job_id": job_id},
+                f"[{label}] {state_label}: {error}",
+                metadata={
+                    "job_id": job_id,
+                    "error": error,
+                    "interrupted": interrupted,
+                    "cancelled": cancelled,
+                    "final_state": final_state,
+                    "result": content,
+                    "tools_used": tools_used,
+                    "turns": sa_meta.get("turns", 0),
+                    "duration": sa_meta.get("duration", 0),
+                    "total_tokens": sa_meta.get("total_tokens", 0),
+                    "prompt_tokens": sa_meta.get("prompt_tokens", 0),
+                    "completion_tokens": sa_meta.get("completion_tokens", 0),
+                },
             )
         elif is_subagent:
             tools_summary = ", ".join(tools_used[:10]) if tools_used else "none"

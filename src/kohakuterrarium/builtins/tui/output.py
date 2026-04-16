@@ -235,10 +235,15 @@ class TUIOutput(BaseOutputModule):
             self._tui.update_running(job_id, job_name, remove=True)
         # Also mark any tool or sub-agent block as cancelled
         self._tui.update_tool_block(
-            job_name, error="cancelled by user", tool_id=job_id, target=t
+            job_name,
+            error="Background task was cancelled by user.",
+            tool_id=job_id,
+            target=t,
         )
         self._tui.end_subagent_block(
-            error="cancelled by user", target=t, agent_id=job_id
+            error="Background sub-agent was cancelled by user.",
+            target=t,
+            agent_id=job_id,
         )
         self._tui.add_system_notice(
             f"Cancelled: {job_name}", command="cancel", target=t

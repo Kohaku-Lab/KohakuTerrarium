@@ -200,6 +200,7 @@ class SessionOutput(OutputModule):
                 "exit_code": 1,
                 "error": metadata.get("error", detail),
                 "interrupted": bool(metadata.get("interrupted", False)),
+                "cancelled": bool(metadata.get("cancelled", False)),
                 "final_state": metadata.get("final_state", "error"),
             },
         )
@@ -241,6 +242,7 @@ class SessionOutput(OutputModule):
                 "error": metadata.get("error", detail),
                 "success": False,
                 "interrupted": bool(metadata.get("interrupted", False)),
+                "cancelled": bool(metadata.get("cancelled", False)),
                 "final_state": metadata.get("final_state", "error"),
                 "tools_used": metadata.get("tools_used", []),
                 "turns": metadata.get("turns", 0),

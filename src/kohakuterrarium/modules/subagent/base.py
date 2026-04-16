@@ -241,7 +241,6 @@ class SubAgent:
                     completion_tokens=self._completion_tokens,
                     metadata={"tools_used": tools_used},
                 )
-
             self._turns += 1
             logger.debug(
                 "Sub-agent turn started",
