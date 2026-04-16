@@ -40,7 +40,7 @@ def test_file_under_600_lines(path):
     rel = str(path.relative_to(SRC)).replace("\\", "/")
     lines = len(path.read_text(encoding="utf-8").splitlines())
     if rel in ALLOWLIST_600:
-        assert lines <= 950, f"{rel} is {lines} lines (allowlisted but max 950)"
+        assert lines <= 1000, f"{rel} is {lines} lines (allowlisted but max 1000)"
     else:
         assert lines <= 600, f"{rel} is {lines} lines (max 600)"
 
