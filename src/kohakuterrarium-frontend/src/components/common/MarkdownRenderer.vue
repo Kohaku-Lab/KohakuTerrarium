@@ -74,6 +74,10 @@ watch(
 function preprocessLatex(text) {
   if (!text) return ""
 
+  // Strip combining low line and zero-width formatting chars that can break
+  // KaTeX command parsing while keeping the visible math content intact.
+  text = text.replace(/[\u0332\u200B-\u200D\u2060\uFEFF]/g, "")
+
   // Convert \( ... \) to $ ... $ for inline math
   text = text.replace(/\\\((.+?)\\\)/g, (_, math) => `$${math}$`)
 
@@ -87,9 +91,18 @@ function preprocessLatex(text) {
   return text
 }
 
+function renderMarkdown(content) {
+  try {
+    const html = md.render(content)
+    return html.replace(/<span class="katex-error" title="([^"]*)">[\s\S]*?<\/span>/g, (_, raw) => `<code>${md.utils.escapeHtml(raw)}</code>`)
+  } catch {
+    return md.render(content.replace(/\$/g, "\\$"))
+  }
+}
+
 const rendered = computed(() => {
   if (!props.content) return ""
-  return md.render(preprocessLatex(props.content))
+  return renderMarkdown(preprocessLatex(props.content))
 })
 </script>
 
