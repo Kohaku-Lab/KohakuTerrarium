@@ -573,12 +573,20 @@ class Controller:
         if self.executor:
             context = self.executor._build_tool_context()
         else:
-            return [TextPart(text=f"[Unable to resolve file without executor context: {path}]")]
+            return [
+                TextPart(
+                    text=f"[Unable to resolve file without executor context: {path}]"
+                )
+            ]
 
         try:
             result = await tool.execute({"path": path}, context=context)
             if result.error:
-                return [TextPart(text=f"[File read failed: {part.name or path}: {result.error}]")]
+                return [
+                    TextPart(
+                        text=f"[File read failed: {part.name or path}: {result.error}]"
+                    )
+                ]
             if isinstance(result.output, str):
                 return [TextPart(text=result.output)]
             return result.output
@@ -589,7 +597,9 @@ class Controller:
                 except OSError:
                     logger.debug("Failed to clean temp upload", path=temp_path)
 
-    async def _resolve_message_files(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    async def _resolve_message_files(
+        self, messages: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         """Resolve custom file parts in messages before provider send."""
         resolved_messages: list[dict[str, Any]] = []
         for msg in messages:
@@ -638,7 +648,9 @@ class Controller:
                     pos = 0
                     for match in _FILE_PLACEHOLDER_RE.finditer(text):
                         if match.start() > pos:
-                            resolved_parts.append(TextPart(text=text[pos:match.start()]))
+                            resolved_parts.append(
+                                TextPart(text=text[pos : match.start()])
+                            )
                         ref = match.group("ref")
                         replacement = file_map.get(ref)
                         if replacement:
@@ -663,7 +675,11 @@ class Controller:
 
             if not inserted:
                 for fp in file_parts:
-                    resolved_parts.extend(file_map.get(fp.name) or file_map.get(fp.path or "") or file_map.get(str(file_parts.index(fp)), []))
+                    resolved_parts.extend(
+                        file_map.get(fp.name)
+                        or file_map.get(fp.path or "")
+                        or file_map.get(str(file_parts.index(fp)), [])
+                    )
 
             resolved_msg = dict(msg)
             resolved_msg["content"] = [part.to_dict() for part in resolved_parts]
