@@ -478,6 +478,17 @@ Full documentation lives in [`docs/`](docs/README.md).
 - [HTTP API](docs/reference/http.md)
 - [CLI Reference](docs/reference/cli.md)
 
+## Roadmap
+
+Near-term directions:
+
+- More reliable terrarium flow and configurable automation
+- Richer UI output and interaction modules across CLI, TUI, and web
+- More built-in creatures, terrariums, plugins, and integrations
+- Better daemon-backed workflows for long-running and remote usage
+
+See [ROADMAP.md](./ROADMAP.md) for more detail.
+
 ### Contributing
 
 - [Contributing docs](docs/dev/README.md)
