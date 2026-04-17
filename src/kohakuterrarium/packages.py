@@ -180,6 +180,45 @@ def install_package(
         )
 
 
+def update_package(name: str) -> str:
+    """Pull latest changes for a git-installed package.
+
+    Unlike :func:`install_package`, this is only valid for an *already*
+    installed, non-editable, git-backed package. It runs
+    ``git -C <pkg> pull --ff-only`` in place and re-runs the post-install
+    hooks (manifest validation + python deps). The caller is expected to
+    have already filtered out editable and non-git packages.
+
+    Raises
+    ------
+    FileNotFoundError
+        If no package with ``name`` exists under ``PACKAGES_DIR``.
+    RuntimeError
+        If the package is not a git clone, or ``git pull`` fails.
+    """
+    target = PACKAGES_DIR / name
+    if not target.exists() or not target.is_dir():
+        raise FileNotFoundError(f"Package not installed: {name}")
+    if not (target / ".git").exists():
+        raise RuntimeError(f"Package is not a git clone: {name}")
+
+    logger.info("Updating package", package=name)
+    try:
+        subprocess.run(
+            ["git", "-C", str(target), "pull", "--ff-only"],
+            check=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError as e:
+        stderr = e.stderr.decode(errors="replace").strip() if e.stderr else str(e)
+        raise RuntimeError(f"Git pull failed for {name}: {stderr}")
+
+    _validate_package(target, name)
+    _install_python_deps(target)
+    logger.info("Package updated", package=name, path=str(target))
+    return name
+
+
 def _install_from_git(url: str, name_override: str | None = None) -> str:
     """Clone a git repo into packages directory."""
     # Determine package name from URL

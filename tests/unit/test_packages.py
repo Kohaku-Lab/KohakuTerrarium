@@ -164,6 +164,120 @@ class TestUninstall:
         assert not uninstall_package("no-such-package")
 
 
+class TestUpdatePackage:
+    """Regression tests for `kt update` / `update_package`."""
+
+    def _make_git_repo(self, tmp_path, name: str):
+        """Create a git repo with a sample package and first commit.
+
+        Path ends with ``.git`` so ``install_package`` routes it through the
+        git branch (same dispatch rule it uses for real URLs).
+        """
+        import subprocess
+
+        src = tmp_path / f"{name}.git"
+        src.mkdir()
+        (src / "kohaku.yaml").write_text(yaml.dump({"name": name, "version": "1.0.0"}))
+        subprocess.run(["git", "init", "-q"], check=True, cwd=src)
+        subprocess.run(
+            ["git", "-c", "user.email=a@b", "-c", "user.name=t", "add", "-A"],
+            check=True,
+            cwd=src,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.email=a@b",
+                "-c",
+                "user.name=t",
+                "commit",
+                "-q",
+                "-m",
+                "v1",
+            ],
+            check=True,
+            cwd=src,
+        )
+        return src
+
+    def test_update_pulls_from_remote(self, tmp_packages, tmp_path, monkeypatch):
+        """Regression: `kt update` must run git pull, not re-copy the local install.
+
+        Previously `_update_package` called `install_package(str(path))` where
+        path was the local install dir — `install_package` then routed that
+        through the local-dir branch, so an installed git clone was never
+        updated. This test pins the fix: a change on the remote must land in
+        the installed copy after `update_package(name)`.
+        """
+        import subprocess
+
+        from kohakuterrarium.packages import install_package, update_package
+
+        # Skip on systems where git is not available.
+        if not subprocess.run(["which", "git"], capture_output=True).stdout.strip():
+            pytest.skip("git not available")
+
+        remote = self._make_git_repo(tmp_path, "gitpack")
+        # Source path ends in .git so install_package dispatches to the git
+        # branch and clones it (same rule as real remote URLs).
+        install_package(str(remote))
+        installed = tmp_packages / "gitpack"
+        assert (installed / ".git").exists(), "install should produce a git clone"
+
+        # Add a new commit on the remote with a sentinel file + version bump.
+        (remote / "NEW.txt").write_text("added after install")
+        (remote / "kohaku.yaml").write_text(
+            yaml.dump({"name": "gitpack", "version": "2.0.0"})
+        )
+        subprocess.run(
+            ["git", "-c", "user.email=a@b", "-c", "user.name=t", "add", "-A"],
+            check=True,
+            cwd=remote,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.email=a@b",
+                "-c",
+                "user.name=t",
+                "commit",
+                "-q",
+                "-m",
+                "v2",
+            ],
+            check=True,
+            cwd=remote,
+        )
+
+        # Before update: sentinel must not be present yet.
+        assert not (installed / "NEW.txt").exists()
+
+        # Act.
+        update_package("gitpack")
+
+        # After update: pull landed, sentinel present, manifest bumped.
+        assert (
+            installed / "NEW.txt"
+        ).exists(), "update_package should have pulled the remote commit"
+        assert "2.0.0" in (installed / "kohaku.yaml").read_text()
+
+    def test_update_rejects_local_install(self, tmp_packages, sample_package):
+        """A non-git local install must not be treated as updatable."""
+        from kohakuterrarium.packages import install_package, update_package
+
+        install_package(str(sample_package))
+        with pytest.raises(RuntimeError, match="not a git clone"):
+            update_package("test-pack")
+
+    def test_update_unknown_package(self, tmp_packages):
+        from kohakuterrarium.packages import update_package
+
+        with pytest.raises(FileNotFoundError):
+            update_package("no-such-pack")
+
+
 class TestListPackages:
     def test_empty(self, tmp_packages):
         assert list_packages() == []

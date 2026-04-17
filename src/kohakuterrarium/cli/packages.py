@@ -11,6 +11,7 @@ from kohakuterrarium.packages import (
     list_packages,
     resolve_package_path,
     uninstall_package,
+    update_package,
 )
 
 
@@ -175,7 +176,7 @@ def _update_package(name: str) -> int:
         return 0
 
     try:
-        install_package(str(path))
+        update_package(name)
     except Exception as e:
         print(f"Failed to update {name}: {e}")
         return 1
