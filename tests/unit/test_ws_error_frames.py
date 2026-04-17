@@ -44,9 +44,9 @@ def _assert_error_frame_then_close(ws, *, key: str = "content") -> None:
     """Verify the next message is an error frame and the server then closes."""
     msg = ws.receive_json()
     assert msg["type"] == "error"
-    assert key in msg and msg[key], (
-        f"error frame missing non-empty '{key}' field: {msg!r}"
-    )
+    assert (
+        key in msg and msg[key]
+    ), f"error frame missing non-empty '{key}' field: {msg!r}"
     with pytest.raises(WebSocketDisconnect):
         ws.receive_json()
 
