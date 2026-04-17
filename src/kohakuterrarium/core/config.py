@@ -10,6 +10,7 @@ from typing import Any
 
 import yaml
 
+from kohakuterrarium.core.config_merge import merge_configs as _merge_configs
 from kohakuterrarium.core.config_types import (
     AgentConfig,
     InputConfig,
@@ -125,68 +126,8 @@ def _resolve_base_config_path(base_config: str, child_dir: Path) -> Path | None:
     return None
 
 
-def _merge_configs(base_data: dict[str, Any], child_data: dict[str, Any]) -> dict:
-    """
-    Merge child config over base config following creature hierarchy rules.
-
-    - tools, subagents: child entries EXTEND base list (deduplicated by name)
-    - Dicts (controller, input, output): shallow-merged (child keys override)
-    - Scalars: child overrides base
-    - system_prompt_file: tracked separately for append behavior
-
-    Special directive ``no_inherit`` (list of key names) makes specified
-    extend-keys use REPLACE instead of EXTEND, so only the child's entries
-    are kept.  Example::
-
-        no_inherit: [tools, subagents]
-        tools:
-          - { name: think, type: builtin }
-    """
-    # Keys whose lists should be extended, not replaced
-    _EXTEND_KEYS = {"tools", "subagents"}
-    # Keys the child explicitly opts out of inheriting
-    _NO_INHERIT = set(child_data.get("no_inherit", []))
-
-    result = dict(base_data)
-
-    # Track inline system_prompt from child so prompt chain can append it
-    if "system_prompt" in child_data and child_data["system_prompt"] is not None:
-        result["_inline_system_prompt"] = child_data["system_prompt"]
-
-    for key, value in child_data.items():
-        if key in ("base_config", "no_inherit"):
-            continue  # Metadata, don't propagate
-        if value is None:
-            continue  # Only override if child explicitly sets a value
-        if (
-            key in _EXTEND_KEYS
-            and key not in _NO_INHERIT
-            and isinstance(value, list)
-            and key in result
-            and isinstance(result[key], list)
-        ):
-            # Extend: base list + child entries (deduplicate by name)
-            existing_names = {
-                item.get("name") for item in result[key] if isinstance(item, dict)
-            }
-            merged_list = list(result[key])
-            for item in value:
-                item_name = item.get("name") if isinstance(item, dict) else None
-                if item_name and item_name not in existing_names:
-                    merged_list.append(item)
-                    existing_names.add(item_name)
-            result[key] = merged_list
-        elif (
-            isinstance(value, dict) and key in result and isinstance(result[key], dict)
-        ):
-            # Shallow merge for dicts (controller, input, output)
-            merged = dict(result[key])
-            merged.update(value)
-            result[key] = merged
-        else:
-            # Scalars and other lists: child replaces base
-            result[key] = value
-    return result
+# The unified merge implementation lives in `core/config_merge.py`.
+# It is re-exported above as `_merge_configs` so existing imports keep working.
 
 
 def _load_base_config_data(base_path: Path) -> dict[str, Any] | None:
@@ -234,12 +175,13 @@ def _parse_input_config(data: dict[str, Any] | None) -> InputConfig:
 
 def _parse_trigger_config(data: dict[str, Any]) -> TriggerConfig:
     """Parse trigger configuration."""
-    reserved = {"type", "module", "class", "prompt"}
+    reserved = {"type", "module", "class", "prompt", "name"}
     return TriggerConfig(
         type=data.get("type", ""),
         module=data.get("module"),
         class_name=data.get("class"),
         prompt=data.get("prompt"),
+        name=data.get("name"),
         options={k: v for k, v in data.items() if k not in reserved},
     )
 
@@ -443,6 +385,9 @@ def _construct_agent_config(
         max_subagent_depth=config_data.get("max_subagent_depth", 3),
         agent_path=agent_path,
         session_key=config_data.get("session_key"),
+        mcp_servers=list(config_data.get("mcp_servers") or []),
+        plugins=list(config_data.get("plugins") or []),
+        memory=dict(config_data.get("memory") or {}),
     )
 
 

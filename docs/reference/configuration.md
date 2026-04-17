@@ -236,13 +236,53 @@ Preset aliases: `@tiny`, `@base`, `@retrieval`, `@best`,
 
 ### Inheritance rules
 
-- `base_config` resolves via the path rules above.
-- **Scalars**: child overrides.
-- **Lists** (`tools`, `subagents`): extend with dedup by `name` unless
-  the key is listed in `no_inherit`.
-- **Dicts** (`controller`, `input`, `output`): shallow merge.
-- `system_prompt_file`: concatenated along the chain; inline
-  `system_prompt` is appended last.
+`base_config` resolves via the path rules above. Merging follows one
+unified rule set for every field:
+
+- **Scalars** — child overrides.
+- **Dicts** (`controller`, `input`, `output`, `memory`, `compact`, …) —
+  shallow merge; child keys override at the top level.
+- **Identity-keyed lists** (`tools`, `subagents`, `plugins`,
+  `mcp_servers`, `triggers`) — union by `name`. On name collision
+  **child wins** and replaces the base entry in place (preserving base
+  order). Items without a `name` value concatenate.
+- **Other lists** — child replaces base.
+- **Prompt files** — `system_prompt_file` concatenates along the chain;
+  inline `system_prompt` is appended last.
+
+Two directives opt out of defaults:
+
+| Directive | Effect |
+|-----------|--------|
+| `no_inherit: [field, …]` | Drops the inherited value for each listed field. Applies uniformly to scalars, dicts, identity lists, and the prompt chain. |
+| `prompt_mode: concat \| replace` | `concat` (default) keeps inherited prompt file chain + inline. `replace` wipes inherited prompts — sugar for `no_inherit: [system_prompt, system_prompt_file]`. |
+
+**Examples.**
+
+Override an inherited tool without replacing the whole list:
+
+```yaml
+base_config: "@kt-defaults/creatures/swe"
+tools:
+  - { name: bash, type: custom, module: ./tools/safe_bash.py, class: SafeBash }
+```
+
+Start clean: drop inherited tools entirely.
+
+```yaml
+base_config: "@kt-defaults/creatures/general"
+no_inherit: [tools]
+tools:
+  - { name: think, type: builtin }
+```
+
+Replace the prompt entirely for a specialised persona:
+
+```yaml
+base_config: "@kt-defaults/creatures/general"
+prompt_mode: replace
+system_prompt_file: prompts/niche.md
+```
 
 ### File convention
 

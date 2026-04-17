@@ -48,19 +48,69 @@ base_config: "@kt-defaults/creatures/swe"
 controller:
   reasoning_effort: high
 tools:
-  - name: my_tool
+  - name: my_tool          # new tool, appended
     type: custom
     module: ./tools/my_tool.py
-no_inherit: []    # keys that should replace the base instead of merging
 ```
 
-Rules:
+Rules — one unified model across all fields:
 
-- Scalars: child wins.
-- `controller`, `input`, `output`: shallow merge.
-- `tools`, `subagents`: extend and dedup by `name` unless listed in `no_inherit`.
-- `system_prompt_file`: concatenated along the chain; inline `system_prompt` appended last.
+- **Scalars**: child wins.
+- **Dicts** (`controller`, `input`, `output`, `memory`, `compact`, …): shallow merge.
+- **Identity-keyed lists** (`tools`, `subagents`, `plugins`, `mcp_servers`, `triggers`): union by `name`. On name collision the **child wins** and replaces the base entry in place. Items without a `name` concatenate.
+- **Prompt files**: `system_prompt_file` concatenates along the chain; inline `system_prompt` is appended last.
 - `base_config` resolves `@pkg/...`, `creatures/<name>` (walks up the project root), or a relative path.
+
+Two directives opt out of defaults:
+
+```yaml
+# 1. Drop an inherited field entirely, then redefine from scratch
+no_inherit: [tools, plugins]
+tools:
+  - { name: think, type: builtin }
+
+# 2. Replace the inherited prompt chain (sugar for
+#    no_inherit: [system_prompt, system_prompt_file])
+prompt_mode: replace
+system_prompt_file: prompts/brand_new.md
+```
+
+### When to use `prompt_mode: replace`
+
+Especially useful for **sub-agents** and **terrarium creatures** that inherit from a base persona but need a fundamentally different voice:
+
+```yaml
+# sub-agent entry inside a creature config
+subagents:
+  - name: niche_responder
+    base_config: "@kt-defaults/subagents/response"
+    prompt_mode: replace
+    system_prompt_file: prompts/niche_persona.md
+```
+
+```yaml
+# terrarium creature that re-purposes an OOTB creature as a team specialist
+creatures:
+  - name: reviewer
+    base_config: "@kt-defaults/creatures/critic"
+    prompt_mode: replace
+    system_prompt: |
+      You are the team's lead reviewer. Speak only to approve or reject, with one-line reasoning.
+```
+
+Default (`prompt_mode: concat`) is the right move when the base prompt is a general contract you want to extend, not replace.
+
+### Overriding vs extending a list entry
+
+Collision by `name` means the child's entry wins:
+
+```yaml
+base_config: "@kt-defaults/creatures/general"
+tools:
+  - { name: bash, type: custom, module: ./tools/safe_bash.py, class: SafeBash }
+```
+
+The child's `bash` replaces the base's `bash` in place; other inherited tools are preserved.
 
 ## Prompt files
 
@@ -133,6 +183,14 @@ tools:
   - name: web_search
     options:
       max_results: 5
+  # Expose a universal trigger as a setup tool — the LLM can install it
+  # at runtime by calling this tool name. The framework wraps the trigger
+  # class with `CallableTriggerTool`; the short description is prefixed
+  # with "**Trigger** — " so the LLM knows it's installing a long-lived
+  # side-effect rather than running an immediate action.
+  - { name: add_timer, type: trigger }
+  - { name: watch_channel, type: trigger }
+  - { name: add_schedule, type: trigger }
 
 subagents:
   - worker
@@ -144,6 +202,12 @@ subagents:
     interactive: true                 # stays alive across parent turns
     can_modify: true
 ```
+
+Setup-able triggers opt in per-creature — a creature without any
+`type: trigger` entries cannot install triggers at runtime. Each
+universal `BaseTrigger` subclass declares its own `setup_tool_name`
+(e.g. `add_timer`), `setup_description`, and `setup_param_schema`. To
+write your own, see [Custom Modules — Triggers](custom-modules.md).
 
 See [reference/builtins](../reference/builtins.md) for the complete tool and sub-agent catalog; [Custom Modules](custom-modules.md) for writing your own.
 

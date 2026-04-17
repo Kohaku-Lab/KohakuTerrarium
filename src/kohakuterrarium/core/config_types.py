@@ -27,6 +27,9 @@ class TriggerConfig:
     class_name: str | None = None  # Class name to instantiate
     prompt: str | None = None
     options: dict[str, Any] = field(default_factory=dict)
+    # Optional stable identity — used as trigger_id and as the identity key for
+    # inheritance (child-wins override of a base trigger with the same name).
+    name: str | None = None
 
 
 @dataclass
@@ -175,6 +178,9 @@ class AgentConfig:
 
     # Plugin configurations (loaded during agent init)
     plugins: list[dict[str, Any]] = field(default_factory=list)
+
+    # Memory / embedding configuration
+    memory: dict[str, Any] = field(default_factory=dict)
 
     def get_api_key(self) -> str | None:
         """Get API key from environment."""

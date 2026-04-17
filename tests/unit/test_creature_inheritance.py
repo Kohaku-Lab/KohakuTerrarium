@@ -128,16 +128,30 @@ class TestMergeConfigs:
         assert tool_names == ["bash", "read", "grep"]
         assert result["subagents"] == [{"name": "explore"}]  # inherited
 
-    def test_child_extends_deduplicates(self):
+    def test_child_wins_on_identity_collision(self):
+        """Child entry with same name replaces base entry in place."""
         base = {
-            "tools": [{"name": "bash"}, {"name": "read"}],
+            "tools": [
+                {"name": "bash", "type": "builtin"},
+                {"name": "read", "type": "builtin"},
+            ],
         }
-        child = {"tools": [{"name": "bash"}, {"name": "grep"}]}
+        child = {
+            "tools": [
+                {"name": "bash", "type": "custom", "module": "./tools/bash.py"},
+                {"name": "grep", "type": "builtin"},
+            ]
+        }
         result = _merge_configs(base, child)
-        # bash already in base, so only grep is added
+        # Size = unique names across both (bash, read, grep)
         assert len(result["tools"]) == 3
         tool_names = [t["name"] for t in result["tools"]]
+        # bash stays at its original position; grep appended
         assert tool_names == ["bash", "read", "grep"]
+        # bash was overridden by the child definition
+        bash = result["tools"][0]
+        assert bash["type"] == "custom"
+        assert bash["module"] == "./tools/bash.py"
 
     def test_dicts_are_shallow_merged(self):
         base = {"controller": {"model": "base-model", "temperature": 0.7}}
@@ -195,6 +209,110 @@ class TestMergeConfigs:
         result = _merge_configs(base, child)
         # Empty no_inherit = normal extend behavior
         assert [t["name"] for t in result["tools"]] == ["bash", "think"]
+
+    def test_plugins_merge_child_wins(self):
+        """Plugins follow the same identity-union rule as tools."""
+        base = {
+            "plugins": [
+                {"name": "logger", "class": "LogPlugin"},
+                {"name": "guard", "class": "BaseGuard"},
+            ]
+        }
+        child = {
+            "plugins": [
+                {"name": "guard", "class": "StrictGuard"},
+                {"name": "rate_limit", "class": "RateLimit"},
+            ]
+        }
+        result = _merge_configs(base, child)
+        names = [p["name"] for p in result["plugins"]]
+        assert names == ["logger", "guard", "rate_limit"]
+        guard = next(p for p in result["plugins"] if p["name"] == "guard")
+        assert guard["class"] == "StrictGuard"
+
+    def test_mcp_servers_merge_child_wins(self):
+        """mcp_servers use the same identity-union rule."""
+        base = {
+            "mcp_servers": [
+                {"name": "sqlite", "transport": "stdio", "command": "old"},
+            ]
+        }
+        child = {
+            "mcp_servers": [
+                {"name": "sqlite", "transport": "stdio", "command": "new"},
+                {"name": "web", "transport": "http", "url": "https://x"},
+            ]
+        }
+        result = _merge_configs(base, child)
+        names = [s["name"] for s in result["mcp_servers"]]
+        assert names == ["sqlite", "web"]
+        sqlite = next(s for s in result["mcp_servers"] if s["name"] == "sqlite")
+        assert sqlite["command"] == "new"
+
+    def test_triggers_with_name_identity(self):
+        """Triggers with matching name override in place; unnamed concat."""
+        base = {
+            "triggers": [
+                {"name": "heartbeat", "type": "timer", "options": {"interval": 60}},
+                {"type": "context"},
+            ]
+        }
+        child = {
+            "triggers": [
+                {"name": "heartbeat", "type": "timer", "options": {"interval": 10}},
+                {"type": "channel", "options": {"channel": "tasks"}},
+            ]
+        }
+        result = _merge_configs(base, child)
+        # 1 base-named + 1 base-unnamed + 0 overrides (heartbeat replaces in place)
+        # + 1 new unnamed child entry = 3 total
+        assert len(result["triggers"]) == 3
+        # heartbeat replaced in place at position 0
+        heartbeat = result["triggers"][0]
+        assert heartbeat["name"] == "heartbeat"
+        assert heartbeat["options"]["interval"] == 10
+        # unnamed child entry appended at the end
+        assert result["triggers"][-1]["type"] == "channel"
+
+    def test_no_inherit_universal_for_controller(self):
+        """no_inherit works on dict fields (not just identity lists)."""
+        base = {"controller": {"model": "base-model", "temperature": 0.7}}
+        child = {
+            "no_inherit": ["controller"],
+            "controller": {"model": "child-model"},
+        }
+        result = _merge_configs(base, child)
+        # Inherited controller dropped; child's controller is the only one
+        assert result["controller"] == {"model": "child-model"}
+
+    def test_no_inherit_universal_for_plugins(self):
+        """no_inherit drops inherited plugins list."""
+        base = {
+            "plugins": [
+                {"name": "p1"},
+                {"name": "p2"},
+            ]
+        }
+        child = {"no_inherit": ["plugins"], "plugins": [{"name": "only"}]}
+        result = _merge_configs(base, child)
+        assert [p["name"] for p in result["plugins"]] == ["only"]
+
+    def test_prompt_mode_replace_drops_chain(self):
+        """prompt_mode: replace wipes inherited _prompt_chain and inline."""
+        base = {
+            "_prompt_chain": ["/path/to/base.md", "/path/to/parent.md"],
+            "_inline_system_prompt": "old inline",
+            "system_prompt_file": "prompts/old.md",
+        }
+        child = {
+            "prompt_mode": "replace",
+            "system_prompt_file": "prompts/new.md",
+            "system_prompt": "new inline",
+        }
+        result = _merge_configs(base, child)
+        assert "_prompt_chain" not in result
+        assert result["_inline_system_prompt"] == "new inline"
+        assert result["system_prompt_file"] == "prompts/new.md"
 
 
 class TestResolveBaseConfigPath:
@@ -374,6 +492,89 @@ class TestLoadAgentConfigInheritance:
         config = load_agent_config(broken)
         assert config.name == "broken"
         assert len(config.tools) == 0
+
+    def test_mcp_servers_plugins_memory_populated(self, tmp_creatures):
+        """mcp_servers, plugins, memory survive construction (no silent drop)."""
+        custom = tmp_creatures / "creatures" / "with_extras"
+        custom.mkdir(parents=True)
+        (custom / "config.yaml").write_text(
+            yaml.dump(
+                {
+                    "name": "with_extras",
+                    "base_config": "../general",
+                    "mcp_servers": [
+                        {"name": "sqlite", "transport": "stdio", "command": "mcps"},
+                    ],
+                    "plugins": [
+                        {"name": "logger", "class": "LogPlugin"},
+                    ],
+                    "memory": {
+                        "embedding": {"provider": "model2vec", "model": "@base"},
+                    },
+                }
+            )
+        )
+
+        config = load_agent_config(custom)
+        assert len(config.mcp_servers) == 1
+        assert config.mcp_servers[0]["name"] == "sqlite"
+        assert len(config.plugins) == 1
+        assert config.plugins[0]["name"] == "logger"
+        assert config.memory["embedding"]["provider"] == "model2vec"
+
+    def test_prompt_mode_replace_in_full_load(self, tmp_creatures):
+        """prompt_mode: replace drops base prompt entirely."""
+        clean = tmp_creatures / "creatures" / "clean"
+        clean.mkdir(parents=True)
+        (clean / "prompts").mkdir()
+        (clean / "config.yaml").write_text(
+            yaml.dump(
+                {
+                    "name": "clean",
+                    "base_config": "../general",
+                    "prompt_mode": "replace",
+                    "system_prompt_file": "prompts/system.md",
+                }
+            )
+        )
+        (clean / "prompts" / "system.md").write_text(
+            "# Clean Agent\n\nFresh prompt only."
+        )
+
+        config = load_agent_config(clean)
+        # Base prompt must NOT appear
+        assert "General Agent" not in config.system_prompt
+        assert "general-purpose assistant" not in config.system_prompt
+        # Child prompt IS the prompt
+        assert "Clean Agent" in config.system_prompt
+        assert "Fresh prompt only" in config.system_prompt
+
+    def test_child_wins_for_overridden_tool_in_full_load(self, tmp_creatures):
+        """A child redeclaring a base tool by name gets its own definition."""
+        override = tmp_creatures / "creatures" / "override"
+        override.mkdir(parents=True)
+        (override / "config.yaml").write_text(
+            yaml.dump(
+                {
+                    "name": "override",
+                    "base_config": "../general",
+                    "tools": [
+                        {
+                            "name": "bash",
+                            "type": "custom",
+                            "module": "./tools/bash.py",
+                            "class": "SafeBash",
+                        },
+                    ],
+                }
+            )
+        )
+
+        config = load_agent_config(override)
+        bash = next(t for t in config.tools if t.name == "bash")
+        assert bash.type == "custom"
+        assert bash.module == "./tools/bash.py"
+        assert bash.class_name == "SafeBash"
 
 
 class TestRealCreatures:
