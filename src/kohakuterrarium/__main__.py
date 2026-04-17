@@ -39,13 +39,18 @@ def _is_briefcase_bundle() -> bool:
     return any(exe_dir.glob("python3*._pth"))
 
 
-if __name__ == "__main__":
+def main() -> int:
     _configure_utf8_stdio()
     if _is_briefcase_bundle() and len(sys.argv) <= 1:
-        from kohakuterrarium.__briefcase__ import main
+        from kohakuterrarium.__briefcase__ import main as briefcase_main
 
-        main()
-    else:
-        from kohakuterrarium.cli import main
+        briefcase_main()
+        return 0
 
-        sys.exit(main())
+    from kohakuterrarium.cli import main as cli_main
+
+    return cli_main()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
