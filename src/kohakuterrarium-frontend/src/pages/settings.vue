@@ -5,28 +5,39 @@
 
       <el-tabs v-model="activeTab">
         <el-tab-pane :label="t('settings.tabs.keys')" name="keys">
-          <div class="flex flex-col gap-3 max-w-xl">
+          <div class="flex flex-col gap-3 max-w-2xl">
             <p class="text-xs text-warm-400 mb-2">{{ t("settings.keys.storageHint") }}</p>
             <div v-for="provider in providers" :key="provider.provider" class="card p-4 flex items-center gap-3">
-              <div class="flex-1">
+              <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 mb-1">
                   <span class="font-medium text-warm-700 dark:text-warm-300">{{ provider.provider }}</span>
+                  <el-tag size="small" effect="plain">{{ provider.backend_type }}</el-tag>
                   <span class="text-[10px] px-1.5 py-0.5 rounded" :class="provider.available ? 'bg-aquamarine/15 text-aquamarine' : 'bg-warm-200 dark:bg-warm-700 text-warm-400'">
                     {{ provider.available ? t("settings.keys.active") : t("settings.keys.noKey") }}
                   </span>
                 </div>
-                <div v-if="provider.masked_key && provider.provider !== 'codex'" class="text-[11px] text-warm-400 font-mono">
-                  {{ provider.masked_key }}
-                </div>
-                <div v-if="provider.provider === 'codex'" class="text-[11px] text-warm-400">
-                  {{ t("settings.keys.oauthHint") }}
+                <div class="text-[11px] text-warm-400 font-mono truncate">
+                  <span v-if="provider.env_var">{{ provider.env_var }}</span>
+                  <span v-if="provider.masked_key && provider.backend_type !== 'codex'"> · {{ provider.masked_key }}</span>
+                  <span v-if="provider.backend_type === 'codex'">{{ t("settings.keys.oauthHint") }}</span>
                 </div>
               </div>
-              <template v-if="provider.provider !== 'codex'">
+              <template v-if="provider.backend_type !== 'codex'">
                 <el-input v-if="editingKey === provider.provider" v-model="keyInput" size="small" type="password" show-password :placeholder="t('settings.keys.enterKey')" class="!w-60" @keyup.enter="saveKey(provider.provider)" />
-                <el-button v-if="editingKey === provider.provider" size="small" type="primary" @click="saveKey(provider.provider)">{{ t("common.save") }}</el-button>
-                <el-button v-if="editingKey === provider.provider" size="small" @click="editingKey = ''">{{ t("common.cancel") }}</el-button>
-                <el-button v-else size="small" @click="startEditKey(provider.provider)">{{ provider.has_key ? t("settings.keys.change") : t("settings.keys.setKey") }}</el-button>
+                <el-button v-if="editingKey === provider.provider" size="small" type="primary" @click="saveKey(provider.provider)">
+                  {{ t("common.save") }}
+                </el-button>
+                <el-button v-if="editingKey === provider.provider" size="small" @click="editingKey = ''">
+                  {{ t("common.cancel") }}
+                </el-button>
+                <el-button v-else size="small" @click="startEditKey(provider.provider)">
+                  {{ provider.has_key ? t("settings.keys.change") : t("settings.keys.setKey") }}
+                </el-button>
+              </template>
+              <template v-else>
+                <el-button size="small" type="primary" :loading="codexLoggingIn" @click="runCodexLogin">
+                  {{ provider.available ? t("common.refresh") : t("settings.keys.setKey") }}
+                </el-button>
               </template>
             </div>
           </div>
@@ -35,6 +46,46 @@
         <el-tab-pane :label="t('settings.tabs.models')" name="models">
           <div class="flex flex-col gap-3 max-w-2xl">
             <p class="text-xs text-warm-400 mb-2">{{ t("settings.models.storageHint") }}</p>
+
+            <div class="card p-4 border-l-3 border-l-sapphire dark:border-l-sapphire-light">
+              <div class="font-medium text-warm-700 dark:text-warm-300 mb-3">Providers</div>
+              <div v-for="backend in backends" :key="backend.name" class="flex items-center gap-2 py-2 border-b border-warm-100 dark:border-warm-800 last:border-b-0">
+                <div class="flex-1 min-w-0">
+                  <div class="font-medium text-warm-700 dark:text-warm-300">{{ backend.name }}</div>
+                  <div class="text-[11px] text-warm-400 font-mono truncate">
+                    {{ backend.backend_type }}<span v-if="backend.base_url"> · {{ backend.base_url }}</span>
+                  </div>
+                </div>
+                <el-tag size="small" effect="plain">{{ backend.built_in ? "built-in" : "custom" }}</el-tag>
+                <el-tag size="small" :type="backend.available ? 'success' : 'info'">{{ backend.has_token ? "token set" : "no token" }}</el-tag>
+                <el-popconfirm v-if="!backend.built_in" title="Delete this provider?" @confirm="deleteBackend(backend.name)">
+                  <template #reference>
+                    <el-button size="small" type="danger" plain>{{ t("common.delete") }}</el-button>
+                  </template>
+                </el-popconfirm>
+              </div>
+              <div class="grid grid-cols-2 gap-3 mt-3">
+                <div>
+                  <label class="text-[11px] text-warm-400 mb-1 block">Provider name</label>
+                  <el-input v-model="backendForm.name" size="small" placeholder="my-provider" />
+                </div>
+                <div>
+                  <label class="text-[11px] text-warm-400 mb-1 block">Backend type</label>
+                  <el-select v-model="backendForm.backend_type" size="small" class="w-full">
+                    <el-option value="openai" label="openai" />
+                    <el-option value="codex" label="codex" />
+                    <el-option value="anthropic" label="anthropic" />
+                  </el-select>
+                </div>
+                <div class="col-span-2">
+                  <label class="text-[11px] text-warm-400 mb-1 block">Base URL</label>
+                  <el-input v-model="backendForm.base_url" size="small" placeholder="https://api.example.com/v1" />
+                </div>
+              </div>
+              <div class="flex gap-2 mt-3">
+                <el-button type="primary" size="small" :disabled="!backendForm.name || !backendForm.backend_type" @click="saveBackend">Save provider</el-button>
+              </div>
+            </div>
 
             <div v-for="profile in profiles" :key="profile.name" class="card p-4">
               <div class="flex items-center gap-2 mb-2">
@@ -72,18 +123,10 @@
                   <el-input v-model="form.model" size="small" placeholder="gpt-4o" />
                 </div>
                 <div>
-                  <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.models.provider") }}</label>
+                  <label class="text-[11px] text-warm-400 mb-1 block">Provider</label>
                   <el-select v-model="form.provider" size="small" class="w-full">
-                    <el-option value="openai" label="OpenAI" />
-                    <el-option value="anthropic" label="Anthropic" />
-                    <el-option value="openrouter" label="OpenRouter" />
-                    <el-option value="gemini" label="Gemini" />
-                    <el-option value="mimo" label="Mimo" />
+                    <el-option v-for="backend in backends" :key="backend.name" :value="backend.name" :label="backend.name" />
                   </el-select>
-                </div>
-                <div>
-                  <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.models.baseUrlOptional") }}</label>
-                  <el-input v-model="form.base_url" size="small" placeholder="https://api.openai.com/v1" />
                 </div>
                 <div>
                   <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.models.maxContext") }}</label>
@@ -93,9 +136,21 @@
                   <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.models.temperature") }}</label>
                   <el-input-number v-model="form.temperature" size="small" :min="0" :max="2" :step="0.1" :precision="1" />
                 </div>
+                <div>
+                  <label class="text-[11px] text-warm-400 mb-1 block">Max output</label>
+                  <el-input-number v-model="form.max_output" size="small" :min="1" :step="1000" />
+                </div>
+                <div>
+                  <label class="text-[11px] text-warm-400 mb-1 block">Reasoning effort</label>
+                  <el-input v-model="form.reasoning_effort" size="small" placeholder="high" />
+                </div>
+                <div>
+                  <label class="text-[11px] text-warm-400 mb-1 block">Service tier</label>
+                  <el-input v-model="form.service_tier" size="small" placeholder="default" />
+                </div>
               </div>
               <div class="flex gap-2 mt-3">
-                <el-button type="primary" size="small" :disabled="!form.name || !form.model" @click="saveProfile">
+                <el-button type="primary" size="small" :disabled="!form.name || !form.model || !form.provider" @click="saveProfile">
                   {{ editingProfile ? t("settings.models.update") : t("settings.models.addProfile") }}
                 </el-button>
                 <el-button v-if="editingProfile" size="small" @click="resetForm">{{ t("common.cancel") }}</el-button>
@@ -111,9 +166,7 @@
             <div v-for="server in mcpServers" :key="server.name" class="card p-4">
               <div class="flex items-center gap-2 mb-2">
                 <span class="font-medium text-warm-700 dark:text-warm-300">{{ server.name }}</span>
-                <span class="text-[10px] px-1.5 py-0.5 rounded bg-sapphire/15 text-sapphire dark:text-sapphire-light font-mono">
-                  {{ server.transport }}
-                </span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-sapphire/15 text-sapphire dark:text-sapphire-light font-mono">{{ server.transport }}</span>
                 <div class="flex-1" />
                 <el-popconfirm :title="t('settings.mcp.deleteConfirm')" @confirm="removeMCPServer(server.name)">
                   <template #reference>
@@ -176,48 +229,13 @@
                   <div class="i-carbon-user-avatar text-iolite text-sm" />
                 </div>
                 <div>
-                  <div class="font-medium text-warm-700 dark:text-warm-300">
-                    {{ codexUsage.email }}
-                  </div>
+                  <div class="font-medium text-warm-700 dark:text-warm-300">{{ codexUsage.email }}</div>
                   <div class="text-[11px] text-warm-400 capitalize">
                     {{ codexUsage.plan_type || t("settings.account.unknownPlan") }}
                     <span v-if="codexUsage.limit_reached" class="ml-2 text-coral">{{ t("settings.account.limitReached") }}</span>
                   </div>
                 </div>
               </div>
-
-              <div v-if="codexUsage.primary_window" class="card p-4">
-                <div class="flex items-center justify-between mb-2">
-                  <span class="text-xs font-medium text-warm-600 dark:text-warm-400">{{ t("settings.account.shortTermWindow") }}</span>
-                  <span class="text-[11px] text-warm-400">{{ t("settings.account.resets", { value: formatReset(codexUsage.primary_window.reset_after_seconds) }) }}</span>
-                </div>
-                <div class="h-2 rounded-full bg-warm-200 dark:bg-warm-700 overflow-hidden">
-                  <div class="h-full rounded-full transition-all" :class="codexUsage.primary_window.used_percent > 80 ? 'bg-coral' : 'bg-iolite'" :style="`width: ${codexUsage.primary_window.used_percent}%`" />
-                </div>
-                <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.account.used", { value: codexUsage.primary_window.used_percent }) }}</div>
-              </div>
-
-              <div v-if="codexUsage.secondary_window" class="card p-4">
-                <div class="flex items-center justify-between mb-2">
-                  <span class="text-xs font-medium text-warm-600 dark:text-warm-400">{{ t("settings.account.weeklyWindow") }}</span>
-                  <span class="text-[11px] text-warm-400">{{ t("settings.account.resets", { value: formatReset(codexUsage.secondary_window.reset_after_seconds) }) }}</span>
-                </div>
-                <div class="h-2 rounded-full bg-warm-200 dark:bg-warm-700 overflow-hidden">
-                  <div class="h-full rounded-full transition-all" :class="codexUsage.secondary_window.used_percent > 80 ? 'bg-coral' : 'bg-taaffeite'" :style="`width: ${codexUsage.secondary_window.used_percent}%`" />
-                </div>
-                <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.account.used", { value: codexUsage.secondary_window.used_percent }) }}</div>
-              </div>
-
-              <div v-if="codexUsage.credits" class="card p-4">
-                <div class="text-xs font-medium text-warm-600 dark:text-warm-400 mb-2">{{ t("settings.account.credits") }}</div>
-                <div class="text-sm text-warm-700 dark:text-warm-300">
-                  <span v-if="codexUsage.credits.unlimited">{{ t("settings.account.unlimited") }}</span>
-                  <span v-else-if="codexUsage.credits.has_credits">{{ t("settings.account.balance", { value: codexUsage.credits.balance }) }}</span>
-                  <span v-else class="text-warm-400">{{ t("settings.account.noCredits") }}</span>
-                  <span v-if="codexUsage.credits.overage_limit_reached" class="ml-2 text-coral text-[11px]">{{ t("settings.account.overageLimitReached") }}</span>
-                </div>
-              </div>
-
               <el-button size="small" @click="loadCodexUsage">{{ t("common.refresh") }}</el-button>
             </template>
           </div>
@@ -306,14 +324,6 @@ async function loadCodexUsage() {
   }
 }
 
-function formatReset(seconds) {
-  if (!seconds) return t("settings.account.soon")
-  const hours = Math.floor(seconds / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  if (hours > 0) return t("settings.account.inHoursMinutes", { hours, minutes })
-  return t("settings.account.inMinutes", { minutes })
-}
-
 const providers = ref([])
 const editingKey = ref("")
 const keyInput = ref("")
@@ -340,21 +350,85 @@ async function saveKey(provider) {
     editingKey.value = ""
     keyInput.value = ""
     await loadKeys()
+    await loadBackends()
   } catch (err) {
     ElMessage.error(err.response?.data?.detail || t("settings.keys.saveFailed"))
   }
 }
+
+const codexLoggingIn = ref(false)
+async function runCodexLogin() {
+  codexLoggingIn.value = true
+  ElMessage.info("Codex OAuth started — complete the flow in your browser (or visit the console URL).")
+  try {
+    await settingsAPI.codexLogin()
+    ElMessage.success("Codex login successful")
+    await loadKeys()
+    await loadBackends()
+  } catch (err) {
+    ElMessage.error(err.response?.data?.detail || "Codex login failed")
+  } finally {
+    codexLoggingIn.value = false
+  }
+}
+
+const backends = ref([])
+const backendForm = reactive({
+  name: "",
+  backend_type: "openai",
+  base_url: "",
+})
 
 const profiles = ref([])
 const editingProfile = ref(null)
 const form = reactive({
   name: "",
   model: "",
-  provider: "openai",
-  base_url: "",
+  provider: "",
   max_context: 128000,
+  max_output: 16384,
   temperature: null,
+  reasoning_effort: "",
+  service_tier: "",
 })
+
+async function loadBackends() {
+  try {
+    const data = await settingsAPI.getBackends()
+    backends.value = data.backends || []
+    if (!form.provider && backends.value.length > 0) {
+      form.provider = backends.value[0].name
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+async function saveBackend() {
+  if (!backendForm.name || !backendForm.backend_type) return
+  try {
+    await settingsAPI.saveBackend({ ...backendForm })
+    ElMessage.success(`Saved provider: ${backendForm.name}`)
+    backendForm.name = ""
+    backendForm.backend_type = "openai"
+    backendForm.base_url = ""
+    await loadBackends()
+    await loadKeys()
+  } catch (err) {
+    ElMessage.error(err.response?.data?.detail || "Failed to save provider")
+  }
+}
+
+async function deleteBackend(name) {
+  try {
+    await settingsAPI.deleteBackend(name)
+    ElMessage.success(`Deleted provider: ${name}`)
+    await loadBackends()
+    await loadKeys()
+  } catch (err) {
+    ElMessage.error(err.response?.data?.detail || "Failed to delete provider")
+  }
+}
 
 async function loadProfiles() {
   try {
@@ -369,24 +443,28 @@ function editProfile(profile) {
   editingProfile.value = profile.name
   form.name = profile.name
   form.model = profile.model
-  form.provider = profile.provider
-  form.base_url = profile.base_url || ""
+  form.provider = profile.provider || ""
   form.max_context = profile.max_context || 128000
+  form.max_output = profile.max_output || 16384
   form.temperature = profile.temperature
+  form.reasoning_effort = profile.reasoning_effort || ""
+  form.service_tier = profile.service_tier || ""
 }
 
 function resetForm() {
   editingProfile.value = null
   form.name = ""
   form.model = ""
-  form.provider = "openai"
-  form.base_url = ""
+  form.provider = backends.value[0]?.name || ""
   form.max_context = 128000
+  form.max_output = 16384
   form.temperature = null
+  form.reasoning_effort = ""
+  form.service_tier = ""
 }
 
 async function saveProfile() {
-  if (!form.name || !form.model) return
+  if (!form.name || !form.model || !form.provider) return
   try {
     await settingsAPI.saveProfile({ ...form })
     ElMessage.success(t("settings.models.saved", { name: form.name }))
@@ -457,10 +535,11 @@ async function removeMCPServer(name) {
   }
 }
 
-onMounted(() => {
-  loadKeys()
-  loadProfiles()
-  loadMCP()
+onMounted(async () => {
+  await loadKeys()
+  await loadBackends()
+  await loadProfiles()
+  await loadMCP()
 })
 
 watch(activeTab, (tab) => {

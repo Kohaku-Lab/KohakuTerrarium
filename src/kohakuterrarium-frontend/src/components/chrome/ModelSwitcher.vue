@@ -72,14 +72,14 @@ const currentModel = computed(() => {
   const inst = currentInstance.value
   if (inst?.type === "terrarium") {
     const target = selectedTarget.value
-    if (target === "root") return terrariumTarget.value === target ? chat.sessionInfo.model || inst.model || "" : inst.model || ""
+    if (target === "root") return terrariumTarget.value === target ? chat.sessionInfo.llmName || chat.sessionInfo.model || inst.model || "" : inst.model || ""
     if (target) {
       const creature = inst.creatures?.find((c) => c.name === target)
-      return terrariumTarget.value === target ? chat.sessionInfo.model || creature?.model || "" : creature?.model || ""
+      return terrariumTarget.value === target ? chat.sessionInfo.llmName || chat.sessionInfo.model || creature?.model || "" : creature?.model || ""
     }
     return ""
   }
-  return chat.sessionInfo.model || inst?.model || ""
+  return chat.sessionInfo.llmName || chat.sessionInfo.model || inst?.model || ""
 })
 
 async function loadModels() {
@@ -99,7 +99,7 @@ function onVisibleChange(open) {
 }
 
 function modelLabel(model) {
-  const provider = model.login_provider || model.provider || ""
+  const provider = model.backend || model.login_provider || model.provider || ""
   return provider ? `${model.name} · ${provider}` : model.name
 }
 
@@ -123,10 +123,12 @@ async function onPick(modelName) {
       await terrariumAPI.switchCreatureModel(id, target, modelName)
       await instances.fetchOne(id)
       if (terrariumTarget.value === target) {
+        chat.sessionInfo.llmName = modelName
         chat.sessionInfo.model = modelName
       }
     } else {
       await agentAPI.switchModel(id, modelName)
+      chat.sessionInfo.llmName = modelName
       chat.sessionInfo.model = modelName
     }
     ElMessage.success(`Switched to ${modelName}`)
@@ -145,6 +147,7 @@ function openModelConfig() {
     ? {
         model: fullProfile.model,
         provider: fullProfile.provider,
+        backend: fullProfile.backend || "",
         max_context: fullProfile.max_context || 0,
         max_output: fullProfile.max_output || 0,
         temperature: fullProfile.temperature,

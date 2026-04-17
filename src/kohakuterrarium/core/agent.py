@@ -474,14 +474,11 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
                     exc_info=True,
                 )
 
-        # Save LLM profile name to session state for resume
-        if self.session_store and self._llm_override:
+        # Save selected preset/profile name to session state for resume
+        selected_llm_name = self._llm_override or self.config.llm_profile or ""
+        if self.session_store and selected_llm_name:
             self.session_store.state[f"{self.config.name}:llm_profile"] = (
-                self._llm_override
-            )
-        elif self.session_store and self.config.llm_profile:
-            self.session_store.state[f"{self.config.name}:llm_profile"] = (
-                self.config.llm_profile
+                selected_llm_name
             )
 
         # Set prompt_cache_key on LLM provider for cache routing
@@ -513,6 +510,7 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
             metadata={
                 "session_id": session_id,
                 "model": model,
+                "llm_name": selected_llm_name,
                 "agent_name": self.config.name,
                 "max_context": max_context,
                 "compact_threshold": compact_at,
@@ -625,6 +623,7 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
             The model identifier string of the new provider.
         """
         new_llm = create_llm_from_profile_name(profile_name)
+        self._llm_override = profile_name
         self.llm = new_llm
         self.controller.llm = new_llm
         if self.compact_manager:
@@ -652,6 +651,7 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
             f"Model switched to {model_name}",
             metadata={
                 "model": model_name,
+                "llm_name": profile_name,
                 "agent_name": self.config.name,
                 "session_id": getattr(self, "_session_id", ""),
                 "max_context": new_max,

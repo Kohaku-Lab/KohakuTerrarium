@@ -610,10 +610,11 @@ export const useChatStore = defineStore("chat", {
     runningJobs: {},
     /** @type {Object<string, number>} Unread message counts per tab */
     unreadCounts: {},
-    /** @type {{sessionId: string, model: string, agentName: string, compactThreshold: number}} Session metadata */
+    /** @type {{sessionId: string, model: string, llmName: string, agentName: string, compactThreshold: number}} Session metadata */
     sessionInfo: {
       sessionId: "",
       model: "",
+      llmName: "",
       agentName: "",
       compactThreshold: 0,
     },
@@ -667,6 +668,7 @@ export const useChatStore = defineStore("chat", {
       this.sessionInfo = {
         sessionId: "",
         model: "",
+        llmName: "",
         agentName: "",
         compactThreshold: 0,
         maxContext: 0,
@@ -998,6 +1000,7 @@ export const useChatStore = defineStore("chat", {
         // Merge — update fields present in the event, keep existing for absent ones
         if (data.session_id) this.sessionInfo.sessionId = data.session_id
         if (data.model) this.sessionInfo.model = data.model
+        if (data.llm_name) this.sessionInfo.llmName = data.llm_name
         if (data.agent_name) this.sessionInfo.agentName = data.agent_name
         if (data.max_context != null) this.sessionInfo.maxContext = data.max_context
         if (data.compact_threshold != null)

@@ -30,8 +30,12 @@ class ModelCommand(BaseUserCommand):
 
         entries = list_all()
         current = ""
+        current_name = ""
         if context.agent:
             current = getattr(context.agent.llm, "model", "")
+            current_name = getattr(context.agent, "_llm_override", "") or getattr(
+                context.agent.config, "llm_profile", ""
+            )
 
         available = [e for e in entries if e.get("available")]
 
@@ -40,7 +44,12 @@ class ModelCommand(BaseUserCommand):
         if available:
             lines.append("Available models:")
             for e in available:
-                marker = " *" if e["model"] == current else ""
+                marker = (
+                    " *"
+                    if e["name"] == current_name
+                    or (not current_name and e["model"] == current)
+                    else ""
+                )
                 lines.append(
                     f"  {e['name']:<25} {e['model']:<35} "
                     f"({e['login_provider']}){marker}"
@@ -62,7 +71,8 @@ class ModelCommand(BaseUserCommand):
                         "model": e["model"],
                         "provider": e.get("login_provider", ""),
                         "context": f"{e.get('max_context', 0) // 1000}k",
-                        "selected": e["model"] == current,
+                        "selected": e["name"] == current_name
+                        or (not current_name and e["model"] == current),
                     }
                     for e in available
                 ],

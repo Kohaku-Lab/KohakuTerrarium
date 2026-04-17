@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config import AgentConfig
+from kohakuterrarium.llm.profiles import _login_provider_for
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -129,14 +130,14 @@ class AgentSession:
                 max_context * self.agent.compact_manager.config.threshold
             )
 
-        # Resolve provider from profile
-        provider = ""
-        from kohakuterrarium.llm.profiles import _login_provider_for
-
-        profile_data = {"provider": getattr(self.agent.llm, "provider", "openai")}
+        # Resolve provider name the user should authenticate against.
+        profile_data = {"provider": getattr(self.agent.llm, "provider", "")}
         api_key_env = getattr(self.agent.llm, "api_key_env", "")
         if api_key_env:
             profile_data["api_key_env"] = api_key_env
+        base_url = getattr(self.agent.llm, "base_url", "")
+        if base_url:
+            profile_data["base_url"] = base_url
         provider = _login_provider_for(profile_data)
 
         # Session ID

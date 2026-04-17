@@ -4,21 +4,20 @@ import os
 from pathlib import Path
 from typing import Any
 
-
-from kohakuterrarium.api.routes.settings import _load_mcp_config, _save_mcp_config
-from kohakuterrarium.llm.api_keys import (
-    KEYS_PATH,
-    PROVIDER_KEY_MAP,
-    list_api_keys,
-    save_api_key,
-)
+from kohakuterrarium.cli.auth import login_cli
+from kohakuterrarium.cli.config_mcp import add_or_update_mcp, delete_mcp, list_mcp
+from kohakuterrarium.llm.api_keys import KEYS_PATH, list_api_keys, save_api_key
 from kohakuterrarium.llm.profiles import (
     PROFILES_PATH,
+    LLMBackend,
     LLMProfile,
+    delete_backend,
     delete_profile,
     get_default_model,
     get_profile,
+    load_backends,
     load_profiles,
+    save_backend,
     save_profile,
     set_default_model,
 )
@@ -28,6 +27,14 @@ def _prompt(label: str, default: str = "") -> str:
     suffix = f" [{default}]" if default else ""
     value = input(f"{label}{suffix}: ").strip()
     return value if value else default
+
+
+def _prompt_choice(label: str, choices: list[str], default: str) -> str:
+    while True:
+        value = _prompt(f"{label} ({'/'.join(choices)})", default)
+        if value in choices:
+            return value
+        print(f"Please choose one of: {', '.join(choices)}")
 
 
 def _prompt_int(label: str, default: int) -> int:
@@ -84,25 +91,26 @@ def _confirm(prompt: str, default: bool = False) -> bool:
 
 def _format_profile(profile: LLMProfile) -> str:
     lines = [
-        f"Name:        {profile.name}",
-        f"Provider:    {profile.provider}",
-        f"Model:       {profile.model}",
-        f"Max context: {profile.max_context}",
-        f"Max output:  {profile.max_output}",
+        f"Name:         {profile.name}",
+        f"Provider:     {profile.provider}",
+        f"Backend type: {profile.backend_type}",
+        f"Model:        {profile.model}",
+        f"Max context:  {profile.max_context}",
+        f"Max output:   {profile.max_output}",
     ]
     if profile.base_url:
-        lines.append(f"Base URL:    {profile.base_url}")
+        lines.append(f"Base URL:     {profile.base_url}")
     if profile.api_key_env:
-        lines.append(f"API key env: {profile.api_key_env}")
+        lines.append(f"API key env:  {profile.api_key_env}")
     if profile.temperature is not None:
-        lines.append(f"Temperature: {profile.temperature}")
+        lines.append(f"Temperature:  {profile.temperature}")
     if profile.reasoning_effort:
-        lines.append(f"Reasoning:   {profile.reasoning_effort}")
+        lines.append(f"Reasoning:    {profile.reasoning_effort}")
     if profile.service_tier:
-        lines.append(f"Service tier:{profile.service_tier}")
+        lines.append(f"Service tier: {profile.service_tier}")
     if profile.extra_body:
         lines.append(
-            f"Extra body:  {json.dumps(profile.extra_body, ensure_ascii=False)}"
+            f"Extra body:   {json.dumps(profile.extra_body, ensure_ascii=False)}"
         )
     return "\n".join(lines)
 
@@ -157,27 +165,74 @@ def _config_edit(name: str | None) -> int:
     return os.system(f'{editor} "{path}"')
 
 
+def _backend_list() -> int:
+    backends = load_backends()
+    if not backends:
+        print("No providers.")
+        return 0
+    print(f"{'Name':<24} {'Backend Type':<12} {'Base URL'}")
+    print("-" * 90)
+    for name, backend in sorted(backends.items()):
+        print(f"{name:<24} {backend.backend_type:<12} {backend.base_url}")
+    return 0
+
+
+def _backend_add_or_update(name: str | None = None) -> int:
+    backends = load_backends()
+    existing = backends.get(name or "")
+    backend_name = name or _prompt("Provider name")
+    if not backend_name:
+        print("Provider name is required.")
+        return 1
+    backend = LLMBackend(
+        name=backend_name,
+        backend_type=_prompt_choice(
+            "Backend type",
+            ["openai", "codex", "anthropic"],
+            existing.backend_type if existing else "openai",
+        ),
+        base_url=_prompt("Base URL", existing.base_url if existing else ""),
+        api_key_env=_prompt("API key env", existing.api_key_env if existing else ""),
+    )
+    save_backend(backend)
+    print(f"Saved provider: {backend.name}")
+    return 0
+
+
+def _backend_delete(name: str) -> int:
+    try:
+        deleted = delete_backend(name)
+    except ValueError as e:
+        print(str(e))
+        return 1
+    if not deleted:
+        print(f"Provider not found: {name}")
+        return 1
+    print(f"Deleted provider: {name}")
+    return 0
+
+
 def _llm_list() -> int:
     profiles = load_profiles()
     default_name = get_default_model()
     if not profiles:
-        print("No user-defined LLM profiles.")
+        print("No user-defined LLM presets.")
         print(f"Profiles file: {PROFILES_PATH}")
         return 0
     print(f"Profiles file: {PROFILES_PATH}")
     print()
-    print(f"{'Name':<24} {'Provider':<12} {'Model':<40} {'Default'}")
-    print("-" * 90)
+    print(f"{'Name':<24} {'Provider':<18} {'Model':<40} {'Default'}")
+    print("-" * 100)
     for name, profile in sorted(profiles.items()):
         marker = "*" if name == default_name else ""
-        print(f"{name:<24} {profile.provider:<12} {profile.model:<40} {marker}")
+        print(f"{name:<24} {profile.provider:<18} {profile.model:<40} {marker}")
     return 0
 
 
 def _llm_show(name: str) -> int:
     profile = get_profile(name)
     if not profile:
-        print(f"Profile not found: {name}")
+        print(f"Preset not found: {name}")
         return 1
     print(_format_profile(profile))
     return 0
@@ -185,23 +240,26 @@ def _llm_show(name: str) -> int:
 
 def _llm_add_or_update(name: str | None = None) -> int:
     existing = get_profile(name) if name else None
-    profile_name = name or _prompt("Profile name")
+    profile_name = name or _prompt("Preset name")
     if not profile_name:
-        print("Profile name is required.")
+        print("Preset name is required.")
         return 1
 
-    provider = _prompt("Provider", existing.provider if existing else "openai")
-    model = _prompt("Model", existing.model if existing else "")
+    providers = sorted(load_backends().keys())
+    provider_name = _prompt_choice(
+        "Provider",
+        providers,
+        existing.provider if existing and existing.provider else providers[0],
+    )
+    model = _prompt("API model name", existing.model if existing else "")
     if not model:
         print("Model is required.")
         return 1
 
     profile = LLMProfile(
         name=profile_name,
-        provider=provider,
         model=model,
-        base_url=_prompt("Base URL", existing.base_url if existing else ""),
-        api_key_env=_prompt("API key env", existing.api_key_env if existing else ""),
+        provider=provider_name,
         max_context=_prompt_int(
             "Max context", existing.max_context if existing else 128000
         ),
@@ -221,7 +279,7 @@ def _llm_add_or_update(name: str | None = None) -> int:
         or {},
     )
     save_profile(profile)
-    print(f"Saved profile: {profile.name}")
+    print(f"Saved preset: {profile.name}")
     if _confirm("Set as default model?", default=False):
         set_default_model(profile.name)
         print(f"Default model set to: {profile.name}")
@@ -231,15 +289,15 @@ def _llm_add_or_update(name: str | None = None) -> int:
 def _llm_delete(name: str) -> int:
     profile = get_profile(name)
     if not profile:
-        print(f"Profile not found: {name}")
+        print(f"Preset not found: {name}")
         return 1
-    if not _confirm(f"Delete profile '{name}'?", default=False):
+    if not _confirm(f"Delete preset '{name}'?", default=False):
         print("Cancelled.")
         return 0
     if delete_profile(name):
-        print(f"Deleted profile: {name}")
+        print(f"Deleted preset: {name}")
         return 0
-    print(f"Profile not found: {name}")
+    print(f"Preset not found: {name}")
     return 1
 
 
@@ -250,7 +308,7 @@ def _llm_default(name: str | None) -> int:
         return 0
     profile = get_profile(name)
     if not profile:
-        print(f"Profile/preset not found: {name}")
+        print(f"Preset not found: {name}")
         return 1
     set_default_model(name)
     print(f"Default model set to: {name}")
@@ -261,22 +319,25 @@ def _key_list() -> int:
     masked = list_api_keys()
     print(f"API keys file: {KEYS_PATH}")
     print()
-    providers = sorted(PROVIDER_KEY_MAP.keys())
-    for provider in providers:
-        env_var = PROVIDER_KEY_MAP[provider]
+    for provider, backend in sorted(load_backends().items()):
         value = masked.get(provider, "")
         source = (
-            "stored" if value else ("env" if os.environ.get(env_var) else "missing")
+            "stored"
+            if value
+            else (
+                "env"
+                if backend.api_key_env and os.environ.get(backend.api_key_env)
+                else "missing"
+            )
         )
         shown = value or ("(from env)" if source == "env" else "")
-        print(f"{provider:<12} {env_var:<24} {source:<8} {shown}")
+        print(f"{provider:<20} {backend.api_key_env:<24} {source:<8} {shown}")
     return 0
 
 
 def _key_set(provider: str, value: str | None) -> int:
-    if provider not in PROVIDER_KEY_MAP:
+    if provider not in load_backends():
         print(f"Unknown provider: {provider}")
-        print(f"Available: {', '.join(sorted(PROVIDER_KEY_MAP.keys()))}")
         return 1
     key = value or input(f"API key for {provider}: ").strip()
     if not key:
@@ -288,7 +349,7 @@ def _key_set(provider: str, value: str | None) -> int:
 
 
 def _key_delete(provider: str) -> int:
-    if provider not in PROVIDER_KEY_MAP:
+    if provider not in load_backends():
         print(f"Unknown provider: {provider}")
         return 1
     if not _confirm(f"Delete stored key for '{provider}'?", default=False):
@@ -299,198 +360,178 @@ def _key_delete(provider: str) -> int:
     return 0
 
 
-def _mcp_list() -> int:
-    servers = _load_mcp_config()
-    path = _config_paths()["mcp_servers"]
-    print(f"MCP config file: {path}")
-    if not servers:
-        print("No MCP servers configured.")
-        return 0
-    print()
-    for server in servers:
-        print(f"- {server.get('name', '')}")
-        print(f"  transport: {server.get('transport', 'stdio')}")
-        if server.get("command"):
-            print(f"  command:   {server.get('command', '')}")
-        if server.get("args"):
-            print(f"  args:      {server.get('args', [])}")
-        if server.get("url"):
-            print(f"  url:       {server.get('url', '')}")
-        if server.get("env"):
-            print(f"  env keys:  {list((server.get('env') or {}).keys())}")
-    return 0
+# ── Subparser + dispatch ────────────────────────────────────────
 
 
-def _prompt_mcp(existing: dict[str, Any] | None = None) -> dict[str, Any]:
-    existing = existing or {}
-    name = _prompt("Name", existing.get("name", ""))
-    transport = _prompt("Transport", existing.get("transport", "stdio"))
-    command = _prompt("Command", existing.get("command", ""))
-    args_raw = _prompt(
-        "Args JSON array", json.dumps(existing.get("args", []), ensure_ascii=False)
+def add_config_subparser(subparsers: argparse._SubParsersAction) -> None:
+    """Register the `kt config` command group."""
+    parser = subparsers.add_parser(
+        "config",
+        help="Manage KohakuTerrarium configuration (providers, presets, keys, MCP)",
     )
-    env_raw = _prompt(
-        "Env JSON object", json.dumps(existing.get("env", {}), ensure_ascii=False)
+    sub = parser.add_subparsers(dest="config_command")
+
+    sub.add_parser("show", help="Show all configuration file paths")
+    path_parser = sub.add_parser("path", help="Print the path of a config file")
+    path_parser.add_argument("name", nargs="?", default=None)
+    edit_parser = sub.add_parser("edit", help="Open a config file in $EDITOR")
+    edit_parser.add_argument("name", nargs="?", default=None)
+
+    # Provider (a.k.a. backend) management
+    provider_parser = sub.add_parser(
+        "provider",
+        aliases=["backend"],
+        help="Manage LLM providers (name, backend_type, base_url, api_key_env)",
     )
-    url = _prompt("URL", existing.get("url", ""))
+    provider_sub = provider_parser.add_subparsers(dest="config_provider_command")
+    provider_sub.add_parser("list", help="List providers")
+    p_add = provider_sub.add_parser("add", help="Add or update a provider")
+    p_add.add_argument("name", nargs="?", default=None)
+    p_edit = provider_sub.add_parser("edit", help="Edit an existing provider")
+    p_edit.add_argument("name")
+    p_del = provider_sub.add_parser("delete", help="Delete a provider")
+    p_del.add_argument("name")
 
-    try:
-        args = json.loads(args_raw) if args_raw else []
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid args JSON: {e}")
-    if not isinstance(args, list):
-        raise ValueError("Args must be a JSON array")
+    # LLM preset management
+    llm_parser = sub.add_parser(
+        "llm",
+        aliases=["model", "preset"],
+        help="Manage LLM presets (model, provider binding, params)",
+    )
+    llm_sub = llm_parser.add_subparsers(dest="config_llm_command")
+    llm_sub.add_parser("list", help="List presets")
+    l_show = llm_sub.add_parser("show", help="Show preset details")
+    l_show.add_argument("name")
+    l_add = llm_sub.add_parser("add", help="Add or update a preset")
+    l_add.add_argument("name", nargs="?", default=None)
+    l_edit = llm_sub.add_parser("edit", help="Edit an existing preset")
+    l_edit.add_argument("name")
+    l_del = llm_sub.add_parser("delete", help="Delete a preset")
+    l_del.add_argument("name")
+    l_def = llm_sub.add_parser("default", help="Get or set the default model")
+    l_def.add_argument("name", nargs="?", default=None)
 
-    try:
-        env = json.loads(env_raw) if env_raw else {}
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid env JSON: {e}")
-    if not isinstance(env, dict):
-        raise ValueError("Env must be a JSON object")
+    # API key management
+    key_parser = sub.add_parser("key", help="Manage stored API keys")
+    key_sub = key_parser.add_subparsers(dest="config_key_command")
+    key_sub.add_parser("list", help="List providers with key status")
+    k_set = key_sub.add_parser("set", help="Set the API key for a provider")
+    k_set.add_argument("provider")
+    k_set.add_argument("value", nargs="?", default=None)
+    k_del = key_sub.add_parser("delete", help="Delete the stored key for a provider")
+    k_del.add_argument("provider")
 
-    if not name:
-        raise ValueError("Name is required")
+    # Login passthrough — `kt config login <provider>` mirrors `kt login`
+    login_parser = sub.add_parser(
+        "login", help="Authenticate with a provider (OAuth or API key)"
+    )
+    login_parser.add_argument("provider")
 
-    return {
-        "name": name,
-        "transport": transport,
-        "command": command,
-        "args": args,
-        "env": env,
-        "url": url,
-    }
-
-
-def _mcp_add_or_update(name: str | None = None) -> int:
-    servers = _load_mcp_config()
-    existing = None
-    if name:
-        for server in servers:
-            if server.get("name") == name:
-                existing = server
-                break
-    try:
-        new_server = _prompt_mcp(existing)
-    except ValueError as e:
-        print(e)
-        return 1
-    servers = [s for s in servers if s.get("name") != new_server["name"]]
-    servers.append(new_server)
-    _save_mcp_config(servers)
-    print(f"Saved MCP server: {new_server['name']}")
-    return 0
+    # MCP server management
+    mcp_parser = sub.add_parser("mcp", help="Manage MCP servers")
+    mcp_sub = mcp_parser.add_subparsers(dest="config_mcp_command")
+    mcp_sub.add_parser("list", help="List MCP servers")
+    m_add = mcp_sub.add_parser("add", help="Add or update an MCP server")
+    m_add.add_argument("name", nargs="?", default=None)
+    m_edit = mcp_sub.add_parser("edit", help="Edit an existing MCP server")
+    m_edit.add_argument("name")
+    m_del = mcp_sub.add_parser("delete", help="Delete an MCP server")
+    m_del.add_argument("name")
 
 
-def _mcp_delete(name: str) -> int:
-    servers = _load_mcp_config()
-    if not any(s.get("name") == name for s in servers):
-        print(f"MCP server not found: {name}")
-        return 1
-    if not _confirm(f"Delete MCP server '{name}'?", default=False):
-        print("Cancelled.")
-        return 0
-    _save_mcp_config([s for s in servers if s.get("name") != name])
-    print(f"Deleted MCP server: {name}")
-    return 0
+def _dispatch_provider(args: argparse.Namespace) -> int:
+    sub = getattr(args, "config_provider_command", None) or "list"
+    name = getattr(args, "name", None)
+    match sub:
+        case "list":
+            return _backend_list()
+        case "add":
+            return _backend_add_or_update(name)
+        case "edit":
+            return _backend_add_or_update(name)
+        case "delete":
+            return _backend_delete(name)
+    print("Usage: kt config provider {list|add|edit|delete}")
+    return 1
+
+
+def _dispatch_llm(args: argparse.Namespace) -> int:
+    sub = getattr(args, "config_llm_command", None) or "list"
+    name = getattr(args, "name", None)
+    match sub:
+        case "list":
+            return _llm_list()
+        case "show":
+            return _llm_show(name) if name else (print("name required") or 1)
+        case "add":
+            return _llm_add_or_update(name)
+        case "edit":
+            return _llm_add_or_update(name)
+        case "delete":
+            return _llm_delete(name) if name else (print("name required") or 1)
+        case "default":
+            return _llm_default(name)
+    print("Usage: kt config llm {list|show|add|edit|delete|default}")
+    return 1
+
+
+def _dispatch_key(args: argparse.Namespace) -> int:
+    sub = getattr(args, "config_key_command", None) or "list"
+    provider = getattr(args, "provider", None)
+    match sub:
+        case "list":
+            return _key_list()
+        case "set":
+            if not provider:
+                print("provider required")
+                return 1
+            return _key_set(provider, getattr(args, "value", None))
+        case "delete":
+            if not provider:
+                print("provider required")
+                return 1
+            return _key_delete(provider)
+    print("Usage: kt config key {list|set|delete}")
+    return 1
+
+
+def _dispatch_mcp(args: argparse.Namespace) -> int:
+    sub = getattr(args, "config_mcp_command", None) or "list"
+    name = getattr(args, "name", None)
+    match sub:
+        case "list":
+            return list_mcp(_config_paths())
+        case "add":
+            return add_or_update_mcp(name, _prompt)
+        case "edit":
+            return add_or_update_mcp(name, _prompt)
+        case "delete":
+            return delete_mcp(name) if name else (print("name required") or 1)
+    print("Usage: kt config mcp {list|add|edit|delete}")
+    return 1
 
 
 def config_cli(args: argparse.Namespace) -> int:
-    sub = getattr(args, "config_command", None)
-    if sub == "show" or sub is None:
-        return _config_show()
-    if sub == "path":
-        return _config_path(getattr(args, "name", None))
-    if sub == "edit":
-        return _config_edit(getattr(args, "name", None))
-
-    if sub == "llm":
-        action = getattr(args, "config_llm_command", None)
-        if action == "list" or action is None:
-            return _llm_list()
-        if action == "show":
-            return _llm_show(args.name)
-        if action == "add":
-            return _llm_add_or_update()
-        if action == "update":
-            return _llm_add_or_update(args.name)
-        if action == "delete":
-            return _llm_delete(args.name)
-        if action == "default":
-            return _llm_default(getattr(args, "name", None))
-
-    if sub == "key":
-        action = getattr(args, "config_key_command", None)
-        if action == "list" or action is None:
-            return _key_list()
-        if action == "set":
-            return _key_set(args.provider, getattr(args, "value", None))
-        if action == "delete":
-            return _key_delete(args.provider)
-
-    if sub == "mcp":
-        action = getattr(args, "config_mcp_command", None)
-        if action == "list" or action is None:
-            return _mcp_list()
-        if action == "add":
-            return _mcp_add_or_update()
-        if action == "update":
-            return _mcp_add_or_update(args.name)
-        if action == "delete":
-            return _mcp_delete(args.name)
-
-    print("Usage: kt config [show|path|edit|llm|key|mcp] ...")
-    return 0
-
-
-def add_config_subparser(subparsers) -> None:
-    config_parser = subparsers.add_parser(
-        "config", help="Manage ~/.kohakuterrarium configuration"
+    """Entry point for the `kt config` command group."""
+    command = getattr(args, "config_command", None)
+    match command:
+        case None | "show":
+            return _config_show()
+        case "path":
+            return _config_path(getattr(args, "name", None))
+        case "edit":
+            return _config_edit(getattr(args, "name", None))
+        case "provider" | "backend":
+            return _dispatch_provider(args)
+        case "llm" | "model" | "preset":
+            return _dispatch_llm(args)
+        case "key":
+            return _dispatch_key(args)
+        case "login":
+            return login_cli(getattr(args, "provider", ""))
+        case "mcp":
+            return _dispatch_mcp(args)
+    print(
+        "Usage: kt config {show|path|edit|provider|llm|key|login|mcp} ...",
     )
-    config_sub = config_parser.add_subparsers(dest="config_command")
-
-    config_sub.add_parser("show", help="Show important config file locations")
-    path_parser = config_sub.add_parser("path", help="Print a config file path")
-    path_parser.add_argument(
-        "name",
-        nargs="?",
-        choices=["home", "llm_profiles", "api_keys", "mcp_servers", "ui_prefs"],
-        help="Named config path",
-    )
-    edit_parser = config_sub.add_parser("edit", help="Open a config file in $EDITOR")
-    edit_parser.add_argument(
-        "name",
-        nargs="?",
-        choices=["llm_profiles", "api_keys", "mcp_servers", "ui_prefs"],
-        help="Named config target (default: llm_profiles)",
-    )
-
-    llm_parser = config_sub.add_parser("llm", help="Manage user-defined LLM profiles")
-    llm_sub = llm_parser.add_subparsers(dest="config_llm_command")
-    llm_sub.add_parser("list", help="List user-defined profiles")
-    llm_show = llm_sub.add_parser("show", help="Show a profile")
-    llm_show.add_argument("name")
-    llm_sub.add_parser("add", help="Interactively add a profile")
-    llm_update = llm_sub.add_parser("update", help="Interactively update a profile")
-    llm_update.add_argument("name")
-    llm_delete = llm_sub.add_parser("delete", help="Delete a profile")
-    llm_delete.add_argument("name")
-    llm_default = llm_sub.add_parser("default", help="Show or set default model")
-    llm_default.add_argument("name", nargs="?")
-
-    key_parser = config_sub.add_parser("key", help="Manage stored API keys")
-    key_sub = key_parser.add_subparsers(dest="config_key_command")
-    key_sub.add_parser("list", help="List stored/env-backed provider keys")
-    key_set = key_sub.add_parser("set", help="Store an API key")
-    key_set.add_argument("provider", choices=sorted(PROVIDER_KEY_MAP.keys()))
-    key_set.add_argument("value", nargs="?")
-    key_delete = key_sub.add_parser("delete", help="Delete a stored API key")
-    key_delete.add_argument("provider", choices=sorted(PROVIDER_KEY_MAP.keys()))
-
-    mcp_parser = config_sub.add_parser("mcp", help="Manage global MCP server config")
-    mcp_sub = mcp_parser.add_subparsers(dest="config_mcp_command")
-    mcp_sub.add_parser("list", help="List MCP servers")
-    mcp_sub.add_parser("add", help="Interactively add an MCP server")
-    mcp_update = mcp_sub.add_parser("update", help="Interactively update an MCP server")
-    mcp_update.add_argument("name")
-    mcp_delete = mcp_sub.add_parser("delete", help="Delete an MCP server")
-    mcp_delete.add_argument("name")
+    return 1

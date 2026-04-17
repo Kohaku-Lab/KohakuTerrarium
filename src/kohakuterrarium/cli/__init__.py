@@ -145,8 +145,7 @@ def _build_parser() -> argparse.ArgumentParser:
     login_parser = subparsers.add_parser("login", help="Authenticate with a provider")
     login_parser.add_argument(
         "provider",
-        choices=["codex", "openrouter", "openai", "anthropic", "gemini", "mimo"],
-        help="Provider to authenticate with",
+        help="Provider or backend name to authenticate with",
     )
 
     # Install command

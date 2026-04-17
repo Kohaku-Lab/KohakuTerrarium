@@ -403,6 +403,18 @@ export const settingsAPI = {
     const { data } = await api.delete(`/settings/keys/${provider}`)
     return data
   },
+  async getBackends() {
+    const { data } = await api.get("/settings/backends")
+    return data
+  },
+  async saveBackend(backend) {
+    const { data } = await api.post("/settings/backends", backend)
+    return data
+  },
+  async deleteBackend(name) {
+    const { data } = await api.delete(`/settings/backends/${name}`)
+    return data
+  },
   async getProfiles() {
     const { data } = await api.get("/settings/profiles")
     return data
@@ -438,6 +450,14 @@ export const settingsAPI = {
   },
   async getCodexUsage() {
     const { data } = await api.get("/settings/codex-usage")
+    return data
+  },
+  async getCodexStatus() {
+    const { data } = await api.get("/settings/codex-status")
+    return data
+  },
+  async codexLogin() {
+    const { data } = await api.post("/settings/codex-login", {}, { timeout: 300000 })
     return data
   },
   async getUIPrefs() {
