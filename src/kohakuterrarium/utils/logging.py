@@ -6,8 +6,10 @@ Colors: DEBUG=gray, INFO=green, WARNING=yellow, ERROR=red
 
 Default behavior:
   - Logs written to ``~/.kohakuterrarium/logs/kt.log`` (rotating, 10MB x 5)
-  - No stderr output — keeps CLI clean
+  - No stderr output by default, keeps CLI clean
   - Set ``KT_LOG_STDERR=1`` to also log to stderr (for debugging)
+  - CLI commands can opt-in via ``enable_stderr_logging`` when the
+    terminal is not owned by a full-screen UI
 """
 
 import datetime
@@ -256,6 +258,8 @@ def set_level(level: int | str) -> None:
     root_logger.setLevel(level)
     if _handler:
         _handler.setLevel(level)
+    if _stderr_handler:
+        _stderr_handler.setLevel(level)
 
 
 def disable_colors() -> None:
@@ -286,6 +290,43 @@ class TUILogHandler(logging.Handler):
 
 
 _tui_handler: logging.Handler | None = None
+_stderr_handler: logging.Handler | None = None
+
+
+def enable_stderr_logging(level: int | str = logging.DEBUG) -> None:
+    """Attach a stderr handler on top of the existing file handler.
+
+    Idempotent: a second call updates the level of the existing handler
+    instead of adding a duplicate. Safe to call after ``get_logger`` has
+    initialized the root handler.
+
+    Args:
+        level: Minimum level the stderr handler will emit at.
+    """
+    global _stderr_handler
+
+    if isinstance(level, str):
+        level = getattr(logging, level.upper(), logging.DEBUG)
+
+    root_logger = logging.getLogger("kohakuterrarium")
+    if _stderr_handler is not None:
+        _stderr_handler.setLevel(level)
+        return
+
+    _stderr_handler = FlushingStreamHandler(sys.stderr)
+    _stderr_handler.setFormatter(ColoredFormatter(use_color=True))
+    _stderr_handler.setLevel(level)
+    root_logger.addHandler(_stderr_handler)
+
+
+def disable_stderr_logging() -> None:
+    """Remove the stderr handler if one was attached."""
+    global _stderr_handler
+    if _stderr_handler is None:
+        return
+    root_logger = logging.getLogger("kohakuterrarium")
+    root_logger.removeHandler(_stderr_handler)
+    _stderr_handler = None
 
 
 def enable_tui_logging(write_func: Any) -> None:
