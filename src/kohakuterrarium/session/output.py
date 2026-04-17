@@ -18,14 +18,23 @@ class SessionOutput(OutputModule):
     """Output module that records events to a SessionStore.
 
     Accumulates streaming text chunks and flushes as one event
-    on processing_end. Tool/subagent activity recorded immediately.
-    Saves conversation snapshot and agent state after each processing cycle.
+    on processing_end. Tool/subagent activity can be recorded immediately
+    when enabled. Saves conversation snapshot and agent state after each
+    processing cycle.
     """
 
-    def __init__(self, agent_name: str, store: Any, agent: Any):
+    def __init__(
+        self,
+        agent_name: str,
+        store: Any,
+        agent: Any,
+        *,
+        capture_activity: bool = True,
+    ):
         self._agent_name = agent_name
         self._store = store
         self._agent = agent  # direct reference, not dict lookup
+        self._capture_activity = capture_activity
         self._text_buffer: list[str] = []
         # Cumulative API token usage across the session
         self._total_input_tokens: int = 0
@@ -109,6 +118,8 @@ class SessionOutput(OutputModule):
             logger.debug("State save failed", error=str(e))
 
     def on_activity(self, activity_type: str, detail: str) -> None:
+        if not self._capture_activity:
+            return
         name, info = _parse_detail(detail)
         self._flush_text_before_activity()
         self._record_activity(activity_type, name, info, {})
@@ -116,6 +127,8 @@ class SessionOutput(OutputModule):
     def on_activity_with_metadata(
         self, activity_type: str, detail: str, metadata: dict
     ) -> None:
+        if not self._capture_activity:
+            return
         name, info = _parse_detail(detail)
         self._flush_text_before_activity()
         self._record_activity(activity_type, name, info, metadata)

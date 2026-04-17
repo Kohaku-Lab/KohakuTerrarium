@@ -804,16 +804,24 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
         """Inject a custom TriggerEvent programmatically."""
         await self._process_event(event)
 
-    def attach_session_store(self, store: Any) -> None:
+    def attach_session_store(
+        self, store: Any, *, capture_activity: bool = True
+    ) -> None:
         """Attach a SessionStore for persistent event recording.
 
         Registers a SessionOutput as a secondary output module.
-        Records all text, activity, processing events, conversation
-        snapshots, and agent state to the store.
+        Records text, processing events, conversation snapshots, and agent
+        state to the store. Activity capture can be disabled for runs where
+        the active I/O is not a CLI-style interactive UI.
         """
         self.session_store = store
 
-        self._session_output = SessionOutput(self.config.name, store, self)
+        self._session_output = SessionOutput(
+            self.config.name,
+            store,
+            self,
+            capture_activity=capture_activity,
+        )
         self.output_router.add_secondary(self._session_output)
 
         # Wire session store to sub-agent manager for conversation capture

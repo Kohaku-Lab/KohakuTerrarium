@@ -1,7 +1,6 @@
 """CLI run command — launch an agent from a config folder."""
 
 import asyncio
-import sys
 from pathlib import Path
 from uuid import uuid4
 
@@ -58,6 +57,22 @@ def _has_custom_io(config) -> tuple[bool, bool]:
     return custom_input, custom_output
 
 
+def _should_capture_session_activity(config, io_mode: str | None) -> bool:
+    """Capture session activity only for CLI/rich CLI/TUI I/O.
+
+    When ``kt run`` uses creature-defined custom/package I/O, keep session
+    persistence for text/history but do not mirror activity/logging into the
+    session event stream. That capture is only intended for the built-in
+    terminal UIs.
+    """
+    if io_mode is not None:
+        return io_mode in {"cli", "tui"}
+    return config.input.type in {"cli", "tui"} or config.output.type in {
+        "cli",
+        "tui",
+    }
+
+
 def _warn_io_override_if_needed(config, io_mode: str) -> None:
     """Warn when an explicit CLI mode overrides configured custom I/O."""
     custom_input, custom_output = _has_custom_io(config)
@@ -69,10 +84,7 @@ def _warn_io_override_if_needed(config, io_mode: str) -> None:
     if not overridden:
         return
     joined = ", ".join(overridden)
-    print(
-        "Warning: --mode "
-        f"{io_mode} overrides configured custom I/O ({joined})."
-    )
+    print("Warning: --mode " f"{io_mode} overrides configured custom I/O ({joined}).")
 
 
 def run_agent_cli(
@@ -142,7 +154,12 @@ def run_agent_cli(
                 pwd=str(Path.cwd()),
                 agents=[agent.config.name],
             )
-            agent.attach_session_store(store)
+            agent.attach_session_store(
+                store,
+                capture_activity=_should_capture_session_activity(
+                    config, resolved_mode
+                ),
+            )
 
         if use_rich_cli:
             asyncio.run(_run_agent_rich_cli(agent))
