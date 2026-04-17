@@ -3,6 +3,32 @@
 Developer reference for the Vue 3 web dashboard. Covers the component
 tree, store design, WebSocket protocols, and how to add new panels.
 
+## Dev loop
+
+Source lives in `src/kohakuterrarium-frontend/`. Built output lands in
+`src/kohakuterrarium/web_dist/` (configured in `vite.config.js:48`),
+where the FastAPI app in `api/app.py` and `serving/web.py` pick it up
+as static files.
+
+```bash
+# Dev server (hot reload, points at the Python API via proxy)
+npm run dev --prefix src/kohakuterrarium-frontend
+
+# Production build (writes into src/kohakuterrarium/web_dist)
+npm run build --prefix src/kohakuterrarium-frontend
+
+# Lint / format
+npm run lint   --prefix src/kohakuterrarium-frontend
+npm run format --prefix src/kohakuterrarium-frontend
+
+# Unit tests (vitest + jsdom)
+npm run test   --prefix src/kohakuterrarium-frontend
+```
+
+When distributing KT, run `npm run build` so `web_dist/` is populated
+before `pip install -e .` or packaging. The Python side ships the
+built bundle as part of the installed package.
+
 ## Stack
 
 - **Vue 3.5+** with `<script setup>` composition API

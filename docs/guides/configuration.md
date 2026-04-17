@@ -1,412 +1,297 @@
-# Configuration Reference
+# Configuration
 
-Complete reference for agent configuration (`config.yaml`).
+For readers who want to tweak an existing creature or wire a new one without reading every field in the reference.
 
-## Agent Configuration
+Creature configs are YAML (JSON/TOML also supported). Each top-level key maps to an `AgentConfig` field; sub-blocks like `controller`, `input`, `output` are dataclasses with their own fields. This guide is task-oriented — for the full field list see [reference/configuration](../reference/configuration.md).
 
-KohakuTerrarium supports YAML, JSON, and TOML configuration formats. YAML is recommended.
+Concept primer: [creatures](creatures.md), [composing an agent](../concepts/foundations/composing-an-agent.md).
 
-### Environment Variable Interpolation
+Env-var interpolation works anywhere: `${VAR}` or `${VAR:default}`.
 
-Use `${VAR:default}` syntax for environment variables:
+## How do I switch the model?
+
+Pick a preset from `~/.kohakuterrarium/llm_profiles.yaml` (or add one with `kt config llm add`):
 
 ```yaml
 controller:
-  model: "${OPENROUTER_MODEL:google/gemini-3-flash-preview}"  # Uses env var or default
-  api_key_env: OPENROUTER_API_KEY                             # Reads from this env var
+  llm: claude-opus-4.6
+  reasoning_effort: high
 ```
 
-### Top-Level Fields
+Or override at the command line for one run:
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | Yes | Agent identifier |
-| `version` | string | No | Version string |
-| `session_key` | string | No | Session key for shared state (default: agent name). Agents with the same key share channels, scratchpad, and TUI state |
-| `controller` | object | Yes | LLM configuration |
-| `system_prompt_file` | string | No | Path to system prompt markdown |
-| `input` | object | No | Input module configuration |
-| `output` | object | No | Output module configuration |
-| `tools` | list | No | Tool configurations |
-| `subagents` | list | No | Sub-agent configurations |
-| `triggers` | list | No | Trigger configurations |
-| `memory` | object | No | Memory system configuration |
-| `compact` | object | No | Context compaction settings |
-| `termination` | object | No | Stop conditions (max turns, duration, keywords) |
-| `startup_trigger` | object | No | Event fired on agent start |
-| `base_config` | string | No | Path to parent creature config for inheritance |
-| `max_subagent_depth` | int | No | Sub-agent nesting depth limit (default: 3) |
+```bash
+kt run path/to/creature --llm gpt-5.4
+```
 
-### Controller Configuration
+If you want fully inline settings (no profile file), use `model` + `api_key_env` + `base_url`:
 
 ```yaml
-# Using an LLM profile (recommended)
 controller:
-  llm: claude-sonnet-4.6     # Profile name from presets or ~/.kohakuterrarium/llm_profiles.yaml
-  tool_format: native
-
-# Codex OAuth (uses ChatGPT subscription)
-controller:
-  model: gpt-5.4
-  auth_mode: codex-oauth
-  tool_format: native
-
-# OpenRouter / OpenAI-compatible (inline config, backward compat)
-controller:
-  model: "google/gemini-3-flash-preview"
-  temperature: 0.7
-  max_tokens: 4096
-  api_key_env: OPENROUTER_API_KEY
-  base_url: https://openrouter.ai/api/v1
-  max_messages: 100
-  max_context_chars: 100000
-  ephemeral: false
-  include_tools_in_prompt: true
-  include_hints_in_prompt: true
-  skill_mode: "dynamic"
-  tool_format: bracket       # "bracket", "xml", "native", or custom dict
+  model: gpt-4o
+  api_key_env: OPENAI_API_KEY
+  base_url: https://api.openai.com/v1
+  temperature: 0.3
 ```
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `llm` | string | "" | LLM profile name (e.g., `gpt-5.4`, `claude-sonnet-4.6`). Overridable via `--llm` CLI flag |
-| `model` | string | Required* | Model identifier (*not needed when `llm` is set) |
-| `auth_mode` | string | None | Authentication mode: `codex-oauth` for ChatGPT subscription |
-| `temperature` | float | 0.7 | Sampling temperature |
-| `max_tokens` | int | None | Max tokens to generate (None = let the API decide) |
-| `reasoning_effort` | string | "medium" | Reasoning effort: none, minimal, low, medium, high, xhigh |
-| `service_tier` | string | None | API service tier (None, priority, flex) |
-| `extra_body` | dict | {} | Extra fields merged into the API request body |
-| `api_key_env` | string | Required* | Env var containing API key (*not needed with codex-oauth or `llm` profile) |
-| `base_url` | string | OpenAI URL | API endpoint |
-| `max_messages` | int | 0 (unlimited) | Max conversation messages |
-| `max_context_chars` | int | 0 (unlimited) | Max context characters |
-| `ephemeral` | bool | false | Clear conversation after each turn |
-| `include_tools_in_prompt` | bool | true | Include tool list |
-| `include_hints_in_prompt` | bool | true | Include framework hints |
-| `skill_mode` | string | "dynamic" | "dynamic" (use info command) or "static" (all docs in prompt) |
-| `tool_format` | string or dict | "bracket" | Tool call format. See [Tool Formats](../concepts/tool-formats.md) |
-
-#### LLM Profiles
-
-The `llm` field references a named profile that bundles all LLM connection settings (provider, model, base URL, API key, context limits). This is the recommended way to configure the LLM.
-
-Resolution order: `--llm` CLI flag > `controller.llm` in config > `default_model` in `~/.kohakuterrarium/llm_profiles.yaml` > inline controller fields (backward compat).
+## How do I inherit from an OOTB creature?
 
 ```yaml
-# Profile resolves all connection details automatically
+name: my-swe
+base_config: "@kt-defaults/creatures/swe"
 controller:
-  llm: gpt-5.4
-  temperature: 0.5           # Inline fields still override profile values
+  reasoning_effort: xhigh
+tools:
+  - name: my_tool
+    type: custom
+    module: ./tools/my_tool.py
 ```
 
-Built-in presets include models from OpenAI, Anthropic, Google, Qwen, Kimi, MiniMax, and more. Custom profiles can be defined in `~/.kohakuterrarium/llm_profiles.yaml`. The inline config fields (`model`, `auth_mode`, `api_key_env`, `base_url`) still work as fallback when no profile is set.
-
-### Input Configuration
+Scalars override; `controller`/`input`/`output` merge; lists extend and dedup by `name`. To replace a list instead of extending:
 
 ```yaml
-# CLI input (builtin)
-input:
-  type: cli
-  prompt: "> "
-
-# TUI input (builtin)
-input:
-  type: tui
-  prompt: "You: "
-  session_key: my_agent     # Optional: override session key
-
-# None input (trigger-only agents)
-input:
-  type: none
-
-# Custom input
-input:
-  type: custom
-  module: ./custom/my_input.py
-  class: MyInputModule
-  my_option: value          # Additional fields passed to constructor
+no_inherit: [tools, subagents]
 ```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `type` | string | Yes | "cli", "tui", "none", or "custom" |
-| `module` | string | For custom | Path to module |
-| `class` | string | For custom | Class name |
-| `prompt` | string | For CLI/TUI | Input prompt string |
-| `session_key` | string | For TUI | Override session key for TUI session |
+## How do I add a tool?
 
-### Output Configuration
-
-```yaml
-# Basic output
-output:
-  type: stdout
-  controller_direct: true
-
-# TUI output
-output:
-  type: tui
-  controller_direct: true
-  session_key: my_agent
-
-# With named outputs
-output:
-  type: stdout
-  named_outputs:
-    discord:
-      type: custom
-      module: ./custom/discord_output.py
-      class: DiscordOutput
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `type` | string | Yes | "stdout", "tui", or "custom" |
-| `controller_direct` | bool | No | Controller output to default |
-| `named_outputs` | object | No | Named output targets |
-
-### Tools Configuration
+Shorthand for builtins:
 
 ```yaml
 tools:
-  # Builtin tools
-  - name: bash
-    type: builtin
-  - name: read
-    type: builtin
-
-  # Custom tools
-  - name: my_tool
-    type: custom
-    module: ./custom/my_tool.py
-    class: MyTool
-    timeout: 30
+  - bash
+  - read
+  - web_search
 ```
 
-**Available built-in tools (30 total):**
+With options:
 
-**General tools (21):**
+```yaml
+tools:
+  - name: web_search
+    options:
+      max_results: 10
+      region: us-en
+```
 
-| Name | Description | Name | Description |
-|------|-------------|------|-------------|
-| `bash` | Execute shell commands | `think` | Extended reasoning step |
-| `python` | Execute Python code | `scratchpad` | Session key-value memory |
-| `read` | Read file contents | `send_message` | Send to named channel |
-| `write` | Create/overwrite files | `web_fetch` | Fetch and read web pages |
-| `edit` | Single-file search/replace or unified diff edit | `web_search` | Search the web (DuckDuckGo) |
-| `multi_edit` | Ordered multi-step search/replace in one file with strict/partial/best-effort policies | `ask_user` | Prompt user for input |
-| `glob` | Find files by pattern | `json_read` | Query JSON files |
-| `grep` | Regex search in files | `json_write` | Modify JSON files |
-| `tree` | Directory structure | `list_triggers` | Show active triggers |
-| `info` | Load tool/sub-agent docs | `create_trigger` | Create trigger at runtime |
-| `search_memory` | Search session history | | |
-| `stop_task` | Cancel a running background task | | |
+Custom (local module):
 
-**Terrarium management tools (9):** Used by the `root` creature for managing terrariums.
+```yaml
+tools:
+  - name: my_tool
+    type: custom
+    module: ./tools/my_tool.py
+    class_name: MyTool
+```
 
-| Name | Description |
-|------|-------------|
-| `terrarium_create` | Create and start a terrarium |
-| `terrarium_status` | Get terrarium status |
-| `terrarium_stop` | Stop a running terrarium |
-| `terrarium_send` | Send a message to a terrarium channel |
-| `terrarium_observe` | Observe terrarium channel traffic |
-| `terrarium_history` | Get channel message history |
-| `creature_start` | Start a creature in a terrarium |
-| `creature_stop` | Stop a creature in a terrarium |
-| `creature_interrupt` | Interrupt a creature's current LLM turn |
+Package (from an installed package's `kohaku.yaml`):
 
-### Sub-Agents Configuration
+```yaml
+tools:
+  - name: kql
+    type: package
+```
+
+See [Custom Modules](custom-modules.md) for the protocol.
+
+## How do I add a sub-agent?
 
 ```yaml
 subagents:
-  # Builtin
-  - name: explore
-    type: builtin
-
-  # Custom
-  - name: output
+  - plan
+  - worker
+  - name: my_critic
     type: custom
-    description: Generate responses
-    prompt_file: prompts/output.md
-    tools: []
-    can_modify: false
-    max_turns: 5
-    timeout: 60
-    interactive: false
-    output_to: controller
+    module: ./subagents/critic.py
+    config_name: CRITIC_CONFIG
+    interactive: true       # stays alive across parent turns
+    can_modify: true
 ```
 
-**Available built-in sub-agents:**
+Built-ins: `worker`, `coordinator`, `explore`, `plan`, `research`, `critic`, `response`, `memory_read`, `memory_write`, `summarize`.
 
-| Name | Description | Tools |
-|------|-------------|-------|
-| `explore` | Search and analyze codebase | glob, grep, read |
-| `plan` | Create implementation plans | glob, grep, read |
-| `worker` | Implement changes | read, write, edit, multi_edit, bash, glob, grep |
-| `critic` | Review and critique | read, glob, grep |
-| `summarize` | Condense content | (none) |
-| `research` | Web + file research | http, read, glob, grep |
-| `coordinator` | Multi-agent via channels | send_message, wait_channel |
-| `memory_read` | Retrieve from memory | read, glob |
-| `memory_write` | Store to memory | write, read |
-| `response` | Generate user responses | (none) |
-
-**Sub-agent fields:**
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `name` | string | Required | Sub-agent identifier |
-| `type` | string | Required | "builtin" or "custom" |
-| `description` | string | "" | One-line description |
-| `tools` | list | [] | Allowed tool names |
-| `system_prompt` | string | "" | Inline system prompt |
-| `prompt_file` | string | None | Path to prompt file |
-| `can_modify` | bool | false | Allow file-modifying tools such as write/edit/multi_edit |
-| `stateless` | bool | true | No persistent state |
-| `interactive` | bool | false | Long-lived with context updates |
-| `context_mode` | string | "interrupt_restart" | How to handle updates |
-| `output_to` | string | "controller" | "controller" or "external" |
-| `output_module` | string | None | Output module name |
-| `return_as_context` | bool | false | Return output to parent |
-| `max_turns` | int | 10 | Max conversation turns |
-| `timeout` | float | 300.0 | Max execution time |
-| `model` | string | None | Override LLM model |
-| `temperature` | float | None | Override temperature |
-| `memory_path` | string | None | Memory folder path |
-
-**Context update modes:** `interrupt_restart` (stop, start new), `queue_append` (queue, process after), `flush_replace` (flush, replace immediately).
-
-### Triggers Configuration
+## How do I add a trigger?
 
 ```yaml
 triggers:
-  - type: custom
-    module: ./custom/idle_trigger.py
-    class: IdleTrigger
-    prompt: "The chat has been quiet."
-    min_idle_seconds: 300
+  - type: timer
+    options: { interval: 300 }
+    prompt: "Check for pending tasks."
+  - type: channel
+    options: { channel: alerts }
+  - type: idle
+    options: { timeout: 120 }
+    prompt: "If the user seems stuck, ask."
 ```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `type` | string | Yes | "custom" (builtins coming) |
-| `module` | string | Yes | Path to module |
-| `class` | string | Yes | Class name |
-| `prompt` | string | No | Default prompt for events |
+Built-ins: `timer`, `idle`, `webhook`, `channel`, `custom`, `package`. `prompt` is injected as the `TriggerEvent.prompt_override` when the trigger fires.
 
-### Memory Configuration
-
-```yaml
-memory:
-  path: ./memory
-  init_files:
-    - character.md       # Read-only
-    - rules.md
-  writable_files:
-    - context.md         # Agent can modify
-    - facts.md
-```
-
-### Compact (Context Management)
-
-Non-blocking background context compaction. When the prompt token count reaches `threshold`, a background task summarizes older messages to free context space. The agent continues working during compaction.
+## How do I set up compaction?
 
 ```yaml
 compact:
-  max_tokens: 256000       # Max context token budget (match your model's window)
-  threshold: 0.80          # Trigger compaction at this fraction of max_tokens
-  target: 0.40             # After compaction, reduce to this fraction of max_tokens
-  keep_recent: 8           # Always keep last N user/assistant turns uncompacted
-  compact_model: null      # Optional: use a different (cheaper) model for summarization
+  enabled: true
+  threshold: 0.8
+  target: 0.5
+  keep_recent_turns: 5
+  compact_model: gpt-4o-mini
 ```
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `max_tokens` | int | 256000 | Context window budget in tokens |
-| `threshold` | float | 0.80 | Fraction of max_tokens that triggers compaction |
-| `target` | float | 0.40 | Target fraction of max_tokens after compaction |
-| `keep_recent` | int | 8 | Number of recent turns to keep verbatim (live zone) |
-| `compact_model` | string | null | Override model for the summarization call |
+See [Sessions](sessions.md) for what compaction does.
 
-The compaction process: messages are split into a "compact zone" (older, will be summarized) and a "live zone" (recent, untouched). The LLM produces a structured summary of the compact zone, which atomically replaces it. If summarization fails, emergency truncation is used as a fallback.
+## How do I add a custom input?
 
-### Termination (Stop Conditions)
+```yaml
+input:
+  type: custom
+  module: ./inputs/discord.py
+  class_name: DiscordInput
+  options:
+    token: "${DISCORD_TOKEN}"
+    channel_id: 123456
+```
 
-Configurable conditions that stop the agent loop. All conditions are optional; if multiple are set, ANY triggered condition stops the agent.
+Built-in types: `cli`, `tui`, `asr`, `whisper`, `none`. See [Custom Modules](custom-modules.md) for the protocol.
+
+## How do I add a named output sink?
+
+Useful when tools or sub-agents want to route to a specific channel (TTS, Discord, file):
+
+```yaml
+output:
+  type: stdout
+  named_outputs:
+    tts:
+      type: tts
+      options: { provider: edge, voice: en-US-AriaNeural }
+    discord:
+      type: custom
+      module: ./outputs/discord.py
+      class_name: DiscordOutput
+      options: { webhook_url: "${DISCORD_WEBHOOK}" }
+```
+
+## How do I gate a tool with a plugin?
+
+Lifecycle plugin that blocks dangerous commands:
+
+```yaml
+plugins:
+  - name: tool_guard
+    type: custom
+    module: ./plugins/tool_guard.py
+    class: ToolGuard
+    options:
+      deny_patterns: ["rm -rf", "dd if="]
+```
+
+See [Plugins](plugins.md) for writing the plugin class and [examples/plugins/tool_guard.py](../../examples/plugins/tool_guard.py) for a reference implementation.
+
+## How do I register MCP servers?
+
+Per creature:
+
+```yaml
+mcp_servers:
+  - name: sqlite
+    transport: stdio
+    command: mcp-server-sqlite
+    args: ["/var/db/my.db"]
+  - name: docs_api
+    transport: http
+    url: https://mcp.example.com/sse
+    env: { API_KEY: "${DOCS_API_KEY}" }
+```
+
+Global (`~/.kohakuterrarium/mcp_servers.yaml`) uses the same schema. See [MCP](mcp.md).
+
+## How do I change the tool call format?
+
+```yaml
+tool_format: bracket        # default: [/name]@@arg=value\n[name/]
+# or
+tool_format: xml            # <name arg="value"></name>
+# or
+tool_format: native         # provider-native function calling
+```
+
+See [creatures guide — Tool format](creatures.md) for the concrete shape of each, and [reference/configuration.md — `tool_format`](../reference/configuration.md) for fully custom delimiter configs.
+
+## How do I choose dynamic vs static skill mode?
+
+```yaml
+skill_mode: dynamic   # default — the `info` framework command loads full docs on demand
+# or
+skill_mode: static    # full tool docs baked into system prompt
+```
+
+## How do I keep a creature alive without user input?
+
+```yaml
+input:
+  type: none
+triggers:
+  - type: timer
+    options: { interval: 60 }
+    prompt: "Check for anomalies."
+```
+
+A `none` input plus any trigger is the standard monitor-agent pattern.
+
+## How do I bound a run?
 
 ```yaml
 termination:
-  max_turns: 50            # Stop after N controller turns
-  max_tokens: 100000       # Stop after N total tokens used (reserved)
-  max_duration: 3600       # Stop after N seconds
-  idle_timeout: 300        # Stop after N seconds of inactivity
-  keywords: ["##done##"]   # Stop when controller outputs any keyword
+  max_turns: 15
+  max_duration: 600
+  idle_timeout: 120
+  keywords: ["DONE", "ABORT"]
 ```
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `max_turns` | int | 0 (unlimited) | Max controller turns before stopping |
-| `max_tokens` | int | 0 (unlimited) | Total token budget (reserved for future use) |
-| `max_duration` | float | 0 (unlimited) | Max wall-clock duration in seconds |
-| `idle_timeout` | float | 0 (unlimited) | Stop after N seconds with no events |
-| `keywords` | list[str] | [] | Stop when controller output contains any keyword |
+Any met condition stops the agent.
 
-### Startup Trigger
+## How do I share state across creatures (without a terrarium)?
+
+Give them the same `session_key`:
 
 ```yaml
-startup_trigger:
-  prompt: "Agent starting. Initialize your state."
+name: writer
+session_key: shared-workspace
+---
+name: reviewer
+session_key: shared-workspace
 ```
 
-### Memory Embedding
+Both creatures now share `Scratchpad` and `ChannelRegistry`. Useful when multiple creatures run in the same process without a terrarium.
 
-Configures the embedding provider for semantic search via the `search_memory` tool. Without this, only FTS keyword search is available.
+## How do I configure memory/embedding?
 
 ```yaml
 memory:
-  path: ./memory
   embedding:
-    provider: auto              # auto | model2vec | sentence-transformer | api | none
-    model: <string>             # Provider-specific model name
-    dimensions: <int>           # Optional dimension truncation (Matryoshka)
+    provider: model2vec
+    model: "@retrieval"
 ```
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `provider` | string | "auto" | Embedding provider. `auto` tries model2vec, then sentence-transformer, then none |
-| `model` | string | varies | Model name. Defaults: `minishlab/potion-base-8M` (model2vec), `jinaai/jina-embeddings-v5-text-nano` (sentence-transformer), `text-embedding-3-small` (api) |
-| `dimensions` | int | null | Optional dimension truncation for Matryoshka-capable models |
-| `device` | string | "cpu" | Device for sentence-transformer: `cpu` or `cuda` |
-| `api_key_env` | string | "OPENAI_API_KEY" | Env var for API provider key |
-| `base_url` | string | OpenAI URL | API endpoint for API provider |
+See [Memory](memory.md).
 
-Provider tiers (by weight and speed):
-- **model2vec**: ~8 MB, numpy-only, microsecond inference (lightest)
-- **sentence-transformer**: Gemma, Jina, bge, any HuggingFace model (better quality)
-- **api**: OpenAI, Google, Jina via HTTP (no local model needed)
-- **none**: Disables semantic search, FTS keyword search only
+## How do I pin a creature to a specific working directory?
 
-### Agent Folder Structure
-
-```
-examples/agent-apps/my_agent/
-+-- config.yaml              # Main configuration
-+-- prompts/
-|   +-- system.md            # System prompt
-|   +-- output.md            # Output sub-agent prompt
-|   +-- tools/               # Tool documentation overrides
-|       +-- bash.md
-+-- memory/
-|   +-- character.md
-|   +-- context.md
-+-- custom/
-    +-- my_input.py
-    +-- my_tool.py
-    +-- my_trigger.py
+```bash
+kt run path/to/creature --pwd /path/to/project
 ```
 
----
+`pwd` is passed to every tool's `ToolContext`.
 
-For terrarium configuration, see [Terrariums](terrariums.md).
+## Troubleshooting
+
+- **Env var not expanding.** Use `${VAR}` (with braces). `$VAR` is left literal.
+- **Child config "lost" a tool from the parent.** You declared `no_inherit: [tools]`. Remove it to extend instead.
+- **Config loads but tool isn't present.** Shorthand names are resolved against the built-in tool catalog — typos fall through silently. Check `kt info path/to/creature`.
+- **Two conflicting settings.** CLI overrides (`--llm`) win over config; config wins over `default_model` from `llm_profiles.yaml`.
+
+## See also
+
+- [Reference / configuration](../reference/configuration.md) — every field, type, and default.
+- [Creatures](creatures.md) — folder layout and anatomy.
+- [Plugins](plugins.md), [Custom Modules](custom-modules.md), [MCP](mcp.md), [Memory](memory.md) — wiring specific surfaces.

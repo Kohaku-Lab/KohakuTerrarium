@@ -1,228 +1,91 @@
 # Examples
 
-The `examples/` directory is one of the best ways to understand how KohakuTerrarium is meant to be used in practice.
+For readers looking for runnable code and config to learn from.
 
-Read it from a creature-first perspective:
+The `examples/` tree groups runnable material by kind: standalone agent configs, terrarium configs, plugin implementations, and Python scripts that embed the framework. Each folder illustrates a pattern you can copy or inherit from.
 
-- config-driven creatures in `examples/agent-apps/`
-- programmatic usage in `examples/code/`
-- plugin examples in `examples/plugins/`
-- optional multi-agent systems in `examples/terrariums/`
+Concept primer: [boundaries](../concepts/boundaries.md) — examples intentionally cover the edges.
 
-For the raw directory overview, see [`examples/README.md`](../../examples/README.md).
+## `examples/agent-apps/` — standalone creatures
 
-## How to use the examples well
-
-Do not read the examples as isolated demos.
-
-Read them as architecture patterns:
-
-- what kind of creature is this
-- what runtime surface does it use
-- what capability or extension point is it demonstrating
-- is this a standalone creature or an optional terrarium topology
-
-## Start with `kt-defaults` first
-
-If your goal is to run something useful quickly, start with [`kt-defaults`](../../kt-defaults/README.md) before digging through examples.
-
-The examples are especially good when you want to study patterns, integration, or extension points.
-
-## Agent app examples
-
-These are config-driven creature examples that you can run directly with `kt run`.
+Single-creature configs. Run with:
 
 ```bash
-kt run examples/agent-apps/planner_agent
-kt run examples/agent-apps/monitor_agent
-kt run examples/agent-apps/rp_agent
+kt run examples/agent-apps/<name>
 ```
 
-### `planner_agent`
+| Agent | Pattern | What it shows |
+|---|---|---|
+| `swe_agent` | Coding agent | Tool-heavy creature close to `kt-defaults/creatures/swe` |
+| `discord_bot` | Group-chat bot | Custom Discord I/O, ephemeral, native tool calling |
+| `planner_agent` | Plan-execute-reflect | Scratchpad state machine + critic sub-agent |
+| `monitor_agent` | Trigger-driven | `input: none` + timer triggers, no user in the loop |
+| `conversational` | Streaming ASR/TTS | Whisper input, TTS output, interactive sub-agent |
+| `rp_agent` | Roleplay | Memory-first design, startup trigger, persona prompt |
+| `compact_test` | Compaction stress | Small context + auto-compact, for validating the compaction path |
 
-A good example for planning-oriented behavior and internal task structure.
+Related guides: [Creatures](creatures.md), [Configuration](configuration.md).
 
-Look here if you want to understand:
-
-- prompt-driven workflow style
-- use of built-in sub-agents
-- configuration of a focused creature
-
-### `monitor_agent`
-
-A trigger-oriented example.
-
-Look here if you want to understand:
-
-- agents that are not primarily user-input driven
-- timer or monitoring-style behavior
-- automation-oriented creature design
-
-### `discord_bot`
-
-A custom integration example.
-
-Look here if you want to understand:
-
-- custom input and output flows
-- external platform integration
-- how a creature can be adapted to a messaging environment
-
-### `conversational`
-
-A richer interaction example with custom behavior and alternate runtime patterns.
-
-Look here if you want to understand:
-
-- conversational experience design
-- custom modules around input or output
-- specialized app-oriented creature configuration
-
-### `rp_agent`
-
-A character or roleplay-oriented example.
-
-Look here if you want to understand:
-
-- memory-oriented setup
-- prompt-driven character behavior
-- persistent identity-style creature design
-
-### `compact_test`
-
-A stress and behavior example.
-
-Look here if you want to understand:
-
-- compaction behavior
-- context pressure testing
-- runtime behavior under constrained settings
-
-## Code examples
-
-These are for using KohakuTerrarium as a Python framework, not just as a CLI app.
-
-The key distinction from config-based usage is simple: your program is the orchestrator, and the agents are runtime components your code invokes.
-
-Important examples include:
-
-### `programmatic_chat.py`
-
-Start here if you want the smallest useful Python embedding example.
-
-### `run_terrarium.py`
-
-Start here if you want to create and run terrariums from code.
-
-### `task_orchestrator.py`
-
-Useful for understanding orchestration patterns where your own application controls the flow.
-
-### `review_loop.py`
-
-Useful for understanding iterative multi-step workflows in code.
-
-### `smart_router.py`
-
-Useful for understanding routing and specialization patterns.
-
-### `debate_arena.py` and `ensemble_voting.py`
-
-Useful for understanding multiple-agent coordination patterns driven directly from Python.
-
-## Terrarium examples
-
-These examples are about topology and collaboration between creatures.
-They are useful, but they are not the first place most users should start.
-
-Run them with:
+## `examples/terrariums/` — multi-agent configs
 
 ```bash
-kt terrarium run examples/terrariums/code_review_team
-kt terrarium run examples/terrariums/novel_terrarium
-kt terrarium run examples/terrariums/research_assistant
+kt terrarium run examples/terrariums/<name>
 ```
 
-### `code_review_team`
+| Terrarium | Topology | Creatures |
+|---|---|---|
+| `novel_terrarium` | Pipeline with feedback | brainstorm → planner → writer |
+| `code_review_team` | Loop with gate | developer, reviewer, tester |
+| `research_assistant` | Star with coordinator | coordinator + searcher + analyst |
 
-A software workflow terrarium.
+Related guide: [Terrariums](terrariums.md).
 
-Look here if you want to understand:
+## `examples/plugins/` — plugin hooks
 
-- developer and reviewer role separation
-- feedback loops
-- practical multi-creature collaboration
+One example per hook category. Use these as a reference when writing your own.
 
-### `novel_terrarium`
+| Plugin | Hooks | Level |
+|---|---|---|
+| `hello_plugin` | `on_load`, `on_agent_start/stop` | beginner |
+| `tool_timer` | `pre/post_tool_execute`, state | beginner |
+| `tool_guard` | `pre_tool_execute`, `PluginBlockError` | intermediate |
+| `prompt_injector` | `pre_llm_call` (message mutation) | intermediate |
+| `response_logger` | `post_llm_call`, `on_event`, `on_interrupt` | intermediate |
+| `budget_enforcer` | `pre/post_llm_call` with blocking + state | advanced |
+| `subagent_tracker` | `pre/post_subagent_run`, `on_task_promoted` | advanced |
+| `webhook_notifier` | Fire-and-forget callbacks, `inject_event`, `switch_model` | advanced |
 
-A creative workflow terrarium.
+Related guide: [Plugins](plugins.md). See `examples/plugins/README.md` for the full field-by-field walk-through.
 
-Look here if you want to understand:
+## `examples/code/` — Python embedding
 
-- staged handoff through channels
-- how different creative roles can be composed
-- pipeline-style multi-agent structures
+Scripts that embed the framework with your code as the orchestrator. Each uses a different slice of the compose algebra or the `Agent` / `TerrariumRuntime` / `KohakuManager` API.
 
-### `research_assistant`
+| Script | Pattern | Features used |
+|---|---|---|
+| `programmatic_chat.py` | Agent as library | `AgentSession.chat()` |
+| `run_terrarium.py` | Terrarium from code | `TerrariumRuntime`, channel injection |
+| `discord_adventure_bot.py` | Bot-owned interaction | `agent()`, dynamic creation, game state |
+| `debate_arena.py` | Multi-agent turn-taking | `agent()`, `>>`, `async for`, persistent agents |
+| `task_orchestrator.py` | Dynamic agent topology | `factory()`, `>>`, `asyncio.gather` |
+| `ensemble_voting.py` | Redundancy through diversity | `&`, `>>` auto-wrap, `\|`, `*` |
+| `review_loop.py` | Write → review → revise | `.iterate()`, persistent `agent()` |
+| `smart_router.py` | Classify and dispatch | `>> {dict}` routing, `factory()`, `\|` fallback |
+| `pipeline_transforms.py` | Data-extraction pipeline | `>>` auto-wrap (`json.loads`, lambdas), agents + functions |
 
-A research-oriented terrarium.
+Related guides: [Programmatic Usage](programmatic-usage.md), [Composition](composition.md).
 
-Look here if you want to understand:
+## Reading order for new readers
 
-- coordinator-style structures
-- analysis and task decomposition
-- information flow between specialist roles
+1. **Run something.** `kt run examples/agent-apps/swe_agent` — feel how a creature works.
+2. **Inherit from it.** Copy the folder, tweak `config.yaml`, run again.
+3. **Add a plugin.** Drop `examples/plugins/tool_timer.py` into your creature's `plugins:` list.
+4. **Go Python.** Open `examples/code/programmatic_chat.py` and run it.
+5. **Compose.** Try `examples/code/review_loop.py` for the compose algebra in action.
+6. **Go multi-agent.** Run `examples/terrariums/code_review_team` and watch the channel traffic.
 
-## Plugin examples
+## See also
 
-The plugin examples are especially valuable if you want to extend the framework without replacing core modules.
-
-See:
-
-- [`examples/plugins/README.md`](../../examples/plugins/README.md)
-
-Important patterns shown there include:
-
-- lifecycle hooks
-- tool interception
-- prompt injection
-- cost or budget enforcement
-- event observation
-- sub-agent tracking
-- webhook integration
-
-## Suggested reading paths
-
-### If you want to build a coding creature
-
-1. [`kt-defaults`](../../kt-defaults/README.md)
-2. `examples/agent-apps/planner_agent`
-3. `examples/code/programmatic_chat.py`
-4. [Creatures](creatures.md)
-
-### If you want to build a custom integration
-
-1. `examples/agent-apps/discord_bot`
-2. `examples/plugins/`
-3. [Custom Modules](custom-modules.md)
-
-### If you want to understand optional multi-agent composition
-
-1. `examples/terrariums/code_review_team`
-2. `examples/terrariums/research_assistant`
-3. [Terrariums](terrariums.md)
-4. [Channels](../concepts/channels.md)
-
-### If you want to embed the framework in Python
-
-1. `examples/code/programmatic_chat.py`
-2. `examples/code/run_terrarium.py`
-3. `examples/code/task_orchestrator.py`
-4. [Programmatic Usage](programmatic-usage.md)
-
-## Main takeaway
-
-The examples directory is not a bonus folder.
-It is one of the clearest expressions of how the framework is actually meant to be used.
-
-But if your goal is simply to get a useful agent running, start with `kt-defaults`, then come back to the examples when you want patterns and implementation ideas.
+- [Getting Started](getting-started.md) — environment setup.
+- [`kt-defaults`](../../kt-defaults/README.md) — the showcase package; examples share many of its patterns.
+- [Tutorials](../tutorials/README.md) — guided walk-throughs that pair with these examples.

@@ -1,20 +1,29 @@
 # Reference
 
-Reference pages are for exact lookup.
+Reference pages are for exact lookup. Use them when you already know
+what you are trying to do and need the precise command, endpoint,
+class, field, or hook.
 
-Use this section when you already know what you are trying to do and need the precise command, endpoint, class, or interface.
+For mental models, read [Concepts](../concepts/README.md). For
+task-oriented paths, read [Guides](../guides/README.md).
 
-If you are still learning the model, start with [Guides](../guides/README.md) or [Concepts](../concepts/README.md).
+## Pages
 
-## Main reference pages
-
-- [CLI Reference](cli.md)
-- [HTTP API](http.md)
-- [Python API](python.md)
+- [CLI](cli.md) — every `kt` command and flag.
+- [HTTP and WebSocket API](http.md) — every REST route, WebSocket
+  endpoint, and Pydantic schema.
+- [Python API](python.md) — every public class, function, and protocol.
+- [Configuration](configuration.md) — every field of creature configs,
+  terrarium configs, LLM profiles, MCP catalog, and package manifests.
+- [Built-ins](builtins.md) — every shipped tool, sub-agent, input,
+  output, user command, framework command, LLM provider, and LLM
+  preset.
+- [Plugin hooks](plugin-hooks.md) — every lifecycle, LLM, tool,
+  sub-agent, callback, and prompt hook, with signatures and timing.
 
 ## What belongs here
 
-Reference docs should stay narrow and exact:
+Reference docs stay narrow and exact:
 
 - command syntax
 - API endpoints

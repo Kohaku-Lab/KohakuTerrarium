@@ -1,9 +1,12 @@
 # builtins/ (Built-in Components)
 
-Ready-to-use tools, sub-agents, inputs, and outputs that ship with the framework.
-Agents reference these by name in their `config.yaml`.
+Ready-to-use tools, sub-agents, inputs, outputs, terminal UIs, and user
+commands that ship with the framework. Agents reference these by name in
+their `config.yaml`.
 
-## Tools (20)
+## Tools (30 registered names across 21 implementation files)
+
+Core general-purpose tools:
 
 | Name | Description |
 |------|-------------|
@@ -11,22 +14,39 @@ Agents reference these by name in their `config.yaml`.
 | `python` | Execute Python code via subprocess |
 | `read` | Read file contents with optional line range |
 | `write` | Create or overwrite files |
-| `edit` | Edit files using unified diff format |
+| `edit` | Single-diff edit of a file |
+| `multi_edit` | Atomic or policy-driven batch of ordered search/replace edits on one file |
 | `glob` | Find files by glob pattern |
 | `grep` | Search file contents with regex and type filtering |
 | `tree` | List directory structure with frontmatter summaries |
 | `think` | No-op tool for explicit LLM reasoning |
-| `scratchpad` | Read/write session-scoped key-value working memory |
-| `ask_user` | Request human input mid-execution (CLI) |
-| `http` | Make HTTP requests to APIs and web services |
-| `json_read` | Read and query JSON files with path expressions |
-| `json_write` | Modify JSON files with path expressions |
+| `scratchpad` | Session-scoped key-value working memory |
+| `ask_user` | Request human input mid-execution |
+| `json_read` / `json_write` | Read and modify JSON files with path expressions |
 | `send_message` | Send a message to a named channel |
-| `wait_channel` | Wait for a message on a named channel |
 | `info` | Load full documentation for a tool or sub-agent on demand |
 | `list_triggers` | Introspect active triggers on the agent |
+| `create_trigger` | Dynamically create a trigger at runtime (timer / channel / context) |
 | `stop_task` | Cancel a running background tool or sub-agent |
-| `terrarium_tools` | Terrarium management tools for the root agent (lazily registered) |
+| `search_memory` | FTS5 + semantic search over the current session's event log |
+| `web_fetch` | Fetch and clean a web page (crawl4ai → trafilatura → jina → naive fallback) |
+| `web_search` | DuckDuckGo web search (optional dep) |
+
+Terrarium management tools (registered lazily via `terrarium/tool_registration`,
+intended for a root agent):
+
+| Name | Description |
+|------|-------------|
+| `terrarium_create` | Create and start a new terrarium from a config path |
+| `terrarium_status` | Read status (creatures, channels, running state) |
+| `terrarium_stop` | Stop a running terrarium |
+| `terrarium_send` | Send a message to a channel inside a terrarium |
+| `terrarium_observe` | Non-destructively observe a channel |
+| `terrarium_history` | Read a channel's message history |
+| `creature_start` / `creature_stop` / `creature_interrupt` | Lifecycle control for individual creatures |
+
+MCP meta-tools (registered from `mcp/tools.py`): `mcp_list`, `mcp_call`,
+`mcp_connect`, `mcp_disconnect` — see `../mcp/README.md`.
 
 ## Sub-agents (10)
 
@@ -45,31 +65,33 @@ Agents reference these by name in their `config.yaml`.
 
 ## Inputs and Outputs
 
-**Inputs:** `cli` (blocking and non-blocking), `tui` (shared TUI session), `whisper` (Silero VAD + Whisper ASR), `none` (trigger-only, no input)
+**Inputs:** `cli` (blocking and non-blocking), `tui` (shared TUI session),
+`whisper` (Silero VAD + Whisper ASR), `none` (trigger-only, no input).
 
-**Outputs:** `stdout` (plain and prefixed), `tui` (shared TUI session), `tts` (console TTS with config)
+**Outputs:** `stdout` (plain and prefixed), `tui` (shared TUI session),
+`tts` (console TTS with config).
 
-## TUI System (`tui/`)
+## Subpackages
 
-Shared terminal UI with coordinated input and output via the session registry.
-
-| Module | Purpose |
-|--------|---------|
-| `TUISession` | Shared state (input queue, output buffer, stop signal) stored in `Session.tui` |
-| `TUIInput` | Input module reading from `TUISession`. Config: `input: {type: tui}` |
-| `TUIOutput` | Output module writing to `TUISession`. Config: `output: {type: tui}` |
-
-Both modules attach to the same `TUISession` instance via `get_session()`, enabling coordinated terminal access.
+| Package | Purpose |
+|---------|---------|
+| `tools/` | 21 tool implementation files, 30 registered tool names |
+| `subagents/` | 10 sub-agent configs |
+| `inputs/` | CLI, Whisper, ASR, None input modules |
+| `outputs/` | Stdout, TTS output modules |
+| `tui/` | Full-screen Textual terminal UI (session, input, output, widgets) |
+| `cli_rich/` | Inline rich CLI app (prompt_toolkit + rich) — see `cli_rich/README.md` |
+| `user_commands/` | Slash commands (`/help`, `/clear`, `/compact`, `/model`, `/plugin`, `/regen`, `/status`, `/exit`) |
 
 ## Catalogs
 
 Tool and sub-agent registration logic lives in catalog modules at the
-builtins root, separate from the implementation subdirectories:
+builtins root:
 
 | File | Purpose |
 |------|---------|
-| `tool_catalog.py` | Tool registry: `register_builtin`, `get_builtin_tool`, `list_builtin_tools`, `is_builtin_tool` |
-| `subagent_catalog.py` | Sub-agent registry: `get_builtin_subagent_config`, `list_builtin_subagents` |
+| `tool_catalog.py` | `register_builtin`, `get_builtin_tool`, `list_builtin_tools`, `is_builtin_tool` |
+| `subagent_catalog.py` | `get_builtin_subagent_config`, `list_builtin_subagents` |
 
 ## Usage
 
@@ -77,13 +99,11 @@ builtins root, separate from the implementation subdirectories:
 from kohakuterrarium.builtins.tool_catalog import get_builtin_tool
 from kohakuterrarium.builtins.subagent_catalog import get_builtin_subagent_config
 
-tool = get_builtin_tool("bash")           # Returns BaseTool instance
-config = get_builtin_subagent_config("explore")  # Returns SubAgentConfig
+tool = get_builtin_tool("bash")
+config = get_builtin_subagent_config("explore")
 ```
 
 ## Adding Custom Builtins
-
-Register new tools with `@register_builtin("name")`:
 
 ```python
 from kohakuterrarium.builtins.tool_catalog import register_builtin
@@ -99,15 +119,9 @@ class MyTool(BaseTool):
         return ToolResult(output="done")
 ```
 
-## File Layout
+## See also
 
-```
-builtins/
-├── tool_catalog.py      # Tool registry (canonical location)
-├── subagent_catalog.py  # Sub-agent registry (canonical location)
-├── tools/       # 20 tool implementations
-├── subagents/   # 10 sub-agent configs
-├── inputs/      # CLI, Whisper, and None input modules
-├── outputs/     # Stdout and TTS output modules
-└── tui/         # TUI session, input, and output modules
-```
+- `tools/README.md` — per-file breakdown of tool implementations
+- `cli_rich/README.md` — rich inline CLI architecture
+- `user_commands/README.md` — slash command layer and UI payloads
+- `../modules/tool/` — `BaseTool`, `ToolResult`, `ExecutionMode`

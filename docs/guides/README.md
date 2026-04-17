@@ -1,39 +1,48 @@
 # Guides
 
-Guides are task-oriented docs for people using or building with KohakuTerrarium.
+Task-oriented docs for people running, building with, and extending KohakuTerrarium.
 
-If you want to understand the system conceptually, go to [Concepts](../concepts/README.md).
-If you want exact commands or API surfaces, go to [Reference](../reference/README.md).
-If you want a guided learning path, go to [Tutorials](../tutorials/README.md).
+If you want the mental model, go to [Concepts](../concepts/README.md).
+If you want exact fields, flags, or signatures, go to [Reference](../reference/README.md).
+If you want a guided first walk-through, go to [Tutorials](../tutorials/README.md).
 
 ## Start here
 
-- [Getting Started](getting-started.md) for installation, authentication, packages, and first run
-- [Creatures](creatures.md) for using, inheriting, and authoring standalone agents
-- [Sessions](sessions.md) for resume, history storage, and searchable memory
-- [Configuration](configuration.md) for config structure and fields
-- [Terrariums](terrariums.md) for optional multi-agent composition
+- [Getting Started](getting-started.md) — install, authenticate, run your first creature, resume, and open the web UI.
+- [Creatures](creatures.md) — anatomy, inheritance, prompt files, tool/subagent wiring, packaging.
+- [Sessions](sessions.md) — `.kohakutr` files, resume, compaction.
 
-## Build, run, and configure
+## Build and configure
 
-- [Getting Started](getting-started.md)
-- [Creatures](creatures.md)
-- [Configuration](configuration.md)
-- [Plugins](plugins.md)
-- [Custom Modules](custom-modules.md)
-- [Terrariums](terrariums.md)
+- [Configuration](configuration.md) — task-oriented "how do I configure X" recipes.
+- [Creatures](creatures.md) — authoring standalone agents.
+- [Plugins](plugins.md) — prompt and lifecycle plugins.
+- [Custom Modules](custom-modules.md) — writing tools, inputs, outputs, triggers, sub-agents.
+- [MCP](mcp.md) — registering MCP servers per-agent or globally.
+- [Packages](packages.md) — `kohaku.yaml` manifests, install modes, publishing.
 
-## Operate, persist, and search history
+## Multi-agent and composition
 
-- [Sessions](sessions.md)
-- [Programmatic Usage](programmatic-usage.md)
-- [Frontend Layout](frontend-layout.md)
+- [Terrariums](terrariums.md) — channels, root agents, hot-plug, observers.
+- [Composition](composition.md) — `>>`, `&`, `|`, `*` pipelines from Python.
+- [Programmatic Usage](programmatic-usage.md) — embedding `Agent`, `AgentSession`, `TerrariumRuntime`, `KohakuManager`.
 
-## Extend the framework
+## Persist and search
 
-- [Custom Modules](custom-modules.md)
-- [Plugins](plugins.md)
+- [Sessions](sessions.md) — persistence model and resume.
+- [Memory](memory.md) — embedding providers, FTS and vector search, `search_memory` tool.
 
-## Explore examples
+## Run it somewhere
 
-- [Examples](examples.md)
+- [Serving](serving.md) — `kt web`, `kt app`, the `kt serve` daemon.
+- [Frontend Layout](frontend-layout.md) — web dashboard panels and presets.
+
+## Learn from code
+
+- [Examples](examples.md) — what every folder under `examples/` demonstrates.
+
+## See also
+
+- [Concepts](../concepts/README.md) — why things work the way they do.
+- [Reference](../reference/README.md) — exhaustive lookup.
+- [Development](../dev/README.md) — contributing to the framework itself.

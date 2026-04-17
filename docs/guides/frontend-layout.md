@@ -1,9 +1,10 @@
-# Frontend layout guide
+# Frontend Layout
 
-KohakuTerrarium's web dashboard uses a configurable binary split tree
-layout. Every part of the screen (except the header and status bar) is
-a recursively splittable area that holds a panel. Users can rearrange
-panels, resize splits, and save custom presets.
+For readers using or customising the web dashboard served by `kt web` / `kt app` / `kt serve`.
+
+The dashboard uses a configurable binary split tree: every pane is either a leaf (one panel) or a split (two children with a draggable handle). Presets swap the whole tree at once; edit mode rearranges it in place.
+
+See also: [Serving](serving.md) for how to open the dashboard.
 
 ## Core concepts
 
@@ -174,3 +175,8 @@ The `LayoutNode.vue` component is recursive: splits render two children
 with a draggable handle, leaves render the panel component via
 `<component :is>`. Panel runtime props flow through Vue's
 provide/inject from the route page.
+
+## See also
+
+- [Serving](serving.md) — opening the dashboard via `kt web` / `kt app` / `kt serve`.
+- [Development / Frontend](../dev/frontend.md) — architecture for contributors.

@@ -1,359 +1,241 @@
 # Programmatic Usage
 
-Programmatic usage is one of the key features of KohakuTerrarium.
+For readers embedding agents inside their own Python code.
 
-KohakuTerrarium is not only a config-driven runtime. It is also a Python framework for embedding creatures directly into your own applications, coordinating them in code, and mixing agent behavior with normal Python logic.
+A creature isn't a config file — the config describes one. A running creature is an async Python object: `Agent`. Everything in KohakuTerrarium is callable and awaitable, including terrariums and sessions. Your code is the orchestrator; agents are workers you invoke.
 
-If the CLI is the easiest way to run a creature, the Python API is the strongest way to integrate creatures into your own product.
+Concept primer: [agent as a Python object](../concepts/python-native/agent-as-python-object.md), [composition algebra](../concepts/python-native/composition-algebra.md).
 
-## Two paradigms
+## Four entry points
 
-KohakuTerrarium supports two different ways to work.
+| Surface | Use when |
+|---|---|
+| `Agent` | You want full control: inject events, attach custom output handlers, manage lifecycle yourself. |
+| `AgentSession` | Streaming chat wrapper: inject input, iterate output chunks. Good for bots and web UIs. |
+| `TerrariumRuntime` | You have a terrarium config and want to run it. |
+| `KohakuManager` | Multi-tenant server: many agents/terrariums managed by ID, transport-agnostic. |
 
-### Config-driven runtime
+For multi-agent Python pipelines without a terrarium, see [Composition](composition.md).
 
-You write a creature config folder, launch it with `kt run`, and the creature owns the interactive loop.
-
-### Programmatic runtime
-
-Your Python code is the orchestrator.
-You create creatures, invoke them, stream or capture their output, coordinate them with code, and decide how long they live.
-
-Use programmatic mode when:
-
-- you are building a web server, Discord bot, backend worker, or desktop app
-- the number and role of creatures are decided at runtime
-- you want strict ordering or explicit control flow
-- you want to mix agent calls with normal Python logic
-- you want stronger orchestration than loose channel-based collaboration
-- you want composition algebra as an application-owned orchestration layer
-
-## Main Python surfaces
-
-Most users will work with one of these layers:
-
-| Surface | Use it when |
-|---------|-------------|
-| `AgentSession` | you want the simplest streaming chat interface for one creature |
-| `Agent` | you want direct control over one creature runtime |
-| `TerrariumRuntime` | you want to run a terrarium directly in code |
-| `KohakuManager` | you want a service-style manager above creatures and terrariums |
-| composition algebra | you want to treat creatures as composable programmatic steps |
-
-## 1. The simplest path: `AgentSession`
-
-`AgentSession` is the easiest Python entry point for a single creature.
-It wraps an `Agent` with a streaming chat interface and is also the same kind of surface used by higher-level serving layers.
+## `Agent` — full control
 
 ```python
 import asyncio
-
-from kohakuterrarium.serving.agent_session import AgentSession
-
-
-async def main() -> None:
-    session = await AgentSession.from_path("@kt-defaults/creatures/general")
-
-    try:
-        async for chunk in session.chat("Summarize what this repository does."):
-            print(chunk, end="", flush=True)
-        print()
-    finally:
-        await session.stop()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-Key points:
-
-- `AgentSession.from_path(path)` loads and starts a creature from a filesystem path or package ref
-- `session.chat(message)` returns an async iterator of streamed output chunks
-- the creature keeps conversation context across calls
-- always call `session.stop()` when you are done
-
-### Build from config in memory
-
-When you want to start from an existing config and override it in code:
-
-```python
-from kohakuterrarium.core.config import load_agent_config
-from kohakuterrarium.serving.agent_session import AgentSession
-
-
-async def create_custom_agent() -> AgentSession:
-    config = load_agent_config("@kt-defaults/creatures/general")
-    config.name = "my-custom-agent"
-    config.system_prompt = "You are a pirate. Respond in pirate speak."
-    config.tools = []
-    config.subagents = []
-
-    return await AgentSession.from_config(config)
-```
-
-This is a good pattern when you want to inherit the structure of a real creature but specialize it dynamically.
-
-## 2. Direct control with `Agent`
-
-Use `Agent` when you want direct lifecycle control instead of the higher-level chat wrapper.
-
-```python
-import asyncio
-
 from kohakuterrarium.core.agent import Agent
 
-
-async def main() -> None:
+async def main():
     agent = Agent.from_path("@kt-defaults/creatures/swe")
-    parts: list[str] = []
-
-    agent.set_output_handler(lambda text: parts.append(text), replace_default=True)
-
+    agent.set_output_handler(
+        lambda text: print(text, end=""),
+        replace_default=True,
+    )
     await agent.start()
-    try:
-        await agent.inject_input("Explain how this codebase is structured.")
-        print("".join(parts))
-    finally:
-        await agent.stop()
+    await agent.inject_input("Explain what this codebase does.")
+    await agent.stop()
 
-
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(main())
 ```
 
-Use this layer when you want:
+Key methods:
 
-- custom output handling
-- direct event injection
-- tighter lifecycle management
-- integration with your own surrounding runtime
-- explicit control of sessions, interruption, or model switching
+- `Agent.from_path(path, *, input_module=..., output_module=..., session=..., environment=..., llm_override=..., pwd=...)` — build from a config folder or `@pkg/...` ref.
+- `await agent.start()` / `await agent.stop()` — lifecycle.
+- `await agent.run()` — the built-in loop (pulls from input, dispatches triggers, runs controller).
+- `await agent.inject_input(content, source="programmatic")` — push input bypassing the input module.
+- `await agent.inject_event(TriggerEvent(...))` — push any event.
+- `agent.interrupt()` — stop the current processing cycle (non-blocking).
+- `agent.switch_model(profile_name)` — change LLM at runtime.
+- `agent.set_output_handler(fn, replace_default=False)` — add or replace an output sink.
+- `await agent.add_trigger(trigger)` / `await agent.remove_trigger(id)` — runtime trigger management.
 
-Important methods include:
+Properties:
 
-- `Agent.from_path(...)`
-- `start()`
-- `stop()`
-- `inject_input(...)`
-- `inject_event(...)`
-- `interrupt()`
-- `switch_model(...)`
-- `set_output_handler(...)`
+- `agent.is_running: bool`
+- `agent.tools: list[str]`, `agent.subagents: list[str]`
+- `agent.conversation_history: list[dict]`
 
-## 3. Terrarium from code
-
-You can also start and control a terrarium directly from Python.
+## `AgentSession` — streaming chat
 
 ```python
 import asyncio
+from kohakuterrarium.serving.agent_session import AgentSession
 
-from kohakuterrarium.core.channel import ChannelMessage
-from kohakuterrarium.terrarium.config import load_terrarium_config
+async def main():
+    session = await AgentSession.from_path("@kt-defaults/creatures/swe")
+    await session.start()
+    async for chunk in session.chat("What does this do?"):
+        print(chunk, end="")
+    print()
+    await session.stop()
+
+asyncio.run(main())
+```
+
+`chat(message)` yields text chunks as the controller streams. Tool activity and sub-agent events are surfaced through the output module's activity callbacks — `AgentSession` focuses on the text stream; for richer events, use `Agent` + a custom output module.
+
+Builders: `AgentSession.from_path(...)`, `from_config(AgentConfig)`, `from_agent(pre_built_agent)`.
+
+## Output handling
+
+`set_output_handler` lets you hook any callable:
+
+```python
+def handle(text: str) -> None:
+    my_logger.info(text)
+
+agent.set_output_handler(handle, replace_default=True)
+```
+
+For multiple sinks (TTS, Discord, file), configure `named_outputs` in the YAML and the agent routes automatically.
+
+## Event-level control
+
+```python
+from kohakuterrarium.core.events import TriggerEvent, create_user_input_event
+
+await agent.inject_event(create_user_input_event("Hi", source="slack"))
+await agent.inject_event(TriggerEvent(
+    type="context_update",
+    content="User just navigated to page /settings.",
+    context={"source": "frontend"},
+))
+```
+
+`type` can be any string the controller is wired to handle — `user_input`, `idle`, `timer`, `channel_message`, `context_update`, `monitor`, or your own. See [reference/python](../reference/python.md).
+
+## Terrarium from code
+
+```python
+import asyncio
 from kohakuterrarium.terrarium.runtime import TerrariumRuntime
+from kohakuterrarium.terrarium.config import load_terrarium_config
+from kohakuterrarium.core.channel import ChannelMessage
 
-
-async def main() -> None:
+async def main():
     config = load_terrarium_config("@kt-defaults/terrariums/swe_team")
     runtime = TerrariumRuntime(config)
     await runtime.start()
 
-    try:
-        tasks = runtime.environment.shared_channels.get("tasks")
-        if tasks is not None:
-            await tasks.send(
-                ChannelMessage(sender="user", content="Fix the auth bug.")
-            )
+    tasks = runtime.environment.shared_channels.get("tasks")
+    await tasks.send(ChannelMessage(sender="user", content="Fix the auth bug."))
 
-        await runtime.run()
-    finally:
-        await runtime.stop()
+    await runtime.run()
+    await runtime.stop()
 
-
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(main())
 ```
 
-Use `TerrariumRuntime` when you need:
+Runtime methods: `start`, `stop`, `run`, `add_creature`, `remove_creature`, `add_channel`, `wire_channel`. The `environment` holds `shared_channels` (a `ChannelRegistry`) visible to all creatures; each creature has its own private `Session`.
 
-- direct control over terrarium lifecycle
-- programmatic channel interaction
-- status inspection
-- runtime-level coordination around a terrarium
+## `KohakuManager` — multi-tenant
 
-Important surfaces include:
-
-- `start()`
-- `run()`
-- `stop()`
-- `get_status()`
-- `environment`
-- `api`
-- `observer`
-- `get_creature_agent(name)`
-
-## 4. Service-style integration with `KohakuManager`
-
-Use `KohakuManager` when you want a management layer above creatures and terrariums.
-
-This is the right level for:
-
-- backend services
-- custom APIs
-- dashboards or UI backends
-- systems that create and manage many runtimes
+Used by the HTTP API, web app, and any code that wants "several agents, identified by ID":
 
 ```python
-import asyncio
-
 from kohakuterrarium.serving.manager import KohakuManager
 
+manager = KohakuManager(session_dir="/var/kt/sessions")
 
-async def main() -> None:
-    manager = KohakuManager(session_dir="./sessions")
+agent_id = await manager.agent_create("@kt-defaults/creatures/swe")
+async for chunk in manager.agent_chat(agent_id, "Hi"):
+    print(chunk, end="")
 
-    agent_id = await manager.agent_create(config_path="@kt-defaults/creatures/general")
-    try:
-        async for chunk in manager.agent_chat(agent_id, "What tools do you have?"):
-            print(chunk, end="")
-    finally:
-        await manager.agent_stop(agent_id)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+status = manager.agent_status(agent_id)
+manager.agent_interrupt(agent_id)
+await manager.agent_stop(agent_id)
 ```
 
-This layer also connects closely to the HTTP and WebSocket serving stack.
+Also exposes terrarium/creature/channel operations. The manager takes care of session-store attachment and concurrent access safety.
 
-## 5. Composition algebra
+## Stopping cleanly
 
-Composition algebra is one of the strongest programmatic features in the framework.
-
-It lets you treat creatures as composable programmatic steps and combine them with Python operators.
+Always pair `start()` with `stop()`:
 
 ```python
-from kohakuterrarium.compose import agent, factory
+agent = Agent.from_path("...")
+try:
+    await agent.start()
+    await agent.inject_input("...")
+finally:
+    await agent.stop()
 ```
 
-### `agent()` for persistent creatures
+Or use `AgentSession` / `compose.agent()` which are async context managers.
 
-`agent()` creates a persistent runnable creature that keeps context across calls.
+Interrupts are safe from any asyncio task:
 
 ```python
-async with await agent("@kt-defaults/creatures/general") as a:
-    first = await a("Tell me a joke")
-    second = await a("Tell me another in the same style")
+agent.interrupt()           # non-blocking
 ```
 
-Use this when you want memory across turns.
+The controller checks its interrupt flag between LLM streaming steps.
 
-### `factory()` for ephemeral creatures
-
-`factory()` creates a fresh creature per call.
+## Custom session / environment
 
 ```python
-specialist = factory("@kt-defaults/creatures/general")
-result = await specialist("Summarize this file")
+from kohakuterrarium.core.session import Session
+from kohakuterrarium.core.environment import Environment
+
+env = Environment(env_id="my-app")
+session = env.get_session("my-agent")
+session.extra["db"] = my_db_connection
+
+agent = Agent.from_path("...", session=session, environment=env)
 ```
 
-Use this when you want disposable workers with no retained context.
+Anything you put in `session.extra` is accessible to tools via `ToolContext.session`.
 
-### `>>` for pipelines
-
-```python
-pipeline = writer >> reviewer
-pipeline = extractor >> json.loads >> formatter
-pipeline = agent_a >> (lambda text: text.upper()) >> agent_b
-```
-
-### `&` for parallel branches
-
-```python
-results = await (analyst & reviewer & writer)(task)
-```
-
-### `|` for fallback
-
-Use a fallback runnable if the primary raises.
-
-### `*` for retry
-
-Retry the same runnable multiple times.
-
-### `async for` for iterative workflows
-
-This is especially useful for review loops, debate, or refine-until-good-enough patterns.
-
-## Example: write-review loop
-
-```python
-import asyncio
-from kohakuterrarium.compose import agent
-
-
-async def main() -> None:
-    async with await agent("@kt-defaults/creatures/creative") as writer, \
-               await agent("@kt-defaults/creatures/reviewer") as reviewer:
-        pipeline = writer >> (lambda text: f"Review this:\n{text}") >> reviewer
-
-        async for feedback in pipeline.iterate("Write a short product intro"):
-            print(feedback)
-            if "APPROVED" in feedback:
-                break
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-This is a good example of why programmatic usage is a first-class capability in KT: your application owns the loop, while creatures provide the agentic work.
-
-## 6. Sessions and memory in code
-
-Programmatic usage can still take advantage of session persistence and searchable history.
-
-Relevant surfaces include:
+## Attaching session persistence
 
 ```python
 from kohakuterrarium.session.store import SessionStore
+
+store = SessionStore("/tmp/my-session.kohakutr")
+store.init_meta(
+    session_id="s1",
+    config_type="agent",
+    config_path="path/to/creature",
+    pwd="/tmp",
+    agents=["my-agent"],
+)
+agent.attach_session_store(store)
 ```
 
-Use these when you want to:
+For simple cases `AgentSession` / `KohakuManager` handle this automatically based on `session_dir`.
 
-- persist operational state
-- inspect prior runs
-- treat session history as searchable knowledge
-- build custom tools around session memory
+## Testing
 
-This matters because session history is not only for resume. It can also act as a knowledge database that supports FTS or vector-based retrieval.
+```python
+from kohakuterrarium.testing.agent import TestAgentBuilder
 
-## Choosing the right layer
+env = (
+    TestAgentBuilder()
+    .with_llm_script([
+        "Let me check. [/bash]@@command=ls\n[bash/]",
+        "Done.",
+    ])
+    .with_builtin_tools(["bash"])
+    .with_system_prompt("You are helpful.")
+    .build()
+)
 
-### Use `AgentSession`
+await env.inject("List files.")
+assert "Done" in env.output.all_text
+assert env.llm.call_count == 2
+```
 
-When you want the easiest streaming interface for one creature.
+`ScriptedLLM` is deterministic; `OutputRecorder` captures chunks/writes/activities for assertions.
 
-### Use `Agent`
+## Troubleshooting
 
-When you want direct runtime control of one creature.
+- **`await agent.run()` never returns.** `run()` is the full event loop; it exits when the input module closes (e.g. CLI gets EOF) or when a termination condition fires. Use `inject_input` + `stop` instead for one-shot interactions.
+- **Output handler not called.** Confirm `replace_default=True` if you don't want stdout as well; make sure the agent started before injecting.
+- **Hot-plugged creature never sees messages.** After `runtime.add_creature`, call `runtime.wire_channel(..., direction="listen")` for each channel the creature should consume.
+- **`AgentSession.chat` hangs.** Another caller is using the agent; sessions serialize input. Use one `AgentSession` per caller.
 
-### Use `TerrariumRuntime`
+## See also
 
-When you want direct control of a terrarium runtime.
-
-### Use `KohakuManager`
-
-When you want a service or orchestration layer above creatures and terrariums.
-
-### Use composition algebra
-
-When your own application logic is the orchestrator and you want agents as composable steps.
-
-## Related reading
-
-- [Python API](../reference/python.md)
-- [Creatures](creatures.md)
-- [Terrariums](terrariums.md)
-- [Sessions](sessions.md)
-- [Serving Layer](../concepts/serving.md)
+- [Composition](composition.md) — Python-side multi-agent pipelines.
+- [Custom Modules](custom-modules.md) — write the tools/inputs/outputs you wire in.
+- [Reference / Python API](../reference/python.md) — exhaustive signatures.
+- [examples/code/](../../examples/code/) — runnable scripts for each pattern.

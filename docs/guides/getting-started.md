@@ -1,315 +1,148 @@
 # Getting Started
 
-This guide gets you from installation to a working creature with the current KohakuTerrarium runtime.
+For readers who have never run KohakuTerrarium before and want a working agent on their machine in a few minutes.
 
-The fastest way to understand KohakuTerrarium is not to build everything from scratch.
-Start by installing the framework, install the official OOTB creature pack, run a useful creature, and then customize from there.
+KohakuTerrarium ships a core framework plus an install path for reusable creature/plugin packs. The official pack, `kt-defaults`, gives you a ready-to-use SWE agent, a reviewer, a researcher, and a few terrariums. You don't have to write anything to try it.
 
-## What you need
+Concept primer: [what is a creature](../concepts/foundations/what-is-an-agent.md), [why this framework](../concepts/foundations/why-kohakuterrarium.md).
 
-- Python 3.10+
-- one supported model provider
-  - Codex OAuth through `kt login codex`
-  - or an API-backed provider such as OpenRouter, OpenAI, Anthropic, Gemini, or Mimo
+## 1. Install
 
-## 1. Install KohakuTerrarium
-
-### Install from PyPI
+### From PyPI (recommended)
 
 ```bash
 pip install kohakuterrarium
-```
-
-If you want more optional dependencies in one shot:
-
-```bash
+# or, with more optional deps (speech, embeddings, etc.)
 pip install "kohakuterrarium[full]"
 ```
 
-### Install from source
+This gives you the `kt` command. Verify:
+
+```bash
+kt --version
+```
+
+### From source (for development)
 
 ```bash
 git clone https://github.com/Kohaku-Lab/KohakuTerrarium.git
 cd KohakuTerrarium
-pip install -e ".[dev]"
+uv pip install -e ".[dev]"
 ```
 
-If you are running from source and want `kt web` or `kt app`, build the frontend too:
+If you want `kt web` or `kt app` to serve the frontend, build it once:
 
 ```bash
 npm install --prefix src/kohakuterrarium-frontend
 npm run build --prefix src/kohakuterrarium-frontend
 ```
 
-## 2. Install the official defaults package
+Without the build step, `kt web` prints a message and `kt app` fails to open.
 
-The main reusable unit in KohakuTerrarium is the creature, and the easiest way to start is with the official package of OOTB creatures and plugins:
+## 2. Install the default creature pack
+
+`kt-defaults` contains the OOTB creatures (`swe`, `reviewer`, `researcher`, `ops`, `creative`, `general`, `root`) and a few terrariums.
 
 ```bash
 kt install https://github.com/Kohaku-Lab/kt-defaults.git
+kt list
 ```
 
-That gives you package-style references such as:
-
-- `@kt-defaults/creatures/general`
-- `@kt-defaults/creatures/swe`
-- `@kt-defaults/creatures/reviewer`
-- `@kt-defaults/terrariums/swe_team`
-
-You can also install third-party or local packages:
-
-```bash
-kt install https://github.com/someone/cool-creatures.git
-kt install ./my-creatures
-kt install ./my-creatures -e
-```
-
-Package installs are stored under `~/.kohakuterrarium/packages/`.
-Editable installs use link files instead of symlinks, so local package development stays simple and portable.
+Installed packages live at `~/.kohakuterrarium/packages/<name>/` and are referenced with the `@<package>/path` syntax.
 
 ## 3. Authenticate a model provider
 
-### Option A: Codex OAuth
+Pick one:
 
+**Codex (ChatGPT subscription, no API key)**
 ```bash
 kt login codex
-```
-
-This is a common starting point for the bundled SWE-oriented defaults.
-
-### Option B: Other providers
-
-You can also authenticate other providers:
-
-```bash
-kt login openrouter
-kt login openai
-kt login anthropic
-kt login gemini
-kt login mimo
-```
-
-Inspect models and set a default:
-
-```bash
-kt model list
 kt model default gpt-5.4
 ```
 
-If you want more direct control over saved config, profiles, API keys, or MCP entries, see:
+A browser window opens; finish the device-code flow; tokens land in `~/.kohakuterrarium/codex-auth.json`.
 
+**OpenAI-compatible provider (API key)**
 ```bash
-kt config show
-kt config path
-kt config edit
+kt config key set openai          # prompts for key
+kt config llm add                 # interactive preset builder
+kt model default <preset-name>
 ```
 
-## 4. Run your first creature
+**Other providers**: `anthropic`, `openrouter`, `gemini`, etc. are built-in backends. See `kt config provider list` and [Configuration](configuration.md) for details.
 
-The fastest useful path is to run an installed default creature:
-
-```bash
-kt run @kt-defaults/creatures/swe
-```
-
-Other good starting points:
-
-```bash
-kt run @kt-defaults/creatures/general
-kt run @kt-defaults/creatures/reviewer
-kt run @kt-defaults/creatures/researcher
-```
-
-You can also run local example creatures from the repository:
-
-```bash
-kt run examples/agent-apps/planner_agent
-kt run examples/agent-apps/monitor_agent
-kt run examples/agent-apps/rp_agent
-```
-
-### Standalone run modes
-
-`kt run` defaults to:
-
-- `cli` when running in a TTY
-- `plain` when not running in a TTY
-
-You can choose a mode explicitly:
+## 4. Run a creature
 
 ```bash
 kt run @kt-defaults/creatures/swe --mode cli
-kt run @kt-defaults/creatures/swe --mode tui
-kt run @kt-defaults/creatures/swe --mode plain
 ```
 
-## 5. Optional: run a terrarium
+You land in an interactive prompt with the SWE agent. Type a request; it uses shell, file, and editing tools in the current working directory. Ctrl+C exits cleanly and prints a resume hint.
 
-If you want multi-agent composition, run a terrarium:
+Modes:
+
+- `cli` — Rich inline (default on TTY)
+- `tui` — Full-screen Textual app
+- `plain` — Bare stdout/stdin, for piping or CI
+
+Override the model for one run:
 
 ```bash
-kt terrarium run @kt-defaults/terrariums/swe_team
+kt run @kt-defaults/creatures/swe --llm claude-opus-4.6
 ```
 
-You can also run the example terrariums in `examples/terrariums/`.
+## 5. Resume
 
-A terrarium is not a second agent brain. It is a runtime layer that wires multiple creatures together through channels and lifecycle management.
-
-### Terrarium run modes
-
-`kt terrarium run` defaults to `tui`.
-
-You can choose a mode explicitly:
+Sessions auto-save to `~/.kohakuterrarium/sessions/*.kohakutr` (unless you pass `--no-session`). Restart any past session:
 
 ```bash
-kt terrarium run @kt-defaults/terrariums/swe_team --mode tui
-kt terrarium run @kt-defaults/terrariums/swe_team --mode cli
-kt terrarium run @kt-defaults/terrariums/swe_team --mode plain
+kt resume --last                # most recent
+kt resume                       # interactive picker
+kt resume swe_20240101_1234     # by name prefix
 ```
 
-In plain mode, you can observe channel traffic explicitly with `--observe` or disable it with `--no-observe`.
+The agent rebuilds from the saved config, replays conversation, re-registers resumable triggers, and restores scratchpad and channel history. See [Sessions](sessions.md) for the full persistence model.
 
-## 6. Web and desktop runtime surfaces
+## 6. Search session history (hint)
 
-KohakuTerrarium supports several user-facing runtime surfaces:
-
-### Web server / dashboard
+Because sessions are stored operationally, you can search them like a small local knowledge base:
 
 ```bash
-kt serve
+kt embedding ~/.kohakuterrarium/sessions/<name>.kohakutr
+kt search <name> "auth bug"
+```
+
+Full walk-through: [Memory](memory.md).
+
+## 7. Open the web UI or desktop app
+
+```bash
+kt web           # local web server at http://127.0.0.1:8001
+kt app           # native desktop window (requires pywebview)
+```
+
+For a daemon that outlives your terminal:
+
+```bash
 kt serve start
 kt serve status
-kt serve logs
+kt serve logs --follow
+kt serve stop
 ```
 
-`kt serve` manages the web server as a daemon-style process.
+See [Serving](serving.md) for when each surface is appropriate.
 
-### Desktop app
+## Troubleshooting
 
-```bash
-kt app
-```
+- **`kt login codex` doesn't open a browser.** Copy the URL the CLI prints and paste it into a browser manually. If the callback port is busy, free it before re-running.
+- **`kt web` serves nothing / 404s on `/`.** The frontend isn't built. Run `npm install --prefix src/kohakuterrarium-frontend && npm run build --prefix src/kohakuterrarium-frontend`. PyPI installs ship the built assets already.
+- **`Permission denied` writing to `~/.kohakuterrarium/`.** The framework creates that directory on first run. If it already exists but is owned by another user (common after `sudo pip install`), fix ownership: `chown -R $USER ~/.kohakuterrarium`.
+- **`kt run` says "no model set".** You skipped step 3. Run `kt model default <name>` or pass `--llm <name>`.
+- **`ModuleNotFoundError: pywebview`.** `kt app` needs the desktop extra: `pip install 'kohakuterrarium[full]'` (or use `kt web`).
 
-`kt app` launches the same web UI in a native desktop window.
+## See also
 
-## 7. Resume a saved session
-
-KohakuTerrarium saves session state by default unless disabled.
-
-```bash
-kt resume
-kt resume --last
-kt resume swe_team
-```
-
-Sessions are saved under `~/.kohakuterrarium/sessions/`.
-
-Session files store much more than a transcript. They capture operational state such as:
-
-- conversation history
-- tool call metadata
-- event logs
-- scratchpad state
-- sub-agent state
-- channel messages
-- jobs
-- resumable triggers
-- config and topology metadata
-
-That history is not only for resuming a past session. It also acts as a searchable knowledge base. Past runs can be searched in full-text or vector form, and agents can retrieve useful history through the built-in memory search tools.
-
-## 8. Search session memory
-
-You can search stored session history directly from the CLI:
-
-```bash
-kt search "auth bug"
-kt search "why did the deployment fail" --mode fts
-kt search "similar incident with websocket reconnects" --mode semantic
-```
-
-Search defaults to `auto`, which uses hybrid behavior when vector search is available.
-
-Embedding configuration also defaults to `auto`:
-
-```bash
-kt embedding status
-kt embedding rebuild
-```
-
-## What a creature config looks like
-
-A minimal creature config usually looks like this:
-
-```yaml
-name: my_agent
-version: "1.0"
-
-controller:
-  llm: gpt-5.4
-  tool_format: native
-
-system_prompt_file: prompts/system.md
-
-input:
-  type: cli
-
-output:
-  type: stdout
-
-tools:
-  - name: bash
-    type: builtin
-  - name: read
-    type: builtin
-  - name: write
-    type: builtin
-  - name: glob
-    type: builtin
-  - name: grep
-    type: builtin
-```
-
-The main pieces are:
-
-- `controller` for the LLM and reasoning settings
-- `input` and `output` for runtime surfaces
-- `tools` for executable capabilities
-- `subagents` for nested delegation
-- `triggers` for automatic wake-up events
-- `system_prompt_file` for the prompt layer
-
-For the full field reference, see [Configuration](configuration.md).
-
-## Recommended next steps
-
-### I want useful OOTB agents
-
-- [`kt-defaults`](../../kt-defaults/README.md)
-- [Creatures](creatures.md)
-- [Examples](examples.md)
-
-### I want to customize or build creatures
-
-- [Creatures](creatures.md)
-- [Configuration](configuration.md)
-- [Custom Modules](custom-modules.md)
-- [Plugins](plugins.md)
-
-### I want sessions and searchable memory
-
-- [Sessions](sessions.md)
-- [Environment and Session](../concepts/environment.md)
-
-### I want optional multi-agent composition
-
-- [Terrariums](terrariums.md)
-- [Channels](../concepts/channels.md)
-- [Overview](../concepts/overview.md)
-
-### I want code and service integration
-
-- [Programmatic Usage](programmatic-usage.md)
-- [Python API](../reference/python.md)
-- [CLI Reference](../reference/cli.md)
-- [HTTP API](../reference/http.md)
+- [Creatures](creatures.md) for how to inherit from or customize the OOTB agents.
+- [Sessions](sessions.md) for resume semantics and compaction.
+- [Serving](serving.md) to decide between `kt web`, `kt app`, and `kt serve`.
+- [Reference / CLI](../reference/cli.md) for every command and flag.

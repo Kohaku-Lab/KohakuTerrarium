@@ -1,175 +1,163 @@
 # First Terrarium
 
-This tutorial walks through building a small two-creature terrarium.
+**Problem:** you want two creatures to cooperate — a writer produces
+something, a reviewer critiques it — and you want to see the messages
+flow between them.
 
-By the end, you will have:
+**End state:** a terrarium config with two creatures and two channels,
+running under the TUI, visibly passing messages from one to the other.
 
-- two creature configs
-- one terrarium config
-- queue and broadcast channels
-- a runnable multi-agent system
+**Prerequisites:** [First Creature](first-creature.md). You should have
+`kt-defaults` installed and be able to `kt run` a single creature.
 
-## What you are building
+A terrarium is a **pure wiring layer**: it owns channels and manages
+creature lifecycles. It has no LLM of its own. The intelligence stays
+inside each creature. See
+[terrarium concept](../concepts/multi-agent/terrarium.md) for the full
+contract.
 
-You will build:
+## Step 1 — Create the folder
 
-- a `worker` creature that receives tasks
-- a `reviewer` creature that reviews results
-- a terrarium that wires them together
-
-This is a simple but very useful pattern because it shows the split between creature behavior and terrarium topology.
-
-## Step 1: create the folders
-
-```text
-my-team/
-  terrarium.yaml
-  creatures/
-    worker/
-      config.yaml
-      prompts/
-        system.md
-    reviewer/
-      config.yaml
-      prompts/
-        system.md
+```bash
+mkdir -p terrariums
 ```
 
-## Step 2: create the worker creature
+You can put the terrarium config anywhere; the convention is a
+`terrariums/` folder next to your creatures.
 
-`creatures/worker/config.yaml`
+## Step 2 — Write the terrarium config
+
+`terrariums/writer-team.yaml`:
 
 ```yaml
-name: worker
-base_config: "@kt-defaults/creatures/swe"
-system_prompt_file: prompts/system.md
+# Writer + reviewer team.
+#   tasks    -> writer  -> review  -> reviewer
+#                       <- feedback <- reviewer
+
+terrarium:
+  name: writer_team
+
+  creatures:
+    - name: writer
+      base_config: "@kt-defaults/creatures/general"
+      system_prompt: |
+        You are a concise writer. When you receive a message on
+        `tasks`, write a short draft and send it to `review` using
+        send_message. When you receive feedback, revise and resend.
+      channels:
+        listen:    [tasks, feedback]
+        can_send:  [review]
+
+    - name: reviewer
+      base_config: "@kt-defaults/creatures/reviewer"
+      system_prompt: |
+        You critique drafts. When you receive a message on `review`,
+        reply with one or two concrete improvement suggestions on
+        `feedback` using send_message. If the draft is good, say so.
+      channels:
+        listen:    [review]
+        can_send:  [feedback]
+
+  channels:
+    tasks:    { type: queue, description: "Incoming work for the writer" }
+    review:   { type: queue, description: "Drafts sent to the reviewer" }
+    feedback: { type: queue, description: "Review notes sent back" }
 ```
 
-`creatures/worker/prompts/system.md`
+What the wiring does:
 
-```markdown
-# Worker
+- `listen` registers a `ChannelTrigger` on the creature — when a message
+  lands on one of those channels, the creature wakes up and sees it.
+- `can_send` enumerates channels the creature's `send_message` tool is
+  allowed to write to. A creature cannot reach channels that are not in
+  this list.
+- Channels are declared once in `channels:`. `queue` delivers each
+  message to one consumer; `broadcast` delivers to all listeners.
 
-You focus on doing the task and reporting useful work product.
+Inline `system_prompt:` is appended to the inherited base prompt. Do
+that here to keep the tutorial self-contained; prefer
+`system_prompt_file:` for real use.
+
+## Step 3 — Inspect the topology (optional)
+
+```bash
+kt terrarium info terrariums/writer-team.yaml
 ```
 
-## Step 3: create the reviewer creature
+Prints the creatures, their listen/send channel sets, and the channel
+definitions. Good sanity check before running.
 
-`creatures/reviewer/config.yaml`
+## Step 4 — Run it
 
-```yaml
-name: reviewer
-base_config: "@kt-defaults/creatures/reviewer"
-system_prompt_file: prompts/system.md
+```bash
+kt terrarium run terrariums/writer-team.yaml --mode tui --seed "write a one-paragraph product description for a smart kettle" --seed-channel tasks
 ```
 
-`creatures/reviewer/prompts/system.md`
+The TUI opens with a tab per creature plus a tab per channel. `--seed`
+injects your prompt onto the `seed-channel` (default `seed`; we override
+to `tasks`) at startup. The writer wakes up, drafts, and sends to
+`review`. The reviewer wakes up, reviews, sends to `feedback`. The
+writer wakes up again, revises.
 
-```markdown
-# Reviewer
+You can watch the channel tabs for raw message flow and the creature
+tabs for each one's reasoning.
 
-You focus on reviewing the worker's output carefully and giving actionable feedback.
-```
+## Step 5 — Understand the honest limit
 
-## Step 4: create `terrarium.yaml`
+Horizontal multi-agent has one characteristic failure mode: **progress
+depends on each creature actually routing its output to the right
+channel.** If a model forgets to call `send_message`, the channel stays
+empty and the team stalls.
+
+Two workarounds you can reach for today:
+
+1. **Strong prompting.** Tell the creature very explicitly which
+   channel to emit to and when. The inline prompts above do this.
+2. **Add a root agent.** A root creature sits *outside* the terrarium
+   and owns the terrarium-management tools. It receives user input,
+   seeds the team, observes channels, and nudges creatures that stall.
+   See `@kt-defaults/creatures/root` and the `swe_team` terrarium for a
+   worked example. The [root agent concept](../concepts/multi-agent/root-agent.md)
+   explains the pattern.
+
+Example — add a root:
 
 ```yaml
 terrarium:
-  name: my_team
-
-  creatures:
-    - name: worker
-      config: ./creatures/worker
-      channels:
-        listen: [tasks, feedback]
-        can_send: [review, team_chat]
-
-    - name: reviewer
-      config: ./creatures/reviewer
-      channels:
-        listen: [review]
-        can_send: [feedback, team_chat]
-
-  channels:
-    tasks:
-      type: queue
-      description: Incoming work for the worker
-    review:
-      type: queue
-      description: Work product for review
-    feedback:
-      type: queue
-      description: Reviewer feedback to the worker
-    team_chat:
-      type: broadcast
-      description: Shared status updates
+  name: writer_team
+  root:
+    base_config: "@kt-defaults/creatures/root"
+  # ... creatures and channels as before
 ```
 
-## Step 5: run the terrarium
+Now the TUI mounts the root agent on its main tab and you talk to it
+directly; it orchestrates the writer/reviewer through terrarium tools.
 
-```bash
-kt terrarium run path/to/my-team
-```
+## Step 6 — Where terrariums are going
 
-If you prefer, run the shipped team first to compare the experience:
-
-```bash
-kt terrarium run @kt-defaults/terrariums/swe_team
-```
-
-## Step 6: understand the split
-
-This is the key lesson.
-
-### The creatures define
-
-- role behavior
-- prompts
-- tools
-- internal agent logic
-
-### The terrarium defines
-
-- who can hear what
-- who can send where
-- queue vs broadcast topology
-- collaboration structure
-
-That means the terrarium is not replacing the creatures. It is wiring them.
-
-## Step 7: understand the channels
-
-### `tasks`
-
-A queue channel for incoming work.
-
-### `review`
-
-A queue channel for passing work product to the reviewer.
-
-### `feedback`
-
-A queue channel for sending review feedback back to the worker.
-
-### `team_chat`
-
-A broadcast channel for shared updates.
-
-This combination is common:
-
-- queue channels for work handoff
-- broadcast channels for shared awareness
+Auto-routing (a configurable "creature's last message always goes to
+channel X"), root lifecycle observation, and dynamic creature
+management are on the roadmap. Until they land, prefer explicit
+prompting or a root creature for anything important. The full picture
+is in the [ROADMAP](../../ROADMAP.md) terrarium section.
 
 ## What you learned
 
-You just learned the core terrarium model:
+- A terrarium is wiring. It adds no intelligence.
+- Creatures stay standalone; the terrarium tells them who can hear
+  what and who can send where.
+- Horizontal multi-agent is real but explicit — prompts drive the
+  routing, and the current failure mode is stalls.
+- A root creature is the practical answer when you want a user-facing
+  orchestrator around the team.
 
-1. creatures stay standalone agents
-2. the terrarium wires them through channels
-3. topology belongs in the terrarium, not in creature internals
+## What to read next
 
-## Next steps
-
-- [Terrariums](../guides/terrariums.md)
-- [Channels](../concepts/channels.md)
-- [Terrariums Concept](../concepts/terrariums.md)
+- [Terrarium concept](../concepts/multi-agent/terrarium.md) — the
+  contract and its boundaries.
+- [Root agent concept](../concepts/multi-agent/root-agent.md) — the
+  user-facing creature.
+- [Terrariums guide](../guides/terrariums.md) — the practical how-to
+  reference.
+- [Channel concept](../concepts/modules/channel.md) — queue vs
+  broadcast, observers, and where channels cross module lines.

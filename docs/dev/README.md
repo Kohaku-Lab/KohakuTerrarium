@@ -1,36 +1,45 @@
 # Development
 
-This section is for contributors and maintainers working on the framework itself.
+For contributors working on the framework itself. Not for users.
 
-KohakuTerrarium has two documentation layers:
+## Contributing workflow
 
-- reader-facing docs in `docs/`
-- code-near maintainer docs in package `README.md` files under `src/kohakuterrarium/`
+See the top-level [CONTRIBUTING.md](../../CONTRIBUTING.md) for setup,
+branch conventions, and PR flow. Read [CLAUDE.md](../../CLAUDE.md)
+before touching code — it encodes the architecture rules (Creature vs
+Terrarium vs Root, controller-as-orchestrator, non-blocking tool
+dispatch) and the style conventions (modern type hints, no in-function
+imports, logging instead of `print`).
 
-Use both.
+## In this section
 
-## Start here
+- [Architecture](internals.md) — implementation-level map of the 16
+  runtime flows. Read alongside `src/kohakuterrarium/`.
+- [Testing](testing.md) — how to run the suite and use the
+  `ScriptedLLM` / `TestAgentBuilder` harness.
+- [Dependency rules](dependency-graph.md) — the leaf-first import
+  discipline and how to verify with `scripts/dep_graph.py`.
+- [Frontend](frontend.md) — Vue 3 dashboard, panel registration,
+  WebSocket contracts.
 
-- [Testing](testing.md)
-- [Framework Internals](internals.md)
-- [Frontend Architecture](frontend.md)
+## When to read what
 
-## Recommended contributor path
+- Just landed? Start with [CONTRIBUTING.md](../../CONTRIBUTING.md),
+  then skim [internals.md](internals.md) top-to-bottom.
+- Adding a tool, trigger, or module? Read the relevant concept doc
+  under [../concepts/modules/](../concepts/modules/README.md) first.
+  The concepts explain *why*; this section explains *where*.
+- Changing the agent lifecycle or the controller loop? Read
+  [internals.md §Agent runtime](internals.md#1-agent-runtime) and the
+  impl-notes — especially
+  [non-blocking-compaction](../concepts/impl-notes/non-blocking-compaction.md)
+  and [stream-parser](../concepts/impl-notes/stream-parser.md).
+- Touching persistence? Read
+  [session-persistence](../concepts/impl-notes/session-persistence.md)
+  before the code.
 
-1. Read the root [README](../README.md)
-2. Read the docs home at [docs/README.md](../README.md)
-3. Read [Testing](testing.md)
-4. Read [Framework Internals](internals.md)
-5. Read package READMEs in `src/kohakuterrarium/`
+## Code-near docs
 
-## What belongs here
-
-Development docs explain how the project is implemented and maintained:
-
-- testing strategy
-- internal architecture
-- frontend structure
-- dependency direction
-- contributor workflows
-
-User-facing setup and usage docs belong in [Guides](../guides/README.md) and [Reference](../reference/README.md).
+Every subpackage under `src/kohakuterrarium/` has its own `README.md`
+covering the files it contains. Those are the most accurate description
+of "what actually lives here." Use them together with this section.

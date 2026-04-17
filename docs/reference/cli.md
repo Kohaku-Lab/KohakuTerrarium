@@ -1,443 +1,586 @@
 # CLI Reference
 
-This page is the command lookup for the `kt` CLI.
+Every `kt` command, subcommand, and flag. The CLI is the operator-facing
+surface over the framework: starting creatures, starting terrariums,
+managing packages, configuring LLMs, serving the web UI, and searching
+saved sessions.
 
-Use it when you already know the workflow you want and need the exact command surface. For a guided setup path, see [Getting Started](../guides/getting-started.md).
+For the mental model of creatures, terrariums, and the root agent, read
+[concepts/boundaries](../concepts/boundaries.md). For task-oriented
+paths, see [guides/getting-started](../guides/getting-started.md) and
+[guides/creatures](../guides/creatures.md).
 
-## Command map
+## Entry points
 
-| Area | Commands |
-|------|----------|
-| Authentication | `kt login <provider>` |
-| Models | `kt model list`, `kt model default <name>`, `kt model show <name>` |
-| Config | `kt config show`, `kt config path`, `kt config edit`, `kt config llm ...`, `kt config key ...`, `kt config mcp ...` |
-| Standalone creatures | `kt run <path>`, `kt info <path>` |
-| Terrariums | `kt terrarium run <path>`, `kt terrarium info <path>` |
-| Sessions | `kt resume`, `kt search ...`, `kt embedding ...` |
-| Packages | `kt install <source>`, `kt uninstall <name>`, `kt list`, `kt edit <ref>` |
-| Extensions | `kt extension list`, `kt extension info <name>` |
-| UI and service | `kt web`, `kt app`, `kt serve [start|stop|restart|status|logs]` |
-| MCP | `kt mcp list --agent <path>` |
-| Misc | `kt update`, `kt version` |
+- `kt` — installed console script.
+- `python -m kohakuterrarium` — equivalent.
+- Invoked with no subcommand (e.g. from a Briefcase double-click), `kt`
+  starts the desktop app automatically.
 
-## Authentication
+## Global flags
 
-### `kt login <provider>`
+| Flag | Purpose |
+|---|---|
+| `--version` | Print version, install source, package path, Python version, and git commit. |
+| `--verbose` | With `--version`, also print `$VIRTUAL_ENV`, executable, and git branch. |
 
-Authenticate with a provider.
+---
 
-Common providers:
+## Core commands
 
-- `codex`
-- `openrouter`
-- `openai`
-- `anthropic`
-- `gemini`
-- `mimo`
+### `kt run`
 
-Examples:
+Run a single creature.
 
-```bash
-kt login codex
-kt login openrouter
-kt login anthropic
-kt login mimo
+```
+kt run <agent_path> [flags]
 ```
 
-Notes:
+Positional:
 
-- `codex` uses OAuth
-- API-backed providers store credentials in the local KohakuTerrarium config area
+- `agent_path` — local folder containing `config.yaml`, or a package
+  reference like `@kt-defaults/creatures/swe`.
 
-## Model management
+Flags:
 
-### `kt model list`
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--log-level` | `DEBUG\|INFO\|WARNING\|ERROR` | `INFO` | Root logger level. |
+| `--session` | path | auto | Session file to write; absolute or name under `~/.kohakuterrarium/sessions/`. |
+| `--no-session` | flag | — | Disable session persistence entirely. |
+| `--llm` | str | — | Override LLM profile (e.g. `gpt-5.4`, `claude-opus-4.6`). |
+| `--mode` | `cli\|plain\|tui` | auto | Interaction mode. Defaults to `cli` on TTY, `plain` otherwise. |
 
-List available LLM profiles and presets.
+Behaviour:
 
-```bash
-kt model list
+- `@package/...` paths resolve to `~/.kohakuterrarium/packages/<pkg>/...`,
+  following `.link` pointers for editable installs.
+- A session is auto-created under `~/.kohakuterrarium/sessions/` with
+  extension `.kohakutr` unless `--no-session` is set.
+- On exit, prints a `kt resume <name>` hint.
+- Ctrl+C triggers graceful shutdown.
+
+### `kt resume`
+
+Resume a prior session. Agent vs terrarium is auto-detected from the
+session file.
+
+```
+kt resume [session] [flags]
 ```
 
-### `kt model default <name>`
+Positional:
 
-Set the default model profile.
+- `session` — name prefix, full filename, or full path. Omit for an
+  interactive picker of the 10 most-recent sessions.
 
-```bash
-kt model default gpt-5.4
+Flags:
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--pwd` | path | session's stored cwd | Override working directory. |
+| `--last` | flag | — | Resume the most-recent session without prompting. |
+| `--log-level` | as `kt run` | | |
+| `--mode` | as `kt run` | | Terrarium sessions force `tui`. |
+| `--llm` | str | | Override LLM profile for the resumed session. |
+
+Behaviour:
+
+- `.kohakutr` and legacy `.kt` extensions are accepted and stripped.
+- Prefix matches that are ambiguous trigger a picker.
+
+### `kt list`
+
+List installed packages and local agents.
+
+```
+kt list [--path agents]
 ```
 
-### `kt model show <name>`
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--path` | str | `agents` | Local folder to scan in addition to installed packages. |
 
-Show the details for a profile.
+### `kt info`
 
-```bash
-kt model show gpt-5.4
+Print name, description, model, tools, sub-agents, and files for a
+creature config.
+
+```
+kt info <agent_path>
 ```
 
-## Config management
+---
+
+## Terrarium
+
+### `kt terrarium run`
+
+Run a multi-agent terrarium.
+
+```
+kt terrarium run <terrarium_path> [flags]
+```
+
+Positional:
+
+- `terrarium_path` — YAML file or `@package/terrariums/<name>`.
+
+Flags:
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--log-level` | as `kt run` | | |
+| `--seed` | str | — | Prompt to inject into the seed channel at startup. |
+| `--seed-channel` | str | `seed` | Channel to receive `--seed`. |
+| `--observe` | list of channel names | — | Channels to observe (plain/log mode). |
+| `--no-observe` | flag | — | Disable observation entirely. |
+| `--session` | path | auto | Session file path. |
+| `--no-session` | flag | — | Disable persistence. |
+| `--llm` | str | — | Override LLM profile for *every* creature (and root). |
+| `--mode` | `cli\|plain\|tui` | `tui` | UI mode. |
+
+Behaviour:
+
+- `tui` mounts multi-tab view: root + each creature + each channel.
+- `cli` mounts root (if present) or the first creature under RichCLI.
+- `plain` streams observed channel messages to stdout.
+
+### `kt terrarium info`
+
+Print terrarium name, creatures, listen/send channels, and channel list.
+
+```
+kt terrarium info <terrarium_path>
+```
+
+---
+
+## Packages
+
+### `kt install`
+
+Install a package from a git URL or local path.
+
+```
+kt install <source> [-e|--editable] [--name <name>]
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `-e`, `--editable` | flag | — | Write a `<name>.link` pointing at the source instead of copying. |
+| `--name` | str | derived from URL/path | Override installed package name. |
+
+`<source>` may be:
+
+- A git URL (cloned into `~/.kohakuterrarium/packages/<name>`).
+- A local directory (copied, or linked with `-e`).
+
+### `kt uninstall`
+
+Remove an installed package.
+
+```
+kt uninstall <name>
+```
+
+### `kt update`
+
+Update git-backed packages. Skips editable and non-git packages.
+
+```
+kt update [target] [--all]
+```
+
+| Flag | Type | Description |
+|---|---|---|
+| `--all` | flag | Update every git-backed package. |
+
+### `kt edit`
+
+Open a creature or terrarium config in `$EDITOR` (falls back to
+`$VISUAL`, then `nano`).
+
+```
+kt edit <target>
+```
+
+`target` accepts package refs (`@pkg/creatures/name`) and local paths.
+
+---
+
+## Configuration: `kt config`
 
 ### `kt config show`
 
-Show the current saved config.
-
-```bash
-kt config show
-```
+Print every config file path used by the CLI.
 
 ### `kt config path`
 
-Print the path to the config file.
+Print the path for one of: `home`, `llm_profiles`, `api_keys`,
+`mcp_servers`, `ui_prefs`.
 
-```bash
-kt config path
+```
+kt config path [name]
 ```
 
 ### `kt config edit`
 
-Open the config file in your editor.
+Open a config file in `$EDITOR`. Defaults to `llm_profiles` when no name
+is given.
 
-```bash
-kt config edit
+```
+kt config edit [name]
 ```
 
-### `kt config llm ...`
+### `kt config provider` (alias: `kt config backend`)
 
-Manage saved LLM profiles.
+Manage LLM providers (backends).
 
-```bash
-kt config llm list
-kt config llm show default
-kt config llm add my-model
-kt config llm update my-model
-kt config llm delete old-model
-kt config llm default my-model
+#### `kt config provider list`
+
+Show Name, Backend Type, and Base URL for each provider.
+
+#### `kt config provider add`
+
+Interactive. Prompts for backend type (`openai`, `codex`, `anthropic`),
+base URL, and `api_key_env`.
+
+```
+kt config provider add [name]
 ```
 
-### `kt config key ...`
+#### `kt config provider edit`
 
-Manage saved API keys and provider credentials.
+Same fields as `add`, pre-filled from the current entry.
 
-```bash
-kt config key list
-kt config key set openai
-kt config key delete openai
+```
+kt config provider edit <name>
 ```
 
-### `kt config mcp ...`
+#### `kt config provider delete`
 
-Manage saved MCP server definitions.
-
-```bash
-kt config mcp list
-kt config mcp add my-server
-kt config mcp update my-server
-kt config mcp delete my-server
+```
+kt config provider delete <name>
 ```
 
-## Running standalone creatures
+### `kt config llm` (aliases: `kt config model`, `kt config preset`)
 
-### `kt run <path>`
+Manage LLM presets.
 
-Run a creature from a local path or installed package reference.
+#### `kt config llm list`
 
-```bash
-kt run examples/agent-apps/planner_agent
-kt run @kt-defaults/creatures/swe
+Show Name, Provider, Model, and a Default marker.
+
+#### `kt config llm show`
+
+Print the full preset: provider, model, max_context, max_output,
+base_url, api_key_env, temperature, reasoning_effort, service_tier,
+extra_body.
+
+```
+kt config llm show <name>
 ```
 
-`kt run` defaults to:
+#### `kt config llm add`
 
-- `cli` when running in a TTY
-- `plain` when not running in a TTY
+Interactive. Optionally marks the new preset as default.
 
-Common options:
-
-| Flag | Purpose |
-|------|---------|
-| `--mode <cli|tui|plain>` | Choose the interaction surface |
-| `--llm <profile>` | Override the model profile for this run |
-| `--session <path>` | Write the session to a specific file |
-| `--no-session` | Disable session persistence |
-| `--log-level <level>` | Set logging verbosity |
-
-Examples:
-
-```bash
-kt run @kt-defaults/creatures/swe --mode cli
-kt run @kt-defaults/creatures/swe --mode tui
-kt run @kt-defaults/creatures/swe --llm gemini
-kt run examples/agent-apps/monitor_agent --no-session
+```
+kt config llm add [name]
 ```
 
-### `kt info <path>`
+#### `kt config llm edit`
 
-Show creature config information without starting the runtime.
-
-```bash
-kt info examples/agent-apps/planner_agent
+```
+kt config llm edit <name>
 ```
 
-Note: current `kt info` behavior is most reliable with local paths. Package-style `@package/...` refs are supported in `kt run` and `kt terrarium run`, but should not be assumed here unless verified in your environment.
+#### `kt config llm delete`
 
-## Interaction modes
-
-### `cli`
-
-Rich terminal interaction mode.
-
-### `tui`
-
-Full-screen Textual interface.
-
-### `plain`
-
-Simple stdout and stdin mode.
-
-## Running terrariums
-
-### `kt terrarium run <path>`
-
-Run a terrarium from a local path or installed package reference.
-
-```bash
-kt terrarium run examples/terrariums/code_review_team
-kt terrarium run @kt-defaults/terrariums/swe_team
+```
+kt config llm delete <name>
 ```
 
-`kt terrarium run` defaults to `tui`.
+#### `kt config llm default`
 
-Common options:
+Without argument, print the current default. With `name`, set it.
 
-| Flag | Purpose |
-|------|---------|
-| `--mode <cli|tui|plain>` | Choose runtime UI behavior |
-| `--session <path>` | Write the terrarium session to a specific file |
-| `--no-session` | Disable session persistence |
-| `--observe` | Observe channels in plain mode |
-| `--no-observe` | Disable channel observation in plain mode |
-| `--seed-channel <name>` | Seed channel used for initial non-root input in some flows |
-| `--log-level <level>` | Set logging verbosity |
-
-Examples:
-
-```bash
-kt terrarium run @kt-defaults/terrariums/swe_team
-kt terrarium run @kt-defaults/terrariums/swe_team --mode tui
-kt terrarium run @kt-defaults/terrariums/swe_team --mode cli
-kt terrarium run examples/terrariums/research_assistant --mode plain --observe
+```
+kt config llm default [name]
 ```
 
-Mode notes:
+### `kt config key`
 
-- In `cli` mode, the runtime mounts the root agent when one exists.
-- If no root agent exists, `cli` mode auto-mounts the first creature and warns that other creature output is not directly surfaced there.
-- In `plain` mode, channel observation can be enabled or disabled explicitly.
+Manage stored API keys.
 
-### `kt terrarium info <path>`
+#### `kt config key list`
 
-Show terrarium config information without starting it.
+Columns: provider, api_key_env, source (`stored`/`env`/`missing`),
+masked value.
 
-```bash
-kt terrarium info examples/terrariums/code_review_team
+#### `kt config key set`
+
+Save an API key to `~/.kohakuterrarium/api_keys.yaml`. Prompts
+(masked) if `value` is omitted.
+
+```
+kt config key set <provider> [value]
 ```
 
-## Session commands
+#### `kt config key delete`
 
-### `kt resume`
+Clear the stored key (the provider entry itself stays intact).
 
-Resume a previous session.
-
-```bash
-kt resume
-kt resume --last
-kt resume swe_team
+```
+kt config key delete <provider>
 ```
 
-Notes:
+### `kt config login`
 
-- Sessions are stored under `~/.kohakuterrarium/sessions/`
-- `kt resume` detects whether the saved session is a standalone creature or a terrarium
-- Terrarium sessions are resumed into the terrarium TUI
+Alias of `kt login`. See [Auth](#auth).
 
-### `kt search ...`
+### `kt config mcp`
 
-Search saved session history.
+Manage the global MCP server catalog
+(`~/.kohakuterrarium/mcp_servers.yaml`).
 
-```bash
-kt search "auth bug"
-kt search "database error" --mode fts
-kt search "a similar retry problem" --mode semantic
+- `list` — show file path and server inventory.
+- `add [name]` — interactive. Prompts for transport (`stdio`/`http`),
+  command, args JSON, env JSON, URL.
+- `edit <name>` — interactive edit.
+- `delete <name>` — remove entry.
+
+---
+
+## Auth
+
+### `kt login`
+
+Authenticate with a provider.
+
+```
+kt login <provider>
 ```
 
-Search modes:
+- For `codex` backend: OAuth device-code flow. Tokens stored at
+  `~/.kohakuterrarium/codex-auth.json`.
+- For API-key backends: prompts (masked) and saves to
+  `~/.kohakuterrarium/api_keys.yaml`.
 
-- `fts`
-- `semantic`
-- `hybrid`
-- `auto`
+---
 
-Default search mode is `auto`, which uses hybrid behavior when vector search is available.
+## Models
 
-### `kt embedding ...`
+### `kt model`
 
-Manage session embeddings used for semantic and hybrid search.
+Thin wrappers over `kt config llm`:
 
-```bash
-kt embedding status
-kt embedding rebuild
+```
+kt model list
+kt model default [name]
+kt model show <name>
 ```
 
-Embedding provider selection defaults to `auto`.
+---
 
-## Package commands
+## Memory and search
 
-### `kt install <source>`
+### `kt embedding`
 
-Install a package from Git or a local path.
+Build FTS and vector indices for a saved session.
 
-```bash
-kt install https://github.com/Kohaku-Lab/kt-defaults.git
-kt install ./my-creatures
-kt install ./my-creatures -e
+```
+kt embedding <session> [--provider ...] [--model ...] [--dimensions N]
 ```
 
-Notes:
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--provider` | `auto\|model2vec\|sentence-transformer\|api` | `auto` | Auto prefers jina-v5-nano. |
+| `--model` | str | provider-dependent | Provider-specific model, including aliases like `@tiny`, `@best`, `@multilingual-best`. |
+| `--dimensions` | int | — | Matryoshka truncation (shorter vectors). |
 
-- installed packages live under `~/.kohakuterrarium/packages/`
-- editable installs use link files rather than symlinks
-- package refs use `@package/path` syntax
+### `kt search`
 
-### `kt uninstall <name>`
+Search a session's memory.
 
-Remove an installed package.
-
-```bash
-kt uninstall my-creatures
+```
+kt search <session> <query> [flags]
 ```
 
-### `kt list`
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--mode` | `fts\|semantic\|hybrid\|auto` | `auto` | Search mode. Auto picks semantic when vectors exist, else FTS. |
+| `--agent` | str | — | Restrict to events from one agent. |
+| `-k` | int | `10` | Max results. |
 
-List installed packages and available local creature references.
+---
 
-```bash
-kt list
-```
-
-Note: `kt list` is not the session listing command.
-
-### `kt edit <ref>`
-
-Open an installed config reference in your editor.
-
-```bash
-kt edit @kt-defaults/creatures/general
-```
-
-## Extension commands
-
-### `kt extension list`
-
-List installed extension modules.
-
-```bash
-kt extension list
-```
-
-### `kt extension info <name>`
-
-Show extension details for a package.
-
-```bash
-kt extension info kt-defaults
-```
-
-## Web, app, and service runtime
+## Web and desktop UI
 
 ### `kt web`
 
-Serve the web UI and API in a single process.
+Run the web server (blocking, single process).
 
-```bash
-kt web
-kt web --port 8001
 ```
+kt web [flags]
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--host` | str | `127.0.0.1` | Bind host. |
+| `--port` | int | `8001` | Bind port. Auto-increments if busy. |
+| `--dev` | flag | — | API-only (serve frontend separately via `vite dev`). |
+| `--log-level` | as `kt run` | | |
 
 ### `kt app`
 
-Launch the desktop application shell.
+Run the native desktop build (requires pywebview).
 
-```bash
-kt app
-kt app --port 8001
+```
+kt app [--port 8001] [--log-level ...]
 ```
 
 ### `kt serve`
 
-Manage the web server as a daemon-style service.
+Daemon management for the web server. Process state lives under
+`~/.kohakuterrarium/run/web.{pid,json,log}`.
 
-```bash
-kt serve
-kt serve start
-kt serve stop
-kt serve restart
-kt serve status
-kt serve logs
+#### `kt serve start`
+
+Start a detached server process.
+
+```
+kt serve start [--host 127.0.0.1] [--port 8001] [--dev] [--log-level INFO]
 ```
 
-If no subcommand is given, `kt serve` behaves like `kt serve start`.
+#### `kt serve stop`
 
-## MCP
+Send SIGTERM, then SIGKILL after the grace period.
 
-### `kt mcp list --agent <path>`
-
-List MCP servers declared for an agent.
-
-```bash
-kt mcp list --agent examples/agent-apps/planner_agent
+```
+kt serve stop [--timeout 5.0]
 ```
 
-## Miscellaneous
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--timeout` | float | `5.0` | Seconds to wait for graceful shutdown. |
 
-### `kt update`
+#### `kt serve restart`
 
-Update KohakuTerrarium and optionally installed packages, depending on the environment.
+`stop` then `start`, forwarding all flags to `start`.
 
-```bash
-kt update
+#### `kt serve status`
+
+Print `running` / `stopped` / `stale`, PID, URL, started_at, version,
+git commit.
+
+#### `kt serve logs`
+
+Read `~/.kohakuterrarium/run/web.log`.
+
+```
+kt serve logs [--follow] [--lines 80]
 ```
 
-### `kt version`
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--follow` | flag | — | Tail the log. |
+| `--lines` | int | `80` | Initial lines to print. |
 
-Show the installed version.
+---
 
-```bash
-kt version
+## Extensions
+
+### `kt extension list`
+
+List every tool, plugin, and LLM preset contributed by installed
+packages. Marks editable installs.
+
+### `kt extension info`
+
+Show package metadata plus its creatures, terrariums, tools, plugins,
+and LLM presets.
+
+```
+kt extension info <name>
 ```
 
-## Notes on path types
+---
 
-The CLI accepts both local paths and package references.
+## MCP (per-agent)
 
-### Local path
+### `kt mcp list`
 
-```bash
-kt run examples/agent-apps/planner_agent
-kt terrarium run examples/terrariums/code_review_team
+List MCP servers declared in an agent's `config.yaml` `mcp_servers:`
+section. Columns: name, transport, command, URL, args, env keys.
+
+```
+kt mcp list --agent <path>
 ```
 
-### Package reference
+---
 
-```bash
-kt run @kt-defaults/creatures/swe
-kt terrarium run @kt-defaults/terrariums/swe_team
-```
+## File paths
 
-## Related reading
+| Path | Purpose |
+|---|---|
+| `~/.kohakuterrarium/` | Home. |
+| `~/.kohakuterrarium/llm_profiles.yaml` | LLM presets and providers. |
+| `~/.kohakuterrarium/api_keys.yaml` | Stored API keys. |
+| `~/.kohakuterrarium/mcp_servers.yaml` | Global MCP server catalog. |
+| `~/.kohakuterrarium/ui_prefs.json` | UI preferences. |
+| `~/.kohakuterrarium/codex-auth.json` | Codex OAuth tokens. |
+| `~/.kohakuterrarium/sessions/*.kohakutr` | Saved sessions (legacy `*.kt` also accepted). |
+| `~/.kohakuterrarium/packages/` | Installed packages (copies or `.link` pointers). |
+| `~/.kohakuterrarium/run/web.{pid,json,log}` | Web daemon state. |
 
-- [Getting Started](../guides/getting-started.md)
-- [Creatures](../guides/creatures.md)
-- [Sessions](../guides/sessions.md)
-- [Terrariums](../guides/terrariums.md)
-- [Python API](python.md)
-- [HTTP API](http.md)
+## Environment variables
+
+| Var | Purpose |
+|---|---|
+| `EDITOR`, `VISUAL` | Editor for `kt edit` / `kt config edit`. |
+| `VIRTUAL_ENV` | Reported by `kt --version --verbose`. |
+| `<PROVIDER>_API_KEY` | Whatever `api_key_env` each provider references. |
+| `KT_SHELL_PATH` | Override shell used by the `bash` tool. |
+| `KT_SESSION_DIR` | Override session directory for the web API (default `~/.kohakuterrarium/sessions`). |
+
+## Exit codes
+
+- `0` — success.
+- `1` — generic error.
+- Editor exit code — for `kt edit` / `kt config edit`.
+
+## Interactive prompts
+
+These commands may drop into interactive prompts:
+
+- `kt resume` with no argument, or ambiguous prefix.
+- `kt terrarium run` when there is no root and no `--seed`.
+- `kt login`.
+- Every `... add` subcommand under `kt config`.
+- `kt config key set` with no value.
+
+## Package reference syntax
+
+`@<pkg-name>/<path-inside-pkg>` resolves to
+`~/.kohakuterrarium/packages/<pkg-name>/<path-inside-pkg>`, or follows
+`<pkg-name>.link`. Accepted by `kt run`, `kt terrarium run`, `kt edit`,
+`kt update`, and `kt info`.
+
+## Terrarium TUI slash commands
+
+Inside `kt terrarium run --mode tui`, the input bar accepts slash
+commands. Built-ins: `/exit`, `/quit`. Additional commands come from
+the terrarium's registered user commands. See
+[builtins.md#user-commands](builtins.md#user-commands).
+
+## See also
+
+- Concepts: [boundaries](../concepts/boundaries.md),
+  [session persistence](../concepts/impl-notes/session-persistence.md).
+- Guides: [getting-started](../guides/getting-started.md),
+  [sessions](../guides/sessions.md),
+  [terrariums](../guides/terrariums.md).
+- Reference: [configuration](configuration.md), [builtins](builtins.md),
+  [http](http.md).
