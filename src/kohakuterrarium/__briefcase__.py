@@ -7,9 +7,9 @@ KohakuTerrarium desktop app (FastAPI server + pywebview window).
 
 def main():
     """Launch the KohakuTerrarium desktop app."""
-    from kohakuterrarium.serving.web import run_desktop_app
+    from kohakuterrarium.serving.web import _run_desktop_app_blocking
 
-    run_desktop_app()
+    _run_desktop_app_blocking()
 
 
 if __name__ == "__main__":
