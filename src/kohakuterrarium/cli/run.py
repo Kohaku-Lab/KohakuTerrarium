@@ -9,6 +9,7 @@ from kohakuterrarium.builtins.cli_rich.app import RichCLIApp
 from kohakuterrarium.builtins.cli_rich.input import RichCLIInput
 from kohakuterrarium.builtins.cli_rich.output import RichCLIOutput
 from kohakuterrarium.core.agent import Agent
+from kohakuterrarium.core.config import load_agent_config
 from kohakuterrarium.session.resume import _create_io_modules
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.logging import get_logger, set_level
@@ -50,6 +51,30 @@ async def _run_agent_rich_cli(agent: Agent) -> None:
         await agent.stop()
 
 
+def _has_custom_io(config) -> tuple[bool, bool]:
+    """Return whether the creature config uses custom/package input/output."""
+    custom_input = config.input.type in {"custom", "package"}
+    custom_output = config.output.type in {"custom", "package"}
+    return custom_input, custom_output
+
+
+def _warn_io_override_if_needed(config, io_mode: str) -> None:
+    """Warn when an explicit CLI mode overrides configured custom I/O."""
+    custom_input, custom_output = _has_custom_io(config)
+    overridden: list[str] = []
+    if custom_input:
+        overridden.append(f"input={config.input.type}")
+    if custom_output:
+        overridden.append(f"output={config.output.type}")
+    if not overridden:
+        return
+    joined = ", ".join(overridden)
+    print(
+        "Warning: --mode "
+        f"{io_mode} overrides configured custom I/O ({joined})."
+    )
+
+
 def run_agent_cli(
     agent_path: str,
     log_level: str,
@@ -75,22 +100,26 @@ def run_agent_cli(
             print(f"Error: No config.yaml found in {agent_path}")
             return 1
 
-    # Resolve mode: default to "cli" (rich) if interactive, else "plain"
-    resolved_mode = io_mode or ("cli" if sys.stdout.isatty() else "plain")
+    config = load_agent_config(str(path))
+
+    # If the user does not specify --mode, respect the creature's configured
+    # input/output modules exactly. Only explicit --mode should override them.
+    resolved_mode = io_mode
     use_rich_cli = resolved_mode == "cli"
 
     store = None
     session_file = None
     try:
-        # Create IO module overrides if mode specified
         io_kwargs: dict = {}
-        if use_rich_cli:
-            io_kwargs["input_module"] = RichCLIInput()
-            io_kwargs["output_module"] = RichCLIOutput(app=None)
-        else:
-            inp, out = _create_io_modules(resolved_mode)
-            io_kwargs["input_module"] = inp
-            io_kwargs["output_module"] = out
+        if resolved_mode is not None:
+            _warn_io_override_if_needed(config, resolved_mode)
+            if use_rich_cli:
+                io_kwargs["input_module"] = RichCLIInput()
+                io_kwargs["output_module"] = RichCLIOutput(app=None)
+            else:
+                inp, out = _create_io_modules(resolved_mode)
+                io_kwargs["input_module"] = inp
+                io_kwargs["output_module"] = out
 
         # Create agent
         agent = Agent.from_path(str(path), llm_override=llm_override, **io_kwargs)
