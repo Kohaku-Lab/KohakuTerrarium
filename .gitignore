@@ -74,3 +74,5 @@ Thumbs.db
 plans/
 src/kohakuterrarium-frontend/node_modules/
 src/kohakuterrarium/web_dist/
+
+kt-defaults/

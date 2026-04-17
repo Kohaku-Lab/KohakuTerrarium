@@ -167,4 +167,4 @@ This lets a creature inside one package reference tools declared in another, as 
 - [Creatures](creatures.md) — packaging a creature.
 - [Custom Modules](custom-modules.md) — writing tools/plugins to ship.
 - [Reference / CLI](../reference/cli.md) — `kt install`, `kt list`, `kt extension`.
-- [`kt-defaults`](../../kt-defaults/README.md) — reference package.
+- [`kt-defaults`](https://github.com/Kohaku-Lab/kt-defaults) — reference package.

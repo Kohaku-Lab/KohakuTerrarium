@@ -87,5 +87,5 @@ Related guides: [Programmatic Usage](programmatic-usage.md), [Composition](compo
 ## See also
 
 - [Getting Started](getting-started.md) — environment setup.
-- [`kt-defaults`](../../kt-defaults/README.md) — the showcase package; examples share many of its patterns.
+- [`kt-defaults`](https://github.com/Kohaku-Lab/kt-defaults) — the showcase package; examples share many of its patterns.
 - [Tutorials](../tutorials/README.md) — guided walk-throughs that pair with these examples.
