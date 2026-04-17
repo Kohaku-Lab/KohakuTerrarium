@@ -142,7 +142,9 @@ async def _send_channel_history(ws: WebSocket, runtime) -> None:
             )
 
 
-async def _handle_terrarium_input(ws: WebSocket, manager, terrarium_id: str) -> None:
+async def _handle_terrarium_input(
+    ws: WebSocket, manager, terrarium_id: str, queue: asyncio.Queue
+) -> None:
     """Handle incoming WebSocket messages for a terrarium."""
     while True:
         data = await ws.receive_json()
@@ -221,7 +223,7 @@ async def ws_terrarium(websocket: WebSocket, terrarium_id: str):
     fwd_task = asyncio.create_task(_forward_queue(queue, websocket))
 
     try:
-        await _handle_terrarium_input(websocket, manager, terrarium_id)
+        await _handle_terrarium_input(websocket, manager, terrarium_id, queue)
     except WebSocketDisconnect:
         pass
     except Exception as e:
