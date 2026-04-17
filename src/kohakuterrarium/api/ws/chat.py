@@ -226,6 +226,10 @@ async def ws_terrarium(websocket: WebSocket, terrarium_id: str):
         pass
     except Exception as e:
         logger.debug("Terrarium WS error", error=str(e), exc_info=True)
+        try:
+            await websocket.send_json({"type": "error", "content": str(e)})
+        except Exception:
+            pass
     finally:
         queue.put_nowait(None)
         fwd_task.cancel()
@@ -300,6 +304,10 @@ async def ws_creature(websocket: WebSocket, agent_id: str):
         pass
     except Exception as e:
         logger.debug("Creature WS error", error=str(e), exc_info=True)
+        try:
+            await websocket.send_json({"type": "error", "content": str(e)})
+        except Exception:
+            pass
     finally:
         queue.put_nowait(None)
         fwd_task.cancel()
