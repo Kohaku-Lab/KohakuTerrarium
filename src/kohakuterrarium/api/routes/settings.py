@@ -1,4 +1,4 @@
-"""Settings routes - API keys, custom model profiles, default model."""
+from __future__ import annotations
 
 import datetime
 import json
@@ -10,27 +10,27 @@ import yaml
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from kohakuterrarium.llm.codex_auth import CodexTokens, refresh_tokens
-
+from kohakuterrarium.llm.codex_auth import CodexTokens, oauth_login, refresh_tokens
 from kohakuterrarium.llm.profiles import (
-    PROVIDER_KEY_MAP,
+    LLMBackend,
     LLMProfile,
+    PROVIDER_KEY_MAP,
     _is_available,
+    delete_backend,
     delete_profile,
     get_api_key,
     get_default_model,
-    list_api_keys,
     list_all,
+    list_api_keys,
+    load_backends,
     load_profiles,
     save_api_key,
+    save_backend,
     save_profile,
     set_default_model,
 )
 
 router = APIRouter()
-
-
-# ── Request models ──
 
 
 class ApiKeyRequest(BaseModel):
@@ -41,14 +41,20 @@ class ApiKeyRequest(BaseModel):
 class ProfileRequest(BaseModel):
     name: str
     model: str
-    provider: str = "openai"
-    base_url: str = ""
-    api_key_env: str = ""
+    provider: str = ""
     max_context: int = 128000
     max_output: int = 16384
     temperature: float | None = None
     reasoning_effort: str = ""
+    service_tier: str = ""
     extra_body: dict | None = None
+
+
+class BackendRequest(BaseModel):
+    name: str
+    backend_type: str = "openai"
+    base_url: str = ""
+    api_key_env: str = ""
 
 
 class DefaultModelRequest(BaseModel):
@@ -100,61 +106,110 @@ def _save_ui_prefs(values: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
-# ── API keys ──
-
-
 @router.get("/keys")
 async def get_keys():
-    """List stored API keys (masked) + availability status."""
     masked = list_api_keys()
-    # Add provider list with status
-    providers = []
-    for provider, env_var in PROVIDER_KEY_MAP.items():
-        providers.append(
+    entries = []
+    for name, backend in load_backends().items():
+        entries.append(
             {
-                "provider": provider,
-                "env_var": env_var,
-                "has_key": bool(get_api_key(provider)),
-                "masked_key": masked.get(provider, ""),
-                "available": _is_available(provider),
+                "provider": name,
+                "backend_type": backend.backend_type,
+                "env_var": backend.api_key_env,
+                "has_key": bool(get_api_key(name)),
+                "masked_key": masked.get(name, ""),
+                "available": _is_available(name),
+                "built_in": name in {"codex", *PROVIDER_KEY_MAP.keys()},
             }
         )
-    # Add codex (OAuth-based)
-    providers.insert(
-        0,
-        {
-            "provider": "codex",
-            "env_var": "",
-            "has_key": _is_available("codex"),
-            "masked_key": "OAuth" if _is_available("codex") else "",
-            "available": _is_available("codex"),
-        },
-    )
-    return {"providers": providers}
+    return {"providers": entries}
 
 
 @router.post("/keys")
 async def set_key(req: ApiKeyRequest):
-    """Save an API key for a provider."""
     if not req.provider or not req.key:
         raise HTTPException(400, "Provider and key are required")
+    if req.provider not in load_backends():
+        raise HTTPException(404, f"Provider not found: {req.provider}")
     save_api_key(req.provider, req.key)
     return {"status": "saved", "provider": req.provider}
 
 
+@router.post("/codex-login")
+async def codex_login():
+    """Run the Codex OAuth flow server-side (server must be local)."""
+    try:
+        tokens = await oauth_login()
+    except Exception as e:
+        raise HTTPException(500, f"Codex login failed: {e}") from e
+    return {"status": "ok", "expires_at": tokens.expires_at}
+
+
+@router.get("/codex-status")
+async def codex_status():
+    tokens = CodexTokens.load()
+    if not tokens:
+        return {"authenticated": False}
+    return {"authenticated": True, "expired": tokens.is_expired()}
+
+
 @router.delete("/keys/{provider}")
 async def remove_key(provider: str):
-    """Remove a stored API key."""
+    if provider not in load_backends():
+        raise HTTPException(404, f"Provider not found: {provider}")
     save_api_key(provider, "")
     return {"status": "removed", "provider": provider}
 
 
-# ── Custom model profiles ──
+@router.get("/backends")
+async def get_backends():
+    built_in = {"codex", "openai", "openrouter", "anthropic", "gemini", "mimo"}
+    return {
+        "backends": [
+            {
+                "name": name,
+                "backend_type": backend.backend_type,
+                "base_url": backend.base_url or "",
+                "api_key_env": backend.api_key_env or "",
+                "built_in": name in built_in,
+                "has_token": bool(get_api_key(name)),
+                "available": _is_available(name),
+            }
+            for name, backend in load_backends().items()
+        ]
+    }
+
+
+@router.post("/backends")
+async def create_backend(req: BackendRequest):
+    if not req.name or not req.backend_type:
+        raise HTTPException(400, "Name and backend type are required")
+    if req.backend_type not in {"openai", "codex", "anthropic"}:
+        raise HTTPException(400, "Unsupported backend type")
+    save_backend(
+        LLMBackend(
+            name=req.name,
+            backend_type=req.backend_type,
+            base_url=req.base_url or "",
+            api_key_env=req.api_key_env or "",
+        )
+    )
+    return {"status": "saved", "name": req.name}
+
+
+@router.delete("/backends/{name}")
+async def remove_backend(name: str):
+    try:
+        deleted = delete_backend(name)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    if not deleted:
+        raise HTTPException(404, f"Provider not found: {name}")
+    return {"status": "deleted", "name": name}
 
 
 @router.get("/profiles")
 async def get_profiles():
-    """List user-defined custom model profiles."""
     profiles = load_profiles()
     return {
         "profiles": [
@@ -162,12 +217,14 @@ async def get_profiles():
                 "name": name,
                 "model": p.model,
                 "provider": p.provider,
+                "backend_type": p.backend_type,
                 "base_url": p.base_url or "",
                 "api_key_env": p.api_key_env or "",
                 "max_context": p.max_context,
                 "max_output": p.max_output,
                 "temperature": p.temperature,
                 "reasoning_effort": p.reasoning_effort or "",
+                "service_tier": p.service_tier or "",
                 "extra_body": p.extra_body or {},
             }
             for name, p in profiles.items()
@@ -177,20 +234,20 @@ async def get_profiles():
 
 @router.post("/profiles")
 async def create_profile(req: ProfileRequest):
-    """Create or update a custom model profile."""
-    if not req.name or not req.model:
-        raise HTTPException(400, "Name and model are required")
+    if not req.name or not req.model or not req.provider:
+        raise HTTPException(400, "Name, model, and provider are required")
+    if req.provider not in load_backends():
+        raise HTTPException(404, f"Provider not found: {req.provider}")
     profile = LLMProfile(
         name=req.name,
         model=req.model,
         provider=req.provider,
-        base_url=req.base_url or None,
-        api_key_env=req.api_key_env or None,
         max_context=req.max_context,
         max_output=req.max_output,
         temperature=req.temperature,
-        reasoning_effort=req.reasoning_effort or None,
-        extra_body=req.extra_body,
+        reasoning_effort=req.reasoning_effort or "",
+        service_tier=req.service_tier or "",
+        extra_body=req.extra_body or {},
     )
     save_profile(profile)
     return {"status": "saved", "name": req.name}
@@ -198,50 +255,35 @@ async def create_profile(req: ProfileRequest):
 
 @router.delete("/profiles/{name}")
 async def remove_profile(name: str):
-    """Delete a custom model profile."""
     if not delete_profile(name):
         raise HTTPException(404, f"Profile not found: {name}")
     return {"status": "deleted", "name": name}
 
 
-# ── Default model ──
-
-
 @router.get("/default-model")
 async def get_default():
-    """Get the current default model name."""
     return {"default_model": get_default_model()}
 
 
 @router.post("/default-model")
 async def set_default(req: DefaultModelRequest):
-    """Set the default model."""
     set_default_model(req.name)
     return {"status": "set", "default_model": req.name}
 
 
-# ── All models (convenience: same as /api/configs/models but here too) ──
-
-
 @router.get("/models")
 async def get_all_models():
-    """List all available models (presets + user profiles) with status."""
     return list_all()
 
 
 @router.get("/ui-prefs")
 async def get_ui_prefs():
-    """Return persisted UI preferences used as backend fallback for the frontend."""
     return {"values": _load_ui_prefs()}
 
 
 @router.post("/ui-prefs")
 async def update_ui_prefs(req: UIPrefsUpdateRequest):
-    """Merge and persist UI preferences in ~/.kohakuterrarium/ui_prefs.json."""
     return {"values": _save_ui_prefs(req.values or {})}
-
-
-# ── MCP server configs (global, saved in ~/.kohakuterrarium/mcp_servers.yaml) ──
 
 
 class MCPServerRequest(BaseModel):
@@ -255,18 +297,15 @@ class MCPServerRequest(BaseModel):
 
 @router.get("/mcp")
 async def list_mcp_servers():
-    """List globally configured MCP servers."""
     servers = _load_mcp_config()
     return {"servers": servers}
 
 
 @router.post("/mcp")
 async def add_mcp_server(req: MCPServerRequest):
-    """Add or update a global MCP server config."""
     if not req.name:
         raise HTTPException(400, "Name is required")
     servers = _load_mcp_config()
-    # Replace if exists, add if new
     servers = [s for s in servers if s.get("name") != req.name]
     servers.append(req.model_dump())
     _save_mcp_config(servers)
@@ -275,7 +314,6 @@ async def add_mcp_server(req: MCPServerRequest):
 
 @router.delete("/mcp/{name}")
 async def remove_mcp_server(name: str):
-    """Remove a global MCP server config."""
     servers = _load_mcp_config()
     new_servers = [s for s in servers if s.get("name") != name]
     if len(new_servers) == len(servers):
@@ -285,105 +323,57 @@ async def remove_mcp_server(name: str):
 
 
 def _mcp_config_path():
-    from pathlib import Path
-
     return Path.home() / ".kohakuterrarium" / "mcp_servers.yaml"
 
 
-def _load_mcp_config() -> list[dict]:
+def _load_mcp_config():
     path = _mcp_config_path()
     if not path.exists():
         return []
     try:
         with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
-            return data.get("servers", []) if isinstance(data, dict) else []
-    except Exception as e:
-        _ = e  # MCP config unreadable
+        return data if isinstance(data, list) else []
+    except Exception:
         return []
 
 
-def _save_mcp_config(servers: list[dict]) -> None:
+def _save_mcp_config(servers):
     path = _mcp_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        yaml.dump({"servers": servers}, f, default_flow_style=False, sort_keys=False)
-
-
-# ── Codex usage ──
+        yaml.dump(servers, f, default_flow_style=False, sort_keys=False)
 
 
 @router.get("/codex-usage")
-async def get_codex_usage() -> dict:
-    """Fetch Codex quota/usage from chatgpt.com using stored OAuth token.
-
-    Requires the user to be logged in via ``kt login codex``.
-    Returns rate limit windows, credits, and plan info.
-    """
+async def get_codex_usage():
     tokens = CodexTokens.load()
     if not tokens:
-        raise HTTPException(
-            status_code=401,
-            detail="Not logged in with Codex. Run: kt login codex",
-        )
-
+        raise HTTPException(404, "Codex login not found")
     if tokens.is_expired():
         try:
             tokens = await refresh_tokens(tokens)
         except Exception as e:
-            raise HTTPException(
-                status_code=401,
-                detail=f"Codex token expired and could not be refreshed: {e}",
-            )
-
-    url = "https://chatgpt.com/backend-api/wham/usage"
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
-                url,
-                headers={
-                    "Authorization": f"Bearer {tokens.access_token}",
-                    "User-Agent": "codex-cli",
-                    "Content-Type": "application/json",
-                },
-            )
-    except httpx.RequestError as e:
-        raise HTTPException(status_code=503, detail=f"Request failed: {e}")
-
-    if resp.status_code == 401:
-        raise HTTPException(
-            status_code=401,
-            detail="Codex token rejected — re-login with: kt login codex",
-        )
-    if resp.status_code != 200:
-        raise HTTPException(
-            status_code=resp.status_code, detail="Failed to fetch Codex usage"
-        )
-
-    data = resp.json()
-
-    # Enrich windows with human-readable reset timestamps
-    def _enrich_window(w: dict | None) -> dict | None:
-        if not w:
-            return None
-        return {**w, "reset_at_iso": _unix_to_iso(w.get("reset_at", 0))}
-
-    rl = data.get("rate_limit", {})
-    return {
-        "logged_in": True,
-        "email": data.get("email", ""),
-        "plan_type": data.get("plan_type", ""),
-        "allowed": rl.get("allowed", True),
-        "limit_reached": rl.get("limit_reached", False),
-        "primary_window": _enrich_window(rl.get("primary_window")),
-        "secondary_window": _enrich_window(rl.get("secondary_window")),
-        "credits": data.get("credits"),
-        "additional_rate_limits": data.get("additional_rate_limits", []),
-        "spend_control": data.get("spend_control"),
+            raise HTTPException(401, f"Failed to refresh Codex tokens: {e}") from e
+    headers = {
+        "Authorization": f"Bearer {tokens.id_token}",
+        "Content-Type": "application/json",
     }
-
-
-def _unix_to_iso(ts: float | int) -> str:
-    if not ts:
-        return ""
-    return datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).isoformat()
+    params = {
+        "since": int(
+            (
+                datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=14)
+            ).timestamp()
+        ),
+    }
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.get(
+            "https://chatgpt.com/backend-api/codex/usage",
+            headers=headers,
+            params=params,
+        )
+        if resp.status_code != 200:
+            raise HTTPException(
+                resp.status_code, f"Failed to fetch Codex usage: {resp.text}"
+            )
+        return resp.json()

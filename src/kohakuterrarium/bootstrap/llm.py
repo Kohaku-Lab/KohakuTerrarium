@@ -71,9 +71,10 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
         profile=profile.name,
         model=profile.model,
         provider=profile.provider,
+        backend_type=profile.backend_type,
     )
 
-    if profile.provider == "codex-oauth":
+    if profile.backend_type == "codex":
         provider = CodexOAuthProvider(
             model=profile.model,
             reasoning_effort=profile.reasoning_effort or "medium",
@@ -82,21 +83,14 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
         provider._profile_max_context = profile.max_context
         return provider
 
-    # OpenAI-compatible (OpenRouter, direct OpenAI, local, etc.)
-    # Resolve key: stored keys (kt login) -> env var -> error
-    api_key = get_api_key(profile.api_key_env) if profile.api_key_env else ""
-    if not api_key:
-        # Try common providers
-        for provider in ("openrouter", "openai"):
-            api_key = get_api_key(provider)
-            if api_key:
-                break
-
+    api_key = get_api_key(profile.provider) if profile.provider else ""
+    if not api_key and profile.api_key_env:
+        api_key = get_api_key(profile.api_key_env)
     if not api_key:
         raise ValueError(
             f"API key not found for profile '{profile.name}'. "
-            f"Use 'kt login {profile.api_key_env or 'openrouter'}' or set "
-            f"{profile.api_key_env or 'OPENROUTER_API_KEY'} environment variable."
+            f"Use 'kt login {profile.provider or 'openai'}' or set "
+            f"{profile.api_key_env or 'OPENAI_API_KEY'} environment variable."
         )
 
     provider = OpenAIProvider(

@@ -1,8 +1,10 @@
 """
 Built-in LLM presets and model aliases.
 
-Model-specific metadata that can't be obtained from APIs.
-Keys are model names (or aliases). Users reference these by name.
+A preset references a **provider by name** (codex, openai, openrouter,
+anthropic, gemini, mimo, …). The provider owns the backend_type, base_url,
+and api_key_env. Presets only carry model-facing metadata (model id, context
+window, reasoning effort, extra_body, …).
 """
 
 from typing import Any
@@ -13,39 +15,37 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 # ── Built-in Presets ──────────────────────────────────────────
-# Model-specific metadata that can't be obtained from APIs.
-# Keys are model names (or aliases). Users reference these by name.
 
 PRESETS: dict[str, dict[str, Any]] = {
     # ═══════════════════════════════════════════════════════
     #  OpenAI via Codex OAuth (ChatGPT subscription auth)
     # ═══════════════════════════════════════════════════════
     "gpt-5.4": {
-        "provider": "codex-oauth",
+        "provider": "codex",
         "model": "gpt-5.4",
         "max_context": 272000,
         "reasoning_effort": "high",
     },
     "gpt-5.3-codex": {
-        "provider": "codex-oauth",
+        "provider": "codex",
         "model": "gpt-5.3-codex",
         "max_context": 272000,
         "reasoning_effort": "high",
     },
     "gpt-5.1": {
-        "provider": "codex-oauth",
+        "provider": "codex",
         "model": "gpt-5.1",
         "max_context": 272000,
         "reasoning_effort": "high",
     },
     "gpt-4o": {
-        "provider": "codex-oauth",
+        "provider": "codex",
         "model": "gpt-4o",
         "max_context": 128000,
         "reasoning_effort": "high",
     },
     "gpt-4o-mini": {
-        "provider": "codex-oauth",
+        "provider": "codex",
         "model": "gpt-4o-mini",
         "max_context": 128000,
         "reasoning_effort": "high",
@@ -57,113 +57,85 @@ PRESETS: dict[str, dict[str, Any]] = {
     "gpt-5.4-direct": {
         "provider": "openai",
         "model": "gpt-5.4",
-        "base_url": "https://api.openai.com/v1",
-        "api_key_env": "OPENAI_API_KEY",
         "max_context": 272000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "gpt-5.4-mini-direct": {
         "provider": "openai",
         "model": "gpt-5.4-mini",
-        "base_url": "https://api.openai.com/v1",
-        "api_key_env": "OPENAI_API_KEY",
         "max_context": 272000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "gpt-5.4-nano-direct": {
         "provider": "openai",
         "model": "gpt-5.4-nano",
-        "base_url": "https://api.openai.com/v1",
-        "api_key_env": "OPENAI_API_KEY",
         "max_context": 272000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "gpt-5.3-codex-direct": {
         "provider": "openai",
         "model": "gpt-5.3-codex",
-        "base_url": "https://api.openai.com/v1",
-        "api_key_env": "OPENAI_API_KEY",
         "max_context": 272000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "gpt-5.1-direct": {
         "provider": "openai",
         "model": "gpt-5.1",
-        "base_url": "https://api.openai.com/v1",
-        "api_key_env": "OPENAI_API_KEY",
         "max_context": 272000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "gpt-4o-direct": {
         "provider": "openai",
         "model": "gpt-4o",
-        "base_url": "https://api.openai.com/v1",
-        "api_key_env": "OPENAI_API_KEY",
         "max_context": 128000,
     },
     "gpt-4o-mini-direct": {
         "provider": "openai",
         "model": "gpt-4o-mini",
-        "base_url": "https://api.openai.com/v1",
-        "api_key_env": "OPENAI_API_KEY",
         "max_context": 128000,
     },
     # ═══════════════════════════════════════════════════════
     #  OpenAI via OpenRouter (uses OR context windows, not Codex)
     # ═══════════════════════════════════════════════════════
     "or-gpt-5.4": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "openai/gpt-5.4",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 1050000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "or-gpt-5.4-mini": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "openai/gpt-5.4-mini",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 400000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "or-gpt-5.4-nano": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "openai/gpt-5.4-nano",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 400000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "or-gpt-5.3-codex": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "openai/gpt-5.3-codex",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 400000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "or-gpt-5.1": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "openai/gpt-5.1",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 400000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "or-gpt-4o": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "openai/gpt-4o",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 128000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "or-gpt-4o-mini": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "openai/gpt-4o-mini",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 128000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
@@ -171,10 +143,8 @@ PRESETS: dict[str, dict[str, Any]] = {
     #  Anthropic Claude via OpenRouter (OpenAI-compat API)
     # ═══════════════════════════════════════════════════════
     "claude-opus-4.6": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "anthropic/claude-opus-4.6",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 1000000,
         "extra_body": {
             "reasoning": {"enabled": True, "effort": "high"},
@@ -182,10 +152,8 @@ PRESETS: dict[str, dict[str, Any]] = {
         },
     },
     "claude-sonnet-4.6": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "anthropic/claude-sonnet-4.6",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 1000000,
         "extra_body": {
             "reasoning": {"enabled": True, "effort": "high"},
@@ -193,10 +161,8 @@ PRESETS: dict[str, dict[str, Any]] = {
         },
     },
     "claude-sonnet-4.5": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "anthropic/claude-sonnet-4.5",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 1000000,
         "extra_body": {
             "reasoning": {"enabled": True, "effort": "high"},
@@ -204,10 +170,8 @@ PRESETS: dict[str, dict[str, Any]] = {
         },
     },
     "claude-haiku-4.5": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "anthropic/claude-haiku-4.5",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 200000,
         "extra_body": {
             "cache_control": {"type": "ephemeral"},
@@ -215,24 +179,20 @@ PRESETS: dict[str, dict[str, Any]] = {
     },
     # Legacy aliases kept for backward compat
     "claude-sonnet-4": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "anthropic/claude-sonnet-4",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 200000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "claude-opus-4": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "anthropic/claude-opus-4",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 200000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     # ═══════════════════════════════════════════════════════
     #  Anthropic Claude Direct API (non-OpenAI format)
-    #  NOTE: provider="anthropic" requires dedicated client,
+    #  NOTE: backend_type="anthropic" requires dedicated client,
     #  not the OpenAI-compat provider. Adaptive thinking is
     #  the recommended mode for 4.6 models:
     #    thinking: {type: "adaptive"}, effort: low|medium|high|max
@@ -242,56 +202,42 @@ PRESETS: dict[str, dict[str, Any]] = {
     "claude-opus-4.6-direct": {
         "provider": "anthropic",
         "model": "claude-opus-4-6",
-        "base_url": "https://api.anthropic.com/v1",
-        "api_key_env": "ANTHROPIC_API_KEY",
         "max_context": 1000000,
     },
     "claude-sonnet-4.6-direct": {
         "provider": "anthropic",
         "model": "claude-sonnet-4-6",
-        "base_url": "https://api.anthropic.com/v1",
-        "api_key_env": "ANTHROPIC_API_KEY",
         "max_context": 1000000,
     },
     "claude-haiku-4.5-direct": {
         "provider": "anthropic",
         "model": "claude-haiku-4-5",
-        "base_url": "https://api.anthropic.com/v1",
-        "api_key_env": "ANTHROPIC_API_KEY",
         "max_context": 200000,
     },
     # ═══════════════════════════════════════════════════════
     #  Google Gemini via OpenRouter
     # ═══════════════════════════════════════════════════════
     "gemini-3.1-pro": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "google/gemini-3.1-pro-preview",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 1048576,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "gemini-3-flash": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "google/gemini-3-flash-preview",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 1048576,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "gemini-3.1-flash-lite": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "google/gemini-3.1-flash-lite-preview",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 1048576,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "nano-banana": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "google/gemini-3.1-flash-image-preview",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 65536,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
@@ -299,26 +245,20 @@ PRESETS: dict[str, dict[str, Any]] = {
     #  Google Gemini Direct API (OpenAI-compat endpoint)
     # ═══════════════════════════════════════════════════════
     "gemini-3.1-pro-direct": {
-        "provider": "openai",
+        "provider": "gemini",
         "model": "gemini-3.1-pro-preview",
-        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "api_key_env": "GEMINI_API_KEY",
         "max_context": 1048576,
         "extra_body": {"google": {"thinking_config": {"thinking_level": "HIGH"}}},
     },
     "gemini-3-flash-direct": {
-        "provider": "openai",
+        "provider": "gemini",
         "model": "gemini-3-flash-preview",
-        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "api_key_env": "GEMINI_API_KEY",
         "max_context": 1048576,
         "extra_body": {"google": {"thinking_config": {"thinking_level": "HIGH"}}},
     },
     "gemini-3.1-flash-lite-direct": {
-        "provider": "openai",
+        "provider": "gemini",
         "model": "gemini-3.1-flash-lite-preview",
-        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "api_key_env": "GEMINI_API_KEY",
         "max_context": 1048576,
         "extra_body": {"google": {"thinking_config": {"thinking_level": "HIGH"}}},
     },
@@ -326,18 +266,14 @@ PRESETS: dict[str, dict[str, Any]] = {
     #  Gemma 4 (open models, via OpenRouter)
     # ═══════════════════════════════════════════════════════
     "gemma-4-31b": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "google/gemma-4-31b-it",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 262144,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "gemma-4-26b": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "google/gemma-4-26b-a4b-it",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 262144,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
@@ -345,50 +281,38 @@ PRESETS: dict[str, dict[str, Any]] = {
     #  Qwen 3.5 / 3.6 series (via OpenRouter)
     # ═══════════════════════════════════════════════════════
     "qwen3.5-plus": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "qwen/qwen3.5-plus-02-15",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 1000000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "qwen3.5-flash": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "qwen/qwen3.5-flash-02-23",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 1000000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "qwen3.5-397b": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "qwen/qwen3.5-397b-a17b",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 262144,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "qwen3.5-27b": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "qwen/qwen3.5-27b",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 262144,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "qwen3-coder": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "qwen/qwen3-coder",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 262144,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "qwen3-coder-plus": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "qwen/qwen3-coder-plus",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 1000000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
@@ -398,18 +322,14 @@ PRESETS: dict[str, dict[str, Any]] = {
     #  Disable via reasoning param if needed.
     # ═══════════════════════════════════════════════════════
     "kimi-k2.5": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "moonshotai/kimi-k2.5",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 262144,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "kimi-k2-thinking": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "moonshotai/kimi-k2-thinking",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 131072,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
@@ -417,18 +337,14 @@ PRESETS: dict[str, dict[str, Any]] = {
     #  MiniMax (via OpenRouter)
     # ═══════════════════════════════════════════════════════
     "minimax-m2.7": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "minimax/minimax-m2.7",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 204800,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "minimax-m2.5": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "minimax/minimax-m2.5",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 197000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
@@ -436,18 +352,14 @@ PRESETS: dict[str, dict[str, Any]] = {
     #  Xiaomi MiMo (via OpenRouter)
     # ═══════════════════════════════════════════════════════
     "mimo-v2-pro": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "xiaomi/mimo-v2-pro",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 1048576,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "mimo-v2-flash": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "xiaomi/mimo-v2-flash",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 262144,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
@@ -455,18 +367,14 @@ PRESETS: dict[str, dict[str, Any]] = {
     #  Xiaomi MiMo Direct API (kt login mimo)
     # ═══════════════════════════════════════════════════════
     "mimo-v2-pro-direct": {
-        "provider": "openai",
+        "provider": "mimo",
         "model": "MiMo-V2-Pro",
-        "base_url": "https://api.xiaomimimo.com/v1",
-        "api_key_env": "MIMO_API_KEY",
         "max_context": 1048576,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "mimo-v2-flash-direct": {
-        "provider": "openai",
+        "provider": "mimo",
         "model": "MiMo-V2-Flash",
-        "base_url": "https://api.xiaomimimo.com/v1",
-        "api_key_env": "MIMO_API_KEY",
         "max_context": 262144,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
@@ -474,18 +382,14 @@ PRESETS: dict[str, dict[str, Any]] = {
     #  GLM (Z.ai, via OpenRouter)
     # ═══════════════════════════════════════════════════════
     "glm-5": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "z-ai/glm-5",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 80000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "glm-5-turbo": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "z-ai/glm-5-turbo",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 202752,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
@@ -493,67 +397,51 @@ PRESETS: dict[str, dict[str, Any]] = {
     #  xAI Grok series (via OpenRouter)
     # ═══════════════════════════════════════════════════════
     "grok-4": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "x-ai/grok-4",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 256000,
         # Reasoning is mandatory and not configurable
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "grok-4.20": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "x-ai/grok-4.20",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 272000,  # 2M model, use 272K budget
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "grok-4.20-multi": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "x-ai/grok-4.20-multi-agent",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 272000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "grok-4-fast": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "x-ai/grok-4-fast",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 272000,  # 2M model, use 272K budget
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "grok-4.1-fast": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "x-ai/grok-4.1-fast",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 272000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "grok-code-fast": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "x-ai/grok-code-fast-1",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 256000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "grok-3": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "x-ai/grok-3",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 131072,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "grok-3-mini": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "x-ai/grok-3-mini",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 131072,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
@@ -562,120 +450,92 @@ PRESETS: dict[str, dict[str, Any]] = {
     #  Large = flagship, Small 4 = reasoning, Codestral/Devstral = coding
     # ═══════════════════════════════════════════════════════
     "mistral-large-3": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "mistralai/mistral-large-2512",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 262144,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "mistral-medium-3.1": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "mistralai/mistral-medium-3.1",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 131072,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "mistral-medium-3": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "mistralai/mistral-medium-3",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 131072,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "mistral-small-4": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "mistralai/mistral-small-2603",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 262144,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "mistral-small-3.2": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "mistralai/mistral-small-3.2-24b-instruct",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 128000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     # Magistral: dedicated reasoning models
     "magistral-medium": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "mistralai/magistral-medium-2506",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 40960,
         # Reasoning is always-on (mandatory)
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "magistral-small": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "mistralai/magistral-small-2506",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 40000,
         # Reasoning is always-on (mandatory)
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     # Coding specialists
     "codestral": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "mistralai/codestral-2508",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 256000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "devstral-2": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "mistralai/devstral-2512",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 262144,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "devstral-medium": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "mistralai/devstral-medium",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 131072,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "devstral-small": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "mistralai/devstral-small",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 131072,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     # Multimodal
     "pixtral-large": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "mistralai/pixtral-large-2411",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 131072,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     # Small/edge models
     "ministral-3-14b": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "mistralai/ministral-14b-2512",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 262144,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     "ministral-3-8b": {
-        "provider": "openai",
+        "provider": "openrouter",
         "model": "mistralai/ministral-8b-2512",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
         "max_context": 262144,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
