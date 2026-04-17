@@ -167,89 +167,68 @@ class TestUninstall:
 class TestUpdatePackage:
     """Regression tests for `kt update` / `update_package`."""
 
-    def _make_git_repo(self, tmp_path, name: str):
-        """Create a git repo with a sample package and first commit.
+    _GIT_CONFIG = ["-c", "user.email=t@test", "-c", "user.name=test"]
 
-        Path ends with ``.git`` so ``install_package`` routes it through the
-        git branch (same dispatch rule it uses for real URLs).
-        """
+    def _run_git(self, *args, cwd):
         import subprocess
 
-        src = tmp_path / f"{name}.git"
-        src.mkdir()
-        (src / "kohaku.yaml").write_text(yaml.dump({"name": name, "version": "1.0.0"}))
-        subprocess.run(["git", "init", "-q"], check=True, cwd=src)
-        subprocess.run(
-            ["git", "-c", "user.email=a@b", "-c", "user.name=t", "add", "-A"],
-            check=True,
-            cwd=src,
-        )
-        subprocess.run(
-            [
-                "git",
-                "-c",
-                "user.email=a@b",
-                "-c",
-                "user.name=t",
-                "commit",
-                "-q",
-                "-m",
-                "v1",
-            ],
-            check=True,
-            cwd=src,
-        )
-        return src
+        subprocess.run(["git", *args], check=True, cwd=str(cwd), capture_output=True)
 
-    def test_update_pulls_from_remote(self, tmp_packages, tmp_path, monkeypatch):
-        """Regression: `kt update` must run git pull, not re-copy the local install.
+    def _init_git_repo(self, src):
+        """Init a git repo at ``src`` and make a first commit on branch ``main``."""
+        self._run_git("init", "-q", "-b", "main", cwd=src)
+        self._run_git(*self._GIT_CONFIG, "add", "-A", cwd=src)
+        self._run_git(*self._GIT_CONFIG, "commit", "-q", "-m", "v1", cwd=src)
 
-        Previously `_update_package` called `install_package(str(path))` where
-        path was the local install dir — `install_package` then routed that
-        through the local-dir branch, so an installed git clone was never
-        updated. This test pins the fix: a change on the remote must land in
-        the installed copy after `update_package(name)`.
+    def _set_up_installed_clone(self, tmp_packages, tmp_path, name):
+        """Arrange: a remote git repo + an installed clone of it.
+
+        Done without touching ``install_package`` so the test works the
+        same on POSIX and Windows. ``install_package``'s dispatch has
+        path-shape heuristics (``.git`` suffix detection, ``/``-based
+        split) that don't round-trip on Windows paths, and that's not
+        what this regression test is exercising anyway.
         """
-        import subprocess
+        remote = tmp_path / f"{name}-remote"
+        remote.mkdir()
+        (remote / "kohaku.yaml").write_text(
+            yaml.dump({"name": name, "version": "1.0.0"})
+        )
+        self._init_git_repo(remote)
 
-        from kohakuterrarium.packages import install_package, update_package
+        installed = tmp_packages / name
+        self._run_git("clone", "-q", str(remote), str(installed), cwd=tmp_path)
+        return remote, installed
 
-        # Skip on systems where git is not available.
-        if not subprocess.run(["which", "git"], capture_output=True).stdout.strip():
+    def test_update_pulls_from_remote(self, tmp_packages, tmp_path):
+        """Regression: `kt update` must run git pull, not re-copy the install.
+
+        Previously ``_update_package`` called ``install_package(str(path))``
+        where ``path`` was the local install dir — ``install_package``
+        routed that through the local-dir branch, so an installed git
+        clone was never updated. This test pins the fix: a change on
+        the remote must land in the installed copy after
+        ``update_package(name)``.
+        """
+        import shutil
+
+        if shutil.which("git") is None:
             pytest.skip("git not available")
 
-        remote = self._make_git_repo(tmp_path, "gitpack")
-        # Source path ends in .git so install_package dispatches to the git
-        # branch and clones it (same rule as real remote URLs).
-        install_package(str(remote))
-        installed = tmp_packages / "gitpack"
-        assert (installed / ".git").exists(), "install should produce a git clone"
+        from kohakuterrarium.packages import update_package
+
+        remote, installed = self._set_up_installed_clone(
+            tmp_packages, tmp_path, "gitpack"
+        )
+        assert (installed / ".git").exists(), "arrange: install must be a git clone"
 
         # Add a new commit on the remote with a sentinel file + version bump.
         (remote / "NEW.txt").write_text("added after install")
         (remote / "kohaku.yaml").write_text(
             yaml.dump({"name": "gitpack", "version": "2.0.0"})
         )
-        subprocess.run(
-            ["git", "-c", "user.email=a@b", "-c", "user.name=t", "add", "-A"],
-            check=True,
-            cwd=remote,
-        )
-        subprocess.run(
-            [
-                "git",
-                "-c",
-                "user.email=a@b",
-                "-c",
-                "user.name=t",
-                "commit",
-                "-q",
-                "-m",
-                "v2",
-            ],
-            check=True,
-            cwd=remote,
-        )
+        self._run_git(*self._GIT_CONFIG, "add", "-A", cwd=remote)
+        self._run_git(*self._GIT_CONFIG, "commit", "-q", "-m", "v2", cwd=remote)
 
         # Before update: sentinel must not be present yet.
         assert not (installed / "NEW.txt").exists()
