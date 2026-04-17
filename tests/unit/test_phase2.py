@@ -269,6 +269,30 @@ def hello():
         assert commands[0].command == "info"
         assert "bash" in commands[0].args
 
+    def test_read_job_command(self):
+        """Test parsing read_job as a framework command."""
+        text = "Check this: [/read_job]job_123[read_job/]"
+
+        events = parse_complete_with_tools(text)
+        commands = [e for e in events if isinstance(e, CommandEvent)]
+
+        assert len(commands) == 1
+        assert commands[0].command == "read_job"
+        assert commands[0].args == "job_123"
+
+    def test_read_remains_tool_not_framework_command(self):
+        """Test that read stays classified as the file-read tool."""
+        text = "[/read]README.md[read/]"
+
+        events = parse_complete_with_tools(text)
+        tools = extract_tool_calls(events)
+        commands = [e for e in events if isinstance(e, CommandEvent)]
+
+        assert len(tools) == 1
+        assert tools[0].name == "read"
+        assert tools[0].args == {"path": "README.md"}
+        assert len(commands) == 0
+
     def test_streaming_chunks(self):
         """Test that streaming works correctly."""
         parser = get_test_parser()

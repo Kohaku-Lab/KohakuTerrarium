@@ -3,7 +3,7 @@ Read command - Read job output.
 Info command - Get tool/subagent documentation.
 
 Usage:
-    ##read job_id [--lines N] [--offset M]##
+    ##read_job job_id [--lines N] [--offset M]##
     ##info tool_name##
 """
 
@@ -25,14 +25,14 @@ class ReadCommand(BaseCommand):
     Retrieves output from a completed or running job.
 
     Usage:
-        ##read job_123##
-        ##read job_123 --lines 50##
-        ##read job_123 --lines 50 --offset 10##
+        ##read_job job_123##
+        ##read_job job_123 --lines 50##
+        ##read_job job_123 --lines 50 --offset 10##
     """
 
     @property
     def command_name(self) -> str:
-        return "read"
+        return "read_job"
 
     @property
     def description(self) -> str:
@@ -43,7 +43,7 @@ class ReadCommand(BaseCommand):
         job_id, kwargs = parse_command_args(args)
 
         if not job_id:
-            return CommandResult(error="No job_id provided. Usage: ##read job_id##")
+            return CommandResult(error="No job_id provided. Usage: ##read_job job_id##")
 
         # Get optional parameters
         lines = int(kwargs.get("lines", 0))

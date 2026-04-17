@@ -190,7 +190,7 @@ class Controller:
 
         # Commands
         self._commands: dict[str, Command] = {
-            "read": ReadCommand(),
+            "read_job": ReadCommand(),
             "info": InfoCommand(),
             "jobs": JobsCommand(),
             "wait": WaitCommand(),

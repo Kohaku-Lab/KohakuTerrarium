@@ -1,7 +1,7 @@
 """
 Commands module - framework commands for controller.
 
-Commands are special actions like ##read##, ##info## that the
+Commands are special actions like ##read_job##, ##info## that the
 controller can use to interact with the framework.
 """
 
