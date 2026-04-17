@@ -60,6 +60,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Logging level",
     )
     run_parser.add_argument(
+        "--log-stderr",
+        choices=["auto", "on", "off"],
+        default="auto",
+        help=(
+            "Mirror logs to stderr. auto=on when I/O is not cli/tui "
+            "(custom, package, stdout, plain), off=never, on=always"
+        ),
+    )
+    run_parser.add_argument(
         "--session",
         nargs="?",
         const="__auto__",
@@ -139,6 +148,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--log-level",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         default="INFO",
+    )
+    resume_parser.add_argument(
+        "--log-stderr",
+        choices=["auto", "on", "off"],
+        default="auto",
+        help=(
+            "Mirror logs to stderr. auto=on when I/O is not cli/tui "
+            "(custom, package, stdout, plain), off=never, on=always"
+        ),
     )
 
     # Login command
@@ -329,6 +347,7 @@ def _dispatch_run(args: argparse.Namespace) -> int:
         session=session,
         io_mode=args.mode,
         llm_override=args.llm,
+        log_stderr=args.log_stderr,
     )
 
 
@@ -341,6 +360,7 @@ def _dispatch_resume(args: argparse.Namespace) -> int:
         last=args.last,
         io_mode=args.mode,
         llm_override=args.llm,
+        log_stderr=args.log_stderr,
     )
 
 

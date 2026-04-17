@@ -11,7 +11,11 @@ from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config import load_agent_config
 from kohakuterrarium.session.resume import _create_io_modules
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.utils.logging import get_logger, set_level
+from kohakuterrarium.utils.logging import (
+    enable_stderr_logging,
+    get_logger,
+    set_level,
+)
 
 logger = get_logger(__name__)
 
@@ -73,6 +77,33 @@ def _should_capture_session_activity(config, io_mode: str | None) -> bool:
     }
 
 
+def _resolve_effective_io(config, io_mode: str | None) -> tuple[str, str]:
+    """Return the effective (input_type, output_type) for the run.
+
+    Explicit ``--mode`` wins. Otherwise, use the creature's configured
+    I/O module types. Used to decide whether the terminal is free for
+    stderr logging.
+    """
+    if io_mode is not None:
+        return io_mode, io_mode
+    return config.input.type, config.output.type
+
+
+def _should_log_to_stderr(log_stderr: str, input_type: str, output_type: str) -> bool:
+    """Resolve the ``--log-stderr`` flag against the effective I/O types.
+
+    ``auto`` turns on stderr logging when neither input nor output is a
+    full-screen UI (``cli``/``tui``), so custom, package, stdout, and
+    plain I/O all get terminal logs without corrupting a UI frame.
+    """
+    if log_stderr == "on":
+        return True
+    if log_stderr == "off":
+        return False
+    terminal_ui = {"cli", "tui"}
+    return input_type not in terminal_ui and output_type not in terminal_ui
+
+
 def _warn_io_override_if_needed(config, io_mode: str) -> None:
     """Warn when an explicit CLI mode overrides configured custom I/O."""
     custom_input, custom_output = _has_custom_io(config)
@@ -93,6 +124,7 @@ def run_agent_cli(
     session: str | None = None,
     io_mode: str | None = None,
     llm_override: str | None = None,
+    log_stderr: str = "auto",
 ) -> int:
     """Run an agent from CLI."""
 
@@ -113,6 +145,10 @@ def run_agent_cli(
             return 1
 
     config = load_agent_config(str(path))
+
+    input_type, output_type = _resolve_effective_io(config, io_mode)
+    if _should_log_to_stderr(log_stderr, input_type, output_type):
+        enable_stderr_logging(log_level)
 
     # If the user does not specify --mode, respect the creature's configured
     # input/output modules exactly. Only explicit --mode should override them.

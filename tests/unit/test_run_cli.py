@@ -65,7 +65,9 @@ class _DummyAgent:
 def _make_config(*, input_type="cli", output_type="stdout"):
     return AgentConfig(
         name="demo",
-        input=InputConfig(type=input_type, module="pkg.input", class_name="CustomInput"),
+        input=InputConfig(
+            type=input_type, module="pkg.input", class_name="CustomInput"
+        ),
         output=OutputConfig(
             type=output_type,
             module="pkg.output",
@@ -124,6 +126,83 @@ def test_explicit_mode_warns_and_overrides_custom_io(monkeypatch, tmp_path, caps
     }
     out = capsys.readouterr().out
     assert "Warning: --mode plain overrides configured custom I/O" in out
+
+
+def test_should_log_to_stderr_auto_off_for_cli_io():
+    assert run_cli._should_log_to_stderr("auto", "cli", "stdout") is False
+    assert run_cli._should_log_to_stderr("auto", "custom", "tui") is False
+
+
+def test_should_log_to_stderr_auto_on_for_non_terminal_io():
+    assert run_cli._should_log_to_stderr("auto", "custom", "stdout") is True
+    assert run_cli._should_log_to_stderr("auto", "package", "plain") is True
+
+
+def test_should_log_to_stderr_flag_overrides():
+    assert run_cli._should_log_to_stderr("on", "cli", "tui") is True
+    assert run_cli._should_log_to_stderr("off", "custom", "stdout") is False
+
+
+def test_resolve_effective_io_respects_explicit_mode():
+    config = _make_config(input_type="custom", output_type="custom")
+    assert run_cli._resolve_effective_io(config, "plain") == ("plain", "plain")
+    assert run_cli._resolve_effective_io(config, None) == ("custom", "custom")
+
+
+def test_run_agent_cli_enables_stderr_for_custom_io(monkeypatch, tmp_path):
+    config_dir = tmp_path / "agent"
+    config_dir.mkdir()
+    (config_dir / "config.yaml").write_text("name: demo\n")
+
+    config = _make_config(input_type="custom", output_type="stdout")
+    called = {}
+
+    monkeypatch.setattr(run_cli, "load_agent_config", lambda _path: config)
+    monkeypatch.setattr(
+        run_cli.Agent,
+        "from_path",
+        lambda path, llm_override=None, **kwargs: _DummyAgent(config=config),
+    )
+    monkeypatch.setattr(run_cli.asyncio, "run", lambda coro: None)
+    monkeypatch.setattr(
+        run_cli,
+        "enable_stderr_logging",
+        lambda level: called.setdefault("level", level),
+    )
+
+    rc = run_cli.run_agent_cli(
+        str(config_dir), log_level="DEBUG", io_mode=None, log_stderr="auto"
+    )
+    assert rc == 0
+    assert called == {"level": "DEBUG"}
+
+
+def test_run_agent_cli_skips_stderr_when_off(monkeypatch, tmp_path):
+    config_dir = tmp_path / "agent"
+    config_dir.mkdir()
+    (config_dir / "config.yaml").write_text("name: demo\n")
+
+    config = _make_config(input_type="custom", output_type="stdout")
+    called = {}
+
+    monkeypatch.setattr(run_cli, "load_agent_config", lambda _path: config)
+    monkeypatch.setattr(
+        run_cli.Agent,
+        "from_path",
+        lambda path, llm_override=None, **kwargs: _DummyAgent(config=config),
+    )
+    monkeypatch.setattr(run_cli.asyncio, "run", lambda coro: None)
+    monkeypatch.setattr(
+        run_cli,
+        "enable_stderr_logging",
+        lambda level: called.setdefault("level", level),
+    )
+
+    rc = run_cli.run_agent_cli(
+        str(config_dir), log_level="DEBUG", io_mode=None, log_stderr="off"
+    )
+    assert rc == 0
+    assert called == {}
 
 
 def test_explicit_mode_without_custom_io_does_not_warn(monkeypatch, tmp_path, capsys):

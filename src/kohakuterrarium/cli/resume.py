@@ -10,7 +10,7 @@ from kohakuterrarium.session.resume import (
     resume_terrarium,
 )
 from kohakuterrarium.terrarium.cli import run_terrarium_with_tui
-from kohakuterrarium.utils.logging import set_level
+from kohakuterrarium.utils.logging import enable_stderr_logging, set_level
 
 
 def resume_cli(
@@ -20,6 +20,7 @@ def resume_cli(
     last: bool = False,
     io_mode: str | None = None,
     llm_override: str | None = None,
+    log_stderr: str = "auto",
 ) -> int:
     """Resume an agent or terrarium from a session file."""
     set_level(log_level)
@@ -28,6 +29,11 @@ def resume_cli(
     # plain otherwise. Keeps resume behavior consistent with run.
     if io_mode is None:
         io_mode = "cli" if sys.stdout.isatty() else "plain"
+
+    # Mirror logs to stderr when the terminal is not owned by a
+    # full-screen UI. ``auto`` treats plain as free; cli/tui as taken.
+    if log_stderr == "on" or (log_stderr == "auto" and io_mode not in {"cli", "tui"}):
+        enable_stderr_logging(log_level)
 
     path = _resolve_session(query, last=last)
     if path is None:
