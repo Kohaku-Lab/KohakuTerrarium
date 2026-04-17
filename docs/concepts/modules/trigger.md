@@ -51,8 +51,11 @@ wires completions into the agent's event callback, and persists
 trigger state to the session store so `kt resume` can re-create them.
 
 Config-time triggers are declared in `config.triggers[]`. Runtime
-triggers can be created from a tool (`create_trigger`) or
-programmatically via `agent.add_trigger(...)`.
+triggers can be installed by the agent itself — each universal
+trigger class (`universal = True` + `setup_*` metadata) is wrapped as
+its own tool (`add_timer`, `watch_channel`, `add_schedule`) that the
+creature lists under `tools: [{ name: add_timer, type: trigger }]` —
+and programmatically via `agent.add_trigger(...)`.
 
 ## What you can therefore do
 

@@ -11,9 +11,33 @@ from kohakuterrarium.core.config import AgentConfig
 from kohakuterrarium.core.loader import ModuleLoadError, ModuleLoader
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.tool.base import BaseTool
+from kohakuterrarium.modules.trigger.base import BaseTrigger
+from kohakuterrarium.modules.trigger.callable import CallableTriggerTool
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+# Universal trigger classes the framework ships. `type: trigger` entries
+# look up the trigger by its `setup_tool_name`.
+def _universal_trigger_classes() -> list[type[BaseTrigger]]:
+    # Import locally to avoid circulars at module load time.
+    from kohakuterrarium.modules.trigger.channel import ChannelTrigger
+    from kohakuterrarium.modules.trigger.scheduler import SchedulerTrigger
+    from kohakuterrarium.modules.trigger.timer import TimerTrigger
+
+    return [
+        cls
+        for cls in (TimerTrigger, ChannelTrigger, SchedulerTrigger)
+        if getattr(cls, "universal", False) and getattr(cls, "setup_tool_name", "")
+    ]
+
+
+def _lookup_trigger_class(name: str) -> type[BaseTrigger] | None:
+    for cls in _universal_trigger_classes():
+        if cls.setup_tool_name == name:
+            return cls
+    return None
 
 
 def create_tool(
@@ -31,6 +55,20 @@ def create_tool(
             if tool is None:
                 logger.warning("Unknown built-in tool", tool_name=tool_config.name)
             return tool
+
+        case "trigger":
+            trigger_cls = _lookup_trigger_class(tool_config.name)
+            if trigger_cls is None:
+                available = ", ".join(
+                    cls.setup_tool_name for cls in _universal_trigger_classes()
+                )
+                logger.warning(
+                    "Unknown setup-able trigger",
+                    tool_name=tool_config.name,
+                    available=available,
+                )
+                return None
+            return CallableTriggerTool(trigger_cls)
 
         case "custom" | "package":
             if not tool_config.module or not tool_config.class_name:

@@ -118,48 +118,17 @@ class TestTriggerManager:
         assert trigger._context.get("key") == "value"
 
 
-class TestListTriggersTool:
-    """Test the list_triggers builtin tool."""
+class TestTriggerManagerListing:
+    """Introspection on the trigger manager itself (no longer exposed as a tool)."""
 
-    async def test_no_triggers(self):
-        from kohakuterrarium.builtins.tools.list_triggers import ListTriggersTool
-        from kohakuterrarium.modules.tool.base import ToolContext
+    async def test_list_empty(self):
+        manager = TriggerManager(lambda e: None)
+        assert manager.list() == []
 
-        tool = ListTriggersTool()
-
-        # Mock agent with empty trigger_manager
-        class MockAgent:
-            trigger_manager = TriggerManager(lambda e: None)
-
-        ctx = ToolContext(
-            agent_name="test",
-            session=None,
-            working_dir=__import__("pathlib").Path("."),
-            agent=MockAgent(),
-        )
-        result = await tool.execute({"content": ""}, context=ctx)
-        assert "No active triggers" in result.output
-
-    async def test_with_triggers(self):
-        from kohakuterrarium.builtins.tools.list_triggers import ListTriggersTool
-        from kohakuterrarium.modules.tool.base import ToolContext
-
-        tool = ListTriggersTool()
-
-        class MockAgent:
-            trigger_manager = TriggerManager(lambda e: None)
-
-        agent = MockAgent()
+    async def test_list_with_triggers(self):
+        manager = TriggerManager(lambda e: None)
         t = MockTrigger()
-        # Add without autostart to avoid event loop issues
-        await agent.trigger_manager.add(t, trigger_id="test_obs", autostart=False)
-
-        ctx = ToolContext(
-            agent_name="test",
-            session=None,
-            working_dir=__import__("pathlib").Path("."),
-            agent=agent,
-        )
-        result = await tool.execute({"content": ""}, context=ctx)
-        assert "test_obs" in result.output
-        assert "MockTrigger" in result.output
+        await manager.add(t, trigger_id="test_obs", autostart=False)
+        items = manager.list()
+        assert any(info.trigger_id == "test_obs" for info in items)
+        assert any(info.trigger_type == "MockTrigger" for info in items)

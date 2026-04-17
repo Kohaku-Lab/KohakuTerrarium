@@ -98,8 +98,12 @@ def init_triggers(
     for trigger_config in config.triggers:
         trigger = create_trigger(trigger_config, session, loader)
         if trigger:
+            # Prefer an explicit user-provided name as the stable trigger_id
+            # (used for inheritance identity, resume, /stop, etc.). Fall back
+            # to the auto-generated shape for triggers without a name.
             trigger_id = (
-                f"{trigger_config.type}_{trigger_config.class_name or 'builtin'}"
+                trigger_config.name
+                or f"{trigger_config.type}_{trigger_config.class_name or 'builtin'}"
             )
             # Use sync add via internal dict (not started yet)
             trigger_manager._triggers[trigger_id] = trigger

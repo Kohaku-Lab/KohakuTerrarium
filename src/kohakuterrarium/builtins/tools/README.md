@@ -25,9 +25,7 @@ the public API from `builtins.tool_catalog`.
 | `json_read.py` / `json_write.py` | `json_read` / `json_write` with path expressions |
 | `send_message.py` | `send_message`: send to a named channel |
 | `info.py` | `info`: load full documentation for a tool or sub-agent on demand |
-| `list_triggers.py` | `list_triggers`: introspect active triggers |
-| `create_trigger.py` | `create_trigger`: dynamically create a trigger at runtime |
-| `stop_task.py` | `stop_task`: cancel a running background tool or sub-agent |
+| `stop_task.py` | `stop_task`: cancel a running background tool, sub-agent, or trigger by id |
 | `search_memory.py` | `search_memory`: FTS5 + semantic search over the current session's event log |
 | `web_fetch.py` | `web_fetch`: clean-read a URL (crawl4ai → trafilatura → jina → naive fallback) |
 | `web_search.py` | `web_search`: DuckDuckGo search (optional `duckduckgo-search` dep) |
@@ -64,8 +62,13 @@ No tool imports another tool's implementation except `multi_edit` reusing
 - Web tools degrade gracefully when optional deps (crawl4ai, trafilatura,
   duckduckgo-search) aren't installed — they log a warning and return a
   useful `ToolResult.error`.
-- `create_trigger` works against the agent's live `TriggerManager` — triggers
-  created this way persist to the session store and restore on resume.
+- Setup-able triggers (`add_timer`, `watch_channel`, `add_schedule`) are
+  not defined here — they come from
+  `modules/trigger/callable.py:CallableTriggerTool` wrapping each
+  `universal = True` trigger class. A creature opts in per-entry with
+  `- { name: add_timer, type: trigger }` in its `tools:` list. Installed
+  triggers run against the agent's live `TriggerManager` and persist to
+  the session store on resume.
 
 ## See also
 

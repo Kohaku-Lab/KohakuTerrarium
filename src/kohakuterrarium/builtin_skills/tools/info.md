@@ -41,6 +41,6 @@ Returns the full documentation content as markdown text.
 
 ## TIPS
 
-- Some tools (like `edit` and `create_trigger`) require you to call
-  `info` before first use. They will error until you do.
+- Some tools (like `edit`) require you to call `info` before first
+  use. They will error until you do.
 - Use `info` proactively when unsure about a tool's exact arguments.

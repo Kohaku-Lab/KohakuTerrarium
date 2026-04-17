@@ -193,8 +193,6 @@ def force_register_terrarium_tools(agent: Agent) -> None:
         "creature_start",
         "creature_stop",
         "creature_interrupt",
-        "list_triggers",
-        "create_trigger",
     ]
     for name in terrarium_tool_names:
         if agent.registry.get_tool(name) is None:

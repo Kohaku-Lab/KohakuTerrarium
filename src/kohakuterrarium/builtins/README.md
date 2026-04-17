@@ -25,9 +25,8 @@ Core general-purpose tools:
 | `json_read` / `json_write` | Read and modify JSON files with path expressions |
 | `send_message` | Send a message to a named channel |
 | `info` | Load full documentation for a tool or sub-agent on demand |
-| `list_triggers` | Introspect active triggers on the agent |
-| `create_trigger` | Dynamically create a trigger at runtime (timer / channel / context) |
-| `stop_task` | Cancel a running background tool or sub-agent |
+| `stop_task` | Cancel a running background tool, sub-agent, or trigger by id |
+| `add_timer` / `watch_channel` / `add_schedule` | Setup-able trigger tools (opt-in via `type: trigger`) — see `modules/trigger/callable.py` |
 | `search_memory` | FTS5 + semantic search over the current session's event log |
 | `web_fetch` | Fetch and clean a web page (crawl4ai → trafilatura → jina → naive fallback) |
 | `web_search` | DuckDuckGo web search (optional dep) |

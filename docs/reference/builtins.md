@@ -131,17 +131,32 @@ Delegates to skill manifests under
 
 - Args: `target` (tool or sub-agent name).
 
-**`list_triggers`** — List active triggers with IDs. Direct.
+**`stop_task`** — Cancel a running background task or trigger by id. Direct.
 
-**`stop_task`** — Cancel a running background task by job id. Direct.
+- Args: `job_id` (job id from any tool call; or the trigger id returned by `add_timer`/`watch_channel`/`add_schedule`).
 
-- Args: `job_id`.
+### Setup-able triggers (exposed as tools via `type: trigger`)
 
-**`create_trigger`** — Install a trigger at runtime. Supports
-`Timer`, `Scheduler`, `Channel` types. The controller is required to
-read full docs via the `info` framework command (`info create_trigger`) before using it.
+Each universal trigger class is wrapped as its own tool via
+`modules/trigger/callable.py:CallableTriggerTool`. A creature opts in by
+listing the trigger's `setup_tool_name` under `tools:` with
+`type: trigger`. The tool's description is prefixed with
+`**Trigger** — ` so the LLM knows calling it installs a long-lived
+side-effect. All three return immediately with the installed trigger
+id; the trigger itself runs in the background.
 
-- Args: depend on the trigger type; see the skill manifest.
+**`add_timer`** (wraps `TimerTrigger`) — Install a periodic timer.
+
+- Args: `interval` (seconds, required), `prompt` (required), `immediate` (bool, default false).
+
+**`watch_channel`** (wraps `ChannelTrigger`) — Listen on a named channel.
+
+- Args: `channel_name` (required), `prompt` (optional, supports `{content}`), `filter_sender` (optional).
+- The agent's own name is auto-set as `ignore_sender` to prevent self-triggering.
+
+**`add_schedule`** (wraps `SchedulerTrigger`) — Clock-aligned schedule.
+
+- Args: `prompt` (required); exactly one of `every_minutes`, `daily_at` (HH:MM), `hourly_at` (0-59).
 
 ### Terrarium (root-only)
 

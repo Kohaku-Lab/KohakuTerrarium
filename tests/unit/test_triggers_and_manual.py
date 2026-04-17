@@ -190,34 +190,99 @@ class TestRequireManualRead:
         assert t._manual_read
 
 
-class TestCreateTriggerTool:
-    def test_import(self):
-        from kohakuterrarium.builtins.tools.create_trigger import CreateTriggerTool
+class TestCallableTriggerTool:
+    """Each universal trigger class becomes an individually-named tool."""
 
-        t = CreateTriggerTool()
-        assert t.tool_name == "create_trigger"
-        assert t.require_manual_read is True
-        assert t.needs_context is True
+    def test_timer_tool_shape(self):
+        from kohakuterrarium.modules.trigger.callable import CallableTriggerTool
+        from kohakuterrarium.modules.trigger.timer import TimerTrigger
 
-    def test_trigger_registry(self):
-        from kohakuterrarium.builtins.tools.create_trigger import (
-            _ensure_registry,
-            _TRIGGER_TYPES,
-        )
+        tool = CallableTriggerTool(TimerTrigger)
+        assert tool.tool_name == "add_timer"
+        assert tool.description.startswith("**Trigger** — ")
+        schema = tool.get_parameters_schema()
+        assert "interval" in schema["properties"]
+        assert "prompt" in schema["properties"]
+        assert "interval" in schema["required"]
 
-        _ensure_registry()
-        assert "TimerTrigger" in _TRIGGER_TYPES
-        assert "ChannelTrigger" in _TRIGGER_TYPES
-        assert "SchedulerTrigger" in _TRIGGER_TYPES
+    def test_channel_tool_shape(self):
+        from kohakuterrarium.modules.trigger.callable import CallableTriggerTool
+        from kohakuterrarium.modules.trigger.channel import ChannelTrigger
 
-    def test_has_documentation(self):
-        from kohakuterrarium.builtins.tools.create_trigger import CreateTriggerTool
+        tool = CallableTriggerTool(ChannelTrigger)
+        assert tool.tool_name == "watch_channel"
+        assert tool.description.startswith("**Trigger** — ")
+        schema = tool.get_parameters_schema()
+        assert "channel_name" in schema["properties"]
 
-        t = CreateTriggerTool()
-        doc = t.get_full_documentation()
-        assert "TimerTrigger" in doc
-        assert "SchedulerTrigger" in doc
-        assert "ChannelTrigger" in doc
+    def test_scheduler_tool_shape(self):
+        from kohakuterrarium.modules.trigger.callable import CallableTriggerTool
+        from kohakuterrarium.modules.trigger.scheduler import SchedulerTrigger
+
+        tool = CallableTriggerTool(SchedulerTrigger)
+        assert tool.tool_name == "add_schedule"
+
+    def test_rejects_non_universal(self):
+        import pytest
+
+        from kohakuterrarium.modules.trigger.base import BaseTrigger
+        from kohakuterrarium.modules.trigger.callable import CallableTriggerTool
+
+        class Plain(BaseTrigger):
+            async def wait_for_trigger(self):
+                return None
+
+        with pytest.raises(ValueError):
+            CallableTriggerTool(Plain)
+
+    def test_full_documentation_includes_params(self):
+        from kohakuterrarium.modules.trigger.callable import CallableTriggerTool
+        from kohakuterrarium.modules.trigger.timer import TimerTrigger
+
+        doc = CallableTriggerTool(TimerTrigger).get_full_documentation()
+        assert "add_timer" in doc
         assert "interval" in doc
-        assert "every_minutes" in doc
-        assert "daily_at" in doc
+        assert "prompt" in doc
+        assert "(required)" in doc
+
+    def test_name_arg_is_always_exposed(self):
+        """Adapter injects an optional `name` arg into every tool's schema."""
+        from kohakuterrarium.modules.trigger.callable import CallableTriggerTool
+        from kohakuterrarium.modules.trigger.timer import TimerTrigger
+
+        schema = CallableTriggerTool(TimerTrigger).get_parameters_schema()
+        assert "name" in schema["properties"]
+        # `name` is optional — it does NOT appear in the class schema's
+        # required list (only `interval` and `prompt` should be required).
+        assert "name" not in schema.get("required", [])
+        assert set(schema["required"]) == {"interval", "prompt"}
+
+    async def test_execute_with_name_uses_it_as_trigger_id(self):
+        """Passing `name` to the tool makes trigger_manager use it as the id."""
+        from pathlib import Path
+
+        from kohakuterrarium.core.trigger_manager import TriggerManager
+        from kohakuterrarium.modules.tool.base import ToolContext
+        from kohakuterrarium.modules.trigger.callable import CallableTriggerTool
+        from kohakuterrarium.modules.trigger.timer import TimerTrigger
+
+        class MockAgent:
+            trigger_manager = TriggerManager(lambda e: None)
+
+        agent = MockAgent()
+        ctx = ToolContext(
+            agent_name="test",
+            session=None,
+            working_dir=Path("."),
+            agent=agent,
+        )
+        tool = CallableTriggerTool(TimerTrigger)
+        result = await tool.execute(
+            {"name": "hourly_check", "interval": 3600, "prompt": "Check queue"},
+            context=ctx,
+        )
+        assert result.error is None, result.error
+        assert result.metadata["trigger_id"] == "hourly_check"
+        assert "hourly_check" in agent.trigger_manager._triggers
+        # Cleanup to avoid leaking background tasks.
+        await agent.trigger_manager.remove("hourly_check")

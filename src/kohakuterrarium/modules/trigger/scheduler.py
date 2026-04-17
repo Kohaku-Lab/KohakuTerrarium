@@ -33,6 +33,40 @@ class SchedulerTrigger(BaseTrigger):
     resumable = True
     universal = True
 
+    setup_tool_name = "add_schedule"
+    setup_description = (
+        "Install a clock-aligned schedule: fire every N minutes, daily at HH:MM, "
+        "or hourly at minute :MM."
+    )
+    setup_param_schema = {
+        "type": "object",
+        "properties": {
+            "every_minutes": {
+                "type": "integer",
+                "description": "Fire every N minutes, aligned to midnight (1-1440).",
+            },
+            "daily_at": {
+                "type": "string",
+                "description": "Fire daily at HH:MM (24h clock).",
+            },
+            "hourly_at": {
+                "type": "integer",
+                "description": "Fire every hour at minute :MM (0-59).",
+            },
+            "prompt": {
+                "type": "string",
+                "description": "Prompt injected when the schedule fires.",
+            },
+        },
+        "required": ["prompt"],
+    }
+    setup_full_doc = (
+        "Installs a SchedulerTrigger. Provide exactly one of `every_minutes`, "
+        "`daily_at`, or `hourly_at` — they cannot be combined. `every_minutes` "
+        "aligns to midnight so e.g. `every_minutes: 30` fires at :00 and :30 "
+        "of every hour. Stash the returned trigger id to stop_task later."
+    )
+
     def __init__(
         self,
         every_minutes: int | None = None,

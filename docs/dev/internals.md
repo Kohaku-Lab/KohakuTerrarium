@@ -144,7 +144,7 @@ Built-ins: `TimerTrigger`, `IdleTrigger`, `ChannelTrigger`,
 (`core/trigger_manager.py`) keeps a dict of triggers and their
 background tasks. On start, it launches one task per trigger that
 iterates `fire()` and pushes events into the agent's queue. The
-`create_trigger` builtin tool wraps this so agents can hot-plug
+`CallableTriggerTool` (`modules/trigger/callable.py`) wraps each universal trigger class so agents can hot-plug
 triggers at runtime.
 
 On resume, trigger state is rebuilt from `events[agent]:*` rows in the

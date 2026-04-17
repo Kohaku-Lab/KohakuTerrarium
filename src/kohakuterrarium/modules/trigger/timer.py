@@ -28,6 +28,37 @@ class TimerTrigger(BaseTrigger):
     resumable = True
     universal = True
 
+    setup_tool_name = "add_timer"
+    setup_description = (
+        "Install a timer that wakes the agent every N seconds with a custom prompt."
+    )
+    setup_param_schema = {
+        "type": "object",
+        "properties": {
+            "interval": {
+                "type": "number",
+                "description": "Seconds between fires (must be > 0).",
+            },
+            "prompt": {
+                "type": "string",
+                "description": "Prompt injected when the timer fires.",
+            },
+            "immediate": {
+                "type": "boolean",
+                "description": "If true, fire once right after install before waiting.",
+                "default": False,
+            },
+        },
+        "required": ["interval", "prompt"],
+    }
+    setup_full_doc = (
+        "Installs a TimerTrigger. The agent will be woken every `interval` "
+        "seconds with the given `prompt` injected as a user_input-style event. "
+        "Set `immediate: true` to fire once immediately on install as well. "
+        "The tool returns the installed trigger id — stash it in scratchpad "
+        "if you may need to stop_task it later."
+    )
+
     def to_resume_dict(self) -> dict[str, Any]:
         return {
             "interval": self.interval,

@@ -37,4 +37,4 @@ if already completed.
 ## TIPS
 
 - Use the `jobs` command to see running job IDs before cancelling.
-- Use `list_triggers` to find trigger IDs if you want to stop a trigger.
+- Stash the returned trigger IDs from `add_timer`, `watch_channel`, and `add_schedule` in your scratchpad if you may need to stop them later.

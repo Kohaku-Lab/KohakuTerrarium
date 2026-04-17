@@ -64,7 +64,7 @@ Built-in tools include shell (`bash`), Python (`python`), file ops
 (`read`, `write`, `edit`, `multi_edit`), search (`glob`, `grep`,
 `tree`), JSON (`json_read`, `json_write`), web (`web_fetch`,
 `web_search`), communication (`send_message`), memory (`scratchpad`,
-`search_memory`), introspection (`info`, `list_triggers`, `stop_task`),
+`search_memory`), introspection (`info`, `stop_task`),
 and terrarium management (`terrarium_create`, `creature_start`, …).
 
 ## What you can therefore do
@@ -74,8 +74,13 @@ and terrarium management (`terrarium_create`, `creature_start`, …).
   trigger reproduce a group-chat pattern with zero new primitives.
 - **Tools as state handles.** The `scratchpad` tool is a classic KV
   API; any cooperating tools can rendezvous through it.
-- **Tools that spawn tools.** `create_trigger` installs a new trigger at
-  runtime. `terrarium_create` starts an entire nested system.
+- **Tools that install triggers.** Any universal trigger class
+  (`TimerTrigger`, `ChannelTrigger`, `SchedulerTrigger` by default) can
+  be exposed as a tool of its own — listing it under `tools:` with
+  `type: trigger` makes `add_timer` / `watch_channel` / `add_schedule`
+  show up in the tool list, and calling one installs that trigger on
+  the live `TriggerManager`. `terrarium_create` starts an entire
+  nested system.
 - **Tools that wrap sub-agents.** Any sub-agent invocation is itself
   tool-shaped, because the LLM calls it by name with args.
 - **Tools that run agents.** Because tools are plain Python, a tool can

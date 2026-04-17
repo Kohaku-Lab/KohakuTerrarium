@@ -5,7 +5,7 @@ Triggers produce TriggerEvents without user input - enabling autonomous agents.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, ClassVar, Protocol, runtime_checkable
 
 from kohakuterrarium.core.events import TriggerEvent
 
@@ -60,8 +60,28 @@ class BaseTrigger(ABC):
 
     # Override in subclass to enable resume persistence
     resumable: bool = False
-    # Override in subclass to allow creation via create_trigger tool
-    universal: bool = False
+    # Override in subclass to allow the agent to install this trigger at
+    # runtime via a tool call. Setup-able triggers get wrapped as tools by
+    # ``CallableTriggerTool`` (see ``modules/trigger/callable.py``).
+    universal: ClassVar[bool] = False
+
+    # --- Setup-able trigger metadata (only honoured when universal=True) ---
+    # Tool name the agent calls to install this trigger (e.g. "add_timer").
+    setup_tool_name: ClassVar[str] = ""
+    # One-line summary shown in the tool list. The adapter prepends
+    # "**Trigger** — " so the LLM knows this call installs a long-lived
+    # side-effect rather than returning an immediate result.
+    setup_description: ClassVar[str] = ""
+    # JSON-schema-like dict describing the args the agent should pass.
+    # None means the tool accepts no args.
+    setup_param_schema: ClassVar[dict[str, Any] | None] = None
+    # Long-form documentation surfaced by the ``info`` framework command.
+    # Empty string falls back to setup_description.
+    setup_full_doc: ClassVar[str] = ""
+    # If True, the adapter requires the agent to call ``info <name>`` before
+    # using the tool — for triggers whose correct use depends on subtle
+    # details beyond the schema.
+    setup_require_manual_read: ClassVar[bool] = False
 
     def __init__(
         self,
@@ -95,6 +115,27 @@ class BaseTrigger(ABC):
         Override in subclass if constructor signature differs from data keys.
         """
         return cls(**data)
+
+    @classmethod
+    def from_setup_args(cls, args: dict[str, Any]) -> "BaseTrigger":
+        """Build an instance from the agent-supplied setup tool args.
+
+        Default: forwards to ``from_resume_dict``. Override when the setup
+        schema differs from the resume dict shape (e.g. when you accept
+        user-facing aliases or need validation beyond dataclass wiring).
+        """
+        return cls.from_resume_dict(args)
+
+    @classmethod
+    def post_setup(cls, trigger: "BaseTrigger", context: Any) -> None:
+        """Hook called after an agent-installed trigger is constructed.
+
+        Default: no-op. Triggers that need context-derived state (e.g. a
+        channel registry or a creature-name-based ``ignore_sender``) override
+        this to wire those fields from the executor ``context`` before the
+        trigger is registered with the trigger manager.
+        """
+        return None
 
     @property
     def is_running(self) -> bool:

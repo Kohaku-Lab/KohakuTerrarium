@@ -35,6 +35,59 @@ class ChannelTrigger(BaseTrigger):
     resumable = True
     universal = True
 
+    setup_tool_name = "watch_channel"
+    setup_description = (
+        "Listen on a named channel and wake the agent when a message arrives."
+    )
+    setup_param_schema = {
+        "type": "object",
+        "properties": {
+            "channel_name": {
+                "type": "string",
+                "description": "Channel name to listen on (creature or shared).",
+            },
+            "prompt": {
+                "type": "string",
+                "description": (
+                    "Prompt injected when a message arrives. If it contains "
+                    "'{content}' the message content is substituted in."
+                ),
+            },
+            "filter_sender": {
+                "type": "string",
+                "description": "Only fire when sender matches (whitelist).",
+            },
+        },
+        "required": ["channel_name"],
+    }
+    setup_full_doc = (
+        "Installs a ChannelTrigger. The agent wakes up whenever a message is "
+        "delivered to `channel_name`. Use the `{content}` placeholder inside "
+        "`prompt` to inline the incoming message. `filter_sender` limits the "
+        "trigger to a specific sender. The creature's own name is "
+        "auto-registered as the `ignore_sender` to prevent self-triggering."
+    )
+
+    @classmethod
+    def post_setup(cls, trigger: "ChannelTrigger", context: Any) -> None:
+        """Wire registry + self-ignore from the invoking agent's context."""
+        agent = getattr(context, "agent", None) if context else None
+        if getattr(trigger, "_registry", None) is None and agent is not None:
+            env = getattr(agent, "environment", None)
+            if env is not None and getattr(env, "shared_channels", None) is not None:
+                trigger._registry = env.shared_channels
+            else:
+                session = getattr(agent, "session", None)
+                if (
+                    session is not None
+                    and getattr(session, "channels", None) is not None
+                ):
+                    trigger._registry = session.channels
+        if not trigger.ignore_sender:
+            agent_name = getattr(context, "agent_name", None)
+            if agent_name:
+                trigger.ignore_sender = agent_name
+
     def __init__(
         self,
         channel_name: str,

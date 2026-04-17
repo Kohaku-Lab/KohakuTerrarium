@@ -250,7 +250,7 @@ triggers:
     prompt: "Check the dashboard."
 ```
 
-`universal: True` lets the agent install this trigger at runtime via the `create_trigger` tool.
+`universal: True` marks the class as setup-able by the agent. Fill in `setup_tool_name`, `setup_description`, `setup_param_schema`, and (optionally) `setup_full_doc` on the class; declare an entry under `tools:` with `type: trigger` and `name: <setup_tool_name>` in the creature config. The framework wraps the class as a tool named after `setup_tool_name`, and calling it installs the trigger in the background via the agent's `TriggerManager`.
 
 ## Sub-agents
 
