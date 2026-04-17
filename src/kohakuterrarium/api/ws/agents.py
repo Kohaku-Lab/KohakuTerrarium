@@ -16,6 +16,13 @@ async def agent_chat(websocket: WebSocket, agent_id: str):
     await websocket.accept()
     manager = get_manager()
 
+    if manager._agents.get(agent_id) is None:
+        await websocket.send_json(
+            {"type": "error", "content": f"Agent not found: {agent_id}"}
+        )
+        await websocket.close()
+        return
+
     try:
         while True:
             # Receive message from client
@@ -41,4 +48,8 @@ async def agent_chat(websocket: WebSocket, agent_id: str):
         pass
     except Exception as e:
         logger.debug("WebSocket close error", error=str(e), exc_info=True)
+        try:
+            await websocket.send_json({"type": "error", "content": str(e)})
+        except Exception:
+            pass
         await websocket.close()

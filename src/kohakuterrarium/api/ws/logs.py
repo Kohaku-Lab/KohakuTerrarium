@@ -128,6 +128,10 @@ async def tail_logs(websocket: WebSocket):
     except Exception as e:
         logger.debug("log WS error", error=str(e), exc_info=True)
         try:
+            await websocket.send_json({"type": "error", "text": str(e)})
+        except Exception:
+            pass
+        try:
             await websocket.close()
         except Exception as e:
             logger.debug("Failed to close log WS", error=str(e), exc_info=True)
