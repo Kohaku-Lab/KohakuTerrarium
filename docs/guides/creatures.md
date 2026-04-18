@@ -44,7 +44,7 @@ Reuse an existing creature as the base:
 
 ```yaml
 name: my-swe
-base_config: "@kt-defaults/creatures/swe"
+base_config: "@kt-biome/creatures/swe"
 controller:
   reasoning_effort: high
 tools:
@@ -83,7 +83,7 @@ Especially useful for **sub-agents** and **terrarium creatures** that inherit fr
 # sub-agent entry inside a creature config
 subagents:
   - name: niche_responder
-    base_config: "@kt-defaults/subagents/response"
+    base_config: "@kt-biome/subagents/response"
     prompt_mode: replace
     system_prompt_file: prompts/niche_persona.md
 ```
@@ -92,7 +92,7 @@ subagents:
 # terrarium creature that re-purposes an OOTB creature as a team specialist
 creatures:
   - name: reviewer
-    base_config: "@kt-defaults/creatures/critic"
+    base_config: "@kt-biome/creatures/critic"
     prompt_mode: replace
     system_prompt: |
       You are the team's lead reviewer. Speak only to approve or reject, with one-line reasoning.
@@ -105,7 +105,7 @@ Default (`prompt_mode: concat`) is the right move when the base prompt is a gene
 Collision by `name` means the child's entry wins:
 
 ```yaml
-base_config: "@kt-defaults/creatures/general"
+base_config: "@kt-biome/creatures/general"
 tools:
   - { name: bash, type: custom, module: ./tools/safe_bash.py, class: SafeBash }
 ```

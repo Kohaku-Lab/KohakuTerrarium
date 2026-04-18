@@ -13,7 +13,7 @@ from kohakuterrarium.terrarium.runtime import TerrariumRuntime
 
 
 async def main() -> None:
-    config = load_terrarium_config("@kt-defaults/terrariums/swe_team")
+    config = load_terrarium_config("@kt-biome/terrariums/swe_team")
     runtime = TerrariumRuntime(config)
     await runtime.start()
 

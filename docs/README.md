@@ -10,7 +10,7 @@ These docs are split into four stacks: tutorials (guided), guides (task-oriented
 
 | You are... | Start here |
 |---|---|
-| **Evaluating the project** | [Getting Started](guides/getting-started.md) · [What is an agent](concepts/foundations/what-is-an-agent.md) · [`kt-defaults`](https://github.com/Kohaku-Lab/kt-defaults) |
+| **Evaluating the project** | [Getting Started](guides/getting-started.md) · [What is an agent](concepts/foundations/what-is-an-agent.md) · [`kt-biome`](https://github.com/Kohaku-Lab/kt-biome) |
 | **Operating the CLI / dashboard** | [Getting Started](guides/getting-started.md) · [Serving](guides/serving.md) · [CLI Reference](reference/cli.md) |
 | **Building a creature** | [Creatures](guides/creatures.md) · [Configuration](guides/configuration.md) · [Custom Modules](guides/custom-modules.md) |
 | **Embedding in Python** | [Programmatic Usage](guides/programmatic-usage.md) · [Composition](guides/composition.md) · [Python API](reference/python.md) |
@@ -101,7 +101,7 @@ src/kohakuterrarium/
   testing/          Test infrastructure
 
 src/kohakuterrarium-frontend/   Vue web frontend
-kt-defaults (separate repo)     Showcase package — creatures, terrariums, plugins
+kt-biome (separate repo)     Showcase package — creatures, terrariums, plugins
 examples/                       Runnable examples
 docs/                           This tree
 ```

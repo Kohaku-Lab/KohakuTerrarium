@@ -14,15 +14,15 @@ Terrariums are still experimental — see the [honest bit](#the-honest-bit) belo
 terrarium:
   name: swe-team
   root:
-    base_config: "@kt-defaults/creatures/root"
+    base_config: "@kt-biome/creatures/root"
   creatures:
     - name: swe
-      base_config: "@kt-defaults/creatures/swe"
+      base_config: "@kt-biome/creatures/swe"
       channels:
         listen:   [tasks]
         can_send: [review, status]
     - name: reviewer
-      base_config: "@kt-defaults/creatures/reviewer"
+      base_config: "@kt-biome/creatures/reviewer"
       channels:
         listen:   [review]
         can_send: [status]
@@ -72,7 +72,7 @@ If your creature uses `tool_format: xml` or `native`, the call looks different; 
 ## Running a terrarium
 
 ```bash
-kt terrarium run @kt-defaults/terrariums/swe_team
+kt terrarium run @kt-biome/terrariums/swe_team
 ```
 
 Flags:
@@ -89,7 +89,7 @@ In TUI mode you get a multi-tab view: root (if any), each creature, and observed
 Terrarium info without running:
 
 ```bash
-kt terrarium info @kt-defaults/terrariums/swe_team
+kt terrarium info @kt-biome/terrariums/swe_team
 ```
 
 ## Root agent pattern
@@ -106,7 +106,7 @@ Use a root when you want a single conversational surface; skip it for headless c
 ```yaml
 terrarium:
   root:
-    base_config: "@kt-defaults/creatures/root"
+    base_config: "@kt-biome/creatures/root"
     system_prompt_file: prompts/team_lead.md
 ```
 
@@ -147,7 +147,7 @@ from kohakuterrarium.terrarium.runtime import TerrariumRuntime
 from kohakuterrarium.terrarium.config import load_terrarium_config
 from kohakuterrarium.core.channel import ChannelMessage
 
-runtime = TerrariumRuntime(load_terrarium_config("@kt-defaults/terrariums/swe_team"))
+runtime = TerrariumRuntime(load_terrarium_config("@kt-biome/terrariums/swe_team"))
 await runtime.start()
 
 tasks = runtime.environment.shared_channels.get("tasks")

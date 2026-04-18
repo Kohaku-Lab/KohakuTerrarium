@@ -48,7 +48,7 @@ The general direction is a more modular UI system, so custom modules can partici
 
 ## More built-in creatures, terrariums, and plugins
 
-`kt-defaults` currently provides a useful starting set of out-of-the-box creatures, terrariums, and example plugins. After 1.0.0, we want to expand that set based on real user feedback and practical usage patterns.
+`kt-biome` currently provides a useful starting set of out-of-the-box creatures, terrariums, and example plugins. After 1.0.0, we want to expand that set based on real user feedback and practical usage patterns.
 
 Possible areas include:
 

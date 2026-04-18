@@ -1,4 +1,4 @@
-base_config: "@kt-defaults/creatures/reviewer"
+base_config: "@kt-biome/creatures/reviewer"
 
 name: reviewer
 

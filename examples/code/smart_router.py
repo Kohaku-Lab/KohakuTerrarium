@@ -27,7 +27,7 @@ from kohakuterrarium.core.config import load_agent_config
 
 
 def make_classifier_config():
-    config = load_agent_config("@kt-defaults/creatures/general")
+    config = load_agent_config("@kt-biome/creatures/general")
     config.name = "classifier"
     config.tools = []
     config.subagents = []
@@ -44,7 +44,7 @@ def make_classifier_config():
 
 
 def make_specialist_config(role: str, description: str):
-    config = load_agent_config("@kt-defaults/creatures/general")
+    config = load_agent_config("@kt-biome/creatures/general")
     config.name = f"specialist-{role}"
     config.tools = (
         [

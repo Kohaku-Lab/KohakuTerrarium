@@ -5,7 +5,7 @@ Usage::
     from kohakuterrarium.compose import agent, factory, Pure
 
     # Persistent agent (reused across calls)
-    async with await agent("@kt-defaults/creatures/swe") as swe:
+    async with await agent("@kt-biome/creatures/swe") as swe:
         result = await (swe >> extract_code >> reviewer)(task)
 
     # Ephemeral agent (fresh per call)

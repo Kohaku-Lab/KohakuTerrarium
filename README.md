@@ -17,8 +17,8 @@
 ```bash
 pip install kohakuterrarium                                         # install
 kt login codex                                                      # authenticate
-kt install https://github.com/Kohaku-Lab/kt-defaults.git            # get OOTB creatures
-kt run @kt-defaults/creatures/swe --mode cli                        # run one
+kt install https://github.com/Kohaku-Lab/kt-biome.git            # get OOTB creatures
+kt run @kt-biome/creatures/swe --mode cli                        # run one
 ```
 
 You get an interactive shell with a full coding agent — file tools, shell access, web search, sub-agents, resumable sessions. `Ctrl+D` exits; `kt resume --last` picks back up.
@@ -41,15 +41,15 @@ KohakuTerrarium's job is to put that substrate in one place so the next agent sh
 
 The core abstraction is the **creature**: a standalone agent with its own controller, tools, sub-agents, triggers, memory, and I/O. Creatures compose horizontally into a **terrarium** — a pure wiring layer. Everything is Python, so agents can be embedded inside tools, triggers, plugins, and outputs of other agents.
 
-For out-of-the-box creatures you can try today, see [**kt-defaults**](https://github.com/Kohaku-Lab/kt-defaults) — the showcase pack of useful agents and plugins built on top of the framework.
+For out-of-the-box creatures you can try today, see [**kt-biome**](https://github.com/Kohaku-Lab/kt-biome) — the showcase pack of useful agents and plugins built on top of the framework.
 
 ## Where it fits
 
 |  | Product | Framework | Utility / Wrapper |
 |--|---------|-----------|-------------------|
 | **LLM App** | ChatGPT, Claude.ai | LangChain, LangGraph, Dify | DSPy |
-| **Agent** | ***kt-defaults***, Claude Code, Codex, OpenCode, OpenClaw, Hermes Agent… | ***KohakuTerrarium***, smolagents | — |
-| **Multi-Agent** | ***kt-defaults*** | ***KohakuTerrarium***  | CrewAI, AutoGen |
+| **Agent** | ***kt-biome***, Claude Code, Codex, OpenCode, OpenClaw, Hermes Agent… | ***KohakuTerrarium***, smolagents | — |
+| **Multi-Agent** | ***kt-biome*** | ***KohakuTerrarium***  | CrewAI, AutoGen |
 
 Most tooling sits below the agent layer or jumps straight to multi-agent orchestration with a thin idea of what an agent is. KohakuTerrarium starts with the agent itself.
 
@@ -76,7 +76,7 @@ A terrarium composes multiple creatures horizontally through channels, lifecycle
 - **Python-native.** Agents are async Python objects. Embed them inside tools, triggers, plugins, or outputs of other agents.
 - **Composition algebra.** `>>`, `&`, `|`, `*`, `.iterate` operators for stitching agents into pipelines programmatically.
 - **Multiple runtime surfaces.** CLI, TUI, web dashboard, and desktop app out of the box.
-- **Useful OOTB creatures via [`kt-defaults`](https://github.com/Kohaku-Lab/kt-defaults).** Start by running strong default agents; customise or inherit from them later.
+- **Useful OOTB creatures via [`kt-biome`](https://github.com/Kohaku-Lab/kt-biome).** Start by running strong default agents; customise or inherit from them later.
 
 ## Quick start
 
@@ -101,7 +101,7 @@ npm run build --prefix src/kohakuterrarium-frontend
 
 ```bash
 # Official showcase pack
-kt install https://github.com/Kohaku-Lab/kt-defaults.git
+kt install https://github.com/Kohaku-Lab/kt-biome.git
 
 # Any third-party package
 kt install <git-url>
@@ -124,11 +124,11 @@ Supports OpenRouter, OpenAI, Anthropic, Google Gemini, and any OpenAI-compatible
 
 ```bash
 # Single creature
-kt run @kt-defaults/creatures/swe --mode cli
-kt run @kt-defaults/creatures/reviewer
+kt run @kt-biome/creatures/swe --mode cli
+kt run @kt-biome/creatures/reviewer
 
 # Multi-agent terrarium
-kt terrarium run @kt-defaults/terrariums/swe_team
+kt terrarium run @kt-biome/terrariums/swe_team
 
 # Web dashboard
 kt serve start
@@ -142,7 +142,7 @@ kt app
 ### I want to run something now
 
 - [Getting Started](docs/guides/getting-started.md)
-- [`kt-defaults`](https://github.com/Kohaku-Lab/kt-defaults)
+- [`kt-biome`](https://github.com/Kohaku-Lab/kt-biome)
 - [CLI Reference](docs/reference/cli.md)
 - [Examples](examples/README.md)
 
@@ -293,14 +293,14 @@ from kohakuterrarium.terrarium.runtime import TerrariumRuntime
 
 async def main():
     # Single agent
-    agent = Agent.from_path("@kt-defaults/creatures/swe")
+    agent = Agent.from_path("@kt-biome/creatures/swe")
     agent.set_output_handler(lambda text: print(text, end=""), replace_default=True)
     await agent.start()
     await agent.inject_input("Explain what this codebase does.")
     await agent.stop()
 
     # Multi-agent terrarium
-    runtime = TerrariumRuntime(load_terrarium_config("@kt-defaults/terrariums/swe_team"))
+    runtime = TerrariumRuntime(load_terrarium_config("@kt-biome/terrariums/swe_team"))
     await runtime.start()
     tasks = runtime.environment.shared_channels.get("tasks")
     await tasks.send(ChannelMessage(sender="user", content="Fix the auth bug."))
@@ -320,7 +320,7 @@ from kohakuterrarium.compose import agent, factory
 from kohakuterrarium.core.config import load_agent_config
 
 def make_agent(name, prompt):
-    config = load_agent_config("@kt-defaults/creatures/general")
+    config = load_agent_config("@kt-biome/creatures/general")
     config.name, config.system_prompt, config.tools, config.subagents = name, prompt, [], []
     return config
 
@@ -417,7 +417,7 @@ kt terrarium run @cool-creatures/terrariums/my-team
 
 Available resources:
 
-- [`kt-defaults/`](https://github.com/Kohaku-Lab/kt-defaults) — official showcase creatures, terrariums, and plugin pack
+- [`kt-biome/`](https://github.com/Kohaku-Lab/kt-biome) — official showcase creatures, terrariums, and plugin pack
 - `examples/agent-apps/` — config-driven creature examples
 - `examples/code/` — Python usage examples
 - `examples/terrariums/` — multi-agent examples
@@ -447,7 +447,7 @@ src/kohakuterrarium/
   testing/           # Test infrastructure (ScriptedLLM, TestAgentBuilder, recorders)
 
 src/kohakuterrarium-frontend/   # Vue web frontend
-kt-defaults/                    # (separate repo) Official OOTB pack
+kt-biome/                    # (separate repo) Official OOTB pack
 examples/                       # Example creatures, terrariums, code samples, plugins
 docs/                           # Tutorials, guides, concepts, reference, dev
 ```

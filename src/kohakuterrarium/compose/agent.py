@@ -90,7 +90,7 @@ async def agent(config: AgentConfig | str | Path) -> AgentRunnable:
 
     Usage::
 
-        async with await agent("@kt-defaults/creatures/swe") as a:
+        async with await agent("@kt-biome/creatures/swe") as a:
             result = await (a >> process)(task)
     """
     if isinstance(config, (str, Path)):

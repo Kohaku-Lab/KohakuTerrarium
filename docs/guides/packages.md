@@ -6,16 +6,16 @@ A KohakuTerrarium package is a directory with a `kohaku.yaml` manifest. It can c
 
 Concept primer: [boundaries](../concepts/boundaries.md) — packages are how the framework makes "share reusable pieces" cheap.
 
-## The official pack: `kt-defaults`
+## The official pack: `kt-biome`
 
-The first package most people install is `kt-defaults` — the showcase pack containing `swe`, `reviewer`, `researcher`, `ops`, `creative`, `general`, `root` creatures, terrariums like `swe_team` and `deep_research`, and a handful of plugins.
+The first package most people install is `kt-biome` — the showcase pack containing `swe`, `reviewer`, `researcher`, `ops`, `creative`, `general`, `root` creatures, terrariums like `swe_team` and `deep_research`, and a handful of plugins.
 
 ```bash
-kt install https://github.com/Kohaku-Lab/kt-defaults.git
-kt run @kt-defaults/creatures/swe
+kt install https://github.com/Kohaku-Lab/kt-biome.git
+kt run @kt-biome/creatures/swe
 ```
 
-Study `kt-defaults` as a reference when you build your own pack.
+Study `kt-biome` as a reference when you build your own pack.
 
 ## Manifest: `kohaku.yaml`
 
@@ -167,4 +167,4 @@ This lets a creature inside one package reference tools declared in another, as 
 - [Creatures](creatures.md) — packaging a creature.
 - [Custom Modules](custom-modules.md) — writing tools/plugins to ship.
 - [Reference / CLI](../reference/cli.md) — `kt install`, `kt list`, `kt extension`.
-- [`kt-defaults`](https://github.com/Kohaku-Lab/kt-defaults) — reference package.
+- [`kt-biome`](https://github.com/Kohaku-Lab/kt-biome) — reference package.

@@ -70,7 +70,7 @@ This means small config drift is fine (swapping an LLM, changing a prompt). Stru
 ## Interrupt and resume workflow
 
 ```bash
-kt run @kt-defaults/creatures/swe
+kt run @kt-biome/creatures/swe
 # work... then Ctrl+C
 # later:
 kt resume --last
@@ -140,7 +140,7 @@ The agent itself can search with the `search_memory` tool. Full walk-through: [M
 Sometimes you want a throwaway run:
 
 ```bash
-kt run @kt-defaults/creatures/swe --no-session
+kt run @kt-biome/creatures/swe --no-session
 ```
 
 No `.kohakutr` is created. This also disables compaction's ability to recover previous rounds from disk (it still compacts in memory).

@@ -39,7 +39,7 @@ kt run <agent_path> [flags]
 Positional:
 
 - `agent_path` — local folder containing `config.yaml`, or a package
-  reference like `@kt-defaults/creatures/swe`.
+  reference like `@kt-biome/creatures/swe`.
 
 Flags:
 

@@ -13,7 +13,7 @@ terrarium:
   name: code_review_team
 
   root:
-    base_config: "@kt-defaults/creatures/root"
+    base_config: "@kt-biome/creatures/root"
 
   creatures:
     - name: developer

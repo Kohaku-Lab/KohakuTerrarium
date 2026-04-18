@@ -25,7 +25,7 @@ from kohakuterrarium.core.config import load_agent_config
 
 
 def make_extractor_config():
-    config = load_agent_config("@kt-defaults/creatures/general")
+    config = load_agent_config("@kt-biome/creatures/general")
     config.name = "extractor"
     config.tools = []
     config.subagents = []
@@ -39,7 +39,7 @@ def make_extractor_config():
 
 
 def make_enricher_config():
-    config = load_agent_config("@kt-defaults/creatures/general")
+    config = load_agent_config("@kt-biome/creatures/general")
     config.name = "enricher"
     config.tools = []
     config.subagents = []

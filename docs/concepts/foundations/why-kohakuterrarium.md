@@ -69,7 +69,7 @@ new agent design.
 
 - **Not an agent product.** You do not "run KohakuTerrarium." You run a
   creature built with it. If you want out-of-the-box creatures to try,
-  the [`kt-defaults`](https://github.com/Kohaku-Lab/kt-defaults) pack
+  the [`kt-biome`](https://github.com/Kohaku-Lab/kt-biome) pack
   is the showcase.
 - **Not a workflow engine.** Nothing here assumes your agent follows a
   fixed sequence of steps.
@@ -84,4 +84,4 @@ new agent design.
 
 - [What is an agent](what-is-an-agent.md) — the definition the framework is built around.
 - [Boundaries](../boundaries.md) — when KT fits, when it doesn't.
-- [kt-defaults](https://github.com/Kohaku-Lab/kt-defaults) — the showcase creatures + plugin pack.
+- [kt-biome](https://github.com/Kohaku-Lab/kt-biome) — the showcase creatures + plugin pack.

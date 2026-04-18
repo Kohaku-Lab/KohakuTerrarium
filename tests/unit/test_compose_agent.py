@@ -147,9 +147,9 @@ class TestAgentFactory:
 
     @pytest.mark.asyncio
     async def test_repr_with_path(self):
-        f = AgentFactory("@kt-defaults/creatures/swe")
+        f = AgentFactory("@kt-biome/creatures/swe")
         assert "AgentFactory" in repr(f)
-        assert "kt-defaults" in repr(f)
+        assert "kt-biome" in repr(f)
 
 
 # ── Compose patterns with agents ─────────────────────────────────────

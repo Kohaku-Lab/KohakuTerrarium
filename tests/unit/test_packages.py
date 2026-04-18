@@ -64,7 +64,7 @@ def sample_package(tmp_path):
 
 class TestIsPackageRef:
     def test_at_prefix(self):
-        assert is_package_ref("@kt-defaults/creatures/swe")
+        assert is_package_ref("@kt-biome/creatures/swe")
 
     def test_no_prefix(self):
         assert not is_package_ref("creatures/swe")

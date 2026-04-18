@@ -75,7 +75,7 @@ async def create_npc(
     Each NPC gets a unique personality and knowledge set based on the
     current adventure state.
     """
-    config = load_agent_config("@kt-defaults/creatures/general")
+    config = load_agent_config("@kt-biome/creatures/general")
 
     # Override for NPC behavior: small model, no tools needed
     config.name = f"npc-{name}"

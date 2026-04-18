@@ -90,7 +90,7 @@ peer-equal to the controller's. You pick which one the user sees.
 
 **Use when.** You want a specialist voice (persona, formatting,
 constraints) to be the user-facing one, with the orchestrator behind
-the curtain. Many of the kt-defaults chat creatures use this.
+the curtain. Many of the kt-biome chat creatures use this.
 
 ## 6. Tool-as-state-bus
 

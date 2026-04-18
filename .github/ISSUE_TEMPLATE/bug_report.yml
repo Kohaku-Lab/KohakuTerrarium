@@ -22,7 +22,7 @@ body:
       label: Steps to reproduce
       description: How can we reproduce this?
       placeholder: |
-        1. Run `kt run @kt-defaults/creatures/swe`
+        1. Run `kt run @kt-biome/creatures/swe`
         2. Send "..."
         3. Observe that...
     validations:

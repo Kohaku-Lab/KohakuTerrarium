@@ -32,7 +32,7 @@ from kohakuterrarium.core.config import load_agent_config
 
 
 def make_debater_config(name: str, stance: str, topic: str):
-    config = load_agent_config("@kt-defaults/creatures/general")
+    config = load_agent_config("@kt-biome/creatures/general")
     config.name = f"debater-{name.lower()}"
     config.tools = []
     config.subagents = []
@@ -51,7 +51,7 @@ def make_debater_config(name: str, stance: str, topic: str):
 
 
 def make_judge_config(topic: str):
-    config = load_agent_config("@kt-defaults/creatures/general")
+    config = load_agent_config("@kt-biome/creatures/general")
     config.name = "judge"
     config.tools = []
     config.subagents = []

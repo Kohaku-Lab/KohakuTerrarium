@@ -1,4 +1,4 @@
-base_config: "@kt-defaults/creatures/researcher"
+base_config: "@kt-biome/creatures/researcher"
 
 name: searcher
 system_prompt_file: prompts/system.md

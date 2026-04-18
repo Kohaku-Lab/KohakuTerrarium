@@ -8,7 +8,7 @@ flow between them.
 running under the TUI, visibly passing messages from one to the other.
 
 **Prerequisites:** [First Creature](first-creature.md). You should have
-`kt-defaults` installed and be able to `kt run` a single creature.
+`kt-biome` installed and be able to `kt run` a single creature.
 
 A terrarium is a **pure wiring layer**: it owns channels and manages
 creature lifecycles. It has no LLM of its own. The intelligence stays
@@ -39,7 +39,7 @@ terrarium:
 
   creatures:
     - name: writer
-      base_config: "@kt-defaults/creatures/general"
+      base_config: "@kt-biome/creatures/general"
       system_prompt: |
         You are a concise writer. When you receive a message on
         `tasks`, write a short draft and send it to `review` using
@@ -49,7 +49,7 @@ terrarium:
         can_send:  [review]
 
     - name: reviewer
-      base_config: "@kt-defaults/creatures/reviewer"
+      base_config: "@kt-biome/creatures/reviewer"
       system_prompt: |
         You critique drafts. When you receive a message on `review`,
         reply with one or two concrete improvement suggestions on
@@ -116,7 +116,7 @@ Two workarounds you can reach for today:
 2. **Add a root agent.** A root creature sits *outside* the terrarium
    and owns the terrarium-management tools. It receives user input,
    seeds the team, observes channels, and nudges creatures that stall.
-   See `@kt-defaults/creatures/root` and the `swe_team` terrarium for a
+   See `@kt-biome/creatures/root` and the `swe_team` terrarium for a
    worked example. The [root agent concept](../concepts/multi-agent/root-agent.md)
    explains the pattern.
 
@@ -126,7 +126,7 @@ Example — add a root:
 terrarium:
   name: writer_team
   root:
-    base_config: "@kt-defaults/creatures/root"
+    base_config: "@kt-biome/creatures/root"
   # ... creatures and channels as before
 ```
 

@@ -38,7 +38,7 @@ controller:
 
 ```yaml
 name: my-swe
-base_config: "@kt-defaults/creatures/swe"
+base_config: "@kt-biome/creatures/swe"
 controller:
   reasoning_effort: xhigh
 tools:

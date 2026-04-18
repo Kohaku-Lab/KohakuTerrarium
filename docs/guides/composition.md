@@ -37,7 +37,7 @@ Two agent wrappers:
 ```python
 from kohakuterrarium.compose import agent, factory
 
-async with await agent("@kt-defaults/creatures/swe") as swe:
+async with await agent("@kt-biome/creatures/swe") as swe:
     r1 = await swe("Read the repo.")
     r2 = await swe("Now fix the auth bug.")   # same conversation
 
@@ -56,7 +56,7 @@ from kohakuterrarium.compose import agent
 from kohakuterrarium.core.config import load_agent_config
 
 def make(name, prompt):
-    c = load_agent_config("@kt-defaults/creatures/general")
+    c = load_agent_config("@kt-biome/creatures/general")
     c.name, c.system_prompt = name, prompt
     c.tools, c.subagents = [], []
     return c

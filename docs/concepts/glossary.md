@@ -150,12 +150,12 @@ tools, plugins, LLM presets, and Python dependencies, described by a
 via `kt install`. Referenced in configs and on the CLI with
 `@<pkg>/<path>` syntax. Full: [packages guide](../guides/packages.md).
 
-## kt-defaults
+## kt-biome
 
 The official out-of-the-box pack of useful creatures, terrariums, and
 plugins, shipped as a package. Not part of the core framework — it's a
 showcase + starting point. See
-[github.com/Kohaku-Lab/kt-defaults](https://github.com/Kohaku-Lab/kt-defaults).
+[github.com/Kohaku-Lab/kt-biome](https://github.com/Kohaku-Lab/kt-biome).
 
 ## Compose algebra
 

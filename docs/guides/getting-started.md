@@ -2,7 +2,7 @@
 
 For readers who have never run KohakuTerrarium before and want a working agent on their machine in a few minutes.
 
-KohakuTerrarium ships a core framework plus an install path for reusable creature/plugin packs. The official pack, `kt-defaults`, gives you a ready-to-use SWE agent, a reviewer, a researcher, and a few terrariums. You don't have to write anything to try it.
+KohakuTerrarium ships a core framework plus an install path for reusable creature/plugin packs. The official pack, `kt-biome`, gives you a ready-to-use SWE agent, a reviewer, a researcher, and a few terrariums. You don't have to write anything to try it.
 
 Concept primer: [what is a creature](../concepts/foundations/what-is-an-agent.md), [why this framework](../concepts/foundations/why-kohakuterrarium.md).
 
@@ -41,10 +41,10 @@ Without the build step, `kt web` prints a message and `kt app` fails to open.
 
 ## 2. Install the default creature pack
 
-`kt-defaults` contains the OOTB creatures (`swe`, `reviewer`, `researcher`, `ops`, `creative`, `general`, `root`) and a few terrariums.
+`kt-biome` contains the OOTB creatures (`swe`, `reviewer`, `researcher`, `ops`, `creative`, `general`, `root`) and a few terrariums.
 
 ```bash
-kt install https://github.com/Kohaku-Lab/kt-defaults.git
+kt install https://github.com/Kohaku-Lab/kt-biome.git
 kt list
 ```
 
@@ -74,7 +74,7 @@ kt model default <preset-name>
 ## 4. Run a creature
 
 ```bash
-kt run @kt-defaults/creatures/swe --mode cli
+kt run @kt-biome/creatures/swe --mode cli
 ```
 
 You land in an interactive prompt with the SWE agent. Type a request; it uses shell, file, and editing tools in the current working directory. Ctrl+C exits cleanly and prints a resume hint.
@@ -88,7 +88,7 @@ Modes:
 Override the model for one run:
 
 ```bash
-kt run @kt-defaults/creatures/swe --llm claude-opus-4.6
+kt run @kt-biome/creatures/swe --llm claude-opus-4.6
 ```
 
 ## 5. Resume

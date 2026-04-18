@@ -43,7 +43,7 @@ from kohakuterrarium.core.agent import Agent
 
 
 async def main() -> None:
-    agent = Agent.from_path("@kt-defaults/creatures/general")
+    agent = Agent.from_path("@kt-biome/creatures/general")
 
     await agent.start()
     try:
@@ -66,7 +66,7 @@ python demo.py
 The default stdout output module prints the response. Three things to
 notice:
 
-1. `Agent.from_path` resolves `@kt-defaults/...` the same way the CLI
+1. `Agent.from_path` resolves `@kt-biome/...` the same way the CLI
    does.
 2. `start()` initialises controller + tools + triggers + plugins.
 3. `inject_input(...)` is the programmatic equivalent of a user typing
@@ -85,7 +85,7 @@ from kohakuterrarium.core.agent import Agent
 async def main() -> None:
     parts: list[str] = []
 
-    agent = Agent.from_path("@kt-defaults/creatures/general")
+    agent = Agent.from_path("@kt-biome/creatures/general")
     agent.set_output_handler(
         lambda text: parts.append(text),
         replace_default=True,
@@ -122,7 +122,7 @@ from kohakuterrarium.serving.agent_session import AgentSession
 
 
 async def main() -> None:
-    agent = Agent.from_path("@kt-defaults/creatures/general")
+    agent = Agent.from_path("@kt-biome/creatures/general")
     session = AgentSession(agent)
 
     await session.start()
@@ -155,7 +155,7 @@ from kohakuterrarium.terrarium.runtime import TerrariumRuntime
 
 
 async def main() -> None:
-    config = load_terrarium_config("@kt-defaults/terrariums/swe_team")
+    config = load_terrarium_config("@kt-biome/terrariums/swe_team")
     runtime = TerrariumRuntime(config)
 
     await runtime.start()

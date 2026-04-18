@@ -6,7 +6,7 @@ Demonstrates:
   - State persistence: survive session resume via get_state/set_state
   - Options: configurable budget, warn threshold, per-model pricing
 
-This is similar to kt-defaults' cost_tracker but focuses on the
+This is similar to kt-biome' cost_tracker but focuses on the
 *enforcement* pattern — actually blocking calls, not just observing.
 
 Usage in config.yaml:

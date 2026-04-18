@@ -24,7 +24,7 @@ import asyncio
 from kohakuterrarium.core.agent import Agent
 
 async def main():
-    agent = Agent.from_path("@kt-defaults/creatures/swe")
+    agent = Agent.from_path("@kt-biome/creatures/swe")
     agent.set_output_handler(
         lambda text: print(text, end=""),
         replace_default=True,
@@ -61,7 +61,7 @@ import asyncio
 from kohakuterrarium.serving.agent_session import AgentSession
 
 async def main():
-    session = await AgentSession.from_path("@kt-defaults/creatures/swe")
+    session = await AgentSession.from_path("@kt-biome/creatures/swe")
     await session.start()
     async for chunk in session.chat("What does this do?"):
         print(chunk, end="")
@@ -112,7 +112,7 @@ from kohakuterrarium.terrarium.config import load_terrarium_config
 from kohakuterrarium.core.channel import ChannelMessage
 
 async def main():
-    config = load_terrarium_config("@kt-defaults/terrariums/swe_team")
+    config = load_terrarium_config("@kt-biome/terrariums/swe_team")
     runtime = TerrariumRuntime(config)
     await runtime.start()
 
@@ -136,7 +136,7 @@ from kohakuterrarium.serving.manager import KohakuManager
 
 manager = KohakuManager(session_dir="/var/kt/sessions")
 
-agent_id = await manager.agent_create("@kt-defaults/creatures/swe")
+agent_id = await manager.agent_create("@kt-biome/creatures/swe")
 async for chunk in manager.agent_chat(agent_id, "Hi"):
     print(chunk, end="")
 

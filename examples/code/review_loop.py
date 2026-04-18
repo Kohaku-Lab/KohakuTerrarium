@@ -23,7 +23,7 @@ from kohakuterrarium.core.config import load_agent_config
 
 
 def make_writer_config():
-    config = load_agent_config("@kt-defaults/creatures/general")
+    config = load_agent_config("@kt-biome/creatures/general")
     config.name = "writer"
     config.tools = []
     config.subagents = []
@@ -36,7 +36,7 @@ def make_writer_config():
 
 
 def make_reviewer_config():
-    config = load_agent_config("@kt-defaults/creatures/general")
+    config = load_agent_config("@kt-biome/creatures/general")
     config.name = "reviewer"
     config.tools = []
     config.subagents = []

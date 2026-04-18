@@ -56,7 +56,7 @@ Depth is bounded by `max_subagent_depth` (config-level) to prevent
 runaway recursion. Cancellation is cooperative — the parent can invoke
 `stop_task` to interrupt a running sub-agent.
 
-Built-in sub-agents (in `kt-defaults` + framework): `worker`, `plan`,
+Built-in sub-agents (in `kt-biome` + framework): `worker`, `plan`,
 `explore`, `critic`, `response`, `research`, `summarize`,
 `memory_read`, `memory_write`, `coordinator`.
 
@@ -66,7 +66,7 @@ Built-in sub-agents (in `kt-defaults` + framework): `worker`, `plan`,
   parent orchestrates; each sub-agent stays focused on one phase.
 - **Silent controller.** Parent uses `output_to: external` on a
   `response` sub-agent. The controller does not emit text; only the
-  sub-agent's reply reaches the user. This is how most kt-defaults
+  sub-agent's reply reaches the user. This is how most kt-biome
   chat-style creatures work.
 - **Persistent specialist.** An `interactive: true` reviewer that sees
   every turn and speaks only when it has something to say.

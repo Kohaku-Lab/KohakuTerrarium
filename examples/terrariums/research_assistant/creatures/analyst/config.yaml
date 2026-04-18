@@ -1,4 +1,4 @@
-base_config: "@kt-defaults/creatures/general"
+base_config: "@kt-biome/creatures/general"
 
 name: analyst
 system_prompt_file: prompts/system.md

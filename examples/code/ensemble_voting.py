@@ -26,7 +26,7 @@ from kohakuterrarium.core.config import load_agent_config
 
 def make_expert(name: str, style: str):
     """Create a config with a specific answering style."""
-    config = load_agent_config("@kt-defaults/creatures/general")
+    config = load_agent_config("@kt-biome/creatures/general")
     config.name = f"expert-{name}"
     config.tools = []
     config.subagents = []

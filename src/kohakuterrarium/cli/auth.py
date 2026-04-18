@@ -46,7 +46,7 @@ def _login_api_key(provider: str, env_var: str) -> int:
     print(f"\nSaved provider token for: {provider}")
     print("You can now use presets bound to this provider:")
     print("  kt model list")
-    print("  kt run @kt-defaults/creatures/swe --llm <model>")
+    print("  kt run @kt-biome/creatures/swe --llm <model>")
     return 0
 
 

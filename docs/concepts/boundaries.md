@@ -57,7 +57,7 @@ The framework's abstractions are tools for thinking, not walls.
 - You want to **try a new agent design** — a novel combination of
   tools, triggers, or sub-agent shapes — without rebuilding the
   substrate.
-- You want **OOTB creatures you can customise**. `kt-defaults` gives
+- You want **OOTB creatures you can customise**. `kt-biome` gives
   a starting point; inherit from it, swap a few modules, done.
 - You want to **embed agent behaviour inside existing Python code**
   without running a separate service.

@@ -17,15 +17,15 @@ shortest path that touches all the relevant moving parts.
 ## Step 1 — Install the default package
 
 Goal: get the shipped creatures (swe, general, reviewer, root, …) onto
-your machine so you can reference them with `@kt-defaults/...`.
+your machine so you can reference them with `@kt-biome/...`.
 
 ```bash
-kt install https://github.com/Kohaku-Lab/kt-defaults.git
+kt install https://github.com/Kohaku-Lab/kt-biome.git
 ```
 
 `kt install` takes a git URL or a local path. After this finishes, the
-package lives at `~/.kohakuterrarium/packages/kt-defaults/` and any
-config can reference it via `@kt-defaults/...`.
+package lives at `~/.kohakuterrarium/packages/kt-biome/` and any
+config can reference it via `@kt-biome/...`.
 
 Verify:
 
@@ -33,7 +33,7 @@ Verify:
 kt list
 ```
 
-You should see `kt-defaults` and the creatures it contains (`swe`,
+You should see `kt-biome` and the creatures it contains (`swe`,
 `general`, `reviewer`, `root`, `researcher`, `ops`, `creative`).
 
 ## Step 2 — Authenticate to an LLM
@@ -67,7 +67,7 @@ kt model default gpt-5.4
 Goal: see a complete creature work before you change anything.
 
 ```bash
-kt run @kt-defaults/creatures/swe --mode cli
+kt run @kt-biome/creatures/swe --mode cli
 ```
 
 Ask it something simple:
@@ -106,7 +106,7 @@ mkdir -p creatures/my-swe/prompts
 ```yaml
 name: my_swe
 version: "1.0"
-base_config: "@kt-defaults/creatures/swe"
+base_config: "@kt-biome/creatures/swe"
 
 system_prompt_file: prompts/system.md
 ```
@@ -139,7 +139,7 @@ Edit `creatures/my-swe/config.yaml`:
 ```yaml
 name: my_swe
 version: "1.0"
-base_config: "@kt-defaults/creatures/swe"
+base_config: "@kt-biome/creatures/swe"
 
 system_prompt_file: prompts/system.md
 

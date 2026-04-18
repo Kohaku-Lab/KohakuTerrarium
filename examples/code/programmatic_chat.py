@@ -15,7 +15,7 @@ from kohakuterrarium.serving.agent_session import AgentSession
 
 
 async def main() -> None:
-    session = await AgentSession.from_path("@kt-defaults/creatures/general")
+    session = await AgentSession.from_path("@kt-biome/creatures/general")
 
     try:
         # Your code decides when to call the agent

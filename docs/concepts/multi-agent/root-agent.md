@@ -32,7 +32,7 @@ terrarium config removes that boilerplate.
 ```yaml
 terrarium:
   root:
-    base_config: "@kt-defaults/creatures/root"
+    base_config: "@kt-biome/creatures/root"
     controller:
       llm: gpt-5.4
       reasoning_effort: high

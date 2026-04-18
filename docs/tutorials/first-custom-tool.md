@@ -113,7 +113,7 @@ Key points:
 ```yaml
 name: tutorial_creature
 version: "1.0"
-base_config: "@kt-defaults/creatures/general"
+base_config: "@kt-biome/creatures/general"
 
 system_prompt_file: prompts/system.md
 

@@ -76,7 +76,7 @@ from kohakuterrarium.compose import agent, factory
 from kohakuterrarium.core.config import load_agent_config
 
 def make_agent(name, prompt):
-    c = load_agent_config("@kt-defaults/creatures/general")
+    c = load_agent_config("@kt-biome/creatures/general")
     c.name, c.system_prompt, c.tools, c.subagents = name, prompt, [], []
     return c
 

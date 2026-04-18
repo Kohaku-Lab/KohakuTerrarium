@@ -50,7 +50,7 @@ Nothing inside the framework imports `cli/` — it is the top of the graph.
 - `_dispatch_*` helpers in `__init__.py` exist only to adapt between the
   argparse `Namespace` and the handler signatures; the real logic is in
   the per-command modules.
-- `@package/path` syntax (e.g. `@kt-defaults/creatures/swe`) is resolved
+- `@package/path` syntax (e.g. `@kt-biome/creatures/swe`) is resolved
   via `packages.resolve_package_path` before dispatch.
 
 ## See also

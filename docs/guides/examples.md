@@ -16,7 +16,7 @@ kt run examples/agent-apps/<name>
 
 | Agent | Pattern | What it shows |
 |---|---|---|
-| `swe_agent` | Coding agent | Tool-heavy creature close to `kt-defaults/creatures/swe` |
+| `swe_agent` | Coding agent | Tool-heavy creature close to `kt-biome/creatures/swe` |
 | `discord_bot` | Group-chat bot | Custom Discord I/O, ephemeral, native tool calling |
 | `planner_agent` | Plan-execute-reflect | Scratchpad state machine + critic sub-agent |
 | `monitor_agent` | Trigger-driven | `input: none` + timer triggers, no user in the loop |
@@ -87,5 +87,5 @@ Related guides: [Programmatic Usage](programmatic-usage.md), [Composition](compo
 ## See also
 
 - [Getting Started](getting-started.md) — environment setup.
-- [`kt-defaults`](https://github.com/Kohaku-Lab/kt-defaults) — the showcase package; examples share many of its patterns.
+- [`kt-biome`](https://github.com/Kohaku-Lab/kt-biome) — the showcase package; examples share many of its patterns.
 - [Tutorials](../tutorials/README.md) — guided walk-throughs that pair with these examples.

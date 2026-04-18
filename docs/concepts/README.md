@@ -25,7 +25,7 @@ You want to know what this framework is and whether it's for you.
 
 ### Builder (1 hour)
 
-You want to build a creature that is not in `kt-defaults`.
+You want to build a creature that is not in `kt-biome`.
 
 1. Evaluator path above
 2. [Modules overview](modules/README.md) → read each module doc as needed

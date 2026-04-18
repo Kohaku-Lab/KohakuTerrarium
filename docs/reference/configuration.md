@@ -262,7 +262,7 @@ Two directives opt out of defaults:
 Override an inherited tool without replacing the whole list:
 
 ```yaml
-base_config: "@kt-defaults/creatures/swe"
+base_config: "@kt-biome/creatures/swe"
 tools:
   - { name: bash, type: custom, module: ./tools/safe_bash.py, class: SafeBash }
 ```
@@ -270,7 +270,7 @@ tools:
 Start clean: drop inherited tools entirely.
 
 ```yaml
-base_config: "@kt-defaults/creatures/general"
+base_config: "@kt-biome/creatures/general"
 no_inherit: [tools]
 tools:
   - { name: think, type: builtin }
@@ -279,7 +279,7 @@ tools:
 Replace the prompt entirely for a specialised persona:
 
 ```yaml
-base_config: "@kt-defaults/creatures/general"
+base_config: "@kt-biome/creatures/general"
 prompt_mode: replace
 system_prompt_file: prompts/niche.md
 ```

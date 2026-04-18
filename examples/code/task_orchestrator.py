@@ -52,7 +52,7 @@ SPECIALIST_PROMPTS = {
 
 
 def make_specialist_config(role: str, context: str = ""):
-    config = load_agent_config("@kt-defaults/creatures/general")
+    config = load_agent_config("@kt-biome/creatures/general")
     config.name = f"specialist-{role}"
     config.tools = (
         []

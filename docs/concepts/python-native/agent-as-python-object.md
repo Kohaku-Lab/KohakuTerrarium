@@ -32,7 +32,7 @@ be put inside other values.
 ```python
 from kohakuterrarium.core.agent import Agent
 
-agent = Agent.from_path("@kt-defaults/creatures/swe")
+agent = Agent.from_path("@kt-biome/creatures/swe")
 agent.set_output_handler(lambda text: print(text, end=""), replace_default=True)
 
 await agent.start()
@@ -45,7 +45,7 @@ Or the transport-friendly wrapper:
 ```python
 from kohakuterrarium.serving.agent_session import AgentSession
 
-session = AgentSession(Agent.from_path("@kt-defaults/creatures/swe"))
+session = AgentSession(Agent.from_path("@kt-biome/creatures/swe"))
 await session.start()
 async for event in session.send_input("What does this do?"):
     print(event)
@@ -58,7 +58,7 @@ Terrariums follow the same shape:
 from kohakuterrarium.terrarium.runtime import TerrariumRuntime
 from kohakuterrarium.terrarium.config import load_terrarium_config
 
-runtime = TerrariumRuntime(load_terrarium_config("@kt-defaults/terrariums/swe_team"))
+runtime = TerrariumRuntime(load_terrarium_config("@kt-biome/terrariums/swe_team"))
 await runtime.start()
 await runtime.run()
 await runtime.stop()
