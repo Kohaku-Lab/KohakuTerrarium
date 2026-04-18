@@ -2,7 +2,7 @@
   "repos": [
     {
       "name": "kohaku-creatures",
-      "url": "https://github.com/Kohaku-Lab/kohaku-creatures.git",
+      "url": "https://github.com/Kohaku-Lab/kt-biome.git",
       "type": "package",
       "description": "Official creatures and terrariums for KohakuTerrarium (SWE agent, chat bot, reviewer, swe_team, etc.)",
       "tags": ["official", "swe", "chat", "multi-agent"]
