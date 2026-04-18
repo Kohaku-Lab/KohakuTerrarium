@@ -3,6 +3,7 @@
   <div v-if="isMobileRoute" class="h-full w-full overflow-hidden bg-warm-50 dark:bg-warm-950">
     <router-view />
     <CommandPalette />
+    <ShortcutHelp />
     <ToastCenter />
   </div>
   <!-- Desktop layout: NavRail + content -->
@@ -17,6 +18,7 @@
       <span>{{ t("common.mobileView") }}</span>
     </button>
     <CommandPalette />
+    <ShortcutHelp />
     <ToastCenter />
   </div>
 </template>
@@ -25,6 +27,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 
 import CommandPalette from "@/components/chrome/CommandPalette.vue"
+import ShortcutHelp from "@/components/chrome/ShortcutHelp.vue"
 import ToastCenter from "@/components/chrome/ToastCenter.vue"
 import NavRail from "@/components/layout/NavRail.vue"
 import { useArtifactDetector } from "@/composables/useArtifactDetector"
@@ -72,28 +75,6 @@ watch(
   },
   { immediate: true },
 )
-
-function toMobileRoute(path) {
-  if (path === "/") return "/mobile"
-  if (path === "/new") return "/mobile/new"
-  if (path === "/sessions") return "/mobile/sessions"
-  if (path === "/settings") return "/mobile/settings"
-  if (path === "/registry") return "/mobile/registry"
-  const instMatch = path.match(/^\/instances\/(.+)$/)
-  if (instMatch) return `/mobile/${instMatch[1]}`
-  return null
-}
-
-function toDesktopRoute(path) {
-  if (path === "/mobile") return "/"
-  if (path === "/mobile/new") return "/new"
-  if (path === "/mobile/sessions") return "/sessions"
-  if (path === "/mobile/settings") return "/settings"
-  if (path === "/mobile/registry") return "/registry"
-  const instMatch = path.match(/^\/mobile\/(.+)$/)
-  if (instMatch) return `/instances/${instMatch[1]}`
-  return "/"
-}
 
 function switchToMobile() {
   forceDesktop.value = false
