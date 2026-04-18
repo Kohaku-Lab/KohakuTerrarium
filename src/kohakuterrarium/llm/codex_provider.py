@@ -29,11 +29,76 @@ from kohakuterrarium.llm.codex_auth import (
     oauth_login,
     refresh_tokens,
 )
+from kohakuterrarium.llm.codex_rate_limits import (
+    capture_from_headers,
+    parse_rate_limit_event,
+    set_cached,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
+
+
+async def _capture_rate_limit_headers(response: Any) -> None:
+    """httpx response hook — capture Codex rate-limit headers.
+
+    The Codex backend delivers ``x-codex-*`` rate-limit / credits /
+    promo headers on every response. This hook parses them and stores
+    the latest snapshot in the process-level cache for ``/codex-usage``
+    to read. Failure is silent — the hook must never break the request.
+    """
+    try:
+        snap = capture_from_headers(response.headers)
+        set_cached(snap)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug(
+            "Codex rate-limit header capture failed",
+            error=str(exc),
+            exc_info=True,
+        )
+
+
+def _maybe_capture_stream_rate_limit(event: Any) -> None:
+    """Capture a ``codex.rate_limits`` event if the SDK surfaces one.
+
+    The Codex backend can emit in-stream rate-limit updates. The OpenAI
+    SDK exposes unknown events with a type outside the ``response.*``
+    family; we sniff the event for a dict-shaped payload carrying
+    ``codex.rate_limits`` and feed it to the parser. Silent on failure.
+    """
+    try:
+        # The event may carry a raw dict under ``event.data``,
+        # ``event.event``, or the full model dict; try each.
+        payload: Any = (
+            getattr(event, "data", None)
+            or getattr(event, "event", None)
+            or getattr(event, "raw", None)
+        )
+        if payload is None:
+            return
+        if hasattr(payload, "model_dump"):
+            payload_dict: Any = payload.model_dump()
+        elif isinstance(payload, dict):
+            payload_dict = payload
+        else:
+            return
+        if not isinstance(payload_dict, dict):
+            return
+        if payload_dict.get("type") != "codex.rate_limits":
+            return
+        snap = parse_rate_limit_event(_json.dumps(payload_dict))
+        if snap is not None and snap.has_data():
+            from kohakuterrarium.llm.codex_rate_limits import UsageSnapshot
+
+            set_cached(UsageSnapshot(snapshots=[snap]))
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug(
+            "Codex rate-limit event capture failed",
+            error=str(exc),
+            exc_info=True,
+        )
 
 
 class CodexOAuthProvider(BaseLLMProvider):
@@ -87,16 +152,34 @@ class CodexOAuthProvider(BaseLLMProvider):
         self._rebuild_client()
 
     def _rebuild_client(self) -> None:
-        """Create or recreate the AsyncOpenAI client with current token."""
+        """Create or recreate the AsyncOpenAI client with current token.
+
+        Installs an httpx response event hook that captures rate-limit
+        headers from every Codex response into the process-level cache
+        (see ``codex_rate_limits.set_cached``). This replaces the dead
+        ``/backend-api/codex/usage`` endpoint — rate limits now ride on
+        every real API call's response.
+        """
         if not HAS_OPENAI:
             raise ImportError("openai not installed. Install with: pip install openai")
         if not self._tokens:
             return
+
+        # Custom httpx client with a response hook so we can observe
+        # rate-limit headers on every response without changing the
+        # streaming / non-streaming code paths.
+        import httpx
+
+        http_client = httpx.AsyncClient(
+            event_hooks={"response": [_capture_rate_limit_headers]},
+            timeout=self.timeout,
+        )
         self._client = AsyncOpenAI(
             api_key=self._tokens.access_token,
             base_url=CODEX_BASE_URL,
             timeout=self.timeout,
             max_retries=self.max_retries,
+            http_client=http_client,
         )
 
     async def _ensure_valid_token(self) -> None:
@@ -377,6 +460,14 @@ class CodexOAuthProvider(BaseLLMProvider):
         collected_tool_calls: list[NativeToolCall] = []
 
         async for event in stream:
+            # Capture inline rate-limit SSE events if the backend emits them.
+            # These carry the same data as response headers but arrive
+            # during the stream, which can be fresher for long completions.
+            # We don't branch on a specific codex event name here because
+            # the SDK doesn't know about ``codex.rate_limits``; the
+            # payload (if present) rides under a generic event type.
+            _maybe_capture_stream_rate_limit(event)
+
             match event.type:
                 case "response.output_text.delta":
                     yield event.delta

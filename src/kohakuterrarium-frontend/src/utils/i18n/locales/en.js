@@ -250,6 +250,11 @@ export default {
   "settings.account.soon": "soon",
   "settings.account.inHoursMinutes": "in {hours}h {minutes}m",
   "settings.account.inMinutes": "in {minutes}m",
+  "settings.account.notLoggedIn": "Not logged into Codex. Run `kt login codex` first.",
+  "settings.account.noDataYet": "No usage data yet. Send one chat turn using the Codex provider to populate it — usage ships on response headers, not a separate endpoint.",
+  "settings.account.capturedAt": "Captured {value}",
+  "settings.account.refreshHint": "Send another Codex request to refresh.",
+  "settings.account.defaultLimit": "Default limit",
 
   "chat.noMessagesYet": "No messages yet",
   "chat.getStarted": "Send a message to get started",

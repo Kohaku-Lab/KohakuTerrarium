@@ -219,6 +219,11 @@ export default {
   "settings.account.soon": "bald",
   "settings.account.inHoursMinutes": "in {hours} Std. {minutes} Min.",
   "settings.account.inMinutes": "in {minutes} Min.",
+  "settings.account.notLoggedIn": "Nicht bei Codex angemeldet. Fuehre `kt login codex` aus.",
+  "settings.account.noDataYet": "Noch keine Nutzungsdaten. Sende eine Codex-Anfrage — die Daten kommen aus Response-Headern, nicht aus einem separaten Endpunkt.",
+  "settings.account.capturedAt": "Erfasst {value}",
+  "settings.account.refreshHint": "Sende eine weitere Codex-Anfrage, um die Daten zu aktualisieren.",
+  "settings.account.defaultLimit": "Standard-Limit",
 
   "status.noTargetSelected": "Kein Ziel ausgewaehlt",
   "status.modelSwitchHint": "Modellwechsel ist in Root- und Kreatur-Tabs verfuegbar.",

@@ -224,18 +224,89 @@
               <p class="text-xs text-warm-400 mt-1">{{ t("settings.account.loginHint") }}</p>
             </div>
             <template v-else-if="codexUsage">
-              <div class="card p-4 flex items-center gap-3">
-                <div class="w-8 h-8 rounded-full bg-iolite/15 flex items-center justify-center shrink-0">
-                  <div class="i-carbon-user-avatar text-iolite text-sm" />
+              <!-- Not logged in -->
+              <div v-if="codexUsage.status === 'not_logged_in'" class="card p-4 border-l-3 border-l-warm-400">
+                <p class="text-sm text-warm-600 dark:text-warm-400">{{ t("settings.account.notLoggedIn") }}</p>
+              </div>
+
+              <!-- Logged in, but no request has been captured yet -->
+              <div v-else-if="codexUsage.status === 'no_data_yet'" class="card p-4 border-l-3 border-l-warm-400">
+                <p class="text-sm text-warm-600 dark:text-warm-400">{{ t("settings.account.noDataYet") }}</p>
+              </div>
+
+              <!-- Snapshot data available -->
+              <template v-else-if="codexUsage.status === 'ok'">
+                <div v-if="codexUsage.captured_at" class="text-[11px] text-warm-400">
+                  {{ t("settings.account.capturedAt", { value: formatCapturedAt(codexUsage.captured_at) }) }}
                 </div>
-                <div>
-                  <div class="font-medium text-warm-700 dark:text-warm-300">{{ codexUsage.email }}</div>
-                  <div class="text-[11px] text-warm-400 capitalize">
-                    {{ codexUsage.plan_type || t("settings.account.unknownPlan") }}
-                    <span v-if="codexUsage.limit_reached" class="ml-2 text-coral">{{ t("settings.account.limitReached") }}</span>
+
+                <div
+                  v-for="snap in codexUsage.snapshots || []"
+                  :key="snap.limit_id"
+                  class="card p-4 flex flex-col gap-3"
+                >
+                  <div class="flex items-center justify-between">
+                    <div class="font-medium text-warm-700 dark:text-warm-300">
+                      {{ snap.limit_name || snap.limit_id || t("settings.account.defaultLimit") }}
+                    </div>
+                    <div v-if="snap.plan_type" class="text-[11px] text-warm-400 capitalize">
+                      {{ snap.plan_type }}
+                    </div>
+                  </div>
+
+                  <div v-if="snap.primary" class="flex flex-col gap-1">
+                    <div class="flex items-center justify-between text-xs text-warm-500">
+                      <span>{{ t("settings.account.shortTermWindow") }}</span>
+                      <span>{{ t("settings.account.used", { value: formatPercent(snap.primary.used_percent) }) }}</span>
+                    </div>
+                    <div class="h-2 w-full rounded bg-warm-200 dark:bg-warm-700 overflow-hidden">
+                      <div
+                        class="h-full bg-iolite"
+                        :style="{ width: clampPercent(snap.primary.used_percent) + '%' }"
+                      />
+                    </div>
+                    <div v-if="snap.primary.resets_at" class="text-[11px] text-warm-400">
+                      {{ t("settings.account.resets", { value: formatResets(snap.primary.resets_at) }) }}
+                    </div>
+                  </div>
+
+                  <div v-if="snap.secondary" class="flex flex-col gap-1">
+                    <div class="flex items-center justify-between text-xs text-warm-500">
+                      <span>{{ t("settings.account.weeklyWindow") }}</span>
+                      <span>{{ t("settings.account.used", { value: formatPercent(snap.secondary.used_percent) }) }}</span>
+                    </div>
+                    <div class="h-2 w-full rounded bg-warm-200 dark:bg-warm-700 overflow-hidden">
+                      <div
+                        class="h-full bg-iolite"
+                        :style="{ width: clampPercent(snap.secondary.used_percent) + '%' }"
+                      />
+                    </div>
+                    <div v-if="snap.secondary.resets_at" class="text-[11px] text-warm-400">
+                      {{ t("settings.account.resets", { value: formatResets(snap.secondary.resets_at) }) }}
+                    </div>
+                  </div>
+
+                  <div v-if="snap.credits" class="text-xs text-warm-500 flex items-center gap-2">
+                    <span class="font-medium text-warm-600 dark:text-warm-400">{{ t("settings.account.credits") }}</span>
+                    <span v-if="snap.credits.unlimited" class="text-iolite">{{ t("settings.account.unlimited") }}</span>
+                    <span v-else-if="snap.credits.has_credits && snap.credits.balance">
+                      {{ t("settings.account.balance", { value: snap.credits.balance }) }}
+                    </span>
+                    <span v-else class="text-warm-400">{{ t("settings.account.noCredits") }}</span>
+                  </div>
+
+                  <div v-if="snap.rate_limit_reached_type" class="text-xs text-coral">
+                    {{ t("settings.account.overageLimitReached") }}
                   </div>
                 </div>
-              </div>
+
+                <div v-if="codexUsage.promo_message" class="card p-3 border-l-3 border-l-iolite text-xs text-warm-600 dark:text-warm-400">
+                  {{ codexUsage.promo_message }}
+                </div>
+
+                <div class="text-[11px] text-warm-400">{{ t("settings.account.refreshHint") }}</div>
+              </template>
+
               <el-button size="small" @click="loadCodexUsage">{{ t("common.refresh") }}</el-button>
             </template>
           </div>
@@ -322,6 +393,44 @@ async function loadCodexUsage() {
   } finally {
     codexUsageLoading.value = false
   }
+}
+
+function clampPercent(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return 0
+  if (n < 0) return 0
+  if (n > 100) return 100
+  return n
+}
+
+function formatPercent(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return "0"
+  return n.toFixed(n >= 10 ? 0 : 1)
+}
+
+function formatResets(epochSeconds) {
+  if (!epochSeconds) return ""
+  const resetMs = Number(epochSeconds) * 1000
+  const now = Date.now()
+  const diffMs = resetMs - now
+  if (diffMs <= 0) return t("settings.account.soon")
+  const totalMinutes = Math.round(diffMs / 60000)
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  if (hours > 0) {
+    return t("settings.account.inHoursMinutes", { hours, minutes })
+  }
+  return t("settings.account.inMinutes", { minutes })
+}
+
+function formatCapturedAt(epochSeconds) {
+  if (!epochSeconds) return ""
+  const ms = Number(epochSeconds) * 1000
+  const diff = Math.round((Date.now() - ms) / 60000)
+  if (diff <= 0) return new Date(ms).toLocaleTimeString()
+  if (diff < 60) return t("settings.account.inMinutes", { minutes: -diff }).replace("-", "") + " ago"
+  return new Date(ms).toLocaleTimeString()
 }
 
 const providers = ref([])

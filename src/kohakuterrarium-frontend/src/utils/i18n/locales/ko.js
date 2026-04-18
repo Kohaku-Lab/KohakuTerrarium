@@ -216,6 +216,11 @@ export default {
   "settings.account.soon": "곧",
   "settings.account.inHoursMinutes": "{hours}시간 {minutes}분 후",
   "settings.account.inMinutes": "{minutes}분 후",
+  "settings.account.notLoggedIn": "Codex에 로그인되지 않았습니다. `kt login codex`를 실행하세요.",
+  "settings.account.noDataYet": "아직 사용량 데이터가 없습니다. Codex 공급자로 채팅 한 번을 보내세요 — 데이터는 응답 헤더를 통해 전달됩니다(전용 엔드포인트 없음).",
+  "settings.account.capturedAt": "수집됨: {value}",
+  "settings.account.refreshHint": "Codex 요청을 다시 보내 새로고침하세요.",
+  "settings.account.defaultLimit": "기본 제한",
 
   "chat.noMessagesYet": "아직 메시지가 없습니다",
   "chat.getStarted": "메시지를 보내서 시작하세요",

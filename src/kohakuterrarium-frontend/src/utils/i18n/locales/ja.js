@@ -217,6 +217,11 @@ export default {
   "settings.account.soon": "まもなく",
   "settings.account.inHoursMinutes": "{hours} 時間 {minutes} 分後",
   "settings.account.inMinutes": "{minutes} 分後",
+  "settings.account.notLoggedIn": "Codex にログインしていません。`kt login codex` を実行してください。",
+  "settings.account.noDataYet": "使用量データはまだありません。Codex プロバイダーでチャットターンを1回送信してください — データは応答ヘッダーに乗って届きます（専用エンドポイントはありません）。",
+  "settings.account.capturedAt": "取得日時: {value}",
+  "settings.account.refreshHint": "Codex リクエストをもう一度送信して更新してください。",
+  "settings.account.defaultLimit": "デフォルト制限",
 
   "chat.noMessagesYet": "まだメッセージはありません",
   "chat.getStarted": "メッセージを送って始めましょう",

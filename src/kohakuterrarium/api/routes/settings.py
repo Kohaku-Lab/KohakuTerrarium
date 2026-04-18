@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-import datetime
 import json
 from pathlib import Path
 from typing import Any
 
-import httpx
 import yaml
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from kohakuterrarium.llm.codex_auth import CodexTokens, oauth_login, refresh_tokens
+from kohakuterrarium.llm.codex_rate_limits import get_cached as get_cached_codex_usage
 from kohakuterrarium.llm.profiles import (
     LLMBackend,
     LLMProfile,
@@ -347,40 +346,63 @@ def _save_mcp_config(servers):
 
 @router.get("/codex-usage")
 async def get_codex_usage():
+    """Return the most-recent captured Codex rate-limit / credits snapshot.
+
+    The old ``https://chatgpt.com/backend-api/codex/usage`` endpoint has
+    been removed upstream and is now shielded by Cloudflare (non-browser
+    clients receive a managed-challenge HTML page). Per the current
+    Codex implementation, rate-limit state rides on the response headers
+    of every chat-completion request. ``codex_provider`` captures those
+    headers into a process-level cache; this endpoint returns that cache.
+
+    Response shape::
+
+        {
+          "status": "ok" | "no_data_yet" | "not_logged_in",
+          "captured_at": <unix seconds | null>,
+          "snapshots": [                  # one per rate-limit family
+            {
+              "limit_id": "codex",
+              "limit_name": null,
+              "primary":   {"used_percent": 12.5, "window_minutes": 300,  "resets_at": ...},
+              "secondary": {"used_percent": 80.0, "window_minutes": 1440, "resets_at": ...},
+              "credits":   {"has_credits": ..., "unlimited": ..., "balance": "..."},
+              "plan_type": null,
+              "rate_limit_reached_type": null
+            }
+          ],
+          "promo_message": null | "<text>"
+        }
+
+    ``status="no_data_yet"`` means the user is logged in but hasn't made
+    a Codex request this process-lifetime yet. Send one chat turn, then
+    refetch.
+    """
     tokens = CodexTokens.load()
     if not tokens:
-        raise HTTPException(404, "Codex login not found")
+        return {
+            "status": "not_logged_in",
+            "captured_at": None,
+            "snapshots": [],
+            "promo_message": None,
+        }
     if tokens.is_expired():
         try:
-            tokens = await refresh_tokens(tokens)
+            await refresh_tokens(tokens)
         except Exception as e:
             raise HTTPException(401, f"Failed to refresh Codex tokens: {e}") from e
-    if not tokens.id_token:
-        # ChatGPT backend-api requires the OIDC id_token. Older local
-        # token files saved before id_token round-trip was added won't
-        # have it — force a re-login rather than sending an empty bearer.
-        raise HTTPException(
-            401, "Codex id_token missing — please run `kt login codex` again"
-        )
-    headers = {
-        "Authorization": f"Bearer {tokens.id_token}",
-        "Content-Type": "application/json",
+
+    cached = get_cached_codex_usage()
+    if cached is None or cached.is_empty():
+        return {
+            "status": "no_data_yet",
+            "captured_at": None,
+            "snapshots": [],
+            "promo_message": None,
+        }
+    return {
+        "status": "ok",
+        "captured_at": cached.captured_at,
+        "snapshots": [snap.to_dict() for snap in cached.snapshots],
+        "promo_message": cached.promo_message,
     }
-    params = {
-        "since": int(
-            (
-                datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=14)
-            ).timestamp()
-        ),
-    }
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        resp = await client.get(
-            "https://chatgpt.com/backend-api/codex/usage",
-            headers=headers,
-            params=params,
-        )
-        if resp.status_code != 200:
-            raise HTTPException(
-                resp.status_code, f"Failed to fetch Codex usage: {resp.text}"
-            )
-        return resp.json()
