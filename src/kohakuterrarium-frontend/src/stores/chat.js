@@ -3,6 +3,7 @@ import { useMessagesStore } from "@/stores/messages"
 import { useInstancesStore } from "@/stores/instances"
 import { useStatusStore } from "@/stores/status"
 import { getHybridPrefSync, setHybridPref } from "@/utils/uiPrefs"
+import { wsUrl } from "@/utils/wsUrl"
 
 function normalizeContentParts(content) {
   if (!Array.isArray(content)) return null
@@ -588,13 +589,6 @@ function _parseArgs(args) {
   return args
 }
 
-function wsUrl(path) {
-  const protocol = location.protocol === "https:" ? "wss:" : "ws:"
-  const isDev = location.port === "5173" || location.port === "5174"
-  const host = isDev ? `${location.hostname}:8001` : location.host
-  return `${protocol}//${host}${path}`
-}
-
 export const useChatStore = defineStore("chat", {
   state: () => ({
     /** @type {Object<string, import('@/utils/api').ChatMessage[]>} */
@@ -628,6 +622,13 @@ export const useChatStore = defineStore("chat", {
     _instanceType: null,
     /** @type {WebSocket | null} Single WS for the instance */
     _ws: null,
+    /** @type {number | null} Pending reconnect timer id */
+    _reconnectTimer: null,
+    /** @type {number} Current reconnect delay (exponential backoff) */
+    _reconnectDelay: 500,
+    /** Connection status for the single instance WS. Used by the UI to
+     *  show "reconnecting" banners. "open" | "reconnecting" | "closed" */
+    wsStatus: "closed",
     /** @type {Array<{id: string, content: string, timestamp: string}>} Messages queued while agent is processing */
     queuedMessages: [],
     /** @type {number} Monotonic token to ignore stale history/WS callbacks after instance switches */
@@ -815,65 +816,87 @@ export const useChatStore = defineStore("chat", {
         } else if (messages?.length) {
           this.messagesByTab[target] = _convertHistory(messages)
         }
-      } catch {
-        /* no history yet */
+      } catch (err) {
+        // 404 = session has no prior history, which is fine. Anything
+        // else is a real error and should be surfaced.
+        if (err?.response?.status !== 404) {
+          console.error("Failed to load history for", target, err)
+        }
       }
     },
 
     /** Connect single WS for terrarium */
     _connectTerrarium(terrariumId, generation) {
-      this._historyLoaded = false
-      this._wsBuffer = []
-
-      const ws = new WebSocket(wsUrl(`/ws/terrariums/${terrariumId}`))
-      ws.onmessage = (event) => {
-        if (generation !== this._instanceGeneration || ws !== this._ws) return
-        const data = JSON.parse(event.data)
-        if (this._historyLoaded) {
-          this._onMessage(data)
-        } else {
-          this._wsBuffer.push(data)
-        }
-      }
-      ws.onclose = () => {
-        if (generation !== this._instanceGeneration || ws !== this._ws) return
-        this.processing = false
-      }
-      this._ws = ws
-
-      // Load all tab histories, then flush WS buffer
-      const loads = []
-      if (this.tabs[0]) {
-        loads.push(this._loadHistory(this.tabs[0]))
-      }
-      for (const tab of this.tabs) {
-        if (tab.startsWith("ch:")) {
-          loads.push(this._loadHistory(tab))
-        }
-      }
-      Promise.all(loads).then(() => {
-        if (generation !== this._instanceGeneration || ws !== this._ws) return
-        this._historyLoaded = true
-        if (this._wsBuffer) {
-          for (const data of this._wsBuffer) {
-            this._onMessage(data)
+      this._openWs({
+        generation,
+        url: wsUrl(`/ws/terrariums/${terrariumId}`),
+        onOpen: () => {
+          // Load all tab histories, then flush WS buffer
+          const loads = []
+          if (this.tabs[0]) {
+            loads.push(this._loadHistory(this.tabs[0], generation))
           }
-          this._wsBuffer = []
-        }
+          for (const tab of this.tabs) {
+            if (tab.startsWith("ch:")) {
+              loads.push(this._loadHistory(tab, generation))
+            }
+          }
+          Promise.all(loads)
+            .catch((err) => console.error("Terrarium history load failed:", err))
+            .finally(() => this._flushWsBuffer(generation))
+        },
+        reconnect: () => this._connectTerrarium(terrariumId, generation),
       })
     },
 
     /** Connect single WS for standalone creature */
     _connectCreature(agentId, generation) {
-      // Buffer WS events until history loads to avoid race condition
-      // (WS events arriving before history overwrites them)
+      this._openWs({
+        generation,
+        url: wsUrl(`/ws/creatures/${agentId}`),
+        onOpen: () => {
+          const tabKey = this.tabs[0]
+          if (tabKey) {
+            this._loadAgentHistory(agentId, tabKey, generation)
+          } else {
+            this._flushWsBuffer(generation)
+          }
+        },
+        reconnect: () => this._connectCreature(agentId, generation),
+      })
+    },
+
+    /** Shared WS bootstrap: wires onmessage/onclose, handles generation
+     *  checks, and schedules exponential-backoff reconnects. */
+    _openWs({ generation, url, onOpen, reconnect }) {
+      // Always replace the buffer so history events are re-accumulated
+      // on reconnect — the backend re-replays state on open.
       this._historyLoaded = false
       this._wsBuffer = []
+      if (this._reconnectTimer) {
+        clearTimeout(this._reconnectTimer)
+        this._reconnectTimer = null
+      }
 
-      const ws = new WebSocket(wsUrl(`/ws/creatures/${agentId}`))
+      const ws = new WebSocket(url)
+      this._ws = ws
+      this.wsStatus = "reconnecting"
+
+      ws.onopen = () => {
+        if (generation !== this._instanceGeneration || ws !== this._ws) return
+        this.wsStatus = "open"
+        this._reconnectDelay = 500
+        onOpen?.()
+      }
       ws.onmessage = (event) => {
         if (generation !== this._instanceGeneration || ws !== this._ws) return
-        const data = JSON.parse(event.data)
+        let data
+        try {
+          data = JSON.parse(event.data)
+        } catch (err) {
+          console.warn("Failed to parse WS message:", err)
+          return
+        }
         if (this._historyLoaded) {
           this._onMessage(data)
         } else {
@@ -883,12 +906,30 @@ export const useChatStore = defineStore("chat", {
       ws.onclose = () => {
         if (generation !== this._instanceGeneration || ws !== this._ws) return
         this.processing = false
+        this.wsStatus = "reconnecting"
+        // Exponential backoff, capped at 10s.
+        const delay = this._reconnectDelay
+        this._reconnectDelay = Math.min(delay * 2, 10000)
+        this._reconnectTimer = setTimeout(() => {
+          this._reconnectTimer = null
+          if (generation !== this._instanceGeneration) return
+          reconnect()
+        }, delay)
       }
-      this._ws = ws
+      ws.onerror = () => {
+        // onclose fires after this; reconnect is scheduled there.
+      }
+    },
 
-      const tabKey = this.tabs[0]
-      if (tabKey) {
-        this._loadAgentHistory(agentId, tabKey, generation)
+    /** Flush any events that arrived while history was still loading. */
+    _flushWsBuffer(generation) {
+      if (generation !== this._instanceGeneration) return
+      this._historyLoaded = true
+      if (this._wsBuffer) {
+        for (const data of this._wsBuffer) {
+          this._onMessage(data)
+        }
+        this._wsBuffer = []
       }
     },
 
@@ -904,18 +945,12 @@ export const useChatStore = defineStore("chat", {
         } else if (messages?.length) {
           this.messagesByTab[tabKey] = _convertHistory(messages)
         }
-      } catch {
-        /* no history yet */
-      }
-      // History loaded — flush buffered WS events
-      if (generation !== this._instanceGeneration) return
-      this._historyLoaded = true
-      if (this._wsBuffer) {
-        for (const data of this._wsBuffer) {
-          this._onMessage(data)
+      } catch (err) {
+        if (err?.response?.status !== 404) {
+          console.error("Failed to load agent history:", err)
         }
-        this._wsBuffer = []
       }
+      this._flushWsBuffer(generation)
     },
 
     /** Restore running jobs from replay result. */
@@ -1569,8 +1604,24 @@ export const useChatStore = defineStore("chat", {
       this.activeTab = null
       this._historyLoaded = false
       this._wsBuffer = []
+      if (this._reconnectTimer) {
+        clearTimeout(this._reconnectTimer)
+        this._reconnectTimer = null
+      }
+      this._reconnectDelay = 500
+      this.wsStatus = "closed"
       if (this._ws) {
-        this._ws.close()
+        // Null the callbacks first — otherwise onclose will fire during
+        // close() and schedule a reconnect for the old instance.
+        this._ws.onopen = null
+        this._ws.onmessage = null
+        this._ws.onclose = null
+        this._ws.onerror = null
+        try {
+          this._ws.close()
+        } catch {
+          // ignore
+        }
         this._ws = null
       }
       if (this._jobTimer !== null) {

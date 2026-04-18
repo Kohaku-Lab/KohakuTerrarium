@@ -13,7 +13,7 @@
 
   <!-- Context compacted (accordion) -->
   <div v-else-if="message.role === 'compact'" class="rounded-lg overflow-hidden" :class="message.status === 'running' ? 'bg-amber/6 dark:bg-amber/8 border border-amber/15 dark:border-amber/20' : 'bg-iolite/6 dark:bg-iolite/8 border border-iolite/15 dark:border-iolite/20'">
-    <div role="button" tabindex="0" class="flex items-center gap-2 py-1.5 px-3 cursor-pointer select-none" @click="toggleTool('compact_' + message.id)" @keydown.enter="toggleTool('compact_' + message.id)" @keydown.space.prevent="toggleTool('compact_' + message.id)">
+    <div role="button" tabindex="0" :aria-expanded="!!expandedTools['compact_' + message.id]" class="flex items-center gap-2 py-1.5 px-3 cursor-pointer select-none" @click="toggleTool('compact_' + message.id)" @keydown.enter="toggleTool('compact_' + message.id)" @keydown.space.prevent="toggleTool('compact_' + message.id)">
       <span v-if="message.status === 'running'" class="w-1.5 h-1.5 rounded-full bg-amber kohaku-pulse shrink-0" />
       <span class="text-xs font-medium" :class="message.status === 'running' ? 'text-amber dark:text-amber-light' : 'text-iolite dark:text-iolite-light'">
         {{ message.status === "running" ? "Compacting context..." : `Context Compacted (round ${message.round || "?"})` }}
@@ -29,7 +29,7 @@
 
   <!-- Processing error -->
   <div v-else-if="message.role === 'error'" class="rounded-lg bg-coral/8 dark:bg-coral/12 border border-coral/25 dark:border-coral/30 overflow-hidden">
-    <div role="button" tabindex="0" class="flex items-center gap-2 py-2 px-3 cursor-pointer select-none hover:bg-coral/12 dark:hover:bg-coral/18" @click="errorExpanded = !errorExpanded" @keydown.enter="errorExpanded = !errorExpanded" @keydown.space.prevent="errorExpanded = !errorExpanded">
+    <div role="button" tabindex="0" :aria-expanded="errorExpanded" class="flex items-center gap-2 py-2 px-3 cursor-pointer select-none hover:bg-coral/12 dark:hover:bg-coral/18" @click="errorExpanded = !errorExpanded" @keydown.enter="errorExpanded = !errorExpanded" @keydown.space.prevent="errorExpanded = !errorExpanded">
       <span class="text-coral font-bold text-sm">&#x2717;</span>
       <span class="text-coral dark:text-coral-light font-semibold text-xs flex-1">
         {{ message.errorType || "Processing Error" }}
@@ -46,7 +46,7 @@
 
   <!-- Trigger fired (expandable if has message content) -->
   <div v-else-if="message.role === 'trigger'" class="rounded-lg bg-amber/6 dark:bg-amber/8 border border-amber/15 dark:border-amber/20 overflow-hidden">
-    <div :role="message.triggerContent ? 'button' : undefined" :tabindex="message.triggerContent ? 0 : undefined" class="flex items-center gap-2 py-1.5 px-3" :class="message.triggerContent ? 'cursor-pointer select-none' : ''" @click="message.triggerContent && toggleTool('trig_' + message.id)" @keydown.enter="message.triggerContent && toggleTool('trig_' + message.id)" @keydown.space.prevent="message.triggerContent && toggleTool('trig_' + message.id)">
+    <div :role="message.triggerContent ? 'button' : undefined" :tabindex="message.triggerContent ? 0 : undefined" :aria-expanded="message.triggerContent ? !!expandedTools['trig_' + message.id] : undefined" class="flex items-center gap-2 py-1.5 px-3" :class="message.triggerContent ? 'cursor-pointer select-none' : ''" @click="message.triggerContent && toggleTool('trig_' + message.id)" @keydown.enter="message.triggerContent && toggleTool('trig_' + message.id)" @keydown.space.prevent="message.triggerContent && toggleTool('trig_' + message.id)">
       <span class="w-1.5 h-1.5 rounded-full bg-amber shrink-0" />
       <span class="text-xs text-amber-shadow dark:text-amber-light flex-1">
         Triggered by <span class="font-semibold">{{ message.content }}</span>
@@ -168,6 +168,22 @@ import ToolCallBlock from "@/components/chat/ToolCallBlock.vue"
 import { GEM } from "@/utils/colors"
 import { useChatStore } from "@/stores/chat"
 
+// Module-scoped so colors are stable across all ChatMessage instances.
+// If this were declared inside <script setup>, each message would have
+// its own cache and the same sender would cycle through colors.
+const SENDER_GEMS = [GEM.iolite.main, GEM.aquamarine.main, GEM.taaffeite.main, GEM.amber.main, GEM.sapphire.main]
+const _senderColorCache = {}
+let _nextColorIdx = 0
+
+function _gemForSender(name) {
+  if (!name) return GEM.iolite.main
+  if (!_senderColorCache[name]) {
+    _senderColorCache[name] = SENDER_GEMS[_nextColorIdx % SENDER_GEMS.length]
+    _nextColorIdx++
+  }
+  return _senderColorCache[name]
+}
+
 /** Extract plain text from content that may be a string or array of content parts. */
 function contentToText(content) {
   if (typeof content === "string") return content
@@ -210,19 +226,7 @@ const showSenderHeader = computed(() => {
   return props.prevMessage.sender !== props.message.sender
 })
 
-const SENDER_GEMS = [GEM.iolite.main, GEM.aquamarine.main, GEM.taaffeite.main, GEM.amber.main, GEM.sapphire.main]
-const senderColorCache = {}
-let nextColorIdx = 0
-
-const senderGemColor = computed(() => {
-  const name = props.message.sender
-  if (!name) return GEM.iolite.main
-  if (!senderColorCache[name]) {
-    senderColorCache[name] = SENDER_GEMS[nextColorIdx % SENDER_GEMS.length]
-    nextColorIdx++
-  }
-  return senderColorCache[name]
-})
+const senderGemColor = computed(() => _gemForSender(props.message.sender))
 
 // ── Message actions (copy / edit / regenerate) ──
 

@@ -17,9 +17,13 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted } from "vue"
+import { ElMessageBox } from "element-plus"
 
 import { useLayoutStore } from "@/stores/layout"
+import { useI18n } from "@/utils/i18n"
 import { LAYOUT_EVENTS, fireLayoutSaveAsRequested, onLayoutEvent } from "@/utils/layoutEvents"
+
+const { t } = useI18n()
 
 const layout = useLayoutStore()
 
@@ -48,9 +52,17 @@ function onRevert() {
   layout.revertEditMode()
 }
 
-function onExit() {
+async function onExit() {
   if (layout.editModeDirty) {
-    if (!confirm("Discard unsaved layout changes?")) return
+    try {
+      await ElMessageBox.confirm(t("layout.discardConfirm"), t("layout.unsavedTitle"), {
+        type: "warning",
+        confirmButtonText: t("common.discard"),
+        cancelButtonText: t("common.cancel"),
+      })
+    } catch {
+      return
+    }
     layout.revertEditMode()
   }
   layout.exitEditMode()

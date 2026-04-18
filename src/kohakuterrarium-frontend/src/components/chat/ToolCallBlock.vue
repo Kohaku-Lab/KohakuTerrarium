@@ -1,7 +1,7 @@
 <template>
   <div class="rounded-lg overflow-hidden min-w-0" :class="tc.kind === 'subagent' ? 'border border-taaffeite/25 dark:border-taaffeite/30' : 'border border-sapphire/20 dark:border-sapphire/25'">
     <!-- Header -->
-    <div role="button" tabindex="0" class="flex items-center gap-2 text-xs px-3 py-1.5 cursor-pointer select-none min-w-0" :class="tc.kind === 'subagent' ? 'bg-taaffeite/8 dark:bg-taaffeite/12' : 'bg-sapphire/8 dark:bg-sapphire/12'" @click="$emit('toggle')" @keydown.enter="$emit('toggle')" @keydown.space.prevent="$emit('toggle')">
+    <div role="button" tabindex="0" :aria-expanded="expanded" :aria-label="`${tc.kind === 'subagent' ? 'Sub-agent' : 'Tool'} ${tc.name}`" class="flex items-center gap-2 text-xs px-3 py-1.5 cursor-pointer select-none min-w-0" :class="tc.kind === 'subagent' ? 'bg-taaffeite/8 dark:bg-taaffeite/12' : 'bg-sapphire/8 dark:bg-sapphire/12'" @click="$emit('toggle')" @keydown.enter="$emit('toggle')" @keydown.space.prevent="$emit('toggle')">
       <span :class="statusIcon.class">{{ statusIcon.icon }}</span>
       <span class="font-semibold font-mono shrink-0" :class="tc.kind === 'subagent' ? 'text-taaffeite dark:text-taaffeite-light' : 'text-iolite dark:text-iolite-light'">
         {{ tc.kind === "subagent" ? `[sub] ${tc.name}` : tc.name }}
@@ -16,12 +16,12 @@
     <div v-if="expanded" class="border-t min-w-0" :class="tc.kind === 'subagent' ? 'border-taaffeite/15 dark:border-taaffeite/20' : 'border-sapphire/15 dark:border-sapphire/20'">
       <template v-if="tc.kind === 'subagent'">
         <!-- Sub-agent nested tool calls (warm recessed bg — sapphire tool items pop against it) -->
-        <div v-if="tc.children?.length" class="px-2 py-1.5 space-y-1 bg-warm-100 dark:bg-warm-800/80 border-b border-taaffeite/15 dark:border-taaffeite/20 max-h-48 overflow-y-auto overflow-x-hidden min-w-0">
+        <div v-if="tc.children?.length" ref="childrenEl" class="px-2 py-1.5 space-y-1 bg-warm-100 dark:bg-warm-800/80 border-b border-taaffeite/15 dark:border-taaffeite/20 max-h-48 overflow-y-auto overflow-x-hidden min-w-0" @scroll="onChildrenScroll">
           <ToolCallBlock v-for="(child, i) in tc.children" :key="i" :tc="child" :expanded="childExpanded[i]" :depth="depth + 1" @toggle="toggleChild(i)" />
         </div>
         <!-- Sub-agent result (taaffeite tinted) -->
         <div v-if="tc.result && tc.status !== 'interrupted'" class="relative">
-          <div class="px-3 py-2 bg-taaffeite/8 dark:bg-taaffeite/12 text-xs max-h-48 overflow-y-auto scroll-smooth sa-result">
+          <div ref="resultEl" class="px-3 py-2 bg-taaffeite/8 dark:bg-taaffeite/12 text-xs max-h-48 overflow-y-auto scroll-smooth sa-result" @scroll="onResultScroll">
             <template v-if="tc.resultParts?.length">
               <div class="flex flex-col gap-2">
                 <template v-for="(part, i) in tc.resultParts" :key="i">
@@ -53,7 +53,7 @@
       </template>
       <template v-else>
         <!-- Tool raw output, scrollable accordion -->
-        <div class="text-xs font-mono px-3 py-2 text-warm-500 dark:text-warm-400 whitespace-pre-wrap max-h-64 overflow-y-auto overflow-x-hidden bg-sapphire/4 dark:bg-sapphire/6 min-w-0 break-all">
+        <div ref="resultEl" class="text-xs font-mono px-3 py-2 text-warm-500 dark:text-warm-400 whitespace-pre-wrap max-h-64 overflow-y-auto overflow-x-hidden bg-sapphire/4 dark:bg-sapphire/6 min-w-0 break-all" @scroll="onResultScroll">
           <template v-if="tc.resultParts?.length">
             <div class="flex flex-col gap-2">
               <template v-for="(part, i) in tc.resultParts" :key="i">
@@ -91,17 +91,56 @@ function toggleChild(index) {
   childExpanded[index] = !childExpanded[index]
 }
 
-// Elapsed time - use store's _jobTick for consistent reactivity
+// ── Follow-mode auto-scroll for the two internal scroll containers. ──
+// Logic mirrors ChatPanel's outer scroller: we auto-stick to the bottom
+// while the user hasn't manually scrolled up. Once they do, we stop
+// following until they scroll back within ~32 px of the bottom.
+const NEAR_BOTTOM_PX = 32
+const childrenEl = ref(null)
+const resultEl = ref(null)
+const childrenFollow = ref(true)
+const resultFollow = ref(true)
+
+function _isNearBottom(el) {
+  if (!el) return true
+  return el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX
+}
+
+function onChildrenScroll() {
+  childrenFollow.value = _isNearBottom(childrenEl.value)
+}
+function onResultScroll() {
+  resultFollow.value = _isNearBottom(resultEl.value)
+}
+
+function _stickToBottom(el, follow) {
+  if (!el || !follow) return
+  // Next tick so the DOM has the new child/content height.
+  nextTick(() => {
+    if (!el || !follow.value) return
+    el.scrollTop = el.scrollHeight
+  })
+}
+
+// Follow new sub-agent child tool calls.
+watch(
+  () => props.tc.children?.length,
+  () => _stickToBottom(childrenEl.value, childrenFollow),
+)
+
+// Follow streaming tool / sub-agent result growth. The result string
+// grows character by character during streaming, and resultParts
+// length changes when new parts arrive.
+watch(
+  () => [typeof props.tc.result === "string" ? props.tc.result.length : 0, props.tc.resultParts?.length || 0],
+  () => _stickToBottom(resultEl.value, resultFollow),
+)
+
+// Elapsed time — chat.getJobElapsed reads _jobTick internally so this
+// recomputes every second while a job is running.
 const elapsed = computed(() => {
-  if (props.tc.status === "running" && props.tc.startedAt) {
-    // Reference _jobTick to re-evaluate every second
-    void chat._jobTick
-    const secs = Math.floor((Date.now() - props.tc.startedAt) / 1000)
-    return secs > 0 ? `${secs}s` : ""
-  }
-  if (props.tc.status !== "running" && props.tc.duration) {
-    return `${props.tc.duration.toFixed(1)}s`
-  }
+  if (props.tc.status === "running") return chat.getJobElapsed(props.tc)
+  if (props.tc.duration) return `${props.tc.duration.toFixed(1)}s`
   return ""
 })
 
@@ -117,16 +156,16 @@ watch(
   },
 )
 
-// Show "→ bg" button for running direct tasks after 1 second
+// Show "→ bg" button for running direct tasks after 1 second. We
+// re-read elapsed.value so this computed is invalidated whenever the
+// store's job tick advances.
 const canPromote = computed(() => {
   if (props.tc.status !== "running") return false
   const jobId = props.tc.jobId || props.tc.id
   const job = chat.runningJobs[jobId]
   if (!job || !job.promotable) return false
-  // Show after 1 second elapsed
-  void chat._jobTick
-  const elapsed = Date.now() - (props.tc.startedAt || 0)
-  return elapsed > 1000
+  void elapsed.value
+  return Date.now() - (props.tc.startedAt || 0) > 1000
 })
 
 const statusIcon = computed(() => {

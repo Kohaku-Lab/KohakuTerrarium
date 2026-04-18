@@ -51,9 +51,20 @@
     </div>
 
     <!-- Chat bubble: surface-level bg, equal margin left/right/bottom -->
-    <div class="flex-1 mx-4 mb-4 bg-white dark:bg-warm-900 rounded-b-xl rounded-tr-xl border border-warm-200 dark:border-warm-700 border-t-0 overflow-hidden flex flex-col shadow-sm">
+    <div class="flex-1 mx-4 mb-4 bg-white dark:bg-warm-900 rounded-b-xl rounded-tr-xl border border-warm-200 dark:border-warm-700 border-t-0 overflow-hidden flex flex-col shadow-sm relative" :class="{ 'ring-2 ring-iolite/40 ring-inset': dragOver }" @dragenter.prevent="onDragEnter" @dragleave.prevent="onDragLeave" @dragover.prevent @drop.prevent="onDrop">
       <!-- Decorative top accent: subtle gem gradient -->
       <div class="h-0.5 w-full bg-gradient-to-r from-iolite/30 via-taaffeite/20 to-aquamarine/30" />
+
+      <!-- Reconnect banner: surface when WS is attempting to reconnect -->
+      <div v-if="chat.wsStatus === 'reconnecting'" class="flex items-center gap-2 px-4 py-1.5 text-xs bg-amber/10 dark:bg-amber/12 border-b border-amber/25 text-amber-shadow dark:text-amber-light">
+        <span class="i-carbon-renew kohaku-pulse shrink-0" />
+        <span>{{ t("chat.disconnected") }}</span>
+      </div>
+
+      <!-- Drag-over hint -->
+      <div v-if="dragOver && !readOnly" class="absolute inset-0 z-10 flex items-center justify-center bg-iolite/5 dark:bg-iolite/10 backdrop-blur-sm pointer-events-none">
+        <div class="px-4 py-2 rounded-lg bg-white dark:bg-warm-900 border border-iolite/40 shadow-lg text-sm text-iolite dark:text-iolite-light font-medium"><span class="i-carbon-upload mr-1" /> {{ t("chat.dropToAttach") }}</div>
+      </div>
 
       <!-- Messages -->
       <div ref="messagesEl" class="flex-1 overflow-y-auto px-5 py-4" @scroll="onMessagesScroll">
@@ -75,13 +86,18 @@
         </div>
       </div>
 
-      <!-- Queued messages: shown above input, not in main chat -->
+      <!-- Queued messages: shown above input, not in main chat.
+           Capped to QUEUE_VISIBLE items; overflow collapses into a "+N more"
+           toggle so the input doesn't get pushed off-screen. -->
       <div v-if="!readOnly && chat.queuedMessages.length" class="px-4 pt-2 flex flex-col gap-1.5">
-        <div v-for="qm in chat.queuedMessages" :key="qm.id" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber/5 dark:bg-amber/5 border border-amber/20 text-sm">
+        <div v-for="qm in visibleQueued" :key="qm.id" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber/5 dark:bg-amber/5 border border-amber/20 text-sm">
           <span class="i-carbon-time text-amber/60 text-xs flex-shrink-0" />
           <span class="text-warm-500 dark:text-warm-400 truncate">{{ qm.content }}</span>
           <span class="text-warm-300 dark:text-warm-600 text-xs flex-shrink-0 ml-auto">{{ t("chat.queued") }}</span>
         </div>
+        <button v-if="hiddenQueuedCount > 0" class="self-start text-xs text-amber-shadow dark:text-amber-light hover:underline" @click="queueExpanded = !queueExpanded">
+          {{ queueExpanded ? t("chat.queueCollapse") : t("chat.queueShowMore", { count: hiddenQueuedCount }) }}
+        </button>
       </div>
 
       <!-- Input: sits inside bubble, with subtle top border -->
@@ -128,12 +144,21 @@
 </template>
 
 <script setup>
+import { ElMessage, ElMessageBox } from "element-plus"
+
 import StatusDot from "@/components/common/StatusDot.vue"
 import ChatMessage from "@/components/chat/ChatMessage.vue"
 import { useChatStore } from "@/stores/chat"
 import { useI18n } from "@/utils/i18n"
 import { terrariumAPI, agentAPI } from "@/utils/api"
 import { getHybridPref, removeHybridPref, setHybridPref } from "@/utils/uiPrefs"
+
+// Base64-encoded attachments are sent over WS; keep them bounded so a
+// single message doesn't blow past server limits or hang on encode.
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024 // 10 MB
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024 // 5 MB
+// How many queued-while-processing messages to show before collapsing.
+const QUEUE_VISIBLE = 5
 
 const props = defineProps({
   instance: { type: Object, required: true },
@@ -150,6 +175,16 @@ const inputEl = ref(null)
 const imageInputEl = ref(null)
 const fileInputEl = ref(null)
 const attachments = ref([])
+const queueExpanded = ref(false)
+const dragOver = ref(false)
+let dragDepth = 0
+
+const visibleQueued = computed(() => {
+  const queue = chat.queuedMessages
+  if (queueExpanded.value || queue.length <= QUEUE_VISIBLE) return queue
+  return queue.slice(0, QUEUE_VISIBLE)
+})
+const hiddenQueuedCount = computed(() => Math.max(0, chat.queuedMessages.length - QUEUE_VISIBLE))
 
 function draftKey() {
   const instanceId = props.instance?.id || chat._instanceId || ""
@@ -398,12 +433,59 @@ async function genericFileToPart(file) {
   }
 }
 
+function formatBytes(bytes) {
+  if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + " MB"
+  if (bytes >= 1024) return (bytes / 1024).toFixed(1) + " KB"
+  return bytes + " B"
+}
+
+function _pushAttachment(file, kind) {
+  const limit = kind === "image" ? MAX_IMAGE_BYTES : MAX_ATTACHMENT_BYTES
+  if (file.size > limit) {
+    ElMessage.error(
+      t("chat.attachmentTooLarge", {
+        name: file.name,
+        size: formatBytes(file.size),
+        limit: formatBytes(limit),
+      }),
+    )
+    return false
+  }
+  if (kind === "image" && file.type && !file.type.startsWith("image/")) {
+    ElMessage.error(t("chat.attachmentNotImage", { name: file.name }))
+    return false
+  }
+  attachments.value.push({ file, name: file.name, kind })
+  return true
+}
+
 async function onFileChange(e, kind = "file") {
   const files = Array.from(e.target.files || [])
-  for (const file of files) {
-    attachments.value.push({ file, name: file.name, kind })
-  }
+  for (const file of files) _pushAttachment(file, kind)
   e.target.value = ""
+}
+
+// ── Drag-and-drop: routes dropped files through the same validation. ──
+function onDragEnter(e) {
+  if (props.readOnly) return
+  if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes("Files")) return
+  dragDepth++
+  dragOver.value = true
+}
+function onDragLeave() {
+  if (props.readOnly) return
+  dragDepth = Math.max(0, dragDepth - 1)
+  if (dragDepth === 0) dragOver.value = false
+}
+function onDrop(e) {
+  dragDepth = 0
+  dragOver.value = false
+  if (props.readOnly) return
+  const files = Array.from(e.dataTransfer?.files || [])
+  for (const file of files) {
+    const kind = file.type.startsWith("image/") ? "image" : "file"
+    _pushAttachment(file, kind)
+  }
 }
 
 function removeAttachment(index) {
@@ -444,7 +526,15 @@ async function triggerCompact() {
 
 async function triggerClear() {
   if (props.readOnly) return
-  if (!confirm(t("chat.clearConfirm"))) return
+  try {
+    await ElMessageBox.confirm(t("chat.clearConfirm"), t("chat.clearContext"), {
+      type: "warning",
+      confirmButtonText: t("common.clear"),
+      cancelButtonText: t("common.cancel"),
+    })
+  } catch {
+    return // user cancelled
+  }
   try {
     const tab = chat.activeTab
     if (chat._instanceType === "terrarium") {
