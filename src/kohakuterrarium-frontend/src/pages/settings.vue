@@ -240,11 +240,7 @@
                   {{ t("settings.account.capturedAt", { value: formatCapturedAt(codexUsage.captured_at) }) }}
                 </div>
 
-                <div
-                  v-for="snap in codexUsage.snapshots || []"
-                  :key="snap.limit_id"
-                  class="card p-4 flex flex-col gap-3"
-                >
+                <div v-for="snap in codexUsage.snapshots || []" :key="snap.limit_id" class="card p-4 flex flex-col gap-3">
                   <div class="flex items-center justify-between">
                     <div class="font-medium text-warm-700 dark:text-warm-300">
                       {{ snap.limit_name || snap.limit_id || t("settings.account.defaultLimit") }}
@@ -260,10 +256,7 @@
                       <span>{{ t("settings.account.used", { value: formatPercent(snap.primary.used_percent) }) }}</span>
                     </div>
                     <div class="h-2 w-full rounded bg-warm-200 dark:bg-warm-700 overflow-hidden">
-                      <div
-                        class="h-full bg-iolite"
-                        :style="{ width: clampPercent(snap.primary.used_percent) + '%' }"
-                      />
+                      <div class="h-full bg-iolite" :style="{ width: clampPercent(snap.primary.used_percent) + '%' }" />
                     </div>
                     <div v-if="snap.primary.resets_at" class="text-[11px] text-warm-400">
                       {{ t("settings.account.resets", { value: formatResets(snap.primary.resets_at) }) }}
@@ -276,10 +269,7 @@
                       <span>{{ t("settings.account.used", { value: formatPercent(snap.secondary.used_percent) }) }}</span>
                     </div>
                     <div class="h-2 w-full rounded bg-warm-200 dark:bg-warm-700 overflow-hidden">
-                      <div
-                        class="h-full bg-iolite"
-                        :style="{ width: clampPercent(snap.secondary.used_percent) + '%' }"
-                      />
+                      <div class="h-full bg-iolite" :style="{ width: clampPercent(snap.secondary.used_percent) + '%' }" />
                     </div>
                     <div v-if="snap.secondary.resets_at" class="text-[11px] text-warm-400">
                       {{ t("settings.account.resets", { value: formatResets(snap.secondary.resets_at) }) }}
