@@ -48,7 +48,7 @@
             <p class="text-xs text-warm-400 mb-2">{{ t("settings.models.storageHint") }}</p>
 
             <div class="card p-4 border-l-3 border-l-sapphire dark:border-l-sapphire-light">
-              <div class="font-medium text-warm-700 dark:text-warm-300 mb-3">Providers</div>
+              <div class="font-medium text-warm-700 dark:text-warm-300 mb-3">{{ t("settings.backends.title") }}</div>
               <div v-for="backend in backends" :key="backend.name" class="flex items-center gap-2 py-2 border-b border-warm-100 dark:border-warm-800 last:border-b-0">
                 <div class="flex-1 min-w-0">
                   <div class="font-medium text-warm-700 dark:text-warm-300">{{ backend.name }}</div>
@@ -56,9 +56,9 @@
                     {{ backend.backend_type }}<span v-if="backend.base_url"> · {{ backend.base_url }}</span>
                   </div>
                 </div>
-                <el-tag size="small" effect="plain">{{ backend.built_in ? "built-in" : "custom" }}</el-tag>
-                <el-tag size="small" :type="backend.available ? 'success' : 'info'">{{ backend.has_token ? "token set" : "no token" }}</el-tag>
-                <el-popconfirm v-if="!backend.built_in" title="Delete this provider?" @confirm="deleteBackend(backend.name)">
+                <el-tag size="small" effect="plain">{{ backend.built_in ? t("settings.backends.builtIn") : t("settings.backends.custom") }}</el-tag>
+                <el-tag size="small" :type="backend.available ? 'success' : 'info'">{{ backend.has_token ? t("settings.backends.tokenSet") : t("settings.backends.noToken") }}</el-tag>
+                <el-popconfirm v-if="!backend.built_in" :title="t('settings.backends.deleteConfirm')" @confirm="deleteBackend(backend.name)">
                   <template #reference>
                     <el-button size="small" type="danger" plain>{{ t("common.delete") }}</el-button>
                   </template>
@@ -66,11 +66,11 @@
               </div>
               <div class="grid grid-cols-2 gap-3 mt-3">
                 <div>
-                  <label class="text-[11px] text-warm-400 mb-1 block">Provider name</label>
+                  <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.backends.name") }}</label>
                   <el-input v-model="backendForm.name" size="small" placeholder="my-provider" />
                 </div>
                 <div>
-                  <label class="text-[11px] text-warm-400 mb-1 block">Backend type</label>
+                  <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.backends.backendType") }}</label>
                   <el-select v-model="backendForm.backend_type" size="small" class="w-full">
                     <el-option value="openai" label="openai" />
                     <el-option value="codex" label="codex" />
@@ -78,12 +78,12 @@
                   </el-select>
                 </div>
                 <div class="col-span-2">
-                  <label class="text-[11px] text-warm-400 mb-1 block">Base URL</label>
+                  <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.backends.baseUrl") }}</label>
                   <el-input v-model="backendForm.base_url" size="small" placeholder="https://api.example.com/v1" />
                 </div>
               </div>
               <div class="flex gap-2 mt-3">
-                <el-button type="primary" size="small" :disabled="!backendForm.name || !backendForm.backend_type" @click="saveBackend">Save provider</el-button>
+                <el-button type="primary" size="small" :disabled="!backendForm.name || !backendForm.backend_type" @click="saveBackend">{{ t("settings.backends.save") }}</el-button>
               </div>
             </div>
 

@@ -11,21 +11,18 @@
     <el-option v-for="m in availableModels" :key="m.name" :label="modelLabel(m)" :value="m.name" :disabled="m.name === currentModel" />
   </el-select>
 
-  <!-- Model config dialog (opened by gear button in StatusBar) -->
-  <el-dialog v-model="configDialogVisible" title="Model Configuration" width="500px" :close-on-click-modal="true">
+  <!-- Model profile preview (opened by gear button in StatusBar).
+       Read-only until editing is wired up, so kept compact. -->
+  <el-dialog v-model="configDialogVisible" title="Model profile" width="380px" :close-on-click-modal="true">
     <div class="flex flex-col gap-2">
-      <p class="text-xs text-warm-400">
-        JSON profile for
-        <strong class="text-warm-600 dark:text-warm-300">{{ currentModel || "current model" }}</strong>
+      <p class="text-xs text-warm-500 dark:text-warm-400 font-mono">
+        {{ currentModel || "current model" }}
       </p>
-      <textarea v-model="configJson" class="w-full h-48 bg-warm-50 dark:bg-warm-800 border border-warm-200 dark:border-warm-700 rounded p-2 font-mono text-xs resize-y" spellcheck="false" />
-      <p v-if="configJsonError" class="text-coral text-xs">
-        {{ configJsonError }}
-      </p>
+      <pre class="w-full h-40 overflow-auto bg-warm-50 dark:bg-warm-800 border border-warm-200 dark:border-warm-700 rounded p-2 font-mono text-[11px] text-warm-700 dark:text-warm-200 whitespace-pre">{{ configJson }}</pre>
+      <p class="text-[10px] text-warm-400 italic leading-snug">Read-only. Edit <code>profiles.toml</code> or the Settings page to change profiles.</p>
     </div>
     <template #footer>
-      <el-button size="small" @click="configDialogVisible = false">Cancel</el-button>
-      <el-button size="small" type="primary" @click="saveModelConfig">Save</el-button>
+      <el-button size="small" @click="configDialogVisible = false">Close</el-button>
     </template>
   </el-dialog>
 </template>
@@ -47,10 +44,9 @@ const models = ref([])
 const loading = ref(false)
 const availableModels = computed(() => models.value.filter((model) => model.available !== false))
 
-// Config dialog state
+// Config dialog state — profile preview only; editing is not wired up yet.
 const configDialogVisible = ref(false)
 const configJson = ref("")
-const configJsonError = ref("")
 
 const currentInstance = computed(() => {
   const id = String(route.params.id || "")
@@ -139,7 +135,6 @@ async function onPick(modelName) {
 
 /** Open model config dialog with the current profile's JSON */
 function openModelConfig() {
-  configJsonError.value = ""
   if (models.value.length === 0) loadModels()
   const modelName = currentModel.value
   const fullProfile = availableModels.value.find((m) => m.name === modelName) || models.value.find((m) => m.name === modelName)
@@ -158,18 +153,6 @@ function openModelConfig() {
     : { model: modelName, extra_body: {} }
   configJson.value = JSON.stringify(profile, null, 2)
   configDialogVisible.value = true
-}
-
-function saveModelConfig() {
-  configJsonError.value = ""
-  try {
-    JSON.parse(configJson.value)
-    configDialogVisible.value = false
-    ElMessage.success("Config saved")
-    // TODO: send updated config to backend when API supports it
-  } catch (e) {
-    configJsonError.value = "Invalid JSON: " + e.message
-  }
 }
 
 // Listen for gear button event from StatusBar

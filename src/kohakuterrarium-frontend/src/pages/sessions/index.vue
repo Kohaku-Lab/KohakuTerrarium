@@ -37,7 +37,7 @@
               :class="session.config_type === 'terrarium' ? 'i-carbon-network-4' : 'i-carbon-bot'"
               class="text-lg shrink-0"
               :style="{
-                color: session.config_type === 'terrarium' ? '#5A4FCF' : '#4C9989',
+                color: session.config_type === 'terrarium' ? GEM.iolite.main : GEM.aquamarine.main,
               }"
             />
 
@@ -106,10 +106,11 @@
 </template>
 
 <script setup>
-import { ElMessage } from "element-plus"
+import { ElMessage, ElMessageBox } from "element-plus"
 
 import GemBadge from "@/components/common/GemBadge.vue"
 import { useInstancesStore } from "@/stores/instances"
+import { GEM } from "@/utils/colors"
 import { useI18n } from "@/utils/i18n"
 import { sessionAPI } from "@/utils/api"
 
@@ -187,7 +188,15 @@ async function resumeSession(session) {
 }
 
 async function deleteSession(session) {
-  if (!confirm(t("sessions.deleteConfirm", { name: session.name }))) return
+  try {
+    await ElMessageBox.confirm(t("sessions.deleteConfirm", { name: session.name }), t("common.delete"), {
+      type: "warning",
+      confirmButtonText: t("common.delete"),
+      cancelButtonText: t("common.cancel"),
+    })
+  } catch {
+    return // user cancelled
+  }
   try {
     await sessionAPI.delete(session.name)
     ElMessage.success(t("sessions.deleted"))
