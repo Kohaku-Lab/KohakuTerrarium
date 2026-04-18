@@ -10,13 +10,9 @@
 
 import { onMounted, onUnmounted, ref } from "vue"
 
-const BUFFER_SIZE = 5000
+import { wsUrl as _wsUrl } from "@/utils/wsUrl"
 
-function _wsUrl(path) {
-  if (typeof window === "undefined") return path
-  const scheme = window.location.protocol === "https:" ? "wss:" : "ws:"
-  return `${scheme}//${window.location.host}${path}`
-}
+const BUFFER_SIZE = 5000
 
 export function useLogStream() {
   const lines = ref(

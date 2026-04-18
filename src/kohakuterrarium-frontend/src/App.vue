@@ -35,6 +35,7 @@ import { useInstancesStore } from "@/stores/instances"
 import { useLocaleStore } from "@/stores/locale"
 import { useThemeStore } from "@/stores/theme"
 import { useI18n } from "@/utils/i18n"
+import { toDesktopRoute, toMobileRoute } from "@/utils/routes"
 import { getHybridPrefSync, removeHybridPref, setHybridPref } from "@/utils/uiPrefs"
 
 const MOBILE_WIDTH = 768

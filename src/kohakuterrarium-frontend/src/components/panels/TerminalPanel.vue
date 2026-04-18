@@ -25,6 +25,7 @@ import "@xterm/xterm/css/xterm.css"
 import { useChatStore } from "@/stores/chat"
 import { useInstancesStore } from "@/stores/instances"
 import { useThemeStore } from "@/stores/theme"
+import { wsUrl } from "@/utils/wsUrl"
 
 const props = defineProps({
   instance: { type: Object, default: null },
@@ -66,12 +67,6 @@ const terminalPath = computed(() => {
   }
   return `/ws/terminal/${id}`
 })
-
-function wsUrl(path) {
-  if (typeof window === "undefined") return path
-  const scheme = window.location.protocol === "https:" ? "wss:" : "ws:"
-  return `${scheme}//${window.location.host}${path}`
-}
 
 let unmounted = false
 

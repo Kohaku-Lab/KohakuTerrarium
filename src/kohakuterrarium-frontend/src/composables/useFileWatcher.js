@@ -6,11 +6,7 @@
 
 import { onMounted, onUnmounted, ref, watch } from "vue"
 
-function _wsUrl(path) {
-  if (typeof window === "undefined") return path
-  const scheme = window.location.protocol === "https:" ? "wss:" : "ws:"
-  return `${scheme}//${window.location.host}${path}`
-}
+import { wsUrl as _wsUrl } from "@/utils/wsUrl"
 
 export function useFileWatcher(agentIdRef) {
   const changes = ref([])
