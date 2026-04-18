@@ -60,6 +60,7 @@ order: `config.yaml` → `config.yml` → `config.json` → `config.toml`.
 | `plugins` | list | `[]` | no | Lifecycle plugins. See [Plugins](#plugins). |
 | `no_inherit` | list[str] | `[]` | no | Keys that replace (not merge) base values. E.g. `[tools, subagents]`. |
 | `memory` | dict | `{}` | no | `memory.embedding.{provider,model}`. See [Memory](#memory). |
+| `output_wiring` | list | `[]` | no | Per-creature automatic round-output routing. See [Output wiring](#output-wiring). |
 
 ### Controller block
 
@@ -177,6 +178,52 @@ Common per-type options:
 | `target` | float | `0.5` | Target fraction after compaction. |
 | `keep_recent_turns` | int | `5` | Turns preserved verbatim. |
 | `compact_model` | str | controller's model | Override LLM used for summarisation. |
+
+### Output wiring
+
+A list of framework-level routing entries. At each turn-end, the
+framework constructs a `creature_output` `TriggerEvent` and pushes it
+directly into each target creature's event queue — bypassing channels
+entirely. See [terrariums guide — output wiring](../guides/terrariums.md#output-wiring)
+and [patterns.md — pattern 1b](../concepts/patterns.md) for
+discussion; this section is the config reference.
+
+Entry fields:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `to` | str | — | Target creature name, or the magic string `"root"`. |
+| `with_content` | bool | `true` | If `false`, the event carries an empty `content` (metadata-only ping). |
+| `prompt` | str \| null | `null` | Template for the receiver's prompt override. When unset, a default template is used depending on `with_content`. |
+| `prompt_format` | `simple` \| `jinja` | `"simple"` | `simple` uses `str.format_map`; `jinja` uses the `prompt.template` renderer for conditionals / filters. |
+
+Available template variables (both formats): `source`, `target`,
+`content`, `turn_index`, `source_event_type`, `with_content`.
+
+Shorthand — a bare string is sugar for `{to: <str>, with_content: true}`:
+
+```yaml
+output_wiring:
+  - runner                                   # shorthand
+  - { to: root, with_content: false }        # lifecycle ping
+  - to: analyzer
+    prompt: "[From coder] {content}"         # simple (default)
+  - to: critic
+    prompt: "{{ source | upper }}: {{ content }}"
+    prompt_format: jinja
+```
+
+Notes:
+
+- Only meaningful when the creature runs inside a terrarium. Standalone
+  creatures with `output_wiring` configured emit nothing (the resolver
+  is attached by the terrarium runtime; a standalone agent gets a
+  no-op resolver that logs once).
+- Unknown / stopped targets are logged and skipped; they never raise
+  into the source creature's turn-finalisation.
+- The source's `_finalize_processing` runs to completion immediately —
+  each target's `_process_event` runs in its own `asyncio.Task` so a
+  slow receiver doesn't block the source.
 
 ### Termination
 
@@ -333,7 +380,8 @@ Terrarium field summary:
 | `creatures` | list | `[]` | Creatures that run inside the terrarium. |
 | `channels` | dict | `{}` | Shared channel declarations. |
 
-Creature entry fields:
+Creature entry fields (also accepts any AgentConfig field inline, e.g.
+`system_prompt_file`, `controller`, `output_wiring`, …):
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -343,6 +391,7 @@ Creature entry fields:
 | `channels.can_send` | list[str] | `[]` | Channels the creature can publish to. |
 | `output_log` | bool | `false` | Capture stdout per creature. |
 | `output_log_size` | int | `100` | Max lines per creature's log buffer. |
+| `output_wiring` | list | `[]` | Framework-level auto-delivery of this creature's turn-end output to other creatures. See [Output wiring](#output-wiring) for the entry shape. |
 
 Channel entry fields:
 

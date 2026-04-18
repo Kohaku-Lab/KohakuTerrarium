@@ -125,7 +125,7 @@ Supports OpenRouter, OpenAI, Anthropic, Google Gemini, and any OpenAI-compatible
 ```bash
 # Single creature
 kt run @kt-biome/creatures/swe --mode cli
-kt run @kt-biome/creatures/reviewer
+kt run @kt-biome/creatures/researcher
 
 # Multi-agent terrarium
 kt terrarium run @kt-biome/terrariums/swe_team
@@ -223,13 +223,13 @@ kt run @package/path/to/creature
                     |     Terrarium Layer       |
                     |   (pure wiring, no LLM)   |
                     +-------+----------+--------+
-                    |  swe  | reviewer |  ....  |
+                    |  swe  |  coder   |  ....  |
                     +-------+----------+--------+
 ```
 
-A terrarium is a pure wiring layer that manages creature lifecycles and the channels between them. No LLM, no decisions — just runtime. Creatures don't know they're in a terrarium; they run standalone too.
+A terrarium is a pure wiring layer that manages creature lifecycles, the channels between them, and the framework-level **output wiring** that auto-delivers a creature's turn-end output to named targets. No LLM, no decisions — just runtime. Creatures don't know they're in a terrarium; they run standalone too.
 
-The terrarium layer is still rough — progress depends on creatures routing their own outputs correctly, and a disobedient model can stall a team. Planned fixes are in the [roadmap](ROADMAP.md). Prefer vertical (sub-agent) multi-agent until those land.
+Terrarium is our **proposed architecture** for horizontal multi-agent — two complementary cooperation mechanisms (channels for conditional / optional traffic; output wiring for deterministic pipeline edges), plus hot-plug and observation. Still evolving as patterns emerge; the [ROADMAP](ROADMAP.md) has the open questions. Prefer sub-agents (vertical) when a single creature can decompose the task itself — it's the simpler answer for most "I need context isolation" instincts.
 
 ### Root agent
 

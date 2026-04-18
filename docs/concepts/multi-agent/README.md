@@ -56,20 +56,31 @@ Reach for a terrarium when you genuinely want *different creatures*
 cooperating, and when the workflow is stable enough to be expressed as
 a topology.
 
-## Honest note
+## Position, honestly
 
-The terrarium layer is still rough. Its current weakness: progress
-depends on creatures routing their own outputs correctly, and if a
-model misses an instruction the terrarium can stall. The
-[ROADMAP](../../../ROADMAP.md) describes the planned fixes
-(configurable round routing, root lifecycle observation, dynamic
-management). This is experimental territory. Use sub-agents when you
-can.
+We treat terrarium as a **proposed architecture** for horizontal
+multi-agent. The pieces work together today: channels for optional /
+conditional traffic, **output wiring** for deterministic pipeline
+edges (a framework-level config that auto-delivers a creature's
+turn-end text into a target's event queue — no `send_message` needed),
+plus hot-plug, observation, and lifecycle pings to root. kt-biome's
+`auto_research`, `deep_research`, `swe_team`, and `pair_programming`
+terrariums exercise these end-to-end.
+
+What we're still learning is the idiom — when to prefer wiring vs.
+channels, how to express conditional branches without hand-rolled
+channel plumbing, how to surface wiring activity in the UI on par
+with channel traffic. Those open questions live in the
+[ROADMAP](../../../ROADMAP.md).
+
+Use terrarium where you genuinely want different creatures
+cooperating. Use sub-agents when the task decomposes naturally inside
+one creature — vertical stays simpler for most "I need context
+isolation" instincts. The framework doesn't pick between them.
 
 ## What's in this section
 
-- [Terrarium](terrarium.md) — the horizontal wiring layer, honestly
-  described.
+- [Terrarium](terrarium.md) — the horizontal wiring layer.
 - [Root agent](root-agent.md) — the creature that sits outside a
   terrarium and represents the user.
 

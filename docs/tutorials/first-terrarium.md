@@ -49,7 +49,7 @@ terrarium:
         can_send:  [review]
 
     - name: reviewer
-      base_config: "@kt-biome/creatures/reviewer"
+      base_config: "@kt-biome/creatures/general"
       system_prompt: |
         You critique drafts. When you receive a message on `review`,
         reply with one or two concrete improvement suggestions on
@@ -102,54 +102,101 @@ writer wakes up again, revises.
 You can watch the channel tabs for raw message flow and the creature
 tabs for each one's reasoning.
 
-## Step 5 — Understand the honest limit
+## Step 5 — Make the handoff reliable with output wiring
 
-Horizontal multi-agent has one characteristic failure mode: **progress
-depends on each creature actually routing its output to the right
-channel.** If a model forgets to call `send_message`, the channel stays
-empty and the team stalls.
+Channels are the right answer for conditional / optional / broadcast
+traffic — the reviewer's "approve vs. revise" decision is a genuine
+choice that should live on a channel. But the writer → reviewer edge
+is **deterministic**: every time the writer finishes a turn, the
+reviewer should see it. Relying on the writer's LLM to remember
+`send_message("review", ...)` is the old failure mode.
 
-Two workarounds you can reach for today:
+The framework offers a direct alternative: **output wiring**. Declare
+the pipeline edge in the creature's config, and the runtime emits a
+`creature_output` event straight into the target's event queue at
+turn-end — no `send_message` required on either side.
 
-1. **Strong prompting.** Tell the creature very explicitly which
-   channel to emit to and when. The inline prompts above do this.
-2. **Add a root agent.** A root creature sits *outside* the terrarium
-   and owns the terrarium-management tools. It receives user input,
-   seeds the team, observes channels, and nudges creatures that stall.
-   See `@kt-biome/creatures/root` and the `swe_team` terrarium for a
-   worked example. The [root agent concept](../concepts/multi-agent/root-agent.md)
-   explains the pattern.
+Update `terrariums/writer-team.yaml`:
 
-Example — add a root:
+```yaml
+terrarium:
+  name: writer_team
+  creatures:
+    - name: writer
+      base_config: "@kt-biome/creatures/general"
+      system_prompt: |
+        You write short product copy. You receive a brief on `tasks`
+        and a critique on `feedback`. When you receive feedback, revise
+        your draft based on it.
+      output_wiring:
+        - reviewer                # every writer turn-end → reviewer
+      channels:
+        listen: [tasks, feedback]
+        can_send: []              # no longer needs to send on `review`
+    - name: reviewer
+      base_config: "@kt-biome/creatures/general"
+      system_prompt: |
+        You are a strict reviewer. The writer's draft will arrive as a
+        creature_output event. If the draft is good, send "APPROVED:
+        <draft>" on `feedback`. If not, send specific revision requests
+        on `feedback`.
+      channels:
+        listen: []                # receives writer's output via wiring
+        can_send: [feedback]      # reviewer's decision is conditional — keep on channel
+  channels:
+    tasks:    { type: queue }
+    feedback: { type: queue }
+```
+
+What changed:
+
+- Writer's `output_wiring: [reviewer]` replaces the need for the
+  writer to emit on a `review` channel.
+- The `review` channel itself is gone — wiring carries the edge.
+- Reviewer still uses `feedback` (channel) because "approve vs.
+  revise" is a conditional branch that wiring can't express.
+
+Re-run and the ratchet completes without the writer ever having to
+remember to call `send_message` — wiring fires regardless.
+
+## Step 6 — Add a root for interactive use (optional)
+
+Channels + wiring give you a headless cooperative team. If you want a
+single conversational surface — the user talks to one agent and that
+agent drives the team — add a **root**:
 
 ```yaml
 terrarium:
   name: writer_team
   root:
-    base_config: "@kt-biome/creatures/root"
-  # ... creatures and channels as before
+    base_config: "@kt-biome/creatures/general"
+    system_prompt_file: prompts/root.md   # team-specific delegation prompt
+  creatures:
+    - ...
 ```
 
-Now the TUI mounts the root agent on its main tab and you talk to it
-directly; it orchestrates the writer/reviewer through terrarium tools.
+Create `prompts/root.md` next to the terrarium yaml — it only needs
+to carry delegation style; the framework auto-generates the topology
+awareness section listing the team's creatures and channels, and
+force-injects the management toolset (`terrarium_send`,
+`creature_status`, `terrarium_history`, …).
 
-## Step 6 — Where terrariums are going
-
-Auto-routing (a configurable "creature's last message always goes to
-channel X"), root lifecycle observation, and dynamic creature
-management are on the roadmap. Until they land, prefer explicit
-prompting or a root creature for anything important. The full picture
-is in the [ROADMAP](../../ROADMAP.md) terrarium section.
+The TUI mounts root on its main tab; you talk to root, root talks to
+the team. See [root agent concept](../concepts/multi-agent/root-agent.md)
+for more.
 
 ## What you learned
 
 - A terrarium is wiring. It adds no intelligence.
 - Creatures stay standalone; the terrarium tells them who can hear
-  what and who can send where.
-- Horizontal multi-agent is real but explicit — prompts drive the
-  routing, and the current failure mode is stalls.
-- A root creature is the practical answer when you want a user-facing
-  orchestrator around the team.
+  what, who can send where, and where their turn-end output flows.
+- Two cooperation mechanisms compose freely:
+  - **Channels** — conditional, optional, broadcast. The creature
+    chooses whether and where to send.
+  - **Output wiring** — deterministic pipeline edges. Fires on every
+    turn-end regardless of what the creature does.
+- Root is optional. Skip it for headless workflows; add it when you
+  want a single conversational surface.
 
 ## What to read next
 

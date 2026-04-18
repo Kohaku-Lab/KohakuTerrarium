@@ -32,9 +32,9 @@ terrarium config removes that boilerplate.
 ```yaml
 terrarium:
   root:
-    base_config: "@kt-biome/creatures/root"
+    base_config: "@kt-biome/creatures/general"
+    system_prompt_file: prompts/root.md     # team-specific delegation prompt
     controller:
-      llm: gpt-5.4
       reasoning_effort: high
   creatures:
     - ...
@@ -43,12 +43,28 @@ terrarium:
 ```
 
 Anything valid in an agent config is valid inside `root:`. Inheritance
-(`base_config`) works the same way. The only difference at runtime:
+(`base_config`) works the same way.
 
-- The terrarium runtime injects the management toolset into its
-  registry.
-- It auto-listens to every creature channel (so it sees all activity).
-- It is the one the user interacts with directly (TUI / CLI / web).
+Authoring note: kt-biome does **not** ship a generic `root` creature.
+Each terrarium owns its own `root:` block and a co-located
+`prompts/root.md` that knows its specific team — "coding → send to
+`driver`" reads better than "coding → send to the swe creature." The
+framework handles everything else.
+
+The runtime does three things with the root agent, regardless of what
+you put in its config:
+
+- Injects the management toolset (`terrarium_create`, `terrarium_send`,
+  `creature_start`, `creature_stop`, `creature_status`,
+  `terrarium_status`, …) into its registry.
+- Auto-listens to every creature channel so it sees all team activity.
+- Auto-generates a "terrarium awareness" prompt section listing the
+  bound terrarium's creatures and channels, and appends it to root's
+  system prompt.
+- Makes root the one the user interacts with directly (TUI / CLI / web).
+
+Your `prompts/root.md` only needs to carry delegation style /
+personality — the topology awareness is framework-supplied.
 
 ## How we implement it
 

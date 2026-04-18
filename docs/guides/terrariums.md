@@ -2,11 +2,11 @@
 
 For readers composing several creatures that need to cooperate.
 
-A **terrarium** is pure wiring: no LLM of its own, no decisions. It owns shared channels and manages the lifecycle of the creatures inside it. Creatures do not know they are in one — they listen on channel names, send on channel names, and the terrarium makes those names real.
+A **terrarium** is pure wiring: no LLM of its own, no decisions. It owns shared channels, manages the lifecycle of the creatures inside it, and ships the framework-level *output wiring* that auto-delivers a creature's turn-end output to named targets. Creatures do not know they are in one — they listen on channel names, send on channel names, and the terrarium makes those names real.
 
 Concept primer: [terrarium](../concepts/multi-agent/terrarium.md), [root agent](../concepts/multi-agent/root-agent.md), [channel](../concepts/modules/channel.md).
 
-Terrariums are still experimental — see the [honest bit](#the-honest-bit) below before building anything production-facing.
+We treat terrarium as a **proposed architecture** for horizontal multi-agent — the pieces work together (wiring + channels + hot-plug + observation + lifecycle pings to root), and kt-biome's four terrariums exercise them end to end. What we're still learning is the idiom; see [position, honestly](#position-honestly) below and the [ROADMAP](../../ROADMAP.md).
 
 ## Config anatomy
 
@@ -14,27 +14,32 @@ Terrariums are still experimental — see the [honest bit](#the-honest-bit) belo
 terrarium:
   name: swe-team
   root:
-    base_config: "@kt-biome/creatures/root"
+    base_config: "@kt-biome/creatures/general"
+    system_prompt_file: prompts/root.md    # team-specific delegation prompt, co-located with the terrarium
   creatures:
     - name: swe
       base_config: "@kt-biome/creatures/swe"
+      output_wiring: [reviewer]            # deterministic edge: every swe turn → reviewer
       channels:
-        listen:   [tasks]
-        can_send: [review, status]
-    - name: reviewer
-      base_config: "@kt-biome/creatures/reviewer"
-      channels:
-        listen:   [review]
+        listen:   [tasks, feedback]
         can_send: [status]
+    - name: reviewer
+      base_config: "@kt-biome/creatures/swe"
+      system_prompt_file: prompts/reviewer.md   # reviewer role expressed as a prompt, not a dedicated creature
+      channels:
+        listen:   [status]
+        can_send: [feedback, results, status]  # conditional: approve → results, revise → feedback
   channels:
-    tasks:   { type: queue }
-    review:  { type: queue }
-    status:  { type: broadcast }
+    tasks:    { type: queue }
+    feedback: { type: queue }
+    results:  { type: queue }
+    status:   { type: broadcast }
 ```
 
-- **`creatures`** — same inheritance and override rules as standalone creatures. Each creature additionally gets `channels.listen` / `channels.can_send`.
+- **`creatures`** — same inheritance and override rules as standalone creatures. Each creature additionally gets `channels.listen` / `channels.can_send` plus optional `output_wiring`.
 - **`channels`** — `queue` (one consumer per message) or `broadcast` (every subscriber gets every message).
-- **`root`** — optional user-facing creature outside the terrarium; see below.
+- **`output_wiring`** — per-creature list of targets that receive this creature's turn-end output automatically. See [Output wiring](#output-wiring).
+- **`root`** — optional user-facing creature outside the terrarium; see below. kt-biome does not ship a standalone `root` creature — each terrarium brings its own `prompts/root.md`.
 
 Shorthand for channel description:
 
@@ -99,6 +104,7 @@ A root is a standalone creature with terrarium-management tools attached. It sit
 - Auto-listens to every creature channel.
 - Receives `report_to_root`.
 - Gets terrarium tools (`terrarium_create`, `terrarium_send`, `creature_start`, `creature_stop`, …).
+- Auto-receives a generated "terrarium awareness" prompt section listing the bound team's creatures and channels.
 - Is the user-facing interface when a terrarium runs in TUI/CLI mode.
 
 Use a root when you want a single conversational surface; skip it for headless cooperative flows.
@@ -106,9 +112,11 @@ Use a root when you want a single conversational surface; skip it for headless c
 ```yaml
 terrarium:
   root:
-    base_config: "@kt-biome/creatures/root"
-    system_prompt_file: prompts/team_lead.md
+    base_config: "@kt-biome/creatures/general"
+    system_prompt_file: prompts/root.md   # team-specific delegation prompt
 ```
+
+kt-biome does not ship a generic `root` creature. Each terrarium owns its own `root:` block and a co-located `prompts/root.md` — the prompt can name actual team members ("coding → send to `driver`") because it lives next to the team it orchestrates. The framework provides the management toolset and topology awareness automatically.
 
 See [concepts/multi-agent/root-agent](../concepts/multi-agent/root-agent.md) for the design rationale.
 
@@ -159,24 +167,69 @@ await runtime.stop()
 
 For streaming, multi-tenant, or long-lived use, wrap with `KohakuManager`. See [Programmatic Usage](programmatic-usage.md).
 
-## The honest bit
+## Output wiring
 
-A terrarium's progress depends on each creature routing output to the right channel. If a model ignores the instruction, the team stalls. Prefer terrariums when:
+Channels rely on the creature remembering to call `send_message`. For pipeline edges that are deterministic — "every time the coder finishes, the runner should run what it wrote" — the framework offers an alternative: **output wiring**.
 
-- The workflow is explicit (fixed channel topology, predictable message shapes).
-- The creatures are well-prompted and reliably follow their role instructions.
-- You want hot-plug or observation.
+A creature declares in its config where its turn-end output should go. At every turn boundary, the framework emits a `creature_output` `TriggerEvent` into each target's event queue. No `send_message`, no `ChannelTrigger`, no channel in between.
 
-Prefer sub-agents (vertical delegation inside one creature) when a parent can do the decomposition itself.
+```yaml
+# terrarium.yaml creature block
+- name: coder
+  base_config: "@kt-biome/creatures/swe"
+  output_wiring:
+    - runner                              # shorthand = {to: runner, with_content: true}
+    - { to: root, with_content: false }   # lifecycle ping (metadata only)
+  channels:
+    listen: [reverts, team_chat]
+    can_send: [team_chat]
+```
+
+The full entry shape is in [reference / configuration — output wiring](../reference/configuration.md#output-wiring). Key properties:
+
+- **`to: <creature-name>`** resolves to another creature in the same terrarium.
+- **`to: root`** is a magic-string target — the root agent (which sits outside the terrarium). Useful for lifecycle pings; the root sees the event even when it wouldn't be listening to a channel.
+- **`with_content: false`** delivers the event with empty `content` — a metadata-only "turn-end happened" signal.
+- **`prompt` / `prompt_format`** customise the receiver-side prompt-override text.
+
+### When to wire vs. when to channel
+
+Reach for **output wiring** when:
+
+- The edge is deterministic — one creature's output always goes to the next stage.
+- You want lifecycle observability without the creature having to opt in via `send_message`.
+- The pipeline is linear (or a ratchet loop where the loop-back is still unconditional).
+
+Stay on **channels** when:
+
+- The edge is conditional. Reviewer says approve vs. revise; analyzer says keep vs. discard. Wiring can't branch; channels can.
+- The traffic is broadcast / status / team-chat — optional, observed by many.
+- You want group-chat shape where many creatures may send, any may listen.
+
+Both mechanisms compose freely in one terrarium. kt-biome's `auto_research` uses wiring for the ratchet edges (ideator → coder → runner → analyzer) and channels for the analyzer's keep-vs-discard decision and for team-chat status.
+
+### How the receiver sees a wiring event
+
+The event lands in the target creature's event queue and goes through the same `_process_event` path any trigger uses. The receiver tab in the TUI renders the ensuing turn normally (prompt injection, LLM text, tools). Plugins registered on the receiver see the event via the existing `on_event` hook — no new plugin API.
+
+## Position, honestly
+
+Two cooperation mechanisms are enough to cover most teams today: channels (tool + trigger, voluntary) and output wiring (framework-level, automatic). The kt-biome terrariums exercise both — wiring for the deterministic pipeline edges, channels for the conditional branches and group-chat traffic.
+
+What we're still learning is the idiom. The observer panel and TUI rendering of wiring events is thinner than channel-traffic rendering. Conditional edges still need channels because wiring can't branch — a small `when:` filter is something we want to understand through use rather than design up front. Content modes (`last_round` vs. `all_rounds` vs. summary) may become useful for pipelines that want scratch reasoning included; not clear yet. See the [ROADMAP](../../ROADMAP.md) for the full set of open questions.
+
+Prefer **sub-agents** (vertical delegation inside one creature) when a single parent can do the decomposition itself — it's the simpler answer for most "I need context isolation" instincts. Reach for a terrarium when you genuinely want different creatures cooperating and want the individual creatures to stay portable as standalone configs.
 
 ## Troubleshooting
 
-- **Team stalls, no messages moving.** The sender creature probably forgot to call `send_message`. Use `--observe` to see channel traffic live; stronger prompts on the sender side usually resolve it.
+- **Team stalls, no messages moving.** Most common cause: the sender relied on `send_message` and the LLM forgot. Two fixes:
+  - Add `output_wiring:` for the deterministic pipeline edge — the framework can't forget.
+  - Strengthen the sender's prompt about the channel obligation (for conditional edges that must remain channel-based).
+  Use `--observe` to see channel traffic live.
 - **Creature doesn't react to a channel message.** Confirm `listen` contains the channel name and the `ChannelTrigger` registered (`kt terrarium info` prints the wiring).
-- **Root can't see what creatures are doing.** Root sees channels it listens to and `report_to_root`. Add `report_to_root` to relevant `can_send` lists.
+- **Root can't see what creatures are doing.** Two paths: add `report_to_root` to the creature's `can_send` (channel-based), or add `{to: root, with_content: false}` to its `output_wiring` (framework-level lifecycle ping; fires even if the creature never calls `send_message`).
+- **Wiring target doesn't receive anything.** Check that the target creature exists in the same terrarium and is running. Wiring resolves by creature name (or the magic `root` token); unknown / stopped targets are logged and skipped.
 - **Slow startup with many creatures.** Each creature starts its own LLM provider and trigger manager; expect roughly linear startup time.
-
-Planned improvements (automatic round-output routing, root lifecycle observation, dynamic terrarium management) are tracked in [ROADMAP](../../ROADMAP.md).
 
 ## See also
 

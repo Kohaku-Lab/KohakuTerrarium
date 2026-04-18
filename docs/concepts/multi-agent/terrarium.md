@@ -47,21 +47,24 @@ Terrarium config:
 terrarium:
   name: my-team
   root:                         # optional; user-facing agent outside the team
-    base_config: "@pkg/creatures/root"
+    base_config: "@pkg/creatures/general"
+    system_prompt_file: prompts/root.md   # team-specific delegation prompt
   creatures:
     - name: swe
       base_config: "@pkg/creatures/swe"
+      output_wiring: [reviewer]           # deterministic edge → reviewer
       channels:
-        listen:    [tasks]
-        can_send:  [review, status]
-    - name: reviewer
-      base_config: "@pkg/creatures/reviewer"
-      channels:
-        listen:    [review]
+        listen:    [tasks, feedback]
         can_send:  [status]
+    - name: reviewer
+      base_config: "@pkg/creatures/swe"   # reviewer role via prompt, not a dedicated creature
+      system_prompt_file: prompts/reviewer.md
+      channels:
+        listen:    [status]
+        can_send:  [feedback, status]     # conditional: approve vs. revise stays on channels
   channels:
     tasks:    { type: queue }
-    review:   { type: queue }
+    feedback: { type: queue }
     status:   { type: broadcast }
 ```
 
@@ -88,39 +91,61 @@ others can DM it) and, if a root exists, a `report_to_root` channel.
 
 ## What you can therefore do
 
-- **Explicit specialist teams.** A `swe` creature and a `reviewer`
-  creature cooperating through a `tasks` / `review` / `status` channel
-  topology.
+- **Explicit specialist teams.** Two `swe` creatures cooperating
+  through a `tasks` / `review` / `feedback` channel topology, with a
+  prompt-driven reviewer role.
 - **User-facing root agent.** See [root-agent](root-agent.md). Lets the
   user talk to one agent and have that agent orchestrate the team.
+- **Deterministic pipeline edges via output wiring.** Declare in the
+  creature's config that its turn-end output flows to the next stage
+  automatically — no dependency on the LLM remembering `send_message`.
 - **Hot-plug specialists.** Add a new creature mid-session without
   restart; the existing channels pick it up.
 - **Non-destructive monitoring.** Attach a `ChannelObserver` to see
   every message in a queue channel without competing with the real
   consumers.
 
-## The honest bit
+## Output wiring alongside channels
 
-Terrarium is experimental. Its current limitation: a terrarium's
-progress depends on each creature routing its own output to the right
-channel. If a model ignores the instruction — which happens — the
-team can stall.
+Channels are the original (and still correct) answer for **conditional
+and optional traffic**: a critic that approves *or* revises, a status
+broadcast anyone may read, a group-chat side-channel. They rely on the
+creature calling `send_message`.
 
-The [ROADMAP](../../../ROADMAP.md) plans for:
+Output wiring is a separate, framework-level path: a creature declares
+`output_wiring` in its config, and at turn-end the runtime emits a
+`creature_output` TriggerEvent straight into the target's event queue.
+No channel, no tool call — the event travels the same path any other
+trigger uses.
 
-- **Configurable automatic round-output routing** — let users assign
-  a channel that receives a creature's latest message for a round
-  automatically.
-- **Root lifecycle observation** — let the root see completion signals
-  and inspect channel activity.
-- **Configuration-first automation** — any new automation remains
-  opt-in.
-- **Dynamic terrarium management** — let a root add/remove creatures
-  during runtime.
+Use wiring for the **deterministic pipeline edge** ("always next goes
+to runner"). Keep channels for the conditional / broadcast / observation
+cases wiring can't express. The two compose cleanly in a single
+terrarium — the kt-biome `auto_research` and `deep_research` terrariums
+do exactly that.
 
-Until those land, prefer vertical (sub-agent) multi-agent when you
-can. Terrariums are worth using now when the workflow is explicit and
-the creatures can be trusted to follow their prompts.
+See [the terrariums guide](../../guides/terrariums.md#output-wiring)
+for the config shape and mixed patterns.
+
+## Position, honestly
+
+We treat terrarium as a **proposed architecture** for horizontal
+multi-agent rather than a fully settled one. The pieces work together
+today (wiring + channels + hot-plug + observation + lifecycle pings to
+root), and the kt-biome terrariums exercise them end to end. What we're
+still learning is the idiom: when to prefer wiring vs. channels, how
+to express conditional branches without hand-rolled channel plumbing,
+how to surface wiring activity in the UI on par with channel traffic.
+
+Use it where the workflow is genuinely multi-creature and you want the
+creatures to stay portable. Use sub-agents (vertical) when the task
+naturally decomposes inside one creature — vertical stays simpler for
+most "I need context isolation" instincts. Both are legitimate; the
+framework doesn't pick.
+
+For the full set of improvements we're exploring (UI surfacing of
+wiring events, conditional wiring, content modes, wiring hot-plug), see
+[the ROADMAP](../../../ROADMAP.md).
 
 ## Don't be bounded
 

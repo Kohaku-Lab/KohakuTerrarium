@@ -16,6 +16,7 @@ that sits OUTSIDE the terrarium).
 | `config.py` | `TerrariumConfig`, `CreatureConfig`, `ChannelConfig`, `load_terrarium_config`, `build_channel_topology_prompt` |
 | `factory.py` | `build_creature`, `build_root_agent` — construct Agent instances; wire triggers and topology prompt |
 | `creature.py` | `CreatureHandle` — wrapper around an `Agent` with terrarium metadata (channels, config) |
+| `output_wiring.py` | `TerrariumOutputWiringResolver` — resolves `output_wiring` targets to live `Agent` instances and dispatches `creature_output` events |
 | `hotplug.py` | `HotPlugMixin` — add / remove creatures and channels at runtime without restart |
 | `observer.py` | `ChannelObserver`, `ObservedMessage` — non-destructive channel message recording |
 | `output_log.py` | `OutputLogCapture`, `LogEntry` — tee wrapper that captures creature output for observability |
@@ -57,6 +58,15 @@ One-way dependency: `terrarium/` → `core/`, never `core/` → `terrarium/`.
 - A terrarium has NO LLM of its own. The optional root agent sits OUTSIDE
   the terrarium (a normal creature with terrarium tools bound) — it is the
   user's interface; the terrarium obeys its orders through `TerrariumAPI`.
+- **Output wiring** is installed on every creature's agent during
+  `TerrariumRuntime.start()` via `_install_output_wiring_resolver()`. Each
+  creature's `_finalize_processing` (in `core/agent_handlers.py`) calls
+  `resolver.emit(...)` at turn-end; the resolver constructs a
+  `creature_output` `TriggerEvent` and pushes it via
+  `asyncio.create_task(target._process_event(event))` per target — fire-
+  and-forget so the source's turn-finalisation doesn't block on slow
+  receivers. See `core/output_wiring.py` for the core protocol + no-op
+  default resolver (used by standalone agents).
 - `tool_registration.py` exists purely to break the
   `core → builtins/tools → terrarium → core` circular import cycle. Tools
   are registered only on first terrarium use.

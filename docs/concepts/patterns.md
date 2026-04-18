@@ -19,7 +19,8 @@ to it; the trigger reads from it. Neither module knows about the
 other.
 
 **Use when.** You want horizontal multi-agent without importing
-`terrarium.yaml` machinery.
+`terrarium.yaml` machinery, or when the sender's decision to emit is
+conditional (approve vs. revise, keep vs. discard).
 
 **Minimal config.**
 
@@ -34,6 +35,42 @@ triggers:
     options:
       channel: chat
 ```
+
+## 1b. Deterministic pipeline edge via output wiring
+
+**Shape.** A creature declares `output_wiring:` in its config, naming
+one or more target creatures. At each turn-end, the framework emits a
+`creature_output` `TriggerEvent` into every target's event queue —
+carrying the creature's final-round assistant text (or just a
+lifecycle ping if `with_content: false`).
+
+**Why it works.** The wiring lives at the framework level — no tool
+call on the sender, no trigger subscription on the receiver, no
+channel in between. The target sees the event through the same
+`agent._process_event` path it already uses for user input, timer
+fires, and channel messages.
+
+**Use when.** The pipeline edge is deterministic — "every time A
+finishes a turn, B gets the output." Reviewer / navigator roles, or
+analyzer decisions that branch on content, stay on pattern 1
+(channels) because wiring can't conditionally fire.
+
+**Minimal config.**
+
+```yaml
+# terrarium.yaml creature block
+- name: coder
+  base_config: "@kt-biome/creatures/swe"
+  output_wiring:
+    - runner                              # shorthand
+    - { to: root, with_content: false }   # lifecycle ping
+```
+
+**Contrast.** Channels require the LLM to remember to send; wiring
+fires regardless of what the LLM does. Both mechanisms coexist freely
+in one terrarium — kt-biome's `auto_research` uses wiring for the
+ratchet edges (ideator → coder → runner → analyzer) and channels for
+the analyzer's keep-vs-discard decision and for team-chat status.
 
 ## 2. Smart guard via agent-in-plugin
 

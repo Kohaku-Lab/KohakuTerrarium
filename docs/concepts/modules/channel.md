@@ -71,6 +71,24 @@ that have real consumers.
 - **Cross-creature rendezvous.** Two creatures that each listen on the
   same shared channel can take turns handling items.
 
+## Channels vs. output wiring
+
+Channels aren't the only way creatures talk. A sibling mechanism —
+**output wiring** — emits a `creature_output` `TriggerEvent` straight
+into a target creature's event queue at the end of every turn, with
+no `send_message` call on either side. Which one to use:
+
+- **Channels** — conditional routes (approve vs. revise), group chat,
+  broadcast status, late / optional traffic, observation. The creature
+  chooses whether and where to send.
+- **Output wiring** — deterministic pipeline edges ("the runner's
+  output always goes to the analyzer"). Configured declaratively;
+  fires automatically at turn-end.
+
+A single terrarium freely mixes both. See
+[terrarium](../multi-agent/terrarium.md) and
+[guides/terrariums](../../guides/terrariums.md#output-wiring).
+
 ## Don't be bounded
 
 A standalone creature does not need channels — its tools do not

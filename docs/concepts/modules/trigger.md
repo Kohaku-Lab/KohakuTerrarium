@@ -46,6 +46,12 @@ Built-in trigger types:
 - **`monitor`** — fires when a predicate over scratchpad / context
   returns true.
 
+Common `TriggerEvent` types on the receiving side: `user_input`
+(from input modules), `timer`, `channel_message` (from a channel
+trigger), `tool_complete`, `subagent_output`, `creature_output` (a
+turn-end emission from another creature via `output_wiring` —
+framework-emitted, not triggered by a module), and `error`.
+
 `TriggerManager` (`core/trigger_manager.py`) owns the running tasks,
 wires completions into the agent's event callback, and persists
 trigger state to the session store so `kt resume` can re-create them.
@@ -62,7 +68,10 @@ and programmatically via `agent.add_trigger(...)`.
 - **Recurring agents.** A `timer` trigger that fires every hour lets a
   creature self-refresh its view of a file system or a set of metrics.
 - **Cross-creature wiring.** A `channel` trigger is the mechanism that
-  makes [terrariums](../multi-agent/terrarium.md) actually work.
+  makes channel-based terrarium communication work. For deterministic
+  pipeline edges, the framework also emits `creature_output` events at
+  turn-end when a creature declares `output_wiring` — see
+  [terrariums](../multi-agent/terrarium.md).
 - **Idle-driven summaries.** An `idle` trigger that fires after two
   minutes of silence can dispatch a `summarize` sub-agent and send the
   result to a log channel.

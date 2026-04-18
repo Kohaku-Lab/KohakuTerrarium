@@ -70,6 +70,24 @@ terrarium's shared environment. A `send_message` tool plus a
 `ChannelTrigger` is how cross-creature communication works. Full:
 [channel](modules/channel.md).
 
+## Output wiring
+
+Configurable framework-level routing of a creature's turn-end output.
+Declared via `output_wiring:` in the creature config; at the end of
+every turn, the framework emits a `creature_output` `TriggerEvent`
+into each listed target creature's event queue. No `send_message`
+call required, no channel involved — it rides the same event path as
+any other trigger. Use for deterministic pipeline edges; keep
+channels for conditional / broadcast / observation traffic. Full:
+[terrariums guide — output wiring](../guides/terrariums.md#output-wiring).
+
+## creature_output (event type)
+
+The `TriggerEvent` type the framework emits for each `output_wiring`
+entry at turn-end. Context carries `source`, `target`, `with_content`,
+`source_event_type`, and a per-source-creature `turn_index`. Plugins
+on the receiving creature see it through the normal `on_event` hook.
+
 ## Session
 
 Per-creature **private** state: the scratchpad, private channels, TUI
@@ -130,10 +148,12 @@ collide with the `read` file-reader tool.
 ## Terrarium
 
 A pure wiring layer that runs several creatures together. No LLM, no
-decisions — just a runtime and a set of shared channels. Creatures
-don't know they're in a terrarium; they still work standalone. Rough
-at the edges today; see the [roadmap](../../ROADMAP.md). Full:
-[terrarium](multi-agent/terrarium.md).
+decisions — just a runtime, a set of shared channels, and the
+output-wiring plumbing. Creatures don't know they're in a terrarium;
+they still work standalone. Our proposed architecture for horizontal
+multi-agent — still evolving as patterns emerge. See the
+[roadmap](../../ROADMAP.md) for what's shipped vs. still exploring.
+Full: [terrarium](multi-agent/terrarium.md).
 
 ## Root agent
 
