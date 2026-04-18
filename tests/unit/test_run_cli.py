@@ -1,7 +1,6 @@
 import types
 
 
-
 class _DummyVault:
     def __init__(self, *args, **kwargs):
         pass
