@@ -1,0 +1,183 @@
+"""Terrarium-side resolver for the output-wiring framework feature.
+
+The core layer defines the protocol and a no-op default. This module
+provides the real resolver that knows how to look up targets by name
+inside a running terrarium and push ``creature_output`` events straight
+into their event queues.
+
+Resolution rules:
+
+- ``entry.to == "root"`` (magic string, see ``core.output_wiring.ROOT_TARGET``)
+  resolves to the terrarium's root agent. Unknown when no root is
+  configured → logged and skipped.
+- Any other value is looked up as a creature name in the terrarium.
+  Unknown / stopped creatures are logged and skipped.
+
+Delivery is fire-and-forget: each target receives its event via
+``asyncio.create_task(target_agent._process_event(event))`` so the
+source creature's ``_finalize_processing`` never blocks on a downstream
+LLM round. Plugins installed on the receiver see the event through the
+existing ``on_event`` notify in ``Agent._process_event``.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from typing import TYPE_CHECKING
+
+from kohakuterrarium.core.events import create_creature_output_event
+from kohakuterrarium.core.output_wiring import (
+    ROOT_TARGET,
+    OutputWiringEntry,
+    render_prompt,
+)
+from kohakuterrarium.utils.logging import get_logger
+
+if TYPE_CHECKING:
+    from kohakuterrarium.core.agent import Agent
+    from kohakuterrarium.terrarium.creature import CreatureHandle
+
+logger = get_logger(__name__)
+
+
+class TerrariumOutputWiringResolver:
+    """Looks up targets inside a terrarium and dispatches events to them.
+
+    Built once by the terrarium runtime (after all creatures and the
+    optional root are constructed) and attached to every agent's
+    ``_wiring_resolver`` field. Lives for the lifetime of the runtime.
+    """
+
+    def __init__(
+        self,
+        creatures: dict[str, CreatureHandle],
+        root_agent: Agent | None,
+    ) -> None:
+        self._creatures = creatures
+        self._root_agent = root_agent
+        # Remember which unknown targets we've already warned about so
+        # a mis-typed target doesn't spam the log every turn.
+        self._warned_missing: set[str] = set()
+
+    def _resolve_target(self, target: str) -> Agent | None:
+        """Map a wiring target string to an Agent, or None if unknown."""
+        if target == ROOT_TARGET:
+            if self._root_agent is None:
+                self._warn_once(target, "terrarium has no root agent configured")
+            return self._root_agent
+
+        handle = self._creatures.get(target)
+        if handle is None:
+            self._warn_once(target, "no such creature in this terrarium")
+            return None
+        return handle.agent
+
+    def _warn_once(self, target: str, reason: str) -> None:
+        if target in self._warned_missing:
+            return
+        self._warned_missing.add(target)
+        logger.warning(
+            "output_wiring target unresolved - emissions will be dropped",
+            target=target,
+            reason=reason,
+        )
+
+    async def emit(
+        self,
+        *,
+        source: str,
+        content: str,
+        source_event_type: str,
+        turn_index: int,
+        entries: list[OutputWiringEntry],
+    ) -> None:
+        """Dispatch one event per entry into the resolved target's queue.
+
+        Fire-and-forget: tasks are created but not awaited. The source
+        creature's turn-finalisation returns immediately. Exceptions
+        inside ``_process_event`` on the receiver are logged by the
+        receiver's own code path and do not propagate here.
+        """
+        for entry in entries:
+            target_agent = self._resolve_target(entry.to)
+            if target_agent is None:
+                continue
+            if not getattr(target_agent, "_running", False):
+                logger.debug(
+                    "output_wiring target not running - dropping",
+                    source=source,
+                    target=entry.to,
+                )
+                continue
+
+            delivered_content = content if entry.with_content else ""
+            prompt_text = render_prompt(
+                entry,
+                source=source,
+                target=entry.to,
+                content=delivered_content,
+                turn_index=turn_index,
+                source_event_type=source_event_type,
+            )
+            event = create_creature_output_event(
+                source=source,
+                target=entry.to,
+                content=delivered_content,
+                with_content=entry.with_content,
+                source_event_type=source_event_type,
+                turn_index=turn_index,
+                prompt_override=prompt_text,
+            )
+            # Fire-and-forget: don't block the source's finalisation on
+            # the target's turn-processing.
+            task = asyncio.create_task(
+                _safe_deliver(target_agent, event),
+                name=f"wiring_{source}_to_{entry.to}_{turn_index}",
+            )
+            # Attach a done-callback so we can surface receiver-side
+            # exceptions at warning-level (instead of the default
+            # "Task exception was never retrieved" noise).
+            task.add_done_callback(
+                lambda t, tgt=entry.to: _log_task_error(t, source, tgt)
+            )
+            logger.debug(
+                "output_wiring emission dispatched",
+                source=source,
+                target=entry.to,
+                with_content=entry.with_content,
+                turn_index=turn_index,
+            )
+
+
+async def _safe_deliver(target_agent: Agent, event) -> None:
+    """Invoke target's ``_process_event`` and swallow its errors.
+
+    The receiver has its own error handling inside ``_process_event``
+    (``_process_event_with_controller`` catches and logs exceptions).
+    This wrapper is a last line of defence so the task created in
+    ``emit`` never propagates an error into the asyncio event loop.
+    """
+    try:
+        await target_agent._process_event(event)
+    except Exception as exc:
+        logger.warning(
+            "output_wiring delivery raised inside receiver",
+            target=getattr(target_agent, "config", None) and target_agent.config.name,
+            error=str(exc),
+            exc_info=True,
+        )
+
+
+def _log_task_error(task: asyncio.Task, source: str, target: str) -> None:
+    """Callback attached to dispatch tasks. Logs any uncaught error."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is None:
+        return
+    logger.warning(
+        "output_wiring dispatch task errored",
+        source=source,
+        target=target,
+        error=str(exc),
+    )

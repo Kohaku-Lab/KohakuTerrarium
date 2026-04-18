@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kohakuterrarium.core.output_wiring import OutputWiringEntry
+
 
 @dataclass
 class InputConfig:
@@ -181,6 +183,13 @@ class AgentConfig:
 
     # Memory / embedding configuration
     memory: dict[str, Any] = field(default_factory=dict)
+
+    # Output wiring: framework-level automatic round-output routing.
+    # Each entry declares a target (creature name or magic "root")
+    # that receives a ``creature_output`` TriggerEvent at turn-end.
+    # See ``core/output_wiring.py`` for the dataclass + protocol and
+    # ``core/agent_handlers.py:_finalize_processing`` for the emission hook.
+    output_wiring: list[OutputWiringEntry] = field(default_factory=list)
 
     def get_api_key(self) -> str | None:
         """Get API key from environment."""

@@ -18,6 +18,7 @@ from kohakuterrarium.terrarium.creature import CreatureHandle
 from kohakuterrarium.terrarium.factory import build_creature, build_root_agent
 from kohakuterrarium.terrarium.hotplug import HotPlugMixin
 from kohakuterrarium.terrarium.observer import ChannelObserver
+from kohakuterrarium.terrarium.output_wiring import TerrariumOutputWiringResolver
 from kohakuterrarium.terrarium.persistence import attach_session_store
 from kohakuterrarium.utils.logging import get_logger
 
@@ -170,11 +171,40 @@ class TerrariumRuntime(HotPlugMixin):
                 base_config=self.config.root.config_data.get("base_config"),
             )
 
+        # 6. Install the output-wiring resolver on every agent.
+        # Must happen AFTER all creatures + root exist so the resolver
+        # can see every possible target at dispatch time.
+        self._install_output_wiring_resolver()
+
         self._running = True
         logger.info(
             "Terrarium started",
             terrarium_name=self.config.name,
             creatures=len(self._creatures),
+            has_root=self._root_agent is not None,
+        )
+
+    def _install_output_wiring_resolver(self) -> None:
+        """Build and attach the output-wiring resolver on every agent.
+
+        The resolver is shared across agents (it only holds references
+        to creatures + root, both of which live for the terrarium's
+        lifetime). Each agent's ``_wiring_resolver`` field is set by the
+        core framework to ``None`` by default, which activates the
+        NoopResolver behaviour. We replace it with the terrarium-aware
+        resolver here.
+        """
+        resolver = TerrariumOutputWiringResolver(
+            creatures=self._creatures,
+            root_agent=self._root_agent,
+        )
+        for handle in self._creatures.values():
+            handle.agent._wiring_resolver = resolver
+        if self._root_agent is not None:
+            self._root_agent._wiring_resolver = resolver
+        logger.debug(
+            "Output wiring resolver installed",
+            creature_count=len(self._creatures),
             has_root=self._root_agent is not None,
         )
 

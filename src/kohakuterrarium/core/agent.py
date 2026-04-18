@@ -131,6 +131,15 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
         self.compact_manager: Any = None
         self.plugins: Any = None  # PluginManager | None
 
+        # Output wiring: resolver is attached by the terrarium runtime at
+        # build time (None → emissions silently drop via NoopResolver).
+        # ``_last_turn_text`` is replaced each LLM round inside the
+        # controller loop so that at ``_finalize_processing`` time it
+        # holds exactly the text of the final round.
+        self._wiring_resolver: Any = None  # OutputWiringResolver | None
+        self._turn_index: int = 0
+        self._last_turn_text: list[str] = []
+
         # Environment and session (explicit or auto-created in _init_executor)
         self.environment: Optional["Environment"] = environment
         self._explicit_session: Session | None = session

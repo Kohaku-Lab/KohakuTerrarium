@@ -21,6 +21,7 @@ from kohakuterrarium.core.config_types import (
     TriggerConfig,
     _interpolate_env_vars,
 )
+from kohakuterrarium.core.output_wiring import parse_wiring_list
 from kohakuterrarium.packages import resolve_package_path
 
 try:
@@ -388,6 +389,7 @@ def _construct_agent_config(
         mcp_servers=list(config_data.get("mcp_servers") or []),
         plugins=list(config_data.get("plugins") or []),
         memory=dict(config_data.get("memory") or {}),
+        output_wiring=parse_wiring_list(config_data.get("output_wiring")),
     )
 
 

@@ -205,6 +205,9 @@ class AgentHandlersMixin(AgentToolsMixin):
 
             round_result = await self._run_single_turn(controller)
             all_round_text.extend(round_result.text_output)
+            # Track the final round's text separately for output-wiring
+            # emission (REPLACE each iteration — we want only the last round).
+            self._last_turn_text = list(round_result.text_output)
 
             # Emit token usage after each LLM turn (real-time update)
             self._emit_token_usage(controller)
@@ -529,3 +532,42 @@ class AgentHandlersMixin(AgentToolsMixin):
             prompt_tokens = last_usage.get("prompt_tokens", 0)
             if self.compact_manager.should_compact(prompt_tokens):
                 self.compact_manager.trigger_compact()
+
+        # Output wiring emission.
+        #
+        # Runs after the normal turn-end bookkeeping so the resolver (and
+        # any receiver plugins) see a consistent post-turn state. The
+        # resolver is responsible for never raising back into this path;
+        # we still wrap defensively so a buggy resolver can't break the
+        # creature's main loop.
+        await self._emit_output_wiring(event)
+
+    async def _emit_output_wiring(self, trigger_event: TriggerEvent) -> None:
+        """Emit a ``creature_output`` event for each configured wiring entry.
+
+        Called at the end of ``_finalize_processing``. No-op when the
+        creature has no wiring configured or no resolver is attached
+        (standalone mode).
+        """
+        entries = getattr(self.config, "output_wiring", None) or []
+        resolver = getattr(self, "_wiring_resolver", None)
+        if not entries or resolver is None:
+            return
+
+        content = "".join(self._last_turn_text).strip()
+        self._turn_index += 1
+        try:
+            await resolver.emit(
+                source=self.config.name,
+                content=content,
+                source_event_type=trigger_event.type,
+                turn_index=self._turn_index,
+                entries=entries,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Output wiring resolver raised - dropping emission",
+                source=self.config.name,
+                error=str(exc),
+                exc_info=True,
+            )

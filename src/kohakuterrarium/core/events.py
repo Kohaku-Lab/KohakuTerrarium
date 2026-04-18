@@ -134,6 +134,7 @@ class EventType:
     TOOL_COMPLETE = "tool_complete"
     SUBAGENT_OUTPUT = "subagent_output"
     CHANNEL_MESSAGE = "channel_message"
+    CREATURE_OUTPUT = "creature_output"
     MONITOR = "monitor"
     ERROR = "error"
     STARTUP = "startup"
@@ -173,6 +174,53 @@ def create_tool_complete_event(
         content=content,
         context=context,
         job_id=job_id,
+        stackable=True,
+    )
+
+
+def create_creature_output_event(
+    source: str,
+    target: str,
+    content: str,
+    *,
+    with_content: bool = True,
+    source_event_type: str = "",
+    turn_index: int = 0,
+    prompt_override: str | None = None,
+) -> TriggerEvent:
+    """Create a creature_output event for output-wiring delivery.
+
+    This is the wire payload used by the output-wiring framework hook:
+    one creature's turn-end produces an event that the resolver pushes
+    directly into the target creature's event queue.
+
+    Args:
+        source: Name of the creature whose turn just ended.
+        target: Name of the creature receiving this event (for context).
+        content: The source creature's last-round assistant text. Pass
+            an empty string when ``with_content=False``.
+        with_content: Mirrors the wiring entry's setting; stored in
+            context so plugins / receivers can distinguish metadata
+            pings from content deliveries.
+        source_event_type: The type of the event that originally
+            triggered the source's turn (``user_input``, ``channel_message``,
+            etc.). Stored for observability.
+        turn_index: Per-source monotonic turn counter.
+        prompt_override: Rendered prompt text that wraps the raw content
+            when the receiver's controller consumes the event. Same
+            mechanism ``ChannelTrigger`` already uses.
+    """
+    return TriggerEvent(
+        type=EventType.CREATURE_OUTPUT,
+        content=content,
+        context={
+            "source": source,
+            "target": target,
+            "with_content": with_content,
+            "source_event_type": source_event_type,
+            "turn_index": turn_index,
+        },
+        prompt_override=prompt_override,
         stackable=True,
     )
 
