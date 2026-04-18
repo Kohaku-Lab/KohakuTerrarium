@@ -355,6 +355,13 @@ async def get_codex_usage():
             tokens = await refresh_tokens(tokens)
         except Exception as e:
             raise HTTPException(401, f"Failed to refresh Codex tokens: {e}") from e
+    if not tokens.id_token:
+        # ChatGPT backend-api requires the OIDC id_token. Older local
+        # token files saved before id_token round-trip was added won't
+        # have it — force a re-login rather than sending an empty bearer.
+        raise HTTPException(
+            401, "Codex id_token missing — please run `kt login codex` again"
+        )
     headers = {
         "Authorization": f"Bearer {tokens.id_token}",
         "Content-Type": "application/json",

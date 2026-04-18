@@ -51,11 +51,19 @@ CODEX_CLI_TOKEN_PATH = Path.home() / ".codex" / "auth.json"
 
 @dataclass
 class CodexTokens:
-    """OAuth token set for Codex backend access."""
+    """OAuth token set for Codex backend access.
+
+    `access_token` is used for the OpenAI API (`api.openai.com`).
+    `id_token` is the OIDC JWT used for ChatGPT backend endpoints
+    (e.g. `chatgpt.com/backend-api/codex/usage`). Codex CLI stores
+    both; we do too.
+    """
 
     access_token: str
     refresh_token: str
     expires_at: float = 0.0
+    id_token: str = ""
+    account_id: str = ""
 
     def is_expired(self) -> bool:
         """Check if the access token is expired (with 60s safety buffer)."""
@@ -71,6 +79,8 @@ class CodexTokens:
                     "access_token": self.access_token,
                     "refresh_token": self.refresh_token,
                     "expires_at": self.expires_at,
+                    "id_token": self.id_token,
+                    "account_id": self.account_id,
                 }
             )
         )
@@ -78,23 +88,71 @@ class CodexTokens:
 
     @classmethod
     def load(cls, path: Path | None = None) -> "CodexTokens | None":
-        """Load tokens from disk. Tries our path, then Codex CLI fallback."""
-        candidates = [path or DEFAULT_TOKEN_PATH, CODEX_CLI_TOKEN_PATH]
+        """Load tokens from disk.
+
+        If `path` is given, only that file is tried. Otherwise we try
+        our default path first, then fall back to the Codex CLI file at
+        `~/.codex/auth.json`.
+
+        Supports two on-disk shapes:
+          1. Our flat shape: {access_token, refresh_token, expires_at, ...}
+          2. Codex CLI shape: {tokens: {id_token, access_token, refresh_token,
+             account_id}, last_refresh: ISO8601}
+        """
+        if path is not None:
+            candidates = [path]
+        else:
+            candidates = [DEFAULT_TOKEN_PATH, CODEX_CLI_TOKEN_PATH]
         for p in candidates:
             if p and p.exists():
                 try:
                     data = json.loads(p.read_text())
-                    tokens = cls(
-                        access_token=data.get("access_token", ""),
-                        refresh_token=data.get("refresh_token", ""),
-                        expires_at=data.get("expires_at", 0),
-                    )
-                    if tokens.access_token:
+                    tokens = cls._from_dict(data)
+                    if tokens and tokens.access_token:
                         logger.info("Tokens loaded", path=str(p))
                         return tokens
                 except Exception as e:
                     logger.warning("Failed to load tokens", path=str(p), error=str(e))
         return None
+
+    @classmethod
+    def _from_dict(cls, data: dict) -> "CodexTokens | None":
+        # Codex CLI nested format.
+        if isinstance(data.get("tokens"), dict):
+            t = data["tokens"]
+            # CLI stores ISO8601 last_refresh, not expires_at. Treat it
+            # as "refreshed now" — is_expired() will trigger a refresh
+            # on first use if the token is actually stale.
+            expires_at = cls._parse_expires_at(data.get("last_refresh"))
+            return cls(
+                access_token=t.get("access_token", ""),
+                refresh_token=t.get("refresh_token", ""),
+                expires_at=expires_at,
+                id_token=t.get("id_token", ""),
+                account_id=t.get("account_id", ""),
+            )
+        # Our flat format.
+        return cls(
+            access_token=data.get("access_token", ""),
+            refresh_token=data.get("refresh_token", ""),
+            expires_at=float(data.get("expires_at", 0) or 0),
+            id_token=data.get("id_token", ""),
+            account_id=data.get("account_id", ""),
+        )
+
+    @staticmethod
+    def _parse_expires_at(last_refresh: str | None) -> float:
+        """CLI's `last_refresh` is ISO8601; convert to epoch + ~1h window."""
+        if not last_refresh:
+            return 0.0
+        try:
+            # Access tokens last ~1h; assume the same window the CLI uses.
+            return (
+                datetime.fromisoformat(last_refresh.replace("Z", "+00:00")).timestamp()
+                + 3600
+            )
+        except Exception:
+            return 0.0
 
 
 # =========================================================================
@@ -277,6 +335,7 @@ async def _device_code_flow() -> CodexTokens:
                         access_token=token_data["access_token"],
                         refresh_token=token_data.get("refresh_token", ""),
                         expires_at=time.time() + token_data.get("expires_in", 3600),
+                        id_token=token_data.get("id_token", ""),
                     )
                     tokens.save()
                     logger.info("Device code login successful")
@@ -351,6 +410,7 @@ async def _exchange_code(
         access_token=data["access_token"],
         refresh_token=data.get("refresh_token", ""),
         expires_at=time.time() + int(data.get("expires_in", 3600)),
+        id_token=data.get("id_token", ""),
     )
     tokens.save()
     logger.info("OAuth login successful")
@@ -433,6 +493,9 @@ async def refresh_tokens(tokens: CodexTokens) -> CodexTokens:
         access_token=data["access_token"],
         refresh_token=data.get("refresh_token", tokens.refresh_token),
         expires_at=time.time() + int(data.get("expires_in", 3600)),
+        # Refresh responses sometimes omit id_token — keep the old one.
+        id_token=data.get("id_token") or tokens.id_token,
+        account_id=tokens.account_id,
     )
     new_tokens.save()
     logger.info("Tokens refreshed")
