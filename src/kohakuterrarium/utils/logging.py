@@ -65,11 +65,28 @@ SUPPORTS_COLOR = _supports_color()
 
 
 class FlushingStreamHandler(logging.StreamHandler):
-    """StreamHandler that flushes after every emit."""
+    """StreamHandler that flushes after every emit.
+
+    Also robust against non-ASCII log messages on streams whose underlying
+    encoding can't represent them (e.g. Windows ``cp1252`` stderr). Without
+    this, logging an LLM response that contains CJK / emoji would raise
+    ``UnicodeEncodeError`` mid-stream and abort the request.
+    """
 
     def emit(self, record: logging.LogRecord) -> None:
-        """Emit a record and flush immediately."""
-        super().emit(record)
+        """Emit a record, flushing immediately and surviving encoding errors."""
+        try:
+            super().emit(record)
+        except UnicodeEncodeError:
+            # Fall back to an ASCII-safe rendering rather than crashing.
+            try:
+                msg = self.format(record)
+                enc = getattr(self.stream, "encoding", None) or "ascii"
+                self.stream.write(
+                    msg.encode(enc, errors="replace").decode(enc) + self.terminator
+                )
+            except Exception:
+                self.handleError(record)
         self.flush()
 
 
