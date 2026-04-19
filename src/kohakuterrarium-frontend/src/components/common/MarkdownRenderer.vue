@@ -58,18 +58,44 @@ function onClick(e) {
   })
 }
 
-/**
+/*
+ * Invisible / formatting / combining characters that can silently split
+ * KaTeX control sequences. Without stripping, `\int` with any of these
+ * inserted between `\i` and `nt` tokenizes as `\i` (undefined) + text.
+ * None of these are ever semantically meaningful in chat markdown, so
+ * we strip globally rather than per-math-block.
+ *
+ * `\p{Cf}` covers the entire Unicode Format category (soft hyphen,
+ * bidi controls, zero-width joiners, word joiner, BOM, deprecated
+ * format chars, Arabic/Mongolian/Kaithi/Egyptian/Duployan/Musical
+ * format chars, language tags, …). Explicit ranges cover a few
+ * problematic codepoints outside Cf:
+ * - U+0332             COMBINING LOW LINE (KaTeX's error-display underline)
+ * - U+034F             COMBINING GRAPHEME JOINER
+ * - U+115F, U+1160     HANGUL CHOSEONG / JUNGSEONG FILLER
+ * - U+17B4, U+17B5     KHMER VOWEL INHERENT AQ / AA
+ * - U+3164             HANGUL FILLER
+ * - U+FE00-U+FE0F      Variation selectors (Mn, not Cf)
+ */
+const INVISIBLE_CHARS = /[\u0332\u034F\u115F\u1160\u17B4\u17B5\u3164\uFE00-\uFE0F]|\p{Cf}/gu
+
+/*
  * Pre-process content to normalize LaTeX delimiters:
  * - \( ... \) -> $ ... $  (inline)
  * - \[ ... \] -> $$ ... $$ (block, on own lines)
  * - Ensure $$ blocks have blank lines around them
+ * Also strips invisible characters that break KaTeX tokenization.
  */
 function preprocessLatex(text) {
   if (!text) return ""
 
-  // Strip combining low line and zero-width formatting chars that can break
-  // KaTeX command parsing while keeping the visible math content intact.
-  text = text.replace(/[\u0332\u200B-\u200D\u2060\uFEFF]/g, "")
+  // Normalize CRLF to LF, then strip any remaining bare CR. A stray \r
+  // mid-word (e.g. between \i and nt from a bad stream chunk) splits
+  // KaTeX control-sequence tokenization just like invisible chars do.
+  text = text.replace(/\r\n/g, "\n").replace(/\r/g, "")
+
+  // Strip invisible / formatting / combining chars (see above).
+  text = text.replace(INVISIBLE_CHARS, "")
 
   // Convert \( ... \) to $ ... $ for inline math
   text = text.replace(/\\\((.+?)\\\)/g, (_, math) => `$${math}$`)
@@ -84,11 +110,40 @@ function preprocessLatex(text) {
   return text
 }
 
+// Catches both inline (<span class="katex-error">) and block
+// (<p class="katex-block katex-error">) error wrappers emitted by the
+// @vscode/markdown-it-katex plugin.
+const KATEX_ERROR_RE = /<(span|p) class="(?:katex-block )?katex-error" title="([^"]*)">([\s\S]*?)<\/\1>/g
+
+function decodeHtmlEntities(s) {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+}
+
 function renderMarkdown(content) {
   try {
     const html = md.render(content)
-    return html.replace(/<span class="katex-error" title="([^"]*)">[\s\S]*?<\/span>/g, (_, raw) => `<code>${md.utils.escapeHtml(raw)}</code>`)
-  } catch {
+    // Replace KaTeX error markers with a compact code-style fallback so
+    // the user sees the raw LaTeX, not the parse-error message. The
+    // actual error is emitted to the console for debugging.
+    return html.replace(KATEX_ERROR_RE, (_match, _tag, titleHtml, bodyHtml) => {
+      const latex = decodeHtmlEntities(titleHtml)
+      const msg = decodeHtmlEntities(bodyHtml.replace(/<[^>]+>/g, ""))
+      // Dump char codes of the first 30 chars — makes it trivial to spot
+      // any invisible char that's slipping past the INVISIBLE_CHARS filter.
+      const codes = Array.from(latex.slice(0, 30))
+        .map((c) => `${c === "\n" ? "\\n" : c === "\r" ? "\\r" : c}(0x${c.codePointAt(0).toString(16).toUpperCase()})`)
+        .join(" ")
+      console.warn(`[MarkdownRenderer] KaTeX parse error for ${JSON.stringify(latex)}: ${msg}\n  chars: ${codes}`)
+      // titleHtml is already HTML-escaped so it's safe to embed as-is.
+      return `<code class="katex-fallback">${titleHtml}</code>`
+    })
+  } catch (err) {
+    console.warn("[MarkdownRenderer] markdown-it render failed, falling back to escaped text:", err)
     return md.render(content.replace(/\$/g, "\\$"))
   }
 }
@@ -215,6 +270,15 @@ onBeforeUnmount(() => {
 }
 html.dark .md-content code {
   background: rgba(255, 255, 255, 0.08);
+}
+/* KaTeX parse-error fallback — show raw LaTeX in a subdued tone so the
+ * user isn't confronted with a red parse-error block. Real errors go to
+ * the dev console. */
+.md-content code.katex-fallback {
+  background: rgba(165, 126, 174, 0.08);
+  color: var(--color-text-muted);
+  border: 1px dashed rgba(165, 126, 174, 0.35);
+  white-space: pre-wrap;
 }
 .md-content .code-block {
   margin: 0.6em 0;
