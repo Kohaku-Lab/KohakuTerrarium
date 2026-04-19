@@ -10,6 +10,7 @@ novel_out.txt
 .kohaku/
 .internal/
 .briefcase/
+.kohaku-docs-build/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
