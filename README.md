@@ -10,6 +10,10 @@
   <img src="https://img.shields.io/badge/version-1.0.0rc3-orange" alt="Version">
 </p>
 
+<p align="center">
+  <strong>English</strong> &nbsp;·&nbsp; <a href="README.zh.md">繁體中文</a>
+</p>
+
 ---
 
 ## See it run (60 seconds)
@@ -23,13 +27,13 @@ kt run @kt-biome/creatures/swe --mode cli                        # run one
 
 You get an interactive shell with a full coding agent — file tools, shell access, web search, sub-agents, resumable sessions. `Ctrl+D` exits; `kt resume --last` picks back up.
 
-Want more hand-holding? [Getting Started](docs/guides/getting-started.md). Want to build your own? [First Creature](docs/tutorials/first-creature.md).
+Want more hand-holding? [Getting Started](docs/en/guides/getting-started.md). Want to build your own? [First Creature](docs/en/tutorials/first-creature.md).
 
 ## Is this for you?
 
 **You probably want KohakuTerrarium if** you need a new agent shape and don't want to rebuild the substrate; you want OOTB creatures you can customise; you want to embed agent behaviour in existing Python; your requirements are still evolving.
 
-**You probably don't if** an existing agent product (Claude Code, Codex, …) already fits your stable needs; your mental model doesn't map onto controller / tools / triggers / sub-agents / channels; you need sub-50 ms per-operation latency. More honesty at [boundaries](docs/concepts/boundaries.md).
+**You probably don't if** an existing agent product (Claude Code, Codex, …) already fits your stable needs; your mental model doesn't map onto controller / tools / triggers / sub-agents / channels; you need sub-50 ms per-operation latency. More honesty at [boundaries](docs/en/concepts/boundaries.md).
 
 ## What KohakuTerrarium is
 
@@ -141,44 +145,44 @@ kt app
 
 ### I want to run something now
 
-- [Getting Started](docs/guides/getting-started.md)
+- [Getting Started](docs/en/guides/getting-started.md)
 - [`kt-biome`](https://github.com/Kohaku-Lab/kt-biome)
-- [CLI Reference](docs/reference/cli.md)
+- [CLI Reference](docs/en/reference/cli.md)
 - [Examples](examples/README.md)
 
 ### I want to build my own creature
 
-- [First Creature tutorial](docs/tutorials/first-creature.md)
-- [Creatures guide](docs/guides/creatures.md)
-- [Custom Modules](docs/guides/custom-modules.md)
-- [Plugins](docs/guides/plugins.md)
-- [First Custom Tool tutorial](docs/tutorials/first-custom-tool.md)
+- [First Creature tutorial](docs/en/tutorials/first-creature.md)
+- [Creatures guide](docs/en/guides/creatures.md)
+- [Custom Modules](docs/en/guides/custom-modules.md)
+- [Plugins](docs/en/guides/plugins.md)
+- [First Custom Tool tutorial](docs/en/tutorials/first-custom-tool.md)
 
 ### I want multi-agent composition
 
-- [First Terrarium tutorial](docs/tutorials/first-terrarium.md)
-- [Terrariums guide](docs/guides/terrariums.md)
-- [Multi-agent concept](docs/concepts/multi-agent/README.md)
+- [First Terrarium tutorial](docs/en/tutorials/first-terrarium.md)
+- [Terrariums guide](docs/en/guides/terrariums.md)
+- [Multi-agent concept](docs/en/concepts/multi-agent/README.md)
 
 ### I want to embed it in Python
 
-- [First Python Embedding tutorial](docs/tutorials/first-python-embedding.md)
-- [Programmatic Usage](docs/guides/programmatic-usage.md)
-- [Composition Algebra](docs/guides/composition.md)
-- [Python API](docs/reference/python.md)
+- [First Python Embedding tutorial](docs/en/tutorials/first-python-embedding.md)
+- [Programmatic Usage](docs/en/guides/programmatic-usage.md)
+- [Composition Algebra](docs/en/guides/composition.md)
+- [Python API](docs/en/reference/python.md)
 
 ### I want to understand what's going on
 
-- [Concept docs](docs/concepts/README.md)
-- [Glossary](docs/concepts/glossary.md) — plain-English definitions
-- [Why KohakuTerrarium](docs/concepts/foundations/why-kohakuterrarium.md)
-- [What is an agent](docs/concepts/foundations/what-is-an-agent.md)
+- [Concept docs](docs/en/concepts/README.md)
+- [Glossary](docs/en/concepts/glossary.md) — plain-English definitions
+- [Why KohakuTerrarium](docs/en/concepts/foundations/why-kohakuterrarium.md)
+- [What is an agent](docs/en/concepts/foundations/what-is-an-agent.md)
 
 ### I want to work on the framework itself
 
-- [Development home](docs/dev/README.md)
-- [Internals](docs/dev/internals.md)
-- [Testing](docs/dev/testing.md)
+- [Development home](docs/en/dev/README.md)
+- [Internals](docs/en/dev/internals.md)
+- [Testing](docs/en/dev/testing.md)
 - Package READMEs under [`src/kohakuterrarium/`](src/kohakuterrarium/README.md)
 
 ## Core mental model
@@ -254,7 +258,7 @@ A creature has six conceptual modules. **Five of them are user-extensible** — 
 | **Trigger** | Generates automatic events | Timer, scheduler, channel watcher |
 | **Sub-agent** | Delegated task execution | Planning, code review, research |
 
-Plus **plugins**, which modify the connections *between* modules without forking them (prompt plugins, lifecycle hooks). See [plugins guide](docs/guides/plugins.md).
+Plus **plugins**, which modify the connections *between* modules without forking them (prompt plugins, lifecycle hooks). See [plugins guide](docs/en/guides/plugins.md).
 
 ### Environment and session
 
@@ -346,7 +350,7 @@ async def main():
 asyncio.run(main())
 ```
 
-More: [Programmatic Usage](docs/guides/programmatic-usage.md), [Composition](docs/guides/composition.md), [Python API](docs/reference/python.md), and [`examples/code/`](examples/).
+More: [Programmatic Usage](docs/en/guides/programmatic-usage.md), [Composition](docs/en/guides/composition.md), [Python API](docs/en/reference/python.md), and [`examples/code/`](examples/).
 
 ## Runtime surfaces
 
@@ -356,7 +360,7 @@ More: [Programmatic Usage](docs/guides/programmatic-usage.md), [Composition](doc
 - **tui** — full-screen Textual application
 - **plain** — simple stdout/stdin for pipes and CI
 
-See [CLI Reference](docs/reference/cli.md).
+See [CLI Reference](docs/en/reference/cli.md).
 
 ### Web dashboard
 
@@ -368,7 +372,7 @@ kt serve start               # long-running daemon
 # Frontend dev: npm run dev --prefix src/kohakuterrarium-frontend
 ```
 
-See [HTTP API](docs/reference/http.md), [Serving guide](docs/guides/serving.md), [Frontend Architecture](docs/dev/frontend.md).
+See [HTTP API](docs/en/reference/http.md), [Serving guide](docs/en/guides/serving.md), [Frontend Architecture](docs/en/dev/frontend.md).
 
 ### Desktop app
 
@@ -395,7 +399,7 @@ And the agent can search its own history via the `search_memory` tool.
 
 `.kohakutr` files store conversation, tool calls, events, scratchpad, sub-agent state, channel messages, jobs, resumable triggers, and config metadata.
 
-See [Sessions](docs/guides/sessions.md), [Memory](docs/guides/memory.md).
+See [Sessions](docs/en/guides/sessions.md), [Memory](docs/en/guides/memory.md).
 
 ## Packages, defaults, and examples
 
@@ -456,19 +460,19 @@ Every subpackage has its own README describing files, dependency direction, and 
 
 ## Documentation map
 
-Full docs live in [`docs/`](docs/README.md).
+Full docs live in [`docs/`](docs/en/README.md).
 
 ### Tutorials
-[First Creature](docs/tutorials/first-creature.md) · [First Terrarium](docs/tutorials/first-terrarium.md) · [First Python Embedding](docs/tutorials/first-python-embedding.md) · [First Custom Tool](docs/tutorials/first-custom-tool.md) · [First Plugin](docs/tutorials/first-plugin.md)
+[First Creature](docs/en/tutorials/first-creature.md) · [First Terrarium](docs/en/tutorials/first-terrarium.md) · [First Python Embedding](docs/en/tutorials/first-python-embedding.md) · [First Custom Tool](docs/en/tutorials/first-custom-tool.md) · [First Plugin](docs/en/tutorials/first-plugin.md)
 
 ### Guides
-[Getting Started](docs/guides/getting-started.md) · [Creatures](docs/guides/creatures.md) · [Terrariums](docs/guides/terrariums.md) · [Sessions](docs/guides/sessions.md) · [Memory](docs/guides/memory.md) · [Configuration](docs/guides/configuration.md) · [Programmatic Usage](docs/guides/programmatic-usage.md) · [Composition](docs/guides/composition.md) · [Custom Modules](docs/guides/custom-modules.md) · [Plugins](docs/guides/plugins.md) · [MCP](docs/guides/mcp.md) · [Packages](docs/guides/packages.md) · [Serving](docs/guides/serving.md) · [Examples](docs/guides/examples.md)
+[Getting Started](docs/en/guides/getting-started.md) · [Creatures](docs/en/guides/creatures.md) · [Terrariums](docs/en/guides/terrariums.md) · [Sessions](docs/en/guides/sessions.md) · [Memory](docs/en/guides/memory.md) · [Configuration](docs/en/guides/configuration.md) · [Programmatic Usage](docs/en/guides/programmatic-usage.md) · [Composition](docs/en/guides/composition.md) · [Custom Modules](docs/en/guides/custom-modules.md) · [Plugins](docs/en/guides/plugins.md) · [MCP](docs/en/guides/mcp.md) · [Packages](docs/en/guides/packages.md) · [Serving](docs/en/guides/serving.md) · [Examples](docs/en/guides/examples.md)
 
 ### Concepts
-[Glossary](docs/concepts/glossary.md) · [Why KohakuTerrarium](docs/concepts/foundations/why-kohakuterrarium.md) · [What is an agent](docs/concepts/foundations/what-is-an-agent.md) · [Composing an agent](docs/concepts/foundations/composing-an-agent.md) · [Modules](docs/concepts/modules/README.md) · [Agent as a Python object](docs/concepts/python-native/agent-as-python-object.md) · [Composition algebra](docs/concepts/python-native/composition-algebra.md) · [Multi-agent](docs/concepts/multi-agent/README.md) · [Patterns](docs/concepts/patterns.md) · [Boundaries](docs/concepts/boundaries.md)
+[Glossary](docs/en/concepts/glossary.md) · [Why KohakuTerrarium](docs/en/concepts/foundations/why-kohakuterrarium.md) · [What is an agent](docs/en/concepts/foundations/what-is-an-agent.md) · [Composing an agent](docs/en/concepts/foundations/composing-an-agent.md) · [Modules](docs/en/concepts/modules/README.md) · [Agent as a Python object](docs/en/concepts/python-native/agent-as-python-object.md) · [Composition algebra](docs/en/concepts/python-native/composition-algebra.md) · [Multi-agent](docs/en/concepts/multi-agent/README.md) · [Patterns](docs/en/concepts/patterns.md) · [Boundaries](docs/en/concepts/boundaries.md)
 
 ### Reference
-[CLI](docs/reference/cli.md) · [HTTP](docs/reference/http.md) · [Python API](docs/reference/python.md) · [Configuration](docs/reference/configuration.md) · [Builtins](docs/reference/builtins.md) · [Plugin hooks](docs/reference/plugin-hooks.md)
+[CLI](docs/en/reference/cli.md) · [HTTP](docs/en/reference/http.md) · [Python API](docs/en/reference/python.md) · [Configuration](docs/en/reference/configuration.md) · [Builtins](docs/en/reference/builtins.md) · [Plugin hooks](docs/en/reference/plugin-hooks.md)
 
 ## Roadmap
 
@@ -476,10 +480,10 @@ Near-term directions include more reliable terrarium flow, richer UI output / in
 
 ## Contributing
 
-- [Contributing docs](docs/dev/README.md)
-- [Testing](docs/dev/testing.md)
-- [Internals](docs/dev/internals.md)
-- [Frontend architecture](docs/dev/frontend.md)
+- [Contributing docs](docs/en/dev/README.md)
+- [Testing](docs/en/dev/testing.md)
+- [Internals](docs/en/dev/internals.md)
+- [Frontend architecture](docs/en/dev/frontend.md)
 
 ## License
 
