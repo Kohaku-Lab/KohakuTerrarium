@@ -18,7 +18,7 @@ const dotClass = computed(() => {
   switch (props.status) {
     case "running":
     case "processing":
-      return "bg-aquamarine kohaku-glow"
+      return "bg-aquamarine"
     case "idle":
     case "done":
       return "bg-amber"

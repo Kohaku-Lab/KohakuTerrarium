@@ -3,7 +3,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref, watch } from "vue"
+import { onBeforeUnmount, ref, shallowRef, watch } from "vue"
 import MarkdownIt from "markdown-it"
 import markdownItKatex from "@vscode/markdown-it-katex"
 import hljs from "highlight.js"
@@ -58,13 +58,6 @@ function onClick(e) {
   })
 }
 
-watch(
-  () => props.content,
-  async () => {
-    await nextTick()
-  },
-)
-
 /**
  * Pre-process content to normalize LaTeX delimiters:
  * - \( ... \) -> $ ... $  (inline)
@@ -100,9 +93,72 @@ function renderMarkdown(content) {
   }
 }
 
-const rendered = computed(() => {
-  if (!props.content) return ""
-  return renderMarkdown(preprocessLatex(props.content))
+/*
+ * Throttled rendering.
+ *
+ * `md.render` + `hljs.highlight` is expensive and grows with content
+ * length — running it on every streaming chunk (~30 fps) saturates
+ * both CPU and GPU (the latter because `v-html` swaps the whole
+ * subtree, invalidating every code-block compositor layer).
+ *
+ * We coalesce rapid updates: the last-requested render runs at most
+ * once per THROTTLE_MS, plus a guaranteed trailing render so the
+ * final content is always correct. A brand-new mount / cleared
+ * content renders synchronously to avoid a flicker of empty output.
+ *
+ * `shallowRef` avoids deep reactivity on a value that's always
+ * replaced whole.
+ */
+const rendered = shallowRef("")
+
+const THROTTLE_MS = 80 // ~12 fps during streaming; user eye can't tell
+
+let lastRenderAt = 0
+let pendingTimer = null
+let pendingContent = null
+
+function doRender(content) {
+  if (!content) {
+    rendered.value = ""
+    return
+  }
+  rendered.value = renderMarkdown(preprocessLatex(content))
+  lastRenderAt = performance.now()
+}
+
+function scheduleRender(content) {
+  pendingContent = content
+  if (pendingTimer !== null) return // trailing render will pick up latest content
+  const now = performance.now()
+  const elapsed = now - lastRenderAt
+  if (elapsed >= THROTTLE_MS) {
+    // Fast path: cooldown elapsed, render immediately.
+    doRender(pendingContent)
+    pendingContent = null
+    return
+  }
+  // Schedule trailing render at the end of the cooldown window.
+  pendingTimer = setTimeout(() => {
+    pendingTimer = null
+    const c = pendingContent
+    pendingContent = null
+    if (c != null) doRender(c)
+  }, THROTTLE_MS - elapsed)
+}
+
+// Immediate render on first content so the component never mounts empty.
+if (props.content) doRender(props.content)
+
+watch(
+  () => props.content,
+  (content) => scheduleRender(content),
+)
+
+onBeforeUnmount(() => {
+  if (pendingTimer !== null) {
+    clearTimeout(pendingTimer)
+    pendingTimer = null
+  }
 })
 </script>
 

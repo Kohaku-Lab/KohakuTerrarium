@@ -20,6 +20,7 @@
 import { computed, onMounted, onUnmounted, provide, ref, watch } from "vue"
 
 import WorkspaceShell from "@/components/layout/WorkspaceShell.vue"
+import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 import { useChatStore } from "@/stores/chat"
 import { useEditorStore } from "@/stores/editor"
 import { useInstancesStore } from "@/stores/instances"
@@ -82,9 +83,12 @@ provide("panelProps", panelProps)
 onMounted(async () => {
   await loadInstance()
   applyPresetForInstance()
-  refreshTimer = setInterval(() => {
+  // Visibility-aware refresh: pauses polling while the tab is hidden
+  // so backgrounded instance pages don't drive idle CPU / GPU load.
+  refreshTimer = createVisibilityInterval(() => {
     loadInstance().catch((err) => console.error("Instance refresh failed:", err))
   }, 5000)
+  refreshTimer.start()
 })
 
 watch(
@@ -151,7 +155,7 @@ async function confirmStop() {
 
 onUnmounted(() => {
   if (refreshTimer) {
-    clearInterval(refreshTimer)
+    refreshTimer.stop()
     refreshTimer = null
   }
 })

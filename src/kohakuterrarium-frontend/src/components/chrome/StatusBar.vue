@@ -42,10 +42,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from "vue"
+import { computed, ref } from "vue"
 
 import ModelSwitcher from "@/components/chrome/ModelSwitcher.vue"
 import StatusDot from "@/components/common/StatusDot.vue"
+import { useVisibilityInterval } from "@/composables/useVisibilityInterval"
 import { useChatStore } from "@/stores/chat"
 import { useInstancesStore } from "@/stores/instances"
 import { useI18n } from "@/utils/i18n"
@@ -72,15 +73,12 @@ const sessionIdShort = computed(() => {
 const jobCount = computed(() => Object.keys(chat.runningJobs || {}).length)
 
 const now = ref(Date.now())
-let tick = null
-onMounted(() => {
-  tick = setInterval(() => {
-    now.value = Date.now()
-  }, 1000)
-})
-onUnmounted(() => {
-  if (tick) clearInterval(tick)
-})
+// Visibility-aware tick — the runtime-elapsed label only matters when
+// the user can see the status bar. While hidden, pause the reactive
+// updates entirely.
+useVisibilityInterval(() => {
+  now.value = Date.now()
+}, 1000)
 
 const runtimeStr = computed(() => {
   const t0 = instance.value?.created_at

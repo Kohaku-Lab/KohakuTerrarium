@@ -1,4 +1,5 @@
 import { terrariumAPI, agentAPI } from "@/utils/api"
+import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 
 export const useInstancesStore = defineStore("instances", {
   state: () => ({
@@ -7,7 +8,7 @@ export const useInstancesStore = defineStore("instances", {
     /** @type {import('@/utils/api').InstanceInfo | null} */
     current: null,
     loading: false,
-    /** @type {number | null} */
+    /** @type {ReturnType<typeof createVisibilityInterval> | null} */
     _pollInterval: null,
     /** @type {number} Number of active subscribers (components using this store) */
     _subscribers: 0,
@@ -101,13 +102,19 @@ export const useInstancesStore = defineStore("instances", {
       }
     },
 
-    /** Start auto-refresh polling. Called when a component mounts. */
+    /** Start auto-refresh polling. Called when a component mounts.
+     *
+     * Uses a visibility-aware interval so the store stops polling when
+     * the tab is hidden — otherwise every running-instance row drives
+     * a reactive update every 5 s even while the user isn't looking.
+     */
     startPolling() {
       this._subscribers++
       if (this._pollInterval === null) {
-        this._pollInterval = setInterval(() => {
+        this._pollInterval = createVisibilityInterval(() => {
           this.fetchAll()
         }, 5000)
+        this._pollInterval.start()
       }
     },
 
@@ -115,7 +122,7 @@ export const useInstancesStore = defineStore("instances", {
     stopPolling() {
       this._subscribers = Math.max(0, this._subscribers - 1)
       if (this._subscribers === 0 && this._pollInterval !== null) {
-        clearInterval(this._pollInterval)
+        this._pollInterval.stop()
         this._pollInterval = null
       }
     },

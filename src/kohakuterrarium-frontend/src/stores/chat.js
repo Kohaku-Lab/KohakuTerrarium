@@ -1,4 +1,5 @@
 import { terrariumAPI, agentAPI } from "@/utils/api"
+import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 import { useMessagesStore } from "@/stores/messages"
 import { useInstancesStore } from "@/stores/instances"
 import { useStatusStore } from "@/stores/status"
@@ -1575,18 +1576,26 @@ export const useChatStore = defineStore("chat", {
 
     // ── Job timer (reactive elapsed tracking) ──
 
-    /** Start 1s interval to tick _jobTick, making elapsed times reactive. */
+    /** Start 1s interval to tick _jobTick, making elapsed times reactive.
+     *
+     * Visibility-aware — while the tab is hidden the tick pauses and
+     * every `getJobElapsed` subscriber stops re-rendering. A stale
+     * elapsed time for a backgrounded tab is fine; what matters is
+     * not burning GPU driving a reactive effect the user can't see.
+     */
     _ensureJobTimer() {
       if (this._jobTimer !== null) return
-      this._jobTimer = setInterval(() => {
+      const ctrl = createVisibilityInterval(() => {
         this._jobTick++
       }, 1000)
+      ctrl.start()
+      this._jobTimer = ctrl
     },
 
     /** Stop timer if no more running jobs. */
     _checkJobTimer() {
       if (Object.keys(this.runningJobs).length === 0 && this._jobTimer !== null) {
-        clearInterval(this._jobTimer)
+        this._jobTimer.stop()
         this._jobTimer = null
       }
     },
@@ -1625,7 +1634,7 @@ export const useChatStore = defineStore("chat", {
         this._ws = null
       }
       if (this._jobTimer !== null) {
-        clearInterval(this._jobTimer)
+        this._jobTimer.stop()
         this._jobTimer = null
       }
     },

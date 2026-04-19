@@ -187,7 +187,21 @@ html.dark {
   opacity: 0;
 }
 
-/* KohakUwUing animation */
+/* Status / activity animations.
+ *
+ * `.kohaku-pulse` — opacity animation on the element itself.
+ * Compositor-friendly, no paint cost. Apply it only to things the
+ * user genuinely wants to see moving: the "Processing..." text, the
+ * WebSocket reconnect banner, an actively-compacting context marker.
+ *
+ * We used to ship a `.kohaku-glow` class (pulsing halo on status
+ * dots) — it got removed. A terrarium view can have 10-30 status
+ * dots on screen at once, and *any* continuous animation on each one
+ * was enough to saturate the compositor and keep the GPU busy even
+ * when the page was idle. The dot's colour already tells you
+ * "running" (aquamarine) vs "idle" (amber) vs "error" (coral);
+ * animation added no information.
+ */
 @keyframes amber-pulse {
   0%,
   100% {
@@ -200,18 +214,4 @@ html.dark {
 
 .kohaku-pulse {
   animation: amber-pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes amber-glow {
-  0%,
-  100% {
-    box-shadow: 0 0 4px rgba(212, 146, 10, 0.2);
-  }
-  50% {
-    box-shadow: 0 0 12px rgba(212, 146, 10, 0.5);
-  }
-}
-
-.kohaku-glow {
-  animation: amber-glow 2s ease-in-out infinite;
 }

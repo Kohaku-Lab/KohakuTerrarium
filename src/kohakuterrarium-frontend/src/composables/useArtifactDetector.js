@@ -8,13 +8,14 @@
 
 import { onUnmounted, watch } from "vue"
 
+import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 import { useCanvasStore } from "@/stores/canvas"
 import { useChatStore } from "@/stores/chat"
 
 export function useArtifactDetector() {
   const chat = useChatStore()
   const canvas = useCanvasStore()
-  let intervalId = null
+  let ctrl = null
 
   function scanAll() {
     const tab = chat.activeTab
@@ -25,16 +26,18 @@ export function useArtifactDetector() {
     }
   }
 
-  // While processing, scan every 2s to catch completed code blocks mid-stream.
+  // While processing, scan every 2s to catch completed code blocks
+  // mid-stream. Visibility-aware so a backgrounded tab doesn't scan.
   watch(
     () => chat.processing,
     (processing) => {
-      if (processing && !intervalId) {
-        intervalId = setInterval(scanAll, 2000)
+      if (processing && !ctrl) {
+        ctrl = createVisibilityInterval(scanAll, 2000)
+        ctrl.start()
       } else if (!processing) {
-        if (intervalId) {
-          clearInterval(intervalId)
-          intervalId = null
+        if (ctrl) {
+          ctrl.stop()
+          ctrl = null
         }
         // Final scan when streaming ends.
         scanAll()
@@ -53,9 +56,9 @@ export function useArtifactDetector() {
   )
 
   onUnmounted(() => {
-    if (intervalId) {
-      clearInterval(intervalId)
-      intervalId = null
+    if (ctrl) {
+      ctrl.stop()
+      ctrl = null
     }
   })
 }
