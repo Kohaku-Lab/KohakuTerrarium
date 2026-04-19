@@ -1,3 +1,13 @@
+---
+title: Channel
+summary: Named message pipes — queue vs. broadcast — that underpin multi-agent and cross-module communication.
+tags:
+  - concepts
+  - module
+  - channel
+  - multi-agent
+---
+
 # Channel
 
 ## What it is

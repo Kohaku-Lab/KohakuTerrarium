@@ -1,3 +1,12 @@
+---
+title: Prompt aggregation
+summary: How the system prompt is assembled from personality, tool list, framework hints, and on-demand skills.
+tags:
+  - concepts
+  - impl-notes
+  - prompt
+---
+
 # Prompt aggregation
 
 ## The problem this solves

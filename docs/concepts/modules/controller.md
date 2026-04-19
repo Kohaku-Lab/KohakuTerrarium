@@ -1,3 +1,12 @@
+---
+title: Controller
+summary: The reasoning loop that streams from the LLM, parses tool calls, and dispatches feedback.
+tags:
+  - concepts
+  - module
+  - controller
+---
+
 # Controller
 
 ## What it is

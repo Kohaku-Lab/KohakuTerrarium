@@ -1,3 +1,11 @@
+---
+title: Boundaries
+summary: The creature abstraction is a default, not a corset — where the framework bends, and when it doesn't fit at all.
+tags:
+  - concepts
+  - philosophy
+---
+
 # Boundaries
 
 The creature abstraction is the default shape of an agent in

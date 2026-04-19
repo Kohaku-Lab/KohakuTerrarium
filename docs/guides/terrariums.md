@@ -1,3 +1,12 @@
+---
+title: Terrariums
+summary: Horizontal multi-agent with channels, output wiring, root agents, hot-plug, and observation.
+tags:
+  - guides
+  - terrarium
+  - multi-agent
+---
+
 # Terrariums
 
 For readers composing several creatures that need to cooperate.

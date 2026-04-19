@@ -1,3 +1,12 @@
+---
+title: Root agent
+summary: A creature outside the terrarium that represents the user — user-facing surface, management toolset, topology awareness.
+tags:
+  - concepts
+  - multi-agent
+  - root
+---
+
 # Root agent
 
 ## What it is

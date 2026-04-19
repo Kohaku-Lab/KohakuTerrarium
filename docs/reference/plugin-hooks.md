@@ -1,3 +1,12 @@
+---
+title: Plugin hooks
+summary: Every lifecycle hook plugins can register, when it fires, and what payload it receives.
+tags:
+  - reference
+  - plugin
+  - hooks
+---
+
 # Plugin hooks
 
 Every lifecycle, LLM, tool, sub-agent, and callback hook exposed to

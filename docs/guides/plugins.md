@@ -1,3 +1,12 @@
+---
+title: Plugins
+summary: Prompt plugins and lifecycle plugins — what each hooks, how they compose, and when to use them.
+tags:
+  - guides
+  - plugin
+  - extending
+---
+
 # Plugins
 
 For readers adding behaviour at the *seams* between modules without forking any module.

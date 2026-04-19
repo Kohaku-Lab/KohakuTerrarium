@@ -1,3 +1,11 @@
+---
+title: Examples
+summary: Tour of the bundled example creatures, terrariums, and code — what to read first and why.
+tags:
+  - guides
+  - examples
+---
+
 # Examples
 
 For readers looking for runnable code and config to learn from.

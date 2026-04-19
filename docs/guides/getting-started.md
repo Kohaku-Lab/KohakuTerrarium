@@ -1,3 +1,12 @@
+---
+title: Getting started
+summary: Install KohakuTerrarium, install the kt-biome showcase pack, and run a working agent in a few minutes.
+tags:
+  - guides
+  - install
+  - getting-started
+---
+
 # Getting Started
 
 For readers who have never run KohakuTerrarium before and want a working agent on their machine in a few minutes.

@@ -1,3 +1,12 @@
+---
+title: Non-blocking compaction
+summary: How the controller keeps running while the summariser rebuilds a compacted conversation in the background.
+tags:
+  - concepts
+  - impl-notes
+  - compaction
+---
+
 # Non-blocking compaction
 
 ## The problem this solves

@@ -1,3 +1,12 @@
+---
+title: Serving
+summary: kt serve for the HTTP API + WebSocket + web dashboard, plus native desktop via kt app.
+tags:
+  - guides
+  - serving
+  - http
+---
+
 # Serving
 
 For readers running KohakuTerrarium's web UI, the desktop app, or a long-lived daemon.

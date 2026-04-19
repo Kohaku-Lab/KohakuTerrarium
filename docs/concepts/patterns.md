@@ -1,3 +1,11 @@
+---
+title: Patterns
+summary: Recipes that fall out of combining existing modules — group chat, smart guards, adaptive watchers, output wiring.
+tags:
+  - concepts
+  - patterns
+---
+
 # Patterns
 
 None of the patterns on this page required a new framework feature.

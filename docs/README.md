@@ -1,3 +1,11 @@
+---
+title: KohakuTerrarium Documentation
+summary: Home for the concept model, guides, reference, tutorials, and development notes.
+tags:
+  - overview
+  - docs
+---
+
 # KohakuTerrarium Documentation
 
 KohakuTerrarium is a framework for building real agents — not just LLM wrappers.

@@ -1,3 +1,12 @@
+---
+title: Composing an agent
+summary: How the six creature modules interact at runtime through one TriggerEvent envelope.
+tags:
+  - concepts
+  - foundations
+  - runtime
+---
+
 # Composing an agent
 
 [What is an agent](what-is-an-agent.md) introduced six modules. This

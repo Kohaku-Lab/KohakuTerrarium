@@ -1,3 +1,11 @@
+---
+title: Guides
+summary: Task-oriented how-tos for authoring creatures, composing them, and shipping agents.
+tags:
+  - guides
+  - overview
+---
+
 # Guides
 
 Task-oriented docs for people running, building with, and extending KohakuTerrarium.

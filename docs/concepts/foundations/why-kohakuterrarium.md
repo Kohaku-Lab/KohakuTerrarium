@@ -1,3 +1,12 @@
+---
+title: Why KohakuTerrarium
+summary: The observation that every agent product re-implements the same substrate — and the framework-shaped response.
+tags:
+  - concepts
+  - foundations
+  - philosophy
+---
+
 # Why KohakuTerrarium exists
 
 ## An observation you have probably made

@@ -1,3 +1,12 @@
+---
+title: Terrarium
+summary: The horizontal wiring layer — channels for optional traffic, output wiring for deterministic edges, hot-plug and observation on top.
+tags:
+  - concepts
+  - multi-agent
+  - terrarium
+---
+
 # Terrarium
 
 ## What it is

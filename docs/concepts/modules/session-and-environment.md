@@ -1,3 +1,13 @@
+---
+title: Session & environment
+summary: Per-creature private state (session) vs. terrarium-shared state (environment) and how they interact.
+tags:
+  - concepts
+  - module
+  - session
+  - environment
+---
+
 # Session and environment
 
 ## What it is

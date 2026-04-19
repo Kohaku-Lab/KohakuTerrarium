@@ -1,3 +1,12 @@
+---
+title: Your first custom tool
+summary: Write a Python tool, register it, and wire it into a creature's config.
+tags:
+  - tutorials
+  - tool
+  - extending
+---
+
 # First Custom Tool
 
 **Problem:** your agent needs a capability that no built-in tool

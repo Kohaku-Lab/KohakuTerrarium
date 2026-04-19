@@ -1,3 +1,12 @@
+---
+title: Input
+summary: The specific-case trigger that carries user messages into the event queue.
+tags:
+  - concepts
+  - module
+  - input
+---
+
 # Input
 
 ## What it is

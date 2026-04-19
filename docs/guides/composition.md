@@ -1,3 +1,12 @@
+---
+title: Compose algebra
+summary: Stitch agents and async callables together in plain Python with sequence / parallel / fallback / retry operators.
+tags:
+  - guides
+  - python
+  - composition
+---
+
 # Composition
 
 For readers who want multi-agent choreography from plain Python without building a terrarium.

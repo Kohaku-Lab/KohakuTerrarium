@@ -1,3 +1,12 @@
+---
+title: Session persistence
+summary: The .kohakutr file format, what's stored per creature, and how resume rebuilds conversation state.
+tags:
+  - concepts
+  - impl-notes
+  - persistence
+---
+
 # Session persistence
 
 ## The problem this solves

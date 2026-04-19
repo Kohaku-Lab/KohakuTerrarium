@@ -1,3 +1,12 @@
+---
+title: Frontend layout
+summary: How the Vue 3 dashboard is organised, where to extend it, and how events flow from backend to UI.
+tags:
+  - guides
+  - frontend
+  - ui
+---
+
 # Frontend Layout
 
 For readers using or customising the web dashboard served by `kt web` / `kt app` / `kt serve`.

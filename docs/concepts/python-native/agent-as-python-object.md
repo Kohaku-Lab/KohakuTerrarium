@@ -1,3 +1,12 @@
+---
+title: Agent as a Python object
+summary: Why every agent is a Python object, what that unlocks, and how embedding is different from running a CLI.
+tags:
+  - concepts
+  - python
+  - embedding
+---
+
 # Agent as a Python object
 
 ## What it is

@@ -1,3 +1,12 @@
+---
+title: Your first terrarium
+summary: Compose two creatures with channels and output wiring, then add a root for an interactive surface.
+tags:
+  - tutorials
+  - terrarium
+  - multi-agent
+---
+
 # First Terrarium
 
 **Problem:** you want two creatures to cooperate — a writer produces

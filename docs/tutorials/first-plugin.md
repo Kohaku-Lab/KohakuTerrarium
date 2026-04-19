@@ -1,3 +1,12 @@
+---
+title: Your first plugin
+summary: Build a lifecycle plugin that hooks pre/post tool execution to gate or enrich calls.
+tags:
+  - tutorials
+  - plugin
+  - extending
+---
+
 # First Plugin
 
 **Problem:** you need a behaviour that does not belong to any single

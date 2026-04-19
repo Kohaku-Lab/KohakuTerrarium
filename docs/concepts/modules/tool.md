@@ -1,3 +1,12 @@
+---
+title: Tool
+summary: Named capabilities the LLM can invoke — shell commands, file edits, web searches, and more.
+tags:
+  - concepts
+  - module
+  - tool
+---
+
 # Tool
 
 ## What it is

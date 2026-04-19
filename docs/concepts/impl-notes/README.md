@@ -1,3 +1,12 @@
+---
+title: Implementation notes
+summary: Deep dives into how specific subsystems actually work — for contributors and curious readers.
+tags:
+  - concepts
+  - impl-notes
+  - internals
+---
+
 # Impl notes
 
 Four specific implementation choices that deserve their own short

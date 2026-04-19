@@ -1,3 +1,12 @@
+---
+title: Glossary
+summary: Plain-English definitions for the vocabulary used across the docs.
+tags:
+  - concepts
+  - glossary
+  - reference
+---
+
 # Glossary
 
 Plain-English definitions for the vocabulary KohakuTerrarium uses. If

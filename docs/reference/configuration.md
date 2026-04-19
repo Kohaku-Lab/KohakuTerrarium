@@ -1,3 +1,11 @@
+---
+title: Configuration
+summary: Every configuration field for creatures, terrariums, LLM profiles, MCP servers, compaction, plugins, and output wiring.
+tags:
+  - reference
+  - config
+---
+
 # Configuration
 
 Every configuration field for creatures, terrariums, LLM profiles,

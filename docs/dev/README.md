@@ -1,3 +1,11 @@
+---
+title: Development
+summary: Contributor-facing docs — internals, dep graph, frontend, and the test strategy.
+tags:
+  - dev
+  - overview
+---
+
 # Development
 
 For contributors working on the framework itself. Not for users.

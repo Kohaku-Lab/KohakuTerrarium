@@ -1,3 +1,12 @@
+---
+title: Sessions and resume
+summary: How .kohakutr session files work, how to resume a creature, and how to replay conversation history.
+tags:
+  - guides
+  - session
+  - persistence
+---
+
 # Sessions
 
 For readers persisting, resuming, or archiving agent runs.

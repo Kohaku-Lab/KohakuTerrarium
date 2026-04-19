@@ -1,3 +1,12 @@
+---
+title: MCP
+summary: Connect Model Context Protocol servers (stdio / HTTP / SSE) and surface their tools to your creatures.
+tags:
+  - guides
+  - mcp
+  - integration
+---
+
 # MCP
 
 For readers connecting MCP (Model Context Protocol) servers to a creature.

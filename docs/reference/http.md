@@ -1,3 +1,12 @@
+---
+title: HTTP API
+summary: The kt serve REST endpoints and WebSocket channels, with request / response shapes.
+tags:
+  - reference
+  - http
+  - api
+---
+
 # HTTP and WebSocket API
 
 Every REST endpoint and WebSocket channel exposed by the in-package

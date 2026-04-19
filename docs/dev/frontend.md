@@ -1,3 +1,11 @@
+---
+title: Frontend
+summary: Vue 3 dashboard layout, state stores, WebSocket plumbing, and how to contribute UI changes.
+tags:
+  - dev
+  - frontend
+---
+
 # Frontend architecture
 
 Developer reference for the Vue 3 web dashboard. Covers the component

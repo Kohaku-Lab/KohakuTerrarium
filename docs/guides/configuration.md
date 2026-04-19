@@ -1,3 +1,12 @@
+---
+title: Authoring configuration
+summary: Creature config shape, inheritance, prompt chains, and the fields that matter most in day-to-day authoring.
+tags:
+  - guides
+  - config
+  - creature
+---
+
 # Configuration
 
 For readers who want to tweak an existing creature or wire a new one without reading every field in the reference.

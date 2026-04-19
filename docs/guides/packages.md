@@ -1,3 +1,12 @@
+---
+title: Packages
+summary: Installing packs via kt install, the kohaku.yaml manifest, @pkg/ references, and publishing your own pack.
+tags:
+  - guides
+  - package
+  - distribution
+---
+
 # Packages
 
 For readers sharing creatures, terrariums, tools, or plugins across projects.

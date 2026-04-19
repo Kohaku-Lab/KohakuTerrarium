@@ -1,3 +1,12 @@
+---
+title: Stream parser
+summary: State-machine parsing of LLM output into text, tool calls, sub-agent dispatches, and framework commands.
+tags:
+  - concepts
+  - impl-notes
+  - parser
+---
+
 # Stream parser
 
 ## The problem this solves

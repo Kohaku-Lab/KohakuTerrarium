@@ -1,3 +1,12 @@
+---
+title: Memory
+summary: FTS5 + vector memory over the session store, embedding provider choice, and retrieval patterns.
+tags:
+  - guides
+  - memory
+  - embedding
+---
+
 # Memory
 
 For readers who want to search past session events — from the CLI, from Python, or from an agent at runtime.

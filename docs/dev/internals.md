@@ -1,3 +1,11 @@
+---
+title: Internals
+summary: How the runtime fits together — event queue, controller loop, executor, subagent manager, plugin wrap.
+tags:
+  - dev
+  - internals
+---
+
 # Framework internals
 
 Implementation-level map of the runtime, grouped into three layers.

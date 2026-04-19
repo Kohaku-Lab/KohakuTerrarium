@@ -1,3 +1,12 @@
+---
+title: Your first creature
+summary: Author a creature config, run it in CLI / TUI / web, and customise the prompt and tools.
+tags:
+  - tutorials
+  - creature
+  - getting-started
+---
+
 # First Creature
 
 **Problem:** you have KohakuTerrarium installed and you want to go from

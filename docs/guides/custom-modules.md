@@ -1,3 +1,12 @@
+---
+title: Custom modules
+summary: Write and register custom inputs, triggers, tools, outputs, and sub-agents against the module protocols.
+tags:
+  - guides
+  - extending
+  - module
+---
+
 # Custom Modules
 
 For readers writing their own tools, inputs, outputs, triggers, or sub-agents.

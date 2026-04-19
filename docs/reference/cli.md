@@ -1,3 +1,11 @@
+---
+title: CLI
+summary: Every kt subcommand — run, resume, login, install, list, info, model, embedding, search, terrarium, serve, app.
+tags:
+  - reference
+  - cli
+---
+
 # CLI Reference
 
 Every `kt` command, subcommand, and flag. The CLI is the operator-facing

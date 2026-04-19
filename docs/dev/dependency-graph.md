@@ -1,3 +1,12 @@
+---
+title: Dependency graph
+summary: Module import-direction invariants and the tests that enforce them.
+tags:
+  - dev
+  - internals
+  - architecture
+---
+
 # Dependency rules
 
 The package has a strict one-way import discipline. Enforced by

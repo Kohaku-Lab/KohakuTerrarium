@@ -1,3 +1,11 @@
+---
+title: Foundations
+summary: Why the framework exists, what an agent is in its model, and how the six modules wire up at runtime.
+tags:
+  - concepts
+  - foundations
+---
+
 # Foundations
 
 Three short docs that stake the ground for everything else.

@@ -1,3 +1,12 @@
+---
+title: Python API
+summary: The kohakuterrarium package surface — Agent, AgentSession, TerrariumRuntime, compose, and testing helpers.
+tags:
+  - reference
+  - python
+  - api
+---
+
 # Python API
 
 Every public class, function, and protocol in the `kohakuterrarium`

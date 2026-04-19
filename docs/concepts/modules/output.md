@@ -1,3 +1,12 @@
+---
+title: Output
+summary: How a creature talks back — the output router that fans text, activity, and structured events to sinks.
+tags:
+  - concepts
+  - module
+  - output
+---
+
 # Output
 
 ## What it is

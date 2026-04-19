@@ -1,3 +1,12 @@
+---
+title: Trigger
+summary: Anything that wakes the controller without explicit user input — timers, idle, channels, webhooks, monitors.
+tags:
+  - concepts
+  - module
+  - trigger
+---
+
 # Trigger
 
 ## What it is

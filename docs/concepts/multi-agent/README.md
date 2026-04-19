@@ -1,3 +1,12 @@
+---
+title: Multi-agent
+summary: Two axes — vertical (sub-agents) and horizontal (terrarium + channels + output wiring) — and when to pick which.
+tags:
+  - concepts
+  - multi-agent
+  - overview
+---
+
 # Multi-agent
 
 There are two distinct axes of multi-agent in KohakuTerrarium, and

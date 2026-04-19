@@ -1,3 +1,11 @@
+---
+title: Testing
+summary: Test layout, the ScriptedLLM and TestAgentBuilder helpers, and how to write deterministic agent tests.
+tags:
+  - dev
+  - testing
+---
+
 # Testing
 
 The test suite lives under `tests/` and splits into unit tests

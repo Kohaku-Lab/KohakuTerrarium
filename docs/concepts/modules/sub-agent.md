@@ -1,3 +1,12 @@
+---
+title: Sub-agent
+summary: Nested creatures spawned by a parent for bounded tasks, with their own context and a subset of tools.
+tags:
+  - concepts
+  - module
+  - sub-agent
+---
+
 # Sub-agent
 
 ## What it is

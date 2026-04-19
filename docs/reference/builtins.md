@@ -1,3 +1,11 @@
+---
+title: Built-ins
+summary: The bundled tools, sub-agents, triggers, inputs, and outputs — argument shapes, behaviours, and defaults.
+tags:
+  - reference
+  - builtins
+---
+
 # Built-ins
 
 Every built-in tool, sub-agent, input, output, user command, framework

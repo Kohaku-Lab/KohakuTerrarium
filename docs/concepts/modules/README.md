@@ -1,3 +1,12 @@
+---
+title: Modules
+summary: One doc per creature module — controller, input, trigger, tool, sub-agent, output, plus cross-cutters.
+tags:
+  - concepts
+  - modules
+  - overview
+---
+
 # Modules
 
 A creature is made of modules. This section has one concept doc per

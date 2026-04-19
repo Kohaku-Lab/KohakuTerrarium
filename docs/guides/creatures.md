@@ -1,3 +1,12 @@
+---
+title: Authoring creatures
+summary: Prompt design, tool and sub-agent selection, LLM profile choice, and publishing creatures for reuse.
+tags:
+  - guides
+  - creature
+  - authoring
+---
+
 # Creatures
 
 For readers who want to author, customize, or package a standalone agent.

@@ -1,3 +1,12 @@
+---
+title: Compose algebra
+summary: Four operators and a set of combinators that treat agents and async callables as composable units.
+tags:
+  - concepts
+  - python
+  - composition
+---
+
 # Composition algebra
 
 ## What it is

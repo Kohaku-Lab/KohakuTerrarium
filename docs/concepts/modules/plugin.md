@@ -1,3 +1,12 @@
+---
+title: Plugin
+summary: Code that modifies the connections between modules without forking them — prompt plugins and lifecycle plugins.
+tags:
+  - concepts
+  - module
+  - plugin
+---
+
 # Plugin
 
 ## What it is

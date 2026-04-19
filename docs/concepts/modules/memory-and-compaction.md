@@ -1,3 +1,12 @@
+---
+title: Memory & compaction
+summary: How the session store doubles as a searchable memory, and how non-blocking compaction keeps context in budget.
+tags:
+  - concepts
+  - memory
+  - compaction
+---
+
 # Memory and compaction
 
 ## What it is

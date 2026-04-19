@@ -1,3 +1,12 @@
+---
+title: Programmatic usage
+summary: Drive Agent, AgentSession, TerrariumRuntime, and KohakuManager from your own Python code.
+tags:
+  - guides
+  - python
+  - embedding
+---
+
 # Programmatic Usage
 
 For readers embedding agents inside their own Python code.

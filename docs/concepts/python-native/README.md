@@ -1,3 +1,12 @@
+---
+title: Python-native
+summary: Agents as first-class async Python values, and the algebra that stitches them into pipelines.
+tags:
+  - concepts
+  - python
+  - overview
+---
+
 # Python-native
 
 Every module in a KohakuTerrarium creature is a Python class. An

@@ -1,3 +1,12 @@
+---
+title: Embedding in Python
+summary: Run an agent inside your own Python code via AgentSession and the compose algebra.
+tags:
+  - tutorials
+  - python
+  - embedding
+---
+
 # First Python Embedding
 
 **Problem:** you want to run a creature from inside your own Python

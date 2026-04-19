@@ -1,3 +1,12 @@
+---
+title: What is an agent
+summary: Build up a creature from a chat bot in four stages — controller, tools, triggers, sub-agents.
+tags:
+  - concepts
+  - foundations
+  - creature
+---
+
 # What is an agent
 
 An agent, in KohakuTerrarium, is a **creature**. To see why a creature

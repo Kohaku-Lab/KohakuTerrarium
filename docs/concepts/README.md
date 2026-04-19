@@ -1,3 +1,11 @@
+---
+title: Concepts
+summary: Mental models for creatures, terrariums, channels, triggers, plugins, and the compose algebra.
+tags:
+  - concepts
+  - overview
+---
+
 # Concepts
 
 Concept docs teach mental models. They are not a reference — field names,

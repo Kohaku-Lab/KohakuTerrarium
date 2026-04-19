@@ -1,3 +1,11 @@
+---
+title: Reference
+summary: Full-surface specifications — every field, command, endpoint, hook, and Python entry point.
+tags:
+  - reference
+  - overview
+---
+
 # Reference
 
 Reference pages are for exact lookup. Use them when you already know
