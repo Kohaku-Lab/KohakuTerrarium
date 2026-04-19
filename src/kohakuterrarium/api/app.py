@@ -53,7 +53,7 @@ def create_app(
     app = FastAPI(
         title="KohakuTerrarium API",
         description="HTTP API for managing agents and terrariums",
-        version="1.0.0",
+        version="1.0.1",
         lifespan=lifespan,
     )
 
