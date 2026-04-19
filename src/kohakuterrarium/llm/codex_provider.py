@@ -440,6 +440,7 @@ class CodexOAuthProvider(BaseLLMProvider):
             self.prompt_cache_key
             or hashlib.sha256(instr_text.encode()).hexdigest()[:32]
         )
+        extra_headers = {"session_id": cache_key}
 
         try:
             stream = await self._client.responses.create(
@@ -450,6 +451,7 @@ class CodexOAuthProvider(BaseLLMProvider):
                 store=False,
                 stream=True,
                 prompt_cache_key=cache_key,
+                extra_headers=extra_headers,
                 **extra_params,
             )
         except Exception as e:
