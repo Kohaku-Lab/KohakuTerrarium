@@ -91,7 +91,11 @@ class SessionStore:
         """Scan existing keys to restore sequence counters after restart."""
         # Event counters
         for key_bytes in self.events.keys():
-            key = key_bytes.decode() if isinstance(key_bytes, bytes) else key_bytes
+            key = (
+                key_bytes.decode("utf-8", errors="replace")
+                if isinstance(key_bytes, bytes)
+                else key_bytes
+            )
             # Format: "{agent}:e{seq:06d}"
             parts = key.rsplit(":e", 1)
             if len(parts) == 2:
@@ -105,7 +109,11 @@ class SessionStore:
 
         # Channel counters
         for key_bytes in self.channels.keys():
-            key = key_bytes.decode() if isinstance(key_bytes, bytes) else key_bytes
+            key = (
+                key_bytes.decode("utf-8", errors="replace")
+                if isinstance(key_bytes, bytes)
+                else key_bytes
+            )
             # Format: "{channel}:m{seq:06d}"
             parts = key.rsplit(":m", 1)
             if len(parts) == 2:
@@ -122,7 +130,11 @@ class SessionStore:
 
         # Sub-agent run counters
         for key_bytes in self.subagents.keys():
-            key = key_bytes.decode() if isinstance(key_bytes, bytes) else key_bytes
+            key = (
+                key_bytes.decode("utf-8", errors="replace")
+                if isinstance(key_bytes, bytes)
+                else key_bytes
+            )
             # Format: "{parent}:{name}:{run}:meta" or "...:conversation"
             if key.endswith(":meta"):
                 parts = key[: -len(":meta")].rsplit(":", 2)
@@ -213,7 +225,11 @@ class SessionStore:
         self.events.flush_cache()
         all_events = []
         for key_bytes in self.events.keys():
-            key = key_bytes.decode() if isinstance(key_bytes, bytes) else key_bytes
+            key = (
+                key_bytes.decode("utf-8", errors="replace")
+                if isinstance(key_bytes, bytes)
+                else key_bytes
+            )
             try:
                 evt = self.events[key_bytes]
                 all_events.append((key, evt))
@@ -248,7 +264,11 @@ class SessionStore:
                 return val
             # Legacy: JSON string from older sessions
             if isinstance(val, (str, bytes)):
-                s = val.decode() if isinstance(val, bytes) else val
+                s = (
+                    val.decode("utf-8", errors="replace")
+                    if isinstance(val, bytes)
+                    else val
+                )
                 data = json.loads(s)
                 if isinstance(data, dict) and "messages" in data:
                     return data["messages"]
@@ -471,7 +491,11 @@ class SessionStore:
         """Load all metadata as a dict."""
         result = {}
         for key_bytes in self.meta.keys():
-            key = key_bytes.decode() if isinstance(key_bytes, bytes) else key_bytes
+            key = (
+                key_bytes.decode("utf-8", errors="replace")
+                if isinstance(key_bytes, bytes)
+                else key_bytes
+            )
             try:
                 result[key] = self.meta[key_bytes]
             except Exception as e:
