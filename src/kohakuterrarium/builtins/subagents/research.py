@@ -19,7 +19,7 @@ You are a research agent. Find accurate information.
 RESEARCH_CONFIG = SubAgentConfig(
     name="research",
     description="Research topics using files and web access",
-    tools=["web_search", "web_fetch", "read", "write", "think", "scratchpad"],
+    tools=["web_search", "web_fetch", "read", "write", "scratchpad"],
     system_prompt=RESEARCH_SYSTEM_PROMPT,
     can_modify=False,
     stateless=True,

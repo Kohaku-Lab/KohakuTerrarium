@@ -19,7 +19,7 @@ You are in read-only planning mode. You may NOT make any changes.
 PLAN_CONFIG = SubAgentConfig(
     name="plan",
     description="Create implementation plans (read-only)",
-    tools=["glob", "grep", "read", "tree", "bash", "think"],
+    tools=["glob", "grep", "read", "tree", "bash"],
     system_prompt=PLAN_SYSTEM_PROMPT,
     can_modify=False,
     stateless=True,

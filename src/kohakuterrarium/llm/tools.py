@@ -143,16 +143,6 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
             },
         },
     },
-    "think": {
-        "type": "object",
-        "properties": {
-            "content": {
-                "type": "string",
-                "description": "Your reasoning and analysis",
-            },
-        },
-        "required": ["content"],
-    },
     "scratchpad": {
         "type": "object",
         "properties": {

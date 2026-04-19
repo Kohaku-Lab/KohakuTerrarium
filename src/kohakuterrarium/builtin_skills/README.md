@@ -14,9 +14,9 @@ override any file by placing a same-named file in their agent's
 | `tools/*.md` | One markdown doc per builtin tool (bash, read, edit, write, glob, grep, etc.) |
 | `subagents/*.md` | One markdown doc per builtin sub-agent (explore, plan, worker, critic, etc.) |
 
-## Tool Docs (16)
+## Tool Docs (15)
 
-bash, read, write, edit, glob, grep, tree, think, scratchpad,
+bash, read, write, edit, glob, grep, tree, scratchpad,
 ask_user, http, json_read, json_write, python, send_message, wait_channel
 
 ## Sub-agent Docs (10)

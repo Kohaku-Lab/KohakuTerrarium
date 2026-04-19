@@ -19,7 +19,6 @@ the public API from `builtins.tool_catalog`.
 | `glob.py` | `glob`: find files by pattern |
 | `grep.py` | `grep`: ripgrep-backed regex search with type filtering |
 | `tree.py` | `tree`: list directory structure (.gitignore-aware, line-limited) |
-| `think.py` | `think`: no-op tool for explicit LLM reasoning |
 | `scratchpad_tool.py` | `scratchpad`: session-scoped key-value working memory |
 | `ask_user.py` | `ask_user`: request human input mid-execution |
 | `json_read.py` / `json_write.py` | `json_read` / `json_write` with path expressions |

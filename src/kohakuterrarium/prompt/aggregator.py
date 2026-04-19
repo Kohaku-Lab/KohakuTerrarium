@@ -233,11 +233,6 @@ def _build_tool_examples(
     if "bash" in tool_names:
         ex = format_tool_call_example(fmt, "bash", body="ls -la")
         examples.append(f"```\n{ex}\n```")
-    elif "think" in tool_names:
-        ex = format_tool_call_example(
-            fmt, "think", body="Analyze the problem step by step..."
-        )
-        examples.append(f"```\n{ex}\n```")
 
     if "write" in tool_names:
         ex = format_tool_call_example(fmt, "write", {"path": "out.txt"}, "content here")

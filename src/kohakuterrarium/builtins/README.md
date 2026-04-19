@@ -19,7 +19,6 @@ Core general-purpose tools:
 | `glob` | Find files by glob pattern |
 | `grep` | Search file contents with regex and type filtering |
 | `tree` | List directory structure with frontmatter summaries |
-| `think` | No-op tool for explicit LLM reasoning |
 | `scratchpad` | Session-scoped key-value working memory |
 | `ask_user` | Request human input mid-execution |
 | `json_read` / `json_write` | Read and modify JSON files with path expressions |

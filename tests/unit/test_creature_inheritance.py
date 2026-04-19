@@ -47,7 +47,7 @@ def tmp_creatures(tmp_path):
                     {"name": "bash", "type": "builtin"},
                     {"name": "read", "type": "builtin"},
                     {"name": "write", "type": "builtin"},
-                    {"name": "think", "type": "builtin"},
+                    {"name": "scratchpad", "type": "builtin"},
                 ],
                 "subagents": [
                     {"name": "explore", "type": "builtin"},
@@ -179,11 +179,11 @@ class TestMergeConfigs:
         }
         child = {
             "no_inherit": ["tools"],
-            "tools": [{"name": "think"}],
+            "tools": [{"name": "scratchpad"}],
         }
         result = _merge_configs(base, child)
         # tools replaced (not extended)
-        assert [t["name"] for t in result["tools"]] == ["think"]
+        assert [t["name"] for t in result["tools"]] == ["scratchpad"]
         # subagents still inherited (not in no_inherit)
         assert [s["name"] for s in result["subagents"]] == ["explore", "plan"]
         # no_inherit itself not in result
@@ -196,19 +196,19 @@ class TestMergeConfigs:
         }
         child = {
             "no_inherit": ["tools", "subagents"],
-            "tools": [{"name": "think"}],
+            "tools": [{"name": "scratchpad"}],
             "subagents": [],
         }
         result = _merge_configs(base, child)
-        assert [t["name"] for t in result["tools"]] == ["think"]
+        assert [t["name"] for t in result["tools"]] == ["scratchpad"]
         assert result["subagents"] == []
 
     def test_no_inherit_empty_keeps_extend(self):
         base = {"tools": [{"name": "bash"}]}
-        child = {"no_inherit": [], "tools": [{"name": "think"}]}
+        child = {"no_inherit": [], "tools": [{"name": "scratchpad"}]}
         result = _merge_configs(base, child)
         # Empty no_inherit = normal extend behavior
-        assert [t["name"] for t in result["tools"]] == ["bash", "think"]
+        assert [t["name"] for t in result["tools"]] == ["bash", "scratchpad"]
 
     def test_plugins_merge_child_wins(self):
         """Plugins follow the same identity-union rule as tools."""
@@ -362,7 +362,7 @@ class TestLoadAgentConfigInheritance:
         assert len(config.tools) == 4
         tool_names = [t.name for t in config.tools]
         assert "bash" in tool_names
-        assert "think" in tool_names
+        assert "scratchpad" in tool_names
 
         # Inherits subagents from general
         assert len(config.subagents) == 2
@@ -443,7 +443,7 @@ class TestLoadAgentConfigInheritance:
         )
 
         config = load_agent_config(custom)
-        # grep extends general's 4 tools (bash, read, write, think)
+        # grep extends general's 4 tools (bash, read, write, scratchpad)
         assert len(config.tools) == 5
         tool_names = [t.name for t in config.tools]
         assert "grep" in tool_names

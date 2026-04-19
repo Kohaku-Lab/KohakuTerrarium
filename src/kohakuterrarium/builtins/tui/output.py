@@ -421,8 +421,6 @@ def _format_args_preview(tool_name: str, args: dict) -> str:
             return f"-> {args.get('channel', '')}"
         case "terrarium_observe":
             return f"<- {args.get('channel', '')}"
-        case "think":
-            return str(args.get("thought", args.get("content", "")))[:50]
         case "info":
             return args.get("name", args.get("topic", ""))[:50]
         case _:

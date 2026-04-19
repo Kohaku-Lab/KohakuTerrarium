@@ -20,7 +20,6 @@ DEFAULT_CONTENT_ARG_MAP: dict[str, str] = {
     "grep": "pattern",
     "tree": "path",
     "send_message": "message",
-    "think": "content",
     # Commands
     "info": "tool_name",
     "read_job": "job_id",
