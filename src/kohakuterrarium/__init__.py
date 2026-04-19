@@ -5,4 +5,4 @@ The framework enables building any kind of agent system - from SWE agents like C
 to conversational bots like Neuro-sama to autonomous monitoring systems.
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
