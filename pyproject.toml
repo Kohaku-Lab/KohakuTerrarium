@@ -104,9 +104,12 @@ dev = [
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+include-package-data = false
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["kohakuterrarium*"]
+exclude = ["kohakuterrarium-frontend*"]
 
 [tool.setuptools.package-data]
 "kohakuterrarium.builtin_skills" = ["**/*.md"]
