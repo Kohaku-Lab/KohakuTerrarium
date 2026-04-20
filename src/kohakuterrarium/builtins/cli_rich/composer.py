@@ -70,9 +70,10 @@ def _register_enhanced_keyboard_keys() -> None:
 
       where ``<codepoint>`` is the lowercase ASCII value (97..122).
 
-    - **Enter / Tab / Backspace** under Kitty CSI u — some terminals
-      disambiguate these even without modifiers:
+    - **Esc / Enter / Tab / Backspace** under Kitty CSI u — some
+      terminals disambiguate these even without modifiers:
 
+      - Esc       → ``ESC [ 27 u``   → ``Keys.Escape``
       - Enter     → ``ESC [ 13 u``   → ``Keys.ControlM``
       - Tab       → ``ESC [ 9 u``    → ``Keys.ControlI``
       - Backspace → ``ESC [ 127 u``  → ``Keys.ControlH``
@@ -120,10 +121,14 @@ def _register_enhanced_keyboard_keys() -> None:
         ANSI_SEQUENCES[f"\x1b[{codepoint};5u"] = key
         ANSI_SEQUENCES[f"\x1b[27;5;{codepoint}~"] = key
 
-    # Enter / Tab / Backspace — Kitty CSI u disambiguated forms.
+    # Esc / Enter / Tab / Backspace — Kitty CSI u disambiguated forms.
     # Terminals emit these when flag 1 of the protocol is active and
     # they choose to disambiguate all keys (not every terminal does,
     # but it costs us nothing to register defensively).
+    # Without the Esc mapping, pressing Esc on macOS (Ghostty / Kitty /
+    # WezTerm / recent iTerm2) leaks the bytes `[27u` into the composer
+    # instead of firing the interrupt hotkey.
+    ANSI_SEQUENCES["\x1b[27u"] = Keys.Escape  # Esc
     ANSI_SEQUENCES["\x1b[13u"] = Keys.ControlM  # Enter
     ANSI_SEQUENCES["\x1b[9u"] = Keys.ControlI  # Tab
     ANSI_SEQUENCES["\x1b[127u"] = Keys.ControlH  # Backspace
