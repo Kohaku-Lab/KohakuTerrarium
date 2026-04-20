@@ -23,9 +23,21 @@ tags:
 
 ```yaml
 controller:
-  llm: claude-opus-4.6
+  llm: claude-opus-4.7
   reasoning_effort: high
 ```
+
+你也可以釘住 preset 的某個 **variation** — 內建 preset 會暴露 `reasoning`、`speed`、`thinking` 這類 group (見 [reference/builtins — Variation groups](../reference/builtins.md#variation-groups))：
+
+```yaml
+controller:
+  llm: claude-opus-4.7@reasoning=xhigh
+  # 或，明確形式
+  variation_selections:
+    reasoning: xhigh
+```
+
+每個 provider 的 effort 旋鈕路徑不同。Codex 設 `reasoning_effort`；OpenAI 直連與 OpenRouter 設 `extra_body.reasoning.effort`；Anthropic 直連設 `extra_body.output_config.effort`；Gemini 直連設 `extra_body.google.thinking_config.thinking_level`。用 variation 會自動幫你接好；如果要手動設，見 [reference/configuration — Provider 專屬 `extra_body` 說明](../reference/configuration.md#provider-專屬-extra_body-說明)。
 
 或是在命令列只為這次執行覆寫：
 
@@ -90,7 +102,7 @@ tools:
   - name: my_tool
     type: custom
     module: ./tools/my_tool.py
-    class_name: MyTool
+    class: MyTool
 ```
 
 來自已安裝套件的 `kohaku.yaml`：
@@ -112,7 +124,7 @@ subagents:
   - name: my_critic
     type: custom
     module: ./subagents/critic.py
-    config_name: CRITIC_CONFIG
+    config: CRITIC_CONFIG
     interactive: true       # 跨父回合持續活著
     can_modify: true
 ```
@@ -128,12 +140,12 @@ triggers:
     prompt: "Check for pending tasks."
   - type: channel
     options: { channel: alerts }
-  - type: idle
-    options: { timeout: 120 }
-    prompt: "If the user seems stuck, ask."
+  - type: context
+    options: { debounce_ms: 200 }
+    prompt: "Context changed — re-plan if needed."
 ```
 
-內建：`timer`、`idle`、`webhook`、`channel`、`custom`、`package`。觸發器觸發時 `prompt` 會塞進 `TriggerEvent.prompt_override`。
+內建：`timer`、`context`、`channel`、`custom`、`package`。觸發器觸發時 `prompt` 會塞進 `TriggerEvent.prompt_override`。需要時鐘對齊的 scheduler 時，請把 `SchedulerTrigger` 暴露成 setup 工具 — 見 [怎麼加工具？](#怎麼加工具) 以及 [reference/builtins](../reference/builtins.md#可安裝的-trigger以-type-trigger-形式暴露為工具) 裡的 `add_schedule`。
 
 ## 怎麼設定壓縮？
 
@@ -154,13 +166,13 @@ compact:
 input:
   type: custom
   module: ./inputs/discord.py
-  class_name: DiscordInput
+  class: DiscordInput
   options:
     token: "${DISCORD_TOKEN}"
     channel_id: 123456
 ```
 
-內建型別：`cli`、`tui`、`asr`、`whisper`、`none`。協定請看 [自訂模組](custom-modules.md)。
+內建型別：`cli`、`cli_nonblocking`、`tui`、`none`。選用的 RealtimeSTT 套件有裝時還會有 `whisper`。協定請看 [自訂模組](custom-modules.md)。
 
 ## 怎麼加 named output sink？
 
@@ -171,14 +183,16 @@ output:
   type: stdout
   named_outputs:
     tts:
-      type: tts
-      options: { provider: edge, voice: en-US-AriaNeural }
+      type: console_tts        # 逐字印出來，適合快速 demo
+      options: { char_delay: 0.02 }
     discord:
       type: custom
       module: ./outputs/discord.py
-      class_name: DiscordOutput
+      class: DiscordOutput
       options: { webhook_url: "${DISCORD_WEBHOOK}" }
 ```
+
+內建輸出型別：`stdout`、`stdout_prefixed`、`console_tts`、`dummy_tts`、`tui`。沒有純 `tts` 型別 — `console_tts` 與 `dummy_tts` 是出廠的 TTS-shaped 輸出；更完整的 TTS 後端以 custom/package 輸出的形式出貨。
 
 ## 怎麼用外掛擋工具？
 
@@ -258,6 +272,20 @@ termination:
 ```
 
 任一條件符合就會停下代理。
+
+## 怎麼接一條確定性的 pipeline 邊？
+
+生物跑在生態瓶裡時，`output_wiring` 會把每一次回合結束變成一個 `creature_output` 事件，直接落到另一隻生物的佇列裡 — 完全繞過頻道：
+
+```yaml
+output_wiring:
+  - runner                                   # 簡寫：把輸出送到 `runner`
+  - to: analyzer
+    prompt: "[From coder] {content}"         # 模板；{content} 等會被填上
+  - { to: root, with_content: false }        # 只是 metadata ping
+```
+
+生物不在生態瓶裡時，`output_wiring` 是 no-op。完整條目形狀見 [reference/configuration — 輸出接線](../reference/configuration.md#輸出接線)，生態瓶側的視角見 [生態瓶指南 — 輸出接線](terrariums.md#輸出接線)。
 
 ## 怎麼讓多隻生物共用狀態 (不透過生態瓶)？
 

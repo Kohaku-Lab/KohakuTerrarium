@@ -46,9 +46,10 @@ Positional：
 | 旗标 | 型别 | 默认 | 说明 |
 |---|---|---|---|
 | `--log-level` | `DEBUG\|INFO\|WARNING\|ERROR` | `INFO` | Root logger 等级。 |
+| `--log-stderr` | `auto\|on\|off` | `auto` | 把 log 镜像到 stderr。`auto` = I/O 模式不是 cli/tui 时开启 (例如 `plain`、`stdout`、`custom`、`package`)；`off` = 永不开启；`on` = 永远开启。 |
 | `--session` | path | 自动 | 会话档；绝对路径或放在 `~/.kohakuterrarium/sessions/` 下的名字。 |
 | `--no-session` | flag | — | 完全不做持久化。 |
-| `--llm` | str | — | 覆盖 LLM profile (例如 `gpt-5.4`、`claude-opus-4.6`)。 |
+| `--llm` | str | — | 覆盖 LLM profile (例如 `gpt-5.4`、`claude-opus-4.7`)。可以带 variation 选择器 — 见 [配置参考](configuration.md#variation-选择器)。 |
 | `--mode` | `cli\|plain\|tui` | 自动 | 互动模式。TTY 上默认 `cli`，非 TTY 默认 `plain`。 |
 
 行为：
@@ -77,8 +78,9 @@ Positional：
 | `--pwd` | path | 会话记录的 cwd | 覆盖工作目录。 |
 | `--last` | flag | — | 直接 resume 最近一个，不弹选单。 |
 | `--log-level` | 同 `kt run` | | |
+| `--log-stderr` | 同 `kt run` | `auto` | 把 log 镜像到 stderr。 |
 | `--mode` | 同 `kt run` | | Terrarium会话强制 `tui`。 |
-| `--llm` | str | | 覆盖这次 resume 的 LLM profile。 |
+| `--llm` | str | | 覆盖这次 resume 的 LLM profile。支持 variation 选择器简写。 |
 
 行为：
 
@@ -95,7 +97,7 @@ kt list [--path agents]
 
 | 旗标 | 型别 | 默认 | 说明 |
 |---|---|---|---|
-| `--path` | str | `agents` | 除了已安装套件之外，另外扫的本地目录。 |
+| `--path` | str | `agents` | 除了已安装套件之外，另外扫的本地目录。主要在当 cwd 是有自己 `agents/` 目录的专案时有用；已安装的套件无论 `--path` 为何都会出现。 |
 
 ### `kt info`
 
@@ -235,11 +237,13 @@ kt config edit [name]
 
 #### `kt config provider add`
 
-互动式。会问 backend type (`openai`、`codex`、`anthropic`)、base URL、`api_key_env`。
+互动式。会问 backend type、base URL、`api_key_env`。prompt 会提供 `openai`、`codex` 与 `anthropic`；若选 `anthropic`，存盘时会自动正规化为 `openai` (并没有原生 Anthropic client — 内置的 `anthropic` provider 其实指到 Anthropic 的 OpenAI-compat endpoint)。因此规范存储值就是 `openai` 与 `codex`。
 
 ```
 kt config provider add [name]
 ```
+
+`kt config provider add` 和 `kt config provider edit` 共用同一条互动式路径；唯一差别是 `edit` 需要给 positional 名称，并预填现有值。
 
 #### `kt config provider edit`
 
@@ -261,11 +265,15 @@ kt config provider delete <name>
 
 #### `kt config llm list`
 
-显示 Name、Provider、Model、Default 标记。
+显示 Name、Provider、Model、Groups 栏位 (该 preset 的 variation group 名称，以逗号分隔；没有就空) 以及 Default 标记。默认只列使用者定义的 preset。
+
+| 旗标 | 型别 | 默认 | 说明 |
+|---|---|---|---|
+| `--all` | flag | — | 也包含所有内置 preset。会分组显示 (User presets / Built-in presets)；Legend 会标示哪些条目已配置 API key / OAuth。 |
 
 #### `kt config llm show`
 
-印出完整 preset：provider、model、max_context、max_output、base_url、api_key_env、temperature、reasoning_effort、service_tier、extra_body。
+印出完整 preset：名称、provider、backend type、model、`max_context` / `max_output`、base URL、`api_key_env`、temperature、reasoning_effort、service_tier、目前的 variation selection (若有)、preset 宣告的 variation group 及其选择器范例 (例如 `claude-opus-4.7@reasoning=xhigh`)、以及 `extra_body`。
 
 ```
 kt config llm show <name>
@@ -273,7 +281,7 @@ kt config llm show <name>
 
 #### `kt config llm add`
 
-互动式。可选择把新 preset 设成默认。
+互动式。会询问是否把新 preset 设成默认 (默认 No)。
 
 ```
 kt config llm add [name]
@@ -357,7 +365,7 @@ kt login <provider>
 
 ### `kt model`
 
-`kt config llm` 的薄包装：
+`kt config llm` 的薄向后兼容包装。新文件请优先使用 `kt config llm` 形式；`kt model` 保留作为一行别名。
 
 ```
 kt model list
@@ -371,7 +379,7 @@ kt model show <name>
 
 ### `kt embedding`
 
-为已存的会话建 FTS 与向量索引。
+为已存的会话建 FTS 与向量索引。`<session>` 接受名字前缀、完整档名或路径；旧的 `.kt` 扩展名除了 `.kohakutr` 外也会辨识。
 
 ```
 kt embedding <session> [--provider ...] [--model ...] [--dimensions N]
@@ -385,7 +393,7 @@ kt embedding <session> [--provider ...] [--model ...] [--dimensions N]
 
 ### `kt search`
 
-搜索会话的记忆。
+搜索会话的记忆。`<session>` 接受与 `kt embedding` 相同的形式 (旧的 `.kt` 也辨识)。
 
 ```
 kt search <session> <query> [flags]
@@ -496,6 +504,8 @@ kt extension info <name>
 ```
 kt mcp list --agent <path>
 ```
+
+MCP server 也可以放在 `~/.kohakuterrarium/mcp_servers.yaml` 全域目录，由 [`kt config mcp`](#kt-config-mcp) 管理。两边登记互不相干 — per-agent 条目在代理启动时挂上；目录条目不会自动挂，但可以依名称参照。
 
 ---
 

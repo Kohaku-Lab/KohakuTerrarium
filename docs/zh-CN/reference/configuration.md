@@ -52,7 +52,7 @@ Config 中引用其他文件或套件的字段时，解析顺序如下：
 | `startup_trigger` | dict | `null` | 否 | 启动时触发一次的trigger。`{prompt: "..."}`。 |
 | `termination` | dict | `null` | 否 | 终止条件。见 [终止](#终止)。 |
 | `max_subagent_depth` | int | `3` | 否 | 子代理最大嵌套深度。`0` = 无上限。 |
-| `tool_format` | str \| dict | `"bracket"` | 否 | `bracket`、`xml`、`native`，或自定义 dict 格式。 |
+| `tool_format` | str \| dict | `"bracket"` | 否 | `bracket`、`xml`、`native`，或自定义 dict 格式。`native` 需要所配置的 LLM provider 支持结构化 tool calling。 |
 | `mcp_servers` | list | `[]` | 否 | 每只代理的 MCP server。见 [MCP server](#Creature-config-里的-mcp-server)。 |
 | `plugins` | list | `[]` | 否 | Lifecycle 插件。见 [插件](#插件)。 |
 | `no_inherit` | list[str] | `[]` | 否 | 改成 **替换** 而非合并的 key。例如 `[tools, subagents]`。 |
@@ -65,36 +65,88 @@ Config 中引用其他文件或套件的字段时，解析顺序如下：
 
 | 字段 | 型别 | 默认 | 说明 |
 |---|---|---|---|
-| `llm` | str | `""` | `~/.kohakuterrarium/llm_profiles.yaml` 里的 profile 参照 (例如 `gpt-5.4`、`claude-opus-4.6`)。 |
-| `model` | str | `""` | 没设 `llm` 时用的行内 model id。 |
+| `llm` | str | `""` | `~/.kohakuterrarium/llm_profiles.yaml` 里的 profile 参照 (例如 `gpt-5.4`、`claude-opus-4.7`)。可以挂行内 variation 选择器，例如 `claude-opus-4.7@reasoning=xhigh`。 |
+| `model` | str | `""` | 没设 `llm` 时用的行内 model id。也接受 `name@group=option` 选择器。 |
+| `provider` | str | `""` | 当 `model` 被设且同一个 model id 绑到多个 backend 时 (例如 `openai` 与 `openrouter`) 用来区分。 |
+| `variation_selections` | dict[str,str] | `{}` | 每个 group 的 variation 覆盖 — `{group_name: option_name}`。见 [Variation 选择器](#variation-选择器)。 |
+| `variation` | str | `""` | 单一 option 选择的简写；会在 preset 的 groups 里解析。 |
 | `auth_mode` | str | `""` | 空 (自动)、`codex-oauth` 等。 |
 | `api_key_env` | str | `""` | 装 key 的环境变数。 |
 | `base_url` | str | `""` | 覆盖 endpoint URL。 |
 | `temperature` | float | `0.7` | Sampling temperature。 |
-| `max_tokens` | int \| null | `null` | 输出上限。 |
-| `reasoning_effort` | str | `"medium"` | `none`、`minimal`、`low`、`medium`、`high`、`xhigh`。 |
+| `max_tokens` | int \| null | `null` | 会映射到解析后 profile 的 `max_output` (每回应的输出上限)，而不是 `max_context` (总窗口)。 |
+| `reasoning_effort` | str | `"medium"` | `none`、`minimal`、`low`、`medium`、`high`、`xhigh`。Codex 直接读取；其他 provider 请用 `extra_body` (见 [Provider 专属 `extra_body` 说明](#provider-专属-extra_body-说明))。 |
 | `service_tier` | str | `null` | `priority`、`flex`。 |
-| `extra_body` | dict | `{}` | 原样合并进 request JSON。 |
+| `extra_body` | dict | `{}` | 与解析后 preset 的 `extra_body` 做深度合并 (preset 里可能已带有 variation patch)。 |
 | `skill_mode`、`include_tools_in_prompt`、`include_hints_in_prompt`、`max_messages`、`ephemeral`、`tool_format` | | | 对映顶层同名字段。 |
 
-每回合解析顺序：
+每回合解析顺序 (见 `llm/profiles.py:resolve_controller_llm`)：
 
-1. CLI 旗标 `--llm`。
-2. `controller.llm`。
-3. `controller.model` (+ 可选的 `base_url` / `api_key_env`)。
-4. `llm_profiles.yaml` 的 `default_model`。
+1. CLI 旗标 `--llm` 优先于 YAML 的 `controller.llm`。
+2. 否则使用 `controller.llm` (preset 名称 + 可选的 `@group=option` 选择器)。
+3. 否则使用 `controller.model` — 依 model id 比对内置与使用者 preset registry。`controller.provider` 用来消解跨 backend 的碰撞；也会解析出 `name@group=option` 选择器。
+4. 若 `llm` 与 `model` 都没设，fall back 到 `llm_profiles.yaml` 的 `default_model`。
+5. Profile 解析完毕后，控制器的 `temperature`、`reasoning_effort`、`service_tier`、`max_tokens` (重映射到 `max_output`) 与 `extra_body` 会再叠加上去。`extra_body` 做深度合并，其他每个覆盖都是标量替换。
+
+### Variation 选择器
+
+一个 preset 可以暴露 **variation groups** — 两层的 `{group_name: {option_name: patch}}` dict，让单一 preset 同时服务多个旋钮 (reasoning effort、speed、thinking level) 而不必重复条目。选择的方式可以写在 preset 参照字符串里，或通过 controller 上的显式 dict 字段指定。
+
+简写形式 (可用于 `--llm`、`controller.llm`、`controller.model`)：
+
+```text
+claude-opus-4.7@reasoning=xhigh                 # 一个 group = option
+claude-opus-4.7@reasoning=xhigh,speed=fast      # 多个 group，逗号分隔
+claude-opus-4.7@xhigh                           # 裸 option；自动解析到
+                                                # 唯一匹配的 group
+                                                # (有歧义时会失败)
+```
+
+显式形式 (在 config 里组装选择器时较建议)：
+
+```yaml
+controller:
+  llm: claude-opus-4.7
+  variation_selections:
+    reasoning: xhigh
+  # 或者单一 option 简写：
+  variation: xhigh
+```
+
+规则：
+
+- 裸简写形式 (`@xhigh`) 若同时有超过一个 group 匹配该 option，会被拒绝 — 请用 `@group=option` 消解歧义。
+- 未知的 group 或 option 会在解析时报错。
+- Variation patch 只能写到这几个根：`temperature`、`reasoning_effort`、`service_tier`、`max_context`、`max_output`、`extra_body`。其他一律拒绝。
+- 不同 group 在同一个点分路径上的碰撞会报错 — 两个选择不能同时宣告 `extra_body.reasoning.effort`。
+
+每个 preset 的 groups 与 options 目录请见 [builtins.md — Variation groups](builtins.md#variation-groups)。
+
+### Provider 专属 `extra_body` 说明
+
+`extra_body` 会深度合并进 JSON 请求体。每个 provider 读取 reasoning/effort 旋钮的路径都不同 — 请设定该 provider 实际会理睬的那一个：
+
+| Provider | 标准路径 | 说明 |
+|---|---|---|
+| Codex (ChatGPT-OAuth) | 顶层 `reasoning_effort`、`service_tier` | `reasoning_effort`: `none\|low\|medium\|high\|xhigh`。Fast 模式：使用 `gpt-5.4` 的 `speed=fast` variation — 它会映射到 `service_tier: priority`。直接设 `service_tier: fast` 会被 OpenAI API 拒绝。 |
+| OpenAI direct (`-api` preset) | `extra_body.reasoning.effort` | 全量级 `none\|low\|medium\|high\|xhigh`。 |
+| OpenRouter (`-or` preset) | `extra_body.reasoning.effort` | 统一量级 `minimal\|low\|medium\|high`；`xhigh` 只有少数模型 (Opus 4.7、GPT-5.x) 会认。 |
+| Anthropic direct | `extra_body.output_config.effort` | Compat endpoint 会默默丢掉顶层的 `reasoning_effort` / `service_tier`。Opus 4.7: `low\|medium\|high\|xhigh\|max`；Opus 4.6 / Sonnet 4.6: `low\|medium\|high\|max`。Haiku 4.5 使用较旧的 `thinking.budget_tokens`。 |
+| Gemini direct | `extra_body.google.thinking_config.thinking_level` | `LOW\|MEDIUM\|HIGH` (Pro) 或 `MINIMAL\|LOW\|MEDIUM\|HIGH` (Flash / Flash-Lite)。 |
+
+Anthropic-via-OpenRouter (`claude-*-or`) preset 出厂就带有 `extra_body.cache_control: {type: ephemeral}`；你写在 `controller.extra_body` 的行内设定会深度合并在它上面，可以关掉或替换。
 
 ### Input
 
-Dict 字段：`{type, module?, class_name?, options?, ...型别专属 key}`。
+Dict 字段：`{type, module?, class?, options?, ...型别专属 key}`。
 
 | 字段 | 型别 | 默认 | 说明 |
 |---|---|---|---|
-| `type` | str | `"cli"` | `cli`、`tui`、`asr`、`whisper`、`none`、`custom`、`package`。 |
+| `type` | str | `"cli"` | `cli`、`cli_nonblocking`、`tui`、`whisper` (选用，需要 RealtimeSTT)、`none`、`custom`、`package`。 |
 | `module` | str | — | 给 `custom` (例如 `./custom/input.py`) 或 `package` (例如 `pkg.mod`) 用。 |
-| `class_name` | str | — | 要 instantiate 的类别。 |
+| `class` | str | — | 要 instantiate 的类别。YAML key 是 `class`；loader 会把它存在 dataclass 的 `class_name` 属性上。 |
 | `options` | dict | `{}` | 模组专属选项。 |
-| `prompt` | str | `"> "` | CLI prompt (cli input)。 |
+| `prompt` | str | `"> "` | CLI prompt (只适用于纯 `cli` input — Rich CLI 与 TUI 会忽略)。 |
 | `exit_commands` | list[str] | `[]` | 触发离开的字符串。 |
 
 ### Output
@@ -103,9 +155,9 @@ Dict 字段：`{type, module?, class_name?, options?, ...型别专属 key}`。
 
 | 字段 | 型别 | 默认 | 说明 |
 |---|---|---|---|
-| `type` | str | `"stdout"` | `stdout`、`tts`、`tui`、`custom`、`package`。 |
+| `type` | str | `"stdout"` | `stdout`、`stdout_prefixed`、`console_tts`、`dummy_tts`、`tui`、`custom`、`package`。 |
 | `module` | str | — | `custom`/`package` 输出模块用。 |
-| `class_name` | str | — | 要 instantiate 的类别。 |
+| `class` | str | — | 要 instantiate 的类别。YAML key 是 `class`；loader 会把它存在 dataclass 的 `class_name` 属性上。 |
 | `options` | dict | `{}` | 模组专属选项。 |
 | `controller_direct` | bool | `true` | 把控制器文本通过默认输出送出。 |
 | `named_outputs` | dict[str, OutputConfigItem] | `{}` | Named 侧输出。每个 item 结构跟默认相同。 |
@@ -116,12 +168,18 @@ Dict 字段：`{type, module?, class_name?, options?, ...型别专属 key}`。
 
 | 字段 | 型别 | 默认 | 说明 |
 |---|---|---|---|
-| `name` | str | — | 工具名 (必填)。 |
-| `type` | str | `"builtin"` | `builtin`、`custom`、`package`。 |
+| `name` | str | — | 工具名 (必填)。对 `type: trigger`，必须与该 trigger 的 `setup_tool_name` 匹配。 |
+| `type` | str | `"builtin"` | `builtin`、`trigger`、`custom`、`package`。 |
 | `module` | str | — | 给 `custom` (例如 `./custom/tools/my_tool.py`) 或 `package` 用。 |
-| `class_name` | str | — | 要 instantiate 的类别。 |
+| `class` | str | — | `custom`/`package` 时要 instantiate 的类别。YAML key 是 `class`；存在 dataclass 的 `class_name` 属性上。 |
 | `doc` | str | — | 覆盖 skill 文件档。 |
 | `options` | dict | `{}` | 工具专属选项。 |
+
+工具 type：
+
+- `builtin` — 依 `name` 在内置工具目录里查。
+- `trigger` — 把一个通用 trigger 类别暴露成 LLM 可调用的 setup 工具。`name` 必须与该 trigger 的 `setup_tool_name` 匹配。出厂提供的 setup 工具：`add_timer` (TimerTrigger)、`watch_channel` (ChannelTrigger)、`add_schedule` (SchedulerTrigger)。
+- `custom` / `package` — 加载 `module` + `class` 指定的类别。
 
 简写：
 
@@ -139,7 +197,7 @@ tools:
 | `name` | str | — | 子代理识别字。 |
 | `type` | str | `"builtin"` | `builtin`、`custom`、`package`。 |
 | `module` | str | — | 给 `custom`/`package` 用。 |
-| `config_name` | str | — | 模组里具名的 config 对象 (例如 `MY_AGENT_CONFIG`)。 |
+| `config` | str | — | 模组里具名的 config 对象 (例如 `MY_AGENT_CONFIG`)。YAML key 是 `config`；存在 dataclass 的 `config_name` 属性上。 |
 | `description` | str | — | 父代理 prompt 里用到的描述。 |
 | `tools` | list[str] | `[]` | 子代理被允许使用的工具。 |
 | `can_modify` | bool | `false` | 子代理能不能做会改东西的操作。 |
@@ -150,18 +208,19 @@ tools:
 
 | 字段 | 型别 | 默认 | 说明 |
 |---|---|---|---|
-| `type` | str | — | `timer`、`idle`、`webhook`、`channel`、`custom`、`package`。 |
+| `type` | str | — | `timer`、`context`、`channel`、`custom`、`package`。 |
 | `module` | str | — | 给 `custom`/`package` 用。 |
-| `class_name` | str | — | 要 instantiate 的类别。 |
+| `class` | str | — | 要 instantiate 的类别。YAML key 是 `class`；存在 dataclass 的 `class_name` 属性上。 |
 | `prompt` | str | — | trigger触发时注入的默认 prompt。 |
 | `options` | dict | `{}` | trigger专属选项。 |
 
 各型别常见选项：
 
-- `timer`：`interval` (秒)。
-- `idle`：`timeout` (秒)。
-- `channel`：频道名 + filter。
-- `webhook`：endpoint 配置。
+- `timer`：`interval` (秒)、`immediate` (bool，默认 `false`)。
+- `context`：`debounce_ms` (int，默认 `100`) — 带 debounce 的 context-update trigger。
+- `channel`：`channel` (名称)、`filter_sender` (选用)。
+
+若需要对齐时钟的排程器，请通过 `tools` 条目以 `type: trigger, name: add_schedule` 把 `SchedulerTrigger` 暴露成 LLM 可调用的 setup 工具 (见 [工具](#工具))，而不是写进 `triggers:` 列表。
 
 ### 压缩
 
@@ -170,8 +229,8 @@ tools:
 | `enabled` | bool | `true` | 开启压缩。 |
 | `max_tokens` | int | profile 默认 | 目标 token 上限。 |
 | `threshold` | float | `0.8` | 达到 `max_tokens` 多少比例时启动压缩。 |
-| `target` | float | `0.5` | 压缩后目标比例。 |
-| `keep_recent_turns` | int | `5` | 原样保留的回合数。 |
+| `target` | float | `0.4` | 压缩后目标比例。 |
+| `keep_recent_turns` | int | `8` | 原样保留的回合数。 |
 | `compact_model` | str | 控制器的 model | 摘要用的 LLM 覆盖。 |
 
 ### 输出接线
@@ -222,12 +281,12 @@ output_wiring:
 
 ### Creature config 里的 MCP server
 
-每只代理自己的 MCP server。代理启动时连线。
+每只代理自己的 MCP server。代理启动时连线。位于 `~/.kohakuterrarium/mcp_servers.yaml` 的全域目录 (由 `kt config mcp` 管理) 使用相同的 schema；代理在各自 config 里宣告自己要用的。
 
 | 字段 | 型别 | 默认 | 说明 |
 |---|---|---|---|
 | `name` | str | — | Server 识别字。 |
-| `transport` | `stdio` \| `http` | — | Transport。 |
+| `transport` | `stdio` \| `http` | — | Transport。`http` 走 Server-Sent Events (SSE)。 |
 | `command` | str | — | stdio 执行档。 |
 | `args` | list[str] | `[]` | stdio 参数。 |
 | `env` | dict[str,str] | `{}` | stdio 环境变数。 |
@@ -312,10 +371,12 @@ system_prompt_file: prompts/niche.md
 creatures/<name>/
   config.yaml           # 必要
   prompts/system.md     # 有参照就要存在
-  tools/                # 自定义工具模组
-  memory/               # context 档
-  subagents/            # 自定义子代理 config
+  tools/                # 自定义工具模组 (惯例)
+  memory/               # context 档 (惯例)
+  subagents/            # 自定义子代理 config (惯例)
 ```
+
+这些子目录名只是惯例。loader 通过 `ModuleLoader` 相对于代理目录解析每个 `module:` 路径 — `tools/` 与 `subagents/` 不会被自动扫描，所以每个自定义模组都要在 `config.yaml` 里明确宣告。
 
 ---
 
@@ -395,7 +456,7 @@ default_model: <preset name>
 
 backends:
   <provider-name>:
-    backend_type: openai | codex | anthropic
+    backend_type: openai | codex        # 规范集合 (见下方说明)
     base_url: str
     api_key_env: str
 
@@ -409,11 +470,17 @@ presets:
     reasoning_effort: str      # none | minimal | low | medium | high | xhigh
     service_tier: str          # priority | flex
     extra_body: dict
+    variation_groups:          # 选用 — 见 Variation 选择器
+      <group>:
+        <option>:
+          <dotted.path>: value
 ```
 
-内置 provider 名称 (不可覆盖)：`codex`、`openai`、`openrouter`、`anthropic`、`gemini`、`mimo`。
+`backend_type` 规范值为 `openai` 与 `codex`。旧值 (`anthropic`、`codex-oauth`) 仍然接受并在读取时默默正规化 — `anthropic` → `openai` (走 Anthropic 的 OpenAI-compat endpoint；没有原生 Anthropic client)、`codex-oauth` → `codex`。新增 provider 时请优先使用规范值。
 
-所有附带的 preset 请看 [builtins.md — LLM presets](builtins.md#llm-presets)。
+内置 provider 名称 (`codex`、`openai`、`openrouter`、`anthropic`、`gemini`、`mimo`) 无法删除；它们的 base URL 与 `api_key_env` 是内置默认固定的。每只代理仍可通过 `controller.base_url` / `controller.api_key_env` 覆盖。
+
+所有附带的 preset 请看 [builtins.md — LLM presets](builtins.md#llm-presets)；每个 preset 的目录请见 [builtins.md — Variation groups](builtins.md#variation-groups)；如何在 controller config 里挑特定 variation 请见 [Variation 选择器](#variation-选择器)。
 
 ---
 
@@ -438,7 +505,7 @@ presets:
 | 字段 | 型别 | 默认 | 说明 |
 |---|---|---|---|
 | `name` | str | — | 唯一识别字。 |
-| `transport` | `stdio` \| `http` | — | Transport。 |
+| `transport` | `stdio` \| `http` | — | Transport。`http` 走 Server-Sent Events (SSE)。 |
 | `command` | str | — | stdio 执行档。 |
 | `args` | list[str] | `[]` | stdio 参数。 |
 | `env` | dict[str,str] | `{}` | stdio 环境变数。 |

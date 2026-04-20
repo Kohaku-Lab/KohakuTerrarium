@@ -37,11 +37,14 @@ tags:
 
 - **`cli`**— 由 `prompt_toolkit` 驱动的行编辑器。支持历史纪录、
   slash commands、多行输入与粘贴。
+- **`cli_nonblocking`**— 和 `cli` 表面相近，但会在每次按键之间把控制权还给
+  event loop，让 trigger 在输入过程中也能触发。
 - **`tui`**— 当Creature在 Textual 下执行时，TUI composer 就是输入来源。
 - **`whisper`**— 本机麦克风 + Silero VAD + OpenAI Whisper；会把
-  ASR 事件以 `user_input` 形式送出。
-- **`asr`**— 自订语音辨识模块的抽象基底。
+  ASR 事件以 `user_input` 形式送出。只有安装可选的 RealtimeSTT 依赖时才会注册。
 - **`none`**— 永远不产生事件的 stub；给纯 trigger 驱动的 Creature使用。
+
+`ASRModule` 仍然作为自定义语音输入的抽象基底随框架出货，但不会注册成可配置的 `asr` 类型。
 
 自订输入可透过Creature配置中的 `type: custom` 或 `type: package`
 注册。它们必须实现 `InputModule`，并由 `bootstrap/io.py` 加载。

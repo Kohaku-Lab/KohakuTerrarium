@@ -130,7 +130,7 @@ tools:
   - name: wordcount
     type: custom
     module: ./tools/wordcount.py
-    class_name: WordCountTool
+    class: WordCountTool
 ```
 
 What each field does:
@@ -139,7 +139,7 @@ What each field does:
   `builtin` or `package`).
 - `module` — path to the `.py` file, resolved relative to the agent
   folder (`creatures/tutorial-creature/`).
-- `class_name` — the class inside that module.
+- `class` — the class inside that module.
 
 Because `tools:` extends the inherited list, you keep the full `general`
 tool set and add `wordcount` on top.
@@ -231,7 +231,7 @@ See `src/kohakuterrarium/testing/` for `OutputRecorder`,
 - A tool is a `BaseTool` subclass with `tool_name`, `description`,
   `parameters`, and `_execute`.
 - `tools:` in `config.yaml` wires it with `type: custom`, `module:`,
-  and `class_name:`.
+  and `class:`.
 - Execution mode matters — pick `DIRECT` for fast pure work,
   `BACKGROUND` for long work.
 - Tests can drive the whole flow deterministically with

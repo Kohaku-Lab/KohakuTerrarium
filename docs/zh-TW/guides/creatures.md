@@ -25,19 +25,19 @@ creatures/my-agent/
   prompts/
     system.md            # 由 system_prompt_file 引用
     context.md           # 由 prompt_context_files 引用
-  tools/                 # 可選的自訂工具模組
-  subagents/             # 可選的自訂子代理設定
-  memory/                # 可選的文字 / Markdown 記憶檔案
+  tools/                 # 可選的自訂工具模組 (慣例)
+  subagents/             # 可選的自訂子代理設定 (慣例)
+  memory/                # 可選的文字 / Markdown 記憶檔案 (慣例)
 ```
 
-查找順序為：`config.yaml` → `config.yml` → `config.json` → `config.toml`。環境變數插值（`${VAR}` 或 `${VAR:default}`）可在 YAML 任意位置使用。
+查找順序為：`config.yaml` → `config.yml` → `config.json` → `config.toml`。環境變數插值（`${VAR}` 或 `${VAR:default}`）可在 YAML 任意位置使用。子資料夾名稱只是慣例 — loader 會依每個 `module:` 路徑相對於代理資料夾解析，但並不會自動掃 `tools/` 或 `subagents/`。
 
 ### 最小設定
 
 ```yaml
 name: my-agent
 controller:
-  llm: claude-opus-4.6
+  llm: claude-opus-4.7
 system_prompt_file: prompts/system.md
 tools:
   - read
@@ -188,7 +188,7 @@ tools:
   - name: my_tool                     # custom / package tool
     type: custom
     module: ./tools/my_tool.py
-    class_name: MyTool
+    class: MyTool
   - name: web_search
     options:
       max_results: 5
@@ -206,7 +206,7 @@ subagents:
   - name: my_specialist
     type: custom
     module: ./subagents/specialist.py
-    config_name: SPECIALIST_CONFIG
+    config: SPECIALIST_CONFIG
     interactive: true                 # 在父代理多輪之間持續存活
     can_modify: true
 ```
@@ -224,12 +224,15 @@ triggers:
     prompt: "Health check: anything pending?"
   - type: channel
     options: { channel: alerts }
+  - type: context
+    options: { debounce_ms: 200 }
+    prompt: "Context shifted — reconsider plan."
   - type: custom
     module: ./triggers/webhook.py
-    class_name: WebhookTrigger
+    class: WebhookTrigger
 ```
 
-內建型別：`timer`、`idle`、`webhook`、`channel`、`custom`、`package`。見 [concepts/modules/trigger](../concepts/modules/trigger.md)。
+內建型別：`timer`、`context`、`channel`、`custom`、`package`。需要時鐘對齊的 scheduler 時，請改用 `add_schedule` setup 工具 (見 [工具與子代理](#工具與子代理))。模組文件：[concepts/modules/trigger](../concepts/modules/trigger.md)。
 
 ## 啟動觸發器
 
@@ -298,17 +301,17 @@ session_key: shared_workspace
 
 ```yaml
 input:
-  type: cli                  # 或：tui、whisper、asr、none、custom、package
+  type: cli                  # 或：cli_nonblocking、tui、whisper (選用)、none、custom、package
   prompt: "> "
-  history_file: ~/.my_agent_history
+  exit_commands: ["exit", "quit"]
 
 output:
-  type: stdout               # 或：tts、tui、custom、package
+  type: stdout               # 或：stdout_prefixed、console_tts、dummy_tts、tui、custom、package
   named_outputs:
     discord:
       type: custom
       module: ./outputs/discord.py
-      class_name: DiscordOutput
+      class: DiscordOutput
       options: { webhook_url: "${DISCORD_WEBHOOK}" }
 ```
 

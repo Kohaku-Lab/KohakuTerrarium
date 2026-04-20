@@ -104,7 +104,7 @@ Attribute：
 - `Agent` 實例 `stop()` 之後不能重用；要從 `SessionStore` 接回來，請建新的。
 
 ```python
-agent = Agent.from_path("creatures/my_agent", llm_override="claude-opus-4.6")
+agent = Agent.from_path("creatures/my_agent", llm_override="claude-opus-4.7")
 await agent.start()
 await agent.inject_input("Hello")
 await agent.stop()
@@ -164,23 +164,24 @@ await agent.stop()
 
 **`InputConfig`**
 
-- `type: str = "cli"` — `builtin`、`custom`、或 `package`。
+- `type: str = "cli"` — 輸入模組型別（`cli`、`cli_nonblocking`、`tui`、`whisper`、`none`、`custom`、`package`）。
 - `module: str | None = None`
-- `class_name: str | None = None`
+- `class_name: str | None = None` — 由 YAML 的 `class` 鍵填入。
 - `prompt: str = "> "`
 - `options: dict[str, Any]`
 
 **`TriggerConfig`**
 
-- `type: str`
+- `type: str` — 內建型別是 `timer`、`context`、`channel`；custom/package trigger 用 `module` + YAML `class`。
 - `module, class_name: str | None`
 - `prompt: str | None = None`
 - `options: dict[str, Any]`
+- `name: str | None = None`
 
 **`ToolConfigItem`**
 
 - `name: str`
-- `type: str = "builtin"`
+- `type: str = "builtin"` — `builtin`、`trigger`、`custom`、或 `package`。
 - `module, class_name: str | None`
 - `doc: str | None = None` — 覆寫 skill doc 路徑。
 - `options: dict[str, Any]`
@@ -202,7 +203,7 @@ await agent.stop()
 
 - `name: str`
 - `type: str = "builtin"`
-- `module, class_name, config_name, description: str | None`
+- `module, class_name, config_name, description: str | None` — `class_name` / `config_name` 分別由 YAML 的 `class` / `config` 鍵填入。
 - `tools: list[str]`
 - `can_modify: bool = False`
 - `interactive: bool = False`

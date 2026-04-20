@@ -49,11 +49,18 @@ lets you interpose a processor (rewriter, safety filter, summariser).
 Built-in outputs:
 
 - **`stdout`** — plain terminal, prefix/suffix/stream-suffix configurable.
-- **`tts`** — text-to-speech; backends include Fish, Edge, OpenAI,
-  auto-selected at runtime.
+- **`stdout_prefixed`** — stdout with a per-line prefix, handy for
+  tagged side outputs.
+- **`console_tts`** — console-only TTS shim that prints text
+  character-by-character for demos and testing.
+- **`dummy_tts`** — silent TTS-shaped output for tests and lifecycle
+  wiring.
 - **`tui`** — Textual-based display when the creature runs under a TUI.
 - **(implicit) web streaming output** — used when the creature runs
   inside the HTTP/WebSocket server.
+
+`TTSModule` still exists as a base class for richer custom/package TTS
+backends, but there is no plain built-in `tts` registry key.
 
 `OutputRouter` (`modules/output/router.py`) also exposes an activity
 stream used by the TUI and HTTP clients to show tool start/complete

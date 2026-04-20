@@ -25,19 +25,19 @@ creatures/my-agent/
   prompts/
     system.md            # referenced by system_prompt_file
     context.md           # referenced by prompt_context_files
-  tools/                 # optional custom tool modules
-  subagents/             # optional custom sub-agent configs
-  memory/                # optional text/markdown memory files
+  tools/                 # optional custom tool modules (by convention)
+  subagents/             # optional custom sub-agent configs (by convention)
+  memory/                # optional text/markdown memory files (by convention)
 ```
 
-Lookup order: `config.yaml` → `config.yml` → `config.json` → `config.toml`. Env-var interpolation (`${VAR}` or `${VAR:default}`) works anywhere in the YAML.
+Lookup order: `config.yaml` → `config.yml` → `config.json` → `config.toml`. Env-var interpolation (`${VAR}` or `${VAR:default}`) works anywhere in the YAML. Subfolder names are a convention — the loader resolves `module:` paths relative to the agent folder but does not auto-scan `tools/` or `subagents/`.
 
 ### Minimal config
 
 ```yaml
 name: my-agent
 controller:
-  llm: claude-opus-4.6
+  llm: claude-opus-4.7
 system_prompt_file: prompts/system.md
 tools:
   - read
@@ -188,7 +188,7 @@ tools:
   - name: my_tool                     # custom / package tool
     type: custom
     module: ./tools/my_tool.py
-    class_name: MyTool
+    class: MyTool
   - name: web_search
     options:
       max_results: 5
@@ -207,7 +207,7 @@ subagents:
   - name: my_specialist
     type: custom
     module: ./subagents/specialist.py
-    config_name: SPECIALIST_CONFIG
+    config: SPECIALIST_CONFIG
     interactive: true                 # stays alive across parent turns
     can_modify: true
 ```
@@ -229,12 +229,18 @@ triggers:
     prompt: "Health check: anything pending?"
   - type: channel
     options: { channel: alerts }
+  - type: context
+    options: { debounce_ms: 200 }
+    prompt: "Context shifted — reconsider plan."
   - type: custom
     module: ./triggers/webhook.py
-    class_name: WebhookTrigger
+    class: WebhookTrigger
 ```
 
-Built-in types: `timer`, `idle`, `webhook`, `channel`, `custom`, `package`. See [concepts/modules/trigger](../concepts/modules/trigger.md).
+Built-in types: `timer`, `context`, `channel`, `custom`, `package`. For a
+clock-aligned scheduler, opt into the `add_schedule` setup tool instead
+(see [Tools and sub-agents](#tools-and-sub-agents)). Module docs:
+[concepts/modules/trigger](../concepts/modules/trigger.md).
 
 ## Startup trigger
 
@@ -303,17 +309,17 @@ Custom user commands live under `builtins/user_commands/` or ship inside package
 
 ```yaml
 input:
-  type: cli                  # or: tui, whisper, asr, none, custom, package
+  type: cli                  # or: cli_nonblocking, tui, whisper (optional), none, custom, package
   prompt: "> "
-  history_file: ~/.my_agent_history
+  exit_commands: ["exit", "quit"]
 
 output:
-  type: stdout               # or: tts, tui, custom, package
+  type: stdout               # or: stdout_prefixed, console_tts, dummy_tts, tui, custom, package
   named_outputs:
     discord:
       type: custom
       module: ./outputs/discord.py
-      class_name: DiscordOutput
+      class: DiscordOutput
       options: { webhook_url: "${DISCORD_WEBHOOK}" }
 ```
 

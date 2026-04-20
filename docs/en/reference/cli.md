@@ -54,9 +54,10 @@ Flags:
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--log-level` | `DEBUG\|INFO\|WARNING\|ERROR` | `INFO` | Root logger level. |
+| `--log-stderr` | `auto\|on\|off` | `auto` | Mirror logs to stderr. `auto` = on when the I/O mode is not cli/tui (e.g. `plain`, `stdout`, `custom`, `package`); `off` = never; `on` = always. |
 | `--session` | path | auto | Session file to write; absolute or name under `~/.kohakuterrarium/sessions/`. |
 | `--no-session` | flag | — | Disable session persistence entirely. |
-| `--llm` | str | — | Override LLM profile (e.g. `gpt-5.4`, `claude-opus-4.6`). |
+| `--llm` | str | — | Override LLM profile (e.g. `gpt-5.4`, `claude-opus-4.7`). Accepts a variation selector — see [configuration reference](configuration.md#variation-selector). |
 | `--mode` | `cli\|plain\|tui` | auto | Interaction mode. Defaults to `cli` on TTY, `plain` otherwise. |
 
 Behaviour:
@@ -89,8 +90,9 @@ Flags:
 | `--pwd` | path | session's stored cwd | Override working directory. |
 | `--last` | flag | — | Resume the most-recent session without prompting. |
 | `--log-level` | as `kt run` | | |
+| `--log-stderr` | as `kt run` | `auto` | Mirror logs to stderr. |
 | `--mode` | as `kt run` | | Terrarium sessions force `tui`. |
-| `--llm` | str | | Override LLM profile for the resumed session. |
+| `--llm` | str | | Override LLM profile for the resumed session. Supports the variation-selector shorthand. |
 
 Behaviour:
 
@@ -107,7 +109,7 @@ kt list [--path agents]
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `--path` | str | `agents` | Local folder to scan in addition to installed packages. |
+| `--path` | str | `agents` | Local folder to scan in addition to installed packages. Mainly useful when the cwd is a project with its own `agents/` folder; installed packages always appear regardless of `--path`. |
 
 ### `kt info`
 
@@ -251,12 +253,20 @@ Show Name, Backend Type, and Base URL for each provider.
 
 #### `kt config provider add`
 
-Interactive. Prompts for backend type (`openai`, `codex`, `anthropic`),
-base URL, and `api_key_env`.
+Interactive. Prompts for backend type, base URL, and `api_key_env`. The
+prompt offers `openai`, `codex`, and `anthropic`; selecting `anthropic`
+is auto-normalized to `openai` on save (there is no native Anthropic
+client — the built-in `anthropic` provider points at Anthropic's
+OpenAI-compat endpoint). Canonical stored values are therefore `openai`
+and `codex`.
 
 ```
 kt config provider add [name]
 ```
+
+`kt config provider add` and `kt config provider edit` call the same
+interactive path; the only difference is that `edit` requires a
+positional name and pre-fills the existing values.
 
 #### `kt config provider edit`
 
@@ -278,13 +288,21 @@ Manage LLM presets.
 
 #### `kt config llm list`
 
-Show Name, Provider, Model, and a Default marker.
+Show Name, Provider, Model, a Groups column (comma-separated variation
+group names, if any), and a Default marker. By default lists only
+user-defined presets.
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--all` | flag | — | Also include every built-in preset. Rows are grouped (User presets / Built-in presets); the Legend marks which entries have API key / OAuth configured. |
 
 #### `kt config llm show`
 
-Print the full preset: provider, model, max_context, max_output,
-base_url, api_key_env, temperature, reasoning_effort, service_tier,
-extra_body.
+Print the full preset: name, provider, backend type, model,
+`max_context` / `max_output`, base URL, `api_key_env`, temperature,
+reasoning effort, service tier, current variation selections (if any),
+the preset's declared variation groups with selector examples (e.g.
+`claude-opus-4.7@reasoning=xhigh`), and `extra_body`.
 
 ```
 kt config llm show <name>
@@ -292,7 +310,8 @@ kt config llm show <name>
 
 #### `kt config llm add`
 
-Interactive. Optionally marks the new preset as default.
+Interactive. Prompts whether to mark the new preset as the default
+(defaults to No).
 
 ```
 kt config llm add [name]
@@ -382,7 +401,8 @@ kt login <provider>
 
 ### `kt model`
 
-Thin wrappers over `kt config llm`:
+Thin back-compat wrappers over `kt config llm`. Prefer the `kt config
+llm` forms in new docs; `kt model` stays as a one-liner alias.
 
 ```
 kt model list
@@ -396,7 +416,9 @@ kt model show <name>
 
 ### `kt embedding`
 
-Build FTS and vector indices for a saved session.
+Build FTS and vector indices for a saved session. `<session>` accepts a
+name prefix, full filename, or path; the legacy `.kt` extension is also
+recognized in addition to `.kohakutr`.
 
 ```
 kt embedding <session> [--provider ...] [--model ...] [--dimensions N]
@@ -410,7 +432,8 @@ kt embedding <session> [--provider ...] [--model ...] [--dimensions N]
 
 ### `kt search`
 
-Search a session's memory.
+Search a session's memory. `<session>` accepts the same forms as
+`kt embedding` (legacy `.kt` also recognized).
 
 ```
 kt search <session> <query> [flags]
@@ -526,6 +549,12 @@ section. Columns: name, transport, command, URL, args, env keys.
 ```
 kt mcp list --agent <path>
 ```
+
+MCP servers can also live in the global catalog at
+`~/.kohakuterrarium/mcp_servers.yaml`, managed by
+[`kt config mcp`](#kt-config-mcp). The two registries are independent —
+per-agent entries are attached on agent start; catalog entries are not
+auto-attached but can be referenced by name.
 
 ---
 

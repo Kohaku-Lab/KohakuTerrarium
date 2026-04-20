@@ -113,14 +113,14 @@ tools:
   - name: wordcount
     type: custom
     module: ./tools/wordcount.py
-    class_name: WordCountTool
+    class: WordCountTool
 ```
 
 各字段的作用：
 
 - `type: custom` —— 从本地 Python 文件加载，而不是 `builtin` 或 `package`。
 - `module` —— `.py` 文件路径，会以 Agent 目录（`creatures/tutorial-creature/`）为相对基准解析。
-- `class_name` —— 模块中的类名。
+- `class` —— 模块中的类名。
 
 由于 `tools:` 会扩展继承来的列表，因此你会保留完整的 `general` 工具集，并在其基础上额外添加 `wordcount`。
 
@@ -196,7 +196,7 @@ asyncio.run(test_wordcount())
 ## 你学到了什么
 
 - 工具本质上是一个 `BaseTool` 子类，包含 `tool_name`、`description`、`parameters` 和 `_execute`。
-- `config.yaml` 中的 `tools:` 通过 `type: custom`、`module:` 和 `class_name:` 把它接入系统。
+- `config.yaml` 中的 `tools:` 通过 `type: custom`、`module:` 和 `class:` 把它接入系统。
 - 执行模式非常重要：快速且纯粹的工作适合 `DIRECT`，耗时较长的工作适合 `BACKGROUND`。
 - 测试时可以用 `ScriptedLLM` 以可复现方式驱动整个流程。
 

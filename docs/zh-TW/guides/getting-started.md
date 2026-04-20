@@ -97,7 +97,7 @@ kt run @kt-biome/creatures/swe --mode cli
 覆寫單次執行的模型：
 
 ```bash
-kt run @kt-biome/creatures/swe --llm claude-opus-4.6
+kt run @kt-biome/creatures/swe --llm claude-opus-4.7
 ```
 
 ## 5. 恢復

@@ -25,19 +25,19 @@ creatures/my-agent/
   prompts/
     system.md            # 由 system_prompt_file 引用
     context.md           # 由 prompt_context_files 引用
-  tools/                 # 可选的自定义工具模块
-  subagents/             # 可选的自定义子代理设置
-  memory/                # 可选的文字 / Markdown 记忆文件
+  tools/                 # 可选的自定义工具模块 (惯例)
+  subagents/             # 可选的自定义子代理设置 (惯例)
+  memory/                # 可选的文字 / Markdown 记忆文件 (惯例)
 ```
 
-查找顺序为：`config.yaml` → `config.yml` → `config.json` → `config.toml`。环境变量插值（`${VAR}` 或 `${VAR:default}`）可在 YAML 任意位置使用。
+查找顺序为：`config.yaml` → `config.yml` → `config.json` → `config.toml`。环境变量插值（`${VAR}` 或 `${VAR:default}`）可在 YAML 任意位置使用。子目录名称只是惯例 — loader 依代理目录解析 `module:` 路径，不会自动扫描 `tools/` 或 `subagents/`。
 
 ### 最小设置
 
 ```yaml
 name: my-agent
 controller:
-  llm: claude-opus-4.6
+  llm: claude-opus-4.7
 system_prompt_file: prompts/system.md
 tools:
   - read
@@ -188,7 +188,7 @@ tools:
   - name: my_tool                     # custom / package tool
     type: custom
     module: ./tools/my_tool.py
-    class_name: MyTool
+    class: MyTool
   - name: web_search
     options:
       max_results: 5
@@ -206,7 +206,7 @@ subagents:
   - name: my_specialist
     type: custom
     module: ./subagents/specialist.py
-    config_name: SPECIALIST_CONFIG
+    config: SPECIALIST_CONFIG
     interactive: true                 # 在父代理多轮之间持续存活
     can_modify: true
 ```
@@ -224,12 +224,15 @@ triggers:
     prompt: "Health check: anything pending?"
   - type: channel
     options: { channel: alerts }
+  - type: context
+    options: { debounce_ms: 200 }
+    prompt: "Context shifted — reconsider plan."
   - type: custom
     module: ./triggers/webhook.py
-    class_name: WebhookTrigger
+    class: WebhookTrigger
 ```
 
-内置型别：`timer`、`idle`、`webhook`、`channel`、`custom`、`package`。见 [概念 / Trigger](../concepts/modules/trigger.md)。
+内置型别：`timer`、`context`、`channel`、`custom`、`package`。若要时钟对齐的排程器，请改成启用 `add_schedule` setup 工具 (见 [工具与子代理](#工具与子代理))。见 [概念 / Trigger](../concepts/modules/trigger.md)。
 
 ## 启动触发器
 
@@ -298,17 +301,17 @@ session_key: shared_workspace
 
 ```yaml
 input:
-  type: cli                  # 或：tui、whisper、asr、none、custom、package
+  type: cli                  # 或：cli_nonblocking、tui、whisper (选用)、none、custom、package
   prompt: "> "
-  history_file: ~/.my_agent_history
+  exit_commands: ["exit", "quit"]
 
 output:
-  type: stdout               # 或：tts、tui、custom、package
+  type: stdout               # 或：stdout_prefixed、console_tts、dummy_tts、tui、custom、package
   named_outputs:
     discord:
       type: custom
       module: ./outputs/discord.py
-      class_name: DiscordOutput
+      class: DiscordOutput
       options: { webhook_url: "${DISCORD_WEBHOOK}" }
 ```
 

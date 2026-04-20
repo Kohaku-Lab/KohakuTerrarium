@@ -39,13 +39,19 @@ Built-in input modules:
 
 - **`cli`** — `prompt_toolkit`-powered line editor. Supports history,
   slash commands, multi-line, paste.
+- **`cli_nonblocking`** — the same basic surface, but yields back to
+  the event loop between keystrokes so triggers can still fire during
+  input.
 - **`tui`** — when the creature runs under Textual, the TUI composer
   is the input.
 - **`whisper`** — local microphone + Silero VAD + OpenAI Whisper; emits
-  ASR events as `user_input`.
-- **`asr`** — abstract base for custom speech recognition modules.
+  ASR events as `user_input`. Registered only when the optional
+  RealtimeSTT dependency is installed.
 - **`none`** — a stub that never produces events; for purely
   trigger-driven creatures.
+
+`ASRModule` is still shipped as an abstract base for custom speech
+inputs, but it is not registered as an `asr` config type.
 
 Custom inputs register via `type: custom` or `type: package` in the
 creature config. They must implement `InputModule` and are loaded by

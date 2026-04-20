@@ -1,6 +1,6 @@
 ---
 title: Trigger
-summary: Anything that wakes the controller without explicit user input — timers, idle, channels, webhooks, monitors.
+summary: Anything that wakes the controller without explicit user input — timers, context updates, channels, and custom watchers.
 tags:
   - concepts
   - module
@@ -12,8 +12,8 @@ tags:
 ## What it is
 
 A **trigger** is anything that wakes the controller without explicit
-user input. Timers, idle detectors, webhook receivers, channel
-listeners, and monitor conditions are all triggers. Each one runs as a
+user input. Timers, context-update watchers, channel listeners, and
+custom watcher conditions are all triggers. Each one runs as a
 background task and pushes `TriggerEvent`s onto the event queue when
 its firing condition is met.
 
@@ -24,8 +24,8 @@ real agents need to:
 
 - run `/loop`-style recurring plans while nobody is watching;
 - react to a channel message from another creature;
-- wake up N seconds after the last event to summarise;
-- receive a webhook from an external service;
+- wake up when shared context changes;
+- schedule a future wake-up from inside the agent itself;
 - poll a resource and fire when a condition flips.
 
 You could bolt each of these on as ad-hoc code. The framework says:
@@ -48,12 +48,15 @@ Each task loops over `fire()` and pushes events.
 
 Built-in trigger types:
 
-- **`timer`** — fires every N seconds or on a cron schedule.
-- **`idle`** — fires if N seconds pass without any event.
+- **`timer`** — fires every N seconds.
+- **`context`** — fires after debounced context updates.
 - **`channel`** — listens on a named channel; fires on message.
-- **`webhook` / `http`** — receives POST requests.
-- **`monitor`** — fires when a predicate over scratchpad / context
-  returns true.
+- **`custom` / `package`** — your own trigger classes loaded from a
+  module.
+
+A clock-aligned scheduler is also shipped as the universal
+`SchedulerTrigger`, but it is exposed as the setup tool `add_schedule`
+rather than as a config-time `triggers:` type.
 
 Common `TriggerEvent` types on the receiving side: `user_input`
 (from input modules), `timer`, `channel_message` (from a channel
@@ -81,12 +84,12 @@ and programmatically via `agent.add_trigger(...)`.
   pipeline edges, the framework also emits `creature_output` events at
   turn-end when a creature declares `output_wiring` — see
   [terrariums](../multi-agent/terrarium.md).
-- **Idle-driven summaries.** An `idle` trigger that fires after two
-  minutes of silence can dispatch a `summarize` sub-agent and send the
-  result to a log channel.
-- **External signalling.** A `webhook` trigger turns a creature into a
-  receiver for CI hooks, deployment events, or upstream product
-  traffic.
+- **Context-driven summaries.** A `context` trigger can debounce rapid
+  updates, then dispatch a `summarize` sub-agent once the shared state
+  settles.
+- **Runtime scheduling.** The `add_schedule` setup tool lets the agent
+  install a clock-aligned recurring wake-up without hard-coding that
+  schedule in `triggers:`.
 - **Adaptive watchers.** A custom trigger whose `fire()` runs a small
   nested agent can decide *when* to wake the outer creature based on
   judgement, not a fixed rule. See [patterns](../patterns.md).

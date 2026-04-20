@@ -23,9 +23,21 @@ Creature 设置用 YAML (也支持 JSON/TOML)。每个顶层 key 对映到 `Agen
 
 ```yaml
 controller:
-  llm: claude-opus-4.6
+  llm: claude-opus-4.7
   reasoning_effort: high
 ```
+
+你也可以固定到 preset 的某个 **variation** — 内置 preset 会暴露像 `reasoning`、`speed`、`thinking` 等 group (见 [reference/builtins — Variation groups](../reference/builtins.md#variation-groups))：
+
+```yaml
+controller:
+  llm: claude-opus-4.7@reasoning=xhigh
+  # 或者显式形式
+  variation_selections:
+    reasoning: xhigh
+```
+
+每个 provider 读 effort 旋钮的路径都不同。Codex 是 `reasoning_effort`，OpenAI direct 与 OpenRouter 是 `extra_body.reasoning.effort`，Anthropic direct 是 `extra_body.output_config.effort`，Gemini direct 是 `extra_body.google.thinking_config.thinking_level`。Variation 会帮你接好；手动设定的话请看 [reference/configuration — Provider 专属 `extra_body` 说明](../reference/configuration.md#provider-专属-extra_body-说明)。
 
 或是在命令列只为这次执行覆盖：
 
@@ -90,7 +102,7 @@ tools:
   - name: my_tool
     type: custom
     module: ./tools/my_tool.py
-    class_name: MyTool
+    class: MyTool
 ```
 
 来自已安装包的 `kohaku.yaml`：
@@ -112,7 +124,7 @@ subagents:
   - name: my_critic
     type: custom
     module: ./subagents/critic.py
-    config_name: CRITIC_CONFIG
+    config: CRITIC_CONFIG
     interactive: true       # 跨父回合持续活著
     can_modify: true
 ```
@@ -128,12 +140,12 @@ triggers:
     prompt: "Check for pending tasks."
   - type: channel
     options: { channel: alerts }
-  - type: idle
-    options: { timeout: 120 }
-    prompt: "If the user seems stuck, ask."
+  - type: context
+    options: { debounce_ms: 200 }
+    prompt: "Context changed — re-plan if needed."
 ```
 
-内置：`timer`、`idle`、`webhook`、`channel`、`custom`、`package`。触发器触发时 `prompt` 会塞进 `TriggerEvent.prompt_override`。
+内置：`timer`、`context`、`channel`、`custom`、`package`。触发器触发时 `prompt` 会塞进 `TriggerEvent.prompt_override`。若要时钟对齐的排程器，请改以 setup 工具的形式暴露 `SchedulerTrigger` — 见 [怎么加工具？](#怎么加工具)，以及 [reference/builtins](../reference/builtins.md#setup-able-triggers-exposed-as-tools-via-type-trigger) 里的 `add_schedule` 条目。
 
 ## 怎么设置压缩？
 
@@ -154,13 +166,13 @@ compact:
 input:
   type: custom
   module: ./inputs/discord.py
-  class_name: DiscordInput
+  class: DiscordInput
   options:
     token: "${DISCORD_TOKEN}"
     channel_id: 123456
 ```
 
-内置型别：`cli`、`tui`、`asr`、`whisper`、`none`。协定请看 [自定义模块指南](custom-modules.md)。
+内置型别：`cli`、`cli_nonblocking`、`tui`、`none`。`whisper` 在安装了选用的 RealtimeSTT 依赖时可用。协定请看 [自定义模块指南](custom-modules.md)。
 
 ## 怎么加 named output sink？
 
@@ -171,14 +183,16 @@ output:
   type: stdout
   named_outputs:
     tts:
-      type: tts
-      options: { provider: edge, voice: en-US-AriaNeural }
+      type: console_tts        # 一个字一个字印出来，适合 demo
+      options: { char_delay: 0.02 }
     discord:
       type: custom
       module: ./outputs/discord.py
-      class_name: DiscordOutput
+      class: DiscordOutput
       options: { webhook_url: "${DISCORD_WEBHOOK}" }
 ```
+
+内置 output 型别：`stdout`、`stdout_prefixed`、`console_tts`、`dummy_tts`、`tui`。没有纯 `tts` 型别 — `console_tts` 与 `dummy_tts` 是出厂的 TTS 形态输出；更完整的 TTS 后端请以 `custom`/`package` 输出提供。
 
 ## 怎么用插件挡工具？
 
@@ -258,6 +272,20 @@ termination:
 ```
 
 任一条件符合就会停下代理。
+
+## 怎么接一条确定性的 pipeline 边？
+
+当 creature 跑在 terrarium 里时，`output_wiring` 会把每回合结束变成一个 `creature_output` 事件，直接落到另一只 creature 的 queue — 完全绕过 channel：
+
+```yaml
+output_wiring:
+  - runner                                   # 简写：把输出送到 `runner`
+  - to: analyzer
+    prompt: "[From coder] {content}"         # 模板；{content} 等会被填入
+  - { to: root, with_content: false }        # metadata-only ping
+```
+
+在 terrarium 外，`output_wiring` 是无操作。完整的条目形状见 [reference/configuration — Output wiring](../reference/configuration.md#输出接线)，terrarium 那一侧的视角见 [Terrarium 指南 — output wiring](terrariums.md#输出接线)。
 
 ## 怎么让多只Creature共用状态 (不通过Terrarium)？
 

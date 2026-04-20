@@ -23,9 +23,27 @@ Pick a preset from `~/.kohakuterrarium/llm_profiles.yaml` (or add one with `kt c
 
 ```yaml
 controller:
-  llm: claude-opus-4.6
+  llm: claude-opus-4.7
   reasoning_effort: high
 ```
+
+You can also pin a **variation** of the preset — built-in presets expose groups like `reasoning`, `speed`, `thinking` (see [reference/builtins — Variation groups](../reference/builtins.md#variation-groups)):
+
+```yaml
+controller:
+  llm: claude-opus-4.7@reasoning=xhigh
+  # or, the explicit form
+  variation_selections:
+    reasoning: xhigh
+```
+
+Each provider exposes the effort knob on a different path. Set
+`reasoning_effort` for Codex, `extra_body.reasoning.effort` for OpenAI
+direct and OpenRouter, `extra_body.output_config.effort` for Anthropic
+direct, and `extra_body.google.thinking_config.thinking_level` for Gemini
+direct. Variations wire these for you; see [reference/configuration —
+Provider-specific `extra_body` notes](../reference/configuration.md#provider-specific-extra_body-notes)
+if you are setting them by hand.
 
 Or override at the command line for one run:
 
@@ -90,7 +108,7 @@ tools:
   - name: my_tool
     type: custom
     module: ./tools/my_tool.py
-    class_name: MyTool
+    class: MyTool
 ```
 
 Package (from an installed package's `kohaku.yaml`):
@@ -112,7 +130,7 @@ subagents:
   - name: my_critic
     type: custom
     module: ./subagents/critic.py
-    config_name: CRITIC_CONFIG
+    config: CRITIC_CONFIG
     interactive: true       # stays alive across parent turns
     can_modify: true
 ```
@@ -128,12 +146,16 @@ triggers:
     prompt: "Check for pending tasks."
   - type: channel
     options: { channel: alerts }
-  - type: idle
-    options: { timeout: 120 }
-    prompt: "If the user seems stuck, ask."
+  - type: context
+    options: { debounce_ms: 200 }
+    prompt: "Context changed — re-plan if needed."
 ```
 
-Built-ins: `timer`, `idle`, `webhook`, `channel`, `custom`, `package`. `prompt` is injected as the `TriggerEvent.prompt_override` when the trigger fires.
+Built-ins: `timer`, `context`, `channel`, `custom`, `package`. `prompt`
+is injected as the `TriggerEvent.prompt_override` when the trigger fires.
+For a clock-aligned scheduler, expose `SchedulerTrigger` as a setup tool
+instead — see [How do I add a tool?](#how-do-i-add-a-tool) and the
+`add_schedule` entry in [reference/builtins](../reference/builtins.md#setup-able-triggers-exposed-as-tools-via-type-trigger).
 
 ## How do I set up compaction?
 
@@ -154,13 +176,15 @@ See [Sessions](sessions.md) for what compaction does.
 input:
   type: custom
   module: ./inputs/discord.py
-  class_name: DiscordInput
+  class: DiscordInput
   options:
     token: "${DISCORD_TOKEN}"
     channel_id: 123456
 ```
 
-Built-in types: `cli`, `tui`, `asr`, `whisper`, `none`. See [Custom Modules](custom-modules.md) for the protocol.
+Built-in types: `cli`, `cli_nonblocking`, `tui`, `none`. `whisper` is
+available when the optional RealtimeSTT dep is installed. See
+[Custom Modules](custom-modules.md) for the protocol.
 
 ## How do I add a named output sink?
 
@@ -171,14 +195,19 @@ output:
   type: stdout
   named_outputs:
     tts:
-      type: tts
-      options: { provider: edge, voice: en-US-AriaNeural }
+      type: console_tts        # prints character-by-character for quick demos
+      options: { char_delay: 0.02 }
     discord:
       type: custom
       module: ./outputs/discord.py
-      class_name: DiscordOutput
+      class: DiscordOutput
       options: { webhook_url: "${DISCORD_WEBHOOK}" }
 ```
+
+Built-in output types: `stdout`, `stdout_prefixed`, `console_tts`,
+`dummy_tts`, `tui`. There is no plain `tts` type — `console_tts` and
+`dummy_tts` are the shipped TTS-shaped outputs; richer TTS backends are
+custom/package outputs.
 
 ## How do I gate a tool with a plugin?
 
@@ -258,6 +287,25 @@ termination:
 ```
 
 Any met condition stops the agent.
+
+## How do I wire a deterministic pipeline edge?
+
+When the creature runs inside a terrarium, `output_wiring` turns each
+turn-end into a `creature_output` event that lands directly in another
+creature's queue — bypassing channels entirely:
+
+```yaml
+output_wiring:
+  - runner                                   # shorthand: ship output to `runner`
+  - to: analyzer
+    prompt: "[From coder] {content}"         # template; {content} etc. filled in
+  - { to: root, with_content: false }        # metadata-only ping
+```
+
+Outside a terrarium, `output_wiring` is a no-op. See the full entry
+shape at [reference/configuration — Output wiring](../reference/configuration.md#output-wiring)
+and [terrariums guide — output wiring](terrariums.md#output-wiring)
+for the terrarium-side view.
 
 ## How do I share state across creatures (without a terrarium)?
 

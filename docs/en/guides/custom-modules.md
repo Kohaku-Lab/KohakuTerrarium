@@ -17,7 +17,7 @@ Concept primer: [modules](../concepts/modules/README.md), and the per-module pag
 
 ## Shape of a custom module
 
-Each module lives in a Python file (anywhere you like — usually under your creature folder or inside a package). The config points at `module: ./path/to/file.py` + `class_name: YourClass`.
+Each module lives in a Python file (anywhere you like — usually under your creature folder or inside a package). The config points at `module: ./path/to/file.py` + `class: YourClass`. (The YAML key is `class` for every module kind. Plugins also accept `class_name` for back-compat; see [Plugins](plugins.md).)
 
 All five module kinds use the same wiring pattern. They differ only in the protocol their class implements.
 
@@ -64,7 +64,7 @@ tools:
   - name: my_tool
     type: custom
     module: ./tools/my_tool.py
-    class_name: MyTool
+    class: MyTool
 ```
 
 Tool execution modes (set via `BaseTool`):
@@ -137,7 +137,7 @@ Config:
 input:
   type: custom
   module: ./inputs/line_file.py
-  class_name: LineFileInput
+  class: LineFileInput
   options:
     path: ./tasks.txt
 ```
@@ -197,7 +197,7 @@ Config:
 output:
   type: custom
   module: ./outputs/discord.py
-  class_name: DiscordWebhookOutput
+  class: DiscordWebhookOutput
   options:
     webhook_url: "${DISCORD_WEBHOOK}"
 ```
@@ -211,7 +211,7 @@ output:
     discord:
       type: custom
       module: ./outputs/discord.py
-      class_name: DiscordWebhookOutput
+      class: DiscordWebhookOutput
       options: { webhook_url: "${DISCORD_WEBHOOK}" }
 ```
 
@@ -254,7 +254,7 @@ Config:
 triggers:
   - type: custom
     module: ./triggers/timer.py
-    class_name: TimerTrigger
+    class: TimerTrigger
     options: { interval: 60 }
     prompt: "Check the dashboard."
 ```
@@ -287,7 +287,7 @@ subagents:
   - name: specialist
     type: custom
     module: ./subagents/specialist.py
-    config_name: SPECIALIST_CONFIG
+    config: SPECIALIST_CONFIG
 ```
 
 For a sub-agent that wraps an entire custom agent (e.g. a different framework, or a Python-first implementation), subclass `SubAgent` and implement `async run(input_text) -> SubAgentResult`. See [concepts/modules/sub-agent](../concepts/modules/sub-agent.md).
@@ -348,7 +348,7 @@ For triggers: use `EventRecorder` and verify `TriggerEvent` shape.
 ## Troubleshooting
 
 - **Module not found.** `module:` paths are relative to the creature folder. Use absolute paths if that's ambiguous.
-- **Tool isn't in the prompt.** Check `kt info path/to/creature`. The tool is probably silently rejected — confirm `class_name` matches.
+- **Tool isn't in the prompt.** Check `kt info path/to/creature`. The tool is probably silently rejected — confirm the YAML `class:` value matches the actual class name in the module. (The YAML key is `class`, not `class_name`; plugins also accept `class_name` for back-compat, but tools/inputs/outputs/triggers/sub-agents require `class`.)
 - **`needs_context=True` but `context` is `None` in tests.** `TestAgentBuilder` provides a context; make sure you called `.with_session(...)` if you need channels or scratchpad.
 - **Trigger doesn't resume.** Set `resumable = True` on the class and implement `to_resume_dict()`.
 

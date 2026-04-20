@@ -63,7 +63,7 @@ order: `config.yaml` → `config.yml` → `config.json` → `config.toml`.
 | `startup_trigger` | dict | `null` | no | One-shot trigger fired on start. `{prompt: "..."}`. |
 | `termination` | dict | `null` | no | Termination conditions. See [Termination](#termination). |
 | `max_subagent_depth` | int | `3` | no | Max nested sub-agent depth. `0` = unlimited. |
-| `tool_format` | str \| dict | `"bracket"` | no | `bracket`, `xml`, `native`, or a custom dict format. |
+| `tool_format` | str \| dict | `"bracket"` | no | `bracket`, `xml`, `native`, or a custom dict format. `native` requires the configured LLM provider to support structured tool calling. |
 | `mcp_servers` | list | `[]` | no | Per-agent MCP servers. See [MCP servers](#mcp-servers-in-agent-config). |
 | `plugins` | list | `[]` | no | Lifecycle plugins. See [Plugins](#plugins). |
 | `no_inherit` | list[str] | `[]` | no | Keys that replace (not merge) base values. E.g. `[tools, subagents]`. |
@@ -76,36 +76,102 @@ All fields may also be set at the top level for backward compatibility.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `llm` | str | `""` | Profile reference in `~/.kohakuterrarium/llm_profiles.yaml` (e.g. `gpt-5.4`, `claude-opus-4.6`). |
-| `model` | str | `""` | Inline model id if `llm` unset. |
+| `llm` | str | `""` | Profile reference in `~/.kohakuterrarium/llm_profiles.yaml` (e.g. `gpt-5.4`, `claude-opus-4.7`). May carry an inline variation selector, e.g. `claude-opus-4.7@reasoning=xhigh`. |
+| `model` | str | `""` | Inline model id if `llm` unset. Also accepts a `name@group=option` selector. |
+| `provider` | str | `""` | Disambiguator when `model` is set and the same model id is bound to multiple backends (e.g. `openai` vs `openrouter`). |
+| `variation_selections` | dict[str,str] | `{}` | Per-group variation overrides — `{group_name: option_name}`. See [Variation selector](#variation-selector). |
+| `variation` | str | `""` | Shorthand for a single-option selection; resolved against the preset's groups. |
 | `auth_mode` | str | `""` | Blank (auto), `codex-oauth`, etc. |
 | `api_key_env` | str | `""` | Env var holding the key. |
 | `base_url` | str | `""` | Override endpoint URL. |
 | `temperature` | float | `0.7` | Sampling temperature. |
-| `max_tokens` | int \| null | `null` | Output cap. |
-| `reasoning_effort` | str | `"medium"` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`. |
+| `max_tokens` | int \| null | `null` | Maps onto the resolved profile's `max_output` (per-response output cap), not `max_context` (total window). |
+| `reasoning_effort` | str | `"medium"` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`. Consumed directly by Codex; for other providers use `extra_body` (see [Provider-specific `extra_body` notes](#provider-specific-extra_body-notes)). |
 | `service_tier` | str | `null` | `priority`, `flex`. |
-| `extra_body` | dict | `{}` | Merged verbatim into the request JSON. |
+| `extra_body` | dict | `{}` | Deep-merged onto the resolved preset's `extra_body` (which may already carry variation patches). |
 | `skill_mode`, `include_tools_in_prompt`, `include_hints_in_prompt`, `max_messages`, `ephemeral`, `tool_format` | | | Mirror top-level fields. |
 
-Resolution order per turn:
+Resolution order per turn (see `llm/profiles.py:resolve_controller_llm`):
 
-1. `--llm` CLI flag.
-2. `controller.llm`.
-3. `controller.model` (+ optional `base_url` / `api_key_env`).
-4. `default_model` from `llm_profiles.yaml`.
+1. `--llm` CLI flag wins over the YAML `controller.llm`.
+2. Otherwise `controller.llm` (preset name + optional `@group=option` selector).
+3. Otherwise `controller.model` — matched against the built-in and user preset registry by model id. `controller.provider` disambiguates cross-backend collisions; a `name@group=option` selector is also parsed out.
+4. If neither `llm` nor `model` was set, fall back to `default_model` from `llm_profiles.yaml`.
+5. After a profile is resolved, the controller's `temperature`, `reasoning_effort`, `service_tier`, `max_tokens` (remapped to `max_output`), and `extra_body` are layered on top. `extra_body` is deep-merged, every other override is a scalar replace.
+
+### Variation selector
+
+A preset may expose **variation groups** — two-level dicts of `{group_name:
+{option_name: patch}}` that let one preset serve multiple knobs (reasoning
+effort, speed, thinking level) without duplicating the entry. Selection
+happens either inside the preset reference string or via explicit dict fields
+on the controller.
+
+Shorthand forms (usable in `--llm`, `controller.llm`, or `controller.model`):
+
+```text
+claude-opus-4.7@reasoning=xhigh                 # one group = option
+claude-opus-4.7@reasoning=xhigh,speed=fast      # multiple groups, comma-separated
+claude-opus-4.7@xhigh                           # bare option; auto-resolves
+                                                # to the single matching group
+                                                # (fails if ambiguous)
+```
+
+Explicit form (preferred when the selector is assembled in config):
+
+```yaml
+controller:
+  llm: claude-opus-4.7
+  variation_selections:
+    reasoning: xhigh
+  # or, single-option shorthand:
+  variation: xhigh
+```
+
+Rules:
+
+- The bare-shorthand form (`@xhigh`) is rejected when more than one group
+  would match the option — disambiguate with `@group=option`.
+- Unknown groups or options raise at resolve time.
+- Variation patches may write to only these roots: `temperature`,
+  `reasoning_effort`, `service_tier`, `max_context`, `max_output`,
+  `extra_body`. Anything else is rejected.
+- Cross-group collisions on the same dotted path raise — two selections
+  cannot both claim `extra_body.reasoning.effort`.
+
+See [builtins.md — Variation groups](builtins.md#variation-groups) for the
+per-preset catalogue of groups and options.
+
+### Provider-specific `extra_body` notes
+
+`extra_body` is deep-merged into the JSON request body. Each provider reads
+reasoning/effort knobs from a different path — set the knob the provider
+actually honours:
+
+| Provider | Canonical path | Notes |
+|---|---|---|
+| Codex (ChatGPT-OAuth) | top-level `reasoning_effort`, `service_tier` | `reasoning_effort`: `none\|low\|medium\|high\|xhigh`. Fast mode: use the `speed=fast` variation on `gpt-5.4` — it maps to `service_tier: priority`. Setting `service_tier: fast` literally is rejected by the OpenAI API. |
+| OpenAI direct (`-api` presets) | `extra_body.reasoning.effort` | Full scale `none\|low\|medium\|high\|xhigh`. |
+| OpenRouter (`-or` presets) | `extra_body.reasoning.effort` | Unified scale `minimal\|low\|medium\|high`; `xhigh` only honoured by a handful of models (Opus 4.7, GPT-5.x). |
+| Anthropic direct | `extra_body.output_config.effort` | Compat endpoint silently drops top-level `reasoning_effort` / `service_tier`. Opus 4.7: `low\|medium\|high\|xhigh\|max`; Opus 4.6 / Sonnet 4.6: `low\|medium\|high\|max`. Haiku 4.5 uses the older `thinking.budget_tokens`. |
+| Gemini direct | `extra_body.google.thinking_config.thinking_level` | `LOW\|MEDIUM\|HIGH` (Pro) or `MINIMAL\|LOW\|MEDIUM\|HIGH` (Flash / Flash-Lite). |
+
+Anthropic-via-OpenRouter (`claude-*-or`) presets ship with
+`extra_body.cache_control: {type: ephemeral}` pre-set; your inline
+`controller.extra_body` is deep-merged over it and can disable or replace
+it.
 
 ### Input
 
-Dict fields: `{type, module?, class_name?, options?, ...type-specific keys}`.
+Dict fields: `{type, module?, class?, options?, ...type-specific keys}`.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `type` | str | `"cli"` | `cli`, `tui`, `asr`, `whisper`, `none`, `custom`, `package`. |
+| `type` | str | `"cli"` | `cli`, `cli_nonblocking`, `tui`, `whisper` (optional, requires RealtimeSTT), `none`, `custom`, `package`. |
 | `module` | str | — | For `custom` (e.g. `./custom/input.py`) or `package` (e.g. `pkg.mod`). |
-| `class_name` | str | — | Class to instantiate. |
+| `class` | str | — | Class to instantiate. YAML key is `class`; the loader stores it on the `class_name` dataclass attribute. |
 | `options` | dict | `{}` | Module-specific options. |
-| `prompt` | str | `"> "` | CLI prompt (cli input). |
+| `prompt` | str | `"> "` | CLI prompt (plain `cli` input only — ignored by the Rich CLI and TUI). |
 | `exit_commands` | list[str] | `[]` | Strings that trigger exit. |
 
 ### Output
@@ -115,9 +181,9 @@ channels (e.g. a Discord webhook).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `type` | str | `"stdout"` | `stdout`, `tts`, `tui`, `custom`, `package`. |
+| `type` | str | `"stdout"` | `stdout`, `stdout_prefixed`, `console_tts`, `dummy_tts`, `tui`, `custom`, `package`. |
 | `module` | str | — | For `custom`/`package` output modules. |
-| `class_name` | str | — | Class to instantiate. |
+| `class` | str | — | Class to instantiate. YAML key is `class`; the loader stores it on the `class_name` dataclass attribute. |
 | `options` | dict | `{}` | Module-specific options. |
 | `controller_direct` | bool | `true` | Route controller text through the default output. |
 | `named_outputs` | dict[str, OutputConfigItem] | `{}` | Named side outputs. Each item has the same shape as the default. |
@@ -129,12 +195,21 @@ List of tool entries. Each entry is a dict or a shorthand string
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `name` | str | — | Tool name (required). |
-| `type` | str | `"builtin"` | `builtin`, `custom`, `package`. |
+| `name` | str | — | Tool name (required). For `type: trigger`, must match the trigger's `setup_tool_name`. |
+| `type` | str | `"builtin"` | `builtin`, `trigger`, `custom`, `package`. |
 | `module` | str | — | For `custom` (e.g. `./custom/tools/my_tool.py`) or `package`. |
-| `class_name` | str | — | Class to instantiate. |
+| `class` | str | — | Class to instantiate for `custom`/`package`. YAML key is `class`; stored on the `class_name` dataclass attribute. |
 | `doc` | str | — | Override for the skill documentation file. |
 | `options` | dict | `{}` | Tool-specific options. |
+
+Tool types:
+
+- `builtin` — resolved against the built-in tool catalog by `name`.
+- `trigger` — exposes a universal trigger class as an LLM-callable setup
+  tool. `name` must match the trigger's `setup_tool_name`. Shipped
+  setup tools: `add_timer` (TimerTrigger), `watch_channel`
+  (ChannelTrigger), `add_schedule` (SchedulerTrigger).
+- `custom` / `package` — load the class at `module` + `class`.
 
 Shorthand:
 
@@ -152,7 +227,7 @@ tools:
 | `name` | str | — | Sub-agent identifier. |
 | `type` | str | `"builtin"` | `builtin`, `custom`, `package`. |
 | `module` | str | — | For `custom`/`package`. |
-| `config_name` | str | — | Named config object inside the module (e.g. `MY_AGENT_CONFIG`). |
+| `config` | str | — | Named config object inside the module (e.g. `MY_AGENT_CONFIG`). YAML key is `config`; stored on the `config_name` dataclass attribute. |
 | `description` | str | — | Description used in the parent's prompt. |
 | `tools` | list[str] | `[]` | Tools this sub-agent is allowed to use. |
 | `can_modify` | bool | `false` | Whether the sub-agent can perform mutating operations. |
@@ -163,18 +238,21 @@ tools:
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `type` | str | — | `timer`, `idle`, `webhook`, `channel`, `custom`, `package`. |
+| `type` | str | — | `timer`, `context`, `channel`, `custom`, `package`. |
 | `module` | str | — | For `custom`/`package`. |
-| `class_name` | str | — | Class to instantiate. |
+| `class` | str | — | Class to instantiate. YAML key is `class`; stored on the `class_name` dataclass attribute. |
 | `prompt` | str | — | Default prompt injection when the trigger fires. |
 | `options` | dict | `{}` | Trigger-specific options. |
 
 Common per-type options:
 
-- `timer`: `interval` (seconds).
-- `idle`: `timeout` (seconds).
-- `channel`: channel name + filter.
-- `webhook`: endpoint settings.
+- `timer`: `interval` (seconds), `immediate` (bool, default `false`).
+- `context`: `debounce_ms` (int, default `100`) — debounced context-update trigger.
+- `channel`: `channel` (name), `filter_sender` (optional).
+
+For a clock-aligned scheduler, expose `SchedulerTrigger` as an LLM-callable
+setup tool via a `tools` entry with `type: trigger, name: add_schedule`
+(see [Tools](#tools)) rather than declaring it in the `triggers:` list.
 
 ### Compact
 
@@ -183,8 +261,8 @@ Common per-type options:
 | `enabled` | bool | `true` | Turn compaction on. |
 | `max_tokens` | int | profile-default | Target token ceiling. |
 | `threshold` | float | `0.8` | Fraction of `max_tokens` at which compaction starts. |
-| `target` | float | `0.5` | Target fraction after compaction. |
-| `keep_recent_turns` | int | `5` | Turns preserved verbatim. |
+| `target` | float | `0.4` | Target fraction after compaction. |
+| `keep_recent_turns` | int | `8` | Turns preserved verbatim. |
 | `compact_model` | str | controller's model | Override LLM used for summarisation. |
 
 ### Output wiring
@@ -248,12 +326,14 @@ when the output contains the keyword.
 
 ### MCP servers in agent config
 
-Per-agent MCP servers. Connected on agent start.
+Per-agent MCP servers. Connected on agent start. A global catalog at
+`~/.kohakuterrarium/mcp_servers.yaml` (managed by `kt config mcp`) uses
+the same schema; agents declare the ones they want per-config.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `name` | str | — | Server identifier. |
-| `transport` | `stdio` \| `http` | — | Transport. |
+| `transport` | `stdio` \| `http` | — | Transport. `http` speaks Server-Sent Events (SSE). |
 | `command` | str | — | stdio executable. |
 | `args` | list[str] | `[]` | stdio args. |
 | `env` | dict[str,str] | `{}` | stdio env. |
@@ -266,7 +346,7 @@ Per-agent MCP servers. Connected on agent start.
 | `name` | str | — | Plugin identifier. |
 | `type` | str | `"builtin"` | `builtin`, `custom`, `package`. |
 | `module` | str | — | For `custom` (e.g. `./custom/plugins/my.py`) or `package`. |
-| `class` or `class_name` | str | — | Class to instantiate. |
+| `class` or `class_name` | str | — | Class to instantiate. Plugins accept both keys (see `bootstrap/plugins.py`); every other module kind uses `class`. |
 | `description` | str | — | Free-form metadata. |
 | `options` | dict | `{}` | Plugin-specific options. |
 
@@ -345,10 +425,15 @@ system_prompt_file: prompts/niche.md
 creatures/<name>/
   config.yaml           # required
   prompts/system.md     # if referenced
-  tools/                # custom tool modules
-  memory/               # context files
-  subagents/            # custom sub-agent configs
+  tools/                # custom tool modules (by convention)
+  memory/               # context files (by convention)
+  subagents/            # custom sub-agent configs (by convention)
 ```
+
+These subfolder names are conventions only. The loader resolves each
+`module:` path relative to the agent folder via `ModuleLoader` — there
+is no auto-scan of `tools/` or `subagents/`, so every custom module
+must be declared in `config.yaml`.
 
 ---
 
@@ -430,7 +515,7 @@ default_model: <preset name>
 
 backends:
   <provider-name>:
-    backend_type: openai | codex | anthropic
+    backend_type: openai | codex        # canonical set (see note below)
     base_url: str
     api_key_env: str
 
@@ -444,13 +529,27 @@ presets:
     reasoning_effort: str      # none | minimal | low | medium | high | xhigh
     service_tier: str          # priority | flex
     extra_body: dict
+    variation_groups:          # optional — see Variation selector
+      <group>:
+        <option>:
+          <dotted.path>: value
 ```
 
-Built-in provider names (not overridable): `codex`, `openai`,
-`openrouter`, `anthropic`, `gemini`, `mimo`.
+Canonical `backend_type` values are `openai` and `codex`. Legacy values
+(`anthropic`, `codex-oauth`) are accepted for back-compat and silently
+normalized on read — `anthropic` → `openai` (Anthropic's OpenAI-compat
+endpoint; there is no native Anthropic client), `codex-oauth` → `codex`.
+When adding a provider, prefer the canonical values.
+
+Built-in provider names (`codex`, `openai`, `openrouter`, `anthropic`,
+`gemini`, `mimo`) cannot be deleted; their base URLs and `api_key_env`
+values are fixed via built-in defaults. Per-agent overrides via
+`controller.base_url` / `controller.api_key_env` still work.
 
 See [builtins.md — LLM presets](builtins.md#llm-presets) for every
-shipped preset.
+shipped preset, [builtins.md — Variation groups](builtins.md#variation-groups)
+for the per-preset catalogue, and [Variation selector](#variation-selector)
+for how to pick a specific variation in a controller config.
 
 ---
 
@@ -475,11 +574,11 @@ Fields:
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `name` | str | — | Unique identifier. |
-| `transport` | `stdio` \| `http` | — | Transport. |
+| `transport` | `stdio` \| `http` | — | Transport. `http` speaks Server-Sent Events (SSE). |
 | `command` | str | — | stdio executable. |
 | `args` | list[str] | `[]` | stdio args. |
 | `env` | dict[str,str] | `{}` | stdio env. |
-| `url` | str | — | HTTP endpoint for `http` transport. |
+| `url` | str | — | HTTP/SSE endpoint for `http` transport. |
 
 ---
 

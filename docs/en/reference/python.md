@@ -115,7 +115,7 @@ Notes:
   resume from a `SessionStore`.
 
 ```python
-agent = Agent.from_path("creatures/my_agent", llm_override="claude-opus-4.6")
+agent = Agent.from_path("creatures/my_agent", llm_override="claude-opus-4.7")
 await agent.start()
 await agent.inject_input("Hello")
 await agent.stop()
@@ -176,23 +176,24 @@ Module: `kohakuterrarium.core.config_types`. Dataclasses.
 
 **`InputConfig`**
 
-- `type: str = "cli"` — `builtin`, `custom`, or `package`.
+- `type: str = "cli"` — input module type (`cli`, `cli_nonblocking`, `tui`, `whisper`, `none`, `custom`, `package`).
 - `module: str | None = None`
-- `class_name: str | None = None`
+- `class_name: str | None = None` — populated from the YAML key `class`.
 - `prompt: str = "> "`
 - `options: dict[str, Any]`
 
 **`TriggerConfig`**
 
-- `type: str`
+- `type: str` — built-ins are `timer`, `context`, `channel`; custom/package triggers use `module` + YAML `class`.
 - `module, class_name: str | None`
 - `prompt: str | None = None`
 - `options: dict[str, Any]`
+- `name: str | None = None`
 
 **`ToolConfigItem`**
 
 - `name: str`
-- `type: str = "builtin"`
+- `type: str = "builtin"` — `builtin`, `trigger`, `custom`, or `package`.
 - `module, class_name: str | None`
 - `doc: str | None = None` — override skill doc path.
 - `options: dict[str, Any]`
@@ -214,7 +215,7 @@ Inherits `OutputConfigItem` plus:
 
 - `name: str`
 - `type: str = "builtin"`
-- `module, class_name, config_name, description: str | None`
+- `module, class_name, config_name, description: str | None` — `class_name` / `config_name` are populated from YAML `class` / `config`.
 - `tools: list[str]`
 - `can_modify: bool = False`
 - `interactive: bool = False`

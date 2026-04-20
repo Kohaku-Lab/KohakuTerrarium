@@ -97,7 +97,7 @@ Modes:
 Override the model for one run:
 
 ```bash
-kt run @kt-biome/creatures/swe --llm claude-opus-4.6
+kt run @kt-biome/creatures/swe --llm claude-opus-4.7
 ```
 
 ## 5. Resume

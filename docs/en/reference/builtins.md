@@ -205,17 +205,24 @@ Shipped input modules under `src/kohakuterrarium/builtins/inputs/`.
 
 **`cli`** — Stdin prompt. Options: `prompt`, `exit_commands`.
 
+**`cli_nonblocking`** — Same surface as `cli` but returns control to
+the event loop between keystrokes (useful when triggers fire during
+input).
+
 **`none`** — No input. For trigger-only agents.
 
 **`whisper`** — Microphone + Silero VAD + `openai-whisper`. Options
-include `model`, `language`, VAD thresholds. Requires FFmpeg.
+include `model`, `language`, VAD thresholds. Requires FFmpeg and the
+optional `RealtimeSTT` dep; only registered when the import succeeds.
 
-**`asr`** — Abstract base for custom speech recognition.
+`ASRModule` / `ASRConfig` / `ASRResult` live under
+`builtins/inputs/` as abstract bases for writing custom speech inputs;
+they are **not** registered as the `asr` type.
 
 Two further input types are resolved dynamically:
 
 - `tui` — mounted by the Textual app when running under TUI mode.
-- `custom` / `package` — loaded via `module` + `class_name` fields.
+- `custom` / `package` — loaded via `module` + `class` fields.
 
 ---
 
@@ -226,13 +233,24 @@ Shipped output modules under `src/kohakuterrarium/builtins/outputs/`.
 **`stdout`** — Print to stdout. Options:
 `prefix`, `suffix`, `stream_suffix`, `flush_on_stream`.
 
-**`tts`** — Fish / Edge / OpenAI TTS (auto-detected). Supports
-streaming and hard interruption.
+**`stdout_prefixed`** — `stdout` with a per-line prefix, useful for
+tagging side outputs.
+
+**`console_tts`** — Console-only TTS shim that prints the synthesized
+text character-by-character with a configurable `char_delay`. Intended
+for demos and testing — no audio backend.
+
+**`dummy_tts`** — Silent TTS that fires the usual TTS lifecycle
+events without any output. Useful in tests.
 
 Additional routed types:
 
 - `tui` — renders into the Textual TUI widget tree.
-- `custom` / `package` — loaded via module + class.
+- `custom` / `package` — loaded via `module` + `class`.
+
+There is no plain `tts` registry key. Real TTS backends (Fish, Edge,
+OpenAI, etc.) are shipped as custom/package outputs that subclass
+`TTSModule`.
 
 ---
 
@@ -275,81 +293,97 @@ Command names share a namespace with tool names; the command for reading job out
 
 Built-in provider types (backends):
 
-| Provider | Transport | Notes |
-|---|---|---|
-| `codex` | OpenAI chat API over Codex OAuth | ChatGPT subscription auth; `kt login codex`. |
-| `openai` | OpenAI chat API | API-key auth. |
-| `openrouter` | OpenAI-compatible | API-key auth; routes to many models. |
-| `anthropic` | Native Anthropic messages API | Dedicated client. |
-| `gemini` | OpenAI-compatible endpoint on Google | API-key auth. |
-| `mimo` | Xiaomi MiMo native | `kt login mimo`. |
+| Provider | Backend type | Transport | Notes |
+|---|---|---|---|
+| `codex` | `codex` | Codex OAuth (ChatGPT subscription) | `kt login codex`; routed via `CodexOAuthProvider`. |
+| `openai` | `openai` | OpenAI `/chat/completions` | API-key auth (`OPENAI_API_KEY`). |
+| `openrouter` | `openai` | OpenAI-compat against OpenRouter | API-key auth (`OPENROUTER_API_KEY`); unified `reasoning` param. |
+| `anthropic` | `openai` | Anthropic's OpenAI-compat endpoint | API-key auth (`ANTHROPIC_API_KEY`). No native Anthropic client. Claude-specific knobs go through `extra_body` (`thinking.*`, `output_config.*`). |
+| `gemini` | `openai` | Google's OpenAI-compat endpoint | API-key auth (`GEMINI_API_KEY`). |
+| `mimo` | `openai` | Xiaomi MiMo | `kt login mimo`. |
 
-Extra community providers referenced in configs:
-`together`, `mistral`, `deepseek`, `vllm`, `generic`. See
-`kohakuterrarium.llm.presets` for the canonical list.
+Canonical backend types are `openai` and `codex`. Legacy `anthropic` /
+`codex-oauth` backend type values are silently migrated on read (see
+[configuration reference](configuration.md#llm-profiles-kohakuterrariumllm_profilesyaml)).
 
 ## LLM presets
 
 Shipped in `src/kohakuterrarium/llm/presets.py`. Use them as `llm:` or
-`--llm` values. Aliases listed in parentheses.
+`--llm` values.
+
+Naming convention (post-2026-04 refactor):
+
+- Direct / native-API variants are the primary name
+  (`claude-opus-4.7`, `gemini-3.1-pro`, `mimo-v2-pro`).
+- OpenRouter-routed variants use the `-or` suffix
+  (`claude-opus-4.7-or`).
+- OpenAI is an exception: `gpt-5.4` stays bound to the **Codex OAuth**
+  provider; the direct OpenAI API variant uses `-api`, OpenRouter uses
+  `-or`.
+- Legacy names (`claude-opus-4.6-direct`, `or-gpt-5.4`,
+  `gemini-3.1-pro-direct`, `mimo-v2-pro-direct`, …) survive as aliases
+  so existing configs keep working.
 
 ### OpenAI via Codex OAuth
 
-- `gpt-5.4` (alias: `gpt5`, `gpt54`)
+- `gpt-5.4` (aliases: `gpt5`, `gpt54`)
 - `gpt-5.3-codex` (`gpt53`)
 - `gpt-5.1`
-- `gpt-4o` (`gpt4o`)
-- `gpt-4o-mini`
+- `gpt-4o-codex` (aliases: `gpt4o`, `gpt-4o`)
+- `gpt-4o-mini-codex` (alias: `gpt-4o-mini`)
 
-### OpenAI direct
+### OpenAI Direct API (`-api` suffix)
 
-- `gpt-5.4-direct`
-- `gpt-5.4-mini-direct`
-- `gpt-5.4-nano-direct`
-- `gpt-5.3-codex-direct`
-- `gpt-5.1-direct`
-- `gpt-4o-direct`
-- `gpt-4o-mini-direct`
+- `gpt-5.4-api` (legacy alias: `gpt-5.4-direct`)
+- `gpt-5.4-mini-api` (`gpt-5.4-mini-direct`)
+- `gpt-5.4-nano-api` (`gpt-5.4-nano-direct`)
+- `gpt-5.3-codex-api` (`gpt-5.3-codex-direct`)
+- `gpt-5.1-api` (`gpt-5.1-direct`)
+- `gpt-4o-api` (`gpt-4o-direct`)
+- `gpt-4o-mini-api` (`gpt-4o-mini-direct`)
 
-### OpenAI via OpenRouter
+### OpenAI via OpenRouter (`-or` suffix)
 
-- `or-gpt-5.4`
-- `or-gpt-5.4-mini`
-- `or-gpt-5.4-nano`
-- `or-gpt-5.3-codex`
-- `or-gpt-5.1`
-- `or-gpt-4o`
-- `or-gpt-4o-mini`
+- `gpt-5.4-or` (legacy alias: `or-gpt-5.4`)
+- `gpt-5.4-mini-or` (`or-gpt-5.4-mini`)
+- `gpt-5.4-nano-or` (`or-gpt-5.4-nano`)
+- `gpt-5.3-codex-or` (`or-gpt-5.3-codex`)
+- `gpt-5.1-or` (`or-gpt-5.1`)
+- `gpt-4o-or` (`or-gpt-4o`)
+- `gpt-4o-mini-or` (`or-gpt-4o-mini`)
 
-### Anthropic Claude via OpenRouter
+### Anthropic Claude Direct (no suffix — primary)
 
-- `claude-opus-4.6` (aliases: `claude-opus`, `opus`)
-- `claude-sonnet-4.6` (aliases: `claude`, `claude-sonnet`, `sonnet`)
-- `claude-sonnet-4.5`
-- `claude-haiku-4.5` (aliases: `claude-haiku`, `haiku`)
-- `claude-sonnet-4` (legacy)
-- `claude-opus-4` (legacy)
+Routed through Anthropic's OpenAI-compat endpoint. Effort via
+`extra_body.output_config.effort`.
 
-### Anthropic Claude direct
+- `claude-opus-4.7` (aliases: `claude-opus`, `opus`)
+- `claude-opus-4.6` (legacy alias: `claude-opus-4.6-direct`)
+- `claude-sonnet-4.6` (aliases: `claude`, `claude-sonnet`, `sonnet`; legacy: `claude-sonnet-4.6-direct`)
+- `claude-haiku-4.5` (aliases: `claude-haiku`, `haiku`; legacy: `claude-haiku-4.5-direct`)
 
-- `claude-opus-4.6-direct`
-- `claude-sonnet-4.6-direct`
-- `claude-haiku-4.5-direct`
+### Anthropic Claude via OpenRouter (`-or` suffix)
 
-### Google Gemini
+- `claude-opus-4.7-or`
+- `claude-opus-4.6-or`
+- `claude-sonnet-4.6-or`
+- `claude-sonnet-4.5-or`
+- `claude-haiku-4.5-or`
+- `claude-sonnet-4-or` (legacy alias: `claude-sonnet-4`)
+- `claude-opus-4-or` (legacy alias: `claude-opus-4`)
 
-Via OpenRouter:
+### Google Gemini Direct (OpenAI-compat)
 
-- `gemini-3.1-pro` (aliases: `gemini`, `gemini-pro`)
-- `gemini-3-flash` (`gemini-flash`)
-- `gemini-3.1-flash-lite` (`gemini-lite`)
-- `nano-banana`
+- `gemini-3.1-pro` (aliases: `gemini`, `gemini-pro`; legacy: `gemini-3.1-pro-direct`)
+- `gemini-3-flash` (`gemini-flash`; legacy: `gemini-3-flash-direct`)
+- `gemini-3.1-flash-lite` (`gemini-lite`; legacy: `gemini-3.1-flash-lite-direct`)
 
-Direct (OpenAI-compat endpoint):
+### Google Gemini via OpenRouter (`-or` suffix)
 
-- `gemini-3.1-pro-direct`
-- `gemini-3-flash-direct`
-- `gemini-3.1-flash-lite-direct`
+- `gemini-3.1-pro-or`
+- `gemini-3-flash-or`
+- `gemini-3.1-flash-lite-or`
+- `nano-banana` (image-generation model, OpenRouter)
 
 ### Google Gemma (OpenRouter)
 
@@ -375,22 +409,20 @@ Direct (OpenAI-compat endpoint):
 - `minimax-m2.7` (`minimax`)
 - `minimax-m2.5`
 
-### Xiaomi MiMo
+### Xiaomi MiMo Direct (no suffix — primary)
 
-Via OpenRouter:
+- `mimo-v2-pro` (`mimo`; legacy alias: `mimo-v2-pro-direct`)
+- `mimo-v2-flash` (legacy alias: `mimo-v2-flash-direct`)
 
-- `mimo-v2-pro` (`mimo`)
-- `mimo-v2-flash`
+### Xiaomi MiMo via OpenRouter (`-or` suffix)
 
-Direct:
+- `mimo-v2-pro-or`
+- `mimo-v2-flash-or`
 
-- `mimo-v2-pro-direct`
-- `mimo-v2-flash-direct`
+### GLM (Z.ai, OpenRouter)
 
-### GLM (Z.ai, via OpenRouter)
-
-- `glm-5` (`glm`, via default alias)
-- `glm-5-turbo` (`glm`)
+- `glm-5`
+- `glm-5-turbo` (alias: `glm`)
 
 ### xAI Grok (OpenRouter)
 
@@ -420,9 +452,120 @@ Direct:
 - `ministral-3-14b` (`ministral`)
 - `ministral-3-8b`
 
+Preset token windows (`max_context` / `max_output`) are set per preset —
+see `src/kohakuterrarium/llm/presets.py` for the exact values, or
+`kt config llm show <name>`. `controller.max_tokens` overrides
+`max_output`; to adjust the compaction window, set `compact.max_tokens`.
+
 Built-in preset merging also picks up `llm_presets` contributed by
 installed packages; see
 [configuration.md — Package manifest](configuration.md#package-manifest-kohakuyaml).
+
+## Variation groups
+
+A variation group lets one preset expose multiple knobs without
+duplicating the entry. Select with the `preset@group=option` shorthand
+in `llm:` / `--llm`, or via `controller.variation_selections`; see
+[configuration reference — Variation selector](configuration.md#variation-selector).
+
+Presets not listed here have no variation group — their defaults are
+fixed.
+
+### OpenAI — Codex OAuth
+
+| Preset | Group | Options |
+|---|---|---|
+| `gpt-5.4` | `reasoning` | `none`, `low`, `medium`, `high`, `xhigh` |
+| `gpt-5.4` | `speed` | `normal`, `fast` (maps to `service_tier: priority`) |
+| `gpt-5.3-codex` | `reasoning` | `none`, `low`, `medium`, `high`, `xhigh` |
+| `gpt-5.1` | `reasoning` | `none`, `low`, `medium`, `high`, `xhigh` |
+
+### OpenAI — Direct API (`-api` suffix)
+
+Patches `extra_body.reasoning.effort`.
+
+| Preset | Group | Options |
+|---|---|---|
+| `gpt-5.4-api`, `gpt-5.4-mini-api`, `gpt-5.4-nano-api`, `gpt-5.3-codex-api`, `gpt-5.1-api` | `reasoning` | `none`, `low`, `medium`, `high`, `xhigh` |
+
+### OpenAI — OpenRouter (`-or` suffix)
+
+Patches `extra_body.reasoning.effort` via OpenRouter's unified param.
+
+| Preset | Group | Options |
+|---|---|---|
+| `gpt-5.4-or`, `gpt-5.4-mini-or`, `gpt-5.4-nano-or`, `gpt-5.3-codex-or`, `gpt-5.1-or` | `reasoning` | `minimal`, `low`, `medium`, `high`, `xhigh` |
+
+### Anthropic — Direct
+
+Patches `extra_body.output_config.effort` via the compat layer.
+
+| Preset | Group | Options |
+|---|---|---|
+| `claude-opus-4.7` | `reasoning` | `low`, `medium`, `high`, `xhigh`, `max` |
+| `claude-opus-4.6`, `claude-sonnet-4.6` | `reasoning` | `low`, `medium`, `high`, `max` |
+
+Haiku 4.5 uses the older extended-thinking (`budget_tokens`) and has
+no variation group.
+
+### Anthropic — OpenRouter (`-or` suffix)
+
+Patches `extra_body.reasoning.effort`. `xhigh` is only honoured by
+Opus 4.7.
+
+| Preset | Group | Options |
+|---|---|---|
+| `claude-opus-4.7-or` | `reasoning` | `minimal`, `low`, `medium`, `high`, `xhigh` |
+| `claude-opus-4.6-or`, `claude-sonnet-4.6-or`, `claude-sonnet-4.5-or`, `claude-opus-4-or`, `claude-sonnet-4-or` | `reasoning` | `minimal`, `low`, `medium`, `high` |
+| `claude-haiku-4.5-or` | `reasoning` | `off`, `low`, `medium`, `high` |
+
+### Google Gemini — Direct
+
+Patches `extra_body.google.thinking_config.thinking_level`.
+
+| Preset | Group | Options |
+|---|---|---|
+| `gemini-3.1-pro` | `thinking` | `low`, `medium`, `high` |
+| `gemini-3-flash`, `gemini-3.1-flash-lite` | `thinking` | `minimal`, `low`, `medium`, `high` |
+
+### Google Gemini — OpenRouter
+
+| Preset | Group | Options |
+|---|---|---|
+| `gemini-3.1-pro-or`, `gemini-3-flash-or`, `gemini-3.1-flash-lite-or` | `reasoning` | `minimal`, `low`, `medium`, `high` |
+
+### Gemma / Qwen / Kimi / MiMo / GLM — OpenRouter
+
+Share the same OpenRouter unified reasoning group (unless noted).
+
+| Preset | Group | Options |
+|---|---|---|
+| `gemma-4-31b`, `gemma-4-26b` | `reasoning` | `minimal`, `low`, `medium`, `high` |
+| `qwen3.5-plus`, `qwen3.5-flash`, `qwen3.5-397b`, `qwen3.5-27b`, `qwen3-coder`, `qwen3-coder-plus` | `reasoning` | `minimal`, `low`, `medium`, `high` |
+| `kimi-k2.5` | `reasoning` | `minimal`, `low`, `medium`, `high` |
+| `mimo-v2-pro`, `mimo-v2-flash`, `mimo-v2-pro-or`, `mimo-v2-flash-or` | `reasoning` | `minimal`, `low`, `medium`, `high` |
+| `glm-5`, `glm-5-turbo` | `reasoning` | `minimal`, `low`, `medium`, `high` |
+
+`kimi-k2-thinking` has always-on thinking — no variation group.
+
+### Mistral — OpenRouter
+
+| Preset | Group | Options |
+|---|---|---|
+| `mistral-small-4` | `reasoning` | `none`, `high` |
+
+Other Mistral presets (`mistral-large-3`, `mistral-medium-*`,
+`mistral-small-3.2`, `codestral`, `devstral-*`, `pixtral-large`,
+`ministral-*`) are not reasoning models. `magistral-medium` and
+`magistral-small` have always-on reasoning — no variation group.
+
+### Grok / MiniMax — OpenRouter
+
+Grok 4.x (`grok-4`, `grok-4.20`, `grok-4.20-multi`, `grok-4-fast`,
+`grok-4.1-fast`, `grok-code-fast`) has mandatory non-configurable
+reasoning. `grok-3` / `grok-3-mini` are legacy non-reasoning models.
+`minimax-m2.7` / `minimax-m2.5` have mandatory reasoning. None expose
+a variation group.
 
 ---
 
