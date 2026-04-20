@@ -34,12 +34,17 @@ from typing import Any
 from prompt_toolkit.application import Application
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import ANSI
+from prompt_toolkit.key_binding.key_bindings import (
+    ConditionalKeyBindings,
+    merge_key_bindings,
+)
 from prompt_toolkit.layout import (
     ConditionalContainer,
     HSplit,
     Layout,
     Window,
 )
+from prompt_toolkit.layout.containers import FloatContainer
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.output import ColorDepth
@@ -58,15 +63,9 @@ from kohakuterrarium.builtins.cli_rich.runtime import (
     make_output,
     spawn,
 )
+from kohakuterrarium.builtins.cli_rich.selector import SelectorOverlay
+from kohakuterrarium.builtins.cli_rich.slash import SlashHandler
 from kohakuterrarium.builtins.cli_rich.theme import COLOR_BANNER
-from kohakuterrarium.builtins.user_commands import (
-    get_builtin_user_command,
-    list_builtin_user_commands,
-)
-from kohakuterrarium.modules.user_command.base import (
-    UserCommandContext,
-    parse_slash_command,
-)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -80,9 +79,10 @@ class RichCLIApp:
     def __init__(self, agent: Any):
         self.agent = agent
         self.live_region = LiveRegion()
+        self.selector = SelectorOverlay()
+        self.slash = SlashHandler(self)
         self._exit_requested = False
         self._processing = False
-        self._command_registry: dict = {}
         self._pending_task: asyncio.Task | None = None
 
         # Console used only for committing to scrollback (via run_in_terminal).
@@ -215,12 +215,19 @@ class RichCLIApp:
             always_hide_cursor=True,
         )
 
-        root_container = HSplit(
+        base_container = HSplit(
             [
                 status_container,
                 input_frame,
                 footer_window,
             ]
+        )
+
+        # FloatContainer lets SelectorOverlay paint a modal popup above
+        # the normal layout without spawning a second Application.
+        root_container = FloatContainer(
+            content=base_container,
+            floats=self.selector.build_floats(),
         )
 
         layout = Layout(
@@ -231,12 +238,38 @@ class RichCLIApp:
             {
                 "input.frame": "ansicyan",
                 "input.frame.label": "ansicyan bold",
+                # Selector overlay — same blue as the TUI SelectionModal.
+                "selector.frame": "#0F52BA",
+                "selector.frame.label": "#0F52BA bold",
+                "selector.frame.confirm": "#D4920A",
+                "selector.frame.confirm.label": "#D4920A bold",
+                "selector.title": "bold",
+                "selector.hint": "#888888",
+                "selector.row": "",
+                "selector.row.highlight": "bg:#0F52BA #ffffff bold",
+                "selector.row.extra": "#888888",
+                "selector.row.extra.highlight": "bg:#0F52BA #d0d0d0",
             }
+        )
+
+        # Gate the composer's key bindings so they yield while the
+        # overlay is open — otherwise composer's global Enter/Esc
+        # handlers would fire alongside the overlay's.
+        selector_visible = Condition(lambda: self.selector.visible)
+        app_kb = merge_key_bindings(
+            [
+                ConditionalKeyBindings(
+                    self.selector.key_bindings, filter=selector_visible
+                ),
+                ConditionalKeyBindings(
+                    self.composer.key_bindings, filter=~selector_visible
+                ),
+            ]
         )
 
         return Application(
             layout=layout,
-            key_bindings=self.composer.key_bindings,
+            key_bindings=app_kb,
             full_screen=False,
             mouse_support=False,
             erase_when_done=False,
@@ -293,7 +326,7 @@ class RichCLIApp:
 
         # Slash command path
         if text.startswith("/"):
-            self._pending_task = spawn(self._handle_slash(text))
+            self._pending_task = spawn(self.slash.handle(text))
             return
 
         # Send to agent (in a background task so the UI stays responsive)
@@ -316,43 +349,10 @@ class RichCLIApp:
     # ── Slash command dispatch ──
 
     def _wire_command_registry(self) -> None:
-        registry: dict = {}
-        for name in list_builtin_user_commands():
-            cmd = get_builtin_user_command(name)
-            if cmd:
-                registry[name] = cmd
+        """Populate the builtin command registry + wire composer autocomplete."""
+        registry = self.slash.wire_builtins()
         self.composer.set_command_registry(registry)
         self.composer.set_command_context(agent=self.agent)
-        self._command_registry = registry
-
-    async def _handle_slash(self, text: str) -> None:
-        name, args = parse_slash_command(text)
-        cmd = self._command_registry.get(name) or get_builtin_user_command(name)
-        if cmd is None:
-            self._commit_text(f"[red]Unknown command:[/red] /{name}")
-            return
-
-        ctx = UserCommandContext(
-            agent=self.agent,
-            session=getattr(self.agent, "session", None),
-            input_module=getattr(self.agent, "input", None),
-            extra={"command_registry": self._command_registry},
-        )
-        try:
-            result = await cmd.execute(args, ctx)
-        except Exception as e:
-            self._commit_text(f"[red]Command error:[/red] {e}")
-            return
-
-        if result.error:
-            self._commit_text(f"[red]{result.error}[/red]")
-        if result.output:
-            self._commit_text(result.output)
-
-        if name in ("exit", "quit"):
-            self._exit_requested = True
-            if self.app:
-                self.app.exit()
 
     # ── Output module callbacks (called by RichCLIOutput) ──
 
