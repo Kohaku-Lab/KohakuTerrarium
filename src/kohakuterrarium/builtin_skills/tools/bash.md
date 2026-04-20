@@ -17,6 +17,9 @@ Do NOT use bash for operations that have dedicated tools:
 - File writing: use `write` (NOT `echo >`, `cat <<EOF`)
 - File finding: use `glob` (NOT `find`, `ls`)
 - Content search: use `grep` (NOT `grep`, `rg` via bash)
+- Moving / renaming: use `file_move` (NOT `mv`)
+- Deleting: use `file_delete` (NOT `rm`)
+- Creating directories: use `mkdir` tool (NOT `mkdir -p` via bash)
 
 Using dedicated tools gives structured output and enables safety guards.
 

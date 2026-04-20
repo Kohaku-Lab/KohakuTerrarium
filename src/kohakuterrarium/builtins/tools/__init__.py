@@ -20,12 +20,15 @@ from kohakuterrarium.builtins.tool_catalog import (
 from kohakuterrarium.builtins.tools.ask_user import AskUserTool
 from kohakuterrarium.builtins.tools.bash import BashTool, PythonTool
 from kohakuterrarium.builtins.tools.edit import EditTool
+from kohakuterrarium.builtins.tools.file_delete import FileDeleteTool
+from kohakuterrarium.builtins.tools.file_move import FileMoveTool
 from kohakuterrarium.builtins.tools.glob import GlobTool
 from kohakuterrarium.builtins.tools.multi_edit import MultiEditTool
 from kohakuterrarium.builtins.tools.grep import GrepTool
 from kohakuterrarium.builtins.tools.info import InfoTool
 from kohakuterrarium.builtins.tools.json_read import JsonReadTool
 from kohakuterrarium.builtins.tools.json_write import JsonWriteTool
+from kohakuterrarium.builtins.tools.mkdir import MkdirTool
 from kohakuterrarium.builtins.tools.read import ReadTool
 from kohakuterrarium.builtins.tools.scratchpad_tool import ScratchpadTool
 from kohakuterrarium.builtins.tools.search_memory import SearchMemoryTool
@@ -58,7 +61,10 @@ __all__ = [
     "SendMessageTool",
     "WriteTool",
     "EditTool",
+    "FileDeleteTool",
+    "FileMoveTool",
     "GlobTool",
+    "MkdirTool",
     "MultiEditTool",
     "GrepTool",
     "InfoTool",
