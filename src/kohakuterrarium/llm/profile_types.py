@@ -44,6 +44,7 @@ class LLMPreset:
     reasoning_effort: str = ""
     service_tier: str = ""
     extra_body: dict[str, Any] = field(default_factory=dict)
+    variation_groups: dict[str, dict[str, dict[str, Any]]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -61,13 +62,13 @@ class LLMPreset:
             data["service_tier"] = self.service_tier
         if self.extra_body:
             data["extra_body"] = self.extra_body
+        if self.variation_groups:
+            data["variation_groups"] = self.variation_groups
         return data
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "LLMPreset":
         provider = data.get("provider", "") or data.get("backend", "")
-        if provider in _LEGACY_BACKEND_TYPES:
-            provider = ""
         return cls(
             name=name,
             model=data.get("model", ""),
@@ -78,6 +79,7 @@ class LLMPreset:
             reasoning_effort=data.get("reasoning_effort", ""),
             service_tier=data.get("service_tier", ""),
             extra_body=data.get("extra_body", {}),
+            variation_groups=data.get("variation_groups", {}) or {},
         )
 
 
@@ -97,6 +99,7 @@ class LLMProfile:
     reasoning_effort: str = ""
     service_tier: str = ""
     extra_body: dict[str, Any] = field(default_factory=dict)
+    selected_variations: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "LLMProfile":
@@ -118,6 +121,7 @@ class LLMProfile:
             reasoning_effort=data.get("reasoning_effort", ""),
             service_tier=data.get("service_tier", ""),
             extra_body=data.get("extra_body", {}),
+            selected_variations=data.get("selected_variations", {}) or {},
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -142,4 +146,6 @@ class LLMProfile:
             data["service_tier"] = self.service_tier
         if self.extra_body:
             data["extra_body"] = self.extra_body
+        if self.selected_variations:
+            data["selected_variations"] = self.selected_variations
         return data

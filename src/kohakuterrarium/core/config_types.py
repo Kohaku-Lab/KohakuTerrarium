@@ -104,10 +104,15 @@ class AgentConfig:
     base_config: str | None = None
 
     # LLM profile reference (resolves from ~/.kohakuterrarium/llm_profiles.yaml)
-    llm_profile: str = ""  # Profile name; empty = use inline settings or default
+    llm_profile: str = (
+        ""  # Profile name or selector; empty = use inline settings or default
+    )
 
     # LLM settings (inline, backward compat; overridden by llm_profile if set)
     model: str = ""  # empty = resolve via profile system
+    provider: str = ""  # optional provider disambiguator when model is set
+    variation_selections: dict[str, str] = field(default_factory=dict)
+    variation: str = ""  # optional shorthand; normalized into variation_selections
     auth_mode: str = ""  # empty = resolve via profile; "codex-oauth" for ChatGPT sub
     api_key_env: str = ""  # empty = resolve via profile
     base_url: str = ""  # empty = resolve via profile

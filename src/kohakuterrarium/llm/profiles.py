@@ -5,16 +5,28 @@ Two-layer model:
     provider -> concrete transport binding (backend_type + base_url + api_key_env)
 
 Backend types are a small enum of implementations:
-    openai    : OpenAI-compatible HTTP client
-    codex     : OpenAI ChatGPT subscription via OAuth
-    anthropic : Anthropic-native client (dedicated thinking API)
+    openai : OpenAI-compatible HTTP client. Used for OpenAI, OpenRouter,
+             Anthropic (via their official OpenAI-compat endpoint at
+             ``api.anthropic.com/v1``), Gemini, MiMo, and any user-defined
+             provider that exposes a ``/chat/completions`` interface.
+    codex  : OpenAI ChatGPT subscription via OAuth.
 
 Built-in providers cover the common cases (codex, openai, openrouter,
 anthropic, gemini, mimo). Users can add custom providers in
 ``~/.kohakuterrarium/llm_profiles.yaml`` and custom presets that reference
 any provider (built-in or custom).
+
+Note: there is currently no native Anthropic client. The ``anthropic``
+built-in provider targets Anthropic's OpenAI-compat endpoint, which accepts
+``extra_body.thinking`` (incl. adaptive mode) but silently ignores
+top-level ``reasoning_effort`` / ``service_tier`` and fields like
+``speed`` / ``betas``. For fast mode or the full native feature set, route
+through ``openrouter`` instead.
 """
 
+from __future__ import annotations
+
+from copy import deepcopy
 from typing import Any
 
 import yaml
@@ -48,11 +60,31 @@ _BUILTIN_PROVIDER_NAMES = {
 # Values that historically appeared under a preset's `provider` field to
 # describe the backend type. They are now only valid as `backend_type`.
 _LEGACY_BACKEND_TYPE_VALUES = {"openai", "codex", "codex-oauth", "anthropic"}
+_ALLOWED_VARIATION_ROOTS = {
+    "temperature",
+    "reasoning_effort",
+    "service_tier",
+    "max_context",
+    "max_output",
+    "extra_body",
+}
+_SHORTHAND_SELECTION_KEY = "__option__"
 
 
 def _normalize_backend_type(value: str) -> str:
+    """Map legacy / user-typed backend types onto the current canonical set.
+
+    - ``"codex-oauth"`` → ``"codex"`` (old name for the ChatGPT-OAuth backend)
+    - ``"anthropic"`` → ``"openai"`` (there is no native Anthropic client;
+      the anthropic *provider* now points at Anthropic's OpenAI-compat
+      endpoint and speaks ``/chat/completions``). Legacy profiles that
+      declare ``backend_type: anthropic`` are auto-migrated here.
+    - empty / unknown → ``"openai"`` (safe default for unconfigured data).
+    """
     if value == "codex-oauth":
         return "codex"
+    if value == "anthropic":
+        return "openai"
     return value or "openai"
 
 
@@ -88,10 +120,16 @@ def _built_in_providers() -> dict[str, LLMBackend]:
             base_url="https://openrouter.ai/api/v1",
             api_key_env="OPENROUTER_API_KEY",
         ),
+        # Anthropic's OpenAI-compatible endpoint. No native Anthropic client
+        # in this project — we speak /chat/completions and pass Claude-specific
+        # knobs (``thinking: {type: "adaptive"}``, ``thinking.budget_tokens``)
+        # through ``extra_body``. Top-level ``reasoning_effort`` / ``service_tier``
+        # and ``speed`` / ``betas`` fields are silently dropped by the compat
+        # layer; for those, use the ``openrouter`` provider instead.
         "anthropic": LLMBackend(
             name="anthropic",
-            backend_type="anthropic",
-            base_url="https://api.anthropic.com/v1",
+            backend_type="openai",
+            base_url="https://api.anthropic.com/v1/",
             api_key_env="ANTHROPIC_API_KEY",
         ),
         "gemini": LLMBackend(
@@ -118,16 +156,19 @@ def _legacy_provider_from_data(data: dict[str, Any]) -> str:
     """
     value = data.get("provider", "")
     if value and value not in _LEGACY_BACKEND_TYPE_VALUES:
-        return value  # already a real provider name
+        return value
 
-    backend_type = _normalize_backend_type(
-        data.get("backend_type") or data.get("provider", "openai")
-    )
+    # Raw (un-normalized) backend_type declaration — ``anthropic`` here is a
+    # legacy signal that the preset was targeting Anthropic direct, which
+    # now resolves to the built-in ``anthropic`` provider (backend_type=openai).
+    raw_backend_type = data.get("backend_type") or data.get("provider", "openai")
+    backend_type = _normalize_backend_type(raw_backend_type)
     base_url = data.get("base_url", "")
     api_key_env = data.get("api_key_env", "")
+
     if backend_type == "codex":
         return "codex"
-    if backend_type == "anthropic":
+    if raw_backend_type == "anthropic" or "api.anthropic.com" in base_url:
         return "anthropic"
     if "openrouter.ai" in base_url:
         return "openrouter"
@@ -160,9 +201,6 @@ def load_backends() -> dict[str, LLMBackend]:
             if isinstance(bdata, dict):
                 backends[name] = LLMBackend.from_dict(name, bdata)
 
-    # Legacy fallback: old profiles stored base_url/api_key_env inline on each
-    # preset. Reconstruct synthetic providers from any unseen (base_url,
-    # api_key_env, backend_type) tuple so those presets keep working.
     legacy = data.get("profiles", {})
     if isinstance(legacy, dict):
         for name, pdata in legacy.items():
@@ -223,14 +261,21 @@ def _serialize_user_data(
     if presets:
         serialized = {name: preset.to_dict() for name, preset in presets.items()}
         data["presets"] = serialized
-        # Keep a ``profiles`` mirror for legacy tooling that reads the old key.
         data["profiles"] = serialized
     return data
 
 
 def save_backend(backend: LLMBackend) -> None:
-    """Persist a user-defined provider."""
-    if backend.backend_type not in {"openai", "codex", "anthropic"}:
+    """Persist a user-defined provider.
+
+    ``backend_type`` values are ``openai`` (any OpenAI-compatible
+    ``/chat/completions`` endpoint, including Anthropic's compat layer and
+    Gemini's) and ``codex`` (ChatGPT-subscription OAuth). Legacy
+    ``anthropic`` / ``codex-oauth`` values are normalized at read time and
+    should not be supplied here.
+    """
+    backend.backend_type = _normalize_backend_type(backend.backend_type)
+    if backend.backend_type not in {"openai", "codex"}:
         raise ValueError(f"Unsupported backend_type: {backend.backend_type}")
     data = _load_yaml()
     backends = load_backends()
@@ -256,25 +301,181 @@ def delete_backend(name: str) -> bool:
     return True
 
 
+def parse_variation_selector(selector: str) -> tuple[str, dict[str, str]]:
+    """Parse ``preset@group=option,group2=option2`` into name + selections."""
+    if "@" not in selector:
+        return selector, {}
+
+    base_name, raw_selector = selector.split("@", 1)
+    if not base_name:
+        raise ValueError("Variation selector is missing a preset/model name before '@'")
+    if not raw_selector.strip():
+        raise ValueError(f"Variation selector for '{base_name}' is empty")
+
+    selections: dict[str, str] = {}
+    for raw_part in raw_selector.split(","):
+        part = raw_part.strip()
+        if not part:
+            raise ValueError(f"Invalid empty variation selection in '{selector}'")
+        if "=" in part:
+            group, option = part.split("=", 1)
+            group = group.strip()
+            option = option.strip()
+            if not group or not option:
+                raise ValueError(
+                    f"Invalid variation selection '{part}' in '{selector}'"
+                )
+            selections[group] = option
+        else:
+            if _SHORTHAND_SELECTION_KEY in selections:
+                raise ValueError(
+                    "Variation shorthand may only specify one option without a group"
+                )
+            selections[_SHORTHAND_SELECTION_KEY] = part
+    return base_name, selections
+
+
+def _validate_patch_target(path: str) -> None:
+    root = path.split(".", 1)[0]
+    if root not in _ALLOWED_VARIATION_ROOTS:
+        raise ValueError(
+            f"Unsupported variation patch target '{path}'. "
+            f"Allowed roots: {', '.join(sorted(_ALLOWED_VARIATION_ROOTS))}"
+        )
+
+
+def _set_dotted_path(target: dict[str, Any], path: str, value: Any) -> None:
+    parts = path.split(".")
+    cur = target
+    for part in parts[:-1]:
+        existing = cur.get(part)
+        if existing is None:
+            existing = {}
+            cur[part] = existing
+        if not isinstance(existing, dict):
+            raise ValueError(
+                f"Cannot apply variation patch '{path}': '{part}' is not an object"
+            )
+        cur = existing
+    cur[parts[-1]] = deepcopy(value)
+
+
+def apply_patch_map(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+    result = deepcopy(base)
+    for path, value in (patch or {}).items():
+        _validate_patch_target(path)
+        _set_dotted_path(result, path, value)
+    return result
+
+
+def normalize_variation_selections(
+    selection_map: dict[str, str],
+    preset: LLMPreset,
+) -> dict[str, str]:
+    """Resolve shorthand selections and validate groups/options."""
+    groups = preset.variation_groups or {}
+    selections = dict(selection_map or {})
+    normalized: dict[str, str] = {}
+
+    shorthand = selections.pop(_SHORTHAND_SELECTION_KEY, "")
+    if shorthand:
+        matching_groups = [
+            group_name
+            for group_name, options in groups.items()
+            if shorthand in (options or {})
+        ]
+        if not matching_groups:
+            raise ValueError(
+                f"Unknown variation option '{shorthand}' for preset '{preset.name}'"
+            )
+        if len(matching_groups) > 1:
+            raise ValueError(
+                f"Ambiguous variation option '{shorthand}' for preset '{preset.name}'. "
+                f"Specify one of: {', '.join(f'{g}={shorthand}' for g in matching_groups)}"
+            )
+        normalized[matching_groups[0]] = shorthand
+
+    for group_name, option_name in selections.items():
+        if group_name not in groups:
+            raise ValueError(
+                f"Unknown variation group '{group_name}' for preset '{preset.name}'"
+            )
+        group_options = groups[group_name] or {}
+        if option_name not in group_options:
+            raise ValueError(
+                f"Unknown variation option '{option_name}' in group '{group_name}' "
+                f"for preset '{preset.name}'"
+            )
+        normalized[group_name] = option_name
+
+    return normalized
+
+
+def apply_variation_groups(
+    base: dict[str, Any],
+    variation_groups: dict[str, dict[str, dict[str, Any]]],
+    selections: dict[str, str],
+) -> dict[str, Any]:
+    result = deepcopy(base)
+    written_paths: dict[str, tuple[str, str]] = {}
+
+    for group_name, option_name in selections.items():
+        patch = ((variation_groups or {}).get(group_name) or {}).get(option_name) or {}
+        for path in patch:
+            _validate_patch_target(path)
+            prior = written_paths.get(path)
+            if prior is not None:
+                prev_group, prev_option = prior
+                raise ValueError(
+                    f"Variation selections conflict on '{path}': "
+                    f"{prev_group}={prev_option} and {group_name}={option_name}"
+                )
+            written_paths[path] = (group_name, option_name)
+        result = apply_patch_map(result, patch)
+
+    return result
+
+
+def _deep_merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged = deepcopy(base)
+    for key, value in (override or {}).items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_dicts(merged[key], value)
+        else:
+            merged[key] = deepcopy(value)
+    return merged
+
+
 def _resolve_preset(
-    preset: LLMPreset, backends: dict[str, LLMBackend]
+    preset: LLMPreset,
+    backends: dict[str, LLMBackend],
+    selections: dict[str, str] | None = None,
 ) -> LLMProfile | None:
     provider = backends.get(preset.provider) if preset.provider else None
     if preset.provider and provider is None:
         return None
+
+    normalized = normalize_variation_selections(selections or {}, preset)
+    resolved_dict = apply_variation_groups(
+        preset.to_dict(), preset.variation_groups, normalized
+    )
+    resolved_preset = LLMPreset.from_dict(preset.name, resolved_dict)
+    resolved_preset.provider = preset.provider
+
     return LLMProfile(
-        name=preset.name,
-        model=preset.model,
-        provider=preset.provider,
+        name=resolved_preset.name,
+        model=resolved_preset.model,
+        provider=resolved_preset.provider,
         backend_type=provider.backend_type if provider else "",
-        max_context=preset.max_context,
-        max_output=preset.max_output,
+        max_context=resolved_preset.max_context,
+        max_output=resolved_preset.max_output,
         base_url=provider.base_url if provider else "",
         api_key_env=provider.api_key_env if provider else "",
-        temperature=preset.temperature,
-        reasoning_effort=preset.reasoning_effort,
-        service_tier=preset.service_tier,
-        extra_body=preset.extra_body,
+        temperature=resolved_preset.temperature,
+        reasoning_effort=resolved_preset.reasoning_effort,
+        service_tier=resolved_preset.service_tier,
+        extra_body=deepcopy(resolved_preset.extra_body),
+        selected_variations=normalized,
     )
 
 
@@ -313,31 +514,42 @@ def set_default_model(model_name: str) -> None:
     _save_yaml(_serialize_user_data(load_presets(), load_backends(), model_name))
 
 
-def save_profile(profile: LLMProfile) -> None:
+def save_profile(profile: LLMProfile | LLMPreset) -> None:
     """Persist a user-defined preset.
 
-    `LLMProfile` doubles as the user-facing input form — only a handful of
-    fields (name, model, provider, params) flow into the saved preset; the
-    rest (backend_type, base_url, api_key_env) come from the provider.
+    When called with an :class:`LLMProfile` (which has no ``variation_groups``
+    field of its own), any ``variation_groups`` already defined on the existing
+    preset of the same name are preserved — otherwise round-tripping a profile
+    through the API would silently erase its variation set.
     """
-    if not profile.provider:
+    if isinstance(profile, LLMPreset):
+        preset = profile
+    else:
+        existing_preset = load_presets().get(profile.name)
+        preset = LLMPreset(
+            name=profile.name,
+            model=profile.model,
+            provider=profile.provider,
+            max_context=profile.max_context,
+            max_output=profile.max_output,
+            temperature=profile.temperature,
+            reasoning_effort=profile.reasoning_effort,
+            service_tier=profile.service_tier,
+            extra_body=profile.extra_body,
+            variation_groups=(
+                deepcopy(existing_preset.variation_groups) if existing_preset else {}
+            ),
+        )
+
+    if not preset.provider:
         raise ValueError("Preset provider is required")
+
     data = _load_yaml()
     backends = load_backends()
-    if profile.provider not in backends:
-        raise ValueError(f"Provider not found: {profile.provider}")
+    if preset.provider not in backends:
+        raise ValueError(f"Provider not found: {preset.provider}")
     presets = load_presets()
-    presets[profile.name] = LLMPreset(
-        name=profile.name,
-        model=profile.model,
-        provider=profile.provider,
-        max_context=profile.max_context,
-        max_output=profile.max_output,
-        temperature=profile.temperature,
-        reasoning_effort=profile.reasoning_effort,
-        service_tier=profile.service_tier,
-        extra_body=profile.extra_body,
-    )
+    presets[preset.name] = preset
     _save_yaml(_serialize_user_data(presets, backends, data.get("default_model", "")))
 
 
@@ -353,31 +565,84 @@ def delete_profile(name: str) -> bool:
     return True
 
 
-def _builtin_preset_to_runtime(name: str, data: dict[str, Any]) -> LLMProfile | None:
-    """Turn a built-in preset dict into a resolved ``LLMProfile``."""
+def _builtin_preset_to_runtime(
+    name: str,
+    data: dict[str, Any],
+    selections: dict[str, str] | None = None,
+) -> LLMProfile | None:
     preset = _preset_from_data(name, data)
-    return _resolve_preset(preset, load_backends())
+    return _resolve_preset(preset, load_backends(), selections)
+
+
+def _all_preset_definitions() -> dict[str, LLMPreset]:
+    presets = load_presets()
+    for name, data in get_all_presets().items():
+        if name not in presets:
+            presets[name] = _preset_from_data(name, data)
+    return presets
+
+
+def _get_preset_definition(name: str) -> LLMPreset | None:
+    base_name, _ = parse_variation_selector(name)
+    canonical = ALIASES.get(base_name, base_name)
+
+    user_presets = load_presets()
+    if canonical in user_presets:
+        return user_presets[canonical]
+    if base_name in user_presets:
+        return user_presets[base_name]
+
+    presets = get_all_presets()
+    if canonical in presets:
+        return _preset_from_data(canonical, presets[canonical])
+    if base_name in presets:
+        return _preset_from_data(base_name, presets[base_name])
+    return None
+
+
+def _get_profile_from_selector(
+    name: str,
+    extra_selections: dict[str, str] | None = None,
+) -> LLMProfile | None:
+    base_name, selector_selections = parse_variation_selector(name)
+    preset = _get_preset_definition(base_name)
+    if preset is None:
+        return None
+    merged_selections = dict(selector_selections)
+    merged_selections.update(extra_selections or {})
+    return _resolve_preset(preset, load_backends(), merged_selections)
+
+
+def _find_profile_by_model(
+    model: str,
+    provider: str = "",
+    selections: dict[str, str] | None = None,
+) -> LLMProfile | None:
+    matches = []
+    for preset in _all_preset_definitions().values():
+        if preset.model != model:
+            continue
+        if provider and preset.provider != provider:
+            continue
+        matches.append(preset)
+
+    if not matches:
+        return None
+    if len(matches) > 1 and not provider:
+        providers = sorted({preset.provider or "(none)" for preset in matches})
+        raise ValueError(
+            f"Model '{model}' is ambiguous across multiple providers: {', '.join(providers)}. "
+            "Set controller.provider or use a preset name."
+        )
+    return _resolve_preset(matches[0], load_backends(), selections)
 
 
 def get_profile(name: str) -> LLMProfile | None:
-    canonical = ALIASES.get(name, name)
-    profiles = load_profiles()
-    if canonical in profiles:
-        return profiles[canonical]
-    presets = get_all_presets()
-    if canonical in presets:
-        return _builtin_preset_to_runtime(canonical, presets[canonical])
-    if name in presets:
-        return _builtin_preset_to_runtime(name, presets[name])
-    return None
+    return _get_profile_from_selector(name)
 
 
 def get_preset(name: str) -> LLMProfile | None:
-    canonical = ALIASES.get(name, name)
-    presets = get_all_presets()
-    if canonical in presets:
-        return _builtin_preset_to_runtime(canonical, presets[canonical])
-    return None
+    return _get_profile_from_selector(name)
 
 
 def resolve_controller_llm(
@@ -385,14 +650,34 @@ def resolve_controller_llm(
     llm_override: str | None = None,
 ) -> LLMProfile | None:
     name = llm_override or controller_config.get("llm")
-    if not name and not controller_config.get("model", ""):
-        name = get_default_model()
-    if not name:
-        return None
-    profile = get_profile(name)
+    raw_model = controller_config.get("model", "")
+    provider = controller_config.get("provider", "") or ""
+
+    selection_overrides = dict(controller_config.get("variation_selections") or {})
+    legacy_variation = controller_config.get("variation", "")
+    if legacy_variation and _SHORTHAND_SELECTION_KEY not in selection_overrides:
+        selection_overrides[_SHORTHAND_SELECTION_KEY] = legacy_variation
+
+    profile: LLMProfile | None = None
+    if name:
+        profile = _get_profile_from_selector(name, selection_overrides)
+    elif raw_model:
+        model_name, model_selector_selections = parse_variation_selector(raw_model)
+        if model_name:
+            merged_selections = dict(model_selector_selections)
+            merged_selections.update(selection_overrides)
+            profile = _find_profile_by_model(model_name, provider, merged_selections)
+
+    if profile is None and not name and not raw_model:
+        default_name = get_default_model()
+        if default_name:
+            profile = _get_profile_from_selector(default_name, selection_overrides)
+
     if not profile:
-        logger.warning("LLM profile not found", profile_name=name)
+        if name or raw_model:
+            logger.warning("LLM profile not found", profile_name=name or raw_model)
         return None
+
     for key in ("temperature", "reasoning_effort", "service_tier", "max_tokens"):
         if key not in controller_config:
             continue
@@ -403,6 +688,11 @@ def resolve_controller_llm(
             profile.max_output = value
         else:
             setattr(profile, key, value)
+
+    extra_body = controller_config.get("extra_body") or {}
+    if extra_body:
+        profile.extra_body = _deep_merge_dicts(profile.extra_body or {}, extra_body)
+
     return profile
 
 
@@ -440,13 +730,16 @@ def _is_available(provider_name: str) -> bool:
 def list_all() -> list[dict[str, Any]]:
     """List every user + built-in preset resolved against current providers."""
     result: list[dict[str, Any]] = []
+    definitions = _all_preset_definitions()
 
-    def _entry(profile: LLMProfile, source: str) -> dict[str, Any]:
+    def _entry(
+        profile: LLMProfile, preset: LLMPreset | None, source: str
+    ) -> dict[str, Any]:
         return {
             "name": profile.name,
             "model": profile.model,
             "provider": profile.provider,
-            "login_provider": profile.provider,  # backward-compat alias
+            "login_provider": profile.provider,
             "backend_type": profile.backend_type,
             "available": _is_available(profile.provider),
             "source": source,
@@ -457,10 +750,15 @@ def list_all() -> list[dict[str, Any]]:
             "service_tier": profile.service_tier or "",
             "extra_body": profile.extra_body or {},
             "base_url": profile.base_url or "",
+            "variation_groups": deepcopy(preset.variation_groups if preset else {}),
+            "selected_variations": dict(profile.selected_variations or {}),
         }
 
-    for name, profile in load_profiles().items():
-        result.append(_entry(profile, "user"))
+    for name, preset in load_presets().items():
+        profile = _resolve_preset(preset, load_backends())
+        if profile is not None:
+            result.append(_entry(profile, definitions.get(name), "user"))
+
     user_names = {entry["name"] for entry in result}
     for name, data in get_all_presets().items():
         if name in user_names:
@@ -468,7 +766,8 @@ def list_all() -> list[dict[str, Any]]:
         profile = _builtin_preset_to_runtime(name, data)
         if profile is None:
             continue
-        result.append(_entry(profile, "preset"))
+        result.append(_entry(profile, definitions.get(name), "preset"))
+
     default = get_default_model()
     for entry in result:
         entry["is_default"] = entry["name"] == default or entry["model"] == default

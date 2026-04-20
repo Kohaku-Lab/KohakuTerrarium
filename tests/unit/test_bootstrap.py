@@ -196,7 +196,9 @@ class TestBootstrapLLM:
             api_key_env="TEST_KEY_FOR_BOOTSTRAP",
             base_url="https://example.com/v1",
             model="gpt-4o",
+            provider="custom-inline",
             temperature=0.5,
+            reasoning_effort="high",
             max_tokens=2048,
         )
 
@@ -233,6 +235,49 @@ class TestBootstrapLLM:
             os.environ.pop("NONEXISTENT_KEY_BOOTSTRAP_TEST_XYZ", None)
             with pytest.raises(ValueError, match="API key not found"):
                 create_llm_provider(config)
+
+    @patch("kohakuterrarium.bootstrap.llm.resolve_controller_llm")
+    def test_extract_controller_data_does_not_send_agent_defaults(self, mock_resolve):
+        from kohakuterrarium.bootstrap.llm import create_llm_provider
+
+        mock_resolve.return_value = None
+        config = AgentConfig(name="test", llm_profile="gpt-5.4")
+
+        with pytest.raises(ValueError, match="No LLM model configured"):
+            create_llm_provider(config)
+
+        controller_data = mock_resolve.call_args.args[0]
+        assert controller_data == {"llm": "gpt-5.4"}
+
+    @patch("kohakuterrarium.bootstrap.llm.resolve_controller_llm")
+    def test_extract_controller_data_passes_extra_body_and_meaningful_overrides(
+        self, mock_resolve
+    ):
+        from kohakuterrarium.bootstrap.llm import create_llm_provider
+        from kohakuterrarium.llm.profile_types import LLMProfile
+
+        mock_resolve.return_value = LLMProfile(
+            name="x", model="gpt-5.4", provider="openai"
+        )
+        config = AgentConfig(
+            name="test",
+            llm_profile="gpt-5.4",
+            reasoning_effort="high",
+            extra_body={"reasoning": {"effort": "low"}},
+            max_tokens=4096,
+        )
+
+        with patch(
+            "kohakuterrarium.bootstrap.llm._create_from_profile",
+            return_value=MagicMock(),
+        ):
+            create_llm_provider(config)
+
+        controller_data = mock_resolve.call_args.args[0]
+        assert controller_data["llm"] == "gpt-5.4"
+        assert controller_data["reasoning_effort"] == "high"
+        assert controller_data["max_tokens"] == 4096
+        assert controller_data["extra_body"] == {"reasoning": {"effort": "low"}}
 
 
 # ---------------------------------------------------------------------------
