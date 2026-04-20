@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <strong>English</strong> &nbsp;·&nbsp; <a href="README.zh.md">繁體中文</a>
+  <strong>English</strong> &nbsp;·&nbsp; <a href="README.zh.md">繁體中文</a> &nbsp;·&nbsp; <a href="README.zh-CN.md">简体中文</a>
 </p>
 
 ---
