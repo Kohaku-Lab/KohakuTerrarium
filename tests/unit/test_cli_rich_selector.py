@@ -552,6 +552,140 @@ class TestConcurrentShow:
         assert await first is True
 
 
+# ── Viewport scrolling ─────────────────────────────────────────────────
+
+
+def _many_options(n: int) -> list[dict]:
+    """Build ``n`` dummy options: opt00, opt01, …"""
+    return [{"value": f"opt{i:02d}", "label": f"opt{i:02d}"} for i in range(n)]
+
+
+class TestViewport:
+    """Long option lists scroll within the overlay via ``_viewport_start``."""
+
+    async def test_short_list_never_scrolls(self):
+        overlay = SelectorOverlay()
+        opts = _many_options(3)
+        task = asyncio.create_task(overlay.show_select("Pick", opts, "", app=None))
+        await asyncio.sleep(0)
+
+        assert overlay._viewport_start == 0
+        start, end = overlay._viewport_range()
+        assert (start, end) == (0, 3)
+
+        _press(overlay, "escape")
+        await task
+
+    async def test_long_list_caps_visible_rows(self):
+        from kohakuterrarium.builtins.cli_rich.selector import _MAX_VISIBLE_OPTIONS
+
+        overlay = SelectorOverlay()
+        opts = _many_options(_MAX_VISIBLE_OPTIONS + 5)
+        task = asyncio.create_task(overlay.show_select("Pick", opts, "", app=None))
+        await asyncio.sleep(0)
+
+        start, end = overlay._viewport_range()
+        assert end - start == _MAX_VISIBLE_OPTIONS
+
+        _press(overlay, "escape")
+        await task
+
+    async def test_down_scrolls_viewport_when_past_cap(self):
+        from kohakuterrarium.builtins.cli_rich.selector import _MAX_VISIBLE_OPTIONS
+
+        overlay = SelectorOverlay()
+        opts = _many_options(_MAX_VISIBLE_OPTIONS + 3)
+        task = asyncio.create_task(overlay.show_select("Pick", opts, "", app=None))
+        await asyncio.sleep(0)
+
+        # Move past the cap; viewport should slide down.
+        for _ in range(_MAX_VISIBLE_OPTIONS + 1):
+            _press(overlay, "down")
+        assert overlay._highlight == _MAX_VISIBLE_OPTIONS + 1
+        start, end = overlay._viewport_range()
+        assert start <= overlay._highlight < end
+
+        _press(overlay, "escape")
+        await task
+
+    async def test_up_scrolls_viewport_backwards(self):
+        from kohakuterrarium.builtins.cli_rich.selector import _MAX_VISIBLE_OPTIONS
+
+        overlay = SelectorOverlay()
+        opts = _many_options(_MAX_VISIBLE_OPTIONS + 5)
+        task = asyncio.create_task(overlay.show_select("Pick", opts, "", app=None))
+        await asyncio.sleep(0)
+
+        # Jump to the end, then walk back to the top.
+        _press(overlay, "end")
+        assert overlay._highlight == _MAX_VISIBLE_OPTIONS + 4
+        last_start, _ = overlay._viewport_range()
+        assert last_start > 0  # scrolled down
+
+        _press(overlay, "home")
+        assert overlay._highlight == 0
+        start, _ = overlay._viewport_range()
+        assert start == 0  # scrolled back to top
+
+        _press(overlay, "escape")
+        await task
+
+    async def test_scroll_indicator_strings_in_render(self):
+        from kohakuterrarium.builtins.cli_rich.selector import _MAX_VISIBLE_OPTIONS
+
+        overlay = SelectorOverlay()
+        opts = _many_options(_MAX_VISIBLE_OPTIONS + 4)
+        task = asyncio.create_task(overlay.show_select("Pick", opts, "", app=None))
+        await asyncio.sleep(0)
+
+        # At the top: only "▼ N more below" should appear.
+        joined = "".join(text for _, text in overlay._render_select())
+        assert "▼" in joined
+        assert "more below" in joined
+        assert "▲" not in joined
+
+        # Scroll past the last visible row: both indicators appear.
+        for _ in range(_MAX_VISIBLE_OPTIONS):
+            _press(overlay, "down")
+        joined = "".join(text for _, text in overlay._render_select())
+        assert "▲" in joined
+        assert "more above" in joined
+        assert "▼" in joined
+
+        # Jump to the end: only "▲ N more above" remains.
+        _press(overlay, "end")
+        joined = "".join(text for _, text in overlay._render_select())
+        assert "▲" in joined
+        assert "▼" not in joined
+
+        _press(overlay, "escape")
+        await task
+
+    async def test_filter_resets_viewport(self):
+        from kohakuterrarium.builtins.cli_rich.selector import _MAX_VISIBLE_OPTIONS
+
+        overlay = SelectorOverlay()
+        opts = _many_options(_MAX_VISIBLE_OPTIONS + 5)
+        task = asyncio.create_task(overlay.show_select("Pick", opts, "", app=None))
+        await asyncio.sleep(0)
+
+        _press(overlay, "end")
+        assert overlay._viewport_start > 0
+
+        # Filter to a short match → viewport resets.
+        _press(overlay, "o")  # every option contains "opt"
+        _press(overlay, "p")
+        _press(overlay, "t")
+        _press(overlay, "0")
+        _press(overlay, "0")
+        assert overlay._filtered[0]["value"] == "opt00"
+        assert len(overlay._filtered) == 1
+        assert overlay._viewport_start == 0
+
+        _press(overlay, "escape")
+        await task
+
+
 # ── Rendering sanity ───────────────────────────────────────────────────
 
 
@@ -580,7 +714,7 @@ class TestRendering:
         fragments = overlay._render_select()
         joined = "".join(text for _, text in fragments)
         assert "Switch Model" in joined
-        assert "search" in joined
+        assert "›" in joined  # search arrow lives in the compact header
         assert "type to filter" in joined
         assert "opus" in joined
         assert "sonnet" in joined
@@ -598,7 +732,9 @@ class TestRendering:
         _press(overlay, "a")
         joined = "".join(text for _, text in overlay._render_select())
         assert "type to filter" not in joined
-        assert "  search " in joined
+        # Header remains: "  Pick  › a▏  1/2"
+        assert "› " in joined
+        assert "a" in joined  # the typed query
 
         _press(overlay, "escape")
         await task

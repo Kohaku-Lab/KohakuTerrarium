@@ -42,6 +42,11 @@ _COL_MODEL = 26
 _COL_PROVIDER = 12
 _COL_CONTEXT = 6
 
+# Cap the option viewport so a long model list doesn't inflate the Float
+# past the terminal height. The overlay scrolls within this window using
+# ``_viewport_start`` + ``▲ / ▼`` scroll indicators.
+_MAX_VISIBLE_OPTIONS = 8
+
 
 # Pointer-led highlight: calm in the terminal, no full-width reverse bar.
 SELECTOR_STYLES: dict[str, str] = {
@@ -102,6 +107,7 @@ class SelectorOverlay:
         self._query: str = ""
         self._filtered: list[dict[str, Any]] = []
         self._highlight: int = 0
+        self._viewport_start: int = 0
         self._future: asyncio.Future[Any] | None = None
         self._saved_focus: Any | None = None
 
@@ -110,10 +116,13 @@ class SelectorOverlay:
             focusable=True,
             show_cursor=False,
         )
+        # ``min=3`` keeps the floor at a header + one option + hint so the
+        # Float still fits when the user runs with a tight terminal; ``max``
+        # caps the overlay at header + 8 options + 2 scroll hints + hint.
         self._select_window = Window(
             content=self._select_control,
             width=Dimension(min=52, max=96, preferred=76),
-            height=Dimension(min=5),
+            height=Dimension(min=3, max=_MAX_VISIBLE_OPTIONS + 4),
             dont_extend_height=True,
             wrap_lines=False,
             always_hide_cursor=True,
@@ -213,6 +222,8 @@ class SelectorOverlay:
         self._query = ""
         self._filtered = list(options)
         self._highlight = self._initial_highlight(options, current)
+        self._viewport_start = 0
+        self._ensure_highlight_visible()
         self._future = asyncio.get_event_loop().create_future()
 
         self._claim_focus(app)
@@ -265,6 +276,7 @@ class SelectorOverlay:
         self._query = ""
         self._filtered = []
         self._highlight = 0
+        self._viewport_start = 0
         self._future = None
 
     def _claim_focus(self, app: Application | None) -> None:
@@ -317,47 +329,77 @@ class SelectorOverlay:
         ]
         if not self._filtered:
             self._highlight = 0
+            self._viewport_start = 0
             return
         if self._highlight >= len(self._filtered):
             self._highlight = len(self._filtered) - 1
         if self._highlight < 0:
             self._highlight = 0
+        self._viewport_start = 0
+        self._ensure_highlight_visible()
+
+    # ── Viewport scrolling ──
+
+    def _viewport_range(self) -> tuple[int, int]:
+        """Return ``(start, end)`` indices to render, honouring the cap."""
+        total = len(self._filtered)
+        if total <= _MAX_VISIBLE_OPTIONS:
+            return 0, total
+        start = max(0, min(self._viewport_start, total - _MAX_VISIBLE_OPTIONS))
+        return start, start + _MAX_VISIBLE_OPTIONS
+
+    def _ensure_highlight_visible(self) -> None:
+        """Scroll the viewport so ``_highlight`` is inside the visible slice."""
+        total = len(self._filtered)
+        if total <= _MAX_VISIBLE_OPTIONS:
+            self._viewport_start = 0
+            return
+        if self._highlight < self._viewport_start:
+            self._viewport_start = self._highlight
+        elif self._highlight >= self._viewport_start + _MAX_VISIBLE_OPTIONS:
+            self._viewport_start = self._highlight - _MAX_VISIBLE_OPTIONS + 1
+        # Clamp to valid range in case ``_filtered`` shrank.
+        self._viewport_start = max(
+            0, min(self._viewport_start, total - _MAX_VISIBLE_OPTIONS)
+        )
 
     # ── Rendering ──
 
     def _render_select(self) -> StyleAndTextTuples:
         lines: StyleAndTextTuples = []
-        self._render_title(lines)
-        self._render_search(lines)
+        self._render_header(lines)
         self._render_options(lines)
         self._render_hint(lines)
         return lines
 
-    def _render_title(self, lines: StyleAndTextTuples) -> None:
+    def _render_header(self, lines: StyleAndTextTuples) -> None:
+        """Compact one-row header: title ›  query   N/M count badge."""
         title = self._title or "Select"
-        lines.append(("class:selector.title", f"  {title}"))
-        total = len(self._options)
-        visible = len(self._filtered)
-        if self._query and visible < total:
-            lines.append(("class:selector.count", f"   {visible}/{total}"))
-        lines.append(("", "\n\n"))
-
-    def _render_search(self, lines: StyleAndTextTuples) -> None:
-        lines.append(("class:selector.search.label", "  search "))
+        lines.append(("class:selector.title", f"  {title}  "))
         lines.append(("class:selector.search.arrow", "› "))
         if self._query:
             lines.append(("class:selector.search.query", self._query))
             lines.append(("class:selector.search.cursor", "▏"))
         else:
             lines.append(("class:selector.search.placeholder", "type to filter…"))
-        lines.append(("", "\n\n"))
+        total = len(self._options)
+        visible = len(self._filtered)
+        if self._query and visible < total:
+            lines.append(("class:selector.count", f"  {visible}/{total}"))
+        lines.append(("", "\n"))
 
     def _render_options(self, lines: StyleAndTextTuples) -> None:
         if not self._filtered:
             lines.append(("class:selector.empty", "  no matches\n"))
             return
-        for i, opt in enumerate(self._filtered):
-            self._render_row(lines, opt, is_active=(i == self._highlight))
+        start, end = self._viewport_range()
+        if start > 0:
+            lines.append(("class:selector.hint", f"  ▲ {start} more above\n"))
+        for i in range(start, end):
+            self._render_row(lines, self._filtered[i], is_active=(i == self._highlight))
+        below = len(self._filtered) - end
+        if below > 0:
+            lines.append(("class:selector.hint", f"  ▼ {below} more below\n"))
 
     def _render_row(
         self,
@@ -415,15 +457,10 @@ class SelectorOverlay:
         lines.append(("", "\n"))
 
     def _render_hint(self, lines: StyleAndTextTuples) -> None:
-        lines.append(("", "\n"))
-        lines.append(
-            (
-                "class:selector.hint",
-                "  ↑↓ navigate   enter select   esc cancel",
-            )
-        )
+        hint = "  ↑↓ navigate   enter select   esc cancel"
         if self._query:
-            lines.append(("class:selector.hint", "   ^U clear   ⌫ backspace"))
+            hint += "   ^U clear"
+        lines.append(("class:selector.hint", hint))
 
     def _render_confirm(self) -> StyleAndTextTuples:
         message = self._message or "Confirm?"
@@ -445,6 +482,7 @@ class SelectorOverlay:
         def _up(event) -> None:
             if self._filtered:
                 self._highlight = (self._highlight - 1) % len(self._filtered)
+                self._ensure_highlight_visible()
                 event.app.invalidate()
 
         @kb.add("down", filter=in_select)
@@ -452,18 +490,21 @@ class SelectorOverlay:
         def _down(event) -> None:
             if self._filtered:
                 self._highlight = (self._highlight + 1) % len(self._filtered)
+                self._ensure_highlight_visible()
                 event.app.invalidate()
 
         @kb.add("home", filter=in_select)
         def _home(event) -> None:
             if self._filtered:
                 self._highlight = 0
+                self._ensure_highlight_visible()
                 event.app.invalidate()
 
         @kb.add("end", filter=in_select)
         def _end(event) -> None:
             if self._filtered:
                 self._highlight = len(self._filtered) - 1
+                self._ensure_highlight_visible()
                 event.app.invalidate()
 
         @kb.add("enter", filter=in_select)
