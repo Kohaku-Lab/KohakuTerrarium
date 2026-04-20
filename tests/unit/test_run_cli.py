@@ -313,6 +313,7 @@ def test_enhanced_keyboard_classic_single_byte_encoding_still_works():
     assert _parse_terminal_input("\t") == [("Keys.ControlI", "\t")]
     assert _parse_terminal_input("\x7f") == [("Keys.ControlH", "\x7f")]
 
+
 def test_rich_cli_enter_persists_submission_to_history(tmp_path, monkeypatch):
     """Issue #28: submissions must be appended to FileHistory so Up/Down can
     recall them later. The previous `_enter` handler called `buf.reset()`
