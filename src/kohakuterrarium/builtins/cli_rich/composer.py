@@ -150,7 +150,10 @@ class Composer:
                 buf.delete_before_cursor()
                 buf.insert_text("\n")
                 return
-            buf.reset()
+            # append_to_history=True persists the submission to FileHistory
+            # so Up/Down can recall it next session. Default bindings handle
+            # the arrow keys themselves (auto_up/auto_down).
+            buf.reset(append_to_history=True)
             if self._on_submit:
                 self._on_submit(text)
 

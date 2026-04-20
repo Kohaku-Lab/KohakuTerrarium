@@ -1,5 +1,7 @@
 import types
 
+from prompt_toolkit.history import FileHistory
+
 
 class _DummyVault:
     def __init__(self, *args, **kwargs):
@@ -223,3 +225,71 @@ def test_explicit_mode_without_custom_io_does_not_warn(monkeypatch, tmp_path, ca
     rc = run_cli.run_agent_cli(str(config_dir), log_level="INFO", io_mode="plain")
     assert rc == 0
     assert "Warning:" not in capsys.readouterr().out
+
+
+def test_rich_cli_enter_persists_submission_to_history(tmp_path, monkeypatch):
+    """Issue #28: submissions must be appended to FileHistory so Up/Down can
+    recall them later. The previous `_enter` handler called `buf.reset()`
+    without `append_to_history=True`, so nothing was ever persisted."""
+    from kohakuterrarium.builtins.cli_rich import composer as composer_mod
+
+    monkeypatch.setattr(composer_mod, "HISTORY_DIR", tmp_path)
+
+    submitted: list[str] = []
+    composer = composer_mod.Composer(
+        creature_name="test-creature",
+        on_submit=submitted.append,
+    )
+
+    buf = composer.text_area.buffer
+    buf.text = "first command"
+
+    enter_binding = next(
+        b for b in composer.key_bindings.bindings if b.handler.__name__ == "_enter"
+    )
+
+    class _Event:
+        def __init__(self, current_buffer):
+            self.current_buffer = current_buffer
+
+    enter_binding.handler(_Event(buf))
+
+    # Submission was forwarded and buffer cleared
+    assert submitted == ["first command"]
+    assert buf.text == ""
+
+    # And — the critical assertion — it was persisted to history on disk
+    history_file = tmp_path / "test-creature.txt"
+    assert history_file.exists()
+    persisted = FileHistory(str(history_file)).load_history_strings()
+    assert list(persisted) == ["first command"]
+
+
+async def test_rich_cli_enter_does_not_persist_line_continuation(tmp_path, monkeypatch):
+    """A trailing backslash extends the input to a new line — that partial
+    draft must NOT be appended to history. (Async because prompt_toolkit's
+    Buffer.insert_text schedules a completer task on the running loop.)"""
+    from kohakuterrarium.builtins.cli_rich import composer as composer_mod
+
+    monkeypatch.setattr(composer_mod, "HISTORY_DIR", tmp_path)
+
+    composer = composer_mod.Composer(creature_name="test-creature")
+    buf = composer.text_area.buffer
+    buf.text = "line1\\"
+    buf.cursor_position = len(buf.text)
+
+    enter_binding = next(
+        b for b in composer.key_bindings.bindings if b.handler.__name__ == "_enter"
+    )
+
+    class _Event:
+        def __init__(self, current_buffer):
+            self.current_buffer = current_buffer
+
+    enter_binding.handler(_Event(buf))
+
+    # Backslash dropped, newline inserted — draft lives on, nothing in history
+    assert buf.text == "line1\n"
+    history_file = tmp_path / "test-creature.txt"
+    if history_file.exists():
+        assert list(FileHistory(str(history_file)).load_history_strings()) == []
