@@ -63,7 +63,7 @@ from kohakuterrarium.builtins.cli_rich.runtime import (
     make_output,
     spawn,
 )
-from kohakuterrarium.builtins.cli_rich.selector import SelectorOverlay
+from kohakuterrarium.builtins.cli_rich.selector import SELECTOR_STYLES, SelectorOverlay
 from kohakuterrarium.builtins.cli_rich.slash import SlashHandler
 from kohakuterrarium.builtins.cli_rich.theme import COLOR_BANNER
 from kohakuterrarium.utils.logging import get_logger
@@ -238,17 +238,7 @@ class RichCLIApp:
             {
                 "input.frame": "ansicyan",
                 "input.frame.label": "ansicyan bold",
-                # Selector overlay — same blue as the TUI SelectionModal.
-                "selector.frame": "#0F52BA",
-                "selector.frame.label": "#0F52BA bold",
-                "selector.frame.confirm": "#D4920A",
-                "selector.frame.confirm.label": "#D4920A bold",
-                "selector.title": "bold",
-                "selector.hint": "#888888",
-                "selector.row": "",
-                "selector.row.highlight": "bg:#0F52BA #ffffff bold",
-                "selector.row.extra": "#888888",
-                "selector.row.extra.highlight": "bg:#0F52BA #d0d0d0",
+                **SELECTOR_STYLES,
             }
         )
 
