@@ -185,20 +185,41 @@ class SelectorOverlay:
     # ── Layout integration ──
 
     def build_floats(self) -> list[Float]:
-        """Return the Floats to attach to the app's FloatContainer."""
-        select_float = Float(
-            content=ConditionalContainer(
-                content=HSplit([self._select_frame]),
-                filter=Condition(lambda: self.is_select),
+        """Return Floats anchored at ``top=0`` so they land inside the
+        spacer RichCLIApp reserves above the composer while open."""
+        return [
+            Float(
+                content=ConditionalContainer(
+                    content=HSplit([self._select_frame]),
+                    filter=Condition(lambda: self.is_select),
+                ),
+                top=0,
             ),
-        )
-        confirm_float = Float(
-            content=ConditionalContainer(
-                content=HSplit([self._confirm_frame]),
-                filter=Condition(lambda: self.is_confirm),
+            Float(
+                content=ConditionalContainer(
+                    content=HSplit([self._confirm_frame]),
+                    filter=Condition(lambda: self.is_confirm),
+                ),
+                top=0,
             ),
-        )
-        return [select_float, confirm_float]
+        ]
+
+    def current_height(self) -> int:
+        """Rows the Float needs right now (0 while hidden).
+
+        RichCLIApp uses this to reserve space above the composer so the
+        Float has room to render in non-full-screen mode.
+        """
+        if not self.visible:
+            return 0
+        if self.is_select:
+            start, end = self._viewport_range()
+            options_rows = max(1, end - start)
+            scroll_up = 1 if start > 0 else 0
+            scroll_down = 1 if len(self._filtered) - end > 0 else 0
+            # header + scroll_up + options + scroll_down + hint + 2 border
+            return 1 + scroll_up + options_rows + scroll_down + 1 + 2
+        return 3 + 2  # confirm content + border
 
     # ── Async entry points ──
 

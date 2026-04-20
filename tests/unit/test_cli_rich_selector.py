@@ -661,6 +661,69 @@ class TestViewport:
         _press(overlay, "escape")
         await task
 
+    async def test_current_height_is_zero_when_hidden(self):
+        overlay = SelectorOverlay()
+        assert overlay.current_height() == 0
+
+    async def test_current_height_scales_with_option_count(self):
+        overlay = SelectorOverlay()
+        opts = _many_options(3)
+        task = asyncio.create_task(overlay.show_select("Pick", opts, "", app=None))
+        await asyncio.sleep(0)
+
+        # 3 options: header(1) + 3 options + hint(1) + border(2) = 7 rows.
+        assert overlay.current_height() == 7
+
+        _press(overlay, "escape")
+        await task
+
+    async def test_current_height_adds_scroll_indicator_rows(self):
+        from kohakuterrarium.builtins.cli_rich.selector import _MAX_VISIBLE_OPTIONS
+
+        overlay = SelectorOverlay()
+        opts = _many_options(_MAX_VISIBLE_OPTIONS + 4)
+        task = asyncio.create_task(overlay.show_select("Pick", opts, "", app=None))
+        await asyncio.sleep(0)
+
+        # At top: header + cap + "▼ N more" + hint + border = 1+8+1+1+2 = 13.
+        assert overlay.current_height() == 13
+
+        # Navigate to middle — both indicators present: +1.
+        for _ in range(_MAX_VISIBLE_OPTIONS):
+            _press(overlay, "down")
+        assert overlay.current_height() == 14
+
+        # Jump to end — only "▲ N more" indicator remains: back to 13.
+        _press(overlay, "end")
+        assert overlay.current_height() == 13
+
+        _press(overlay, "escape")
+        await task
+
+    async def test_current_height_for_confirm_mode(self):
+        overlay = SelectorOverlay()
+        task = asyncio.create_task(overlay.show_confirm("Sure?", app=None))
+        await asyncio.sleep(0)
+        assert overlay.current_height() == 5  # 3 content + 2 border
+
+        _press(overlay, "escape")
+        await task
+
+    async def test_current_height_no_matches_keeps_floor(self):
+        overlay = SelectorOverlay()
+        opts = [{"value": "a", "label": "a"}]
+        task = asyncio.create_task(overlay.show_select("Pick", opts, "", app=None))
+        await asyncio.sleep(0)
+
+        for ch in "zzz":
+            _press(overlay, ch)
+        # No matches collapses to options_rows=1, so 5 rows stays the floor
+        # — keeps header + empty message + hint + border visible.
+        assert overlay.current_height() == 5
+
+        _press(overlay, "escape")
+        await task
+
     async def test_filter_resets_viewport(self):
         from kohakuterrarium.builtins.cli_rich.selector import _MAX_VISIBLE_OPTIONS
 

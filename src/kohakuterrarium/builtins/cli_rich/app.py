@@ -215,16 +215,22 @@ class RichCLIApp:
             always_hide_cursor=True,
         )
 
-        base_container = HSplit(
-            [
-                status_container,
-                input_frame,
-                footer_window,
-            ]
+        # Reserve rows above the composer while the overlay is open.
+        # In non-full-screen mode the app only occupies content rows, so
+        # a Float at top=0 needs the HSplit to grow to hold it —
+        # without this the terminal-bottom case falls back to
+        # prompt_toolkit's "Window too small…".
+        overlay_spacer = Window(
+            height=self._overlay_spacer_height, always_hide_cursor=True
         )
 
-        # FloatContainer lets SelectorOverlay paint a modal popup above
-        # the normal layout without spawning a second Application.
+        base_container = HSplit(
+            [overlay_spacer, status_container, input_frame, footer_window]
+        )
+
+        # FloatContainer paints the overlay modal above the HSplit
+        # without spawning a second Application; Floats are top=0
+        # anchored so they land inside the spacer.
         root_container = FloatContainer(
             content=base_container,
             floats=self.selector.build_floats(),
@@ -272,6 +278,10 @@ class RichCLIApp:
         )
 
     # ── FormattedTextControl callbacks ──
+
+    def _overlay_spacer_height(self) -> Dimension:
+        """Exact spacer height (0 when hidden). Re-evaluated per paint."""
+        return Dimension.exact(self.selector.current_height())
 
     def _status_text(self):
         width = self._terminal_width()
