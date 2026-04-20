@@ -493,3 +493,8 @@ Near-term directions include more reliable terrarium flow, richer UI output / in
 - Derivative works must provide visible attribution with a link to this project.
 
 Copyright 2024-2026 Shih-Ying Yeh (KohakuBlueLeaf) and contributors.
+
+## Community
+QQ: 1097666427
+Discord: https://discord.gg/xWYrkyvJ2s
+Forum: https://linux.do/
