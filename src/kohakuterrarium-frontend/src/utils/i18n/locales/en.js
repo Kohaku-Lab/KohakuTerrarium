@@ -170,10 +170,17 @@ export default {
 
   "settings.languageHint": "Choose the interface language for the web UI.",
   "settings.tabs.keys": "API Keys",
-  "settings.tabs.models": "Custom Models",
+  "settings.tabs.providers": "Providers",
+  "settings.tabs.models": "Models",
   "settings.tabs.mcp": "MCP Servers",
   "settings.tabs.account": "Account",
   "settings.tabs.prefs": "Preferences",
+  "settings.providers.description":
+    "Providers define how to reach an LLM endpoint (backend type + base URL + auth env). Built-in providers cover the common cases; add a custom one for on-prem / proxy / non-standard endpoints.",
+  "settings.providers.builtInTitle": "Built-in providers",
+  "settings.providers.customTitle": "Custom providers",
+  "settings.providers.addCustom": "+ Add provider",
+  "settings.providers.noCustom": "No custom providers yet.",
   "settings.prefs.appearance": "Appearance",
   "settings.prefs.desktopZoom": "Desktop Zoom",
   "settings.prefs.mobileZoom": "Mobile Zoom",
