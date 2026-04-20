@@ -25,6 +25,10 @@ ALLOWLIST_600 = {
     "prompt/aggregator.py",
     # Pure data (model presets)
     "llm/presets.py",
+    # Rich CLI orchestrator — same shape as core/agent.py + manager.py
+    # (top-level class owning lifecycle + layout + many small delegation
+    # methods). Output-event handlers already extracted to AppOutputMixin.
+    "builtins/cli_rich/app.py",
 }
 
 
