@@ -44,12 +44,14 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.output import ColorDepth
 from prompt_toolkit.styles import Style
-from prompt_toolkit.widgets import Frame
 from rich.console import Console
 from rich.text import Text
 
+from kohakuterrarium.builtins.cli_rich.app_output import AppOutputMixin
 from kohakuterrarium.builtins.cli_rich.commit import ScrollbackCommitter, SessionReplay
 from kohakuterrarium.builtins.cli_rich.composer import Composer
+from kohakuterrarium.builtins.cli_rich.dialogs.model_picker import ModelPicker
+from kohakuterrarium.builtins.cli_rich.hint_bar import SlashHintBar
 from kohakuterrarium.builtins.cli_rich.live_region import LiveRegion
 from kohakuterrarium.builtins.cli_rich.runtime import (
     StderrToLogger,
@@ -63,6 +65,7 @@ from kohakuterrarium.builtins.user_commands import (
     get_builtin_user_command,
     list_builtin_user_commands,
 )
+from kohakuterrarium.llm.profiles import list_all as list_all_presets
 from kohakuterrarium.modules.user_command.base import (
     UserCommandContext,
     parse_slash_command,
@@ -74,12 +77,22 @@ logger = get_logger(__name__)
 DEFAULT_WIDTH = 100
 
 
-class RichCLIApp:
-    """Single-Application orchestrator for ``--mode cli``."""
+class RichCLIApp(AppOutputMixin):
+    """Single-Application orchestrator for ``--mode cli``.
+
+    Output events from the agent's OutputRouter (``on_text_chunk``,
+    ``on_tool_start``, …) are provided by ``AppOutputMixin`` — see
+    ``app_output.py`` — to keep this file focused on lifecycle + layout.
+    """
 
     def __init__(self, agent: Any):
         self.agent = agent
         self.live_region = LiveRegion()
+        self.hint_bar = SlashHintBar()
+        self.model_picker = ModelPicker(
+            load_presets=self._load_presets_for_picker,
+            on_apply=self._apply_model_selector,
+        )
         self._exit_requested = False
         self._processing = False
         self._command_registry: dict = {}
@@ -113,6 +126,8 @@ class RichCLIApp:
             on_clear_screen=self._on_clear_screen,
             on_backgroundify=self._on_backgroundify,
             on_cancel_bg=self._on_cancel_bg,
+            on_toggle_expand=self._on_toggle_expand,
+            picker_key_handler=self._picker_handle_key,
         )
 
         self.app: Application | None = None
@@ -192,14 +207,48 @@ class RichCLIApp:
         )
         status_container = ConditionalContainer(
             content=status_window,
-            filter=Condition(lambda: self.live_region.has_content),
+            filter=Condition(
+                lambda: self.model_picker.visible or self.live_region.has_content
+            ),
         )
 
-        # Bordered input box.
-        input_frame = Frame(
-            self.composer.text_area,
-            title="message",
-            style="class:input.frame",
+        # Input area — no more Frame(title="message"). User flagged the
+        # labelled box as "not what other CLIs look like" and pointed
+        # out the bottom separator mattered most. We replace the full
+        # Frame with a pair of dim horizontal rules (top + bottom) that
+        # bracket the textarea. The bottom rule doubles as the visual
+        # boundary between composer and footer, which the Frame used to
+        # provide via its lower edge.
+        input_top_rule = Window(
+            char="─",
+            height=Dimension.exact(1),
+            style="class:input.rule",
+        )
+        input_bottom_rule = Window(
+            char="─",
+            height=Dimension.exact(1),
+            style="class:input.rule",
+        )
+
+        # Slash-command hint bar — renders as a single line between the
+        # input frame and the footer. Visible only when the buffer starts
+        # with "/" and has matches. Think of it as the always-on version
+        # of the completion dropdown: even before you type a letter, the
+        # bar shows you what commands exist at all.
+        hint_control = FormattedTextControl(
+            text=self._hint_text,
+            focusable=False,
+            show_cursor=False,
+        )
+        hint_window = Window(
+            content=hint_control,
+            height=Dimension.exact(1),
+            wrap_lines=False,
+            always_hide_cursor=True,
+        )
+        hint_container = ConditionalContainer(
+            content=hint_window,
+            filter=Condition(self._hint_has_content),
         )
 
         # Footer (single line).
@@ -215,10 +264,20 @@ class RichCLIApp:
             always_hide_cursor=True,
         )
 
+        # Layout order top → bottom:
+        #   status (live region)
+        #   hint bar (slash-command hints, above the input per user ask)
+        #   top rule  ─────────────────────────
+        #   textarea
+        #   bottom rule  ──────────────────────  (separates input from footer)
+        #   footer
         root_container = HSplit(
             [
                 status_container,
-                input_frame,
+                hint_container,
+                input_top_rule,
+                self.composer.text_area,
+                input_bottom_rule,
                 footer_window,
             ]
         )
@@ -229,8 +288,7 @@ class RichCLIApp:
 
         style = Style.from_dict(
             {
-                "input.frame": "ansicyan",
-                "input.frame.label": "ansicyan bold",
+                "input.rule": "#555555",
             }
         )
 
@@ -252,13 +310,54 @@ class RichCLIApp:
 
     def _status_text(self):
         width = self._terminal_width()
+        # When the model picker is open, it owns the status area — the
+        # live region's normal content (streaming message, tools) is
+        # hidden until the picker closes, so all user attention is on
+        # the picker.
+        if self.model_picker.visible:
+            ansi = self.model_picker.render(width)
+            return ANSI(ansi) if ansi else ""
         ansi = self.live_region.to_ansi(width)
         if not ansi:
             return ""
         return ANSI(ansi)
 
+    def _hint_text(self):
+        width = self._terminal_width()
+        try:
+            buffer_text = self.composer.text_area.buffer.document.text
+        except Exception:
+            return ""
+        ansi = self.hint_bar.render(buffer_text, width)
+        return ANSI(ansi) if ansi else ""
+
+    def _hint_has_content(self) -> bool:
+        try:
+            buffer_text = self.composer.text_area.buffer.document.text
+        except Exception:
+            return False
+        if not self.hint_bar.is_active(buffer_text):
+            return False
+        return bool(self.hint_bar._matches(buffer_text[1:].lower()))
+
     def _footer_text(self):
         width = self._terminal_width()
+        # Sync the footer's cursor-position indicator from the composer's
+        # current Document. Cheap (document access is O(1)) and keeps the
+        # footer responsive to every keystroke without a separate hook.
+        try:
+            doc = self.composer.text_area.buffer.document
+            total_lines = doc.line_count
+            if total_lines >= 2:
+                self.live_region.footer.update_cursor(
+                    line=doc.cursor_position_row + 1,
+                    col=doc.cursor_position_col + 1,
+                    total_lines=total_lines,
+                )
+            else:
+                self.live_region.footer.update_cursor(0, 0, 0)
+        except Exception as e:
+            logger.debug("cursor pos update failed", error=str(e))
         ansi = self.live_region.footer_to_ansi(width)
         return ANSI(ansi) if ansi else ""
 
@@ -309,6 +408,14 @@ class RichCLIApp:
             finally:
                 self._processing = False
                 self.live_region.set_processing(False)
+                # Turn is over — close any tool-block sequence whose
+                # closing rule was deferred waiting for a next commit.
+                # Without this, a turn that ends on a tool call leaves
+                # the bottom ``═══`` rule un-emitted until something
+                # else commits (next user message, interrupt, etc.).
+                # User-visible symptom: "hanging" open tool box while
+                # the agent sits idle post-turn.
+                self.committer.flush_block_close()
                 self._invalidate()
 
         self._pending_task = spawn(_send())
@@ -323,10 +430,20 @@ class RichCLIApp:
                 registry[name] = cmd
         self.composer.set_command_registry(registry)
         self.composer.set_command_context(agent=self.agent)
+        self.hint_bar.set_registry(registry)
         self._command_registry = registry
 
     async def _handle_slash(self, text: str) -> None:
         name, args = parse_slash_command(text)
+
+        # Special path: `/model` with no args opens the interactive
+        # picker. A full selector string is still handled the standard
+        # way via the /model command's own execute().
+        if name == "model" and not args.strip():
+            self.model_picker.open()
+            self._invalidate()
+            return
+
         cmd = self._command_registry.get(name) or get_builtin_user_command(name)
         if cmd is None:
             self._commit_text(f"[red]Unknown command:[/red] /{name}")
@@ -354,156 +471,9 @@ class RichCLIApp:
             if self.app:
                 self.app.exit()
 
-    # ── Output module callbacks (called by RichCLIOutput) ──
-
-    def on_text_chunk(self, chunk: str) -> None:
-        if not chunk:
-            return
-        self.live_region.append_chunk(chunk)
-        self._invalidate()
-
-    def on_processing_start(self) -> None:
-        # Spacer line before the model's response. Tool calls / text
-        # commits inside the turn add no extra blank lines, so the whole
-        # turn reads as one block surrounded by exactly one blank line
-        # before and one after.
-        self._commit_blank_line()
-        self.live_region.start_message()
-        self._invalidate()
-
-    def on_processing_end(self) -> None:
-        committed = self.live_region.finish_message()
-        if committed is not None:
-            self._commit_renderable(committed)
-        # Spacer line after the model's response.
-        self._commit_blank_line()
-        self._invalidate()
-
-    def on_tool_start(
-        self,
-        job_id: str,
-        name: str,
-        args_preview: str = "",
-        kind: str = "tool",
-        parent_job_id: str = "",
-        background: bool = False,
-    ) -> None:
-        # Ordering rule:
-        #
-        # - **Direct (blocking) tools** — the controller WAITS for the tool
-        #   inside the same turn, then the model continues with post-tool
-        #   text. We flush the in-flight assistant message NOW so the
-        #   commit order in scrollback is: pre-text → tool → post-text.
-        #
-        # - **Background tools** — the controller does NOT wait. It
-        #   immediately feeds a "task promoted" placeholder back to the
-        #   LLM, which generates interim text in the same cycle. If we
-        #   flushed here, the pre-tool text and the interim text would
-        #   end up as TWO separate ◆ blocks. By keeping the assistant
-        #   message intact across a bg dispatch, the whole cycle commits
-        #   as one coherent ◆.
-        if not background:
-            self._flush_assistant_message()
-        self.live_region.add_tool(
-            job_id, name, args_preview, kind, parent_job_id=parent_job_id
-        )
-        if background:
-            # The block opens straight into the bg state. Commit a
-            # one-line "dispatched in background" notice immediately so
-            # the user has a clear marker of WHEN the bg job started —
-            # the matching result panel will commit later when the task
-            # actually completes.
-            self.live_region.promote_tool(job_id)
-            block = self.live_region.tool_blocks.get(job_id)
-            if block is not None and not parent_job_id:
-                self.committer.renderable(block.build_dispatch_notice())
-        self._invalidate()
-
-    def _flush_assistant_message(self) -> None:
-        """Commit the current assistant message (if any non-empty) to scrollback."""
-        msg = self.live_region.assistant_msg
-        if msg is None or msg.is_empty:
-            return
-        committed = self.live_region.finish_message()
-        if committed is not None:
-            self._commit_renderable(committed)
-
-    def on_tool_done(self, job_id: str, output: str = "", **metadata) -> None:
-        committed = self.live_region.update_tool_done(job_id, output, **metadata)
-        if committed is not None:
-            self._commit_renderable(committed)
-        self._invalidate()
-
-    def on_tool_error(self, job_id: str, error: str = "") -> None:
-        committed = self.live_region.update_tool_error(job_id, error)
-        if committed is not None:
-            self._commit_renderable(committed)
-        self._invalidate()
-
-    def on_tool_promoted(self, job_id: str) -> None:
-        self.live_region.promote_tool(job_id)
-        self._invalidate()
-
-    def on_job_cancelled(self, job_id: str, job_name: str = "") -> None:
-        committed = self.live_region.cancel_tool(job_id)
-        if committed is not None:
-            self._commit_renderable(committed)
-        self._invalidate()
-
-    def on_subagent_tool_start(
-        self, parent_id: str, tool_name: str, args_preview: str = ""
-    ) -> None:
-        self.live_region.add_subagent_tool(parent_id, tool_name, args_preview)
-        self._invalidate()
-
-    def on_subagent_tool_done(
-        self, parent_id: str, tool_name: str, output: str = ""
-    ) -> None:
-        self.live_region.update_subagent_tool_done(parent_id, tool_name, output)
-        self._invalidate()
-
-    def on_subagent_tool_error(
-        self, parent_id: str, tool_name: str, error: str = ""
-    ) -> None:
-        self.live_region.update_subagent_tool_error(parent_id, tool_name, error)
-        self._invalidate()
-
-    def on_subagent_tokens(
-        self, parent_id: str, prompt: int, completion: int, total: int
-    ) -> None:
-        self.live_region.update_subagent_tokens(parent_id, prompt, completion, total)
-        self._invalidate()
-
-    def on_token_update(self, prompt: int, completion: int, max_ctx: int = 0) -> None:
-        self.live_region.update_footer_tokens(prompt, completion, max_ctx)
-        self._invalidate()
-
-    def on_compact_start(self) -> None:
-        self.live_region.set_compacting(True)
-        self._invalidate()
-
-    def on_compact_end(self) -> None:
-        self.live_region.set_compacting(False)
-        self._invalidate()
-
-    def on_session_info(self, model: str = "", max_ctx: int = 0) -> None:
-        if model:
-            self.live_region.update_footer_model(model)
-        if max_ctx:
-            self.live_region.footer._max_context = max_ctx
-        self._invalidate()
-
-    def on_processing_error(self, error_type: str, error: str) -> None:
-        """Surface a processing error as a red notice in scrollback."""
-        self._flush_assistant_message()
-        self.committer.text(f"[red]✗ {error_type}:[/red] {error}")
-        self._invalidate()
-
-    def on_interrupt_notice(self, detail: str = "") -> None:
-        """Commit an 'interrupted' notice to scrollback."""
-        self._flush_assistant_message()
-        self.committer.text("[yellow]⚠ interrupted[/yellow]")
-        self._invalidate()
+    # Output event handlers (on_text_chunk, on_tool_start, etc.) live in
+    # ``AppOutputMixin`` (app_output.py). Kept separate so this file stays
+    # focused on lifecycle + layout.
 
     # ── Commit helpers ──
 
@@ -570,6 +540,39 @@ class RichCLIApp:
     def _on_exit(self) -> None:
         self._exit_requested = True
 
+    def _on_toggle_expand(self) -> None:
+        """Expand/collapse the most recent top-level tool block."""
+        if self.live_region.toggle_latest_tool_expand():
+            self._invalidate()
+
+    def _load_presets_for_picker(self) -> list[dict[str, Any]]:
+        """Load the list of presets for the model picker."""
+        try:
+            return list_all_presets()
+        except Exception as e:
+            logger.warning("Model picker: failed to load presets", error=str(e))
+            return []
+
+    def _apply_model_selector(self, selector: str) -> None:
+        """Apply a selector string chosen from the model picker.
+
+        Dispatches through the same ``/model <selector>`` path that
+        text-based invocation uses, so behaviour (validation, error
+        surfacing, notice-to-scrollback) is identical.
+        """
+        if not selector:
+            return
+        self._pending_task = spawn(self._handle_slash(f"/model {selector}"))
+
+    def _picker_handle_key(self, key: str) -> bool:
+        """Forward a key event to the model picker; return True if consumed."""
+        if not self.model_picker.visible:
+            return False
+        consumed = self.model_picker.handle_key(key)
+        if consumed:
+            self._invalidate()
+        return consumed
+
     def _on_clear_screen(self) -> None:
         # Send the standard "clear scrollback + screen" escape — handled
         # via the committer so it goes through run_in_terminal correctly.
@@ -585,13 +588,8 @@ class RichCLIApp:
         if model:
             banner.append(f" ({model})", style="dim")
         self._scroll_console.print(banner)
+        # One compact hint line. Full keymap lives behind /help.
         self._scroll_console.print(
-            Text(
-                "Type a message · /help · /exit · "
-                "Esc=interrupt · Ctrl+B=backgroundify · "
-                "Ctrl+X=cancel-bg · Ctrl+L=clear · Ctrl+D=quit · "
-                "Shift+Enter / Ctrl+Enter / Alt+Enter / Ctrl+J = newline",
-                style="dim",
-            )
+            Text("Type /help for shortcuts · Ctrl+D to quit", style="dim")
         )
         self._scroll_console.print()

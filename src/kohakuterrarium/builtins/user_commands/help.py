@@ -22,7 +22,6 @@ class HelpCommand(BaseUserCommand):
     ) -> UserCommandResult:
         registry = context.extra.get("command_registry", {})
 
-        # Plain text
         lines = ["Available commands:", ""]
         items = []
         for cmd in registry.values():
@@ -38,7 +37,44 @@ class HelpCommand(BaseUserCommand):
                     "layer": cmd.layer.value,
                 }
             )
-        lines.append("")
+
+        lines.extend(
+            [
+                "",
+                "Keyboard shortcuts:",
+                "",
+                "  Enter              Submit message",
+                "  Shift+Enter / Ctrl+Enter / Alt+Enter / Ctrl+J   Insert newline",
+                "  Backslash at EOL   Soft newline continuation on Enter",
+                "  Up / Down          Move in buffer (falls through to history at edges)",
+                "  Alt+P / Alt+N      Force prev / next in history",
+                "  Ctrl+R             Reverse-incremental history search",
+                "  Ctrl+A / Ctrl+E    Start / end of line",
+                "  Ctrl+W             Delete previous word",
+                "  Ctrl+K / Ctrl+U    Kill to end / start of line",
+                "  Ctrl+Y             Yank (paste kill-ring)",
+                "",
+                "  Esc                Interrupt the running agent",
+                "  Ctrl+C             Clear input, or Ctrl+C again to interrupt",
+                "  Ctrl+D             Quit",
+                "  Ctrl+L             Clear the screen",
+                "  Ctrl+O             Expand/collapse the most recent tool block",
+                "  Ctrl+B             Send the running tool to background",
+                "  Ctrl+X             Cancel the most recent backgrounded tool",
+                "",
+                "  /                  Open slash-command hint bar (try /model, /help, /exit)",
+                "  @file              (completer) insert a file reference",
+                "",
+                "Model picker (opens on `/model` with no args):",
+                "",
+                "  Up / Down          Move through preset list",
+                "  Left / Right       Cycle variation option on the hovered row",
+                "  Tab / Shift+Tab    Switch which variation group is being cycled",
+                "  Enter              Apply selected preset + variations",
+                "  Esc                Cancel",
+                "",
+            ]
+        )
 
         return UserCommandResult(
             output="\n".join(lines),

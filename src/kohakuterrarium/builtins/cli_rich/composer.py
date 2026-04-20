@@ -13,9 +13,14 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.input.ansi_escape_sequences import ANSI_SEQUENCES
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
+from prompt_toolkit.search import SearchDirection, start_search
 from prompt_toolkit.widgets import TextArea
 
 from kohakuterrarium.builtins.cli_rich.completer import SlashCommandCompleter
+from kohakuterrarium.builtins.cli_rich.paste_store import (
+    PasteStore,
+    should_placeholderize,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -139,6 +144,8 @@ class Composer:
         on_clear_screen: Callable[[], None] | None = None,
         on_backgroundify: Callable[[], None] | None = None,
         on_cancel_bg: Callable[[], None] | None = None,
+        on_toggle_expand: Callable[[], None] | None = None,
+        picker_key_handler: Callable[[str], bool] | None = None,
     ):
         self.creature_name = creature_name
         self._on_submit = on_submit
@@ -147,10 +154,16 @@ class Composer:
         self._on_clear_screen = on_clear_screen
         self._on_backgroundify = on_backgroundify
         self._on_cancel_bg = on_cancel_bg
+        self._on_toggle_expand = on_toggle_expand
+        # Returns True if the key was consumed by a visible picker; the
+        # composer then skips its default handler so arrow keys etc. flow
+        # into the picker instead of moving the text cursor.
+        self._picker_key = picker_key_handler
 
         HISTORY_DIR.mkdir(parents=True, exist_ok=True)
         self._history = FileHistory(str(HISTORY_DIR / f"{creature_name}.txt"))
         self._completer = SlashCommandCompleter()
+        self._paste_store = PasteStore()
 
         # The bordered input box. Frame is added by RichCLIApp around this.
         #
@@ -165,13 +178,18 @@ class Composer:
             history=self._history,
             completer=self._completer,
             complete_while_typing=True,
-            prompt="▶ ",
+            prompt="› ",
             scrollbar=False,
             focus_on_click=True,
             dont_extend_height=True,
         )
 
         self.key_bindings = self._build_key_bindings()
+
+    # Public accessor — the app resolves paste placeholders on submit.
+    @property
+    def paste_store(self) -> PasteStore:
+        return self._paste_store
 
     def set_command_registry(self, registry: dict) -> None:
         """Wire the slash command completer to the user command registry."""
@@ -184,8 +202,69 @@ class Composer:
     def _build_key_bindings(self) -> KeyBindings:
         kb = KeyBindings()
 
+        def _picker(key: str) -> bool:
+            if self._picker_key is None:
+                return False
+            return self._picker_key(key)
+
+        # Picker-priority keys — when a dialog (currently model picker)
+        # is visible, arrows / tab / enter / esc are routed to it first.
+        # If consumed, the composer's normal handler for that key is
+        # suppressed. This is the cleanest way we've found to "modal"
+        # a prompt_toolkit Application without juggling focus between
+        # containers.
+        @kb.add("up")
+        def _up(event):
+            if _picker("up"):
+                return
+            event.current_buffer.auto_up()
+
+        @kb.add("down")
+        def _down(event):
+            if _picker("down"):
+                return
+            event.current_buffer.auto_down()
+
+        @kb.add("left")
+        def _left(event):
+            if _picker("left"):
+                return
+            event.current_buffer.cursor_left()
+
+        @kb.add("right")
+        def _right(event):
+            if _picker("right"):
+                return
+            event.current_buffer.cursor_right()
+
+        @kb.add("pageup")
+        def _pgup(event):
+            if _picker("pageup"):
+                return
+            # Default: move to start of buffer (closest analogue).
+            event.current_buffer.cursor_position = 0
+
+        @kb.add("pagedown")
+        def _pgdn(event):
+            if _picker("pagedown"):
+                return
+            event.current_buffer.cursor_position = len(event.current_buffer.text)
+
+        @kb.add("tab")
+        def _tab(event):
+            if _picker("tab"):
+                return
+            event.current_buffer.insert_text("\t")
+
+        @kb.add("s-tab")
+        def _stab(event):
+            if _picker("s-tab"):
+                return
+
         @kb.add("enter")
         def _enter(event):
+            if _picker("enter"):
+                return
             buf = event.current_buffer
             text = buf.text
             if not text.strip():
@@ -195,12 +274,38 @@ class Composer:
                 buf.delete_before_cursor()
                 buf.insert_text("\n")
                 return
+            # Expand paste placeholders back to their full content before
+            # shipping the text to the agent. The visible buffer stayed
+            # compact thanks to the placeholder token; the model sees the
+            # real paste body.
+            submitted = self._paste_store.resolve(text)
             # append_to_history=True persists the submission to FileHistory
-            # so Up/Down can recall it next session. Default bindings handle
-            # the arrow keys themselves (auto_up/auto_down).
+            # so history recall can find it next session. We persist the
+            # visible text (with placeholders), not the expanded form —
+            # otherwise replaying history would dump huge pastes back into
+            # the buffer.
             buf.reset(append_to_history=True)
             if self._on_submit:
-                self._on_submit(text)
+                self._on_submit(submitted)
+
+        @kb.add(Keys.BracketedPaste)
+        def _bracketed_paste(event):
+            # Real terminals (Windows Terminal, iTerm2, Kitty, Alacritty,
+            # WezTerm, Foot, modern tmux/screen) emit CSI 200~ … CSI 201~
+            # around pasted content. prompt_toolkit's Vt100Parser decodes
+            # that into a BracketedPaste key whose .data is the full
+            # payload — so multiline pastes arrive as ONE event instead of
+            # a burst of individual Enter keys. Without this binding, each
+            # newline in the paste would trigger our submit handler.
+            data = event.data or ""
+            if not data:
+                return
+            buf = event.current_buffer
+            if should_placeholderize(data):
+                token = self._paste_store.stash(data)
+                buf.insert_text(token)
+            else:
+                buf.insert_text(data)
 
         @kb.add("escape", "enter")  # Alt+Enter
         def _alt_enter(event):
@@ -238,6 +343,8 @@ class Composer:
 
         @kb.add("escape", eager=True)
         def _esc(event):
+            if _picker("escape"):
+                return
             # Esc is the dedicated "interrupt the agent" hotkey, like
             # Claude Code. Ctrl+C is reserved for clearing the buffer.
             if self._on_interrupt:
@@ -268,5 +375,42 @@ class Composer:
         def _ctrl_l(event):
             if self._on_clear_screen:
                 self._on_clear_screen()
+
+        @kb.add("c-o")
+        def _ctrl_o(event):
+            # Toggle expand/collapse on the most recent top-level tool
+            # block. Useful when a long tool output was truncated to
+            # preview size in the live region — press Ctrl+O to see all
+            # of it, press again to re-collapse. Mnemonic: "output".
+            if self._on_toggle_expand:
+                self._on_toggle_expand()
+
+        # Power-user history bindings — Alt+P prev / Alt+N next. The bare
+        # Up/Down arrows are already smart via prompt_toolkit's auto_up /
+        # auto_down (they move within a multiline buffer first and only
+        # fall through to history when the cursor is at the very top/
+        # bottom line). Alt+P/N force the history step unconditionally,
+        # which is the shell convention — useful when editing a long
+        # multiline message and you want to cycle to a prior command
+        # without first scrolling the cursor to the top.
+        @kb.add("escape", "p")
+        def _alt_p(event):
+            event.current_buffer.history_backward()
+
+        @kb.add("escape", "n")
+        def _alt_n(event):
+            event.current_buffer.history_forward()
+
+        @kb.add("c-r")
+        def _ctrl_r(event):
+            # Reverse-incremental history search. prompt_toolkit wires
+            # this up to the buffer's search state — the default search
+            # toolbar is not in our layout, but the buffer's internal
+            # search still works: start_search puts the buffer into
+            # "searching" mode, subsequent chars narrow the match, Enter
+            # accepts, Esc cancels. Without any toolbar the user sees
+            # the buffer text update to the matched entry as they type —
+            # mirrors bash's C-r UX, minimally.
+            start_search(direction=SearchDirection.BACKWARD)
 
         return kb
