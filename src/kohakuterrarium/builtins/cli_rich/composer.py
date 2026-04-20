@@ -36,50 +36,95 @@ CTRL_ENTER_KEY = Keys.F20
 CTRL_SHIFT_ENTER_KEY = Keys.F21
 
 
-_MODIFIER_ENTER_REGISTERED = False
+_ENHANCED_KEYS_REGISTERED = False
 
 
-def _register_modifier_enter_keys() -> None:
-    """Teach prompt_toolkit to recognise Shift+Enter / Ctrl+Enter as
-    distinct keys.
+def _register_enhanced_keyboard_keys() -> None:
+    """Teach prompt_toolkit to decode the escape sequences that terminals
+    emit once enhanced keyboard reporting is enabled.
 
-    By default, prompt_toolkit collapses every "modifier + Enter" escape
-    sequence back to plain ``ControlM``. We override the ``ANSI_SEQUENCES``
-    map so the relevant escapes decode to ``F19/F20/F21`` instead, which
-    we then bind to insert-newline.
+    ``runtime.enable_enhanced_keyboard`` asks the terminal to switch to
+    xterm ``modifyOtherKeys=2`` **and** Kitty keyboard protocol flag 1
+    ("Disambiguate escape codes"). Under either protocol, keys that used
+    to arrive as single-byte control codes (``\\x04`` for Ctrl+D, ``\\r``
+    for Enter, …) now arrive as escape sequences prompt_toolkit's
+    built-in table has no mapping for — so every ``@kb.add("c-d")``,
+    ``@kb.add("enter")`` etc. silently stops firing and the raw bytes
+    leak into the buffer.
 
-    Two encoding families are covered:
+    We patch ``ANSI_SEQUENCES`` so those forms decode to the same
+    ``Keys.Control*`` values as the classic single-byte encoding,
+    keeping every existing key binding intact.
 
-    - **xterm ``modifyOtherKeys=2``** — emits ``ESC [ 27 ; <mods> ; 13 ~``.
-      This is what Windows Terminal sends for Ctrl/Shift+Enter once
-      ``modifyOtherKeys`` is enabled.
-    - **Kitty keyboard / CSI u** — emits ``ESC [ 13 ; <mods> u``. Used
-      by kitty, foot, alacritty (with the protocol enabled), and recent
-      Windows Terminal builds with progressive keyboard enhancement.
+    Coverage:
 
-    ``mods`` field: 2 = shift, 5 = ctrl, 6 = ctrl+shift.
+    - **Ctrl+a..z** (modifier = ``5``) under both encodings:
 
-    Idempotent — guarded by a module-level flag so that re-importing
-    this module (e.g. inside tests) doesn't repeatedly mutate the
-    global ``ANSI_SEQUENCES`` table.
+      - Kitty CSI u:        ``ESC [ <codepoint> ; 5 u``
+      - modifyOtherKeys=2:  ``ESC [ 27 ; 5 ; <codepoint> ~``
+
+      where ``<codepoint>`` is the lowercase ASCII value (97..122).
+
+    - **Enter / Tab / Backspace** under Kitty CSI u — some terminals
+      disambiguate these even without modifiers:
+
+      - Enter     → ``ESC [ 13 u``   → ``Keys.ControlM``
+      - Tab       → ``ESC [ 9 u``    → ``Keys.ControlI``
+      - Backspace → ``ESC [ 127 u``  → ``Keys.ControlH``
+
+    - **Modifier + Enter** (proxied through F19/F20/F21 so our key
+      bindings can treat them as "insert newline"):
+
+      - Kitty CSI u:       ``ESC [ 13 ; <mods> u``
+      - modifyOtherKeys=2: ``ESC [ 27 ; <mods> ; 13 ~``
+
+      ``mods`` values: 2 = shift, 5 = ctrl, 6 = ctrl+shift.
+
+    Out of scope (deliberately not registered): Alt+letter, Ctrl+Shift+
+    letter, and Cmd/Super+letter. prompt_toolkit has no enum slots for
+    most of them, they conflict with classic encodings, and users rarely
+    bind those combos in this app. Adding them later is a drop-in.
+
+    Idempotent — guarded by a module-level flag so re-importing this
+    module (e.g. inside tests) doesn't repeatedly mutate the global
+    ``ANSI_SEQUENCES`` table.
     """
-    global _MODIFIER_ENTER_REGISTERED
-    if _MODIFIER_ENTER_REGISTERED:
+    global _ENHANCED_KEYS_REGISTERED
+    if _ENHANCED_KEYS_REGISTERED:
         return
-    _MODIFIER_ENTER_REGISTERED = True
+    _ENHANCED_KEYS_REGISTERED = True
 
+    # Modifier + Enter (proxied through F19/F20/F21).
     # xterm modifyOtherKeys=2 — `ESC [ 27 ; mod ; 13 ~`
     ANSI_SEQUENCES["\x1b[27;2;13~"] = SHIFT_ENTER_KEY
     ANSI_SEQUENCES["\x1b[27;5;13~"] = CTRL_ENTER_KEY
     ANSI_SEQUENCES["\x1b[27;6;13~"] = CTRL_SHIFT_ENTER_KEY
-
-    # Kitty / CSI u — `ESC [ 13 ; mod u`
+    # Kitty CSI u — `ESC [ 13 ; mod u`
     ANSI_SEQUENCES["\x1b[13;2u"] = SHIFT_ENTER_KEY
     ANSI_SEQUENCES["\x1b[13;5u"] = CTRL_ENTER_KEY
     ANSI_SEQUENCES["\x1b[13;6u"] = CTRL_SHIFT_ENTER_KEY
 
+    # Ctrl+a..z under Kitty CSI u + modifyOtherKeys=2.
+    # Without these, Ctrl+D (exit), Ctrl+C (interrupt), Ctrl+L (clear),
+    # Ctrl+B (bg), Ctrl+X (cancel bg), Ctrl+J (newline fallback) all
+    # silently stop working on Ghostty / Kitty / Foot / WezTerm / recent
+    # iTerm2 — the bytes `[100;5u` would just get typed into the buffer.
+    for letter in "abcdefghijklmnopqrstuvwxyz":
+        codepoint = ord(letter)  # 97..122
+        key = getattr(Keys, f"Control{letter.upper()}")
+        ANSI_SEQUENCES[f"\x1b[{codepoint};5u"] = key
+        ANSI_SEQUENCES[f"\x1b[27;5;{codepoint}~"] = key
 
-_register_modifier_enter_keys()
+    # Enter / Tab / Backspace — Kitty CSI u disambiguated forms.
+    # Terminals emit these when flag 1 of the protocol is active and
+    # they choose to disambiguate all keys (not every terminal does,
+    # but it costs us nothing to register defensively).
+    ANSI_SEQUENCES["\x1b[13u"] = Keys.ControlM  # Enter
+    ANSI_SEQUENCES["\x1b[9u"] = Keys.ControlI  # Tab
+    ANSI_SEQUENCES["\x1b[127u"] = Keys.ControlH  # Backspace
+
+
+_register_enhanced_keyboard_keys()
 
 
 class Composer:
@@ -165,7 +210,7 @@ class Composer:
         def _shift_enter(event):
             # Shift+Enter — works in terminals that emit modifyOtherKeys
             # (Windows Terminal, xterm) or kitty CSI u (kitty, foot,
-            # alacritty, modern WT). See _register_modifier_enter_keys.
+            # alacritty, modern WT). See _register_enhanced_keyboard_keys.
             event.current_buffer.insert_text("\n")
 
         @kb.add(CTRL_ENTER_KEY)

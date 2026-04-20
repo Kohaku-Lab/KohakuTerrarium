@@ -227,6 +227,93 @@ def test_explicit_mode_without_custom_io_does_not_warn(monkeypatch, tmp_path, ca
     assert "Warning:" not in capsys.readouterr().out
 
 
+def _parse_terminal_input(seq: str):
+    """Feed ``seq`` through prompt_toolkit's vt100 parser and return the
+    list of ``(key_enum_str, payload)`` tuples it produces."""
+    from prompt_toolkit.input.vt100_parser import Vt100Parser, _Flush
+
+    presses: list = []
+    parser = Vt100Parser(lambda kp: presses.append(kp))
+    parser.feed(seq)
+    parser._input_parser.send(_Flush())  # drain any pending prefix match
+    return [(str(kp.key), kp.data) for kp in presses]
+
+
+def test_enhanced_keyboard_decodes_ctrl_letter_under_kitty_and_modifyother():
+    """Issue #29: once ``\\x1b[>1u`` (Kitty keyboard) or ``\\x1b[>4;2m``
+    (xterm modifyOtherKeys=2) is active, terminals emit Ctrl+letter as
+    escape sequences prompt_toolkit's default table does NOT decode —
+    which makes Ctrl+D (and every other Ctrl+letter binding) appear dead
+    and leaks the raw bytes (``[100;5u``) into the TextArea.
+
+    The composer module patches ``ANSI_SEQUENCES`` on import; verify the
+    patch is in place and the vt100 parser now routes both encodings
+    back to ``Keys.ControlX``.
+    """
+    from kohakuterrarium.builtins.cli_rich import composer  # noqa: F401
+
+    # Spot-check the keys we actually bind in the composer.
+    for letter, expected in [
+        ("b", "Keys.ControlB"),
+        ("c", "Keys.ControlC"),
+        ("d", "Keys.ControlD"),
+        ("j", "Keys.ControlJ"),
+        ("l", "Keys.ControlL"),
+        ("x", "Keys.ControlX"),
+    ]:
+        codepoint = ord(letter)
+        kitty = f"\x1b[{codepoint};5u"
+        modifyother = f"\x1b[27;5;{codepoint}~"
+        assert _parse_terminal_input(kitty) == [
+            (expected, kitty)
+        ], f"Kitty CSI u for Ctrl+{letter} did not decode"
+        assert _parse_terminal_input(modifyother) == [
+            (expected, modifyother)
+        ], f"modifyOtherKeys for Ctrl+{letter} did not decode"
+
+
+def test_enhanced_keyboard_decodes_enter_tab_backspace_csi_u():
+    """Kitty flag 1 optionally disambiguates Enter / Tab / Backspace too.
+    These must decode to the same ``Keys.Control*`` values that the classic
+    single-byte encoding produces, so that ``@kb.add("enter")`` etc.
+    keep firing."""
+    from kohakuterrarium.builtins.cli_rich import composer  # noqa: F401
+
+    assert _parse_terminal_input("\x1b[13u") == [("Keys.ControlM", "\x1b[13u")]
+    assert _parse_terminal_input("\x1b[9u") == [("Keys.ControlI", "\x1b[9u")]
+    assert _parse_terminal_input("\x1b[127u") == [("Keys.ControlH", "\x1b[127u")]
+
+
+def test_enhanced_keyboard_modifier_enter_still_proxied_to_f19_f20_f21():
+    """Shift+Enter / Ctrl+Enter / Ctrl+Shift+Enter are proxied through
+    F19/F20/F21 so the composer can treat them as "insert newline"
+    without fighting prompt_toolkit's built-in ``ControlM`` handling."""
+    from kohakuterrarium.builtins.cli_rich import composer  # noqa: F401
+
+    # Kitty CSI u form
+    assert _parse_terminal_input("\x1b[13;2u") == [("Keys.F19", "\x1b[13;2u")]
+    assert _parse_terminal_input("\x1b[13;5u") == [("Keys.F20", "\x1b[13;5u")]
+    assert _parse_terminal_input("\x1b[13;6u") == [("Keys.F21", "\x1b[13;6u")]
+    # modifyOtherKeys=2 form
+    assert _parse_terminal_input("\x1b[27;2;13~") == [("Keys.F19", "\x1b[27;2;13~")]
+    assert _parse_terminal_input("\x1b[27;5;13~") == [("Keys.F20", "\x1b[27;5;13~")]
+    assert _parse_terminal_input("\x1b[27;6;13~") == [("Keys.F21", "\x1b[27;6;13~")]
+
+
+def test_enhanced_keyboard_classic_single_byte_encoding_still_works():
+    """Regression guard — classic single-byte Ctrl+letter (``\\x04`` etc.)
+    and plain ``\\r`` / ``\\t`` / ``\\x7f`` must continue to decode as
+    before. Terminals without enhanced-keyboard support still use these.
+    """
+    from kohakuterrarium.builtins.cli_rich import composer  # noqa: F401
+
+    assert _parse_terminal_input("\x04") == [("Keys.ControlD", "\x04")]
+    assert _parse_terminal_input("\x03") == [("Keys.ControlC", "\x03")]
+    assert _parse_terminal_input("\r") == [("Keys.ControlM", "\r")]
+    assert _parse_terminal_input("\t") == [("Keys.ControlI", "\t")]
+    assert _parse_terminal_input("\x7f") == [("Keys.ControlH", "\x7f")]
+
+
 def test_rich_cli_enter_persists_submission_to_history(tmp_path, monkeypatch):
     """Issue #28: submissions must be appended to FileHistory so Up/Down can
     recall them later. The previous `_enter` handler called `buf.reset()`
