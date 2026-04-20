@@ -140,8 +140,14 @@ class AppOutputMixin:
 
     # ── Footer / session info ──
 
-    def on_token_update(self, prompt: int, completion: int, max_ctx: int = 0) -> None:
-        self.live_region.update_footer_tokens(prompt, completion, max_ctx)
+    def on_token_update(
+        self,
+        prompt: int,
+        completion: int,
+        max_ctx: int = 0,
+        cached: int = 0,
+    ) -> None:
+        self.live_region.update_footer_tokens(prompt, completion, max_ctx, cached)
         self._invalidate()
 
     def on_compact_start(self) -> None:

@@ -1,7 +1,14 @@
 """Footer block — single-line status displayed at the bottom of the live region.
 
-Shows token usage, model, mode hints, compaction state, and (when the
-composer is multiline) the cursor's line/column position.
+Shows token usage (cumulative), model, mode hints, compaction state,
+and (when the composer is multiline) the cursor's line/column position.
+
+Token accounting matches the TUI + web frontends:
+  ↑ = accumulated INPUT tokens across every LLM call in this session
+  ↓ = accumulated OUTPUT tokens
+  ctx% = last-call prompt tokens / max_context (not cumulative — ctx%
+          represents how full the current context window is, NOT the
+          total over the session)
 
 Colors shift as the context window fills:
   < 60%  dim (default)
@@ -38,8 +45,15 @@ class FooterBlock:
     """One-line status footer at the bottom of the live region."""
 
     def __init__(self):
-        self._prompt_tokens = 0
-        self._completion_tokens = 0
+        # Cumulative counters — accumulated across every LLM call in
+        # this session. Match TUI / web frontend semantics.
+        self._input_tokens = 0
+        self._output_tokens = 0
+        self._cached_tokens = 0
+        # Last call's prompt size — used for the context-fill % reading
+        # (the current context window is what the NEXT call will see,
+        # not the session total).
+        self._last_prompt_tokens = 0
         self._max_context = 0
         self._model = ""
         self._compacting = False
@@ -50,11 +64,39 @@ class FooterBlock:
         self._cursor_col: int = 0
         self._cursor_total_lines: int = 0
 
-    def update_tokens(self, prompt: int, completion: int, max_ctx: int = 0) -> None:
-        self._prompt_tokens = prompt
-        self._completion_tokens = completion
+    def update_tokens(
+        self,
+        prompt: int = 0,
+        completion: int = 0,
+        max_ctx: int = 0,
+        cached: int = 0,
+    ) -> None:
+        """Accumulate the latest LLM call's token deltas.
+
+        Called once per LLM call with that call's prompt / completion /
+        cached counts. Each call's prompt is ALSO saved as
+        ``_last_prompt_tokens`` for the context-fill % readout.
+        """
+        self._input_tokens += max(0, prompt)
+        self._output_tokens += max(0, completion)
+        self._cached_tokens += max(0, cached)
+        if prompt > 0:
+            self._last_prompt_tokens = prompt
         if max_ctx:
             self._max_context = max_ctx
+
+    def restore_tokens(
+        self,
+        input_total: int = 0,
+        output_total: int = 0,
+        cached_total: int = 0,
+        last_prompt: int = 0,
+    ) -> None:
+        """Set cumulative totals from session history (on resume)."""
+        self._input_tokens = input_total
+        self._output_tokens = output_total
+        self._cached_tokens = cached_total
+        self._last_prompt_tokens = last_prompt
 
     def update_model(self, model: str) -> None:
         self._model = model
@@ -89,19 +131,24 @@ class FooterBlock:
                 line.append(sep)
             first = False
 
-        # Context window: percentage (color-shifted), raw counts.
-        if self._prompt_tokens or self._completion_tokens:
-            if self._max_context > 0 and self._prompt_tokens > 0:
-                pct = int(self._prompt_tokens / self._max_context * 100)
-                _push_sep()
-                line.append(
-                    f"ctx {pct}%/{_fmt_tokens(self._max_context)}",
-                    style=_context_style(pct),
-                )
-            tok = (
-                f"{_fmt_tokens(self._prompt_tokens)}↑ "
-                f"{_fmt_tokens(self._completion_tokens)}↓"
+        # Context window fill (based on LAST prompt — reflects the
+        # current window, not session-cumulative counts).
+        if self._max_context > 0 and self._last_prompt_tokens > 0:
+            pct = int(self._last_prompt_tokens / self._max_context * 100)
+            _push_sep()
+            line.append(
+                f"ctx {pct}%/{_fmt_tokens(self._max_context)}",
+                style=_context_style(pct),
             )
+
+        # Cumulative in/out tokens for the session. Include cache count
+        # inline when present — matches TUI: ``1.2k↑ (cache 800) 3.4k↓``.
+        if self._input_tokens or self._output_tokens:
+            tok = Text()
+            tok.append(f"{_fmt_tokens(self._input_tokens)}↑")
+            if self._cached_tokens > 0:
+                tok.append(f" (cache {_fmt_tokens(self._cached_tokens)})")
+            tok.append(f" {_fmt_tokens(self._output_tokens)}↓")
             _push_sep()
             line.append(tok)
 

@@ -188,10 +188,13 @@ class RichCLIOutput(BaseOutputModule):
             return
 
         if activity_type == "token_usage":
+            # Pass cached_tokens through so the footer can show
+            # ``in↑ (cache N) out↓`` — matches TUI / web semantics.
             prompt = metadata.get("prompt_tokens", 0)
             completion = metadata.get("completion_tokens", 0)
             max_ctx = metadata.get("max_context", 0)
-            self.app.on_token_update(prompt, completion, max_ctx)
+            cached = metadata.get("cached_tokens", 0) or 0
+            self.app.on_token_update(prompt, completion, max_ctx, cached=cached)
             return
 
         if activity_type == "compact_start":

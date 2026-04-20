@@ -494,8 +494,63 @@ class RichCLIApp(AppOutputMixin):
 
     def replay_session(self, events: list[dict]) -> None:
         """Replay session events to scrollback. Called during resume,
-        after ``agent.start()`` but before ``app.run_async()``."""
+        after ``agent.start()`` but before ``app.run_async()``.
+
+        Also hydrates the footer's cumulative token counters AND the
+        context-window limits from the event stream BEFORE the replay
+        renders anything, so ``↑ / ↓`` and ``ctx %`` read correctly
+        immediately after resume — not after the first new LLM call.
+        Mirrors the TUI's ``on_resume`` approach (summing token_usage
+        events) which is more reliable than reading session state
+        directly.
+        """
+        self._restore_footer_from_events(events)
         SessionReplay(self).replay(events)
+
+    def _restore_footer_from_events(self, events: list[dict]) -> None:
+        """Seed the footer's cumulative token + context values from events.
+
+        Sums every ``token_usage`` event in the replay stream into
+        ``input_total`` / ``output_total`` / ``cached_total``, records
+        the most recent prompt size as ``last_prompt``, and pulls the
+        latest ``max_context`` / ``compact_threshold`` from any
+        ``session_info`` event. All of those fields otherwise stay at 0
+        until the first fresh LLM call after resume.
+        """
+        if not events:
+            return
+        total_in = 0
+        total_out = 0
+        total_cached = 0
+        last_prompt = 0
+        max_ctx = 0
+        for evt in events:
+            # Events may be wrapped {"type": ..., "data": {...}} or flat.
+            etype = evt.get("type") or evt.get("etype") or ""
+            data = evt.get("data") if isinstance(evt.get("data"), dict) else evt
+            if etype == "token_usage":
+                prompt = int(data.get("prompt_tokens", 0) or 0)
+                completion = int(data.get("completion_tokens", 0) or 0)
+                cached = int(data.get("cached_tokens", 0) or 0)
+                total_in += prompt
+                total_out += completion
+                total_cached += cached
+                if prompt > 0:
+                    last_prompt = prompt
+            elif etype == "session_info":
+                ctx = int(data.get("max_context", 0) or 0)
+                if ctx:
+                    max_ctx = ctx
+        footer = self.live_region.footer
+        if total_in or total_out or last_prompt:
+            footer.restore_tokens(
+                input_total=total_in,
+                output_total=total_out,
+                cached_total=total_cached,
+                last_prompt=last_prompt,
+            )
+        if max_ctx:
+            footer._max_context = max_ctx
 
     # ── Misc helpers ──
 

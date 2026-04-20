@@ -335,9 +335,13 @@ class LiveRegion:
     # ── Footer pass-through ──
 
     def update_footer_tokens(
-        self, prompt: int, completion: int, max_ctx: int = 0
+        self,
+        prompt: int,
+        completion: int,
+        max_ctx: int = 0,
+        cached: int = 0,
     ) -> None:
-        self.footer.update_tokens(prompt, completion, max_ctx)
+        self.footer.update_tokens(prompt, completion, max_ctx, cached)
 
     def update_footer_model(self, model: str) -> None:
         self.footer.update_model(model)
