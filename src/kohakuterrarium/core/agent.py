@@ -842,9 +842,24 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
         self.trigger_manager._session_store = store
         self.trigger_manager._agent_name = self.config.name
 
-        # Wire session store to compact manager
+        # Wire session store to compact manager. Also re-read the
+        # saved compact_count from the session store — this matters in
+        # terrariums where ``attach_session_store`` is called AFTER
+        # ``agent.start()`` (creatures) so the initial ``_init_compact_manager``
+        # ran without a store and saw count=0. Without this re-read
+        # the compact counter resets to 0 on every resume.
         if self.compact_manager:
             self.compact_manager._session_store = store
+            try:
+                saved = store.state.get(f"{self.config.name}:compact_count")
+                if saved is not None:
+                    self.compact_manager._compact_count = int(saved)
+            except (KeyError, TypeError, ValueError) as e:
+                logger.debug(
+                    "compact_count restore skipped",
+                    agent=self.config.name,
+                    error=str(e),
+                )
 
         logger.debug("Session store attached", agent=self.config.name)
 

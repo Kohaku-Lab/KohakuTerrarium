@@ -123,10 +123,44 @@ class CompactManager:
     def trigger_compact(self) -> None:
         """Start compaction as a background task.
 
-        Emits compact_start immediately, then runs background summarization.
-        compact_complete is emitted when done.
+        Emits ``compact_start`` up-front, then runs background
+        summarization, then ``compact_complete`` (or ``compact_skipped``
+        if the conversation is too short to benefit).
+
+        Pre-check short-conversation case BEFORE flipping ``_compacting``
+        or emitting ``compact_start``. Otherwise the UI gets stuck on a
+        "compacting..." banner because the background task returns via
+        the early-out in ``_run_compact`` without emitting a completion
+        event. Terrariums hit this path often — the root agent's
+        conversation is typically just orchestration so ``/compact`` on
+        root has "nothing to compact".
         """
         if self._compacting or not self._controller:
+            return
+
+        # Pre-check size. The same logic is replicated inside _run_compact
+        # for the early-return path; we check here too so we can emit a
+        # clean ``compact_skipped`` without flipping the compacting flag
+        # or misleadingly showing a "compacting..." banner.
+        messages = self._controller.conversation.get_messages()
+        keep_count = self._count_keep_messages(messages)
+        boundary = len(messages) - keep_count
+        if boundary <= 1:
+            if self._output_router:
+                self._output_router.notify_activity(
+                    "compact_skipped",
+                    "Not enough context to compact — nothing to summarize",
+                    metadata={
+                        "reason": "too_short",
+                        "round": self._compact_count + 1,
+                    },
+                )
+            logger.info(
+                "Compact skipped — conversation too short",
+                agent=self._agent_name,
+                message_count=len(messages),
+                boundary=boundary,
+            )
             return
 
         self._compacting = True
