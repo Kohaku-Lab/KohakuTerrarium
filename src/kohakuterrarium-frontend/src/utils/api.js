@@ -39,7 +39,7 @@ export const configAPI = {
     return data
   },
 
-  /** @returns {Promise<{id: string, name: string, available: boolean}[]>} */
+  /** @returns {Promise<{name: string, model: string, provider: string, available: boolean, variation_groups?: Record<string, Record<string, object>>, selected_variations?: Record<string, string>}[]>} */
   async getModels() {
     const { data } = await api.get("/configs/models")
     return data

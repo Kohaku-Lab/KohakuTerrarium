@@ -6,6 +6,7 @@ Creates the correct LLM provider based on:
   2. Inline controller config (backward compat)
 """
 
+from dataclasses import MISSING, fields
 from typing import Any
 
 from kohakuterrarium.core.config import AgentConfig
@@ -16,6 +17,30 @@ from kohakuterrarium.llm.profiles import LLMProfile, get_api_key, resolve_contro
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+_AGENT_CONFIG_FIELDS = {field.name: field for field in fields(AgentConfig)}
+
+
+def _agent_config_default(field_name: str) -> Any:
+    field = _AGENT_CONFIG_FIELDS[field_name]
+    if field.default is not MISSING:
+        return field.default
+    if field.default_factory is not MISSING:
+        return field.default_factory()
+    return MISSING
+
+
+def _is_meaningful_config_value(field_name: str, value: Any) -> bool:
+    """Return True when a config value should override preset/default resolution."""
+    if value is None:
+        return False
+
+    default = _agent_config_default(field_name)
+    if isinstance(value, str):
+        return value != "" and value != default
+    if isinstance(value, dict):
+        return bool(value)
+    return value != default
 
 
 def create_llm_provider(
@@ -43,21 +68,25 @@ def create_llm_provider(
 
 
 def _extract_controller_data(config: AgentConfig) -> dict[str, Any]:
-    """Extract controller dict for profile resolution."""
+    """Extract only meaningful controller overrides for profile resolution."""
     data: dict[str, Any] = {}
-    if config.model:
-        data["model"] = config.model
-    if config.auth_mode:
-        data["auth_mode"] = config.auth_mode
-    if config.temperature is not None:
-        data["temperature"] = config.temperature
-    if config.max_tokens:
-        data["max_tokens"] = config.max_tokens
-    if config.reasoning_effort:
-        data["reasoning_effort"] = config.reasoning_effort
-    if config.service_tier:
-        data["service_tier"] = config.service_tier
-    # Check for llm profile reference
+
+    for field_name in (
+        "model",
+        "provider",
+        "variation_selections",
+        "variation",
+        "auth_mode",
+        "temperature",
+        "max_tokens",
+        "reasoning_effort",
+        "service_tier",
+        "extra_body",
+    ):
+        value = getattr(config, field_name)
+        if _is_meaningful_config_value(field_name, value):
+            data[field_name] = dict(value) if isinstance(value, dict) else value
+
     llm_ref = getattr(config, "llm_profile", None)
     if llm_ref:
         data["llm"] = llm_ref

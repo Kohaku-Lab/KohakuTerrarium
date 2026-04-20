@@ -1,7 +1,4 @@
-from __future__ import annotations
-
 """Creature handle - wrapper around an Agent with terrarium metadata."""
-
 
 from dataclasses import dataclass, field
 

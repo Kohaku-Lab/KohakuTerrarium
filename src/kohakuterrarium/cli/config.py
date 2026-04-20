@@ -1,16 +1,26 @@
 import argparse
-import json
 import os
 from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.cli.auth import login_cli
 from kohakuterrarium.cli.config_mcp import add_or_update_mcp, delete_mcp, list_mcp
+from kohakuterrarium.cli.config_prompts import (
+    confirm as _confirm,
+    format_profile as _format_profile,
+    prompt as _prompt,
+    prompt_choice as _prompt_choice,
+    prompt_int as _prompt_int,
+    prompt_optional_float as _prompt_optional_float,
+    prompt_optional_json as _prompt_optional_json,
+    prompt_variation_groups as _prompt_variation_groups,
+)
 from kohakuterrarium.llm.api_keys import KEYS_PATH, list_api_keys, save_api_key
 from kohakuterrarium.llm.profiles import (
     PROFILES_PATH,
     LLMBackend,
-    LLMProfile,
+    LLMPreset,
+    _get_preset_definition,
     delete_backend,
     delete_profile,
     get_default_model,
@@ -21,98 +31,6 @@ from kohakuterrarium.llm.profiles import (
     save_profile,
     set_default_model,
 )
-
-
-def _prompt(label: str, default: str = "") -> str:
-    suffix = f" [{default}]" if default else ""
-    value = input(f"{label}{suffix}: ").strip()
-    return value if value else default
-
-
-def _prompt_choice(label: str, choices: list[str], default: str) -> str:
-    while True:
-        value = _prompt(f"{label} ({'/'.join(choices)})", default)
-        if value in choices:
-            return value
-        print(f"Please choose one of: {', '.join(choices)}")
-
-
-def _prompt_int(label: str, default: int) -> int:
-    while True:
-        value = _prompt(label, str(default))
-        try:
-            return int(value)
-        except ValueError:
-            print("Please enter an integer.")
-
-
-def _prompt_optional_float(label: str, default: float | None) -> float | None:
-    current = "" if default is None else str(default)
-    while True:
-        value = input(f"{label}{f' [{current}]' if current else ''}: ").strip()
-        if not value:
-            return default
-        if value.lower() in {"none", "null", "-"}:
-            return None
-        try:
-            return float(value)
-        except ValueError:
-            print("Please enter a number, blank, or 'none'.")
-
-
-def _prompt_optional_json(
-    label: str, default: dict[str, Any] | None
-) -> dict[str, Any] | None:
-    current = json.dumps(default, ensure_ascii=False) if default else ""
-    while True:
-        value = input(f"{label}{f' [{current}]' if current else ''}: ").strip()
-        if not value:
-            return default or None
-        if value.lower() in {"none", "null", "{}"}:
-            return None
-        try:
-            parsed = json.loads(value)
-        except json.JSONDecodeError as e:
-            print(f"Invalid JSON: {e}")
-            continue
-        if not isinstance(parsed, dict):
-            print("extra_body must be a JSON object.")
-            continue
-        return parsed
-
-
-def _confirm(prompt: str, default: bool = False) -> bool:
-    suffix = "[Y/n]" if default else "[y/N]"
-    answer = input(f"{prompt} {suffix}: ").strip().lower()
-    if not answer:
-        return default
-    return answer in {"y", "yes"}
-
-
-def _format_profile(profile: LLMProfile) -> str:
-    lines = [
-        f"Name:         {profile.name}",
-        f"Provider:     {profile.provider}",
-        f"Backend type: {profile.backend_type}",
-        f"Model:        {profile.model}",
-        f"Max context:  {profile.max_context}",
-        f"Max output:   {profile.max_output}",
-    ]
-    if profile.base_url:
-        lines.append(f"Base URL:     {profile.base_url}")
-    if profile.api_key_env:
-        lines.append(f"API key env:  {profile.api_key_env}")
-    if profile.temperature is not None:
-        lines.append(f"Temperature:  {profile.temperature}")
-    if profile.reasoning_effort:
-        lines.append(f"Reasoning:    {profile.reasoning_effort}")
-    if profile.service_tier:
-        lines.append(f"Service tier: {profile.service_tier}")
-    if profile.extra_body:
-        lines.append(
-            f"Extra body:   {json.dumps(profile.extra_body, ensure_ascii=False)}"
-        )
-    return "\n".join(lines)
 
 
 def _config_paths() -> dict[str, Path]:
@@ -212,20 +130,72 @@ def _backend_delete(name: str) -> int:
     return 0
 
 
-def _llm_list() -> int:
-    profiles = load_profiles()
+def _llm_list(include_builtins: bool = False) -> int:
+    from kohakuterrarium.llm.profiles import list_all
+
     default_name = get_default_model()
+
+    def _print_row(entry: dict[str, Any]) -> None:
+        marker = "*" if entry["name"] == default_name else ""
+        group_summary = ",".join(sorted((entry.get("variation_groups") or {}).keys()))
+        avail = "✓" if entry.get("available") else "·"
+        print(
+            f"{avail} {entry['name']:<24} "
+            f"{entry['provider']:<14} "
+            f"{entry['model']:<32} "
+            f"{group_summary:<18} {marker}"
+        )
+
+    if include_builtins:
+        entries = list_all()
+        print(f"Profiles file: {PROFILES_PATH}")
+        print()
+        print(
+            f"  {'Name':<24} {'Provider':<14} {'Model':<32} {'Groups':<18} {'Default'}"
+        )
+        print("-" * 100)
+        user_entries = [e for e in entries if e.get("source") == "user"]
+        builtin_entries = [e for e in entries if e.get("source") != "user"]
+        if user_entries:
+            print("# User presets")
+            for entry in sorted(user_entries, key=lambda e: e["name"]):
+                _print_row(entry)
+            print()
+        if builtin_entries:
+            print("# Built-in presets")
+            for entry in sorted(
+                builtin_entries, key=lambda e: (e["provider"], e["name"])
+            ):
+                _print_row(entry)
+        print()
+        print("Legend: ✓ = API key/OAuth configured   · = not available   * = default")
+        return 0
+
+    profiles = load_profiles()
     if not profiles:
         print("No user-defined LLM presets.")
         print(f"Profiles file: {PROFILES_PATH}")
+        print()
+        print("Tip: `kt config llm list --all` to include built-in presets.")
         return 0
     print(f"Profiles file: {PROFILES_PATH}")
     print()
-    print(f"{'Name':<24} {'Provider':<18} {'Model':<40} {'Default'}")
+    print(f"  {'Name':<24} {'Provider':<14} {'Model':<32} {'Groups':<18} {'Default'}")
     print("-" * 100)
     for name, profile in sorted(profiles.items()):
         marker = "*" if name == default_name else ""
-        print(f"{name:<24} {profile.provider:<18} {profile.model:<40} {marker}")
+        preset = _get_preset_definition(name)
+        group_summary = (
+            ",".join(sorted((preset.variation_groups or {}).keys())) if preset else ""
+        )
+        print(
+            f"  {name:<24} "
+            f"{profile.provider:<14} "
+            f"{profile.model:<32} "
+            f"{group_summary:<18} {marker}"
+        )
+    print()
+    print("Tip: `kt config llm list --all` to include built-in presets.")
     return 0
 
 
@@ -256,7 +226,9 @@ def _llm_add_or_update(name: str | None = None) -> int:
         print("Model is required.")
         return 1
 
-    profile = LLMProfile(
+    existing_preset = _get_preset_definition(profile_name) if profile_name else None
+
+    profile = LLMPreset(
         name=profile_name,
         model=model,
         provider=provider_name,
@@ -277,6 +249,10 @@ def _llm_add_or_update(name: str | None = None) -> int:
             "Extra body JSON", existing.extra_body if existing else None
         )
         or {},
+        variation_groups=_prompt_variation_groups(
+            "Variation groups JSON",
+            existing_preset.variation_groups if existing_preset else None,
+        ),
     )
     save_profile(profile)
     print(f"Saved preset: {profile.name}")
@@ -399,7 +375,13 @@ def add_config_subparser(subparsers: argparse._SubParsersAction) -> None:
         help="Manage LLM presets (model, provider binding, params)",
     )
     llm_sub = llm_parser.add_subparsers(dest="config_llm_command")
-    llm_sub.add_parser("list", help="List presets")
+    l_list = llm_sub.add_parser("list", help="List presets")
+    l_list.add_argument(
+        "--all",
+        dest="include_builtins",
+        action="store_true",
+        help="Include built-in presets in the listing",
+    )
     l_show = llm_sub.add_parser("show", help="Show preset details")
     l_show.add_argument("name")
     l_add = llm_sub.add_parser("add", help="Add or update a preset")
@@ -460,7 +442,7 @@ def _dispatch_llm(args: argparse.Namespace) -> int:
     name = getattr(args, "name", None)
     match sub:
         case "list":
-            return _llm_list()
+            return _llm_list(include_builtins=getattr(args, "include_builtins", False))
         case "show":
             return _llm_show(name) if name else (print("name required") or 1)
         case "add":

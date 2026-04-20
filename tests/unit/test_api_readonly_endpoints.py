@@ -21,7 +21,6 @@ from kohakuterrarium.api.routes import sessions as sessions_route
 from kohakuterrarium.api.routes import terrariums as terrariums_route
 from kohakuterrarium.core.scratchpad import Scratchpad
 from kohakuterrarium.core.trigger_manager import TriggerInfo
-from datetime import datetime
 
 
 def _make_fake_agent(
@@ -552,6 +551,62 @@ def test_memory_search_response_shape(tmp_path: Path, monkeypatch):
 # ----------------------------------------------------------------------
 # Log WS route is registered
 # ----------------------------------------------------------------------
+
+
+def test_settings_profiles_round_trip_includes_variation_groups(
+    tmp_path: Path, monkeypatch
+):
+    from fastapi import FastAPI
+    from kohakuterrarium.api.routes import settings as settings_route
+
+    profiles_path = tmp_path / "llm_profiles.yaml"
+    monkeypatch.setattr(
+        settings_route,
+        "load_backends",
+        lambda: {
+            "openai": settings_route.LLMBackend(
+                name="openai",
+                backend_type="openai",
+                base_url="https://api.openai.com/v1",
+                api_key_env="OPENAI_API_KEY",
+            )
+        },
+    )
+    monkeypatch.setattr("kohakuterrarium.llm.profiles.PROFILES_PATH", profiles_path)
+
+    app = FastAPI()
+    app.include_router(settings_route.router, prefix="/api/settings")
+    client = TestClient(app)
+
+    payload = {
+        "name": "custom-variant",
+        "model": "gpt-test",
+        "provider": "openai",
+        "max_context": 123000,
+        "max_output": 4567,
+        "temperature": 0.2,
+        "reasoning_effort": "high",
+        "service_tier": "priority",
+        "extra_body": {"foo": "bar"},
+        "variation_groups": {
+            "reasoning": {
+                "low": {"extra_body.reasoning.effort": "low"},
+                "high": {"extra_body.reasoning.effort": "high"},
+            }
+        },
+    }
+
+    resp = client.post("/api/settings/profiles", json=payload)
+    assert resp.status_code == 200
+
+    resp = client.get("/api/settings/profiles")
+    assert resp.status_code == 200
+    body = resp.json()
+    profile = next(
+        item for item in body["profiles"] if item["name"] == "custom-variant"
+    )
+    assert profile["variation_groups"] == payload["variation_groups"]
+    assert profile["extra_body"] == {"foo": "bar"}
 
 
 def test_log_ws_route_is_registered():

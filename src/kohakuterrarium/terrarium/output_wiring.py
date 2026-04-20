@@ -20,10 +20,8 @@ LLM round. Plugins installed on the receiver see the event through the
 existing ``on_event`` notify in ``Agent._process_event``.
 """
 
-from __future__ import annotations
-
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from kohakuterrarium.core.events import create_creature_output_event
 from kohakuterrarium.core.output_wiring import (
@@ -50,8 +48,8 @@ class TerrariumOutputWiringResolver:
 
     def __init__(
         self,
-        creatures: dict[str, CreatureHandle],
-        root_agent: Agent | None,
+        creatures: dict[str, "CreatureHandle"],
+        root_agent: Optional["Agent"],
     ) -> None:
         self._creatures = creatures
         self._root_agent = root_agent
@@ -59,7 +57,7 @@ class TerrariumOutputWiringResolver:
         # a mis-typed target doesn't spam the log every turn.
         self._warned_missing: set[str] = set()
 
-    def _resolve_target(self, target: str) -> Agent | None:
+    def _resolve_target(self, target: str) -> Optional["Agent"]:
         """Map a wiring target string to an Agent, or None if unknown."""
         if target == ROOT_TARGET:
             if self._root_agent is None:
@@ -149,7 +147,7 @@ class TerrariumOutputWiringResolver:
             )
 
 
-async def _safe_deliver(target_agent: Agent, event) -> None:
+async def _safe_deliver(target_agent: "Agent", event) -> None:
     """Invoke target's ``_process_event`` and swallow its errors.
 
     The receiver has its own error handling inside ``_process_event``
