@@ -394,11 +394,43 @@ class TerrariumRuntime(HotPlugMixin):
         Run a single creature's event loop.
 
         Mirrors ``Agent.run()`` but without calling ``start()`` / ``stop()``
-        (those are managed by the runtime).
+        (those are managed by the runtime). Also handles the two resume
+        steps that ``Agent.run()`` does — output-event replay and
+        trigger restore — since creatures skip ``Agent.run()`` entirely.
+        Without this, resumed terrariums had broken creature output
+        replay and hot-plugged triggers were lost.
         """
         agent = handle.agent
 
         try:
+            # Replay recorded output events (tool calls, messages, etc.)
+            # to this creature's output_router — the web/TUI rebuilds
+            # per-creature scrollback from these.
+            if getattr(agent, "_pending_resume_events", None):
+                try:
+                    await agent.output_router.on_resume(agent._pending_resume_events)
+                except Exception as exc:
+                    logger.warning(
+                        "Creature output replay failed",
+                        creature=handle.name,
+                        error=str(exc),
+                    )
+                agent._pending_resume_events = None
+
+            # Re-create resumable triggers (hot-plugged channel
+            # listeners, timers, etc.) from saved state.
+            pending_triggers = getattr(agent, "_pending_resume_triggers", None)
+            if pending_triggers:
+                try:
+                    await agent._restore_triggers(pending_triggers)
+                except Exception as exc:
+                    logger.warning(
+                        "Creature trigger restore failed",
+                        creature=handle.name,
+                        error=str(exc),
+                    )
+                agent._pending_resume_triggers = None
+
             # Fire startup trigger if configured
             await agent._fire_startup_trigger()
 

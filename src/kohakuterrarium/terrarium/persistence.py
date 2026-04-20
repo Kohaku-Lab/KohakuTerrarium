@@ -104,29 +104,57 @@ def attach_session_store(runtime: "TerrariumRuntime", store: Any) -> None:
 
         runtime._pending_resume_data = None
 
-    # Set resume events on root agent for output replay
-    if (
-        hasattr(runtime, "_pending_resume_events")
-        and runtime._pending_resume_events
-        and runtime._root_agent is not None
-    ):
-        root_events = runtime._pending_resume_events.get("root")
-        if root_events:
-            runtime._root_agent._pending_resume_events = root_events
-            logger.info("Resume events set on root agent", count=len(root_events))
+    # Set resume events on every agent that has them — root AND each
+    # creature. Previously we only propagated root's events, so
+    # creature output replay + hot-plugged triggers were silently
+    # dropped on resume.
+    if hasattr(runtime, "_pending_resume_events") and runtime._pending_resume_events:
+        for name, events in runtime._pending_resume_events.items():
+            if not events:
+                continue
+            if name == "root":
+                target = runtime._root_agent
+            else:
+                target = runtime.get_creature_agent(name)
+            if target is None:
+                logger.debug(
+                    "Resume events target missing, skipped",
+                    agent=name,
+                    count=len(events),
+                )
+                continue
+            target._pending_resume_events = events
+            logger.info(
+                "Resume events set",
+                agent=name,
+                count=len(events),
+            )
         runtime._pending_resume_events = None
 
-    # Set resumable triggers on root agent
+    # Same for resumable triggers (hot-plugged channel listeners etc.)
     if (
         hasattr(runtime, "_pending_resume_triggers")
         and runtime._pending_resume_triggers
-        and runtime._root_agent is not None
     ):
-        root_triggers = runtime._pending_resume_triggers.get("root")
-        if root_triggers:
-            runtime._root_agent._pending_resume_triggers = root_triggers
+        for name, triggers in runtime._pending_resume_triggers.items():
+            if not triggers:
+                continue
+            if name == "root":
+                target = runtime._root_agent
+            else:
+                target = runtime.get_creature_agent(name)
+            if target is None:
+                logger.debug(
+                    "Resume triggers target missing, skipped",
+                    agent=name,
+                    count=len(triggers),
+                )
+                continue
+            target._pending_resume_triggers = triggers
             logger.info(
-                "Resumable triggers set on root agent", count=len(root_triggers)
+                "Resumable triggers set",
+                agent=name,
+                count=len(triggers),
             )
         runtime._pending_resume_triggers = None
 
