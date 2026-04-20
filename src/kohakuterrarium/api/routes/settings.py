@@ -12,7 +12,7 @@ from kohakuterrarium.llm.codex_auth import CodexTokens, oauth_login, refresh_tok
 from kohakuterrarium.llm.codex_rate_limits import get_cached as get_cached_codex_usage
 from kohakuterrarium.llm.profiles import (
     LLMBackend,
-    LLMProfile,
+    LLMPreset,
     PROVIDER_KEY_MAP,
     _is_available,
     delete_backend,
@@ -22,6 +22,7 @@ from kohakuterrarium.llm.profiles import (
     list_all,
     list_api_keys,
     load_backends,
+    load_presets,
     load_profiles,
     save_api_key,
     save_backend,
@@ -47,6 +48,7 @@ class ProfileRequest(BaseModel):
     reasoning_effort: str = ""
     service_tier: str = ""
     extra_body: dict | None = None
+    variation_groups: dict[str, dict[str, dict[str, Any]]] = Field(default_factory=dict)
 
 
 class BackendRequest(BaseModel):
@@ -210,6 +212,7 @@ async def remove_backend(name: str):
 @router.get("/profiles")
 async def get_profiles():
     profiles = load_profiles()
+    presets = load_presets()
     return {
         "profiles": [
             {
@@ -225,6 +228,10 @@ async def get_profiles():
                 "reasoning_effort": p.reasoning_effort or "",
                 "service_tier": p.service_tier or "",
                 "extra_body": p.extra_body or {},
+                "variation_groups": (
+                    presets.get(name).variation_groups if name in presets else {}
+                ),
+                "selected_variations": p.selected_variations or {},
             }
             for name, p in profiles.items()
         ]
@@ -237,7 +244,7 @@ async def create_profile(req: ProfileRequest):
         raise HTTPException(400, "Name, model, and provider are required")
     if req.provider not in load_backends():
         raise HTTPException(404, f"Provider not found: {req.provider}")
-    profile = LLMProfile(
+    profile = LLMPreset(
         name=req.name,
         model=req.model,
         provider=req.provider,
@@ -247,6 +254,7 @@ async def create_profile(req: ProfileRequest):
         reasoning_effort=req.reasoning_effort or "",
         service_tier=req.service_tier or "",
         extra_body=req.extra_body or {},
+        variation_groups=req.variation_groups or {},
     )
     save_profile(profile)
     return {"status": "saved", "name": req.name}

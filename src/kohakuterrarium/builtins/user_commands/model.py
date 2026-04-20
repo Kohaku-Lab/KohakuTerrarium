@@ -50,15 +50,23 @@ class ModelCommand(BaseUserCommand):
                     or (not current_name and e["model"] == current)
                     else ""
                 )
+                variations = e.get("variation_groups") or {}
+                variation_note = ""
+                if variations:
+                    parts = []
+                    for group_name in sorted(variations):
+                        options = sorted((variations[group_name] or {}).keys())
+                        parts.append(f"{group_name}={{{'|'.join(options)}}}")
+                    variation_note = "  [" + "; ".join(parts) + "]"
                 lines.append(
                     f"  {e['name']:<25} {e['model']:<35} "
-                    f"({e['login_provider']}){marker}"
+                    f"({e['login_provider']}){variation_note}{marker}"
                 )
         else:
             lines.append("No models with API keys configured.")
             lines.append("Run: kt login <provider>")
         lines.append("")
-        lines.append("Switch: /model <name>")
+        lines.append("Switch: /model <name>  (or /model name@group=option,…)")
 
         return UserCommandResult(
             output="\n".join(lines),
@@ -71,6 +79,7 @@ class ModelCommand(BaseUserCommand):
                         "model": e["model"],
                         "provider": e.get("login_provider", ""),
                         "context": f"{e.get('max_context', 0) // 1000}k",
+                        "variation_groups": e.get("variation_groups", {}),
                         "selected": e["name"] == current_name
                         or (not current_name and e["model"] == current),
                     }

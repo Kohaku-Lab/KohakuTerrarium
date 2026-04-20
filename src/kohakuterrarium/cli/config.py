@@ -11,6 +11,8 @@ from kohakuterrarium.llm.profiles import (
     PROFILES_PATH,
     LLMBackend,
     LLMProfile,
+    LLMPreset,
+    _get_preset_definition,
     delete_backend,
     delete_profile,
     get_default_model,
@@ -81,12 +83,218 @@ def _prompt_optional_json(
         return parsed
 
 
+_VARIATION_PATCH_ROOTS = (
+    "temperature",
+    "reasoning_effort",
+    "service_tier",
+    "max_context",
+    "max_output",
+    "extra_body",
+)
+
+
+def _parse_variation_patch_value(raw: str) -> Any:
+    """Parse a scalar/JSON value for a variation patch entry.
+
+    Accepts JSON-looking input (numbers, booleans, null, strings with quotes,
+    lists, objects) and falls back to the raw string otherwise — so simple
+    values like ``low`` don't need to be wrapped in quotes.
+    """
+    if not raw:
+        return ""
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+
+
+def _prompt_single_variation_patch() -> dict[str, Any] | None:
+    """Interactively build one option's patch map (dotted path -> value)."""
+    print(
+        "      Patch entries (blank path to finish). Allowed roots: "
+        + ", ".join(_VARIATION_PATCH_ROOTS)
+    )
+    patch: dict[str, Any] = {}
+    while True:
+        path = input("      Path: ").strip()
+        if not path:
+            break
+        root = path.split(".", 1)[0]
+        if root not in _VARIATION_PATCH_ROOTS:
+            print(
+                f"      Path root must be one of: {', '.join(_VARIATION_PATCH_ROOTS)}"
+            )
+            continue
+        raw = input(f"      Value for {path} (JSON or plain): ").strip()
+        patch[path] = _parse_variation_patch_value(raw)
+    return patch or None
+
+
+def _prompt_variation_groups(
+    label: str,
+    default: dict[str, dict[str, dict[str, Any]]] | None,
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """Interactively build a variation_groups map.
+
+    Supports three entry modes at the top prompt:
+      - blank       -> keep existing default
+      - ``none``    -> drop all groups
+      - ``json``    -> paste a full JSON map (legacy / power-user path)
+      - ``edit``    -> enter the interactive group/option builder
+    """
+    current = json.dumps(default or {}, ensure_ascii=False)
+    hint = f" [{current}]" if current and default else ""
+    print(
+        f"{label}{hint} — type 'edit' to build interactively, 'json' to paste raw, blank to keep, 'none' to clear:"
+    )
+    mode = input("  > ").strip().lower()
+    if not mode:
+        return default or {}
+    if mode in {"none", "null", "{}", "clear"}:
+        return {}
+    if mode == "json":
+        return _prompt_variation_groups_raw(default)
+    if mode != "edit":
+        # Anything else — treat as a legacy JSON blob on the same line.
+        try:
+            parsed = json.loads(mode)
+        except json.JSONDecodeError:
+            print("Unrecognized input — keeping existing groups.")
+            return default or {}
+        if isinstance(parsed, dict):
+            return parsed
+        print("variation_groups must be a JSON object — keeping existing groups.")
+        return default or {}
+
+    groups: dict[str, dict[str, dict[str, Any]]] = {
+        name: {opt: dict(patch) for opt, patch in options.items()}
+        for name, options in (default or {}).items()
+    }
+
+    while True:
+        names = list(groups.keys()) or ["(none)"]
+        print(f"\n  Current groups: {', '.join(names)}")
+        action = input("  [a]dd group / [r]emove group / [f]inish: ").strip().lower()
+        if action in {"f", ""}:
+            return groups
+        if action == "r":
+            if not groups:
+                print("  No groups to remove.")
+                continue
+            target = input(
+                f"    Remove which group? ({', '.join(groups.keys())}): "
+            ).strip()
+            if target in groups:
+                del groups[target]
+            else:
+                print(f"    No such group: {target}")
+            continue
+        if action != "a":
+            print("  Unknown action.")
+            continue
+
+        group_name = input("    Group name (e.g. reasoning): ").strip()
+        if not group_name:
+            print("    Group name is required.")
+            continue
+        options: dict[str, dict[str, Any]] = dict(groups.get(group_name, {}))
+        while True:
+            option_name = input(
+                f"    Option name for '{group_name}' (blank to finish group): "
+            ).strip()
+            if not option_name:
+                break
+            patch = _prompt_single_variation_patch()
+            options[option_name] = patch or {}
+        if options:
+            groups[group_name] = options
+        else:
+            print(f"    Group '{group_name}' has no options — skipping.")
+
+
+def _prompt_variation_groups_raw(
+    default: dict[str, dict[str, dict[str, Any]]] | None,
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """Legacy raw-JSON input path for ``variation_groups``."""
+    current = json.dumps(default or {}, ensure_ascii=False)
+    while True:
+        value = input(
+            f"  Paste variation_groups JSON{f' [{current}]' if current else ''}: "
+        ).strip()
+        if not value:
+            return default or {}
+        if value.lower() in {"none", "null", "{}"}:
+            return {}
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError as e:
+            print(f"  Invalid JSON: {e}")
+            continue
+        if not isinstance(parsed, dict):
+            print(
+                "  variation_groups must be a JSON object of group -> option -> patch."
+            )
+            continue
+        invalid = False
+        for group_name, options in parsed.items():
+            if not isinstance(group_name, str) or not isinstance(options, dict):
+                invalid = True
+                break
+            for option_name, patch in options.items():
+                if not isinstance(option_name, str) or not isinstance(patch, dict):
+                    invalid = True
+                    break
+            if invalid:
+                break
+        if invalid:
+            print(
+                '  variation_groups must be shaped like {"group": {"option": {"extra_body.foo": "bar"}}}.'
+            )
+            continue
+        return parsed
+
+
 def _confirm(prompt: str, default: bool = False) -> bool:
     suffix = "[Y/n]" if default else "[y/N]"
     answer = input(f"{prompt} {suffix}: ").strip().lower()
     if not answer:
         return default
     return answer in {"y", "yes"}
+
+
+def _format_variation_groups(
+    variation_groups: dict[str, dict[str, dict[str, Any]]],
+) -> list[str]:
+    if not variation_groups:
+        return []
+    lines = ["Variation groups:"]
+    for group_name, options in sorted(variation_groups.items()):
+        option_names = ", ".join(sorted((options or {}).keys())) or "(none)"
+        lines.append(f"  - {group_name}: {option_names}")
+    return lines
+
+
+def _format_variation_examples(
+    preset_name: str,
+    variation_groups: dict[str, dict[str, dict[str, Any]]],
+) -> list[str]:
+    """Print a couple of ready-to-use selector examples for the user."""
+    if not variation_groups:
+        return []
+    lines = ["Selector examples:"]
+    pairs = []
+    for group_name, options in sorted(variation_groups.items()):
+        first_option = next(iter(sorted((options or {}).keys())), None)
+        if first_option:
+            pairs.append((group_name, first_option))
+    if not pairs:
+        return lines
+    single = pairs[0]
+    lines.append(f"  {preset_name}@{single[0]}={single[1]}")
+    if len(pairs) > 1:
+        combo = ",".join(f"{g}={o}" for g, o in pairs)
+        lines.append(f"  {preset_name}@{combo}")
+    return lines
 
 
 def _format_profile(profile: LLMProfile) -> str:
@@ -108,6 +316,14 @@ def _format_profile(profile: LLMProfile) -> str:
         lines.append(f"Reasoning:    {profile.reasoning_effort}")
     if profile.service_tier:
         lines.append(f"Service tier: {profile.service_tier}")
+    if profile.selected_variations:
+        lines.append(
+            f"Variations:   {json.dumps(profile.selected_variations, ensure_ascii=False, sort_keys=True)}"
+        )
+    preset = _get_preset_definition(profile.name)
+    if preset is not None and preset.variation_groups:
+        lines.extend(_format_variation_groups(preset.variation_groups))
+        lines.extend(_format_variation_examples(profile.name, preset.variation_groups))
     if profile.extra_body:
         lines.append(
             f"Extra body:   {json.dumps(profile.extra_body, ensure_ascii=False)}"
@@ -212,20 +428,72 @@ def _backend_delete(name: str) -> int:
     return 0
 
 
-def _llm_list() -> int:
-    profiles = load_profiles()
+def _llm_list(include_builtins: bool = False) -> int:
+    from kohakuterrarium.llm.profiles import list_all
+
     default_name = get_default_model()
+
+    def _print_row(entry: dict[str, Any]) -> None:
+        marker = "*" if entry["name"] == default_name else ""
+        group_summary = ",".join(sorted((entry.get("variation_groups") or {}).keys()))
+        avail = "✓" if entry.get("available") else "·"
+        print(
+            f"{avail} {entry['name']:<24} "
+            f"{entry['provider']:<14} "
+            f"{entry['model']:<32} "
+            f"{group_summary:<18} {marker}"
+        )
+
+    if include_builtins:
+        entries = list_all()
+        print(f"Profiles file: {PROFILES_PATH}")
+        print()
+        print(
+            f"  {'Name':<24} {'Provider':<14} {'Model':<32} {'Groups':<18} {'Default'}"
+        )
+        print("-" * 100)
+        user_entries = [e for e in entries if e.get("source") == "user"]
+        builtin_entries = [e for e in entries if e.get("source") != "user"]
+        if user_entries:
+            print("# User presets")
+            for entry in sorted(user_entries, key=lambda e: e["name"]):
+                _print_row(entry)
+            print()
+        if builtin_entries:
+            print("# Built-in presets")
+            for entry in sorted(
+                builtin_entries, key=lambda e: (e["provider"], e["name"])
+            ):
+                _print_row(entry)
+        print()
+        print("Legend: ✓ = API key/OAuth configured   · = not available   * = default")
+        return 0
+
+    profiles = load_profiles()
     if not profiles:
         print("No user-defined LLM presets.")
         print(f"Profiles file: {PROFILES_PATH}")
+        print()
+        print("Tip: `kt config llm list --all` to include built-in presets.")
         return 0
     print(f"Profiles file: {PROFILES_PATH}")
     print()
-    print(f"{'Name':<24} {'Provider':<18} {'Model':<40} {'Default'}")
+    print(f"  {'Name':<24} {'Provider':<14} {'Model':<32} {'Groups':<18} {'Default'}")
     print("-" * 100)
     for name, profile in sorted(profiles.items()):
         marker = "*" if name == default_name else ""
-        print(f"{name:<24} {profile.provider:<18} {profile.model:<40} {marker}")
+        preset = _get_preset_definition(name)
+        group_summary = (
+            ",".join(sorted((preset.variation_groups or {}).keys())) if preset else ""
+        )
+        print(
+            f"  {name:<24} "
+            f"{profile.provider:<14} "
+            f"{profile.model:<32} "
+            f"{group_summary:<18} {marker}"
+        )
+    print()
+    print("Tip: `kt config llm list --all` to include built-in presets.")
     return 0
 
 
@@ -256,7 +524,9 @@ def _llm_add_or_update(name: str | None = None) -> int:
         print("Model is required.")
         return 1
 
-    profile = LLMProfile(
+    existing_preset = _get_preset_definition(profile_name) if profile_name else None
+
+    profile = LLMPreset(
         name=profile_name,
         model=model,
         provider=provider_name,
@@ -277,6 +547,10 @@ def _llm_add_or_update(name: str | None = None) -> int:
             "Extra body JSON", existing.extra_body if existing else None
         )
         or {},
+        variation_groups=_prompt_variation_groups(
+            "Variation groups JSON",
+            existing_preset.variation_groups if existing_preset else None,
+        ),
     )
     save_profile(profile)
     print(f"Saved preset: {profile.name}")
@@ -399,7 +673,13 @@ def add_config_subparser(subparsers: argparse._SubParsersAction) -> None:
         help="Manage LLM presets (model, provider binding, params)",
     )
     llm_sub = llm_parser.add_subparsers(dest="config_llm_command")
-    llm_sub.add_parser("list", help="List presets")
+    l_list = llm_sub.add_parser("list", help="List presets")
+    l_list.add_argument(
+        "--all",
+        dest="include_builtins",
+        action="store_true",
+        help="Include built-in presets in the listing",
+    )
     l_show = llm_sub.add_parser("show", help="Show preset details")
     l_show.add_argument("name")
     l_add = llm_sub.add_parser("add", help="Add or update a preset")
@@ -460,7 +740,7 @@ def _dispatch_llm(args: argparse.Namespace) -> int:
     name = getattr(args, "name", None)
     match sub:
         case "list":
-            return _llm_list()
+            return _llm_list(include_builtins=getattr(args, "include_builtins", False))
         case "show":
             return _llm_show(name) if name else (print("name required") or 1)
         case "add":
