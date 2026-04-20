@@ -3,7 +3,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from kohakuterrarium.api.deps import get_manager
-from kohakuterrarium.api.schemas import CreatureAdd, ModelSwitch, WireChannel
+from kohakuterrarium.api.schemas import (
+    CreatureAdd,
+    ModelSwitch,
+    SlashCommand,
+    WireChannel,
+)
 from kohakuterrarium.terrarium.config import CreatureConfig
 
 router = APIRouter()
@@ -92,13 +97,48 @@ async def promote_creature_task(
         runtime = manager._terrariums.get(terrarium_id)
         if not runtime:
             raise ValueError(f"Terrarium {terrarium_id} not found")
-        handle = runtime.get_creature(name)
-        if not handle or not handle.agent:
+        # Accept either a creature name or "root" for the root agent.
+        # Fix for bug: was calling ``runtime.get_creature(name)`` which
+        # doesn't exist — creatures live in ``runtime.creatures`` dict
+        # and the public accessor is ``get_creature_agent``. The old
+        # call raised AttributeError that was never caught and came
+        # back as a 500 Internal Server Error.
+        if name == "root":
+            agent = runtime.root_agent
+        else:
+            handle = runtime.creatures.get(name)
+            agent = handle.agent if handle else None
+        if agent is None:
             raise ValueError(f"Creature {name} not found")
-        ok = handle.agent._promote_handle(job_id)
+        ok = agent._promote_handle(job_id)
         return {"status": "promoted" if ok else "not_found"}
+    except (ValueError, AttributeError) as e:
+        raise HTTPException(404, str(e))
+
+
+@router.post("/{name}/command")
+async def execute_creature_command(
+    terrarium_id: str,
+    name: str,
+    req: SlashCommand,
+    manager=Depends(get_manager),
+):
+    """Execute a slash command targeting a specific creature in a terrarium.
+
+    ``name`` may be a creature name or the literal ``"root"`` for the
+    terrarium's root agent. This is the endpoint the web frontend's
+    ``/compact``, ``/clear``, ``/status`` etc. buttons should hit — the
+    correct agent's ``UserCommandContext`` is built at the manager
+    layer so the command operates on the intended conversation.
+    """
+    try:
+        return await manager.creature_execute_command(
+            terrarium_id, name, req.command, req.args
+        )
     except ValueError as e:
         raise HTTPException(404, str(e))
+    except Exception as e:  # pragma: no cover - defensive
+        raise HTTPException(500, f"Command failed: {e}")
 
 
 @router.post("/{name}/model")

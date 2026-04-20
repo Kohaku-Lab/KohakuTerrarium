@@ -565,6 +565,45 @@ class KohakuManager:
             raise ValueError(f"Creature not found: {name}")
         return agent.switch_model(profile_name)
 
+    async def creature_execute_command(
+        self, terrarium_id: str, name: str, command: str, args: str = ""
+    ) -> dict:
+        """Execute a user slash command targeting a specific creature.
+
+        ``name`` may be either a creature name or the literal string
+        ``"root"``. This is the terrarium-scoped equivalent of
+        :meth:`agent_execute_command` and is the correct path for
+        things like ``/compact`` / ``/clear`` / ``/status`` when the
+        user is focused on a particular creature tab in the web UI
+        or the TUI. Using the wrong agent (always routing to root)
+        was the root cause of "/compact does nothing in terrarium".
+        """
+        runtime = self._get_runtime(terrarium_id)
+        agent = (
+            runtime.root_agent if name == "root" else runtime.get_creature_agent(name)
+        )
+        if agent is None:
+            raise ValueError(f"Creature not found: {name}")
+
+        cmd = get_builtin_user_command(command)
+        if cmd is None:
+            raise ValueError(f"Unknown command: /{command}")
+
+        context = UserCommandContext(
+            agent=agent,
+            session=getattr(agent, "session", None),
+        )
+        result = await cmd.execute(args, context)
+        resp: dict = {
+            "command": command,
+            "output": result.output,
+            "error": result.error,
+            "success": result.success,
+        }
+        if result.data is not None:
+            resp["data"] = result.data
+        return resp
+
     async def creature_interrupt(self, terrarium_id: str, name: str) -> None:
         """Interrupt a creature's current turn."""
         runtime = self._get_runtime(terrarium_id)
