@@ -179,6 +179,7 @@ async def _handle_terrarium_command(
     commands: dict,
     aliases: dict[str, str],
     cmd_context: "UserCommandContext",
+    runtime: "TerrariumRuntime | None" = None,
 ) -> bool | None:
     """Handle a slash command in the terrarium TUI.
 
@@ -186,6 +187,14 @@ async def _handle_terrarium_command(
         True if the command was consumed (skip sending to agent),
         False if the caller should break out of the main loop,
         None if the text was not a recognized command (fall through).
+
+    Target resolution:
+        If ``runtime`` is provided and the active tab corresponds to a
+        creature, we rebuild the context with ``agent=<creature.agent>``
+        + its own session so commands like ``/compact``, ``/clear``,
+        ``/status`` operate on the visible conversation (Bugs 2/8/9).
+        Previously the context was pinned to root at start-up and every
+        slash command always operated on root.
     """
     cmd_name, cmd_args = parse_slash_command(text)
     canonical = aliases.get(cmd_name, cmd_name)
@@ -193,7 +202,28 @@ async def _handle_terrarium_command(
     if not cmd:
         return None
 
-    result = await cmd.execute(cmd_args, cmd_context)
+    # Resolve target agent from the active tab. Channel tabs (prefixed
+    # with ``#``) and the non-targeted default both keep root as the
+    # target — commands don't make sense against a channel, and root is
+    # the "meta" orchestrator the user is controlling via slash.
+    target_ctx = cmd_context
+    if runtime is not None:
+        active_tab = tui.get_active_tab()
+        if active_tab and active_tab != "root" and not active_tab.startswith("#"):
+            creature_agent = runtime.get_creature_agent(active_tab)
+            if creature_agent is not None:
+                target_ctx = UserCommandContext(
+                    agent=creature_agent,
+                    session=creature_agent.session,
+                )
+                # Preserve the command registry reference so commands
+                # like ``/help`` still see the full set.
+                if "command_registry" in cmd_context.extra:
+                    target_ctx.extra["command_registry"] = cmd_context.extra[
+                        "command_registry"
+                    ]
+
+    result = await cmd.execute(cmd_args, target_ctx)
     if result.output:
         tui.add_system_notice(result.output, command=cmd_name)
     if result.error:
@@ -234,11 +264,18 @@ async def run_terrarium_with_tui(runtime: TerrariumRuntime) -> None:
     # Run runtime as background task (conversations/scratchpad restored inside)
     runtime_task = asyncio.create_task(runtime.run())
 
-    # Wait for runtime to be fully started
-    for _ in range(20):
-        await asyncio.sleep(0.25)
+    # Wait for runtime to be fully started — including the root agent's
+    # compact manager (which is initialised inside ``agent.start()`` →
+    # ``_init_compact_manager``). The TUI context-bar readout below
+    # reads ``root.compact_manager.config.max_tokens`` and will skip the
+    # readout if the manager isn't ready yet, leaving the user staring
+    # at a blank context bar until the next refresh. Waiting here keeps
+    # the first render correct.
+    for _ in range(40):
+        await asyncio.sleep(0.125)
         if runtime.is_running and runtime.root_agent:
-            break
+            if getattr(runtime.root_agent, "compact_manager", None) is not None:
+                break
 
     root = runtime.root_agent
     if not root:
@@ -321,7 +358,7 @@ async def run_terrarium_with_tui(runtime: TerrariumRuntime) -> None:
             # Handle slash commands
             if text.startswith("/"):
                 cmd_result = await _handle_terrarium_command(
-                    text, tui, _commands, _cmd_aliases, _cmd_context
+                    text, tui, _commands, _cmd_aliases, _cmd_context, runtime
                 )
                 if cmd_result is False:
                     break
