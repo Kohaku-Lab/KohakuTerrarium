@@ -150,6 +150,26 @@ const zhTWSidebar = [
   { text: "開發", items: sidebarStructure.dev },
 ]
 
+const zhCNSidebar = [
+  { text: "总览", items: sidebarStructure.overview },
+  { text: "教程", items: sidebarStructure.tutorials },
+  { text: "使用指南", items: sidebarStructure.guides },
+  {
+    text: "核心概念",
+    items: [
+      ...sidebarStructure.conceptsRoot,
+      { text: "基础", items: sidebarStructure.conceptsFoundations },
+      { text: "模块", items: sidebarStructure.conceptsModules },
+      { text: "多智能体系统", items: sidebarStructure.conceptsMultiAgent },
+      { text: "Python 原生整合", items: sidebarStructure.conceptsPythonNative },
+      ...sidebarStructure.conceptsTail,
+      { text: "实现笔记", items: sidebarStructure.conceptsImplNotes },
+    ],
+  },
+  { text: "参考", items: sidebarStructure.reference },
+  { text: "开发", items: sidebarStructure.dev },
+]
+
 // ---------------------------------------------------------------------------
 // Home-page cards (shared layout, per-locale strings)
 // ---------------------------------------------------------------------------
@@ -228,6 +248,45 @@ const zhTWHomeCards = [
     title: "ROADMAP",
     description:
       "1.0.x 已釋出的項目，以及生態瓶、UI、記憶、整合方面仍在探索的方向。",
+    href: "https://github.com/Kohaku-Lab/KohakuTerrarium/blob/main/ROADMAP.md",
+  },
+]
+
+const zhCNHomeCards = [
+  {
+    title: "什么是 agent？",
+    description:
+      "从聊天机器人出发，分四个阶段建立生物的六模块结构：控制器、输入、触发器、工具、子代理、输出。",
+    to: "/docs/concepts/foundations/what-is-an-agent",
+  },
+  {
+    title: "第一只生物",
+    description:
+      "编写生物配置，在 CLI / TUI / 网页模式中运行，调整提示词与工具。",
+    to: "/docs/tutorials/first-creature",
+  },
+  {
+    title: "第一个生态瓶",
+    description:
+      "用频道与 output_wiring 把两只生物串起来，再加一个 root 提供单一对话界面。",
+    to: "/docs/tutorials/first-terrarium",
+  },
+  {
+    title: "生态瓶使用指南",
+    description:
+      "频道 vs. 输出接线、root 代理、热插拔、观察机制 — 横向多智能体的实用 how-to。",
+    to: "/docs/guides/terrariums",
+  },
+  {
+    title: "配置参考",
+    description:
+      "生物、生态瓶、LLM 配置文件、MCP 服务器、上下文压缩、插件、输出接线的所有字段。",
+    to: "/docs/reference/configuration",
+  },
+  {
+    title: "ROADMAP",
+    description:
+      "1.0.x 已发布的项目，以及生态瓶、UI、记忆、集成方面仍在探索的方向。",
     href: "https://github.com/Kohaku-Lab/KohakuTerrarium/blob/main/ROADMAP.md",
   },
 ]
@@ -317,6 +376,41 @@ export default {
         cards: zhTWHomeCards,
       },
       sidebar: zhTWSidebar,
+    },
+    "zh-CN": {
+      label: "简体中文",
+      docsSubdir: "zh-CN",
+      homePage: "README.md",
+      ui: "zh-CN",
+      site: {
+        title: "KohakuTerrarium",
+        description:
+          "一个通用的代理系统框架。生物、子代理、生态瓶、工具、触发器、频道、插件、记忆、I/O 共用同一套底层机制。",
+        editBaseUrl:
+          "https://github.com/Kohaku-Lab/KohakuTerrarium/edit/main/docs/zh-CN/",
+        favicon: "./docs-assets/favicon.png",
+      },
+      home: {
+        kicker: "框架是用来建 agent 的，不是又一个 agent",
+        title: "KohakuTerrarium 文档",
+        description:
+          "生物通过频道与输出接线横向组成生态瓶，通过子代理进行纵向分解，并可借由 compose 代数原生嵌入 Python。文档涵盖概念模型、实用指南、完整配置与 API 参考，以及可实际操作的教程。",
+        actions: [
+          { text: "快速开始", to: "/docs/guides/getting-started" },
+          {
+            text: "GitHub",
+            href: "https://github.com/Kohaku-Lab/KohakuTerrarium",
+            variant: "secondary",
+          },
+          {
+            text: "kt-biome (官方套件)",
+            href: "https://github.com/Kohaku-Lab/kt-biome",
+            variant: "secondary",
+          },
+        ],
+        cards: zhCNHomeCards,
+      },
+      sidebar: zhCNSidebar,
     },
   },
 }
