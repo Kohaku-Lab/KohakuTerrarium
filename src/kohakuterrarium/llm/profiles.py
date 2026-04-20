@@ -1,20 +1,16 @@
-"""LLM preset/provider system.
+"""LLM preset/provider system — preset loading + runtime resolution.
 
-Two-layer model:
-    preset  -> references a provider by name (and owns model-facing params)
-    provider -> concrete transport binding (backend_type + base_url + api_key_env)
+Backend management lives in :mod:`backends`; the pure variation-selector
+machinery lives in :mod:`variations`. This module builds on both for preset
+persistence, preset-level YAML round-tripping, and the ``resolve_controller_llm``
+entrypoint called from :mod:`bootstrap.llm`.
 
-Backend types are a small enum of implementations:
+The two backend types in use:
     openai : OpenAI-compatible HTTP client. Used for OpenAI, OpenRouter,
              Anthropic (via their official OpenAI-compat endpoint at
              ``api.anthropic.com/v1``), Gemini, MiMo, and any user-defined
              provider that exposes a ``/chat/completions`` interface.
     codex  : OpenAI ChatGPT subscription via OAuth.
-
-Built-in providers cover the common cases (codex, openai, openrouter,
-anthropic, gemini, mimo). Users can add custom providers in
-``~/.kohakuterrarium/llm_profiles.yaml`` and custom presets that reference
-any provider (built-in or custom).
 
 Note: there is currently no native Anthropic client. The ``anthropic``
 built-in provider targets Anthropic's OpenAI-compat endpoint, which accepts
@@ -24,199 +20,46 @@ top-level ``reasoning_effort`` / ``service_tier`` and fields like
 through ``openrouter`` instead.
 """
 
-from __future__ import annotations
-
 from copy import deepcopy
 from typing import Any
 
-import yaml
-
 from kohakuterrarium.llm.api_keys import (
-    KT_DIR,
+    KT_DIR,  # noqa: F401  (re-exported for back-compat)
     KEYS_PATH,  # noqa: F401
-    PROVIDER_KEY_MAP,
+    PROVIDER_KEY_MAP,  # noqa: F401
     get_api_key,
     list_api_keys,  # noqa: F401
-    save_api_key,  # noqa: F401
+    save_api_key,
+)
+from kohakuterrarium.llm.backends import (
+    PROFILES_PATH,  # noqa: F401  (re-exported so callers + tests can patch here)
+    _BUILTIN_PROVIDER_NAMES,
+    _LEGACY_BACKEND_TYPE_VALUES,  # noqa: F401
+    _SCHEMA_VERSION,
+    _normalize_backend_type,  # noqa: F401
+    legacy_provider_from_data as _legacy_provider_from_data,
+    load_backends,
+    load_yaml_store as _load_yaml,
+    save_yaml_store as _save_yaml,
+    validate_backend_type,
 )
 from kohakuterrarium.llm.codex_auth import CodexTokens
 from kohakuterrarium.llm.presets import ALIASES, PRESETS, get_all_presets  # noqa: F401
 from kohakuterrarium.llm.profile_types import LLMBackend, LLMProfile, LLMPreset
+from kohakuterrarium.llm.variations import (
+    _SHORTHAND_SELECTION_KEY,
+    apply_patch_map,  # noqa: F401
+    apply_variation_groups,
+    deep_merge_dicts,
+    normalize_variation_selections,
+    parse_variation_selector,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-PROFILES_PATH = KT_DIR / "llm_profiles.yaml"
-_SCHEMA_VERSION = 3
-_BUILTIN_PROVIDER_NAMES = {
-    "codex",
-    "openai",
-    "openrouter",
-    "anthropic",
-    "gemini",
-    "mimo",
-}
 
-# Values that historically appeared under a preset's `provider` field to
-# describe the backend type. They are now only valid as `backend_type`.
-_LEGACY_BACKEND_TYPE_VALUES = {"openai", "codex", "codex-oauth", "anthropic"}
-_ALLOWED_VARIATION_ROOTS = {
-    "temperature",
-    "reasoning_effort",
-    "service_tier",
-    "max_context",
-    "max_output",
-    "extra_body",
-}
-_SHORTHAND_SELECTION_KEY = "__option__"
-
-
-def _normalize_backend_type(value: str) -> str:
-    """Map legacy / user-typed backend types onto the current canonical set.
-
-    - ``"codex-oauth"`` → ``"codex"`` (old name for the ChatGPT-OAuth backend)
-    - ``"anthropic"`` → ``"openai"`` (there is no native Anthropic client;
-      the anthropic *provider* now points at Anthropic's OpenAI-compat
-      endpoint and speaks ``/chat/completions``). Legacy profiles that
-      declare ``backend_type: anthropic`` are auto-migrated here.
-    - empty / unknown → ``"openai"`` (safe default for unconfigured data).
-    """
-    if value == "codex-oauth":
-        return "codex"
-    if value == "anthropic":
-        return "openai"
-    return value or "openai"
-
-
-def _load_yaml() -> dict[str, Any]:
-    if not PROFILES_PATH.exists():
-        return {}
-    try:
-        with open(PROFILES_PATH, encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-    except Exception as e:
-        logger.warning("Failed to load LLM profiles", error=str(e))
-        return {}
-
-
-def _save_yaml(data: dict[str, Any]) -> None:
-    PROFILES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(PROFILES_PATH, "w", encoding="utf-8") as f:
-        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
-
-
-def _built_in_providers() -> dict[str, LLMBackend]:
-    return {
-        "codex": LLMBackend(name="codex", backend_type="codex"),
-        "openai": LLMBackend(
-            name="openai",
-            backend_type="openai",
-            base_url="https://api.openai.com/v1",
-            api_key_env="OPENAI_API_KEY",
-        ),
-        "openrouter": LLMBackend(
-            name="openrouter",
-            backend_type="openai",
-            base_url="https://openrouter.ai/api/v1",
-            api_key_env="OPENROUTER_API_KEY",
-        ),
-        # Anthropic's OpenAI-compatible endpoint. No native Anthropic client
-        # in this project — we speak /chat/completions and pass Claude-specific
-        # knobs (``thinking: {type: "adaptive"}``, ``thinking.budget_tokens``)
-        # through ``extra_body``. Top-level ``reasoning_effort`` / ``service_tier``
-        # and ``speed`` / ``betas`` fields are silently dropped by the compat
-        # layer; for those, use the ``openrouter`` provider instead.
-        "anthropic": LLMBackend(
-            name="anthropic",
-            backend_type="openai",
-            base_url="https://api.anthropic.com/v1/",
-            api_key_env="ANTHROPIC_API_KEY",
-        ),
-        "gemini": LLMBackend(
-            name="gemini",
-            backend_type="openai",
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-            api_key_env="GEMINI_API_KEY",
-        ),
-        "mimo": LLMBackend(
-            name="mimo",
-            backend_type="openai",
-            base_url="https://api.xiaomimimo.com/v1",
-            api_key_env="MIMO_API_KEY",
-        ),
-    }
-
-
-def _legacy_provider_from_data(data: dict[str, Any]) -> str:
-    """Best-effort mapping for legacy preset shapes.
-
-    Old presets stored ``provider`` as a backend type (``openai``/``codex-oauth``
-    /``anthropic``) plus ``base_url``/``api_key_env``. Infer which built-in
-    provider they actually referred to so the runtime resolution still works.
-    """
-    value = data.get("provider", "")
-    if value and value not in _LEGACY_BACKEND_TYPE_VALUES:
-        return value
-
-    # Raw (un-normalized) backend_type declaration — ``anthropic`` here is a
-    # legacy signal that the preset was targeting Anthropic direct, which
-    # now resolves to the built-in ``anthropic`` provider (backend_type=openai).
-    raw_backend_type = data.get("backend_type") or data.get("provider", "openai")
-    backend_type = _normalize_backend_type(raw_backend_type)
-    base_url = data.get("base_url", "")
-    api_key_env = data.get("api_key_env", "")
-
-    if backend_type == "codex":
-        return "codex"
-    if raw_backend_type == "anthropic" or "api.anthropic.com" in base_url:
-        return "anthropic"
-    if "openrouter.ai" in base_url:
-        return "openrouter"
-    if "generativelanguage.googleapis.com" in base_url:
-        return "gemini"
-    if "api.openai.com" in base_url:
-        return "openai"
-    if "mimo" in base_url:
-        return "mimo"
-    if api_key_env in {
-        "OPENAI_API_KEY",
-        "OPENROUTER_API_KEY",
-        "ANTHROPIC_API_KEY",
-        "GEMINI_API_KEY",
-        "MIMO_API_KEY",
-    }:
-        reverse = {v: k for k, v in PROVIDER_KEY_MAP.items()}
-        return reverse[api_key_env]
-    return ""
-
-
-def load_backends() -> dict[str, LLMBackend]:
-    """Return merged built-in + user-defined providers."""
-    data = _load_yaml()
-    backends = _built_in_providers()
-
-    user_backends = data.get("backends") or data.get("providers") or {}
-    if isinstance(user_backends, dict):
-        for name, bdata in user_backends.items():
-            if isinstance(bdata, dict):
-                backends[name] = LLMBackend.from_dict(name, bdata)
-
-    legacy = data.get("profiles", {})
-    if isinstance(legacy, dict):
-        for name, pdata in legacy.items():
-            if not isinstance(pdata, dict):
-                continue
-            inferred = _legacy_provider_from_data(pdata)
-            if inferred and inferred not in backends:
-                backends[inferred] = LLMBackend(
-                    name=inferred,
-                    backend_type=_normalize_backend_type(
-                        pdata.get("backend_type") or pdata.get("provider", "openai")
-                    ),
-                    base_url=pdata.get("base_url", ""),
-                    api_key_env=pdata.get("api_key_env", ""),
-                )
-    return backends
+# ── Preset I/O ─────────────────────────────────────────────────
 
 
 def _preset_from_data(name: str, data: dict[str, Any]) -> LLMPreset:
@@ -265,18 +108,19 @@ def _serialize_user_data(
     return data
 
 
+# ── Backend CRUD (writes touch both backends + presets, so lives here) ──
+
+
 def save_backend(backend: LLMBackend) -> None:
     """Persist a user-defined provider.
 
     ``backend_type`` values are ``openai`` (any OpenAI-compatible
     ``/chat/completions`` endpoint, including Anthropic's compat layer and
     Gemini's) and ``codex`` (ChatGPT-subscription OAuth). Legacy
-    ``anthropic`` / ``codex-oauth`` values are normalized at read time and
-    should not be supplied here.
+    ``anthropic`` / ``codex-oauth`` values are normalized here so older API
+    clients keep working.
     """
-    backend.backend_type = _normalize_backend_type(backend.backend_type)
-    if backend.backend_type not in {"openai", "codex"}:
-        raise ValueError(f"Unsupported backend_type: {backend.backend_type}")
+    backend.backend_type = validate_backend_type(backend.backend_type)
     data = _load_yaml()
     backends = load_backends()
     presets = load_presets()
@@ -301,149 +145,7 @@ def delete_backend(name: str) -> bool:
     return True
 
 
-def parse_variation_selector(selector: str) -> tuple[str, dict[str, str]]:
-    """Parse ``preset@group=option,group2=option2`` into name + selections."""
-    if "@" not in selector:
-        return selector, {}
-
-    base_name, raw_selector = selector.split("@", 1)
-    if not base_name:
-        raise ValueError("Variation selector is missing a preset/model name before '@'")
-    if not raw_selector.strip():
-        raise ValueError(f"Variation selector for '{base_name}' is empty")
-
-    selections: dict[str, str] = {}
-    for raw_part in raw_selector.split(","):
-        part = raw_part.strip()
-        if not part:
-            raise ValueError(f"Invalid empty variation selection in '{selector}'")
-        if "=" in part:
-            group, option = part.split("=", 1)
-            group = group.strip()
-            option = option.strip()
-            if not group or not option:
-                raise ValueError(
-                    f"Invalid variation selection '{part}' in '{selector}'"
-                )
-            selections[group] = option
-        else:
-            if _SHORTHAND_SELECTION_KEY in selections:
-                raise ValueError(
-                    "Variation shorthand may only specify one option without a group"
-                )
-            selections[_SHORTHAND_SELECTION_KEY] = part
-    return base_name, selections
-
-
-def _validate_patch_target(path: str) -> None:
-    root = path.split(".", 1)[0]
-    if root not in _ALLOWED_VARIATION_ROOTS:
-        raise ValueError(
-            f"Unsupported variation patch target '{path}'. "
-            f"Allowed roots: {', '.join(sorted(_ALLOWED_VARIATION_ROOTS))}"
-        )
-
-
-def _set_dotted_path(target: dict[str, Any], path: str, value: Any) -> None:
-    parts = path.split(".")
-    cur = target
-    for part in parts[:-1]:
-        existing = cur.get(part)
-        if existing is None:
-            existing = {}
-            cur[part] = existing
-        if not isinstance(existing, dict):
-            raise ValueError(
-                f"Cannot apply variation patch '{path}': '{part}' is not an object"
-            )
-        cur = existing
-    cur[parts[-1]] = deepcopy(value)
-
-
-def apply_patch_map(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
-    result = deepcopy(base)
-    for path, value in (patch or {}).items():
-        _validate_patch_target(path)
-        _set_dotted_path(result, path, value)
-    return result
-
-
-def normalize_variation_selections(
-    selection_map: dict[str, str],
-    preset: LLMPreset,
-) -> dict[str, str]:
-    """Resolve shorthand selections and validate groups/options."""
-    groups = preset.variation_groups or {}
-    selections = dict(selection_map or {})
-    normalized: dict[str, str] = {}
-
-    shorthand = selections.pop(_SHORTHAND_SELECTION_KEY, "")
-    if shorthand:
-        matching_groups = [
-            group_name
-            for group_name, options in groups.items()
-            if shorthand in (options or {})
-        ]
-        if not matching_groups:
-            raise ValueError(
-                f"Unknown variation option '{shorthand}' for preset '{preset.name}'"
-            )
-        if len(matching_groups) > 1:
-            raise ValueError(
-                f"Ambiguous variation option '{shorthand}' for preset '{preset.name}'. "
-                f"Specify one of: {', '.join(f'{g}={shorthand}' for g in matching_groups)}"
-            )
-        normalized[matching_groups[0]] = shorthand
-
-    for group_name, option_name in selections.items():
-        if group_name not in groups:
-            raise ValueError(
-                f"Unknown variation group '{group_name}' for preset '{preset.name}'"
-            )
-        group_options = groups[group_name] or {}
-        if option_name not in group_options:
-            raise ValueError(
-                f"Unknown variation option '{option_name}' in group '{group_name}' "
-                f"for preset '{preset.name}'"
-            )
-        normalized[group_name] = option_name
-
-    return normalized
-
-
-def apply_variation_groups(
-    base: dict[str, Any],
-    variation_groups: dict[str, dict[str, dict[str, Any]]],
-    selections: dict[str, str],
-) -> dict[str, Any]:
-    result = deepcopy(base)
-    written_paths: dict[str, tuple[str, str]] = {}
-
-    for group_name, option_name in selections.items():
-        patch = ((variation_groups or {}).get(group_name) or {}).get(option_name) or {}
-        for path in patch:
-            _validate_patch_target(path)
-            prior = written_paths.get(path)
-            if prior is not None:
-                prev_group, prev_option = prior
-                raise ValueError(
-                    f"Variation selections conflict on '{path}': "
-                    f"{prev_group}={prev_option} and {group_name}={option_name}"
-                )
-            written_paths[path] = (group_name, option_name)
-        result = apply_patch_map(result, patch)
-
-    return result
-
-
-def _deep_merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    merged = deepcopy(base)
-    for key, value in (override or {}).items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = _deep_merge_dicts(merged[key], value)
-        else:
-            merged[key] = deepcopy(value)
-    return merged
+# ── Runtime resolution ─────────────────────────────────────────
 
 
 def _resolve_preset(
@@ -491,11 +193,11 @@ def load_profiles() -> dict[str, LLMProfile]:
 
 _PROVIDER_DEFAULT_MODELS: list[tuple[str, str]] = [
     ("codex", "gpt-5.4"),
-    ("openrouter", "mimo-v2-pro"),
-    ("anthropic", "claude-opus-4.6-direct"),
-    ("openai", "gpt-5.4-direct"),
-    ("gemini", "gemini-3.1-pro-direct"),
-    ("mimo", "mimo-v2-pro-direct"),
+    ("openrouter", "mimo-v2-pro-or"),
+    ("anthropic", "claude-opus-4.7"),
+    ("openai", "gpt-5.4-api"),
+    ("gemini", "gemini-3.1-pro"),
+    ("mimo", "mimo-v2-pro"),
 ]
 
 
@@ -691,9 +393,12 @@ def resolve_controller_llm(
 
     extra_body = controller_config.get("extra_body") or {}
     if extra_body:
-        profile.extra_body = _deep_merge_dicts(profile.extra_body or {}, extra_body)
+        profile.extra_body = deep_merge_dicts(profile.extra_body or {}, extra_body)
 
     return profile
+
+
+# ── Helpers ────────────────────────────────────────────────────
 
 
 def _login_provider_for(profile_or_data: dict[str, Any] | LLMProfile) -> str:

@@ -24,11 +24,24 @@ from kohakuterrarium.llm.profiles import (
 )
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def tmp_profiles(tmp_path):
-    """Use a temp file for profiles instead of ~/.kohakuterrarium/."""
+    """Use a temp file for profiles instead of ~/.kohakuterrarium/.
+
+    ``autouse=True`` so no test can accidentally write to the user's real
+    ``~/.kohakuterrarium/llm_profiles.yaml`` — an earlier version of this
+    fixture was opt-in and silently polluted the developer's home dir when
+    a test read state without naming the fixture.
+
+    The ``PROFILES_PATH`` symbol is re-exported from :mod:`profiles` for
+    back-compat, but the actual file I/O happens in :mod:`backends` — that's
+    the module we need to patch so ``load_yaml_store`` sees the temp file.
+    """
     profiles_path = tmp_path / "llm_profiles.yaml"
-    with patch("kohakuterrarium.llm.profiles.PROFILES_PATH", profiles_path):
+    with (
+        patch("kohakuterrarium.llm.backends.PROFILES_PATH", profiles_path),
+        patch("kohakuterrarium.llm.profiles.PROFILES_PATH", profiles_path),
+    ):
         yield profiles_path
 
 
