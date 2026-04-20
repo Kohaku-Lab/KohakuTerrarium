@@ -1,12 +1,9 @@
-from __future__ import annotations
-
 """
 Hot-plug mixin for TerrariumRuntime.
 
 Provides methods to add/remove creatures and channels at runtime
 without restarting the terrarium.
 """
-
 
 import asyncio
 

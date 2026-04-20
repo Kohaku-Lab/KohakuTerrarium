@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Terrarium session persistence helpers.
 
@@ -7,7 +5,6 @@ Handles attaching a SessionStore to a running terrarium (creatures,
 root agent, channels) and rebuilding Conversation objects from saved
 message dicts on resume.
 """
-
 
 from typing import TYPE_CHECKING, Any
 
@@ -35,7 +32,7 @@ def build_conversation_from_messages(messages: list[dict]) -> Conversation:
     return conv
 
 
-def attach_session_store(runtime: TerrariumRuntime, store: Any) -> None:
+def attach_session_store(runtime: "TerrariumRuntime", store: Any) -> None:
     """Attach a SessionStore to all creatures, root agent, and channels.
 
     Must be called AFTER start() (when creatures exist) but works

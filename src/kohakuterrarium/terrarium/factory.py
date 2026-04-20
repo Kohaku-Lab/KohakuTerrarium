@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Creature and root agent construction.
 
@@ -8,7 +6,6 @@ triggers, inject topology prompts, and attach output log captures.
 Extracted from TerrariumRuntime to keep the runtime focused on
 lifecycle orchestration.
 """
-
 
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -91,7 +88,7 @@ def _inject_channel_triggers(
 def build_root_agent(
     config: TerrariumConfig,
     environment: Environment,
-    runtime: TerrariumRuntime,
+    runtime: "TerrariumRuntime",
     **kwargs: Any,
 ) -> Agent:
     """

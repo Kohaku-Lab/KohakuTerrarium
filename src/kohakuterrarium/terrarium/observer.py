@@ -1,12 +1,9 @@
-from __future__ import annotations
-
 """
 Non-destructive channel message observer.
 
 Subscribes to broadcast channels as a silent observer and records
 messages that flow through the API for queue channels.
 """
-
 
 import asyncio
 from dataclasses import dataclass, field

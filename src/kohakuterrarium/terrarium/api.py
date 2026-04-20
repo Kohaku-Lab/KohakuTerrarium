@@ -1,12 +1,9 @@
-from __future__ import annotations
-
 """
 Programmatic API for terrarium management.
 
 Wraps TerrariumRuntime with convenient methods for channel
 operations, creature lifecycle, and terrarium status.
 """
-
 
 import asyncio
 from typing import TYPE_CHECKING, Any
@@ -31,7 +28,7 @@ class TerrariumAPI:
     - Terrarium lifecycle (start, stop, status)
     """
 
-    def __init__(self, runtime: TerrariumRuntime) -> None:
+    def __init__(self, runtime: "TerrariumRuntime") -> None:
         self._runtime = runtime
 
     # ------------------------------------------------------------------
@@ -101,7 +98,7 @@ class TerrariumAPI:
 
         # Record in observer if one exists
         if hasattr(self._runtime, "_observer"):
-            observer: ChannelObserver = self._runtime._observer
+            observer: "ChannelObserver" = self._runtime._observer
             observer.record(name, msg)
 
         logger.debug(

@@ -17,8 +17,6 @@ There is no polling endpoint; you must capture this data from the
 response of a real API call.
 """
 
-from __future__ import annotations
-
 import json
 from dataclasses import dataclass, field
 from typing import Any, Mapping
