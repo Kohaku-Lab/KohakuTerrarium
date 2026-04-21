@@ -14,6 +14,7 @@ Default behavior:
 
 import datetime
 import hashlib
+import locale
 import logging
 import os
 import sys
@@ -191,6 +192,34 @@ _handler: logging.Handler | None = None
 
 
 DEFAULT_LOG_DIR = Path.home() / ".kohakuterrarium" / "logs"
+
+
+def configure_utf8_stdio(*, log: bool = False) -> None:
+    """Best-effort UTF-8 configuration for stdout/stderr.
+
+    Reconfigures text streams when possible so streamed model output does not
+    inherit a legacy Windows console encoding like cp950/cp1252.
+    """
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream is None:
+            continue
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+    if log:
+        logger = logging.getLogger("kohakuterrarium.startup")
+        logger.info(
+            "stdio encoding configured",
+            stdout_encoding=getattr(sys.stdout, "encoding", None),
+            stderr_encoding=getattr(sys.stderr, "encoding", None),
+            preferred_encoding=locale.getpreferredencoding(False),
+        )
 
 
 def _make_log_filename() -> str:

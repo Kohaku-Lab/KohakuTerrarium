@@ -10,7 +10,11 @@ from kohakuterrarium.session.resume import (
     resume_terrarium,
 )
 from kohakuterrarium.terrarium.cli import run_terrarium_with_tui
-from kohakuterrarium.utils.logging import enable_stderr_logging, set_level
+from kohakuterrarium.utils.logging import (
+    configure_utf8_stdio,
+    enable_stderr_logging,
+    set_level,
+)
 
 
 def resume_cli(
@@ -23,6 +27,7 @@ def resume_cli(
     log_stderr: str = "auto",
 ) -> int:
     """Resume an agent or terrarium from a session file."""
+    configure_utf8_stdio(log=True)
     set_level(log_level)
 
     # Resolve mode the same way ``kt run`` does — rich CLI on a TTY,

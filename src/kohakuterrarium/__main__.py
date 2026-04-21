@@ -13,19 +13,7 @@ to take:
 import sys
 from pathlib import Path
 
-
-def _configure_utf8_stdio() -> None:
-    for stream_name in ("stdout", "stderr"):
-        stream = getattr(sys, stream_name, None)
-        if stream is None:
-            continue
-        reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is None:
-            continue
-        try:
-            reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
+from kohakuterrarium.utils.logging import configure_utf8_stdio
 
 
 def _is_briefcase_bundle() -> bool:
@@ -40,7 +28,7 @@ def _is_briefcase_bundle() -> bool:
 
 
 def main() -> int:
-    _configure_utf8_stdio()
+    configure_utf8_stdio(log=True)
     if _is_briefcase_bundle() and len(sys.argv) <= 1:
         from kohakuterrarium.__briefcase__ import main as briefcase_main
 

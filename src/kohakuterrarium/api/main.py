@@ -4,6 +4,9 @@ import uvicorn
 
 from kohakuterrarium.api.app import create_app
 from kohakuterrarium.serving.web import _resolve_config_dirs
+from kohakuterrarium.utils.logging import configure_utf8_stdio
+
+configure_utf8_stdio(log=True)
 
 _creatures_dirs, _terrariums_dirs = _resolve_config_dirs()
 

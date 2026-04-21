@@ -12,7 +12,7 @@ import sys
 import threading
 from pathlib import Path
 
-from kohakuterrarium.utils.logging import get_logger, set_level
+from kohakuterrarium.utils.logging import configure_utf8_stdio, get_logger, set_level
 
 logger = get_logger(__name__)
 
@@ -97,6 +97,8 @@ def run_web_server(
         port: Bind port.
         dev: If True, skip static file serving (user runs vite dev separately).
     """
+    configure_utf8_stdio(log=True)
+
     import uvicorn
 
     from kohakuterrarium.api.app import create_app
@@ -192,6 +194,8 @@ def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
 
 def _run_desktop_app_blocking(port: int = 8001, log_level: str = "INFO") -> None:
     """Actually run the desktop app (blocking). Called by the child process."""
+    configure_utf8_stdio(log=True)
+
     # Set AppUserModelID on Windows so the taskbar shows our icon
     # instead of the generic python.exe icon.
     if sys.platform == "win32":

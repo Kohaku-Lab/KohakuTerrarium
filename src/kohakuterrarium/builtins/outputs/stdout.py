@@ -5,11 +5,24 @@ Outputs to terminal/stdout with streaming support.
 """
 
 import sys
+from typing import TextIO
 
 from kohakuterrarium.modules.output.base import BaseOutputModule
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _write_safe(stream: TextIO, text: str) -> None:
+    """Write text without letting console encoding mismatches crash streaming."""
+    try:
+        stream.write(text)
+        return
+    except UnicodeEncodeError:
+        pass
+
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    stream.write(text.encode(encoding, errors="replace").decode(encoding))
 
 
 class StdoutOutput(BaseOutputModule):
@@ -69,7 +82,7 @@ class StdoutOutput(BaseOutputModule):
 
         output += content + self.suffix
 
-        sys.stdout.write(output)
+        _write_safe(sys.stdout, output)
         sys.stdout.flush()
 
         self._has_output = True
@@ -87,9 +100,9 @@ class StdoutOutput(BaseOutputModule):
 
         # Add prefix if this is start of output
         if not self._streaming and not self._has_output and self.prefix:
-            sys.stdout.write(self.prefix)
+            _write_safe(sys.stdout, self.prefix)
 
-        sys.stdout.write(chunk + self.stream_suffix)
+        _write_safe(sys.stdout, chunk + self.stream_suffix)
 
         if self.flush_on_stream:
             sys.stdout.flush()
@@ -100,7 +113,7 @@ class StdoutOutput(BaseOutputModule):
     async def flush(self) -> None:
         """Flush stdout and add suffix if streaming."""
         if self._streaming:
-            sys.stdout.write(self.suffix)
+            _write_safe(sys.stdout, self.suffix)
         sys.stdout.flush()
         self._streaming = False
 
@@ -151,13 +164,13 @@ class StdoutOutput(BaseOutputModule):
         if not turns:
             return
 
-        sys.stdout.write(f"\n--- Resumed session ({len(turns)} turns) ---\n")
+        _write_safe(sys.stdout, f"\n--- Resumed session ({len(turns)} turns) ---\n")
         for turn in turns:
             if turn["user"]:
                 user_preview = turn["user"][:120]
                 if len(turn["user"]) > 120:
                     user_preview += "..."
-                sys.stdout.write(f"You: {user_preview}\n")
+                _write_safe(sys.stdout, f"You: {user_preview}\n")
             if turn["text"]:
                 text_preview = turn["text"].strip()[:200]
                 if len(turn["text"].strip()) > 200:
@@ -165,8 +178,8 @@ class StdoutOutput(BaseOutputModule):
                 tools_str = ""
                 if turn["tools"]:
                     tools_str = f" [used {', '.join(turn['tools'])}]"
-                sys.stdout.write(f"Assistant:{tools_str} {text_preview}\n")
-        sys.stdout.write("--- End of history ---\n\n")
+                _write_safe(sys.stdout, f"Assistant:{tools_str} {text_preview}\n")
+        _write_safe(sys.stdout, "--- End of history ---\n\n")
         sys.stdout.flush()
 
 

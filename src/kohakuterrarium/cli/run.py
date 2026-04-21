@@ -12,6 +12,7 @@ from kohakuterrarium.core.config import load_agent_config
 from kohakuterrarium.session.resume import _create_io_modules
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.logging import (
+    configure_utf8_stdio,
     enable_stderr_logging,
     get_logger,
     set_level,
@@ -127,6 +128,8 @@ def run_agent_cli(
     log_stderr: str = "auto",
 ) -> int:
     """Run an agent from CLI."""
+
+    configure_utf8_stdio(log=True)
 
     # Setup logging
     set_level(log_level)

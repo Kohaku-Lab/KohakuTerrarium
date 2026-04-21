@@ -22,6 +22,7 @@ from kohakuterrarium.builtins.cli_rich.theme import (
     ICON_USER,
 )
 from kohakuterrarium.builtins.cli_rich.runtime import spawn
+from kohakuterrarium.builtins.outputs.stdout import _write_safe
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -210,9 +211,9 @@ class ScrollbackCommitter:
 
         def _emit() -> None:
             try:
-                sys.stdout.write(ansi)
+                _write_safe(sys.stdout, ansi)
                 if not ansi.endswith("\n"):
-                    sys.stdout.write("\n")
+                    _write_safe(sys.stdout, "\n")
                 sys.stdout.flush()
             except Exception as e:
                 logger.exception("scrollback write failed", error=str(e))
