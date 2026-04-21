@@ -26,12 +26,28 @@ We enforce this strictly. The point is not gatekeeping — it is to make sure no
 
 A "feature PR" is anything that adds new functionality, changes a public API, alters core architecture, introduces a new module/tool/sub-agent shape, or changes user-visible behavior in a non-trivial way.
 
-Before opening a feature PR, you need **one** of:
+Before opening a feature PR, you need a **pre-existing public discussion trail** and an explicit maintainer go-ahead.
 
-1. An open **feature-request issue** that a maintainer has acknowledged with explicit approval (a comment giving you the green light, or an "approved" label).
-2. A **discussion in the QQ group or Discord** with an owner/maintainer who has given you a clear go-ahead.
+Accepted paths:
 
-**Submitting an issue and a PR at the same time does not count.** The issue must exist first, be discussed, and be approved. Opening the PR before that approval lands will get the PR closed.
+1. An open **GitHub issue** created before the PR, with a maintainer comment giving approval (or an `approved` label).
+2. A **discussion in QQ or Discord** with a maintainer who has clearly approved the work.
+
+If the approval happened outside GitHub, the PR description must still link back to the public context as clearly as possible (for example: issue link, message permalink, quoted maintainer approval, date, and maintainer name/handle).
+
+**Submitting an issue and a PR at the same time does not count.**
+The issue/discussion must exist first, the proposal must be discussed, and approval must land before the PR is opened. Opening the PR before that approval lands will get the PR closed.
+
+### Feature PR checklist requirement
+
+If your PR is a feature / behavior / API / architecture change, your PR description must explicitly state all of the following:
+
+- the issue or discussion link
+- when that issue/discussion was opened
+- who approved it
+- whether the PR matches the approved scope
+
+If any of that is missing, reviewers will treat the PR as not yet ready for review.
 
 PRs that arrive without traceable approval will be closed with a short pointer to this document. This is firm but not personal — open the issue, get aligned, and reopen. We will help you do that.
 
@@ -55,7 +71,21 @@ A two-line message in Discord before you start saves hours of rework.
 
 ### What "approval" looks like
 
-A maintainer comment like "go ahead", "approved", "please open a PR for this", a thumbs-up reaction on a concrete proposal, or an "approved" label. If you are unsure whether you have approval, you do not — ask explicitly.
+A maintainer comment like "go ahead", "approved", "please open a PR for this", a thumbs-up reaction on a concrete proposal, or an `approved` label. If you are unsure whether you have approval, you do not — ask explicitly.
+
+### What to include in the PR description
+
+Use the PR template. Do not delete the checklist sections just because they are inconvenient.
+
+At minimum, every PR description should include:
+
+- a short summary of the change
+- the PR type (bug fix / docs / tests / refactor / feature / breaking change)
+- exact validation steps or commands you ran
+- linked issue(s) / discussion(s)
+- any skipped checks with a concrete reason
+
+For feature PRs, the issue/discussion link is not optional.
 
 ---
 
@@ -153,6 +183,9 @@ Before opening the PR:
 2. Run `black src/ tests/` and `ruff check src/ tests/`.
 3. Add tests for new code under `tests/unit/`. Test suites can use simpler output than library code.
 4. Split commits along logical boundaries — one concept per commit, working on each commit.
+5. Fill out the PR template completely.
+6. If this is a feature PR, verify that the linked issue/discussion existed before the PR and that the approval is explicit.
+7. If you skipped any local check, explain that in the PR body instead of leaving reviewers guessing.
 
 ---
 
