@@ -51,6 +51,7 @@ from kohakuterrarium.builtins.cli_rich.app_output import AppOutputMixin
 from kohakuterrarium.builtins.cli_rich.commit import ScrollbackCommitter, SessionReplay
 from kohakuterrarium.builtins.cli_rich.composer import Composer
 from kohakuterrarium.builtins.cli_rich.dialogs.model_picker import ModelPicker
+from kohakuterrarium.builtins.cli_rich.dialogs.settings import SettingsOverlay
 from kohakuterrarium.builtins.cli_rich.hint_bar import SlashHintBar
 from kohakuterrarium.builtins.cli_rich.live_region import LiveRegion
 from kohakuterrarium.builtins.cli_rich.runtime import (
@@ -93,6 +94,7 @@ class RichCLIApp(AppOutputMixin):
             load_presets=self._load_presets_for_picker,
             on_apply=self._apply_model_selector,
         )
+        self.settings_overlay = SettingsOverlay()
         self._exit_requested = False
         self._processing = False
         self._command_registry: dict = {}
@@ -128,6 +130,8 @@ class RichCLIApp(AppOutputMixin):
             on_cancel_bg=self._on_cancel_bg,
             on_toggle_expand=self._on_toggle_expand,
             picker_key_handler=self._picker_handle_key,
+            picker_text_handler=self._picker_handle_text,
+            picker_captures_input=self._picker_captures_input,
         )
 
         self.app: Application | None = None
@@ -208,7 +212,9 @@ class RichCLIApp(AppOutputMixin):
         status_container = ConditionalContainer(
             content=status_window,
             filter=Condition(
-                lambda: self.model_picker.visible or self.live_region.has_content
+                lambda: self.model_picker.visible
+                or self.settings_overlay.visible
+                or self.live_region.has_content
             ),
         )
 
@@ -310,12 +316,15 @@ class RichCLIApp(AppOutputMixin):
 
     def _status_text(self):
         width = self._terminal_width()
-        # When the model picker is open, it owns the status area — the
+        # When an overlay is open, it owns the status area — the
         # live region's normal content (streaming message, tools) is
-        # hidden until the picker closes, so all user attention is on
-        # the picker.
+        # hidden until the overlay closes, so all user attention is on
+        # the overlay.
         if self.model_picker.visible:
             ansi = self.model_picker.render(width)
+            return ANSI(ansi) if ansi else ""
+        if self.settings_overlay.visible:
+            ansi = self.settings_overlay.render(width)
             return ANSI(ansi) if ansi else ""
         ansi = self.live_region.to_ansi(width)
         if not ansi:
@@ -441,6 +450,15 @@ class RichCLIApp(AppOutputMixin):
         # way via the /model command's own execute().
         if name == "model" and not args.strip():
             self.model_picker.open()
+            self._invalidate()
+            return
+
+        # Special path: `/settings` / `/config` open the settings overlay.
+        # Unlike /model there's no text-form equivalent — it's always
+        # the interactive surface. The SettingsCommand class still exists
+        # so the command shows up in /help and the slash-hint bar.
+        if name in ("settings", "config") and not args.strip():
+            self.settings_overlay.open()
             self._invalidate()
             return
 
@@ -620,13 +638,50 @@ class RichCLIApp(AppOutputMixin):
         self._pending_task = spawn(self._handle_slash(f"/model {selector}"))
 
     def _picker_handle_key(self, key: str) -> bool:
-        """Forward a key event to the model picker; return True if consumed."""
-        if not self.model_picker.visible:
-            return False
-        consumed = self.model_picker.handle_key(key)
-        if consumed:
-            self._invalidate()
-        return consumed
+        """Forward a named-key event to whichever overlay is open.
+
+        Composer bindings call this on every named key (``up``, ``enter``,
+        ``escape``, ``tab``, ``backspace``, …). The first overlay that
+        claims to own the keyboard (``visible``) gets the key; if it
+        consumes it, the composer skips its own default handling.
+        """
+        if self.model_picker.visible:
+            consumed = self.model_picker.handle_key(key)
+            if consumed:
+                self._invalidate()
+            return consumed
+        if self.settings_overlay.visible:
+            consumed = self.settings_overlay.handle_key(key)
+            if consumed:
+                self._invalidate()
+            return consumed
+        return False
+
+    def _picker_handle_text(self, char: str) -> bool:
+        """Forward a printable-character event to whichever overlay wants text.
+
+        Invoked from the composer's ``Keys.Any`` binding which is
+        conditionally active only when ``_picker_captures_input`` is
+        True — so this runs only for forms inside the settings overlay.
+        """
+        if self.settings_overlay.visible and self.settings_overlay.is_capturing_text():
+            consumed = self.settings_overlay.handle_text(char)
+            if consumed:
+                self._invalidate()
+            return consumed
+        return False
+
+    def _picker_captures_input(self) -> bool:
+        """True when an overlay is capturing printable characters.
+
+        Drives the ``Condition`` filter on the composer's ``Keys.Any``
+        binding — we only intercept text when an overlay genuinely wants
+        it (form mode), so list-mode keystrokes still go through the
+        normal ``handle_key`` path.
+        """
+        if self.settings_overlay.visible and self.settings_overlay.is_capturing_text():
+            return True
+        return False
 
     def _on_clear_screen(self) -> None:
         # Send the standard "clear scrollback + screen" escape — handled

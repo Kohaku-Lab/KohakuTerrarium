@@ -9,6 +9,7 @@ loop, one bordered input box, no flicker.
 from pathlib import Path
 from typing import Callable
 
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.input.ansi_escape_sequences import ANSI_SEQUENCES
 from prompt_toolkit.key_binding import KeyBindings
@@ -151,6 +152,8 @@ class Composer:
         on_cancel_bg: Callable[[], None] | None = None,
         on_toggle_expand: Callable[[], None] | None = None,
         picker_key_handler: Callable[[str], bool] | None = None,
+        picker_text_handler: Callable[[str], bool] | None = None,
+        picker_captures_input: Callable[[], bool] | None = None,
     ):
         self.creature_name = creature_name
         self._on_submit = on_submit
@@ -164,6 +167,11 @@ class Composer:
         # composer then skips its default handler so arrow keys etc. flow
         # into the picker instead of moving the text cursor.
         self._picker_key = picker_key_handler
+        # Returns True if a printable character was consumed by an overlay
+        # form. Drives the ``Keys.Any`` binding below via a Condition so
+        # we only steal text when the overlay is genuinely capturing input.
+        self._picker_text = picker_text_handler
+        self._picker_captures_input = picker_captures_input
 
         HISTORY_DIR.mkdir(parents=True, exist_ok=True)
         self._history = FileHistory(str(HISTORY_DIR / f"{creature_name}.txt"))
@@ -405,6 +413,55 @@ class Composer:
         @kb.add("escape", "n")
         def _alt_n(event):
             event.current_buffer.history_forward()
+
+        # Named keys the settings overlay needs to intercept in form mode.
+        # Without these, Backspace would delete from the textarea buffer
+        # instead of the form field value, and Home/End would move the
+        # composer cursor instead of being swallowed as no-ops.
+        @kb.add("backspace")
+        def _bksp(event):
+            if _picker("backspace"):
+                return
+            event.current_buffer.delete_before_cursor()
+
+        @kb.add("delete")
+        def _del(event):
+            if _picker("delete"):
+                return
+            event.current_buffer.delete()
+
+        @kb.add("home")
+        def _home(event):
+            if _picker("home"):
+                return
+            event.current_buffer.cursor_position = 0
+
+        @kb.add("end")
+        def _end(event):
+            if _picker("end"):
+                return
+            event.current_buffer.cursor_position = len(event.current_buffer.text)
+
+        # Printable-character capture for overlay forms. Only fires when
+        # an overlay explicitly asks for it — in list/confirm mode the
+        # Condition returns False and Keys.Any falls through to the
+        # textarea's default character-insertion handler. Without the
+        # filter we'd swallow every keystroke whenever any overlay was
+        # open, which would break the composer entirely.
+        @kb.add(
+            Keys.Any,
+            filter=Condition(
+                lambda: bool(
+                    self._picker_captures_input and self._picker_captures_input()
+                )
+            ),
+        )
+        def _overlay_char(event):
+            data = event.data or ""
+            if not data or not data.isprintable():
+                return
+            if self._picker_text:
+                self._picker_text(data)
 
         @kb.add("c-r")
         def _ctrl_r(event):

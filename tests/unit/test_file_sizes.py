@@ -29,6 +29,11 @@ ALLOWLIST_600 = {
     # (top-level class owning lifecycle + layout + many small delegation
     # methods). Output-event handlers already extracted to AppOutputMixin.
     "builtins/cli_rich/app.py",
+    # Settings overlay state machine — list/form/confirm modes + 4 tabs of
+    # data loaders and action handlers. Rendering already split into
+    # settings_render.py; splitting further would fragment a cohesive
+    # state machine.
+    "builtins/cli_rich/dialogs/settings.py",
 }
 
 
