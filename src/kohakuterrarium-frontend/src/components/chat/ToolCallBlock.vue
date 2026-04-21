@@ -26,7 +26,7 @@
               <div class="flex flex-col gap-2">
                 <template v-for="(part, i) in tc.resultParts" :key="i">
                   <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" />
-                  <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="max-w-full rounded-lg border border-warm-200 dark:border-warm-700" />
+                  <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="tool-inline-image" />
                 </template>
               </div>
             </template>
@@ -58,7 +58,7 @@
             <div class="flex flex-col gap-2">
               <template v-for="(part, i) in tc.resultParts" :key="i">
                 <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" />
-                <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="max-w-full rounded-lg border border-warm-200 dark:border-warm-700" />
+                <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="tool-inline-image" />
               </template>
             </div>
           </template>
@@ -189,6 +189,28 @@ function formatArgs(args) {
 </script>
 
 <style scoped>
+.tool-inline-image {
+  display: block;
+  max-width: min(65%, 42vw);
+  max-height: 35vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 0.5rem;
+  border: 1px solid rgb(231 223 211 / 1);
+}
+
+@supports (max-width: 65cqw) {
+  .tool-inline-image {
+    max-width: 65cqw;
+    max-height: 50cqh;
+  }
+}
+
+.dark .tool-inline-image {
+  border-color: rgb(89 75 61 / 1);
+}
+
 /* Fade hint at bottom when content is scrollable */
 .sa-result {
   mask-image: linear-gradient(to bottom, black calc(100% - 24px), transparent 100%);

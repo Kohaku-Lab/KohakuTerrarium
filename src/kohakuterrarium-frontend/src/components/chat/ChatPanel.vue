@@ -67,7 +67,7 @@
       </div>
 
       <!-- Messages -->
-      <div ref="messagesEl" class="flex-1 overflow-y-auto px-5 py-4" @scroll="onMessagesScroll">
+      <div ref="messagesEl" class="chat-messages-viewport flex-1 overflow-y-auto px-5 py-4" @scroll="onMessagesScroll">
         <div class="flex flex-col gap-3">
           <template v-if="chat.currentMessages.length === 0">
             <div class="text-center py-16">
@@ -575,3 +575,9 @@ function onGlobalKeydown(e) {
 onMounted(() => window.addEventListener("keydown", onGlobalKeydown))
 onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown))
 </script>
+
+<style scoped>
+.chat-messages-viewport {
+  container-type: size;
+}
+</style>

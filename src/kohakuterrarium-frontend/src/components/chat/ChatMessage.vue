@@ -78,7 +78,7 @@
           <div class="flex flex-col gap-2">
             <template v-for="(part, i) in message.contentParts" :key="i">
               <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" />
-              <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="max-w-full rounded-lg border border-warm-200 dark:border-warm-700" />
+              <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="chat-inline-image" />
               <div v-else-if="part.type === 'file'" class="px-3 py-2 rounded-lg border border-aquamarine/20 bg-aquamarine/5 text-xs text-warm-600 dark:text-warm-300">
                 <span class="i-carbon-document mr-1 text-aquamarine" />
                 {{ part.file?.name || part.file?.path || "file" }}
@@ -149,7 +149,7 @@
         <div class="flex flex-col gap-2">
           <template v-for="(part, i) in message.contentParts" :key="i">
             <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" />
-            <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="max-w-full rounded-lg border border-warm-200 dark:border-warm-700" />
+            <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="chat-inline-image" />
             <div v-else-if="part.type === 'file'" class="px-3 py-2 rounded-lg border border-aquamarine/20 bg-aquamarine/5 text-xs text-warm-600 dark:text-warm-300">
               <span class="i-carbon-document mr-1 text-aquamarine" />
               {{ part.file?.name || part.file?.path || "file" }}
@@ -275,6 +275,28 @@ function regenerate() {
 </script>
 
 <style scoped>
+.chat-inline-image {
+  display: block;
+  max-width: min(65%, 42vw);
+  max-height: 35vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 0.5rem;
+  border: 1px solid rgb(231 223 211 / 1);
+}
+
+@supports (max-width: 65cqw) {
+  .chat-inline-image {
+    max-width: 65cqw;
+    max-height: 50cqh;
+  }
+}
+
+.dark .chat-inline-image {
+  border-color: rgb(89 75 61 / 1);
+}
+
 .msg-action-btn {
   display: inline-flex;
   align-items: center;

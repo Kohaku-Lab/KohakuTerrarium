@@ -224,6 +224,24 @@ onBeforeUnmount(() => {
   line-height: 1.65;
   word-wrap: break-word;
 }
+
+.md-content img {
+  display: block;
+  max-width: min(65%, 42vw);
+  max-height: 35vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 0.5rem;
+  margin: 0.5rem 0;
+}
+
+@supports (max-width: 65cqw) {
+  .md-content img {
+    max-width: 65cqw;
+    max-height: 50cqh;
+  }
+}
 .md-content p {
   margin-bottom: 0.5em;
 }
