@@ -226,17 +226,31 @@ class Composer:
         # suppressed. This is the cleanest way we've found to "modal"
         # a prompt_toolkit Application without juggling focus between
         # containers.
+        # When the slash-command completion menu is open, up/down must
+        # cycle the menu — our original bindings went straight to
+        # ``auto_up`` / ``auto_down`` and silently skipped menu
+        # navigation. Symptom was "arrow keys randomly not working":
+        # they worked fine on an empty buffer but felt dead the moment
+        # you typed ``/`` and the completer popped open.
         @kb.add("up")
         def _up(event):
             if _picker("up"):
                 return
-            event.current_buffer.auto_up()
+            buf = event.current_buffer
+            if buf.complete_state:
+                buf.complete_previous()
+                return
+            buf.auto_up()
 
         @kb.add("down")
         def _down(event):
             if _picker("down"):
                 return
-            event.current_buffer.auto_down()
+            buf = event.current_buffer
+            if buf.complete_state:
+                buf.complete_next()
+                return
+            buf.auto_down()
 
         @kb.add("left")
         def _left(event):
@@ -267,18 +281,37 @@ class Composer:
         def _tab(event):
             if _picker("tab"):
                 return
-            event.current_buffer.insert_text("\t")
+            buf = event.current_buffer
+            # Tab accepts the current completion (menu-cycling semantics
+            # shared with up/down below). Without this, pressing Tab on
+            # ``/mod`` would insert a literal tab character instead of
+            # finishing the ``/model`` suggestion — a 90%-of-the-time
+            # papercut.
+            if buf.complete_state:
+                buf.complete_next()
+                return
+            buf.insert_text("\t")
 
         @kb.add("s-tab")
         def _stab(event):
             if _picker("s-tab"):
                 return
+            buf = event.current_buffer
+            if buf.complete_state:
+                buf.complete_previous()
 
         @kb.add("enter")
         def _enter(event):
             if _picker("enter"):
                 return
             buf = event.current_buffer
+            # If the completion menu is open and the user has a row
+            # highlighted, accept the completion instead of submitting.
+            # The submit-through-menu behaviour (empty menu, or nothing
+            # highlighted) still falls through to the normal path.
+            if buf.complete_state and buf.complete_state.current_completion:
+                buf.apply_completion(buf.complete_state.current_completion)
+                return
             text = buf.text
             if not text.strip():
                 return
@@ -357,6 +390,16 @@ class Composer:
         @kb.add("escape", eager=True)
         def _esc(event):
             if _picker("escape"):
+                return
+            # Close an open completion menu before treating Esc as
+            # "interrupt". Without this, once the slash completer
+            # popped open it would stay open — every subsequent arrow
+            # key would cycle the hidden menu instead of moving the
+            # cursor, which is the "arrow keys randomly not working"
+            # bug.
+            buf = event.current_buffer
+            if buf.complete_state:
+                buf.cancel_completion()
                 return
             # Esc is the dedicated "interrupt the agent" hotkey, like
             # Claude Code. Ctrl+C is reserved for clearing the buffer.
