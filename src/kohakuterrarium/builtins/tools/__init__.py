@@ -23,6 +23,7 @@ from kohakuterrarium.builtins.tools.edit import EditTool
 from kohakuterrarium.builtins.tools.glob import GlobTool
 from kohakuterrarium.builtins.tools.multi_edit import MultiEditTool
 from kohakuterrarium.builtins.tools.grep import GrepTool
+from kohakuterrarium.builtins.tools.image_gen import ImageGenTool
 from kohakuterrarium.builtins.tools.info import InfoTool
 from kohakuterrarium.builtins.tools.json_read import JsonReadTool
 from kohakuterrarium.builtins.tools.json_write import JsonWriteTool
@@ -61,6 +62,7 @@ __all__ = [
     "GlobTool",
     "MultiEditTool",
     "GrepTool",
+    "ImageGenTool",
     "InfoTool",
     "JsonReadTool",
     "JsonWriteTool",

@@ -159,6 +159,13 @@ class AgentConfig:
     subagents: list[SubAgentConfigItem] = field(default_factory=list)
     output: OutputConfig = field(default_factory=OutputConfig)
 
+    # Opt-out list for provider-native tools. Providers (Codex, …)
+    # auto-inject their native capabilities (``image_gen`` etc.) into
+    # every creature that runs on them; names listed here are skipped.
+    # Example: ``disable_provider_tools: ["image_gen"]`` on a
+    # research-only creature that shouldn't produce images.
+    disable_provider_tools: list[str] = field(default_factory=list)
+
     # Auto-compact config (dict with max_tokens, threshold, target, keep_recent_turns)
     compact: dict[str, Any] | None = None
 

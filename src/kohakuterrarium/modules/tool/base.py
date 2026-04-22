@@ -205,6 +205,26 @@ class BaseTool:
     needs_context: bool = False  # Set True in subclass to receive ToolContext
     require_manual_read: bool = False  # Block usage until info tool reads the manual
 
+    # Provider-native tools represent capabilities the LLM provider
+    # performs itself (e.g. Codex image_generation, OpenAI web_search).
+    # The tool appears in the agent's inventory, but the tool runner
+    # MUST NOT execute it — the provider translates the entry into a
+    # built-in tool spec on the wire and surfaces results as
+    # structured assistant content.
+    #
+    # Provider-native tools are **opt-out**: every provider declares
+    # which native tools it serves via ``provider_native_tools`` on
+    # the provider class, and those entries are auto-registered into
+    # every creature that runs on that provider. Creatures can
+    # suppress any of them via ``disable_provider_tools`` in the
+    # creature config. Subclasses set ``is_provider_native = True``
+    # and populate ``provider_support`` with the canonical
+    # ``provider_name`` of every provider that can honor this tool;
+    # an explicitly-wired tool on a non-supporting provider is
+    # silently dropped at agent start.
+    is_provider_native: bool = False
+    provider_support: frozenset[str] = frozenset()
+
     def __init__(self, config: ToolConfig | None = None):
         self.config = config or ToolConfig()
         self._manual_read = False  # Set to True after info tool reads this tool's docs
@@ -230,6 +250,16 @@ class BaseTool:
         self, args: dict[str, Any], context: ToolContext | None = None
     ) -> ToolResult:
         """Execute with error handling."""
+        if self.is_provider_native:
+            # Should never be reached — the tool runner is expected to
+            # skip provider-native tools. Raising here fails loud so a
+            # regression in the filter surfaces immediately.
+            return ToolResult(
+                error=(
+                    f"Tool {self.tool_name!r} is provider-native and must be "
+                    "handled by the LLM provider, not the tool runner."
+                )
+            )
         try:
             if self.needs_context:
                 result = await self._execute(args, context=context)

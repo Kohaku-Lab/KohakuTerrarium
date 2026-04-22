@@ -29,6 +29,10 @@ from kohakuterrarium.llm.codex_auth import (
     oauth_login,
     refresh_tokens,
 )
+from kohakuterrarium.llm.codex_image_gen import (
+    build_image_part,
+    translate_image_gen_tool,
+)
 from kohakuterrarium.llm.codex_rate_limits import (
     capture_from_headers,
     parse_rate_limit_event,
@@ -115,6 +119,14 @@ class CodexOAuthProvider(BaseLLMProvider):
             print(chunk, end="")
     """
 
+    # Provider-native tool compatibility key — matches the
+    # ``provider_support`` declaration on ImageGenTool etc.
+    provider_name = "codex"
+    # Provider-native tools auto-injected into every creature that
+    # runs on this provider (opt-out via creature config's
+    # ``disable_provider_tools`` list).
+    provider_native_tools = frozenset({"image_gen"})
+
     def __init__(
         self,
         model: str = "gpt-5.4",
@@ -133,6 +145,7 @@ class CodexOAuthProvider(BaseLLMProvider):
         self._client: Any = None  # AsyncOpenAI
         self._last_tool_calls: list[NativeToolCall] = []
         self._last_usage: dict[str, int] = {}
+        self._last_assistant_parts: list[Any] = []
         self.prompt_cache_key: str | None = None
 
     async def ensure_authenticated(self) -> None:
@@ -194,6 +207,27 @@ class CodexOAuthProvider(BaseLLMProvider):
     @property
     def last_tool_calls(self) -> list[NativeToolCall]:
         return self._last_tool_calls
+
+    @property
+    def last_assistant_content_parts(self) -> list[Any] | None:
+        """Structured assistant parts from the most recent turn.
+
+        The Codex provider captures images emitted via the
+        ``image_generation`` built-in tool (and may later add other
+        structured outputs here). Returns ``None`` when the turn was
+        plain text so the controller keeps the zero-overhead fast path.
+        """
+        return self._last_assistant_parts or None
+
+    def translate_provider_native_tool(self, tool: Any) -> dict | None:
+        """Map a KT provider-native tool onto a Codex Responses tool spec.
+
+        Currently supports ``image_gen`` (see
+        :mod:`kohakuterrarium.llm.codex_image_gen`). Future Codex
+        built-ins plug in here — dispatch by tool name, return
+        ``None`` for anything this provider doesn't handle.
+        """
+        return translate_image_gen_tool(tool)
 
     # ------------------------------------------------------------------
     # Chat Completions -> Responses API message conversion
@@ -379,11 +413,13 @@ class CodexOAuthProvider(BaseLLMProvider):
         messages: list[dict[str, Any]],
         *,
         tools: list[ToolSchema] | None = None,
+        provider_native_tools: list[Any] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         """Stream response from Codex backend using AsyncOpenAI SDK."""
         self._last_tool_calls = []
         self._last_usage = {}
+        self._last_assistant_parts = []
         await self._ensure_valid_token()
 
         if not self._client:
@@ -401,8 +437,9 @@ class CodexOAuthProvider(BaseLLMProvider):
         # Convert Chat Completions format to Responses API flat array
         api_input = self._to_responses_input(input_messages)
 
-        # Build tools in Responses API format
-        api_tools = None
+        # Build tools in Responses API format — normal function tools
+        # first, provider-native translations appended after.
+        api_tools: list[dict[str, Any]] | None = None
         if tools:
             api_tools = [
                 {
@@ -413,6 +450,19 @@ class CodexOAuthProvider(BaseLLMProvider):
                 }
                 for t in tools
             ]
+
+        # Track the output format we requested for each provider-native
+        # image tool so we can reconstruct a valid data URL extension
+        # when image_generation_call lands in the stream.
+        self._image_gen_output_format: str = "png"
+        if provider_native_tools:
+            for native in provider_native_tools:
+                spec = self.translate_provider_native_tool(native)
+                if spec is None:
+                    continue
+                api_tools = (api_tools or []) + [spec]
+                if spec.get("type") == "image_generation":
+                    self._image_gen_output_format = spec.get("output_format", "png")
 
         # Validate: function_call must be immediately followed by function_call_output
         # with matching call_id. Reorder, add placeholders, remove orphans.
@@ -475,7 +525,8 @@ class CodexOAuthProvider(BaseLLMProvider):
                     yield event.delta
                 case "response.output_item.done":
                     item = event.item
-                    if getattr(item, "type", "") == "function_call":
+                    itype = getattr(item, "type", "")
+                    if itype == "function_call":
                         collected_tool_calls.append(
                             NativeToolCall(
                                 id=getattr(item, "call_id", ""),
@@ -483,6 +534,13 @@ class CodexOAuthProvider(BaseLLMProvider):
                                 arguments=getattr(item, "arguments", ""),
                             )
                         )
+                    elif itype == "image_generation_call":
+                        # Built-in image_generation tool output. Status
+                        # at this event is typically "generating" — the
+                        # image bytes are already in `result`; don't
+                        # gate on status == "completed" (see
+                        # plans/codex-provider-image-generation-plan.md).
+                        self._handle_image_generation_call(item)
                 case "response.completed":
                     # Extract usage from completed response
                     resp = getattr(event, "response", None)
@@ -520,6 +578,12 @@ class CodexOAuthProvider(BaseLLMProvider):
             usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
             model=self.model,
         )
+
+    def _handle_image_generation_call(self, item: Any) -> None:
+        """Append an ImagePart for an ``image_generation_call`` item."""
+        part = build_image_part(item, self._image_gen_output_format)
+        if part is not None:
+            self._last_assistant_parts.append(part)
 
     async def close(self) -> None:
         """Cleanup."""

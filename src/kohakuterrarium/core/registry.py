@@ -36,6 +36,15 @@ class Registry:
         self._tool_infos[tool_name] = ToolInfo.from_tool(tool)
         logger.debug("Registered tool", tool_name=tool_name)
 
+    def unregister_tool(self, tool_name: str) -> bool:
+        """Remove a previously registered tool. Returns True if present."""
+        existed = tool_name in self._tools
+        self._tools.pop(tool_name, None)
+        self._tool_infos.pop(tool_name, None)
+        if existed:
+            logger.debug("Unregistered tool", tool_name=tool_name)
+        return existed
+
     def get_tool(self, tool_name: str) -> Tool | None:
         """Get a registered tool by name."""
         return self._tools.get(tool_name)

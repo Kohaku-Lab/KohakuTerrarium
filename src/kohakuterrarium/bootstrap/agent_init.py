@@ -16,6 +16,7 @@ from kohakuterrarium.bootstrap.llm import create_llm_provider
 from kohakuterrarium.bootstrap.subagents import init_subagents
 from kohakuterrarium.bootstrap.tools import init_tools
 from kohakuterrarium.bootstrap.triggers import init_triggers
+from kohakuterrarium.builtins.tool_catalog import get_builtin_tool
 from kohakuterrarium.core.config import AgentConfig
 from kohakuterrarium.core.controller import Controller, ControllerConfig
 from kohakuterrarium.core.executor import Executor
@@ -60,9 +61,98 @@ class AgentInitMixin:
         self.llm = create_llm_provider(self.config, llm_override=llm_override)
 
     def _init_registry(self) -> None:
-        """Initialize module registry and register tools."""
+        """Initialize module registry and register tools.
+
+        Order matters:
+
+        1. ``init_tools`` wires user-configured entries from the
+           creature YAML.
+        2. ``_drop_unsupported_provider_native_tools`` removes any of
+           those user-wired entries that the active provider can't
+           handle (explicit wiring on the wrong provider → silent drop
+           with an INFO log).
+        3. ``_auto_inject_provider_native_tools`` adds every native
+           tool the active provider advertises via
+           ``provider_native_tools`` that isn't already in the registry
+           and isn't opted out by the creature's
+           ``disable_provider_tools`` list.
+        """
         self.registry = Registry()
         init_tools(self.config, self.registry, self._loader)
+        self._drop_unsupported_provider_native_tools()
+        self._auto_inject_provider_native_tools()
+
+    def _drop_unsupported_provider_native_tools(self) -> None:
+        """Remove user-wired provider-native tools the provider can't serve.
+
+        Users may explicitly list e.g. ``image_gen`` under ``tools:``.
+        If the active provider's ``provider_name`` is not in the
+        tool's ``provider_support`` set, drop the entry — the tool
+        can't function here and the provider won't translate it.
+        Auto-injection handles the happy path in a separate step.
+        """
+        llm = getattr(self, "llm", None)
+        active = getattr(llm, "provider_name", "") if llm is not None else ""
+        for name in list(self.registry.list_tools()):
+            tool = self.registry.get_tool(name)
+            if tool is None or not getattr(tool, "is_provider_native", False):
+                continue
+            support = getattr(tool, "provider_support", frozenset())
+            if active and active in support:
+                continue
+            self.registry.unregister_tool(name)
+            logger.info(
+                "provider_native_tool_dropped",
+                tool_name=name,
+                active_provider=active or "<unset>",
+                supported_providers=sorted(support) or None,
+            )
+
+    def _auto_inject_provider_native_tools(self) -> None:
+        """Auto-register provider-native tools advertised by the LLM.
+
+        Every provider declares the builtin tool names it can serve
+        via the ``provider_native_tools`` class attribute. Those
+        entries are injected into the registry automatically — the
+        creature does NOT have to list them under ``tools:``. To
+        suppress any of them, add the tool name to the creature's
+        ``disable_provider_tools`` list.
+        """
+        llm = getattr(self, "llm", None)
+        offered = (
+            getattr(llm, "provider_native_tools", frozenset()) if llm else frozenset()
+        )
+        if not offered:
+            return
+
+        disabled = set(self.config.disable_provider_tools or ())
+        existing = set(self.registry.list_tools())
+
+        for name in sorted(offered):
+            if name in disabled:
+                logger.debug(
+                    "provider_native_tool_opted_out",
+                    tool_name=name,
+                    active_provider=getattr(llm, "provider_name", ""),
+                )
+                continue
+            if name in existing:
+                # User already wired it with custom config — respect that.
+                continue
+            tool = get_builtin_tool(name)
+            if tool is None:
+                logger.warning(
+                    "provider_native_tool_not_in_catalog",
+                    tool_name=name,
+                    active_provider=getattr(llm, "provider_name", ""),
+                )
+                continue
+            self.registry.register_tool(tool)
+            logger.info(
+                "provider_native_tool_injected",
+                tool_name=name,
+                active_provider=getattr(llm, "provider_name", ""),
+            )
 
     def _init_executor(self) -> None:
         """Initialize background executor."""

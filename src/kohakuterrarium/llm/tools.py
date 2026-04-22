@@ -5,6 +5,8 @@ Converts registered Tool instances into ToolSchema objects suitable
 for OpenAI-compatible native function calling.
 """
 
+from typing import Any
+
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.base import ToolSchema
 from kohakuterrarium.utils.logging import get_logger
@@ -251,6 +253,11 @@ def build_tool_schemas(registry: Registry) -> list[ToolSchema]:
     Uses builtin schemas for known tools, falls back to tool's
     get_parameters_schema() method, then to a generic schema.
 
+    Provider-native tools (``tool.is_provider_native == True``) are
+    **skipped** — they do not represent callable functions; the
+    provider translates them into its own wire-format tool spec
+    instead. See :func:`build_provider_native_tools`.
+
     Args:
         registry: Registry containing registered tools
 
@@ -262,6 +269,10 @@ def build_tool_schemas(registry: Registry) -> list[ToolSchema]:
     for name in registry.list_tools():
         info = registry.get_tool_info(name)
         if not info:
+            continue
+
+        tool = registry.get_tool(name)
+        if tool is not None and getattr(tool, "is_provider_native", False):
             continue
 
         # 1. Check builtin schemas first (most accurate)
@@ -349,3 +360,19 @@ def build_tool_schemas(registry: Registry) -> list[ToolSchema]:
         tools=[s.name for s in schemas],
     )
     return schemas
+
+
+def build_provider_native_tools(registry: Registry) -> list[Any]:
+    """Return the registered tools whose ``is_provider_native`` flag is set.
+
+    The controller passes this list to the LLM provider as a separate
+    argument (see ``BaseLLMProvider.chat``). Each provider translates
+    the entries into its own built-in tool spec via
+    ``translate_provider_native_tool``, or ignores them if unsupported.
+    """
+    out: list[Any] = []
+    for name in registry.list_tools():
+        tool = registry.get_tool(name)
+        if tool is not None and getattr(tool, "is_provider_native", False):
+            out.append(tool)
+    return out

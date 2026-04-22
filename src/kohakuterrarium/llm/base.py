@@ -216,6 +216,20 @@ class BaseLLMProvider:
     Subclasses should implement _stream_chat and _complete_chat.
     """
 
+    # Canonical short name used by provider-native tools to declare
+    # compatibility. Subclasses override (e.g. ``"codex"``, ``"openai"``).
+    # Empty string means "this provider does not support any
+    # provider-native tools" — the agent-start validator treats an
+    # empty value as non-matching.
+    provider_name: str = ""
+
+    # Names (as registered in the builtin tool catalog) of provider-
+    # native tools this provider can serve. These are **opt-out** —
+    # at agent start the mixin auto-registers every entry in this
+    # set unless the creature's ``disable_provider_tools`` list names
+    # it. Subclasses override (e.g. Codex sets ``{"image_gen"}``).
+    provider_native_tools: frozenset[str] = frozenset()
+
     def __init__(self, config: LLMConfig | None = None):
         self.config = config or LLMConfig(model="")
         self._last_tool_calls: list[NativeToolCall] = []
@@ -233,6 +247,34 @@ class BaseLLMProvider:
         (keys depend on provider). Empty dict if not available.
         """
         return getattr(self, "_last_usage", {})
+
+    @property
+    def last_assistant_content_parts(self) -> list[Any] | None:
+        """Structured assistant content parts from the last turn.
+
+        Returns a list of ``ContentPart`` instances (text + images +
+        anything else the provider chose to surface) when the provider
+        emitted non-text output during the last stream. Returns ``None``
+        when the turn was text-only — the controller then falls back
+        to the accumulated text delta path.
+
+        Providers override by storing parts on an instance attribute
+        during stream handling. The base class returns ``None`` so
+        text-only providers need zero changes.
+        """
+        return getattr(self, "_last_assistant_parts", None) or None
+
+    def translate_provider_native_tool(self, tool: Any) -> dict | None:
+        """Translate a KT provider-native tool into a wire-format tool spec.
+
+        Return a dict that the provider can insert directly into the
+        outbound API ``tools`` list (in place of the normal
+        ``{"type":"function",...}`` block), or ``None`` if this
+        provider does not support the given tool. The base default is
+        ``None`` — every existing provider keeps shipping only
+        function tools until it opts in.
+        """
+        return None
 
     def _normalize_messages(
         self,
@@ -255,14 +297,27 @@ class BaseLLMProvider:
         *,
         stream: bool = True,
         tools: list[ToolSchema] | None = None,
+        provider_native_tools: list[Any] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
-        """Default chat implementation that delegates to subclass methods."""
+        """Default chat implementation that delegates to subclass methods.
+
+        ``provider_native_tools`` — a list of ``BaseTool`` instances
+        whose ``is_provider_native`` flag is set. Providers that
+        understand these tools translate them into wire-format tool
+        specs via :meth:`translate_provider_native_tool`; providers
+        that don't simply ignore the list.
+        """
         self._last_tool_calls = []
         normalized = self._normalize_messages(messages)
 
         if stream:
-            async for chunk in self._stream_chat(normalized, tools=tools, **kwargs):
+            async for chunk in self._stream_chat(
+                normalized,
+                tools=tools,
+                provider_native_tools=provider_native_tools,
+                **kwargs,
+            ):
                 yield chunk
         else:
             response = await self._complete_chat(normalized, **kwargs)
@@ -282,10 +337,15 @@ class BaseLLMProvider:
         messages: list[dict[str, Any]],
         *,
         tools: list[ToolSchema] | None = None,
+        provider_native_tools: list[Any] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         """
         Stream chat implementation. Must be overridden by subclass.
+
+        Subclasses that don't support provider-native tools can simply
+        ignore the ``provider_native_tools`` argument — the base
+        signature accepts it for compatibility.
         """
         raise NotImplementedError("Subclass must implement _stream_chat")
         yield  # Make this a generator

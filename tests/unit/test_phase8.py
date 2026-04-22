@@ -279,6 +279,7 @@ class MockLLM(LLMProvider):
         self,
         messages: list[dict[str, Any]],
         stream: bool = False,
+        **kwargs,
     ) -> AsyncIterator[str]:
         self.received_messages.append(messages)
         response = self.responses[min(self._call_count, len(self.responses) - 1)]
