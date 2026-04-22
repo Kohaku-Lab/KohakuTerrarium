@@ -18,6 +18,7 @@ from kohakuterrarium.api.routes import (
     settings,
     terrariums,
 )
+from kohakuterrarium.api.studio import build_studio_router
 from kohakuterrarium.api.ws import (
     agents as ws_agents,
     channels as ws_channels,
@@ -89,6 +90,9 @@ def create_app(
     app.include_router(registry.router, prefix="/api/registry", tags=["registry"])
     app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
     app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
+
+    # Studio (embedded authoring tool) — touch point T1
+    app.include_router(build_studio_router())
 
     # WebSocket routes
     app.include_router(ws_channels.router, tags=["ws"])
