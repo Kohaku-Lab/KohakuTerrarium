@@ -34,11 +34,15 @@ def create_subagent_config(
                 logger.warning("Unknown builtin sub-agent", subagent_name=item.name)
                 return None
 
-            # Overlay extra_prompt from config options onto builtin config
+            # Overlay selected inline options onto builtin config
             if item.options.get("extra_prompt"):
                 config.extra_prompt = item.options["extra_prompt"]
             if item.options.get("extra_prompt_file"):
                 config.extra_prompt_file = item.options["extra_prompt_file"]
+            if "notify_controller_on_background_complete" in item.options:
+                config.notify_controller_on_background_complete = bool(
+                    item.options["notify_controller_on_background_complete"]
+                )
 
             return config
 

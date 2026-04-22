@@ -127,6 +127,7 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
 
         self._active_handles: dict[str, Any] = {}
         self._direct_job_meta: dict[str, dict[str, Any]] = {}
+        self._bg_controller_notify: dict[str, bool] = {}
 
         self.compact_manager: Any = None
         self.plugins: Any = None  # PluginManager | None

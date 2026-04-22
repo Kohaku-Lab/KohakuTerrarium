@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Callable, TypeVar
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
-    from kohakuterrarium.modules.tool.base import BaseTool
+    from kohakuterrarium.modules.tool.base import BaseTool, ToolConfig
 
 logger = get_logger(__name__)
 
@@ -79,7 +79,9 @@ def _run_deferred_loaders() -> None:
         loader()
 
 
-def get_builtin_tool(name: str) -> "BaseTool | None":
+def get_builtin_tool(
+    name: str, config: "ToolConfig | None" = None
+) -> "BaseTool | None":
     """Get an instance of a built-in tool by name.
 
     On first miss, invokes any registered deferred loaders (which may
@@ -91,7 +93,7 @@ def get_builtin_tool(name: str) -> "BaseTool | None":
         _run_deferred_loaders()
         tool_cls = _BUILTIN_TOOLS.get(name)
     if tool_cls:
-        return tool_cls()
+        return tool_cls(config=config)
     return None
 
 

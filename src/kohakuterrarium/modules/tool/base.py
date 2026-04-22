@@ -39,6 +39,8 @@ class ToolConfig:
         max_output: Maximum output size in bytes (0 = no limit)
         working_dir: Working directory for execution
         env: Additional environment variables
+        notify_controller_on_background_complete: Whether a backgrounded tool
+            completion should push a new event back into the controller loop
         extra: Tool-specific configuration
     """
 
@@ -46,6 +48,7 @@ class ToolConfig:
     max_output: int = 0
     working_dir: str | None = None
     env: dict[str, str] = field(default_factory=dict)
+    notify_controller_on_background_complete: bool = True
     extra: dict[str, Any] = field(default_factory=dict)
 
 

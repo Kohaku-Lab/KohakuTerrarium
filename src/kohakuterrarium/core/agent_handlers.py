@@ -303,6 +303,17 @@ class AgentHandlersMixin(AgentToolsMixin):
         run_bg = parse_event.args.pop("run_in_background", False)
 
         job_id, task, is_direct = await self._start_tool_async(parse_event)
+        tool = self.executor.get_tool(parse_event.name)
+        notify_controller_on_background_complete = True
+        if tool is not None and hasattr(tool, "config"):
+            notify_controller_on_background_complete = bool(
+                getattr(
+                    tool.config,
+                    "notify_controller_on_background_complete",
+                    True,
+                )
+            )
+        self._bg_controller_notify[job_id] = notify_controller_on_background_complete
 
         # Three-level decision for execution mode
         if not is_direct:
@@ -340,6 +351,7 @@ class AgentHandlersMixin(AgentToolsMixin):
                 kind="tool",
                 name=parse_event.name,
                 tool_call_id=tool_call_id,
+                notify_controller_on_background_complete=notify_controller_on_background_complete,
             )
 
         logger.debug(
@@ -365,6 +377,13 @@ class AgentHandlersMixin(AgentToolsMixin):
         sa_tool_call_id = parse_event.args.pop("_tool_call_id", None)
         full_task = parse_event.args.get("task", "")
         job_id, is_bg = await self._start_subagent_async(parse_event)
+        cfg = self.subagent_manager._configs.get(parse_event.name)
+        notify_controller_on_background_complete = True
+        if cfg is not None:
+            notify_controller_on_background_complete = bool(
+                getattr(cfg, "notify_controller_on_background_complete", True)
+            )
+        self._bg_controller_notify[job_id] = notify_controller_on_background_complete
 
         sa_task = self.subagent_manager._tasks.get(job_id)
         handle = (
@@ -395,6 +414,7 @@ class AgentHandlersMixin(AgentToolsMixin):
                 kind="subagent",
                 name=parse_event.name,
                 tool_call_id=sa_tool_call_id,
+                notify_controller_on_background_complete=notify_controller_on_background_complete,
             )
             if sa_tool_call_id and native_tool_call_ids is not None:
                 native_tool_call_ids[job_id] = sa_tool_call_id

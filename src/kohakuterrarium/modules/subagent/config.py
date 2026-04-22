@@ -51,6 +51,8 @@ class SubAgentConfig:
         model: LLM model to use (None = inherit from parent)
         temperature: LLM temperature (None = inherit from parent)
         memory_path: Path to memory folder (for memory sub-agents)
+        notify_controller_on_background_complete: Whether background completion
+            should push a new event back into the parent controller loop
         extra: Additional configuration
     """
 
@@ -75,6 +77,7 @@ class SubAgentConfig:
     memory_path: str | None = None
     modifying_tools: set[str] | None = None
     tool_format: str | None = None  # None = inherit from parent
+    notify_controller_on_background_complete: bool = True
     extra: dict[str, Any] = field(default_factory=dict)
 
     def load_prompt(self, agent_path: Path | None = None) -> str:
@@ -159,6 +162,7 @@ class SubAgentConfig:
             "memory_path",
             "modifying_tools",
             "tool_format",
+            "notify_controller_on_background_complete",
             "extra",
         }
 

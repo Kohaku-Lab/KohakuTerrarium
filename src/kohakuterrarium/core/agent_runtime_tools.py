@@ -18,6 +18,12 @@ def _make_job_label(job_id: str) -> tuple[str, str]:
 
 
 class AgentRuntimeToolsMixin:
+    def _should_notify_controller_on_background_complete(self, job_id: str) -> bool:
+        meta = self._direct_job_meta.get(job_id)
+        if meta and "notify_controller_on_background_complete" in meta:
+            return bool(meta["notify_controller_on_background_complete"])
+        return bool(self._bg_controller_notify.get(job_id, True))
+
     def _notify_command_result(self, parse_event: CommandResultEvent) -> None:
         """Route command results to activity log (not user-facing output)."""
         activity = "command_error" if parse_event.error else "command_done"
@@ -166,4 +172,7 @@ class AgentRuntimeToolsMixin:
             )
 
         logger.info("Background job completed", job_id=job_id)
-        asyncio.create_task(self._process_event(event))
+        if self._should_notify_controller_on_background_complete(job_id):
+            asyncio.create_task(self._process_event(event))
+        else:
+            self._bg_controller_notify.pop(job_id, None)

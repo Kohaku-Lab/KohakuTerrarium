@@ -185,6 +185,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         kind: str,
         name: str,
         tool_call_id: str | None = None,
+        notify_controller_on_background_complete: bool = True,
     ) -> None:
         """Track a direct job so interrupt/cancel can finalize it reliably."""
         self._direct_job_meta[job_id] = {
@@ -193,11 +194,13 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             "tool_call_id": tool_call_id or job_id,
             "background": False,
             "interruptible": True,
+            "notify_controller_on_background_complete": notify_controller_on_background_complete,
         }
 
     def _clear_direct_job_tracking(self, job_id: str) -> None:
         self._active_handles.pop(job_id, None)
         self._direct_job_meta.pop(job_id, None)
+        self._bg_controller_notify.pop(job_id, None)
 
     def _emit_interrupted_activity(self, job_id: str, result: Any) -> None:
         """Emit terminal activity for an interrupted direct job."""

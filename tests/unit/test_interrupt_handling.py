@@ -1,10 +1,12 @@
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.agent_tools import AgentToolsMixin
+from kohakuterrarium.core.events import create_tool_complete_event
 from kohakuterrarium.core.job import JobResult
 from kohakuterrarium.modules.subagent.base import SubAgentResult
 from kohakuterrarium.serving.manager import KohakuManager
@@ -64,8 +66,55 @@ class _FakeAgentTools(AgentToolsMixin):
         self.output_router = _FakeOutputRouter()
         self._active_handles = {}
         self._direct_job_meta = {}
+        self._bg_controller_notify = {}
         self.executor = _FakeExecutor()
         self.subagent_manager = _FakeSubagentManager()
+        self._running = True
+        self.processed_events = []
+
+    async def _process_event(self, event):
+        self.processed_events.append(event)
+
+
+@pytest.mark.asyncio
+async def test_background_completion_notifies_controller_by_default():
+    agent = _FakeAgentTools()
+    event = create_tool_complete_event("bash_123", "done")
+
+    scheduled = []
+    real_create_task = asyncio.create_task
+
+    def _fake_create_task(coro):
+        task = real_create_task(coro)
+        scheduled.append(task)
+        return task
+
+    with patch(
+        "kohakuterrarium.core.agent_runtime_tools.asyncio.create_task",
+        _fake_create_task,
+    ):
+        agent._on_bg_complete(event)
+        await asyncio.gather(*scheduled)
+
+    assert agent.output_router.activities[0][0] == "tool_done"
+    assert agent.processed_events == [event]
+
+
+@pytest.mark.asyncio
+async def test_background_completion_can_skip_controller_notification_but_keep_activity():
+    agent = _FakeAgentTools()
+    agent._bg_controller_notify["bash_456"] = False
+    event = create_tool_complete_event("bash_456", "done")
+
+    with patch(
+        "kohakuterrarium.core.agent_runtime_tools.asyncio.create_task"
+    ) as create_task:
+        agent._on_bg_complete(event)
+
+    assert agent.output_router.activities[0][0] == "tool_done"
+    assert agent.processed_events == []
+    create_task.assert_not_called()
+    assert "bash_456" not in agent._bg_controller_notify
 
 
 @pytest.mark.asyncio

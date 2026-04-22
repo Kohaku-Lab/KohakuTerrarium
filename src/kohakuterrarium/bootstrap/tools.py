@@ -10,7 +10,7 @@ from kohakuterrarium.builtins.tool_catalog import get_builtin_tool
 from kohakuterrarium.core.config import AgentConfig
 from kohakuterrarium.core.loader import ModuleLoadError, ModuleLoader
 from kohakuterrarium.core.registry import Registry
-from kohakuterrarium.modules.tool.base import BaseTool
+from kohakuterrarium.modules.tool.base import BaseTool, ToolConfig
 from kohakuterrarium.modules.trigger.base import BaseTrigger
 from kohakuterrarium.modules.trigger.callable import CallableTriggerTool
 from kohakuterrarium.utils.logging import get_logger
@@ -51,7 +51,23 @@ def create_tool(
     """
     match tool_config.type:
         case "builtin":
-            tool = get_builtin_tool(tool_config.name)
+            raw_options = dict(tool_config.options or {})
+            tool_cfg_keys = {
+                "timeout",
+                "max_output",
+                "working_dir",
+                "env",
+                "notify_controller_on_background_complete",
+            }
+            tool_cfg = ToolConfig(
+                **{
+                    k: raw_options.pop(k)
+                    for k in list(raw_options)
+                    if k in tool_cfg_keys
+                },
+                extra=raw_options,
+            )
+            tool = get_builtin_tool(tool_config.name, config=tool_cfg)
             if tool is None:
                 logger.warning("Unknown built-in tool", tool_name=tool_config.name)
             return tool
