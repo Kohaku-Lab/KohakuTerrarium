@@ -1011,6 +1011,8 @@ export const useChatStore = defineStore("chat", {
         this._finishStream(source)
       } else if (data.type === "activity") {
         this._handleActivity(source, data)
+      } else if (data.type === "image") {
+        this._handleAssistantImage(source, data)
       } else if (data.type === "channel_message") {
         this._handleChannelMessage(data)
       } else if (data.type === "error") {
@@ -1553,6 +1555,30 @@ export const useChatStore = defineStore("chat", {
       } else {
         last.parts.push({ type: "text", content, _streaming: true })
       }
+    },
+
+    /** Append an assistant-emitted image to the active assistant message.
+     *
+     * Shape matches the user-image render path in ChatMessage.vue:
+     * `{type: "image_url", image_url: {url, detail}, meta: {...}}`.
+     * Any streaming text part loses its _streaming flag so further
+     * text chunks land in a fresh part after the image.
+     */
+    _handleAssistantImage(source, data) {
+      const msgs = this.messagesByTab[source]
+      if (!msgs) return
+      const last = this._ensureAssistantMsg(msgs)
+      for (const p of last.parts || []) {
+        if (p.type === "text") p._streaming = false
+      }
+      last.parts.push({
+        type: "image_url",
+        image_url: {
+          url: data.url,
+          detail: data.detail || "auto",
+        },
+        meta: data.meta || {},
+      })
     },
 
     _finishStream(source) {

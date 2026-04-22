@@ -11,6 +11,7 @@ from typing import Any
 
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.parsing import (
+    AssistantImageEvent,
     BlockEndEvent,
     BlockStartEvent,
     CommandEvent,
@@ -261,6 +262,37 @@ class OutputRouter:
 
             case BlockEndEvent(block_type=block_type):
                 self._handle_block_end(block_type)
+
+            case AssistantImageEvent():
+                self._handle_assistant_image(event)
+
+    def _handle_assistant_image(self, event: AssistantImageEvent) -> None:
+        """Fan out an assistant image to every attached output module.
+
+        Both the default output and every secondary output receives
+        the notification. Text-only outputs inherit the default
+        no-op; StreamOutput (API) pushes a JSON event to the WS
+        queue so the frontend can render live.
+        """
+        targets = [self.default_output, *self._secondary_outputs]
+        for target in targets:
+            handler = getattr(target, "on_assistant_image", None)
+            if handler is None:
+                continue
+            try:
+                handler(
+                    event.url,
+                    detail=event.detail,
+                    source_type=event.source_type,
+                    source_name=event.source_name,
+                    revised_prompt=event.revised_prompt,
+                )
+            except Exception as e:  # pragma: no cover — defensive
+                logger.debug(
+                    "on_assistant_image handler raised",
+                    error=str(e),
+                    exc_info=True,
+                )
 
     async def _handle_text(self, text: str) -> None:
         """Handle text event based on current state."""

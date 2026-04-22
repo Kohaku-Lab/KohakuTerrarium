@@ -124,6 +124,34 @@ class SessionOutput(OutputModule):
         self._flush_text_before_activity()
         self._record_activity(activity_type, name, info, {})
 
+    def on_assistant_image(
+        self,
+        url: str,
+        *,
+        detail: str = "auto",
+        source_type: str | None = None,
+        source_name: str | None = None,
+        revised_prompt: str | None = None,
+    ) -> None:
+        """Append an ``assistant_image`` event to the session log.
+
+        The image bytes are already on disk (written by the controller
+        via ``SessionStore.write_artifact``). This just records the
+        metadata so resume + event-log consumers can surface it.
+        """
+        self._flush_text_before_activity()
+        payload: dict = {
+            "url": url,
+            "detail": detail,
+        }
+        if source_type is not None:
+            payload["source_type"] = source_type
+        if source_name is not None:
+            payload["source_name"] = source_name
+        if revised_prompt is not None:
+            payload["revised_prompt"] = revised_prompt
+        self._record("assistant_image", payload)
+
     def on_activity_with_metadata(
         self, activity_type: str, detail: str, metadata: dict
     ) -> None:

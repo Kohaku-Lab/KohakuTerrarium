@@ -21,6 +21,10 @@ from typing import Any
 
 from kohakuvault import KVault, TextVault
 
+from kohakuterrarium.session.artifacts import (
+    artifacts_dir_for,
+    write_artifact_bytes,
+)
 from kohakuterrarium.session.history import normalize_resumable_events
 from kohakuterrarium.utils.logging import get_logger
 
@@ -85,7 +89,41 @@ class SessionStore:
         # Restore counters from existing data
         self._restore_counters()
 
+        # Artifacts directory — created lazily so stores backing
+        # transient in-memory sessions (tests, dry runs) stay fully
+        # tidy when no artifact is ever written.
+        self._artifacts_dir: Path | None = None
+
         logger.debug("SessionStore opened", path=self._path)
+
+    @property
+    def session_id(self) -> str:
+        """Session id — read from meta if set, else derived from the filename.
+
+        The stem of the ``.kohakutr`` file is the authoritative session
+        identifier (``<session_id>.kohakutr``). The meta-table value
+        is populated in ``init_meta``; the filename-stem fallback
+        keeps the property useful for stores opened without that call.
+        """
+        stored = self.meta.get("session_id") if "session_id" in self.meta else None
+        if stored:
+            return str(stored)
+        return Path(self._path).stem
+
+    @property
+    def artifacts_dir(self) -> Path:
+        """Session-local directory for binary artifacts.
+
+        Lives alongside the ``.kohakutr`` file at
+        ``<stem>.artifacts/``. Created on first access.
+        """
+        if self._artifacts_dir is None:
+            self._artifacts_dir = artifacts_dir_for(Path(self._path))
+        return self._artifacts_dir
+
+    def write_artifact(self, filename: str, data: bytes) -> Path:
+        """Write raw bytes to ``artifacts_dir/<filename>``. Traversal-safe."""
+        return write_artifact_bytes(self.artifacts_dir, filename, data)
 
     def _restore_counters(self) -> None:
         """Scan existing keys to restore sequence counters after restart."""

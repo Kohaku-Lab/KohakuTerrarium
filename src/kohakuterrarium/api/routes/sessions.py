@@ -1,11 +1,13 @@
 """Session management routes. List saved sessions and resume them."""
 
+import mimetypes
 import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 
 from kohakuterrarium.api.deps import get_manager
 from kohakuterrarium.utils.logging import get_logger
@@ -462,3 +464,59 @@ async def search_session_memory(
             for r in results
         ],
     }
+
+
+# --------------------------------------------------------------------
+# Artifacts (generated images, etc.)
+# --------------------------------------------------------------------
+
+
+def _resolve_artifacts_dir(session_name: str) -> Path:
+    """Return the artifacts dir for a session, or 404 if it doesn't exist.
+
+    Mirrors ``SessionStore.artifacts_dir``: sibling directory named
+    ``<session-stem>.artifacts`` alongside the ``.kohakutr`` file.
+    Either an existing session file OR an existing ``.artifacts/``
+    directory is enough — there are transient runs where the store
+    writes artifacts before the .kohakutr is closed.
+    """
+    # Fast path: ``<name>.artifacts/`` directly under the sessions dir.
+    direct = _SESSION_DIR / f"{session_name}.artifacts"
+    if direct.is_dir():
+        return direct
+    # Fallback: resolve via the session file stem (handles ``.kt``).
+    session_path = _resolve_session_path(session_name)
+    if session_path is not None:
+        sibling = session_path.parent / f"{session_path.stem}.artifacts"
+        if sibling.is_dir():
+            return sibling
+    raise HTTPException(status_code=404, detail="session artifacts not found")
+
+
+@router.get("/{session_name}/artifacts/{filepath:path}")
+async def get_session_artifact(session_name: str, filepath: str):
+    """Serve a file from ``<session>.artifacts/`` with path-traversal guards.
+
+    ``filepath`` is the path relative to the session's artifacts
+    directory (e.g. ``generated_images/cat.png``). The resolved
+    location must stay inside the artifacts dir — any ``..`` or
+    absolute path is rejected.
+    """
+    decoded = unquote(filepath)
+    if not decoded:
+        raise HTTPException(status_code=400, detail="empty filepath")
+    rel = Path(decoded)
+    if rel.is_absolute() or any(part in ("..", "") for part in rel.parts):
+        raise HTTPException(status_code=400, detail="invalid filepath")
+
+    artifacts = _resolve_artifacts_dir(session_name)
+    candidate = (artifacts / rel).resolve()
+    try:
+        candidate.relative_to(artifacts.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="path escapes artifacts")
+    if not candidate.is_file():
+        raise HTTPException(status_code=404, detail="artifact not found")
+
+    mime, _ = mimetypes.guess_type(candidate.name)
+    return FileResponse(candidate, media_type=mime or "application/octet-stream")

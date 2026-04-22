@@ -102,7 +102,7 @@
     </div>
   </div>
 
-  <!-- Assistant message (parts-based: ordered text + tools) -->
+  <!-- Assistant message (parts-based: ordered text + tools + images) -->
   <div v-else-if="message.role === 'assistant' && message.parts" class="max-w-[90%] group relative">
     <template v-for="(part, pi) in message.parts" :key="pi">
       <!-- Text part -->
@@ -112,6 +112,10 @@
       <!-- Tool/subagent part -->
       <div v-else-if="part.type === 'tool'" class="mb-1.5">
         <ToolCallBlock :tc="part" :expanded="expandedTools[part.id]" @toggle="toggleTool(part.id)" />
+      </div>
+      <!-- Image part (same render + CSS as user-side attached images) -->
+      <div v-else-if="part.type === 'image_url'" class="mb-1.5">
+        <img :src="part.image_url?.url" class="chat-inline-image" :alt="part.meta?.source_name || 'generated image'" />
       </div>
     </template>
     <!-- Hover actions -->

@@ -826,6 +826,12 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
         """
         self.session_store = store
 
+        # Give the controller direct access — it needs ``write_artifact``
+        # + ``session_id`` to persist generated images (see
+        # ``_save_structured_assistant_parts``).
+        if hasattr(self, "controller") and self.controller is not None:
+            self.controller.session_store = store
+
         self._session_output = SessionOutput(
             self.config.name,
             store,

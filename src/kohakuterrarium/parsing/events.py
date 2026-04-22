@@ -152,6 +152,31 @@ class CommandResultEvent:
     error: str | None = None
 
 
+@dataclass
+class AssistantImageEvent:
+    """Structured image part emitted by the assistant mid / end of turn.
+
+    Produced by the controller after persisting an ImagePart returned
+    via a provider-native tool (e.g. Codex `image_generation`). The
+    output router forwards this to secondary outputs so live UIs can
+    render the image without waiting for a save/resume round-trip.
+
+    Attributes:
+        url: Final image URL — typically a session-local
+            ``/api/sessions/{id}/artifacts/...`` path.
+        detail: Vision detail hint from the original ImagePart.
+        source_type: Optional tag (e.g. ``"image_gen"``).
+        source_name: Optional id / filename hint.
+        revised_prompt: Optional backend-revised prompt text.
+    """
+
+    url: str
+    detail: str = "auto"
+    source_type: str | None = None
+    source_name: str | None = None
+    revised_prompt: str | None = None
+
+
 # Union type for all parse events
 ParseEvent = (
     TextEvent
@@ -162,6 +187,7 @@ ParseEvent = (
     | OutputEvent
     | BlockStartEvent
     | BlockEndEvent
+    | AssistantImageEvent
 )
 
 

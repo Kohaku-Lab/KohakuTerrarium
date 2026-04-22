@@ -21,6 +21,7 @@ Exports:
 """
 
 from kohakuterrarium.parsing.events import (
+    AssistantImageEvent,
     BlockEndEvent,
     BlockStartEvent,
     CommandEvent,
@@ -93,6 +94,7 @@ __all__ = [
     "OutputEvent",
     "BlockStartEvent",
     "BlockEndEvent",
+    "AssistantImageEvent",
     "is_action_event",
     "is_text_event",
     # Extraction helpers

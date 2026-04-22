@@ -369,9 +369,16 @@ def create_message(
         case "user":
             return UserMessage(content, **kwargs)
         case "assistant":
-            # Assistant messages are typically text-only from LLM
+            # Assistant messages are usually text, but providers that
+            # emit structured content (e.g. Codex image_generation)
+            # deliver ImagePart entries in a list — preserve those so
+            # the image survives serialization / resume. Lists that
+            # contain only text parts still get flattened for cheaper
+            # downstream handling.
             if isinstance(content, list):
-                content = "\n".join(p.text for p in content if isinstance(p, TextPart))
+                if any(not isinstance(p, TextPart) for p in content):
+                    return AssistantMessage(content, **kwargs)
+                content = "\n".join(p.text for p in content)
             return AssistantMessage(content, **kwargs)
         case "tool":
             if "tool_call_id" not in kwargs:

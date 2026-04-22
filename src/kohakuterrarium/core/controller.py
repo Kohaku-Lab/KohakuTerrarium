@@ -14,6 +14,7 @@ import asyncio
 import base64
 import re
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator
@@ -22,18 +23,6 @@ if TYPE_CHECKING:
     from kohakuterrarium.llm.base import ToolSchema
 
 from kohakuterrarium.builtins.tools.read import ReadTool
-from kohakuterrarium.llm.message import ContentPart, FilePart, ImagePart, TextPart
-from kohakuterrarium.llm.tools import build_tool_schemas
-from kohakuterrarium.parsing import (
-    CommandEvent,
-    CommandResultEvent,
-    ParseEvent,
-    ParserConfig,
-    StreamParser,
-    SubAgentCallEvent,
-    TextEvent,
-    ToolCallEvent,
-)
 from kohakuterrarium.commands.base import Command, CommandResult
 from kohakuterrarium.commands.read import (
     InfoCommand,
@@ -47,12 +36,47 @@ from kohakuterrarium.core.executor import Executor
 from kohakuterrarium.core.job import JobResult, JobStatus, JobStore
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.base import LLMProvider
+from kohakuterrarium.llm.message import ContentPart, FilePart, ImagePart, TextPart
+from kohakuterrarium.llm.tools import build_provider_native_tools, build_tool_schemas
 from kohakuterrarium.modules.tool.base import ToolInfo
+from kohakuterrarium.parsing import (
+    AssistantImageEvent,
+    CommandEvent,
+    CommandResultEvent,
+    ParseEvent,
+    ParserConfig,
+    StreamParser,
+    SubAgentCallEvent,
+    TextEvent,
+    ToolCallEvent,
+)
 from kohakuterrarium.parsing.format import BRACKET_FORMAT, XML_FORMAT
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 _FILE_PLACEHOLDER_RE = re.compile(r"\[\[file:(?P<ref>[^\]]+)\]\]")
+
+
+def _merge_text_and_parts(
+    text: str,
+    structured_parts: list[ContentPart],
+) -> str | list[ContentPart]:
+    """Combine streamed assistant text with structured parts.
+
+    - No structured parts → return the raw text (cheapest path, keeps
+      all existing providers / text-only sessions unchanged).
+    - Structured parts present → return a list with a ``TextPart``
+      first (when text is non-empty) followed by the structured parts.
+      The ``Conversation`` layer serialises that list using the nested
+      ``image_url`` shape (see Conversation._serialize_content).
+    """
+    if not structured_parts:
+        return text
+    merged: list[ContentPart] = []
+    if text:
+        merged.append(TextPart(text=text))
+    merged.extend(structured_parts)
+    return merged
 
 
 @dataclass
@@ -168,6 +192,12 @@ class Controller:
         # Token usage tracking
         self._last_usage: dict[str, int] = {}
 
+        # Session store for artifact persistence. Attached by the
+        # parent agent after construction via ``attach_session_store``
+        # so the controller can write generated images (and any future
+        # binary artifact) to disk alongside the session file.
+        self.session_store: Any = None
+
         # Event queue
         self._event_queue: asyncio.Queue[TriggerEvent] = asyncio.Queue()
         self._pending_events: list[TriggerEvent] = []
@@ -234,6 +264,12 @@ class Controller:
     def _get_native_tool_schemas(self) -> "list[ToolSchema]":
         """Build native tool schemas from registry."""
         return build_tool_schemas(self.registry)
+
+    def _get_provider_native_tools(self) -> list:
+        """Collect tools the active provider should translate into
+        wire-format built-in tool specs. See
+        :func:`build_provider_native_tools`."""
+        return build_provider_native_tools(self.registry)
 
     def _setup_system_prompt(self) -> None:
         """Setup initial system prompt."""
@@ -408,8 +444,13 @@ class Controller:
         """
         assistant_content = ""
 
+        provider_native_tools = self._get_provider_native_tools()
+
         async for chunk in self.llm.chat(
-            messages, stream=True, tools=tool_schemas or None
+            messages,
+            stream=True,
+            tools=tool_schemas or None,
+            provider_native_tools=provider_native_tools or None,
         ):
             if self._interrupted:
                 break
@@ -418,6 +459,20 @@ class Controller:
                 yield TextEvent(text=chunk)
 
         self._log_token_usage()
+
+        # Structured assistant parts — e.g. images from a provider-
+        # native image-generation tool. Persist them, rewrite URLs,
+        # and emit a StreamEvent per image so the UI can render live.
+        structured_parts = self._collect_structured_assistant_parts()
+        for part in structured_parts:
+            if isinstance(part, ImagePart):
+                yield AssistantImageEvent(
+                    url=part.url,
+                    detail=part.detail,
+                    source_type=part.source_type,
+                    source_name=part.source_name,
+                    revised_prompt=getattr(part, "revised_prompt", None),
+                )
 
         # Extract native tool calls from LLM response
         native_calls = (
@@ -453,14 +508,98 @@ class Controller:
                     yield ToolCallEvent(name=tc.name, args=call_args, raw=tc.arguments)
 
             # Append assistant message WITH tool_calls metadata
+            final_content = _merge_text_and_parts(assistant_content, structured_parts)
             self.conversation.append(
                 "assistant",
-                assistant_content or "",
+                final_content,
                 tool_calls=tool_calls_data,
             )
         else:
             # No tool calls: normal assistant message
-            self.conversation.append("assistant", assistant_content)
+            final_content = _merge_text_and_parts(assistant_content, structured_parts)
+            self.conversation.append("assistant", final_content)
+
+    # ------------------------------------------------------------------
+    # Structured assistant content (images etc. from provider-native tools)
+    # ------------------------------------------------------------------
+
+    _DATA_URL_RE = re.compile(r"^data:image/(?P<ext>[\w+-]+);base64,(?P<b64>.*)$")
+
+    def _collect_structured_assistant_parts(self) -> list[ContentPart]:
+        """Pull structured parts the provider captured during the turn.
+
+        Providers surface these via
+        ``last_assistant_content_parts``. For every ``ImagePart`` whose
+        URL is a ``data:image/…`` payload, we decode the bytes, write
+        them into the session's artifacts directory, and rewrite the
+        URL to a served ``/api/sessions/{id}/artifacts/…`` path so the
+        conversation JSON stays small and the frontend can stream the
+        image lazily. Providers without structured output return
+        ``None`` here and this is a no-op.
+        """
+        source = getattr(self.llm, "last_assistant_content_parts", None)
+        if source is None:
+            return []
+        materialized: list[ContentPart] = []
+        for part in source:
+            if isinstance(part, ImagePart):
+                materialized.append(self._persist_image_part(part))
+            else:
+                materialized.append(part)
+        return materialized
+
+    def _persist_image_part(self, part: ImagePart) -> ImagePart:
+        """Persist a data-URL image part to disk, return a rewritten part.
+
+        Falls back to the original ImagePart (with the data URL) if no
+        session store is attached or the URL isn't a recognised data
+        URL — keeping behavior correct in unit tests / ephemeral runs.
+        """
+        match = self._DATA_URL_RE.match(part.url or "")
+        if not match:
+            return part
+        store = getattr(self, "session_store", None)
+        if store is None:
+            return part
+
+        ext = match.group("ext").split(";", 1)[0].lower()
+        b64 = match.group("b64")
+        try:
+            raw = base64.b64decode(b64, validate=False)
+        except Exception as e:  # pragma: no cover — defensive
+            logger.warning("Failed to decode assistant image", error=str(e))
+            return part
+
+        base_name = (part.source_name or f"img_{int(time.time() * 1000)}").strip()
+        safe_stem = re.sub(r"[^\w.-]", "_", base_name) or "img"
+        safe_ext = re.sub(r"[^\w]", "", ext) or "png"
+        filename = f"generated_images/{safe_stem}.{safe_ext}"
+        try:
+            disk_path = store.write_artifact(filename, raw)
+        except Exception as e:
+            logger.warning(
+                "Failed to persist assistant image — falling back to data URL",
+                error=str(e),
+            )
+            return part
+
+        session_id = getattr(store, "session_id", "") or ""
+        if session_id:
+            served = f"/api/sessions/{session_id}/artifacts/{filename}"
+        else:
+            served = disk_path.as_uri()
+
+        new_part = ImagePart(
+            url=served,
+            detail=part.detail,
+            source_type=part.source_type,
+            source_name=part.source_name,
+        )
+        # Preserve opaque metadata (e.g. revised_prompt) for the event log.
+        for attr in ("revised_prompt",):
+            if hasattr(part, attr):
+                setattr(new_part, attr, getattr(part, attr))
+        return new_part
 
     async def _run_text_completion(
         self, messages: list[dict]
@@ -478,7 +617,13 @@ class Controller:
         self._parser = self._get_parser()
         assistant_content = ""
 
-        async for chunk in self.llm.chat(messages, stream=True):
+        provider_native_tools = self._get_provider_native_tools()
+
+        async for chunk in self.llm.chat(
+            messages,
+            stream=True,
+            provider_native_tools=provider_native_tools or None,
+        ):
             if self._interrupted:
                 break
             assistant_content += chunk
@@ -731,7 +876,20 @@ class Controller:
             async for event in self._run_text_completion(messages):
                 yield event
             self._log_token_usage()
-            self.conversation.append("assistant", self._last_assistant_content)
+            structured = self._collect_structured_assistant_parts()
+            for part in structured:
+                if isinstance(part, ImagePart):
+                    yield AssistantImageEvent(
+                        url=part.url,
+                        detail=part.detail,
+                        source_type=part.source_type,
+                        source_name=part.source_name,
+                        revised_prompt=getattr(part, "revised_prompt", None),
+                    )
+            self.conversation.append(
+                "assistant",
+                _merge_text_and_parts(self._last_assistant_content, structured),
+            )
 
         # Plugin post-hook: observe response and usage
         if self.plugins:

@@ -98,6 +98,39 @@ class StreamOutput(OutputModule):
         )
         self._n += 1
 
+    def on_assistant_image(
+        self,
+        url: str,
+        *,
+        detail: str = "auto",
+        source_type: str | None = None,
+        source_name: str | None = None,
+        revised_prompt: str | None = None,
+    ) -> None:
+        """Push an assistant image event to the WS queue.
+
+        The frontend chat store listens for ``type: "image"`` events
+        and appends a matching ``image_url`` content part to the
+        active assistant message, rendered by the existing
+        ``chat-inline-image`` path.
+        """
+        msg: dict = {
+            "type": "image",
+            "url": url,
+            "detail": detail,
+        }
+        meta: dict = {}
+        if source_type is not None:
+            meta["source_type"] = source_type
+        if source_name is not None:
+            meta["source_name"] = source_name
+        if revised_prompt is not None:
+            meta["revised_prompt"] = revised_prompt
+        if meta:
+            msg["meta"] = meta
+        self._put(msg)
+        self._n += 1
+
     def on_activity_with_metadata(
         self, activity_type: str, detail: str, metadata: dict
     ) -> None:

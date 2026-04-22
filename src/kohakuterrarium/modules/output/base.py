@@ -66,6 +66,23 @@ class OutputModule(Protocol):
         """
         ...
 
+    def on_assistant_image(
+        self,
+        url: str,
+        *,
+        detail: str = "auto",
+        source_type: str | None = None,
+        source_name: str | None = None,
+        revised_prompt: str | None = None,
+    ) -> None:
+        """Called when the assistant emits a structured image part.
+
+        Implementations that render to a user (stdout / TUI / WS)
+        should surface the image. Default is no-op for text-only
+        outputs.
+        """
+        ...
+
     async def on_user_input(self, text: str) -> None:
         """Called when user input is received, before processing starts.
 
@@ -147,6 +164,18 @@ class BaseOutputModule(ABC):
 
     def on_activity(self, activity_type: str, detail: str) -> None:
         """Called when tool/subagent activity occurs. Default is no-op."""
+        pass
+
+    def on_assistant_image(
+        self,
+        url: str,
+        *,
+        detail: str = "auto",
+        source_type: str | None = None,
+        source_name: str | None = None,
+        revised_prompt: str | None = None,
+    ) -> None:
+        """Called when the assistant emits a structured image. Default no-op."""
         pass
 
     async def on_user_input(self, text: str) -> None:

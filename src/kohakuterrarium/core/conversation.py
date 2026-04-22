@@ -278,44 +278,61 @@ class Conversation:
     # Serialization
 
     def _serialize_content(self, content: MessageContent) -> Any:
-        """Serialize message content (text or multimodal) to JSON-compatible format."""
+        """Serialize message content to JSON-compatible format.
+
+        Emits the **nested** OpenAI-style ``image_url`` shape to match
+        ``ImagePart.to_dict()`` and the Chat Completions wire format:
+
+        ``{"type":"image_url","image_url":{"url":..,"detail":..},"meta":{..}}``
+
+        The legacy flat shape (``{url, detail, source_type, source_name}``
+        at the top level) remains readable via ``_deserialize_content``.
+        """
         if isinstance(content, str):
             return content
 
-        # Multimodal content - serialize each part
         parts = []
         for part in content:
             if isinstance(part, TextPart):
                 parts.append({"type": "text", "text": part.text})
             elif isinstance(part, ImagePart):
-                parts.append(
-                    {
-                        "type": "image_url",
-                        "url": part.url,
-                        "detail": part.detail,
-                        "source_type": part.source_type,
-                        "source_name": part.source_name,
-                    }
-                )
+                parts.append(part.to_dict())
         return parts
 
     def _deserialize_content(self, content: Any) -> MessageContent:
-        """Deserialize message content from JSON format."""
+        """Deserialize message content from JSON.
+
+        Accepts both the current nested shape and the legacy flat shape
+        so sessions written before the normalization continue to load.
+        """
         if isinstance(content, str):
             return content
 
-        # Multimodal content - deserialize each part
         parts: list[ContentPart] = []
         for item in content:
-            if item.get("type") == "text":
+            kind = item.get("type")
+            if kind == "text":
                 parts.append(TextPart(text=item.get("text", "")))
-            elif item.get("type") == "image_url":
+            elif kind == "image_url":
+                # Nested (current) vs flat (legacy) shape.
+                if "image_url" in item and isinstance(item["image_url"], dict):
+                    img = item["image_url"]
+                    url = img.get("url", "")
+                    detail = img.get("detail", "low")
+                    meta = item.get("meta") or {}
+                    source_type = meta.get("source_type")
+                    source_name = meta.get("source_name")
+                else:
+                    url = item.get("url", "")
+                    detail = item.get("detail", "low")
+                    source_type = item.get("source_type")
+                    source_name = item.get("source_name")
                 parts.append(
                     ImagePart(
-                        url=item.get("url", ""),
-                        detail=item.get("detail", "low"),
-                        source_type=item.get("source_type"),
-                        source_name=item.get("source_name"),
+                        url=url,
+                        detail=detail,
+                        source_type=source_type,
+                        source_name=source_name,
                     )
                 )
         return parts
