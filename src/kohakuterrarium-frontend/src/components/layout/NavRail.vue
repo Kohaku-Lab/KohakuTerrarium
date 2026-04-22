@@ -58,6 +58,11 @@
       <NavItem :expanded="expanded" :active="isExactActive" icon="i-carbon-catalog" :label="t('common.registry')" @click="navigate" />
     </router-link>
 
+    <!-- Studio (authoring tool — isolated /studio/* subtree) -->
+    <router-link v-slot="{ navigate, isActive }" to="/studio" custom>
+      <NavItem :expanded="expanded" :active="isActive" icon="i-carbon-tool-box" :label="t('studio.nav.studio')" @click="navigate" />
+    </router-link>
+
     <!-- Settings -->
     <router-link v-slot="{ navigate, isExactActive }" to="/settings" custom>
       <NavItem :expanded="expanded" :active="isExactActive" icon="i-carbon-settings" :label="t('common.settings')" @click="navigate" />
