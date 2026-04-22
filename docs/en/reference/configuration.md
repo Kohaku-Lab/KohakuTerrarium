@@ -200,7 +200,7 @@ List of tool entries. Each entry is a dict or a shorthand string
 | `module` | str | — | For `custom` (e.g. `./custom/tools/my_tool.py`) or `package`. |
 | `class` | str | — | Class to instantiate for `custom`/`package`. YAML key is `class`; stored on the `class_name` dataclass attribute. |
 | `doc` | str | — | Override for the skill documentation file. |
-| `options` | dict | `{}` | Tool-specific options. |
+| `options` | dict | `{}` | Tool-specific options. For builtins, top-level keys such as `timeout`, `max_output`, `working_dir`, `env`, and `notify_controller_on_background_complete` are mapped into `ToolConfig`; remaining keys stay in `config.extra`. |
 
 Tool types:
 
@@ -232,7 +232,23 @@ tools:
 | `tools` | list[str] | `[]` | Tools this sub-agent is allowed to use. |
 | `can_modify` | bool | `false` | Whether the sub-agent can perform mutating operations. |
 | `interactive` | bool | `false` | Stay alive across turns; receive context updates. |
-| `options` | dict | `{}` | Sub-agent-specific options. |
+| `options` | dict | `{}` | Sub-agent-specific options. Inline sub-agent config fields such as `notify_controller_on_background_complete` are read from here when supported by `SubAgentConfig`. |
+
+Background completion note:
+
+```yaml
+tools:
+  - name: web_fetch
+    type: builtin
+    notify_controller_on_background_complete: false
+
+subagents:
+  - name: research
+    type: builtin
+    notify_controller_on_background_complete: false
+```
+
+With this flag set to `false`, the background job still emits normal activity/log/output updates, but its completion does not push a fresh event back into the controller loop.
 
 ### Triggers
 
