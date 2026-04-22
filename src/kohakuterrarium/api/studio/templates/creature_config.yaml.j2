@@ -1,0 +1,22 @@
+name: {{ name }}
+version: "1.0"
+{% if base_config %}
+base_config: {{ base_config | tojson }}
+{% endif -%}
+{% if description %}
+description: {{ description | tojson }}
+{% endif %}
+system_prompt_file: prompts/system.md
+skill_mode: dynamic
+
+controller:
+  tool_format: native
+  reasoning_effort: high
+
+tools: []
+
+subagents: []
+
+output:
+  type: stdout
+  controller_direct: true
