@@ -1,0 +1,19 @@
+"""
+{{ description }}
+"""
+
+from kohakuterrarium.modules.subagent.config import SubAgentConfig
+
+{{ system_prompt_var }} = {{ system_prompt | tojson }}
+
+{{ config_var }} = SubAgentConfig(
+    name={{ name | tojson }},
+    description={{ description | tojson }},
+    tools={{ tools | tojson }},
+    system_prompt={{ system_prompt_var }},
+    can_modify={{ can_modify }},
+    stateless={{ stateless }},
+{%- if interactive %}
+    interactive=True,
+{%- endif %}
+)

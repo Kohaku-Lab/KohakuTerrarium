@@ -1,0 +1,12 @@
+"""
+{{ description }}
+"""
+
+from typing import Any
+
+
+class {{ class_name }}:
+    """Output module: {{ name }}."""
+
+    async def write_output(self, data: Any) -> None:
+{{ body | indent(8, True) }}

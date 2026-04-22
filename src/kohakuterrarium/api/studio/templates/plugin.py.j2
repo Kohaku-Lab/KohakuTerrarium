@@ -1,0 +1,17 @@
+"""
+{{ description }}
+"""
+
+from kohakuterrarium.modules.plugin.base import BasePlugin, PluginContext
+from kohakuterrarium.utils.logging import get_logger
+
+logger = get_logger(__name__)
+
+
+class {{ class_name }}(BasePlugin):
+    name = {{ name | tojson }}
+    priority = {{ priority }}
+{% for hook in enabled_hooks %}
+    async def {{ hook.name }}(self{{ hook.args_signature }}){{ hook.return_hint }}:
+{{ hook.body | indent(8, True) }}
+{% endfor %}

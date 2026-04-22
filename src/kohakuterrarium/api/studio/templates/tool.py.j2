@@ -1,0 +1,35 @@
+"""
+{{ description }}
+"""
+
+from typing import Any
+
+from kohakuterrarium.modules.tool.base import (
+    BaseTool,
+    ExecutionMode,
+    ToolResult,
+)
+from kohakuterrarium.utils.logging import get_logger
+
+logger = get_logger(__name__)
+
+
+class {{ class_name }}(BaseTool):
+{%- if needs_context %}
+    needs_context = True
+{%- endif %}
+
+    @property
+    def tool_name(self) -> str:
+        return {{ tool_name | tojson }}
+
+    @property
+    def description(self) -> str:
+        return {{ description | tojson }}
+
+    @property
+    def execution_mode(self) -> ExecutionMode:
+        return ExecutionMode.{{ execution_mode | upper }}
+
+    async def _execute(self, args: dict[str, Any], **kwargs: Any) -> ToolResult:
+{{ execute_body | indent(8, True) }}
