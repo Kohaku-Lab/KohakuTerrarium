@@ -5,14 +5,21 @@ from typing import Any
 
 from kohakuterrarium.cli.auth import login_cli
 from kohakuterrarium.cli.config_mcp import add_or_update_mcp, delete_mcp, list_mcp
+from kohakuterrarium.cli.config_prompts import confirm as _confirm
+from kohakuterrarium.cli.config_prompts import format_profile as _format_profile
+from kohakuterrarium.cli.config_prompts import prompt as _prompt
+from kohakuterrarium.cli.config_prompts import prompt_choice as _prompt_choice
+from kohakuterrarium.cli.config_prompts import prompt_int as _prompt_int
 from kohakuterrarium.cli.config_prompts import (
-    confirm as _confirm,
-    format_profile as _format_profile,
-    prompt as _prompt,
-    prompt_choice as _prompt_choice,
-    prompt_int as _prompt_int,
+    prompt_native_tools as _prompt_native_tools,
+)
+from kohakuterrarium.cli.config_prompts import (
     prompt_optional_float as _prompt_optional_float,
+)
+from kohakuterrarium.cli.config_prompts import (
     prompt_optional_json as _prompt_optional_json,
+)
+from kohakuterrarium.cli.config_prompts import (
     prompt_variation_groups as _prompt_variation_groups,
 )
 from kohakuterrarium.llm.api_keys import KEYS_PATH, list_api_keys, save_api_key
@@ -88,10 +95,16 @@ def _backend_list() -> int:
     if not backends:
         print("No providers.")
         return 0
-    print(f"{'Name':<24} {'Backend Type':<12} {'Base URL'}")
-    print("-" * 90)
+    print(
+        f"{'Name':<24} {'Backend':<10} {'Provider name':<16} {'Native tools':<22} {'Base URL'}"
+    )
+    print("-" * 110)
     for name, backend in sorted(backends.items()):
-        print(f"{name:<24} {backend.backend_type:<12} {backend.base_url}")
+        native = ",".join(sorted(backend.provider_native_tools)) or "-"
+        print(
+            f"{name:<24} {backend.backend_type:<10} "
+            f"{(backend.provider_name or '-'):<16} {native:<22} {backend.base_url}"
+        )
     return 0
 
 
@@ -102,15 +115,25 @@ def _backend_add_or_update(name: str | None = None) -> int:
     if not backend_name:
         print("Provider name is required.")
         return 1
+    backend_type = _prompt_choice(
+        "Backend type",
+        ["openai", "codex", "anthropic"],
+        existing.backend_type if existing else "openai",
+    )
+    provider_name = _prompt(
+        "Provider identity (for native-tool compatibility)",
+        existing.provider_name if existing and existing.provider_name else backend_name,
+    )
+    native_tools = _prompt_native_tools(
+        list(existing.provider_native_tools) if existing else []
+    )
     backend = LLMBackend(
         name=backend_name,
-        backend_type=_prompt_choice(
-            "Backend type",
-            ["openai", "codex", "anthropic"],
-            existing.backend_type if existing else "openai",
-        ),
+        backend_type=backend_type,
         base_url=_prompt("Base URL", existing.base_url if existing else ""),
         api_key_env=_prompt("API key env", existing.api_key_env if existing else ""),
+        provider_name=provider_name.strip(),
+        provider_native_tools=native_tools,
     )
     save_backend(backend)
     print(f"Saved provider: {backend.name}")
@@ -180,27 +203,40 @@ def _llm_list(include_builtins: bool = False) -> int:
         return 0
     print(f"Profiles file: {PROFILES_PATH}")
     print()
-    print(f"  {'Name':<24} {'Provider':<14} {'Model':<32} {'Groups':<18} {'Default'}")
+    print(f"  {'Provider/Name':<36} {'Model':<32} {'Groups':<18} {'Default'}")
     print("-" * 100)
-    for name, profile in sorted(profiles.items()):
-        marker = "*" if name == default_name else ""
-        preset = _get_preset_definition(name)
+    for (provider, name), profile in sorted(profiles.items()):
+        identifier = f"{provider}/{name}"
+        marker = "*" if default_name in {identifier, name} else ""
+        preset = _get_preset_definition(name, provider)
         group_summary = (
             ",".join(sorted((preset.variation_groups or {}).keys())) if preset else ""
         )
         print(
-            f"  {name:<24} "
-            f"{profile.provider:<14} "
+            f"  {identifier:<36} "
             f"{profile.model:<32} "
             f"{group_summary:<18} {marker}"
         )
     print()
     print("Tip: `kt config llm list --all` to include built-in presets.")
+    print("Tip: Reference models as 'provider/name' (e.g. 'codex/gpt-5.4').")
     return 0
 
 
+def _split_identifier(name: str) -> tuple[str, str]:
+    if "/" in name:
+        prov, bare = name.split("/", 1)
+        return prov, bare
+    return "", name
+
+
 def _llm_show(name: str) -> int:
-    profile = get_profile(name)
+    provider, bare = _split_identifier(name)
+    try:
+        profile = get_profile(bare, provider)
+    except ValueError as e:
+        print(str(e))
+        return 1
     if not profile:
         print(f"Preset not found: {name}")
         return 1
@@ -209,24 +245,31 @@ def _llm_show(name: str) -> int:
 
 
 def _llm_add_or_update(name: str | None = None) -> int:
-    existing = get_profile(name) if name else None
-    profile_name = name or _prompt("Preset name")
+    arg_provider, arg_name = _split_identifier(name) if name else ("", "")
+    existing = None
+    if arg_name:
+        try:
+            existing = get_profile(arg_name, arg_provider)
+        except ValueError:
+            existing = None
+    profile_name = arg_name or _prompt("Preset name")
     if not profile_name:
         print("Preset name is required.")
         return 1
 
     providers = sorted(load_backends().keys())
-    provider_name = _prompt_choice(
-        "Provider",
-        providers,
-        existing.provider if existing and existing.provider else providers[0],
+    default_prov = arg_provider or (
+        existing.provider if existing and existing.provider else providers[0]
     )
+    provider_name = _prompt_choice("Provider", providers, default_prov)
     model = _prompt("API model name", existing.model if existing else "")
     if not model:
         print("Model is required.")
         return 1
 
-    existing_preset = _get_preset_definition(profile_name) if profile_name else None
+    existing_preset = (
+        _get_preset_definition(profile_name, provider_name) if profile_name else None
+    )
 
     profile = LLMPreset(
         name=profile_name,
@@ -255,23 +298,31 @@ def _llm_add_or_update(name: str | None = None) -> int:
         ),
     )
     save_profile(profile)
-    print(f"Saved preset: {profile.name}")
+    identifier = f"{profile.provider}/{profile.name}"
+    print(f"Saved preset: {identifier}")
     if _confirm("Set as default model?", default=False):
-        set_default_model(profile.name)
-        print(f"Default model set to: {profile.name}")
+        set_default_model(identifier)
+        print(f"Default model set to: {identifier}")
     return 0
 
 
 def _llm_delete(name: str) -> int:
-    profile = get_profile(name)
+    provider, bare = _split_identifier(name)
+    try:
+        profile = get_profile(bare, provider)
+    except ValueError as e:
+        print(str(e))
+        return 1
     if not profile:
         print(f"Preset not found: {name}")
         return 1
-    if not _confirm(f"Delete preset '{name}'?", default=False):
+    if not _confirm(
+        f"Delete preset '{profile.provider}/{profile.name}'?", default=False
+    ):
         print("Cancelled.")
         return 0
-    if delete_profile(name):
-        print(f"Deleted preset: {name}")
+    if delete_profile(profile.name, profile.provider):
+        print(f"Deleted preset: {profile.provider}/{profile.name}")
         return 0
     print(f"Preset not found: {name}")
     return 1
@@ -282,12 +333,18 @@ def _llm_default(name: str | None) -> int:
         default_name = get_default_model()
         print(default_name or "")
         return 0
-    profile = get_profile(name)
+    provider, bare = _split_identifier(name)
+    try:
+        profile = get_profile(bare, provider)
+    except ValueError as e:
+        print(str(e))
+        return 1
     if not profile:
         print(f"Preset not found: {name}")
         return 1
-    set_default_model(name)
-    print(f"Default model set to: {name}")
+    identifier = f"{profile.provider}/{profile.name}"
+    set_default_model(identifier)
+    print(f"Default model set to: {identifier}")
     return 0
 
 

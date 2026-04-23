@@ -30,26 +30,38 @@ class ModelCommand(BaseUserCommand):
 
         entries = list_all()
         current = ""
-        current_name = ""
+        current_identifier = ""
         if context.agent:
-            current = getattr(context.agent.llm, "model", "")
-            current_name = getattr(context.agent, "_llm_override", "") or getattr(
-                context.agent.config, "llm_profile", ""
-            )
+            # Prefer the canonical ``provider/name[@variations]`` identifier
+            # so the "Current model:" line matches the switcher output.
+            get_ident = getattr(context.agent, "llm_identifier", None)
+            current_identifier = get_ident() if callable(get_ident) else ""
+            current = current_identifier or getattr(context.agent.llm, "model", "")
+        current_name = current_identifier
 
         available = [e for e in entries if e.get("available")]
+
+        def _identifier(entry: dict) -> str:
+            """Canonical ``provider/name`` identifier for an entry."""
+            provider = entry.get("provider") or entry.get("login_provider") or ""
+            return f"{provider}/{entry['name']}" if provider else entry["name"]
+
+        # Strip any ``@variations`` suffix from the current identifier
+        # so the row match works regardless of selected options.
+        current_base = (current_name.split("@", 1)[0]) if current_name else ""
+
+        def _is_current(entry: dict) -> bool:
+            ident = _identifier(entry)
+            if current_base and current_base in {ident, entry["name"]}:
+                return True
+            return not current_base and entry["model"] == current
 
         # Plain text for CLI/TUI
         lines = [f"Current model: {current}", ""]
         if available:
             lines.append("Available models:")
             for e in available:
-                marker = (
-                    " *"
-                    if e["name"] == current_name
-                    or (not current_name and e["model"] == current)
-                    else ""
-                )
+                marker = " *" if _is_current(e) else ""
                 variations = e.get("variation_groups") or {}
                 variation_note = ""
                 if variations:
@@ -59,14 +71,16 @@ class ModelCommand(BaseUserCommand):
                         parts.append(f"{group_name}={{{'|'.join(options)}}}")
                     variation_note = "  [" + "; ".join(parts) + "]"
                 lines.append(
-                    f"  {e['name']:<25} {e['model']:<35} "
-                    f"({e['login_provider']}){variation_note}{marker}"
+                    f"  {_identifier(e):<36} {e['model']:<35}{variation_note}{marker}"
                 )
         else:
             lines.append("No models with API keys configured.")
             lines.append("Run: kt login <provider>")
         lines.append("")
-        lines.append("Switch: /model <name>  (or /model name@group=option,…)")
+        lines.append(
+            "Switch: /model <provider>/<name>  "
+            "(e.g. /model codex/gpt-5.4, /model openai/gpt-5.4@reasoning=high)"
+        )
 
         return UserCommandResult(
             output="\n".join(lines),
@@ -74,14 +88,13 @@ class ModelCommand(BaseUserCommand):
                 "Switch Model",
                 [
                     {
-                        "value": e["name"],
-                        "label": e["name"],
+                        "value": _identifier(e),
+                        "label": _identifier(e),
                         "model": e["model"],
                         "provider": e.get("login_provider", ""),
                         "context": f"{e.get('max_context', 0) // 1000}k",
                         "variation_groups": e.get("variation_groups", {}),
-                        "selected": e["name"] == current_name
-                        or (not current_name and e["model"] == current),
+                        "selected": _is_current(e),
                     }
                     for e in available
                 ],

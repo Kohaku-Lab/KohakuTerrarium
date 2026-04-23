@@ -57,10 +57,16 @@ class ModelPicker:
 
     def open(self) -> None:
         self._entries = list(self._load())
+        # Selection state keyed by ``provider/name`` — bare names collide
+        # across providers under the (provider, name) hierarchy (e.g.
+        # ``gpt-5.4`` exists on codex, openai, openrouter and possibly a
+        # user's custom provider), so we need the full identifier as the
+        # dict key.
         self._selections = {
-            e["name"]: dict(e.get("selected_variations") or {}) for e in self._entries
+            self._entry_key(e): dict(e.get("selected_variations") or {})
+            for e in self._entries
         }
-        self._group_cursor = {e["name"]: 0 for e in self._entries}
+        self._group_cursor = {self._entry_key(e): 0 for e in self._entries}
         # Default cursor to current / default model when present.
         self._cursor = 0
         for i, e in enumerate(self._entries):
@@ -68,6 +74,12 @@ class ModelPicker:
                 self._cursor = i
                 break
         self.visible = True
+
+    @staticmethod
+    def _entry_key(entry: dict[str, Any]) -> str:
+        """Unique key for a preset entry under the (provider, name) hierarchy."""
+        provider = entry.get("provider") or entry.get("login_provider") or ""
+        return f"{provider}/{entry['name']}" if provider else str(entry["name"])
 
     def close(self) -> None:
         self.visible = False
@@ -135,12 +147,13 @@ class ModelPicker:
         groups = self._current_group_names(entry)
         if not groups:
             return
-        group_idx = self._group_cursor.get(entry["name"], 0) % len(groups)
+        key = self._entry_key(entry)
+        group_idx = self._group_cursor.get(key, 0) % len(groups)
         group = groups[group_idx]
         options = sorted((entry["variation_groups"].get(group) or {}).keys())
         if not options:
             return
-        selection = self._selections.setdefault(entry["name"], {})
+        selection = self._selections.setdefault(key, {})
         current_option = selection.get(group)
         if current_option in options:
             i = options.index(current_option)
@@ -156,9 +169,10 @@ class ModelPicker:
         groups = self._current_group_names(entry)
         if not groups:
             return
-        idx = self._group_cursor.get(entry["name"], 0)
+        key = self._entry_key(entry)
+        idx = self._group_cursor.get(key, 0)
         idx = (idx + delta) % len(groups)
-        self._group_cursor[entry["name"]] = idx
+        self._group_cursor[key] = idx
 
     def _apply(self) -> None:
         entry = self._current()
@@ -176,17 +190,22 @@ class ModelPicker:
             pass
 
     def _compose_selector(self, entry: dict[str, Any]) -> str:
-        """Build the `name[@group=option,g2=o2]` selector string.
+        """Build the ``provider/name[@group=option,g2=o2]`` selector string.
 
-        Mirrors the same shorthand used by `/model` on the CLI, the
-        web ModelSwitcher, and `resolve_controller_llm`.
+        The ``provider/`` prefix is mandatory under the (provider, name)
+        hierarchy: bare names are ambiguous when the same model is
+        available through multiple providers (``gpt-5.4`` → codex,
+        openai, openrouter, …), so the picker always emits the full
+        identifier. Mirrors the same shorthand used by the web
+        ModelSwitcher and ``resolve_controller_llm``.
         """
-        name = entry["name"]
-        selection = self._selections.get(name) or {}
+        identifier = self._entry_key(entry)
+        key = identifier
+        selection = self._selections.get(key) or {}
         parts = [f"{g}={o}" for g, o in sorted(selection.items()) if o]
         if not parts:
-            return name
-        return f"{name}@" + ",".join(parts)
+            return identifier
+        return f"{identifier}@" + ",".join(parts)
 
     # ── Rendering ──
 
@@ -290,8 +309,9 @@ class ModelPicker:
         # cycling group highlighted cyan.
         groups = self._current_group_names(entry)
         if groups:
-            group_idx = self._group_cursor.get(entry["name"], 0) % len(groups)
-            selection = self._selections.get(entry["name"]) or {}
+            key = self._entry_key(entry)
+            group_idx = self._group_cursor.get(key, 0) % len(groups)
+            selection = self._selections.get(key) or {}
             for i, group in enumerate(groups):
                 option = selection.get(group) or next(
                     iter(sorted((entry["variation_groups"].get(group) or {}).keys())),

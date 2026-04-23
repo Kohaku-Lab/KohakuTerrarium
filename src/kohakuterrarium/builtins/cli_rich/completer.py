@@ -13,19 +13,25 @@ from typing import Any
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.document import Document
 
-from kohakuterrarium.llm.presets import PRESETS
+from kohakuterrarium.llm.presets import iter_all_presets
 
 
 def _model_completions(prefix: str, agent: Any | None = None) -> list[tuple[str, str]]:
-    """Suggest LLM profile names for /model."""
+    """Suggest LLM profile names for /model.
+
+    Suggestions use ``provider/name`` form — the unambiguous identifier
+    under the (provider, name) hierarchy. A bare-name prefix match still
+    works because ``provider/name`` starts with the provider, so users
+    typing ``claude-opus`` also see ``anthropic/claude-opus-4.7`` and
+    ``openrouter/claude-opus-4.7``.
+    """
     out: list[tuple[str, str]] = []
-    for name, preset in PRESETS.items():
-        if not name.startswith(prefix):
+    for provider, name, data in iter_all_presets():
+        identifier = f"{provider}/{name}"
+        if not (identifier.startswith(prefix) or name.startswith(prefix)):
             continue
-        meta = ""
-        if isinstance(preset, dict):
-            meta = preset.get("model", "") or preset.get("provider", "")
-        out.append((name, meta))
+        meta = data.get("model", "") if isinstance(data, dict) else ""
+        out.append((identifier, meta))
     return out
 
 

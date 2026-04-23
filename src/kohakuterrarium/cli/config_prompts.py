@@ -80,6 +80,48 @@ def confirm(message: str, default: bool = False) -> bool:
     return answer in {"y", "yes"}
 
 
+def prompt_native_tools(default: list[str]) -> list[str]:
+    """Interactive checkbox-style prompt for provider_native_tools.
+
+    Presents every ``is_provider_native`` tool one-by-one with y/N,
+    pre-checking any in ``default``. Accepts a shorthand where the
+    user types ``all`` / ``none`` / a comma-separated list at the first
+    prompt — that shortcut bypasses the per-tool loop.
+    """
+    from kohakuterrarium.builtins.tool_catalog import list_provider_native_tools
+
+    available = list_provider_native_tools()
+    if not available:
+        return list(default)
+    names = [str(entry["name"]) for entry in available]
+
+    summary = ", ".join(
+        f"{entry['name']} (providers: {','.join(entry['provider_support']) or 'any'})"
+        for entry in available
+    )
+    print(f"  Available provider-native tools: {summary}")
+    shortcut = prompt(
+        "Enable (comma list / all / none / blank to pick interactively)",
+        ",".join(default) if default else "",
+    )
+    shortcut_norm = shortcut.strip().lower()
+    if shortcut_norm in {"all", "*"}:
+        return list(names)
+    if shortcut_norm in {"none", "-"}:
+        return []
+    if shortcut.strip():
+        requested = [item.strip() for item in shortcut.split(",") if item.strip()]
+        return [item for item in requested if item in names]
+
+    selected: list[str] = []
+    for entry in available:
+        entry_name = str(entry["name"])
+        pre = entry_name in default
+        if confirm(f"  enable {entry_name!r}?", default=pre):
+            selected.append(entry_name)
+    return selected
+
+
 # ── Variation-group builder ────────────────────────────────────
 
 VARIATION_PATCH_ROOTS: tuple[str, ...] = (
@@ -319,7 +361,7 @@ def format_profile(profile: LLMProfile) -> str:
                 profile.selected_variations, ensure_ascii=False, sort_keys=True
             )
         )
-    preset = _get_preset_definition(profile.name)
+    preset = _get_preset_definition(profile.name, profile.provider)
     if preset is not None and preset.variation_groups:
         lines.extend(format_variation_groups(preset.variation_groups))
         lines.extend(format_variation_examples(profile.name, preset.variation_groups))

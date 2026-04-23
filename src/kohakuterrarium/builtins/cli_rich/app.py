@@ -34,12 +34,7 @@ from typing import Any
 from prompt_toolkit.application import Application
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import ANSI
-from prompt_toolkit.layout import (
-    ConditionalContainer,
-    HSplit,
-    Layout,
-    Window,
-)
+from prompt_toolkit.layout import ConditionalContainer, HSplit, Layout, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.output import ColorDepth
@@ -110,8 +105,10 @@ class RichCLIApp(AppOutputMixin):
         )
         self.committer = ScrollbackCommitter(self)
 
-        # Initialize footer with model info
-        model = getattr(agent.llm, "model", "") or ""
+        # Initialize footer with model info — prefer the canonical
+        # ``provider/name[@variations]`` identifier so the footer
+        # matches what ``/model`` shows and what the picker emits.
+        model = agent.llm_identifier() or getattr(agent.llm, "model", "") or ""
         if model:
             self.live_region.update_footer_model(model)
         max_ctx = getattr(agent.llm, "_profile_max_context", 0) or 0
@@ -690,7 +687,12 @@ class RichCLIApp(AppOutputMixin):
 
     def _print_banner(self) -> None:
         name = getattr(self.agent.config, "name", "agent")
-        model = getattr(self.agent.llm, "model", "") or ""
+        # Prefer the full ``provider/name[@variations]`` identifier over
+        # the raw API model id so the banner matches the ``/model``
+        # picker output and the web ModelSwitcher pill.
+        model = (
+            self.agent.llm_identifier() or getattr(self.agent.llm, "model", "") or ""
+        )
         banner = Text()
         banner.append("KohakuTerrarium", style=COLOR_BANNER)
         banner.append(" · ", style="dim")

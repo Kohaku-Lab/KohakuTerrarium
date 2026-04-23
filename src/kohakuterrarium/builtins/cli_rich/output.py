@@ -216,8 +216,13 @@ class RichCLIOutput(BaseOutputModule):
             return
 
         if activity_type == "session_info":
+            # Prefer the canonical ``provider/name[@variations]``
+            # identifier (``llm_name``) over the raw API model id
+            # (``model``) so the footer matches what ``/model`` shows
+            # and what the picker emits.
+            display_model = metadata.get("llm_name") or metadata.get("model", "")
             self.app.on_session_info(
-                model=metadata.get("model", ""),
+                model=display_model,
                 max_ctx=metadata.get("max_context", 0),
             )
             return

@@ -32,7 +32,9 @@ from kohakuterrarium.llm.profiles import (
     delete_backend,
     delete_profile,
     get_default_model,
-    list_all as list_all_presets,
+)
+from kohakuterrarium.llm.profiles import list_all as list_all_presets
+from kohakuterrarium.llm.profiles import (
     load_backends,
     load_presets,
     save_backend,
@@ -190,18 +192,30 @@ class SettingsOverlay:
 
     def _load_models(self) -> list[dict[str, Any]]:
         entries = list_all_presets()
-        user_names = set(load_presets().keys())
+        user_keys = set(load_presets().keys())
         default = get_default_model()
+        # default may be ``provider/name`` or a bare legacy name.
+        default_provider, default_bare = (
+            default.split("/", 1) if "/" in default else ("", default)
+        )
         rows: list[dict[str, Any]] = []
         for e in entries:
+            provider = e.get("provider") or ""
+            name = e["name"]
+            is_default = False
+            if default:
+                if default_provider:
+                    is_default = provider == default_provider and name == default_bare
+                else:
+                    is_default = name == default or e["model"] == default
             rows.append(
                 {
-                    "name": e["name"],
+                    "name": name,
                     "model": e["model"],
-                    "provider": e.get("provider") or "",
+                    "provider": provider,
                     "available": e.get("available", True),
-                    "is_default": e["name"] == default or e["model"] == default,
-                    "user_defined": e["name"] in user_names,
+                    "is_default": is_default,
+                    "user_defined": (provider, name) in user_keys,
                 }
             )
         return rows
@@ -408,10 +422,11 @@ class SettingsOverlay:
             if not row.get("user_defined"):
                 self._flash = f"{row['name']}: built-in preset, cannot delete"
                 return
+            identifier = f"{row.get('provider', '')}/{row['name']}".lstrip("/")
             self._confirm = ConfirmState(
-                message=f"Delete preset {row['name']}?",
+                message=f"Delete preset {identifier}?",
                 action="delete_preset",
-                context={"name": row["name"]},
+                context={"name": row["name"], "provider": row.get("provider", "")},
             )
             self.mode = "confirm"
             return
@@ -651,8 +666,11 @@ class SettingsOverlay:
                 self._refresh_tab("Providers")
                 self._refresh_tab("Keys")
             elif state.action == "delete_preset":
-                delete_profile(state.context["name"])
-                self._flash = f"Deleted preset: {state.context['name']}"
+                delete_profile(state.context["name"], state.context.get("provider", ""))
+                identifier = (
+                    f"{state.context.get('provider', '')}/{state.context['name']}"
+                ).lstrip("/")
+                self._flash = f"Deleted preset: {identifier}"
                 self._refresh_tab("Models")
             elif state.action == "delete_mcp":
                 servers = _load_mcp_config()
