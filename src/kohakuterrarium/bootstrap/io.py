@@ -3,6 +3,13 @@ Input and output module factories.
 
 Creates input and output modules from agent config, with fallback
 to CLI input and stdout output for unknown or failed types.
+
+Bare-name input/output types (neither a builtin nor ``custom``/``package``)
+are looked up in installed package manifests via
+:func:`kohakuterrarium.packages.resolve_package_io`. This lets packages ship
+IO modules under short names (e.g. ``type: discord_input``) without the
+user needing to spell out ``module: ... ; class: ...`` in every creature
+config.
 """
 
 from typing import Any
@@ -21,6 +28,7 @@ from kohakuterrarium.core.config import AgentConfig
 from kohakuterrarium.core.loader import ModuleLoadError, ModuleLoader
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
+from kohakuterrarium.packages import resolve_package_io
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -80,6 +88,33 @@ def create_input(
             logger.error("Failed to load custom input", error=str(e))
             return CLIInput(prompt=config.input.prompt)
 
+    # Bare name (e.g. "discord_input") — try to resolve via package manifest
+    # before giving up. This wires the kohaku.yaml `io:` entries through
+    # bootstrap so users can reference packaged inputs by short name.
+    package_match = resolve_package_io(input_type)
+    if package_match is not None:
+        module_path, class_name = package_match
+        if loader is None:
+            logger.warning(
+                "No module loader available for packaged input, using CLI",
+                input_type=input_type,
+            )
+            return CLIInput(prompt=config.input.prompt)
+        try:
+            return loader.load_instance(
+                module_path=module_path,
+                class_name=class_name,
+                module_type="package",
+                options=config.input.options,
+            )
+        except ModuleLoadError as e:
+            logger.error(
+                "Failed to load packaged input",
+                input_type=input_type,
+                error=str(e),
+            )
+            return CLIInput(prompt=config.input.prompt)
+
     # Unknown type
     logger.warning("Unknown input type, using CLI", input_type=input_type)
     return CLIInput(prompt=config.input.prompt)
@@ -124,6 +159,33 @@ def _create_output_module(
             )
         except ModuleLoadError as e:
             logger.error("Failed to load custom output", error=str(e))
+            return StdoutOutput()
+
+    # Bare name (e.g. "discord_output") — try to resolve via package manifest
+    # before giving up. This wires the kohaku.yaml `io:` entries through
+    # bootstrap so users can reference packaged outputs by short name.
+    package_match = resolve_package_io(output_type)
+    if package_match is not None:
+        pkg_module, pkg_class = package_match
+        if loader is None:
+            logger.warning(
+                "No module loader available for packaged output, using stdout",
+                output_type=output_type,
+            )
+            return StdoutOutput()
+        try:
+            return loader.load_instance(
+                module_path=pkg_module,
+                class_name=pkg_class,
+                module_type="package",
+                options=options,
+            )
+        except ModuleLoadError as e:
+            logger.error(
+                "Failed to load packaged output",
+                output_type=output_type,
+                error=str(e),
+            )
             return StdoutOutput()
 
     # Unknown type

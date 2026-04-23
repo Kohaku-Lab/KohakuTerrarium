@@ -3,6 +3,13 @@ Trigger initialization factory.
 
 Creates trigger instances from agent config and registers them
 with the trigger manager.
+
+Bare-name trigger types (anything that is not ``timer``/``context``/
+``channel``/``custom``/``package``) are looked up in installed package
+manifests via :func:`kohakuterrarium.packages.resolve_package_trigger`.
+This wires the ``triggers:`` entries of ``kohaku.yaml`` through bootstrap
+so users can reference packaged triggers by short name instead of
+spelling out ``module:`` + ``class:`` in every creature config.
 """
 
 from datetime import datetime
@@ -18,6 +25,7 @@ from kohakuterrarium.modules.trigger import (
     ContextUpdateTrigger,
     TimerTrigger,
 )
+from kohakuterrarium.packages import resolve_package_trigger
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -80,8 +88,36 @@ def create_trigger(
                 return None
 
         case _:
-            logger.warning("Unknown trigger type", trigger_type=trigger_config.type)
-            return None
+            # Bare name — try to resolve through installed package manifests
+            # before giving up. Mirrors the `io:` lookup in `bootstrap/io.py`.
+            package_match = resolve_package_trigger(trigger_config.type)
+            if package_match is None:
+                logger.warning("Unknown trigger type", trigger_type=trigger_config.type)
+                return None
+            module_path, class_name = package_match
+            if loader is None:
+                logger.warning(
+                    "No module loader available for packaged trigger",
+                    trigger_type=trigger_config.type,
+                )
+                return None
+            try:
+                return loader.load_instance(
+                    module_path=module_path,
+                    class_name=class_name,
+                    module_type="package",
+                    options={
+                        "prompt": trigger_config.prompt,
+                        **trigger_config.options,
+                    },
+                )
+            except ModuleLoadError as e:
+                logger.error(
+                    "Failed to load packaged trigger",
+                    trigger_type=trigger_config.type,
+                    error=str(e),
+                )
+                return None
 
 
 def init_triggers(

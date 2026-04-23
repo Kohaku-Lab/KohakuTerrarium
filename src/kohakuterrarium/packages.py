@@ -354,6 +354,8 @@ def list_packages() -> list[dict]:
                 "tools": manifest.get("tools", []),
                 "plugins": manifest.get("plugins", []),
                 "llm_presets": manifest.get("llm_presets", []),
+                "io": manifest.get("io", []),
+                "triggers": manifest.get("triggers", []),
             }
         )
     return results
@@ -408,6 +410,80 @@ def resolve_package_tool(tool_name: str) -> tuple[str, str] | None:
                 if module_path and class_name:
                     return (module_path, class_name)
     return None
+
+
+def _resolve_manifest_entry(
+    kind: str,
+    entry_name: str,
+) -> tuple[str, str] | None:
+    """Scan installed packages for a manifest entry of ``kind`` with the given name.
+
+    Shared helper for :func:`resolve_package_io` and
+    :func:`resolve_package_trigger`. Collisions (two packages exporting the
+    same ``entry_name`` for the same ``kind``) raise ``ValueError`` with both
+    package names listed — per cluster 1.1 of the extension-point decisions,
+    io / trigger name clashes are a hard error at load time.
+
+    Args:
+        kind: Manifest field to scan (e.g. ``"io"`` or ``"triggers"``).
+        entry_name: The short name requested by the agent config.
+
+    Returns:
+        ``(module_path, class_name)`` if exactly one package declares
+        ``entry_name`` under ``kind``; ``None`` if no package declares it.
+
+    Raises:
+        ValueError: If more than one installed package declares the same
+            ``entry_name`` under ``kind``.
+    """
+    matches: list[tuple[str, str, str]] = []  # (package_name, module, class)
+    for pkg in list_packages():
+        for entry in pkg.get(kind, []):
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("name") != entry_name:
+                continue
+            module_path = entry.get("module")
+            class_name = entry.get("class") or entry.get("class_name")
+            if not module_path or not class_name:
+                continue
+            matches.append((pkg.get("name", "?"), module_path, class_name))
+
+    if not matches:
+        return None
+    if len(matches) > 1:
+        conflicting = ", ".join(sorted({m[0] for m in matches}))
+        raise ValueError(
+            f"Collision for {kind} name {entry_name!r}: declared by packages "
+            f"[{conflicting}]. Uninstall one or rename the entry in its "
+            f"kohaku.yaml to resolve the conflict."
+        )
+    _, module_path, class_name = matches[0]
+    return (module_path, class_name)
+
+
+def resolve_package_io(io_name: str) -> tuple[str, str] | None:
+    """Scan installed packages for an IO module with the given name.
+
+    Looks up ``io:`` entries declared in each package's ``kohaku.yaml``.
+    Collisions across packages raise ``ValueError`` at lookup time.
+
+    Returns:
+        (module_path, class_name) tuple if found, or None.
+    """
+    return _resolve_manifest_entry("io", io_name)
+
+
+def resolve_package_trigger(trigger_name: str) -> tuple[str, str] | None:
+    """Scan installed packages for a trigger module with the given name.
+
+    Looks up ``triggers:`` entries declared in each package's ``kohaku.yaml``.
+    Collisions across packages raise ``ValueError`` at lookup time.
+
+    Returns:
+        (module_path, class_name) tuple if found, or None.
+    """
+    return _resolve_manifest_entry("triggers", trigger_name)
 
 
 def get_package_path(name: str) -> Path | None:
