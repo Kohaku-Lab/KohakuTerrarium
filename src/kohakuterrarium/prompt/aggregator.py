@@ -6,6 +6,18 @@ Supports two skill modes:
 2. Static: All tool docs included in system prompt (more context upfront)
 
 Configurable via agent config: skill_mode: "dynamic" | "static"
+
+Framework-hint prose (output model + execution model blocks) is sourced
+from :mod:`kohakuterrarium.prompt.framework_hints`. Harness authors override
+it per-creature via ``AgentConfig.framework_hint_overrides`` or per-package
+via ``framework_hints:`` in ``kohaku.yaml``. Canonical override keys:
+
+- ``framework.output_model``
+- ``framework.execution_model.dynamic``
+- ``framework.execution_model.static``
+- ``framework.execution_model.native``
+
+An empty string override means "omit that block entirely".
 """
 
 from pathlib import Path
@@ -18,6 +30,13 @@ from kohakuterrarium.parsing.format import (
     ToolCallFormat,
     format_tool_call_example,
 )
+from kohakuterrarium.prompt.framework_hints import (
+    HINT_EXECUTION_MODEL_DYNAMIC,
+    HINT_EXECUTION_MODEL_NATIVE,
+    HINT_EXECUTION_MODEL_STATIC,
+    HINT_OUTPUT_MODEL,
+    get_framework_hint,
+)
 from kohakuterrarium.prompt.plugins import (
     BasePlugin,
     PluginContext,
@@ -29,17 +48,6 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-# Framework hints template - {named_outputs_section} is replaced dynamically
-FRAMEWORK_HINTS_OUTPUT_MODEL = """
-## Output Format
-
-Plain text = internal thinking (not sent anywhere)
-To send output externally, you MUST wrap in output block:
-
-[/output_<name>]your content here[output_<name>/]
-{named_outputs_section}
-"""
-
 NAMED_OUTPUTS_SECTION_TEMPLATE = """
 Available: {outputs_list}
 
@@ -49,62 +57,6 @@ Available: {outputs_list}
 
 If you want to send to {first_output}, wrap your message exactly like above.
 Without the wrapper, nothing gets sent.
-"""
-
-_EXECUTION_MODEL_DYNAMIC = """
-## Execution Model
-
-- **Direct tools**: Results return after you finish your response
-- **Sub-agents**: Run in background by default (set `run_in_background=false` to wait for result)
-- **Commands** (info, jobs, wait): Execute during your response
-
-### Background Tasks
-
-Sub-agents run in background by default. Tools can also run in background
-with `run_in_background=true`. Background results arrive automatically in a later turn.
-
-**Critical rule**: Once you delegate a task to background, do NOT do the same work yourself.
-The work is already being done — doing it again wastes tokens and produces duplicates.
-
-**Workflow example**:
-1. Dispatch `explore` to investigate the project structure (background)
-2. Dispatch `research` to look up API documentation (background)
-3. **Stop your response and wait** — both are working in parallel
-4. Results arrive automatically → synthesize and continue
-
-**Direct sub-agents** (set `run_in_background=false`):
-Use when you need the result before continuing and the task is short.
-
-**WRONG** (duplicate work):
-1. Dispatch `explore` to investigate the codebase ← background
-2. Start reading the same codebase yourself ← WRONG, same task!
-
-IMPORTANT: When calling a function, output ONLY the function call block. Do not output any extra text, markers, or filler characters (like dashes, dots, etc.) before or after the function call. If you need results before continuing, end with the function call and nothing else.
-IMPORTANT: You may ONLY call functions listed in the "Available Functions" section above. Do NOT call functions that are not listed.
-"""
-
-_EXECUTION_MODEL_STATIC = """
-## Execution Model
-
-- **Direct tools**: Results return after you finish your response
-- **Sub-agents**: Run in background by default (set `run_in_background=false` to wait)
-
-### Background Tasks
-
-Sub-agents run in background by default. Background results arrive automatically
-in a later turn.
-
-**Critical rule**: Once you delegate a task to background, do NOT do the same
-work yourself. The work is already being done.
-
-**Workflow**: dispatch sub-agents → do DIFFERENT direct work or stop and wait →
-results arrive automatically → continue.
-
-**Direct sub-agents**: Set `run_in_background=false` when you need the result
-before continuing and the task is short.
-
-IMPORTANT: When calling a function, output ONLY the function call block. Do not output any extra text, markers, or filler characters before or after. If you need results before continuing, end with the function call and nothing else.
-IMPORTANT: You may ONLY call functions listed in the "Available Functions" section above. Do NOT call functions that are not listed.
 """
 
 
@@ -135,7 +87,9 @@ def _build_command_hints(tool_format: str) -> str:
 
 
 def _build_dynamic_hints(
-    registry: Registry | None = None, tool_format: str = "bracket"
+    registry: Registry | None = None,
+    tool_format: str = "bracket",
+    overrides: dict[str, str] | None = None,
 ) -> str:
     """Build framework hints with examples from actual registered tools."""
     parts = [_build_format_header(tool_format)]
@@ -144,13 +98,17 @@ def _build_dynamic_hints(
     if examples:
         parts.append("Examples:\n" + examples)
 
-    parts.append(_EXECUTION_MODEL_DYNAMIC.strip())
+    execution_block = get_framework_hint(HINT_EXECUTION_MODEL_DYNAMIC, overrides)
+    if execution_block:
+        parts.append(execution_block.strip())
     parts.append(_build_command_hints(tool_format))
     return "\n\n".join(parts)
 
 
 def _build_static_hints(
-    registry: Registry | None = None, tool_format: str = "bracket"
+    registry: Registry | None = None,
+    tool_format: str = "bracket",
+    overrides: dict[str, str] | None = None,
 ) -> str:
     """Build static framework hints with examples from actual registered tools."""
     parts = [_build_format_header(tool_format)]
@@ -159,42 +117,19 @@ def _build_static_hints(
     if examples:
         parts.append("Examples:\n" + examples)
 
-    parts.append(_EXECUTION_MODEL_STATIC.strip())
+    execution_block = get_framework_hint(HINT_EXECUTION_MODEL_STATIC, overrides)
+    if execution_block:
+        parts.append(execution_block.strip())
     return "\n\n".join(parts)
 
 
-_NATIVE_HINTS = """## Tool Usage
-
-Tools are called via the API's native function calling mechanism.
-You do not need to format tool calls manually.
-
-By default, tool results are returned immediately after your response.
-You WILL receive the result before your next turn.
-
-### Background Execution
-
-Sub-agents run in background by default. Set `run_in_background=false`
-to wait for a sub-agent's result before continuing (use for short tasks).
-Tools can also run in background with `run_in_background=true`.
-
-When a task runs in background, the result arrives automatically in
-a later turn. You do NOT need to poll or wait.
-
-**Critical**: Once you delegate work to background, do NOT do the same
-work yourself. The task is already being done.
-
-**Example workflow**:
-1. Dispatch `explore` sub-agent to investigate module A (background)
-2. Use `read` on a DIFFERENT file (module B) yourself (direct)
-3. Stop — explore result for module A arrives in next turn
-
-You may ONLY call tools listed in the "Available Functions" section above.
-"""
-
-
-def _build_native_hints(registry: Registry | None = None) -> str:
+def _build_native_hints(
+    registry: Registry | None = None,
+    overrides: dict[str, str] | None = None,
+) -> str:
     """Build hints for native tool calling mode (no syntax examples)."""
-    return _NATIVE_HINTS.strip()
+    block = get_framework_hint(HINT_EXECUTION_MODEL_NATIVE, overrides)
+    return block.strip() if block else ""
 
 
 def _get_tool_call_format(tool_format: str) -> ToolCallFormat:
@@ -263,6 +198,7 @@ def aggregate_system_prompt(
     known_outputs: set[str] | None = None,
     channels: list[dict[str, str]] | None = None,
     extra_context: dict | None = None,
+    framework_hint_overrides: dict[str, str] | None = None,
 ) -> str:
     """
     Build complete system prompt from components.
@@ -279,6 +215,10 @@ def aggregate_system_prompt(
         channels: Channel info for prompt injection (list of dicts with
                   name, type, description). Auto-detected from session if None.
         extra_context: Extra variables for template rendering
+        framework_hint_overrides: Map of canonical hint key -> replacement
+            prose. See :mod:`kohakuterrarium.prompt.framework_hints` for the
+            recognised keys. Empty string = omit that block entirely; unknown
+            keys are ignored with a warning.
 
     Returns:
         Complete system prompt
@@ -332,7 +272,9 @@ def aggregate_system_prompt(
         # Build output model section with available outputs
         # (skip for native mode — outputs are also API-driven)
         if tool_format != "native":
-            output_hints = _build_output_hints(known_outputs)
+            output_hints = _build_output_hints(
+                known_outputs, overrides=framework_hint_overrides
+            )
             if output_hints:
                 parts.append(output_hints)
 
@@ -340,38 +282,62 @@ def aggregate_system_prompt(
         # Native mode: skip syntax examples entirely (API handles formatting)
         # Bracket/XML/custom: show format-appropriate examples
         if tool_format == "native":
-            hints = _build_native_hints(registry)
+            hints = _build_native_hints(registry, overrides=framework_hint_overrides)
         elif skill_mode == "static":
-            hints = _build_static_hints(registry, tool_format=tool_format)
+            hints = _build_static_hints(
+                registry,
+                tool_format=tool_format,
+                overrides=framework_hint_overrides,
+            )
         else:
-            hints = _build_dynamic_hints(registry, tool_format=tool_format)
-        parts.append(hints)
+            hints = _build_dynamic_hints(
+                registry,
+                tool_format=tool_format,
+                overrides=framework_hint_overrides,
+            )
+        if hints:
+            parts.append(hints)
 
     result = "\n\n".join(parts)
     logger.debug("Aggregated system prompt", length=len(result), skill_mode=skill_mode)
     return result
 
 
-def _build_output_hints(known_outputs: set[str] | None) -> str:
-    """Build output model hints with available named outputs."""
-    logger.debug("Building output hints", known_outputs=known_outputs)
-    if not known_outputs:
-        # No named outputs - just basic output model
-        logger.debug("No known outputs, using basic output model")
-        return FRAMEWORK_HINTS_OUTPUT_MODEL.format(named_outputs_section="").strip()
+def _build_output_hints(
+    known_outputs: set[str] | None,
+    *,
+    overrides: dict[str, str] | None = None,
+) -> str:
+    """Build output model hints with available named outputs.
 
-    # Build named outputs section
+    Honors ``framework.output_model`` overrides. If an override is provided,
+    its prose is used verbatim (no ``.format(...)`` is attempted, because a
+    custom override is unlikely to contain the ``{named_outputs_section}``
+    placeholder). An empty-string override suppresses the block entirely.
+    """
+    template = get_framework_hint(HINT_OUTPUT_MODEL, overrides)
+    if template is None or template == "":
+        logger.debug("Output-model block suppressed (empty override)")
+        return ""
+
+    # Only the default template contains ``{named_outputs_section}``; a user
+    # override is treated as plain prose and returned as-is.
+    is_default_template = "{named_outputs_section}" in template
+    logger.debug("Building output hints", known_outputs=known_outputs)
+    if not is_default_template:
+        return template.strip()
+
+    if not known_outputs:
+        logger.debug("No known outputs, using basic output model")
+        return template.format(named_outputs_section="").strip()
+
     outputs_list = ", ".join(f"`{name}`" for name in sorted(known_outputs))
     first_output = sorted(known_outputs)[0]
-
     named_section = NAMED_OUTPUTS_SECTION_TEMPLATE.format(
         outputs_list=outputs_list,
         first_output=first_output,
     )
-
-    return FRAMEWORK_HINTS_OUTPUT_MODEL.format(
-        named_outputs_section=named_section
-    ).strip()
+    return template.format(named_outputs_section=named_section).strip()
 
 
 def _build_channel_hints(

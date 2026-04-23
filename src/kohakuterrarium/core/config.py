@@ -398,6 +398,11 @@ def _construct_agent_config(
         plugins=list(config_data.get("plugins") or []),
         memory=dict(config_data.get("memory") or {}),
         output_wiring=parse_wiring_list(config_data.get("output_wiring")),
+        framework_hint_overrides=dict(
+            config_data.get("framework_hint_overrides")
+            or config_data.get("framework_hints")
+            or {}
+        ),
     )
 
 

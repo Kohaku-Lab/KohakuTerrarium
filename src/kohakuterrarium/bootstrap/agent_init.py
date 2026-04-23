@@ -38,7 +38,12 @@ from kohakuterrarium.parsing.format import (
     XML_FORMAT,
     ToolCallFormat,
 )
+from kohakuterrarium.packages import (
+    find_package_root_for_path,
+    get_package_framework_hints,
+)
 from kohakuterrarium.prompt.aggregator import aggregate_system_prompt
+from kohakuterrarium.prompt.framework_hints import merge_overrides
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -283,10 +288,19 @@ class AgentInitMixin:
             else "custom"
         )
 
+        # Resolve framework-hint overrides: package-level (kohaku.yaml)
+        # merges under creature-level (AgentConfig.framework_hint_overrides).
+        pkg_root = find_package_root_for_path(self.config.agent_path)
+        package_hints = get_package_framework_hints(pkg_root)
+        hint_overrides = merge_overrides(
+            package_hints, self.config.framework_hint_overrides
+        )
+
         logger.debug(
             "Building system prompt",
             known_outputs=known_outputs,
             tool_format=tool_format_name,
+            hint_override_keys=sorted(hint_overrides.keys()) if hint_overrides else [],
         )
         system_prompt = aggregate_system_prompt(
             base_prompt,
@@ -295,6 +309,7 @@ class AgentInitMixin:
             include_hints=self.config.include_hints_in_prompt,
             tool_format=tool_format_name,
             known_outputs=known_outputs,
+            framework_hint_overrides=hint_overrides or None,
         )
 
         # Store controller config for creating controllers on-demand (parallel mode)

@@ -415,6 +415,49 @@ def get_package_path(name: str) -> Path | None:
     return _get_package_root(name)
 
 
+def find_package_root_for_path(path: Path | None) -> Path | None:
+    """Walk up from ``path`` until a directory containing a manifest is found.
+
+    Returns the first ancestor directory that contains ``kohaku.yaml`` (or
+    ``kohaku.yml``), or ``None`` if no such ancestor exists. Used to resolve
+    package-level defaults for a creature whose config lives in
+    ``<pkg_root>/creatures/<name>/``.
+    """
+    if path is None:
+        return None
+    try:
+        current = path.resolve()
+    except OSError:
+        return None
+    # Start from path if it's a directory, else from its parent.
+    if current.is_file():
+        current = current.parent
+    for _ in range(20):  # safety bound against pathological paths
+        if (current / "kohaku.yaml").exists() or (current / "kohaku.yml").exists():
+            return current
+        parent = current.parent
+        if parent == current:
+            return None
+        current = parent
+    return None
+
+
+def get_package_framework_hints(pkg_root: Path | None) -> dict[str, str]:
+    """Read the ``framework_hints:`` block from a package manifest.
+
+    Returns an empty dict if the package has no manifest, no
+    ``framework_hints`` section, or the section is malformed.
+    """
+    if pkg_root is None:
+        return {}
+    manifest = _load_manifest(pkg_root)
+    raw = manifest.get("framework_hints") or manifest.get("framework_hint_overrides")
+    if not isinstance(raw, dict):
+        return {}
+    # Coerce all values to strings so downstream doesn't have to guess.
+    return {str(k): ("" if v is None else str(v)) for k, v in raw.items()}
+
+
 def _load_manifest(pkg_dir: Path) -> dict:
     """Load kohaku.yaml manifest from a package directory."""
     manifest_file = pkg_dir / "kohaku.yaml"

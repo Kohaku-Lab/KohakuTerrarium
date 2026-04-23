@@ -211,6 +211,14 @@ class AgentConfig:
 # Environment variable pattern: ${VAR} or ${VAR:default}
 ENV_VAR_PATTERN = re.compile(r"\$\{([^}:]+)(?::([^}]*))?\}")
 
+    # Framework-hint overrides for the system-prompt aggregator.
+    # Maps a canonical hint key (see ``prompt/framework_hints.py``)
+    # to replacement prose. Empty string means "omit this block entirely".
+    # Unknown keys are ignored with a warning. Load order during aggregation:
+    # built-in default -> package-level ``framework_hints`` in kohaku.yaml
+    # -> this creature-level map.
+    framework_hint_overrides: dict[str, str] = field(default_factory=dict)
+
 
 def _interpolate_env_vars(value: Any) -> Any:
     """Recursively interpolate environment variables in config values."""
