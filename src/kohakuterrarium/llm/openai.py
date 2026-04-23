@@ -9,6 +9,10 @@ from typing import Any, AsyncIterator
 
 from openai import AsyncOpenAI
 
+from kohakuterrarium.llm.anthropic_cache import (
+    apply_anthropic_cache_markers,
+    is_anthropic_endpoint,
+)
 from kohakuterrarium.llm.base import (
     BaseLLMProvider,
     ChatResponse,
@@ -92,6 +96,10 @@ class OpenAIProvider(BaseLLMProvider):
         self.extra_body = extra_body or {}
         self._last_usage: dict[str, int] = {}
         self.prompt_cache_key: str | None = None
+        # Retained so :mod:`anthropic_cache` can sniff whether caching
+        # applies — the SDK client stores a trailing-slash-normalised URL
+        # which is fine for ``"anthropic.com" in ...`` matching.
+        self.base_url: str = base_url or ""
 
         self._client = AsyncOpenAI(
             api_key=api_key,
@@ -100,6 +108,19 @@ class OpenAIProvider(BaseLLMProvider):
             max_retries=max_retries,
             default_headers=extra_headers or {},
         )
+
+        # Log whether auto-caching will be engaged for this provider. One
+        # line per construction (typically once per agent / model switch)
+        # is enough — the actual per-turn caching path stays silent.
+        anthropic = is_anthropic_endpoint(self.base_url, None)
+        disabled = bool(self.extra_body.get("disable_prompt_caching"))
+        if anthropic and not disabled:
+            logger.info("Anthropic prompt caching auto-enabled", base_url=self.base_url)
+        elif anthropic and disabled:
+            logger.info(
+                "Anthropic prompt caching disabled via extra_body flag",
+                base_url=self.base_url,
+            )
 
         logger.debug(
             "OpenAIProvider initialized (SDK)",
@@ -115,6 +136,33 @@ class OpenAIProvider(BaseLLMProvider):
     # Streaming
     # ------------------------------------------------------------------
 
+    def _prepare_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Apply Anthropic prompt-cache markers when relevant.
+
+        Non-Anthropic endpoints or the ``disable_prompt_caching`` opt-out
+        return the list unchanged (no deep-copy, no alloc). For Anthropic
+        endpoints we defer to :func:`apply_anthropic_cache_markers` which
+        deep-copies and tags system + the last three non-tool messages.
+        """
+        if not is_anthropic_endpoint(self.base_url, None):
+            return messages
+        if self.extra_body.get("disable_prompt_caching"):
+            return messages
+        return apply_anthropic_cache_markers(messages)
+
+    def _sanitize_extra_body(self, extra: dict[str, Any]) -> dict[str, Any]:
+        """Strip KT-internal knobs before sending to the provider.
+
+        ``disable_prompt_caching`` is a KohakuTerrarium-level flag (user
+        opt-out). Anthropic would reject it as an unknown field, and
+        other providers would pass it through verbatim into logs. Drop
+        it here — the caching branch already read it.
+        """
+        if "disable_prompt_caching" not in extra:
+            return extra
+        cleaned = {k: v for k, v in extra.items() if k != "disable_prompt_caching"}
+        return cleaned
+
     async def _stream_chat(
         self,
         messages: list[dict[str, Any]],
@@ -129,7 +177,7 @@ class OpenAIProvider(BaseLLMProvider):
 
         create_kwargs: dict[str, Any] = {
             "model": kwargs.get("model", self.config.model),
-            "messages": messages,
+            "messages": self._prepare_messages(messages),
             "stream": True,
             "stream_options": {"include_usage": True},
         }
@@ -154,6 +202,7 @@ class OpenAIProvider(BaseLLMProvider):
         merged_extra = {**self.extra_body}
         if "extra_body" in kwargs:
             merged_extra.update(kwargs["extra_body"])
+        merged_extra = self._sanitize_extra_body(merged_extra)
         if merged_extra:
             create_kwargs["extra_body"] = merged_extra
 
@@ -247,7 +296,7 @@ class OpenAIProvider(BaseLLMProvider):
 
         create_kwargs: dict[str, Any] = {
             "model": kwargs.get("model", self.config.model),
-            "messages": messages,
+            "messages": self._prepare_messages(messages),
         }
 
         temp = kwargs.get("temperature", self.config.temperature)
@@ -261,6 +310,7 @@ class OpenAIProvider(BaseLLMProvider):
         merged_extra = {**self.extra_body}
         if "extra_body" in kwargs:
             merged_extra.update(kwargs["extra_body"])
+        merged_extra = self._sanitize_extra_body(merged_extra)
         if merged_extra:
             create_kwargs["extra_body"] = merged_extra
 
