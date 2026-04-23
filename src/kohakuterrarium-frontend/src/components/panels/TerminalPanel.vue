@@ -4,9 +4,16 @@
     <div class="flex items-center gap-2 px-2 h-6 border-b text-[10px] shrink-0" :class="themeStore.dark ? 'bg-warm-900 border-warm-800 text-warm-400' : 'bg-warm-100 border-warm-200 text-warm-500'">
       <span class="i-carbon-terminal text-[11px]" />
       <span>Terminal</span>
+      <!-- Terrarium: explicit creature selector so the terminal doesn't
+           silently follow the chat tab. Each creature runs in its own
+           working directory / environment, so the terminal target must
+           be user-visible. -->
+      <el-select v-if="isTerrarium" v-model="selectedTarget" size="small" class="terminal-target-select" :placeholder="terminalTargets.length ? 'Select creature' : 'No creatures'" :disabled="!terminalTargets.length">
+        <el-option v-for="target in terminalTargets" :key="target" :value="target" :label="target" />
+      </el-select>
       <span class="w-1.5 h-1.5 rounded-full" :class="connected ? 'bg-aquamarine' : 'bg-warm-600'" />
       <span class="flex-1" />
-      <button v-if="!connected" class="px-1.5 py-0.5 rounded text-warm-500 hover:text-warm-300 hover:bg-warm-800" @click="connect">Connect</button>
+      <button v-if="!connected" class="px-1.5 py-0.5 rounded text-warm-500 hover:text-warm-300 hover:bg-warm-800" :disabled="!terminalPath" @click="connect">Connect</button>
     </div>
     <!-- Terminal container -->
     <div ref="termEl" class="flex-1 min-h-0" />
@@ -50,6 +57,10 @@ const LIGHT_THEME = {
 }
 const termEl = ref(null)
 const connected = ref(false)
+// Explicit terrarium creature selection. Defaults to the current chat
+// tab on mount, but stays independent afterwards so the terminal can
+// target a different creature than the one the user is chatting with.
+const selectedTarget = ref("")
 
 let term = null
 let fitAddon = null
@@ -57,11 +68,29 @@ let ws = null
 let resizeObserver = null
 
 const agentId = computed(() => props.instance?.id || instances.current?.id || null)
+const isTerrarium = computed(() => props.instance?.type === "terrarium")
+
+/**
+ * Names of every creature / root the terminal can attach to for the
+ * active terrarium. The backend's terrarium terminal endpoint keys on
+ * creature name (``root`` for the root agent).
+ */
+const terminalTargets = computed(() => {
+  if (!isTerrarium.value) return []
+  const inst = props.instance
+  const names = []
+  if (inst?.has_root) names.push("root")
+  for (const c of inst?.creatures || []) {
+    if (c?.name && !names.includes(c.name)) names.push(c.name)
+  }
+  return names
+})
+
 const terminalPath = computed(() => {
   const id = agentId.value
   if (!id) return null
-  if (props.instance?.type === "terrarium") {
-    const target = chat.terrariumTarget
+  if (isTerrarium.value) {
+    const target = selectedTarget.value
     if (!target) return null
     return `/ws/terminal/terrariums/${id}/${encodeURIComponent(target)}`
   }
@@ -183,8 +212,20 @@ onMounted(async () => {
       resizeObserver.observe(termEl.value)
     }
 
-    // Auto-connect if we have an agent.
-    if (agentId.value) connect()
+    // Seed terrarium selection from the current chat tab (so the
+    // default matches user expectation) without binding to it — the
+    // terminal stays pinned to its own target afterwards.
+    if (isTerrarium.value) {
+      const chatTarget = chat.terrariumTarget
+      if (chatTarget && terminalTargets.value.includes(chatTarget)) {
+        selectedTarget.value = chatTarget
+      } else if (terminalTargets.value.length) {
+        selectedTarget.value = terminalTargets.value[0]
+      }
+    }
+
+    // Auto-connect if we have an agent AND a resolvable path.
+    if (agentId.value && terminalPath.value) connect()
   } catch (err) {
     console.error("[TerminalPanel] onMounted error:", err)
   }
@@ -200,9 +241,21 @@ watch(
   },
 )
 
-watch([agentId, terminalPath], ([id], [prevId]) => {
-  if (prevId) disconnect()
-  if (id) connect()
+// If the available target list changes (creature added/removed, switched
+// instance), make sure our selection is still valid. Fall back to the
+// first available target.
+watch(terminalTargets, (targets) => {
+  if (!isTerrarium.value) return
+  if (!targets.includes(selectedTarget.value)) {
+    selectedTarget.value = targets[0] || ""
+  }
+})
+
+// Reconnect whenever the target changes — either the instance itself
+// (agentId) or the terrarium creature selection (path rebuild).
+watch([agentId, terminalPath], ([id, path], [prevId, prevPath]) => {
+  if (prevId || prevPath) disconnect()
+  if (id && path) connect()
 })
 
 onUnmounted(() => {
@@ -218,3 +271,23 @@ onUnmounted(() => {
   }
 })
 </script>
+
+<style scoped>
+.terminal-target-select {
+  width: 9rem;
+  --el-component-size-small: 20px;
+  --el-font-size-small: 10px;
+}
+.terminal-target-select :deep(.el-input__wrapper) {
+  min-height: 18px;
+  padding: 0 4px;
+  box-shadow: none;
+  background: transparent;
+}
+.terminal-target-select :deep(.el-input__inner) {
+  font-size: 10px;
+  color: inherit;
+  height: 18px;
+  line-height: 18px;
+}
+</style>
