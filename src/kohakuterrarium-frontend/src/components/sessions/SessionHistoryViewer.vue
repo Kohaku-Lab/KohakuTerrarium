@@ -90,7 +90,7 @@ function resetViewer() {
   chat.runningJobs = {}
   chat.unreadCounts = {}
   chat.queuedMessages = []
-  chat.processing = false
+  chat.processingByTab = {}
   chat.sessionInfo = {
     sessionId: viewerMeta.value?.session_id || "",
     model: "",

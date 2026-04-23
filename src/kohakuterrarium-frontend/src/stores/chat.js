@@ -528,6 +528,26 @@ export function _replayEvents(messages, events) {
         messagesCleared: evt.messages_cleared || 0,
         timestamp: "",
       })
+    } else if (t === "assistant_image") {
+      // Replay the image into the current assistant message so resumed
+      // sessions (and plain history reloads) show it in place. Mirrors
+      // the live `_handleAssistantImage` path so shape + meta match.
+      const c = ensureCur()
+      for (const p of c.parts || []) {
+        if (p.type === "text") p._streaming = false
+      }
+      c.parts.push({
+        type: "image_url",
+        image_url: {
+          url: evt.url,
+          detail: evt.detail || "auto",
+        },
+        meta: {
+          source_type: evt.source_type,
+          source_name: evt.source_name,
+          revised_prompt: evt.revised_prompt,
+        },
+      })
     } else if (t === "token_usage" || t === "processing_complete") {
       // skip
     }
@@ -598,7 +618,18 @@ export const useChatStore = defineStore("chat", {
     activeTab: null,
     /** @type {string[]} */
     tabs: [],
-    processing: false,
+    /**
+     * Per-tab processing flag. ``processingByTab[tab]`` is true while
+     * that specific creature/root is mid-stream. Replaces the previous
+     * global ``processing`` boolean — which made tab A's interrupt
+     * button appear on tab B and dropped the indicator on every tab
+     * switch until the next chunk arrived. UI components should read
+     * the ``processing`` getter (active-tab short-cut) or probe
+     * ``processingByTab[tab]`` directly when they care about a
+     * specific creature.
+     * @type {Object<string, boolean>}
+     */
+    processingByTab: {},
     /** @type {Object<string, {prompt: number, completion: number, total: number, cached: number}>} Per-source token usage */
     tokenUsage: {},
     /** @type {Object<string, {name: string, type: string, startedAt: number}>} Running background jobs */
@@ -644,6 +675,26 @@ export const useChatStore = defineStore("chat", {
       return state.messagesByTab[state.activeTab] || []
     },
     hasRunningJobs: (state) => Object.keys(state.runningJobs).length > 0,
+    /**
+     * Back-compat shim — true when the active tab is processing. Most
+     * UI code that used to read ``chat.processing`` actually wanted
+     * "is the tab I'm looking at streaming?", which is exactly this.
+     * Escape key, interrupt-button visibility, processing banner all
+     * pull from here. Components that need a specific tab's state
+     * (e.g. unread-badge logic) should read
+     * ``chat.processingByTab[tab]`` directly.
+     */
+    processing: (state) => (state.activeTab ? !!state.processingByTab[state.activeTab] : false),
+    /** True when any tab is currently streaming. */
+    anyProcessing: (state) => Object.values(state.processingByTab).some(Boolean),
+    /**
+     * Canonical display form of the active model, preferring the
+     * ``provider/name[@variations]`` identifier so every display surface
+     * shows the same string the user types into ``/model``. Falls back
+     * to the raw API model id when ``llm_name`` hasn't been populated
+     * yet (very first moments before the session_info event arrives).
+     */
+    modelDisplay: (state) => state.sessionInfo.llmName || state.sessionInfo.model || "",
     terrariumTarget: (state) => {
       if (state._instanceType !== "terrarium") return null
       const tab = state.activeTab
@@ -665,7 +716,7 @@ export const useChatStore = defineStore("chat", {
       this.runningJobs = {}
       this.unreadCounts = {}
       this.queuedMessages = []
-      this.processing = false
+      this.processingByTab = {}
       this._recentUserInputs = {}
       this.sessionInfo = {
         sessionId: "",
@@ -738,10 +789,10 @@ export const useChatStore = defineStore("chat", {
       }
     },
 
-    /** Interrupt the active agent. Also stops all running sub-agent jobs. */
-    async interrupt() {
+    /** Interrupt the active tab's agent. Also stops its streaming flag. */
+    async interrupt(tab) {
       if (!this._instanceId) return
-      const target = this.activeTab
+      const target = tab || this.activeTab
       if (!target || target.startsWith("ch:")) return
 
       try {
@@ -749,13 +800,13 @@ export const useChatStore = defineStore("chat", {
         // Background jobs (sub-agents, background tools) are NOT cancelled —
         // they have their own lifecycle and must be stopped individually
         // via stopTask() from the running jobs panel.
-        if (this.processing) {
+        if (this.processingByTab[target]) {
           if (this._instanceType === "terrarium") {
             await terrariumAPI.interruptCreature(this._instanceId, target)
           } else {
             await agentAPI.interrupt(this._instanceId)
           }
-          this.processing = false
+          this.processingByTab[target] = false
         }
         // Do NOT mark running parts as interrupted or remove running jobs.
         // The backend will send proper done/error events when jobs complete.
@@ -781,7 +832,7 @@ export const useChatStore = defineStore("chat", {
       }
 
       this._recentUserInputs[`${tab}:${normalized.content}`] = now
-      if (this.processing) {
+      if (this.processingByTab[tab]) {
         // Don't put in main chat — hold in queue, shown above input box
         msg.queued = true
         this.queuedMessages.push(msg)
@@ -800,7 +851,11 @@ export const useChatStore = defineStore("chat", {
         const target = tab
         if (this._ws.readyState === WebSocket.OPEN) {
           this._ws.send(JSON.stringify({ type: "input", target, content: contentParts }))
-          this.processing = true
+          // Flip processing optimistically — the backend's
+          // processing_start event will confirm it; this ensures the
+          // indicator and interrupt button appear immediately on the
+          // correct tab even before the first chunk arrives.
+          this.processingByTab[target] = true
         }
       }
     },
@@ -906,7 +961,10 @@ export const useChatStore = defineStore("chat", {
       }
       ws.onclose = () => {
         if (generation !== this._instanceGeneration || ws !== this._ws) return
-        this.processing = false
+        // Clear processing for every tab — the WS is gone so we can't
+        // be streaming anywhere. Each tab gets its flag reset on
+        // reconnect via processing_start or the text-recovery path.
+        this.processingByTab = {}
         this.wsStatus = "reconnecting"
         // Exponential backoff, capped at 10s.
         const delay = this._reconnectDelay
@@ -996,18 +1054,21 @@ export const useChatStore = defineStore("chat", {
       if (data.type === "user_input") {
         this._handleUserInput(source, data)
       } else if (data.type === "text") {
-        // If we get text chunks but processing is false (e.g. reconnect mid-stream),
-        // set processing to true so the UI shows "KohakUwUing"
-        if (!this.processing) this.processing = true
+        // If we get text chunks but the tab isn't marked processing
+        // (e.g. reconnect mid-stream), flip it so the UI shows the
+        // streaming indicator on the correct tab.
+        if (source && !this.processingByTab[source]) {
+          this.processingByTab[source] = true
+        }
         this._appendStreamChunk(source, data.content)
       } else if (data.type === "processing_start") {
-        this.processing = true
+        if (source) this.processingByTab[source] = true
         // Promote queued user messages (agent is now processing them)
         this._promoteQueuedMessages(source)
       } else if (data.type === "processing_end") {
         this._finishStream(source)
       } else if (data.type === "idle") {
-        this.processing = false
+        if (source) this.processingByTab[source] = false
         this._finishStream(source)
       } else if (data.type === "activity") {
         this._handleActivity(source, data)
@@ -1022,7 +1083,7 @@ export const useChatStore = defineStore("chat", {
           content: "Error: " + (data.content || ""),
           timestamp: new Date().toISOString(),
         })
-        this.processing = false
+        if (source) this.processingByTab[source] = false
       }
     },
 
@@ -1135,7 +1196,7 @@ export const useChatStore = defineStore("chat", {
           content: errorMsg,
           timestamp: new Date().toISOString(),
         })
-        this.processing = false
+        if (source) this.processingByTab[source] = false
         return
       }
 
@@ -1158,7 +1219,9 @@ export const useChatStore = defineStore("chat", {
 
       if (at === "tool_start" || at === "subagent_start") {
         // Tool/subagent activity means the agent is processing
-        if (!this.processing) this.processing = true
+        if (source && !this.processingByTab[source]) {
+          this.processingByTab[source] = true
+        }
         const last = this._ensureAssistantMsg(msgs)
         if (last.parts.length > 0) {
           const tail = last.parts[last.parts.length - 1]
@@ -1582,7 +1645,7 @@ export const useChatStore = defineStore("chat", {
     },
 
     _finishStream(source) {
-      this.processing = false
+      if (source) this.processingByTab[source] = false
       const msgs = this.messagesByTab[source]
       if (msgs) {
         const last = msgs[msgs.length - 1]

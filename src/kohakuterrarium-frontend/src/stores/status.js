@@ -12,6 +12,10 @@ export const useStatusStore = defineStore("status", {
       agentName: "",
       sessionId: "",
       model: "",
+      // Canonical ``provider/name[@variations]`` identifier — mirrors
+      // the chat store so Dashboard/Status surfaces can display the
+      // full form without reaching into the chat namespace.
+      llmName: "",
       startTime: null,
     },
     tokenUsage: {
@@ -44,6 +48,7 @@ export const useStatusStore = defineStore("status", {
           agentName: data.agent_name || this.sessionInfo.agentName,
           sessionId: data.session_id || this.sessionInfo.sessionId,
           model: data.model || this.sessionInfo.model,
+          llmName: data.llm_name || this.sessionInfo.llmName,
           startTime: data.start_time
             ? new Date(data.start_time).getTime()
             : this.sessionInfo.startTime || Date.now(),
@@ -135,6 +140,7 @@ export const useStatusStore = defineStore("status", {
         agentName: "",
         sessionId: "",
         model: "",
+        llmName: "",
         startTime: null,
       }
       this.tokenUsage = {
