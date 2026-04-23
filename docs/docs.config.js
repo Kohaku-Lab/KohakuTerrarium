@@ -256,19 +256,19 @@ const zhCNHomeCards = [
   {
     title: "什么是 agent？",
     description:
-      "从聊天机器人出发，分四个阶段建立生物的六模块结构：控制器、输入、触发器、工具、子代理、输出。",
+      "从聊天机器人出发，分四个阶段建立智能体的六模块结构：控制器、输入、触发器、工具、子代理、输出。",
     to: "/docs/concepts/foundations/what-is-an-agent",
   },
   {
-    title: "第一只生物",
+    title: "第一个智能体",
     description:
-      "编写生物配置，在 CLI / TUI / 网页模式中运行，调整提示词与工具。",
+      "编写智能体配置，在 CLI / TUI / 网页模式中运行，调整提示词与工具。",
     to: "/docs/tutorials/first-creature",
   },
   {
     title: "第一个生态瓶",
     description:
-      "用频道与 output_wiring 把两只生物串起来，再加一个 root 提供单一对话界面。",
+      "用频道与 output_wiring 把两个智能体串起来，再加一个 root 提供单一对话界面。",
     to: "/docs/tutorials/first-terrarium",
   },
   {
@@ -280,7 +280,7 @@ const zhCNHomeCards = [
   {
     title: "配置参考",
     description:
-      "生物、生态瓶、LLM 配置文件、MCP 服务器、上下文压缩、插件、输出接线的所有字段。",
+      "智能体、生态瓶、LLM 配置文件、MCP 服务器、上下文压缩、插件、输出接线的所有字段。",
     to: "/docs/reference/configuration",
   },
   {
@@ -385,7 +385,7 @@ export default {
       site: {
         title: "KohakuTerrarium",
         description:
-          "一个通用的代理系统框架。生物、子代理、生态瓶、工具、触发器、频道、插件、记忆、I/O 共用同一套底层机制。",
+          "一个通用的代理系统框架。智能体、子代理、生态瓶、工具、触发器、频道、插件、记忆、I/O 共用同一套底层机制。",
         editBaseUrl:
           "https://github.com/Kohaku-Lab/KohakuTerrarium/edit/main/docs/zh-CN/",
         favicon: "./docs-assets/favicon.png",
@@ -394,7 +394,7 @@ export default {
         kicker: "框架是用来建 agent 的，不是又一个 agent",
         title: "KohakuTerrarium 文档",
         description:
-          "生物通过频道与输出接线横向组成生态瓶，通过子代理进行纵向分解，并可借由 compose 代数原生嵌入 Python。文档涵盖概念模型、实用指南、完整配置与 API 参考，以及可实际操作的教程。",
+          "智能体通过频道与输出接线横向组成生态瓶，通过子代理进行纵向分解，并可借由 compose 代数原生嵌入 Python。文档涵盖概念模型、实用指南、完整配置与 API 参考，以及可实际操作的教程。",
         actions: [
           { text: "快速开始", to: "/docs/guides/getting-started" },
           {
