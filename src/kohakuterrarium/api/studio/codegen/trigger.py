@@ -5,8 +5,6 @@ Round-trip: find the subclass, replace the body of
 metadata class attributes.
 """
 
-from __future__ import annotations
-
 import libcst as cst
 
 from kohakuterrarium.api.studio.codegen.common import (

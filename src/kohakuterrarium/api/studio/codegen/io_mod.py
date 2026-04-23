@@ -6,9 +6,6 @@ studio v1 scope is scaffold + raw mode. The form surface is tiny
 and we simply pass through on update_existing without libcst.
 """
 
-from __future__ import annotations
-
-
 from kohakuterrarium.api.studio.codegen.common import (
     find_class,
     first_class,

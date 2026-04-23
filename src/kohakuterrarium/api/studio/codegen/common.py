@@ -6,8 +6,6 @@ modules. Phase 3 hardens these with more helpers as the codegen
 modules require.
 """
 
-from __future__ import annotations
-
 import libcst as cst
 
 

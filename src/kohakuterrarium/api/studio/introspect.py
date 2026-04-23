@@ -19,8 +19,6 @@ form. Two sources:
 BaseTool subclasses and has nothing the user should be editing here.
 """
 
-from __future__ import annotations
-
 import ast
 from pathlib import Path
 

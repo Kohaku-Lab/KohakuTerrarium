@@ -9,8 +9,6 @@ Per-kind modules re-export these via ``from ._pending_stub import *``
 and override as implementation matures.
 """
 
-from __future__ import annotations
-
 PENDING_WARNING = {
     "code": "codegen_pending",
     "message": "form-mode codegen for this kind lands in Phase 3; use raw mode",

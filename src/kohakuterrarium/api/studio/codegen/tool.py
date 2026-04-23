@@ -11,8 +11,6 @@ Three entry points (see ``codegen/__init__.py``):
   doesn't look like a BaseTool subclass.
 """
 
-from __future__ import annotations
-
 import libcst as cst
 
 from kohakuterrarium.api.studio.codegen.common import (

@@ -12,8 +12,6 @@ Round-trip strategy:
    supply a new body, and replacing where they did.
 """
 
-from __future__ import annotations
-
 import libcst as cst
 
 from kohakuterrarium.api.studio.codegen.common import (

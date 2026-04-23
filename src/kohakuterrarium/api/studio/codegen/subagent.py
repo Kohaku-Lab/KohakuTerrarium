@@ -19,8 +19,6 @@ rewrite them on save. The optional ``SYSTEM_PROMPT`` string is
 kept next to the call.
 """
 
-from __future__ import annotations
-
 import libcst as cst
 
 from kohakuterrarium.api.studio.codegen.common import parse
