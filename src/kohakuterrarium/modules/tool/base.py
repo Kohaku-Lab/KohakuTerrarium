@@ -225,6 +225,24 @@ class BaseTool:
     is_provider_native: bool = False
     provider_support: frozenset[str] = frozenset()
 
+    # Concurrency-safety flag used by the executor to partition parallel
+    # tool batches (see Cluster 5 / G.1 of the extension-point decisions).
+    # Tools flagged ``False`` acquire a shared serial lock, so at most
+    # one unsafe tool runs at a time while safe tools keep running in
+    # parallel. Default True — the historical behavior. Flip to False
+    # in subclasses that mutate shared state in ways that race each
+    # other (file writes, destructive shell commands, etc.).
+    is_concurrency_safe: bool = True
+
+    # Three-bucket ordering for :meth:`prompt_contribution` output. The
+    # aggregator groups contributions by bucket and then sorts
+    # alphabetically *within* a bucket:
+    #   - ``"first"``  → appears before the normal-alphabetical bucket
+    #   - ``"normal"`` → default; sorted alphabetical by tool name
+    #   - ``"last"``   → appears after the normal-alphabetical bucket
+    # Unknown values fall back to ``"normal"`` with a logged warning.
+    prompt_contribution_bucket: str = "normal"
+
     def __init__(self, config: ToolConfig | None = None):
         self.config = config or ToolConfig()
         self._manual_read = False  # Set to True after info tool reads this tool's docs
@@ -302,6 +320,21 @@ class BaseTool:
         if doc:
             return doc
         return f"# {self.tool_name}\n\n{self.description}\n"
+
+    def prompt_contribution(self) -> str | None:
+        """Optional self-described guidance, inserted into the system prompt
+        once per session when the tool is registered.
+
+        Subclasses override to return a short prose hint ("use me like
+        this"). Return ``None`` to skip the contribution (default). The
+        text should be kept short — full tool reference documentation
+        stays behind ``##info <tool>##``.
+
+        Called once at aggregation time per Cluster 5 / E.1 of the
+        extension-point decisions; cached in the assembled system
+        prompt (so the prefix stays stable for prompt caching).
+        """
+        return None
 
 
 @dataclass

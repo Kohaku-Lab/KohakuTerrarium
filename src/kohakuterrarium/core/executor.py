@@ -68,6 +68,15 @@ class Executor:
         self._on_complete = on_complete
         self._event_queue: asyncio.Queue[TriggerEvent] = asyncio.Queue()
 
+        # Shared serial lock for tools with ``is_concurrency_safe = False``
+        # (Cluster 5 / G.1 of the extension-point decisions). Tools that
+        # mutate shared state — file writes, destructive shell commands —
+        # acquire this lock before running so at most one unsafe tool
+        # executes at a time. Safe tools skip the lock entirely and keep
+        # running in parallel. Created lazily inside ``_run_tool`` so the
+        # executor can be constructed outside a running event loop.
+        self._serial_lock: asyncio.Lock | None = None
+
         # Context for tools (set by agent during init)
         self._agent_name: str = ""
         self._tool_format: str = "native"
@@ -196,8 +205,18 @@ class Executor:
             if isinstance(tool, BaseTool) and tool.needs_context:
                 context = self._build_tool_context()
 
-            # Execute tool
-            result = await tool.execute(args, context=context)
+            # Concurrency-safety partition (Cluster 5 / G.1):
+            # unsafe tools acquire the shared serial lock so at most
+            # one unsafe tool runs at a time. Safe tools skip the lock
+            # entirely and remain fully parallel.
+            needs_lock = isinstance(tool, BaseTool) and not tool.is_concurrency_safe
+            if needs_lock:
+                if self._serial_lock is None:
+                    self._serial_lock = asyncio.Lock()
+                async with self._serial_lock:
+                    result = await tool.execute(args, context=context)
+            else:
+                result = await tool.execute(args, context=context)
 
             # Create job result
             job_result = JobResult(

@@ -222,6 +222,11 @@ class ShellTool(BaseTool):
     """
 
     needs_context = True
+    # Shell commands are opaque — the runner can't tell if two
+    # invocations will conflict. Serialize unsafe tools so two parallel
+    # bash calls can't race against each other (e.g. two writes, two
+    # test runs sharing a port). Safe tools keep running in parallel.
+    is_concurrency_safe = False
 
     def __init__(self, config: ToolConfig | None = None):
         super().__init__(config)

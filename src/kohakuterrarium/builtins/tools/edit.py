@@ -274,6 +274,8 @@ class EditTool(BaseTool):
 
     needs_context = True
     require_manual_read = True
+    # Edits mutate the filesystem — serialize with other unsafe tools.
+    is_concurrency_safe = False
 
     @property
     def tool_name(self) -> str:

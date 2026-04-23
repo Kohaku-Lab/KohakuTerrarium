@@ -30,6 +30,10 @@ class WriteTool(BaseTool):
     """
 
     needs_context = True
+    # File writes mutate the filesystem — running two in parallel
+    # against the same or related paths is a foot-gun. The executor
+    # serializes unsafe tools so only one write runs at a time.
+    is_concurrency_safe = False
 
     @property
     def tool_name(self) -> str:
