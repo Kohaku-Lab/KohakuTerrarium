@@ -392,6 +392,7 @@ def _construct_agent_config(
         startup_trigger=config_data.get("startup_trigger"),
         termination=config_data.get("termination"),
         max_subagent_depth=config_data.get("max_subagent_depth", 3),
+        max_iterations=config_data.get("max_iterations"),
         agent_path=agent_path,
         session_key=config_data.get("session_key"),
         mcp_servers=list(config_data.get("mcp_servers") or []),

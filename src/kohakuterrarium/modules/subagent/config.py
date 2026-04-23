@@ -78,6 +78,16 @@ class SubAgentConfig:
     modifying_tools: set[str] | None = None
     tool_format: str | None = None  # None = inherit from parent
     notify_controller_on_background_complete: bool = True
+    # Shared-iteration-budget controls (see core/budget.py).
+    # - budget_inherit=True (default): the child reuses the parent's
+    #   IterationBudget reference — every child turn decrements the
+    #   same pool the parent draws from.
+    # - budget_allocation=N: hand the child a fresh isolated budget of
+    #   N turns; parent's remaining counter is untouched.
+    # - budget_inherit=False and allocation=None: today's behavior,
+    #   child runs unbounded (or bounded by its own ``max_turns``).
+    budget_inherit: bool = True
+    budget_allocation: int | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     def load_prompt(self, agent_path: Path | None = None) -> str:
@@ -163,6 +173,8 @@ class SubAgentConfig:
             "modifying_tools",
             "tool_format",
             "notify_controller_on_background_complete",
+            "budget_inherit",
+            "budget_allocation",
             "extra",
         }
 

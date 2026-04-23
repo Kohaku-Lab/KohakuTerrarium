@@ -17,6 +17,7 @@ from kohakuterrarium.bootstrap.plugins import init_plugins
 from kohakuterrarium.core.agent_handlers import AgentHandlersMixin
 from kohakuterrarium.core.agent_messages import AgentMessagesMixin
 from kohakuterrarium.core.agent_model import AgentModelMixin
+from kohakuterrarium.core.budget import IterationBudget
 from kohakuterrarium.core.compact import CompactConfig, CompactManager
 from kohakuterrarium.core.config import AgentConfig, load_agent_config
 from kohakuterrarium.core.controller_plugins import (
@@ -166,6 +167,7 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin, AgentModelMi
         self._init_registry()
         self._init_executor()
         self._init_subagents()
+        self._init_iteration_budget()
         self._init_output(output_module)  # Before controller - sets _known_outputs
         self._init_controller()
         self._init_input(input_module)
@@ -179,6 +181,27 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin, AgentModelMi
             tools=len(self.registry.list_tools()),
             triggers=len(self.trigger_manager.list()),
             ephemeral=config.ephemeral,
+        )
+
+    def _init_iteration_budget(self) -> None:
+        """Create shared IterationBudget; parent + children consume it.
+
+        Sub-agents that inherit share this counter. The parent
+        controller also consumes one slot per turn in
+        ``AgentHandlersMixin._check_termination`` — see Cluster 6.1 in
+        ``plans/harness/extension-point-decisions.md``.
+        """
+        cap = getattr(self.config, "max_iterations", None)
+        if not cap or cap <= 0:
+            self.iteration_budget = None
+            return
+        self.iteration_budget = IterationBudget(remaining=int(cap), total=int(cap))
+        if hasattr(self, "subagent_manager") and self.subagent_manager is not None:
+            self.subagent_manager.iteration_budget = self.iteration_budget
+        logger.info(
+            "Iteration budget configured",
+            agent_name=self.config.name,
+            max_iterations=cap,
         )
 
     def _init_termination(self) -> TerminationChecker | None:

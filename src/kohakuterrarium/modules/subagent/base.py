@@ -9,6 +9,7 @@ import asyncio
 from datetime import datetime
 from typing import Any
 
+from kohakuterrarium.core.budget import BudgetExhausted, IterationBudget
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.core.executor import Executor
 from kohakuterrarium.core.registry import Registry
@@ -62,6 +63,11 @@ class SubAgent:
         self._session_store: Any = None
         self._parent_name: str = ""
         self._run_index: int = 0
+
+        # Shared iteration budget — set by SubAgentManager.spawn() based on
+        # parent's budget and this config's budget_inherit / budget_allocation
+        # fields. ``None`` means "no budget enforcement" (today's behavior).
+        self.iteration_budget: IterationBudget | None = None
 
         # Create limited registry with only allowed tools
         self.registry = self._create_limited_registry()
@@ -241,6 +247,15 @@ class SubAgent:
                     completion_tokens=self._completion_tokens,
                     metadata={"tools_used": tools_used},
                 )
+            # Charge one unit against the shared iteration budget before
+            # spending an LLM call. On exhaustion we return a failed
+            # SubAgentResult so the parent controller sees a tool-result
+            # error and can decide how to proceed.
+            if self.iteration_budget is not None:
+                exhausted = self._charge_budget_or_fail(tools_used)
+                if exhausted is not None:
+                    return exhausted
+
             self._turns += 1
             logger.debug(
                 "Sub-agent turn started",
@@ -587,6 +602,39 @@ class SubAgent:
         if self._start_time:
             return (datetime.now() - self._start_time).total_seconds()
         return 0.0
+
+    def _charge_budget_or_fail(self, tools_used: list[str]) -> SubAgentResult | None:
+        """Consume one unit of the shared budget. Return a failed result
+        when the budget is drained, or ``None`` when the caller may proceed.
+        """
+        budget = self.iteration_budget
+        if budget is None:
+            return None
+        try:
+            budget.consume(1)
+            return None
+        except BudgetExhausted as exc:
+            logger.info(
+                "Sub-agent hit shared iteration budget",
+                subagent_name=self.config.name,
+                turn=self._turns,
+                remaining=budget.remaining,
+                total=budget.total,
+            )
+            return SubAgentResult(
+                success=False,
+                error=f"BudgetExhausted: {exc}",
+                turns=self._turns,
+                duration=self._calculate_duration(),
+                total_tokens=self._total_tokens,
+                prompt_tokens=self._prompt_tokens,
+                completion_tokens=self._completion_tokens,
+                metadata={
+                    "tools_used": tools_used,
+                    "budget_exhausted": True,
+                    "budget": budget.snapshot(),
+                },
+            )
 
     def cancel(self) -> None:
         """Request cancellation. Checked during LLM streaming and between turns."""

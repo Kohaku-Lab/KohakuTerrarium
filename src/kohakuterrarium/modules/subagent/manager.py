@@ -9,6 +9,7 @@ import asyncio
 from pathlib import Path
 from typing import Any, Callable
 
+from kohakuterrarium.core.budget import IterationBudget
 from kohakuterrarium.core.job import (
     JobState,
     JobStatus,
@@ -89,6 +90,12 @@ class SubAgentManager(InteractiveManagerMixin):
         self._on_tool_activity: Callable[[str, str, str, str], None] | None = None
         # Parent executor (for inheriting tool context builder)
         self._parent_executor: Any = None
+        # Parent's shared iteration budget. Wired by ``Agent`` after
+        # subagent_manager construction when ``config.max_iterations`` is
+        # set. ``None`` means the parent has no budget — sub-agent configs
+        # that ask to inherit will simply run unbounded, matching the
+        # legacy behavior.
+        self.iteration_budget: IterationBudget | None = None
         # Session store for persisting sub-agent conversations
         self._session_store: Any = None
         self._parent_name: str = ""
@@ -104,6 +111,21 @@ class SubAgentManager(InteractiveManagerMixin):
         # Interactive sub-agents (long-lived)
         self._interactive: dict[str, InteractiveSubAgent] = {}
         self._output_callbacks: dict[str, Callable[[InteractiveOutput], None]] = {}
+
+    def _resolve_child_budget(self, config: SubAgentConfig) -> IterationBudget | None:
+        """Decide which IterationBudget a new child should run under.
+
+        Precedence:
+        1. ``config.budget_allocation`` is non-None → fresh isolated budget.
+        2. ``config.budget_inherit`` is True and parent has one → reuse it.
+        3. Otherwise → ``None`` (no budget enforcement).
+        """
+        allocation = config.budget_allocation
+        if allocation is not None:
+            return IterationBudget(remaining=int(allocation), total=int(allocation))
+        if config.budget_inherit and self.iteration_budget is not None:
+            return self.iteration_budget
+        return None
 
     def register(self, config: SubAgentConfig) -> None:
         """
@@ -239,6 +261,15 @@ class SubAgentManager(InteractiveManagerMixin):
             agent_path=self.agent_path,
             tool_format=effective_tool_format,
         )
+
+        # Resolve shared iteration budget for the child. Three cases:
+        #   - budget_allocation=N → fresh IterationBudget(N, N) for this
+        #     child; parent's counter is untouched.
+        #   - budget_inherit=True and parent has a budget → reuse the
+        #     parent's reference so every child consume() decrements the
+        #     same pool the parent draws from.
+        #   - otherwise → no budget (legacy behavior, unbounded).
+        subagent.iteration_budget = self._resolve_child_budget(config)
 
         # Forward sub-agent tool activity to parent's callback
         if self._on_tool_activity:

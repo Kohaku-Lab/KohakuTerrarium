@@ -10,6 +10,7 @@ from kohakuterrarium.core.agent_tools import (
     _make_job_label,
 )
 from kohakuterrarium.core.backgroundify import BackgroundifyHandle, backgroundify
+from kohakuterrarium.core.budget import BudgetExhausted
 
 _BG_PLACEHOLDER = (
     "Running in background — task delegated. "
@@ -434,10 +435,34 @@ class AgentHandlersMixin(AgentToolsMixin):
         )
 
     def _check_termination(self, round_text: list[str]) -> bool:
-        """Check if termination conditions are met. Returns True to stop."""
+        """Check if termination conditions are met. Returns True to stop.
+
+        Consumes one slot from the shared :class:`IterationBudget` per
+        parent turn (cluster 6.1). When the counter hits zero the
+        ``BudgetExhausted`` raised by ``budget.consume`` is translated
+        into a termination with reason ``"Iteration budget exhausted"``
+        so the outer run-loop exits cleanly.
+        """
         if not self._termination_checker:
             return False
         self._termination_checker.record_turn()
+
+        budget = getattr(self, "iteration_budget", None)
+        if budget is not None:
+            try:
+                budget.consume(1)
+            except BudgetExhausted as exc:
+                logger.info(
+                    "Agent terminated: iteration budget exhausted",
+                    budget_total=budget.total,
+                    agent_name=self.config.name,
+                )
+                self._termination_checker.force_terminate(
+                    f"Iteration budget exhausted ({exc})"
+                )
+                self._running = False
+                return True
+
         last_output = "".join(round_text)
         if self._termination_checker.should_terminate(last_output=last_output):
             logger.info(

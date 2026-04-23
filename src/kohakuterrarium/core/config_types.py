@@ -186,6 +186,14 @@ class AgentConfig:
     # Sub-agent depth limit (0 = unlimited)
     max_subagent_depth: int = 3
 
+    # Shared iteration budget (see core/budget.py). When set, both the
+    # parent controller and any budget_inherit=True sub-agents draw LLM
+    # turns from the same pool. Exhaustion in a sub-agent surfaces as a
+    # failed SubAgentResult; exhaustion in the parent emits a
+    # termination signal. None / 0 means "no enforcement" and preserves
+    # the legacy behavior.
+    max_iterations: int | None = None
+
     # Tool call format: "bracket", "xml", "native", or custom dict
     tool_format: str | dict = "bracket"
 
