@@ -132,20 +132,35 @@ const canPickModel = computed(() => !!instanceId.value && (!isTerrarium.value ||
 
 const currentModel = computed(() => {
   const inst = currentInstance.value
+  // ``llm_name`` carries the canonical ``provider/name[@variations]`` —
+  // prefer it over ``model`` (raw API id) so the pill and picker-draft
+  // survive a page refresh with the full identifier intact.
   if (inst?.type === "terrarium") {
     const target = selectedTarget.value
-    if (target === "root") return terrariumTarget.value === target ? chat.sessionInfo.llmName || chat.sessionInfo.model || inst.model || "" : inst.model || ""
+    if (target === "root") {
+      const fallback = inst.llm_name || inst.model || ""
+      return terrariumTarget.value === target ? chat.sessionInfo.llmName || chat.sessionInfo.model || fallback : fallback
+    }
     if (target) {
       const creature = inst.creatures?.find((c) => c.name === target)
-      return terrariumTarget.value === target ? chat.sessionInfo.llmName || chat.sessionInfo.model || creature?.model || "" : creature?.model || ""
+      const fallback = creature?.llm_name || creature?.model || ""
+      return terrariumTarget.value === target ? chat.sessionInfo.llmName || chat.sessionInfo.model || fallback : fallback
     }
     return ""
   }
-  return chat.sessionInfo.llmName || chat.sessionInfo.model || inst?.model || ""
+  return chat.sessionInfo.llmName || chat.sessionInfo.model || inst?.llm_name || inst?.model || ""
 })
 
 const currentParsed = computed(() => parseSelector(currentModel.value))
-const currentLabel = computed(() => currentParsed.value.name)
+const currentLabel = computed(() => {
+  const { provider, name } = currentParsed.value
+  // Always show ``provider/name`` when both are known — matches the
+  // identifier the picker emits and the rich-CLI banner displays. Falls
+  // back to the bare name for pre-refactor session data that still
+  // stores just the model id.
+  if (provider && name) return `${provider}/${name}`
+  return name
+})
 const currentVariationSummary = computed(() => {
   const entries = Object.entries(currentParsed.value.selections)
   if (!entries.length) return ""
@@ -201,11 +216,16 @@ const draftVariationGroups = computed(() => {
 
 const draftSelector = computed(() => {
   if (!draftPreset.value) return ""
+  // Under the (provider, name) hierarchy, bare names can be ambiguous
+  // across providers (``gpt-5.4`` exists on codex, openai, openrouter,
+  // and any custom backend the user added). Always emit ``provider/name``
+  // so the backend resolver can pick the exact entry without guessing.
+  const base = draftProvider.value ? `${draftProvider.value}/${draftPreset.value}` : draftPreset.value
   const entries = Object.entries(draftSelections)
     .filter(([, value]) => value)
     .sort(([a], [b]) => a.localeCompare(b))
-  if (!entries.length) return draftPreset.value
-  return `${draftPreset.value}@${entries.map(([g, o]) => `${g}=${o}`).join(",")}`
+  if (!entries.length) return base
+  return `${base}@${entries.map(([g, o]) => `${g}=${o}`).join(",")}`
 })
 
 function hasVariations(preset) {
@@ -214,8 +234,15 @@ function hasVariations(preset) {
 
 function parseSelector(value) {
   const raw = String(value || "")
-  if (!raw) return { name: "", selections: {} }
-  const [name, selector] = raw.split("@", 2)
+  if (!raw) return { provider: "", name: "", selections: {} }
+  const [base, selector] = raw.split("@", 2)
+  let provider = ""
+  let name = base.trim()
+  if (name.includes("/")) {
+    const slash = name.indexOf("/")
+    provider = name.slice(0, slash).trim()
+    name = name.slice(slash + 1).trim()
+  }
   const selections = {}
   if (selector) {
     selector.split(",").forEach((part) => {
@@ -223,12 +250,15 @@ function parseSelector(value) {
       if (group && option) selections[group.trim()] = option.trim()
     })
   }
-  return { name: name.trim(), selections }
+  return { provider, name, selections }
 }
 
 function resetDraftFromCurrent() {
-  const { name, selections } = currentParsed.value
-  const matched = models.value.find((m) => m.name === name) || models.value.find((m) => m.model === name) || models.value[0]
+  const { provider, name, selections } = currentParsed.value
+  // When the selector carried a ``provider/name`` prefix, look up by the
+  // full (provider, name) pair. Otherwise fall back to the bare name (for
+  // pre-refactor session data that still stores bare ids).
+  const matched = (provider && models.value.find((m) => (m.provider || m.login_provider) === provider && m.name === name)) || models.value.find((m) => m.name === name) || models.value.find((m) => m.model === name) || models.value[0]
   if (!matched) {
     draftProvider.value = providerOptions.value[0]?.name || ""
     draftPreset.value = ""

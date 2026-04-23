@@ -224,6 +224,12 @@ export default {
   "settings.backends.custom": "custom",
   "settings.backends.tokenSet": "token set",
   "settings.backends.noToken": "no token",
+  "settings.backends.providerName": "Provider identity",
+  "settings.backends.providerNameHint":
+    "The compatibility key that provider-native tools match against. Defaults to the provider name. Set to 'codex' to expose Codex-compatible tools on your own endpoint.",
+  "settings.backends.nativeTools": "Provider-native tools",
+  "settings.backends.nativeToolsHint":
+    "Tools the provider handles itself (e.g. image_gen). Tick to auto-inject into every creature that runs through this provider.",
   "settings.mcp.description":
     "MCP servers provide external tools to agents via the Model Context Protocol. Agents access them through mcp_list and mcp_call tools.",
   "settings.mcp.deleteConfirm": "Remove this MCP server?",

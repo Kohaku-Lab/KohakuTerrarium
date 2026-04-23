@@ -82,8 +82,8 @@
             <div v-if="customBackends.length === 0 && !showBackendForm" class="text-[11px] text-warm-400 italic text-center py-4">
               {{ t("settings.providers.noCustom") }}
             </div>
-            <div class="grid grid-cols-[auto_auto_1fr_auto_auto] gap-x-3 gap-y-2 items-center">
-              <template v-for="backend in customBackends" :key="backend.name">
+            <div class="flex flex-col gap-2">
+              <div v-for="backend in customBackends" :key="backend.name" class="grid grid-cols-[auto_auto_1fr_auto_auto] gap-x-3 items-center">
                 <div class="font-medium text-warm-700 dark:text-warm-300 text-sm">{{ backend.name }}</div>
                 <el-tag size="small" effect="plain">{{ backend.backend_type }}</el-tag>
                 <div class="text-[11px] text-warm-400 font-mono truncate">
@@ -97,7 +97,11 @@
                     <el-button size="small" type="danger" plain>{{ t("common.delete") }}</el-button>
                   </template>
                 </el-popconfirm>
-              </template>
+                <div v-if="backend.provider_name || backend.provider_native_tools?.length" class="col-span-5 text-[10px] text-warm-400 pl-2 -mt-1 flex items-center gap-2 flex-wrap">
+                  <span v-if="backend.provider_name" class="font-mono">identity: {{ backend.provider_name }}</span>
+                  <span v-if="backend.provider_native_tools?.length" class="font-mono">native: {{ backend.provider_native_tools.join(", ") }}</span>
+                </div>
+              </div>
             </div>
 
             <div v-if="showBackendForm" class="mt-4 pt-3 border-t border-warm-100 dark:border-warm-800 grid grid-cols-[1fr_1fr] gap-3">
@@ -116,6 +120,30 @@
               <div class="col-span-2">
                 <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.backends.baseUrl") }}</label>
                 <el-input v-model="backendForm.base_url" size="small" placeholder="https://api.example.com/v1" />
+              </div>
+              <div class="col-span-2">
+                <label class="text-[11px] text-warm-400 mb-1 block">
+                  {{ t("settings.backends.providerName") }}
+                </label>
+                <el-input v-model="backendForm.provider_name" size="small" :placeholder="backendForm.name || 'my-provider'" />
+                <p class="text-[10px] text-warm-400 mt-1">
+                  {{ t("settings.backends.providerNameHint") }}
+                </p>
+              </div>
+              <div v-if="nativeToolCatalog.length" class="col-span-2">
+                <label class="text-[11px] text-warm-400 mb-1 block">
+                  {{ t("settings.backends.nativeTools") }}
+                </label>
+                <el-checkbox-group v-model="backendForm.provider_native_tools" class="flex flex-col gap-1">
+                  <el-checkbox v-for="tool in nativeToolCatalog" :key="tool.name" :value="tool.name" class="!mr-0">
+                    <span class="font-mono text-[12px]">{{ tool.name }}</span>
+                    <span class="text-[10px] text-warm-400 ml-1"> ({{ tool.provider_support.length ? tool.provider_support.join(", ") : "any" }}) </span>
+                    <span v-if="tool.description" class="text-[10px] text-warm-400 ml-1 truncate">— {{ tool.description }}</span>
+                  </el-checkbox>
+                </el-checkbox-group>
+                <p class="text-[10px] text-warm-400 mt-1">
+                  {{ t("settings.backends.nativeToolsHint") }}
+                </p>
               </div>
               <div class="col-span-2 flex justify-end">
                 <el-button type="primary" size="small" :disabled="!backendForm.name || !backendForm.backend_type" @click="saveBackend">
@@ -145,7 +173,7 @@
                   {{ group.provider }}
                   <span class="normal-case text-warm-400">({{ group.presets.length }})</span>
                 </div>
-                <button v-for="preset in group.presets" :key="preset.name" type="button" class="preset-row" :class="{ 'is-active': selectedPresetName === preset.name }" @click="selectPreset(preset)">
+                <button v-for="preset in group.presets" :key="`${preset.provider}/${preset.name}`" type="button" class="preset-row" :class="{ 'is-active': selectedPresetKey === `${preset.provider}/${preset.name}` }" @click="selectPreset(preset)">
                   <div class="flex items-center gap-1.5 w-full min-w-0">
                     <span class="font-medium text-[12px] truncate">{{ preset.name }}</span>
                     <span v-if="preset.source === 'user'" class="text-[9px] px-1 rounded bg-iolite/15 text-iolite uppercase shrink-0"> user </span>
@@ -438,7 +466,10 @@ const backendForm = reactive({
   name: "",
   backend_type: "openai",
   base_url: "",
+  provider_name: "",
+  provider_native_tools: [],
 })
+const nativeToolCatalog = ref([])
 
 const builtInBackends = computed(() => backends.value.filter((b) => b.built_in))
 const customBackends = computed(() => backends.value.filter((b) => !b.built_in))
@@ -452,14 +483,31 @@ async function loadBackends() {
   }
 }
 
+async function loadNativeTools() {
+  try {
+    const data = await settingsAPI.getNativeTools()
+    nativeToolCatalog.value = data.tools || []
+  } catch {
+    nativeToolCatalog.value = []
+  }
+}
+
 async function saveBackend() {
   if (!backendForm.name || !backendForm.backend_type) return
   try {
-    await settingsAPI.saveBackend({ ...backendForm })
+    await settingsAPI.saveBackend({
+      name: backendForm.name,
+      backend_type: backendForm.backend_type,
+      base_url: backendForm.base_url,
+      provider_name: backendForm.provider_name || backendForm.name,
+      provider_native_tools: Array.from(backendForm.provider_native_tools || []),
+    })
     ElMessage.success(`Saved provider: ${backendForm.name}`)
     backendForm.name = ""
     backendForm.backend_type = "openai"
     backendForm.base_url = ""
+    backendForm.provider_name = ""
+    backendForm.provider_native_tools = []
     showBackendForm.value = false
     await loadBackends()
     await loadKeys()
@@ -483,15 +531,29 @@ async function deleteBackend(name) {
 
 const allPresets = ref([])
 const presetSearch = ref("")
-const selectedPresetName = ref("")
+const selectedPresetKey = ref("") // "provider/name"
 const editorMode = ref("new") // "new" | "edit" | "view"
 const editorPreset = ref(null)
 const showEditor = ref(false)
+
+function presetKey(preset) {
+  if (!preset) return ""
+  return `${preset.provider || ""}/${preset.name || ""}`
+}
 
 async function loadPresets() {
   try {
     const data = await configAPI.getModels()
     allPresets.value = Array.isArray(data) ? data : []
+    // Re-point the editor at the freshly-reloaded copy of the same preset
+    // so variation_groups and other derived fields show up after a refresh
+    // rather than only after the user re-selects.
+    if (selectedPresetKey.value) {
+      const match = allPresets.value.find((p) => presetKey(p) === selectedPresetKey.value)
+      if (match) {
+        editorPreset.value = match
+      }
+    }
   } catch {
     allPresets.value = []
   }
@@ -525,14 +587,14 @@ const presetGroups = computed(() => {
 })
 
 function selectPreset(preset) {
-  selectedPresetName.value = preset.name
+  selectedPresetKey.value = presetKey(preset)
   editorPreset.value = preset
   editorMode.value = preset.source === "user" ? "edit" : "view"
   showEditor.value = true
 }
 
 function startNewPreset() {
-  selectedPresetName.value = ""
+  selectedPresetKey.value = ""
   editorPreset.value = null
   editorMode.value = "new"
   showEditor.value = true
@@ -540,7 +602,7 @@ function startNewPreset() {
 
 function cancelEdit() {
   showEditor.value = false
-  selectedPresetName.value = ""
+  selectedPresetKey.value = ""
   editorPreset.value = null
 }
 
@@ -553,7 +615,7 @@ function clonePreset() {
     name: cloneName,
     source: "user",
   }
-  selectedPresetName.value = ""
+  selectedPresetKey.value = ""
   editorMode.value = "new"
   ElMessage.info(`Cloned ${base.name}. Edit and save to persist.`)
 }
@@ -562,9 +624,12 @@ async function handleSavePreset(payload) {
   try {
     await settingsAPI.saveProfile(payload)
     ElMessage.success(t("settings.models.saved", { name: payload.name }))
+    // Set the selection key BEFORE reloading so loadPresets() re-binds the
+    // editor to the newly-saved preset (and its freshly-computed
+    // variation_groups) without requiring a manual re-click.
+    selectedPresetKey.value = `${payload.provider}/${payload.name}`
     await loadPresets()
-    // Re-select the just-saved preset
-    const saved = allPresets.value.find((p) => p.name === payload.name)
+    const saved = allPresets.value.find((p) => presetKey(p) === selectedPresetKey.value)
     if (saved) selectPreset(saved)
   } catch (err) {
     ElMessage.error(err.response?.data?.detail || err.message || t("settings.models.saveFailed"))
@@ -582,7 +647,14 @@ async function confirmDeletePreset(name) {
     return
   }
   try {
-    await settingsAPI.deleteProfile(name)
+    // Use provider + name when available — the new (provider, name)
+    // hierarchy API refuses to guess when a bare name is ambiguous.
+    const preset = editorPreset.value
+    if (preset && preset.provider) {
+      await settingsAPI.deleteProfile(name, preset.provider)
+    } else {
+      await settingsAPI.deleteProfile(name)
+    }
     ElMessage.success(t("settings.models.deleted", { name }))
     cancelEdit()
     await loadPresets()
@@ -699,6 +771,7 @@ function formatCapturedAt(epochSeconds) {
 onMounted(async () => {
   await loadKeys()
   await loadBackends()
+  await loadNativeTools()
   await loadPresets()
   await loadMCP()
 })

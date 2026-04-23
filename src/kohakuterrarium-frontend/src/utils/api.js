@@ -415,6 +415,10 @@ export const settingsAPI = {
     const { data } = await api.delete(`/settings/backends/${name}`)
     return data
   },
+  async getNativeTools() {
+    const { data } = await api.get("/settings/native-tools")
+    return data
+  },
   async getProfiles() {
     const { data } = await api.get("/settings/profiles")
     return data
@@ -423,8 +427,11 @@ export const settingsAPI = {
     const { data } = await api.post("/settings/profiles", profile)
     return data
   },
-  async deleteProfile(name) {
-    const { data } = await api.delete(`/settings/profiles/${name}`)
+  async deleteProfile(name, provider = "") {
+    const target = provider
+      ? `/settings/profiles/${encodeURIComponent(provider)}/${encodeURIComponent(name)}`
+      : `/settings/profiles/${encodeURIComponent(name)}`
+    const { data } = await api.delete(target)
     return data
   },
   async getDefaultModel() {

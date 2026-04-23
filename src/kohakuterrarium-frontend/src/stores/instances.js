@@ -139,6 +139,7 @@ function _mapTerrarium(data) {
     status: data.running ? "running" : "stopped",
     has_root: !!data.has_root,
     model: data.root_model || "",
+    llm_name: data.root_llm_name || "",
     provider: "",
     session_id: data.root_session_id || "",
     max_context: data.root_max_context || 0,
@@ -147,6 +148,7 @@ function _mapTerrarium(data) {
       name,
       status: info.running ? "running" : "idle",
       model: info.model || "",
+      llm_name: info.llm_name || "",
       listen_channels: info.listen_channels || [],
       send_channels: info.send_channels || [],
     })),
@@ -166,6 +168,10 @@ function _mapAgent(data) {
     type: "creature",
     config_name: data.name || "agent",
     model: data.model || "",
+    // Canonical ``provider/name[@variations]`` identifier used by the
+    // ModelSwitcher pill so it keeps showing the full form after a
+    // page refresh (per-session WS events aren't replayed).
+    llm_name: data.llm_name || "",
     provider: data.provider || "",
     session_id: data.session_id || "",
     pwd: data.pwd || "",
@@ -178,6 +184,7 @@ function _mapAgent(data) {
         name: data.name || "agent",
         status: data.running ? "running" : "idle",
         model: data.model || "",
+        llm_name: data.llm_name || "",
         listen_channels: [],
         send_channels: [],
       },

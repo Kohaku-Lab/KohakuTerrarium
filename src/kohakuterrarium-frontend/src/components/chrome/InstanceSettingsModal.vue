@@ -15,7 +15,6 @@
         <TriggersTab v-else-if="activeTab === 'triggers'" :instance="instance" />
         <CostTab v-else-if="activeTab === 'cost'" :instance="instance" />
         <EnvTab v-else-if="activeTab === 'env'" :instance="instance" />
-        <AutoOpenTab v-else-if="activeTab === 'auto-open'" />
       </div>
     </div>
   </el-dialog>
@@ -24,7 +23,6 @@
 <script setup>
 import { computed, ref } from "vue"
 
-import AutoOpenTab from "@/components/panels/settings/AutoOpenTab.vue"
 import CostTab from "@/components/panels/settings/CostTab.vue"
 import EnvTab from "@/components/panels/settings/EnvTab.vue"
 import ExtensionsTab from "@/components/panels/settings/ExtensionsTab.vue"
@@ -38,6 +36,9 @@ defineProps({ instance: { type: Object, default: null } })
 const open = defineModel({ default: false })
 const { t } = useI18n()
 
+// The "auto-open" tab is a Phase-10 placeholder (see AutoOpenTab.vue).
+// Hidden from the tab list until the rule engine lands; AutoOpenTab.vue
+// kept in the tree so the Phase-10 work doesn't start from scratch.
 const tabs = computed(() => [
   { id: "model", label: t("instanceSettings.model"), icon: "i-carbon-chip" },
   { id: "plugins", label: t("instanceSettings.plugins"), icon: "i-carbon-plug" },
@@ -45,7 +46,6 @@ const tabs = computed(() => [
   { id: "triggers", label: t("instanceSettings.triggers"), icon: "i-carbon-event" },
   { id: "cost", label: t("instanceSettings.cost"), icon: "i-carbon-currency-dollar" },
   { id: "env", label: t("instanceSettings.environment"), icon: "i-carbon-cloud" },
-  { id: "auto-open", label: t("instanceSettings.autoOpen"), icon: "i-carbon-launch" },
 ])
 
 const activeTab = ref("model")

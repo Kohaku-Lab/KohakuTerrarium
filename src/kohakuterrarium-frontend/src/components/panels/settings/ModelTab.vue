@@ -46,14 +46,24 @@ const props = defineProps({
 
 const chat = useChatStore()
 
-const current = computed(() => chat.sessionInfo.model || props.instance?.model || "")
+const current = computed(() => chat.modelDisplay || props.instance?.llm_name || props.instance?.model || "")
 
 const profile = ref(null)
 
 async function loadProfile() {
   try {
     const models = await configAPI.getModels()
-    profile.value = (Array.isArray(models) ? models : []).find((m) => m.name === current.value) || null
+    // ``current`` may be ``provider/name[@variations]`` — strip the
+    // ``@...`` suffix and split the ``provider/name`` prefix so we can
+    // match the preset catalog entry exactly (duplicate bare names
+    // across providers would otherwise bind to the wrong row).
+    const raw = current.value
+    const base = raw.split("@", 1)[0]
+    const slash = base.indexOf("/")
+    const wantProvider = slash >= 0 ? base.slice(0, slash) : ""
+    const wantName = slash >= 0 ? base.slice(slash + 1) : base
+    const entries = Array.isArray(models) ? models : []
+    profile.value = entries.find((m) => m.name === wantName && (!wantProvider || (m.provider || m.login_provider) === wantProvider)) || entries.find((m) => m.name === wantName) || null
   } catch {
     profile.value = null
   }
