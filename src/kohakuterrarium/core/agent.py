@@ -12,23 +12,23 @@ import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
+from kohakuterrarium.bootstrap.agent_init import AgentInitMixin
+from kohakuterrarium.bootstrap.plugins import init_plugins
 from kohakuterrarium.core.agent_handlers import AgentHandlersMixin
 from kohakuterrarium.core.agent_messages import AgentMessagesMixin
-from kohakuterrarium.bootstrap.agent_init import AgentInitMixin
-from kohakuterrarium.bootstrap.llm import create_llm_from_profile_name
-from kohakuterrarium.bootstrap.plugins import init_plugins
+from kohakuterrarium.core.agent_model import AgentModelMixin
 from kohakuterrarium.core.compact import CompactConfig, CompactManager
-from kohakuterrarium.modules.plugin.base import PluginContext
 from kohakuterrarium.core.config import AgentConfig, load_agent_config
-from kohakuterrarium.core.job import JobState
 from kohakuterrarium.core.events import TriggerEvent, create_user_input_event
-from kohakuterrarium.llm.message import ContentPart
+from kohakuterrarium.core.job import JobState
 from kohakuterrarium.core.loader import ModuleLoader
 from kohakuterrarium.core.session import Session
 from kohakuterrarium.core.termination import TerminationChecker, TerminationConfig
 from kohakuterrarium.core.trigger_manager import TriggerManager
+from kohakuterrarium.llm.message import ContentPart
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
+from kohakuterrarium.modules.plugin.base import PluginContext
 from kohakuterrarium.modules.trigger.base import BaseTrigger
 from kohakuterrarium.session.output import SessionOutput
 from kohakuterrarium.utils.logging import get_logger
@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
+class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin, AgentModelMixin):
     """Main agent orchestrator. Wires LLM, controller, executor, I/O."""
 
     @classmethod
@@ -112,6 +112,12 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
 
         # LLM profile override (from --llm CLI flag)
         self._llm_override = llm_override
+        # Canonical ``provider/name[@variations]`` identifier for the
+        # currently-bound profile, populated lazily by ``llm_identifier()``
+        # and refreshed on every ``switch_model()`` call. Used by the
+        # rich-CLI banner, ``/model`` output, session_info metadata, and
+        # the web ModelSwitcher pill so every surface shows the same form.
+        self._llm_identifier: str = ""
 
         # Explicit working directory (from web API pwd field)
         self._explicit_pwd = pwd
@@ -514,13 +520,20 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
         compact_cfg = self.compact_manager.config
         max_context = compact_cfg.max_tokens
         compact_at = int(max_context * compact_cfg.threshold) if max_context else 0
+        # ``llm_name`` carries the canonical ``provider/name[@variations]``
+        # identifier so CLI banners, the web ModelSwitcher pill, and
+        # future ``/model`` invocations all show the same selector form.
+        # Falls back to whatever the user originally specified if
+        # resolution failed (shouldn't happen at this point but we're
+        # conservative — the event still fires with best-effort data).
+        llm_identifier = self.llm_identifier() or selected_llm_name
         self.output_router.notify_activity(
             "session_info",
             "",
             metadata={
                 "session_id": session_id,
                 "model": model,
-                "llm_name": selected_llm_name,
+                "llm_name": llm_identifier,
                 "agent_name": self.config.name,
                 "max_context": max_context,
                 "compact_threshold": compact_at,
@@ -623,53 +636,9 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin):
         logger.info("Task promoted via UI", job_id=job_id)
         return True
 
-    def switch_model(self, profile_name: str) -> str:
-        """Switch the LLM provider to a different model profile.
-
-        Args:
-            profile_name: Name of the LLM profile/preset (e.g. "claude-opus-4.6")
-
-        Returns:
-            The model identifier string of the new provider.
-        """
-        new_llm = create_llm_from_profile_name(profile_name)
-        self._llm_override = profile_name
-        self.llm = new_llm
-        self.controller.llm = new_llm
-        if self.compact_manager:
-            self.compact_manager._llm = new_llm
-            # Update compact threshold from new profile's context window
-            new_max = getattr(new_llm, "_profile_max_context", 0)
-            if new_max:
-                self.compact_manager.config.max_tokens = new_max
-
-        model_name = getattr(new_llm, "model", profile_name)
-        logger.info(
-            "Model switched",
-            agent_name=self.config.name,
-            profile=profile_name,
-            model=model_name,
-        )
-
-        # Emit session_info so TUI/frontend updates the display
-        new_max = getattr(new_llm, "_profile_max_context", 0)
-        compact_at = 0
-        if self.compact_manager and new_max:
-            compact_at = int(new_max * self.compact_manager.config.threshold)
-        self.output_router.notify_activity(
-            "session_info",
-            f"Model switched to {model_name}",
-            metadata={
-                "model": model_name,
-                "llm_name": profile_name,
-                "agent_name": self.config.name,
-                "session_id": getattr(self, "_session_id", ""),
-                "max_context": new_max,
-                "compact_threshold": compact_at,
-            },
-        )
-
-        return model_name
+    # ``switch_model`` + ``llm_identifier`` live in AgentModelMixin —
+    # see ``core/agent_model.py``. Split out to keep this file under
+    # the per-file size guard.
 
     async def stop(self) -> None:
         """Stop all agent modules."""

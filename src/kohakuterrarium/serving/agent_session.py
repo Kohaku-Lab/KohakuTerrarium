@@ -123,6 +123,17 @@ class AgentSession:
             or getattr(getattr(self.agent.llm, "config", None), "model", "")
             or self.agent.config.model
         )
+        # Canonical ``provider/name[@variations]`` identifier — frontends
+        # use this for the ModelSwitcher pill so it survives a page
+        # refresh (the per-request session_info event isn't replayed
+        # when the user reloads the page).
+        llm_identifier = ""
+        get_ident = getattr(self.agent, "llm_identifier", None)
+        if callable(get_ident):
+            try:
+                llm_identifier = get_ident() or ""
+            except Exception as e:
+                logger.debug("llm_identifier resolve failed", error=str(e))
         max_context = getattr(self.agent.llm, "_profile_max_context", 0)
         compact_threshold = 0
         if self.agent.compact_manager and max_context:
@@ -158,6 +169,7 @@ class AgentSession:
             "agent_id": self.agent_id,
             "name": self.agent.config.name,
             "model": model,
+            "llm_name": llm_identifier,
             "provider": provider,
             "session_id": session_id,
             "max_context": max_context,

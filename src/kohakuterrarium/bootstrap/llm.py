@@ -110,6 +110,7 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
             service_tier=profile.service_tier or None,
         )
         provider._profile_max_context = profile.max_context
+        _apply_backend_native_identity(provider, profile)
         return provider
 
     api_key = get_api_key(profile.provider) if profile.provider else ""
@@ -131,7 +132,28 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
         extra_body=profile.extra_body or None,
     )
     provider._profile_max_context = profile.max_context
+    _apply_backend_native_identity(provider, profile)
     return provider
+
+
+def _apply_backend_native_identity(provider: LLMProvider, profile: LLMProfile) -> None:
+    """Stamp the backend's provider_name and provider_native_tools onto the
+    instance.
+
+    The tool-injection logic in :mod:`bootstrap.agent_init` reads these
+    via ``getattr(llm, "provider_name")`` / ``provider_native_tools``.
+    Class-level defaults on the provider subclass serve as fallbacks:
+    a custom provider that leaves ``provider_name`` empty and declares
+    no native tools inherits the class defaults (empty sets).
+    """
+    backend_name = getattr(profile, "backend_provider_name", "")
+    if backend_name:
+        provider.provider_name = backend_name
+    backend_tools = getattr(profile, "backend_native_tools", None)
+    if backend_tools is not None:
+        # Always respect the backend's list (including the empty list —
+        # an explicit empty list means "opt out of every native tool").
+        provider.provider_native_tools = frozenset(backend_tools)
 
 
 def create_llm_from_profile_name(name: str) -> LLMProvider:

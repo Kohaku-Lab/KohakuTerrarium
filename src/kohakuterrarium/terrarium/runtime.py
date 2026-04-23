@@ -334,10 +334,21 @@ class TerrariumRuntime(HotPlugMixin):
         """Return a status dict for monitoring."""
         creature_states: dict[str, dict[str, Any]] = {}
         for name, handle in self._creatures.items():
+            # Canonical ``provider/name[@variations]`` identifier so the
+            # web ModelSwitcher pill survives a page refresh — the
+            # per-request session_info event isn't replayed then.
+            identifier = ""
+            get_ident = getattr(handle.agent, "llm_identifier", None)
+            if callable(get_ident):
+                try:
+                    identifier = get_ident() or ""
+                except Exception:
+                    identifier = ""
             creature_states[name] = {
                 "running": handle.is_running,
                 "model": getattr(handle.agent.llm, "model", "")
                 or getattr(getattr(handle.agent.llm, "config", None), "model", ""),
+                "llm_name": identifier,
                 "listen_channels": handle.listen_channels,
                 "send_channels": handle.send_channels,
             }
@@ -367,6 +378,16 @@ class TerrariumRuntime(HotPlugMixin):
             status["root_model"] = getattr(
                 self._root_agent.llm, "model", ""
             ) or getattr(getattr(self._root_agent.llm, "config", None), "model", "")
+            # Canonical ``provider/name[@variations]`` so the web pill
+            # survives a refresh.
+            root_identifier = ""
+            get_ident = getattr(self._root_agent, "llm_identifier", None)
+            if callable(get_ident):
+                try:
+                    root_identifier = get_ident() or ""
+                except Exception:
+                    root_identifier = ""
+            status["root_llm_name"] = root_identifier
             status["root_session_id"] = ""
             if self._root_agent.session_store:
                 try:
