@@ -1,21 +1,79 @@
 """
 Prompt templating using Jinja2.
 
-Provides simple variable substitution and control flow for prompts.
+Provides simple variable substitution and control flow for prompts,
+plus shared prompt-fragment discovery through the package manifest
+``prompts:`` / ``templates:`` slots (Cluster 1 / A.5). A creature
+system prompt containing ``{% include "git-safety" %}`` triggers a
+search across every installed package for a fragment with that name,
+letting packages ship reusable prompt bundles.
 """
 
+from pathlib import Path
 from typing import Any
 
-from jinja2 import Environment, BaseLoader, TemplateSyntaxError
+from jinja2 import (
+    BaseLoader,
+    Environment,
+    TemplateNotFound,
+    TemplateSyntaxError,
+)
 
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 
+class PackagePromptLoader(BaseLoader):
+    """Resolve ``{% include "<name>" %}`` via the package manifest.
+
+    The loader queries :func:`resolve_package_prompt` for every include
+    target, falling back to absolute / relative file paths. The
+    manifest lookup is lazy so every render picks up newly-installed
+    packages without reloading the module.
+    """
+
+    def get_source(self, environment, template):  # noqa: D401 — Jinja API
+        # Local import — ``packages`` imports ``packages_manifest`` which
+        # imports ``packages`` in turn, so we defer to avoid a cold-boot
+        # circular import through this module's top-level.
+        from kohakuterrarium.packages import resolve_package_prompt
+
+        path: Path | None = None
+        try:
+            path = resolve_package_prompt(template)
+        except ValueError as exc:
+            # Collision across packages — surface as TemplateNotFound
+            # with a clearer message so the Jinja traceback points at
+            # the manifest rather than the include line.
+            logger.error("Prompt fragment collision", fragment=template, error=str(exc))
+            raise TemplateNotFound(template, message=str(exc)) from exc
+
+        if path is None:
+            # Try raw file path as a second resort — keeps parity with
+            # ``Environment(loader=FileSystemLoader(...))`` flows.
+            candidate = Path(template)
+            if candidate.exists() and candidate.is_file():
+                path = candidate.resolve()
+
+        if path is None or not path.exists():
+            raise TemplateNotFound(template)
+
+        source = path.read_text(encoding="utf-8")
+        mtime = path.stat().st_mtime
+
+        def uptodate() -> bool:
+            try:
+                return path.stat().st_mtime == mtime
+            except OSError:
+                return False
+
+        return source, str(path), uptodate
+
+
 # Create Jinja2 environment with safe defaults
 _env = Environment(
-    loader=BaseLoader(),
+    loader=PackagePromptLoader(),
     autoescape=False,  # Prompts are not HTML
     trim_blocks=True,
     lstrip_blocks=True,
@@ -30,6 +88,8 @@ def render_template(template: str, **variables: Any) -> str:
     - Variables: {{ variable }}
     - Conditionals: {% if condition %}...{% endif %}
     - Loops: {% for item in items %}...{% endfor %}
+    - Includes: {% include "git-safety" %} resolves via the package
+      manifest ``prompts:`` slot, then falls back to a raw file path.
 
     Args:
         template: Template string with Jinja2 syntax
