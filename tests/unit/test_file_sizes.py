@@ -25,6 +25,11 @@ ALLOWLIST_600 = {
     "prompt/aggregator.py",
     # Pure data (model presets)
     "llm/presets.py",
+    # Preset + backend resolution module: cohesive registry state +
+    # lookup rules (YAML layout, (provider, name) key, variation
+    # selector parse, ambiguity handling, list_all). Splitting further
+    # would scatter related logic across many small files.
+    "llm/profiles.py",
     # Rich CLI orchestrator — same shape as core/agent.py + manager.py
     # (top-level class owning lifecycle + layout + many small delegation
     # methods). Output-event handlers already extracted to AppOutputMixin.

@@ -136,7 +136,7 @@ class TestAgentSession:
         try:
             status = session.get_status()
             assert "agent_id" in status
-            assert status["name"] == "swe_agent"
+            assert status["name"] == "swe"
             assert status["running"] is True
             assert isinstance(status["tools"], list)
             assert len(status["tools"]) > 0
@@ -219,7 +219,7 @@ class TestKohakuManagerAgents:
 
         assert status is not None
         assert status["agent_id"] == agent_id
-        assert status["name"] == "swe_agent"
+        assert status["name"] == "swe"
         assert status["running"] is True
         assert isinstance(status["tools"], list)
 

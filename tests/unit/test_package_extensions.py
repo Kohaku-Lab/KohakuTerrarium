@@ -266,23 +266,26 @@ class TestValidatePackageExtensions:
 
 class TestGetAllPresets:
     def test_includes_builtins(self):
-        from kohakuterrarium.llm.presets import PRESETS, get_all_presets
-
         # Reset cache for clean test
         import kohakuterrarium.llm.presets as presets_mod
+        from kohakuterrarium.llm.preset_aliases import _CANONICAL_NAMES
+        from kohakuterrarium.llm.presets import PRESETS, get_all_presets
 
         presets_mod._all_presets_cache = None
         presets_mod._package_presets_merged = False
 
         result = get_all_presets()
-        # All builtin presets should be present
-        for key in PRESETS:
-            assert key in result
+        # All builtin presets should be present under their (provider, canonical_name) key.
+        for legacy_name, data in PRESETS.items():
+            provider = data.get("provider")
+            if not provider:
+                continue
+            canonical = _CANONICAL_NAMES.get(legacy_name, legacy_name)
+            assert (provider, canonical) in result
 
     def test_caching(self):
-        from kohakuterrarium.llm.presets import get_all_presets
-
         import kohakuterrarium.llm.presets as presets_mod
+        from kohakuterrarium.llm.presets import get_all_presets
 
         presets_mod._all_presets_cache = None
         presets_mod._package_presets_merged = False
@@ -292,7 +295,8 @@ class TestGetAllPresets:
         assert result1 is result2  # Same object, cached
 
     def test_package_presets_merged(self, tmp_packages, extension_package):
-        """Package presets should appear in get_all_presets()."""
+        """Package presets should appear in get_all_presets() under their
+        (provider, name) key."""
         import kohakuterrarium.llm.presets as presets_mod
 
         presets_mod._all_presets_cache = None
@@ -300,9 +304,8 @@ class TestGetAllPresets:
 
         install_package(str(extension_package))
         result = presets_mod.get_all_presets()
-        assert "custom-model" in result
-        assert result["custom-model"]["provider"] == "openai"
-        assert result["custom-model"]["model"] == "custom/model-v1"
+        assert ("openai", "custom-model") in result
+        assert result[("openai", "custom-model")]["model"] == "custom/model-v1"
 
         # Cleanup
         presets_mod._all_presets_cache = None

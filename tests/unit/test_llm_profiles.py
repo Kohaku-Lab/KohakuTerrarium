@@ -19,6 +19,7 @@ from kohakuterrarium.llm.profiles import (
     normalize_variation_selections,
     parse_variation_selector,
     resolve_controller_llm,
+    save_backend,
     save_profile,
     set_default_model,
 )
@@ -56,16 +57,37 @@ class TestPresets:
             assert "max_context" in data, f"{name} missing max_context"
 
     def test_aliases_point_to_valid_presets(self):
+        from kohakuterrarium.llm.presets import get_all_presets
+
+        catalog = get_all_presets()
         for alias, target in ALIASES.items():
+            # Aliases now store (provider, canonical_name) tuples under the
+            # (provider, name) hierarchy. Each target must resolve to an
+            # entry in the merged nested preset catalog.
             assert (
-                target in PRESETS
+                target in catalog
             ), f"alias '{alias}' points to missing preset '{target}'"
 
-    def test_get_preset_by_name(self):
-        p = get_preset("gpt-5.4")
+    def test_get_preset_by_qualified_name(self):
+        # Bare "gpt-5.4" is now ambiguous (exists on codex, openai, openrouter).
+        # Qualified "codex/gpt-5.4" is unambiguous.
+        p = get_preset("codex/gpt-5.4")
         assert p is not None
         assert p.model == "gpt-5.4"
+        assert p.provider == "codex"
         assert p.max_context > 0
+
+    def test_get_preset_ambiguous_bare_name(self):
+        # Bare name with multiple providers raises, per the new hierarchy.
+        with pytest.raises(ValueError, match="multiple providers"):
+            get_preset("gpt-5.4")
+
+    def test_get_preset_unique_bare_name(self):
+        # Names that exist under exactly one provider still resolve bare.
+        # ``kimi-k2.5`` only exists on openrouter (no direct Moonshot backend).
+        p = get_preset("kimi-k2.5")
+        assert p is not None
+        assert p.provider == "openrouter"
 
     def test_get_preset_by_alias(self):
         p = get_preset("gemini")
@@ -176,7 +198,7 @@ class TestPresetSerialization:
 
         from kohakuterrarium.llm.profiles import load_presets
 
-        stored = load_presets()["user-variant"]
+        stored = load_presets()[("openai", "user-variant")]
         assert stored.model == "gpt-test-v2"
         assert stored.max_context == 512000
         assert stored.variation_groups == {
@@ -195,8 +217,8 @@ class TestProfileStorage:
         save_profile(profile)
 
         profiles = load_profiles()
-        assert "myprofile" in profiles
-        assert profiles["myprofile"].model == "custom-model"
+        assert ("openai", "myprofile") in profiles
+        assert profiles[("openai", "myprofile")].model == "custom-model"
 
     def test_delete_profile(self, tmp_profiles):
         profile = LLMProfile(name="todel", provider="openai", model="m")
@@ -207,8 +229,16 @@ class TestProfileStorage:
     def test_default_model(self, tmp_profiles):
         with patch("kohakuterrarium.llm.profiles._is_available", return_value=False):
             assert get_default_model() == ""
+        # Explicit qualified default — round-trips unchanged.
+        set_default_model("codex/gpt-5.4")
+        assert get_default_model() == "codex/gpt-5.4"
+
+    def test_default_model_legacy_bare_name_upgrades(self, tmp_profiles):
+        """A pre-refactor YAML with ``default_model: gpt-5.4`` is read back
+        as ``codex/gpt-5.4`` — the bare ambiguous name gets upgraded to
+        the first-preferred provider that serves it."""
         set_default_model("gpt-5.4")
-        assert get_default_model() == "gpt-5.4"
+        assert get_default_model() == "codex/gpt-5.4"
 
     def test_load_empty(self, tmp_profiles):
         profiles = load_profiles()
@@ -277,9 +307,18 @@ class TestVariationHelpers:
 
 class TestResolution:
     def test_resolve_from_config_llm(self, tmp_profiles):
-        profile = resolve_controller_llm({"llm": "gpt-5.4"})
+        # Qualified provider/name form under the (provider, name) hierarchy.
+        profile = resolve_controller_llm({"llm": "codex/gpt-5.4"})
         assert profile is not None
         assert profile.model == "gpt-5.4"
+        assert profile.provider == "codex"
+
+    def test_resolve_from_config_with_provider_field(self, tmp_profiles):
+        # Same preset accessed via a separate ``provider`` field instead of
+        # the ``provider/name`` prefix — both forms must succeed.
+        profile = resolve_controller_llm({"llm": "gpt-5.4", "provider": "codex"})
+        assert profile is not None
+        assert profile.provider == "codex"
 
     def test_resolve_from_alias(self, tmp_profiles):
         profile = resolve_controller_llm({"llm": "gemini"})
@@ -287,19 +326,26 @@ class TestResolution:
         assert "gemini" in profile.model
 
     def test_resolve_from_default(self, tmp_profiles):
-        set_default_model("gpt-4o")
+        set_default_model("codex/gpt-4o")
         profile = resolve_controller_llm({})
         assert profile is not None
         assert profile.model == "gpt-4o"
+        assert profile.provider == "codex"
 
     def test_resolve_cli_override(self, tmp_profiles):
-        profile = resolve_controller_llm({"llm": "gpt-5.4"}, llm_override="gemini")
+        profile = resolve_controller_llm(
+            {"llm": "codex/gpt-5.4"}, llm_override="gemini"
+        )
         assert profile is not None
         assert "gemini" in profile.model
 
     def test_resolve_inline_overrides(self, tmp_profiles):
         profile = resolve_controller_llm(
-            {"llm": "gpt-5.4", "temperature": 0.3, "reasoning_effort": "xhigh"}
+            {
+                "llm": "codex/gpt-5.4",
+                "temperature": 0.3,
+                "reasoning_effort": "xhigh",
+            }
         )
         assert profile is not None
         assert profile.temperature == 0.3
@@ -361,6 +407,9 @@ class TestResolution:
         assert profile.extra_body["reasoning"]["summary"] == "auto"
 
     def test_resolve_user_profile_over_preset(self, tmp_profiles):
+        # User preset at (openai, gpt-5.4) overrides the built-in at
+        # the same (provider, name). The codex and openrouter built-ins
+        # stay untouched — different (provider, name) keys.
         custom = LLMProfile(
             name="gpt-5.4",
             provider="openai",
@@ -368,9 +417,15 @@ class TestResolution:
             max_context=999999,
         )
         save_profile(custom)
-        profile = resolve_controller_llm({"llm": "gpt-5.4"})
+        profile = resolve_controller_llm({"llm": "openai/gpt-5.4"})
         assert profile is not None
         assert profile.model == "custom-gpt-5.4"
+
+        # The codex built-in is still present — same bare name, different provider.
+        codex_profile = resolve_controller_llm({"llm": "codex/gpt-5.4"})
+        assert codex_profile is not None
+        assert codex_profile.model == "gpt-5.4"
+        assert codex_profile.provider == "codex"
 
     def test_resolve_no_profile_returns_none(self, tmp_profiles):
         with patch("kohakuterrarium.llm.profiles._is_available", return_value=False):
@@ -381,9 +436,15 @@ class TestResolution:
         profile = resolve_controller_llm({"llm": "nonexistent-xyz"})
         assert profile is None
 
-    def test_resolve_ambiguous_model_lookup(self, tmp_profiles):
-        with pytest.raises(ValueError, match="ambiguous"):
-            resolve_controller_llm({"model": "gpt-5.4"})
+    def test_resolve_bare_model_picks_preferred_provider(self, tmp_profiles):
+        # Bare ``model: gpt-5.4`` exists on codex, openai, openrouter. Under
+        # the new (provider, name) hierarchy this would be ambiguous, but
+        # legacy controller configs still use the bare form — the resolver
+        # falls back to the ``_LEGACY_MODEL_PROVIDER_PREFERENCE`` ordering
+        # (codex first) to keep old configs working.
+        profile = resolve_controller_llm({"model": "gpt-5.4"})
+        assert profile is not None
+        assert profile.provider == "codex"
 
     def test_selector_unknown_group_is_explicit(self, tmp_profiles):
         with pytest.raises(ValueError, match="Unknown variation group"):
@@ -408,11 +469,71 @@ class TestListAll:
         assert "custom" in names
 
     def test_marks_default(self, tmp_profiles):
-        set_default_model("gpt-5.4")
+        # Default is now ``provider/name`` under the hierarchy.
+        set_default_model("codex/gpt-5.4")
         entries = list_all()
         defaults = [e for e in entries if e.get("is_default")]
         assert len(defaults) >= 1
         assert defaults[0]["name"] == "gpt-5.4"
+        assert defaults[0]["provider"] == "codex"
+
+    def test_user_preset_coexists_with_builtin_same_name(self, tmp_profiles):
+        """User preset ``(my-ent, gpt-5.4)`` does NOT hide built-in
+        ``(codex, gpt-5.4)``. Both appear in list_all — the merge key
+        is (provider, name), not name alone."""
+        from kohakuterrarium.llm.profile_types import LLMBackend
+
+        save_backend(
+            LLMBackend(
+                name="my-ent",
+                backend_type="openai",
+                base_url="https://example.invalid/v1",
+                api_key_env="MY_ENT_KEY",
+            )
+        )
+        save_profile(LLMPreset(name="gpt-5.4", provider="my-ent", model="gpt-5.4"))
+
+        entries = list_all()
+        gpt54 = [e for e in entries if e["name"] == "gpt-5.4"]
+        providers = {e["provider"] for e in gpt54}
+        # User (my-ent) coexists with built-ins (codex, openai, openrouter).
+        assert "my-ent" in providers
+        assert "codex" in providers
+        # The user entry is tagged as such.
+        sources = {e["provider"]: e["source"] for e in gpt54}
+        assert sources["my-ent"] == "user"
+        assert sources["codex"] == "preset"
+
+    def test_yaml_migration_flat_to_nested(self, tmp_profiles):
+        """Legacy flat-shape YAML is read and migrated to the nested
+        ``presets: {provider: {name: data}}`` shape on the next save."""
+        import yaml
+
+        flat = {
+            "version": 2,
+            "presets": {
+                "my-model": {
+                    "provider": "openai",
+                    "model": "gpt-5.4",
+                    "max_context": 128000,
+                }
+            },
+        }
+        tmp_profiles.write_text(yaml.dump(flat))
+
+        # Read succeeds against the flat shape.
+        from kohakuterrarium.llm.profiles import load_presets
+
+        loaded = load_presets()
+        assert ("openai", "my-model") in loaded
+
+        # Any save rewrites the file in nested shape.
+        save_profile(LLMPreset(name="other", provider="openai", model="gpt-4o"))
+        content = tmp_profiles.read_text()
+        rewritten = yaml.safe_load(content)
+        assert "openai" in rewritten["presets"]
+        assert "my-model" in rewritten["presets"]["openai"]
+        assert "other" in rewritten["presets"]["openai"]
 
     def test_exposes_variation_metadata(self, tmp_profiles):
         # claude-opus-4.6 (Anthropic direct) is the primary Opus 4.6 preset
