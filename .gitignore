@@ -11,6 +11,7 @@ novel_out.txt
 .internal/
 .briefcase/
 .kohaku-docs-build/
+poc/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
