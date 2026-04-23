@@ -152,8 +152,8 @@ PRESETS: dict[str, dict[str, Any]] = {
     "gpt-5.4": {
         "provider": "codex",
         "model": "gpt-5.4",
-        "max_context": 272000,
-        "reasoning_effort": "high",
+        "max_context": 400000,
+        "reasoning_effort": "xhigh",
         "variation_groups": {
             "reasoning": _CODEX_REASONING_GROUP,
             "speed": _CODEX_SPEED_GROUP,
@@ -162,15 +162,15 @@ PRESETS: dict[str, dict[str, Any]] = {
     "gpt-5.3-codex": {
         "provider": "codex",
         "model": "gpt-5.3-codex",
-        "max_context": 272000,
-        "reasoning_effort": "high",
+        "max_context": 400000,
+        "reasoning_effort": "xhigh",
         "variation_groups": {"reasoning": _CODEX_REASONING_GROUP},
     },
     "gpt-5.1": {
         "provider": "codex",
         "model": "gpt-5.1",
-        "max_context": 272000,
-        "reasoning_effort": "high",
+        "max_context": 400000,
+        "reasoning_effort": "xhigh",
         "variation_groups": {"reasoning": _CODEX_REASONING_GROUP},
     },
     "gpt-4o-codex": {
