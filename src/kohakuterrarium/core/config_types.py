@@ -211,14 +211,6 @@ class AgentConfig:
     # ``core/agent_handlers.py:_finalize_processing`` for the emission hook.
     output_wiring: list[OutputWiringEntry] = field(default_factory=list)
 
-    def get_api_key(self) -> str | None:
-        """Get API key from environment."""
-        return os.environ.get(self.api_key_env)
-
-
-# Environment variable pattern: ${VAR} or ${VAR:default}
-ENV_VAR_PATTERN = re.compile(r"\$\{([^}:]+)(?::([^}]*))?\}")
-
     # Framework-hint overrides for the system-prompt aggregator.
     # Maps a canonical hint key (see ``prompt/framework_hints.py``)
     # to replacement prose. Empty string means "omit this block entirely".
@@ -226,6 +218,14 @@ ENV_VAR_PATTERN = re.compile(r"\$\{([^}:]+)(?::([^}]*))?\}")
     # built-in default -> package-level ``framework_hints`` in kohaku.yaml
     # -> this creature-level map.
     framework_hint_overrides: dict[str, str] = field(default_factory=dict)
+
+    def get_api_key(self) -> str | None:
+        """Get API key from environment."""
+        return os.environ.get(self.api_key_env)
+
+
+# Environment variable pattern: ${VAR} or ${VAR:default}
+ENV_VAR_PATTERN = re.compile(r"\$\{([^}:]+)(?::([^}]*))?\}")
 
 
 def _interpolate_env_vars(value: Any) -> Any:
