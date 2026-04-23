@@ -3,6 +3,7 @@
 import asyncio
 import importlib
 
+from kohakuterrarium.core.agent_pre_dispatch import run_pre_tool_dispatch
 from kohakuterrarium.core.agent_tools import (
     AgentToolsMixin,
     _TurnResult,
@@ -299,6 +300,11 @@ class AgentHandlersMixin(AgentToolsMixin):
         native_mode: bool,
     ) -> None:
         """Handle a ToolCallEvent: wrap in backgroundify and track."""
+        # pre_tool_dispatch plugin chain (cluster B.2) — may rewrite or veto.
+        parse_event = await run_pre_tool_dispatch(self, parse_event, controller)
+        if parse_event is None:
+            return
+
         tool_call_id = parse_event.args.pop("_tool_call_id", None)
         run_bg = parse_event.args.pop("run_in_background", False)
 

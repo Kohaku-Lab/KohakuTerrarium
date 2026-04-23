@@ -10,13 +10,14 @@ All plugins run linearly by priority, not nested.
 **Callbacks** — fire-and-forget notifications with data.
 
 Error handling:
-  - PluginBlockError in pre_tool_execute: blocks execution, becomes tool result
+  - PluginBlockError in pre_tool_execute / pre_tool_dispatch:
+    blocks execution, becomes tool result
   - Regular Exception: logged, plugin skipped, execution continues
 """
 
-import warnings
+import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from kohakuterrarium.utils.logging import get_logger
 
@@ -38,7 +39,8 @@ class PluginBlockError(Exception):
     """Raised by a plugin to block tool/sub-agent execution.
 
     The error message is returned to the model as the tool result.
-    Only meaningful in ``pre_tool_execute`` and ``pre_subagent_run``.
+    Only meaningful in ``pre_tool_execute``, ``pre_tool_dispatch``, and
+    ``pre_subagent_run``.
     """
 
 
@@ -64,11 +66,9 @@ class PluginContext:
       prepended to the next LLM call.
     * ``get_state(key)`` / ``set_state(key, value)`` — plugin-scoped state.
 
-    The private ``_agent`` attribute still works but emits a
-    ``DeprecationWarning`` once per ``(plugin, context)`` pair.
-    One-minor-version compatibility window (per
-    ``plans/harness/extension-point-decisions.md`` cluster 7.2), after
-    which the alias is removed.
+    The deprecated ``_agent`` alias was removed in Cluster 2 (β) of the
+    extension-point work. Use ``host_agent`` (or the specific typed
+    properties above) instead.
     """
 
     def __init__(
@@ -79,62 +79,19 @@ class PluginContext:
         model: str = "",
         _host_agent: Any = None,
         _plugin_name: str = "",
-        *,
-        _agent: Any = None,
     ) -> None:
         self.agent_name = agent_name
         self.working_dir = working_dir if working_dir is not None else Path.cwd()
         self.session_id = session_id
         self.model = model
-        # Accept legacy ``_agent=`` kwarg (emits no warning at construction
-        # time — the warning fires on access). Field renames happened in
-        # the H.5 refactor; the new canonical storage is ``_host_agent``.
-        if _host_agent is None and _agent is not None:
-            _host_agent = _agent
         self._host_agent = _host_agent
         self._plugin_name = _plugin_name
-        self._deprecation_warned: set[str] = set()
 
     def __repr__(self) -> str:
         return (
             f"PluginContext(agent_name={self.agent_name!r}, "
             f"session_id={self.session_id!r}, model={self.model!r}, "
             f"plugin={self._plugin_name!r})"
-        )
-
-    # ── Backward-compat alias for ``_agent`` ───────────────────────────
-
-    @property
-    def _agent(self) -> Any:
-        """Deprecated back-ref to the host Agent.
-
-        Kept for one minor version. Use ``host_agent`` (or the specific
-        typed properties like ``session_store`` / ``registry``) instead.
-        """
-        self._warn_deprecated_agent_access()
-        return self._host_agent
-
-    @_agent.setter
-    def _agent(self, value: Any) -> None:
-        # Allow in-place assignment. Routes to the real storage slot.
-        self._host_agent = value
-
-    def _warn_deprecated_agent_access(self) -> None:
-        """Emit DeprecationWarning once per plugin lifetime."""
-        key = self._plugin_name or "<anonymous>"
-        if key in self._deprecation_warned:
-            return
-        self._deprecation_warned.add(key)
-        message = (
-            f"PluginContext._agent is deprecated; plugin '{key}' should "
-            "use context.host_agent (or context.session_store / "
-            "context.registry / context.scratchpad / etc.). The alias "
-            "will be removed in the next minor release."
-        )
-        warnings.warn(message, DeprecationWarning, stacklevel=3)
-        logger.info(
-            "Plugin using deprecated PluginContext._agent",
-            plugin_name=key,
         )
 
     # ── Public accessors ───────────────────────────────────────────────
@@ -260,10 +217,86 @@ class BasePlugin:
 
     Return None from pre/post to keep the value unchanged.
     Return a value to replace it for the next plugin in the chain.
+
+    Declarative gating via ``applies_to``:
+        class MyPlugin(BasePlugin):
+            applies_to = {
+                "agent_names": ["swe"],        # list of exact matches
+                "model_patterns": ["^codex/"], # list of regex strings
+            }
+
+    Override ``should_apply(context)`` for dynamic gating; subclasses
+    typically call ``super().should_apply(context)`` first.
     """
 
     name: str = "unnamed"
     priority: int = 50  # Lower = runs first in pre, last in post
+
+    # Declarative filter. Empty dict / missing = apply to all contexts.
+    applies_to: dict[str, list[str]] = {}
+
+    def __init__(self) -> None:
+        # Pre-compile model_patterns once. Evaluated before every hook
+        # call (see cluster 2.5 of the extension-point spec).
+        self._model_pattern_res: list[re.Pattern[str]] = []
+        for pattern in self.applies_to.get("model_patterns", []) or []:
+            try:
+                self._model_pattern_res.append(re.compile(pattern))
+            except re.error as exc:
+                logger.warning(
+                    "Plugin model_patterns regex failed to compile; skipping",
+                    plugin_name=getattr(self, "name", "?"),
+                    pattern=str(pattern),
+                    error=str(exc),
+                )
+
+    # ── Gating ──
+
+    def should_apply(self, context: PluginContext) -> bool:
+        """Return True if this plugin should run for the given context.
+
+        Default implementation consults the declarative ``applies_to``
+        filter. Override to add dynamic checks — call
+        ``super().should_apply(context)`` first to keep the declarative
+        gate in effect.
+        """
+        applies_to = self.applies_to or {}
+        names = applies_to.get("agent_names") or []
+        if names and context.agent_name not in names:
+            return False
+        if self._model_pattern_res:
+            model = context.model or ""
+            if not any(p.search(model) for p in self._model_pattern_res):
+                return False
+        return True
+
+    # ── Controller / package commands ──
+
+    def contribute_commands(self) -> dict[str, Any]:
+        """Return a mapping of ``##name##`` → ``BaseCommand`` instance.
+
+        Called once per plugin after ``on_load``. Built-in command names
+        (``info``, ``read_job``, ``jobs``, ``wait``) are protected —
+        attempting to register one without ``override=True`` raises.
+        """
+        return {}
+
+    # ── Termination voting ──
+
+    def contribute_termination_check(
+        self,
+    ) -> "Callable[[Any], Any] | None":
+        """Return a checker function that votes on termination each turn.
+
+        The checker is a callable ``fn(context: TerminationContext) ->
+        TerminationDecision | None``. Return ``None`` (default) to not
+        participate in termination voting.
+
+        When any plugin's checker returns ``TerminationDecision(
+        should_stop=True, reason=...)``, the run stops (any-can-stop
+        per cluster 3.3).
+        """
+        return None
 
     # ── Lifecycle ──
 
@@ -284,13 +317,33 @@ class BasePlugin:
 
     async def post_llm_call(
         self, messages: list[dict], response: str, usage: dict, **kwargs
-    ) -> None:
-        """After LLM call. Observation — cannot modify response.
+    ) -> str | None:
+        """After LLM call. Return a rewritten response string or None.
+
+        Chain-with-return semantics: each plugin sees the previous
+        plugin's rewrite. ``None`` means pass through unchanged.
+        Finalize-only — one fire per complete turn with the full
+        assistant content.
 
         kwargs: model (str)
         """
+        return None
 
     # ── Tool hooks ──
+
+    async def pre_tool_dispatch(self, call: Any, context: PluginContext) -> Any | None:
+        """Before the executor sees a tool call.
+
+        Fires after the parser emits a ``ToolCallEvent`` and before the
+        executor submits it. Return a new/modified ``ToolCallEvent`` to
+        rewrite (can change tool name, args, or both). Return ``None``
+        to pass through. Raise ``PluginBlockError`` to veto the call;
+        the error text becomes the tool result.
+
+        Chain linearly by priority; each plugin sees the output of the
+        previous one.
+        """
+        return None
 
     async def pre_tool_execute(self, args: dict, **kwargs) -> dict | None:
         """Before tool execution. Return modified args or None.

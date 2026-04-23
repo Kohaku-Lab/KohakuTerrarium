@@ -316,6 +316,14 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
 
     def _emit_direct_completion_activity(self, job_id: str, result: Any) -> None:
         """Emit terminal activity immediately when a direct job finishes."""
+        # Record for plugin termination checkers that want to peek at
+        # the recent tool-result tail (cluster C.2 TerminationContext).
+        checker = getattr(self, "_termination_checker", None)
+        if checker is not None and hasattr(checker, "record_tool_result"):
+            try:
+                checker.record_tool_result(result)
+            except Exception:  # pragma: no cover — defensive
+                pass
         meta = self._direct_job_meta.get(job_id, {})
         kind = meta.get("kind", "subagent" if job_id.startswith("agent_") else "tool")
         _, label = _make_job_label(job_id)

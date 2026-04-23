@@ -19,6 +19,9 @@ from kohakuterrarium.core.agent_messages import AgentMessagesMixin
 from kohakuterrarium.core.agent_model import AgentModelMixin
 from kohakuterrarium.core.compact import CompactConfig, CompactManager
 from kohakuterrarium.core.config import AgentConfig, load_agent_config
+from kohakuterrarium.core.controller_plugins import (
+    register_plugin_and_package_commands,
+)
 from kohakuterrarium.core.events import TriggerEvent, create_user_input_event
 from kohakuterrarium.core.job import JobState
 from kohakuterrarium.core.loader import ModuleLoader
@@ -437,15 +440,19 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin, AgentModelMi
         if not self.plugins:
             return
         self.controller.plugins = self.plugins
-        # Wire plugin manager into the compact manager so that
-        # on_compact_start can be used as a veto point and
-        # on_compact_end fires as a normal callback.
+        # Compact manager uses on_compact_start as a veto point + on_compact_end callback.
         if self.compact_manager is not None:
             self.compact_manager._plugins = self.plugins
+        # Plugin-supplied termination checkers (cluster 3.2/3.3).
+        if self._termination_checker is not None:
+            self._termination_checker.attach_plugins(self.plugins)
+            self._termination_checker.attach_scratchpad(
+                getattr(self, "scratchpad", None)
+            )
         self._apply_plugin_hooks()
 
     async def _load_plugins(self) -> None:
-        """Load plugins and fire on_agent_start."""
+        """Load plugins, register pluggable commands, fire on_agent_start."""
         if not self.plugins:
             return
         wd = Path(self.executor._working_dir) if self.executor else Path.cwd()
@@ -456,6 +463,9 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin, AgentModelMi
             _host_agent=self,
         )
         await self.plugins.load_all(ctx)
+        # Pluggable ##xxx## commands (cluster C.1) — after on_load so
+        # plugins can lazy-build their command handlers.
+        register_plugin_and_package_commands(self)
         await self.plugins.notify("on_agent_start")
 
     def _apply_plugin_hooks(self) -> None:

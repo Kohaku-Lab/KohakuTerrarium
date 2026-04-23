@@ -30,6 +30,10 @@ from kohakuterrarium.commands.read import (
     ReadCommand,
     WaitCommand,
 )
+from kohakuterrarium.core.controller_plugins import (
+    register_controller_command,
+    run_post_llm_call_chain,
+)
 from kohakuterrarium.core.conversation import Conversation, ConversationConfig
 from kohakuterrarium.core.events import TriggerEvent
 from kohakuterrarium.core.executor import Executor
@@ -58,18 +62,9 @@ _FILE_PLACEHOLDER_RE = re.compile(r"\[\[file:(?P<ref>[^\]]+)\]\]")
 
 
 def _merge_text_and_parts(
-    text: str,
-    structured_parts: list[ContentPart],
+    text: str, structured_parts: list[ContentPart]
 ) -> str | list[ContentPart]:
-    """Combine streamed assistant text with structured parts.
-
-    - No structured parts → return the raw text (cheapest path, keeps
-      all existing providers / text-only sessions unchanged).
-    - Structured parts present → return a list with a ``TextPart``
-      first (when text is non-empty) followed by the structured parts.
-      The ``Conversation`` layer serialises that list using the nested
-      ``image_url`` shape (see Conversation._serialize_content).
-    """
+    """Combine streamed text with structured parts (text-first list)."""
     if not structured_parts:
         return text
     merged: list[ContentPart] = []
@@ -111,15 +106,14 @@ class ControllerConfig:
 
 @dataclass
 class ControllerContext:
-    """
-    Context object passed to commands and handlers.
-
-    Provides access to controller internals for commands like ##read##.
+    """Context passed to commands/handlers. ``skills_registry`` lets
+    ``##info`` / ``##skill`` reach the runtime :class:`SkillRegistry`.
     """
 
     controller: "Controller"
     job_store: JobStore
     registry: Registry
+    skills_registry: Any | None = None
 
     def get_job_status(self, job_id: str) -> JobStatus | None:
         """Get job status."""
@@ -217,6 +211,11 @@ class Controller:
         # Plugin manager (set by agent after creation, None = no overhead)
         self.plugins: Any = None
 
+        # Output router (set by agent after creation). Used to emit
+        # ``assistant_message_edited`` activity events when a plugin's
+        # post_llm_call rewrites the response.
+        self.output_router: Any = None
+
         # Messages queued by plugins via
         # ``PluginContext.inject_message_before_llm``. Drained right
         # before the ``pre_llm_call`` hooks run on the next LLM round,
@@ -265,6 +264,7 @@ class Controller:
             known_subagents=known_subagents,
             known_outputs=self.config.known_outputs,
             tool_format=tool_format,
+            known_commands=set(self._commands.keys()),
         )
         return StreamParser(self._parser_config)
 
@@ -922,17 +922,17 @@ class Controller:
                 _merge_text_and_parts(self._last_assistant_content, structured),
             )
 
-        # Plugin post-hook: observe response and usage
+        # Plugin post_llm_call chain-with-return (cluster B.3). Logic
+        # lives in ``controller_plugins.py`` to keep this file under
+        # the 1000-line hard cap.
         if self.plugins:
-            last = self.conversation.get_last_assistant_message()
-            response_text = last.get_text_content() if last else ""
-            await self.plugins.notify(
-                "post_llm_call",
-                messages=messages,
-                response=response_text,
-                usage=self._last_usage or {},
-                model=getattr(self.llm, "model", ""),
-            )
+            await run_post_llm_call_chain(self, messages)
+
+    def register_command(
+        self, command_name: str, cmd: Command, override: bool = False
+    ) -> None:
+        """Register a ``##name##`` controller command (cluster C.1)."""
+        register_controller_command(self, command_name, cmd, override=override)
 
     async def _handle_command(self, event: CommandEvent) -> CommandResult:
         """Handle a framework command."""

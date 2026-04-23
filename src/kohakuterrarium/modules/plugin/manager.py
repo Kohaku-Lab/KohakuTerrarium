@@ -24,6 +24,28 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _plugin_applies(plugin: BasePlugin, context: PluginContext | None) -> bool:
+    """Evaluate the plugin's ``should_apply`` gate, swallowing errors.
+
+    A plugin with no context yet (e.g. called before ``load_all``) is
+    treated as applicable — the gate is only meaningful once the agent
+    is wired up. Exceptions are logged and treated as ``True`` (safer
+    to run the plugin than to silently skip it).
+    """
+    if context is None:
+        return True
+    try:
+        return bool(plugin.should_apply(context))
+    except Exception as e:  # pragma: no cover — defensive
+        logger.warning(
+            "Plugin should_apply raised; defaulting to True",
+            plugin_name=getattr(plugin, "name", "?"),
+            error=str(e),
+            exc_info=True,
+        )
+        return True
+
+
 class PluginManager:
     """Manages plugin lifecycle, hook wrapping, and callback dispatch."""
 
@@ -87,18 +109,78 @@ class PluginManager:
 
     def _active_plugins(self) -> list[BasePlugin]:
         if not self._disabled:
-            return self._plugins
+            return list(self._plugins)
         return [
             p for p in self._plugins if getattr(p, "name", "") not in self._disabled
         ]
+
+    def _applicable_plugins(self) -> list[BasePlugin]:
+        """Active plugins that pass ``should_apply(context)``.
+
+        Evaluated before every hook call. Declarative filter on
+        ``applies_to`` is cheap; the method override is the escape
+        hatch. See cluster 2.4 + 2.5 of the extension-point spec.
+        """
+        ctx = self._load_context
+        return [p for p in self._active_plugins() if _plugin_applies(p, ctx)]
+
+    # ── Collectors (aggregated contributions across plugins) ──
+
+    def collect_commands(self) -> list[tuple[BasePlugin, dict[str, Any]]]:
+        """Collect ``contribute_commands()`` output from each plugin.
+
+        Returns a list of ``(plugin, commands)`` pairs — the controller
+        validates names and detects collisions itself. Errors in
+        individual ``contribute_commands`` calls are logged and the
+        plugin is skipped.
+        """
+        out: list[tuple[BasePlugin, dict[str, Any]]] = []
+        for plugin in self._applicable_plugins():
+            try:
+                contributed = plugin.contribute_commands() or {}
+            except Exception as e:
+                logger.warning(
+                    "Plugin contribute_commands raised",
+                    plugin_name=getattr(plugin, "name", "?"),
+                    error=str(e),
+                    exc_info=True,
+                )
+                continue
+            if contributed:
+                out.append((plugin, contributed))
+        return out
+
+    def collect_termination_checkers(
+        self,
+    ) -> list[tuple[str, Callable[[Any], Any]]]:
+        """Collect plugin-supplied termination checkers.
+
+        Returns a list of ``(plugin_name, checker_fn)`` pairs. The
+        termination manager calls each checker per turn; any returning
+        ``TerminationDecision(should_stop=True, …)`` stops the run.
+        """
+        checkers: list[tuple[str, Callable[[Any], Any]]] = []
+        for plugin in self._applicable_plugins():
+            try:
+                fn = plugin.contribute_termination_check()
+            except Exception as e:
+                logger.warning(
+                    "Plugin contribute_termination_check raised",
+                    plugin_name=getattr(plugin, "name", "?"),
+                    error=str(e),
+                    exc_info=True,
+                )
+                continue
+            if fn is None:
+                continue
+            checkers.append((getattr(plugin, "name", "?"), fn))
+        return checkers
 
     # ── Lifecycle ──
 
     async def load_all(self, context: PluginContext) -> None:
         """Call on_load for enabled plugins only."""
         self._load_context = context
-        # Read via the private storage slot to avoid tripping the
-        # DeprecationWarning on ``PluginContext._agent``.
         host_agent = context._host_agent
         for plugin in self._active_plugins():
             try:
@@ -204,7 +286,7 @@ class PluginManager:
 
         @functools.wraps(original)
         async def wrapper(first_arg, *args, **kwargs):
-            active = manager._active_plugins()
+            active = manager._applicable_plugins()
             hook_kw = {**kwargs, **injected}
 
             # Pre hooks: transform first_arg
@@ -268,7 +350,7 @@ class PluginManager:
         """
         if not self._plugins:
             return value
-        for plugin in self._active_plugins():
+        for plugin in self._applicable_plugins():
             if not _has_override(plugin, hook_name):
                 continue
             try:
@@ -293,7 +375,7 @@ class PluginManager:
         """Fire a callback on all active plugins."""
         if not self._plugins:
             return
-        for plugin in self._active_plugins():
+        for plugin in self._applicable_plugins():
             if not hasattr(plugin, callback_name):
                 continue
             try:
@@ -323,7 +405,7 @@ class PluginManager:
         if not self._plugins:
             return True
         vetoed: list[str] = []
-        for plugin in self._active_plugins():
+        for plugin in self._applicable_plugins():
             if not hasattr(plugin, callback_name):
                 continue
             try:

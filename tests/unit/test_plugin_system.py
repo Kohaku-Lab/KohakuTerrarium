@@ -1,7 +1,5 @@
 """Tests for the plugin system (pre/post hooks, callbacks, manager)."""
 
-import warnings
-
 import pytest
 
 from kohakuterrarium.modules.plugin.base import (
@@ -430,33 +428,22 @@ class TestContextPublicAPI:
         assert ctx.controller is None
         assert ctx.subagent_manager is None
 
-    def test_private_agent_emits_deprecation_warning(self):
+    def test_private_agent_alias_removed(self):
+        """Cluster 7.2 — ``PluginContext._agent`` was hard-removed.
+
+        Accessing the deprecated alias must raise AttributeError (not a
+        DeprecationWarning), and the legacy ``_agent=`` constructor
+        kwarg is no longer accepted.
+        """
         agent = _FakeAgent()
         ctx = PluginContext(_host_agent=agent, _plugin_name="legacy")
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            # First access emits the warning and still returns the agent.
-            assert ctx._agent is agent
-        assert any(issubclass(w.category, DeprecationWarning) for w in caught)
-        msg = str(caught[0].message)
-        assert "PluginContext._agent" in msg
-        assert "legacy" in msg
+        with pytest.raises(AttributeError):
+            _ = ctx._agent
 
-    def test_private_agent_warns_only_once(self):
+    def test_legacy_agent_kwarg_rejected(self):
         agent = _FakeAgent()
-        ctx = PluginContext(_host_agent=agent, _plugin_name="legacy")
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            _ = ctx._agent
-            _ = ctx._agent
-            _ = ctx._agent
-        depr = [w for w in caught if issubclass(w.category, DeprecationWarning)]
-        assert len(depr) == 1
-
-    def test_legacy_kwarg_accepted(self):
-        agent = _FakeAgent()
-        ctx = PluginContext(_agent=agent, _plugin_name="legacy")
-        assert ctx.host_agent is agent
+        with pytest.raises(TypeError):
+            PluginContext(_agent=agent, _plugin_name="legacy")
 
     def test_inject_message_before_llm_queues_on_controller(self):
         agent = _FakeAgent()
