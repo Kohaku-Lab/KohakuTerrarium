@@ -44,6 +44,7 @@ from kohakuterrarium.prompt.plugins import (
 )
 from kohakuterrarium.prompt.template import render_template_safe
 from kohakuterrarium.utils.logging import get_logger
+from kohakuterrarium.prompt.tool_contributions import build_tool_guidance_section
 
 logger = get_logger(__name__)
 
@@ -263,6 +264,15 @@ def aggregate_system_prompt(
             hint_ctx["channels"] = channels
         channel_hints = _build_channel_hints(
             registry, hint_ctx, tool_format=tool_format
+    # Add per-tool prompt contributions (Cluster 5 / E.1).
+    # Sits between the tool list and the framework hints; gated by
+    # ``include_tools`` because a caller skipping the list likely does
+    # not want per-tool prose either.
+    if registry and include_tools:
+        guidance = build_tool_guidance_section(registry)
+        if guidance:
+            parts.append(guidance)
+
         )
         if channel_hints:
             parts.append(channel_hints)
