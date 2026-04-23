@@ -435,7 +435,7 @@ export default {
   "studio.newModule.nameInvalid": "Invalid name. No spaces, slashes, or leading dot.",
   "studio.newModule.nameExists": "A module with this name already exists.",
   "studio.newModule.editorNote":
-    "A minimal scaffold will be written. Full form-based module editor lands in Phase 5.",
+    "A starter file will be written. You can edit the form, execute body, and documentation from the module editor after it's created.",
   "studio.newModule.create": "Create",
   "studio.newModule.creating": "Creating…",
   "studio.newModule.created": "Scaffolded {kind}/{name}",
@@ -563,6 +563,7 @@ export default {
   "studio.common.cancel": "Cancel",
   "studio.common.confirm": "Confirm",
   "studio.common.delete": "Delete",
+  "studio.common.close": "Close",
 
   "studio.creature.pool.title": "Module pool",
   "studio.creature.pool.noTools": "No tools in catalog.",
@@ -586,7 +587,8 @@ export default {
 
   "studio.creature.systemPrompt.title": "System prompt",
   "studio.creature.systemPrompt.edit": "Edit",
-  "studio.creature.systemPrompt.editComingSoon": "Full prompt editor tab lands in Phase 4e.",
+  "studio.creature.systemPrompt.editComingSoon":
+    "The full prompt editor isn't available yet — edit prompts/system.md directly for now.",
   "studio.creature.systemPrompt.none": "(no system prompt configured)",
   "studio.creature.systemPrompt.modeConcat": "concat mode — prepended to base prompt from {base}",
   "studio.creature.systemPrompt.modeReplace": "replace mode — base prompt is discarded",
@@ -612,7 +614,8 @@ export default {
   "studio.creature.advanced.outputWiring": "Output wiring",
 
   "studio.creature.head.testDrive": "Test drive",
-  "studio.creature.head.testDriveComingSoon": "Test drive (chat / terminal) lands in Phase 6-7.",
+  "studio.creature.head.testDriveComingSoon":
+    "In-studio test drive isn't available yet — run the creature from the terminal for now.",
 
   "studio.creature.detail.summary": "Summary",
   "studio.creature.detail.catalog": "Catalog item",
@@ -629,13 +632,17 @@ export default {
   "studio.creature.detail.executionMode": "Execution mode",
   "studio.creature.detail.needsContext": "Needs context",
   "studio.creature.detail.add": "Add",
-  "studio.creature.detail.addComingSoon": "Adding modules lands in Phase 4e.",
+  "studio.creature.detail.addComingSoon":
+    "Adding from the detail panel isn't wired yet — click an item in the left pool to add it.",
   "studio.creature.detail.customize": "Customize",
-  "studio.creature.detail.customizeComingSoon": "Per-module options editor lands in Phase 4e.",
+  "studio.creature.detail.customizeComingSoon":
+    "Expand the module row in the middle panel to edit its options.",
   "studio.creature.detail.options": "Options",
-  "studio.creature.detail.optionsComingSoon": "Options editor lands in Phase 4e.",
+  "studio.creature.detail.optionsComingSoon":
+    "Expand this module's row in the middle panel to edit its options.",
   "studio.creature.detail.remove": "Remove",
-  "studio.creature.detail.removeComingSoon": "Remove lands in Phase 4e.",
+  "studio.creature.detail.removeComingSoon":
+    "Use the × button on the module row in the middle panel to remove it.",
   "studio.creature.detail.wired": "wired",
 
   "studio.creature.validation.title": ({ count }) =>
@@ -654,4 +661,83 @@ export default {
   "studio.picker.selectHighlighted": "Select highlighted folder",
   "studio.picker.noRoots": "No roots available.",
   "studio.picker.noSubdirs": "No subdirectories here.",
+
+  // ─── Module editor (Phase 5) ────────────────────────────────
+  "studio.module.mode.simple": "Simple",
+  "studio.module.mode.simpleHint": "Form-driven editor. Safe for most tools.",
+  "studio.module.mode.raw": "Raw",
+  "studio.module.mode.rawHint": "Edit the full Python source directly.",
+  "studio.module.raw.title": "Raw mode",
+  "studio.module.raw.auto": "auto-raw",
+  "studio.module.raw.roundtripFailed": "Round-trip failed — switched to raw mode",
+  "studio.module.raw.retry": "Retry simple",
+  "studio.module.warnings": ({ n }) => `${n} warning${n === 1 ? "" : "s"}`,
+
+  "studio.module.simpleNotAvailable": ({ kind }) =>
+    `A form-based editor for ${kind} isn't wired up yet.`,
+  "studio.module.simpleNotAvailableHint":
+    "Switch to Raw mode above to edit the full Python source directly.",
+
+  "studio.module.guard.notEditable": ({ kind, name }) => `${kind}/${name} is not editable here.`,
+  "studio.module.guard.hint":
+    "This module is declared outside the workspace — studio only edits files under <root>/modules/.",
+
+  "studio.module.notFound.title": ({ kind, name }) => `No workspace file for ${kind}/${name}.`,
+  "studio.module.notFound.hint": "Create it from the dashboard, or check the name.",
+
+  "studio.module.confirm.unsavedLeave": "You have unsaved changes. Leave this page?",
+
+  "studio.module.preview.title": "Consumer preview",
+  "studio.module.preview.soon": "Live preview isn't available yet.",
+  "studio.module.preview.soonHint": ({ kind, name }) =>
+    `This panel will show how ${kind}/${name} appears to a creature that wires it in — params, description, and the option form a creature author would see.`,
+
+  "studio.module.peers.empty": "No other workspace modules of this kind yet.",
+
+  "studio.module.form.identity": "Identity",
+  "studio.module.form.toolName": "Tool name",
+  "studio.module.form.toolNameHint":
+    "Snake-case. Used as the file stem and the identifier in tool calls.",
+  "studio.module.form.className": "Class name",
+  "studio.module.form.classNameHint": "PascalCase. Derived from the tool name if left blank.",
+  "studio.module.form.description": "Description",
+  "studio.module.form.descriptionHint": "One line the controller sees when picking tools.",
+  "studio.module.form.descriptionPlaceholder": "What this tool does.",
+  "studio.module.form.behavior": "Behavior",
+  "studio.module.form.executionMode": "Execution mode",
+  "studio.module.form.executionModeHint":
+    "direct = blocking, background = fire-and-forget updates, stateful = multi-turn.",
+  "studio.module.form.flags": "Flags",
+  "studio.module.form.needsContext": "Inject ToolContext (working_dir, session, …)",
+  "studio.module.form.requireManualRead": "Require ##info## read before use",
+  "studio.module.form.params": "Parameters",
+  "studio.module.form.paramsHint":
+    "What a creature passes when wiring this tool. Matches the schema the creature editor renders.",
+  "studio.module.form.executeBody": "_execute body",
+  "studio.module.form.executeBodyHint":
+    "The body of `async def _execute(self, args)`. Return a ToolResult.",
+  "studio.module.form.wiring": "Wiring preview",
+
+  "studio.module.params.empty": "No parameters yet.",
+  "studio.module.params.add": "Add parameter",
+  "studio.module.params.remove": "Remove",
+  "studio.module.params.required": "required",
+  "studio.module.params.defaultPlaceholder": "default value (empty = none)",
+  "studio.module.params.descriptionPlaceholder": "description (optional)",
+  "studio.module.params.moveUp": "Move up",
+  "studio.module.params.moveDown": "Move down",
+
+  "studio.module.wiring.title": "How a creature wires this",
+  "studio.module.wiring.copy": "Copy",
+  "studio.module.wiring.copied": "Copied",
+
+  "studio.module.doc.sectionTitle": "Skill documentation",
+  "studio.module.doc.edit": "Edit",
+  "studio.module.doc.empty":
+    "No sidecar .md yet — click Edit to create one. The framework surfaces this via `##info##` at runtime.",
+  "studio.module.doc.hint":
+    "Markdown sitting next to the module file. The agent reads this when asking for the tool's full documentation.",
+  "studio.module.doc.tabLabel": "Documentation",
+  "studio.module.doc.headTitle": ({ name }) => `Documentation — ${name}`,
+  "studio.module.doc.confirmClose": "The documentation has unsaved changes. Close without saving?",
 }

@@ -373,7 +373,8 @@ export default {
   "studio.newModule.namePlaceholder": "my_module",
   "studio.newModule.nameInvalid": "名稱不合法。不可含空白、斜線或開頭的句點。",
   "studio.newModule.nameExists": "已存在同名的模組。",
-  "studio.newModule.editorNote": "將寫入最小樣板檔案。完整表單編輯器會於 Phase 5 加入。",
+  "studio.newModule.editorNote":
+    "建立後將寫入一份樣板檔案。之後可在模組編輯器中編輯表單、函式主體與說明文件。",
   "studio.newModule.create": "建立",
   "studio.newModule.creating": "建立中…",
   "studio.newModule.created": "已建立 {kind}/{name}",
@@ -491,6 +492,7 @@ export default {
   "studio.common.cancel": "取消",
   "studio.common.confirm": "確認",
   "studio.common.delete": "刪除",
+  "studio.common.close": "關閉",
 
   "studio.creature.pool.title": "模組池",
   "studio.creature.pool.noTools": "目錄中沒有工具。",
@@ -539,7 +541,8 @@ export default {
   "studio.creature.advanced.outputWiring": "輸出路由",
 
   "studio.creature.head.testDrive": "試跑",
-  "studio.creature.head.testDriveComingSoon": "試跑(聊天 / 終端)將於 Phase 6-7 加入。",
+  "studio.creature.head.testDriveComingSoon":
+    "Studio 內的即時試跑尚未支援 — 請先於終端執行 creature 進行測試。",
 
   "studio.creature.detail.summary": "摘要",
   "studio.creature.detail.catalog": "目錄項目",
@@ -580,4 +583,78 @@ export default {
   "studio.picker.selectHighlighted": "使用已選取資料夾",
   "studio.picker.noRoots": "無可用根目錄。",
   "studio.picker.noSubdirs": "此處沒有子目錄。",
+
+  // ─── 模組編輯器 (Phase 5) ────────────────────────────────
+  "studio.module.mode.simple": "簡易",
+  "studio.module.mode.simpleHint": "表單編輯器,適用於大多數工具。",
+  "studio.module.mode.raw": "原始",
+  "studio.module.mode.rawHint": "直接編輯完整 Python 原始碼。",
+  "studio.module.raw.title": "原始模式",
+  "studio.module.raw.auto": "自動原始",
+  "studio.module.raw.roundtripFailed": "往返失敗 — 已切換至原始模式",
+  "studio.module.raw.retry": "重試簡易模式",
+  "studio.module.warnings": ({ n }) => `${n} 則警告`,
+
+  "studio.module.simpleNotAvailable": ({ kind }) => `尚未為 ${kind} 提供表單編輯器。`,
+  "studio.module.simpleNotAvailableHint": "請切換至上方「原始」模式直接編輯 Python 原始碼。",
+
+  "studio.module.guard.notEditable": ({ kind, name }) => `${kind}/${name} 無法於此編輯。`,
+  "studio.module.guard.hint": "此模組定義於工作區之外 — Studio 僅編輯 <root>/modules/ 之下的檔案。",
+
+  "studio.module.notFound.title": ({ kind, name }) => `找不到 ${kind}/${name} 的工作區檔案。`,
+  "studio.module.notFound.hint": "可從儀表板建立,或確認名稱是否正確。",
+
+  "studio.module.confirm.unsavedLeave": "尚有未儲存的變更。確定要離開此頁?",
+
+  "studio.module.preview.title": "消費端預覽",
+  "studio.module.preview.soon": "即時預覽尚未支援。",
+  "studio.module.preview.soonHint": ({ kind, name }) =>
+    `此面板將顯示 creature 接入 ${kind}/${name} 時看到的內容 — 參數、描述,以及選項表單。`,
+
+  "studio.module.peers.empty": "此類型尚無其他工作區模組。",
+
+  "studio.module.form.identity": "識別",
+  "studio.module.form.toolName": "工具名稱",
+  "studio.module.form.toolNameHint": "snake_case。用作檔案名稱與工具呼叫識別碼。",
+  "studio.module.form.className": "類別名稱",
+  "studio.module.form.classNameHint": "PascalCase。若留空則從工具名稱推導。",
+  "studio.module.form.description": "描述",
+  "studio.module.form.descriptionHint": "控制器挑選工具時所見的一行文字。",
+  "studio.module.form.descriptionPlaceholder": "這個工具的功能。",
+  "studio.module.form.behavior": "行為",
+  "studio.module.form.executionMode": "執行模式",
+  "studio.module.form.executionModeHint":
+    "direct = 阻塞,background = 背景更新,stateful = 多輪互動。",
+  "studio.module.form.flags": "旗標",
+  "studio.module.form.needsContext": "注入 ToolContext(working_dir、session 等)",
+  "studio.module.form.requireManualRead": "需先 ##info## 讀取後使用",
+  "studio.module.form.params": "參數",
+  "studio.module.form.paramsHint":
+    "creature 接入此工具時傳入的參數。與 creature 編輯器渲染的 schema 對應。",
+  "studio.module.form.executeBody": "_execute 主體",
+  "studio.module.form.executeBodyHint":
+    "`async def _execute(self, args)` 的函式主體。請回傳 ToolResult。",
+  "studio.module.form.wiring": "接入預覽",
+
+  "studio.module.params.empty": "尚無參數。",
+  "studio.module.params.add": "新增參數",
+  "studio.module.params.remove": "移除",
+  "studio.module.params.required": "必填",
+  "studio.module.params.defaultPlaceholder": "預設值(留空表示無)",
+  "studio.module.params.descriptionPlaceholder": "描述(可選)",
+  "studio.module.params.moveUp": "上移",
+  "studio.module.params.moveDown": "下移",
+
+  "studio.module.wiring.title": "creature 如何接入此模組",
+  "studio.module.wiring.copy": "複製",
+  "studio.module.wiring.copied": "已複製",
+
+  "studio.module.doc.sectionTitle": "技能文件",
+  "studio.module.doc.edit": "編輯",
+  "studio.module.doc.empty":
+    "尚未建立 .md 說明檔 — 點擊「編輯」新建一份。執行時代理透過 `##info##` 讀取此文件。",
+  "studio.module.doc.hint": "與模組檔案同目錄的 Markdown 文件。代理詢問工具完整說明時即讀取此檔。",
+  "studio.module.doc.tabLabel": "說明文件",
+  "studio.module.doc.headTitle": ({ name }) => `文件編輯 — ${name}`,
+  "studio.module.doc.confirmClose": "說明文件有未儲存的變更。要不儲存就關閉嗎?",
 }
