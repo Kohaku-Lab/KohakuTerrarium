@@ -158,6 +158,16 @@ PRESETS: dict[str, dict[str, Any]] = {
     #  by CodexOAuthProvider. GPT-5.4 additionally supports
     #  fast mode via ``service_tier="fast"`` (ChatGPT-sub only).
     # ═══════════════════════════════════════════════════════
+    "gpt-5.5": {
+        "provider": "codex",
+        "model": "gpt-5.5",
+        "max_context": 400000,
+        "reasoning_effort": "xhigh",
+        "variation_groups": {
+            "reasoning": _CODEX_REASONING_GROUP,
+            "speed": _CODEX_SPEED_GROUP,
+        },
+    },
     "gpt-5.4": {
         "provider": "codex",
         "model": "gpt-5.4",
