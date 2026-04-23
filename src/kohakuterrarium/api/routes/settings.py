@@ -9,9 +9,9 @@ from pydantic import BaseModel, Field
 from kohakuterrarium.llm.codex_auth import CodexTokens, oauth_login, refresh_tokens
 from kohakuterrarium.llm.codex_rate_limits import get_cached as get_cached_codex_usage
 from kohakuterrarium.llm.profiles import (
+    PROVIDER_KEY_MAP,
     LLMBackend,
     LLMPreset,
-    PROVIDER_KEY_MAP,
     _is_available,
     delete_backend,
     delete_profile,
@@ -54,6 +54,8 @@ class BackendRequest(BaseModel):
     backend_type: str = "openai"
     base_url: str = ""
     api_key_env: str = ""
+    provider_name: str = ""
+    provider_native_tools: list[str] = Field(default_factory=list)
 
 
 class DefaultModelRequest(BaseModel):
@@ -170,6 +172,8 @@ async def get_backends():
                 "backend_type": backend.backend_type,
                 "base_url": backend.base_url or "",
                 "api_key_env": backend.api_key_env or "",
+                "provider_name": backend.provider_name or "",
+                "provider_native_tools": list(backend.provider_native_tools),
                 "built_in": name in built_in,
                 "has_token": bool(get_api_key(name)),
                 "available": _is_available(name),
@@ -177,6 +181,18 @@ async def get_backends():
             for name, backend in load_backends().items()
         ]
     }
+
+
+@router.get("/native-tools")
+async def get_native_tools():
+    """Return metadata for every provider-native built-in tool.
+
+    Frontend renders this as a checkbox list inside the custom-backend
+    form so the user can opt a backend into specific native tools.
+    """
+    from kohakuterrarium.builtins.tool_catalog import list_provider_native_tools
+
+    return {"tools": list_provider_native_tools()}
 
 
 @router.post("/backends")
@@ -191,6 +207,8 @@ async def create_backend(req: BackendRequest):
             backend_type=req.backend_type,
             base_url=req.base_url or "",
             api_key_env=req.api_key_env or "",
+            provider_name=req.provider_name or "",
+            provider_native_tools=list(req.provider_native_tools or []),
         )
     )
     return {"status": "saved", "name": req.name}
@@ -214,7 +232,7 @@ async def get_profiles():
     return {
         "profiles": [
             {
-                "name": name,
+                "name": p.name,
                 "model": p.model,
                 "provider": p.provider,
                 "backend_type": p.backend_type,
@@ -227,11 +245,11 @@ async def get_profiles():
                 "service_tier": p.service_tier or "",
                 "extra_body": p.extra_body or {},
                 "variation_groups": (
-                    presets.get(name).variation_groups if name in presets else {}
+                    presets[key].variation_groups if key in presets else {}
                 ),
                 "selected_variations": p.selected_variations or {},
             }
-            for name, p in profiles.items()
+            for key, p in profiles.items()
         ]
     }
 
@@ -255,13 +273,28 @@ async def create_profile(req: ProfileRequest):
         variation_groups=req.variation_groups or {},
     )
     save_profile(profile)
-    return {"status": "saved", "name": req.name}
+    return {"status": "saved", "name": req.name, "provider": req.provider}
+
+
+@router.delete("/profiles/{provider}/{name}")
+async def remove_profile(provider: str, name: str):
+    if not delete_profile(name, provider):
+        raise HTTPException(404, f"Profile not found: {provider}/{name}")
+    return {"status": "deleted", "name": name, "provider": provider}
 
 
 @router.delete("/profiles/{name}")
-async def remove_profile(name: str):
+async def remove_profile_legacy(name: str):
+    """Legacy DELETE — succeeds only when the bare name is unambiguous.
+
+    Kept for older frontend builds. Prefer ``/profiles/{provider}/{name}``
+    which is always unambiguous under the (provider, name) hierarchy.
+    """
     if not delete_profile(name):
-        raise HTTPException(404, f"Profile not found: {name}")
+        raise HTTPException(
+            404,
+            f"Profile not found or ambiguous: {name} — use /profiles/<provider>/<name>",
+        )
     return {"status": "deleted", "name": name}
 
 

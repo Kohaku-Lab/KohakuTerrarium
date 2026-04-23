@@ -105,3 +105,38 @@ def list_builtin_tools() -> list[str]:
 def is_builtin_tool(name: str) -> bool:
     """Check if a tool name is a registered built-in."""
     return name in _BUILTIN_TOOLS
+
+
+def list_provider_native_tools() -> list[dict[str, object]]:
+    """Return metadata for every registered provider-native tool.
+
+    Used by ``kt config``, the rich CLI, and the frontend settings page
+    to render the "which native tools does this backend expose?"
+    checkbox list. Each entry carries the canonical tool name, the
+    declared ``provider_support`` set, and a one-line description so
+    the UI can show "image_gen — Codex-only, generate/edit images".
+
+    Fires deferred loaders first so terrarium-registered tools (and any
+    other lazy additions) show up too.
+    """
+    if _DEFERRED_LOADERS:
+        _run_deferred_loaders()
+    out: list[dict[str, object]] = []
+    for name, tool_cls in _BUILTIN_TOOLS.items():
+        if not getattr(tool_cls, "is_provider_native", False):
+            continue
+        support = getattr(tool_cls, "provider_support", frozenset()) or frozenset()
+        try:
+            instance = tool_cls()
+            description = getattr(instance, "description", "") or ""
+        except Exception:
+            description = ""
+        out.append(
+            {
+                "name": name,
+                "provider_support": sorted(support),
+                "description": description,
+            }
+        )
+    out.sort(key=lambda entry: entry["name"])
+    return out
