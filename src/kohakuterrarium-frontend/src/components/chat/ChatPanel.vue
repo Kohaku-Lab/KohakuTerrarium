@@ -29,9 +29,9 @@
       </div>
 
       <!-- Token usage + session info for active tab -->
-      <div v-if="activeTokens > 0 || chat.sessionInfo.model" class="flex items-center gap-2 px-2 py-2 -mb-px text-[10px] text-warm-400 font-mono">
-        <template v-if="chat.sessionInfo.model">
-          <span class="text-warm-500 dark:text-warm-400">{{ chat.sessionInfo.model }}</span>
+      <div v-if="activeTokens > 0 || chat.modelDisplay" class="flex items-center gap-2 px-2 py-2 -mb-px text-[10px] text-warm-400 font-mono">
+        <template v-if="chat.modelDisplay">
+          <span class="text-warm-500 dark:text-warm-400">{{ chat.modelDisplay }}</span>
           <span class="text-warm-300 dark:text-warm-600">|</span>
         </template>
         <template v-if="activeTokens > 0">

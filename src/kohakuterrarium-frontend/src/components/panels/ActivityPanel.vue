@@ -79,7 +79,7 @@ const chat = useChatStore()
 const { t } = useI18n()
 
 const jobCount = computed(() => Object.keys(chat.runningJobs || {}).length)
-const model = computed(() => chat.sessionInfo.model || props.instance?.model || "(no model - frontend)")
+const model = computed(() => chat.modelDisplay || props.instance?.llm_name || props.instance?.model || "(no model - frontend)")
 const maxContext = computed(() => chat.sessionInfo.maxContext || props.instance?.max_context || 0)
 
 const totals = computed(() => {

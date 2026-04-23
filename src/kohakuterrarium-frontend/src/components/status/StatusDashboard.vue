@@ -18,8 +18,8 @@
             </div>
             <div class="flex items-center gap-2">
               <span class="text-warm-400 w-12">{{ t("common.model") }}</span>
-              <span class="text-warm-600 dark:text-warm-400 font-mono text-[11px]">
-                {{ chat.sessionInfo.model || "default" }}
+              <span class="text-warm-600 dark:text-warm-400 font-mono text-[11px] break-all">
+                {{ chat.modelDisplay || instance?.llm_name || instance?.model || "default" }}
               </span>
             </div>
           </div>
@@ -42,10 +42,10 @@
           <div v-if="canSwitchTargetModel" class="flex items-start gap-2">
             <span class="text-warm-400 w-16 pt-1">{{ t("common.model") }}</span>
             <div class="flex-1 min-w-0 flex flex-col gap-2">
-              <span class="text-iolite font-mono text-[11px] break-all">{{ sessionModel || instance?.model || "--" }}</span>
+              <span class="text-iolite font-mono text-[11px] break-all">{{ sessionModel || instance?.llm_name || instance?.model || "--" }}</span>
               <div class="flex items-center gap-2">
                 <el-select v-model="selectedModel" size="small" class="flex-1 min-w-0" :placeholder="t('status.selectModel')" :loading="modelsLoading" @change="handleModelSwitch">
-                  <el-option v-for="model in availableModels" :key="model.name" :label="model.name" :value="model.name" />
+                  <el-option v-for="model in availableModels" :key="`${model.provider || model.login_provider || ''}/${model.name}`" :label="`${model.provider || model.login_provider || ''}/${model.name}`" :value="`${model.provider || model.login_provider || ''}/${model.name}`" />
                 </el-select>
                 <el-button size="small" text class="model-config-btn" :title="t('status.modelConfig')" :aria-label="t('status.openModelConfig')" @click="openModelConfig">
                   <span class="i-carbon-settings text-[12px]" />
@@ -73,7 +73,7 @@
           <div class="flex items-center gap-2">
             <span class="text-warm-400 w-16">{{ t("common.model") }}</span>
             <span class="text-iolite font-mono text-[11px] break-all">
-              {{ chat.sessionInfo.model || instance?.model || "--" }}
+              {{ chat.modelDisplay || instance?.llm_name || instance?.model || "--" }}
             </span>
           </div>
           <div class="flex items-center gap-2">
@@ -231,18 +231,33 @@ const canSwitchTargetModel = computed(() => {
 })
 
 const sessionModel = computed(() => {
-  if (props.instance?.type !== "terrarium") return chat.sessionInfo.model || props.instance?.model || ""
-  if (currentTarget.value === "root") return chat.sessionInfo.model || props.instance?.model || ""
+  // Prefer the canonical ``provider/name[@variations]`` identifier so
+  // the dashboard matches the ModelSwitcher pill and ``/model`` output.
+  const activeIdentifier = chat.modelDisplay
+  if (props.instance?.type !== "terrarium") {
+    return activeIdentifier || props.instance?.llm_name || props.instance?.model || ""
+  }
+  if (currentTarget.value === "root") {
+    return activeIdentifier || props.instance?.llm_name || props.instance?.model || ""
+  }
   if (currentTarget.value) {
     const creature = props.instance.creatures?.find((creature) => creature.name === currentTarget.value)
-    return chat.sessionInfo.model || creature?.model || ""
+    return activeIdentifier || creature?.llm_name || creature?.model || ""
   }
   return ""
 })
 
 const currentModelProfile = computed(() => {
-  const modelName = selectedModel.value || sessionModel.value || props.instance?.model || ""
-  return availableModels.value.find((model) => model.name === modelName) || null
+  // The active identifier can be bare ``name``, ``provider/name``, or
+  // ``provider/name@group=option,...`` — parse the latter two so we
+  // can match the preset catalog entry precisely.
+  const raw = selectedModel.value || sessionModel.value || props.instance?.llm_name || props.instance?.model || ""
+  const base = raw.split("@", 1)[0]
+  const slash = base.indexOf("/")
+  const provider = slash >= 0 ? base.slice(0, slash) : ""
+  const name = slash >= 0 ? base.slice(slash + 1) : base
+  const entries = availableModels.value || []
+  return entries.find((m) => m.name === name && (!provider || (m.provider || m.login_provider) === provider)) || entries.find((m) => m.name === name) || null
 })
 
 watch(
@@ -312,8 +327,16 @@ async function handleModelSwitch(modelId) {
 
 function openModelConfig() {
   configJsonError.value = ""
-  const modelName = selectedModel.value || sessionModel.value || ""
-  const fullProfile = availableModels.value.find((model) => model.name === modelName)
+  // selectedModel / sessionModel may be ``provider/name[@variations]``;
+  // reuse the parsing used by ``currentModelProfile`` so the profile
+  // editor gets the right preset even when bare names collide across
+  // providers.
+  const raw = selectedModel.value || sessionModel.value || ""
+  const base = raw.split("@", 1)[0]
+  const slash = base.indexOf("/")
+  const wantProvider = slash >= 0 ? base.slice(0, slash) : ""
+  const wantName = slash >= 0 ? base.slice(slash + 1) : base
+  const fullProfile = availableModels.value.find((m) => m.name === wantName && (!wantProvider || (m.provider || m.login_provider) === wantProvider)) || availableModels.value.find((m) => m.name === wantName)
   const profile = fullProfile
     ? {
         model: fullProfile.model,

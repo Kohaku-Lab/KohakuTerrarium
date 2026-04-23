@@ -21,7 +21,7 @@
             </div>
             <div class="flex items-center gap-2">
               <span class="text-warm-400 w-16">{{ t("common.model") }}</span>
-              <span class="text-iolite font-mono text-[11px]">{{ chat.sessionInfo.model || instance?.model || "--" }}</span>
+              <span class="text-iolite font-mono text-[11px] break-all">{{ chat.modelDisplay || instance?.llm_name || instance?.model || "--" }}</span>
             </div>
             <div class="flex items-center gap-2">
               <span class="text-warm-400 w-16">{{ t("common.provider") }}</span>
@@ -117,9 +117,9 @@ onMounted(() => {
 })
 
 watch(
-  [() => props.instance?.model, () => chat.sessionInfo.model],
-  ([instanceModel, sessionModel]) => {
-    const best = sessionModel || instanceModel || ""
+  [() => props.instance?.llm_name, () => props.instance?.model, () => chat.modelDisplay],
+  ([instanceIdent, instanceModel, active]) => {
+    const best = active || instanceIdent || instanceModel || ""
     if (best && best !== selectedModel.value) {
       selectedModel.value = best
     }
@@ -128,8 +128,17 @@ watch(
 )
 
 const currentModelProfile = computed(() => {
-  const modelName = selectedModel.value || chat.sessionInfo.model || props.instance?.model || ""
-  return availableModels.value.find((model) => model.name === modelName) || null
+  // Active ``selectedModel`` may be ``provider/name[@variations]`` —
+  // strip the variation suffix and the optional provider prefix so we
+  // can match the preset catalog entry precisely even when bare names
+  // collide across providers.
+  const raw = selectedModel.value || chat.modelDisplay || props.instance?.llm_name || props.instance?.model || ""
+  const base = raw.split("@", 1)[0]
+  const slash = base.indexOf("/")
+  const wantProvider = slash >= 0 ? base.slice(0, slash) : ""
+  const wantName = slash >= 0 ? base.slice(slash + 1) : base
+  const entries = availableModels.value || []
+  return entries.find((m) => m.name === wantName && (!wantProvider || (m.provider || m.login_provider) === wantProvider)) || entries.find((m) => m.name === wantName) || null
 })
 
 async function loadModels() {

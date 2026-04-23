@@ -10,7 +10,7 @@
             <div :class="inst.type === 'terrarium' ? 'i-carbon-network-4 text-taaffeite' : 'i-carbon-bot text-iolite'" class="text-lg shrink-0" />
             <div class="flex-1 min-w-0">
               <div class="text-sm font-medium text-warm-700 dark:text-warm-200 truncate">{{ inst.config_name }}</div>
-              <div class="text-[11px] text-warm-400">{{ inst.type }} · {{ inst.model || "default" }}</div>
+              <div class="text-[11px] text-warm-400">{{ inst.type }} · {{ inst.llm_name || inst.model || "default" }}</div>
             </div>
             <span class="w-2.5 h-2.5 rounded-full shrink-0" :class="inst.status === 'running' ? 'bg-aquamarine' : 'bg-warm-400'" />
             <button class="w-8 h-8 flex items-center justify-center rounded text-warm-400 hover:text-coral shrink-0" :title="t('common.stop')" @click.stop="handleStop(inst)">

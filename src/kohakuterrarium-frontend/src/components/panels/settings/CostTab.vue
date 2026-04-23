@@ -60,7 +60,7 @@ const props = defineProps({
 
 const chat = useChatStore()
 
-const model = computed(() => chat.sessionInfo.model || props.instance?.model || "")
+const model = computed(() => chat.modelDisplay || props.instance?.llm_name || props.instance?.model || "")
 
 const totals = computed(() => {
   let prompt = 0
