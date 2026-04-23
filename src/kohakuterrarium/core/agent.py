@@ -437,6 +437,11 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin, AgentModelMi
         if not self.plugins:
             return
         self.controller.plugins = self.plugins
+        # Wire plugin manager into the compact manager so that
+        # on_compact_start can be used as a veto point and
+        # on_compact_end fires as a normal callback.
+        if self.compact_manager is not None:
+            self.compact_manager._plugins = self.plugins
         self._apply_plugin_hooks()
 
     async def _load_plugins(self) -> None:
@@ -448,7 +453,7 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin, AgentModelMi
             agent_name=self.config.name,
             working_dir=wd,
             model=getattr(self.llm, "model", ""),
-            _agent=self,
+            _host_agent=self,
         )
         await self.plugins.load_all(ctx)
         await self.plugins.notify("on_agent_start")

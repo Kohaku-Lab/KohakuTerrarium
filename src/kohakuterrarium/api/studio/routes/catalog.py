@@ -362,15 +362,18 @@ PLUGIN_HOOKS: list[dict] = [
         "name": "on_compact_start",
         "group": "event",
         "args_signature": ", context_length: int",
-        "return_hint": " -> None",
-        "description": "Context compaction about to start.",
+        "return_hint": " -> bool | None",
+        "description": (
+            "Context compaction about to start. Return False to veto this "
+            "cycle; any other return value (None, True) proceeds."
+        ),
     },
     {
         "name": "on_compact_end",
         "group": "event",
         "args_signature": ", summary: str, messages_removed: int",
         "return_hint": " -> None",
-        "description": "Context compaction completed.",
+        "description": ("Context compaction completed (not called when vetoed)."),
     },
 ]
 

@@ -1,5 +1,7 @@
 """Tests for the plugin system (pre/post hooks, callbacks, manager)."""
 
+import warnings
+
 import pytest
 
 from kohakuterrarium.modules.plugin.base import (
@@ -359,3 +361,290 @@ class TestContext:
         ctx = PluginContext(_plugin_name="t")
         assert ctx.get_state("k") is None
         ctx.set_state("k", "v")
+
+
+# ── Public accessor API (H.5) ──
+
+
+class _FakeStore:
+    def __init__(self):
+        self.state: dict = {}
+
+
+class _FakeController:
+    def __init__(self):
+        self._pending_injections: list[dict] = []
+
+
+class _FakeAgent:
+    """Minimal stand-in for ``Agent`` used by context accessor tests."""
+
+    def __init__(self, *, with_store: bool = True):
+        self.session_store = _FakeStore() if with_store else None
+        self.session_memory = None
+        self.registry = object()
+        self.scratchpad = object()
+        self.compact_manager = object()
+        self.controller = _FakeController()
+        self.subagent_manager = object()
+
+
+class TestContextPublicAPI:
+    def test_host_agent_returns_agent(self):
+        agent = _FakeAgent()
+        ctx = PluginContext(_host_agent=agent, _plugin_name="t")
+        assert ctx.host_agent is agent
+
+    def test_session_store_returns_store(self):
+        agent = _FakeAgent(with_store=True)
+        ctx = PluginContext(_host_agent=agent, _plugin_name="t")
+        assert ctx.session_store is agent.session_store
+
+    def test_session_store_none_when_not_attached(self):
+        agent = _FakeAgent(with_store=False)
+        ctx = PluginContext(_host_agent=agent, _plugin_name="t")
+        assert ctx.session_store is None
+
+    def test_session_memory_none_when_absent(self):
+        agent = _FakeAgent()
+        ctx = PluginContext(_host_agent=agent, _plugin_name="t")
+        assert ctx.session_memory is None
+
+    def test_registry_scratchpad_compact_subagent_accessors(self):
+        agent = _FakeAgent()
+        ctx = PluginContext(_host_agent=agent, _plugin_name="t")
+        assert ctx.registry is agent.registry
+        assert ctx.scratchpad is agent.scratchpad
+        assert ctx.compact_manager is agent.compact_manager
+        assert ctx.controller is agent.controller
+        assert ctx.subagent_manager is agent.subagent_manager
+
+    def test_accessors_none_without_agent(self):
+        ctx = PluginContext()
+        assert ctx.host_agent is None
+        assert ctx.session_store is None
+        assert ctx.session_memory is None
+        assert ctx.registry is None
+        assert ctx.scratchpad is None
+        assert ctx.compact_manager is None
+        assert ctx.controller is None
+        assert ctx.subagent_manager is None
+
+    def test_private_agent_emits_deprecation_warning(self):
+        agent = _FakeAgent()
+        ctx = PluginContext(_host_agent=agent, _plugin_name="legacy")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            # First access emits the warning and still returns the agent.
+            assert ctx._agent is agent
+        assert any(issubclass(w.category, DeprecationWarning) for w in caught)
+        msg = str(caught[0].message)
+        assert "PluginContext._agent" in msg
+        assert "legacy" in msg
+
+    def test_private_agent_warns_only_once(self):
+        agent = _FakeAgent()
+        ctx = PluginContext(_host_agent=agent, _plugin_name="legacy")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            _ = ctx._agent
+            _ = ctx._agent
+            _ = ctx._agent
+        depr = [w for w in caught if issubclass(w.category, DeprecationWarning)]
+        assert len(depr) == 1
+
+    def test_legacy_kwarg_accepted(self):
+        agent = _FakeAgent()
+        ctx = PluginContext(_agent=agent, _plugin_name="legacy")
+        assert ctx.host_agent is agent
+
+    def test_inject_message_before_llm_queues_on_controller(self):
+        agent = _FakeAgent()
+        ctx = PluginContext(_host_agent=agent, _plugin_name="t")
+        ctx.inject_message_before_llm("user", "hello")
+        assert agent.controller._pending_injections == [
+            {"role": "user", "content": "hello"}
+        ]
+
+    def test_inject_message_before_llm_noop_without_agent(self):
+        ctx = PluginContext(_plugin_name="t")
+        # Must not raise — silently drops when no host agent is bound.
+        ctx.inject_message_before_llm("user", "hi")
+
+
+# ── pre_llm_call sees injected messages ──
+
+
+class _InjectorPlugin(BasePlugin):
+    """Injects a message via the context at on_load, then captures the
+    messages list it sees on pre_llm_call for assertion."""
+
+    name = "injector"
+    priority = 10
+
+    def __init__(self):
+        self.captured: list[dict] = []
+        self._ctx: PluginContext | None = None
+
+    async def on_load(self, context: PluginContext) -> None:
+        self._ctx = context
+        context.inject_message_before_llm("system", "[critical] remember to be concise")
+
+    async def pre_llm_call(self, messages, **kwargs):
+        self.captured = list(messages)
+        return None
+
+
+@pytest.mark.asyncio
+async def test_injected_message_visible_in_pre_llm_call_hook():
+    """Emulates the controller drain + pre_llm_call dispatch."""
+    from kohakuterrarium.core.controller import Controller, ControllerConfig
+
+    # Build a minimal controller without running LLM — we drive the
+    # drain + run_pre_hooks path manually exactly as run_once does.
+    class _DummyLLM:
+        model = "test-model"
+
+        async def close(self):
+            pass
+
+    mgr = PluginManager()
+    injector = _InjectorPlugin()
+    mgr.register(injector)
+
+    controller = Controller(llm=_DummyLLM(), config=ControllerConfig())
+    controller.plugins = mgr
+
+    agent = _FakeAgent()
+    agent.controller = controller
+    ctx = PluginContext(_host_agent=agent, _plugin_name="injector")
+    await mgr.load_all(ctx)
+
+    # Mirror controller._run_once: build messages, drain injections,
+    # run pre_llm_call hooks.
+    messages = [
+        {"role": "system", "content": "you are a helper"},
+        {"role": "user", "content": "hi"},
+    ]
+    if controller._pending_injections:
+        injected = controller._pending_injections
+        controller._pending_injections = []
+        messages = [messages[0]] + list(injected) + messages[1:]
+
+    messages = await mgr.run_pre_hooks("pre_llm_call", messages, model="test")
+
+    # The injector plugin saw the injected system-level message.
+    roles = [m["role"] for m in injector.captured]
+    assert roles.count("system") == 2
+    assert any(
+        m["content"] == "[critical] remember to be concise" for m in injector.captured
+    )
+
+
+# ── Compact hook veto (H.6) ──
+
+
+class _VetoPlugin(BasePlugin):
+    name = "vetoer"
+    priority = 10
+
+    def __init__(self, veto: bool):
+        self._veto = veto
+        self.end_called = False
+
+    async def on_compact_start(self, context_length: int):
+        return False if self._veto else None
+
+    async def on_compact_end(self, summary: str, messages_removed: int):
+        self.end_called = True
+
+
+class _PlainCallbackPlugin(BasePlugin):
+    name = "observer"
+    priority = 20
+
+    def __init__(self):
+        self.starts = 0
+        self.ends = 0
+
+    async def on_compact_start(self, context_length: int):
+        self.starts += 1
+        # Legacy return — treated as "proceed".
+        return None
+
+    async def on_compact_end(self, summary: str, messages_removed: int):
+        self.ends += 1
+
+
+@pytest.mark.asyncio
+async def test_should_proceed_true_when_no_plugin_vetoes():
+    mgr = PluginManager()
+    mgr.register(_PlainCallbackPlugin())
+    assert await mgr.should_proceed("on_compact_start", context_length=100)
+
+
+@pytest.mark.asyncio
+async def test_should_proceed_false_when_plugin_vetoes():
+    mgr = PluginManager()
+    mgr.register(_VetoPlugin(veto=True))
+    assert not await mgr.should_proceed("on_compact_start", context_length=100)
+
+
+@pytest.mark.asyncio
+async def test_veto_wins_over_proceed():
+    mgr = PluginManager()
+    mgr.register(_PlainCallbackPlugin())
+    mgr.register(_VetoPlugin(veto=True))
+    # Even though one plugin returns None, another returning False vetoes.
+    assert not await mgr.should_proceed("on_compact_start", context_length=100)
+
+
+@pytest.mark.asyncio
+async def test_all_none_proceeds():
+    mgr = PluginManager()
+    mgr.register(_PlainCallbackPlugin())
+    assert await mgr.should_proceed("on_compact_start", context_length=1)
+
+
+@pytest.mark.asyncio
+async def test_compact_manager_skips_on_veto():
+    """CompactManager consults ``should_proceed`` and skips when vetoed."""
+    from kohakuterrarium.core.compact import CompactConfig, CompactManager
+
+    class _FakeConversation:
+        def __init__(self, msgs):
+            self._m = msgs
+
+        def get_messages(self):
+            return self._m
+
+        def get_context_length(self):
+            return 999
+
+    class _MsgStub:
+        def __init__(self, role, content):
+            self.role = role
+            self.content = content
+
+    class _FakeControllerForCompact:
+        def __init__(self, msgs):
+            self.conversation = _FakeConversation(msgs)
+
+    messages = [_MsgStub("system", "sys")]
+    for i in range(20):
+        messages.append(_MsgStub("user", f"u{i}"))
+        messages.append(_MsgStub("assistant", f"a{i}"))
+
+    mgr = PluginManager()
+    veto = _VetoPlugin(veto=True)
+    mgr.register(veto)
+
+    compact = CompactManager(CompactConfig(keep_recent_turns=2))
+    compact._controller = _FakeControllerForCompact(messages)
+    compact._plugins = mgr
+    compact._agent_name = "test"
+
+    await compact._run_compact()
+
+    # ``on_compact_end`` must NOT fire when vetoed.
+    assert veto.end_called is False

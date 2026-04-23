@@ -217,6 +217,13 @@ class Controller:
         # Plugin manager (set by agent after creation, None = no overhead)
         self.plugins: Any = None
 
+        # Messages queued by plugins via
+        # ``PluginContext.inject_message_before_llm``. Drained right
+        # before the ``pre_llm_call`` hooks run on the next LLM round,
+        # so every plugin sees the injected messages in its ``messages``
+        # argument.
+        self._pending_injections: list[dict] = []
+
         # Job store (shared with executor if provided)
         if executor:
             self.job_store = executor.job_store
@@ -861,6 +868,25 @@ class Controller:
 
         messages = self.conversation.to_messages()
         messages = await self._resolve_message_files(messages)
+
+        # Drain any messages queued by plugins via
+        # ``PluginContext.inject_message_before_llm``. These are
+        # inserted after the system prompt so they appear as early
+        # context — and they're visible to ``pre_llm_call`` hooks.
+        if self._pending_injections:
+            injected = self._pending_injections
+            self._pending_injections = []
+            insert_idx = 0
+            for i, msg in enumerate(messages):
+                if msg.get("role") == "system":
+                    insert_idx = i + 1
+                else:
+                    break
+            messages = (
+                list(messages[:insert_idx])
+                + list(injected)
+                + list(messages[insert_idx:])
+            )
 
         # Plugin pre-hook: transform messages before LLM call
         if self.plugins:

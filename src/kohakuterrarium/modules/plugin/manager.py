@@ -97,6 +97,9 @@ class PluginManager:
     async def load_all(self, context: PluginContext) -> None:
         """Call on_load for enabled plugins only."""
         self._load_context = context
+        # Read via the private storage slot to avoid tripping the
+        # DeprecationWarning on ``PluginContext._agent``.
+        host_agent = context._host_agent
         for plugin in self._active_plugins():
             try:
                 ctx = PluginContext(
@@ -104,7 +107,7 @@ class PluginManager:
                     working_dir=context.working_dir,
                     session_id=context.session_id,
                     model=context.model,
-                    _agent=context._agent,
+                    _host_agent=host_agent,
                     _plugin_name=getattr(plugin, "name", "unnamed"),
                 )
                 await _call_method(plugin, "on_load", context=ctx)
@@ -120,6 +123,7 @@ class PluginManager:
         """Call on_load for plugins that were enabled at runtime."""
         if not self._needs_load or not self._load_context:
             return
+        host_agent = self._load_context._host_agent
         for plugin in self._plugins:
             pname = getattr(plugin, "name", "")
             if pname not in self._needs_load:
@@ -130,7 +134,7 @@ class PluginManager:
                     working_dir=self._load_context.working_dir,
                     session_id=self._load_context.session_id,
                     model=self._load_context.model,
-                    _agent=self._load_context._agent,
+                    _host_agent=host_agent,
                     _plugin_name=pname,
                 )
                 await _call_method(plugin, "on_load", context=ctx)
@@ -302,6 +306,47 @@ class PluginManager:
                     error=str(e),
                     exc_info=True,
                 )
+
+    # ── Vetoable callbacks ──
+
+    async def should_proceed(self, callback_name: str, **kwargs: Any) -> bool:
+        """Fire a vetoable callback. Returns True if no plugin vetoed.
+
+        Any plugin returning ``False`` vetoes the action. Other returns
+        (``None``, ``True``, etc.) do not veto. Vetoing plugins are
+        logged at INFO level by name.
+
+        Used by the compact manager to offer ``on_compact_start`` as a
+        veto point: a plugin that just injected critical context can
+        return ``False`` to skip this compaction cycle.
+        """
+        if not self._plugins:
+            return True
+        vetoed: list[str] = []
+        for plugin in self._active_plugins():
+            if not hasattr(plugin, callback_name):
+                continue
+            try:
+                result = await _call_method(plugin, callback_name, **kwargs)
+            except Exception as e:
+                logger.warning(
+                    "Plugin vetoable callback failed",
+                    plugin_name=getattr(plugin, "name", "?"),
+                    callback=callback_name,
+                    error=str(e),
+                    exc_info=True,
+                )
+                continue
+            if result is False:
+                vetoed.append(getattr(plugin, "name", "?"))
+        if vetoed:
+            logger.info(
+                "Plugin vetoed action",
+                callback=callback_name,
+                plugins=vetoed,
+            )
+            return False
+        return True
 
 
 def _has_override(plugin: BasePlugin, method_name: str) -> bool:

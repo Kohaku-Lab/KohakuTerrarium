@@ -101,6 +101,10 @@ class CompactManager:
         self._session_store: Any = None
         self._output_router: Any = None
         self._agent_name: str = ""
+        # Plugin manager (set by agent via _init_compact_manager when
+        # plugins are wired up). Used for on_compact_start veto + the
+        # on_compact_end notification. ``None`` = no-op.
+        self._plugins: Any = None
 
     @property
     def is_compacting(self) -> bool:
@@ -202,6 +206,32 @@ class CompactManager:
             if not compact_messages:
                 return
 
+            # Plugin veto: ``on_compact_start`` is a vetoable callback.
+            # Any plugin returning ``False`` skips this compaction cycle
+            # (e.g. a plugin that just injected critical context).
+            # ``on_compact_end`` will NOT fire in this case.
+            context_length = conversation.get_context_length()
+            if self._plugins is not None:
+                proceed = await self._plugins.should_proceed(
+                    "on_compact_start",
+                    context_length=context_length,
+                )
+                if not proceed:
+                    if self._output_router:
+                        self._output_router.notify_activity(
+                            "compact_skipped",
+                            "Compaction vetoed by plugin",
+                            metadata={
+                                "reason": "plugin_veto",
+                                "round": self._compact_count + 1,
+                            },
+                        )
+                    logger.info(
+                        "Compact vetoed by plugin(s)",
+                        agent=self._agent_name,
+                    )
+                    return
+
             # Build the text to summarize
             summary_input = self._format_messages_for_summary(compact_messages)
 
@@ -278,6 +308,15 @@ class CompactManager:
                 messages_compacted=boundary - 1,
                 compact_round=self._compact_count,
             )
+
+            # Fire on_compact_end callback on all plugins (observation
+            # only — veto applies pre-compact only).
+            if self._plugins is not None:
+                await self._plugins.notify(
+                    "on_compact_end",
+                    summary=summary,
+                    messages_removed=boundary - 1,
+                )
 
         except asyncio.CancelledError:
             logger.info("Compact cancelled", agent=self._agent_name)
