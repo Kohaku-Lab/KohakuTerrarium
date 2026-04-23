@@ -14,7 +14,10 @@ from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.api.studio.catalog_sources import (
+    MANIFEST_KEYS,
+    classify_io,
     dedupe_preserve_order,
+    load_workspace_manifest,
     package_entries,
     workspace_manifest_entries,
 )
@@ -103,13 +106,53 @@ class LocalWorkspace:
         }
 
     def _modules_summary(self, kind: str) -> list[dict]:
-        """Merged module list for the dashboard — files + manifest + packages."""
+        """Merged module list for the dashboard — files + manifest + packages.
+
+        Manifest entries whose ``module:`` path resolves to a file
+        *inside* the workspace root are marked ``editable: true``.
+        kt-template / kt-biome style workspaces keep their module
+        sources under ``<root>/<pkg>/`` and declare them in
+        ``kohaku.yaml``; without this flag the dashboard would treat
+        them as read-only.
+        """
         merged: list[dict] = []
         for item in self.list_modules(kind):
-            merged.append({**item, "source": "workspace"})
-        merged.extend(workspace_manifest_entries(self, kind))
+            merged.append({**item, "source": "workspace", "editable": True})
+
+        for entry in workspace_manifest_entries(self, kind):
+            path = self._resolve_manifest_path(entry.get("module"))
+            if path is not None:
+                entry = {
+                    **entry,
+                    "editable": True,
+                    "path": str(path.relative_to(self.root_path)).replace("\\", "/"),
+                }
+            merged.append(entry)
+
         merged.extend(package_entries(kind))
         return dedupe_preserve_order(merged)
+
+    def _resolve_manifest_path(self, module: str | None) -> Path | None:
+        """Return the on-disk .py file for a dotted ``module:`` ref if it
+        lives inside this workspace root; otherwise None.
+
+        Rejects anything outside the root (installed packages, absolute
+        paths, parent-escape attempts) — the editor must only ever
+        touch files the user already considers part of this workspace.
+        """
+        if not module or not isinstance(module, str):
+            return None
+        candidate = self.root_path / (module.replace(".", "/") + ".py")
+        try:
+            resolved = candidate.resolve()
+            root = self.root_path.resolve()
+        except OSError:
+            return None
+        if not resolved.is_file():
+            return None
+        if root != resolved and root not in resolved.parents:
+            return None
+        return resolved
 
     # ------------------------------------------------------------------
     # Creatures — read
@@ -258,18 +301,9 @@ class LocalWorkspace:
 
     def load_module(self, kind: str, name: str) -> dict:
         name = sanitize_name(name)
-        kind_dir = self.module_kind_dir(kind)
-        path = kind_dir / f"{name}.py"
-        if not path.exists():
-            # YAML fallback for subagents
-            if kind == "subagents":
-                for ext in (".yaml", ".yml"):
-                    candidate = kind_dir / f"{name}{ext}"
-                    if candidate.exists():
-                        path = candidate
-                        break
-            if not path.exists():
-                raise FileNotFoundError(f"{kind}/{name}")
+        path = self._find_module_file(kind, name)
+        if path is None:
+            raise FileNotFoundError(f"{kind}/{name}")
 
         raw = path.read_text(encoding="utf-8")
         # Parse back to form state via the per-kind codegen
@@ -314,8 +348,15 @@ class LocalWorkspace:
     def save_module(self, kind: str, name: str, data: dict) -> dict:
         name = sanitize_name(name)
         kind_dir = self.module_kind_dir(kind)
-        kind_dir.mkdir(parents=True, exist_ok=True)
-        path = kind_dir / f"{name}.py"
+
+        # Existing file — update in place (handles both
+        # <root>/modules/<kind>/<name>.py and manifest-declared
+        # <root>/<pkg>/<kind>/<stem>.py shapes).
+        path = self._find_module_file(kind, name)
+        if path is None:
+            # New file: default location is <root>/modules/<kind>/<name>.py.
+            kind_dir.mkdir(parents=True, exist_ok=True)
+            path = kind_dir / f"{name}.py"
 
         from kohakuterrarium.api.studio.codegen import (
             RoundTripError,
@@ -329,6 +370,7 @@ class LocalWorkspace:
             raw = data.get("raw_source", "")
             if not raw:
                 raise ValueError("raw_source required in raw mode")
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(raw, encoding="utf-8")
         elif mode == "simple":
             form = data.get("form") or {}
@@ -348,6 +390,7 @@ class LocalWorkspace:
                         "execute_body": exec_body,
                     }
                 )
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(new_src, encoding="utf-8")
         else:
             raise ValueError(f"unknown mode: {mode!r}")
@@ -356,14 +399,95 @@ class LocalWorkspace:
 
     def delete_module(self, kind: str, name: str) -> None:
         name = sanitize_name(name)
+        path = self._find_module_file(kind, name)
+        if path is None:
+            raise FileNotFoundError(f"{kind}/{name}")
+        path.unlink()
+
+    # ------------------------------------------------------------------
+    # Module skill docs — sidecar .md files
+    # ------------------------------------------------------------------
+
+    def load_module_doc(self, kind: str, name: str) -> dict:
+        """Return the sidecar skill-doc markdown for a workspace module.
+
+        The sidecar is ``<dir>/<stem>.md`` sitting next to the module's
+        ``.py`` file. Returns the current content (empty string if no
+        sidecar exists yet) plus the sidecar path for display. Raises
+        ``FileNotFoundError`` when the module itself isn't a
+        workspace-editable file — studio never surfaces built-in docs
+        here (the catalog endpoint serves those read-only for
+        reference elsewhere).
+        """
+        name = sanitize_name(name)
+        py_path = self._find_module_file(kind, name)
+        if py_path is None:
+            raise FileNotFoundError(f"{kind}/{name}")
+
+        sidecar = py_path.with_suffix(".md")
+        content = sidecar.read_text(encoding="utf-8") if sidecar.exists() else ""
+        return {
+            "content": content,
+            "path": str(sidecar.relative_to(self.root_path)).replace("\\", "/"),
+            "exists": sidecar.exists(),
+        }
+
+    def save_module_doc(self, kind: str, name: str, content: str) -> dict:
+        """Write the skill-doc sidecar for a module. Returns the fresh
+        ``load_module_doc`` envelope.
+
+        Refuses when the module has no workspace file (no .py file to
+        sit next to). Package / external modules keep their own docs.
+        """
+        name = sanitize_name(name)
+        py_path = self._find_module_file(kind, name)
+        if py_path is None:
+            raise FileNotFoundError(f"{kind}/{name}")
+        sidecar = py_path.with_suffix(".md")
+        sidecar.parent.mkdir(parents=True, exist_ok=True)
+        sidecar.write_text(content, encoding="utf-8")
+        return self.load_module_doc(kind, name)
+
+    def _find_module_file(self, kind: str, name: str) -> Path | None:
+        """Locate the on-disk file for (kind, name).
+
+        Search order:
+        1. ``<root>/modules/<kind>/<name>.py`` (or ``.yaml`` / ``.yml``
+           for sub-agents) — the studio-native location.
+        2. A ``kohaku.yaml`` manifest entry whose ``name`` matches and
+           whose ``module:`` dotted path resolves to a file inside the
+           workspace root — kt-template / kt-biome style packaging.
+
+        Returns ``None`` when no file is found; callers decide whether
+        to 404 or treat it as a fresh-file save.
+        """
         kind_dir = self.module_kind_dir(kind)
-        # Try .py, .yaml, .yml
-        for ext in (".py", ".yaml", ".yml"):
-            candidate = kind_dir / f"{name}{ext}"
-            if candidate.exists():
-                candidate.unlink()
-                return
-        raise FileNotFoundError(f"{kind}/{name}")
+        candidate = kind_dir / f"{name}.py"
+        if candidate.exists():
+            return candidate
+        if kind == "subagents":
+            for ext in (".yaml", ".yml"):
+                c = kind_dir / f"{name}{ext}"
+                if c.exists():
+                    return c
+
+        manifest = load_workspace_manifest(self)
+        key = MANIFEST_KEYS.get(kind)
+        if key is None:
+            return None
+        for entry in manifest.get(key) or []:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("name") != name:
+                continue
+            if kind in ("inputs", "outputs"):
+                want = "input" if kind == "inputs" else "output"
+                if classify_io(entry) != want:
+                    continue
+            resolved = self._resolve_manifest_path(entry.get("module"))
+            if resolved is not None:
+                return resolved
+        return None
 
 
 # ----------------------------------------------------------------------

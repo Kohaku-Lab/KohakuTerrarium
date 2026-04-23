@@ -176,11 +176,14 @@ function openModule(kind, name) {
   })
 }
 
-/** A module is editable iff it's a workspace-authored file (under
- *  ``<root>/modules/<kind>/``). Manifest declarations and package
- *  contributions are shown read-only — you can wire them into a
- *  creature from the pool but there's no editor for them. */
+/** A module is editable iff it's an author-local file — either
+ *  under ``<root>/modules/<kind>/`` (source = "workspace") or a
+ *  ``kohaku.yaml`` manifest entry whose ``module:`` resolves to a
+ *  file INSIDE the workspace root (kt-template / kt-biome style
+ *  packaging). The backend flags the latter with ``editable: true``.
+ *  Package contributions stay read-only. */
 function isEditable(m) {
+  if (m.editable === true) return true
   return !m.source || m.source === "workspace"
 }
 

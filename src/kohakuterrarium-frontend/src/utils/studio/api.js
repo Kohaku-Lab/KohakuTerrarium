@@ -64,6 +64,9 @@ export const moduleAPI = {
   load: (kind, name) => run(http.get(`/modules/${kind}/${encodeURIComponent(name)}`)),
   scaffold: (kind, body) => run(http.post(`/modules/${kind}`, body)),
   save: (kind, name, body) => run(http.put(`/modules/${kind}/${encodeURIComponent(name)}`, body)),
+  loadDoc: (kind, name) => run(http.get(`/modules/${kind}/${encodeURIComponent(name)}/doc`)),
+  saveDoc: (kind, name, content) =>
+    run(http.put(`/modules/${kind}/${encodeURIComponent(name)}/doc`, { content })),
   del: (kind, name) =>
     run(http.delete(`/modules/${kind}/${encodeURIComponent(name)}?confirm=true`)),
 }

@@ -29,6 +29,12 @@ class SaveBody(BaseModel):
     raw_source: str = ""
 
 
+class DocSaveBody(BaseModel):
+    """Write body for a tool / sub-agent skill-doc sidecar."""
+
+    content: str = ""
+
+
 def _check_kind(kind: str) -> None:
     if kind not in KNOWN_KINDS:
         raise HTTPException(
@@ -105,6 +111,68 @@ async def save_module(
         )
     except ValueError as e:
         raise HTTPException(400, detail={"code": "invalid_input", "message": str(e)})
+
+
+@router.get("/{kind}/{name}/doc")
+async def load_module_doc(
+    kind: str,
+    name: str,
+    ws: Workspace = Depends(get_workspace),
+) -> dict:
+    """Return the skill-doc markdown for ``(kind, name)``.
+
+    Uses the sidecar ``.md`` sitting next to the module's ``.py``
+    (``<dir>/<stem>.md``). For tools this matches the framework's
+    ``get_full_documentation`` search path extended to accept sidecar
+    docs for workspace modules. Falls back to the built-in skill doc
+    for tools with a matching builtin name (read-only).
+
+    Returns ``{content, path, editable, source}``:
+      * ``source="sidecar"`` — writable .md next to the .py
+      * ``source="builtin"`` — read-only reference to the packaged doc
+      * ``source="missing"`` — no doc anywhere; suggest creating one
+    """
+    _check_kind(kind)
+    try:
+        return ws.load_module_doc(kind, name)  # type: ignore[attr-defined]
+    except FileNotFoundError:
+        raise HTTPException(
+            404,
+            detail={
+                "code": "not_found",
+                "message": f"{kind}/{name} not found",
+            },
+        )
+    except ValueError as e:
+        raise HTTPException(400, detail={"code": "invalid_name", "message": str(e)})
+
+
+@router.put("/{kind}/{name}/doc")
+async def save_module_doc(
+    kind: str,
+    name: str,
+    body: DocSaveBody,
+    ws: Workspace = Depends(get_workspace),
+) -> dict:
+    """Write the skill-doc sidecar for ``(kind, name)``.
+
+    Writes ``<dir>/<stem>.md`` next to the module file. Refuses with
+    409 when the module itself isn't a workspace-editable file — a
+    built-in tool's doc can't be overridden at the workspace level.
+    """
+    _check_kind(kind)
+    try:
+        return ws.save_module_doc(kind, name, body.content)  # type: ignore[attr-defined]
+    except FileNotFoundError:
+        raise HTTPException(
+            404,
+            detail={
+                "code": "not_found",
+                "message": f"{kind}/{name} not found — create the module first",
+            },
+        )
+    except ValueError as e:
+        raise HTTPException(400, detail={"code": "invalid_name", "message": str(e)})
 
 
 @router.delete("/{kind}/{name}")
