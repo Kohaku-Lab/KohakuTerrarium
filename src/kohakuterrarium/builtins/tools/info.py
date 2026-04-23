@@ -6,6 +6,7 @@ from typing import Any
 from kohakuterrarium.builtin_skills import (
     get_builtin_subagent_doc,
     get_builtin_tool_doc,
+    read_skill_body,
 )
 from kohakuterrarium.builtins.tools.registry import register_builtin
 from kohakuterrarium.modules.tool.base import (
@@ -64,10 +65,9 @@ class InfoTool(BaseTool):
             for subdir in ["prompts/tools", "prompts/subagents"]:
                 doc_path = Path(context.working_dir) / subdir / f"{name}.md"
                 if doc_path.exists():
-                    return ToolResult(
-                        output=doc_path.read_text(encoding="utf-8"),
-                        exit_code=0,
-                    )
+                    body = read_skill_body(doc_path)
+                    if body is not None:
+                        return ToolResult(output=body, exit_code=0)
 
         # 4. Try tool's own get_full_documentation from the agent's registry
         if context and context.agent:

@@ -3,6 +3,7 @@ name: explore
 description: Autonomous codebase exploration sub-agent
 category: subagent
 tags: [search, exploration, analysis]
+license: internal
 ---
 
 # explore

@@ -53,7 +53,9 @@ class TestSkillDoc:
         assert doc.content == "# Bash Tool\n\nRun shell commands."
         assert doc.category == "custom"  # default
         assert doc.tags == []  # default
-        assert doc.metadata == {}  # default
+        assert doc.extra == {}  # default
+        assert doc.standard == {}  # default
+        assert doc.raw_frontmatter == {}  # default
 
     def test_skill_doc_with_all_fields(self):
         """Test SkillDoc with all fields."""
@@ -63,11 +65,11 @@ class TestSkillDoc:
             content="# Read Tool",
             category="builtin",
             tags=["file", "io"],
-            metadata={"version": "1.0"},
+            extra={"version": "1.0"},
         )
         assert doc.category == "builtin"
         assert doc.tags == ["file", "io"]
-        assert doc.metadata == {"version": "1.0"}
+        assert doc.extra == {"version": "1.0"}
 
     def test_full_doc_property(self):
         """Test full_doc property returns content."""

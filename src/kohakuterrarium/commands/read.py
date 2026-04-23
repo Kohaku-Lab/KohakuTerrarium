@@ -9,13 +9,18 @@ Usage:
 
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from kohakuterrarium.builtin_skills import (
+    BUILTIN_SKILLS_DIR,
     get_builtin_subagent_doc,
     get_builtin_tool_doc,
+    read_skill_body,
 )
 from kohakuterrarium.commands.base import BaseCommand, CommandResult, parse_command_args
+
+if TYPE_CHECKING:
+    from kohakuterrarium.prompt.skill_loader import SkillDoc
 
 
 class ReadCommand(BaseCommand):
@@ -133,25 +138,27 @@ class InfoCommand(BaseCommand):
             # Try tool documentation file
             tool_doc_path = agent_path / "prompts" / "tools" / f"{target_name}.md"
             if tool_doc_path.exists():
-                content = tool_doc_path.read_text(encoding="utf-8")
-                return CommandResult(content=content)
+                rendered = _render_skill_from_path(tool_doc_path)
+                if rendered is not None:
+                    return CommandResult(content=rendered)
 
             # Try subagent documentation file
             subagent_doc_path = (
                 agent_path / "prompts" / "subagents" / f"{target_name}.md"
             )
             if subagent_doc_path.exists():
-                content = subagent_doc_path.read_text(encoding="utf-8")
-                return CommandResult(content=content)
+                rendered = _render_skill_from_path(subagent_doc_path)
+                if rendered is not None:
+                    return CommandResult(content=rendered)
 
         # 2. Try builtin skills from package
-        builtin_tool_doc = get_builtin_tool_doc(target_name)
-        if builtin_tool_doc:
-            return CommandResult(content=builtin_tool_doc)
+        rendered = _render_builtin_skill("tools", target_name)
+        if rendered is not None:
+            return CommandResult(content=rendered)
 
-        builtin_subagent_doc = get_builtin_subagent_doc(target_name)
-        if builtin_subagent_doc:
-            return CommandResult(content=builtin_subagent_doc)
+        rendered = _render_builtin_skill("subagents", target_name)
+        if rendered is not None:
+            return CommandResult(content=rendered)
 
         # 3. Try to get tool info from registry
         if hasattr(context, "get_tool_info"):
@@ -178,6 +185,60 @@ class InfoCommand(BaseCommand):
                 return CommandResult(content=subagent_info)
 
         return CommandResult(error=f"Not found: {target_name}")
+
+
+def _format_skill_for_info(doc: "SkillDoc", body: str) -> str:
+    """Render a ``SkillDoc`` body with a short ``Tags:`` preamble.
+
+    Tags are wired into the ``##info##`` output so that the first-class
+    ``SkillDoc.tags`` field is actually consumed by the agent — otherwise
+    it would just be parsed-and-discarded metadata.
+    """
+    if not doc.tags:
+        return body
+    tag_line = "Tags: " + ", ".join(str(t) for t in doc.tags)
+    if not body:
+        return tag_line
+    return f"{tag_line}\n\n{body}"
+
+
+def _render_skill_from_path(path: Path) -> str | None:
+    """Load a skill doc from ``path`` and render its body with tags.
+
+    Falls back to the raw body via :func:`read_skill_body` if YAML parsing
+    fails, so ``##info##`` never breaks on malformed frontmatter.
+    """
+    # Lazy import: ``kohakuterrarium.prompt.__init__`` eagerly loads the
+    # aggregator, which imports from ``core`` -> ``commands.read``.
+    # Importing at call time breaks that cycle.
+    from kohakuterrarium.prompt.skill_loader import load_skill_doc
+
+    doc = load_skill_doc(path)
+    if doc is not None:
+        return _format_skill_for_info(doc, doc.content)
+    # load_skill_doc failed (already logged). Degrade gracefully.
+    return read_skill_body(path)
+
+
+def _render_builtin_skill(kind: str, name: str) -> str | None:
+    """Render a built-in skill (``tools`` or ``subagents``) by name.
+
+    Uses :func:`load_skill_doc` so we can surface tags; falls back to the
+    body-only builtin helpers if the SKILL.md fails to parse.
+    """
+    doc_path = BUILTIN_SKILLS_DIR / kind / f"{name}.md"
+    if doc_path.exists():
+        rendered = _render_skill_from_path(doc_path)
+        if rendered is not None:
+            return rendered
+    # Degrade to the pre-existing body-only helpers as a final fallback
+    # (used when the path itself is missing but a helper finds it via some
+    # other convention in the future).
+    if kind == "tools":
+        return get_builtin_tool_doc(name)
+    if kind == "subagents":
+        return get_builtin_subagent_doc(name)
+    return None
 
 
 class JobsCommand(BaseCommand):

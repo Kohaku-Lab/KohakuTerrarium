@@ -3,6 +3,7 @@ name: bash
 description: Execute shell commands (prefer dedicated tools for file ops)
 category: builtin
 tags: [shell, command, system]
+license: internal
 ---
 
 # bash
