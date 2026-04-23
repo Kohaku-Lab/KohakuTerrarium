@@ -6,12 +6,28 @@ _LEGACY_BACKEND_TYPES = {"openai", "codex", "codex-oauth", "anthropic"}
 
 @dataclass
 class LLMBackend:
-    """Reusable concrete provider profile."""
+    """Reusable concrete provider profile.
+
+    ``provider_name`` is the compatibility key that provider-native tools
+    match against (``BaseTool.provider_support``). Built-in backends
+    default to their own name (``codex``, ``openai``, …); custom
+    backends default to the backend's own ``name`` unless the user
+    explicitly sets something else (e.g. ``codex`` to masquerade as
+    Codex for tool-compat purposes on a ChatGPT-Enterprise endpoint).
+
+    ``provider_native_tools`` is the set of builtin tool names the user
+    has opted into for this backend. Runtime auto-injects these tools
+    when the active LLM profile resolves through this backend; tools
+    not listed here are never injected, even if the active provider
+    class (e.g. ``CodexOAuthProvider``) advertises them globally.
+    """
 
     name: str
     backend_type: str
     base_url: str = ""
     api_key_env: str = ""
+    provider_name: str = ""
+    provider_native_tools: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {"backend_type": self.backend_type}
@@ -19,15 +35,24 @@ class LLMBackend:
             data["base_url"] = self.base_url
         if self.api_key_env:
             data["api_key_env"] = self.api_key_env
+        if self.provider_name:
+            data["provider_name"] = self.provider_name
+        if self.provider_native_tools:
+            data["provider_native_tools"] = list(self.provider_native_tools)
         return data
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "LLMBackend":
+        native_tools = data.get("provider_native_tools") or []
+        if not isinstance(native_tools, list):
+            native_tools = []
         return cls(
             name=name,
             backend_type=data.get("backend_type") or data.get("provider", "openai"),
             base_url=data.get("base_url", ""),
             api_key_env=data.get("api_key_env", ""),
+            provider_name=data.get("provider_name", ""),
+            provider_native_tools=[str(tool) for tool in native_tools if tool],
         )
 
 
@@ -85,7 +110,15 @@ class LLMPreset:
 
 @dataclass
 class LLMProfile:
-    """Resolved runtime LLM configuration."""
+    """Resolved runtime LLM configuration.
+
+    ``backend_provider_name`` and ``backend_native_tools`` are carried
+    through from :class:`LLMBackend` so ``bootstrap/llm.py`` can stamp
+    them onto the constructed LLM provider instance (see
+    :meth:`LLMBackend.provider_name` and
+    :meth:`LLMBackend.provider_native_tools`). These control which
+    provider-native tools auto-inject into the agent's tool registry.
+    """
 
     name: str
     model: str
@@ -100,6 +133,8 @@ class LLMProfile:
     service_tier: str = ""
     extra_body: dict[str, Any] = field(default_factory=dict)
     selected_variations: dict[str, str] = field(default_factory=dict)
+    backend_provider_name: str = ""
+    backend_native_tools: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "LLMProfile":
@@ -108,6 +143,9 @@ class LLMProfile:
         if provider in _LEGACY_BACKEND_TYPES and not backend_type:
             backend_type = provider
             provider = ""
+        native_tools = data.get("backend_native_tools") or []
+        if not isinstance(native_tools, list):
+            native_tools = []
         return cls(
             name=name,
             model=data.get("model", ""),
@@ -122,6 +160,8 @@ class LLMProfile:
             service_tier=data.get("service_tier", ""),
             extra_body=data.get("extra_body", {}),
             selected_variations=data.get("selected_variations", {}) or {},
+            backend_provider_name=data.get("backend_provider_name", ""),
+            backend_native_tools=[str(tool) for tool in native_tools if tool],
         )
 
     def to_dict(self) -> dict[str, Any]:

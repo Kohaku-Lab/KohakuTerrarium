@@ -29,8 +29,17 @@ Naming convention (post-2026-04 refactor):
 
 from typing import Any
 
+from kohakuterrarium.llm.preset_aliases import _CANONICAL_NAMES, ALIASES
 from kohakuterrarium.packages import list_packages
 from kohakuterrarium.utils.logging import get_logger
+
+__all__ = [
+    "ALIASES",
+    "PRESETS",
+    "get_all_presets",
+    "iter_all_presets",
+    "resolve_alias",
+]
 
 logger = get_logger(__name__)
 
@@ -771,101 +780,48 @@ PRESETS: dict[str, dict[str, Any]] = {
     },
 }
 
-# ── Aliases ────────────────────────────────────────────────────
-# Three roles:
-#   1. Short/friendly names for frequent picks (e.g. ``gpt5``, ``opus``).
-#   2. Backward-compat for the pre-2026-04 preset naming scheme — the
-#      old ``-direct`` / ``or-`` prefixed names are preserved so existing
-#      user configs keep working.
-#   3. Legacy model-name spellings (e.g. ``gpt-4o`` → ``gpt-4o-codex``).
-ALIASES: dict[str, str] = {
-    # ── Short / friendly names ──
-    "gpt5": "gpt-5.4",
-    "gpt54": "gpt-5.4",
-    "gpt53": "gpt-5.3-codex",
-    "gpt4o": "gpt-4o-codex",
-    "gemini": "gemini-3.1-pro",
-    "gemini-pro": "gemini-3.1-pro",
-    "gemini-flash": "gemini-3-flash",
-    "gemini-lite": "gemini-3.1-flash-lite",
-    "claude": "claude-sonnet-4.6",
-    "claude-sonnet": "claude-sonnet-4.6",
-    "claude-opus": "claude-opus-4.7",
-    "claude-haiku": "claude-haiku-4.5",
-    "sonnet": "claude-sonnet-4.6",
-    "opus": "claude-opus-4.7",
-    "haiku": "claude-haiku-4.5",
-    "gemma": "gemma-4-31b",
-    "gemma-4": "gemma-4-31b",
-    "qwen": "qwen3.5-plus",
-    "qwen-coder": "qwen3-coder",
-    "kimi": "kimi-k2.5",
-    "minimax": "minimax-m2.7",
-    "mimo": "mimo-v2-pro",
-    "glm": "glm-5-turbo",
-    "grok": "grok-4",
-    "grok-fast": "grok-4-fast",
-    "grok-code": "grok-code-fast",
-    "mistral": "mistral-large-3",
-    "mistral-large": "mistral-large-3",
-    "mistral-medium": "mistral-medium-3.1",
-    "mistral-small": "mistral-small-4",
-    "magistral": "magistral-medium",
-    "devstral": "devstral-2",
-    "ministral": "ministral-3-14b",
-    # ── Back-compat: pre-2026-04 preset names ──
-    # OpenAI codex (moved gpt-4o → gpt-4o-codex for consistency).
-    "gpt-4o": "gpt-4o-codex",
-    "gpt-4o-mini": "gpt-4o-mini-codex",
-    # OpenAI direct (was ``-direct`` → now ``-api``).
-    "gpt-5.4-direct": "gpt-5.4-api",
-    "gpt-5.4-mini-direct": "gpt-5.4-mini-api",
-    "gpt-5.4-nano-direct": "gpt-5.4-nano-api",
-    "gpt-5.3-codex-direct": "gpt-5.3-codex-api",
-    "gpt-5.1-direct": "gpt-5.1-api",
-    "gpt-4o-direct": "gpt-4o-api",
-    "gpt-4o-mini-direct": "gpt-4o-mini-api",
-    # OpenAI OR (was ``or-`` prefix → now ``-or`` suffix).
-    "or-gpt-5.4": "gpt-5.4-or",
-    "or-gpt-5.4-mini": "gpt-5.4-mini-or",
-    "or-gpt-5.4-nano": "gpt-5.4-nano-or",
-    "or-gpt-5.3-codex": "gpt-5.3-codex-or",
-    "or-gpt-5.1": "gpt-5.1-or",
-    "or-gpt-4o": "gpt-4o-or",
-    "or-gpt-4o-mini": "gpt-4o-mini-or",
-    # Anthropic direct (was ``-direct`` → now unsuffixed primary).
-    "claude-opus-4.6-direct": "claude-opus-4.6",
-    "claude-sonnet-4.6-direct": "claude-sonnet-4.6",
-    "claude-haiku-4.5-direct": "claude-haiku-4.5",
-    # Legacy 4.0 Anthropic (were unsuffixed OR → now ``-or``).
-    "claude-sonnet-4": "claude-sonnet-4-or",
-    "claude-opus-4": "claude-opus-4-or",
-    # Gemini direct (was ``-direct`` → now unsuffixed primary).
-    "gemini-3.1-pro-direct": "gemini-3.1-pro",
-    "gemini-3-flash-direct": "gemini-3-flash",
-    "gemini-3.1-flash-lite-direct": "gemini-3.1-flash-lite",
-    # MiMo direct (was ``-direct`` → now unsuffixed primary).
-    "mimo-v2-pro-direct": "mimo-v2-pro",
-    "mimo-v2-flash-direct": "mimo-v2-flash",
-}
-
-
-# ── Package preset merging ───────────────────────────────────
+# ── Nested view + package preset merging ─────────────────────
+#
+# ``_CANONICAL_NAMES`` and ``ALIASES`` live in :mod:`preset_aliases`
+# so this module stays under the file-size guard.
 _package_presets_merged: bool = False
-_all_presets_cache: dict[str, dict[str, Any]] | None = None
+_all_presets_cache: dict[tuple[str, str], dict[str, Any]] | None = None
 
 
-def _merge_package_presets() -> dict[str, dict[str, Any]]:
-    """Scan installed packages for llm_presets and merge into PRESETS.
+def _canonical_entry(
+    legacy_name: str, data: dict[str, Any]
+) -> tuple[str, str, dict[str, Any]] | None:
+    """Return ``(provider, canonical_name, data_without_provider)`` or ``None``.
 
-    Package presets do NOT override built-in presets; they only add new entries.
+    Entries missing a ``provider`` field can't be mapped into the
+    nested ``(provider, name)`` space and are dropped.
+    """
+    provider = data.get("provider", "") or ""
+    if not provider:
+        return None
+    canonical = _CANONICAL_NAMES.get(legacy_name, legacy_name)
+    body = {k: v for k, v in data.items() if k != "provider"}
+    return provider, canonical, body
+
+
+def _merge_package_presets() -> dict[tuple[str, str], dict[str, Any]]:
+    """Scan installed packages for llm_presets.
+
+    Package presets do NOT override built-in presets; they only add
+    new entries under their declared ``provider``. Each package entry
+    must carry ``name`` + ``provider`` — without both, it is skipped.
     """
     global _package_presets_merged
     if _package_presets_merged:
         return {}
 
     _package_presets_merged = True
-    merged: dict[str, dict[str, Any]] = {}
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
+    builtin_keys = {
+        (data.get("provider", ""), _CANONICAL_NAMES.get(name, name))
+        for name, data in PRESETS.items()
+        if data.get("provider")
+    }
 
     try:
         for pkg in list_packages():
@@ -873,37 +829,68 @@ def _merge_package_presets() -> dict[str, dict[str, Any]]:
                 if not isinstance(preset, dict):
                     continue
                 preset_name = preset.get("name")
-                if not preset_name:
+                provider = preset.get("provider", "")
+                if not preset_name or not provider:
                     continue
-                if preset_name in PRESETS:
+                key = (provider, preset_name)
+                if key in builtin_keys:
                     logger.debug(
                         "Package preset skipped (builtin exists)",
                         preset=preset_name,
+                        provider=provider,
                         package=pkg["name"],
                     )
                     continue
-                if preset_name in merged:
+                if key in merged:
                     logger.debug(
                         "Package preset skipped (duplicate)",
                         preset=preset_name,
+                        provider=provider,
                         package=pkg["name"],
                     )
                     continue
-                # Build preset dict from the entry (exclude 'name' key)
-                preset_data = {k: v for k, v in preset.items() if k != "name"}
-                merged[preset_name] = preset_data
+                preset_data = {
+                    k: v for k, v in preset.items() if k not in {"name", "provider"}
+                }
+                merged[key] = preset_data
     except Exception as e:
         logger.debug("Failed to load package presets", error=str(e), exc_info=True)
 
     return merged
 
 
-def get_all_presets() -> dict[str, dict[str, Any]]:
-    """Return PRESETS merged with package presets, cached after first call."""
+def get_all_presets() -> dict[tuple[str, str], dict[str, Any]]:
+    """Return every built-in + package preset keyed by ``(provider, name)``.
+
+    Cached after first call. Entry values do NOT include the
+    ``provider`` key — it is already the first element of the tuple.
+    """
     global _all_presets_cache
     if _all_presets_cache is not None:
         return _all_presets_cache
 
-    package_presets = _merge_package_presets()
-    _all_presets_cache = {**PRESETS, **package_presets}
+    flat: dict[tuple[str, str], dict[str, Any]] = {}
+    for legacy_name, data in PRESETS.items():
+        canonical = _canonical_entry(legacy_name, data)
+        if canonical is None:
+            continue
+        provider, bare_name, body = canonical
+        flat[(provider, bare_name)] = body
+
+    flat.update(_merge_package_presets())
+    _all_presets_cache = flat
     return _all_presets_cache
+
+
+def iter_all_presets() -> list[tuple[str, str, dict[str, Any]]]:
+    """Yield every built-in + package preset as ``(provider, name, data)``."""
+    return [(p, n, d) for (p, n), d in get_all_presets().items()]
+
+
+def resolve_alias(name: str) -> tuple[str, str] | None:
+    """Resolve a short / legacy alias to its ``(provider, canonical_name)``.
+
+    Returns ``None`` if the name is not an alias. Callers should treat
+    non-alias inputs as already-canonical names.
+    """
+    return ALIASES.get(name)

@@ -86,8 +86,25 @@ def save_yaml_store(data: dict[str, Any]) -> None:
 
 
 def _built_in_providers() -> dict[str, LLMBackend]:
+    """Built-in provider registry.
+
+    ``provider_name`` on each entry is the compatibility key that
+    :class:`~kohakuterrarium.modules.tool.base.BaseTool` subclasses
+    match against via their ``provider_support`` set. Only ``codex``
+    is bound to a native LLM provider that declares any provider-
+    native tools today (``ImageGenTool``); the other built-ins leave
+    ``provider_name`` empty so their tool-catalog surface stays bare
+    by default. Users can opt into e.g. ``image_gen`` on their own
+    OpenAI-backend provider by setting ``provider_name=codex`` and
+    adding ``image_gen`` to ``provider_native_tools``.
+    """
     return {
-        "codex": LLMBackend(name="codex", backend_type="codex"),
+        "codex": LLMBackend(
+            name="codex",
+            backend_type="codex",
+            provider_name="codex",
+            provider_native_tools=["image_gen"],
+        ),
         "openai": LLMBackend(
             name="openai",
             backend_type="openai",
@@ -181,6 +198,14 @@ def load_backends() -> dict[str, LLMBackend]:
         for name, bdata in user_backends.items():
             if isinstance(bdata, dict):
                 backends[name] = LLMBackend.from_dict(name, bdata)
+
+    # User-defined backends default ``provider_name`` to their own name
+    # so provider-native tool compatibility has something concrete to
+    # match. Setting ``provider_name=codex`` is how a user opts into
+    # Codex-compatible tools (``image_gen``) on their own endpoint.
+    for name, backend in backends.items():
+        if name not in _BUILTIN_PROVIDER_NAMES and not backend.provider_name:
+            backend.provider_name = name
 
     # Legacy fallback: some old profiles stored ``base_url`` / ``api_key_env``
     # inline on each preset. If those map onto a built-in provider that isn't

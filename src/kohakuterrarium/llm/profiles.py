@@ -23,32 +23,40 @@ through ``openrouter`` instead.
 from copy import deepcopy
 from typing import Any
 
-from kohakuterrarium.llm.api_keys import (
-    KT_DIR,  # noqa: F401  (re-exported for back-compat)
-    KEYS_PATH,  # noqa: F401
-    PROVIDER_KEY_MAP,  # noqa: F401
-    get_api_key,
-    list_api_keys,  # noqa: F401
-    save_api_key,
+from kohakuterrarium.llm.api_keys import KEYS_PATH as KEYS_PATH
+from kohakuterrarium.llm.api_keys import KT_DIR as KT_DIR
+from kohakuterrarium.llm.api_keys import PROVIDER_KEY_MAP as PROVIDER_KEY_MAP
+from kohakuterrarium.llm.api_keys import list_api_keys as list_api_keys
+from kohakuterrarium.llm.api_keys import get_api_key, save_api_key
+from kohakuterrarium.llm.backends import (
+    PROFILES_PATH as PROFILES_PATH,
 )
 from kohakuterrarium.llm.backends import (
-    PROFILES_PATH,  # noqa: F401  (re-exported so callers + tests can patch here)
-    _BUILTIN_PROVIDER_NAMES,
-    _LEGACY_BACKEND_TYPE_VALUES,  # noqa: F401
-    _SCHEMA_VERSION,
-    _normalize_backend_type,  # noqa: F401
-    legacy_provider_from_data as _legacy_provider_from_data,
-    load_backends,
-    load_yaml_store as _load_yaml,
-    save_yaml_store as _save_yaml,
-    validate_backend_type,
+    _LEGACY_BACKEND_TYPE_VALUES as _LEGACY_BACKEND_TYPE_VALUES,
 )
+from kohakuterrarium.llm.backends import _SCHEMA_VERSION as _SCHEMA_VERSION
+from kohakuterrarium.llm.backends import (
+    _normalize_backend_type as _normalize_backend_type,
+)
+from kohakuterrarium.llm.backends import _BUILTIN_PROVIDER_NAMES
+from kohakuterrarium.llm.backends import (
+    legacy_provider_from_data as _legacy_provider_from_data,
+)
+from kohakuterrarium.llm.backends import load_backends
+from kohakuterrarium.llm.backends import load_yaml_store as _load_yaml
+from kohakuterrarium.llm.backends import save_yaml_store as _save_yaml
+from kohakuterrarium.llm.backends import validate_backend_type
 from kohakuterrarium.llm.codex_auth import CodexTokens
-from kohakuterrarium.llm.presets import ALIASES, PRESETS, get_all_presets  # noqa: F401
-from kohakuterrarium.llm.profile_types import LLMBackend, LLMProfile, LLMPreset
+from kohakuterrarium.llm.preset_store import load_presets
+from kohakuterrarium.llm.preset_store import preset_from_data as _preset_from_data
+from kohakuterrarium.llm.preset_store import serialize_user_data as _serialize_user_data
+from kohakuterrarium.llm.presets import ALIASES as ALIASES
+from kohakuterrarium.llm.presets import PRESETS as PRESETS
+from kohakuterrarium.llm.presets import get_all_presets, resolve_alias
+from kohakuterrarium.llm.profile_types import LLMBackend, LLMPreset, LLMProfile
+from kohakuterrarium.llm.variations import apply_patch_map as apply_patch_map
 from kohakuterrarium.llm.variations import (
     _SHORTHAND_SELECTION_KEY,
-    apply_patch_map,  # noqa: F401
     apply_variation_groups,
     deep_merge_dicts,
     normalize_variation_selections,
@@ -57,55 +65,6 @@ from kohakuterrarium.llm.variations import (
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
-
-
-# ── Preset I/O ─────────────────────────────────────────────────
-
-
-def _preset_from_data(name: str, data: dict[str, Any]) -> LLMPreset:
-    """Build a LLMPreset from raw yaml data, inferring provider if legacy."""
-    preset = LLMPreset.from_dict(name, data)
-    if not preset.provider:
-        preset.provider = _legacy_provider_from_data(data)
-    return preset
-
-
-def load_presets() -> dict[str, LLMPreset]:
-    data = _load_yaml()
-    presets: dict[str, LLMPreset] = {}
-    stored = data.get("presets", {})
-    if isinstance(stored, dict):
-        for name, pdata in stored.items():
-            if isinstance(pdata, dict):
-                presets[name] = _preset_from_data(name, pdata)
-    legacy = data.get("profiles", {})
-    if isinstance(legacy, dict):
-        for name, pdata in legacy.items():
-            if isinstance(pdata, dict) and name not in presets:
-                presets[name] = _preset_from_data(name, pdata)
-    return presets
-
-
-def _serialize_user_data(
-    presets: dict[str, LLMPreset],
-    backends: dict[str, LLMBackend],
-    default_model: str = "",
-) -> dict[str, Any]:
-    data: dict[str, Any] = {"version": _SCHEMA_VERSION}
-    if default_model:
-        data["default_model"] = default_model
-    user_backends = {
-        name: backend.to_dict()
-        for name, backend in backends.items()
-        if name not in _BUILTIN_PROVIDER_NAMES
-    }
-    if user_backends:
-        data["backends"] = user_backends
-    if presets:
-        serialized = {name: preset.to_dict() for name, preset in presets.items()}
-        data["presets"] = serialized
-        data["profiles"] = serialized
-    return data
 
 
 # ── Backend CRUD (writes touch both backends + presets, so lives here) ──
@@ -136,7 +95,7 @@ def delete_backend(name: str) -> bool:
     if name not in existing:
         return False
     presets = load_presets()
-    if any(p.provider == name for p in presets.values()):
+    if any(provider == name for provider, _ in presets):
         raise ValueError(f"Provider still in use by one or more presets: {name}")
     backends = load_backends()
     backends.pop(name, None)
@@ -178,38 +137,94 @@ def _resolve_preset(
         service_tier=resolved_preset.service_tier,
         extra_body=deepcopy(resolved_preset.extra_body),
         selected_variations=normalized,
+        backend_provider_name=provider.provider_name if provider else "",
+        backend_native_tools=(list(provider.provider_native_tools) if provider else []),
     )
 
 
-def load_profiles() -> dict[str, LLMProfile]:
+def load_profiles() -> dict[tuple[str, str], LLMProfile]:
     backends = load_backends()
-    profiles: dict[str, LLMProfile] = {}
-    for name, preset in load_presets().items():
+    profiles: dict[tuple[str, str], LLMProfile] = {}
+    for key, preset in load_presets().items():
         resolved = _resolve_preset(preset, backends)
         if resolved is not None:
-            profiles[name] = resolved
+            profiles[key] = resolved
     return profiles
 
 
+# Default-model ordering: the first provider in this list that has a
+# reachable preset wins if no explicit default is set. Each tuple is
+# ``(provider_name, preferred_bare_preset_name)``; the bare name
+# reflects the new naming — no ``-api`` / ``-or`` suffixes.
 _PROVIDER_DEFAULT_MODELS: list[tuple[str, str]] = [
     ("codex", "gpt-5.4"),
-    ("openrouter", "mimo-v2-pro-or"),
+    ("openrouter", "mimo-v2-pro"),
     ("anthropic", "claude-opus-4.7"),
-    ("openai", "gpt-5.4-api"),
+    ("openai", "gpt-5.4"),
     ("gemini", "gemini-3.1-pro"),
     ("mimo", "mimo-v2-pro"),
 ]
 
 
+# Legacy raw ``controller.model`` values historically named the provider's
+# API model id rather than a user-facing preset. Under the new (provider,
+# name) hierarchy that raw id can be ambiguous, so the old bare-model path
+# keeps a stable preference order. This applies only to ``model: ...``
+# resolution; explicit preset references stay strict.
+_LEGACY_MODEL_PROVIDER_PREFERENCE: list[str] = [
+    provider for provider, _ in _PROVIDER_DEFAULT_MODELS
+]
+
+
 def get_default_model() -> str:
+    """Return the default model identifier as ``provider/name``.
+
+    ``provider/name`` is unambiguous under the new (provider, name)
+    hierarchy — a bare name could exist under multiple providers and
+    would trigger the ambiguity error during resolution.
+
+    Legacy bare-name values (written by pre-refactor builds that wrote
+    ``default_model: gpt-5.4`` straight from the preset key) are
+    upgraded on read: the first ``_PROVIDER_DEFAULT_MODELS`` provider
+    that actually has the preset wins. Storage is not rewritten here
+    — :func:`set_default_model` handles that on the next save.
+    """
     data = _load_yaml()
     explicit = data.get("default_model", "")
     if explicit:
-        return explicit
-    for provider_name, model in _PROVIDER_DEFAULT_MODELS:
+        if "/" in explicit:
+            return explicit
+        return _upgrade_bare_default(explicit) or explicit
+    for provider_name, bare_name in _PROVIDER_DEFAULT_MODELS:
         if _is_available(provider_name):
-            return model
+            return f"{provider_name}/{bare_name}"
     return ""
+
+
+def _upgrade_bare_default(bare: str) -> str:
+    """Map a legacy bare-name default to ``provider/name``.
+
+    Tries, in order:
+      1. alias lookup (``gpt-5.4-api`` → openai/gpt-5.4);
+      2. the first provider from ``_PROVIDER_DEFAULT_MODELS`` that has
+         a preset with this canonical name;
+      3. any provider that has it (stable-sorted).
+    Returns an empty string if nothing matches — the caller falls
+    back to the raw bare string in that case.
+    """
+    aliased = resolve_alias(bare)
+    if aliased is not None:
+        provider, canonical = aliased
+        return f"{provider}/{canonical}"
+
+    all_presets = get_all_presets()
+    hits = [prov for (prov, name) in all_presets if name == bare]
+    if not hits:
+        return ""
+    for pref_provider, _ in _PROVIDER_DEFAULT_MODELS:
+        if pref_provider in hits:
+            return f"{pref_provider}/{bare}"
+    return f"{sorted(hits)[0]}/{bare}"
 
 
 def set_default_model(model_name: str) -> None:
@@ -219,15 +234,21 @@ def set_default_model(model_name: str) -> None:
 def save_profile(profile: LLMProfile | LLMPreset) -> None:
     """Persist a user-defined preset.
 
-    When called with an :class:`LLMProfile` (which has no ``variation_groups``
-    field of its own), any ``variation_groups`` already defined on the existing
-    preset of the same name are preserved — otherwise round-tripping a profile
-    through the API would silently erase its variation set.
+    Uniqueness is ``(provider, name)`` — two user presets can share a
+    bare name as long as they bind to different providers. Built-in
+    presets with the same ``(provider, name)`` are overridden; any
+    built-in whose pair differs stays visible.
+
+    When called with an :class:`LLMProfile` (which has no
+    ``variation_groups`` field of its own), any ``variation_groups``
+    already defined on the existing preset with the same
+    ``(provider, name)`` are preserved — otherwise round-tripping a
+    profile through the API would silently erase its variation set.
     """
     if isinstance(profile, LLMPreset):
         preset = profile
     else:
-        existing_preset = load_presets().get(profile.name)
+        existing_preset = load_presets().get((profile.provider, profile.name))
         preset = LLMPreset(
             name=profile.name,
             model=profile.model,
@@ -251,16 +272,30 @@ def save_profile(profile: LLMProfile | LLMPreset) -> None:
     if preset.provider not in backends:
         raise ValueError(f"Provider not found: {preset.provider}")
     presets = load_presets()
-    presets[preset.name] = preset
+    presets[(preset.provider, preset.name)] = preset
     _save_yaml(_serialize_user_data(presets, backends, data.get("default_model", "")))
 
 
-def delete_profile(name: str) -> bool:
+def delete_profile(name: str, provider: str = "") -> bool:
+    """Delete a user preset.
+
+    ``provider`` disambiguates across the nested layout. If omitted
+    and the bare ``name`` appears under multiple providers, this
+    returns ``False`` without deleting anything — the API surface is
+    expected to pass the provider explicitly.
+    """
     data = _load_yaml()
     presets = load_presets()
-    if name not in presets:
-        return False
-    presets.pop(name)
+    if provider:
+        key = (provider, name)
+        if key not in presets:
+            return False
+        presets.pop(key)
+    else:
+        hits = [k for k in presets if k[1] == name]
+        if len(hits) != 1:
+            return False
+        presets.pop(hits[0])
     _save_yaml(
         _serialize_user_data(presets, load_backends(), data.get("default_model", ""))
     )
@@ -268,46 +303,99 @@ def delete_profile(name: str) -> bool:
 
 
 def _builtin_preset_to_runtime(
+    provider: str,
     name: str,
     data: dict[str, Any],
     selections: dict[str, str] | None = None,
 ) -> LLMProfile | None:
-    preset = _preset_from_data(name, data)
+    preset = _preset_from_data(name, data, provider)
     return _resolve_preset(preset, load_backends(), selections)
 
 
-def _all_preset_definitions() -> dict[str, LLMPreset]:
-    presets = load_presets()
-    for name, data in get_all_presets().items():
-        if name not in presets:
-            presets[name] = _preset_from_data(name, data)
+def _all_preset_definitions() -> dict[tuple[str, str], LLMPreset]:
+    """User presets merged over built-ins by ``(provider, name)`` key.
+
+    When both a user preset and a built-in preset share the same
+    (provider, name), the user preset wins. Otherwise both show up
+    — a user preset named ``gpt-5.4`` under their own custom
+    provider does NOT hide the built-in codex ``gpt-5.4``.
+    """
+    presets: dict[tuple[str, str], LLMPreset] = {}
+    for key, data in get_all_presets().items():
+        provider, name = key
+        presets[key] = _preset_from_data(name, data, provider)
+    # User entries override the built-ins of the same (provider, name).
+    presets.update(load_presets())
     return presets
 
 
-def _get_preset_definition(name: str) -> LLMPreset | None:
+def _split_provider_prefix(name: str) -> tuple[str, str]:
+    """Split ``provider/name`` into its two parts.
+
+    Returns ``("", name)`` when there is no ``/`` in the input. Empty
+    provider or empty name raise ``ValueError`` — callers expect one
+    or the other to be non-empty.
+    """
+    if "/" not in name:
+        return "", name
+    provider, bare = name.split("/", 1)
+    if not provider or not bare:
+        raise ValueError(
+            f"Invalid provider/name identifier {name!r}: both halves must be non-empty"
+        )
+    return provider, bare
+
+
+def _get_preset_definition(name: str, provider: str = "") -> LLMPreset | None:
+    """Resolve a preset by bare or qualified name.
+
+    Rules:
+      1. ``provider`` argument wins when non-empty.
+      2. ``provider/name`` syntax in ``name`` picks that provider.
+      3. Aliases (``gpt-5.4-api`` → (openai, gpt-5.4)) are resolved.
+      4. A bare name that exists under exactly one provider resolves
+         silently. If it exists under multiple, ``ValueError`` is
+         raised with the ambiguity message.
+    """
     base_name, _ = parse_variation_selector(name)
-    canonical = ALIASES.get(base_name, base_name)
+    qualified_provider, bare_name = _split_provider_prefix(base_name)
+    if provider:
+        qualified_provider = provider
 
-    user_presets = load_presets()
-    if canonical in user_presets:
-        return user_presets[canonical]
-    if base_name in user_presets:
-        return user_presets[base_name]
+    if not qualified_provider:
+        aliased = resolve_alias(bare_name)
+        if aliased is not None:
+            qualified_provider, bare_name = aliased
 
-    presets = get_all_presets()
-    if canonical in presets:
-        return _preset_from_data(canonical, presets[canonical])
-    if base_name in presets:
-        return _preset_from_data(base_name, presets[base_name])
-    return None
+    definitions = _all_preset_definitions()
+
+    if qualified_provider:
+        preset = definitions.get((qualified_provider, bare_name))
+        if preset is not None:
+            return preset
+        return None
+
+    # Bare name lookup across all providers.
+    matches = [p for (prov, n), p in definitions.items() if n == bare_name]
+    if not matches:
+        return None
+    if len(matches) > 1:
+        providers = sorted({p.provider or "(none)" for p in matches})
+        raise ValueError(
+            f"Preset name {bare_name!r} exists under multiple providers: "
+            f"{', '.join(providers)}. Use 'provider/name' (e.g. "
+            f"'{providers[0]}/{bare_name}') or set controller.provider."
+        )
+    return matches[0]
 
 
 def _get_profile_from_selector(
     name: str,
     extra_selections: dict[str, str] | None = None,
+    provider: str = "",
 ) -> LLMProfile | None:
     base_name, selector_selections = parse_variation_selector(name)
-    preset = _get_preset_definition(base_name)
+    preset = _get_preset_definition(base_name, provider)
     if preset is None:
         return None
     merged_selections = dict(selector_selections)
@@ -331,6 +419,11 @@ def _find_profile_by_model(
     if not matches:
         return None
     if len(matches) > 1 and not provider:
+        preferred = {preset.provider: preset for preset in matches if preset.provider}
+        for preferred_provider in _LEGACY_MODEL_PROVIDER_PREFERENCE:
+            chosen = preferred.get(preferred_provider)
+            if chosen is not None:
+                return _resolve_preset(chosen, load_backends(), selections)
         providers = sorted({preset.provider or "(none)" for preset in matches})
         raise ValueError(
             f"Model '{model}' is ambiguous across multiple providers: {', '.join(providers)}. "
@@ -339,12 +432,46 @@ def _find_profile_by_model(
     return _resolve_preset(matches[0], load_backends(), selections)
 
 
-def get_profile(name: str) -> LLMProfile | None:
-    return _get_profile_from_selector(name)
+def get_profile(name: str, provider: str = "") -> LLMProfile | None:
+    return _get_profile_from_selector(name, provider=provider)
 
 
-def get_preset(name: str) -> LLMProfile | None:
-    return _get_profile_from_selector(name)
+def profile_to_identifier(profile: LLMProfile) -> str:
+    """Render an :class:`LLMProfile` as its canonical selector string.
+
+    Output shape is ``provider/name[@group=option,...]`` — the same
+    form the pickers emit and :func:`resolve_controller_llm` accepts.
+    Used by the ``/model`` command, rich-CLI banner, and web model
+    pill so every surface agrees on how the current model is spelt.
+    """
+    if not profile:
+        return ""
+    base = f"{profile.provider}/{profile.name}" if profile.provider else profile.name
+    selections = profile.selected_variations or {}
+    if not selections:
+        return base
+    parts = [f"{g}={o}" for g, o in sorted(selections.items()) if o]
+    if not parts:
+        return base
+    return f"{base}@" + ",".join(parts)
+
+
+def get_preset(name: str, provider: str = "") -> LLMProfile | None:
+    return _get_profile_from_selector(name, provider=provider)
+
+
+def _legacy_model_provider_hint(controller_config: dict[str, Any]) -> str:
+    """Infer a provider for legacy raw ``controller.model`` configs.
+
+    Pre-hierarchy configs often specified only the backend model id
+    (e.g. ``model: gpt-5.4``) plus transport hints like
+    ``auth_mode: codex-oauth``. Preserve that behavior here without
+    weakening the stricter ambiguity checks for explicit preset names.
+    """
+    auth_mode = controller_config.get("auth_mode", "") or ""
+    if auth_mode == "codex-oauth":
+        return "codex"
+    return ""
 
 
 def resolve_controller_llm(
@@ -362,13 +489,20 @@ def resolve_controller_llm(
 
     profile: LLMProfile | None = None
     if name:
-        profile = _get_profile_from_selector(name, selection_overrides)
+        profile = _get_profile_from_selector(
+            name, selection_overrides, provider=provider
+        )
     elif raw_model:
         model_name, model_selector_selections = parse_variation_selector(raw_model)
         if model_name:
             merged_selections = dict(model_selector_selections)
             merged_selections.update(selection_overrides)
-            profile = _find_profile_by_model(model_name, provider, merged_selections)
+            model_provider = provider or _legacy_model_provider_hint(controller_config)
+            profile = _find_profile_by_model(
+                model_name,
+                model_provider,
+                merged_selections,
+            )
 
     if profile is None and not name and not raw_model:
         default_name = get_default_model()
@@ -433,7 +567,14 @@ def _is_available(provider_name: str) -> bool:
 
 
 def list_all() -> list[dict[str, Any]]:
-    """List every user + built-in preset resolved against current providers."""
+    """List every user + built-in preset resolved against current providers.
+
+    Dedup key is ``(provider, name)``. A user preset at
+    ``(my-enterprise, gpt-5.4)`` never hides the built-in at
+    ``(codex, gpt-5.4)`` — they coexist in the output. User entries
+    only override built-ins when the full (provider, name) tuple
+    matches.
+    """
     result: list[dict[str, Any]] = []
     definitions = _all_preset_definitions()
 
@@ -459,21 +600,32 @@ def list_all() -> list[dict[str, Any]]:
             "selected_variations": dict(profile.selected_variations or {}),
         }
 
-    for name, preset in load_presets().items():
+    seen: set[tuple[str, str]] = set()
+    for (provider, name), preset in load_presets().items():
         profile = _resolve_preset(preset, load_backends())
         if profile is not None:
-            result.append(_entry(profile, definitions.get(name), "user"))
+            seen.add((provider, name))
+            result.append(_entry(profile, definitions.get((provider, name)), "user"))
 
-    user_names = {entry["name"] for entry in result}
-    for name, data in get_all_presets().items():
-        if name in user_names:
+    for (provider, name), data in get_all_presets().items():
+        if (provider, name) in seen:
             continue
-        profile = _builtin_preset_to_runtime(name, data)
+        profile = _builtin_preset_to_runtime(provider, name, data)
         if profile is None:
             continue
-        result.append(_entry(profile, definitions.get(name), "preset"))
+        result.append(_entry(profile, definitions.get((provider, name)), "preset"))
 
     default = get_default_model()
+    default_provider, default_bare = _split_provider_prefix(default)
     for entry in result:
-        entry["is_default"] = entry["name"] == default or entry["model"] == default
+        is_default = False
+        if default:
+            if default_provider:
+                is_default = (
+                    entry["provider"] == default_provider
+                    and entry["name"] == default_bare
+                )
+            else:
+                is_default = entry["name"] == default or entry["model"] == default
+        entry["is_default"] = is_default
     return result
