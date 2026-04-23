@@ -321,6 +321,7 @@ class AgentInitMixin:
             ephemeral=self.config.ephemeral,
             known_outputs=getattr(self, "_known_outputs", set()),
             tool_format=tool_format_name,
+            sanitize_orphan_tool_calls=self.config.sanitize_orphan_tool_calls,
         )
 
         # Primary controller (always exists)

@@ -103,6 +103,10 @@ class ControllerConfig:
     ephemeral: bool = False  # Clear after each interaction (for group chat bots)
     known_outputs: set[str] = field(default_factory=set)  # Output targets for parser
     tool_format: str | None = None  # "bracket", "xml", "native", or None (auto)
+    # Pre-LLM sanitiser (mirrors ``AgentConfig.sanitize_orphan_tool_calls``).
+    # Threads through to ``ConversationConfig`` so the wire payload drops
+    # compact-induced orphan tool_call / tool-result fragments.
+    sanitize_orphan_tool_calls: bool = True
 
 
 @dataclass
@@ -186,6 +190,7 @@ class Controller:
         conv_config = ConversationConfig(
             max_messages=self.config.max_messages,
             keep_system=True,
+            sanitize_orphan_tool_calls=self.config.sanitize_orphan_tool_calls,
         )
         self.conversation = Conversation(conv_config)
 

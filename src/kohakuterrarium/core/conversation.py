@@ -35,6 +35,41 @@ def _get_content_text_length(content: MessageContent) -> int:
     return sum(len(part.text) for part in content if isinstance(part, TextPart))
 
 
+def _is_empty_content(content: Any) -> bool:
+    """Return True if a message's ``content`` carries no user-visible text.
+
+    Used by the orphan tool-call sanitiser to decide whether an assistant
+    message whose ``tool_calls`` were all dropped can be removed wholesale.
+    Treats ``None``, the empty string (after strip), and an empty list as
+    empty. A list with any non-trivial part (text with content, image,
+    file) counts as non-empty — the assistant still has something to say.
+    """
+    if content is None:
+        return True
+    if isinstance(content, str):
+        return not content.strip()
+    if isinstance(content, list):
+        for part in content:
+            if isinstance(part, TextPart):
+                if part.text and part.text.strip():
+                    return False
+            elif isinstance(part, dict):
+                # Post-serialisation dicts — treat anything non-text or
+                # non-empty text as meaningful payload.
+                if part.get("type") == "text":
+                    text = part.get("text", "")
+                    if text and text.strip():
+                        return False
+                else:
+                    return False
+            else:
+                # Any non-TextPart object (ImagePart, FilePart, …) is
+                # meaningful — keep the message.
+                return False
+        return True
+    return False
+
+
 @dataclass
 class ConversationConfig:
     """
@@ -43,10 +78,15 @@ class ConversationConfig:
     Attributes:
         max_messages: Maximum number of messages to keep (0 = unlimited)
         keep_system: Always keep system message(s) even when truncating
+        sanitize_orphan_tool_calls: Strip mismatched tool_call / tool-result
+            pairs from the wire payload. Most OpenAI-compatible providers
+            return HTTP 400 when either side of a pair is missing; compaction
+            occasionally produces this. Pure, opt-out, on by default.
     """
 
     max_messages: int = 0
     keep_system: bool = True
+    sanitize_orphan_tool_calls: bool = True
 
 
 @dataclass
@@ -181,10 +221,136 @@ class Conversation:
         """
         Convert conversation to OpenAI API message format.
 
+        Applies the orphan tool-call sanitiser when
+        ``config.sanitize_orphan_tool_calls`` is True so the payload
+        sent to the provider never violates the OpenAI contract of
+        ``assistant.tool_calls`` pairing with matching ``role=tool``
+        messages. See :meth:`sanitize_orphan_tool_pairs`.
+
         Returns:
             List of message dicts suitable for API calls
         """
-        return messages_to_dicts(self._messages)
+        messages = messages_to_dicts(self._messages)
+        if self.config.sanitize_orphan_tool_calls:
+            messages = self.sanitize_orphan_tool_pairs(messages)
+        return messages
+
+    @staticmethod
+    def sanitize_orphan_tool_pairs(
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Strip unmatched tool_call / tool-result pairs.
+
+        Pure function: takes the provider payload, returns a new list
+        with orphan fragments removed. Idempotent — running twice
+        yields identical output.
+
+        Rules (matches the OpenAI Chat Completions contract):
+
+        1. Every id in an ``assistant.tool_calls`` list MUST have a
+           matching ``role=tool`` message with the same ``tool_call_id``
+           somewhere between that assistant message and the next
+           ``assistant`` / ``user`` message. Unmatched ids are dropped
+           from ``tool_calls``. If an assistant message ends up with
+           empty ``tool_calls`` AND empty ``content``, the whole
+           message is dropped.
+        2. Every ``role=tool`` message MUST reference a ``tool_call_id``
+           announced by some *preceding* assistant message (after the
+           same sanitisation pass). Orphan tool messages are dropped.
+
+        Produces WARNING-level log entries for every drop so operators
+        can see when compaction left the conversation inconsistent.
+        """
+        if not messages:
+            return messages
+
+        # --- Pass 1 + 2: scan for orphan assistant tool_calls. ---
+        # For each assistant with tool_calls, walk forward until we hit
+        # the next assistant/user and collect the tool_call_ids that
+        # actually showed up. Drop the missing ones.
+        cleaned: list[dict[str, Any]] = []
+        n = len(messages)
+        for idx, msg in enumerate(messages):
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                expected_ids = [
+                    tc.get("id") for tc in msg["tool_calls"] if tc.get("id") is not None
+                ]
+                # Collect responder ids up to the next assistant/user.
+                observed_ids: set[str] = set()
+                for j in range(idx + 1, n):
+                    nxt = messages[j]
+                    if nxt.get("role") in ("assistant", "user"):
+                        break
+                    if nxt.get("role") == "tool":
+                        tc_id = nxt.get("tool_call_id")
+                        if tc_id:
+                            observed_ids.add(tc_id)
+
+                kept_calls = [
+                    tc for tc in msg["tool_calls"] if tc.get("id") in observed_ids
+                ]
+                dropped = len(msg["tool_calls"]) - len(kept_calls)
+                if dropped:
+                    missing = [
+                        tc.get("id")
+                        for tc in msg["tool_calls"]
+                        if tc.get("id") not in observed_ids
+                    ]
+                    logger.warning(
+                        f"dropped {dropped} orphan tool_call(s) on assistant message #{idx}",
+                        dropped=dropped,
+                        message_index=idx,
+                        missing_ids=missing,
+                        expected_ids=expected_ids,
+                    )
+                new_msg = dict(msg)
+                if kept_calls:
+                    new_msg["tool_calls"] = kept_calls
+                else:
+                    # All tool_calls orphaned — remove the key so the
+                    # provider doesn't see an empty list.
+                    new_msg.pop("tool_calls", None)
+
+                # If the assistant now has NO meaningful payload, drop
+                # the whole message. Content considered "empty" if it's
+                # None, empty string, or empty list.
+                if not kept_calls and _is_empty_content(new_msg.get("content")):
+                    logger.warning(
+                        f"dropped assistant message #{idx} — no content + all tool_calls orphaned",
+                        message_index=idx,
+                    )
+                    continue
+                cleaned.append(new_msg)
+            else:
+                cleaned.append(msg)
+
+        # --- Pass 3: drop orphan tool-result messages. ---
+        # A tool message is valid only if some preceding assistant in
+        # the (already sanitised) list advertises its tool_call_id.
+        announced_ids: set[str] = set()
+        final: list[dict[str, Any]] = []
+        for idx, msg in enumerate(cleaned):
+            role = msg.get("role")
+            if role == "assistant" and msg.get("tool_calls"):
+                for tc in msg["tool_calls"]:
+                    tc_id = tc.get("id")
+                    if tc_id:
+                        announced_ids.add(tc_id)
+                final.append(msg)
+            elif role == "tool":
+                tc_id = msg.get("tool_call_id")
+                if tc_id and tc_id in announced_ids:
+                    final.append(msg)
+                else:
+                    logger.warning(
+                        f"dropped orphan tool-result message #{idx} with id={tc_id}",
+                        message_index=idx,
+                        tool_call_id=tc_id,
+                    )
+            else:
+                final.append(msg)
+
+        return final
 
     def get_messages(self) -> MessageList:
         """Get the raw Message objects."""

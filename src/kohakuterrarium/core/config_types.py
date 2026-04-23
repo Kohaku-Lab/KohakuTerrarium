@@ -152,6 +152,14 @@ class AgentConfig:
         False  # Clear conversation after each interaction (for group chat)
     )
 
+    # Pre-LLM sanitiser: drop orphan tool_call / tool-result pairs
+    # produced by compaction before they reach the provider. Most
+    # OpenAI-compatible endpoints reject messages where a ``tool``
+    # message has no preceding ``tool_calls`` entry (and vice-versa);
+    # this guard keeps the wire payload valid even when compact_manager
+    # strips a partial pair. Set ``False`` to preserve raw history.
+    sanitize_orphan_tool_calls: bool = True
+
     # Module configs
     input: InputConfig = field(default_factory=InputConfig)
     triggers: list[TriggerConfig] = field(default_factory=list)
