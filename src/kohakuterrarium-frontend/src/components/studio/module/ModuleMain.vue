@@ -23,7 +23,10 @@
       </div>
       <div v-else class="h-full">
         <ToolForm v-if="kind === 'tools'" :kind="kind" :name="name" :form="form" :execute-body="executeBody" :doc-refresh-key="docRefreshKey" @patch="$emit('patch-form', $event.path, $event.value)" @execute-body-change="$emit('execute-body-change', $event)" @save="$emit('save')" @open-doc="$emit('open-doc')" />
-        <!-- Other kinds land in 5.3+, raw mode is the interim. -->
+        <SubagentForm v-else-if="kind === 'subagents'" :kind="kind" :name="name" :form="form" :execute-body="executeBody" :doc-refresh-key="docRefreshKey" @patch="$emit('patch-form', $event.path, $event.value)" @execute-body-change="$emit('execute-body-change', $event)" @save="$emit('save')" @open-doc="$emit('open-doc')" />
+        <TriggerForm v-else-if="kind === 'triggers'" :kind="kind" :name="name" :form="form" :execute-body="executeBody" @patch="$emit('patch-form', $event.path, $event.value)" @execute-body-change="$emit('execute-body-change', $event)" @save="$emit('save')" />
+        <PluginForm v-else-if="kind === 'plugins'" :kind="kind" :name="name" :form="form" :execute-body="executeBody" @patch="$emit('patch-form', $event.path, $event.value)" @execute-body-change="$emit('execute-body-change', $event)" @save="$emit('save')" />
+        <IoForm v-else-if="kind === 'inputs' || kind === 'outputs'" :kind="kind" :name="name" :form="form" :execute-body="executeBody" @patch="$emit('patch-form', $event.path, $event.value)" @execute-body-change="$emit('execute-body-change', $event)" @save="$emit('save')" />
         <div v-else class="h-full flex flex-col items-center justify-center gap-2 text-warm-500 px-6 text-center">
           <div class="i-carbon-code text-3xl text-warm-400" />
           <div class="text-sm">
@@ -43,8 +46,12 @@ import { computed } from "vue"
 
 import MonacoEditor from "@/components/studio/code/MonacoEditor.vue"
 import RawModeBanner from "@/components/studio/code/RawModeBanner.vue"
+import IoForm from "@/components/studio/module/IoForm.vue"
 import ModeToggle from "@/components/studio/module/ModeToggle.vue"
+import PluginForm from "@/components/studio/module/PluginForm.vue"
+import SubagentForm from "@/components/studio/module/SubagentForm.vue"
 import ToolForm from "@/components/studio/module/ToolForm.vue"
+import TriggerForm from "@/components/studio/module/TriggerForm.vue"
 import { useI18n } from "@/utils/i18n"
 
 const { t } = useI18n()

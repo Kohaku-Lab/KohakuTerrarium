@@ -445,6 +445,13 @@ export default {
   "studio.newModule.create": "Create",
   "studio.newModule.creating": "Creating…",
   "studio.newModule.created": "Scaffolded {kind}/{name}",
+  "studio.newModule.manifestSyncTitle": "List in kohaku.yaml?",
+  "studio.newModule.manifestSyncBody": ({ kind, name }) =>
+    `List ${kind}/${name} in the workspace's kohaku.yaml so other creatures and the catalog can discover it? This is safe — existing entries and comments are preserved.`,
+  "studio.newModule.manifestSyncConfirm": "Add to kohaku.yaml",
+  "studio.newModule.manifestSyncCancel": "Skip",
+  "studio.newModule.manifestSyncAdded": ({ name }) => `Added ${name} to kohaku.yaml`,
+  "studio.newModule.manifestSyncAlready": ({ name }) => `${name} is already listed in kohaku.yaml`,
 
   // ─── Memory / embedding ─────────────────────────────────────
   "studio.memory.provider": "Provider",
@@ -694,9 +701,14 @@ export default {
   "studio.module.confirm.unsavedLeave": "You have unsaved changes. Leave this page?",
 
   "studio.module.preview.title": "Consumer preview",
-  "studio.module.preview.soon": "Live preview isn't available yet.",
-  "studio.module.preview.soonHint": ({ kind, name }) =>
-    `This panel will show how ${kind}/${name} appears to a creature that wires it in — params, description, and the option form a creature author would see.`,
+  "studio.module.preview.hint": ({ kind }) =>
+    `What a creature sees when it wires this ${kind.replace(/s$/, "")} in. Updates after every save.`,
+  "studio.module.preview.schemaTitle": "Option form",
+  "studio.module.preview.noParams": "No configurable options on this module.",
+  "studio.module.preview.usedInTitle": "Used in creatures",
+  "studio.module.preview.renameTitle": "Rename will break existing wirings",
+  "studio.module.preview.renameHint": ({ old, count }) =>
+    `${count} creature${count === 1 ? "" : "s"} currently wire ${old}. Renaming without updating those wirings will fail at runtime.`,
 
   "studio.module.peers.empty": "No other workspace modules of this kind yet.",
 
@@ -746,4 +758,81 @@ export default {
   "studio.module.doc.tabLabel": "Documentation",
   "studio.module.doc.headTitle": ({ name }) => `Documentation — ${name}`,
   "studio.module.doc.confirmClose": "The documentation has unsaved changes. Close without saving?",
+
+  // ─── Sub-agent form ─────────────────────────────────────────
+  "studio.module.form.subagentName": "Sub-agent name",
+  "studio.module.form.subagentNameHint":
+    "Snake-case. The controller dispatches to this sub-agent by this name.",
+  "studio.module.form.subagentFlags": "Flags",
+  "studio.module.form.stateless":
+    "Stateless — a fresh context every run (recommended for tool-use sub-agents)",
+  "studio.module.form.interactive":
+    "Interactive — keep alive between parent turns for context updates",
+  "studio.module.form.canModify":
+    "Allow file-modifying tools (write / edit). Leave off unless genuinely needed.",
+  "studio.module.form.subagentTools": "Tools granted",
+  "studio.module.form.subagentToolsHint":
+    "Pick from the workspace / package / built-in catalog. Only these tools are callable inside this sub-agent.",
+  "studio.module.form.systemPrompt": "System prompt",
+  "studio.module.form.systemPromptHint":
+    "The role and constraints this sub-agent runs under. Markdown.",
+
+  // ─── Trigger form ───────────────────────────────────────────
+  "studio.module.form.triggerName": "Trigger class name",
+  "studio.module.form.triggerNameHint":
+    "PascalCase. Used as the Python class name (e.g. MyTrigger).",
+  "studio.module.form.triggerSetup": "Setup metadata",
+  "studio.module.form.universal": "Universal (setup-tool) trigger",
+  "studio.module.form.universalHint":
+    "When enabled, the controller can arm this trigger at runtime via a setup tool.",
+  "studio.module.form.universalLabel": "Expose as a setup tool",
+  "studio.module.form.setupToolName": "Setup tool name",
+  "studio.module.form.setupToolNameHint":
+    "The tool name the controller calls to arm this trigger (e.g. add_timer).",
+  "studio.module.form.setupDescription": "Setup tool description",
+  "studio.module.form.setupDescriptionHint": "One line the controller sees for the setup tool.",
+  "studio.module.form.setupDescriptionPlaceholder": "Arm a new instance of this trigger.",
+  "studio.module.form.triggerBody": "wait_for_trigger body",
+  "studio.module.form.triggerBodyHint":
+    "The async body. Return a TriggerEvent when the trigger fires.",
+
+  // ─── Input / Output form ────────────────────────────────────
+  "studio.module.form.ioClassNameHint":
+    "PascalCase — used as the Python class name for this module.",
+  "studio.module.form.ioBody": ({ method }) => `${method} body`,
+  "studio.module.form.ioInputHint": "The async body. Return a TriggerEvent (or None to stop).",
+  "studio.module.form.ioOutputHint": "The async body. Emit the content to the target surface.",
+
+  // ─── Plugin form ────────────────────────────────────────────
+  "studio.module.form.pluginName": "Plugin name",
+  "studio.module.form.pluginNameHint": "Snake-case. The creature lists this under plugins:.",
+  "studio.module.form.priority": "Priority",
+  "studio.module.form.priorityHint":
+    "0-100. Lower priorities run first in pre-hooks, last in post-hooks.",
+  "studio.module.form.optionsSchema": "Option schema",
+  "studio.module.form.optionsSchemaHint":
+    "Keys a creature may pass under `options:`. Saved as <name>.schema.json next to the .py — the creature editor renders a real form for each key.",
+  "studio.module.form.hooks": "Hooks",
+  "studio.module.form.hooksHint":
+    "Pick which framework events this plugin listens to. Each hook gets its own method body below.",
+  "studio.module.form.hookBodies": "Hook bodies",
+
+  "studio.module.optionsSchema.intro":
+    "Each row describes one key under this plugin's `options:` dict. A creature that wires this plugin gets a form for these keys instead of a raw JSON editor.",
+
+  // ─── Tools multi-select ─────────────────────────────────────
+  "studio.module.tools.searchPlaceholder": "Search tools…",
+  "studio.module.tools.empty": "No tools match.",
+
+  // ─── Plugin hook groups ─────────────────────────────────────
+  "studio.module.hooks.empty": "No plugin hooks available.",
+  "studio.module.hooks.group.lifecycle": "Lifecycle",
+  "studio.module.hooks.group.llm": "LLM",
+  "studio.module.hooks.group.tool": "Tool",
+  "studio.module.hooks.group.subagent": "Sub-agent",
+  "studio.module.hooks.group.event": "Events",
+  "studio.module.hooks.group.other": "Other",
+
+  "studio.module.usedIn.empty": "No creatures wire this module yet.",
+  "studio.module.usedIn.summary": ({ n }) => `Wired in ${n} creature${n === 1 ? "" : "s"}:`,
 }

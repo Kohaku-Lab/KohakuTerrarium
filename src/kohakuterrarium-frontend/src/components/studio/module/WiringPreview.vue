@@ -29,43 +29,57 @@ const props = defineProps({
 
 const copied = ref(false)
 
-// Top-level YAML key depends on kind.
-const listKey = computed(() => {
+const yamlText = computed(() => {
+  const name = props.toolName || "<name>"
   switch (props.kind) {
     case "tools":
-      return "tools"
-    case "subagents":
-      return "subagents"
+      return renderTool(name, props.params)
     case "triggers":
-      return "tools" // universal setup-tool triggers share the tools list
+      // Universal setup-tool triggers share the `tools:` list with
+      // ``type: trigger`` — this is what a creature writes.
+      return renderTrigger(name)
+    case "subagents":
+      return renderSubagent(name)
     case "plugins":
-      return "plugins"
+      return renderPlugin(name)
     case "inputs":
-      return "input"
+      return renderIo("input", name)
     case "outputs":
-      return "output"
+      return renderIo("output", name)
     default:
-      return props.kind
+      return `${props.kind}:\n  - name: ${name}`
   }
 })
 
-const yamlText = computed(() => {
-  const name = props.toolName || "<name>"
-  const lines = [`${listKey.value}:`, `  - name: ${name}`]
-  for (const p of props.params) {
+function renderTool(name, params) {
+  const lines = ["tools:", `  - name: ${name}`]
+  for (const p of params || []) {
     if (!p?.name) continue
-    const value = p.default
-    const rendered = renderScalar(value)
-    const line = `    ${p.name}: ${rendered}`
+    const value = renderScalar(p.default)
     if (p.required) {
-      // required: no default to show, but hint the key name
-      lines.push(`    # ${p.name}: ${rendered || "<value>"}  # required`)
+      lines.push(`    # ${p.name}: ${value || "<value>"}  # required`)
     } else {
-      lines.push(line)
+      lines.push(`    ${p.name}: ${value}`)
     }
   }
   return lines.join("\n")
-})
+}
+
+function renderTrigger(name) {
+  return ["tools:", `  - name: ${name}`, "    type: trigger", "    # args passed to the setup tool at runtime"].join("\n")
+}
+
+function renderSubagent(name) {
+  return ["subagents:", `  - name: ${name}`].join("\n")
+}
+
+function renderPlugin(name) {
+  return ["plugins:", `  - name: ${name}`, "    type: custom", `    module: modules.plugins.${name}`, "    options: {}"].join("\n")
+}
+
+function renderIo(kind, name) {
+  return [`${kind}:`, `  name: ${name}`, "  type: custom", `  module: modules.${kind}s.${name}`].join("\n")
+}
 
 function renderScalar(v) {
   if (v == null) return "null"

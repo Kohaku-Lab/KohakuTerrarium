@@ -378,6 +378,13 @@ export default {
   "studio.newModule.create": "建立",
   "studio.newModule.creating": "建立中…",
   "studio.newModule.created": "已建立 {kind}/{name}",
+  "studio.newModule.manifestSyncTitle": "加入 kohaku.yaml?",
+  "studio.newModule.manifestSyncBody": ({ kind, name }) =>
+    `要將 ${kind}/${name} 加入工作區的 kohaku.yaml,讓其他 creature 與目錄都能發現嗎?此操作安全 — 既有項目與註解皆會保留。`,
+  "studio.newModule.manifestSyncConfirm": "加入 kohaku.yaml",
+  "studio.newModule.manifestSyncCancel": "略過",
+  "studio.newModule.manifestSyncAdded": ({ name }) => `已將 ${name} 加入 kohaku.yaml`,
+  "studio.newModule.manifestSyncAlready": ({ name }) => `${name} 已存在於 kohaku.yaml`,
 
   // ─── Memory / embedding ─────────────────────────────────────
   "studio.memory.provider": "提供者",
@@ -607,9 +614,14 @@ export default {
   "studio.module.confirm.unsavedLeave": "尚有未儲存的變更。確定要離開此頁?",
 
   "studio.module.preview.title": "消費端預覽",
-  "studio.module.preview.soon": "即時預覽尚未支援。",
-  "studio.module.preview.soonHint": ({ kind, name }) =>
-    `此面板將顯示 creature 接入 ${kind}/${name} 時看到的內容 — 參數、描述,以及選項表單。`,
+  "studio.module.preview.hint": ({ kind }) =>
+    `creature 接入此 ${kind.replace(/s$/, "")} 時看到的內容。每次儲存後更新。`,
+  "studio.module.preview.schemaTitle": "選項表單",
+  "studio.module.preview.noParams": "此模組沒有可設定的選項。",
+  "studio.module.preview.usedInTitle": "使用此模組的 creature",
+  "studio.module.preview.renameTitle": "重新命名會破壞既有接入",
+  "studio.module.preview.renameHint": ({ old, count }) =>
+    `目前有 ${count} 個 creature 接入 ${old}。重新命名後若未更新那些接入,執行時會失敗。`,
 
   "studio.module.peers.empty": "此類型尚無其他工作區模組。",
 
@@ -657,4 +669,69 @@ export default {
   "studio.module.doc.tabLabel": "說明文件",
   "studio.module.doc.headTitle": ({ name }) => `文件編輯 — ${name}`,
   "studio.module.doc.confirmClose": "說明文件有未儲存的變更。要不儲存就關閉嗎?",
+
+  // ─── 子代理表單 ─────────────────────────────────────────
+  "studio.module.form.subagentName": "子代理名稱",
+  "studio.module.form.subagentNameHint": "snake_case。控制器以此名稱派遣子代理。",
+  "studio.module.form.subagentFlags": "旗標",
+  "studio.module.form.stateless": "無狀態 — 每次執行都是新上下文(工具型子代理建議開啟)",
+  "studio.module.form.interactive": "互動模式 — 在父層回合之間保留,接收上下文更新",
+  "studio.module.form.canModify": "允許檔案修改工具(write / edit)。除非確有必要,否則請關閉。",
+  "studio.module.form.subagentTools": "授權工具",
+  "studio.module.form.subagentToolsHint":
+    "從 workspace / 套件 / 內建目錄中挑選。子代理只能呼叫這些工具。",
+  "studio.module.form.systemPrompt": "系統提示",
+  "studio.module.form.systemPromptHint": "此子代理扮演的角色與限制。使用 Markdown 格式。",
+
+  // ─── 觸發器表單 ─────────────────────────────────────────
+  "studio.module.form.triggerName": "觸發器類別名稱",
+  "studio.module.form.triggerNameHint": "PascalCase,作為 Python 類別名稱(例如 MyTrigger)。",
+  "studio.module.form.triggerSetup": "Setup 設定",
+  "studio.module.form.universal": "通用型(setup-tool)觸發器",
+  "studio.module.form.universalHint": "啟用後,控制器可在執行時透過 setup 工具啟動此觸發器。",
+  "studio.module.form.universalLabel": "暴露為 setup 工具",
+  "studio.module.form.setupToolName": "Setup 工具名稱",
+  "studio.module.form.setupToolNameHint": "控制器用來啟動此觸發器的工具名稱(例如 add_timer)。",
+  "studio.module.form.setupDescription": "Setup 工具描述",
+  "studio.module.form.setupDescriptionHint": "控制器看到的一行說明文字。",
+  "studio.module.form.setupDescriptionPlaceholder": "啟動此觸發器的新實例。",
+  "studio.module.form.triggerBody": "wait_for_trigger 主體",
+  "studio.module.form.triggerBodyHint": "非同步函式主體。當觸發器觸發時回傳 TriggerEvent。",
+
+  // ─── 輸入 / 輸出表單 ──────────────────────────────────────
+  "studio.module.form.ioClassNameHint": "PascalCase,用作此模組的 Python 類別名稱。",
+  "studio.module.form.ioBody": ({ method }) => `${method} 主體`,
+  "studio.module.form.ioInputHint": "非同步函式主體。回傳 TriggerEvent(None 表示停止)。",
+  "studio.module.form.ioOutputHint": "非同步函式主體。將內容輸出到目標介面。",
+
+  // ─── 外掛表單 ─────────────────────────────────────────
+  "studio.module.form.pluginName": "外掛名稱",
+  "studio.module.form.pluginNameHint": "snake_case。creature 於 plugins: 下列出此名稱。",
+  "studio.module.form.priority": "優先順序",
+  "studio.module.form.priorityHint": "0 至 100。數字愈低,pre-hook 愈先執行,post-hook 愈後執行。",
+  "studio.module.form.optionsSchema": "選項 schema",
+  "studio.module.form.optionsSchemaHint":
+    "creature 於 `options:` 下可傳入的鍵。儲存為 .py 旁的 <name>.schema.json — creature 編輯器會為每個鍵渲染表單。",
+  "studio.module.form.hooks": "Hook",
+  "studio.module.form.hooksHint": "挑選此外掛監聽的框架事件。每個 hook 於下方有專屬函式主體。",
+  "studio.module.form.hookBodies": "Hook 實作",
+
+  "studio.module.optionsSchema.intro":
+    "每一列描述一個此外掛 `options:` 字典中的鍵。接入此外掛的 creature 將看到欄位表單,而非原始 JSON 編輯器。",
+
+  // ─── 工具多選 ─────────────────────────────────────────
+  "studio.module.tools.searchPlaceholder": "搜尋工具…",
+  "studio.module.tools.empty": "沒有符合的工具。",
+
+  // ─── 外掛 hook 分組 ────────────────────────────────────
+  "studio.module.hooks.empty": "目前沒有可用的外掛 hook。",
+  "studio.module.hooks.group.lifecycle": "生命週期",
+  "studio.module.hooks.group.llm": "LLM",
+  "studio.module.hooks.group.tool": "工具",
+  "studio.module.hooks.group.subagent": "子代理",
+  "studio.module.hooks.group.event": "事件",
+  "studio.module.hooks.group.other": "其他",
+
+  "studio.module.usedIn.empty": "目前沒有 creature 接入此模組。",
+  "studio.module.usedIn.summary": ({ n }) => `共 ${n} 個 creature 接入:`,
 }
