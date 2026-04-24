@@ -73,7 +73,7 @@
           <button class="px-2 py-0.5 rounded bg-sapphire text-white hover:bg-sapphire-dark" @click="confirmEdit">Save & Rerun</button>
         </div>
       </div>
-      <div v-else class="text-body whitespace-pre-wrap break-words overflow-wrap-anywhere min-w-0">
+      <div v-else class="text-body break-words overflow-wrap-anywhere min-w-0">
         <template v-if="message.contentParts?.length">
           <div class="flex flex-col gap-2">
             <template v-for="(part, i) in message.contentParts" :key="i">
@@ -87,7 +87,7 @@
           </div>
         </template>
         <template v-else>
-          {{ message.content }}
+          <div class="whitespace-pre-wrap">{{ message.content }}</div>
         </template>
       </div>
     </div>
