@@ -312,3 +312,114 @@ def test_pattern_matching_variations(tmp_path, pattern, filename, matches):
     reg.add(_make_skill("skill", paths=[pattern]))
     found = SkillPathScanner().matching_skills(reg, tmp_path)
     assert bool(found) is matches
+
+
+# ---------------------------------------------------------------------------
+# Package-skill enable-by-default / wildcard opt-in
+# ---------------------------------------------------------------------------
+
+
+def _stub_one_package_skill(
+    monkeypatch,
+    tmp_path: Path,
+    *,
+    pkg_name: str,
+    skill_names: list[str],
+) -> None:
+    """Lay out ``tmp_path/<pkg_name>/skills/<name>/SKILL.md`` files and
+    monkeypatch the discovery layer to surface them as one installed
+    package."""
+    from kohakuterrarium.skills import discovery as disc
+
+    pkg_root = tmp_path / pkg_name
+    for name in skill_names:
+        _write_skill_folder(pkg_root / "skills", name, body=f"PKG {name}")
+
+    entries = [
+        (pkg_name, {"name": n, "path": f"skills/{n}", "_root": str(pkg_root)})
+        for n in skill_names
+    ]
+    monkeypatch.setattr(disc, "list_package_skills_with_owner", lambda: entries)
+    monkeypatch.setattr(
+        disc,
+        "get_package_path",
+        lambda name: pkg_root if name == pkg_name else None,
+    )
+
+
+def test_package_skill_defaults_disabled_without_declaration(monkeypatch, tmp_path):
+    """Without a ``skills:`` entry, package-provided skills load disabled."""
+    _stub_one_package_skill(
+        monkeypatch, tmp_path, pkg_name="demo-pack", skill_names=["foo"]
+    )
+
+    skills = discover_skills(cwd=tmp_path / "proj", home=tmp_path / "home")
+    foo = next(s for s in skills if s.name == "foo")
+    assert foo.origin.startswith("package")
+    assert foo.enabled is False
+
+
+def test_package_skill_enabled_when_named_in_declared(monkeypatch, tmp_path):
+    """``declared_package_skills=['foo']`` flips that one skill on."""
+    _stub_one_package_skill(
+        monkeypatch, tmp_path, pkg_name="demo-pack", skill_names=["foo", "bar"]
+    )
+
+    skills = discover_skills(
+        cwd=tmp_path / "proj",
+        home=tmp_path / "home",
+        declared_package_skills=["foo"],
+    )
+    foo = next(s for s in skills if s.name == "foo")
+    bar = next(s for s in skills if s.name == "bar")
+    assert foo.enabled is True
+    assert bar.enabled is False
+
+
+def test_wildcard_enables_every_package_skill(monkeypatch, tmp_path):
+    """``declared_package_skills=['*']`` enables every discovered package skill."""
+    _stub_one_package_skill(
+        monkeypatch,
+        tmp_path,
+        pkg_name="demo-pack",
+        skill_names=["foo", "bar", "baz"],
+    )
+
+    skills = discover_skills(
+        cwd=tmp_path / "proj",
+        home=tmp_path / "home",
+        declared_package_skills=["*"],
+    )
+    pkg_skills = [s for s in skills if s.origin.startswith("package")]
+    assert len(pkg_skills) == 3
+    assert all(s.enabled for s in pkg_skills)
+
+
+def test_wildcard_combines_with_named_entries(monkeypatch, tmp_path):
+    """Mixed ``['*', 'foo']`` is equivalent to wildcard alone — all enabled."""
+    _stub_one_package_skill(
+        monkeypatch, tmp_path, pkg_name="demo-pack", skill_names=["foo", "bar"]
+    )
+
+    skills = discover_skills(
+        cwd=tmp_path / "proj",
+        home=tmp_path / "home",
+        declared_package_skills=["*", "foo"],
+    )
+    pkg_skills = [s for s in skills if s.origin.startswith("package")]
+    assert all(s.enabled for s in pkg_skills)
+
+
+def test_wildcard_not_treated_as_literal_skill_name(monkeypatch, tmp_path):
+    """The ``*`` entry is consumed as the wildcard, never registered."""
+    _stub_one_package_skill(
+        monkeypatch, tmp_path, pkg_name="demo-pack", skill_names=["foo"]
+    )
+
+    skills = discover_skills(
+        cwd=tmp_path / "proj",
+        home=tmp_path / "home",
+        declared_package_skills=["*"],
+    )
+    pkg_names = [s.name for s in skills if s.origin.startswith("package")]
+    assert pkg_names == ["foo"]

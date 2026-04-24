@@ -204,7 +204,9 @@ def discover_skills(
             ``skills: []`` opt-in list. Packaged skills that are not
             declared here are returned *disabled by default*
             (spec Qa: "packaged skills default disabled=True unless
-            the creature config explicitly enables them").
+            the creature config explicitly enables them"). Passing
+            ``"*"`` as one of the entries enables *every* discovered
+            package skill — opt-in-to-all shorthand.
         default_enabled_origins: Origins that default to enabled=True
             when no scratchpad override exists. Creature / user /
             project are enabled by default; ``package`` is not.
@@ -212,6 +214,11 @@ def discover_skills(
     cwd = cwd or Path.cwd()
     home = home or Path.home()
     declared = set(declared_package_skills or [])
+    # ``*`` is a shorthand the creature config can use to opt in to every
+    # discovered package skill. It cannot collide with a real skill name
+    # because skill names match ``[a-z][a-z0-9-]*``.
+    enable_all_packages = "*" in declared
+    declared.discard("*")
 
     collected: list[Skill] = []
 
@@ -219,6 +226,7 @@ def discover_skills(
     collected.extend(
         _load_package_skills(
             declared_names=declared,
+            enable_all_packages=enable_all_packages,
             default_enabled_origins=default_enabled_origins,
         )
     )
@@ -248,7 +256,8 @@ def discover_skills(
 def _load_package_skills(
     *,
     declared_names: set[str],
-    default_enabled_origins: tuple[str, ...],
+    enable_all_packages: bool = False,
+    default_enabled_origins: tuple[str, ...] = (),
 ) -> list[Skill]:
     """Resolve every packaged skill into a :class:`Skill` instance.
 
@@ -297,13 +306,18 @@ def _load_package_skills(
         # Override frontmatter-derived description with manifest's if present.
         if entry.get("description") and not skill.description:
             skill.description = str(entry["description"])
-        # Package skills default disabled (Qa) unless the creature config
-        # opted-in.  But if the origin rule puts "package" into
-        # default_enabled_origins, we honour that override.
-        if "package" in default_enabled_origins:
+        # Package skills default disabled (Qa) unless:
+        #   - the creature config named this skill in ``skills:``, OR
+        #   - the creature config used the ``"*"`` wildcard, OR
+        #   - the origin rule puts ``package`` into default_enabled_origins.
+        if (
+            enable_all_packages
+            or "package" in default_enabled_origins
+            or skill.name in declared_names
+        ):
             skill.enabled = True
         else:
-            skill.enabled = skill.name in declared_names
+            skill.enabled = False
         skills.append(skill)
     return skills
 
