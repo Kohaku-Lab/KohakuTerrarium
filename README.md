@@ -13,6 +13,9 @@
 <p align="center">
   <strong>English</strong> &nbsp;·&nbsp; <a href="README.zh.md">繁體中文</a> &nbsp;·&nbsp; <a href="README.zh-CN.md">简体中文</a>
 </p>
+<p align="center">
+  <a href="https://terrarium.kohaku-lab.org"><strong>Documentation</strong></a>
+</p>
 
 ---
 
