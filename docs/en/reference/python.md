@@ -74,7 +74,8 @@ Input and events:
 
 Runtime controls:
 
-- `switch_model(profile_name: str) -> str` — returns the resolved model id.
+- `switch_model(profile_name: str) -> str` — returns the canonical `provider/name[@variations]` identifier.
+- `llm_identifier() -> str` — return the currently-bound canonical model identifier.
 - `async add_trigger(trigger: BaseTrigger, trigger_id: str | None = None) -> str`
 - `async remove_trigger(trigger_id_or_trigger: str | BaseTrigger) -> bool`
 - `update_system_prompt(content: str, replace: bool = False) -> None`
@@ -106,6 +107,7 @@ Attributes:
 - `session_store: Any`
 - `compact_manager: Any`
 - `plugins: Any`
+- `skills: SkillRegistry | None`
 
 Notes:
 
@@ -135,6 +137,9 @@ Fields:
 - `base_config: str | None = None`
 - `llm_profile: str = ""`
 - `model: str = ""`
+- `provider: str = ""`
+- `variation_selections: dict[str, str]`
+- `variation: str = ""`
 - `auth_mode: str = ""`
 - `api_key_env: str = ""`
 - `base_url: str = ""`
@@ -165,6 +170,14 @@ Fields:
 - `session_key: str | None = None`
 - `mcp_servers: list[dict[str, Any]]`
 - `plugins: list[dict[str, Any]]`
+- `memory: dict[str, Any]`
+- `output_wiring: list[Any]`
+- `disable_provider_tools: list[str]`
+- `max_iterations: int | None = None`
+- `sanitize_orphan_tool_calls: bool = True`
+- `skills: list[str]`
+- `skill_index_budget_bytes: int = 4096`
+- `framework_hint_overrides: dict[str, str]`
 
 Methods:
 
@@ -467,8 +480,16 @@ Module: `kohakuterrarium.core.termination`.
 - `start() -> None`
 - `record_turn() -> None`
 - `record_activity() -> None`
+- `record_tool_result(result) -> None`
+- `attach_plugins(manager) -> None`
+- `attach_scratchpad(scratchpad) -> None`
 - `should_terminate(last_output: str = "") -> bool`
+- `force_terminate(reason: str) -> None`
 - `reason, turn_count, elapsed, is_active` properties.
+
+**`TerminationDecision`** — `should_stop: bool`, `reason: str = ""`.
+
+**`TerminationContext`** — `turn_count`, `elapsed`, `idle_time`, `last_output`, `scratchpad`, `recent_tool_results`.
 
 ---
 
@@ -561,7 +582,7 @@ Aliases: `Role`, `MessageContent`, `ContentPart`, `MessageList`.
 
 Module: `kohakuterrarium.llm.profiles`, `kohakuterrarium.llm.profile_types`.
 
-**`LLMBackend`** — `name, backend_type, base_url, api_key_env`.
+**`LLMBackend`** — `name, backend_type, base_url, api_key_env, provider_name, provider_native_tools`.
 
 **`LLMPreset`** — `name, model, provider, max_context, max_output, temperature, reasoning_effort, service_tier, extra_body`.
 
@@ -659,6 +680,16 @@ Misc:
 - `flush() -> None`
 - `close(update_status=True) -> None`
 - `path: str` property.
+
+### Session artifacts
+
+Module: `kohakuterrarium.session.artifacts`.
+
+Helpers for binary artifacts stored beside a session file:
+
+- `artifacts_dir_for(session_path: Path) -> Path`
+- `resolve_artifact_relpath(filename: str) -> Path`
+- `write_artifact_bytes(artifacts_dir: Path, filename: str, data: bytes) -> Path`
 
 ### `SessionMemory`
 
@@ -793,6 +824,9 @@ Terrarium methods:
 Module: `kohakuterrarium.serving.agent_session`. Thin wrapper around
 `Agent` with concurrent input-injection and output streaming.
 
+`get_status()` now includes both the raw model id and `llm_name`, the
+canonical `provider/name[@variations]` identifier used by UI and `/model`.
+
 Factories:
 
 - `async from_path(config_path, llm_override=None, pwd=None) -> AgentSession`
@@ -819,9 +853,12 @@ Protocol / `BaseTool` base class.
 
 - `async execute(args: dict, context: ToolContext | None = None) -> ToolResult` — required.
 - `needs_context: bool = False`
-- `parallel_allowed: bool = True`
-- `timeout: float = 60.0`
-- `max_output: int = 0`
+- `is_provider_native: bool = False`
+- `provider_support: frozenset[str]`
+- `is_concurrency_safe: bool = True`
+- `prompt_contribution_bucket: str = "normal"`
+- `prompt_contribution() -> str | None`
+- `provider_native_options() -> dict[str, Any]`
 
 ### `InputModule`
 
@@ -1000,9 +1037,19 @@ Module: `kohakuterrarium.packages`.
 
 - `is_package_ref(path: str) -> bool`
 - `resolve_package_path(ref: str) -> Path`
-- `list_packages() -> list[str]`
+- `list_packages() -> list[dict]`
 - `install_package(source, name=None, editable=False) -> None`
+- `update_package(name) -> str`
 - `uninstall_package(name) -> bool`
+- `resolve_package_tool(name) -> tuple[str, str] | None`
+- `resolve_package_io(name) -> tuple[str, str] | None`
+- `resolve_package_trigger(name) -> tuple[str, str] | None`
+- `resolve_package_command(name) -> dict | None`
+- `resolve_package_user_command(name) -> dict | None`
+- `resolve_package_prompt(name) -> Path | None`
+- `resolve_package_skills(name) -> list[dict] | None`
+- `find_package_root_for_path(path) -> Path | None`
+- `get_package_framework_hints(pkg_root) -> dict[str, str]`
 
 Package root: `~/.kohakuterrarium/packages/`. Editable installs use
 `<name>.link` pointers instead of copies.

@@ -20,7 +20,8 @@ There are two flavours, each solving a different problem:
 - **Prompt plugins** contribute content to the system prompt when the
   controller builds it.
 - **Lifecycle plugins** hook into runtime events — before/after an LLM
-  call, before/after a tool call, before/after a sub-agent spawn.
+  call, before/after tool dispatch/execution, before/after a sub-agent
+  spawn, and at lifecycle checkpoints like compaction and interrupts.
 
 Together, plugins are the main way to add behaviour *without forking
 any module*.
@@ -64,27 +65,40 @@ dir, date, platform), `ProjectInstructionsPlugin` (loads
 A `BasePlugin` subclass with any of these hooks:
 
 - `on_load(context)`, `on_unload()`
+- `should_apply(context) -> bool` or declarative `applies_to = {agent_names, model_patterns}`
+- `contribute_commands()` for custom `##command##` handlers
+- `contribute_termination_check()` for pluggable stop conditions
 - `pre_llm_call(messages, **kwargs) → list[dict] | None`
-- `post_llm_call(response) → ChatResponse | None`
-- `pre_tool_execute(name, args) → dict | None`
-- `post_tool_execute(name, result) → ToolResult | None`
-- `pre_subagent_run(name, context) → dict | None`
-- `post_subagent_run(name, output) → str | None`
-- Fire-and-forget: `on_tool_start`, `on_tool_end`, `on_llm_start`,
-  `on_llm_end`, `on_processing_start`, `on_processing_end`,
-  `on_startup`, `on_shutdown`, `on_compact_start`,
-  `on_compact_complete`, `on_event`.
+- `post_llm_call(messages, response, usage, **kwargs) → str | None`
+- `pre_tool_dispatch(call, context) → ToolCallEvent | None`
+- `pre_tool_execute(args, **kwargs) → dict | None`
+- `post_tool_execute(result, **kwargs) → ToolResult | None`
+- `pre_subagent_run(task, **kwargs) → str | None`
+- `post_subagent_run(result, **kwargs) → Any | None`
+- Fire-and-forget callbacks such as `on_agent_start`, `on_agent_stop`,
+  `on_event`, `on_interrupt`, `on_task_promoted`, `on_compact_start`,
+  `on_compact_end`.
 
 A `pre_*` hook can raise `PluginBlockError("message")` to abort the
 operation — the message becomes the tool result or a blocked
-`tool_complete` event.
+`tool_complete` event. `post_llm_call` rewrites are special: when a
+plugin changes the final assistant text, the runtime emits an
+`assistant_message_edited` activity marker so UIs can show that the text
+was modified after generation.
 
 ## How we implement it
 
-`PluginManager.notify(hook, **kwargs)` iterates registered, enabled
-plugins and awaits each matching method. `bootstrap/plugins.py` loads
-config-declared plugins on agent start; package-declared plugins are
-discoverable via `kohaku.yaml`.
+`PluginManager` filters plugins by enable/disable state and by
+`should_apply(context)` before each hook call. `bootstrap/plugins.py`
+loads config-declared plugins on agent start; package-declared plugins
+are discoverable via `kohaku.yaml`.
+
+Two newer extension points live alongside the hook surface:
+
+- **Controller commands.** Plugins and packages can register custom
+  `##name##` commands into the controller namespace.
+- **Termination voters.** Plugins can contribute a checker that receives
+  a `TerminationContext`; any checker can stop the run.
 
 ## What you can therefore do
 

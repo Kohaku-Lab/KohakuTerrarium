@@ -138,6 +138,10 @@ tool set, sub-agents, the upstream system prompt. Your `system.md` is
 appended to the inherited prompt (prompts concatenate along the
 inheritance chain). Everything else you did not set stays inherited.
 
+That includes provider-native tools too. If the inherited creature runs on a
+backend that advertises native capabilities, those can appear automatically
+without being listed under `tools:`.
+
 ## Step 6 — Add one tool
 
 Goal: extend the inherited tool list by one entry. Web search is a
@@ -185,6 +189,8 @@ session saves automatically.
 - `base_config: "@pkg/creatures/<name>"` inherits everything; scalars
   override, `tools:` / `subagents:` extend.
 - `system_prompt_file` concatenates along the inheritance chain.
+- Some tools can be auto-injected by the active provider, so the visible
+  tool inventory is not always only the YAML list.
 
 ## What to read next
 

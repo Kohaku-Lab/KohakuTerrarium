@@ -11,7 +11,7 @@ tags:
 
 For readers adding behaviour at the *seams* between modules without forking any module.
 
-Plugins modify the connections between controller, tools, sub-agents, and LLM — not the modules themselves. Two flavours: **prompt plugins** contribute to the system prompt, **lifecycle plugins** hook into runtime events (pre/post LLM, pre/post tool, etc.).
+Plugins modify the connections between controller, tools, sub-agents, and LLM — not the modules themselves. Two flavours: **prompt plugins** contribute to the system prompt, **lifecycle plugins** hook into runtime events (pre/post LLM, pre/post tool dispatch/execution, sub-agent runs, compaction, interrupts, and more).
 
 Concept primer: [plugin](../concepts/modules/plugin.md), [patterns](../concepts/patterns.md).
 
@@ -56,34 +56,41 @@ Built-in prompt plugins (always present):
 |---|---|---|
 | `ProjectInstructionsPlugin` | 30 | Loads `CLAUDE.md` / `.claude/rules.md` |
 | `EnvInfoPlugin` | 40 | Working dir, platform, date |
-| `FrameworkHintsPlugin` | 45 | Tool-call syntax + framework command examples (`info`, `jobs`, `wait`) |
+| `FrameworkHintsPlugin` | 45 | Tool-call syntax + framework command examples (`info`, `jobs`, `wait`, native tool usage) |
 | `ToolListPlugin` | 50 | One-line description per tool |
+
+Separate from prompt plugins, tools themselves can now contribute short
+prompt-guidance paragraphs via `prompt_contribution()`. Those land in the
+aggregated prompt before the framework hints.
 
 Lower priority runs earlier. Pick your plugin's priority to slot it correctly.
 
 ## Lifecycle plugins
 
-Subclass `BasePlugin` and implement any of these hooks. All are async.
+Subclass `BasePlugin` and implement any of these hooks. All are async unless noted.
 
 | Hook | Signature | Effect |
 |---|---|---|
 | `on_load(context)` | setup at agent start | — |
 | `on_unload()` | teardown at stop | — |
+| `should_apply(context)` | return `bool` | Dynamic per-agent/model gating |
 | `pre_llm_call(messages, **kwargs)` | return `list[dict] \| None` | Replace messages sent to LLM |
-| `post_llm_call(response)` | return `ChatResponse \| None` | Replace response |
-| `pre_tool_execute(name, args)` | return `dict \| None`; or raise `PluginBlockError` | Replace args or block the call |
-| `post_tool_execute(name, result)` | return `ToolResult \| None` | Replace tool result |
-| `pre_subagent_run(name, context)` | return `dict \| None` | Replace sub-agent context |
-| `post_subagent_run(name, output)` | return `str \| None` | Replace sub-agent output |
+| `post_llm_call(messages, response, usage, **kwargs)` | return `str \| None` | Rewrite final assistant text |
+| `pre_tool_dispatch(call, context)` | return rewritten call or raise `PluginBlockError` | Rewrite or veto a parsed tool call before executor submission |
+| `pre_tool_execute(args, **kwargs)` | return `dict \| None`; or raise `PluginBlockError` | Replace args or block the call |
+| `post_tool_execute(result, **kwargs)` | return `ToolResult \| None` | Replace tool result |
+| `pre_subagent_run(task, **kwargs)` | return `str \| None` | Replace sub-agent task text |
+| `post_subagent_run(result, **kwargs)` | return result or `None` | Replace sub-agent result |
+| `contribute_commands()` | return `dict[name, BaseCommand]` | Add controller `##command##` handlers |
+| `contribute_termination_check()` | return callable or `None` | Vote on whether the run should stop |
 
 Fire-and-forget callbacks (no return value, no ability to modify):
 
-- `on_tool_start`, `on_tool_end`
-- `on_llm_start`, `on_llm_end`
-- `on_processing_start`, `on_processing_end`
-- `on_startup`, `on_shutdown`
-- `on_compact_start`, `on_compact_complete`
-- `on_event`
+- `on_agent_start`, `on_agent_stop`
+- `on_event`, `on_interrupt`, `on_task_promoted`
+- `on_compact_start`, `on_compact_end`
+
+You can also declare a cheap static gate with `applies_to = {agent_names: [...], model_patterns: [...]}`.
 
 ## Example: tool guard
 
@@ -131,11 +138,13 @@ Raising `PluginBlockError` aborts the operation — the message becomes the tool
 class TokenAccountant(BasePlugin):
     name = "token_accountant"
 
-    async def post_llm_call(self, response):
-        usage = response.usage or {}
-        my_db.record(tokens_in=usage.get("prompt_tokens"),
-                     tokens_out=usage.get("completion_tokens"))
-        return None   # don't replace the response
+    async def post_llm_call(self, messages, response, usage, **kwargs):
+        my_db.record(
+            tokens_in=usage.get("prompt_tokens"),
+            tokens_out=usage.get("completion_tokens"),
+            cached=usage.get("cached_tokens", 0),
+        )
+        return None   # don't rewrite the response
 ```
 
 ## Example: seamless memory (agent inside plugin)
@@ -153,7 +162,7 @@ Slash command:
 /plugin toggle tool_guard
 ```
 
-Plugins are loaded once at agent start; enable/disable is a runtime flag, not a reload. Configuration changes require a restart.
+Plugins are loaded once at agent start; enable/disable is a runtime flag, not a reload. Re-enabling runs `on_load()` again through the manager's pending-load path. Configuration changes still require a restart.
 
 ## Distributing plugins
 

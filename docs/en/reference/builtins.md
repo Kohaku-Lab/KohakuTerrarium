@@ -101,6 +101,17 @@ results. Direct.
 
 - Args: `query`, `max_results` (int), `region` (str).
 
+### Provider-native media
+
+**`image_gen`** — Generate or edit an image through the provider's own
+native image backend. Currently auto-injected for Codex-backed creatures
+unless opted out with `disable_provider_tools: [image_gen]`. The executor
+never runs it; the provider returns structured image content and the
+session store persists the generated file into the session artifacts dir.
+
+- Args: `prompt` plus provider-specific knobs when explicitly wired:
+  `output_format`, `size`, `quality`, `action`, `background`.
+
 ### Interactive and memory
 
 **`ask_user`** — Prompt the user over stdin (CLI or TUI only).
@@ -264,10 +275,12 @@ Slash commands available inside input modules. Under
 | `/help` | `/h`, `/?` | List commands. |
 | `/status` | `/info` | Model, message count, tools, jobs, compact state. |
 | `/clear` | | Clear conversation (the session log retains history). |
-| `/model [name]` | `/llm` | Show current model or switch profile. |
+| `/model [name]` | `/llm` | Show current model or switch profile. Accepts canonical `provider/name[@variations]`. |
 | `/compact` | | Manual context compaction. |
 | `/regen` | `/regenerate` | Re-run the last assistant turn. |
 | `/plugin [list\|enable\|disable\|toggle] [name]` | `/plugins` | Inspect or toggle plugins. |
+| `/skill [list\|enable\|disable\|toggle\|show] [name]` | `/skills` | Inspect or toggle procedural skills. |
+| `/<skill-name> [args]` | — | User-invoke path for an enabled procedural skill when no built-in slash command shadows that name. |
 | `/exit` | `/quit`, `/q` | Graceful exit. On web, a force flag may be required. |
 
 ---
@@ -280,10 +293,11 @@ to the framework directly (no tool round-trip). Defined under
 
 Framework commands use the **same syntax family** as tool calls — they follow the creature's configured `tool_format` (bracket / XML / native). The default bracket form with bare-identifier placeholders:
 
-- `[/info]tool_or_subagent[info/]` — Load a tool's or sub-agent's full documentation on demand.
+- `[/info]tool_or_subagent[info/]` — Load a tool's, sub-agent's, or procedural skill's documentation on demand.
 - `[/read_job]job_id[read_job/]` — Read output from a background job. Supports `--lines N` and `--offset M` in the body.
 - `[/jobs][jobs/]` — List running jobs with IDs.
 - `[/wait]job_id[wait/]` — Block the current turn until a background job finishes.
+- `[/skill]skill_name [args][skill/]` — Return a procedural skill body to the model for explicit invocation.
 
 Command names share a namespace with tool names; the command for reading job output is called `read_job` to avoid colliding with the `read` file-reader tool. Defined under `src/kohakuterrarium/commands/`.
 
@@ -295,10 +309,10 @@ Built-in provider types (backends):
 
 | Provider | Backend type | Transport | Notes |
 |---|---|---|---|
-| `codex` | `codex` | Codex OAuth (ChatGPT subscription) | `kt login codex`; routed via `CodexOAuthProvider`. |
+| `codex` | `codex` | Codex OAuth (ChatGPT subscription) | `kt login codex`; routed via `CodexOAuthProvider`. Ships provider-native tool support such as `image_gen`. |
 | `openai` | `openai` | OpenAI `/chat/completions` | API-key auth (`OPENAI_API_KEY`). |
 | `openrouter` | `openai` | OpenAI-compat against OpenRouter | API-key auth (`OPENROUTER_API_KEY`); unified `reasoning` param. |
-| `anthropic` | `openai` | Anthropic's OpenAI-compat endpoint | API-key auth (`ANTHROPIC_API_KEY`). No native Anthropic client. Claude-specific knobs go through `extra_body` (`thinking.*`, `output_config.*`). |
+| `anthropic` | `openai` | Anthropic's OpenAI-compat endpoint | API-key auth (`ANTHROPIC_API_KEY`). No native Anthropic client. Claude-specific knobs go through `extra_body` (`thinking.*`, `output_config.*`). Prompt-caching markers are auto-applied unless disabled. |
 | `gemini` | `openai` | Google's OpenAI-compat endpoint | API-key auth (`GEMINI_API_KEY`). |
 | `mimo` | `openai` | Xiaomi MiMo | `kt login mimo`. |
 
@@ -326,6 +340,7 @@ Naming convention (post-2026-04 refactor):
 
 ### OpenAI via Codex OAuth
 
+- `gpt-5.5`
 - `gpt-5.4` (aliases: `gpt5`, `gpt54`)
 - `gpt-5.3-codex` (`gpt53`)
 - `gpt-5.1`
@@ -475,6 +490,8 @@ fixed.
 
 | Preset | Group | Options |
 |---|---|---|
+| `gpt-5.5` | `reasoning` | `none`, `low`, `medium`, `high`, `xhigh` |
+| `gpt-5.5` | `speed` | `normal`, `fast` (maps to `service_tier: priority`) |
 | `gpt-5.4` | `reasoning` | `none`, `low`, `medium`, `high`, `xhigh` |
 | `gpt-5.4` | `speed` | `normal`, `fast` (maps to `service_tier: priority`) |
 | `gpt-5.3-codex` | `reasoning` | `none`, `low`, `medium`, `high`, `xhigh` |
@@ -577,13 +594,16 @@ priority (lower = earlier).
 | Priority | Name | Emits |
 |---|---|---|
 | 50 | `ToolListPlugin` | Tool name + one-line description. |
-| 45 | `FrameworkHintsPlugin` | Framework command examples (`info`, `read_job`, `jobs`, `wait`) and tool-call format examples. |
+| 45 | `FrameworkHintsPlugin` | Framework command examples (`info`, `read_job`, `jobs`, `wait`, native tool usage) and tool-call format examples. |
 | 40 | `EnvInfoPlugin` | `cwd`, platform, date/time. |
 | 30 | `ProjectInstructionsPlugin` | Loads `CLAUDE.md` and `.claude/rules.md`. |
 
 Custom prompt plugins subclass `BasePlugin` and register via the
 `plugins` field in a creature config. See
 [plugin-hooks.md](plugin-hooks.md) for lifecycle and callback hooks.
+
+Separate from prompt plugins, tools may also contribute one-line or short
+paragraph guidance into the aggregated `## Tool guidance` section.
 
 ---
 
@@ -630,9 +650,10 @@ Python surface: `MCPServerConfig`, `MCPClientManager` in
 ## Extensions
 
 A package's `kohaku.yaml` may contribute `creatures`, `terrariums`,
-`tools`, `plugins`, `llm_presets`, and `python_dependencies`.
-`kt extension list` inventories them. Python modules resolve by
-`module:class` refs; configs resolve via `@pkg/path`. See
+`tools`, `plugins`, `io`, `triggers`, `skills`, `commands`,
+`user_commands`, `prompts`, `framework_hints`, `llm_presets`, and
+`python_dependencies`. `kt extension list` inventories them. Python modules
+resolve by `module:class` refs; configs resolve via `@pkg/path`. See
 [configuration.md — Package manifest](configuration.md#package-manifest-kohakuyaml).
 
 ---

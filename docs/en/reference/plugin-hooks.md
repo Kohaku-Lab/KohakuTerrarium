@@ -42,10 +42,14 @@ hooks cannot block.
 |---|---|---|---|
 | `on_load` | `async on_load(ctx: PluginContext) -> None` | Plugin is loaded into an agent. | ignored |
 | `on_unload` | `async on_unload() -> None` | Plugin is unloaded or agent stops. | ignored |
+| `should_apply` | `def should_apply(ctx: PluginContext) -> bool` | Evaluated before each hook call. | `False` skips this plugin for that context. |
+| `contribute_commands` | `def contribute_commands() -> dict[str, BaseCommand]` | After load, during controller wiring. | Mapping of controller command names. |
+| `contribute_termination_check` | `def contribute_termination_check() -> Callable[[TerminationContext], TerminationDecision \| None] \| None` | During termination wiring. | Checker function or `None`. |
 
-`PluginContext` gives the plugin access to the agent, its config,
-scratchpad, and a logger. Detailed shape is in
-`kohakuterrarium.modules.plugin.context`.
+`PluginContext` gives the plugin access to the host agent, session store,
+scratchpad, registry, controller, subagent manager, and helper methods like
+`switch_model(...)`, `inject_event(...)`, and `inject_message_before_llm(...)`.
+Plugins can also declare a static filter with `applies_to = {agent_names, model_patterns}`.
 
 ---
 
@@ -54,7 +58,9 @@ scratchpad, and a logger. Detailed shape is in
 | Hook | Signature | Fired when | Return semantics |
 |---|---|---|---|
 | `pre_llm_call` | `async pre_llm_call(messages: list[dict], **kwargs) -> list[dict] \| None` | Before every LLM request (controller, sub-agent, compact). | `None` keeps the list; a new list replaces it. May raise `PluginBlockError`. |
-| `post_llm_call` | `async post_llm_call(response: ChatResponse) -> ChatResponse \| None` | After an LLM response is assembled. | `None` keeps the response; a new `ChatResponse` replaces it. |
+| `post_llm_call` | `async post_llm_call(messages: list[dict], response: str, usage: dict, **kwargs) -> str \| None` | After the final assistant message is assembled. | `None` keeps the text; a returned string rewrites it for the next plugin / final output. |
+
+When a `post_llm_call` rewrite changes the final assistant text, the runtime emits an `assistant_message_edited` activity marker so UIs can audit that rewrite.
 
 ---
 
@@ -62,8 +68,9 @@ scratchpad, and a logger. Detailed shape is in
 
 | Hook | Signature | Fired when | Return semantics |
 |---|---|---|---|
-| `pre_tool_execute` | `async pre_tool_execute(name: str, args: dict) -> dict \| None` | Before a tool is dispatched to the executor. | `None` keeps `args`; a new dict replaces them. May raise `PluginBlockError`. |
-| `post_tool_execute` | `async post_tool_execute(name: str, result: ToolResult) -> ToolResult \| None` | After a tool completes (including error results). | `None` keeps the result; a new `ToolResult` replaces it. |
+| `pre_tool_dispatch` | `async pre_tool_dispatch(call: ToolCallEvent, context: PluginContext) -> ToolCallEvent \| None` | After parsing, before executor submission. | `None` keeps the call; a returned event rewrites tool name/args. May raise `PluginBlockError`. |
+| `pre_tool_execute` | `async pre_tool_execute(args: dict, **kwargs) -> dict \| None` | Just before tool execution. | `None` keeps `args`; a new dict replaces them. May raise `PluginBlockError`. `kwargs` include `tool_name`, `job_id`. |
+| `post_tool_execute` | `async post_tool_execute(result: ToolResult, **kwargs) -> ToolResult \| None` | After a tool completes (including error results). | `None` keeps the result; a new `ToolResult` replaces it. `kwargs` include `tool_name`, `job_id`, `args`. |
 
 ---
 
@@ -71,30 +78,24 @@ scratchpad, and a logger. Detailed shape is in
 
 | Hook | Signature | Fired when | Return semantics |
 |---|---|---|---|
-| `pre_subagent_run` | `async pre_subagent_run(name: str, ctx: SubAgentContext) -> dict \| None` | Before a sub-agent is spawned and started. | `None` keeps the spawn context; a dict merges overrides. May raise `PluginBlockError`. |
-| `post_subagent_run` | `async post_subagent_run(name: str, output: str) -> str \| None` | After a sub-agent completes (its output is about to be delivered as a `subagent_output` event). | `None` keeps the output; a new string replaces it. |
+| `pre_subagent_run` | `async pre_subagent_run(task: str, **kwargs) -> str \| None` | Before a sub-agent is spawned and started. | `None` keeps the task; a returned string replaces it. May raise `PluginBlockError`. `kwargs` include `name`, `job_id`, `is_background`. |
+| `post_subagent_run` | `async post_subagent_run(result: Any, **kwargs) -> Any \| None` | After a sub-agent completes (its output is about to be delivered as a `subagent_output` event). | `None` keeps the result; a returned value replaces it. `kwargs` include `name`, `job_id`. |
 
 ---
 
 ## Callback hooks
 
-All callbacks are fire-and-forget. Their return value is ignored. They
-run concurrently via the plugin scheduler; slow callbacks do not block
-the agent.
+All callbacks are fire-and-forget. Their return value is ignored.
 
 | Hook | Signature | Fired when |
 |---|---|---|
-| `on_tool_start` | `async on_tool_start(name: str, args: dict) -> None` | Tool execution is about to begin. |
-| `on_tool_end` | `async on_tool_end(name: str, result: ToolResult) -> None` | Tool execution completed. |
-| `on_llm_start` | `async on_llm_start(messages: list[dict]) -> None` | LLM request sent. |
-| `on_llm_end` | `async on_llm_end(response: ChatResponse) -> None` | LLM response received. |
-| `on_processing_start` | `async on_processing_start() -> None` | Agent enters a processing turn. |
-| `on_processing_end` | `async on_processing_end() -> None` | Agent exits a processing turn. |
-| `on_startup` | `async on_startup() -> None` | Agent `start()` completed. |
-| `on_shutdown` | `async on_shutdown() -> None` | Agent `stop()` is running. |
-| `on_compact_start` | `async on_compact_start(reason: str) -> None` | Compaction begins. |
-| `on_compact_complete` | `async on_compact_complete(summary: str) -> None` | Compaction finishes. |
+| `on_agent_start` | `async on_agent_start() -> None` | `agent.start()` completed. |
+| `on_agent_stop` | `async on_agent_stop() -> None` | `agent.stop()` begins. |
 | `on_event` | `async on_event(event: TriggerEvent) -> None` | Any event is injected into the controller. |
+| `on_interrupt` | `async on_interrupt() -> None` | The user interrupts the agent. |
+| `on_task_promoted` | `async on_task_promoted(job_id: str, tool_name: str) -> None` | A direct task is promoted to background. |
+| `on_compact_start` | `async on_compact_start(context_length: int) -> bool \| None` | Before compaction. Return `False` to veto this compaction cycle. |
+| `on_compact_end` | `async on_compact_end(summary: str, messages_removed: int) -> None` | After compaction finishes. |
 
 ---
 
@@ -134,8 +135,8 @@ Minimal lifecycle plugin:
 from kohakuterrarium.modules.plugin import BasePlugin, PluginBlockError
 
 class GuardPlugin(BasePlugin):
-    async def pre_tool_execute(self, name, args):
-        if name == "bash" and "rm -rf" in args.get("command", ""):
+    async def pre_tool_execute(self, args, **kwargs):
+        if kwargs.get("tool_name") == "bash" and "rm -rf" in args.get("command", ""):
             raise PluginBlockError("unsafe command")
         return None  # keep args unchanged
 ```

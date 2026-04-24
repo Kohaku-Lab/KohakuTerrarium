@@ -11,7 +11,7 @@ tags:
 
 For readers sharing creatures, terrariums, tools, or plugins across projects.
 
-A KohakuTerrarium package is a directory with a `kohaku.yaml` manifest. It can contain creatures, terrariums, custom tools, plugins, and LLM presets. `kt install` puts it under `~/.kohakuterrarium/packages/<name>/` and the `@<name>/path` syntax references anything inside it.
+A KohakuTerrarium package is a directory with a `kohaku.yaml` manifest. It can contain creatures, terrariums, custom tools, plugins, triggers, I/O modules, procedural skills, controller commands, user slash commands, prompt fragments, framework-hint overrides, and LLM presets. `kt install` puts it under `~/.kohakuterrarium/packages/<name>/` and the `@<name>/path` syntax references anything inside it.
 
 Concept primer: [boundaries](../concepts/boundaries.md) — packages are how the framework makes "share reusable pieces" cheap.
 
@@ -49,6 +49,39 @@ plugins:
     module: my_pack.plugins.my_guard
     class: MyGuard
 
+io:
+  - name: discord_input
+    module: my_pack.io.discord
+    class: DiscordInput
+
+triggers:
+  - name: webhook
+    module: my_pack.triggers.webhook
+    class: WebhookTrigger
+
+skills:
+  - name: repo-surgery
+    path: skills/repo-surgery
+    description: Shared repo surgery workflow
+
+commands:
+  - name: handoff
+    module: my_pack.commands.handoff
+    class: HandoffCommand
+
+user_commands:
+  - name: deploy
+    module: my_pack.user_commands.deploy
+    class: DeployCommand
+
+prompts:
+  - name: git-safety
+    path: prompts/git-safety.md
+
+framework_hints:
+  framework.execution_model.dynamic: |
+    Use background work aggressively, but never duplicate it.
+
 llm_presets:
   - name: my-custom-model
 
@@ -64,15 +97,40 @@ my-pack/
   kohaku.yaml
   creatures/researcher/config.yaml
   terrariums/research_team/config.yaml
+  prompts/git-safety.md
+  skills/repo-surgery/SKILL.md
   my_pack/                     # installable python package
     __init__.py
     tools/my_tool.py
     plugins/my_guard.py
+    io/discord.py
+    triggers/webhook.py
+    commands/handoff.py
+    user_commands/deploy.py
 ```
 
 Python modules resolve by dotted path (`my_pack.tools.my_tool:MyTool`). Configs resolve via `@my-pack/creatures/researcher`.
 
 `python_dependencies` are installed by `kt install` when Python deps are declared.
+
+### Newer manifest slots
+
+Beyond `tools`, `plugins`, and `llm_presets`, packages can now contribute:
+
+- `io:` — package-resolved input/output module classes
+- `triggers:` — package-resolved trigger classes
+- `skills:` — procedural skill bundles (`SKILL.md`) discoverable by creatures
+- `commands:` — controller `##name##` commands
+- `user_commands:` — slash commands the human can type
+- `prompts:` / `templates:` — reusable Jinja include fragments for prompts
+- `framework_hints:` — package-level overrides for the built-in framework-hint prose
+
+Collision policy is intentionally mixed:
+
+- tools/plugins/io/triggers/user commands/controller commands use a shared name
+  namespace and collisions are treated as errors or explicit overrides,
+- procedural skills are the exception: they are last-wins, with narrower scope
+  (project/user/creature) overriding package-shipped copies.
 
 ## Install modes
 
@@ -162,7 +220,28 @@ tools:
     type: package          # resolved through the `tools:` list in kohaku.yaml
 ```
 
-This lets a creature inside one package reference tools declared in another, as long as both are installed.
+The same pattern now applies to package-declared I/O and triggers:
+
+```yaml
+input:
+  type: package
+  name: discord_input
+
+triggers:
+  - type: package
+    name: webhook
+```
+
+Prompt fragments are resolved from Jinja includes:
+
+```md
+{% include "git-safety" %}
+```
+
+and controller/user commands are discovered from the package manifest rather
+than the creature folder.
+
+This lets a creature inside one package reference extensions declared in another, as long as both are installed.
 
 ## Troubleshooting
 

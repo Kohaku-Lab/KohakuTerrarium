@@ -31,7 +31,7 @@ Concept primer: [memory and compaction](../concepts/modules/memory-and-compactio
 | `fts` | FTS5 index over events (for `kt search`) |
 | `vectors` | optional embedding column (populated by `kt embedding`) |
 
-The format is append-only for event data and versioned through KohakuVault's auto-pack. You can safely copy, archive, or email a `.kohakutr` file; there's nothing external it depends on.
+The format is append-only for event data and versioned through KohakuVault's auto-pack. Binary artifacts can also live in a sibling `<session>.artifacts/` directory, so when a run generated images or other binary outputs, archive the `.kohakutr` file and its artifacts directory together.
 
 ## Where sessions live
 
@@ -52,6 +52,7 @@ On each turn KohakuTerrarium records:
 - **Job records** — outputs of long-running tools and sub-agents.
 - **Resumable triggers** — any `BaseTrigger` subclass with `resumable: True` serializes to `state` and restores on resume.
 - **Config snapshot** — the fully-resolved config at run time, so resume can rebuild the agent even if the on-disk config changed.
+- **Binary artifacts** — generated images and similar binary outputs written under `<session>.artifacts/` beside the session file.
 
 ## Resuming
 
@@ -92,6 +93,7 @@ The agent exits gracefully on Ctrl+C: finishes the in-flight tool, flushes the s
 ```bash
 # Backup
 cp ~/.kohakuterrarium/sessions/swe_20240101.kohakutr ~/backups/
+cp -r ~/.kohakuterrarium/sessions/swe_20240101.artifacts ~/backups/   # if present
 
 # Resume from a moved location
 kt resume ~/backups/swe_20240101.kohakutr
@@ -159,6 +161,7 @@ No `.kohakutr` is created. This also disables compaction's ability to recover pr
 - **Compaction runs forever / OOMs.** The compact model is the same heavy controller model. Set `compact_model` to something cheap (`gpt-4o-mini`, `claude-haiku`).
 - **Resume errors with `tool not registered`.** The creature config changed (a tool was removed) but the conversation still references it. Manually edit `config.yaml` to re-add the tool, or start a fresh session.
 - **`kt resume` can't find a session I just saw.** Sessions are resolved by prefix against filenames in `~/.kohakuterrarium/sessions/`. If you renamed the file or moved it, pass the full path.
+- **Generated images are missing after copying a session.** Copy the sibling `<session>.artifacts/` directory too, not just the `.kohakutr` file.
 - **Large `.kohakutr` files.** The event log is append-only; long sessions grow. Archive old ones or split work across sessions. Compaction shrinks the live conversation but keeps the full event history for search.
 - **Sub-agent output missing from resume.** Sub-agent conversations are saved when the sub-agent completes. If the parent was interrupted mid-sub-agent, the latest snapshot is whatever was persisted at the last checkpoint.
 

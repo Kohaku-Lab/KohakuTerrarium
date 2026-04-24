@@ -25,8 +25,13 @@ calling any other tool.
 Context windows are finite. A real task — "explore this repo and tell
 me how auth works" — can involve hundreds of file reads. Doing that
 exploration in the parent's conversation blows the budget for the main
-work. Doing it in a sub-agent spends a separate budget and returns
+work. Doing it in a sub-agent usually spends a separate budget and returns
 just the summary.
+
+But that budget is now configurable. A parent can give children an
+independent turn pool, let them run unbounded, or make them share the
+same iteration budget as the parent. That matters when you want "delegate
+freely, but the whole run still only gets N LLM calls".
 
 A second reason: **specialisation**. A `critic` sub-agent prompted
 specifically for review decisions will outperform a general agent
@@ -40,6 +45,8 @@ A sub-agent is a creature config + a parent registry. When spawned:
 - it inherits the parent's LLM and tool format,
 - it is given a subset of tools (the `tools` list in its sub-agent config),
 - it runs a full Agent lifecycle (start → event-loop → stop),
+- it either inherits the parent's iteration budget, gets its own
+  `budget_allocation`, or runs without a shared budget at all,
 - its result is delivered as a `subagent_output` event on the parent,
   or streamed directly to the user if `output_to: external`.
 
@@ -63,7 +70,9 @@ job id, and delivers completions as `TriggerEvent`s.
 
 Depth is bounded by `max_subagent_depth` (config-level) to prevent
 runaway recursion. Cancellation is cooperative — the parent can invoke
-`stop_task` to interrupt a running sub-agent.
+`stop_task` to interrupt a running sub-agent. Shared iteration budgets
+are resolved at spawn time: `budget_allocation` wins, otherwise
+`budget_inherit: true` reuses the parent's budget object if one exists.
 
 Built-in sub-agents (in `kt-biome` + framework): `worker`, `plan`,
 `explore`, `critic`, `response`, `research`, `summarize`,

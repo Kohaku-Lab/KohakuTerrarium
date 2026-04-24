@@ -69,6 +69,12 @@ order: `config.yaml` → `config.yml` → `config.json` → `config.toml`.
 | `no_inherit` | list[str] | `[]` | no | Keys that replace (not merge) base values. E.g. `[tools, subagents]`. |
 | `memory` | dict | `{}` | no | `memory.embedding.{provider,model}`. See [Memory](#memory). |
 | `output_wiring` | list | `[]` | no | Per-creature automatic round-output routing. See [Output wiring](#output-wiring). |
+| `skills` | list[str] | `[]` | no | Package-skill opt-in list. Package skills default disabled unless named here; `"*"` enables all discovered package skills. |
+| `skill_index_budget_bytes` | int | `4096` | no | Byte budget for the auto-invoke procedural-skill index in the system prompt. |
+| `framework_hint_overrides` | dict[str,str] | `{}` | no | Creature-level override map for built-in framework-hint prose blocks. |
+| `disable_provider_tools` | list[str] | `[]` | no | Opt out of provider-native tools auto-injected by the active backend. |
+| `max_iterations` | int \| null | `null` | no | Shared iteration budget for the parent controller and inheriting sub-agents. |
+| `sanitize_orphan_tool_calls` | bool | `true` | no | Drop orphan tool-call/tool-result fragments before sending history to the provider. |
 
 ### Controller block
 
@@ -90,6 +96,8 @@ All fields may also be set at the top level for backward compatibility.
 | `service_tier` | str | `null` | `priority`, `flex`. |
 | `extra_body` | dict | `{}` | Deep-merged onto the resolved preset's `extra_body` (which may already carry variation patches). |
 | `skill_mode`, `include_tools_in_prompt`, `include_hints_in_prompt`, `max_messages`, `ephemeral`, `tool_format` | | | Mirror top-level fields. |
+
+Canonical model identifiers are now `provider/name[@group=option,...]`. The runtime stores and surfaces this full identifier (for `/model`, session-info events, and UI display), so a round-trip like `/model openai/gpt-5.4-api@reasoning=high` is stable.
 
 Resolution order per turn (see `llm/profiles.py:resolve_controller_llm`):
 
@@ -161,6 +169,10 @@ Anthropic-via-OpenRouter (`claude-*-or`) presets ship with
 `controller.extra_body` is deep-merged over it and can disable or replace
 it.
 
+Anthropic-compatible endpoints also get automatic prompt-caching markers
+applied to the system message and the last three non-tool conversation
+messages unless you set `extra_body.disable_prompt_caching: true`.
+
 ### Input
 
 Dict fields: `{type, module?, class?, options?, ...type-specific keys}`.
@@ -211,6 +223,11 @@ Tool types:
   (ChannelTrigger), `add_schedule` (SchedulerTrigger).
 - `custom` / `package` — load the class at `module` + `class`.
 
+Provider-native tools are auto-injected from the active backend's
+`provider_native_tools` declaration. The creature does not need to list
+such a tool under `tools:` unless it wants to override per-tool knobs.
+The shipped example is `image_gen` for Codex-backed creatures.
+
 Shorthand:
 
 ```yaml
@@ -249,6 +266,12 @@ subagents:
 ```
 
 With this flag set to `false`, the background job still emits normal activity/log/output updates, but its completion does not push a fresh event back into the controller loop.
+
+Sub-agent option fields also include shared-budget controls via `options`:
+
+- `budget_inherit: true` (default) — child reuses the parent's shared iteration budget if one exists.
+- `budget_allocation: N` — child gets a fresh isolated budget of `N` turns.
+- `budget_inherit: false` with no allocation — child runs without the parent's shared budget.
 
 ### Triggers
 
@@ -340,6 +363,9 @@ when the output contains the keyword.
 | `idle_timeout` | float | `0` | Seconds with no events. |
 | `keywords` | list[str] | `[]` | Case-sensitive substring match. |
 
+Built-in termination checks run first. Plugins may then contribute additional
+termination voters programmatically; any positive vote stops the run.
+
 ### MCP servers in agent config
 
 Per-agent MCP servers. Connected on agent start. A global catalog at
@@ -367,6 +393,9 @@ the same schema; agents declare the ones they want per-config.
 | `options` | dict | `{}` | Plugin-specific options. |
 
 Shorthand: a bare string is treated as a package-resolved plugin name.
+
+Plugins may also add controller commands and termination voters at runtime;
+those are Python-level extension points, not YAML fields on the creature.
 
 ### Memory
 
@@ -534,6 +563,8 @@ backends:
     backend_type: openai | codex        # canonical set (see note below)
     base_url: str
     api_key_env: str
+    provider_name: str                  # compatibility identity for native tools
+    provider_native_tools: [str, ...]   # auto-injected native tools this backend serves
 
 presets:
   <preset-name>:
@@ -561,6 +592,13 @@ Built-in provider names (`codex`, `openai`, `openrouter`, `anthropic`,
 `gemini`, `mimo`) cannot be deleted; their base URLs and `api_key_env`
 values are fixed via built-in defaults. Per-agent overrides via
 `controller.base_url` / `controller.api_key_env` still work.
+
+Custom backends may also declare:
+
+- `provider_name` — the compatibility identity used when checking whether a
+  provider-native tool supports this backend.
+- `provider_native_tools` — the built-in provider-native tools to auto-inject
+  into creatures using this backend.
 
 See [builtins.md — LLM presets](builtins.md#llm-presets) for every
 shipped preset, [builtins.md — Variation groups](builtins.md#variation-groups)
@@ -616,6 +654,30 @@ plugins:
   - name: my_plugin
     module: my_package.plugins
     class: MyPlugin
+io:
+  - name: discord_input
+    module: my_package.io.discord
+    class: DiscordInput
+triggers:
+  - name: webhook
+    module: my_package.triggers.webhook
+    class: WebhookTrigger
+skills:
+  - name: repo-surgery
+    path: skills/repo-surgery
+commands:
+  - name: handoff
+    module: my_package.commands.handoff
+    class: HandoffCommand
+user_commands:
+  - name: deploy
+    module: my_package.user_commands.deploy
+    class: DeployCommand
+prompts:
+  - name: git-safety
+    path: prompts/git-safety.md
+framework_hints:
+  framework.execution_model.dynamic: "..."
 llm_presets:
   - name: my_preset
 python_dependencies:
@@ -631,6 +693,13 @@ python_dependencies:
 | `terrariums` | list | `[{name}]` — terrarium configs under `terrariums/<name>/`. |
 | `tools` | list | `[{name, module, class}]` — contributed tool classes. |
 | `plugins` | list | `[{name, module, class}]` — contributed plugins. |
+| `io` | list | `[{name, module, class}]` — contributed input/output modules resolved by package name. |
+| `triggers` | list | `[{name, module, class}]` — contributed trigger classes. |
+| `skills` | list | `[{name, path, description?}]` — contributed procedural skill bundles. |
+| `commands` | list | `[{name, module, class, override?}]` — controller `##name##` commands. |
+| `user_commands` | list | `[{name, module, class}]` — human-facing slash commands. |
+| `prompts` / `templates` | list | `[{name, path}]` — reusable prompt fragments for Jinja `{% include %}`. |
+| `framework_hints` | dict[str,str] | Package-level override map for framework-hint prose blocks. |
 | `llm_presets` | list | `[{name}]` — contributed LLM presets (values live in the package). |
 | `python_dependencies` | list[str] | Pip requirement strings. |
 

@@ -249,16 +249,17 @@ Manage LLM providers (backends).
 
 #### `kt config provider list`
 
-Show Name, Backend Type, and Base URL for each provider.
+Show Name, Backend Type, Provider identity, Native tools, and Base URL for each provider.
 
 #### `kt config provider add`
 
-Interactive. Prompts for backend type, base URL, and `api_key_env`. The
-prompt offers `openai`, `codex`, and `anthropic`; selecting `anthropic`
-is auto-normalized to `openai` on save (there is no native Anthropic
-client — the built-in `anthropic` provider points at Anthropic's
-OpenAI-compat endpoint). Canonical stored values are therefore `openai`
-and `codex`.
+Interactive. Prompts for backend type, base URL, `api_key_env`, a
+provider identity (`provider_name`), and a checkbox-style list of
+provider-native tools to expose. The prompt offers `openai`, `codex`, and
+`anthropic`; selecting `anthropic` is auto-normalized to `openai` on save
+(there is no native Anthropic client — the built-in `anthropic` provider
+points at Anthropic's OpenAI-compat endpoint). Canonical stored values are
+therefore `openai` and `codex`.
 
 ```
 kt config provider add [name]

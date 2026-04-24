@@ -440,6 +440,20 @@ Each result: `{content, round, block, agent, block_type, score, ts, tool_name, c
 Side effects: unindexed events get indexed (idempotent); uses the live
 embedder when the agent is running, otherwise loads from config.
 
+### `GET /api/sessions/{session_name}/artifacts/{filepath}`
+
+Serve a binary artifact stored under the session's sibling
+`<session>.artifacts/` directory.
+
+- `filepath` is relative to that artifacts root (for example
+  `generated_images/cat.png`).
+- Absolute paths and traversal (`..`) are rejected with `400`.
+- Missing session artifacts or files return `404`.
+- Response is a `FileResponse` with MIME type guessed from the filename.
+
+This is the HTTP surface used to read generated images persisted by
+provider-native tools such as `image_gen`.
+
 ---
 
 ## Files
@@ -534,12 +548,17 @@ refresh failed), `404` (no login).
 
 #### `GET /api/settings/backends`
 
-`{"backends": [{"name", "backend_type", "base_url", "api_key_env", "built_in", "has_token", "available"}]}`.
+`{"backends": [{"name", "backend_type", "base_url", "api_key_env", "provider_name", "provider_native_tools", "built_in", "has_token", "available"}]}`.
+
+#### `GET /api/settings/native-tools`
+
+Return metadata for every provider-native built-in tool:
+`{"tools": [{"name", "provider_support", "description"}]}`.
 
 #### `POST /api/settings/backends`
 
 - Body: `BackendRequest` (`name`, `backend_type` default `"openai"`,
-  `base_url`, `api_key_env`).
+  `base_url`, `api_key_env`, `provider_name`, `provider_native_tools`).
 - Response: `{"status": "saved", "name"}`.
 
 #### `DELETE /api/settings/backends/{name}`
@@ -932,6 +951,8 @@ At least one of `message` or `content` must be provided.
 | `backend_type` | str | no | `"openai"` |
 | `base_url` | str | no | `""` |
 | `api_key_env` | str | no | `""` |
+| `provider_name` | str | no | `""` |
+| `provider_native_tools` | list[str] | no | `[]` |
 
 ### `DefaultModelRequest`
 
@@ -979,11 +1000,14 @@ and `ts` (Unix seconds).
 
 - `text` — streaming text chunk.
   - `content: str`.
+- `activity: assistant_message_edited` — emitted when a `post_llm_call`
+  plugin rewrites the final assistant message.
 - `activity` — diverse type discriminated by `activity_type`, e.g.
   `session_info`, `tool_call`, `tool_result`, `token_usage`,
   `job_update`, `job_completed`, `model_switch`, `interrupt`,
   `regenerate`, `edit`, `rewind`, `promote`, `background_result`,
-  `memory_compact`, `memory_search`, `memory_save`.
+  `memory_compact`, `memory_search`, `memory_save`,
+  `assistant_message_edited`.
   - Additional fields depend on `activity_type`: `args`, `job_id`,
     `tools_used`, `result`, `output`, `turns`, `duration`, `task`,
     `trigger_id`, `event_type`, `channel`, `sender`, `content`,
@@ -1000,7 +1024,8 @@ and `ts` (Unix seconds).
 ## Session storage
 
 Sessions live in `~/.kohakuterrarium/sessions/` with extension
-`.kohakutr` (legacy `.kt` still accepted). See
+`.kohakutr` (legacy `.kt` still accepted). Binary artifacts may live in a
+sibling `<session>.artifacts/` directory. See
 [concepts/impl-notes/session-persistence](../concepts/impl-notes/session-persistence.md)
 for the table layout and resume path.
 

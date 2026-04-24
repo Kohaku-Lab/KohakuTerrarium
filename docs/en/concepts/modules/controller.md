@@ -56,6 +56,9 @@ Three design choices worth naming:
 - **Tools dispatched mid-stream.** The controller does not wait for the
   LLM to finish speaking before firing a tool. See
   [impl-notes/stream-parser](../impl-notes/stream-parser.md).
+- **Pluggable seams.** Tool calls can be rewritten before the executor
+  sees them, assistant text can be rewritten after the LLM finishes, and
+  the controller-command namespace itself is extensible.
 
 ## How we implement it
 
@@ -63,6 +66,11 @@ The main class is `Controller` (`core/controller.py`). It owns an
 `asyncio.Queue` for events, a parser state machine for the LLM's
 output stream, and a reference to the creature's `Registry` (tools),
 `SubAgentManager`, `Executor`, and `OutputRouter`.
+
+The controller also has a command registry. Built-ins (`info`, `jobs`,
+`read_job`, `wait`) are always present; packages and plugins can add more,
+and creatures with procedural skills get a `skill` controller command wired
+in automatically.
 
 Key invariants:
 
@@ -72,6 +80,10 @@ Key invariants:
   batch and get their own turn.
 - The controller never calls tools directly; it hands them to the
   `Executor` which spawns `asyncio.Task`s.
+- Provider-native tools are declared to the LLM but filtered out of
+  executor execution.
+- If a `post_llm_call` plugin rewrites the final assistant message, the
+  visible text is updated and an audit-style activity event is emitted.
 
 ## What you can therefore do
 

@@ -25,9 +25,13 @@ All five module kinds use the same wiring pattern. They differ only in the proto
 
 Contract (`kohakuterrarium.modules.tool.base`):
 
-- `async execute(args: dict, context: ToolContext | None) -> ToolResult`
-- optional class attrs: `needs_context`, `parallel_allowed`, `timeout`, `max_output`
-- optional `get_full_documentation() -> str` (loaded by the `info` framework command)
+- subclass `BaseTool`
+- implement `tool_name`, `description`, and `_execute(args, **kwargs) -> ToolResult`
+- set `needs_context = True` if you want `context=ToolContext`
+- optionally override `execution_mode`
+- optionally provide `prompt_contribution()` for a short prompt hint
+- optionally mark `is_concurrency_safe = False` if this tool should be serialized against other unsafe tools
+- optionally override `get_full_documentation()` (loaded by the `info` framework command)
 
 Minimal tool:
 
@@ -37,23 +41,19 @@ from kohakuterrarium.modules.tool.base import BaseTool, ToolContext, ToolResult
 
 
 class MyTool(BaseTool):
-    def __init__(self):
-        super().__init__(
-            name="my_tool",
-            description="Do the thing.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "target": {"type": "string"},
-                },
-                "required": ["target"],
-            },
-            needs_context=True,
-        )
+    needs_context = True
 
-    async def execute(self, args: dict, context: ToolContext | None = None) -> ToolResult:
+    @property
+    def tool_name(self) -> str:
+        return "my_tool"
+
+    @property
+    def description(self) -> str:
+        return "Do the thing."
+
+    async def _execute(self, args: dict, *, context: ToolContext | None = None) -> ToolResult:
         target = args["target"]
-        # context.pwd, context.session, context.environment, context.file_guard, ...
+        # context.working_dir, context.session, context.environment, ...
         return ToolResult(output=f"Did the thing to {target}.")
 ```
 
@@ -67,11 +67,19 @@ tools:
     class: MyTool
 ```
 
-Tool execution modes (set via `BaseTool`):
+Tool execution modes (set via `BaseTool.execution_mode`):
 
-- **direct** (default) — awaited within the turn, result becomes a `tool_complete` event.
+- **direct** — awaited within the turn, result becomes a `tool_complete` event.
 - **background** — submitted, returns a job id; result arrives later.
 - **stateful** — generator-like, yields intermediate results over multiple turns.
+
+Concurrency is a separate knob: set `is_concurrency_safe = False` on tools
+that mutate shared state unsafely (destructive shell commands, writes to the
+same resource, etc.). The executor will serialize those behind one shared lock.
+
+Provider-native tools are a different category again. If you build one, set
+`is_provider_native = True` and `provider_support = frozenset({...})`; the
+executor will skip it and the provider will handle it on the wire.
 
 Testing:
 

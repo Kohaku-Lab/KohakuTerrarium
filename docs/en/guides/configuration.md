@@ -121,6 +121,17 @@ tools:
 
 See [Custom Modules](custom-modules.md) for the protocol.
 
+Provider-native tools can also appear automatically. For example, a
+Codex-backed creature gets `image_gen` injected unless you opt out:
+
+```yaml
+disable_provider_tools:
+  - image_gen
+```
+
+If you want to keep the provider-native tool but override its knobs, wire it
+explicitly under `tools:`; the explicit entry wins over auto-injection.
+
 ## How do I add a sub-agent?
 
 ```yaml
@@ -133,9 +144,27 @@ subagents:
     config: CRITIC_CONFIG
     interactive: true       # stays alive across parent turns
     can_modify: true
+    options:
+      budget_inherit: true
 ```
 
 Built-ins: `worker`, `coordinator`, `explore`, `plan`, `research`, `critic`, `response`, `memory_read`, `memory_write`, `summarize`.
+
+If you also set `max_iterations` on the parent creature, sub-agents can share
+that turn budget or take an isolated slice:
+
+```yaml
+max_iterations: 30
+subagents:
+  - name: explore
+    type: builtin
+    options:
+      budget_inherit: true      # default: child consumes from the same pool
+  - name: critic
+    type: builtin
+    options:
+      budget_allocation: 5      # child gets its own 5-turn pool
+```
 
 ## How do I add a trigger?
 
@@ -263,6 +292,19 @@ skill_mode: dynamic   # default — the `info` framework command loads full docs
 skill_mode: static    # full tool docs baked into system prompt
 ```
 
+Procedural skills are a separate layer. Package skills default disabled and are
+opted in by name (or `"*"` for all package skills):
+
+```yaml
+skills:
+  - repo-surgery
+  - "*"
+skill_index_budget_bytes: 4096
+```
+
+Users can then manage discovered skills at runtime with `/skill ...`, and the
+model can invoke them explicitly via `##skill <name>##`.
+
 ## How do I keep a creature alive without user input?
 
 ```yaml
@@ -287,6 +329,16 @@ termination:
 ```
 
 Any met condition stops the agent.
+
+If what you want is "the whole agent tree only gets N LLM calls", use the
+shared iteration budget instead:
+
+```yaml
+max_iterations: 30
+```
+
+That budget is consumed by the parent controller and, by default, by any
+sub-agent with `budget_inherit: true`.
 
 ## How do I wire a deterministic pipeline edge?
 
@@ -345,6 +397,8 @@ kt run path/to/creature --pwd /path/to/project
 - **Env var not expanding.** Use `${VAR}` (with braces). `$VAR` is left literal.
 - **Child config "lost" a tool from the parent.** You declared `no_inherit: [tools]`. Remove it to extend instead.
 - **Config loads but tool isn't present.** Shorthand names are resolved against the built-in tool catalog — typos fall through silently. Check `kt info path/to/creature`.
+- **Provider-native tool didn't appear.** Confirm the backend advertises it through `provider_native_tools`, and that you didn't opt out with `disable_provider_tools`.
+- **Model switching feels ambiguous.** Use the canonical `provider/name` form (`/model codex/gpt-5.5`, `/model openai/gpt-5.4-api`).
 - **Two conflicting settings.** CLI overrides (`--llm`) win over config; config wins over `default_model` from `llm_profiles.yaml`.
 
 ## See also

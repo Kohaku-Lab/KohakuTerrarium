@@ -158,6 +158,10 @@ The aggregator appends tool-list, framework hints, env info, and `CLAUDE.md` aut
 
 Use `dynamic` unless you want a fixed, auditable prompt.
 
+Procedural skills are separate from tool docs. Discovered package skills default
+disabled until the creature opts them in with `skills:`; the prompt only gets a
+byte-budgeted skill index, not every full `SKILL.md` body.
+
 ## Tool format
 
 Controls the syntax the LLM emits to call tools (and to invoke framework commands). Applies to the parser and to the framework-hints block of the system prompt.
@@ -210,6 +214,8 @@ subagents:
     config: SPECIALIST_CONFIG
     interactive: true                 # stays alive across parent turns
     can_modify: true
+    options:
+      budget_inherit: true
 ```
 
 Setup-able triggers opt in per-creature — a creature without any
@@ -219,6 +225,10 @@ universal `BaseTrigger` subclass declares its own `setup_tool_name`
 write your own, see [Custom Modules — Triggers](custom-modules.md).
 
 See [reference/builtins](../reference/builtins.md) for the complete tool and sub-agent catalog; [Custom Modules](custom-modules.md) for writing your own.
+
+On providers that advertise native tools, some tools can appear without being
+listed here at all. Codex-backed creatures, for example, get `image_gen`
+auto-injected unless the creature opts out with `disable_provider_tools`.
 
 ## Triggers
 
@@ -263,6 +273,9 @@ termination:
 
 Any met condition stops the agent. `keywords` is substring matching on controller output.
 
+If you want a shared parent+sub-agent turn cap instead of a stop condition,
+use `max_iterations` on the creature and sub-agent `budget_*` options.
+
 ## Session key
 
 Multiple creatures can share the same `Session` (scratchpad + channels) by setting `session_key`:
@@ -283,6 +296,7 @@ Framework commands use the same syntax family as tool calls — whichever `tool_
 - `[/read_job]job_id[read_job/]` — read output from a background job (accepts `--lines N` and `--offset M` in the body).
 - `[/jobs][jobs/]` — list running jobs with their IDs.
 - `[/wait]job_id[wait/]` — block the current turn until a background job finishes.
+- `[/skill]skill_name [args][skill/]` — explicitly invoke a procedural skill body.
 
 Command names share a namespace with tool names; the read-job-output command is called `read_job` precisely to avoid colliding with the `read` file-reader tool.
 
@@ -301,9 +315,14 @@ Slash commands the *user* types at the CLI/TUI prompt. Built-ins:
 | `/compact` | | Manual compaction |
 | `/regen` | `/regenerate` | Rerun last assistant turn |
 | `/plugin [list\|enable\|disable\|toggle] [name]` | `/plugins` | Manage lifecycle plugins |
+| `/skill [list\|enable\|disable\|toggle\|show] [name]` | `/skills` | Manage procedural skills |
+| `/<skill-name> [args]` | — | Direct user-invoke path for an enabled skill |
 | `/exit` | `/quit`, `/q` | Graceful exit |
 
 Custom user commands live under `builtins/user_commands/` or ship inside packages. Authoring: [Custom Modules](custom-modules.md).
+
+`/model` now prefers canonical provider-qualified names, so in mixed-backend
+installs `codex/gpt-5.5` and `openai/gpt-5.4-api` are the least ambiguous forms.
 
 ## Input and output
 

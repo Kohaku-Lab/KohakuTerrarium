@@ -53,6 +53,8 @@ with tables:
 - `fts` — SQLite FTS5 index over events (keyword search).
 - Vector index (optional, under the same store) — built by
   `kt embedding` when requested.
+- `*.artifacts/` sibling directory — binary outputs such as generated
+  images, stored next to the `.kohakutr` file rather than inside SQLite.
 
 ### Resume path
 
@@ -86,8 +88,9 @@ them as the tool result.
   the snapshot, not O(N) against history.
 - **Non-serialisable state is rebuilt from config.** Sockets, pywebview
   handles, LLM provider sessions — recreated, not restored.
-- **One file per session.** Portable; copyable; `.kohakutr` extension
-  lets tooling recognise it.
+- **One logical bundle per session.** The SQLite file is the primary
+  unit, but binary artifacts may live in a sibling `<session>.artifacts/`
+  directory.
 - **Resume is opt-out.** `--no-session` disables the store entirely.
 
 ## Where it lives in the code
@@ -96,6 +99,8 @@ them as the tool result.
 - `src/kohakuterrarium/session/output.py` — `SessionOutput` records
   events via the `OutputModule` protocol, so nothing special is
   needed at the controller layer.
+- `src/kohakuterrarium/session/artifacts.py` — artifact path resolution
+  and safe binary writes.
 - `src/kohakuterrarium/session/resume.py` — the rebuild path.
 - `src/kohakuterrarium/session/memory.py` — FTS and vector queries.
 - `src/kohakuterrarium/session/embedding.py` — embedding providers.

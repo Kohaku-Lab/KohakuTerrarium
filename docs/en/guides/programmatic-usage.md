@@ -54,6 +54,7 @@ Key methods:
 - `await agent.inject_event(TriggerEvent(...))` — push any event.
 - `agent.interrupt()` — stop the current processing cycle (non-blocking).
 - `agent.switch_model(profile_name)` — change LLM at runtime.
+- `agent.llm_identifier()` — read the canonical `provider/name[@variations]` identifier.
 - `agent.set_output_handler(fn, replace_default=False)` — add or replace an output sink.
 - `await agent.add_trigger(trigger)` / `await agent.remove_trigger(id)` — runtime trigger management.
 
@@ -81,6 +82,8 @@ asyncio.run(main())
 ```
 
 `chat(message)` yields text chunks as the controller streams. Tool activity and sub-agent events are surfaced through the output module's activity callbacks — `AgentSession` focuses on the text stream; for richer events, use `Agent` + a custom output module.
+
+`AgentSession.get_status()` also exposes `llm_name`, the canonical provider-qualified model identifier used by the web UI and `/model`.
 
 Builders: `AgentSession.from_path(...)`, `from_config(AgentConfig)`, `from_agent(pre_built_agent)`.
 
@@ -211,6 +214,10 @@ agent.attach_session_store(store)
 ```
 
 For simple cases `AgentSession` / `KohakuManager` handle this automatically based on `session_dir`.
+
+If your agent generates binary artifacts (for example provider-native images),
+attach the session store before the run so those artifacts can be persisted
+beside the session file under `<session>.artifacts/`.
 
 ## Testing
 
