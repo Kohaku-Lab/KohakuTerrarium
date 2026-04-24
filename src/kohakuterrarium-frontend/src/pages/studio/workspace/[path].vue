@@ -121,7 +121,7 @@ import KButton from "@/components/studio/common/KButton.vue"
 import NewCreatureDialog from "@/components/studio/dashboard/NewCreatureDialog.vue"
 import NewModuleDialog from "@/components/studio/dashboard/NewModuleDialog.vue"
 import { useStudioWorkspaceStore } from "@/stores/studio/workspace"
-import { creatureAPI } from "@/utils/studio/api"
+import { creatureAPI, manifestAPI } from "@/utils/studio/api"
 import { useI18n } from "@/utils/i18n"
 
 const { t } = useI18n()
@@ -206,8 +206,37 @@ async function onCreatureCreated(created) {
 async function onModuleCreated({ kind, name }) {
   await ws.refresh().catch(() => {})
   ElMessage.success(t("studio.newModule.created", { kind, name }))
-  // Module editor lands in Phase 5 — navigation goes to the placeholder.
+
+  // Offer to sync into kohaku.yaml so other creatures can discover
+  // the new module via the catalog. Only prompts when a manifest file
+  // exists (or would be created) in the current workspace — skipped
+  // silently on bare workspaces without kohaku.yaml intent.
+  askManifestSync(kind, name).catch(() => {})
+
   openModule(kind, name)
+}
+
+async function askManifestSync(kind, name) {
+  try {
+    await ElMessageBox.confirm(t("studio.newModule.manifestSyncBody", { kind, name }), t("studio.newModule.manifestSyncTitle"), {
+      confirmButtonText: t("studio.newModule.manifestSyncConfirm"),
+      cancelButtonText: t("studio.newModule.manifestSyncCancel"),
+      type: "info",
+    })
+  } catch {
+    return // user declined
+  }
+  try {
+    const res = await manifestAPI.sync(kind, name)
+    if (res?.added) {
+      ElMessage.success(t("studio.newModule.manifestSyncAdded", { name }))
+    } else {
+      ElMessage.info(t("studio.newModule.manifestSyncAlready", { name }))
+    }
+    await ws.refresh().catch(() => {})
+  } catch (err) {
+    ElMessage.error(err?.message || String(err))
+  }
 }
 
 async function confirmDelete(c) {

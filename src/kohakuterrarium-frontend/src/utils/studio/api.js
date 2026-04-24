@@ -48,6 +48,12 @@ export const workspaceAPI = {
   close: () => run(http.post("/workspace/close")),
 }
 
+export const manifestAPI = {
+  /** Append a workspace-authored module into kohaku.yaml. Idempotent;
+   *  returns {added: false} when the entry already exists. */
+  sync: (kind, name) => run(http.post("/workspace/manifest/sync", { kind, name })),
+}
+
 export const creatureAPI = {
   list: () => run(http.get("/creatures")),
   load: (name) => run(http.get(`/creatures/${encodeURIComponent(name)}`)),
@@ -113,6 +119,7 @@ export const schemaAPI = {
 export default {
   meta: metaAPI,
   workspace: workspaceAPI,
+  manifest: manifestAPI,
   creatures: creatureAPI,
   modules: moduleAPI,
   catalog: catalogAPI,
