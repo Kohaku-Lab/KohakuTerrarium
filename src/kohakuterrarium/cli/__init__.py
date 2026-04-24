@@ -2,13 +2,6 @@
 
 import argparse
 
-from kohakuterrarium.packages import resolve_package_path
-from kohakuterrarium.serving.web import run_desktop_app, run_web_server
-from kohakuterrarium.terrarium.cli import (
-    add_terrarium_subparser,
-    handle_terrarium_command,
-)
-
 from kohakuterrarium.cli.auth import login_cli
 from kohakuterrarium.cli.config import add_config_subparser, config_cli
 from kohakuterrarium.cli.extension import extension_info_cli, extension_list_cli
@@ -27,6 +20,12 @@ from kohakuterrarium.cli.resume import resume_cli
 from kohakuterrarium.cli.run import run_agent_cli
 from kohakuterrarium.cli.serve import add_serve_subparser, serve_cli
 from kohakuterrarium.cli.version import format_version_report
+from kohakuterrarium.packages import resolve_package_path
+from kohakuterrarium.serving.web import run_desktop_app, run_web_server
+from kohakuterrarium.terrarium.cli import (
+    add_terrarium_subparser,
+    handle_terrarium_command,
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:

@@ -13,18 +13,10 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 from unittest.mock import MagicMock
 
-
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.base import LLMProvider
-from kohakuterrarium.modules.subagent.base import (
-    SubAgent,
-    SubAgentJob,
-    SubAgentResult,
-)
-from kohakuterrarium.modules.subagent.config import (
-    ContextUpdateMode,
-    SubAgentConfig,
-)
+from kohakuterrarium.modules.subagent.base import SubAgent, SubAgentJob, SubAgentResult
+from kohakuterrarium.modules.subagent.config import ContextUpdateMode, SubAgentConfig
 from kohakuterrarium.modules.tool.base import Tool, ToolConfig, ToolResult
 from kohakuterrarium.prompt.skill_loader import (
     SkillDoc,
@@ -776,8 +768,8 @@ class TestController:
 
 
 from kohakuterrarium.modules.subagent.interactive import (
-    InteractiveSubAgent,
     InteractiveOutput,
+    InteractiveSubAgent,
 )
 
 

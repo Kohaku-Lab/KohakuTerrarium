@@ -15,11 +15,7 @@ from kohakuterrarium.utils.async_utils import (
     run_with_timeout,
     to_thread,
 )
-from kohakuterrarium.utils.logging import (
-    disable_colors,
-    get_logger,
-    set_level,
-)
+from kohakuterrarium.utils.logging import disable_colors, get_logger, set_level
 
 __all__ = [
     # Logging

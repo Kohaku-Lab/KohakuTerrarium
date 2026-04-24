@@ -8,8 +8,8 @@ from kohakuterrarium.core.channel import (
     ChannelRegistry,
     ChannelSubscription,
 )
-from kohakuterrarium.core.session import get_channel_registry
 from kohakuterrarium.core.events import EventType, TriggerEvent
+from kohakuterrarium.core.session import get_channel_registry
 from kohakuterrarium.modules.trigger.base import BaseTrigger
 from kohakuterrarium.utils.logging import get_logger
 

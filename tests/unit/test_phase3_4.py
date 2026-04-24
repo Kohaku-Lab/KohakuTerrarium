@@ -18,6 +18,7 @@ _SKIP_WINDOWS = pytest.mark.skipif(
     sys.platform == "win32", reason="bash tool tests require Unix shell"
 )
 
+from kohakuterrarium.builtins.tools import BashTool
 from kohakuterrarium.commands import CommandResult, parse_command_args
 from kohakuterrarium.core.job import (
     JobResult,
@@ -28,12 +29,7 @@ from kohakuterrarium.core.job import (
     generate_job_id,
 )
 from kohakuterrarium.core.registry import Registry
-from kohakuterrarium.modules.tool import (
-    ExecutionMode,
-    ToolConfig,
-    ToolResult,
-)
-from kohakuterrarium.builtins.tools import BashTool
+from kohakuterrarium.modules.tool import ExecutionMode, ToolConfig, ToolResult
 
 
 class TestJobStatus:

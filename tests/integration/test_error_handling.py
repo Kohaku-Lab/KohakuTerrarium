@@ -4,7 +4,6 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-
 from kohakuterrarium.core.events import create_tool_complete_event
 from kohakuterrarium.core.session import Session
 from kohakuterrarium.modules.tool.base import (
@@ -13,9 +12,7 @@ from kohakuterrarium.modules.tool.base import (
     ToolContext,
     ToolResult,
 )
-from kohakuterrarium.testing import (
-    TestAgentBuilder,
-)
+from kohakuterrarium.testing import TestAgentBuilder
 
 # =============================================================================
 # Helpers

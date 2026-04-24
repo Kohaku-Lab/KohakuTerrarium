@@ -557,6 +557,7 @@ def test_settings_profiles_round_trip_includes_variation_groups(
     tmp_path: Path, monkeypatch
 ):
     from fastapi import FastAPI
+
     from kohakuterrarium.api.routes import settings as settings_route
 
     profiles_path = tmp_path / "llm_profiles.yaml"

@@ -17,13 +17,7 @@ frontend falls back to raw-Monaco mode.
 
 from typing import Protocol
 
-from kohakuterrarium.api.studio.codegen import (
-    io_mod,
-    plugin,
-    subagent,
-    tool,
-    trigger,
-)
+from kohakuterrarium.api.studio.codegen import io_mod, plugin, subagent, tool, trigger
 
 
 class RoundTripError(ValueError):

@@ -20,9 +20,7 @@ import pytest
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.channel import ChannelMessage
 from kohakuterrarium.core.config import load_agent_config
-from kohakuterrarium.core.session import (
-    remove_session,
-)
+from kohakuterrarium.core.session import remove_session
 from kohakuterrarium.modules.trigger.channel import ChannelTrigger
 from kohakuterrarium.terrarium.config import (
     ChannelConfig,

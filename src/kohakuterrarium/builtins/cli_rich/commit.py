@@ -17,11 +17,8 @@ from rich.text import Text
 from kohakuterrarium.builtins.cli_rich.blocks.message import AssistantMessageBlock
 from kohakuterrarium.builtins.cli_rich.blocks.tool import ToolCallBlock
 from kohakuterrarium.builtins.cli_rich.live_region import render_to_ansi
-from kohakuterrarium.builtins.cli_rich.theme import (
-    COLOR_USER,
-    ICON_USER,
-)
 from kohakuterrarium.builtins.cli_rich.runtime import spawn
+from kohakuterrarium.builtins.cli_rich.theme import COLOR_USER, ICON_USER
 from kohakuterrarium.builtins.outputs.stdout import _write_safe
 from kohakuterrarium.utils.logging import get_logger
 

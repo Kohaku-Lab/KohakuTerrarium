@@ -32,7 +32,7 @@ from kohakuterrarium.core.config import (
     ToolConfigItem,
     TriggerConfig,
 )
-from kohakuterrarium.core.loader import ModuleLoadError, ModuleLoader
+from kohakuterrarium.core.loader import ModuleLoader, ModuleLoadError
 from kohakuterrarium.modules.tool.base import BaseTool
 
 # ---------------------------------------------------------------------------

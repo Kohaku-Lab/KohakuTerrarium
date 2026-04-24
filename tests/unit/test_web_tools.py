@@ -3,11 +3,11 @@
 import pytest
 
 from kohakuterrarium.builtins.tools.web_fetch import (
-    WebFetchTool,
     _HAS_CRAWL4AI,
     _HAS_TRAFILATURA,
+    WebFetchTool,
 )
-from kohakuterrarium.builtins.tools.web_search import WebSearchTool, _HAS_DDG
+from kohakuterrarium.builtins.tools.web_search import _HAS_DDG, WebSearchTool
 
 # ── WebFetchTool ──────────────────────────────────────────────
 

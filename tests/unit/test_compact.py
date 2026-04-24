@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from kohakuterrarium.core.compact import (
+    DEFAULT_MAX_TOKENS,
     CompactConfig,
     CompactManager,
-    DEFAULT_MAX_TOKENS,
 )
 from kohakuterrarium.core.conversation import Conversation
 

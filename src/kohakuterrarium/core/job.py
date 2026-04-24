@@ -4,11 +4,11 @@ Job status tracking for background tasks.
 Jobs represent running tools or sub-agents with their status and output.
 """
 
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any
-import uuid
 
 
 class JobType(Enum):

@@ -11,11 +11,7 @@ from typing import Any
 from textual.containers import VerticalScroll
 from textual.widgets import Markdown, Static
 
-from kohakuterrarium.builtins.tui.app import (
-    IDLE_STATUS,
-    AgentTUI,
-    _safe_id,
-)
+from kohakuterrarium.builtins.tui.app import IDLE_STATUS, AgentTUI, _safe_id
 from kohakuterrarium.builtins.tui.widgets import (
     CompactSummaryBlock,
     ConfirmModal,

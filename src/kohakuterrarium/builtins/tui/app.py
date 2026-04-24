@@ -10,8 +10,6 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Footer, Header, Static, TabbedContent, TabPane
 
-from kohakuterrarium.utils.logging import get_logger
-
 from kohakuterrarium.builtins.tui.widgets import (
     ChatInput,
     LoadOlderButton,
@@ -22,6 +20,7 @@ from kohakuterrarium.builtins.tui.widgets import (
     TerrariumPanel,
     UserMessage,
 )
+from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 

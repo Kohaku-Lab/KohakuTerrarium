@@ -7,12 +7,7 @@ hints and that tools provide helpful errors for non-existent channels.
 from pathlib import Path
 from unittest.mock import MagicMock
 
-
-from kohakuterrarium.core.channel import (
-    AgentChannel,
-    ChannelRegistry,
-    SubAgentChannel,
-)
+from kohakuterrarium.core.channel import AgentChannel, ChannelRegistry, SubAgentChannel
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.prompt.aggregator import (
     _build_channel_hints,

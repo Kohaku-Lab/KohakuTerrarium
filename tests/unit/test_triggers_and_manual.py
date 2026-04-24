@@ -1,10 +1,10 @@
 """Tests for trigger system improvements and require_manual_read."""
 
+from kohakuterrarium.modules.tool.base import BaseTool
 from kohakuterrarium.modules.trigger.base import BaseTrigger
 from kohakuterrarium.modules.trigger.channel import ChannelTrigger
 from kohakuterrarium.modules.trigger.scheduler import SchedulerTrigger
 from kohakuterrarium.modules.trigger.timer import TimerTrigger
-from kohakuterrarium.modules.tool.base import BaseTool
 
 
 class TestTriggerProperties:

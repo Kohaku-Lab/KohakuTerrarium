@@ -21,10 +21,7 @@ from typing import Any
 
 from kohakuvault import KVault, TextVault
 
-from kohakuterrarium.session.artifacts import (
-    artifacts_dir_for,
-    write_artifact_bytes,
-)
+from kohakuterrarium.session.artifacts import artifacts_dir_for, write_artifact_bytes
 from kohakuterrarium.session.history import normalize_resumable_events
 from kohakuterrarium.utils.logging import get_logger
 

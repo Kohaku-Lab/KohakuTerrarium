@@ -34,11 +34,7 @@ from kohakuterrarium.parsing.events import (
     is_action_event,
     is_text_event,
 )
-from kohakuterrarium.parsing.format import (
-    BRACKET_FORMAT,
-    XML_FORMAT,
-    ToolCallFormat,
-)
+from kohakuterrarium.parsing.format import BRACKET_FORMAT, XML_FORMAT, ToolCallFormat
 from kohakuterrarium.parsing.patterns import (
     DEFAULT_COMMANDS,
     DEFAULT_CONTENT_ARG_MAP,
@@ -53,11 +49,7 @@ from kohakuterrarium.parsing.patterns import (
     parse_closing_tag,
     parse_opening_tag,
 )
-from kohakuterrarium.parsing.state_machine import (
-    ParserState,
-    StreamParser,
-    parse_full,
-)
+from kohakuterrarium.parsing.state_machine import ParserState, StreamParser, parse_full
 
 # Alias for backward compatibility
 parse_complete = parse_full

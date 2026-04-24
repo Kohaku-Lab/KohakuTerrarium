@@ -10,7 +10,10 @@ nested shape on the next save.
 
 from typing import Any
 
-from kohakuterrarium.llm.backends import _BUILTIN_PROVIDER_NAMES, _SCHEMA_VERSION
+from kohakuterrarium.llm.backends import (
+    _BUILTIN_PROVIDER_NAMES,
+    _SCHEMA_VERSION,
+)
 from kohakuterrarium.llm.backends import (
     legacy_provider_from_data as _legacy_provider_from_data,
 )

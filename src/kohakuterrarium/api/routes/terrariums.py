@@ -3,10 +3,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from kohakuterrarium.api.routes.agents import _redacted_env
-
 from kohakuterrarium.api.deps import get_manager
 from kohakuterrarium.api.events import get_event_log
+from kohakuterrarium.api.routes.agents import _redacted_env
 from kohakuterrarium.api.schemas import AgentChat, ChannelAdd, TerrariumCreate
 from kohakuterrarium.utils.logging import get_logger
 

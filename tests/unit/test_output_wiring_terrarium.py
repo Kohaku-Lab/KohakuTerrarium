@@ -11,10 +11,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from kohakuterrarium.core.events import EventType, TriggerEvent
-from kohakuterrarium.core.output_wiring import (
-    ROOT_TARGET,
-    OutputWiringEntry,
-)
+from kohakuterrarium.core.output_wiring import ROOT_TARGET, OutputWiringEntry
 from kohakuterrarium.terrarium.output_wiring import TerrariumOutputWiringResolver
 
 # ---------------------------------------------------------------------------

@@ -21,10 +21,7 @@ from kohakuterrarium.api.studio.catalog_sources import (
     package_entries,
     workspace_manifest_entries,
 )
-from kohakuterrarium.api.studio.utils.paths import (
-    ensure_in_root,
-    sanitize_name,
-)
+from kohakuterrarium.api.studio.utils.paths import ensure_in_root, sanitize_name
 from kohakuterrarium.api.studio.yaml_io.creature import (
     load_creature_file,
     save_creature_merged,
@@ -358,10 +355,7 @@ class LocalWorkspace:
             kind_dir.mkdir(parents=True, exist_ok=True)
             path = kind_dir / f"{name}.py"
 
-        from kohakuterrarium.api.studio.codegen import (
-            RoundTripError,
-            get_codegen,
-        )
+        from kohakuterrarium.api.studio.codegen import RoundTripError, get_codegen
 
         cg = get_codegen(kind)
 

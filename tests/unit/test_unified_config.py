@@ -11,9 +11,7 @@ from kohakuterrarium.parsing.format import (
     ToolCallFormat,
     format_tool_call_example,
 )
-from kohakuterrarium.terrarium.config import (
-    load_terrarium_config,
-)
+from kohakuterrarium.terrarium.config import load_terrarium_config
 
 # ---------------------------------------------------------------------------
 # format_tool_call_example
@@ -234,27 +232,21 @@ class TestFormatAwarePrompts:
         assert "send_message" in hints
 
     def test_subagent_hints_native_no_brackets(self):
-        from kohakuterrarium.modules.subagent.base import (
-            build_subagent_framework_hints,
-        )
+        from kohakuterrarium.modules.subagent.base import build_subagent_framework_hints
 
         hints = build_subagent_framework_hints("native")
         matches = BRACKET_PATTERN.findall(hints)
         assert matches == [], f"Bracket leaked in native subagent hints: {matches}"
 
     def test_subagent_hints_bracket_has_bracket_syntax(self):
-        from kohakuterrarium.modules.subagent.base import (
-            build_subagent_framework_hints,
-        )
+        from kohakuterrarium.modules.subagent.base import build_subagent_framework_hints
 
         hints = build_subagent_framework_hints("bracket", BRACKET_FORMAT)
         assert "[/tool_name]" in hints
         assert "@@arg=value" in hints
 
     def test_subagent_hints_xml_has_xml_syntax(self):
-        from kohakuterrarium.modules.subagent.base import (
-            build_subagent_framework_hints,
-        )
+        from kohakuterrarium.modules.subagent.base import build_subagent_framework_hints
 
         hints = build_subagent_framework_hints("xml", XML_FORMAT)
         assert "<tool_name" in hints
@@ -264,9 +256,7 @@ class TestFormatAwarePrompts:
 
     def test_subagent_hints_custom_format(self):
         """Custom format generates correct examples."""
-        from kohakuterrarium.modules.subagent.base import (
-            build_subagent_framework_hints,
-        )
+        from kohakuterrarium.modules.subagent.base import build_subagent_framework_hints
 
         custom = ToolCallFormat(
             start_char="{",

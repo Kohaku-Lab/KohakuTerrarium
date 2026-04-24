@@ -16,17 +16,13 @@ from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.base import LLMProvider
 from kohakuterrarium.llm.tools import build_tool_schemas
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
-from kohakuterrarium.modules.subagent.result import (
-    SubAgentJob,  # noqa: F401 – re-exported for backward compat
+from kohakuterrarium.modules.subagent.result import (  # noqa: F401 – re-exported for backward compat
+    SubAgentJob,
     SubAgentResult,
     build_subagent_framework_hints,
 )
 from kohakuterrarium.parsing import ParserConfig, StreamParser, TextEvent, ToolCallEvent
-from kohakuterrarium.parsing.format import (
-    BRACKET_FORMAT,
-    XML_FORMAT,
-    ToolCallFormat,
-)
+from kohakuterrarium.parsing.format import BRACKET_FORMAT, XML_FORMAT, ToolCallFormat
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

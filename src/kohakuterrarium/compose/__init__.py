@@ -25,8 +25,8 @@ Usage::
 from kohakuterrarium.compose.agent import AgentFactory, AgentRunnable, agent, factory
 from kohakuterrarium.compose.core import (
     BaseRunnable,
-    Fallback,
     FailsWhen,
+    Fallback,
     PipelineIterator,
     Product,
     Pure,

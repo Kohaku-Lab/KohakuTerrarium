@@ -12,12 +12,7 @@ letting packages ship reusable prompt bundles.
 from pathlib import Path
 from typing import Any
 
-from jinja2 import (
-    BaseLoader,
-    Environment,
-    TemplateNotFound,
-    TemplateSyntaxError,
-)
+from jinja2 import BaseLoader, Environment, TemplateNotFound, TemplateSyntaxError
 
 from kohakuterrarium.utils.logging import get_logger
 

@@ -36,8 +36,8 @@ from kohakuterrarium.core.job import (
     generate_job_id,
 )
 from kohakuterrarium.core.loader import (
-    ModuleLoadError,
     ModuleLoader,
+    ModuleLoadError,
     load_custom_module,
 )
 from kohakuterrarium.core.registry import Registry, get_registry, register_tool

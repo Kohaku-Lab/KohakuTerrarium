@@ -20,10 +20,10 @@ from uuid import uuid4
 
 from kohakuterrarium.builtins.user_commands import get_builtin_user_command
 from kohakuterrarium.core.channel import AgentChannel, ChannelMessage
-from kohakuterrarium.packages import is_package_ref, resolve_package_path
 from kohakuterrarium.core.config import AgentConfig
 from kohakuterrarium.core.environment import Environment
 from kohakuterrarium.modules.user_command.base import UserCommandContext
+from kohakuterrarium.packages import is_package_ref, resolve_package_path
 from kohakuterrarium.serving.agent_session import AgentSession
 from kohakuterrarium.serving.events import ChannelEvent
 from kohakuterrarium.session.store import SessionStore

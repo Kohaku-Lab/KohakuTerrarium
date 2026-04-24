@@ -24,11 +24,7 @@ from kohakuterrarium.llm.base import (
     NativeToolCall,
     ToolSchema,
 )
-from kohakuterrarium.llm.codex_auth import (
-    CodexTokens,
-    oauth_login,
-    refresh_tokens,
-)
+from kohakuterrarium.llm.codex_auth import CodexTokens, oauth_login, refresh_tokens
 from kohakuterrarium.llm.codex_image_gen import (
     build_image_part,
     translate_image_gen_tool,

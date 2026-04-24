@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-
 from kohakuterrarium.terrarium.config import CreatureConfig
 from kohakuterrarium.terrarium.creature import CreatureHandle
 from kohakuterrarium.terrarium.output_log import LogEntry, OutputLogCapture

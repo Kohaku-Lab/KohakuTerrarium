@@ -10,7 +10,6 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from kohakuterrarium.api.deps import get_manager
-from kohakuterrarium.utils.logging import get_logger
 from kohakuterrarium.session.embedding import create_embedder
 from kohakuterrarium.session.memory import SessionMemory
 from kohakuterrarium.session.resume import (
@@ -19,6 +18,7 @@ from kohakuterrarium.session.resume import (
     resume_terrarium,
 )
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 

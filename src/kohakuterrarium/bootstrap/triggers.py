@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Any
 
 from kohakuterrarium.core.config import AgentConfig
-from kohakuterrarium.core.loader import ModuleLoadError, ModuleLoader
+from kohakuterrarium.core.loader import ModuleLoader, ModuleLoadError
 from kohakuterrarium.core.session import Session
 from kohakuterrarium.core.trigger_manager import TriggerManager
 from kohakuterrarium.modules.trigger import (

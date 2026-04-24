@@ -35,10 +35,7 @@ from kohakuterrarium.builtins.subagent_catalog import (
     get_builtin_subagent_config,
     list_builtin_subagents,
 )
-from kohakuterrarium.builtins.tool_catalog import (
-    get_builtin_tool,
-    list_builtin_tools,
-)
+from kohakuterrarium.builtins.tool_catalog import get_builtin_tool, list_builtin_tools
 from kohakuterrarium.llm.profiles import list_all as list_all_models
 
 router = APIRouter()
@@ -249,9 +246,7 @@ async def list_models() -> list[dict]:
 @router.get("/embedding_presets")
 async def list_embedding_presets() -> dict:
     """Grouped embedding presets (model2vec / sentence-transformer)."""
-    from kohakuterrarium.session.embedding import (
-        list_embedding_presets as _list,
-    )
+    from kohakuterrarium.session.embedding import list_embedding_presets as _list
 
     return _list()
 

@@ -54,11 +54,7 @@ Usage:
     await manager.stop_interactive("output")
 """
 
-from kohakuterrarium.modules.subagent.base import (
-    SubAgent,
-    SubAgentJob,
-    SubAgentResult,
-)
+from kohakuterrarium.modules.subagent.base import SubAgent, SubAgentJob, SubAgentResult
 from kohakuterrarium.modules.subagent.config import (
     ContextUpdateMode,
     OutputTarget,

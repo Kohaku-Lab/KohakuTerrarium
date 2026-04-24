@@ -12,9 +12,9 @@ from kohakuterrarium.terrarium.config import (
     ChannelConfig,
     CreatureConfig,
     TerrariumConfig,
+    build_channel_topology_prompt,
     load_terrarium_config,
 )
-from kohakuterrarium.terrarium.config import build_channel_topology_prompt
 from kohakuterrarium.terrarium.runtime import TerrariumRuntime
 
 # Paths used across multiple tests

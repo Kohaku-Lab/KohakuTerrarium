@@ -19,7 +19,6 @@ from datetime import datetime
 from typing import Any
 
 from kohakuterrarium.llm.message import create_message
-
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

@@ -8,7 +8,7 @@ from typing import Any
 
 from kohakuterrarium.builtins.tool_catalog import get_builtin_tool
 from kohakuterrarium.core.config import AgentConfig
-from kohakuterrarium.core.loader import ModuleLoadError, ModuleLoader
+from kohakuterrarium.core.loader import ModuleLoader, ModuleLoadError
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.tool.base import BaseTool, ToolConfig
 from kohakuterrarium.modules.trigger.base import BaseTrigger

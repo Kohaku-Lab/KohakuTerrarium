@@ -8,11 +8,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from kohakuterrarium.core.config import load_agent_config
-from kohakuterrarium.packages import (
-    install_package,
-    list_packages,
-    uninstall_package,
-)
+from kohakuterrarium.packages import install_package, list_packages, uninstall_package
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

@@ -18,10 +18,7 @@ from unittest.mock import patch
 
 import pytest
 
-from kohakuterrarium.core.output_wiring import (
-    OutputWiringEntry,
-    ROOT_TARGET,
-)
+from kohakuterrarium.core.output_wiring import ROOT_TARGET, OutputWiringEntry
 from kohakuterrarium.core.session import remove_session
 from kohakuterrarium.terrarium.config import (
     ChannelConfig,

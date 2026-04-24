@@ -1,6 +1,7 @@
 """Guard: no source file exceeds 600 lines (soft) or 1000 lines (hard)."""
 
 from pathlib import Path
+
 import pytest
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "kohakuterrarium"

@@ -17,10 +17,7 @@ from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.base import LLMProvider
 from kohakuterrarium.modules.subagent.base import SubAgent, SubAgentResult
-from kohakuterrarium.modules.subagent.config import (
-    ContextUpdateMode,
-    SubAgentConfig,
-)
+from kohakuterrarium.modules.subagent.config import ContextUpdateMode, SubAgentConfig
 from kohakuterrarium.parsing import StreamParser, TextEvent, ToolCallEvent
 from kohakuterrarium.utils.logging import get_logger
 

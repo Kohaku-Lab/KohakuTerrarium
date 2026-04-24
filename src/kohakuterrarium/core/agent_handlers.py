@@ -6,8 +6,8 @@ import importlib
 from kohakuterrarium.core.agent_pre_dispatch import run_pre_tool_dispatch
 from kohakuterrarium.core.agent_tools import (
     AgentToolsMixin,
-    _TurnResult,
     _make_job_label,
+    _TurnResult,
 )
 from kohakuterrarium.core.backgroundify import BackgroundifyHandle, backgroundify
 from kohakuterrarium.core.budget import BudgetExhausted

@@ -19,14 +19,12 @@ from kohakuterrarium.api.routes import (
     terrariums,
 )
 from kohakuterrarium.api.studio import build_studio_router
-from kohakuterrarium.api.ws import (
-    agents as ws_agents,
-    channels as ws_channels,
-    chat as ws_chat,
-    files as ws_files,
-    logs as ws_logs,
-    terminal as ws_terminal,
-)
+from kohakuterrarium.api.ws import agents as ws_agents
+from kohakuterrarium.api.ws import channels as ws_channels
+from kohakuterrarium.api.ws import chat as ws_chat
+from kohakuterrarium.api.ws import files as ws_files
+from kohakuterrarium.api.ws import logs as ws_logs
+from kohakuterrarium.api.ws import terminal as ws_terminal
 
 
 @asynccontextmanager

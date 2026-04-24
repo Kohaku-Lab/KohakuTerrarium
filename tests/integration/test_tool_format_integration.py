@@ -9,7 +9,6 @@ Only tests that can run without API keys or external services.
 
 from pathlib import Path
 
-
 from kohakuterrarium.core.config import AgentConfig, load_agent_config
 from kohakuterrarium.parsing.format import BRACKET_FORMAT, XML_FORMAT, ToolCallFormat
 from kohakuterrarium.parsing.patterns import ParserConfig

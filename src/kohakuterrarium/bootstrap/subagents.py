@@ -9,7 +9,7 @@ from typing import Any
 
 from kohakuterrarium.builtins.subagent_catalog import get_builtin_subagent_config
 from kohakuterrarium.core.config import AgentConfig
-from kohakuterrarium.core.loader import ModuleLoadError, ModuleLoader
+from kohakuterrarium.core.loader import ModuleLoader, ModuleLoadError
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.subagent import SubAgentManager
 from kohakuterrarium.modules.subagent.config import SubAgentConfig

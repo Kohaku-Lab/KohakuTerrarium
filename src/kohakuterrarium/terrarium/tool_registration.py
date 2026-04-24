@@ -21,9 +21,9 @@ def ensure_terrarium_tools_registered() -> None:
     if _REGISTERED:
         return
     _REGISTERED = True
+    import kohakuterrarium.builtins.tools.terrarium_creature  # noqa: F401
     import kohakuterrarium.builtins.tools.terrarium_lifecycle  # noqa: F401
     import kohakuterrarium.builtins.tools.terrarium_messaging  # noqa: F401
-    import kohakuterrarium.builtins.tools.terrarium_creature  # noqa: F401
 
 
 # Auto-register so any get_builtin_tool("terrarium_*") call will

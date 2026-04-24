@@ -5,8 +5,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from kohakuterrarium.utils.logging import get_logger
 from kohakuterrarium.modules.output.base import OutputModule
+from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
