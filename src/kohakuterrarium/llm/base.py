@@ -264,6 +264,23 @@ class BaseLLMProvider:
         """
         return getattr(self, "_last_assistant_parts", None) or None
 
+    @property
+    def last_assistant_extra_fields(self) -> dict[str, Any]:
+        """Non-standard fields captured off the last assistant message.
+
+        Holds provider-specific top-level keys like ``reasoning_content``
+        (DeepSeek / Qwen / Grok), ``reasoning_details`` (OpenRouter /
+        MiMo), or anything else the backend appends to the assistant
+        message. The controller attaches these to the conversation so
+        they round-trip back into the outgoing wire format on the next
+        turn — required for stateful-chain reasoning models.
+
+        Providers populate ``self._last_assistant_extra_fields`` during
+        stream / complete handling. The base property returns ``{}``
+        so providers that don't capture anything stay a no-op.
+        """
+        return getattr(self, "_last_assistant_extra_fields", {}) or {}
+
     def translate_provider_native_tool(self, tool: Any) -> dict | None:
         """Translate a KT provider-native tool into a wire-format tool spec.
 

@@ -493,19 +493,21 @@ class Controller:
             self.llm.last_tool_calls if hasattr(self.llm, "last_tool_calls") else []
         )
 
+        # Stateful-chain reasoning fields (DeepSeek / MiMo / Qwen / …)
+        # round-trip back via extra_fields regardless of tool-call state.
+        extra_fields = getattr(self.llm, "last_assistant_extra_fields", {}) or {}
+        final_content = _merge_text_and_parts(assistant_content, structured_parts)
+        append_kwargs: dict = {"extra_fields": extra_fields}
+
         if native_calls:
             tool_calls_data = []
             known_subagents = set(self.registry.list_subagents())
-
             for tc in native_calls:
                 tool_calls_data.append(
                     {
                         "id": tc.id,
                         "type": "function",
-                        "function": {
-                            "name": tc.name,
-                            "arguments": tc.arguments,
-                        },
+                        "function": {"name": tc.name, "arguments": tc.arguments},
                     }
                 )
                 logger.info(
@@ -520,18 +522,9 @@ class Controller:
                     )
                 else:
                     yield ToolCallEvent(name=tc.name, args=call_args, raw=tc.arguments)
+            append_kwargs["tool_calls"] = tool_calls_data
 
-            # Append assistant message WITH tool_calls metadata
-            final_content = _merge_text_and_parts(assistant_content, structured_parts)
-            self.conversation.append(
-                "assistant",
-                final_content,
-                tool_calls=tool_calls_data,
-            )
-        else:
-            # No tool calls: normal assistant message
-            final_content = _merge_text_and_parts(assistant_content, structured_parts)
-            self.conversation.append("assistant", final_content)
+        self.conversation.append("assistant", final_content, **append_kwargs)
 
     # ------------------------------------------------------------------
     # Structured assistant content (images etc. from provider-native tools)
@@ -922,6 +915,9 @@ class Controller:
             self.conversation.append(
                 "assistant",
                 _merge_text_and_parts(self._last_assistant_content, structured),
+                extra_fields=(
+                    getattr(self.llm, "last_assistant_extra_fields", {}) or {}
+                ),
             )
 
         # Plugin post_llm_call chain-with-return (cluster B.3). Logic

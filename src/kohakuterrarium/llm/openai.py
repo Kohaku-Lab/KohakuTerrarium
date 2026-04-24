@@ -64,6 +64,7 @@ class OpenAIProvider(BaseLLMProvider):
         extra_headers: dict[str, str] | None = None,
         extra_body: dict[str, Any] | None = None,
         max_retries: int = 3,
+        echo_reasoning: bool = True,
     ):
         """Initialize the OpenAI provider.
 
@@ -78,6 +79,14 @@ class OpenAIProvider(BaseLLMProvider):
             extra_body: Additional fields merged into every API request body
                 (e.g., {"reasoning": {"enabled": True}})
             max_retries: Maximum retry attempts for transient errors
+            echo_reasoning: When ``True`` (default) capture provider-
+                emitted reasoning fields (``reasoning_content``,
+                ``reasoning_details``, ``reasoning``) and echo them back
+                on the next turn via :attr:`last_assistant_extra_fields`.
+                Required for stateful-chain reasoning on DeepSeek V4,
+                MiMo V2.5 (OpenRouter), Qwen, Grok, and similar. Turn
+                off for providers that 400 on unknown fields (e.g.
+                older DeepSeek V3) — the agent stores nothing.
         """
         super().__init__(
             LLMConfig(
@@ -94,7 +103,9 @@ class OpenAIProvider(BaseLLMProvider):
             )
 
         self.extra_body = extra_body or {}
+        self.echo_reasoning = bool(echo_reasoning)
         self._last_usage: dict[str, int] = {}
+        self._last_assistant_extra_fields: dict[str, Any] = {}
         self.prompt_cache_key: str | None = None
         # Retained so :mod:`anthropic_cache` can sniff whether caching
         # applies — the SDK client stores a trailing-slash-normalised URL
@@ -172,6 +183,7 @@ class OpenAIProvider(BaseLLMProvider):
     ) -> AsyncIterator[str]:
         """Stream chat completion via the OpenAI SDK."""
         self._last_tool_calls = []
+        self._last_assistant_extra_fields = {}
 
         api_tools = [t.to_api_format() for t in tools] if tools else None
 
@@ -214,6 +226,9 @@ class OpenAIProvider(BaseLLMProvider):
 
         self._last_usage = {}
         pending_calls: dict[int, dict[str, str]] = {}
+        reasoning_text = ""
+        reasoning_details: list[Any] = []
+        reasoning_extra: dict[str, Any] = {}
 
         stream = await self._client.chat.completions.create(**create_kwargs)
 
@@ -255,6 +270,25 @@ class OpenAIProvider(BaseLLMProvider):
                                 "arguments"
                             ] += tc_delta.function.arguments
 
+            # Capture provider-specific reasoning deltas when enabled.
+            # These aren't on the typed OpenAI SDK delta surface; the
+            # SDK exposes unknown response fields via ``model_extra``.
+            if self.echo_reasoning:
+                rc_piece = _delta_field(delta, "reasoning_content")
+                if isinstance(rc_piece, str):
+                    reasoning_text += rc_piece
+                rd_piece = _delta_field(delta, "reasoning_details")
+                if isinstance(rd_piece, list) and rd_piece:
+                    reasoning_details.extend(rd_piece)
+                # OpenRouter also occasionally emits a plain "reasoning"
+                # string alongside ``reasoning_details`` — keep the last
+                # value; the details array is the canonical source.
+                r_piece = _delta_field(delta, "reasoning")
+                if isinstance(r_piece, str) and r_piece:
+                    reasoning_extra["reasoning"] = (
+                        reasoning_extra.get("reasoning", "") + r_piece
+                    )
+
             # Yield text content
             if delta.content:
                 yield delta.content
@@ -275,6 +309,16 @@ class OpenAIProvider(BaseLLMProvider):
                 tools=[tc.name for tc in self._last_tool_calls],
             )
 
+        if reasoning_text or reasoning_details or reasoning_extra:
+            self._last_assistant_extra_fields = _pack_reasoning_fields(
+                reasoning_text, reasoning_details, reasoning_extra
+            )
+            logger.debug(
+                "Reasoning fields captured",
+                has_content=bool(reasoning_text),
+                details_count=len(reasoning_details),
+            )
+
         if self._last_usage:
             logger.info(
                 "Token usage",
@@ -293,6 +337,7 @@ class OpenAIProvider(BaseLLMProvider):
     ) -> ChatResponse:
         """Non-streaming chat completion via the OpenAI SDK."""
         self._last_tool_calls = []
+        self._last_assistant_extra_fields = {}
 
         create_kwargs: dict[str, Any] = {
             "model": kwargs.get("model", self.config.model),
@@ -340,6 +385,21 @@ class OpenAIProvider(BaseLLMProvider):
                 tools=[tc.name for tc in self._last_tool_calls],
             )
 
+        # Capture reasoning fields off the complete assistant message.
+        if self.echo_reasoning:
+            rc = _delta_field(message, "reasoning_content")
+            rd = _delta_field(message, "reasoning_details")
+            r = _delta_field(message, "reasoning")
+            extras = {}
+            if isinstance(rc, str) and rc:
+                extras["reasoning_content"] = rc
+            if isinstance(rd, list) and rd:
+                extras["reasoning_details"] = rd
+            if isinstance(r, str) and r:
+                extras["reasoning"] = r
+            if extras:
+                self._last_assistant_extra_fields = extras
+
         if response.usage:
             cached = 0
             cache_write = 0
@@ -376,3 +436,44 @@ class OpenAIProvider(BaseLLMProvider):
 
     async def __aexit__(self, *args: Any) -> None:
         await self.close()
+
+
+# ----------------------------------------------------------------------
+# Reasoning-field helpers
+# ----------------------------------------------------------------------
+
+
+def _delta_field(obj: Any, name: str) -> Any:
+    """Fetch *name* off a pydantic-backed delta / message object.
+
+    The OpenAI SDK surfaces only the documented fields on the typed
+    classes; anything the provider added (``reasoning_content``,
+    ``reasoning_details``, …) lives in ``model_extra``. Fall back to
+    ``getattr`` for non-pydantic shapes so unit tests can pass plain
+    objects or dicts.
+    """
+    extra = getattr(obj, "model_extra", None)
+    if isinstance(extra, dict) and name in extra:
+        return extra[name]
+    if isinstance(obj, dict):
+        return obj.get(name)
+    return getattr(obj, name, None)
+
+
+def _pack_reasoning_fields(
+    text: str, details: list[Any], extra: dict[str, Any]
+) -> dict[str, Any]:
+    """Assemble the captured reasoning fields into a single extras dict.
+
+    Keys included only when they have content, so downstream
+    ``Message.to_dict`` doesn't spread empty scaffolding onto the wire.
+    """
+    packed: dict[str, Any] = {}
+    if text:
+        packed["reasoning_content"] = text
+    if details:
+        packed["reasoning_details"] = details
+    for k, v in (extra or {}).items():
+        if v:
+            packed[k] = v
+    return packed

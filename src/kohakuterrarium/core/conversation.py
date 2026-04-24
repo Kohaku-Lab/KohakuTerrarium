@@ -504,7 +504,13 @@ class Conversation:
         return parts
 
     def to_json(self) -> str:
-        """Serialize conversation to JSON string."""
+        """Serialize conversation to JSON string.
+
+        ``tool_calls`` and ``extra_fields`` (the pocket that holds
+        reasoning_content / reasoning_details / other provider-specific
+        assistant fields) are persisted so resumed sessions preserve
+        whatever stateful-chain data the provider expects back.
+        """
         data = {
             "messages": [
                 {
@@ -512,6 +518,8 @@ class Conversation:
                     "content": self._serialize_content(msg.content),
                     "name": msg.name,
                     "tool_call_id": msg.tool_call_id,
+                    "tool_calls": msg.tool_calls,
+                    "extra_fields": msg.extra_fields or None,
                     "metadata": msg.metadata,
                 }
                 for msg in self._messages
@@ -533,11 +541,14 @@ class Conversation:
 
         for msg_data in data.get("messages", []):
             content = conv._deserialize_content(msg_data["content"])
+            extras = msg_data.get("extra_fields") or {}
             msg = create_message(
                 role=msg_data["role"],
                 content=content,
                 name=msg_data.get("name"),
                 tool_call_id=msg_data.get("tool_call_id"),
+                tool_calls=msg_data.get("tool_calls"),
+                extra_fields=extras,
             )
             msg.metadata = msg_data.get("metadata", {})
             conv._messages.append(msg)

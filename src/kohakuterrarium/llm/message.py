@@ -169,6 +169,16 @@ def content_parts_to_dicts(parts: list[ContentPart]) -> list[dict[str, Any]]:
 # =============================================================================
 
 
+# Keys that the standard OpenAI-compatible wire format already recognises.
+# Anything else on a message dict (``reasoning_content``, ``reasoning_details``,
+# ``reasoning``, audio fields, future provider-specific extras) is captured
+# into ``Message.extra_fields`` so it survives serialization and round-trips
+# back on the next outgoing turn.
+_STANDARD_MESSAGE_KEYS = frozenset(
+    {"role", "content", "name", "tool_call_id", "tool_calls"}
+)
+
+
 @dataclass
 class Message:
     """
@@ -182,7 +192,12 @@ class Message:
         content: Message content - either str or list of ContentPart for multimodal
         name: Optional name for the message sender
         tool_call_id: For tool messages, the ID of the tool call this responds to
-        metadata: Optional metadata (not sent to API, for internal use)
+        tool_calls: Native tool call records (assistant role)
+        metadata: Optional metadata (NOT sent to API, for internal use)
+        extra_fields: Non-standard top-level fields captured from the provider
+            (e.g. ``reasoning_content``, ``reasoning_details``). Spread back
+            into the outgoing wire format so stateful-chain reasoning models
+            see their own prior state on the next turn.
     """
 
     role: Role
@@ -191,6 +206,7 @@ class Message:
     tool_call_id: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    extra_fields: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to OpenAI API format dict."""
@@ -210,16 +226,33 @@ class Message:
             result["tool_call_id"] = self.tool_call_id
         if self.tool_calls:
             result["tool_calls"] = self.tool_calls
+
+        # Echo non-standard fields (reasoning_content, reasoning_details, …)
+        # last so they never clobber the canonical keys above.
+        for k, v in (self.extra_fields or {}).items():
+            if k in _STANDARD_MESSAGE_KEYS:
+                continue
+            result[k] = v
         return result
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Message":
-        """Create Message from dict (e.g., API response)."""
+        """Create Message from dict (e.g., API response).
+
+        Any keys outside the standard OpenAI message shape land in
+        ``extra_fields`` so provider-specific additions (reasoning
+        content, reasoning details, etc.) survive round-trips.
+        """
         content = data.get("content", "")
 
         # Handle multimodal content from API
         if isinstance(content, list):
             content = normalize_content_parts(content) or []
+
+        extras = {k: v for k, v in data.items() if k not in _STANDARD_MESSAGE_KEYS}
+        # Drop internal-only keys that callers (e.g. persistence layer)
+        # pass through dict shape — those don't belong on the wire.
+        extras.pop("metadata", None)
 
         return cls(
             role=data["role"],
@@ -227,6 +260,7 @@ class Message:
             name=data.get("name"),
             tool_call_id=data.get("tool_call_id"),
             tool_calls=data.get("tool_calls"),
+            extra_fields=extras,
         )
 
     def get_text_content(self) -> str:
