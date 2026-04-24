@@ -161,7 +161,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     "gpt-5.5": {
         "provider": "codex",
         "model": "gpt-5.5",
-        "max_context": 400000,
+        "max_context": 272000,
         "reasoning_effort": "xhigh",
         "variation_groups": {
             "reasoning": _CODEX_REASONING_GROUP,
