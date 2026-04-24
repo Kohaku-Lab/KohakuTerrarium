@@ -30,7 +30,10 @@
       </template>
 
       <template #right>
-        <IntrospectionPlaceholder :kind="kindParam" :name="nameParam" />
+        <IntrospectionPreview v-if="mod.saved" :kind="kindParam" :name="nameParam" :path="mod.path" :current-identity="currentIdentity" :refresh-key="introspectKey" @open-creature="openCreature" />
+        <div v-else class="h-full flex items-center justify-center text-xs text-warm-500">
+          {{ t("studio.common.loading") }}
+        </div>
       </template>
 
       <template #status>
@@ -52,7 +55,7 @@ import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router"
 
 import KButton from "@/components/studio/common/KButton.vue"
 import EditorFrame from "@/components/studio/frame/EditorFrame.vue"
-import IntrospectionPlaceholder from "@/components/studio/module/IntrospectionPlaceholder.vue"
+import IntrospectionPreview from "@/components/studio/module/IntrospectionPreview.vue"
 import ModuleHead from "@/components/studio/module/ModuleHead.vue"
 import ModuleMain from "@/components/studio/module/ModuleMain.vue"
 import ModulePeerList from "@/components/studio/module/ModulePeerList.vue"
@@ -82,6 +85,27 @@ const docTabOpen = ref(false)
 const docDirty = ref(false)
 const docSaving = ref(false)
 const docRefreshKey = ref(0)
+
+// Bumped after every successful module save — drives IntrospectionPreview
+// (schema + used-in list) to refetch with fresh data.
+const introspectKey = ref(0)
+
+// The user-visible identity field varies by kind. Used by the
+// IntrospectionPreview to detect rename-while-wired and warn.
+const currentIdentity = computed(() => {
+  const form = mod.form || {}
+  switch (kindParam.value) {
+    case "tools":
+      return form.tool_name || ""
+    case "subagents":
+    case "plugins":
+      return form.name || ""
+    case "triggers":
+      return form.setup_tool_name || ""
+    default:
+      return ""
+  }
+})
 
 const tabs = computed(() => {
   const entries = [
@@ -239,8 +263,13 @@ async function onSave() {
   if (!mod.dirty || mod.saving) return
   const res = await mod.save()
   if (res?.ok) {
+    introspectKey.value += 1
     ws.refresh().catch(() => {})
   }
+}
+
+function openCreature(name) {
+  router.push(`/studio/creature/${encodeURIComponent(name)}`)
 }
 
 function onDiscard() {
