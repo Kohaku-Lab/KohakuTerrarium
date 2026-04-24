@@ -184,6 +184,15 @@ class InfoCommand(BaseCommand):
             if subagent_info is not None:
                 return CommandResult(content=subagent_info)
 
+        # 5. Fall through to procedural skills (Cluster 4 / Qc).
+        # The controller context carries a reference to the runtime
+        # SkillRegistry when one exists; resolve the skill and render
+        # its body with a short preamble so the model can tell this is
+        # a skill rather than a registered tool.
+        skill_content = _render_skill_info(context, target_name)
+        if skill_content is not None:
+            return CommandResult(content=skill_content)
+
         return CommandResult(error=f"Not found: {target_name}")
 
 
@@ -218,6 +227,61 @@ def _render_skill_from_path(path: Path) -> str | None:
         return _format_skill_for_info(doc, doc.content)
     # load_skill_doc failed (already logged). Degrade gracefully.
     return read_skill_body(path)
+
+
+def _render_skill_info(context: Any, name: str) -> str | None:
+    """Resolve ``name`` against the procedural-skill registry.
+
+    Returns ``None`` when no matching skill exists so :class:`InfoCommand`
+    can fall back to its "Not found" error.
+    """
+    registry = _lookup_skill_registry(context)
+    if registry is None:
+        return None
+    skill = registry.get(name)
+    if skill is None:
+        return None
+    preamble = f"--- Skill: {skill.name} ---"
+    origin = f"Origin: {skill.origin}"
+    desc = (skill.description or "").strip()
+    parts = [preamble, origin]
+    if desc:
+        parts.append(f"Description: {desc}")
+    if skill.paths:
+        parts.append(f"Paths: {', '.join(skill.paths)}")
+    parts.append("")  # blank line
+    if skill.body:
+        parts.append(skill.body)
+    return "\n".join(parts)
+
+
+def _lookup_skill_registry(context: Any):
+    """Extract the SkillRegistry from whatever shape of context we got."""
+    if context is None:
+        return None
+    # Controller context carries the registry at ``skills_registry`` in
+    # its session.extra or via an attribute; test contexts may expose
+    # it directly.
+    direct = getattr(context, "skills_registry", None)
+    if direct is not None:
+        return direct
+    controller = getattr(context, "controller", None)
+    if controller is not None:
+        direct = getattr(controller, "skills_registry", None)
+        if direct is not None:
+            return direct
+        agent = getattr(controller, "_agent", None)
+        if agent is not None:
+            direct = getattr(agent, "skills", None)
+            if direct is not None:
+                return direct
+    # Session-based lookup.
+    session = getattr(context, "session", None)
+    if session is not None:
+        extras = getattr(session, "extra", None) or {}
+        if isinstance(extras, dict) and extras.get("skills_registry"):
+            return extras["skills_registry"]
+    return None
 
 
 def _render_builtin_skill(kind: str, name: str) -> str | None:

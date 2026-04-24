@@ -399,6 +399,8 @@ def _construct_agent_config(
         plugins=list(config_data.get("plugins") or []),
         memory=dict(config_data.get("memory") or {}),
         output_wiring=parse_wiring_list(config_data.get("output_wiring")),
+        skills=list(config_data.get("skills") or []),
+        skill_index_budget_bytes=int(config_data.get("skill_index_budget_bytes", 4096)),
         framework_hint_overrides=dict(
             config_data.get("framework_hint_overrides")
             or config_data.get("framework_hints")

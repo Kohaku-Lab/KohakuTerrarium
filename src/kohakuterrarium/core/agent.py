@@ -169,6 +169,7 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin, AgentModelMi
         self._init_subagents()
         self._init_iteration_budget()
         self._init_output(output_module)  # Before controller - sets _known_outputs
+        self._init_skills()  # Before controller so skill index is in prompt
         self._init_controller()
         self._init_input(input_module)
         self._init_user_commands()

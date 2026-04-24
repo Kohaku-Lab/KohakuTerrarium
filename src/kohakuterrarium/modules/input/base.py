@@ -3,6 +3,16 @@ Input module protocol and base class.
 
 Input modules receive external input and produce TriggerEvents.
 Integrates with the user command system for slash commands.
+
+Slash-command dispatch order:
+
+1. Exact match in the registered ``_user_commands`` dict — /model,
+   /plugin, /skill, ...
+2. Wildcard fallback to the :class:`SkillRegistry` (Qd triple-
+   invocation): ``/<skill-name> [args]`` injects a user-turn
+   preamble that asks the model to follow the named skill. This
+   only fires when the slash name does not shadow a real user
+   command, so existing commands keep working.
 """
 
 from abc import ABC, abstractmethod
@@ -13,6 +23,7 @@ from kohakuterrarium.modules.user_command.base import (
     UserCommandResult,
     parse_slash_command,
 )
+from kohakuterrarium.skills.user_slash import build_user_skill_turn
 
 
 @runtime_checkable
@@ -80,27 +91,69 @@ class BaseInputModule(ABC):
         After executing the command, calls ``render_command_data()`` if
         the result has a ``data`` payload. The subclass renders interactive
         UI (select, confirm, etc.) and may return a follow-up result.
+
+        When the slash name does not match any registered user command,
+        falls through to the skill registry so ``/<skill-name>`` acts
+        as the user-invoke path of the triple-invocation spec (Qd).
         """
-        if not self._user_commands or not text.startswith("/"):
+        if not text.startswith("/"):
             return None
 
         name, args = parse_slash_command(text)
-        canonical = self._command_alias_map.get(name, name)
-        cmd = self._user_commands.get(canonical)
-        if cmd is None:
-            return None
 
+        if self._user_commands:
+            canonical = self._command_alias_map.get(name, name)
+            cmd = self._user_commands.get(canonical)
+            if cmd is not None:
+                ctx = self._user_command_context
+                ctx.extra["command_registry"] = self._user_commands
+                result = await cmd.execute(args, ctx)
+
+                # Let the subclass handle interactive data payloads
+                if result.data and not result.error:
+                    followup = await self.render_command_data(result, canonical)
+                    if followup is not None:
+                        return followup
+
+                return result
+
+        # Slash-to-skill fallback (Qd). Returns ``None`` if the name
+        # doesn't match a registered skill either, so the caller can
+        # fall back to its legacy "unknown command" path (e.g. sending
+        # the text to the LLM as-is or raising in tests).
+        return self._dispatch_skill_slash(name, args)
+
+    def _dispatch_skill_slash(self, name: str, args: str) -> UserCommandResult | None:
+        """Handle ``/<skill-name> [args]`` — returns an injection turn.
+
+        The returned :class:`UserCommandResult` is non-consuming so the
+        injected text flows through to the LLM as a user turn; callers
+        that want strict consumption behaviour can re-wrap the output.
+        """
         ctx = self._user_command_context
-        ctx.extra["command_registry"] = self._user_commands
-        result = await cmd.execute(args, ctx)
+        if ctx is None or getattr(ctx, "agent", None) is None:
+            return None
+        registry = getattr(ctx.agent, "skills", None)
+        if registry is None:
+            return None
+        skill = registry.get(name)
+        if skill is None:
+            return None
+        if not skill.enabled:
+            return UserCommandResult(
+                error=(
+                    f"Skill '{name}' is disabled. Enable with " f"/skill enable {name}."
+                )
+            )
 
-        # Let the subclass handle interactive data payloads
-        if result.data and not result.error:
-            followup = await self.render_command_data(result, canonical)
-            if followup is not None:
-                return followup
-
-        return result
+        # Build the preamble that becomes a user-turn message. The
+        # framework rewrites the user's original ``/<skill-name> args``
+        # line into this preamble so the model sees a clean request.
+        injected = build_user_skill_turn(skill, args)
+        return UserCommandResult(
+            output=injected,
+            consumed=False,
+        )
 
     async def render_command_data(
         self, result: UserCommandResult, command_name: str

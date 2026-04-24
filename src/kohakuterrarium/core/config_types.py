@@ -219,6 +219,17 @@ class AgentConfig:
     # ``core/agent_handlers.py:_finalize_processing`` for the emission hook.
     output_wiring: list[OutputWiringEntry] = field(default_factory=list)
 
+    # Procedural-skill opt-ins (cluster 4 / Qa). Lists names of
+    # package-shipped skills that the creature wants enabled by default.
+    # User- or project-local skills are always enabled unless the user
+    # runs ``/skill disable <name>`` at runtime.
+    skills: list[str] = field(default_factory=list)
+
+    # Byte budget for the auto-invoke ``## Skills`` section of the
+    # system prompt (spec 4.3). Overflow skills remain reachable via
+    # ``##skill`` / ``##info``.
+    skill_index_budget_bytes: int = 4096
+
     # Framework-hint overrides for the system-prompt aggregator.
     # Maps a canonical hint key (see ``prompt/framework_hints.py``)
     # to replacement prose. Empty string means "omit this block entirely".

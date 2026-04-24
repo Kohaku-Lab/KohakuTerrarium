@@ -15,8 +15,6 @@ Covers:
   positional fields and supplies sensible defaults.
 """
 
-from __future__ import annotations
-
 import tempfile
 import warnings
 from pathlib import Path

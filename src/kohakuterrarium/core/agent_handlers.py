@@ -11,14 +11,6 @@ from kohakuterrarium.core.agent_tools import (
 )
 from kohakuterrarium.core.backgroundify import BackgroundifyHandle, backgroundify
 from kohakuterrarium.core.budget import BudgetExhausted
-
-_BG_PLACEHOLDER = (
-    "Running in background — task delegated. "
-    "Do NOT do this same task yourself — it is already being done. "
-    "Do NOT use bash echo/sleep to wait — just end your response. "
-    "Work on a DIFFERENT task or STOP your response now. "
-    "Result arrives automatically in the next turn."
-)
 from kohakuterrarium.core.controller import Controller
 from kohakuterrarium.core.events import (
     EventType,
@@ -32,7 +24,16 @@ from kohakuterrarium.parsing import (
     TextEvent,
     ToolCallEvent,
 )
+from kohakuterrarium.skills.hints import inject_skill_path_hint
 from kohakuterrarium.utils.logging import get_logger
+
+_BG_PLACEHOLDER = (
+    "Running in background — task delegated. "
+    "Do NOT do this same task yourself — it is already being done. "
+    "Do NOT use bash echo/sleep to wait — just end your response. "
+    "Work on a DIFFERENT task or STOP your response now. "
+    "Result arrives automatically in the next turn."
+)
 
 logger = get_logger(__name__)
 
@@ -130,6 +131,9 @@ class AgentHandlersMixin(AgentToolsMixin):
 
         if self.plugins is not None:
             await self.plugins.notify("on_event", event=event)
+        # Procedural-skill ``paths:`` auto-activate (D.6 + Qd).
+        if event.type == "user_input":
+            inject_skill_path_hint(self)
         async with self._processing_lock:
             if not self._running:
                 logger.debug("Dropping event, agent stopped", event_type=event.type)

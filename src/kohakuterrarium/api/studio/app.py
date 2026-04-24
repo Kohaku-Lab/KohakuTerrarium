@@ -15,6 +15,7 @@ from kohakuterrarium.api.studio.routes import (
     modules,
     packages,
     schema,
+    skills,
     templates,
     validate,
     workspace,
@@ -53,4 +54,5 @@ def build_studio_router() -> APIRouter:
     r.include_router(
         schema.router, prefix="/api/studio/module_schema", tags=["studio.schema"]
     )
+    r.include_router(skills.router, prefix="/api/studio/skills", tags=["studio.skills"])
     return r

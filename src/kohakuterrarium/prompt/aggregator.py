@@ -21,6 +21,7 @@ An empty string override means "omit that block entirely".
 """
 
 from pathlib import Path
+from typing import Any
 
 from kohakuterrarium.builtin_skills import get_all_subagent_docs, get_all_tool_docs
 from kohakuterrarium.core.registry import Registry
@@ -43,8 +44,12 @@ from kohakuterrarium.prompt.plugins import (
     get_default_plugins,
 )
 from kohakuterrarium.prompt.template import render_template_safe
-from kohakuterrarium.utils.logging import get_logger
 from kohakuterrarium.prompt.tool_contributions import build_tool_guidance_section
+from kohakuterrarium.skills.index import (
+    DEFAULT_SKILL_INDEX_BUDGET_BYTES,
+    build_skill_index,
+)
+from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -200,6 +205,8 @@ def aggregate_system_prompt(
     channels: list[dict[str, str]] | None = None,
     extra_context: dict | None = None,
     framework_hint_overrides: dict[str, str] | None = None,
+    skill_registry: Any | None = None,
+    skill_index_budget_bytes: int = DEFAULT_SKILL_INDEX_BUDGET_BYTES,
 ) -> str:
     """
     Build complete system prompt from components.
@@ -257,13 +264,6 @@ def aggregate_system_prompt(
             if tools_list:
                 parts.append(tools_list)
 
-    # Add channel communication hints (when channel tools are registered)
-    if registry and include_hints:
-        hint_ctx = dict(extra_context or {})
-        if channels is not None:
-            hint_ctx["channels"] = channels
-        channel_hints = _build_channel_hints(
-            registry, hint_ctx, tool_format=tool_format
     # Add per-tool prompt contributions (Cluster 5 / E.1).
     # Sits between the tool list and the framework hints; gated by
     # ``include_tools`` because a caller skipping the list likely does
@@ -273,6 +273,23 @@ def aggregate_system_prompt(
         if guidance:
             parts.append(guidance)
 
+    # Add procedural-skill index (Cluster 4 / D.2). Budget-gated so a
+    # huge personal skill library doesn't swell the prompt; overflow
+    # skills remain reachable via ``##info`` / ``##skill``.
+    if skill_registry is not None:
+        skill_index = build_skill_index(
+            skill_registry, budget_bytes=skill_index_budget_bytes
+        )
+        if skill_index:
+            parts.append(skill_index)
+
+    # Add channel communication hints (when channel tools are registered)
+    if registry and include_hints:
+        hint_ctx = dict(extra_context or {})
+        if channels is not None:
+            hint_ctx["channels"] = channels
+        channel_hints = _build_channel_hints(
+            registry, hint_ctx, tool_format=tool_format
         )
         if channel_hints:
             parts.append(channel_hints)

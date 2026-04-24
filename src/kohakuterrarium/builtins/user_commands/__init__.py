@@ -46,6 +46,7 @@ from kohakuterrarium.builtins.user_commands.model import ModelCommand
 from kohakuterrarium.builtins.user_commands.plugin import PluginCommand
 from kohakuterrarium.builtins.user_commands.regen import RegenCommand
 from kohakuterrarium.builtins.user_commands.settings import SettingsCommand
+from kohakuterrarium.builtins.user_commands.skill import SkillUserCommand
 from kohakuterrarium.builtins.user_commands.status import StatusCommand
 
 __all__ = [
@@ -60,5 +61,6 @@ __all__ = [
     "PluginCommand",
     "RegenCommand",
     "SettingsCommand",
+    "SkillUserCommand",
     "StatusCommand",
 ]

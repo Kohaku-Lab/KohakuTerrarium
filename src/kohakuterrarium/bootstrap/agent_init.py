@@ -44,6 +44,12 @@ from kohakuterrarium.packages import (
 )
 from kohakuterrarium.prompt.aggregator import aggregate_system_prompt
 from kohakuterrarium.prompt.framework_hints import merge_overrides
+from kohakuterrarium.skills import (
+    SkillCommand,
+    SkillPathScanner,
+    SkillRegistry,
+    discover_skills,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -310,6 +316,10 @@ class AgentInitMixin:
             tool_format=tool_format_name,
             known_outputs=known_outputs,
             framework_hint_overrides=hint_overrides or None,
+            skill_registry=getattr(self, "skills", None),
+            skill_index_budget_bytes=getattr(
+                self.config, "skill_index_budget_bytes", 4096
+            ),
         )
 
         # Store controller config for creating controllers on-demand (parallel mode)
@@ -328,6 +338,21 @@ class AgentInitMixin:
         # Note: Controller handles framework commands (read, info, jobs, wait)
         # via its own _commands dict and ControllerContext
         self.controller = self._create_controller()
+        # Wire the output router so post_llm_call rewrites can emit the
+        # ``assistant_message_edited`` activity event.
+        if hasattr(self, "output_router"):
+            self.controller.output_router = self.output_router
+        # Register the ``##skill <name>##`` controller command so the
+        # model can invoke procedural skills alongside builtin ##info##
+        # / ##jobs## / ##wait## commands.  Must happen after _init_skills
+        # so the registry reference is captured.
+        skill_registry = getattr(self, "skills", None)
+        if skill_registry is not None:
+            self.controller.register_command("skill", SkillCommand(skill_registry))
+            # Expose the registry to ControllerContext so the builtin
+            # ##info## command can fall through to procedural skills.
+            if hasattr(self.controller, "_context"):
+                self.controller._context.skills_registry = skill_registry
 
     def _create_controller(self) -> Controller:
         """Create a new controller instance (for parallel processing)."""
@@ -336,6 +361,58 @@ class AgentInitMixin:
             self._controller_config,
             executor=self.executor,
             registry=self.registry,
+        )
+
+    def _init_skills(self) -> None:
+        """Discover procedural skills and build the runtime registry.
+
+        Scans (in priority order, high → low):
+
+        1. ``<cwd>/.kt/skills``, ``.claude/skills``, ``.agents/skills``
+        2. ``~/.kohakuterrarium/skills``, ``~/.claude/skills``,
+           ``~/.agents/skills``
+        3. ``<agent>/prompts/skills``
+        4. every installed package's ``skills:`` manifest entries
+
+        Last-wins across origins (spec 1.1 exception). Runtime
+        enable-state is persisted to the session scratchpad under
+        ``skills.enabled``.
+        """
+        scratchpad = getattr(self, "scratchpad", None)
+        self.skills = SkillRegistry(scratchpad=scratchpad)
+        self.skill_path_scanner = SkillPathScanner()
+
+        cwd = Path(self.executor._working_dir) if self.executor else Path.cwd()
+        agent_path = getattr(self.config, "agent_path", None)
+        declared = list(getattr(self.config, "skills", []) or [])
+
+        try:
+            discovered = discover_skills(
+                cwd=cwd,
+                agent_path=Path(agent_path) if agent_path else None,
+                declared_package_skills=declared,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Skill discovery failed",
+                error=str(exc),
+                exc_info=True,
+            )
+            discovered = []
+
+        for skill in discovered:
+            self.skills.add(skill)
+
+        # Mirror the registry onto session.extra so plugins and the
+        # studio routes can reach it without an agent reference.
+        session = getattr(self, "session", None)
+        if session is not None:
+            session.extra["skills_registry"] = self.skills
+
+        logger.info(
+            "Skills registry initialized",
+            skill_count=len(self.skills),
+            enabled=len(self.skills.list_enabled()),
         )
 
     def _init_input(self, custom_input: InputModule | None) -> None:
