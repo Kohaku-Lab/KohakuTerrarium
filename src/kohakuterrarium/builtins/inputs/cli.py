@@ -85,14 +85,16 @@ class CLIInput(BaseInputModule):
             if line.startswith("/"):
                 result = await self.try_user_command(line)
                 if result is not None:
-                    if result.output:
-                        print(result.output)
                     if result.error:
                         print(f"Error: {result.error}")
+                    elif result.output and result.consumed:
+                        print(result.output)
                     if self._exit_requested:
                         return None
                     if result.consumed:
                         return await self.get_input()
+                    if result.output:
+                        line = result.output
 
             # Return as trigger event
             return create_user_input_event(line)

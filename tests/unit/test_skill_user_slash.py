@@ -2,17 +2,17 @@
 
 from dataclasses import dataclass
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
-from kohakuterrarium.builtins.user_commands import (
-    get_builtin_user_command,
-)
+from kohakuterrarium.builtins.user_commands import get_builtin_user_command
+from kohakuterrarium.core.agent import Agent
+from kohakuterrarium.core.config_types import AgentConfig, ToolConfigItem
 from kohakuterrarium.modules.input.base import BaseInputModule
-from kohakuterrarium.modules.user_command.base import (
-    UserCommandContext,
-)
+from kohakuterrarium.modules.user_command.base import UserCommandContext
 from kohakuterrarium.skills import Skill, SkillRegistry, build_user_skill_turn
+from kohakuterrarium.testing import ScriptedLLM
 
 
 def _skill(name: str, **kw) -> Skill:
@@ -144,9 +144,7 @@ async def test_wildcard_slash_defers_to_registered_command():
         description = "d"
 
         async def execute(self, args, ctx):
-            from kohakuterrarium.modules.user_command.base import (
-                UserCommandResult,
-            )
+            from kohakuterrarium.modules.user_command.base import UserCommandResult
 
             return UserCommandResult(output=f"real-dummy:{args}")
 
@@ -195,3 +193,70 @@ def test_build_user_skill_turn_without_args_omits_line():
     skill = _skill("foo", body="proc")
     turn = build_user_skill_turn(skill, "")
     assert "Arguments the user provided" not in turn
+
+
+@pytest.mark.asyncio
+async def test_programmatic_slash_skill_injects_skill_turn_for_frontend_path():
+    llm = ScriptedLLM(["done"])
+    config = AgentConfig(
+        name="skill-slash-agent",
+        model="test-model",
+        api_key_env="TEST_API_KEY",
+        tool_format="native",
+        tools=[ToolConfigItem(name="info")],
+    )
+
+    discovered = [_skill("pdf-merge", body="merge pdf instructions")]
+    with (
+        patch(
+            "kohakuterrarium.bootstrap.agent_init.create_llm_provider",
+            return_value=llm,
+        ),
+        patch(
+            "kohakuterrarium.bootstrap.agent_init.discover_skills",
+            return_value=discovered,
+        ),
+    ):
+        agent = Agent(config)
+
+    await agent.start()
+    try:
+        await agent.inject_input("/pdf-merge a.pdf b.pdf", source="chat")
+    finally:
+        await agent.stop()
+
+    assert "merge pdf instructions" in llm.last_user_message
+    assert "a.pdf b.pdf" in llm.last_user_message
+
+
+def test_agent_with_skills_exposes_skill_tool_to_controller_and_native_schema():
+    llm = ScriptedLLM(["done"])
+    config = AgentConfig(
+        name="skill-tool-agent",
+        model="test-model",
+        api_key_env="TEST_API_KEY",
+        tool_format="native",
+        tools=[ToolConfigItem(name="info")],
+    )
+
+    discovered = [_skill("git-commit-flow", body="commit instructions")]
+    with (
+        patch(
+            "kohakuterrarium.bootstrap.agent_init.create_llm_provider",
+            return_value=llm,
+        ),
+        patch(
+            "kohakuterrarium.bootstrap.agent_init.discover_skills",
+            return_value=discovered,
+        ),
+    ):
+        agent = Agent(config)
+
+    assert "skill" in agent.registry.list_tools()
+    assert "skill" in agent.executor.list_tools()
+    assert "skill" in agent.controller._commands
+    assert "- `skill`:" in agent.controller.config.system_prompt
+    assert {schema.name for schema in agent.controller._get_native_tool_schemas()} >= {
+        "info",
+        "skill",
+    }

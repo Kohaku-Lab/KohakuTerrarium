@@ -227,7 +227,7 @@ class AgentConfig:
 
     # Byte budget for the auto-invoke ``## Skills`` section of the
     # system prompt (spec 4.3). Overflow skills remain reachable via
-    # ``##skill`` / ``##info``.
+    # explicit `skill` / `info` tool calls.
     skill_index_budget_bytes: int = 4096
 
     # Framework-hint overrides for the system-prompt aggregator.

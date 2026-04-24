@@ -2,8 +2,8 @@
 
 Spec D.6 + Qd: on every user input, scan the cwd for files that match
 any enabled skill's ``paths`` globs. For each match, inject a short
-hint into the next ``pre_llm_call`` asking the model to consider
-``##skill <name>##`` if the task matches.
+hint into the next ``pre_llm_call`` asking the model to consider the
+explicit ``skill`` tool if the task matches.
 
 Kept cheap (per spec): at most one cwd scan per user_input, cached
 on ``(cwd, top-level mtime)`` so re-evaluating within the same turn
@@ -75,8 +75,8 @@ class SkillPathScanner:
         lines = ["## Skill Context", ""]
         lines.append(
             "The current working directory contains files matched by "
-            "these skills' ``paths`` filters. Consider invoking the "
-            "relevant one with ``##skill <name>##`` if your task matches."
+            "these skills' `paths` filters. Consider invoking the "
+            "relevant one with the `skill` tool if your task matches."
         )
         for skill in matched:
             patterns = ", ".join(f"`{p}`" for p in skill.paths)

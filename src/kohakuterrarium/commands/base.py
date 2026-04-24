@@ -1,9 +1,8 @@
 """
 Framework command protocol and base classes.
 
-Commands are special actions the controller can invoke:
-- ##read job_id## - Read job output
-- ##info tool_name## - Get tool documentation
+Commands are special actions the legacy/custom text-format controller
+path can invoke.
 """
 
 from dataclasses import dataclass
@@ -54,7 +53,7 @@ class Command(Protocol):
         Execute the command.
 
         Args:
-            args: Arguments string from ##command args##
+            args: Arguments string from the parsed controller command
             context: Controller context for accessing jobs, tools, etc.
 
         Returns:

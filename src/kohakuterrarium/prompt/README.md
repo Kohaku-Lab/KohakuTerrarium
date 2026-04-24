@@ -3,8 +3,8 @@
 Prompt loading, templating, and system prompt aggregation. Builds the final
 system prompt from components: a base prompt file (agent personality), an
 auto-generated tool list, framework hints (call syntax, commands), environment
-info, and project instructions. Supports two skill modes: dynamic (model
-uses `##info##` on demand) and static (all docs in system prompt). Prompt
+info, and project instructions. Supports compact skill indexes with
+on-demand lookup via `info` / `skill` tools. Prompt
 composition is plugin-based, with each plugin contributing a prioritized
 section.
 

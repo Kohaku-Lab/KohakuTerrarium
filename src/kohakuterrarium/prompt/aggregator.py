@@ -275,7 +275,7 @@ def aggregate_system_prompt(
 
     # Add procedural-skill index (Cluster 4 / D.2). Budget-gated so a
     # huge personal skill library doesn't swell the prompt; overflow
-    # skills remain reachable via ``##info`` / ``##skill``.
+    # skills remain reachable via explicit `info` / `skill` tool calls.
     if skill_registry is not None:
         skill_index = build_skill_index(
             skill_registry, budget_bytes=skill_index_budget_bytes

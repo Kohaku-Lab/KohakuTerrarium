@@ -56,7 +56,8 @@ class Skill:
 
         Aligns with Claude Code's ``disable-model-invocation`` semantics
         (spec 4.4): hidden from the system-prompt index but still
-        reachable via explicit ``##info <name>##`` / ``##skill <name>##``.
+        reachable via explicit ``info(name=...)`` / ``skill(name=...)``
+        tool calls.
         """
         return self.disable_model_invocation
 

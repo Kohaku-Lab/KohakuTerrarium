@@ -106,8 +106,10 @@ class ControllerConfig:
 
 @dataclass
 class ControllerContext:
-    """Context passed to commands/handlers. ``skills_registry`` lets
-    ``##info`` / ``##skill`` reach the runtime :class:`SkillRegistry`.
+    """Context passed to commands/handlers.
+
+    ``skills_registry`` lets built-in skill/info handlers reach the runtime
+    :class:`SkillRegistry`.
     """
 
     controller: "Controller"

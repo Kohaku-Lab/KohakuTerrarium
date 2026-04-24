@@ -1,8 +1,8 @@
 """
 Commands module - framework commands for controller.
 
-Commands are special actions like ##read_job##, ##info## that the
-controller can use to interact with the framework.
+Commands are special actions the legacy/custom text-format controller
+path can use to interact with the framework.
 """
 
 from kohakuterrarium.commands.base import (

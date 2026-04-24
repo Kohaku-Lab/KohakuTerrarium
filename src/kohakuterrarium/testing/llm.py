@@ -126,6 +126,10 @@ class ScriptedLLM:
             if entry.delay_per_chunk > 0:
                 await asyncio.sleep(entry.delay_per_chunk)
 
+    async def close(self) -> None:
+        """Match the production LLM provider lifecycle API."""
+        return None
+
     async def chat_complete(
         self,
         messages: list[Message] | list[dict[str, Any]],

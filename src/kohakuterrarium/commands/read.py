@@ -2,9 +2,8 @@
 Read command - Read job output.
 Info command - Get tool/subagent documentation.
 
-Usage:
-    ##read_job job_id [--lines N] [--offset M]##
-    ##info tool_name##
+These commands are used by legacy/custom text tool-call formats; native
+models use the corresponding registered tools.
 """
 
 import asyncio
@@ -111,9 +110,7 @@ class InfoCommand(BaseCommand):
     5. ToolInfo.documentation field
     6. Basic description fallback
 
-    Usage:
-        ##info tool_name##
-        ##info subagent_name##
+    Legacy text-format command counterpart of the native ``info`` tool.
     """
 
     @property
@@ -122,14 +119,14 @@ class InfoCommand(BaseCommand):
 
     @property
     def description(self) -> str:
-        return "Get documentation for a tool or sub-agent"
+        return "Get documentation for a tool, sub-agent, or procedural skill"
 
     async def _execute(self, args: str, context: Any) -> CommandResult:
         """Get tool/subagent documentation."""
         target_name, _ = parse_command_args(args)
 
         if not target_name:
-            return CommandResult(error="No name provided. Usage: ##info name##")
+            return CommandResult(error="No name provided. Use info(name=...).")
 
         # 1. Try to load from agent folder first (user override)
         if hasattr(context, "agent_path") and context.agent_path:
@@ -199,7 +196,7 @@ class InfoCommand(BaseCommand):
 def _format_skill_for_info(doc: "SkillDoc", body: str) -> str:
     """Render a ``SkillDoc`` body with a short ``Tags:`` preamble.
 
-    Tags are wired into the ``##info##`` output so that the first-class
+    Tags are wired into the info output so that the first-class
     ``SkillDoc.tags`` field is actually consumed by the agent — otherwise
     it would just be parsed-and-discarded metadata.
     """
@@ -215,7 +212,7 @@ def _render_skill_from_path(path: Path) -> str | None:
     """Load a skill doc from ``path`` and render its body with tags.
 
     Falls back to the raw body via :func:`read_skill_body` if YAML parsing
-    fails, so ``##info##`` never breaks on malformed frontmatter.
+    fails, so info output never breaks on malformed frontmatter.
     """
     # Lazy import: ``kohakuterrarium.prompt.__init__`` eagerly loads the
     # aggregator, which imports from ``core`` -> ``commands.read``.
@@ -260,11 +257,16 @@ def _lookup_skill_registry(context: Any):
     if context is None:
         return None
     # Controller context carries the registry at ``skills_registry`` in
-    # its session.extra or via an attribute; test contexts may expose
-    # it directly.
+    # its session.extra or via an attribute; tool contexts expose the
+    # active agent; test contexts may expose it directly.
     direct = getattr(context, "skills_registry", None)
     if direct is not None:
         return direct
+    agent = getattr(context, "agent", None)
+    if agent is not None:
+        direct = getattr(agent, "skills", None)
+        if direct is not None:
+            return direct
     controller = getattr(context, "controller", None)
     if controller is not None:
         direct = getattr(controller, "skills_registry", None)

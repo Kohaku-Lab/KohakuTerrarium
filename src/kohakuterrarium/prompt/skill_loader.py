@@ -84,7 +84,7 @@ class SkillDoc:
     - ``name`` / ``description`` / ``content`` — required-ish identifiers plus
       the markdown body.
     - ``category`` — KT-specific bucket (``builtin`` / ``custom`` / …).
-    - ``tags`` — free-form tag list (rendered by ``##info##`` output).
+    - ``tags`` — free-form tag list (rendered by info output).
     - ``standard`` — recognized agentskills.io / Claude Code frontmatter
       fields (see ``_STANDARD_KEYS``). Kept as parsed YAML values
       (strings, lists, dicts) without normalization.

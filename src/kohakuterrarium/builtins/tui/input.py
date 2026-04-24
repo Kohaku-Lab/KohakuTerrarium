@@ -9,11 +9,7 @@ from kohakuterrarium.core.events import TriggerEvent, create_user_input_event
 from kohakuterrarium.core.session import get_session
 from kohakuterrarium.modules.input.base import BaseInputModule
 from kohakuterrarium.modules.user_command.base import UserCommandResult
-from kohakuterrarium.utils.logging import (
-    get_logger,
-    restore_logging,
-    suppress_logging,
-)
+from kohakuterrarium.utils.logging import get_logger, restore_logging, suppress_logging
 
 logger = get_logger(__name__)
 
@@ -182,16 +178,18 @@ class TUIInput(BaseInputModule):
                 )
                 result = await self.try_user_command(text)
                 if result is not None:
-                    if result.output:
-                        self._tui.add_system_notice(result.output, command=cmd_name)
                     if result.error:
                         self._tui.add_system_notice(
                             result.error, command=cmd_name, error=True
                         )
+                    elif result.output and result.consumed:
+                        self._tui.add_system_notice(result.output, command=cmd_name)
                     if self._exit_requested:
                         return None
                     if result.consumed:
                         return await self.get_input()
+                    if result.output:
+                        text = result.output
 
             return create_user_input_event(text, source="tui")
 

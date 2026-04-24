@@ -20,9 +20,7 @@ from kohakuterrarium.core.agent_model import AgentModelMixin
 from kohakuterrarium.core.budget import IterationBudget
 from kohakuterrarium.core.compact import CompactConfig, CompactManager
 from kohakuterrarium.core.config import AgentConfig, load_agent_config
-from kohakuterrarium.core.controller_plugins import (
-    register_plugin_and_package_commands,
-)
+from kohakuterrarium.core.controller_plugins import register_plugin_and_package_commands
 from kohakuterrarium.core.events import TriggerEvent, create_user_input_event
 from kohakuterrarium.core.job import JobState
 from kohakuterrarium.core.loader import ModuleLoader
@@ -810,11 +808,12 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin, AgentModelMi
         return self.controller.conversation.to_messages()
 
     async def inject_input(
-        self,
-        content: str | list[ContentPart],
-        source: str = "programmatic",
+        self, content: str | list[ContentPart], source: str = "programmatic"
     ) -> None:
-        """Inject user input programmatically (bypasses input module)."""
+        """Inject user input programmatically."""
+        content = await self._prepare_injected_input(content, source)
+        if content is None:
+            return
         event = create_user_input_event(content, source=source)
         await self._process_event(event)
 

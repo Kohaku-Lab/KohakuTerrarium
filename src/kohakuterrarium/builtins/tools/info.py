@@ -9,6 +9,7 @@ from kohakuterrarium.builtin_skills import (
     read_skill_body,
 )
 from kohakuterrarium.builtins.tools.registry import register_builtin
+from kohakuterrarium.commands.read import _render_skill_info
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
     ExecutionMode,
@@ -32,7 +33,9 @@ class InfoTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Get full documentation for a tool or sub-agent by name"
+        return (
+            "Get full documentation for a tool, sub-agent, or procedural skill by name"
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:
@@ -45,7 +48,9 @@ class InfoTool(BaseTool):
         name = args.get("name", args.get("content", "")).strip()
 
         if not name:
-            return ToolResult(error="Provide the name of a tool or sub-agent.")
+            return ToolResult(
+                error="Provide the name of a tool, sub-agent, or procedural skill."
+            )
 
         # 1. Try builtin tool docs
         doc = get_builtin_tool_doc(name)
@@ -87,9 +92,15 @@ class InfoTool(BaseTool):
                 desc = getattr(subagent, "description", "") or f"Sub-agent: {name}"
                 return ToolResult(output=desc, exit_code=0)
 
+        # 6. Try runtime procedural skills.
+        skill_doc = _render_skill_info(context, name)
+        if skill_doc is not None:
+            logger.debug("Loaded procedural skill doc", skill_name=name)
+            return ToolResult(output=skill_doc, exit_code=0)
+
         return ToolResult(
             error=f"No documentation found for '{name}'. "
-            "Check the tool/sub-agent name and try again."
+            "Check the tool/sub-agent/skill name and try again."
         )
 
     @staticmethod

@@ -12,17 +12,17 @@ spec):
 
 1. ``paths:`` frontmatter — auto-activates a hint when the cwd contains
    files matching its globs (:mod:`kohakuterrarium.skills.paths`).
-2. ``##skill <name> [args]##`` controller command — model-invoked,
-   returns the SKILL.md body as a tool-like response
-   (:mod:`kohakuterrarium.skills.command`).
+2. The built-in ``skill`` tool — model-invoked, returns the SKILL.md body
+   as a tool response. A legacy text-format controller command remains for
+   non-native tool formats (:mod:`kohakuterrarium.skills.command`).
 3. ``/<skill-name> [args]`` user slash command — injects a user-turn
    preamble that asks the model to follow the skill
    (:mod:`kohakuterrarium.skills.user_slash`).
 
 Vocabulary distinction (Qc): *tool references* live in
 ``builtin_skills/tools/<name>.md`` and document registered
-:class:`BaseTool` / :class:`BaseSubAgent` classes; they are read via
-``##info <tool_name>##``. *Skills* are procedural bundles and are
+:class:`BaseTool` / :class:`BaseSubAgent` classes; they are read via the
+``info`` tool. *Skills* are procedural bundles and are
 **never** shipped as built-ins — only via user/project dirs or
 third-party packages.
 """
@@ -39,11 +39,7 @@ from kohakuterrarium.skills.index import (
     build_skill_index,
 )
 from kohakuterrarium.skills.paths import SkillPathScanner
-from kohakuterrarium.skills.registry import (
-    SCRATCHPAD_ENABLED_KEY,
-    Skill,
-    SkillRegistry,
-)
+from kohakuterrarium.skills.registry import SCRATCHPAD_ENABLED_KEY, Skill, SkillRegistry
 from kohakuterrarium.skills.user_slash import build_user_skill_turn
 
 __all__ = (

@@ -5,7 +5,7 @@ These events represent parsed segments from LLM output:
 - TextEvent: Regular text content
 - ToolCallEvent: Tool call block
 - SubAgentCallEvent: Sub-agent call block
-- CommandEvent: Framework command (##read##, ##info##)
+- CommandEvent: Legacy/custom-format framework command
 """
 
 from dataclasses import dataclass, field
@@ -69,7 +69,7 @@ class CommandEvent:
     """
     Framework command detected in LLM output.
 
-    Commands like ##read job_id## or ##info tool_name##.
+    Commands parsed from the configured text tool-call format.
 
     Attributes:
         command: Command name (read, info, etc.)

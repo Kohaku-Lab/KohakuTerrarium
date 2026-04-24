@@ -10,6 +10,7 @@ to reduce import fan-out.
 """
 
 from pathlib import Path
+from typing import Any
 
 from kohakuterrarium.bootstrap.io import create_input, create_output
 from kohakuterrarium.bootstrap.llm import create_llm_provider
@@ -17,39 +18,40 @@ from kohakuterrarium.bootstrap.subagents import init_subagents
 from kohakuterrarium.bootstrap.tools import init_tools
 from kohakuterrarium.bootstrap.triggers import init_triggers
 from kohakuterrarium.builtins.tool_catalog import get_builtin_tool
-from kohakuterrarium.core.config import AgentConfig
-from kohakuterrarium.core.controller import Controller, ControllerConfig
-from kohakuterrarium.core.executor import Executor
-from kohakuterrarium.core.loader import ModuleLoader
-from kohakuterrarium.utils.file_guard import FileReadState, PathBoundaryGuard
-from kohakuterrarium.core.registry import Registry
-from kohakuterrarium.core.session import get_session
 from kohakuterrarium.builtins.user_commands import (
     get_builtin_user_command,
     list_builtin_user_commands,
 )
+from kohakuterrarium.core.config import AgentConfig
+from kohakuterrarium.core.controller import Controller, ControllerConfig
+from kohakuterrarium.core.executor import Executor
+from kohakuterrarium.core.loader import ModuleLoader
+from kohakuterrarium.core.registry import Registry
+from kohakuterrarium.core.session import get_session
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
-from kohakuterrarium.modules.user_command.base import UserCommandContext
 from kohakuterrarium.modules.output.router import OutputRouter
 from kohakuterrarium.modules.subagent import SubAgentManager
-from kohakuterrarium.parsing.format import (
-    BRACKET_FORMAT,
-    XML_FORMAT,
-    ToolCallFormat,
+from kohakuterrarium.modules.user_command.base import (
+    UserCommandContext,
+    UserCommandResult,
+    parse_slash_command,
 )
 from kohakuterrarium.packages import (
     find_package_root_for_path,
     get_package_framework_hints,
 )
+from kohakuterrarium.parsing.format import BRACKET_FORMAT, XML_FORMAT, ToolCallFormat
 from kohakuterrarium.prompt.aggregator import aggregate_system_prompt
 from kohakuterrarium.prompt.framework_hints import merge_overrides
 from kohakuterrarium.skills import (
     SkillCommand,
     SkillPathScanner,
     SkillRegistry,
+    build_user_skill_turn,
     discover_skills,
 )
+from kohakuterrarium.utils.file_guard import FileReadState, PathBoundaryGuard
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -302,6 +304,10 @@ class AgentInitMixin:
             package_hints, self.config.framework_hint_overrides
         )
 
+        skill_registry = getattr(self, "skills", None)
+        if skill_registry is not None:
+            self._ensure_skill_tool_registered()
+
         logger.debug(
             "Building system prompt",
             known_outputs=known_outputs,
@@ -338,30 +344,104 @@ class AgentInitMixin:
         # Note: Controller handles framework commands (read, info, jobs, wait)
         # via its own _commands dict and ControllerContext
         self.controller = self._create_controller()
-        # Wire the output router so post_llm_call rewrites can emit the
-        # ``assistant_message_edited`` activity event.
-        if hasattr(self, "output_router"):
-            self.controller.output_router = self.output_router
-        # Register the ``##skill <name>##`` controller command so the
-        # model can invoke procedural skills alongside builtin ##info##
-        # / ##jobs## / ##wait## commands.  Must happen after _init_skills
-        # so the registry reference is captured.
-        skill_registry = getattr(self, "skills", None)
-        if skill_registry is not None:
-            self.controller.register_command("skill", SkillCommand(skill_registry))
-            # Expose the registry to ControllerContext so the builtin
-            # ##info## command can fall through to procedural skills.
-            if hasattr(self.controller, "_context"):
-                self.controller._context.skills_registry = skill_registry
+
+    def _ensure_skill_tool_registered(self) -> None:
+        """Expose procedural skills through the normal tool registry."""
+        if self.registry.get_tool("skill") is not None:
+            return
+        tool = get_builtin_tool("skill")
+        if tool is None:
+            try:
+                from kohakuterrarium.builtins.tools.skill import SkillTool
+
+                tool = SkillTool()
+            except Exception as exc:
+                logger.warning(
+                    "Skill tool not found in builtin catalog", error=str(exc)
+                )
+                return
+        self.registry.register_tool(tool)
+        if getattr(self, "executor", None) is not None:
+            self.executor.register_tool(tool)
+
+    async def _try_slash_command_text(self, text: str) -> Any | None:
+        """Run the configured slash dispatcher for programmatic inputs."""
+        input_module = getattr(self, "input", None)
+        if input_module is not None and hasattr(input_module, "try_user_command"):
+            return await input_module.try_user_command(text)
+
+        commands: dict[str, Any] = {}
+        for name in list_builtin_user_commands():
+            cmd = get_builtin_user_command(name)
+            if cmd:
+                commands[name] = cmd
+        context = UserCommandContext(agent=self, session=getattr(self, "session", None))
+        name, args = parse_slash_command(text)
+        cmd = commands.get(name)
+        if cmd is not None:
+            return await cmd.execute(args, context)
+
+        registry = getattr(self, "skills", None)
+        if registry is None:
+            return None
+        skill = registry.get(name)
+        if skill is None:
+            return None
+        if not skill.enabled:
+            return UserCommandResult(
+                error=f"Skill '{name}' is disabled. Enable with /skill enable {name}."
+            )
+
+        return UserCommandResult(
+            output=build_user_skill_turn(skill, args),
+            consumed=False,
+        )
+
+    async def _prepare_injected_input(
+        self,
+        content: Any,
+        source: str,
+    ) -> Any | None:
+        """Resolve programmatic slash input before building a user event."""
+        if not isinstance(content, str) or not content.startswith("/"):
+            return content
+        result = await self._try_slash_command_text(content)
+        if result is None:
+            return content
+        if result.error:
+            if self.output_router is not None:
+                self.output_router.notify_activity(
+                    "command_error",
+                    result.error,
+                    metadata={"source": source, "command": content},
+                )
+            return None
+        if result.consumed:
+            if result.output and self.output_router is not None:
+                self.output_router.notify_activity(
+                    "command_result",
+                    result.output,
+                    metadata={"source": source, "command": content},
+                )
+            return None
+        return result.output or content
 
     def _create_controller(self) -> Controller:
         """Create a new controller instance (for parallel processing)."""
-        return Controller(
+        controller = Controller(
             self.llm,
             self._controller_config,
             executor=self.executor,
             registry=self.registry,
         )
+        if hasattr(self, "output_router"):
+            controller.output_router = self.output_router
+        skill_registry = getattr(self, "skills", None)
+        if skill_registry is not None:
+            controller.register_command("skill", SkillCommand(skill_registry))
+            if hasattr(controller, "_context"):
+                controller._context.skills_registry = skill_registry
+        return controller
 
     def _init_skills(self) -> None:
         """Discover procedural skills and build the runtime registry.

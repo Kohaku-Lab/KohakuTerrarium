@@ -1,17 +1,12 @@
-"""``##skill <name> [args]##`` controller command (model-invoked skill).
+"""Legacy text-format controller command for procedural skills.
 
-Registered on the agent's controller via
-:func:`kohakuterrarium.core.controller_plugins.register_controller_command`
-once the skill registry has been populated (see
-:mod:`kohakuterrarium.bootstrap.agent_init`). When the model emits
-``##skill pdf-merge file.pdf##`` the controller dispatches here; we
-look up the skill, check enabled-state, and return the SKILL.md body
-as the command output — the model then reads that body and decides
-how to execute it.
+Native-capable models should use the built-in ``skill`` tool. This
+command remains for bracket/XML/custom text tool formats and shares the
+same registry lookup/rendering behavior.
 
 Note: ``disable-model-invocation: true`` hides a skill from the
-auto-invoke index (aggregator.py) but an explicit ``##skill <name>##``
-is still allowed (spec 4.4).
+auto-invoke index (aggregator.py) but explicit skill invocation is still
+allowed (spec 4.4).
 """
 
 from typing import Any
@@ -21,7 +16,7 @@ from kohakuterrarium.skills.registry import SkillRegistry
 
 
 class SkillCommand(BaseCommand):
-    """``##skill <name> [args]##`` — return a procedural skill's body."""
+    """Return a procedural skill's body."""
 
     def __init__(self, registry: SkillRegistry) -> None:
         self._registry = registry
@@ -39,8 +34,8 @@ class SkillCommand(BaseCommand):
         if not text:
             return CommandResult(
                 error=(
-                    "No skill name provided. Usage: ##skill <name> [args]##. "
-                    "List skills with ##info skills##."
+                    "No skill name provided. Use skill(name=..., arguments=...). "
+                    "List skills with /skill list."
                 )
             )
         parts = text.split(None, 1)
@@ -53,7 +48,7 @@ class SkillCommand(BaseCommand):
             return CommandResult(
                 error=(
                     f"Unknown skill: {name!r}. Available: {available}. "
-                    "Run ##info <skill_name>## for details."
+                    "Run info(name=<skill_name>) for details."
                 )
             )
         if not skill.enabled:

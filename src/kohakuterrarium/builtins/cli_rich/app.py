@@ -62,10 +62,7 @@ from kohakuterrarium.builtins.user_commands import (
     list_builtin_user_commands,
 )
 from kohakuterrarium.llm.profiles import list_all as list_all_presets
-from kohakuterrarium.modules.user_command.base import (
-    UserCommandContext,
-    parse_slash_command,
-)
+from kohakuterrarium.modules.user_command.base import parse_slash_command
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -459,27 +456,37 @@ class RichCLIApp(AppOutputMixin):
             self._invalidate()
             return
 
-        cmd = self._command_registry.get(name) or get_builtin_user_command(name)
-        if cmd is None:
-            self._commit_text(f"[red]Unknown command:[/red] /{name}")
-            return
-
-        ctx = UserCommandContext(
-            agent=self.agent,
-            session=getattr(self.agent, "session", None),
-            input_module=getattr(self.agent, "input", None),
-            extra={"command_registry": self._command_registry},
-        )
         try:
-            result = await cmd.execute(args, ctx)
+            result = await self.agent._try_slash_command_text(text)
         except Exception as e:
             self._commit_text(f"[red]Command error:[/red] {e}")
             return
 
+        if result is None:
+            self._commit_text(f"[red]Unknown command:[/red] /{name}")
+            return
+
         if result.error:
             self._commit_text(f"[red]{result.error}[/red]")
-        if result.output:
+        elif result.output and result.consumed:
             self._commit_text(result.output)
+        elif result.output:
+            self._processing = True
+            self.live_region.set_processing(True)
+            self._invalidate()
+
+            async def _send_skill_turn():
+                try:
+                    await self.agent.inject_input(result.output, source="cli")
+                except Exception as e:
+                    logger.exception("Error processing skill slash input", error=str(e))
+                finally:
+                    self._processing = False
+                    self.live_region.set_processing(False)
+                    self.committer.flush_block_close()
+                    self._invalidate()
+
+            self._pending_task = spawn(_send_skill_turn())
 
         if name in ("exit", "quit"):
             self._exit_requested = True

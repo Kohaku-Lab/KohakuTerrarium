@@ -328,7 +328,7 @@ class BaseTool:
         Subclasses override to return a short prose hint ("use me like
         this"). Return ``None`` to skip the contribution (default). The
         text should be kept short — full tool reference documentation
-        stays behind ``##info <tool>##``.
+        stays behind the ``info`` tool.
 
         Called once at aggregation time per Cluster 5 / E.1 of the
         extension-point decisions; cached in the assembled system
@@ -346,7 +346,7 @@ class ToolInfo:
         tool_name: Tool identifier
         description: One-line description
         execution_mode: Execution mode
-        documentation: Full documentation (for ##info##)
+        documentation: Full documentation for info lookups
     """
 
     tool_name: str

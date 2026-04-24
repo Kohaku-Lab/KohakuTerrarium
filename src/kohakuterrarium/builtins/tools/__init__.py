@@ -21,16 +21,17 @@ from kohakuterrarium.builtins.tools.ask_user import AskUserTool
 from kohakuterrarium.builtins.tools.bash import BashTool, PythonTool
 from kohakuterrarium.builtins.tools.edit import EditTool
 from kohakuterrarium.builtins.tools.glob import GlobTool
-from kohakuterrarium.builtins.tools.multi_edit import MultiEditTool
 from kohakuterrarium.builtins.tools.grep import GrepTool
 from kohakuterrarium.builtins.tools.image_gen import ImageGenTool
 from kohakuterrarium.builtins.tools.info import InfoTool
 from kohakuterrarium.builtins.tools.json_read import JsonReadTool
 from kohakuterrarium.builtins.tools.json_write import JsonWriteTool
+from kohakuterrarium.builtins.tools.multi_edit import MultiEditTool
 from kohakuterrarium.builtins.tools.read import ReadTool
 from kohakuterrarium.builtins.tools.scratchpad_tool import ScratchpadTool
 from kohakuterrarium.builtins.tools.search_memory import SearchMemoryTool
 from kohakuterrarium.builtins.tools.send_message import SendMessageTool
+from kohakuterrarium.builtins.tools.skill import SkillTool
 from kohakuterrarium.builtins.tools.stop_task import StopTaskTool
 from kohakuterrarium.builtins.tools.tree import TreeTool
 from kohakuterrarium.builtins.tools.web_fetch import WebFetchTool
@@ -57,6 +58,7 @@ __all__ = [
     "ScratchpadTool",
     "SearchMemoryTool",
     "SendMessageTool",
+    "SkillTool",
     "WriteTool",
     "EditTool",
     "GlobTool",

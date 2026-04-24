@@ -21,7 +21,7 @@ def read_skill_body(path: Path) -> str | None:
 
     If the file has no frontmatter, the whole file is treated as content.
     If the file is malformed or fails to parse, falls back to the raw text
-    so ``##info##`` never breaks on a bad YAML block.
+    so info output never breaks on a bad YAML block.
 
     Args:
         path: Path to a markdown skill file.

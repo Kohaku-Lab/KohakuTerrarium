@@ -73,5 +73,5 @@ No tool imports another tool's implementation except `multi_edit` reusing
 
 - `../README.md` — full builtin catalog (tools + subagents + io + TUI)
 - `../../modules/tool/` — `BaseTool` protocol + execution modes
-- `../../builtin_skills/` — full-doc markdown skills loaded via `##info##`
+- `../../builtin_skills/` — full-doc markdown loaded via the `info` tool
 - `../../terrarium/README.md` — terrarium management tool context

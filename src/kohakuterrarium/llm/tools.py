@@ -172,7 +172,21 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
         "properties": {
             "name": {
                 "type": "string",
-                "description": "Name of the tool or sub-agent to get documentation for",
+                "description": "Name of the tool, sub-agent, or procedural skill to get documentation for",
+            },
+        },
+        "required": ["name"],
+    },
+    "skill": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "Name of the procedural skill to invoke",
+            },
+            "arguments": {
+                "type": "string",
+                "description": "Optional user/task arguments to pass along to the skill",
             },
         },
         "required": ["name"],
