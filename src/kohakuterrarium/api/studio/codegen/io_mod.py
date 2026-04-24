@@ -34,9 +34,9 @@ def render_new(form: dict) -> str:
 def update_existing(source: str, form: dict, execute_body: str) -> str:
     """Replace the body of the protocol method if provided.
 
-    Which method depends on the file: we look for ``read_input``
-    or ``write_output`` on the first class and rewrite whichever
-    is present.
+    Which method depends on the file: we search the class for one of
+    the framework's canonical method names (``get_input`` for inputs,
+    ``write`` for outputs) and rewrite whichever is present.
     """
     from kohakuterrarium.api.studio.codegen import RoundTripError
 
@@ -50,12 +50,17 @@ def update_existing(source: str, form: dict, execute_body: str) -> str:
     if klass is None:
         raise RoundTripError("no class found in source")
 
-    for method in ("read_input", "write_output"):
+    # Framework abstract methods, in priority order. ``read_input`` /
+    # ``write_output`` are accepted for historical compatibility with
+    # legacy scaffolds.
+    for method in ("get_input", "write", "read_input", "write_output"):
         if read_method_body(klass, method) is not None:
             klass = replace_method_body(klass, method, body)
             return replace_class_in_module(tree, klass.name.value, klass).code
 
-    raise RoundTripError("no read_input/write_output method found — use raw mode")
+    raise RoundTripError(
+        "no get_input / write method found — use raw mode",
+    )
 
 
 def parse_back(source: str) -> dict:
@@ -68,10 +73,15 @@ def parse_back(source: str) -> dict:
     if klass is None:
         return _raw_envelope("no class found")
 
-    # Try both methods
-    body = read_method_body(klass, "read_input") or read_method_body(
-        klass, "write_output"
-    )
+    body = None
+    method_name = ""
+    for candidate in ("get_input", "write", "read_input", "write_output"):
+        b = read_method_body(klass, candidate)
+        if b is not None:
+            body = b
+            method_name = candidate
+            break
+
     if body is None:
         return _raw_envelope("no protocol method found")
 
@@ -80,6 +90,7 @@ def parse_back(source: str) -> dict:
         "form": {
             "class_name": klass.name.value,
             "description": "",
+            "method_name": method_name,
         },
         "execute_body": body,
         "warnings": [],

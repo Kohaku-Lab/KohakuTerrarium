@@ -2,11 +2,11 @@
 {{ description }}
 """
 
-from typing import Any
+from kohakuterrarium.modules.output.base import BaseOutputModule
 
 
-class {{ class_name }}:
+class {{ class_name }}(BaseOutputModule):
     """Output module: {{ name }}."""
 
-    async def write_output(self, data: Any) -> None:
+    async def write(self, content: str) -> None:
 {{ body | indent(8, True) }}

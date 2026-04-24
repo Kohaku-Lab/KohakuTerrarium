@@ -2,11 +2,12 @@
 {{ description }}
 """
 
-from typing import Any
+from kohakuterrarium.core.events import TriggerEvent
+from kohakuterrarium.modules.input.base import BaseInputModule
 
 
-class {{ class_name }}:
+class {{ class_name }}(BaseInputModule):
     """Input module: {{ name }}."""
 
-    async def read_input(self) -> Any:
+    async def get_input(self) -> TriggerEvent | None:
 {{ body | indent(8, True) }}
