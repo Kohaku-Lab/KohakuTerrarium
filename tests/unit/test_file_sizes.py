@@ -39,6 +39,23 @@ ALLOWLIST_600 = {
     # settings_render.py; splitting further would fragment a cohesive
     # state machine.
     "builtins/cli_rich/dialogs/settings.py",
+    # Package manager facade — install/uninstall/list + resolvers for
+    # every manifest field (tools / plugins / io / triggers / skills /
+    # commands / user_commands / prompts / templates). Resolver bodies
+    # are short and uniform; splitting further would scatter the
+    # top-level function signatures external callers depend on.
+    "packages.py",
+    # Sub-agent runtime loop: conversation setup, native + text turn
+    # paths, tool execution, budget accounting, result building. Each
+    # helper is short but they share a lot of instance state, and
+    # splitting further would scatter closely-coupled pieces across
+    # files without improving comprehension.
+    "modules/subagent/base.py",
+    # Event-handler mixin: controller loop, event dispatch, processing
+    # lifecycle, tool-completion routing, termination checks. Helpers
+    # already extracted to agent_tools/agent_pre_dispatch/skill-hints;
+    # the remaining code is a single cohesive lifecycle.
+    "core/agent_handlers.py",
 }
 
 
