@@ -60,7 +60,7 @@
 
   <!-- User message -->
   <div v-else-if="message.role === 'user'" class="ml-auto max-w-[80%] group relative">
-    <div class="card px-4 py-3 border-l-3" :class="message.queued ? 'border-l-amber dark:border-l-amber/60 opacity-70' : 'border-l-sapphire dark:border-l-sapphire/60'">
+    <div class="user-message" :class="{ 'opacity-70': message.queued }">
       <div class="text-xs text-warm-400 mb-1 flex items-center gap-1.5">
         <span>You</span>
         <span v-if="message.queued" class="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber/15 text-amber leading-none">Queued</span>
@@ -73,7 +73,7 @@
           <button class="px-2 py-0.5 rounded bg-sapphire text-white hover:bg-sapphire-dark" @click="confirmEdit">Save & Rerun</button>
         </div>
       </div>
-      <div v-else class="text-body whitespace-pre-wrap break-words overflow-wrap-anywhere min-w-0">
+      <div v-else class="text-body break-words overflow-wrap-anywhere min-w-0">
         <template v-if="message.contentParts?.length">
           <div class="flex flex-col gap-2">
             <template v-for="(part, i) in message.contentParts" :key="i">
@@ -87,7 +87,7 @@
           </div>
         </template>
         <template v-else>
-          {{ message.content }}
+          <div class="whitespace-pre-wrap">{{ message.content }}</div>
         </template>
       </div>
     </div>
