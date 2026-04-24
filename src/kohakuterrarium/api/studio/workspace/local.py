@@ -22,6 +22,8 @@ from kohakuterrarium.api.studio.catalog_sources import (
     workspace_manifest_entries,
 )
 from kohakuterrarium.api.studio.utils.paths import ensure_in_root, sanitize_name
+from kohakuterrarium.api.studio.workspace import sidecars as _sidecars
+from kohakuterrarium.api.studio.workspace.manifest_ops import sync_manifest_entry
 from kohakuterrarium.api.studio.yaml_io.creature import (
     load_creature_file,
     save_creature_merged,
@@ -307,7 +309,13 @@ class LocalWorkspace:
         from kohakuterrarium.api.studio.codegen import get_codegen
 
         cg = get_codegen(kind)
-        envelope = cg.parse_back(raw)
+        # Plugins read an optional sidecar schema so the
+        # OptionsSchemaEditor can round-trip the author's options.
+        if kind == "plugins":
+            sidecar_schema = _sidecars.read_schema(path)
+            envelope = cg.parse_back(raw, sidecar_schema=sidecar_schema)
+        else:
+            envelope = cg.parse_back(raw)
         envelope.update(
             {
                 "kind": kind,
@@ -360,6 +368,7 @@ class LocalWorkspace:
         cg = get_codegen(kind)
 
         mode = data.get("mode", "simple")
+        form = data.get("form") or {}
         if mode == "raw":
             raw = data.get("raw_source", "")
             if not raw:
@@ -367,7 +376,6 @@ class LocalWorkspace:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(raw, encoding="utf-8")
         elif mode == "simple":
-            form = data.get("form") or {}
             exec_body = data.get("execute_body", "")
             if path.exists():
                 try:
@@ -389,6 +397,11 @@ class LocalWorkspace:
         else:
             raise ValueError(f"unknown mode: {mode!r}")
 
+        # Per-kind sidecars: plugins round-trip their options-schema as a
+        # JSON file sitting next to the .py. Other kinds currently declare
+        # nothing, so ``sidecar_files`` returns an empty dict.
+        _sidecars.write_codegen_sidecars(cg, form, path)
+
         return self.load_module(kind, name)
 
     def delete_module(self, kind: str, name: str) -> None:
@@ -405,30 +418,33 @@ class LocalWorkspace:
     def load_module_doc(self, kind: str, name: str) -> dict:
         """Return the sidecar skill-doc markdown for a workspace module.
 
-        The sidecar is ``<dir>/<stem>.md`` sitting next to the module's
-        ``.py`` file. Returns the current content (empty string if no
-        sidecar exists yet) plus the sidecar path for display. Raises
-        ``FileNotFoundError`` when the module itself isn't a
-        workspace-editable file — studio never surfaces built-in docs
-        here (the catalog endpoint serves those read-only for
-        reference elsewhere).
+        See :mod:`workspace.sidecars` for the storage layout.
         """
         name = sanitize_name(name)
         py_path = self._find_module_file(kind, name)
         if py_path is None:
             raise FileNotFoundError(f"{kind}/{name}")
+        return _sidecars.load_doc(py_path, self.root_path)
 
-        sidecar = py_path.with_suffix(".md")
-        content = sidecar.read_text(encoding="utf-8") if sidecar.exists() else ""
-        return {
-            "content": content,
-            "path": str(sidecar.relative_to(self.root_path)).replace("\\", "/"),
-            "exists": sidecar.exists(),
-        }
+    # ------------------------------------------------------------------
+    # Manifest sync — append a workspace-authored module into kohaku.yaml
+    # ------------------------------------------------------------------
+
+    def sync_manifest(self, kind: str, name: str) -> dict:
+        """Idempotently append ``(kind, name)`` to ``<root>/kohaku.yaml``.
+
+        Delegates to :func:`manifest_ops.sync_manifest_entry` for the
+        actual YAML work so this file stays under the 600-line cap.
+        """
+        name = sanitize_name(name)
+        py_path = self._find_module_file(kind, name)
+        if py_path is None:
+            raise FileNotFoundError(f"{kind}/{name}")
+        return sync_manifest_entry(self.root_path, kind, name, py_path, KNOWN_KINDS)
 
     def save_module_doc(self, kind: str, name: str, content: str) -> dict:
         """Write the skill-doc sidecar for a module. Returns the fresh
-        ``load_module_doc`` envelope.
+        :meth:`load_module_doc` envelope.
 
         Refuses when the module has no workspace file (no .py file to
         sit next to). Package / external modules keep their own docs.
@@ -437,9 +453,7 @@ class LocalWorkspace:
         py_path = self._find_module_file(kind, name)
         if py_path is None:
             raise FileNotFoundError(f"{kind}/{name}")
-        sidecar = py_path.with_suffix(".md")
-        sidecar.parent.mkdir(parents=True, exist_ok=True)
-        sidecar.write_text(content, encoding="utf-8")
+        _sidecars.save_doc(py_path, content)
         return self.load_module_doc(kind, name)
 
     def _find_module_file(self, kind: str, name: str) -> Path | None:

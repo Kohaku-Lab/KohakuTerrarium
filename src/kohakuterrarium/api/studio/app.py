@@ -11,6 +11,7 @@ from fastapi import APIRouter
 from kohakuterrarium.api.studio.routes import (
     catalog,
     creatures,
+    manifest,
     meta,
     modules,
     packages,
@@ -32,6 +33,11 @@ def build_studio_router() -> APIRouter:
     r.include_router(meta.router, prefix="/api/studio/meta", tags=["studio.meta"])
     r.include_router(
         workspace.router, prefix="/api/studio/workspace", tags=["studio.workspace"]
+    )
+    r.include_router(
+        manifest.router,
+        prefix="/api/studio/workspace/manifest",
+        tags=["studio.manifest"],
     )
     r.include_router(
         creatures.router, prefix="/api/studio/creatures", tags=["studio.creatures"]
