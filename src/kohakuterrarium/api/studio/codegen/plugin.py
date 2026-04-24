@@ -53,7 +53,10 @@ def render_new(form: dict) -> str:
 
     Expected form keys: ``name``, ``class_name`` (optional),
     ``priority`` (int, default 50), ``description``,
-    ``enabled_hooks`` (list of ``{name, body}`` dicts).
+    ``enabled_hooks`` (list of ``{name, body}`` dicts),
+    ``options_schema`` (optional list of ``{name, type_hint,
+    default, required, description}`` param descriptors — written
+    alongside the .py as a sidecar; see :func:`sidecar_files`).
     """
     name = form.get("name", "my_plugin")
     class_name = form.get("class_name") or _to_class_name(name)
@@ -71,6 +74,43 @@ def render_new(form: dict) -> str:
         description=description,
         enabled_hooks=hooks,
     )
+
+
+def sidecar_files(form: dict) -> dict[str, str]:
+    """Return ``{relative_filename: content}`` for sidecars to write
+    alongside the plugin's .py file.
+
+    Plugins use an ``options: dict`` constructor by convention, so
+    their author-declared option keys can't be recovered from the
+    ``__init__`` signature alone. When the form carries an
+    ``options_schema``, we persist it as a sibling
+    ``<plugin>.schema.json`` so ``introspect.py`` can surface per-key
+    docs back to the creature editor's pool.
+
+    Returns an empty dict when no schema is declared — caller writes
+    nothing extra.
+    """
+    schema = form.get("options_schema")
+    if not isinstance(schema, list) or not schema:
+        return {}
+    normalized = [_normalize_schema_param(p) for p in schema if isinstance(p, dict)]
+    if not normalized:
+        return {}
+    import json
+
+    return {".schema.json": json.dumps(normalized, indent=2) + "\n"}
+
+
+def _normalize_schema_param(p: dict) -> dict:
+    """Coerce an incoming param dict into the canonical shape we
+    persist. Unknown keys are dropped to keep the sidecar tight."""
+    return {
+        "name": p.get("name", ""),
+        "type_hint": p.get("type_hint") or "",
+        "default": p.get("default"),
+        "required": bool(p.get("required")),
+        "description": p.get("description") or "",
+    }
 
 
 # ----------------------------------------------------------------------
@@ -134,8 +174,13 @@ def update_existing(source: str, form: dict, execute_body: str) -> str:
 # ----------------------------------------------------------------------
 
 
-def parse_back(source: str) -> dict:
-    """Extract form state from a plugin source file."""
+def parse_back(source: str, sidecar_schema: list | None = None) -> dict:
+    """Extract form state from a plugin source file.
+
+    *sidecar_schema* — optional list loaded from ``<name>.schema.json``.
+    When present, it's round-tripped into ``form.options_schema`` so the
+    OptionsSchemaEditor can re-render the author's previous choices.
+    """
     warnings: list[dict] = []
 
     try:
@@ -163,6 +208,12 @@ def parse_back(source: str) -> dict:
                 }
             )
 
+    options_schema: list[dict] = []
+    if isinstance(sidecar_schema, list):
+        options_schema = [
+            _normalize_schema_param(p) for p in sidecar_schema if isinstance(p, dict)
+        ]
+
     return {
         "mode": "simple",
         "form": {
@@ -171,6 +222,7 @@ def parse_back(source: str) -> dict:
             "priority": priority,
             "description": "",
             "enabled_hooks": enabled,
+            "options_schema": options_schema,
         },
         "execute_body": "",
         "warnings": warnings,

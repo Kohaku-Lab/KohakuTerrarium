@@ -141,10 +141,21 @@ def builtin_schema(kind: str) -> dict:
     return {"params": [], "warnings": []}
 
 
-def custom_schema(source: str, class_name: str | None) -> dict:
+def custom_schema(
+    source: str,
+    class_name: str | None,
+    sidecar_schema: list | None = None,
+) -> dict:
     """AST-parse a source file and extract the target class's
     ``__init__`` signature. Pass ``class_name=None`` to use the first
     class in the module.
+
+    *sidecar_schema* — optional per-key descriptor list (loaded from
+    a sibling ``.schema.json``). When the class's ``__init__`` takes a
+    single ``options: dict`` parameter, the plugin's configurable
+    surface is the sidecar's keys rather than that one anonymous
+    dict — so we return the sidecar list directly in that case. For
+    classes with a richer ``__init__``, the sidecar is ignored.
 
     Returns ``{params, warnings}``. Warnings surface problems without
     blocking — the user still sees whatever params we did manage to
@@ -206,7 +217,48 @@ def custom_schema(source: str, class_name: str | None) -> dict:
         return {"params": [], "warnings": []}
 
     params, warnings = _extract_init_params(init)
+
+    # Options-dict plugins: replace the anonymous ``options: dict`` with
+    # the sidecar's per-key descriptors so consumers see a real form.
+    if sidecar_schema is not None and _is_options_dict_init(params):
+        return {
+            "params": [_normalize_sidecar_param(p) for p in sidecar_schema],
+            "warnings": warnings,
+        }
+
     return {"params": params, "warnings": warnings}
+
+
+def _is_options_dict_init(params: list[dict]) -> bool:
+    """True when the class's editable surface is a single
+    ``options: dict`` parameter (the plugin-options convention)."""
+    if len(params) != 1:
+        return False
+    p = params[0]
+    if p.get("name") != "options":
+        return False
+    hint = (p.get("type_hint") or "").lower()
+    return hint.startswith("dict") or "dict" in hint or hint == "any"
+
+
+def _normalize_sidecar_param(raw: dict) -> dict:
+    """Coerce a sidecar entry into the same shape ``_extract_init_params``
+    produces so the frontend's ``SchemaFormField`` renders uniformly."""
+    if not isinstance(raw, dict):
+        return {
+            "name": "",
+            "type_hint": "",
+            "default": None,
+            "required": False,
+            "description": "",
+        }
+    return {
+        "name": raw.get("name", ""),
+        "type_hint": raw.get("type_hint") or "",
+        "default": raw.get("default"),
+        "required": bool(raw.get("required")),
+        "description": raw.get("description") or "",
+    }
 
 
 def _extract_init_params(

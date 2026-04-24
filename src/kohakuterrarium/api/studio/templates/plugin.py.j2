@@ -11,6 +11,10 @@ logger = get_logger(__name__)
 class {{ class_name }}(BasePlugin):
     name = {{ name | tojson }}
     priority = {{ priority }}
+
+    def __init__(self, options: dict | None = None):
+        super().__init__()
+        self.options = options or {}
 {% for hook in enabled_hooks %}
     async def {{ hook.name }}(self{{ hook.args_signature }}){{ hook.return_hint }}:
 {{ hook.body | indent(8, True) }}

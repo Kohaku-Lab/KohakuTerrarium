@@ -65,6 +65,36 @@ async def module_schema(
                     }
                 ],
             }
-        return custom_schema(source, req.class_name)
+        # Plugins carry a sibling ``<stem>.schema.json`` describing
+        # the per-key layout of their ``options: dict``. When present,
+        # custom_schema substitutes those descriptors for the anonymous
+        # blob so the creature pool renders a real form.
+        sidecar_schema = None
+        if req.kind == "plugins":
+            sidecar_schema = _load_plugin_sidecar(ws.root_path, req.module)
+        return custom_schema(source, req.class_name, sidecar_schema=sidecar_schema)
 
     return {"params": [], "warnings": []}
+
+
+def _load_plugin_sidecar(root, module: str) -> list | None:
+    """Best-effort read of ``<stem>.schema.json`` next to the module file.
+
+    Returns None when the sidecar is missing or unreadable — callers
+    fall back to the plain ``__init__`` signature. Kept here rather
+    than in introspect.py so studio's workspace-rooted path resolution
+    stays local to the route that understands it.
+    """
+    import json
+    from pathlib import Path
+
+    if not module:
+        return None
+    candidate = Path(root) / (module.replace(".", "/") + ".schema.json")
+    if not candidate.is_file():
+        return None
+    try:
+        data = json.loads(candidate.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, list) else None
