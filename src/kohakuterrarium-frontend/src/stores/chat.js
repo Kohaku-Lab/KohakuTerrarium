@@ -84,12 +84,188 @@ export function _convertHistory(messages) {
  * jobId -> { name, type, startedAt } for tools/sub-agents that started
  * but never received a done/error event.
  */
-export function _replayEvents(messages, events) {
+/**
+ * Build per-turn branch metadata from the event stream.
+ *
+ * Returns { byTurn: Map(turn_index -> { branches: number[], latestBranch: number,
+ * eventIdsByBranch: Map(branch_id -> number[]) }), liveIds: Set<number>,
+ * branchSelection: Map(turn_index -> selected_branch_id) }.
+ *
+ * branchSelection defaults to the latest branch per turn; callers can
+ * override it (e.g. when the user clicks <1/N>) and re-run the replay.
+ */
+/**
+ * Path-aware branch metadata.
+ *
+ * Each event optionally carries ``parent_branch_path`` — a list of
+ * ``[turn_index, branch_id]`` pairs naming the live branch of every
+ * prior turn at the moment the event was recorded. The frontend uses
+ * this to correctly hide follow-up turns when the user switches an
+ * earlier turn to a sibling branch whose subtree never produced them.
+ *
+ * Events without an explicit path (legacy / migrated streams) get one
+ * derived from their position: snapshot of the highest branch_id seen
+ * for every prior turn before this event in event order.
+ */
+function _coercePath(raw) {
+  if (!raw || !Array.isArray(raw)) return []
+  const out = []
+  for (const item of raw) {
+    if (Array.isArray(item) && item.length === 2) {
+      const [t, b] = item
+      if (typeof t === "number" && typeof b === "number") out.push([t, b])
+    }
+  }
+  return out
+}
+
+function _indexParentPaths(events) {
+  const paths = new Map()
+  const latestByTurn = new Map()
+  for (const evt of events) {
+    const ti = evt?.turn_index
+    const bi = evt?.branch_id
+    const eid = evt?.event_id
+    const explicit = _coercePath(evt?.parent_branch_path)
+    if (typeof eid === "number") {
+      if (explicit.length) {
+        paths.set(eid, explicit)
+      } else if (typeof ti === "number") {
+        const snap = []
+        for (const [t, b] of latestByTurn) {
+          if (t < ti) snap.push([t, b])
+        }
+        snap.sort((a, b) => a[0] - b[0])
+        paths.set(eid, snap)
+      }
+    }
+    if (typeof ti === "number" && typeof bi === "number") {
+      const prev = latestByTurn.get(ti) || 0
+      if (bi > prev) latestByTurn.set(ti, bi)
+    }
+  }
+  return paths
+}
+
+function _pathMatches(path, selected) {
+  for (const [t, b] of path) {
+    if (selected.has(t) && selected.get(t) !== b) return false
+  }
+  return true
+}
+
+function _resolveSelectedBranches(events, parentPaths, branchView) {
+  const branchesByTurn = new Map()
+  for (const evt of events) {
+    const ti = evt?.turn_index
+    const bi = evt?.branch_id
+    const eid = evt?.event_id
+    if (typeof ti !== "number" || typeof bi !== "number") continue
+    const path = typeof eid === "number" ? parentPaths.get(eid) || [] : []
+    let bucket = branchesByTurn.get(ti)
+    if (!bucket) {
+      bucket = []
+      branchesByTurn.set(ti, bucket)
+    }
+    if (!bucket.some((entry) => entry.branch === bi)) {
+      bucket.push({ path, branch: bi })
+    }
+  }
+  const selected = new Map()
+  const turns = [...branchesByTurn.keys()].sort((a, b) => a - b)
+  for (const ti of turns) {
+    const candidates = branchesByTurn.get(ti).filter((entry) => _pathMatches(entry.path, selected))
+    if (!candidates.length) continue
+    if (branchView && Object.prototype.hasOwnProperty.call(branchView, ti)) {
+      const requested = branchView[ti]
+      const match = candidates.find((entry) => entry.branch === requested)
+      if (match) {
+        selected.set(ti, match.branch)
+        continue
+      }
+    }
+    selected.set(ti, Math.max(...candidates.map((entry) => entry.branch)))
+  }
+  return selected
+}
+
+export function _collectBranchMetadata(events, branchView = null) {
+  const parentPaths = _indexParentPaths(events)
+  const branchSelection = _resolveSelectedBranches(events, parentPaths, branchView)
+
+  // Per-turn metadata, filtered to branches whose parent path is
+  // consistent with the current selection of prior turns. The
+  // navigator's <x/N> count reflects only siblings inside the live
+  // subtree, not branches living under a different prior selection.
+  const byTurn = new Map()
+  for (const evt of events) {
+    const ti = evt?.turn_index
+    const bi = evt?.branch_id
+    const eid = evt?.event_id
+    if (typeof ti !== "number" || typeof bi !== "number") continue
+    const path = typeof eid === "number" ? parentPaths.get(eid) || [] : []
+    const priorSelected = new Map()
+    for (const [t, b] of branchSelection) if (t < ti) priorSelected.set(t, b)
+    if (!_pathMatches(path, priorSelected)) continue
+    let bucket = byTurn.get(ti)
+    if (!bucket) {
+      bucket = { branches: [], latestBranch: 0, eventIdsByBranch: new Map() }
+      byTurn.set(ti, bucket)
+    }
+    if (!bucket.eventIdsByBranch.has(bi)) {
+      bucket.eventIdsByBranch.set(bi, [])
+      bucket.branches.push(bi)
+    }
+    if (typeof eid === "number") bucket.eventIdsByBranch.get(bi).push(eid)
+    if (bi > bucket.latestBranch) bucket.latestBranch = bi
+  }
+  for (const bucket of byTurn.values()) bucket.branches.sort((a, b) => a - b)
+
+  const liveIds = new Set()
+  for (const evt of events) {
+    const eid = evt?.event_id
+    const ti = evt?.turn_index
+    const bi = evt?.branch_id
+    if (typeof eid !== "number") continue
+    if (typeof ti !== "number" || typeof bi !== "number") {
+      liveIds.add(eid)
+      continue
+    }
+    if (branchSelection.get(ti) !== bi) continue
+    const path = parentPaths.get(eid) || []
+    const priorSelected = new Map()
+    for (const [t, b] of branchSelection) if (t < ti) priorSelected.set(t, b)
+    if (!_pathMatches(path, priorSelected)) continue
+    liveIds.add(eid)
+  }
+  return { byTurn, liveIds, branchSelection }
+}
+
+export function _replayEvents(messages, events, branchView = null) {
   if (!events?.length) return { messages: _convertHistory(messages), pendingJobs: {} }
+
+  const { byTurn, liveIds, branchSelection } = _collectBranchMetadata(events, branchView)
+
+  // Pre-pass: compact_replace ranges hide every event whose event_id
+  // falls inside the replaced range. Mirrors Python replay_conversation
+  // so resume + live show the same compact-summary bubble.
+  const replacedIds = new Set()
+  for (const evt of events) {
+    if (evt?.type === "compact_replace") {
+      const frm = evt.replaced_from_event_id
+      const to = evt.replaced_to_event_id
+      if (typeof frm === "number" && typeof to === "number") {
+        for (let i = frm; i <= to; i++) replacedIds.add(i)
+      }
+    }
+  }
 
   const result = []
   let cur = null
   let _n = 0
+  // Dedupe user-role renders across user_input + user_message duplicates
+  // for the same (turn, branch).
+  const _seenUserRender = new Set()
   // Track job lifecycle: started jobs and completed jobs
   const startedJobs = {} // jobId -> tool part reference
   const completedJobs = new Set() // jobIds that received done/error
@@ -300,8 +476,35 @@ export function _replayEvents(messages, events) {
   for (const evt of events) {
     const t = evt.type
 
+    // Skip events on a non-selected branch of their turn (siblings of
+    // regen / edit+rerun stay on disk for the <1/N> navigator but
+    // don't render in the default view).
+    if (typeof evt.event_id === "number" && !liveIds.has(evt.event_id)) {
+      continue
+    }
+
+    // Skip events covered by a compact_replace range (the summary
+    // bubble emitted below replaces them).
+    if (
+      typeof evt.event_id === "number" &&
+      replacedIds.has(evt.event_id) &&
+      t !== "compact_replace"
+    ) {
+      continue
+    }
+
     // ── Common types (both formats) ──
-    if (t === "user_input") {
+    if (t === "user_input" || t === "user_message") {
+      // Live-agent flows emit BOTH user_input + user_message for every
+      // user turn (the first carries the trigger, the second is the
+      // state-bearing replay event). The migration-from-snapshot path
+      // emits ONLY user_message. Render the first one we see for each
+      // (turn, branch) pair; skip the second.
+      const ti = evt?.turn_index
+      const bi = evt?.branch_id
+      const key = typeof ti === "number" && typeof bi === "number" ? `${ti}/${bi}` : null
+      if (key && _seenUserRender.has(key)) continue
+      if (key) _seenUserRender.add(key)
       cur = null
       const normalized = normalizeMessageContent(evt.content)
       result.push({
@@ -319,7 +522,9 @@ export function _replayEvents(messages, events) {
         timestamp: "",
       }
       result.push(cur)
-    } else if (t === "text") {
+    } else if (t === "text" || t === "text_chunk") {
+      // text_chunk is the Wave C per-chunk streaming format; replay
+      // collapses consecutive chunks into one assistant text part.
       appendText(evt.content || "")
     } else if (t === "processing_end" || t === "idle") {
       // Do NOT clear cur if sub-agents might still be adding tools to this message
@@ -508,6 +713,18 @@ export function _replayEvents(messages, events) {
         "done",
         evt.messages_compacted || 0,
       )
+    } else if (t === "compact_replace") {
+      // Wave C state-bearing event. Used by replay_conversation and
+      // by v1→v2 migration to mark the boundary where pre-compact
+      // history was replaced with a summary. Render as a compact
+      // bubble — NOT as a plain assistant message.
+      cur = null
+      upsertCompactMessage(
+        evt.round || 0,
+        evt.summary_text || evt.summary || "",
+        "done",
+        evt.messages_compacted || 0,
+      )
     } else if (t === "compact_start") {
       cur = null
       upsertCompactMessage(evt.compact_round || evt.round || 0, "", "running", 0)
@@ -595,7 +812,126 @@ export function _replayEvents(messages, events) {
   for (const msg of result) {
     if (msg.parts?.length === 0) delete msg.parts
   }
-  return { messages: result, pendingJobs }
+
+  // Branch navigator placement is determined per turn by *content*
+  // grouping of the available branches:
+  //
+  //   - All branches share the SAME user_message content
+  //     → regen-style branching. Navigator on the assistant bubble.
+  //   - Branches have DIFFERENT user_message content
+  //     → edit-style branching. Navigator on the user bubble.
+  //   - Mixed (some same, some different)
+  //     → both navigators surface independently: a user-level one
+  //       between user contents, plus an assistant-level one between
+  //       regens of the currently-selected user content.
+  //
+  // This mirrors the user's mental model: regen produces an assistant
+  // alternative, edit produces a user alternative; placing the
+  // chevrons anywhere else creates phantom navigators.
+  const userContentByBranch = new Map() // ti -> Map(branch_id -> content)
+  for (const evt of events) {
+    if (evt?.type !== "user_message" && evt?.type !== "user_input") continue
+    const ti = evt.turn_index
+    const bi = evt.branch_id
+    if (typeof ti !== "number" || typeof bi !== "number") continue
+    let perTurn = userContentByBranch.get(ti)
+    if (!perTurn) {
+      perTurn = new Map()
+      userContentByBranch.set(ti, perTurn)
+    }
+    if (!perTurn.has(bi)) {
+      const c = evt.content
+      perTurn.set(bi, typeof c === "string" ? c : JSON.stringify(c ?? ""))
+    }
+  }
+
+  function _userGroupsForTurn(ti) {
+    const info = byTurn.get(ti)
+    if (!info) return null
+    const contents = userContentByBranch.get(ti) || new Map()
+    const groups = []
+    for (const branch of info.branches) {
+      const content = contents.get(branch) ?? ""
+      const existing = groups.find((g) => g.content === content)
+      if (existing) existing.branches.push(branch)
+      else groups.push({ content, branches: [branch] })
+    }
+    return groups
+  }
+
+  // Walk events grouped to result messages by turn so each rendered
+  // user / assistant bubble can be tagged with the right turn_index.
+  // Dedup user_input + user_message — the renderer only emits one
+  // role=user message per (turn, branch).
+  const userTurnsForResult = []
+  const assistantTurnsForResult = []
+  const seenUserKey = new Set()
+  for (const evt of events) {
+    const eid = evt?.event_id
+    if (typeof eid === "number" && !liveIds.has(eid)) continue
+    const ti = evt?.turn_index
+    const bi = evt?.branch_id
+    if (typeof ti !== "number") continue
+    if (evt.type === "user_input" || evt.type === "user_message") {
+      const key = `${ti}/${bi}`
+      if (seenUserKey.has(key)) continue
+      seenUserKey.add(key)
+      userTurnsForResult.push(ti)
+    } else if (evt.type === "processing_end") {
+      assistantTurnsForResult.push(ti)
+    }
+  }
+
+  function _attachUserNav(msg, ti) {
+    const groups = _userGroupsForTurn(ti)
+    if (!groups || groups.length <= 1) return
+    const sel = branchSelection.get(ti)
+    let groupIdx = groups.findIndex((g) => g.branches.includes(sel))
+    if (groupIdx < 0) groupIdx = 0
+    msg.turnIndex = ti
+    msg.branchAnchor = "user"
+    msg.userGroupCount = groups.length
+    msg.currentUserGroupIdx = groupIdx
+    // Branch ids representing each group (we pick the highest in each
+    // group as the "default" target when chevroning across groups so
+    // switching lands on the latest regen of the destination edit).
+    msg.userGroupBranches = groups.map((g) => Math.max(...g.branches))
+    msg.branches = [...(byTurn.get(ti)?.branches || [])]
+    msg.currentBranch = sel
+    msg.latestBranch = byTurn.get(ti)?.latestBranch
+  }
+
+  function _attachAssistantNav(msg, ti) {
+    const groups = _userGroupsForTurn(ti)
+    if (!groups) return
+    const sel = branchSelection.get(ti)
+    const group = groups.find((g) => g.branches.includes(sel)) || groups[0]
+    if (!group || group.branches.length <= 1) return
+    msg.turnIndex = ti
+    msg.branchAnchor = "assistant"
+    msg.assistantBranchCount = group.branches.length
+    msg.currentAssistantIdx = group.branches.indexOf(sel)
+    msg.assistantBranches = [...group.branches]
+    msg.branches = [...group.branches]
+    msg.currentBranch = sel
+    msg.latestBranch = Math.max(...group.branches)
+  }
+
+  let userMsgIdx = 0
+  let assistantMsgIdx = 0
+  for (const msg of result) {
+    if (msg.role === "user") {
+      const ti = userTurnsForResult[userMsgIdx]
+      userMsgIdx += 1
+      if (typeof ti === "number") _attachUserNav(msg, ti)
+    } else if (msg.role === "assistant") {
+      const ti = assistantTurnsForResult[assistantMsgIdx]
+      assistantMsgIdx += 1
+      if (typeof ti === "number") _attachAssistantNav(msg, ti)
+    }
+  }
+
+  return { messages: result, pendingJobs, branchMeta: { byTurn, branchSelection } }
 }
 
 function _parseArgs(args) {
@@ -636,6 +972,18 @@ export const useChatStore = defineStore("chat", {
     runningJobs: {},
     /** @type {Object<string, number>} Unread message counts per tab */
     unreadCounts: {},
+    /**
+     * Per-tab raw event log cached from the last ``getHistory`` so
+     * branch navigation can re-replay without a network round-trip.
+     * @type {Object<string, any[]>}
+     */
+    eventsByTab: {},
+    /**
+     * Per-tab branch selection: ``{turnIndex: branchId}``. Empty
+     * means "use latest branch for every turn" (the default).
+     * @type {Object<string, Object<number, number>>}
+     */
+    branchViewByTab: {},
     /** @type {{sessionId: string, model: string, llmName: string, agentName: string, compactThreshold: number}} Session metadata */
     sessionInfo: {
       sessionId: "",
@@ -865,7 +1213,11 @@ export const useChatStore = defineStore("chat", {
         const { messages, events } = await terrariumAPI.getHistory(this._instanceId, target)
         if (generation !== this._instanceGeneration) return
         if (events?.length) {
-          const { messages: msgs, pendingJobs } = _replayEvents(messages, events)
+          // Cache raw events so the branch navigator can re-replay
+          // without a network round-trip after the user clicks <prev/next>.
+          this.eventsByTab[target] = events
+          const view = this.branchViewByTab[target] || null
+          const { messages: msgs, pendingJobs } = _replayEvents(messages, events, view)
           this.messagesByTab[target] = msgs
           this._restoreTokenUsage(target, events)
           this._restoreRunningState(pendingJobs)
@@ -997,7 +1349,11 @@ export const useChatStore = defineStore("chat", {
         const { messages, events } = await agentAPI.getHistory(agentId)
         if (generation !== this._instanceGeneration) return
         if (events?.length) {
-          const { messages: msgs, pendingJobs } = _replayEvents(messages, events)
+          // Cache raw events so branch navigation works after resume
+          // without an extra network round-trip.
+          this.eventsByTab[tabKey] = events
+          const view = this.branchViewByTab[tabKey] || null
+          const { messages: msgs, pendingJobs } = _replayEvents(messages, events, view)
           this.messagesByTab[tabKey] = msgs
           this._restoreTokenUsage(tabKey, events)
           this._restoreRunningState(pendingJobs)
@@ -1389,33 +1745,89 @@ export const useChatStore = defineStore("chat", {
       }
     },
 
-    /** Regenerate the last assistant response using current settings. */
+    /** Regenerate the last assistant response using current settings.
+     *
+     * Wipes the entire current assistant turn from the local message
+     * list (including tool calls / sub-agent dispatches that were part
+     * of it) before triggering regen so the user sees the old turn
+     * disappear immediately and the new one stream in fresh as a new
+     * branch. After ``processing_end`` arrives via WS, ``_resyncHistory``
+     * pulls the canonical event log including branch metadata so the
+     * ``<1/N>`` navigator can flip back.
+     */
     async regenerateLastResponse() {
       if (!this._instanceId || this._instanceType === "terrarium") {
         console.warn("Regenerate only supported for standalone creature instances currently")
         return
       }
+      // Dedupe rapid double-clicks: another regen already in flight.
+      if (this._regenInFlight) return
+      this._regenInFlight = true
+      const tab = this.activeTab
+      if (tab) {
+        const msgs = this.messagesByTab[tab] || []
+        // Drop ALL trailing assistant messages back to the most recent
+        // user message. A single assistant turn may include multiple
+        // assistant entries (text → tool → text) — leaving stale
+        // intermediate parts breaks resync ordering.
+        let cutAt = msgs.length
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          if (msgs[i].role === "user") break
+          cutAt = i
+        }
+        if (cutAt < msgs.length) msgs.splice(cutAt)
+      }
       try {
         const { agentAPI } = await import("@/utils/api")
-        // Re-fetch history BEFORE triggering regen so the frontend
-        // state matches the backend's truncated conversation.
         await agentAPI.regenerate(this._instanceId)
         await this._resyncHistory()
       } catch (e) {
         console.warn("Failed to regenerate:", e)
+      } finally {
+        this._regenInFlight = false
       }
     },
 
-    /** Edit a user message and re-run from that point. */
+    /** Edit a user message and re-run from that point.
+     *
+     * Same wipe-and-stream UX as regen: drop everything from the
+     * edited message onward, then let the new branch stream in.
+     *
+     * ``messageIdx`` is the FRONTEND list index (which may include
+     * non-conversation rows: errors, triggers, channel posts, splitters,
+     * compact bubbles). The backend's ``msg_idx`` counts only
+     * conversation messages (user / assistant). We translate here so
+     * editing message N in the UI lands on the N-th conversation entry
+     * server-side regardless of how many decorations sit in front of it.
+     */
     async editMessage(messageIdx, newContent) {
       if (!this._instanceId || this._instanceType === "terrarium") return
       if (messageIdx == null) return
+      if (this._regenInFlight) return
+      this._regenInFlight = true
+      const tab = this.activeTab
+      let backendIdx = messageIdx
+      if (tab) {
+        const msgs = this.messagesByTab[tab] || []
+        if (messageIdx >= 0 && messageIdx < msgs.length) {
+          // Map frontend idx → backend conversation idx by counting
+          // user/assistant messages strictly before messageIdx.
+          backendIdx = 0
+          for (let i = 0; i < messageIdx; i++) {
+            const r = msgs[i]?.role
+            if (r === "user" || r === "assistant") backendIdx += 1
+          }
+          msgs.splice(messageIdx)
+        }
+      }
       try {
         const { agentAPI } = await import("@/utils/api")
-        await agentAPI.editMessage(this._instanceId, messageIdx, newContent)
+        await agentAPI.editMessage(this._instanceId, backendIdx, newContent)
         await this._resyncHistory()
       } catch (e) {
         console.warn("Failed to edit message:", e)
+      } finally {
+        this._regenInFlight = false
       }
     },
 
@@ -1441,13 +1853,39 @@ export const useChatStore = defineStore("chat", {
         const data = await agentAPI.getHistory(this._instanceId)
         const tab = this.activeTab
         if (!tab || !data?.events) return
-        // Rebuild messages from the event history.
-        const events = data.events
-        const { messages } = _replayEvents([], events)
-        this.messagesByTab[tab] = messages
+        // Cache raw events for branch navigation re-replay.
+        this.eventsByTab[tab] = data.events
+        // Regen / edit lands the user on the latest branch — clear
+        // any prior branch override so the navigator starts at <N/N>.
+        this.branchViewByTab[tab] = {}
+        this._rebuildMessages(tab)
       } catch (e) {
         console.warn("Failed to resync history:", e)
       }
+    },
+
+    /**
+     * Rebuild ``messagesByTab[tab]`` from the cached event log,
+     * applying the current ``branchViewByTab[tab]`` override.
+     */
+    _rebuildMessages(tab) {
+      const events = this.eventsByTab[tab]
+      if (!events) return
+      const branchView = this.branchViewByTab[tab] || null
+      const { messages } = _replayEvents([], events, branchView)
+      this.messagesByTab[tab] = messages
+    },
+
+    /**
+     * Switch the active branch for a turn. Re-runs replay against
+     * the cached event log; no network round-trip.
+     */
+    selectBranch(turnIndex, branchId) {
+      const tab = this.activeTab
+      if (!tab) return
+      if (!this.branchViewByTab[tab]) this.branchViewByTab[tab] = {}
+      this.branchViewByTab[tab][turnIndex] = branchId
+      this._rebuildMessages(tab)
     },
 
     /**

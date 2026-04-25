@@ -145,3 +145,256 @@ describe("chat store — compact round handling", () => {
     })
   })
 })
+
+describe("chat store — Wave C text_chunk events", () => {
+  it("replays text_chunk events as assistant text (Wave C streaming format)", () => {
+    const messages = []
+    const events = [
+      { type: "user_input", content: "hi" },
+      { type: "processing_start" },
+      { type: "text_chunk", content: "Hel", chunk_seq: 0, event_id: 1 },
+      { type: "text_chunk", content: "lo!", chunk_seq: 1, event_id: 2 },
+      { type: "processing_end" },
+    ]
+
+    const { messages: replayed } = _replayEvents(messages, events)
+
+    expect(replayed).toHaveLength(2)
+    expect(replayed[0]).toMatchObject({ role: "user", content: "hi" })
+    expect(replayed[1].role).toBe("assistant")
+    expect(replayed[1].parts[0]).toMatchObject({ type: "text", content: "Hello!" })
+  })
+
+  it("replays legacy text events alongside text_chunk (mixed v1/v2 stream)", () => {
+    const messages = []
+    const events = [
+      { type: "user_input", content: "hi" },
+      { type: "processing_start" },
+      { type: "text", content: "v1 chunk", event_id: 1 },
+      { type: "text_chunk", content: " then v2", chunk_seq: 0, event_id: 2 },
+      { type: "processing_end" },
+    ]
+
+    const { messages: replayed } = _replayEvents(messages, events)
+
+    expect(replayed[1].parts[0]).toMatchObject({
+      type: "text",
+      content: "v1 chunk then v2",
+    })
+  })
+})
+
+describe("chat store — turn/branch model (regen / edit+rerun)", () => {
+  it("renders only the latest branch per turn by default", () => {
+    const messages = []
+    const events = [
+      // Turn 1, branch 1 (original)
+      {
+        type: "user_input",
+        content: "hi",
+        event_id: 1,
+        turn_index: 1,
+        branch_id: 1,
+      },
+      {
+        type: "processing_start",
+        event_id: 2,
+        turn_index: 1,
+        branch_id: 1,
+      },
+      {
+        type: "text_chunk",
+        content: "OLD reply",
+        chunk_seq: 0,
+        event_id: 3,
+        turn_index: 1,
+        branch_id: 1,
+      },
+      {
+        type: "processing_end",
+        event_id: 4,
+        turn_index: 1,
+        branch_id: 1,
+      },
+      // Turn 1, branch 2 (regen — self-contained, mirrored user_input)
+      {
+        type: "user_input",
+        content: "hi",
+        event_id: 5,
+        turn_index: 1,
+        branch_id: 2,
+      },
+      {
+        type: "processing_start",
+        event_id: 6,
+        turn_index: 1,
+        branch_id: 2,
+      },
+      {
+        type: "text_chunk",
+        content: "NEW reply",
+        chunk_seq: 0,
+        event_id: 7,
+        turn_index: 1,
+        branch_id: 2,
+      },
+      {
+        type: "processing_end",
+        event_id: 8,
+        turn_index: 1,
+        branch_id: 2,
+      },
+    ]
+
+    const { messages: replayed } = _replayEvents(messages, events)
+
+    expect(replayed.filter((m) => m.role === "user")).toHaveLength(1)
+    const assistantMsgs = replayed.filter((m) => m.role === "assistant")
+    expect(assistantMsgs).toHaveLength(1)
+    const flatText = assistantMsgs[0].parts
+      .filter((p) => p.type === "text")
+      .map((p) => p.content)
+      .join("")
+    expect(flatText).toBe("NEW reply")
+    expect(flatText).not.toContain("OLD reply")
+  })
+
+  it("attaches branch metadata to assistant turn for the navigator", () => {
+    const messages = []
+    const events = [
+      {
+        type: "user_input",
+        content: "hi",
+        event_id: 1,
+        turn_index: 1,
+        branch_id: 1,
+      },
+      {
+        type: "processing_start",
+        event_id: 2,
+        turn_index: 1,
+        branch_id: 1,
+      },
+      {
+        type: "text_chunk",
+        content: "first",
+        chunk_seq: 0,
+        event_id: 3,
+        turn_index: 1,
+        branch_id: 1,
+      },
+      {
+        type: "processing_end",
+        event_id: 4,
+        turn_index: 1,
+        branch_id: 1,
+      },
+      {
+        type: "user_input",
+        content: "hi",
+        event_id: 5,
+        turn_index: 1,
+        branch_id: 2,
+      },
+      {
+        type: "processing_start",
+        event_id: 6,
+        turn_index: 1,
+        branch_id: 2,
+      },
+      {
+        type: "text_chunk",
+        content: "second",
+        chunk_seq: 0,
+        event_id: 7,
+        turn_index: 1,
+        branch_id: 2,
+      },
+      {
+        type: "processing_end",
+        event_id: 8,
+        turn_index: 1,
+        branch_id: 2,
+      },
+    ]
+
+    const { messages: replayed, branchMeta } = _replayEvents(messages, events)
+
+    expect(branchMeta).toBeTruthy()
+    expect(branchMeta.byTurn.get(1).branches).toEqual([1, 2])
+
+    const assistant = replayed.find((m) => m.role === "assistant")
+    expect(assistant.turnIndex).toBe(1)
+    expect(assistant.branches).toEqual([1, 2])
+    expect(assistant.currentBranch).toBe(2)
+    expect(assistant.latestBranch).toBe(2)
+  })
+
+  it("respects branchView override to flip back to branch 1", () => {
+    const messages = []
+    const events = [
+      {
+        type: "user_input",
+        content: "hi",
+        event_id: 1,
+        turn_index: 1,
+        branch_id: 1,
+      },
+      {
+        type: "processing_start",
+        event_id: 2,
+        turn_index: 1,
+        branch_id: 1,
+      },
+      {
+        type: "text_chunk",
+        content: "first",
+        chunk_seq: 0,
+        event_id: 3,
+        turn_index: 1,
+        branch_id: 1,
+      },
+      {
+        type: "processing_end",
+        event_id: 4,
+        turn_index: 1,
+        branch_id: 1,
+      },
+      {
+        type: "user_input",
+        content: "hi",
+        event_id: 5,
+        turn_index: 1,
+        branch_id: 2,
+      },
+      {
+        type: "processing_start",
+        event_id: 6,
+        turn_index: 1,
+        branch_id: 2,
+      },
+      {
+        type: "text_chunk",
+        content: "second",
+        chunk_seq: 0,
+        event_id: 7,
+        turn_index: 1,
+        branch_id: 2,
+      },
+      {
+        type: "processing_end",
+        event_id: 8,
+        turn_index: 1,
+        branch_id: 2,
+      },
+    ]
+
+    const { messages: replayed } = _replayEvents(messages, events, { 1: 1 })
+    const assistant = replayed.find((m) => m.role === "assistant")
+    const flatText = assistant.parts
+      .filter((p) => p.type === "text")
+      .map((p) => p.content)
+      .join("")
+    expect(flatText).toBe("first")
+  })
+})
