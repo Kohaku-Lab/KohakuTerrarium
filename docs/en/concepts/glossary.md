@@ -32,8 +32,9 @@ that makes the LLM act over time. Full: [controller](modules/controller.md).
 
 How the outside world hands a user's message to the creature. In
 practice, just one specific kind of trigger — the one labelled
-`user_input`. Built-ins include CLI, TUI, Whisper ASR, and `none`
-(trigger-only creatures). Full: [input](modules/input.md).
+`user_input`. Built-ins include CLI, TUI, and `none` (trigger-only
+creatures); audio/ASR is provided as opt-in custom modules. Full:
+[input](modules/input.md).
 
 ## Trigger
 

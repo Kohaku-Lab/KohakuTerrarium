@@ -189,7 +189,7 @@ Module: `kohakuterrarium.core.config_types`. Dataclasses.
 
 **`InputConfig`**
 
-- `type: str = "cli"` — input module type (`cli`, `cli_nonblocking`, `tui`, `whisper`, `none`, `custom`, `package`).
+- `type: str = "cli"` — input module type (`cli`, `cli_nonblocking`, `tui`, `none`, `custom`, `package`).
 - `module: str | None = None`
 - `class_name: str | None = None` — populated from the YAML key `class`.
 - `prompt: str = "> "`

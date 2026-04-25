@@ -1,10 +1,10 @@
 # builtins/inputs/
 
 Built-in input module implementations. Input modules receive external input
-(terminal, speech, API) and produce `TriggerEvent` objects for the controller.
+(terminal, API) and produce `TriggerEvent` objects for the controller.
 The `__init__.py` provides a registry with factory functions so that
-`bootstrap/io.py` can create input modules by name. TUI and Whisper inputs
-are registered at import time when their dependencies are available.
+`bootstrap/io.py` can create input modules by name. Audio/ASR examples live
+under `examples/` and are loaded as custom modules when explicitly configured.
 
 ## Files
 
@@ -13,12 +13,11 @@ are registered at import time when their dependencies are available.
 | `__init__.py` | Input registry, factory functions, builtin registration |
 | `cli.py` | `CLIInput` (blocking terminal) and `NonBlockingCLIInput` (non-blocking polling) |
 | `none.py` | `NoneInput` for trigger-only agents with no user input |
-| `asr.py` | ASR base classes (`ASRModule`, `ASRConfig`, `ASRResult`) for speech-to-text |
-| `whisper.py` | `WhisperASR` using openai-whisper + sounddevice + Silero VAD (optional dependency) |
+
 
 ## Registered Types
 
-`cli`, `cli_nonblocking`, `none`, `tui` (from `builtins.tui`), `whisper` (optional)
+`cli`, `cli_nonblocking`, `none`, `tui` (from `builtins.tui`)
 
 ## Dependencies
 

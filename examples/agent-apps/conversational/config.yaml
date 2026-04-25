@@ -17,9 +17,11 @@ controller:
 system_prompt_file: system.md
 
 # Input module - Real-time Whisper ASR with VAD
-# Requires: pip install -e ".[asr]" and FFmpeg (choco install ffmpeg)
+# Requires: pip install openai-whisper sounddevice numpy torch and FFmpeg
 input:
-  type: whisper
+  type: custom
+  module: ./custom/input.py
+  class: WhisperInput
   # Whisper model: tiny, base, small, medium, large, large-v3
   model: small
   # Device: cuda or cpu (cuda uses fp16 for speed)

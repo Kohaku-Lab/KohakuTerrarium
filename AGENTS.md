@@ -207,7 +207,7 @@ plugins:
 mcp_servers: [...]
 triggers: [...]
 input:
-  type: cli                              # or tui, none, whisper, custom
+  type: cli                              # or tui, none, custom, package
 output:
   type: stdout                           # or tts, custom
 memory:

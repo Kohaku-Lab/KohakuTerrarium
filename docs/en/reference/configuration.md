@@ -179,7 +179,7 @@ Dict fields: `{type, module?, class?, options?, ...type-specific keys}`.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `type` | str | `"cli"` | `cli`, `cli_nonblocking`, `tui`, `whisper` (optional, requires RealtimeSTT), `none`, `custom`, `package`. |
+| `type` | str | `"cli"` | `cli`, `cli_nonblocking`, `tui`, `none`, `custom`, `package`. Audio/ASR inputs are custom/package modules. |
 | `module` | str | — | For `custom` (e.g. `./custom/input.py`) or `package` (e.g. `pkg.mod`). |
 | `class` | str | — | Class to instantiate. YAML key is `class`; the loader stores it on the `class_name` dataclass attribute. |
 | `options` | dict | `{}` | Module-specific options. |

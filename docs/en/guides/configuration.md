@@ -211,9 +211,9 @@ input:
     channel_id: 123456
 ```
 
-Built-in types: `cli`, `cli_nonblocking`, `tui`, `none`. `whisper` is
-available when the optional RealtimeSTT dep is installed. See
-[Custom Modules](custom-modules.md) for the protocol.
+Built-in types: `cli`, `cli_nonblocking`, `tui`, `none`. Audio/ASR inputs
+should be configured as custom or package modules; see the conversational
+example and [Custom Modules](custom-modules.md) for the protocol.
 
 ## How do I add a named output sink?
 

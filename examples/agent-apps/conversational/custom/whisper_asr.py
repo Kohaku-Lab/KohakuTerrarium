@@ -47,7 +47,7 @@ except ImportError:
     whisper = None  # type: ignore[assignment]
     HAS_WHISPER = False
 
-from kohakuterrarium.builtins.inputs.asr import ASRConfig, ASRModule, ASRResult
+from asr import ASRConfig, ASRModule, ASRResult
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -347,17 +347,9 @@ class WhisperASR(ASRModule):
 
 
 # Factory function for config-based creation
-def create_whisper_asr(options: dict[str, Any]) -> WhisperASR:
-    """
-    Create WhisperASR from config options.
-
-    Args:
-        options: Configuration dictionary
-
-    Returns:
-        Configured WhisperASR instance
-    """
-    config = WhisperConfig(
+def create_whisper_config(options: dict[str, Any]) -> WhisperConfig:
+    """Create WhisperConfig from config options."""
+    return WhisperConfig(
         language=options.get("language", "auto"),
         sample_rate=options.get("sample_rate", 16000),
         vad_enabled=options.get("vad_enabled", True),
@@ -372,4 +364,3 @@ def create_whisper_asr(options: dict[str, Any]) -> WhisperASR:
         min_silence_ms=options.get("min_silence_ms", 500),
         max_speech_s=options.get("max_speech_s", 30.0),
     )
-    return WhisperASR(config)

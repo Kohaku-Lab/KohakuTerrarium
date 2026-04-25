@@ -21,10 +21,7 @@ def _iter_all_modules():
 def test_import_module(module_name):
     """Every module should import without error (catches circular imports)."""
     # Skip modules that require optional deps at import time
-    skip_prefixes = (
-        "kohakuterrarium.builtins.inputs.whisper",
-        "kohakuterrarium.builtins.outputs.tts",
-    )
+    skip_prefixes = ("kohakuterrarium.builtins.outputs.tts",)
     if any(module_name.startswith(p) for p in skip_prefixes):
         pytest.skip("optional dependency")
     importlib.import_module(module_name)

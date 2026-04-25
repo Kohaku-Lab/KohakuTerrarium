@@ -44,14 +44,12 @@ Built-in input modules:
   input.
 - **`tui`** — when the creature runs under Textual, the TUI composer
   is the input.
-- **`whisper`** — local microphone + Silero VAD + OpenAI Whisper; emits
-  ASR events as `user_input`. Registered only when the optional
-  RealtimeSTT dependency is installed.
 - **`none`** — a stub that never produces events; for purely
   trigger-driven creatures.
 
-`ASRModule` is still shipped as an abstract base for custom speech
-inputs, but it is not registered as an `asr` config type.
+Audio/ASR implementations are intentionally not imported by the core package.
+See `examples/agent-apps/conversational/custom/` for opt-in ASR and Whisper
+input modules that can be loaded with `type: custom`.
 
 Custom inputs register via `type: custom` or `type: package` in the
 creature config. They must implement `InputModule` and are loaded by

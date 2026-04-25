@@ -64,7 +64,8 @@ MCP meta-tools (registered from `mcp/tools.py`): `mcp_list`, `mcp_call`,
 ## Inputs and Outputs
 
 **Inputs:** `cli` (blocking and non-blocking), `tui` (shared TUI session),
-`whisper` (Silero VAD + Whisper ASR), `none` (trigger-only, no input).
+`none` (trigger-only, no input). Audio/ASR examples live under `examples/` and
+can be loaded explicitly as custom modules.
 
 **Outputs:** `stdout` (plain and prefixed), `tui` (shared TUI session),
 `tts` (console TTS with config).
@@ -75,7 +76,7 @@ MCP meta-tools (registered from `mcp/tools.py`): `mcp_list`, `mcp_call`,
 |---------|---------|
 | `tools/` | 21 tool implementation files, 30 registered tool names |
 | `subagents/` | 10 sub-agent configs |
-| `inputs/` | CLI, Whisper, ASR, None input modules |
+| `inputs/` | CLI, TUI registry, None input modules |
 | `outputs/` | Stdout, TTS output modules |
 | `tui/` | Full-screen Textual terminal UI (session, input, output, widgets) |
 | `cli_rich/` | Inline rich CLI app (prompt_toolkit + rich) — see `cli_rich/README.md` |

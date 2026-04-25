@@ -233,7 +233,7 @@ src/kohakuterrarium/
 │   ├── subagents/            # Built-in sub-agent configs
 │   │                         # (coordinator, critic, explore, plan, research, response,
 │   │                         #  memory_read, memory_write)
-│   ├── inputs/               # cli, asr, whisper, none
+│   ├── inputs/               # cli, tui registry, none
 │   ├── outputs/              # stdout, tts
 │   ├── user_commands/        # Slash commands (clear, compact, exit, help, model,
 │   │                         # plugin, regen, status)

@@ -1,10 +1,7 @@
-"""
-Built-in input modules.
+"""Built-in input modules.
 
-Contains:
-- cli: Terminal input (CLIInput, NonBlockingCLIInput)
-- asr: ASR base classes (ASRModule, ASRConfig, ASRResult)
-- whisper: Whisper-based ASR with VAD (WhisperASR) - requires RealtimeSTT
+Contains terminal, TUI, and no-input implementations only. Audio examples
+(ASR/Whisper) live under ``examples/`` so core imports stay audio-free.
 """
 
 from typing import Any
@@ -86,15 +83,6 @@ def create_builtin_input(name: str, options: dict[str, Any] | None = None) -> An
 from kohakuterrarium.builtins.tui.input import TUIInput
 
 register_builtin_input("tui", TUIInput)
-
-# Try to register whisper (optional dependency)
-try:
-    from kohakuterrarium.builtins.inputs.whisper import WhisperASR, create_whisper_asr
-
-    register_builtin_input("whisper", WhisperASR)
-    register_builtin_input_factory("whisper", create_whisper_asr)
-except ImportError:
-    pass  # RealtimeSTT not installed
 
 
 __all__ = [

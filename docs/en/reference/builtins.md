@@ -222,13 +222,9 @@ input).
 
 **`none`** — No input. For trigger-only agents.
 
-**`whisper`** — Microphone + Silero VAD + `openai-whisper`. Options
-include `model`, `language`, VAD thresholds. Requires FFmpeg and the
-optional `RealtimeSTT` dep; only registered when the import succeeds.
-
-`ASRModule` / `ASRConfig` / `ASRResult` live under
-`builtins/inputs/` as abstract bases for writing custom speech inputs;
-they are **not** registered as the `asr` type.
+Audio/ASR implementations are not built-ins. The conversational example ships
+opt-in `ASRModule`/Whisper custom input files under
+`examples/agent-apps/conversational/custom/`; load them with `type: custom`.
 
 Two further input types are resolved dynamically:
 

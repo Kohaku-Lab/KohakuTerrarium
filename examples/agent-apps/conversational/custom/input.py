@@ -1,14 +1,22 @@
-"""
-Custom ASR input for conversational agent.
+"""Custom ASR input helpers for the conversational agent example.
 
-For demo purposes, this reads from console.
-Replace with actual ASR implementation (Whisper, etc.) for production.
+For demo purposes, ``ConsoleASR`` reads from stdin. ``WhisperInput`` wraps the
+local Whisper ASR example in this folder for opt-in audio setups.
 """
 
 import asyncio
 import sys
+from typing import Any
 
-from kohakuterrarium.builtins.inputs.asr import ASRConfig, ASRModule, ASRResult
+from asr import ASRConfig, ASRModule, ASRResult
+from whisper_asr import WhisperASR, create_whisper_config
+
+
+class WhisperInput(WhisperASR):
+    """Config-friendly wrapper around the example Whisper ASR input."""
+
+    def __init__(self, **options: Any):
+        super().__init__(create_whisper_config(options))
 
 
 class ConsoleASR(ASRModule):

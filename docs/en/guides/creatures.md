@@ -328,7 +328,7 @@ installs `codex/gpt-5.5` and `openai/gpt-5.4-api` are the least ambiguous forms.
 
 ```yaml
 input:
-  type: cli                  # or: cli_nonblocking, tui, whisper (optional), none, custom, package
+  type: cli                  # or: cli_nonblocking, tui, none, custom, package
   prompt: "> "
   exit_commands: ["exit", "quit"]
 

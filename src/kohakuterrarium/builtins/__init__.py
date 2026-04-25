@@ -4,7 +4,7 @@ Builtins module - all built-in components for the framework.
 Contains:
 - tools: Built-in tool implementations (bash, python, read, write, edit, glob, grep)
 - subagents: Built-in sub-agent configurations (explore, plan, memory_read, memory_write)
-- inputs: Built-in input modules (cli, whisper)
+- inputs: Built-in input modules (cli, tui, none)
 - outputs: Built-in output modules (stdout, tts)
 - skills: Skill documentation files
 """
