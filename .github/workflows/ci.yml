@@ -17,8 +17,6 @@ jobs:
       - run: pip install ruff black
       - run: ruff check src/ tests/
       - run: black --check src/ tests/
-      - name: Dependency-graph lint (cycles + in-function imports)
-        run: python scripts/dep_graph.py --lint-imports --fail
 
   test:
     runs-on: ${{ matrix.os }}
@@ -42,7 +40,7 @@ jobs:
         run: |
           pip install -e ".[dev]"
       - name: Run unit tests
-        run: pytest tests/unit/ -v --tb=short --ignore=tests/unit/test_file_sizes.py
+        run: pytest tests/unit/ -v --tb=short --ignore=tests/unit/test_file_sizes.py --ignore=tests/unit/test_dep_graph_lint.py
 
   test-format-guards:
     runs-on: ubuntu-latest
@@ -58,6 +56,21 @@ jobs:
           pip install -e ".[dev]"
       - name: Run file size guards
         run: pytest tests/unit/test_file_sizes.py -v --tb=short
+
+  test-dep-graph:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          pip install -e ".[dev]"
+      - name: Run dep-graph lint guard
+        run: pytest tests/unit/test_dep_graph_lint.py -v --tb=short
 
   frontend-check:
     runs-on: ubuntu-latest
