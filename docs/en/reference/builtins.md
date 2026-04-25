@@ -273,7 +273,10 @@ Slash commands available inside input modules. Under
 | `/clear` | | Clear conversation (the session log retains history). |
 | `/model [name]` | `/llm` | Show current model or switch profile. Accepts canonical `provider/name[@variations]`. |
 | `/compact` | | Manual context compaction. |
-| `/regen` | `/regenerate` | Re-run the last assistant turn. |
+| `/regen` | `/regenerate`, `/retry` | Re-run the last assistant turn as a sibling branch. |
+| `/edit <message_index> <new content>` | — | Edit a past user message and re-run from that point as a new branch. |
+| `/branch [<turn> <branch_id>\|latest]` | `/br` | List or switch the live branch for regen/edit alternatives. |
+| `/fork [event_id] [--name name]` | — | Copy the current session into a new `.kohakutr` file for alternate exploration. |
 | `/plugin [list\|enable\|disable\|toggle] [name]` | `/plugins` | Inspect or toggle plugins. |
 | `/skill [list\|enable\|disable\|toggle\|show] [name]` | `/skills` | Inspect or toggle procedural skills. |
 | `/<skill-name> [args]` | — | User-invoke path for an enabled procedural skill when no built-in slash command shadows that name. |

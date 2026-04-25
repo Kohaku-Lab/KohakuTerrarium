@@ -91,7 +91,7 @@ Serving 层和会话存储的结构请参见 [会话持久化概念](../concepts
 
 读对话与事件日志。`target` 是 `"root"`、Creature名称、或 `"ch:<channel_name>"` (频道历程)。优先用 SessionStore，失败就 fallback 到记忆体 log。
 
-- Response：`{"terrarium_id", "target", "messages": [...], "events": [...]}`。
+- Response：`{"terrarium_id", "target", "messages": [...], "events": [...], "is_processing": bool}`。频道历程 target 会返回 `messages`，且 `is_processing` 为 `false`。
 
 ### `GET /api/terrariums/{terrarium_id}/scratchpad/{target}`
 
@@ -188,7 +188,7 @@ Creature名称到状态 dict 的 map。
 
 ### `GET /api/agents/{agent_id}`
 
-回 `{"agent_id", "name", "model", "running"}`。
+回 `{"agent_id", "name", "model", "running", "is_processing", ...}`。status payload 也包含工具/子代理与 context 细节。
 
 ### `DELETE /api/agents/{agent_id}`
 
@@ -236,7 +236,12 @@ Creature名称到状态 dict 的 map。
 
 ### `GET /api/agents/{agent_id}/history`
 
-回 `{"agent_id", "events": [...]}`。
+回 `{"agent_id", "events": [...], "is_processing": bool}`。事件流包含 sibling branches；client 可本地 replay 当前 branch，或调用 `/branches` 取得 compact branch map。
+
+### `GET /api/agents/{agent_id}/branches`
+
+回 branch navigator 使用的逐 turn branch metadata：
+`{"agent_id": str, "turns": [{"turn_index": int, "branches": [int], "latest_branch": int}]}`。
 
 ### `POST /api/agents/{agent_id}/model`
 

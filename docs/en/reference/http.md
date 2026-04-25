@@ -109,7 +109,7 @@ Read conversation and event log. `target` is `"root"`, a creature name,
 or `"ch:<channel_name>"` for channel history. Prefers SessionStore,
 falls back to the in-memory log.
 
-- Response: `{"terrarium_id", "target", "messages": [...], "events": [...]}`.
+- Response: `{"terrarium_id", "target", "messages": [...], "events": [...], "is_processing": bool}`. Channel-history targets return `messages` and set `is_processing` to `false`.
 
 ### `GET /api/terrariums/{terrarium_id}/scratchpad/{target}`
 
@@ -213,7 +213,7 @@ List running agents.
 
 ### `GET /api/agents/{agent_id}`
 
-Return `{"agent_id", "name", "model", "running"}`.
+Return `{"agent_id", "name", "model", "running", "is_processing", ...}`. The status payload also includes tool/sub-agent and context details.
 
 ### `DELETE /api/agents/{agent_id}`
 
@@ -264,7 +264,12 @@ Cancel a background job.
 
 ### `GET /api/agents/{agent_id}/history`
 
-Return `{"agent_id", "events": [...]}`.
+Return `{"agent_id", "events": [...], "is_processing": bool}`. The event stream includes sibling branches; clients can replay the active branch locally or call `/branches` for a compact branch map.
+
+### `GET /api/agents/{agent_id}/branches`
+
+Return per-turn branch metadata for the branch navigator:
+`{"agent_id": str, "turns": [{"turn_index": int, "branches": [int], "latest_branch": int}]}`.
 
 ### `POST /api/agents/{agent_id}/model`
 

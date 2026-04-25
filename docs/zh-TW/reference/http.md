@@ -91,7 +91,7 @@ Serving 層與工作階段儲存的結構請看 [concepts/impl-notes/session-per
 
 讀對話與事件日誌。`target` 是 `"root"`、生物名稱、或 `"ch:<channel_name>"` (頻道歷程)。優先用 SessionStore，失敗就 fallback 到記憶體 log。
 
-- Response：`{"terrarium_id", "target", "messages": [...], "events": [...]}`。
+- Response：`{"terrarium_id", "target", "messages": [...], "events": [...], "is_processing": bool}`。頻道歷程 target 會回傳 `messages`，且 `is_processing` 為 `false`。
 
 ### `GET /api/terrariums/{terrarium_id}/scratchpad/{target}`
 
@@ -188,7 +188,7 @@ Serving 層與工作階段儲存的結構請看 [concepts/impl-notes/session-per
 
 ### `GET /api/agents/{agent_id}`
 
-回 `{"agent_id", "name", "model", "running"}`。
+回 `{"agent_id", "name", "model", "running", "is_processing", ...}`。status payload 也包含工具/子代理與 context 細節。
 
 ### `DELETE /api/agents/{agent_id}`
 
@@ -236,7 +236,12 @@ Serving 層與工作階段儲存的結構請看 [concepts/impl-notes/session-per
 
 ### `GET /api/agents/{agent_id}/history`
 
-回 `{"agent_id", "events": [...]}`。
+回 `{"agent_id", "events": [...], "is_processing": bool}`。事件流包含 sibling branches；client 可本地 replay 目前 branch，或呼叫 `/branches` 取得 compact branch map。
+
+### `GET /api/agents/{agent_id}/branches`
+
+回 branch navigator 使用的逐 turn branch metadata：
+`{"agent_id": str, "turns": [{"turn_index": int, "branches": [int], "latest_branch": int}]}`。
 
 ### `POST /api/agents/{agent_id}/model`
 
