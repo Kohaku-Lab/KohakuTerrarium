@@ -151,7 +151,7 @@
   },
   {
     "file": "src/kohakuterrarium/core/agent.py",
-    "line": 344,
+    "line": 346,
     "function": "_init_mcp",
     "reason": "wrapped in try/except ImportError so MCP can be used as a graceful-degradation feature when the mcp package is missing"
   },
