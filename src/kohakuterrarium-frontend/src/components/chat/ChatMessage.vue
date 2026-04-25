@@ -77,7 +77,7 @@
         <template v-if="message.contentParts?.length">
           <div class="flex flex-col gap-2">
             <template v-for="(part, i) in message.contentParts" :key="i">
-              <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" />
+              <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" :breaks="true" />
               <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="chat-inline-image" />
               <div v-else-if="part.type === 'file'" class="px-3 py-2 rounded-lg border border-aquamarine/20 bg-aquamarine/5 text-xs text-warm-600 dark:text-warm-300">
                 <span class="i-carbon-document mr-1 text-aquamarine" />
@@ -181,7 +181,7 @@
       <template v-if="message.contentParts?.length">
         <div class="flex flex-col gap-2">
           <template v-for="(part, i) in message.contentParts" :key="i">
-            <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" />
+            <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" :breaks="true" />
             <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="chat-inline-image" />
             <div v-else-if="part.type === 'file'" class="px-3 py-2 rounded-lg border border-aquamarine/20 bg-aquamarine/5 text-xs text-warm-600 dark:text-warm-300">
               <span class="i-carbon-document mr-1 text-aquamarine" />
@@ -190,7 +190,7 @@
           </template>
         </div>
       </template>
-      <MarkdownRenderer v-else :content="message.content" />
+      <MarkdownRenderer v-else :content="message.content" :breaks="true" />
     </div>
   </div>
 </template>

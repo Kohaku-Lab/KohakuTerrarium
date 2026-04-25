@@ -1210,8 +1210,9 @@ export const useChatStore = defineStore("chat", {
 
     async _loadHistory(target, generation = this._instanceGeneration) {
       try {
-        const { messages, events } = await terrariumAPI.getHistory(this._instanceId, target)
+        const data = await terrariumAPI.getHistory(this._instanceId, target)
         if (generation !== this._instanceGeneration) return
+        const { messages, events, is_processing: isProcessing } = data || {}
         if (events?.length) {
           // Cache raw events so the branch navigator can re-replay
           // without a network round-trip after the user clicks <prev/next>.
@@ -1220,9 +1221,15 @@ export const useChatStore = defineStore("chat", {
           const { messages: msgs, pendingJobs } = _replayEvents(messages, events, view)
           this.messagesByTab[target] = msgs
           this._restoreTokenUsage(target, events)
-          this._restoreRunningState(target, pendingJobs, data.is_processing)
+          this._restoreRunningState(target, pendingJobs, isProcessing)
         } else if (messages?.length) {
           this.messagesByTab[target] = _convertHistory(messages)
+          // No event stream but the agent might still be mid-turn —
+          // honour the backend's processing flag so the UI shows the
+          // running indicator after a refresh.
+          if (isProcessing) this.processingByTab[target] = true
+        } else if (isProcessing) {
+          this.processingByTab[target] = true
         }
       } catch (err) {
         // 404 = session has no prior history, which is fine. Anything
@@ -1342,8 +1349,9 @@ export const useChatStore = defineStore("chat", {
 
     async _loadAgentHistory(agentId, tabKey, generation = this._instanceGeneration) {
       try {
-        const { messages, events } = await agentAPI.getHistory(agentId)
+        const data = await agentAPI.getHistory(agentId)
         if (generation !== this._instanceGeneration) return
+        const { messages, events, is_processing: isProcessing } = data || {}
         if (events?.length) {
           // Cache raw events so branch navigation works after resume
           // without an extra network round-trip.
@@ -1352,9 +1360,12 @@ export const useChatStore = defineStore("chat", {
           const { messages: msgs, pendingJobs } = _replayEvents(messages, events, view)
           this.messagesByTab[tabKey] = msgs
           this._restoreTokenUsage(tabKey, events)
-          this._restoreRunningState(tabKey, pendingJobs, data.is_processing)
+          this._restoreRunningState(tabKey, pendingJobs, isProcessing)
         } else if (messages?.length) {
           this.messagesByTab[tabKey] = _convertHistory(messages)
+          if (isProcessing) this.processingByTab[tabKey] = true
+        } else if (isProcessing) {
+          this.processingByTab[tabKey] = true
         }
       } catch (err) {
         if (err?.response?.status !== 404) {

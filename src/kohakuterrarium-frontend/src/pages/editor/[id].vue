@@ -37,6 +37,7 @@ const panelProps = computed(() => ({
   state: { instance: instance.value },
   debug: { instance: instance.value },
   settings: { instance: instance.value },
+  "tool-options": { instance: instance.value },
 }))
 provide("panelProps", panelProps)
 

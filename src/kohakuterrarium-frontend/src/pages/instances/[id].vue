@@ -71,6 +71,7 @@ const panelProps = computed(() => ({
     onSelect: (path) => editor.openFile(path),
   },
   settings: { instance: instance.value },
+  "tool-options": { instance: instance.value },
   debug: { instance: instance.value },
   terminal: { instance: instance.value },
   "status-tab": {

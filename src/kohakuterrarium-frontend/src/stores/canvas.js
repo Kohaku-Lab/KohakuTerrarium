@@ -39,6 +39,13 @@ function _guessTypeFromLang(lang) {
   return "code"
 }
 
+/** ``data:image/png;base64,...`` → ``png``; falls back to "" for unknown URLs. */
+function _extOfDataUrl(url) {
+  if (typeof url !== "string") return ""
+  const m = /^data:image\/([\w+.-]+);/i.exec(url)
+  return m ? m[1].toLowerCase() : ""
+}
+
 function _artifactName(seed) {
   const trimmed = (seed || "").trim().split("\n")[0] || "artifact"
   return trimmed.length > 60 ? trimmed.slice(0, 60) + "…" : trimmed
@@ -79,6 +86,29 @@ export const useCanvasStore = defineStore("canvas", () => {
    *  Assistant messages use `parts: [{type, content}]`, not `.content`. */
   function scanMessage(msg) {
     if (!msg || msg.role !== "assistant") return
+    // Image parts (provider-native ``image_gen`` outputs, etc.) become
+    // image artifacts so they show up in the Canvas alongside long
+    // code blocks. The url can be a data: URL (Codex inlines them
+    // base64) or a session-relative path the backend rewrote.
+    if (msg.parts && Array.isArray(msg.parts)) {
+      let imgIdx = 0
+      for (const p of msg.parts) {
+        if (p.type !== "image_url") continue
+        const url = p.image_url?.url
+        if (!url) continue
+        const meta = p.meta || {}
+        const lang = (meta.output_format || _extOfDataUrl(url) || "png").toLowerCase()
+        upsertArtifact({
+          sourceId: `${msg.id}:image:${imgIdx}`,
+          content: url,
+          lang,
+          type: "image",
+          seedName:
+            meta.revised_prompt || meta.source_name || meta.source_type || `image_${imgIdx + 1}`,
+        })
+        imgIdx += 1
+      }
+    }
     // Assemble full text from parts (the chat store's message format).
     let text = ""
     if (msg.parts && Array.isArray(msg.parts)) {

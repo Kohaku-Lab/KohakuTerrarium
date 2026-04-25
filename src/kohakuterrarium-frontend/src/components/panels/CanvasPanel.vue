@@ -28,12 +28,13 @@
           <div class="i-carbon-canvas text-3xl mb-2 mx-auto opacity-30" />
           <p>Artifacts appear here automatically.</p>
           <p class="text-[10px] mt-1 opacity-70">
-            Long code blocks (&gt;= 15 lines) or
+            Long code blocks (&gt;= 15 lines), generated images, or
             <code class="font-mono">##canvas##</code> markers.
           </p>
         </div>
       </div>
 
+      <ImageViewer v-else-if="viewerType === 'image'" :src="canvas.activeArtifact.content" :alt="canvas.activeArtifact.name" />
       <CodeViewer v-else-if="viewerType === 'code' || viewerType === 'svg' || viewerType === 'diagram'" :content="canvas.activeArtifact.content" :lang="canvas.activeArtifact.lang" />
       <MarkdownViewer v-else-if="viewerType === 'markdown'" :content="canvas.activeArtifact.content" />
       <HtmlViewer v-else-if="viewerType === 'html'" :content="canvas.activeArtifact.content" />
@@ -43,8 +44,10 @@
     <!-- Bottom info strip -->
     <div v-if="canvas.activeArtifact" class="flex items-center gap-2 px-2 h-6 border-t border-warm-200 dark:border-warm-700 text-[10px] text-warm-500 shrink-0">
       <span class="font-mono">{{ canvas.activeArtifact?.lang || "text" }}</span>
-      <span class="opacity-50">·</span>
-      <span>{{ lineCount }} lines</span>
+      <template v-if="viewerType !== 'image'">
+        <span class="opacity-50">·</span>
+        <span>{{ lineCount }} lines</span>
+      </template>
     </div>
   </div>
 </template>
@@ -54,6 +57,7 @@ import { computed } from "vue"
 
 import CodeViewer from "@/components/panels/canvas/CodeViewer.vue"
 import HtmlViewer from "@/components/panels/canvas/HtmlViewer.vue"
+import ImageViewer from "@/components/panels/canvas/ImageViewer.vue"
 import MarkdownViewer from "@/components/panels/canvas/MarkdownViewer.vue"
 import { useCanvasStore } from "@/stores/canvas"
 
@@ -72,6 +76,7 @@ function typeIcon(t) {
       markdown: "i-carbon-document",
       html: "i-carbon-html",
       svg: "i-carbon-image",
+      image: "i-carbon-image",
       diagram: "i-carbon-flow-connection",
       table: "i-carbon-data-table",
     }[t] || "i-carbon-document"
@@ -79,26 +84,55 @@ function typeIcon(t) {
 }
 
 function copyContent() {
-  const text = canvas.activeArtifact?.content
-  if (!text) return
-  navigator.clipboard?.writeText(text).catch(() => {})
+  const art = canvas.activeArtifact
+  if (!art?.content) return
+  // Images: write a Blob to the clipboard when the browser supports it,
+  // otherwise fall back to copying the URL as text. ``data:`` URLs
+  // round-trip cleanly through fetch().
+  if (art.type === "image") {
+    if (navigator.clipboard?.write && typeof window.ClipboardItem === "function") {
+      fetch(art.content)
+        .then((r) => r.blob())
+        .then((blob) => {
+          const item = new ClipboardItem({ [blob.type || "image/png"]: blob })
+          return navigator.clipboard.write([item])
+        })
+        .catch(() => {
+          // Fall back to copying the URL itself.
+          navigator.clipboard?.writeText(art.content).catch(() => {})
+        })
+      return
+    }
+    navigator.clipboard?.writeText(art.content).catch(() => {})
+    return
+  }
+  navigator.clipboard?.writeText(art.content).catch(() => {})
 }
 
 function downloadContent() {
   const art = canvas.activeArtifact
-  const ver = canvas.activeArtifact
-  if (!art || !ver) return
+  if (!art?.content) return
   const ext =
     {
-      code: ver.lang || "txt",
+      code: art.lang || "txt",
       markdown: "md",
       html: "html",
       svg: "svg",
+      image: art.lang || "png",
       diagram: "mmd",
       table: "csv",
     }[art.type] || "txt"
   const name = (art.name || "artifact").replace(/[^a-zA-Z0-9_.-]/g, "_") + "." + ext
-  const blob = new Blob([ver.content], { type: "text/plain" })
+  if (art.type === "image") {
+    // Image content is a URL (data: or remote). Anchor download keeps
+    // bytes intact for both cases.
+    const a = document.createElement("a")
+    a.href = art.content
+    a.download = name
+    a.click()
+    return
+  }
+  const blob = new Blob([art.content], { type: "text/plain" })
   const url = URL.createObjectURL(blob)
   const a = document.createElement("a")
   a.href = url

@@ -68,6 +68,46 @@ describe("canvas store — artifact detection", () => {
     expect(store.artifacts).toHaveLength(1)
   })
 
+  it("picks up assistant image_url parts as image artifacts", () => {
+    const store = useCanvasStore()
+    const msg = {
+      id: "m4",
+      role: "assistant",
+      parts: [
+        { type: "text", content: "Here you go:" },
+        {
+          type: "image_url",
+          image_url: { url: "data:image/png;base64,iVBORw0KGgo=", detail: "auto" },
+          meta: { revised_prompt: "A cat", output_format: "png" },
+        },
+      ],
+    }
+    store.scanMessage(msg)
+    expect(store.artifacts).toHaveLength(1)
+    const a = store.artifacts[0]
+    expect(a.type).toBe("image")
+    expect(a.lang).toBe("png")
+    expect(a.name).toContain("A cat")
+    expect(a.content).toMatch(/^data:image\/png;base64,/)
+  })
+
+  it("infers image format from a data URL when meta is missing", () => {
+    const store = useCanvasStore()
+    const msg = {
+      id: "m5",
+      role: "assistant",
+      parts: [
+        {
+          type: "image_url",
+          image_url: { url: "data:image/webp;base64,Rg==" },
+        },
+      ],
+    }
+    store.scanMessage(msg)
+    expect(store.artifacts).toHaveLength(1)
+    expect(store.artifacts[0].lang).toBe("webp")
+  })
+
   it("skips non-assistant messages", () => {
     const store = useCanvasStore()
     const bigBody = Array.from({ length: 20 }).fill("x").join("\n")

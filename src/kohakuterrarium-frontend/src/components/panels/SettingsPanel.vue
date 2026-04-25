@@ -18,12 +18,12 @@
 
       <div class="flex-1 overflow-y-auto">
         <ModelTab v-if="activeTab === 'model'" :instance="instance" />
+        <ToolOptionsPanel v-else-if="activeTab === 'tool-options'" :instance="instance" />
         <PluginsTab v-else-if="activeTab === 'plugins'" :instance="instance" />
         <ExtensionsTab v-else-if="activeTab === 'extensions'" />
         <TriggersTab v-else-if="activeTab === 'triggers'" :instance="instance" />
         <CostTab v-else-if="activeTab === 'cost'" :instance="instance" />
         <EnvTab v-else-if="activeTab === 'env'" :instance="instance" />
-        <AutoOpenTab v-else-if="activeTab === 'auto-open'" />
       </div>
     </div>
   </div>
@@ -32,7 +32,7 @@
 <script setup>
 import { computed, ref } from "vue"
 
-import AutoOpenTab from "./settings/AutoOpenTab.vue"
+import ToolOptionsPanel from "./ToolOptionsPanel.vue"
 import CostTab from "./settings/CostTab.vue"
 import EnvTab from "./settings/EnvTab.vue"
 import ExtensionsTab from "./settings/ExtensionsTab.vue"
@@ -46,12 +46,12 @@ defineProps({
 
 const tabs = [
   { id: "model", label: "Model", icon: "i-carbon-chip" },
+  { id: "tool-options", label: "Tool options", icon: "i-carbon-settings-adjust" },
   { id: "plugins", label: "Plugins", icon: "i-carbon-plug" },
   { id: "extensions", label: "Extensions", icon: "i-carbon-cube" },
   { id: "triggers", label: "Triggers", icon: "i-carbon-event" },
   { id: "cost", label: "Cost", icon: "i-carbon-currency-dollar" },
   { id: "env", label: "Environment", icon: "i-carbon-cloud" },
-  { id: "auto-open", label: "Auto-open", icon: "i-carbon-launch" },
 ]
 
 const activeTab = ref("model")

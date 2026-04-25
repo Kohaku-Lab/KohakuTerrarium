@@ -10,6 +10,7 @@
 
       <div class="flex-1 min-w-0 overflow-y-auto">
         <ModelTab v-if="activeTab === 'model'" :instance="instance" />
+        <ToolOptionsPanel v-else-if="activeTab === 'tool-options'" :instance="instance" />
         <PluginsTab v-else-if="activeTab === 'plugins'" :instance="instance" />
         <ExtensionsTab v-else-if="activeTab === 'extensions'" />
         <TriggersTab v-else-if="activeTab === 'triggers'" :instance="instance" />
@@ -23,6 +24,7 @@
 <script setup>
 import { computed, ref } from "vue"
 
+import ToolOptionsPanel from "@/components/panels/ToolOptionsPanel.vue"
 import CostTab from "@/components/panels/settings/CostTab.vue"
 import EnvTab from "@/components/panels/settings/EnvTab.vue"
 import ExtensionsTab from "@/components/panels/settings/ExtensionsTab.vue"
@@ -36,11 +38,12 @@ defineProps({ instance: { type: Object, default: null } })
 const open = defineModel({ default: false })
 const { t } = useI18n()
 
-// The "auto-open" tab is a Phase-10 placeholder (see AutoOpenTab.vue).
-// Hidden from the tab list until the rule engine lands; AutoOpenTab.vue
-// kept in the tree so the Phase-10 work doesn't start from scratch.
+// The "auto-open" tab was a Phase-10 placeholder; removed in favour of
+// surfacing native-tool options for the active session right next to
+// the model picker.
 const tabs = computed(() => [
   { id: "model", label: t("instanceSettings.model"), icon: "i-carbon-chip" },
+  { id: "tool-options", label: "Tool options", icon: "i-carbon-settings-adjust" },
   { id: "plugins", label: t("instanceSettings.plugins"), icon: "i-carbon-plug" },
   { id: "extensions", label: t("instanceSettings.extensions"), icon: "i-carbon-cube" },
   { id: "triggers", label: t("instanceSettings.triggers"), icon: "i-carbon-event" },

@@ -19,6 +19,7 @@ import ActivityPanel from "@/components/panels/ActivityPanel.vue"
 import SettingsPanel from "@/components/panels/SettingsPanel.vue"
 import StatePanel from "@/components/panels/StatePanel.vue"
 import TerminalPanel from "@/components/panels/TerminalPanel.vue"
+import ToolOptionsPanel from "@/components/panels/ToolOptionsPanel.vue"
 import StatusDashboard from "@/components/status/StatusDashboard.vue"
 import StatusDashboardTab from "@/components/status/StatusDashboardTab.vue"
 
@@ -95,12 +96,12 @@ const MULTI_CREATURE_PRESET = {
   ),
 }
 
-/** Canvas — chat on left, canvas + status on right. */
+/** Canvas — chat on left, canvas + tool options on right. */
 const CANVAS_PRESET = {
   id: "canvas",
   label: "Canvas",
   shortcut: "Ctrl+4",
-  tree: hsplit(45, leaf("chat"), vsplit(70, leaf("canvas"), leaf("status-dashboard"))),
+  tree: hsplit(45, leaf("chat"), vsplit(70, leaf("canvas"), leaf("tool-options"))),
 }
 
 /** Debug — chat + state + debug drawer. */
@@ -197,6 +198,11 @@ export function registerBuiltinPanels() {
     id: "terminal",
     label: "Terminal",
     component: TerminalPanel,
+  })
+  layout.registerPanel({
+    id: "tool-options",
+    label: "Tool Options",
+    component: ToolOptionsPanel,
   })
 
   // ── Presets ──

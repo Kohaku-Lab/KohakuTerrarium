@@ -10,6 +10,11 @@ import hljs from "highlight.js"
 
 const props = defineProps({
   content: { type: String, default: "" },
+  // ``breaks: true`` matches the chat-app convention: a single newline
+  // becomes a ``<br>`` instead of CommonMark's soft-break-as-space, so
+  // user-typed messages preserve their line breaks. Off by default to
+  // keep the assistant render strictly CommonMark.
+  breaks: { type: Boolean, default: false },
 })
 
 const rootEl = ref(null)
@@ -18,6 +23,7 @@ const md = new MarkdownIt({
   html: false,
   linkify: true,
   typographer: false,
+  breaks: props.breaks,
   highlight(str, lang) {
     const displayLang = lang || "text"
     const langClass = lang && hljs.getLanguage(lang) ? lang : ""
