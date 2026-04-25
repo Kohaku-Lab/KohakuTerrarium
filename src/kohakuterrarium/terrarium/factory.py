@@ -27,9 +27,8 @@ from kohakuterrarium.terrarium.tool_manager import (
     TERRARIUM_MANAGER_KEY,
     TerrariumToolManager,
 )
-from kohakuterrarium.terrarium.tool_registration import (
-    ensure_terrarium_tools_registered,
-)
+from kohakuterrarium.terrarium.tool_registry import ensure_terrarium_tools_registered
+from kohakuterrarium.terrarium.tool_runtime_factory import create_runtime_from_config
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -119,7 +118,10 @@ def build_root_agent(
     # Create a separate environment for the root agent
     # with a TerrariumToolManager pre-bound to this runtime
     root_env = Environment(env_id=f"root_{environment.env_id}")
-    manager = TerrariumToolManager()
+    manager = TerrariumToolManager(
+        runtime_factory=create_runtime_from_config,
+        runtime_class=type(runtime),
+    )
     manager.register_runtime(config.name, runtime)
     root_env.register(TERRARIUM_MANAGER_KEY, manager)
 

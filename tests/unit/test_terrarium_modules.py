@@ -9,7 +9,7 @@ Covers:
 
 import asyncio
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -31,54 +31,44 @@ from kohakuterrarium.terrarium.persistence import build_conversation_from_messag
 
 
 class TestToolRegistration:
-    """Tests for ensure_terrarium_tools_registered."""
+    """Tests for ensure_terrarium_tools_registered.
 
-    def test_ensure_terrarium_tools_registered_loads_tools(self):
-        """First call sets _REGISTERED and imports the terrarium_tools module."""
-        import sys
+    Registration is now declarative: importing
+    ``kohakuterrarium.terrarium.tool_registry`` pulls in
+    ``tools_creature`` / ``tools_lifecycle`` / ``tools_messaging`` at
+    module load time, so the function is a defensive no-op kept for
+    back-compat callers.
+    """
 
+    def test_ensure_terrarium_tools_registered_returns_none(self):
+        """The function exists and returns None without raising."""
         import kohakuterrarium.terrarium.tool_registration as reg
 
-        # Reset state for a clean test
-        original = reg._REGISTERED
-        reg._REGISTERED = False
-
-        # The function does `import kohakuterrarium.builtins.tools.terrarium_tools`.
-        # Inject a sentinel into sys.modules so the import resolves without
-        # loading the real (potentially heavy) module.
-        mod_name = "kohakuterrarium.builtins.tools.terrarium_tools"
-        had_module = mod_name in sys.modules
-        old_module = sys.modules.get(mod_name)
-        sentinel = MagicMock()
-        sys.modules[mod_name] = sentinel
-        try:
-            reg.ensure_terrarium_tools_registered()
-            assert reg._REGISTERED is True
-        finally:
-            reg._REGISTERED = original
-            # Restore sys.modules
-            if had_module:
-                sys.modules[mod_name] = old_module
-            else:
-                sys.modules.pop(mod_name, None)
+        assert reg.ensure_terrarium_tools_registered() is None
 
     def test_ensure_terrarium_tools_registered_idempotent(self):
-        """Second call is a no-op (module not re-imported)."""
+        """Calling repeatedly is safe and still returns None."""
         import kohakuterrarium.terrarium.tool_registration as reg
 
-        original = reg._REGISTERED
-        reg._REGISTERED = True
-        try:
-            # Patch the import target; if called, it would set a side effect
-            with patch.dict(
-                "sys.modules",
-                {"kohakuterrarium.builtins.tools.terrarium_tools": MagicMock()},
-            ):
-                # Calling when already registered should NOT re-import
-                reg.ensure_terrarium_tools_registered()
-                assert reg._REGISTERED is True
-        finally:
-            reg._REGISTERED = original
+        assert reg.ensure_terrarium_tools_registered() is None
+        assert reg.ensure_terrarium_tools_registered() is None
+
+    def test_terrarium_tool_classes_available_at_import(self):
+        """Importing the registry exposes the expected tool classes."""
+        from kohakuterrarium.terrarium import tool_registry
+
+        for name in (
+            "CreatureInterruptTool",
+            "CreatureStartTool",
+            "CreatureStopTool",
+            "TerrariumCreateTool",
+            "TerrariumHistoryTool",
+            "TerrariumObserveTool",
+            "TerrariumSendTool",
+            "TerrariumStatusTool",
+            "TerrariumStopTool",
+        ):
+            assert hasattr(tool_registry, name), name
 
 
 # ---------------------------------------------------------------------------

@@ -25,9 +25,22 @@ class TerrariumToolManager:
     context so that tools can access it.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, runtime_factory: Any = None, runtime_class: Any = None) -> None:
         self._runtimes: dict[str, Any] = {}  # terrarium_id -> TerrariumRuntime
         self._tasks: dict[str, asyncio.Task] = {}
+        self._runtime_factory = runtime_factory
+        self._runtime_class = runtime_class
+
+    def create_runtime(self, config_path: str) -> Any:
+        """Create a TerrariumRuntime from a config path.
+
+        Local import keeps the manager independent from the runtime at module
+        load time while allowing lifecycle tools to stay out of the runtime
+        dependency cycle.
+        """
+        if self._runtime_factory is None or self._runtime_class is None:
+            raise RuntimeError("No terrarium runtime factory configured")
+        return self._runtime_factory(config_path, self._runtime_class)
 
     def register_runtime(self, terrarium_id: str, runtime: Any) -> None:
         """Register a running terrarium runtime."""
