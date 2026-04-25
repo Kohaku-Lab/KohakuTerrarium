@@ -1,19 +1,13 @@
-"""Wave B observability wiring + Wave F attach sugar for the Agent class.
+"""Wave B observability wiring for the Agent class.
 
 Routes scratchpad writes and plugin hook timings through the
 ``output_router`` so SessionOutput can persist them as
-``scratchpad_write`` / ``plugin_hook_timing`` events. Wave F piggy-backs
-on this module for the public :meth:`Agent.attach_to_session` /
-:meth:`Agent.detach_from_session` wrappers. Factored out of
+``scratchpad_write`` / ``plugin_hook_timing`` events. Factored out of
 ``core/agent.py`` so that file stays under the 1000-line hard cap.
 """
 
 from typing import Any
 
-from kohakuterrarium.session.attach import (
-    attach_agent_to_session,
-    detach_agent_from_session,
-)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -105,33 +99,6 @@ def wire_plugin_hook_timing(agent: Any) -> None:
             )
 
     plugins.set_hook_timing_callback(_observe)
-
-
-# ─── Wave F attach wrappers ───────────────────────────────────────────
-#
-# ``Agent.attach_to_session`` / ``Agent.detach_from_session`` are
-# exposed on the Agent class by rebinding these functions — see
-# ``core/agent.py`` where the class body sets the public attributes.
-# The actual attach/detach mechanics live in ``session/attach.py``.
-
-
-def attach_to_session(self: Any, session: Any, role: str) -> None:
-    """Bind ``self`` to ``session`` under ``role`` (Wave F).
-
-    Thin wrapper around
-    :func:`kohakuterrarium.session.attach.attach_agent_to_session`.
-    Raises :class:`AlreadyAttachedError` when the agent is already
-    attached to a different session.
-    """
-    attach_agent_to_session(self, session, role)
-
-
-def detach_from_session(self: Any) -> None:
-    """Unbind ``self`` from its attached session (Wave F).
-
-    Raises :class:`NotAttachedError` when the agent is not attached.
-    """
-    detach_agent_from_session(self)
 
 
 # ─── Wave G session_info helper ───────────────────────────────────────

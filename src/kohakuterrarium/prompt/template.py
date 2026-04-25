@@ -14,6 +14,7 @@ from typing import Any
 
 from jinja2 import BaseLoader, Environment, TemplateNotFound, TemplateSyntaxError
 
+from kohakuterrarium.packages_manifest import resolve_package_prompt
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -29,11 +30,6 @@ class PackagePromptLoader(BaseLoader):
     """
 
     def get_source(self, environment, template):  # noqa: D401 — Jinja API
-        # Local import — ``packages`` imports ``packages_manifest`` which
-        # imports ``packages`` in turn, so we defer to avoid a cold-boot
-        # circular import through this module's top-level.
-        from kohakuterrarium.packages import resolve_package_prompt
-
         path: Path | None = None
         try:
             path = resolve_package_prompt(template)

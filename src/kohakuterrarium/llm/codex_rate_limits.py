@@ -18,6 +18,7 @@ response of a real API call.
 """
 
 import json
+import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -418,8 +419,6 @@ def set_cached(snapshot: UsageSnapshot, *, now: float | None = None) -> None:
     if snapshot.is_empty():
         return
     if now is None:
-        import time
-
         now = time.time()
     snapshot.captured_at = now
     _cached = snapshot

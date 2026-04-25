@@ -13,6 +13,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import shutil
+
+from ruamel.yaml.comments import CommentedMap, CommentedSeq
+
 from kohakuterrarium.api.studio.catalog_sources import (
     MANIFEST_KEYS,
     classify_io,
@@ -21,6 +25,12 @@ from kohakuterrarium.api.studio.catalog_sources import (
     package_entries,
     workspace_manifest_entries,
 )
+from kohakuterrarium.api.studio.codegen import get_codegen
+from kohakuterrarium.api.studio.codegen.base import RoundTripError
+from kohakuterrarium.api.studio.templates_render import (
+    render_creature_config,
+    render_system_prompt,
+)
 from kohakuterrarium.api.studio.utils.paths import ensure_in_root, sanitize_name
 from kohakuterrarium.api.studio.workspace import sidecars as _sidecars
 from kohakuterrarium.api.studio.workspace.manifest_ops import sync_manifest_entry
@@ -28,6 +38,7 @@ from kohakuterrarium.api.studio.yaml_io.creature import (
     load_creature_file,
     save_creature_merged,
 )
+from kohakuterrarium.core.config import load_agent_config
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -223,11 +234,6 @@ class LocalWorkspace:
         prompts_dir = creature_dir / "prompts"
         prompts_dir.mkdir()
         # Seed system.md + config.yaml from templates
-        from kohakuterrarium.api.studio.templates_render import (  # noqa: E402
-            render_creature_config,
-            render_system_prompt,
-        )
-
         (prompts_dir / "system.md").write_text(
             render_system_prompt(name), encoding="utf-8"
         )
@@ -306,8 +312,6 @@ class LocalWorkspace:
 
         raw = path.read_text(encoding="utf-8")
         # Parse back to form state via the per-kind codegen
-        from kohakuterrarium.api.studio.codegen import get_codegen
-
         cg = get_codegen(kind)
         # Plugins read an optional sidecar schema so the
         # OptionsSchemaEditor can round-trip the author's options.
@@ -333,8 +337,6 @@ class LocalWorkspace:
         path = kind_dir / f"{name}.py"
         if path.exists():
             raise FileExistsError(f"{kind}/{name}")
-
-        from kohakuterrarium.api.studio.codegen import get_codegen
 
         cg = get_codegen(kind)
         # ``kind`` is passed through so io_mod can tell input vs output.
@@ -362,8 +364,6 @@ class LocalWorkspace:
             # New file: default location is <root>/modules/<kind>/<name>.py.
             kind_dir.mkdir(parents=True, exist_ok=True)
             path = kind_dir / f"{name}.py"
-
-        from kohakuterrarium.api.studio.codegen import RoundTripError, get_codegen
 
         cg = get_codegen(kind)
 
@@ -535,11 +535,6 @@ def _compute_effective(cfg_path: Path, data: dict) -> dict:
     ``error`` key instead of crashing the read.
     """
     try:
-        from kohakuterrarium.core.config import load_agent_config
-    except Exception as e:
-        return {"error": f"core config loader unavailable: {e}"}
-
-    try:
         cfg = load_agent_config(cfg_path.parent)
     except Exception as e:
         return {"error": str(e)}
@@ -579,8 +574,6 @@ def _coerce_plain(obj: Any) -> Any:
     JSON serialization blows up on CommentedMap via FastAPI's
     default encoder — coerce on the way out.
     """
-    from ruamel.yaml.comments import CommentedMap, CommentedSeq
-
     if isinstance(obj, CommentedMap) or isinstance(obj, dict):
         return {k: _coerce_plain(v) for k, v in obj.items()}
     if isinstance(obj, CommentedSeq) or isinstance(obj, list):
@@ -590,6 +583,4 @@ def _coerce_plain(obj: Any) -> Any:
 
 def _rmtree(path: Path) -> None:
     """Recursive delete — stdlib shutil.rmtree wrapped for atomicity."""
-    import shutil
-
     shutil.rmtree(path)

@@ -13,16 +13,14 @@ import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from kohakuvault import KVault
 
 from kohakuterrarium.session.artifacts import artifacts_dir_for
 from kohakuterrarium.session.errors import ForkNotStableError
+from kohakuterrarium.session.store_protocol import SessionStoreLike
 from kohakuterrarium.utils.logging import get_logger
-
-if TYPE_CHECKING:
-    from kohakuterrarium.session.store import SessionStore
 
 logger = get_logger(__name__)
 
@@ -223,7 +221,7 @@ def _copy_artifacts(source_path: Path, dest_path: Path) -> None:
 
 
 def _collect_copy_range(
-    source: "SessionStore",
+    source: SessionStoreLike,
     at_event_id: int,
 ) -> tuple[list[tuple[str, dict[str, Any]]], dict[str, Any] | None]:
     """Return (events-in-range, fork-point event). Events in storage order.
@@ -270,21 +268,18 @@ def _child_session_id(parent_session_id: str) -> str:
 
 
 def perform_fork(
-    source: "SessionStore",
+    source: SessionStoreLike,
     target_path: str,
     *,
     at_event_id: int,
     mutate: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     name: str | None = None,
     pending_job_ids: set[str] | None = None,
-) -> "SessionStore":
+) -> SessionStoreLike:
     """Implementation behind :meth:`SessionStore.fork`.
 
     Kept as a module-level function so the store class stays lean.
     """
-    # Lazy import to avoid a module cycle with ``session.store``.
-    from kohakuterrarium.session.store import SessionStore
-
     if at_event_id < 1:
         raise ValueError(
             f"at_event_id must be >= 1 (event_ids start at 1, got {at_event_id})"
@@ -324,7 +319,7 @@ def perform_fork(
     child_session_id = _child_session_id(parent_session_id)
     child_name = name or child_session_id
 
-    dest = SessionStore(str(target))
+    dest = type(source)(str(target))
     try:
         # --- meta: copy parent meta verbatim, then overwrite the
         # session identity + stamp lineage.

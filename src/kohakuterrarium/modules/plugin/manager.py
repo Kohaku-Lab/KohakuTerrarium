@@ -222,6 +222,7 @@ class PluginManager:
                     model=context.model,
                     _host_agent=host_agent,
                     _plugin_name=getattr(plugin, "name", "unnamed"),
+                    _spawn_child_agent_helper=context._spawn_child_agent_helper,
                 )
                 await _call_method(plugin, "on_load", context=ctx)
             except Exception as e:
@@ -249,6 +250,9 @@ class PluginManager:
                     model=self._load_context.model,
                     _host_agent=host_agent,
                     _plugin_name=pname,
+                    _spawn_child_agent_helper=(
+                        self._load_context._spawn_child_agent_helper
+                    ),
                 )
                 await _call_method(plugin, "on_load", context=ctx)
             except Exception as e:

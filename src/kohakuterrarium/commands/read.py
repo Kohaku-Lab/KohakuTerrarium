@@ -17,6 +17,7 @@ from kohakuterrarium.builtin_skills import (
     read_skill_body,
 )
 from kohakuterrarium.commands.base import BaseCommand, CommandResult, parse_command_args
+from kohakuterrarium.prompt.skill_loader import load_skill_doc
 
 if TYPE_CHECKING:
     from kohakuterrarium.prompt.skill_loader import SkillDoc
@@ -214,11 +215,6 @@ def _render_skill_from_path(path: Path) -> str | None:
     Falls back to the raw body via :func:`read_skill_body` if YAML parsing
     fails, so info output never breaks on malformed frontmatter.
     """
-    # Lazy import: ``kohakuterrarium.prompt.__init__`` eagerly loads the
-    # aggregator, which imports from ``core`` -> ``commands.read``.
-    # Importing at call time breaks that cycle.
-    from kohakuterrarium.prompt.skill_loader import load_skill_doc
-
     doc = load_skill_doc(path)
     if doc is not None:
         return _format_skill_for_info(doc, doc.content)

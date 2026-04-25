@@ -30,6 +30,7 @@ manifest-slot plumbing:
 from pathlib import Path
 
 from kohakuterrarium.packages import list_packages
+from kohakuterrarium.packages_base import get_package_root
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -281,14 +282,5 @@ def list_package_prompts() -> dict[str, Path]:
 
 
 def _package_root_for(pkg_name: str) -> Path | None:
-    """Locate the installed-package root directory for ``pkg_name``.
-
-    Delegates to :func:`kohakuterrarium.packages.get_package_path` but
-    imported lazily to keep the circular-import graph flat (this
-    module is imported from ``packages.py`` via re-exports below).
-    """
-    # Local import avoids a circular at module load — packages.py
-    # imports from here at the end of its module body.
-    from kohakuterrarium.packages import get_package_path
-
-    return get_package_path(pkg_name)
+    """Locate the installed-package root directory for ``pkg_name``."""
+    return get_package_root(pkg_name)

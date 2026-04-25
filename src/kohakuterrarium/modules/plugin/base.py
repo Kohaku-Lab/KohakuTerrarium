@@ -19,6 +19,9 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
+from kohakuterrarium.plugins_context import (
+    spawn_child_agent as _default_spawn_child_agent_helper,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -79,6 +82,7 @@ class PluginContext:
         model: str = "",
         _host_agent: Any = None,
         _plugin_name: str = "",
+        _spawn_child_agent_helper: Callable[..., Any] | None = None,
     ) -> None:
         self.agent_name = agent_name
         self.working_dir = working_dir if working_dir is not None else Path.cwd()
@@ -86,6 +90,9 @@ class PluginContext:
         self.model = model
         self._host_agent = _host_agent
         self._plugin_name = _plugin_name
+        self._spawn_child_agent_helper = (
+            _spawn_child_agent_helper or _default_spawn_child_agent_helper
+        )
 
     def __repr__(self) -> str:
         return (
@@ -228,52 +235,8 @@ class PluginContext:
         lifecycle (``await agent.start()`` / ``agent.inject_input(...)``
         / ``await agent.stop()``).
         """
-        # Lazy imports break the Agent <-> PluginContext import cycle:
-        # Agent imports PluginContext at module load time, so we can't
-        # import Agent / Session eagerly here.
-        from kohakuterrarium.core.agent import Agent
-        from kohakuterrarium.session.attach import attach_agent_to_session
-        from kohakuterrarium.session.session import Session as AsyncSession
-
-        host = self._host_agent
-        if host is None:
-            raise RuntimeError(
-                "PluginContext.spawn_child_agent requires a host agent; "
-                "cannot spawn before plugin on_load.",
-            )
-        store = getattr(host, "session_store", None)
-        if store is None:
-            raise RuntimeError(
-                "PluginContext.spawn_child_agent requires the host agent "
-                "to have a SessionStore attached.",
-            )
-
-        if isinstance(config_path_or_dict, str):
-            child = Agent.from_path(config_path_or_dict)
-        elif isinstance(config_path_or_dict, dict):
-            # Lazy import — see note above; AgentConfig also lives under
-            # core and would otherwise cycle.
-            from kohakuterrarium.core.config import AgentConfig
-
-            cfg = AgentConfig(**config_path_or_dict)
-            child = Agent(cfg)
-        else:
-            raise TypeError(
-                "config_path_or_dict must be a str path or AgentConfig dict, "
-                f"got {type(config_path_or_dict).__name__}",
-            )
-
-        # Wrap the host's store in an async Session facade so the
-        # attach primitive has the public shape it expects. We do NOT
-        # replace the host's own store — this Session is a thin handle.
-        session = AsyncSession(store, agent=host)
-        attach_agent_to_session(
-            child,
-            session,
-            role=f"plugin:{self._plugin_name}/{role}",
-            attached_by=f"plugin:{self._plugin_name}",
-        )
-        return child
+        helper = self._spawn_child_agent_helper
+        return helper(self, config_path_or_dict, role)
 
 
 class BasePlugin:

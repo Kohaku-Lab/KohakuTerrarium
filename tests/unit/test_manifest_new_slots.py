@@ -17,13 +17,12 @@ import sys
 import pytest
 import yaml
 
-from kohakuterrarium.packages import (
-    install_package,
+from kohakuterrarium.packages import install_package, list_packages
+from kohakuterrarium.packages_manifest import (
     list_package_commands,
     list_package_prompts,
     list_package_skills,
     list_package_user_commands,
-    list_packages,
     resolve_package_command,
     resolve_package_prompt,
     resolve_package_skills,

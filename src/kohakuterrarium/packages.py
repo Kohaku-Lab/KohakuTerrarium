@@ -30,12 +30,15 @@ from pathlib import Path
 
 import yaml
 
+from kohakuterrarium.packages_base import LINK_SUFFIX
+from kohakuterrarium.packages_base import PACKAGES_DIR
+from kohakuterrarium.packages_base import get_package_root as _get_package_root
+from kohakuterrarium.packages_base import read_link as _read_link
+from kohakuterrarium.packages_base import remove_link as _remove_link
+from kohakuterrarium.packages_base import write_link as _write_link
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
-
-PACKAGES_DIR = Path.home() / ".kohakuterrarium" / "packages"
-LINK_SUFFIX = ".link"
 
 
 def _force_rmtree(path: Path) -> None:
@@ -49,60 +52,6 @@ def _force_rmtree(path: Path) -> None:
         shutil.rmtree(path, onexc=_on_error)
     else:
         shutil.rmtree(path, onerror=_on_error)
-
-
-def _read_link(name: str) -> Path | None:
-    """Read a .link pointer file and return the target path, or None."""
-    link_file = PACKAGES_DIR / f"{name}{LINK_SUFFIX}"
-    if not link_file.exists():
-        return None
-    target = Path(link_file.read_text(encoding="utf-8").strip())
-    if target.is_dir():
-        return target
-    logger.warning("Link target missing", package=name, target=str(target))
-    return None
-
-
-def _write_link(name: str, target: Path) -> None:
-    """Write a .link pointer file."""
-    link_file = PACKAGES_DIR / f"{name}{LINK_SUFFIX}"
-    link_file.write_text(str(target.resolve()), encoding="utf-8")
-
-
-def _remove_link(name: str) -> bool:
-    """Remove a .link pointer file if it exists."""
-    link_file = PACKAGES_DIR / f"{name}{LINK_SUFFIX}"
-    if link_file.exists():
-        link_file.unlink()
-        return True
-    return False
-
-
-def _get_package_root(name: str) -> Path | None:
-    """Get the real root directory of an installed package.
-
-    Checks (in order):
-      1. .link pointer file (editable install)
-      2. Direct directory (cloned / copied)
-      3. Symlink (legacy editable install)
-    """
-    # Editable: pointer file
-    link_target = _read_link(name)
-    if link_target is not None:
-        return link_target
-
-    # Cloned / copied directory
-    pkg_dir = PACKAGES_DIR / name
-    if pkg_dir.is_dir():
-        return pkg_dir.resolve()
-
-    # Legacy symlink (from older installs)
-    if pkg_dir.is_symlink():
-        real = pkg_dir.resolve()
-        if real.is_dir():
-            return real
-
-    return None
 
 
 def resolve_package_path(ref: str) -> Path:
@@ -495,23 +444,6 @@ def resolve_package_trigger(trigger_name: str) -> tuple[str, str] | None:
         (module_path, class_name) tuple if found, or None.
     """
     return _resolve_manifest_entry("triggers", trigger_name)
-
-
-# Cluster 1 manifest slots (A.2 / A.3 / A.4 / A.5) live in
-# ``packages_manifest`` but are re-exported here so callers keep a
-# single import surface (``from kohakuterrarium.packages import
-# resolve_package_skills``). Safe against circular import because the
-# re-export runs after ``list_packages`` is defined.
-from kohakuterrarium.packages_manifest import (  # noqa: E402,F401
-    list_package_commands,
-    list_package_prompts,
-    list_package_skills,
-    list_package_user_commands,
-    resolve_package_command,
-    resolve_package_prompt,
-    resolve_package_skills,
-    resolve_package_user_command,
-)
 
 
 def get_package_path(name: str) -> Path | None:

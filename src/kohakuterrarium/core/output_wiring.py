@@ -25,6 +25,7 @@ The terrarium-specific resolver lives in ``terrarium/output_wiring.py``.
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
+from kohakuterrarium.prompt.template import render_template_safe
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -170,10 +171,6 @@ def render_prompt(
     }
 
     if entry.prompt_format == PROMPT_FORMAT_JINJA:
-        # Lazy import to keep this module leaf-level (avoid importing
-        # jinja2 at module-load time just because AgentConfig has a field).
-        from kohakuterrarium.prompt.template import render_template_safe
-
         return render_template_safe(template, **variables)
 
     # Simple mode: str.format_map with a defaulting mapping so missing

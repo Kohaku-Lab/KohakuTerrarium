@@ -18,9 +18,7 @@ from kohakuterrarium.core.agent_handlers import AgentHandlersMixin
 from kohakuterrarium.core.agent_messages import AgentMessagesMixin
 from kohakuterrarium.core.agent_model import AgentModelMixin
 from kohakuterrarium.core.agent_observability import (
-    attach_to_session as _attach_to_session,
     build_session_info as _build_session_info,
-    detach_from_session as _detach_from_session,
     init_branch_state,
     wire_plugin_hook_timing,
     wire_scratchpad_observer,
@@ -40,6 +38,11 @@ from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.modules.plugin.base import PluginContext
 from kohakuterrarium.modules.trigger.base import BaseTrigger
+from kohakuterrarium.plugins_context import spawn_child_agent
+from kohakuterrarium.session.agent_attach import attach_to_session as _attach_to_session
+from kohakuterrarium.session.agent_attach import (
+    detach_from_session as _detach_from_session,
+)
 from kohakuterrarium.session.output import SessionOutput
 from kohakuterrarium.utils.logging import get_logger
 
@@ -484,6 +487,7 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin, AgentModelMi
             working_dir=wd,
             model=getattr(self.llm, "model", ""),
             _host_agent=self,
+            _spawn_child_agent_helper=spawn_child_agent,
         )
         await self.plugins.load_all(ctx)
         # Pluggable ##xxx## commands (cluster C.1) — after on_load so

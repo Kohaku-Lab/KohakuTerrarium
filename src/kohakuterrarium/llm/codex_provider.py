@@ -10,6 +10,8 @@ import hashlib
 import json as _json
 from typing import Any, AsyncIterator
 
+import httpx
+
 try:
     from openai import AsyncOpenAI
 
@@ -32,6 +34,7 @@ from kohakuterrarium.llm.codex_image_gen import (
 from kohakuterrarium.llm.codex_rate_limits import (
     capture_from_headers,
     parse_rate_limit_event,
+    UsageSnapshot,
     set_cached,
 )
 from kohakuterrarium.utils.logging import get_logger
@@ -90,8 +93,6 @@ def _maybe_capture_stream_rate_limit(event: Any) -> None:
             return
         snap = parse_rate_limit_event(_json.dumps(payload_dict))
         if snap is not None and snap.has_data():
-            from kohakuterrarium.llm.codex_rate_limits import UsageSnapshot
-
             set_cached(UsageSnapshot(snapshots=[snap]))
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug(
@@ -177,8 +178,6 @@ class CodexOAuthProvider(BaseLLMProvider):
         # Custom httpx client with a response hook so we can observe
         # rate-limit headers on every response without changing the
         # streaming / non-streaming code paths.
-        import httpx
-
         http_client = httpx.AsyncClient(
             event_hooks={"response": [_capture_rate_limit_headers]},
             timeout=self.timeout,
