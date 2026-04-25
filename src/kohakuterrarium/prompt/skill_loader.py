@@ -130,6 +130,65 @@ class SkillDoc:
         return self.extra
 
 
+def _normalize_skill_text(text: str) -> str:
+    """Strip a leading BOM and normalise line endings.
+
+    Markdown editors on Windows / various export pipelines like to
+    prepend a UTF-8 BOM (``\\ufeff``); the YAML frontmatter detection
+    further down checks for a literal ``---`` prefix and would silently
+    skip every BOM'd file. CR / CRLF line endings are likewise folded
+    to ``\\n`` so ``yaml.safe_load`` doesn't choke on stray CRs.
+    """
+    if not isinstance(text, str):
+        return ""
+    if text.startswith("﻿"):
+        text = text.lstrip("﻿")
+    if "\r" in text:
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return text
+
+
+def read_skill_text(path: "Path | str") -> str | None:
+    """Read a SKILL.md / *.md file with permissive decoding.
+
+    Tries UTF-8 first (the documented format), then falls back to UTF-8
+    with replacement, then latin-1. Returns ``None`` when the file
+    can't be read at all (missing, permission denied, …) — callers warn
+    and skip rather than crash. BOM and CR characters are stripped on
+    the way out so downstream YAML / markdown parsing stays robust.
+    """
+    p = Path(path)
+    try:
+        raw = p.read_bytes()
+    except OSError as exc:
+        logger.warning("Failed to read skill file", path=str(p), error=str(exc))
+        return None
+    # Try strict UTF-8 first. Fall back through utf-8-sig (eats BOM
+    # too), then replacement-mode UTF-8, then latin-1 as a last
+    # resort. None of these can raise — the loader will log a warning
+    # and the markdown body will be best-effort recovered.
+    for encoding, errors in (
+        ("utf-8", "strict"),
+        ("utf-8-sig", "strict"),
+        ("utf-8", "replace"),
+        ("latin-1", "replace"),
+    ):
+        try:
+            text = raw.decode(encoding, errors)
+        except UnicodeDecodeError:
+            continue
+        if encoding != "utf-8" or errors != "strict":
+            logger.warning(
+                "Skill file is not clean UTF-8 — recovered with fallback decoding",
+                path=str(p),
+                encoding=encoding,
+                errors=errors,
+            )
+        return _normalize_skill_text(text)
+    logger.warning("Failed to decode skill file", path=str(p))
+    return None
+
+
 def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     """
     Parse YAML frontmatter from markdown text.
@@ -143,7 +202,11 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
         can decide how to bucket them. Returns ``({}, text)`` when the
         text has no (valid) frontmatter.
     """
-    text = text.strip()
+    if not isinstance(text, str):
+        return {}, ""
+    # Strip BOM + normalise newlines BEFORE the ``---`` prefix check
+    # so a BOM'd file doesn't fall straight through to the no-fm path.
+    text = _normalize_skill_text(text).strip()
 
     # Check for frontmatter delimiter
     if not text.startswith("---"):
@@ -158,13 +221,27 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     frontmatter_text = text[3:end_idx].strip()
     content = text[end_idx + 3 :].strip()
 
-    # Parse YAML
+    # Parse YAML — both YAMLError (malformed) and any unexpected
+    # exception (e.g. corrupt unicode that survived decoding) must
+    # degrade to "no frontmatter" rather than bubbling up.
+    parsed: Any
     try:
         parsed = yaml.safe_load(frontmatter_text)
-        if not isinstance(parsed, dict):
-            parsed = {}
     except yaml.YAMLError as e:
-        logger.warning("Failed to parse frontmatter", error=str(e))
+        logger.warning("Failed to parse skill frontmatter", error=str(e))
+        parsed = {}
+    except Exception as e:  # noqa: BLE001 — defensive
+        logger.warning(
+            "Unexpected error parsing skill frontmatter",
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        parsed = {}
+
+    if not isinstance(parsed, dict):
+        # YAML "front matter" that parses to e.g. a string or list is
+        # technically valid YAML but useless to the loader — treat as
+        # absent rather than blowing up downstream.
         parsed = {}
 
     return parsed, content
@@ -195,19 +272,26 @@ def load_skill_doc(path: Path | str) -> SkillDoc | None:
     """
     Load a skill/tool documentation file.
 
+    Returns ``None`` (with a warning) for any failure — bad encoding,
+    BOM-only file, malformed frontmatter, OS error — so a single
+    broken skill never crashes the agent loader.
+
     Args:
         path: Path to markdown file
 
     Returns:
-        SkillDoc or None if file not found
+        SkillDoc or None if the file is missing or unreadable.
     """
     path = Path(path)
 
     if not path.exists():
         return None
 
+    text = read_skill_text(path)
+    if text is None:
+        return None
+
     try:
-        text = path.read_text(encoding="utf-8")
         raw, content = parse_frontmatter(text)
         standard, extra = _split_frontmatter(raw)
 
@@ -216,17 +300,22 @@ def load_skill_doc(path: Path | str) -> SkillDoc | None:
             tags_value = [tags_value] if tags_value else []
 
         return SkillDoc(
-            name=raw.get("name", path.stem),
-            description=raw.get("description", ""),
+            name=str(raw.get("name") or path.stem),
+            description=str(raw.get("description") or ""),
             content=content,
-            category=raw.get("category", "custom"),
-            tags=list(tags_value),
+            category=str(raw.get("category") or "custom"),
+            tags=[str(t) for t in tags_value if t is not None],
             standard=standard,
             extra=extra,
             raw_frontmatter=dict(raw),
         )
-    except Exception as e:
-        logger.error("Failed to load skill doc", path=str(path), error=str(e))
+    except Exception as e:  # noqa: BLE001 — last line of defense
+        logger.warning(
+            "Failed to load skill doc; skipping",
+            path=str(path),
+            error=str(e),
+            error_type=type(e).__name__,
+        )
         return None
 
 

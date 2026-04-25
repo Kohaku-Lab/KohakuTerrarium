@@ -23,7 +23,7 @@ the override. A DEBUG log trace is emitted for every supersede.
 from pathlib import Path
 
 from kohakuterrarium.packages import get_package_path, list_packages
-from kohakuterrarium.prompt.skill_loader import parse_frontmatter
+from kohakuterrarium.prompt.skill_loader import parse_frontmatter, read_skill_text
 from kohakuterrarium.skills.registry import Skill
 from kohakuterrarium.utils.logging import get_logger
 
@@ -64,6 +64,11 @@ def load_skill_from_path(
 ) -> Skill | None:
     """Load one ``SKILL.md`` file into a :class:`Skill`.
 
+    Returns ``None`` (with a warning) when the file can't be read or
+    parsed — never raises. Bad SKILL.md files in one creature must not
+    crash ``kt run`` / ``kt serve``; they're skipped with a log line so
+    the user can see what's wrong without losing the whole agent.
+
     ``default_name`` is used when the frontmatter lacks a ``name`` —
     typically the parent directory name for the folder form, or the
     file stem for the flat form.
@@ -72,46 +77,79 @@ def load_skill_from_path(
         return None
 
     try:
-        text = skill_md.read_text(encoding="utf-8")
-    except OSError as exc:
-        logger.warning("Failed to read skill file", path=str(skill_md), error=str(exc))
+        text = read_skill_text(skill_md)
+        if text is None:
+            return None
+
+        frontmatter, body = parse_frontmatter(text)
+        if not isinstance(frontmatter, dict):
+            frontmatter = {}
+
+        name = str(frontmatter.get("name") or default_name or skill_md.stem).strip()
+        if not name:
+            logger.warning(
+                "Skill file has no usable name; skipping",
+                path=str(skill_md),
+            )
+            return None
+        description = str(frontmatter.get("description") or "").strip()
+        disable_model = bool(frontmatter.get("disable-model-invocation", False))
+
+        paths = _as_string_list(frontmatter.get("paths"))
+        allowed_tools = _as_string_list(frontmatter.get("allowed-tools"))
+
+        return Skill(
+            name=name,
+            description=description,
+            body=body,
+            frontmatter=dict(frontmatter),
+            base_dir=skill_md.parent,
+            origin=origin,
+            disable_model_invocation=disable_model,
+            paths=paths,
+            allowed_tools=allowed_tools,
+        )
+    except Exception as exc:  # noqa: BLE001 — defensive: never crash the loader
+        logger.warning(
+            "Failed to load skill; skipping",
+            path=str(skill_md),
+            origin=origin,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
         return None
-
-    frontmatter, body = parse_frontmatter(text)
-
-    name = str(frontmatter.get("name") or default_name or skill_md.stem).strip()
-    description = str(frontmatter.get("description") or "").strip()
-    disable_model = bool(frontmatter.get("disable-model-invocation", False))
-
-    paths = _as_string_list(frontmatter.get("paths"))
-    allowed_tools = _as_string_list(frontmatter.get("allowed-tools"))
-
-    base_dir = skill_md.parent if skill_md.name == "SKILL.md" else skill_md.parent
-
-    return Skill(
-        name=name,
-        description=description,
-        body=body,
-        frontmatter=dict(frontmatter),
-        base_dir=base_dir,
-        origin=origin,
-        disable_model_invocation=disable_model,
-        paths=paths,
-        allowed_tools=allowed_tools,
-    )
 
 
 def _as_string_list(value: object) -> list[str]:
-    """Normalise YAML-ish ``foo`` / ``foo, bar`` / ``[foo, bar]`` to list."""
+    """Normalise YAML-ish ``foo`` / ``foo, bar`` / ``[foo, bar]`` to list.
+
+    Defensive against malformed frontmatter — a dict, set, or other
+    surprise type yields an empty list rather than raising.
+    """
     if value is None:
         return []
     if isinstance(value, list):
-        return [str(v).strip() for v in value if str(v).strip()]
+        out: list[str] = []
+        for v in value:
+            if v is None:
+                continue
+            try:
+                s = str(v).strip()
+            except Exception:  # noqa: BLE001
+                continue
+            if s:
+                out.append(s)
+        return out
     if isinstance(value, str):
         if "," in value:
             return [part.strip() for part in value.split(",") if part.strip()]
         return [value.strip()] if value.strip() else []
-    return [str(value)]
+    if isinstance(value, (dict, set)):
+        return []
+    try:
+        return [str(value)]
+    except Exception:  # noqa: BLE001
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -123,9 +161,14 @@ def _scan_root(root: Path, *, origin: str) -> list[Skill]:
     """Load every ``<name>/SKILL.md`` or ``<name>.md`` under ``root``.
 
     Folder form shadows flat form (spec 4.1) when both exist for the
-    same name.
+    same name. Per-entry failures are logged and skipped — one corrupt
+    SKILL.md must never block the rest of the scan.
     """
-    if not root.exists() or not root.is_dir():
+    try:
+        if not root.exists() or not root.is_dir():
+            return []
+    except OSError as exc:  # weird filesystem / permission edge cases
+        logger.warning("Failed to stat skill root", path=str(root), error=str(exc))
         return []
 
     # First pass: folder form.
@@ -141,7 +184,11 @@ def _scan_root(root: Path, *, origin: str) -> list[Skill]:
         )
         return []
     for entry in entries:
-        if entry.is_dir():
+        try:
+            is_dir = entry.is_dir()
+        except OSError:
+            continue
+        if is_dir:
             skill_md = entry / "SKILL.md"
             if not skill_md.exists():
                 continue
@@ -155,7 +202,11 @@ def _scan_root(root: Path, *, origin: str) -> list[Skill]:
 
     # Second pass: flat form (shadowed by folder form).
     for entry in entries:
-        if entry.is_file() and entry.suffix == ".md" and entry.name != "SKILL.md":
+        try:
+            is_file = entry.is_file()
+        except OSError:
+            continue
+        if is_file and entry.suffix == ".md" and entry.name != "SKILL.md":
             stem = entry.stem
             skill = load_skill_from_path(entry, origin=origin, default_name=stem)
             if skill is None:
@@ -222,33 +273,69 @@ def discover_skills(
 
     collected: list[Skill] = []
 
+    def _safe_extend(
+        origin: str, source: str, scan: "callable[[], list[Skill]]"
+    ) -> None:
+        """Run *scan* and absorb any unexpected failure with a warning.
+
+        ``_scan_root`` and ``_load_package_skills`` already swallow
+        per-skill errors; this is the outer guardrail so a busted
+        scratchpad / unicode-mangled filesystem path / etc. cannot
+        crash the whole agent boot.
+        """
+        try:
+            new_skills = scan()
+        except Exception as exc:  # noqa: BLE001 — last-resort catch
+            logger.warning(
+                "Failed to scan skill source",
+                origin=origin,
+                source=source,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
+            return
+        for skill in new_skills:
+            if origin in {"creature", "user", "project"}:
+                skill.enabled = origin in default_enabled_origins
+            collected.append(skill)
+
     # 4 — packages (lowest).
-    collected.extend(
-        _load_package_skills(
+    _safe_extend(
+        "package",
+        "package-manifest",
+        lambda: _load_package_skills(
             declared_names=declared,
             enable_all_packages=enable_all_packages,
             default_enabled_origins=default_enabled_origins,
-        )
+        ),
     )
 
     # 3 — creature.
     if agent_path is not None:
         creature_root = Path(agent_path) / CREATURE_SKILL_SUBDIR
-        for skill in _scan_root(creature_root, origin="creature"):
-            skill.enabled = "creature" in default_enabled_origins
-            collected.append(skill)
+        _safe_extend(
+            "creature",
+            str(creature_root),
+            lambda: _scan_root(creature_root, origin="creature"),
+        )
 
     # 2 — user.
     for rel in USER_SKILL_ROOTS:
-        for skill in _scan_root(home / rel, origin="user"):
-            skill.enabled = "user" in default_enabled_origins
-            collected.append(skill)
+        user_root = home / rel
+        _safe_extend(
+            "user",
+            str(user_root),
+            lambda root=user_root: _scan_root(root, origin="user"),
+        )
 
     # 1 — project (highest).
     for rel in PROJECT_SKILL_ROOTS:
-        for skill in _scan_root(cwd / rel, origin="project"):
-            skill.enabled = "project" in default_enabled_origins
-            collected.append(skill)
+        project_root = cwd / rel
+        _safe_extend(
+            "project",
+            str(project_root),
+            lambda root=project_root: _scan_root(root, origin="project"),
+        )
 
     return collected
 
