@@ -4,6 +4,11 @@ import asyncio
 import sys
 
 from kohakuterrarium.cli.run import _resolve_session, _run_agent_rich_cli
+from kohakuterrarium.session.migrations import (
+    MAX_SUPPORTED_VERSION,
+    discover_versions,
+    path_for_version,
+)
 from kohakuterrarium.session.resume import (
     detect_session_type,
     resume_agent,
@@ -13,8 +18,38 @@ from kohakuterrarium.terrarium.cli import run_terrarium_with_tui
 from kohakuterrarium.utils.logging import (
     configure_utf8_stdio,
     enable_stderr_logging,
+    get_logger,
     set_level,
 )
+
+logger = get_logger(__name__)
+
+
+def _announce_migration_if_needed(path) -> None:
+    """Log an informational line when resume will trigger a migration.
+
+    Doesn't perform the migration itself — that's the job of
+    :func:`ensure_latest_version` inside resume. This just surfaces
+    the "v1 → v2" transition on the terminal so the user isn't
+    confused when a new file appears beside their original session.
+    """
+    candidates = discover_versions(path)
+    if not candidates:
+        return
+    best_version, best_path = candidates[0]
+    if best_version >= MAX_SUPPORTED_VERSION:
+        return
+    target = path_for_version(best_path, MAX_SUPPORTED_VERSION)
+    logger.info(
+        "Upgrading session format",
+        source=str(best_path),
+        source_version=best_version,
+        target=str(target),
+        target_version=MAX_SUPPORTED_VERSION,
+    )
+    print(
+        f"[session.migration] upgrading {best_path.name} -> {target.name}",
+    )
 
 
 def resume_cli(
@@ -47,6 +82,10 @@ def resume_cli(
         else:
             print("No sessions found in ~/.kohakuterrarium/sessions/")
         return 1
+
+    # Wave D: announce any pending upgrade before we open the store so
+    # the user sees what's happening; resume itself performs the work.
+    _announce_migration_if_needed(path)
 
     session_type = detect_session_type(path)
     store = None

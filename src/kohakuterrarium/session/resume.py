@@ -15,6 +15,8 @@ from kohakuterrarium.builtins.inputs import create_builtin_input
 from kohakuterrarium.builtins.outputs import create_builtin_output
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.session.history import replay_conversation
+from kohakuterrarium.session.migrations import ensure_latest_version
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.config import load_terrarium_config
 from kohakuterrarium.terrarium.runtime import TerrariumRuntime
@@ -73,6 +75,111 @@ def _build_conversation(messages: list[dict]) -> Conversation:
     return conv
 
 
+def _load_conversation_with_replay_fallback(
+    store: SessionStore, agent_name: str
+) -> list[dict] | None:
+    """Wave C: prefer the snapshot; replay the event log if it's stale.
+
+    A snapshot is considered stale when its ``<agent>:snapshot_event_id``
+    state entry is missing or lower than the last ``event_id`` on the
+    agent's event stream. In either case we fall back to
+    ``replay_conversation(events)``; if replay also yields an empty
+    list, we return the snapshot (or ``None``) unchanged.
+    """
+    snapshot = store.load_conversation(agent_name)
+    events = store.get_events(agent_name)
+    if not events:
+        return snapshot
+    last_event_id = 0
+    for evt in events:
+        eid = evt.get("event_id")
+        if isinstance(eid, int) and eid > last_event_id:
+            last_event_id = eid
+    try:
+        cached_up_to = store.state.get(f"{agent_name}:snapshot_event_id")
+    except (KeyError, TypeError):
+        cached_up_to = None
+    if snapshot is not None and isinstance(cached_up_to, int):
+        if cached_up_to >= last_event_id:
+            return snapshot
+    replayed = replay_conversation(events)
+    if replayed:
+        logger.info(
+            "Resume rebuilt conversation via replay",
+            agent=agent_name,
+            snapshot_event_id=cached_up_to,
+            last_event_id=last_event_id,
+            messages=len(replayed),
+        )
+        return replayed
+    return snapshot
+
+
+def _restore_turn_branch_state(agent, store: SessionStore, agent_name: str) -> None:
+    """Set turn / branch / parent-path state on the agent from saved events.
+
+    Picks the latest live subtree on resume (parent path = the latest
+    branch of every prior turn). This matches ``replay_conversation``
+    default selection so the in-memory conversation, the saved
+    snapshot, and the agent's branch counters all agree.
+    """
+    try:
+        events = store.get_events(agent_name)
+    except Exception as e:
+        logger.debug("Failed to read events for turn/branch restore", error=str(e))
+        return
+    # Walk events: track the most recent live branch of every turn so
+    # we can derive both the leaf (turn, branch) and the parent path
+    # leading to it.
+    latest_by_turn: dict[int, int] = {}
+    for evt in events:
+        ti = evt.get("turn_index")
+        bi = evt.get("branch_id")
+        if not isinstance(ti, int) or not isinstance(bi, int):
+            continue
+        prev = latest_by_turn.get(ti, 0)
+        if bi > prev:
+            latest_by_turn[ti] = bi
+    if not latest_by_turn:
+        return
+    max_turn = max(latest_by_turn.keys())
+    agent._turn_index = max_turn
+    agent._branch_id = latest_by_turn[max_turn]
+    agent._parent_branch_path = [
+        (t, latest_by_turn[t]) for t in sorted(latest_by_turn.keys()) if t < max_turn
+    ]
+    logger.debug(
+        "Turn/branch state restored",
+        agent=agent_name,
+        turn_index=max_turn,
+        branch_id=agent._branch_id,
+        parent_path_len=len(agent._parent_branch_path),
+    )
+
+
+def _open_store_with_migration(session_path: str | Path) -> SessionStore:
+    """Open a session file, auto-migrating older formats upward first.
+
+    Wraps ``ensure_latest_version`` so resume transparently uses the
+    newest readable version on disk. If migration raises, the error
+    message carries the original v1 path so the user can re-run
+    against the preserved file after fixing the cause.
+    """
+    try:
+        resolved = ensure_latest_version(session_path)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to migrate session at {session_path}: {exc}"
+        ) from exc
+    if str(resolved) != str(session_path):
+        logger.info(
+            "Session auto-migrated before resume",
+            original=str(session_path),
+            opened=str(resolved),
+        )
+    return SessionStore(resolved)
+
+
 def resume_agent(
     session_path: str | Path,
     pwd_override: str | None = None,
@@ -90,7 +197,7 @@ def resume_agent(
     Returns:
         (agent, store) tuple. Caller should run agent.run() then store.close().
     """
-    store = SessionStore(session_path)
+    store = _open_store_with_migration(session_path)
     meta = store.load_meta()
 
     if meta.get("config_type") != "agent":
@@ -128,14 +235,19 @@ def resume_agent(
     agent = Agent.from_path(config_path, llm_override=effective_llm, **io_kwargs)
     agent_name = meta.get("agents", [agent.config.name])[0]
 
-    # Inject saved conversation
-    saved_messages = store.load_conversation(agent_name)
+    # Inject saved conversation (Wave C: snapshot is a cache, fall
+    # back to replay_conversation when it's stale or absent).
+    saved_messages = _load_conversation_with_replay_fallback(store, agent_name)
     if saved_messages:
         conv = _build_conversation(saved_messages)
         agent.controller.conversation = conv
         logger.info(
             "Conversation restored", agent=agent_name, messages=len(saved_messages)
         )
+
+    # Restore turn / branch counters so a regenerate /  edit+rerun
+    # after resume opens the right branch_id of the current turn.
+    _restore_turn_branch_state(agent, store, agent_name)
 
     # Restore scratchpad
     pad_data = store.load_scratchpad(agent_name)
@@ -184,7 +296,7 @@ def resume_terrarium(
         (runtime, store) tuple. Caller should run runtime.run() then store.close().
         The runtime will auto-inject conversations via attach_session_store.
     """
-    store = SessionStore(session_path)
+    store = _open_store_with_migration(session_path)
     meta = store.load_meta()
 
     if meta.get("config_type") != "terrarium":
@@ -220,7 +332,7 @@ def resume_terrarium(
     resume_triggers = {}
     for name in agents:
         resume_data[name] = {
-            "conversation": store.load_conversation(name),
+            "conversation": _load_conversation_with_replay_fallback(store, name),
             "scratchpad": store.load_scratchpad(name),
         }
         events = store.get_resumable_events(name)
@@ -249,9 +361,16 @@ def resume_terrarium(
 def detect_session_type(session_path: str | Path) -> str:
     """Detect whether a session file is an agent or terrarium.
 
-    Returns "agent" or "terrarium".
+    Returns "agent" or "terrarium". Resolves to the newest version on
+    disk so a v1 file with an ``alice.kohakutr.v2`` neighbour reports
+    the v2 file's type (they are guaranteed to match today, but the
+    abstraction holds for future format changes too).
     """
-    store = SessionStore(session_path)
+    try:
+        resolved = ensure_latest_version(session_path)
+    except Exception:
+        resolved = Path(session_path)
+    store = SessionStore(resolved)
     try:
         meta = store.load_meta()
         return meta.get("config_type", "agent")
