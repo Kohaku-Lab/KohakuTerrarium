@@ -155,7 +155,7 @@ class TestMeta:
         assert meta["pwd"] == "/home/user"
         assert meta["agents"] == ["swe_agent"]
         assert meta["status"] == "running"
-        assert meta["format_version"] == 1
+        assert meta["format_version"] == 2
         assert "created_at" in meta
         assert "hostname" in meta
 
@@ -198,10 +198,13 @@ class TestMeta:
 
 class TestEvents:
     def test_append_and_read(self, store):
-        key1 = store.append_event("root", "user_input", {"content": "hello"})
-        key2 = store.append_event("root", "text", {"content": "world"})
+        key1, eid1 = store.append_event("root", "user_input", {"content": "hello"})
+        key2, eid2 = store.append_event("root", "text", {"content": "world"})
         assert key1 == "root:e000000"
         assert key2 == "root:e000001"
+        # Wave B: event_id is a global monotonic integer.
+        assert eid1 == 1
+        assert eid2 == 2
 
         events = store.get_events("root")
         assert len(events) == 2
@@ -427,10 +430,10 @@ class TestCounterRestoration:
 
         # Reopen and verify counters restored
         s2 = SessionStore(path)
-        key = s2.append_event("root", "text", {"content": "fourth"})
+        key, _ = s2.append_event("root", "text", {"content": "fourth"})
         assert key == "root:e000002"  # Continues from 2, not 0
 
-        swe_key = s2.append_event("swe", "text", {"content": "fifth"})
+        swe_key, _ = s2.append_event("swe", "text", {"content": "fifth"})
         assert swe_key == "swe:e000001"  # Continues from 1
         s2.close()
 
