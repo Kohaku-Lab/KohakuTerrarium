@@ -109,19 +109,66 @@ class AgentHandlersMixin(AgentToolsMixin):
         triggers fire simultaneously, events are serialized so only
         one LLM call runs at a time.
         """
-        # Record user input to session store
-        if self.session_store is not None and event.type == "user_input":
+        is_rerun = bool(event.context.get("rerun"))
+        is_edited = bool(event.context.get("edited"))
+        is_pure_rerun = is_rerun and not is_edited
+        # Turn / branch bookkeeping for v2 session events.
+        # - New user input → bump turn_index, reset branch_id to 1.
+        # - Pure regen / edit+rerun keep turn_index, ``_branch_id`` was
+        #   pre-incremented by ``regenerate_last_response`` /
+        #   ``edit_and_rerun`` before this trigger fired.
+        if event.type == "user_input" and not is_rerun:
+            # The previous turn's (turn_index, branch_id) becomes part
+            # of the new turn's parent_branch_path so a future branch
+            # switch on that earlier turn can hide this turn's events
+            # if they don't belong to the chosen subtree.
+            if self._turn_index > 0 and self._branch_id > 0:
+                self._parent_branch_path = list(self._parent_branch_path)
+                self._parent_branch_path.append((self._turn_index, self._branch_id))
+            self._turn_index += 1
+            self._branch_id = 1
+        # Record user input to session store. Pure regenerate (rerun
+        # with no new content) is a synthetic re-trigger of an existing
+        # user message, so we do NOT emit a fresh ``user_message``.
+        # Edit+rerun carries the new content (``edited=True``) and
+        # records normally — under the new branch_id so the navigator
+        # can flip back to the original.
+        if (
+            self.session_store is not None
+            and event.type == "user_input"
+            and not is_pure_rerun
+        ):
             content = (
                 content_parts_to_dicts(event.content)
                 if hasattr(event, "is_multimodal") and event.is_multimodal()
                 else (event.content or "")
             )
+            ppath = [tuple(p) for p in self._parent_branch_path]
             self.session_store.append_event(
-                self.config.name, "user_input", {"content": content}
+                self.config.name,
+                "user_input",
+                {"content": content},
+                turn_index=self._turn_index,
+                branch_id=self._branch_id,
+                parent_branch_path=ppath,
+            )
+            self.session_store.append_event(
+                self.config.name,
+                "user_message",
+                {"content": content},
+                turn_index=self._turn_index,
+                branch_id=self._branch_id,
+                parent_branch_path=ppath,
             )
 
-        # Notify output of user input (for inline panel rendering)
-        if event.type == "user_input" and self.output_router is not None:
+        # Notify output of user input (for inline panel rendering).
+        # Pure regen has no new user input — skip the notification so
+        # output modules don't render an empty user bubble.
+        if (
+            event.type == "user_input"
+            and self.output_router is not None
+            and not is_pure_rerun
+        ):
             content = (
                 event.get_text_content()
                 if hasattr(event, "is_multimodal") and event.is_multimodal()
@@ -194,6 +241,12 @@ class AgentHandlersMixin(AgentToolsMixin):
         self.trigger_manager.set_context_all(event.context)
         if self._termination_checker:
             self._termination_checker.record_activity()
+        # Reset per-turn token aggregator. ``_emit_token_usage`` adds
+        # each LLM round's usage; ``_finalize_processing`` flushes a
+        # single ``turn_token_usage`` event when the turn ends.
+        if isinstance(getattr(self, "_turn_usage_accum", None), dict):
+            for k in self._turn_usage_accum:
+                self._turn_usage_accum[k] = 0
 
     async def _run_controller_loop(
         self, controller: Controller, all_round_text: list[str]
@@ -576,6 +629,27 @@ class AgentHandlersMixin(AgentToolsMixin):
                     },
                 )
 
+        # Flush per-turn token aggregate as a Wave B event before the
+        # ``processing_end`` marker so session readers can pin the turn
+        # rollup to this turn_index.
+        accum = getattr(self, "_turn_usage_accum", None)
+        if isinstance(accum, dict) and any(accum.values()):
+            self.output_router.notify_activity(
+                "turn_token_usage",
+                (
+                    f"turn {self._turn_index}: "
+                    f"{accum.get('prompt_tokens', 0)} in, "
+                    f"{accum.get('completion_tokens', 0)} out"
+                ),
+                metadata={
+                    "turn_index": self._turn_index,
+                    "prompt_tokens": accum.get("prompt_tokens", 0),
+                    "completion_tokens": accum.get("completion_tokens", 0),
+                    "cached_tokens": accum.get("cached_tokens", 0),
+                    "total_tokens": accum.get("total_tokens", 0),
+                },
+            )
+
         await self.output_router.on_processing_end()
         self.output_router.clear_all()
 
@@ -611,7 +685,9 @@ class AgentHandlersMixin(AgentToolsMixin):
             return
 
         content = "".join(self._last_turn_text).strip()
-        self._turn_index += 1
+        # ``_turn_index`` is now bumped at user-input arrival inside
+        # ``_process_event``; output wiring just reads the current
+        # value rather than bumping again here.
         try:
             await resolver.emit(
                 source=self.config.name,

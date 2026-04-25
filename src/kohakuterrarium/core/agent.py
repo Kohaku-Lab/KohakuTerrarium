@@ -17,6 +17,14 @@ from kohakuterrarium.bootstrap.plugins import init_plugins
 from kohakuterrarium.core.agent_handlers import AgentHandlersMixin
 from kohakuterrarium.core.agent_messages import AgentMessagesMixin
 from kohakuterrarium.core.agent_model import AgentModelMixin
+from kohakuterrarium.core.agent_observability import (
+    attach_to_session as _attach_to_session,
+    build_session_info as _build_session_info,
+    detach_from_session as _detach_from_session,
+    init_branch_state,
+    wire_plugin_hook_timing,
+    wire_scratchpad_observer,
+)
 from kohakuterrarium.core.budget import IterationBudget
 from kohakuterrarium.core.compact import CompactConfig, CompactManager
 from kohakuterrarium.core.config import AgentConfig, load_agent_config
@@ -140,14 +148,7 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin, AgentModelMi
         self.compact_manager: Any = None
         self.plugins: Any = None  # PluginManager | None
 
-        # Output wiring: resolver is attached by the terrarium runtime at
-        # build time (None → emissions silently drop via NoopResolver).
-        # ``_last_turn_text`` is replaced each LLM round inside the
-        # controller loop so that at ``_finalize_processing`` time it
-        # holds exactly the text of the final round.
-        self._wiring_resolver: Any = None  # OutputWiringResolver | None
-        self._turn_index: int = 0
-        self._last_turn_text: list[str] = []
+        init_branch_state(self)
 
         # Environment and session (explicit or auto-created in _init_executor)
         self.environment: Optional["Environment"] = environment
@@ -824,44 +825,26 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin, AgentModelMi
     def attach_session_store(
         self, store: Any, *, capture_activity: bool = True
     ) -> None:
-        """Attach a SessionStore for persistent event recording.
+        """Attach a SessionStore; registers a SessionOutput sink.
 
-        Registers a SessionOutput as a secondary output module.
-        Records text, processing events, conversation snapshots, and agent
-        state to the store. Activity capture can be disabled for runs where
-        the active I/O is not a CLI-style interactive UI.
+        Wires scratchpad + plugin-hook observers so Wave B
+        ``scratchpad_write`` / ``plugin_hook_timing`` events flow.
         """
         self.session_store = store
-
-        # Give the controller direct access — it needs ``write_artifact``
-        # + ``session_id`` to persist generated images (see
-        # ``_save_structured_assistant_parts``).
+        # Controller needs direct access for artifact writes.
         if hasattr(self, "controller") and self.controller is not None:
             self.controller.session_store = store
-
         self._session_output = SessionOutput(
-            self.config.name,
-            store,
-            self,
-            capture_activity=capture_activity,
+            self.config.name, store, self, capture_activity=capture_activity
         )
         self.output_router.add_secondary(self._session_output)
-
-        # Wire session store to sub-agent manager for conversation capture
         if hasattr(self, "subagent_manager"):
             self.subagent_manager._session_store = store
             self.subagent_manager._parent_name = self.config.name
-
-        # Wire session store to trigger manager for resumable trigger persistence
         self.trigger_manager._session_store = store
         self.trigger_manager._agent_name = self.config.name
-
-        # Wire session store to compact manager. Also re-read the
-        # saved compact_count from the session store — this matters in
-        # terrariums where ``attach_session_store`` is called AFTER
-        # ``agent.start()`` (creatures) so the initial ``_init_compact_manager``
-        # ran without a store and saw count=0. Without this re-read
-        # the compact counter resets to 0 on every resume.
+        # Terrariums attach the store AFTER agent.start() (creatures),
+        # so re-read the saved compact_count or it resets to 0.
         if self.compact_manager:
             self.compact_manager._session_store = store
             try:
@@ -874,8 +857,16 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin, AgentModelMi
                     agent=self.config.name,
                     error=str(e),
                 )
-
+        # Wave B: route scratchpad + plugin-hook events to the router.
+        wire_scratchpad_observer(self)
+        wire_plugin_hook_timing(self)
         logger.debug("Session store attached", agent=self.config.name)
+
+    # Wave F attach / detach — implementation in
+    # ``kohakuterrarium.session.attach``; thin wrappers here to keep
+    # this file under the 1000-line hard cap.
+    attach_to_session = _attach_to_session
+    detach_from_session = _detach_from_session
 
     def set_output_handler(self, handler: Any, replace_default: bool = False) -> None:
         """Set a custom output handler callback for text chunks."""
@@ -985,6 +976,10 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin, AgentModelMi
             "message_count": len(self.conversation_history),
             "pending_jobs": self.executor.get_pending_count() if self.executor else 0,
         }
+
+    def session_info(self, tokens_view: str = "own") -> dict[str, Any]:
+        """Wave G session snapshot (see ``build_session_info``)."""
+        return _build_session_info(self, tokens_view)
 
 
 async def run_agent(config_path: str) -> None:

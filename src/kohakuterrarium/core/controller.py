@@ -854,10 +854,13 @@ class Controller:
         logger.debug("Processing events", count=len(events))
 
         user_content, combined_text = self._build_turn_context(events)
-
-        # In native mode, empty tool_complete events just trigger next turn
-        # (tool results already added as role="tool" messages)
-        skip_empty = self._is_native_mode and not combined_text.strip()
+        # Skip user append: native-mode tool round-trips, and pure regen.
+        skip_empty = (self._is_native_mode and not combined_text.strip()) or any(
+            e.type == "user_input"
+            and e.context.get("rerun")
+            and not e.context.get("edited")
+            for e in events
+        )
         if not skip_empty:
             self.conversation.append("user", user_content)
 
