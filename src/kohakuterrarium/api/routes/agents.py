@@ -196,12 +196,50 @@ async def stop_agent_task(agent_id: str, job_id: str, manager=Depends(get_manage
 
 @router.get("/{agent_id}/history")
 async def agent_history(agent_id: str, manager=Depends(get_manager)):
-    """Get conversation history + event log for a standalone agent."""
+    """Get conversation history + event log for a standalone agent.
+
+    Returns the raw event stream including sibling branches; clients
+    are expected to compute branch metadata client-side via the same
+    helpers used by ``replay_conversation``. Use ``/branches`` for a
+    pre-aggregated turn→branches map.
+    """
     try:
         history = manager.agent_get_history(agent_id)
         return {"agent_id": agent_id, "events": history}
     except ValueError as e:
         raise HTTPException(404, str(e))
+
+
+@router.get("/{agent_id}/branches")
+async def agent_branches(agent_id: str, manager=Depends(get_manager)):
+    """Return per-turn branch metadata for the navigator UI.
+
+    Response shape::
+
+        {
+          "agent_id": "...",
+          "turns": [
+            {"turn_index": 1, "branches": [1, 2], "latest_branch": 2},
+            ...
+          ]
+        }
+    """
+    from kohakuterrarium.session.history import collect_branch_metadata
+
+    try:
+        events = manager.agent_get_history(agent_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    meta = collect_branch_metadata(events)
+    turns = [
+        {
+            "turn_index": ti,
+            "branches": info["branches"],
+            "latest_branch": info["latest_branch"],
+        }
+        for ti, info in sorted(meta.items())
+    ]
+    return {"agent_id": agent_id, "turns": turns}
 
 
 @router.post("/{agent_id}/model")
