@@ -151,3 +151,35 @@ class FileMkdir(BaseModel):
     """Request body for creating a directory."""
 
     path: str
+
+
+class ForkMutationPayload(BaseModel):
+    """Description of the optional fork-point mutation.
+
+    ``kind`` picks the canned mutator; ``args`` carry mutator-specific
+    parameters (validated by the route handler).
+    """
+
+    kind: Literal[
+        "drop_trailing",
+        "edit_user_message",
+        "inject_user_message",
+        "inject_tool_result",
+    ]
+    args: dict | None = None
+
+
+class ForkRequest(BaseModel):
+    """Request body for ``POST /sessions/{id}/fork``."""
+
+    at_event_id: int
+    mutate: ForkMutationPayload | None = None
+    name: str | None = None
+
+
+class ForkResponse(BaseModel):
+    """Response body for a successful fork."""
+
+    session_id: str
+    fork_point: int
+    path: str

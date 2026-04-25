@@ -10,6 +10,15 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from kohakuterrarium.api.deps import get_manager
+from kohakuterrarium.api.routes._session_fork import fork_session_handler
+from kohakuterrarium.api.routes._session_paths import (
+    all_session_files as _all_session_files_impl,
+    all_versions_for_session as _all_versions_for_session_impl,
+    normalize_session_stem as _normalize_session_stem,
+    pick_canonical_per_session,
+    resolve_session_path as _resolve_session_path_impl,
+)
+from kohakuterrarium.api.schemas import ForkRequest, ForkResponse
 from kohakuterrarium.session.embedding import create_embedder
 from kohakuterrarium.session.memory import SessionMemory
 from kohakuterrarium.session.resume import (
@@ -40,9 +49,11 @@ def _build_session_index() -> list[dict]:
         _session_index = []
         return _session_index
 
-    session_files = list(_SESSION_DIR.glob("*.kohakutr")) + list(
-        _SESSION_DIR.glob("*.kt")
-    )
+    # Wave D auto-migration leaves both ``foo.kohakutr`` (v1 rollback)
+    # and ``foo.kohakutr.v2`` (live) on disk. Surface only the highest-
+    # versioned file per logical session; delete/resume still reach
+    # both files via ``_all_versions_for_session``.
+    session_files = pick_canonical_per_session(_SESSION_DIR)
 
     results = []
     for path in session_files:
@@ -67,9 +78,14 @@ def _build_session_index() -> list[dict]:
 
             store.close(update_status=False)
 
+            lineage = meta.get("lineage") or {}
+            forked_children = meta.get("forked_children") or []
             results.append(
                 {
-                    "name": path.stem,
+                    # Canonical name strips the version suffix so v1+v2
+                    # of the same session show as one entry — and the
+                    # name round-trips through delete/resume cleanly.
+                    "name": _normalize_session_stem(path),
                     "filename": path.name,
                     "config_type": meta.get("config_type", "unknown"),
                     "config_path": meta.get("config_path", ""),
@@ -80,11 +96,42 @@ def _build_session_index() -> list[dict]:
                     "last_active": meta.get("last_active", ""),
                     "preview": preview,
                     "pwd": meta.get("pwd", ""),
+                    "format_version": meta.get("format_version", 1),
+                    # Wave E lineage for the fork tree in the lister.
+                    # ``parent_session_id`` is set on forked children;
+                    # ``forked_children`` lists the child session_ids
+                    # this session is the parent of. Frontend uses
+                    # them to render parent/child grouping.
+                    "parent_session_id": (
+                        (lineage.get("fork") or {}).get("parent_session_id")
+                        if isinstance(lineage, dict)
+                        else None
+                    ),
+                    "fork_point": (
+                        (lineage.get("fork") or {}).get("fork_point")
+                        if isinstance(lineage, dict)
+                        else None
+                    ),
+                    "forked_children": [
+                        c.get("session_id") if isinstance(c, dict) else c
+                        for c in forked_children
+                    ],
+                    "migrated_from_version": (
+                        lineage.get("migration", {}).get("source_version")
+                        if isinstance(lineage, dict)
+                        else None
+                    ),
                 }
             )
         except Exception as e:
             _ = e  # corrupt session file, show as error entry
-            results.append({"name": path.stem, "filename": path.name, "error": True})
+            results.append(
+                {
+                    "name": _normalize_session_stem(path),
+                    "filename": path.name,
+                    "error": True,
+                }
+            )
 
     results.sort(
         key=lambda s: s.get("last_active") or s.get("created_at") or "",
@@ -150,33 +197,32 @@ async def list_sessions(
 
 @router.delete("/{session_name}")
 async def delete_session(session_name: str):
-    """Delete a saved session file."""
-    path = None
-    for ext in (".kohakutr", ".kt"):
-        candidate = _SESSION_DIR / f"{session_name}{ext}"
-        if candidate.exists():
-            path = candidate
-            break
+    """Delete a saved session file.
 
-    if path is None:
-        # Prefix match
-        matches = [
-            p
-            for p in list(_SESSION_DIR.glob("*.kohakutr"))
-            + list(_SESSION_DIR.glob("*.kt"))
-            if p.stem == session_name
-        ]
-        if len(matches) == 1:
-            path = matches[0]
+    Removes every on-disk file that belongs to the logical session
+    (``foo.kohakutr.v2`` plus its ``foo.kohakutr`` v1 rollback when
+    both exist). Falls back to fuzzy lookup if the user passes a
+    legacy raw stem.
+    """
+    targets = _all_versions_for_session(session_name)
+    if not targets:
+        resolved = _resolve_session_path(session_name)
+        if resolved is not None:
+            targets = _all_versions_for_session(_normalize_session_stem(resolved))
+            if not targets:
+                targets = [resolved]
 
-    if path is None:
+    if not targets:
         raise HTTPException(
             status_code=404, detail=f"Session not found: {session_name}"
         )
 
+    deleted: list[str] = []
     try:
-        path.unlink()
-        return {"status": "deleted", "name": session_name}
+        for path in targets:
+            path.unlink()
+            deleted.append(path.name)
+        return {"status": "deleted", "name": session_name, "files": deleted}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Delete failed: {e}")
 
@@ -188,31 +234,7 @@ async def resume_session(session_name: str):
     The frontend can then connect to the instance via normal
     terrarium/agent WebSocket and history endpoints.
     """
-    # Find the session file
-    path = None
-    for ext in (".kohakutr", ".kt"):
-        candidate = _SESSION_DIR / f"{session_name}{ext}"
-        if candidate.exists():
-            path = candidate
-            break
-
-    if path is None:
-        # Try prefix match
-        matches = [
-            p
-            for p in list(_SESSION_DIR.glob("*.kohakutr"))
-            + list(_SESSION_DIR.glob("*.kt"))
-            if p.stem.startswith(session_name) or session_name in p.stem
-        ]
-        if len(matches) == 1:
-            path = matches[0]
-        elif len(matches) > 1:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Ambiguous session name, {len(matches)} matches. "
-                f"Options: {[m.stem for m in matches[:5]]}",
-            )
-
+    path = _resolve_session_path(session_name)
     if path is None:
         raise HTTPException(
             status_code=404, detail=f"Session not found: {session_name}"
@@ -220,6 +242,7 @@ async def resume_session(session_name: str):
 
     session_type = detect_session_type(path)
     manager = get_manager()
+    canonical_name = _normalize_session_stem(path)
 
     try:
         # Force CLI mode (headless) for web resume. TUI can't run without a TTY.
@@ -229,7 +252,7 @@ async def resume_session(session_name: str):
             return {
                 "instance_id": tid,
                 "type": "terrarium",
-                "session_name": path.stem,
+                "session_name": canonical_name,
             }
         else:
             agent, store = resume_agent(path, io_mode="cli")
@@ -237,28 +260,25 @@ async def resume_session(session_name: str):
             return {
                 "instance_id": aid,
                 "type": "agent",
-                "session_name": path.stem,
+                "session_name": canonical_name,
             }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Resume failed: {e}")
 
 
+def _all_session_files() -> list[Path]:
+    """Every session file under ``_SESSION_DIR`` (Wave-D-aware)."""
+    return _all_session_files_impl(_SESSION_DIR)
+
+
 def _resolve_session_path(session_name: str) -> Path | None:
-    """Shared session file lookup (name, prefix, or full path)."""
-    for ext in (".kohakutr", ".kt"):
-        candidate = _SESSION_DIR / f"{session_name}{ext}"
-        if candidate.exists():
-            return candidate
-    matches = [
-        p
-        for p in list(_SESSION_DIR.glob("*.kohakutr")) + list(_SESSION_DIR.glob("*.kt"))
-        if p.stem == session_name
-        or p.stem.startswith(session_name)
-        or session_name in p.stem
-    ]
-    if len(matches) == 1:
-        return matches[0]
-    return None
+    """Resolve ``session_name`` against ``_SESSION_DIR`` (Wave-D-aware)."""
+    return _resolve_session_path_impl(session_name, _SESSION_DIR)
+
+
+def _all_versions_for_session(session_name: str) -> list[Path]:
+    """Every file belonging to the given session (v1 + v2 rollback pair)."""
+    return _all_versions_for_session_impl(session_name, _SESSION_DIR)
 
 
 def _session_targets(store: SessionStore, meta: dict[str, Any]) -> list[str]:
@@ -520,3 +540,22 @@ async def get_session_artifact(session_name: str, filepath: str):
 
     mime, _ = mimetypes.guess_type(candidate.name)
     return FileResponse(candidate, media_type=mime or "application/octet-stream")
+
+
+# --------------------------------------------------------------------
+# Fork / branch (Wave E)
+# --------------------------------------------------------------------
+
+
+@router.post("/{session_name}/fork", status_code=201)
+async def fork_session(session_name: str, payload: ForkRequest) -> ForkResponse:
+    """Fork a saved session at ``at_event_id`` into a new ``.kohakutr``.
+
+    Returns 201 with the child's session id + path. Returns 400 for
+    bad ``at_event_id`` or invalid mutation, 409 when the fork would
+    split an in-flight job, and 404 if the source cannot be found.
+    """
+    path = _resolve_session_path(session_name)
+    if path is None:
+        raise HTTPException(404, f"Session not found: {session_name}")
+    return await fork_session_handler(path, payload)
