@@ -73,13 +73,8 @@ discord = [
     "discord.py>=2.0.0",
     "Pillow>=12.2.0",
 ]
-asr = [
-    "openai-whisper>=20250625",
-    "sounddevice>=0.4.0",
-    "numpy",
-]
 demo = [
-    "KohakuTerrarium[discord,asr]",
+    "KohakuTerrarium[discord]",
 ]
 
 # ── browser: full browser rendering for web_fetch (heavy: lxml) ──────
