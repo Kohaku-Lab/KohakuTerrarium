@@ -91,6 +91,8 @@ class RichCLIApp(AppOutputMixin):
         self._processing = False
         self._command_registry: dict = {}
         self._pending_task: asyncio.Task | None = None
+        self._ctrl_c_armed = False
+        self._ctrl_c_reset_task: asyncio.Task | None = None
 
         # Console used only for committing to scrollback (via run_in_terminal).
         self._scroll_console = Console(
@@ -118,6 +120,7 @@ class RichCLIApp(AppOutputMixin):
             creature_name=getattr(agent.config, "name", "creature"),
             on_submit=self._handle_submit,
             on_interrupt=self._on_interrupt,
+            on_ctrl_c=self._on_ctrl_c,
             on_exit=self._on_exit,
             on_clear_screen=self._on_clear_screen,
             on_backgroundify=self._on_backgroundify,
@@ -159,12 +162,18 @@ class RichCLIApp(AppOutputMixin):
             # Terminals that don't support either silently ignore.
             enable_enhanced_keyboard()
 
-            await self.app.run_async()
+            await self.app.run_async(handle_sigint=False)
         finally:
             disable_enhanced_keyboard()
             sys.stderr = prev_stderr
             loop.set_exception_handler(prev_handler)
             # Cancel any in-flight agent task
+            if self._ctrl_c_reset_task and not self._ctrl_c_reset_task.done():
+                self._ctrl_c_reset_task.cancel()
+                try:
+                    await self._ctrl_c_reset_task
+                except (asyncio.CancelledError, Exception):
+                    pass
             if self._pending_task and not self._pending_task.done():
                 self._pending_task.cancel()
                 try:
@@ -581,11 +590,41 @@ class RichCLIApp(AppOutputMixin):
             self.app.invalidate()
 
     def _on_interrupt(self) -> None:
+        self._ctrl_c_armed = False
+        if self._ctrl_c_reset_task and not self._ctrl_c_reset_task.done():
+            self._ctrl_c_reset_task.cancel()
+            self._ctrl_c_reset_task = None
         if self._processing and self.agent:
             try:
                 self.agent.interrupt()
             except Exception as e:
                 logger.exception("Interrupt failed", error=str(e))
+
+    def _on_ctrl_c(self) -> None:
+        if self._processing:
+            self._on_interrupt()
+            return
+        if self._ctrl_c_armed:
+            self._exit_requested = True
+            if self.app:
+                self.app.exit()
+            return
+        self._ctrl_c_armed = True
+        self._commit_text("[dim]Press Ctrl+C again to exit, or Ctrl+D to quit.[/dim]")
+        self._invalidate()
+
+        async def _reset_ctrl_c() -> None:
+            try:
+                await asyncio.sleep(1.5)
+                self._ctrl_c_armed = False
+            except asyncio.CancelledError:
+                raise
+            finally:
+                self._ctrl_c_reset_task = None
+
+        if self._ctrl_c_reset_task and not self._ctrl_c_reset_task.done():
+            self._ctrl_c_reset_task.cancel()
+        self._ctrl_c_reset_task = spawn(_reset_ctrl_c())
 
     def _on_backgroundify(self) -> None:
         """Promote the latest running direct tool/sub-agent to background."""

@@ -146,6 +146,7 @@ class Composer:
         creature_name: str = "creature",
         on_submit: Callable[[str], None] | None = None,
         on_interrupt: Callable[[], None] | None = None,
+        on_ctrl_c: Callable[[], None] | None = None,
         on_exit: Callable[[], None] | None = None,
         on_clear_screen: Callable[[], None] | None = None,
         on_backgroundify: Callable[[], None] | None = None,
@@ -158,6 +159,7 @@ class Composer:
         self.creature_name = creature_name
         self._on_submit = on_submit
         self._on_interrupt = on_interrupt
+        self._on_ctrl_c = on_ctrl_c
         self._on_exit = on_exit
         self._on_clear_screen = on_clear_screen
         self._on_backgroundify = on_backgroundify
@@ -384,8 +386,13 @@ class Composer:
             buf = event.current_buffer
             if buf.text:
                 buf.reset()
-            elif self._on_interrupt:
-                self._on_interrupt()
+            elif self._on_ctrl_c:
+                self._on_ctrl_c()
+
+        @kb.add("sigint", eager=True)
+        def _sigint(_event):
+            if self._on_ctrl_c:
+                self._on_ctrl_c()
 
         @kb.add("escape", eager=True)
         def _esc(event):
