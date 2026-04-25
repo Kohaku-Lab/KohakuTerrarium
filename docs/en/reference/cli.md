@@ -67,7 +67,7 @@ Behaviour:
 - A session is auto-created under `~/.kohakuterrarium/sessions/` with
   extension `.kohakutr` unless `--no-session` is set.
 - On exit, prints a `kt resume <name>` hint.
-- Ctrl+C triggers graceful shutdown.
+- In Rich CLI mode, Ctrl+C interrupts the current turn; when idle, press Ctrl+C twice (or Ctrl+D / `/exit`) to shut down cleanly.
 
 ### `kt resume`
 

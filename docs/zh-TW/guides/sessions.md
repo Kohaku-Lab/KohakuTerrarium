@@ -80,12 +80,12 @@ Resume 會做這些事：
 
 ```bash
 kt run @kt-biome/creatures/swe
-# 工作一下... 然後 Ctrl+C
+# 工作一下... 閒置時按兩次 Ctrl+C（或 Ctrl+D / /exit）
 # 之後：
 kt resume --last
 ```
 
-代理在 Ctrl+C 時會乾淨離開：把進行中的工具跑完、flush session store、印出 resume 提示。強制砍掉 (SIGKILL) 會跳過最後的 flush，但因為寫入是 append-only，最近的狀態大部分還是在磁碟上。
+在 Rich CLI 模式下，Ctrl+C 會中斷目前 turn；閒置時按兩次 Ctrl+C（或 Ctrl+D / `/exit`）會乾淨離開、flush session store、印出 resume 提示。強制砍掉 (SIGKILL) 會跳過最後的 flush，但因為寫入是 append-only，最近的狀態大部分還是在磁碟上。
 
 ## 複製或封存工作階段
 

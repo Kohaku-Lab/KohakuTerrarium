@@ -54,11 +54,7 @@ kt app
 kt app --port 8002
 ```
 
-它會透過 pywebview 開一個原生桌面視窗，背後連的是內嵌 API 伺服器。需要安裝 desktop extra：
-
-```bash
-pip install 'kohakuterrarium[full]'
-```
+它會透過 pywebview 開一個原生桌面視窗，背後連的是內嵌 API 伺服器。PyPI 安裝包含 `pywebview`；從原始碼安裝時請使用正常 editable install，確保依賴已安裝。
 
 關閉視窗後，伺服器也會一起停止。
 
@@ -117,7 +113,7 @@ npm run dev --prefix src/kohakuterrarium-frontend
 - **兩個實例在搶 port 8001。** `kt web` 會自動遞增；`kt serve` 若設定的 port 被占用則會失敗。請改用 `--port`。
 - **`kt web` 沒有自動開瀏覽器。** 它只會印出 URL，請自己打開。
 - **從另一台主機連不到 daemon。** 你綁的是 `127.0.0.1`。請用 `--host 0.0.0.0` 重啟，並放在 proxy 後面。
-- **`kt app` 一開就崩。** 通常是少了 `pywebview`。請安裝 `pip install 'kohakuterrarium[full]'`，或退回用 `kt web`。
+- **`kt app` 一開就崩。** 如果缺少 `pywebview`，請重新安裝/升級 `kohakuterrarium`；否則可退回用 `kt web`。
 
 ## 延伸閱讀
 

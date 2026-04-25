@@ -80,12 +80,12 @@ kt resume ~/backup/run.kohakutr
 
 ```bash
 kt run @kt-biome/creatures/swe
-# 运行一段时间... 然后 Ctrl+C
+# 运行一段时间... 空闲时按两次 Ctrl+C（或 Ctrl+D / /exit）
 # 之后：
 kt resume --last
 ```
 
-按下 Ctrl+C 后，代理会正常退出：执行完正在运行的工具、刷新 session store，并打印恢复提示。若强制终止进程（SIGKILL），则会跳过最后一次刷新；但由于写入是 append-only，最近的大部分状态通常仍会保留在磁盘上。
+在 Rich CLI 模式下，Ctrl+C 会中断当前 turn；空闲时按两次 Ctrl+C（或 Ctrl+D / `/exit`）会正常退出、刷新 session store，并打印恢复提示。若强制终止进程（SIGKILL），则会跳过最后一次刷新；但由于写入是 append-only，最近的大部分状态通常仍会保留在磁盘上。
 
 ## 复制或封存会话
 

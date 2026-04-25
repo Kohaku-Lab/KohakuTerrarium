@@ -21,7 +21,7 @@ Concept primer: [what is a creature](../concepts/foundations/what-is-an-agent.md
 
 ```bash
 pip install kohakuterrarium
-# or, with more optional deps (speech, embeddings, etc.)
+# or, with optional browser/demo/heavy-embedding deps
 pip install "kohakuterrarium[full]"
 ```
 
@@ -86,7 +86,7 @@ kt model default <preset-name>
 kt run @kt-biome/creatures/swe --mode cli
 ```
 
-You land in an interactive prompt with the SWE agent. Type a request; it uses shell, file, and editing tools in the current working directory. Ctrl+C exits cleanly and prints a resume hint.
+You land in an interactive prompt with the SWE agent. Type a request; it uses shell, file, and editing tools in the current working directory. Ctrl+C interrupts a running turn; when idle, press Ctrl+C twice (or Ctrl+D / `/exit`) to exit cleanly and print a resume hint.
 
 Modes:
 
@@ -147,7 +147,7 @@ See [Serving](serving.md) for when each surface is appropriate.
 - **`kt web` serves nothing / 404s on `/`.** The frontend isn't built. Run `npm install --prefix src/kohakuterrarium-frontend && npm run build --prefix src/kohakuterrarium-frontend`. PyPI installs ship the built assets already.
 - **`Permission denied` writing to `~/.kohakuterrarium/`.** The framework creates that directory on first run. If it already exists but is owned by another user (common after `sudo pip install`), fix ownership: `chown -R $USER ~/.kohakuterrarium`.
 - **`kt run` says "no model set".** You skipped step 3. Run `kt model default <name>` or pass `--llm <name>`.
-- **`ModuleNotFoundError: pywebview`.** `kt app` needs the desktop extra: `pip install 'kohakuterrarium[full]'` (or use `kt web`).
+- **`ModuleNotFoundError: pywebview`.** `pywebview` is part of the core PyPI dependencies. Reinstall/upgrade `kohakuterrarium` if it is missing, or use `kt web`.
 
 ## See also
 

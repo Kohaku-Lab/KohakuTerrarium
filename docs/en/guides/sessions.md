@@ -81,12 +81,12 @@ This means small config drift is fine (swapping an LLM, changing a prompt). Stru
 
 ```bash
 kt run @kt-biome/creatures/swe
-# work... then Ctrl+C
+# work... then Ctrl+C twice while idle (or Ctrl+D / /exit)
 # later:
 kt resume --last
 ```
 
-The agent exits gracefully on Ctrl+C: finishes the in-flight tool, flushes the session store, and prints a resume hint. Forced kills (SIGKILL) skip the final flush but most recent state is still on disk thanks to append-only writes.
+In Rich CLI mode, Ctrl+C interrupts the active turn; when idle, pressing Ctrl+C twice (or Ctrl+D / `/exit`) exits gracefully, flushes the session store, and prints a resume hint. Forced kills (SIGKILL) skip the final flush but most recent state is still on disk thanks to append-only writes.
 
 ## Copying or archiving sessions
 

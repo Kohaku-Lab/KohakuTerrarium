@@ -57,7 +57,7 @@ Positional：
 - `@package/...` 会解析到 `~/.kohakuterrarium/packages/<pkg>/...`，遇到 `.link` 指标会跟 (给 editable 安装用)。
 - 除非有 `--no-session`，会在 `~/.kohakuterrarium/sessions/` 自动建一个 `.kohakutr` 会话。
 - 离开时会印 `kt resume <name>` 提示。
-- Ctrl+C 触发 graceful shutdown。
+- 在 Rich CLI 模式下，Ctrl+C 会中断当前 turn；空闲时按两次 Ctrl+C（或 Ctrl+D / `/exit`）会干净退出。
 
 ### `kt resume`
 

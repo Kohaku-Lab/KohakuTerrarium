@@ -86,9 +86,9 @@ Ask it something simple:
 ```
 
 It should stream the answer, call tools (`glob`, `read`), and show the
-output. Exit with `/exit` or Ctrl+C. On exit, `kt` prints a resume hint
-that looks like `kt resume <session-name>`; sessions auto-save to
-`~/.kohakuterrarium/sessions/*.kohakutr`.
+output. Exit with `/exit`, Ctrl+D, or Ctrl+C twice while idle. On exit,
+`kt` prints a resume hint that looks like `kt resume <session-name>`;
+sessions auto-save to `~/.kohakuterrarium/sessions/*.kohakutr`.
 
 ## Step 4 — Resume the session
 

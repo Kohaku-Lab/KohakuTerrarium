@@ -54,11 +54,7 @@ kt app
 kt app --port 8002
 ```
 
-Opens a native desktop window using pywebview, talking to an embedded API server. Requires the desktop extra:
-
-```bash
-pip install 'kohakuterrarium[full]'
-```
+Opens a native desktop window using pywebview, talking to an embedded API server. PyPI installs include `pywebview`; source installs should use the normal editable install so dependencies are present.
 
 When you close the window, the server stops.
 
@@ -117,7 +113,7 @@ Full endpoint list: [Reference / HTTP API](../reference/http.md).
 - **Two instances fighting for port 8001.** `kt web` auto-increments; `kt serve` fails if the configured port is taken. Use `--port`.
 - **Browser doesn't open for `kt web`.** It only prints the URL. Open manually.
 - **Can't reach daemon from another host.** You bound to `127.0.0.1`. Re-start with `--host 0.0.0.0` and front it with a proxy.
-- **`kt app` crashes immediately.** Missing `pywebview`. Install with `pip install 'kohakuterrarium[full]'` or fall back to `kt web`.
+- **`kt app` crashes immediately.** If `pywebview` is missing, reinstall/upgrade `kohakuterrarium`; otherwise fall back to `kt web`.
 
 ## See also
 

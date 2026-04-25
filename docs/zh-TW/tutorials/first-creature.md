@@ -72,7 +72,7 @@ kt run @kt-biome/creatures/swe --mode cli
 > 列出這個目錄中的 python 檔案
 ```
 
-你應該會看到它串流輸出答案、呼叫工具（`glob`、`read`），並顯示結果。用 `/exit` 或 Ctrl+C 離開。離開時，`kt` 會印出類似 `kt resume <session-name>` 的恢復提示；工作階段會自動儲存到 `~/.kohakuterrarium/sessions/*.kohakutr`。
+你應該會看到它串流輸出答案、呼叫工具（`glob`、`read`），並顯示結果。用 `/exit`、Ctrl+D，或在閒置時按兩次 Ctrl+C 離開。離開時，`kt` 會印出類似 `kt resume <session-name>` 的恢復提示；工作階段會自動儲存到 `~/.kohakuterrarium/sessions/*.kohakutr`。
 
 ## 步驟 4 —— 恢復工作階段
 
