@@ -6,6 +6,7 @@ without restarting the terrarium.
 """
 
 import asyncio
+import time
 
 from kohakuterrarium.core.channel import BaseChannel
 from kohakuterrarium.modules.trigger.channel import ChannelTrigger
@@ -19,6 +20,34 @@ from kohakuterrarium.terrarium.factory import build_creature
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _emit_hotplug_transition(
+    runtime: "HotPlugMixin",
+    action: str,
+    creature: str | None = None,
+    channel: str | None = None,
+) -> None:
+    """Append a Wave B ``hotplug_transition`` event to the shared session store.
+
+    Best-effort observability; swallows any store errors. Also nudges
+    ``meta["agents"]`` so resume can pick up creatures added at runtime
+    (test_session_resume_hotplugged_agent flip).
+    """
+    store = getattr(runtime, "_session_store", None) or getattr(
+        runtime, "_pending_session_store", None
+    )
+    if store is None:
+        return
+    try:
+        payload: dict = {"action": action, "ts": time.time()}
+        if creature is not None:
+            payload["creature"] = creature
+        if channel is not None:
+            payload["channel"] = channel
+        store.append_event("terrarium", "hotplug_transition", payload)
+    except Exception as e:  # pragma: no cover — observability
+        logger.debug("hotplug_transition emit failed", error=str(e), exc_info=True)
 
 
 class HotPlugMixin:
@@ -63,6 +92,25 @@ class HotPlugMixin:
         )
         self._creature_tasks.append(task)
 
+        _emit_hotplug_transition(self, "add", creature=creature_cfg.name)
+        # Update meta["agents"] so resume_terrarium covers hot-plugged
+        # creatures (test_session_resume_hotplugged_agent).
+        store = getattr(self, "_session_store", None) or getattr(
+            self, "_pending_session_store", None
+        )
+        if store is not None:
+            try:
+                meta = store.load_meta()
+                agents = list(meta.get("agents", []) or [])
+                if creature_cfg.name not in agents:
+                    agents.append(creature_cfg.name)
+                    store.meta["agents"] = agents
+            except Exception as e:  # pragma: no cover — observability
+                logger.debug(
+                    "Failed to update meta['agents'] on hot-plug",
+                    error=str(e),
+                    exc_info=True,
+                )
         logger.info("Creature hot-added", creature=creature_cfg.name)
         return handle
 
@@ -102,6 +150,7 @@ class HotPlugMixin:
 
         # Remove from registry
         del self._creatures[name]
+        _emit_hotplug_transition(self, "remove", creature=name)
         logger.info("Creature removed", creature=name)
         return True
 
@@ -133,6 +182,7 @@ class HotPlugMixin:
             ChannelConfig(name=name, channel_type=channel_type, description=description)
         )
 
+        _emit_hotplug_transition(self, "add", channel=name)
         logger.info("Channel hot-added", channel=name, channel_type=channel_type)
         return channel
 
