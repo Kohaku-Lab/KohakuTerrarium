@@ -4,6 +4,7 @@ import sys
 from datetime import datetime
 
 from kohakuterrarium.modules.output.base import BaseOutputModule
+from kohakuterrarium.session.history import select_live_event_ids
 
 
 class CLIOutput(BaseOutputModule):
@@ -94,11 +95,15 @@ def _group_resume_events(events: list[dict]) -> list[dict]:
     if not events:
         return []
 
+    live_ids = select_live_event_ids(events)
     turns: list[dict] = []
     current: dict = {"user": "", "text": "", "tools": []}
 
     for evt in events:
         etype = evt.get("type", "")
+        eid = evt.get("event_id")
+        if isinstance(eid, int) and eid not in live_ids:
+            continue
         if etype == "user_input":
             if current["user"] or current["text"]:
                 turns.append(current)
@@ -113,7 +118,9 @@ def _group_resume_events(events: list[dict]) -> list[dict]:
                 "text": "",
                 "tools": [],
             }
-        elif etype == "text":
+        elif etype in ("text", "text_chunk"):
+            # ``text_chunk`` is Wave C's per-chunk streaming format;
+            # both render the same way in the resume preview.
             current["text"] += evt.get("content", "")
         elif etype == "tool_call":
             name = evt.get("name", "tool")

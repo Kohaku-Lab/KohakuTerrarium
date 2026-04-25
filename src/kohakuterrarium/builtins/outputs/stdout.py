@@ -8,6 +8,7 @@ import sys
 from typing import TextIO
 
 from kohakuterrarium.modules.output.base import BaseOutputModule
+from kohakuterrarium.session.history import select_live_event_ids
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -23,6 +24,55 @@ def _write_safe(stream: TextIO, text: str) -> None:
 
     encoding = getattr(stream, "encoding", None) or "utf-8"
     stream.write(text.encode(encoding, errors="replace").decode(encoding))
+
+
+def _group_resume_events(events: list[dict]) -> list[dict]:
+    """Group persisted events into condensed turns for the plain-stdout
+    resume preview. Honors Wave C ``text_chunk`` events and shows only
+    the latest branch of each turn (regen / edit+rerun siblings hidden
+    by default; the navigator surfaces them).
+    """
+    if not events:
+        return []
+    live_ids = select_live_event_ids(events)
+    turns: list[dict] = []
+    current: dict = {"user": "", "text": "", "tools": []}
+
+    for evt in events:
+        etype = evt.get("type", "")
+        eid = evt.get("event_id")
+        if isinstance(eid, int) and eid not in live_ids:
+            continue
+        if etype == "user_input":
+            if current["user"] or current["text"]:
+                turns.append(current)
+            current = {
+                "user": evt.get("content", ""),
+                "text": "",
+                "tools": [],
+            }
+        elif etype == "trigger_fired":
+            if current["user"] or current["text"]:
+                turns.append(current)
+            channel = evt.get("channel", "")
+            sender = evt.get("sender", "")
+            current = {
+                "user": f"[trigger: {channel} from {sender}]",
+                "text": "",
+                "tools": [],
+            }
+        elif etype in ("text", "text_chunk"):
+            # text_chunk is Wave C's per-chunk streaming format; both
+            # render the same way in the resume preview.
+            current["text"] += evt.get("content", "")
+        elif etype == "tool_call":
+            name = evt.get("name", "tool")
+            if name not in current["tools"]:
+                current["tools"].append(name)
+
+    if current["user"] or current["text"]:
+        turns.append(current)
+    return turns
 
 
 class StdoutOutput(BaseOutputModule):
@@ -127,40 +177,7 @@ class StdoutOutput(BaseOutputModule):
         if not events:
             return
 
-        # Group events into processing cycles (user_input -> processing_end)
-        turns: list[dict] = []
-        current: dict = {"user": "", "text": "", "tools": []}
-
-        for evt in events:
-            etype = evt.get("type", "")
-            if etype == "user_input":
-                if current["user"] or current["text"]:
-                    turns.append(current)
-                current = {
-                    "user": evt.get("content", ""),
-                    "text": "",
-                    "tools": [],
-                }
-            elif etype == "trigger_fired":
-                if current["user"] or current["text"]:
-                    turns.append(current)
-                channel = evt.get("channel", "")
-                sender = evt.get("sender", "")
-                current = {
-                    "user": f"[trigger: {channel} from {sender}]",
-                    "text": "",
-                    "tools": [],
-                }
-            elif etype == "text":
-                current["text"] += evt.get("content", "")
-            elif etype == "tool_call":
-                name = evt.get("name", "tool")
-                if name not in current["tools"]:
-                    current["tools"].append(name)
-
-        if current["user"] or current["text"]:
-            turns.append(current)
-
+        turns = _group_resume_events(events)
         if not turns:
             return
 

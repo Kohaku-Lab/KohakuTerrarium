@@ -20,6 +20,7 @@ from kohakuterrarium.builtins.cli_rich.live_region import render_to_ansi
 from kohakuterrarium.builtins.cli_rich.runtime import spawn
 from kohakuterrarium.builtins.cli_rich.theme import COLOR_USER, ICON_USER
 from kohakuterrarium.builtins.outputs.stdout import _write_safe
+from kohakuterrarium.session.history import select_live_event_ids
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -280,7 +281,14 @@ class SessionReplay:
         scroll.print(Text("--- resumed session history ---", style="dim"))
         scroll.print()
 
+        # Drop events on superseded branches (regen / edit+rerun) so
+        # the resume scrollback shows only the latest branch per turn.
+        live_ids = select_live_event_ids(events)
+
         for event in events:
+            eid = event.get("event_id")
+            if isinstance(eid, int) and eid not in live_ids:
+                continue
             self._handle_event(event)
 
         # Trailing flush in case the session ended mid-turn
@@ -318,7 +326,7 @@ class SessionReplay:
             self._text_buffer.clear()
             return
 
-        if etype == "text":
+        if etype in ("text", "text_chunk"):
             content = data.get("content", "")
             if content:
                 self._text_buffer.append(content)

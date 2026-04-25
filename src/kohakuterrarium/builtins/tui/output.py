@@ -17,6 +17,7 @@ from kohakuterrarium.builtins.tui.widgets import (
 )
 from kohakuterrarium.core.session import get_session
 from kohakuterrarium.modules.output.base import BaseOutputModule
+from kohakuterrarium.session.history import select_live_event_ids
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -437,11 +438,15 @@ def _format_args_preview(tool_name: str, args: dict) -> str:
 def _group_into_turns(events: list[dict]) -> list[dict]:
     """Group events into turns. Each turn has an ordered list of steps
     that preserves the interleaving of text and tool calls."""
+    live_ids = select_live_event_ids(events)
     turns: list[dict] = []
     current: dict | None = None
 
     for evt in events:
         etype = evt.get("type", "")
+        eid = evt.get("event_id")
+        if isinstance(eid, int) and eid not in live_ids:
+            continue
         if etype == "user_input":
             if current:
                 turns.append(current)
@@ -468,8 +473,10 @@ def _group_into_turns(events: list[dict]) -> list[dict]:
             if target:
                 target["steps"].append((etype, evt))
         elif current is not None:
-            if etype == "text":
-                # Merge consecutive text into one step
+            if etype in ("text", "text_chunk"):
+                # Merge consecutive text into one step. ``text_chunk``
+                # events are Wave C's per-chunk streaming format; replay
+                # treats them identically to legacy ``text`` events.
                 if current["steps"] and current["steps"][-1][0] == "text":
                     current["steps"][-1] = (
                         "text",
