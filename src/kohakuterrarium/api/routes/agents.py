@@ -205,8 +205,12 @@ async def agent_history(agent_id: str, manager=Depends(get_manager)):
     pre-aggregated turn→branches map.
     """
     try:
+        session = manager._agents.get(agent_id)
         history = manager.agent_get_history(agent_id)
-        return {"agent_id": agent_id, "events": history}
+        is_processing = False
+        if session is not None:
+            is_processing = bool(getattr(session.agent, "_processing_task", None))
+        return {"agent_id": agent_id, "events": history, "is_processing": is_processing}
     except ValueError as e:
         raise HTTPException(404, str(e))
 

@@ -109,6 +109,7 @@ async def terrarium_history(
                     }
                     for m in messages
                 ],
+                "is_processing": False,
             }
 
         # Agent/creature history
@@ -135,6 +136,7 @@ async def terrarium_history(
             "target": target,
             "messages": agent.conversation_history,
             "events": events,
+            "is_processing": bool(getattr(agent, "_processing_task", None)),
         }
     except ValueError as e:
         raise HTTPException(404, str(e))

@@ -94,6 +94,46 @@ describe("chat store — interrupted task handling", () => {
   })
 })
 
+describe("chat store — refresh/reconnect running state", () => {
+  it("restores running parts and processing flag from history payload", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = {
+      main: [
+        {
+          id: "m1",
+          role: "assistant",
+          parts: [
+            {
+              type: "tool",
+              id: "tc_1",
+              jobId: "job_1",
+              name: "bash",
+              kind: "tool",
+              args: { command: "sleep 10" },
+              status: "interrupted",
+              result: "",
+              children: [],
+            },
+          ],
+        },
+      ],
+    }
+
+    chat._restoreRunningState(
+      "main",
+      {
+        job_1: { name: "bash", type: "tool", startedAt: 123 },
+      },
+      true,
+    )
+
+    expect(chat.processingByTab.main).toBe(true)
+    expect(chat.runningJobs.job_1).toMatchObject({ name: "bash", type: "tool" })
+    expect(chat.messagesByTab.main[0].parts[0].status).toBe("running")
+    expect(chat.messagesByTab.main[0].parts[0].startedAt).toBe(123)
+  })
+})
+
 describe("chat store — compact round handling", () => {
   it("replays compact start/complete as a single merged compact message", () => {
     const { messages: replayed } = _replayEvents(

@@ -175,6 +175,7 @@ class AgentSession:
             "max_context": max_context,
             "compact_threshold": compact_threshold,
             "running": self._running and self.agent.is_running,
+            "is_processing": bool(getattr(self.agent, "_processing_task", None)),
             "tools": self.agent.tools,
             "subagents": self.agent.subagents,
             "pwd": pwd,

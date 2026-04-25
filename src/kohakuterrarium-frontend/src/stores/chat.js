@@ -1220,7 +1220,7 @@ export const useChatStore = defineStore("chat", {
           const { messages: msgs, pendingJobs } = _replayEvents(messages, events, view)
           this.messagesByTab[target] = msgs
           this._restoreTokenUsage(target, events)
-          this._restoreRunningState(pendingJobs)
+          this._restoreRunningState(target, pendingJobs, data.is_processing)
         } else if (messages?.length) {
           this.messagesByTab[target] = _convertHistory(messages)
         }
@@ -1313,10 +1313,6 @@ export const useChatStore = defineStore("chat", {
       }
       ws.onclose = () => {
         if (generation !== this._instanceGeneration || ws !== this._ws) return
-        // Clear processing for every tab — the WS is gone so we can't
-        // be streaming anywhere. Each tab gets its flag reset on
-        // reconnect via processing_start or the text-recovery path.
-        this.processingByTab = {}
         this.wsStatus = "reconnecting"
         // Exponential backoff, capped at 10s.
         const delay = this._reconnectDelay
@@ -1356,7 +1352,7 @@ export const useChatStore = defineStore("chat", {
           const { messages: msgs, pendingJobs } = _replayEvents(messages, events, view)
           this.messagesByTab[tabKey] = msgs
           this._restoreTokenUsage(tabKey, events)
-          this._restoreRunningState(pendingJobs)
+          this._restoreRunningState(tabKey, pendingJobs, data.is_processing)
         } else if (messages?.length) {
           this.messagesByTab[tabKey] = _convertHistory(messages)
         }
@@ -1369,12 +1365,31 @@ export const useChatStore = defineStore("chat", {
     },
 
     /** Restore running jobs from replay result. */
-    _restoreRunningState(pendingJobs) {
+    _restoreRunningState(tabKey, pendingJobs, isProcessing = false) {
       for (const [jobId, job] of Object.entries(pendingJobs)) {
         this.runningJobs[jobId] = job
       }
+      if (tabKey) {
+        this.processingByTab[tabKey] = !!isProcessing
+        this._rehydrateRunningParts(tabKey, pendingJobs)
+      }
       if (Object.keys(pendingJobs).length > 0) {
         this._ensureJobTimer()
+      }
+    },
+
+    _rehydrateRunningParts(tabKey, pendingJobs) {
+      const msgs = this.messagesByTab[tabKey]
+      if (!msgs) return
+      const pendingIds = new Set(Object.keys(pendingJobs))
+      for (const msg of msgs) {
+        for (const part of msg.parts || []) {
+          if (part.type !== "tool") continue
+          const partJobId = part.jobId || part.id
+          if (!pendingIds.has(partJobId)) continue
+          part.status = "running"
+          if (!part.startedAt) part.startedAt = pendingJobs[partJobId]?.startedAt || Date.now()
+        }
       }
     },
 
