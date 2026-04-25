@@ -12,6 +12,8 @@ novel_out.txt
 .briefcase/
 .kohaku-docs-build/
 poc/
+.coverage
+.coverage*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -78,3 +80,4 @@ src/kohakuterrarium-frontend/node_modules/
 src/kohakuterrarium/web_dist/
 
 kt-biome/
+kt-template/
