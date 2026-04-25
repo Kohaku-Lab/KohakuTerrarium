@@ -225,6 +225,49 @@ class BaseTool:
     is_provider_native: bool = False
     provider_support: frozenset[str] = frozenset()
 
+    @classmethod
+    def provider_native_option_schema(cls) -> dict[str, dict[str, Any]]:
+        """Declare the user-tunable options for this provider-native tool.
+
+        UIs (Studio, ``kt config``, the Rich settings dialog, the
+        ``/settings`` slash command) read this schema to render a generic
+        form. The runtime merges values from this schema into the
+        wire-format spec via :meth:`provider_native_options`.
+
+        Schema shape per entry::
+
+            "<option>": {
+                "type": "string" | "int" | "float" | "bool" | "enum",
+                "default": <value>,        # value sent when nothing is set
+                "label": "...",            # optional UI label
+                "description": "...",      # optional one-liner
+
+                # Strict enum (UI must render as dropdown, no custom):
+                "values": [...],          # required when type == "enum"
+
+                # Free-form with hints (UI renders combo box / autocomplete
+                # — values not in the list are still accepted):
+                "suggestions": [...],     # optional for non-enum types
+
+                # Numeric bounds (optional, type == "int" | "float"):
+                "min": <number>,
+                "max": <number>,
+                "step": <number>,
+
+                # Free-form input hint:
+                "placeholder": "...",
+            }
+
+        Use ``enum`` only when the provider's wire protocol actually
+        rejects anything outside the listed values. Otherwise prefer
+        ``string`` / ``int`` / ``float`` / ``bool`` with ``suggestions``
+        so users can override with custom values.
+
+        Default returns an empty dict — non-native tools and tools with
+        no user-visible knobs simply omit the override.
+        """
+        return {}
+
     # Concurrency-safety flag used by the executor to partition parallel
     # tool batches (see Cluster 5 / G.1 of the extension-point decisions).
     # Tools flagged ``False`` acquire a shared serial lock, so at most

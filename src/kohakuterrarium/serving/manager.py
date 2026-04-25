@@ -190,6 +190,60 @@ class KohakuManager:
             raise ValueError(f"Agent not found: {agent_id}")
         return session.agent.switch_model(profile_name)
 
+    def agent_native_tool_options(self, agent_id: str) -> dict[str, dict]:
+        """Return the agent's session-wise provider-native tool overrides."""
+        session = self._agents.get(agent_id)
+        if not session:
+            raise ValueError(f"Agent not found: {agent_id}")
+        helper = getattr(session.agent, "native_tool_options", None)
+        if helper is None:
+            return {}
+        return helper.list()
+
+    def agent_set_native_tool_options(
+        self, agent_id: str, tool_name: str, values: dict
+    ) -> dict:
+        """Replace the override dict for one provider-native tool.
+
+        See :class:`~kohakuterrarium.core.agent_native_tools.NativeToolOptions`.
+        """
+        session = self._agents.get(agent_id)
+        if not session:
+            raise ValueError(f"Agent not found: {agent_id}")
+        helper = getattr(session.agent, "native_tool_options", None)
+        if helper is None:
+            raise ValueError(f"Agent {agent_id!r} has no native_tool_options helper")
+        return helper.set(tool_name, values or {})
+
+    def agent_native_tool_inventory(self, agent_id: str) -> list[dict]:
+        """List provider-native tools registered on this agent + their schemas."""
+        session = self._agents.get(agent_id)
+        if not session:
+            raise ValueError(f"Agent not found: {agent_id}")
+        registry = session.agent.registry
+        helper = getattr(session.agent, "native_tool_options", None)
+        out: list[dict] = []
+        for name in registry.list_tools():
+            tool = registry.get_tool(name)
+            if tool is None or not getattr(tool, "is_provider_native", False):
+                continue
+            schema_fn = getattr(type(tool), "provider_native_option_schema", None)
+            try:
+                schema = schema_fn() if callable(schema_fn) else {}
+            except Exception:
+                schema = {}
+            values = helper.get(name) if helper else {}
+            out.append(
+                {
+                    "name": name,
+                    "description": getattr(tool, "description", "") or "",
+                    "option_schema": schema,
+                    "values": values,
+                }
+            )
+        out.sort(key=lambda entry: entry["name"])
+        return out
+
     async def agent_execute_command(
         self, agent_id: str, command: str, args: str = ""
     ) -> dict:

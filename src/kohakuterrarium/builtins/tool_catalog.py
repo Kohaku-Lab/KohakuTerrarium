@@ -131,12 +131,40 @@ def list_provider_native_tools() -> list[dict[str, object]]:
             description = getattr(instance, "description", "") or ""
         except Exception:
             description = ""
+        schema_fn = getattr(tool_cls, "provider_native_option_schema", None)
+        try:
+            option_schema = schema_fn() if callable(schema_fn) else {}
+        except Exception:
+            option_schema = {}
         out.append(
             {
                 "name": name,
                 "provider_support": sorted(support),
                 "description": description,
+                "option_schema": option_schema,
             }
         )
     out.sort(key=lambda entry: entry["name"])
     return out
+
+
+def get_provider_native_option_schema(name: str) -> dict[str, dict[str, object]]:
+    """Return the option schema for a single provider-native tool.
+
+    Returns an empty dict if the tool is unknown or not provider-native.
+    Used by the bootstrap merge step and the slash-command/CLI/TUI
+    flows when they need to validate or render a single tool's form.
+    """
+    tool_cls = _BUILTIN_TOOLS.get(name)
+    if tool_cls is None and _DEFERRED_LOADERS:
+        _run_deferred_loaders()
+        tool_cls = _BUILTIN_TOOLS.get(name)
+    if tool_cls is None or not getattr(tool_cls, "is_provider_native", False):
+        return {}
+    schema_fn = getattr(tool_cls, "provider_native_option_schema", None)
+    if not callable(schema_fn):
+        return {}
+    try:
+        return schema_fn() or {}
+    except Exception:
+        return {}

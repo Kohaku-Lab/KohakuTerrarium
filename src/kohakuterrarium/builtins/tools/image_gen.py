@@ -56,6 +56,57 @@ class ImageGenTool(BaseTool):
     is_provider_native = True
     provider_support = frozenset({"codex"})
 
+    @classmethod
+    def provider_native_option_schema(cls) -> dict[str, dict[str, Any]]:
+        return {
+            "output_format": {
+                "type": "enum",
+                "values": ["png", "webp", "jpeg"],
+                "default": "png",
+                "label": "Output format",
+                "description": "Image file format the provider returns.",
+            },
+            "size": {
+                # Free-form: newer image models accept sizes the older
+                # docs don't list (e.g. 2048x2048 on gpt-image-2). The
+                # suggestions are common values; users may type any
+                # WIDTHxHEIGHT or "auto".
+                "type": "string",
+                "suggestions": [
+                    "auto",
+                    "1024x1024",
+                    "1024x1536",
+                    "1536x1024",
+                    "2048x2048",
+                ],
+                "default": "auto",
+                "placeholder": "auto or WIDTHxHEIGHT",
+                "label": "Size",
+                "description": "Output dimensions; auto lets the provider choose.",
+            },
+            "quality": {
+                "type": "enum",
+                "values": ["auto", "low", "medium", "high"],
+                "default": "auto",
+                "label": "Quality",
+                "description": "Render quality; higher costs more.",
+            },
+            "background": {
+                "type": "enum",
+                "values": ["auto", "transparent", "opaque"],
+                "default": "auto",
+                "label": "Background",
+                "description": "Transparent only applies to PNG/WebP.",
+            },
+            "action": {
+                "type": "enum",
+                "values": ["auto", "generate", "edit"],
+                "default": "auto",
+                "label": "Action",
+                "description": "Force generate vs edit; auto routes by attached input image.",
+            },
+        }
+
     def __init__(
         self,
         *,
@@ -67,21 +118,41 @@ class ImageGenTool(BaseTool):
         config: Any = None,
     ) -> None:
         super().__init__(config=config)
-        # The bootstrap path hands knobs through ``ToolConfig.extra``
-        # (non-recognised YAML keys go there). Explicit kwargs take
-        # precedence so programmatic construction stays readable.
-        extra = getattr(self.config, "extra", {}) or {}
+        # Capture explicit kwargs separately so a later
+        # :meth:`refresh_native_options` re-read of ``ToolConfig.extra``
+        # (used when the bootstrap merges profile-level options after
+        # construction) keeps honoring them as the highest-priority
+        # source.
+        self._explicit_kwargs: dict[str, Any] = {
+            "output_format": output_format,
+            "action": action,
+            "size": size,
+            "quality": quality,
+            "background": background,
+        }
+        self.refresh_native_options()
 
-        def _pick(kwarg: Any, key: str) -> Any:
-            if kwarg is not None:
-                return kwarg
+    def refresh_native_options(self) -> None:
+        """Re-read ``ToolConfig.extra`` into instance fields.
+
+        Called by the bootstrap layer after profile-level options are
+        merged into ``self.config.extra``. The merge order is::
+
+            explicit kwargs > config.extra > schema defaults > "png"
+        """
+        extra = getattr(self.config, "extra", {}) or {}
+        kwargs = self._explicit_kwargs
+
+        def _pick(key: str) -> Any:
+            if kwargs.get(key) is not None:
+                return kwargs[key]
             return extra.get(key)
 
-        self.output_format = _pick(output_format, "output_format") or "png"
-        self.action = _pick(action, "action")
-        self.size = _pick(size, "size")
-        self.quality = _pick(quality, "quality")
-        self.background = _pick(background, "background")
+        self.output_format = _pick("output_format") or "png"
+        self.action = _pick("action")
+        self.size = _pick("size")
+        self.quality = _pick("quality")
+        self.background = _pick("background")
 
     @property
     def tool_name(self) -> str:

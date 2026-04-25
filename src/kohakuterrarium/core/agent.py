@@ -17,6 +17,7 @@ from kohakuterrarium.bootstrap.plugins import init_plugins
 from kohakuterrarium.core.agent_handlers import AgentHandlersMixin
 from kohakuterrarium.core.agent_messages import AgentMessagesMixin
 from kohakuterrarium.core.agent_model import AgentModelMixin
+from kohakuterrarium.core.agent_native_tools import NativeToolOptions
 from kohakuterrarium.core.agent_observability import (
     build_session_info as _build_session_info,
     init_branch_state,
@@ -150,6 +151,7 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin, AgentModelMi
 
         self.compact_manager: Any = None
         self.plugins: Any = None  # PluginManager | None
+        self.native_tool_options = NativeToolOptions(self)
 
         init_branch_state(self)
 

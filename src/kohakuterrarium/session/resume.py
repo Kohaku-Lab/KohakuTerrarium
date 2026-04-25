@@ -256,6 +256,19 @@ def resume_agent(
             agent.session.scratchpad.set(k, v)
         logger.info("Scratchpad restored", agent=agent_name, keys=len(pad_data))
 
+    # Re-apply session-wise provider-native tool option overrides
+    # captured in the scratchpad (e.g. ``image_gen`` size/quality).
+    native_tool_options = getattr(agent, "native_tool_options", None)
+    if native_tool_options is not None:
+        try:
+            native_tool_options.apply()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "Failed to reapply native tool options",
+                agent=agent_name,
+                error=str(exc),
+            )
+
     # Load events for output replay on resume
     resume_events = store.get_resumable_events(agent_name)
     if resume_events:

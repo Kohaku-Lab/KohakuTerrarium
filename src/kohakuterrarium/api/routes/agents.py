@@ -86,6 +86,50 @@ async def stop_agent(agent_id: str, manager=Depends(get_manager)):
         raise HTTPException(404, str(e))
 
 
+class NativeToolOptionsRequest(BaseModel):
+    """Partial update for one provider-native tool's option values.
+
+    Body shape: ``{"tool": "image_gen", "values": {"size": "...", ...}}``.
+    Empty / missing values clear the override (tool reverts to its
+    constructor defaults).
+    """
+
+    tool: str
+    values: dict[str, Any] = {}
+
+
+@router.get("/{agent_id}/native-tool-options")
+async def get_agent_native_tool_options(agent_id: str, manager=Depends(get_manager)):
+    """Return the agent's session-wise provider-native tool overrides.
+
+    Combines the registered tools (with their option schema) and the
+    user-set override values. Frontends render this directly into a
+    schema-driven form.
+    """
+    try:
+        return {
+            "tools": manager.agent_native_tool_inventory(agent_id),
+        }
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.put("/{agent_id}/native-tool-options")
+async def set_agent_native_tool_options(
+    agent_id: str,
+    req: NativeToolOptionsRequest,
+    manager=Depends(get_manager),
+):
+    """Replace the override dict for one provider-native tool."""
+    try:
+        applied = manager.agent_set_native_tool_options(
+            agent_id, req.tool, req.values or {}
+        )
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    return {"status": "saved", "tool": req.tool, "values": applied}
+
+
 @router.post("/{agent_id}/interrupt")
 async def interrupt_agent(agent_id: str, manager=Depends(get_manager)):
     """Interrupt the agent's current processing. Agent stays alive."""
