@@ -223,6 +223,9 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             activity_meta["total_tokens"] = getattr(result, "total_tokens", 0)
             activity_meta["prompt_tokens"] = getattr(result, "prompt_tokens", 0)
             activity_meta["completion_tokens"] = getattr(result, "completion_tokens", 0)
+            # Wave B audit finding A: surface sub-agent cached_tokens to
+            # the parent's session output.
+            activity_meta["cached_tokens"] = getattr(result, "cached_tokens", 0)
             activity_meta["tools_used"] = getattr(result, "metadata", {}).get(
                 "tools_used", []
             )
@@ -304,6 +307,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                     "total_tokens": getattr(result, "total_tokens", 0),
                     "prompt_tokens": getattr(result, "prompt_tokens", 0),
                     "completion_tokens": getattr(result, "completion_tokens", 0),
+                    "cached_tokens": getattr(result, "cached_tokens", 0),
                     "interrupted": bool(getattr(result, "interrupted", False)),
                     "cancelled": bool(getattr(result, "cancelled", False)),
                 }
@@ -373,6 +377,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                 metadata["total_tokens"] = getattr(result, "total_tokens", 0)
                 metadata["prompt_tokens"] = getattr(result, "prompt_tokens", 0)
                 metadata["completion_tokens"] = getattr(result, "completion_tokens", 0)
+                metadata["cached_tokens"] = getattr(result, "cached_tokens", 0)
                 metadata["tools_used"] = getattr(result, "metadata", {}).get(
                     "tools_used", []
                 )
@@ -407,6 +412,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             metadata["total_tokens"] = getattr(result, "total_tokens", 0)
             metadata["prompt_tokens"] = getattr(result, "prompt_tokens", 0)
             metadata["completion_tokens"] = getattr(result, "completion_tokens", 0)
+            metadata["cached_tokens"] = getattr(result, "cached_tokens", 0)
             metadata["tools_used"] = getattr(result, "metadata", {}).get(
                 "tools_used", []
             )

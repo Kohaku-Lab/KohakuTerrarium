@@ -81,6 +81,11 @@ class SubAgentResult:
     total_tokens: int = 0  # Total tokens used across all turns
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    # Prompt-cache hit tokens (Wave B audit finding A). Populated from
+    # the provider's ``last_usage["cached_tokens"]`` by SubAgent and
+    # surfaced through the parent's ``subagent_done`` activity so the
+    # session store can record it.
+    cached_tokens: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def truncated(self, max_chars: int = 2000) -> str:

@@ -82,6 +82,9 @@ class SubAgent:
         self._total_tokens = 0
         self._prompt_tokens = 0
         self._completion_tokens = 0
+        # Wave B: track prompt-cache hits so the parent's
+        # ``subagent_done`` event can record them (audit finding A).
+        self._cached_tokens = 0
 
         # Resolve tool call format for the parser
         self._is_native = tool_format == "native"
@@ -241,6 +244,7 @@ class SubAgent:
                     total_tokens=self._total_tokens,
                     prompt_tokens=self._prompt_tokens,
                     completion_tokens=self._completion_tokens,
+                    cached_tokens=self._cached_tokens,
                     metadata={"tools_used": tools_used},
                 )
             # Charge one unit against the shared iteration budget before
@@ -272,6 +276,7 @@ class SubAgent:
                     total_tokens=self._total_tokens,
                     prompt_tokens=self._prompt_tokens,
                     completion_tokens=self._completion_tokens,
+                    cached_tokens=self._cached_tokens,
                     metadata={"tools_used": tools_used},
                 )
 
@@ -396,6 +401,12 @@ class SubAgent:
             self._prompt_tokens += usage.get("prompt_tokens", 0)
             self._completion_tokens += usage.get("completion_tokens", 0)
             self._total_tokens += usage.get("total_tokens", 0)
+            # Wave B audit finding A: provider fills
+            # ``last_usage["cached_tokens"]`` (see llm/openai.py:242
+            # and codex_provider.py:555), but the sub-agent used to
+            # drop it. Track it so the parent's ``subagent_done``
+            # event carries the real cached-tokens count.
+            self._cached_tokens += usage.get("cached_tokens", 0)
         # Emit running token totals to parent
         if self.on_tool_activity and self._total_tokens > 0:
             self.on_tool_activity(
@@ -406,6 +417,7 @@ class SubAgent:
                     "prompt_tokens": self._prompt_tokens,
                     "completion_tokens": self._completion_tokens,
                     "total_tokens": self._total_tokens,
+                    "cached_tokens": self._cached_tokens,
                 },
             )
 
@@ -524,6 +536,7 @@ class SubAgent:
             total_tokens=self._total_tokens,
             prompt_tokens=self._prompt_tokens,
             completion_tokens=self._completion_tokens,
+            cached_tokens=self._cached_tokens,
             metadata={"tools_used": tools_used},
         )
 
@@ -625,6 +638,7 @@ class SubAgent:
                 total_tokens=self._total_tokens,
                 prompt_tokens=self._prompt_tokens,
                 completion_tokens=self._completion_tokens,
+                cached_tokens=self._cached_tokens,
                 metadata={
                     "tools_used": tools_used,
                     "budget_exhausted": True,
