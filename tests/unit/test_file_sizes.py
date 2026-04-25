@@ -57,6 +57,18 @@ ALLOWLIST_600 = {
     # already extracted to agent_tools/agent_pre_dispatch/skill-hints;
     # the remaining code is a single cohesive lifecycle.
     "core/agent_handlers.py",
+    # Session store facade — owns every KVault table + uniform per-table
+    # getters/setters (meta, state, events, channels, subagents, jobs,
+    # conversation, turn_rollup, fts). Heavy lifting for counters, fork,
+    # rollups already extracted to sibling modules (store_counters,
+    # store_fork, rollup); what remains is the cohesive table surface.
+    "session/store.py",
+    # Session output module — one cohesive OutputModule that routes ~18
+    # distinct activity types (tool/subagent/token/compact/plugin-hook
+    # /cache/scratchpad/attach) to ``_record``. Handlers are short and
+    # uniform; splitting them across files would fragment a single
+    # dispatch table for no readability win.
+    "session/output.py",
 }
 
 
