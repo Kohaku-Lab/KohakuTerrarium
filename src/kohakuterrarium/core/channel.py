@@ -103,13 +103,30 @@ class SubAgentChannel(BaseChannel):
         return "queue"
 
     async def send(self, message: ChannelMessage) -> None:
-        """Send a message to the channel."""
+        """Send a message to the channel.
+
+        Emits a Wave B ``channel_backpressure`` callback (via
+        :meth:`on_send` subscribers) if the bounded queue is full at
+        call time — tells the session store the producer blocked.
+        """
         message.channel = self.name
         self.history.append(message)
         if len(self.history) > self._max_history:
             self.history = self.history[-self._max_history :]
         self._fire_on_send(message)
-        await self._queue.put(message)
+        # Bounded queue back-pressure — observability only.
+        if self._queue.maxsize and self._queue.full():
+            wait_start = asyncio.get_event_loop().time()
+            await self._queue.put(message)
+            wait_ms = (asyncio.get_event_loop().time() - wait_start) * 1000.0
+            logger.info(
+                "channel_backpressure",
+                channel=self.name,
+                wait_ms=round(wait_ms, 2),
+                sender=message.sender,
+            )
+        else:
+            await self._queue.put(message)
         logger.debug(
             "Message sent on channel '%s' from '%s'",
             self.name,

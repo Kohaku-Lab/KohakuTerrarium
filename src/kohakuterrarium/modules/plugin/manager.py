@@ -12,6 +12,7 @@ function unchanged — zero overhead.
 
 import functools
 import inspect
+import time
 from typing import Any, Callable
 
 from kohakuterrarium.modules.plugin.base import (
@@ -54,6 +55,36 @@ class PluginManager:
         self._disabled: set[str] = set()
         self._needs_load: set[str] = set()  # Plugins enabled at runtime needing on_load
         self._load_context: PluginContext | None = None  # Saved for runtime enable
+        # Wave B additive observability: emit ``plugin_hook_timing``
+        # around every hook invocation. Wired by the agent during
+        # plugin manager setup; staying ``None`` is the zero-overhead
+        # path for tests and agents without a session store.
+        self._on_hook_timing: Callable[[str, str, float, bool], None] | None = None
+
+    def set_hook_timing_callback(
+        self, cb: Callable[[str, str, float, bool], None] | None
+    ) -> None:
+        """Attach a ``plugin_hook_timing`` observer.
+
+        Signature: ``cb(hook_name, plugin_name, duration_ms, blocked)``.
+        Called fire-and-forget after every plugin hook / callback /
+        vetoable-callback invocation. ``blocked`` is True for a
+        ``PluginBlockError`` raised by a pre-hook.
+        """
+        self._on_hook_timing = cb
+
+    def _emit_hook_timing(
+        self, hook: str, plugin: BasePlugin, start: float, blocked: bool
+    ) -> None:
+        """Call the hook-timing observer if wired. Pure observability."""
+        cb = self._on_hook_timing
+        if cb is None:
+            return
+        duration_ms = (time.perf_counter() - start) * 1000.0
+        try:
+            cb(hook, getattr(plugin, "name", "?"), duration_ms, blocked)
+        except Exception as e:  # pragma: no cover — defensive
+            logger.debug("plugin_hook_timing emit failed", error=str(e), exc_info=True)
 
     def __bool__(self) -> bool:
         return len(self._plugins) > 0
@@ -294,6 +325,8 @@ class PluginManager:
                 for plugin in active:
                     if not _has_override(plugin, pre_hook):
                         continue
+                    start = time.perf_counter()
+                    blocked = False
                     try:
                         modified = await _call_method(
                             plugin, pre_hook, first_arg, **hook_kw
@@ -301,6 +334,7 @@ class PluginManager:
                         if modified is not None:
                             first_arg = modified
                     except PluginBlockError:
+                        blocked = True
                         raise
                     except Exception as e:
                         logger.warning(
@@ -310,6 +344,8 @@ class PluginManager:
                             error=str(e),
                             exc_info=True,
                         )
+                    finally:
+                        manager._emit_hook_timing(pre_hook, plugin, start, blocked)
 
             # Call original
             result = await original(first_arg, *args, **kwargs)
@@ -322,6 +358,7 @@ class PluginManager:
                 for plugin in active:
                     if not _has_override(plugin, post_hook):
                         continue
+                    start = time.perf_counter()
                     try:
                         modified = await _call_method(
                             plugin, post_hook, result, **post_kwargs
@@ -335,6 +372,10 @@ class PluginManager:
                             hook=post_hook,
                             error=str(e),
                             exc_info=True,
+                        )
+                    finally:
+                        manager._emit_hook_timing(
+                            post_hook, plugin, start, blocked=False
                         )
 
             return result
@@ -353,11 +394,14 @@ class PluginManager:
         for plugin in self._applicable_plugins():
             if not _has_override(plugin, hook_name):
                 continue
+            start = time.perf_counter()
+            blocked = False
             try:
                 modified = await _call_method(plugin, hook_name, value, **kwargs)
                 if modified is not None:
                     value = modified
             except PluginBlockError:
+                blocked = True
                 raise
             except Exception as e:
                 logger.warning(
@@ -367,6 +411,8 @@ class PluginManager:
                     error=str(e),
                     exc_info=True,
                 )
+            finally:
+                self._emit_hook_timing(hook_name, plugin, start, blocked)
         return value
 
     # ── Callbacks (fire-and-forget) ──
@@ -378,6 +424,7 @@ class PluginManager:
         for plugin in self._applicable_plugins():
             if not hasattr(plugin, callback_name):
                 continue
+            start = time.perf_counter()
             try:
                 await _call_method(plugin, callback_name, **kwargs)
             except Exception as e:
@@ -388,6 +435,8 @@ class PluginManager:
                     error=str(e),
                     exc_info=True,
                 )
+            finally:
+                self._emit_hook_timing(callback_name, plugin, start, blocked=False)
 
     # ── Vetoable callbacks ──
 

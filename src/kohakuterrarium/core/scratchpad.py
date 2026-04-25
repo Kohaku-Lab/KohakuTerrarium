@@ -5,6 +5,8 @@ Different from memory (file-based, cross-session, agent-managed).
 Scratchpad is session-scoped, framework-managed, structured, and cheap.
 """
 
+from typing import Callable
+
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -24,12 +26,34 @@ class Scratchpad:
 
     def __init__(self) -> None:
         self._data: dict[str, str] = {}
+        # Wave B additive ``scratchpad_write`` event: fire-and-forget
+        # observer. Signature: ``cb(key, action, size_bytes)``.
+        # ``action`` is ``"set"`` / ``"delete"``. Staying ``None`` is
+        # the zero-overhead default.
+        self._on_write: Callable[[str, str, int], None] | None = None
         logger.debug("Scratchpad initialized")
+
+    def set_write_observer(self, cb: Callable[[str, str, int], None] | None) -> None:
+        """Attach a fire-and-forget observer. See ``_on_write`` above."""
+        self._on_write = cb
+
+    def _emit(self, key: str, action: str, size_bytes: int) -> None:
+        """Fire the write observer if wired; swallow errors defensively."""
+        cb = self._on_write
+        if cb is None:
+            return
+        try:
+            cb(key, action, size_bytes)
+        except Exception as e:  # pragma: no cover — defensive
+            logger.debug("scratchpad observer failed", error=str(e), exc_info=True)
 
     def set(self, key: str, value: str) -> None:
         """Set a key-value pair."""
         self._data[key] = value
         logger.debug("Scratchpad set", key=key)
+        self._emit(
+            key, "set", len(value.encode("utf-8")) if isinstance(value, str) else 0
+        )
 
     def get(self, key: str) -> str | None:
         """Get value by key. Returns None if not found."""
@@ -40,6 +64,7 @@ class Scratchpad:
         if key in self._data:
             del self._data[key]
             logger.debug("Scratchpad deleted", key=key)
+            self._emit(key, "delete", 0)
             return True
         return False
 

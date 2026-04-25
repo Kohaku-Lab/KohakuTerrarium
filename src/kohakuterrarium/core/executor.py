@@ -93,6 +93,33 @@ class Executor:
         self._tools[tool.tool_name] = tool
         logger.debug("Registered tool", tool_name=tool.tool_name)
 
+    def _emit_tool_wait(self, tool_name: str, wait_ms: float, reason: str) -> None:
+        """Emit a Wave B ``tool_wait`` activity to the agent's output router.
+
+        Fires only when a tool call blocked on a concurrency-unsafe lock
+        so viewers (session store, Studio) can surface serialization
+        hotspots. Missing agent / router is tolerated — this is pure
+        observability.
+        """
+        agent = self._agent
+        if agent is None:
+            return
+        router = getattr(agent, "output_router", None)
+        if router is None:
+            return
+        try:
+            router.notify_activity(
+                "tool_wait",
+                f"[{tool_name}] waited {wait_ms:.1f}ms on {reason}",
+                metadata={
+                    "tool": tool_name,
+                    "wait_ms": wait_ms,
+                    "reason": reason,
+                },
+            )
+        except Exception as e:  # pragma: no cover — pure observability
+            logger.debug("tool_wait emit failed", error=str(e), exc_info=True)
+
     def get_tool(self, tool_name: str) -> Tool | None:
         """Get a registered tool by name."""
         return self._tools.get(tool_name)
@@ -213,7 +240,14 @@ class Executor:
             if needs_lock:
                 if self._serial_lock is None:
                     self._serial_lock = asyncio.Lock()
+                wait_start = asyncio.get_event_loop().time()
                 async with self._serial_lock:
+                    # Wave B additive ``tool_wait`` event: emit only when
+                    # the caller actually blocked (>1ms). Keeps noise
+                    # down for the common uncontended case.
+                    wait_ms = (asyncio.get_event_loop().time() - wait_start) * 1000.0
+                    if wait_ms >= 1.0:
+                        self._emit_tool_wait(tool.tool_name, wait_ms, "serial_lock")
                     result = await tool.execute(args, context=context)
             else:
                 result = await tool.execute(args, context=context)

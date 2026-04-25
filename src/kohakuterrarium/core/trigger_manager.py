@@ -7,6 +7,7 @@ agent's trigger_manager.
 """
 
 import asyncio
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Coroutine
@@ -16,6 +17,11 @@ from kohakuterrarium.modules.trigger.base import BaseTrigger
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+# Wave B: drift threshold (seconds). Trigger firings later than this
+# get a ``schedule_drift`` event so session readers can see scheduler
+# backlog. Kept small so real-time triggers flag promptly.
+SCHEDULE_DRIFT_THRESHOLD_S = 1.0
 
 
 @dataclass
@@ -221,6 +227,10 @@ class TriggerManager:
                         trigger_id=trigger_id,
                         event_type=event.type,
                     )
+                    # Wave B ``schedule_drift`` — compares the event's
+                    # scheduled timestamp (if set) against now. Only
+                    # emits when drift crosses the threshold.
+                    self._maybe_emit_schedule_drift(trigger_id, trigger, event)
                     if self.on_trigger_fired:
                         try:
                             self.on_trigger_fired(trigger_id, event)
@@ -240,3 +250,40 @@ class TriggerManager:
                     error=str(e),
                 )
                 await asyncio.sleep(1.0)
+
+    def _maybe_emit_schedule_drift(
+        self, trigger_id: str, trigger: BaseTrigger, event: Any
+    ) -> None:
+        """Record Wave B ``schedule_drift`` when the trigger fired late.
+
+        The event's ``scheduled_at`` timestamp (if set by the trigger)
+        is compared to ``time.time()``. If the delta exceeds
+        :data:`SCHEDULE_DRIFT_THRESHOLD_S`, a store event is written.
+        Pure observability — missing store / missing scheduled_at is
+        fine.
+        """
+        scheduled = getattr(event, "scheduled_at", None)
+        if scheduled is None:
+            scheduled = getattr(event, "context", None)
+            if isinstance(scheduled, dict):
+                scheduled = scheduled.get("scheduled_at")
+        if not isinstance(scheduled, (int, float)):
+            return
+        drift_s = time.time() - float(scheduled)
+        if drift_s < SCHEDULE_DRIFT_THRESHOLD_S:
+            return
+        store = self._session_store
+        if store is None:
+            return
+        try:
+            store.append_event(
+                self._agent_name or "agent",
+                "schedule_drift",
+                {
+                    "trigger_id": trigger_id,
+                    "trigger_name": type(trigger).__name__,
+                    "drift_ms": drift_s * 1000.0,
+                },
+            )
+        except Exception as e:  # pragma: no cover — observability
+            logger.debug("schedule_drift emit failed", error=str(e), exc_info=True)

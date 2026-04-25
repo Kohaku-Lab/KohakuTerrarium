@@ -53,14 +53,51 @@ class AgentRuntimeToolsMixin:
         )
 
     def _emit_token_usage(self, controller: Controller) -> None:
-        """Emit token usage from the last LLM turn to output."""
+        """Emit token usage from the last LLM turn to output.
+
+        Also accumulates the round's tokens into ``_turn_usage_accum``
+        so ``_finalize_processing`` can flush a single
+        ``turn_token_usage`` event covering the whole turn, and emits
+        a Wave B ``cache_stats`` event whenever the provider returned
+        cache hit/write counts.
+        """
         usage = getattr(controller, "_last_usage", {})
-        if usage:
+        if not usage:
+            return
+        self.output_router.notify_activity(
+            "token_usage",
+            f"tokens: {usage.get('prompt_tokens', 0)} in, "
+            f"{usage.get('completion_tokens', 0)} out",
+            metadata=usage,
+        )
+        accum = getattr(self, "_turn_usage_accum", None)
+        if isinstance(accum, dict):
+            for k in (
+                "prompt_tokens",
+                "completion_tokens",
+                "cached_tokens",
+                "total_tokens",
+            ):
+                accum[k] = accum.get(k, 0) + int(usage.get(k, 0) or 0)
+
+        cache_write = int(usage.get("cache_creation_input_tokens", 0) or 0)
+        cache_read = int(
+            usage.get("cached_tokens", 0)
+            or usage.get("cache_read_input_tokens", 0)
+            or 0
+        )
+        if cache_write or cache_read:
+            prompt = int(usage.get("prompt_tokens", 0) or 0)
+            ratio = (cache_read / prompt) if prompt else 0.0
             self.output_router.notify_activity(
-                "token_usage",
-                f"tokens: {usage.get('prompt_tokens', 0)} in, "
-                f"{usage.get('completion_tokens', 0)} out",
-                metadata=usage,
+                "cache_stats",
+                f"cache: r={cache_read} w={cache_write}",
+                metadata={
+                    "agent": getattr(self.config, "name", ""),
+                    "cache_write": cache_write,
+                    "cache_read": cache_read,
+                    "cache_hit_ratio": ratio,
+                },
             )
 
     def _cancel_handles(self, handles: dict[str, BackgroundifyHandle]) -> None:

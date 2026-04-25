@@ -158,6 +158,18 @@ class CompactManager:
                         "round": self._compact_count + 1,
                     },
                 )
+                # Wave B additive ``compact_decision`` — records that
+                # the manager saw the pre-check and chose to skip.
+                self._output_router.notify_activity(
+                    "compact_decision",
+                    f"[{self._agent_name}] skipped (too_short)",
+                    metadata={
+                        "reason": "too_short",
+                        "tokens_before": 0,
+                        "tokens_after": 0,
+                        "skipped": True,
+                    },
+                )
             logger.info(
                 "Compact skipped — conversation too short",
                 agent=self._agent_name,
@@ -174,6 +186,17 @@ class CompactManager:
                 "compact_start",
                 f"Compacting context (round {self._compact_count + 1})",
                 metadata={"round": self._compact_count + 1},
+            )
+            # Wave B ``compact_decision`` — triggered path.
+            self._output_router.notify_activity(
+                "compact_decision",
+                f"[{self._agent_name}] triggered",
+                metadata={
+                    "reason": "threshold",
+                    "tokens_before": 0,
+                    "tokens_after": 0,
+                    "skipped": False,
+                },
             )
 
         self._compact_task = asyncio.create_task(self._run_compact())
