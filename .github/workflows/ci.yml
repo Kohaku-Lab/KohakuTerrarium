@@ -17,6 +17,8 @@ jobs:
       - run: pip install ruff black
       - run: ruff check src/ tests/
       - run: black --check src/ tests/
+      - name: Dependency-graph lint (cycles + in-function imports)
+        run: python scripts/dep_graph.py --lint-imports --fail
 
   test:
     runs-on: ${{ matrix.os }}

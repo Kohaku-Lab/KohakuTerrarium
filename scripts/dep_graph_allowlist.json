@@ -1,0 +1,218 @@
+[
+  {
+    "file": "src/kohakuterrarium/__main__.py",
+    "line": 33,
+    "function": "main",
+    "reason": "entry-point dispatch: briefcase bundle vs cli (mutually exclusive runtime modes)"
+  },
+  {
+    "file": "src/kohakuterrarium/__main__.py",
+    "line": 38,
+    "function": "main",
+    "reason": "entry-point dispatch: cli loaded only after the briefcase branch is ruled out"
+  },
+  {
+    "file": "src/kohakuterrarium/__briefcase__.py",
+    "line": 10,
+    "function": "main",
+    "reason": "briefcase bundle entry point — defers serving stack until app launch"
+  },
+  {
+    "file": "src/kohakuterrarium/cli/serve.py",
+    "line": 29,
+    "function": "_is_pid_alive",
+    "reason": "Win32-only ctypes import inside `if sys.platform == 'win32'` branch"
+  },
+  {
+    "file": "src/kohakuterrarium/cli/serve.py",
+    "line": 30,
+    "function": "_is_pid_alive",
+    "reason": "Win32-only ctypes.wintypes import inside `if sys.platform == 'win32'` branch"
+  },
+  {
+    "file": "src/kohakuterrarium/serving/web.py",
+    "line": 31,
+    "function": "_resolve_config_dirs",
+    "reason": "package-discovery cold-path; avoids loading packages module on bare uvicorn boot"
+  },
+  {
+    "file": "src/kohakuterrarium/serving/web.py",
+    "line": 104,
+    "function": "run_web_server",
+    "reason": "FastAPI app factory: serving->api lazy boot avoids pulling all routes when only the helper is touched"
+  },
+  {
+    "file": "src/kohakuterrarium/serving/web.py",
+    "line": 156,
+    "function": "run_desktop_app",
+    "reason": "subprocess used only when relaunching as desktop process"
+  },
+  {
+    "file": "src/kohakuterrarium/serving/web.py",
+    "line": 220,
+    "function": "_run_desktop_app_blocking",
+    "reason": "FastAPI app factory: same as line 104, desktop variant"
+  },
+  {
+    "file": "src/kohakuterrarium/api/studio/introspect.py",
+    "line": 368,
+    "function": "resolve_module_source",
+    "reason": "package-resolver cold-path inside `if module.startswith('@')` branch"
+  },
+  {
+    "file": "src/kohakuterrarium/api/studio/introspect.py",
+    "line": 401,
+    "function": "resolve_module_source",
+    "reason": "importlib.util used only on dotted-module branch"
+  },
+  {
+    "file": "src/kohakuterrarium/api/studio/introspect.py",
+    "line": 403,
+    "function": "resolve_module_source",
+    "reason": "package-resolver cold-path inside the same dotted-module branch"
+  },
+  {
+    "file": "src/kohakuterrarium/session/session.py",
+    "line": 156,
+    "function": "attach_agent",
+    "reason": "session.attach <-> session.session sibling cycle workaround (attach_agent_to_session)"
+  },
+  {
+    "file": "src/kohakuterrarium/session/session.py",
+    "line": 168,
+    "function": "detach_agent",
+    "reason": "session.attach <-> session.session sibling cycle workaround (detach helpers)"
+  },
+  {
+    "file": "src/kohakuterrarium/session/session.py",
+    "line": 172,
+    "function": "detach_agent",
+    "reason": "session.errors imported only on the not-attached error path"
+  },
+  {
+    "file": "src/kohakuterrarium/session/output.py",
+    "line": 171,
+    "function": "on_processing_end",
+    "reason": "session.history imports session.output; replay_conversation only used on processing end"
+  },
+  {
+    "file": "src/kohakuterrarium/session/output.py",
+    "line": 438,
+    "function": "_persist_subagent_conversation",
+    "reason": "json import scoped to subagent persistence path"
+  },
+  {
+    "file": "src/kohakuterrarium/api/studio/codegen/common.py",
+    "line": 227,
+    "function": "_dedent_body",
+    "reason": "textwrap used only by the dedent helper; cold path"
+  },
+  {
+    "file": "src/kohakuterrarium/api/studio/routes/meta.py",
+    "line": 21,
+    "function": "version",
+    "reason": "importlib.metadata is heavy; only used by the /version endpoint"
+  },
+  {
+    "file": "src/kohakuterrarium/api/studio/routes/meta.py",
+    "line": 22,
+    "function": "version",
+    "reason": "same as line 21; importlib.metadata.version"
+  },
+  {
+    "file": "src/kohakuterrarium/api/studio/routes/schema.py",
+    "line": 88,
+    "function": "_load_plugin_sidecar",
+    "reason": "json/pathlib used only when plugin sidecar is loaded"
+  },
+  {
+    "file": "src/kohakuterrarium/api/studio/routes/schema.py",
+    "line": 89,
+    "function": "_load_plugin_sidecar",
+    "reason": "same as line 88; pathlib"
+  },
+  {
+    "file": "src/kohakuterrarium/builtins/user_commands/fork.py",
+    "line": 59,
+    "function": "_suggest_target_path",
+    "reason": "pathlib used only by the suggest helper"
+  },
+  {
+    "file": "src/kohakuterrarium/builtins/user_commands/fork.py",
+    "line": 60,
+    "function": "_suggest_target_path",
+    "reason": "uuid used only by the suggest helper"
+  },
+  {
+    "file": "src/kohakuterrarium/llm/codex_rate_limits.py",
+    "line": 421,
+    "function": "set_cached",
+    "reason": "time imported only on the cache-fallback branch"
+  },
+  {
+    "file": "src/kohakuterrarium/core/agent.py",
+    "line": 344,
+    "function": "_init_mcp",
+    "reason": "wrapped in try/except ImportError so MCP can be used as a graceful-degradation feature when the mcp package is missing"
+  },
+  {
+    "file": "src/kohakuterrarium/mcp/client.py",
+    "line": 57,
+    "function": "connect",
+    "reason": "mcp SDK is heavy; loaded only when a server is actually connecting"
+  },
+  {
+    "file": "src/kohakuterrarium/mcp/client.py",
+    "line": 58,
+    "function": "connect",
+    "reason": "mcp.client.stdio is loaded on the stdio-transport path"
+  },
+  {
+    "file": "src/kohakuterrarium/mcp/client.py",
+    "line": 95,
+    "function": "connect",
+    "reason": "mcp.client.sse is loaded only on the http/SSE-transport branch"
+  },
+  {
+    "file": "src/kohakuterrarium/serving/web.py",
+    "line": 102,
+    "function": "run_web_server",
+    "reason": "uvicorn is heavy; imported only when serving HTTP for real"
+  },
+  {
+    "file": "src/kohakuterrarium/serving/web.py",
+    "line": 218,
+    "function": "_run_desktop_app_blocking",
+    "reason": "uvicorn import deferred to desktop-app launch path"
+  },
+  {
+    "file": "src/kohakuterrarium/builtins/tools/web_fetch.py",
+    "line": 143,
+    "function": "_fetch_crawl4ai",
+    "reason": "trafilatura is invoked only when the crawl4ai backend produced HTML to parse"
+  },
+  {
+    "file": "src/kohakuterrarium/builtins/tools/web_fetch.py",
+    "line": 168,
+    "function": "_fetch_trafilatura",
+    "reason": "trafilatura backend imported only when the user picked it"
+  },
+  {
+    "file": "src/kohakuterrarium/api/app.py",
+    "line": 116,
+    "function": "_mount_spa",
+    "reason": "fastapi.responses imported only when a built SPA is being mounted"
+  },
+  {
+    "file": "src/kohakuterrarium/api/app.py",
+    "line": 117,
+    "function": "_mount_spa",
+    "reason": "fastapi.staticfiles imported only when a built SPA is being mounted"
+  },
+  {
+    "file": "src/kohakuterrarium/builtin_skills/__init__.py",
+    "line": 34,
+    "function": "read_skill_body",
+    "reason": "prompt.aggregator imports from builtin_skills and prompt.__init__ loads aggregator eagerly; lazy import here breaks the cycle"
+  }
+]
