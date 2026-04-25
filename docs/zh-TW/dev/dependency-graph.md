@@ -52,17 +52,17 @@ tags:
 2. **可測試性。** 如果 `core/` 永遠不匯入 `terrarium/`，你就能在不啟動多 Agent 執行期的情況下單元測試 controller。如果 `modules/` 只放協定，你就能很容易替換實作。
 3. **清楚的變更影響面。** 修改 `utils/` 時，所有東西都會重建。修改 `cli/` 時，其他部分都不會。分層讓你能預期變更的爆炸半徑。
 
-歷史註記：過去曾有一個循環 `builtins.tools.registry → terrarium.runtime → core.agent → builtins.tools.registry`。後來透過引入 `tool_catalog` 這個具延遲載入器的葉模組將它拆解。詳情請參閱 git 歷史中 [`internals.md`](internals.md) 的 legacy notes 區段。現在只剩兩個合理的 lazy import：`core/__init__.py` 使用 `__getattr__` 來避免 `core.agent` 的初始化順序問題，而 `terrarium/tool_registration.py` 會把 terrarium-tool registration 延後到第一次查詢時才進行。
+歷史註記：過去曾有一個循環 `builtins.tools.registry → terrarium.runtime → core.agent → builtins.tools.registry`。後來透過引入 catalog/helper 模組，並把 Terrarium root-tool 實作移到 `terrarium/` 底下拆解。`core/__init__.py` 仍使用模組層級 `__getattr__` 做延遲 public export；新的函式內匯入應透過 dep-graph allowlist 說明理由，而不是當成循環 workaround。
 
 ## 工具：`scripts/dep_graph.py`
 
-靜態 AST 分析器。會走訪 `src/kohakuterrarium/` 下每個 `.py`，解析 `import` / `from ... import`，並把每條邊分類為：
+靜態 AST 分析器。會以 UTF-8 讀取並走訪 `src/kohakuterrarium/` 下每個 `.py`，解析 `import` / `from ... import`，並把每條邊分類為：
 
 - **runtime** —— 在模組載入時於頂層執行的匯入。
 - **TYPE_CHECKING** —— 受 `if TYPE_CHECKING:` 保護。不會進入執行期圖。
-- **lazy** —— 函式內的匯入。不會進入執行期圖。
+- **in-function** —— 函式內的匯入。預設/循環視圖會包含這些邊，以便發現隱藏循環；`--module-only` 可恢復舊的僅頂層匯入圖。
 
-只有 runtime 邊會計入循環偵測。
+import hygiene lint 會依 stdlib、必要依賴、選用依賴、平台限定模組，以及 `scripts/dep_graph_allowlist.json` 分類函式內匯入。每個 allowlist 條目都需要寫明 reason。
 
 ### 指令
 
@@ -70,8 +70,17 @@ tags:
 # Summary stats + cross-group edge counts (default)
 python scripts/dep_graph.py
 
-# Runtime SCC cycle detection
+# Runtime SCC cycle detection（預設包含函式內匯入）
 python scripts/dep_graph.py --cycles
+
+# In-function import policy report
+python scripts/dep_graph.py --lint-imports
+
+# JSON dump（graph + lint result）
+python scripts/dep_graph.py --json
+
+# parse errors / cycles / lint violations 時以非零碼退出
+python scripts/dep_graph.py --fail
 
 # Graphviz DOT output (pipe into `dot -Tsvg`)
 python scripts/dep_graph.py --dot > deps.dot
@@ -79,7 +88,7 @@ python scripts/dep_graph.py --dot > deps.dot
 # Render a matplotlib group + module plot into plans/
 python scripts/dep_graph.py --plot
 
-# All of the above
+# Stats + cycles + import lint
 python scripts/dep_graph.py --all
 ```
 
@@ -88,9 +97,10 @@ python scripts/dep_graph.py --all
 - **Top fan-out** —— 匯入最多其他模組的模組。通常會是組裝程式碼（`bootstrap/`、`core/agent.py`）。
 - **Top fan-in** —— 被匯入次數最多的模組。通常應以 `utils/`、`modules/base`、`core/events.py` 為主。
 - **Cross-group edges** —— 類似長條圖的讀值，表示有多少邊跨越套件邊界。如果出現新的 `core/` → `terrarium/` 邊，請調查。
-- **SCCs** —— 應該永遠是空的。如果 Tarjan 演算法找到了非平凡 SCC，代表執行期圖存在循環。
+- **SCCs** —— 應該永遠是空的。如果 Tarjan 演算法找到了非平凡 SCC，代表執行期圖存在循環。循環報告會包含 sample path 與構成循環的 import 語句。
+- **Import hygiene** —— `--lint-imports` 會報告不允許的函式內匯入。optional/platform 匯入會自動允許；刻意保留的例外放在 `scripts/dep_graph_allowlist.json`。
 
-`--plot` 旗標會輸出 `plans/dep-graph.png`（群組層級、環狀配置）與 `plans/dep-graph-detailed.png`（模組層級、同心圓配置）。當重構重新整理相依邊時，兩者都很適合用在 PR 審查。
+`--plot` 旗標會輸出 `plans/dep-graph.png`（群組層級、環狀配置）。當重構重新整理相依邊時，這張圖很適合用在 PR 審查。
 
 ### 什麼時候該執行
 
@@ -98,13 +108,13 @@ python scripts/dep_graph.py --all
 - 當你懷疑有循環匯入時（症狀：啟動時出現提到 partially initialized module 的 `ImportError`）。
 - 大型重構之後，作為健全性檢查。
 
-執行 `python scripts/dep_graph.py --cycles`，並確認輸出為：
+執行 `python scripts/dep_graph.py --fail`，並確認輸出包含：
 
 ```
 None found. The runtime import graph is acyclic.
 ```
 
-如果不是，請先修掉循環再合併。
+如果它以非零碼退出，請先修掉 parse error、循環或 lint violation 再合併。CI 會在獨立的 `test-dep-graph` job 中執行同一套 `tests/unit/test_dep_graph_lint.py` guard。
 
 ## 新增套件
 

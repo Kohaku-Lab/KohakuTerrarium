@@ -80,25 +80,30 @@ The rules serve three goals:
 
 Historical note: there used to be a cycle
 `builtins.tools.registry → terrarium.runtime → core.agent →
-builtins.tools.registry`. It was broken by introducing `tool_catalog`
-as a leaf module with deferred loaders. See
-[`internals.md`](internals.md) legacy notes section in git history for
-the details. Only two legitimate lazy imports remain: `core/__init__.py`
-uses `__getattr__` to avoid a `core.agent` init-order issue, and
-`terrarium/tool_registration.py` defers terrarium-tool registration
-until first lookup.
+builtins.tools.registry`. It was broken by introducing catalog/helper
+modules and moving terrarium root-tool implementations under
+`terrarium/`. `core/__init__.py` still uses module-level `__getattr__`
+for lazy public exports, but new function-local imports should be
+justified by the dep-graph allowlist rather than used as a cycle
+workaround.
 
 ## The tool — `scripts/dep_graph.py`
 
 Static AST analyzer. Walks every `.py` under `src/kohakuterrarium/`,
-parses `import` / `from ... import`, and classifies each edge as:
+reads files as UTF-8, parses `import` / `from ... import`, and classifies
+edges as:
 
 - **runtime** — top-level import that executes on module load.
 - **TYPE_CHECKING** — guarded by `if TYPE_CHECKING:`. Not in the
   runtime graph.
-- **lazy** — import inside a function body. Not in the runtime graph.
+- **in-function** — import inside a function body. The default/cycle view
+  includes these so hidden cycles are still visible; `--module-only`
+  restores the older top-level-only graph.
 
-Only runtime edges count for cycle detection.
+Import-hygiene linting classifies in-function imports against stdlib,
+required deps, optional deps, platform-only modules, and
+`scripts/dep_graph_allowlist.json`. Every allowlisted import needs a
+reason.
 
 ### Commands
 
@@ -106,8 +111,17 @@ Only runtime edges count for cycle detection.
 # Summary stats + cross-group edge counts (default)
 python scripts/dep_graph.py
 
-# Runtime SCC cycle detection
+# Runtime SCC cycle detection (includes in-function imports by default)
 python scripts/dep_graph.py --cycles
+
+# In-function import policy report
+python scripts/dep_graph.py --lint-imports
+
+# JSON dump (graph + lint result)
+python scripts/dep_graph.py --json
+
+# Exit non-zero on parse errors / cycles / lint violations
+python scripts/dep_graph.py --fail
 
 # Graphviz DOT output (pipe into `dot -Tsvg`)
 python scripts/dep_graph.py --dot > deps.dot
@@ -115,7 +129,7 @@ python scripts/dep_graph.py --dot > deps.dot
 # Render a matplotlib group + module plot into plans/
 python scripts/dep_graph.py --plot
 
-# All of the above
+# Stats + cycles + import lint
 python scripts/dep_graph.py --all
 ```
 
@@ -129,11 +143,14 @@ Key outputs:
   cross package boundaries. If a new edge appears from `core/` into
   `terrarium/`, investigate.
 - **SCCs** — should always be empty. If Tarjan's algorithm finds a
-  non-trivial SCC, the runtime graph has a cycle.
+  non-trivial SCC, the runtime graph has a cycle. Cycle reports include
+  a sample path and the import statements that form it.
+- **Import hygiene** — `--lint-imports` reports disallowed in-function
+  imports. Optional/platform imports are auto-allowed; intentional
+  exceptions live in `scripts/dep_graph_allowlist.json`.
 
 The `--plot` flag writes `plans/dep-graph.png` (group-level, circular
-layout) and `plans/dep-graph-detailed.png` (module-level, concentric
-rings). Both are useful for PR review when a refactor shuffles edges.
+layout). It is useful for PR review when a refactor shuffles edges.
 
 ### When to run it
 
@@ -142,14 +159,13 @@ rings). Both are useful for PR review when a refactor shuffles edges.
   startup mentioning a partially initialized module).
 - As a sanity check after a large refactor.
 
-Run `python scripts/dep_graph.py --cycles` and confirm the output
-reads:
+Run `python scripts/dep_graph.py --fail` and confirm the output includes:
 
 ```
 None found. The runtime import graph is acyclic.
 ```
 
-If it doesn't, fix the cycle before merging.
+If it exits non-zero, fix parse errors, cycles, or lint violations before merging. CI runs the same guard in `tests/unit/test_dep_graph_lint.py` as a dedicated `test-dep-graph` job.
 
 ## Adding a new package
 
