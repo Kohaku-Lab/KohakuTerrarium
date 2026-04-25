@@ -86,6 +86,52 @@ async def stop_agent(agent_id: str, manager=Depends(get_manager)):
         raise HTTPException(404, str(e))
 
 
+class WorkingDirRequest(BaseModel):
+    """Switch the agent's tool-side cwd. Body shape: ``{"path": "<dir>"}``.
+
+    The new path is resolved server-side (``~`` expansion + absolute) and
+    must exist as a directory. Rejected with 409 when the agent is in the
+    middle of a turn — interrupt first.
+    """
+
+    path: str
+
+
+@router.get("/{agent_id}/working-dir")
+async def get_agent_working_dir(agent_id: str, manager=Depends(get_manager)):
+    """Return the agent's current working directory."""
+    try:
+        return {"pwd": manager.agent_get_working_dir(agent_id)}
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.put("/{agent_id}/working-dir")
+async def set_agent_working_dir(
+    agent_id: str,
+    req: WorkingDirRequest,
+    manager=Depends(get_manager),
+):
+    """Switch the agent's tool-side cwd mid-session.
+
+    Updates the executor's working directory, rebuilds the path-boundary
+    guard against the new root, clears file-read tracking, and persists
+    the new pwd to session metadata so resume restores it.
+    """
+    try:
+        applied = manager.agent_set_working_dir(agent_id, req.path)
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+    except ValueError as e:
+        # Distinguish "agent not found" (404) from "bad path" (400) by
+        # looking at the message — both raise ValueError today.
+        msg = str(e)
+        if msg.startswith("Agent not found"):
+            raise HTTPException(404, msg)
+        raise HTTPException(400, msg)
+    return {"status": "saved", "pwd": applied}
+
+
 class NativeToolOptionsRequest(BaseModel):
     """Partial update for one provider-native tool's option values.
 

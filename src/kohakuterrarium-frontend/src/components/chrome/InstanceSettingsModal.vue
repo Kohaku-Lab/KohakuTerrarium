@@ -10,6 +10,7 @@
 
       <div class="flex-1 min-w-0 overflow-y-auto">
         <ModelTab v-if="activeTab === 'model'" :instance="instance" />
+        <WorkspaceTab v-else-if="activeTab === 'workspace'" :instance="instance" />
         <ToolOptionsPanel v-else-if="activeTab === 'tool-options'" :instance="instance" />
         <PluginsTab v-else-if="activeTab === 'plugins'" :instance="instance" />
         <ExtensionsTab v-else-if="activeTab === 'extensions'" />
@@ -31,6 +32,7 @@ import ExtensionsTab from "@/components/panels/settings/ExtensionsTab.vue"
 import ModelTab from "@/components/panels/settings/ModelTab.vue"
 import PluginsTab from "@/components/panels/settings/PluginsTab.vue"
 import TriggersTab from "@/components/panels/settings/TriggersTab.vue"
+import WorkspaceTab from "@/components/panels/settings/WorkspaceTab.vue"
 import { useI18n } from "@/utils/i18n"
 
 defineProps({ instance: { type: Object, default: null } })
@@ -43,6 +45,7 @@ const { t } = useI18n()
 // the model picker.
 const tabs = computed(() => [
   { id: "model", label: t("instanceSettings.model"), icon: "i-carbon-chip" },
+  { id: "workspace", label: "Workspace", icon: "i-carbon-folder" },
   { id: "tool-options", label: "Tool options", icon: "i-carbon-settings-adjust" },
   { id: "plugins", label: t("instanceSettings.plugins"), icon: "i-carbon-plug" },
   { id: "extensions", label: t("instanceSettings.extensions"), icon: "i-carbon-cube" },

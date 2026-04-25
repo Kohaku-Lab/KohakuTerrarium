@@ -215,6 +215,32 @@ class KohakuManager:
             raise ValueError(f"Agent {agent_id!r} has no native_tool_options helper")
         return helper.set(tool_name, values or {})
 
+    def agent_get_working_dir(self, agent_id: str) -> str:
+        """Return the agent's current working directory."""
+        session = self._agents.get(agent_id)
+        if not session:
+            raise ValueError(f"Agent not found: {agent_id}")
+        ws = getattr(session.agent, "workspace", None)
+        if ws is None:
+            return str(getattr(session.agent.executor, "_working_dir", ""))
+        return ws.get()
+
+    def agent_set_working_dir(self, agent_id: str, new_path: str) -> str:
+        """Switch the agent's tool-side working directory mid-session.
+
+        Delegates to ``agent.workspace.set`` (see
+        :mod:`kohakuterrarium.core.agent_workspace`). Raises ``ValueError``
+        for missing agents / bad paths and ``RuntimeError`` if the agent
+        is currently processing.
+        """
+        session = self._agents.get(agent_id)
+        if not session:
+            raise ValueError(f"Agent not found: {agent_id}")
+        ws = getattr(session.agent, "workspace", None)
+        if ws is None:
+            raise RuntimeError(f"Agent {agent_id!r} has no workspace helper")
+        return ws.set(new_path)
+
     def agent_native_tool_inventory(self, agent_id: str) -> list[dict]:
         """List provider-native tools registered on this agent + their schemas."""
         session = self._agents.get(agent_id)
