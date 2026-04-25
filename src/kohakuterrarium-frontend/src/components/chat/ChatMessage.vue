@@ -92,7 +92,19 @@
       </div>
     </div>
     <!-- Hover actions for user messages -->
-    <div v-if="!editing && !message.queued && messageIdx != null" class="absolute -bottom-5 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+    <div v-if="!editing && !message.queued && messageIdx != null" class="absolute -bottom-5 right-2 flex gap-1 items-center opacity-0 group-hover:opacity-100 transition-opacity">
+      <!-- Branch navigator on user message: shown only when this turn
+           has multiple distinct user contents (i.e. an edit produced
+           a sibling branch at this divergence point). -->
+      <div v-if="hasUserGroups" class="flex items-center gap-0.5 mr-1 select-none">
+        <button class="msg-action-btn" title="Previous edit" aria-label="Previous user edit" :disabled="!hasPrevUserGroup" @click="goToPrevUserGroup">
+          <span class="i-carbon-chevron-left text-xs" />
+        </button>
+        <span class="text-[10px] tabular-nums text-warm-500 px-1">{{ message.currentUserGroupIdx + 1 }}/{{ message.userGroupCount }}</span>
+        <button class="msg-action-btn" title="Next edit" aria-label="Next user edit" :disabled="!hasNextUserGroup" @click="goToNextUserGroup">
+          <span class="i-carbon-chevron-right text-xs" />
+        </button>
+      </div>
       <button class="msg-action-btn" title="Copy" aria-label="Copy message" @click="copyMessage">
         <span class="i-carbon-copy text-xs" />
       </button>
@@ -119,10 +131,27 @@
       </div>
     </template>
     <!-- Hover actions -->
-    <div v-if="isLastAssistant" class="absolute -bottom-5 left-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+    <div class="absolute -bottom-5 left-2 flex gap-1 items-center opacity-0 group-hover:opacity-100 transition-opacity">
+      <!-- Branch navigator on the assistant bubble: shown only when
+           the current user-content group has more than one regen
+           alternative. Edit-only branching does NOT light this up —
+           that's the user-side navigator's job. -->
+      <div v-if="hasAssistantBranches" class="flex items-center gap-0.5 mr-1 select-none">
+        <button class="msg-action-btn" title="Previous regen" aria-label="Previous regen" :disabled="!hasPrevAssistantBranch" @click="goToPrevAssistantBranch">
+          <span class="i-carbon-chevron-left text-xs" />
+        </button>
+        <span class="text-[10px] tabular-nums text-warm-500 px-1">{{ message.currentAssistantIdx + 1 }}/{{ message.assistantBranchCount }}</span>
+        <button class="msg-action-btn" title="Next regen" aria-label="Next regen" :disabled="!hasNextAssistantBranch" @click="goToNextAssistantBranch">
+          <span class="i-carbon-chevron-right text-xs" />
+        </button>
+      </div>
       <button class="msg-action-btn" title="Copy" aria-label="Copy response" @click="copyAssistantText">
         <span class="i-carbon-copy text-xs" />
       </button>
+      <!-- Regenerate: opens a new branch of this turn. Always visible
+           on assistant messages — the previous duplicate "Retry"
+           button was identical and only hid the affordance when an
+           interrupt left the turn in a non-"last" state. -->
       <button class="msg-action-btn" title="Regenerate" aria-label="Regenerate response" @click="regenerate">
         <span class="i-carbon-renew text-xs" />
       </button>
@@ -275,6 +304,48 @@ function confirmEdit() {
 
 function regenerate() {
   chat.regenerateLastResponse()
+}
+
+// ── Branch navigator ──
+//
+// User-side <x/N>: walks distinct user_message contents (edits).
+// Assistant-side <x/N>: walks regens within the current user content.
+// The two are independent — a turn can have neither, either, or both.
+
+const hasUserGroups = computed(() => props.message.branchAnchor === "user" && typeof props.message.userGroupCount === "number" && props.message.userGroupCount > 1)
+const hasPrevUserGroup = computed(() => hasUserGroups.value && (props.message.currentUserGroupIdx ?? 0) > 0)
+const hasNextUserGroup = computed(() => hasUserGroups.value && (props.message.currentUserGroupIdx ?? 0) < props.message.userGroupCount - 1)
+
+function _switchUserGroup(delta) {
+  const idx = props.message.currentUserGroupIdx ?? 0
+  const target = idx + delta
+  const groups = props.message.userGroupBranches || []
+  if (target < 0 || target >= groups.length) return
+  chat.selectBranch(props.message.turnIndex, groups[target])
+}
+function goToPrevUserGroup() {
+  if (hasPrevUserGroup.value) _switchUserGroup(-1)
+}
+function goToNextUserGroup() {
+  if (hasNextUserGroup.value) _switchUserGroup(1)
+}
+
+const hasAssistantBranches = computed(() => props.message.branchAnchor === "assistant" && typeof props.message.assistantBranchCount === "number" && props.message.assistantBranchCount > 1)
+const hasPrevAssistantBranch = computed(() => hasAssistantBranches.value && (props.message.currentAssistantIdx ?? 0) > 0)
+const hasNextAssistantBranch = computed(() => hasAssistantBranches.value && (props.message.currentAssistantIdx ?? 0) < props.message.assistantBranchCount - 1)
+
+function _switchAssistantBranch(delta) {
+  const idx = props.message.currentAssistantIdx ?? 0
+  const target = idx + delta
+  const branches = props.message.assistantBranches || []
+  if (target < 0 || target >= branches.length) return
+  chat.selectBranch(props.message.turnIndex, branches[target])
+}
+function goToPrevAssistantBranch() {
+  if (hasPrevAssistantBranch.value) _switchAssistantBranch(-1)
+}
+function goToNextAssistantBranch() {
+  if (hasNextAssistantBranch.value) _switchAssistantBranch(1)
 }
 </script>
 

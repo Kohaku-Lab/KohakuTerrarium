@@ -42,13 +42,27 @@
             />
 
             <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2 mb-0.5">
+              <div class="flex items-center gap-2 mb-0.5 flex-wrap">
                 <span class="font-medium text-warm-800 dark:text-warm-200 truncate">
                   {{ session.name }}
                 </span>
                 <GemBadge :gem="session.config_type === 'terrarium' ? 'iolite' : 'aquamarine'">
                   {{ session.config_type }}
                 </GemBadge>
+                <!-- Lineage badges (Wave E fork / Wave D migration) -->
+                <span v-if="session.parent_session_id" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-iolite/10 text-iolite-shadow dark:text-iolite-light" :title="`Forked from ${session.parent_session_id} at event ${session.fork_point}`">
+                  <span class="i-carbon-fork-vertical text-[10px]" />
+                  fork
+                </span>
+                <span v-if="session.forked_children && session.forked_children.length" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-aquamarine/10 text-aquamarine-shadow dark:text-aquamarine-light" :title="`${session.forked_children.length} fork(s) of this session`">
+                  <span class="i-carbon-tree-view-alt text-[10px]" />
+                  {{ session.forked_children.length }} fork{{ session.forked_children.length === 1 ? "" : "s" }}
+                </span>
+                <span v-if="session.migrated_from_version" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber/10 text-amber-shadow dark:text-amber-light" :title="`Migrated from format v${session.migrated_from_version}`">
+                  <span class="i-carbon-migrate text-[10px]" />
+                  migrated v{{ session.migrated_from_version }}
+                </span>
+                <span v-if="session.format_version && session.format_version > 1" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-warm-100 dark:bg-warm-800 text-warm-500" :title="`Format version ${session.format_version}`"> v{{ session.format_version }} </span>
               </div>
               <div class="flex items-center gap-3 text-xs text-secondary">
                 <span v-if="session.config_path" class="font-mono truncate">
