@@ -6,6 +6,7 @@ studio v1 scope is scaffold + raw mode. The form surface is tiny
 and we simply pass through on update_existing without libcst.
 """
 
+from kohakuterrarium.api.studio.codegen.base import RoundTripError
 from kohakuterrarium.api.studio.codegen.common import (
     find_class,
     first_class,
@@ -38,8 +39,6 @@ def update_existing(source: str, form: dict, execute_body: str) -> str:
     the framework's canonical method names (``get_input`` for inputs,
     ``write`` for outputs) and rewrite whichever is present.
     """
-    from kohakuterrarium.api.studio.codegen import RoundTripError
-
     body = execute_body or form.get("body") or ""
     if not body:
         return source

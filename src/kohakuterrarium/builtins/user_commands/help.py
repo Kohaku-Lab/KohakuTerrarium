@@ -1,6 +1,6 @@
 """Help command — list available slash commands."""
 
-from kohakuterrarium.builtins.user_commands import register_user_command
+from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (
     BaseUserCommand,
     CommandLayer,

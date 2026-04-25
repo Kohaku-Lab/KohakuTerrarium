@@ -15,20 +15,8 @@ patch the file safely; routes surface it as a 422 and the
 frontend falls back to raw-Monaco mode.
 """
 
-from typing import Protocol
-
 from kohakuterrarium.api.studio.codegen import io_mod, plugin, subagent, tool, trigger
-
-
-class RoundTripError(ValueError):
-    """Raised when an AST-based round-trip cannot preserve the file."""
-
-
-class _Codegen(Protocol):
-    def render_new(self, form: dict) -> str: ...
-    def update_existing(self, source: str, form: dict, execute_body: str) -> str: ...
-    def parse_back(self, source: str) -> dict: ...
-
+from kohakuterrarium.api.studio.codegen.base import Codegen, RoundTripError
 
 _DISPATCH = {
     "tools": tool,
@@ -40,7 +28,7 @@ _DISPATCH = {
 }
 
 
-def get_codegen(kind: str):
+def get_codegen(kind: str) -> Codegen:
     """Return the codegen module for *kind* or raise ValueError."""
     if kind not in _DISPATCH:
         raise ValueError(f"unknown module kind: {kind!r}")

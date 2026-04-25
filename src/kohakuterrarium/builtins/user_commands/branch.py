@@ -13,7 +13,7 @@ Usage::
     /branch latest             — reset every turn to its latest branch
 """
 
-from kohakuterrarium.builtins.user_commands import register_user_command
+from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (
     BaseUserCommand,
     CommandLayer,

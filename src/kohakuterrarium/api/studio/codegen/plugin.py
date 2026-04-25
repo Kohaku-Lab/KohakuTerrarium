@@ -12,8 +12,11 @@ Round-trip strategy:
    supply a new body, and replacing where they did.
 """
 
+import json
+
 import libcst as cst
 
+from kohakuterrarium.api.studio.codegen.base import RoundTripError
 from kohakuterrarium.api.studio.codegen.common import (
     find_class,
     first_class,
@@ -21,6 +24,7 @@ from kohakuterrarium.api.studio.codegen.common import (
     read_method_body,
     read_property_string,
 )
+from kohakuterrarium.api.studio.plugin_hooks import PLUGIN_HOOKS
 from kohakuterrarium.api.studio.templates_render import render
 
 # Hook names must match catalog.PLUGIN_HOOKS.
@@ -96,8 +100,6 @@ def sidecar_files(form: dict) -> dict[str, str]:
     normalized = [_normalize_schema_param(p) for p in schema if isinstance(p, dict)]
     if not normalized:
         return {}
-    import json
-
     return {".schema.json": json.dumps(normalized, indent=2) + "\n"}
 
 
@@ -125,8 +127,6 @@ def update_existing(source: str, form: dict, execute_body: str) -> str:
     hooks, not one ``_execute``). Kept in the signature for
     Codegen Protocol compatibility.
     """
-    from kohakuterrarium.api.studio.codegen import RoundTripError
-
     del execute_body  # not used
 
     tree = parse(source)
@@ -236,8 +236,6 @@ def parse_back(source: str, sidecar_schema: list | None = None) -> dict:
 
 def _hook_context(h: dict) -> dict:
     """Enrich an incoming {name, body} with signature info."""
-    from kohakuterrarium.api.studio.routes.catalog import PLUGIN_HOOKS
-
     spec = next((s for s in PLUGIN_HOOKS if s["name"] == h["name"]), None)
     if spec is None:
         # Unknown hook — keep going with minimal signature

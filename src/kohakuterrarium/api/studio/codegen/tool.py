@@ -13,6 +13,7 @@ Three entry points (see ``codegen/__init__.py``):
 
 import libcst as cst
 
+from kohakuterrarium.api.studio.codegen.base import RoundTripError
 from kohakuterrarium.api.studio.codegen.common import (
     find_class,
     first_class,
@@ -64,8 +65,6 @@ def render_new(form: dict) -> str:
 
 def update_existing(source: str, form: dict, execute_body: str) -> str:
     """Patch *source* in place. See module docstring."""
-    from kohakuterrarium.api.studio.codegen import RoundTripError
-
     tree = parse(source)
     class_name = form.get("class_name")
     if class_name:

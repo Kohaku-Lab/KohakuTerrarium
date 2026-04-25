@@ -7,7 +7,7 @@ up in ``/help`` and the slash-command hint bar, and so the TUI / web
 frontends can still receive a sensible fallback payload.
 """
 
-from kohakuterrarium.builtins.user_commands import register_user_command
+from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (
     BaseUserCommand,
     CommandLayer,

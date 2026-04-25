@@ -14,6 +14,7 @@ from kohakuterrarium.api.schemas import (
     ModelSwitch,
     SlashCommand,
 )
+from kohakuterrarium.session.history import collect_branch_metadata
 
 router = APIRouter()
 
@@ -224,8 +225,6 @@ async def agent_branches(agent_id: str, manager=Depends(get_manager)):
           ]
         }
     """
-    from kohakuterrarium.session.history import collect_branch_metadata
-
     try:
         events = manager.agent_get_history(agent_id)
     except ValueError as e:

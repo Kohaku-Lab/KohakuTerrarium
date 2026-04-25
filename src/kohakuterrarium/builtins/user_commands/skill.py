@@ -17,7 +17,7 @@ command so the existing ``/model``, ``/plugin``, … commands still
 shadow same-named skills by design.
 """
 
-from kohakuterrarium.builtins.user_commands import register_user_command
+from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (
     BaseUserCommand,
     CommandLayer,

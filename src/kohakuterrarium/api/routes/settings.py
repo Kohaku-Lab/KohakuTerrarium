@@ -6,6 +6,7 @@ import yaml
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from kohakuterrarium.builtins.tool_catalog import list_provider_native_tools
 from kohakuterrarium.llm.codex_auth import CodexTokens, oauth_login, refresh_tokens
 from kohakuterrarium.llm.codex_rate_limits import get_cached as get_cached_codex_usage
 from kohakuterrarium.llm.profiles import (
@@ -190,8 +191,6 @@ async def get_native_tools():
     Frontend renders this as a checkbox list inside the custom-backend
     form so the user can opt a backend into specific native tools.
     """
-    from kohakuterrarium.builtins.tool_catalog import list_provider_native_tools
-
     return {"tools": list_provider_native_tools()}
 
 

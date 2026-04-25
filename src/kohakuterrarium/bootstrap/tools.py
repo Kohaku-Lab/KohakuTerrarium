@@ -13,6 +13,7 @@ from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.tool.base import BaseTool, ToolConfig
 from kohakuterrarium.modules.trigger.base import BaseTrigger
 from kohakuterrarium.modules.trigger.callable import CallableTriggerTool
+from kohakuterrarium.modules.trigger.universal import list_universal_trigger_classes
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -21,16 +22,7 @@ logger = get_logger(__name__)
 # Universal trigger classes the framework ships. `type: trigger` entries
 # look up the trigger by its `setup_tool_name`.
 def _universal_trigger_classes() -> list[type[BaseTrigger]]:
-    # Import locally to avoid circulars at module load time.
-    from kohakuterrarium.modules.trigger.channel import ChannelTrigger
-    from kohakuterrarium.modules.trigger.scheduler import SchedulerTrigger
-    from kohakuterrarium.modules.trigger.timer import TimerTrigger
-
-    return [
-        cls
-        for cls in (TimerTrigger, ChannelTrigger, SchedulerTrigger)
-        if getattr(cls, "universal", False) and getattr(cls, "setup_tool_name", "")
-    ]
+    return list_universal_trigger_classes()
 
 
 def _lookup_trigger_class(name: str) -> type[BaseTrigger] | None:

@@ -9,7 +9,9 @@ value they return, so callers compose them freely.
 import json
 from typing import Any
 
+from kohakuterrarium.builtins.tool_catalog import list_provider_native_tools
 from kohakuterrarium.llm.profile_types import LLMProfile
+from kohakuterrarium.llm.profiles import _get_preset_definition
 
 # ── Primitive prompts ──────────────────────────────────────────
 
@@ -88,8 +90,6 @@ def prompt_native_tools(default: list[str]) -> list[str]:
     user types ``all`` / ``none`` / a comma-separated list at the first
     prompt — that shortcut bypasses the per-tool loop.
     """
-    from kohakuterrarium.builtins.tool_catalog import list_provider_native_tools
-
     available = list_provider_native_tools()
     if not available:
         return list(default)
@@ -332,10 +332,6 @@ def format_variation_examples(
 
 
 def format_profile(profile: LLMProfile) -> str:
-    # Imported lazily: ``profiles`` pulls in YAML / codex-auth / etc., and
-    # we don't want to pay that cost just to format a line of help text.
-    from kohakuterrarium.llm.profiles import _get_preset_definition
-
     lines = [
         f"Name:         {profile.name}",
         f"Provider:     {profile.provider}",

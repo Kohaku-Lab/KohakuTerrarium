@@ -33,6 +33,7 @@ from kohakuterrarium.llm.profiles import (
     get_default_model,
     get_profile,
     load_backends,
+    list_all,
     load_profiles,
     save_backend,
     save_profile,
@@ -154,8 +155,6 @@ def _backend_delete(name: str) -> int:
 
 
 def _llm_list(include_builtins: bool = False) -> int:
-    from kohakuterrarium.llm.profiles import list_all
-
     default_name = get_default_model()
 
     def _print_row(entry: dict[str, Any]) -> None:

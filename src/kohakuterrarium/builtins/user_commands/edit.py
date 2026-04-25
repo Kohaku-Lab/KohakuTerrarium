@@ -14,7 +14,7 @@ original branch is preserved and addressable via the ``<1/N>``
 navigator (frontend) or by manually inspecting the event log.
 """
 
-from kohakuterrarium.builtins.user_commands import register_user_command
+from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (
     BaseUserCommand,
     CommandLayer,

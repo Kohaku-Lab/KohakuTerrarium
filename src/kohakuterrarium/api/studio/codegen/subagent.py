@@ -21,6 +21,7 @@ kept next to the call.
 
 import libcst as cst
 
+from kohakuterrarium.api.studio.codegen.base import RoundTripError
 from kohakuterrarium.api.studio.codegen.common import parse
 from kohakuterrarium.api.studio.templates_render import render
 
@@ -59,8 +60,6 @@ def update_existing(source: str, form: dict, execute_body: str) -> str:
 
     *execute_body* unused (sub-agents don't have one).
     """
-    from kohakuterrarium.api.studio.codegen import RoundTripError
-
     del execute_body
 
     tree = parse(source)

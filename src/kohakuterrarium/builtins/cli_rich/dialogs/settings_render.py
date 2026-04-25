@@ -12,6 +12,8 @@ from rich.console import Console, Group, RenderableType
 from rich.panel import Panel
 from rich.text import Text
 
+from kohakuterrarium.builtins.cli_rich.dialogs.settings_model import TABS
+
 if TYPE_CHECKING:
     from kohakuterrarium.builtins.cli_rich.dialogs.settings import (
         FormField,
@@ -66,8 +68,6 @@ def _build_panel(overlay: "SettingsOverlay") -> RenderableType:
 
 
 def _render_tab_line(overlay: "SettingsOverlay") -> Text:
-    from kohakuterrarium.builtins.cli_rich.dialogs.settings import TABS
-
     line = Text()
     for i, tab in enumerate(TABS):
         if tab == overlay.tab:

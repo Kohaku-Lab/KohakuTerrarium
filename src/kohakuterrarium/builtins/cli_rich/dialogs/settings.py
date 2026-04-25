@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from kohakuterrarium.api.routes.settings import _load_mcp_config, _save_mcp_config
+from kohakuterrarium.builtins.cli_rich.dialogs.settings_model import TABS
 from kohakuterrarium.builtins.cli_rich.dialogs.settings_render import render_overlay
 from kohakuterrarium.llm.api_keys import PROVIDER_KEY_MAP, get_api_key, save_api_key
 from kohakuterrarium.llm.profile_types import LLMBackend
@@ -43,8 +44,6 @@ from kohakuterrarium.llm.profiles import (
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
-
-TABS: list[str] = ["Keys", "Providers", "Models", "MCP"]
 
 _BUILTIN_PROVIDERS = {"codex", "openai", "openrouter", "anthropic", "gemini", "mimo"}
 _BACKEND_TYPES = ["openai", "codex"]

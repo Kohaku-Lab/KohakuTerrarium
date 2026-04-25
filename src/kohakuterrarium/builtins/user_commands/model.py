@@ -1,6 +1,7 @@
 """Model command — list or switch LLM models."""
 
-from kohakuterrarium.builtins.user_commands import register_user_command
+from kohakuterrarium.builtins.user_commands.registry import register_user_command
+from kohakuterrarium.llm.profiles import list_all
 from kohakuterrarium.modules.user_command.base import (
     BaseUserCommand,
     CommandLayer,
@@ -26,8 +27,6 @@ class ModelCommand(BaseUserCommand):
         return self._switch_model(args.strip(), context)
 
     def _list_models(self, context: UserCommandContext) -> UserCommandResult:
-        from kohakuterrarium.llm.profiles import list_all
-
         entries = list_all()
         current = ""
         current_identifier = ""
