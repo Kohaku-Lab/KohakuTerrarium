@@ -30,28 +30,83 @@ class SessionOutput(OutputModule):
         agent: Any,
         *,
         capture_activity: bool = True,
+        event_key_prefix: str | None = None,
     ):
         self._agent_name = agent_name
         self._store = store
         self._agent = agent  # direct reference, not dict lookup
         self._capture_activity = capture_activity
-        self._text_buffer: list[str] = []
+        # Wave F: attached agents write events under a custom key prefix
+        # (``<host>:attached:<role>:<attach_seq>``). Defaults to the
+        # agent's own name for the standard one-agent-per-store case.
+        self._event_key_prefix = event_key_prefix or agent_name
+        # Wave C: streaming chunks land as ``text_chunk`` events on the
+        # append bus directly; the old ``_text_buffer`` flush-on-turn-end
+        # path is gone. ``_chunk_seq`` counts within one assistant
+        # response and resets at each ``processing_start``.
+        self._chunk_seq: int = 0
+        # Wave C: track ``subagent_start`` tasks so a later
+        # ``subagent_done`` can persist a minimal conversation record
+        # for child agents that ran outside SubAgentManager.
+        self._subagent_tasks: dict[str, dict] = {}
         # Cumulative API token usage across the session
         self._total_input_tokens: int = 0
         self._total_output_tokens: int = 0
         self._total_cached_tokens: int = 0
 
+    def _current_turn_branch(self) -> tuple[int | None, int | None]:
+        """Return ``(turn_index, branch_id)`` from the agent, or
+        ``(None, None)`` for sinks without an attached agent.
+        """
+        agent = self._agent
+        if agent is None:
+            return None, None
+        ti = getattr(agent, "_turn_index", None)
+        bi = getattr(agent, "_branch_id", None)
+        if isinstance(ti, int) and ti > 0 and isinstance(bi, int) and bi > 0:
+            return ti, bi
+        return None, None
+
+    def _current_parent_path(self) -> list[tuple[int, int]] | None:
+        """Snapshot of the agent's branch lineage at this moment.
+
+        Returned as a fresh list (caller may mutate). ``None`` when
+        the agent or its path has not been initialised.
+        """
+        agent = self._agent
+        if agent is None:
+            return None
+        path = getattr(agent, "_parent_branch_path", None)
+        if not isinstance(path, list):
+            return None
+        return [tuple(p) for p in path]
+
     def _record(self, event_type: str, data: dict) -> None:
-        """Record an event."""
+        """Record an event under this sink's event-key prefix.
+
+        Wave F: ``event_key_prefix`` replaces the agent-name namespace
+        when the agent is attached to a host session. Defaults to the
+        agent's own name (the pre-Wave-F behavior).
+        """
+        ti, bi = self._current_turn_branch()
         try:
-            self._store.append_event(self._agent_name, event_type, data)
+            self._store.append_event(
+                self._event_key_prefix,
+                event_type,
+                data,
+                turn_index=ti,
+                branch_id=bi,
+                parent_branch_path=self._current_parent_path(),
+            )
         except Exception as e:
             logger.debug("Session record failed", error=str(e))
 
     async def start(self) -> None:
-        # Restore cumulative token totals from session state
+        # Restore cumulative token totals from session state. Wave F:
+        # attached agents have their own ``<host>:attached:<role>:<seq>``
+        # prefix so restart restores each sink's own counters.
         try:
-            usage = self._store.state.get(f"{self._agent_name}:token_usage")
+            usage = self._store.state.get(f"{self._event_key_prefix}:token_usage")
             if isinstance(usage, dict):
                 self._total_input_tokens = usage.get("total_input_tokens", 0)
                 self._total_output_tokens = usage.get("total_output_tokens", 0)
@@ -63,35 +118,78 @@ class SessionOutput(OutputModule):
         pass
 
     async def write(self, text: str) -> None:
+        # Wave C: non-streaming writes still go to the append bus as a
+        # ``text_chunk`` event. Replay collapses consecutive chunks
+        # into one logical assistant message.
         if text:
-            self._text_buffer.append(text)
+            self._emit_text_chunk(text)
 
     async def write_stream(self, chunk: str) -> None:
         if chunk:
-            self._text_buffer.append(chunk)
+            self._emit_text_chunk(chunk)
+
+    def _emit_text_chunk(self, chunk: str) -> None:
+        """Append a Wave C ``text_chunk`` event.
+
+        Wave F: honours ``event_key_prefix`` so attached agents write
+        streaming chunks under their attached namespace.
+        """
+        seq = self._chunk_seq
+        self._chunk_seq += 1
+        ti, bi = self._current_turn_branch()
+        try:
+            self._store.append_event(
+                self._event_key_prefix,
+                "text_chunk",
+                {"content": chunk, "chunk_seq": seq},
+                turn_index=ti,
+                branch_id=bi,
+                parent_branch_path=self._current_parent_path(),
+            )
+        except Exception as e:
+            logger.debug("text_chunk record failed", error=str(e))
 
     async def flush(self) -> None:
         pass
 
     async def on_processing_start(self) -> None:
-        self._text_buffer.clear()
+        # Wave C: chunk_seq is per-assistant-response.
+        self._chunk_seq = 0
         self._record("processing_start", {})
 
     async def on_processing_end(self) -> None:
-        # Flush accumulated text as one event
-        if self._text_buffer:
-            text = "".join(self._text_buffer)
-            if text.strip():
-                self._record("text", {"content": text})
-            self._text_buffer.clear()
-
         self._record("processing_end", {})
 
-        # Save conversation snapshot (raw messages list, not JSON)
+        # Wave C: snapshot is now a derived cache rebuilt from the
+        # event stream. Falls back to the in-memory controller messages
+        # if replay is empty (e.g. very first turn before any events
+        # landed). Wave F: all reads/writes are keyed by
+        # ``_event_key_prefix`` so attached agents' snapshots/state
+        # live under their attached namespace.
         try:
-            if self._agent and hasattr(self._agent, "controller"):
+            # Lazy import avoids circular dep at module load time.
+            from kohakuterrarium.session.history import replay_conversation
+
+            events = self._store.get_events(self._event_key_prefix)
+            messages = replay_conversation(events)
+            if not messages and self._agent and hasattr(self._agent, "controller"):
                 messages = self._agent.controller.conversation.to_messages()
-                self._store.save_conversation(self._agent_name, messages)
+            last_event_id = 0
+            for evt in events:
+                eid = evt.get("event_id")
+                if isinstance(eid, int) and eid > last_event_id:
+                    last_event_id = eid
+            self._store.save_conversation(self._event_key_prefix, messages)
+            try:
+                self._store.state[f"{self._event_key_prefix}:snapshot_event_id"] = (
+                    last_event_id
+                )
+            except Exception as e:
+                logger.debug(
+                    "Failed to save snapshot_event_id",
+                    error=str(e),
+                    exc_info=True,
+                )
         except Exception as e:
             logger.warning("Conversation snapshot failed", error=str(e))
 
@@ -113,7 +211,7 @@ class SessionOutput(OutputModule):
                         state_kwargs["token_usage"] = usage
 
                 if state_kwargs:
-                    self._store.save_state(self._agent_name, **state_kwargs)
+                    self._store.save_state(self._event_key_prefix, **state_kwargs)
         except Exception as e:
             logger.debug("State save failed", error=str(e))
 
@@ -121,7 +219,6 @@ class SessionOutput(OutputModule):
         if not self._capture_activity:
             return
         name, info = _parse_detail(detail)
-        self._flush_text_before_activity()
         self._record_activity(activity_type, name, info, {})
 
     def on_assistant_image(
@@ -139,7 +236,6 @@ class SessionOutput(OutputModule):
         via ``SessionStore.write_artifact``). This just records the
         metadata so resume + event-log consumers can surface it.
         """
-        self._flush_text_before_activity()
         payload: dict = {
             "url": url,
             "detail": detail,
@@ -158,15 +254,7 @@ class SessionOutput(OutputModule):
         if not self._capture_activity:
             return
         name, info = _parse_detail(detail)
-        self._flush_text_before_activity()
         self._record_activity(activity_type, name, info, metadata)
-
-    def _flush_text_before_activity(self) -> None:
-        if self._text_buffer:
-            text = "".join(self._text_buffer)
-            if text.strip():
-                self._record("text", {"content": text})
-            self._text_buffer.clear()
 
     # Dispatch table: activity_type -> handler method name
     _ACTIVITY_HANDLERS: dict[str, str] = {
@@ -183,6 +271,13 @@ class SessionOutput(OutputModule):
         "processing_complete": "_handle_processing_complete",
         "processing_error": "_handle_processing_error",
         "context_cleared": "_handle_context_cleared",
+        # Wave B additive event types — emit via notify_activity.
+        "tool_wait": "_handle_tool_wait",
+        "compact_decision": "_handle_compact_decision",
+        "turn_token_usage": "_handle_turn_token_usage",
+        "plugin_hook_timing": "_handle_plugin_hook_timing",
+        "cache_stats": "_handle_cache_stats",
+        "scratchpad_write": "_handle_scratchpad_write",
     }
 
     def _record_activity(
@@ -247,39 +342,60 @@ class SessionOutput(OutputModule):
         )
 
     def _handle_subagent_start(self, name: str, detail: str, metadata: dict) -> None:
+        task = metadata.get("task", detail)
+        job_id = metadata.get("job_id", "")
+        if job_id:
+            # Wave C: remember the task so ``subagent_done`` can persist
+            # a minimal child conversation for plugin-spawned agents.
+            self._subagent_tasks[job_id] = {
+                "name": name,
+                "task": task,
+            }
         self._record(
             "subagent_call",
             {
                 "name": name,
-                "task": metadata.get("task", detail),
-                "job_id": metadata.get("job_id", ""),
+                "task": task,
+                "job_id": job_id,
                 "background": bool(metadata.get("background", False)),
             },
         )
 
     def _handle_subagent_done(self, name: str, detail: str, metadata: dict) -> None:
+        job_id = metadata.get("job_id", "")
+        output_text = metadata.get("result", detail)
         self._record(
             "subagent_result",
             {
                 "name": name,
-                "job_id": metadata.get("job_id", ""),
-                "output": metadata.get("result", detail),
+                "job_id": job_id,
+                "output": output_text,
                 "tools_used": metadata.get("tools_used", []),
                 "turns": metadata.get("turns", 0),
                 "duration": metadata.get("duration", 0),
                 "total_tokens": metadata.get("total_tokens", 0),
                 "prompt_tokens": metadata.get("prompt_tokens", 0),
                 "completion_tokens": metadata.get("completion_tokens", 0),
+                # Wave B audit finding A: cached_tokens now flow from
+                # SubAgent → parent activity → stored event.
+                "cached_tokens": metadata.get("cached_tokens", 0),
             },
+        )
+        # Wave C: persist a minimal child conversation so plugin-spawned
+        # agents (no SubAgentManager) don't drop their history.
+        self._persist_subagent_conversation(
+            name, job_id, output_text, success=True, metadata=metadata
         )
 
     def _handle_subagent_error(self, name: str, detail: str, metadata: dict) -> None:
+        job_id = metadata.get("job_id", "")
+        output_text = metadata.get("result", detail)
         self._record(
             "subagent_result",
             {
                 "name": name,
-                "job_id": metadata.get("job_id", ""),
-                "output": metadata.get("result", detail),
+                "job_id": job_id,
+                "output": output_text,
                 "error": metadata.get("error", detail),
                 "success": False,
                 "interrupted": bool(metadata.get("interrupted", False)),
@@ -291,8 +407,67 @@ class SessionOutput(OutputModule):
                 "total_tokens": metadata.get("total_tokens", 0),
                 "prompt_tokens": metadata.get("prompt_tokens", 0),
                 "completion_tokens": metadata.get("completion_tokens", 0),
+                "cached_tokens": metadata.get("cached_tokens", 0),
             },
         )
+        self._persist_subagent_conversation(
+            name, job_id, output_text, success=False, metadata=metadata
+        )
+
+    def _persist_subagent_conversation(
+        self,
+        name: str,
+        job_id: str,
+        output_text: str,
+        *,
+        success: bool,
+        metadata: dict,
+    ) -> None:
+        """Wave C: save a minimal child conversation for SubAgentManager runs.
+
+        The SubAgentManager path already writes the full conversation
+        via ``SubAgent._build_result``; we only fill the gap when a
+        child agent ran outside the manager (pre-Wave-F plugin flow).
+        Wave F replacement: plugin-spawned ``Agent`` instances now
+        attach to the host :class:`Session` via
+        :func:`kohakuterrarium.session.attach.attach_agent_to_session`
+        and write their own events under
+        ``<host>:attached:<role>:<attach_seq>:e<seq>``. This method
+        stays for the SubAgent (tool-like) path.
+        """
+        import json as _json
+
+        task_record = self._subagent_tasks.pop(job_id, None)
+        task_text = task_record.get("task", "") if task_record is not None else ""
+        try:
+            # Already persisted by SubAgentManager? Skip to avoid
+            # overwriting the full conversation with a synthetic stub.
+            run = self._store.next_subagent_run(self._agent_name, name)
+            convo = [
+                {"role": "user", "content": task_text},
+                {"role": "assistant", "content": output_text or ""},
+            ]
+            self._store.save_subagent(
+                parent=self._agent_name,
+                name=name,
+                run=run,
+                meta={
+                    "task": task_text,
+                    "turns": metadata.get("turns", 0),
+                    "tools_used": metadata.get("tools_used", []),
+                    "success": success,
+                    "duration": metadata.get("duration", 0),
+                    "output_preview": (output_text or "")[:500],
+                    "source": "session_output",
+                },
+                conv_json=_json.dumps(convo),
+            )
+        except Exception as e:
+            logger.debug(
+                "Failed to persist sub-agent conversation via SessionOutput",
+                error=str(e),
+                exc_info=True,
+            )
 
     def _handle_token_usage(self, name: str, detail: str, metadata: dict) -> None:
         prompt = metadata.get("prompt_tokens", 0)
@@ -310,10 +485,12 @@ class SessionOutput(OutputModule):
                 "cached_tokens": cached,
             },
         )
-        # Save cumulative totals to session state for fast resume
+        # Save cumulative totals to session state for fast resume.
+        # Wave F: keyed under the attached-namespace prefix so attached
+        # agents' counters don't collide with the host's.
         try:
             self._store.save_state(
-                self._agent_name,
+                self._event_key_prefix,
                 token_usage={
                     "total_input_tokens": self._total_input_tokens,
                     "total_output_tokens": self._total_output_tokens,
@@ -380,6 +557,76 @@ class SessionOutput(OutputModule):
                 "trigger_channel": metadata.get("trigger_channel", ""),
                 "trigger_sender": metadata.get("trigger_sender", ""),
                 "output_preview": metadata.get("output_preview", ""),
+            },
+        )
+
+    # ── Wave B additive event handlers ──
+
+    def _handle_tool_wait(self, name: str, detail: str, metadata: dict) -> None:
+        self._record(
+            "tool_wait",
+            {
+                "tool": metadata.get("tool", name),
+                "wait_ms": metadata.get("wait_ms", 0),
+                "reason": metadata.get("reason", "serial_lock"),
+            },
+        )
+
+    def _handle_compact_decision(self, name: str, detail: str, metadata: dict) -> None:
+        self._record(
+            "compact_decision",
+            {
+                "reason": metadata.get("reason", "unknown"),
+                "tokens_before": metadata.get("tokens_before", 0),
+                "tokens_after": metadata.get("tokens_after", 0),
+                "skipped": bool(metadata.get("skipped", False)),
+            },
+        )
+
+    def _handle_turn_token_usage(self, name: str, detail: str, metadata: dict) -> None:
+        self._record(
+            "turn_token_usage",
+            {
+                "turn_index": metadata.get("turn_index", 0),
+                "prompt_tokens": metadata.get("prompt_tokens", 0),
+                "completion_tokens": metadata.get("completion_tokens", 0),
+                "cached_tokens": metadata.get("cached_tokens", 0),
+                "total_tokens": metadata.get("total_tokens", 0),
+            },
+        )
+
+    def _handle_plugin_hook_timing(
+        self, name: str, detail: str, metadata: dict
+    ) -> None:
+        self._record(
+            "plugin_hook_timing",
+            {
+                "hook": metadata.get("hook", name),
+                "plugin": metadata.get("plugin", ""),
+                "duration_ms": metadata.get("duration_ms", 0),
+                "blocked": bool(metadata.get("blocked", False)),
+            },
+        )
+
+    def _handle_cache_stats(self, name: str, detail: str, metadata: dict) -> None:
+        self._record(
+            "cache_stats",
+            {
+                "agent": metadata.get("agent", self._agent_name),
+                "cache_write": metadata.get("cache_write", 0),
+                "cache_read": metadata.get("cache_read", 0),
+                "cache_hit_ratio": metadata.get("cache_hit_ratio", 0.0),
+            },
+        )
+
+    def _handle_scratchpad_write(self, name: str, detail: str, metadata: dict) -> None:
+        self._record(
+            "scratchpad_write",
+            {
+                "agent": metadata.get("agent", self._agent_name),
+                "key": metadata.get("key", name),
+                "action": metadata.get("action", "set"),
+                "size_bytes": metadata.get("size_bytes", 0),
             },
         )
 

@@ -20,6 +20,7 @@ from typing import Any
 from kohakuvault import KVault, TextVault, VectorKVault
 
 from kohakuterrarium.session.embedding import BaseEmbedder, NullEmbedder
+from kohakuterrarium.session.history import select_live_event_ids
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -386,6 +387,7 @@ def _extract_blocks(
     agent: str, events: list[dict], event_offset: int = 0
 ) -> list[Block]:
     """Extract searchable blocks from session events."""
+    live_ids = select_live_event_ids(events)
     blocks: list[Block] = []
     round_num = 0
     block_num = 0
@@ -394,6 +396,9 @@ def _extract_blocks(
     for i, evt in enumerate(events):
         etype = evt.get("type", "")
         ts = evt.get("ts", 0)
+        eid = evt.get("event_id")
+        if isinstance(eid, int) and eid not in live_ids:
+            continue
 
         if etype == "user_input":
             round_num += 1
@@ -434,7 +439,11 @@ def _extract_blocks(
                 )
                 block_num += 1
 
-        elif etype == "text" and in_round:
+        elif etype in ("text", "text_chunk") and in_round:
+            # ``text_chunk`` is Wave C's per-chunk streaming format.
+            # Index the same way; FTS treats consecutive chunks as
+            # separate blocks (callers can reassemble via event_id
+            # ordering if needed).
             content = evt.get("content", "")
             # Split long text on double newlines for finer-grained blocks
             paragraphs = content.split("\n\n") if len(content) > 300 else [content]
