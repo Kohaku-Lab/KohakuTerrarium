@@ -40,10 +40,13 @@ def list_builtin_user_commands() -> list[str]:
 # Import commands to trigger @register_user_command decorators
 from kohakuterrarium.builtins.user_commands.clear import ClearCommand
 from kohakuterrarium.builtins.user_commands.compact import CompactCommand
+from kohakuterrarium.builtins.user_commands.edit import EditCommand
 from kohakuterrarium.builtins.user_commands.exit import ExitCommand
+from kohakuterrarium.builtins.user_commands.fork import ForkCommand
 from kohakuterrarium.builtins.user_commands.help import HelpCommand
 from kohakuterrarium.builtins.user_commands.model import ModelCommand
 from kohakuterrarium.builtins.user_commands.plugin import PluginCommand
+from kohakuterrarium.builtins.user_commands.branch import BranchCommand
 from kohakuterrarium.builtins.user_commands.regen import RegenCommand
 from kohakuterrarium.builtins.user_commands.settings import SettingsCommand
 from kohakuterrarium.builtins.user_commands.skill import SkillUserCommand
@@ -53,9 +56,12 @@ __all__ = [
     "register_user_command",
     "get_builtin_user_command",
     "list_builtin_user_commands",
+    "BranchCommand",
     "ClearCommand",
     "CompactCommand",
+    "EditCommand",
     "ExitCommand",
+    "ForkCommand",
     "HelpCommand",
     "ModelCommand",
     "PluginCommand",

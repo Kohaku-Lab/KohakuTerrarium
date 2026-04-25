@@ -12,7 +12,7 @@ from kohakuterrarium.modules.user_command.base import (
 @register_user_command("regen")
 class RegenCommand(BaseUserCommand):
     name = "regen"
-    aliases = ["regenerate"]
+    aliases = ["regenerate", "retry"]
     description = "Regenerate the last assistant response with current settings"
     layer = CommandLayer.AGENT
 
