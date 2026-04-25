@@ -389,7 +389,7 @@ class Composer:
             elif self._on_ctrl_c:
                 self._on_ctrl_c()
 
-        @kb.add("sigint", eager=True)
+        @kb.add(Keys.SIGINT, eager=True)
         def _sigint(_event):
             if self._on_ctrl_c:
                 self._on_ctrl_c()
