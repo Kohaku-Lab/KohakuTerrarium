@@ -172,7 +172,7 @@ input:
     channel_id: 123456
 ```
 
-内置型别：`cli`、`cli_nonblocking`、`tui`、`none`。`whisper` 在安装了选用的 RealtimeSTT 依赖时可用。协定请看 [自定义模块指南](custom-modules.md)。
+内置型别：`cli`、`cli_nonblocking`、`tui`、`none`。音频/ASR 输入应配置为 custom 或 package 模块；协议请看 conversational 示例与[自定义模块指南](custom-modules.md)。
 
 ## 怎么加 named output sink？
 

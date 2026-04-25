@@ -40,11 +40,9 @@ tags:
 - **`cli_nonblocking`** — 和 `cli` 表面相近，但會在每次按鍵之間把控制權還給
   event loop，讓 trigger 在輸入過程中也能觸發。
 - **`tui`** — 當生物在 Textual 下執行時，TUI composer 就是輸入來源。
-- **`whisper`** — 本機麥克風 + Silero VAD + OpenAI Whisper；會把
-  ASR 事件以 `user_input` 形式送出。只有安裝可選的 RealtimeSTT 依賴時才會註冊。
 - **`none`** — 永遠不產生事件的 stub；給純 trigger 驅動的生物使用。
 
-`ASRModule` 仍然作為自訂語音輸入的抽象基底隨框架出貨，但不會註冊成可配置的 `asr` 型別。
+音訊/ASR 實作不會由核心套件匯入。請參考 `examples/agent-apps/conversational/custom/` 底下 opt-in 的 ASR 與 Whisper 輸入模組，並透過 `type: custom` 載入。
 
 自訂輸入可透過生物設定中的 `type: custom` 或 `type: package`
 註冊。它們必須實作 `InputModule`，並由 `bootstrap/io.py` 載入。

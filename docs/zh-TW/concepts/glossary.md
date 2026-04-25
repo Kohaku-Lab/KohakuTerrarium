@@ -21,7 +21,7 @@ tags:
 
 ## Input / 輸入
 
-外界把使用者訊息交給生物的方式。實際上就是一種特殊的觸發器 — 標記為 `user_input` 的那種。內建的有 CLI、TUI、Whisper ASR、以及 `none` (純觸發器驅動的生物)。完整說明：[輸入](modules/input.md)。
+外界把使用者訊息交給生物的方式。實際上就是一種特殊的觸發器 — 標記為 `user_input` 的那種。內建的有 CLI、TUI、以及 `none` (純觸發器驅動的生物)；音訊/ASR 由 opt-in 的自訂模組提供。完整說明：[輸入](modules/input.md)。
 
 ## Trigger / 觸發器
 

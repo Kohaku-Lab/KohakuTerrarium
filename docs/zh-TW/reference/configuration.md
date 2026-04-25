@@ -142,7 +142,7 @@ Dict 欄位：`{type, module?, class?, options?, ...型別專屬 key}`。
 
 | 欄位 | 型別 | 預設 | 說明 |
 |---|---|---|---|
-| `type` | str | `"cli"` | `cli`、`cli_nonblocking`、`tui`、`whisper` (選用，需要 RealtimeSTT)、`none`、`custom`、`package`。 |
+| `type` | str | `"cli"` | `cli`、`cli_nonblocking`、`tui`、`none`、`custom`、`package`。音訊/ASR 輸入是 custom/package 模組。 |
 | `module` | str | — | 給 `custom` (例如 `./custom/input.py`) 或 `package` (例如 `pkg.mod`) 用。 |
 | `class` | str | — | 要 instantiate 的類別。YAML key 是 `class`；loader 會存到 dataclass 屬性 `class_name`。 |
 | `options` | dict | `{}` | 模組專屬選項。 |

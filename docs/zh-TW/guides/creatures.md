@@ -301,7 +301,7 @@ session_key: shared_workspace
 
 ```yaml
 input:
-  type: cli                  # 或：cli_nonblocking、tui、whisper (選用)、none、custom、package
+  type: cli                  # 或：cli_nonblocking、tui、none、custom、package
   prompt: "> "
   exit_commands: ["exit", "quit"]
 

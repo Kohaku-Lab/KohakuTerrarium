@@ -164,7 +164,7 @@ Creature配置的每一个字段。YAML 形式见 [configuration.md](configurati
 
  **`InputConfig`**
 
-- `type: str = "cli"` — 输入模块类型（`cli`、`cli_nonblocking`、`tui`、`whisper`、`none`、`custom`、`package`）。
+- `type: str = "cli"` — 输入模块类型（`cli`、`cli_nonblocking`、`tui`、`none`、`custom`、`package`）。
 - `module: str | None = None`
 - `class_name: str | None = None` — 由 YAML 的 `class` 键填入。
 - `prompt: str = "> "`

@@ -164,7 +164,7 @@ await agent.stop()
 
 **`InputConfig`**
 
-- `type: str = "cli"` — 輸入模組型別（`cli`、`cli_nonblocking`、`tui`、`whisper`、`none`、`custom`、`package`）。
+- `type: str = "cli"` — 輸入模組型別（`cli`、`cli_nonblocking`、`tui`、`none`、`custom`、`package`）。
 - `module: str | None = None`
 - `class_name: str | None = None` — 由 YAML 的 `class` 鍵填入。
 - `prompt: str = "> "`

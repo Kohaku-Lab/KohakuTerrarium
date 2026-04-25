@@ -172,7 +172,7 @@ input:
     channel_id: 123456
 ```
 
-內建型別：`cli`、`cli_nonblocking`、`tui`、`none`。選用的 RealtimeSTT 套件有裝時還會有 `whisper`。協定請看 [自訂模組](custom-modules.md)。
+內建型別：`cli`、`cli_nonblocking`、`tui`、`none`。音訊/ASR 輸入應設定為 custom 或 package 模組；協定請看 conversational 範例與[自訂模組](custom-modules.md)。
 
 ## 怎麼加 named output sink？
 
