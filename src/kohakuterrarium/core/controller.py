@@ -14,7 +14,6 @@ import asyncio
 import base64
 import re
 import tempfile
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator
@@ -39,6 +38,7 @@ from kohakuterrarium.core.events import TriggerEvent
 from kohakuterrarium.core.executor import Executor
 from kohakuterrarium.core.job import JobResult, JobStatus, JobStore
 from kohakuterrarium.core.registry import Registry
+from kohakuterrarium.core.tool_output import materialize_image_part, render_content_text
 from kohakuterrarium.llm.base import LLMProvider
 from kohakuterrarium.llm.message import ContentPart, FilePart, ImagePart, TextPart
 from kohakuterrarium.llm.tools import build_provider_native_tools, build_tool_schemas
@@ -359,13 +359,19 @@ class Controller:
         text_parts: list[str] = []
         image_parts: list[ImagePart] = []
         file_parts: list[FilePart] = []
-        has_multimodal = False
+
+        def append_multimodal(prefix: str, parts: list[ContentPart]) -> None:
+            part_text = render_content_text(parts)
+            text_parts.append(f"{prefix}\n{part_text}" if part_text else prefix)
+            for part in parts:
+                if isinstance(part, ImagePart):
+                    image_parts.append(part)
+                elif isinstance(part, FilePart):
+                    file_parts.append(part)
 
         for event in events:
             if event.type == "user_input":
                 if isinstance(event.content, list):
-                    has_multimodal = True
-                    # Extract text and non-text parts from multimodal content
                     for part in event.content:
                         if isinstance(part, TextPart):
                             text_parts.append(part.text)
@@ -376,8 +382,11 @@ class Controller:
                 elif isinstance(event.content, str):
                     text_parts.append(event.content)
             elif event.type == "tool_complete":
-                content_text = event.get_text_content()
-                text_parts.append(f"[Tool {event.job_id} completed]\n{content_text}")
+                prefix = f"[Tool {event.job_id} completed]"
+                if isinstance(event.content, list):
+                    append_multimodal(prefix, event.content)
+                else:
+                    text_parts.append(f"{prefix}\n{event.get_text_content()}")
             elif event.type == "subagent_output":
                 content_text = event.get_text_content()
                 text_parts.append(f"[Sub-agent {event.job_id} output]\n{content_text}")
@@ -385,11 +394,9 @@ class Controller:
                 content_text = event.get_text_content()
                 text_parts.append(f"[{event.type}] {content_text}")
 
-        # Combine text
         combined_text = "\n\n".join(text_parts)
 
-        # Return multimodal if we have non-text parts
-        if has_multimodal and (image_parts or file_parts):
+        if image_parts or file_parts:
             result: list[ContentPart] = [TextPart(text=combined_text)]
             result.extend(image_parts)
             result.extend(file_parts)
@@ -530,8 +537,6 @@ class Controller:
     # Structured assistant content (images etc. from provider-native tools)
     # ------------------------------------------------------------------
 
-    _DATA_URL_RE = re.compile(r"^data:image/(?P<ext>[\w+-]+);base64,(?P<b64>.*)$")
-
     def _collect_structured_assistant_parts(self) -> list[ContentPart]:
         """Pull structured parts the provider captured during the turn.
 
@@ -550,7 +555,16 @@ class Controller:
         materialized: list[ContentPart] = []
         for part in source:
             if isinstance(part, ImagePart):
-                materialized.append(self._persist_image_part(part))
+                rewritten = materialize_image_part(
+                    part,
+                    getattr(self, "session_store", None),
+                    subdir="generated_images",
+                    stem_hint=part.source_name,
+                    elide_without_store=False,
+                )
+                materialized.append(
+                    rewritten if isinstance(rewritten, ImagePart) else part
+                )
             else:
                 materialized.append(part)
         return materialized
@@ -562,51 +576,14 @@ class Controller:
         session store is attached or the URL isn't a recognised data
         URL — keeping behavior correct in unit tests / ephemeral runs.
         """
-        match = self._DATA_URL_RE.match(part.url or "")
-        if not match:
-            return part
-        store = getattr(self, "session_store", None)
-        if store is None:
-            return part
-
-        ext = match.group("ext").split(";", 1)[0].lower()
-        b64 = match.group("b64")
-        try:
-            raw = base64.b64decode(b64, validate=False)
-        except Exception as e:  # pragma: no cover — defensive
-            logger.warning("Failed to decode assistant image", error=str(e))
-            return part
-
-        base_name = (part.source_name or f"img_{int(time.time() * 1000)}").strip()
-        safe_stem = re.sub(r"[^\w.-]", "_", base_name) or "img"
-        safe_ext = re.sub(r"[^\w]", "", ext) or "png"
-        filename = f"generated_images/{safe_stem}.{safe_ext}"
-        try:
-            disk_path = store.write_artifact(filename, raw)
-        except Exception as e:
-            logger.warning(
-                "Failed to persist assistant image — falling back to data URL",
-                error=str(e),
-            )
-            return part
-
-        session_id = getattr(store, "session_id", "") or ""
-        if session_id:
-            served = f"/api/sessions/{session_id}/artifacts/{filename}"
-        else:
-            served = disk_path.as_uri()
-
-        new_part = ImagePart(
-            url=served,
-            detail=part.detail,
-            source_type=part.source_type,
-            source_name=part.source_name,
+        rewritten = materialize_image_part(
+            part,
+            getattr(self, "session_store", None),
+            subdir="generated_images",
+            stem_hint=part.source_name,
+            elide_without_store=False,
         )
-        # Preserve opaque metadata (e.g. revised_prompt) for the event log.
-        for attr in ("revised_prompt",):
-            if hasattr(part, attr):
-                setattr(new_part, attr, getattr(part, attr))
-        return new_part
+        return rewritten if isinstance(rewritten, ImagePart) else part
 
     async def _run_text_completion(
         self, messages: list[dict]

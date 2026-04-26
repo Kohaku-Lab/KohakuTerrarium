@@ -36,7 +36,8 @@ class ToolConfig:
 
     Attributes:
         timeout: Maximum execution time in seconds (0 = no timeout)
-        max_output: Maximum output size in bytes (0 = no limit)
+        max_output: Maximum UTF-8 bytes of text output to keep centrally
+            after execution. ``0`` means no limit.
         working_dir: Working directory for execution
         env: Additional environment variables
         notify_controller_on_background_complete: Whether a backgrounded tool
@@ -45,7 +46,7 @@ class ToolConfig:
     """
 
     timeout: float = 60.0
-    max_output: int = 0
+    max_output: int = 64 * 1024
     working_dir: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     notify_controller_on_background_complete: bool = True

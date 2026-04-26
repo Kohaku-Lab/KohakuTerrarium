@@ -50,9 +50,12 @@ def builtin_schema(kind: str) -> dict:
                 {
                     "name": "max_output",
                     "type_hint": "int",
-                    "default": 0,
+                    "default": 65536,
                     "required": False,
-                    "description": "Max output bytes. 0 = unlimited.",
+                    "description": (
+                        "Central UTF-8 byte cap for tool text output/text parts. "
+                        "0 = unlimited."
+                    ),
                 },
                 {
                     "name": "notify_controller_on_background_complete",

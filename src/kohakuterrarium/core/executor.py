@@ -8,7 +8,6 @@ import asyncio
 from pathlib import Path
 from typing import Any, Callable
 
-from kohakuterrarium.core.constants import TOOL_OUTPUT_PREVIEW_CHARS
 from kohakuterrarium.core.events import TriggerEvent, create_tool_complete_event
 from kohakuterrarium.core.job import (
     JobResult,
@@ -18,6 +17,7 @@ from kohakuterrarium.core.job import (
     JobType,
     generate_job_id,
 )
+from kohakuterrarium.core.tool_output import normalize_tool_output
 from kohakuterrarium.modules.tool.base import BaseTool, Tool, ToolContext
 from kohakuterrarium.parsing.events import ToolCallEvent
 from kohakuterrarium.utils.logging import get_logger
@@ -252,23 +252,34 @@ class Executor:
             else:
                 result = await tool.execute(args, context=context)
 
-            # Create job result
+            max_output = tool.config.max_output if isinstance(tool, BaseTool) else 0
+            artifact_store = getattr(self._agent, "session_store", None)
+            normalized = normalize_tool_output(
+                result.output,
+                max_output=max_output,
+                job_id=job_id,
+                tool_name=tool.tool_name,
+                artifact_store=artifact_store,
+            )
+            metadata = dict(result.metadata or {})
+            metadata.update(normalized.metadata)
+
+            # Create job result from centrally normalized output.
             job_result = JobResult(
                 job_id=job_id,
-                output=result.output,
+                output=normalized.output,
                 exit_code=result.exit_code,
                 error=result.error,
-                metadata=result.metadata,
+                metadata=metadata,
             )
 
-            # Update status (output may be string or list of multimodal parts)
-            output_str = result.output if isinstance(result.output, str) else ""
+            # Update status from normalized text stats.
             self.job_store.update_status(
                 job_id,
                 state=JobState.DONE if result.success else JobState.ERROR,
-                output_lines=output_str.count("\n") + 1 if output_str else 0,
-                output_bytes=len(output_str.encode("utf-8")) if output_str else 0,
-                preview=(output_str[:TOOL_OUTPUT_PREVIEW_CHARS] if output_str else ""),
+                output_lines=normalized.stats.lines,
+                output_bytes=normalized.stats.bytes,
+                preview=normalized.stats.preview,
                 error=result.error,
             )
             self.job_store.store_result(job_result)
@@ -283,7 +294,7 @@ class Executor:
             if not is_direct:
                 event = create_tool_complete_event(
                     job_id=job_id,
-                    content=result.output if result.output else "",
+                    content=normalized.output if normalized.output else "",
                     exit_code=result.exit_code,
                     error=result.error,
                 )

@@ -8,7 +8,12 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from kohakuterrarium.core.tool_output import render_content_text
+
+if TYPE_CHECKING:
+    from kohakuterrarium.llm.message import ContentPart
 
 
 class JobType(Enum):
@@ -127,7 +132,7 @@ class JobResult:
     """
 
     job_id: str
-    output: str = ""
+    output: "str | list[ContentPart]" = ""
     exit_code: int | None = None
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -137,21 +142,23 @@ class JobResult:
         """Check if job completed successfully."""
         return self.error is None and (self.exit_code is None or self.exit_code == 0)
 
+    def get_text_output(self) -> str:
+        """Render output to safe text for commands/logging."""
+        return render_content_text(self.output)
+
     def get_lines(self, start: int = 0, count: int | None = None) -> list[str]:
-        """Get lines from output with optional slicing."""
-        lines = self.output.split("\n")
+        """Get rendered text lines with optional slicing."""
+        lines = self.get_text_output().split("\n")
         if count is None:
             return lines[start:]
         return lines[start : start + count]
 
     def truncated(self, max_chars: int = 1000) -> str:
-        """Get truncated output."""
-        if len(self.output) <= max_chars:
-            return self.output
-        return (
-            self.output[:max_chars]
-            + f"\n... ({len(self.output) - max_chars} more chars)"
-        )
+        """Get truncated rendered text output."""
+        text = self.get_text_output()
+        if len(text) <= max_chars:
+            return text
+        return text[:max_chars] + f"\n... ({len(text) - max_chars} more chars)"
 
 
 def generate_job_id(prefix: str = "job") -> str:

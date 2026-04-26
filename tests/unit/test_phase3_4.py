@@ -20,6 +20,7 @@ _SKIP_WINDOWS = pytest.mark.skipif(
 
 from kohakuterrarium.builtins.tools import BashTool
 from kohakuterrarium.commands import CommandResult, parse_command_args
+from kohakuterrarium.core.executor import Executor
 from kohakuterrarium.core.job import (
     JobResult,
     JobState,
@@ -29,7 +30,9 @@ from kohakuterrarium.core.job import (
     generate_job_id,
 )
 from kohakuterrarium.core.registry import Registry
+from kohakuterrarium.llm.message import ImagePart, TextPart
 from kohakuterrarium.modules.tool import ExecutionMode, ToolConfig, ToolResult
+from kohakuterrarium.modules.tool.base import BaseTool
 
 
 class TestJobStatus:
@@ -143,6 +146,15 @@ class TestJobResult:
         assert len(truncated) < len(long_output)
         assert "more chars" in truncated
 
+    def test_multimodal_text_output(self):
+        result = JobResult(
+            job_id="test_123",
+            output=[TextPart(text="hello"), ImagePart(url="https://x/img.png")],
+        )
+        text = result.get_text_output()
+        assert "hello" in text
+        assert "https://x/img.png" in text
+
 
 class TestJobStore:
     """Tests for JobStore."""
@@ -224,7 +236,7 @@ class TestToolBase:
         """Test ToolConfig defaults."""
         config = ToolConfig()
         assert config.timeout == 60.0
-        assert config.max_output == 0
+        assert config.max_output == 64 * 1024
         assert config.working_dir is None
 
     def test_execution_mode_values(self):
@@ -353,8 +365,6 @@ class TestExecutorBasic:
 
     def test_register_tool(self):
         """Test registering tools with executor."""
-        from kohakuterrarium.core.executor import Executor
-
         executor = Executor()
         executor.register_tool(BashTool())
 
@@ -363,10 +373,21 @@ class TestExecutorBasic:
 
     def test_get_nonexistent_tool(self):
         """Test getting non-existent tool."""
-        from kohakuterrarium.core.executor import Executor
-
         executor = Executor()
         assert executor.get_tool("nonexistent") is None
+
+
+class LongOutputTool(BaseTool):
+    @property
+    def tool_name(self) -> str:
+        return "long_output"
+
+    @property
+    def description(self) -> str:
+        return "Long output test tool"
+
+    async def _execute(self, args, **kwargs):
+        return ToolResult(output="abcdef")
 
 
 class TestExecutorAsync:
@@ -376,8 +397,6 @@ class TestExecutorAsync:
     @pytest.mark.asyncio
     async def test_submit_and_wait(self):
         """Test submitting and waiting for a job."""
-        from kohakuterrarium.core.executor import Executor
-
         executor = Executor()
         executor.register_tool(BashTool())
 
@@ -393,8 +412,6 @@ class TestExecutorAsync:
     @pytest.mark.asyncio
     async def test_get_status_while_running(self):
         """Test getting status while job runs."""
-        from kohakuterrarium.core.executor import Executor
-
         executor = Executor()
         executor.register_tool(BashTool())
 
@@ -411,9 +428,24 @@ class TestExecutorAsync:
     @pytest.mark.asyncio
     async def test_submit_invalid_tool(self):
         """Test submitting with invalid tool."""
-        from kohakuterrarium.core.executor import Executor
-
         executor = Executor()
 
         with pytest.raises(ValueError, match="not registered"):
             await executor.submit("nonexistent", {})
+
+    @pytest.mark.asyncio
+    async def test_executor_applies_max_output_centrally(self):
+        tool = LongOutputTool(ToolConfig(max_output=3))
+        executor = Executor()
+        executor.register_tool(tool)
+
+        job_id = await executor.submit("long_output", {})
+        result = await executor.wait_for(job_id)
+
+        assert result is not None
+        assert isinstance(result.output, str)
+        assert result.output.startswith("abc")
+        assert "truncated" in result.output
+        status = executor.get_status(job_id)
+        assert status is not None
+        assert status.output_bytes > 0

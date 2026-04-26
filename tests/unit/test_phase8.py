@@ -13,8 +13,10 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 from unittest.mock import MagicMock
 
+from kohakuterrarium.core.job import JobResult, JobState, JobStatus, JobStore, JobType
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.base import LLMProvider
+from kohakuterrarium.llm.message import ImagePart, TextPart
 from kohakuterrarium.modules.subagent.base import SubAgent, SubAgentJob, SubAgentResult
 from kohakuterrarium.modules.subagent.config import ContextUpdateMode, SubAgentConfig
 from kohakuterrarium.modules.tool.base import Tool, ToolConfig, ToolResult
@@ -985,7 +987,6 @@ class TestJobsCommand:
     async def test_jobs_no_running(self):
         """Test jobs command with no running jobs."""
         from kohakuterrarium.commands.read import JobsCommand
-        from kohakuterrarium.core.job import JobStore
 
         cmd = JobsCommand()
         job_store = JobStore()
@@ -999,7 +1000,6 @@ class TestJobsCommand:
     async def test_jobs_with_running(self):
         """Test jobs command with running jobs."""
         from kohakuterrarium.commands.read import JobsCommand
-        from kohakuterrarium.core.job import JobState, JobStatus, JobStore, JobType
 
         cmd = JobsCommand()
         job_store = JobStore()
@@ -1038,7 +1038,6 @@ class TestWaitCommand:
     async def test_wait_job_not_found(self):
         """Test wait command with non-existent job."""
         from kohakuterrarium.commands.read import WaitCommand
-        from kohakuterrarium.core.job import JobStore
 
         cmd = WaitCommand()
         job_store = JobStore()
@@ -1052,13 +1051,6 @@ class TestWaitCommand:
     async def test_wait_already_complete(self):
         """Test wait command with already completed job."""
         from kohakuterrarium.commands.read import WaitCommand
-        from kohakuterrarium.core.job import (
-            JobResult,
-            JobState,
-            JobStatus,
-            JobStore,
-            JobType,
-        )
 
         cmd = WaitCommand()
         job_store = JobStore()
@@ -1084,6 +1076,67 @@ class TestWaitCommand:
         result = await cmd.execute("done_123", context)
         assert "DONE" in result.content
         assert "Hello world" in result.content
+
+    async def test_wait_multimodal_result_uses_safe_renderer(self):
+        from kohakuterrarium.commands.read import WaitCommand
+
+        cmd = WaitCommand()
+        job_store = JobStore()
+        status = JobStatus(
+            job_id="done_mm",
+            job_type=JobType.TOOL,
+            type_name="vision",
+            state=JobState.DONE,
+        )
+        job_store.register(status)
+        job_store.store_result(
+            JobResult(
+                job_id="done_mm",
+                output=[TextPart(text="See image"), ImagePart(url="https://x/img.png")],
+            )
+        )
+
+        context = MagicMock()
+        context.job_store = job_store
+
+        result = await cmd.execute("done_mm", context)
+        assert "See image" in result.content
+        assert "https://x/img.png" in result.content
+        assert "ImagePart" not in result.content
+
+
+class TestReadCommand:
+    async def test_read_job_multimodal_result_uses_safe_renderer(self):
+        from kohakuterrarium.commands.read import ReadCommand
+
+        cmd = ReadCommand()
+        job_store = JobStore()
+        status = JobStatus(
+            job_id="read_mm",
+            job_type=JobType.TOOL,
+            type_name="vision",
+            state=JobState.DONE,
+        )
+        job_store.register(status)
+        job_store.store_result(
+            JobResult(
+                job_id="read_mm",
+                output=[
+                    TextPart(text="Output text"),
+                    ImagePart(url="https://x/img.png"),
+                ],
+            )
+        )
+
+        context = MagicMock()
+        context.job_store = job_store
+        context.get_job_result = job_store.get_result
+        context.get_job_status = job_store.get_status
+
+        result = await cmd.execute("read_mm", context)
+        assert "Output text" in result.content
+        assert "https://x/img.png" in result.content
+        assert "ImagePart" not in result.content
 
 
 # =============================================================================

@@ -193,15 +193,6 @@ def _read_output_file(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
-def _truncate_output(output: str, max_output: int) -> str:
-    if max_output > 0 and len(output) > max_output:
-        return (
-            output[:max_output]
-            + f"\n... (truncated, {len(output) - max_output} chars omitted)"
-        )
-    return output
-
-
 def _get_available_shells() -> list[str]:
     """Return shell types whose executable can be resolved (cached)."""
     global _AVAILABLE_SHELLS
@@ -358,9 +349,7 @@ class ShellTool(BaseTool):
                 )
             except asyncio.TimeoutError:
                 await _terminate_process_tree(process)
-                output = _truncate_output(
-                    _read_output_file(output_path), self.config.max_output
-                )
+                output = _read_output_file(output_path)
                 return ToolResult(
                     output=output,
                     error=f"Command timed out after {self.config.timeout}s",
@@ -377,9 +366,7 @@ class ShellTool(BaseTool):
                 await _terminate_process_tree(process)
                 raise
 
-            output = _truncate_output(
-                _read_output_file(output_path), self.config.max_output
-            )
+            output = _read_output_file(output_path)
             exit_code = process.returncode or 0
 
             logger.debug(
@@ -415,7 +402,7 @@ class ShellTool(BaseTool):
             if process is not None:
                 await _terminate_process_tree(process)
             error_output = (
-                _truncate_output(_read_output_file(output_path), self.config.max_output)
+                _read_output_file(output_path)
                 if output_path and output_path.exists()
                 else ""
             )

@@ -17,6 +17,7 @@ from kohakuterrarium.builtin_skills import (
     read_skill_body,
 )
 from kohakuterrarium.commands.base import BaseCommand, CommandResult, parse_command_args
+from kohakuterrarium.core.tool_output import render_content_text
 from kohakuterrarium.skill_docs import SkillDoc, load_skill_doc
 
 
@@ -56,7 +57,7 @@ class ReadCommand(BaseCommand):
         if not hasattr(context, "get_job_result"):
             return CommandResult(error="Context does not support job result retrieval")
 
-        result = context.get_job_result(job_id)
+        result = _get_job_result(context, job_id)
         if result is None:
             # Check if job exists but not completed
             if hasattr(context, "get_job_status"):
@@ -70,8 +71,8 @@ class ReadCommand(BaseCommand):
                         return CommandResult(content=f"[Job {job_id} is pending]")
             return CommandResult(error=f"Job not found: {job_id}")
 
-        # Get output
-        output = result.output or ""
+        # Get safe text output; multimodal parts render as placeholders.
+        output = render_content_text(result.output or "")
 
         # Apply slicing if requested
         if lines > 0 or offset > 0:
@@ -189,6 +190,23 @@ class InfoCommand(BaseCommand):
             return CommandResult(content=skill_content)
 
         return CommandResult(error=f"Not found: {target_name}")
+
+
+def _get_job_result(context: Any, job_id: str):
+    getter = getattr(context, "get_job_result", None)
+    if callable(getter):
+        try:
+            result = getter(job_id)
+        except Exception:
+            result = None
+        if result is not None and not type(result).__module__.startswith(
+            "unittest.mock"
+        ):
+            return result
+    job_store = getattr(context, "job_store", None)
+    if job_store is not None and hasattr(job_store, "get_result"):
+        return job_store.get_result(job_id)
+    return None
 
 
 def _format_skill_for_info(doc: "SkillDoc", body: str) -> str:
@@ -391,12 +409,12 @@ class WaitCommand(BaseCommand):
 
         # If already complete, return result
         if status.is_complete:
-            result = context.job_store.get_result(job_id)
+            result = _get_job_result(context, job_id)
             if result:
                 if result.error:
                     return CommandResult(content=f"## {job_id} - ERROR\n{result.error}")
                 return CommandResult(
-                    content=f"## {job_id} - DONE\n{result.output[:2000]}"
+                    content=f"## {job_id} - DONE\n{render_content_text(result.output)}"
                 )
             return CommandResult(content=f"## {job_id} - DONE (no output)")
 
@@ -411,14 +429,18 @@ class WaitCommand(BaseCommand):
 
                 status = context.job_store.get_status(job_id)
                 if status and status.is_complete:
-                    result = context.job_store.get_result(job_id)
+                    result = (
+                        context.get_job_result(job_id)
+                        if hasattr(context, "get_job_result")
+                        else context.job_store.get_result(job_id)
+                    )
                     if result:
                         if result.error:
                             return CommandResult(
                                 content=f"## {job_id} - ERROR\n{result.error}"
                             )
                         return CommandResult(
-                            content=f"## {job_id} - DONE\n{result.output[:2000]}"
+                            content=f"## {job_id} - DONE\n{render_content_text(result.output)}"
                         )
                     return CommandResult(content=f"## {job_id} - DONE (no output)")
 

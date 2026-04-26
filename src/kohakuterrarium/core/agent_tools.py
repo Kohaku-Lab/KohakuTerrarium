@@ -12,6 +12,7 @@ from kohakuterrarium.core.backgroundify import BackgroundifyHandle, PromotionRes
 from kohakuterrarium.core.controller import Controller
 from kohakuterrarium.core.events import create_tool_complete_event
 from kohakuterrarium.core.job import JobResult
+from kohakuterrarium.core.tool_output import render_content_text
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode
 from kohakuterrarium.parsing import ToolCallEvent
 from kohakuterrarium.utils.logging import get_logger
@@ -357,7 +358,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             return
 
         if result is not None and hasattr(result, "error") and result.error:
-            output = result.output or ""
+            output = render_content_text(result.output or "")
             interrupted = bool(getattr(result, "interrupted", False))
             cancelled = bool(getattr(result, "cancelled", False))
             final_state = (
@@ -452,7 +453,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                 prefix = "Interrupted" if interrupted else "Error"
                 content = f"{prefix}: {error_text}"
             elif result is not None and hasattr(result, "error") and result.error:
-                output = result.output or ""
+                output = render_content_text(result.output or "")
                 interrupted = bool(getattr(result, "interrupted", False))
                 cancelled = bool(getattr(result, "cancelled", False))
                 prefix = (
@@ -497,8 +498,9 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                     f"## {job_id} - {'INTERRUPTED' if interrupted else 'FAILED'}\n{error_text}"
                 )
             elif result is not None:
-                output = result.output if hasattr(result, "output") else str(result)
-                output = output or ""
+                output = render_content_text(
+                    result.output if hasattr(result, "output") else str(result)
+                )
                 error = getattr(result, "error", None)
                 if error:
                     interrupted = bool(getattr(result, "interrupted", False))

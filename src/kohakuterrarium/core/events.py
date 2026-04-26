@@ -15,7 +15,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from kohakuterrarium.llm.message import ContentPart, TextPart, normalize_content_parts
+from kohakuterrarium.core.tool_output import render_content_text
+from kohakuterrarium.llm.message import ContentPart, normalize_content_parts
 
 # Type alias for event content (text or multimodal)
 EventContent = str | list[ContentPart]
@@ -74,13 +75,10 @@ class TriggerEvent:
         """
         Extract text content from event.
 
-        For multimodal events, concatenates all text parts.
+        For multimodal events, renders safe text placeholders for
+        non-text parts without exposing raw base64 payloads.
         """
-        if isinstance(self.content, str):
-            return self.content
-        return "\n".join(
-            part.text for part in self.content if isinstance(part, TextPart)
-        )
+        return render_content_text(self.content)
 
     def is_multimodal(self) -> bool:
         """Check if event has multimodal content."""
@@ -158,20 +156,21 @@ def create_user_input_event(
 
 def create_tool_complete_event(
     job_id: str,
-    content: str,
+    content: EventContent,
     exit_code: int | None = None,
     error: str | None = None,
     **extra_context: Any,
 ) -> TriggerEvent:
     """Create a tool completion event with standard context."""
     context: dict[str, Any] = extra_context
+    normalized = normalize_content_parts(content)
     if exit_code is not None:
         context["exit_code"] = exit_code
     if error is not None:
         context["error"] = error
     return TriggerEvent(
         type=EventType.TOOL_COMPLETE,
-        content=content,
+        content=normalized if normalized is not None else "",
         context=context,
         job_id=job_id,
         stackable=True,
