@@ -37,6 +37,7 @@ from kohakuterrarium.core.session import Session
 from kohakuterrarium.core.termination import TerminationChecker, TerminationConfig
 from kohakuterrarium.core.trigger_manager import TriggerManager
 from kohakuterrarium.llm.message import ContentPart
+from kohakuterrarium.mcp.client import MCPClientManager, MCPServerConfig
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.modules.plugin.base import PluginContext
@@ -348,13 +349,6 @@ class Agent(
         """Initialize MCP client manager and connect configured servers."""
         mcp_configs = self.config.mcp_servers
         if not mcp_configs:
-            self._mcp_manager = None
-            return
-
-        try:
-            from kohakuterrarium.mcp.client import MCPClientManager, MCPServerConfig
-        except ImportError:
-            logger.warning("MCP configured but mcp package not installed")
             self._mcp_manager = None
             return
 
@@ -858,8 +852,8 @@ class Agent(
         logger.debug("Session store attached", agent=self.config.name)
 
     # Wave F attach / detach — implementation in
-    # ``kohakuterrarium.session.attach``; thin wrappers here to keep
-    # this file under the 1000-line hard cap.
+    # ``kohakuterrarium.session.attachment_service``; thin wrappers here
+    # to keep this file under the 1000-line hard cap.
     attach_to_session = _attach_to_session
     detach_from_session = _detach_from_session
 

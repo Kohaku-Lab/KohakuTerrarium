@@ -15,7 +15,7 @@ statement, so the dep-graph linter does not see it as an in-function import.
 import sys
 from typing import Any
 
-from kohakuterrarium.session.attach import attach_agent_to_session
+from kohakuterrarium.session.attachment_service import attach_agent_to_session
 from kohakuterrarium.session.session import Session as AsyncSession
 
 

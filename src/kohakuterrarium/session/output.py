@@ -6,9 +6,11 @@ as the WS StreamOutput). Captures text, tool activity, processing state,
 trigger events, and token usage without modifying the processing loop.
 """
 
+import json
 from typing import Any
 
 from kohakuterrarium.modules.output.base import OutputModule
+from kohakuterrarium.session.history import replay_conversation
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -167,9 +169,6 @@ class SessionOutput(OutputModule):
         # ``_event_key_prefix`` so attached agents' snapshots/state
         # live under their attached namespace.
         try:
-            # Lazy import avoids circular dep at module load time.
-            from kohakuterrarium.session.history import replay_conversation
-
             events = self._store.get_events(self._event_key_prefix)
             if self._agent and hasattr(self._agent, "controller"):
                 messages = self._agent.controller.conversation.to_messages()
@@ -431,13 +430,11 @@ class SessionOutput(OutputModule):
         child agent ran outside the manager (pre-Wave-F plugin flow).
         Wave F replacement: plugin-spawned ``Agent`` instances now
         attach to the host :class:`Session` via
-        :func:`kohakuterrarium.session.attach.attach_agent_to_session`
+        :func:`kohakuterrarium.session.attachment_service.attach_agent_to_session`
         and write their own events under
         ``<host>:attached:<role>:<attach_seq>:e<seq>``. This method
         stays for the SubAgent (tool-like) path.
         """
-        import json as _json
-
         task_record = self._subagent_tasks.pop(job_id, None)
         task_text = task_record.get("task", "") if task_record is not None else ""
         try:
@@ -461,7 +458,7 @@ class SessionOutput(OutputModule):
                     "output_preview": (output_text or "")[:500],
                     "source": "session_output",
                 },
-                conv_json=_json.dumps(convo),
+                conv_json=json.dumps(convo),
             )
         except Exception as e:
             logger.debug(

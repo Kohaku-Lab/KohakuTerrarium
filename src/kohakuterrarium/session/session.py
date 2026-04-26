@@ -13,6 +13,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from kohakuterrarium.session.attachment_service import attach_agent_to_session
+from kohakuterrarium.session.attachment_service import detach_agent_from_session
+from kohakuterrarium.session.attachment_service import get_attach_state
+from kohakuterrarium.session.errors import NotAttachedError
 from kohakuterrarium.session.migrations import path_for_version
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.version import FORMAT_VERSION
@@ -147,14 +151,11 @@ class Session:
         """Attach ``agent`` to this session under ``role``.
 
         Thin mirror of :meth:`Agent.attach_to_session` — both call the
-        same underlying primitive in :mod:`kohakuterrarium.session.attach`.
-        Explicit-only; one session per agent
-        (see :class:`kohakuterrarium.session.errors.AlreadyAttachedError`).
+        same underlying primitive in
+        :mod:`kohakuterrarium.session.attachment_service`. Explicit-only;
+        one session per agent (see
+        :class:`kohakuterrarium.session.errors.AlreadyAttachedError`).
         """
-        # Lazy import: avoids the Session <-> attach <-> SessionOutput
-        # import cycle at module load time.
-        from kohakuterrarium.session.attach import attach_agent_to_session
-
         attach_agent_to_session(agent, self, role)
 
     def detach_agent(self, agent: "Agent") -> None:
@@ -164,13 +165,6 @@ class Session:
         :class:`kohakuterrarium.session.errors.NotAttachedError` when
         ``agent`` is not currently attached here.
         """
-        # Lazy import matches the ``attach_agent`` pattern above.
-        from kohakuterrarium.session.attach import (
-            detach_agent_from_session,
-            get_attach_state,
-        )
-        from kohakuterrarium.session.errors import NotAttachedError
-
         state = get_attach_state(agent)
         if state is None or state.get("session") is not self:
             raise NotAttachedError(

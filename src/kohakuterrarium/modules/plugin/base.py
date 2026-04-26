@@ -226,7 +226,7 @@ class PluginContext:
 
         Wave F sugar: convenience wrapper over
         ``Agent.from_path(...)`` / ``Agent(config)`` plus
-        :func:`kohakuterrarium.session.attach.attach_agent_to_session`.
+        :func:`kohakuterrarium.session.attachment_service.attach_agent_to_session`.
         The resulting agent writes its events under
         ``<host>:attached:plugin:<plugin_name>/<role>:<attach_seq>:e<seq>``
         in the host session's backing store.
