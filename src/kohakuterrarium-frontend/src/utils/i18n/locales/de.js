@@ -324,17 +324,20 @@ export default {
   "studio.dashboard.deletedMessage": '"{name}" geloescht',
   "studio.dashboard.sourceManifest": "manifest",
   "studio.dashboard.sourcePackage": ({ name }) => `Paket: ${name}`,
-  "studio.dashboard.readOnlyModule": "In {source} deklariert. Binde es aus dem Pool in eine Kreatur ein.",
+  "studio.dashboard.readOnlyModule":
+    "In {source} deklariert. Binde es aus dem Pool in eine Kreatur ein.",
 
   "studio.newCreature.title": "New creature",
   "studio.newCreature.name": "Name",
   "studio.newCreature.nameHint":
     "Wird als Ordnername verwendet: Buchstaben, Ziffern und Unterstriche. Keine Leerzeichen oder Schraegstriche.",
   "studio.newCreature.namePlaceholder": "my_creature",
-  "studio.newCreature.nameInvalid": "Ungueltiger Name. Keine Leerzeichen, Schraegstriche oder fuehrenden Punkte.",
+  "studio.newCreature.nameInvalid":
+    "Ungueltiger Name. Keine Leerzeichen, Schraegstriche oder fuehrenden Punkte.",
   "studio.newCreature.nameExists": "Eine Kreatur mit diesem Namen existiert bereits.",
   "studio.newCreature.baseConfig": "Basiskonfiguration (optional)",
-  "studio.newCreature.baseConfigHint": "Von einer anderen Kreatur ueber @package/creatures/name erben.",
+  "studio.newCreature.baseConfigHint":
+    "Von einer anderen Kreatur ueber @package/creatures/name erben.",
   "studio.newCreature.baseConfigPlaceholder": "@kt-biome/creatures/general",
   "studio.newCreature.description": "Description (optional)",
   "studio.newCreature.descriptionPlaceholder": "Wofuer diese Kreatur gedacht ist.",
@@ -344,9 +347,11 @@ export default {
   "studio.newModule.title": "New module",
   "studio.newModule.kind": "Art",
   "studio.newModule.name": "Name",
-  "studio.newModule.nameHint": "Wird als Dateiname ohne Endung verwendet (foo → modules/tools/foo.py).",
+  "studio.newModule.nameHint":
+    "Wird als Dateiname ohne Endung verwendet (foo → modules/tools/foo.py).",
   "studio.newModule.namePlaceholder": "my_module",
-  "studio.newModule.nameInvalid": "Ungueltiger Name. Keine Leerzeichen, Schraegstriche oder fuehrenden Punkte.",
+  "studio.newModule.nameInvalid":
+    "Ungueltiger Name. Keine Leerzeichen, Schraegstriche oder fuehrenden Punkte.",
   "studio.newModule.nameExists": "Ein Modul mit diesem Namen existiert bereits.",
   "studio.newModule.editorNote":
     "A starter file will be written. You can edit the form, execute body, and documentation from the module editor after it's created.",
@@ -359,7 +364,8 @@ export default {
   "studio.newModule.manifestSyncConfirm": "Zu kohaku.yaml hinzufuegen",
   "studio.newModule.manifestSyncCancel": "Ueberspringen",
   "studio.newModule.manifestSyncAdded": ({ name }) => `${name} zu kohaku.yaml hinzugefuegt`,
-  "studio.newModule.manifestSyncAlready": ({ name }) => `${name} ist bereits in kohaku.yaml eingetragen`,
+  "studio.newModule.manifestSyncAlready": ({ name }) =>
+    `${name} ist bereits in kohaku.yaml eingetragen`,
 
   // ─── Memory / embedding ─────────────────────────────────────
   "studio.memory.provider": "Provider",
@@ -515,7 +521,8 @@ export default {
   "studio.creature.systemPrompt.modeReplace": "replace mode — base prompt is discarded",
 
   "studio.creature.modules.title": "Modules wired",
-  "studio.creature.modules.empty": "Keine Module eingebunden. Klicke links auf Eintraege, um sie hinzuzufuegen.",
+  "studio.creature.modules.empty":
+    "Keine Module eingebunden. Klicke links auf Eintraege, um sie hinzuzufuegen.",
   "studio.creature.modules.addHint":
     "Click an item in the pool to add it — or open the detail panel on the right for an explicit Add button.",
   "studio.creature.modules.remove": "Remove",
@@ -603,7 +610,8 @@ export default {
   "studio.module.guard.hint":
     "This module is declared outside the workspace — studio only edits files under <root>/modules/.",
 
-  "studio.module.notFound.title": ({ kind, name }) => `Keine Arbeitsbereichsdatei fuer ${kind}/${name}.`,
+  "studio.module.notFound.title": ({ kind, name }) =>
+    `Keine Arbeitsbereichsdatei fuer ${kind}/${name}.`,
   "studio.module.notFound.hint": "Create it from the dashboard, or check the name.",
 
   "studio.module.confirm.unsavedLeave": "You have unsaved changes. Leave this page?",

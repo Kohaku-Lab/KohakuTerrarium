@@ -367,7 +367,8 @@ export default {
   "studio.newCreature.nameHint":
     "폴더 이름으로 사용됩니다. 문자, 숫자, 밑줄만 사용할 수 있으며 공백이나 슬래시는 사용할 수 없습니다.",
   "studio.newCreature.namePlaceholder": "my_creature",
-  "studio.newCreature.nameInvalid": "잘못된 이름입니다. 공백, 슬래시, 맨 앞의 점은 사용할 수 없습니다.",
+  "studio.newCreature.nameInvalid":
+    "잘못된 이름입니다. 공백, 슬래시, 맨 앞의 점은 사용할 수 없습니다.",
   "studio.newCreature.nameExists": "이 이름의 크리처가 이미 있습니다.",
   "studio.newCreature.baseConfig": "기본 설정(선택 사항)",
   "studio.newCreature.baseConfigHint": "@package/creatures/name 형식으로 다른 크리처를 상속합니다.",
@@ -382,7 +383,8 @@ export default {
   "studio.newModule.name": "이름",
   "studio.newModule.nameHint": "파일 이름의 기준으로 사용됩니다(foo → modules/tools/foo.py).",
   "studio.newModule.namePlaceholder": "my_module",
-  "studio.newModule.nameInvalid": "잘못된 이름입니다. 공백, 슬래시, 맨 앞의 점은 사용할 수 없습니다.",
+  "studio.newModule.nameInvalid":
+    "잘못된 이름입니다. 공백, 슬래시, 맨 앞의 점은 사용할 수 없습니다.",
   "studio.newModule.nameExists": "이 이름의 모듈이 이미 있습니다.",
   "studio.newModule.editorNote":
     "시작용 파일이 작성됩니다. 생성한 뒤 모듈 편집기에서 폼, 실행 본문, 문서를 편집할 수 있습니다.",
@@ -404,8 +406,7 @@ export default {
   "studio.memory.providerInherit": "(기본값 상속)",
   "studio.memory.model": "모델",
   "studio.memory.modelHintPreset": "@preset 축약형이나 전체 HuggingFace 경로를 사용하세요.",
-  "studio.memory.modelHintApi":
-    "원격 임베딩 엔드포인트 식별자입니다(예: text-embedding-3-small).",
+  "studio.memory.modelHintApi": "원격 임베딩 엔드포인트 식별자입니다(예: text-embedding-3-small).",
   "studio.memory.modelPlaceholder": "@multilingual-best",
   "studio.memory.device": "장치",
   "studio.memory.dimensions": "차원",
@@ -436,7 +437,8 @@ export default {
   "studio.plugin.classNamePlaceholder": "MyPlugin",
   "studio.plugin.add": "플러그인 추가",
   "studio.plugin.optionsLabel": "옵션 (JSON)",
-  "studio.plugin.optionsHint": "이 플러그인은 자유 형식의 options 딕셔너리를 받습니다. JSON으로 편집하세요.",
+  "studio.plugin.optionsHint":
+    "이 플러그인은 자유 형식의 options 딕셔너리를 받습니다. JSON으로 편집하세요.",
   "studio.plugin.optionsMustBeObject": "옵션은 JSON 객체여야 합니다.",
 
   // ─── Compaction ─────────────────────────────────────────────
@@ -453,7 +455,8 @@ export default {
 
   // ─── Identity (new keys) ────────────────────────────────────
   "studio.creature.identity.inheritDefault": "(기본값 상속)",
-  "studio.creature.identity.reasoningHint": "모델 추론 깊이입니다. 상속하면 모델 기본값을 사용합니다.",
+  "studio.creature.identity.reasoningHint":
+    "모델 추론 깊이입니다. 상속하면 모델 기본값을 사용합니다.",
   "studio.creature.identity.toolFormatHint":
     "도구 호출을 인코딩하는 방식입니다. native는 모델의 도구 호출 API를 사용합니다.",
   "studio.creature.identity.temperatureHint": "비워 두면 모델 기본값을 사용합니다.",
@@ -584,7 +587,8 @@ export default {
   "studio.creature.detail.subagents": "하위 에이전트",
   "studio.creature.detail.triggers": "트리거",
   "studio.creature.detail.plugins": "플러그인",
-  "studio.creature.detail.hoverHint": "자세한 정보를 보려면 풀 또는 연결 목록의 항목 위에 마우스를 올리세요.",
+  "studio.creature.detail.hoverHint":
+    "자세한 정보를 보려면 풀 또는 연결 목록의 항목 위에 마우스를 올리세요.",
   "studio.creature.detail.noDescription": "(사용 가능한 설명 없음)",
   "studio.creature.detail.executionMode": "실행 모드",
   "studio.creature.detail.needsContext": "컨텍스트 필요",
@@ -592,8 +596,7 @@ export default {
   "studio.creature.detail.addComingSoon":
     "상세 패널에서 추가하는 기능은 아직 연결되지 않았습니다. 왼쪽 풀의 항목을 클릭해 추가하세요.",
   "studio.creature.detail.customize": "사용자 지정",
-  "studio.creature.detail.customizeComingSoon":
-    "가운데 패널에서 모듈 행을 펼쳐 옵션을 편집하세요.",
+  "studio.creature.detail.customizeComingSoon": "가운데 패널에서 모듈 행을 펼쳐 옵션을 편집하세요.",
   "studio.creature.detail.options": "옵션",
   "studio.creature.detail.optionsComingSoon":
     "이 모듈 행을 가운데 패널에서 펼쳐 옵션을 편집하세요.",
@@ -605,7 +608,8 @@ export default {
   "studio.creature.validation.title": ({ count }) =>
     `${count}개의 검증 오류 — 저장하기 전에 수정하세요`,
 
-  "studio.creature.confirm.unsavedLeave": "저장되지 않은 변경 사항이 있습니다. 저장하지 않고 나갈까요?",
+  "studio.creature.confirm.unsavedLeave":
+    "저장되지 않은 변경 사항이 있습니다. 저장하지 않고 나갈까요?",
 
   "studio.creature.status.loaded": "불러옴",
 
@@ -701,7 +705,8 @@ export default {
     "모듈 파일 옆에 있는 Markdown 문서입니다. 에이전트가 도구의 전체 문서를 요청할 때 이를 읽습니다.",
   "studio.module.doc.tabLabel": "문서",
   "studio.module.doc.headTitle": ({ name }) => `문서 — ${name}`,
-  "studio.module.doc.confirmClose": "문서에 저장되지 않은 변경 사항이 있습니다. 저장하지 않고 닫을까요?",
+  "studio.module.doc.confirmClose":
+    "문서에 저장되지 않은 변경 사항이 있습니다. 저장하지 않고 닫을까요?",
 
   // ─── Sub-agent form ─────────────────────────────────────────
   "studio.module.form.subagentName": "하위 에이전트 이름",
@@ -744,12 +749,14 @@ export default {
   "studio.module.form.ioClassNameHint":
     "파스칼 케이스입니다. 이 모듈의 Python 클래스 이름으로 사용됩니다.",
   "studio.module.form.ioBody": ({ method }) => `${method} 본문`,
-  "studio.module.form.ioInputHint": "비동기 본문입니다. TriggerEvent를 반환합니다(중지하려면 None).",
+  "studio.module.form.ioInputHint":
+    "비동기 본문입니다. TriggerEvent를 반환합니다(중지하려면 None).",
   "studio.module.form.ioOutputHint": "비동기 본문입니다. 대상 표면으로 내용을 내보냅니다.",
 
   // ─── Plugin form ────────────────────────────────────────────
   "studio.module.form.pluginName": "플러그인 이름",
-  "studio.module.form.pluginNameHint": "스네이크 케이스입니다. 크리처는 이를 plugins: 아래에 나열합니다.",
+  "studio.module.form.pluginNameHint":
+    "스네이크 케이스입니다. 크리처는 이를 plugins: 아래에 나열합니다.",
   "studio.module.form.priority": "우선순위",
   "studio.module.form.priorityHint":
     "0-100. 숫자가 낮을수록 pre-hook에서는 먼저, post-hook에서는 나중에 실행됩니다.",

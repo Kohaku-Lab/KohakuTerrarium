@@ -364,7 +364,8 @@ export default {
   "studio.dashboard.deletedMessage": '"{name}" を削除しました',
   "studio.dashboard.sourceManifest": "マニフェスト",
   "studio.dashboard.sourcePackage": ({ name }) => `パッケージ: ${name}`,
-  "studio.dashboard.readOnlyModule": "{source} で宣言されています。プールからクリーチャーに組み込んでください。",
+  "studio.dashboard.readOnlyModule":
+    "{source} で宣言されています。プールからクリーチャーに組み込んでください。",
 
   "studio.newCreature.title": "新規クリーチャー",
   "studio.newCreature.name": "名前",
@@ -374,7 +375,8 @@ export default {
   "studio.newCreature.nameInvalid": "名前が無効です。空白、スラッシュ、先頭のドットは使えません。",
   "studio.newCreature.nameExists": "この名前のクリーチャーはすでに存在します。",
   "studio.newCreature.baseConfig": "ベース設定（任意）",
-  "studio.newCreature.baseConfigHint": "@package/creatures/name 形式で別のクリーチャーから継承します。",
+  "studio.newCreature.baseConfigHint":
+    "@package/creatures/name 形式で別のクリーチャーから継承します。",
   "studio.newCreature.baseConfigPlaceholder": "@kt-biome/creatures/general",
   "studio.newCreature.description": "説明（任意）",
   "studio.newCreature.descriptionPlaceholder": "このクリーチャーの用途。",
@@ -399,7 +401,8 @@ export default {
   "studio.newModule.manifestSyncConfirm": "kohaku.yaml に追加",
   "studio.newModule.manifestSyncCancel": "スキップ",
   "studio.newModule.manifestSyncAdded": ({ name }) => `${name} を kohaku.yaml に追加しました`,
-  "studio.newModule.manifestSyncAlready": ({ name }) => `${name} はすでに kohaku.yaml に記載されています`,
+  "studio.newModule.manifestSyncAlready": ({ name }) =>
+    `${name} はすでに kohaku.yaml に記載されています`,
 
   // ─── Memory / embedding ─────────────────────────────────────
   "studio.memory.provider": "プロバイダー",
@@ -407,14 +410,14 @@ export default {
     "（継承）のままにすると実行時の既定値を使います。`auto` は利用可能な最も軽量なバックエンドを選びます。",
   "studio.memory.providerInherit": "（既定値を継承）",
   "studio.memory.model": "モデル",
-  "studio.memory.modelHintPreset": "@preset 形式の省略名、または完全な HuggingFace パスを指定します。",
+  "studio.memory.modelHintPreset":
+    "@preset 形式の省略名、または完全な HuggingFace パスを指定します。",
   "studio.memory.modelHintApi":
     "リモート埋め込みエンドポイントの識別子（例: text-embedding-3-small）。",
   "studio.memory.modelPlaceholder": "@multilingual-best",
   "studio.memory.device": "デバイス",
   "studio.memory.dimensions": "次元数",
-  "studio.memory.dimensionsHint":
-    "Matryoshka 切り詰め。対応しているモデルでのみ有効です。",
+  "studio.memory.dimensionsHint": "Matryoshka 切り詰め。対応しているモデルでのみ有効です。",
   "studio.memory.dimensionsPlaceholder": "auto",
 
   // ─── MCP servers ────────────────────────────────────────────
@@ -440,7 +443,8 @@ export default {
   "studio.plugin.classNamePlaceholder": "MyPlugin",
   "studio.plugin.add": "プラグインを追加",
   "studio.plugin.optionsLabel": "オプション（JSON）",
-  "studio.plugin.optionsHint": "このプラグインは自由形式のオプション辞書を受け取ります。JSON として編集してください。",
+  "studio.plugin.optionsHint":
+    "このプラグインは自由形式のオプション辞書を受け取ります。JSON として編集してください。",
   "studio.plugin.optionsMustBeObject": "オプションは JSON オブジェクトである必要があります。",
 
   // ─── 圧縮 ─────────────────────────────────────────────
@@ -457,7 +461,8 @@ export default {
 
   // ─── Identity (new keys) ────────────────────────────────────
   "studio.creature.identity.inheritDefault": "（既定値を継承）",
-  "studio.creature.identity.reasoningHint": "モデルの推論の深さ。継承するとモデルの既定値を使います。",
+  "studio.creature.identity.reasoningHint":
+    "モデルの推論の深さ。継承するとモデルの既定値を使います。",
   "studio.creature.identity.toolFormatHint":
     "ツール呼び出しのエンコード方法。native はモデルのツール呼び出し API を使います。",
   "studio.creature.identity.temperatureHint": "空欄にするとモデルの既定値を使います。",
@@ -501,7 +506,8 @@ export default {
   "studio.moduleOptions.advanced": "詳細オプション（JSON）",
   "studio.moduleOptions.advancedHint":
     "上に表示されていない追加キーです。安全のためオブジェクト（{}）のままにしてください。",
-  "studio.moduleOptions.advancedMustBeObject": "詳細オプションは JSON オブジェクトである必要があります。",
+  "studio.moduleOptions.advancedMustBeObject":
+    "詳細オプションは JSON オブジェクトである必要があります。",
 
   "studio.module.kinds.tools": "ツール",
   "studio.module.kinds.subagents": "サブエージェント",
@@ -555,7 +561,8 @@ export default {
   "studio.creature.systemPrompt.modeReplace": "replace モード — ベースプロンプトを破棄",
 
   "studio.creature.modules.title": "組み込み済みモジュール",
-  "studio.creature.modules.empty": "組み込まれたモジュールはありません。左側の項目をクリックして追加してください。",
+  "studio.creature.modules.empty":
+    "組み込まれたモジュールはありません。左側の項目をクリックして追加してください。",
   "studio.creature.modules.addHint":
     "プール内の項目をクリックして追加するか、右側の詳細パネルで Add ボタンを使って追加してください。",
   "studio.creature.modules.remove": "削除",
@@ -588,7 +595,8 @@ export default {
   "studio.creature.detail.subagents": "サブエージェント",
   "studio.creature.detail.triggers": "トリガー",
   "studio.creature.detail.plugins": "プラグイン",
-  "studio.creature.detail.hoverHint": "詳細を見るには、プールまたは組み込みリストの項目にカーソルを合わせてください。",
+  "studio.creature.detail.hoverHint":
+    "詳細を見るには、プールまたは組み込みリストの項目にカーソルを合わせてください。",
   "studio.creature.detail.noDescription": "（説明はありません）",
   "studio.creature.detail.executionMode": "実行モード",
   "studio.creature.detail.needsContext": "コンテキストが必要",
@@ -639,11 +647,13 @@ export default {
   "studio.module.simpleNotAvailableHint":
     "上の Raw モードに切り替えると、Python ソース全体を直接編集できます。",
 
-  "studio.module.guard.notEditable": ({ kind, name }) => `${kind}/${name} はここでは編集できません。`,
+  "studio.module.guard.notEditable": ({ kind, name }) =>
+    `${kind}/${name} はここでは編集できません。`,
   "studio.module.guard.hint":
     "このモジュールはワークスペース外で宣言されています。Studio は <root>/modules/ 以下のファイルだけを編集します。",
 
-  "studio.module.notFound.title": ({ kind, name }) => `${kind}/${name} のワークスペースファイルがありません。`,
+  "studio.module.notFound.title": ({ kind, name }) =>
+    `${kind}/${name} のワークスペースファイルがありません。`,
   "studio.module.notFound.hint": "ダッシュボードから作成するか、名前を確認してください。",
 
   "studio.module.confirm.unsavedLeave": "未保存の変更があります。このページを離れますか？",
@@ -714,8 +724,7 @@ export default {
   "studio.module.form.subagentFlags": "フラグ",
   "studio.module.form.stateless":
     "ステートレス — 実行ごとに新しいコンテキストを使います（ツール利用サブエージェントに推奨）",
-  "studio.module.form.interactive":
-    "対話型 — コンテキスト更新のため親ターン間で維持します",
+  "studio.module.form.interactive": "対話型 — コンテキスト更新のため親ターン間で維持します",
   "studio.module.form.canModify":
     "ファイル変更ツール（write / edit）を許可します。本当に必要な場合以外はオフにしてください。",
   "studio.module.form.subagentTools": "許可するツール",
@@ -738,8 +747,10 @@ export default {
   "studio.module.form.setupToolNameHint":
     "コントローラーがこのトリガーを設定するときに呼び出すツール名です（例: add_timer）。",
   "studio.module.form.setupDescription": "Setup ツール説明",
-  "studio.module.form.setupDescriptionHint": "コントローラーが setup ツールについて見る 1 行の説明です。",
-  "studio.module.form.setupDescriptionPlaceholder": "このトリガーの新しいインスタンスを設定します。",
+  "studio.module.form.setupDescriptionHint":
+    "コントローラーが setup ツールについて見る 1 行の説明です。",
+  "studio.module.form.setupDescriptionPlaceholder":
+    "このトリガーの新しいインスタンスを設定します。",
   "studio.module.form.triggerBody": "wait_for_trigger 本文",
   "studio.module.form.triggerBodyHint":
     "非同期本文です。トリガー発火時に TriggerEvent を返してください。",
@@ -748,12 +759,14 @@ export default {
   "studio.module.form.ioClassNameHint":
     "PascalCase。このモジュールの Python クラス名として使われます。",
   "studio.module.form.ioBody": ({ method }) => `${method} 本文`,
-  "studio.module.form.ioInputHint": "非同期本文です。TriggerEvent を返します（停止する場合は None）。",
+  "studio.module.form.ioInputHint":
+    "非同期本文です。TriggerEvent を返します（停止する場合は None）。",
   "studio.module.form.ioOutputHint": "非同期本文です。対象の出力先へ内容を送ります。",
 
   // ─── Plugin form ────────────────────────────────────────────
   "studio.module.form.pluginName": "プラグイン名",
-  "studio.module.form.pluginNameHint": "スネークケース。クリーチャーはこれを plugins: の下に列挙します。",
+  "studio.module.form.pluginNameHint":
+    "スネークケース。クリーチャーはこれを plugins: の下に列挙します。",
   "studio.module.form.priority": "優先度",
   "studio.module.form.priorityHint":
     "0〜100。値が小さいほど pre-hook では先に、post-hook では後に実行されます。",

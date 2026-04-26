@@ -388,7 +388,8 @@ export default {
 
   // ─── 记忆 / 嵌入 ─────────────────────────────────────
   "studio.memory.provider": "提供者",
-  "studio.memory.providerHint": "保持为（使用默认）即可使用运行时默认值；`auto` 会选择可用的最轻量后端。",
+  "studio.memory.providerHint":
+    "保持为（使用默认）即可使用运行时默认值；`auto` 会选择可用的最轻量后端。",
   "studio.memory.providerInherit": "（使用默认）",
   "studio.memory.model": "模型",
   "studio.memory.modelHintPreset": "可使用 @preset 简写或完整 HuggingFace 路径。",
@@ -523,7 +524,8 @@ export default {
 
   "studio.creature.systemPrompt.title": "系统提示",
   "studio.creature.systemPrompt.edit": "编辑",
-  "studio.creature.systemPrompt.editComingSoon": "完整提示编辑器暂未提供——目前请直接编辑 prompts/system.md。",
+  "studio.creature.systemPrompt.editComingSoon":
+    "完整提示编辑器暂未提供——目前请直接编辑 prompts/system.md。",
   "studio.creature.systemPrompt.none": "（未配置系统提示）",
   "studio.creature.systemPrompt.modeConcat": "concat 模式——追加到来自 {base} 的基础提示之后",
   "studio.creature.systemPrompt.modeReplace": "replace 模式——丢弃基础提示",
@@ -567,7 +569,8 @@ export default {
   "studio.creature.detail.executionMode": "执行模式",
   "studio.creature.detail.needsContext": "需要上下文",
   "studio.creature.detail.add": "添加",
-  "studio.creature.detail.addComingSoon": "详情面板中的添加功能尚未接好——请点击左侧模块池中的项目来添加。",
+  "studio.creature.detail.addComingSoon":
+    "详情面板中的添加功能尚未接好——请点击左侧模块池中的项目来添加。",
   "studio.creature.detail.customize": "自定义",
   "studio.creature.detail.customizeComingSoon": "展开中间面板中的模块行即可编辑其选项。",
   "studio.creature.detail.options": "选项",
@@ -666,7 +669,8 @@ export default {
   "studio.module.doc.edit": "编辑",
   "studio.module.doc.empty":
     "尚未创建配套 .md 文档——点击“编辑”即可新建。运行时框架会通过 `##info##` 提供给智能体。",
-  "studio.module.doc.hint": "与模块文件放在同一目录的 Markdown 文件。智能体请求工具完整说明时会读取此文件。",
+  "studio.module.doc.hint":
+    "与模块文件放在同一目录的 Markdown 文件。智能体请求工具完整说明时会读取此文件。",
   "studio.module.doc.tabLabel": "文档",
   "studio.module.doc.headTitle": ({ name }) => `文档编辑 — ${name}`,
   "studio.module.doc.confirmClose": "文档有尚未保存的更改。要不保存就关闭吗？",
@@ -714,7 +718,8 @@ export default {
   "studio.module.form.optionsSchemaHint":
     "智能体可在 `options:` 下传入的键。保存为 .py 旁边的 <name>.schema.json——智能体编辑器会为每个键渲染表单。",
   "studio.module.form.hooks": "Hook",
-  "studio.module.form.hooksHint": "选择此插件监听的框架事件。每个 hook 都会在下方拥有自己的函数主体。",
+  "studio.module.form.hooksHint":
+    "选择此插件监听的框架事件。每个 hook 都会在下方拥有自己的函数主体。",
   "studio.module.form.hookBodies": "Hook 实现",
 
   "studio.module.optionsSchema.intro":
