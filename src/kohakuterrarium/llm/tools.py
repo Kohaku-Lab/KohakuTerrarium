@@ -105,6 +105,114 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
         },
         "required": ["path", "edits"],
     },
+    "notebook_read": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Jupyter .ipynb file path"},
+            "cell_id": {
+                "type": "string",
+                "description": "Optional real cell id or synthetic cell-N reference",
+            },
+            "offset": {"type": "integer", "description": "Cell offset (optional)"},
+            "limit": {"type": "integer", "description": "Max cells to read (optional)"},
+            "include_outputs": {
+                "type": "string",
+                "enum": ["none", "summary", "all"],
+                "description": "Output detail level (default summary)",
+            },
+            "include_metadata": {
+                "type": "boolean",
+                "description": "Include cell metadata (default false)",
+            },
+            "max_source_chars": {
+                "type": "integer",
+                "description": "Max source characters per cell (default 8000)",
+            },
+            "max_output_chars": {
+                "type": "integer",
+                "description": "Max output characters per output (default 4000)",
+            },
+        },
+        "required": ["path"],
+    },
+    "notebook_edit": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Jupyter .ipynb file path"},
+            "cell_id": {
+                "type": "string",
+                "description": "Cell id for single replace/delete or insertion anchor",
+            },
+            "new_source": {
+                "type": "string",
+                "description": "New source for single replace/insert edit",
+            },
+            "cell_type": {
+                "type": "string",
+                "enum": ["code", "markdown", "raw"],
+                "description": "Cell type for insert, or optional type conversion for replace",
+            },
+            "edit_mode": {
+                "type": "string",
+                "enum": ["replace", "insert", "delete"],
+                "description": "Single edit mode (default replace)",
+            },
+            "insert_location": {
+                "type": "string",
+                "enum": ["after", "before", "beginning", "end"],
+                "description": "Where to insert relative to cell_id (default after; end if no cell_id)",
+            },
+            "clear_outputs": {
+                "type": "boolean",
+                "description": "Clear outputs/execution count for code replacements (default true)",
+            },
+            "edits": {
+                "type": "array",
+                "description": "Ordered notebook cell edits; if present, replaces single-edit args",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "cell_id": {
+                            "type": "string",
+                            "description": "Real cell id or synthetic cell-N reference",
+                        },
+                        "new_source": {
+                            "type": "string",
+                            "description": "New cell source",
+                        },
+                        "cell_type": {
+                            "type": "string",
+                            "enum": ["code", "markdown", "raw"],
+                            "description": "Cell type for insert or optional conversion",
+                        },
+                        "edit_mode": {
+                            "type": "string",
+                            "enum": ["replace", "insert", "delete"],
+                            "description": "replace, insert, or delete (default replace)",
+                        },
+                        "insert_location": {
+                            "type": "string",
+                            "enum": ["after", "before", "beginning", "end"],
+                            "description": "Insertion location (default after)",
+                        },
+                        "clear_outputs": {
+                            "type": "boolean",
+                            "description": "Clear outputs for code replacements (default true)",
+                        },
+                    },
+                },
+            },
+            "strict": {
+                "type": "boolean",
+                "description": "If true (default), any failed edit aborts and leaves file unchanged",
+            },
+            "best_effort": {
+                "type": "boolean",
+                "description": "If true, keep going after failed edits. Cannot be combined with strict=true",
+            },
+        },
+        "required": ["path"],
+    },
     "glob": {
         "type": "object",
         "properties": {

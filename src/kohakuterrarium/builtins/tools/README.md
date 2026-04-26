@@ -16,6 +16,8 @@ the public API from `builtins.tool_catalog`.
 | `write.py` | `write`: create or overwrite files |
 | `edit.py` | `edit`: single-diff edit with guard rails; exports `check_edit_guards` / `build_result_diff` used by `multi_edit` |
 | `multi_edit.py` | `multi_edit`: atomic or policy-driven batch of ordered search/replace edits on one file |
+| `notebook_read.py` / `notebook_edit.py` | `notebook_read` / `notebook_edit`: cell-aware Jupyter `.ipynb` read and batch edit tools |
+| `notebook_utils.py` | Shared notebook parsing, cell-id, output-summary, and mutation helpers |
 | `glob.py` | `glob`: find files by pattern |
 | `grep.py` | `grep`: ripgrep-backed regex search with type filtering |
 | `tree.py` | `tree`: list directory structure (.gitignore-aware, line-limited) |
@@ -45,8 +47,8 @@ names a builtin tool. Imports:
 - `kohakuterrarium.session.memory` / `session.store` (`search_memory`)
 - `kohakuterrarium.utils.logging`
 
-No tool imports another tool's implementation except `multi_edit` reusing
-`edit.py` helpers.
+No tool imports another tool's implementation except `multi_edit` and
+`notebook_edit` reusing `edit.py` result/guard helpers.
 
 ## Key entry points
 

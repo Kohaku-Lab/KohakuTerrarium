@@ -242,7 +242,7 @@ Creatures inherit from other creatures via `base_config`:
 | Category | Tools |
 |----------|-------|
 | Shell | `bash`, `python` |
-| File ops | `read`, `write`, `edit`, `multi_edit`, `glob`, `grep`, `tree` |
+| File ops | `read`, `write`, `edit`, `multi_edit`, `notebook_read`, `notebook_edit`, `glob`, `grep`, `tree` |
 | Structured data | `json_read`, `json_write` |
 | Web | `web_fetch`, `web_search` |
 | Interactive/Memory | `ask_user`, `think`, `scratchpad`, `search_memory` |

@@ -27,6 +27,8 @@ from kohakuterrarium.builtins.tools.info import InfoTool
 from kohakuterrarium.builtins.tools.json_read import JsonReadTool
 from kohakuterrarium.builtins.tools.json_write import JsonWriteTool
 from kohakuterrarium.builtins.tools.multi_edit import MultiEditTool
+from kohakuterrarium.builtins.tools.notebook_edit import NotebookEditTool
+from kohakuterrarium.builtins.tools.notebook_read import NotebookReadTool
 from kohakuterrarium.builtins.tools.read import ReadTool
 from kohakuterrarium.builtins.tools.scratchpad_tool import ScratchpadTool
 from kohakuterrarium.builtins.tools.search_memory import SearchMemoryTool
@@ -64,6 +66,8 @@ __all__ = [
     "GlobTool",
     "MultiEditTool",
     "GrepTool",
+    "NotebookEditTool",
+    "NotebookReadTool",
     "ImageGenTool",
     "InfoTool",
     "JsonReadTool",
