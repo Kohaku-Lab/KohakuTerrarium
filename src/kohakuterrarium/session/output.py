@@ -171,9 +171,10 @@ class SessionOutput(OutputModule):
             from kohakuterrarium.session.history import replay_conversation
 
             events = self._store.get_events(self._event_key_prefix)
-            messages = replay_conversation(events)
-            if not messages and self._agent and hasattr(self._agent, "controller"):
+            if self._agent and hasattr(self._agent, "controller"):
                 messages = self._agent.controller.conversation.to_messages()
+            else:
+                messages = replay_conversation(events)
             last_event_id = 0
             for evt in events:
                 eid = evt.get("event_id")

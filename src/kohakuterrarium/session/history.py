@@ -370,7 +370,21 @@ def replay_conversation(
                 text_buf.append(chunk)
             continue
 
-        # Any non-chunk event flushes the buffer first.
+        if etype in (
+            "compact_start",
+            "compact_complete",
+            "compact_decision",
+            "token_usage",
+            "turn_token_usage",
+            "cache_stats",
+            "scratchpad_write",
+            "plugin_hook_timing",
+            "processing_start",
+            "processing_complete",
+        ):
+            continue
+
+        # Any non-chunk structural event flushes the buffer first.
         _flush_text()
 
         if etype == "user_message":

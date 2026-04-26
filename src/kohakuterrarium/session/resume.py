@@ -80,11 +80,10 @@ def _load_conversation_with_replay_fallback(
 ) -> list[dict] | None:
     """Wave C: prefer the snapshot; replay the event log if it's stale.
 
-    A snapshot is considered stale when its ``<agent>:snapshot_event_id``
-    state entry is missing or lower than the last ``event_id`` on the
-    agent's event stream. In either case we fall back to
-    ``replay_conversation(events)``; if replay also yields an empty
-    list, we return the snapshot (or ``None``) unchanged.
+    The runtime now keeps the live in-memory conversation snapshot fresh
+    at processing end and after compaction. Replay remains the fallback
+    for sessions whose saved snapshot is missing or older than the event
+    stream.
     """
     snapshot = store.load_conversation(agent_name)
     events = store.get_events(agent_name)
@@ -102,6 +101,8 @@ def _load_conversation_with_replay_fallback(
     if snapshot is not None and isinstance(cached_up_to, int):
         if cached_up_to >= last_event_id:
             return snapshot
+    if snapshot is not None and cached_up_to is None:
+        return snapshot
     replayed = replay_conversation(events)
     if replayed:
         logger.info(
