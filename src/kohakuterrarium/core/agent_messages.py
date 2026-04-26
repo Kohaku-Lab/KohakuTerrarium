@@ -66,47 +66,73 @@ class AgentMessagesMixin:
             )
         await self._rerun_from_last()
 
-    async def edit_and_rerun(self, message_idx: int, new_content: str) -> None:
-        """Replace a user message at ``message_idx`` and re-run from there.
+    async def edit_and_rerun(
+        self,
+        message_idx: int,
+        new_content: str,
+        *,
+        turn_index: int | None = None,
+        user_position: int | None = None,
+    ) -> bool:
+        """Replace a user message and re-run from there.
 
-        Maps the edit to a new ``branch_id`` of the corresponding
-        ``turn_index``: the turn whose ``user_position``-th user
-        message was edited. The ``<1/N>`` navigator surfaces the
-        previous branches (with the original wording) alongside the
-        new one.
+        ``message_idx`` remains the raw in-memory conversation index for
+        CLI/back-compat callers. Frontend callers should pass a stable
+        ``turn_index`` or visible ``user_position`` so system/tool
+        messages cannot shift the target.
         """
         conv = self.controller.conversation
         msgs = conv.get_messages()
-        if message_idx < 0 or message_idx >= len(msgs):
-            logger.warning("Invalid edit index", index=message_idx)
-            return
-        target = msgs[message_idx]
+        resolved_idx = self._resolve_edit_message_index(
+            msgs, message_idx, turn_index=turn_index, user_position=user_position
+        )
+        if resolved_idx is None:
+            logger.warning(
+                "Invalid edit target",
+                index=message_idx,
+                turn_index=turn_index,
+                user_position=user_position,
+            )
+            return False
+        target = msgs[resolved_idx]
         if target.role != "user":
             logger.warning("Can only edit user messages", role=target.role)
-            return
+            return False
         # Compute the user-message position so we can map back to a
         # turn_index in the event log.
-        user_position = sum(1 for m in msgs[: message_idx + 1] if m.role == "user") - 1
+        resolved_user_position = (
+            sum(1 for m in msgs[: resolved_idx + 1] if m.role == "user") - 1
+        )
         # Drop the old user message + everything after from the
         # in-memory conversation. Do NOT append the new user message
         # here — the rerun trigger carries it; the controller appends
         # it via ``_build_turn_context``.
-        conv.truncate_from(message_idx)
+        conv.truncate_from(resolved_idx)
         # Resolve the turn_index of the edited user message and bump
         # branch_id accordingly. If we cannot resolve it (no store, or
         # legacy events without turn_index), keep the agent's current
         # turn/branch state.
-        target_turn_index = self._turn_index_for_user_position(user_position)
+        target_turn_index = turn_index
+        if target_turn_index is None:
+            target_turn_index = self._turn_index_for_user_position(
+                resolved_user_position
+            )
+        if target_turn_index is None and user_position is not None:
+            # No session/event metadata (common in narrow tests or
+            # legacy in-memory agents). Position-based targeting still
+            # found the right user message, so preserve old fallback
+            # semantics and open a new branch on the current turn.
+            target_turn_index = self._turn_index if self._turn_index > 0 else None
         if target_turn_index is not None:
             self._turn_index = target_turn_index
         self._branch_id = (
             self._max_branch_id_for_turn(self._turn_index) + 1
-            if target_turn_index is not None
+            if target_turn_index is not None and self.session_store is not None
             else max(self._branch_id, 1) + 1
         )
         logger.info(
             "Edited and re-running",
-            index=message_idx,
+            index=resolved_idx,
             turn_index=self._turn_index,
             branch_id=self._branch_id,
         )
@@ -138,6 +164,7 @@ class AgentMessagesMixin:
                 parent_branch_path=ppath,
             )
         await self._rerun_from_last(new_user_content=new_content)
+        return True
 
     async def rewind_to(self, message_idx: int) -> None:
         """Drop messages from ``message_idx`` onward without re-running."""
@@ -177,23 +204,52 @@ class AgentMessagesMixin:
     # Branch resolution helpers
     # ------------------------------------------------------------------
 
-    def _turn_index_for_user_position(self, user_position: int) -> int | None:
-        """Return the ``turn_index`` of the ``user_position``-th live
-        user_message event, or ``None`` if it cannot be resolved.
-
-        Live = belonging to the latest branch of its turn. We walk
-        events grouping by ``turn_index``, picking the latest
-        ``branch_id`` per turn, then scan the resulting user_message
-        events in order.
-        """
-        if self.session_store is None:
+    def _resolve_edit_message_index(
+        self,
+        msgs: list[object],
+        message_idx: int,
+        *,
+        turn_index: int | None = None,
+        user_position: int | None = None,
+    ) -> int | None:
+        """Resolve an edit target to an in-memory user-message index."""
+        if turn_index is not None:
+            pos = self._user_position_for_turn_index(turn_index)
+            if pos is not None:
+                user_position = pos
+            elif user_position is None:
+                return None
+        if user_position is not None:
+            if user_position < 0:
+                return None
+            seen = -1
+            for idx, msg in enumerate(msgs):
+                if msg.role != "user":
+                    continue
+                seen += 1
+                if seen == user_position:
+                    return idx
             return None
+        if message_idx < 0 or message_idx >= len(msgs):
+            return None
+        return message_idx
+
+    def _user_position_for_turn_index(self, turn_index: int) -> int | None:
+        """Return the visible user-position for a live turn_index."""
+        for pos, ti in enumerate(self._live_user_turns()):
+            if ti == turn_index:
+                return pos
+        return None
+
+    def _live_user_turns(self) -> list[int]:
+        """Return live user turn_index values in replay order."""
+        if self.session_store is None:
+            return []
         try:
             events = self.session_store.get_events(self.config.name)
         except Exception as e:
-            logger.debug("Failed to read events for turn lookup", error=str(e))
-            return None
-        # Build {turn_index: max_branch_id}
+            logger.debug("Failed to read events for live turns", error=str(e))
+            return []
         latest_branch: dict[int, int] = {}
         for evt in events:
             ti = evt.get("turn_index")
@@ -212,6 +268,18 @@ class AgentMessagesMixin:
             if bi != latest_branch.get(ti):
                 continue
             live_user_turns.append(ti)
+        return live_user_turns
+
+    def _turn_index_for_user_position(self, user_position: int) -> int | None:
+        """Return the ``turn_index`` of the ``user_position``-th live
+        user_message event, or ``None`` if it cannot be resolved.
+
+        Live = belonging to the latest branch of its turn. We walk
+        events grouping by ``turn_index``, picking the latest
+        ``branch_id`` per turn, then scan the resulting user_message
+        events in order.
+        """
+        live_user_turns = self._live_user_turns()
         if user_position < 0 or user_position >= len(live_user_turns):
             return None
         return live_user_turns[user_position]

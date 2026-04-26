@@ -207,8 +207,19 @@ async def edit_message(
     session = manager._agents.get(agent_id)
     if not session:
         raise HTTPException(404, f"Agent {agent_id} not found")
-    await session.agent.edit_and_rerun(msg_idx, req.content)
-    return {"status": "edited"}
+    edited = await session.agent.edit_and_rerun(
+        msg_idx,
+        req.content,
+        turn_index=req.turn_index,
+        user_position=req.user_position,
+    )
+    if not edited:
+        raise HTTPException(400, "Invalid edit target; expected a user message")
+    return {
+        "status": "edited",
+        "turn_index": req.turn_index,
+        "user_position": req.user_position,
+    }
 
 
 @router.post("/{agent_id}/messages/{msg_idx}/rewind")

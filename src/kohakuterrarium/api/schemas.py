@@ -118,6 +118,12 @@ class MessageEdit(BaseModel):
     """Request body for editing a user message and re-running."""
 
     content: str
+    # Prefer stable visible-user targeting over raw conversation indices.
+    # ``msg_idx`` remains in the URL for backward compatibility, but the
+    # frontend sends one of these fields so system/tool messages cannot
+    # shift the target.
+    turn_index: int | None = None
+    user_position: int | None = None
 
 
 class SlashCommand(BaseModel):

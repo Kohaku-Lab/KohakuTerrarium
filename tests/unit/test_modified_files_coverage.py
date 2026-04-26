@@ -306,8 +306,23 @@ async def test_edit_non_user_role_rejected():
     agent = _NoStoreAgent()
     agent.controller.conversation.append("user", "hi")
     agent.controller.conversation.append("assistant", "reply")
-    await agent.edit_and_rerun(1, "should-fail")  # idx 1 is assistant
+    assert not await agent.edit_and_rerun(1, "should-fail")  # idx 1 is assistant
     assert agent._rerun_calls == []
+
+
+@pytest.mark.asyncio
+async def test_edit_position_target_skips_system_prompt():
+    agent = _NoStoreAgent()
+    agent.controller.conversation.append("system", "sys")
+    agent.controller.conversation.append("user", "hi")
+    agent.controller.conversation.append("assistant", "reply")
+    agent._turn_index = 1
+    agent._branch_id = 1
+    assert await agent.edit_and_rerun(0, "edited", user_position=0)
+    msgs = agent.controller.conversation.get_messages()
+    assert [m.role for m in msgs] == ["system"]
+    assert agent._rerun_calls == ["edited"]
+    assert agent._branch_id == 2
 
 
 @pytest.mark.asyncio
