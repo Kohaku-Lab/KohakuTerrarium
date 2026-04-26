@@ -20,7 +20,14 @@ BaseTool subclasses and has nothing the user should be editing here.
 """
 
 import ast
+import importlib.util
 from pathlib import Path
+
+from kohakuterrarium.packages import (
+    ensure_package_importable,
+    list_packages,
+    resolve_package_path,
+)
 
 # Parameters that we intentionally hide from the form — they're
 # framework-level plumbing, not user-facing options.
@@ -368,8 +375,6 @@ def resolve_module_source(workspace_root: Path, module: str) -> str | None:
     # @package references
     if module.startswith("@"):
         try:
-            from kohakuterrarium.packages import resolve_package_path
-
             p = resolve_package_path(module)
             if p.is_file():
                 return p.read_text(encoding="utf-8")
@@ -401,13 +406,6 @@ def resolve_module_source(workspace_root: Path, module: str) -> str | None:
         # dotted path there. This covers kt-biome's
         # ``kt_biome.plugins.cost_tracker`` and similar.
         try:
-            import importlib.util
-
-            from kohakuterrarium.packages import (
-                ensure_package_importable,
-                list_packages,
-            )
-
             for pkg in list_packages():
                 ensure_package_importable(pkg["name"])
 

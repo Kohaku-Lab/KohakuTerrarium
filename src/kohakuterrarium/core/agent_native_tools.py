@@ -181,11 +181,19 @@ class NativeToolOptions:
         return data if isinstance(data, dict) else {}
 
     def _persist(self) -> None:
-        """Write the override map to private session state."""
+        """Write the override map to private session state.
+
+        ``session_store`` / ``session.extra`` are the canonical storage
+        locations. The reserved scratchpad key is kept as a compatibility
+        mirror when no canonical session storage is attached so lightweight
+        programmatic/test agents still observe the legacy persistence surface.
+        """
         store = getattr(self._agent, "session_store", None)
         key = self._state_key()
+        wrote_canonical = False
         if store is not None:
             store.state[key] = dict(self._values)
+            wrote_canonical = True
         session = getattr(self._agent, "session", None)
         extra = getattr(session, "extra", None) if session is not None else None
         if isinstance(extra, dict):
@@ -193,6 +201,11 @@ class NativeToolOptions:
                 extra[NATIVE_TOOL_OPTIONS_STATE_SUFFIX] = dict(self._values)
             else:
                 extra.pop(NATIVE_TOOL_OPTIONS_STATE_SUFFIX, None)
+            wrote_canonical = True
         scratchpad = self._scratchpad()
-        if scratchpad is not None:
+        if scratchpad is None:
+            return
+        if wrote_canonical or not self._values:
             scratchpad.delete(NATIVE_TOOL_OPTIONS_KEY)
+            return
+        scratchpad.set(NATIVE_TOOL_OPTIONS_KEY, json.dumps(self._values))

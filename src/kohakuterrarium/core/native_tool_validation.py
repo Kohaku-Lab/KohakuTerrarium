@@ -47,7 +47,9 @@ def _coerce_value(tool_name: str, key: str, value: Any, spec: dict[str, Any]) ->
         if not isinstance(value, str):
             raise NativeToolOptionError(f"{key!r} must be a string enum value")
         if value not in allowed:
-            raise NativeToolOptionError(f"{key!r} must be one of: {', '.join(allowed)}")
+            raise NativeToolOptionError(
+                f"{key!r} value {value!r} must be one of: {', '.join(allowed)}"
+            )
         return value
     if kind == "string":
         if value is None:
