@@ -78,6 +78,7 @@ class CompactConfig:
     target: float = DEFAULT_TARGET
     keep_recent_turns: int = DEFAULT_KEEP_RECENT
     enabled: bool = True
+    cooldown_seconds: float = 30.0
     # If set, use a different model for summarization (cheaper/faster)
     compact_model: str | None = None
 
@@ -119,6 +120,10 @@ class CompactManager:
         """
         if not self.config.enabled or self.is_compacting:
             return False
+        if self._last_compact_time:
+            elapsed = time.time() - self._last_compact_time
+            if elapsed < self.config.cooldown_seconds:
+                return False
 
         if prompt_tokens > 0:
             return prompt_tokens >= self.config.max_tokens * self.config.threshold

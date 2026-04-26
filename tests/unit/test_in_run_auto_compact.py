@@ -9,8 +9,8 @@ within a single user request.
 
 The unit guarantees being verified:
 
-1. Compact checks only happen at turn-end, not between turns within a
-   single ``_process_event``.
+1. Compact checks can happen between turns within a single
+   ``_process_event`` so summarization can overlap the ongoing run.
 2. The helper ignores duplicate attempts while a compact job is already
    running.
 3. Below-threshold runs never trigger.
@@ -79,8 +79,8 @@ class _LoopAgent(AgentHandlersMixin):
         # Iteration counter — bumped inside ``_collect_and_push_feedback``
         # so it reflects "turns already integrated".
         self._iter = 0
-        # Real helper field used by ``_finalize_processing`` exists so
-        # we can plug a recording stub here.
+        # Real helper field used by mid-loop + turn-end compact checks
+        # exists so we can plug a recording stub here.
         self.compact_manager = _RecordingCompact()
         # Track sequence: index = compact-check ordinal,
         # value = prompt_tokens seen at that check.
@@ -125,17 +125,15 @@ class _LoopAgent(AgentHandlersMixin):
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Turn-end trigger behaviour
+# Mid-loop trigger behaviour
 # ─────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_compact_does_not_fire_during_controller_loop():
-    """Controller-loop iterations no longer dispatch compact between turns.
-
-    Auto-compact is now a turn-end concern handled by
-    ``_finalize_processing`` only.
-    """
+async def test_compact_fires_mid_loop_when_threshold_crossed():
+    """Three-turn run; turn 2 crosses threshold. Compact must fire
+    *between* turn 2 and turn 3, proving the mid-loop hook works — not
+    only at ``_finalize_processing`` after the loop returns."""
     agent = _LoopAgent(
         turns_to_run=3,
         usages=[
@@ -148,8 +146,8 @@ async def test_compact_does_not_fire_during_controller_loop():
 
     await agent._run_controller_loop(controller, all_round_text=[])
 
-    assert agent.compact_manager.trigger_calls == 0
-    assert agent.compact_check_log == []
+    assert agent.compact_manager.trigger_calls == 1
+    assert agent.compact_check_log == [100, 900]
 
 
 @pytest.mark.asyncio
@@ -166,13 +164,13 @@ async def test_compact_does_not_fire_below_threshold():
     await agent._run_controller_loop(controller, all_round_text=[])
 
     assert agent.compact_manager.trigger_calls == 0
-    assert agent.compact_check_log == []
+    assert agent.compact_check_log == [100]
 
 
 @pytest.mark.asyncio
 async def test_compact_only_once_per_run_when_already_busy():
-    """The controller loop must not dispatch compaction while the loop is
-    still running, even if every turn crosses the threshold."""
+    """If the threshold stays crossed across turns, the busy guard must
+    suppress redundant dispatch attempts while one compact job is active."""
     agent = _LoopAgent(
         turns_to_run=4,
         usages=[
@@ -186,12 +184,12 @@ async def test_compact_only_once_per_run_when_already_busy():
 
     await agent._run_controller_loop(controller, all_round_text=[])
 
-    assert agent.compact_manager.trigger_calls == 0
-    assert agent.compact_check_log == []
+    assert agent.compact_manager.trigger_calls == 1
+    assert agent.compact_check_log == [900, 950, 980]
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Helper null-safety (turn-end helper)
+# Helper null-safety (mid-loop + turn-end helper)
 # ─────────────────────────────────────────────────────────────────────
 
 

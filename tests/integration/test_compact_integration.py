@@ -133,9 +133,11 @@ class TestCompactIntegration:
         await asyncio.sleep(0.6)
         assert not compact_mgr.is_compacting
 
-        # New messages should be in the live zone
+        # New messages should still be present; compaction must not block
+        # normal progress even when it runs in the background.
         messages = conv.get_messages()
         contents = [str(m.content) for m in messages]
+        assert compact_mgr._compact_count == 1
         assert any("New message during compact" in c for c in contents)
         assert any("Response during compact" in c for c in contents)
 
@@ -180,6 +182,7 @@ class TestCompactIntegration:
 
         await compact_mgr._run_compact()
         assert compact_mgr._compact_count == 1
+        compact_mgr._last_compact_time = 0
 
         # Round 2: add more messages and compact again
         for i in range(20):

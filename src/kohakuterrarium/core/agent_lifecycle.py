@@ -4,6 +4,7 @@ Split out of :mod:`agent` to keep the main orchestrator file below the
 repository file-size guard while keeping shutdown behavior centralized.
 """
 
+import asyncio
 from typing import Any
 
 from kohakuterrarium.utils.logging import get_logger
@@ -39,6 +40,7 @@ class AgentLifecycleMixin:
         if hasattr(self, "_mcp_manager") and self._mcp_manager:
             await self._mcp_manager.shutdown()
 
+        await self._cancel_executor_tasks()
         await self.subagent_manager.cancel_all()
         await self.trigger_manager.stop_all()
         await self.input.stop()
@@ -57,3 +59,14 @@ class AgentLifecycleMixin:
         ):
             await compact_llm.close()
         await self.llm.close()
+
+    async def _cancel_executor_tasks(self) -> None:
+        executor = getattr(self, "executor", None)
+        if executor is None:
+            return
+        tasks = [task for task in executor._tasks.values() if not task.done()]
+        if not tasks:
+            return
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)

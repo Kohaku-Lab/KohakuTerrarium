@@ -300,6 +300,12 @@ class AgentHandlersMixin(AgentToolsMixin):
             if not should_continue:
                 break
 
+            # Mid-turn auto-compact: fire between loop iterations so
+            # summarization can run while the agent continues. The
+            # compact manager's single-flight gate suppresses duplicate
+            # compact jobs while one is already in progress.
+            self._maybe_trigger_compact(controller)
+
     async def _run_single_turn(self, controller: Controller) -> "_TurnResult":
         """Run one LLM turn, dispatching tools and sub-agents as they appear.
 
@@ -669,11 +675,12 @@ class AgentHandlersMixin(AgentToolsMixin):
         await self._emit_output_wiring(event)
 
     def _maybe_trigger_compact(self, controller: Controller) -> None:
-        """Fire auto-compact at turn end if the last LLM call hit the threshold.
+        """Fire auto-compact if the last LLM call hit the threshold.
 
-        Uses the compact manager's single-flight dispatch gate: if one
-        compact job is already running, later attempts are ignored
-        immediately rather than queued or retried.
+        Called both mid-loop (between turns within a single user
+        request) and at turn end. The compact manager's single-flight
+        dispatch gate ensures later attempts are ignored immediately
+        while one compact job is already running.
         """
         if self.compact_manager is None:
             return
