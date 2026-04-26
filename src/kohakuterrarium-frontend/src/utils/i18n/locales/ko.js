@@ -429,7 +429,7 @@ export default {
 
   // ─── Plugins ────────────────────────────────────────────────
   "studio.plugin.name": "이름",
-  "studio.plugin.namePlaceholder": "my_플러그인",
+  "studio.plugin.namePlaceholder": "my_plugin",
   "studio.plugin.type": "유형",
   "studio.plugin.module": "모듈",
   "studio.plugin.modulePlaceholder": "modules.plugins.my_plugin",

@@ -306,7 +306,7 @@ export default {
   "studio.home.recent": "Recent",
   "studio.home.noRecent": "Noch keine Arbeitsbereiche geoeffnet.",
   "studio.home.hint":
-    "Ein Arbeitsbereich ist ein beliebiger Ordner. Studio erstellt beim ersten Speichern die Unterordner creatures/ und modules/. ",
+    "Ein Arbeitsbereich ist ein beliebiger Ordner. Studio erstellt beim ersten Speichern die Unterordner creatures/ und modules/.",
   "studio.home.errorOpen": "Arbeitsbereich konnte nicht geoeffnet werden:",
 
   "studio.dashboard.creatures": "Kreaturen",

@@ -265,13 +265,13 @@ export default {
     "メモリ検索はインデックス済みのセッションで利用できます。実行中のセッションは、まだイベントがインデックス化されていない場合があります。",
   "state.noSessionId": "利用可能なセッション ID がありません",
   "state.noToolCalls": "このセッションにはまだツール呼び出しがありません。",
-  "state.no圧縮s": "このセッションにはまだ圧縮履歴がありません。",
+  "state.noCompactions": "このセッションにはまだ圧縮履歴がありません。",
   "state.roundMessages": ({ round, count }) => `${round} ラウンド | ${count} 件のメッセージ`,
   "state.agentFallback": "agent",
   "state.score": "スコア",
   "state.deleteEntry": "削除",
 
-  "status.no目標Selected": "対象が選択されていません",
+  "status.noTargetSelected": "対象が選択されていません",
   "status.modelSwitchHint": "モデル切り替えは root と creature のタブで利用できます。",
   "status.modelSwitchError": "モデルの切り替えに失敗しました",
   "status.promptIn": "入力プロンプト",
@@ -371,7 +371,7 @@ export default {
   "studio.newCreature.name": "名前",
   "studio.newCreature.nameHint":
     "フォルダー名として使われます。使用できるのは英数字とアンダースコアです。空白やスラッシュは使えません。",
-  "studio.newCreature.namePlaceholder": "my_クリーチャー",
+  "studio.newCreature.namePlaceholder": "my_creature",
   "studio.newCreature.nameInvalid": "名前が無効です。空白、スラッシュ、先頭のドットは使えません。",
   "studio.newCreature.nameExists": "この名前のクリーチャーはすでに存在します。",
   "studio.newCreature.baseConfig": "ベース設定（任意）",
@@ -387,7 +387,7 @@ export default {
   "studio.newModule.kind": "種類",
   "studio.newModule.name": "名前",
   "studio.newModule.nameHint": "ファイル名の本体として使われます（foo → modules/tools/foo.py）。",
-  "studio.newModule.namePlaceholder": "my_モジュール",
+  "studio.newModule.namePlaceholder": "my_module",
   "studio.newModule.nameInvalid": "名前が無効です。空白、スラッシュ、先頭のドットは使えません。",
   "studio.newModule.nameExists": "この名前のモジュールはすでに存在します。",
   "studio.newModule.editorNote":
