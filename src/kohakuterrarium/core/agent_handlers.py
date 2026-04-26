@@ -300,6 +300,13 @@ class AgentHandlersMixin(AgentToolsMixin):
             if not should_continue:
                 break
 
+            # Mid-turn auto-compact: fire here so summarization runs in
+            # parallel with the next LLM call. ``should_compact``'s
+            # ``_compacting`` guard prevents re-entry if a prior compact
+            # is still in flight; ``_count_keep_messages`` keeps the
+            # active tool exchange in the live zone.
+            self._maybe_trigger_compact(controller)
+
     async def _run_single_turn(self, controller: Controller) -> "_TurnResult":
         """Run one LLM turn, dispatching tools and sub-agents as they appear.
 
@@ -656,12 +663,8 @@ class AgentHandlersMixin(AgentToolsMixin):
         if controller.is_ephemeral:
             controller.flush()
 
-        # Check if auto-compact should trigger
-        if self.compact_manager is not None:
-            last_usage = getattr(controller, "_last_usage", {})
-            prompt_tokens = last_usage.get("prompt_tokens", 0)
-            if self.compact_manager.should_compact(prompt_tokens):
-                self.compact_manager.trigger_compact()
+        # Check if auto-compact should trigger at turn end
+        self._maybe_trigger_compact(controller)
 
         # Output wiring emission.
         #
@@ -671,6 +674,21 @@ class AgentHandlersMixin(AgentToolsMixin):
         # we still wrap defensively so a buggy resolver can't break the
         # creature's main loop.
         await self._emit_output_wiring(event)
+
+    def _maybe_trigger_compact(self, controller: Controller) -> None:
+        """Fire auto-compact if the last LLM call hit the threshold.
+
+        Called from two places: mid-loop (between turns within a single
+        user request) and turn-end (in ``_finalize_processing``). The
+        ``CompactManager._compacting`` flag prevents re-entry — at most
+        one compact runs in the background at a time.
+        """
+        if self.compact_manager is None:
+            return
+        last_usage = getattr(controller, "_last_usage", {}) or {}
+        prompt_tokens = last_usage.get("prompt_tokens", 0)
+        if self.compact_manager.should_compact(prompt_tokens):
+            self.compact_manager.trigger_compact()
 
     async def _emit_output_wiring(self, trigger_event: TriggerEvent) -> None:
         """Emit a ``creature_output`` event for each configured wiring entry.
