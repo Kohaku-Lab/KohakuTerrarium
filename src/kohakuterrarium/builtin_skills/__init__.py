@@ -7,6 +7,7 @@ Users can override them by placing files in their agent's prompts/tools/ folder.
 
 from pathlib import Path
 
+from kohakuterrarium.skill_docs import load_skill_doc
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -29,10 +30,6 @@ def read_skill_body(path: Path) -> str | None:
     Returns:
         The post-frontmatter body, or ``None`` if the file does not exist.
     """
-    # Lazy import to avoid circular import: prompt.aggregator imports from
-    # this module, and the prompt package __init__ eagerly loads aggregator.
-    from kohakuterrarium.prompt.skill_loader import load_skill_doc
-
     if not path.exists():
         return None
 
@@ -59,7 +56,7 @@ def get_builtin_tool_doc(name: str) -> str | None:
 
     The returned string is the documentation body only - any YAML frontmatter
     is stripped. Callers that need the frontmatter metadata should use
-    ``prompt.skill_loader.load_skill_doc`` directly.
+    ``skill_docs.load_skill_doc`` directly.
 
     Args:
         name: Tool name (e.g., "bash", "read")
@@ -77,7 +74,7 @@ def get_builtin_subagent_doc(name: str) -> str | None:
 
     The returned string is the documentation body only - any YAML frontmatter
     is stripped. Callers that need the frontmatter metadata should use
-    ``prompt.skill_loader.load_skill_doc`` directly.
+    ``skill_docs.load_skill_doc`` directly.
 
     Args:
         name: Subagent name

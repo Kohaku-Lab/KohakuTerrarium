@@ -8,7 +8,7 @@ models use the corresponding registered tools.
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from kohakuterrarium.builtin_skills import (
     BUILTIN_SKILLS_DIR,
@@ -17,10 +17,7 @@ from kohakuterrarium.builtin_skills import (
     read_skill_body,
 )
 from kohakuterrarium.commands.base import BaseCommand, CommandResult, parse_command_args
-from kohakuterrarium.prompt.skill_loader import load_skill_doc
-
-if TYPE_CHECKING:
-    from kohakuterrarium.prompt.skill_loader import SkillDoc
+from kohakuterrarium.skill_docs import SkillDoc, load_skill_doc
 
 
 class ReadCommand(BaseCommand):

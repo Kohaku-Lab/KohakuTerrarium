@@ -23,7 +23,7 @@ the override. A DEBUG log trace is emitted for every supersede.
 from pathlib import Path
 
 from kohakuterrarium.packages import get_package_path, list_packages
-from kohakuterrarium.prompt.skill_loader import parse_frontmatter, read_skill_text
+from kohakuterrarium.skill_docs import parse_frontmatter, read_skill_text
 from kohakuterrarium.skills.registry import Skill
 from kohakuterrarium.utils.logging import get_logger
 
