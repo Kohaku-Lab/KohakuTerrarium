@@ -505,6 +505,7 @@ export default {
   "studio.creature.pool.noTools": "目錄中沒有工具。",
   "studio.creature.pool.noSubagents": "目錄中沒有子代理。",
   "studio.creature.pool.noTriggers": "目錄中沒有觸發器。",
+  "studio.creature.pool.noPlugins": "目錄中沒有外掛。",
 
   "studio.creature.identity.title": "基本設定",
   "studio.creature.identity.name": "名稱",

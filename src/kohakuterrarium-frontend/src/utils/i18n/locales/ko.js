@@ -330,4 +330,462 @@ export default {
   "instanceSettings.cost": "비용",
   "instanceSettings.environment": "환경",
   "instanceSettings.autoOpen": "자동 열기",
+
+  // ─── Studio (isolated /studio/* section) ─────────────────────────
+  "studio.nav.studio": "Studio",
+  "studio.home.title": "KohakuTerrarium Studio",
+  "studio.home.subtitle": "브라우저에서 크리처, 도구, 플러그인을 작성하세요.",
+  "studio.home.openWorkspace": "워크스페이스 열기",
+  "studio.home.pickFolder": "찾아보기…",
+  "studio.home.openButton": "열기",
+  "studio.home.useCwd": "서버 cwd 사용",
+  "studio.home.recent": "최근",
+  "studio.home.noRecent": "아직 연 워크스페이스가 없습니다.",
+  "studio.home.hint":
+    "워크스페이스는 아무 폴더나 사용할 수 있습니다. Studio는 처음 저장할 때 크리처/ 및 모듈/ 하위 디렉터리를 만듭니다.",
+  "studio.home.errorOpen": "워크스페이스를 열 수 없습니다:",
+
+  "studio.dashboard.creatures": "크리처",
+  "studio.dashboard.modules": "모듈",
+  "studio.dashboard.newCreature": "새 크리처",
+  "studio.dashboard.newModule": "새 모듈",
+  "studio.dashboard.noCreatures": "아직 크리처가 없습니다.",
+  "studio.dashboard.noModules": "아직 모듈이 없습니다.",
+  "studio.dashboard.switchWorkspace": "워크스페이스 전환",
+  "studio.dashboard.refreshing": "새로고침 중",
+  "studio.dashboard.deleteCreature": "크리처 삭제",
+  "studio.dashboard.deleteConfirmTitle": "크리처 삭제",
+  "studio.dashboard.deleteConfirmBody":
+    '"{name}"을(를) 영구적으로 삭제할까요? 폴더와 그 안의 모든 파일이 제거됩니다.',
+  "studio.dashboard.deletedMessage": '"{name}"을(를) 삭제했습니다',
+  "studio.dashboard.sourceManifest": "매니페스트",
+  "studio.dashboard.sourcePackage": ({ name }) => `패키지: ${name}`,
+  "studio.dashboard.readOnlyModule": "{source}에 선언되어 있습니다. 풀에서 크리처에 연결하세요.",
+
+  "studio.newCreature.title": "새 크리처",
+  "studio.newCreature.name": "이름",
+  "studio.newCreature.nameHint":
+    "폴더 이름으로 사용됩니다. 문자, 숫자, 밑줄만 사용할 수 있으며 공백이나 슬래시는 사용할 수 없습니다.",
+  "studio.newCreature.namePlaceholder": "my_creature",
+  "studio.newCreature.nameInvalid":
+    "잘못된 이름입니다. 공백, 슬래시, 맨 앞의 점은 사용할 수 없습니다.",
+  "studio.newCreature.nameExists": "이 이름의 크리처가 이미 있습니다.",
+  "studio.newCreature.baseConfig": "기본 설정(선택 사항)",
+  "studio.newCreature.baseConfigHint": "@package/creatures/name 형식으로 다른 크리처를 상속합니다.",
+  "studio.newCreature.baseConfigPlaceholder": "@kt-biome/creatures/general",
+  "studio.newCreature.description": "설명(선택 사항)",
+  "studio.newCreature.descriptionPlaceholder": "이 크리처의 용도를 입력하세요.",
+  "studio.newCreature.create": "생성",
+  "studio.newCreature.creating": "생성 중…",
+
+  "studio.newModule.title": "새 모듈",
+  "studio.newModule.kind": "종류",
+  "studio.newModule.name": "이름",
+  "studio.newModule.nameHint": "파일 이름의 기준으로 사용됩니다(foo → modules/tools/foo.py).",
+  "studio.newModule.namePlaceholder": "my_module",
+  "studio.newModule.nameInvalid":
+    "잘못된 이름입니다. 공백, 슬래시, 맨 앞의 점은 사용할 수 없습니다.",
+  "studio.newModule.nameExists": "이 이름의 모듈이 이미 있습니다.",
+  "studio.newModule.editorNote":
+    "시작용 파일이 작성됩니다. 생성한 뒤 모듈 편집기에서 폼, 실행 본문, 문서를 편집할 수 있습니다.",
+  "studio.newModule.create": "생성",
+  "studio.newModule.creating": "생성 중…",
+  "studio.newModule.created": "{kind}/{name} 스캐폴드를 생성했습니다",
+  "studio.newModule.manifestSyncTitle": "kohaku.yaml에 추가할까요?",
+  "studio.newModule.manifestSyncBody": ({ kind, name }) =>
+    `${kind}/${name}을(를) 워크스페이스의 kohaku.yaml에 추가해 다른 크리처와 카탈로그에서 찾을 수 있게 할까요? 기존 항목과 주석은 보존됩니다.`,
+  "studio.newModule.manifestSyncConfirm": "kohaku.yaml에 추가",
+  "studio.newModule.manifestSyncCancel": "건너뛰기",
+  "studio.newModule.manifestSyncAdded": ({ name }) => `${name}을(를) kohaku.yaml에 추가했습니다`,
+  "studio.newModule.manifestSyncAlready": ({ name }) => `${name}은(는) 이미 kohaku.yaml에 있습니다`,
+
+  // ─── Memory / embedding ─────────────────────────────────────
+  "studio.memory.provider": "제공자",
+  "studio.memory.providerHint":
+    "(상속)으로 두면 런타임 기본값을 사용합니다. `auto`는 사용 가능한 가장 가벼운 백엔드를 선택합니다.",
+  "studio.memory.providerInherit": "(기본값 상속)",
+  "studio.memory.model": "모델",
+  "studio.memory.modelHintPreset": "@preset 축약형이나 전체 HuggingFace 경로를 사용하세요.",
+  "studio.memory.modelHintApi": "원격 임베딩 엔드포인트 식별자입니다(예: text-embedding-3-small).",
+  "studio.memory.modelPlaceholder": "@multilingual-best",
+  "studio.memory.device": "장치",
+  "studio.memory.dimensions": "차원",
+  "studio.memory.dimensionsHint":
+    "Matryoshka 절단입니다. 이를 지원하는 모델에서만 효과가 있습니다.",
+  "studio.memory.dimensionsPlaceholder": "auto",
+
+  // ─── MCP servers ────────────────────────────────────────────
+  "studio.mcp.name": "이름",
+  "studio.mcp.namePlaceholder": "my-mcp",
+  "studio.mcp.transport": "전송 방식",
+  "studio.mcp.command": "명령",
+  "studio.mcp.commandPlaceholder": "uvx",
+  "studio.mcp.args": "인수",
+  "studio.mcp.argsHint": "공백으로 구분합니다. 공백이 있는 인수는 따옴표로 묶으세요.",
+  "studio.mcp.argsPlaceholder": 'my-mcp-server --flag "value"',
+  "studio.mcp.url": "URL",
+  "studio.mcp.urlPlaceholder": "https://example.com/mcp",
+  "studio.mcp.add": "MCP 서버 추가",
+
+  // ─── Plugins ────────────────────────────────────────────────
+  "studio.plugin.name": "이름",
+  "studio.plugin.namePlaceholder": "my_plugin",
+  "studio.plugin.type": "유형",
+  "studio.plugin.module": "모듈",
+  "studio.plugin.modulePlaceholder": "modules.plugins.my_plugin",
+  "studio.plugin.className": "클래스",
+  "studio.plugin.classNamePlaceholder": "MyPlugin",
+  "studio.plugin.add": "플러그인 추가",
+  "studio.plugin.optionsLabel": "옵션 (JSON)",
+  "studio.plugin.optionsHint":
+    "이 플러그인은 자유 형식의 options 딕셔너리를 받습니다. JSON으로 편집하세요.",
+  "studio.plugin.optionsMustBeObject": "옵션은 JSON 객체여야 합니다.",
+
+  // ─── Compaction ─────────────────────────────────────────────
+  "studio.compact.enable": "압축",
+  "studio.compact.enableHint": "대화 기록이 너무 커지면 오래된 턴을 요약합니다.",
+  "studio.compact.maxTokens": "최대 토큰",
+  "studio.compact.maxTokensHint":
+    "대화가 이 값을 넘으면 압축을 시작합니다. 자동은 모델에서 값을 추정합니다.",
+  "studio.compact.threshold": "임계값",
+  "studio.compact.thresholdHint": "압축을 시작할 최대 토큰 대비 비율입니다(0-1).",
+  "studio.compact.target": "목표",
+  "studio.compact.targetHint": "압축 후 줄일 최대 토큰 대비 비율입니다(0-1).",
+  "studio.compact.keepRecentTurns": "최근 턴 유지",
+
+  // ─── Identity (new keys) ────────────────────────────────────
+  "studio.creature.identity.inheritDefault": "(기본값 상속)",
+  "studio.creature.identity.reasoningHint":
+    "모델 추론 깊이입니다. 상속하면 모델 기본값을 사용합니다.",
+  "studio.creature.identity.toolFormatHint":
+    "도구 호출을 인코딩하는 방식입니다. native는 모델의 도구 호출 API를 사용합니다.",
+  "studio.creature.identity.temperatureHint": "비워 두면 모델 기본값을 사용합니다.",
+  "studio.creature.identity.temperatureDefault": "기본값(모델 정의)",
+  "studio.creature.identity.maxMessages": "최대 메시지",
+  "studio.creature.identity.maxMessagesPlaceholder": "0(무제한)",
+  "studio.creature.identity.modelHint":
+    "모델은 아래 상태 표시줄에서 선택합니다. 설정하지 않으면 런타임에 사용자가 선택할 수 있습니다.",
+
+  // ─── Model picker (status footer) ───────────────────────────
+  "studio.model.pickerTitle": "모델 선택",
+  "studio.model.search": "모델 또는 제공자 검색…",
+  "studio.model.refresh": "새로고침",
+  "studio.model.letUserChoose": "사용자가 선택(기본값 상속)",
+  "studio.model.letUserChooseHint":
+    "모델을 고정하지 않습니다. 런타임은 사용자의 기본값(`kt model default`)을 사용합니다.",
+  "studio.model.letUserChooseShort": "사용자 기본값",
+  "studio.model.orPick": "또는 특정 프로필 선택",
+  "studio.model.userDefault": "default",
+  "studio.model.notAvailable": "(사용 불가)",
+  "studio.model.noMatch": "일치하는 모델이 없습니다.",
+
+  // ─── Module options dialog ──────────────────────────────────
+  "studio.creature.modules.options": "옵션",
+  "studio.moduleOptions.title": "모듈 옵션",
+  "studio.moduleOptions.module": "모듈 경로",
+  "studio.moduleOptions.className": "클래스 이름",
+  "studio.moduleOptions.timeout": "타임아웃(초)",
+  "studio.moduleOptions.timeoutHint": "0 = 타임아웃 없음",
+  "studio.moduleOptions.maxOutput": "최대 출력(바이트)",
+  "studio.moduleOptions.maxOutputHint": "0 = 무제한",
+  "studio.moduleOptions.notifyBgComplete": "백그라운드 완료",
+  "studio.moduleOptions.notifyBgCompleteLabel":
+    "이 도구의 백그라운드 실행이 완료되면 컨트롤러에 알립니다",
+  "studio.moduleOptions.interactive": "인터랙티브",
+  "studio.moduleOptions.interactiveLabel":
+    "컨텍스트 업데이트를 위해 턴 사이에도 하위 에이전트를 유지합니다",
+  "studio.moduleOptions.canModify": "파일 수정 가능",
+  "studio.moduleOptions.canModifyLabel":
+    "이 하위 에이전트가 파일 수정 도구(write / edit)를 사용할 수 있게 허용합니다",
+  "studio.moduleOptions.advanced": "고급 옵션(JSON)",
+  "studio.moduleOptions.advancedHint":
+    "위에 표시되지 않은 추가 키입니다. 안전을 위해 객체({})로 유지하세요.",
+  "studio.moduleOptions.advancedMustBeObject": "고급 옵션은 JSON 객체여야 합니다.",
+
+  "studio.module.kinds.tools": "도구",
+  "studio.module.kinds.subagents": "하위 에이전트",
+  "studio.module.kinds.triggers": "트리거",
+  "studio.module.kinds.plugins": "플러그인",
+  "studio.module.kinds.inputs": "입력",
+  "studio.module.kinds.outputs": "출력",
+
+  "studio.frame.save": "저장",
+  "studio.frame.saving": "저장 중…",
+  "studio.frame.saved": "저장됨",
+  "studio.frame.discard": "버리기",
+  "studio.frame.back": "뒤로",
+  "studio.frame.unsaved": "저장되지 않음",
+  "studio.frame.autosaved": "자동 저장됨",
+
+  "studio.common.loading": "로드 중…",
+  "studio.common.error": "오류",
+  "studio.common.empty": "아직 아무것도 없습니다.",
+  "studio.common.cancel": "취소",
+  "studio.common.confirm": "확인",
+  "studio.common.delete": "삭제",
+  "studio.common.close": "닫기",
+
+  "studio.creature.pool.title": "모듈 풀",
+  "studio.creature.pool.noTools": "카탈로그에 도구가 없습니다.",
+  "studio.creature.pool.noSubagents": "카탈로그에 하위 에이전트가 없습니다.",
+  "studio.creature.pool.noTriggers": "카탈로그에 트리거가 없습니다.",
+  "studio.creature.pool.noPlugins": "카탈로그에 플러그인이 없습니다.",
+
+  "studio.creature.identity.title": "식별 정보",
+  "studio.creature.identity.name": "이름",
+  "studio.creature.identity.version": "버전",
+  "studio.creature.identity.baseConfig": "기본 설정",
+  "studio.creature.identity.noBase": "(없음 — 독립 크리처)",
+  "studio.creature.identity.description": "설명",
+  "studio.creature.identity.noDescription": "(설명 없음)",
+  "studio.creature.identity.controller": "컨트롤러",
+  "studio.creature.identity.model": "모델",
+  "studio.creature.identity.modelDefault": "(`kt model default`의 기본값)",
+  "studio.creature.identity.reasoning": "추론 강도",
+  "studio.creature.identity.toolFormat": "도구 형식",
+  "studio.creature.identity.temperature": "온도",
+
+  "studio.creature.systemPrompt.title": "시스템 프롬프트",
+  "studio.creature.systemPrompt.edit": "편집",
+  "studio.creature.systemPrompt.editComingSoon":
+    "전체 프롬프트 편집기는 아직 사용할 수 없습니다. 지금은 prompts/system.md를 직접 편집하세요.",
+  "studio.creature.systemPrompt.none": "(구성된 시스템 프롬프트 없음)",
+  "studio.creature.systemPrompt.modeConcat": "concat 모드 — {base}의 기본 프롬프트 앞에 추가됨",
+  "studio.creature.systemPrompt.modeReplace": "replace 모드 — 기본 프롬프트를 버림",
+
+  "studio.creature.modules.title": "연결된 모듈",
+  "studio.creature.modules.empty": "연결된 모듈이 없습니다. 왼쪽 항목을 클릭해 추가하세요.",
+  "studio.creature.modules.addHint":
+    "풀의 항목을 클릭해 추가하거나 오른쪽 상세 패널에서 Add 버튼으로 명시적으로 추가하세요.",
+  "studio.creature.modules.remove": "제거",
+  "studio.creature.modules.convertOverride": "오버라이드로 변환",
+  "studio.creature.modules.inheritedFrom": "base_config에서 상속됨",
+  "studio.creature.modules.expand": "옵션 펼치기",
+  "studio.creature.modules.collapse": "접기",
+
+  "studio.schema.optional": "선택 사항",
+  "studio.schema.noOptions": "(이 모듈에는 구성 가능한 옵션이 없습니다)",
+
+  "studio.creature.advanced.memory": "메모리 / 임베딩",
+  "studio.creature.advanced.mcp": "MCP 서버",
+  "studio.creature.advanced.plugins": "플러그인",
+  "studio.creature.advanced.compact": "압축",
+  "studio.creature.advanced.termination": "종료 조건",
+  "studio.creature.advanced.outputWiring": "출력 배선",
+
+  "studio.creature.head.testDrive": "테스트 실행",
+  "studio.creature.head.testDriveComingSoon":
+    "Studio 내 테스트 실행은 아직 사용할 수 없습니다. 지금은 터미널에서 크리처를 실행하세요.",
+
+  "studio.creature.detail.summary": "요약",
+  "studio.creature.detail.catalog": "카탈로그 항목",
+  "studio.creature.detail.slot": "연결된 슬롯",
+  "studio.creature.detail.name": "크리처",
+  "studio.creature.detail.resolvedModel": "해결된 모델",
+  "studio.creature.detail.inheritance": "상속",
+  "studio.creature.detail.tools": "도구",
+  "studio.creature.detail.subagents": "하위 에이전트",
+  "studio.creature.detail.triggers": "트리거",
+  "studio.creature.detail.plugins": "플러그인",
+  "studio.creature.detail.hoverHint":
+    "자세한 정보를 보려면 풀 또는 연결 목록의 항목 위에 마우스를 올리세요.",
+  "studio.creature.detail.noDescription": "(사용 가능한 설명 없음)",
+  "studio.creature.detail.executionMode": "실행 모드",
+  "studio.creature.detail.needsContext": "컨텍스트 필요",
+  "studio.creature.detail.add": "추가",
+  "studio.creature.detail.addComingSoon":
+    "상세 패널에서 추가하는 기능은 아직 연결되지 않았습니다. 왼쪽 풀의 항목을 클릭해 추가하세요.",
+  "studio.creature.detail.customize": "사용자 지정",
+  "studio.creature.detail.customizeComingSoon": "가운데 패널에서 모듈 행을 펼쳐 옵션을 편집하세요.",
+  "studio.creature.detail.options": "옵션",
+  "studio.creature.detail.optionsComingSoon":
+    "이 모듈 행을 가운데 패널에서 펼쳐 옵션을 편집하세요.",
+  "studio.creature.detail.remove": "제거",
+  "studio.creature.detail.removeComingSoon":
+    "가운데 패널의 모듈 행에서 × 버튼을 사용해 제거하세요.",
+  "studio.creature.detail.wired": "연결됨",
+
+  "studio.creature.validation.title": ({ count }) =>
+    `${count}개의 검증 오류 — 저장하기 전에 수정하세요`,
+
+  "studio.creature.confirm.unsavedLeave":
+    "저장되지 않은 변경 사항이 있습니다. 저장하지 않고 나갈까요?",
+
+  "studio.creature.status.loaded": "불러옴",
+
+  "studio.picker.title": "워크스페이스 폴더 선택",
+  "studio.picker.up": "상위로",
+  "studio.picker.roots": "루트",
+  "studio.picker.chooseRoot": "루트 디렉터리 선택",
+  "studio.picker.allowedRoots": "허용된 루트",
+  "studio.picker.useThisFolder": "이 폴더 사용",
+  "studio.picker.selectHighlighted": "선택된 폴더 사용",
+  "studio.picker.noRoots": "사용 가능한 루트가 없습니다.",
+  "studio.picker.noSubdirs": "여기에는 하위 디렉터리가 없습니다.",
+
+  // ─── Module editor (Phase 5) ────────────────────────────────
+  "studio.module.mode.simple": "Simple",
+  "studio.module.mode.simpleHint": "폼 기반 편집기입니다. 대부분의 도구에 안전합니다.",
+  "studio.module.mode.raw": "Raw",
+  "studio.module.mode.rawHint": "전체 Python 소스를 직접 편집합니다.",
+  "studio.module.raw.title": "Raw mode",
+  "studio.module.raw.auto": "auto-raw",
+  "studio.module.raw.roundtripFailed": "왕복 변환 실패 — Raw 모드로 전환했습니다",
+  "studio.module.raw.retry": "Simple 다시 시도",
+  "studio.module.warnings": ({ n }) => `경고 ${n}개`,
+
+  "studio.module.simpleNotAvailable": ({ kind }) =>
+    `${kind}용 폼 기반 편집기는 아직 연결되어 있지 않습니다.`,
+  "studio.module.simpleNotAvailableHint":
+    "전체 Python 소스를 직접 편집하려면 위에서 Raw 모드로 전환하세요.",
+
+  "studio.module.guard.notEditable": ({ kind, name }) =>
+    `${kind}/${name}은(는) 여기에서 편집할 수 없습니다.`,
+  "studio.module.guard.hint":
+    "이 모듈은 워크스페이스 밖에 선언되어 있습니다. Studio는 <root>/modules/ 아래의 파일만 편집합니다.",
+
+  "studio.module.notFound.title": ({ kind, name }) =>
+    `${kind}/${name}에 해당하는 워크스페이스 파일이 없습니다.`,
+  "studio.module.notFound.hint": "대시보드에서 생성하거나 이름이 올바른지 확인하세요.",
+
+  "studio.module.confirm.unsavedLeave": "저장되지 않은 변경 사항이 있습니다. 이 페이지를 나갈까요?",
+
+  "studio.module.preview.title": "사용자 측 미리보기",
+  "studio.module.preview.hint":
+    "크리처가 이 모듈을 연결했을 때 보게 되는 내용입니다. 저장할 때마다 업데이트됩니다.",
+  "studio.module.preview.schemaTitle": "옵션 폼",
+  "studio.module.preview.noParams": "이 모듈에는 구성 가능한 옵션이 없습니다.",
+  "studio.module.preview.usedInTitle": "사용 중인 크리처",
+  "studio.module.preview.renameTitle": "이름을 바꾸면 기존 연결이 깨집니다",
+  "studio.module.preview.renameHint": ({ old, count }) =>
+    `${count}개의 크리처가 현재 ${old}을(를) 연결하고 있습니다. 해당 연결을 업데이트하지 않고 이름을 바꾸면 런타임에 실패합니다.`,
+
+  "studio.module.peers.empty": "이 종류의 다른 워크스페이스 모듈은 아직 없습니다.",
+
+  "studio.module.form.identity": "식별 정보",
+  "studio.module.form.toolName": "도구 이름",
+  "studio.module.form.toolNameHint":
+    "스네이크 케이스입니다. 파일 이름의 기준과 도구 호출 식별자로 사용됩니다.",
+  "studio.module.form.className": "클래스 이름",
+  "studio.module.form.classNameHint": "PascalCase입니다. 비워 두면 도구 이름에서 파생됩니다.",
+  "studio.module.form.description": "설명",
+  "studio.module.form.descriptionHint": "컨트롤러가 도구를 선택할 때 보는 한 줄 설명입니다.",
+  "studio.module.form.descriptionPlaceholder": "이 도구가 하는 일.",
+  "studio.module.form.behavior": "동작",
+  "studio.module.form.executionMode": "실행 모드",
+  "studio.module.form.executionModeHint":
+    "direct = 블로킹, background = 실행 후 업데이트, stateful = 다중 턴.",
+  "studio.module.form.flags": "플래그",
+  "studio.module.form.needsContext": "ToolContext 주입(working_dir, session 등)",
+  "studio.module.form.requireManualRead": "사용 전 ##info## 읽기 필요",
+  "studio.module.form.params": "매개변수",
+  "studio.module.form.paramsHint":
+    "크리처가 이 도구를 연결할 때 전달하는 값입니다. 크리처 편집기가 렌더링하는 스키마와 일치합니다.",
+  "studio.module.form.executeBody": "_execute 본문",
+  "studio.module.form.executeBodyHint":
+    "`async def _execute(self, args)`의 본문입니다. ToolResult를 반환하세요.",
+  "studio.module.form.wiring": "연결 미리보기",
+
+  "studio.module.params.empty": "아직 매개변수가 없습니다.",
+  "studio.module.params.add": "매개변수 추가",
+  "studio.module.params.remove": "제거",
+  "studio.module.params.required": "필수",
+  "studio.module.params.defaultPlaceholder": "기본값(비워 두면 없음)",
+  "studio.module.params.descriptionPlaceholder": "설명(선택 사항)",
+  "studio.module.params.moveUp": "위로 이동",
+  "studio.module.params.moveDown": "아래로 이동",
+
+  "studio.module.wiring.title": "크리처가 이를 연결하는 방식",
+  "studio.module.wiring.copy": "복사",
+  "studio.module.wiring.copied": "복사됨",
+
+  "studio.module.doc.sectionTitle": "스킬 문서",
+  "studio.module.doc.edit": "편집",
+  "studio.module.doc.empty":
+    "아직 함께 둘 .md 파일이 없습니다. 편집을 클릭해 만드세요. 런타임에는 프레임워크가 이를 `##info##`로 노출합니다.",
+  "studio.module.doc.hint":
+    "모듈 파일 옆에 있는 Markdown 문서입니다. 에이전트가 도구의 전체 문서를 요청할 때 이를 읽습니다.",
+  "studio.module.doc.tabLabel": "문서",
+  "studio.module.doc.headTitle": ({ name }) => `문서 — ${name}`,
+  "studio.module.doc.confirmClose":
+    "문서에 저장되지 않은 변경 사항이 있습니다. 저장하지 않고 닫을까요?",
+
+  // ─── Sub-agent form ─────────────────────────────────────────
+  "studio.module.form.subagentName": "하위 에이전트 이름",
+  "studio.module.form.subagentNameHint":
+    "스네이크 케이스입니다. 컨트롤러는 이 이름으로 하위 에이전트에 작업을 보냅니다.",
+  "studio.module.form.subagentFlags": "플래그",
+  "studio.module.form.stateless":
+    "무상태 — 실행할 때마다 새 컨텍스트를 사용합니다(도구 사용 하위 에이전트에 권장)",
+  "studio.module.form.interactive":
+    "인터랙티브 — 컨텍스트 업데이트를 위해 부모 턴 사이에도 유지합니다",
+  "studio.module.form.canModify":
+    "파일 수정 도구(write / edit)를 허용합니다. 꼭 필요하지 않으면 꺼 두세요.",
+  "studio.module.form.subagentTools": "허용된 도구",
+  "studio.module.form.subagentToolsHint":
+    "워크스페이스 / 패키지 / 내장 카탈로그에서 선택하세요. 이 하위 에이전트 안에서는 선택한 도구만 호출할 수 있습니다.",
+  "studio.module.form.systemPrompt": "시스템 프롬프트",
+  "studio.module.form.systemPromptHint":
+    "이 하위 에이전트가 따르는 역할과 제약입니다. Markdown 형식입니다.",
+
+  // ─── Trigger form ───────────────────────────────────────────
+  "studio.module.form.triggerName": "트리거 클래스 이름",
+  "studio.module.form.triggerNameHint":
+    "파스칼 케이스입니다. Python 클래스 이름으로 사용됩니다(예: MyTrigger).",
+  "studio.module.form.triggerSetup": "Setup 메타데이터",
+  "studio.module.form.universal": "범용(setup-tool) 트리거",
+  "studio.module.form.universalHint":
+    "활성화하면 컨트롤러가 런타임에 setup 도구로 이 트리거를 설정할 수 있습니다.",
+  "studio.module.form.universalLabel": "setup 도구로 노출",
+  "studio.module.form.setupToolName": "Setup 도구 이름",
+  "studio.module.form.setupToolNameHint":
+    "컨트롤러가 이 트리거를 설정할 때 호출하는 도구 이름입니다(예: add_timer).",
+  "studio.module.form.setupDescription": "Setup 도구 설명",
+  "studio.module.form.setupDescriptionHint": "컨트롤러가 setup 도구에 대해 보는 한 줄 설명입니다.",
+  "studio.module.form.setupDescriptionPlaceholder": "이 트리거의 새 인스턴스를 설정합니다.",
+  "studio.module.form.triggerBody": "wait_for_trigger 본문",
+  "studio.module.form.triggerBodyHint":
+    "비동기 본문입니다. 트리거가 발생하면 TriggerEvent를 반환하세요.",
+
+  // ─── Input / Output form ────────────────────────────────────
+  "studio.module.form.ioClassNameHint":
+    "파스칼 케이스입니다. 이 모듈의 Python 클래스 이름으로 사용됩니다.",
+  "studio.module.form.ioBody": ({ method }) => `${method} 본문`,
+  "studio.module.form.ioInputHint":
+    "비동기 본문입니다. TriggerEvent를 반환합니다(중지하려면 None).",
+  "studio.module.form.ioOutputHint": "비동기 본문입니다. 대상 표면으로 내용을 내보냅니다.",
+
+  // ─── Plugin form ────────────────────────────────────────────
+  "studio.module.form.pluginName": "플러그인 이름",
+  "studio.module.form.pluginNameHint":
+    "스네이크 케이스입니다. 크리처는 이를 plugins: 아래에 나열합니다.",
+  "studio.module.form.priority": "우선순위",
+  "studio.module.form.priorityHint":
+    "0-100. 숫자가 낮을수록 pre-hook에서는 먼저, post-hook에서는 나중에 실행됩니다.",
+  "studio.module.form.optionsSchema": "옵션 스키마",
+  "studio.module.form.optionsSchemaHint":
+    "크리처가 `options:` 아래에 전달할 수 있는 키입니다. .py 옆에 <name>.schema.json으로 저장되며, 크리처 편집기는 각 키에 대한 실제 폼을 렌더링합니다.",
+  "studio.module.form.hooks": "훅",
+  "studio.module.form.hooksHint":
+    "이 플러그인이 수신할 프레임워크 이벤트를 선택하세요. 각 훅은 아래에 자체 메서드 본문을 가집니다.",
+  "studio.module.form.hookBodies": "훅 본문",
+
+  "studio.module.optionsSchema.intro":
+    "각 행은 이 플러그인의 `options:` 딕셔너리 아래 키 하나를 설명합니다. 이 플러그인을 연결한 크리처는 원시 JSON 편집기 대신 각 키에 대한 폼을 받습니다.",
+
+  // ─── Tools multi-select ─────────────────────────────────────
+  "studio.module.tools.searchPlaceholder": "도구 검색…",
+  "studio.module.tools.empty": "일치하는 도구가 없습니다.",
+
+  // ─── Plugin hook groups ─────────────────────────────────────
+  "studio.module.hooks.empty": "사용 가능한 플러그인 훅이 없습니다.",
+  "studio.module.hooks.group.lifecycle": "생명주기",
+  "studio.module.hooks.group.llm": "LLM",
+  "studio.module.hooks.group.tool": "도구",
+  "studio.module.hooks.group.subagent": "하위 에이전트",
+  "studio.module.hooks.group.event": "이벤트",
+  "studio.module.hooks.group.other": "기타",
+
+  "studio.module.usedIn.empty": "아직 이 모듈을 연결한 크리처가 없습니다.",
+  "studio.module.usedIn.summary": ({ n }) => `${n}개의 크리처에 연결됨:`,
 }

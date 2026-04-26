@@ -295,4 +295,463 @@ export default {
   "instanceSettings.cost": "Kosten",
   "instanceSettings.environment": "Umgebung",
   "instanceSettings.autoOpen": "Automatisch oeffnen",
+  // ─── Studio (isolated /studio/* section) ─────────────────────────
+  "studio.nav.studio": "Studio",
+  "studio.home.title": "KohakuTerrarium Studio",
+  "studio.home.subtitle": "Kreaturen, Werkzeuge und Plugins direkt im Browser erstellen.",
+  "studio.home.openWorkspace": "Arbeitsbereich oeffnen",
+  "studio.home.pickFolder": "Durchsuchen…",
+  "studio.home.openButton": "Oeffnen",
+  "studio.home.useCwd": "Server-Arbeitsverzeichnis verwenden",
+  "studio.home.recent": "Zuletzt verwendet",
+  "studio.home.noRecent": "Noch keine Arbeitsbereiche geoeffnet.",
+  "studio.home.hint":
+    "Ein Arbeitsbereich ist ein beliebiger Ordner. Studio erstellt beim ersten Speichern die Unterordner creatures/ und modules/.",
+  "studio.home.errorOpen": "Arbeitsbereich konnte nicht geoeffnet werden:",
+
+  "studio.dashboard.creatures": "Kreaturen",
+  "studio.dashboard.modules": "Module",
+  "studio.dashboard.newCreature": "Neue Kreatur",
+  "studio.dashboard.newModule": "Neues Modul",
+  "studio.dashboard.noCreatures": "Noch keine Kreaturen.",
+  "studio.dashboard.noModules": "Noch keine Module.",
+  "studio.dashboard.switchWorkspace": "Arbeitsbereich wechseln",
+  "studio.dashboard.refreshing": "Aktualisieren",
+  "studio.dashboard.deleteCreature": "Kreatur loeschen",
+  "studio.dashboard.deleteConfirmTitle": "Kreatur loeschen",
+  "studio.dashboard.deleteConfirmBody":
+    '"{name}" dauerhaft loeschen? Der Ordner und alle Dateien darin werden entfernt.',
+  "studio.dashboard.deletedMessage": '"{name}" geloescht',
+  "studio.dashboard.sourceManifest": "Manifest",
+  "studio.dashboard.sourcePackage": ({ name }) => `Paket: ${name}`,
+  "studio.dashboard.readOnlyModule":
+    "In {source} deklariert. Binde es aus dem Pool in eine Kreatur ein.",
+
+  "studio.newCreature.title": "Neue Kreatur",
+  "studio.newCreature.name": "Name",
+  "studio.newCreature.nameHint":
+    "Wird als Ordnername verwendet: Buchstaben, Ziffern und Unterstriche. Keine Leerzeichen oder Schraegstriche.",
+  "studio.newCreature.namePlaceholder": "my_creature",
+  "studio.newCreature.nameInvalid":
+    "Ungueltiger Name. Keine Leerzeichen, Schraegstriche oder fuehrenden Punkte.",
+  "studio.newCreature.nameExists": "Eine Kreatur mit diesem Namen existiert bereits.",
+  "studio.newCreature.baseConfig": "Basiskonfiguration (optional)",
+  "studio.newCreature.baseConfigHint":
+    "Von einer anderen Kreatur ueber @package/creatures/name erben.",
+  "studio.newCreature.baseConfigPlaceholder": "@kt-biome/creatures/general",
+  "studio.newCreature.description": "Beschreibung (optional)",
+  "studio.newCreature.descriptionPlaceholder": "Wofuer diese Kreatur gedacht ist.",
+  "studio.newCreature.create": "Erstellen",
+  "studio.newCreature.creating": "Wird erstellt…",
+
+  "studio.newModule.title": "Neues Modul",
+  "studio.newModule.kind": "Art",
+  "studio.newModule.name": "Name",
+  "studio.newModule.nameHint":
+    "Wird als Dateiname ohne Endung verwendet (foo → modules/tools/foo.py).",
+  "studio.newModule.namePlaceholder": "my_module",
+  "studio.newModule.nameInvalid":
+    "Ungueltiger Name. Keine Leerzeichen, Schraegstriche oder fuehrenden Punkte.",
+  "studio.newModule.nameExists": "Ein Modul mit diesem Namen existiert bereits.",
+  "studio.newModule.editorNote":
+    "Eine Startdatei wird geschrieben. Nach dem Erstellen kannst du Formular, Ausfuehrungskoerper und Dokumentation im Modul-Editor bearbeiten.",
+  "studio.newModule.create": "Erstellen",
+  "studio.newModule.creating": "Wird erstellt…",
+  "studio.newModule.created": "{kind}/{name} angelegt",
+  "studio.newModule.manifestSyncTitle": "In kohaku.yaml eintragen?",
+  "studio.newModule.manifestSyncBody": ({ kind, name }) =>
+    `${kind}/${name} in die kohaku.yaml des Arbeitsbereichs eintragen, damit andere Kreaturen und der Katalog es finden? Das ist sicher: vorhandene Eintraege und Kommentare bleiben erhalten.`,
+  "studio.newModule.manifestSyncConfirm": "Zu kohaku.yaml hinzufuegen",
+  "studio.newModule.manifestSyncCancel": "Ueberspringen",
+  "studio.newModule.manifestSyncAdded": ({ name }) => `${name} zu kohaku.yaml hinzugefuegt`,
+  "studio.newModule.manifestSyncAlready": ({ name }) =>
+    `${name} ist bereits in kohaku.yaml eingetragen`,
+
+  // ─── Memory / embedding ─────────────────────────────────────
+  "studio.memory.provider": "Provider",
+  "studio.memory.providerHint":
+    "Leave on (inherit) to use the runtime default — `auto` picks the lightest available backend.",
+  "studio.memory.providerInherit": "(inherit default)",
+  "studio.memory.model": "Modell",
+  "studio.memory.modelHintPreset": "Use a @preset shorthand or a full HuggingFace path.",
+  "studio.memory.modelHintApi":
+    "Remote embedding endpoint identifier (e.g. text-embedding-3-small).",
+  "studio.memory.modelPlaceholder": "@multilingual-best",
+  "studio.memory.device": "Device",
+  "studio.memory.dimensions": "Dimensions",
+  "studio.memory.dimensionsHint":
+    "Matryoshka truncation — only effective on models that support it.",
+  "studio.memory.dimensionsPlaceholder": "auto",
+
+  // ─── MCP servers ────────────────────────────────────────────
+  "studio.mcp.name": "Name",
+  "studio.mcp.namePlaceholder": "my-mcp",
+  "studio.mcp.transport": "Transport",
+  "studio.mcp.command": "Command",
+  "studio.mcp.commandPlaceholder": "uvx",
+  "studio.mcp.args": "Arguments",
+  "studio.mcp.argsHint": "Space-separated; use quotes for args with spaces.",
+  "studio.mcp.argsPlaceholder": 'my-mcp-server --flag "value"',
+  "studio.mcp.url": "URL",
+  "studio.mcp.urlPlaceholder": "https://example.com/mcp",
+  "studio.mcp.add": "Add MCP server",
+
+  // ─── Plugins ────────────────────────────────────────────────
+  "studio.plugin.name": "Name",
+  "studio.plugin.namePlaceholder": "my_plugin",
+  "studio.plugin.type": "Type",
+  "studio.plugin.module": "Module",
+  "studio.plugin.modulePlaceholder": "modules.plugins.my_plugin",
+  "studio.plugin.className": "Class",
+  "studio.plugin.classNamePlaceholder": "MyPlugin",
+  "studio.plugin.add": "Add plugin",
+  "studio.plugin.optionsLabel": "Options (JSON)",
+  "studio.plugin.optionsHint": "This plugin takes a free-form options dict. Edit as JSON.",
+  "studio.plugin.optionsMustBeObject": "Options must be a JSON object.",
+
+  // ─── Compaction ─────────────────────────────────────────────
+  "studio.compact.enable": "Compaction",
+  "studio.compact.enableHint": "When conversation history grows too large, summarize older turns.",
+  "studio.compact.maxTokens": "Max tokens",
+  "studio.compact.maxTokensHint":
+    "Compaction triggers when the conversation exceeds this. Auto = derive from model.",
+  "studio.compact.threshold": "Threshold",
+  "studio.compact.thresholdHint": "Fraction of max tokens that triggers compaction (0-1).",
+  "studio.compact.target": "Target",
+  "studio.compact.targetHint": "Fraction of max tokens to shrink to (0-1).",
+  "studio.compact.keepRecentTurns": "Keep recent turns",
+
+  // ─── Identity (new keys) ────────────────────────────────────
+  "studio.creature.identity.inheritDefault": "(inherit default)",
+  "studio.creature.identity.reasoningHint": "Model reasoning depth. Inherit = use model's default.",
+  "studio.creature.identity.toolFormatHint":
+    "How tool calls are encoded — native uses the model's tool-calling API.",
+  "studio.creature.identity.temperatureHint": "Leave blank to use the model's default.",
+  "studio.creature.identity.temperatureDefault": "default (model-defined)",
+  "studio.creature.identity.maxMessages": "Max messages",
+  "studio.creature.identity.maxMessagesPlaceholder": "0 (unlimited)",
+  "studio.creature.identity.modelHint":
+    "Model is picked in the status bar at the bottom. Leave unset to let the user choose at runtime.",
+
+  // ─── Model picker (status footer) ───────────────────────────
+  "studio.model.pickerTitle": "Pick model",
+  "studio.model.search": "Search model or provider…",
+  "studio.model.refresh": "Aktualisieren",
+  "studio.model.letUserChoose": "Let user choose (inherit default)",
+  "studio.model.letUserChooseHint":
+    "Don't pin a model — the runtime uses the user's default (`kt model default`).",
+  "studio.model.letUserChooseShort": "user default",
+  "studio.model.orPick": "Or pick a specific profile",
+  "studio.model.userDefault": "default",
+  "studio.model.notAvailable": "(unavailable)",
+  "studio.model.noMatch": "Keine passenden Modelle.",
+
+  // ─── Module options dialog ──────────────────────────────────
+  "studio.creature.modules.options": "Options",
+  "studio.moduleOptions.title": "Module options",
+  "studio.moduleOptions.module": "Module path",
+  "studio.moduleOptions.className": "Klassenname",
+  "studio.moduleOptions.timeout": "Timeout (seconds)",
+  "studio.moduleOptions.timeoutHint": "0 = no timeout",
+  "studio.moduleOptions.maxOutput": "Max output (bytes)",
+  "studio.moduleOptions.maxOutputHint": "0 = unlimited",
+  "studio.moduleOptions.notifyBgComplete": "Background completion",
+  "studio.moduleOptions.notifyBgCompleteLabel":
+    "Notify the controller when a backgrounded run of this tool finishes",
+  "studio.moduleOptions.interactive": "Interactive",
+  "studio.moduleOptions.interactiveLabel":
+    "Keep the sub-agent alive between turns for context updates",
+  "studio.moduleOptions.canModify": "Can modify files",
+  "studio.moduleOptions.canModifyLabel":
+    "Allow this sub-agent to use file-modifying tools (write / edit)",
+  "studio.moduleOptions.advanced": "Advanced options (JSON)",
+  "studio.moduleOptions.advancedHint":
+    "Extra keys not surfaced above. Keep this an object — {} — for safety.",
+  "studio.moduleOptions.advancedMustBeObject": "Advanced options must be a JSON object.",
+
+  "studio.module.kinds.tools": "Tools",
+  "studio.module.kinds.subagents": "Sub-agents",
+  "studio.module.kinds.triggers": "Triggers",
+  "studio.module.kinds.plugins": "Plugins",
+  "studio.module.kinds.inputs": "Inputs",
+  "studio.module.kinds.outputs": "Outputs",
+
+  "studio.frame.save": "Save",
+  "studio.frame.saving": "Saving…",
+  "studio.frame.saved": "saved",
+  "studio.frame.discard": "Discard",
+  "studio.frame.back": "Back",
+  "studio.frame.unsaved": "unsaved",
+  "studio.frame.autosaved": "autosaved",
+
+  "studio.common.loading": "Loading…",
+  "studio.common.error": "Error",
+  "studio.common.empty": "Nothing here yet.",
+  "studio.common.cancel": "Cancel",
+  "studio.common.confirm": "Confirm",
+  "studio.common.delete": "Delete",
+  "studio.common.close": "Close",
+
+  "studio.creature.pool.title": "Module pool",
+  "studio.creature.pool.noTools": "Keine Werkzeuge im Katalog.",
+  "studio.creature.pool.noSubagents": "Keine Sub-Agenten im Katalog.",
+  "studio.creature.pool.noTriggers": "Keine Trigger im Katalog.",
+  "studio.creature.pool.noPlugins": "Keine Plugins im Katalog.",
+
+  "studio.creature.identity.title": "Identity",
+  "studio.creature.identity.name": "Name",
+  "studio.creature.identity.version": "Version",
+  "studio.creature.identity.baseConfig": "Base config",
+  "studio.creature.identity.noBase": "(none — standalone creature)",
+  "studio.creature.identity.description": "Beschreibung",
+  "studio.creature.identity.noDescription": "(no description)",
+  "studio.creature.identity.controller": "Controller",
+  "studio.creature.identity.model": "Modell",
+  "studio.creature.identity.modelDefault": "(default from `kt model default`)",
+  "studio.creature.identity.reasoning": "Reasoning effort",
+  "studio.creature.identity.toolFormat": "Tool format",
+  "studio.creature.identity.temperature": "Temperature",
+
+  "studio.creature.systemPrompt.title": "System prompt",
+  "studio.creature.systemPrompt.edit": "Edit",
+  "studio.creature.systemPrompt.editComingSoon":
+    "The full prompt editor isn't available yet — edit prompts/system.md directly for now.",
+  "studio.creature.systemPrompt.none": "(no system prompt configured)",
+  "studio.creature.systemPrompt.modeConcat": "concat mode — prepended to base prompt from {base}",
+  "studio.creature.systemPrompt.modeReplace": "replace mode — base prompt is discarded",
+
+  "studio.creature.modules.title": "Modules wired",
+  "studio.creature.modules.empty":
+    "Keine Module eingebunden. Klicke links auf Eintraege, um sie hinzuzufuegen.",
+  "studio.creature.modules.addHint":
+    "Click an item in the pool to add it — or open the detail panel on the right for an explicit Add button.",
+  "studio.creature.modules.remove": "Remove",
+  "studio.creature.modules.convertOverride": "Convert to override",
+  "studio.creature.modules.inheritedFrom": "inherited from base_config",
+  "studio.creature.modules.expand": "Expand options",
+  "studio.creature.modules.collapse": "Collapse",
+
+  "studio.schema.optional": "optional",
+  "studio.schema.noOptions": "(this module has no configurable options)",
+
+  "studio.creature.advanced.memory": "Memory / embedding",
+  "studio.creature.advanced.mcp": "MCP servers",
+  "studio.creature.advanced.plugins": "Plugins",
+  "studio.creature.advanced.compact": "Compaction",
+  "studio.creature.advanced.termination": "Termination",
+  "studio.creature.advanced.outputWiring": "Output wiring",
+
+  "studio.creature.head.testDrive": "Test drive",
+  "studio.creature.head.testDriveComingSoon":
+    "In-studio test drive isn't available yet — run the creature from the terminal for now.",
+
+  "studio.creature.detail.summary": "Summary",
+  "studio.creature.detail.catalog": "Catalog item",
+  "studio.creature.detail.slot": "Eingebundener Slot",
+  "studio.creature.detail.name": "Creature",
+  "studio.creature.detail.resolvedModel": "Resolved model",
+  "studio.creature.detail.inheritance": "Inheritance",
+  "studio.creature.detail.tools": "Tools",
+  "studio.creature.detail.subagents": "Sub-agents",
+  "studio.creature.detail.triggers": "Triggers",
+  "studio.creature.detail.plugins": "Plugins",
+  "studio.creature.detail.hoverHint": "Hover items in the pool or wired list for details.",
+  "studio.creature.detail.noDescription": "(no description available)",
+  "studio.creature.detail.executionMode": "Execution mode",
+  "studio.creature.detail.needsContext": "Needs context",
+  "studio.creature.detail.add": "Add",
+  "studio.creature.detail.addComingSoon":
+    "Hinzufuegen aus dem Detailbereich ist noch nicht verdrahtet — klicke links im Pool auf einen Eintrag, um ihn hinzuzufuegen.",
+  "studio.creature.detail.customize": "Customize",
+  "studio.creature.detail.customizeComingSoon":
+    "Expand the module row in the middle panel to edit its options.",
+  "studio.creature.detail.options": "Options",
+  "studio.creature.detail.optionsComingSoon":
+    "Expand this module's row in the middle panel to edit its options.",
+  "studio.creature.detail.remove": "Remove",
+  "studio.creature.detail.removeComingSoon":
+    "Use the × button on the module row in the middle panel to remove it.",
+  "studio.creature.detail.wired": "wired",
+
+  "studio.creature.validation.title": ({ count }) =>
+    `${count} validation ${count === 1 ? "error" : "errors"} — fix before saving`,
+
+  "studio.creature.confirm.unsavedLeave": "You have unsaved changes. Leave without saving?",
+
+  "studio.creature.status.loaded": "Loaded",
+
+  "studio.picker.title": "Pick workspace folder",
+  "studio.picker.up": "Up",
+  "studio.picker.roots": "Roots",
+  "studio.picker.chooseRoot": "Choose a root directory",
+  "studio.picker.allowedRoots": "Allowed roots",
+  "studio.picker.useThisFolder": "Use this folder",
+  "studio.picker.selectHighlighted": "Select highlighted folder",
+  "studio.picker.noRoots": "Keine Wurzeln verfuegbar.",
+  "studio.picker.noSubdirs": "Hier gibt es keine Unterordner.",
+
+  // ─── Module editor (Phase 5) ────────────────────────────────
+  "studio.module.mode.simple": "Simple",
+  "studio.module.mode.simpleHint": "Formularbasierter Editor. Sicher fuer die meisten Tools.",
+  "studio.module.mode.raw": "Raw",
+  "studio.module.mode.rawHint": "Den vollstaendigen Python-Quelltext direkt bearbeiten.",
+  "studio.module.raw.title": "Raw mode",
+  "studio.module.raw.auto": "auto-raw",
+  "studio.module.raw.roundtripFailed": "Round-trip fehlgeschlagen — in den Rohmodus gewechselt",
+  "studio.module.raw.retry": "Simple erneut versuchen",
+  "studio.module.warnings": ({ n }) => `${n} Warnung${n === 1 ? "" : "en"}`,
+
+  "studio.module.simpleNotAvailable": ({ kind }) =>
+    `Ein formularbasierter Editor fuer ${kind} ist noch nicht verdrahtet.`,
+  "studio.module.simpleNotAvailableHint":
+    "Wechsle oben in den Rohmodus, um den vollstaendigen Python-Quelltext direkt zu bearbeiten.",
+
+  "studio.module.guard.notEditable": ({ kind, name }) =>
+    `${kind}/${name} ist hier nicht bearbeitbar.`,
+  "studio.module.guard.hint":
+    "This module is declared outside the workspace — studio only edits files under <root>/modules/.",
+
+  "studio.module.notFound.title": ({ kind, name }) =>
+    `Keine Arbeitsbereichsdatei fuer ${kind}/${name}.`,
+  "studio.module.notFound.hint": "Erstelle es ueber das Dashboard oder pruefe den Namen.",
+
+  "studio.module.confirm.unsavedLeave": "You have unsaved changes. Leave this page?",
+
+  "studio.module.preview.title": "Verbraucher-Vorschau",
+  "studio.module.preview.hint":
+    "Was eine Kreatur sieht, wenn sie dieses Modul einbindet. Wird nach jedem Speichern aktualisiert.",
+  "studio.module.preview.schemaTitle": "Optionsformular",
+  "studio.module.preview.noParams": "Keine konfigurierbaren Optionen fuer dieses Modul.",
+  "studio.module.preview.usedInTitle": "Used in creatures",
+  "studio.module.preview.renameTitle": "Umbenennen beschaedigt bestehende Verdrahtungen",
+  "studio.module.preview.renameHint": ({ old, count }) =>
+    `${count} Kreatur${count === 1 ? "" : "en"} bindet/binden derzeit ${old} ein. Umbenennen ohne Aktualisierung dieser Verdrahtungen schlaegt zur Laufzeit fehl.`,
+
+  "studio.module.peers.empty": "Noch keine anderen Arbeitsbereichs-Module dieser Art.",
+
+  "studio.module.form.identity": "Identity",
+  "studio.module.form.toolName": "Tool-Name",
+  "studio.module.form.toolNameHint":
+    "Snake-case. Wird als Dateiname ohne Endung und als Kennung in Tool-Aufrufen verwendet.",
+  "studio.module.form.className": "Klassenname",
+  "studio.module.form.classNameHint":
+    "PascalCase. Wird aus dem Tool-Namen abgeleitet, wenn leer gelassen.",
+  "studio.module.form.description": "Beschreibung",
+  "studio.module.form.descriptionHint":
+    "Eine Zeile, die der Controller bei der Tool-Auswahl sieht.",
+  "studio.module.form.descriptionPlaceholder": "Was dieses Tool tut.",
+  "studio.module.form.behavior": "Behavior",
+  "studio.module.form.executionMode": "Execution mode",
+  "studio.module.form.executionModeHint":
+    "direct = blocking, background = fire-and-forget updates, stateful = multi-turn.",
+  "studio.module.form.flags": "Flags",
+  "studio.module.form.needsContext": "Inject ToolContext (working_dir, session, …)",
+  "studio.module.form.requireManualRead": "Require ##info## read before use",
+  "studio.module.form.params": "Parameters",
+  "studio.module.form.paramsHint":
+    "Was eine Kreatur beim Einbinden dieses Tools uebergibt. Entspricht dem Schema, das der Kreatur-Editor rendert.",
+  "studio.module.form.executeBody": "_execute body",
+  "studio.module.form.executeBodyHint":
+    "The body of `async def _execute(self, args)`. Return a ToolResult.",
+  "studio.module.form.wiring": "Wiring preview",
+
+  "studio.module.params.empty": "Noch keine Parameter.",
+  "studio.module.params.add": "Add parameter",
+  "studio.module.params.remove": "Remove",
+  "studio.module.params.required": "required",
+  "studio.module.params.defaultPlaceholder": "default value (empty = none)",
+  "studio.module.params.descriptionPlaceholder": "description (optional)",
+  "studio.module.params.moveUp": "Move up",
+  "studio.module.params.moveDown": "Move down",
+
+  "studio.module.wiring.title": "How a creature wires this",
+  "studio.module.wiring.copy": "Copy",
+  "studio.module.wiring.copied": "Copied",
+
+  "studio.module.doc.sectionTitle": "Skill documentation",
+  "studio.module.doc.edit": "Edit",
+  "studio.module.doc.empty":
+    "Noch keine begleitende .md-Datei; klicke auf Bearbeiten, um eine anzulegen. Das Framework stellt sie zur Laufzeit ueber `##info##` bereit.",
+  "studio.module.doc.hint":
+    "Markdown sitting next to the module file. The agent reads this when asking for the tool's full documentation.",
+  "studio.module.doc.tabLabel": "Documentation",
+  "studio.module.doc.headTitle": ({ name }) => `Documentation — ${name}`,
+  "studio.module.doc.confirmClose": "The documentation has unsaved changes. Close without saving?",
+
+  // ─── Sub-agent form ─────────────────────────────────────────
+  "studio.module.form.subagentName": "Sub-agent name",
+  "studio.module.form.subagentNameHint":
+    "Snake-case. The controller dispatches to this sub-agent by this name.",
+  "studio.module.form.subagentFlags": "Flags",
+  "studio.module.form.stateless":
+    "Stateless — a fresh context every run (recommended for tool-use sub-agents)",
+  "studio.module.form.interactive":
+    "Interactive — keep alive between parent turns for context updates",
+  "studio.module.form.canModify":
+    "Allow file-modifying tools (write / edit). Leave off unless genuinely needed.",
+  "studio.module.form.subagentTools": "Tools granted",
+  "studio.module.form.subagentToolsHint":
+    "Pick from the workspace / package / built-in catalog. Only these tools are callable inside this sub-agent.",
+  "studio.module.form.systemPrompt": "System prompt",
+  "studio.module.form.systemPromptHint":
+    "The role and constraints this sub-agent runs under. Markdown.",
+
+  // ─── Trigger form ───────────────────────────────────────────
+  "studio.module.form.triggerName": "Trigger-Klassenname",
+  "studio.module.form.triggerNameHint":
+    "PascalCase. Wird als Python-Klassenname verwendet (z. B. MyTrigger).",
+  "studio.module.form.triggerSetup": "Setup metadata",
+  "studio.module.form.universal": "Universal (setup-tool) trigger",
+  "studio.module.form.universalHint":
+    "When enabled, the controller can arm this trigger at runtime via a setup tool.",
+  "studio.module.form.universalLabel": "Expose as a setup tool",
+  "studio.module.form.setupToolName": "Setup tool name",
+  "studio.module.form.setupToolNameHint":
+    "The tool name the controller calls to arm this trigger (e.g. add_timer).",
+  "studio.module.form.setupDescription": "Setup tool description",
+  "studio.module.form.setupDescriptionHint": "One line the controller sees for the setup tool.",
+  "studio.module.form.setupDescriptionPlaceholder": "Arm a new instance of this trigger.",
+  "studio.module.form.triggerBody": "wait_for_trigger body",
+  "studio.module.form.triggerBodyHint":
+    "The async body. Return a TriggerEvent when the trigger fires.",
+
+  // ─── Input / Output form ────────────────────────────────────
+  "studio.module.form.ioClassNameHint":
+    "PascalCase — wird als Python-Klassenname fuer dieses Modul verwendet.",
+  "studio.module.form.ioBody": ({ method }) => `${method} body`,
+  "studio.module.form.ioInputHint": "The async body. Return a TriggerEvent (or None to stop).",
+  "studio.module.form.ioOutputHint": "The async body. Emit the content to the target surface.",
+
+  // ─── Plugin form ────────────────────────────────────────────
+  "studio.module.form.pluginName": "Plugin name",
+  "studio.module.form.pluginNameHint": "Snake-case. The creature lists this under plugins:.",
+  "studio.module.form.priority": "Priority",
+  "studio.module.form.priorityHint":
+    "0-100. Lower priorities run first in pre-hooks, last in post-hooks.",
+  "studio.module.form.optionsSchema": "Option schema",
+  "studio.module.form.optionsSchemaHint":
+    "Keys a creature may pass under `options:`. Saved as <name>.schema.json next to the .py — the creature editor renders a real form for each key.",
+  "studio.module.form.hooks": "Hooks",
+  "studio.module.form.hooksHint":
+    "Pick which framework events this plugin listens to. Each hook gets its own method body below.",
+  "studio.module.form.hookBodies": "Hook bodies",
+
+  "studio.module.optionsSchema.intro":
+    "Each row describes one key under this plugin's `options:` dict. A creature that wires this plugin gets a form for these keys instead of a raw JSON editor.",
+
+  // ─── Tools multi-select ─────────────────────────────────────
+  "studio.module.tools.searchPlaceholder": "Search tools…",
+  "studio.module.tools.empty": "Keine passenden Werkzeuge.",
+
+  // ─── Plugin hook groups ─────────────────────────────────────
+  "studio.module.hooks.empty": "Keine Plugin-Hooks verfuegbar.",
+  "studio.module.hooks.group.lifecycle": "Lifecycle",
+  "studio.module.hooks.group.llm": "LLM",
+  "studio.module.hooks.group.tool": "Tool",
+  "studio.module.hooks.group.subagent": "Sub-agent",
+  "studio.module.hooks.group.event": "Events",
+  "studio.module.hooks.group.other": "Other",
+
+  "studio.module.usedIn.empty": "Noch keine Kreatur bindet dieses Modul ein.",
+  "studio.module.usedIn.summary": ({ n }) => `In ${n} Kreatur${n === 1 ? "" : "en"} eingebunden:`,
 }
