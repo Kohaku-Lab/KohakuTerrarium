@@ -59,18 +59,21 @@
   </div>
 
   <!-- User message -->
-  <div v-else-if="message.role === 'user'" class="ml-auto max-w-[80%] group relative">
-    <div class="user-message" :class="{ 'opacity-70': message.queued }">
+  <div v-else-if="message.role === 'user'" class="ml-auto group relative" :class="editing ? 'w-[min(760px,92%)] max-w-[92%]' : 'max-w-[80%]'">
+    <div class="user-message" :class="{ 'opacity-70': message.queued, 'user-message-editing': editing }">
       <div class="text-xs text-warm-400 mb-1 flex items-center gap-1.5">
         <span>You</span>
         <span v-if="message.queued" class="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber/15 text-amber leading-none">Queued</span>
       </div>
       <!-- Edit mode -->
-      <div v-if="editing" class="flex flex-col gap-2">
-        <textarea v-model="editText" class="w-full bg-transparent border border-warm-300 dark:border-warm-600 rounded px-2 py-1 text-body resize-none" :rows="Math.max(2, editText.split('\n').length)" @keydown.meta.enter="confirmEdit" @keydown.ctrl.enter="confirmEdit" @keydown.esc="cancelEdit" />
-        <div class="flex gap-2 justify-end text-xs">
-          <button class="px-2 py-0.5 rounded hover:bg-warm-100 dark:hover:bg-warm-800" @click="cancelEdit">Cancel</button>
-          <button class="px-2 py-0.5 rounded bg-sapphire text-white hover:bg-sapphire-dark" @click="confirmEdit">Save & Rerun</button>
+      <div v-if="editing" class="flex flex-col gap-2.5">
+        <textarea ref="editTextareaEl" v-model="editText" class="message-edit-textarea" :rows="Math.min(16, Math.max(6, editText.split('\n').length))" :disabled="editSaving" @keydown.meta.enter="confirmEdit" @keydown.ctrl.enter="confirmEdit" @keydown.esc="cancelEdit" />
+        <div class="flex flex-wrap items-center gap-2 text-xs">
+          <span class="text-warm-400 dark:text-warm-500 mr-auto">Ctrl/Cmd+Enter to rerun · Esc to cancel</span>
+          <button class="px-2.5 py-1 rounded hover:bg-warm-100 dark:hover:bg-warm-800 disabled:opacity-50" :disabled="editSaving" @click="cancelEdit">Cancel</button>
+          <button class="px-2.5 py-1 rounded bg-sapphire text-white hover:bg-sapphire-dark disabled:opacity-60" :disabled="editSaving || !editText.trim()" @click="confirmEdit">
+            {{ editSaving ? "Saving..." : "Save & Rerun" }}
+          </button>
         </div>
       </div>
       <div v-else class="text-body break-words overflow-wrap-anywhere min-w-0">
@@ -240,6 +243,8 @@ const props = defineProps({
 const expandedTools = reactive({})
 const editing = ref(false)
 const editText = ref("")
+const editTextareaEl = ref(null)
+const editSaving = ref(false)
 const errorExpanded = ref(false)
 
 const errorFirstLine = computed(() => {
@@ -287,17 +292,25 @@ function copyAssistantText() {
 function startEdit() {
   editText.value = contentToText(props.message.contentParts || props.message.content)
   editing.value = true
+  nextTick(() => editTextareaEl.value?.focus())
 }
 
 function cancelEdit() {
+  if (editSaving.value) return
   editing.value = false
   editText.value = ""
 }
 
-function confirmEdit() {
+async function confirmEdit() {
   const newContent = editText.value.trim()
-  if (!newContent) return
-  chat.editMessage(props.messageIdx, newContent)
+  if (!newContent || editSaving.value) return
+  editSaving.value = true
+  const ok = await chat.editMessage(props.messageIdx, newContent, {
+    turnIndex: props.message.turnIndex,
+    userPosition: props.message.userPosition,
+  })
+  editSaving.value = false
+  if (!ok) return
   editing.value = false
   editText.value = ""
 }
@@ -370,6 +383,33 @@ function goToNextAssistantBranch() {
 
 .dark .chat-inline-image {
   border-color: rgb(89 75 61 / 1);
+}
+
+.message-edit-textarea {
+  width: 100%;
+  min-height: 160px;
+  max-height: 50vh;
+  padding: 0.75rem 0.85rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-card);
+  color: var(--color-text);
+  font-size: 0.92rem;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.04);
+}
+
+.message-edit-textarea:focus {
+  border-color: rgb(124 103 184 / 0.55);
+  box-shadow:
+    0 0 0 2px rgb(124 103 184 / 0.12),
+    inset 0 1px 2px rgb(0 0 0 / 0.04);
+}
+
+.user-message-editing {
+  width: 100%;
 }
 
 .msg-action-btn {

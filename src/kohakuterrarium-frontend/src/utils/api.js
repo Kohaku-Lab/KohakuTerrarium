@@ -256,10 +256,11 @@ export const agentAPI = {
   },
 
   /** Edit a user message at a given index and re-run */
-  async editMessage(id, msgIdx, content) {
-    const { data } = await api.post(`/agents/${id}/messages/${msgIdx}/edit`, {
-      content,
-    })
+  async editMessage(id, msgIdx, content, target = {}) {
+    const body = { content }
+    if (target.turnIndex != null) body.turn_index = target.turnIndex
+    if (target.userPosition != null) body.user_position = target.userPosition
+    const { data } = await api.post(`/agents/${id}/messages/${msgIdx}/edit`, body)
     return data
   },
 

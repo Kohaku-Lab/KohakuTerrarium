@@ -1,5 +1,5 @@
 import { createPinia, setActivePinia } from "pinia"
-import { beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { _replayEvents, useChatStore } from "./chat.js"
 
@@ -91,6 +91,43 @@ describe("chat store — interrupted task handling", () => {
     expect(tool.status).toBe("interrupted")
     expect(tool.result).toBe("User manually interrupted this job.")
     expect(chat.runningJobs.job_1).toBeUndefined()
+  })
+})
+
+describe("chat store — edit/regen live branch resync", () => {
+  it("keeps edit open and restores messages when target is invalid", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceType = "agent"
+    chat.activeTab = "main"
+    chat.messagesByTab = {
+      main: [{ id: "a1", role: "assistant", parts: [{ type: "text", content: "reply" }] }],
+    }
+
+    const ok = await chat.editMessage(0, "edited")
+
+    expect(ok).toBe(false)
+    expect(chat.messagesByTab.main).toHaveLength(1)
+    expect(chat.messagesByTab.main[0].role).toBe("assistant")
+    expect(chat._branchResyncPendingByTab.main).toBeUndefined()
+  })
+
+  it("schedules a canonical replay after streaming branch mutations finish", async () => {
+    vi.useFakeTimers()
+    try {
+      const chat = useChatStore()
+      chat.activeTab = "main"
+      chat.messagesByTab = { main: [{ id: "u1", role: "user", content: "hi" }] }
+      chat._markBranchResyncPending("main")
+      const resync = vi.spyOn(chat, "_resyncHistory").mockResolvedValue(true)
+
+      chat._onMessage({ type: "processing_end", source: "main" })
+      await vi.advanceTimersByTimeAsync(400)
+
+      expect(resync).toHaveBeenCalledWith("main")
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

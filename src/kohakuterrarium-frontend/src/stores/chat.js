@@ -6,6 +6,8 @@ import { useStatusStore } from "@/stores/status"
 import { getHybridPrefSync, setHybridPref } from "@/utils/uiPrefs"
 import { wsUrl } from "@/utils/wsUrl"
 
+const BRANCH_RESYNC_DELAY_MS = 350
+
 function normalizeContentParts(content) {
   if (!Array.isArray(content)) return null
   return content.filter(
@@ -1015,6 +1017,10 @@ export const useChatStore = defineStore("chat", {
     _instanceGeneration: 0,
     /** @type {Record<string, number>} Recent user message signatures for cross-tab dedupe */
     _recentUserInputs: {},
+    /** @type {Record<string, boolean>} Tabs needing canonical replay after regen/edit streaming finishes */
+    _branchResyncPendingByTab: {},
+    /** @type {Record<string, number>} Debounce timers for post-branch history resync */
+    _branchResyncTimers: {},
   }),
 
   getters: {
@@ -1066,6 +1072,8 @@ export const useChatStore = defineStore("chat", {
       this.queuedMessages = []
       this.processingByTab = {}
       this._recentUserInputs = {}
+      this._branchResyncPendingByTab = {}
+      this._clearBranchResyncTimers()
       this.sessionInfo = {
         sessionId: "",
         model: "",
@@ -1449,9 +1457,11 @@ export const useChatStore = defineStore("chat", {
         this._promoteQueuedMessages(source)
       } else if (data.type === "processing_end") {
         this._finishStream(source)
+        this._scheduleBranchResync(source)
       } else if (data.type === "idle") {
         if (source) this.processingByTab[source] = false
         this._finishStream(source)
+        this._scheduleBranchResync(source)
       } else if (data.type === "activity") {
         this._handleActivity(source, data)
       } else if (data.type === "image") {
@@ -1771,6 +1781,39 @@ export const useChatStore = defineStore("chat", {
       }
     },
 
+    _markBranchResyncPending(tab = this.activeTab) {
+      if (!tab) return
+      this._branchResyncPendingByTab[tab] = true
+    },
+
+    _scheduleBranchResync(tab) {
+      if (!tab || !this._branchResyncPendingByTab[tab]) return
+      if (this._branchResyncTimers[tab]) clearTimeout(this._branchResyncTimers[tab])
+      this._branchResyncTimers[tab] = setTimeout(async () => {
+        delete this._branchResyncTimers[tab]
+        if (!this._branchResyncPendingByTab[tab]) return
+        await this._resyncHistory(tab)
+      }, BRANCH_RESYNC_DELAY_MS)
+    },
+
+    _clearBranchResyncTimers() {
+      for (const timer of Object.values(this._branchResyncTimers || {})) {
+        clearTimeout(timer)
+      }
+      this._branchResyncTimers = {}
+    },
+
+    _conversationUserPosition(tab, messageIdx) {
+      const msgs = this.messagesByTab[tab] || []
+      if (messageIdx == null || messageIdx < 0 || messageIdx >= msgs.length) return null
+      if (msgs[messageIdx]?.role !== "user") return null
+      let pos = 0
+      for (let i = 0; i < messageIdx; i++) {
+        if (msgs[i]?.role === "user") pos += 1
+      }
+      return pos
+    },
+
     /** Regenerate the last assistant response using current settings.
      *
      * Wipes the entire current assistant turn from the local message
@@ -1790,6 +1833,7 @@ export const useChatStore = defineStore("chat", {
       if (this._regenInFlight) return
       this._regenInFlight = true
       const tab = this.activeTab
+      this._markBranchResyncPending(tab)
       if (tab) {
         const msgs = this.messagesByTab[tab] || []
         // Drop ALL trailing assistant messages back to the most recent
@@ -1806,9 +1850,10 @@ export const useChatStore = defineStore("chat", {
       try {
         const { agentAPI } = await import("@/utils/api")
         await agentAPI.regenerate(this._instanceId)
-        await this._resyncHistory()
+        await this._resyncHistory(tab)
       } catch (e) {
         console.warn("Failed to regenerate:", e)
+        this._scheduleBranchResync(tab)
       } finally {
         this._regenInFlight = false
       }
@@ -1826,32 +1871,54 @@ export const useChatStore = defineStore("chat", {
      * editing message N in the UI lands on the N-th conversation entry
      * server-side regardless of how many decorations sit in front of it.
      */
-    async editMessage(messageIdx, newContent) {
-      if (!this._instanceId || this._instanceType === "terrarium") return
-      if (messageIdx == null) return
-      if (this._regenInFlight) return
+    async editMessage(messageIdx, newContent, target = {}) {
+      if (!this._instanceId || this._instanceType === "terrarium") return false
+      if (messageIdx == null) return false
+      if (this._regenInFlight) return false
       this._regenInFlight = true
       const tab = this.activeTab
+      this._markBranchResyncPending(tab)
       let backendIdx = messageIdx
+      let userPosition = target.userPosition
+      const turnIndex = target.turnIndex
+      let validTarget = false
       if (tab) {
         const msgs = this.messagesByTab[tab] || []
-        if (messageIdx >= 0 && messageIdx < msgs.length) {
-          // Map frontend idx → backend conversation idx by counting
-          // user/assistant messages strictly before messageIdx.
+        if (messageIdx >= 0 && messageIdx < msgs.length && msgs[messageIdx]?.role === "user") {
+          validTarget = true
+          userPosition = userPosition ?? this._conversationUserPosition(tab, messageIdx)
+          // Back-compat fallback for servers that only understand the
+          // URL index: count rendered conversation rows, excluding
+          // decorations. New servers prefer turnIndex/userPosition.
           backendIdx = 0
           for (let i = 0; i < messageIdx; i++) {
             const r = msgs[i]?.role
             if (r === "user" || r === "assistant") backendIdx += 1
           }
-          msgs.splice(messageIdx)
         }
+      }
+      if (!validTarget && turnIndex == null && userPosition == null) {
+        delete this._branchResyncPendingByTab[tab]
+        this._regenInFlight = false
+        return false
+      }
+      const previousMessages = tab ? [...(this.messagesByTab[tab] || [])] : null
+      if (validTarget && tab) {
+        this.messagesByTab[tab].splice(messageIdx)
       }
       try {
         const { agentAPI } = await import("@/utils/api")
-        await agentAPI.editMessage(this._instanceId, backendIdx, newContent)
-        await this._resyncHistory()
+        await agentAPI.editMessage(this._instanceId, backendIdx, newContent, {
+          turnIndex,
+          userPosition,
+        })
+        const resynced = await this._resyncHistory(tab)
+        return resynced !== false
       } catch (e) {
+        delete this._branchResyncPendingByTab[tab]
+        if (previousMessages && tab) this.messagesByTab[tab] = previousMessages
         console.warn("Failed to edit message:", e)
+        return false
       } finally {
         this._regenInFlight = false
       }
@@ -1863,7 +1930,7 @@ export const useChatStore = defineStore("chat", {
       try {
         const { agentAPI } = await import("@/utils/api")
         await agentAPI.rewindTo(this._instanceId, messageIdx)
-        await this._resyncHistory()
+        await this._resyncHistory(this.activeTab)
       } catch (e) {
         console.warn("Failed to rewind:", e)
       }
@@ -1872,21 +1939,23 @@ export const useChatStore = defineStore("chat", {
     /** Re-fetch conversation history from the backend and rebuild the
      *  local message list. Called after edit/regenerate/rewind so the
      *  frontend matches the backend's truncated conversation. */
-    async _resyncHistory() {
-      if (!this._instanceId) return
+    async _resyncHistory(tab = this.activeTab) {
+      if (!this._instanceId || !tab) return false
       try {
         const { agentAPI } = await import("@/utils/api")
         const data = await agentAPI.getHistory(this._instanceId)
-        const tab = this.activeTab
-        if (!tab || !data?.events) return
+        if (!data?.events) return false
         // Cache raw events for branch navigation re-replay.
         this.eventsByTab[tab] = data.events
         // Regen / edit lands the user on the latest branch — clear
         // any prior branch override so the navigator starts at <N/N>.
         this.branchViewByTab[tab] = {}
         this._rebuildMessages(tab)
+        delete this._branchResyncPendingByTab[tab]
+        return true
       } catch (e) {
         console.warn("Failed to resync history:", e)
+        throw e
       }
     },
 
@@ -2166,6 +2235,8 @@ export const useChatStore = defineStore("chat", {
       this.activeTab = null
       this._historyLoaded = false
       this._wsBuffer = []
+      this._branchResyncPendingByTab = {}
+      this._clearBranchResyncTimers()
       if (this._reconnectTimer) {
         clearTimeout(this._reconnectTimer)
         this._reconnectTimer = null
