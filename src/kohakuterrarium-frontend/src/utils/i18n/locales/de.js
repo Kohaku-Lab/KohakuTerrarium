@@ -301,9 +301,9 @@ export default {
   "studio.home.subtitle": "Kreaturen, Werkzeuge und Plugins direkt im Browser erstellen.",
   "studio.home.openWorkspace": "Arbeitsbereich oeffnen",
   "studio.home.pickFolder": "Durchsuchen…",
-  "studio.home.openButton": "Open",
+  "studio.home.openButton": "Oeffnen",
   "studio.home.useCwd": "Server-Arbeitsverzeichnis verwenden",
-  "studio.home.recent": "Recent",
+  "studio.home.recent": "Zuletzt verwendet",
   "studio.home.noRecent": "Noch keine Arbeitsbereiche geoeffnet.",
   "studio.home.hint":
     "Ein Arbeitsbereich ist ein beliebiger Ordner. Studio erstellt beim ersten Speichern die Unterordner creatures/ und modules/.",
@@ -316,7 +316,7 @@ export default {
   "studio.dashboard.noCreatures": "Noch keine Kreaturen.",
   "studio.dashboard.noModules": "Noch keine Module.",
   "studio.dashboard.switchWorkspace": "Arbeitsbereich wechseln",
-  "studio.dashboard.refreshing": "Refresh",
+  "studio.dashboard.refreshing": "Aktualisieren",
   "studio.dashboard.deleteCreature": "Kreatur loeschen",
   "studio.dashboard.deleteConfirmTitle": "Kreatur loeschen",
   "studio.dashboard.deleteConfirmBody":
@@ -327,7 +327,7 @@ export default {
   "studio.dashboard.readOnlyModule":
     "In {source} deklariert. Binde es aus dem Pool in eine Kreatur ein.",
 
-  "studio.newCreature.title": "New creature",
+  "studio.newCreature.title": "Neue Kreatur",
   "studio.newCreature.name": "Name",
   "studio.newCreature.nameHint":
     "Wird als Ordnername verwendet: Buchstaben, Ziffern und Unterstriche. Keine Leerzeichen oder Schraegstriche.",
@@ -339,12 +339,12 @@ export default {
   "studio.newCreature.baseConfigHint":
     "Von einer anderen Kreatur ueber @package/creatures/name erben.",
   "studio.newCreature.baseConfigPlaceholder": "@kt-biome/creatures/general",
-  "studio.newCreature.description": "Description (optional)",
+  "studio.newCreature.description": "Beschreibung (optional)",
   "studio.newCreature.descriptionPlaceholder": "Wofuer diese Kreatur gedacht ist.",
   "studio.newCreature.create": "Erstellen",
   "studio.newCreature.creating": "Wird erstellt…",
 
-  "studio.newModule.title": "New module",
+  "studio.newModule.title": "Neues Modul",
   "studio.newModule.kind": "Art",
   "studio.newModule.name": "Name",
   "studio.newModule.nameHint":
@@ -354,7 +354,7 @@ export default {
     "Ungueltiger Name. Keine Leerzeichen, Schraegstriche oder fuehrenden Punkte.",
   "studio.newModule.nameExists": "Ein Modul mit diesem Namen existiert bereits.",
   "studio.newModule.editorNote":
-    "A starter file will be written. You can edit the form, execute body, and documentation from the module editor after it's created.",
+    "Eine Startdatei wird geschrieben. Nach dem Erstellen kannst du Formular, Ausfuehrungskoerper und Dokumentation im Modul-Editor bearbeiten.",
   "studio.newModule.create": "Erstellen",
   "studio.newModule.creating": "Wird erstellt…",
   "studio.newModule.created": "{kind}/{name} angelegt",
@@ -436,7 +436,7 @@ export default {
   // ─── Model picker (status footer) ───────────────────────────
   "studio.model.pickerTitle": "Pick model",
   "studio.model.search": "Search model or provider…",
-  "studio.model.refresh": "Refresh",
+  "studio.model.refresh": "Aktualisieren",
   "studio.model.letUserChoose": "Let user choose (inherit default)",
   "studio.model.letUserChooseHint":
     "Don't pin a model — the runtime uses the user's default (`kt model default`).",
@@ -450,7 +450,7 @@ export default {
   "studio.creature.modules.options": "Options",
   "studio.moduleOptions.title": "Module options",
   "studio.moduleOptions.module": "Module path",
-  "studio.moduleOptions.className": "Class name",
+  "studio.moduleOptions.className": "Klassenname",
   "studio.moduleOptions.timeout": "Timeout (seconds)",
   "studio.moduleOptions.timeoutHint": "0 = no timeout",
   "studio.moduleOptions.maxOutput": "Max output (bytes)",
@@ -503,7 +503,7 @@ export default {
   "studio.creature.identity.version": "Version",
   "studio.creature.identity.baseConfig": "Base config",
   "studio.creature.identity.noBase": "(none — standalone creature)",
-  "studio.creature.identity.description": "Description",
+  "studio.creature.identity.description": "Beschreibung",
   "studio.creature.identity.noDescription": "(no description)",
   "studio.creature.identity.controller": "Controller",
   "studio.creature.identity.model": "Model",
@@ -547,7 +547,7 @@ export default {
 
   "studio.creature.detail.summary": "Summary",
   "studio.creature.detail.catalog": "Catalog item",
-  "studio.creature.detail.slot": "Wired slot",
+  "studio.creature.detail.slot": "Eingebundener Slot",
   "studio.creature.detail.name": "Creature",
   "studio.creature.detail.resolvedModel": "Resolved model",
   "studio.creature.detail.inheritance": "Inheritance",
@@ -561,7 +561,7 @@ export default {
   "studio.creature.detail.needsContext": "Needs context",
   "studio.creature.detail.add": "Add",
   "studio.creature.detail.addComingSoon":
-    "Adding from the detail panel isn't wired yet — click an item in the left pool to add it.",
+    "Hinzufuegen aus dem Detailbereich ist noch nicht verdrahtet — klicke links im Pool auf einen Eintrag, um ihn hinzuzufuegen.",
   "studio.creature.detail.customize": "Customize",
   "studio.creature.detail.customizeComingSoon":
     "Expand the module row in the middle panel to edit its options.",
@@ -592,51 +592,54 @@ export default {
 
   // ─── Module editor (Phase 5) ────────────────────────────────
   "studio.module.mode.simple": "Simple",
-  "studio.module.mode.simpleHint": "Form-driven editor. Safe for most tools.",
+  "studio.module.mode.simpleHint": "Formularbasierter Editor. Sicher fuer die meisten Tools.",
   "studio.module.mode.raw": "Raw",
-  "studio.module.mode.rawHint": "Edit the full Python source directly.",
+  "studio.module.mode.rawHint": "Den vollstaendigen Python-Quelltext direkt bearbeiten.",
   "studio.module.raw.title": "Raw mode",
   "studio.module.raw.auto": "auto-raw",
-  "studio.module.raw.roundtripFailed": "Round-trip failed — switched to raw mode",
-  "studio.module.raw.retry": "Retry simple",
-  "studio.module.warnings": ({ n }) => `${n} warning${n === 1 ? "" : "s"}`,
+  "studio.module.raw.roundtripFailed": "Round-trip fehlgeschlagen — in den Rohmodus gewechselt",
+  "studio.module.raw.retry": "Simple erneut versuchen",
+  "studio.module.warnings": ({ n }) => `${n} Warnung${n === 1 ? "" : "en"}`,
 
   "studio.module.simpleNotAvailable": ({ kind }) =>
-    `A form-based editor for ${kind} isn't wired up yet.`,
+    `Ein formularbasierter Editor fuer ${kind} ist noch nicht verdrahtet.`,
   "studio.module.simpleNotAvailableHint":
     "Wechsle oben in den Rohmodus, um den vollstaendigen Python-Quelltext direkt zu bearbeiten.",
 
-  "studio.module.guard.notEditable": ({ kind, name }) => `${kind}/${name} is not editable here.`,
+  "studio.module.guard.notEditable": ({ kind, name }) =>
+    `${kind}/${name} ist hier nicht bearbeitbar.`,
   "studio.module.guard.hint":
     "This module is declared outside the workspace — studio only edits files under <root>/modules/.",
 
   "studio.module.notFound.title": ({ kind, name }) =>
     `Keine Arbeitsbereichsdatei fuer ${kind}/${name}.`,
-  "studio.module.notFound.hint": "Create it from the dashboard, or check the name.",
+  "studio.module.notFound.hint": "Erstelle es ueber das Dashboard oder pruefe den Namen.",
 
   "studio.module.confirm.unsavedLeave": "You have unsaved changes. Leave this page?",
 
-  "studio.module.preview.title": "Consumer preview",
+  "studio.module.preview.title": "Verbraucher-Vorschau",
   "studio.module.preview.hint": ({ kind }) =>
-    `What a creature sees when it wires this ${kind.replace(/s$/, "")} in. Updates after every save.`,
-  "studio.module.preview.schemaTitle": "Option form",
+    `Was eine Kreatur sieht, wenn sie dieses ${kind.replace(/s$/, "")} einbindet. Wird nach jedem Speichern aktualisiert.`,
+  "studio.module.preview.schemaTitle": "Optionsformular",
   "studio.module.preview.noParams": "Keine konfigurierbaren Optionen fuer dieses Modul.",
   "studio.module.preview.usedInTitle": "Used in creatures",
-  "studio.module.preview.renameTitle": "Rename will break existing wirings",
+  "studio.module.preview.renameTitle": "Umbenennen beschaedigt bestehende Verdrahtungen",
   "studio.module.preview.renameHint": ({ old, count }) =>
-    `${count} creature${count === 1 ? "" : "s"} currently wire ${old}. Renaming without updating those wirings will fail at runtime.`,
+    `${count} Kreatur${count === 1 ? "" : "en"} bindet/binden derzeit ${old} ein. Umbenennen ohne Aktualisierung dieser Verdrahtungen schlaegt zur Laufzeit fehl.`,
 
   "studio.module.peers.empty": "Noch keine anderen Arbeitsbereichs-Module dieser Art.",
 
   "studio.module.form.identity": "Identity",
-  "studio.module.form.toolName": "Tool name",
+  "studio.module.form.toolName": "Tool-Name",
   "studio.module.form.toolNameHint":
     "Snake-case. Wird als Dateiname ohne Endung und als Kennung in Tool-Aufrufen verwendet.",
-  "studio.module.form.className": "Class name",
-  "studio.module.form.classNameHint": "PascalCase. Derived from the tool name if left blank.",
-  "studio.module.form.description": "Description",
-  "studio.module.form.descriptionHint": "One line the controller sees when picking tools.",
-  "studio.module.form.descriptionPlaceholder": "What this tool does.",
+  "studio.module.form.className": "Klassenname",
+  "studio.module.form.classNameHint":
+    "PascalCase. Wird aus dem Tool-Namen abgeleitet, wenn leer gelassen.",
+  "studio.module.form.description": "Beschreibung",
+  "studio.module.form.descriptionHint":
+    "Eine Zeile, die der Controller bei der Tool-Auswahl sieht.",
+  "studio.module.form.descriptionPlaceholder": "Was dieses Tool tut.",
   "studio.module.form.behavior": "Behavior",
   "studio.module.form.executionMode": "Execution mode",
   "studio.module.form.executionModeHint":
@@ -646,7 +649,7 @@ export default {
   "studio.module.form.requireManualRead": "Require ##info## read before use",
   "studio.module.form.params": "Parameters",
   "studio.module.form.paramsHint":
-    "What a creature passes when wiring this tool. Matches the schema the creature editor renders.",
+    "Was eine Kreatur beim Einbinden dieses Tools uebergibt. Entspricht dem Schema, das der Kreatur-Editor rendert.",
   "studio.module.form.executeBody": "_execute body",
   "studio.module.form.executeBodyHint":
     "The body of `async def _execute(self, args)`. Return a ToolResult.",
@@ -694,7 +697,7 @@ export default {
     "The role and constraints this sub-agent runs under. Markdown.",
 
   // ─── Trigger form ───────────────────────────────────────────
-  "studio.module.form.triggerName": "Trigger class name",
+  "studio.module.form.triggerName": "Trigger-Klassenname",
   "studio.module.form.triggerNameHint":
     "PascalCase. Wird als Python-Klassenname verwendet (z. B. MyTrigger).",
   "studio.module.form.triggerSetup": "Setup metadata",
@@ -714,7 +717,7 @@ export default {
 
   // ─── Input / Output form ────────────────────────────────────
   "studio.module.form.ioClassNameHint":
-    "PascalCase — used as the Python class name for this module.",
+    "PascalCase — wird als Python-Klassenname fuer dieses Modul verwendet.",
   "studio.module.form.ioBody": ({ method }) => `${method} body`,
   "studio.module.form.ioInputHint": "The async body. Return a TriggerEvent (or None to stop).",
   "studio.module.form.ioOutputHint": "The async body. Emit the content to the target surface.",
@@ -750,5 +753,5 @@ export default {
   "studio.module.hooks.group.other": "Other",
 
   "studio.module.usedIn.empty": "Noch keine Kreatur bindet dieses Modul ein.",
-  "studio.module.usedIn.summary": ({ n }) => `Wired in ${n} creature${n === 1 ? "" : "s"}:`,
+  "studio.module.usedIn.summary": ({ n }) => `In ${n} Kreatur${n === 1 ? "" : "en"} eingebunden:`,
 }

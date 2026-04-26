@@ -625,47 +625,49 @@ export default {
 
   // ─── Module editor (Phase 5) ────────────────────────────────
   "studio.module.mode.simple": "Simple",
-  "studio.module.mode.simpleHint": "Form-driven editor. Safe for most tools.",
+  "studio.module.mode.simpleHint": "폼 기반 편집기입니다. 대부분의 도구에 안전합니다.",
   "studio.module.mode.raw": "Raw",
-  "studio.module.mode.rawHint": "Edit the full Python source directly.",
+  "studio.module.mode.rawHint": "전체 Python 소스를 직접 편집합니다.",
   "studio.module.raw.title": "Raw mode",
   "studio.module.raw.auto": "auto-raw",
-  "studio.module.raw.roundtripFailed": "Round-trip failed — switched to raw mode",
-  "studio.module.raw.retry": "Retry simple",
-  "studio.module.warnings": ({ n }) => `${n} warning${n === 1 ? "" : "s"}`,
+  "studio.module.raw.roundtripFailed": "왕복 변환 실패 — Raw 모드로 전환했습니다",
+  "studio.module.raw.retry": "Simple 다시 시도",
+  "studio.module.warnings": ({ n }) => `경고 ${n}개`,
 
   "studio.module.simpleNotAvailable": ({ kind }) =>
-    `A form-based editor for ${kind} isn't wired up yet.`,
+    `${kind}용 폼 기반 편집기는 아직 연결되어 있지 않습니다.`,
   "studio.module.simpleNotAvailableHint":
     "전체 Python 소스를 직접 편집하려면 위에서 Raw 모드로 전환하세요.",
 
-  "studio.module.guard.notEditable": ({ kind, name }) => `${kind}/${name} is not editable here.`,
+  "studio.module.guard.notEditable": ({ kind, name }) =>
+    `${kind}/${name}은(는) 여기에서 편집할 수 없습니다.`,
   "studio.module.guard.hint":
     "이 모듈은 워크스페이스 밖에 선언되어 있습니다. Studio는 <root>/modules/ 아래의 파일만 편집합니다.",
 
-  "studio.module.notFound.title": ({ kind, name }) => `No 워크스페이스 file for ${kind}/${name}.`,
-  "studio.module.notFound.hint": "생성 it from the dashboard, or check the name.",
+  "studio.module.notFound.title": ({ kind, name }) =>
+    `${kind}/${name}에 해당하는 워크스페이스 파일이 없습니다.`,
+  "studio.module.notFound.hint": "대시보드에서 생성하거나 이름이 올바른지 확인하세요.",
 
   "studio.module.confirm.unsavedLeave": "저장되지 않은 변경 사항이 있습니다. 이 페이지를 나갈까요?",
 
-  "studio.module.preview.title": "Consumer preview",
+  "studio.module.preview.title": "사용자 측 미리보기",
   "studio.module.preview.hint": ({ kind }) =>
-    `What a 크리처 sees when it wires this ${kind.replace(/s$/, "")} in. Updates after every save.`,
-  "studio.module.preview.schemaTitle": "Option form",
+    `크리처가 이 ${kind.replace(/s$/, "")}을(를) 연결했을 때 보게 되는 내용입니다. 저장할 때마다 업데이트됩니다.`,
+  "studio.module.preview.schemaTitle": "옵션 폼",
   "studio.module.preview.noParams": "이 모듈에는 구성 가능한 옵션이 없습니다.",
   "studio.module.preview.usedInTitle": "사용 중인 크리처",
-  "studio.module.preview.renameTitle": "Rename will break existing wirings",
+  "studio.module.preview.renameTitle": "이름을 바꾸면 기존 연결이 깨집니다",
   "studio.module.preview.renameHint": ({ old, count }) =>
-    `${count} 크리처${count === 1 ? "" : "s"} currently wire ${old}. Renaming without updating those wirings will fail at runtime.`,
+    `${count}개의 크리처가 현재 ${old}을(를) 연결하고 있습니다. 해당 연결을 업데이트하지 않고 이름을 바꾸면 런타임에 실패합니다.`,
 
   "studio.module.peers.empty": "이 종류의 다른 워크스페이스 모듈은 아직 없습니다.",
 
   "studio.module.form.identity": "식별 정보",
-  "studio.module.form.toolName": "Tool name",
+  "studio.module.form.toolName": "도구 이름",
   "studio.module.form.toolNameHint":
     "스네이크 케이스입니다. 파일 이름의 기준과 도구 호출 식별자로 사용됩니다.",
-  "studio.module.form.className": "클래스 name",
-  "studio.module.form.classNameHint": "PascalCase. Derived from the tool name if left blank.",
+  "studio.module.form.className": "클래스 이름",
+  "studio.module.form.classNameHint": "PascalCase입니다. 비워 두면 도구 이름에서 파생됩니다.",
   "studio.module.form.description": "설명",
   "studio.module.form.descriptionHint": "컨트롤러가 도구를 선택할 때 보는 한 줄 설명입니다.",
   "studio.module.form.descriptionPlaceholder": "이 도구가 하는 일.",

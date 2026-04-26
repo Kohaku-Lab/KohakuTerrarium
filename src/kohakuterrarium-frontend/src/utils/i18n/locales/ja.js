@@ -633,17 +633,19 @@ export default {
 
   // ─── Module editor (Phase 5) ────────────────────────────────
   "studio.module.mode.simple": "Simple",
-  "studio.module.mode.simpleHint": "Form-driven editor. Safe for most tools.",
+  "studio.module.mode.simpleHint":
+    "フォーム駆動のエディターです。ほとんどのツールで安全に使えます。",
   "studio.module.mode.raw": "Raw",
-  "studio.module.mode.rawHint": "Edit the full Python source directly.",
+  "studio.module.mode.rawHint": "Python ソース全体を直接編集します。",
   "studio.module.raw.title": "Raw mode",
   "studio.module.raw.auto": "auto-raw",
-  "studio.module.raw.roundtripFailed": "Round-trip failed — switched to raw mode",
-  "studio.module.raw.retry": "Retry simple",
-  "studio.module.warnings": ({ n }) => `${n} warning${n === 1 ? "" : "s"}`,
+  "studio.module.raw.roundtripFailed":
+    "ラウンドトリップに失敗しました — Raw モードに切り替えました",
+  "studio.module.raw.retry": "Simple を再試行",
+  "studio.module.warnings": ({ n }) => `警告 ${n} 件`,
 
   "studio.module.simpleNotAvailable": ({ kind }) =>
-    `A form-based editor for ${kind} isn't wired up yet.`,
+    `${kind} 用のフォームベースエディターはまだ接続されていません。`,
   "studio.module.simpleNotAvailableHint":
     "上の Raw モードに切り替えると、Python ソース全体を直接編集できます。",
 
@@ -660,7 +662,7 @@ export default {
 
   "studio.module.preview.title": "利用側プレビュー",
   "studio.module.preview.hint": ({ kind }) =>
-    `What a クリーチャー sees when it wires this ${kind.replace(/s$/, "")} in. Updates after every save.`,
+    `クリーチャーがこの ${kind.replace(/s$/, "")} を組み込んだときに見る内容です。保存するたびに更新されます。`,
   "studio.module.preview.schemaTitle": "オプションフォーム",
   "studio.module.preview.noParams": "このモジュールに設定可能なオプションはありません。",
   "studio.module.preview.usedInTitle": "使用中のクリーチャー",
@@ -795,5 +797,5 @@ export default {
   "studio.module.hooks.group.other": "その他",
 
   "studio.module.usedIn.empty": "このモジュールを組み込んでいるクリーチャーはまだありません。",
-  "studio.module.usedIn.summary": ({ n }) => `Wired in ${n} クリーチャー${n === 1 ? "" : "s"}:`,
+  "studio.module.usedIn.summary": ({ n }) => `${n} 個のクリーチャーに組み込み済み:`,
 }
