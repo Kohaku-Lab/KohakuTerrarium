@@ -35,6 +35,8 @@ class AgentModelMixin:
     _llm_override: str | None
     _llm_identifier: str
 
+    def _build_compact_llm(self, compact_cfg: Any) -> Any: ...
+
     def switch_model(self, profile_name: str) -> str:
         """Switch the LLM provider to a different model profile.
 
@@ -59,8 +61,10 @@ class AgentModelMixin:
         self.llm = new_llm
         self.controller.llm = new_llm
         if self.compact_manager:
-            self.compact_manager._llm = new_llm
-            new_max = getattr(new_llm, "_profile_max_context", 0)
+            compact_llm = self._build_compact_llm(self.compact_manager.config)
+            self.compact_manager._llm = compact_llm
+            context_source = compact_llm if compact_llm is not self.llm else new_llm
+            new_max = getattr(context_source, "_profile_max_context", 0)
             if new_max:
                 self.compact_manager.config.max_tokens = new_max
 

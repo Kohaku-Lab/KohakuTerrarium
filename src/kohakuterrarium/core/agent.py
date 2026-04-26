@@ -14,7 +14,9 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from kohakuterrarium.bootstrap.agent_init import AgentInitMixin
 from kohakuterrarium.bootstrap.plugins import init_plugins
+from kohakuterrarium.core.agent_compact import AgentCompactMixin
 from kohakuterrarium.core.agent_handlers import AgentHandlersMixin
+from kohakuterrarium.core.agent_lifecycle import AgentLifecycleMixin
 from kohakuterrarium.core.agent_messages import AgentMessagesMixin
 from kohakuterrarium.core.agent_model import AgentModelMixin
 from kohakuterrarium.core.agent_helpers import attach_session_helpers
@@ -53,7 +55,14 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin, AgentModelMixin):
+class Agent(
+    AgentInitMixin,
+    AgentHandlersMixin,
+    AgentMessagesMixin,
+    AgentModelMixin,
+    AgentCompactMixin,
+    AgentLifecycleMixin,
+):
     """Main agent orchestrator. Wires LLM, controller, executor, I/O."""
 
     @classmethod
@@ -442,7 +451,7 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin, AgentModelMi
         )
         self.compact_manager = CompactManager(compact_cfg)
         self.compact_manager._controller = self.controller
-        self.compact_manager._llm = self.llm
+        self.compact_manager._llm = self._build_compact_llm(compact_cfg)
         self.compact_manager._output_router = self.output_router
         self.compact_manager._agent_name = self.config.name
         if self.session_store:
@@ -683,26 +692,6 @@ class Agent(AgentInitMixin, AgentHandlersMixin, AgentMessagesMixin, AgentModelMi
     # ``switch_model`` + ``llm_identifier`` live in AgentModelMixin —
     # see ``core/agent_model.py``. Split out to keep this file under
     # the per-file size guard.
-
-    async def stop(self) -> None:
-        """Stop all agent modules."""
-        logger.info("Stopping agent", agent_name=self.config.name)
-
-        if self.plugins:
-            await self.plugins.notify("on_agent_stop")
-            await self.plugins.unload_all()
-
-        self._running = False
-        self._shutdown_event.set()
-
-        if hasattr(self, "_mcp_manager") and self._mcp_manager:
-            await self._mcp_manager.shutdown()
-
-        await self.subagent_manager.cancel_all()
-        await self.trigger_manager.stop_all()
-        await self.input.stop()
-        await self.output_router.stop()
-        await self.llm.close()
 
     async def run(self) -> None:
         """

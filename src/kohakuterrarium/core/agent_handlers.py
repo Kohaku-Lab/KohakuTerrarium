@@ -300,13 +300,6 @@ class AgentHandlersMixin(AgentToolsMixin):
             if not should_continue:
                 break
 
-            # Mid-turn auto-compact: fire here so summarization runs in
-            # parallel with the next LLM call. ``should_compact``'s
-            # ``_compacting`` guard prevents re-entry if a prior compact
-            # is still in flight; ``_count_keep_messages`` keeps the
-            # active tool exchange in the live zone.
-            self._maybe_trigger_compact(controller)
-
     async def _run_single_turn(self, controller: Controller) -> "_TurnResult":
         """Run one LLM turn, dispatching tools and sub-agents as they appear.
 
@@ -676,12 +669,11 @@ class AgentHandlersMixin(AgentToolsMixin):
         await self._emit_output_wiring(event)
 
     def _maybe_trigger_compact(self, controller: Controller) -> None:
-        """Fire auto-compact if the last LLM call hit the threshold.
+        """Fire auto-compact at turn end if the last LLM call hit the threshold.
 
-        Called from two places: mid-loop (between turns within a single
-        user request) and turn-end (in ``_finalize_processing``). The
-        ``CompactManager._compacting`` flag prevents re-entry — at most
-        one compact runs in the background at a time.
+        Uses the compact manager's single-flight dispatch gate: if one
+        compact job is already running, later attempts are ignored
+        immediately rather than queued or retried.
         """
         if self.compact_manager is None:
             return

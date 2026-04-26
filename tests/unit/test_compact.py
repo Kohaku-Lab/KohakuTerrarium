@@ -81,7 +81,7 @@ class TestShouldCompact:
 
     def test_already_compacting(self):
         mgr, _ = _make_manager(max_tokens=1000)
-        mgr._compacting = True
+        assert mgr._dispatch.try_acquire() is not None
         assert not mgr.should_compact(prompt_tokens=900)
 
     def test_no_char_estimation_fallback(self):
@@ -219,7 +219,7 @@ class TestRunCompact:
         after_count = len(conv.get_messages())
         assert after_count < before_count
         assert mgr._compact_count == 1
-        assert not mgr._compacting
+        assert not mgr.is_compacting
 
     @pytest.mark.asyncio
     async def test_compact_with_session_store(self):
@@ -368,12 +368,39 @@ class TestNonBlocking:
         mgr._llm = MagicMock()
         mgr._llm.chat = slow_chat
 
-        mgr.trigger_compact()
-        mgr.trigger_compact()  # Should be ignored (already compacting)
+        assert mgr.trigger_compact() is True
+        assert mgr.trigger_compact() is False  # Ignored while busy
         assert mgr.is_compacting
 
         await asyncio.sleep(0.5)
         assert mgr._compact_count == 1  # Only one compact ran
+
+    @pytest.mark.asyncio
+    async def test_direct_run_ignored_while_background_compact_active(self):
+        mgr, conv = _make_manager(keep_recent=2)
+
+        started = asyncio.Event()
+        release = asyncio.Event()
+        calls = []
+
+        async def gated_chat(messages, stream=True):
+            calls.append(True)
+            started.set()
+            await release.wait()
+            yield "Summary"
+
+        mgr._llm = MagicMock()
+        mgr._llm.chat = gated_chat
+
+        assert mgr.trigger_compact() is True
+        await asyncio.wait_for(started.wait(), timeout=1)
+
+        await mgr._run_compact()
+        assert len(calls) == 1
+
+        release.set()
+        await asyncio.sleep(0.1)
+        assert mgr._compact_count == 1
 
 
 class TestEdgeCases:
@@ -410,5 +437,5 @@ class TestEdgeCases:
     def test_is_compacting_property(self):
         mgr = CompactManager()
         assert not mgr.is_compacting
-        mgr._compacting = True
+        assert mgr._dispatch.try_acquire() is not None
         assert mgr.is_compacting

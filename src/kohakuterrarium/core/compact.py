@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from kohakuterrarium.core.single_flight import SingleFlightDispatch, SingleFlightLease
 from kohakuterrarium.llm.message import create_message
 from kohakuterrarium.utils.logging import get_logger
 
@@ -90,8 +91,9 @@ class CompactManager:
 
     def __init__(self, config: CompactConfig | None = None):
         self.config = config or CompactConfig()
-        self._compacting = False
+        self._dispatch = SingleFlightDispatch()
         self._compact_task: asyncio.Task | None = None
+        self._active_lease: SingleFlightLease | None = None
         self._last_compact_time: float = 0
         self._compact_count: int = 0
         # References set by agent
@@ -107,7 +109,7 @@ class CompactManager:
 
     @property
     def is_compacting(self) -> bool:
-        return self._compacting
+        return self._dispatch.is_running
 
     def should_compact(self, prompt_tokens: int = 0) -> bool:
         """Check if compaction should be triggered.
@@ -115,7 +117,7 @@ class CompactManager:
         Uses prompt_tokens from the last LLM call. Token-based only,
         no character estimation fallback.
         """
-        if not self.config.enabled or self._compacting:
+        if not self.config.enabled or self.is_compacting:
             return False
 
         if prompt_tokens > 0:
@@ -123,23 +125,28 @@ class CompactManager:
 
         return False
 
-    def trigger_compact(self) -> None:
+    def trigger_compact(self) -> bool:
         """Start compaction as a background task.
+
+        Returns ``True`` only when this call actually dispatches the
+        single allowed compact job. If another compact is already
+        running, the attempt is ignored immediately and ``False`` is
+        returned.
 
         Emits ``compact_start`` up-front, then runs background
         summarization, then ``compact_complete`` (or ``compact_skipped``
         if the conversation is too short to benefit).
 
-        Pre-check short-conversation case BEFORE flipping ``_compacting``
-        or emitting ``compact_start``. Otherwise the UI gets stuck on a
-        "compacting..." banner because the background task returns via
-        the early-out in ``_run_compact`` without emitting a completion
-        event. Terrariums hit this path often — the root agent's
-        conversation is typically just orchestration so ``/compact`` on
-        root has "nothing to compact".
+        Pre-check short-conversation case BEFORE acquiring the
+        single-flight lease or emitting ``compact_start``. Otherwise the
+        UI gets stuck on a "compacting..." banner because the background
+        task returns via the early-out in ``_run_compact`` without
+        emitting a completion event. Terrariums hit this path often —
+        the root agent's conversation is typically just orchestration so
+        ``/compact`` on root has "nothing to compact".
         """
-        if self._compacting or not self._controller:
-            return
+        if not self._controller:
+            return False
 
         # Pre-check size. The same logic is replicated inside _run_compact
         # for the early-return path; we check here too so we can emit a
@@ -176,9 +183,28 @@ class CompactManager:
                 message_count=len(messages),
                 boundary=boundary,
             )
-            return
+            return False
 
-        self._compacting = True
+        lease = self._dispatch.try_acquire()
+        if lease is None:
+            logger.debug(
+                "Compact trigger ignored — already running",
+                agent=self._agent_name,
+            )
+            if self._output_router:
+                self._output_router.notify_activity(
+                    "compact_decision",
+                    f"[{self._agent_name}] ignored (busy)",
+                    metadata={
+                        "reason": "busy",
+                        "tokens_before": 0,
+                        "tokens_after": 0,
+                        "skipped": True,
+                    },
+                )
+            return False
+
+        self._active_lease = lease
 
         # Emit compact_start immediately (before background task)
         if self._output_router:
@@ -199,15 +225,25 @@ class CompactManager:
                 },
             )
 
-        self._compact_task = asyncio.create_task(self._run_compact())
+        self._compact_task = asyncio.create_task(self._run_compact(lease))
         logger.info(
             "Auto-compact triggered",
             agent=self._agent_name,
             compact_count=self._compact_count + 1,
         )
+        return True
 
-    async def _run_compact(self) -> None:
+    async def _run_compact(self, lease: SingleFlightLease | None = None) -> None:
         """Background compaction task."""
+        if lease is None:
+            lease = self._dispatch.try_acquire()
+            if lease is None:
+                logger.debug(
+                    "Compact run ignored — already running",
+                    agent=self._agent_name,
+                )
+                return
+        self._active_lease = lease
         try:
             conversation = self._controller.conversation
             messages = conversation.get_messages()
@@ -311,12 +347,22 @@ class CompactManager:
                         exc_info=True,
                     )
 
-                # Persist compact_count for resume continuity
+                # Persist compact_count for resume continuity and
+                # stamp the snapshot watermark to the latest event so
+                # resume can trust the compacted snapshot.
                 try:
+                    last_event_id = 0
+                    for evt in self._session_store.get_events(self._agent_name):
+                        eid = evt.get("event_id")
+                        if isinstance(eid, int) and eid > last_event_id:
+                            last_event_id = eid
                     self._session_store.save_state(
                         self._agent_name,
                         compact_count=self._compact_count,
                     )
+                    self._session_store.state[
+                        f"{self._agent_name}:snapshot_event_id"
+                    ] = last_event_id
                 except Exception as e:
                     logger.debug(
                         "Failed to save compact_count state",
@@ -345,7 +391,9 @@ class CompactManager:
         except Exception as e:
             logger.error("Compact failed", agent=self._agent_name, error=str(e))
         finally:
-            self._compacting = False
+            self._dispatch.release(lease)
+            if self._active_lease is lease:
+                self._active_lease = None
             self._compact_task = None
 
     def _count_keep_messages(self, messages: list) -> int:
@@ -454,5 +502,6 @@ class CompactManager:
                 await self._compact_task
             except (asyncio.CancelledError, Exception):
                 pass
-        self._compacting = False
+        self._dispatch.force_release()
+        self._active_lease = None
         self._compact_task = None

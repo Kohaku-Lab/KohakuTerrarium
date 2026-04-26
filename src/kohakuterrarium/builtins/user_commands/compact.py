@@ -30,7 +30,14 @@ class CompactCommand(BaseUserCommand):
                 output="Compaction already in progress.",
                 data=ui_notify("Compaction already in progress", level="warning"),
             )
-        mgr.trigger_compact()
+        if not mgr.trigger_compact():
+            return UserCommandResult(
+                output="Compaction ignored because another compact job is running.",
+                data=ui_notify(
+                    "Compaction ignored because another compact job is running",
+                    level="warning",
+                ),
+            )
         return UserCommandResult(
             output="Compaction triggered.",
             data=ui_notify("Context compaction started", level="info"),
