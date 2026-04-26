@@ -45,6 +45,7 @@ explicit entry wins over auto-injection::
 from typing import Any
 
 from kohakuterrarium.builtins.tools.registry import register_builtin
+from kohakuterrarium.core.native_tool_validation import validate_native_tool_options
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 
 
@@ -67,10 +68,9 @@ class ImageGenTool(BaseTool):
                 "description": "Image file format the provider returns.",
             },
             "size": {
-                # Free-form: newer image models accept sizes the older
-                # docs don't list (e.g. 2048x2048 on gpt-image-2). The
-                # suggestions are common values; users may type any
-                # WIDTHxHEIGHT or "auto".
+                # Free-form with runtime validation: newer image models
+                # may accept sizes not listed below, but values still
+                # must be "auto" or WIDTHxHEIGHT within sane bounds.
                 "type": "string",
                 "suggestions": [
                     "auto",
@@ -82,6 +82,7 @@ class ImageGenTool(BaseTool):
                 "default": "auto",
                 "placeholder": "auto or WIDTHxHEIGHT",
                 "label": "Size",
+                "max_length": 32,
                 "description": "Output dimensions; auto lets the provider choose.",
             },
             "quality": {
@@ -148,11 +149,19 @@ class ImageGenTool(BaseTool):
                 return kwargs[key]
             return extra.get(key)
 
-        self.output_format = _pick("output_format") or "png"
-        self.action = _pick("action")
-        self.size = _pick("size")
-        self.quality = _pick("quality")
-        self.background = _pick("background")
+        raw_options: dict[str, Any] = {"output_format": _pick("output_format") or "png"}
+        for key in ("action", "size", "quality", "background"):
+            value = _pick(key)
+            if value not in (None, ""):
+                raw_options[key] = value
+        validated = validate_native_tool_options(
+            "image_gen", raw_options, self.provider_native_option_schema()
+        )
+        self.output_format = validated.get("output_format") or "png"
+        self.action = validated.get("action")
+        self.size = validated.get("size")
+        self.quality = validated.get("quality")
+        self.background = validated.get("background")
 
     @property
     def tool_name(self) -> str:

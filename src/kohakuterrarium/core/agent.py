@@ -442,6 +442,9 @@ class Agent(
             keep_recent_turns=compact_data.get(
                 "keep_recent_turns", CompactConfig.keep_recent_turns
             ),
+            cooldown_seconds=compact_data.get(
+                "cooldown_seconds", CompactConfig.cooldown_seconds
+            ),
         )
         self.compact_manager = CompactManager(compact_cfg)
         self.compact_manager._controller = self.controller
@@ -845,6 +848,17 @@ class Agent(
                     "compact_count restore skipped",
                     agent=self.config.name,
                     error=str(e),
+                )
+        native_tool_options = getattr(self, "native_tool_options", None)
+        if native_tool_options is not None:
+            try:
+                native_tool_options.apply()
+            except Exception as e:
+                logger.debug(
+                    "native tool option apply skipped",
+                    agent=self.config.name,
+                    error=str(e),
+                    exc_info=True,
                 )
         # Wave B: route scratchpad + plugin-hook events to the router.
         wire_scratchpad_observer(self)

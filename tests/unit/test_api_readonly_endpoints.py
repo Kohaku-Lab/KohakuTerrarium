@@ -125,6 +125,19 @@ def test_patch_scratchpad_merges_updates_and_deletes_nulls():
     assert sp.get("new") == "hello"
 
 
+def test_patch_scratchpad_rejects_reserved_keys():
+    sp = Scratchpad()
+    client = _make_client(_make_fake_agent(scratchpad=sp))
+
+    resp = client.patch(
+        "/api/agents/test-agent/scratchpad",
+        json={"updates": {"__private__": "nope"}},
+    )
+
+    assert resp.status_code == 400
+    assert sp.get("__private__") is None
+
+
 # ----------------------------------------------------------------------
 # Triggers
 # ----------------------------------------------------------------------

@@ -201,7 +201,7 @@ class KohakuManager:
         return helper.list()
 
     def agent_set_native_tool_options(
-        self, agent_id: str, tool_name: str, values: dict
+        self, agent_id: str, tool_name: str, values: dict[str, Any]
     ) -> dict:
         """Replace the override dict for one provider-native tool.
 

@@ -250,15 +250,26 @@ def resume_agent(
     # after resume opens the right branch_id of the current turn.
     _restore_turn_branch_state(agent, store, agent_name)
 
-    # Restore scratchpad
+    # Restore scratchpad. Reserved ``__*__`` keys are legacy framework
+    # internals; keep them readable for migration but do not surface them
+    # back into Working Memory.
     pad_data = store.load_scratchpad(agent_name)
     if pad_data:
+        legacy_native_options = pad_data.get("__native_tool_options__")
+        if legacy_native_options:
+            agent.session.scratchpad.set(
+                "__native_tool_options__", legacy_native_options
+            )
+        visible_count = 0
         for k, v in pad_data.items():
+            if k.startswith("__") and k.endswith("__"):
+                continue
             agent.session.scratchpad.set(k, v)
-        logger.info("Scratchpad restored", agent=agent_name, keys=len(pad_data))
+            visible_count += 1
+        logger.info("Scratchpad restored", agent=agent_name, keys=visible_count)
 
-    # Re-apply session-wise provider-native tool option overrides
-    # captured in the scratchpad (e.g. ``image_gen`` size/quality).
+    # Re-apply session-wise provider-native tool option overrides from
+    # private session state, with legacy scratchpad migration fallback.
     native_tool_options = getattr(agent, "native_tool_options", None)
     if native_tool_options is not None:
         try:

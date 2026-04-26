@@ -19,6 +19,27 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _coerce_tool_config_value(key: str, value: Any) -> Any:
+    """Coerce common ToolConfig fields from config-file values."""
+    if key == "max_output":
+        try:
+            coerced = int(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"max_output must be an integer, got {value!r}")
+        if coerced < 0:
+            raise ValueError("max_output must be >= 0")
+        return coerced
+    if key == "timeout":
+        try:
+            coerced_float = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"timeout must be numeric, got {value!r}")
+        if coerced_float < 0:
+            raise ValueError("timeout must be >= 0")
+        return coerced_float
+    return value
+
+
 # Universal trigger classes the framework ships. `type: trigger` entries
 # look up the trigger by its `setup_tool_name`.
 def _universal_trigger_classes() -> list[type[BaseTrigger]]:
@@ -51,14 +72,21 @@ def create_tool(
                 "env",
                 "notify_controller_on_background_complete",
             }
-            tool_cfg = ToolConfig(
-                **{
-                    k: raw_options.pop(k)
-                    for k in list(raw_options)
-                    if k in tool_cfg_keys
-                },
-                extra=raw_options,
-            )
+            tool_cfg_values = {}
+            try:
+                for key in list(raw_options):
+                    if key in tool_cfg_keys:
+                        tool_cfg_values[key] = _coerce_tool_config_value(
+                            key, raw_options.pop(key)
+                        )
+            except ValueError as exc:
+                logger.warning(
+                    "Invalid tool config value",
+                    tool_name=tool_config.name,
+                    error=str(exc),
+                )
+                return None
+            tool_cfg = ToolConfig(**tool_cfg_values, extra=raw_options)
             tool = get_builtin_tool(tool_config.name, config=tool_cfg)
             if tool is None:
                 logger.warning("Unknown built-in tool", tool_name=tool_config.name)

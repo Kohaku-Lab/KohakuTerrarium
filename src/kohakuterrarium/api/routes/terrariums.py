@@ -7,6 +7,7 @@ from kohakuterrarium.api.deps import get_manager
 from kohakuterrarium.api.events import get_event_log
 from kohakuterrarium.api.routes.agents import _redacted_env
 from kohakuterrarium.api.schemas import AgentChat, ChannelAdd, TerrariumCreate
+from kohakuterrarium.core.scratchpad import is_reserved_scratchpad_key
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -178,6 +179,8 @@ async def patch_terrarium_scratchpad(
     session = _mount_target(manager, terrarium_id, target)
     pad = session.agent.scratchpad
     for key, value in req.updates.items():
+        if is_reserved_scratchpad_key(key):
+            raise HTTPException(400, f"Reserved scratchpad key: {key}")
         if value is None:
             pad.delete(key)
         else:

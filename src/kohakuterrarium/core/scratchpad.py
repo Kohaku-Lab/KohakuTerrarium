@@ -12,6 +12,11 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+def is_reserved_scratchpad_key(key: str) -> bool:
+    """Return True for framework-private scratchpad keys."""
+    return key.startswith("__") and key.endswith("__")
+
+
 class Scratchpad:
     """
     Session-scoped key-value working memory.
@@ -68,9 +73,11 @@ class Scratchpad:
             return True
         return False
 
-    def list_keys(self) -> list[str]:
-        """List all keys."""
-        return list(self._data.keys())
+    def list_keys(self, include_reserved: bool = False) -> list[str]:
+        """List keys, hiding framework-reserved entries by default."""
+        if include_reserved:
+            return list(self._data.keys())
+        return [k for k in self._data if not is_reserved_scratchpad_key(k)]
 
     def clear(self) -> None:
         """Clear all data."""
@@ -79,7 +86,9 @@ class Scratchpad:
 
     def to_dict(self) -> dict[str, str]:
         """Get all data as a dict copy."""
-        return self._data.copy()
+        return {
+            k: v for k, v in self._data.items() if not is_reserved_scratchpad_key(k)
+        }
 
     def to_prompt_section(self) -> str:
         """
@@ -88,11 +97,12 @@ class Scratchpad:
         Returns empty string if scratchpad is empty.
         Returns markdown with ## Working Memory header if has data.
         """
-        if not self._data:
+        visible = self.to_dict()
+        if not visible:
             return ""
 
         lines = ["## Working Memory\n"]
-        for key, value in self._data.items():
+        for key, value in visible.items():
             # For multi-line values, indent them
             if "\n" in value:
                 lines.append(f"### {key}\n{value}\n")
@@ -108,7 +118,7 @@ class Scratchpad:
         return key in self._data
 
     def __repr__(self) -> str:
-        return f"Scratchpad(keys={list(self._data.keys())})"
+        return f"Scratchpad(keys={self.list_keys()})"
 
 
 # get_scratchpad() has moved to kohakuterrarium.core.session to avoid

@@ -8,6 +8,7 @@ message dicts on resume.
 
 from typing import TYPE_CHECKING, Any
 
+from kohakuterrarium.core.agent_native_tools import NATIVE_TOOL_OPTIONS_KEY
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.utils.logging import get_logger
 
@@ -99,8 +100,25 @@ def attach_session_store(runtime: "TerrariumRuntime", store: Any) -> None:
 
             pad = data.get("scratchpad", {})
             if pad and agent.session:
+                legacy_native_options = pad.get(NATIVE_TOOL_OPTIONS_KEY)
+                if legacy_native_options:
+                    agent.session.scratchpad.set(
+                        NATIVE_TOOL_OPTIONS_KEY, legacy_native_options
+                    )
                 for k, v in pad.items():
+                    if k.startswith("__") and k.endswith("__"):
+                        continue
                     agent.session.scratchpad.set(k, v)
+            native_tool_options = getattr(agent, "native_tool_options", None)
+            if native_tool_options is not None:
+                try:
+                    native_tool_options.apply()
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to reapply native tool options",
+                        agent=name,
+                        error=str(exc),
+                    )
 
         runtime._pending_resume_data = None
 

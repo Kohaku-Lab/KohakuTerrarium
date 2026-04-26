@@ -3,6 +3,7 @@
 from typing import Any
 
 from kohakuterrarium.builtins.tools.registry import register_builtin
+from kohakuterrarium.core.scratchpad import is_reserved_scratchpad_key
 from kohakuterrarium.core.session import get_scratchpad
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
@@ -43,6 +44,9 @@ class ScratchpadTool(BaseTool):
             if context and context.session
             else get_scratchpad()
         )
+
+        if key and is_reserved_scratchpad_key(key):
+            return ToolResult(error="Reserved scratchpad keys are framework-private")
 
         match action:
             case "set":

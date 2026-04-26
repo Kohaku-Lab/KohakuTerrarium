@@ -18,7 +18,6 @@ free-form ``string``/``int``/``float``/``bool`` accept any cast-compatible
 value.
 """
 
-import json
 import shlex
 from typing import Any
 
@@ -78,7 +77,10 @@ class ToolOptionsCommand(BaseUserCommand):
             )
 
         if any(t in {"--reset", "-r", "reset"} for t in rest):
-            helper.set(tool_name, {})
+            try:
+                helper.set(tool_name, {})
+            except ValueError as exc:
+                return UserCommandResult(error=str(exc))
             return UserCommandResult(output=f"Reset {tool_name} options.")
 
         try:
@@ -88,18 +90,12 @@ class ToolOptionsCommand(BaseUserCommand):
 
         merged = dict(helper.get(tool_name))
         for key, raw in updates.items():
-            if key not in schema:
-                return UserCommandResult(
-                    error=f"Unknown option {key!r} for tool {tool_name!r}.",
-                )
-            coerced = _coerce(raw, schema[key])
-            if coerced is _INVALID:
-                return UserCommandResult(
-                    error=f"Invalid value for {key!r}: {raw!r}",
-                )
-            merged[key] = coerced
+            merged[key] = raw
 
-        applied = helper.set(tool_name, merged)
+        try:
+            applied = helper.set(tool_name, merged)
+        except ValueError as exc:
+            return UserCommandResult(error=str(exc))
         if not applied:
             return UserCommandResult(output=f"Cleared {tool_name} options.")
         rendered = ", ".join(f"{k}={v}" for k, v in sorted(applied.items()))
@@ -107,9 +103,6 @@ class ToolOptionsCommand(BaseUserCommand):
 
 
 # ── Helpers ────────────────────────────────────────────────────────
-
-
-_INVALID = object()
 
 
 def _schema_for(agent: Any, tool_name: str) -> dict[str, Any] | None:
@@ -139,41 +132,6 @@ def _parse_assignments(tokens: list[str]) -> dict[str, str]:
             raise ValueError(f"Missing key in {tok!r}")
         pairs[key] = raw
     return pairs
-
-
-def _coerce(raw: str, spec: dict[str, Any]) -> Any:
-    """Cast a string token into the schema-declared type. Returns
-    sentinel ``_INVALID`` when the value isn't acceptable."""
-    kind = spec.get("type", "string")
-    if kind == "enum":
-        values = [str(v) for v in (spec.get("values") or [])]
-        return raw if raw in values else _INVALID
-    if kind in {"int", "float"}:
-        cast = int if kind == "int" else float
-        try:
-            value = cast(raw)
-        except ValueError:
-            return _INVALID
-        minimum = spec.get("min")
-        maximum = spec.get("max")
-        if minimum is not None and value < minimum:
-            return _INVALID
-        if maximum is not None and value > maximum:
-            return _INVALID
-        return value
-    if kind == "bool":
-        if raw.lower() in {"true", "1", "yes", "y", "on"}:
-            return True
-        if raw.lower() in {"false", "0", "no", "n", "off"}:
-            return False
-        return _INVALID
-    # ``string`` and unknown types: accept JSON literals (so users can
-    # pass quoted strings or JSON objects) but fall back to the raw
-    # token. Suggestions are advisory only.
-    try:
-        return json.loads(raw)
-    except (TypeError, ValueError):
-        return raw
 
 
 def _render_overview(agent: Any) -> str:

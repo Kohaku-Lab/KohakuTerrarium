@@ -10,14 +10,15 @@ Policy:
 * :meth:`set` updates the matching tool in ``agent.registry`` in place
   (via ``BaseTool.refresh_native_options``) so the next provider
   request picks up the change without rebuilding the agent.
-* The map is persisted to the session scratchpad under the reserved
-  key ``__native_tool_options__`` (JSON-encoded). Resume rebuilds the
-  agent then calls :meth:`apply` after the scratchpad rehydrates.
+* The map is persisted to private session state when a SessionStore is
+  attached, and to ``session.extra`` for ephemeral runs. Legacy
+  scratchpad-backed values are migrated on apply.
 """
 
 import json
 from typing import TYPE_CHECKING, Any
 
+from kohakuterrarium.core.native_tool_validation import validate_native_tool_options
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 NATIVE_TOOL_OPTIONS_KEY = "__native_tool_options__"
+NATIVE_TOOL_OPTIONS_STATE_SUFFIX = "native_tool_options"
 
 
 class NativeToolOptions:
@@ -54,9 +56,7 @@ class NativeToolOptions:
         constructor defaults). Returns the cleaned dict that was
         applied (after dropping empty entries).
         """
-        cleaned: dict[str, Any] = {
-            k: v for k, v in (values or {}).items() if v not in (None, "")
-        }
+        cleaned = self._validate(tool_name, values or {})
         if cleaned:
             self._values[tool_name] = cleaned
         else:
@@ -71,30 +71,44 @@ class NativeToolOptions:
         Called from ``session/resume.py`` after scratchpad rehydrate.
         Fresh agents with no scratchpad are a no-op.
         """
-        scratchpad = self._scratchpad()
-        if scratchpad is None:
-            return
-        raw = scratchpad.get(NATIVE_TOOL_OPTIONS_KEY)
-        if not raw:
-            return
-        try:
-            data = json.loads(raw)
-        except (TypeError, ValueError):
-            logger.warning(
-                "native_tool_options_parse_failed",
-                agent_name=getattr(self._agent.config, "name", ""),
-                raw=str(raw)[:120],
-            )
-            return
+        data = self._load_private_state()
+        legacy = self._load_legacy_scratchpad()
+        if legacy:
+            data.update(legacy)
+            scratchpad = self._scratchpad()
+            if scratchpad is not None:
+                scratchpad.delete(NATIVE_TOOL_OPTIONS_KEY)
         if not isinstance(data, dict):
             return
         for tool_name, values in data.items():
             if not isinstance(values, dict):
                 continue
-            self._values[str(tool_name)] = dict(values)
-            self._refresh_in_registry(str(tool_name), values)
+            try:
+                cleaned = self._validate(str(tool_name), values)
+            except ValueError as exc:
+                logger.warning(
+                    "native_tool_options_invalid_on_apply",
+                    agent_name=getattr(self._agent.config, "name", ""),
+                    tool_name=str(tool_name),
+                    error=str(exc),
+                )
+                continue
+            if not cleaned:
+                continue
+            self._values[str(tool_name)] = cleaned
+            self._refresh_in_registry(str(tool_name), cleaned)
+        self._persist()
 
     # ── Internals ───────────────────────────────────────────────
+
+    def _validate(self, tool_name: str, values: dict[str, Any]) -> dict[str, Any]:
+        registry = getattr(self._agent, "registry", None)
+        tool = registry.get_tool(tool_name) if registry is not None else None
+        if tool is None or not getattr(tool, "is_provider_native", False):
+            raise ValueError(f"Unknown provider-native tool: {tool_name}")
+        schema_fn = getattr(type(tool), "provider_native_option_schema", None)
+        schema = schema_fn() if callable(schema_fn) else {}
+        return validate_native_tool_options(tool_name, values or {}, schema or {})
 
     def _scratchpad(self) -> Any:
         """Resolve the session scratchpad, or ``None`` when not attached."""
@@ -120,15 +134,65 @@ class NativeToolOptions:
         if callable(refresh):
             refresh()
 
-    def _persist(self) -> None:
-        """Write the override map to scratchpad as JSON (or clear)."""
+    def _state_key(self) -> str:
+        return f"{self._agent.config.name}:{NATIVE_TOOL_OPTIONS_STATE_SUFFIX}"
+
+    def _load_private_state(self) -> dict[str, Any]:
+        store = getattr(self._agent, "session_store", None)
+        key = self._state_key()
+        if store is not None:
+            try:
+                raw = store.state.get(key)
+            except (KeyError, TypeError):
+                raw = None
+            if isinstance(raw, dict):
+                return raw
+            if isinstance(raw, str):
+                try:
+                    parsed = json.loads(raw)
+                except ValueError:
+                    return {}
+                return parsed if isinstance(parsed, dict) else {}
+        session = getattr(self._agent, "session", None)
+        extra = getattr(session, "extra", None) if session is not None else None
+        raw = (
+            extra.get(NATIVE_TOOL_OPTIONS_STATE_SUFFIX)
+            if isinstance(extra, dict)
+            else None
+        )
+        return raw if isinstance(raw, dict) else {}
+
+    def _load_legacy_scratchpad(self) -> dict[str, Any]:
         scratchpad = self._scratchpad()
         if scratchpad is None:
-            return
-        if not self._values:
+            return {}
+        raw = scratchpad.get(NATIVE_TOOL_OPTIONS_KEY)
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+        except (TypeError, ValueError):
+            logger.warning(
+                "native_tool_options_parse_failed",
+                agent_name=getattr(self._agent.config, "name", ""),
+                raw=str(raw)[:120],
+            )
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _persist(self) -> None:
+        """Write the override map to private session state."""
+        store = getattr(self._agent, "session_store", None)
+        key = self._state_key()
+        if store is not None:
+            store.state[key] = dict(self._values)
+        session = getattr(self._agent, "session", None)
+        extra = getattr(session, "extra", None) if session is not None else None
+        if isinstance(extra, dict):
+            if self._values:
+                extra[NATIVE_TOOL_OPTIONS_STATE_SUFFIX] = dict(self._values)
+            else:
+                extra.pop(NATIVE_TOOL_OPTIONS_STATE_SUFFIX, None)
+        scratchpad = self._scratchpad()
+        if scratchpad is not None:
             scratchpad.delete(NATIVE_TOOL_OPTIONS_KEY)
-            return
-        scratchpad.set(
-            NATIVE_TOOL_OPTIONS_KEY,
-            json.dumps(self._values, ensure_ascii=False),
-        )

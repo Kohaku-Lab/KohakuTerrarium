@@ -14,6 +14,7 @@ from kohakuterrarium.api.schemas import (
     ModelSwitch,
     SlashCommand,
 )
+from kohakuterrarium.core.scratchpad import is_reserved_scratchpad_key
 from kohakuterrarium.session.history import collect_branch_metadata
 
 router = APIRouter()
@@ -172,7 +173,9 @@ async def set_agent_native_tool_options(
             agent_id, req.tool, req.values or {}
         )
     except ValueError as e:
-        raise HTTPException(404, str(e))
+        msg = str(e)
+        status = 400 if "option" in msg or "must" in msg or "Unknown" in msg else 404
+        raise HTTPException(status, msg)
     return {"status": "saved", "tool": req.tool, "values": applied}
 
 
@@ -413,6 +416,8 @@ async def patch_scratchpad(
         raise HTTPException(404, f"Agent {agent_id} not found")
     pad = session.agent.scratchpad
     for key, value in req.updates.items():
+        if is_reserved_scratchpad_key(key):
+            raise HTTPException(400, f"Reserved scratchpad key: {key}")
         if value is None:
             pad.delete(key)
         else:

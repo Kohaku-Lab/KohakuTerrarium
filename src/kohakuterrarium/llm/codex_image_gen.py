@@ -7,6 +7,7 @@ helpers — no Codex client state lives in this module.
 
 from typing import Any
 
+from kohakuterrarium.core.native_tool_validation import validate_native_tool_options
 from kohakuterrarium.llm.message import ImagePart
 
 # Mapping used when decoding ``image_generation_call.result`` into a
@@ -35,7 +36,11 @@ def translate_image_gen_tool(tool: Any) -> dict[str, Any] | None:
         return None
     spec: dict[str, Any] = {"type": "image_generation"}
     if hasattr(tool, "provider_native_options"):
-        spec.update(tool.provider_native_options())
+        options = tool.provider_native_options()
+        schema_fn = getattr(type(tool), "provider_native_option_schema", None)
+        schema = schema_fn() if callable(schema_fn) else {}
+        options = validate_native_tool_options("image_gen", options, schema)
+        spec.update(options)
     else:
         # Minimal fallback if someone subclassed without the helper.
         spec["output_format"] = "png"
