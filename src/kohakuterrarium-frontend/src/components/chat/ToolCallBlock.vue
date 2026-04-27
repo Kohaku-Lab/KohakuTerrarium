@@ -66,6 +66,9 @@
             {{ tc.result || "(no output)" }}
           </template>
         </div>
+        <div v-if="tc.resultMeta?.truncated" class="px-3 py-1 text-[10px] border-t border-sapphire/15 dark:border-sapphire/20 bg-sapphire/8 dark:bg-sapphire/10 text-amber-shadow dark:text-amber-light font-mono">
+          Output truncated<span v-if="tc.resultMeta.omitted_text_bytes"> · {{ tc.resultMeta.omitted_text_bytes.toLocaleString() }} bytes omitted</span>
+        </div>
       </template>
     </div>
   </div>

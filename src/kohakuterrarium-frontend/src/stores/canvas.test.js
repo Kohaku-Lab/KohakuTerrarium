@@ -118,4 +118,26 @@ describe("canvas store — artifact detection", () => {
     })
     expect(store.artifacts).toHaveLength(0)
   })
+
+  it("isolates artifacts by instance/session/tab scope", () => {
+    const store = useCanvasStore()
+    const msg = {
+      id: "m6",
+      role: "assistant",
+      parts: [{ type: "text", content: "##canvas name=one lang=py##\nprint('a')\n##canvas##" }],
+    }
+
+    store.setScope({ instanceId: "i1", sessionId: "s1", tab: "root" })
+    store.scanMessage(msg, store.currentScope)
+    expect(store.artifacts).toHaveLength(1)
+
+    store.setScope({ instanceId: "i1", sessionId: "s1", tab: "worker" })
+    expect(store.artifacts).toHaveLength(0)
+    store.scanMessage(msg, store.currentScope)
+    expect(store.artifacts).toHaveLength(1)
+
+    store.setScope({ instanceId: "i1", sessionId: "s1", tab: "root" })
+    expect(store.artifacts).toHaveLength(1)
+    expect(Object.keys(store.artifactsByScope)).toHaveLength(2)
+  })
 })

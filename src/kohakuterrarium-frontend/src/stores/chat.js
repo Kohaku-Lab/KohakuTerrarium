@@ -36,6 +36,21 @@ function normalizeMessageContent(content) {
   }
 }
 
+function contentSignature(content) {
+  if (typeof content === "string") return `text:${content}`
+  const normalized = normalizeContentParts(content)
+  if (!normalized) return ""
+  return JSON.stringify(normalized)
+}
+
+function toolResultPayload(result, data = {}) {
+  return {
+    result,
+    resultParts: normalizeContentParts(result),
+    resultMeta: data.result_meta || data.output_meta || data.metadata || null,
+  }
+}
+
 /**
  * Convert OpenAI-format conversation history to frontend messages.
  */
@@ -379,7 +394,10 @@ export function _replayEvents(messages, events, branchView = null) {
     if (sa?.children?.length) {
       const tc = [...sa.children].reverse().find((p) => p.name === name)
       if (tc) {
-        tc.result = result || ""
+        const payload = toolResultPayload(result || "", opts || {})
+        tc.result = payload.result
+        tc.resultParts = payload.resultParts
+        tc.resultMeta = payload.resultMeta
         if (opts?.error) tc.status = "error"
         return
       }
@@ -421,7 +439,10 @@ export function _replayEvents(messages, events, branchView = null) {
       }
     }
     if (tc) {
-      tc.result = result || ""
+      const payload = toolResultPayload(result || "", opts || {})
+      tc.result = payload.result
+      tc.resultParts = payload.resultParts
+      tc.resultMeta = payload.resultMeta
       if (opts?.interrupted || opts?.finalState === "interrupted") tc.status = "interrupted"
       else if (opts?.error) tc.status = "error"
       if (opts?.tools_used) tc.tools_used = opts.tools_used
@@ -664,6 +685,9 @@ export function _replayEvents(messages, events, branchView = null) {
           error: evt.error ? true : false,
           interrupted: !!evt.interrupted,
           finalState: evt.final_state,
+          output_meta: evt.output_meta,
+          result_meta: evt.result_meta,
+          metadata: evt.metadata,
         },
         evt.call_id || evt.job_id,
       )
@@ -1017,7 +1041,7 @@ export const useChatStore = defineStore("chat", {
     _instanceGeneration: 0,
     /** @type {Record<string, number>} Recent user message signatures for cross-tab dedupe */
     _recentUserInputs: {},
-    /** @type {Record<string, boolean>} Tabs needing canonical replay after regen/edit streaming finishes */
+    /** @type {Record<string, {active: boolean, expectedBranchByTurn?: Record<string, number>}>} Tabs needing canonical replay after regen/edit streaming finishes */
     _branchResyncPendingByTab: {},
     /** @type {Record<string, number>} Debounce timers for post-branch history resync */
     _branchResyncTimers: {},
@@ -1179,6 +1203,7 @@ export const useChatStore = defineStore("chat", {
       const now = Date.now()
       const contentParts = typeof text === "string" ? [{ type: "text", text }] : text
       const normalized = normalizeMessageContent(contentParts)
+      const signature = contentSignature(contentParts)
       const msg = {
         id: "u_" + now,
         role: "user",
@@ -1187,7 +1212,7 @@ export const useChatStore = defineStore("chat", {
         timestamp: new Date(now).toISOString(),
       }
 
-      this._recentUserInputs[`${tab}:${normalized.content}`] = now
+      this._recentUserInputs[`${tab}:${signature}`] = now
       if (this.processingByTab[tab]) {
         // Don't put in main chat — hold in queue, shown above input box
         msg.queued = true
@@ -1663,8 +1688,10 @@ export const useChatStore = defineStore("chat", {
           last.parts.push(tc)
         }
         tc.status = "done"
-        tc.result = data.result || data.output || data.detail || ""
-        tc.resultParts = normalizeContentParts(tc.result)
+        const payload = toolResultPayload(data.result || data.output || data.detail || "", data)
+        tc.result = payload.result
+        tc.resultParts = payload.resultParts
+        tc.resultMeta = payload.resultMeta
         if (data.tools_used) tc.tools_used = data.tools_used
         if (data.turns != null) tc.turns = data.turns
         if (data.duration != null) tc.duration = data.duration
@@ -1692,8 +1719,10 @@ export const useChatStore = defineStore("chat", {
           last.parts.push(tc)
         }
         tc.status = data.interrupted || data.final_state === "interrupted" ? "interrupted" : "error"
-        tc.result = data.result || data.error || data.detail || ""
-        tc.resultParts = normalizeContentParts(tc.result)
+        const payload = toolResultPayload(data.result || data.error || data.detail || "", data)
+        tc.result = payload.result
+        tc.resultParts = payload.resultParts
+        tc.resultMeta = payload.resultMeta
         if (data.tools_used) tc.tools_used = data.tools_used
         if (data.turns != null) tc.turns = data.turns
         if (data.duration != null) tc.duration = data.duration
@@ -1781,17 +1810,25 @@ export const useChatStore = defineStore("chat", {
       }
     },
 
-    _markBranchResyncPending(tab = this.activeTab) {
+    _markBranchResyncPending(tab = this.activeTab, expected = null) {
       if (!tab) return
-      this._branchResyncPendingByTab[tab] = true
+      const pending = this._branchResyncPendingByTab[tab] || {}
+      this._branchResyncPendingByTab[tab] = {
+        active: true,
+        expectedBranchByTurn: {
+          ...(pending.expectedBranchByTurn || {}),
+          ...(expected?.expectedBranchByTurn || {}),
+        },
+      }
     },
 
     _scheduleBranchResync(tab) {
-      if (!tab || !this._branchResyncPendingByTab[tab]) return
+      const pending = tab ? this._branchResyncPendingByTab[tab] : null
+      if (!tab || !pending?.active) return
       if (this._branchResyncTimers[tab]) clearTimeout(this._branchResyncTimers[tab])
       this._branchResyncTimers[tab] = setTimeout(async () => {
         delete this._branchResyncTimers[tab]
-        if (!this._branchResyncPendingByTab[tab]) return
+        if (!this._branchResyncPendingByTab[tab]?.active) return
         await this._resyncHistory(tab)
       }, BRANCH_RESYNC_DELAY_MS)
     },
@@ -1877,10 +1914,13 @@ export const useChatStore = defineStore("chat", {
       if (this._regenInFlight) return false
       this._regenInFlight = true
       const tab = this.activeTab
-      this._markBranchResyncPending(tab)
       let backendIdx = messageIdx
       let userPosition = target.userPosition
       const turnIndex = target.turnIndex
+      const expectedLatestBranch = target.latestBranch
+      this._markBranchResyncPending(tab, {
+        expectedBranchByTurn: turnIndex != null && expectedLatestBranch != null ? { [turnIndex]: expectedLatestBranch + 1 } : {},
+      })
       let validTarget = false
       if (tab) {
         const msgs = this.messagesByTab[tab] || []
@@ -1908,10 +1948,15 @@ export const useChatStore = defineStore("chat", {
       }
       try {
         const { agentAPI } = await import("@/utils/api")
-        await agentAPI.editMessage(this._instanceId, backendIdx, newContent, {
+        const editResponse = await agentAPI.editMessage(this._instanceId, backendIdx, newContent, {
           turnIndex,
           userPosition,
         })
+        if (turnIndex != null && editResponse?.branch_id != null) {
+          this._markBranchResyncPending(tab, {
+            expectedBranchByTurn: { [turnIndex]: editResponse.branch_id },
+          })
+        }
         const resynced = await this._resyncHistory(tab)
         return resynced !== false
       } catch (e) {
@@ -1945,6 +1990,24 @@ export const useChatStore = defineStore("chat", {
         const { agentAPI } = await import("@/utils/api")
         const data = await agentAPI.getHistory(this._instanceId)
         if (!data?.events) return false
+        const pending = this._branchResyncPendingByTab[tab]
+        const expectedBranchByTurn = pending?.expectedBranchByTurn || {}
+        if (Object.keys(expectedBranchByTurn).length) {
+          const { branchMeta } = _replayEvents([], data.events)
+          const branchSelection = branchMeta?.branchSelection || new Map()
+          let complete = true
+          for (const [turn, branch] of Object.entries(expectedBranchByTurn)) {
+            if (branchSelection.get(Number(turn)) !== branch) {
+              complete = false
+              break
+            }
+          }
+          if (!complete) {
+            this.eventsByTab[tab] = data.events
+            this._scheduleBranchResync(tab)
+            return false
+          }
+        }
         // Cache raw events for branch navigation re-replay.
         this.eventsByTab[tab] = data.events
         // Regen / edit lands the user on the latest branch — clear
@@ -2054,7 +2117,7 @@ export const useChatStore = defineStore("chat", {
     _handleUserInput(source, data) {
       if (!source || !this.messagesByTab[source]) return
       const normalized = normalizeMessageContent(data.content)
-      const signature = `${source}:${normalized.content}`
+      const signature = `${source}:${contentSignature(data.content)}`
       const now = Date.now()
       const seenAt = this._recentUserInputs[signature] || 0
       if (now - seenAt < 2000) return

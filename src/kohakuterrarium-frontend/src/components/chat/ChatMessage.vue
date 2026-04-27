@@ -67,11 +67,32 @@
       </div>
       <!-- Edit mode -->
       <div v-if="editing" class="flex flex-col gap-2.5">
-        <textarea ref="editTextareaEl" v-model="editText" class="message-edit-textarea" :rows="Math.min(16, Math.max(6, editText.split('\n').length))" :disabled="editSaving" @keydown.meta.enter="confirmEdit" @keydown.ctrl.enter="confirmEdit" @keydown.esc="cancelEdit" />
+        <div v-if="editAttachments.length" class="flex flex-wrap gap-2">
+          <div v-for="(attachment, idx) in editAttachments" :key="attachment.id || attachment.name + ':' + idx" class="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-iolite/8 dark:bg-iolite/12 border border-iolite/20 text-xs">
+            <span :class="attachment.kind === 'image' ? 'i-carbon-image text-iolite dark:text-iolite-light' : 'i-carbon-document text-aquamarine'" />
+            <span class="text-warm-700 dark:text-warm-200 max-w-52 truncate">{{ attachment.name }}</span>
+            <button class="text-warm-400 hover:text-coral" :disabled="editSaving" @click="removeEditAttachment(idx)">
+              <span class="i-carbon-close" />
+            </button>
+          </div>
+        </div>
+        <div class="flex gap-2 pl-2 pr-3 py-2 rounded-xl bg-warm-50 dark:bg-warm-800 border border-warm-200 dark:border-warm-700 focus-within:border-iolite/40 dark:focus-within:border-iolite-light/30 transition-colors items-end">
+          <input ref="editImageInputEl" type="file" accept="image/*" class="hidden" @change="(e) => onEditFileChange(e, 'image')" />
+          <input ref="editFileInputEl" type="file" class="hidden" @change="(e) => onEditFileChange(e, 'file')" />
+          <div class="flex items-center gap-0 shrink-0 mb-0.5">
+            <button class="w-7 h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-aquamarine dark:hover:text-aquamarine hover:bg-aquamarine/10 disabled:opacity-50" title="Attach file" aria-label="Attach file" :disabled="editSaving" @click="editFileInputEl?.click()">
+              <span class="i-carbon-add text-xs" />
+            </button>
+            <button class="w-7 h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-iolite dark:hover:text-iolite-light hover:bg-iolite/10 disabled:opacity-50" title="Attach image" aria-label="Attach image" :disabled="editSaving" @click="editImageInputEl?.click()">
+              <span class="i-carbon-image text-xs" />
+            </button>
+          </div>
+          <textarea ref="editTextareaEl" v-model="editText" class="message-edit-textarea message-edit-inline" :rows="Math.min(16, Math.max(6, editText.split('\n').length))" :disabled="editSaving" @keydown.meta.enter="confirmEdit" @keydown.ctrl.enter="confirmEdit" @keydown.esc="cancelEdit" />
+        </div>
         <div class="flex flex-wrap items-center gap-2 text-xs">
           <span class="text-warm-400 dark:text-warm-500 mr-auto">Ctrl/Cmd+Enter to rerun · Esc to cancel</span>
           <button class="px-2.5 py-1 rounded hover:bg-warm-100 dark:hover:bg-warm-800 disabled:opacity-50" :disabled="editSaving" @click="cancelEdit">Cancel</button>
-          <button class="px-2.5 py-1 rounded bg-sapphire text-white hover:bg-sapphire-dark disabled:opacity-60" :disabled="editSaving || !editText.trim()" @click="confirmEdit">
+          <button class="px-2.5 py-1 rounded bg-sapphire text-white hover:bg-sapphire-dark disabled:opacity-60" :disabled="editSaving || (!editText.trim() && editAttachments.length === 0)" @click="confirmEdit">
             {{ editSaving ? "Saving..." : "Save & Rerun" }}
           </button>
         </div>
@@ -199,10 +220,19 @@
 </template>
 
 <script setup>
+import { ElMessage } from "element-plus"
+
 import MarkdownRenderer from "@/components/common/MarkdownRenderer.vue"
 import ToolCallBlock from "@/components/chat/ToolCallBlock.vue"
-import { GEM } from "@/utils/colors"
 import { useChatStore } from "@/stores/chat"
+import { GEM } from "@/utils/colors"
+import {
+  buildMessageParts,
+  contentToEditableDraft,
+  formatBytes,
+  MAX_ATTACHMENT_BYTES,
+  MAX_IMAGE_BYTES,
+} from "@/utils/chatAttachments"
 
 // Module-scoped so colors are stable across all ChatMessage instances.
 // If this were declared inside <script setup>, each message would have
@@ -243,7 +273,10 @@ const props = defineProps({
 const expandedTools = reactive({})
 const editing = ref(false)
 const editText = ref("")
+const editAttachments = ref([])
 const editTextareaEl = ref(null)
+const editImageInputEl = ref(null)
+const editFileInputEl = ref(null)
 const editSaving = ref(false)
 const errorExpanded = ref(false)
 
@@ -290,7 +323,9 @@ function copyAssistantText() {
 }
 
 function startEdit() {
-  editText.value = contentToText(props.message.contentParts || props.message.content)
+  const draft = contentToEditableDraft(props.message.contentParts || props.message.content)
+  editText.value = draft.text
+  editAttachments.value = draft.attachments
   editing.value = true
   nextTick(() => editTextareaEl.value?.focus())
 }
@@ -299,20 +334,57 @@ function cancelEdit() {
   if (editSaving.value) return
   editing.value = false
   editText.value = ""
+  editAttachments.value = []
+}
+
+function _pushEditAttachment(file, kind) {
+  const limit = kind === "image" ? MAX_IMAGE_BYTES : MAX_ATTACHMENT_BYTES
+  if (file.size > limit) {
+    ElMessage.error(`${file.name} is too large (${formatBytes(file.size)} > ${formatBytes(limit)})`)
+    return false
+  }
+  if (kind === "image" && file.type && !file.type.startsWith("image/")) {
+    ElMessage.error(`${file.name} is not an image file`)
+    return false
+  }
+  editAttachments.value.push({
+    id: `new_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    file,
+    name: file.name,
+    kind,
+  })
+  return true
+}
+
+function onEditFileChange(e, kind = "file") {
+  const files = Array.from(e.target.files || [])
+  for (const file of files) _pushEditAttachment(file, kind)
+  e.target.value = ""
+}
+
+function removeEditAttachment(index) {
+  editAttachments.value.splice(index, 1)
 }
 
 async function confirmEdit() {
-  const newContent = editText.value.trim()
-  if (!newContent || editSaving.value) return
+  if (editSaving.value || (!editText.value.trim() && editAttachments.value.length === 0)) return
   editSaving.value = true
-  const ok = await chat.editMessage(props.messageIdx, newContent, {
-    turnIndex: props.message.turnIndex,
-    userPosition: props.message.userPosition,
-  })
-  editSaving.value = false
-  if (!ok) return
-  editing.value = false
-  editText.value = ""
+  try {
+    const newContent = await buildMessageParts(editText.value, editAttachments.value)
+    const ok = await chat.editMessage(props.messageIdx, newContent, {
+      turnIndex: props.message.turnIndex,
+      userPosition: props.message.userPosition,
+      latestBranch: props.message.latestBranch,
+    })
+    if (!ok) return
+    editing.value = false
+    editText.value = ""
+    editAttachments.value = []
+  } catch (err) {
+    console.error("Failed to prepare edited message:", err)
+  } finally {
+    editSaving.value = false
+  }
 }
 
 function regenerate() {
@@ -401,11 +473,25 @@ function goToNextAssistantBranch() {
   box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.04);
 }
 
+.message-edit-inline {
+  min-height: 7rem;
+  max-height: 40vh;
+  border: none;
+  background: transparent;
+  padding: 0.25rem 0;
+  box-shadow: none;
+}
+
 .message-edit-textarea:focus {
   border-color: rgb(124 103 184 / 0.55);
   box-shadow:
     0 0 0 2px rgb(124 103 184 / 0.12),
     inset 0 1px 2px rgb(0 0 0 / 0.04);
+}
+
+.message-edit-inline:focus {
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .user-message-editing {

@@ -151,12 +151,13 @@ import ChatMessage from "@/components/chat/ChatMessage.vue"
 import { useChatStore } from "@/stores/chat"
 import { useI18n } from "@/utils/i18n"
 import { terrariumAPI, agentAPI } from "@/utils/api"
+import {
+  buildMessageParts,
+  formatBytes,
+  MAX_ATTACHMENT_BYTES,
+  MAX_IMAGE_BYTES,
+} from "@/utils/chatAttachments"
 import { getHybridPref, removeHybridPref, setHybridPref } from "@/utils/uiPrefs"
-
-// Base64-encoded attachments are sent over WS; keep them bounded so a
-// single message doesn't blow past server limits or hang on encode.
-const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024 // 10 MB
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024 // 5 MB
 // How many queued-while-processing messages to show before collapsing.
 const QUEUE_VISIBLE = 5
 
@@ -373,72 +374,6 @@ watch(inputText, () => {
   persistDraft()
 })
 
-async function imageFileToPart(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      resolve({
-        type: "image_url",
-        image_url: { url: reader.result, detail: "low" },
-        meta: { source_type: "attachment", source_name: file.name },
-      })
-    }
-    reader.onerror = () => reject(reader.error)
-    reader.readAsDataURL(file)
-  })
-}
-
-async function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const result = typeof reader.result === "string" ? reader.result : ""
-      resolve(result.includes(",") ? result.split(",", 2)[1] : result)
-    }
-    reader.onerror = () => reject(reader.error)
-    reader.readAsDataURL(file)
-  })
-}
-
-async function genericFileToPart(file) {
-  const mime = file.type || "application/octet-stream"
-  const textLike = mime.startsWith("text/") || ["application/json", "application/xml", "application/javascript", "image/svg+xml"].includes(mime) || /\.(md|txt|py|js|ts|tsx|jsx|json|yaml|yml|toml|ini|cfg|csv|tsv|html|css|xml|sh|rs|go|java|c|cc|cpp|h|hpp)$/i.test(file.name)
-
-  if (textLike) {
-    return {
-      type: "file",
-      file: {
-        name: file.name,
-        mime,
-        path: null,
-        content: await file.text(),
-        data_base64: null,
-        encoding: "utf-8",
-        is_inline: true,
-      },
-    }
-  }
-
-  return {
-    type: "file",
-    file: {
-      name: file.name,
-      mime,
-      path: null,
-      content: null,
-      data_base64: await fileToBase64(file),
-      encoding: "base64",
-      is_inline: true,
-    },
-  }
-}
-
-function formatBytes(bytes) {
-  if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + " MB"
-  if (bytes >= 1024) return (bytes / 1024).toFixed(1) + " KB"
-  return bytes + " B"
-}
-
 function _pushAttachment(file, kind) {
   const limit = kind === "image" ? MAX_IMAGE_BYTES : MAX_ATTACHMENT_BYTES
   if (file.size > limit) {
@@ -494,11 +429,7 @@ function removeAttachment(index) {
 
 async function send() {
   if (props.readOnly || (!inputText.value.trim() && attachments.value.length === 0)) return
-  const parts = []
-  if (inputText.value.trim()) parts.push({ type: "text", text: inputText.value })
-  for (const attachment of attachments.value) {
-    parts.push(attachment.kind === "image" ? await imageFileToPart(attachment.file) : await genericFileToPart(attachment.file))
-  }
+  const parts = await buildMessageParts(inputText.value, attachments.value)
   chat.send(parts)
   inputText.value = ""
   attachments.value = []

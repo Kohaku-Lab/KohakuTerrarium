@@ -14,6 +14,13 @@ import { computed, ref } from "vue"
 
 import { useChatStore } from "@/stores/chat"
 
+function scopeKeyOf(scope) {
+  const instanceId = scope?.instanceId || ""
+  const sessionId = scope?.sessionId || ""
+  const tab = scope?.tab || ""
+  return `${instanceId}::${sessionId}::${tab}`
+}
+
 const MIN_LINES_FOR_HEURISTIC = 15
 // Match fenced code blocks: opening ```lang\n ... closing ```
 // Uses \n``` on its own line (not $ anchor which is fragile with \r\n).
@@ -52,20 +59,48 @@ function _artifactName(seed) {
 }
 
 export const useCanvasStore = defineStore("canvas", () => {
-  /** @type {import('vue').Ref<Array<{id: string, name: string, type: string, content: string, lang: string, sourceId: string}>>} */
-  const artifacts = ref([])
-  const activeId = ref(/** @type {string | null} */ (null))
-  /** Per-session dismissal: once the user closes canvas, don't auto-open. */
-  const dismissed = ref(false)
+  const artifactsByScope = ref({})
+  const activeIdByScope = ref({})
+  const dismissedByScope = ref({})
+  const currentScope = ref({ instanceId: "", sessionId: "", tab: "" })
+
+  const currentScopeKey = computed(() => scopeKeyOf(currentScope.value))
+  const artifacts = computed(() => artifactsByScope.value[currentScopeKey.value] || [])
+  const activeId = computed(() => activeIdByScope.value[currentScopeKey.value] || null)
+  const dismissed = computed(() => !!dismissedByScope.value[currentScopeKey.value])
+
+  function setScope(scope = {}) {
+    currentScope.value = {
+      instanceId: scope.instanceId || "",
+      sessionId: scope.sessionId || "",
+      tab: scope.tab || "",
+    }
+  }
+
+  function _setArtifacts(scopeKey, items) {
+    artifactsByScope.value = { ...artifactsByScope.value, [scopeKey]: items }
+  }
+
+  function _setActiveId(scopeKey, value) {
+    activeIdByScope.value = { ...activeIdByScope.value, [scopeKey]: value }
+  }
+
+  function _setDismissed(scopeKey, value) {
+    dismissedByScope.value = { ...dismissedByScope.value, [scopeKey]: value }
+  }
 
   /** Upsert an artifact. Skips if sourceId exists with same content. */
-  function upsertArtifact({ sourceId, content, lang, type, seedName }) {
-    const existing = artifacts.value.find((a) => a.sourceId === sourceId)
+  function upsertArtifact({ sourceId, content, lang, type, seedName, scope = currentScope.value }) {
+    const scopeKey = scopeKeyOf(scope)
+    const list = artifactsByScope.value[scopeKey] || []
+    const existing = list.find((a) => a.sourceId === sourceId)
     if (existing) {
       if (existing.content === content) return existing
       existing.content = content
       existing.lang = lang || existing.lang
-      if (!activeId.value) activeId.value = existing.id
+      existing.type = type || existing.type
+      _setArtifacts(scopeKey, [...list])
+      if (!activeIdByScope.value[scopeKey]) _setActiveId(scopeKey, existing.id)
       return existing
     }
     const id = `artifact_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
@@ -76,15 +111,16 @@ export const useCanvasStore = defineStore("canvas", () => {
       type: type || _guessTypeFromLang(lang),
       content,
       lang: lang || "text",
+      scopeKey,
     }
-    artifacts.value = [...artifacts.value, a]
-    if (!activeId.value) activeId.value = id
+    _setArtifacts(scopeKey, [...list, a])
+    if (!activeIdByScope.value[scopeKey]) _setActiveId(scopeKey, id)
     return a
   }
 
   /** Scan a single assistant message for fenced blocks or markers.
    *  Assistant messages use `parts: [{type, content}]`, not `.content`. */
-  function scanMessage(msg) {
+  function scanMessage(msg, scope = currentScope.value) {
     if (!msg || msg.role !== "assistant") return
     // Image parts (provider-native ``image_gen`` outputs, etc.) become
     // image artifacts so they show up in the Canvas alongside long
@@ -99,7 +135,8 @@ export const useCanvasStore = defineStore("canvas", () => {
         const meta = p.meta || {}
         const lang = (meta.output_format || _extOfDataUrl(url) || "png").toLowerCase()
         upsertArtifact({
-          sourceId: `${msg.id}:image:${imgIdx}`,
+          scope,
+          sourceId: `${scopeKeyOf(scope)}:${msg.id}:image:${imgIdx}`,
           content: url,
           lang,
           type: "image",
@@ -130,7 +167,8 @@ export const useCanvasStore = defineStore("canvas", () => {
       const lang = /lang=([\w-]+)/.exec(meta)?.[1] || "text"
       const name = /name=([^\s]+)/.exec(meta)?.[1] || null
       upsertArtifact({
-        sourceId: `${msg.id}:marker:${m.index}`,
+        scope,
+        sourceId: `${scopeKeyOf(scope)}:${msg.id}:marker:${m.index}`,
         content: body,
         lang,
         type: _guessTypeFromLang(lang),
@@ -147,7 +185,8 @@ export const useCanvasStore = defineStore("canvas", () => {
       const lines = body.split("\n").length
       if (lines < MIN_LINES_FOR_HEURISTIC) continue
       upsertArtifact({
-        sourceId: `${msg.id}:fence:${f.index}`,
+        scope,
+        sourceId: `${scopeKeyOf(scope)}:${msg.id}:fence:${f.index}`,
         content: body,
         lang,
         type: _guessTypeFromLang(lang),
@@ -160,27 +199,41 @@ export const useCanvasStore = defineStore("canvas", () => {
     const chat = useChatStore()
     const tab = chat.activeTab
     if (!tab) return
+    const scope = {
+      instanceId: chat._instanceId || "",
+      sessionId: chat.sessionInfo.sessionId || "",
+      tab,
+    }
+    setScope(scope)
     const msgs = chat.messagesByTab?.[tab] || []
     for (const m of msgs) {
       if (m.role !== "assistant") continue
-      scanMessage(m)
+      scanMessage(m, scope)
     }
   }
 
   function setActive(id) {
-    if (artifacts.value.some((a) => a.id === id)) {
-      activeId.value = id
+    const scopeKey = currentScopeKey.value
+    if ((artifactsByScope.value[scopeKey] || []).some((a) => a.id === id)) {
+      _setActiveId(scopeKey, id)
     }
   }
 
   function dismiss() {
-    dismissed.value = true
+    _setDismissed(currentScopeKey.value, true)
   }
 
-  function reset() {
-    artifacts.value = []
-    activeId.value = null
-    dismissed.value = false
+  function reset(scope = currentScope.value) {
+    const scopeKey = scopeKeyOf(scope)
+    const nextArtifacts = { ...artifactsByScope.value }
+    const nextActive = { ...activeIdByScope.value }
+    const nextDismissed = { ...dismissedByScope.value }
+    delete nextArtifacts[scopeKey]
+    delete nextActive[scopeKey]
+    delete nextDismissed[scopeKey]
+    artifactsByScope.value = nextArtifacts
+    activeIdByScope.value = nextActive
+    dismissedByScope.value = nextDismissed
   }
 
   const activeArtifact = computed(
@@ -196,6 +249,11 @@ export const useCanvasStore = defineStore("canvas", () => {
     activeArtifact,
     activeVersion,
     dismissed,
+    currentScope,
+    artifactsByScope,
+    activeIdByScope,
+    dismissedByScope,
+    setScope,
     upsertArtifact,
     scanMessage,
     syncFromChatStore,

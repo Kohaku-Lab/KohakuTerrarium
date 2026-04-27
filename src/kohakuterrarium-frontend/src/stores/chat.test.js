@@ -475,3 +475,82 @@ describe("chat store — turn/branch model (regen / edit+rerun)", () => {
     expect(flatText).toBe("first")
   })
 })
+
+
+describe("chat store — multimodal edit + branch resync", () => {
+  it("dedupes live multimodal user echoes by full content signature", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = { main: [] }
+
+    const payload = [
+      { type: "text", text: "hello" },
+      { type: "image_url", image_url: { url: "data:image/png;base64,abc", detail: "low" } },
+    ]
+
+    chat._handleUserInput("main", { content: payload })
+    chat._handleUserInput("main", { content: payload })
+
+    expect(chat.messagesByTab.main).toHaveLength(1)
+    expect(chat.messagesByTab.main[0].contentParts).toHaveLength(2)
+  })
+
+  it("replay preserves tool result metadata for frontend truncation markers", () => {
+    const { messages } = _replayEvents([], [
+      { type: "processing_start" },
+      { type: "tool_call", name: "read", call_id: "job_1", args: { path: "foo.txt" } },
+      {
+        type: "tool_result",
+        name: "read",
+        call_id: "job_1",
+        output: "trimmed output",
+        output_meta: { truncated: true, omitted_text_bytes: 1234 },
+      },
+      { type: "processing_end" },
+    ])
+
+    expect(messages[0].parts[0].resultMeta).toEqual({ truncated: true, omitted_text_bytes: 1234 })
+  })
+
+  it("resync waits until expected edit branch becomes canonical", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat.activeTab = "main"
+    chat._branchResyncPendingByTab.main = {
+      active: true,
+      expectedBranchByTurn: { 1: 2 },
+    }
+
+    const rebuildSpy = vi.spyOn(chat, "_rebuildMessages").mockImplementation(() => {})
+    const scheduleSpy = vi.spyOn(chat, "_scheduleBranchResync").mockImplementation(() => {})
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistory = vi
+      .spyOn(importActual.agentAPI, "getHistory")
+      .mockResolvedValueOnce({
+        events: [
+          { type: "user_input", content: "hi", event_id: 1, turn_index: 1, branch_id: 1 },
+          { type: "user_message", content: "hi", event_id: 2, turn_index: 1, branch_id: 1 },
+        ],
+      })
+      .mockResolvedValueOnce({
+        events: [
+          { type: "user_input", content: "hi", event_id: 1, turn_index: 1, branch_id: 1 },
+          { type: "user_message", content: "hi", event_id: 2, turn_index: 1, branch_id: 1 },
+          { type: "user_input", content: "hello", event_id: 3, turn_index: 1, branch_id: 2 },
+          { type: "user_message", content: "hello", event_id: 4, turn_index: 1, branch_id: 2 },
+        ],
+      })
+
+    await expect(chat._resyncHistory("main")).resolves.toBe(false)
+    expect(scheduleSpy).toHaveBeenCalledWith("main")
+    expect(chat._branchResyncPendingByTab.main).toBeTruthy()
+    expect(rebuildSpy).not.toHaveBeenCalled()
+
+    await expect(chat._resyncHistory("main")).resolves.toBe(true)
+    expect(rebuildSpy).toHaveBeenCalledWith("main")
+    expect(chat._branchResyncPendingByTab.main).toBeUndefined()
+
+    rebuildSpy.mockRestore()
+    scheduleSpy.mockRestore()
+    getHistory.mockRestore()
+  })
+})

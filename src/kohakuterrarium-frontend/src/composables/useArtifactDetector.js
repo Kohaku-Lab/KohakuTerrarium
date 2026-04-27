@@ -20,9 +20,14 @@ export function useArtifactDetector() {
   function scanAll() {
     const tab = chat.activeTab
     if (!tab) return
+    canvas.setScope({
+      instanceId: chat._instanceId || "",
+      sessionId: chat.sessionInfo.sessionId || "",
+      tab,
+    })
     const msgs = chat.messagesByTab?.[tab] || []
     for (const m of msgs) {
-      canvas.scanMessage(m)
+      canvas.scanMessage(m, canvas.currentScope.value)
     }
   }
 
