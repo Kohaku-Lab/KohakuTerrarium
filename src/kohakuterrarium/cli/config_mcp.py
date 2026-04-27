@@ -16,6 +16,14 @@ def prompt_mcp(existing: dict[str, Any] | None, prompt) -> dict[str, Any]:
         "Env JSON object", json.dumps(existing.get("env", {}), ensure_ascii=False)
     )
     url = prompt("URL", existing.get("url", ""))
+    timeout_raw = prompt(
+        "Connect timeout (seconds)",
+        (
+            ""
+            if existing.get("connect_timeout") in (None, "")
+            else str(existing.get("connect_timeout"))
+        ),
+    )
 
     try:
         args = json.loads(args_raw) if args_raw else []
@@ -33,6 +41,14 @@ def prompt_mcp(existing: dict[str, Any] | None, prompt) -> dict[str, Any]:
     if not name:
         raise ValueError("Name is required")
 
+    if timeout_raw:
+        try:
+            connect_timeout = float(timeout_raw)
+        except ValueError as e:
+            raise ValueError(f"Invalid connect timeout: {e}") from e
+    else:
+        connect_timeout = None
+
     return {
         "name": name,
         "transport": transport,
@@ -40,6 +56,7 @@ def prompt_mcp(existing: dict[str, Any] | None, prompt) -> dict[str, Any]:
         "args": args,
         "env": env,
         "url": url,
+        "connect_timeout": connect_timeout,
     }
 
 
@@ -60,6 +77,8 @@ def list_mcp(config_paths: dict[str, Any]) -> int:
             print(f"  args:      {server.get('args', [])}")
         if server.get("url"):
             print(f"  url:       {server.get('url', '')}")
+        if server.get("connect_timeout") not in (None, ""):
+            print(f"  timeout:   {server.get('connect_timeout')}s")
         if server.get("env"):
             print(f"  env keys:  {list((server.get('env') or {}).keys())}")
     return 0

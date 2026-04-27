@@ -21,6 +21,7 @@ from kohakuterrarium.core.agent_compact import (
 from kohakuterrarium.core.agent_handlers import AgentHandlersMixin
 from kohakuterrarium.core.agent_lifecycle import AgentLifecycleMixin
 from kohakuterrarium.core.agent_messages import AgentMessagesMixin
+from kohakuterrarium.core.agent_mcp import init_mcp, inject_mcp_tools_into_prompt
 from kohakuterrarium.core.agent_model import AgentModelMixin
 from kohakuterrarium.core.agent_helpers import attach_session_helpers
 from kohakuterrarium.core.agent_observability import (
@@ -40,7 +41,6 @@ from kohakuterrarium.core.session import Session
 from kohakuterrarium.core.termination import TerminationChecker, TerminationConfig
 from kohakuterrarium.core.trigger_manager import TriggerManager
 from kohakuterrarium.llm.message import ContentPart
-from kohakuterrarium.mcp.client import MCPClientManager, MCPServerConfig
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.modules.plugin.base import PluginContext
@@ -349,84 +349,10 @@ class Agent(
         self.subagent_manager._on_tool_activity = _on_sa_tool_activity
 
     async def _init_mcp(self) -> None:
-        """Initialize MCP client manager and connect configured servers."""
-        mcp_configs = self.config.mcp_servers
-        if not mcp_configs:
-            self._mcp_manager = None
-            return
-
-        self._mcp_manager = MCPClientManager()
-
-        for srv_data in mcp_configs:
-            if not isinstance(srv_data, dict):
-                continue
-            try:
-                config = MCPServerConfig(
-                    name=srv_data.get("name", ""),
-                    transport=srv_data.get("transport", "stdio"),
-                    command=srv_data.get("command", ""),
-                    args=srv_data.get("args", []),
-                    env=srv_data.get("env", {}),
-                    url=srv_data.get("url", ""),
-                )
-                if config.name:
-                    await self._mcp_manager.connect(config)
-            except Exception as e:
-                logger.warning(
-                    "Failed to connect MCP server",
-                    server=srv_data.get("name", ""),
-                    error=str(e),
-                )
+        await init_mcp(self)
 
     def _inject_mcp_tools_into_prompt(self) -> None:
-        """Inject available MCP tool descriptions into the system prompt.
-
-        After MCP servers connect, the agent should know what tools are
-        available without needing to call mcp_list first.  We append the
-        tool listing to the system prompt so the agent can use mcp_call
-        directly.
-        """
-        if not self._mcp_manager:
-            return
-        servers = self._mcp_manager.list_servers()
-        if not servers:
-            return
-
-        lines = ["\n## Available MCP Tools\n"]
-        lines.append(
-            "Call these with: mcp_call(server=<server>, tool=<tool>, args={...})\n"
-        )
-
-        for srv in servers:
-            if srv["status"] != "connected":
-                continue
-            lines.append(f"### Server: {srv['name']}")
-            for t in srv["tools"]:
-                desc = f" — {t['description']}" if t.get("description") else ""
-                lines.append(f"- **{t['name']}**{desc}")
-                schema = t.get("input_schema", {})
-                props = schema.get("properties", {})
-                required = set(schema.get("required", []))
-                for pname, pinfo in props.items():
-                    ptype = pinfo.get("type", "any")
-                    pdesc = pinfo.get("description", "")
-                    req = " (required)" if pname in required else ""
-                    param_line = f"  - `{pname}`: {ptype}{req}"
-                    if pdesc:
-                        param_line += f" — {pdesc}"
-                    lines.append(param_line)
-            lines.append("")
-
-        if len(lines) <= 2:
-            return
-
-        mcp_section = "\n".join(lines)
-        self.update_system_prompt(mcp_section)
-        logger.info(
-            "MCP tools injected into prompt",
-            servers=len(servers),
-            tools=sum(len(s["tools"]) for s in servers),
-        )
+        inject_mcp_tools_into_prompt(self)
 
     def _init_compact_manager(self) -> None:
         """Initialize the auto-compact manager.

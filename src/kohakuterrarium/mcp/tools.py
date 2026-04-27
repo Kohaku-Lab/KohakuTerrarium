@@ -45,6 +45,17 @@ class MCPListTool(BaseTool):
     def execution_mode(self) -> ExecutionMode:
         return ExecutionMode.DIRECT
 
+    def get_parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "server": {
+                    "type": "string",
+                    "description": "Optional MCP server name for detailed tool info",
+                }
+            },
+        }
+
     async def _execute(self, args: dict[str, Any], **kwargs: Any) -> ToolResult:
         context = kwargs.get("context")
         try:
@@ -124,6 +135,26 @@ class MCPCallTool(BaseTool):
     def execution_mode(self) -> ExecutionMode:
         return ExecutionMode.DIRECT
 
+    def get_parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "server": {
+                    "type": "string",
+                    "description": "MCP server name (see mcp_list)",
+                },
+                "tool": {
+                    "type": "string",
+                    "description": "Tool name on that MCP server",
+                },
+                "args": {
+                    "type": "object",
+                    "description": "Arguments to pass to the MCP tool",
+                },
+            },
+            "required": ["server", "tool"],
+        }
+
     async def _execute(self, args: dict[str, Any], **kwargs: Any) -> ToolResult:
         context = kwargs.get("context")
         try:
@@ -175,11 +206,46 @@ class MCPConnectTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Connect to an MCP server (stdio command or HTTP URL)"
+        return "Connect to an MCP server (stdio, SSE, or streamable HTTP)"
 
     @property
     def execution_mode(self) -> ExecutionMode:
         return ExecutionMode.DIRECT
+
+    def get_parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Name for this MCP server"},
+                "transport": {
+                    "type": "string",
+                    "description": "Transport: stdio, http/sse, or streamable_http",
+                },
+                "command": {
+                    "type": "string",
+                    "description": "Executable command for stdio transport",
+                },
+                "args": {
+                    "type": "array",
+                    "description": "Command arguments for stdio transport",
+                    "items": {"type": "string"},
+                },
+                "url": {
+                    "type": "string",
+                    "description": "URL for SSE or streamable_http transport",
+                },
+                "env": {
+                    "type": "object",
+                    "description": "Environment variables for stdio transport",
+                    "additionalProperties": {"type": "string"},
+                },
+                "connect_timeout": {
+                    "type": "number",
+                    "description": "Optional timeout in seconds for the MCP connection",
+                },
+            },
+            "required": ["name"],
+        }
 
     async def _execute(self, args: dict[str, Any], **kwargs: Any) -> ToolResult:
         context = kwargs.get("context")
@@ -189,28 +255,45 @@ class MCPConnectTool(BaseTool):
             return ToolResult(error=str(e))
 
         name = args.get("name", "")
+        transport = args.get("transport", "")
         command = args.get("command", "")
         cmd_args = args.get("args", [])
         url = args.get("url", "")
         env = args.get("env", {})
+        connect_timeout = args.get("connect_timeout", None)
 
         if not name:
             return ToolResult(error="Missing 'name' argument. Give this server a name.")
         if not command and not url:
             return ToolResult(
-                error="Provide either 'command' (for stdio) or 'url' (for HTTP)."
+                error="Provide either 'command' (for stdio) or 'url' (for HTTP transports)."
             )
 
         if isinstance(cmd_args, str):
             cmd_args = cmd_args.split()
 
+        if transport:
+            resolved_transport = str(transport)
+        elif command:
+            resolved_transport = "stdio"
+        else:
+            resolved_transport = "streamable_http"
+
+        try:
+            timeout_value = (
+                float(connect_timeout) if connect_timeout not in (None, "") else None
+            )
+        except (TypeError, ValueError):
+            return ToolResult(error="'connect_timeout' must be a number if provided.")
+
         config = MCPServerConfig(
             name=name,
-            transport="stdio" if command else "http",
+            transport=resolved_transport,
             command=command,
             args=cmd_args,
             env=env,
             url=url,
+            connect_timeout=timeout_value,
         )
 
         try:
@@ -249,6 +332,21 @@ class MCPDisconnectTool(BaseTool):
     @property
     def execution_mode(self) -> ExecutionMode:
         return ExecutionMode.DIRECT
+
+    def get_parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "server": {
+                    "type": "string",
+                    "description": "Name of the MCP server to disconnect",
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Alias for server name",
+                },
+            },
+        }
 
     async def _execute(self, args: dict[str, Any], **kwargs: Any) -> ToolResult:
         context = kwargs.get("context")

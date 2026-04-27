@@ -1,6 +1,6 @@
 ---
 title: MCP
-summary: Connect Model Context Protocol servers (stdio / HTTP / SSE) and surface their tools to your creatures.
+summary: Connect Model Context Protocol servers (stdio / SSE / streamable HTTP) and surface their tools to your creatures.
 tags:
   - guides
   - mcp
@@ -28,8 +28,9 @@ mcp_servers:
     command: mcp-server-sqlite
     args: ["/var/db/my.db"]
   - name: docs_api
-    transport: http
-    url: https://mcp.example.com/sse
+    transport: streamable_http
+    url: https://mcp.example.com/mcp
+    connect_timeout: 20
     env:
       API_KEY: "${DOCS_API_KEY}"
 ```
@@ -66,9 +67,10 @@ Global servers are available to any creature that references them.
 ## Transports
 
 - **stdio** — launches a subprocess (`command` + `args` + `env`). Best for local servers, low latency, isolated-per-agent process lifetime.
-- **http** — opens an SSE/streaming HTTP session to `url`. Best for shared/remote servers, lets multiple creatures share one server.
+- **http** / **sse** — opens a legacy SSE session to `url`. Use this for servers that explicitly expose SSE endpoints such as `/sse`.
+- **streamable_http** — opens a modern streamable HTTP session to `url`. This is the default for many newer FastMCP servers (`FastMCP.streamable_http_app()`).
 
-Pick stdio for local MCP servers (sqlite, filesystem, git) and http for hosted ones.
+Pick stdio for local MCP servers (sqlite, filesystem, git), `streamable_http` for most modern hosted servers, and `http` / `sse` only when the server specifically exposes legacy SSE.
 
 ## How MCP tools reach the LLM
 
@@ -88,7 +90,7 @@ The system prompt gets an "Available MCP Tools" section listing every server's t
 [mcp_call/]
 ```
 
-Swap to `xml` or `native` via [`tool_format`](creatures.md) if preferred — the semantics don't change.
+Swap to `xml` or `native` via [`tool_format`](creatures.md) if preferred. The semantics are the same: `mcp_call` still takes `server`, `tool`, and `args`, and the native function schema now reflects those fields directly.
 
 You don't need to wire each MCP tool individually — the meta-tool approach keeps the controller's tool list compact.
 
@@ -125,7 +127,8 @@ The agent's runtime uses this under the hood.
 ## Troubleshooting
 
 - **Server not connecting (stdio).** Run `kt config mcp list` to see the resolved command. Try it in a shell first (`mcp-server-sqlite /path/to/db`) and check the server prints its handshake.
-- **Server not connecting (http).** Verify the URL is SSE-compatible. Some servers expose both `/sse` and `/ws` — KohakuTerrarium uses SSE.
+- **Server not connecting (http / sse).** Verify the URL is SSE-compatible. Some servers expose both `/sse` and `/ws`; KohakuTerrarium's `http` / `sse` transport expects the SSE endpoint.
+- **Server not connecting (streamable_http).** Verify the URL points at the server's streamable HTTP endpoint (for example FastMCP's `streamable_http_app()` route) rather than a legacy SSE path.
 - **Tool not found.** The meta-tools list is computed at connection time. Reconnect (`mcp_disconnect` + `mcp_connect`) if the server hot-added tools.
 - **Env vars not substituted.** MCP config supports `${VAR}` and `${VAR:default}`, same as creature configs.
 - **Server crashes mid-session.** Stdio servers respawn on next `mcp_call`. Check the server's own logs.

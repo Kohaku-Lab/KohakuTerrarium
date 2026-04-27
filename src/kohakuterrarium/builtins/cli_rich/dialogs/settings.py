@@ -47,7 +47,7 @@ logger = get_logger(__name__)
 
 _BUILTIN_PROVIDERS = {"codex", "openai", "openrouter", "anthropic", "gemini", "mimo"}
 _BACKEND_TYPES = ["openai", "codex"]
-_TRANSPORTS = ["stdio", "http"]
+_TRANSPORTS = ["stdio", "http", "streamable_http"]
 
 
 @dataclass
@@ -228,6 +228,7 @@ class SettingsOverlay:
                     "transport": s.get("transport", "stdio"),
                     "command": s.get("command", ""),
                     "url": s.get("url", ""),
+                    "connect_timeout": s.get("connect_timeout", None),
                     "args": s.get("args", []),
                     "env": s.get("env", {}),
                     "raw": s,
@@ -504,7 +505,17 @@ class SettingsOverlay:
                     label="URL",
                     key="url",
                     value=(row.get("url", "") if row else ""),
-                    hint="endpoint for http",
+                    hint="endpoint for http / streamable_http",
+                ),
+                FormField(
+                    label="Timeout",
+                    key="connect_timeout",
+                    value=(
+                        ""
+                        if not row or row.get("connect_timeout") in (None, "")
+                        else str(row.get("connect_timeout"))
+                    ),
+                    hint="seconds (optional)",
                 ),
             ],
             context={
@@ -623,6 +634,11 @@ class SettingsOverlay:
                         "transport": values.get("transport", "stdio"),
                         "command": values.get("command", ""),
                         "url": values.get("url", ""),
+                        "connect_timeout": (
+                            float(values["connect_timeout"])
+                            if values.get("connect_timeout")
+                            else None
+                        ),
                         "args": ctx.get("preserved_args", []),
                         "env": ctx.get("preserved_env", {}),
                     }

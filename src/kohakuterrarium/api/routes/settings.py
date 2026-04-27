@@ -330,6 +330,7 @@ class MCPServerRequest(BaseModel):
     args: list[str] = []
     env: dict[str, str] = {}
     url: str = ""
+    connect_timeout: float | None = None
 
 
 @router.get("/mcp")

@@ -8,17 +8,32 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+DEFAULT_MCP_CONNECT_TIMEOUT = 20.0
+
+
+def normalize_mcp_transport(transport: str) -> str:
+    """Normalize user-facing transport names to runtime transport kinds."""
+    raw = (transport or "stdio").strip().lower().replace("-", "_")
+    if raw == "stdio":
+        return "stdio"
+    if raw in {"http", "sse"}:
+        return "sse"
+    if raw in {"streamable_http", "streamablehttp", "http_streamable"}:
+        return "streamable_http"
+    raise ValueError(f"Unknown transport: {transport}")
+
 
 @dataclass
 class MCPServerConfig:
     """Configuration for a single MCP server."""
 
     name: str
-    transport: str = "stdio"  # "stdio" or "http"
+    transport: str = "stdio"  # stdio / sse / streamable_http
     command: str = ""  # For stdio: executable command
     args: list[str] = field(default_factory=list)  # For stdio: command arguments
     env: dict[str, str] = field(default_factory=dict)  # For stdio: env vars
-    url: str = ""  # For http: server URL
+    url: str = ""  # For sse / streamable_http: server URL
+    connect_timeout: float | None = None  # Optional per-server connection timeout
 
 
 @dataclass
@@ -41,8 +56,8 @@ class MCPClientManager:
     def __init__(self) -> None:
         self._servers: dict[str, MCPServerInfo] = {}
         self._sessions: dict[str, Any] = {}  # name -> ClientSession
-        self._transports: dict[str, Any] = {}  # name -> (read, write) or context
-        self._stdio_contexts: dict[str, Any] = {}  # name -> context manager
+        self._transports: dict[str, Any] = {}  # name -> (read, write)
+        self._stdio_contexts: dict[str, Any] = {}  # name -> transport context manager
         self._lock = asyncio.Lock()
 
     @property
@@ -54,6 +69,32 @@ class MCPClientManager:
 
         Raises ImportError if the mcp package is not installed.
         """
+        timeout = config.connect_timeout
+        if timeout is not None and timeout <= 0:
+            raise ValueError("connect_timeout must be greater than 0")
+
+        if timeout is None:
+            return await self._connect_impl(config)
+
+        try:
+            return await asyncio.wait_for(self._connect_impl(config), timeout=timeout)
+        except asyncio.TimeoutError as e:
+            message = f"Timed out after {timeout:g}s"
+            info = self._servers.get(config.name)
+            if info is None:
+                info = MCPServerInfo(config=config)
+                self._servers[config.name] = info
+            info.status = "error"
+            info.error = message
+            logger.error(
+                "MCP connect timed out",
+                server=config.name,
+                transport=config.transport,
+                timeout_seconds=timeout,
+            )
+            raise TimeoutError(f"MCP server {config.name}: {message}") from e
+
+    async def _connect_impl(self, config: MCPServerConfig) -> MCPServerInfo:
         from mcp import ClientSession
         from mcp.client.stdio import StdioServerParameters, stdio_client
 
@@ -64,9 +105,10 @@ class MCPClientManager:
 
         info = MCPServerInfo(config=config, status="connecting")
         self._servers[name] = info
+        transport = normalize_mcp_transport(config.transport)
 
         try:
-            if config.transport == "stdio":
+            if transport == "stdio":
                 if not config.command:
                     raise ValueError(
                         f"MCP server {name}: stdio transport requires 'command'"
@@ -77,41 +119,24 @@ class MCPClientManager:
                     args=config.args,
                     env=config.env if config.env else None,
                 )
-
-                # Enter the stdio context manager
                 ctx = stdio_client(params)
-                read_stream, write_stream = await ctx.__aenter__()
-                self._stdio_contexts[name] = ctx
-
-                # Create and initialize session
-                session = ClientSession(read_stream, write_stream)
-                await session.initialize()
-
-                self._sessions[name] = session
-                self._transports[name] = (read_stream, write_stream)
-
-            elif config.transport == "http":
-                # HTTP/SSE transport
+            elif transport == "sse":
                 from mcp.client.sse import sse_client
 
                 if not config.url:
-                    raise ValueError(
-                        f"MCP server {name}: http transport requires 'url'"
-                    )
-
+                    raise ValueError(f"MCP server {name}: SSE transport requires 'url'")
                 ctx = sse_client(config.url)
-                read_stream, write_stream = await ctx.__aenter__()
-                self._stdio_contexts[name] = ctx
-
-                session = ClientSession(read_stream, write_stream)
-                await session.initialize()
-
-                self._sessions[name] = session
-                self._transports[name] = (read_stream, write_stream)
             else:
-                raise ValueError(f"Unknown transport: {config.transport}")
+                from mcp.client.streamable_http import streamablehttp_client
 
-            # Discover tools
+                if not config.url:
+                    raise ValueError(
+                        f"MCP server {name}: streamable_http transport requires 'url'"
+                    )
+                ctx = streamablehttp_client(config.url)
+
+            session = await self._open_transport_session(name, ctx, ClientSession)
+
             tools_response = await session.list_tools()
             info.tools = [
                 {
@@ -130,30 +155,47 @@ class MCPClientManager:
                 tools=len(info.tools),
             )
             return info
-
+        except asyncio.CancelledError:
+            await self._cleanup_connection(name, remove_server=False)
+            raise
         except Exception as e:
             info.status = "error"
             info.error = str(e)
+            await self._cleanup_connection(name, remove_server=False)
             logger.error("MCP connect failed", server=name, error=str(e))
             raise
 
-    async def disconnect(self, name: str) -> bool:
-        """Disconnect from an MCP server."""
-        if name not in self._servers:
-            return False
+    async def _open_transport_session(
+        self, name: str, ctx: Any, client_session_cls: Any
+    ) -> Any:
+        entered = await ctx.__aenter__()
+        try:
+            read_stream = entered[0]
+            write_stream = entered[1]
+        except (IndexError, TypeError) as e:
+            raise ValueError(
+                f"MCP server {name}: transport did not yield read/write streams"
+            ) from e
 
-        # Close session
+        self._stdio_contexts[name] = ctx
+        session = client_session_cls(read_stream, write_stream)
+        await session.__aenter__()
+        await session.initialize()
+
+        self._sessions[name] = session
+        self._transports[name] = (read_stream, write_stream)
+        return session
+
+    async def _cleanup_connection(self, name: str, *, remove_server: bool) -> None:
         session = self._sessions.pop(name, None)
-        if session:
+        if session is not None:
             try:
-                # ClientSession doesn't have a close method in all versions
-                pass
+                await session.__aexit__(None, None, None)
             except Exception as e:
                 logger.debug("Failed to close MCP session", error=str(e), exc_info=True)
 
-        # Exit the transport context manager
         ctx = self._stdio_contexts.pop(name, None)
-        if ctx:
+        if ctx is not None:
             try:
                 await ctx.__aexit__(None, None, None)
             except Exception as e:
@@ -163,10 +205,17 @@ class MCPClientManager:
 
         self._transports.pop(name, None)
 
-        info = self._servers.pop(name, None)
-        if info:
-            info.status = "disconnected"
+        if remove_server:
+            info = self._servers.pop(name, None)
+            if info is not None:
+                info.status = "disconnected"
 
+    async def disconnect(self, name: str) -> bool:
+        """Disconnect from an MCP server."""
+        if name not in self._servers:
+            return False
+
+        await self._cleanup_connection(name, remove_server=True)
         logger.info("MCP server disconnected", server=name)
         return True
 
@@ -192,7 +241,6 @@ class MCPClientManager:
 
         result = await session.call_tool(tool_name, arguments=args)
 
-        # Convert MCP result to string
         parts = []
         for content in result.content:
             if hasattr(content, "text"):
