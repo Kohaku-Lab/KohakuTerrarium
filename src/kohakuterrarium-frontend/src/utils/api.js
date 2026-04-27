@@ -388,6 +388,106 @@ export const sessionAPI = {
     const { data } = await api.delete(`/sessions/${sessionName}`)
     return data
   },
+
+  // ── V1 Viewer / Trace Viewer endpoints ──────────────────────────
+
+  /**
+   * Fork lineage + attached-agent DAG for the session-tree pane.
+   * @returns {Promise<{session_name: string, session_id: string, nodes: object[], edges: object[]}>}
+   */
+  async getTree(sessionName) {
+    const { data } = await api.get(`/sessions/${sessionName}/tree`)
+    return data
+  },
+
+  /**
+   * Overview-tab stats. ``agent`` narrows to one creature (default: all).
+   */
+  async getSummary(sessionName, agent = null) {
+    const params = {}
+    if (agent) params.agent = agent
+    const { data } = await api.get(`/sessions/${sessionName}/summary`, { params })
+    return data
+  },
+
+  /**
+   * Paginated turn-rollup rows. Drives trace timeline + collapsed turn list.
+   *
+   * Pass ``aggregate: true`` to get per-turn rows summed across every
+   * agent in the session, with a ``breakdown`` array of per-agent
+   * contributions. ``agent`` is ignored in that mode.
+   *
+   * @param {string} sessionName
+   * @param {{agent?: string, fromTurn?: number, toTurn?: number, limit?: number, offset?: number, aggregate?: boolean}} opts
+   */
+  async getTurns(
+    sessionName,
+    {
+      agent = null,
+      fromTurn = null,
+      toTurn = null,
+      limit = 200,
+      offset = 0,
+      aggregate = false,
+    } = {},
+  ) {
+    const params = { limit, offset }
+    if (agent) params.agent = agent
+    if (fromTurn != null) params.from_turn = fromTurn
+    if (toTurn != null) params.to_turn = toTurn
+    if (aggregate) params.aggregate = true
+    const { data } = await api.get(`/sessions/${sessionName}/turns`, { params })
+    return data
+  },
+
+  /**
+   * Structured diff between two saved sessions.
+   */
+  async getDiff(sessionName, otherName, agent = null) {
+    const params = { other: otherName }
+    if (agent) params.agent = agent
+    const { data } = await api.get(`/sessions/${sessionName}/diff`, { params })
+    return data
+  },
+
+  /**
+   * Export URL for a session in ``md`` / ``html`` / ``jsonl`` form.
+   * Returns a string the browser can navigate to so the standard
+   * download flow takes over (the backend sets Content-Disposition).
+   */
+  exportUrl(sessionName, format = "md", agent = null) {
+    const params = new URLSearchParams({ format })
+    if (agent) params.set("agent", agent)
+    return `/api/sessions/${encodeURIComponent(sessionName)}/export?${params.toString()}`
+  },
+
+  /**
+   * Filtered events for one agent, cursor-paginated by ``event_id``.
+   * @param {string} sessionName
+   * @param {{agent?: string, turnIndex?: number, types?: string|string[], fromTs?: number, toTs?: number, limit?: number, cursor?: number}} opts
+   */
+  async getEvents(
+    sessionName,
+    {
+      agent = null,
+      turnIndex = null,
+      types = null,
+      fromTs = null,
+      toTs = null,
+      limit = 200,
+      cursor = null,
+    } = {},
+  ) {
+    const params = { limit }
+    if (agent) params.agent = agent
+    if (turnIndex != null) params.turn_index = turnIndex
+    if (types) params.types = Array.isArray(types) ? types.join(",") : types
+    if (fromTs != null) params.from_ts = fromTs
+    if (toTs != null) params.to_ts = toTs
+    if (cursor != null) params.cursor = cursor
+    const { data } = await api.get(`/sessions/${sessionName}/events`, { params })
+    return data
+  },
 }
 
 /** Settings - API keys, custom models */
