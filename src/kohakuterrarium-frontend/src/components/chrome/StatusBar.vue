@@ -8,11 +8,8 @@
 
     <div class="seg-sep" />
 
-    <!-- Model quick switcher + config gear -->
+    <!-- Model quick switcher -->
     <ModelSwitcher />
-    <button class="w-4 h-4 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" :title="t('status.modelConfig')" :aria-label="t('status.openModelConfig')" @click="openModelConfig">
-      <div class="i-carbon-settings text-[10px]" />
-    </button>
 
     <div class="seg-sep" />
 
@@ -50,7 +47,6 @@ import { useVisibilityInterval } from "@/composables/useVisibilityInterval"
 import { useChatStore } from "@/stores/chat"
 import { useInstancesStore } from "@/stores/instances"
 import { useI18n } from "@/utils/i18n"
-import { fireModelConfigOpen } from "@/utils/layoutEvents"
 
 const route = useRoute()
 const instances = useInstancesStore()
@@ -93,10 +89,6 @@ const runtimeStr = computed(() => {
   if (m > 0) return `${m}m ${s}s`
   return `${s}s`
 })
-
-function openModelConfig() {
-  fireModelConfigOpen()
-}
 
 function copySession() {
   const s = sessionId.value

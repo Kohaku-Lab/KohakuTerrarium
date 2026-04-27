@@ -12,6 +12,7 @@
 
     <div class="flex-1 overflow-y-auto p-4">
       <div v-if="!agentId" class="text-warm-400 text-sm italic">No active agent — open or create one to edit its tool options.</div>
+      <div v-else-if="isTerrarium" class="text-warm-400 text-sm italic">Tool options are currently only available for standalone agent sessions.</div>
       <div v-else-if="loading" class="text-warm-400 text-sm italic">Loading tool options…</div>
       <div v-else-if="!availableTools.length" class="text-warm-400 text-sm italic">This agent has no provider-native tools with editable options.</div>
       <div v-else-if="!selectedTool" class="text-warm-400 text-sm italic">Pick a tool to edit.</div>
@@ -24,6 +25,7 @@
 import { computed, ref, toRefs, watch } from "vue"
 
 import ToolOptionsForm from "@/components/settings/ToolOptionsForm.vue"
+import { validateNativeToolOptions } from "@/utils/nativeToolValidation"
 
 /**
  * Per-instance editor for provider-native tool options.
@@ -49,8 +51,12 @@ const saving = ref(false)
 const status = ref("")
 
 const agentId = computed(() => instance.value?.agent_id || instance.value?.id || "")
+const isTerrarium = computed(() => instance.value?.type === "terrarium")
 
-const availableTools = computed(() => tools.value.filter((t) => Object.keys(t.option_schema || {}).length))
+const availableTools = computed(() => {
+  if (isTerrarium.value) return []
+  return tools.value.filter((t) => Object.keys(t.option_schema || {}).length)
+})
 
 const currentTool = computed(() => tools.value.find((t) => t.name === selectedTool.value) || null)
 
@@ -120,10 +126,11 @@ async function saveOptions() {
   saving.value = true
   status.value = ""
   try {
+    const validatedValues = validateNativeToolOptions(selectedTool.value, draftValues.value, schemaForCurrent.value)
     const res = await fetch(`/api/agents/${encodeURIComponent(agentId.value)}/native-tool-options`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tool: selectedTool.value, values: draftValues.value }),
+      body: JSON.stringify({ tool: selectedTool.value, values: validatedValues }),
     })
     if (!res.ok) throw new Error(await res.text())
     status.value = "Saved"

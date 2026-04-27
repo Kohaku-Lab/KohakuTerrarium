@@ -26,8 +26,10 @@
 
 <script setup>
 import { computed, ref, watch } from "vue"
+import { useRoute } from "vue-router"
 
 import { useLayoutStore } from "@/stores/layout"
+import { useInstancesStore } from "@/stores/instances"
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -38,6 +40,7 @@ const props = defineProps({
 const emit = defineEmits(["update:modelValue", "select", "cancel"])
 
 const layout = useLayoutStore()
+const instances = useInstancesStore()
 
 const open = ref(props.modelValue)
 watch(
@@ -52,11 +55,18 @@ watch(open, (v) => {
 
 const query = ref("")
 
+const currentInstance = computed(() => {
+  const id = String(useRoute().params.id || "")
+  if (!id) return instances.current || null
+  if (instances.current?.id === id) return instances.current
+  return instances.list.find((item) => item.id === id) || null
+})
+
 const filtered = computed(() => {
   const q = query.value.trim().toLowerCase()
   const all = layout.panelList.filter(
-    // Hide the status-bar chrome from the picker — it's not moveable.
-    (p) => p.id !== "status-bar",
+    // Hide non-user-facing chrome / deprecated panels from the picker.
+    (p) => p.id !== "status-bar" && !(currentInstance.value?.type === "terrarium" && p.id === "tool-options"),
   )
   if (!q) return all
   return all.filter((p) => {

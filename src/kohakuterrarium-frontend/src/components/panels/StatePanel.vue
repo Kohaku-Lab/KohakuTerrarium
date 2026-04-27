@@ -161,7 +161,7 @@ const canInspectScratchpad = computed(() => !!instanceId.value && (props.instanc
 const entries = computed(() => {
   const id = instanceId.value
   if (!id || !canInspectScratchpad.value) return []
-  return Object.entries(scratchpad.getFor(id, scratchpadTarget.value)).filter(([k]) => k !== "_plan")
+  return Object.entries(scratchpad.getFor(id, scratchpadTarget.value)).filter(([k]) => k !== "_plan" && !/^__.*__$/.test(k))
 })
 
 const loading = computed(() => {

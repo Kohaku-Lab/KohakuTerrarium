@@ -47,9 +47,6 @@
                 <el-select v-model="selectedModel" size="small" class="flex-1 min-w-0" :placeholder="t('status.selectModel')" :loading="modelsLoading" @change="handleModelSwitch">
                   <el-option v-for="model in availableModels" :key="`${model.provider || model.login_provider || ''}/${model.name}`" :label="`${model.provider || model.login_provider || ''}/${model.name}`" :value="`${model.provider || model.login_provider || ''}/${model.name}`" />
                 </el-select>
-                <el-button size="small" text class="model-config-btn" :title="t('status.modelConfig')" :aria-label="t('status.openModelConfig')" @click="openModelConfig">
-                  <span class="i-carbon-settings text-[12px]" />
-                </el-button>
               </div>
               <div v-if="modelSwitchError" class="text-coral text-[10px]">{{ modelSwitchError }}</div>
             </div>
@@ -167,9 +164,6 @@ const modelsLoading = ref(false)
 const modelSwitchError = ref("")
 const availableModels = ref([])
 
-const configDialogVisible = ref(false)
-const configJson = ref("")
-const configJsonError = ref("")
 
 onMounted(() => {
   loadModels()
@@ -325,43 +319,6 @@ async function handleModelSwitch(modelId) {
   }
 }
 
-function openModelConfig() {
-  configJsonError.value = ""
-  // selectedModel / sessionModel may be ``provider/name[@variations]``;
-  // reuse the parsing used by ``currentModelProfile`` so the profile
-  // editor gets the right preset even when bare names collide across
-  // providers.
-  const raw = selectedModel.value || sessionModel.value || ""
-  const base = raw.split("@", 1)[0]
-  const slash = base.indexOf("/")
-  const wantProvider = slash >= 0 ? base.slice(0, slash) : ""
-  const wantName = slash >= 0 ? base.slice(slash + 1) : base
-  const fullProfile = availableModels.value.find((m) => m.name === wantName && (!wantProvider || (m.provider || m.login_provider) === wantProvider)) || availableModels.value.find((m) => m.name === wantName)
-  const profile = fullProfile
-    ? {
-        model: fullProfile.model,
-        provider: fullProfile.provider,
-        max_context: fullProfile.max_context || 0,
-        max_output: fullProfile.max_output || 0,
-        temperature: fullProfile.temperature,
-        reasoning_effort: fullProfile.reasoning_effort || "",
-        extra_body: fullProfile.extra_body || {},
-        base_url: fullProfile.base_url || "",
-      }
-    : { model: modelName, extra_body: {} }
-  configJson.value = JSON.stringify(profile, null, 2)
-  configDialogVisible.value = true
-}
-
-function saveModelConfig() {
-  configJsonError.value = ""
-  try {
-    JSON.parse(configJson.value)
-    configDialogVisible.value = false
-  } catch (e) {
-    configJsonError.value = "Invalid JSON: " + e.message
-  }
-}
 </script>
 
 <style scoped>
@@ -373,44 +330,5 @@ function saveModelConfig() {
   --el-fill-color-blank: var(--color-surface);
   --el-border-color: var(--color-border);
   --el-text-color-regular: var(--color-text);
-}
-
-.model-config-btn {
-  --el-button-hover-bg-color: rgba(90, 79, 207, 0.1);
-  --el-button-hover-border-color: #5a4fcf;
-  --el-button-hover-text-color: #5a4fcf;
-  color: var(--color-text-muted);
-}
-
-:deep(.model-config-dialog .el-dialog__header) {
-  padding: 16px 20px 12px;
-  border-bottom: 1px solid var(--el-border-color);
-}
-
-:deep(.model-config-dialog .el-dialog__title) {
-  font-weight: 600;
-}
-
-:deep(.model-config-dialog .el-dialog__body) {
-  padding: 16px 20px;
-}
-
-:deep(.model-config-dialog .el-dialog__footer) {
-  padding: 12px 20px 16px;
-  border-top: 1px solid var(--el-border-color);
-}
-
-:deep(.config-textarea .el-textarea__inner) {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  resize: vertical;
-}
-
-.save-btn {
-  --el-button-bg-color: #5a4fcf;
-  --el-button-border-color: #5a4fcf;
-  --el-button-hover-bg-color: #4a3fbf;
-  --el-button-hover-border-color: #4a3fbf;
 }
 </style>
