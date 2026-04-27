@@ -157,21 +157,27 @@
   },
   {
     "file": "src/kohakuterrarium/mcp/client.py",
-    "line": 57,
-    "function": "connect",
+    "line": 98,
+    "function": "_connect_impl",
     "reason": "mcp SDK is heavy; loaded only when a server is actually connecting"
   },
   {
     "file": "src/kohakuterrarium/mcp/client.py",
-    "line": 58,
-    "function": "connect",
+    "line": 99,
+    "function": "_connect_impl",
     "reason": "mcp.client.stdio is loaded on the stdio-transport path"
   },
   {
     "file": "src/kohakuterrarium/mcp/client.py",
-    "line": 95,
-    "function": "connect",
+    "line": 124,
+    "function": "_connect_impl",
     "reason": "mcp.client.sse is loaded only on the http/SSE-transport branch"
+  },
+  {
+    "file": "src/kohakuterrarium/mcp/client.py",
+    "line": 130,
+    "function": "_connect_impl",
+    "reason": "mcp.client.streamable_http is loaded only on the streamable_http transport branch"
   },
   {
     "file": "src/kohakuterrarium/serving/web.py",
