@@ -5,67 +5,56 @@
     </div>
 
     <el-tabs v-model="activeTab" class="settings-tabs">
-      <!-- ════════════════════════ API Keys ════════════════════════ -->
-      <el-tab-pane :label="t('settings.tabs.keys')" name="keys">
-        <div class="settings-pane flex flex-col gap-3 max-w-2xl">
-          <p class="text-xs text-warm-400 mb-2">{{ t("settings.keys.storageHint") }}</p>
-          <div v-for="provider in providers" :key="provider.provider" class="card p-4 flex items-center gap-3">
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2 mb-1">
-                <span class="font-medium text-warm-700 dark:text-warm-300">{{ provider.provider }}</span>
-                <el-tag size="small" effect="plain">{{ provider.backend_type }}</el-tag>
-                <span class="text-[10px] px-1.5 py-0.5 rounded" :class="provider.available ? 'bg-aquamarine/15 text-aquamarine' : 'bg-warm-200 dark:bg-warm-700 text-warm-400'">
-                  {{ provider.available ? t("settings.keys.active") : t("settings.keys.noKey") }}
-                </span>
-              </div>
-              <div class="text-[11px] text-warm-400 font-mono truncate">
-                <span v-if="provider.env_var">{{ provider.env_var }}</span>
-                <span v-if="provider.masked_key && provider.backend_type !== 'codex'"> · {{ provider.masked_key }}</span>
-                <span v-if="provider.backend_type === 'codex'">{{ t("settings.keys.oauthHint") }}</span>
-              </div>
-            </div>
-            <template v-if="provider.backend_type !== 'codex'">
-              <el-input v-if="editingKey === provider.provider" v-model="keyInput" size="small" type="password" show-password :placeholder="t('settings.keys.enterKey')" class="!w-60" @keyup.enter="saveKey(provider.provider)" />
-              <el-button v-if="editingKey === provider.provider" size="small" type="primary" @click="saveKey(provider.provider)">
-                {{ t("common.save") }}
-              </el-button>
-              <el-button v-if="editingKey === provider.provider" size="small" @click="editingKey = ''">
-                {{ t("common.cancel") }}
-              </el-button>
-              <el-button v-else size="small" @click="startEditKey(provider.provider)">
-                {{ provider.has_key ? t("settings.keys.change") : t("settings.keys.setKey") }}
-              </el-button>
-            </template>
-            <template v-else>
-              <el-button size="small" type="primary" :loading="codexLoggingIn" @click="runCodexLogin">
-                {{ provider.available ? t("common.refresh") : t("settings.keys.setKey") }}
-              </el-button>
-            </template>
-          </div>
-        </div>
-      </el-tab-pane>
-
       <!-- ════════════════════════ Providers (custom backends) ════════════════════════ -->
       <el-tab-pane :label="t('settings.tabs.providers')" name="providers">
         <div class="settings-pane flex flex-col gap-3 max-w-2xl">
-          <p class="text-xs text-warm-400 mb-2">{{ t("settings.providers.description") }}</p>
+          <p class="text-xs text-warm-400 mb-1">{{ t("settings.providers.description") }}</p>
+          <p class="text-xs text-warm-400 mb-2">{{ t("settings.keys.storageHint") }}</p>
 
-          <!-- Built-in provider list (read-only) -->
+          <!-- Built-in provider list (auth managed inline) -->
           <div class="card p-4">
             <div class="font-medium text-warm-700 dark:text-warm-300 text-sm mb-3">
               {{ t("settings.providers.builtInTitle") }}
             </div>
-            <div class="grid grid-cols-[auto_auto_1fr_auto] gap-x-3 gap-y-2 items-center">
-              <template v-for="backend in builtInBackends" :key="backend.name">
-                <div class="font-medium text-warm-700 dark:text-warm-300 text-sm">{{ backend.name }}</div>
-                <el-tag size="small" effect="plain">{{ backend.backend_type }}</el-tag>
-                <div class="text-[11px] text-warm-400 font-mono truncate">
-                  {{ backend.base_url || "(built-in endpoint)" }}
+            <div class="flex flex-col gap-3">
+              <div v-for="backend in builtInBackends" :key="backend.name" class="flex items-start gap-3">
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 mb-1 flex-wrap">
+                    <div class="font-medium text-warm-700 dark:text-warm-300 text-sm">{{ backend.name }}</div>
+                    <el-tag size="small" effect="plain">{{ backend.backend_type }}</el-tag>
+                    <el-tag size="small" :type="backend.available ? 'success' : 'info'" effect="plain">
+                      {{ backend.available ? t("settings.keys.active") : t("settings.keys.noKey") }}
+                    </el-tag>
+                  </div>
+                  <div class="text-[11px] text-warm-400 font-mono truncate">
+                    {{ backend.base_url || "(built-in endpoint)" }}
+                  </div>
+                  <div class="text-[11px] text-warm-400 font-mono truncate mt-1">
+                    <span v-if="backend.env_var">{{ backend.env_var }}</span>
+                    <span v-if="backend.masked_key && backend.backend_type !== 'codex'"> · {{ backend.masked_key }}</span>
+                    <span v-if="backend.backend_type === 'codex'">{{ t("settings.keys.oauthHint") }}</span>
+                  </div>
                 </div>
-                <el-tag size="small" :type="backend.available ? 'success' : 'info'" effect="plain">
-                  {{ backend.has_token ? t("settings.backends.tokenSet") : t("settings.backends.noToken") }}
-                </el-tag>
-              </template>
+                <div class="flex flex-wrap items-center justify-end gap-2 shrink-0">
+                  <template v-if="backend.backend_type !== 'codex'">
+                    <el-input v-if="editingKey === backend.name" v-model="keyInput" size="small" type="password" show-password :placeholder="t('settings.keys.enterKey')" class="!w-60" @keyup.enter="saveKey(backend.name)" />
+                    <el-button v-if="editingKey === backend.name" size="small" type="primary" @click="saveKey(backend.name)">
+                      {{ t("common.save") }}
+                    </el-button>
+                    <el-button v-if="editingKey === backend.name" size="small" @click="editingKey = ''">
+                      {{ t("common.cancel") }}
+                    </el-button>
+                    <el-button v-else size="small" @click="startEditKey(backend.name)">
+                      {{ backend.has_key ? t("settings.keys.change") : t("settings.keys.setKey") }}
+                    </el-button>
+                  </template>
+                  <template v-else>
+                    <el-button size="small" type="primary" :loading="codexLoggingIn" @click="runCodexLogin">
+                      {{ backend.available ? t("common.refresh") : t("settings.keys.setKey") }}
+                    </el-button>
+                  </template>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -82,24 +71,52 @@
             <div v-if="customBackends.length === 0 && !showBackendForm" class="text-[11px] text-warm-400 italic text-center py-4">
               {{ t("settings.providers.noCustom") }}
             </div>
-            <div class="flex flex-col gap-2">
-              <div v-for="backend in customBackends" :key="backend.name" class="grid grid-cols-[auto_auto_1fr_auto_auto] gap-x-3 items-center">
-                <div class="font-medium text-warm-700 dark:text-warm-300 text-sm">{{ backend.name }}</div>
-                <el-tag size="small" effect="plain">{{ backend.backend_type }}</el-tag>
-                <div class="text-[11px] text-warm-400 font-mono truncate">
-                  {{ backend.base_url || "(no base_url)" }}
+            <div class="flex flex-col gap-3">
+              <div v-for="backend in customBackends" :key="backend.name" class="flex items-start gap-3">
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 mb-1 flex-wrap">
+                    <div class="font-medium text-warm-700 dark:text-warm-300 text-sm">{{ backend.name }}</div>
+                    <el-tag size="small" effect="plain">{{ backend.backend_type }}</el-tag>
+                    <el-tag size="small" :type="backend.available ? 'success' : 'info'" effect="plain">
+                      {{ backend.available ? t("settings.keys.active") : t("settings.keys.noKey") }}
+                    </el-tag>
+                  </div>
+                  <div class="text-[11px] text-warm-400 font-mono truncate">
+                    {{ backend.base_url || "(no base_url)" }}
+                  </div>
+                  <div class="text-[11px] text-warm-400 font-mono truncate mt-1">
+                    <span v-if="backend.env_var">{{ backend.env_var }}</span>
+                    <span v-if="backend.masked_key && backend.backend_type !== 'codex'"> · {{ backend.masked_key }}</span>
+                    <span v-if="backend.backend_type === 'codex'">{{ t("settings.keys.oauthHint") }}</span>
+                  </div>
+                  <div v-if="backend.provider_name || backend.provider_native_tools?.length" class="text-[10px] text-warm-400 mt-1 flex items-center gap-2 flex-wrap">
+                    <span v-if="backend.provider_name" class="font-mono">identity: {{ backend.provider_name }}</span>
+                    <span v-if="backend.provider_native_tools?.length" class="font-mono">native: {{ backend.provider_native_tools.join(", ") }}</span>
+                  </div>
                 </div>
-                <el-tag size="small" :type="backend.available ? 'success' : 'info'" effect="plain">
-                  {{ backend.has_token ? t("settings.backends.tokenSet") : t("settings.backends.noToken") }}
-                </el-tag>
-                <el-popconfirm :title="t('settings.backends.deleteConfirm')" @confirm="deleteBackend(backend.name)">
-                  <template #reference>
-                    <el-button size="small" type="danger" plain>{{ t("common.delete") }}</el-button>
+                <div class="flex flex-wrap items-center justify-end gap-2 shrink-0">
+                  <template v-if="backend.backend_type !== 'codex'">
+                    <el-input v-if="editingKey === backend.name" v-model="keyInput" size="small" type="password" show-password :placeholder="t('settings.keys.enterKey')" class="!w-60" @keyup.enter="saveKey(backend.name)" />
+                    <el-button v-if="editingKey === backend.name" size="small" type="primary" @click="saveKey(backend.name)">
+                      {{ t("common.save") }}
+                    </el-button>
+                    <el-button v-if="editingKey === backend.name" size="small" @click="editingKey = ''">
+                      {{ t("common.cancel") }}
+                    </el-button>
+                    <el-button v-else size="small" @click="startEditKey(backend.name)">
+                      {{ backend.has_key ? t("settings.keys.change") : t("settings.keys.setKey") }}
+                    </el-button>
                   </template>
-                </el-popconfirm>
-                <div v-if="backend.provider_name || backend.provider_native_tools?.length" class="col-span-5 text-[10px] text-warm-400 pl-2 -mt-1 flex items-center gap-2 flex-wrap">
-                  <span v-if="backend.provider_name" class="font-mono">identity: {{ backend.provider_name }}</span>
-                  <span v-if="backend.provider_native_tools?.length" class="font-mono">native: {{ backend.provider_native_tools.join(", ") }}</span>
+                  <template v-else>
+                    <el-button size="small" type="primary" :loading="codexLoggingIn" @click="runCodexLogin">
+                      {{ backend.available ? t("common.refresh") : t("settings.keys.setKey") }}
+                    </el-button>
+                  </template>
+                  <el-popconfirm :title="t('settings.backends.deleteConfirm')" @confirm="deleteBackend(backend.name)">
+                    <template #reference>
+                      <el-button size="small" type="danger" plain>{{ t("common.delete") }}</el-button>
+                    </template>
+                  </el-popconfirm>
                 </div>
               </div>
             </div>
@@ -398,7 +415,7 @@ import { configAPI, settingsAPI } from "@/utils/api"
 const theme = useThemeStore()
 const localeStore = useLocaleStore()
 const { t } = useI18n()
-const activeTab = ref("keys")
+const activeTab = ref("providers")
 
 const localeOptions = computed(() =>
   SUPPORTED_LOCALES.map((value) => ({
@@ -407,18 +424,18 @@ const localeOptions = computed(() =>
   })),
 )
 
-// ───────── API Keys tab ─────────
+// ───────── Provider auth state ─────────
 
-const providers = ref([])
+const providerKeys = ref([])
 const editingKey = ref("")
 const keyInput = ref("")
 
 async function loadKeys() {
   try {
     const data = await settingsAPI.getKeys()
-    providers.value = data.providers || []
+    providerKeys.value = data.providers || []
   } catch {
-    /* ignore */
+    providerKeys.value = []
   }
 }
 
@@ -471,8 +488,21 @@ const backendForm = reactive({
 })
 const nativeToolCatalog = ref([])
 
-const builtInBackends = computed(() => backends.value.filter((b) => b.built_in))
-const customBackends = computed(() => backends.value.filter((b) => !b.built_in))
+const backendsWithAuth = computed(() => {
+  const keyMetaByProvider = new Map(providerKeys.value.map((provider) => [provider.provider, provider]))
+  return backends.value.map((backend) => {
+    const keyMeta = keyMetaByProvider.get(backend.name) || {}
+    return {
+      ...backend,
+      env_var: keyMeta.env_var || backend.api_key_env || "",
+      has_key: keyMeta.has_key ?? backend.has_token,
+      masked_key: keyMeta.masked_key || "",
+    }
+  })
+})
+
+const builtInBackends = computed(() => backendsWithAuth.value.filter((b) => b.built_in))
+const customBackends = computed(() => backendsWithAuth.value.filter((b) => !b.built_in))
 
 async function loadBackends() {
   try {

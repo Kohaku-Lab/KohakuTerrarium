@@ -143,7 +143,7 @@ export default {
   "registry.uninstall": "解除安裝",
 
   "settings.languageHint": "選擇 Web 介面的顯示語言。",
-  "settings.tabs.keys": "API 金鑰",
+  "settings.tabs.providers": "提供者",
   "settings.tabs.models": "自訂模型",
   "settings.tabs.mcp": "MCP 伺服器",
   "settings.tabs.account": "帳戶",

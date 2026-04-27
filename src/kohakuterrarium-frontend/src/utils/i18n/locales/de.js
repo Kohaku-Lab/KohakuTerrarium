@@ -147,7 +147,7 @@ export default {
   "registry.uninstall": "Deinstallieren",
 
   "settings.languageHint": "Waehle die Anzeigesprache fuer die Weboberflaeche.",
-  "settings.tabs.keys": "API-Schluessel",
+  "settings.tabs.providers": "Anbieter",
   "settings.tabs.models": "Benutzerdefinierte Modelle",
   "settings.tabs.mcp": "MCP-Server",
   "settings.tabs.account": "Konto",

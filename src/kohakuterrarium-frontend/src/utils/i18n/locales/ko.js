@@ -145,7 +145,7 @@ export default {
   "registry.uninstall": "제거",
 
   "settings.languageHint": "웹 UI에 표시할 언어를 선택하세요.",
-  "settings.tabs.keys": "API 키",
+  "settings.tabs.providers": "제공자",
   "settings.tabs.models": "사용자 지정 모델",
   "settings.tabs.mcp": "MCP 서버",
   "settings.tabs.account": "계정",

@@ -143,7 +143,7 @@ export default {
   "registry.uninstall": "卸载",
 
   "settings.languageHint": "选择 Web 界面的显示语言。",
-  "settings.tabs.keys": "API 密钥",
+  "settings.tabs.providers": "提供者",
   "settings.tabs.models": "自定义模型",
   "settings.tabs.mcp": "MCP 服务器",
   "settings.tabs.account": "账户",
