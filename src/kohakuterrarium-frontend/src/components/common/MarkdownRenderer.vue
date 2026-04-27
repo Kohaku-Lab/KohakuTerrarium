@@ -1,4 +1,5 @@
 <template>
+  <!-- eslint-disable-next-line vue/no-v-html -->
   <div ref="rootEl" class="md-content" @click="onClick" v-html="rendered" />
 </template>
 

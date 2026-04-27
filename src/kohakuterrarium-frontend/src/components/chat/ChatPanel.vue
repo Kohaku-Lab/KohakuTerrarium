@@ -151,12 +151,7 @@ import ChatMessage from "@/components/chat/ChatMessage.vue"
 import { useChatStore } from "@/stores/chat"
 import { useI18n } from "@/utils/i18n"
 import { terrariumAPI, agentAPI } from "@/utils/api"
-import {
-  buildMessageParts,
-  formatBytes,
-  MAX_ATTACHMENT_BYTES,
-  MAX_IMAGE_BYTES,
-} from "@/utils/chatAttachments"
+import { buildMessageParts, formatBytes, MAX_ATTACHMENT_BYTES, MAX_IMAGE_BYTES } from "@/utils/chatAttachments"
 import { getHybridPref, removeHybridPref, setHybridPref } from "@/utils/uiPrefs"
 // How many queued-while-processing messages to show before collapsing.
 const QUEUE_VISIBLE = 5

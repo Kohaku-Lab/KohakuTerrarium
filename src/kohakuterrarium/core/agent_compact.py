@@ -9,6 +9,7 @@ from typing import Any
 
 from kohakuterrarium.bootstrap.llm import create_llm_from_profile_name
 from kohakuterrarium.core.compact import CompactConfig
+from kohakuterrarium.llm.profiles import profile_to_identifier, resolve_controller_llm
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -30,6 +31,19 @@ class AgentCompactMixin:
         profile_name = (
             compact_cfg.compact_model or self._llm_override or self.config.llm_profile
         )
+        if not profile_name:
+            controller_data: dict[str, Any] = {
+                "llm": self.config.llm_profile or None,
+                "model": self.config.model or None,
+                "provider": self.config.provider or None,
+                "variation_selections": dict(self.config.variation_selections or {}),
+            }
+            controller_data = {k: v for k, v in controller_data.items() if v}
+            profile = resolve_controller_llm(
+                controller_data, llm_override=self._llm_override
+            )
+            if profile is not None:
+                profile_name = profile_to_identifier(profile)
         if profile_name:
             try:
                 return create_llm_from_profile_name(profile_name)

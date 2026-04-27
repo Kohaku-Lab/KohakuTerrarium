@@ -6,6 +6,7 @@
     </div>
 
     <div class="flex-1 min-h-0 overflow-auto p-4 text-xs">
+      <!-- eslint-disable-next-line vue/no-v-html -->
       <div v-if="mode === 'preview'" class="markdown-body" v-html="rendered" />
       <pre v-else class="font-mono text-[11px] whitespace-pre-wrap break-words text-warm-700 dark:text-warm-300">{{ content }}</pre>
     </div>

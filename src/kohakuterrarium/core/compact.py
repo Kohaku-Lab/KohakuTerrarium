@@ -97,6 +97,7 @@ class CompactManager:
         self._active_lease: SingleFlightLease | None = None
         self._last_compact_time: float = 0
         self._compact_count: int = 0
+        self._last_summary_error: str = ""
         # References set by agent
         self._controller: Any = None
         self._llm: Any = None
@@ -311,7 +312,8 @@ class CompactManager:
                         "[CompactError] Summarization failed — context preserved unchanged",
                         metadata={
                             "error_type": "CompactError",
-                            "error": "Summarization LLM call failed. Context was NOT modified.",
+                            "error": self._last_summary_error
+                            or "Summarization LLM call failed. Context was NOT modified.",
                         },
                     )
                 return
@@ -439,23 +441,50 @@ class CompactManager:
 
         return "\n\n".join(parts)
 
+    def _summary_max_tokens(self) -> int:
+        """Return a conservative output cap for the summarization request.
+
+        Compact runs near the model's context ceiling. Reusing the
+        profile's full normal ``max_output`` budget can make the summary
+        request exceed the context window even when the regular turn just
+        fit. Keep the summary budget intentionally small.
+        """
+        max_context = max(int(self.config.max_tokens or DEFAULT_MAX_TOKENS), 1024)
+        return max(512, min(4096, max_context // 64))
+
     async def _summarize(self, text: str) -> str:
         """Call LLM to produce a structured summary."""
         if not self._llm:
+            self._last_summary_error = (
+                "No LLM available for compaction. Context was NOT modified."
+            )
             return ""
 
         prompt_messages = [
             {"role": "system", "content": COMPACT_PROMPT},
             {"role": "user", "content": f"Summarize this conversation:\n\n{text}"},
         ]
+        summary_max_tokens = self._summary_max_tokens()
 
         try:
+            self._last_summary_error = ""
             result = ""
-            async for chunk in self._llm.chat(prompt_messages, stream=True):
+            async for chunk in self._llm.chat(
+                prompt_messages,
+                stream=True,
+                max_tokens=summary_max_tokens,
+            ):
                 result += chunk
             return result.strip()
         except Exception as e:
-            logger.error("Summarization LLM call failed", error=str(e))
+            self._last_summary_error = (
+                f"Summarization LLM call failed: {e}. Context was NOT modified."
+            )
+            logger.error(
+                "Summarization LLM call failed",
+                error=str(e),
+                summary_max_tokens=summary_max_tokens,
+            )
             return ""
 
     def _emergency_truncate(self, messages: list) -> str:

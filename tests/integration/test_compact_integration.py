@@ -48,8 +48,8 @@ class TestCompactIntegration:
         # We need a separate LLM for compaction (the ScriptedLLM is consumed by the agent)
         compact_responses = []
 
-        async def compact_chat(messages, stream=True):
-            compact_responses.append(True)
+        async def compact_chat(messages, stream=True, max_tokens=None):
+            compact_responses.append(max_tokens)
             yield "### Current Goal\nTest\n### Key Facts\nFact 1"
 
         from unittest.mock import MagicMock
@@ -77,6 +77,7 @@ class TestCompactIntegration:
         assert not compact_mgr.is_compacting
         assert compact_mgr._compact_count == 1
         assert len(compact_responses) == 1
+        assert compact_responses[0] == compact_mgr._summary_max_tokens()
 
         # Conversation should be shorter
         new_count = len(conv.get_messages())
@@ -107,7 +108,7 @@ class TestCompactIntegration:
         compact_mgr._agent_name = "test"
 
         # Slow compact LLM
-        async def slow_compact(messages, stream=True):
+        async def slow_compact(messages, stream=True, max_tokens=None):
             await asyncio.sleep(0.3)
             yield "Summary"
 
@@ -163,7 +164,7 @@ class TestCompactIntegration:
 
         summarize_inputs = []
 
-        async def tracking_compact(messages, stream=True):
+        async def tracking_compact(messages, stream=True, max_tokens=None):
             # Capture what's being summarized
             user_msg = messages[-1]["content"]
             summarize_inputs.append(user_msg)

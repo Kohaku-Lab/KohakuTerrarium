@@ -208,7 +208,8 @@ class TestRunCompact:
         before_count = len(conv.get_messages())
 
         # Mock LLM
-        async def mock_chat(messages, stream=True):
+        async def mock_chat(messages, stream=True, max_tokens=None):
+            assert max_tokens == mgr._summary_max_tokens()
             yield "### Current Goal\nTest goal\n### Key Facts\nFact 1"
 
         mgr._llm = MagicMock()
@@ -225,7 +226,7 @@ class TestRunCompact:
     async def test_compact_with_session_store(self):
         mgr, conv = _make_manager(keep_recent=2)
 
-        async def mock_chat(messages, stream=True):
+        async def mock_chat(messages, stream=True, max_tokens=None):
             yield "Summary"
 
         mgr._llm = MagicMock()
@@ -245,7 +246,7 @@ class TestRunCompact:
         mgr, conv = _make_manager(keep_recent=2)
         before_count = len(conv.get_messages())
 
-        async def mock_chat_fail(messages, stream=True):
+        async def mock_chat_fail(messages, stream=True, max_tokens=None):
             raise RuntimeError("LLM error")
             yield  # make it an async generator
 
@@ -257,6 +258,7 @@ class TestRunCompact:
         # On LLM failure, context should be preserved unchanged (no truncation)
         after_count = len(conv.get_messages())
         assert after_count == before_count
+        assert "LLM error" in mgr._last_summary_error
 
     @pytest.mark.asyncio
     async def test_compact_preserves_live_zone(self):
@@ -267,7 +269,7 @@ class TestRunCompact:
         keep = mgr._count_keep_messages(messages)
         live_before = [m.content for m in messages[-keep:]]
 
-        async def mock_chat(messages, stream=True):
+        async def mock_chat(messages, stream=True, max_tokens=None):
             yield "Summary of old messages"
 
         mgr._llm = MagicMock()
@@ -287,7 +289,7 @@ class TestRunCompact:
 
         call_log = []
 
-        async def mock_chat(messages, stream=True):
+        async def mock_chat(messages, stream=True, max_tokens=None):
             # Capture the user message content (what's being summarized)
             user_msg = messages[-1]["content"]
             call_log.append(user_msg)
@@ -313,6 +315,13 @@ class TestRunCompact:
         assert len(call_log) == 2
         assert "Summary round 1" in call_log[1]
 
+    def test_summary_max_tokens_is_conservative(self):
+        mgr, _ = _make_manager(max_tokens=256000)
+        assert mgr._summary_max_tokens() == 4000
+
+        tiny_mgr, _ = _make_manager(max_tokens=8000)
+        assert tiny_mgr._summary_max_tokens() == 512
+
 
 class TestNonBlocking:
     @pytest.mark.asyncio
@@ -320,7 +329,7 @@ class TestNonBlocking:
         mgr, conv = _make_manager(keep_recent=2)
 
         # Slow LLM that takes time
-        async def slow_chat(messages, stream=True):
+        async def slow_chat(messages, stream=True, max_tokens=None):
             await asyncio.sleep(0.2)
             yield "Summary"
 
@@ -344,7 +353,7 @@ class TestNonBlocking:
     async def test_cancel_compact(self):
         mgr, conv = _make_manager(keep_recent=2)
 
-        async def very_slow_chat(messages, stream=True):
+        async def very_slow_chat(messages, stream=True, max_tokens=None):
             await asyncio.sleep(10)
             yield "Summary"
 
@@ -361,7 +370,7 @@ class TestNonBlocking:
     async def test_no_double_compact(self):
         mgr, conv = _make_manager(keep_recent=2)
 
-        async def slow_chat(messages, stream=True):
+        async def slow_chat(messages, stream=True, max_tokens=None):
             await asyncio.sleep(0.2)
             yield "Summary"
 
@@ -383,7 +392,7 @@ class TestNonBlocking:
         release = asyncio.Event()
         calls = []
 
-        async def gated_chat(messages, stream=True):
+        async def gated_chat(messages, stream=True, max_tokens=None):
             calls.append(True)
             started.set()
             await release.wait()
@@ -413,7 +422,7 @@ class TestEdgeCases:
         mgr._controller = controller
         mgr._agent_name = "test"
 
-        async def mock_chat(messages, stream=True):
+        async def mock_chat(messages, stream=True, max_tokens=None):
             yield "Summary"
 
         mgr._llm = MagicMock()

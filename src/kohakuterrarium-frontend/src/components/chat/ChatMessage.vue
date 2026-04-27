@@ -226,13 +226,7 @@ import MarkdownRenderer from "@/components/common/MarkdownRenderer.vue"
 import ToolCallBlock from "@/components/chat/ToolCallBlock.vue"
 import { useChatStore } from "@/stores/chat"
 import { GEM } from "@/utils/colors"
-import {
-  buildMessageParts,
-  contentToEditableDraft,
-  formatBytes,
-  MAX_ATTACHMENT_BYTES,
-  MAX_IMAGE_BYTES,
-} from "@/utils/chatAttachments"
+import { buildMessageParts, contentToEditableDraft, formatBytes, MAX_ATTACHMENT_BYTES, MAX_IMAGE_BYTES } from "@/utils/chatAttachments"
 
 // Module-scoped so colors are stable across all ChatMessage instances.
 // If this were declared inside <script setup>, each message would have

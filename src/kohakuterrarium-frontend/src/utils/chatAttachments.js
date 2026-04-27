@@ -76,8 +76,12 @@ export async function genericFileToPart(file) {
   const mime = file.type || "application/octet-stream"
   const textLike =
     mime.startsWith("text/") ||
-    ["application/json", "application/xml", "application/javascript", "image/svg+xml"].includes(mime) ||
-    /\.(md|txt|py|js|ts|tsx|jsx|json|yaml|yml|toml|ini|cfg|csv|tsv|html|css|xml|sh|rs|go|java|c|cc|cpp|h|hpp)$/i.test(file.name)
+    ["application/json", "application/xml", "application/javascript", "image/svg+xml"].includes(
+      mime,
+    ) ||
+    /\.(md|txt|py|js|ts|tsx|jsx|json|yaml|yml|toml|ini|cfg|csv|tsv|html|css|xml|sh|rs|go|java|c|cc|cpp|h|hpp)$/i.test(
+      file.name,
+    )
 
   if (textLike) {
     return {

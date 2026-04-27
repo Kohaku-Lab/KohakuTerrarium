@@ -476,7 +476,6 @@ describe("chat store — turn/branch model (regen / edit+rerun)", () => {
   })
 })
 
-
 describe("chat store — multimodal edit + branch resync", () => {
   it("dedupes live multimodal user echoes by full content signature", () => {
     const chat = useChatStore()
@@ -495,18 +494,21 @@ describe("chat store — multimodal edit + branch resync", () => {
   })
 
   it("replay preserves tool result metadata for frontend truncation markers", () => {
-    const { messages } = _replayEvents([], [
-      { type: "processing_start" },
-      { type: "tool_call", name: "read", call_id: "job_1", args: { path: "foo.txt" } },
-      {
-        type: "tool_result",
-        name: "read",
-        call_id: "job_1",
-        output: "trimmed output",
-        output_meta: { truncated: true, omitted_text_bytes: 1234 },
-      },
-      { type: "processing_end" },
-    ])
+    const { messages } = _replayEvents(
+      [],
+      [
+        { type: "processing_start" },
+        { type: "tool_call", name: "read", call_id: "job_1", args: { path: "foo.txt" } },
+        {
+          type: "tool_result",
+          name: "read",
+          call_id: "job_1",
+          output: "trimmed output",
+          output_meta: { truncated: true, omitted_text_bytes: 1234 },
+        },
+        { type: "processing_end" },
+      ],
+    )
 
     expect(messages[0].parts[0].resultMeta).toEqual({ truncated: true, omitted_text_bytes: 1234 })
   })

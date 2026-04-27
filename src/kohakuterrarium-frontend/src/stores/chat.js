@@ -1919,7 +1919,10 @@ export const useChatStore = defineStore("chat", {
       const turnIndex = target.turnIndex
       const expectedLatestBranch = target.latestBranch
       this._markBranchResyncPending(tab, {
-        expectedBranchByTurn: turnIndex != null && expectedLatestBranch != null ? { [turnIndex]: expectedLatestBranch + 1 } : {},
+        expectedBranchByTurn:
+          turnIndex != null && expectedLatestBranch != null
+            ? { [turnIndex]: expectedLatestBranch + 1 }
+            : {},
       })
       let validTarget = false
       if (tab) {

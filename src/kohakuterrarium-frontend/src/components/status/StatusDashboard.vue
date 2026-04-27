@@ -164,7 +164,6 @@ const modelsLoading = ref(false)
 const modelSwitchError = ref("")
 const availableModels = ref([])
 
-
 onMounted(() => {
   loadModels()
 })
@@ -318,7 +317,6 @@ async function handleModelSwitch(modelId) {
     selectedModel.value = sessionModel.value || ""
   }
 }
-
 </script>
 
 <style scoped>

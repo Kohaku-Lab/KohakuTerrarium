@@ -7,7 +7,10 @@
       </div>
     </div>
     <!-- Code content -->
-    <pre class="flex-1 m-0 py-3 pl-3 pr-3 text-[11px] font-mono text-warm-700 dark:text-warm-300 whitespace-pre leading-[1.4]"><code v-html="highlighted" /></pre>
+    <pre class="flex-1 m-0 py-3 pl-3 pr-3 text-[11px] font-mono text-warm-700 dark:text-warm-300 whitespace-pre leading-[1.4]">
+      <!-- eslint-disable-next-line vue/no-v-html -->
+      <code v-html="highlighted" />
+    </pre>
   </div>
 </template>
 
