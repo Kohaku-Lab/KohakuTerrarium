@@ -64,7 +64,7 @@
               <h3 class="font-medium text-warm-700 dark:text-warm-300 text-sm">
                 {{ t("settings.providers.customTitle") }}
               </h3>
-              <el-button size="small" type="primary" plain @click="showBackendForm = !showBackendForm">
+              <el-button size="small" type="primary" plain @click="toggleBackendForm">
                 {{ showBackendForm ? t("common.cancel") : t("settings.providers.addCustom") }}
               </el-button>
             </div>
@@ -72,7 +72,7 @@
               {{ t("settings.providers.noCustom") }}
             </div>
             <div class="flex flex-col gap-3">
-              <div v-for="backend in customBackends" :key="backend.name" class="flex items-start gap-3">
+              <div v-for="backend in customBackends" :key="backend.name" class="flex flex-col gap-3">
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2 mb-1 flex-wrap">
                     <div class="font-medium text-warm-700 dark:text-warm-300 text-sm">{{ backend.name }}</div>
@@ -112,61 +112,23 @@
                       {{ backend.available ? t("common.refresh") : t("settings.keys.setKey") }}
                     </el-button>
                   </template>
+                  <el-button size="small" plain @click="startEditBackend(backend)">
+                    {{ t("common.edit") }}
+                  </el-button>
                   <el-popconfirm :title="t('settings.backends.deleteConfirm')" @confirm="deleteBackend(backend.name)">
                     <template #reference>
                       <el-button size="small" type="danger" plain>{{ t("common.delete") }}</el-button>
                     </template>
                   </el-popconfirm>
                 </div>
+                <div v-if="showBackendForm && editingBackendName === backend.name" class="border-t border-warm-100 dark:border-warm-800 pt-3">
+                  <BackendForm :form="backendForm" :native-tool-catalog="nativeToolCatalog" :is-editing="true" @save="saveBackend" @cancel="closeBackendForm" @update-field="onBackendFormUpdate" />
+                </div>
               </div>
             </div>
 
-            <div v-if="showBackendForm" class="mt-4 pt-3 border-t border-warm-100 dark:border-warm-800 grid grid-cols-[1fr_1fr] gap-3">
-              <div>
-                <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.backends.name") }}</label>
-                <el-input v-model="backendForm.name" size="small" placeholder="my-provider" />
-              </div>
-              <div>
-                <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.backends.backendType") }}</label>
-                <el-select v-model="backendForm.backend_type" size="small" class="w-full">
-                  <el-option value="openai" label="openai" />
-                  <el-option value="codex" label="codex" />
-                  <el-option value="anthropic" label="anthropic" />
-                </el-select>
-              </div>
-              <div class="col-span-2">
-                <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.backends.baseUrl") }}</label>
-                <el-input v-model="backendForm.base_url" size="small" placeholder="https://api.example.com/v1" />
-              </div>
-              <div class="col-span-2">
-                <label class="text-[11px] text-warm-400 mb-1 block">
-                  {{ t("settings.backends.providerName") }}
-                </label>
-                <el-input v-model="backendForm.provider_name" size="small" :placeholder="backendForm.name || 'my-provider'" />
-                <p class="text-[10px] text-warm-400 mt-1">
-                  {{ t("settings.backends.providerNameHint") }}
-                </p>
-              </div>
-              <div v-if="nativeToolCatalog.length" class="col-span-2">
-                <label class="text-[11px] text-warm-400 mb-1 block">
-                  {{ t("settings.backends.nativeTools") }}
-                </label>
-                <el-checkbox-group v-model="backendForm.provider_native_tools" class="flex flex-col gap-1">
-                  <el-checkbox v-for="tool in nativeToolCatalog" :key="tool.name" :value="tool.name" class="!mr-0">
-                    <span class="font-mono text-[12px]">{{ tool.name }}</span>
-                    <span class="text-[10px] text-warm-400 ml-1"> ({{ tool.provider_support.length ? tool.provider_support.join(", ") : "any" }}) </span>
-                    <span v-if="tool.description" class="text-[10px] text-warm-400 ml-1 truncate">— {{ tool.description }}</span>
-                  </el-checkbox>
-                </el-checkbox-group>
-                <p class="text-[10px] text-warm-400 mt-1">
-                  {{ t("settings.backends.nativeToolsHint") }}
-                </p>
-              </div>
-              <div class="col-span-2 flex justify-end">
-                <el-button type="primary" size="small" :disabled="!backendForm.name || !backendForm.backend_type" @click="saveBackend">
-                  {{ t("settings.backends.save") }}
-                </el-button>
-              </div>
+            <div v-if="showBackendForm && !editingBackendName" class="mt-4 pt-3 border-t border-warm-100 dark:border-warm-800">
+              <BackendForm :form="backendForm" :native-tool-catalog="nativeToolCatalog" :is-editing="false" @save="saveBackend" @cancel="closeBackendForm" @update-field="onBackendFormUpdate" />
             </div>
           </div>
         </div>
@@ -406,6 +368,7 @@
 import { computed, reactive, ref, onMounted, watch } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
 
+import BackendForm from "@/components/settings/BackendForm.vue"
 import PresetEditor from "@/components/settings/PresetEditor.vue"
 import { LOCALE_DISPLAY_NAMES, SUPPORTED_LOCALES, useLocaleStore } from "@/stores/locale"
 import { DEFAULT_DESKTOP_ZOOM, DEFAULT_MOBILE_ZOOM, MAX_UI_ZOOM, MIN_UI_ZOOM, useThemeStore } from "@/stores/theme"
@@ -479,6 +442,7 @@ async function runCodexLogin() {
 
 const backends = ref([])
 const showBackendForm = ref(false)
+const editingBackendName = ref("")
 const backendForm = reactive({
   name: "",
   backend_type: "openai",
@@ -522,23 +486,56 @@ async function loadNativeTools() {
   }
 }
 
+function resetBackendForm() {
+  editingBackendName.value = ""
+  backendForm.name = ""
+  backendForm.backend_type = "openai"
+  backendForm.base_url = ""
+  backendForm.provider_name = ""
+  backendForm.provider_native_tools = []
+}
+
+function closeBackendForm() {
+  resetBackendForm()
+  showBackendForm.value = false
+}
+
+function toggleBackendForm() {
+  if (showBackendForm.value) {
+    closeBackendForm()
+    return
+  }
+  resetBackendForm()
+  showBackendForm.value = true
+}
+
+function startEditBackend(backend) {
+  editingBackendName.value = backend.name
+  backendForm.name = backend.name
+  backendForm.backend_type = backend.backend_type || "openai"
+  backendForm.base_url = backend.base_url || ""
+  backendForm.provider_name = backend.provider_name || ""
+  backendForm.provider_native_tools = Array.from(backend.provider_native_tools || [])
+  showBackendForm.value = true
+}
+
+function onBackendFormUpdate({ key, value }) {
+  backendForm[key] = key === "provider_native_tools" ? Array.from(value || []) : value
+}
+
 async function saveBackend() {
   if (!backendForm.name || !backendForm.backend_type) return
+  const backendName = backendForm.name.trim()
   try {
     await settingsAPI.saveBackend({
-      name: backendForm.name,
+      name: backendName,
       backend_type: backendForm.backend_type,
       base_url: backendForm.base_url,
-      provider_name: backendForm.provider_name || backendForm.name,
+      provider_name: backendForm.provider_name || backendName,
       provider_native_tools: Array.from(backendForm.provider_native_tools || []),
     })
-    ElMessage.success(`Saved provider: ${backendForm.name}`)
-    backendForm.name = ""
-    backendForm.backend_type = "openai"
-    backendForm.base_url = ""
-    backendForm.provider_name = ""
-    backendForm.provider_native_tools = []
-    showBackendForm.value = false
+    ElMessage.success(`Saved provider: ${backendName}`)
+    closeBackendForm()
     await loadBackends()
     await loadKeys()
   } catch (err) {
@@ -550,6 +547,7 @@ async function deleteBackend(name) {
   try {
     await settingsAPI.deleteBackend(name)
     ElMessage.success(`Deleted provider: ${name}`)
+    if (editingBackendName.value === name) closeBackendForm()
     await loadBackends()
     await loadKeys()
   } catch (err) {
