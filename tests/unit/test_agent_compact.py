@@ -73,3 +73,61 @@ class TestBuildCompactLlm:
         )
 
         assert compact_llm is agent.llm
+
+
+class TestAgentMRO:
+    """Regression for the silent MRO collision that caused
+    ``compact_manager._llm = None`` and the ``"No LLM available for
+    compaction"`` user report.
+
+    A sibling mixin (``AgentModelMixin``) once declared a
+    ``def _build_compact_llm(self, compact_cfg) -> Any: ...`` stub
+    "for type checkers". Because ``...`` is the ``Ellipsis`` literal
+    and *not* a NotImplementedError, the function silently returned
+    ``None``. ``AgentModelMixin`` sits before ``AgentCompactMixin``
+    in ``Agent.__mro__``, so its stub shadowed the real implementation
+    and every standard agent ended up with no compact LLM.
+
+    These tests pin two invariants:
+
+    1. ``Agent._build_compact_llm`` resolves to ``AgentCompactMixin``
+       (not any other mixin).
+    2. A freshly constructed ``Agent`` ends up with a non-None
+       ``compact_manager._llm`` after ``_init_compact_manager``.
+    """
+
+    def test_method_resolves_to_compact_mixin(self):
+        from kohakuterrarium.core.agent import Agent
+
+        method = Agent._build_compact_llm
+        assert method.__qualname__ == "AgentCompactMixin._build_compact_llm", (
+            f"Agent._build_compact_llm resolved to {method.__qualname__!r}; "
+            "expected AgentCompactMixin._build_compact_llm. A sibling mixin "
+            "is shadowing the real implementation via MRO."
+        )
+
+    def test_init_compact_manager_binds_real_llm(self, monkeypatch):
+        """End-to-end: building an Agent and running
+        ``_init_compact_manager`` must populate ``_llm`` with the
+        agent's active provider, never ``None``."""
+        # Stub out the api-key check so we can construct the provider
+        # without a real OPENAI_API_KEY in the environment.
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-used")
+
+        from kohakuterrarium.core.agent import Agent
+        from kohakuterrarium.core.config import AgentConfig
+
+        config = AgentConfig(name="test", model="gpt-4o", provider="openai")
+        agent = Agent(config=config)
+        assert agent.llm is not None, "agent.llm not initialized"
+
+        # ``_init_compact_manager`` is normally called inside ``start()``
+        # but is itself a synchronous, idempotent helper.
+        agent._init_compact_manager()
+
+        assert agent.compact_manager is not None
+        assert agent.compact_manager._llm is not None, (
+            "compact_manager._llm is None after init — MRO shadow bug. "
+            "The compact path will report 'No LLM available for compaction' "
+            "when the user clicks the compact button."
+        )

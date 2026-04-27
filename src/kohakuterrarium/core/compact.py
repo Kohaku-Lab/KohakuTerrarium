@@ -9,7 +9,9 @@ Design:
   - Background task: LLM summarizes the compact zone asynchronously
   - Atomic splice: when summary is ready, replaces compact zone
   - Incremental: each round's summary includes the previous summary
-  - Emergency truncation: if summarization fails, truncate oldest messages
+  - Failure preserves context unchanged — no emergency truncation, no
+    silent data loss; the agent keeps the full context if the LLM call
+    fails so the user can retry / switch model / etc.
 """
 
 import asyncio
@@ -18,6 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from kohakuterrarium.core.compact_text import extract_message_text
 from kohakuterrarium.core.single_flight import SingleFlightDispatch, SingleFlightLease
 from kohakuterrarium.llm.message import create_message
 from kohakuterrarium.utils.logging import get_logger
@@ -33,6 +36,7 @@ DEFAULT_MAX_TOKENS = 256_000
 DEFAULT_THRESHOLD = 0.80  # compact when prompt_tokens >= 80% of max_tokens
 DEFAULT_TARGET = 0.40  # aim for 40% of max_tokens after compact
 DEFAULT_KEEP_RECENT = 8  # keep last 8 turns raw (not summarized)
+
 
 COMPACT_PROMPT = """You are summarizing a conversation between an AI agent and a user (or between agents in a team).
 
@@ -98,6 +102,12 @@ class CompactManager:
         self._last_compact_time: float = 0
         self._compact_count: int = 0
         self._last_summary_error: str = ""
+        # Why ``trigger_compact`` last returned ``False``. Read by the
+        # ``/compact`` slash command (``builtins/user_commands/compact.py``)
+        # to surface a precise reason instead of the generic "busy"
+        # message. One of: ``""`` (success or never called),
+        # ``"no_controller"``, ``"too_short"``, ``"busy"``.
+        self._last_skip_reason: str = ""
         # References set by agent
         self._controller: Any = None
         self._llm: Any = None
@@ -152,6 +162,7 @@ class CompactManager:
         ``/compact`` on root has "nothing to compact".
         """
         if not self._controller:
+            self._last_skip_reason = "no_controller"
             return False
 
         # Pre-check size. The same logic is replicated inside _run_compact
@@ -189,6 +200,7 @@ class CompactManager:
                 message_count=len(messages),
                 boundary=boundary,
             )
+            self._last_skip_reason = "too_short"
             return False
 
         lease = self._dispatch.try_acquire()
@@ -197,6 +209,7 @@ class CompactManager:
                 "Compact trigger ignored — already running",
                 agent=self._agent_name,
             )
+            self._last_skip_reason = "busy"
             if self._output_router:
                 self._output_router.notify_activity(
                     "compact_decision",
@@ -231,6 +244,7 @@ class CompactManager:
                 },
             )
 
+        self._last_skip_reason = ""
         self._compact_task = asyncio.create_task(self._run_compact(lease))
         logger.info(
             "Auto-compact triggered",
@@ -294,6 +308,12 @@ class CompactManager:
                         "Compact vetoed by plugin(s)",
                         agent=self._agent_name,
                     )
+                    # Cooldown applies to vetos too. Without this, the
+                    # next ``should_compact`` call would re-trigger
+                    # immediately on every turn while the conversation
+                    # stays above threshold — wasting LLM/plugin calls
+                    # and emitting a flood of ``compact_skipped`` events.
+                    self._last_compact_time = time.time()
                     return
 
             # Build the text to summarize
@@ -356,7 +376,11 @@ class CompactManager:
 
                 # Persist compact_count for resume continuity and
                 # stamp the snapshot watermark to the latest event so
-                # resume can trust the compacted snapshot.
+                # resume can trust the compacted snapshot. Persisting
+                # ``last_compact_time`` lets resume restore the cooldown
+                # window — without it, every resume would permit an
+                # immediate re-compact regardless of how recent the last
+                # one was (audit finding 3j).
                 try:
                     last_event_id = 0
                     for evt in self._session_store.get_events(self._agent_name):
@@ -370,6 +394,9 @@ class CompactManager:
                     self._session_store.state[
                         f"{self._agent_name}:snapshot_event_id"
                     ] = last_event_id
+                    self._session_store.state[
+                        f"{self._agent_name}:last_compact_time"
+                    ] = self._last_compact_time
                 except Exception as e:
                     logger.debug(
                         "Failed to save compact_count state",
@@ -406,31 +433,74 @@ class CompactManager:
     def _count_keep_messages(self, messages: list) -> int:
         """Count how many messages from the end to keep (live zone).
 
-        Keeps at least keep_recent_turns worth of user/assistant pairs,
-        plus any tool call/result messages between them.
+        Two-phase policy:
+
+        1. **Walk back ``keep_recent_turns`` user turns.** This is the
+           normal case — preserve the recent turns + assistant/tool
+           messages between them.
+
+        2. **Half-cap fallback** when phase 1 cannot find enough user
+           turns. Without this an agent run with 100 tool calls but
+           only 2 user turns would always report ``boundary = 1``
+           ("too_short") even though there is plenty to summarise. The
+           fallback only applies once the conversation has at least
+           ``MIN_COMPACTABLE`` messages so a tiny chat (a couple
+           messages) is still considered too small to bother with.
         """
+        # Below this many messages the compact zone is so small there
+        # is nothing useful to summarise — skip and report ``too_short``.
+        MIN_COMPACTABLE = 8
+
+        n = len(messages)
+        if n <= 1:
+            return 0
         turns = 0
-        count = 0
+        by_turn_count = 0
+        found_target = False
         for msg in reversed(messages):
-            count += 1
+            by_turn_count += 1
             if msg.role == "user":
                 turns += 1
                 if turns >= self.config.keep_recent_turns:
+                    found_target = True
                     break
-        return min(count, len(messages) - 1)  # Always keep system prompt
+
+        if found_target:
+            # Normal path — keep the requested user-turn window plus
+            # whatever tool / assistant messages sit inside it.
+            return min(by_turn_count, n - 1)
+
+        # Fallback only kicks in when the conversation is long enough
+        # that the half-cap leaves a non-trivial compact zone.
+        if n < MIN_COMPACTABLE:
+            return min(by_turn_count, n - 1)
+
+        half_cap = max(1, n // 2)
+        return min(half_cap, n - 1)
 
     def _format_messages_for_summary(self, messages: list) -> str:
-        """Format messages into text for the summarization prompt."""
+        """Format messages into text for the summarization prompt.
+
+        ``msg.content`` arrives in three shapes from upstream:
+
+        * ``str`` — plain text, the easy case.
+        * ``list[ContentPart]`` — multimodal parts produced by the
+          framework's own message helpers; each part has a ``.text``
+          attribute (or is non-textual, in which case it carries no
+          summarisable content).
+        * ``list[dict]`` — the raw shape the web frontend POSTs and
+          ``conversation.append`` stores verbatim. Each dict looks like
+          ``{"type": "text", "text": "..."}`` for text and similar for
+          other modalities. **This case used to silently drop user
+          messages** because the old code asked for ``.text`` via
+          ``hasattr(p, "text")`` which is False for dicts — so a
+          conversation built entirely from web POSTs had no user
+          instructions reach the compact LLM.
+        """
         parts = []
         for msg in messages:
             role = msg.role
-            content = msg.content if isinstance(msg.content, str) else ""
-            if not content and hasattr(msg, "content") and msg.content:
-                # Handle multimodal: extract text parts
-                if isinstance(msg.content, list):
-                    content = " ".join(
-                        p.text for p in msg.content if hasattr(p, "text")
-                    )
+            content = extract_message_text(msg)
 
             # Truncate very long tool results
             if role == "tool" and len(content) > 500:
@@ -486,17 +556,6 @@ class CompactManager:
                 summary_max_tokens=summary_max_tokens,
             )
             return ""
-
-    def _emergency_truncate(self, messages: list) -> str:
-        """Last resort: create a minimal summary from message roles/counts."""
-        user_count = sum(1 for m in messages if m.role == "user")
-        assistant_count = sum(1 for m in messages if m.role == "assistant")
-        tool_count = sum(1 for m in messages if m.role == "tool")
-        return (
-            f"[Context auto-compact: {len(messages)} messages truncated "
-            f"({user_count} user, {assistant_count} assistant, {tool_count} tool). "
-            f"Use search_memory to retrieve specific details from session history.]"
-        )
 
     def _splice_conversation(
         self, conversation: Any, boundary: int, summary: str

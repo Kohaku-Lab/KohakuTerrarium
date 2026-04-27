@@ -27,6 +27,11 @@ class AgentModelMixin:
     """
 
     # Declared for static type-checkers; populated by ``Agent.__init__``.
+    # ``_build_compact_llm`` is provided by ``AgentCompactMixin`` — do
+    # NOT add a stub here, it would shadow the real implementation via
+    # MRO. ``Agent`` is composed as ``AgentInitMixin, AgentHandlersMixin,
+    # AgentMessagesMixin, AgentModelMixin, AgentCompactMixin, …`` so a
+    # method declared on this mixin wins over ``AgentCompactMixin``'s.
     llm: Any
     controller: Any
     compact_manager: Any
@@ -34,8 +39,6 @@ class AgentModelMixin:
     config: Any
     _llm_override: str | None
     _llm_identifier: str
-
-    def _build_compact_llm(self, compact_cfg: Any) -> Any: ...
 
     def switch_model(self, profile_name: str) -> str:
         """Switch the LLM provider to a different model profile.

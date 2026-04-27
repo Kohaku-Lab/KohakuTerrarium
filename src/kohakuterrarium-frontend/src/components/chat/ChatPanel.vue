@@ -440,13 +440,50 @@ async function triggerCompact() {
   if (props.readOnly) return
   try {
     const tab = chat.activeTab
+    let response
     if (chat._instanceType === "terrarium") {
-      await terrariumAPI.executeCreatureCommand(chat._instanceId, tab || "root", "compact")
+      response = await terrariumAPI.executeCreatureCommand(chat._instanceId, tab || "root", "compact")
     } else {
-      await agentAPI.executeCommand(chat._instanceId, "compact")
+      response = await agentAPI.executeCommand(chat._instanceId, "compact")
     }
+    // ``/compact`` returns a ``ui_notify`` payload describing one of
+    // four outcomes: triggered, no-controller, too-short, busy. Without
+    // surfacing it the user has no signal that the click did anything
+    // — the compact runs (or doesn't) silently in the background.
+    surfaceCommandResult(response)
   } catch (err) {
     console.error("Compact failed:", err)
+    ElMessage.error(`Compact failed: ${err?.message || err}`)
+  }
+}
+
+/**
+ * Render a ``UserCommandResult`` payload as a toast / inline message.
+ *
+ * Backend command results carry a ``data`` block built by ``ui_notify``
+ * (and friends) in ``modules/user_command/base.py``. CLI/TUI commit
+ * ``output`` to their own surfaces; the web frontend is responsible
+ * for translating the typed payload into UI. This helper covers the
+ * "notify" case — additional types (``select``, ``confirm``, …) get
+ * wired up when the command needing them surfaces in the chat header.
+ */
+function surfaceCommandResult(response) {
+  if (!response) return
+  if (response.error) {
+    ElMessage.error(response.error)
+    return
+  }
+  const payload = response.data
+  if (payload && payload.type === "notify" && payload.message) {
+    const level = payload.level || "info"
+    const fn = ElMessage[level] || ElMessage.info
+    fn(payload.message)
+    return
+  }
+  // Fall back to plain ``output`` text when no structured payload —
+  // mirrors how CLI / TUI render unspecified results.
+  if (response.output) {
+    ElMessage({ message: response.output, type: "info" })
   }
 }
 
@@ -463,13 +500,16 @@ async function triggerClear() {
   }
   try {
     const tab = chat.activeTab
+    let response
     if (chat._instanceType === "terrarium") {
-      await terrariumAPI.executeCreatureCommand(chat._instanceId, tab || "root", "clear", "--force")
+      response = await terrariumAPI.executeCreatureCommand(chat._instanceId, tab || "root", "clear", "--force")
     } else {
-      await agentAPI.executeCommand(chat._instanceId, "clear", "--force")
+      response = await agentAPI.executeCommand(chat._instanceId, "clear", "--force")
     }
+    surfaceCommandResult(response)
   } catch (err) {
     console.error("Clear failed:", err)
+    ElMessage.error(`Clear failed: ${err?.message || err}`)
   }
 }
 

@@ -14,7 +14,10 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from kohakuterrarium.bootstrap.agent_init import AgentInitMixin
 from kohakuterrarium.bootstrap.plugins import init_plugins
-from kohakuterrarium.core.agent_compact import AgentCompactMixin
+from kohakuterrarium.core.agent_compact import (
+    AgentCompactMixin,
+    restore_compact_state_from_session,
+)
 from kohakuterrarium.core.agent_handlers import AgentHandlersMixin
 from kohakuterrarium.core.agent_lifecycle import AgentLifecycleMixin
 from kohakuterrarium.core.agent_messages import AgentMessagesMixin
@@ -453,19 +456,9 @@ class Agent(
         self.compact_manager._agent_name = self.config.name
         if self.session_store:
             self.compact_manager._session_store = self.session_store
-            # Restore compact_count from session so round numbering continues
-            try:
-                saved_count = self.session_store.state.get(
-                    f"{self.config.name}:compact_count"
-                )
-                if saved_count is not None:
-                    self.compact_manager._compact_count = int(saved_count)
-                    logger.info(
-                        "Compact count restored",
-                        compact_count=self.compact_manager._compact_count,
-                    )
-            except (KeyError, TypeError, ValueError):
-                pass
+            restore_compact_state_from_session(
+                self.compact_manager, self.session_store, self.config.name
+            )
 
     def _init_plugins(self) -> None:
         """Initialize plugins from config + discover from packages."""

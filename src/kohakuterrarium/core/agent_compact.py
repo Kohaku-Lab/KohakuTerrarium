@@ -8,7 +8,7 @@ place.
 from typing import Any
 
 from kohakuterrarium.bootstrap.llm import create_llm_from_profile_name
-from kohakuterrarium.core.compact import CompactConfig
+from kohakuterrarium.core.compact import CompactConfig, CompactManager
 from kohakuterrarium.llm.profiles import profile_to_identifier, resolve_controller_llm
 from kohakuterrarium.utils.logging import get_logger
 
@@ -56,3 +56,33 @@ class AgentCompactMixin:
                     exc_info=True,
                 )
         return self.llm
+
+
+def restore_compact_state_from_session(
+    manager: CompactManager, session_store: Any, agent_name: str
+) -> None:
+    """Restore persisted compact state (count + cooldown) from the store.
+
+    Audit finding 3j: ``last_compact_time`` was previously not
+    persisted, so a quick resume after a successful compact would
+    bypass the cooldown and immediately re-trigger. This restores both
+    the round counter (display continuity) and the cooldown watermark
+    (rate-limit continuity) from the same save_state slot the manager
+    writes after each successful run.
+    """
+    state = getattr(session_store, "state", None)
+    if state is None:
+        return
+    try:
+        saved_count = state.get(f"{agent_name}:compact_count")
+        if saved_count is not None:
+            manager._compact_count = int(saved_count)
+            logger.info(
+                "Compact count restored",
+                compact_count=manager._compact_count,
+            )
+        saved_ts = state.get(f"{agent_name}:last_compact_time")
+        if saved_ts is not None:
+            manager._last_compact_time = float(saved_ts)
+    except (KeyError, TypeError, ValueError):
+        pass

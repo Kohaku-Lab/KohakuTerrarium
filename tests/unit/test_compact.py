@@ -140,16 +140,6 @@ class TestFormatMessagesForSummary:
         assert len(text) < 1000
 
 
-class TestEmergencyTruncate:
-    def test_produces_summary(self):
-        mgr, _ = _make_manager()
-        conv = _make_conversation(10)
-        messages = conv.get_messages()
-        result = mgr._emergency_truncate(messages[1:])
-        assert "truncated" in result.lower() or "compacted" in result.lower()
-        assert "search_memory" in result
-
-
 class TestSpliceConversation:
     def test_preserves_system_prompt(self):
         mgr, conv = _make_manager()
