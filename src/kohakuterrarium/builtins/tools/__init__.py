@@ -9,6 +9,8 @@ Internal code should import from ``builtins.tool_catalog`` directly to
 avoid pulling in all tool modules.
 """
 
+import importlib
+
 from kohakuterrarium.builtins.tool_catalog import (
     get_builtin_tool,
     is_builtin_tool,
@@ -39,12 +41,13 @@ from kohakuterrarium.builtins.tools.tree import TreeTool
 from kohakuterrarium.builtins.tools.web_fetch import WebFetchTool
 from kohakuterrarium.builtins.tools.web_search import WebSearchTool
 from kohakuterrarium.builtins.tools.write import WriteTool
-from kohakuterrarium.mcp.tools import (
-    MCPCallTool,
-    MCPConnectTool,
-    MCPDisconnectTool,
-    MCPListTool,
-)
+
+_MCP_EXPORTS = {
+    "MCPListTool": "kohakuterrarium.mcp.tools",
+    "MCPCallTool": "kohakuterrarium.mcp.tools",
+    "MCPConnectTool": "kohakuterrarium.mcp.tools",
+    "MCPDisconnectTool": "kohakuterrarium.mcp.tools",
+}
 
 __all__ = [
     # Registry
@@ -82,3 +85,13 @@ __all__ = [
     "MCPConnectTool",
     "MCPDisconnectTool",
 ]
+
+
+def __getattr__(name: str):
+    module_name = _MCP_EXPORTS.get(name)
+    if module_name is None:
+        raise AttributeError(name)
+    module = importlib.import_module(module_name)
+    value = getattr(module, name)
+    globals()[name] = value
+    return value

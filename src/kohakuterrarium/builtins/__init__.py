@@ -2,12 +2,14 @@
 Builtins module - all built-in components for the framework.
 
 Contains:
-- tools: Built-in tool implementations (bash, python, read, write, edit, glob, grep)
-- subagents: Built-in sub-agent configurations (explore, plan, memory_read, memory_write)
+- tools: Built-in tool registry + lazy tool exports
+- subagents: Built-in sub-agent registry
 - inputs: Built-in input modules (cli, tui, none)
 - outputs: Built-in output modules (stdout, tts)
 - skills: Skill documentation files
 """
+
+import importlib
 
 from kohakuterrarium.builtins.inputs import (
     CLIInput,
@@ -31,24 +33,27 @@ from kohakuterrarium.builtins.outputs import (
     is_builtin_output,
     list_builtin_outputs,
 )
-from kohakuterrarium.builtins.subagents import (
+from kohakuterrarium.builtins.subagent_catalog import (
     BUILTIN_SUBAGENTS,
     get_builtin_subagent_config,
     list_builtin_subagents,
 )
-from kohakuterrarium.builtins.tools import (
-    BashTool,
-    EditTool,
-    GlobTool,
-    GrepTool,
-    PythonTool,
-    ReadTool,
-    WriteTool,
+from kohakuterrarium.builtins.tool_catalog import (
     get_builtin_tool,
     is_builtin_tool,
     list_builtin_tools,
     register_builtin,
 )
+
+_TOOL_EXPORTS = {
+    "BashTool": "kohakuterrarium.builtins.tools",
+    "PythonTool": "kohakuterrarium.builtins.tools",
+    "ReadTool": "kohakuterrarium.builtins.tools",
+    "WriteTool": "kohakuterrarium.builtins.tools",
+    "EditTool": "kohakuterrarium.builtins.tools",
+    "GlobTool": "kohakuterrarium.builtins.tools",
+    "GrepTool": "kohakuterrarium.builtins.tools",
+}
 
 __all__ = [
     # Tool registry
@@ -91,3 +96,13 @@ __all__ = [
     "DummyTTS",
     "TUIOutput",
 ]
+
+
+def __getattr__(name: str):
+    module_name = _TOOL_EXPORTS.get(name)
+    if module_name is None:
+        raise AttributeError(name)
+    module = importlib.import_module(module_name)
+    value = getattr(module, name)
+    globals()[name] = value
+    return value
