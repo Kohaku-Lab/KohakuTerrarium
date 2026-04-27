@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 
 from kohakuterrarium.api.deps import get_manager
 from kohakuterrarium.api.routes._session_fork import fork_session_handler
+from kohakuterrarium.api.routes._session_viewer import build_viewer_router
 from kohakuterrarium.api.routes._session_paths import (
     all_session_files as _all_session_files_impl,
     all_versions_for_session as _all_versions_for_session_impl,
@@ -545,6 +546,20 @@ async def get_session_artifact(session_name: str, filepath: str):
 # --------------------------------------------------------------------
 # Fork / branch (Wave E)
 # --------------------------------------------------------------------
+
+
+# --------------------------------------------------------------------
+# Viewer / Trace Viewer (V1) — see plans/session-system/viewer-design.md
+# Routes mounted via the sub-router in ``_session_viewer`` so the
+# handlers live in their own file and ``sessions.py`` stays under cap.
+# --------------------------------------------------------------------
+
+router.include_router(
+    build_viewer_router(
+        resolve_session_path=_resolve_session_path,
+        canonical_name=_normalize_session_stem,
+    )
+)
 
 
 @router.post("/{session_name}/fork", status_code=201)

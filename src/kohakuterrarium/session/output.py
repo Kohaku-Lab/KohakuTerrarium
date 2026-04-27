@@ -592,6 +592,33 @@ class SessionOutput(OutputModule):
                 "total_tokens": metadata.get("total_tokens", 0),
             },
         )
+        # Populate the ``turn_rollup`` KVault table so the Trace / Cost
+        # / Overview tabs in the viewer have data to render. The
+        # endpoints fall back to events-derivation when this row is
+        # missing, but writing the row at the source is cheaper for
+        # subsequent reads.
+        turn_index = metadata.get("turn_index", 0)
+        if self._store and isinstance(turn_index, int) and turn_index > 0:
+            try:
+                self._store.save_turn_rollup(
+                    self._event_key_prefix,
+                    turn_index,
+                    {
+                        "started_at": metadata.get("started_at"),
+                        "ended_at": metadata.get("ended_at"),
+                        "tokens_in": int(metadata.get("prompt_tokens") or 0),
+                        "tokens_out": int(metadata.get("completion_tokens") or 0),
+                        "tokens_cached": int(metadata.get("cached_tokens") or 0),
+                        "cost_usd": metadata.get("cost_usd"),
+                    },
+                )
+            except Exception as e:
+                logger.debug(
+                    "save_turn_rollup failed",
+                    error=str(e),
+                    turn_index=turn_index,
+                    exc_info=True,
+                )
 
     def _handle_plugin_hook_timing(
         self, name: str, detail: str, metadata: dict

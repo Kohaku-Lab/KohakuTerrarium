@@ -199,13 +199,13 @@
   },
   {
     "file": "src/kohakuterrarium/api/app.py",
-    "line": 116,
+    "line": 118,
     "function": "_mount_spa",
     "reason": "fastapi.responses imported only when a built SPA is being mounted"
   },
   {
     "file": "src/kohakuterrarium/api/app.py",
-    "line": 117,
+    "line": 119,
     "function": "_mount_spa",
     "reason": "fastapi.staticfiles imported only when a built SPA is being mounted"
   },

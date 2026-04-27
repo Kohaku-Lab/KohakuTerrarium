@@ -98,6 +98,14 @@ class SessionStore:
         # Artifacts directory — created lazily.
         self._artifacts_dir: Path | None = None
 
+        # Append-event subscribers. Each callback receives ``(key, data)``
+        # after the row has been written and FTS has indexed (so any
+        # reader call from the callback sees the event). Callbacks run
+        # in-process, on the appending thread, wrapped in try/except so
+        # one slow / failing listener cannot stall ``append_event``.
+        # Used by the live-attach WebSocket in ``api/ws/sessions.py``.
+        self._event_subscribers: list[Callable[[str, dict], None]] = []
+
         logger.debug("SessionStore opened", path=self._path)
 
     @property
@@ -206,7 +214,34 @@ class SessionStore:
             except Exception as e:
                 logger.debug("FTS indexing failed", error=str(e), exc_info=True)
 
+        # Fan out to live subscribers. Each callback is isolated — a
+        # slow or failing listener must not block the appending agent.
+        for cb in tuple(self._event_subscribers):
+            try:
+                cb(key, data)
+            except Exception as e:
+                logger.debug("Event subscriber failed", error=str(e), exc_info=True)
+
         return key, event_id
+
+    # ─── Live event subscription (V1 viewer) ────────────────────────
+
+    def subscribe(self, callback: Callable[[str, dict], None]) -> None:
+        """Register a callback fired after each ``append_event``.
+
+        Idempotent: re-subscribing the same callable is a no-op so the
+        WebSocket handler does not need an explicit "already attached"
+        check on reconnect retries.
+        """
+        if callback not in self._event_subscribers:
+            self._event_subscribers.append(callback)
+
+    def unsubscribe(self, callback: Callable[[str, dict], None]) -> None:
+        """Remove a previously-registered callback. Safe if not present."""
+        try:
+            self._event_subscribers.remove(callback)
+        except ValueError:
+            pass
 
     def get_events(self, agent: str) -> list[dict]:
         """Get all events for an agent, ordered by sequence.
