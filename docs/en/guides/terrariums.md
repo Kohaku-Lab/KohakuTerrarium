@@ -157,15 +157,16 @@ Hot-plug is useful for provisioning ad-hoc specialists without restarting. Exist
 
 ## Observer for debugging
 
-`ChannelObserver` is a non-destructive tap on any channel. Unlike a consumer, observers read without competing for queue messages. The dashboard uses this under the hood; programmatically:
+Channel observation is a non-destructive tap on channel traffic. Unlike a consumer, an observer reads without competing for queue messages. Programmatic code can subscribe to the engine event stream and filter for channel messages:
 
 ```python
-sub = runtime.observer.observe("tasks")
-async for msg in sub:
-    print(f"[tasks] {msg.sender}: {msg.content}")
+from kohakuterrarium import EventFilter, EventKind
+
+async for ev in engine.subscribe(EventFilter(kinds={EventKind.CHANNEL_MESSAGE})):
+    print(f"[{ev.channel}] {ev.creature_id}: {ev.payload}")
 ```
 
-`--observe` from `kt terrarium run` attaches observers to the listed channels and streams them in the TUI.
+The dashboard exposes this idea as an attach policy: it observes traffic without consuming the underlying channel messages.
 
 ## Programmatic terrariums
 
@@ -187,7 +188,7 @@ asyncio.run(main())
 
 For more patterns (event subscription, hot-plug, solo + recipe coexistence) see [Programmatic Usage](programmatic-usage.md) and the runnable scripts in [`examples/code/`](../../examples/code/) (`terrarium_solo.py`, `terrarium_recipe.py`, `terrarium_hotplug.py`).
 
-The legacy `TerrariumRuntime` is still on disk during the transition; new code should use `Terrarium`.
+For management tasks above the runtime engine — packages, active-session handles, saved-session persistence, attach policies, and editor flows — use [`Studio`](studio.md).
 
 ## Output wiring
 

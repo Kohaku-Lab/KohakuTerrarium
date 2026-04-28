@@ -1,6 +1,6 @@
 ---
 title: Python API
-summary: The kohakuterrarium package surface — Terrarium engine, Creature, Agent, compose, and testing helpers.
+summary: The kohakuterrarium package surface — Studio, Terrarium engine, Creature, Agent, compose, and testing helpers.
 tags:
   - reference
   - python
@@ -22,21 +22,17 @@ For task walkthroughs, see
 
 | When you want | Use |
 |---|---|
+| The management facade (catalog, identity, sessions, persistence, attach, editors) | `kohakuterrarium.Studio` |
 | The runtime engine (solo or multi-creature) | `kohakuterrarium.Terrarium` |
 | A running creature handle | `kohakuterrarium.Creature` |
 | Engine events | `kohakuterrarium.{EngineEvent, EventKind, EventFilter}` |
 | Topology results | `kohakuterrarium.{ConnectionResult, DisconnectionResult}` |
 | Direct agent control | `kohakuterrarium.core.agent.Agent` |
-| Streaming chat (legacy wrapper) | `kohakuterrarium.serving.agent_session.AgentSession` |
 | Config loading | `kohakuterrarium.core.config.load_agent_config` / `kohakuterrarium.terrarium.config.load_terrarium_config` |
 | Persistence / search | `kohakuterrarium.session.store.SessionStore`, `kohakuterrarium.session.memory.SessionMemory` |
 | Extension author | `kohakuterrarium.modules.{tool,input,output,trigger,subagent}.base` |
 | Pipeline composition | `kohakuterrarium.compose` |
 | Tests | `kohakuterrarium.testing` |
-
-The legacy `kohakuterrarium.terrarium.runtime.TerrariumRuntime` and
-`kohakuterrarium.serving.manager.KohakuManager` remain on disk during
-the transition and are documented further down.
 
 ---
 
@@ -47,6 +43,7 @@ The new public surface is re-exported directly from
 
 ```python
 from kohakuterrarium import (
+    Studio,
     Terrarium,
     Creature,
     EngineEvent,
@@ -56,6 +53,59 @@ from kohakuterrarium import (
     DisconnectionResult,
 )
 ```
+
+### `Studio`
+
+Module: `kohakuterrarium.studio.studio`. Programmatic facade for the
+studio tier. Wraps a `Terrarium` engine and exposes catalog, identity,
+active-session, persistence, editor, and attach namespaces.
+
+Constructor and lifecycle:
+
+- `Studio(engine: Terrarium | None = None)` — create a facade over an
+  existing engine, or create an empty engine if omitted.
+- `async with Studio() as studio: ...` — enters/exits the underlying
+  engine context.
+- `await studio.shutdown()` — stop every running creature through the
+  engine.
+- `studio.engine: Terrarium` — drop down to raw runtime operations.
+
+Classmethod constructors:
+
+- `async Studio.with_creature(config, *, pwd=None, llm_override=None) -> Studio`
+- `async Studio.from_recipe(recipe, *, pwd=None) -> Studio`
+- `async Studio.resume(store_or_path, *, pwd=None, llm_override=None) -> Studio`
+
+Namespaces:
+
+- `studio.sessions` — active engine-backed sessions:
+  `start_creature`, `start_terrarium`, `list`, `get`, `stop`,
+  `find_creature`, `add_creature`, `remove_creature`, `add_channel`,
+  `connect`, `disconnect`, `wire_output`, `unwire_output`,
+  `search_memory`.
+- `studio.sessions.chat` — `chat`, `regenerate`, `edit_message`,
+  `rewind`, `history`, `branches`. `chat(...)` is awaited to produce
+  an async iterator of text chunks.
+- `studio.sessions.ctl` — `interrupt`, `list_jobs`, `cancel_job`,
+  `promote_job`.
+- `studio.sessions.state` — `scratchpad`, `patch_scratchpad`,
+  `triggers`, `env`, `system_prompt`, `working_dir`,
+  `set_working_dir`.
+- `studio.sessions.plugins` — `list`, `toggle`.
+- `studio.sessions.model` — `switch`, `native_tool_options`.
+- `studio.sessions.command` — `execute`.
+- `studio.catalog` — `packages`, `creatures`, `modules`, `builtins`,
+  `introspect` namespaces.
+- `studio.identity` — `llm`, `keys`, `codex`, `mcp`, `ui_prefs`,
+  `settings` namespaces.
+- `studio.persistence` — `list`, `resume`, `fork`, `delete`,
+  `history_index`, `history`, `resolve_path`, plus `viewer` payload
+  builders (`tree`, `summary`, `turns`, `events`, `diff`, `export`).
+- `studio.editors` — `creatures` and `modules` CRUD/scaffold helpers.
+- `studio.attach` — `policies_for_creature`, `policies_for_session`.
+
+See [guides/studio](../guides/studio.md) for task-oriented examples and
+[concepts/studio](../concepts/studio.md) for the layer model.
 
 ### `Terrarium`
 
@@ -69,8 +119,8 @@ Classmethod factories:
 - `async Terrarium.from_recipe(recipe, *, pwd=None) -> Terrarium` —
   engine with a recipe applied. ``recipe`` is a `TerrariumConfig` or
   YAML path.
-- `async Terrarium.resume(store, *, recipe=None) -> Terrarium` —
-  **not yet implemented**; raises `NotImplementedError`.
+- `async Terrarium.resume(store, *, pwd=None, llm_override=None) -> Terrarium`
+  — build a fresh engine and adopt a saved session.
 
 Constructor:
 
@@ -311,8 +361,8 @@ Attributes:
 
 Notes:
 
-- `environment` is provided by `TerrariumRuntime` for multi-agent; `None`
-  for standalone.
+- `environment` is provided by the `Terrarium` graph hosting the creature;
+  direct standalone `Agent` use may leave it as `None`.
 - An `Agent` instance is not reusable after `stop()`; build a new one to
   resume from a `SessionStore`.
 
@@ -921,34 +971,11 @@ providers include `GeminiEmbedder`. Aliases: `@tiny`, `@base`,
 
 ---
 
-## `kohakuterrarium.terrarium` (legacy runtime)
+## `kohakuterrarium.terrarium` recipe compatibility
 
-The classes below predate the unified `Terrarium` engine documented
-above. They still exist on disk during the transition; new code should
-prefer `Terrarium`.
+The config dataclasses and loader below describe terrarium recipe files
+consumed by `Terrarium.from_recipe(...)` / `apply_recipe(...)`.
 
-### `TerrariumRuntime` (legacy)
-
-Module: `kohakuterrarium.terrarium.runtime`. Multi-agent orchestrator;
-subclasses `HotPlugMixin`.
-
-Lifecycle:
-
-- `async start() -> None`
-- `async stop() -> None`
-- `async run() -> None`
-
-Hot-plug:
-
-- `async add_creature(name, creature: Agent, ...) -> CreatureHandle`
-- `async remove_creature(name) -> bool`
-- `async add_channel(name, channel_type) -> None`
-- `async wire_channel(creature_name, channel_name, direction) -> None`
-
-Properties: `api: TerrariumAPI`, `observer: ChannelObserver`.
-
-Attributes: `config: TerrariumConfig`, `environment: Environment`,
-`_creatures: dict[str, CreatureHandle]`.
 
 ### `TerrariumConfig`, `CreatureConfig`, `ChannelConfig`, `RootConfig`
 
@@ -987,64 +1014,14 @@ Functions:
 - `load_terrarium_config(config_path: str) -> TerrariumConfig`
 - `build_channel_topology_prompt(config, creature) -> str`
 
-### `TerrariumAPI`, `ChannelObserver`, `CreatureHandle`
-
-Programmatic control surfaces. `TerrariumAPI` mirrors the terrarium
-tools available to the root agent. `ChannelObserver` provides
-non-destructive observation. `CreatureHandle` wraps an `Agent` plus
-its terrarium wiring.
-
 ---
 
 ## `kohakuterrarium.serving`
 
-### `KohakuManager` (legacy)
-
-Module: `kohakuterrarium.serving.manager`. Transport-agnostic manager
-that predates the `Terrarium` engine. Still used by older HTTP routes
-during the transition; new code should reach for `Terrarium`.
-
-Agent methods:
-
-- `async agent_create(config_path=None, config=None, llm_override=None, pwd=None) -> str`
-- `async agent_stop(agent_id) -> None`
-- `async agent_chat(agent_id, message) -> AsyncIterator[str]`
-- `agent_status(agent_id) -> dict`
-- `agent_list() -> list[dict]`
-- `agent_interrupt(agent_id) -> None`
-- `agent_get_jobs(agent_id) -> list[dict]`
-- `async agent_cancel_job(agent_id, job_id) -> bool`
-- `agent_switch_model(agent_id, profile_name) -> str`
-- `async agent_execute_command(agent_id, command, args="") -> dict`
-
-Terrarium methods:
-
-- `async terrarium_create(config_path, ...) -> str`
-- `async terrarium_stop(terrarium_id) -> None`
-- `async terrarium_run(terrarium_id) -> AsyncIterator[str]`
-- creature / channel / observer operations mirroring the HTTP surface.
-
-### `AgentSession`
-
-Module: `kohakuterrarium.serving.agent_session`. Thin wrapper around
-`Agent` with concurrent input-injection and output streaming.
-
-`get_status()` now includes both the raw model id and `llm_name`, the
-canonical `provider/name[@variations]` identifier used by UI and `/model`.
-
-Factories:
-
-- `async from_path(config_path, llm_override=None, pwd=None) -> AgentSession`
-- `async from_config(config: AgentConfig) -> AgentSession`
-- `async from_agent(agent: Agent) -> AgentSession`
-
-Methods:
-
-- `async start() / async stop()`
-- `async chat(message: str | list[dict]) -> AsyncIterator[str]`
-- `get_status() -> dict`
-
-Attributes: `agent_id: str`, `agent: Agent`.
+Serving helpers launch or support the HTTP API and web / desktop frontends.
+User-facing session management should go through `Studio`; route handlers
+should delegate catalog, identity, session, persistence, attach, and editor
+policy to the corresponding Studio namespaces.
 
 ---
 

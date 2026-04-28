@@ -184,7 +184,7 @@ Pick composition when:
 
 ## See also
 
-- [Programmatic Usage](programmatic-usage.md) — the underlying `Agent` / `AgentSession` API.
+- [Programmatic Usage](programmatic-usage.md) — the underlying `Studio` / `Terrarium` / `Creature` / `Agent` API.
 - [Concepts / composition algebra](../concepts/python-native/composition-algebra.md) — design rationale.
 - [Reference / Python API](../reference/python.md) — `compose.core`, `compose.agent`, operator signatures.
 - [examples/code/](../../examples/code/) — `review_loop.py`, `ensemble_voting.py`, `debate_arena.py`, `smart_router.py`, `pipeline_transforms.py`.

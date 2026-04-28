@@ -18,6 +18,8 @@ If you want a guided first walk-through, go to [Tutorials](../tutorials/README.m
 
 - [Getting Started](getting-started.md) — install, authenticate, run your first creature, resume, and open the web UI.
 - [Creatures](creatures.md) — anatomy, inheritance, prompt files, tool/subagent wiring, packaging.
+- [Terrariums](terrariums.md) — the runtime engine for solo and multi-creature graphs.
+- [Studio](studio.md) — the management layer for catalog, identity, sessions, persistence, attach, and editors.
 - [Sessions](sessions.md) — `.kohakutr` files, resume, compaction.
 
 ## Build and configure
@@ -31,9 +33,10 @@ If you want a guided first walk-through, go to [Tutorials](../tutorials/README.m
 
 ## Multi-agent and composition
 
-- [Terrariums](terrariums.md) — channels, root agents, hot-plug, observers.
+- [Terrariums](terrariums.md) — channels, root agents, hot-plug, observers, and the `Terrarium` runtime class.
+- [Studio](studio.md) — manage running sessions and saved state through the `Studio` class.
 - [Composition](composition.md) — `>>`, `&`, `|`, `*` pipelines from Python.
-- [Programmatic Usage](programmatic-usage.md) — embedding `Agent`, `AgentSession`, `TerrariumRuntime`, `KohakuManager`.
+- [Programmatic Usage](programmatic-usage.md) — embedding `Terrarium`, `Studio`, `Creature`, and lower-level `Agent` objects.
 
 ## Persist and search
 

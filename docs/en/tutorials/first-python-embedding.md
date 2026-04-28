@@ -1,6 +1,6 @@
 ---
 title: Embedding in Python
-summary: Run an agent inside your own Python code via AgentSession and the compose algebra.
+summary: Run an agent inside your own Python code via Agent, Creature, Terrarium, Studio, and the compose algebra.
 tags:
   - tutorials
   - python
@@ -15,15 +15,16 @@ with other code.
 
 **End state:** a minimal script that starts a creature, injects an
 input, captures output through a custom handler, and shuts down cleanly.
-Then the same thing using `AgentSession` for event streaming. Then a
-terrarium, embedded the same way.
+Then the same thing using `Creature.chat()` for event streaming. Then a
+terrarium and Studio session, embedded the same way.
 
 **Prerequisites:** [First Creature](first-creature.md). You need the
 package installed in a mode where you can `import kohakuterrarium`.
 
 An agent in this framework is not a config — it is a Python object. A
 config describes one; `Agent.from_path(...)` builds one; you own the
-object. Sub-agents, terrariums, and sessions are the same shape. See
+object. Sub-agents, `Terrarium` engines, `Creature` handles, and
+`Studio` sessions are the same shape. See
 [agent-as-python-object](../concepts/python-native/agent-as-python-object.md)
 for the full mental model.
 
@@ -118,7 +119,7 @@ asyncio.run(main())
 This is the right shape for a web backend, a bot, or anything that
 wants to own rendering.
 
-## Step 4 — Use `AgentSession` for streaming
+## Step 4 — Use `Creature.chat()` for streaming
 
 Goal: get an async iterator of chunks, not a push handler. Useful when
 you want an `async for` loop over the response.
@@ -126,31 +127,30 @@ you want an `async for` loop over the response.
 ```python
 import asyncio
 
-from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.serving.agent_session import AgentSession
+from kohakuterrarium import Terrarium
 
 
 async def main() -> None:
-    agent = Agent.from_path("@kt-biome/creatures/general")
-    session = AgentSession(agent)
+    engine, creature = await Terrarium.with_creature(
+        "@kt-biome/creatures/general"
+    )
 
-    await session.start()
     try:
-        async for chunk in session.chat(
+        async for chunk in creature.chat(
             "Describe three practical uses of a terrarium."
         ):
             print(chunk, end="", flush=True)
         print()
     finally:
-        await session.stop()
+        await engine.shutdown()
 
 
 asyncio.run(main())
 ```
 
-`AgentSession` is the transport-friendly wrapper used by the HTTP and
-WebSocket layers. Same agent underneath; it just gives you an
-`AsyncIterator[str]` per `chat(...)` call.
+`Creature` is the engine-level wrapper around the same underlying
+`Agent`. It adds graph membership and gives you an `AsyncIterator[str]`
+per `chat(...)` call.
 
 ## Step 5 — Embed a whole terrarium
 
@@ -159,33 +159,64 @@ Goal: drive a multi-agent setup from Python instead of the CLI.
 ```python
 import asyncio
 
-from kohakuterrarium.terrarium.config import load_terrarium_config
-from kohakuterrarium.terrarium.runtime import TerrariumRuntime
+from kohakuterrarium import Terrarium
 
 
 async def main() -> None:
-    config = load_terrarium_config("@kt-biome/terrariums/swe_team")
-    runtime = TerrariumRuntime(config)
-
-    await runtime.start()
-    try:
-        # runtime.run() drives the main loop until a stop signal.
-        # For a script, you can interact through runtime's API or
-        # just let the creatures run to quiescence.
-        await runtime.run()
-    finally:
-        await runtime.stop()
+    async with await Terrarium.from_recipe(
+        "@kt-biome/terrariums/swe_team"
+    ) as engine:
+        swe = engine["swe"]
+        async for chunk in swe.chat("Summarize the team topology."):
+            print(chunk, end="", flush=True)
+        print()
 
 
 asyncio.run(main())
 ```
 
-For programmatic *control* of a running terrarium (send on a channel,
-start a creature, observe messages), use `TerrariumAPI`
-(`kohakuterrarium.terrarium.api`). That is the same facade the
-terrarium-management tools route through.
+For programmatic *control* of a running terrarium (add creatures,
+connect channels, observe events), use methods on `Terrarium` itself:
+`add_creature`, `connect`, `disconnect`, `subscribe`, and `shutdown`.
+For user-facing management concerns above the engine, use `Studio`.
 
-## Step 6 — Compose agents as values
+## Step 6 — Manage sessions with Studio
+
+Goal: use the same management facade as the CLI and dashboard: active
+sessions, saved-session persistence, catalog, settings, attach policies,
+and editor workflows.
+
+```python
+import asyncio
+
+from kohakuterrarium import Studio
+
+
+async def main() -> None:
+    async with Studio() as studio:
+        session = await studio.sessions.start_creature(
+            "@kt-biome/creatures/general"
+        )
+        cid = session.creatures[0]["creature_id"]
+
+        stream = await studio.sessions.chat.chat(
+            session.session_id,
+            cid,
+            "What does Studio manage?",
+        )
+        async for chunk in stream:
+            print(chunk, end="", flush=True)
+        print()
+
+
+asyncio.run(main())
+```
+
+`Studio` wraps a `Terrarium` engine and adds management namespaces:
+`catalog`, `identity`, `sessions`, `persistence`, `attach`, and
+`editors`.
+
+## Step 7 — Compose agents as values
 
 The real leverage of "agents are Python objects" is that you can put
 one inside anything else: inside a plugin, inside a trigger, inside a
@@ -198,10 +229,11 @@ starts to feel natural, reach for those.
 ## What you learned
 
 - An `Agent` is a regular Python object — build, start, inject, stop.
-- `set_output_handler` swaps the output sink. `AgentSession.chat()`
-  turns it into an async iterator.
-- `TerrariumRuntime` runs a whole multi-agent config with the same
-  shape.
+- `set_output_handler` swaps the output sink. `Creature.chat()` turns
+  an engine-hosted creature into an async iterator.
+- `Terrarium` runs one or many creatures in graph topology.
+- `Studio` manages active sessions, saved sessions, catalog, identity,
+  attach policy, and editor workflows above the engine.
 - The CLI is one consumer of these objects; your application can be
   another.
 

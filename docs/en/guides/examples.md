@@ -67,12 +67,14 @@ Related guide: [Plugins](plugins.md). See `examples/plugins/README.md` for the f
 
 ## `examples/code/` — Python embedding
 
-Scripts that embed the framework with your code as the orchestrator. Each uses a different slice of the compose algebra or the `Agent` / `TerrariumRuntime` / `KohakuManager` API.
+Scripts that embed the framework with your code as the orchestrator. Each uses a different slice of the compose algebra or the `Studio` / `Terrarium` / `Creature` / `Agent` API.
 
 | Script | Pattern | Features used |
 |---|---|---|
-| `programmatic_chat.py` | Agent as library | `AgentSession.chat()` |
-| `run_terrarium.py` | Terrarium from code | `TerrariumRuntime`, channel injection |
+| `programmatic_chat.py` | Agent as library | `Agent` lifecycle and output handlers |
+| `terrarium_solo.py` | Solo creature in an engine | `Terrarium.with_creature()`, `Creature.chat()` |
+| `terrarium_recipe.py` | Terrarium recipe from code | `Terrarium.from_recipe()`, channels, engine events |
+| `terrarium_hotplug.py` | Dynamic topology | `Terrarium.add_creature()`, `connect()`, `disconnect()` |
 | `discord_adventure_bot.py` | Bot-owned interaction | `agent()`, dynamic creation, game state |
 | `debate_arena.py` | Multi-agent turn-taking | `agent()`, `>>`, `async for`, persistent agents |
 | `task_orchestrator.py` | Dynamic agent topology | `factory()`, `>>`, `asyncio.gather` |

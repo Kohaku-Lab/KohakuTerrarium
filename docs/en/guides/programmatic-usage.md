@@ -1,6 +1,6 @@
 ---
 title: Programmatic usage
-summary: Drive Terrarium, Creature, Agent, and AgentSession from your own Python code.
+summary: Drive Studio, Terrarium, Creature, and Agent from your own Python code.
 tags:
   - guides
   - python
@@ -11,22 +11,69 @@ tags:
 
 For readers embedding agents inside their own Python code.
 
-A creature isn't a config file — the config describes one. A running creature is an async Python object hosted by a `Terrarium` engine. Everything in KohakuTerrarium is callable and awaitable. Your code is the orchestrator; agents are workers you invoke.
+A creature isn't a config file — the config describes one. A running creature is an async Python object hosted by a `Terrarium` engine. `Studio` is the management facade above that engine: catalog, identity, active sessions, saved sessions, attach policies, and editor workflows. Everything in KohakuTerrarium is callable and awaitable. Your code is the orchestrator; agents are workers you invoke.
 
-Concept primer: [agent as a Python object](../concepts/python-native/agent-as-python-object.md), [composition algebra](../concepts/python-native/composition-algebra.md).
+Concept primer: [Studio](../concepts/studio.md), [Terrarium](../concepts/multi-agent/terrarium.md), [agent as a Python object](../concepts/python-native/agent-as-python-object.md), [composition algebra](../concepts/python-native/composition-algebra.md).
 
 ## Entry points
 
 | Surface | Use when |
 |---|---|
-| `Terrarium` | The single runtime engine. Add creatures, connect them, observe events. Same engine handles solo and multi-creature workloads. |
+| `Studio` | The management facade. Use it for packages/catalog, settings/identity, active sessions, saved sessions, attach policy, and editor workflows. |
+| `Terrarium` | The runtime engine. Add creatures, connect them, observe events. Same engine handles solo and multi-creature workloads. |
 | `Creature` | A running creature in the engine — `chat()`, `inject_input()`, `get_status()`. Returned by `Terrarium.add_creature` / `with_creature`. |
 | `Agent` | Lower-level: the LLM controller behind a creature. Use when you need direct control over events, triggers, or output handlers. |
-| `AgentSession` | Legacy streaming wrapper. Functional, but `Creature.chat()` is the new equivalent. |
 
-The top-level imports are stable: `from kohakuterrarium import Terrarium, Creature, EngineEvent, EventFilter`.
+The top-level imports are stable: `from kohakuterrarium import Studio, Terrarium, Creature, EngineEvent, EventFilter`.
 
 For multi-agent Python pipelines without an engine, see [Composition](composition.md).
+
+## `Studio` — management facade
+
+Use `Studio` when you are embedding the same responsibilities as the
+CLI or dashboard: start/list/stop sessions, resume saved `.kohakutr`
+files, inspect packages, edit workspaces, or expose attach streams.
+
+```python
+import asyncio
+from kohakuterrarium import Studio
+
+async def main():
+    async with Studio() as studio:
+        session = await studio.sessions.start_creature(
+            "@kt-biome/creatures/general"
+        )
+        cid = session.creatures[0]["creature_id"]
+
+        stream = await studio.sessions.chat.chat(
+            session.session_id,
+            cid,
+            "Explain this project in one paragraph.",
+        )
+        async for chunk in stream:
+            print(chunk, end="", flush=True)
+
+asyncio.run(main())
+```
+
+Common construction helpers:
+
+- `Studio()` — create an empty Studio with an empty engine.
+- `await Studio.with_creature(config, *, pwd=None)` — create Studio + a one-creature session.
+- `await Studio.from_recipe(recipe, *, pwd=None)` — create Studio + a recipe session.
+- `await Studio.resume(store, *, pwd=None, llm_override=None)` — resume a saved session into a new Studio.
+- `await studio.shutdown()` — stop the underlying engine; also called by `async with`.
+
+Important namespaces:
+
+- `studio.sessions` — active graph/session lifecycle and per-creature chat/control/state helpers.
+- `studio.catalog` — packages, built-ins, workspace creature/module listing, introspection.
+- `studio.identity` — LLM profiles/backends, API keys, Codex auth, MCP, UI preferences.
+- `studio.persistence` — saved-session list/resolve/resume/fork/history/viewer/export/delete.
+- `studio.attach` — available live attach policies for chat, channel observer, trace/logs, files, pty.
+- `studio.editors` — workspace creature/module scaffolding and writes.
+
+See [Studio guide](studio.md) for task-oriented examples of each namespace.
 
 ## `Terrarium` — the engine
 
@@ -124,7 +171,8 @@ Every observable thing the engine does — text chunks, channel messages, topolo
 
 - `await Terrarium.with_creature(config)` — engine + one creature.
 - `await Terrarium.from_recipe(recipe)` — engine + a recipe applied.
-- `await Terrarium.resume(store)` — *not yet implemented*.
+- `await Terrarium.resume(store, *, pwd=None, llm_override=None)` — build an engine and adopt a saved session.
+- `await engine.adopt_session(store, *, pwd=None, llm_override=None)` — resume into an existing engine and return the graph id.
 - `await engine.add_creature(config, *, graph=None, start=True)` — add to an existing graph or mint a new singleton graph.
 - `await engine.remove_creature(creature)` — stop and remove; may split the graph.
 - `await engine.add_channel(graph, name, kind=...)` — declare a channel.
@@ -136,7 +184,7 @@ Every observable thing the engine does — text chunks, channel messages, topolo
 - `engine.status()` / `engine.status(creature)` — roll-up or per-creature status dict.
 - `await engine.shutdown()` — stop every creature; idempotent.
 
-The legacy `TerrariumRuntime` and `KohakuManager` still exist on disk and remain functional during the transition. New code should reach for `Terrarium`.
+Use `Terrarium` for runtime mechanics. Use `Studio` when you also need catalog, settings, saved-session, attach, or editor management.
 
 ## `Agent` — full control
 
@@ -176,28 +224,33 @@ Properties:
 - `agent.tools: list[str]`, `agent.subagents: list[str]`
 - `agent.conversation_history: list[dict]`
 
-## `AgentSession` — streaming chat
+## `Creature` — streaming chat
+
+`Creature.chat(message)` yields text chunks as the controller streams.
+Tool activity and sub-agent events are still emitted through the
+underlying output/event paths; `Creature` focuses on the simple text
+stream and status handle.
 
 ```python
 import asyncio
-from kohakuterrarium.serving.agent_session import AgentSession
+from kohakuterrarium import Terrarium
 
 async def main():
-    session = await AgentSession.from_path("@kt-biome/creatures/swe")
-    await session.start()
-    async for chunk in session.chat("What does this do?"):
-        print(chunk, end="")
-    print()
-    await session.stop()
+    engine, creature = await Terrarium.with_creature("@kt-biome/creatures/swe")
+    try:
+        async for chunk in creature.chat("What does this do?"):
+            print(chunk, end="")
+        print()
+    finally:
+        await engine.shutdown()
 
 asyncio.run(main())
 ```
 
-`chat(message)` yields text chunks as the controller streams. Tool activity and sub-agent events are surfaced through the output module's activity callbacks — `AgentSession` focuses on the text stream; for richer events, use `Agent` + a custom output module.
-
-`AgentSession.get_status()` also exposes `llm_name`, the canonical provider-qualified model identifier used by the web UI and `/model`.
-
-Builders: `AgentSession.from_path(...)`, `from_config(AgentConfig)`, `from_agent(pre_built_agent)`.
+Use `Creature.inject_input(message, source=...)` when you want to push
+input without draining output, and `Creature.get_status()` when you need
+model, tools, sub-agents, graph id, channels, and working-directory
+status.
 
 ## Output handling
 
@@ -229,22 +282,27 @@ await agent.inject_event(TriggerEvent(
 
 ## Multi-tenant servers
 
-The HTTP API uses the `Terrarium` engine as a single shared singleton — every request adds, removes, or chats with creatures by ID through the engine's pythonic accessors:
+The HTTP API uses `Studio` as its management facade over a shared `Terrarium` engine. API routes start sessions, chat with creatures, inspect settings, and resume saved sessions through Studio namespaces rather than duplicating those policies. If you are building your own server, follow the same shape:
 
 ```python
-from kohakuterrarium import Terrarium
+from kohakuterrarium import Studio
 
-engine = Terrarium(session_dir="/var/kt/sessions")
+studio = Studio()
+session = await studio.sessions.start_creature(
+    "@kt-biome/creatures/swe",
+    pwd="/srv/workspaces/project-a",
+)
+cid = session.creatures[0]["creature_id"]
 
-alice = await engine.add_creature("@kt-biome/creatures/swe", creature_id="alice")
-async for chunk in alice.chat("Hi"):
+stream = await studio.sessions.chat.chat(session.session_id, cid, "Hi")
+async for chunk in stream:
     print(chunk, end="")
 
-print(engine.status("alice"))
-await engine.stop("alice")
+print(studio.engine.status(cid))
+await studio.sessions.stop(session.session_id)
 ```
 
-For the FastAPI handlers themselves, `kohakuterrarium.api.deps.get_engine()` returns the per-process singleton; the legacy `get_manager()` (`KohakuManager`) is still wired in until every route is cut over.
+For the FastAPI handlers themselves, dependency helpers provide the per-process `Studio` / `Terrarium` objects. Route handlers should delegate to Studio namespaces for catalog, identity, active-session, persistence, attach, and editor policy.
 
 ## Stopping cleanly
 
@@ -259,7 +317,7 @@ finally:
     await agent.stop()
 ```
 
-Or use `AgentSession` / `compose.agent()` which are async context managers.
+Or use `Terrarium`, `Studio`, or `compose.agent()` as async context managers where appropriate.
 
 Interrupts are safe from any asyncio task:
 
@@ -334,7 +392,7 @@ assert env.llm.call_count == 2
 - **`await agent.run()` never returns.** `run()` is the full event loop; it exits when the input module closes (e.g. CLI gets EOF) or when a termination condition fires. Use `inject_input` + `stop` instead for one-shot interactions.
 - **Output handler not called.** Confirm `replace_default=True` if you don't want stdout as well; make sure the agent started before injecting.
 - **Hot-plugged creature never sees messages.** Use `engine.connect(sender, receiver, channel=...)` — the engine handles channel registration and trigger injection. Adding a creature with `add_creature` alone gives it a singleton graph with no inbound channels.
-- **`AgentSession.chat` hangs.** Another caller is using the agent; sessions serialize input. Use one `AgentSession` per caller.
+- **`Creature.chat` appears to hang.** Another caller may be using the same creature; serialize access per creature, or start separate sessions/creatures per independent caller.
 
 ## See also
 
