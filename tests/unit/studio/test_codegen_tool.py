@@ -2,8 +2,8 @@
 
 import pytest
 
-from kohakuterrarium.api.studio.codegen import RoundTripError
-from kohakuterrarium.api.studio.codegen import tool as tool_cg
+from kohakuterrarium.studio.editors import codegen_tool as tool_cg
+from kohakuterrarium.studio.editors.codegen_init import RoundTripError
 
 MINIMAL_SOURCE = '''\
 """Sample."""

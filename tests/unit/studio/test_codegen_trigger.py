@@ -1,6 +1,6 @@
 """Trigger codegen tests."""
 
-from kohakuterrarium.api.studio.codegen import trigger as trig_cg
+from kohakuterrarium.studio.editors import codegen_trigger as trig_cg
 
 SAMPLE = '''\
 """Sample trigger."""

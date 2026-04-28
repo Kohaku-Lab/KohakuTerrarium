@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from kohakuterrarium.api.studio.workspace.base import Workspace
-from kohakuterrarium.api.studio.workspace.local import LocalWorkspace
+from kohakuterrarium.studio.editors.workspace_fs import LocalWorkspace
+from kohakuterrarium.studio.editors.workspace_manifest import Workspace
 
 
 def test_open_rejects_missing(tmp_path: Path):

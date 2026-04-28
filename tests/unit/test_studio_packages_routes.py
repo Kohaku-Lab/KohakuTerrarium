@@ -14,13 +14,13 @@ from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.studio import build_studio_router
 from kohakuterrarium.api.studio.deps import set_workspace
-from kohakuterrarium.packages import install_package
+from kohakuterrarium.packages.install import install_package
 
 
 @pytest.fixture
 def tmp_packages(tmp_path, monkeypatch):
     """Redirect ``PACKAGES_DIR`` to a fresh temp dir for the test."""
-    import kohakuterrarium.packages as pkg_mod
+    import kohakuterrarium.packages.locations as pkg_mod
 
     packages_dir = tmp_path / "packages"
     packages_dir.mkdir()

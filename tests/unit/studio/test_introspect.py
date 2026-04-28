@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from kohakuterrarium.api.studio.introspect import (
+from kohakuterrarium.studio.catalog.introspect import (
     builtin_schema,
     custom_schema,
     resolve_module_source,

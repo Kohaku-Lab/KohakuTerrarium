@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from kohakuterrarium.api.studio.yaml_io.creature import (
+from kohakuterrarium.studio.editors.yaml_creature import (
     load_creature_file,
     save_creature_file,
     save_creature_merged,

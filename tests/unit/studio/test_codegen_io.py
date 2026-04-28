@@ -1,6 +1,6 @@
 """Input / output codegen tests."""
 
-from kohakuterrarium.api.studio.codegen import io_mod
+from kohakuterrarium.studio.editors import codegen_io as io_mod
 
 # Canonical framework shape — BaseInputModule.get_input() / BaseOutputModule.write().
 SAMPLE_INPUT = '''\

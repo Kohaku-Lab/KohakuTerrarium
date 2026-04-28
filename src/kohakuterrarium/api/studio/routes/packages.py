@@ -3,18 +3,17 @@
 Used by the creature editor's ``base_config`` autocomplete, the
 "copy template from package" flow, and the package-detail cards
 shown in the Studio UI. Reuses the existing
-``kohakuterrarium.packages.list_packages``, ``_get_package_root``,
-and ``get_package_modules`` helpers.
+``kohakuterrarium.packages.walk.list_packages``,
+``kohakuterrarium.packages.locations.get_package_root``, and
+``kohakuterrarium.packages.walk.get_package_modules`` helpers.
 """
 
 from fastapi import APIRouter, HTTPException
 
-from kohakuterrarium.packages import (
-    _get_package_root,
-    _load_manifest,
-    get_package_modules,
-    list_packages,
-)
+from kohakuterrarium.packages.locations import get_package_root
+from kohakuterrarium.packages.manifest import _load_manifest
+from kohakuterrarium.packages.walk import get_package_modules
+from kohakuterrarium.studio.catalog.packages import list_installed_packages
 
 router = APIRouter()
 
@@ -32,7 +31,7 @@ _EXTENSION_KINDS: tuple[str, ...] = (
 
 
 def _require_package_root(name: str):
-    root = _get_package_root(name)
+    root = get_package_root(name)
     if root is None:
         raise HTTPException(
             404,
@@ -47,7 +46,7 @@ def _require_package_root(name: str):
 @router.get("")
 async def list_all_packages() -> list[dict]:
     """Return a summary of every installed kt package."""
-    return list_packages()
+    return list_installed_packages()
 
 
 @router.get("/{name}")

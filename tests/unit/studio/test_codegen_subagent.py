@@ -1,6 +1,6 @@
 """Sub-agent codegen tests."""
 
-from kohakuterrarium.api.studio.codegen import subagent as sa_cg
+from kohakuterrarium.studio.editors import codegen_subagent as sa_cg
 
 SAMPLE = '''\
 """Explore sub-agent."""

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from kohakuterrarium.api.studio.utils.paths import (
+from kohakuterrarium.studio.editors.utils_paths import (
     UnsafePath,
     ensure_in_root,
     sanitize_name,

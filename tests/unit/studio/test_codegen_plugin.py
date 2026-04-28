@@ -1,6 +1,6 @@
 """Plugin codegen — scaffold, parse, re-render with changed hooks."""
 
-from kohakuterrarium.api.studio.codegen import plugin as plugin_cg
+from kohakuterrarium.studio.editors import codegen_plugin as plugin_cg
 
 SAMPLE_PLUGIN = '''\
 """Response logger."""

@@ -37,11 +37,11 @@ def _write_skill(base: Path, name: str, body: str = "hi") -> Path:
 def test_get_list_empty_when_no_skills(client, tmp_path, monkeypatch):
     state_file = tmp_path / "state.json"
     monkeypatch.setattr(
-        "kohakuterrarium.api.studio.routes.skills._STATE_FILE",
+        "kohakuterrarium.studio.editors.skills_state._STATE_FILE",
         state_file,
     )
     # Point cwd at tmp_path with no skills dirs.
-    with mock.patch("kohakuterrarium.api.studio.routes.skills.Path") as patched_path:
+    with mock.patch("kohakuterrarium.api.routes.catalog.skills.Path") as patched_path:
         patched_path.cwd.return_value = tmp_path
         patched_path.home.return_value = tmp_path / "home"
         r = client.get("/api/studio/skills")
@@ -52,7 +52,7 @@ def test_get_list_returns_discovered_skills(client, tmp_path, monkeypatch):
     _write_skill(tmp_path / ".kt" / "skills", "alpha")
     state_file = tmp_path / "state.json"
     monkeypatch.setattr(
-        "kohakuterrarium.api.studio.routes.skills._STATE_FILE",
+        "kohakuterrarium.studio.editors.skills_state._STATE_FILE",
         state_file,
     )
     monkeypatch.chdir(tmp_path)
@@ -72,7 +72,7 @@ def test_toggle_flips_state(client, tmp_path, monkeypatch):
     _write_skill(tmp_path / ".kt" / "skills", "beta")
     state_file = tmp_path / "state.json"
     monkeypatch.setattr(
-        "kohakuterrarium.api.studio.routes.skills._STATE_FILE",
+        "kohakuterrarium.studio.editors.skills_state._STATE_FILE",
         state_file,
     )
     monkeypatch.chdir(tmp_path)
@@ -94,7 +94,7 @@ def test_toggle_flips_state(client, tmp_path, monkeypatch):
 def test_toggle_unknown_skill_404(client, tmp_path, monkeypatch):
     state_file = tmp_path / "state.json"
     monkeypatch.setattr(
-        "kohakuterrarium.api.studio.routes.skills._STATE_FILE",
+        "kohakuterrarium.studio.editors.skills_state._STATE_FILE",
         state_file,
     )
     monkeypatch.chdir(tmp_path)
@@ -116,7 +116,7 @@ def test_list_serializes_paths_and_allowed_tools(client, tmp_path, monkeypatch):
     )
     state_file = tmp_path / "state.json"
     monkeypatch.setattr(
-        "kohakuterrarium.api.studio.routes.skills._STATE_FILE",
+        "kohakuterrarium.studio.editors.skills_state._STATE_FILE",
         state_file,
     )
     monkeypatch.chdir(tmp_path)

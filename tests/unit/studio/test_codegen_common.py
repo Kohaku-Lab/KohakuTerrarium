@@ -1,6 +1,6 @@
 """Unit tests for the shared libcst helpers."""
 
-from kohakuterrarium.api.studio.codegen.common import (
+from kohakuterrarium.studio.editors.codegen_common import (
     find_class,
     first_class,
     parse,

@@ -58,7 +58,7 @@ def client(studio_app: FastAPI, tmp_workspace: Path) -> TestClient:
     fixture is expected to be overridden by tests that need it.
     """
     # Late import to avoid circularity with future workspace module.
-    from kohakuterrarium.api.studio.workspace.local import LocalWorkspace  # noqa: E402
+    from kohakuterrarium.studio.editors.workspace_fs import LocalWorkspace  # noqa: E402
 
     set_workspace(LocalWorkspace.open(tmp_workspace))
     with TestClient(studio_app) as c:
