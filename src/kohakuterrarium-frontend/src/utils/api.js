@@ -85,13 +85,10 @@ export const terrariumAPI = {
   },
 
   async sendToChannel(id, channelName, content, sender = "human") {
-    const { data } = await api.post(
-      `/sessions/topology/${id}/channels/${channelName}/send`,
-      {
-        content,
-        sender,
-      },
-    )
+    const { data } = await api.post(`/sessions/topology/${id}/channels/${channelName}/send`, {
+      content,
+      sender,
+    })
     return data
   },
 
@@ -100,23 +97,17 @@ export const terrariumAPI = {
    * Returns { messages: [...], events: [...] }
    */
   async getHistory(id, target) {
-    const { data } = await api.get(
-      `/sessions/${id}/creatures/${encodeTarget(target)}/history`,
-    )
+    const { data } = await api.get(`/sessions/${id}/creatures/${encodeTarget(target)}/history`)
     return data
   },
 
   async interruptCreature(id, name) {
-    const { data } = await api.post(
-      `/sessions/${id}/creatures/${encodeTarget(name)}/interrupt`,
-    )
+    const { data } = await api.post(`/sessions/${id}/creatures/${encodeTarget(name)}/interrupt`)
     return data
   },
 
   async listCreatureJobs(id, name) {
-    const { data } = await api.get(
-      `/sessions/${id}/creatures/${encodeTarget(name)}/jobs`,
-    )
+    const { data } = await api.get(`/sessions/${id}/creatures/${encodeTarget(name)}/jobs`)
     return data
   },
 
@@ -135,29 +126,23 @@ export const terrariumAPI = {
   },
 
   async switchCreatureModel(id, name, model) {
-    const { data } = await api.post(
-      `/sessions/${id}/creatures/${encodeTarget(name)}/model`,
-      { model },
-    )
+    const { data } = await api.post(`/sessions/${id}/creatures/${encodeTarget(name)}/model`, {
+      model,
+    })
     return data
   },
 
   /** Execute a slash command on a terrarium creature */
   async executeCreatureCommand(id, name, command, args = "") {
-    const { data } = await api.post(
-      `/sessions/${id}/creatures/${encodeTarget(name)}/command`,
-      {
-        command,
-        args,
-      },
-    )
+    const { data } = await api.post(`/sessions/${id}/creatures/${encodeTarget(name)}/command`, {
+      command,
+      args,
+    })
     return data
   },
 
   async getScratchpad(id, target) {
-    const { data } = await api.get(
-      `/sessions/${id}/creatures/${encodeTarget(target)}/scratchpad`,
-    )
+    const { data } = await api.get(`/sessions/${id}/creatures/${encodeTarget(target)}/scratchpad`)
     return data
   },
 
@@ -172,16 +157,12 @@ export const terrariumAPI = {
   },
 
   async getEnv(id, target) {
-    const { data } = await api.get(
-      `/sessions/${id}/creatures/${encodeTarget(target)}/env`,
-    )
+    const { data } = await api.get(`/sessions/${id}/creatures/${encodeTarget(target)}/env`)
     return data
   },
 
   async listPlugins(id, target) {
-    const { data } = await api.get(
-      `/sessions/${id}/creatures/${encodeTarget(target)}/plugins`,
-    )
+    const { data } = await api.get(`/sessions/${id}/creatures/${encodeTarget(target)}/plugins`)
     return data
   },
 
@@ -193,9 +174,7 @@ export const terrariumAPI = {
   },
 
   async listTriggers(id, target) {
-    const { data } = await api.get(
-      `/sessions/${id}/creatures/${encodeTarget(target)}/triggers`,
-    )
+    const { data } = await api.get(`/sessions/${id}/creatures/${encodeTarget(target)}/triggers`)
     return data
   },
 
@@ -292,18 +271,13 @@ export const agentAPI = {
     const body = { content }
     if (target.turnIndex != null) body.turn_index = target.turnIndex
     if (target.userPosition != null) body.user_position = target.userPosition
-    const { data } = await api.post(
-      `/sessions/_/creatures/${id}/messages/${msgIdx}/edit`,
-      body,
-    )
+    const { data } = await api.post(`/sessions/_/creatures/${id}/messages/${msgIdx}/edit`, body)
     return data
   },
 
   /** Rewind conversation to a point (drop messages onward) */
   async rewindTo(id, msgIdx) {
-    const { data } = await api.post(
-      `/sessions/_/creatures/${id}/messages/${msgIdx}/rewind`,
-    )
+    const { data } = await api.post(`/sessions/_/creatures/${id}/messages/${msgIdx}/rewind`)
     return data
   },
 
