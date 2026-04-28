@@ -1,9 +1,15 @@
-"""CLI memory commands — build embeddings and search sessions."""
+"""CLI memory commands — terminal formatters around session memory.
+
+The actual indexing / search logic lives in
+:mod:`kohakuterrarium.studio.sessions.memory_search`; this module is
+strictly the rich-CLI presentation layer.
+"""
 
 from kohakuterrarium.cli.run import _resolve_session
 from kohakuterrarium.session.embedding import create_embedder
 from kohakuterrarium.session.memory import SessionMemory
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.studio.sessions.memory_search import build_embeddings
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -21,48 +27,34 @@ def embedding_cli(
         print(f"Session not found: {session_query}")
         return 1
 
-    store = SessionStore(path)
     try:
-        meta = store.load_meta()
-        agents = meta.get("agents", [])
-
-        # Build embedder config
-        embed_config: dict = {"provider": provider}
-        if model:
-            embed_config["model"] = model
-        if dimensions:
-            embed_config["dimensions"] = dimensions
-
-        print(f"Session: {path.name}")
-        print(f"Agents: {', '.join(agents)}")
-        print(f"Embedding: {provider}" + (f" ({model})" if model else ""))
-        print()
-
-        embedder = create_embedder(embed_config)
-        memory = SessionMemory(str(path), embedder=embedder, store=store)
-
-        total_blocks = 0
-        for agent_name in agents:
-            events = store.get_events(agent_name)
-            if not events:
-                print(f"  {agent_name}: no events")
-                continue
-            count = memory.index_events(agent_name, events)
-            total_blocks += count
-            print(f"  {agent_name}: {count} blocks indexed ({len(events)} events)")
-
-        stats = memory.get_stats()
-        print(
-            f"\nDone. FTS: {stats['fts_blocks']} blocks, "
-            f"Vector: {stats['vec_blocks']} blocks "
-            f"({stats['dimensions']}d)"
+        result = build_embeddings(
+            path, provider=provider, model=model, dimensions=dimensions
         )
-        return 0
     except Exception as e:
         print(f"Error: {e}")
         return 1
-    finally:
-        store.close()
+
+    print(f"Session: {path.name}")
+    print(f"Agents: {', '.join(result['agents'])}")
+    print(f"Embedding: {provider}" + (f" ({model})" if model else ""))
+    print()
+
+    for agent_name, info in result["indexed_per_agent"].items():
+        if info["events"] == 0:
+            print(f"  {agent_name}: no events")
+        else:
+            print(
+                f"  {agent_name}: {info['blocks']} blocks indexed ({info['events']} events)"
+            )
+
+    stats = result["stats"]
+    print(
+        f"\nDone. FTS: {stats['fts_blocks']} blocks, "
+        f"Vector: {stats['vec_blocks']} blocks "
+        f"({stats['dimensions']}d)"
+    )
+    return 0
 
 
 def search_cli(
@@ -119,7 +111,6 @@ def search_cli(
             if age:
                 header += f"  {age}"
             print(header)
-            # Show content (truncated for display)
             content = r.content
             if len(content) > 200:
                 content = content[:200] + "..."

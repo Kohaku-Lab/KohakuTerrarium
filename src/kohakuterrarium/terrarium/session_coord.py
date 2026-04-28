@@ -205,11 +205,43 @@ def apply_split(
         # (the kept one, which by topology convention is
         # ``new_graph_ids[0]``) and copy nothing onto the others.
         engine._session_stores[delta.new_graph_ids[0]] = parent
+        _refresh_meta_for_split_graph(engine, delta.new_graph_ids[0], parent)
         return
     new_stores = split_session_store(parent, new_paths)
     for gid, store in zip(delta.new_graph_ids, new_stores):
         engine._session_stores[gid] = store
         _attach_store_to_graph(engine, gid, store)
+        _refresh_meta_for_split_graph(engine, gid, store)
+
+
+def _refresh_meta_for_split_graph(
+    engine: "Terrarium", graph_id: str, store: SessionStore
+) -> None:
+    """Update ``store.meta`` so it reflects the post-split graph membership.
+
+    A split can leave a graph holding a single creature; the studio
+    persistence layer (``studio.persistence.resume._resolve_session_kind``)
+    keys on ``config_type`` + ``agents`` to decide whether to resume
+    such a session as a creature or terrarium.  Without this refresh
+    the saved meta would still claim the original (pre-split) creature
+    list, so resume would build a multi-creature terrarium for what
+    is now a solo creature.
+    """
+    g = engine._topology.graphs.get(graph_id)
+    if g is None:
+        return
+    creatures = list(g.creature_ids)
+    agents: list[str] = []
+    for cid in creatures:
+        c = engine._creatures.get(cid)
+        if c is None:
+            continue
+        agents.append(getattr(c.agent.config, "name", cid))
+    try:
+        store.meta["agents"] = agents
+        store.meta["config_type"] = "agent" if len(agents) <= 1 else "terrarium"
+    except Exception:
+        logger.debug("split: meta refresh failed", exc_info=True)
 
 
 def _attach_store_to_graph(

@@ -12,10 +12,12 @@ union on graph merge, session-store copy on graph split).
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, AsyncIterator, Iterator, Union
+from collections.abc import AsyncIterator, Iterator
+from typing import TYPE_CHECKING
 
 import kohakuterrarium.terrarium.channels as _channels
 import kohakuterrarium.terrarium.recipe as _recipe
+import kohakuterrarium.terrarium.resume as _resume
 import kohakuterrarium.terrarium.root as _root
 import kohakuterrarium.terrarium.topology as _topo
 import kohakuterrarium.terrarium.wiring as _wiring
@@ -50,8 +52,8 @@ _logger = get_logger(__name__)
 
 # A few user-facing aliases so callers can refer to creatures and graphs
 # either by handle or by id.  The engine accepts both forms.
-CreatureRef = Union[Creature, str]
-GraphRef = Union[GraphTopology, str]
+CreatureRef = Creature | str
+GraphRef = GraphTopology | str
 
 
 class Terrarium:
@@ -60,25 +62,8 @@ class Terrarium:
     Hosts any number of creatures (single agents) and connects them via
     channels.  A standalone agent is a 1-creature graph; a "terrarium
     config" is a multi-creature graph.  Topology can change at runtime.
-
-    Programmatic usage::
-
-        async with Terrarium() as t:
-            alice = await t.add_creature("creatures/alice.yaml")
-            bob   = await t.add_creature("creatures/bob.yaml")
-            await t.connect(alice, bob, channel="alice_to_bob")
-            async for event in t.subscribe():
-                ...
-
-    Or, via a recipe::
-
-        async with await Terrarium.from_recipe("my-terrarium.yaml") as t:
-            ...
-
-    Or, resuming a saved session::
-
-        async with await Terrarium.resume("session.kohakutr") as t:
-            ...
+    See :meth:`from_recipe`, :meth:`resume`, :meth:`with_creature` for
+    the three common construction shapes.
     """
 
     # ------------------------------------------------------------------
@@ -127,13 +112,35 @@ class Terrarium:
         cls,
         store: "SessionStore | str",
         *,
-        recipe: "TerrariumConfig | None" = None,
+        pwd: str | None = None,
+        llm_override: str | None = None,
     ) -> "Terrarium":
-        """Resume an engine from a saved session store (or its path).
+        """Build a fresh engine and adopt a saved session into it.
 
         Example: ``async with await Terrarium.resume("s.kohakutr") as t``.
         """
-        raise NotImplementedError("resume — not yet implemented")
+        engine = cls(pwd=pwd)
+        engine._running = True
+        await _resume.resume_into_engine(
+            engine, store, pwd=pwd, llm_override=llm_override
+        )
+        return engine
+
+    async def adopt_session(
+        self,
+        store: "SessionStore | str",
+        *,
+        pwd: str | None = None,
+        llm_override: str | None = None,
+    ) -> str:
+        """Adopt a saved session into this running engine.  Returns ``graph_id``.
+
+        Same body as :meth:`resume` but on an existing engine instance —
+        the HTTP / programmatic hot-resume entry point.
+        """
+        return await _resume.resume_into_engine(
+            self, store, pwd=pwd, llm_override=llm_override
+        )
 
     @classmethod
     async def with_creature(

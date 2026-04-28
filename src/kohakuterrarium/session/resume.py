@@ -9,17 +9,15 @@ import os
 from pathlib import Path
 from typing import Any
 
-from kohakuterrarium.builtins.cli_rich.input import RichCLIInput
-from kohakuterrarium.builtins.cli_rich.output import RichCLIOutput
 from kohakuterrarium.builtins.inputs import create_builtin_input
 from kohakuterrarium.builtins.outputs import create_builtin_output
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.modules.input.base import InputModule
+from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.session.history import replay_conversation
 from kohakuterrarium.session.migrations import ensure_latest_version
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.terrarium.config import load_terrarium_config
-from kohakuterrarium.terrarium.runtime import TerrariumRuntime
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -30,26 +28,29 @@ IO_MODES = ("cli", "plain", "tui")
 
 def _create_io_modules(
     mode: str,
-) -> tuple[Any, Any]:
+) -> tuple[InputModule, OutputModule]:
     """Create input and output modules for a given IO mode.
 
     Returns (input_module, output_module).
 
-    Note: ``cli`` mode (the rich prompt_toolkit-based CLI) returns stub
-    modules here. The actual main loop is driven by ``RichCLIApp`` in
-    ``cli/run.py``, which constructs its own input/output and replaces
-    these stubs after the agent is built. We still return the stubs so
-    the agent's bootstrap contract is satisfied.
+    Note: ``cli`` mode is handled by the caller (``cli/resume.py``)
+    because the rich CLI lives in the ``builtins.cli_rich`` tier, which
+    this module cannot import without creating a cycle (``session/`` is
+    below ``builtins/`` in the layering, and ``cli_rich`` reaches up
+    into ``studio.identity``).  Pass ``input_module`` / ``output_module``
+    keyword arguments to :func:`resume_agent` instead.
     """
     match mode:
-        case "cli":
-            return RichCLIInput(), RichCLIOutput(app=None)
         case "plain":
             return create_builtin_input("cli", {}), create_builtin_output("stdout", {})
         case "tui":
             return create_builtin_input("tui", {}), create_builtin_output("tui", {})
         case _:
-            raise ValueError(f"Unknown IO mode: {mode}. Use one of {IO_MODES}")
+            raise ValueError(
+                f"Unknown IO mode: {mode}. Use one of {IO_MODES} "
+                "(``cli`` mode must be constructed by the caller and "
+                "passed via ``input_module`` / ``output_module``)."
+            )
 
 
 def _build_conversation(messages: list[dict]) -> Conversation:
@@ -158,6 +159,64 @@ def _restore_turn_branch_state(agent, store: SessionStore, agent_name: str) -> N
     )
 
 
+def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
+    """Inject saved conversation, scratchpad, triggers, and resumable
+    events from ``store`` into a freshly-rebuilt ``agent``.
+
+    Shared by :func:`resume_agent` (low-tier, builds Agent from config)
+    and ``studio.persistence.resume.resume_into_engine`` (Studio,
+    builds Creature graph via the engine then injects per-creature).
+    """
+    saved_messages = _load_conversation_with_replay_fallback(store, agent_name)
+    if saved_messages:
+        agent.controller.conversation = _build_conversation(saved_messages)
+        logger.info(
+            "Conversation restored", agent=agent_name, messages=len(saved_messages)
+        )
+
+    _restore_turn_branch_state(agent, store, agent_name)
+
+    pad_data = store.load_scratchpad(agent_name)
+    if pad_data:
+        legacy_native_options = pad_data.get("__native_tool_options__")
+        if legacy_native_options:
+            agent.session.scratchpad.set(
+                "__native_tool_options__", legacy_native_options
+            )
+        visible_count = 0
+        for k, v in pad_data.items():
+            if k.startswith("__") and k.endswith("__"):
+                continue
+            agent.session.scratchpad.set(k, v)
+            visible_count += 1
+        logger.info("Scratchpad restored", agent=agent_name, keys=visible_count)
+
+    native_tool_options = getattr(agent, "native_tool_options", None)
+    if native_tool_options is not None:
+        try:
+            native_tool_options.apply()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "Failed to reapply native tool options",
+                agent=agent_name,
+                error=str(exc),
+            )
+
+    resume_events = store.get_resumable_events(agent_name)
+    if resume_events:
+        agent._pending_resume_events = resume_events
+        logger.info("Resume events loaded", agent=agent_name, count=len(resume_events))
+
+    saved_triggers = store.load_triggers(agent_name)
+    if saved_triggers:
+        agent._pending_resume_triggers = saved_triggers
+        logger.info(
+            "Resumable triggers loaded",
+            agent=agent_name,
+            count=len(saved_triggers),
+        )
+
+
 def _open_store_with_migration(session_path: str | Path) -> SessionStore:
     """Open a session file, auto-migrating older formats upward first.
 
@@ -186,14 +245,22 @@ def resume_agent(
     pwd_override: str | None = None,
     io_mode: str | None = None,
     llm_override: str | None = None,
+    *,
+    input_module: InputModule | None = None,
+    output_module: OutputModule | None = None,
 ) -> tuple[Agent, SessionStore]:
     """Resume a standalone agent from a session file.
 
     Args:
         session_path: Path to the session file.
         pwd_override: Override the working directory (uses saved pwd if None).
-        io_mode: Override input/output mode ("cli", "inline", "tui", or None for config default).
+        io_mode: Override input/output mode (``"plain"`` or ``"tui"``).
+            Pass ``None`` to keep the config's defaults.  ``cli`` mode
+            (the rich prompt_toolkit CLI) must be constructed by the
+            caller — pass ``input_module`` / ``output_module`` directly.
         llm_override: Override LLM profile (from --llm flag or saved session).
+        input_module: Pre-built input module (overrides ``io_mode``).
+        output_module: Pre-built output module (overrides ``io_mode``).
 
     Returns:
         (agent, store) tuple. Caller should run agent.run() then store.close().
@@ -204,7 +271,8 @@ def resume_agent(
     if meta.get("config_type") != "agent":
         raise ValueError(
             f"Session is a {meta.get('config_type')}, not an agent. "
-            "Use resume_terrarium() instead."
+            "Use the legacy resume_terrarium() in terrarium.legacy_resume "
+            "instead."
         )
 
     config_path = meta.get("config_path", "")
@@ -215,9 +283,14 @@ def resume_agent(
     if pwd and os.path.isdir(pwd):
         os.chdir(pwd)
 
-    # Create IO module overrides if mode specified
+    # IO module overrides — explicit instances win over io_mode shortcut.
     io_kwargs: dict[str, Any] = {}
-    if io_mode:
+    if input_module is not None or output_module is not None:
+        if input_module is not None:
+            io_kwargs["input_module"] = input_module
+        if output_module is not None:
+            io_kwargs["output_module"] = output_module
+    elif io_mode:
         inp, out = _create_io_modules(io_mode)
         io_kwargs["input_module"] = inp
         io_kwargs["output_module"] = out
@@ -236,66 +309,8 @@ def resume_agent(
     agent = Agent.from_path(config_path, llm_override=effective_llm, **io_kwargs)
     agent_name = meta.get("agents", [agent.config.name])[0]
 
-    # Inject saved conversation (Wave C: snapshot is a cache, fall
-    # back to replay_conversation when it's stale or absent).
-    saved_messages = _load_conversation_with_replay_fallback(store, agent_name)
-    if saved_messages:
-        conv = _build_conversation(saved_messages)
-        agent.controller.conversation = conv
-        logger.info(
-            "Conversation restored", agent=agent_name, messages=len(saved_messages)
-        )
-
-    # Restore turn / branch counters so a regenerate /  edit+rerun
-    # after resume opens the right branch_id of the current turn.
-    _restore_turn_branch_state(agent, store, agent_name)
-
-    # Restore scratchpad. Reserved ``__*__`` keys are legacy framework
-    # internals; keep them readable for migration but do not surface them
-    # back into Working Memory.
-    pad_data = store.load_scratchpad(agent_name)
-    if pad_data:
-        legacy_native_options = pad_data.get("__native_tool_options__")
-        if legacy_native_options:
-            agent.session.scratchpad.set(
-                "__native_tool_options__", legacy_native_options
-            )
-        visible_count = 0
-        for k, v in pad_data.items():
-            if k.startswith("__") and k.endswith("__"):
-                continue
-            agent.session.scratchpad.set(k, v)
-            visible_count += 1
-        logger.info("Scratchpad restored", agent=agent_name, keys=visible_count)
-
-    # Re-apply session-wise provider-native tool option overrides from
-    # private session state, with legacy scratchpad migration fallback.
-    native_tool_options = getattr(agent, "native_tool_options", None)
-    if native_tool_options is not None:
-        try:
-            native_tool_options.apply()
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.warning(
-                "Failed to reapply native tool options",
-                agent=agent_name,
-                error=str(exc),
-            )
-
-    # Load events for output replay on resume
-    resume_events = store.get_resumable_events(agent_name)
-    if resume_events:
-        agent._pending_resume_events = resume_events
-        logger.info("Resume events loaded", agent=agent_name, count=len(resume_events))
-
-    # Load resumable triggers
-    saved_triggers = store.load_triggers(agent_name)
-    if saved_triggers:
-        agent._pending_resume_triggers = saved_triggers
-        logger.info(
-            "Resumable triggers loaded",
-            agent=agent_name,
-            count=len(saved_triggers),
-        )
+    # Inject every state slot from the store.
+    inject_saved_state(agent, store, agent_name)
 
     # Re-attach session store for continued recording
     store.update_status("running")
@@ -303,84 +318,6 @@ def resume_agent(
 
     logger.info("Agent resumed", agent=agent_name, session=str(session_path))
     return agent, store
-
-
-def resume_terrarium(
-    session_path: str | Path,
-    pwd_override: str | None = None,
-    io_mode: str | None = None,
-) -> tuple[TerrariumRuntime, SessionStore]:
-    """Resume a terrarium from a session file.
-
-    Args:
-        session_path: Path to the session file.
-        pwd_override: Override the working directory (uses saved pwd if None).
-        io_mode: Override root agent input/output mode ("cli", "inline", "tui", or None for config default).
-
-    Returns:
-        (runtime, store) tuple. Caller should run runtime.run() then store.close().
-        The runtime will auto-inject conversations via attach_session_store.
-    """
-    store = _open_store_with_migration(session_path)
-    meta = store.load_meta()
-
-    if meta.get("config_type") != "terrarium":
-        raise ValueError(
-            f"Session is a {meta.get('config_type')}, not a terrarium. "
-            "Use resume_agent() instead."
-        )
-
-    config_path = meta.get("config_path", "")
-    if not config_path:
-        raise ValueError("Session has no config_path in metadata")
-
-    pwd = pwd_override or meta.get("pwd", ".")
-    if pwd and os.path.isdir(pwd):
-        os.chdir(pwd)
-
-    # Rebuild runtime from config, with optional IO mode override for root
-    config = load_terrarium_config(config_path)
-    if io_mode and config.root:
-        config.root.config_data["input"] = {
-            "type": io_mode if io_mode != "cli" else "cli"
-        }
-        config.root.config_data["output"] = {
-            "type": io_mode if io_mode != "cli" else "stdout",
-            "controller_direct": True,
-        }
-    runtime = TerrariumRuntime(config)
-
-    # Prepare resume data (injected during attach_session_store in run())
-    agents = meta.get("agents", [])
-    resume_data = {}
-    resume_events = {}
-    resume_triggers = {}
-    for name in agents:
-        resume_data[name] = {
-            "conversation": _load_conversation_with_replay_fallback(store, name),
-            "scratchpad": store.load_scratchpad(name),
-        }
-        events = store.get_resumable_events(name)
-        if events:
-            resume_events[name] = events
-        triggers = store.load_triggers(name)
-        if triggers:
-            resume_triggers[name] = triggers
-
-    runtime._pending_session_store = store
-    runtime._pending_resume_data = resume_data
-    runtime._pending_resume_triggers = resume_triggers
-    runtime._pending_resume_events = resume_events
-
-    store.update_status("running")
-
-    logger.info(
-        "Terrarium resume prepared",
-        terrarium=config.name,
-        agents=agents,
-        session=str(session_path),
-    )
-    return runtime, store
 
 
 def detect_session_type(session_path: str | Path) -> str:
