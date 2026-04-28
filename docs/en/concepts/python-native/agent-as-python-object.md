@@ -14,8 +14,9 @@ tags:
 In KohakuTerrarium, an agent is not a config file — the config file
 just describes one. A running agent is a `kohakuterrarium.core.agent.Agent`
 instance: an async Python object you construct, start, feed events,
-and stop. A sub-agent is the same object, nested. A terrarium is
-another Python object that owns several of them.
+and stop. A sub-agent is the same object, nested. A `Terrarium` is the
+runtime engine that hosts one or many running creatures, and `Studio`
+is the management facade above that engine.
 
 Everything is callable, awaitable, composable.
 
@@ -49,28 +50,39 @@ await agent.inject_input("Explain what this codebase does.")
 await agent.stop()
 ```
 
-Or the transport-friendly wrapper:
+Or use the engine-level `Creature` wrapper when you want a streaming
+chat handle and graph membership:
 
 ```python
-from kohakuterrarium.serving.agent_session import AgentSession
+from kohakuterrarium import Terrarium
 
-session = AgentSession(Agent.from_path("@kt-biome/creatures/swe"))
-await session.start()
-async for event in session.send_input("What does this do?"):
-    print(event)
-await session.stop()
+engine, creature = await Terrarium.with_creature("@kt-biome/creatures/swe")
+try:
+    async for chunk in creature.chat("What does this do?"):
+        print(chunk, end="")
+finally:
+    await engine.shutdown()
 ```
 
-Terrariums follow the same shape:
+Terrarium recipes follow the same shape:
 
 ```python
-from kohakuterrarium.terrarium.runtime import TerrariumRuntime
-from kohakuterrarium.terrarium.config import load_terrarium_config
+from kohakuterrarium import Terrarium
 
-runtime = TerrariumRuntime(load_terrarium_config("@kt-biome/terrariums/swe_team"))
-await runtime.start()
-await runtime.run()
-await runtime.stop()
+async with await Terrarium.from_recipe("@kt-biome/terrariums/swe_team") as engine:
+    swe = engine["swe"]
+    await swe.inject_input("Fix the auth bug.")
+```
+
+When you need catalog/settings/session/persistence policy as well as
+runtime hosting, wrap the engine in `Studio`:
+
+```python
+from kohakuterrarium import Studio
+
+async with Studio() as studio:
+    session = await studio.sessions.start_creature("@kt-biome/creatures/general")
+    print(session.session_id)
 ```
 
 ## What you can therefore do

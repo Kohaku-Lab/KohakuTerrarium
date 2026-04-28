@@ -10,7 +10,7 @@ tags:
 
 KohakuTerrarium is a framework for building real agents — not just LLM wrappers.
 
-The first-class abstraction is the **creature**: a standalone agent with its own controller, tools, sub-agents, triggers, prompts, and I/O. A creature runs by itself, inherits from another creature, or ships inside a package. A **terrarium** is the optional multi-agent wiring layer composing creatures through channels. Everything is Python — you can embed any of it in your own code.
+The first-class abstraction is the **creature**: a standalone agent with its own controller, tools, sub-agents, triggers, prompts, and I/O. A creature runs by itself, inherits from another creature, or ships inside a package. A **terrarium** is the runtime engine that hosts creatures — a solo creature is a one-creature graph, and a team is a graph wired by channels. **Studio** is the management layer above the engine: catalog, identity, active sessions, saved-session persistence, attach streams, and editors. Everything is Python — you can embed any of it in your own code.
 
 These docs are split into four stacks: tutorials (guided), guides (task-oriented), concepts (mental models), and reference (exhaustive lookup). Pick whichever matches where you are.
 
@@ -40,11 +40,12 @@ Task-oriented docs: "how do I do X".
 
 - [Getting Started](guides/getting-started.md) — install, authenticate, run, resume.
 - [Creatures](guides/creatures.md) — anatomy, inheritance, packaging.
-- [Terrariums](guides/terrariums.md) — multi-agent wiring and root agents.
+- [Terrariums](guides/terrariums.md) — the `Terrarium` runtime engine, multi-agent wiring, and root agents.
+- [Studio](guides/studio.md) — the `Studio` management facade over catalog, identity, sessions, persistence, attach, and editors.
 - [Sessions](guides/sessions.md) — `.kohakutr` persistence and resume.
 - [Memory](guides/memory.md) — FTS, semantic, hybrid search over session history.
 - [Configuration](guides/configuration.md) — task-oriented "how do I configure X".
-- [Programmatic Usage](guides/programmatic-usage.md) — `Agent`, `AgentSession`, `TerrariumRuntime`, `KohakuManager`.
+- [Programmatic Usage](guides/programmatic-usage.md) — `Terrarium`, `Studio`, `Creature`, and lower-level `Agent` embedding.
 - [Composition](guides/composition.md) — `>>`, `&`, `|`, `*` pipelines.
 - [Custom Modules](guides/custom-modules.md) — tools, inputs, outputs, triggers, sub-agents.
 - [Plugins](guides/plugins.md) — prompt and lifecycle plugins.
@@ -95,13 +96,15 @@ The source is organized by runtime subsystem, not by reader intent. Package-loca
 src/kohakuterrarium/
   core/             Agent runtime, controller, executor, events, environment
   bootstrap/        Initialization factories for LLM, tools, I/O, triggers
-  cli/              CLI command handlers
-  terrarium/        Multi-agent runtime, topology wiring, hot-plug
+  cli/              CLI command handlers (UI tier over Studio services)
+  packages/         Low-tier package install, manifest, @pkg resolution helpers
+  terrarium/        Runtime engine: creatures, graph topology, channels, hot-plug
+  studio/           Management layer: catalog, identity, sessions, persistence, attach, editors
   builtins/         Built-in tools, sub-agents, I/O modules, TUI, user commands
   builtin_skills/   Markdown skill manifests for on-demand tool and sub-agent docs
-  session/          Persistence, memory search, embeddings
-  serving/          Transport-agnostic service manager and event streaming
-  api/              FastAPI HTTP and WebSocket server
+  session/          Session store, migrations, memory search primitives, embeddings
+  serving/          Web / desktop launch helpers
+  api/              FastAPI HTTP and WebSocket adapters over Studio + Terrarium
   modules/          Protocols for tools, inputs, outputs, triggers, sub-agents
   llm/              LLM providers, profiles, API key management
   parsing/          Tool-call parsing and streaming

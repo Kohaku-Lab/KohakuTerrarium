@@ -30,6 +30,7 @@ const sidebarStructure = {
     "guides/configuration.md",
     "guides/creatures.md",
     "guides/terrariums.md",
+    "guides/studio.md",
     "guides/composition.md",
     "guides/programmatic-usage.md",
     "guides/sessions.md",
@@ -66,6 +67,7 @@ const sidebarStructure = {
     "concepts/multi-agent/README.md",
     "concepts/multi-agent/terrarium.md",
     "concepts/multi-agent/root-agent.md",
+    "concepts/studio.md",
   ],
   conceptsPythonNative: [
     "concepts/python-native/README.md",
@@ -196,8 +198,14 @@ const enHomeCards = [
   {
     title: "Terrariums guide",
     description:
-      "Channels vs. output wiring, root agents, hot-plug, observation — the practical how-to for horizontal multi-agent.",
+      "Channels vs. output wiring, root agents, hot-plug, observation — the practical how-to for the Terrarium runtime engine.",
     to: "/docs/guides/terrariums",
+  },
+  {
+    title: "Studio guide",
+    description:
+      "Use the Studio class to manage catalog, identity, active sessions, saved sessions, attach policies, and editor workflows.",
+    to: "/docs/guides/studio",
   },
   {
     title: "Configuration reference",
@@ -235,8 +243,14 @@ const zhTWHomeCards = [
   {
     title: "生態瓶使用指南",
     description:
-      "頻道 vs. 輸出接線、root 代理、熱插拔、觀察機制 — 橫向多代理的實務 how-to。",
+      "頻道 vs. 輸出接線、root 代理、熱插拔、觀察機制 — Terrarium 執行引擎的實務 how-to。",
     to: "/docs/guides/terrariums",
+  },
+  {
+    title: "Studio 使用指南",
+    description:
+      "使用 Studio 類別管理 catalog、identity、執行中 session、保存的 session、attach policy 與編輯器流程。",
+    to: "/docs/guides/studio",
   },
   {
     title: "設定參考",
@@ -274,8 +288,14 @@ const zhCNHomeCards = [
   {
     title: "生态瓶使用指南",
     description:
-      "频道 vs. 输出接线、root 代理、热插拔、观察机制 — 横向多智能体的实用 how-to。",
+      "频道 vs. 输出接线、root 代理、热插拔、观察机制 — Terrarium 运行引擎的实用 how-to。",
     to: "/docs/guides/terrariums",
+  },
+  {
+    title: "Studio 使用指南",
+    description:
+      "使用 Studio 类管理 catalog、identity、运行中 session、保存的 session、attach policy 与编辑器流程。",
+    to: "/docs/guides/studio",
   },
   {
     title: "配置参考",

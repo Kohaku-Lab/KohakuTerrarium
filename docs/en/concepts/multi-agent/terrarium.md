@@ -1,6 +1,6 @@
 ---
 title: Terrarium
-summary: The horizontal wiring layer — channels for optional traffic, output wiring for deterministic edges, hot-plug and observation on top.
+summary: The runtime engine for solo and multi-creature graphs — channels, output wiring, hot-plug, sessions, and observability.
 tags:
   - concepts
   - multi-agent
@@ -103,9 +103,8 @@ you subscribe with one filter. The per-graph mental model above is a
 
 What this buys you, beyond the single-team case:
 
-- **Multiple sessions in one process** — a server hosts hundreds of
-  user sessions side by side without the per-graph isolation of
-  separate `TerrariumRuntime` instances.
+- **Multiple sessions in one process** — a server hosts many user
+  sessions side by side as independent graphs in one runtime engine.
 - **Cross-graph rewiring at runtime** — combine two independent runs
   by drawing a channel between them; their session histories merge
   automatically.
@@ -163,8 +162,7 @@ others can DM it) and, if a root exists, a `report_to_root` channel.
   Owns the topology state, live creatures, environments, attached
   session stores, and the event-subscriber list. Async context manager
   (`async with Terrarium() as t:`) plus classmethod factories
-  (`from_recipe`, `with_creature`, `resume` — the last not yet
-  implemented).
+  (`from_recipe`, `with_creature`, `resume`).
 - `terrarium/topology.py` — pure-data graph model
   (`TopologyState`, `GraphTopology`, `ChannelKind`, `TopologyDelta`).
   No live agent references; testable without asyncio. The engine
@@ -186,7 +184,7 @@ others can DM it) and, if a root exists, a `report_to_root` channel.
   to send on it, makes the root listen on every existing channel, and
   flips `creature.is_root = True`. Pure channel + wiring; tool
   registration and user-IO mounting stay at higher layers. Use it any
-  time you build a graph imperatively and want the legacy "one-team,
+  time you build a graph imperatively and want the normal "one-team,
   one-root" topology without going through a recipe file.
 - `terrarium/session_coord.py` — session merge / split policy. On a
   graph merge, both old stores are unioned into a new one. On a graph
@@ -194,10 +192,9 @@ others can DM it) and, if a root exists, a `report_to_root` channel.
 - `terrarium/events.py` — the `EngineEvent` taxonomy plus
   `EventFilter`, `ConnectionResult`, `DisconnectionResult`.
 
-The legacy `terrarium/runtime.py:TerrariumRuntime` remains during the
-transition; new code should reach for `Terrarium` directly. Top-level
-re-exports are stable: `from kohakuterrarium import Terrarium,
-Creature, EngineEvent, EventFilter`.
+Top-level re-exports are stable: `from kohakuterrarium import
+Terrarium, Creature, EngineEvent, EventFilter`. For user-facing
+management concerns above the engine, use [`Studio`](../studio.md).
 
 ## What you can therefore do
 

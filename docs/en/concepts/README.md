@@ -51,6 +51,16 @@ You want to run a team of creatures.
 4. [Root agent](multi-agent/root-agent.md)
 5. [Channel](modules/channel.md) *(the primitive both rely on)*
 
+### Embedding / dashboard builder
+
+You want to host KohakuTerrarium from your own Python process, service,
+or UI.
+
+1. [Terrarium](multi-agent/terrarium.md) — the runtime engine and graph model.
+2. [Studio](studio.md) — the management layer above the engine.
+3. [Agent as a Python object](python-native/agent-as-python-object.md) — the lower-level creature internals.
+4. [Session and environment](modules/session-and-environment.md) — private creature state vs graph-shared state.
+
 ### Contributor / deep read
 
 You want to change the framework itself.
@@ -68,6 +78,7 @@ concepts/
 ├── modules/             One doc per module of a creature.
 ├── python-native/       Agents as Python values; composition algebra.
 ├── multi-agent/         Terrarium + root agent.
+├── studio.md            The management layer above Terrarium.
 ├── impl-notes/          Specific implementation choices worth teaching.
 ├── patterns.md          What emerges from combining modules.
 ├── boundaries.md        The abstraction is a default, not a law.

@@ -65,9 +65,9 @@ Rules:
 ## How we implement it
 
 `core/session.py` defines `Session` and helpers for fetching/creating
-sessions by key. `core/environment.py` defines `Environment`.
-`TerrariumRuntime` creates one environment and attaches a session to
-each creature.
+sessions by key. `core/environment.py` defines `Environment`. The
+`Terrarium` engine creates one environment per graph and attaches the
+appropriate session store to each hosted creature.
 
 The `scratchpad` builtin tool reads/writes the current creature's
 session scratchpad. The `send_message` tool picks the right channel

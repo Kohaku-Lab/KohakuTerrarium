@@ -126,10 +126,11 @@ ensemble with fallback and retry — all in plain Python.
 
 ## Don't be bounded
 
-Composition algebra is optional. Creature configs plus `AgentSession`
-cover the majority of embedding use cases. The operators exist for
-when you *do* want multi-agent choreography from plain Python without
-a terrarium.
+Composition algebra is optional. Creature configs plus `Studio`,
+`Terrarium`, or direct `Creature.chat()` cover the majority of
+embedding use cases. The operators exist for when you *do* want
+multi-agent choreography from plain Python without managing a runtime
+graph.
 
 Status note: the algebra is useful but still evolving — the exact set
 of operators may grow or simplify based on feedback. Prefer it for

@@ -60,7 +60,7 @@ creature config. They must implement `InputModule` and are loaded by
 - **Trigger-only creatures.** `input: { type: none }` plus one or more
   triggers: a cron creature, a channel watcher, a webhook receiver.
 - **Multi-surface chat.** An HTTP-driven deployment does not need a
-  CLI input — the `AgentSession` transport pushes user content in
+  CLI input — `Studio` / `Creature` chat routes push user content in
   programmatically via `inject_input()`.
 - **Sensor-style inputs.** Plug in a filesystem watcher, a Discord
   listener, or an MQTT consumer. The creature does not know the
