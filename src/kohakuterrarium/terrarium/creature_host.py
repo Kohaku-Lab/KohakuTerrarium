@@ -15,7 +15,8 @@ both ``AgentConfig`` (file path or object) and ``CreatureConfig``
 import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, AsyncIterator, Union
+from collections.abc import AsyncIterator
+from typing import Any
 from uuid import uuid4
 
 from kohakuterrarium.builtins.inputs.none import NoneInput
@@ -261,7 +262,7 @@ class Creature:
 # ---------------------------------------------------------------------------
 
 
-CreatureBuildInput = Union[AgentConfig, CreatureConfig, str, Path]
+CreatureBuildInput = AgentConfig | CreatureConfig | str | Path
 
 
 def build_creature(

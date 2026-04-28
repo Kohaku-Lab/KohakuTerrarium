@@ -14,6 +14,9 @@ Usage::
     /fork --name <new_name>     — name the new session
 """
 
+import uuid
+from pathlib import Path
+
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (
     BaseUserCommand,
@@ -56,9 +59,6 @@ def _suggest_target_path(parent_path: str, name: str | None) -> str:
     Uses ``path_for_version`` so the suffix matches whatever
     ``MAX_SUPPORTED_VERSION`` is on this build.
     """
-    from pathlib import Path
-    import uuid
-
     parent = Path(parent_path)
     # Strip ``.v2``-style version suffix to get the bare name.
     stem = parent.name

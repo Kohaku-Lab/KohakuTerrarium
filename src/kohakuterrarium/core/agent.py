@@ -10,7 +10,7 @@ Event handling and tool execution is in agent_handlers.py (AgentHandlersMixin).
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from kohakuterrarium.bootstrap.agent_init import AgentInitMixin
 from kohakuterrarium.bootstrap.plugins import init_plugins
@@ -77,7 +77,7 @@ class Agent(
         input_module: InputModule | None = None,
         output_module: OutputModule | None = None,
         session: Session | None = None,
-        environment: Optional["Environment"] = None,
+        environment: "Environment | None" = None,
         llm_override: str | None = None,
         pwd: str | None = None,
     ) -> "Agent":
@@ -114,7 +114,7 @@ class Agent(
         input_module: InputModule | None = None,
         output_module: OutputModule | None = None,
         session: Session | None = None,
-        environment: Optional["Environment"] = None,
+        environment: "Environment | None" = None,
         llm_override: str | None = None,
         pwd: str | None = None,
     ):
@@ -169,7 +169,7 @@ class Agent(
         init_branch_state(self)
 
         # Environment and session (explicit or auto-created in _init_executor)
-        self.environment: Optional["Environment"] = environment
+        self.environment: "Environment | None" = environment
         self._explicit_session: Session | None = session
 
         # Module loader for custom components
