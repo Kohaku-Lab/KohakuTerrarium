@@ -14,7 +14,7 @@ from typing import Any
 
 from jinja2 import BaseLoader, Environment, TemplateNotFound, TemplateSyntaxError
 
-from kohakuterrarium.packages_manifest import resolve_package_prompt
+from kohakuterrarium.packages.slots import resolve_package_prompt
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

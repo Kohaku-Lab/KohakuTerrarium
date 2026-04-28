@@ -18,7 +18,8 @@ from typing import TYPE_CHECKING
 
 from kohakuterrarium.commands.base import Command
 from kohakuterrarium.modules.plugin.base import BasePlugin
-from kohakuterrarium.packages import ensure_package_importable, list_packages
+from kohakuterrarium.packages.resolve import ensure_package_importable
+from kohakuterrarium.packages.walk import list_packages
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:

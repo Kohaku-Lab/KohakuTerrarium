@@ -1,23 +1,31 @@
-"""CLI extension commands -- list and inspect package extension modules."""
+"""CLI extension commands -- list and inspect package extension modules.
 
-from kohakuterrarium.packages import get_package_modules, list_packages
+Thin formatter over :mod:`kohakuterrarium.studio.catalog.builtins` —
+the read-side helpers there are the single source of truth shared
+with the studio catalog routes.
+"""
+
+from kohakuterrarium.studio.catalog.builtins import (
+    extension_module_types,
+    get_extension_modules,
+    list_extension_packages,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-_MODULE_TYPES = ("tools", "plugins", "llm_presets")
-
 
 def extension_list_cli() -> int:
     """Show all installed extension modules (tools, plugins, presets)."""
-    packages = list_packages()
+    packages = list_extension_packages()
     if not packages:
         print("No packages installed.")
         return 0
 
+    module_types = extension_module_types()
     found_any = False
     for pkg in packages:
-        counts = {mt: len(pkg.get(mt, [])) for mt in _MODULE_TYPES}
+        counts = {mt: len(pkg.get(mt, [])) for mt in module_types}
         if not any(counts.values()):
             continue
 
@@ -26,7 +34,7 @@ def extension_list_cli() -> int:
         print(f"{pkg['name']} v{pkg['version']}{editable_tag}")
         if pkg.get("description"):
             print(f"  {pkg['description']}")
-        for mt in _MODULE_TYPES:
+        for mt in module_types:
             items = pkg.get(mt, [])
             if items:
                 label = mt.replace("_", " ")
@@ -42,8 +50,7 @@ def extension_list_cli() -> int:
 
 def extension_info_cli(name: str) -> int:
     """Show details of a specific package's extension modules."""
-    # Verify the package exists
-    packages = list_packages()
+    packages = list_extension_packages()
     pkg_match = [p for p in packages if p["name"] == name]
     if not pkg_match:
         print(f"Package not found: {name}")
@@ -57,9 +64,9 @@ def extension_info_cli(name: str) -> int:
     print(f"Path: {pkg['path']}")
     print()
 
-    all_types = ("creatures", "terrariums", *_MODULE_TYPES)
+    all_types = ("creatures", "terrariums", *extension_module_types())
     for module_type in all_types:
-        modules = get_package_modules(name, module_type)
+        modules = get_extension_modules(name, module_type)
         if not modules:
             continue
         label = module_type.replace("_", " ").title()
