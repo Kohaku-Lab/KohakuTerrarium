@@ -162,12 +162,20 @@ def build_root_agent(
                 "A message arrived on '{channel}'. "
                 "Evaluate if you need to act on it or relay information."
             )
+    # ``ignore_sender`` and ``subscriber_id`` MUST match the identity that
+    # ``send_message`` stamps on outgoing messages, which is
+    # ``ToolContext.agent_name`` = ``agent.config.name``. Earlier code
+    # hardcoded the string ``"root"``, which silently bypassed the
+    # self-message filter whenever the user named their root agent
+    # anything else (the common case). See `tests/unit/terrarium/
+    # test_root_self_filter.py` for the regression coverage.
+    root_identity = agent.config.name
     _inject_channel_triggers(
         agent=agent,
-        subscriber_id="root",
+        subscriber_id=root_identity,
         channel_names=[ch.name for ch in config.channels],
         prompts=root_prompts,
-        ignore_sender="root",
+        ignore_sender=root_identity,
         registry=environment.shared_channels,
         config=config,
     )
@@ -315,12 +323,18 @@ def build_creature(
             )
         else:
             creature_prompts[ch_name] = "[Channel '{channel}' from {sender}]: {content}"
+    # Use the agent's actual ``config.name`` (not the terrarium-level
+    # ``creature_cfg.name``) so the self-filter byte-matches what
+    # ``send_message`` stamps via ``ToolContext.agent_name``. In practice
+    # these are the same, but base_config inheritance / config overrides
+    # can diverge, and this keeps both sides locked to one identifier.
+    creature_identity = agent.config.name
     _inject_channel_triggers(
         agent=agent,
-        subscriber_id=creature_cfg.name,
+        subscriber_id=creature_identity,
         channel_names=all_listen,
         prompts=creature_prompts,
-        ignore_sender=creature_cfg.name,
+        ignore_sender=creature_identity,
         registry=environment.shared_channels,
         config=config,
     )

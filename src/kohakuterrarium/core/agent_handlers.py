@@ -108,83 +108,93 @@ class AgentHandlersMixin(AgentToolsMixin):
         Uses a lock to prevent concurrent processing. When multiple
         triggers fire simultaneously, events are serialized so only
         one LLM call runs at a time.
+
+        The lock covers the ENTIRE event-handling pipeline — including
+        pre-controller side effects like ``output_router.on_user_input``,
+        plugin ``on_event`` notifications, and ``session_store`` event
+        appends. If those ran concurrently (two trigger tasks calling
+        ``_process_event`` at once) the TUI would see overlapping
+        renders and the session log would interleave events from two
+        turns. Holding the lock around them serializes everything.
         """
-        is_rerun = bool(event.context.get("rerun"))
-        is_edited = bool(event.context.get("edited"))
-        is_pure_rerun = is_rerun and not is_edited
-        # Turn / branch bookkeeping for v2 session events.
-        # - New user input → bump turn_index, reset branch_id to 1.
-        # - Pure regen / edit+rerun keep turn_index, ``_branch_id`` was
-        #   pre-incremented by ``regenerate_last_response`` /
-        #   ``edit_and_rerun`` before this trigger fired.
-        if event.type == "user_input" and not is_rerun:
-            # The previous turn's (turn_index, branch_id) becomes part
-            # of the new turn's parent_branch_path so a future branch
-            # switch on that earlier turn can hide this turn's events
-            # if they don't belong to the chosen subtree.
-            if self._turn_index > 0 and self._branch_id > 0:
-                self._parent_branch_path = list(self._parent_branch_path)
-                self._parent_branch_path.append((self._turn_index, self._branch_id))
-            self._turn_index += 1
-            self._branch_id = 1
-        # Record user input to session store. Pure regenerate (rerun
-        # with no new content) is a synthetic re-trigger of an existing
-        # user message, so we do NOT emit a fresh ``user_message``.
-        # Edit+rerun carries the new content (``edited=True``) and
-        # records normally — under the new branch_id so the navigator
-        # can flip back to the original.
-        if (
-            self.session_store is not None
-            and event.type == "user_input"
-            and not is_pure_rerun
-        ):
-            content = (
-                content_parts_to_dicts(event.content)
-                if hasattr(event, "is_multimodal") and event.is_multimodal()
-                else (event.content or "")
-            )
-            ppath = [tuple(p) for p in self._parent_branch_path]
-            self.session_store.append_event(
-                self.config.name,
-                "user_input",
-                {"content": content},
-                turn_index=self._turn_index,
-                branch_id=self._branch_id,
-                parent_branch_path=ppath,
-            )
-            self.session_store.append_event(
-                self.config.name,
-                "user_message",
-                {"content": content},
-                turn_index=self._turn_index,
-                branch_id=self._branch_id,
-                parent_branch_path=ppath,
-            )
-
-        # Notify output of user input (for inline panel rendering).
-        # Pure regen has no new user input — skip the notification so
-        # output modules don't render an empty user bubble.
-        if (
-            event.type == "user_input"
-            and self.output_router is not None
-            and not is_pure_rerun
-        ):
-            content = (
-                event.get_text_content()
-                if hasattr(event, "is_multimodal") and event.is_multimodal()
-                else (event.content or "")
-            )
-            await self.output_router.on_user_input(content)
-
-        if self.plugins is not None:
-            await self.plugins.notify("on_event", event=event)
-        # Procedural-skill ``paths:`` auto-activate (D.6 + Qd).
-        if event.type == "user_input":
-            inject_skill_path_hint(self)
         async with self._processing_lock:
             if not self._running:
                 logger.debug("Dropping event, agent stopped", event_type=event.type)
                 return
+
+            is_rerun = bool(event.context.get("rerun"))
+            is_edited = bool(event.context.get("edited"))
+            is_pure_rerun = is_rerun and not is_edited
+            # Turn / branch bookkeeping for v2 session events.
+            # - New user input → bump turn_index, reset branch_id to 1.
+            # - Pure regen / edit+rerun keep turn_index, ``_branch_id`` was
+            #   pre-incremented by ``regenerate_last_response`` /
+            #   ``edit_and_rerun`` before this trigger fired.
+            if event.type == "user_input" and not is_rerun:
+                # The previous turn's (turn_index, branch_id) becomes part
+                # of the new turn's parent_branch_path so a future branch
+                # switch on that earlier turn can hide this turn's events
+                # if they don't belong to the chosen subtree.
+                if self._turn_index > 0 and self._branch_id > 0:
+                    self._parent_branch_path = list(self._parent_branch_path)
+                    self._parent_branch_path.append((self._turn_index, self._branch_id))
+                self._turn_index += 1
+                self._branch_id = 1
+            # Record user input to session store. Pure regenerate (rerun
+            # with no new content) is a synthetic re-trigger of an existing
+            # user message, so we do NOT emit a fresh ``user_message``.
+            # Edit+rerun carries the new content (``edited=True``) and
+            # records normally — under the new branch_id so the navigator
+            # can flip back to the original.
+            if (
+                self.session_store is not None
+                and event.type == "user_input"
+                and not is_pure_rerun
+            ):
+                content = (
+                    content_parts_to_dicts(event.content)
+                    if hasattr(event, "is_multimodal") and event.is_multimodal()
+                    else (event.content or "")
+                )
+                ppath = [tuple(p) for p in self._parent_branch_path]
+                self.session_store.append_event(
+                    self.config.name,
+                    "user_input",
+                    {"content": content},
+                    turn_index=self._turn_index,
+                    branch_id=self._branch_id,
+                    parent_branch_path=ppath,
+                )
+                self.session_store.append_event(
+                    self.config.name,
+                    "user_message",
+                    {"content": content},
+                    turn_index=self._turn_index,
+                    branch_id=self._branch_id,
+                    parent_branch_path=ppath,
+                )
+
+            # Notify output of user input (for inline panel rendering).
+            # Pure regen has no new user input — skip the notification so
+            # output modules don't render an empty user bubble.
+            if (
+                event.type == "user_input"
+                and self.output_router is not None
+                and not is_pure_rerun
+            ):
+                content = (
+                    event.get_text_content()
+                    if hasattr(event, "is_multimodal") and event.is_multimodal()
+                    else (event.content or "")
+                )
+                await self.output_router.on_user_input(content)
+
+            if self.plugins is not None:
+                await self.plugins.notify("on_event", event=event)
+            # Procedural-skill ``paths:`` auto-activate (D.6 + Qd).
+            if event.type == "user_input":
+                inject_skill_path_hint(self)
+
             await self._process_event_with_controller(event, self.controller)
 
     # ------------------------------------------------------------------

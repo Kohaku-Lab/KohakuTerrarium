@@ -220,11 +220,16 @@ class HotPlugMixin:
                     "Only act on it if it is relevant to your current task."
                 )
 
+            # Use the agent's own ``config.name`` so the self-filter
+            # byte-matches what ``send_message`` stamps via
+            # ``ToolContext.agent_name``.  See ``terrarium/factory.py``
+            # ``build_root_agent`` for context.
+            identity = handle.agent.config.name
             trigger = ChannelTrigger(
                 channel_name=channel_name,
-                subscriber_id=creature_name,
+                subscriber_id=identity,
                 prompt=prompt,
-                ignore_sender=creature_name,
+                ignore_sender=identity,
                 registry=self.environment.shared_channels,
             )
 
