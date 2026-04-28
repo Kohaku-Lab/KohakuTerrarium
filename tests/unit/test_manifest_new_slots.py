@@ -17,8 +17,8 @@ import sys
 import pytest
 import yaml
 
-from kohakuterrarium.packages import install_package, list_packages
-from kohakuterrarium.packages_manifest import (
+from kohakuterrarium.packages.install import install_package
+from kohakuterrarium.packages.slots import (
     list_package_commands,
     list_package_prompts,
     list_package_skills,
@@ -28,6 +28,7 @@ from kohakuterrarium.packages_manifest import (
     resolve_package_skills,
     resolve_package_user_command,
 )
+from kohakuterrarium.packages.walk import list_packages
 from kohakuterrarium.prompt.template import render_template
 
 # ---------------------------------------------------------------------------
@@ -38,7 +39,7 @@ from kohakuterrarium.prompt.template import render_template
 @pytest.fixture
 def tmp_packages(tmp_path, monkeypatch):
     """Redirect the package install root to a throwaway directory."""
-    import kohakuterrarium.packages as pkg_mod
+    import kohakuterrarium.packages.locations as pkg_mod
 
     monkeypatch.setattr(pkg_mod, "PACKAGES_DIR", tmp_path / "packages")
     (tmp_path / "packages").mkdir()

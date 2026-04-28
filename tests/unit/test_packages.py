@@ -5,20 +5,16 @@ from pathlib import Path
 import pytest
 import yaml
 
-import kohakuterrarium.packages as pkg_mod
-from kohakuterrarium.packages import (
-    install_package,
-    is_package_ref,
-    list_packages,
-    resolve_package_path,
-    uninstall_package,
-)
+from kohakuterrarium.packages import manifest as _manifest_mod
+from kohakuterrarium.packages.install import install_package, uninstall_package
+from kohakuterrarium.packages.resolve import is_package_ref, resolve_package_path
+from kohakuterrarium.packages.walk import list_packages
 
 
 @pytest.fixture
 def tmp_packages(tmp_path, monkeypatch):
     """Use a temporary directory for packages instead of ~/.kohakuterrarium/packages."""
-    import kohakuterrarium.packages as pkg_mod
+    import kohakuterrarium.packages.locations as pkg_mod
 
     monkeypatch.setattr(pkg_mod, "PACKAGES_DIR", tmp_path / "packages")
     (tmp_path / "packages").mkdir()
@@ -87,10 +83,10 @@ class TestForceRmtree:
             called["path"] = path
             called.update(kwargs)
 
-        monkeypatch.setattr(pkg_mod.shutil, "rmtree", fake_rmtree)
-        monkeypatch.setattr(pkg_mod.sys, "version_info", (3, 12, 0))
+        monkeypatch.setattr(_manifest_mod.shutil, "rmtree", fake_rmtree)
+        monkeypatch.setattr(_manifest_mod.sys, "version_info", (3, 12, 0))
 
-        pkg_mod._force_rmtree(tmp_path)
+        _manifest_mod._force_rmtree(tmp_path)
 
         assert called["path"] == tmp_path
         assert "onexc" in called
@@ -103,10 +99,10 @@ class TestForceRmtree:
             called["path"] = path
             called.update(kwargs)
 
-        monkeypatch.setattr(pkg_mod.shutil, "rmtree", fake_rmtree)
-        monkeypatch.setattr(pkg_mod.sys, "version_info", (3, 11, 0))
+        monkeypatch.setattr(_manifest_mod.shutil, "rmtree", fake_rmtree)
+        monkeypatch.setattr(_manifest_mod.sys, "version_info", (3, 11, 0))
 
-        pkg_mod._force_rmtree(tmp_path)
+        _manifest_mod._force_rmtree(tmp_path)
 
         assert called["path"] == tmp_path
         assert "onerror" in called
@@ -215,7 +211,7 @@ class TestUpdatePackage:
         if shutil.which("git") is None:
             pytest.skip("git not available")
 
-        from kohakuterrarium.packages import update_package
+        from kohakuterrarium.packages.install import update_package
 
         remote, installed = self._set_up_installed_clone(
             tmp_packages, tmp_path, "gitpack"
@@ -244,14 +240,14 @@ class TestUpdatePackage:
 
     def test_update_rejects_local_install(self, tmp_packages, sample_package):
         """A non-git local install must not be treated as updatable."""
-        from kohakuterrarium.packages import install_package, update_package
+        from kohakuterrarium.packages.install import install_package, update_package
 
         install_package(str(sample_package))
         with pytest.raises(RuntimeError, match="not a git clone"):
             update_package("test-pack")
 
     def test_update_unknown_package(self, tmp_packages):
-        from kohakuterrarium.packages import update_package
+        from kohakuterrarium.packages.install import update_package
 
         with pytest.raises(FileNotFoundError):
             update_package("no-such-pack")

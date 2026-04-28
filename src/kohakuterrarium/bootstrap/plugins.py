@@ -6,7 +6,8 @@ from typing import Any
 from kohakuterrarium.core.loader import ModuleLoader
 from kohakuterrarium.modules.plugin.base import BasePlugin
 from kohakuterrarium.modules.plugin.manager import PluginManager
-from kohakuterrarium.packages import ensure_package_importable, list_packages
+from kohakuterrarium.packages.resolve import ensure_package_importable
+from kohakuterrarium.packages.walk import list_packages
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

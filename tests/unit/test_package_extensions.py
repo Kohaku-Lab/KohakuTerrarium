@@ -13,18 +13,15 @@ Covers:
 import pytest
 import yaml
 
-from kohakuterrarium.packages import (
-    get_package_modules,
-    install_package,
-    list_packages,
-    resolve_package_tool,
-)
+from kohakuterrarium.packages.install import install_package
+from kohakuterrarium.packages.resolve import resolve_package_tool
+from kohakuterrarium.packages.walk import get_package_modules, list_packages
 
 
 @pytest.fixture
 def tmp_packages(tmp_path, monkeypatch):
     """Use a temporary directory for packages."""
-    import kohakuterrarium.packages as pkg_mod
+    import kohakuterrarium.packages.locations as pkg_mod
 
     monkeypatch.setattr(pkg_mod, "PACKAGES_DIR", tmp_path / "packages")
     (tmp_path / "packages").mkdir()
@@ -237,7 +234,7 @@ class TestValidatePackageExtensions:
 
     def test_validate_checks_manifest(self, tmp_path):
         """_validate_package checks manifest for extension entries."""
-        from kohakuterrarium.packages import _validate_package
+        from kohakuterrarium.packages.manifest import _validate_package
 
         # Package with tools in manifest but no creatures/ dir
         pkg = tmp_path / "tool-only"
@@ -250,7 +247,7 @@ class TestValidatePackageExtensions:
 
     def test_validate_empty_package(self, tmp_path):
         """_validate_package still runs for truly empty packages."""
-        from kohakuterrarium.packages import _validate_package
+        from kohakuterrarium.packages.manifest import _validate_package
 
         pkg = tmp_path / "empty"
         pkg.mkdir()
@@ -364,7 +361,7 @@ class TestExtensionCLI:
 
 class TestMCPCLI:
     def test_mcp_list_no_servers(self, tmp_path, capsys):
-        from kohakuterrarium.cli.mcp import mcp_list_cli
+        from kohakuterrarium.cli.identity_mcp import list_for_agent_cli as mcp_list_cli
 
         agent = tmp_path / "agent"
         agent.mkdir()
@@ -375,7 +372,7 @@ class TestMCPCLI:
         assert "No MCP servers" in out
 
     def test_mcp_list_with_servers(self, tmp_path, capsys):
-        from kohakuterrarium.cli.mcp import mcp_list_cli
+        from kohakuterrarium.cli.identity_mcp import list_for_agent_cli as mcp_list_cli
 
         agent = tmp_path / "agent"
         agent.mkdir()
@@ -408,7 +405,7 @@ class TestMCPCLI:
         assert "sse" in out
 
     def test_mcp_list_missing_path(self, capsys):
-        from kohakuterrarium.cli.mcp import mcp_list_cli
+        from kohakuterrarium.cli.identity_mcp import list_for_agent_cli as mcp_list_cli
 
         rc = mcp_list_cli("/nonexistent/path")
         assert rc == 1
@@ -416,7 +413,7 @@ class TestMCPCLI:
         assert "not found" in out.lower()
 
     def test_mcp_list_no_config(self, tmp_path, capsys):
-        from kohakuterrarium.cli.mcp import mcp_list_cli
+        from kohakuterrarium.cli.identity_mcp import list_for_agent_cli as mcp_list_cli
 
         agent = tmp_path / "agent"
         agent.mkdir()

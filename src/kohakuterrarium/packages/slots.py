@@ -29,8 +29,8 @@ manifest-slot plumbing:
 
 from pathlib import Path
 
-from kohakuterrarium.packages import list_packages
-from kohakuterrarium.packages_base import get_package_root
+from kohakuterrarium.packages.locations import get_package_root
+from kohakuterrarium.packages.walk import list_packages
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

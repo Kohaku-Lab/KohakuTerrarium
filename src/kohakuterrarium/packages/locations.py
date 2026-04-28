@@ -1,9 +1,9 @@
 """Low-level package-location helpers shared by package modules.
 
 This module intentionally contains only constants and filesystem lookup
-primitives. Higher-level package management (`packages.py`) and manifest-slot
-resolvers (`packages_manifest.py`) both depend on it, avoiding a cycle between
-those two public modules.
+primitives. Higher-level package management (:mod:`.install`,
+:mod:`.walk`) and manifest-slot resolvers (:mod:`.slots`) all depend on
+it, avoiding a cycle between those public modules.
 """
 
 import sys
@@ -21,10 +21,11 @@ def _packages_dir() -> Path:
     """Return the active packages directory.
 
     Tests and legacy callers historically monkeypatch
-    ``kohakuterrarium.packages.PACKAGES_DIR``. Consult that public module
-    when present so the new split storage layer remains compatible.
+    ``kohakuterrarium.packages.locations.PACKAGES_DIR``. Consult that
+    module when present so the new split storage layer remains
+    compatible.
     """
-    pkg_mod = sys.modules.get("kohakuterrarium.packages")
+    pkg_mod = sys.modules.get("kohakuterrarium.packages.locations")
     if pkg_mod is not None:
         current = getattr(pkg_mod, "PACKAGES_DIR", PACKAGES_DIR)
         if isinstance(current, Path):
@@ -82,4 +83,36 @@ def get_package_root(name: str) -> Path | None:
         if real.is_dir():
             return real
 
+    return None
+
+
+def get_package_path(name: str) -> Path | None:
+    """Get the path to an installed package."""
+    return get_package_root(name)
+
+
+def find_package_root_for_path(path: Path | None) -> Path | None:
+    """Walk up from ``path`` until a directory containing a manifest is found.
+
+    Returns the first ancestor directory that contains ``kohaku.yaml`` (or
+    ``kohaku.yml``), or ``None`` if no such ancestor exists. Used to resolve
+    package-level defaults for a creature whose config lives in
+    ``<pkg_root>/creatures/<name>/``.
+    """
+    if path is None:
+        return None
+    try:
+        current = path.resolve()
+    except OSError:
+        return None
+    # Start from path if it's a directory, else from its parent.
+    if current.is_file():
+        current = current.parent
+    for _ in range(20):  # safety bound against pathological paths
+        if (current / "kohaku.yaml").exists() or (current / "kohaku.yml").exists():
+            return current
+        parent = current.parent
+        if parent == current:
+            return None
+        current = parent
     return None

@@ -25,7 +25,7 @@ from kohakuterrarium.modules.trigger import (
     ContextUpdateTrigger,
     TimerTrigger,
 )
-from kohakuterrarium.packages import resolve_package_trigger
+from kohakuterrarium.packages.resolve import resolve_package_trigger
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

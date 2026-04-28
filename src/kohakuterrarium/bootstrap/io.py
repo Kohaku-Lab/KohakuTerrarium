@@ -28,7 +28,7 @@ from kohakuterrarium.core.config import AgentConfig
 from kohakuterrarium.core.loader import ModuleLoader, ModuleLoadError
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
-from kohakuterrarium.packages import resolve_package_io
+from kohakuterrarium.packages.resolve import resolve_package_io
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

@@ -38,10 +38,8 @@ from kohakuterrarium.modules.user_command.base import (
     UserCommandResult,
     parse_slash_command,
 )
-from kohakuterrarium.packages import (
-    find_package_root_for_path,
-    get_package_framework_hints,
-)
+from kohakuterrarium.packages.locations import find_package_root_for_path
+from kohakuterrarium.packages.manifest import get_package_framework_hints
 from kohakuterrarium.parsing.format import BRACKET_FORMAT, XML_FORMAT, ToolCallFormat
 from kohakuterrarium.prompt.aggregator import aggregate_system_prompt
 from kohakuterrarium.prompt.framework_hints import merge_overrides

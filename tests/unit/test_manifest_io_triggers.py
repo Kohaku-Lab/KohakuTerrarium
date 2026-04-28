@@ -22,8 +22,8 @@ from kohakuterrarium.core.config import (
     TriggerConfig,
 )
 from kohakuterrarium.core.loader import ModuleLoader
-from kohakuterrarium.packages import (
-    install_package,
+from kohakuterrarium.packages.install import install_package
+from kohakuterrarium.packages.resolve import (
     resolve_package_io,
     resolve_package_trigger,
 )
@@ -36,7 +36,7 @@ from kohakuterrarium.packages import (
 @pytest.fixture
 def tmp_packages(tmp_path, monkeypatch):
     """Redirect the package install root to a throwaway directory."""
-    import kohakuterrarium.packages as pkg_mod
+    import kohakuterrarium.packages.locations as pkg_mod
 
     monkeypatch.setattr(pkg_mod, "PACKAGES_DIR", tmp_path / "packages")
     (tmp_path / "packages").mkdir()
@@ -278,7 +278,7 @@ class TestCollisionPolicy:
 class TestBootstrapManifestLookup:
     def test_create_input_uses_package_manifest(self, tmp_packages, io_package):
         install_package(str(io_package))
-        from kohakuterrarium.packages import ensure_package_importable
+        from kohakuterrarium.packages.resolve import ensure_package_importable
 
         ensure_package_importable("io-pkg")
 
@@ -294,7 +294,7 @@ class TestBootstrapManifestLookup:
 
     def test_create_output_uses_package_manifest(self, tmp_packages, io_package):
         install_package(str(io_package))
-        from kohakuterrarium.packages import ensure_package_importable
+        from kohakuterrarium.packages.resolve import ensure_package_importable
 
         ensure_package_importable("io-pkg")
 
@@ -309,7 +309,7 @@ class TestBootstrapManifestLookup:
 
     def test_create_trigger_uses_package_manifest(self, tmp_packages, trigger_package):
         install_package(str(trigger_package))
-        from kohakuterrarium.packages import ensure_package_importable
+        from kohakuterrarium.packages.resolve import ensure_package_importable
 
         ensure_package_importable("trigger-pkg")
 

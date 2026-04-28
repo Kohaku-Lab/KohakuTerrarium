@@ -28,7 +28,8 @@ def _resolve_config_dirs() -> tuple[list[str], list[str]]:
       2. Installed packages (``~/.kohakuterrarium/packages/``)
       3. Local project dirs (``creatures/``, ``terrariums/`` in project root)
     """
-    from kohakuterrarium.packages import PACKAGES_DIR, _get_package_root, list_packages
+    from kohakuterrarium.packages.locations import PACKAGES_DIR, get_package_root
+    from kohakuterrarium.packages.walk import list_packages
 
     creatures: list[str] = []
     terrariums: list[str] = []
@@ -44,7 +45,7 @@ def _resolve_config_dirs() -> tuple[list[str], list[str]]:
     # 2. Installed packages
     if PACKAGES_DIR.exists():
         for pkg in list_packages():
-            pkg_root = _get_package_root(pkg["name"])
+            pkg_root = get_package_root(pkg["name"])
             if pkg_root:
                 c = pkg_root / "creatures"
                 t = pkg_root / "terrariums"

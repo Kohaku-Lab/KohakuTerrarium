@@ -22,7 +22,7 @@ from kohakuterrarium.core.config_types import (
     _interpolate_env_vars,
 )
 from kohakuterrarium.core.output_wiring import parse_wiring_list
-from kohakuterrarium.packages import resolve_package_path
+from kohakuterrarium.packages.resolve import resolve_package_path
 
 try:
     import tomllib

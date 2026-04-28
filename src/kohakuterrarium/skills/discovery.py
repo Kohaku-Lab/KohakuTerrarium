@@ -7,7 +7,7 @@ Priority order (spec 1.3 "more limited scope = higher priority"):
             ``~/.agents/skills``)
 3. creature (``<agent>/prompts/skills``)
 4. package  (``resolve_package_skills`` / ``list_package_skills``
-             from :mod:`kohakuterrarium.packages_manifest`)
+             from :mod:`kohakuterrarium.packages.slots`)
 
 Skills are **last-wins** across origins (spec 1.1 skills exception).
 The registry is populated in *reverse* priority order — packages first,
@@ -22,7 +22,8 @@ the override. A DEBUG log trace is emitted for every supersede.
 
 from pathlib import Path
 
-from kohakuterrarium.packages import get_package_path, list_packages
+from kohakuterrarium.packages.locations import get_package_path
+from kohakuterrarium.packages.walk import list_packages
 from kohakuterrarium.skill_docs import parse_frontmatter, read_skill_text
 from kohakuterrarium.skills.registry import Skill
 from kohakuterrarium.utils.logging import get_logger
