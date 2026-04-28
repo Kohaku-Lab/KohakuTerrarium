@@ -378,6 +378,60 @@ def _matches(entry: dict, fact: dict) -> bool:
     return True
 
 
+# ── Tier rules (Phase 0 of studio-cleanup refactor) ─────────────────
+# Phase 0 introduces three tier separations:
+#
+# - ``packages/`` is a low-tier library (peer to core / bootstrap /
+#   terrarium); it cannot reach into ``studio/``, ``api/``, or ``cli/``.
+# - ``studio/`` is the new orchestration tier; lower tiers (``core``,
+#   ``bootstrap``, ``compose``, ``terrarium``, ``packages``) cannot
+#   import it, and ``studio/`` cannot import ``api/`` or ``cli/``.
+# - ``api/`` and ``cli/`` are top tiers — every other tier is below.
+#
+# Lower tiers below ``studio/`` are peers: the existing dependency
+# edges between e.g. ``core`` and ``bootstrap`` are not regulated
+# here, only the new tier separations.
+
+# Mapping from tier root → set of tier roots it MAY NOT import.
+FORBIDDEN_TIER_TARGETS: dict[str, set[str]] = {
+    "core": {"studio", "api", "cli"},
+    "bootstrap": {"studio", "api", "cli"},
+    "compose": {"studio", "api", "cli"},
+    "terrarium": {"studio", "api", "cli"},
+    "packages": {"studio", "api", "cli"},
+    "studio": {"api", "cli"},
+}
+
+
+def _tier_for(module: str) -> str | None:
+    """Return the tier root for ``module`` or ``None`` if unmanaged."""
+    if not module.startswith(f"{PKG}."):
+        return None
+    parts = module.split(".")
+    if len(parts) < 2:
+        return None
+    return parts[1]
+
+
+def check_tier_violations(
+    runtime: dict[str, set[str]],
+) -> list[tuple[str, str, str, str]]:
+    """Return (src, dst, src_tier, dst_tier) for each forbidden tier import."""
+    violations: list[tuple[str, str, str, str]] = []
+    for src, targets in runtime.items():
+        src_tier = _tier_for(src)
+        if src_tier is None or src_tier not in FORBIDDEN_TIER_TARGETS:
+            continue
+        forbidden = FORBIDDEN_TIER_TARGETS[src_tier]
+        for dst in targets:
+            dst_tier = _tier_for(dst)
+            if dst_tier is None or dst_tier == src_tier:
+                continue
+            if dst_tier in forbidden:
+                violations.append((src, dst, src_tier, dst_tier))
+    return violations
+
+
 # ── Lint ───────────────────────────────────────────────────────────
 
 
@@ -516,6 +570,23 @@ def report_cycles(sccs, edges_meta, out=sys.stdout) -> None:
                     continue
                 print(f"    {_short(a)} -> {_short(b)}", file=out)
                 print(f"      {fact['file']}:{fact['line']}  {fact['stmt']}", file=out)
+
+
+def report_tier_violations(
+    tier_violations: list[tuple[str, str, str, str]], out=sys.stdout
+) -> None:
+    print("=" * 70, file=out)
+    print("TIER VIOLATIONS", file=out)
+    print("=" * 70, file=out)
+    if not tier_violations:
+        print("None — all imports respect the tier order.", file=out)
+        return
+    for src, dst, src_tier, dst_tier in tier_violations:
+        print(
+            f"  {_short(src)}  ->  {_short(dst)}  "
+            f"({src_tier} importing higher tier {dst_tier})",
+            file=out,
+        )
 
 
 def report_lint(violations, allowed, out=sys.stdout) -> None:
@@ -722,6 +793,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.lint_imports or args.all or args.fail:
         violations, allowed = lint_imports(facts, required, optional)
 
+    tier_violations = check_tier_violations(runtime)
+
     show_stats = (
         args.stats
         or args.all
@@ -747,6 +820,7 @@ def main(argv: list[str] | None = None) -> int:
         report_cycles(sccs, edges_meta)
     if args.lint_imports or args.all or args.fail:
         report_lint(violations, allowed)
+        report_tier_violations(tier_violations)
     if args.dot:
         output_dot(runtime, all_modules)
     if args.plot or args.all:
@@ -771,6 +845,8 @@ def main(argv: list[str] | None = None) -> int:
             return 3
         if violations:
             return 4
+        if tier_violations:
+            return 5
     return 0
 
 
