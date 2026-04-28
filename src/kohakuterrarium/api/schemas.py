@@ -117,7 +117,10 @@ class AgentChat(BaseModel):
 class MessageEdit(BaseModel):
     """Request body for editing a user message and re-running."""
 
-    content: str
+    # Accept either a plain string (legacy / text-only edit) or a list of
+    # multimodal content parts — same shape as ``AgentChat.content`` —
+    # so the frontend's ``buildMessageParts`` output is valid.
+    content: str | list[ContentPartPayload]
     # Prefer stable visible-user targeting over raw conversation indices.
     # ``msg_idx`` remains in the URL for backward compatibility, but the
     # frontend sends one of these fields so system/tool messages cannot

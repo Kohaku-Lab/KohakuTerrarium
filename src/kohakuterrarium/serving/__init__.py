@@ -1,16 +1,12 @@
-"""Core service API for hosting and managing agents and terrariums.
+"""Serving — static frontend launcher.
 
-All runtime operations go through KohakuManager. Event types are
-transport-agnostic dataclasses usable by any interface layer.
+The legacy ``KohakuManager`` facade and the ``AgentSession`` /
+``StreamOutput`` / ``ChannelEvent`` helpers were removed in Phase 3
+of the studio cleanup. The :class:`Terrarium` engine
+(``kohakuterrarium.terrarium``) and the studio sessions modules
+(``kohakuterrarium.studio.sessions``) own those responsibilities now.
+This package keeps only :mod:`kohakuterrarium.serving.web`, the
+static-files launcher used by ``kt serve`` and the desktop bundle.
 """
 
-from kohakuterrarium.serving.agent_session import AgentSession
-from kohakuterrarium.serving.events import ChannelEvent, OutputEvent
-from kohakuterrarium.serving.manager import KohakuManager
-
-__all__ = [
-    "AgentSession",
-    "ChannelEvent",
-    "KohakuManager",
-    "OutputEvent",
-]
+__all__: list[str] = []

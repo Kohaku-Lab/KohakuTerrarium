@@ -5,7 +5,7 @@ import argparse
 from kohakuterrarium.cli.auth import login_cli
 from kohakuterrarium.cli.config import add_config_subparser, config_cli
 from kohakuterrarium.cli.extension import extension_info_cli, extension_list_cli
-from kohakuterrarium.cli.mcp import mcp_list_cli
+from kohakuterrarium.cli.identity_mcp import list_for_agent_cli as mcp_list_cli
 from kohakuterrarium.cli.memory import embedding_cli, search_cli
 from kohakuterrarium.cli.model import model_cli
 from kohakuterrarium.cli.packages import (
@@ -20,7 +20,7 @@ from kohakuterrarium.cli.resume import resume_cli
 from kohakuterrarium.cli.run import run_agent_cli
 from kohakuterrarium.cli.serve import add_serve_subparser, serve_cli
 from kohakuterrarium.cli.version import format_version_report
-from kohakuterrarium.packages import resolve_package_path
+from kohakuterrarium.packages.resolve import resolve_package_path
 from kohakuterrarium.serving.web import run_desktop_app, run_web_server
 from kohakuterrarium.terrarium.cli import (
     add_terrarium_subparser,
