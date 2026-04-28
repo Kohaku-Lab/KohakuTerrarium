@@ -24,7 +24,7 @@ CLI overlay, ``kt config``, and the settings page stay in lock-step.
 from dataclasses import dataclass, field
 from typing import Any
 
-from kohakuterrarium.api.routes.settings import _load_mcp_config, _save_mcp_config
+from kohakuterrarium.studio.identity.mcp_servers import load_servers, save_servers
 from kohakuterrarium.builtins.cli_rich.dialogs.settings_model import TABS
 from kohakuterrarium.builtins.cli_rich.dialogs.settings_render import render_overlay
 from kohakuterrarium.llm.api_keys import PROVIDER_KEY_MAP, get_api_key, save_api_key
@@ -221,7 +221,7 @@ class SettingsOverlay:
 
     def _load_mcp(self) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
-        for s in _load_mcp_config():
+        for s in load_servers():
             rows.append(
                 {
                     "name": s.get("name", ""),
@@ -624,7 +624,7 @@ class SettingsOverlay:
                 if not name:
                     self._form.message = "Name is required"
                     return
-                servers = _load_mcp_config()
+                servers = load_servers()
                 # Rename allowed on edit (filter by original, replace).
                 original = ctx.get("original_name", "")
                 servers = [s for s in servers if s.get("name") not in {name, original}]
@@ -643,7 +643,7 @@ class SettingsOverlay:
                         "env": ctx.get("preserved_env", {}),
                     }
                 )
-                _save_mcp_config(servers)
+                save_servers(servers)
                 self._flash = f"MCP server saved: {name}"
                 self._refresh_tab("MCP")
         except Exception as e:
@@ -688,9 +688,9 @@ class SettingsOverlay:
                 self._flash = f"Deleted preset: {identifier}"
                 self._refresh_tab("Models")
             elif state.action == "delete_mcp":
-                servers = _load_mcp_config()
+                servers = load_servers()
                 servers = [s for s in servers if s.get("name") != state.context["name"]]
-                _save_mcp_config(servers)
+                save_servers(servers)
                 self._flash = f"Deleted MCP server: {state.context['name']}"
                 self._refresh_tab("MCP")
         except Exception as e:

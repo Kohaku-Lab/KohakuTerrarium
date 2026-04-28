@@ -30,7 +30,7 @@ Naming convention (post-2026-04 refactor):
 from typing import Any
 
 from kohakuterrarium.llm.preset_aliases import _CANONICAL_NAMES, ALIASES
-from kohakuterrarium.packages import list_packages
+from kohakuterrarium.packages.walk import list_packages
 from kohakuterrarium.utils.logging import get_logger
 
 __all__ = [
