@@ -5,6 +5,7 @@ The framework enables building any kind of agent system - from SWE agents like C
 to conversational bots like Neuro-sama to autonomous monitoring systems.
 """
 
+from kohakuterrarium.studio import Studio
 from kohakuterrarium.terrarium import (
     ConnectionResult,
     Creature,
@@ -24,6 +25,7 @@ __all__ = [
     "EngineEvent",
     "EventFilter",
     "EventKind",
+    "Studio",
     "Terrarium",
     "__version__",
 ]
