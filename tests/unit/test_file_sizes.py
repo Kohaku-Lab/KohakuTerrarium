@@ -69,6 +69,12 @@ ALLOWLIST_600 = {
     # uniform; splitting them across files would fragment a single
     # dispatch table for no readability win.
     "session/output.py",
+    # Studio façade — pure consumer class wrapping every studio
+    # sub-package (catalog/identity/sessions/persistence/editors/attach)
+    # as nested namespaces.  Every method is a one-liner forwarding to
+    # an existing function; splitting the namespaces across files would
+    # fragment a single discoverable surface for the programmatic API.
+    "studio/studio.py",
 }
 
 

@@ -6,16 +6,18 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from kohakuterrarium.api.routes import sessions as sessions_routes
+from kohakuterrarium.studio.persistence import store as persistence_store
+
+from tests.unit._persistence_test_helpers import mount_session_routes
 
 
 @pytest.fixture()
 def app_with_sessions(tmp_path: Path, monkeypatch):
     """Spin up a FastAPI app mounted at /api/sessions with a fresh
     sessions directory so the test doesn't touch ~/.kohakuterrarium."""
-    monkeypatch.setattr(sessions_routes, "_SESSION_DIR", tmp_path)
+    monkeypatch.setattr(persistence_store, "_SESSION_DIR", tmp_path)
     app = FastAPI()
-    app.include_router(sessions_routes.router, prefix="/api/sessions")
+    mount_session_routes(app)
     return app, tmp_path
 
 

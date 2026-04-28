@@ -5,13 +5,16 @@ Two collisions caught at review time:
 1. ``/fork`` previously declared ``aliases = ["branch"]`` so the
    resolver shadowed the new ``/branch`` command — typing ``/branch``
    in the prompt invoked Fork, not the regen / edit navigator.
-2. ``api/routes/sessions.py`` listed ``*.kohakutr.v*`` files but
-   ``delete_session`` / ``resume_session`` / ``_resolve_session_path``
+2. The legacy ``api/routes/sessions.py`` listed ``*.kohakutr.v*`` files
+   but ``delete_session`` / ``resume_session`` / ``_resolve_session_path``
    only checked ``.kohakutr`` and ``.kt`` extensions and used
    ``Path.stem`` (which returns ``"foo.kohakutr"`` for
    ``foo.kohakutr.v2``). With Wave D auto-migration in place the
    v2 file is the live one — every operation other than listing
-   was broken.
+   was broken. After the studio-cleanup refactor the path helpers
+   live in ``studio/persistence`` and the route logic lives in
+   ``api/routes/persistence``; the property tested here is
+   identical.
 """
 
 from pathlib import Path
@@ -50,16 +53,16 @@ def test_branch_alias_br_still_resolves():
     assert isinstance(cmd, BranchCommand)
 
 
-# ── sessions.py path resolution ───────────────────────────────────────
+# ── persistence path resolution ───────────────────────────────────────
 
 
 @pytest.fixture
 def session_dir(tmp_path, monkeypatch):
-    """Repoint ``_SESSION_DIR`` to a tmp path so the tests don't touch
-    the user's real session library."""
-    from kohakuterrarium.api.routes import sessions as sessions_module
+    """Repoint the studio persistence ``_SESSION_DIR`` to a tmp path so
+    the tests don't touch the user's real session library."""
+    from kohakuterrarium.studio.persistence import store as persistence_store
 
-    monkeypatch.setattr(sessions_module, "_SESSION_DIR", tmp_path)
+    monkeypatch.setattr(persistence_store, "_SESSION_DIR", tmp_path)
     return tmp_path
 
 
@@ -82,71 +85,87 @@ def _touch_session_file(path: Path) -> None:
 
 
 def test_normalize_session_stem_handles_v2_suffix(session_dir):
-    from kohakuterrarium.api.routes.sessions import _normalize_session_stem
+    from kohakuterrarium.studio.persistence.viewer.paths import (
+        normalize_session_stem,
+    )
 
     p = session_dir / "foo.kohakutr.v2"
     p.write_bytes(b"")
-    assert _normalize_session_stem(p) == "foo"
+    assert normalize_session_stem(p) == "foo"
 
 
 def test_normalize_session_stem_handles_bare_kohakutr(session_dir):
-    from kohakuterrarium.api.routes.sessions import _normalize_session_stem
+    from kohakuterrarium.studio.persistence.viewer.paths import (
+        normalize_session_stem,
+    )
 
     p = session_dir / "foo.kohakutr"
     p.write_bytes(b"")
-    assert _normalize_session_stem(p) == "foo"
+    assert normalize_session_stem(p) == "foo"
 
 
 def test_normalize_session_stem_handles_kt(session_dir):
-    from kohakuterrarium.api.routes.sessions import _normalize_session_stem
+    from kohakuterrarium.studio.persistence.viewer.paths import (
+        normalize_session_stem,
+    )
 
     p = session_dir / "foo.kt"
     p.write_bytes(b"")
-    assert _normalize_session_stem(p) == "foo"
+    assert normalize_session_stem(p) == "foo"
 
 
 def test_resolve_session_path_prefers_v2_over_v1(session_dir):
-    from kohakuterrarium.api.routes.sessions import _resolve_session_path
+    from kohakuterrarium.studio.persistence.store import (
+        resolve_session_path_default,
+    )
 
     _touch_session_file(session_dir / "foo.kohakutr")
     _touch_session_file(session_dir / "foo.kohakutr.v2")
 
-    resolved = _resolve_session_path("foo")
+    resolved = resolve_session_path_default("foo")
     assert resolved is not None
     assert resolved.name == "foo.kohakutr.v2"
 
 
 def test_resolve_session_path_falls_back_to_v1(session_dir):
-    from kohakuterrarium.api.routes.sessions import _resolve_session_path
+    from kohakuterrarium.studio.persistence.store import (
+        resolve_session_path_default,
+    )
 
     _touch_session_file(session_dir / "foo.kohakutr")
-    resolved = _resolve_session_path("foo")
+    resolved = resolve_session_path_default("foo")
     assert resolved is not None
     assert resolved.name == "foo.kohakutr"
 
 
 def test_resolve_session_path_v2_only_works(session_dir):
     """Wave-D-migrated session: only v2 file present (no v1 rollback)."""
-    from kohakuterrarium.api.routes.sessions import _resolve_session_path
+    from kohakuterrarium.studio.persistence.store import (
+        resolve_session_path_default,
+    )
 
     _touch_session_file(session_dir / "foo.kohakutr.v2")
-    resolved = _resolve_session_path("foo")
+    resolved = resolve_session_path_default("foo")
     assert resolved is not None
     assert resolved.name == "foo.kohakutr.v2"
 
 
 def test_resolve_session_path_unknown_returns_none(session_dir):
-    from kohakuterrarium.api.routes.sessions import _resolve_session_path
+    from kohakuterrarium.studio.persistence.store import (
+        resolve_session_path_default,
+    )
 
-    assert _resolve_session_path("missing") is None
+    assert resolve_session_path_default("missing") is None
 
 
 def test_all_versions_returns_v1_and_v2(session_dir):
-    from kohakuterrarium.api.routes.sessions import _all_versions_for_session
+    from kohakuterrarium.studio.persistence.store import (
+        all_versions_for_session_default,
+    )
 
     _touch_session_file(session_dir / "foo.kohakutr")
     _touch_session_file(session_dir / "foo.kohakutr.v2")
-    paths = _all_versions_for_session("foo")
+    paths = all_versions_for_session_default("foo")
     names = {p.name for p in paths}
     assert names == {"foo.kohakutr", "foo.kohakutr.v2"}
 
@@ -155,13 +174,13 @@ def test_all_versions_returns_v1_and_v2(session_dir):
 
 
 def test_listing_dedupes_v1_v2_under_same_canonical_name(session_dir):
-    from kohakuterrarium.api.routes.sessions import _build_session_index
+    from kohakuterrarium.studio.persistence.store import build_session_index
 
     _touch_session_file(session_dir / "foo.kohakutr")
     _touch_session_file(session_dir / "foo.kohakutr.v2")
     _touch_session_file(session_dir / "bar.kohakutr.v2")
 
-    index = _build_session_index()
+    index = build_session_index()
     names = sorted(s["name"] for s in index)
     assert names == ["bar", "foo"]
     foo = next(s for s in index if s["name"] == "foo")
@@ -171,7 +190,7 @@ def test_listing_dedupes_v1_v2_under_same_canonical_name(session_dir):
 
 @pytest.mark.asyncio
 async def test_delete_session_removes_both_v1_and_v2(session_dir):
-    from kohakuterrarium.api.routes.sessions import delete_session
+    from kohakuterrarium.api.routes.persistence.saved import delete_session
 
     v1 = session_dir / "foo.kohakutr"
     v2 = session_dir / "foo.kohakutr.v2"
@@ -189,7 +208,7 @@ async def test_delete_session_removes_both_v1_and_v2(session_dir):
 async def test_delete_session_404_when_missing(session_dir):
     from fastapi import HTTPException
 
-    from kohakuterrarium.api.routes.sessions import delete_session
+    from kohakuterrarium.api.routes.persistence.saved import delete_session
 
     with pytest.raises(HTTPException) as exc:
         await delete_session("nope")

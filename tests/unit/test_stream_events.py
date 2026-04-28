@@ -1,6 +1,6 @@
 """Tests for StreamOutput event parsing and metadata forwarding."""
 
-from kohakuterrarium.api.events import _parse_detail
+from kohakuterrarium.studio.attach._event_stream import _parse_detail
 
 
 class TestParseDetail:

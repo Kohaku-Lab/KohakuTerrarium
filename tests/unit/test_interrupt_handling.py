@@ -9,7 +9,6 @@ from kohakuterrarium.core.agent_tools import AgentToolsMixin
 from kohakuterrarium.core.events import create_tool_complete_event
 from kohakuterrarium.core.job import JobResult
 from kohakuterrarium.modules.subagent.base import SubAgentResult
-from kohakuterrarium.serving.manager import KohakuManager
 
 
 class _FakeOutputRouter:
@@ -286,42 +285,9 @@ def test_agent_interrupt_only_cancels_tracked_direct_jobs():
     assert cancelled == ["processing", "job_a", "job_b"]
 
 
-@pytest.mark.asyncio
-async def test_manager_cancel_job_prefers_direct_interrupt_path():
-    manager = KohakuManager()
-    agent = SimpleNamespace(
-        _interrupt_direct_job=lambda job_id: job_id == "direct_1",
-        executor=SimpleNamespace(cancel=lambda job_id: asyncio.sleep(0, result=False)),
-        subagent_manager=SimpleNamespace(
-            cancel=lambda job_id: asyncio.sleep(0, result=False)
-        ),
-    )
-    manager._agents["a1"] = SimpleNamespace(agent=agent)
-
-    assert await manager.agent_cancel_job("a1", "direct_1") is True
-
-
-@pytest.mark.asyncio
-async def test_manager_cancel_job_falls_back_for_background_jobs():
-    manager = KohakuManager()
-    executor_calls = []
-    subagent_calls = []
-
-    async def executor_cancel(job_id):
-        executor_calls.append(job_id)
-        return True
-
-    async def subagent_cancel(job_id):
-        subagent_calls.append(job_id)
-        return False
-
-    agent = SimpleNamespace(
-        _interrupt_direct_job=lambda job_id: False,
-        executor=SimpleNamespace(cancel=executor_cancel),
-        subagent_manager=SimpleNamespace(cancel=subagent_cancel),
-    )
-    manager._agents["a1"] = SimpleNamespace(agent=agent)
-
-    assert await manager.agent_cancel_job("a1", "bg_1") is True
-    assert executor_calls == ["bg_1"]
-    assert subagent_calls == []
+# Phase 3 removed ``KohakuManager``; the cancel-job tests previously
+# guarded ``manager.agent_cancel_job`` semantics.  The same priority
+# (direct-interrupt → executor → subagent_manager) now lives on the
+# studio sessions per-creature ops layer; it is exercised in
+# ``tests/unit/test_session_creature_ctl.py`` (added in Phase 2).
+# The two manager-shaped tests are intentionally absent here.

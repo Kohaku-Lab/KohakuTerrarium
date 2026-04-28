@@ -1,9 +1,15 @@
-"""Unit tests for the Phase 1 read-only API endpoints.
+"""Unit tests for the read-only API endpoints.
 
-These endpoints expose existing agent / session state over HTTP for
-the new frontend panels. Each test mounts a minimal FastAPI app with
-the real route handler but a mocked ``KohakuManager`` that returns a
-fake agent whose surface is exactly what the endpoint needs.
+These endpoints expose existing creature state over HTTP for the new
+frontend panels.  Each test mounts a minimal FastAPI app with the
+real route handler but a mocked :class:`Terrarium` engine that
+returns a fake creature whose surface is exactly what the endpoint
+needs.
+
+Phase 3 of the studio cleanup removed the legacy ``/api/agents/...``
+and ``/api/terrariums/.../{target}/...`` routes; this file now
+exercises the canonical ``/api/sessions/{sid}/creatures/{cid}/...``
+shape through ``api/routes/sessions_v2/creatures_state.py``.
 """
 
 from datetime import datetime
@@ -14,13 +20,18 @@ from unittest.mock import MagicMock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from kohakuterrarium.api.deps import get_manager
-from kohakuterrarium.api.routes import agents as agents_route
-from kohakuterrarium.api.routes import files as files_route
-from kohakuterrarium.api.routes import sessions as sessions_route
-from kohakuterrarium.api.routes import terrariums as terrariums_route
+from kohakuterrarium.api.deps import get_engine
+from kohakuterrarium.api.routes.attach import files as files_route
+from kohakuterrarium.api.routes.sessions_v2 import creatures_state
+from kohakuterrarium.api.routes.sessions_v2 import memory as sessions_memory_route
+from kohakuterrarium.studio.persistence import history as persistence_history
+from kohakuterrarium.studio.persistence import store as persistence_store
+from kohakuterrarium.studio.sessions import memory_search as sessions_memory_search
+
+from tests.unit._persistence_test_helpers import mount_session_routes
 from kohakuterrarium.core.scratchpad import Scratchpad
 from kohakuterrarium.core.trigger_manager import TriggerInfo
+from kohakuterrarium.studio.attach import workspace_files
 
 
 def _make_fake_agent(
@@ -43,38 +54,26 @@ def _make_fake_agent(
     return agent
 
 
-def _make_client(fake_agent, *, agent_id: str = "test-agent") -> TestClient:
-    """Build a FastAPI app wired to our agents router + a fake manager."""
+def _make_engine_with_creature(fake_agent, creature_id: str = "test-agent"):
+    """Build a fake engine whose ``get_creature`` returns the fake agent."""
+    fake_creature = SimpleNamespace(agent=fake_agent)
+
+    class _FakeEngine:
+        def get_creature(self, cid: str):
+            if cid != creature_id:
+                raise KeyError(cid)
+            return fake_creature
+
+    return _FakeEngine()
+
+
+def _make_client(fake_agent, *, creature_id: str = "test-agent") -> TestClient:
+    """FastAPI app wired to creatures_state router + a fake engine."""
     app = FastAPI()
-    app.include_router(agents_route.router, prefix="/api/agents")
+    app.include_router(creatures_state.router, prefix="/api/sessions")
 
-    fake_session = SimpleNamespace(agent=fake_agent)
-    fake_manager = SimpleNamespace(_agents={agent_id: fake_session})
-
-    def _override_manager():
-        return fake_manager
-
-    app.dependency_overrides[get_manager] = _override_manager
-    return TestClient(app)
-
-
-def _make_terrarium_client(
-    fake_agent, *, terrarium_id: str = "terrarium_test"
-) -> TestClient:
-    app = FastAPI()
-    app.include_router(terrariums_route.router, prefix="/api/terrariums")
-
-    fake_session = SimpleNamespace(agent=fake_agent)
-
-    class _FakeManager:
-        def terrarium_mount(self, tid, target):
-            if tid != terrarium_id:
-                raise ValueError(f"Terrarium not found: {tid}")
-            if target in {"root", "worker"}:
-                return fake_session
-            raise ValueError(f"Creature not found: {target}")
-
-    app.dependency_overrides[get_manager] = lambda: _FakeManager()
+    fake_engine = _make_engine_with_creature(fake_agent, creature_id=creature_id)
+    app.dependency_overrides[get_engine] = lambda: fake_engine
     return TestClient(app)
 
 
@@ -95,15 +94,15 @@ def test_get_scratchpad_returns_dict():
     sp.set("language", "python")
     client = _make_client(_make_fake_agent(scratchpad=sp))
 
-    resp = client.get("/api/agents/test-agent/scratchpad")
+    resp = client.get("/api/sessions/sess1/creatures/test-agent/scratchpad")
 
     assert resp.status_code == 200
     assert resp.json() == {"answer": "42", "language": "python"}
 
 
-def test_get_scratchpad_404_for_unknown_agent():
+def test_get_scratchpad_404_for_unknown_creature():
     client = _make_client(_make_fake_agent())
-    resp = client.get("/api/agents/nope/scratchpad")
+    resp = client.get("/api/sessions/sess1/creatures/nope/scratchpad")
     assert resp.status_code == 404
 
 
@@ -114,7 +113,7 @@ def test_patch_scratchpad_merges_updates_and_deletes_nulls():
     client = _make_client(_make_fake_agent(scratchpad=sp))
 
     resp = client.patch(
-        "/api/agents/test-agent/scratchpad",
+        "/api/sessions/sess1/creatures/test-agent/scratchpad",
         json={"updates": {"new": "hello", "drop": None}},
     )
 
@@ -130,7 +129,7 @@ def test_patch_scratchpad_rejects_reserved_keys():
     client = _make_client(_make_fake_agent(scratchpad=sp))
 
     resp = client.patch(
-        "/api/agents/test-agent/scratchpad",
+        "/api/sessions/sess1/creatures/test-agent/scratchpad",
         json={"updates": {"__private__": "nope"}},
     )
 
@@ -154,7 +153,7 @@ def test_list_triggers_returns_expected_shape():
     ]
     client = _make_client(_make_fake_agent(triggers=triggers))
 
-    resp = client.get("/api/agents/test-agent/triggers")
+    resp = client.get("/api/sessions/sess1/creatures/test-agent/triggers")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -169,7 +168,7 @@ def test_list_triggers_returns_expected_shape():
 
 def test_list_triggers_empty_when_none():
     client = _make_client(_make_fake_agent())
-    resp = client.get("/api/agents/test-agent/triggers")
+    resp = client.get("/api/sessions/sess1/creatures/test-agent/triggers")
     assert resp.status_code == 200
     assert resp.json() == []
 
@@ -189,7 +188,7 @@ def test_get_env_filters_credentials(monkeypatch):
     monkeypatch.setenv("AUTH_HEADER", "Bearer filtered")
 
     client = _make_client(_make_fake_agent(working_dir="/tmp/fake-cwd"))
-    resp = client.get("/api/agents/test-agent/env")
+    resp = client.get("/api/sessions/sess1/creatures/test-agent/env")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -214,87 +213,9 @@ def test_get_system_prompt_returns_text():
     client = _make_client(
         _make_fake_agent(system_prompt="You are the agent. Be helpful.")
     )
-    resp = client.get("/api/agents/test-agent/system-prompt")
+    resp = client.get("/api/sessions/sess1/creatures/test-agent/system-prompt")
     assert resp.status_code == 200
     assert resp.json() == {"text": "You are the agent. Be helpful."}
-
-
-# ----------------------------------------------------------------------
-# Terrarium inspection endpoints
-# ----------------------------------------------------------------------
-
-
-def test_terrarium_get_scratchpad_returns_target_dict():
-    sp = Scratchpad()
-    sp.set("answer", "42")
-    client = _make_terrarium_client(_make_fake_agent(scratchpad=sp))
-
-    resp = client.get("/api/terrariums/terrarium_test/scratchpad/root")
-
-    assert resp.status_code == 200
-    assert resp.json() == {"answer": "42"}
-
-
-def test_terrarium_patch_scratchpad_merges_updates_and_deletes_nulls():
-    sp = Scratchpad()
-    sp.set("keep", "yes")
-    sp.set("drop", "gone-after-patch")
-    client = _make_terrarium_client(_make_fake_agent(scratchpad=sp))
-
-    resp = client.patch(
-        "/api/terrariums/terrarium_test/scratchpad/worker",
-        json={"updates": {"new": "hello", "drop": None}},
-    )
-
-    assert resp.status_code == 200
-    assert resp.json() == {"keep": "yes", "new": "hello"}
-
-
-def test_terrarium_get_env_filters_credentials(monkeypatch):
-    monkeypatch.setenv("MY_SECRET", "hidden")
-    monkeypatch.setenv("SAFE_VAR", "visible")
-    client = _make_terrarium_client(_make_fake_agent(working_dir="/tmp/terrarium-cwd"))
-
-    resp = client.get("/api/terrariums/terrarium_test/env/root")
-
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["pwd"] == "/tmp/terrarium-cwd"
-    assert "MY_SECRET" not in body["env"]
-    assert body["env"].get("SAFE_VAR") == "visible"
-
-
-def test_terrarium_list_triggers_returns_expected_shape():
-    triggers = [
-        TriggerInfo(
-            trigger_id="trigger_abc123",
-            trigger_type="ChannelTrigger",
-            running=True,
-            created_at=datetime(2026, 4, 10, 12, 34, 56),
-        ),
-    ]
-    client = _make_terrarium_client(_make_fake_agent(triggers=triggers))
-
-    resp = client.get("/api/terrariums/terrarium_test/triggers/root")
-
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body[0]["trigger_id"] == "trigger_abc123"
-
-
-def test_terrarium_get_system_prompt_returns_text():
-    client = _make_terrarium_client(
-        _make_fake_agent(system_prompt="You are the terrarium root. Be helpful.")
-    )
-    resp = client.get("/api/terrariums/terrarium_test/system-prompt/root")
-    assert resp.status_code == 200
-    assert resp.json() == {"text": "You are the terrarium root. Be helpful."}
-
-
-def test_terrarium_agent_only_endpoint_rejects_channel_target():
-    client = _make_terrarium_client(_make_fake_agent())
-    resp = client.get("/api/terrariums/terrarium_test/env/ch:tasks")
-    assert resp.status_code == 400
 
 
 # ----------------------------------------------------------------------
@@ -308,7 +229,7 @@ def test_files_browse_lists_roots(tmp_path: Path, monkeypatch):
     root_a.mkdir()
     root_b.mkdir()
     monkeypatch.setattr(
-        files_route,
+        workspace_files,
         "_list_browse_roots",
         lambda: [root_a.resolve(), root_b.resolve()],
     )
@@ -333,7 +254,7 @@ def test_files_browse_lists_child_directories_only(tmp_path: Path, monkeypatch):
     (root / "beta").mkdir()
     (root / "notes.txt").write_text("hello", encoding="utf-8")
     (root / ".git").mkdir()
-    monkeypatch.setattr(files_route, "_list_browse_roots", lambda: [root.resolve()])
+    monkeypatch.setattr(workspace_files, "_list_browse_roots", lambda: [root.resolve()])
     client = _make_files_client()
 
     resp = client.get("/api/files/browse", params={"path": str(root)})
@@ -350,7 +271,7 @@ def test_files_browse_returns_parent_directory(tmp_path: Path, monkeypatch):
     nested = root / "alpha" / "deep"
     nested.mkdir(parents=True)
     monkeypatch.setattr(
-        files_route,
+        workspace_files,
         "_list_browse_roots",
         lambda: [root.anchor and Path(root.anchor) or root.resolve()],
     )
@@ -371,7 +292,7 @@ def test_files_browse_returns_parent_directory(tmp_path: Path, monkeypatch):
 def test_session_history_index_lists_targets(tmp_path: Path, monkeypatch):
     fake_session = tmp_path / "history-session.kohakutr"
     fake_session.write_bytes(b"")
-    monkeypatch.setattr(sessions_route, "_SESSION_DIR", tmp_path)
+    monkeypatch.setattr(persistence_store, "_SESSION_DIR", tmp_path)
 
     class _FakeStore:
         def __init__(self, path):
@@ -386,9 +307,9 @@ def test_session_history_index_lists_targets(tmp_path: Path, monkeypatch):
         def close(self, update_status=False):
             pass
 
-    monkeypatch.setattr(sessions_route, "SessionStore", _FakeStore)
+    monkeypatch.setattr(persistence_history, "SessionStore", _FakeStore)
     app = FastAPI()
-    app.include_router(sessions_route.router, prefix="/api/sessions")
+    mount_session_routes(app)
     client = TestClient(app)
 
     resp = client.get("/api/sessions/history-session/history")
@@ -401,7 +322,7 @@ def test_session_history_index_lists_targets(tmp_path: Path, monkeypatch):
 def test_session_history_returns_agent_messages_and_events(tmp_path: Path, monkeypatch):
     fake_session = tmp_path / "history-session.kohakutr"
     fake_session.write_bytes(b"")
-    monkeypatch.setattr(sessions_route, "_SESSION_DIR", tmp_path)
+    monkeypatch.setattr(persistence_store, "_SESSION_DIR", tmp_path)
 
     class _FakeStore:
         def __init__(self, path):
@@ -419,9 +340,9 @@ def test_session_history_returns_agent_messages_and_events(tmp_path: Path, monke
         def close(self, update_status=False):
             pass
 
-    monkeypatch.setattr(sessions_route, "SessionStore", _FakeStore)
+    monkeypatch.setattr(persistence_history, "SessionStore", _FakeStore)
     app = FastAPI()
-    app.include_router(sessions_route.router, prefix="/api/sessions")
+    mount_session_routes(app)
     client = TestClient(app)
 
     resp = client.get("/api/sessions/history-session/history/root")
@@ -437,7 +358,7 @@ def test_session_history_returns_channel_messages_as_events(
 ):
     fake_session = tmp_path / "history-session.kohakutr"
     fake_session.write_bytes(b"")
-    monkeypatch.setattr(sessions_route, "_SESSION_DIR", tmp_path)
+    monkeypatch.setattr(persistence_store, "_SESSION_DIR", tmp_path)
 
     class _FakeStore:
         def __init__(self, path):
@@ -452,9 +373,9 @@ def test_session_history_returns_channel_messages_as_events(
         def close(self, update_status=False):
             pass
 
-    monkeypatch.setattr(sessions_route, "SessionStore", _FakeStore)
+    monkeypatch.setattr(persistence_history, "SessionStore", _FakeStore)
     app = FastAPI()
-    app.include_router(sessions_route.router, prefix="/api/sessions")
+    mount_session_routes(app)
     client = TestClient(app)
 
     resp = client.get("/api/sessions/history-session/history/ch%3Atasks")
@@ -481,9 +402,9 @@ def test_session_history_returns_channel_messages_as_events(
 def test_memory_search_404_on_unknown_session(tmp_path: Path, monkeypatch):
     # Point the session lookup at a real (empty) temp dir so the test
     # doesn't accidentally hit the user's actual session store.
-    monkeypatch.setattr(sessions_route, "_SESSION_DIR", tmp_path)
+    monkeypatch.setattr(persistence_store, "_SESSION_DIR", tmp_path)
     app = FastAPI()
-    app.include_router(sessions_route.router, prefix="/api/sessions")
+    mount_session_routes(app)
     client = TestClient(app)
 
     resp = client.get("/api/sessions/nope/memory/search", params={"q": "hello"})
@@ -495,7 +416,7 @@ def test_memory_search_response_shape(tmp_path: Path, monkeypatch):
     # Create a fake .kohakutr file so the resolve step succeeds.
     fake_session = tmp_path / "test-session.kohakutr"
     fake_session.write_bytes(b"")
-    monkeypatch.setattr(sessions_route, "_SESSION_DIR", tmp_path)
+    monkeypatch.setattr(persistence_store, "_SESSION_DIR", tmp_path)
 
     class _FakeResult:
         def __init__(self):
@@ -532,20 +453,23 @@ def test_memory_search_response_shape(tmp_path: Path, monkeypatch):
         def close(self, update_status=False):
             pass
 
+        def flush(self):
+            pass
+
         class state:
             @staticmethod
             def get(key):
                 raise KeyError(key)
 
-    # Mock manager to return no live agents.
-    fake_manager = SimpleNamespace(_agents={})
-    monkeypatch.setattr(sessions_route, "get_manager", lambda: fake_manager)
-    monkeypatch.setattr(sessions_route, "SessionMemory", _FakeMemory)
-    monkeypatch.setattr(sessions_route, "SessionStore", _FakeStore)
-    monkeypatch.setattr(sessions_route, "create_embedder", lambda cfg: None)
+    # Mock engine to return no live creatures.
+    fake_engine = SimpleNamespace(list_creatures=lambda: [])
+    monkeypatch.setattr(sessions_memory_route, "get_engine", lambda: fake_engine)
+    monkeypatch.setattr(sessions_memory_search, "SessionMemory", _FakeMemory)
+    monkeypatch.setattr(sessions_memory_search, "SessionStore", _FakeStore)
+    monkeypatch.setattr(sessions_memory_search, "create_embedder", lambda cfg: None)
 
     app = FastAPI()
-    app.include_router(sessions_route.router, prefix="/api/sessions")
+    mount_session_routes(app)
     client = TestClient(app)
 
     resp = client.get(
@@ -562,7 +486,7 @@ def test_memory_search_response_shape(tmp_path: Path, monkeypatch):
 
 
 # ----------------------------------------------------------------------
-# Log WS route is registered
+# Settings / Log WS sanity
 # ----------------------------------------------------------------------
 
 
@@ -571,14 +495,14 @@ def test_settings_profiles_round_trip_includes_variation_groups(
 ):
     from fastapi import FastAPI
 
-    from kohakuterrarium.api.routes import settings as settings_route
+    from kohakuterrarium.api.routes.identity import llm as settings_route
+    from kohakuterrarium.llm.profile_types import LLMBackend
 
     profiles_path = tmp_path / "llm_profiles.yaml"
     monkeypatch.setattr(
-        settings_route,
-        "load_backends",
+        "kohakuterrarium.studio.identity.llm_backends.load_backends",
         lambda: {
-            "openai": settings_route.LLMBackend(
+            "openai": LLMBackend(
                 name="openai",
                 backend_type="openai",
                 base_url="https://api.openai.com/v1",

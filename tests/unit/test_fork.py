@@ -18,7 +18,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from kohakuterrarium.api.routes import sessions as sessions_route
+from kohakuterrarium.studio.persistence import store as persistence_store
+
+from tests.unit._persistence_test_helpers import mount_session_routes
 from kohakuterrarium.session.errors import ForkNotStableError
 from kohakuterrarium.session.store import SessionStore
 
@@ -382,7 +384,7 @@ def _build_fork_client(tmp_path: Path, monkeypatch) -> tuple[TestClient, Path]:
     Creates a parent session inside tmp_path so resolve_session_path
     finds it.
     """
-    monkeypatch.setattr(sessions_route, "_SESSION_DIR", tmp_path)
+    monkeypatch.setattr(persistence_store, "_SESSION_DIR", tmp_path)
     parent_path = tmp_path / "http-parent.kohakutr"
     store = SessionStore(parent_path)
     store.init_meta(
@@ -401,7 +403,7 @@ def _build_fork_client(tmp_path: Path, monkeypatch) -> tuple[TestClient, Path]:
     store.close(update_status=False)
 
     app = FastAPI()
-    app.include_router(sessions_route.router, prefix="/api/sessions")
+    mount_session_routes(app)
     return TestClient(app), parent_path
 
 
@@ -437,9 +439,9 @@ def test_http_fork_400_on_missing_event_id(tmp_path: Path, monkeypatch):
 
 
 def test_http_fork_404_on_unknown_session(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr(sessions_route, "_SESSION_DIR", tmp_path)
+    monkeypatch.setattr(persistence_store, "_SESSION_DIR", tmp_path)
     app = FastAPI()
-    app.include_router(sessions_route.router, prefix="/api/sessions")
+    mount_session_routes(app)
     client = TestClient(app)
     resp = client.post(
         "/api/sessions/no-such-session/fork",

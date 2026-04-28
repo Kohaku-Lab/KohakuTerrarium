@@ -5,15 +5,12 @@ error should first emit a structured ``{"type": "error", ...}`` frame
 so clients (browser, wscat, anything) can surface a real cause instead
 of a bare ``Disconnected (code: 1000)``.
 
-Covered endpoints:
-  * /ws/agents/{agent_id}/chat           (startup validation)
-  * /ws/terrariums/{terrarium_id}/channels
-  * /ws/terrariums/{terrarium_id}         (existing startup validation)
-  * /ws/creatures/{agent_id}              (existing startup validation)
-  * /ws/logs                              (existing no-log-file path)
-
-These tests use ``TestClient`` + ``app.dependency_overrides[get_manager]``
-in the same style as ``tests/unit/test_api_readonly_endpoints.py``.
+Phase 3 collapsed the legacy ``/ws/agents/{id}/chat``,
+``/ws/terrariums/{id}``, ``/ws/creatures/{id}`` and
+``/ws/terrariums/{id}/channels`` endpoints into the engine-backed
+``/ws/sessions/{sid}/creatures/{cid}/chat`` and
+``/ws/sessions/{sid}/observer`` routes.  The error-frame contract
+moved with them.
 """
 
 from types import SimpleNamespace
@@ -23,21 +20,21 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from kohakuterrarium.api.deps import get_manager
-from kohakuterrarium.api.ws import agents as agents_ws
-from kohakuterrarium.api.ws import channels as channels_ws
-from kohakuterrarium.api.ws import chat as chat_ws
+from kohakuterrarium.api.deps import get_engine
+from kohakuterrarium.api.ws import io as io_ws
 from kohakuterrarium.api.ws import logs as logs_ws
+from kohakuterrarium.api.ws import observer as observer_ws
 
 
-def _build_client(fake_manager) -> TestClient:
-    """FastAPI test app wired with all WS routers and a fake manager."""
+def _build_client(fake_engine) -> TestClient:
+    """FastAPI test app wired with the engine-backed WS routers."""
     app = FastAPI()
-    app.include_router(agents_ws.router)
-    app.include_router(channels_ws.router)
-    app.include_router(chat_ws.router)
-    app.dependency_overrides[get_manager] = lambda: fake_manager
-    return TestClient(app)
+    app.include_router(io_ws.router)
+    app.include_router(observer_ws.router)
+    app.dependency_overrides[get_engine] = lambda: fake_engine
+    # The router resolves ``get_engine`` through ``api.deps`` directly
+    # (no Depends), so monkeypatch that lookup as well.
+    return app
 
 
 def _assert_error_frame_then_close(ws, *, key: str = "content") -> None:
@@ -52,72 +49,47 @@ def _assert_error_frame_then_close(ws, *, key: str = "content") -> None:
 
 
 # ----------------------------------------------------------------------
-# /ws/agents/{agent_id}/chat — startup validation (new behavior)
+# /ws/sessions/{sid}/creatures/{cid}/chat — startup validation
 # ----------------------------------------------------------------------
 
 
-def test_ws_agents_invalid_id_sends_error_frame_before_close():
-    fake_manager = SimpleNamespace(_agents={})
-    client = _build_client(fake_manager)
+def test_ws_io_invalid_creature_sends_error_frame_before_close(monkeypatch):
+    class _Engine:
+        def get_creature(self, cid):
+            raise KeyError(cid)
 
-    with client.websocket_connect("/ws/agents/nonexistent/chat") as ws:
+    fake_engine = _Engine()
+    monkeypatch.setattr(io_ws, "get_engine", lambda: fake_engine)
+    app = _build_client(fake_engine)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws/sessions/sess1/creatures/nope/chat") as ws:
         _assert_error_frame_then_close(ws)
 
 
 # ----------------------------------------------------------------------
-# /ws/terrariums/{terrarium_id}/channels — catch-all send_json (new behavior)
+# /ws/sessions/{sid}/observer — startup validation
 # ----------------------------------------------------------------------
 
 
-class _RaisingChannelStreamManager:
-    """Manager whose ``terrarium_channel_stream`` raises on first iteration."""
+def test_ws_observer_invalid_session_sends_error_frame_before_close(monkeypatch):
+    class _Engine:
+        _environments: dict = {}
 
-    async def terrarium_channel_stream(self, tid, channels=None):
-        raise ValueError(f"Terrarium not found: {tid}")
-        yield  # pragma: no cover — keeps this an async generator
+        def get_creature(self, cid):  # pragma: no cover — unused here
+            raise KeyError(cid)
 
+    fake_engine = _Engine()
+    monkeypatch.setattr(observer_ws, "get_engine", lambda: fake_engine)
+    app = _build_client(fake_engine)
+    client = TestClient(app)
 
-def test_ws_channels_stream_error_sends_error_frame_before_close():
-    client = _build_client(_RaisingChannelStreamManager())
-
-    with client.websocket_connect("/ws/terrariums/nope/channels") as ws:
+    with client.websocket_connect("/ws/sessions/nope/observer") as ws:
         _assert_error_frame_then_close(ws)
 
 
 # ----------------------------------------------------------------------
-# /ws/terrariums/{terrarium_id} — existing startup validation (regression)
-# ----------------------------------------------------------------------
-
-
-class _UnknownRuntimeManager:
-    """Manager whose ``_get_runtime`` always reports the terrarium missing."""
-
-    def _get_runtime(self, tid):
-        raise ValueError(f"Terrarium not found: {tid}")
-
-
-def test_ws_terrarium_invalid_id_sends_error_frame_before_close():
-    client = _build_client(_UnknownRuntimeManager())
-
-    with client.websocket_connect("/ws/terrariums/nope") as ws:
-        _assert_error_frame_then_close(ws)
-
-
-# ----------------------------------------------------------------------
-# /ws/creatures/{agent_id} — existing startup validation (regression)
-# ----------------------------------------------------------------------
-
-
-def test_ws_creature_invalid_id_sends_error_frame_before_close():
-    fake_manager = SimpleNamespace(_agents={})
-    client = _build_client(fake_manager)
-
-    with client.websocket_connect("/ws/creatures/nope") as ws:
-        _assert_error_frame_then_close(ws)
-
-
-# ----------------------------------------------------------------------
-# /ws/logs — no log file path (existing) + new error frame on catch-all
+# /ws/logs — no log file path
 # ----------------------------------------------------------------------
 
 
@@ -130,3 +102,8 @@ def test_ws_logs_no_log_file_sends_error_frame_before_close(monkeypatch):
 
     with client.websocket_connect("/ws/logs") as ws:
         _assert_error_frame_then_close(ws, key="text")
+
+
+# Suppress unused-import warning — SimpleNamespace kept for parity with
+# the legacy test fixture style; future tests may reuse it.
+_ = SimpleNamespace
