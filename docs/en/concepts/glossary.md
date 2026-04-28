@@ -157,13 +157,25 @@ collide with the `read` file-reader tool.
 
 ## Terrarium
 
-A pure wiring layer that runs several creatures together. No LLM, no
-decisions — just a runtime, a set of shared channels, and the
-output-wiring plumbing. Creatures don't know they're in a terrarium;
-they still work standalone. Our proposed architecture for horizontal
-multi-agent — still evolving as patterns emerge. See the
-[roadmap](../../ROADMAP.md) for what's shipped vs. still exploring.
-Full: [terrarium](multi-agent/terrarium.md).
+The runtime engine that hosts every running creature in the process.
+A standalone agent is a 1-creature graph in the engine; a multi-agent
+team is a connected graph wired by channels. The engine owns creature
+CRUD, channel CRUD, hot-plug, output wiring, and the session merge /
+split bookkeeping that follows topology changes. It contains no LLM
+and makes no decisions — pure wiring. Creatures don't know they're in
+a terrarium; they still work standalone. Full:
+[terrarium](multi-agent/terrarium.md).
+
+## Graph
+
+A connected component inside the Terrarium engine: a set of creatures
+that share at least one channel path. Two unrelated creatures live in
+two graphs; drawing a channel between them merges the graphs (and
+unions their session histories). Removing the last channel between
+two halves splits a graph (and copies the history into each side).
+The graph is the unit of "session" — creatures in the same graph see
+the same `.kohakutr` file. Full:
+[terrarium](multi-agent/terrarium.md).
 
 ## Root agent
 

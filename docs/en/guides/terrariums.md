@@ -11,7 +11,9 @@ tags:
 
 For readers composing several creatures that need to cooperate.
 
-A **terrarium** is pure wiring: no LLM of its own, no decisions. It owns shared channels, manages the lifecycle of the creatures inside it, and ships the framework-level *output wiring* that auto-delivers a creature's turn-end output to named targets. Creatures do not know they are in one — they listen on channel names, send on channel names, and the terrarium makes those names real.
+A **terrarium** is the runtime engine that hosts every running creature in the process. A standalone agent is a 1-creature graph; a multi-agent team is a connected graph wired by channels. The engine owns lifecycles, shared channels, hot-plug, output wiring, and the session merge / split bookkeeping that follows topology changes. It has no LLM and makes no decisions — pure wiring. Creatures do not know they are in one; they listen on channel names, send on channel names, and the engine makes those names real.
+
+A `terrarium.yaml` config is a **recipe**: a sequence of "add these creatures, declare these channels, wire these edges" applied to the engine. It is no longer a distinct kind of entity.
 
 Concept primer: [terrarium](../concepts/multi-agent/terrarium.md), [root agent](../concepts/multi-agent/root-agent.md), [channel](../concepts/modules/channel.md).
 
@@ -131,15 +133,23 @@ See [concepts/multi-agent/root-agent](../concepts/multi-agent/root-agent.md) for
 
 ## Hot-plug at runtime
 
-From the root (via tools) or programmatically:
+From the root (via tools) or programmatically through the engine:
 
 ```python
-await runtime.add_creature("tester", tester_agent,
-                           listen=["review"], can_send=["status"])
-await runtime.add_channel("hotfix", channel_type="queue")
-await runtime.wire_channel("swe", "hotfix", direction="listen")
-await runtime.remove_creature("tester")
+from kohakuterrarium import Terrarium
+
+async with Terrarium() as engine:
+    await engine.apply_recipe("@kt-biome/terrariums/swe_team")
+    tester = await engine.add_creature(
+        "@kt-biome/creatures/swe", creature_id="tester",
+    )
+    # tester lands in its own singleton graph; connect() merges it in.
+    swe = engine["swe"]
+    result = await engine.connect(swe, tester, channel="review")
+    # result.delta_kind == "merge"
 ```
+
+Cross-graph `connect()` merges the two graphs — environments union, attached session stores merge into one, the new listener gets a `ChannelTrigger` injected. `disconnect()` may split a graph back apart and copy the parent session into each side. See [`examples/code/terrarium_hotplug.py`](../../examples/code/terrarium_hotplug.py).
 
 Tool equivalents the root uses: `creature_start`, `creature_stop`, `terrarium_create`, `terrarium_send`.
 
@@ -160,21 +170,24 @@ async for msg in sub:
 ## Programmatic terrariums
 
 ```python
-from kohakuterrarium.terrarium.runtime import TerrariumRuntime
-from kohakuterrarium.terrarium.config import load_terrarium_config
-from kohakuterrarium.core.channel import ChannelMessage
+import asyncio
+from kohakuterrarium import Terrarium
 
-runtime = TerrariumRuntime(load_terrarium_config("@kt-biome/terrariums/swe_team"))
-await runtime.start()
+async def main():
+    engine = await Terrarium.from_recipe("@kt-biome/terrariums/swe_team")
+    try:
+        # talk to a creature by id
+        async for chunk in engine["swe"].chat("Fix the auth bug."):
+            print(chunk, end="", flush=True)
+    finally:
+        await engine.shutdown()
 
-tasks = runtime.environment.shared_channels.get("tasks")
-await tasks.send(ChannelMessage(sender="user", content="Fix the auth bug."))
-
-await runtime.run()
-await runtime.stop()
+asyncio.run(main())
 ```
 
-For streaming, multi-tenant, or long-lived use, wrap with `KohakuManager`. See [Programmatic Usage](programmatic-usage.md).
+For more patterns (event subscription, hot-plug, solo + recipe coexistence) see [Programmatic Usage](programmatic-usage.md) and the runnable scripts in [`examples/code/`](../../examples/code/) (`terrarium_solo.py`, `terrarium_recipe.py`, `terrarium_hotplug.py`).
+
+The legacy `TerrariumRuntime` is still on disk during the transition; new code should use `Terrarium`.
 
 ## Output wiring
 
@@ -244,5 +257,5 @@ Prefer **sub-agents** (vertical delegation inside one creature) when a single pa
 
 - [Creatures](creatures.md) — each terrarium entry is a creature.
 - [Composition](composition.md) — Python-side alternative when you need a small loop, not a full terrarium.
-- [Programmatic Usage](programmatic-usage.md) — `TerrariumRuntime` + `KohakuManager`.
+- [Programmatic Usage](programmatic-usage.md) — the `Terrarium` engine.
 - [Concepts / terrarium](../concepts/multi-agent/terrarium.md) — why terrariums look the way they do.

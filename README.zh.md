@@ -234,7 +234,7 @@ kt run @package/path/to/creature
                     +-------+----------+--------+
 ```
 
-生態瓶是純接線層，管理生物的生命週期、它們之間的頻道、以及框架層級的 **輸出接線 (output wiring)** — 把生物回合結束的輸出自動送到指定目標。沒有 LLM、不做決策 — 只是執行期。生物不知道自己在生態瓶裡；它們一樣可以獨立跑。
+生態瓶是托管行程內所有運行中生物的執行期引擎。一隻獨立 agent 就是引擎裡的 1-creature graph；多代理團隊則是用頻道連起來的 connected graph。引擎管理生物的生命週期、它們之間的頻道、熱插拔，以及框架層級的 **輸出接線 (output wiring)** — 把生物回合結束的輸出自動送到指定目標。引擎本身沒有 LLM、不做決策 — 只是執行期。生物不知道自己在生態瓶裡；它們一樣可以獨立跑。
 
 生態瓶是我們對橫向多代理的 **一種提案架構** — 兩種互補的合作機制 (頻道處理條件性/選用性流量；輸出接線處理確定性的 pipeline 邊)，加上熱插拔與觀察。模式還在演化中；開放問題放在 [ROADMAP](ROADMAP.md)。當單一生物可以自己拆解任務時，用子代理 (縱向) 比較簡單 — 對多數「我要上下文隔離」的直覺而言。
 
@@ -282,37 +282,35 @@ KohakuTerrarium 已經內建：
 - 長時間執行的 agent 用非阻塞自動壓縮。
 - MCP (Model Context Protocol) 整合 — stdio 與 HTTP 傳輸。
 - 生物、外掛、生態瓶、可重用 agent 套件的套件管理器 (`kt install`、`kt update`)。
-- 透過 `Agent`、`AgentSession`、`TerrariumRuntime`、`KohakuManager` 嵌入 Python。
+- 透過 `Terrarium` 引擎嵌入 Python，需要更底層控制時也可直接使用 `Agent`。
 - HTTP 與 WebSocket 服務。
 - 網頁 dashboard 與原生桌面 app。
 - 自訂模組與外掛系統。
 
 ## 程式化使用
 
-Agent 是 async Python 值。嵌進去：
+Agent 是 async Python 值。每個行程一個 `Terrarium` 引擎托管所有運行中生物 — 獨立 agent 就是引擎裡的 1-creature graph。
 
 ```python
 import asyncio
-from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.core.channel import ChannelMessage
-from kohakuterrarium.terrarium.config import load_terrarium_config
-from kohakuterrarium.terrarium.runtime import TerrariumRuntime
+from kohakuterrarium import Terrarium
 
 async def main():
-    # 單一 agent
-    agent = Agent.from_path("@kt-biome/creatures/swe")
-    agent.set_output_handler(lambda text: print(text, end=""), replace_default=True)
-    await agent.start()
-    await agent.inject_input("說明這個 codebase 在做什麼。")
-    await agent.stop()
+    # 獨立 agent
+    engine, alice = await Terrarium.with_creature("@kt-biome/creatures/swe")
+    try:
+        async for chunk in alice.chat("說明這個 codebase 在做什麼。"):
+            print(chunk, end="", flush=True)
+    finally:
+        await engine.shutdown()
 
-    # 多代理生態瓶
-    runtime = TerrariumRuntime(load_terrarium_config("@kt-biome/terrariums/swe_team"))
-    await runtime.start()
-    tasks = runtime.environment.shared_channels.get("tasks")
-    await tasks.send(ChannelMessage(sender="user", content="修 auth bug。"))
-    await runtime.run()
-    await runtime.stop()
+    # 多代理 recipe
+    engine = await Terrarium.from_recipe("@kt-biome/terrariums/swe_team")
+    try:
+        async for chunk in engine["swe"].chat("修 auth bug。"):
+            print(chunk, end="", flush=True)
+    finally:
+        await engine.shutdown()
 
 asyncio.run(main())
 ```

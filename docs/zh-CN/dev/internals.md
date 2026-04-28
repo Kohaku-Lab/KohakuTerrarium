@@ -146,15 +146,27 @@ Session 都保存在单个 `.kohakutr` 文件中，底层是 KohakuVault（SQLit
 
 ## 3. Multi-agent & serving
 
-### 3.1 Terrarium runtime
+### 3.1 Terrarium 引擎
 
-`terrarium/runtime.py:TerrariumRuntime.start`（85-180 行）会先预创建共享 channel，确保每个 creature 都有自己的 direct queue；如果存在 root，还会额外创建一个 `report_to_root`；然后通过 `terrarium/factory.py:build_creature` 构建并启动每个 creature，最后再构建 root（此时尚未启动），接着启动 termination checker。
+`terrarium/engine.py:Terrarium` 是运行时引擎 — 每进程一个，托管所有 Creature。引擎拥有：
 
-`build_creature` 会通过 `@pkg/...` 或路径加载基础配置，创建 `Agent(session=Session(creature_name), environment=shared_env, …)`，为每个 listen-channel 注册 `ChannelTrigger`，再将 channel topology prompt 拼接到 system prompt 之后。creature 不会直接知道自己处于 terrarium 中，它只能通过 channel 和可选的 topology hint 间接感知。
+- `_topology: TopologyState` — 纯数据 graph 模型 (`terrarium/topology.py`)，记录哪些 Creature 共用哪个 graph、哪些频道存在、谁 listen / send。
+- `_creatures: dict[str, Creature]` — 运行中的 wrapper (`terrarium/creature_host.py`)。
+- `_environments: dict[str, Environment]` — 每个 graph 一份；持有 `shared_channels`。
+- `_session_stores: dict[str, SessionStore]` — 每个挂著 store 的 graph 一份。
+- `_subscribers: list[_Subscriber]` — `EngineEvent` 发布订阅。
 
-root agent 的 environment 上会挂一个 `TerrariumToolManager`，这样它就能使用 `terrarium_*` 和 `creature_*` tools。root 永远处于系统外侧，而不是 peer。
+独立 Agent 是 1-creature graph；recipe 是用频道连起来的 connected graph。`Terrarium.with_creature(config)` 是独立 Agent 的捷径；`Terrarium.from_recipe(recipe)` 通过 `terrarium/recipe.py:apply_recipe` 走完一份 `TerrariumConfig` (宣告频道、为每只 Creature 加一条 direct channel、若有 root 加 `report_to_root`、接 listen / send 边、启动一切)。Creature 除了通过频道和 (可选的) 嵌进 system prompt 的 topology hint 外，不会知道自己处于 Terrarium 中。
 
-`terrarium/hotplug.py:HotPlugMixin` 提供运行时的 `add_creature`、`remove_creature`、`add_channel`、`remove_channel`。`terrarium/observer.py:ChannelObserver` 会在 channel send 上挂无破坏性的 callback，这样 dashboard 就能观察 queue channel，而不会消费掉消息。
+**频道注入**。当一只 Creature 加入了一个有它要 listen 的频道的 graph，`terrarium/channels.py:inject_channel_trigger` 会往它的 `trigger_manager` 加一个 `ChannelTrigger`。这是 layer 模型里唯一被允许的向下注入：在 graph 里的 Creature *会* 知道自己有同伴 (它得知道)，但只透过引擎给它的 handle。独立 Creature 不会有任何注入。
+
+**热插拔**。拓扑可以在运行时变更。`Terrarium.connect(a, b, channel=...)` 可能合并两个 graph (environment 取联集，频道汇集，挂著的 session store 透过 `terrarium/session_coord.py:apply_merge` 合成一份)。`Terrarium.disconnect` 可能拆 graph (parent session 透过 `apply_split` 复制到两边)。`terrarium/topology.py` 里的纯数据拓扑 mutator 返回 `TopologyDelta`，其 `kind in {"nothing", "merge", "split"}` 驱动这些 live 更新。
+
+**Session 合并 / 分裂**。Session 的单位是 graph 的连通分量。不影响 graph 成员的拓扑变更会沿用既有的 store。`terrarium/session_coord.py` 实作两条分支并发出 `SESSION_FORKED` / `TOPOLOGY_CHANGED` 事件。
+
+**事件 bus**。`terrarium/events.py:EngineEvent` 是统一的可观测面。kind 涵盖 text chunk、频道消息、拓扑变更、session fork、creature 生命周期、processing start / end、error。`Terrarium.subscribe(filter)` 返回与 `EventFilter` 匹配的事件 async iterator。每个订阅者各有一个 queue；取消 iterator 会自动撤销订阅。
+
+旧版 `terrarium/runtime.py:TerrariumRuntime` 与 `serving/manager.py:KohakuManager` 在过渡期间还留在硬盘上 — 较旧的 HTTP route 与 CLI 还会用它们。`api/deps.py` 现在同时暴露 `get_engine()` (新) 与 `get_manager()` (旧) 这两个 singleton；route 会一条一条切过去。
 
 相关文档见 [concepts/multi-agent/terrarium.md](../concepts/multi-agent/terrarium.md) 和 [concepts/multi-agent/root-agent.md](../concepts/multi-agent/root-agent.md)。
 

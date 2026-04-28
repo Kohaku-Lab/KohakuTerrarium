@@ -11,28 +11,78 @@ tags:
 
 ## 它是什么
 
-**Terrarium (terrarium)** 是一个把多只Creature一起执行的纯连线层。它自己没有 LLM、没有智慧，也不做决策。它只做两件事：
+**Terrarium (terrarium)** 是托管行程内所有运行中Creature的运行时引擎。它自己没有 LLM、没有智慧，也不做决策。每个进程一个引擎；同一个引擎里可以共存多个互不相连的 graph。
 
-1. 它是一个管理Creature生命周期的 **运行时**。
-2. 它拥有一组Creature之间可用来互相对话的 **共享频道**。
+独立 Agent 是引擎里的 **1-creature graph**。多 Agent 团队则是用频道连起来的 **connected graph**。你以前称为「terrarium」的设定档，现在是一份 **recipe** — 「加这些 Creature、宣告这些频道、接这些边」的序列，由引擎执行。引擎本身始终存在；recipe 只是把它填满。
+
+引擎做这些事：
+
+1. **Creature CRUD** — 加、移除、列出、检视。
+2. **Channel CRUD** — 宣告、连接 Creature、断开。
+3. **输出接线** — 回合结束的事件送进指定目标。
+4. **生命周期** — start、stop、shutdown。
+5. **Session 合并 / 分裂**，跟著拓扑变更走。
+6. **可观测性** — 一切可观察的事都进 `EngineEvent` stream。
 
 这就是它全部的契约。
 
+### 心智模型：单一团队、单一 Root
+
+入门时——多数使用者后续也维持这个画面——你会从一支团队加上一只面向使用者的 Root Creature 看起：
+
 ```
-  +---------+  +---------------------------+
-  |  User  |<----->|  Root Agent  |
-  +---------+  |  (terrarium tools, TUI)  |
-  +---------------------------+
-  |  ^
-  sends tasks  |  |  observes
-  v  |
-  +---------------------------+
-  |  Terrarium Layer  |
-  |  (pure wiring, no LLM)  |
-  +-------+----------+--------+
-  |  swe  | reviewer |....  |
-  +-------+----------+--------+
+  +---------+       +---------------------------+
+  |  User   |<----->|        Root Agent         |
+  +---------+       |  (terrarium tools, TUI)   |
+                    +---------------------------+
+                          |               ^
+            sends tasks   |               |  observes
+                          v               |
+                    +---------------------------+
+                    |     Terrarium Layer       |
+                    |   (pure wiring, no LLM)   |
+                    +-------+----------+--------+
+                    |  swe  | reviewer |  ....  |
+                    +-------+----------+--------+
 ```
+
+这是 **per-graph 视角**：上方一只 Root，下方一张连通的同侪图，中间是「terrarium 即接线」。这是框架原生提供、也是大多数 recipe 编码的样子。如果你只需要这些，看到这就够了——本节剩下的是当你超出单一团队画面后才需要的引擎细节。
+
+### 引擎全貌：执行所有 graph 的 runtime
+
+引擎是行程层级的 host。一个行程一个引擎。引擎里可以同时存在任意多张 graph——你的团队、你临时拉起来快速对话的独立 Agent、没有同侪的监控 Creature——每张都是独立的 connected component。拓扑不是冻结的；channel 可以在 runtime 跨 graph 拉起来（造成 graph 合并），也可以拆掉（可能让 graph 分裂回去）。
+
+```
+              +-----------------------------------------+
+              |              Terrarium engine           |
+              |          (one per process, no LLM)      |
+              +-----------------------------------------+
+                |                  |                |
+         graph A             graph B           graph C
+   +-------------------+ +-------------+   +-------------+
+   | root <- swe       | | scout       |   | watcher     |
+   |    \-> reviewer   | | (solo)      |   | (no peers)  |
+   |    \-> tester     | +-------------+   +-------------+
+   +-------------------+
+
+         |  ^
+         |  |  connect(scout, swe, channel="leads")
+         v  |  -> graph A 和 B 合并；environments 联集，
+            |     已 attach 的 session store 也合并。
+            |
+         |  |  disconnect(reviewer, tester, ...)
+         v  |  -> 若移除连结让 graph 断开，A 会分裂；
+            |     每一边都拿到 parent session 的副本。
+```
+
+每一件可观察的事——文字片段、工具活动、channel 讯息、拓扑变更——都从同一个事件汇流排（`EngineEvent` + `EventFilter`）流出。无论你有一张 graph 或十二张，都用一个 filter 订阅。上面那张 per-graph 的心智模型只是这个引擎的一种 **投影**。
+
+超出单一团队场景之后，这个层次给你的：
+
+- **一个行程多个 session** — 服务端可以并排 host 上百个使用者 session，不需要每张 graph 都拉一个独立的 `TerrariumRuntime`。
+- **runtime 跨 graph 重接线** — 在两个独立 run 之间画一条 channel 就能合并它们；session 历史会自动合并。
+- **统一可观测性** — 一个订阅 filter 涵盖所有事件。
+- **保留分层无知** — Creature 仍然不知道自己在引擎里。它只知道自己的 agent、工具，和它所在 graph 注入的 channel handle。
 
 ## 为什么它存在
 
@@ -73,11 +123,16 @@ terrarium:
 
 ## 我们怎么实现它
 
-- `terrarium/runtime.py` —— `TerrariumRuntime` 以固定顺序协调启动（建立共享频道 → 建立Creature → 接好 triggers → 最后建立 root，但先不启动）。
-- `terrarium/factory.py` —— `build_creature` 加载Creature配置（支持 `@pkg/...` 解析），用共享 environment + 私有 session 建立 `Agent`，为每个 listen 频道注册一个 `ChannelTrigger`，并在 system prompt 中注入一段频道拓扑说明。
-- `terrarium/hotplug.py` —— 运行时的 `add_creature`、`remove_creature`、`add_channel`、`remove_channel`。
-- `terrarium/observer.py` —— 用于非破坏式监控的 `ChannelObserver`（让 dashboard 可以旁观而不消耗消息）。
-- `terrarium/api.py` —— `TerrariumAPI` 是程序介面的 fa?ade；内建的Terrarium管理工具（`terrarium_create`、`creature_start`、`terrarium_send`、…）都透过它路由。
+- `terrarium/engine.py` —— `Terrarium` 类。每个进程一个。拥有拓扑状态、live Creature、environment、挂著的 session store、订阅者列表。是 async context manager (`async with Terrarium() as t:`)，并附 classmethod factory (`from_recipe`、`with_creature`、`resume` — 最后一个尚未实现)。
+- `terrarium/topology.py` —— 纯数据 graph 模型 (`TopologyState`、`GraphTopology`、`ChannelKind`、`TopologyDelta`)。没有 live agent 引用；不需 asyncio 就能测。引擎在它上面叠 live state。
+- `terrarium/creature_host.py` —— `Creature`，引擎对每只 Creature 的 wrapper。把以前独立 Agent 与频道感知的两个面合成同一个型别。
+- `terrarium/recipe.py` —— 走完一份 `TerrariumConfig` 套到引擎上：宣告频道、为每只 Creature 加一条 direct channel、若有 root 加 `report_to_root`、接 listen / send 边、注入频道触发器、启动一切。
+- `terrarium/channels.py` —— 频道注入 (当一只 Creature 加入了一个有它要 listen 的频道的 graph，引擎会往它的 agent 加一个 `ChannelTrigger`)，以及 `connect_creatures` / `disconnect_creatures` 的本体。
+- `terrarium/root.py` —— `assign_root` 辅助函数。给一只已经在 graph 里的 Creature，把它指定为该 graph 的 Root：宣告（或重用）一个 `report_to_root` 频道、把 graph 内每只其它 Creature 接成在该频道上送讯息、让 Root 在每个既有频道上 listen，并把 `creature.is_root = True` 翻起来。纯粹是 channel + wiring；工具注册和使用者 IO 挂接留给上层处理。当你以 imperative 方式建 graph 又想要传统「一团队一 Root」拓扑而不走 recipe 档案时使用。
+- `terrarium/session_coord.py` —— Session 合并 / 分裂策略。Graph 合并时把两边旧 store 合成一份新的；Graph 分裂时把 parent store 复制到两边。
+- `terrarium/events.py` —— `EngineEvent` 分类，加 `EventFilter`、`ConnectionResult`、`DisconnectionResult`。
+
+旧版 `terrarium/runtime.py:TerrariumRuntime` 在过渡期间仍在；新代码请直接用 `Terrarium`。顶层 re-export 是稳定的：`from kohakuterrarium import Terrarium, Creature, EngineEvent, EventFilter`。
 
 ## 因此你可以做什么
 

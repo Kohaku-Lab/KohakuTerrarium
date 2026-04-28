@@ -1,6 +1,6 @@
 ---
 title: Python API
-summary: The kohakuterrarium package surface — Agent, AgentSession, TerrariumRuntime, compose, and testing helpers.
+summary: The kohakuterrarium package surface — Terrarium engine, Creature, Agent, compose, and testing helpers.
 tags:
   - reference
   - python
@@ -22,15 +22,215 @@ For task walkthroughs, see
 
 | When you want | Use |
 |---|---|
-| The easiest streaming chat wrapper | `kohakuterrarium.serving.agent_session.AgentSession` |
+| The runtime engine (solo or multi-creature) | `kohakuterrarium.Terrarium` |
+| A running creature handle | `kohakuterrarium.Creature` |
+| Engine events | `kohakuterrarium.{EngineEvent, EventKind, EventFilter}` |
+| Topology results | `kohakuterrarium.{ConnectionResult, DisconnectionResult}` |
 | Direct agent control | `kohakuterrarium.core.agent.Agent` |
-| Multi-agent runtime | `kohakuterrarium.terrarium.runtime.TerrariumRuntime` |
-| Transport-agnostic manager | `kohakuterrarium.serving.manager.KohakuManager` |
+| Streaming chat (legacy wrapper) | `kohakuterrarium.serving.agent_session.AgentSession` |
 | Config loading | `kohakuterrarium.core.config.load_agent_config` / `kohakuterrarium.terrarium.config.load_terrarium_config` |
 | Persistence / search | `kohakuterrarium.session.store.SessionStore`, `kohakuterrarium.session.memory.SessionMemory` |
 | Extension author | `kohakuterrarium.modules.{tool,input,output,trigger,subagent}.base` |
 | Pipeline composition | `kohakuterrarium.compose` |
 | Tests | `kohakuterrarium.testing` |
+
+The legacy `kohakuterrarium.terrarium.runtime.TerrariumRuntime` and
+`kohakuterrarium.serving.manager.KohakuManager` remain on disk during
+the transition and are documented further down.
+
+---
+
+## Top-level package re-exports
+
+The new public surface is re-exported directly from
+`kohakuterrarium`:
+
+```python
+from kohakuterrarium import (
+    Terrarium,
+    Creature,
+    EngineEvent,
+    EventKind,
+    EventFilter,
+    ConnectionResult,
+    DisconnectionResult,
+)
+```
+
+### `Terrarium`
+
+Module: `kohakuterrarium.terrarium.engine`. The runtime engine — one
+per process. Hosts every running creature and owns graph-level state.
+
+Classmethod factories:
+
+- `async Terrarium.with_creature(config, *, pwd=None) -> tuple[Terrarium, Creature]`
+  — engine + one creature.
+- `async Terrarium.from_recipe(recipe, *, pwd=None) -> Terrarium` —
+  engine with a recipe applied. ``recipe`` is a `TerrariumConfig` or
+  YAML path.
+- `async Terrarium.resume(store, *, recipe=None) -> Terrarium` —
+  **not yet implemented**; raises `NotImplementedError`.
+
+Constructor:
+
+- `Terrarium(*, pwd=None, session_dir=None)` — bare engine. Use
+  `add_creature` / `apply_recipe` to populate.
+
+Async context manager:
+
+- `async with Terrarium() as engine: ...` — `__aexit__` calls
+  `shutdown()`.
+
+Creature CRUD:
+
+- `async add_creature(config, *, graph=None, creature_id=None, llm_override=None, pwd=None, start=True) -> Creature`
+- `async remove_creature(creature) -> None`
+- `get_creature(creature_id) -> Creature`
+- `list_creatures() -> list[Creature]`
+- Pythonic accessors: `engine[id]`, `id in engine`, `for c in engine`,
+  `len(engine)`.
+
+Channel CRUD:
+
+- `async add_channel(graph, name, kind=ChannelKind.BROADCAST, description="") -> ChannelInfo`
+- `async connect(sender, receiver, *, channel=None, kind=ChannelKind.QUEUE) -> ConnectionResult`
+  — cross-graph connect merges graphs (environment union, session
+  stores merge).
+- `async disconnect(sender, receiver, *, channel=None) -> DisconnectionResult`
+  — may split a graph (parent session copied to each side).
+
+Output wiring:
+
+- `async wire_output(creature, sink: OutputModule) -> str`
+- `async unwire_output(creature, sink_id: str) -> bool`
+
+Graphs:
+
+- `get_graph(graph_id) -> GraphTopology`
+- `list_graphs() -> list[GraphTopology]`
+
+Recipe:
+
+- `async apply_recipe(recipe, *, graph=None, pwd=None, creature_builder=None) -> GraphTopology`
+
+Lifecycle:
+
+- `async start(creature) / async stop(creature)`
+- `async stop_graph(graph) -> None`
+- `async shutdown() -> None` — idempotent.
+
+Observability:
+
+- `async subscribe(filter=None) -> AsyncIterator[EngineEvent]`
+- `status() -> dict` (roll-up) / `status(creature) -> dict`
+
+Session:
+
+- `async attach_session(graph, store: SessionStore) -> None`
+
+`Creature` and graph IDs may be passed as the object or as a string ID
+anywhere a `CreatureRef` / `GraphRef` is accepted.
+
+### `Creature`
+
+Module: `kohakuterrarium.terrarium.creature_host`. A running creature
+handle. Returned by `add_creature` / `with_creature`; never
+constructed directly.
+
+Attributes:
+
+- `creature_id: str`, `name: str`, `graph_id: str`
+- `agent: Agent` — the underlying LLM controller.
+- `listen_channels: list[str]`, `send_channels: list[str]`
+- `is_running: bool`
+
+Methods:
+
+- `async start() / async stop()` — idempotent.
+- `async inject_input(message, *, source="chat") -> None`
+- `async chat(message) -> AsyncIterator[str]` — push input, stream
+  the text response.
+- `get_status() -> dict` — model, max_context, compact_threshold,
+  provider, session_id, tools, subagents, pwd, graph_id, listen /
+  send channels.
+- `get_log_entries(last_n=20) -> list[LogEntry]`
+- `get_log_text(last_n=10) -> str`
+
+### `EngineEvent`, `EventKind`, `EventFilter`
+
+Module: `kohakuterrarium.terrarium.events`.
+
+Every observable thing the engine does surfaces as an `EngineEvent`.
+
+**`EventKind`** (`str`-valued enum):
+
+- `TEXT`, `ACTIVITY`, `CHANNEL_MESSAGE`
+- `TOPOLOGY_CHANGED`, `SESSION_FORKED`
+- `CREATURE_STARTED`, `CREATURE_STOPPED`
+- `PROCESSING_START`, `PROCESSING_END`
+- `ERROR`
+
+**`EngineEvent`** dataclass:
+
+- `kind: EventKind`
+- `creature_id: str | None`
+- `graph_id: str | None`
+- `channel: str | None`
+- `payload: dict`
+- `ts: float`
+
+**`EventFilter`** dataclass:
+
+- `kinds: set[EventKind] | None`
+- `creature_ids: set[str] | None`
+- `graph_ids: set[str] | None`
+- `channels: set[str] | None`
+- `matches(ev: EngineEvent) -> bool`
+
+Fields are AND-combined; `None` means "any". Pass `EventFilter()` (or
+omit) to receive everything.
+
+### `ConnectionResult`, `DisconnectionResult`
+
+Module: `kohakuterrarium.terrarium.events`.
+
+**`ConnectionResult`** — returned by `Terrarium.connect`:
+
+- `channel: str` — channel name (created if needed).
+- `trigger_id: str` — the receiver's injected `ChannelTrigger` id.
+- `delta_kind: str` — `"nothing"` or `"merge"`.
+
+**`DisconnectionResult`** — returned by `Terrarium.disconnect`:
+
+- `channels: list[str]` — channels that were unwired.
+- `delta_kind: str` — `"nothing"` or `"split"`.
+
+### `GraphTopology`, `ChannelKind`, `ChannelInfo`
+
+Module: `kohakuterrarium.terrarium.topology`. Pure-data topology
+model — no live agent references.
+
+**`GraphTopology`** — one connected component:
+
+- `graph_id: str`
+- `creature_ids: set[str]`
+- `channels: dict[str, ChannelInfo]`
+- `listen_edges: dict[str, set[str]]`
+- `send_edges: dict[str, set[str]]`
+- `has_creature(creature_id) -> bool`
+- `has_channel(name) -> bool`
+
+**`ChannelKind`** enum: `BROADCAST`, `QUEUE`.
+
+**`ChannelInfo`** — `name, kind, description`.
+
+### Compose interop
+
+`Creature` is intended to satisfy the `Runnable` protocol from
+`kohakuterrarium.compose.core`, so creatures slot into pipelines via
+`>>` / `&` / `|` / `*`. Integration tests covering this composition
+path still need to be added.
 
 ---
 
@@ -721,9 +921,13 @@ providers include `GeminiEmbedder`. Aliases: `@tiny`, `@base`,
 
 ---
 
-## `kohakuterrarium.terrarium`
+## `kohakuterrarium.terrarium` (legacy runtime)
 
-### `TerrariumRuntime`
+The classes below predate the unified `Terrarium` engine documented
+above. They still exist on disk during the transition; new code should
+prefer `Terrarium`.
+
+### `TerrariumRuntime` (legacy)
 
 Module: `kohakuterrarium.terrarium.runtime`. Multi-agent orchestrator;
 subclasses `HotPlugMixin`.
@@ -794,10 +998,11 @@ its terrarium wiring.
 
 ## `kohakuterrarium.serving`
 
-### `KohakuManager`
+### `KohakuManager` (legacy)
 
-Module: `kohakuterrarium.serving.manager`. Transport-agnostic manager;
-used by the HTTP API and any custom transport.
+Module: `kohakuterrarium.serving.manager`. Transport-agnostic manager
+that predates the `Terrarium` engine. Still used by older HTTP routes
+during the transition; new code should reach for `Terrarium`.
 
 Agent methods:
 

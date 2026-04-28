@@ -275,30 +275,64 @@ for the full reasoning.
 
 ## 3. Multi-agent & serving
 
-### 3.1 Terrarium runtime
+### 3.1 Terrarium engine
 
-`terrarium/runtime.py:TerrariumRuntime.start` (lines 85-180) pre-creates
-shared channels, ensures a direct-queue per creature, adds
-`report_to_root` if a root is present, builds each creature via
-`terrarium/factory.py:build_creature`, starts creatures, builds the
-root last (unstarted), then starts the termination checker.
+`terrarium/engine.py:Terrarium` is the runtime engine — one per
+process, hosting every creature. The engine owns:
 
-`build_creature` loads the base config via `@pkg/...` or path, creates
-`Agent(session=Session(creature_name), environment=shared_env, …)`,
-registers one `ChannelTrigger` per listen-channel, and concatenates
-the channel topology prompt onto the system prompt. Creatures never
-learn they are in a terrarium except through their channels and
-(optionally) topology hints.
+- `_topology: TopologyState` — pure-data graph model
+  (`terrarium/topology.py`) tracking which creatures share which
+  graphs, which channels exist, who listens / sends.
+- `_creatures: dict[str, Creature]` — live wrappers
+  (`terrarium/creature_host.py`).
+- `_environments: dict[str, Environment]` — one per graph; holds
+  `shared_channels`.
+- `_session_stores: dict[str, SessionStore]` — one per attached graph.
+- `_subscribers: list[_Subscriber]` — `EngineEvent` pub-sub.
 
-The root agent gets a `TerrariumToolManager` attached to its
-environment so it can use `terrarium_*` and `creature_*` tools. Root
-is always outside, never a peer.
+A standalone agent is a 1-creature graph; a recipe is a connected
+graph with channels. `Terrarium.with_creature(config)` is the solo
+shortcut; `Terrarium.from_recipe(recipe)` walks a `TerrariumConfig`
+via `terrarium/recipe.py:apply_recipe` (declare channels, add direct
+channels per creature, add `report_to_root` when a root is declared,
+wire listen / send edges, start everything). Creatures never learn
+they are in a terrarium except through their channels and (optionally)
+the topology hint baked into their system prompt.
 
-`terrarium/hotplug.py:HotPlugMixin` provides `add_creature`,
-`remove_creature`, `add_channel`, `remove_channel` at runtime.
-`terrarium/observer.py:ChannelObserver` attaches non-destructive
-callbacks on channel sends so dashboards can watch queue channels
-without consuming messages.
+**Channel injection.** When a creature joins a graph that has channels
+it listens to, `terrarium/channels.py:inject_channel_trigger` adds a
+`ChannelTrigger` to its `trigger_manager`. This is the one sanctioned
+downward injection in the layer model: a creature in a graph does
+know it has peers (it has to), but only via the handles the engine
+gave it. Solo creatures get no injection.
+
+**Hot-plug.** Topology can change at runtime. `Terrarium.connect(a, b,
+channel=...)` may merge two graphs (environments union, channels
+pool, attached session stores merge into one via
+`terrarium/session_coord.py:apply_merge`). `Terrarium.disconnect` may
+split a graph (parent session is duplicated to each side via
+`apply_split`). The pure-data topology mutators in
+`terrarium/topology.py` return a `TopologyDelta` whose
+`kind in {"nothing", "merge", "split"}` drives the live updates.
+
+**Session merge / split.** The unit of session is the connected
+component of the graph. Topology changes that don't affect graph
+membership reuse the existing store. `terrarium/session_coord.py`
+implements both branches and emits `SESSION_FORKED` / `TOPOLOGY_CHANGED`
+events.
+
+**Event bus.** `terrarium/events.py:EngineEvent` is the unified
+observable surface. Kinds cover text chunks, channel messages,
+topology changes, session forks, creature lifecycle, processing
+start / end, and errors. `Terrarium.subscribe(filter)` returns an
+async iterator over events matching `EventFilter`. Each subscriber
+gets its own queue; cancelling the iterator de-registers.
+
+The legacy `terrarium/runtime.py:TerrariumRuntime` and
+`serving/manager.py:KohakuManager` are still on disk during the
+transition — older HTTP routes and CLI paths still reach for them.
+`api/deps.py` now exposes both `get_engine()` (new) and `get_manager()`
+(legacy) singletons; routes migrate one by one.
 
 See [concepts/multi-agent/terrarium.md](../concepts/multi-agent/terrarium.md)
 and [concepts/multi-agent/root-agent.md](../concepts/multi-agent/root-agent.md).

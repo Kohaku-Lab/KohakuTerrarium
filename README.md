@@ -234,7 +234,7 @@ kt run @package/path/to/creature
                     +-------+----------+--------+
 ```
 
-A terrarium is a pure wiring layer that manages creature lifecycles, the channels between them, and the framework-level **output wiring** that auto-delivers a creature's turn-end output to named targets. No LLM, no decisions — just runtime. Creatures don't know they're in a terrarium; they run standalone too.
+A terrarium is the runtime engine that hosts every running creature in the process. A standalone agent is a 1-creature graph; a multi-agent team is a connected graph wired by channels. The engine manages creature lifecycles, the channels between them, hot-plug, and the framework-level **output wiring** that auto-delivers a creature's turn-end output to named targets. No LLM, no decisions — just runtime. Creatures don't know they're in a terrarium; they run standalone too.
 
 Terrarium is our **proposed architecture** for horizontal multi-agent — two complementary cooperation mechanisms (channels for conditional / optional traffic; output wiring for deterministic pipeline edges), plus hot-plug and observation. Still evolving as patterns emerge; the [ROADMAP](ROADMAP.md) has the open questions. Prefer sub-agents (vertical) when a single creature can decompose the task itself — it's the simpler answer for most "I need context isolation" instincts.
 
@@ -282,37 +282,35 @@ KohakuTerrarium already ships:
 - Non-blocking auto-compaction for long-running agents.
 - MCP (Model Context Protocol) integration — stdio and HTTP transports.
 - Package manager for creatures, plugins, terrariums, and reusable agent packs (`kt install`, `kt update`).
-- Python embedding through `Agent`, `AgentSession`, `TerrariumRuntime`, and `KohakuManager`.
+- Python embedding through the `Terrarium` engine plus lower-level `Agent` access.
 - HTTP and WebSocket serving.
 - Web dashboard and native desktop app.
 - Custom module and plugin systems.
 
 ## Programmatic usage
 
-Agents are async Python values. Embed them:
+Agents are async Python values. One `Terrarium` engine per process hosts every running creature — a standalone agent is just a 1-creature graph in the engine.
 
 ```python
 import asyncio
-from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.core.channel import ChannelMessage
-from kohakuterrarium.terrarium.config import load_terrarium_config
-from kohakuterrarium.terrarium.runtime import TerrariumRuntime
+from kohakuterrarium import Terrarium
 
 async def main():
-    # Single agent
-    agent = Agent.from_path("@kt-biome/creatures/swe")
-    agent.set_output_handler(lambda text: print(text, end=""), replace_default=True)
-    await agent.start()
-    await agent.inject_input("Explain what this codebase does.")
-    await agent.stop()
+    # Solo creature
+    engine, alice = await Terrarium.with_creature("@kt-biome/creatures/swe")
+    try:
+        async for chunk in alice.chat("Explain what this codebase does."):
+            print(chunk, end="", flush=True)
+    finally:
+        await engine.shutdown()
 
-    # Multi-agent terrarium
-    runtime = TerrariumRuntime(load_terrarium_config("@kt-biome/terrariums/swe_team"))
-    await runtime.start()
-    tasks = runtime.environment.shared_channels.get("tasks")
-    await tasks.send(ChannelMessage(sender="user", content="Fix the auth bug."))
-    await runtime.run()
-    await runtime.stop()
+    # Multi-agent recipe
+    engine = await Terrarium.from_recipe("@kt-biome/terrariums/swe_team")
+    try:
+        async for chunk in engine["swe"].chat("Fix the auth bug."):
+            print(chunk, end="", flush=True)
+    finally:
+        await engine.shutdown()
 
 asyncio.run(main())
 ```

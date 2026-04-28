@@ -11,7 +11,9 @@ tags:
 
 給想把多隻生物組起來合作的讀者。
 
-**生態瓶** 純粹是接線：自己沒有 LLM、不做決策。它擁有共用頻道、管理裡面生物的 lifecycle，並提供框架層級的**輸出接線** — 把一隻生物回合結束的輸出自動送到指定目標。生物本身不知道自己在生態瓶裡 — 它們只知道自己 listen 哪些頻道名字、能送到哪些頻道名字，而生態瓶讓那些名字變成真的。
+**生態瓶** 是托管行程內所有運行中生物的執行期引擎。一隻獨立 agent 就是引擎裡的 1-creature graph；多代理團隊則是用頻道連起來的 connected graph。引擎負責生命週期、共用頻道、熱插拔、以及框架層級的**輸出接線** — 把一隻生物回合結束的輸出自動送到指定目標。引擎本身沒有 LLM、不做決策 — 純粹接線。生物本身不知道自己在生態瓶裡 — 它們只知道自己 listen 哪些頻道名字、能送到哪些頻道名字，而引擎讓那些名字變成真的。
+
+`terrarium.yaml` 設定檔則成為一份 **recipe**：「加這些生物、宣告這些頻道、接這些邊」的序列，套用到引擎上。它不再是一種獨立的實體。
 
 觀念預備：[生態瓶](../concepts/multi-agent/terrarium.md)、[root agent](../concepts/multi-agent/root-agent.md)、[頻道](../concepts/modules/channel.md)。
 
@@ -131,15 +133,23 @@ kt-biome 不附通用 `root` 生物。每個生態瓶自己擁有 `root:` 區塊
 
 ## 執行期熱插拔
 
-從 root (透過工具) 或寫程式：
+從 root (透過工具) 或寫程式直接對引擎操作：
 
 ```python
-await runtime.add_creature("tester", tester_agent,
-                           listen=["review"], can_send=["status"])
-await runtime.add_channel("hotfix", channel_type="queue")
-await runtime.wire_channel("swe", "hotfix", direction="listen")
-await runtime.remove_creature("tester")
+from kohakuterrarium import Terrarium
+
+async with Terrarium() as engine:
+    await engine.apply_recipe("@kt-biome/terrariums/swe_team")
+    tester = await engine.add_creature(
+        "@kt-biome/creatures/swe", creature_id="tester",
+    )
+    # tester 落在自己的 singleton graph；connect() 會把它合進來。
+    swe = engine["swe"]
+    result = await engine.connect(swe, tester, channel="review")
+    # result.delta_kind == "merge"
 ```
+
+跨 graph 的 `connect()` 會合併兩個 graph — environment 取聯集，掛著的 session store 合成一份，新的 listener 會被注入 `ChannelTrigger`。`disconnect()` 可能把 graph 拆回兩邊、並把 parent session 複製到兩側。參考 [`examples/code/terrarium_hotplug.py`](../../examples/code/terrarium_hotplug.py)。
 
 Root 用的對應工具：`creature_start`、`creature_stop`、`terrarium_create`、`terrarium_send`。
 
@@ -160,21 +170,24 @@ async for msg in sub:
 ## 程式化生態瓶
 
 ```python
-from kohakuterrarium.terrarium.runtime import TerrariumRuntime
-from kohakuterrarium.terrarium.config import load_terrarium_config
-from kohakuterrarium.core.channel import ChannelMessage
+import asyncio
+from kohakuterrarium import Terrarium
 
-runtime = TerrariumRuntime(load_terrarium_config("@kt-biome/terrariums/swe_team"))
-await runtime.start()
+async def main():
+    engine = await Terrarium.from_recipe("@kt-biome/terrariums/swe_team")
+    try:
+        # 用 id 找到引擎裡某隻生物
+        async for chunk in engine["swe"].chat("Fix the auth bug."):
+            print(chunk, end="", flush=True)
+    finally:
+        await engine.shutdown()
 
-tasks = runtime.environment.shared_channels.get("tasks")
-await tasks.send(ChannelMessage(sender="user", content="Fix the auth bug."))
-
-await runtime.run()
-await runtime.stop()
+asyncio.run(main())
 ```
 
-串流、多租戶、長期跑的場景，請用 `KohakuManager` 包一層。見 [程式化使用](programmatic-usage.md)。
+更多寫法 (事件訂閱、熱插拔、獨立 + recipe 共存) 看 [程式化使用](programmatic-usage.md)，以及 [`examples/code/`](../../examples/code/) 裡可執行的腳本 (`terrarium_solo.py`、`terrarium_recipe.py`、`terrarium_hotplug.py`)。
+
+舊版 `TerrariumRuntime` 在過渡期間還留在硬碟上；新程式碼請用 `Terrarium`。
 
 ## 輸出接線
 
@@ -244,5 +257,5 @@ await runtime.stop()
 
 - [撰寫生物](creatures.md) — 每一條生態瓶 entry 都是一隻生物。
 - [組合代數使用指南](composition.md) — 只需要小迴圈、不需要整個生態瓶的時候，Python 端的替代方案。
-- [程式化使用](programmatic-usage.md) — `TerrariumRuntime` + `KohakuManager`。
+- [程式化使用](programmatic-usage.md) — `Terrarium` 引擎。
 - [概念 / 生態瓶](../concepts/multi-agent/terrarium.md) — 生態瓶為什麼長這樣。

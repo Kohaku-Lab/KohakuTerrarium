@@ -242,7 +242,7 @@ kt run @package/path/to/creature
 观察结果：各智能体 / 通道状态 -> Root Agent
 ```
 
-生态瓶是一个纯粹的连线层，负责管理智能体的生命周期、它们之间的通道，以及框架层级的 **输出连线 (output wiring)** —— 将智能体在回合结束时的输出自动发送到指定目标。生态瓶本身不包含 LLM，也不负责决策；它只是运行时环境。智能体并不知道自己运行在生态瓶中，因此同样可以独立运行。
+生态瓶是托管进程内所有运行中智能体的运行时引擎。一个独立的 Agent 就是引擎里的 1-creature graph；多 Agent 团队则是用通道连起来的 connected graph。引擎负责管理智能体的生命周期、它们之间的通道、热插拔，以及框架层级的 **输出连线 (output wiring)** —— 将智能体在回合结束时的输出自动发送到指定目标。引擎本身不包含 LLM，也不负责决策；它只是运行时环境。智能体并不知道自己运行在生态瓶中，因此同样可以独立运行。
 
 生态瓶是我们针对横向多 Agent 提出的一种架构方案：它结合了两种互补的协作机制（通道用于处理条件性 / 可选性流量；输出连线用于处理确定性的 pipeline 边），并支持热插拔与观测。这个模式仍在持续演进，相关开放问题见 [ROADMAP](ROADMAP.md)。当单个智能体已经能够自行拆解任务时，使用子代理（纵向）通常会更简单，也更符合多数人对“上下文隔离”的直觉。
 
@@ -290,39 +290,35 @@ KohakuTerrarium 开箱即内置了以下功能：
 - 针对长时间运行的 Agent 提供非阻塞的自动上下文压缩。
 - MCP (Model Context Protocol) 集成 —— 支持 stdio 与 HTTP 传输协议。
 - 智能体、插件、生态瓶、可复用 Agent 包的包管理器 (`kt install`、`kt update`)。
-- 通过 `Agent`、`AgentSession`、`TerrariumRuntime`、`KohakuManager` 嵌入 Python。
+- 通过 `Terrarium` 引擎嵌入 Python，需要更底层控制时也可直接使用 `Agent`。
 - 内置 HTTP 与 WebSocket 服务器。
 - Web Dashboard 与原生桌面 App。
 - 灵活的自定义模块与插件系统。
 
 ## 程序化使用
 
-Agent 是异步的 Python 对象。可以直接嵌入代码中：
+Agent 是异步的 Python 对象。每个进程一个 `Terrarium` 引擎托管所有运行中的智能体 —— 独立 Agent 就是引擎里的 1-creature graph。
 
 ```python
 import asyncio
-from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.core.channel import ChannelMessage
-from kohakuterrarium.terrarium.config import load_terrarium_config
-from kohakuterrarium.terrarium.runtime import TerrariumRuntime
+from kohakuterrarium import Terrarium
 
 async def main():
-    # 单个 Agent
-    agent = Agent.from_path("@kt-biome/creatures/swe")
-    agent.set_output_handler(lambda text: print(text, end=""), replace_default=True)
-    await agent.start()
-    await agent.inject_input("说明这个代码库是做什么的。")
-    await agent.stop()
+    # 独立 Agent
+    engine, alice = await Terrarium.with_creature("@kt-biome/creatures/swe")
+    try:
+        async for chunk in alice.chat("说明这个代码库是做什么的。"):
+            print(chunk, end="", flush=True)
+    finally:
+        await engine.shutdown()
 
-    # 多 Agent 生态瓶
-    runtime = TerrariumRuntime(load_terrarium_config("@kt-biome/terrariums/swe_team"))
-    await runtime.start()
-    tasks = runtime.environment.shared_channels.get("tasks")
-    if tasks is None:
-        raise RuntimeError("terrarium 配置中缺少共享通道 'tasks'")
-    await tasks.send(ChannelMessage(sender="user", content="修复 auth bug。"))
-    await runtime.run()
-    await runtime.stop()
+    # 多 Agent recipe
+    engine = await Terrarium.from_recipe("@kt-biome/terrariums/swe_team")
+    try:
+        async for chunk in engine["swe"].chat("修复 auth bug。"):
+            print(chunk, end="", flush=True)
+    finally:
+        await engine.shutdown()
 
 asyncio.run(main())
 ```
