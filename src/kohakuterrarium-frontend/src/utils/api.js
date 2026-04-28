@@ -58,37 +58,40 @@ export const terrariumAPI = {
   async create(configPath, pwd) {
     const body = { config_path: configPath }
     if (pwd) body.pwd = pwd
-    const { data } = await api.post("/terrariums", body)
+    const { data } = await api.post("/sessions/active/terrariums", body)
     return data
   },
 
   /** @returns {Promise<object[]>} */
   async list() {
-    const { data } = await api.get("/terrariums")
+    const { data } = await api.get("/sessions/active/terrariums")
     return data
   },
 
   /** @returns {Promise<object>} */
   async get(id) {
-    const { data } = await api.get(`/terrariums/${id}`)
+    const { data } = await api.get(`/sessions/active/terrariums/${id}`)
     return data
   },
 
   async stop(id) {
-    await api.delete(`/terrariums/${id}`)
+    await api.delete(`/sessions/active/terrariums/${id}`)
   },
 
   /** @returns {Promise<object[]>} */
   async listChannels(id) {
-    const { data } = await api.get(`/terrariums/${id}/channels`)
+    const { data } = await api.get(`/sessions/topology/${id}/channels`)
     return data
   },
 
   async sendToChannel(id, channelName, content, sender = "human") {
-    const { data } = await api.post(`/terrariums/${id}/channels/${channelName}/send`, {
-      content,
-      sender,
-    })
+    const { data } = await api.post(
+      `/sessions/topology/${id}/channels/${channelName}/send`,
+      {
+        content,
+        sender,
+      },
+    )
     return data
   },
 
@@ -97,80 +100,109 @@ export const terrariumAPI = {
    * Returns { messages: [...], events: [...] }
    */
   async getHistory(id, target) {
-    const { data } = await api.get(`/terrariums/${id}/history/${encodeTarget(target)}`)
+    const { data } = await api.get(
+      `/sessions/${id}/creatures/${encodeTarget(target)}/history`,
+    )
     return data
   },
 
   async interruptCreature(id, name) {
-    const { data } = await api.post(`/terrariums/${id}/creatures/${name}/interrupt`)
+    const { data } = await api.post(
+      `/sessions/${id}/creatures/${encodeTarget(name)}/interrupt`,
+    )
     return data
   },
 
   async listCreatureJobs(id, name) {
-    const { data } = await api.get(`/terrariums/${id}/creatures/${name}/jobs`)
+    const { data } = await api.get(
+      `/sessions/${id}/creatures/${encodeTarget(name)}/jobs`,
+    )
     return data
   },
 
   async promoteCreatureTask(id, name, jobId) {
-    const { data } = await api.post(`/terrariums/${id}/creatures/${name}/promote/${jobId}`)
+    const { data } = await api.post(
+      `/sessions/${id}/creatures/${encodeTarget(name)}/promote/${jobId}`,
+    )
     return data
   },
 
   async stopCreatureTask(id, name, jobId) {
-    const { data } = await api.post(`/terrariums/${id}/creatures/${name}/tasks/${jobId}/stop`)
+    const { data } = await api.post(
+      `/sessions/${id}/creatures/${encodeTarget(name)}/tasks/${jobId}/stop`,
+    )
     return data
   },
 
   async switchCreatureModel(id, name, model) {
-    const { data } = await api.post(`/terrariums/${id}/creatures/${name}/model`, { model })
+    const { data } = await api.post(
+      `/sessions/${id}/creatures/${encodeTarget(name)}/model`,
+      { model },
+    )
     return data
   },
 
   /** Execute a slash command on a terrarium creature */
   async executeCreatureCommand(id, name, command, args = "") {
-    const { data } = await api.post(`/terrariums/${id}/creatures/${name}/command`, {
-      command,
-      args,
-    })
+    const { data } = await api.post(
+      `/sessions/${id}/creatures/${encodeTarget(name)}/command`,
+      {
+        command,
+        args,
+      },
+    )
     return data
   },
 
   async getScratchpad(id, target) {
-    const { data } = await api.get(`/terrariums/${id}/scratchpad/${encodeTarget(target)}`)
+    const { data } = await api.get(
+      `/sessions/${id}/creatures/${encodeTarget(target)}/scratchpad`,
+    )
     return data
   },
 
   async patchScratchpad(id, target, updates) {
-    const { data } = await api.patch(`/terrariums/${id}/scratchpad/${encodeTarget(target)}`, {
-      updates,
-    })
+    const { data } = await api.patch(
+      `/sessions/${id}/creatures/${encodeTarget(target)}/scratchpad`,
+      {
+        updates,
+      },
+    )
     return data
   },
 
   async getEnv(id, target) {
-    const { data } = await api.get(`/terrariums/${id}/env/${encodeTarget(target)}`)
+    const { data } = await api.get(
+      `/sessions/${id}/creatures/${encodeTarget(target)}/env`,
+    )
     return data
   },
 
   async listPlugins(id, target) {
-    const { data } = await api.get(`/terrariums/${id}/plugins/${encodeTarget(target)}`)
+    const { data } = await api.get(
+      `/sessions/${id}/creatures/${encodeTarget(target)}/plugins`,
+    )
     return data
   },
 
   async togglePlugin(id, target, pluginName) {
     const { data } = await api.post(
-      `/terrariums/${id}/plugins/${encodeTarget(target)}/${encodeURIComponent(pluginName)}/toggle`,
+      `/sessions/${id}/creatures/${encodeTarget(target)}/plugins/${encodeURIComponent(pluginName)}/toggle`,
     )
     return data
   },
 
   async listTriggers(id, target) {
-    const { data } = await api.get(`/terrariums/${id}/triggers/${encodeTarget(target)}`)
+    const { data } = await api.get(
+      `/sessions/${id}/creatures/${encodeTarget(target)}/triggers`,
+    )
     return data
   },
 
   async getSystemPrompt(id, target) {
-    const { data } = await api.get(`/terrariums/${id}/system-prompt/${encodeTarget(target)}`)
+    const { data } = await api.get(
+      `/sessions/${id}/creatures/${encodeTarget(target)}/system-prompt`,
+    )
     return data
   },
 }
@@ -181,77 +213,77 @@ export const agentAPI = {
   async create(configPath, pwd) {
     const body = { config_path: configPath }
     if (pwd) body.pwd = pwd
-    const { data } = await api.post("/agents", body)
+    const { data } = await api.post("/sessions/active/agents", body)
     return data
   },
 
   /** @returns {Promise<object[]>} */
   async list() {
-    const { data } = await api.get("/agents")
+    const { data } = await api.get("/sessions/active/agents")
     return data
   },
 
   /** @returns {Promise<object>} */
   async get(id) {
-    const { data } = await api.get(`/agents/${id}`)
+    const { data } = await api.get(`/sessions/active/agents/${id}`)
     return data
   },
 
   async stop(id) {
-    await api.delete(`/agents/${id}`)
+    await api.delete(`/sessions/active/agents/${id}`)
   },
 
   async interrupt(id) {
-    const { data } = await api.post(`/agents/${id}/interrupt`)
+    const { data } = await api.post(`/sessions/_/creatures/${id}/interrupt`)
     return data
   },
 
   /** Get conversation history + event log */
   async getHistory(id) {
-    const { data } = await api.get(`/agents/${id}/history`)
+    const { data } = await api.get(`/sessions/_/creatures/${id}/history`)
     return data
   },
 
   /** Non-streaming chat */
   async chat(id, message) {
     const body = Array.isArray(message) ? { content: message } : { message }
-    const { data } = await api.post(`/agents/${id}/chat`, body)
+    const { data } = await api.post(`/sessions/_/creatures/${id}/chat`, body)
     return data
   },
 
   async listJobs(id) {
-    const { data } = await api.get(`/agents/${id}/jobs`)
+    const { data } = await api.get(`/sessions/_/creatures/${id}/jobs`)
     return data
   },
 
   async stopTask(id, jobId) {
-    const { data } = await api.post(`/agents/${id}/tasks/${jobId}/stop`)
+    const { data } = await api.post(`/sessions/_/creatures/${id}/tasks/${jobId}/stop`)
     return data
   },
 
   /** Promote a running direct task to background */
   async promote(id, jobId) {
-    const { data } = await api.post(`/agents/${id}/promote/${jobId}`)
+    const { data } = await api.post(`/sessions/_/creatures/${id}/promote/${jobId}`)
     return data
   },
 
   /** List plugins with enabled/disabled status */
   async listPlugins(id) {
-    const { data } = await api.get(`/agents/${id}/plugins`)
+    const { data } = await api.get(`/sessions/_/creatures/${id}/plugins`)
     return data
   },
 
   /** Toggle a plugin's enabled state */
   async togglePlugin(id, pluginName) {
     const { data } = await api.post(
-      `/agents/${id}/plugins/${encodeURIComponent(pluginName)}/toggle`,
+      `/sessions/_/creatures/${id}/plugins/${encodeURIComponent(pluginName)}/toggle`,
     )
     return data
   },
 
   /** Regenerate the last assistant response */
   async regenerate(id) {
-    const { data } = await api.post(`/agents/${id}/regenerate`)
+    const { data } = await api.post(`/sessions/_/creatures/${id}/regenerate`)
     return data
   },
 
@@ -260,25 +292,33 @@ export const agentAPI = {
     const body = { content }
     if (target.turnIndex != null) body.turn_index = target.turnIndex
     if (target.userPosition != null) body.user_position = target.userPosition
-    const { data } = await api.post(`/agents/${id}/messages/${msgIdx}/edit`, body)
+    const { data } = await api.post(
+      `/sessions/_/creatures/${id}/messages/${msgIdx}/edit`,
+      body,
+    )
     return data
   },
 
   /** Rewind conversation to a point (drop messages onward) */
   async rewindTo(id, msgIdx) {
-    const { data } = await api.post(`/agents/${id}/messages/${msgIdx}/rewind`)
+    const { data } = await api.post(
+      `/sessions/_/creatures/${id}/messages/${msgIdx}/rewind`,
+    )
     return data
   },
 
   /** Switch the model for a running agent */
   async switchModel(id, model) {
-    const { data } = await api.post(`/agents/${id}/model`, { model })
+    const { data } = await api.post(`/sessions/_/creatures/${id}/model`, { model })
     return data
   },
 
   /** Execute a slash command on an agent */
   async executeCommand(id, command, args = "") {
-    const { data } = await api.post(`/agents/${id}/command`, { command, args })
+    const { data } = await api.post(`/sessions/_/creatures/${id}/command`, {
+      command,
+      args,
+    })
     return data
   },
 
@@ -286,7 +326,7 @@ export const agentAPI = {
 
   /** @returns {Promise<Record<string, string>>} */
   async getScratchpad(id) {
-    const { data } = await api.get(`/agents/${id}/scratchpad`)
+    const { data } = await api.get(`/sessions/_/creatures/${id}/scratchpad`)
     return data
   },
 
@@ -296,25 +336,27 @@ export const agentAPI = {
    * @param {Record<string, string | null>} updates
    */
   async patchScratchpad(id, updates) {
-    const { data } = await api.patch(`/agents/${id}/scratchpad`, { updates })
+    const { data } = await api.patch(`/sessions/_/creatures/${id}/scratchpad`, {
+      updates,
+    })
     return data
   },
 
   /** @returns {Promise<{trigger_id: string, trigger_type: string, running: boolean, created_at: string}[]>} */
   async listTriggers(id) {
-    const { data } = await api.get(`/agents/${id}/triggers`)
+    const { data } = await api.get(`/sessions/_/creatures/${id}/triggers`)
     return data
   },
 
   /** @returns {Promise<{pwd: string, env: Record<string, string>}>} */
   async getEnv(id) {
-    const { data } = await api.get(`/agents/${id}/env`)
+    const { data } = await api.get(`/sessions/_/creatures/${id}/env`)
     return data
   },
 
   /** @returns {Promise<{text: string}>} */
   async getSystemPrompt(id) {
-    const { data } = await api.get(`/agents/${id}/system-prompt`)
+    const { data } = await api.get(`/sessions/_/creatures/${id}/system-prompt`)
     return data
   },
 }
@@ -528,10 +570,11 @@ export const settingsAPI = {
     const { data } = await api.post("/settings/profiles", profile)
     return data
   },
-  async deleteProfile(name, provider = "") {
-    const target = provider
-      ? `/settings/profiles/${encodeURIComponent(provider)}/${encodeURIComponent(name)}`
-      : `/settings/profiles/${encodeURIComponent(name)}`
+  async deleteProfile(name, provider) {
+    if (!provider) {
+      throw new Error("deleteProfile: provider is required (Phase 3 dropped the bare-name route)")
+    }
+    const target = `/settings/profiles/${encodeURIComponent(provider)}/${encodeURIComponent(name)}`
     const { data } = await api.delete(target)
     return data
   },

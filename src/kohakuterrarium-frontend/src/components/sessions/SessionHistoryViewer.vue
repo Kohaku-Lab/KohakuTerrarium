@@ -162,4 +162,14 @@ watch(
   },
   { immediate: true },
 )
+
+// The viewer borrows the live chat store as its render surface (it
+// writes saved-session events into ``messagesByTab`` / ``tabs`` and
+// flips ``_instanceId`` to ``session:<name>``). Wipe everything on
+// unmount so navigating to a running instance afterwards doesn't show
+// the previous session's frozen history while ``initForInstance`` is
+// still awaiting its ``fetchOne`` round-trip.
+onUnmounted(() => {
+  chat.resetForRouteSwitch()
+})
 </script>

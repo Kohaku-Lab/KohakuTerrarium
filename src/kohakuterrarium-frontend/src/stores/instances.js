@@ -37,20 +37,35 @@ export const useInstancesStore = defineStore("instances", {
       }
     },
 
-    /** Fetch a single instance by ID */
+    /** Fetch a single instance by ID.
+     *
+     * The engine produces non-prefixed IDs (creature ``general_abc123``,
+     * graph ``graph_def456``), so we can no longer dispatch by string
+     * prefix. We instead resolve the type from ``this.list`` (populated
+     * by ``fetchAll`` — including the post-create refresh in
+     * :func:`create` below). For brand-new IDs not yet in the list we
+     * try the terrarium endpoint first and fall back to the agent
+     * endpoint on 404.
+     */
     async fetchOne(id) {
       this.loading = true
       try {
+        const existing = this.list.find((i) => i.id === id)
         let loaded = null
-        if (id.startsWith("terrarium_")) {
-          const data = await terrariumAPI.get(id)
-          loaded = _mapTerrarium(data)
-        } else if (id.startsWith("agent_")) {
-          const data = await agentAPI.get(id)
-          loaded = _mapAgent(data)
+        if (existing?.type === "terrarium") {
+          loaded = _mapTerrarium(await terrariumAPI.get(id))
+        } else if (existing?.type === "creature") {
+          loaded = _mapAgent(await agentAPI.get(id))
         } else {
-          this.current = null
-          return null
+          // Unknown type — probe both endpoints. Either succeeds quickly
+          // (the active-session count is small) and 404 is the only
+          // miss we expect when probing the wrong family.
+          try {
+            loaded = _mapTerrarium(await terrariumAPI.get(id))
+          } catch (err) {
+            if (err?.response?.status !== 404) throw err
+            loaded = _mapAgent(await agentAPI.get(id))
+          }
         }
         this.current = loaded
         const idx = this.list.findIndex((item) => item.id === loaded.id)
@@ -86,10 +101,19 @@ export const useInstancesStore = defineStore("instances", {
     /** Stop an instance — awaits API response before removing from list */
     async stop(id) {
       try {
-        if (id.startsWith("terrarium_")) {
+        const existing = this.list.find((i) => i.id === id)
+        if (existing?.type === "terrarium") {
           await terrariumAPI.stop(id)
-        } else if (id.startsWith("agent_")) {
+        } else if (existing?.type === "creature") {
           await agentAPI.stop(id)
+        } else {
+          // Unknown — probe both. Whichever isn't 404 will succeed.
+          try {
+            await terrariumAPI.stop(id)
+          } catch (err) {
+            if (err?.response?.status !== 404) throw err
+            await agentAPI.stop(id)
+          }
         }
         // Only remove after successful API response
         this.list = this.list.filter((i) => i.id !== id)

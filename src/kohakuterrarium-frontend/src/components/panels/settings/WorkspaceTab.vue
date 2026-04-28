@@ -38,8 +38,8 @@ const RECENT_MAX = 8
 
 /**
  * Per-instance "Workspace" form. Reads/writes
- * ``/api/agents/{id}/working-dir`` on the running agent — no global
- * state, no relation to the Studio workspace store.
+ * ``/api/sessions/_/creatures/{id}/working-dir`` on the running creature
+ * — no global state, no relation to the Studio workspace store.
  *
  * Suggestions: pulled from ``localStorage`` keyed by agent id, plus the
  * current pwd, so recent dirs auto-complete via a ``<datalist>``.
@@ -102,7 +102,7 @@ async function loadCurrent() {
     return
   }
   try {
-    const res = await fetch(`/api/agents/${encodeURIComponent(agentId.value)}/working-dir`)
+    const res = await fetch(`/api/sessions/_/creatures/${encodeURIComponent(agentId.value)}/working-dir`)
     if (!res.ok) throw new Error(await res.text())
     const data = await res.json()
     currentPwd.value = data.pwd || ""
@@ -133,7 +133,7 @@ async function apply() {
   status.value = ""
   errorMessage.value = ""
   try {
-    const res = await fetch(`/api/agents/${encodeURIComponent(agentId.value)}/working-dir`, {
+    const res = await fetch(`/api/sessions/_/creatures/${encodeURIComponent(agentId.value)}/working-dir`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: draft.value }),

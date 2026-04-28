@@ -103,6 +103,15 @@ watch(
 async function loadInstance() {
   const id = String(route.params.id || "")
   if (!id) return
+  // If the chat store is still wired to a different surface (most
+  // commonly the session viewer, which sets ``_instanceId`` to
+  // ``session:<name>``), wipe it synchronously before the awaited
+  // fetch. Otherwise the WorkspaceShell mounts and renders the
+  // previous surface's tabs/messages while ``initForInstance`` is
+  // still in flight.
+  if (chat._instanceId && chat._instanceId !== id) {
+    chat.resetForRouteSwitch()
+  }
   const loaded = await instances.fetchOne(id)
   if (!loaded) {
     loadedInstance.value = null

@@ -556,3 +556,76 @@ describe("chat store — multimodal edit + branch resync", () => {
     getHistory.mockRestore()
   })
 })
+
+describe("chat store — resetForRouteSwitch", () => {
+  // Regression test for the bug where the SessionHistoryViewer leaves
+  // the saved-session's tabs / messages / _instanceId in the chat
+  // store, so navigating to a running instance afterwards renders the
+  // viewer's content for the brief window between page mount and the
+  // async ``initForInstance`` call.
+  it("wipes viewer state so the next live-instance render starts clean", () => {
+    const chat = useChatStore()
+
+    // Simulate the SessionHistoryViewer state after loading a saved
+    // session named ``my-saved-session`` with two recorded tabs.
+    chat._instanceId = "session:my-saved-session"
+    chat._instanceType = "terrarium"
+    chat.tabs = ["root", "swe"]
+    chat.activeTab = "root"
+    chat.messagesByTab = {
+      root: [{ id: "m1", role: "assistant", parts: [{ type: "text", text: "frozen reply" }] }],
+      swe: [{ id: "m2", role: "assistant", parts: [{ type: "text", text: "frozen output" }] }],
+    }
+    chat.tokenUsage = { root: { prompt: 10, completion: 5, total: 15, cached: 0 } }
+    chat.runningJobs = { jobX: { name: "bash", type: "tool", startedAt: 1 } }
+    chat.unreadCounts = { swe: 3 }
+    chat.queuedMessages = [{ id: "q1", content: "queued", timestamp: "now" }]
+    chat.processingByTab = { root: true }
+    chat.eventsByTab = { root: [{ type: "text_delta", text: "stale" }] }
+    chat.branchViewByTab = { root: { 0: 1 } }
+    chat.sessionInfo = {
+      sessionId: "saved-session-id",
+      model: "saved-model",
+      llmName: "saved/llm",
+      agentName: "saved-agent",
+      compactThreshold: 999,
+      maxContext: 1000,
+    }
+
+    chat.resetForRouteSwitch()
+
+    expect(chat._instanceId).toBeNull()
+    expect(chat._instanceType).toBeNull()
+    expect(chat.tabs).toEqual([])
+    expect(chat.activeTab).toBeNull()
+    expect(chat.messagesByTab).toEqual({})
+    expect(chat.tokenUsage).toEqual({})
+    expect(chat.runningJobs).toEqual({})
+    expect(chat.unreadCounts).toEqual({})
+    expect(chat.queuedMessages).toEqual([])
+    expect(chat.processingByTab).toEqual({})
+    expect(chat.eventsByTab).toEqual({})
+    expect(chat.branchViewByTab).toEqual({})
+    expect(chat.sessionInfo.sessionId).toBe("")
+    expect(chat.sessionInfo.model).toBe("")
+    expect(chat.sessionInfo.llmName).toBe("")
+    expect(chat.sessionInfo.agentName).toBe("")
+    expect(chat.sessionInfo.compactThreshold).toBe(0)
+    expect(chat.sessionInfo.maxContext).toBe(0)
+
+    // ``currentMessages`` getter must return an empty list — this is
+    // what ChatPanel reads, and the bug surfaced as "saved messages
+    // shown on a live instance" via this exact getter.
+    expect(chat.currentMessages).toEqual([])
+  })
+
+  it("bumps the instance generation so in-flight WS callbacks are ignored", () => {
+    const chat = useChatStore()
+    const before = chat._instanceGeneration
+
+    chat._instanceId = "session:foo"
+    chat.resetForRouteSwitch()
+
+    expect(chat._instanceGeneration).toBeGreaterThan(before)
+  })
+})

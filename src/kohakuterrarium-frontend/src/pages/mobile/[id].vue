@@ -138,6 +138,12 @@ function onFileSelect(path) {
 async function loadInstance() {
   const id = String(route.params.id || "")
   if (!id) return
+  // Wipe any leftover chat-store state from another surface (e.g. the
+  // session viewer) before awaiting the instance fetch. See the
+  // matching guard in ``pages/instances/[id].vue`` for the why.
+  if (chat._instanceId && chat._instanceId !== id) {
+    chat.resetForRouteSwitch()
+  }
   const loaded = await instances.fetchOne(id)
   if (loaded) {
     loadedInstance.value = loaded

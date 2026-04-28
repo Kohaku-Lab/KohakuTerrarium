@@ -1273,11 +1273,20 @@ export const useChatStore = defineStore("chat", {
       }
     },
 
-    /** Connect single WS for terrarium */
+    /** Connect single WS for terrarium.
+     *
+     * Phase 3 collapsed the legacy ``/ws/terrariums/{id}`` route into
+     * the per-creature ``/ws/sessions/{sid}/creatures/{cid}/chat`` URL.
+     * The frontend wires onto the terrarium's root creature; per-tab
+     * channel views read history through the legacy
+     * ``terrariumAPI.getHistory`` path until the multi-tab session
+     * shell is ported (Stage 3 work).
+     */
     _connectTerrarium(terrariumId, generation) {
+      const target = this.tabs[0] || "root"
       this._openWs({
         generation,
-        url: wsUrl(`/ws/terrariums/${terrariumId}`),
+        url: wsUrl(`/ws/sessions/${terrariumId}/creatures/${target}/chat`),
         onOpen: () => {
           // Load all tab histories, then flush WS buffer
           const loads = []
@@ -1301,7 +1310,7 @@ export const useChatStore = defineStore("chat", {
     _connectCreature(agentId, generation) {
       this._openWs({
         generation,
-        url: wsUrl(`/ws/creatures/${agentId}`),
+        url: wsUrl(`/ws/sessions/_/creatures/${agentId}/chat`),
         onOpen: () => {
           const tabKey = this.tabs[0]
           if (tabKey) {
@@ -2295,6 +2304,51 @@ export const useChatStore = defineStore("chat", {
       if (!job?.startedAt) return ""
       const secs = Math.floor((Date.now() - job.startedAt) / 1000)
       return secs > 0 ? `${secs}s` : ""
+    },
+
+    /**
+     * Wipe the chat store back to a neutral, disconnected state.
+     *
+     * Used when leaving a surface that borrowed the chat store (most
+     * importantly the SessionHistoryViewer, which writes saved-session
+     * data into ``messagesByTab``/``tabs``/``_instanceId``). Without
+     * this, navigating from the session viewer back to a running
+     * ``/instances/<id>`` page renders the previous session's content
+     * for the brief window between mount and the async
+     * ``initForInstance`` call — and ``_saveTabs``/``_restoreTabs``
+     * keys can hit the wrong instance bucket because ``_instanceId``
+     * still points at ``session:<name>``.
+     *
+     * Does NOT open a websocket; pair it with ``initForInstance`` if
+     * you want to attach to a new live instance afterwards.
+     */
+    resetForRouteSwitch() {
+      this._cleanup()
+      this._instanceGeneration++
+      this._instanceId = null
+      this._instanceType = null
+      this.tabs = []
+      this.messagesByTab = {}
+      this.tokenUsage = {}
+      this.runningJobs = {}
+      this.unreadCounts = {}
+      this.queuedMessages = []
+      this.processingByTab = {}
+      this.eventsByTab = {}
+      this.branchViewByTab = {}
+      this._recentUserInputs = {}
+      this._branchResyncPendingByTab = {}
+      this._clearBranchResyncTimers()
+      this.sessionInfo = {
+        sessionId: "",
+        model: "",
+        llmName: "",
+        agentName: "",
+        compactThreshold: 0,
+        maxContext: 0,
+      }
+      const statusStore = useStatusStore()
+      statusStore.reset()
     },
 
     _cleanup() {

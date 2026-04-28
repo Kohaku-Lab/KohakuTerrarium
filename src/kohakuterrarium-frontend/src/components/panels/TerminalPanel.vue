@@ -92,9 +92,10 @@ const terminalPath = computed(() => {
   if (isTerrarium.value) {
     const target = selectedTarget.value
     if (!target) return null
-    return `/ws/terminal/terrariums/${id}/${encodeURIComponent(target)}`
+    return `/ws/sessions/${encodeURIComponent(id)}/creatures/${encodeURIComponent(target)}/pty`
   }
-  return `/ws/terminal/${id}`
+  // Standalone agent: cid is unused server-side, pass the agent id again.
+  return `/ws/sessions/${encodeURIComponent(id)}/creatures/${encodeURIComponent(id)}/pty`
 })
 
 let unmounted = false

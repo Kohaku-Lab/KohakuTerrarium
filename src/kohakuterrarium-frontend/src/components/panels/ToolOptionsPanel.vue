@@ -32,11 +32,14 @@ import { validateNativeToolOptions } from "@/utils/nativeToolValidation"
  *
  * Stays scoped to the active agent so overrides live with the session
  * (persisted in the agent's scratchpad). Reads + writes the
- * ``/api/agents/{id}/native-tool-options`` endpoint exclusively;
- * does not touch any global backend / settings-page surface.
+ * ``/api/sessions/_/creatures/{id}/native-tool-options`` endpoint
+ * exclusively; does not touch any global backend / settings-page
+ * surface.
  *
- * GET  /api/agents/{id}/native-tool-options    → {tools: [{name, description, option_schema, values}]}
- * PUT  /api/agents/{id}/native-tool-options    body: {tool, values}; empty values clears the override.
+ * GET  /api/sessions/_/creatures/{id}/native-tool-options
+ *      → {tools: [{name, description, option_schema, values}]}
+ * PUT  /api/sessions/_/creatures/{id}/native-tool-options
+ *      body: {tool, values}; empty values clears the override.
  */
 const props = defineProps({
   instance: { type: Object, default: null },
@@ -75,7 +78,7 @@ async function loadTools() {
   }
   loading.value = true
   try {
-    const res = await fetch(`/api/agents/${encodeURIComponent(agentId.value)}/native-tool-options`)
+    const res = await fetch(`/api/sessions/_/creatures/${encodeURIComponent(agentId.value)}/native-tool-options`)
     if (!res.ok) throw new Error(await res.text())
     const body = await res.json()
     tools.value = body.tools || []
@@ -127,7 +130,7 @@ async function saveOptions() {
   status.value = ""
   try {
     const validatedValues = validateNativeToolOptions(selectedTool.value, draftValues.value, schemaForCurrent.value)
-    const res = await fetch(`/api/agents/${encodeURIComponent(agentId.value)}/native-tool-options`, {
+    const res = await fetch(`/api/sessions/_/creatures/${encodeURIComponent(agentId.value)}/native-tool-options`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tool: selectedTool.value, values: validatedValues }),
@@ -147,7 +150,7 @@ async function resetTool() {
   saving.value = true
   status.value = ""
   try {
-    const res = await fetch(`/api/agents/${encodeURIComponent(agentId.value)}/native-tool-options`, {
+    const res = await fetch(`/api/sessions/_/creatures/${encodeURIComponent(agentId.value)}/native-tool-options`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tool: selectedTool.value, values: {} }),

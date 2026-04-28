@@ -675,14 +675,14 @@ async function confirmDeletePreset(name) {
     return
   }
   try {
-    // Use provider + name when available — the new (provider, name)
-    // hierarchy API refuses to guess when a bare name is ambiguous.
+    // The (provider, name) hierarchy API is the only delete path — the
+    // legacy bare-name fallback was removed in Phase 3 of the studio
+    // cleanup.  Editors that lack a provider hit the error toast below.
     const preset = editorPreset.value
-    if (preset && preset.provider) {
-      await settingsAPI.deleteProfile(name, preset.provider)
-    } else {
-      await settingsAPI.deleteProfile(name)
+    if (!preset?.provider) {
+      throw new Error("Profile has no provider — cannot delete")
     }
+    await settingsAPI.deleteProfile(name, preset.provider)
     ElMessage.success(t("settings.models.deleted", { name }))
     cancelEdit()
     await loadPresets()

@@ -106,6 +106,10 @@ watch(
 )
 
 onUnmounted(() => {
-  // Detail store is a singleton; leave its state for fast back-nav.
+  // The session-detail Pinia store is a singleton; we leave its
+  // ``meta``/``tree``/``summary`` cache in place for fast back-nav
+  // between viewer and listing pages. The chat store is reset by the
+  // SessionHistoryViewer when the conv tab unmounts — see
+  // ``components/sessions/SessionHistoryViewer.vue``.
 })
 </script>
