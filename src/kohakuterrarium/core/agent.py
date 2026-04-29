@@ -552,14 +552,16 @@ class Agent(
                 self.executor.job_store.update_status(job_id, state=JobState.CANCELLED)
                 cancelled = True
 
-            # Try sub-agent manager
+            # Try sub-agent manager. Use cooperative cancellation so
+            # any tokens accumulated before cancellation are preserved in
+            # the final SubAgentResult and session trace.
             if not cancelled:
                 sa_task = self.subagent_manager._tasks.get(job_id)
                 if sa_task and not sa_task.done():
+                    job = self.subagent_manager._jobs.get(job_id)
+                    if job and hasattr(job, "subagent"):
+                        job.subagent.cancel()
                     sa_task.cancel()
-                    self.subagent_manager.job_store.update_status(
-                        job_id, state=JobState.CANCELLED
-                    )
                     cancelled = True
 
         if cancelled:
