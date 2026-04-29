@@ -203,6 +203,30 @@ def _get_available_shells() -> list[str]:
     return _AVAILABLE_SHELLS
 
 
+def _resolve_timeout_arg(
+    args: dict[str, Any], default_timeout: float
+) -> tuple[float, str | None]:
+    """Resolve per-call timeout, falling back to the configured default."""
+    raw_timeout = args.get("timeout", default_timeout)
+    if raw_timeout in (None, ""):
+        raw_timeout = default_timeout
+    try:
+        timeout = float(raw_timeout)
+    except (TypeError, ValueError):
+        return 0.0, f"timeout must be numeric, got {raw_timeout!r}"
+    if timeout < 0:
+        return 0.0, "timeout must be >= 0"
+    return timeout, None
+
+
+def _wait_timeout(timeout: float) -> float | None:
+    return timeout if timeout > 0 else None
+
+
+def _format_timeout(timeout: float) -> str:
+    return f"{timeout:g}s"
+
+
 @register_builtin("bash")
 class ShellTool(BaseTool):
     """
@@ -249,6 +273,10 @@ class ShellTool(BaseTool):
                         "Options: bash, zsh, sh, fish, pwsh, powershell"
                     ),
                 },
+                "timeout": {
+                    "type": "number",
+                    "description": "Maximum execution time in seconds (0 = no timeout).",
+                },
             },
             "required": ["command"],
         }
@@ -259,6 +287,9 @@ class ShellTool(BaseTool):
         command = args.get("command", "")
         if not command:
             return ToolResult(error="No command provided")
+        timeout, timeout_error = _resolve_timeout_arg(args, self.config.timeout)
+        if timeout_error is not None:
+            return ToolResult(error=timeout_error)
 
         # Reject no-op waiting commands (hallucination pattern)
         stripped = command.strip().lower()
@@ -343,16 +374,13 @@ class ShellTool(BaseTool):
                 output_handle = None
 
             try:
-                await asyncio.wait_for(
-                    process.wait(),
-                    timeout=self.config.timeout if self.config.timeout > 0 else None,
-                )
+                await asyncio.wait_for(process.wait(), timeout=_wait_timeout(timeout))
             except asyncio.TimeoutError:
                 await _terminate_process_tree(process)
                 output = _read_output_file(output_path)
                 return ToolResult(
                     output=output,
-                    error=f"Command timed out after {self.config.timeout}s",
+                    error=f"Command timed out after {_format_timeout(timeout)}",
                     exit_code=-1,
                     metadata={
                         "raw_output_path": str(output_path),
@@ -360,6 +388,7 @@ class ShellTool(BaseTool):
                         "shell_executable": resolved_exe,
                         "shell_override": _shell_override_env(shell_type),
                         "home": env.get("HOME"),
+                        "timeout": timeout,
                     },
                 )
             except asyncio.CancelledError:
@@ -387,6 +416,7 @@ class ShellTool(BaseTool):
                     "shell_executable": resolved_exe,
                     "shell_override": _shell_override_env(shell_type),
                     "home": env.get("HOME"),
+                    "timeout": timeout,
                 },
             )
 
@@ -416,6 +446,7 @@ class ShellTool(BaseTool):
                         "shell_executable": resolved_exe,
                         "shell_override": _shell_override_env(shell_type),
                         "home": env.get("HOME"),
+                        "timeout": timeout,
                     }
                     if output_path
                     else {}
@@ -448,12 +479,28 @@ class PythonTool(BaseTool):
     def execution_mode(self) -> ExecutionMode:
         return ExecutionMode.DIRECT
 
+    def get_parameters_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "code": {"type": "string", "description": "Python code to execute"},
+                "timeout": {
+                    "type": "number",
+                    "description": "Maximum execution time in seconds (0 = no timeout).",
+                },
+            },
+            "required": ["code"],
+        }
+
     async def _execute(self, args: dict[str, Any], **kwargs: Any) -> ToolResult:
         """Execute Python code."""
         context = kwargs.get("context")
         code = args.get("code", "")
         if not code:
             return ToolResult(error="No code provided")
+        timeout, timeout_error = _resolve_timeout_arg(args, self.config.timeout)
+        if timeout_error is not None:
+            return ToolResult(error=timeout_error)
 
         logger.debug("Executing Python code", code_length=len(code))
 
@@ -474,14 +521,15 @@ class PythonTool(BaseTool):
             try:
                 stdout, _ = await asyncio.wait_for(
                     process.communicate(),
-                    timeout=self.config.timeout if self.config.timeout > 0 else None,
+                    timeout=_wait_timeout(timeout),
                 )
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
                 return ToolResult(
-                    error=f"Python execution timed out after {self.config.timeout}s",
+                    error=f"Python execution timed out after {_format_timeout(timeout)}",
                     exit_code=-1,
+                    metadata={"timeout": timeout},
                 )
 
             output = stdout.decode("utf-8", errors="replace") if stdout else ""
@@ -493,6 +541,7 @@ class PythonTool(BaseTool):
                 error=(
                     None if exit_code == 0 else f"Python exited with code {exit_code}"
                 ),
+                metadata={"timeout": timeout},
             )
 
         except Exception as e:

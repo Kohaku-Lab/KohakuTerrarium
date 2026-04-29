@@ -277,9 +277,10 @@ class TestBuildToolSchemas:
         assert len(schemas) == 1
         assert schemas[0].name == "bash"
         assert schemas[0].description == "Execute shell commands"
-        # bash has a builtin schema with 'command' parameter
+        # bash has a builtin schema with command + per-call timeout parameters
         assert schemas[0].parameters["type"] == "object"
         assert "command" in schemas[0].parameters["properties"]
+        assert schemas[0].parameters["properties"]["timeout"]["type"] == "number"
 
     def test_unknown_tool_gets_generic_schema(self):
         """Test that unknown tool gets generic content-based schema."""

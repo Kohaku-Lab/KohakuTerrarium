@@ -27,6 +27,7 @@ Using dedicated tools gives structured output and enables safety guards.
 |-----|------|-------------|
 | command | string | Shell command to execute (required) |
 | type | string | Shell type: bash, zsh, sh, fish, pwsh, powershell (default: bash) |
+| timeout | number | Maximum execution time in seconds for this call (default: tool config timeout; `0` = no timeout) |
 
 ## Shell Type
 
@@ -54,7 +55,8 @@ which shells are installed so you can choose an alternative with
 - Commands run in bash on all platforms (git bash on Windows).
 - Use `type` parameter to switch shell if bash is unavailable.
 - stdout and stderr are combined in the output.
-- Commands have a configurable timeout; killed on timeout.
+- Commands have a configurable timeout; pass `timeout` per call to override the tool default.
+- `timeout: 0` disables the execution timeout for long-running commands.
 - Large outputs may be truncated to the configured max size.
 
 ## WHEN TO USE
@@ -70,6 +72,6 @@ Returns combined stdout/stderr. Exit code is included in the result metadata.
 
 ## LIMITATIONS
 
-- Commands have timeout (default: 60 seconds)
+- Commands have timeout (default: 60 seconds; override per call with `timeout`)
 - Large outputs may be truncated
 - Shell availability varies by platform (bash via git bash on Windows)

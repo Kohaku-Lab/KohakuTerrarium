@@ -24,6 +24,10 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
                 "type": "string",
                 "description": "Shell type (default: bash). Options: bash, zsh, sh, fish, pwsh",
             },
+            "timeout": {
+                "type": "number",
+                "description": "Maximum execution time in seconds (0 = no timeout).",
+            },
         },
         "required": ["command"],
     },
@@ -31,6 +35,10 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
         "type": "object",
         "properties": {
             "code": {"type": "string", "description": "Python code to execute"},
+            "timeout": {
+                "type": "number",
+                "description": "Maximum execution time in seconds (0 = no timeout).",
+            },
         },
         "required": ["code"],
     },

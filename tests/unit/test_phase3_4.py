@@ -18,7 +18,7 @@ _SKIP_WINDOWS = pytest.mark.skipif(
     sys.platform == "win32", reason="bash tool tests require Unix shell"
 )
 
-from kohakuterrarium.builtins.tools import BashTool
+from kohakuterrarium.builtins.tools import BashTool, PythonTool
 from kohakuterrarium.commands import CommandResult, parse_command_args
 from kohakuterrarium.core.executor import Executor
 from kohakuterrarium.core.job import (
@@ -272,6 +272,45 @@ class TestBashTool:
         assert tool.tool_name == "bash"
         assert len(tool.description) > 0
         assert tool.execution_mode == ExecutionMode.DIRECT
+
+    def test_bash_tool_schema_includes_timeout(self):
+        """Test per-call timeout appears in the shell schema."""
+        tool = BashTool()
+        schema = tool.get_parameters_schema()
+        assert schema["properties"]["timeout"]["type"] == "number"
+
+    @_SKIP_WINDOWS
+    @pytest.mark.asyncio
+    async def test_bash_tool_per_call_timeout(self):
+        """Test bash accepts a per-call timeout override."""
+        tool = BashTool(ToolConfig(timeout=60))
+        result = await tool.execute({"command": "sleep 1", "timeout": 0.01})
+        assert not result.success
+        assert result.error == "Command timed out after 0.01s"
+        assert result.metadata["timeout"] == 0.01
+
+
+class TestPythonTool:
+    """Tests for PythonTool."""
+
+    @pytest.mark.asyncio
+    async def test_python_tool_per_call_timeout(self):
+        """Test python accepts a per-call timeout override."""
+        tool = PythonTool(ToolConfig(timeout=60))
+        result = await tool.execute(
+            {"code": "import time; time.sleep(1)", "timeout": 0.01}
+        )
+        assert not result.success
+        assert result.error == "Python execution timed out after 0.01s"
+        assert result.metadata["timeout"] == 0.01
+
+    @pytest.mark.asyncio
+    async def test_python_tool_rejects_invalid_timeout(self):
+        """Test python reports invalid timeout values."""
+        tool = PythonTool()
+        result = await tool.execute({"code": "print('x')", "timeout": "bad"})
+        assert not result.success
+        assert result.error == "timeout must be numeric, got 'bad'"
 
 
 class TestRegistry:
