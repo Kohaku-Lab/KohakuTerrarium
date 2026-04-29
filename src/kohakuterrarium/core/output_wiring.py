@@ -71,12 +71,16 @@ class OutputWiringEntry:
             ``source_event_type``, ``with_content``.
         prompt_format: ``"simple"`` (default, ``str.format_map``) or
             ``"jinja"`` (uses ``prompt.template.render_template_safe``).
+        allow_self_trigger: Explicit opt-in for source → same-target
+            delivery. Defaults to False so accidental self-loops are
+            dropped by terrarium resolvers.
     """
 
     to: str
     with_content: bool = True
     prompt: str | None = None
     prompt_format: str = PROMPT_FORMAT_SIMPLE
+    allow_self_trigger: bool = False
 
     def __post_init__(self) -> None:
         if not self.to or not isinstance(self.to, str):
@@ -118,6 +122,7 @@ def parse_wiring_entry(raw: Any) -> OutputWiringEntry:
         with_content=bool(raw.get("with_content", True)),
         prompt=raw.get("prompt"),
         prompt_format=raw.get("prompt_format", PROMPT_FORMAT_SIMPLE),
+        allow_self_trigger=bool(raw.get("allow_self_trigger", False)),
     )
 
 

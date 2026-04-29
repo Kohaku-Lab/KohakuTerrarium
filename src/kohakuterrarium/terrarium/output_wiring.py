@@ -70,6 +70,11 @@ class TerrariumOutputWiringResolver:
             return None
         return handle.agent
 
+    def _target_identity(self, target: str, target_agent: "Agent") -> str:
+        if target == ROOT_TARGET:
+            return getattr(target_agent.config, "name", ROOT_TARGET)
+        return target
+
     def _warn_once(self, target: str, reason: str) -> None:
         if target in self._warned_missing:
             return
@@ -99,6 +104,15 @@ class TerrariumOutputWiringResolver:
         for entry in entries:
             target_agent = self._resolve_target(entry.to)
             if target_agent is None:
+                continue
+            target_identity = self._target_identity(entry.to, target_agent)
+            if source == target_identity and not entry.allow_self_trigger:
+                logger.warning(
+                    "output_wiring self-trigger blocked",
+                    source=source,
+                    target=entry.to,
+                    reason="set allow_self_trigger=true on this output_wiring entry to permit it",
+                )
                 continue
             if not getattr(target_agent, "_running", False):
                 logger.debug(
