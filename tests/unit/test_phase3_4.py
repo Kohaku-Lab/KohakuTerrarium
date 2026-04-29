@@ -10,6 +10,7 @@ Tests for:
 - Controller (basic, without LLM)
 """
 
+import shlex
 import sys
 
 import pytest
@@ -284,7 +285,8 @@ class TestBashTool:
     async def test_bash_tool_per_call_timeout(self):
         """Test bash accepts a per-call timeout override."""
         tool = BashTool(ToolConfig(timeout=60))
-        result = await tool.execute({"command": "sleep 1", "timeout": 0.01})
+        command = f"{shlex.quote(sys.executable)} -c 'import time; time.sleep(1)'"
+        result = await tool.execute({"command": command, "timeout": 0.01})
         assert not result.success
         assert result.error == "Command timed out after 0.01s"
         assert result.metadata["timeout"] == 0.01
