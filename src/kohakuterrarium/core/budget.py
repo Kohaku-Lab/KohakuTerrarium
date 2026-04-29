@@ -1,60 +1,173 @@
-"""
-Shared iteration budget primitives for agent / sub-agent loops.
+"""Shared budget primitives for agent and sub-agent loops."""
 
-Per the extension-point cluster 6.1 decision, a parent agent and its child
-sub-agents can share a single pool of "turns" (LLM calls). The parent passes
-an :class:`IterationBudget` reference to each child by default; a child
-``budget_allocation=N`` opts the child out into its own fresh counter.
-When the counter reaches zero, :class:`BudgetExhausted` is raised at the
-next consume site — inside a sub-agent it becomes a failed
-:class:`~kohakuterrarium.modules.subagent.result.SubAgentResult`; in the
-parent's main loop it surfaces as a termination signal.
-"""
-
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any
 
 
 class BudgetExhausted(Exception):
-    """Raised when a shared iteration budget is drained.
+    """Raised when a legacy hard budget is drained."""
 
-    The surrounding sub-agent (or parent controller) is expected to catch
-    this, translate it into a tool-result / termination signal, and let
-    the controller decide how to proceed.
-    """
+
+class AlarmState(Enum):
+    """Budget alarm severity."""
+
+    OK = "ok"
+    SOFT = "soft"
+    HARD = "hard"
+    CRASH = "crash"
+
+
+_SEVERITY = {
+    AlarmState.OK: 0,
+    AlarmState.SOFT: 1,
+    AlarmState.HARD: 2,
+    AlarmState.CRASH: 3,
+}
+
+
+@dataclass
+class BudgetAxis:
+    """Mutable usage counter for one budget dimension."""
+
+    name: str
+    used: float = 0
+    soft: float = 0
+    hard: float = 0
+    last_alarm: AlarmState = AlarmState.OK
+    pending_transitions: list[AlarmState] = field(default_factory=list)
+
+    def consume(self, n: float = 1) -> None:
+        """Increment usage and record one-shot severity transitions."""
+        self.used += n
+        if self.hard <= 0:
+            return
+
+        new = AlarmState.OK
+        if self.used >= self.hard * 1.5:
+            new = AlarmState.CRASH
+        elif self.used >= self.hard:
+            new = AlarmState.HARD
+        elif self.soft > 0 and self.used >= self.soft:
+            new = AlarmState.SOFT
+
+        if _SEVERITY[new] > _SEVERITY[self.last_alarm] and new is not AlarmState.OK:
+            self.pending_transitions.append(new)
+            self.last_alarm = new
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return serialisable state for logging and tests."""
+        return {
+            "name": self.name,
+            "used": self.used,
+            "soft": self.soft,
+            "hard": self.hard,
+            "last_alarm": self.last_alarm.value,
+            "pending_transitions": [state.value for state in self.pending_transitions],
+        }
+
+
+@dataclass
+class BudgetSet:
+    """Multi-axis budget state shared by runtime budget plugins."""
+
+    turn: BudgetAxis | None = None
+    walltime: BudgetAxis | None = None
+    tool_call: BudgetAxis | None = None
+
+    def tick(
+        self,
+        *,
+        turns: float = 0,
+        seconds: float = 0.0,
+        tool_calls: float = 0,
+    ) -> None:
+        """Consume one or more budget dimensions."""
+        if self.turn is not None and turns:
+            self.turn.consume(turns)
+        if self.walltime is not None and seconds:
+            self.walltime.consume(seconds)
+        if self.tool_call is not None and tool_calls:
+            self.tool_call.consume(tool_calls)
+
+    def drain_alarms(self) -> list[tuple[str, AlarmState]]:
+        """Return and clear pending alarm transitions from all axes."""
+        drained: list[tuple[str, AlarmState]] = []
+        for axis in self._axes():
+            for state in axis.pending_transitions:
+                drained.append((axis.name, state))
+            axis.pending_transitions.clear()
+        return drained
+
+    def is_hard_walled(self) -> bool:
+        """True once any axis reaches the hard wall or crash limit."""
+        return any(
+            axis.last_alarm in {AlarmState.HARD, AlarmState.CRASH}
+            for axis in self._axes()
+        )
+
+    def is_crashed(self) -> bool:
+        """True once any axis reaches the crash limit."""
+        return any(axis.last_alarm is AlarmState.CRASH for axis in self._axes())
+
+    def exhausted_axis(self) -> str:
+        """Return the highest-severity exhausted axis name."""
+        for state in (AlarmState.CRASH, AlarmState.HARD, AlarmState.SOFT):
+            for axis in self._axes():
+                if axis.last_alarm is state:
+                    return axis.name
+        return ""
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return serialisable state for every enabled axis."""
+        return {
+            name: axis.snapshot()
+            for name, axis in (
+                ("turn", self.turn),
+                ("walltime", self.walltime),
+                ("tool_call", self.tool_call),
+            )
+            if axis is not None
+        }
+
+    def _axes(self) -> list[BudgetAxis]:
+        return [
+            axis
+            for axis in (self.turn, self.walltime, self.tool_call)
+            if axis is not None
+        ]
 
 
 @dataclass
 class IterationBudget:
-    """Mutable shared counter for LLM iterations.
+    """Backward-compatible single-axis turn budget.
 
-    Attributes:
-        remaining: Iterations still available. Decremented by ``consume``.
-        total: Original size of the budget, for reporting. Never decreases.
+    ``consume`` preserves the historic semantics: a call is allowed while
+    ``remaining >= n`` and exhaustion raises only on a later over-consume.
+    The internal :class:`BudgetSet` mirrors usage so new budget-aware code can
+    inspect the same state when needed.
     """
 
     remaining: int
     total: int = 0
 
     def __post_init__(self) -> None:
-        # ``total`` defaults to whatever ``remaining`` was on construction so
-        # callers can ``IterationBudget(remaining=50)`` and still get a sensible
-        # value back out of ``total`` for logging / UI without having to pass
-        # both fields explicitly.
         if self.total <= 0:
             self.total = max(self.remaining, 0)
+        used = max(self.total - self.remaining, 0)
+        self.budgets = BudgetSet(
+            turn=BudgetAxis(name="turn", used=used, soft=0, hard=self.total)
+        )
 
     def consume(self, n: int = 1) -> None:
-        """Decrement the remaining count by ``n``.
-
-        Raises:
-            BudgetExhausted: When ``remaining < n`` (including remaining=0).
-        """
+        """Decrement remaining by ``n`` or raise ``BudgetExhausted``."""
         if self.remaining < n:
             raise BudgetExhausted(
                 f"Iteration budget exhausted "
                 f"(remaining={self.remaining}, requested={n}, total={self.total})"
             )
         self.remaining -= n
+        self.budgets.tick(turns=n)
 
     @property
     def exhausted(self) -> bool:
@@ -62,7 +175,7 @@ class IterationBudget:
         return self.remaining <= 0
 
     def snapshot(self) -> dict[str, int]:
-        """Return a plain dict for logging / session metadata."""
+        """Return the legacy snapshot shape."""
         return {
             "remaining": self.remaining,
             "total": self.total,
