@@ -499,3 +499,59 @@ Copyright 2024-2026 Shih-Ying Yeh (KohakuBlueLeaf) and contributors.
 - QQ: 1097666427
 - Discord: https://discord.gg/xWYrkyvJ2s
 - Forum: https://linux.do/
+
+## FAQ
+
+### General
+
+**What is KohakuTerrarium?**
+KohakuTerrarium is a Python-native AI agent framework that provides a structured runtime for building, composing, and running autonomous agents. It separates agent logic (Creatures) from execution environment (Terrarium), enabling flexible single-agent and multi-agent workflows.
+
+**How does it differ from other agent frameworks?**
+Unlike monolithic frameworks, KohakuTerrarium uses a modular architecture where agents (Creatures) are defined separately from their runtime environment (Terrarium). This enables hot-plugging agents, composition algebra for multi-agent setups, and programmatic Python usage alongside CLI workflows.
+
+### Installation & Setup
+
+**What Python version is required?**
+Python 3.10 or higher. Install via `pip install kohakuterrarium`.
+
+**Which LLM providers are supported?**
+Any provider with an OpenAI-compatible API endpoint. This includes OpenAI, Anthropic (via proxy), local models (Ollama, vLLM), and cloud providers. Configure via `kt login <provider>` or set environment variables.
+
+**Can I use local models?**
+Yes. Point the LLM endpoint to your local server (Ollama, vLLM, etc.) and configure the model name in your creature configuration.
+
+### Core Concepts
+
+**What is a "Creature"?**
+A Creature is an autonomous agent definition — its tools, prompts, behavior rules, and capabilities. Think of it as the agent's "brain" or personality.
+
+**What is a "Terrarium"?**
+A Terrarium is the runtime environment that executes Creatures. It manages sessions, memory, tool execution, and multi-agent topology. Multiple Creatures can run in the same Terrarium.
+
+**What are "Plugins"?**
+Plugins extend the framework's capabilities — custom tools, I/O modules, triggers, or behavior hooks. They follow a hook-based system for clean integration.
+
+### Development
+
+**How do I create a custom Creature?**
+Define a YAML configuration with tools, prompts, and behavior, or use the Python API to build one programmatically. See `docs/en/tutorials/first-creature.md` for a step-by-step guide.
+
+**Can I embed agents in my Python application?**
+Yes. KohakuTerrarium provides a Python-native API for programmatic agent creation and execution. See `examples/code/` and `docs/en/guides/programmatic-usage.md`.
+
+**How does multi-agent composition work?**
+Use the composition algebra primitives in the `compose` module to wire multiple Creatures together. Define communication topology, data flow, and synchronization patterns. See `examples/terrariums/` for examples.
+
+### Troubleshooting
+
+**Why is my creature not responding?**
+Check that your LLM provider is configured correctly with `kt login`. Verify network connectivity and API key validity.
+
+**How do I debug agent behavior?**
+Use `kt run --verbose` for detailed logs. Check the session history with `kt sessions list` and `kt sessions view <id>`.
+
+**Where can I get help?**
+- QQ Group: 1097666427
+- Discord: https://discord.gg/xWYrkyvJ2s
+- Forum: https://linux.do/
