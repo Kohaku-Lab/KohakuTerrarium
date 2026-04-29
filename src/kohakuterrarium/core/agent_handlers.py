@@ -3,7 +3,10 @@
 import asyncio
 import importlib
 
-from kohakuterrarium.core.agent_pre_dispatch import run_pre_tool_dispatch
+from kohakuterrarium.core.agent_pre_dispatch import (
+    run_pre_subagent_dispatch,
+    run_pre_tool_dispatch,
+)
 from kohakuterrarium.core.agent_tools import (
     AgentToolsMixin,
     _make_job_label,
@@ -454,6 +457,9 @@ class AgentHandlersMixin(AgentToolsMixin):
         native_mode: bool = False,
     ) -> None:
         """Handle a SubAgentCallEvent: wrap in backgroundify and track."""
+        parse_event = await run_pre_subagent_dispatch(self, parse_event, controller)
+        if parse_event is None:
+            return
         sa_tool_call_id = parse_event.args.pop("_tool_call_id", None)
         full_task = parse_event.args.get("task", "")
         job_id, is_bg = await self._start_subagent_async(parse_event)
@@ -517,10 +523,14 @@ class AgentHandlersMixin(AgentToolsMixin):
         so the outer run-loop exits cleanly.
         """
         if not self._termination_checker:
-            return False
-        self._termination_checker.record_turn()
+            budget = getattr(self, "iteration_budget", None)
+            if budget is None:
+                return False
+        else:
+            self._termination_checker.record_turn()
+            budget = getattr(self, "iteration_budget", None)
 
-        budget = getattr(self, "iteration_budget", None)
+        budget_exhausted = False
         if budget is not None:
             try:
                 budget.consume(1)
@@ -530,11 +540,16 @@ class AgentHandlersMixin(AgentToolsMixin):
                     budget_total=budget.total,
                     agent_name=self.config.name,
                 )
-                self._termination_checker.force_terminate(
-                    f"Iteration budget exhausted ({exc})"
-                )
+                if self._termination_checker is not None:
+                    self._termination_checker.force_terminate(
+                        f"Iteration budget exhausted ({exc})"
+                    )
+                budget_exhausted = True
                 self._running = False
                 return True
+
+        if self._termination_checker is None:
+            return budget_exhausted
 
         last_output = "".join(round_text)
         if self._termination_checker.should_terminate(last_output=last_output):

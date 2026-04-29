@@ -17,6 +17,7 @@ from kohakuterrarium.bootstrap.llm import create_llm_provider
 from kohakuterrarium.bootstrap.subagents import init_subagents
 from kohakuterrarium.bootstrap.tools import init_tools
 from kohakuterrarium.bootstrap.triggers import init_triggers
+from kohakuterrarium.builtins.plugin_catalog import resolve_plugin_specs
 from kohakuterrarium.builtins.tool_catalog import get_builtin_tool
 from kohakuterrarium.builtins.tools.skill import SkillTool
 from kohakuterrarium.builtins.user_commands import (
@@ -32,6 +33,7 @@ from kohakuterrarium.core.session import get_session
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.modules.output.router import OutputRouter
+from kohakuterrarium.modules.plugin.base import PluginContext
 from kohakuterrarium.modules.subagent import SubAgentManager
 from kohakuterrarium.modules.user_command.base import (
     UserCommandContext,
@@ -233,6 +235,9 @@ class AgentInitMixin:
             else "bracket"
         )
 
+        default_plugin_specs = resolve_plugin_specs(
+            getattr(self.config, "default_plugins", []) or []
+        )
         self.subagent_manager = SubAgentManager(
             parent_registry=self.registry,
             llm=self.llm,
@@ -240,7 +245,9 @@ class AgentInitMixin:
             job_store=self.executor.job_store,  # Share job store so wait command works
             max_depth=self.config.max_subagent_depth,
             tool_format=parent_tool_format,
+            default_plugin_specs=default_plugin_specs,
         )
+        self.subagent_manager.budgets = getattr(self, "budgets", None)
         # Inherit parent's tool context builder (working_dir, file guards, etc.)
         self.subagent_manager._parent_executor = self.executor
 
@@ -313,6 +320,16 @@ class AgentInitMixin:
             tool_format=tool_format_name,
             hint_override_keys=sorted(hint_overrides.keys()) if hint_overrides else [],
         )
+        plugin_context = None
+        if getattr(self, "plugins", None):
+            plugin_context = PluginContext(
+                agent_name=self.config.name,
+                working_dir=(
+                    Path(self.executor._working_dir) if self.executor else Path.cwd()
+                ),
+                model=getattr(self.llm, "model", ""),
+                _host_agent=self,
+            )
         system_prompt = aggregate_system_prompt(
             base_prompt,
             self.registry,
@@ -325,6 +342,8 @@ class AgentInitMixin:
             skill_index_budget_bytes=getattr(
                 self.config, "skill_index_budget_bytes", 4096
             ),
+            runtime_plugins=getattr(self, "plugins", None),
+            plugin_context=plugin_context,
         )
 
         # Store controller config for creating controllers on-demand (parallel mode)
@@ -343,6 +362,9 @@ class AgentInitMixin:
         # Note: Controller handles framework commands (read, info, jobs, wait)
         # via its own _commands dict and ControllerContext
         self.controller = self._create_controller()
+        if getattr(self, "plugins", None):
+            self.controller.plugins = self.plugins
+            self._apply_plugin_hooks()
 
     def _ensure_skill_tool_registered(self) -> None:
         """Expose procedural skills through the normal tool registry."""
@@ -433,6 +455,8 @@ class AgentInitMixin:
         )
         if hasattr(self, "output_router"):
             controller.output_router = self.output_router
+        if getattr(self, "plugins", None):
+            controller.plugins = self.plugins
         skill_registry = getattr(self, "skills", None)
         if skill_registry is not None:
             controller.register_command("skill", SkillCommand(skill_registry))

@@ -30,7 +30,11 @@ from kohakuterrarium.core.agent_observability import (
     wire_plugin_hook_timing,
     wire_scratchpad_observer,
 )
-from kohakuterrarium.core.budget import IterationBudget
+from kohakuterrarium.core.agent_budget_recovery import (
+    build_budget_set_from_config,
+    sync_emergency_drop_conversation,
+)
+from kohakuterrarium.core.budget import BudgetSet, IterationBudget
 from kohakuterrarium.core.compact import CompactConfig, CompactManager
 from kohakuterrarium.core.config import AgentConfig, load_agent_config
 from kohakuterrarium.core.controller_plugins import register_plugin_and_package_commands
@@ -164,6 +168,7 @@ class Agent(
 
         self.compact_manager: Any = None
         self.plugins: Any = None  # PluginManager | None
+        self.budgets: BudgetSet | None = build_budget_set_from_config(config)
         attach_session_helpers(self)
 
         init_branch_state(self)
@@ -181,8 +186,11 @@ class Agent(
         # Initialize components (methods from AgentInitMixin)
         # Order matters: output before controller (need known_outputs for parser)
         self._init_llm()
+        if hasattr(self.llm, "on_emergency_drop"):
+            self.llm.on_emergency_drop(self._on_provider_emergency_drop)
         self._init_registry()
         self._init_executor()
+        self._init_plugins()
         self._init_subagents()
         self._init_iteration_budget()
         self._init_output(output_module)  # Before controller - sets _known_outputs
@@ -216,11 +224,17 @@ class Agent(
         self.iteration_budget = IterationBudget(remaining=int(cap), total=int(cap))
         if hasattr(self, "subagent_manager") and self.subagent_manager is not None:
             self.subagent_manager.iteration_budget = self.iteration_budget
+            if self.budgets is None:
+                self.subagent_manager.budgets = self.iteration_budget.budgets
         logger.info(
             "Iteration budget configured",
             agent_name=self.config.name,
             max_iterations=cap,
         )
+
+    def _on_provider_emergency_drop(self, messages: list[dict[str, Any]]) -> None:
+        """Synchronize controller conversation after provider emergency drop."""
+        sync_emergency_drop_conversation(self, messages)
 
     def _init_termination(self) -> TerminationChecker | None:
         """Initialize termination checker from config."""
@@ -272,7 +286,8 @@ class Agent(
         self._inject_mcp_tools_into_prompt()
 
         self._init_compact_manager()
-        self._init_plugins()
+        if self.plugins and self.compact_manager is not None:
+            self.compact_manager._plugins = self.plugins
         await self._load_plugins()
         self._publish_session_info()
 
@@ -388,11 +403,29 @@ class Agent(
 
     def _init_plugins(self) -> None:
         """Initialize plugins from config + discover from packages."""
+        if self.plugins:
+            if hasattr(self, "controller"):
+                self.controller.plugins = self.plugins
+            if self.compact_manager is not None:
+                self.compact_manager._plugins = self.plugins
+            if self._termination_checker is not None:
+                self._termination_checker.attach_plugins(self.plugins)
+                self._termination_checker.attach_scratchpad(
+                    getattr(self, "scratchpad", None)
+                )
+            if hasattr(self, "controller"):
+                self._apply_plugin_hooks()
+            return
         plugin_cfgs = getattr(self.config, "plugins", []) or []
-        self.plugins = init_plugins(plugin_cfgs, self._loader)
+        self.plugins = init_plugins(
+            plugin_cfgs,
+            self._loader,
+            default_plugins=getattr(self.config, "default_plugins", []) or [],
+        )
         if not self.plugins:
             return
-        self.controller.plugins = self.plugins
+        if hasattr(self, "controller"):
+            self.controller.plugins = self.plugins
         # Compact manager uses on_compact_start as a veto point + on_compact_end callback.
         if self.compact_manager is not None:
             self.compact_manager._plugins = self.plugins
@@ -402,7 +435,8 @@ class Agent(
             self._termination_checker.attach_scratchpad(
                 getattr(self, "scratchpad", None)
             )
-        self._apply_plugin_hooks()
+        if hasattr(self, "controller"):
+            self._apply_plugin_hooks()
 
     async def _load_plugins(self) -> None:
         """Load plugins, register pluggable commands, fire on_agent_start."""

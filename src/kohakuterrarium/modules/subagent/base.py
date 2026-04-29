@@ -9,20 +9,32 @@ import asyncio
 from datetime import datetime
 from typing import Any
 
-from kohakuterrarium.core.budget import BudgetExhausted, IterationBudget
+from kohakuterrarium.core.budget import (
+    BudgetExhausted,
+    BudgetSet,
+    IterationBudget,
+)
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.core.executor import Executor
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.base import LLMProvider
 from kohakuterrarium.llm.tools import build_tool_schemas
+from kohakuterrarium.modules.plugin.base import (
+    BasePlugin,
+    PluginBlockError,
+    PluginContext,
+)
+from kohakuterrarium.modules.plugin.manager import PluginManager
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 from kohakuterrarium.modules.subagent.result import (  # noqa: F401 – re-exported for backward compat
+    SUBAGENT_FRAMEWORK_HINTS,
     SubAgentJob,
     SubAgentResult,
     build_subagent_framework_hints,
 )
 from kohakuterrarium.parsing import ParserConfig, StreamParser, TextEvent, ToolCallEvent
 from kohakuterrarium.parsing.format import BRACKET_FORMAT, XML_FORMAT, ToolCallFormat
+from kohakuterrarium.prompt.aggregator import aggregate_system_prompt
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -42,12 +54,23 @@ class SubAgent:
         llm: LLMProvider,
         agent_path: Any = None,
         tool_format: str | None = None,
+        plugin_manager: PluginManager | None = None,
+        compact_manager: Any = None,
+        budgets: BudgetSet | None = None,
     ):
         self.config = config
         self.parent_registry = parent_registry
         self.llm = llm
         self.agent_path = agent_path
         self.tool_format = tool_format
+        self.plugins = plugin_manager
+        self._plugin_manager = plugin_manager
+        self.compact_manager = compact_manager
+        self.budgets = budgets
+        if self.compact_manager is not None:
+            self.compact_manager._controller = self
+            self.compact_manager._llm = self.llm
+            self.compact_manager._agent_name = config.name
 
         # Optional callback for reporting tool activity to parent
         self.on_tool_activity: Any = None
@@ -141,21 +164,24 @@ class SubAgent:
         return limited
 
     def _build_system_prompt(self) -> str:
-        """Build complete system prompt with framework hints and tool list."""
-        parts = []
-
+        """Build complete system prompt through the shared aggregator."""
         base_prompt = self.config.load_prompt(self.agent_path)
-        parts.append(base_prompt)
-
-        tool_names = self.registry.list_tools()
-        if tool_names:
-            tool_lines = ["## Available Tools", ""]
-            for name in tool_names:
-                info = self.registry.get_tool_info(name)
-                desc = info.description if info else "Tool"
-                tool_lines.append(f"- `{name}`: {desc}")
-            parts.append("\n".join(tool_lines))
-
+        plugin_ctx = PluginContext(
+            agent_name=self.config.name,
+            working_dir=self.agent_path,
+            model=getattr(self.llm, "model", ""),
+            _host_agent=self,
+        )
+        result = aggregate_system_prompt(
+            base_prompt=base_prompt,
+            registry=self.registry,
+            include_tools=True,
+            include_hints=True,
+            skill_mode="dynamic",
+            tool_format=self.tool_format or "bracket",
+            runtime_plugins=self._plugin_manager,
+            plugin_context=plugin_ctx,
+        )
         if self._missing_tools:
             missing_note = (
                 "## Unavailable Tools\n\n"
@@ -163,16 +189,12 @@ class SubAgent:
                 + ", ".join(f"`{t}`" for t in self._missing_tools)
                 + "\nDo NOT attempt to call these tools. Work with what is available."
             )
-            parts.append(missing_note)
+            result = f"{result}\n\n{missing_note}"
 
-        parser_fmt = self._resolve_parser_format(self.tool_format)
-        parts.append(build_subagent_framework_hints(self.tool_format, parser_fmt))
-
-        result = "\n\n".join(parts)
         logger.info(
             "Sub-agent system prompt built",
             subagent_name=self.config.name,
-            tool_count=len(tool_names),
+            tool_count=len(self.registry.list_tools()),
             prompt_length=len(result),
         )
         return result
@@ -318,9 +340,22 @@ class SubAgent:
     ) -> tuple[list[ToolCallEvent], list[str]]:
         """Run one LLM turn. Returns (tool_calls, output_text_parts)."""
         messages = self.conversation.to_messages()
+        if self.plugins:
+            messages = await self.plugins.run_pre_hooks(
+                "pre_llm_call",
+                messages,
+                model=getattr(self.llm, "model", ""),
+                tools=native_tool_schemas if self._is_native else None,
+            )
         if self._is_native and native_tool_schemas:
-            return await self._run_native_turn(messages, native_tool_schemas)
-        return await self._run_text_turn(messages)
+            tool_calls, output = await self._run_native_turn(
+                messages,
+                native_tool_schemas,
+            )
+        else:
+            tool_calls, output = await self._run_text_turn(messages)
+        output = await self._run_post_llm_plugins(messages, output)
+        return tool_calls, output
 
     async def _run_native_turn(
         self, messages: list[dict], tool_schemas: Any
@@ -407,6 +442,43 @@ class SubAgent:
         self._accumulate_tokens()
         return tool_calls, output_parts
 
+    async def _run_post_llm_plugins(
+        self,
+        messages: list[dict],
+        output_parts: list[str],
+    ) -> list[str]:
+        """Run sub-agent post_llm_call hooks after the assistant message lands."""
+        if not self.plugins:
+            return output_parts
+        current = "".join(output_parts)
+        usage = getattr(self.llm, "last_usage", {}) or {}
+        base_method = getattr(BasePlugin, "post_llm_call", None)
+        for plugin in self.plugins._applicable_plugins():
+            method = getattr(type(plugin), "post_llm_call", None)
+            if method is None or method is base_method:
+                continue
+            try:
+                rewritten = await plugin.post_llm_call(
+                    messages,
+                    current,
+                    usage,
+                    model=getattr(self.llm, "model", ""),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Sub-agent post_llm_call failed",
+                    plugin_name=getattr(plugin, "name", "?"),
+                    error=str(exc),
+                    exc_info=True,
+                )
+                continue
+            if isinstance(rewritten, str) and rewritten != current:
+                current = rewritten
+                last = self.conversation.get_last_assistant_message()
+                if last is not None:
+                    last.content = current
+        return [current] if current else []
+
     def _accumulate_tokens(self) -> None:
         """Accumulate token usage from the last LLM call."""
         usage = getattr(self.llm, "last_usage", None)
@@ -420,6 +492,8 @@ class SubAgent:
             # drop it. Track it so the parent's ``subagent_done``
             # event carries the real cached-tokens count.
             self._cached_tokens += usage.get("cached_tokens", 0)
+        # Auto-compact is handled by the opt-in compact.auto plugin so
+        # sub-agents without that pack do not get hidden runtime behaviour.
         # Emit running token totals to parent
         if self.on_tool_activity and self._total_tokens > 0:
             self.on_tool_activity(
@@ -584,7 +658,16 @@ class SubAgent:
                 context = (
                     self._build_tool_context() if self._build_tool_context else None
                 )
-                result = await tool.execute(tool_call.args, context=context)
+                try:
+                    result = await tool.execute(tool_call.args, context=context)
+                except PluginBlockError as block:
+                    results.append(f"[{tool_call.name}] Error: {str(block)}")
+                    logger.info(
+                        "Sub-agent tool blocked by plugin",
+                        subagent_name=self.config.name,
+                        tool_name=tool_call.name,
+                    )
+                    continue
                 # Guard against tools that return str instead of ToolResult
                 if isinstance(result, str):
                     results.append(f"[{tool_call.name}]\n{result}")

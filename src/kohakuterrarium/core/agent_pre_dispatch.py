@@ -15,7 +15,7 @@ from kohakuterrarium.modules.plugin.base import (
     PluginBlockError,
     PluginContext,
 )
-from kohakuterrarium.parsing import ToolCallEvent
+from kohakuterrarium.parsing import SubAgentCallEvent, ToolCallEvent
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -115,6 +115,57 @@ async def run_pre_tool_dispatch(
     return current
 
 
+async def run_pre_subagent_dispatch(
+    agent: "Agent", parse_event: SubAgentCallEvent, controller: "Controller"
+) -> SubAgentCallEvent | None:
+    """Run parent ``pre_subagent_run`` hooks before a child is spawned."""
+    plugins = getattr(agent, "plugins", None)
+    if plugins is None or not plugins._plugins:
+        return parse_event
+
+    task = parse_event.args.get("task", parse_event.args.get("content", ""))
+    try:
+        updated_task = await plugins.run_pre_hooks(
+            "pre_subagent_run",
+            task,
+            name=parse_event.name,
+            is_background=parse_event.args.get("run_in_background", True),
+        )
+    except PluginBlockError as block:
+        logger.info(
+            "Sub-agent dispatch vetoed by plugin",
+            subagent_name=parse_event.name,
+            error=str(block),
+        )
+        _synthesize_blocked_subagent_result(parse_event, controller, str(block))
+        return None
+    if updated_task is not None and updated_task != task:
+        args = dict(parse_event.args)
+        if "task" in args or "content" not in args:
+            args["task"] = updated_task
+        else:
+            args["content"] = updated_task
+        return SubAgentCallEvent(name=parse_event.name, args=args, raw=parse_event.raw)
+    return parse_event
+
+
+def _synthesize_blocked_subagent_result(
+    original_event: SubAgentCallEvent,
+    controller: "Controller",
+    message: str,
+) -> None:
+    """Inject synthetic feedback when a sub-agent dispatch is vetoed."""
+    error_text = f"[{original_event.name}] {message}"
+    controller.push_event_sync(
+        create_tool_complete_event(
+            job_id=f"blocked_agent_{original_event.name}",
+            content=error_text,
+            exit_code=1,
+            error=error_text,
+        )
+    )
+
+
 def _synthesize_blocked_tool_result(
     original_event: ToolCallEvent,
     controller: "Controller",
@@ -144,4 +195,4 @@ def _synthesize_blocked_tool_result(
         )
 
 
-__all__: tuple[str, ...] = ("run_pre_tool_dispatch",)
+__all__: tuple[str, ...] = ("run_pre_subagent_dispatch", "run_pre_tool_dispatch")

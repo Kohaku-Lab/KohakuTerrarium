@@ -9,7 +9,7 @@ import asyncio
 from pathlib import Path
 from typing import Any, Callable
 
-from kohakuterrarium.core.budget import IterationBudget
+from kohakuterrarium.core.budget import BudgetSet, IterationBudget
 from kohakuterrarium.core.job import (
     JobState,
     JobStatus,
@@ -17,10 +17,18 @@ from kohakuterrarium.core.job import (
     JobType,
     generate_job_id,
 )
+from kohakuterrarium.core.loader import ModuleLoader
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.base import LLMProvider
 from kohakuterrarium.modules.subagent.base import SubAgent, SubAgentJob, SubAgentResult
 from kohakuterrarium.modules.subagent.config import SubAgentConfig, SubAgentInfo
+from kohakuterrarium.modules.subagent.runtime_builders import (
+    build_budgets,
+    build_compact_manager,
+    build_plugin_manager,
+    load_and_wrap_plugins,
+    resolve_llm,
+)
 from kohakuterrarium.modules.subagent.interactive import (
     InteractiveOutput,
     InteractiveSubAgent,
@@ -63,6 +71,7 @@ class SubAgentManager(InteractiveManagerMixin):
         current_depth: int = 0,
         max_depth: int = 3,
         tool_format: str | None = None,
+        default_plugin_specs: list[dict[str, Any]] | None = None,
     ):
         """
         Initialize sub-agent manager.
@@ -83,6 +92,8 @@ class SubAgentManager(InteractiveManagerMixin):
         self._current_depth: int = current_depth
         self._max_depth: int = max_depth
         self._tool_format: str | None = tool_format
+        self._default_plugin_specs = default_plugin_specs or []
+        self._loader = ModuleLoader(agent_path=agent_path)
 
         # Completion callback (wired by agent to deliver results as events)
         self._on_complete: Callable[[Any], None] | None = None
@@ -90,11 +101,10 @@ class SubAgentManager(InteractiveManagerMixin):
         self._on_tool_activity: Callable[[str, str, str, str], None] | None = None
         # Parent executor (for inheriting tool context builder)
         self._parent_executor: Any = None
-        # Parent's shared iteration budget. Wired by ``Agent`` after
-        # subagent_manager construction when ``config.max_iterations`` is
-        # set. ``None`` means the parent has no budget — sub-agent configs
-        # that ask to inherit will simply run unbounded, matching the
-        # legacy behavior.
+        # Parent's shared budgets. ``budgets`` is the multi-axis runtime
+        # state consumed by budget plugins; ``iteration_budget`` is the
+        # legacy single-axis shim used by max_iterations callers.
+        self.budgets: BudgetSet | None = None
         self.iteration_budget: IterationBudget | None = None
         # Session store for persisting sub-agent conversations
         self._session_store: Any = None
@@ -253,23 +263,28 @@ class SubAgentManager(InteractiveManagerMixin):
         # Resolve tool_format: config override > parent inherited
         effective_tool_format = config.tool_format or self._tool_format
 
+        plugin_manager = build_plugin_manager(
+            config, self._loader, self._default_plugin_specs
+        )
+        llm = resolve_llm(self.llm, config)
+        budgets = build_budgets(config, self.budgets, self.iteration_budget)
+        compact_manager = build_compact_manager(config, llm)
+
         # Create sub-agent
         subagent = SubAgent(
             config=config,
             parent_registry=self.parent_registry,
-            llm=self.llm,
+            llm=llm,
             agent_path=self.agent_path,
             tool_format=effective_tool_format,
+            plugin_manager=plugin_manager,
+            compact_manager=compact_manager,
+            budgets=budgets,
         )
 
-        # Resolve shared iteration budget for the child. Three cases:
-        #   - budget_allocation=N → fresh IterationBudget(N, N) for this
-        #     child; parent's counter is untouched.
-        #   - budget_inherit=True and parent has a budget → reuse the
-        #     parent's reference so every child consume() decrements the
-        #     same pool the parent draws from.
-        #   - otherwise → no budget (legacy behavior, unbounded).
+        # Legacy shared iteration budget remains as a compat fallback.
         subagent.iteration_budget = self._resolve_child_budget(config)
+        await load_and_wrap_plugins(plugin_manager, subagent, llm, self.agent_path)
 
         # Forward sub-agent tool activity to parent's callback
         if self._on_tool_activity:
@@ -350,7 +365,6 @@ class SubAgentManager(InteractiveManagerMixin):
             result = await job.run(task)
             self._results[job_id] = result
 
-            # Update status
             if result.interrupted or result.cancelled:
                 state = JobState.CANCELLED
             elif result.success:
@@ -366,7 +380,6 @@ class SubAgentManager(InteractiveManagerMixin):
                 error=result.error,
             )
 
-            # Store result
             job_result = job.to_job_result()
             if job_result:
                 self.job_store.store_result(job_result)
@@ -377,75 +390,42 @@ class SubAgentManager(InteractiveManagerMixin):
                 success=result.success,
                 turns=result.turns,
             )
-
-            # NOTE: We intentionally do NOT fire ``self._on_complete`` here.
-            #
-            # Sub-agent completions are delivered through the
-            # ``BackgroundifyHandle`` that wraps this task in
-            # ``agent_handlers._dispatch_subagent_event``. The handle has
-            # two distinct paths:
-            #
-            # * direct (not promoted) — the awaiter in ``_wait_handles``
-            #   receives the result and ``_collect_and_push_feedback``
-            #   emits the ``subagent_done`` / ``tool_done`` activity and
-            #   pushes the feedback event to the controller.
-            # * background (promoted) — the handle's ``_on_task_done``
-            #   fires ``agent._on_backgroundify_complete``, which in turn
-            #   emits the activity and pushes the trigger event.
-            #
-            # Firing ``_on_complete`` HERE too would double-fire for
-            # direct sub-agents, causing duplicate panels in the CLI and
-            # a ghost extra turn in the controller loop.
-
             return result
 
         except asyncio.CancelledError:
             error_msg = "Background sub-agent was cancelled by user."
-            logger.info(
-                "Sub-agent cancelled by user",
-                job_id=job_id,
-            )
-
+            logger.info("Sub-agent cancelled by user", job_id=job_id)
             current = getattr(job.subagent, "_build_partial_result", None)
             if callable(current):
                 result = current(error_msg, cancelled=True)
             else:
                 result = SubAgentResult(success=False, error=error_msg, cancelled=True)
             self._results[job_id] = result
-
             self.job_store.update_status(
                 job_id,
                 state=JobState.CANCELLED,
                 error=error_msg,
             )
-
-            # See note above — delivery happens via BackgroundifyHandle.
-
             return result
 
         except Exception as e:
-            logger.error(
-                "Sub-agent failed",
-                job_id=job_id,
-                error=str(e),
-            )
-
+            logger.error("Sub-agent failed", job_id=job_id, error=str(e))
             current = getattr(job.subagent, "_build_partial_result", None)
             if callable(current):
                 result = current(str(e))
             else:
                 result = SubAgentResult(success=False, error=str(e))
             self._results[job_id] = result
-
             self.job_store.update_status(
                 job_id,
                 state=JobState.ERROR,
                 error=str(e),
             )
-
-            # See note above — delivery happens via BackgroundifyHandle.
-
             return result
+
+        finally:
+            if hasattr(job.subagent, "plugins") and job.subagent.plugins:
+                await job.subagent.plugins.unload_all()
 
     async def wait_for(
         self,
