@@ -5,6 +5,7 @@ Supports OpenAI API and compatible services like OpenRouter, Together AI, etc.
 Uses AsyncOpenAI for all API calls (streaming + non-streaming).
 """
 
+import asyncio
 from typing import Any, AsyncIterator
 
 from openai import AsyncOpenAI
@@ -17,13 +18,30 @@ from kohakuterrarium.llm.base import (
     BaseLLMProvider,
     ChatResponse,
     LLMConfig,
-    NativeToolCall,
     ToolSchema,
 )
+from kohakuterrarium.llm.openai_helpers import (
+    delta_field,
+    extract_usage,
+    log_token_usage,
+    pack_reasoning_fields,
+    tool_call_from_pending,
+    tool_calls_from_message,
+)
 from kohakuterrarium.llm.openai_sanitize import log_request_shape, strip_kt_extras
+from kohakuterrarium.llm.recovery import (
+    ErrorClass,
+    RetryPolicy,
+    backoff_delay,
+    classify_openai_error,
+    drop_last_tool_round,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+_delta_field = delta_field
+_pack_reasoning_fields = pack_reasoning_fields
 
 # Default API endpoints
 OPENAI_BASE_URL = "https://api.openai.com/v1"
@@ -66,6 +84,7 @@ class OpenAIProvider(BaseLLMProvider):
         extra_body: dict[str, Any] | None = None,
         max_retries: int = 3,
         echo_reasoning: bool = True,
+        retry_policy: RetryPolicy | dict[str, Any] | None = None,
     ):
         """Initialize the OpenAI provider.
 
@@ -94,17 +113,18 @@ class OpenAIProvider(BaseLLMProvider):
                 model=model,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                retry_policy=retry_policy,
             )
         )
 
-        if not api_key:
-            raise ValueError(
-                "API key is required. "
-                "Set OPENROUTER_API_KEY or OPENAI_API_KEY environment variable."
-            )
-
         self.extra_body = extra_body or {}
         self.echo_reasoning = bool(echo_reasoning)
+        self._retry_policy = RetryPolicy.from_value(retry_policy)
+        self._api_key = api_key
+        self._base_url_input = base_url
+        self._timeout = timeout
+        self._extra_headers = extra_headers or {}
+        self._max_retries = max_retries
         self._last_usage: dict[str, int] = {}
         self._last_assistant_extra_fields: dict[str, Any] = {}
         self.prompt_cache_key: str | None = None
@@ -112,6 +132,12 @@ class OpenAIProvider(BaseLLMProvider):
         # applies — the SDK client stores a trailing-slash-normalised URL
         # which is fine for ``"anthropic.com" in ...`` matching.
         self.base_url: str = base_url or ""
+
+        if not api_key:
+            raise ValueError(
+                "API key is required. "
+                "Set OPENROUTER_API_KEY or OPENAI_API_KEY environment variable."
+            )
 
         self._client = AsyncOpenAI(
             api_key=api_key,
@@ -143,6 +169,43 @@ class OpenAIProvider(BaseLLMProvider):
     async def close(self) -> None:
         """Close the underlying HTTP client."""
         await self._client.close()
+
+    def with_model(self, name: str) -> "OpenAIProvider":
+        """Return a sibling provider using the same SDK client."""
+        if not name or name == self.config.model:
+            return self
+        clone = object.__new__(OpenAIProvider)
+        BaseLLMProvider.__init__(
+            clone,
+            LLMConfig(
+                model=name,
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens,
+                retry_policy=self._retry_policy,
+            ),
+        )
+        clone.extra_body = dict(self.extra_body)
+        clone.echo_reasoning = self.echo_reasoning
+        clone._retry_policy = self._retry_policy
+        clone._api_key = self._api_key
+        clone._base_url_input = self._base_url_input
+        clone._timeout = self._timeout
+        clone._extra_headers = dict(self._extra_headers)
+        clone._max_retries = self._max_retries
+        clone._last_usage = {}
+        clone._last_tool_calls = []
+        clone._last_assistant_extra_fields = {}
+        clone._emergency_drop_callbacks = list(self._emergency_drop_callbacks)
+        clone.prompt_cache_key = self.prompt_cache_key
+        clone.base_url = self.base_url
+        clone._client = self._client
+        clone.provider_name = getattr(self, "provider_name", clone.provider_name)
+        clone.provider_native_tools = getattr(
+            self, "provider_native_tools", clone.provider_native_tools
+        )
+        if hasattr(self, "_profile_max_context"):
+            clone._profile_max_context = self._profile_max_context
+        return clone
 
     # ------------------------------------------------------------------
     # Streaming
@@ -185,6 +248,55 @@ class OpenAIProvider(BaseLLMProvider):
         return cleaned
 
     async def _stream_chat(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[ToolSchema] | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[str]:
+        """Stream chat completion with KT-side retry and overflow recovery."""
+        current = messages
+        attempt = 0
+        overflow_recovered = False
+        while True:
+            try:
+                async for chunk in self._raw_stream_chat(
+                    current, tools=tools, **kwargs
+                ):
+                    yield chunk
+                return
+            except Exception as exc:
+                cls = classify_openai_error(exc)
+                if cls is ErrorClass.OVERFLOW and not overflow_recovered:
+                    dropped, recovered = drop_last_tool_round(current)
+                    if dropped:
+                        overflow_recovered = True
+                        current = recovered
+                        self._notify_emergency_drop(recovered)
+                        logger.warning(
+                            "provider_emergency_drop",
+                            dropped=dropped,
+                            recovered_messages=len(recovered),
+                        )
+                        continue
+                if (
+                    cls in self._retry_policy.retry_classes
+                    and attempt < self._retry_policy.max_retries
+                ):
+                    attempt += 1
+                    delay = backoff_delay(attempt, self._retry_policy)
+                    logger.warning(
+                        "provider_retry",
+                        attempt=attempt,
+                        error_class=cls.value,
+                        delay=delay,
+                        error=str(exc),
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                raise
+
+    async def _raw_stream_chat(
         self,
         messages: list[dict[str, Any]],
         *,
@@ -249,19 +361,7 @@ class OpenAIProvider(BaseLLMProvider):
         async for chunk in stream:
             # Usage (usually in the final chunk)
             if chunk.usage:
-                cached = 0
-                cache_write = 0
-                details = getattr(chunk.usage, "prompt_tokens_details", None)
-                if details:
-                    cached = getattr(details, "cached_tokens", 0) or 0
-                    cache_write = getattr(details, "cache_write_tokens", 0) or 0
-                self._last_usage = {
-                    "prompt_tokens": chunk.usage.prompt_tokens or 0,
-                    "completion_tokens": chunk.usage.completion_tokens or 0,
-                    "total_tokens": chunk.usage.total_tokens or 0,
-                    "cached_tokens": cached,
-                    "cache_write_tokens": cache_write,
-                }
+                self._last_usage = extract_usage(chunk.usage)
 
             if not chunk.choices:
                 continue
@@ -288,16 +388,16 @@ class OpenAIProvider(BaseLLMProvider):
             # These aren't on the typed OpenAI SDK delta surface; the
             # SDK exposes unknown response fields via ``model_extra``.
             if self.echo_reasoning:
-                rc_piece = _delta_field(delta, "reasoning_content")
+                rc_piece = delta_field(delta, "reasoning_content")
                 if isinstance(rc_piece, str):
                     reasoning_text += rc_piece
-                rd_piece = _delta_field(delta, "reasoning_details")
+                rd_piece = delta_field(delta, "reasoning_details")
                 if isinstance(rd_piece, list) and rd_piece:
                     reasoning_details.extend(rd_piece)
                 # OpenRouter also occasionally emits a plain "reasoning"
                 # string alongside ``reasoning_details`` — keep the last
                 # value; the details array is the canonical source.
-                r_piece = _delta_field(delta, "reasoning")
+                r_piece = delta_field(delta, "reasoning")
                 if isinstance(r_piece, str) and r_piece:
                     reasoning_extra["reasoning"] = (
                         reasoning_extra.get("reasoning", "") + r_piece
@@ -310,11 +410,7 @@ class OpenAIProvider(BaseLLMProvider):
         # Finalize tool calls
         if pending_calls:
             self._last_tool_calls = [
-                NativeToolCall(
-                    id=call["id"],
-                    name=call["name"],
-                    arguments=call["arguments"],
-                )
+                tool_call_from_pending(call)
                 for _, call in sorted(pending_calls.items())
             ]
             logger.debug(
@@ -324,7 +420,7 @@ class OpenAIProvider(BaseLLMProvider):
             )
 
         if reasoning_text or reasoning_details or reasoning_extra:
-            self._last_assistant_extra_fields = _pack_reasoning_fields(
+            self._last_assistant_extra_fields = pack_reasoning_fields(
                 reasoning_text, reasoning_details, reasoning_extra
             )
             logger.debug(
@@ -333,18 +429,56 @@ class OpenAIProvider(BaseLLMProvider):
                 details_count=len(reasoning_details),
             )
 
-        if self._last_usage:
-            logger.info(
-                "Token usage",
-                prompt_tokens=self._last_usage.get("prompt_tokens", 0),
-                completion_tokens=self._last_usage.get("completion_tokens", 0),
-            )
+        log_token_usage(self._last_usage)
 
     # ------------------------------------------------------------------
     # Non-streaming
     # ------------------------------------------------------------------
 
     async def _complete_chat(
+        self,
+        messages: list[dict[str, Any]],
+        **kwargs: Any,
+    ) -> ChatResponse:
+        """Non-streaming chat completion with retry and overflow recovery."""
+        current = messages
+        attempt = 0
+        overflow_recovered = False
+        while True:
+            try:
+                return await self._raw_complete_chat(current, **kwargs)
+            except Exception as exc:
+                cls = classify_openai_error(exc)
+                if cls is ErrorClass.OVERFLOW and not overflow_recovered:
+                    dropped, recovered = drop_last_tool_round(current)
+                    if dropped:
+                        overflow_recovered = True
+                        current = recovered
+                        self._notify_emergency_drop(recovered)
+                        logger.warning(
+                            "provider_emergency_drop",
+                            dropped=dropped,
+                            recovered_messages=len(recovered),
+                        )
+                        continue
+                if (
+                    cls in self._retry_policy.retry_classes
+                    and attempt < self._retry_policy.max_retries
+                ):
+                    attempt += 1
+                    delay = backoff_delay(attempt, self._retry_policy)
+                    logger.warning(
+                        "provider_retry",
+                        attempt=attempt,
+                        error_class=cls.value,
+                        delay=delay,
+                        error=str(exc),
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                raise
+
+    async def _raw_complete_chat(
         self,
         messages: list[dict[str, Any]],
         **kwargs: Any,
@@ -389,14 +523,7 @@ class OpenAIProvider(BaseLLMProvider):
 
         # Extract native tool calls
         if message.tool_calls:
-            self._last_tool_calls = [
-                NativeToolCall(
-                    id=tc.id,
-                    name=tc.function.name,
-                    arguments=tc.function.arguments,
-                )
-                for tc in message.tool_calls
-            ]
+            self._last_tool_calls = tool_calls_from_message(message.tool_calls)
             logger.debug(
                 "Native tool calls received (non-streaming)",
                 count=len(self._last_tool_calls),
@@ -405,9 +532,9 @@ class OpenAIProvider(BaseLLMProvider):
 
         # Capture reasoning fields off the complete assistant message.
         if self.echo_reasoning:
-            rc = _delta_field(message, "reasoning_content")
-            rd = _delta_field(message, "reasoning_details")
-            r = _delta_field(message, "reasoning")
+            rc = delta_field(message, "reasoning_content")
+            rd = delta_field(message, "reasoning_details")
+            r = delta_field(message, "reasoning")
             extras = {}
             if isinstance(rc, str) and rc:
                 extras["reasoning_content"] = rc
@@ -419,19 +546,7 @@ class OpenAIProvider(BaseLLMProvider):
                 self._last_assistant_extra_fields = extras
 
         if response.usage:
-            cached = 0
-            cache_write = 0
-            details = getattr(response.usage, "prompt_tokens_details", None)
-            if details:
-                cached = getattr(details, "cached_tokens", 0) or 0
-                cache_write = getattr(details, "cache_write_tokens", 0) or 0
-            self._last_usage = {
-                "prompt_tokens": response.usage.prompt_tokens or 0,
-                "completion_tokens": response.usage.completion_tokens or 0,
-                "total_tokens": response.usage.total_tokens or 0,
-                "cached_tokens": cached,
-                "cache_write_tokens": cache_write,
-            }
+            self._last_usage = extract_usage(response.usage)
             logger.debug(
                 "Request completed",
                 tokens_in=self._last_usage.get("prompt_tokens"),
@@ -454,44 +569,3 @@ class OpenAIProvider(BaseLLMProvider):
 
     async def __aexit__(self, *args: Any) -> None:
         await self.close()
-
-
-# ----------------------------------------------------------------------
-# Reasoning-field helpers
-# ----------------------------------------------------------------------
-
-
-def _delta_field(obj: Any, name: str) -> Any:
-    """Fetch *name* off a pydantic-backed delta / message object.
-
-    The OpenAI SDK surfaces only the documented fields on the typed
-    classes; anything the provider added (``reasoning_content``,
-    ``reasoning_details``, …) lives in ``model_extra``. Fall back to
-    ``getattr`` for non-pydantic shapes so unit tests can pass plain
-    objects or dicts.
-    """
-    extra = getattr(obj, "model_extra", None)
-    if isinstance(extra, dict) and name in extra:
-        return extra[name]
-    if isinstance(obj, dict):
-        return obj.get(name)
-    return getattr(obj, name, None)
-
-
-def _pack_reasoning_fields(
-    text: str, details: list[Any], extra: dict[str, Any]
-) -> dict[str, Any]:
-    """Assemble the captured reasoning fields into a single extras dict.
-
-    Keys included only when they have content, so downstream
-    ``Message.to_dict`` doesn't spread empty scaffolding onto the wire.
-    """
-    packed: dict[str, Any] = {}
-    if text:
-        packed["reasoning_content"] = text
-    if details:
-        packed["reasoning_details"] = details
-    for k, v in (extra or {}).items():
-        if v:
-            packed[k] = v
-    return packed

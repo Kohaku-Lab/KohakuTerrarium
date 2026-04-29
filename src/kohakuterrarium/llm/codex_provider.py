@@ -23,10 +23,16 @@ except ImportError:
 from kohakuterrarium.llm.base import (
     BaseLLMProvider,
     ChatResponse,
+    LLMConfig,
     NativeToolCall,
     ToolSchema,
 )
 from kohakuterrarium.llm.codex_auth import CodexTokens, oauth_login, refresh_tokens
+from kohakuterrarium.llm.codex_format import (
+    fix_tool_call_pairing,
+    maybe_capture_stream_rate_limit,
+    to_responses_input,
+)
 from kohakuterrarium.llm.codex_image_gen import (
     build_image_part,
     translate_image_gen_tool,
@@ -37,6 +43,7 @@ from kohakuterrarium.llm.codex_rate_limits import (
     UsageSnapshot,
     set_cached,
 )
+from kohakuterrarium.llm.recovery import RetryPolicy
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -58,45 +65,6 @@ async def _capture_rate_limit_headers(response: Any) -> None:
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug(
             "Codex rate-limit header capture failed",
-            error=str(exc),
-            exc_info=True,
-        )
-
-
-def _maybe_capture_stream_rate_limit(event: Any) -> None:
-    """Capture a ``codex.rate_limits`` event if the SDK surfaces one.
-
-    The Codex backend can emit in-stream rate-limit updates. The OpenAI
-    SDK exposes unknown events with a type outside the ``response.*``
-    family; we sniff the event for a dict-shaped payload carrying
-    ``codex.rate_limits`` and feed it to the parser. Silent on failure.
-    """
-    try:
-        # The event may carry a raw dict under ``event.data``,
-        # ``event.event``, or the full model dict; try each.
-        payload: Any = (
-            getattr(event, "data", None)
-            or getattr(event, "event", None)
-            or getattr(event, "raw", None)
-        )
-        if payload is None:
-            return
-        if hasattr(payload, "model_dump"):
-            payload_dict: Any = payload.model_dump()
-        elif isinstance(payload, dict):
-            payload_dict = payload
-        else:
-            return
-        if not isinstance(payload_dict, dict):
-            return
-        if payload_dict.get("type") != "codex.rate_limits":
-            return
-        snap = parse_rate_limit_event(_json.dumps(payload_dict))
-        if snap is not None and snap.has_data():
-            set_cached(UsageSnapshot(snapshots=[snap]))
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.debug(
-            "Codex rate-limit event capture failed",
             error=str(exc),
             exc_info=True,
         )
@@ -132,12 +100,15 @@ class CodexOAuthProvider(BaseLLMProvider):
         service_tier: str | None = None,
         timeout: float = 300.0,
         max_retries: int = 2,
+        retry_policy: RetryPolicy | dict[str, Any] | None = None,
     ):
+        super().__init__(LLMConfig(model=model, retry_policy=retry_policy))
         self.model = model
         self.reasoning_effort = reasoning_effort  # none/minimal/low/medium/high/xhigh
         self.service_tier = service_tier  # None/priority/flex
         self.timeout = timeout
         self.max_retries = max_retries
+        self._retry_policy = RetryPolicy.from_value(retry_policy)
         self._tokens: CodexTokens | None = None
         self._client: Any = None  # AsyncOpenAI
         self._last_tool_calls: list[NativeToolCall] = []
@@ -224,180 +195,32 @@ class CodexOAuthProvider(BaseLLMProvider):
         """
         return translate_image_gen_tool(tool)
 
+    def with_model(self, name: str) -> "CodexOAuthProvider":
+        """Return a sibling Codex provider preserving tokens/client."""
+        if not name or name == self.model:
+            return self
+        clone = CodexOAuthProvider(
+            model=name,
+            reasoning_effort=self.reasoning_effort,
+            service_tier=self.service_tier,
+            timeout=self.timeout,
+            max_retries=self.max_retries,
+            retry_policy=self._retry_policy,
+        )
+        clone._tokens = self._tokens
+        clone._client = self._client
+        clone._retry_policy = self._retry_policy
+        clone._emergency_drop_callbacks = list(self._emergency_drop_callbacks)
+        clone.prompt_cache_key = self.prompt_cache_key
+        clone._profile_max_context = getattr(self, "_profile_max_context", None)
+        return clone
+
     # ------------------------------------------------------------------
     # Chat Completions -> Responses API message conversion
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _to_responses_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Convert Chat Completions messages to Responses API flat array.
-
-        The Responses API uses a flat list of typed items instead of the
-        nested ``role / tool_calls`` structure used by Chat Completions.
-        System messages are skipped here because they are extracted
-        separately as ``instructions``.
-        """
-        items: list[dict[str, Any]] = []
-        for msg in messages:
-            role = msg.get("role")
-            content = msg.get("content", "")
-
-            if role == "user":
-                if isinstance(content, str):
-                    items.append(
-                        {
-                            "role": "user",
-                            "content": [{"type": "input_text", "text": content}],
-                        }
-                    )
-                elif isinstance(content, list):
-                    # Multimodal content parts
-                    input_content: list[dict[str, Any]] = []
-                    for part in content:
-                        if isinstance(part, dict):
-                            if part.get("type") == "text":
-                                input_content.append(
-                                    {
-                                        "type": "input_text",
-                                        "text": part.get("text", ""),
-                                    }
-                                )
-                            elif part.get("type") == "image_url":
-                                input_content.append(
-                                    {
-                                        "type": "input_image",
-                                        "image_url": part["image_url"]["url"],
-                                    }
-                                )
-                    if input_content:
-                        items.append({"role": "user", "content": input_content})
-
-            elif role == "assistant":
-                # Text part (if any)
-                if content:
-                    if isinstance(content, str):
-                        text = content
-                    else:
-                        text_parts = []
-                        image_count = 0
-                        for part in content:
-                            if not isinstance(part, dict):
-                                continue
-                            if part.get("type") == "text":
-                                text_parts.append(part.get("text", ""))
-                            elif part.get("type") == "image_url":
-                                image_count += 1
-                        text = "\n".join(text_parts)
-                        if image_count and not text:
-                            text = f"[assistant multimodal content: {image_count} image(s)]"
-                    if text:
-                        items.append(
-                            {
-                                "role": "assistant",
-                                "content": [{"type": "output_text", "text": text}],
-                            }
-                        )
-
-                # Tool calls become separate top-level function_call items
-                for tc in msg.get("tool_calls", []):
-                    func = tc.get("function", {})
-                    items.append(
-                        {
-                            "type": "function_call",
-                            "call_id": tc.get("id", ""),
-                            "name": func.get("name", ""),
-                            "arguments": func.get("arguments", "{}"),
-                        }
-                    )
-
-            elif role == "tool":
-                if isinstance(content, str):
-                    output = content
-                else:
-                    text_parts = []
-                    image_count = 0
-                    for part in content:
-                        if not isinstance(part, dict):
-                            continue
-                        if part.get("type") == "text":
-                            text_parts.append(part.get("text", ""))
-                        elif part.get("type") == "image_url":
-                            image_count += 1
-                    output = "\n".join(text_parts)
-                    if image_count and not output:
-                        output = f"[tool multimodal output: {image_count} image(s)]"
-                items.append(
-                    {
-                        "type": "function_call_output",
-                        "call_id": msg.get("tool_call_id", ""),
-                        "output": output,
-                    }
-                )
-
-            # Skip system messages (already extracted as instructions)
-
-        return items
-
-    @staticmethod
-    def _fix_tool_call_pairing(
-        api_input: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        """Ensure every function_call is immediately followed by its function_call_output.
-
-        The Responses API requires strict pairing: each ``function_call`` item
-        must be directly followed by a ``function_call_output`` with the same
-        ``call_id``.  Conversation truncation or compaction can break these
-        pairs.
-
-        This single-pass rebuild:
-        1. Pulls all ``function_call_output`` items into a lookup dict.
-        2. Walks the remaining items in order.
-        3. After each ``function_call``, inserts the matching output (or a
-           placeholder if the real output was lost).
-        4. Orphan outputs (no matching call) are silently dropped.
-        """
-        # Index outputs by call_id (pop them out of the stream)
-        output_by_id: dict[str, dict[str, Any]] = {}
-        other_items: list[dict[str, Any]] = []
-        for item in api_input:
-            if item.get("type") == "function_call_output":
-                output_by_id[item["call_id"]] = item
-            else:
-                other_items.append(item)
-
-        # Rebuild: insert output right after its function_call
-        result: list[dict[str, Any]] = []
-        used_ids: set[str] = set()
-        for item in other_items:
-            result.append(item)
-            if item.get("type") == "function_call":
-                call_id = item["call_id"]
-                if call_id in output_by_id:
-                    result.append(output_by_id[call_id])
-                else:
-                    # Lost output — add placeholder so API doesn't reject
-                    result.append(
-                        {
-                            "type": "function_call_output",
-                            "call_id": call_id,
-                            "output": f"[{item.get('name', '')}] Result unavailable "
-                            "(removed by context compaction).",
-                        }
-                    )
-                    logger.warning(
-                        "Added missing function_call_output", call_id=call_id
-                    )
-                used_ids.add(call_id)
-
-        # Log orphans (outputs whose call was compacted away — already dropped)
-        orphan_ids = set(output_by_id) - used_ids
-        if orphan_ids:
-            logger.warning(
-                "Dropped orphan function_call_outputs",
-                orphan_count=len(orphan_ids),
-            )
-
-        return result
+    _to_responses_input = staticmethod(to_responses_input)
+    _fix_tool_call_pairing = staticmethod(fix_tool_call_pairing)
 
     # ------------------------------------------------------------------
     # Streaming (called by BaseLLMProvider.chat)
@@ -430,7 +253,7 @@ class CodexOAuthProvider(BaseLLMProvider):
                 input_messages.append(msg)
 
         # Convert Chat Completions format to Responses API flat array
-        api_input = self._to_responses_input(input_messages)
+        api_input = to_responses_input(input_messages)
 
         # Build tools in Responses API format — normal function tools
         # first, provider-native translations appended after.
@@ -461,7 +284,7 @@ class CodexOAuthProvider(BaseLLMProvider):
 
         # Validate: function_call must be immediately followed by function_call_output
         # with matching call_id. Reorder, add placeholders, remove orphans.
-        api_input = self._fix_tool_call_pairing(api_input)
+        api_input = fix_tool_call_pairing(api_input)
 
         logger.debug(
             "Codex API request",
@@ -513,7 +336,9 @@ class CodexOAuthProvider(BaseLLMProvider):
             # We don't branch on a specific codex event name here because
             # the SDK doesn't know about ``codex.rate_limits``; the
             # payload (if present) rides under a generic event type.
-            _maybe_capture_stream_rate_limit(event)
+            maybe_capture_stream_rate_limit(
+                event, parse_rate_limit_event, UsageSnapshot, set_cached
+            )
 
             match event.type:
                 case "response.output_text.delta":

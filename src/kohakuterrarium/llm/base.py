@@ -7,9 +7,10 @@ The interface is OpenAI API-oriented for consistency.
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Protocol, runtime_checkable
+from typing import Any, AsyncIterator, Callable, Protocol, runtime_checkable
 
 from kohakuterrarium.llm.message import Message
+from kohakuterrarium.llm.recovery import RetryPolicy
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -35,6 +36,7 @@ class LLMConfig:
     top_p: float = 1.0
     stop: list[str] | None = None
     extra: dict[str, Any] | None = None
+    retry_policy: RetryPolicy | dict[str, Any] | None = None
 
 
 @dataclass
@@ -233,6 +235,9 @@ class BaseLLMProvider:
     def __init__(self, config: LLMConfig | None = None):
         self.config = config or LLMConfig(model="")
         self._last_tool_calls: list[NativeToolCall] = []
+        self._emergency_drop_callbacks: list[Callable[[list[dict[str, Any]]], None]] = (
+            []
+        )
 
     @property
     def last_tool_calls(self) -> list[NativeToolCall]:
@@ -292,6 +297,32 @@ class BaseLLMProvider:
         function tools until it opts in.
         """
         return None
+
+    def on_emergency_drop(
+        self, callback: Callable[[list[dict[str, Any]]], None]
+    ) -> None:
+        """Register a callback invoked with recovered messages after a drop."""
+        self._emergency_drop_callbacks.append(callback)
+
+    def _notify_emergency_drop(self, messages: list[dict[str, Any]]) -> None:
+        """Notify callbacks that provider-side recovery changed context."""
+        for callback in list(self._emergency_drop_callbacks):
+            try:
+                callback(messages)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug(
+                    "Emergency-drop callback failed", error=str(exc), exc_info=True
+                )
+
+    def with_model(self, name: str) -> "BaseLLMProvider":
+        """Return a sibling provider configured for ``name``.
+
+        Providers with external clients should override this to preserve
+        connection pools. The base implementation only supports no-op reuse.
+        """
+        if not name or name == self.config.model:
+            return self
+        raise ValueError(f"Provider {type(self).__name__} cannot switch to {name}")
 
     def _normalize_messages(
         self,

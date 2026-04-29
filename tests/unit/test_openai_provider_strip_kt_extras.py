@@ -8,8 +8,6 @@ includes unknown keys, producing the failure mode "the model says it
 sees no image."
 """
 
-from __future__ import annotations
-
 from kohakuterrarium.llm.message import ImagePart, TextPart
 from kohakuterrarium.llm.openai_sanitize import strip_kt_extras as _strip_kt_extras
 
