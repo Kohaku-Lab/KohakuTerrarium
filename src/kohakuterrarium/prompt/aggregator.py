@@ -38,6 +38,8 @@ from kohakuterrarium.prompt.framework_hints import (
     HINT_OUTPUT_MODEL,
     get_framework_hint,
 )
+from kohakuterrarium.modules.plugin.base import PluginContext as RuntimePluginContext
+from kohakuterrarium.modules.plugin.manager import PluginManager
 from kohakuterrarium.prompt.plugins import (
     BasePlugin,
     PluginContext,
@@ -207,6 +209,8 @@ def aggregate_system_prompt(
     framework_hint_overrides: dict[str, str] | None = None,
     skill_registry: Any | None = None,
     skill_index_budget_bytes: int = DEFAULT_SKILL_INDEX_BUDGET_BYTES,
+    runtime_plugins: PluginManager | None = None,
+    plugin_context: RuntimePluginContext | None = None,
 ) -> str:
     """
     Build complete system prompt from components.
@@ -272,6 +276,16 @@ def aggregate_system_prompt(
         guidance = build_tool_guidance_section(registry)
         if guidance:
             parts.append(guidance)
+
+    # Runtime plugin prompt contributions share the same placement as
+    # per-tool prompt guidance: after function inventory, before framework
+    # syntax / execution hints.
+    if runtime_plugins is not None and plugin_context is not None:
+        for contribution in runtime_plugins.collect_prompt_contributions(
+            plugin_context
+        ):
+            if contribution:
+                parts.append(contribution)
 
     # Add procedural-skill index (Cluster 4 / D.2). Budget-gated so a
     # huge personal skill library doesn't swell the prompt; overflow

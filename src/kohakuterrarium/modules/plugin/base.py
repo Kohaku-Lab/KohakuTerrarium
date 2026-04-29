@@ -26,6 +26,7 @@ from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
     from kohakuterrarium.core.agent import Agent
+    from kohakuterrarium.core.budget import BudgetSet
     from kohakuterrarium.core.compact import CompactManager
     from kohakuterrarium.core.controller import Controller
     from kohakuterrarium.core.registry import Registry
@@ -58,6 +59,7 @@ class PluginContext:
     * ``registry`` — tool/sub-agent registry.
     * ``scratchpad`` — session-scoped key/value store.
     * ``compact_manager`` — auto-compact controller (may be ``None``).
+    * ``budgets`` — multi-axis budget state (may be ``None``).
     * ``controller`` — LLM conversation loop.
     * ``subagent_manager`` — sub-agent lifecycle manager.
 
@@ -152,6 +154,14 @@ class PluginContext:
         if agent is None:
             return None
         return getattr(agent, "compact_manager", None)
+
+    @property
+    def budgets(self) -> "BudgetSet | None":
+        """Multi-axis budget state (turn / walltime / tool_call)."""
+        agent = self._host_agent
+        if agent is None:
+            return None
+        return getattr(agent, "budgets", None)
 
     @property
     def controller(self) -> "Controller | None":
@@ -299,6 +309,17 @@ class BasePlugin:
             if not any(p.search(model) for p in self._model_pattern_res):
                 return False
         return True
+
+    # ── Prompt contributions ──
+
+    def get_prompt_content(self, context: PluginContext) -> str | None:
+        """Contribute prose to the runtime system prompt.
+
+        Return ``None`` or an empty string to contribute nothing. Runtime
+        prompt contributions are collected in plugin priority order and
+        inserted between tool guidance and framework hints.
+        """
+        return None
 
     # ── Controller / package commands ──
 

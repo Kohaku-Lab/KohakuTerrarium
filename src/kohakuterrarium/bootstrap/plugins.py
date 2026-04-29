@@ -3,6 +3,7 @@
 import importlib
 from typing import Any
 
+from kohakuterrarium.builtins.plugin_catalog import resolve_plugin_specs
 from kohakuterrarium.core.loader import ModuleLoader
 from kohakuterrarium.modules.plugin.base import BasePlugin
 from kohakuterrarium.modules.plugin.manager import PluginManager
@@ -16,6 +17,8 @@ logger = get_logger(__name__)
 def init_plugins(
     plugin_configs: list[dict[str, Any]],
     loader: ModuleLoader | None = None,
+    default_plugins: list[str] | None = None,
+    default_plugin_specs: list[dict[str, Any]] | None = None,
 ) -> PluginManager:
     """Create a PluginManager with config plugins + discovered packages.
 
@@ -26,10 +29,13 @@ def init_plugins(
     Returns a PluginManager (possibly empty).
     """
     manager = PluginManager()
+    merged_configs = _merge_default_plugin_specs(
+        plugin_configs or [], default_plugins or [], default_plugin_specs or []
+    )
     config_names: set[str] = set()
 
     # Phase 1: Load plugins from config (enabled)
-    for cfg in plugin_configs or []:
+    for cfg in merged_configs:
         plugin = _load_one(cfg, loader)
         if plugin:
             config_names.add(plugin.name)
@@ -39,6 +45,25 @@ def init_plugins(
     _discover_package_plugins(manager, config_names, loader)
 
     return manager
+
+
+def _merge_default_plugin_specs(
+    plugin_configs: list[dict[str, Any]],
+    default_plugins: list[str],
+    default_plugin_specs: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    defaults = list(default_plugin_specs) + resolve_plugin_specs(default_plugins)
+    explicit_names = {
+        cfg.get("name")
+        for cfg in plugin_configs
+        if isinstance(cfg, dict) and cfg.get("name")
+    }
+    merged = list(plugin_configs)
+    for spec in defaults:
+        if spec.get("name") in explicit_names:
+            continue
+        merged.append(spec)
+    return merged
 
 
 def _load_one(
@@ -67,6 +92,8 @@ def _load_one(
         return None
 
     ptype = cfg.get("type", "package")
+    if module.startswith("kohakuterrarium."):
+        ptype = "package"
     try:
         if loader:
             plugin = loader.load_instance(
@@ -81,7 +108,9 @@ def _load_one(
             logger.warning("Not a BasePlugin", plugin_name=name)
             return None
 
-        if not getattr(plugin, "name", "") or plugin.name == "unnamed":
+        if name:
+            plugin.name = name
+        elif not getattr(plugin, "name", "") or plugin.name == "unnamed":
             plugin.name = name
         if not getattr(plugin, "description", "") and cfg.get("description"):
             plugin.description = cfg["description"]

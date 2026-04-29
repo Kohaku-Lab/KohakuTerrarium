@@ -157,6 +157,24 @@ class PluginManager:
 
     # ── Collectors (aggregated contributions across plugins) ──
 
+    def collect_prompt_contributions(self, context: PluginContext) -> list[str]:
+        """Collect runtime prompt prose in plugin priority order."""
+        out: list[str] = []
+        for plugin in self._applicable_plugins():
+            try:
+                content = plugin.get_prompt_content(context)
+            except Exception as e:
+                logger.warning(
+                    "Plugin get_prompt_content raised",
+                    plugin_name=getattr(plugin, "name", "?"),
+                    error=str(e),
+                    exc_info=True,
+                )
+                continue
+            if content:
+                out.append(content)
+        return out
+
     def collect_commands(self) -> list[tuple[BasePlugin, dict[str, Any]]]:
         """Collect ``contribute_commands()`` output from each plugin.
 

@@ -55,6 +55,7 @@ def _make_agent(tools: list[str], plugins: list[BasePlugin]) -> SimpleNamespace:
         config=SimpleNamespace(name="swe"),
         executor=SimpleNamespace(_working_dir="."),
         llm=SimpleNamespace(model="test/model"),
+        budgets=object(),
         registry=_FakeRegistry(tools),
         plugins=manager,
     )
@@ -138,6 +139,29 @@ async def test_none_passes_through():
     event = ToolCallEvent(name="bash", args={"cmd": "pwd"})
     result = await run_pre_tool_dispatch(agent, event, controller)
     assert result is event
+
+
+@pytest.mark.asyncio
+async def test_pre_dispatch_context_exposes_runtime_accessors():
+    seen_context = None
+
+    class ContextPlugin(BasePlugin):
+        name = "context"
+
+        async def pre_tool_dispatch(self, call, context):
+            nonlocal seen_context
+            seen_context = context
+            return None
+
+    agent = _make_agent(["bash"], [ContextPlugin()])
+    controller = _FakeController()
+    event = ToolCallEvent(name="bash", args={"cmd": "pwd"})
+    result = await run_pre_tool_dispatch(agent, event, controller)
+
+    assert result is event
+    assert seen_context is not None
+    assert seen_context.registry is agent.registry
+    assert seen_context.budgets is agent.budgets
 
 
 @pytest.mark.asyncio
