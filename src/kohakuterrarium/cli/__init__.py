@@ -330,6 +330,7 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         default="INFO",
     )
+    internal_serve_parser.add_argument("--state-path", default=None)
 
     return parser
 
@@ -449,6 +450,7 @@ COMMANDS: dict[str, callable] = {
             port=args.port,
             dev=args.dev,
             log_level=args.log_level,
+            state_path=args.state_path,
         )
     ),
     "extension": _dispatch_extension,

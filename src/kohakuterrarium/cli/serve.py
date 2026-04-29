@@ -127,6 +127,8 @@ def _spawn_server_process(host: str, port: int, dev: bool, log_level: str) -> in
         host,
         "--port",
         str(port),
+        "--state-path",
+        str(STATE_PATH),
     ]
     if dev:
         cmd.append("--dev")
@@ -155,6 +157,18 @@ def _wait_until_alive(pid: int, timeout: float = 3.0) -> bool:
     return _is_pid_alive(pid)
 
 
+def _wait_until_bound(pid: int, timeout: float = 3.0) -> bool:
+    """Wait for the subprocess to publish its actual bound port to the state file."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not _is_pid_alive(pid):
+            return False
+        if _load_state().get("bound"):
+            return True
+        time.sleep(0.1)
+    return _is_pid_alive(pid) and bool(_load_state().get("bound"))
+
+
 def serve_start_cli(args: argparse.Namespace) -> int:
     runtime = _current_runtime()
     if runtime["alive"]:
@@ -169,11 +183,6 @@ def serve_start_cli(args: argparse.Namespace) -> int:
         _remove_runtime_files()
 
     pid = _spawn_server_process(args.host, args.port, args.dev, args.log_level)
-    if not _wait_until_alive(pid):
-        print("Failed to start KohakuTerrarium web daemon.")
-        print(f"Check log: {LOG_PATH}")
-        return 1
-
     _write_started_state(
         pid=pid,
         host=args.host,
@@ -181,6 +190,11 @@ def serve_start_cli(args: argparse.Namespace) -> int:
         dev=args.dev,
         log_level=args.log_level,
     )
+    if not _wait_until_bound(pid):
+        print("Failed to start KohakuTerrarium web daemon.")
+        print(f"Check log: {LOG_PATH}")
+        return 1
+
     state = _load_state()
     print("KohakuTerrarium web daemon started")
     print(f"  pid:  {pid}")
@@ -307,6 +321,7 @@ def run_server_internal(args: argparse.Namespace) -> int:
         port=args.port,
         dev=args.dev,
         log_level=args.log_level,
+        state_path=getattr(args, "state_path", None),
     )
     return 0
 

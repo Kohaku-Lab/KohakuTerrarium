@@ -6,6 +6,7 @@ Web server and desktop app launcher for KohakuTerrarium.
 """
 
 import ctypes
+import json
 import os
 import socket
 import sys
@@ -85,11 +86,37 @@ def find_free_port(
     raise RuntimeError(f"No free port found in range {start}-{start + max_tries - 1}")
 
 
+def _publish_actual_port(state_path: str | None, host: str, port: int) -> None:
+    """Update daemon state file with the actual bound port.
+
+    No-op if state_path is None (e.g. ``kt web`` direct invocation) or the
+    file does not exist. CLI polls this file's ``bound`` field after spawn.
+    """
+    if not state_path:
+        return
+    path = Path(state_path)
+    if not path.exists():
+        return
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return
+        data["port"] = port
+        data["url"] = f"http://{host}:{port}"
+        data["bound"] = True
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2, sort_keys=True)
+    except Exception:
+        pass
+
+
 def run_web_server(
     host: str = "127.0.0.1",
     port: int = 8001,
     dev: bool = False,
     log_level: str = "INFO",
+    state_path: str | None = None,
 ) -> None:
     """Start the FastAPI server, optionally serving the built frontend.
 
@@ -97,6 +124,8 @@ def run_web_server(
         host: Bind address.
         port: Bind port.
         dev: If True, skip static file serving (user runs vite dev separately).
+        state_path: When set (daemon mode), write the actual bound port back
+            to this JSON file so the launching CLI can show the truth.
     """
     configure_utf8_stdio(log=True)
 
@@ -129,6 +158,8 @@ def run_web_server(
     except RuntimeError as e:
         logger.error("Port allocation failed", error=str(e))
         sys.exit(1)
+
+    _publish_actual_port(state_path, host, port)
 
     if dev:
         print(f"API-only mode on http://{host}:{port}")

@@ -31,33 +31,33 @@
   },
   {
     "file": "src/kohakuterrarium/serving/web.py",
-    "line": 31,
+    "line": 32,
     "function": "_resolve_config_dirs",
     "reason": "package-discovery cold-path; avoids loading packages module on bare uvicorn boot"
   },
   {
     "file": "src/kohakuterrarium/serving/web.py",
-    "line": 32,
+    "line": 33,
     "function": "_resolve_config_dirs",
-    "reason": "package-discovery cold-path; sibling of line 31 — same justification"
+    "reason": "package-discovery cold-path; sibling of line 32 — same justification"
   },
   {
     "file": "src/kohakuterrarium/serving/web.py",
-    "line": 105,
+    "line": 134,
     "function": "run_web_server",
     "reason": "FastAPI app factory: serving->api lazy boot avoids pulling all routes when only the helper is touched"
   },
   {
     "file": "src/kohakuterrarium/serving/web.py",
-    "line": 157,
+    "line": 188,
     "function": "run_desktop_app",
     "reason": "subprocess used only when relaunching as desktop process"
   },
   {
     "file": "src/kohakuterrarium/serving/web.py",
-    "line": 221,
+    "line": 252,
     "function": "_run_desktop_app_blocking",
-    "reason": "FastAPI app factory: same as line 104, desktop variant"
+    "reason": "FastAPI app factory: same as line 134, desktop variant"
   },
   {
     "file": "src/kohakuterrarium/api/studio/introspect.py",
@@ -187,13 +187,13 @@
   },
   {
     "file": "src/kohakuterrarium/serving/web.py",
-    "line": 103,
+    "line": 132,
     "function": "run_web_server",
     "reason": "uvicorn is heavy; imported only when serving HTTP for real"
   },
   {
     "file": "src/kohakuterrarium/serving/web.py",
-    "line": 219,
+    "line": 250,
     "function": "_run_desktop_app_blocking",
     "reason": "uvicorn import deferred to desktop-app launch path"
   },
