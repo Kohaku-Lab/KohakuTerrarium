@@ -384,6 +384,8 @@ await agent.stop()
 - `interactive: bool = False`
 - `options: dict[str, Any]`
 
+`subagents:` YAML 條目可以是裸字串（`"explore"` → 內建 `SubAgentConfigItem(name="explore")`）或 dict。`type: custom` 且沒有 `module`/`config` 的 dict 條目會被當作內聯 `SubAgentConfig` 資料；額外欄位會透過 `options` 轉發，並由 `SubAgentConfig.from_dict` 解析。
+
 ### `load_agent_config`
 
 模組：`kohakuterrarium.core.config`。

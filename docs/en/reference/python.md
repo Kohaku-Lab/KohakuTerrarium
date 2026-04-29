@@ -484,6 +484,11 @@ Inherits `OutputConfigItem` plus:
 - `interactive: bool = False`
 - `options: dict[str, Any]`
 
+A `subagents:` YAML entry may be a bare string (`"explore"` → builtin
+`SubAgentConfigItem(name="explore")`) or a dict. Dict entries with
+`type: custom` and no `module`/`config` are inline `SubAgentConfig` data; extra
+fields are forwarded through `options` and parsed by `SubAgentConfig.from_dict`.
+
 ### `load_agent_config`
 
 Module: `kohakuterrarium.core.config`.

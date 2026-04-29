@@ -17,7 +17,9 @@ tags:
 
 ## 為什麼它存在
 
-上下文視窗是有限的。真實任務——例如「探索這個 repo，然後告訴我 auth 是怎麼運作的」——可能會牽涉上百次讀檔。如果把這些探索都放在父生物自己的對話裡，就會把主要工作的預算吃光。改由子代理去做，消耗的是另一份預算，而回傳的只是一份摘要。
+上下文視窗是有限的。真實任務——例如「探索這個 repo，然後告訴我 auth 是怎麼運作的」——可能會牽涉上百次讀檔。如果把這些探索都放在父生物自己的對話裡，就會把主要工作的預算吃光。改由子代理去做，通常會消耗另一份預算，而回傳的只是一份摘要。
+
+這份預算現在可以設定。子代理可以有自己的多軸執行期預算（turn、工具呼叫，以及可選的 walltime），也可以不設限制，或共享父級的舊式 iteration budget。內建子代理會帶一組保守的最小執行期預算：turn 軟/硬限制 `40/60`、工具呼叫軟/硬限制 `75/100`，並且沒有 walltime 限制。
 
 第二個理由是：**專門化**。一個專門為審查決策而提示的 `critic` 子代理，通常會比讓一般 agent 順手兼做 review 來得更好。子代理讓你可以把專家接進通才型工作流，而不用重寫那個通才。
 
@@ -28,6 +30,8 @@ tags:
 - 它會繼承父生物的 LLM 與工具格式；
 - 它會拿到一部分工具（定義於子代理設定中的 `tools` 清單）；
 - 它會跑完整的 Agent 生命週期（start → event-loop → stop）；
+- 它可以有自己的執行期 `turn_budget` / `tool_call_budget`；
+- 它也可以繼承父級舊式 iteration budget、拿到自己的 `budget_allocation`，或完全不共享預算；
 - 它的結果會以父層上的 `subagent_output` 事件送達，
   或在 `output_to: external` 時直接串流給使用者。
 
@@ -42,6 +46,8 @@ tags:
 `SubAgentManager`（`modules/subagent/manager.py`）會把 `SubAgent`（`modules/subagent/base.py`）派生成 `asyncio.Task`，依 job id 追蹤它們，並把完成結果作為 `TriggerEvent` 送出。
 
 深度由 `max_subagent_depth`（設定層級）限制，以防止遞迴失控。取消採合作式機制——父生物可以呼叫 `stop_task` 中斷正在執行的子代理。
+
+執行期預算由 `budget.ticker`、`budget.alarm` 和 `budget.gate` 外掛執行；`default-runtime` 包會啟用這些外掛以及自動壓縮。舊式共享 iteration budget 在派生時解析：`budget_allocation` 優先，否則 `budget_inherit: true` 會在存在父級預算時複用同一個預算物件。
 
 內建子代理（位於 `kt-biome` + framework）：`worker`、`plan`、`explore`、`critic`、`response`、`research`、`summarize`、`memory_read`、`memory_write`、`coordinator`。
 
@@ -62,4 +68,5 @@ tags:
 - [工具](tool.md) ——「它也是一種工具」這個視角。
 - [多代理概覽](../multi-agent/README.md) —— 縱向（子代理）與橫向（生態瓶）的差異。
 - [模式——靜默控制器](../patterns.md) —— 輸出型子代理這個慣用法。
+- [子代理指南](../../guides/sub-agents.md) —— 設定內建/內聯子代理、預算與執行期外掛。
 - [reference/builtins.md — Sub-agents](../../reference/builtins.md) —— 內建子代理工具包。

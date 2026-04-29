@@ -276,7 +276,10 @@ SPECIALIST_CONFIG = SubAgentConfig(
     tools=["read", "grep"],
     interactive=False,
     can_modify=False,
-    llm="claude-haiku",
+    model="subagent-default",
+    default_plugins=["default-runtime"],
+    turn_budget=(40, 60),
+    tool_call_budget=(75, 100),
 )
 ```
 
@@ -288,6 +291,21 @@ subagents:
     type: custom
     module: ./subagents/specialist.py
     config: SPECIALIST_CONFIG
+```
+
+很多專家不需要 Python 模組。省略 `module` 和 `config`，即可在 YAML 中內聯同一份設定：
+
+```yaml
+subagents:
+  - name: specialist
+    type: custom
+    description: Does niche analysis.
+    system_prompt: "You analyze X. Return a short summary."
+    tools: [read, grep]
+    model: subagent-default
+    default_plugins: ["default-runtime"]
+    turn_budget: [40, 60]
+    tool_call_budget: [75, 100]
 ```
 
 如果子代理要包另一個完整的自訂代理 (例如接別的框架，或純 Python 實作)，就繼承 `SubAgent` 實作 `async run(input_text) -> SubAgentResult`。見 [concepts/modules/sub-agent](../concepts/modules/sub-agent.md)。

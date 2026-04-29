@@ -33,6 +33,7 @@ tags:
 ## 擴充
 
 - [外掛](plugins.md) — prompt 外掛與 lifecycle 外掛的用法、組合、時機。
+- [子代理](sub-agents.md) — 內建與內聯專家、執行期預算外掛和自動壓縮。
 - [自訂模組](custom-modules.md) — 自訂輸入、觸發器、工具、輸出、子代理的寫法與註冊。
 - [MCP](mcp.md) — 連接 Model Context Protocol 伺服器，把它們的工具暴露給生物。
 

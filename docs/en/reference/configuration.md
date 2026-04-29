@@ -251,6 +251,32 @@ tools:
 | `interactive` | bool | `false` | Stay alive across turns; receive context updates. |
 | `options` | dict | `{}` | Sub-agent-specific options. Inline sub-agent config fields such as `notify_controller_on_background_complete` are read from here when supported by `SubAgentConfig`. |
 
+Shorthand: a bare string is treated as a builtin sub-agent name:
+
+```yaml
+subagents:
+  - explore
+  - worker
+```
+
+YAML-only inline config: use `type: custom` without `module`/`config`; unknown
+entry fields are forwarded into `SubAgentConfig.from_dict`:
+
+```yaml
+subagents:
+  - name: dependency_mapper
+    type: custom
+    system_prompt: "Map dependencies and return a compact summary."
+    tools: [glob, grep, read, tree]
+    default_plugins: ["default-runtime"]
+    turn_budget: [40, 60]
+    tool_call_budget: [75, 100]
+```
+
+Builtin sub-agents already declare `default_plugins: ["default-runtime"]`,
+`turn_budget: [40, 60]`, `tool_call_budget: [75, 100]`, and no
+`walltime_budget`.
+
 Background completion note:
 
 ```yaml
@@ -267,11 +293,15 @@ subagents:
 
 With this flag set to `false`, the background job still emits normal activity/log/output updates, but its completion does not push a fresh event back into the controller loop.
 
-Sub-agent option fields also include shared-budget controls via `options`:
+Sub-agent option fields also include runtime and shared-budget controls:
 
-- `budget_inherit: true` (default) — child reuses the parent's shared iteration budget if one exists.
-- `budget_allocation: N` — child gets a fresh isolated budget of `N` turns.
-- `budget_inherit: false` with no allocation — child runs without the parent's shared budget.
+- `default_plugins: ["default-runtime"]` — loads budget ticker/alarm/gate plus auto-compact.
+- `turn_budget: [soft, hard]` — sub-agent LLM-turn soft/hard limits.
+- `tool_call_budget: [soft, hard]` — sub-agent tool-call soft/hard limits.
+- `walltime_budget: [soft, hard]` — optional wall-clock limits in seconds.
+- `budget_inherit: true` (default) — child reuses the parent's shared legacy iteration budget if one exists.
+- `budget_allocation: N` — child gets a fresh isolated legacy budget of `N` turns.
+- `budget_inherit: false` with no allocation — child runs without the parent's shared legacy budget.
 
 ### Triggers
 

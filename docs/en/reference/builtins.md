@@ -195,6 +195,10 @@ Shipped sub-agent configs under
 `src/kohakuterrarium/builtins/subagents/`. Reference them in a creature
 config under `subagents:` by name.
 
+All builtin sub-agents load `default_plugins: ["default-runtime"]` and use
+minimal runtime budgets: turn soft/hard `40/60`, tool-call soft/hard `75/100`,
+and no walltime budget.
+
 | Name | Tools | Purpose |
 |---|---|---|
 | `worker` | `read`, `write`, `bash`, `glob`, `grep`, `edit`, `multi_edit` | Fix bugs, refactor, run validations. |

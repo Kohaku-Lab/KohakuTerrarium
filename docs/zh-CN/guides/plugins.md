@@ -58,6 +58,10 @@ class ProjectHeaderPlugin(BasePlugin):
 | `FrameworkHintsPlugin` | 45 | 工具调用语法 + 框架命令示例（`info`、`jobs`、`wait`） |
 | `ToolListPlugin` | 50 | 每个工具的一行描述 |
 
+运行时插件也可以实现 `get_prompt_content(context) -> str | None` 来贡献 prompt 文本。这些内容会被聚合到框架提示之前，并同时适用于父代理与子代理。
+
+除了 prompt 插件以外，工具本身也可以通过 `prompt_contribution()` 贡献短的 prompt 指引；位置同样在框架提示之前。
+
 Priority 越低越早执行。你可以借此把插件插到正确位置。
 
 ## Lifecycle 插件
@@ -139,6 +143,39 @@ class TokenAccountant(BasePlugin):
 ## 示例：seamless memory（在插件里用 agent）
 
 做一个 `pre_llm_call` 插件，先取回相关的历史事件，再把它们 prepend 到 messages 前面。你甚至可以调用一个小型巢状 agent 来判断哪些内容相关——plugin 就是普通 Python，所以里面用 agent 完全合法。可参考 [concepts/python-native/agent-as-python-object 概念](../concepts/python-native/agent-as-python-object.md)。
+
+## 内置运行时包
+
+子代理预算与自动压缩都是普通插件，并打包成具名包：
+
+| 包 | 插件 |
+|---|---|
+| `budget` | `budget.ticker`, `budget.alarm`, `budget.gate` |
+| `auto-compact` | `compact.auto` |
+| `default-runtime` | 全部预算插件加 `compact.auto` |
+
+在父 Creature 上使用：
+
+```yaml
+default_plugins: ["default-runtime"]
+turn_budget: [40, 60]
+tool_call_budget: [75, 100]
+```
+
+或在每个子代理上使用：
+
+```yaml
+subagents:
+  - name: reviewer
+    type: custom
+    system_prompt: "Review the change."
+    tools: [read, grep]
+    default_plugins: ["default-runtime"]
+    turn_budget: [40, 60]
+    tool_call_budget: [75, 100]
+```
+
+内置子代理已经包含这个包和这些最小预算。完整说明见 [子代理指南](sub-agents.md)。
 
 ## 在执行时管理插件
 

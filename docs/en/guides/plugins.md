@@ -59,6 +59,11 @@ Built-in prompt plugins (always present):
 | `FrameworkHintsPlugin` | 45 | Tool-call syntax + framework command examples (`info`, `jobs`, `wait`, native tool usage) |
 | `ToolListPlugin` | 50 | One-line description per tool |
 
+Runtime plugins can also contribute prompt prose by implementing
+`get_prompt_content(context) -> str | None`. Those contributions land in the
+aggregated prompt before framework hints and work for both parent agents and
+sub-agents.
+
 Separate from prompt plugins, tools themselves can now contribute short
 prompt-guidance paragraphs via `prompt_contribution()`. Those land in the
 aggregated prompt before the framework hints.
@@ -150,6 +155,41 @@ class TokenAccountant(BasePlugin):
 ## Example: seamless memory (agent inside plugin)
 
 A `pre_llm_call` plugin that retrieves relevant past events and prepends them to the messages. You can call a small nested agent to decide what's relevant — plugins are plain Python, so agents are legal inside them. See [concepts/python-native/agent-as-python-object](../concepts/python-native/agent-as-python-object.md).
+
+## Built-in runtime packs
+
+Sub-agent budgets and auto-compaction are ordinary plugins bundled as named
+packs:
+
+| Pack | Plugins |
+|---|---|
+| `budget` | `budget.ticker`, `budget.alarm`, `budget.gate` |
+| `auto-compact` | `compact.auto` |
+| `default-runtime` | all budget plugins plus `compact.auto` |
+
+Use them in a parent creature:
+
+```yaml
+default_plugins: ["default-runtime"]
+turn_budget: [40, 60]
+tool_call_budget: [75, 100]
+```
+
+or per sub-agent:
+
+```yaml
+subagents:
+  - name: reviewer
+    type: custom
+    system_prompt: "Review the change."
+    tools: [read, grep]
+    default_plugins: ["default-runtime"]
+    turn_budget: [40, 60]
+    tool_call_budget: [75, 100]
+```
+
+Builtin sub-agents already include this pack and these minimum budgets. See
+[Sub-agents](sub-agents.md) for the full guide.
 
 ## Managing plugins at runtime
 

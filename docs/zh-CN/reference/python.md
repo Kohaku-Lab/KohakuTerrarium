@@ -384,6 +384,8 @@ Creature配置的每一个字段。YAML 形式见 [configuration.md](configurati
 - `interactive: bool = False`
 - `options: dict[str, Any]`
 
+`subagents:` YAML 条目可以是裸字符串（`"explore"` → 内置 `SubAgentConfigItem(name="explore")`）或 dict。`type: custom` 且没有 `module`/`config` 的 dict 条目会被当作内联 `SubAgentConfig` 数据；额外字段会通过 `options` 转发，并由 `SubAgentConfig.from_dict` 解析。
+
 ### `load_agent_config`
 
 模块：`kohakuterrarium.core.config`。

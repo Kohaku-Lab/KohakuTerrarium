@@ -59,6 +59,10 @@ class ProjectHeaderPlugin(BasePlugin):
 | `FrameworkHintsPlugin` | 45 | 工具呼叫語法 + 框架命令範例（`info`、`jobs`、`wait`） |
 | `ToolListPlugin` | 50 | 每個工具的一行描述 |
 
+執行期外掛也可以實作 `get_prompt_content(context) -> str | None` 來貢獻 prompt 文字。這些內容會被聚合到框架提示之前，並同時適用於父代理與子代理。
+
+除了 prompt 外掛以外，工具本身也可以透過 `prompt_contribution()` 貢獻短的 prompt 指引；位置同樣在框架提示之前。
+
 Priority 越低越早執行。你可以藉此把外掛插到正確位置。
 
 ## Lifecycle 外掛
@@ -141,6 +145,39 @@ class TokenAccountant(BasePlugin):
 ## 範例：seamless memory（在外掛裡用 agent）
 
 做一個 `pre_llm_call` 外掛，先取回相關的歷史事件，再把它們 prepend 到 messages 前面。你甚至可以呼叫一個小型巢狀 agent 來判斷哪些內容相關——plugin 就是普通 Python，所以裡面用 agent 完全合法。可參考 [concepts/python-native/agent-as-python-object](../concepts/python-native/agent-as-python-object.md)。
+
+## 內建執行期包
+
+子代理預算與自動壓縮都是普通外掛，並打包成具名包：
+
+| 包 | 外掛 |
+|---|---|
+| `budget` | `budget.ticker`, `budget.alarm`, `budget.gate` |
+| `auto-compact` | `compact.auto` |
+| `default-runtime` | 全部預算外掛加 `compact.auto` |
+
+在父生物上使用：
+
+```yaml
+default_plugins: ["default-runtime"]
+turn_budget: [40, 60]
+tool_call_budget: [75, 100]
+```
+
+或在每個子代理上使用：
+
+```yaml
+subagents:
+  - name: reviewer
+    type: custom
+    system_prompt: "Review the change."
+    tools: [read, grep]
+    default_plugins: ["default-runtime"]
+    turn_budget: [40, 60]
+    tool_call_budget: [75, 100]
+```
+
+內建子代理已經包含這個包和這些最小預算。完整說明見 [子代理指南](sub-agents.md)。
 
 ## 在執行時管理外掛
 

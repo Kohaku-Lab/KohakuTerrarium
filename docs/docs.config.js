@@ -36,6 +36,7 @@ const sidebarStructure = {
     "guides/sessions.md",
     "guides/memory.md",
     "guides/plugins.md",
+    "guides/sub-agents.md",
     "guides/custom-modules.md",
     "guides/mcp.md",
     "guides/packages.md",

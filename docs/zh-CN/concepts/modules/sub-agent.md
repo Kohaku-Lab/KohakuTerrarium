@@ -17,7 +17,9 @@ tags:
 
 ## 为什么它存在
 
-上下文视窗是有限的。真实任务——例如「探索这个 repo，然后告诉我 auth 是怎么运作的」——可能会牵涉上百次读档。如果把这些探索都放在父Creature自己的对话里，就会把主要工作的预算吃光。改由子 Agent去做，消耗的是另一份预算，而返回的只是一份摘要。
+上下文视窗是有限的。真实任务——例如「探索这个 repo，然后告诉我 auth 是怎么运作的」——可能会牵涉上百次读档。如果把这些探索都放在父Creature自己的对话里，就会把主要工作的预算吃光。改由子 Agent去做，通常会消耗另一份预算，而返回的只是一份摘要。
+
+这份预算现在可以配置。子 Agent可以有自己的多轴运行时预算（turn、工具调用，以及可选的 walltime），也可以不设限制，或共享父级的旧式 iteration budget。内置子 Agent会带一组保守的最小运行时预算：turn 软/硬限制 `40/60`、工具调用软/硬限制 `75/100`，并且没有 walltime 限制。
 
 第二个理由是： **专门化**。一个专门为审查决策而提示的 `critic` 子 Agent，通常会比让一般 Agent 顺手兼做 review 来得更好。子 Agent让你可以把专家接进通才型工作流，而不用重写那个通才。
 
@@ -28,7 +30,9 @@ tags:
 - 它会继承父Creature的 LLM 与工具格式；
 - 它会拿到一部分工具（定义于子 Agent配置中的 `tools` 清单）；
 - 它会跑完整的 Agent 生命周期（start → event-loop → stop）；
-- 它的结果会以父层上的 `sub-agent_output` 事件送达，
+- 它可以有自己的运行时 `turn_budget` / `tool_call_budget`；
+- 它也可以继承父级旧式 iteration budget、拿到自己的 `budget_allocation`，或完全不共享预算；
+- 它的结果会以父层上的 `subagent_output` 事件送达，
   或在 `output_to: external` 时直接串流给用户。
 
 有三种重要型态：
@@ -41,7 +45,9 @@ tags:
 
 `SubAgentManager`（`modules/sub-agent/manager.py`）会把 `SubAgent`（`modules/sub-agent/base.py`）派生成 `asyncio.Task`，依 job id 追踪它们，并把完成结果作为 `TriggerEvent` 送出。
 
-深度由 `max_sub-agent_depth`（配置层级）限制，以防止递回失控。取消采合作式机制——父Creature可以调用 `stop_task` 中断正在执行的子 Agent。
+深度由 `max_subagent_depth`（配置层级）限制，以防止递回失控。取消采合作式机制——父Creature可以调用 `stop_task` 中断正在执行的子 Agent。
+
+运行时预算由 `budget.ticker`、`budget.alarm` 和 `budget.gate` 插件执行；`default-runtime` 包会启用这些插件以及自动压缩。旧式共享 iteration budget 在派生时解析：`budget_allocation` 优先，否则 `budget_inherit: true` 会在存在父级预算时复用同一个预算对象。
 
 内建子 Agent（位于 `kt-biome` + framework）：`worker`、`plan`、`explore`、`critic`、`response`、`research`、`summarize`、`memory_read`、`memory_write`、`coordinator`。
 
@@ -62,4 +68,5 @@ tags:
 - [工具](tool.md) ——「它也是一种工具」这个视角。
 - [多 Agent概览](../multi-agent/README.md) —— 纵向（子 Agent）与横向（Terrarium）的差异。
 - [模式——静默控制器](../patterns.md) —— 输出型子 Agent这个惯用法。
+- [子代理指南](../../guides/sub-agents.md) —— 配置内置/内联子代理、预算和运行时插件。
 - [reference/builtins.md — Sub-Agents 参考](../../reference/builtins.md) —— 内建子 Agent工具包。

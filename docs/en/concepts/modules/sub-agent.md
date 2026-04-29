@@ -28,10 +28,12 @@ exploration in the parent's conversation blows the budget for the main
 work. Doing it in a sub-agent usually spends a separate budget and returns
 just the summary.
 
-But that budget is now configurable. A parent can give children an
-independent turn pool, let them run unbounded, or make them share the
-same iteration budget as the parent. That matters when you want "delegate
-freely, but the whole run still only gets N LLM calls".
+But that budget is now configurable. Sub-agents can have their own
+multi-axis runtime budget (turns, tool calls, and optionally walltime),
+let them run unbounded, or make them share the same legacy iteration
+budget as the parent. Builtin sub-agents ship with a conservative minimum
+runtime budget: soft/hard turns `40/60`, soft/hard tool calls `75/100`,
+and no walltime limit.
 
 A second reason: **specialisation**. A `critic` sub-agent prompted
 specifically for review decisions will outperform a general agent
@@ -45,8 +47,9 @@ A sub-agent is a creature config + a parent registry. When spawned:
 - it inherits the parent's LLM and tool format,
 - it is given a subset of tools (the `tools` list in its sub-agent config),
 - it runs a full Agent lifecycle (start → event-loop → stop),
-- it either inherits the parent's iteration budget, gets its own
-  `budget_allocation`, or runs without a shared budget at all,
+- it may have its own runtime `turn_budget` / `tool_call_budget`,
+- it can additionally inherit the parent's legacy iteration budget, get its own
+  `budget_allocation`, or run without a shared budget at all,
 - its result is delivered as a `subagent_output` event on the parent,
   or streamed directly to the user if `output_to: external`.
 
@@ -70,9 +73,12 @@ job id, and delivers completions as `TriggerEvent`s.
 
 Depth is bounded by `max_subagent_depth` (config-level) to prevent
 runaway recursion. Cancellation is cooperative — the parent can invoke
-`stop_task` to interrupt a running sub-agent. Shared iteration budgets
-are resolved at spawn time: `budget_allocation` wins, otherwise
-`budget_inherit: true` reuses the parent's budget object if one exists.
+`stop_task` to interrupt a running sub-agent. Runtime budgets are enforced by
+the `budget.ticker`, `budget.alarm`, and `budget.gate` plugins. The
+`default-runtime` pack enables those plus auto-compaction. Shared legacy
+iteration budgets are resolved at spawn time: `budget_allocation` wins,
+otherwise `budget_inherit: true` reuses the parent's budget object if one
+exists.
 
 Built-in sub-agents (in `kt-biome` + framework): `worker`, `plan`,
 `explore`, `critic`, `response`, `research`, `summarize`,
@@ -106,4 +112,5 @@ point of view that is indistinguishable from a sub-agent call.
 - [Tool](tool.md) — the "also a tool" framing.
 - [Multi-agent overview](../multi-agent/README.md) — vertical (sub-agents) vs horizontal (terrariums).
 - [Patterns — silent controller](../patterns.md) — the output-sub-agent idiom.
+- [Sub-agent guide](../../guides/sub-agents.md) — configuring builtin/inline sub-agents, budgets, and runtime plugins.
 - [reference/builtins.md — Sub-agents](../../reference/builtins.md) — the kit bag.

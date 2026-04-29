@@ -284,7 +284,10 @@ SPECIALIST_CONFIG = SubAgentConfig(
     tools=["read", "grep"],
     interactive=False,
     can_modify=False,
-    llm="claude-haiku",
+    model="subagent-default",
+    default_plugins=["default-runtime"],
+    turn_budget=(40, 60),
+    tool_call_budget=(75, 100),
 )
 ```
 
@@ -296,6 +299,22 @@ subagents:
     type: custom
     module: ./subagents/specialist.py
     config: SPECIALIST_CONFIG
+```
+
+For many specialists, a Python module is unnecessary. Inline the same config in
+YAML by omitting `module` and `config`:
+
+```yaml
+subagents:
+  - name: specialist
+    type: custom
+    description: Does niche analysis.
+    system_prompt: "You analyze X. Return a short summary."
+    tools: [read, grep]
+    model: subagent-default
+    default_plugins: ["default-runtime"]
+    turn_budget: [40, 60]
+    tool_call_budget: [75, 100]
 ```
 
 For a sub-agent that wraps an entire custom agent (e.g. a different framework, or a Python-first implementation), subclass `SubAgent` and implement `async run(input_text) -> SubAgentResult`. See [concepts/modules/sub-agent](../concepts/modules/sub-agent.md).

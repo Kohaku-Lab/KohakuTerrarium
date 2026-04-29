@@ -27,6 +27,7 @@ If you want a guided first walk-through, go to [Tutorials](../tutorials/README.m
 - [Configuration](configuration.md) — task-oriented "how do I configure X" recipes.
 - [Creatures](creatures.md) — authoring standalone agents.
 - [Plugins](plugins.md) — prompt and lifecycle plugins.
+- [Sub-agents](sub-agents.md) — builtin and inline specialists, runtime budget plugins, and auto-compaction.
 - [Custom Modules](custom-modules.md) — writing tools, inputs, outputs, triggers, sub-agents.
 - [MCP](mcp.md) — registering MCP servers per-agent or globally.
 - [Packages](packages.md) — `kohaku.yaml` manifests, install modes, publishing.

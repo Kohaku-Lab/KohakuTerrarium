@@ -150,8 +150,30 @@ subagents:
 
 Built-ins: `worker`, `coordinator`, `explore`, `plan`, `research`, `critic`, `response`, `memory_read`, `memory_write`, `summarize`.
 
+Builtin sub-agents already include the `default-runtime` plugin pack and minimal
+budgets: `turn_budget: [40, 60]`, `tool_call_budget: [75, 100]`, and no walltime
+limit. Override those fields inline if a specialist needs a larger budget.
+
+For YAML-only specialists, use `type: custom` without `module`/`config` and put
+`SubAgentConfig` fields directly in the entry:
+
+```yaml
+subagents:
+  - name: dependency_mapper
+    type: custom
+    description: Map dependency edges without editing files
+    system_prompt: "Map dependencies and return a compact summary."
+    tools: [glob, grep, read, tree]
+    default_plugins: ["default-runtime"]
+    turn_budget: [40, 60]
+    tool_call_budget: [75, 100]
+```
+
+See [Sub-agents](sub-agents.md) for runtime plugin packs, budgets, and
+compaction.
+
 If you also set `max_iterations` on the parent creature, sub-agents can share
-that turn budget or take an isolated slice:
+that legacy turn budget or take an isolated slice:
 
 ```yaml
 max_iterations: 30

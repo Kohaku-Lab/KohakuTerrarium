@@ -204,6 +204,39 @@ tools:
 | `interactive` | bool | `false` | 跨回合持續活著、接收 context update。 |
 | `options` | dict | `{}` | 子代理專屬選項。 |
 
+簡寫：裸字串會被視為內建子代理名稱：
+
+```yaml
+subagents:
+  - explore
+  - worker
+```
+
+純 YAML 內聯設定：使用不帶 `module`/`config` 的 `type: custom`；條目中未知欄位會轉發給 `SubAgentConfig.from_dict`：
+
+```yaml
+subagents:
+  - name: dependency_mapper
+    type: custom
+    system_prompt: "Map dependencies and return a compact summary."
+    tools: [glob, grep, read, tree]
+    default_plugins: ["default-runtime"]
+    turn_budget: [40, 60]
+    tool_call_budget: [75, 100]
+```
+
+內建子代理已經宣告 `default_plugins: ["default-runtime"]`、`turn_budget: [40, 60]`、`tool_call_budget: [75, 100]`，且沒有 `walltime_budget`。
+
+子代理選項欄位還包括執行期與共享預算控制：
+
+- `default_plugins: ["default-runtime"]` — 載入預算 ticker/alarm/gate 以及自動壓縮。
+- `turn_budget: [soft, hard]` — 子代理 LLM turn 的軟/硬限制。
+- `tool_call_budget: [soft, hard]` — 子代理工具呼叫的軟/硬限制。
+- `walltime_budget: [soft, hard]` — 可選的牆鐘時間限制（秒）。
+- `budget_inherit: true`（預設）— 如果父級存在共享舊式 iteration budget，子代理會複用它。
+- `budget_allocation: N` — 子代理得到一份新的獨立舊式 `N` turn 預算。
+- `budget_inherit: false` 且無 allocation — 子代理不使用父級共享舊式預算。
+
 ### 觸發器
 
 | 欄位 | 型別 | 預設 | 說明 |

@@ -33,6 +33,7 @@ tags:
 ## 扩展
 
 - [插件指南](plugins.md) — prompt 插件与 lifecycle 插件的用法、组合方式与使用时机。
+- [子代理指南](sub-agents.md) — 内置与内联专家、运行时预算插件和自动压缩。
 - [自定义模块指南](custom-modules.md) — 自定义输入、触发器、工具、输出、子代理的写法与注册。
 - [MCP 指南](mcp.md) — 连接 Model Context Protocol 服务器，把它们的工具暴露给 Creature。
 

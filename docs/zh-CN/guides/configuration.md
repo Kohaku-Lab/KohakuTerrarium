@@ -131,6 +131,39 @@ subagents:
 
 内置：`worker`、`coordinator`、`explore`、`plan`、`research`、`critic`、`response`、`memory_read`、`memory_write`、`summarize`。
 
+内置子代理已经包含 `default-runtime` 插件包和最小预算：`turn_budget: [40, 60]`、`tool_call_budget: [75, 100]`，并且没有 walltime 限制。专家需要更多空间时，可在条目中直接覆盖这些字段。
+
+对于纯 YAML 专家，使用不带 `module`/`config` 的 `type: custom`，并把 `SubAgentConfig` 字段直接写在条目里：
+
+```yaml
+subagents:
+  - name: dependency_mapper
+    type: custom
+    description: Map dependency edges without editing files
+    system_prompt: "Map dependencies and return a compact summary."
+    tools: [glob, grep, read, tree]
+    default_plugins: ["default-runtime"]
+    turn_budget: [40, 60]
+    tool_call_budget: [75, 100]
+```
+
+运行时插件包、预算与压缩的完整说明见 [子代理指南](sub-agents.md)。
+
+如果你还在父 Creature 上设置了 `max_iterations`，子代理可以共享这份旧式 turn 预算，也可以拿到一份独立切片：
+
+```yaml
+max_iterations: 30
+subagents:
+  - name: explore
+    type: builtin
+    options:
+      budget_inherit: true      # 默认：子代理消耗同一池预算
+  - name: critic
+    type: builtin
+    options:
+      budget_allocation: 5      # 子代理获得自己的 5-turn 旧式预算
+```
+
 ## 怎么加触发器？
 
 ```yaml
