@@ -5,6 +5,8 @@ Leaf module providing sub-agent configuration lookup without
 package-level side effects. Internal code should import from here.
 """
 
+import copy
+
 from kohakuterrarium.builtins.subagents.coordinator import COORDINATOR_CONFIG
 from kohakuterrarium.builtins.subagents.critic import CRITIC_CONFIG
 from kohakuterrarium.builtins.subagents.explore import EXPLORE_CONFIG
@@ -35,8 +37,13 @@ BUILTIN_SUBAGENTS = list(_BUILTIN_CONFIGS.keys())
 
 
 def get_builtin_subagent_config(name: str) -> SubAgentConfig | None:
-    """Get a builtin sub-agent configuration by name."""
-    return _BUILTIN_CONFIGS.get(name)
+    """Get a builtin sub-agent configuration by name.
+
+    Returns a defensive copy so per-agent inline overrides never mutate the
+    catalog singleton used by later agents or tests.
+    """
+    config = _BUILTIN_CONFIGS.get(name)
+    return copy.deepcopy(config) if config is not None else None
 
 
 def list_builtin_subagents() -> list[str]:

@@ -1,20 +1,15 @@
-"""
-Research sub-agent - Deep research with web access.
+"""Built-in research sub-agent."""
 
-Gathers information from local files and external sources to answer
-questions thoroughly, citing sources and synthesizing findings.
-"""
-
+from kohakuterrarium.builtins.subagents._prompt_loader import render_subagent_prompt
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 
-RESEARCH_SYSTEM_PROMPT = """\
-You are a research agent. Find accurate information.
-- Use web_search to find relevant pages, web_fetch to read them
-- Evaluate source reliability
-- Track all sources in your output
-- Distinguish facts from speculation
-- Return structured findings with citations
-"""
+RESEARCH_SYSTEM_PROMPT = render_subagent_prompt(
+    agent_name="research",
+    specialty_intro="You are a research specialist. Gather reliable local and web evidence and synthesize an accurate answer.",
+    extra_principles="Distinguish verified facts from speculation and keep source citations attached to claims.",
+    response_shape="Return: `Answer`, `Sources`, `Details`, and `Uncertainties` sections.",
+    can_modify=False,
+)
 
 RESEARCH_CONFIG = SubAgentConfig(
     name="research",
@@ -23,4 +18,8 @@ RESEARCH_CONFIG = SubAgentConfig(
     system_prompt=RESEARCH_SYSTEM_PROMPT,
     can_modify=False,
     stateless=True,
+    default_plugins=["default-runtime"],
+    turn_budget=(40, 60),
+    tool_call_budget=(75, 100),
+    model="subagent-default",
 )

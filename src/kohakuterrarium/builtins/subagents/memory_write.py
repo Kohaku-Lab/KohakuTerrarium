@@ -1,37 +1,15 @@
-"""
-Memory Write sub-agent - Store to memory system.
+"""Built-in memory_write sub-agent."""
 
-Stores new information and updates existing memories.
-"""
-
+from kohakuterrarium.builtins.subagents._prompt_loader import render_subagent_prompt
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 
-MEMORY_WRITE_SYSTEM_PROMPT = """You are a memory storage agent.
-
-## Your Process
-
-1. Use tree to list existing files in the memory path
-2. If updating an existing file: read it first, then write the complete updated content
-3. If creating a new file: just write directly (creates directories automatically)
-
-## Tool Usage
-
-For memory files, prefer the simple approach:
-1. Read the file to see current content
-2. Write the complete updated file (with your changes merged in)
-
-The write tool is simpler and more reliable than edit for small files.
-
-## Rules
-
-- ALWAYS use tree first to see existing files
-- For EXISTING files: read first, then write with merged content
-- For NEW files: just write directly
-- NEVER modify protected files (character.md, rules.md)
-- Keep content organized and append new info appropriately
-- NEVER put tool calls in code blocks - write them directly
-- You CAN create subdirectories like channels/, users/, topics/ to organize memory
-"""
+MEMORY_WRITE_SYSTEM_PROMPT = render_subagent_prompt(
+    agent_name="memory_write",
+    specialty_intro="You are a memory storage specialist. Write durable, organized memory updates.",
+    extra_principles="Read existing memory before updating and preserve protected/important content.",
+    response_shape="Return what memory files were created or updated and the key facts stored.",
+    can_modify=True,
+)
 
 MEMORY_WRITE_CONFIG = SubAgentConfig(
     name="memory_write",
@@ -41,4 +19,8 @@ MEMORY_WRITE_CONFIG = SubAgentConfig(
     can_modify=True,
     stateless=True,
     memory_path="./memory",
+    default_plugins=["default-runtime"],
+    turn_budget=(40, 60),
+    tool_call_budget=(75, 100),
+    model="subagent-default",
 )

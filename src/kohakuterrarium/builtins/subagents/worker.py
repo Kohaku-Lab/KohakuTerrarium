@@ -1,15 +1,15 @@
 """Worker sub-agent - general-purpose implementation worker."""
 
+from kohakuterrarium.builtins.subagents._prompt_loader import render_subagent_prompt
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 
-WORKER_SYSTEM_PROMPT = """\
-You are an execution agent. Complete the assigned task.
-- You own the files you're given -- edit them directly
-- Follow the plan provided by the caller
-- If you encounter blockers, document them and continue
-- Validate your work before reporting completion
-- Report what you changed and why
-"""
+WORKER_SYSTEM_PROMPT = render_subagent_prompt(
+    agent_name="worker",
+    specialty_intro="You are an implementation worker. Apply code changes, fix bugs, refactor safely, and validate the result.",
+    extra_principles="Prefer minimal, well-tested changes that respect the repository architecture.",
+    response_shape="Return: `Changed`, `Verification`, and `Risks/Follow-up` sections. Include files touched.",
+    can_modify=True,
+)
 
 WORKER_CONFIG = SubAgentConfig(
     name="worker",
@@ -18,4 +18,7 @@ WORKER_CONFIG = SubAgentConfig(
     system_prompt=WORKER_SYSTEM_PROMPT,
     can_modify=True,
     stateless=True,
+    default_plugins=["default-runtime"],
+    turn_budget=(40, 60),
+    tool_call_budget=(75, 100),
 )

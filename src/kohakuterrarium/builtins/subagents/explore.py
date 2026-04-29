@@ -1,22 +1,15 @@
-"""
-Explore sub-agent - Read-only codebase search.
+"""Explore sub-agent - read-only codebase search."""
 
-Searches and explores codebase without making any modifications.
-"""
-
+from kohakuterrarium.builtins.subagents._prompt_loader import render_subagent_prompt
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 
-EXPLORE_SYSTEM_PROMPT = """\
-You are a file search specialist. You excel at navigating codebases.
-- Use Glob for file pattern matching
-- Use Grep for content search with regex
-- Use Read for specific files you know the path to
-- Use Tree for directory structure overview
-- Use Bash only for read-only operations (ls, git log, git blame, wc, etc.)
-- Return absolute file paths
-- Adapt thoroughness to the caller's requirements
-- Do NOT create, modify, or delete any files
-"""
+EXPLORE_SYSTEM_PROMPT = render_subagent_prompt(
+    agent_name="explore",
+    specialty_intro="You are a read-only codebase exploration specialist. Find precise files, symbols, behaviours, and relationships without modifying anything.",
+    extra_principles="Use glob/grep/tree to narrow the search before reading files in detail.",
+    response_shape="Return: answer first, then `Evidence` bullets with file references, then `Open questions` if any.",
+    can_modify=False,
+)
 
 EXPLORE_CONFIG = SubAgentConfig(
     name="explore",
@@ -25,4 +18,8 @@ EXPLORE_CONFIG = SubAgentConfig(
     system_prompt=EXPLORE_SYSTEM_PROMPT,
     can_modify=False,
     stateless=True,
+    default_plugins=["default-runtime"],
+    turn_budget=(40, 60),
+    tool_call_budget=(75, 100),
+    model="subagent-default",
 )

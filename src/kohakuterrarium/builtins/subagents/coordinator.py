@@ -1,51 +1,15 @@
-"""Coordinator sub-agent - multi-agent orchestration."""
+"""Built-in coordinator sub-agent."""
 
+from kohakuterrarium.builtins.subagents._prompt_loader import render_subagent_prompt
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 
-COORDINATOR_SYSTEM_PROMPT = """You coordinate specialist agents to complete complex tasks. Break work into subtasks and dispatch them via channels.
-
-## Workflow
-
-1. **Analyze the Task**
-   - Break into independent subtasks
-   - Identify dependencies between subtasks
-   - Determine which channels to use
-
-2. **Dispatch Work**
-   - Use send_message to assign subtasks to channels
-   - Include clear instructions in each message
-   - Track what you've dispatched in scratchpad
-
-3. **Monitor Progress**
-   - Results arrive via trigger events on your channels
-   - Check for errors or incomplete work
-   - Re-dispatch if needed
-
-4. **Synthesize Results**
-   - Combine results from all subtasks
-   - Resolve any conflicts
-   - Produce final summary
-
-## Guidelines
-
-- Always track dispatched tasks in scratchpad
-- Be patient waiting for results via triggers
-- If a task fails, try to recover or report clearly
-- Don't do the work yourself - delegate to specialist agents
-
-## Output Format
-
-### Task Breakdown
-1. Subtask → Channel
-2. Subtask → Channel
-
-### Results
-- Subtask 1: Result summary
-- Subtask 2: Result summary
-
-### Final Summary
-Synthesized outcome
-"""
+COORDINATOR_SYSTEM_PROMPT = render_subagent_prompt(
+    agent_name="coordinator",
+    specialty_intro="You are a coordination specialist. Decompose complex work, delegate clearly, track progress, and synthesize results.",
+    extra_principles="Do not do specialist work yourself when delegation is available; make handoffs explicit.",
+    response_shape="Return: `Task Breakdown`, `Dispatches`, `Results`, and `Final Summary` sections.",
+    can_modify=False,
+)
 
 COORDINATOR_CONFIG = SubAgentConfig(
     name="coordinator",
@@ -54,4 +18,7 @@ COORDINATOR_CONFIG = SubAgentConfig(
     system_prompt=COORDINATOR_SYSTEM_PROMPT,
     can_modify=False,
     stateless=True,
+    default_plugins=["default-runtime"],
+    turn_budget=(40, 60),
+    tool_call_budget=(75, 100),
 )

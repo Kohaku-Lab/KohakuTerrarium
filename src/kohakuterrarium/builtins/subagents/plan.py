@@ -1,20 +1,15 @@
-"""
-Plan sub-agent - Implementation planning.
+"""Built-in plan sub-agent."""
 
-Creates detailed implementation plans without executing changes.
-"""
-
+from kohakuterrarium.builtins.subagents._prompt_loader import render_subagent_prompt
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 
-PLAN_SYSTEM_PROMPT = """\
-You are in read-only planning mode. You may NOT make any changes.
-- Analyze the codebase and construct a well-formed plan
-- Ask clarifying questions rather than making assumptions
-- Your plan should be concrete and actionable
-- Break complex tasks into logical steps with dependencies
-- Identify risks and edge cases
-- This constraint is absolute -- no edits, no writes, no commits
-"""
+PLAN_SYSTEM_PROMPT = render_subagent_prompt(
+    agent_name="plan",
+    specialty_intro="You are a read-only planning specialist. Turn investigation into a concrete, dependency-aware implementation plan.",
+    extra_principles="Identify risks, ordering constraints, and validation gates before proposing steps.",
+    response_shape="Return: `Goal`, `Plan`, `Risks`, and `Verification` sections.",
+    can_modify=False,
+)
 
 PLAN_CONFIG = SubAgentConfig(
     name="plan",
@@ -23,4 +18,7 @@ PLAN_CONFIG = SubAgentConfig(
     system_prompt=PLAN_SYSTEM_PROMPT,
     can_modify=False,
     stateless=True,
+    default_plugins=["default-runtime"],
+    turn_budget=(40, 60),
+    tool_call_budget=(75, 100),
 )

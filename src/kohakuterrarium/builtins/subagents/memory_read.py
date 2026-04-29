@@ -1,20 +1,15 @@
-"""
-Memory Read sub-agent - Retrieve from memory system.
+"""Built-in memory_read sub-agent."""
 
-Searches and retrieves relevant information from the memory folder.
-"""
-
+from kohakuterrarium.builtins.subagents._prompt_loader import render_subagent_prompt
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 
-MEMORY_READ_SYSTEM_PROMPT = """\
-You are a memory retrieval agent. Search and retrieve from the memory folder.
-
-- Use tree to discover available memory files first
-- Use grep to search for specific content across files
-- Use read to retrieve specific files
-- Never guess file names - always discover them first
-- Report what you found, structured by relevance
-"""
+MEMORY_READ_SYSTEM_PROMPT = render_subagent_prompt(
+    agent_name="memory_read",
+    specialty_intro="You are a memory retrieval specialist. Find relevant persisted knowledge without guessing file names.",
+    extra_principles="Discover available memory files first, then search and read only what is relevant.",
+    response_shape="Return relevant memories grouped by relevance with file paths.",
+    can_modify=False,
+)
 
 MEMORY_READ_CONFIG = SubAgentConfig(
     name="memory_read",
@@ -24,4 +19,8 @@ MEMORY_READ_CONFIG = SubAgentConfig(
     can_modify=False,
     stateless=True,
     memory_path="./memory",
+    default_plugins=["default-runtime"],
+    turn_budget=(40, 60),
+    tool_call_budget=(75, 100),
+    model="subagent-default",
 )
