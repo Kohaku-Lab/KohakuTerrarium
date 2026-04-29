@@ -20,6 +20,7 @@ from kohakuterrarium.llm.base import (
     NativeToolCall,
     ToolSchema,
 )
+from kohakuterrarium.llm.openai_sanitize import log_request_shape, strip_kt_extras
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -148,13 +149,22 @@ class OpenAIProvider(BaseLLMProvider):
     # ------------------------------------------------------------------
 
     def _prepare_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Apply Anthropic prompt-cache markers when relevant.
+        """Sanitize content parts, then apply Anthropic cache markers.
 
-        Non-Anthropic endpoints or the ``disable_prompt_caching`` opt-out
-        return the list unchanged (no deep-copy, no alloc). For Anthropic
-        endpoints we defer to :func:`apply_anthropic_cache_markers` which
-        deep-copies and tags system + the last three non-tool messages.
+        Step 1: strip KT-internal fields (e.g. ``ImagePart.meta``
+        carrying chat-panel badge metadata) from content parts. Strict
+        OpenAI-compatible providers — vLLM-hosted vision models, SGLang,
+        MiMo, and similar — drop or ignore content parts with unknown
+        top-level keys, producing the failure mode "the model says it
+        sees no image." OpenAI proper tolerates the extras but every
+        custom OpenAI-compat backend is its own parser. See
+        :func:`strip_kt_extras`.
+
+        Step 2: for Anthropic endpoints (and unless the user opts out
+        via ``disable_prompt_caching``), tag system + the last three
+        non-tool messages with cache_control markers.
         """
+        messages = strip_kt_extras(messages)
         if not is_anthropic_endpoint(self.base_url, None):
             return messages
         if self.extra_body.get("disable_prompt_caching"):
@@ -222,7 +232,11 @@ class OpenAIProvider(BaseLLMProvider):
         if self.prompt_cache_key:
             create_kwargs["prompt_cache_key"] = self.prompt_cache_key
 
-        logger.debug("Starting streaming request", model=create_kwargs["model"])
+        log_request_shape(
+            "Starting streaming request",
+            create_kwargs["model"],
+            create_kwargs["messages"],
+        )
 
         self._last_usage = {}
         pending_calls: dict[int, dict[str, str]] = {}
@@ -362,7 +376,11 @@ class OpenAIProvider(BaseLLMProvider):
         if self.prompt_cache_key:
             create_kwargs["prompt_cache_key"] = self.prompt_cache_key
 
-        logger.debug("Starting non-streaming request", model=create_kwargs["model"])
+        log_request_shape(
+            "Starting non-streaming request",
+            create_kwargs["model"],
+            create_kwargs["messages"],
+        )
 
         response = await self._client.chat.completions.create(**create_kwargs)
 
