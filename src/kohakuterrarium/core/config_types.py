@@ -123,6 +123,7 @@ class AgentConfig:
     extra_body: dict[str, Any] = field(
         default_factory=dict
     )  # extra fields merged into API request body
+    retry_policy: dict[str, Any] | None = None
 
     # System prompt (loaded from file or inline)
     system_prompt: str = "You are a helpful assistant."
@@ -193,6 +194,12 @@ class AgentConfig:
     # termination signal. None / 0 means "no enforcement" and preserves
     # the legacy behavior.
     max_iterations: int | None = None
+
+    # Runtime default plugin packs and multi-axis budget defaults.
+    default_plugins: list[str] = field(default_factory=list)
+    turn_budget: tuple[int, int] | None = None
+    walltime_budget: tuple[float, float] | None = None
+    tool_call_budget: tuple[int, int] | None = None
 
     # Tool call format: "bracket", "xml", "native", or custom dict
     tool_format: str | dict = "bracket"

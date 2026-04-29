@@ -39,6 +39,16 @@ def create_subagent_config(
                 config.extra_prompt = item.options["extra_prompt"]
             if item.options.get("extra_prompt_file"):
                 config.extra_prompt_file = item.options["extra_prompt_file"]
+            for field_name in (
+                "default_plugins",
+                "turn_budget",
+                "walltime_budget",
+                "tool_call_budget",
+                "compact",
+                "model",
+            ):
+                if field_name in item.options:
+                    setattr(config, field_name, item.options[field_name])
             if "notify_controller_on_background_complete" in item.options:
                 config.notify_controller_on_background_complete = bool(
                     item.options["notify_controller_on_background_complete"]
@@ -65,7 +75,9 @@ def create_subagent_config(
                     logger.error("Failed to load custom sub-agent", error=str(e))
                     return None
 
-            # Otherwise, create inline config from options
+            # Otherwise, create inline config from options. This supports
+            # nested YAML-only sub-agent configs without a Python module:
+            # ``type: custom`` plus fields like ``system_prompt`` / ``tools``.
             config_dict = {
                 "name": item.name,
                 "description": item.description or f"{item.name} sub-agent",

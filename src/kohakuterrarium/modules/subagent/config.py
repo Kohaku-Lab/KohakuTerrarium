@@ -72,6 +72,11 @@ class SubAgentConfig:
     return_as_context: bool = False  # Return output text to parent as context
     max_turns: int = 0  # 0 = unlimited (agent runs until task is done)
     timeout: float = 0  # 0 = no timeout
+    default_plugins: list[str] = field(default_factory=list)
+    turn_budget: tuple[int, int] | None = None
+    walltime_budget: tuple[float, float] | None = None
+    tool_call_budget: tuple[int, int] | None = None
+    compact: dict[str, Any] | None = None
     model: str | None = None
     temperature: float | None = None
     memory_path: str | None = None
@@ -145,9 +150,23 @@ class SubAgentConfig:
         if "context_mode" in data and isinstance(data["context_mode"], str):
             data["context_mode"] = ContextUpdateMode(data["context_mode"])
 
+        data = dict(data)
+
         # Convert modifying_tools list to set if present
         if "modifying_tools" in data and isinstance(data["modifying_tools"], list):
             data["modifying_tools"] = set(data["modifying_tools"])
+
+        if "turn_budget" not in data and data.get("max_turns", 0):
+            data["turn_budget"] = (0, int(data["max_turns"]))
+        if "walltime_budget" not in data and data.get("timeout", 0):
+            data["walltime_budget"] = (0, float(data["timeout"]))
+        for key, cast in (
+            ("turn_budget", int),
+            ("walltime_budget", float),
+            ("tool_call_budget", int),
+        ):
+            if key in data:
+                data[key] = _parse_budget_tuple(data[key], cast)
 
         # Filter to known fields
         known_fields = {
@@ -167,6 +186,11 @@ class SubAgentConfig:
             "return_as_context",
             "max_turns",
             "timeout",
+            "default_plugins",
+            "turn_budget",
+            "walltime_budget",
+            "tool_call_budget",
+            "compact",
             "model",
             "temperature",
             "memory_path",
@@ -185,6 +209,29 @@ class SubAgentConfig:
             filtered.setdefault("extra", {}).update(extra)
 
         return cls(**filtered)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a plain dict representation for tests and tooling."""
+        data = dict(self.__dict__)
+        data["context_mode"] = self.context_mode.value
+        data["output_to"] = self.output_to.value
+        if self.modifying_tools is not None:
+            data["modifying_tools"] = sorted(self.modifying_tools)
+        return data
+
+
+def _parse_budget_tuple(value: Any, cast: Any) -> tuple[Any, Any] | None:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        hard = value.get("hard", value.get("limit"))
+        soft = value.get("soft", 0)
+        if hard is None:
+            return None
+        return (cast(soft), cast(hard))
+    if isinstance(value, (list, tuple)) and len(value) >= 2:
+        return (cast(value[0]), cast(value[1]))
+    return None
 
 
 @dataclass
