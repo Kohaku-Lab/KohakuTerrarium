@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from kohakuterrarium.studio.sessions.lifecycle import find_creature
 from kohakuterrarium.terrarium.config import (
     ChannelConfig,
     CreatureConfig,
@@ -16,7 +17,6 @@ from kohakuterrarium.terrarium.config import (
     TerrariumConfig,
 )
 from kohakuterrarium.terrarium.engine import Terrarium
-
 from tests.unit.terrarium._fakes import make_creature
 
 # ---------------------------------------------------------------------------
@@ -131,9 +131,16 @@ class TestRootRecipe:
         graph = await engine.apply_recipe(cfg, creature_builder=_fake_builder)
         # report_to_root channel was auto-declared
         assert "report_to_root" in graph.channels
-        # Every creature got it added to send_channels
+        # Every non-root creature got it added to send_channels; root listens there.
         for c in engine.list_creatures():
-            assert "report_to_root" in c.send_channels
+            if c.is_root:
+                assert "report_to_root" in c.listen_channels
+            else:
+                assert "report_to_root" in c.send_channels
+        root = engine.get_creature("root")
+        assert root.is_root
+        assert root.agent.environment is engine._environments[graph.graph_id]
+        assert find_creature(engine, graph.graph_id, "root") is root
 
 
 class TestEmptyRecipe:

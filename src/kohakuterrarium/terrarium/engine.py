@@ -11,8 +11,8 @@ union on graph merge, session-store copy on graph split).
 """
 
 import asyncio
-from dataclasses import dataclass, field
 from collections.abc import AsyncIterator, Iterator
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import kohakuterrarium.terrarium.channels as _channels
@@ -424,6 +424,7 @@ class Terrarium:
         *,
         graph: GraphRef | None = None,
         pwd: str | None = None,
+        llm_override: str | None = None,
         creature_builder=None,
     ) -> GraphTopology:
         """Apply a terrarium recipe — bulk add_creature, add_channel,
@@ -436,6 +437,7 @@ class Terrarium:
             recipe,
             graph=graph,
             pwd=pwd if pwd is not None else self._pwd,
+            llm_override=llm_override,
             creature_builder=creature_builder,
         )
 
@@ -551,7 +553,11 @@ class Terrarium:
             return
         for cid in g.creature_ids:
             c = self._creatures.get(cid)
-            if c is not None and hasattr(c.agent, "session_store"):
+            if c is None:
+                continue
+            if hasattr(c.agent, "attach_session_store"):
+                c.agent.attach_session_store(store)
+            elif hasattr(c.agent, "session_store"):
                 c.agent.session_store = store
 
     # ------------------------------------------------------------------

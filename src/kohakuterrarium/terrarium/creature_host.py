@@ -13,15 +13,16 @@ both ``AgentConfig`` (file path or object) and ``CreatureConfig``
 """
 
 import asyncio
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from collections.abc import AsyncIterator
 from typing import Any
 from uuid import uuid4
 
 from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config import AgentConfig, build_agent_config
+from kohakuterrarium.core.environment import Environment
 from kohakuterrarium.llm.profiles import _login_provider_for
 from kohakuterrarium.terrarium.config import CreatureConfig
 from kohakuterrarium.terrarium.output_log import LogEntry, OutputLogCapture
@@ -272,6 +273,7 @@ def build_creature(
     graph_id: str = "",
     pwd: str | None = None,
     llm_override: str | None = None,
+    environment: Environment | None = None,
 ) -> Creature:
     """Build a :class:`Creature` from any of the supported config shapes.
 
@@ -289,7 +291,17 @@ def build_creature(
       ``build_agent_config(config_data, base_dir)`` then ``Agent(...)``.
     """
     if isinstance(config, (str, Path)):
-        agent = Agent.from_path(str(config), llm_override=llm_override, pwd=pwd)
+        agent = Agent.from_path(
+            str(config),
+            session=(
+                environment.get_session(creature_id or Path(config).stem)
+                if environment is not None
+                else None
+            ),
+            environment=environment,
+            llm_override=llm_override,
+            pwd=pwd,
+        )
         cid = creature_id or _safe_creature_id(agent.config.name)
         return Creature(
             creature_id=cid,
@@ -300,7 +312,16 @@ def build_creature(
         )
 
     if isinstance(config, AgentConfig):
-        agent = Agent(config, llm_override=llm_override, pwd=pwd)
+        session = (
+            environment.get_session(creature_id or config.name) if environment else None
+        )
+        agent = Agent(
+            config,
+            session=session,
+            environment=environment,
+            llm_override=llm_override,
+            pwd=pwd,
+        )
         cid = creature_id or _safe_creature_id(config.name)
         return Creature(
             creature_id=cid,
@@ -315,6 +336,8 @@ def build_creature(
         agent = Agent(
             agent_config,
             input_module=NoneInput(),
+            session=environment.get_session(config.name) if environment else None,
+            environment=environment,
             llm_override=llm_override,
             pwd=pwd,
         )
