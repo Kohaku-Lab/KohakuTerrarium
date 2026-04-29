@@ -4,6 +4,7 @@
     <span class="w-4 shrink-0 mt-0.5" :class="iconClass" />
     <span class="font-mono w-32 shrink-0 truncate" :class="typeClass">{{ event.type }}</span>
     <span class="flex-1 min-w-0 truncate text-warm-700 dark:text-warm-300">{{ summary }}</span>
+    <span v-if="tokenStr" class="font-mono text-taaffeite shrink-0">{{ tokenStr }}</span>
     <span v-if="durationMs != null" class="font-mono text-warm-400 shrink-0">⏱ {{ formatDuration(durationMs) }}</span>
   </button>
 </template>
@@ -28,6 +29,7 @@ const TYPE_TONE = {
   subagent_call: "text-iolite",
   subagent_result: "text-iolite/70",
   subagent_error: "text-coral",
+  subagent_token_usage: "text-taaffeite",
   plugin_hook_timing: "text-aquamarine",
   compact_start: "text-amber",
   compact_complete: "text-amber",
@@ -48,6 +50,7 @@ const ICON_MAP = {
   subagent_call: "i-carbon-bot",
   subagent_result: "i-carbon-bot",
   subagent_error: "i-carbon-warning-alt",
+  subagent_token_usage: "i-carbon-chart-bar",
   plugin_hook_timing: "i-carbon-plug",
   compact_start: "i-carbon-compress",
   compact_complete: "i-carbon-compress",
@@ -76,6 +79,17 @@ const summary = computed(() => {
   return ""
 })
 
+const tokenStr = computed(() => {
+  const e = props.event || {}
+  const tin = Number(e.prompt_tokens ?? e.tokens_in ?? 0)
+  const tout = Number(e.completion_tokens ?? e.tokens_out ?? 0)
+  const cached = Number(e.cached_tokens ?? e.tokens_cached ?? 0)
+  if (!tin && !tout && !cached) return ""
+  const parts = [`${formatTokens(tin)} in`, `${formatTokens(tout)} out`]
+  if (cached) parts.push(`${formatTokens(cached)} cache`)
+  return parts.join(" / ")
+})
+
 const durationMs = computed(() => {
   const e = props.event
   if (e == null) return null
@@ -92,6 +106,13 @@ function formatTime(ts) {
   } catch {
     return String(ts)
   }
+}
+
+function formatTokens(n) {
+  const v = Number(n || 0)
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`
+  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}k`
+  return String(v)
 }
 
 function formatDuration(ms) {

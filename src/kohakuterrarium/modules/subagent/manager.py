@@ -406,7 +406,11 @@ class SubAgentManager(InteractiveManagerMixin):
                 job_id=job_id,
             )
 
-            result = SubAgentResult(success=False, error=error_msg, cancelled=True)
+            current = getattr(job.subagent, "_build_partial_result", None)
+            if callable(current):
+                result = current(error_msg, cancelled=True)
+            else:
+                result = SubAgentResult(success=False, error=error_msg, cancelled=True)
             self._results[job_id] = result
 
             self.job_store.update_status(
@@ -426,7 +430,11 @@ class SubAgentManager(InteractiveManagerMixin):
                 error=str(e),
             )
 
-            result = SubAgentResult(success=False, error=str(e))
+            current = getattr(job.subagent, "_build_partial_result", None)
+            if callable(current):
+                result = current(str(e))
+            else:
+                result = SubAgentResult(success=False, error=str(e))
             self._results[job_id] = result
 
             self.job_store.update_status(

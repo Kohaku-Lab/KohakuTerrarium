@@ -45,25 +45,63 @@ def _empty_usage() -> dict[str, int]:
     }
 
 
-def _state_usage_to_shape(raw: dict[str, Any]) -> dict[str, int]:
-    """Normalise a ``state[<agent>:token_usage]`` row to the public shape.
+def _as_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
 
-    ``SessionOutput`` writes ``total_input_tokens`` / ``total_output_tokens``
-    / ``total_cached_tokens`` (and a transient ``last_prompt_tokens``). We
-    surface them under the concise names the read-side API uses.
-    """
-    prompt = int(raw.get("total_input_tokens", 0) or 0)
-    completion = int(raw.get("total_output_tokens", 0) or 0)
-    cached = int(raw.get("total_cached_tokens", 0) or 0)
-    # Total is the sum of prompt + completion — providers already fold
-    # cached into prompt (it's a discount signal, not an extra bucket).
-    total = prompt + completion
+
+def _usage_to_shape(raw: dict[str, Any]) -> dict[str, int]:
+    """Normalise any persisted/event token payload to the public shape."""
+    if any(k in raw for k in ("total_input_tokens", "total_output_tokens")):
+        prompt = _as_int(raw.get("total_input_tokens"))
+        completion = _as_int(raw.get("total_output_tokens"))
+        cached = _as_int(raw.get("total_cached_tokens"))
+        explicit_total = raw.get("total_tokens")
+    else:
+        prompt = _as_int(raw.get("prompt_tokens", raw.get("tokens_in")))
+        completion = _as_int(raw.get("completion_tokens", raw.get("tokens_out")))
+        cached = _as_int(raw.get("cached_tokens", raw.get("tokens_cached")))
+        explicit_total = raw.get("total_tokens")
+    try:
+        total = (
+            _as_int(explicit_total)
+            if explicit_total is not None
+            else prompt + completion
+        )
+    except (TypeError, ValueError):
+        total = prompt + completion
+    if total <= 0:
+        total = prompt + completion
     return {
         "total_tokens": total,
         "prompt_tokens": prompt,
         "completion_tokens": completion,
         "cached_tokens": cached,
     }
+
+
+def _state_usage_to_shape(raw: dict[str, Any]) -> dict[str, int]:
+    """Normalise a ``state[<agent>:token_usage]`` row to public shape."""
+    return _usage_to_shape(raw)
+
+
+def _with_usage_fallback(evt: dict, fallback: dict | None) -> dict:
+    if not fallback:
+        return evt
+    merged = dict(evt)
+    for primary, alias in (
+        ("prompt_tokens", "tokens_in"),
+        ("completion_tokens", "tokens_out"),
+        ("cached_tokens", "tokens_cached"),
+        ("total_tokens", "total_tokens"),
+    ):
+        current = _as_int(merged.get(primary, merged.get(alias)))
+        other = _as_int(fallback.get(primary, fallback.get(alias)))
+        if current <= 0 and other > 0:
+            merged[primary] = other
+    return merged
 
 
 def _own_usage_for_namespace(store: "SessionStore", namespace: str) -> dict[str, int]:
@@ -118,6 +156,16 @@ def _iter_subagent_runs(store: "SessionStore", parent: str) -> list[tuple[str, i
     return runs
 
 
+def _subagent_name_from_event(evt: dict) -> str | None:
+    raw = evt.get("name") or evt.get("subagent") or evt.get("subagent_name")
+    if isinstance(raw, str) and raw:
+        return raw
+    job_id = str(evt.get("job_id") or "")
+    if job_id.startswith("agent_") and "_" in job_id[len("agent_") :]:
+        return job_id[len("agent_") :].rsplit("_", 1)[0]
+    return None
+
+
 def _subagent_tokens_from_events(
     events: list[dict],
 ) -> dict[str, list[dict[str, int]]]:
@@ -129,20 +177,46 @@ def _subagent_tokens_from_events(
     in completion order. See note in module docstring.
     """
     per_name: dict[str, list[dict[str, int]]] = {}
+    by_job: dict[str, dict] = {}
+    anonymous: list[dict] = []
     for evt in events:
-        if evt.get("type") != "subagent_result":
+        if evt.get("type") not in ("subagent_result", "subagent_token_usage"):
             continue
-        name = evt.get("name")
-        if not isinstance(name, str) or not name:
+        if evt.get("type") == "subagent_result":
+            usage = _usage_to_shape(evt)
+            if (
+                not evt.get("error")
+                and evt.get("success") is not False
+                and usage["total_tokens"] <= 0
+                and usage["prompt_tokens"] <= 0
+                and usage["completion_tokens"] <= 0
+                and usage["cached_tokens"] <= 0
+            ):
+                continue
+        name = _subagent_name_from_event(evt)
+        if not name:
             continue
-        per_name.setdefault(name, []).append(
-            {
-                "total_tokens": int(evt.get("total_tokens", 0) or 0),
-                "prompt_tokens": int(evt.get("prompt_tokens", 0) or 0),
-                "completion_tokens": int(evt.get("completion_tokens", 0) or 0),
-                "cached_tokens": int(evt.get("cached_tokens", 0) or 0),
-            }
-        )
+        job_id = str(evt.get("job_id") or "")
+        if not job_id:
+            anonymous.append(evt)
+            continue
+        previous = by_job.get(job_id)
+        previous_usage = _usage_to_shape(previous) if previous else _empty_usage()
+        if previous is None:
+            by_job[job_id] = evt
+        elif evt.get("type") == "subagent_result":
+            by_job[job_id] = _with_usage_fallback(evt, previous)
+        else:
+            usage = _usage_to_shape(evt)
+            if (
+                previous.get("type") != "subagent_result"
+                and usage["total_tokens"] >= previous_usage["total_tokens"]
+            ):
+                by_job[job_id] = evt
+    for evt in list(by_job.values()) + anonymous:
+        name = _subagent_name_from_event(evt)
+        if name:
+            per_name.setdefault(name, []).append(_usage_to_shape(evt))
     return per_name
 
 
@@ -237,16 +311,20 @@ def _by_turn_from_rollup(store: "SessionStore", agent: str) -> list[dict[str, in
         out.append(
             {
                 "turn_index": int(row.get("turn_index", 0) or 0),
-                "prompt": int(row.get("prompt_tokens", 0) or 0),
-                "completion": int(row.get("completion_tokens", 0) or 0),
-                "cached": int(row.get("cached_tokens", 0) or 0),
+                "prompt": int(row.get("prompt_tokens", row.get("tokens_in", 0)) or 0),
+                "completion": int(
+                    row.get("completion_tokens", row.get("tokens_out", 0)) or 0
+                ),
+                "cached": int(
+                    row.get("cached_tokens", row.get("tokens_cached", 0)) or 0
+                ),
             }
         )
     return out
 
 
 def _by_turn_from_events(store: "SessionStore", agent: str) -> list[dict[str, int]]:
-    """Group ``token_usage`` events by ``turn_index`` (fallback path).
+    """Group token and sub-agent-result events by turn (fallback path).
 
     Used when the rollup table has nothing for ``agent``; Wave B
     documented this as acceptable because the emitter is not yet wired
@@ -256,16 +334,21 @@ def _by_turn_from_events(store: "SessionStore", agent: str) -> list[dict[str, in
     """
     buckets: dict[int, dict[str, int]] = {}
     for evt in store.get_events(agent):
-        if evt.get("type") != "token_usage":
+        if evt.get("type") not in (
+            "token_usage",
+            "subagent_result",
+            "subagent_token_usage",
+        ):
             continue
-        turn = int(evt.get("turn_index", 0) or 0)
+        turn = int(evt.get("turn_index", 0) or evt.get("spawned_in_turn", 0) or 0)
+        usage = _usage_to_shape(evt)
         slot = buckets.setdefault(
             turn,
             {"turn_index": turn, "prompt": 0, "completion": 0, "cached": 0},
         )
-        slot["prompt"] += int(evt.get("prompt_tokens", 0) or 0)
-        slot["completion"] += int(evt.get("completion_tokens", 0) or 0)
-        slot["cached"] += int(evt.get("cached_tokens", 0) or 0)
+        slot["prompt"] += usage["prompt_tokens"]
+        slot["completion"] += usage["completion_tokens"]
+        slot["cached"] += usage["cached_tokens"]
     return [buckets[t] for t in sorted(buckets.keys())]
 
 

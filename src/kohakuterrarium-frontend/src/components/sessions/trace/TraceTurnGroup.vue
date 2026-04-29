@@ -6,7 +6,9 @@
       <span class="font-mono w-16 shrink-0 text-warm-700 dark:text-warm-300">#{{ turn.turn_index }}</span>
       <span v-if="agent" class="font-mono text-warm-400 w-20 shrink-0 truncate">{{ agent }}</span>
       <span v-if="durationS != null" class="text-warm-500 shrink-0">{{ t("sessionViewer.trace.turn.duration", { s: durationS }) }}</span>
+      <span v-if="tokenStr" class="font-mono text-warm-500 shrink-0">{{ tokenStr }}</span>
       <span v-if="costStr" class="text-warm-700 dark:text-warm-300 shrink-0">{{ costStr }}</span>
+      <span v-if="subagentCount" class="px-1 py-0 rounded bg-iolite/10 text-iolite text-[10px] font-mono shrink-0">sub×{{ subagentCount }}</span>
       <span v-if="toolCount" class="text-warm-500 shrink-0">{{ t("sessionViewer.trace.turn.toolCalls", { n: toolCount }) }}</span>
       <span v-if="hasError" class="ml-auto px-1.5 py-0 rounded bg-coral/15 text-coral text-[10px] font-mono">error</span>
       <span v-if="isCompact" class="px-1.5 py-0 rounded bg-amber/15 text-amber text-[10px] font-mono">compact</span>
@@ -68,11 +70,22 @@ const durationS = computed(() => {
   return null
 })
 
+const tokenStr = computed(() => {
+  const tin = Number(props.turn.tokens_in || 0)
+  const tout = Number(props.turn.tokens_out || 0)
+  const cached = Number(props.turn.tokens_cached || 0)
+  if (!tin && !tout && !cached) return ""
+  const parts = [`${formatTokens(tin)} in`, `${formatTokens(tout)} out`]
+  if (cached) parts.push(`${formatTokens(cached)} cache`)
+  return parts.join(" / ")
+})
+
 const costStr = computed(() => {
   if (props.turn.cost_usd != null) return `$${Number(props.turn.cost_usd).toFixed(3)}`
   return ""
 })
 
+const subagentCount = computed(() => (props.turn.subagent_breakdown || []).length)
 const toolCount = computed(() => Number(props.turn.tool_calls || 0))
 const hasError = computed(() => Boolean(props.turn.has_error))
 const isCompact = computed(() => Boolean(props.turn.compacted))
@@ -95,10 +108,10 @@ function isThisTurnInStore() {
 
 const TYPE_GROUPS = {
   tool: new Set(["tool_call", "tool_result", "tool_error"]),
-  subagent: new Set(["subagent_call", "subagent_result", "subagent_error"]),
+  subagent: new Set(["subagent_call", "subagent_result", "subagent_error", "subagent_token_usage"]),
   plugin: new Set(["plugin_hook_timing", "plugin_hook"]),
   compact: new Set(["compact_start", "compact_complete", "compact_decision", "compact_replace"]),
-  tokens: new Set(["token_usage", "turn_token_usage"]),
+  tokens: new Set(["token_usage", "turn_token_usage", "subagent_token_usage"]),
   text: new Set(["text_chunk", "text"]),
 }
 
@@ -114,6 +127,13 @@ function _passesFilter(ev) {
     if (set && set.has(ev.type)) return true
   }
   return false
+}
+
+function formatTokens(n) {
+  const v = Number(n || 0)
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`
+  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}k`
+  return String(v)
 }
 
 function loadMore() {

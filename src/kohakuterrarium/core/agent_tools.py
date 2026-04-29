@@ -350,6 +350,19 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             }
             if is_subagent:
                 metadata["result"] = error_text
+                existing = self.subagent_manager.get_result(job_id)
+                if existing is not None:
+                    metadata["turns"] = getattr(existing, "turns", 0)
+                    metadata["duration"] = getattr(existing, "duration", 0)
+                    metadata["total_tokens"] = getattr(existing, "total_tokens", 0)
+                    metadata["prompt_tokens"] = getattr(existing, "prompt_tokens", 0)
+                    metadata["completion_tokens"] = getattr(
+                        existing, "completion_tokens", 0
+                    )
+                    metadata["cached_tokens"] = getattr(existing, "cached_tokens", 0)
+                    metadata["tools_used"] = getattr(existing, "metadata", {}).get(
+                        "tools_used", []
+                    )
             self.output_router.notify_activity(
                 error_activity,
                 f"[{label}] {'INTERRUPTED' if interrupted else 'FAILED'}: {error_text}",

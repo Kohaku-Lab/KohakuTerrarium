@@ -11,11 +11,25 @@ from typing import Any
 from fastapi import HTTPException
 
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.studio.persistence.viewer.rollups import rollups_or_derived
+from kohakuterrarium.studio.persistence.viewer.rollups import (
+    ERROR_EVENT_TYPES,
+    aggregate_turn_rollups,
+    rollups_or_derived,
+)
 
-# Event types that count as "errors" for the overview tab. Kept narrow
-# so a turn with one tool retry-and-success doesn't show as broken.
-_ERROR_EVENT_TYPES = frozenset({"tool_error", "subagent_error", "processing_error"})
+
+def _subagent_failed(evt: dict) -> bool:
+    final_state = str(evt.get("final_state") or "").lower()
+    return bool(
+        evt.get("type") == "subagent_result"
+        and (
+            evt.get("success") is False
+            or evt.get("error")
+            or evt.get("interrupted")
+            or evt.get("cancelled")
+            or final_state in {"error", "interrupted", "cancelled"}
+        )
+    )
 
 
 def _agents_for_summary(meta: dict[str, Any], requested: str | None) -> list[str]:
@@ -67,9 +81,11 @@ def _scan_events_for_summary(events: list[dict]) -> dict[str, Any]:
     for e in events:
         etype = e.get("type")
         ti = e.get("turn_index")
+        if not isinstance(ti, int):
+            ti = e.get("spawned_in_turn")
         if etype == "tool_call":
             tool_calls += 1
-        elif etype in _ERROR_EVENT_TYPES:
+        elif etype in ERROR_EVENT_TYPES or _subagent_failed(e):
             if isinstance(ti, int) and ti not in seen_error_turns:
                 seen_error_turns.add(ti)
                 errors.append(ti)
@@ -96,17 +112,10 @@ def build_summary_payload(
     meta = store.load_meta()
     agents = _agents_for_summary(meta, agent)
 
-    # Per-agent rollups, then a flat list for hot-turn selection.
-    # Falls back to events-derived rows when the rollup table is empty
-    # (which is the case for any session whose ``turn_token_usage``
-    # writer hasn't been wired through ``save_turn_rollup`` yet — see
-    # ``session/output.py``).
-    rollups_by_agent: dict[str, list[dict]] = {}
-    flat_rollups: list[dict] = []
-    for a in agents:
-        rows = rollups_or_derived(store, a)
-        rollups_by_agent[a] = rows
-        flat_rollups.extend(rows)
+    if agent is None:
+        flat_rollups = aggregate_turn_rollups(store)
+    else:
+        flat_rollups = rollups_or_derived(store, agents[0])
 
     totals = _aggregate_rollups(flat_rollups)
 

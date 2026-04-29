@@ -182,6 +182,7 @@ class AgentRuntimeToolsMixin:
                     "total_tokens": sa_meta.get("total_tokens", 0),
                     "prompt_tokens": sa_meta.get("prompt_tokens", 0),
                     "completion_tokens": sa_meta.get("completion_tokens", 0),
+                    "cached_tokens": sa_meta.get("cached_tokens", 0),
                 },
             )
         elif is_subagent:
@@ -198,6 +199,7 @@ class AgentRuntimeToolsMixin:
                     "total_tokens": sa_meta.get("total_tokens", 0),
                     "prompt_tokens": sa_meta.get("prompt_tokens", 0),
                     "completion_tokens": sa_meta.get("completion_tokens", 0),
+                    "cached_tokens": sa_meta.get("cached_tokens", 0),
                 },
             )
         else:

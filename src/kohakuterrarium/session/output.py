@@ -265,6 +265,7 @@ class SessionOutput(OutputModule):
         "subagent_start": "_handle_subagent_start",
         "subagent_done": "_handle_subagent_done",
         "subagent_error": "_handle_subagent_error",
+        "subagent_token_update": "_handle_subagent_token_update",
         "token_usage": "_handle_token_usage",
         "compact_start": "_handle_compact_start",
         "compact_complete": "_handle_compact_complete",
@@ -363,6 +364,7 @@ class SessionOutput(OutputModule):
 
     def _handle_subagent_done(self, name: str, detail: str, metadata: dict) -> None:
         job_id = metadata.get("job_id", "")
+        name = _subagent_name(name, metadata)
         output_text = metadata.get("result", detail)
         self._record(
             "subagent_result",
@@ -373,12 +375,7 @@ class SessionOutput(OutputModule):
                 "tools_used": metadata.get("tools_used", []),
                 "turns": metadata.get("turns", 0),
                 "duration": metadata.get("duration", 0),
-                "total_tokens": metadata.get("total_tokens", 0),
-                "prompt_tokens": metadata.get("prompt_tokens", 0),
-                "completion_tokens": metadata.get("completion_tokens", 0),
-                # Wave B audit finding A: cached_tokens now flow from
-                # SubAgent → parent activity → stored event.
-                "cached_tokens": metadata.get("cached_tokens", 0),
+                **_token_metadata(metadata),
             },
         )
         # Wave C: persist a minimal child conversation so plugin-spawned
@@ -387,8 +384,21 @@ class SessionOutput(OutputModule):
             name, job_id, output_text, success=True, metadata=metadata
         )
 
+    def _handle_subagent_token_update(
+        self, name: str, detail: str, metadata: dict
+    ) -> None:
+        self._record(
+            "subagent_token_usage",
+            {
+                "name": _subagent_name(name, metadata),
+                "job_id": metadata.get("job_id", ""),
+                **_token_metadata(metadata),
+            },
+        )
+
     def _handle_subagent_error(self, name: str, detail: str, metadata: dict) -> None:
         job_id = metadata.get("job_id", "")
+        name = _subagent_name(name, metadata)
         output_text = metadata.get("result", detail)
         self._record(
             "subagent_result",
@@ -404,10 +414,7 @@ class SessionOutput(OutputModule):
                 "tools_used": metadata.get("tools_used", []),
                 "turns": metadata.get("turns", 0),
                 "duration": metadata.get("duration", 0),
-                "total_tokens": metadata.get("total_tokens", 0),
-                "prompt_tokens": metadata.get("prompt_tokens", 0),
-                "completion_tokens": metadata.get("completion_tokens", 0),
-                "cached_tokens": metadata.get("cached_tokens", 0),
+                **_token_metadata(metadata),
             },
         )
         self._persist_subagent_conversation(
@@ -654,6 +661,45 @@ class SessionOutput(OutputModule):
                 "size_bytes": metadata.get("size_bytes", 0),
             },
         )
+
+
+def _subagent_name(fallback: str, metadata: dict) -> str:
+    raw = metadata.get("subagent") or metadata.get("subagent_name")
+    if isinstance(raw, str) and raw:
+        return raw
+    job_id = str(metadata.get("job_id") or "")
+    if fallback == "agent" and job_id.startswith("agent_"):
+        body = job_id[len("agent_") :]
+        if "_" in body:
+            return body.rsplit("_", 1)[0]
+    return fallback
+
+
+def _token_metadata(metadata: dict) -> dict[str, Any]:
+    prompt = metadata.get("prompt_tokens")
+    completion = metadata.get("completion_tokens")
+    total = metadata.get("total_tokens")
+    cached = metadata.get("cached_tokens")
+    if prompt is None:
+        prompt = metadata.get("tokens_in", 0)
+    if completion is None:
+        completion = metadata.get("tokens_out", 0)
+    if cached is None:
+        cached = metadata.get("tokens_cached", 0)
+    if total is None:
+        try:
+            total = int(prompt or 0) + int(completion or 0)
+        except (TypeError, ValueError):
+            total = 0
+    data = {
+        "total_tokens": total or 0,
+        "prompt_tokens": prompt or 0,
+        "completion_tokens": completion or 0,
+        "cached_tokens": cached or 0,
+    }
+    if "cost_usd" in metadata:
+        data["cost_usd"] = metadata.get("cost_usd")
+    return data
 
 
 def _parse_detail(detail: str) -> tuple[str, str]:

@@ -180,8 +180,13 @@ class SubAgent:
     async def run(self, task: str) -> SubAgentResult:
         """Execute the sub-agent with a task."""
         self._running = True
+        self._cancelled = False
         self._start_time = datetime.now()
         self._turns = 0
+        self._total_tokens = 0
+        self._prompt_tokens = 0
+        self._completion_tokens = 0
+        self._cached_tokens = 0
 
         try:
             if self.config.timeout > 0:
@@ -202,6 +207,10 @@ class SubAgent:
                 error=f"Timed out after {self.config.timeout}s",
                 turns=self._turns,
                 duration=self._calculate_duration(),
+                total_tokens=self._total_tokens,
+                prompt_tokens=self._prompt_tokens,
+                completion_tokens=self._completion_tokens,
+                cached_tokens=self._cached_tokens,
             )
         except Exception as e:
             logger.error(
@@ -214,6 +223,10 @@ class SubAgent:
                 error=str(e),
                 turns=self._turns,
                 duration=self._calculate_duration(),
+                total_tokens=self._total_tokens,
+                prompt_tokens=self._prompt_tokens,
+                completion_tokens=self._completion_tokens,
+                cached_tokens=self._cached_tokens,
             )
         finally:
             self._running = False
@@ -611,6 +624,29 @@ class SubAgent:
         if self._start_time:
             return (datetime.now() - self._start_time).total_seconds()
         return 0.0
+
+    def _build_partial_result(
+        self,
+        error: str,
+        *,
+        interrupted: bool = False,
+        cancelled: bool = False,
+        tools_used: list[str] | None = None,
+    ) -> SubAgentResult:
+        """Build a failed result without dropping tokens spent so far."""
+        return SubAgentResult(
+            success=False,
+            error=error,
+            interrupted=interrupted,
+            cancelled=cancelled,
+            turns=self._turns,
+            duration=self._calculate_duration(),
+            total_tokens=self._total_tokens,
+            prompt_tokens=self._prompt_tokens,
+            completion_tokens=self._completion_tokens,
+            cached_tokens=self._cached_tokens,
+            metadata={"tools_used": tools_used or []},
+        )
 
     def _charge_budget_or_fail(self, tools_used: list[str]) -> SubAgentResult | None:
         """Consume one unit of the shared budget. Return a failed result
