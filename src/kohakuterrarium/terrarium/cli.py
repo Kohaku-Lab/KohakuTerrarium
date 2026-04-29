@@ -15,6 +15,7 @@ from kohakuterrarium.builtins.user_commands import (
     get_builtin_user_command,
     list_builtin_user_commands,
 )
+from kohakuterrarium.core.channel import ChannelMessage
 from kohakuterrarium.modules.user_command.base import (
     UserCommandContext,
     parse_slash_command,
@@ -26,6 +27,7 @@ from kohakuterrarium.terrarium.cli_output import (
     _print_channel_message,
 )
 from kohakuterrarium.terrarium.config import load_terrarium_config
+from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.observer import ChannelObserver
 from kohakuterrarium.terrarium.runtime import TerrariumRuntime
 from kohakuterrarium.utils.logging import (
@@ -116,7 +118,14 @@ def _setup_terrarium_tui(
 
 def _wire_channel_callbacks(runtime: TerrariumRuntime, tui: "TUISession") -> None:
     """Wire channel on_send callbacks to display messages in channel tabs."""
-    for ch in runtime.environment.shared_channels._channels.values():
+    _wire_channel_registry_callbacks(
+        runtime.environment.shared_channels._channels.values(),
+        tui,
+    )
+
+
+def _wire_channel_registry_callbacks(channels, tui: "TUISession") -> None:
+    for ch in channels:
         ch_name = ch.name
 
         def _make_ch_cb(channel_name: str):
@@ -393,6 +402,152 @@ async def run_terrarium_with_tui(runtime: TerrariumRuntime) -> None:
         tui.stop()
 
 
+async def run_engine_terrarium_with_tui(
+    engine: Terrarium,
+    graph_id: str,
+    store: SessionStore | None = None,
+) -> None:
+    root_creature = engine.get_creature("root")
+    root = root_creature.agent
+    graph = engine.get_graph(graph_id)
+    env = engine._environments[graph_id]
+
+    tui_tabs = ["root"]
+    graph_creatures = [engine.get_creature(cid) for cid in graph.creature_ids]
+    for creature in graph_creatures:
+        if creature.creature_id != "root":
+            tui_tabs.append(creature.creature_id)
+    for ch_info in graph.channels.values():
+        tui_tabs.append(f"#{ch_info.name}")
+
+    terrarium_name = graph_id
+    tui = TUISession(agent_name=terrarium_name)
+    tui.set_terrarium_tabs(tui_tabs)
+
+    root_output = TUIOutput(session_key="root")
+    root_output._tui = tui
+    root_output._running = True
+    root_output._default_target = "root"
+    root.output_router.default_output = root_output
+
+    for creature in graph_creatures:
+        if creature.creature_id == "root":
+            continue
+        creature_out = TUIOutput(session_key=creature.creature_id)
+        creature_out._tui = tui
+        creature_out._running = True
+        creature_out._default_target = creature.creature_id
+        creature.agent.output_router.default_output = creature_out
+
+    if tui._app:
+        tui._app.on_interrupt = root.interrupt
+    tui.on_cancel_job = root._cancel_job
+    tui.on_promote_job = root._promote_handle
+
+    await tui.start()
+    suppress_logging()
+    app_task = asyncio.create_task(tui.run_app())
+    await tui.wait_ready()
+
+    model = getattr(root.llm, "model", "") or getattr(
+        getattr(root.llm, "config", None), "model", ""
+    )
+    session_id = ""
+    if store:
+        try:
+            meta = store.load_meta()
+            session_id = meta.get("session_id", "")
+        except Exception as e:
+            logger.debug(
+                "Failed to load session meta for TUI", error=str(e), exc_info=True
+            )
+    tui.update_session_info(
+        session_id=session_id,
+        model=model,
+        agent_name=terrarium_name,
+    )
+    compact_mgr = getattr(root, "compact_manager", None)
+    if compact_mgr:
+        max_ctx = compact_mgr.config.max_tokens
+        compact_at = int(max_ctx * compact_mgr.config.threshold) if max_ctx else 0
+        tui.set_context_limits(max_ctx, compact_at)
+
+    creature_info = [
+        {
+            "name": creature.creature_id,
+            "running": creature.is_running,
+            "listen": creature.listen_channels,
+            "send": creature.send_channels,
+        }
+        for creature in graph_creatures
+        if creature.creature_id != "root"
+    ]
+    tui.update_terrarium(creature_info, env.shared_channels.get_channel_info())
+    _wire_channel_registry_callbacks(env.shared_channels._channels.values(), tui)
+
+    commands = {n: get_builtin_user_command(n) for n in list_builtin_user_commands()}
+    aliases: dict[str, str] = {}
+    for n, cmd in commands.items():
+        for alias in getattr(cmd, "aliases", []):
+            aliases[alias] = n
+    cmd_context = UserCommandContext(agent=root, session=root.session)
+    cmd_context.extra["command_registry"] = commands
+
+    if tui._app:
+        try:
+            inp = tui._app.query_one("#input-box", ChatInput)
+            inp.command_names = list(commands.keys())
+        except Exception as e:
+            logger.debug(
+                "Failed to set command hints on TUI input", error=str(e), exc_info=True
+            )
+
+    try:
+        while True:
+            text = await tui.get_input()
+            if not text:
+                break
+            if text.startswith("/"):
+                cmd_result = await _handle_terrarium_command(
+                    text, tui, commands, aliases, cmd_context, None
+                )
+                if cmd_result is False:
+                    break
+                if cmd_result is True:
+                    continue
+            active_tab = tui.get_active_tab()
+            if not active_tab or active_tab == "root":
+                tui.set_active_target("root")
+                await root.inject_input(text, source="tui")
+            elif active_tab.startswith("#"):
+                ch_name = active_tab[1:]
+                channel = env.shared_channels.get(ch_name)
+                if channel is None:
+                    tui.add_trigger_message(
+                        "[error]",
+                        f"Channel '{ch_name}' not found",
+                        target=active_tab,
+                    )
+                    continue
+                tui.add_user_message(text, target=active_tab)
+                await channel.send(ChannelMessage(sender="human", content=text))
+            else:
+                tui.set_active_target(active_tab)
+                await root.inject_input(
+                    f"Send this to {active_tab}: {text}", source="tui"
+                )
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
+    finally:
+        restore_logging()
+        app_task.cancel()
+        try:
+            await app_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        tui.stop()
+
+
 async def run_terrarium_with_rich_cli(runtime: TerrariumRuntime) -> None:
     """Run a terrarium with the rich single-agent CLI.
 
@@ -446,6 +601,31 @@ async def run_terrarium_with_rich_cli(runtime: TerrariumRuntime) -> None:
         except (asyncio.CancelledError, Exception):
             pass
         await runtime.stop()
+
+
+async def run_engine_terrarium_with_cli(engine: Terrarium) -> None:
+    root = engine.get_creature("root")
+    root_output = CLIOutput("root")
+    root_output._running = True
+    root.agent.output_router.default_output = root_output
+
+    while True:
+        text = await _read_cli_input()
+        if text is None:
+            break
+        text = text.strip()
+        if not text:
+            continue
+        if text.lower() in ("exit", "quit", "/exit", "/quit"):
+            break
+        await root.agent.inject_input(text, source="cli")
+
+
+async def run_engine_terrarium_with_rich_cli(engine: Terrarium) -> None:
+    root = engine.get_creature("root")
+    app = RichCLIApp(root.agent)
+    root.agent.output_router.default_output = RichCLIOutput(app)
+    await app.run()
 
 
 async def run_terrarium_with_cli(
@@ -673,27 +853,33 @@ def _run_terrarium_cli(args: argparse.Namespace) -> int:
             ],
         )
 
-    # When root agent is configured, launch terrarium in selected mode.
-    # Also enter the interactive path for --mode cli even without root,
-    # since rich CLI auto-picks the first creature.
-    if config.root or args.mode == "cli":
+    # When root agent is configured, launch via the unified engine. The legacy
+    # TerrariumRuntime path does not model root as a graph creature and can route
+    # root's channel output back into itself.
+    if config.root:
         print()
 
         async def _run_with_mode() -> None:
-            llm = getattr(args, "llm", None)
-            runtime = TerrariumRuntime(config, llm_override=llm)
+            engine = Terrarium()
+            graph = await engine.apply_recipe(
+                config,
+                llm_override=getattr(args, "llm", None),
+            )
             if store:
-                runtime._pending_session_store = store
-            if args.mode == "cli":
-                await run_terrarium_with_rich_cli(runtime)
-            elif args.mode == "plain":
-                await run_terrarium_with_cli(
-                    runtime,
-                    observe=args.observe,
-                    no_observe=args.no_observe,
-                )
-            else:
-                await run_terrarium_with_tui(runtime)
+                await engine.attach_session(graph.graph_id, store)
+            try:
+                if args.mode == "cli":
+                    await run_engine_terrarium_with_rich_cli(engine)
+                elif args.mode == "plain":
+                    await run_engine_terrarium_with_cli(engine)
+                else:
+                    await run_engine_terrarium_with_tui(
+                        engine,
+                        graph.graph_id,
+                        store,
+                    )
+            finally:
+                await engine.shutdown()
 
         try:
             asyncio.run(_run_with_mode())
