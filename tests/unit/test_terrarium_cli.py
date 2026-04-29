@@ -112,7 +112,7 @@ async def test_cli_output_prints_with_speaker_prefix(capsys):
     assert capsys.readouterr().out == "[alpha] ready\n[alpha] streamed\n"
 
 
-def _patch_runners(monkeypatch, calls: dict, *, dummy_runtime):
+def _patch_legacy_runners(monkeypatch, calls: dict, *, dummy_runtime):
     async def fake_rich_cli_runner(runtime):
         calls["runner"] = "rich_cli"
         calls["runtime"] = runtime
@@ -135,6 +135,46 @@ def _patch_runners(monkeypatch, calls: dict, *, dummy_runtime):
     monkeypatch.setattr(terrarium_cli, "run_terrarium_with_tui", fake_tui_runner)
 
 
+def _patch_engine_runners(monkeypatch, calls: dict):
+    class DummyEngine:
+        def __init__(self):
+            self.shutdown_called = False
+
+        async def apply_recipe(self, config, *, llm_override=None):
+            calls["config"] = config
+            calls["llm_override"] = llm_override
+            return SimpleNamespace(graph_id="graph_test")
+
+        async def attach_session(self, graph_id, store):
+            calls["attached"] = (graph_id, store)
+
+        async def shutdown(self):
+            self.shutdown_called = True
+            calls["shutdown"] = True
+
+    async def fake_rich_cli_runner(engine):
+        calls["runner"] = "rich_cli"
+        calls["engine"] = engine
+
+    async def fake_cli_runner(engine):
+        calls["runner"] = "cli"
+        calls["engine"] = engine
+
+    async def fake_tui_runner(engine, graph_id, store=None, **kwargs):
+        calls["runner"] = "tui"
+        calls["engine"] = engine
+        calls["graph_id"] = graph_id
+        calls["store"] = store
+        calls["tui_kwargs"] = kwargs
+
+    monkeypatch.setattr(terrarium_cli, "Terrarium", DummyEngine)
+    monkeypatch.setattr(
+        terrarium_cli, "run_engine_terrarium_with_rich_cli", fake_rich_cli_runner
+    )
+    monkeypatch.setattr(terrarium_cli, "run_engine_terrarium_with_cli", fake_cli_runner)
+    monkeypatch.setattr(terrarium_cli, "run_engine_terrarium_with_tui", fake_tui_runner)
+
+
 class _DummyRuntime:
     def __init__(self, config_obj, llm_override=None):
         self.config = config_obj
@@ -150,13 +190,14 @@ def test_run_root_cli_mode_dispatches_to_rich_cli_runner(monkeypatch, tmp_path):
 
     calls: dict[str, object] = {}
     monkeypatch.setattr(terrarium_cli, "load_terrarium_config", lambda _: config)
-    _patch_runners(monkeypatch, calls, dummy_runtime=_DummyRuntime)
+    _patch_engine_runners(monkeypatch, calls)
 
     rc = terrarium_cli._run_terrarium_cli(args)
 
     assert rc == 0
     assert calls["runner"] == "rich_cli"
-    assert calls["runtime"].llm_override == "gpt-5.4"
+    assert calls["llm_override"] == "gpt-5.4"
+    assert calls["shutdown"] is True
 
 
 def test_run_root_plain_mode_dispatches_to_headless_runner(monkeypatch, tmp_path):
@@ -167,15 +208,14 @@ def test_run_root_plain_mode_dispatches_to_headless_runner(monkeypatch, tmp_path
 
     calls: dict[str, object] = {}
     monkeypatch.setattr(terrarium_cli, "load_terrarium_config", lambda _: config)
-    _patch_runners(monkeypatch, calls, dummy_runtime=_DummyRuntime)
+    _patch_engine_runners(monkeypatch, calls)
 
     rc = terrarium_cli._run_terrarium_cli(args)
 
     assert rc == 0
     assert calls["runner"] == "cli"
-    assert calls["observe"] == ["tasks"]
-    assert calls["no_observe"] is False
-    assert calls["runtime"].llm_override == "gpt-5.4"
+    assert calls["llm_override"] == "gpt-5.4"
+    assert calls["shutdown"] is True
 
 
 def test_run_root_tui_mode_dispatches_to_tui_runner(monkeypatch, tmp_path):
@@ -186,13 +226,15 @@ def test_run_root_tui_mode_dispatches_to_tui_runner(monkeypatch, tmp_path):
 
     calls: dict[str, object] = {}
     monkeypatch.setattr(terrarium_cli, "load_terrarium_config", lambda _: config)
-    _patch_runners(monkeypatch, calls, dummy_runtime=_DummyRuntime)
+    _patch_engine_runners(monkeypatch, calls)
 
     rc = terrarium_cli._run_terrarium_cli(args)
 
     assert rc == 0
     assert calls["runner"] == "tui"
-    assert calls["runtime"].llm_override == "gpt-5.4"
+    assert calls["graph_id"] == "graph_test"
+    assert calls["llm_override"] == "gpt-5.4"
+    assert calls["shutdown"] is True
 
 
 def test_run_no_root_cli_mode_dispatches_to_rich_cli_runner(monkeypatch, tmp_path):
@@ -204,7 +246,7 @@ def test_run_no_root_cli_mode_dispatches_to_rich_cli_runner(monkeypatch, tmp_pat
 
     calls: dict[str, object] = {}
     monkeypatch.setattr(terrarium_cli, "load_terrarium_config", lambda _: config)
-    _patch_runners(monkeypatch, calls, dummy_runtime=_DummyRuntime)
+    _patch_legacy_runners(monkeypatch, calls, dummy_runtime=_DummyRuntime)
 
     rc = terrarium_cli._run_terrarium_cli(args)
 

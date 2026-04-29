@@ -15,7 +15,6 @@ from kohakuterrarium.builtins.user_commands import (
     get_builtin_user_command,
     list_builtin_user_commands,
 )
-from kohakuterrarium.core.channel import ChannelMessage
 from kohakuterrarium.modules.user_command.base import (
     UserCommandContext,
     parse_slash_command,
@@ -28,6 +27,10 @@ from kohakuterrarium.terrarium.cli_output import (
 )
 from kohakuterrarium.terrarium.config import load_terrarium_config
 from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine_cli import (
+    run_engine_terrarium_with_tui,
+    wire_channel_registry_callbacks,
+)
 from kohakuterrarium.terrarium.observer import ChannelObserver
 from kohakuterrarium.terrarium.runtime import TerrariumRuntime
 from kohakuterrarium.utils.logging import (
@@ -125,24 +128,7 @@ def _wire_channel_callbacks(runtime: TerrariumRuntime, tui: "TUISession") -> Non
 
 
 def _wire_channel_registry_callbacks(channels, tui: "TUISession") -> None:
-    for ch in channels:
-        ch_name = ch.name
-
-        def _make_ch_cb(channel_name: str):
-            def _cb(cn: str, message) -> None:
-                sender = message.sender if hasattr(message, "sender") else ""
-                content = (
-                    message.content if hasattr(message, "content") else str(message)
-                )
-                tui.add_trigger_message(
-                    f"[{channel_name}] {sender}",
-                    str(content)[:500],
-                    target=f"#{channel_name}",
-                )
-
-            return _cb
-
-        ch.on_send(_make_ch_cb(ch_name))
+    wire_channel_registry_callbacks(channels, tui)
 
 
 async def _replay_terrarium_history(
@@ -399,152 +385,6 @@ async def run_terrarium_with_tui(runtime: TerrariumRuntime) -> None:
         except (asyncio.CancelledError, Exception):
             pass
         await runtime.stop()
-        tui.stop()
-
-
-async def run_engine_terrarium_with_tui(
-    engine: Terrarium,
-    graph_id: str,
-    store: SessionStore | None = None,
-) -> None:
-    root_creature = engine.get_creature("root")
-    root = root_creature.agent
-    graph = engine.get_graph(graph_id)
-    env = engine._environments[graph_id]
-
-    tui_tabs = ["root"]
-    graph_creatures = [engine.get_creature(cid) for cid in graph.creature_ids]
-    for creature in graph_creatures:
-        if creature.creature_id != "root":
-            tui_tabs.append(creature.creature_id)
-    for ch_info in graph.channels.values():
-        tui_tabs.append(f"#{ch_info.name}")
-
-    terrarium_name = graph_id
-    tui = TUISession(agent_name=terrarium_name)
-    tui.set_terrarium_tabs(tui_tabs)
-
-    root_output = TUIOutput(session_key="root")
-    root_output._tui = tui
-    root_output._running = True
-    root_output._default_target = "root"
-    root.output_router.default_output = root_output
-
-    for creature in graph_creatures:
-        if creature.creature_id == "root":
-            continue
-        creature_out = TUIOutput(session_key=creature.creature_id)
-        creature_out._tui = tui
-        creature_out._running = True
-        creature_out._default_target = creature.creature_id
-        creature.agent.output_router.default_output = creature_out
-
-    if tui._app:
-        tui._app.on_interrupt = root.interrupt
-    tui.on_cancel_job = root._cancel_job
-    tui.on_promote_job = root._promote_handle
-
-    await tui.start()
-    suppress_logging()
-    app_task = asyncio.create_task(tui.run_app())
-    await tui.wait_ready()
-
-    model = getattr(root.llm, "model", "") or getattr(
-        getattr(root.llm, "config", None), "model", ""
-    )
-    session_id = ""
-    if store:
-        try:
-            meta = store.load_meta()
-            session_id = meta.get("session_id", "")
-        except Exception as e:
-            logger.debug(
-                "Failed to load session meta for TUI", error=str(e), exc_info=True
-            )
-    tui.update_session_info(
-        session_id=session_id,
-        model=model,
-        agent_name=terrarium_name,
-    )
-    compact_mgr = getattr(root, "compact_manager", None)
-    if compact_mgr:
-        max_ctx = compact_mgr.config.max_tokens
-        compact_at = int(max_ctx * compact_mgr.config.threshold) if max_ctx else 0
-        tui.set_context_limits(max_ctx, compact_at)
-
-    creature_info = [
-        {
-            "name": creature.creature_id,
-            "running": creature.is_running,
-            "listen": creature.listen_channels,
-            "send": creature.send_channels,
-        }
-        for creature in graph_creatures
-        if creature.creature_id != "root"
-    ]
-    tui.update_terrarium(creature_info, env.shared_channels.get_channel_info())
-    _wire_channel_registry_callbacks(env.shared_channels._channels.values(), tui)
-
-    commands = {n: get_builtin_user_command(n) for n in list_builtin_user_commands()}
-    aliases: dict[str, str] = {}
-    for n, cmd in commands.items():
-        for alias in getattr(cmd, "aliases", []):
-            aliases[alias] = n
-    cmd_context = UserCommandContext(agent=root, session=root.session)
-    cmd_context.extra["command_registry"] = commands
-
-    if tui._app:
-        try:
-            inp = tui._app.query_one("#input-box", ChatInput)
-            inp.command_names = list(commands.keys())
-        except Exception as e:
-            logger.debug(
-                "Failed to set command hints on TUI input", error=str(e), exc_info=True
-            )
-
-    try:
-        while True:
-            text = await tui.get_input()
-            if not text:
-                break
-            if text.startswith("/"):
-                cmd_result = await _handle_terrarium_command(
-                    text, tui, commands, aliases, cmd_context, None
-                )
-                if cmd_result is False:
-                    break
-                if cmd_result is True:
-                    continue
-            active_tab = tui.get_active_tab()
-            if not active_tab or active_tab == "root":
-                tui.set_active_target("root")
-                await root.inject_input(text, source="tui")
-            elif active_tab.startswith("#"):
-                ch_name = active_tab[1:]
-                channel = env.shared_channels.get(ch_name)
-                if channel is None:
-                    tui.add_trigger_message(
-                        "[error]",
-                        f"Channel '{ch_name}' not found",
-                        target=active_tab,
-                    )
-                    continue
-                tui.add_user_message(text, target=active_tab)
-                await channel.send(ChannelMessage(sender="human", content=text))
-            else:
-                tui.set_active_target(active_tab)
-                await root.inject_input(
-                    f"Send this to {active_tab}: {text}", source="tui"
-                )
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        pass
-    finally:
-        restore_logging()
-        app_task.cancel()
-        try:
-            await app_task
-        except (asyncio.CancelledError, Exception):
-            pass
         tui.stop()
 
 
@@ -877,12 +717,40 @@ def _run_terrarium_cli(args: argparse.Namespace) -> int:
                         engine,
                         graph.graph_id,
                         store,
+                        handle_command=_handle_terrarium_command,
                     )
             finally:
                 await engine.shutdown()
 
         try:
             asyncio.run(_run_with_mode())
+            return 0
+        except KeyboardInterrupt:
+            print("\nInterrupted")
+            return 0
+        except Exception as e:
+            print(f"Error: {e}")
+            return 1
+        finally:
+            if store:
+                store.close()
+            if session_file and session_file.exists():
+                print(f"\nSession saved. To resume:")
+                print(f"  kt resume {session_file.stem}")
+
+    # No root agent with rich CLI: preserve the auto-pick behavior from the
+    # legacy runtime path.
+    if args.mode == "cli":
+        print()
+
+        async def _run_with_cli_mode() -> None:
+            runtime = TerrariumRuntime(config, llm_override=getattr(args, "llm", None))
+            if store:
+                runtime._pending_session_store = store
+            await run_terrarium_with_rich_cli(runtime)
+
+        try:
+            asyncio.run(_run_with_cli_mode())
             return 0
         except KeyboardInterrupt:
             print("\nInterrupted")

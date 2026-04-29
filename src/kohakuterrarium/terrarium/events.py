@@ -99,7 +99,7 @@ class DisconnectionResult:
     delta_kind: str = "nothing"
 
 
-@dataclass
+@dataclass(init=False)
 class RootAssignment:
     """Returned by ``Terrarium.assign_root``.
 
@@ -118,3 +118,24 @@ class RootAssignment:
     channels_listened: list[str] = field(default_factory=list)
     # Creature ids that gained ``report_channel`` as a send edge.
     senders_added: list[str] = field(default_factory=list)
+
+    def __init__(
+        self,
+        graph_id: str = "",
+        root_id: str | None = None,
+        report_channel: str = "report_to_root",
+        channels_created: list[str] | None = None,
+        channels_listened: list[str] | None = None,
+        senders_added: list[str] | None = None,
+        *,
+        creature_id: str | None = None,
+        channels: list[str] | None = None,
+    ) -> None:
+        self.graph_id = graph_id
+        self.root_id = root_id if root_id is not None else creature_id or ""
+        self.report_channel = report_channel
+        self.channels_created = list(channels_created or [])
+        self.channels_listened = list(
+            channels_listened if channels_listened is not None else channels or []
+        )
+        self.senders_added = list(senders_added or [])

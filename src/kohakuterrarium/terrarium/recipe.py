@@ -256,7 +256,8 @@ def _prepare_root_creature(
     graph_id: str,
     root: Creature,
 ) -> None:
-    if getattr(root.agent, "registry", None) is not None:
+    registry = getattr(root.agent, "registry", None)
+    if registry is not None and hasattr(registry, "register_tool"):
         force_register_terrarium_tools(root.agent)
     if getattr(root.agent, "controller", None) is not None:
         inject_prompt_section(root.agent, build_root_awareness_prompt(config))

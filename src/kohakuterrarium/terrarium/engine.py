@@ -77,9 +77,6 @@ class Terrarium:
         session_dir: str | None = None,
     ) -> None:
         self._pwd = pwd
-        # Where merge/split should land new ``.kohakutr`` files.  None
-        # means "no persistence" — merged/split graphs reuse one of the
-        # input stores in place rather than copy.
         self._session_dir = session_dir
         self._topology = TopologyState()
         self._creatures: dict[str, Creature] = {}
@@ -87,9 +84,6 @@ class Terrarium:
         # graph_id -> attached SessionStore.
         self._session_stores: dict[str, "SessionStore"] = {}
         self._subscribers: list[_Subscriber] = []
-        # Engine is alive as soon as constructed; ``shutdown()`` sets
-        # this to False.  ``__aenter__`` is a no-op for this flag — it
-        # only exists so users can guard cleanup with ``async with``.
         self._running = True
 
     @classmethod
@@ -427,19 +421,15 @@ class Terrarium:
         llm_override: str | None = None,
         creature_builder=None,
     ) -> GraphTopology:
-        """Apply a terrarium recipe — bulk add_creature, add_channel,
-        wire listen/send edges in dependency order.
-
-        Body lives in :func:`terrarium.recipe.apply_recipe`.
-        """
-        return await _recipe.apply_recipe(
-            self,
-            recipe,
-            graph=graph,
-            pwd=pwd if pwd is not None else self._pwd,
-            llm_override=llm_override,
-            creature_builder=creature_builder,
-        )
+        """Apply a terrarium recipe into this engine."""
+        kwargs = {
+            "graph": graph,
+            "pwd": pwd if pwd is not None else self._pwd,
+            "creature_builder": creature_builder,
+        }
+        if llm_override is not None:
+            kwargs["llm_override"] = llm_override
+        return await _recipe.apply_recipe(self, recipe, **kwargs)
 
     # ------------------------------------------------------------------
     # lifecycle
