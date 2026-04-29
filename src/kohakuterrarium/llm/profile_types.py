@@ -69,6 +69,7 @@ class LLMPreset:
     reasoning_effort: str = ""
     service_tier: str = ""
     extra_body: dict[str, Any] = field(default_factory=dict)
+    retry_policy: dict[str, Any] | None = None
     variation_groups: dict[str, dict[str, dict[str, Any]]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -87,6 +88,8 @@ class LLMPreset:
             data["service_tier"] = self.service_tier
         if self.extra_body:
             data["extra_body"] = self.extra_body
+        if self.retry_policy:
+            data["retry_policy"] = self.retry_policy
         if self.variation_groups:
             data["variation_groups"] = self.variation_groups
         return data
@@ -104,6 +107,7 @@ class LLMPreset:
             reasoning_effort=data.get("reasoning_effort", ""),
             service_tier=data.get("service_tier", ""),
             extra_body=data.get("extra_body", {}),
+            retry_policy=data.get("retry_policy"),
             variation_groups=data.get("variation_groups", {}) or {},
         )
 
@@ -132,6 +136,7 @@ class LLMProfile:
     reasoning_effort: str = ""
     service_tier: str = ""
     extra_body: dict[str, Any] = field(default_factory=dict)
+    retry_policy: dict[str, Any] | None = None
     selected_variations: dict[str, str] = field(default_factory=dict)
     backend_provider_name: str = ""
     backend_native_tools: list[str] = field(default_factory=list)
@@ -159,6 +164,7 @@ class LLMProfile:
             reasoning_effort=data.get("reasoning_effort", ""),
             service_tier=data.get("service_tier", ""),
             extra_body=data.get("extra_body", {}),
+            retry_policy=data.get("retry_policy"),
             selected_variations=data.get("selected_variations", {}) or {},
             backend_provider_name=data.get("backend_provider_name", ""),
             backend_native_tools=[str(tool) for tool in native_tools if tool],
@@ -186,6 +192,8 @@ class LLMProfile:
             data["service_tier"] = self.service_tier
         if self.extra_body:
             data["extra_body"] = self.extra_body
+        if self.retry_policy:
+            data["retry_policy"] = self.retry_policy
         if self.selected_variations:
             data["selected_variations"] = self.selected_variations
         return data

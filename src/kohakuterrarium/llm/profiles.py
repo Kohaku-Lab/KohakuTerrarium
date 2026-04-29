@@ -143,6 +143,7 @@ def _resolve_preset(
         reasoning_effort=resolved_preset.reasoning_effort,
         service_tier=resolved_preset.service_tier,
         extra_body=deepcopy(resolved_preset.extra_body),
+        retry_policy=deepcopy(resolved_preset.retry_policy),
         selected_variations=normalized,
         backend_provider_name=provider.provider_name if provider else "",
         backend_native_tools=(list(provider.provider_native_tools) if provider else []),
@@ -266,6 +267,7 @@ def save_profile(profile: LLMProfile | LLMPreset) -> None:
             reasoning_effort=profile.reasoning_effort,
             service_tier=profile.service_tier,
             extra_body=profile.extra_body,
+            retry_policy=profile.retry_policy,
             variation_groups=(
                 deepcopy(existing_preset.variation_groups) if existing_preset else {}
             ),
@@ -521,7 +523,13 @@ def resolve_controller_llm(
             logger.warning("LLM profile not found", profile_name=name or raw_model)
         return None
 
-    for key in ("temperature", "reasoning_effort", "service_tier", "max_tokens"):
+    for key in (
+        "temperature",
+        "reasoning_effort",
+        "service_tier",
+        "max_tokens",
+        "retry_policy",
+    ):
         if key not in controller_config:
             continue
         value = controller_config[key]
@@ -529,6 +537,8 @@ def resolve_controller_llm(
             continue
         if key == "max_tokens":
             profile.max_output = value
+        elif key == "retry_policy":
+            profile.retry_policy = deepcopy(value)
         else:
             setattr(profile, key, value)
 
@@ -602,6 +612,7 @@ def list_all() -> list[dict[str, Any]]:
             "reasoning_effort": profile.reasoning_effort or "",
             "service_tier": profile.service_tier or "",
             "extra_body": profile.extra_body or {},
+            "retry_policy": profile.retry_policy,
             "base_url": profile.base_url or "",
             "variation_groups": deepcopy(preset.variation_groups if preset else {}),
             "selected_variations": dict(profile.selected_variations or {}),

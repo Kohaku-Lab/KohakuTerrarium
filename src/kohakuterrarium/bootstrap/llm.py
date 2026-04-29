@@ -82,6 +82,7 @@ def _extract_controller_data(config: AgentConfig) -> dict[str, Any]:
         "reasoning_effort",
         "service_tier",
         "extra_body",
+        "retry_policy",
     ):
         value = getattr(config, field_name)
         if _is_meaningful_config_value(field_name, value):
@@ -108,6 +109,7 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
             model=profile.model,
             reasoning_effort=profile.reasoning_effort or "medium",
             service_tier=profile.service_tier or None,
+            retry_policy=getattr(profile, "retry_policy", None),
         )
         provider._profile_max_context = profile.max_context
         _apply_backend_native_identity(provider, profile)
@@ -123,6 +125,7 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
             f"{profile.api_key_env or 'OPENAI_API_KEY'} environment variable."
         )
 
+    retry_policy = getattr(profile, "retry_policy", None)
     provider = OpenAIProvider(
         api_key=api_key,
         base_url=profile.base_url or None,
@@ -130,6 +133,7 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
         temperature=profile.temperature,
         max_tokens=profile.max_output or None,
         extra_body=profile.extra_body or None,
+        retry_policy=retry_policy,
     )
     provider._profile_max_context = profile.max_context
     _apply_backend_native_identity(provider, profile)
@@ -186,6 +190,7 @@ def _create_from_inline(config: AgentConfig) -> LLMProvider:
             model=config.model,
             reasoning_effort=config.reasoning_effort,
             service_tier=config.service_tier,
+            retry_policy=config.retry_policy,
         )
         logger.info(
             "Using Codex OAuth provider (ChatGPT subscription)",
@@ -207,4 +212,5 @@ def _create_from_inline(config: AgentConfig) -> LLMProvider:
         temperature=config.temperature,
         max_tokens=config.max_tokens,
         extra_body=config.extra_body or None,
+        retry_policy=config.retry_policy,
     )

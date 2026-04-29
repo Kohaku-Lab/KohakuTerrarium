@@ -107,12 +107,14 @@ class TestLLMProfile:
                 "model": "test-model",
                 "max_context": 100000,
                 "selected_variations": {"reasoning": "low"},
+                "retry_policy": {"max_retries": 2},
             },
         )
         assert p.name == "test"
         assert p.model == "test-model"
         assert p.max_context == 100000
         assert p.selected_variations == {"reasoning": "low"}
+        assert p.retry_policy == {"max_retries": 2}
 
     def test_to_dict(self):
         p = LLMProfile(
@@ -122,11 +124,13 @@ class TestLLMProfile:
             max_context=100000,
             base_url="https://example.com",
             selected_variations={"reasoning": "high"},
+            retry_policy={"max_retries": 1},
         )
         d = p.to_dict()
         assert d["provider"] == "openai"
         assert d["model"] == "test-model"
         assert d["base_url"] == "https://example.com"
+        assert d["retry_policy"] == {"max_retries": 1}
         assert d["selected_variations"] == {"reasoning": "high"}
         assert "name" not in d
 
@@ -154,6 +158,17 @@ class TestPresetSerialization:
         data = preset.to_dict()
         restored = LLMPreset.from_dict("custom", data)
         assert restored.variation_groups == preset.variation_groups
+
+    def test_retry_policy_round_trip(self):
+        preset = LLMPreset(
+            name="custom",
+            provider="openai",
+            model="gpt-test",
+            retry_policy={"max_retries": 2, "base_delay": 0},
+        )
+        data = preset.to_dict()
+        restored = LLMPreset.from_dict("custom", data)
+        assert restored.retry_policy == {"max_retries": 2, "base_delay": 0}
 
     def test_save_and_load_variation_groups(self, tmp_profiles):
         save_profile(
@@ -350,6 +365,32 @@ class TestResolution:
         assert profile is not None
         assert profile.temperature == 0.3
         assert profile.reasoning_effort == "xhigh"
+
+    def test_resolve_retry_policy_override(self, tmp_profiles):
+        profile = resolve_controller_llm(
+            {
+                "llm": "codex/gpt-5.4",
+                "retry_policy": {"max_retries": 1, "base_delay": 0},
+            }
+        )
+        assert profile is not None
+        assert profile.retry_policy == {"max_retries": 1, "base_delay": 0}
+
+    def test_resolve_retry_policy_variation_patch(self, tmp_profiles):
+        preset = LLMPreset(
+            name="retry-variant",
+            provider="openai",
+            model="gpt-test",
+            variation_groups={
+                "retry": {"none": {"retry_policy.max_retries": 0}},
+            },
+        )
+        save_profile(preset)
+
+        profile = resolve_controller_llm({"llm": "openai/retry-variant@retry=none"})
+
+        assert profile is not None
+        assert profile.retry_policy == {"max_retries": 0}
 
     def test_resolve_grouped_variations_from_selector(self, tmp_profiles):
         # ``claude-opus-4.6-direct`` is a back-compat alias for

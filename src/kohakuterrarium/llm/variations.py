@@ -23,6 +23,7 @@ _ALLOWED_VARIATION_ROOTS: set[str] = {
     "max_context",
     "max_output",
     "extra_body",
+    "retry_policy",
 }
 
 # Internal sentinel used in a selections dict to mark a bare ``@foo``

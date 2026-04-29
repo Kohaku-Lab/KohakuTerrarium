@@ -180,6 +180,7 @@ class TestBootstrapLLM:
             model="o3-mini",
             reasoning_effort="high",
             service_tier=None,
+            retry_policy=None,
         )
         assert result is mock_instance
 
@@ -212,6 +213,7 @@ class TestBootstrapLLM:
             temperature=0.5,
             max_tokens=2048,
             extra_body=None,
+            retry_policy=None,
         )
         assert result is mock_instance
 
@@ -278,6 +280,29 @@ class TestBootstrapLLM:
         assert controller_data["reasoning_effort"] == "high"
         assert controller_data["max_tokens"] == 4096
         assert controller_data["extra_body"] == {"reasoning": {"effort": "low"}}
+
+    @patch("kohakuterrarium.bootstrap.llm.resolve_controller_llm")
+    def test_extract_controller_data_passes_retry_policy(self, mock_resolve):
+        from kohakuterrarium.bootstrap.llm import create_llm_provider
+        from kohakuterrarium.llm.profile_types import LLMProfile
+
+        mock_resolve.return_value = LLMProfile(
+            name="x", model="gpt-5.4", provider="openai"
+        )
+        config = AgentConfig(
+            name="test",
+            llm_profile="gpt-5.4",
+            retry_policy={"max_retries": 1, "base_delay": 0},
+        )
+
+        with patch(
+            "kohakuterrarium.bootstrap.llm._create_from_profile",
+            return_value=MagicMock(),
+        ):
+            create_llm_provider(config)
+
+        controller_data = mock_resolve.call_args.args[0]
+        assert controller_data["retry_policy"] == {"max_retries": 1, "base_delay": 0}
 
 
 # ---------------------------------------------------------------------------
@@ -522,6 +547,30 @@ class TestBootstrapSubagents:
         assert result is not None
         assert isinstance(result, SubAgentConfig)
         assert result.name == "my_agent"
+
+    def test_create_subagent_config_custom_inline_with_runtime_budget(self):
+        from kohakuterrarium.bootstrap.subagents import create_subagent_config
+
+        item = SubAgentConfigItem(
+            name="inline_researcher",
+            type="custom",
+            tools=["read", "grep"],
+            options={
+                "system_prompt": "You are an inline sub-agent.",
+                "default_plugins": ["budget"],
+                "turn_budget": [40, 60],
+                "tool_call_budget": {"soft": 75, "hard": 100},
+            },
+        )
+
+        result = create_subagent_config(item, loader=None)
+        assert result is not None
+        assert result.name == "inline_researcher"
+        assert result.system_prompt == "You are an inline sub-agent."
+        assert result.default_plugins == ["budget"]
+        assert result.turn_budget == (40, 60)
+        assert result.tool_call_budget == (75, 100)
+        assert result.walltime_budget is None
 
     def test_create_subagent_config_custom_no_loader(self):
         from kohakuterrarium.bootstrap.subagents import create_subagent_config
