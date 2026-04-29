@@ -15,6 +15,7 @@ failed/interrupted sub-agents are reflected in trace/cost totals.
 
 from typing import Any
 
+from kohakuterrarium.session.history import dedupe_adjacent_duplicate_events
 from kohakuterrarium.session.store import SessionStore
 
 # Same set used by the summary endpoint — kept in sync explicitly.
@@ -237,7 +238,8 @@ def derive_subagent_turns_from_events(events: list[dict], parent: str) -> list[d
     ``job_id`` and keep the latest snapshot so the parent turn is not
     double counted when both events exist.
     """
-    by_job: dict[str, dict[str, Any]] = {}
+    pending_updates: dict[str, dict[str, Any]] = {}
+    result_rows: list[dict[str, Any]] = []
     anonymous: list[dict[str, Any]] = []
     for evt in events:
         if not _is_subagent_token_event(evt):
@@ -249,8 +251,9 @@ def derive_subagent_turns_from_events(events: list[dict], parent: str) -> list[d
         failed = _subagent_failed(evt)
         if not failed and not _usage_has_value(usage):
             continue
+        etype = evt.get("type")
         if (
-            evt.get("type") == "subagent_result"
+            etype == "subagent_result"
             and not failed
             and usage.get("total_tokens", 0) <= 0
             and usage.get("tokens_cached", 0) <= 0
@@ -260,18 +263,20 @@ def derive_subagent_turns_from_events(events: list[dict], parent: str) -> list[d
         if not job_id:
             anonymous.append(evt)
             continue
-        previous = by_job.get(job_id)
+        if etype == "subagent_result":
+            result_rows.append(
+                _with_usage_fallback(evt, pending_updates.pop(job_id, None))
+            )
+            continue
+        previous = pending_updates.get(job_id)
         previous_usage = _usage_from_event(previous) if previous else {}
-        if previous is None:
-            by_job[job_id] = evt
-        elif evt.get("type") == "subagent_result":
-            by_job[job_id] = _with_usage_fallback(evt, previous)
-        elif previous.get("type") != "subagent_result":
-            if usage.get("total_tokens", 0) >= previous_usage.get("total_tokens", 0):
-                by_job[job_id] = evt
+        if previous is None or usage.get("total_tokens", 0) >= previous_usage.get(
+            "total_tokens", 0
+        ):
+            pending_updates[job_id] = evt
 
     rows: list[dict[str, Any]] = []
-    events_to_rows = list(by_job.values()) + anonymous
+    events_to_rows = result_rows + list(pending_updates.values()) + anonymous
     per_name_counts: dict[str, int] = {}
     for evt in events_to_rows:
         ti = _event_turn_index(evt)
@@ -366,12 +371,13 @@ def _own_rollups_or_derived(store: SessionStore, agent: str) -> list[dict]:
     rows = store.list_turn_rollups(agent)
     if rows:
         return rows
-    return derive_own_turns_from_events(store.get_events(agent), agent)
+    events = dedupe_adjacent_duplicate_events(store.get_events(agent))
+    return derive_own_turns_from_events(events, agent)
 
 
 def rollups_or_derived(store: SessionStore, agent: str) -> list[dict]:
     """Return full turn rows for ``agent`` including sub-agent tokens."""
-    events = store.get_events(agent)
+    events = dedupe_adjacent_duplicate_events(store.get_events(agent))
     own_rows = store.list_turn_rollups(agent)
     if not own_rows:
         own_rows = derive_own_turns_from_events(events, agent)
@@ -426,7 +432,7 @@ def _empty_aggregate(turn_index: int) -> dict:
 
 
 def _iter_rollup_contributions(store: SessionStore, name: str, kind: str):
-    events = store.get_events(name)
+    events = dedupe_adjacent_duplicate_events(store.get_events(name))
     for row in _own_rollups_or_derived(store, name):
         yield name, kind, row
     for row in derive_subagent_turns_from_events(events, name):

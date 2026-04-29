@@ -14,6 +14,7 @@ are thin facades over the helpers below. Nothing here mutates the store
 
 from typing import TYPE_CHECKING, Any
 
+from kohakuterrarium.session.history import dedupe_adjacent_duplicate_events
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -177,12 +178,14 @@ def _subagent_tokens_from_events(
     in completion order. See note in module docstring.
     """
     per_name: dict[str, list[dict[str, int]]] = {}
-    by_job: dict[str, dict] = {}
+    pending_updates: dict[str, dict] = {}
+    result_rows: list[dict] = []
     anonymous: list[dict] = []
     for evt in events:
-        if evt.get("type") not in ("subagent_result", "subagent_token_usage"):
+        etype = evt.get("type")
+        if etype not in ("subagent_result", "subagent_token_usage"):
             continue
-        if evt.get("type") == "subagent_result":
+        if etype == "subagent_result":
             usage = _usage_to_shape(evt)
             if (
                 not evt.get("error")
@@ -200,20 +203,17 @@ def _subagent_tokens_from_events(
         if not job_id:
             anonymous.append(evt)
             continue
-        previous = by_job.get(job_id)
+        if etype == "subagent_result":
+            result_rows.append(
+                _with_usage_fallback(evt, pending_updates.pop(job_id, None))
+            )
+            continue
+        previous = pending_updates.get(job_id)
         previous_usage = _usage_to_shape(previous) if previous else _empty_usage()
-        if previous is None:
-            by_job[job_id] = evt
-        elif evt.get("type") == "subagent_result":
-            by_job[job_id] = _with_usage_fallback(evt, previous)
-        else:
-            usage = _usage_to_shape(evt)
-            if (
-                previous.get("type") != "subagent_result"
-                and usage["total_tokens"] >= previous_usage["total_tokens"]
-            ):
-                by_job[job_id] = evt
-    for evt in list(by_job.values()) + anonymous:
+        usage = _usage_to_shape(evt)
+        if previous is None or usage["total_tokens"] >= previous_usage["total_tokens"]:
+            pending_updates[job_id] = evt
+    for evt in result_rows + list(pending_updates.values()) + anonymous:
         name = _subagent_name_from_event(evt)
         if name:
             per_name.setdefault(name, []).append(_usage_to_shape(evt))
@@ -233,7 +233,7 @@ def _subagent_usage_map(
     """
     results: dict[str, dict[str, int]] = {}
     runs = _iter_subagent_runs(store, parent)
-    events = store.get_events(parent)
+    events = dedupe_adjacent_duplicate_events(store.get_events(parent))
     per_name = _subagent_tokens_from_events(events)
     # Track consumed positions per name so unrecorded extra events can
     # still be surfaced after the known runs.

@@ -46,14 +46,24 @@ def _agents_for_summary(meta: dict[str, Any], requested: str | None) -> list[str
     return [requested]
 
 
-def _aggregate_rollups(rollups: Iterable[dict]) -> dict[str, Any]:
-    """Sum a sequence of turn-rollup rows into one totals dict."""
+def _aggregate_rollups(
+    rollups: Iterable[dict], *, count_by_agent: bool = False
+) -> dict[str, Any]:
+    """Sum turn-rollup rows into one totals dict.
+
+    Normal views count one user turn per turn_index. Session-wide
+    summaries historically counted per-agent turn rows; preserve that
+    when requested so multi-agent sessions still report each agent loop.
+    """
     prompt = completion = cached = 0
     cost_usd = 0.0
     cost_seen = False
-    turns = 0
-    for r in rollups:
-        turns += 1
+    rows = list(rollups)
+    seen_turns: set[int] = set()
+    for r in rows:
+        ti = r.get("turn_index")
+        if isinstance(ti, int) and ti > 0:
+            seen_turns.add(ti)
         prompt += int(r.get("tokens_in") or 0)
         completion += int(r.get("tokens_out") or 0)
         cached += int(r.get("tokens_cached") or 0)
@@ -64,6 +74,16 @@ def _aggregate_rollups(rollups: Iterable[dict]) -> dict[str, Any]:
                 cost_seen = True
             except (TypeError, ValueError):
                 pass
+    if count_by_agent:
+        turns = 0
+        for row in rows:
+            breakdown = row.get("breakdown") or []
+            if breakdown:
+                turns += sum(1 for item in breakdown if item.get("kind") != "subagent")
+            else:
+                turns += 1
+    else:
+        turns = len(seen_turns) or len(rows)
     return {
         "turns": turns,
         "tokens": {"prompt": prompt, "completion": completion, "cached": cached},
@@ -117,7 +137,7 @@ def build_summary_payload(
     else:
         flat_rollups = rollups_or_derived(store, agents[0])
 
-    totals = _aggregate_rollups(flat_rollups)
+    totals = _aggregate_rollups(flat_rollups, count_by_agent=agent is None)
 
     # Hot turns — by cost when available, else by token volume.
     def _hot_key(r: dict) -> tuple[int, float]:
