@@ -20,7 +20,10 @@ from typing import Any
 from kohakuvault import KVault, TextVault, VectorKVault
 
 from kohakuterrarium.session.embedding import BaseEmbedder, NullEmbedder
-from kohakuterrarium.session.history import select_live_event_ids
+from kohakuterrarium.session.history import (
+    dedupe_adjacent_duplicate_events,
+    select_live_event_ids,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -387,6 +390,7 @@ def _extract_blocks(
     agent: str, events: list[dict], event_offset: int = 0
 ) -> list[Block]:
     """Extract searchable blocks from session events."""
+    events = dedupe_adjacent_duplicate_events(events)
     live_ids = select_live_event_ids(events)
     blocks: list[Block] = []
     round_num = 0

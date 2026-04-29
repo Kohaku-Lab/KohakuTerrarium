@@ -258,9 +258,36 @@ export function _collectBranchMetadata(events, branchView = null) {
   return { byTurn, liveIds, branchSelection }
 }
 
+function _stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map((item) => _stableStringify(item)).join(",")}]`
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${_stableStringify(value[key])}`)
+      .join(",")}}`
+  }
+  return JSON.stringify(value)
+}
+
+function _dedupeAdjacentDuplicateEvents(events) {
+  const out = []
+  let previous = null
+  for (const evt of events || []) {
+    const clone = { ...(evt || {}) }
+    delete clone.event_id
+    delete clone.ts
+    const signature = _stableStringify(clone)
+    if (signature === previous) continue
+    out.push(evt)
+    previous = signature
+  }
+  return out
+}
+
 export function _replayEvents(messages, events, branchView = null) {
   if (!events?.length) return { messages: _convertHistory(messages), pendingJobs: {} }
 
+  events = _dedupeAdjacentDuplicateEvents(events)
   const { byTurn, liveIds, branchSelection } = _collectBranchMetadata(events, branchView)
 
   // Pre-pass: compact_replace ranges hide every event whose event_id
@@ -1247,13 +1274,14 @@ export const useChatStore = defineStore("chat", {
         if (generation !== this._instanceGeneration) return
         const { messages, events, is_processing: isProcessing } = data || {}
         if (events?.length) {
+          const normalizedEvents = _dedupeAdjacentDuplicateEvents(events)
           // Cache raw events so the branch navigator can re-replay
           // without a network round-trip after the user clicks <prev/next>.
-          this.eventsByTab[target] = events
+          this.eventsByTab[target] = normalizedEvents
           const view = this.branchViewByTab[target] || null
-          const { messages: msgs, pendingJobs } = _replayEvents(messages, events, view)
+          const { messages: msgs, pendingJobs } = _replayEvents(messages, normalizedEvents, view)
           this.messagesByTab[target] = msgs
-          this._restoreTokenUsage(target, events)
+          this._restoreTokenUsage(target, normalizedEvents)
           this._restoreRunningState(target, pendingJobs, isProcessing)
         } else if (messages?.length) {
           this.messagesByTab[target] = _convertHistory(messages)
@@ -1395,13 +1423,14 @@ export const useChatStore = defineStore("chat", {
         if (generation !== this._instanceGeneration) return
         const { messages, events, is_processing: isProcessing } = data || {}
         if (events?.length) {
+          const normalizedEvents = _dedupeAdjacentDuplicateEvents(events)
           // Cache raw events so branch navigation works after resume
           // without an extra network round-trip.
-          this.eventsByTab[tabKey] = events
+          this.eventsByTab[tabKey] = normalizedEvents
           const view = this.branchViewByTab[tabKey] || null
-          const { messages: msgs, pendingJobs } = _replayEvents(messages, events, view)
+          const { messages: msgs, pendingJobs } = _replayEvents(messages, normalizedEvents, view)
           this.messagesByTab[tabKey] = msgs
-          this._restoreTokenUsage(tabKey, events)
+          this._restoreTokenUsage(tabKey, normalizedEvents)
           this._restoreRunningState(tabKey, pendingJobs, isProcessing)
         } else if (messages?.length) {
           this.messagesByTab[tabKey] = _convertHistory(messages)
@@ -1448,7 +1477,7 @@ export const useChatStore = defineStore("chat", {
 
     /** Restore token usage from event log (for page refresh) */
     _restoreTokenUsage(source, events) {
-      for (const evt of events) {
+      for (const evt of _dedupeAdjacentDuplicateEvents(events)) {
         const isTokenEvt =
           (evt.type === "activity" && evt.activity_type === "token_usage") ||
           evt.type === "token_usage"

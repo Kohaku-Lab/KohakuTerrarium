@@ -8,7 +8,10 @@ snapshot but falls back to replay when the snapshot is stale.
 
 import pytest
 
-from kohakuterrarium.session.history import replay_conversation
+from kohakuterrarium.session.history import (
+    dedupe_adjacent_duplicate_events,
+    replay_conversation,
+)
 from kohakuterrarium.session.store import SessionStore
 
 
@@ -54,6 +57,60 @@ def _seed_conversation_events(store: SessionStore) -> None:
 
 
 class TestEventLogReconstructsConversation:
+    def test_duplicate_adjacent_chunks_are_collapsed_for_legacy_replay(self):
+        events = [
+            {
+                "type": "text_chunk",
+                "content": "Root",
+                "chunk_seq": 0,
+                "event_id": 1,
+                "ts": 1,
+            },
+            {
+                "type": "text_chunk",
+                "content": "Root",
+                "chunk_seq": 0,
+                "event_id": 2,
+                "ts": 2,
+            },
+            {
+                "type": "text_chunk",
+                "content": " cause",
+                "chunk_seq": 1,
+                "event_id": 3,
+                "ts": 3,
+            },
+            {
+                "type": "text_chunk",
+                "content": " cause",
+                "chunk_seq": 1,
+                "event_id": 4,
+                "ts": 4,
+            },
+            {
+                "type": "tool_call",
+                "name": "read",
+                "call_id": "job_1",
+                "args": {},
+                "event_id": 5,
+                "ts": 5,
+            },
+            {
+                "type": "tool_call",
+                "name": "read",
+                "call_id": "job_1",
+                "args": {},
+                "event_id": 6,
+                "ts": 6,
+            },
+        ]
+
+        deduped = dedupe_adjacent_duplicate_events(events)
+        assert [e["event_id"] for e in deduped] == [1, 3, 5]
+
+        msgs = replay_conversation(events)
+        assert msgs[0]["content"] == "Root cause"
+
     def test_round_trip_matches_expected_shape(self, session_path):
         store = SessionStore(session_path)
         try:

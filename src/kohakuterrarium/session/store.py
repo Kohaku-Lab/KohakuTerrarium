@@ -23,7 +23,10 @@ from typing import Any
 from kohakuvault import KVault, TextVault
 
 from kohakuterrarium.session.artifacts import artifacts_dir_for, write_artifact_bytes
-from kohakuterrarium.session.history import normalize_resumable_events
+from kohakuterrarium.session.history import (
+    dedupe_adjacent_duplicate_events,
+    normalize_resumable_events,
+)
 from kohakuterrarium.session.rollup import (
     get_turn_rollup,
     list_turn_rollups,
@@ -260,7 +263,8 @@ class SessionStore:
 
     def get_resumable_events(self, agent: str) -> list[dict]:
         """Get agent events normalized for resume/history replay."""
-        return normalize_resumable_events(self.get_events(agent))
+        events = dedupe_adjacent_duplicate_events(self.get_events(agent))
+        return normalize_resumable_events(events)
 
     def get_all_events(self) -> list[tuple[str, dict]]:
         """Get ALL events across all agents, sorted by timestamp.

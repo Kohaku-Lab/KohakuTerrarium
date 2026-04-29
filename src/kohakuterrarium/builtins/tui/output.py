@@ -17,7 +17,10 @@ from kohakuterrarium.builtins.tui.widgets import (
 )
 from kohakuterrarium.core.session import get_session
 from kohakuterrarium.modules.output.base import BaseOutputModule
-from kohakuterrarium.session.history import select_live_event_ids
+from kohakuterrarium.session.history import (
+    dedupe_adjacent_duplicate_events,
+    select_live_event_ids,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -438,6 +441,7 @@ def _format_args_preview(tool_name: str, args: dict) -> str:
 def _group_into_turns(events: list[dict]) -> list[dict]:
     """Group events into turns. Each turn has an ordered list of steps
     that preserves the interleaving of text and tool calls."""
+    events = dedupe_adjacent_duplicate_events(events)
     live_ids = select_live_event_ids(events)
     turns: list[dict] = []
     current: dict | None = None

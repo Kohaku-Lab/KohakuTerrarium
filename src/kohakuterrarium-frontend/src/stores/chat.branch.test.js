@@ -98,6 +98,79 @@ function makeEvents() {
   ]
 }
 
+describe("chat store — duplicate backend-event compatibility", () => {
+  it("collapses adjacent duplicate chunks and tool events during replay", () => {
+    const events = [
+      { type: "user_input", content: "why?", event_id: 1, turn_index: 1, branch_id: 1 },
+      { type: "user_message", content: "why?", event_id: 2, turn_index: 1, branch_id: 1 },
+      {
+        type: "text_chunk",
+        content: "Root",
+        chunk_seq: 0,
+        event_id: 3,
+        ts: 1,
+        turn_index: 1,
+        branch_id: 1,
+      },
+      {
+        type: "text_chunk",
+        content: "Root",
+        chunk_seq: 0,
+        event_id: 4,
+        ts: 2,
+        turn_index: 1,
+        branch_id: 1,
+      },
+      {
+        type: "text_chunk",
+        content: " cause",
+        chunk_seq: 1,
+        event_id: 5,
+        ts: 3,
+        turn_index: 1,
+        branch_id: 1,
+      },
+      {
+        type: "text_chunk",
+        content: " cause",
+        chunk_seq: 1,
+        event_id: 6,
+        ts: 4,
+        turn_index: 1,
+        branch_id: 1,
+      },
+      {
+        type: "tool_call",
+        name: "read",
+        call_id: "job_1",
+        args: { path: "a.txt" },
+        event_id: 7,
+        ts: 5,
+        turn_index: 1,
+        branch_id: 1,
+      },
+      {
+        type: "tool_call",
+        name: "read",
+        call_id: "job_1",
+        args: { path: "a.txt" },
+        event_id: 8,
+        ts: 6,
+        turn_index: 1,
+        branch_id: 1,
+      },
+    ]
+
+    const { messages, pendingJobs } = _replayEvents([], events)
+    const assistantText = messages
+      .filter((m) => m.role === "assistant")
+      .map((m) => (m.parts || []).map((p) => p.content).join(""))
+      .join("")
+    expect(assistantText).toBe("Root cause")
+    expect(Object.keys(pendingJobs)).toEqual(["job_1"])
+  })
+})
+
 describe("chat store — branch-switch keeps consistent follow-ups", () => {
   it("default view shows turn 1 branch 2 + follow-up turn 2", () => {
     const { messages } = _replayEvents([], makeEvents())

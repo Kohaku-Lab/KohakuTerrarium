@@ -162,10 +162,12 @@ def test_detach_not_attached_raises(host_session):
 def test_attach_twice_same_session_is_idempotent(host_session):
     helper = _make_stub_agent("helper")
     attach_agent_to_session(helper, host_session, role="helper")
+    first_outputs = list(helper.output_router._secondary_outputs)
     # Idempotent: same session, no raise; state unchanged.
     attach_agent_to_session(helper, host_session, role="helper")
     state = get_attach_state(helper)
     assert state["attach_seq"] == 0
+    assert helper.output_router._secondary_outputs == first_outputs
 
 
 def test_attach_to_different_session_raises(tmp_path, host_session):

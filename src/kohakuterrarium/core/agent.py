@@ -747,10 +747,18 @@ class Agent(
         # Controller needs direct access for artifact writes.
         if hasattr(self, "controller") and self.controller is not None:
             self.controller.session_store = store
-        self._session_output = SessionOutput(
-            self.config.name, store, self, capture_activity=capture_activity
-        )
-        self.output_router.add_secondary(self._session_output)
+        if (
+            self._session_output is None
+            or getattr(self._session_output, "_store", None) is not store
+        ):
+            if self._session_output is not None:
+                self.output_router.remove_secondary(self._session_output)
+            self._session_output = SessionOutput(
+                self.config.name, store, self, capture_activity=capture_activity
+            )
+            self.output_router.add_secondary(self._session_output)
+        else:
+            self._session_output._capture_activity = capture_activity
         if hasattr(self, "subagent_manager"):
             self.subagent_manager._session_store = store
             self.subagent_manager._parent_name = self.config.name

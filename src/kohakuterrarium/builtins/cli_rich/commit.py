@@ -20,7 +20,10 @@ from kohakuterrarium.builtins.cli_rich.live_region import render_to_ansi
 from kohakuterrarium.builtins.cli_rich.runtime import spawn
 from kohakuterrarium.builtins.cli_rich.theme import COLOR_USER, ICON_USER
 from kohakuterrarium.builtins.outputs.stdout import _write_safe
-from kohakuterrarium.session.history import select_live_event_ids
+from kohakuterrarium.session.history import (
+    dedupe_adjacent_duplicate_events,
+    select_live_event_ids,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -281,6 +284,7 @@ class SessionReplay:
         scroll.print(Text("--- resumed session history ---", style="dim"))
         scroll.print()
 
+        events = dedupe_adjacent_duplicate_events(events)
         # Drop events on superseded branches (regen / edit+rerun) so
         # the resume scrollback shows only the latest branch per turn.
         live_ids = select_live_event_ids(events)

@@ -99,9 +99,9 @@ async def _resume_agent_into_engine(
     )
     creature = await engine.add_creature(creature_obj, start=True)
 
-    # Attach store at the graph level — idempotent vis-à-vis the
-    # per-agent attach inside resume_agent; the graph link is what
-    # session_coord cares about on merge / split.
+    # Attach at graph level. ``Agent.attach_session_store`` is
+    # idempotent for the same store, so this updates graph bookkeeping
+    # without adding a duplicate SessionOutput sink.
     await engine.attach_session(creature.graph_id, store)
 
     logger.info(
@@ -150,7 +150,9 @@ async def _resume_terrarium_into_engine(
         inject_saved_state(creature.agent, store, agent_name)
         creature.agent.attach_session_store(store)
 
-    # Attach store at the graph level.
+    # Attach at graph level. Each creature was already attached just
+    # above, but ``Agent.attach_session_store`` is idempotent for the
+    # same store so this preserves graph/session bookkeeping safely.
     await engine.attach_session(sid, store)
     store.update_status("running")
 

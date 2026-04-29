@@ -4,7 +4,10 @@ import sys
 from datetime import datetime
 
 from kohakuterrarium.modules.output.base import BaseOutputModule
-from kohakuterrarium.session.history import select_live_event_ids
+from kohakuterrarium.session.history import (
+    dedupe_adjacent_duplicate_events,
+    select_live_event_ids,
+)
 
 
 class CLIOutput(BaseOutputModule):
@@ -95,6 +98,7 @@ def _group_resume_events(events: list[dict]) -> list[dict]:
     if not events:
         return []
 
+    events = dedupe_adjacent_duplicate_events(events)
     live_ids = select_live_event_ids(events)
     turns: list[dict] = []
     current: dict = {"user": "", "text": "", "tools": []}

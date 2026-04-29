@@ -1,3 +1,5 @@
+import json
+from collections.abc import Hashable
 from typing import Any, Iterable
 
 # ---------------------------------------------------------------------
@@ -285,6 +287,43 @@ def select_live_event_ids(
     return live
 
 
+def _event_signature_value(value: Any) -> Hashable:
+    try:
+        hash(value)
+    except TypeError:
+        return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+    return value
+
+
+def dedupe_adjacent_duplicate_events(
+    events: Iterable[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Collapse identical adjacent persisted events.
+
+    Some resumed graph paths briefly attached two ``SessionOutput`` sinks
+    to the same agent/store pair. That wrote each text chunk/tool event
+    twice with distinct ``event_id``/``ts`` values, producing frontend
+    output like ``RootRoot cause cause``. Treat those duplicate rows as a
+    storage accident for replay/history consumers while keeping the raw
+    log intact for audit/debugging.
+    """
+    out: list[dict[str, Any]] = []
+    previous_signature: tuple[tuple[str, Hashable], ...] | None = None
+    for evt in events:
+        signature = tuple(
+            sorted(
+                (k, _event_signature_value(v))
+                for k, v in evt.items()
+                if k not in {"event_id", "ts"}
+            )
+        )
+        if signature == previous_signature:
+            continue
+        out.append(evt)
+        previous_signature = signature
+    return out
+
+
 def replay_conversation(
     events: Iterable[dict[str, Any]],
     *,
@@ -323,7 +362,7 @@ def replay_conversation(
 
     Unknown event types are ignored (they are observability-only).
     """
-    events_list = list(events)
+    events_list = dedupe_adjacent_duplicate_events(events)
     # Path-aware live filter. Replaces the old per-turn-only selector
     # so nested branches (turn N has its own siblings under turn N-1's
     # selected branch) are honored.

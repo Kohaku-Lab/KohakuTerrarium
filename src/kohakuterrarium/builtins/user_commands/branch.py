@@ -23,6 +23,7 @@ from kohakuterrarium.modules.user_command.base import (
 from kohakuterrarium.session.history import (
     collect_branch_metadata,
     collect_user_groups,
+    dedupe_adjacent_duplicate_events,
     replay_conversation,
 )
 from kohakuterrarium.utils.logging import get_logger
@@ -81,7 +82,9 @@ class BranchCommand(BaseUserCommand):
         agent = context.agent
         if not agent or agent.session_store is None:
             return UserCommandResult(error="No agent / session store in context.")
-        events = agent.session_store.get_events(agent.config.name)
+        events = dedupe_adjacent_duplicate_events(
+            agent.session_store.get_events(agent.config.name)
+        )
         meta = collect_branch_metadata(events)
         user_groups = collect_user_groups(events)
 
