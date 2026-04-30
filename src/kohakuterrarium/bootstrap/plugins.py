@@ -4,6 +4,7 @@ import importlib
 from typing import Any
 
 from kohakuterrarium.builtins.plugin_catalog import (
+    list_catalog_plugins,
     lookup_plugin,
     resolve_plugin_specs,
 )
@@ -44,10 +45,36 @@ def init_plugins(
             config_names.add(plugin.name)
             manager.register(plugin)
 
+    # Phase 1.5: Discover built-in catalog plugins not in config
+    # (registered as disabled — visible in the frontend Plugins tab
+    # with an "Enable" button).
+    _discover_catalog_plugins(manager, config_names, loader)
+
     # Phase 2: Discover plugins from installed packages (disabled if not in config)
     _discover_package_plugins(manager, config_names, loader)
 
     return manager
+
+
+def _discover_catalog_plugins(
+    manager: PluginManager, already_loaded: set[str], loader: ModuleLoader | None
+) -> None:
+    """Register built-in catalog plugins (e.g. permgate, budget) as
+    disabled-but-available when they're not already loaded via config.
+
+    This is the third tier of plugin discovery alongside config (Phase
+    1) and package discovery (Phase 2): the frontend's plugin list
+    shows everything in the agent's plugin manager, so registering
+    catalog entries here is what makes them opt-in via UI.
+    """
+    for spec in list_catalog_plugins():
+        name = spec.get("name", "")
+        if not name or name in already_loaded:
+            continue
+        plugin = _load_one(spec, loader)
+        if plugin:
+            manager.register(plugin)
+            manager.disable(name)  # available but not active
 
 
 def _merge_default_plugin_specs(

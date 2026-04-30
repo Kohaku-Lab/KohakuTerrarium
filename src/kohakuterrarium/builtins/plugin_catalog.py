@@ -15,6 +15,10 @@ _PLUGINS: dict[str, dict[str, str]] = {
         "module": "kohakuterrarium.builtins.plugins.compact.auto",
         "class": "AutoCompactPlugin",
     },
+    "permgate": {
+        "module": "kohakuterrarium.builtins.plugins.permgate.plugin",
+        "class": "PermGatePlugin",
+    },
 }
 
 # Plugin packs are syntactic sugar for opting into multiple plugins by
@@ -30,6 +34,20 @@ def lookup_plugin(name: str) -> dict[str, str] | None:
     """Return the catalog spec for a built-in plugin name, or ``None``."""
     spec = _PLUGINS.get(name)
     return dict(spec) if spec else None
+
+
+def list_catalog_plugins() -> list[dict[str, Any]]:
+    """Return all built-in plugins from the catalog as load-spec dicts.
+
+    Used by ``bootstrap.plugins`` to register catalog-listed plugins
+    as disabled-but-available so they appear in the frontend's plugin
+    list (Plugins tab → Enable button) without requiring an explicit
+    entry in the agent's YAML config.
+    """
+    return [
+        {"name": name, "type": "package", **dict(spec)}
+        for name, spec in _PLUGINS.items()
+    ]
 
 
 def resolve_plugin_specs(names: list[str]) -> list[dict[str, Any]]:

@@ -46,8 +46,15 @@ def test_init_plugins_loads_inline_budget_plugin_with_options():
     assert plugin.budgets.tool_call.hard == 100
 
 
-def test_init_plugins_default_pack_does_not_inject_budget():
-    """``auto-compact`` pack must not pull in the budget plugin."""
+def test_init_plugins_default_pack_does_not_enable_budget():
+    """``auto-compact`` pack must not enable the budget plugin.
+
+    Phase B introduced catalog discovery that registers all built-in
+    plugins as available-but-disabled so the frontend Plugins tab can
+    list them with an "Enable" button. So ``budget`` may appear in
+    ``manager._plugins`` — but it must NOT be enabled by default.
+    """
     manager = init_plugins([], default_plugins=["auto-compact"])
-    names = [p.name for p in manager._plugins if p.name == "budget"]
-    assert names == []
+    assert not manager.is_enabled("budget")
+    # ``compact.auto`` from the pack should be enabled.
+    assert manager.is_enabled("compact.auto")

@@ -184,6 +184,37 @@ class PluginContext:
         if agent is not None and hasattr(agent, "controller"):
             agent.controller.push_event_sync(event)
 
+    async def emit(self, event: Any) -> None:
+        """Emit a Phase B :class:`OutputEvent` through the agent's
+        output bus. Display-only — for interactive events that need a
+        reply, use :meth:`emit_and_wait` instead.
+        """
+        agent = self._host_agent
+        if agent is None:
+            return
+        router = getattr(agent, "output_router", None)
+        if router is None:
+            return
+        await router.emit(event)
+
+    async def emit_and_wait(self, event: Any, timeout_s: float | None = None) -> Any:
+        """Emit an interactive :class:`OutputEvent` and await a
+        :class:`UIReply`. Returns the reply (with ``action_id``,
+        ``values``) or a ``UIReply`` whose ``action_id`` is
+        ``"__timeout__"`` on timeout.
+
+        Plugins commonly use this in ``pre_tool_execute`` to gate a
+        tool call on user consent. See ``builtins/plugins/permgate.py``
+        for the canonical exemplar.
+        """
+        agent = self._host_agent
+        if agent is None:
+            raise RuntimeError("PluginContext is not attached to an agent")
+        router = getattr(agent, "output_router", None)
+        if router is None:
+            raise RuntimeError("Agent has no output_router")
+        return await router.emit_and_wait(event, timeout_s=timeout_s)
+
     def inject_message_before_llm(self, role: str, content: str | list) -> None:
         """Queue a message to be prepended to the next LLM call.
 
