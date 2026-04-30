@@ -17,6 +17,7 @@ from kohakuterrarium.builtins.tui.widgets import (
 )
 from kohakuterrarium.core.session import get_session
 from kohakuterrarium.modules.output.base import BaseOutputModule
+from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.session.history import (
     dedupe_adjacent_duplicate_events,
     select_live_event_ids,
@@ -118,6 +119,40 @@ class TUIOutput(BaseOutputModule):
         self, activity_type: str, detail: str, metadata: dict
     ) -> None:
         self._handle_activity(activity_type, detail, metadata)
+
+    async def emit(self, event: OutputEvent) -> None:
+        """Native event consumer.
+
+        Each event type maps to the same widget call the legacy hooks
+        invoke, with byte-identical state changes.
+        """
+        match event.type:
+            case "text":
+                content = event.content
+                if isinstance(content, str):
+                    await self.write_stream(content)
+            case "processing_start":
+                await self.on_processing_start()
+            case "processing_end":
+                await self.on_processing_end()
+            case "user_input":
+                content = event.content
+                if isinstance(content, str):
+                    await self.on_user_input(content)
+            case "assistant_image":
+                payload = event.payload
+                self.on_assistant_image(
+                    payload["url"],
+                    detail=payload.get("detail", "auto"),
+                    source_type=payload.get("source_type"),
+                    source_name=payload.get("source_name"),
+                    revised_prompt=payload.get("revised_prompt"),
+                )
+            case "resume_batch":
+                await self.on_resume(event.payload.get("events", []))
+            case _:
+                detail = event.content if isinstance(event.content, str) else ""
+                self._handle_activity(event.type, detail, event.payload or {})
 
     def _handle_activity(
         self, activity_type: str, name_detail: str, metadata: dict

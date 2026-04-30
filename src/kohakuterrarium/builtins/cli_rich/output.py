@@ -10,6 +10,7 @@ The agent's output router calls into this module:
 from typing import Any
 
 from kohakuterrarium.modules.output.base import BaseOutputModule
+from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -86,6 +87,47 @@ class RichCLIOutput(BaseOutputModule):
                 activity_type=activity_type,
                 error=str(e),
             )
+
+    async def emit(self, event: OutputEvent) -> None:
+        """Native event consumer.
+
+        Each event type maps to the same ``app.on_*`` widget callback
+        the legacy hooks would invoke, with byte-identical arguments.
+        """
+        match event.type:
+            case "text":
+                content = event.content
+                if isinstance(content, str):
+                    await self.write_stream(content)
+            case "processing_start":
+                await self.on_processing_start()
+            case "processing_end":
+                await self.on_processing_end()
+            case "user_input":
+                # CLI app prints user input itself; preserve no-op.
+                pass
+            case "assistant_image":
+                payload = event.payload
+                self.on_assistant_image(
+                    payload["url"],
+                    detail=payload.get("detail", "auto"),
+                    source_type=payload.get("source_type"),
+                    source_name=payload.get("source_name"),
+                    revised_prompt=payload.get("revised_prompt"),
+                )
+            case "resume_batch":
+                await self.on_resume(event.payload.get("events", []))
+            case _:
+                detail = event.content if isinstance(event.content, str) else ""
+                metadata = event.payload or {}
+                try:
+                    self._dispatch(event.type, detail, metadata)
+                except Exception as e:
+                    logger.exception(
+                        "Activity dispatch failed",
+                        activity_type=event.type,
+                        error=str(e),
+                    )
 
     def _dispatch(
         self, activity_type: str, detail: str, metadata: dict[str, Any]

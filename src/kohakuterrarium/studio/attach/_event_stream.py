@@ -10,6 +10,7 @@ import asyncio
 import time
 
 from kohakuterrarium.modules.output.base import OutputModule
+from kohakuterrarium.modules.output.event import OutputEvent
 
 # In-memory event logs keyed by ``"{session_id}:{creature_id}"``.
 _event_logs: dict[str, list] = {}
@@ -122,42 +123,81 @@ class StreamOutput(OutputModule):
             "id": f"{activity_type}_{self._n}",
         }
         if metadata:
-            for k in (
-                "args",
-                "job_id",
-                "tools_used",
-                "result",
-                "output",
-                "turns",
-                "duration",
-                "task",
-                "trigger_id",
-                "event_type",
-                "channel",
-                "sender",
-                "content",
-                "prompt_tokens",
-                "completion_tokens",
-                "total_tokens",
-                "cached_tokens",
-                "round",
-                "summary",
-                "messages_compacted",
-                "session_id",
-                "model",
-                "agent_name",
-                "max_context",
-                "compact_threshold",
-                "error_type",
-                "error",
-                "messages_cleared",
-                "background",
-                "subagent",
-                "tool",
-                "interrupted",
-                "final_state",
-            ):
+            for k in _STREAM_METADATA_KEYS:
                 if k in metadata:
                     msg[k] = metadata[k]
         self._put(msg)
         self._n += 1
+
+    async def emit(self, event: OutputEvent) -> None:
+        """Native event consumer. WS JSON frames stay byte-identical
+        to those produced via the legacy hooks: same keys, same
+        whitelist of metadata fields propagated, same ``id`` counter.
+        """
+        match event.type:
+            case "text":
+                content = event.content
+                if isinstance(content, str) and content:
+                    self._put({"type": "text", "content": content})
+            case "processing_start":
+                self._put({"type": "processing_start"})
+            case "processing_end":
+                self._put({"type": "processing_end"})
+            case "user_input":
+                # StreamOutput historically does not surface user_input.
+                pass
+            case "assistant_image":
+                payload = event.payload
+                self.on_assistant_image(
+                    payload["url"],
+                    detail=payload.get("detail", "auto"),
+                    source_type=payload.get("source_type"),
+                    source_name=payload.get("source_name"),
+                    revised_prompt=payload.get("revised_prompt"),
+                )
+            case "resume_batch":
+                pass
+            case _:
+                detail = event.content if isinstance(event.content, str) else ""
+                metadata = event.payload or {}
+                if metadata:
+                    self.on_activity_with_metadata(event.type, detail, metadata)
+                else:
+                    self.on_activity(event.type, detail)
+
+
+_STREAM_METADATA_KEYS = (
+    "args",
+    "job_id",
+    "tools_used",
+    "result",
+    "output",
+    "turns",
+    "duration",
+    "task",
+    "trigger_id",
+    "event_type",
+    "channel",
+    "sender",
+    "content",
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "cached_tokens",
+    "round",
+    "summary",
+    "messages_compacted",
+    "session_id",
+    "model",
+    "agent_name",
+    "max_context",
+    "compact_threshold",
+    "error_type",
+    "error",
+    "messages_cleared",
+    "background",
+    "subagent",
+    "tool",
+    "interrupted",
+    "final_state",
+)

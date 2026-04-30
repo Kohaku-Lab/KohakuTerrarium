@@ -10,6 +10,7 @@ import json
 from typing import Any
 
 from kohakuterrarium.modules.output.base import OutputModule
+from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.session.history import replay_conversation
 from kohakuterrarium.utils.logging import get_logger
 
@@ -269,6 +270,48 @@ class SessionOutput(OutputModule):
             return
         name, info = _parse_detail(detail)
         self._record_activity(activity_type, name, info, metadata)
+
+    async def emit(self, event: OutputEvent) -> None:
+        """Native event consumer.
+
+        Translates each ``OutputEvent`` to the same persistence calls
+        the legacy hooks would make. The mapping is byte-identical: a
+        renderer override here records the same session-log records
+        SessionOutput records when called via ``write_stream`` /
+        ``on_activity_with_metadata`` / ``on_processing_*`` /
+        ``on_assistant_image``.
+        """
+        match event.type:
+            case "text":
+                content = event.content
+                if isinstance(content, str) and content:
+                    self._emit_text_chunk(content)
+            case "processing_start":
+                await self.on_processing_start()
+            case "processing_end":
+                await self.on_processing_end()
+            case "user_input":
+                # SessionOutput historically does not record user_input
+                # via OutputModule (the agent records it elsewhere).
+                pass
+            case "assistant_image":
+                payload = event.payload
+                self.on_assistant_image(
+                    payload["url"],
+                    detail=payload.get("detail", "auto"),
+                    source_type=payload.get("source_type"),
+                    source_name=payload.get("source_name"),
+                    revised_prompt=payload.get("revised_prompt"),
+                )
+            case "resume_batch":
+                # SessionOutput is a writer, not a replayer.
+                pass
+            case _:
+                if not self._capture_activity:
+                    return
+                detail = event.content if isinstance(event.content, str) else ""
+                name, info = _parse_detail(detail)
+                self._record_activity(event.type, name, info, event.payload or {})
 
     # Dispatch table: activity_type -> handler method name
     _ACTIVITY_HANDLERS: dict[str, str] = {
