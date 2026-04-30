@@ -409,6 +409,8 @@ class Agent(
                 self._termination_checker.attach_scratchpad(
                     getattr(self, "scratchpad", None)
                 )
+            if hasattr(self, "subagent_manager") and self.subagent_manager is not None:
+                self.subagent_manager._parent_plugins = self.plugins
             if hasattr(self, "controller"):
                 self._apply_plugin_hooks()
             return
@@ -431,6 +433,10 @@ class Agent(
             self._termination_checker.attach_scratchpad(
                 getattr(self, "scratchpad", None)
             )
+        # Sub-agent manager fires parent's ``post_subagent_run`` hook
+        # at result collection — give it a reference to our plugins.
+        if hasattr(self, "subagent_manager") and self.subagent_manager is not None:
+            self.subagent_manager._parent_plugins = self.plugins
         if hasattr(self, "controller"):
             self._apply_plugin_hooks()
 
@@ -453,23 +459,21 @@ class Agent(
         await self.plugins.notify("on_agent_start")
 
     def _apply_plugin_hooks(self) -> None:
-        """Wrap methods with plugin pre/post hooks (transparent decoration)."""
-        pm = self.plugins
-        for tool_name in self.registry.list_tools():
-            tool = self.registry.get_tool(tool_name)
-            if tool and hasattr(tool, "execute"):
-                tool.execute = pm.wrap_method(
-                    "pre_tool_execute",
-                    "post_tool_execute",
-                    tool.execute,
-                    input_kwarg="args",
-                    extra_kwargs={"tool_name": tool_name},
-                )
-        self.subagent_manager._run_subagent = pm.wrap_method(
-            "pre_subagent_run",
-            "post_subagent_run",
-            self.subagent_manager._run_subagent,
-        )
+        """No-op stub kept for backward compat.
+
+        Plugin hooks fire at the call site — the executor invokes
+        ``pre_tool_execute`` / ``post_tool_execute`` per tool call (see
+        ``core/executor.py``) and the dispatch layer fires
+        ``pre_subagent_run`` (see ``core/agent_pre_dispatch.py``).
+        We must NOT mutate ``tool.execute`` here: tool instances are
+        shared between the parent's registry and every sub-agent's
+        ``parent_registry`` reference, so a per-agent rebind would leak
+        the wrapping plugin chain across agents — sub-agent budget
+        plugins would then block the parent's tool calls. Keeping this
+        method empty means each agent's plugins fire only when that
+        agent dispatches the tool itself.
+        """
+        return None
 
     def _publish_session_info(self) -> None:
         """Publish session info to output (for TUI session panel).

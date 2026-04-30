@@ -100,6 +100,11 @@ class SubAgentManager(InteractiveManagerMixin):
         self._on_tool_activity: Callable[[str, str, str, str], None] | None = None
         # Parent executor (for inheriting tool context builder)
         self._parent_executor: Any = None
+        # Parent's plugin manager. Set by the agent so we can fire
+        # ``post_subagent_run`` at the result-collection site without
+        # mutating any shared object. ``pre_subagent_run`` fires
+        # earlier in the dispatch layer (``agent_pre_dispatch``).
+        self._parent_plugins: Any = None
         # Parent's shared ``IterationBudget`` (legacy single-axis shim
         # tied to ``max_iterations``). The runtime ``budget`` plugin owns
         # its own state and is not propagated through the manager.
@@ -359,6 +364,30 @@ class SubAgentManager(InteractiveManagerMixin):
         """Run sub-agent and update status."""
         try:
             result = await job.run(task)
+            # Fire parent's ``post_subagent_run`` plugin hooks at the
+            # result-collection site. Plugins may transform the result
+            # by returning a new ``SubAgentResult``; ``None`` passes
+            # through. This replaces the old wrap_method-based wiring
+            # which mutated ``self._run_subagent`` and double-fired
+            # ``pre_subagent_run`` after the dispatch-layer call.
+            pm = self._parent_plugins
+            if pm is not None:
+                try:
+                    rewritten = await pm.run_pre_hooks(
+                        "post_subagent_run",
+                        result,
+                        name=job.subagent.config.name,
+                        job_id=job_id,
+                    )
+                    if isinstance(rewritten, SubAgentResult):
+                        result = rewritten
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.warning(
+                        "post_subagent_run hook failed",
+                        job_id=job_id,
+                        error=str(exc),
+                        exc_info=True,
+                    )
             self._results[job_id] = result
 
             if result.interrupted or result.cancelled:

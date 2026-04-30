@@ -655,8 +655,21 @@ class SubAgent:
                 context = (
                     self._build_tool_context() if self._build_tool_context else None
                 )
+                # Plugin pre/post_tool_execute hooks fire here, scoped
+                # to this sub-agent's plugin manager only — never
+                # rebind ``tool.execute`` because the tool instance is
+                # shared with the parent's registry.
+                exec_fn = tool.execute
+                if self.plugins is not None:
+                    exec_fn = self.plugins.wrap_method(
+                        "pre_tool_execute",
+                        "post_tool_execute",
+                        tool.execute,
+                        input_kwarg="args",
+                        extra_kwargs={"tool_name": tool_call.name},
+                    )
                 try:
-                    result = await tool.execute(tool_call.args, context=context)
+                    result = await exec_fn(tool_call.args, context=context)
                 except PluginBlockError as block:
                     results.append(f"[{tool_call.name}] Error: {str(block)}")
                     logger.info(

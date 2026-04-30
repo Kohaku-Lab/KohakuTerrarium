@@ -120,6 +120,37 @@ class Executor:
         except Exception as e:  # pragma: no cover — pure observability
             logger.debug("tool_wait emit failed", error=str(e), exc_info=True)
 
+    def _wrap_tool_execute(
+        self,
+        tool: Tool,
+        args: dict[str, Any],
+        *,
+        job_id: str,
+    ) -> Callable[..., Any]:
+        """Return ``tool.execute`` wrapped with the agent's pre/post hooks.
+
+        Returns the original ``tool.execute`` unchanged when the agent
+        has no plugin manager or no plugin overrides those hooks
+        (``PluginManager.wrap_method`` short-circuits in that case).
+
+        Importantly the wrapper is a fresh closure — we do NOT assign
+        it back onto the tool. Sub-agents share tool instances with
+        the parent through ``parent_registry``; rebinding ``execute``
+        would let one agent's plugin chain (e.g. its budget plugin)
+        intercept another agent's tool calls.
+        """
+        agent = self._agent
+        plugins = getattr(agent, "plugins", None) if agent is not None else None
+        if plugins is None:
+            return tool.execute
+        return plugins.wrap_method(
+            "pre_tool_execute",
+            "post_tool_execute",
+            tool.execute,
+            input_kwarg="args",
+            extra_kwargs={"tool_name": tool.tool_name, "job_id": job_id},
+        )
+
     def get_tool(self, tool_name: str) -> Tool | None:
         """Get a registered tool by name."""
         return self._tools.get(tool_name)
@@ -232,6 +263,15 @@ class Executor:
             if isinstance(tool, BaseTool) and tool.needs_context:
                 context = self._build_tool_context()
 
+            # Plugin hooks fire at the call site — wrap tool.execute
+            # locally with the AGENT's plugin manager so each agent's
+            # plugin chain only sees that agent's tool calls. Tool
+            # instances are shared between the parent's registry and
+            # every sub-agent's ``parent_registry`` reference, so we
+            # must NOT mutate ``tool.execute``; the wrapper here is a
+            # closure over the original.
+            exec_fn = self._wrap_tool_execute(tool, args, job_id=job_id)
+
             # Concurrency-safety partition (Cluster 5 / G.1):
             # unsafe tools acquire the shared serial lock so at most
             # one unsafe tool runs at a time. Safe tools skip the lock
@@ -248,9 +288,9 @@ class Executor:
                     wait_ms = (asyncio.get_event_loop().time() - wait_start) * 1000.0
                     if wait_ms >= 1.0:
                         self._emit_tool_wait(tool.tool_name, wait_ms, "serial_lock")
-                    result = await tool.execute(args, context=context)
+                    result = await exec_fn(args, context=context)
             else:
-                result = await tool.execute(args, context=context)
+                result = await exec_fn(args, context=context)
 
             max_output = tool.config.max_output if isinstance(tool, BaseTool) else 0
             artifact_store = getattr(self._agent, "session_store", None)

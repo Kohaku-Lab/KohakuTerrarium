@@ -15,17 +15,38 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+# Sentinel model values that mean "use the parent's LLM, don't switch
+# to a different model". These never reach the provider's ``with_model``
+# (which would treat them as literal model ids and trip provider-side
+# validation — e.g. Codex/ChatGPT rejects unknown model names).
+_INHERIT_PARENT_SENTINELS: frozenset[str] = frozenset(
+    {"subagent-default", "subagent_default", "default", "inherit", "parent"}
+)
+
+
 def resolve_llm(parent_llm: LLMProvider, config: SubAgentConfig) -> LLMProvider:
-    """Return a sub-agent-specific provider, falling back to the parent."""
-    if not config.model:
+    """Return a sub-agent-specific provider, falling back to the parent.
+
+    Resolution order:
+
+    * Empty / sentinel ``model`` (``"subagent-default"`` etc.) — inherit
+      parent's LLM unchanged. The sentinels exist so a sub-agent config
+      can record intent ("this is meant to run on a sub-agent default
+      model") even when no separate profile has been configured.
+    * Otherwise — call ``parent_llm.with_model(name)``. On exception
+      (unknown model id, provider rejects), log and fall back to
+      parent so the sub-agent still runs.
+    """
+    name = (config.model or "").strip()
+    if not name or name.lower() in _INHERIT_PARENT_SENTINELS:
         return parent_llm
     try:
-        return parent_llm.with_model(config.model)
+        return parent_llm.with_model(name)
     except Exception as exc:
         logger.warning(
             "Sub-agent model override failed; inheriting parent LLM",
             subagent_name=config.name,
-            model=config.model,
+            model=name,
             error=str(exc),
         )
         return parent_llm
@@ -61,7 +82,16 @@ async def load_and_wrap_plugins(
     llm: LLMProvider,
     agent_path: Path | None,
 ) -> None:
-    """Load sub-agent plugins and wrap its tools."""
+    """Load sub-agent plugins.
+
+    The sub-agent's tool dispatcher (``SubAgent._execute_tools``) fires
+    ``pre_tool_execute`` / ``post_tool_execute`` at the call site, so
+    no per-tool wiring is needed here. We must NOT rebind
+    ``tool.execute`` — tool instances are shared with the parent's
+    registry, and a rebind would leak the sub-agent's plugin chain
+    onto every parent tool call (e.g. a sub-agent's exhausted budget
+    blocking the parent's bash).
+    """
     if not plugin_manager:
         return
     ctx = PluginContext(
@@ -71,16 +101,6 @@ async def load_and_wrap_plugins(
         _host_agent=subagent,
     )
     await plugin_manager.load_all(ctx)
-    for tool_name in subagent.registry.list_tools():
-        tool = subagent.registry.get_tool(tool_name)
-        if tool is not None and hasattr(tool, "execute"):
-            tool.execute = plugin_manager.wrap_method(
-                "pre_tool_execute",
-                "post_tool_execute",
-                tool.execute,
-                input_kwarg="args",
-                extra_kwargs={"tool_name": tool_name},
-            )
 
 
 def build_compact_manager(
