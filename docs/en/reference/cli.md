@@ -255,11 +255,8 @@ Show Name, Backend Type, Provider identity, Native tools, and Base URL for each 
 
 Interactive. Prompts for backend type, base URL, `api_key_env`, a
 provider identity (`provider_name`), and a checkbox-style list of
-provider-native tools to expose. The prompt offers `openai`, `codex`, and
-`anthropic`; selecting `anthropic` is auto-normalized to `openai` on save
-(there is no native Anthropic client — the built-in `anthropic` provider
-points at Anthropic's OpenAI-compat endpoint). Canonical stored values are
-therefore `openai` and `codex`.
+provider-native tools to expose. The prompt offers `openai`, `anthropic`,
+and `codex`; stored backend types use those same canonical values.
 
 ```
 kt config provider add [name]

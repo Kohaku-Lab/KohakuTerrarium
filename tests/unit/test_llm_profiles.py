@@ -396,8 +396,8 @@ class TestResolution:
         # ``claude-opus-4.6-direct`` is a back-compat alias for
         # ``claude-opus-4.6``. Anthropic's adaptive-thinking API puts effort
         # under ``output_config.effort`` (not nested in ``thinking``).
-        # Fast mode was removed — it's not surfaced by Anthropic's
-        # OpenAI-compat endpoint, use the ``-or`` variant for that instead.
+        # Fast mode is not enabled by default because it may require
+        # provider-specific beta headers.
         profile = resolve_controller_llm(
             {"llm": "claude-opus-4.6-direct@reasoning=low"}
         )
@@ -580,8 +580,8 @@ class TestListAll:
         # claude-opus-4.6 (Anthropic direct) is the primary Opus 4.6 preset
         # since the 2026-04 naming cleanup; ``claude-opus-4.6-direct`` is now
         # a back-compat alias pointing at this entry. Only the ``reasoning``
-        # group is kept on direct presets — fast mode requires the native API
-        # and isn't reachable through Anthropic's OpenAI-compat endpoint.
+        # group is kept on direct presets — fast mode may require
+        # provider-specific beta headers and is not enabled by default.
         entry = next(e for e in list_all() if e["name"] == "claude-opus-4.6")
         assert "reasoning" in entry["variation_groups"]
         assert entry["selected_variations"] == {}

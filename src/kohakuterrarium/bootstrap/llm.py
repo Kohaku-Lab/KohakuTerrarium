@@ -10,6 +10,7 @@ from dataclasses import MISSING, fields
 from typing import Any
 
 from kohakuterrarium.core.config import AgentConfig
+from kohakuterrarium.llm.anthropic_provider import AnthropicProvider
 from kohakuterrarium.llm.base import LLMProvider
 from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
 from kohakuterrarium.llm.openai import OpenAIProvider
@@ -126,15 +127,27 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
         )
 
     retry_policy = getattr(profile, "retry_policy", None)
-    provider = OpenAIProvider(
-        api_key=api_key,
-        base_url=profile.base_url or None,
-        model=profile.model,
-        temperature=profile.temperature,
-        max_tokens=profile.max_output or None,
-        extra_body=profile.extra_body or None,
-        retry_policy=retry_policy,
-    )
+    if profile.backend_type == "anthropic":
+        provider = AnthropicProvider(
+            api_key=api_key,
+            base_url=profile.base_url or None,
+            model=profile.model,
+            temperature=profile.temperature,
+            max_tokens=profile.max_output or None,
+            extra_body=profile.extra_body or None,
+            service_tier=profile.service_tier or None,
+            retry_policy=retry_policy,
+        )
+    else:
+        provider = OpenAIProvider(
+            api_key=api_key,
+            base_url=profile.base_url or None,
+            model=profile.model,
+            temperature=profile.temperature,
+            max_tokens=profile.max_output or None,
+            extra_body=profile.extra_body or None,
+            retry_policy=retry_policy,
+        )
     provider._profile_max_context = profile.max_context
     _apply_backend_native_identity(provider, profile)
     return provider
@@ -198,11 +211,25 @@ def _create_from_inline(config: AgentConfig) -> LLMProvider:
         )
         return provider
 
-    # Standard API key auth (OpenAI, OpenRouter, etc.)
+    # Standard API key auth (OpenAI, OpenRouter, etc.). Native Anthropic is
+    # explicit here so legacy inline ``provider: anthropic`` OpenAI-compatible
+    # configs keep using the OpenAI-compatible transport.
     api_key = config.get_api_key()
     if not api_key:
         raise ValueError(
             f"API key not found. Set {config.api_key_env} environment variable."
+        )
+
+    if config.auth_mode == "anthropic":
+        return AnthropicProvider(
+            api_key=api_key,
+            base_url=config.base_url or None,
+            model=config.model,
+            temperature=config.temperature,
+            max_tokens=config.max_tokens,
+            extra_body=config.extra_body or None,
+            service_tier=config.service_tier,
+            retry_policy=config.retry_policy,
         )
 
     return OpenAIProvider(

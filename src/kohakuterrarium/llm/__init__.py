@@ -4,11 +4,13 @@ LLM module - Language model providers and abstractions.
 Exports:
 - LLMProvider: Protocol for LLM providers
 - OpenAIProvider: OpenAI/OpenRouter compatible provider
+- AnthropicProvider: Anthropic-compatible Messages API provider
 - CodexOAuthProvider: ChatGPT subscription provider (Codex OAuth)
 - Message types: Message, SystemMessage, UserMessage, AssistantMessage
 - Native tool calling: ToolSchema, NativeToolCall, build_tool_schemas
 """
 
+from kohakuterrarium.llm.anthropic_provider import ANTHROPIC_BASE_URL, AnthropicProvider
 from kohakuterrarium.llm.base import (
     BaseLLMProvider,
     ChatChunk,
@@ -54,6 +56,9 @@ __all__ = [
     "OpenAIProvider",
     "OPENAI_BASE_URL",
     "OPENROUTER_BASE_URL",
+    # Anthropic provider
+    "AnthropicProvider",
+    "ANTHROPIC_BASE_URL",
     # Codex OAuth provider
     "CodexOAuthProvider",
     # Message types

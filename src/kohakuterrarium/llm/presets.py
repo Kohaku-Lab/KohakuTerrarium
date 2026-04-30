@@ -100,23 +100,15 @@ _OR_REASONING_GROUP_WITH_XHIGH: dict[str, dict[str, Any]] = {
     "xhigh": {"extra_body.reasoning.effort": "xhigh"},
 }
 
-# Anthropic direct (via Anthropic's OpenAI-compat endpoint).
+# Anthropic direct (native Anthropic-compatible Messages API).
 #
-# We route through ``backend_type=openai`` against ``api.anthropic.com/v1``.
-# Anthropic's compat layer explicitly supports ``extra_body.thinking``
-# (including adaptive mode and ``budget_tokens``) but silently ignores
-# top-level ``reasoning_effort`` and ``service_tier`` plus compat-unknown
-# fields like ``speed`` / ``betas``. See the project-level docstring in
-# ``profiles.py`` for the full compatibility caveat.
-#
-# Effort via compat is best-effort: Anthropic's native API places ``effort``
-# on a top-level ``output_config`` dict, which the compat layer *does*
-# forward through ``extra_body`` when recognized. Availability by model:
+# The built-in ``anthropic`` provider uses ``backend_type=anthropic`` and the
+# official ``anthropic`` SDK. Claude-specific request fields such as
+# ``thinking`` and ``output_config`` are passed through from ``extra_body``.
+# Availability by model:
 #   - Opus 4.6 / Sonnet 4.6:   low / medium / high / max
 #   - Opus 4.7 (2026-04-16):   low / medium / high / xhigh / max
-# For fast mode (Opus-only) use the ``-or`` OpenRouter variants — the
-# native ``speed: "fast"`` + beta header combo is not surfaced by Anthropic's
-# OpenAI-compat layer and would be silently dropped.
+# Fast mode may require provider beta headers and is not enabled by default.
 _ANTHROPIC_EFFORT_46_GROUP: dict[str, dict[str, Any]] = {
     "low": {"extra_body.output_config.effort": "low"},
     "medium": {"extra_body.output_config.effort": "medium"},
@@ -317,8 +309,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_context": 1000000,
         # Opus 4.7 defaults ``thinking.display`` to ``"omitted"`` — we explicitly
         # opt in to summarized thinking so the UI can show the reasoning trace.
-        # Fast mode is not exposed via Anthropic's OpenAI-compat layer; use the
-        # ``claude-opus-4.7-or`` OpenRouter preset if you need it.
+        # Fast mode may require provider beta headers and is not enabled by default.
         "extra_body": {
             "thinking": {"type": "adaptive", "display": "summarized"},
             "output_config": {"effort": "xhigh"},

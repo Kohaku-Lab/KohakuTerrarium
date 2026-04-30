@@ -6,14 +6,16 @@ read/write and the backend-level CRUD; :mod:`profiles` builds on top for
 preset lookup and runtime resolution.
 
 A ``backend_type`` is a tiny enum of transport implementations:
-    openai : any OpenAI-compatible ``/chat/completions`` endpoint
-             (OpenAI, OpenRouter, Gemini's compat path, Anthropic's compat
-             path, MiMo, and user-defined proxies).
-    codex  : OpenAI ChatGPT-subscription via OAuth — has its own bespoke
-             provider (``CodexOAuthProvider``) in :mod:`codex_provider`.
+    openai    : any OpenAI-compatible ``/chat/completions`` endpoint
+                (OpenAI, OpenRouter, Gemini's compat path, MiMo, and
+                user-defined proxies).
+    anthropic : Anthropic-compatible Messages API via the official
+                ``anthropic`` package (Claude, MiniMax's Anthropic path,
+                and compatible proxies).
+    codex     : OpenAI ChatGPT-subscription via OAuth — has its own bespoke
+                provider (``CodexOAuthProvider``) in :mod:`codex_provider`.
 
-Legacy ``anthropic`` / ``codex-oauth`` values are silently migrated to
-``openai`` / ``codex`` on read — there is no native Anthropic client.
+Legacy ``codex-oauth`` values are silently migrated to ``codex`` on read.
 
 This module intentionally stays read-only + primitive-CRUD so it has no
 dependency on :mod:`profiles`. The write-side operations that touch both
@@ -53,16 +55,12 @@ def _normalize_backend_type(value: str) -> str:
     """Map legacy / user-typed backend types onto the current canonical set.
 
     - ``"codex-oauth"`` → ``"codex"`` (old name for the ChatGPT-OAuth backend)
-    - ``"anthropic"`` → ``"openai"`` (there is no native Anthropic client;
-      the anthropic *provider* now points at Anthropic's OpenAI-compat
-      endpoint and speaks ``/chat/completions``). Legacy profiles that
-      declare ``backend_type: anthropic`` are auto-migrated here.
+    - ``"anthropic"`` stays ``"anthropic"`` and selects the native
+      Anthropic-compatible Messages API provider.
     - empty / unknown → ``"openai"`` (safe default for unconfigured data).
     """
     if value == "codex-oauth":
         return "codex"
-    if value == "anthropic":
-        return "openai"
     return value or "openai"
 
 
@@ -117,16 +115,10 @@ def _built_in_providers() -> dict[str, LLMBackend]:
             base_url="https://openrouter.ai/api/v1",
             api_key_env="OPENROUTER_API_KEY",
         ),
-        # Anthropic's OpenAI-compatible endpoint. No native Anthropic client
-        # in this project — we speak /chat/completions and pass Claude-specific
-        # knobs (``thinking: {type: "adaptive"}``, ``thinking.budget_tokens``)
-        # through ``extra_body``. Top-level ``reasoning_effort`` / ``service_tier``
-        # and ``speed`` / ``betas`` fields are silently dropped by the compat
-        # layer; for those, use the ``openrouter`` provider instead.
         "anthropic": LLMBackend(
             name="anthropic",
-            backend_type="openai",
-            base_url="https://api.anthropic.com/v1/",
+            backend_type="anthropic",
+            base_url="https://api.anthropic.com",
             api_key_env="ANTHROPIC_API_KEY",
         ),
         "gemini": LLMBackend(
@@ -156,9 +148,8 @@ def legacy_provider_from_data(data: dict[str, Any]) -> str:
     if value and value not in _LEGACY_BACKEND_TYPE_VALUES:
         return value
 
-    # Raw (un-normalized) backend_type declaration — ``anthropic`` here is a
-    # legacy signal that the preset was targeting Anthropic direct, which
-    # now resolves to the built-in ``anthropic`` provider (backend_type=openai).
+    # Raw backend_type declaration. ``anthropic`` maps to the built-in
+    # Anthropic-compatible Messages API provider.
     raw_backend_type = data.get("backend_type") or data.get("provider", "openai")
     backend_type = _normalize_backend_type(raw_backend_type)
     base_url = data.get("base_url", "")
@@ -232,11 +223,11 @@ def load_backends() -> dict[str, LLMBackend]:
 def validate_backend_type(backend_type: str) -> str:
     """Return the canonical backend_type for a new/updated provider.
 
-    Raises ``ValueError`` on anything other than ``openai`` / ``codex``
-    (post-normalization — ``anthropic`` and ``codex-oauth`` are accepted
-    and silently rewritten).
+    Raises ``ValueError`` on anything other than ``openai`` / ``anthropic`` /
+    ``codex`` (post-normalization — ``codex-oauth`` is accepted and silently
+    rewritten).
     """
     normalized = _normalize_backend_type(backend_type)
-    if normalized not in {"openai", "codex"}:
+    if normalized not in {"openai", "anthropic", "codex"}:
         raise ValueError(f"Unsupported backend_type: {backend_type}")
     return normalized

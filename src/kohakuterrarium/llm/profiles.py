@@ -5,19 +5,14 @@ machinery lives in :mod:`variations`. This module builds on both for preset
 persistence, preset-level YAML round-tripping, and the ``resolve_controller_llm``
 entrypoint called from :mod:`bootstrap.llm`.
 
-The two backend types in use:
-    openai : OpenAI-compatible HTTP client. Used for OpenAI, OpenRouter,
-             Anthropic (via their official OpenAI-compat endpoint at
-             ``api.anthropic.com/v1``), Gemini, MiMo, and any user-defined
-             provider that exposes a ``/chat/completions`` interface.
-    codex  : OpenAI ChatGPT subscription via OAuth.
-
-Note: there is currently no native Anthropic client. The ``anthropic``
-built-in provider targets Anthropic's OpenAI-compat endpoint, which accepts
-``extra_body.thinking`` (incl. adaptive mode) but silently ignores
-top-level ``reasoning_effort`` / ``service_tier`` and fields like
-``speed`` / ``betas``. For fast mode or the full native feature set, route
-through ``openrouter`` instead.
+The backend types in use:
+    openai    : OpenAI-compatible HTTP client. Used for OpenAI, OpenRouter,
+                Gemini, MiMo, and any user-defined provider that exposes a
+                ``/chat/completions`` interface.
+    anthropic : Anthropic-compatible Messages API via the official
+                ``anthropic`` package (Claude, MiniMax, and compatible
+                proxies).
+    codex     : OpenAI ChatGPT subscription via OAuth.
 """
 
 from copy import deepcopy
@@ -80,11 +75,10 @@ logger = get_logger(__name__)
 def save_backend(backend: LLMBackend) -> None:
     """Persist a user-defined provider.
 
-    ``backend_type`` values are ``openai`` (any OpenAI-compatible
-    ``/chat/completions`` endpoint, including Anthropic's compat layer and
-    Gemini's) and ``codex`` (ChatGPT-subscription OAuth). Legacy
-    ``anthropic`` / ``codex-oauth`` values are normalized here so older API
-    clients keep working.
+    ``backend_type`` values are ``openai`` (OpenAI-compatible
+    ``/chat/completions``), ``anthropic`` (Anthropic-compatible Messages API),
+    and ``codex`` (ChatGPT-subscription OAuth). Legacy ``codex-oauth`` values
+    are normalized here so older API clients keep working.
     """
     backend.backend_type = validate_backend_type(backend.backend_type)
     data = _load_yaml()

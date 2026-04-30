@@ -489,7 +489,7 @@ default_model: <preset name>
 
 backends:
   <provider-name>:
-    backend_type: openai | codex        # 规范集合 (见下方说明)
+    backend_type: openai | anthropic | codex  # transport 实现
     base_url: str
     api_key_env: str
 
@@ -509,9 +509,39 @@ presets:
           <dotted.path>: value
 ```
 
-`backend_type` 规范值为 `openai` 与 `codex`。旧值 (`anthropic`、`codex-oauth`) 仍然接受并在读取时默默正规化 — `anthropic` → `openai` (走 Anthropic 的 OpenAI-compat endpoint；没有原生 Anthropic client)、`codex-oauth` → `codex`。新增 provider 时请优先使用规范值。
+`backend_type` 规范值为：
+
+- `openai` — OpenAI-compatible `/chat/completions` endpoint。
+- `anthropic` — 通过官方 `anthropic` Python package 访问 Anthropic-compatible Messages API endpoint (Claude、MiniMax 的 `/anthropic/v1/messages`，以及相容代理)。
+- `codex` — ChatGPT 订阅 Codex OAuth。
+
+旧值 `codex-oauth` 仍然接受并在读取时正规化为 `codex`。
 
 内置 provider 名称 (`codex`、`openai`、`openrouter`、`anthropic`、`gemini`、`mimo`) 无法删除；它们的 base URL 与 `api_key_env` 是内置默认固定的。每只代理仍可通过 `controller.base_url` / `controller.api_key_env` 覆盖。
+
+### 添加自定义 LLM backend provider
+
+多数 provider 只需要一个 backend entry 加一个 preset：
+
+```yaml
+backends:
+  minimax-anthropic:
+    backend_type: anthropic
+    base_url: https://api.minimax.io/anthropic
+    api_key_env: MINIMAX_API_KEY
+
+presets:
+  minimax-anthropic:
+    minimax-m2.7:
+      model: MiniMax-M2.7
+      max_context: 200000
+      max_output: 2048
+```
+
+provider 暴露 OpenAI-compatible `/chat/completions` API 时使用 `backend_type: openai`；暴露 Anthropic-compatible `/v1/messages` API 时使用 `backend_type: anthropic`。API key 会先从 `~/.kohakuterrarium/api_keys.yaml` (`kt login <provider-name>` / `kt config key set <provider-name>`) 读取，再 fallback 到 `api_key_env`。
+Anthropic backend preset 可通过 `extra_body` 传递 SDK request field；provider beta header 可设置在 preset 的 `extra_body.extra_headers`。
+
+若要在代码里加入新的 transport 实现，请在 `src/kohakuterrarium/llm/` 下创建 `BaseLLMProvider` 子类，用 KohakuTerrarium 内部 OpenAI-shaped message dict 实现 `_stream_chat()` 与 `_complete_chat()`，把 backend type 加进 `validate_backend_type()`，并扩展 `bootstrap/llm.py` 让解析后的 `LLMProfile.backend_type` 能实例化它。provider 专属的 request/response 转换应停留在这个边界，不要为了单一 provider 改 controller 或 conversation storage。
 
 所有附带的 preset 请看 [builtins.md — LLM presets](builtins.md#llm-presets)；每个 preset 的目录请见 [builtins.md — Variation groups](builtins.md#variation-groups)；如何在 controller config 里挑特定 variation 请见 [Variation 选择器](#variation-选择器)。
 

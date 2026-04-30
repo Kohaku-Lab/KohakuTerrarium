@@ -315,11 +315,11 @@ Built-in provider types (backends):
 | `codex` | `codex` | Codex OAuth (ChatGPT subscription) | `kt login codex`; routed via `CodexOAuthProvider`. Ships provider-native tool support such as `image_gen`. |
 | `openai` | `openai` | OpenAI `/chat/completions` | API-key auth (`OPENAI_API_KEY`). |
 | `openrouter` | `openai` | OpenAI-compat against OpenRouter | API-key auth (`OPENROUTER_API_KEY`); unified `reasoning` param. |
-| `anthropic` | `openai` | Anthropic's OpenAI-compat endpoint | API-key auth (`ANTHROPIC_API_KEY`). No native Anthropic client. Claude-specific knobs go through `extra_body` (`thinking.*`, `output_config.*`). Prompt-caching markers are auto-applied unless disabled. |
+| `anthropic` | `anthropic` | Anthropic-compatible Messages API | API-key auth (`ANTHROPIC_API_KEY`). Uses the official `anthropic` SDK. Claude-specific knobs go through `extra_body` (`thinking.*`, `output_config.*`). Prompt-caching markers are auto-applied unless disabled. |
 | `gemini` | `openai` | Google's OpenAI-compat endpoint | API-key auth (`GEMINI_API_KEY`). |
 | `mimo` | `openai` | Xiaomi MiMo | `kt login mimo`. |
 
-Canonical backend types are `openai` and `codex`. Legacy `anthropic` /
+Canonical backend types are `openai`, `anthropic`, and `codex`. Legacy
 `codex-oauth` backend type values are silently migrated on read (see
 [configuration reference](configuration.md#llm-profiles-kohakuterrariumllm_profilesyaml)).
 
@@ -372,7 +372,7 @@ Naming convention (post-2026-04 refactor):
 
 ### Anthropic Claude Direct (no suffix — primary)
 
-Routed through Anthropic's OpenAI-compat endpoint. Effort via
+Routed through the native Anthropic-compatible Messages API. Effort via
 `extra_body.output_config.effort`.
 
 - `claude-opus-4.7` (aliases: `claude-opus`, `opus`)

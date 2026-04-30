@@ -237,7 +237,7 @@ kt config edit [name]
 
 #### `kt config provider add`
 
-互動式。會問 backend type、base URL、`api_key_env`。選單提供 `openai`、`codex`、`anthropic`；選 `anthropic` 存檔時會自動正規化成 `openai` (沒有原生 Anthropic client — 內建的 `anthropic` provider 指到 Anthropic 的 OpenAI-compat endpoint)。所以儲存時標準值只有 `openai` 與 `codex`。
+互動式。會問 backend type、base URL、`api_key_env`、provider identity，以及要暴露的 provider-native tools。選單提供 `openai`、`anthropic` 與 `codex`；儲存時也使用這些標準 backend type 值。
 
 ```
 kt config provider add [name]

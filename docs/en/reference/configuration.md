@@ -590,7 +590,7 @@ default_model: <preset name>
 
 backends:
   <provider-name>:
-    backend_type: openai | codex        # canonical set (see note below)
+    backend_type: openai | anthropic | codex  # transport implementation
     base_url: str
     api_key_env: str
     provider_name: str                  # compatibility identity for native tools
@@ -612,16 +612,56 @@ presets:
           <dotted.path>: value
 ```
 
-Canonical `backend_type` values are `openai` and `codex`. Legacy values
-(`anthropic`, `codex-oauth`) are accepted for back-compat and silently
-normalized on read — `anthropic` → `openai` (Anthropic's OpenAI-compat
-endpoint; there is no native Anthropic client), `codex-oauth` → `codex`.
-When adding a provider, prefer the canonical values.
+Canonical `backend_type` values are:
+
+- `openai` — OpenAI-compatible `/chat/completions` endpoints.
+- `anthropic` — Anthropic-compatible Messages API endpoints via the official
+  `anthropic` Python package (Claude, MiniMax's `/anthropic/v1/messages`, and
+  compatible proxies).
+- `codex` — ChatGPT-subscription Codex OAuth.
+
+Legacy `codex-oauth` is accepted for back-compat and normalized to `codex`.
 
 Built-in provider names (`codex`, `openai`, `openrouter`, `anthropic`,
 `gemini`, `mimo`) cannot be deleted; their base URLs and `api_key_env`
 values are fixed via built-in defaults. Per-agent overrides via
 `controller.base_url` / `controller.api_key_env` still work.
+
+
+### Adding a custom LLM backend provider
+
+For most providers you only need a backend entry plus a preset:
+
+```yaml
+backends:
+  minimax-anthropic:
+    backend_type: anthropic
+    base_url: https://api.minimax.io/anthropic
+    api_key_env: MINIMAX_API_KEY
+
+presets:
+  minimax-anthropic:
+    minimax-m2.7:
+      model: MiniMax-M2.7
+      max_context: 200000
+      max_output: 2048
+```
+
+Use `backend_type: openai` for providers exposing an OpenAI-compatible
+`/chat/completions` API, and `backend_type: anthropic` for providers exposing
+an Anthropic-compatible `/v1/messages` API. API keys are resolved first from
+`~/.kohakuterrarium/api_keys.yaml` (`kt login <provider-name>` /
+`kt config key set <provider-name>`) and then from `api_key_env`.
+Anthropic backend presets can pass SDK request fields through `extra_body`;
+for provider beta headers, set `extra_body.extra_headers` on the preset.
+
+To add a new transport implementation in code, create a `BaseLLMProvider`
+subclass under `src/kohakuterrarium/llm/`, implement `_stream_chat()` and
+`_complete_chat()` using KohakuTerrarium's OpenAI-shaped internal message
+dicts, add the backend type to `validate_backend_type()`, and extend
+`bootstrap/llm.py` so resolved `LLMProfile.backend_type` instantiates it.
+Keep provider-specific request/response conversion at that boundary; do not
+change controller or conversation storage for one provider.
 
 Custom backends may also declare:
 
