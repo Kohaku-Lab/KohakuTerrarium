@@ -43,6 +43,7 @@ from kohakuterrarium.llm.codex_rate_limits import (
     UsageSnapshot,
     set_cached,
 )
+from kohakuterrarium.llm.openai_sanitize import strip_surrogates
 from kohakuterrarium.llm.recovery import RetryPolicy
 from kohakuterrarium.utils.logging import get_logger
 
@@ -342,7 +343,7 @@ class CodexOAuthProvider(BaseLLMProvider):
 
             match event.type:
                 case "response.output_text.delta":
-                    yield event.delta
+                    yield strip_surrogates(event.delta)
                 case "response.output_item.done":
                     item = event.item
                     itype = getattr(item, "type", "")

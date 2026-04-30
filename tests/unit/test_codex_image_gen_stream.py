@@ -217,3 +217,27 @@ def test_provider_last_parts_reset_between_turns(monkeypatch):
     # last_assistant_content_parts should now be None (empty list → None
     # per the property contract) so the controller falls back to text.
     assert provider.last_assistant_content_parts is None
+
+
+def test_provider_strips_surrogates_from_stream(monkeypatch):
+    provider = CodexOAuthProvider(model="gpt-5.4")
+    provider._tokens = SimpleNamespace(access_token="dummy", is_expired=lambda: False)
+    provider._client = _FakeClient(
+        _FakeStream(
+            [
+                SimpleNamespace(type="response.output_text.delta", delta="ok\udcaf!"),
+                SimpleNamespace(type="response.completed", response=None),
+            ]
+        )
+    )
+
+    async def _noop():
+        return None
+
+    provider._ensure_valid_token = _noop  # type: ignore[assignment]
+
+    chunks = asyncio.run(
+        _consume(provider.chat([{"role": "user", "content": "x"}], stream=True))
+    )
+
+    assert chunks == ["ok!"]

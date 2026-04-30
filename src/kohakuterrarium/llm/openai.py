@@ -28,7 +28,11 @@ from kohakuterrarium.llm.openai_helpers import (
     tool_call_from_pending,
     tool_calls_from_message,
 )
-from kohakuterrarium.llm.openai_sanitize import log_request_shape, strip_kt_extras
+from kohakuterrarium.llm.openai_sanitize import (
+    log_request_shape,
+    strip_kt_extras,
+    strip_surrogates,
+)
 from kohakuterrarium.llm.recovery import (
     ErrorClass,
     RetryPolicy,
@@ -405,10 +409,7 @@ class OpenAIProvider(BaseLLMProvider):
 
             # Yield text content (sanitize surrogates from LLM output)
             if delta.content:
-                # Remove surrogate characters that some APIs emit
-                # which cause UnicodeEncodeError when encoded to UTF-8
-                clean = delta.content.encode('utf-8', errors='ignore').decode('utf-8')
-                yield clean
+                yield strip_surrogates(delta.content)
 
         # Finalize tool calls
         if pending_calls:

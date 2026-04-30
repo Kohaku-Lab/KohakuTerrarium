@@ -101,6 +101,16 @@ def strip_kt_extras(
     return out if any_changed else messages
 
 
+def strip_surrogates(text: str) -> str:
+    """Drop invalid Unicode surrogate code points from provider text.
+
+    Some streaming APIs occasionally emit lone surrogate characters.
+    They are not valid Unicode scalar values and crash later UTF-8
+    encoding paths, so provider boundaries should discard them.
+    """
+    return text.encode("utf-8", errors="ignore").decode("utf-8")
+
+
 def log_request_shape(msg: str, model: str, messages: list[dict[str, Any]]) -> None:
     """One-line summary of an outgoing request, for diagnosis.
 

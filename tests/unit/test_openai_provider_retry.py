@@ -3,6 +3,7 @@
 import pytest
 
 from kohakuterrarium.llm.base import BaseLLMProvider, ChatResponse, LLMConfig
+from kohakuterrarium.llm.openai_sanitize import strip_surrogates
 from kohakuterrarium.llm.recovery import RetryPolicy
 
 
@@ -151,3 +152,7 @@ async def test_second_overflow_after_drop_surfaces_without_loop():
 
 async def _noop():
     return None
+
+
+def test_strip_surrogates_removes_invalid_codepoints():
+    assert strip_surrogates("safe\udcaftext") == "safetext"
