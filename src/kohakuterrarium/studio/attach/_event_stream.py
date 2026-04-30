@@ -133,6 +133,11 @@ class StreamOutput(OutputModule):
         """Native event consumer. WS JSON frames stay byte-identical
         to those produced via the legacy hooks: same keys, same
         whitelist of metadata fields propagated, same ``id`` counter.
+
+        Phase B kinds (``ask_text``, ``confirm``, ``selection``,
+        ``progress``, ``notification``, ``card``, ``ui_supersede``)
+        are emitted as their own JSON frame shape that the frontend
+        dispatches on directly.
         """
         match event.type:
             case "text":
@@ -157,6 +162,37 @@ class StreamOutput(OutputModule):
                 )
             case "resume_batch":
                 pass
+            case (
+                "ask_text"
+                | "confirm"
+                | "selection"
+                | "progress"
+                | "notification"
+                | "card"
+            ):
+                # Phase B kinds — preserve the rich payload verbatim
+                # so the frontend can dispatch on event.type and read
+                # payload keys directly.
+                msg: dict = {
+                    "type": event.type,
+                    "event_id": event.id,
+                    "interactive": bool(event.interactive),
+                    "surface": event.surface,
+                    "payload": dict(event.payload),
+                }
+                if event.update_target is not None:
+                    msg["update_target"] = event.update_target
+                if event.timeout_s is not None:
+                    msg["timeout_s"] = event.timeout_s
+                self._put(msg)
+                self._n += 1
+            case "ui_supersede":
+                self._put(
+                    {
+                        "type": "ui_supersede",
+                        "event_id": event.payload.get("event_id"),
+                    }
+                )
             case _:
                 detail = event.content if isinstance(event.content, str) else ""
                 metadata = event.payload or {}
@@ -164,6 +200,12 @@ class StreamOutput(OutputModule):
                     self.on_activity_with_metadata(event.type, detail, metadata)
                 else:
                     self.on_activity(event.type, detail)
+
+    def on_supersede(self, event_id: str) -> None:
+        """Sync hook invoked by the router when an event is no longer
+        awaiting a reply. The frontend uses this to dim its widget.
+        """
+        self._put({"type": "ui_supersede", "event_id": event_id})
 
 
 _STREAM_METADATA_KEYS = (

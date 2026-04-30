@@ -25,6 +25,7 @@ from kohakuterrarium.llm.message import (
     content_parts_to_dicts,
     normalize_content_parts,
 )
+from kohakuterrarium.modules.output.event import UIReply
 from kohakuterrarium.studio.attach._event_stream import StreamOutput, get_event_log
 from kohakuterrarium.studio.sessions.lifecycle import find_creature
 from kohakuterrarium.terrarium.engine import Terrarium
@@ -43,6 +44,96 @@ def _normalize_input_content(data: dict[str, Any]) -> str | list[dict[str, Any]]
         return content
     message = data.get("message", "")
     return message if isinstance(message, str) else ""
+
+
+def _handle_ui_reply(
+    data: dict[str, Any],
+    agent: Any,
+    ws: WebSocket,
+    queue: asyncio.Queue,
+    source_name: str,
+) -> None:
+    """Route an inbound ``ui_reply`` WS frame to the agent's bus.
+
+    Sync helper invoked from the receive loop. Submits the reply to
+    the agent's output router; the router resolves any pending Future
+    and broadcasts a supersede to other secondary outputs (which the
+    frontend translates back into an ``ack`` frame via StreamOutput).
+
+    The ack frame itself is enqueued for the WS forward task so the
+    submitting client gets ``{type: "ui_reply_ack", event_id, status}``
+    even when the reply was rejected (unknown id / superseded).
+    """
+    event_id = data.get("event_id")
+    if not isinstance(event_id, str) or not event_id:
+        return
+    action_id = data.get("action_id", "")
+    values = data.get("values") or {}
+    user = data.get("user")
+    ts = data.get("ts") or time.time()
+
+    reply = UIReply(
+        event_id=event_id,
+        action_id=action_id,
+        values=values if isinstance(values, dict) else {},
+        user=user if isinstance(user, str) else None,
+        timestamp=float(ts) if isinstance(ts, (int, float)) else time.time(),
+    )
+
+    try:
+        _accepted, ack_status = agent.output_router.submit_reply_with_status(reply)
+    except Exception as e:
+        logger.debug("submit_reply failed", error=str(e), exc_info=True)
+        ack_status = "unknown"
+
+    ack = {
+        "type": "ui_reply_ack",
+        "event_id": event_id,
+        "status": ack_status,
+        "source": source_name,
+        "ts": time.time(),
+    }
+    try:
+        queue.put_nowait(ack)
+    except asyncio.QueueFull:
+        logger.debug("ui_reply_ack dropped — queue full")
+
+
+async def _process_input(
+    agent: Any,
+    content: str | list[dict[str, Any]],
+    queue: asyncio.Queue,
+    source_name: str,
+) -> None:
+    """Run ``agent.inject_input`` in its own task so the WS receive
+    loop can keep processing inbound frames (notably ``ui_reply``)
+    while the agent is mid-turn.
+
+    Errors and the post-turn ``idle`` notice are pushed via the same
+    outbound queue that ``_forward_queue`` drains, so the caller
+    doesn't need to share the websocket reference.
+    """
+    try:
+        await agent.inject_input(content, source="web")
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        try:
+            queue.put_nowait(
+                {
+                    "type": "error",
+                    "source": source_name,
+                    "content": str(e),
+                    "ts": time.time(),
+                }
+            )
+        except asyncio.QueueFull:
+            logger.debug("input error frame dropped — queue full")
+        return
+    try:
+        queue.put_nowait({"type": "idle", "source": source_name, "ts": time.time()})
+    except asyncio.QueueFull:
+        logger.debug("idle frame dropped — queue full")
 
 
 async def _forward_queue(queue: asyncio.Queue, ws: WebSocket) -> None:
@@ -157,10 +248,30 @@ async def attach_io(
 
     fwd_task = asyncio.create_task(_forward_queue(queue, websocket))
 
+    # Track input-processing tasks so we can cancel them on disconnect.
+    # Each user input fires its own task — the receive loop must NOT
+    # ``await`` ``agent.inject_input`` directly, because a tool that
+    # awaits a UIReply (``ask_user``, ``confirm``, etc.) would deadlock
+    # waiting for a frame the receive loop can't fetch while it's
+    # stuck inside ``inject_input``.
+    input_tasks: list[asyncio.Task] = []
+
     try:
         while True:
             data = await websocket.receive_json()
-            if data.get("type") != "input":
+            msg_type = data.get("type")
+
+            if msg_type == "ui_reply":
+                # Phase B: inbound reply to an interactive OutputEvent.
+                # Route into the agent's output_router; it dispatches to
+                # the awaiting Future and broadcasts supersede to peers.
+                _handle_ui_reply(data, agent, websocket, queue, creature.name)
+                continue
+            if msg_type == "ui_dismiss":
+                # Display-only event was dismissed by the user. Nothing
+                # to await; informational so audit / observers can log.
+                continue
+            if msg_type != "input":
                 continue
             content = _normalize_input_content(data)
             if not content:
@@ -173,24 +284,22 @@ async def attach_io(
             }
             log.append(user_evt)
             await queue.put(user_evt)
-            try:
-                await agent.inject_input(content, source="web")
-            except Exception as e:
-                await websocket.send_json(
-                    {
-                        "type": "error",
-                        "source": creature.name,
-                        "content": str(e),
-                        "ts": time.time(),
-                    }
-                )
-                continue
-            await websocket.send_json(
-                {"type": "idle", "source": creature.name, "ts": time.time()}
+            # Fire-and-forget: spawn a task so the receive loop returns
+            # to ``await receive_json()`` immediately. Without this,
+            # interactive tools like ``ask_user`` deadlock — the agent
+            # awaits a UIReply while this loop sits inside
+            # ``inject_input`` unable to deliver it.
+            task = asyncio.create_task(
+                _process_input(agent, content, queue, creature.name)
             )
+            input_tasks.append(task)
+            # Drop completed tasks so the list doesn't grow forever.
+            input_tasks[:] = [t for t in input_tasks if not t.done()]
     finally:
         queue.put_nowait(None)
         fwd_task.cancel()
+        for task in input_tasks:
+            task.cancel()
         try:
             agent.output_router.remove_secondary(out_module)
         except Exception as e:

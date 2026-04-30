@@ -217,6 +217,9 @@
       <MarkdownRenderer v-else :content="message.content" :breaks="true" />
     </div>
   </div>
+
+  <!-- Phase B output-event kinds (ask_text, confirm, selection, progress, notification, card) -->
+  <UIEventBlock v-else-if="message.role === 'ui_event'" :message="message" @reply="onUIEventReply" />
 </template>
 
 <script setup>
@@ -224,6 +227,7 @@ import { ElMessage } from "element-plus"
 
 import MarkdownRenderer from "@/components/common/MarkdownRenderer.vue"
 import ToolCallBlock from "@/components/chat/ToolCallBlock.vue"
+import UIEventBlock from "@/components/chat/UIEventBlock.vue"
 import { useChatStore } from "@/stores/chat"
 import { GEM } from "@/utils/colors"
 import { buildMessageParts, contentToEditableDraft, formatBytes, MAX_ATTACHMENT_BYTES, MAX_IMAGE_BYTES } from "@/utils/chatAttachments"
@@ -283,6 +287,14 @@ const errorFirstLine = computed(() => {
 
 function toggleTool(id) {
   expandedTools[id] = !expandedTools[id]
+}
+
+// Phase B UI event reply: forward to chat store, which sends
+// ``{type: "ui_reply", ...}`` over the per-tab WebSocket.
+function onUIEventReply({ actionId, values }) {
+  if (!props.message?.eventId) return
+  const tab = props.message.tab || ""
+  chat.submitUIReply(tab, props.message.eventId, actionId, values || {})
 }
 
 const showSenderHeader = computed(() => {

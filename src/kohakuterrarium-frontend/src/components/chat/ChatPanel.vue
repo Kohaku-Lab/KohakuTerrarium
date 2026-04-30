@@ -102,6 +102,17 @@
 
       <!-- Input: sits inside bubble, with subtle top border -->
       <div v-if="!readOnly" class="px-4 pb-4 pt-2 border-t border-t-warm-100 dark:border-t-warm-800">
+        <!-- Pending UI events banner: shown when the user starts typing
+             with one or more interactive bus events still awaiting a
+             reply. Acts as a soft nudge — clicking scrolls to the most
+             recent unreplied event. -->
+        <div v-if="showPendingBanner" class="mb-2 flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-amber/10 dark:bg-amber/15 border border-amber/30 text-xs">
+          <span class="i-carbon-warning-alt text-amber" />
+          <span class="text-amber-shadow dark:text-amber-light">
+            {{ pendingCount === 1 ? "1 pending request needs your reply" : `${pendingCount} pending requests need your reply` }}
+          </span>
+          <button class="ml-auto text-amber hover:underline" @click="scrollToPending">show</button>
+        </div>
         <div v-if="attachments.length" class="mb-2 flex flex-wrap gap-2">
           <div v-for="(file, idx) in attachments" :key="file.name + ':' + idx" class="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-iolite/8 dark:bg-iolite/12 border border-iolite/20 text-xs">
             <span :class="file.kind === 'image' ? 'i-carbon-image text-iolite dark:text-iolite-light' : 'i-carbon-document text-aquamarine'" />
@@ -236,6 +247,38 @@ const inputPlaceholder = computed(() => {
 
 const resolvedEmptyTitle = computed(() => props.emptyTitle || t("chat.noMessagesYet"))
 const resolvedEmptySubtitle = computed(() => props.emptySubtitle || t("chat.getStarted"))
+
+// Phase B: count interactive bus events that haven't been replied to
+// or superseded yet, scoped to the active tab. Banner appears when
+// the user starts typing while there are pending requests.
+const pendingCount = computed(() => {
+  const tab = chat.activeTab
+  if (!tab) return 0
+  const list = chat.messagesByTab?.[tab] || []
+  return list.filter((m) => m.role === "ui_event" && m.interactive && !m.replied && !m.superseded && !m.timedOut).length
+})
+
+const showPendingBanner = computed(() => pendingCount.value > 0 && inputText.value.length > 0)
+
+function scrollToPending() {
+  const tab = chat.activeTab
+  if (!tab) return
+  const list = chat.messagesByTab?.[tab] || []
+  const target = list.filter((m) => m.role === "ui_event" && m.interactive && !m.replied && !m.superseded && !m.timedOut).pop()
+  if (!target) return
+  const el = messagesEl.value
+  if (!el) return
+  // Find the rendered message by id; ChatMessage components don't
+  // expose an explicit id attribute, so we use querySelector by
+  // ``data-message-id`` if present, falling back to scrolling to the
+  // bottom of the list.
+  const node = el.querySelector(`[data-message-id="${target.id}"]`)
+  if (node && typeof node.scrollIntoView === "function") {
+    node.scrollIntoView({ behavior: "smooth", block: "center" })
+  } else {
+    el.scrollTop = el.scrollHeight
+  }
+}
 
 function getCreatureStatus(name) {
   const creature = props.instance.creatures.find((c) => c.name === name)

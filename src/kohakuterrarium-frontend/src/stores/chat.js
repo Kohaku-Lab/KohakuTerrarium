@@ -1,3 +1,5 @@
+import { ElMessage } from "element-plus"
+
 import { terrariumAPI, agentAPI } from "@/utils/api"
 import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 import { useMessagesStore } from "@/stores/messages"
@@ -1531,6 +1533,19 @@ export const useChatStore = defineStore("chat", {
         this._handleAssistantImage(source, data)
       } else if (data.type === "channel_message") {
         this._handleChannelMessage(data)
+      } else if (
+        data.type === "ask_text" ||
+        data.type === "confirm" ||
+        data.type === "selection" ||
+        data.type === "card" ||
+        data.type === "notification" ||
+        data.type === "progress"
+      ) {
+        this._handleUIEvent(source, data)
+      } else if (data.type === "ui_supersede") {
+        this._handleUISupersede(source, data)
+      } else if (data.type === "ui_reply_ack") {
+        this._handleUIReplyAck(source, data)
       } else if (data.type === "error") {
         this._addMsg(source, {
           id: "err_" + Date.now(),
@@ -1539,6 +1554,131 @@ export const useChatStore = defineStore("chat", {
           timestamp: new Date().toISOString(),
         })
         if (source) this.processingByTab[source] = false
+      }
+    },
+
+    /**
+     * Phase B: handle a typed OutputEvent from the bus.
+     *
+     * For ``progress`` events with ``update_target`` we mutate the
+     * existing message in place; for everything else we append a new
+     * ``role: "ui_event"`` message. Notifications can either inline
+     * (chat surface) or pop as ElMessage toasts (toast surface).
+     */
+    _handleUIEvent(source, data) {
+      const tab = source || ""
+      const eventType = data.type
+      const eventId = data.event_id || `ev_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      const payload = data.payload || {}
+
+      // Toast notifications skip the chat list — fire ElMessage and
+      // return. Inline notifications fall through to the message path.
+      if (eventType === "notification" && data.surface === "toast") {
+        const level = payload.level || "info"
+        const elType = ["info", "success", "warning", "error"].includes(level) ? level : "info"
+        ElMessage({
+          type: elType,
+          message: payload.text || "",
+          duration: payload.duration_ms || 4000,
+        })
+        return
+      }
+
+      // Progress events with update_target mutate the existing one.
+      if (eventType === "progress" && data.update_target) {
+        const list = this.messagesByTab[tab] || []
+        const existing = list.find((m) => m.role === "ui_event" && m.eventId === data.update_target)
+        if (existing) {
+          existing.payload = { ...existing.payload, ...payload }
+          return
+        }
+        // Fall through — first emit was missed; treat as new.
+      }
+
+      const msg = {
+        id: `ui_${eventId}`,
+        role: "ui_event",
+        uiEventType: eventType,
+        eventId,
+        payload,
+        interactive: !!data.interactive,
+        surface: data.surface || "chat",
+        tab,
+        timestamp: new Date().toISOString(),
+        replied: false,
+        superseded: false,
+        timedOut: false,
+        repliedActionId: "",
+        repliedValues: null,
+      }
+      this._addMsg(tab, msg)
+    },
+
+    _handleUISupersede(source, data) {
+      const tab = source || ""
+      const list = this.messagesByTab[tab] || []
+      const target = list.find((m) => m.role === "ui_event" && m.eventId === data.event_id)
+      if (target && !target.replied) {
+        target.superseded = true
+      }
+    },
+
+    _handleUIReplyAck(source, data) {
+      const tab = source || ""
+      const list = this.messagesByTab[tab] || []
+      const target = list.find((m) => m.role === "ui_event" && m.eventId === data.event_id)
+      if (!target) return
+      if (data.status === "accepted") {
+        // Confirms our optimistic update; idempotent.
+        target.replied = true
+        return
+      }
+      if (data.status === "superseded") {
+        // Another renderer beat us. Mark superseded only if we
+        // haven't already optimistically claimed replied — otherwise
+        // this is the post-success ack of a previous race that's no
+        // longer relevant.
+        if (!target.replied) {
+          target.superseded = true
+        }
+        return
+      }
+      // status === "unknown": agent already moved on (timeout,
+      // resume, etc.). Don't flag superseded — the user's reply was
+      // just too late, surface as timed out.
+      if (data.status === "unknown" && !target.replied) {
+        target.timedOut = true
+      }
+    },
+
+    /**
+     * Phase B: send a UIReply over the chat WS.
+     *
+     * Optimistically marks the message replied so the UI clears
+     * immediately. The ``ui_reply_ack`` from the server confirms
+     * (status: accepted / superseded / unknown).
+     */
+    submitUIReply(tab, eventId, actionId, values) {
+      if (!this._ws || this._ws.readyState !== WebSocket.OPEN) return
+      const list = this.messagesByTab[tab] || []
+      const target = list.find((m) => m.role === "ui_event" && m.eventId === eventId)
+      if (target) {
+        target.replied = true
+        target.repliedActionId = actionId
+        target.repliedValues = values || null
+      }
+      try {
+        this._ws.send(
+          JSON.stringify({
+            type: "ui_reply",
+            event_id: eventId,
+            action_id: actionId,
+            values: values || {},
+            ts: Date.now() / 1000,
+          }),
+        )
+      } catch (err) {
+        console.error("submitUIReply failed:", err)
       }
     },
 
