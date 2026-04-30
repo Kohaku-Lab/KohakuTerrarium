@@ -12,6 +12,7 @@ from uuid import uuid4
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.environment import Environment
 from kohakuterrarium.core.session import Session
+from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.terrarium.api import TerrariumAPI
 from kohakuterrarium.terrarium.config import TerrariumConfig
 from kohakuterrarium.terrarium.creature import CreatureHandle
@@ -429,7 +430,12 @@ class TerrariumRuntime(HotPlugMixin):
             # per-creature scrollback from these.
             if getattr(agent, "_pending_resume_events", None):
                 try:
-                    await agent.output_router.on_resume(agent._pending_resume_events)
+                    await agent.output_router.emit(
+                        OutputEvent(
+                            type="resume_batch",
+                            payload={"events": agent._pending_resume_events},
+                        )
+                    )
                 except Exception as exc:
                     logger.warning(
                         "Creature output replay failed",

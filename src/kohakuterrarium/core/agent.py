@@ -38,6 +38,7 @@ from kohakuterrarium.core.compact import CompactConfig, CompactManager
 from kohakuterrarium.core.config import AgentConfig, load_agent_config
 from kohakuterrarium.core.controller_plugins import register_plugin_and_package_commands
 from kohakuterrarium.core.events import TriggerEvent, create_user_input_event
+from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.core.job import JobState
 from kohakuterrarium.core.loader import ModuleLoader
 from kohakuterrarium.core.session import Session
@@ -661,7 +662,12 @@ class Agent(
         try:
             # Replay session history to output if resuming
             if self._pending_resume_events:
-                await self.output_router.on_resume(self._pending_resume_events)
+                await self.output_router.emit(
+                    OutputEvent(
+                        type="resume_batch",
+                        payload={"events": self._pending_resume_events},
+                    )
+                )
                 self._pending_resume_events = None
 
             # Re-create resumable triggers from saved state
@@ -722,7 +728,7 @@ class Agent(
                 await self.output_router.default_output.write(
                     f"\n[Fatal Error] {error_type}: {e}\n"
                 )
-                await self.output_router.on_processing_end()
+                await self.output_router.emit(OutputEvent(type="processing_end"))
             except Exception as e:
                 logger.debug(
                     "Failed to write fatal error to output", error=str(e), exc_info=True

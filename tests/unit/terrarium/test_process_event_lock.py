@@ -93,6 +93,12 @@ class _FakeOutputRouter:
             self._agent._concurrent_in_controller = True
         self._agent.user_input_calls.append((content, asyncio.get_event_loop().time()))
 
+    async def emit(self, event) -> None:
+        # Mirror BaseOutputModule.emit forwarding for the events the
+        # fake cares about (user_input). Anything else is a no-op.
+        if event.type == "user_input" and isinstance(event.content, str):
+            await self.on_user_input(event.content)
+
 
 @pytest.mark.asyncio
 async def test_process_event_serializes_pre_controller_work():

@@ -21,6 +21,7 @@ from kohakuterrarium.core.events import (
     create_tool_complete_event,
 )
 from kohakuterrarium.llm.message import content_parts_to_dicts
+from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.parsing import (
     CommandResultEvent,
     SubAgentCallEvent,
@@ -190,7 +191,9 @@ class AgentHandlersMixin(AgentToolsMixin):
                     if hasattr(event, "is_multimodal") and event.is_multimodal()
                     else (event.content or "")
                 )
-                await self.output_router.on_user_input(content)
+                await self.output_router.emit(
+                    OutputEvent(type="user_input", content=content)
+                )
 
             if self.plugins is not None:
                 await self.plugins.notify("on_event", event=event)
@@ -210,7 +213,7 @@ class AgentHandlersMixin(AgentToolsMixin):
         """Process event through controller. Cancellable via interrupt()."""
         self._prepare_processing_cycle(event, controller)
         await controller.push_event(event)
-        await self.output_router.on_processing_start()
+        await self.output_router.emit(OutputEvent(type="processing_start"))
 
         all_round_text: list[str] = []
         loop_task = asyncio.create_task(
@@ -681,7 +684,7 @@ class AgentHandlersMixin(AgentToolsMixin):
                 },
             )
 
-        await self.output_router.on_processing_end()
+        await self.output_router.emit(OutputEvent(type="processing_end"))
         self.output_router.clear_all()
 
         if controller.is_ephemeral:
