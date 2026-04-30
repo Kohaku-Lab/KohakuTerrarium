@@ -18,3 +18,4 @@ tags:
 - [Python API](python.md) — `kohakuterrarium` 套件的公開介面：`Terrarium`、`Creature`、`Studio`、底層 `Agent`、`compose`、測試 helper。
 - [外掛 hook](plugin-hooks.md) — 外掛可以註冊的每一個 lifecycle hook、觸發時機、payload 內容。
 - [HTTP API](http.md) — `kt serve` 的 REST 端點與 WebSocket 通道，附 request / response 結構。
+- [v1.3.0 發布說明](release-notes-1.3.0.md) — 最終 changelog、相容性說明、發布流程與驗證摘要。

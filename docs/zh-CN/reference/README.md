@@ -18,3 +18,4 @@ tags:
 - [Python API 参考](python.md) — `kohakuterrarium` 套件的公开接口：`Terrarium`、`Creature`、`Studio`、底层 `Agent`、`compose`、测试辅助工具。
 - [插件 Hook 参考](plugin-hooks.md) — 插件可注册的全部生命周期 Hook、触发时机和 payload 内容。
 - [HTTP API 参考](http.md) — `kt serve` 的 REST 端点与 WebSocket 通道，以及 request / response 结构。
+- [v1.3.0 发布说明](release-notes-1.3.0.md) — 最终 changelog、兼容性说明、发布流程与验证摘要。
