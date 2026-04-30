@@ -11,11 +11,8 @@ Exports:
 """
 
 from kohakuterrarium.modules.output.base import BaseOutputModule, OutputModule
-from kohakuterrarium.modules.output.router import (
-    MultiOutputRouter,
-    OutputRouter,
-    OutputState,
-)
+from kohakuterrarium.modules.output.router import OutputRouter, OutputState
+from kohakuterrarium.modules.output.router_multi import MultiOutputRouter
 
 __all__ = [
     # Protocol and base

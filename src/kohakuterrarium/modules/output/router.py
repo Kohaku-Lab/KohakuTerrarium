@@ -4,22 +4,19 @@ Output router - routes parse events to appropriate output modules.
 Uses a simple state machine to handle different output modes.
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime
-from enum import Enum, auto
-from typing import Any
+import asyncio
 
 from kohakuterrarium.modules.output.base import OutputModule
-from kohakuterrarium.modules.output.event import OutputEvent
+from kohakuterrarium.modules.output.event import OutputEvent, UIReply
+from kohakuterrarium.modules.output.router_interactive import (
+    OutputRouterInteractiveMixin,
+)
+from kohakuterrarium.modules.output.router_parsing import OutputRouterParseEventMixin
+from kohakuterrarium.modules.output.router_state import CompletedOutput, OutputState
 from kohakuterrarium.parsing import (
-    AssistantImageEvent,
-    BlockEndEvent,
-    BlockStartEvent,
     CommandEvent,
     OutputCallEvent,
-    ParseEvent,
     SubAgentCallEvent,
-    TextEvent,
     ToolCallEvent,
 )
 from kohakuterrarium.utils.logging import get_logger
@@ -27,53 +24,28 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-@dataclass
-class CompletedOutput:
-    """Record of a completed output event."""
-
-    target: str
-    content: str
-    timestamp: datetime = field(default_factory=datetime.now)
-    success: bool = True
-    error: str | None = None
-
-    def preview(self, max_len: int = 100) -> str:
-        """Get a preview of the content."""
-        if len(self.content) <= max_len:
-            return self.content
-        return self.content[:max_len] + "..."
-
-    def to_feedback_line(self) -> str:
-        """Format as a single feedback line for controller."""
-        time_str = self.timestamp.strftime("%H:%M:%S")
-        if self.success:
-            preview = self.preview(80)
-            # Escape newlines for single-line display
-            preview = preview.replace("\n", "\\n")
-            return f'- [{self.target}] ({time_str}): "{preview}"'
-        else:
-            return f"- [{self.target}] ({time_str}): FAILED - {self.error}"
-
-
-class OutputState(Enum):
-    """Output routing state."""
-
-    NORMAL = auto()  # Regular text output (stdout)
-    TOOL_BLOCK = auto()  # Inside tool call block (suppress output)
-    SUBAGENT_BLOCK = auto()  # Inside sub-agent block (suppress output)
-    COMMAND_BLOCK = auto()  # Inside command block
-    OUTPUT_BLOCK = auto()  # Inside explicit output block
-
-
-class OutputRouter:
-    """
-    Routes parse events to appropriate output modules.
+class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
+    """Routes parse events to appropriate output modules.
 
     Handles:
     - Text events → default output module (stdout)
     - OutputCallEvent → named output module (e.g., discord, tts)
     - Tool/subagent events → suppress text, queue for handling
     - Commands → queue for handling
+
+    The implementation is split across mixins so each file stays
+    focused:
+
+    - :class:`OutputRouterParseEventMixin` (``router_parsing.py``) —
+      ``route(parse_event)`` and the per-ParseEvent handlers
+      (``_handle_text``, ``_handle_output``, ``_handle_assistant_image``,
+      block start/end).
+    - :class:`OutputRouterInteractiveMixin` (``router_interactive.py``)
+      — Phase B interactive bus (``emit_and_wait``, ``submit_reply``,
+      supersede broadcast).
+    - This file — typed-event ``emit()`` dispatch, secondary-output
+      management, lifecycle (``start``/``stop``/``flush``/processing
+      hooks).
 
     Note on current architecture:
         In the standard Agent flow, ToolCallEvent, SubAgentCallEvent, and
@@ -118,6 +90,19 @@ class OutputRouter:
 
         # Secondary output modules (receive copies of all text output)
         self._secondary_outputs: list[OutputModule] = []
+
+        # Phase B: pending interactive events awaiting a UIReply.
+        # Keyed by event.id; values are Futures that resolve when a
+        # renderer submits the reply via ``submit_reply``.
+        self._pending_replies: dict[str, asyncio.Future[UIReply]] = {}
+
+        # Phase B: outputs that submit replies (TUI / web bridge)
+        # need a reference back to the router. Set duck-typed ``_router``
+        # on every output that exposes it.
+        for output in (default_output, *self._secondary_outputs):
+            self._maybe_link_router(output)
+        for output in (self.named_outputs or {}).values():
+            self._maybe_link_router(output)
 
     @property
     def state(self) -> OutputState:
@@ -184,6 +169,21 @@ class OutputRouter:
     def add_secondary(self, output: OutputModule) -> None:
         """Add a secondary output that receives copies of all text output."""
         self._secondary_outputs.append(output)
+        self._maybe_link_router(output)
+
+    def _maybe_link_router(self, output: OutputModule) -> None:
+        """Set ``output._router`` to ``self`` if the output exposes the
+        slot, so interactive renderers (TUI / web bridge) can call back
+        into ``router.submit_reply``. Outputs without the slot are
+        unaffected.
+        """
+        try:
+            object.__setattr__(output, "_router", self)
+        except Exception:
+            # Some output types may forbid arbitrary attribute setting
+            # (e.g. strict slots). Best-effort; non-interactive
+            # renderers don't need this.
+            pass
 
     def remove_secondary(self, output: OutputModule) -> None:
         """Remove a secondary output."""
@@ -234,8 +234,41 @@ class OutputRouter:
                 )
             case "resume_batch":
                 await self.on_resume(event.payload.get("events", []))
+            case (
+                "ask_text"
+                | "confirm"
+                | "selection"
+                | "progress"
+                | "notification"
+                | "card"
+                | "ui_supersede"
+            ):
+                # Phase B kinds. Fan via outputs' ``emit()`` so renderers
+                # see the typed event with full payload — the legacy
+                # ``on_activity`` path would lose the structure.
+                await self._fan_event_to_outputs(event)
             case _:
                 self._dispatch_activity_event(event)
+
+    async def _fan_event_to_outputs(self, event: OutputEvent) -> None:
+        """Call ``emit()`` on default + every secondary output.
+
+        Used for Phase B event types that carry rich payloads — those
+        bypass the legacy activity dispatch because renderers want the
+        typed event. Failures in one renderer don't stop the others.
+        """
+        targets = [self.default_output, *self._secondary_outputs]
+        for target in targets:
+            try:
+                await target.emit(event)
+            except Exception as e:  # pragma: no cover — defensive
+                logger.debug(
+                    "output emit failed",
+                    output=type(target).__name__,
+                    event_type=event.type,
+                    error=str(e),
+                    exc_info=True,
+                )
 
     def _dispatch_activity_event(self, event: OutputEvent) -> None:
         """Internal sync dispatch for activity-style OutputEvents.
@@ -259,6 +292,10 @@ class OutputRouter:
                 target.on_activity_with_metadata(event.type, detail, metadata)
             else:
                 target.on_activity(event.type, detail)
+
+    # ─────────────────────────────────────────────────────────────
+    # Phase B: interactive bus
+    # ─────────────────────────────────────────────────────────────
 
     def notify_activity(
         self, activity_type: str, detail: str, metadata: dict | None = None
@@ -301,156 +338,9 @@ class OutputRouter:
         await self.default_output.stop()
         logger.debug("Output router stopped")
 
-    async def route(self, event: ParseEvent) -> None:
-        """
-        Route a parse event to appropriate handler.
-
-        Args:
-            event: Parse event to route
-        """
-        match event:
-            case TextEvent(text=text):
-                await self._handle_text(text)
-
-            case ToolCallEvent():
-                self._pending_tool_calls.append(event)
-                logger.debug("Tool call queued", tool_name=event.name)
-
-            case SubAgentCallEvent():
-                self._pending_subagent_calls.append(event)
-                logger.debug("Sub-agent call queued", subagent_name=event.name)
-
-            case CommandEvent():
-                self._pending_commands.append(event)
-                logger.debug("Command queued", command=event.command)
-
-            case OutputCallEvent():
-                # Route to named output immediately
-                await self._handle_output(event)
-
-            case BlockStartEvent(block_type=block_type):
-                self._handle_block_start(block_type)
-
-            case BlockEndEvent(block_type=block_type):
-                self._handle_block_end(block_type)
-
-            case AssistantImageEvent():
-                self._handle_assistant_image(event)
-
-    def _handle_assistant_image(self, event: AssistantImageEvent) -> None:
-        """Fan out an assistant image to every attached output module.
-
-        Both the default output and every secondary output receives
-        the notification. Text-only outputs inherit the default
-        no-op; StreamOutput (API) pushes a JSON event to the WS
-        queue so the frontend can render live.
-        """
-        targets = [self.default_output, *self._secondary_outputs]
-        for target in targets:
-            handler = getattr(target, "on_assistant_image", None)
-            if handler is None:
-                continue
-            try:
-                handler(
-                    event.url,
-                    detail=event.detail,
-                    source_type=event.source_type,
-                    source_name=event.source_name,
-                    revised_prompt=event.revised_prompt,
-                )
-            except Exception as e:  # pragma: no cover — defensive
-                logger.debug(
-                    "on_assistant_image handler raised",
-                    error=str(e),
-                    exc_info=True,
-                )
-
-    async def _handle_text(self, text: str) -> None:
-        """Handle text event based on current state."""
-        # Always send to secondary outputs (for API streaming, logging, etc.)
-        for secondary in self._secondary_outputs:
-            await secondary.write_stream(text)
-
-        match self._state:
-            case OutputState.NORMAL:
-                await self.default_output.write_stream(text)
-
-            case OutputState.TOOL_BLOCK:
-                if not self.suppress_tool_blocks:
-                    await self.default_output.write_stream(text)
-
-            case OutputState.SUBAGENT_BLOCK:
-                if not self.suppress_subagent_blocks:
-                    await self.default_output.write_stream(text)
-
-            case OutputState.COMMAND_BLOCK:
-                pass
-
-            case OutputState.OUTPUT_BLOCK:
-                pass
-
-    async def _handle_output(self, event: OutputCallEvent) -> None:
-        """
-        Handle explicit output event.
-
-        Routes to named output module if registered.
-        Tracks completed outputs for feedback to controller.
-        """
-        target = event.target
-        content = event.content
-
-        if target in self.named_outputs:
-            output_module = self.named_outputs[target]
-            try:
-                await output_module.write(content)
-                # Track successful output
-                self._completed_outputs.append(
-                    CompletedOutput(target=target, content=content, success=True)
-                )
-                logger.debug(
-                    "Output sent to target", target=target, content_len=len(content)
-                )
-            except Exception as e:
-                # Track failed output
-                self._completed_outputs.append(
-                    CompletedOutput(
-                        target=target, content=content, success=False, error=str(e)
-                    )
-                )
-                logger.error("Output failed", target=target, error=str(e))
-        else:
-            # Unknown target - log warning, send to default
-            logger.warning(
-                "Unknown output target, sending to default",
-                target=target,
-                available=list(self.named_outputs.keys()),
-            )
-            await self.default_output.write(f"[output_{target}] {content}")
-            # Track as completed (to default)
-            self._completed_outputs.append(
-                CompletedOutput(
-                    target=f"{target}(default)", content=content, success=True
-                )
-            )
-
-    def _handle_block_start(self, block_type: str) -> None:
-        """Handle block start event."""
-        # Check for output block first (format: output_<target>)
-        if block_type.startswith("output_"):
-            self._state = OutputState.OUTPUT_BLOCK
-            return
-
-        match block_type:
-            case "tool":
-                self._state = OutputState.TOOL_BLOCK
-            case "subagent":
-                self._state = OutputState.SUBAGENT_BLOCK
-            case "command":
-                self._state = OutputState.COMMAND_BLOCK
-
-    def _handle_block_end(self, block_type: str) -> None:
-        """Handle block end event."""
-        self._state = OutputState.NORMAL
+    # ParseEvent routing (route, _handle_text, _handle_output,
+    # _handle_block_start/end, _handle_assistant_image) lives in
+    # OutputRouterParseEventMixin (router_parsing.py).
 
     async def flush(self) -> None:
         """Flush output modules."""
@@ -511,57 +401,4 @@ class OutputRouter:
         self._completed_outputs.clear()
 
 
-class MultiOutputRouter(OutputRouter):
-    """
-    Router that can route to multiple output modules.
-
-    Different content types can go to different destinations.
-    """
-
-    def __init__(
-        self,
-        default_output: OutputModule,
-        outputs: dict[str, OutputModule] | None = None,
-        **kwargs: Any,
-    ):
-        """
-        Initialize multi-output router.
-
-        Args:
-            default_output: Default output module
-            outputs: Named output modules for specific content types
-            **kwargs: Additional arguments for base router
-        """
-        super().__init__(default_output, **kwargs)
-        self.outputs = outputs or {}
-
-    async def start(self) -> None:
-        """Start all output modules."""
-        await super().start()
-        for output in self.outputs.values():
-            await output.start()
-
-    async def stop(self) -> None:
-        """Stop all output modules."""
-        for output in self.outputs.values():
-            await output.stop()
-        await super().stop()
-
-    async def write_to(self, name: str, content: str) -> None:
-        """
-        Write to a specific named output.
-
-        Args:
-            name: Output module name
-            content: Content to write
-        """
-        if name in self.outputs:
-            await self.outputs[name].write(content)
-        else:
-            logger.warning("Unknown output module", output_name=name)
-
-    async def flush(self) -> None:
-        """Flush all output modules."""
-        await super().flush()
-        for output in self.outputs.values():
-            await output.flush()
+__all__ = ["CompletedOutput", "OutputRouter", "OutputState"]
