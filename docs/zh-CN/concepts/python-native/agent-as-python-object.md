@@ -11,7 +11,7 @@ tags:
 
 ## 它是什么
 
-在 KohakuTerrarium 里，Agent 不是一份配置文件——配置文件只是描述它而已。一只正在运作的 Agent 是一个 `kohakuterrarium.core.Agent.Agent` 实例：一个 async Python 对象，你可以建构它、启动它、喂它事件，再把它停掉。子 Agent是同样的对象，只是嵌套存在。terrarium 则是另一个 Python 对象，持有好几只这样的 Agent。
+在 KohakuTerrarium 里，Agent 不是一份配置文件——配置文件只是描述它。主要的公开运行时句柄是一只运行中的 `Creature`：一个由 `Terrarium` 引擎托管的 async Python 对象。子代理是同一套 Agent runtime 在父 Creature 内部的嵌套实例。`Studio` 是引擎之上的管理 facade，负责 catalog、identity、active sessions、persistence、attach 与 editor 流程。更底层的 `kohakuterrarium.core.agent.Agent` 仍然存在，用于进阶事件 / 输出控制。
 
 所有东西都可以被调用、被 await、被组合。
 
@@ -24,43 +24,55 @@ tags:
 
 而你真正想建立在上面的行为，通常又得放进第三层——另一个 process、另一个 container、另一套 plugin system。为了做一件其实可以只是函数调用的事情，却多了很多跳跃。
 
-KohakuTerrarium 把这些层折叠起来：你可以直接 `import kohakuterrarium`、加载配置、spawn 一个 Agent、调用它，并且任意处理它吐出的事件。Agent 是一个 value；value 可以放进其他 value 里。
+KohakuTerrarium 把这些层折叠起来：你可以直接 `import kohakuterrarium`、加载配置、启动 Creature、调用它，并且任意处理它吐出的事件。Agent 是一个 value；value 可以放进其他 value 里。
 
 ## 关键介面长什么样子
 
+应用代码优先从引擎层的 `Creature` 句柄开始。它有图成员身份，也有 streaming chat：
+
 ```python
-from kohakuterrarium.core.Agent import Agent
+from kohakuterrarium import Terrarium
 
-Agent = Agent.from_path("@kt-biome/creatures/swe")
-Agent.set_output_handler(lambda text: print(text, end=""), replace_default=True)
-
-await Agent.start()
-await Agent.inject_input("Explain what this codebase does.")
-await Agent.stop()
+engine, creature = await Terrarium.with_creature("@kt-biome/creatures/swe")
+try:
+    async for chunk in creature.chat("What does this do?"):
+        print(chunk, end="")
+finally:
+    await engine.shutdown()
 ```
 
-或者用比较适合 transport 的包装：
+Terrarium recipe 也是同样形状：
 
 ```python
-from kohakuterrarium.serving.Agent_session import AgentSession
+from kohakuterrarium import Terrarium
 
-session = AgentSession(Agent.from_path("@kt-biome/creatures/swe"))
-await session.start()
-async for event in session.send_input("What does this do?"):
-  print(event)
-await session.stop()
+async with await Terrarium.from_recipe("@kt-biome/terrariums/swe_team") as engine:
+    swe = engine["swe"]
+    async for chunk in swe.chat("Fix the auth bug."):
+        print(chunk, end="")
 ```
 
-Terrarium 也是同样的形状：
+当你还需要 catalog / settings / session / persistence 策略时，用 `Studio`：
 
 ```python
-from kohakuterrarium.terrarium.runtime import TerrariumRuntime
-from kohakuterrarium.terrarium.config import load_terrarium_config
+from kohakuterrarium import Studio
 
-runtime = TerrariumRuntime(load_terrarium_config("@kt-biome/terrariums/swe_team"))
-await runtime.start()
-await runtime.run()
-await runtime.stop()
+async with Studio() as studio:
+    session = await studio.sessions.start_creature("@kt-biome/creatures/general")
+    print(session.session_id)
+```
+
+只有在需要直接注入事件、自定义 output handler 或其它低层控制时，才下探到 `Agent`：
+
+```python
+from kohakuterrarium.core.agent import Agent
+
+agent = Agent.from_path("@kt-biome/creatures/swe")
+agent.set_output_handler(lambda text: print(text, end=""), replace_default=True)
+
+await agent.start()
+await agent.inject_input("Explain what this codebase does.")
+await agent.stop()
 ```
 
 ## 因此你可以做什么
@@ -69,15 +81,15 @@ await runtime.stop()
 
 ### Plugin 里放 Agent（智慧护栏）
 
-做一个 `pre_tool_execute` plugin，实现内容是跑一只小型嵌套 Agent 来判断是否允许工具调用。外层Creature的主对话可以保持清晰；护栏自己的推理在自己的上下文里完成。
+做一个 `pre_tool_execute` plugin，实现内容是跑一只小型嵌套 Agent 来判断是否允许工具调用。外层 Creature 的主对话可以保持清晰；护栏自己的推理在自己的上下文里完成。
 
 ### Plugin 里放 Agent（无缝记忆）
 
-一个 `pre_llm_call` plugin 先跑一只很小的 retrieval Agent，去搜寻 session 的事件日志（或外部向量数据库），挑出相关的过去内容，然后把它注入 LLM 消息。从外层Creature的角度看，它的记忆只是「自然地变好了」。
+一个 `pre_llm_call` plugin 先跑一只很小的 retrieval Agent，去搜寻 session 的事件日志（或外部向量数据库），挑出相关的过去内容，然后把它注入 LLM 消息。从外层 Creature 的角度看，它的记忆只是「自然地变好了」。
 
 ### Trigger 里放 Agent（自适应观察者）
 
-不是写 `timer: 60s`，而是做一个自订 trigger，在 `fire()` 本体里每次 tick 都跑一只小 Agent。这只 Agent 会看目前状态，决定是否该唤醒外层Creature。这种环境感知式智慧，不需要依赖固定规则。
+不是写 `timer: 60s`，而是做一个自订 trigger，在 `fire()` 本体里每次 tick 都跑一只小 Agent。这只 Agent 会看目前状态，决定是否该唤醒外层 Creature。这种环境感知式智慧，不需要依赖固定规则。
 
 ### Tool 里放 Agent（上下文隔离的专家）
 
@@ -93,7 +105,7 @@ await runtime.stop()
 
 ## 不要被边界绑住
 
-你不一定要用 Python 来建立Creature——在大多数情况下，只靠配置文件就够了。但如果某份Creature配置撞上墙，让你开始想要「在 Agent 正在执行的一个步骤里，再放进一只会做判断的 Agent」，那个 Python 基底其实早就在那里了，不需要再发明一套新的 plugin system。
+你不一定要用 Python 来建立 Creature——在大多数情况下，只靠配置文件就够了。但如果某份 Creature 配置撞上墙，让你开始想要「在 Agent 正在执行的一个步骤里，再放进一只会做判断的 Agent」，那个 Python 基底其实早就在那里了，不需要再发明一套新的 plugin system。
 
 ## 延伸阅读
 

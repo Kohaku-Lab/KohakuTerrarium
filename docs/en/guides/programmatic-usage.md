@@ -26,7 +26,7 @@ Concept primer: [Studio](../concepts/studio.md), [Terrarium](../concepts/multi-a
 
 The top-level imports are stable: `from kohakuterrarium import Studio, Terrarium, Creature, EngineEvent, EventFilter`.
 
-For multi-agent Python pipelines without an engine, see [Composition](composition.md).
+For lightweight Python request pipelines without manually managing a long-lived terrarium graph or recipe, see [Composition](composition.md).
 
 ## `Studio` — management facade
 

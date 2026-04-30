@@ -52,7 +52,7 @@ tags:
 - **純 trigger 生物。** `input: { type: none }` 加上一個或多個
   trigger：cron 生物、channel watcher、webhook receiver。
 - **多介面聊天。** 由 HTTP 驅動的部署不需要 CLI 輸入 —
-  `AgentSession` transport 可以透過 `inject_input()` 以程式方式推送
+  `Creature` / `Studio` transport 可以透過 `inject_input()` 以程式方式推送
   使用者內容。
 - **感測器式輸入。** 接上檔案系統監看器、Discord listener，或 MQTT
   consumer。生物本身不會知道差別。

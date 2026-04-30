@@ -144,22 +144,26 @@ class TokenAccountant(BasePlugin):
 
 做一个 `pre_llm_call` 插件，先取回相关的历史事件，再把它们 prepend 到 messages 前面。你甚至可以调用一个小型巢状 agent 来判断哪些内容相关——plugin 就是普通 Python，所以里面用 agent 完全合法。可参考 [concepts/python-native/agent-as-python-object 概念](../concepts/python-native/agent-as-python-object.md)。
 
-## 内置运行时包
+## 内置运行时插件
 
-子代理预算与自动压缩都是普通插件，并打包成具名包：
+子代理预算与自动压缩都是普通 lifecycle 插件：
 
-| 包 | 插件 |
-|---|---|
-| `budget` | `budget.ticker`, `budget.alarm`, `budget.gate` |
-| `auto-compact` | `compact.auto` |
-| `default-runtime` | 全部预算插件加 `compact.auto` |
+| 名称 | 类型 | 用途 |
+|---|---|---|
+| `budget` | 插件 | 统一的 turn/tool/walltime 预算计数与执行；预算轴写在 `options` 下。 |
+| `compact.auto` | 插件 | 在 LLM 轮次后检查用量并触发已配置的压缩管理器。 |
+| `auto-compact` | 插件包 | 展开为 `compact.auto`；这是唯一的内置运行时插件包。 |
 
-在父 Creature 上使用：
+在父 Creature 上使用预算与自动压缩：
 
 ```yaml
-default_plugins: ["default-runtime"]
-turn_budget: [40, 60]
-tool_call_budget: [75, 100]
+default_plugins: ["auto-compact"]
+plugins:
+  - name: budget
+    options:
+      turn_budget: [40, 60]
+      tool_call_budget: [75, 100]
+      # walltime_budget: [300, 600]
 ```
 
 或在每个子代理上使用：
@@ -170,12 +174,15 @@ subagents:
     type: custom
     system_prompt: "Review the change."
     tools: [read, grep]
-    default_plugins: ["default-runtime"]
-    turn_budget: [40, 60]
-    tool_call_budget: [75, 100]
+    default_plugins: ["auto-compact"]
+    plugins:
+      - name: budget
+        options:
+          turn_budget: [40, 60]
+          tool_call_budget: [75, 100]
 ```
 
-内置子代理已经包含这个包和这些最小预算。完整说明见 [子代理指南](sub-agents.md)。
+内置子代理已经使用 `auto-compact` 和带有这些最小选项的 `budget` 插件。完整说明见 [子代理指南](sub-agents.md)。
 
 ## 在执行时管理插件
 

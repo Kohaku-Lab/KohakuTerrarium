@@ -67,12 +67,12 @@ kt terrarium run examples/terrariums/<name>
 
 ## `examples/code/` —— Python 嵌入
 
-這些腳本示範如何把框架嵌入你的程式中，並由你的程式碼擔任協調者。每個範例都使用 compose algebra 的不同片段，或 `Agent` / `TerrariumRuntime` / `KohakuManager` API。
+這些腳本示範如何把框架嵌入你的程式中，並由你的程式碼擔任協調者。每個範例都使用 compose algebra 的不同片段，或 `Terrarium` / `Creature` / `Studio` / 底層 `Agent` API。
 
 | Script | 模式 | 使用的功能 |
 |---|---|---|
-| `programmatic_chat.py` | 將 Agent 當作函式庫使用 | `AgentSession.chat()` |
-| `run_terrarium.py` | 以程式碼建立 Terrarium | `TerrariumRuntime`、頻道注入 |
+| `programmatic_chat.py` | 將 Creature 當作函式庫使用 | `Creature.chat()` |
+| `run_terrarium.py` | 以程式碼建立 Terrarium | `Terrarium`、頻道注入 |
 | `discord_adventure_bot.py` | 由 Bot 擁有互動流程 | `agent()`、動態建立、遊戲狀態 |
 | `debate_arena.py` | 多代理輪流互動 | `agent()`、`>>`、`async for`、持久代理 |
 | `task_orchestrator.py` | 動態代理拓樸 | `factory()`、`>>`、`asyncio.gather` |

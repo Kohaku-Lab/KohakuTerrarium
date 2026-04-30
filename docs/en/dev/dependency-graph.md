@@ -17,20 +17,25 @@ runtime cycles; keep it that way.
 
 `utils/` is a leaf. Everything imports from it; it imports nothing
 from the framework. `modules/` is protocols only. `core/` is the
-runtime — it imports `modules/` and `utils/` but **never** `builtins/`
-or `terrarium/` or `bootstrap/`. `bootstrap/` and `builtins/` import
-`core/` + `modules/`. `terrarium/` and `serving/` import `core/` +
-`bootstrap/`. `cli/` and `api/` sit on top of `serving/` + `terrarium/`.
+creature runtime — it imports `modules/` and `utils/` but **never**
+`builtins/`, `terrarium/`, `studio/`, `bootstrap/`, `api/`, or `cli/`.
+`bootstrap/` and `builtins/` assemble concrete runtime pieces on top of
+`core/` + `modules/`. `terrarium/` hosts creatures in graphs and imports
+`core/` + `bootstrap/`. `studio/` sits above `terrarium/` for management
+policy. `cli/` and `api/` are top-layer adapters over `studio/` /
+`terrarium/` plus launch glue.
 
 ## The tiers
 
 From leaf (bottom) to transport (top):
 
 ```
-  cli/, api/                    <- transports
-  serving/, terrarium/          <- orchestration
+  cli/, api/                    <- user/API adapters
+  studio/                       <- management facade and policies
+  serving/                      <- launch helpers + legacy compatibility wrappers
+  terrarium/                    <- creature graph runtime engine
   bootstrap/, builtins/         <- assembly + implementations
-  core/                         <- runtime engine
+  core/                         <- creature runtime
   modules/                      <- protocols (plus some base classes)
   parsing/, prompt/, llm/, …    <- support packages
   testing/                      <- depends on the whole stack, used only by tests
@@ -55,12 +60,16 @@ Per-tier detail:
 - **`builtins/`** — concrete tools, sub-agents, inputs, outputs, TUI,
   user commands. Internal catalogs (`tool_catalog`,
   `subagent_catalog`) are leaf modules with deferred loaders.
-- **`terrarium/`** — multi-agent runtime. Imports `core/`,
+- **`terrarium/`** — creature graph runtime. Imports `core/`,
   `bootstrap/`, `builtins/`. Not imported by any of them.
-- **`serving/`** — `KohakuManager`, `AgentSession`. Depends on `core/`
-  and `terrarium/`. Transport-agnostic.
+- **`studio/`** — management facade for catalog, identity, active sessions,
+  saved-session persistence, attach policy, and editors. Depends on
+  `terrarium/` and lower layers.
+- **`serving/`** — web/desktop launch helpers plus legacy compatibility
+  wrappers. New management code should live in `studio/`.
 - **`cli/`, `api/`** — top layer. One is an argparse entry point, the
-  other a FastAPI app. Both consume `serving/`.
+  other a FastAPI app. They delegate management to `studio/` and runtime
+  mechanics to `terrarium/`.
 
 See [`src/kohakuterrarium/README.md`](../../src/kohakuterrarium/README.md)
 for the ASCII dependency flow used as the source of truth.

@@ -45,32 +45,34 @@ subagents:
     type: builtin
 ```
 
-内置子代理已经启用默认运行时插件包：
+内置子代理已经启用自动压缩和统一运行时预算插件：
 
 ```yaml
-default_plugins: ["default-runtime"]
+default_plugins: ["auto-compact"]
+plugins:
+  - name: budget
+    options:
+      turn_budget: [40, 60]
+      tool_call_budget: [75, 100]
+      # 无 walltime_budget
 ```
 
-并使用当前最小默认预算：
-
-```yaml
-turn_budget: [40, 60]
-tool_call_budget: [75, 100]
-# 无 walltime_budget
-```
-
-列表/元组的形状是 `[soft, hard]`。软限制会在子代理下一轮 LLM 调用前注入提醒；硬限制会阻止继续派发工具/子代理，让专家用文字收尾，而不是继续消耗执行预算。
+每个预算轴的列表/元组形状是 `[soft, hard]`。软限制会在子代理下一轮 LLM 调用前注入提醒；硬限制会阻止继续派发工具/子代理，让专家用文字收尾，而不是继续消耗执行预算。
 
 ## 覆盖内置预算
 
-在子代理条目上直接覆盖字段：
+对内置子代理，通过条目的 `options` 覆盖 `plugins`：
 
 ```yaml
 subagents:
   - name: worker
     type: builtin
-    turn_budget: [60, 90]
-    tool_call_budget: [120, 180]
+    options:
+      plugins:
+        - name: budget
+          options:
+            turn_budget: [60, 90]
+            tool_call_budget: [120, 180]
 ```
 
 只有在确实需要按墙钟时间截断时才设置 `walltime_budget`：
@@ -79,9 +81,13 @@ subagents:
 subagents:
   - name: research
     type: builtin
-    turn_budget: [80, 120]
-    tool_call_budget: [150, 220]
-    walltime_budget: [300, 600]
+    options:
+      plugins:
+        - name: budget
+          options:
+            turn_budget: [80, 120]
+            tool_call_budget: [150, 220]
+            walltime_budget: [300, 600]
 ```
 
 多数长任务更适合使用 turn/tool 预算，而不是 walltime，因为模型和服务商延迟差异很大。
@@ -100,50 +106,58 @@ subagents:
       cite files as path:line when possible.
     tools: [glob, grep, read, tree]
     can_modify: false
-    default_plugins: ["default-runtime"]
-    turn_budget: [40, 60]
-    tool_call_budget: [75, 100]
+    default_plugins: ["auto-compact"]
+    plugins:
+      - name: budget
+        options:
+          turn_budget: [40, 60]
+          tool_call_budget: [75, 100]
 ```
 
 内联配置支持与 `SubAgentConfig` 相同的字段，包括：
 
 - `system_prompt`, `prompt_file`, `extra_prompt`, `extra_prompt_file`
 - `tools`, `can_modify`, `interactive`, `output_to`, `output_module`
-- `default_plugins`, `turn_budget`, `tool_call_budget`, `walltime_budget`
+- `default_plugins`, `plugins`
 - `compact`
 - `model`, `temperature`
 - `budget_inherit`, `budget_allocation`
 
+运行时预算轴（`turn_budget`、`tool_call_budget`，以及可选的 `walltime_budget`）写在 `budget` 插件的 `options` 中；它们不是核心 `SubAgentConfig` 字段。
+
 只有当你想在包之间共享配置对象、以程序方式构造提示词，或替换运行时行为时，才需要 Python 模块。
 
-## 运行时插件包
+## 运行时插件与插件包
 
-预算执行是基于插件的。内置插件包如下：
+预算执行是基于插件的。内置运行时表面如下：
 
-| 包 | 展开为 | 何时使用 |
+| 名称 | 类型 | 何时使用 |
 |---|---|---|
-| `budget` | `budget.ticker`, `budget.alarm`, `budget.gate` | 需要 turn/tool/walltime 预算计数与执行。 |
-| `auto-compact` | `compact.auto` | 已配置 `compact`，并希望在 LLM 轮次后自动检查压缩。 |
-| `default-runtime` | 上述全部 | 常规子代理运行时安全默认值。 |
+| `budget` | 插件 | 需要 turn/tool/walltime 预算计数与执行；预算轴写在 `options` 下。 |
+| `compact.auto` | 插件 | 已配置 `compact`，并希望在 LLM 轮次后自动检查压缩。 |
+| `auto-compact` | 插件包 | 想通过 `default_plugins` 启用 `compact.auto`。 |
 
-自定义或内联子代理需要显式加入插件包：
+自定义或内联子代理需要显式加入预算与自动压缩：
 
 ```yaml
 subagents:
   - name: reviewer
     type: custom
-    system_prompt: "Review the change."
+    system_prompt: "Review the proposed change."
     tools: [read, grep]
-    default_plugins: ["default-runtime"]
-    turn_budget: [40, 60]
-    tool_call_budget: [75, 100]
+    default_plugins: ["auto-compact"]
+    plugins:
+      - name: budget
+        options:
+          turn_budget: [40, 60]
+          tool_call_budget: [75, 100]
 ```
 
-同名的用户声明插件会覆盖默认插件，因此你可以替换某一个预算插件，同时保留插件包里的其它插件。
+同名的用户声明插件会覆盖默认插件，因此子代理可以替换成更大或更小的预算配置。
 
 ## 父代理预算与子代理预算
 
-子代理上的 `turn_budget` 和 `tool_call_budget` 是该子代理运行的独立多轴预算。
+`budget` 插件中的 `turn_budget` 和 `tool_call_budget` 选项是该子代理运行的独立多轴预算。
 
 旧的父级共享迭代预算仍然存在：
 
@@ -152,13 +166,15 @@ max_iterations: 100
 subagents:
   - name: explore
     type: builtin
-    budget_inherit: true      # 默认：存在父级迭代预算时共享
+    options:
+      budget_inherit: true      # 默认：存在父级迭代预算时共享
   - name: critic
     type: builtin
-    budget_allocation: 10     # 单独的旧式 10-turn 切片
+    options:
+      budget_allocation: 10     # 单独的旧式 10-turn 切片
 ```
 
-新配置优先使用显式的子代理 `turn_budget` / `tool_call_budget` 加 `default_plugins: ["default-runtime"]`。只有在你想让父代理和子代理共享同一个全局上限时，才使用 `max_iterations`。
+新配置优先使用显式的 `plugins: [{name: budget, options: ...}]` 加 `default_plugins: ["auto-compact"]`。只有在你想让父代理和子代理共享同一个全局上限时，才使用 `max_iterations`。
 
 ## 子代理自动压缩
 
@@ -170,9 +186,12 @@ subagents:
     type: custom
     system_prompt: "Research deeply, then summarize."
     tools: [web_search, web_fetch, read]
-    default_plugins: ["default-runtime"]
-    turn_budget: [80, 120]
-    tool_call_budget: [150, 220]
+    default_plugins: ["auto-compact"]
+    plugins:
+      - name: budget
+        options:
+          turn_budget: [80, 120]
+          tool_call_budget: [150, 220]
     compact:
       max_tokens: 120000
       threshold: 0.75
@@ -180,14 +199,14 @@ subagents:
       keep_recent_turns: 4
 ```
 
-`compact.auto` 插件会在 LLM 轮次后检查用量，并在达到阈值时触发压缩。没有 `compact.auto`（或 `default-runtime`）时，单独的 `compact:` 只会配置管理器，不会自动触发。
+`compact.auto` 插件会在 LLM 轮次后检查用量，并在达到阈值时触发压缩。没有 `compact.auto`（或 `auto-compact` 插件包）时，单独的 `compact:` 只会配置管理器，不会自动触发。
 
 ## 快速检查表
 
 对于每个需要实际工作的非内置子代理：
 
 1. 只给它必要工具。
-2. 加上 `default_plugins: ["default-runtime"]`。
-3. 至少设置 `turn_budget: [40, 60]` 和 `tool_call_budget: [75, 100]`。
+2. 如果它有 `compact:` 配置，加上 `default_plugins: ["auto-compact"]`。
+3. 加上 `budget` 插件，并至少设置 `turn_budget: [40, 60]` 和 `tool_call_budget: [75, 100]`。
 4. 除非确实需要墙钟截断，否则避免 `walltime_budget`。
 5. 提示词保持专家化，并要求返回紧凑的结构化结果。

@@ -184,7 +184,7 @@ result = await logged("input")
 
 ## 另請參見
 
-- [程式化使用](programmatic-usage.md) — 底層的 `Agent` / `AgentSession` API。
+- [程式化使用](programmatic-usage.md) — `Terrarium`、`Creature`、`Studio` 與底層 `Agent` API。
 - [概念 / 組合代數](../concepts/python-native/composition-algebra.md) — 設計理由。
 - [參考 / Python API](../reference/python.md) — `compose.core`、`compose.agent`、運算子簽章。
 - [examples/code/](../../examples/code/) — `review_loop.py`、`ensemble_voting.py`、`debate_arena.py`、`smart_router.py`、`pipeline_transforms.py`。

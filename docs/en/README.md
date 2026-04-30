@@ -78,6 +78,7 @@ Exhaustive lookup.
 - [Python API](reference/python.md) — classes, methods, and protocols.
 - [Built-ins Catalog](reference/builtins.md) — every shipped tool, sub-agent, I/O module.
 - [Plugin Hooks](reference/plugin-hooks.md) — every hook signature.
+- [v1.3.0 Release Notes](reference/release-notes-1.3.0.md) — final changelog, compatibility notes, release flow, and validation summary.
 
 ### Development
 

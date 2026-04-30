@@ -28,6 +28,8 @@ task-oriented paths, read [Guides](../guides/README.md).
   preset.
 - [Plugin hooks](plugin-hooks.md) — every lifecycle, LLM, tool,
   sub-agent, callback, and prompt hook, with signatures and timing.
+- [v1.3.0 release notes](release-notes-1.3.0.md) — final changelog,
+  compatibility notes, packaging flow, and validation summary.
 
 ## What belongs here
 

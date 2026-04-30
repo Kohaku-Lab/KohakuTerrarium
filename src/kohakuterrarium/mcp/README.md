@@ -50,8 +50,8 @@ servers need the dep.
   dozens of MCP tools available.
 - `MCPClientManager._lock` serializes connect / disconnect; call_tool does
   not take the lock, so parallel tool calls work.
-- Transport support: `stdio` (local process) and `http` (streamable HTTP).
-  The `transport` field on `MCPServerConfig` selects which.
+- Transport support: `stdio` (local process), `streamable_http` (modern HTTP MCP), and legacy `http`/`sse` SSE endpoints.
+  The `transport` field on `MCPServerConfig` selects which; `http` is normalized to legacy SSE.
 - The manager is attached to `Agent._mcp_manager`; `tools.py:_get_mcp_manager`
   reads it from the tool's `context.agent` at call time.
 

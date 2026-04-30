@@ -47,7 +47,7 @@ A sub-agent is a creature config + a parent registry. When spawned:
 - it inherits the parent's LLM and tool format,
 - it is given a subset of tools (the `tools` list in its sub-agent config),
 - it runs a full Agent lifecycle (start → event-loop → stop),
-- it may have its own runtime `turn_budget` / `tool_call_budget`,
+- it may have its own unified `budget` plugin options (`turn_budget`, `tool_call_budget`, optional `walltime_budget`),
 - it can additionally inherit the parent's legacy iteration budget, get its own
   `budget_allocation`, or run without a shared budget at all,
 - its result is delivered as a `subagent_output` event on the parent,
@@ -74,11 +74,12 @@ job id, and delivers completions as `TriggerEvent`s.
 Depth is bounded by `max_subagent_depth` (config-level) to prevent
 runaway recursion. Cancellation is cooperative — the parent can invoke
 `stop_task` to interrupt a running sub-agent. Runtime budgets are enforced by
-the `budget.ticker`, `budget.alarm`, and `budget.gate` plugins. The
-`default-runtime` pack enables those plus auto-compaction. Shared legacy
-iteration budgets are resolved at spawn time: `budget_allocation` wins,
-otherwise `budget_inherit: true` reuses the parent's budget object if one
-exists.
+the unified `budget` plugin, configured through `plugins[].options` with axes
+such as `turn_budget`, `tool_call_budget`, and optional `walltime_budget`.
+Auto-compaction is enabled separately with the `auto-compact` pack (which expands
+to `compact.auto`). Shared legacy iteration budgets are resolved at spawn time:
+`budget_allocation` wins, otherwise `budget_inherit: true` reuses the parent's
+budget object if one exists.
 
 Built-in sub-agents (in `kt-biome` + framework): `worker`, `plan`,
 `explore`, `critic`, `response`, `research`, `summarize`,

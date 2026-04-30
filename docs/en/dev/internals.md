@@ -8,7 +8,7 @@ tags:
 
 # Framework internals
 
-Implementation-level map of the runtime, grouped into three layers.
+Implementation-level map of the runtime, grouped into creature runtime, Terrarium engine, and Studio/API management layers.
 Reader is assumed to have `src/kohakuterrarium/` open alongside this
 doc. Concept docs under `../concepts/` explain *why*; this explains
 *where*. The public Python API reference (`plans/inventory-python-api.md`)
@@ -19,8 +19,8 @@ Sixteen flows are documented below. They are grouped as:
 1. **Agent runtime** — lifecycle, controller loop, tool pipeline,
    sub-agents, triggers, prompt aggregation, plugins.
 2. **Persistence & memory** — session persistence, compaction.
-3. **Multi-agent & serving** — terrarium runtime, channels, environment
-   vs session, serving layer, compose algebra, package system, MCP.
+3. **Terrarium, Studio & adapters** — graph runtime, channels, environment
+   vs session, Studio management facade, API/CLI adapters, compose algebra, package system, MCP.
 
 A final [Cross-cutting invariants](#cross-cutting-invariants) section
 collects the rules that apply system-wide.
@@ -329,10 +329,10 @@ async iterator over events matching `EventFilter`. Each subscriber
 gets its own queue; cancelling the iterator de-registers.
 
 The legacy `terrarium/runtime.py:TerrariumRuntime` and
-`serving/manager.py:KohakuManager` are still on disk during the
-transition — older HTTP routes and CLI paths still reach for them.
-`api/deps.py` now exposes both `get_engine()` (new) and `get_manager()`
-(legacy) singletons; routes migrate one by one.
+`serving/manager.py:KohakuManager` are still on disk for compatibility and
+legacy CLI/embedding paths. The v1.3 HTTP route path uses
+`api/deps.py:get_engine()` and the Studio route/session modules; there is no
+new `KohakuManager` route dependency.
 
 See [concepts/multi-agent/terrarium.md](../concepts/multi-agent/terrarium.md)
 and [concepts/multi-agent/root-agent.md](../concepts/multi-agent/root-agent.md).
@@ -369,19 +369,20 @@ each other's sessions — shared state goes strictly through
 
 See [concepts/modules/session-and-environment.md](../concepts/modules/session-and-environment.md).
 
-### 3.4 Serving layer
+### 3.4 Studio and adapter layer
 
-`serving/manager.py:KohakuManager` creates `AgentSession` or
-`TerrariumSession` wrappers for transport code.
-`AgentSession.send_input` pushes user-input events into the agent and
-yields output-router events as JSON dicts: `text`, `tool_start`,
-`tool_complete`, `activity`, `token_usage`, `compact_*`, `job_update`,
-and so on.
+`studio/` is the management facade above the Terrarium engine. It owns
+catalog, identity/settings, active sessions, saved-session persistence, attach
+policies, and editor workflows. `api/` routes and CLI commands should delegate
+those policies to Studio namespaces rather than duplicating them.
 
-Both the HTTP/WS API in `api/` and any Python embedding code use this
-layer instead of touching `Agent` internals directly.
+`api/deps.py:get_engine()` exposes the per-process `Terrarium` singleton for
+route handlers that need runtime graph access. Session chat/control routes use
+Studio session modules and engine-backed `Creature.chat()` semantics.
 
-API signatures: `plans/inventory-python-api.md` §Serving.
+`serving/` remains for `web.py` launch helpers and compatibility wrappers such
+as `AgentSession` / `KohakuManager`; new route handlers should not build on
+those wrappers.
 
 ### 3.5 Compose algebra internals
 
@@ -429,7 +430,7 @@ Terminology:
 ### 3.7 MCP integration
 
 `mcp/client.py:MCPClientManager.connect(cfg)` opens a stdio or
-HTTP/SSE session, calls `session.initialize()`, discovers tools via
+HTTP MCP session, calls `session.initialize()`, discovers tools via
 `list_tools`, and caches results into `self._servers[name]`.
 `disconnect(name)` cleans up.
 
@@ -439,7 +440,7 @@ Tools" markdown block listing each server, tool, and param set. Agents
 invoke MCP tools through the builtin `mcp_call(server, tool, args)`
 meta-tool, plus `mcp_list` / `mcp_connect` / `mcp_disconnect`.
 
-Transports: `stdio` (subprocess with stdin/stdout) and `http/SSE`.
+Transports: `stdio` (subprocess with stdin/stdout) and `streamable_http plus legacy http/sse`.
 
 ---
 

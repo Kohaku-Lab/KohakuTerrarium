@@ -7,7 +7,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/license-KohakuTerrarium--1.0-green" alt="License">
-  <img src="https://img.shields.io/badge/version-1.2.0-orange" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.3.0-orange" alt="Version">
 </p>
 
 <p align="center">
@@ -46,7 +46,7 @@ The last two years produced a striking number of agent products: Claude Code, Co
 
 KohakuTerrarium's job is to put that substrate in one place so the next agent shape costs a config file and a few custom modules, not a new repo.
 
-The core abstraction is the **creature**: a standalone agent with its own controller, tools, sub-agents, triggers, memory, and I/O. Creatures compose horizontally into a **terrarium** — a pure wiring layer. Everything is Python, so agents can be embedded inside tools, triggers, plugins, and outputs of other agents.
+The core abstraction is the **creature**: a standalone agent with its own controller, tools, sub-agents, triggers, memory, and I/O. Creatures are hosted by a **Terrarium** engine: a graph runtime for channels, lifecycle, output wiring, hot-plug, and session attachment. A **Studio** layer sits above that for catalog, identity, active sessions, persistence, live traces, and web/desktop/API management. Everything is Python, so agents can be embedded inside tools, triggers, plugins, and outputs of other agents.
 
 For out-of-the-box creatures you can try today, see [**kt-biome**](https://github.com/Kohaku-Lab/kt-biome) — the showcase pack of useful agents and plugins built on top of the framework.
 
@@ -77,8 +77,8 @@ A terrarium composes multiple creatures horizontally through channels, lifecycle
 - **Built-in session persistence and resume.** Sessions store operational state, not just chat history. Resume a run hours later with `kt resume`.
 - **Searchable session history.** Every event is indexed. `kt search` and the `search_memory` tool let you (and the agent) look up past work.
 - **Non-blocking context compaction.** Long-running agents keep working while context is compacted in the background.
-- **Comprehensive built-in tools and sub-agents.** File, shell, web, JSON, search, editing, planning, review, research, terrarium management.
-- **MCP support.** Connect stdio / HTTP MCP servers per-agent or globally; tools surface in the prompt automatically.
+- **Comprehensive built-in tools and sub-agents.** File, shell, web, JSON, notebook/Jupyter, search, editing, planning, review, research, terrarium management.
+- **MCP support.** Connect stdio, streamable HTTP, or legacy SSE/HTTP MCP servers per-agent or globally; tools surface in the prompt automatically.
 - **Package system.** Install creatures / terrariums / plugins / LLM presets from Git or local paths; compose installed packages with inheritance.
 - **Python-native.** Agents are async Python objects. Embed them inside tools, triggers, plugins, or outputs of other agents.
 - **Composition algebra.** `>>`, `&`, `|`, `*`, `.iterate` operators for stitching agents into pipelines programmatically.
@@ -122,10 +122,10 @@ kt install ./my-creatures -e        # editable install
 kt login codex
 kt model default gpt-5.4
 
-# Or any OpenAI-compatible provider via `kt config provider add`
+# Or native Anthropic / OpenAI-compatible providers via `kt config llm add`
 ```
 
-Supports OpenRouter, OpenAI, Anthropic, Google Gemini, and any OpenAI-compatible API.
+Supports Codex OAuth, OpenRouter/OpenAI, native Anthropic, Google Gemini, and any OpenAI-compatible API.
 
 ### 4. Run something
 
@@ -216,38 +216,46 @@ kt run path/to/creature
 kt run @package/path/to/creature
 ```
 
-### Terrarium
+### Runtime hierarchy
 
 ```text
-  +---------+       +---------------------------+
-  |  User   |<----->|        Root Agent         |
-  +---------+       |  (terrarium tools, TUI)   |
-                    +---------------------------+
-                          |               ^
-            sends tasks   |               |  observes results
-                          v               |
-                    +---------------------------+
-                    |     Terrarium Layer       |
-                    |   (pure wiring, no LLM)   |
-                    +-------+----------+--------+
-                    |  swe  |  coder   |  ....  |
-                    +-------+----------+--------+
+User / API / Desktop
+        |
+        v
++----------------------+     no agent reasoning
+| Studio / App Layer   |  catalog, identity, active sessions,
+|                      |  persistence, attach, editors, live traces
++----------------------+
+        |
+        v
++----------------------+     no LLM, no decisions
+| Terrarium Engine     |  creature graph, topology, channels,
+|                      |  lifecycle, output wiring, session attach
++----------+-----------+
+           |
+   +-------+----------------+
+   |                        |
+Root Creature           Worker Team Creatures
+(user-facing)           swe / coder / reviewer / ...
+   |
+   v
+Sub-agents inside each creature
+(vertical/private delegation)
 ```
 
-A terrarium is the runtime engine that hosts every running creature in the process. A standalone agent is a 1-creature graph; a multi-agent team is a connected graph wired by channels. The engine manages creature lifecycles, the channels between them, hot-plug, and the framework-level **output wiring** that auto-delivers a creature's turn-end output to named targets. No LLM, no decisions — just runtime. Creatures don't know they're in a terrarium; they run standalone too.
+- **Studio** is the management facade used by the web dashboard, desktop app, and HTTP API. It owns catalog views, identity/settings, active sessions, persistence, attach/resume, editors, and live traces. It does not reason.
+- **Terrarium** is the runtime engine that hosts every running creature in the process. A standalone agent is a one-creature graph; a multi-agent team is a connected graph. The engine manages topology, channels, lifecycle, hot-plug, output wiring, and session attachment. No LLM, no decisions.
+- **Root creature** is optional. It is a normal creature hosted by the same Terrarium engine, conceptually outside the worker team and user-facing through terrarium management tools.
+- **Creature** owns reasoning: controller, tools, triggers, sub-agents, plugins, memory, I/O, prompts, and private state. Creatures do not need to know whether they are alone or part of a graph.
+- **Sub-agents** are vertical/private delegation inside one creature. Prefer them when one controller can decompose the task internally; use Terrarium when multiple peer creatures need horizontal cooperation.
 
-Terrarium is our **proposed architecture** for horizontal multi-agent — two complementary cooperation mechanisms (channels for conditional / optional traffic; output wiring for deterministic pipeline edges), plus hot-plug and observation. Still evolving as patterns emerge; the [ROADMAP](ROADMAP.md) has the open questions. Prefer sub-agents (vertical) when a single creature can decompose the task itself — it's the simpler answer for most "I need context isolation" instincts.
+### Channels and output wiring
 
-### Root agent
+Channels and output wiring are the horizontal cooperation substrate between creatures:
 
-A terrarium can define a root agent that sits outside the team and operates it through terrarium management tools. The user talks to root; root talks to the team.
-
-### Channels
-
-Channels are the communication substrate — for terrariums and for agent-to-agent patterns inside a single creature.
-
-- **Queue** — one consumer receives each message
-- **Broadcast** — all subscribers receive each message
+- **Queue** — one consumer receives each message.
+- **Broadcast** — all subscribers receive each message.
+- **Output wiring** — deterministic pipeline edges that auto-deliver a creature's turn-end output to named targets.
 
 ### Modules
 
@@ -274,13 +282,13 @@ Private by default, shared by opt-in.
 
 KohakuTerrarium already ships:
 
-- Built-in file, shell, web, JSON, channel, trigger, and introspection tools, including single-edit and multi-edit file mutation primitives.
+- Built-in file, shell, web, JSON, notebook/Jupyter, channel, trigger, and introspection tools, including single-edit and multi-edit file mutation primitives.
 - Built-in sub-agents for exploration, planning, implementation, review, summarisation, and research.
 - Background tool execution and non-blocking agent flow.
 - Session persistence with resumable operational state.
 - FTS + vector memory search (model2vec / sentence-transformer / API embedding providers).
 - Non-blocking auto-compaction for long-running agents.
-- MCP (Model Context Protocol) integration — stdio and HTTP transports.
+- MCP (Model Context Protocol) integration — stdio, streamable HTTP, and legacy SSE/HTTP transports.
 - Package manager for creatures, plugins, terrariums, and reusable agent packs (`kt install`, `kt update`).
 - Python embedding through the `Terrarium` engine plus lower-level `Agent` access.
 - HTTP and WebSocket serving.
@@ -365,7 +373,7 @@ See [CLI Reference](docs/en/reference/cli.md).
 
 ### Web dashboard
 
-Vue-based dashboard + FastAPI server.
+Vue-based dashboard + FastAPI server backed by the Studio management layer.
 
 ```bash
 kt web                       # one-shot, foreground
@@ -437,12 +445,13 @@ src/kohakuterrarium/
   core/              # Agent runtime, controller, executor, events, environment
   bootstrap/         # Agent initialisation factories (LLM, tools, I/O, triggers, plugins)
   cli/               # `kt` command dispatcher
-  terrarium/         # Multi-agent runtime, topology wiring, hot-plug, persistence
+  studio/            # Management facade: catalog, identity, sessions, persistence, attach, editors
+  terrarium/         # Runtime engine: creature graph, topology, channels, output wiring, hot-plug
   builtins/          # Built-in tools, sub-agents, I/O modules, TUI, user commands, CLI UI
   builtin_skills/    # Markdown skill manifests for on-demand docs
   session/           # Session persistence, memory search, embeddings
-  serving/           # Transport-agnostic service manager and event streaming
-  api/               # FastAPI HTTP + WebSocket server
+  serving/           # Launch/transport helpers and compatibility streaming wrappers
+  api/               # FastAPI HTTP + WebSocket adapters over Studio and Terrarium
   compose/           # Composition algebra primitives
   mcp/               # MCP client manager
   modules/           # Base protocols for tools, inputs, outputs, triggers, sub-agents, user commands
@@ -505,10 +514,10 @@ Copyright 2024-2026 Shih-Ying Yeh (KohakuBlueLeaf) and contributors.
 ### General
 
 **What is KohakuTerrarium?**
-KohakuTerrarium is a Python-native AI agent framework that provides a structured runtime for building, composing, and running autonomous agents. It separates agent logic (Creatures) from execution environment (Terrarium), enabling flexible single-agent and multi-agent workflows.
+KohakuTerrarium is a Python-native AI agent framework for building autonomous agents. The public hierarchy is: **Creature** for the agent unit, **Terrarium** for the no-LLM runtime graph, and **Studio** for catalog/session/persistence/API management.
 
 **How does it differ from other agent frameworks?**
-Unlike monolithic frameworks, KohakuTerrarium uses a modular architecture where agents (Creatures) are defined separately from their runtime environment (Terrarium). This enables hot-plugging agents, composition algebra for multi-agent setups, and programmatic Python usage alongside CLI workflows.
+Unlike monolithic frameworks, KohakuTerrarium keeps responsibilities separated: creatures own reasoning and tools, terrariums own graph/channel/lifecycle runtime, and Studio owns management surfaces. Horizontal teams use Terrarium recipes and channels; Python request pipelines can still use composition algebra.
 
 ### Installation & Setup
 
@@ -516,7 +525,7 @@ Unlike monolithic frameworks, KohakuTerrarium uses a modular architecture where 
 Python 3.10 or higher. Install via `pip install kohakuterrarium`.
 
 **Which LLM providers are supported?**
-Any provider with an OpenAI-compatible API endpoint. This includes OpenAI, Anthropic (via proxy), local models (Ollama, vLLM), and cloud providers. Configure via `kt login <provider>` or set environment variables.
+Codex OAuth, OpenAI/OpenRouter-style providers, native Anthropic, Google Gemini, local OpenAI-compatible servers (Ollama, vLLM), and other OpenAI-compatible cloud providers. Configure with `kt login`, `kt config llm add`, `kt config provider add`, or provider API keys.
 
 **Can I use local models?**
 Yes. Point the LLM endpoint to your local server (Ollama, vLLM, etc.) and configure the model name in your creature configuration.
@@ -524,10 +533,10 @@ Yes. Point the LLM endpoint to your local server (Ollama, vLLM, etc.) and config
 ### Core Concepts
 
 **What is a "Creature"?**
-A Creature is an autonomous agent definition — its tools, prompts, behavior rules, and capabilities. Think of it as the agent's "brain" or personality.
+A Creature is the standalone agent unit: controller, tools, triggers, sub-agents, plugins, memory, I/O, prompts, and private state. It can run alone or as a node in a Terrarium graph.
 
 **What is a "Terrarium"?**
-A Terrarium is the runtime environment that executes Creatures. It manages sessions, memory, tool execution, and multi-agent topology. Multiple Creatures can run in the same Terrarium.
+A Terrarium is the no-LLM runtime engine that hosts creature graphs. It manages topology, channels, output wiring, lifecycle, hot-plug, and session attachment; each creature still owns its controller, tools, memory, and private state.
 
 **What are "Plugins"?**
 Plugins extend the framework's capabilities — custom tools, I/O modules, triggers, or behavior hooks. They follow a hook-based system for clean integration.
@@ -541,7 +550,7 @@ Define a YAML configuration with tools, prompts, and behavior, or use the Python
 Yes. KohakuTerrarium provides a Python-native API for programmatic agent creation and execution. See `examples/code/` and `docs/en/guides/programmatic-usage.md`.
 
 **How does multi-agent composition work?**
-Use the composition algebra primitives in the `compose` module to wire multiple Creatures together. Define communication topology, data flow, and synchronization patterns. See `examples/terrariums/` for examples.
+Use Terrarium recipes/engine channels/output wiring for horizontal multi-agent teams. Use `compose` for lightweight Python-side request pipelines (`>>`, `&`, `|`, retry) when you do not need a long-lived graph. See `examples/terrariums/` and `examples/code/`.
 
 ### Troubleshooting
 
@@ -549,7 +558,7 @@ Use the composition algebra primitives in the `compose` module to wire multiple 
 Check that your LLM provider is configured correctly with `kt login`. Verify network connectivity and API key validity.
 
 **How do I debug agent behavior?**
-Use `kt run --verbose` for detailed logs. Check the session history with `kt sessions list` and `kt sessions view <id>`.
+Use `kt run --verbose` for detailed logs. Resume or inspect prior work with `kt resume`, search it with `kt search`, or use the Studio session viewer in the web/desktop UI.
 
 **Where can I get help?**
 - QQ Group: 1097666427

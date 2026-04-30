@@ -210,7 +210,7 @@ are first-class async Python values. Full:
 ## MCP
 
 Model Context Protocol — an external protocol for exposing tools to
-LLMs. KohakuTerrarium connects to MCP servers over stdio or HTTP/SSE,
+LLMs. KohakuTerrarium connects to MCP servers over stdio, streamable HTTP, or legacy HTTP/SSE,
 discovers their tools, and surfaces them to the LLM through meta-tools
 (`mcp_call`, `mcp_list`, …). Full: [mcp guide](../guides/mcp.md).
 

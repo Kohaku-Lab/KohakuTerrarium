@@ -277,10 +277,10 @@ model — no live agent references.
 
 ### Compose interop
 
-`Creature` is intended to satisfy the `Runnable` protocol from
-`kohakuterrarium.compose.core`, so creatures slot into pipelines via
-`>>` / `&` / `|` / `*`. Integration tests covering this composition
-path still need to be added.
+`Creature` exposes `chat()` and `inject_input()` as the engine-hosted runtime
+handle. The composition operators (`>>`, `&`, `|`, `*`) live on
+`kohakuterrarium.compose` runnables; use `compose.agent(...)` or
+`compose.factory(...)` when you want Python-side pipelines.
 
 ---
 

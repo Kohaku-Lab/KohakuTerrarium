@@ -95,6 +95,7 @@ const sidebarStructure = {
     "reference/python.md",
     "reference/plugin-hooks.md",
     "reference/http.md",
+    "reference/release-notes-1.3.0.md",
   ],
   dev: [
     "dev/README.md",

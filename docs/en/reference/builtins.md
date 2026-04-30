@@ -77,6 +77,16 @@ markdown files. Direct.
 
 - Args: `path`, `depth`.
 
+**`notebook_read`** — Read Jupyter notebooks (`.ipynb`) as compact markdown
+summaries, selected cells, or raw JSON. Direct.
+
+- Args: `path`, `cell`, `include_outputs`, `mode`.
+
+**`notebook_edit`** — Edit Jupyter notebooks by replacing, inserting, deleting,
+or appending cells while preserving notebook metadata. Direct.
+
+- Args: `path`, `cell`, `source`, `cell_type`, `action`.
+
 ### Structured data
 
 **`json_read`** — Read a JSON document by dot-path. Direct.
@@ -195,9 +205,9 @@ Shipped sub-agent configs under
 `src/kohakuterrarium/builtins/subagents/`. Reference them in a creature
 config under `subagents:` by name.
 
-All builtin sub-agents load `default_plugins: ["default-runtime"]` and use
-minimal runtime budgets: turn soft/hard `40/60`, tool-call soft/hard `75/100`,
-and no walltime budget.
+All builtin sub-agents load `default_plugins: ["auto-compact"]` and the unified
+`budget` plugin with minimal runtime options: turn soft/hard `40/60`, tool-call
+soft/hard `75/100`, and no walltime budget.
 
 | Name | Tools | Purpose |
 |---|---|---|
@@ -642,8 +652,8 @@ Built-in MCP meta-tools (exposed when `mcp_servers` is configured):
 - `mcp_disconnect` — tear down a connection.
 
 Server tools are surfaced in the system prompt under
-`## Available MCP Tools`. Transports: `stdio` (subprocess) and
-`http`/SSE.
+`## Available MCP Tools`. Transports: `stdio` (subprocess), `streamable_http`
+(modern HTTP MCP), and legacy `http`/`sse` SSE endpoints.
 
 Python surface: `MCPServerConfig`, `MCPClientManager` in
 `kohakuterrarium.mcp`.

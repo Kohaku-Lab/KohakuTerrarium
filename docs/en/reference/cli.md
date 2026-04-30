@@ -371,7 +371,7 @@ Manage the global MCP server catalog
 (`~/.kohakuterrarium/mcp_servers.yaml`).
 
 - `list` — show file path and server inventory.
-- `add [name]` — interactive. Prompts for transport (`stdio`/`http`),
+- `add [name]` — interactive. Prompts for transport (`stdio`/`streamable_http`/`http`),
   command, args JSON, env JSON, URL.
 - `edit <name>` — interactive edit.
 - `delete <name>` — remove entry.

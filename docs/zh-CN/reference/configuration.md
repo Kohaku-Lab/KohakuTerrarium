@@ -220,19 +220,20 @@ subagents:
     type: custom
     system_prompt: "Map dependencies and return a compact summary."
     tools: [glob, grep, read, tree]
-    default_plugins: ["default-runtime"]
-    turn_budget: [40, 60]
-    tool_call_budget: [75, 100]
+    default_plugins: ["auto-compact"]
+    plugins:
+      - name: budget
+        options:
+          turn_budget: [40, 60]
+          tool_call_budget: [75, 100]
 ```
 
-内置子代理已经声明 `default_plugins: ["default-runtime"]`、`turn_budget: [40, 60]`、`tool_call_budget: [75, 100]`，且没有 `walltime_budget`。
+内置子代理已经声明 `default_plugins: ["auto-compact"]`，并配置 `budget` 插件：`turn_budget: [40, 60]`、`tool_call_budget: [75, 100]`，且没有 `walltime_budget`。
 
 子代理选项字段还包括运行时与共享预算控制：
 
-- `default_plugins: ["default-runtime"]` — 加载预算 ticker/alarm/gate 以及自动压缩。
-- `turn_budget: [soft, hard]` — 子代理 LLM turn 的软/硬限制。
-- `tool_call_budget: [soft, hard]` — 子代理工具调用的软/硬限制。
-- `walltime_budget: [soft, hard]` — 可选的墙钟时间限制（秒）。
+- `default_plugins: ["auto-compact"]` — 展开为 `compact.auto`；当子代理的 `compact:` 需要自动触发时使用。
+- `plugins: [{name: budget, options: {...}}]` — 统一运行时预算插件。选项包括 `turn_budget: [soft, hard]`、`tool_call_budget: [soft, hard]`，以及可选的 `walltime_budget: [soft, hard]`（秒）。
 - `budget_inherit: true`（默认）— 如果父级存在共享旧式 iteration budget，子代理会复用它。
 - `budget_allocation: N` — 子代理得到一份新的独立旧式 `N` turn 预算。
 - `budget_inherit: false` 且无 allocation — 子代理不使用父级共享旧式预算。
@@ -319,11 +320,11 @@ output_wiring:
 | 字段 | 型别 | 默认 | 说明 |
 |---|---|---|---|
 | `name` | str | — | Server 识别字。 |
-| `transport` | `stdio` \| `http` | — | Transport。`http` 走 Server-Sent Events (SSE)。 |
+| `transport` | `stdio` \| `streamable_http` \| `http` \| `sse` | `stdio` | Transport。`streamable_http` 是现代 HTTP MCP 首选；`http`/`sse` 是旧式 SSE alias。 |
 | `command` | str | — | stdio 执行档。 |
 | `args` | list[str] | `[]` | stdio 参数。 |
 | `env` | dict[str,str] | `{}` | stdio 环境变数。 |
-| `url` | str | — | HTTP/SSE endpoint。 |
+| `url` | str | — | `streamable_http`、`http` 或 `sse` transport 的 URL。 |
 
 ### 插件
 
@@ -558,8 +559,8 @@ Anthropic backend preset 可通过 `extra_body` 传递 SDK request field；provi
   args: ["/path/to/db"]
   env: {}
 - name: web_api
-  transport: http
-  url: https://mcp.example.com/sse
+  transport: streamable_http
+  url: https://mcp.example.com/mcp
   env: { API_KEY: ${MCP_API_KEY} }
 ```
 
@@ -568,11 +569,11 @@ Anthropic backend preset 可通过 `extra_body` 传递 SDK request field；provi
 | 字段 | 型别 | 默认 | 说明 |
 |---|---|---|---|
 | `name` | str | — | 唯一识别字。 |
-| `transport` | `stdio` \| `http` | — | Transport。`http` 走 Server-Sent Events (SSE)。 |
+| `transport` | `stdio` \| `streamable_http` \| `http` \| `sse` | `stdio` | Transport。`streamable_http` 是现代 HTTP MCP 首选；`http`/`sse` 是旧式 SSE alias。 |
 | `command` | str | — | stdio 执行档。 |
 | `args` | list[str] | `[]` | stdio 参数。 |
 | `env` | dict[str,str] | `{}` | stdio 环境变数。 |
-| `url` | str | — | `http` transport 的 endpoint。 |
+| `url` | str | — | `streamable_http`、`http` 或 `sse` transport 的 URL。 |
 
 ---
 

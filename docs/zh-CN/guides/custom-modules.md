@@ -273,9 +273,16 @@ SPECIALIST_CONFIG = SubAgentConfig(
     interactive=False,
     can_modify=False,
     model="subagent-default",
-    default_plugins=["default-runtime"],
-    turn_budget=(40, 60),
-    tool_call_budget=(75, 100),
+    default_plugins=["auto-compact"],
+    plugins=[
+        {
+            "name": "budget",
+            "options": {
+                "turn_budget": [40, 60],
+                "tool_call_budget": [75, 100],
+            },
+        },
+    ],
 )
 ```
 
@@ -299,9 +306,12 @@ subagents:
     system_prompt: "You analyze X. Return a short summary."
     tools: [read, grep]
     model: subagent-default
-    default_plugins: ["default-runtime"]
-    turn_budget: [40, 60]
-    tool_call_budget: [75, 100]
+    default_plugins: ["auto-compact"]
+    plugins:
+      - name: budget
+        options:
+          turn_budget: [40, 60]
+          tool_call_budget: [75, 100]
 ```
 
 如果子代理要包另一个完整的自定义代理 (例如接别的框架，或纯 Python 实作)，就继承 `SubAgent` 实作 `async run(input_text) -> SubAgentResult`。见 [概念 / Sub-agent](../concepts/modules/sub-agent.md)。

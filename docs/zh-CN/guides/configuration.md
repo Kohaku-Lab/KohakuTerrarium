@@ -131,7 +131,7 @@ subagents:
 
 内置：`worker`、`coordinator`、`explore`、`plan`、`research`、`critic`、`response`、`memory_read`、`memory_write`、`summarize`。
 
-内置子代理已经包含 `default-runtime` 插件包和最小预算：`turn_budget: [40, 60]`、`tool_call_budget: [75, 100]`，并且没有 walltime 限制。专家需要更多空间时，可在条目中直接覆盖这些字段。
+内置子代理已经启用 `default_plugins: ["auto-compact"]`，并配置统一的 `budget` 插件作为最小预算：`turn_budget: [40, 60]`、`tool_call_budget: [75, 100]`，且没有 walltime 限制。专家需要更多空间时，请覆盖 `budget` 插件的 `options`。
 
 对于纯 YAML 专家，使用不带 `module`/`config` 的 `type: custom`，并把 `SubAgentConfig` 字段直接写在条目里：
 
@@ -142,9 +142,12 @@ subagents:
     description: Map dependency edges without editing files
     system_prompt: "Map dependencies and return a compact summary."
     tools: [glob, grep, read, tree]
-    default_plugins: ["default-runtime"]
-    turn_budget: [40, 60]
-    tool_call_budget: [75, 100]
+    default_plugins: ["auto-compact"]
+    plugins:
+      - name: budget
+        options:
+          turn_budget: [40, 60]
+          tool_call_budget: [75, 100]
 ```
 
 运行时插件包、预算与压缩的完整说明见 [子代理指南](sub-agents.md)。
@@ -254,8 +257,8 @@ mcp_servers:
     command: mcp-server-sqlite
     args: ["/var/db/my.db"]
   - name: docs_api
-    transport: http
-    url: https://mcp.example.com/sse
+    transport: streamable_http
+    url: https://mcp.example.com/mcp
     env: { API_KEY: "${DOCS_API_KEY}" }
 ```
 

@@ -1,84 +1,72 @@
-# terrarium/
+# terrarium
 
-Multi-agent orchestration runtime. The terrarium is a **pure wiring layer**
-with no intelligence of its own: it loads standalone creature configs,
-creates channels between them, injects channel triggers, and manages
-lifecycle. Intelligence lives in creatures (and in the optional root agent
-that sits OUTSIDE the terrarium).
+Runtime engine for creature graphs.
+
+A `Terrarium` is the no-LLM, no-decision runtime that hosts running creatures.
+A solo agent is a one-creature graph; a team is a connected graph wired by
+channels and output wiring. Intelligence lives in creatures. Management concerns
+above the engine (catalog, identity, active sessions, persistence, attach,
+editors) live in `studio/`.
+
+The older `TerrariumRuntime` stack is still present for compatibility and some
+legacy CLI paths, but new code should prefer the `Terrarium` engine and the
+`Creature` handle from `creature_host.py`.
 
 ## Files
 
 | File | Responsibility |
 |------|----------------|
-| `__init__.py` | Re-exports `TerrariumRuntime`, `TerrariumAPI`, configs, hot-plug, observer |
-| `runtime.py` | `TerrariumRuntime` — lifecycle orchestration (start, stop, channel wiring) with `HotPlugMixin` |
-| `api.py` | `TerrariumAPI` — programmatic facade wrapping a `TerrariumRuntime` |
-| `config.py` | `TerrariumConfig`, `CreatureConfig`, `ChannelConfig`, `load_terrarium_config`, `build_channel_topology_prompt` |
-| `factory.py` | `build_creature`, `build_root_agent` — construct Agent instances; wire triggers and topology prompt |
-| `creature.py` | `CreatureHandle` — wrapper around an `Agent` with terrarium metadata (channels, config) |
-| `output_wiring.py` | `TerrariumOutputWiringResolver` — resolves `output_wiring` targets to live `Agent` instances and dispatches `creature_output` events |
-| `hotplug.py` | `HotPlugMixin` — add / remove creatures and channels at runtime without restart |
-| `observer.py` | `ChannelObserver`, `ObservedMessage` — non-destructive channel message recording |
-| `output_log.py` | `OutputLogCapture`, `LogEntry` — tee wrapper that captures creature output for observability |
-| `persistence.py` | `attach_session_store`, `build_conversation_from_messages` — session store wiring and resume helpers |
-| `tool_manager.py` | `TerrariumToolManager` — shared state for terrarium management tools (stored in environment) |
-| `tool_registration.py` | `ensure_terrarium_tools_registered` — lazy import of terrarium tools to avoid circular imports |
-| `cli.py` | CLI subcommands (`kt terrarium run` / `resume` / `list`), TUI + headless drivers |
-| `cli_output.py` | `CLIOutput` — minimal prefixed-stdout output for headless terrarium mode |
+| `engine.py` | `Terrarium` engine: graph/session lifecycle, add/remove creatures, connect/disconnect, observe, output wiring. |
+| `creature_host.py` | `Creature` handle around a running `Agent`; exposes `chat()`, `inject_input()`, status, graph metadata. |
+| `topology.py` | Pure-data graph/channel topology model and merge/split deltas. |
+| `events.py` | `EngineEvent`, `EventKind`, `EventFilter` observable event model. |
+| `sessions.py`, `session_coord.py` | Engine-backed session stores and merge/split coordination. |
+| `recipe_loader.py`, `recipe_apply.py` | Load/apply terrarium recipes into the engine. |
+| `channels.py`, `output_wiring.py` | Channel trigger injection and deterministic turn-output routing. |
+| `runtime.py`, `api.py`, `factory.py`, `hotplug.py` | Legacy `TerrariumRuntime` / `TerrariumAPI` compatibility stack. |
+| `cli.py`, `legacy_resume.py` | CLI drivers and legacy terrarium resume path. |
+| `tool_manager.py`, `tool_registration.py` | Shared state and lazy registration for terrarium management tools. |
+| `observer.py`, `output_log.py`, `persistence.py` | Legacy observer/output/session helpers. |
 
 ## Dependency direction
 
-Imported by: `cli/` (via `cli/__init__.py` and `cli_rich/`), `api/` (indirectly
-via `serving/`), `serving/manager.py`, `builtins/tools/terrarium_*.py`
-(lazy).
-
-Imports: `core/` (Agent, channel, conversation, environment, session),
-`builtins/inputs.NoneInput`, `builtins/tool_catalog` (for the root agent),
-`modules/output`, `modules/trigger/channel`, `session/store`, `utils/logging`.
-
-One-way dependency: `terrarium/` → `core/`, never `core/` → `terrarium/`.
+- Imports: `core/`, `bootstrap/`, `builtins/`, `modules/`, `session/`, `utils/`.
+- Imported by: `studio/`, `api/`, `cli/`, compatibility `serving/`, and terrarium tools.
+- One-way dependency: `terrarium/` may depend on `core/`; `core/` must never depend on `terrarium/`.
 
 ## Key entry points
 
-- `TerrariumRuntime(config).start()` — construct + start all creatures
-- **`TerrariumAPI(runtime)`** — the stable programmatic facade. Most external
-  callers (HTTP API, root-agent tools, tests) talk to the terrarium through
-  this, not through `TerrariumRuntime` directly. Exposes:
-  - channel ops: `channel_list`, `channel_read`, `channel_send`, `observe`
-  - creature ops: `creature_list`, `creature_start`, `creature_stop`, `status`
-  - lifecycle: `stop`, `status`
-- `build_creature(name, config, ...)` / `build_root_agent(config, runtime)`
-  — the two Agent-construction factories
-- `HotPlugMixin.add_creature` / `remove_creature` / `add_channel`
-- `ChannelObserver.observe(channel_name)` — non-destructive stream
-- `load_terrarium_config(path)` — parse terrarium YAML
+```python
+from kohakuterrarium import Terrarium
+
+engine, creature = await Terrarium.with_creature("@kt-biome/creatures/swe")
+async for chunk in creature.chat("Explain this project"):
+    print(chunk, end="")
+await engine.shutdown()
+```
+
+- `await Terrarium.with_creature(config)` — create an engine and one running creature.
+- `await Terrarium.from_recipe(recipe)` — create an engine and apply a multi-creature recipe.
+- `await engine.add_creature(config, graph=None, start=True)` — add a creature to an existing or new graph.
+- `await engine.connect(a, b, channel=...)` / `disconnect(...)` — wire or unwire graph edges; may merge/split graphs.
+- `await engine.wire_output(creature, sink)` — deterministic turn-output routing.
+- `engine.subscribe(EventFilter(...))` — observe text chunks, channel messages, topology changes, lifecycle, errors, and session forks.
+- `await engine.shutdown()` — stop all creatures.
+
+Use `Studio` when you also need package catalog, settings/identity, saved-session
+persistence, attach policies, or editor workflows.
 
 ## Notes
 
-- A terrarium has NO LLM of its own. The optional root agent sits OUTSIDE
-  the terrarium (a normal creature with terrarium tools bound) — it is the
-  user's interface; the terrarium obeys its orders through `TerrariumAPI`.
-- **Output wiring** is installed on every creature's agent during
-  `TerrariumRuntime.start()` via `_install_output_wiring_resolver()`. Each
-  creature's `_finalize_processing` (in `core/agent_handlers.py`) calls
-  `resolver.emit(...)` at turn-end; the resolver constructs a
-  `creature_output` `TriggerEvent` and pushes it via
-  `asyncio.create_task(target._process_event(event))` per target — fire-
-  and-forget so the source's turn-finalisation doesn't block on slow
-  receivers. See `core/output_wiring.py` for the core protocol + no-op
-  default resolver (used by standalone agents).
-- `tool_registration.py` exists purely to break the
-  `core → builtins/tools → terrarium → core` circular import cycle. Tools
-  are registered only on first terrarium use.
-- `ChannelObserver` never consumes messages from a channel — it attaches a
-  callback so observers and normal listeners co-exist.
-- Session persistence works exactly like single-agent sessions, but each
-  creature gets its own `.kohakutr` file; the terrarium writes a sidecar
-  index linking them.
+- A Terrarium has no LLM of its own. It routes and hosts; creatures reason.
+- An optional root creature is a normal creature hosted by the same engine and marked as root with `assign_root`; conceptually it is user-facing and outside the worker-team role.
+- Channels provide optional/conditional traffic. Output wiring provides deterministic pipeline edges.
+- Graph topology is pure data; live changes emit `TOPOLOGY_CHANGED`, `SESSION_FORKED`, and related engine events.
+- Legacy `TerrariumRuntime` docs remain only for compatibility code. Avoid building new surfaces on it.
 
 ## See also
 
-- `../core/README.md` — `Agent` + channel primitives
-- `../serving/manager.py` — `KohakuManager.terrarium_*` methods (HTTP layer)
-- `../builtins/tools/terrarium_*.py` — the tools the root agent uses to drive the terrarium
-- `docs/concepts/multi-agent/` — creature vs terrarium vs root agent model
+- `../studio/README.md` — management facade above the engine.
+- `../core/README.md` — `Agent` + channel primitives.
+- `docs/en/concepts/multi-agent/terrarium.md` — runtime mental model.
+- `docs/en/guides/programmatic-usage.md` — embedding examples.

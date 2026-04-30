@@ -114,7 +114,7 @@ Terrarium 引擎里的一个连通分量：透过频道连起来的一组 Creatu
 
 ## MCP
 
-Model Context Protocol — 一个把工具暴露给 LLM 的外部协定。KohakuTerrarium 透过 stdio 或 HTTP/SSE 连到 MCP 服务器、探索它们的工具、再用 meta 工具 (`mcp_call`、`mcp_list`…) 把它们暴露给 LLM。完整说明：[MCP 使用指南](../guides/mcp.md)。
+Model Context Protocol — 一个把工具暴露给 LLM 的外部协定。KohakuTerrarium 透过 stdio、streamable HTTP 或旧式 HTTP/SSE 连到 MCP 服务器、探索它们的工具、再用 meta 工具 (`mcp_call`、`mcp_list`…) 把它们暴露给 LLM。完整说明：[MCP 使用指南](../guides/mcp.md)。
 
 ## Compaction / 压缩
 

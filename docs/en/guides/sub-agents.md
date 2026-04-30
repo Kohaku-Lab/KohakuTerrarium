@@ -49,34 +49,38 @@ subagents:
     type: builtin
 ```
 
-Builtin sub-agents already opt into the default runtime pack:
+Builtin sub-agents already use auto-compaction and the unified runtime budget
+plugin:
 
 ```yaml
-default_plugins: ["default-runtime"]
+default_plugins: ["auto-compact"]
+plugins:
+  - name: budget
+    options:
+      turn_budget: [40, 60]
+      tool_call_budget: [75, 100]
+      # no walltime_budget
 ```
 
-and currently use the same minimal default budget:
-
-```yaml
-turn_budget: [40, 60]
-tool_call_budget: [75, 100]
-# no walltime_budget
-```
-
-The tuple/list shape is `[soft, hard]`. The soft limit injects an alarm into the
-sub-agent's next LLM turn; the hard limit gates further tool/sub-agent dispatch
-so the specialist can finish in text instead of continuing to spend work.
+The tuple/list shape for each budget axis is `[soft, hard]`. The soft limit
+injects an alarm into the sub-agent's next LLM turn; the hard limit gates further
+tool/sub-agent dispatch so the specialist can finish in text instead of
+continuing to spend work.
 
 ## Override a builtin budget
 
-Override fields inline on the sub-agent entry:
+For builtin sub-agents, override `plugins` through the entry's `options` block:
 
 ```yaml
 subagents:
   - name: worker
     type: builtin
-    turn_budget: [60, 90]
-    tool_call_budget: [120, 180]
+    options:
+      plugins:
+        - name: budget
+          options:
+            turn_budget: [60, 90]
+            tool_call_budget: [120, 180]
 ```
 
 Only set `walltime_budget` if you really want wall-clock enforcement:
@@ -85,9 +89,13 @@ Only set `walltime_budget` if you really want wall-clock enforcement:
 subagents:
   - name: research
     type: builtin
-    turn_budget: [80, 120]
-    tool_call_budget: [150, 220]
-    walltime_budget: [300, 600]
+    options:
+      plugins:
+        - name: budget
+          options:
+            turn_budget: [80, 120]
+            tool_call_budget: [150, 220]
+            walltime_budget: [300, 600]
 ```
 
 Most long tasks should prefer turn/tool budgets over walltime, because model and
@@ -108,34 +116,41 @@ subagents:
       cite files as path:line when possible.
     tools: [glob, grep, read, tree]
     can_modify: false
-    default_plugins: ["default-runtime"]
-    turn_budget: [40, 60]
-    tool_call_budget: [75, 100]
+    default_plugins: ["auto-compact"]
+    plugins:
+      - name: budget
+        options:
+          turn_budget: [40, 60]
+          tool_call_budget: [75, 100]
 ```
 
 Inline configs support the same fields as `SubAgentConfig`, including:
 
 - `system_prompt`, `prompt_file`, `extra_prompt`, `extra_prompt_file`
 - `tools`, `can_modify`, `interactive`, `output_to`, `output_module`
-- `default_plugins`, `turn_budget`, `tool_call_budget`, `walltime_budget`
+- `default_plugins`, `plugins`
 - `compact`
 - `model`, `temperature`
 - `budget_inherit`, `budget_allocation`
 
+Runtime budget axes (`turn_budget`, `tool_call_budget`, and optional
+`walltime_budget`) live under the `budget` plugin's `options`; they are not core
+`SubAgentConfig` fields.
+
 Use a Python module only when you want to share a config object across packages,
 construct prompts programmatically, or subclass/replace runtime behaviour.
 
-## Runtime plugin packs
+## Runtime plugins and packs
 
-Budget enforcement is plugin-based. The built-in packs are:
+Budget enforcement is plugin-based. The built-in runtime surface is:
 
-| Pack | Expands to | Use when |
+| Name | Kind | Use when |
 |---|---|---|
-| `budget` | `budget.ticker`, `budget.alarm`, `budget.gate` | You want turn/tool/walltime budget accounting and enforcement. |
-| `auto-compact` | `compact.auto` | You configured `compact` and want automatic compaction checks after LLM turns. |
-| `default-runtime` | all of the above | Normal sub-agent runtime safety defaults. |
+| `budget` | plugin | You want turn/tool/walltime budget accounting and enforcement. Configure axes under `options`. |
+| `compact.auto` | plugin | You configured `compact` and want automatic compaction checks after LLM turns. |
+| `auto-compact` | pack | You want to opt into `compact.auto` through `default_plugins`. |
 
-For custom or inline sub-agents, add the pack explicitly:
+For custom or inline sub-agents, add budget and auto-compaction explicitly:
 
 ```yaml
 subagents:
@@ -143,18 +158,21 @@ subagents:
     type: custom
     system_prompt: "Review the proposed change."
     tools: [read, grep]
-    default_plugins: ["default-runtime"]
-    turn_budget: [40, 60]
-    tool_call_budget: [75, 100]
+    default_plugins: ["auto-compact"]
+    plugins:
+      - name: budget
+        options:
+          turn_budget: [40, 60]
+          tool_call_budget: [75, 100]
 ```
 
-User-declared plugins with the same `name` override defaults, so you can replace
-one budget plugin while keeping the rest of the pack.
+User-declared plugins with the same `name` override defaults, so a sub-agent can
+replace the builtin budget configuration with a larger or smaller one.
 
 ## Parent vs sub-agent budgets
 
-`turn_budget` and `tool_call_budget` on a sub-agent are independent multi-axis
-budgets for that sub-agent run.
+The `budget` plugin's `turn_budget` and `tool_call_budget` options are
+independent multi-axis budgets for that sub-agent run.
 
 The older parent shared iteration budget still exists:
 
@@ -163,15 +181,17 @@ max_iterations: 100
 subagents:
   - name: explore
     type: builtin
-    budget_inherit: true      # default when a parent iteration budget exists
+    options:
+      budget_inherit: true      # default when a parent iteration budget exists
   - name: critic
     type: builtin
-    budget_allocation: 10     # isolated legacy turn slice
+    options:
+      budget_allocation: 10     # isolated legacy turn slice
 ```
 
-For new configs, prefer explicit sub-agent `turn_budget` / `tool_call_budget`
-plus `default_plugins: ["default-runtime"]`. Use `max_iterations` only when you
-want a single global cap shared by parent and children.
+For new configs, prefer explicit sub-agent `plugins: [{name: budget, options:
+...}]` plus `default_plugins: ["auto-compact"]`. Use `max_iterations` only when
+you want a single global cap shared by parent and children.
 
 ## Auto-compaction for sub-agents
 
@@ -183,9 +203,12 @@ subagents:
     type: custom
     system_prompt: "Research deeply, then summarize."
     tools: [web_search, web_fetch, read]
-    default_plugins: ["default-runtime"]
-    turn_budget: [80, 120]
-    tool_call_budget: [150, 220]
+    default_plugins: ["auto-compact"]
+    plugins:
+      - name: budget
+        options:
+          turn_budget: [80, 120]
+          tool_call_budget: [150, 220]
     compact:
       max_tokens: 120000
       threshold: 0.75
@@ -194,16 +217,17 @@ subagents:
 ```
 
 The `compact.auto` plugin checks usage after LLM turns and triggers compaction
-when the configured threshold is crossed. Without `compact.auto` (or
-`default-runtime`), a `compact:` block alone configures the manager but does not
-auto-trigger it.
+when the configured threshold is crossed. Without `compact.auto` (or the
+`auto-compact` pack), a `compact:` block alone configures the manager but does
+not auto-trigger it.
 
 ## Quick checklist
 
 For every non-builtin sub-agent you expect to do real work:
 
 1. Give it only the tools it needs.
-2. Add `default_plugins: ["default-runtime"]`.
-3. Set at least `turn_budget: [40, 60]` and `tool_call_budget: [75, 100]`.
+2. Add `default_plugins: ["auto-compact"]` if it has a `compact:` block.
+3. Add the `budget` plugin with at least `turn_budget: [40, 60]` and
+   `tool_call_budget: [75, 100]`.
 4. Avoid `walltime_budget` unless wall-clock cutoff is truly important.
 5. Keep the prompt specialist-focused and ask for a compact structured result.

@@ -23,7 +23,7 @@ tags:
 - [Creatures 指南](creatures.md) — 提示词设计、工具与子代理挑选、LLM 配置、发布 Creature 供他人重用。
 - [Terrarium 指南](terrariums.md) — 横向多代理协作，频道、输出接线、根代理、热插拔、观察。
 - [组合代数](composition.md) — 用 Python 的 `>>`、`&`、`|`、`*` 把 agent 与 async callable 串起来。
-- [程序化使用指南](programmatic-usage.md) — 在你自己的 Python 代码里驱动 `Agent`、`AgentSession`、`TerrariumRuntime`、`KohakuManager`。
+- [程序化使用指南](programmatic-usage.md) — 在你自己的 Python 代码里驱动 `Terrarium`、`Creature`、`Studio` 与底层 `Agent`。
 
 ## 存续
 

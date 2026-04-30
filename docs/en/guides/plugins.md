@@ -156,23 +156,26 @@ class TokenAccountant(BasePlugin):
 
 A `pre_llm_call` plugin that retrieves relevant past events and prepends them to the messages. You can call a small nested agent to decide what's relevant — plugins are plain Python, so agents are legal inside them. See [concepts/python-native/agent-as-python-object](../concepts/python-native/agent-as-python-object.md).
 
-## Built-in runtime packs
+## Built-in runtime plugins
 
-Sub-agent budgets and auto-compaction are ordinary plugins bundled as named
-packs:
+Sub-agent budgets and auto-compaction are ordinary lifecycle plugins:
 
-| Pack | Plugins |
-|---|---|
-| `budget` | `budget.ticker`, `budget.alarm`, `budget.gate` |
-| `auto-compact` | `compact.auto` |
-| `default-runtime` | all budget plugins plus `compact.auto` |
+| Name | Kind | Use |
+|---|---|---|
+| `budget` | plugin | Unified turn/tool/walltime budget accounting and enforcement. Configure axes under `options`. |
+| `compact.auto` | plugin | Checks usage after LLM turns and triggers the configured compaction manager. |
+| `auto-compact` | pack | Expands to `compact.auto`. This is the only built-in runtime pack. |
 
-Use them in a parent creature:
+Use budget + auto-compaction in a parent creature:
 
 ```yaml
-default_plugins: ["default-runtime"]
-turn_budget: [40, 60]
-tool_call_budget: [75, 100]
+default_plugins: ["auto-compact"]
+plugins:
+  - name: budget
+    options:
+      turn_budget: [40, 60]
+      tool_call_budget: [75, 100]
+      # walltime_budget: [300, 600]
 ```
 
 or per sub-agent:
@@ -183,13 +186,16 @@ subagents:
     type: custom
     system_prompt: "Review the change."
     tools: [read, grep]
-    default_plugins: ["default-runtime"]
-    turn_budget: [40, 60]
-    tool_call_budget: [75, 100]
+    default_plugins: ["auto-compact"]
+    plugins:
+      - name: budget
+        options:
+          turn_budget: [40, 60]
+          tool_call_budget: [75, 100]
 ```
 
-Builtin sub-agents already include this pack and these minimum budgets. See
-[Sub-agents](sub-agents.md) for the full guide.
+Builtin sub-agents already use `auto-compact` and the `budget` plugin with
+these minimum options. See [Sub-agents](sub-agents.md) for the full guide.
 
 ## Managing plugins at runtime
 

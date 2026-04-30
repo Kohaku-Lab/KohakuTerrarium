@@ -30,7 +30,7 @@ tags:
 - 它会继承父Creature的 LLM 与工具格式；
 - 它会拿到一部分工具（定义于子 Agent配置中的 `tools` 清单）；
 - 它会跑完整的 Agent 生命周期（start → event-loop → stop）；
-- 它可以有自己的运行时 `turn_budget` / `tool_call_budget`；
+- 它可以有自己的统一 `budget` 插件选项（`turn_budget`、`tool_call_budget`，以及可选的 `walltime_budget`）；
 - 它也可以继承父级旧式 iteration budget、拿到自己的 `budget_allocation`，或完全不共享预算；
 - 它的结果会以父层上的 `subagent_output` 事件送达，
   或在 `output_to: external` 时直接串流给用户。
@@ -47,7 +47,7 @@ tags:
 
 深度由 `max_subagent_depth`（配置层级）限制，以防止递回失控。取消采合作式机制——父Creature可以调用 `stop_task` 中断正在执行的子 Agent。
 
-运行时预算由 `budget.ticker`、`budget.alarm` 和 `budget.gate` 插件执行；`default-runtime` 包会启用这些插件以及自动压缩。旧式共享 iteration budget 在派生时解析：`budget_allocation` 优先，否则 `budget_inherit: true` 会在存在父级预算时复用同一个预算对象。
+运行时预算由统一的 `budget` 插件执行，并通过 `plugins[].options` 配置 `turn_budget`、`tool_call_budget` 以及可选的 `walltime_budget`。自动压缩单独通过 `auto-compact` 插件包启用（它展开为 `compact.auto`）。旧式共享 iteration budget 在派生时解析：`budget_allocation` 优先，否则 `budget_inherit: true` 会在存在父级预算时复用同一个预算对象。
 
 内建子 Agent（位于 `kt-biome` + framework）：`worker`、`plan`、`explore`、`critic`、`response`、`research`、`summarize`、`memory_read`、`memory_write`、`coordinator`。
 

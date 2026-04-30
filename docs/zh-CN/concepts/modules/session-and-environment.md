@@ -64,7 +64,7 @@ Session（每个 Creature一个）
 
 `core/session.py` 定义了 `Session`，以及依照 key 取得／建立 session 的辅助函数。
 `core/environment.py` 定义 `Environment`。
-`TerrariumRuntime` 会建立一个 environment，并将一个 session 挂到每个 Creature上。
+`Terrarium` 会建立 graph/environment 语境，并将 session 挂到每个 Creature 上。
 
 内建的 `scratchpad` 工具会读写目前Creature的 session scratchpad。
 `send_message` 工具则会选择正确的 channel registry

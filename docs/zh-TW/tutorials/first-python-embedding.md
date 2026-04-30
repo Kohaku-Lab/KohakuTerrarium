@@ -1,76 +1,100 @@
 ---
-title: 在 Python 中嵌入
-summary: 透過 AgentSession 與 compose algebra，在你自己的 Python 程式碼中執行代理。
+title: 第一個 Python 嵌入範例
+summary: 用 Creature.chat、Studio 與組合代數，在你自己的 Python 程式碼中執行代理。
 tags:
   - tutorials
   - python
   - embedding
 ---
 
-# 第一個 Python 嵌入
+# 第一個 Python 嵌入範例
 
-**問題：**你想要從自己的 Python 應用程式內執行一個生物 —— 擷取它的輸出、用程式碼驅動它的輸入，並把它和其他程式碼組合起來。
+## 你將建構什麼
 
-**完成狀態：**你會先完成一支最小腳本：啟動生物、注入輸入、透過自訂 handler 擷取輸出，並乾淨地關閉。接著再用 `AgentSession` 做一次事件串流版本。最後，再用相同方式嵌入一個 terrarium。
+**完成狀態：**一支最小腳本：透過 `Terrarium` 啟動 Creature，用 `Creature.chat()` 串流輸出，嵌入一個多 Creature Terrarium，並用 Studio 管理 session。最後附上底層 `Agent` 範例，用於自訂 output handler。
 
-**先決條件：**[第一個生物](first-creature.md)。你需要以能 `import kohakuterrarium` 的方式安裝套件。
+## 步驟 1 —— 安裝開發環境
 
-在這個框架裡，代理不是設定檔 —— 它是一個 Python 物件。設定檔描述的是代理；`Agent.from_path(...)` 會建出一個代理；而這個物件由你持有。Sub-agents、terrariums 與 sessions 也是同樣的形狀。完整心智模型請參考 [agent-as-python-object](../concepts/python-native/agent-as-python-object.md)。
-
-## 步驟 1 —— 以 editable 方式安裝
-
-目標：讓你的 venv 可以 `import kohakuterrarium`。
-
-在 repo 根目錄執行：
+從倉庫根目錄：
 
 ```bash
 uv pip install -e .[dev]
 ```
 
-`[dev]` extras 也會帶入你之後可能會用到的測試輔助工具。
+`[dev]` extras 會帶入稍後可能會用到的測試輔助工具。
 
-## 步驟 2 —— 最小嵌入範例
+## 步驟 2 —— 用 `Creature.chat()` 做最小嵌入
 
-目標：建立一個代理、啟動它、餵它一筆輸入，再停止它。
+目標：建構一隻運行中的 Creature、送出一條輸入、串流它的回應，並乾淨地關閉引擎。
 
 `demo.py`：
 
 ```python
 import asyncio
 
-from kohakuterrarium.core.agent import Agent
+from kohakuterrarium import Terrarium
 
 
 async def main() -> None:
-    agent = Agent.from_path("@kt-biome/creatures/general")
+    engine, creature = await Terrarium.with_creature(
+        "@kt-biome/creatures/general"
+    )
 
-    await agent.start()
     try:
-        await agent.inject_input(
+        async for chunk in creature.chat(
             "In one sentence, what is a creature in KohakuTerrarium?"
-        )
+        ):
+            print(chunk, end="", flush=True)
+        print()
     finally:
-        await agent.stop()
+        await engine.shutdown()
 
 
 asyncio.run(main())
 ```
 
-執行它：
+執行：
 
 ```bash
 python demo.py
 ```
 
-預設的 stdout output 模組會印出回應。這裡有三件事值得注意：
+注意三件事：
 
-1. `Agent.from_path` 解析 `@kt-biome/...` 的方式和 CLI 完全相同。
-2. `start()` 會初始化 controller + tools + triggers + plugins。
-3. `inject_input(...)` 就是使用者在 CLI input 模組中輸入訊息的程式化對應形式。
+1. `Terrarium.with_creature` 解析 `@kt-biome/...` 的方式與 CLI 相同。
+2. 單隻 Creature 也由多 Creature graph 使用的同一個引擎托管。
+3. `Creature.chat(...)` 是一個文字 chunk 的 async iterator。
 
-## 步驟 3 —— 自己接管輸出
+## 步驟 3 —— 只推輸入，不消費輸出
 
-目標：不要把輸出送到 stdout，而是導入你自己的程式碼。
+目標：從你自己的 scheduler、bot 或 event loop 餵輸入。若另一個 output sink 負責渲染，就使用 `inject_input(...)`。
+
+```python
+import asyncio
+
+from kohakuterrarium import Terrarium
+
+
+async def main() -> None:
+    engine, creature = await Terrarium.with_creature(
+        "@kt-biome/creatures/general"
+    )
+    try:
+        await creature.inject_input(
+            "Explain the difference between a creature and a terrarium."
+        )
+    finally:
+        await engine.shutdown()
+
+
+asyncio.run(main())
+```
+
+Creature 會使用它設定的 output module。若只是想在自己的程式碼裡拿簡單文字流，優先用 `Creature.chat(...)`。
+
+## 步驟 4 —— 用底層 `Agent` 擷取輸出
+
+目標：把輸出導進你自己的 handler，而不是 stdout。這是自訂 transport 的進階形狀；大多數應用應從 `Creature.chat()` 或 `Studio.sessions.chat` 開始。
 
 ```python
 import asyncio
@@ -90,7 +114,7 @@ async def main() -> None:
     await agent.start()
     try:
         await agent.inject_input(
-            "Explain the difference between a creature and a terrarium."
+            "Describe three practical uses of a terrarium."
         )
     finally:
         await agent.stop()
@@ -101,83 +125,79 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`replace_default=True` 會停用 stdout，讓你的 handler 成為唯一的輸出 sink。這種形狀很適合 web backend、bot，或任何想自行掌控渲染的場景。
+`replace_default=True` 會關閉 stdout，讓你的 handler 成為唯一 sink。
 
-## 步驟 4 —— 用 `AgentSession` 做串流
+## 步驟 5 —— 嵌入整個 Terrarium
 
-目標：取得一個 chunks 的 async iterator，而不是 push handler。當你想用 `async for` 迴圈處理回應時，這會很有用。
+目標：從 Python 驅動多代理 setup，而不是透過 CLI。
 
 ```python
 import asyncio
 
-from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.serving.agent_session import AgentSession
+from kohakuterrarium import Terrarium
 
 
 async def main() -> None:
-    agent = Agent.from_path("@kt-biome/creatures/general")
-    session = AgentSession(agent)
-
-    await session.start()
-    try:
-        async for chunk in session.chat(
-            "Describe three practical uses of a terrarium."
-        ):
+    async with await Terrarium.from_recipe(
+        "@kt-biome/terrariums/swe_team"
+    ) as engine:
+        swe = engine["swe"]
+        async for chunk in swe.chat("Fix the auth bug."):
             print(chunk, end="", flush=True)
         print()
-    finally:
-        await session.stop()
 
 
 asyncio.run(main())
 ```
 
-`AgentSession` 是 HTTP 與 WebSocket 層所使用、較適合 transport 的包裝器。底下仍然是同一個 agent；它只是讓你在每次 `chat(...)` 呼叫時取得 `AsyncIterator[str]`。
+Recipe 會載入 Creature、宣告 channel，並接好 graph。Terrarium 本身沒有 LLM，也不做決策；它只負責拓撲、channel 與 lifecycle。
 
-## 步驟 5 —— 嵌入整個 terrarium
+## 步驟 6 —— 使用 Studio 管理 session
 
-目標：從 Python 驅動一套多代理配置，而不是透過 CLI。
+目標：取得與 Web dashboard / API 相同的管理層：active sessions、saved sessions、catalog、identity、attach 與 editor flows。
 
 ```python
 import asyncio
 
-from kohakuterrarium.terrarium.config import load_terrarium_config
-from kohakuterrarium.terrarium.runtime import TerrariumRuntime
+from kohakuterrarium import Studio
 
 
 async def main() -> None:
-    config = load_terrarium_config("@kt-biome/terrariums/swe_team")
-    runtime = TerrariumRuntime(config)
-
-    await runtime.start()
-    try:
-        # runtime.run() drives the main loop until a stop signal.
-        # For a script, you can interact through runtime's API or
-        # just let the creatures run to quiescence.
-        await runtime.run()
-    finally:
-        await runtime.stop()
+    async with Studio() as studio:
+        session = await studio.sessions.start_creature(
+            "@kt-biome/creatures/general"
+        )
+        cid = session.creatures[0]["creature_id"]
+        stream = await studio.sessions.chat.chat(
+            session.session_id,
+            cid,
+            "Summarize the Studio layer in one sentence.",
+        )
+        async for chunk in stream:
+            print(chunk, end="", flush=True)
+        print()
 
 
 asyncio.run(main())
 ```
 
-如果你想用程式方式去**控制**正在執行的 terrarium（向 channel 傳送訊息、啟動 creature、觀察訊息），請使用 `TerrariumAPI`（`kohakuterrarium.terrarium.api`）。這也是 terrarium 管理工具在底層所走的同一個 facade。
+當你是在寫應用 server、dashboard、editor 或多 session backend 時，`Studio` 通常是最方便的入口。
 
-## 步驟 6 —— 把代理當成值來組合
+## 步驟 7 —— 什麼時候用組合代數
 
-「代理是 Python 物件」真正有威力的地方，在於你可以把一個代理放進任何其他東西裡：外掛裡、trigger 裡、工具裡、另一個代理的 output 模組裡。[composition algebra](../concepts/python-native/composition-algebra.md) 提供了一組運算子（`>>`、`|`、`&`、`*`）來表示常見形狀 —— sequence、fallback、parallel、retry。當一串普通函式的 pipeline 看起來開始很自然時，就可以考慮改用這些運算子。
+如果你只想把幾個 callable/agent 串成短 pipeline，不想手動管理長生命週期 graph，[組合代數](../concepts/python-native/composition-algebra.md) 提供 `>>`、`|`、`&`、`*` 操作子：sequence、fallback、parallel、retry。
 
 ## 你學到了什麼
 
-- `Agent` 就是一般的 Python 物件 —— 建立、啟動、注入、停止。
-- `set_output_handler` 可以替換輸出 sink。`AgentSession.chat()` 則把它變成 async iterator。
-- `TerrariumRuntime` 也能以相同形狀執行整套多代理設定。
-- CLI 只是這些物件的一個使用者；你的應用程式也可以是另一個。
+- `Creature` 是由 `Terrarium` 托管的普通 Python 物件；`chat()` 會把它變成 async iterator。
+- 底層 `Agent` 在你需要 `set_output_handler` 或直接事件控制時可用。
+- `Terrarium` 以 graph topology 運行一隻或多隻 Creature。
+- `Studio` 在引擎之上管理 active sessions、saved sessions、catalog、identity、attach policy 與 editor workflows。
+- CLI 只是這些物件的一個使用者；你的應用也可以是另一個使用者。
 
-## 接下來讀什麼
+## 延伸閱讀
 
-- [Agent as a Python object](../concepts/python-native/agent-as-python-object.md) —— 這個概念本身，以及它解鎖的模式。
-- [Programmatic usage guide](../guides/programmatic-usage.md) —— 面向任務的 Python 介面參考。
-- [Composition algebra](../concepts/python-native/composition-algebra.md) —— 用於把代理接進 Python pipeline 的運算子。
-- [Python API reference](../reference/python.md) —— 精確簽章。
+- [Agent 作為 Python 物件](../concepts/python-native/agent-as-python-object.md) — 這個概念，以及它解鎖的模式。
+- [程式化使用指南](../guides/programmatic-usage.md) — Python surface 的任務導向參考。
+- [組合代數](../concepts/python-native/composition-algebra.md) — 把 agent 接成 Python pipeline 的操作子。
+- [Python API 參考](../reference/python.md) — 精確簽名。

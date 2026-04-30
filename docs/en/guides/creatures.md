@@ -353,8 +353,8 @@ mcp_servers:
     command: mcp-server-sqlite
     args: ["/var/db/my.db"]
   - name: docs_api
-    transport: http
-    url: https://mcp.example.com/sse
+    transport: streamable_http
+    url: https://mcp.example.com/mcp
 ```
 
 MCP tools are surfaced to the controller through meta-tools (`mcp_list`, `mcp_call`). Full walkthrough: [MCP](mcp.md).

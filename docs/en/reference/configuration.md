@@ -268,14 +268,17 @@ subagents:
     type: custom
     system_prompt: "Map dependencies and return a compact summary."
     tools: [glob, grep, read, tree]
-    default_plugins: ["default-runtime"]
-    turn_budget: [40, 60]
-    tool_call_budget: [75, 100]
+    default_plugins: ["auto-compact"]
+    plugins:
+      - name: budget
+        options:
+          turn_budget: [40, 60]
+          tool_call_budget: [75, 100]
 ```
 
-Builtin sub-agents already declare `default_plugins: ["default-runtime"]`,
-`turn_budget: [40, 60]`, `tool_call_budget: [75, 100]`, and no
-`walltime_budget`.
+Builtin sub-agents already declare `default_plugins: ["auto-compact"]` and a
+`budget` plugin with `turn_budget: [40, 60]`, `tool_call_budget: [75, 100]`,
+and no `walltime_budget`.
 
 Background completion note:
 
@@ -295,10 +298,8 @@ With this flag set to `false`, the background job still emits normal activity/lo
 
 Sub-agent option fields also include runtime and shared-budget controls:
 
-- `default_plugins: ["default-runtime"]` — loads budget ticker/alarm/gate plus auto-compact.
-- `turn_budget: [soft, hard]` — sub-agent LLM-turn soft/hard limits.
-- `tool_call_budget: [soft, hard]` — sub-agent tool-call soft/hard limits.
-- `walltime_budget: [soft, hard]` — optional wall-clock limits in seconds.
+- `default_plugins: ["auto-compact"]` — expands to `compact.auto`; use it when the sub-agent has a `compact:` block that should auto-trigger.
+- `plugins: [{name: budget, options: {...}}]` — unified runtime budget plugin. Its options include `turn_budget: [soft, hard]`, `tool_call_budget: [soft, hard]`, and optional `walltime_budget: [soft, hard]` in seconds.
 - `budget_inherit: true` (default) — child reuses the parent's shared legacy iteration budget if one exists.
 - `budget_allocation: N` — child gets a fresh isolated legacy budget of `N` turns.
 - `budget_inherit: false` with no allocation — child runs without the parent's shared legacy budget.
@@ -405,11 +406,11 @@ the same schema; agents declare the ones they want per-config.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `name` | str | — | Server identifier. |
-| `transport` | `stdio` \| `http` | — | Transport. `http` speaks Server-Sent Events (SSE). |
+| `transport` | `stdio` \| `streamable_http` \| `http` \| `sse` | `stdio` | Transport. `streamable_http` is preferred for modern HTTP MCP; `http`/`sse` are legacy SSE aliases. |
 | `command` | str | — | stdio executable. |
 | `args` | list[str] | `[]` | stdio args. |
 | `env` | dict[str,str] | `{}` | stdio env. |
-| `url` | str | — | HTTP/SSE endpoint. |
+| `url` | str | — | URL for `streamable_http`, `http`, or `sse` transports. |
 
 ### Plugins
 
@@ -688,8 +689,8 @@ Global MCP registry, an alternative to per-agent `mcp_servers:`.
   args: ["/path/to/db"]
   env: {}
 - name: web_api
-  transport: http
-  url: https://mcp.example.com/sse
+  transport: streamable_http
+  url: https://mcp.example.com/mcp
   env: { API_KEY: ${MCP_API_KEY} }
 ```
 
@@ -698,11 +699,11 @@ Fields:
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `name` | str | — | Unique identifier. |
-| `transport` | `stdio` \| `http` | — | Transport. `http` speaks Server-Sent Events (SSE). |
+| `transport` | `stdio` \| `streamable_http` \| `http` \| `sse` | `stdio` | Transport. `streamable_http` is preferred for modern HTTP MCP; `http`/`sse` are legacy SSE aliases. |
 | `command` | str | — | stdio executable. |
 | `args` | list[str] | `[]` | stdio args. |
 | `env` | dict[str,str] | `{}` | stdio env. |
-| `url` | str | — | HTTP/SSE endpoint for `http` transport. |
+| `url` | str | — | URL for `streamable_http`, `http`, or `sse` transports. |
 
 ---
 

@@ -52,7 +52,7 @@ tags:
 - **纯 trigger Creature**。 `input: { type: none }` 加上一个或多个
   trigger：cron Creature、channel watcher、webhook receiver。
 - **多介面聊天**。 由 HTTP 驱动的部署不需要 CLI 输入 —
-  `AgentSession` transport 可以透过 `inject_input()` 以编程方式推送
+  `Creature` / `Studio` transport 可以透过 `inject_input()` 以编程方式推送
   用户内容。
 - **感测器式输入**。 接上文件系统监控器、Discord listener，或 MQTT
   consumer。Creature本身不会知道差别。

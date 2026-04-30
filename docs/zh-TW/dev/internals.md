@@ -229,11 +229,11 @@ API 簽名：`plans/inventory-python-api.md` §Serving。
 
 ### 3.7 MCP 整合
 
-`mcp/client.py:MCPClientManager.connect(cfg)` 開一個 stdio 或 HTTP/SSE session、呼叫 `session.initialize()`、透過 `list_tools` 探索工具、結果快取到 `self._servers[name]`。`disconnect(name)` 清理。
+`mcp/client.py:MCPClientManager.connect(cfg)` 開一個 stdio 或 HTTP MCP session、呼叫 `session.initialize()`、透過 `list_tools` 探索工具、結果快取到 `self._servers[name]`。`disconnect(name)` 清理。
 
 代理啟動時，MCP 連線完成之後，代理會呼叫 `_inject_mcp_tools_into_prompt()`，建一段「Available MCP Tools」的 markdown，列出每個 server、工具、參數。代理透過內建的 `mcp_call(server, tool, args)` meta 工具呼叫 MCP 工具，加上 `mcp_list` / `mcp_connect` / `mcp_disconnect`。
 
-Transport：`stdio` (子行程走 stdin/stdout) 與 `http/SSE`。
+Transport：`stdio` (子行程走 stdin/stdout) 與 `streamable_http plus legacy http/sse`。
 
 ---
 

@@ -285,9 +285,16 @@ SPECIALIST_CONFIG = SubAgentConfig(
     interactive=False,
     can_modify=False,
     model="subagent-default",
-    default_plugins=["default-runtime"],
-    turn_budget=(40, 60),
-    tool_call_budget=(75, 100),
+    default_plugins=["auto-compact"],
+    plugins=[
+        {
+            "name": "budget",
+            "options": {
+                "turn_budget": [40, 60],
+                "tool_call_budget": [75, 100],
+            },
+        },
+    ],
 )
 ```
 
@@ -312,9 +319,12 @@ subagents:
     system_prompt: "You analyze X. Return a short summary."
     tools: [read, grep]
     model: subagent-default
-    default_plugins: ["default-runtime"]
-    turn_budget: [40, 60]
-    tool_call_budget: [75, 100]
+    default_plugins: ["auto-compact"]
+    plugins:
+      - name: budget
+        options:
+          turn_budget: [40, 60]
+          tool_call_budget: [75, 100]
 ```
 
 For a sub-agent that wraps an entire custom agent (e.g. a different framework, or a Python-first implementation), subclass `SubAgent` and implement `async run(input_text) -> SubAgentResult`. See [concepts/modules/sub-agent](../concepts/modules/sub-agent.md).

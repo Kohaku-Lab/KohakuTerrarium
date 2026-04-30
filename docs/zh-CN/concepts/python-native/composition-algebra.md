@@ -101,7 +101,7 @@ asyncio.run(main())
 
 ## 不要被边界绑住
 
-组合代数是可选的。对大多数嵌入式使用情境来说，Creature配置加上 `AgentSession` 就已经够了。这些操作子存在的理由，是当你 *真的* 想直接从 Python 做多 Agent编舞、又不想上 terrarium 的时候。
+组合代数是可选的。对大多数嵌入式使用情境来说，Creature 配置加上 `Creature.chat()` / `Studio.sessions.chat` 就已经够了。这些操作子存在的理由，是当你 *真的* 想直接从 Python 做轻量 pipeline、又不想管理长生命周期 terrarium graph 的时候。
 
 状态说明：这套代数很有用，但仍在演化中——操作子的精确集合未来可能会根据回馈而增加或简化。可以放心用在内部 pipeline，但如果是 production 用途，建议视为 early-stable。
 

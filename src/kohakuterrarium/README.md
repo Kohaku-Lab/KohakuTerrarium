@@ -1,66 +1,83 @@
-# kohakuterrarium
+# kohakuterrarium package
 
 Root package for the KohakuTerrarium agent framework.
 
 ## Top-Level Files
 
-- `__init__.py` -- Package marker, version info
-- `__main__.py` -- CLI entry point (`python -m kohakuterrarium ...`)
-- `__briefcase__.py` -- Briefcase desktop-app bootstrap
-- `packages.py` -- Package manager (install / uninstall / edit extension packages)
-- `registry.json` -- Bundled curated package registry (used by `kt install`)
+- `__init__.py` — public exports (`Studio`, `Terrarium`, `Creature`, events), version info
+- `__main__.py` — CLI entry point (`python -m kohakuterrarium ...`)
+- `__briefcase__.py` — Briefcase desktop-app bootstrap
+- `packages.py` — Package manager (install / uninstall / edit extension packages)
+- `registry.json` — Bundled curated package registry (used by `kt install`)
+
+## Runtime hierarchy
+
+- `core/` owns the creature/agent runtime: controller, executor, events,
+  conversation, tools, triggers, sub-agents, plugins, compact, and session state.
+- `terrarium/` owns the no-LLM graph runtime for running creatures: topology,
+  channels, lifecycle, output wiring, hot-plug, engine events, and session attach.
+- `studio/` owns management concerns above the engine: catalog, identity,
+  active sessions, saved-session persistence, attach policies, and editor flows.
+- `api/`, `cli/`, the web dashboard, and desktop app are adapters over
+  Studio/Terrarium plus launch/UI glue.
 
 ## Subpackages
 
 | Package | Purpose |
 |---------|---------|
 | `core/` | Agent, Controller, Executor, events, config, session, registry, compact, runtime tools |
-| `bootstrap/` | Agent initialization factories (llm, tools, io, subagents, triggers, plugins) |
+| `bootstrap/` | Agent initialization factories (LLM, tools, IO, subagents, triggers, plugins) |
 | `builtins/` | Built-in tools, sub-agents, inputs, outputs, TUI, rich-CLI, user commands |
 | `builtin_skills/` | On-demand markdown documentation for tools and sub-agents |
 | `modules/` | Base classes and protocols (input, output, tool, trigger, subagent, user_command, plugin) |
-| `terrarium/` | Multi-agent runtime: config, factory, hot-plug, observer, `TerrariumAPI` |
-| `compose/` | Agent composition algebra (`>>`, `&`, `|`, `*`) over `AgentSession` |
+| `terrarium/` | `Terrarium` engine, `Creature` handle, graph topology, channels, output wiring, engine events |
+| `studio/` | Management facade: catalog, identity, active sessions, persistence, attach, editors |
+| `compose/` | Agent composition algebra (`>>`, `&`, `|`, `*`) for Python-side pipelines |
 | `mcp/` | MCP client manager + meta-tools for external MCP servers |
-| `serving/` | Transport-agnostic service layer (KohakuManager, AgentSession, web.py) |
-| `api/` | FastAPI HTTP + WebSocket server (REST routes + ws streaming) |
+| `serving/` | Web/desktop launch helpers and legacy compatibility wrappers |
+| `api/` | FastAPI HTTP + WebSocket adapters over Studio and Terrarium |
 | `cli/` | `kt` command dispatcher (run / resume / web / model / config / ...) |
 | `session/` | Session persistence via KohakuVault (.kohakutr files) + memory/FTS5/vector search |
-| `llm/` | LLM provider abstraction (OpenAI SDK, Codex OAuth, presets, profiles) |
+| `llm/` | LLM provider abstraction (OpenAI-compatible, Codex OAuth, native Anthropic, presets, profiles) |
 | `parsing/` | Streaming state machine for LLM output (bracket, XML, native) |
 | `prompt/` | System prompt aggregation, Jinja2 templating, plugin/skill loading |
 | `commands/` | Framework commands executed inline during LLM streaming (read, info, jobs, wait) |
 | `testing/` | Test infrastructure (ScriptedLLM, TestAgentBuilder, output recorders) |
 | `utils/` | Shared utilities (structured logging, async helpers, file safety guards) |
 
-## Dependency Flow
+## Dependency flow
 
-```
-             CLI (cli/) ────────► api/ ────► serving/
-                 │                                │
-            core/agent ◄─── compose/              │
-           /    │     \                           │
-   bootstrap  controller  terrarium/runtime ──────┘
-      │          │              │
-   builtins    parsing    terrarium/factory
-      │          │              │
-   modules     llm        core/agent
-      │          │
-      └── mcp/ ──┘
-          │
-         utils (leaf)
+```text
+api/, cli/, frontend, desktop
+          |
+          v
+       studio/          serving/ (launch + legacy compatibility)
+          |
+          v
+      terrarium/
+          |
+          v
+bootstrap/ + builtins/ + modules/
+          |
+          v
+        core/
+          |
+          v
+parsing/ + prompt/ + llm/ + session/ + mcp/ + utils/
 ```
 
 Key principles:
-- `utils/` is a leaf: imported by everything, imports nothing from the framework
-- `builtins/tool_catalog` and `builtins/subagent_catalog` are leaf modules for registration
-- `bootstrap/` reduces `core/agent_init` fan-out by encapsulating factory logic
-- `terrarium/` imports `core/` but core never imports terrarium (one-way dependency)
-- `api/` depends on `serving/` (KohakuManager) and never the other way around
-- `cli/` is the user-facing entry; it may import any subsystem but nothing imports `cli/`
-- Zero runtime import cycles (verified via `scripts/dep_graph.py`)
+
+- `utils/` is a leaf: imported by everything, imports nothing from the framework.
+- `modules/` defines protocols/base classes and stays implementation-light.
+- `core/` must never import `terrarium/`, `studio/`, `api/`, or `cli/`.
+- `terrarium/` may import `core/` and bootstrap/builtin factories; it does not make decisions or call LLMs itself.
+- `studio/` sits above `terrarium/` and centralizes user-facing management policies.
+- `api/` and `cli/` are top-layer adapters; they should delegate management work to `studio/` and runtime work to `terrarium/`.
+- Zero runtime import cycles are verified via `scripts/dep_graph.py` and `tests/unit/test_dep_graph_lint.py`.
 
 ## See also
 
-- `docs/concepts/` — mental model (creature vs terrarium, event model, composition)
-- `plans/inventory-runtime.md` — detailed runtime flow inventory
+- `docs/en/concepts/studio.md` — Studio management layer.
+- `docs/en/concepts/multi-agent/terrarium.md` — Terrarium runtime model.
+- `docs/en/guides/programmatic-usage.md` — public Python embedding surface.

@@ -171,7 +171,7 @@ kt uninstall my-pack
 - If `my-pack.link` exists: follow the pointer.
 - Else: `~/.kohakuterrarium/packages/my-pack/creatures/researcher/`.
 
-Used by `kt run`, `kt terrarium run`, `kt edit`, `kt update`, `base_config:` inheritance, and programmatic `Agent.from_path(...)`.
+Used by `kt run`, `kt terrarium run`, `kt edit`, `kt update`, `base_config:` inheritance, and programmatic loaders such as `Terrarium.with_creature(...)`, `engine.add_creature(...)`, `Studio.sessions.start_creature(...)`, and lower-level `Agent.from_path(...)`.
 
 ## Discovery commands
 

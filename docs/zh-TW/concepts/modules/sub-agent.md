@@ -30,7 +30,7 @@ tags:
 - 它會繼承父生物的 LLM 與工具格式；
 - 它會拿到一部分工具（定義於子代理設定中的 `tools` 清單）；
 - 它會跑完整的 Agent 生命週期（start → event-loop → stop）；
-- 它可以有自己的執行期 `turn_budget` / `tool_call_budget`；
+- 它可以有自己的統一 `budget` 外掛選項（`turn_budget`、`tool_call_budget`，以及可選的 `walltime_budget`）；
 - 它也可以繼承父級舊式 iteration budget、拿到自己的 `budget_allocation`，或完全不共享預算；
 - 它的結果會以父層上的 `subagent_output` 事件送達，
   或在 `output_to: external` 時直接串流給使用者。
@@ -47,7 +47,7 @@ tags:
 
 深度由 `max_subagent_depth`（設定層級）限制，以防止遞迴失控。取消採合作式機制——父生物可以呼叫 `stop_task` 中斷正在執行的子代理。
 
-執行期預算由 `budget.ticker`、`budget.alarm` 和 `budget.gate` 外掛執行；`default-runtime` 包會啟用這些外掛以及自動壓縮。舊式共享 iteration budget 在派生時解析：`budget_allocation` 優先，否則 `budget_inherit: true` 會在存在父級預算時複用同一個預算物件。
+執行期預算由統一的 `budget` 外掛執行，並透過 `plugins[].options` 設定 `turn_budget`、`tool_call_budget` 以及可選的 `walltime_budget`。自動壓縮另外透過 `auto-compact` 外掛包啟用（它展開為 `compact.auto`）。舊式共享 iteration budget 在派生時解析：`budget_allocation` 優先，否則 `budget_inherit: true` 會在存在父級預算時複用同一個預算物件。
 
 內建子代理（位於 `kt-biome` + framework）：`worker`、`plan`、`explore`、`critic`、`response`、`research`、`summarize`、`memory_read`、`memory_write`、`coordinator`。
 

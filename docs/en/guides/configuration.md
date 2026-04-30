@@ -150,9 +150,10 @@ subagents:
 
 Built-ins: `worker`, `coordinator`, `explore`, `plan`, `research`, `critic`, `response`, `memory_read`, `memory_write`, `summarize`.
 
-Builtin sub-agents already include the `default-runtime` plugin pack and minimal
-budgets: `turn_budget: [40, 60]`, `tool_call_budget: [75, 100]`, and no walltime
-limit. Override those fields inline if a specialist needs a larger budget.
+Builtin sub-agents already opt into `default_plugins: ["auto-compact"]` and the
+unified `budget` plugin with minimal options: `turn_budget: [40, 60]`,
+`tool_call_budget: [75, 100]`, and no walltime limit. Override the `budget`
+plugin's `options` inline if a specialist needs a larger budget.
 
 For YAML-only specialists, use `type: custom` without `module`/`config` and put
 `SubAgentConfig` fields directly in the entry:
@@ -164,9 +165,12 @@ subagents:
     description: Map dependency edges without editing files
     system_prompt: "Map dependencies and return a compact summary."
     tools: [glob, grep, read, tree]
-    default_plugins: ["default-runtime"]
-    turn_budget: [40, 60]
-    tool_call_budget: [75, 100]
+    default_plugins: ["auto-compact"]
+    plugins:
+      - name: budget
+        options:
+          turn_budget: [40, 60]
+          tool_call_budget: [75, 100]
 ```
 
 See [Sub-agents](sub-agents.md) for runtime plugin packs, budgets, and
@@ -287,8 +291,8 @@ mcp_servers:
     command: mcp-server-sqlite
     args: ["/var/db/my.db"]
   - name: docs_api
-    transport: http
-    url: https://mcp.example.com/sse
+    transport: streamable_http
+    url: https://mcp.example.com/mcp
     env: { API_KEY: "${DOCS_API_KEY}" }
 ```
 

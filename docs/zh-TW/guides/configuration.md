@@ -131,7 +131,7 @@ subagents:
 
 內建：`worker`、`coordinator`、`explore`、`plan`、`research`、`critic`、`response`、`memory_read`、`memory_write`、`summarize`。
 
-內建子代理已經包含 `default-runtime` 外掛包和最小預算：`turn_budget: [40, 60]`、`tool_call_budget: [75, 100]`，並且沒有 walltime 限制。專家需要更多空間時，可在條目中直接覆蓋這些欄位。
+內建子代理已經啟用 `default_plugins: ["auto-compact"]`，並設定統一的 `budget` 外掛作為最小預算：`turn_budget: [40, 60]`、`tool_call_budget: [75, 100]`，且沒有 walltime 限制。專家需要更多空間時，請覆蓋 `budget` 外掛的 `options`。
 
 對於純 YAML 專家，使用不帶 `module`/`config` 的 `type: custom`，並把 `SubAgentConfig` 欄位直接寫在條目裡：
 
@@ -142,9 +142,12 @@ subagents:
     description: Map dependency edges without editing files
     system_prompt: "Map dependencies and return a compact summary."
     tools: [glob, grep, read, tree]
-    default_plugins: ["default-runtime"]
-    turn_budget: [40, 60]
-    tool_call_budget: [75, 100]
+    default_plugins: ["auto-compact"]
+    plugins:
+      - name: budget
+        options:
+          turn_budget: [40, 60]
+          tool_call_budget: [75, 100]
 ```
 
 執行期外掛包、預算與壓縮的完整說明見 [子代理指南](sub-agents.md)。
@@ -254,8 +257,8 @@ mcp_servers:
     command: mcp-server-sqlite
     args: ["/var/db/my.db"]
   - name: docs_api
-    transport: http
-    url: https://mcp.example.com/sse
+    transport: streamable_http
+    url: https://mcp.example.com/mcp
     env: { API_KEY: "${DOCS_API_KEY}" }
 ```
 

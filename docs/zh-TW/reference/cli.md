@@ -340,7 +340,7 @@ kt config key delete <provider>
 管理全域 MCP server 目錄 (`~/.kohakuterrarium/mcp_servers.yaml`)。
 
 - `list` — 顯示檔案路徑與 server 清單。
-- `add [name]` — 互動式。會問 transport (`stdio`/`http`)、command、args JSON、env JSON、URL。
+- `add [name]` — 互動式。會問 transport (`stdio`/`streamable_http`/`http`)、command、args JSON、env JSON、URL。
 - `edit <name>` — 互動式編輯。
 - `delete <name>` — 移除條目。
 

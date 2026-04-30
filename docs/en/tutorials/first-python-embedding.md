@@ -13,18 +13,18 @@ tags:
 application — capture its output, drive its input from code, compose it
 with other code.
 
-**End state:** a minimal script that starts a creature, injects an
-input, captures output through a custom handler, and shuts down cleanly.
-Then the same thing using `Creature.chat()` for event streaming. Then a
-terrarium and Studio session, embedded the same way.
+**End state:** a minimal script that starts a creature through `Terrarium`,
+streams output with `Creature.chat()`, embeds a multi-creature terrarium, and
+uses Studio for session management. A lower-level `Agent` example is included
+for custom output handlers.
 
 **Prerequisites:** [First Creature](first-creature.md). You need the
 package installed in a mode where you can `import kohakuterrarium`.
 
 An agent in this framework is not a config — it is a Python object. A
-config describes one; `Agent.from_path(...)` builds one; you own the
-object. Sub-agents, `Terrarium` engines, `Creature` handles, and
-`Studio` sessions are the same shape. See
+config describes one; `Terrarium.with_creature(...)` builds an engine plus a
+running `Creature` handle that you own. Sub-agents, `Terrarium` engines,
+`Creature` handles, and `Studio` sessions are the same shape. See
 [agent-as-python-object](../concepts/python-native/agent-as-python-object.md)
 for the full mental model.
 
@@ -40,28 +40,32 @@ uv pip install -e .[dev]
 
 The `[dev]` extras bring in the testing helpers you may want later.
 
-## Step 2 — Minimal embed
+## Step 2 — Minimal embed with `Creature.chat()`
 
-Goal: build an agent, start it, feed it one input, stop it.
+Goal: build a running creature, send it one input, stream its response, and shut
+the engine down cleanly.
 
 `demo.py`:
 
 ```python
 import asyncio
 
-from kohakuterrarium.core.agent import Agent
+from kohakuterrarium import Terrarium
 
 
 async def main() -> None:
-    agent = Agent.from_path("@kt-biome/creatures/general")
+    engine, creature = await Terrarium.with_creature(
+        "@kt-biome/creatures/general"
+    )
 
-    await agent.start()
     try:
-        await agent.inject_input(
+        async for chunk in creature.chat(
             "In one sentence, what is a creature in KohakuTerrarium?"
-        )
+        ):
+            print(chunk, end="", flush=True)
+        print()
     finally:
-        await agent.stop()
+        await engine.shutdown()
 
 
 asyncio.run(main())
@@ -73,18 +77,46 @@ Run it:
 python demo.py
 ```
 
-The default stdout output module prints the response. Three things to
-notice:
+Three things to notice:
 
-1. `Agent.from_path` resolves `@kt-biome/...` the same way the CLI
-   does.
-2. `start()` initialises controller + tools + triggers + plugins.
-3. `inject_input(...)` is the programmatic equivalent of a user typing
-   a message on the CLI input module.
+1. `Terrarium.with_creature` resolves `@kt-biome/...` the same way the CLI does.
+2. A solo creature is still hosted by the same engine used for multi-creature graphs.
+3. `Creature.chat(...)` is an async iterator of text chunks.
 
-## Step 3 — Capture output yourself
+## Step 3 — Push input without draining output
 
-Goal: route output into your own code instead of stdout.
+Goal: feed a creature from your own scheduler, bot, or event loop. Use
+`inject_input(...)` when another output sink is responsible for rendering.
+
+```python
+import asyncio
+
+from kohakuterrarium import Terrarium
+
+
+async def main() -> None:
+    engine, creature = await Terrarium.with_creature(
+        "@kt-biome/creatures/general"
+    )
+    try:
+        await creature.inject_input(
+            "Explain the difference between a creature and a terrarium."
+        )
+    finally:
+        await engine.shutdown()
+
+
+asyncio.run(main())
+```
+
+The creature uses its configured output module. For simple streaming text in your
+own code, prefer `Creature.chat(...)`.
+
+## Step 4 — Capture output with lower-level `Agent`
+
+Goal: route output into your own handler instead of stdout. This is an advanced
+shape for custom transports; most applications should start with `Creature.chat()`
+or `Studio.sessions.chat`.
 
 ```python
 import asyncio
@@ -104,7 +136,7 @@ async def main() -> None:
     await agent.start()
     try:
         await agent.inject_input(
-            "Explain the difference between a creature and a terrarium."
+            "Describe three practical uses of a terrarium."
         )
     finally:
         await agent.stop()
@@ -116,41 +148,6 @@ asyncio.run(main())
 ```
 
 `replace_default=True` disables stdout so your handler is the only sink.
-This is the right shape for a web backend, a bot, or anything that
-wants to own rendering.
-
-## Step 4 — Use `Creature.chat()` for streaming
-
-Goal: get an async iterator of chunks, not a push handler. Useful when
-you want an `async for` loop over the response.
-
-```python
-import asyncio
-
-from kohakuterrarium import Terrarium
-
-
-async def main() -> None:
-    engine, creature = await Terrarium.with_creature(
-        "@kt-biome/creatures/general"
-    )
-
-    try:
-        async for chunk in creature.chat(
-            "Describe three practical uses of a terrarium."
-        ):
-            print(chunk, end="", flush=True)
-        print()
-    finally:
-        await engine.shutdown()
-
-
-asyncio.run(main())
-```
-
-`Creature` is the engine-level wrapper around the same underlying
-`Agent`. It adds graph membership and gives you an `AsyncIterator[str]`
-per `chat(...)` call.
 
 ## Step 5 — Embed a whole terrarium
 
@@ -228,9 +225,8 @@ starts to feel natural, reach for those.
 
 ## What you learned
 
-- An `Agent` is a regular Python object — build, start, inject, stop.
-- `set_output_handler` swaps the output sink. `Creature.chat()` turns
-  an engine-hosted creature into an async iterator.
+- A `Creature` is a regular Python object hosted by `Terrarium`; `chat()` turns it into an async iterator.
+- Lower-level `Agent` is available when you need `set_output_handler` or direct event control.
 - `Terrarium` runs one or many creatures in graph topology.
 - `Studio` manages active sessions, saved sessions, catalog, identity,
   attach policy, and editor workflows above the engine.

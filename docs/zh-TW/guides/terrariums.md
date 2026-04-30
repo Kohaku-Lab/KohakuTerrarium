@@ -187,7 +187,7 @@ asyncio.run(main())
 
 更多寫法 (事件訂閱、熱插拔、獨立 + recipe 共存) 看 [程式化使用](programmatic-usage.md)，以及 [`examples/code/`](../../examples/code/) 裡可執行的腳本 (`terrarium_solo.py`、`terrarium_recipe.py`、`terrarium_hotplug.py`)。
 
-舊版 `TerrariumRuntime` 在過渡期間還留在硬碟上；新程式碼請用 `Terrarium`。
+新程式碼請用 `Terrarium`。
 
 ## 輸出接線
 

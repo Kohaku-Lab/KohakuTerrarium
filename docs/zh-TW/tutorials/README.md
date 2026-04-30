@@ -18,7 +18,7 @@ tags:
 - [第一個自訂工具](first-custom-tool.md) — 寫一個 Python 工具、註冊它、接上生物的設定。
 - [第一個外掛](first-plugin.md) — 建立 lifecycle 外掛，攔截工具執行的前後兩端。
 - [第一個生態瓶](first-terrarium.md) — 用頻道與 output_wiring 把兩隻生物串起來，再加一個 root 提供對話介面。
-- [第一次 Python 嵌入](first-python-embedding.md) — 用 AgentSession 與 compose 代數在自己的程式碼裡跑 agent。
+- [第一次 Python 嵌入](first-python-embedding.md) — 用 Creature.chat、Studio 與 compose 代數在自己的程式碼裡跑 agent。
 
 ## 讀完教學之後
 

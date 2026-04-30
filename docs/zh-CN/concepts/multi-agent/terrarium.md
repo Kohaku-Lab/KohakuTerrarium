@@ -79,7 +79,7 @@ tags:
 
 超出单一团队场景之后，这个层次给你的：
 
-- **一个行程多个 session** — 服务端可以并排 host 上百个使用者 session，不需要每张 graph 都拉一个独立的 `TerrariumRuntime`。
+- **一个行程多个 session** — 服务端可以并排 host 上百个使用者 session，不需要每张 graph 都拉一个独立的运行时进程。
 - **runtime 跨 graph 重接线** — 在两个独立 run 之间画一条 channel 就能合并它们；session 历史会自动合并。
 - **统一可观测性** — 一个订阅 filter 涵盖所有事件。
 - **保留分层无知** — Creature 仍然不知道自己在引擎里。它只知道自己的 agent、工具，和它所在 graph 注入的 channel handle。
@@ -132,7 +132,7 @@ terrarium:
 - `terrarium/session_coord.py` —— Session 合并 / 分裂策略。Graph 合并时把两边旧 store 合成一份新的；Graph 分裂时把 parent store 复制到两边。
 - `terrarium/events.py` —— `EngineEvent` 分类，加 `EventFilter`、`ConnectionResult`、`DisconnectionResult`。
 
-旧版 `terrarium/runtime.py:TerrariumRuntime` 在过渡期间仍在；新代码请直接用 `Terrarium`。顶层 re-export 是稳定的：`from kohakuterrarium import Terrarium, Creature, EngineEvent, EventFilter`。
+新代码请直接用 `Terrarium`。顶层 re-export 是稳定的：`from kohakuterrarium import Terrarium, Creature, EngineEvent, EventFilter`。
 
 ## 因此你可以做什么
 

@@ -1,27 +1,33 @@
-# serving/
+# serving
 
-Core service API for hosting and managing agents and terrariums.
-Transport-agnostic: used by any interface layer (CLI, TUI, Web API, Gradio).
-`KohakuManager` is the single entry point for all runtime operations,
-including agent lifecycle, terrarium lifecycle, creature hot-plug, and
-channel interactions. `AgentSession` wraps a standalone agent with streaming
-chat. Event types are plain dataclasses usable across transport boundaries.
+Web/desktop launch helpers plus legacy compatibility wrappers.
+
+The v1.3 runtime path is:
+
+- `Terrarium` (`kohakuterrarium.terrarium`) owns the live creature graph.
+- `Studio` (`kohakuterrarium.studio`) owns catalog, identity, active sessions,
+  saved-session persistence, attach policy, and editor workflows.
+- `api/`, `cli/`, the web dashboard, and the desktop app delegate those concerns
+  to Studio/Terrarium instead of using a separate service manager.
+
+`serving/` remains for launch glue and backwards-compatible imports while older
+embedding code migrates.
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `__init__.py` | Re-exports `KohakuManager`, `AgentSession`, `OutputEvent`, `ChannelEvent` |
-| `manager.py` | `KohakuManager`: unified service manager with `agent_*`, `terrarium_*`, `creature_*` method hierarchy |
-| `agent_session.py` | `AgentSession`: wraps Agent with input injection and async output streaming |
-| `events.py` | `OutputEvent` (text chunk, tool activity) and `ChannelEvent` (observed channel message) dataclasses |
+| `web.py` | Static frontend / FastAPI launcher used by `kt web`, `kt serve`, and `kt app`. |
+| `agent_session.py` | Legacy `AgentSession` compatibility wrapper over `Agent`; prefer `Creature.chat()` or `Studio.sessions.chat`. |
+| `manager.py` | Legacy `KohakuManager` compatibility facade; prefer `Studio` + `Terrarium`. |
+| `events.py` | Compatibility event dataclasses for older transport-facing code. |
+| `__init__.py` | Empty public export surface; new code should import `Studio` / `Terrarium` from `kohakuterrarium`. |
 
-## Dependencies
+## Dependency notes
 
-- `kohakuterrarium.core.agent` (Agent)
-- `kohakuterrarium.core.channel` (AgentChannel, ChannelMessage)
-- `kohakuterrarium.core.config` (AgentConfig)
-- `kohakuterrarium.core.environment` (Environment)
-- `kohakuterrarium.session.store` (SessionStore)
-- `kohakuterrarium.terrarium` (TerrariumRuntime, TerrariumConfig, ChannelObserver)
-- `kohakuterrarium.utils.logging`
+- `serving.web` may import the API app and frontend path helpers to launch local
+  web/desktop surfaces.
+- Compatibility wrappers depend on `core.Agent` and legacy `TerrariumRuntime`.
+  They are not the architecture path for new route handlers.
+- New session-management code belongs in `studio/`; new graph-runtime code
+  belongs in `terrarium/`.

@@ -12,11 +12,12 @@ tags:
 ## What it is
 
 In KohakuTerrarium, an agent is not a config file — the config file
-just describes one. A running agent is a `kohakuterrarium.core.agent.Agent`
-instance: an async Python object you construct, start, feed events,
-and stop. A sub-agent is the same object, nested. A `Terrarium` is the
-runtime engine that hosts one or many running creatures, and `Studio`
-is the management facade above that engine.
+just describes one. The primary public handle is a running `Creature`: an
+async Python object hosted by a `Terrarium` engine. A sub-agent is the same
+agent runtime nested inside a parent creature. `Studio` is the management
+facade above the engine for catalog, identity, active sessions, persistence,
+attach, and editor flows. The lower-level `kohakuterrarium.core.agent.Agent`
+still exists for advanced event/output control.
 
 Everything is callable, awaitable, composable.
 
@@ -39,19 +40,8 @@ be put inside other values.
 
 ## What the key surface looks like
 
-```python
-from kohakuterrarium.core.agent import Agent
-
-agent = Agent.from_path("@kt-biome/creatures/swe")
-agent.set_output_handler(lambda text: print(text, end=""), replace_default=True)
-
-await agent.start()
-await agent.inject_input("Explain what this codebase does.")
-await agent.stop()
-```
-
-Or use the engine-level `Creature` wrapper when you want a streaming
-chat handle and graph membership:
+For application code, start with the engine-level `Creature` wrapper. It gives
+you graph membership plus a streaming chat handle:
 
 ```python
 from kohakuterrarium import Terrarium
@@ -62,6 +52,20 @@ try:
         print(chunk, end="")
 finally:
     await engine.shutdown()
+```
+
+Drop down to `Agent` only when you need direct event injection, custom output
+handlers, or other low-level control:
+
+```python
+from kohakuterrarium.core.agent import Agent
+
+agent = Agent.from_path("@kt-biome/creatures/swe")
+agent.set_output_handler(lambda text: print(text, end=""), replace_default=True)
+
+await agent.start()
+await agent.inject_input("Explain what this codebase does.")
+await agent.stop()
 ```
 
 Terrarium recipes follow the same shape:
