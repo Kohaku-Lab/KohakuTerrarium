@@ -110,6 +110,7 @@ exclude = ["kohakuterrarium-frontend*"]
 
 [tool.setuptools.package-data]
 "kohakuterrarium.builtin_skills" = ["**/*.md"]
+"kohakuterrarium.builtins.subagents" = ["*.md"]
 "kohakuterrarium.studio.editors" = ["templates_data/*.j2"]
 "kohakuterrarium" = ["web_dist/**/*", "app_icons/*"]
 
