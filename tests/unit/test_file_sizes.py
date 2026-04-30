@@ -6,6 +6,19 @@ import pytest
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "kohakuterrarium"
 
+# Pure-data files exempt from BOTH the 600-line and 1000-line caps.
+# These grow linearly with the data they describe (one entry per
+# tool / preset / catalogue item) — splitting them would fragment a
+# single discoverable map across many small files for no readability
+# win. Code logic does NOT belong in any file listed here.
+DATA_FILE_UNLIMITED = {
+    # Per-builtin-tool JSON-schema map for native function-calling.
+    # Imported by ``llm/tools.py:build_tool_schemas``. One entry per
+    # tool — adding a new builtin tool always means appending here,
+    # so the file grows monotonically with the catalogue.
+    "llm/tool_schemas.py",
+}
+
 # Files allowed to exceed 600 lines (with justification)
 ALLOWLIST_600 = {
     # Single cohesive class with many small uniform methods
@@ -89,6 +102,8 @@ def _all_py_files():
 def test_file_under_600_lines(path):
     rel = str(path.relative_to(SRC)).replace("\\", "/")
     lines = len(path.read_text(encoding="utf-8").splitlines())
+    if rel in DATA_FILE_UNLIMITED:
+        return  # pure data, no upper limit
     if rel in ALLOWLIST_600:
         assert lines <= 1000, f"{rel} is {lines} lines (allowlisted but max 1000)"
     else:
@@ -99,6 +114,9 @@ def test_file_under_600_lines(path):
     "path", list(_all_py_files()), ids=lambda p: str(p.relative_to(SRC))
 )
 def test_file_under_1000_lines(path):
-    """Hard max: no file should ever exceed 1000 lines."""
+    """Hard max: no file should ever exceed 1000 lines (data files exempt)."""
+    rel = str(path.relative_to(SRC)).replace("\\", "/")
+    if rel in DATA_FILE_UNLIMITED:
+        return  # pure data, no upper limit
     lines = len(path.read_text(encoding="utf-8").splitlines())
     assert lines <= 1000, f"{path.relative_to(SRC)} is {lines} lines (hard max 1000)"
