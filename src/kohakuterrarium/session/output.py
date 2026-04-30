@@ -215,6 +215,20 @@ class SessionOutput(OutputModule):
         except Exception as e:
             logger.debug("State save failed", error=str(e))
 
+        # Flush the events cache so the per-turn snapshot we just wrote
+        # is consistent with the on-disk event log. Without this, the
+        # ``events`` table can hold up to ``flush_interval`` seconds of
+        # writes in memory; a UI that switches to a different session
+        # tab and immediately re-opens the file (or any out-of-process
+        # reader) sees a truncated history. The flush is bounded —
+        # there is at most one batch per turn, so the cost is small.
+        try:
+            flush = getattr(self._store, "flush", None)
+            if callable(flush):
+                flush()
+        except Exception as e:
+            logger.debug("Events flush at turn end failed", error=str(e))
+
     def on_activity(self, activity_type: str, detail: str) -> None:
         if not self._capture_activity:
             return

@@ -15,7 +15,7 @@ Single .kohakutr file (SQLite) containing:
 import json
 import platform
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -47,6 +47,33 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+# KVault's ``keys()`` defaults to ``limit=10000``; once a session crosses
+# that threshold (~10 long turns of streaming chunks) every read path
+# silently truncates and the latest events become invisible. We pass a
+# very large explicit cap so the read covers any realistic session
+# while staying well below the 64-bit overflow line. Use the helper
+# :func:`iter_kv_keys` from this module instead of calling ``keys()``
+# directly — every site in ``session/`` and ``studio/persistence/``
+# routes through it.
+_KV_KEYS_LIMIT: int = 2**31 - 1
+
+
+def iter_kv_keys(
+    table: Any,
+    *,
+    prefix: Any = None,
+    limit: int = _KV_KEYS_LIMIT,
+) -> Iterable[Any]:
+    """Iterate every key of a KVault table, bypassing its 10k default.
+
+    Returns an iterator over the table's keys (filtered by ``prefix`` if
+    given). The default ``limit`` is large enough to cover any session
+    we expect to see in practice; pass an explicit ``limit`` to opt out.
+    """
+    if prefix is None:
+        return table.keys(limit=limit)
+    return table.keys(prefix=prefix, limit=limit)
+
 
 class SessionStore:
     """Persistent session storage backed by KohakuVault.
@@ -63,9 +90,37 @@ class SessionStore:
       - fts: TextVault-backed FTS5 index
     """
 
-    def __init__(self, path: str | Path) -> None:
+    # Default durability gates for the events cache. ``append_event``
+    # flushes whenever EITHER threshold is met since the last flush —
+    # whichever fires first wins. The KVault's own ``flush_interval``
+    # remains a passive fallback in case neither gate trips (idle session
+    # with one straggling event in the buffer).
+    DEFAULT_FLUSH_EVERY_N_EVENTS = 4
+    DEFAULT_FLUSH_EVERY_N_SECONDS = 1.0
+
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        flush_every_n_events: int | None = None,
+        flush_every_n_seconds: float | None = None,
+    ) -> None:
         self._path = str(path)
         Path(self._path).parent.mkdir(parents=True, exist_ok=True)
+
+        # Durability gates for the events cache.
+        self._flush_every_n_events: int = (
+            flush_every_n_events
+            if flush_every_n_events is not None
+            else self.DEFAULT_FLUSH_EVERY_N_EVENTS
+        )
+        self._flush_every_n_seconds: float = (
+            flush_every_n_seconds
+            if flush_every_n_seconds is not None
+            else self.DEFAULT_FLUSH_EVERY_N_SECONDS
+        )
+        self._unflushed_event_count: int = 0
+        self._last_flush_at: float = time.monotonic()
 
         # Core tables
         self.meta = KVault(self._path, table="meta")
@@ -74,6 +129,8 @@ class SessionStore:
         self.state.enable_auto_pack()
         self.events = KVault(self._path, table="events")
         self.events.enable_auto_pack()
+        # KVault's passive flush_interval acts as a backstop — our
+        # explicit gates in ``append_event`` are the primary path.
         self.events.enable_cache(flush_interval=2.0)
         self.channels = KVault(self._path, table="channels")
         self.channels.enable_auto_pack()
@@ -225,7 +282,33 @@ class SessionStore:
             except Exception as e:
                 logger.debug("Event subscriber failed", error=str(e), exc_info=True)
 
+        # Durability gate — flush when either threshold is exceeded.
+        # See ``DEFAULT_FLUSH_EVERY_N_EVENTS`` /
+        # ``DEFAULT_FLUSH_EVERY_N_SECONDS`` for the policy.
+        self._unflushed_event_count += 1
+        self._maybe_flush_events()
+
         return key, event_id
+
+    def _maybe_flush_events(self) -> None:
+        """Flush the events cache when either durability gate trips."""
+        n_gate = (
+            self._flush_every_n_events > 0
+            and self._unflushed_event_count >= self._flush_every_n_events
+        )
+        t_gate = (
+            self._flush_every_n_seconds > 0
+            and (time.monotonic() - self._last_flush_at) >= self._flush_every_n_seconds
+        )
+        if not (n_gate or t_gate):
+            return
+        try:
+            self.events.flush_cache()
+        except Exception as e:
+            logger.debug("Events flush_cache failed", error=str(e), exc_info=True)
+            return
+        self._unflushed_event_count = 0
+        self._last_flush_at = time.monotonic()
 
     # ─── Live event subscription (V1 viewer) ────────────────────────
 
@@ -252,9 +335,11 @@ class SessionStore:
         Returns list of event dicts with keys sorted chronologically.
         """
         self.events.flush_cache()
+        self._unflushed_event_count = 0
+        self._last_flush_at = time.monotonic()
         prefix = f"{agent}:e"
         result = []
-        for key_bytes in sorted(self.events.keys(prefix=prefix)):
+        for key_bytes in sorted(iter_kv_keys(self.events, prefix=prefix)):
             try:
                 result.append(self.events[key_bytes])
             except Exception as e:
@@ -273,7 +358,7 @@ class SessionStore:
         """
         self.events.flush_cache()
         all_events = []
-        for key_bytes in self.events.keys():
+        for key_bytes in iter_kv_keys(self.events):
             key = (
                 key_bytes.decode("utf-8", errors="replace")
                 if isinstance(key_bytes, bytes)
@@ -437,7 +522,7 @@ class SessionStore:
         """Get all messages for a channel, ordered."""
         prefix = f"{channel}:m"
         result = []
-        for key_bytes in sorted(self.channels.keys(prefix=prefix)):
+        for key_bytes in sorted(iter_kv_keys(self.channels, prefix=prefix)):
             try:
                 result.append(self.channels[key_bytes])
             except Exception as e:
@@ -561,7 +646,7 @@ class SessionStore:
         through ``add_creature``) become visible to resume.
         """
         result = {}
-        for key_bytes in self.meta.keys():
+        for key_bytes in iter_kv_keys(self.meta):
             key = (
                 key_bytes.decode("utf-8", errors="replace")
                 if isinstance(key_bytes, bytes)
@@ -590,7 +675,7 @@ class SessionStore:
         """
         seen: list[str] = []
         excluded = {"terrarium"}
-        for key_bytes in self.events.keys():
+        for key_bytes in iter_kv_keys(self.events):
             key = (
                 key_bytes.decode("utf-8", errors="replace")
                 if isinstance(key_bytes, bytes)
@@ -615,7 +700,7 @@ class SessionStore:
         first-seen (matches :meth:`discover_agents_from_events`).
         """
         seen: dict[str, dict[str, Any]] = {}
-        for key_bytes in self.events.keys():
+        for key_bytes in iter_kv_keys(self.events):
             key = (
                 key_bytes.decode("utf-8", errors="replace")
                 if isinstance(key_bytes, bytes)
@@ -674,6 +759,8 @@ class SessionStore:
     def flush(self) -> None:
         """Flush all caches to disk."""
         self.events.flush_cache()
+        self._unflushed_event_count = 0
+        self._last_flush_at = time.monotonic()
 
     def close(self, update_status: bool = True) -> None:
         """Flush and close all tables.

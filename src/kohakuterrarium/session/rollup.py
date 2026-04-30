@@ -59,7 +59,7 @@ def list_turn_rollups(table: KVault, agent: str) -> list[dict]:
     """List every rollup row for an agent, ordered by ``turn_index``."""
     prefix = f"{agent}:turn:"
     out: list[dict] = []
-    for key_bytes in sorted(table.keys(prefix=prefix)):
+    for key_bytes in sorted(table.keys(prefix=prefix, limit=2**31 - 1)):
         try:
             val = table[key_bytes]
             if isinstance(val, dict):

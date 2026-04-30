@@ -105,7 +105,7 @@ def check_fork_stability(
 
 def _iter_keys(table: KVault) -> list[str]:
     """Return every key in a KVault decoded to str."""
-    return [_decode_key(k) for k in table.keys()]
+    return [_decode_key(k) for k in table.keys(limit=2**31 - 1)]
 
 
 def _copy_table(src: KVault, dst: KVault, keys: list[str] | None = None) -> int:
@@ -233,7 +233,7 @@ def _collect_copy_range(
     source.events.flush_cache()
     in_range: list[tuple[str, dict[str, Any]]] = []
     fork_point: dict[str, Any] | None = None
-    for key_bytes in source.events.keys():
+    for key_bytes in source.events.keys(limit=2**31 - 1):
         key = _decode_key(key_bytes)
         try:
             evt = source.events[key_bytes]
@@ -304,7 +304,7 @@ def perform_fork(
 
     created_at = datetime.now(timezone.utc).isoformat()
     parent_meta: dict[str, Any] = {}
-    for key_bytes in source.meta.keys():
+    for key_bytes in source.meta.keys(limit=2**31 - 1):
         key = _decode_key(key_bytes)
         try:
             parent_meta[key] = source.meta[key_bytes]

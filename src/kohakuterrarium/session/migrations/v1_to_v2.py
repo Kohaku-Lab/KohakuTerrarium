@@ -351,7 +351,7 @@ def _highest_synthetic_event_id(dest: SessionStore, agent: str) -> int:
 
 def _copy_state(source: SessionStore, dest: SessionStore) -> None:
     """Copy every key in the ``state`` table verbatim."""
-    for key_bytes in source.state.keys():
+    for key_bytes in source.state.keys(limit=2**31 - 1):
         key = (
             key_bytes.decode("utf-8", errors="replace")
             if isinstance(key_bytes, bytes)
@@ -370,7 +370,7 @@ def _copy_state(source: SessionStore, dest: SessionStore) -> None:
 
 def _copy_kvault_table(source_table: Any, dest_table: Any, label: str) -> None:
     """Copy every key from a KohakuVault table to its destination twin."""
-    for key_bytes in source_table.keys():
+    for key_bytes in source_table.keys(limit=2**31 - 1):
         key = (
             key_bytes.decode("utf-8", errors="replace")
             if isinstance(key_bytes, bytes)
@@ -390,7 +390,7 @@ def _copy_kvault_table(source_table: Any, dest_table: Any, label: str) -> None:
 def _copy_meta_fields(source: SessionStore, dest: SessionStore) -> dict[str, Any]:
     """Copy every meta key from source to dest; return the loaded source meta."""
     source_meta: dict[str, Any] = {}
-    for key_bytes in source.meta.keys():
+    for key_bytes in source.meta.keys(limit=2**31 - 1):
         key = (
             key_bytes.decode("utf-8", errors="replace")
             if isinstance(key_bytes, bytes)

@@ -12,6 +12,12 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+# KVault's ``keys()`` defaults to ``limit=10000`` — way too small for
+# long-running sessions. A truncated scan here corrupts the recovered
+# sequence counters, which makes new appends overwrite existing keys.
+# Pass an explicit cap that comfortably covers any realistic session.
+_KV_KEYS_LIMIT: int = 2**31 - 1
+
 
 def _decode_key(key_bytes: bytes | str) -> str:
     """Decode a KVault key to str."""
@@ -28,7 +34,7 @@ def restore_event_counters(events: KVault, event_seq: dict[str, int]) -> int:
     so the global counter survives reopen.
     """
     max_event_id = 0
-    for key_bytes in events.keys():
+    for key_bytes in events.keys(limit=_KV_KEYS_LIMIT):
         key = _decode_key(key_bytes)
         parts = key.rsplit(":e", 1)
         if len(parts) == 2:
@@ -59,7 +65,7 @@ def restore_suffix_counters(table: KVault, sep: str, counter: dict[str, int]) ->
 
     ``counter`` is mutated in-place.
     """
-    for key_bytes in table.keys():
+    for key_bytes in table.keys(limit=_KV_KEYS_LIMIT):
         key = _decode_key(key_bytes)
         parts = key.rsplit(sep, 1)
         if len(parts) == 2:
@@ -78,7 +84,7 @@ def restore_subagent_counters(subagents: KVault, runs: dict[str, int]) -> None:
     Keys follow ``{parent}:{name}:{run}:meta``. ``runs`` is mutated
     in-place.
     """
-    for key_bytes in subagents.keys():
+    for key_bytes in subagents.keys(limit=_KV_KEYS_LIMIT):
         key = _decode_key(key_bytes)
         if key.endswith(":meta"):
             parts = key[: -len(":meta")].rsplit(":", 2)

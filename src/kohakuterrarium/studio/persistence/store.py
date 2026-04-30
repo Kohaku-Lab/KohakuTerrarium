@@ -198,7 +198,7 @@ def session_targets(store: SessionStore, meta: dict[str, Any]) -> list[str]:
             seen.add(target)
             targets.append(target)
 
-    for key_bytes in store.conversation.keys():
+    for key_bytes in store.conversation.keys(limit=2**31 - 1):
         target = key_bytes.decode() if isinstance(key_bytes, bytes) else key_bytes
         if target and target not in seen:
             seen.add(target)

@@ -135,7 +135,7 @@ def _iter_subagent_runs(store: "SessionStore", parent: str) -> list[tuple[str, i
     runs: list[tuple[str, int]] = []
     seen: set[tuple[str, int]] = set()
     prefix = f"{parent}:"
-    for key_bytes in store.subagents.keys():
+    for key_bytes in store.subagents.keys(prefix=prefix, limit=2**31 - 1):
         key = _decode_key(key_bytes)
         if not key.startswith(prefix) or not key.endswith(":meta"):
             continue
