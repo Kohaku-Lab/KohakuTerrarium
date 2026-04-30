@@ -45,6 +45,7 @@ from rich.text import Text
 from kohakuterrarium.builtins.cli_rich.app_output import AppOutputMixin
 from kohakuterrarium.builtins.cli_rich.commit import ScrollbackCommitter, SessionReplay
 from kohakuterrarium.builtins.cli_rich.composer import Composer
+from kohakuterrarium.builtins.cli_rich.dialogs.bus_overlay import BusInteractiveOverlay
 from kohakuterrarium.builtins.cli_rich.dialogs.model_picker import ModelPicker
 from kohakuterrarium.builtins.cli_rich.dialogs.settings import SettingsOverlay
 from kohakuterrarium.builtins.cli_rich.hint_bar import SlashHintBar
@@ -87,6 +88,11 @@ class RichCLIApp(AppOutputMixin):
             on_apply=self._apply_model_selector,
         )
         self.settings_overlay = SettingsOverlay()
+        self.bus_overlay = BusInteractiveOverlay(
+            get_router=lambda: getattr(self.agent, "output_router", None),
+            get_textarea_text=self._get_composer_text,
+            clear_textarea=self._set_composer_text,
+        )
         self._exit_requested = False
         self._processing = False
         self._command_registry: dict = {}
@@ -215,7 +221,8 @@ class RichCLIApp(AppOutputMixin):
         status_container = ConditionalContainer(
             content=status_window,
             filter=Condition(
-                lambda: self.model_picker.visible
+                lambda: self.bus_overlay.visible
+                or self.model_picker.visible
                 or self.settings_overlay.visible
                 or self.live_region.has_content
             ),
@@ -323,6 +330,9 @@ class RichCLIApp(AppOutputMixin):
         # live region's normal content (streaming message, tools) is
         # hidden until the overlay closes, so all user attention is on
         # the overlay.
+        if self.bus_overlay.visible:
+            ansi = self.bus_overlay.render(width)
+            return ANSI(ansi) if ansi else ""
         if self.model_picker.visible:
             ansi = self.model_picker.render(width)
             return ANSI(ansi) if ansi else ""
@@ -688,6 +698,11 @@ class RichCLIApp(AppOutputMixin):
         claims to own the keyboard (``visible``) gets the key; if it
         consumes it, the composer skips its own default handling.
         """
+        if self.bus_overlay.visible:
+            consumed = self.bus_overlay.handle_key(key)
+            if consumed:
+                self._invalidate()
+            return consumed
         if self.model_picker.visible:
             consumed = self.model_picker.handle_key(key)
             if consumed:
@@ -707,6 +722,11 @@ class RichCLIApp(AppOutputMixin):
         conditionally active only when ``_picker_captures_input`` is
         True — so this runs only for forms inside the settings overlay.
         """
+        if self.bus_overlay.captures_input():
+            consumed = self.bus_overlay.handle_text(char)
+            if consumed:
+                self._invalidate()
+            return consumed
         if self.settings_overlay.visible and self.settings_overlay.is_capturing_text():
             consumed = self.settings_overlay.handle_text(char)
             if consumed:
@@ -722,9 +742,30 @@ class RichCLIApp(AppOutputMixin):
         it (form mode), so list-mode keystrokes still go through the
         normal ``handle_key`` path.
         """
+        if self.bus_overlay.captures_input():
+            return True
         if self.settings_overlay.visible and self.settings_overlay.is_capturing_text():
             return True
         return False
+
+    def _get_composer_text(self) -> str:
+        """Read the composer textarea contents — for the bus overlay's
+        ``ask_text`` flow (user types into the existing input field
+        rather than a separate buffer)."""
+        try:
+            return self.composer.text_area.buffer.document.text
+        except Exception:
+            return ""
+
+    def _set_composer_text(self, text: str = "") -> None:
+        """Reset the composer textarea contents (or set to a default)."""
+        try:
+            buf = self.composer.text_area.buffer
+            buf.reset()
+            if text:
+                buf.insert_text(text)
+        except Exception as e:
+            logger.debug("set_composer_text failed", error=str(e), exc_info=True)
 
     def _on_clear_screen(self) -> None:
         # Send the standard "clear scrollback + screen" escape — handled

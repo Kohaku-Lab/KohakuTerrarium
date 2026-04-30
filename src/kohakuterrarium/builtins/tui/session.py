@@ -28,6 +28,7 @@ from kohakuterrarium.builtins.tui.widgets import (
     TriggerMessage,
     UserMessage,
 )
+from kohakuterrarium.builtins.tui.widgets.bus_blocks import CardBlock, ProgressBlock
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -255,6 +256,79 @@ class TUISession:
         self, label: str, content: str = "", target: str = ""
     ) -> None:
         self._safe_mount(TriggerMessage(label, content), target=target)
+
+    def add_card_block(
+        self,
+        payload: dict,
+        event_id: str | None = None,
+        on_action=None,
+        target: str = "",
+    ) -> None:
+        """Mount a Phase B ``card`` event as an inline widget.
+
+        When ``on_action`` is provided and ``payload.actions`` is
+        non-empty, the card renders interactive Buttons that call
+        ``on_action(event_id, action_id)`` on click.
+        """
+        self._safe_mount(
+            CardBlock(payload, event_id=event_id, on_action=on_action),
+            target=target,
+        )
+
+    def upsert_progress_block(
+        self,
+        widget_id: str,
+        label: str,
+        value: float | int | None = None,
+        max_value: float | int | None = None,
+        indeterminate: bool = False,
+        complete: bool = False,
+        target: str = "",
+    ) -> None:
+        """Phase B ``progress`` event renderer.
+
+        Mounts a new ``ProgressBlock`` on first call for ``widget_id``;
+        on subsequent calls (events with ``update_target=widget_id``)
+        mutates the existing widget in place.
+        """
+        progress_map: dict[str, ProgressBlock]
+        progress_map = getattr(self, "_progress_blocks", None) or {}
+        existing = progress_map.get(widget_id)
+        if existing is not None:
+            try:
+                existing.update_progress(
+                    label=label,
+                    value=value,
+                    max_value=max_value,
+                    indeterminate=indeterminate,
+                    complete=complete,
+                )
+            except Exception as e:
+                logger.debug("ProgressBlock update failed", error=str(e))
+            return
+
+        block = ProgressBlock(
+            widget_id=widget_id,
+            label=label,
+            value=value,
+            max_value=max_value,
+            indeterminate=indeterminate,
+        )
+        progress_map[widget_id] = block
+        self._progress_blocks = progress_map
+        self._safe_mount(block, target=target)
+        if complete:
+            # First-emit-also-complete edge case.
+            try:
+                block.update_progress(
+                    label=label,
+                    value=value,
+                    max_value=max_value,
+                    indeterminate=indeterminate,
+                    complete=True,
+                )
+            except Exception:
+                pass
 
     def add_compact_summary(
         self, round_num: int, summary: str, target: str = ""

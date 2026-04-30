@@ -15,9 +15,14 @@ from kohakuterrarium.builtins.tui.widgets import (
     TriggerMessage,
     UserMessage,
 )
+from kohakuterrarium.builtins.tui.widgets.ui_event_modals import (
+    BusAskTextModal,
+    BusConfirmModal,
+    BusSelectionModal,
+)
 from kohakuterrarium.core.session import get_session
 from kohakuterrarium.modules.output.base import BaseOutputModule
-from kohakuterrarium.modules.output.event import OutputEvent
+from kohakuterrarium.modules.output.event import OutputEvent, UIReply
 from kohakuterrarium.session.history import (
     dedupe_adjacent_duplicate_events,
     select_live_event_ids,
@@ -125,6 +130,12 @@ class TUIOutput(BaseOutputModule):
 
         Each event type maps to the same widget call the legacy hooks
         invoke, with byte-identical state changes.
+
+        Phase B kinds: ``ask_text``, ``confirm``, ``selection`` open
+        modal screens and submit replies to the agent's output_router
+        when the user activates a button. ``progress``,
+        ``notification``, ``card`` render as inline widgets in the
+        chat scroll.
         """
         match event.type:
             case "text":
@@ -150,9 +161,190 @@ class TUIOutput(BaseOutputModule):
                 )
             case "resume_batch":
                 await self.on_resume(event.payload.get("events", []))
+            case "confirm":
+                await self._handle_confirm_event(event)
+            case "ask_text":
+                await self._handle_ask_text_event(event)
+            case "selection":
+                await self._handle_selection_event(event)
+            case "progress":
+                self._handle_progress_event(event)
+            case "notification":
+                self._handle_notification_event(event)
+            case "card":
+                self._handle_card_event(event)
+            case "ui_supersede":
+                # Future: dim a previously-mounted modal/inline widget
+                # for the given event_id. v1 leaves modals up since
+                # the user has already moved on.
+                pass
             case _:
                 detail = event.content if isinstance(event.content, str) else ""
                 self._handle_activity(event.type, detail, event.payload or {})
+
+    # ─────────────────────────────────────────────────────────────
+    # Phase B handlers
+    # ─────────────────────────────────────────────────────────────
+
+    async def _handle_confirm_event(self, event: OutputEvent) -> None:
+        if self._tui is None or self._tui._app is None:
+            return
+        await self._tui.wait_ready()
+        payload = event.payload or {}
+
+        def _build_and_push() -> None:
+            # Built inside the Textual loop so the active_app
+            # ContextVar is set when the modal renders.
+            modal = BusConfirmModal(
+                prompt=payload.get("prompt", ""),
+                detail=payload.get("detail", ""),
+                options=payload.get("options", []),
+            )
+
+            def _on_dismissed(result: dict | None) -> None:
+                self._submit_modal_reply(event, result, default_action="cancel")
+
+            self._tui._app.push_screen(modal, _on_dismissed)
+
+        self._tui._safe_call(_build_and_push)
+
+    async def _handle_ask_text_event(self, event: OutputEvent) -> None:
+        if self._tui is None or self._tui._app is None:
+            return
+        await self._tui.wait_ready()
+        payload = event.payload or {}
+
+        def _build_and_push() -> None:
+            modal = BusAskTextModal(
+                prompt=payload.get("prompt", ""),
+                placeholder=payload.get("placeholder", ""),
+                default=payload.get("default", ""),
+                multiline=bool(payload.get("multiline", False)),
+            )
+
+            def _on_dismissed(result: dict | None) -> None:
+                self._submit_modal_reply(event, result, default_action="cancel")
+
+            self._tui._app.push_screen(modal, _on_dismissed)
+
+        self._tui._safe_call(_build_and_push)
+
+    async def _handle_selection_event(self, event: OutputEvent) -> None:
+        if self._tui is None or self._tui._app is None:
+            return
+        await self._tui.wait_ready()
+        payload = event.payload or {}
+
+        def _build_and_push() -> None:
+            modal = BusSelectionModal(
+                prompt=payload.get("prompt", ""),
+                options=payload.get("options", []),
+                multi=bool(payload.get("multi", False)),
+                default=payload.get("default"),
+            )
+
+            def _on_dismissed(result: dict | None) -> None:
+                self._submit_modal_reply(event, result, default_action="cancel")
+
+            self._tui._app.push_screen(modal, _on_dismissed)
+
+        self._tui._safe_call(_build_and_push)
+
+    def _submit_modal_reply(
+        self,
+        event: OutputEvent,
+        result: dict | None,
+        default_action: str,
+    ) -> None:
+        """Common path: convert a modal's dismiss result to a UIReply
+        and submit via the bus.
+        """
+        router = getattr(self, "_router", None)
+        if router is None or not event.id:
+            return
+        if result is None:
+            reply = UIReply(event_id=event.id, action_id=default_action, values={})
+        else:
+            reply = UIReply(
+                event_id=event.id,
+                action_id=result.get("action_id", default_action),
+                values=result.get("values", {}),
+            )
+        try:
+            router.submit_reply(reply)
+        except Exception as e:
+            logger.exception("submit_reply failed", error=str(e))
+
+    def _handle_progress_event(self, event: OutputEvent) -> None:
+        if self._tui is None:
+            return
+        payload = event.payload or {}
+        widget_id = event.update_target or event.id
+        if widget_id is None:
+            return
+        try:
+            self._tui.upsert_progress_block(
+                widget_id=widget_id,
+                label=payload.get("label", "progress"),
+                value=payload.get("value"),
+                max_value=payload.get("max"),
+                indeterminate=bool(payload.get("indeterminate", False)),
+                complete=bool(payload.get("complete", False)),
+                target=self._target,
+            )
+        except Exception as e:
+            logger.debug("progress render failed", error=str(e))
+
+    def _handle_notification_event(self, event: OutputEvent) -> None:
+        if self._tui is None:
+            return
+        payload = event.payload or {}
+        try:
+            self._tui.add_system_notice(
+                payload.get("text", ""),
+                command=payload.get("title", payload.get("level", "info")),
+                target=self._target,
+            )
+        except Exception as e:
+            logger.debug("notification render failed", error=str(e))
+
+    def _handle_card_event(self, event: OutputEvent) -> None:
+        if self._tui is None:
+            return
+        payload = event.payload or {}
+        actions = payload.get("actions") or []
+        on_action = self._make_card_action_callback() if actions else None
+        try:
+            self._tui.add_card_block(
+                payload,
+                event_id=event.id,
+                on_action=on_action,
+                target=self._target,
+            )
+        except Exception as e:
+            logger.debug("card render failed", error=str(e))
+
+    def _make_card_action_callback(self):
+        """Return a callable that wraps card button presses into a
+        UIReply submission via the agent's output_router.
+        """
+
+        def _on_action(event_id: str, action_id: str) -> None:
+            router = getattr(self, "_router", None)
+            if router is None or not event_id:
+                return
+            try:
+                router.submit_reply(
+                    UIReply(
+                        event_id=event_id,
+                        action_id=action_id,
+                        values={"action_id": action_id},
+                    )
+                )
+            except Exception as e:
+                logger.exception("card action submit failed", error=str(e))
+
+        return _on_action
 
     def _handle_activity(
         self, activity_type: str, name_detail: str, metadata: dict

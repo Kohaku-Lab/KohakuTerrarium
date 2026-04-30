@@ -93,6 +93,12 @@ class RichCLIOutput(BaseOutputModule):
 
         Each event type maps to the same ``app.on_*`` widget callback
         the legacy hooks would invoke, with byte-identical arguments.
+
+        Phase B v1: ``confirm``/``ask_text``/``selection``/``progress``/
+        ``notification``/``card`` render as display-only Rich Panels in
+        the CLI live region. The CLI does not submit replies in v1 —
+        interactive replies come from TUI or web. If neither is
+        attached, ``emit_and_wait`` falls back to its timeout sentinel.
         """
         match event.type:
             case "text":
@@ -117,6 +123,27 @@ class RichCLIOutput(BaseOutputModule):
                 )
             case "resume_batch":
                 await self.on_resume(event.payload.get("events", []))
+            case "ask_text" | "confirm" | "selection":
+                self._open_bus_overlay(event)
+            case "progress":
+                self._render_progress(event)
+            case "notification":
+                self._render_notification(event)
+            case "card":
+                # Interactive cards (with non-link actions) route
+                # through the bus overlay so the user can pick an
+                # option. Display-only cards render as inline Rich
+                # panels in scrollback.
+                actions = (event.payload or {}).get("actions") or []
+                has_replyable_action = any(a.get("style") != "link" for a in actions)
+                if has_replyable_action and event.interactive:
+                    self._open_bus_overlay(event)
+                else:
+                    self._render_card(event)
+            case "ui_supersede":
+                # CLI is display-only; superseded panels stay in
+                # scrollback but don't get cleared. No-op for now.
+                pass
             case _:
                 detail = event.content if isinstance(event.content, str) else ""
                 metadata = event.payload or {}
@@ -128,6 +155,78 @@ class RichCLIOutput(BaseOutputModule):
                         activity_type=event.type,
                         error=str(e),
                     )
+
+    # ─────────────────────────────────────────────────────────────
+    # Phase B renderers — display-only Rich Panels in v1.
+    # ─────────────────────────────────────────────────────────────
+
+    def _open_bus_overlay(self, event: OutputEvent) -> None:
+        """Push an interactive event onto the CLI's bus overlay queue.
+
+        The overlay (``cli_rich/dialogs/bus_overlay.py``) takes over the
+        live region, captures keyboard input, and submits a UIReply to
+        the agent's output_router on apply. Multiple events stack via
+        the overlay's internal queue.
+        """
+        if self.app is None:
+            return
+        overlay = getattr(self.app, "bus_overlay", None)
+        if overlay is None:
+            # No overlay wired (older app variant) — fall back to the
+            # display-only panel path so the user still sees something.
+            handler = getattr(self.app, "on_ui_event_panel", None)
+            if handler is not None:
+                try:
+                    handler(event_type=event.type, payload=dict(event.payload))
+                except Exception as e:
+                    logger.exception("CLI panel fallback failed", error=str(e))
+            return
+        try:
+            overlay.open(event)
+            self.app._invalidate()
+        except Exception as e:
+            logger.exception(
+                "CLI bus overlay open failed",
+                event_type=event.type,
+                error=str(e),
+            )
+
+    def _render_progress(self, event: OutputEvent) -> None:
+        if self.app is None:
+            return
+        try:
+            handler = getattr(self.app, "on_progress_event", None)
+            if handler is None:
+                return
+            handler(
+                event_id=event.id,
+                update_target=event.update_target,
+                payload=dict(event.payload),
+            )
+        except Exception as e:
+            logger.exception("CLI progress render failed", error=str(e))
+
+    def _render_notification(self, event: OutputEvent) -> None:
+        if self.app is None:
+            return
+        try:
+            handler = getattr(self.app, "on_notification_event", None)
+            if handler is None:
+                return
+            handler(payload=dict(event.payload))
+        except Exception as e:
+            logger.exception("CLI notification render failed", error=str(e))
+
+    def _render_card(self, event: OutputEvent) -> None:
+        if self.app is None:
+            return
+        try:
+            handler = getattr(self.app, "on_card_event", None)
+            if handler is None:
+                return
+            handler(payload=dict(event.payload))
+        except Exception as e:
+            logger.exception("CLI card render failed", error=str(e))
 
     def _dispatch(
         self, activity_type: str, detail: str, metadata: dict[str, Any]
