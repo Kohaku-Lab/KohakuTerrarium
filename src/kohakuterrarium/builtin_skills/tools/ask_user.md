@@ -12,11 +12,28 @@ patterns where the agent needs clarification, approval, or additional input.
 
 ## WHEN TO USE
 
-- Requesting clarification before taking an ambiguous action
-- Approval workflows before destructive or irreversible operations
-- Gathering additional input mid-execution
-- Confirming choices when multiple valid approaches exist
-- Interactive decision-making with the user
+`ask_user` is for **free-text replies** — the user types an answer.
+For other interaction shapes, prefer the right tool:
+
+| Need | Tool |
+|------|------|
+| Free-text answer (a name, a path, a description) | **ask_user** (this tool) |
+| Pick from N labelled options ("Approve / Edit / Reject") | **show_card** with `actions` |
+| Display structured info beautifully (plan preview, status panel) | **show_card** display-only |
+
+Use `ask_user` when:
+
+- Requesting open-ended clarification ("which file did you mean?", "what should I name this?")
+- Gathering missing free-form information mid-execution
+- Asking for a description, reason, or note the user must type out
+
+Use `show_card` instead when:
+
+- The answer is one of a small set of choices → use `show_card` with
+  buttons; the user clicks instead of typing.
+- You want to display a structured summary the user should see
+  prominently (e.g. "Migration plan ready" with file count, line
+  count, risk level) — even without a reply.
 
 ## HOW TO USE
 
@@ -71,15 +88,21 @@ If the user provides an empty response, returns `(no response)`.
 
 ## LIMITATIONS
 
-- CLI-only: reads from stdin, writes the question to stderr
-- Will hang indefinitely if stdin is not available (non-interactive environments)
-- Not suitable for agents running in headless/daemon mode
-- One question at a time; cannot present interactive menus
+- Single free-text input only — for choice / button UIs use
+  `show_card`.
+- The tool waits forever by default. Pass `timeout_s` for a bounded
+  wait if blocking the agent indefinitely is unacceptable.
+- The CLI renders the question above the composer; the user types
+  into the existing input field. TUI and web render a styled input
+  box.
 
 ## TIPS
 
 - Keep questions clear and concise
-- Offer numbered options when presenting choices
-- Use yes/no format for simple confirmations
 - Provide context so the user can make an informed decision
 - Avoid asking unnecessary questions; prefer sensible defaults when possible
+- **Don't list numbered options as text** — that's `show_card`'s job.
+  ask_user's "options" only shape the answer; if the user reads a
+  numbered list and types a number, you got a string back, not a
+  structured choice. Use `show_card` with buttons for that pattern
+  so each click returns a stable `action_id`.

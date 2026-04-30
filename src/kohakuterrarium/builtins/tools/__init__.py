@@ -35,6 +35,7 @@ from kohakuterrarium.builtins.tools.read import ReadTool
 from kohakuterrarium.builtins.tools.scratchpad_tool import ScratchpadTool
 from kohakuterrarium.builtins.tools.search_memory import SearchMemoryTool
 from kohakuterrarium.builtins.tools.send_message import SendMessageTool
+from kohakuterrarium.builtins.tools.show_card import ShowCardTool
 from kohakuterrarium.builtins.tools.skill import SkillTool
 from kohakuterrarium.builtins.tools.stop_task import StopTaskTool
 from kohakuterrarium.builtins.tools.tree import TreeTool
@@ -63,6 +64,7 @@ __all__ = [
     "ScratchpadTool",
     "SearchMemoryTool",
     "SendMessageTool",
+    "ShowCardTool",
     "SkillTool",
     "WriteTool",
     "EditTool",
