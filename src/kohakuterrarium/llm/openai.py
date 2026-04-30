@@ -22,8 +22,10 @@ from kohakuterrarium.llm.base import (
 )
 from kohakuterrarium.llm.openai_helpers import (
     delta_field,
+    delta_field_present,
     extract_usage,
     log_token_usage,
+    normalize_stateful_assistant_fields,
     pack_reasoning_fields,
     tool_call_from_pending,
     tool_calls_from_message,
@@ -232,6 +234,7 @@ class OpenAIProvider(BaseLLMProvider):
         non-tool messages with cache_control markers.
         """
         messages = strip_kt_extras(messages)
+        messages = normalize_stateful_assistant_fields(messages)
         if not is_anthropic_endpoint(self.base_url, None):
             return messages
         if self.extra_body.get("disable_prompt_caching"):
@@ -359,6 +362,8 @@ class OpenAIProvider(BaseLLMProvider):
         reasoning_text = ""
         reasoning_details: list[Any] = []
         reasoning_extra: dict[str, Any] = {}
+        reasoning_text_seen = False
+        reasoning_details_seen = False
 
         stream = await self._client.chat.completions.create(**create_kwargs)
 
@@ -392,20 +397,25 @@ class OpenAIProvider(BaseLLMProvider):
             # These aren't on the typed OpenAI SDK delta surface; the
             # SDK exposes unknown response fields via ``model_extra``.
             if self.echo_reasoning:
+                if delta_field_present(delta, "reasoning_content"):
+                    reasoning_text_seen = True
                 rc_piece = delta_field(delta, "reasoning_content")
                 if isinstance(rc_piece, str):
                     reasoning_text += rc_piece
+                if delta_field_present(delta, "reasoning_details"):
+                    reasoning_details_seen = True
                 rd_piece = delta_field(delta, "reasoning_details")
-                if isinstance(rd_piece, list) and rd_piece:
+                if isinstance(rd_piece, list):
                     reasoning_details.extend(rd_piece)
                 # OpenRouter also occasionally emits a plain "reasoning"
-                # string alongside ``reasoning_details`` — keep the last
-                # value; the details array is the canonical source.
-                r_piece = delta_field(delta, "reasoning")
-                if isinstance(r_piece, str) and r_piece:
-                    reasoning_extra["reasoning"] = (
-                        reasoning_extra.get("reasoning", "") + r_piece
-                    )
+                # string alongside ``reasoning_details`` — keep it when
+                # present, even if the provider emitted an empty value.
+                if delta_field_present(delta, "reasoning"):
+                    r_piece = delta_field(delta, "reasoning")
+                    if isinstance(r_piece, str):
+                        reasoning_extra["reasoning"] = (
+                            reasoning_extra.get("reasoning", "") + r_piece
+                        )
 
             # Yield text content (sanitize surrogates from LLM output)
             if delta.content:
@@ -423,9 +433,19 @@ class OpenAIProvider(BaseLLMProvider):
                 tools=[tc.name for tc in self._last_tool_calls],
             )
 
-        if reasoning_text or reasoning_details or reasoning_extra:
+        if (
+            reasoning_text_seen
+            or reasoning_details_seen
+            or reasoning_text
+            or reasoning_details
+            or reasoning_extra
+        ):
             self._last_assistant_extra_fields = pack_reasoning_fields(
-                reasoning_text, reasoning_details, reasoning_extra
+                reasoning_text,
+                reasoning_details,
+                reasoning_extra,
+                include_text=reasoning_text_seen,
+                include_details=reasoning_details_seen,
             )
             logger.debug(
                 "Reasoning fields captured",
@@ -540,11 +560,15 @@ class OpenAIProvider(BaseLLMProvider):
             rd = delta_field(message, "reasoning_details")
             r = delta_field(message, "reasoning")
             extras = {}
-            if isinstance(rc, str) and rc:
+            if delta_field_present(message, "reasoning_content") and isinstance(
+                rc, str
+            ):
                 extras["reasoning_content"] = rc
-            if isinstance(rd, list) and rd:
+            if delta_field_present(message, "reasoning_details") and isinstance(
+                rd, list
+            ):
                 extras["reasoning_details"] = rd
-            if isinstance(r, str) and r:
+            if delta_field_present(message, "reasoning") and isinstance(r, str):
                 extras["reasoning"] = r
             if extras:
                 self._last_assistant_extra_fields = extras

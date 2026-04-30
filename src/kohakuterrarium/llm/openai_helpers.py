@@ -37,19 +37,99 @@ def delta_field(obj: Any, name: str) -> Any:
     return getattr(obj, name, None)
 
 
+def delta_field_present(obj: Any, name: str) -> bool:
+    """Return whether a provider-specific field was explicitly present.
+
+    Stateful reasoning protocols care about field presence, not just
+    truthiness: DeepSeek V4 thinking mode, for example, rejects later
+    tool-call turns when an assistant message omits ``reasoning_content``
+    even if the value would be an empty string.
+    """
+    extra = getattr(obj, "model_extra", None)
+    if isinstance(extra, dict) and name in extra:
+        return True
+    if isinstance(obj, dict):
+        return name in obj
+    fields_set = getattr(obj, "model_fields_set", None)
+    if fields_set is not None and name in fields_set:
+        return True
+    fields_set = getattr(obj, "__fields_set__", None)
+    if fields_set is not None and name in fields_set:
+        return True
+    return getattr(obj, name, None) is not None
+
+
 def pack_reasoning_fields(
-    text: str, details: list[Any], extra: dict[str, Any]
+    text: str,
+    details: list[Any],
+    extra: dict[str, Any],
+    *,
+    include_text: bool = False,
+    include_details: bool = False,
 ) -> dict[str, Any]:
-    """Assemble captured reasoning fields into one extras dict."""
+    """Assemble captured reasoning fields into one extras dict.
+
+    ``include_*`` means "the provider emitted this field". When set,
+    preserve the field even if its value is empty so stateful reasoning
+    payloads round-trip losslessly.
+    """
     packed: dict[str, Any] = {}
-    if text:
+    if include_text or text:
         packed["reasoning_content"] = text
-    if details:
+    if include_details or details:
         packed["reasoning_details"] = details
     for k, v in (extra or {}).items():
-        if v:
-            packed[k] = v
+        packed[k] = v
     return packed
+
+
+_STATEFUL_ASSISTANT_FIELD_DEFAULTS: dict[str, Any] = {
+    "reasoning_content": "",
+    "reasoning_details": [],
+    "reasoning": "",
+}
+
+
+def normalize_stateful_assistant_fields(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Keep seen provider-owned assistant state fields present.
+
+    This is evidence-based and provider-agnostic: once a conversation
+    contains a known stateful assistant field, every assistant message
+    in the outgoing request gets that field, defaulting to the empty
+    value for its shape. Providers that never emit these fields are left
+    untouched, while DeepSeek-style thinking/tool-call conversations
+    keep the required field present across synthetic, compacted, or
+    empty-reasoning assistant turns.
+    """
+    seen = {
+        field
+        for msg in messages
+        if msg.get("role") == "assistant"
+        for field in _STATEFUL_ASSISTANT_FIELD_DEFAULTS
+        if field in msg
+    }
+    if not seen:
+        return messages
+
+    changed = False
+    normalized: list[dict[str, Any]] = []
+    for msg in messages:
+        if msg.get("role") != "assistant":
+            normalized.append(msg)
+            continue
+        missing = [field for field in seen if field not in msg]
+        if not missing:
+            normalized.append(msg)
+            continue
+        updated = dict(msg)
+        for field in missing:
+            default = _STATEFUL_ASSISTANT_FIELD_DEFAULTS[field]
+            updated[field] = list(default) if isinstance(default, list) else default
+        normalized.append(updated)
+        changed = True
+    return normalized if changed else messages
 
 
 def tool_call_from_pending(call: dict[str, str]) -> NativeToolCall:

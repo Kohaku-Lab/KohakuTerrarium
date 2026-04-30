@@ -16,6 +16,7 @@ from kohakuterrarium.llm.openai import (
     _delta_field,
     _pack_reasoning_fields,
 )
+from kohakuterrarium.llm.openai_helpers import normalize_stateful_assistant_fields
 
 # ───────────────────────────── Message shape ─────────────────────────────
 
@@ -101,14 +102,29 @@ def test_delta_field_falls_back_to_attr_and_dict():
     assert _delta_field({"reasoning": "v"}, "reasoning") == "v"
 
 
-def test_pack_reasoning_fields_drops_empties():
-    packed = _pack_reasoning_fields("", [], {"reasoning": ""})
+def test_pack_reasoning_fields_drops_unseen_empties():
+    packed = _pack_reasoning_fields("", [], {})
     assert packed == {}
     packed = _pack_reasoning_fields("content", [{"a": 1}], {"reasoning": "narrative"})
     assert packed == {
         "reasoning_content": "content",
         "reasoning_details": [{"a": 1}],
         "reasoning": "narrative",
+    }
+
+
+def test_pack_reasoning_fields_preserves_seen_empties():
+    packed = _pack_reasoning_fields(
+        "",
+        [],
+        {"reasoning": ""},
+        include_text=True,
+        include_details=True,
+    )
+    assert packed == {
+        "reasoning_content": "",
+        "reasoning_details": [],
+        "reasoning": "",
     }
 
 
@@ -178,6 +194,40 @@ def test_round_trip_openrouter_reasoning_details():
     )
     wire = conv.to_messages()
     assert wire[-1]["reasoning_details"][1]["text"] == "step 2"
+
+
+def test_normalize_stateful_fields_is_noop_without_seen_fields():
+    messages = [
+        {"role": "user", "content": "q"},
+        {"role": "assistant", "content": "a"},
+    ]
+    assert normalize_stateful_assistant_fields(messages) is messages
+
+
+def test_normalize_stateful_fields_fills_missing_assistant_defaults():
+    messages = [
+        {"role": "user", "content": "q"},
+        {
+            "role": "assistant",
+            "content": "",
+            "reasoning_content": "first",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "tool", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": "ok"},
+        {"role": "assistant", "content": "done"},
+    ]
+    normalized = normalize_stateful_assistant_fields(messages)
+    assert normalized is not messages
+    assert normalized[1]["reasoning_content"] == "first"
+    assert normalized[3]["reasoning_content"] == ""
+    assert "reasoning_content" not in normalized[0]
+    assert "reasoning_content" not in normalized[2]
 
 
 # ─────────────────────────── pytest asyncio marker ──────────────────────
