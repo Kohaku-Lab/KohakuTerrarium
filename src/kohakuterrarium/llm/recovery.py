@@ -98,10 +98,26 @@ _TRANSIENT_MARKERS = (
     "connection reset",
     "connection error",
     "peer disconnected",
+    "peer closed connection",  # httpx.RemoteProtocolError
     "server disconnected",
     "timeout",
     "timed out",
     "temporarily unavailable",
+    # Truncated streaming responses — common when the upstream proxy
+    # cuts the connection mid-message. httpx raises these as
+    # ``RemoteProtocolError``; the SDK passes the message through.
+    "incomplete chunked read",
+    "incomplete read",
+    "remoteprotocolerror",
+    "remote protocol error",
+    "protocol error",
+    # httpx connection-tier errors (ConnectError, ReadError, WriteError,
+    # PoolTimeout). The exception class names sometimes leak into the
+    # SDK-wrapped message; match defensively.
+    "connecterror",
+    "readerror",
+    "writeerror",
+    "pooltimeout",
 )
 
 
@@ -138,6 +154,14 @@ def classify_openai_error(exc: BaseException) -> ErrorClass:
         return ErrorClass.USER_ERROR
     if _contains_any(message, _TRANSIENT_MARKERS):
         return ErrorClass.TRANSIENT
+    # No status code reached us — the request died before the server
+    # could answer (DNS, TCP reset, mid-stream truncation, proxy hiccup,
+    # …). Treat it as TRANSIENT so the retry loop covers the long tail
+    # of network errors we didn't enumerate as markers. We only land in
+    # UNKNOWN when the server DID respond with a status we don't have a
+    # rule for (rare — e.g. 1xx / 3xx leaked through as an exception).
+    if not isinstance(status, int):
+        return ErrorClass.TRANSIENT
     return ErrorClass.UNKNOWN
 
 
@@ -163,7 +187,11 @@ def _extract_error_payload(exc: BaseException) -> dict[str, Any]:
 
 
 def _stringify_error(exc: BaseException, body: dict[str, Any]) -> str:
-    pieces = [str(exc)]
+    # Include the exception class name so providers that wrap httpx can
+    # still classify cleanly when ``str(exc)`` is sparse — e.g. a bare
+    # ``RemoteProtocolError`` instance whose message is empty still
+    # classifies as TRANSIENT via the class-name marker.
+    pieces = [str(exc), type(exc).__name__]
     for key in ("message", "code", "type"):
         value = body.get(key)
         if value:
