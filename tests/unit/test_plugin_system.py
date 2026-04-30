@@ -383,7 +383,6 @@ class _FakeAgent:
         self.registry = object()
         self.scratchpad = object()
         self.compact_manager = object()
-        self.budgets = object()
         self.controller = _FakeController()
         self.subagent_manager = object()
 
@@ -415,7 +414,6 @@ class TestContextPublicAPI:
         assert ctx.registry is agent.registry
         assert ctx.scratchpad is agent.scratchpad
         assert ctx.compact_manager is agent.compact_manager
-        assert ctx.budgets is agent.budgets
         assert ctx.controller is agent.controller
         assert ctx.subagent_manager is agent.subagent_manager
 
@@ -427,7 +425,6 @@ class TestContextPublicAPI:
         assert ctx.registry is None
         assert ctx.scratchpad is None
         assert ctx.compact_manager is None
-        assert ctx.budgets is None
         assert ctx.controller is None
         assert ctx.subagent_manager is None
 

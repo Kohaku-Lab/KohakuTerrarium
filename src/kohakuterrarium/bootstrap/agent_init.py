@@ -247,7 +247,6 @@ class AgentInitMixin:
             tool_format=parent_tool_format,
             default_plugin_specs=default_plugin_specs,
         )
-        self.subagent_manager.budgets = getattr(self, "budgets", None)
         # Inherit parent's tool context builder (working_dir, file guards, etc.)
         self.subagent_manager._parent_executor = self.executor
 

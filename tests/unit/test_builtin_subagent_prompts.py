@@ -6,17 +6,22 @@ from kohakuterrarium.builtins.subagent_catalog import (
 )
 from kohakuterrarium.builtins.subagents.response import INTERACTIVE_RESPONSE_CONFIG
 
-_EXPECTED = {
-    "explore": ((40, 60), None, (75, 100), "subagent-default"),
-    "research": ((40, 60), None, (75, 100), "subagent-default"),
-    "plan": ((40, 60), None, (75, 100), None),
-    "coordinator": ((40, 60), None, (75, 100), None),
-    "critic": ((40, 60), None, (75, 100), None),
-    "memory_read": ((40, 60), None, (75, 100), "subagent-default"),
-    "memory_write": ((40, 60), None, (75, 100), "subagent-default"),
-    "response": ((40, 60), None, (75, 100), "subagent-default"),
-    "summarize": ((40, 60), None, (75, 100), "subagent-default"),
-    "worker": ((40, 60), None, (75, 100), None),
+_EXPECTED_BUDGET = {
+    "turn_budget": [40, 60],
+    "tool_call_budget": [75, 100],
+}
+
+_EXPECTED_MODEL = {
+    "explore": "subagent-default",
+    "research": "subagent-default",
+    "plan": None,
+    "coordinator": None,
+    "critic": None,
+    "memory_read": "subagent-default",
+    "memory_write": "subagent-default",
+    "response": "subagent-default",
+    "summarize": "subagent-default",
+    "worker": None,
 }
 
 
@@ -39,17 +44,20 @@ def test_read_only_builtin_prompts_include_read_only_marker():
             assert "You are read-only" in config.system_prompt
 
 
-def test_builtin_budget_defaults_use_minimal_runtime_pack():
-    assert set(BUILTIN_SUBAGENTS) == set(_EXPECTED)
-    for name, expected in _EXPECTED.items():
+def test_builtin_budget_defaults_are_opt_in_plugin_entries():
+    """Every built-in sub-agent ships budget as a ``plugins:`` entry,
+    not as a core config field — and pulls compaction via the
+    ``auto-compact`` pack rather than a budget-bundling mega-pack.
+    """
+    assert set(BUILTIN_SUBAGENTS) == set(_EXPECTED_MODEL)
+    for name, expected_model in _EXPECTED_MODEL.items():
         config = get_builtin_subagent_config(name)
         assert config is not None
-        turn, walltime, tool_call, model = expected
-        assert config.default_plugins == ["default-runtime"]
-        assert config.turn_budget == turn
-        assert config.walltime_budget == walltime
-        assert config.tool_call_budget == tool_call
-        assert config.model == model
+        assert config.default_plugins == ["auto-compact"]
+        budget_entries = [p for p in config.plugins if p.get("name") == "budget"]
+        assert len(budget_entries) == 1
+        assert budget_entries[0].get("options") == _EXPECTED_BUDGET
+        assert config.model == expected_model
 
 
 def test_catalog_returns_defensive_copies():
@@ -58,12 +66,14 @@ def test_catalog_returns_defensive_copies():
     assert first is not None and second is not None
 
     first.default_plugins.append("changed")
-    assert second.default_plugins == ["default-runtime"]
+    assert second.default_plugins == ["auto-compact"]
 
 
 def test_interactive_response_config_has_runtime_defaults():
-    assert INTERACTIVE_RESPONSE_CONFIG.default_plugins == ["default-runtime"]
-    assert INTERACTIVE_RESPONSE_CONFIG.turn_budget == (40, 60)
-    assert INTERACTIVE_RESPONSE_CONFIG.walltime_budget is None
-    assert INTERACTIVE_RESPONSE_CONFIG.tool_call_budget == (75, 100)
+    assert INTERACTIVE_RESPONSE_CONFIG.default_plugins == ["auto-compact"]
+    budget_entries = [
+        p for p in INTERACTIVE_RESPONSE_CONFIG.plugins if p.get("name") == "budget"
+    ]
+    assert len(budget_entries) == 1
+    assert budget_entries[0].get("options") == _EXPECTED_BUDGET
     assert INTERACTIVE_RESPONSE_CONFIG.model == "subagent-default"

@@ -548,7 +548,7 @@ class TestBootstrapSubagents:
         assert isinstance(result, SubAgentConfig)
         assert result.name == "my_agent"
 
-    def test_create_subagent_config_custom_inline_with_runtime_budget(self):
+    def test_create_subagent_config_custom_inline_with_budget_plugin_options(self):
         from kohakuterrarium.bootstrap.subagents import create_subagent_config
 
         item = SubAgentConfigItem(
@@ -557,9 +557,16 @@ class TestBootstrapSubagents:
             tools=["read", "grep"],
             options={
                 "system_prompt": "You are an inline sub-agent.",
-                "default_plugins": ["budget"],
-                "turn_budget": [40, 60],
-                "tool_call_budget": {"soft": 75, "hard": 100},
+                "default_plugins": ["auto-compact"],
+                "plugins": [
+                    {
+                        "name": "budget",
+                        "options": {
+                            "turn_budget": [40, 60],
+                            "tool_call_budget": {"soft": 75, "hard": 100},
+                        },
+                    }
+                ],
             },
         )
 
@@ -567,10 +574,16 @@ class TestBootstrapSubagents:
         assert result is not None
         assert result.name == "inline_researcher"
         assert result.system_prompt == "You are an inline sub-agent."
-        assert result.default_plugins == ["budget"]
-        assert result.turn_budget == (40, 60)
-        assert result.tool_call_budget == (75, 100)
-        assert result.walltime_budget is None
+        assert result.default_plugins == ["auto-compact"]
+        assert result.plugins == [
+            {
+                "name": "budget",
+                "options": {
+                    "turn_budget": [40, 60],
+                    "tool_call_budget": {"soft": 75, "hard": 100},
+                },
+            }
+        ]
 
     def test_create_subagent_config_custom_no_loader(self):
         from kohakuterrarium.bootstrap.subagents import create_subagent_config

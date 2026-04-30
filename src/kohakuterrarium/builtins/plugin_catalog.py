@@ -7,17 +7,9 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 _PLUGINS: dict[str, dict[str, str]] = {
-    "budget.ticker": {
-        "module": "kohakuterrarium.builtins.plugins.budget.ticker",
-        "class": "BudgetTickerPlugin",
-    },
-    "budget.alarm": {
-        "module": "kohakuterrarium.builtins.plugins.budget.alarm",
-        "class": "BudgetAlarmPlugin",
-    },
-    "budget.gate": {
-        "module": "kohakuterrarium.builtins.plugins.budget.gate",
-        "class": "BudgetGatePlugin",
+    "budget": {
+        "module": "kohakuterrarium.builtins.plugins.budget.plugin",
+        "class": "BudgetPlugin",
     },
     "compact.auto": {
         "module": "kohakuterrarium.builtins.plugins.compact.auto",
@@ -25,16 +17,19 @@ _PLUGINS: dict[str, dict[str, str]] = {
     },
 }
 
+# Plugin packs are syntactic sugar for opting into multiple plugins by
+# name. Budget is intentionally NOT bundled into any default pack — it
+# is opt-in per agent / sub-agent and must be requested explicitly with
+# its own ``options`` so its axes are visible at the call site.
 _PACKS: dict[str, list[str]] = {
-    "budget": ["budget.ticker", "budget.alarm", "budget.gate"],
     "auto-compact": ["compact.auto"],
-    "default-runtime": [
-        "budget.ticker",
-        "budget.alarm",
-        "budget.gate",
-        "compact.auto",
-    ],
 }
+
+
+def lookup_plugin(name: str) -> dict[str, str] | None:
+    """Return the catalog spec for a built-in plugin name, or ``None``."""
+    spec = _PLUGINS.get(name)
+    return dict(spec) if spec else None
 
 
 def resolve_plugin_specs(names: list[str]) -> list[dict[str, Any]]:

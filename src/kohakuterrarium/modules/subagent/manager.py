@@ -9,7 +9,7 @@ import asyncio
 from pathlib import Path
 from typing import Any, Callable
 
-from kohakuterrarium.core.budget import BudgetSet, IterationBudget
+from kohakuterrarium.core.budget import IterationBudget
 from kohakuterrarium.core.job import (
     JobState,
     JobStatus,
@@ -23,7 +23,6 @@ from kohakuterrarium.llm.base import LLMProvider
 from kohakuterrarium.modules.subagent.base import SubAgent, SubAgentJob, SubAgentResult
 from kohakuterrarium.modules.subagent.config import SubAgentConfig, SubAgentInfo
 from kohakuterrarium.modules.subagent.runtime_builders import (
-    build_budgets,
     build_compact_manager,
     build_plugin_manager,
     load_and_wrap_plugins,
@@ -101,10 +100,9 @@ class SubAgentManager(InteractiveManagerMixin):
         self._on_tool_activity: Callable[[str, str, str, str], None] | None = None
         # Parent executor (for inheriting tool context builder)
         self._parent_executor: Any = None
-        # Parent's shared budgets. ``budgets`` is the multi-axis runtime
-        # state consumed by budget plugins; ``iteration_budget`` is the
-        # legacy single-axis shim used by max_iterations callers.
-        self.budgets: BudgetSet | None = None
+        # Parent's shared ``IterationBudget`` (legacy single-axis shim
+        # tied to ``max_iterations``). The runtime ``budget`` plugin owns
+        # its own state and is not propagated through the manager.
         self.iteration_budget: IterationBudget | None = None
         # Session store for persisting sub-agent conversations
         self._session_store: Any = None
@@ -267,7 +265,6 @@ class SubAgentManager(InteractiveManagerMixin):
             config, self._loader, self._default_plugin_specs
         )
         llm = resolve_llm(self.llm, config)
-        budgets = build_budgets(config, self.budgets, self.iteration_budget)
         compact_manager = build_compact_manager(config, llm)
 
         # Create sub-agent
@@ -279,7 +276,6 @@ class SubAgentManager(InteractiveManagerMixin):
             tool_format=effective_tool_format,
             plugin_manager=plugin_manager,
             compact_manager=compact_manager,
-            budgets=budgets,
         )
 
         # Legacy shared iteration budget remains as a compat fallback.

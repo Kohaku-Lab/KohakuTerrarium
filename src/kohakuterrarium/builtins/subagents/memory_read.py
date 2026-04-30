@@ -19,8 +19,15 @@ MEMORY_READ_CONFIG = SubAgentConfig(
     can_modify=False,
     stateless=True,
     memory_path="./memory",
-    default_plugins=["default-runtime"],
-    turn_budget=(40, 60),
-    tool_call_budget=(75, 100),
+    default_plugins=["auto-compact"],
+    plugins=[
+        {
+            "name": "budget",
+            "options": {
+                "turn_budget": [40, 60],
+                "tool_call_budget": [75, 100],
+            },
+        },
+    ],
     model="subagent-default",
 )

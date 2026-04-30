@@ -72,10 +72,12 @@ class SubAgentConfig:
     return_as_context: bool = False  # Return output text to parent as context
     max_turns: int = 0  # 0 = unlimited (agent runs until task is done)
     timeout: float = 0  # 0 = no timeout
+    # Plugin packs to opt into (e.g. ``["auto-compact"]``). Budget axes
+    # are NOT a sub-agent core field — declare the ``budget`` plugin via
+    # ``plugins`` with its own options if you want one.
     default_plugins: list[str] = field(default_factory=list)
-    turn_budget: tuple[int, int] | None = None
-    walltime_budget: tuple[float, float] | None = None
-    tool_call_budget: tuple[int, int] | None = None
+    # Per-instance plugin entries (``[{name, module, class, options}, …]``).
+    plugins: list[dict[str, Any]] = field(default_factory=list)
     compact: dict[str, Any] | None = None
     model: str | None = None
     temperature: float | None = None
@@ -83,7 +85,8 @@ class SubAgentConfig:
     modifying_tools: set[str] | None = None
     tool_format: str | None = None  # None = inherit from parent
     notify_controller_on_background_complete: bool = True
-    # Shared-iteration-budget controls (see core/budget.py).
+    # Shared-iteration-budget controls (legacy ``max_iterations`` path,
+    # distinct from the runtime ``budget`` plugin).
     # - budget_inherit=True (default): the child reuses the parent's
     #   IterationBudget reference — every child turn decrements the
     #   same pool the parent draws from.
@@ -156,18 +159,6 @@ class SubAgentConfig:
         if "modifying_tools" in data and isinstance(data["modifying_tools"], list):
             data["modifying_tools"] = set(data["modifying_tools"])
 
-        if "turn_budget" not in data and data.get("max_turns", 0):
-            data["turn_budget"] = (0, int(data["max_turns"]))
-        if "walltime_budget" not in data and data.get("timeout", 0):
-            data["walltime_budget"] = (0, float(data["timeout"]))
-        for key, cast in (
-            ("turn_budget", int),
-            ("walltime_budget", float),
-            ("tool_call_budget", int),
-        ):
-            if key in data:
-                data[key] = _parse_budget_tuple(data[key], cast)
-
         # Filter to known fields
         known_fields = {
             "name",
@@ -187,9 +178,7 @@ class SubAgentConfig:
             "max_turns",
             "timeout",
             "default_plugins",
-            "turn_budget",
-            "walltime_budget",
-            "tool_call_budget",
+            "plugins",
             "compact",
             "model",
             "temperature",
@@ -218,20 +207,6 @@ class SubAgentConfig:
         if self.modifying_tools is not None:
             data["modifying_tools"] = sorted(self.modifying_tools)
         return data
-
-
-def _parse_budget_tuple(value: Any, cast: Any) -> tuple[Any, Any] | None:
-    if value is None:
-        return None
-    if isinstance(value, dict):
-        hard = value.get("hard", value.get("limit"))
-        soft = value.get("soft", 0)
-        if hard is None:
-            return None
-        return (cast(soft), cast(hard))
-    if isinstance(value, (list, tuple)) and len(value) >= 2:
-        return (cast(value[0]), cast(value[1]))
-    return None
 
 
 @dataclass

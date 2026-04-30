@@ -11,6 +11,11 @@ RESPONSE_SYSTEM_PROMPT = render_subagent_prompt(
     can_modify=False,
 )
 
+_BUDGET_PLUGIN_OPTS = {
+    "turn_budget": [40, 60],
+    "tool_call_budget": [75, 100],
+}
+
 RESPONSE_CONFIG = SubAgentConfig(
     name="response",
     description="Generate user-facing responses",
@@ -20,9 +25,8 @@ RESPONSE_CONFIG = SubAgentConfig(
     stateless=True,
     interactive=False,
     output_to=OutputTarget.EXTERNAL,
-    default_plugins=["default-runtime"],
-    turn_budget=(40, 60),
-    tool_call_budget=(75, 100),
+    default_plugins=["auto-compact"],
+    plugins=[{"name": "budget", "options": dict(_BUDGET_PLUGIN_OPTS)}],
     model="subagent-default",
 )
 
@@ -35,8 +39,7 @@ INTERACTIVE_RESPONSE_CONFIG = SubAgentConfig(
     stateless=False,
     interactive=True,
     output_to=OutputTarget.EXTERNAL,
-    default_plugins=["default-runtime"],
-    turn_budget=(40, 60),
-    tool_call_budget=(75, 100),
+    default_plugins=["auto-compact"],
+    plugins=[{"name": "budget", "options": dict(_BUDGET_PLUGIN_OPTS)}],
     model="subagent-default",
 )

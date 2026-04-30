@@ -41,9 +41,7 @@ def create_subagent_config(
                 config.extra_prompt_file = item.options["extra_prompt_file"]
             for field_name in (
                 "default_plugins",
-                "turn_budget",
-                "walltime_budget",
-                "tool_call_budget",
+                "plugins",
                 "compact",
                 "model",
             ):

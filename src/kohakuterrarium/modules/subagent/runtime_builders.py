@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.bootstrap.plugins import init_plugins
-from kohakuterrarium.core.budget import BudgetAxis, BudgetSet, IterationBudget
 from kohakuterrarium.core.compact import CompactConfig, CompactManager
 from kohakuterrarium.core.loader import ModuleLoader
 from kohakuterrarium.llm.base import LLMProvider
@@ -37,9 +36,19 @@ def build_plugin_manager(
     loader: ModuleLoader,
     default_plugin_specs: list[dict[str, Any]],
 ):
-    """Create the per-run PluginManager for a sub-agent."""
+    """Create the per-run PluginManager for a sub-agent.
+
+    Combines:
+      * inline ``plugins:`` entries from the sub-agent config (each with
+        its own ``options`` — this is where the ``budget`` plugin gets
+        its turn / walltime / tool_call axes)
+      * ``default_plugins:`` pack names resolved against the catalog
+      * ``default_plugin_specs`` propagated from the parent (used when a
+        terrarium / parent agent wants to seed every sub-agent with a
+        common plugin)
+    """
     return init_plugins(
-        [],
+        list(getattr(config, "plugins", []) or []),
         loader,
         default_plugins=config.default_plugins,
         default_plugin_specs=default_plugin_specs,
@@ -97,48 +106,3 @@ def build_compact_manager(
     cm._llm = llm
     cm._agent_name = config.name
     return cm
-
-
-def build_budgets(
-    config: SubAgentConfig,
-    parent_budgets: BudgetSet | None = None,
-    legacy_budget: IterationBudget | None = None,
-) -> BudgetSet | None:
-    """Create or inherit per-sub-agent multi-axis budgets from config."""
-    if _has_explicit_budget(config):
-        return _configured_budget_set(config)
-    if getattr(config, "budget_allocation", None) is not None:
-        allocation = int(config.budget_allocation or 0)
-        return BudgetSet(turn=BudgetAxis(name="turn", soft=0, hard=float(allocation)))
-    if config.budget_inherit and parent_budgets is not None:
-        return parent_budgets
-    if config.budget_inherit and legacy_budget is not None:
-        return legacy_budget.budgets
-    return None
-
-
-def _configured_budget_set(config: SubAgentConfig) -> BudgetSet | None:
-    turn = _axis_from_tuple("turn", config.turn_budget)
-    walltime = _axis_from_tuple("walltime", config.walltime_budget)
-    tool_call = _axis_from_tuple("tool_call", config.tool_call_budget)
-    if turn is None and walltime is None and tool_call is None:
-        return None
-    return BudgetSet(turn=turn, walltime=walltime, tool_call=tool_call)
-
-
-def _has_explicit_budget(config: SubAgentConfig) -> bool:
-    return any(
-        value is not None
-        for value in (
-            config.turn_budget,
-            config.walltime_budget,
-            config.tool_call_budget,
-        )
-    )
-
-
-def _axis_from_tuple(name: str, value: tuple[Any, Any] | None) -> BudgetAxis | None:
-    if value is None:
-        return None
-    soft, hard = value
-    return BudgetAxis(name=name, soft=float(soft), hard=float(hard))

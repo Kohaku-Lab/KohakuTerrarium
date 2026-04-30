@@ -161,7 +161,7 @@ async def test_pre_dispatch_context_exposes_runtime_accessors():
     assert result is event
     assert seen_context is not None
     assert seen_context.registry is agent.registry
-    assert seen_context.budgets is agent.budgets
+    assert seen_context.host_agent is agent
 
 
 @pytest.mark.asyncio

@@ -195,11 +195,10 @@ class AgentConfig:
     # the legacy behavior.
     max_iterations: int | None = None
 
-    # Runtime default plugin packs and multi-axis budget defaults.
+    # Runtime default plugin packs (e.g. ``["auto-compact"]``).
+    # Budget axes are NOT a core agent setting — opt in via the
+    # ``plugins`` field with the ``budget`` plugin and its options.
     default_plugins: list[str] = field(default_factory=list)
-    turn_budget: tuple[int, int] | None = None
-    walltime_budget: tuple[float, float] | None = None
-    tool_call_budget: tuple[int, int] | None = None
 
     # Tool call format: "bracket", "xml", "native", or custom dict
     tool_format: str | dict = "bracket"

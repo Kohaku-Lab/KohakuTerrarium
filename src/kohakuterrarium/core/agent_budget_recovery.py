@@ -1,23 +1,12 @@
-"""Agent helpers for budget construction and provider recovery sync."""
+"""Provider emergency-drop conversation sync helper."""
 
 import json
 from typing import Any
 
-from kohakuterrarium.core.budget import BudgetAxis, BudgetSet
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
-
-
-def build_budget_set_from_config(config: Any) -> BudgetSet | None:
-    """Build a multi-axis BudgetSet from AgentConfig-like fields."""
-    turn = _axis_from_tuple("turn", getattr(config, "turn_budget", None))
-    walltime = _axis_from_tuple("walltime", getattr(config, "walltime_budget", None))
-    tool_call = _axis_from_tuple("tool_call", getattr(config, "tool_call_budget", None))
-    if turn is None and walltime is None and tool_call is None:
-        return None
-    return BudgetSet(turn=turn, walltime=walltime, tool_call=tool_call)
 
 
 def sync_emergency_drop_conversation(
@@ -38,13 +27,6 @@ def sync_emergency_drop_conversation(
             error=str(exc),
             exc_info=True,
         )
-
-
-def _axis_from_tuple(name: str, value: tuple[Any, Any] | None) -> BudgetAxis | None:
-    if value is None:
-        return None
-    soft, hard = value
-    return BudgetAxis(name=name, soft=float(soft), hard=float(hard))
 
 
 def _message_to_conversation_json(msg: dict[str, Any]) -> dict[str, Any]:

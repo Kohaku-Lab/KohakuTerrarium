@@ -3,7 +3,6 @@
 Exercises:
   * ``IterationBudget.consume`` accounting and exhaustion
   * ``SubAgentManager._resolve_child_budget`` legacy inheritance/allocation
-  * ``build_budgets`` multi-axis inheritance/allocation
   * ``SubAgent`` loop exits with ``success=False`` and
     ``metadata.budget_exhausted=True`` when drained
   * No budget → legacy behavior preserved (unbounded by budget)
@@ -14,16 +13,13 @@ from pathlib import Path
 import pytest
 
 from kohakuterrarium.core.budget import (
-    BudgetAxis,
     BudgetExhausted,
-    BudgetSet,
     IterationBudget,
 )
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.subagent.base import SubAgent
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 from kohakuterrarium.modules.subagent.manager import SubAgentManager
-from kohakuterrarium.modules.subagent.runtime_builders import build_budgets
 from kohakuterrarium.testing.llm import ScriptedLLM
 
 # ---------------------------------------------------------------------------
@@ -120,49 +116,6 @@ def test_inherited_child_consume_decrements_parent():
     assert child_budget is parent
     child_budget.consume(4)
     assert parent.remaining == 6
-
-
-def test_build_budgets_inherits_parent_budget_set_by_default():
-    parent = BudgetSet(turn=BudgetAxis(name="turn", soft=2, hard=4))
-    resolved = build_budgets(SubAgentConfig(name="child"), parent_budgets=parent)
-    assert resolved is parent
-
-
-def test_build_budgets_explicit_config_overrides_parent_inheritance():
-    parent = BudgetSet(turn=BudgetAxis(name="turn", soft=2, hard=4))
-    config = SubAgentConfig(name="child", turn_budget=(10, 15))
-    resolved = build_budgets(config, parent_budgets=parent)
-    assert resolved is not parent
-    assert resolved is not None
-    assert resolved.turn is not None
-    assert resolved.turn.soft == 10
-    assert resolved.turn.hard == 15
-
-
-def test_build_budgets_allocation_creates_isolated_turn_axis():
-    parent = BudgetSet(turn=BudgetAxis(name="turn", soft=2, hard=4))
-    config = SubAgentConfig(name="child", budget_allocation=3)
-    resolved = build_budgets(config, parent_budgets=parent)
-    assert resolved is not None
-    assert resolved is not parent
-    assert resolved.turn is not None
-    assert resolved.turn.hard == 3
-    resolved.tick(turns=1)
-    assert resolved.turn.used == 1
-    assert parent.turn is not None
-    assert parent.turn.used == 0
-
-
-def test_build_budgets_can_inherit_legacy_iteration_budget_set():
-    legacy = IterationBudget(remaining=5, total=5)
-    resolved = build_budgets(SubAgentConfig(name="child"), legacy_budget=legacy)
-    assert resolved is legacy.budgets
-
-
-def test_build_budgets_no_inherit_is_unbounded():
-    parent = BudgetSet(turn=BudgetAxis(name="turn", soft=2, hard=4))
-    config = SubAgentConfig(name="child", budget_inherit=False)
-    assert build_budgets(config, parent_budgets=parent) is None
 
 
 # ---------------------------------------------------------------------------

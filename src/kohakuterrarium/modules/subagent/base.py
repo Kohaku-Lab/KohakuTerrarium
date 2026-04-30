@@ -11,7 +11,6 @@ from typing import Any
 
 from kohakuterrarium.core.budget import (
     BudgetExhausted,
-    BudgetSet,
     IterationBudget,
 )
 from kohakuterrarium.core.conversation import Conversation
@@ -56,7 +55,6 @@ class SubAgent:
         tool_format: str | None = None,
         plugin_manager: PluginManager | None = None,
         compact_manager: Any = None,
-        budgets: BudgetSet | None = None,
     ):
         self.config = config
         self.parent_registry = parent_registry
@@ -66,7 +64,6 @@ class SubAgent:
         self.plugins = plugin_manager
         self._plugin_manager = plugin_manager
         self.compact_manager = compact_manager
-        self.budgets = budgets
         if self.compact_manager is not None:
             self.compact_manager._controller = self
             self.compact_manager._llm = self.llm

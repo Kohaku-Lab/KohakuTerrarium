@@ -3,7 +3,10 @@
 import importlib
 from typing import Any
 
-from kohakuterrarium.builtins.plugin_catalog import resolve_plugin_specs
+from kohakuterrarium.builtins.plugin_catalog import (
+    lookup_plugin,
+    resolve_plugin_specs,
+)
 from kohakuterrarium.core.loader import ModuleLoader
 from kohakuterrarium.modules.plugin.base import BasePlugin
 from kohakuterrarium.modules.plugin.manager import PluginManager
@@ -78,13 +81,14 @@ def _load_one(
     class_name = cfg.get("class", cfg.get("class_name", ""))
     options = cfg.get("options", {})
 
-    # If only name given, try to resolve from packages
+    # If only name given, resolve from the built-in catalog first, then
+    # fall back to plugins shipped by installed packages.
     if name and not module:
-        resolved = _resolve_from_packages(name)
+        resolved = _resolve_from_catalog(name) or _resolve_from_packages(name)
         if resolved:
             module, class_name = resolved
         else:
-            logger.debug("Plugin not found in packages", plugin_name=name)
+            logger.debug("Plugin not found", plugin_name=name)
             return None
 
     if not module or not class_name:
@@ -151,6 +155,18 @@ def _discover_package_plugins(
             if plugin:
                 manager.register(plugin)
                 manager.disable(name)  # Available but not active
+
+
+def _resolve_from_catalog(name: str) -> tuple[str, str] | None:
+    """Find a built-in plugin by name in the catalog."""
+    spec = lookup_plugin(name)
+    if spec is None:
+        return None
+    module = spec.get("module", "")
+    cls = spec.get("class") or spec.get("class_name", "")
+    if module and cls:
+        return (module, cls)
+    return None
 
 
 def _resolve_from_packages(name: str) -> tuple[str, str] | None:

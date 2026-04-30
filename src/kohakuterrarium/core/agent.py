@@ -31,10 +31,9 @@ from kohakuterrarium.core.agent_observability import (
     wire_scratchpad_observer,
 )
 from kohakuterrarium.core.agent_budget_recovery import (
-    build_budget_set_from_config,
     sync_emergency_drop_conversation,
 )
-from kohakuterrarium.core.budget import BudgetSet, IterationBudget
+from kohakuterrarium.core.budget import IterationBudget
 from kohakuterrarium.core.compact import CompactConfig, CompactManager
 from kohakuterrarium.core.config import AgentConfig, load_agent_config
 from kohakuterrarium.core.controller_plugins import register_plugin_and_package_commands
@@ -168,7 +167,6 @@ class Agent(
 
         self.compact_manager: Any = None
         self.plugins: Any = None  # PluginManager | None
-        self.budgets: BudgetSet | None = build_budget_set_from_config(config)
         attach_session_helpers(self)
 
         init_branch_state(self)
@@ -224,8 +222,6 @@ class Agent(
         self.iteration_budget = IterationBudget(remaining=int(cap), total=int(cap))
         if hasattr(self, "subagent_manager") and self.subagent_manager is not None:
             self.subagent_manager.iteration_budget = self.iteration_budget
-            if self.budgets is None:
-                self.subagent_manager.budgets = self.iteration_budget.budgets
         logger.info(
             "Iteration budget configured",
             agent_name=self.config.name,

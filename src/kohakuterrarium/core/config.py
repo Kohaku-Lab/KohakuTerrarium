@@ -263,21 +263,6 @@ def _parse_subagent_config(data: dict[str, Any] | str) -> SubAgentConfigItem:
     )
 
 
-def _parse_budget_tuple(value: Any, cast: Any) -> tuple[Any, Any] | None:
-    """Parse ``[soft, hard]`` / ``(soft, hard)`` budget config values."""
-    if value is None:
-        return None
-    if isinstance(value, dict):
-        hard = value.get("hard", value.get("limit"))
-        soft = value.get("soft", 0)
-        if hard is None:
-            return None
-        return (cast(soft), cast(hard))
-    if isinstance(value, (list, tuple)) and len(value) >= 2:
-        return (cast(value[0]), cast(value[1]))
-    return None
-
-
 def load_agent_config(agent_path: str | Path) -> AgentConfig:
     """
     Load agent configuration from folder.
@@ -414,9 +399,6 @@ def _construct_agent_config(
         max_subagent_depth=config_data.get("max_subagent_depth", 3),
         max_iterations=config_data.get("max_iterations"),
         default_plugins=list(config_data.get("default_plugins") or []),
-        turn_budget=_parse_budget_tuple(config_data.get("turn_budget"), int),
-        walltime_budget=_parse_budget_tuple(config_data.get("walltime_budget"), float),
-        tool_call_budget=_parse_budget_tuple(config_data.get("tool_call_budget"), int),
         agent_path=agent_path,
         session_key=config_data.get("session_key"),
         mcp_servers=list(config_data.get("mcp_servers") or []),

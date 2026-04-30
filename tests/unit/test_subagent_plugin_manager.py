@@ -5,7 +5,6 @@ from typing import Any
 
 import pytest
 
-from kohakuterrarium.core.budget import BudgetAxis, BudgetSet
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
@@ -89,7 +88,6 @@ async def _build_subagent(plugin: _RecordingPlugin) -> SubAgent:
             name="sub",
             tools=["echo"],
             system_prompt="You are a sub-agent.",
-            turn_budget=(1, 3),
         ),
         parent_registry=registry,
         llm=ScriptedLLM(
@@ -100,20 +98,18 @@ async def _build_subagent(plugin: _RecordingPlugin) -> SubAgent:
         ),
         agent_path=Path("."),
         plugin_manager=manager,
-        budgets=BudgetSet(turn=BudgetAxis(name="turn", soft=1, hard=3)),
     )
     await load_and_wrap_plugins(manager, subagent, subagent.llm, Path("."))
     return subagent
 
 
 @pytest.mark.asyncio
-async def test_subagent_plugins_load_with_context_and_budget_accessor():
+async def test_subagent_plugins_load_with_context():
     plugin = _RecordingPlugin()
     subagent = await _build_subagent(plugin)
 
     assert plugin.context is not None
     assert plugin.context.host_agent is subagent
-    assert plugin.context.budgets is subagent.budgets
 
 
 @pytest.mark.asyncio

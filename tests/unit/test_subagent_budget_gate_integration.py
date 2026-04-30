@@ -4,9 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from kohakuterrarium.builtins.plugins.budget.gate import BudgetGatePlugin
+from kohakuterrarium.builtins.plugins.budget import BudgetPlugin
 from kohakuterrarium.core.agent_pre_dispatch import run_pre_subagent_dispatch
-from kohakuterrarium.core.budget import BudgetAxis, BudgetSet
 from kohakuterrarium.modules.plugin.base import PluginContext
 from kohakuterrarium.modules.plugin.manager import PluginManager
 from kohakuterrarium.parsing import SubAgentCallEvent
@@ -22,15 +21,14 @@ class _FakeController:
 
 @pytest.mark.asyncio
 async def test_parent_budget_gate_blocks_subagent_dispatch_as_feedback_event():
-    budgets = BudgetSet(turn=BudgetAxis(name="turn", soft=1, hard=2))
-    budgets.tick(turns=2)
+    plugin = BudgetPlugin(options={"turn_budget": [1, 2]})
+    plugin.budgets.tick(turns=2)
     manager = PluginManager()
-    manager.register(BudgetGatePlugin())
+    manager.register(plugin)
     agent = SimpleNamespace(
         config=SimpleNamespace(name="parent"),
         executor=SimpleNamespace(_working_dir="."),
         llm=SimpleNamespace(model="scripted"),
-        budgets=budgets,
         plugins=manager,
     )
     await manager.load_all(
