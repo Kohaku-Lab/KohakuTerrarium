@@ -6,6 +6,7 @@ via OAuth PKCE (browser or device code flow). Billing goes to the user's
 ChatGPT Plus/Pro subscription, not API credits.
 """
 
+import asyncio
 import hashlib
 import json as _json
 from typing import Any, AsyncIterator
@@ -44,7 +45,13 @@ from kohakuterrarium.llm.codex_rate_limits import (
     set_cached,
 )
 from kohakuterrarium.llm.openai_sanitize import strip_surrogates
-from kohakuterrarium.llm.recovery import RetryPolicy
+from kohakuterrarium.llm.recovery import (
+    ErrorClass,
+    RetryPolicy,
+    backoff_delay,
+    classify_openai_error,
+    drop_last_tool_round,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -235,7 +242,68 @@ class CodexOAuthProvider(BaseLLMProvider):
         provider_native_tools: list[Any] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
-        """Stream response from Codex backend using AsyncOpenAI SDK."""
+        """Stream response from Codex backend with KT-side retry.
+
+        Mirrors the OpenAI / Anthropic provider retry pattern so a
+        transient mid-stream failure (httpx ``RemoteProtocolError``,
+        connection reset, 5xx, 429) is retried per the configured
+        ``RetryPolicy`` instead of bubbling up to the agent loop.
+        Only explicit user-error classes (4xx / unknown-status that
+        the classifier rules out) escape without retry.
+        """
+        current = messages
+        attempt = 0
+        overflow_recovered = False
+        while True:
+            try:
+                async for chunk in self._raw_stream_chat(
+                    current,
+                    tools=tools,
+                    provider_native_tools=provider_native_tools,
+                    **kwargs,
+                ):
+                    yield chunk
+                return
+            except Exception as exc:
+                cls = classify_openai_error(exc)
+                if cls is ErrorClass.OVERFLOW and not overflow_recovered:
+                    dropped, recovered = drop_last_tool_round(current)
+                    if dropped:
+                        overflow_recovered = True
+                        current = recovered
+                        self._notify_emergency_drop(recovered)
+                        logger.warning(
+                            "provider_emergency_drop",
+                            dropped=dropped,
+                            recovered_messages=len(recovered),
+                        )
+                        continue
+                if (
+                    cls in self._retry_policy.retry_classes
+                    and attempt < self._retry_policy.max_retries
+                ):
+                    attempt += 1
+                    delay = backoff_delay(attempt, self._retry_policy)
+                    logger.warning(
+                        "provider_retry",
+                        attempt=attempt,
+                        error_class=cls.value,
+                        delay=delay,
+                        error=str(exc),
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                raise
+
+    async def _raw_stream_chat(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[ToolSchema] | None = None,
+        provider_native_tools: list[Any] | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[str]:
+        """Single-shot stream attempt — wrapped by ``_stream_chat`` for retries."""
         self._last_tool_calls = []
         self._last_usage = {}
         self._last_assistant_parts = []
