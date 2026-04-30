@@ -41,4 +41,4 @@ def inject_skill_path_hint(agent: "Agent") -> None:
     hint = scanner.format_hint(matched)
     if not hint:
         return
-    controller._pending_injections.append({"role": "system", "content": hint})
+    controller._pending_injections.append({"role": "user", "content": hint})

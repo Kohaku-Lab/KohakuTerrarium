@@ -3,6 +3,10 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
+from kohakuterrarium.core.controller import Controller, ControllerConfig
+from kohakuterrarium.core.events import create_user_input_event
 from kohakuterrarium.skills import Skill, SkillPathScanner, SkillRegistry
 from kohakuterrarium.skills.hints import inject_skill_path_hint
 
@@ -44,7 +48,7 @@ def test_inject_noop_when_no_file_matches(tmp_path):
     assert agent.controller._pending_injections == []
 
 
-def test_inject_adds_system_message_on_match(tmp_path):
+def test_inject_adds_user_context_message_on_match(tmp_path):
     (tmp_path / "report.pdf").write_text("x", encoding="utf-8")
     reg = SkillRegistry()
     reg.add(_skill("pdf-merge", paths=["*.pdf"]))
@@ -52,7 +56,7 @@ def test_inject_adds_system_message_on_match(tmp_path):
     inject_skill_path_hint(agent)
     assert len(agent.controller._pending_injections) == 1
     msg = agent.controller._pending_injections[0]
-    assert msg["role"] == "system"
+    assert msg["role"] == "user"
     assert "pdf-merge" in msg["content"]
 
 
@@ -88,3 +92,53 @@ def test_inject_safe_when_registry_missing(tmp_path):
     )
     inject_skill_path_hint(agent)  # must not raise
     assert agent.controller._pending_injections == []
+
+
+class CaptureLLM:
+    model = "capture-test"
+
+    def __init__(self):
+        self.calls = []
+
+    @property
+    def last_usage(self):
+        return {}
+
+    @property
+    def last_assistant_content_parts(self):
+        return None
+
+    async def chat(self, messages, **kwargs):
+        self.calls.append(list(messages))
+        yield "ok"
+
+
+@pytest.mark.asyncio
+async def test_path_hint_keeps_single_system_message_in_llm_payload(tmp_path):
+    (tmp_path / "report.pdf").write_text("x", encoding="utf-8")
+    reg = SkillRegistry()
+    reg.add(_skill("pdf-merge", body="Merge PDFs safely.", paths=["*.pdf"]))
+    llm = CaptureLLM()
+    controller = Controller(
+        llm,
+        ControllerConfig(
+            system_prompt="sys",
+            include_job_status=False,
+            include_tools_list=False,
+        ),
+    )
+    agent = SimpleNamespace(
+        skills=reg,
+        skill_path_scanner=SkillPathScanner(),
+        controller=controller,
+        executor=SimpleNamespace(_working_dir=str(tmp_path)),
+    )
+
+    inject_skill_path_hint(agent)
+    await controller.push_event(create_user_input_event("merge these pdfs"))
+    _ = [event async for event in controller.run_once()]
+
+    roles = [message["role"] for message in llm.calls[0]]
+    assert roles == ["system", "user", "user"]
+    assert roles.count("system") == 1
+    assert "Skill Context" in llm.calls[0][1]["content"]
