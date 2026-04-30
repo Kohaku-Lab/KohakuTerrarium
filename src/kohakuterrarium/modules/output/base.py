@@ -7,6 +7,8 @@ Output modules handle the final delivery of agent output.
 from abc import ABC, abstractmethod
 from typing import Protocol, runtime_checkable
 
+from kohakuterrarium.modules.output.event import OutputEvent
+
 
 @runtime_checkable
 class OutputModule(Protocol):
@@ -106,6 +108,20 @@ class OutputModule(Protocol):
         """
         ...
 
+    async def emit(self, event: OutputEvent) -> None:
+        """Receive a typed output event.
+
+        Bus-level entry point for the unified output system. The default
+        implementation on ``BaseOutputModule`` forwards each event to
+        the legacy imperative methods (``write_stream``,
+        ``on_processing_start``, ``on_activity`` …) so subclasses that
+        haven't been migrated to consume events directly keep working.
+
+        Renderers that want to consume events natively override this
+        method and dispatch on ``event.type`` themselves.
+        """
+        ...
+
 
 class BaseOutputModule(ABC):
     """
@@ -185,3 +201,45 @@ class BaseOutputModule(ABC):
     async def on_resume(self, events: list[dict]) -> None:
         """Called during session resume with historical events. Default is no-op."""
         pass
+
+    async def emit(self, event: OutputEvent) -> None:
+        """Default emit() — forwards typed events to legacy methods.
+
+        Phase A: every legacy method has a corresponding event type.
+        This switch keeps subclasses that don't override emit() working
+        identically to before. Subclasses that want to consume events
+        natively override emit() and bypass this switch entirely.
+        """
+        match event.type:
+            case "text":
+                content = event.content
+                if isinstance(content, str):
+                    await self.write_stream(content)
+            case "processing_start":
+                await self.on_processing_start()
+            case "processing_end":
+                await self.on_processing_end()
+            case "user_input":
+                content = event.content
+                if isinstance(content, str):
+                    await self.on_user_input(content)
+            case "assistant_image":
+                payload = event.payload
+                self.on_assistant_image(
+                    payload["url"],
+                    detail=payload.get("detail", "auto"),
+                    source_type=payload.get("source_type"),
+                    source_name=payload.get("source_name"),
+                    revised_prompt=payload.get("revised_prompt"),
+                )
+            case "resume_batch":
+                await self.on_resume(event.payload.get("events", []))
+            case _:
+                # Activity event. Use metadata-aware hook if present
+                # and the payload has structured data, mirroring the
+                # router's notify_activity dispatch.
+                detail = event.content if isinstance(event.content, str) else ""
+                if event.payload and hasattr(self, "on_activity_with_metadata"):
+                    self.on_activity_with_metadata(event.type, detail, event.payload)
+                else:
+                    self.on_activity(event.type, detail)

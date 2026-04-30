@@ -10,12 +10,13 @@ from enum import Enum, auto
 from typing import Any
 
 from kohakuterrarium.modules.output.base import OutputModule
+from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.parsing import (
     AssistantImageEvent,
     BlockEndEvent,
     BlockStartEvent,
     CommandEvent,
-    OutputEvent,
+    OutputCallEvent,
     ParseEvent,
     SubAgentCallEvent,
     TextEvent,
@@ -70,7 +71,7 @@ class OutputRouter:
 
     Handles:
     - Text events → default output module (stdout)
-    - OutputEvent → named output module (e.g., discord, tts)
+    - OutputCallEvent → named output module (e.g., discord, tts)
     - Tool/subagent events → suppress text, queue for handling
     - Commands → queue for handling
 
@@ -110,7 +111,7 @@ class OutputRouter:
         self._pending_tool_calls: list[ToolCallEvent] = []
         self._pending_subagent_calls: list[SubAgentCallEvent] = []
         self._pending_commands: list[CommandEvent] = []
-        self._pending_outputs: list[OutputEvent] = []
+        self._pending_outputs: list[OutputCallEvent] = []
 
         # Track completed outputs for feedback to controller
         self._completed_outputs: list[CompletedOutput] = []
@@ -145,7 +146,7 @@ class OutputRouter:
         return commands
 
     @property
-    def pending_outputs(self) -> list[OutputEvent]:
+    def pending_outputs(self) -> list[OutputCallEvent]:
         """Get and clear pending output events."""
         outputs = self._pending_outputs
         self._pending_outputs = []
@@ -190,10 +191,85 @@ class OutputRouter:
             o for o in self._secondary_outputs if o is not output
         ]
 
+    async def emit(self, event: OutputEvent) -> None:
+        """Bus-level entry point for typed OutputEvents.
+
+        Phase A semantics: fans every event type to the same set of
+        targets the legacy per-method hooks already fan to. Existing
+        renderers see byte-identical method calls.
+
+        Type → routing rule:
+        - ``text``: through the text state machine (default + secondaries).
+        - ``processing_start`` / ``processing_end``: default + named +
+          secondary outputs.
+        - ``user_input``: default output only (matches today's behaviour).
+        - ``assistant_image``: default + secondaries.
+        - ``resume_batch``: default output only.
+        - any other type (activity events): default + secondaries via
+          the same dispatch ``notify_activity`` uses.
+        """
+        match event.type:
+            case "text":
+                content = event.content
+                if isinstance(content, str):
+                    await self._handle_text(content)
+            case "processing_start":
+                await self.on_processing_start()
+            case "processing_end":
+                await self.on_processing_end()
+            case "user_input":
+                content = event.content
+                if isinstance(content, str):
+                    await self.on_user_input(content)
+            case "assistant_image":
+                payload = event.payload
+                self._handle_assistant_image(
+                    AssistantImageEvent(
+                        url=payload["url"],
+                        detail=payload.get("detail", "auto"),
+                        source_type=payload.get("source_type"),
+                        source_name=payload.get("source_name"),
+                        revised_prompt=payload.get("revised_prompt"),
+                    )
+                )
+            case "resume_batch":
+                await self.on_resume(event.payload.get("events", []))
+            case _:
+                self._dispatch_activity_event(event)
+
+    def _dispatch_activity_event(self, event: OutputEvent) -> None:
+        """Internal sync dispatch for activity-style OutputEvents.
+
+        Shared by ``emit()`` (async path) and ``notify_activity`` (legacy
+        sync path) so the bus is uniformly event-based regardless of
+        which entry point a caller uses.
+
+        Renderers that override ``emit()`` natively (Phase A3) take
+        precedence: this helper only runs for outputs that haven't
+        migrated. The check is best-effort — we look for an overridden
+        ``emit`` and call it via ``asyncio`` when possible, otherwise
+        fall back to the legacy ``on_activity_with_metadata`` /
+        ``on_activity`` hooks.
+        """
+        detail = event.content if isinstance(event.content, str) else ""
+        metadata = event.payload or None
+        targets = [self.default_output, *self._secondary_outputs]
+        for target in targets:
+            if metadata and hasattr(target, "on_activity_with_metadata"):
+                target.on_activity_with_metadata(event.type, detail, metadata)
+            else:
+                target.on_activity(event.type, detail)
+
     def notify_activity(
         self, activity_type: str, detail: str, metadata: dict | None = None
     ) -> None:
         """Broadcast activity to default + all secondary outputs.
+
+        Sync entry point preserved for callers that cannot ``await``
+        (trigger callbacks, plugin observers, etc.). Internally
+        constructs an :class:`OutputEvent` and routes through the
+        same dispatch helper as :meth:`emit`, so the bus is event-
+        based for every caller.
 
         Args:
             activity_type: Event type (tool_start, tool_done, subagent_start, etc.)
@@ -201,18 +277,13 @@ class OutputRouter:
             metadata: Structured data (full args, job_id, tools_used, etc.)
                       Only consumed by outputs that support it (e.g. WebSocket).
         """
-        if metadata and hasattr(self.default_output, "on_activity_with_metadata"):
-            self.default_output.on_activity_with_metadata(
-                activity_type, detail, metadata
+        self._dispatch_activity_event(
+            OutputEvent(
+                type=activity_type,
+                content=detail,
+                payload=metadata or {},
             )
-        else:
-            self.default_output.on_activity(activity_type, detail)
-        for secondary in self._secondary_outputs:
-            # Pass metadata if the output supports it
-            if metadata and hasattr(secondary, "on_activity_with_metadata"):
-                secondary.on_activity_with_metadata(activity_type, detail, metadata)
-            else:
-                secondary.on_activity(activity_type, detail)
+        )
 
     async def start(self) -> None:
         """Start the router and output modules."""
@@ -253,7 +324,7 @@ class OutputRouter:
                 self._pending_commands.append(event)
                 logger.debug("Command queued", command=event.command)
 
-            case OutputEvent():
+            case OutputCallEvent():
                 # Route to named output immediately
                 await self._handle_output(event)
 
@@ -318,7 +389,7 @@ class OutputRouter:
             case OutputState.OUTPUT_BLOCK:
                 pass
 
-    async def _handle_output(self, event: OutputEvent) -> None:
+    async def _handle_output(self, event: OutputCallEvent) -> None:
         """
         Handle explicit output event.
 

@@ -23,7 +23,7 @@ from kohakuterrarium.parsing.events import (
     BlockEndEvent,
     BlockStartEvent,
     CommandEvent,
-    OutputEvent,
+    OutputCallEvent,
     ParseEvent,
     SubAgentCallEvent,
     TextEvent,
@@ -494,7 +494,7 @@ class StreamParser:
         is_output, output_target = is_output_tag(name, self.config.known_outputs)
         if is_output:
             # Output block - explicit output to named target
-            events.append(OutputEvent(target=output_target, content=body, raw=raw))
+            events.append(OutputCallEvent(target=output_target, content=body, raw=raw))
             logger.debug("Parsed output block", target=output_target)
 
         elif is_tool_tag(name, self.config.known_tools):

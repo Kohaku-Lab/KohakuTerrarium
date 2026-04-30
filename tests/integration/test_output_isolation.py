@@ -4,7 +4,7 @@ from kohakuterrarium.modules.output.router import OutputRouter, OutputState
 from kohakuterrarium.parsing import (
     BlockEndEvent,
     BlockStartEvent,
-    OutputEvent,
+    OutputCallEvent,
     TextEvent,
 )
 from kohakuterrarium.testing import OutputRecorder
@@ -58,7 +58,7 @@ class TestOutputRouterState:
         assert recorder.stream_text == "before after"
 
     async def test_named_output_routes_to_correct_module(self):
-        """OutputEvent goes to correct named module."""
+        """OutputCallEvent goes to correct named module."""
         default_rec = OutputRecorder()
         discord_rec = OutputRecorder()
 
@@ -67,7 +67,7 @@ class TestOutputRouterState:
             named_outputs={"discord": discord_rec},
         )
 
-        await router.route(OutputEvent(target="discord", content="Hello Discord!"))
+        await router.route(OutputCallEvent(target="discord", content="Hello Discord!"))
 
         # Discord module got the message
         assert "Hello Discord!" in discord_rec.all_text
@@ -79,7 +79,7 @@ class TestOutputRouterState:
         recorder = OutputRecorder()
         router = OutputRouter(default_output=recorder)
 
-        await router.route(OutputEvent(target="nonexistent", content="fallback"))
+        await router.route(OutputCallEvent(target="nonexistent", content="fallback"))
 
         assert "fallback" in recorder.all_text
 
@@ -93,7 +93,7 @@ class TestOutputRouterState:
             named_outputs={"api": target_rec},
         )
 
-        await router.route(OutputEvent(target="api", content="result"))
+        await router.route(OutputCallEvent(target="api", content="result"))
 
         outputs = router.completed_outputs
         assert len(outputs) == 1
@@ -136,7 +136,7 @@ class TestOutputRouterLifecycle:
             named_outputs={"api": target_rec},
         )
 
-        await router.route(OutputEvent(target="api", content="tracked"))
+        await router.route(OutputCallEvent(target="api", content="tracked"))
         assert len(router.completed_outputs) == 1
 
         router.reset()

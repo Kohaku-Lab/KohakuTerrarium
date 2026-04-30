@@ -1,8 +1,10 @@
 """Output recording module for test assertions."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from kohakuterrarium.modules.output.base import BaseOutputModule
+from kohakuterrarium.modules.output.event import OutputEvent
 
 
 @dataclass
@@ -11,6 +13,15 @@ class ActivityRecord:
 
     activity_type: str
     detail: str
+
+
+@dataclass
+class EventRecord:
+    """Record of an OutputEvent emit() call."""
+
+    type: str
+    content: str | Any = ""
+    payload: dict = field(default_factory=dict)
 
 
 class OutputRecorder(BaseOutputModule):
@@ -36,6 +47,7 @@ class OutputRecorder(BaseOutputModule):
         self.writes: list[str] = []
         self.streams: list[str] = []
         self.activities: list[ActivityRecord] = []
+        self.events: list[EventRecord] = []
         self.processing_starts: int = 0
         self.processing_ends: int = 0
         self._flushed: int = 0
@@ -60,17 +72,31 @@ class OutputRecorder(BaseOutputModule):
             ActivityRecord(activity_type=activity_type, detail=detail)
         )
 
+    async def emit(self, event: OutputEvent) -> None:
+        """Record the typed event AND forward to legacy hooks.
+
+        Tests that assert on ``recorder.activities`` / ``recorder.streams``
+        keep working because we still drive the legacy methods. Tests
+        that want to assert on typed events use ``recorder.events``.
+        """
+        detail = event.content if isinstance(event.content, str) else ""
+        self.events.append(
+            EventRecord(type=event.type, content=detail, payload=dict(event.payload))
+        )
+        await super().emit(event)
+
     def reset(self) -> None:
         """Reset all recorded state. Called between turns by OutputRouter."""
         self.writes.clear()
         self.streams.clear()
-        # Note: activities NOT cleared on reset (accumulated across turns)
+        # Note: activities and events NOT cleared on reset (accumulate across turns)
         self._flushed = 0
 
     def clear_all(self) -> None:
-        """Clear everything including activities."""
+        """Clear everything including activities and events."""
         self.reset()
         self.activities.clear()
+        self.events.clear()
         self.processing_starts = 0
         self.processing_ends = 0
 

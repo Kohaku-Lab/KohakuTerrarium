@@ -86,7 +86,7 @@ class CommandEvent:
 
 
 @dataclass
-class OutputEvent:
+class OutputCallEvent:
     """
     Explicit output block detected in LLM output.
 
@@ -104,7 +104,10 @@ class OutputEvent:
     raw: str = ""
 
     def __repr__(self) -> str:
-        return f"OutputEvent(target={self.target!r}, content={self.content[:50]!r}...)"
+        return (
+            f"OutputCallEvent(target={self.target!r}, "
+            f"content={self.content[:50]!r}...)"
+        )
 
 
 @dataclass
@@ -184,7 +187,7 @@ ParseEvent = (
     | SubAgentCallEvent
     | CommandEvent
     | CommandResultEvent
-    | OutputEvent
+    | OutputCallEvent
     | BlockStartEvent
     | BlockEndEvent
     | AssistantImageEvent
