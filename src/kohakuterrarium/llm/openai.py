@@ -403,9 +403,12 @@ class OpenAIProvider(BaseLLMProvider):
                         reasoning_extra.get("reasoning", "") + r_piece
                     )
 
-            # Yield text content
+            # Yield text content (sanitize surrogates from LLM output)
             if delta.content:
-                yield delta.content
+                # Remove surrogate characters that some APIs emit
+                # which cause UnicodeEncodeError when encoded to UTF-8
+                clean = delta.content.encode('utf-8', errors='ignore').decode('utf-8')
+                yield clean
 
         # Finalize tool calls
         if pending_calls:
