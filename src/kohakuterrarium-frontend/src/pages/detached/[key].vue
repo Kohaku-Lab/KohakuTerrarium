@@ -76,7 +76,7 @@ const panelProps = computed(() => ({
   creatures: { instance: instance.value },
   files: { root: instance.value?.pwd || "", onSelect: () => {} },
   settings: { instance: instance.value },
-  "tool-options": { instance: instance.value },
+  modules: { instance: instance.value },
   debug: { instance: instance.value },
   "editor-status": { instance: instance.value },
 }))

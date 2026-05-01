@@ -19,7 +19,7 @@ import ActivityPanel from "@/components/panels/ActivityPanel.vue"
 import SettingsPanel from "@/components/panels/SettingsPanel.vue"
 import StatePanel from "@/components/panels/StatePanel.vue"
 import TerminalPanel from "@/components/panels/TerminalPanel.vue"
-import ToolOptionsPanel from "@/components/panels/ToolOptionsPanel.vue"
+import ModulesPanel from "@/components/panels/modules/ModulesPanel.vue"
 import StatusDashboard from "@/components/status/StatusDashboard.vue"
 import StatusDashboardTab from "@/components/status/StatusDashboardTab.vue"
 
@@ -52,12 +52,15 @@ function vsplit(ratio, top, bottom) {
 // ─── Presets ─────────────────────────────────────────────────────
 
 /** Chat focus — default for single-creature instances.
- *  chat | status-dashboard(large, top) + state(small, bottom) */
+ *  chat | status-dashboard(top) + modules(bottom). Modules replaces
+ *  the legacy ``state`` slot — runtime config is the more useful
+ *  default than scratchpad inspection. ``state`` panel is still
+ *  registered and reachable via the panel picker. */
 const CHAT_FOCUS_PRESET = {
   id: "chat-focus",
   label: "Chat Focus",
   shortcut: "Ctrl+1",
-  tree: hsplit(70, leaf("chat"), vsplit(65, leaf("status-dashboard"), leaf("state"))),
+  tree: hsplit(70, leaf("chat"), vsplit(65, leaf("status-dashboard"), leaf("modules"))),
 }
 
 /** Workspace — files + editor + chat for code-work creatures. */
@@ -96,12 +99,15 @@ const MULTI_CREATURE_PRESET = {
   ),
 }
 
-/** Canvas — chat on left, canvas + tool options on right. */
+/** Canvas — chat on left, canvas + modules on right. ``modules`` here
+ *  takes the slot the legacy ``tool-options`` panel used to occupy
+ *  (provider-native tool options) — the unified module surface
+ *  subsumes that. */
 const CANVAS_PRESET = {
   id: "canvas",
   label: "Canvas",
   shortcut: "Ctrl+4",
-  tree: hsplit(45, leaf("chat"), vsplit(70, leaf("canvas"), leaf("tool-options"))),
+  tree: hsplit(45, leaf("chat"), vsplit(70, leaf("canvas"), leaf("modules"))),
 }
 
 /** Debug — chat + state + debug drawer. */
@@ -200,9 +206,9 @@ export function registerBuiltinPanels() {
     component: TerminalPanel,
   })
   layout.registerPanel({
-    id: "tool-options",
-    label: "Tool Options",
-    component: ToolOptionsPanel,
+    id: "modules",
+    label: "Modules",
+    component: ModulesPanel,
   })
 
   // ── Presets ──

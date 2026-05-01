@@ -65,8 +65,8 @@ const currentInstance = computed(() => {
 const filtered = computed(() => {
   const q = query.value.trim().toLowerCase()
   const all = layout.panelList.filter(
-    // Hide non-user-facing chrome / deprecated panels from the picker.
-    (p) => p.id !== "status-bar" && !(currentInstance.value?.type === "terrarium" && p.id === "tool-options"),
+    // Hide non-user-facing chrome panels from the picker.
+    (p) => p.id !== "status-bar",
   )
   if (!q) return all
   return all.filter((p) => {

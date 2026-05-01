@@ -8,11 +8,18 @@
     </div>
 
     <div class="flex-1 min-w-0 flex flex-col overflow-hidden">
-      <div class="flex items-center gap-2 px-3 py-2 border-b border-warm-200 dark:border-warm-700 shrink-0">
+      <div v-if="activeTab !== 'modules'" class="flex items-center gap-2 px-3 py-2 border-b border-warm-200 dark:border-warm-700 shrink-0">
         <span class="text-xs font-medium text-warm-500 dark:text-warm-400 flex-1">{{ activeLabel }}</span>
       </div>
 
-      <div class="flex-1 overflow-y-auto px-3 py-2 text-xs">
+      <!-- The "Modules" inner tab embeds the full ModulesPanel so
+           the workspace preset (which uses status-tab) gets module
+           access without adding a fourth screen panel. ModulesPanel
+           manages its own header (type tabs, search, refresh) so we
+           skip the wrapper header in this case. -->
+      <ModulesPanel v-if="activeTab === 'modules'" :instance="instance" class="flex-1 min-h-0" />
+
+      <div v-else class="flex-1 overflow-y-auto px-3 py-2 text-xs">
         <template v-if="activeTab === 'session'">
           <div class="flex flex-col gap-1.5">
             <div class="flex items-center gap-2">
@@ -87,6 +94,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from "vue"
 
+import ModulesPanel from "@/components/panels/modules/ModulesPanel.vue"
 import { useChatStore } from "@/stores/chat"
 import { useI18n } from "@/utils/i18n"
 import { agentAPI, configAPI, terrariumAPI } from "@/utils/api"
@@ -103,6 +111,7 @@ const allTabs = computed(() => [
   { id: "session", label: t("common.session"), icon: "i-carbon-information" },
   { id: "tokens", label: t("status.tokenUsage"), icon: "i-carbon-meter" },
   { id: "jobs", label: t("status.runningJobs"), icon: "i-carbon-play-outline" },
+  { id: "modules", label: "Modules", icon: "i-carbon-3d-mpr-toggle" },
 ])
 const activeTab = ref("session")
 

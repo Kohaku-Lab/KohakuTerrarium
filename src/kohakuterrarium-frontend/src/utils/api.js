@@ -335,6 +335,51 @@ export const agentAPI = {
   },
 }
 
+/**
+ * Per-creature configurable modules — unified runtime config surface
+ * across plugins, provider-native tools, and any future module type.
+ *
+ * Backend: /api/sessions/{sid}/creatures/{cid}/modules{/{type}/{name}/...}
+ *
+ * For standalone agents, ``sid="_"`` and ``creatureId`` is the agent id.
+ * For terrarium-attached creatures, ``sid`` is the terrarium id and
+ * ``creatureId`` is the per-target id.
+ */
+export const moduleAPI = {
+  /** List every configurable module (any type) on this creature. */
+  async list(sessionId, creatureId) {
+    const { data } = await api.get(
+      `/sessions/${encodeTarget(sessionId)}/creatures/${encodeTarget(creatureId)}/modules`,
+    )
+    return data?.modules || []
+  },
+
+  /** Read schema + current values for one module. */
+  async getOptions(sessionId, creatureId, moduleType, name) {
+    const { data } = await api.get(
+      `/sessions/${encodeTarget(sessionId)}/creatures/${encodeTarget(creatureId)}/modules/${encodeURIComponent(moduleType)}/${encodeURIComponent(name)}/options`,
+    )
+    return data
+  },
+
+  /** Apply runtime option overrides to one module. */
+  async setOptions(sessionId, creatureId, moduleType, name, values) {
+    const { data } = await api.put(
+      `/sessions/${encodeTarget(sessionId)}/creatures/${encodeTarget(creatureId)}/modules/${encodeURIComponent(moduleType)}/${encodeURIComponent(name)}/options`,
+      { values: values || {} },
+    )
+    return data
+  },
+
+  /** Toggle a module's enabled state (only supported for some types — plugin today). */
+  async toggle(sessionId, creatureId, moduleType, name) {
+    const { data } = await api.post(
+      `/sessions/${encodeTarget(sessionId)}/creatures/${encodeTarget(creatureId)}/modules/${encodeURIComponent(moduleType)}/${encodeURIComponent(name)}/toggle`,
+    )
+    return data
+  },
+}
+
 /** File operations */
 export const filesAPI = {
   async browseDirectories(path = null) {

@@ -58,6 +58,9 @@ from kohakuterrarium.api.routes.sessions_v2 import (
     creatures_model as sessions_creatures_model,
 )
 from kohakuterrarium.api.routes.sessions_v2 import (
+    creatures_modules as sessions_creatures_modules,
+)
+from kohakuterrarium.api.routes.sessions_v2 import (
     creatures_plugins as sessions_creatures_plugins,
 )
 from kohakuterrarium.api.routes.sessions_v2 import (
@@ -310,6 +313,9 @@ def _mount_phase0_stubs(app: FastAPI) -> None:
     )
     app.include_router(
         sessions_creatures_plugins.router, prefix="/api/sessions", tags=["sessions"]
+    )
+    app.include_router(
+        sessions_creatures_modules.router, prefix="/api/sessions", tags=["sessions"]
     )
     app.include_router(
         sessions_creatures_model.router, prefix="/api/sessions", tags=["sessions"]

@@ -11,8 +11,7 @@
       <div class="flex-1 min-w-0 overflow-y-auto">
         <ModelTab v-if="activeTab === 'model'" :instance="instance" />
         <WorkspaceTab v-else-if="activeTab === 'workspace'" :instance="instance" />
-        <ToolOptionsPanel v-else-if="activeTab === 'tool-options'" :instance="instance" />
-        <PluginsTab v-else-if="activeTab === 'plugins'" :instance="instance" />
+        <ModulesPanel v-else-if="activeTab === 'modules'" :instance="instance" />
         <ExtensionsTab v-else-if="activeTab === 'extensions'" />
         <TriggersTab v-else-if="activeTab === 'triggers'" :instance="instance" />
         <CostTab v-else-if="activeTab === 'cost'" :instance="instance" />
@@ -25,12 +24,11 @@
 <script setup>
 import { computed, ref } from "vue"
 
-import ToolOptionsPanel from "@/components/panels/ToolOptionsPanel.vue"
+import ModulesPanel from "@/components/panels/modules/ModulesPanel.vue"
 import CostTab from "@/components/panels/settings/CostTab.vue"
 import EnvTab from "@/components/panels/settings/EnvTab.vue"
 import ExtensionsTab from "@/components/panels/settings/ExtensionsTab.vue"
 import ModelTab from "@/components/panels/settings/ModelTab.vue"
-import PluginsTab from "@/components/panels/settings/PluginsTab.vue"
 import TriggersTab from "@/components/panels/settings/TriggersTab.vue"
 import WorkspaceTab from "@/components/panels/settings/WorkspaceTab.vue"
 import { useI18n } from "@/utils/i18n"
@@ -40,14 +38,10 @@ defineProps({ instance: { type: Object, default: null } })
 const open = defineModel({ default: false })
 const { t } = useI18n()
 
-// The "auto-open" tab was a Phase-10 placeholder; removed in favour of
-// surfacing native-tool options for the active session right next to
-// the model picker.
 const tabs = computed(() => [
   { id: "model", label: t("instanceSettings.model"), icon: "i-carbon-chip" },
   { id: "workspace", label: "Workspace", icon: "i-carbon-folder" },
-  { id: "tool-options", label: "Tool options", icon: "i-carbon-settings-adjust" },
-  { id: "plugins", label: t("instanceSettings.plugins"), icon: "i-carbon-plug" },
+  { id: "modules", label: "Modules", icon: "i-carbon-3d-mpr-toggle" },
   { id: "extensions", label: t("instanceSettings.extensions"), icon: "i-carbon-cube" },
   { id: "triggers", label: t("instanceSettings.triggers"), icon: "i-carbon-event" },
   { id: "cost", label: t("instanceSettings.cost"), icon: "i-carbon-currency-dollar" },

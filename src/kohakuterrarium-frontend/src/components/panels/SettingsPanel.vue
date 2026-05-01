@@ -19,8 +19,7 @@
       <div class="flex-1 overflow-y-auto">
         <ModelTab v-if="activeTab === 'model'" :instance="instance" />
         <WorkspaceTab v-else-if="activeTab === 'workspace'" :instance="instance" />
-        <ToolOptionsPanel v-else-if="activeTab === 'tool-options'" :instance="instance" />
-        <PluginsTab v-else-if="activeTab === 'plugins'" :instance="instance" />
+        <ModulesPanel v-else-if="activeTab === 'modules'" :instance="instance" />
         <ExtensionsTab v-else-if="activeTab === 'extensions'" />
         <TriggersTab v-else-if="activeTab === 'triggers'" :instance="instance" />
         <CostTab v-else-if="activeTab === 'cost'" :instance="instance" />
@@ -33,12 +32,11 @@
 <script setup>
 import { computed, ref } from "vue"
 
-import ToolOptionsPanel from "./ToolOptionsPanel.vue"
+import ModulesPanel from "./modules/ModulesPanel.vue"
 import CostTab from "./settings/CostTab.vue"
 import EnvTab from "./settings/EnvTab.vue"
 import ExtensionsTab from "./settings/ExtensionsTab.vue"
 import ModelTab from "./settings/ModelTab.vue"
-import PluginsTab from "./settings/PluginsTab.vue"
 import TriggersTab from "./settings/TriggersTab.vue"
 import WorkspaceTab from "./settings/WorkspaceTab.vue"
 
@@ -49,8 +47,7 @@ defineProps({
 const tabs = [
   { id: "model", label: "Model", icon: "i-carbon-chip" },
   { id: "workspace", label: "Workspace", icon: "i-carbon-folder" },
-  { id: "tool-options", label: "Tool options", icon: "i-carbon-settings-adjust" },
-  { id: "plugins", label: "Plugins", icon: "i-carbon-plug" },
+  { id: "modules", label: "Modules", icon: "i-carbon-3d-mpr-toggle" },
   { id: "extensions", label: "Extensions", icon: "i-carbon-cube" },
   { id: "triggers", label: "Triggers", icon: "i-carbon-event" },
   { id: "cost", label: "Cost", icon: "i-carbon-currency-dollar" },

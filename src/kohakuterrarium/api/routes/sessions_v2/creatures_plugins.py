@@ -1,4 +1,10 @@
-"""Per-creature plugin routes — list + toggle."""
+"""Per-creature plugin routes — list + toggle.
+
+Plugin **option** mutation lives in the unified module system —
+see :mod:`creatures_modules` (``/modules/plugin/{name}/options``).
+This file keeps only the plugin-list / toggle routes that pre-date
+the module unification.
+"""
 
 from fastapi import APIRouter, Depends, HTTPException
 
