@@ -37,6 +37,36 @@ class BudgetPlugin(BasePlugin):
     # downstream side effects.
     priority = 5
 
+    @classmethod
+    def option_schema(cls) -> dict[str, dict[str, Any]]:
+        return {
+            "turn_budget": {
+                "type": "dict",
+                "default": None,
+                "doc": (
+                    "Turn budget as ``{soft: N, hard: M}`` (hard > 0 to "
+                    "enable). YAML may also use the list shape "
+                    "``[soft, hard]``; the UI uses the object form."
+                ),
+            },
+            "walltime_budget": {
+                "type": "dict",
+                "default": None,
+                "doc": (
+                    "Wall-clock budget in seconds — ``{soft, hard}`` or "
+                    "null to disable."
+                ),
+            },
+            "tool_call_budget": {
+                "type": "dict",
+                "default": None,
+                "doc": (
+                    "Cumulative tool-call budget — ``{soft, hard}`` or "
+                    "null to disable."
+                ),
+            },
+        }
+
     def __init__(
         self,
         *,
@@ -56,9 +86,20 @@ class BudgetPlugin(BasePlugin):
             opts["walltime_budget"] = walltime_budget
         if tool_call_budget is not None and "tool_call_budget" not in opts:
             opts["tool_call_budget"] = tool_call_budget
-        self._budgets = _build_budget_set(opts)
+        self.options = {
+            "turn_budget": opts.get("turn_budget"),
+            "walltime_budget": opts.get("walltime_budget"),
+            "tool_call_budget": opts.get("tool_call_budget"),
+        }
         self._turn_started_at: float | None = None
         self._pending: list[tuple[str, AlarmState]] = []
+        self.refresh_options()
+
+    # ── Options ──
+
+    def refresh_options(self) -> None:
+        """Rebuild :attr:`_budgets` from :attr:`options`."""
+        self._budgets = _build_budget_set(self.options)
 
     # ── Public accessor (other plugins / tests can introspect) ──
 

@@ -19,6 +19,9 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
+from kohakuterrarium.modules.plugin.option_validation import (
+    validate_plugin_options,
+)
 from kohakuterrarium.plugins_context import (
     spawn_child_agent as _default_spawn_child_agent_helper,
 )
@@ -310,6 +313,68 @@ class BasePlugin:
                     pattern=str(pattern),
                     error=str(exc),
                 )
+        # Canonical store for runtime-mutable options. Plugins that
+        # support runtime configuration should override
+        # :meth:`option_schema` and populate this dict in their own
+        # ``__init__``, then call :meth:`refresh_options` to derive
+        # any internal state. Mutation goes through :meth:`set_options`
+        # which validates against the schema.
+        self.options: dict[str, Any] = {}
+
+    # ── Options (runtime-mutable configuration) ──
+
+    @classmethod
+    def option_schema(cls) -> dict[str, dict[str, Any]]:
+        """Return this plugin's option schema for runtime introspection.
+
+        Default returns ``{}`` — plugins with no schema-described
+        options. Plugins that want to be runtime-configurable from a
+        UI override this. See
+        :mod:`kohakuterrarium.modules.plugin.option_validation` for
+        the schema shape.
+        """
+        return {}
+
+    def get_options(self) -> dict[str, Any]:
+        """Return a copy of the current option values."""
+        return dict(self.options)
+
+    def set_options(self, values: dict[str, Any]) -> dict[str, Any]:
+        """Validate, store, and re-apply option overrides.
+
+        Validates ``values`` against :meth:`option_schema`, merges into
+        :attr:`options`, then calls :meth:`refresh_options` so the
+        plugin can re-derive any internal state. Returns the full
+        post-merge options dict.
+
+        Raises :class:`PluginOptionError` (a ``ValueError``) on
+        invalid input — unknown keys, wrong types, out-of-range values.
+        """
+        schema = type(self).option_schema()
+        cleaned = validate_plugin_options(
+            getattr(self, "name", "?"), values or {}, schema or {}
+        )
+        for key, value in cleaned.items():
+            self.options[key] = value
+        try:
+            self.refresh_options()
+        except Exception as e:  # pragma: no cover — defensive
+            logger.warning(
+                "Plugin refresh_options raised after set_options",
+                plugin_name=getattr(self, "name", "?"),
+                error=str(e),
+                exc_info=True,
+            )
+        return self.get_options()
+
+    def refresh_options(self) -> None:
+        """Re-derive internal state from :attr:`options`.
+
+        Called after a successful :meth:`set_options`. Default no-op;
+        plugins with derived state (caches, compiled regexes, etc.)
+        override to re-apply :attr:`options` to their internal fields.
+        """
+        return None
 
     # ── Gating ──
 

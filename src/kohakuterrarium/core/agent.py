@@ -829,6 +829,17 @@ class Agent(
                     error=str(e),
                     exc_info=True,
                 )
+        plugin_options = getattr(self, "plugin_options", None)
+        if plugin_options is not None:
+            try:
+                plugin_options.apply()
+            except Exception as e:
+                logger.debug(
+                    "plugin options apply skipped",
+                    agent=self.config.name,
+                    error=str(e),
+                    exc_info=True,
+                )
         # Wave B: route scratchpad + plugin-hook events to the router.
         wire_scratchpad_observer(self)
         wire_plugin_hook_timing(self)

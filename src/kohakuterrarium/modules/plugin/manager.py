@@ -138,6 +138,66 @@ class PluginManager:
             for p in self._plugins
         ]
 
+    def get_plugin(self, name: str) -> "BasePlugin | None":
+        """Return the registered plugin instance with this name, or None."""
+        for p in self._plugins:
+            if getattr(p, "name", "") == name:
+                return p
+        return None
+
+    def list_plugins_with_options(self) -> list[dict[str, Any]]:
+        """Like :meth:`list_plugins` but include schema + current values.
+
+        Used by the runtime UI to render schema-driven option editors.
+        Plugins without a schema get empty ``schema`` and ``options``.
+        """
+        out: list[dict[str, Any]] = []
+        for p in self._plugins:
+            try:
+                schema = type(p).option_schema()
+            except Exception as e:  # pragma: no cover — defensive
+                logger.warning(
+                    "Plugin option_schema raised; skipping",
+                    plugin_name=getattr(p, "name", "?"),
+                    error=str(e),
+                    exc_info=True,
+                )
+                schema = {}
+            try:
+                values = p.get_options() if hasattr(p, "get_options") else {}
+            except Exception as e:  # pragma: no cover — defensive
+                logger.warning(
+                    "Plugin get_options raised; skipping",
+                    plugin_name=getattr(p, "name", "?"),
+                    error=str(e),
+                    exc_info=True,
+                )
+                values = {}
+            out.append(
+                {
+                    "name": getattr(p, "name", "?"),
+                    "priority": getattr(p, "priority", 50),
+                    "enabled": getattr(p, "name", "") not in self._disabled,
+                    "description": getattr(p, "description", ""),
+                    "schema": schema or {},
+                    "options": values or {},
+                }
+            )
+        return out
+
+    def set_plugin_options(self, name: str, values: dict[str, Any]) -> dict[str, Any]:
+        """Apply option overrides to a registered plugin.
+
+        Returns the plugin's full post-merge options dict.
+        Raises :class:`KeyError` if no such plugin, or
+        :class:`ValueError` (subclass ``PluginOptionError``) on invalid
+        input.
+        """
+        plugin = self.get_plugin(name)
+        if plugin is None:
+            raise KeyError(name)
+        return plugin.set_options(values or {})
+
     def _active_plugins(self) -> list[BasePlugin]:
         if not self._disabled:
             return list(self._plugins)

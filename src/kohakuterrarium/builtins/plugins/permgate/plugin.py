@@ -53,6 +53,44 @@ class PermGatePlugin(BasePlugin):
     )
     priority = 100  # late — runs after argument-rewriting plugins
 
+    @classmethod
+    def option_schema(cls) -> dict[str, dict[str, Any]]:
+        return {
+            "gated_tools": {
+                "type": "list",
+                "item_type": "string",
+                "default": [],
+                "doc": (
+                    "Tool names that require approval. Empty list = gate "
+                    'every tool. Use ``"*"`` to match all tools.'
+                ),
+            },
+            "allowlist": {
+                "type": "list",
+                "item_type": "string",
+                "default": [],
+                "doc": (
+                    "Tools that never require approval, even if listed in "
+                    "gated_tools."
+                ),
+            },
+            "timeout_s": {
+                "type": "float",
+                "default": None,
+                "min": 0,
+                "doc": (
+                    "Seconds to wait for the user. Null = wait forever "
+                    "(default — humans walk away from keyboards)."
+                ),
+            },
+            "surface": {
+                "type": "enum",
+                "values": ["modal", "chat"],
+                "default": "modal",
+                "doc": "Where the prompt appears.",
+            },
+        }
+
     def __init__(
         self,
         gated_tools: list[str] | None = None,
@@ -62,15 +100,29 @@ class PermGatePlugin(BasePlugin):
         **_extra: Any,
     ) -> None:
         super().__init__()
-        self._gated = list(gated_tools or [])
-        self._allowlist = set(allowlist or [])
-        self._timeout_s = float(timeout_s) if timeout_s is not None else None
-        self._surface = surface if surface in ("modal", "chat") else "modal"
+        self.options = {
+            "gated_tools": list(gated_tools or []),
+            "allowlist": list(allowlist or []),
+            "timeout_s": float(timeout_s) if timeout_s is not None else None,
+            "surface": surface if surface in ("modal", "chat") else "modal",
+        }
+        self.refresh_options()
         # Cache of tools the user has approved "always" in this
         # session. The default flow ships only "allow once" / "deny",
         # but extending to remember choices is a one-liner change.
         self._session_approvals: set[str] = set()
         self._context: PluginContext | None = None
+
+    # ── Options ──
+
+    def refresh_options(self) -> None:
+        """Re-derive cached fields from :attr:`options`."""
+        self._gated = list(self.options.get("gated_tools") or [])
+        self._allowlist = set(self.options.get("allowlist") or [])
+        ts = self.options.get("timeout_s")
+        self._timeout_s = float(ts) if ts is not None else None
+        surface = self.options.get("surface", "modal")
+        self._surface = surface if surface in ("modal", "chat") else "modal"
 
     # ── Lifecycle ──
 

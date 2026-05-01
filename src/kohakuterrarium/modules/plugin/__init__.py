@@ -6,10 +6,16 @@ from kohakuterrarium.modules.plugin.base import (
     PluginContext,
 )
 from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.option_validation import (
+    PluginOptionError,
+    validate_plugin_options,
+)
 
 __all__ = [
     "BasePlugin",
     "PluginBlockError",
     "PluginContext",
     "PluginManager",
+    "PluginOptionError",
+    "validate_plugin_options",
 ]
