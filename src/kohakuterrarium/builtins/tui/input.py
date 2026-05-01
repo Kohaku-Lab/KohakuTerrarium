@@ -1,6 +1,7 @@
 """TUI input module - reads input from Textual app."""
 
 import asyncio
+import shlex
 from typing import Any
 
 from kohakuterrarium.builtins.tui.session import TUISession
@@ -8,7 +9,10 @@ from kohakuterrarium.builtins.tui.widgets import ChatInput
 from kohakuterrarium.core.events import TriggerEvent, create_user_input_event
 from kohakuterrarium.core.session import get_session
 from kohakuterrarium.modules.input.base import BaseInputModule
-from kohakuterrarium.modules.user_command.base import UserCommandResult
+from kohakuterrarium.modules.user_command.base import (
+    UserCommandResult,
+    parse_slash_command,
+)
 from kohakuterrarium.utils.logging import get_logger, restore_logging, suppress_logging
 
 logger = get_logger(__name__)
@@ -51,6 +55,83 @@ class TUIInput(BaseInputModule):
         for cmd in commands.values():
             all_names.extend(getattr(cmd, "aliases", []))
         self._command_hint_names = sorted(set(all_names))
+        # Expose the live agent on the TUI session so screens that
+        # bypass the slash-command pipeline (e.g. the F2 Modules
+        # modal) can talk to it directly.
+        host_agent = getattr(context, "agent", None) if context else None
+        if self._tui is not None and host_agent is not None:
+            self._tui.host_agent = host_agent
+
+    async def try_user_command(self, text: str) -> UserCommandResult | None:
+        """Intercept ``/module`` and ``/model`` for native modal screens.
+
+        For these commands the text/$EDITOR rendering inherited from
+        :class:`BaseInputModule` either looks wrong (text list when a
+        scrollable picker is appropriate) or is actively broken
+        (``$EDITOR`` would fight Textual for the terminal). We detect
+        the relevant subcommands here and dispatch to native Textual
+        modals; everything else falls through to the standard
+        slash-command pipeline.
+        """
+        if text.startswith("/") and self._user_commands:
+            name, args = parse_slash_command(text)
+            canonical = self._command_alias_map.get(name, name)
+            if canonical == "module":
+                handled = await self._intercept_module(args)
+                if handled is not None:
+                    return handled
+            elif canonical == "model":
+                handled = await self._intercept_model(args)
+                if handled is not None:
+                    return handled
+        return await super().try_user_command(text)
+
+    async def _intercept_module(self, args: str) -> UserCommandResult | None:
+        """Open the Modules modal (or the Edit modal) instead of text.
+
+        Returns a consumed ``UserCommandResult`` for subcommands the
+        TUI handles natively, or ``None`` to fall through to the
+        regular text dispatch (set / show / enable / disable / reset
+        / toggle remain text-based — they're single-shot operations
+        that don't benefit from a modal).
+        """
+        if self._tui is None or self._user_command_context is None:
+            return None
+        agent = getattr(self._user_command_context, "agent", None)
+        if agent is None:
+            return None
+        try:
+            tokens = shlex.split(args or "")
+        except ValueError:
+            return None
+        sub = tokens[0].lower() if tokens else "list"
+        if sub in ("", "list"):
+            await self._tui.show_modules_modal(agent)
+            return UserCommandResult(output="", consumed=True)
+        if sub == "edit" and len(tokens) > 1:
+            opened = await self._tui.show_module_edit_modal(agent, tokens[1])
+            if opened:
+                return UserCommandResult(output="", consumed=True)
+            # Fall through if the name didn't resolve — let the text
+            # command print the "not found" / "ambiguous" error.
+        return None
+
+    async def _intercept_model(self, args: str) -> UserCommandResult | None:
+        """Open the model-picker modal for ``/model`` with no args.
+
+        ``/model <ident>`` (explicit switch) falls through to the
+        text-mode handler so users can paste a fully-qualified
+        identifier and skip the picker.
+        """
+        if (args or "").strip():
+            return None
+        if self._tui is None or self._user_command_context is None:
+            return None
+        agent = getattr(self._user_command_context, "agent", None)
+        if agent is None:
+            return None
+        await self._tui.show_model_picker_modal(agent)
+        return UserCommandResult(output="", consumed=True)
 
     async def render_command_data(
         self, result: UserCommandResult, command_name: str

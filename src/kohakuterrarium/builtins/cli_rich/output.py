@@ -94,11 +94,13 @@ class RichCLIOutput(BaseOutputModule):
         Each event type maps to the same ``app.on_*`` widget callback
         the legacy hooks would invoke, with byte-identical arguments.
 
-        Phase B v1: ``confirm``/``ask_text``/``selection``/``progress``/
-        ``notification``/``card`` render as display-only Rich Panels in
-        the CLI live region. The CLI does not submit replies in v1 —
-        interactive replies come from TUI or web. If neither is
-        attached, ``emit_and_wait`` falls back to its timeout sentinel.
+        Interactive events (``confirm`` / ``ask_text`` / ``selection``
+        and ``card`` events with non-link actions) route through the
+        :class:`BusInteractiveOverlay` which captures keyboard input
+        in the live region and submits a real :class:`UIReply` back
+        to the agent's output_router. Display-only events
+        (``progress``, ``notification``, link-only ``card``) render
+        as inline Rich panels in scrollback.
         """
         match event.type:
             case "text":

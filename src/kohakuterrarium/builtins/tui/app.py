@@ -20,6 +20,8 @@ from kohakuterrarium.builtins.tui.widgets import (
     TerrariumPanel,
     UserMessage,
 )
+from kohakuterrarium.builtins.tui.widgets.model_picker_modal import ModelPickerModal
+from kohakuterrarium.builtins.tui.widgets.modules_modal import ModulesModal
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -63,6 +65,12 @@ class AgentTUI(App):
         Binding("ctrl+c", "quit", "Quit", show=True),
         Binding("ctrl+l", "clear_output", "Clear", show=True),
         Binding("escape", "interrupt", "Interrupt", show=True),
+        # ``priority=True`` makes the app-level handler run BEFORE the
+        # focused widget gets the key. ChatInput is a TextArea that
+        # otherwise eats function keys via its generic input handler,
+        # which is why F2/F3 went nowhere when chat input had focus.
+        Binding("f2", "open_modules", "Modules", show=True, priority=True),
+        Binding("f3", "open_model_picker", "Model", show=True, priority=True),
     ]
 
     def __init__(
@@ -252,6 +260,24 @@ class AgentTUI(App):
         self._stop_event.set()
         self._input_queue.put_nowait("")  # empty string signals exit
         self.exit()
+
+    def action_open_modules(self) -> None:
+        """Push the Modules modal screen (F2 keybinding)."""
+        agent = (
+            getattr(self.tui_session, "host_agent", None) if self.tui_session else None
+        )
+        if agent is None:
+            return
+        self.push_screen(ModulesModal(agent))
+
+    def action_open_model_picker(self) -> None:
+        """Push the model-picker modal (F3 keybinding)."""
+        agent = (
+            getattr(self.tui_session, "host_agent", None) if self.tui_session else None
+        )
+        if agent is None:
+            return
+        self.push_screen(ModelPickerModal(agent))
 
     # ── Thinking animation ──────────────────────────────────────
 

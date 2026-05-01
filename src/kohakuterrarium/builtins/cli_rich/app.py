@@ -47,6 +47,7 @@ from kohakuterrarium.builtins.cli_rich.commit import ScrollbackCommitter, Sessio
 from kohakuterrarium.builtins.cli_rich.composer import Composer
 from kohakuterrarium.builtins.cli_rich.dialogs.bus_overlay import BusInteractiveOverlay
 from kohakuterrarium.builtins.cli_rich.dialogs.model_picker import ModelPicker
+from kohakuterrarium.builtins.cli_rich.dialogs.module_picker import ModulePicker
 from kohakuterrarium.builtins.cli_rich.dialogs.settings import SettingsOverlay
 from kohakuterrarium.builtins.cli_rich.hint_bar import SlashHintBar
 from kohakuterrarium.builtins.cli_rich.live_region import LiveRegion
@@ -88,6 +89,7 @@ class RichCLIApp(AppOutputMixin):
             on_apply=self._apply_model_selector,
         )
         self.settings_overlay = SettingsOverlay()
+        self.module_picker = ModulePicker(get_agent=lambda: self.agent)
         self.bus_overlay = BusInteractiveOverlay(
             get_router=lambda: getattr(self.agent, "output_router", None),
             get_textarea_text=self._get_composer_text,
@@ -223,6 +225,7 @@ class RichCLIApp(AppOutputMixin):
             filter=Condition(
                 lambda: self.bus_overlay.visible
                 or self.model_picker.visible
+                or self.module_picker.visible
                 or self.settings_overlay.visible
                 or self.live_region.has_content
             ),
@@ -335,6 +338,9 @@ class RichCLIApp(AppOutputMixin):
             return ANSI(ansi) if ansi else ""
         if self.model_picker.visible:
             ansi = self.model_picker.render(width)
+            return ANSI(ansi) if ansi else ""
+        if self.module_picker.visible:
+            ansi = self.module_picker.render(width)
             return ANSI(ansi) if ansi else ""
         if self.settings_overlay.visible:
             ansi = self.settings_overlay.render(width)
@@ -474,6 +480,23 @@ class RichCLIApp(AppOutputMixin):
             self.settings_overlay.open()
             self._invalidate()
             return
+
+        # Special path: `/module` (or aliases) opens the module picker.
+        # Bare ``/module`` shows the list; ``/module edit <name>`` opens
+        # the form for that module directly. Other subcommands
+        # (``set`` / ``show`` / ``enable`` / …) fall through to the
+        # text command — single-shot operations don't need an overlay.
+        if name in ("module", "modules", "mod"):
+            stripped = args.strip()
+            sub, _, rest = stripped.partition(" ")
+            if not stripped or sub.lower() == "list":
+                self.module_picker.open()
+                self._invalidate()
+                return
+            if sub.lower() == "edit" and rest.strip():
+                self.module_picker.open(edit_target=rest.strip())
+                self._invalidate()
+                return
 
         try:
             result = await self.agent._try_slash_command_text(text)
@@ -708,6 +731,11 @@ class RichCLIApp(AppOutputMixin):
             if consumed:
                 self._invalidate()
             return consumed
+        if self.module_picker.visible:
+            consumed = self.module_picker.handle_key(key)
+            if consumed:
+                self._invalidate()
+            return consumed
         if self.settings_overlay.visible:
             consumed = self.settings_overlay.handle_key(key)
             if consumed:
@@ -727,6 +755,18 @@ class RichCLIApp(AppOutputMixin):
             if consumed:
                 self._invalidate()
             return consumed
+        if self.module_picker.visible and self.module_picker.is_capturing_text():
+            consumed = self.module_picker.handle_text(char)
+            if consumed:
+                self._invalidate()
+            return consumed
+        if self.module_picker.visible:
+            # In list mode, ``t`` toggles current row. Consume any
+            # other char so it doesn't leak into the textarea.
+            consumed = self.module_picker.handle_text(char)
+            if consumed:
+                self._invalidate()
+            return consumed
         if self.settings_overlay.visible and self.settings_overlay.is_capturing_text():
             consumed = self.settings_overlay.handle_text(char)
             if consumed:
@@ -743,6 +783,11 @@ class RichCLIApp(AppOutputMixin):
         normal ``handle_key`` path.
         """
         if self.bus_overlay.captures_input():
+            return True
+        if self.module_picker.visible:
+            # Modal: consume both list-mode and form-mode chars so
+            # nothing leaks into the chat textarea behind the
+            # overlay.
             return True
         if self.settings_overlay.visible and self.settings_overlay.is_capturing_text():
             return True

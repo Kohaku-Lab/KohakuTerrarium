@@ -29,6 +29,12 @@ from kohakuterrarium.builtins.tui.widgets import (
     UserMessage,
 )
 from kohakuterrarium.builtins.tui.widgets.bus_blocks import CardBlock, ProgressBlock
+from kohakuterrarium.builtins.tui.widgets.model_picker_modal import ModelPickerModal
+from kohakuterrarium.builtins.tui.widgets.modules_modal import (
+    ModuleEditModal,
+    ModulesModal,
+    _list_modules,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -81,6 +87,10 @@ class TUISession:
         # Signature: (job_id, job_name) -> None
         self.on_cancel_job: Any = None
         self.on_promote_job: Any = None
+        # Live agent reference, wired by ``TUIInput.set_user_commands``
+        # so modal screens (Modules, etc.) can mutate state without
+        # round-tripping the slash-command pipeline.
+        self.host_agent: Any = None
 
     def set_terrarium_tabs(self, tabs: list[str]) -> None:
         """Configure terrarium mode before start()."""
@@ -845,6 +855,60 @@ class TUISession:
 
         self._app.call_later(lambda: self._app.push_screen(modal, callback=_on_dismiss))
         return await result_future
+
+    async def show_model_picker_modal(self, agent: Any) -> None:
+        """Push the model-picker modal screen.
+
+        Used by the F3 keybinding and the ``/model`` (no-args)
+        slash-command intercept.
+        """
+        if not self._app or not self._app.is_running:
+            return
+        self._app.call_later(lambda: self._app.push_screen(ModelPickerModal(agent)))
+
+    async def show_modules_modal(self, agent: Any) -> None:
+        """Push the Modules modal screen.
+
+        Fire-and-forget — the modal manages its own dismiss; we don't
+        block on the result. Used by both the F2 keybinding and the
+        ``/module`` slash-command intercept in :class:`TUIInput`.
+        """
+        if not self._app or not self._app.is_running:
+            return
+        self._app.call_later(lambda: self._app.push_screen(ModulesModal(agent)))
+
+    async def show_module_edit_modal(self, agent: Any, name: str) -> bool:
+        """Resolve ``name`` to a module record and push the edit modal.
+
+        Returns ``True`` if the modal was pushed, ``False`` if the
+        name didn't resolve (caller may then fall through to the
+        text-mode "not found" error from the slash command).
+        """
+        if not self._app or not self._app.is_running:
+            return False
+        try:
+            inventory = _list_modules(agent)
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning("show_module_edit_modal inventory failed", error=str(exc))
+            return False
+        # Accept ``type/name`` or bare ``name``.
+        target = None
+        if "/" in name:
+            type_part, _, name_part = name.partition("/")
+            for m in inventory:
+                if m["type"] == type_part and m["name"] == name_part:
+                    target = m
+                    break
+        else:
+            matches = [m for m in inventory if m["name"] == name]
+            if len(matches) == 1:
+                target = matches[0]
+        if target is None:
+            return False
+        self._app.call_later(
+            lambda: self._app.push_screen(ModuleEditModal(agent, target))
+        )
+        return True
 
     def stop(self) -> None:
         self.running = False
