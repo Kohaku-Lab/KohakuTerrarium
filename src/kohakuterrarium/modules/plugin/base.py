@@ -407,6 +407,15 @@ class BasePlugin:
         """
         return None
 
+    def runtime_services(self, context: Any) -> dict[str, Any]:
+        """Return optional per-call services exposed to tools.
+
+        This is a generic plugin extension point: plugins can publish
+        capabilities without core knowing their semantics, and tools can
+        choose to consume them from ``ToolContext.runtime_services``.
+        """
+        return {}
+
     # ── Controller / package commands ──
 
     def contribute_commands(self) -> dict[str, Any]:
@@ -485,7 +494,7 @@ class BasePlugin:
     async def pre_tool_execute(self, args: dict, **kwargs) -> dict | None:
         """Before tool execution. Return modified args or None.
 
-        kwargs: tool_name (str), job_id (str)
+        kwargs: tool_name (str), job_id (str), context (ToolContext)
         Raise PluginBlockError to prevent execution.
         """
         return None
@@ -493,7 +502,7 @@ class BasePlugin:
     async def post_tool_execute(self, result: Any, **kwargs) -> Any | None:
         """After tool execution. Return modified result or None.
 
-        kwargs: tool_name (str), job_id (str), args (dict)
+        kwargs: tool_name (str), job_id (str), args (dict), context (ToolContext)
         """
         return None
 

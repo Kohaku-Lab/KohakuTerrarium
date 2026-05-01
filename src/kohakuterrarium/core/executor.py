@@ -126,6 +126,7 @@ class Executor:
         args: dict[str, Any],
         *,
         job_id: str,
+        context: ToolContext,
     ) -> Callable[..., Any]:
         """Return ``tool.execute`` wrapped with the agent's pre/post hooks.
 
@@ -148,7 +149,11 @@ class Executor:
             "post_tool_execute",
             tool.execute,
             input_kwarg="args",
-            extra_kwargs={"tool_name": tool.tool_name, "job_id": job_id},
+            extra_kwargs={
+                "tool_name": tool.tool_name,
+                "job_id": job_id,
+                "context": context,
+            },
         )
 
     def get_tool(self, tool_name: str) -> Tool | None:
@@ -258,10 +263,8 @@ class Executor:
                 self._results[job_id] = job_result
                 return job_result
 
-            # Build ToolContext for tools that need it
-            context = None
-            if isinstance(tool, BaseTool) and tool.needs_context:
-                context = self._build_tool_context()
+            # Build one context for plugin hooks and context-aware tools.
+            context = self._build_tool_context()
 
             # Plugin hooks fire at the call site — wrap tool.execute
             # locally with the AGENT's plugin manager so each agent's
@@ -270,7 +273,9 @@ class Executor:
             # every sub-agent's ``parent_registry`` reference, so we
             # must NOT mutate ``tool.execute``; the wrapper here is a
             # closure over the original.
-            exec_fn = self._wrap_tool_execute(tool, args, job_id=job_id)
+            exec_fn = self._wrap_tool_execute(
+                tool, args, job_id=job_id, context=context
+            )
 
             # Concurrency-safety partition (Cluster 5 / G.1):
             # unsafe tools acquire the shared serial lock so at most
@@ -398,7 +403,7 @@ class Executor:
 
     def _build_tool_context(self) -> ToolContext:
         """Build ToolContext for context-aware tools."""
-        return ToolContext(
+        context = ToolContext(
             agent_name=self._agent_name,
             session=self._session,
             working_dir=self._working_dir,
@@ -409,6 +414,11 @@ class Executor:
             file_read_state=self._file_read_state,
             path_guard=self._path_guard,
         )
+        agent = self._agent
+        plugins = getattr(agent, "plugins", None) if agent is not None else None
+        if plugins is not None and hasattr(plugins, "collect_runtime_services"):
+            context.runtime_services.update(plugins.collect_runtime_services(context))
+        return context
 
     async def wait_for(
         self,

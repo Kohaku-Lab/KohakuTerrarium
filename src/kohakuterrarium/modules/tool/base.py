@@ -70,6 +70,7 @@ class ToolContext:
     agent: Any = None  # Agent instance - for trigger_manager access, etc.
     file_read_state: Any = None  # FileReadState - tracks which files the model has read
     path_guard: Any = None  # PathBoundaryGuard - warns/blocks access outside cwd
+    runtime_services: dict[str, Any] = field(default_factory=dict)
 
     @property
     def channels(self) -> Any:

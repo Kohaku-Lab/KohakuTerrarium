@@ -215,6 +215,23 @@ class PluginManager:
         ctx = self._load_context
         return [p for p in self._active_plugins() if _plugin_applies(p, ctx)]
 
+    def collect_runtime_services(self, context: Any) -> dict[str, Any]:
+        """Collect optional per-call services from active plugins."""
+        services: dict[str, Any] = {}
+        for plugin in self._applicable_plugins():
+            try:
+                contributed = plugin.runtime_services(context) or {}
+            except Exception as e:
+                logger.warning(
+                    "Plugin runtime_services raised",
+                    plugin_name=getattr(plugin, "name", "?"),
+                    error=str(e),
+                    exc_info=True,
+                )
+                continue
+            services.update(contributed)
+        return services
+
     # ── Collectors (aggregated contributions across plugins) ──
 
     def collect_prompt_contributions(self, context: PluginContext) -> list[str]:
