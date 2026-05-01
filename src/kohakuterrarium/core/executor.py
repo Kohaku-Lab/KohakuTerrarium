@@ -126,7 +126,7 @@ class Executor:
         args: dict[str, Any],
         *,
         job_id: str,
-        context: ToolContext,
+        context: ToolContext | None = None,
     ) -> Callable[..., Any]:
         """Return ``tool.execute`` wrapped with the agent's pre/post hooks.
 
@@ -140,6 +140,8 @@ class Executor:
         would let one agent's plugin chain (e.g. its budget plugin)
         intercept another agent's tool calls.
         """
+        if context is None:
+            context = self._build_tool_context()
         agent = self._agent
         plugins = getattr(agent, "plugins", None) if agent is not None else None
         if plugins is None:
