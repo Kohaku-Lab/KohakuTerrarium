@@ -19,6 +19,10 @@ _PLUGINS: dict[str, dict[str, str]] = {
         "module": "kohakuterrarium.builtins.plugins.permgate.plugin",
         "class": "PermGatePlugin",
     },
+    "sandbox": {
+        "module": "kohakuterrarium.builtins.plugins.sandbox.plugin",
+        "class": "SandboxPlugin",
+    },
 }
 
 # Plugin packs are syntactic sugar for opting into multiple plugins by
