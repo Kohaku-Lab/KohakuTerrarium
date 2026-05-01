@@ -8,7 +8,6 @@ On all platforms, prefers bash (git bash available on Windows).
 import asyncio
 import os
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
@@ -16,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.builtins.tools.registry import register_builtin
+from kohakuterrarium.builtins.tools.subprocess.shell_utils import terminate_process_tree
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
     ExecutionMode,
@@ -129,53 +129,6 @@ def _resolve_shell_executable(shell_type: str) -> str | None:
     return shutil.which(exe)
 
 
-async def _terminate_process_tree(process: asyncio.subprocess.Process) -> None:
-    """Terminate a subprocess and its children best-effort."""
-    try:
-        if process.returncode is not None:
-            return
-
-        if sys.platform == "win32":
-            killer = await asyncio.create_subprocess_exec(
-                "taskkill",
-                "/PID",
-                str(process.pid),
-                "/T",
-                "/F",
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            await killer.wait()
-        else:
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                return
-            except Exception:
-                process.terminate()
-
-            try:
-                await asyncio.wait_for(process.wait(), timeout=3)
-                return
-            except asyncio.TimeoutError:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    return
-                except Exception:
-                    process.kill()
-
-        await asyncio.wait_for(process.wait(), timeout=5)
-    except ProcessLookupError:
-        pass
-    except Exception:
-        try:
-            process.kill()
-            await asyncio.wait_for(process.wait(), timeout=5)
-        except Exception:
-            pass
-
-
 def _create_output_file() -> tuple[Path, Any]:
     output_dir = Path(tempfile.gettempdir()) / "kohakuterrarium-bash"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -225,6 +178,49 @@ def _wait_timeout(timeout: float) -> float | None:
 
 def _format_timeout(timeout: float) -> str:
     return f"{timeout:g}s"
+
+
+def _fake_wait_error(command: str) -> str | None:
+    stripped = command.strip().lower()
+    if stripped.startswith("echo") and any(
+        w in stripped for w in ("waiting", "wait for", "still running", "in progress")
+    ):
+        return (
+            "Do not use bash to fake-wait for background tasks. "
+            "Background results arrive automatically. Just stop your response."
+        )
+    if stripped.startswith("sleep"):
+        return (
+            "Do not sleep to wait for background tasks. Results arrive "
+            "automatically when ready. Just stop your response."
+        )
+    return None
+
+
+def _shell_metadata(
+    output_path: Path | None,
+    shell_type: str,
+    resolved_exe: str,
+    env: dict[str, str],
+    timeout: float,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "shell_type": shell_type,
+        "shell_executable": resolved_exe,
+        "shell_override": _shell_override_env(shell_type),
+        "home": env.get("HOME"),
+        "timeout": timeout,
+    }
+    if output_path is not None:
+        metadata["raw_output_path"] = str(output_path)
+    return metadata
+
+
+def _subprocess_runner(context: Any) -> Any:
+    services = getattr(context, "runtime_services", {}) if context is not None else {}
+    if isinstance(services, dict):
+        return services.get("subprocess_runner")
+    return None
 
 
 @register_builtin("bash")
@@ -291,23 +287,9 @@ class ShellTool(BaseTool):
         if timeout_error is not None:
             return ToolResult(error=timeout_error)
 
-        # Reject no-op waiting commands (hallucination pattern)
-        stripped = command.strip().lower()
-        if stripped.startswith("echo") and any(
-            w in stripped
-            for w in ("waiting", "wait for", "still running", "in progress")
-        ):
-            return ToolResult(
-                error="Do not use bash to fake-wait for background tasks. "
-                "Background results arrive automatically. "
-                "Just stop your response — do not echo/sleep/poll."
-            )
-        if stripped.startswith("sleep"):
-            return ToolResult(
-                error="Do not sleep to wait for background tasks. "
-                "Results arrive automatically when ready. "
-                "Just stop your response."
-            )
+        wait_error = _fake_wait_error(command)
+        if wait_error:
+            return ToolResult(error=wait_error)
 
         # Resolve shell type
         shell_type = args.get("type", "bash").lower().strip()
@@ -351,52 +333,72 @@ class ShellTool(BaseTool):
         output_path = None
         output_handle = None
         try:
-            output_path, output_handle = _create_output_file()
-
-            popen_kwargs: dict[str, Any] = {
-                "stdout": output_handle,
-                "stderr": subprocess.STDOUT,
-                "cwd": cwd,
-                "env": env,
-            }
-            if sys.platform == "win32":
-                popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-            else:
-                popen_kwargs["start_new_session"] = True
-
-            process = await asyncio.create_subprocess_exec(
-                *full_command,
-                **popen_kwargs,
-            )
-
-            if output_handle is not None:
-                output_handle.close()
-                output_handle = None
-
-            try:
-                await asyncio.wait_for(process.wait(), timeout=_wait_timeout(timeout))
-            except asyncio.TimeoutError:
-                await _terminate_process_tree(process)
-                output = _read_output_file(output_path)
-                return ToolResult(
-                    output=output,
-                    error=f"Command timed out after {_format_timeout(timeout)}",
-                    exit_code=-1,
-                    metadata={
-                        "raw_output_path": str(output_path),
-                        "shell_type": shell_type,
-                        "shell_executable": resolved_exe,
-                        "shell_override": _shell_override_env(shell_type),
-                        "home": env.get("HOME"),
-                        "timeout": timeout,
-                    },
+            runner = _subprocess_runner(context)
+            if runner is not None and hasattr(runner, "run_subprocess_exec"):
+                result = await runner.run_subprocess_exec(
+                    full_command,
+                    cwd=cwd,
+                    env=env,
+                    timeout=_wait_timeout(timeout),
+                    max_output_bytes=self.config.max_output or None,
                 )
-            except asyncio.CancelledError:
-                await _terminate_process_tree(process)
-                raise
+                output = (result.get("stdout", b"") + result.get("stderr", b"")).decode(
+                    "utf-8", errors="replace"
+                )
+                exit_code = int(result.get("returncode") or 0)
+                if result.get("timed_out"):
+                    return ToolResult(
+                        output=output,
+                        error=f"Command timed out after {_format_timeout(timeout)}",
+                        exit_code=-1,
+                        metadata=_shell_metadata(
+                            None, shell_type, resolved_exe, env, timeout
+                        ),
+                    )
+            else:
+                output_path, output_handle = _create_output_file()
 
-            output = _read_output_file(output_path)
-            exit_code = process.returncode or 0
+                popen_kwargs: dict[str, Any] = {
+                    "stdout": output_handle,
+                    "stderr": subprocess.STDOUT,
+                    "cwd": cwd,
+                    "env": env,
+                }
+                if sys.platform == "win32":
+                    popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+                else:
+                    popen_kwargs["start_new_session"] = True
+
+                process = await asyncio.create_subprocess_exec(
+                    *full_command,
+                    **popen_kwargs,
+                )
+
+                if output_handle is not None:
+                    output_handle.close()
+                    output_handle = None
+
+                try:
+                    await asyncio.wait_for(
+                        process.wait(), timeout=_wait_timeout(timeout)
+                    )
+                except asyncio.TimeoutError:
+                    await terminate_process_tree(process)
+                    output = _read_output_file(output_path)
+                    return ToolResult(
+                        output=output,
+                        error=f"Command timed out after {_format_timeout(timeout)}",
+                        exit_code=-1,
+                        metadata=_shell_metadata(
+                            output_path, shell_type, resolved_exe, env, timeout
+                        ),
+                    )
+                except asyncio.CancelledError:
+                    await terminate_process_tree(process)
+                    raise
+
+                output = _read_output_file(output_path)
+                exit_code = process.returncode or 0
 
             logger.debug(
                 "Command completed",
@@ -410,14 +412,9 @@ class ShellTool(BaseTool):
                 error=(
                     None if exit_code == 0 else f"Command exited with code {exit_code}"
                 ),
-                metadata={
-                    "raw_output_path": str(output_path),
-                    "shell_type": shell_type,
-                    "shell_executable": resolved_exe,
-                    "shell_override": _shell_override_env(shell_type),
-                    "home": env.get("HOME"),
-                    "timeout": timeout,
-                },
+                metadata=_shell_metadata(
+                    output_path, shell_type, resolved_exe, env, timeout
+                ),
             )
 
         except FileNotFoundError:
@@ -430,7 +427,7 @@ class ShellTool(BaseTool):
         except Exception as e:
             logger.error("Command execution failed", error=str(e))
             if process is not None:
-                await _terminate_process_tree(process)
+                await terminate_process_tree(process)
             error_output = (
                 _read_output_file(output_path)
                 if output_path and output_path.exists()
@@ -439,17 +436,8 @@ class ShellTool(BaseTool):
             return ToolResult(
                 output=error_output,
                 error=str(e),
-                metadata=(
-                    {
-                        "raw_output_path": str(output_path),
-                        "shell_type": shell_type,
-                        "shell_executable": resolved_exe,
-                        "shell_override": _shell_override_env(shell_type),
-                        "home": env.get("HOME"),
-                        "timeout": timeout,
-                    }
-                    if output_path
-                    else {}
+                metadata=_shell_metadata(
+                    output_path, shell_type, resolved_exe, env, timeout
                 ),
             )
         finally:
@@ -511,29 +499,54 @@ class PythonTool(BaseTool):
             cwd = self.config.working_dir or os.getcwd()
 
         try:
-            process = await asyncio.create_subprocess_exec(
-                *python_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                cwd=cwd,
-            )
-
-            try:
-                stdout, _ = await asyncio.wait_for(
-                    process.communicate(),
+            runner = _subprocess_runner(context)
+            if runner is not None and hasattr(runner, "run_subprocess_exec"):
+                result = await runner.run_subprocess_exec(
+                    python_cmd,
+                    cwd=cwd,
                     timeout=_wait_timeout(timeout),
+                    max_output_bytes=self.config.max_output or None,
                 )
-            except asyncio.TimeoutError:
-                process.kill()
-                await process.wait()
-                return ToolResult(
-                    error=f"Python execution timed out after {_format_timeout(timeout)}",
-                    exit_code=-1,
-                    metadata={"timeout": timeout},
+                output = (result.get("stdout", b"") + result.get("stderr", b"")).decode(
+                    "utf-8", errors="replace"
+                )
+                exit_code = int(result.get("returncode") or 0)
+                if result.get("timed_out"):
+                    return ToolResult(
+                        error=(
+                            "Python execution timed out after "
+                            f"{_format_timeout(timeout)}"
+                        ),
+                        exit_code=-1,
+                        metadata={"timeout": timeout},
+                    )
+            else:
+                process = await asyncio.create_subprocess_exec(
+                    *python_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                    cwd=cwd,
                 )
 
-            output = stdout.decode("utf-8", errors="replace") if stdout else ""
-            exit_code = process.returncode or 0
+                try:
+                    stdout, _ = await asyncio.wait_for(
+                        process.communicate(),
+                        timeout=_wait_timeout(timeout),
+                    )
+                except asyncio.TimeoutError:
+                    process.kill()
+                    await process.wait()
+                    return ToolResult(
+                        error=(
+                            "Python execution timed out after "
+                            f"{_format_timeout(timeout)}"
+                        ),
+                        exit_code=-1,
+                        metadata={"timeout": timeout},
+                    )
+
+                output = stdout.decode("utf-8", errors="replace") if stdout else ""
+                exit_code = process.returncode or 0
 
             return ToolResult(
                 output=output,
