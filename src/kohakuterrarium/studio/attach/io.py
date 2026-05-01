@@ -248,12 +248,18 @@ async def attach_io(
 
     fwd_task = asyncio.create_task(_forward_queue(queue, websocket))
 
-    # Track input-processing tasks so we can cancel them on disconnect.
     # Each user input fires its own task — the receive loop must NOT
     # ``await`` ``agent.inject_input`` directly, because a tool that
     # awaits a UIReply (``ask_user``, ``confirm``, etc.) would deadlock
     # waiting for a frame the receive loop can't fetch while it's
     # stuck inside ``inject_input``.
+    #
+    # These tasks are NOT cancelled on WS disconnect: the agent's work
+    # belongs to the engine, not the viewer. A browser refresh, a
+    # tab close, or a flaky remote connection must not abort an
+    # in-flight turn. We only detach the per-WS output sink and the
+    # forward task; the turn keeps running and a later reattach picks
+    # up the live stream + replays the event log.
     input_tasks: list[asyncio.Task] = []
 
     try:
@@ -298,8 +304,11 @@ async def attach_io(
     finally:
         queue.put_nowait(None)
         fwd_task.cancel()
-        for task in input_tasks:
-            task.cancel()
+        # Intentionally NOT cancelling ``input_tasks`` — see note above.
+        # They keep running on the engine; their late ``idle``/``error``
+        # frames write into the now-orphaned ``queue`` (unbounded, so
+        # ``put_nowait`` never blocks) and are GC'd with the queue once
+        # the tasks finish.
         try:
             agent.output_router.remove_secondary(out_module)
         except Exception as e:
