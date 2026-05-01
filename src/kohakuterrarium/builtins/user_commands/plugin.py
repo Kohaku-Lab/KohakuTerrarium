@@ -85,6 +85,9 @@ class PluginCommand(BaseUserCommand):
         lines.append(
             "Select a plugin to toggle it, or use /plugin enable|disable <name>"
         )
+        lines.append(
+            "Tip: /module covers plugins + provider-native tools in one surface."
+        )
 
         return UserCommandResult(
             output="\n".join(lines),
