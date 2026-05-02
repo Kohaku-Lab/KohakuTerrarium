@@ -1111,8 +1111,31 @@ export const useChatStore = defineStore("chat", {
   },
 
   actions: {
+    /**
+     * Public resync — re-fetch and rebuild the active tab's history.
+     * Idempotent and cheap; safe to call from focus-change listeners,
+     * chat panel re-activations, or programmatically. Soft-fails on
+     * network errors so the UI doesn't flap on transient blips.
+     */
+    async refreshHistory(tab = this.activeTab) {
+      if (!this._instanceId || !tab) return false
+      try {
+        return await this._resyncHistory(tab)
+      } catch {
+        return false
+      }
+    },
+
     initForInstance(instance) {
-      if (this._instanceId === instance.id && this._ws) return
+      if (this._instanceId === instance.id && this._ws) {
+        // Same instance, WS already up. Nothing to do — the live WS
+        // is already streaming any new events into ``messagesByTab``,
+        // so re-fetching ``/history`` here would be wasted work and
+        // (worse) would cause AttachTab's 5 s ``loadInstance`` poll
+        // to rebuild the message list every five seconds, tearing
+        // down + re-mounting every panel watching it.
+        return
+      }
       this._cleanup()
       const generation = ++this._instanceGeneration
       this._instanceId = instance.id
@@ -2125,7 +2148,25 @@ export const useChatStore = defineStore("chat", {
       }
       const previousMessages = tab ? [...(this.messagesByTab[tab] || [])] : null
       if (validTarget && tab) {
-        this.messagesByTab[tab].splice(messageIdx)
+        // Keep the user row at ``messageIdx`` visible (with the new
+        // content) and drop everything after it — the old assistant
+        // response, tool calls, etc. Previously we spliced from
+        // ``messageIdx`` itself, which made the edited message vanish
+        // until ``_resyncHistory`` ran AFTER the LLM finished. That
+        // gave a several-second gap where the chat showed only the
+        // streaming reply with the question that prompted it gone.
+        // ``_handleUserInput`` dedupes against the visible last-user
+        // message, so the WS replay from the new branch won't double
+        // it up.
+        const msgs = this.messagesByTab[tab]
+        const original = msgs[messageIdx]
+        const normalized = normalizeMessageContent(newContent)
+        const editedRow = {
+          ...original,
+          content: normalized.content,
+          contentParts: normalized.contentParts,
+        }
+        msgs.splice(messageIdx, msgs.length - messageIdx, editedRow)
       }
       try {
         const { agentAPI } = await import("@/utils/api")
@@ -2164,13 +2205,35 @@ export const useChatStore = defineStore("chat", {
 
     /** Re-fetch conversation history from the backend and rebuild the
      *  local message list. Called after edit/regenerate/rewind so the
-     *  frontend matches the backend's truncated conversation. */
+     *  frontend matches the backend's truncated conversation.
+     *
+     *  Robustness: ALWAYS rebuild messages from whatever events the
+     *  backend has at the moment of the call, even when the expected
+     *  branch hasn't promoted yet. Earlier this method bailed early on
+     *  ``!complete`` and left ``messagesByTab[tab]`` untouched — which
+     *  meant edit+regen flashed an empty chat (because ``editMessage``
+     *  pre-splices the local list before awaiting the API call). The
+     *  retry timer would eventually pick up the late-arriving branch
+     *  events, but in the gap the user saw their message vanish.
+     *
+     *  We split the two concerns:
+     *  1. Render now: rebuild from whatever events landed.
+     *  2. Promote: keep retrying until ``branchSelection`` matches the
+     *     expected branch_id, so the ``<N/M>`` navigator settles on the
+     *     right value.
+     */
     async _resyncHistory(tab = this.activeTab) {
       if (!this._instanceId || !tab) return false
       try {
         const { agentAPI } = await import("@/utils/api")
         const data = await agentAPI.getHistory(this._instanceId)
         if (!data?.events) return false
+        // Cache events + clear any stale branch override BEFORE the
+        // promotion check, so the rebuild path always has fresh data.
+        this.eventsByTab[tab] = data.events
+        this.branchViewByTab[tab] = {}
+        this._rebuildMessages(tab)
+
         const pending = this._branchResyncPendingByTab[tab]
         const expectedBranchByTurn = pending?.expectedBranchByTurn || {}
         if (Object.keys(expectedBranchByTurn).length) {
@@ -2184,17 +2247,13 @@ export const useChatStore = defineStore("chat", {
             }
           }
           if (!complete) {
-            this.eventsByTab[tab] = data.events
+            // Messages already rebuilt with what we have; just keep
+            // retrying so the navigator catches up once the new branch
+            // is fully written to the session store.
             this._scheduleBranchResync(tab)
             return false
           }
         }
-        // Cache raw events for branch navigation re-replay.
-        this.eventsByTab[tab] = data.events
-        // Regen / edit lands the user on the latest branch — clear
-        // any prior branch override so the navigator starts at <N/N>.
-        this.branchViewByTab[tab] = {}
-        this._rebuildMessages(tab)
         delete this._branchResyncPendingByTab[tab]
         return true
       } catch (e) {

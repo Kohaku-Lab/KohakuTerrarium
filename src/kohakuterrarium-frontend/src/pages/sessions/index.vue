@@ -15,7 +15,7 @@
         <div class="i-carbon-warning-alt text-2xl mx-auto mb-3 text-coral" />
         <div class="text-warm-700 dark:text-warm-300 mb-3">{{ t("sessions.failedTitle") }}</div>
         <div class="text-secondary text-xs mb-4">{{ error }}</div>
-        <button class="btn-secondary" @click="fetchSessions"><span class="i-carbon-renew mr-1" /> {{ t("common.retry") }}</button>
+        <button class="btn-secondary" @click="fetchSessions(true)"><span class="i-carbon-renew mr-1" /> {{ t("common.retry") }}</button>
       </div>
 
       <div v-else-if="totalSessions === 0 && !searchQuery" class="card p-12 text-center text-secondary">
@@ -73,7 +73,7 @@
                   {{ session.pwd }}
                 </span>
               </div>
-              <div v-if="session.preview" class="text-xs text-warm-400 dark:text-warm-500 mt-1 truncate italic" :title="session.preview">"{{ session.preview }}"</div>
+              <div v-if="previewText(session)" class="text-xs text-warm-400 dark:text-warm-500 mt-1 truncate italic" :title="previewText(session, 600)">"{{ previewText(session) }}"</div>
             </div>
 
             <div class="text-xs text-warm-400 shrink-0 text-right min-w-24">
@@ -127,7 +127,23 @@ import { useInstancesStore } from "@/stores/instances"
 import { GEM } from "@/utils/colors"
 import { useI18n } from "@/utils/i18n"
 import { sessionAPI } from "@/utils/api"
+import { extractTextPreview } from "@/utils/multimodal"
 
+function previewText(session, limit = 200) {
+  // Backend flattens preview to a string in ``_read_session_entry``,
+  // but legacy session-index entries cached during older runs may
+  // still surface a list of multi-modal parts. Defensive flatten so
+  // the row never renders ``[object Object]`` or a base64 blob.
+  return extractTextPreview(session?.preview, limit)
+}
+
+// Optional embed callbacks — when this page is mounted as a v2 tab
+// (SavedSessionsTab), the host passes navigation callbacks instead of
+// relying on vue-router. v1 page callers use the route-based fallback.
+const props = defineProps({
+  onView: { type: Function, default: null },
+  onResume: { type: Function, default: null },
+})
 const isMobile = inject("mobileLayout", false)
 const router = useRouter()
 const instances = useInstancesStore()
@@ -154,15 +170,20 @@ watch(searchQuery, () => {
 const hasMore = computed(() => currentOffset.value + pageSize < totalSessions.value)
 const hasPrev = computed(() => currentOffset.value > 0)
 
-async function fetchSessions() {
+async function fetchSessions(forceRefresh = false) {
   loading.value = true
   error.value = null
   try {
+    // ``refresh: true`` forces the backend to re-scan + re-parse every
+    // session file on disk. We respect the 30s server-side cache by
+    // default; only the explicit Refresh button (forceRefresh=true)
+    // triggers a full rebuild. Without this, opening the Sessions list
+    // tab is laggy because every navigation rebuilds the index.
     const result = await sessionAPI.list({
       limit: pageSize,
       offset: currentOffset.value,
       search: searchQuery.value.trim(),
-      refresh: true,
+      refresh: forceRefresh,
     })
     sessions.value = result.sessions || []
     totalSessions.value = result.total || 0
@@ -184,6 +205,10 @@ function prevPage() {
 }
 
 function viewSession(session) {
+  if (typeof props.onView === "function") {
+    props.onView(session)
+    return
+  }
   router.push(isMobile ? `/mobile/sessions/${session.name}` : `/sessions/${session.name}`)
 }
 
@@ -193,6 +218,10 @@ async function resumeSession(session) {
     const result = await sessionAPI.resume(session.name)
     await instances.fetchAll()
     ElMessage.success(t("sessions.resumed", { name: session.name }))
+    if (typeof props.onResume === "function") {
+      props.onResume({ session, result })
+      return
+    }
     router.push(isMobile ? `/mobile/${result.instance_id}` : `/instances/${result.instance_id}`)
   } catch (err) {
     ElMessage.error(t("sessions.resumeFailed", { message: err.response?.data?.detail || err.message }))

@@ -12,6 +12,8 @@
 <script setup>
 import { computed } from "vue"
 
+import { extractTextPreview } from "@/utils/multimodal"
+
 const props = defineProps({
   event: { type: Object, required: true },
   selected: { type: Boolean, default: false },
@@ -69,9 +71,15 @@ const iconClass = computed(() => ICON_MAP[props.event.type] || "i-carbon-circle-
 const summary = computed(() => {
   const e = props.event
   if (!e) return ""
-  if (typeof e.content === "string") return e.content.slice(0, 200)
-  if (typeof e.text === "string") return e.text.slice(0, 200)
-  if (typeof e.output === "string") return e.output.slice(0, 200)
+  // Multi-modal: content / text may be an array of parts; flatten via
+  // extractTextPreview so we never render raw [object Object] or a
+  // base64 image blob in the trace row.
+  const fromContent = extractTextPreview(e.content, 200)
+  if (fromContent) return fromContent
+  const fromText = extractTextPreview(e.text, 200)
+  if (fromText) return fromText
+  const fromOutput = extractTextPreview(e.output, 200)
+  if (fromOutput) return fromOutput
   if (e.tool) return String(e.tool)
   if (e.name) return String(e.name)
   if (e.error) return String(e.error)

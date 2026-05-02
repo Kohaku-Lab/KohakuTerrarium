@@ -6,6 +6,7 @@ implementation.
 """
 
 from kohakuterrarium.core.events import EventType, TriggerEvent
+from kohakuterrarium.llm.message import normalize_content_parts
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -183,18 +184,32 @@ class AgentMessagesMixin:
                     exc_info=True,
                 )
 
-    async def _rerun_from_last(self, new_user_content: str = "") -> None:
+    async def _rerun_from_last(self, new_user_content: str | list = "") -> None:
         """Trigger a new LLM turn from the current conversation state.
 
         ``new_user_content`` is empty for plain regenerate (no new
         user message — we are re-running with the existing one) and
         non-empty for edit+rerun (the controller and event log need
         to record the edited content).
+
+        Multi-modal callers (frontend ``editMessage`` builds a list of
+        ``{type, text|image_url|file}`` dicts via ``buildMessageParts``)
+        must be normalised to ``ContentPart`` instances before the
+        TriggerEvent reaches ``_format_events_for_context`` — that
+        helper only matches ``TextPart`` / ``ImagePart`` / ``FilePart``
+        objects. A raw dict-list silently produces empty
+        ``combined_text``, which in native mode collapses to
+        ``skip_empty=True`` and the LLM ends up running with no new
+        user message at all (the symptom users saw: "edit + rerun
+        runs without the edit").
         """
         edited = bool(new_user_content)
+        normalised = normalize_content_parts(new_user_content)
+        if normalised is None:
+            normalised = new_user_content if isinstance(new_user_content, str) else ""
         event = TriggerEvent(
             type=EventType.USER_INPUT,
-            content=new_user_content,
+            content=normalised,
             context={"rerun": True, "edited": edited},
             stackable=False,
         )

@@ -513,7 +513,14 @@ describe("chat store — multimodal edit + branch resync", () => {
     expect(messages[0].parts[0].resultMeta).toEqual({ truncated: true, omitted_text_bytes: 1234 })
   })
 
-  it("resync waits until expected edit branch becomes canonical", async () => {
+  it("resync rebuilds messages on every poll AND keeps retrying until expected edit branch becomes canonical", async () => {
+    // Regression: earlier ``_resyncHistory`` bailed early without
+    // rebuilding when the expected branch hadn't promoted yet, which
+    // left the chat panel showing an empty list because
+    // ``editMessage`` pre-splices the local messages before awaiting
+    // the API call. The new behaviour rebuilds on every poll
+    // (showing whatever events landed) and only the "promotion" of
+    // the expected branch is gated by the retry loop.
     const chat = useChatStore()
     chat._instanceId = "agent_1"
     chat.activeTab = "main"
@@ -542,11 +549,16 @@ describe("chat store — multimodal edit + branch resync", () => {
         ],
       })
 
+    // First poll: branch=2 events have not arrived yet, so the
+    // promotion check fails. Returns false, schedules a retry, but
+    // STILL rebuilds messages with what we have (branch=1 events).
     await expect(chat._resyncHistory("main")).resolves.toBe(false)
     expect(scheduleSpy).toHaveBeenCalledWith("main")
     expect(chat._branchResyncPendingByTab.main).toBeTruthy()
-    expect(rebuildSpy).not.toHaveBeenCalled()
+    expect(rebuildSpy).toHaveBeenCalledWith("main")
+    rebuildSpy.mockClear()
 
+    // Second poll: branch=2 events landed; promotion succeeds.
     await expect(chat._resyncHistory("main")).resolves.toBe(true)
     expect(rebuildSpy).toHaveBeenCalledWith("main")
     expect(chat._branchResyncPendingByTab.main).toBeUndefined()
@@ -627,5 +639,38 @@ describe("chat store — resetForRouteSwitch", () => {
     chat.resetForRouteSwitch()
 
     expect(chat._instanceGeneration).toBeGreaterThan(before)
+  })
+})
+
+describe("chat store — focus-return resync", () => {
+  it("refreshHistory delegates to _resyncHistory and soft-fails", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat.activeTab = "main"
+
+    const resyncSpy = vi.spyOn(chat, "_resyncHistory").mockResolvedValueOnce(true)
+    await expect(chat.refreshHistory("main")).resolves.toBe(true)
+    expect(resyncSpy).toHaveBeenCalledWith("main")
+    resyncSpy.mockRestore()
+  })
+
+  it("refreshHistory swallows network errors so the UI doesn't flap", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat.activeTab = "main"
+
+    const resyncSpy = vi.spyOn(chat, "_resyncHistory").mockRejectedValueOnce(new Error("net"))
+    await expect(chat.refreshHistory("main")).resolves.toBe(false)
+    resyncSpy.mockRestore()
+  })
+
+  it("refreshHistory is a no-op when no instance is bound", async () => {
+    const chat = useChatStore()
+    chat._instanceId = null
+    chat.activeTab = "main"
+    const resyncSpy = vi.spyOn(chat, "_resyncHistory").mockResolvedValueOnce(true)
+    await expect(chat.refreshHistory("main")).resolves.toBe(false)
+    expect(resyncSpy).not.toHaveBeenCalled()
+    resyncSpy.mockRestore()
   })
 })

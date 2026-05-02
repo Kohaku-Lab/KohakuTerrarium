@@ -39,7 +39,7 @@
             <span v-if="r.channel">ch: {{ r.channel }}</span>
             <span v-if="r.round != null" class="ml-auto">turn {{ r.round }}</span>
           </div>
-          <div class="text-[12px] text-warm-700 dark:text-warm-300 whitespace-pre-wrap break-words line-clamp-3">{{ r.content }}</div>
+          <div class="text-[12px] text-warm-700 dark:text-warm-300 whitespace-pre-wrap break-words line-clamp-3">{{ formatContent(r.content) }}</div>
         </button>
       </div>
     </div>
@@ -53,6 +53,14 @@ import { useRoute, useRouter } from "vue-router"
 import { useSessionDetailStore } from "@/stores/sessionDetail"
 import { sessionAPI } from "@/utils/api"
 import { useI18n } from "@/utils/i18n"
+import { extractTextPreview } from "@/utils/multimodal"
+
+function formatContent(c) {
+  // Search hits sometimes carry multi-modal ``content`` as a list of
+  // parts; flatten so we never render ``[object Object]`` or a base64
+  // image blob in the result row.
+  return extractTextPreview(c, 600)
+}
 
 const { t } = useI18n()
 const detail = useSessionDetailStore()

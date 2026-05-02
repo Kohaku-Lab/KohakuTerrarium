@@ -30,10 +30,18 @@
       <div class="font-mono text-warm-700 dark:text-warm-300 whitespace-pre-wrap break-words bg-warm-50 dark:bg-warm-800 rounded p-2 max-h-48 overflow-y-auto">{{ primaryText }}</div>
     </div>
 
-    <!-- Image artifact preview -->
+    <!-- Image artifact preview (single-image legacy fields) -->
     <div v-if="imageUrl" class="shrink-0 flex flex-col gap-1">
       <div class="text-[10px] uppercase tracking-wider text-warm-400">{{ t("sessionViewer.detail.image") }}</div>
       <img :src="imageUrl" class="max-h-64 object-contain rounded border border-warm-200 dark:border-warm-700" alt="event artifact" />
+    </div>
+
+    <!-- Multi-modal images parsed out of structured content -->
+    <div v-if="contentImages.length" class="shrink-0 flex flex-col gap-1">
+      <div class="text-[10px] uppercase tracking-wider text-warm-400">{{ t("sessionViewer.detail.image") }} ({{ contentImages.length }})</div>
+      <div class="flex flex-wrap gap-2">
+        <img v-for="(url, i) in contentImages" :key="i" :src="url" class="max-h-32 object-contain rounded border border-warm-200 dark:border-warm-700" :alt="'attachment ' + (i + 1)" />
+      </div>
     </div>
 
     <!-- Token usage breakdown -->
@@ -60,6 +68,7 @@
 import { computed } from "vue"
 import { useRoute } from "vue-router"
 
+import { extractTextPreview, listAttachments } from "@/utils/multimodal"
 import { useI18n } from "@/utils/i18n"
 
 const { t } = useI18n()
@@ -115,11 +124,32 @@ const iconClass = computed(() => ICON_MAP[props.event?.type] || "i-carbon-circle
 const primaryText = computed(() => {
   const e = props.event
   if (!e) return ""
-  if (typeof e.content === "string" && e.content) return e.content
-  if (typeof e.text === "string" && e.text) return e.text
-  if (typeof e.output === "string" && e.output) return e.output
+  // Multi-modal events ship ``content`` as a list of parts; flatten
+  // via extractTextPreview (no length cap so the detail pane shows
+  // the full text).
+  const fromContent = extractTextPreview(e.content, Number.MAX_SAFE_INTEGER)
+  if (fromContent) return fromContent
+  const fromText = extractTextPreview(e.text, Number.MAX_SAFE_INTEGER)
+  if (fromText) return fromText
+  const fromOutput = extractTextPreview(e.output, Number.MAX_SAFE_INTEGER)
+  if (fromOutput) return fromOutput
   if (typeof e.error === "string" && e.error) return e.error
   return ""
+})
+
+// Image attachments parsed out of multi-modal content so the detail
+// pane can render them alongside the text. Falls back to legacy
+// single-image fields handled below.
+const contentImages = computed(() => {
+  const e = props.event
+  const out = []
+  for (const field of ["content", "text", "output"]) {
+    const list = listAttachments(e?.[field])
+    for (const a of list) {
+      if (a.kind === "image" && a.url) out.push(a.url)
+    }
+  }
+  return out
 })
 
 const imageUrl = computed(() => {
