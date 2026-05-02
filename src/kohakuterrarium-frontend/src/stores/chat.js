@@ -1,7 +1,9 @@
 import { ElMessage } from "element-plus"
+import { getCurrentInstance } from "vue"
 
 import { terrariumAPI, agentAPI } from "@/utils/api"
 import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
+import { injectScope, registerScopeDisposer, scopeOfStoreId } from "@/composables/useScope"
 import { useMessagesStore } from "@/stores/messages"
 import { useInstancesStore } from "@/stores/instances"
 import { useStatusStore } from "@/stores/status"
@@ -1001,7 +1003,15 @@ function _parseArgs(args) {
   return args
 }
 
-export const useChatStore = defineStore("chat", {
+/**
+ * Chat store options. The same options block is fed into a Pinia
+ * factory below — one store per scope id (creature_id /
+ * terrarium_id) — so multiple ``AttachTab`` components in the macro
+ * shell can each own their own messages, WebSocket, and tab state
+ * without colliding on the shared singleton that v1 used. See
+ * ``composables/useScope.js`` for the lifecycle contract.
+ */
+const _chatStoreOptions = {
   state: () => ({
     /** @type {Object<string, import('@/utils/api').ChatMessage[]>} */
     messagesByTab: {},
@@ -1151,16 +1161,19 @@ export const useChatStore = defineStore("chat", {
       this._branchResyncPendingByTab = {}
       this._clearBranchResyncTimers()
       this.sessionInfo = {
-        sessionId: "",
-        model: "",
-        llmName: "",
-        agentName: "",
-        compactThreshold: 0,
-        maxContext: 0,
+        sessionId: instance.session_id || instance.id || "",
+        model: instance.model || "",
+        llmName: instance.llm_name || instance.model || "",
+        agentName: instance.config_name || instance.creatures?.[0]?.name || "",
+        compactThreshold: instance.compact_threshold || 0,
+        maxContext: instance.max_context || 0,
       }
 
-      // Reset status store too
-      const statusStore = useStatusStore()
+      // Reset status store too. Actions run detached from any Vue
+      // setup context, so ``injectScope()`` would return null —
+      // recover scope from this store's ``$id`` (registered as
+      // ``chat:<scope>``) and pass it explicitly.
+      const statusStore = useStatusStore(scopeOfStoreId(this.$id))
       statusStore.reset()
 
       if (instance.type === "terrarium") {
@@ -1709,8 +1722,10 @@ export const useChatStore = defineStore("chat", {
       const at = data.activity_type
       const name = data.name || "unknown"
 
-      // Forward ALL activities to status store for dashboard
-      const statusStore = useStatusStore()
+      // Forward ALL activities to the per-attach status store. We
+      // can't rely on inject here (actions run detached from setup),
+      // so recover scope from this store's $id and pass it through.
+      const statusStore = useStatusStore(scopeOfStoreId(this.$id))
       statusStore.handleActivity(data)
 
       if (at === "session_info") {
@@ -2399,7 +2414,7 @@ export const useChatStore = defineStore("chat", {
         }
       }
 
-      const msgStore = useMessagesStore()
+      const msgStore = useMessagesStore(scopeOfStoreId(this.$id))
       const normalized = normalizeMessageContent(data.content)
       msgStore.addChannelMessage(data.channel, {
         channel: data.channel,
@@ -2575,7 +2590,7 @@ export const useChatStore = defineStore("chat", {
         compactThreshold: 0,
         maxContext: 0,
       }
-      const statusStore = useStatusStore()
+      const statusStore = useStatusStore(scopeOfStoreId(this.$id))
       statusStore.reset()
     },
 
@@ -2638,4 +2653,57 @@ export const useChatStore = defineStore("chat", {
       }
     },
   },
-})
+}
+
+// ── Per-scope Pinia factory ────────────────────────────────────────
+//
+// Each unique scope (creature_id / terrarium_id, or the literal
+// "default" for the v1 singleton path) gets its own Pinia store
+// instance. The factory caches the ``defineStore`` result so the
+// SAME use-fn is returned for the SAME scope on every call — Pinia
+// then handles instance reuse internally.
+
+const _chatStoreFactories = new Map()
+
+function _factoryFor(scope) {
+  const key = scope || "default"
+  let useFn = _chatStoreFactories.get(key)
+  if (!useFn) {
+    useFn = defineStore(`chat:${key}`, _chatStoreOptions)
+    _chatStoreFactories.set(key, useFn)
+    if (scope) {
+      // When the macro shell tabs store closes the last tab carrying
+      // this scope, free the chat store + its WS. The default scope
+      // ("default") lives forever — v1 never explicitly disposes.
+      registerScopeDisposer(scope, () => {
+        try {
+          useFn()._cleanup?.()
+          useFn().$dispose?.()
+        } catch {
+          /* swallow — disposer must not throw */
+        }
+        _chatStoreFactories.delete(key)
+      })
+    }
+  }
+  return useFn
+}
+
+/**
+ * Resolve the active chat store for the call site.
+ *
+ * - Explicit ``scope`` argument → that-scoped store. Useful for
+ *   programmatic / test access.
+ * - Inside a Vue setup with a ``provideScope`` ancestor (the v2
+ *   macro shell's ``AttachTab``) → the per-attach store.
+ * - Anywhere else → the legacy singleton "default" store, so the v1
+ *   page-routed flow and helper composables that run outside a Vue
+ *   setup keep working unchanged.
+ */
+export function useChatStore(scope) {
+  if (scope !== undefined) return _factoryFor(scope)()
+  if (getCurrentInstance()) {
+    return _factoryFor(injectScope())()
+  }
+  return _factoryFor(null)()
+}

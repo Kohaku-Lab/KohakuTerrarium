@@ -4,9 +4,21 @@
  * Tracks session metadata, token usage, running jobs, and scratchpad
  * state. Populated from WebSocket activity events forwarded by the
  * chat store.
+ *
+ * Per-attach scope: each running creature has its own running-jobs
+ * list, token usage, scratchpad, etc. Two attach tabs for two
+ * creatures of the same config must NOT share status state.
+ * AttachTab provides ``kt:scope`` once at the top of its setup;
+ * descendants that call :func:`useStatusStore` automatically pick
+ * the per-attach store via inject. v1 page-routed flow falls
+ * through to the default singleton.
  */
 
-export const useStatusStore = defineStore("status", {
+import { getCurrentInstance } from "vue"
+
+import { injectScope, registerScopeDisposer } from "@/composables/useScope"
+
+const _options = {
   state: () => ({
     sessionInfo: {
       agentName: "",
@@ -31,6 +43,13 @@ export const useStatusStore = defineStore("status", {
     scratchpad: {},
     /** @type {number | null} */
     _elapsedTimer: null,
+    /**
+     * Ring buffer of recent activity events for the Inspector Trace
+     * pane. Last 100. Populated by ``handleActivity`` for any event
+     * type. Consumers should treat the array as opaque and not mutate.
+     * @type {Array<{ts: number, type: string, name?: string, detail?: string, data: object}>}
+     */
+    recentEvents: [],
   }),
 
   getters: {
@@ -42,6 +61,17 @@ export const useStatusStore = defineStore("status", {
     /** Handle a WS activity event. Call from chat store's _handleActivity. */
     handleActivity(data) {
       const at = data.activity_type
+      // Push to ring buffer for the Inspector Trace pane.
+      this.recentEvents.push({
+        ts: Date.now(),
+        type: at,
+        name: data.name || data.tool_name || "",
+        detail: data.detail || data.message || "",
+        data,
+      })
+      if (this.recentEvents.length > 100) {
+        this.recentEvents = this.recentEvents.slice(-100)
+      }
 
       if (at === "session_info") {
         this.sessionInfo = {
@@ -152,6 +182,36 @@ export const useStatusStore = defineStore("status", {
       }
       this.runningJobs = []
       this.scratchpad = {}
+      this.recentEvents = []
     },
   },
-})
+}
+
+const _factories = new Map()
+
+function _factoryFor(scope) {
+  const key = scope || "default"
+  let useFn = _factories.get(key)
+  if (!useFn) {
+    useFn = defineStore(`status:${key}`, _options)
+    _factories.set(key, useFn)
+    if (scope) {
+      registerScopeDisposer(scope, () => {
+        try {
+          useFn()._clearElapsedTimer?.()
+          useFn().$dispose?.()
+        } catch {
+          /* swallow */
+        }
+        _factories.delete(key)
+      })
+    }
+  }
+  return useFn
+}
+
+export function useStatusStore(scope) {
+  if (scope !== undefined) return _factoryFor(scope)()
+  if (getCurrentInstance()) return _factoryFor(injectScope())()
+  return _factoryFor(null)()
+}
