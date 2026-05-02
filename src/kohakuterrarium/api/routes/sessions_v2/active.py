@@ -125,16 +125,46 @@ async def get_terrarium_session(session_id: str, engine=Depends(get_engine)):
         raise HTTPException(404, f"Terrarium not found: {session_id}")
     if sess.kind != "terrarium":
         raise HTTPException(404, f"Terrarium not found: {session_id}")
-    return {
+    return _terrarium_response(sess)
+
+
+def _terrarium_response(sess) -> dict:
+    """Shape a terrarium :class:`Session` into the legacy wire format.
+
+    The frontend's ``stores/instances._mapTerrarium`` reads ``root_model``
+    / ``root_llm_name`` / ``root_session_id`` / ``root_max_context`` /
+    ``root_compact_threshold`` and a flat ``pwd``. The engine-backed
+    handle stores the root creature in ``sess.creatures`` like any peer
+    so the dispatcher gets a uniform shape — which means we have to
+    pull those fields back out at the API edge or the inspector pill
+    keeps showing a blank model for root.
+    """
+    creatures = {c.get("name", c.get("creature_id", "")): c for c in sess.creatures}
+    root_status: dict = {}
+    if sess.has_root:
+        # Recipe-loaded terrariums always name the root creature "root".
+        # Fall back to the first creature flagged ``is_root`` if a
+        # custom recipe ever changes the name (no current path does).
+        root_status = creatures.get("root") or next(
+            (c for c in sess.creatures if c.get("is_root")),
+            {},
+        )
+    out = {
         "terrarium_id": sess.session_id,
         "name": sess.name,
         "running": True,
-        "creatures": {
-            c.get("name", c.get("creature_id", "")): c for c in sess.creatures
-        },
+        "creatures": creatures,
         "channels": sess.channels,
         "has_root": sess.has_root,
+        "pwd": sess.pwd or root_status.get("pwd", ""),
     }
+    if root_status:
+        out["root_model"] = root_status.get("model", "")
+        out["root_llm_name"] = root_status.get("llm_name", "")
+        out["root_session_id"] = root_status.get("session_id", "")
+        out["root_max_context"] = root_status.get("max_context", 0)
+        out["root_compact_threshold"] = root_status.get("compact_threshold", 0)
+    return out
 
 
 @router.delete("/terrariums/{session_id}")
@@ -168,18 +198,7 @@ async def list_active_terrariums(engine=Depends(get_engine)):
         if sess.kind != "terrarium":
             continue
         full = lifecycle.get_session(engine, sess.session_id)
-        out.append(
-            {
-                "terrarium_id": full.session_id,
-                "name": full.name,
-                "running": True,
-                "creatures": {
-                    c.get("name", c.get("creature_id", "")): c for c in full.creatures
-                },
-                "channels": full.channels,
-                "has_root": full.has_root,
-            }
-        )
+        out.append(_terrarium_response(full))
     return out
 
 

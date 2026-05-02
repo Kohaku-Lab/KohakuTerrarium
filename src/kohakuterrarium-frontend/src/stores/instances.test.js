@@ -40,7 +40,7 @@ describe("instances store", () => {
     expect(store.list).toEqual([])
   })
 
-  it("returns mapped terrarium when fetchOne succeeds", async () => {
+  it("returns mapped terrarium with canonical root model when fetchOne succeeds", async () => {
     const store = useInstancesStore()
     terrariumAPI.get.mockResolvedValue({
       terrarium_id: "terrarium_1",
@@ -49,6 +49,7 @@ describe("instances store", () => {
       running: true,
       has_root: true,
       root_model: "model",
+      root_llm_name: "provider/model",
       root_session_id: "sess",
       root_max_context: 10,
       root_compact_threshold: 5,
@@ -59,6 +60,7 @@ describe("instances store", () => {
     const result = await store.fetchOne("terrarium_1")
 
     expect(result.id).toBe("terrarium_1")
+    expect(result.llm_name).toBe("provider/model")
     expect(store.current.id).toBe("terrarium_1")
   })
 })
