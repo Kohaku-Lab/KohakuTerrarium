@@ -19,6 +19,8 @@
 import { computed, onMounted, ref, watch } from "vue"
 
 import InspectorHeader from "@/components/shell/tabs/InspectorHeader.vue"
+import { provideScope } from "@/composables/useScope"
+import { useChatStore } from "@/stores/chat"
 import { useInstancesStore } from "@/stores/instances"
 import { inspectorInnerTabs } from "@/stores/tabKindRegistry"
 
@@ -27,6 +29,25 @@ const props = defineProps({ tab: { type: Object, required: true } })
 const target = computed(() => props.tab.target)
 const instances = useInstancesStore()
 const instance = computed(() => instances.list.find((i) => i.id === target.value) ?? null)
+
+// Provide the scope so every descendant inner tab (Header, Overview,
+// Activity, Trace, Log) resolves the per-attach status / messages /
+// chat stores rather than the default singletons. Without this, the
+// inner tabs read empty state regardless of whether the WS is open.
+provideScope(target.value)
+
+// Open the data feed for this target. ``initForInstance`` opens the
+// chat WS and routes its activity events into the scoped status store
+// — which is what every inner tab reads. Pass the scope explicitly
+// here because Vue's ``inject()`` does not see the caller's own
+// ``provide()`` (same-component caveat in ``useScope.js``).
+//
+// If an attach tab for the same target is already open, AttachTab has
+// already inited the same scoped chat store; ``initForInstance``
+// short-circuits when ``_instanceId === id`` and reuses the live WS.
+// So the cost of inspecting alone vs. inspecting alongside chat is at
+// most one extra ``/history`` round-trip.
+const chat = useChatStore(target.value)
 
 const STORAGE_KEY = computed(() => `kt.inspect.${target.value}.inner`)
 
@@ -55,16 +76,24 @@ const ActiveInner = computed(() => inspectorInnerTabs.get(activeInner.value)?.co
 
 // Lazy fetch the instance if not yet in the list (the rail's polling
 // fills it in for running targets, but a freshly-mounted inspector
-// may beat the poll).
-onMounted(async () => {
-  if (!instance.value && typeof instances.fetchOne === "function") {
+// may beat the poll). Once we have an instance, kick off the chat
+// store's WS — that's what feeds the scoped status / messages stores
+// the inner tabs read.
+async function ensureFeed() {
+  let inst = instance.value
+  if (!inst && typeof instances.fetchOne === "function") {
     try {
-      await instances.fetchOne(target.value)
+      inst = await instances.fetchOne(target.value)
     } catch {
       /* swallow — instance may not exist; UI degrades gracefully */
     }
   }
-})
+  if (inst) {
+    chat.initForInstance(inst)
+  }
+}
+onMounted(ensureFeed)
+watch(target, ensureFeed)
 
 // If the user ever navigates to a different target, reset inner-tab to
 // the persisted value for that target.

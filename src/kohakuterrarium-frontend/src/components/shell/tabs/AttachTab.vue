@@ -15,6 +15,7 @@ import { computed, onMounted, onUnmounted, provide, ref, watch } from "vue"
 
 import WorkspaceShell from "@/components/layout/WorkspaceShell.vue"
 import ConfirmStopDialog from "@/components/shell/tabs/ConfirmStopDialog.vue"
+import { useArtifactDetector } from "@/composables/useArtifactDetector"
 import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 import { provideScope } from "@/composables/useScope"
 import { useChatStore } from "@/stores/chat"
@@ -45,9 +46,17 @@ provideScope(target.value)
 // scoped one. Passing the scope in by hand keeps writes and reads on
 // the same store.
 const chat = useChatStore(target.value)
-const editor = useEditorStore()
-const layout = useLayoutStore()
+const editor = useEditorStore(target.value)
+const layout = useLayoutStore(target.value)
 const tabsStore = useTabsStore()
+
+// Per-scope artifact scanning. App.vue keeps its own (default-scope)
+// detector for the v1 page-routed flow; this one feeds the scoped
+// canvas store from the scoped chat store. Without it, image_url
+// parts from agent-side image generation never reach the macro
+// shell's Canvas panel because the global detector reads the empty
+// default chat store.
+useArtifactDetector(target.value)
 
 const loadedInstance = ref(null)
 const loading = ref(true)

@@ -119,25 +119,30 @@ describe("canvas store — artifact detection", () => {
     expect(store.artifacts).toHaveLength(0)
   })
 
-  it("isolates artifacts by instance/session/tab scope", () => {
-    const store = useCanvasStore()
+  it("isolates artifacts by Pinia scope (one canvas instance per attach)", () => {
+    // Pre-refactor the singleton canvas store kept ``byScope`` maps
+    // internally; now each Pinia scope gets its own canvas instance.
+    // Two scopes scanning the SAME message produce independent
+    // artifact lists.
+    const root = useCanvasStore("i1::root")
+    const worker = useCanvasStore("i1::worker")
     const msg = {
       id: "m6",
       role: "assistant",
       parts: [{ type: "text", content: "##canvas name=one lang=py##\nprint('a')\n##canvas##" }],
     }
 
-    store.setScope({ instanceId: "i1", sessionId: "s1", tab: "root" })
-    store.scanMessage(msg, store.currentScope)
-    expect(store.artifacts).toHaveLength(1)
+    root.scanMessage(msg)
+    expect(root.artifacts).toHaveLength(1)
+    expect(worker.artifacts).toHaveLength(0)
 
-    store.setScope({ instanceId: "i1", sessionId: "s1", tab: "worker" })
-    expect(store.artifacts).toHaveLength(0)
-    store.scanMessage(msg, store.currentScope)
-    expect(store.artifacts).toHaveLength(1)
+    worker.scanMessage(msg)
+    expect(worker.artifacts).toHaveLength(1)
+    expect(root.artifacts).toHaveLength(1)
 
-    store.setScope({ instanceId: "i1", sessionId: "s1", tab: "root" })
-    expect(store.artifacts).toHaveLength(1)
-    expect(Object.keys(store.artifactsByScope)).toHaveLength(2)
+    // Mutating one scope leaves the other untouched.
+    root.dismiss()
+    expect(root.dismissed).toBe(true)
+    expect(worker.dismissed).toBe(false)
   })
 })

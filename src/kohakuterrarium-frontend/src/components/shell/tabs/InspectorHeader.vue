@@ -7,7 +7,6 @@
       <span class="text-warm-500">{{ kind }}</span>
       <span class="text-warm-500">·</span>
       <span class="text-warm-600 dark:text-warm-400">{{ statusLabel }}</span>
-      <span v-if="liveMismatch" class="ml-auto text-[10px] uppercase tracking-wider text-amber" :title="mismatchTitle"> live data: chat tab not open </span>
     </div>
     <div class="flex items-center gap-3 text-xs text-warm-500 mt-1">
       <span v-if="model">{{ model }}</span>
@@ -65,14 +64,4 @@ const age = computed(() => {
   const h = Math.floor(m / 60)
   return `${h}h ${m % 60}m ago`
 })
-
-// Status store reflects whichever creature chat is currently bound to
-// (singleton WS until Phase 5). If it's a different target, indicate
-// the mismatch so the user knows live values may be stale.
-const liveMismatch = computed(() => {
-  if (!status.sessionInfo.sessionId) return false
-  return status.sessionInfo.sessionId !== props.target
-})
-
-const mismatchTitle = computed(() => `Live status data is currently bound to ${status.sessionInfo.sessionId}; this Inspector is for ${props.target}. Open a chat tab for ${props.target} to see live data.`)
 </script>

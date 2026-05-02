@@ -51,6 +51,7 @@ import { useRoute, useRouter } from "vue-router"
 
 import SessionDetail from "@/components/sessions/SessionDetail.vue"
 import SessionTreePane from "@/components/sessions/SessionTreePane.vue"
+import { provideScope } from "@/composables/useScope"
 import { useSessionDetailStore } from "@/stores/sessionDetail"
 import { useI18n } from "@/utils/i18n"
 
@@ -61,9 +62,21 @@ const { t } = useI18n()
 const props = defineProps({ sessionNameProp: { type: String, default: null } })
 const route = useRoute()
 const router = useRouter()
-const detail = useSessionDetailStore()
 
 const sessionName = computed(() => props.sessionNameProp ?? String(route.params.name || ""))
+
+// Scope the session-viewer stores (sessionDetail / eventStream /
+// turnRollup) by session name. Two macro-shell session-viewer tabs
+// then own independent meta / loaded events / tab selection, instead
+// of trampling each other through a shared singleton.
+provideScope(sessionName.value)
+
+// Pass scope explicitly here — Vue 3's ``inject()`` doesn't see the
+// caller's own ``provide()``, so this component itself must thread the
+// scope in by hand to land on the same per-session store its
+// descendants resolve. (Same-component caveat documented in
+// ``useScope.js``.)
+const detail = useSessionDetailStore(sessionName.value)
 
 const tabs = computed(() => [
   { id: "overview", label: t("sessionViewer.tabs.overview"), icon: "i-carbon-dashboard" },

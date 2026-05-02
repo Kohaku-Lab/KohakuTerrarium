@@ -1,9 +1,19 @@
 /**
  * useArtifactDetector — watches the chat store for assistant messages
- * and scans them for canvas artifacts. Runs globally (App.vue).
+ * and scans them for canvas artifacts.
  *
  * Scans periodically while processing (every 2s) to catch completed
  * code blocks mid-stream, plus a final scan when processing ends.
+ *
+ * **Scope.** Pass an explicit ``scope`` (the attach target id) when
+ * calling from inside an ``AttachTab`` so this composable feeds the
+ * scoped chat / canvas stores rather than the default singletons.
+ * Vue 3's ``inject()`` does not see the caller's own ``provide()``,
+ * so we can't rely on the in-composable ``useChatStore()``/``useCanvasStore()``
+ * to auto-resolve when the caller is the same component that
+ * provides scope. Calls without a ``scope`` argument fall through to
+ * the default singletons — the v1 page-routed path that App.vue
+ * still relies on.
  */
 
 import { onUnmounted, watch } from "vue"
@@ -12,22 +22,17 @@ import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 import { useCanvasStore } from "@/stores/canvas"
 import { useChatStore } from "@/stores/chat"
 
-export function useArtifactDetector() {
-  const chat = useChatStore()
-  const canvas = useCanvasStore()
+export function useArtifactDetector(scope) {
+  const chat = useChatStore(scope)
+  const canvas = useCanvasStore(scope)
   let ctrl = null
 
   function scanAll() {
     const tab = chat.activeTab
     if (!tab) return
-    canvas.setScope({
-      instanceId: chat._instanceId || "",
-      sessionId: chat.sessionInfo.sessionId || "",
-      tab,
-    })
     const msgs = chat.messagesByTab?.[tab] || []
     for (const m of msgs) {
-      canvas.scanMessage(m, canvas.currentScope.value)
+      canvas.scanMessage(m)
     }
   }
 

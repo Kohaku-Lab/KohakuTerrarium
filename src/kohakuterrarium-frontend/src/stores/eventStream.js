@@ -5,13 +5,19 @@
  * caches the events for the *currently expanded* turn only — switching
  * to a different turn clears and refetches. This keeps memory bounded
  * even on long sessions where one turn might have thousands of events.
+ *
+ * **Per-scope** (scope = session name). The session-viewer macro-tab
+ * provides the session name as scope, so two viewers don't trample
+ * each other's loaded events / cursor.
  */
 
 import { defineStore } from "pinia"
+import { getCurrentInstance } from "vue"
 
+import { injectScope, registerScopeDisposer } from "@/composables/useScope"
 import { sessionAPI } from "@/utils/api"
 
-export const useEventStreamStore = defineStore("eventStream", {
+const _eventStreamOptions = {
   state: () => ({
     sessionName: "",
     agent: "",
@@ -27,7 +33,6 @@ export const useEventStreamStore = defineStore("eventStream", {
   },
 
   actions: {
-    /** Load (or replace) events for one turn. */
     async loadTurn(sessionName, { agent = null, turnIndex = null } = {}) {
       this.sessionName = sessionName
       this.agent = agent || ""
@@ -38,7 +43,6 @@ export const useEventStreamStore = defineStore("eventStream", {
       await this.loadMore()
     },
 
-    /** Cursor-paginated next-page fetch. Idempotent past end-of-data. */
     async loadMore() {
       if (!this.sessionName) return
       if (this.loading) return
@@ -64,10 +68,8 @@ export const useEventStreamStore = defineStore("eventStream", {
       }
     },
 
-    /** Append a single event from the live-attach stream. */
     appendLive(eventObj) {
       if (!eventObj) return
-      // Only keep live events that match the currently displayed turn.
       if (
         this.turnIndex != null &&
         eventObj.turn_index != null &&
@@ -87,4 +89,32 @@ export const useEventStreamStore = defineStore("eventStream", {
       this.error = ""
     },
   },
-})
+}
+
+const _eventStreamFactories = new Map()
+
+function _factoryFor(scope) {
+  const key = scope || "default"
+  let useFn = _eventStreamFactories.get(key)
+  if (!useFn) {
+    useFn = defineStore(`eventStream:${key}`, _eventStreamOptions)
+    _eventStreamFactories.set(key, useFn)
+    if (scope) {
+      registerScopeDisposer(scope, () => {
+        try {
+          useFn().$dispose?.()
+        } catch {
+          /* swallow */
+        }
+        _eventStreamFactories.delete(key)
+      })
+    }
+  }
+  return useFn
+}
+
+export function useEventStreamStore(scope) {
+  if (scope !== undefined) return _factoryFor(scope)()
+  if (getCurrentInstance()) return _factoryFor(injectScope())()
+  return _factoryFor(null)()
+}

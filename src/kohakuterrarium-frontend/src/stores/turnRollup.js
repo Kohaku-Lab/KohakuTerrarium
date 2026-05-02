@@ -7,13 +7,17 @@
  * Refresh policy: lazy. The store does not subscribe to live events —
  * the caller (TraceTab) decides when to invalidate, e.g. after a
  * live-attach burst settles.
+ *
+ * **Per-scope** (scope = session name).
  */
 
 import { defineStore } from "pinia"
+import { getCurrentInstance } from "vue"
 
+import { injectScope, registerScopeDisposer } from "@/composables/useScope"
 import { sessionAPI } from "@/utils/api"
 
-export const useTurnRollupStore = defineStore("turnRollup", {
+const _turnRollupOptions = {
   state: () => ({
     sessionName: "",
     agent: "",
@@ -45,7 +49,6 @@ export const useTurnRollupStore = defineStore("turnRollup", {
       return max
     },
 
-    /** ``true`` when no row has a non-null cost — caller falls back to tokens. */
     costAvailable: (state) => state.turns.some((t) => t.cost_usd != null),
   },
 
@@ -91,4 +94,32 @@ export const useTurnRollupStore = defineStore("turnRollup", {
       this.error = ""
     },
   },
-})
+}
+
+const _turnRollupFactories = new Map()
+
+function _factoryFor(scope) {
+  const key = scope || "default"
+  let useFn = _turnRollupFactories.get(key)
+  if (!useFn) {
+    useFn = defineStore(`turnRollup:${key}`, _turnRollupOptions)
+    _turnRollupFactories.set(key, useFn)
+    if (scope) {
+      registerScopeDisposer(scope, () => {
+        try {
+          useFn().$dispose?.()
+        } catch {
+          /* swallow */
+        }
+        _turnRollupFactories.delete(key)
+      })
+    }
+  }
+  return useFn
+}
+
+export function useTurnRollupStore(scope) {
+  if (scope !== undefined) return _factoryFor(scope)()
+  if (getCurrentInstance()) return _factoryFor(injectScope())()
+  return _factoryFor(null)()
+}

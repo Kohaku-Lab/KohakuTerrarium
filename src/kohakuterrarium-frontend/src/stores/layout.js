@@ -1,14 +1,38 @@
 /**
  * Layout store — zone model, panel registry, presets, per-instance overrides.
  *
- * Phase 2 scope: the machinery only. Presets are loaded from whatever the
- * app registers (phase 4 ships real presets; phases 2/3 only ship legacy
- * wrappers). Panels are registered at component mount time so pages don't
- * depend on a hand-maintained registry file.
+ * Persistence: hybrid local + backend prefs
+ *   - kt.presets.user                       : array of user-saved preset defs
+ *   - kt.layout.activePreset[:scope]        : the active preset for a given attach scope
+ *   - kt.layout.tree.<presetId>             : saved splitter ratios for a preset (per preset, not per scope)
+ *   - kt.layout.instance.<id>               : per-instance overrides (zone toggles, sizes)
+ *   - kt.layout.trees                       : backend-mirrored tree-ratio map
+ *   - kt.layout.instances                   : backend-mirrored instance-overrides map
  *
- * Persistence: two localStorage keys
- *   - kt.presets.user            : array of user-saved preset defs
- *   - kt.layout.instance.<id>    : per-instance overrides (zone toggles, sizes)
+ * **Scoping model.** v2's macro shell can host multiple ``attach:<id>``
+ * tabs at once and each must be free to pick its own preset / enter
+ * edit mode independently. The state is split:
+ *
+ *   - **Module-level (shared across all attach tabs):**
+ *       ``builtinPresets``, ``userPresets``, ``panels`` (the panel
+ *       component registry), ``instanceOverrides`` (already keyed by
+ *       instance id), ``detachedPanels`` (window list).
+ *   - **Per-scope (one bucket per attach target):**
+ *       ``activePresetId`` and the ``editMode*`` triple. These are
+ *       what bleed when shared, so they live inside a Pinia factory
+ *       keyed by ``layout:<scope>``.
+ *
+ * Tree-ratio mutations remain global per preset — two attach tabs on
+ * the SAME preset will see the same splits. The user-visible fix is
+ * to use distinct presets, which is exactly what scoping
+ * ``activePresetId`` enables. If they really need different splits on
+ * the same preset, they can ``Save as new`` to fork.
+ *
+ * The ``useLayoutStore()`` API is unchanged for descendants of an
+ * ``AttachTab`` (which calls ``provideScope(target)``) — they
+ * automatically resolve to their per-scope store via inject. Outside
+ * the macro shell (v1 page routes, modals at app root) it falls back
+ * to a ``layout:default`` singleton, preserving v1 behaviour.
  *
  * Shape reference (JSDoc types):
  *
@@ -19,8 +43,9 @@
  */
 
 import { defineStore } from "pinia"
-import { computed, markRaw, ref } from "vue"
+import { computed, getCurrentInstance, markRaw, ref } from "vue"
 
+import { injectScope, registerScopeDisposer } from "@/composables/useScope"
 import { getHybridPrefSync, removeHybridPref, setHybridPref } from "@/utils/uiPrefs"
 
 const USER_PRESETS_KEY = "kt.presets.user"
@@ -65,577 +90,602 @@ function _mergePreset(base, patch) {
   return merged
 }
 
-export const useLayoutStore = defineStore("layout", () => {
-  // ---------- state ----------
+// ── Module-level shared state ──────────────────────────────────────
+//
+// These refs are constructed once and shared across every per-scope
+// store instance. Mutations go through the actions returned from the
+// setup function below; the refs themselves are never recreated.
 
-  /** @type {import('vue').Ref<Record<string, any>>} */
-  const builtinPresets = ref({})
-  /** @type {import('vue').Ref<Record<string, any>>} */
-  const userPresets = ref(_readJson(USER_PRESETS_KEY, {}))
-  /** @type {import('vue').Ref<string | null>} */
-  const activePresetId = ref(_readJson(ACTIVE_PRESET_KEY, null))
-
-  // panels keyed by id. Stored via markRaw so Vue reactivity doesn't
-  // wrap the component object (which breaks Element Plus + Monaco).
-  /** @type {import('vue').Ref<Record<string, any>>} */
-  const panels = ref({})
-
-  /** @type {import('vue').Ref<Record<string, Record<string, any>>>} */
-  const instanceOverrides = ref({})
-
-  /** @type {import('vue').Ref<Array<{panelId: string, instanceId: string}>>} */
-  const detachedPanels = ref([])
-
-  // ── edit mode state ────────────────────────────────────────────
-  /** Edit mode toggle. When true, panels show headers with a kebab
-   *  menu and splitters are thick and editable. */
-  const editMode = ref(false)
-  /** Pristine snapshot of the preset taken when edit mode opens —
-   *  used to revert on cancel. Null when not in edit mode. */
-  const editModeSnapshot = ref(null)
-  /** True if changes have been made since entering edit mode. */
-  const editModeDirty = ref(false)
-
-  // ---------- getters ----------
-
-  const allPresets = computed(() => ({
-    ...builtinPresets.value,
-    ...userPresets.value,
-  }))
-
-  const activePreset = computed(() => {
-    if (!activePresetId.value) return null
-    return allPresets.value[activePresetId.value] || null
-  })
-
-  const panelList = computed(() => Object.values(panels.value))
-
-  /** Return the effective preset for an instance (base + per-instance override). */
-  function effectivePreset(instanceId) {
-    const base = activePreset.value
-    if (!base) return null
-    const override = instanceId ? instanceOverrides.value[instanceId] : null
-    return _mergePreset(base, override)
+/** @type {import('vue').Ref<Record<string, any>>} */
+const _builtinPresets = ref({})
+// User-saved presets. Initialised empty so module import is safe
+// before localStorage exists / is stubbed; refreshed from localStorage
+// on every store mount so a fresh pinia in tests (or an external
+// localStorage write) is reflected on the next ``useLayoutStore()``
+// call. Mutations write to both this ref and localStorage so the next
+// re-read sees the same state — no clobber.
+/** @type {import('vue').Ref<Record<string, any>>} */
+const _userPresets = ref({})
+function _refreshUserPresets() {
+  try {
+    _userPresets.value = _readJson(USER_PRESETS_KEY, {}) || {}
+  } catch {
+    /* ignore — value stays at whatever it was */
   }
+}
+// panels keyed by id. Stored via markRaw so Vue reactivity doesn't
+// wrap the component object (which breaks Element Plus + Monaco).
+/** @type {import('vue').Ref<Record<string, any>>} */
+const _panels = ref({})
+/** @type {import('vue').Ref<Record<string, Record<string, any>>>} */
+const _instanceOverrides = ref({})
+/** @type {import('vue').Ref<Array<{panelId: string, instanceId: string}>>} */
+const _detachedPanels = ref([])
 
-  /** Return all slots for a given zone, in the preset's declared order. */
-  function slotsForZone(zoneId, instanceId = null) {
-    const preset = effectivePreset(instanceId)
-    if (!preset) return []
-    return preset.slots.filter((s) => s.zoneId === zoneId)
-  }
+/** Computed shared by every scope. */
+const _allPresets = computed(() => ({
+  ..._builtinPresets.value,
+  ..._userPresets.value,
+}))
+const _panelList = computed(() => Object.values(_panels.value))
 
-  // ---------- actions ----------
-
-  /** Register a built-in preset. Overwrites an existing entry with the same id.
-   *  Restores user-saved tree ratios from localStorage if available. */
-  function registerBuiltinPreset(preset) {
-    if (!preset || !preset.id) return
-    builtinPresets.value = {
-      ...builtinPresets.value,
-      [preset.id]: { ...preset, builtin: true },
-    }
-    // Restore saved splitter ratios for this preset
-    _restoreTreeRatios(preset.id)
-  }
-
-  /** Switch to a new active preset. Unknown ids are ignored. */
-  function switchPreset(id) {
-    if (allPresets.value[id]) {
-      activePresetId.value = id
-      _writeJson(ACTIVE_PRESET_KEY, id)
-      _restoreTreeRatios(id)
-    }
-  }
-
-  /** Toggle a zone's visibility in the active preset (not persisted to builtin). */
-  function toggleZone(zoneId) {
-    if (!activePreset.value) return
-    const preset = activePreset.value
-    const zone = preset.zones[zoneId] || { visible: true }
-    const nextZones = {
-      ...preset.zones,
-      [zoneId]: { ...zone, visible: !zone.visible },
-    }
-    if (preset.builtin) {
-      // Store override against the current instance scope (null = global).
-      _setOverrideZone(null, zoneId, { visible: !zone.visible })
-    } else {
-      userPresets.value = {
-        ...userPresets.value,
-        [preset.id]: { ...preset, zones: nextZones },
+// Recursively apply saved ratio values onto a tree structure.
+// Only updates ratios — does not change tree topology.
+function _applyRatios(target, saved) {
+  if (!target || !saved) return
+  if (target.type === "split" && saved.type === "split") {
+    if (saved.ratio != null) target.ratio = saved.ratio
+    if (target.children && saved.children) {
+      for (let i = 0; i < target.children.length && i < saved.children.length; i++) {
+        _applyRatios(target.children[i], saved.children[i])
       }
-      _writeJson(USER_PRESETS_KEY, userPresets.value)
     }
   }
+}
 
-  /** Set the size of a slot (or the zone itself). Size is a split ratio 0..100. */
-  function setSlotSize(zoneId, size) {
-    if (!activePreset.value) return
-    const preset = activePreset.value
-    const zone = preset.zones[zoneId] || {}
-    const next = { ...zone, size }
-    if (preset.builtin) {
-      _setOverrideZone(null, zoneId, { size })
-    } else {
-      userPresets.value = {
-        ...userPresets.value,
-        [preset.id]: {
-          ...preset,
-          zones: { ...preset.zones, [zoneId]: next },
+function _restoreTreeRatios(presetId) {
+  const saved =
+    _readJson(PRESET_TREE_PREFIX + presetId, null) ||
+    _readBackendMap(BACKEND_TREES_KEY)[presetId] ||
+    null
+  if (!saved) return
+  const p = _allPresets.value[presetId]
+  if (!p?.tree) return
+  _applyRatios(p.tree, saved)
+  _writeJson(PRESET_TREE_PREFIX + presetId, saved)
+}
+
+// Shared (registry-level) actions. Free functions because they don't
+// touch any per-scope state.
+
+/** Register a built-in preset. Overwrites an existing entry with the same id. */
+function registerBuiltinPreset(preset) {
+  if (!preset || !preset.id) return
+  _builtinPresets.value = {
+    ..._builtinPresets.value,
+    [preset.id]: { ...preset, builtin: true },
+  }
+  _restoreTreeRatios(preset.id)
+}
+
+/** Register a panel definition. Idempotent; replaces if id matches. */
+function registerPanel(meta) {
+  if (!meta || !meta.id) return
+  const normalized = {
+    id: meta.id,
+    label: meta.label || meta.id,
+    component: meta.component ? markRaw(meta.component) : null,
+    preferredZones: meta.preferredZones || [],
+    orientation: meta.orientation || "any",
+    supportsDetach: meta.supportsDetach !== false,
+    props: meta.props || null,
+  }
+  _panels.value = { ..._panels.value, [meta.id]: normalized }
+}
+
+function unregisterPanel(panelId) {
+  if (!_panels.value[panelId]) return
+  const next = { ..._panels.value }
+  delete next[panelId]
+  _panels.value = next
+}
+
+function getPanel(panelId) {
+  return _panels.value[panelId] || null
+}
+
+function loadInstanceOverrides(instanceId) {
+  if (!instanceId) return
+  const data =
+    _readJson(INSTANCE_OVERRIDE_PREFIX + instanceId, null) ||
+    _readBackendMap(BACKEND_INSTANCES_KEY)[instanceId] ||
+    null
+  if (data) {
+    _instanceOverrides.value = {
+      ..._instanceOverrides.value,
+      [instanceId]: data,
+    }
+    _writeJson(INSTANCE_OVERRIDE_PREFIX + instanceId, data)
+  }
+}
+
+function getInstancePresetId(instanceId) {
+  if (!instanceId) return null
+  const data =
+    _instanceOverrides.value[instanceId] || _readJson(INSTANCE_OVERRIDE_PREFIX + instanceId, null)
+  return data?.presetId || null
+}
+
+function rememberInstancePreset(instanceId, presetId) {
+  if (!instanceId || !presetId) return
+  const current =
+    _instanceOverrides.value[instanceId] ||
+    _readJson(INSTANCE_OVERRIDE_PREFIX + instanceId, {}) ||
+    _readBackendMap(BACKEND_INSTANCES_KEY)[instanceId] ||
+    {}
+  const next = { ...current, presetId }
+  _instanceOverrides.value = {
+    ..._instanceOverrides.value,
+    [instanceId]: next,
+  }
+  _writeJson(INSTANCE_OVERRIDE_PREFIX + instanceId, next)
+  _writeBackendMap(BACKEND_INSTANCES_KEY, {
+    ..._readBackendMap(BACKEND_INSTANCES_KEY),
+    [instanceId]: next,
+  })
+}
+
+function setInstanceOverride(instanceId, patch) {
+  if (!instanceId) return
+  _instanceOverrides.value = {
+    ..._instanceOverrides.value,
+    [instanceId]: patch,
+  }
+  _writeJson(INSTANCE_OVERRIDE_PREFIX + instanceId, patch)
+  _writeBackendMap(BACKEND_INSTANCES_KEY, {
+    ..._readBackendMap(BACKEND_INSTANCES_KEY),
+    [instanceId]: patch,
+  })
+}
+
+function clearInstanceOverride(instanceId) {
+  if (!_instanceOverrides.value[instanceId]) return
+  const next = { ..._instanceOverrides.value }
+  delete next[instanceId]
+  _instanceOverrides.value = next
+  removeHybridPref(INSTANCE_OVERRIDE_PREFIX + instanceId)
+  const backendMap = { ..._readBackendMap(BACKEND_INSTANCES_KEY) }
+  delete backendMap[instanceId]
+  _writeBackendMap(BACKEND_INSTANCES_KEY, backendMap)
+}
+
+function markDetached(panelId, instanceId) {
+  const entry = { panelId, instanceId }
+  if (_detachedPanels.value.some((d) => d.panelId === panelId && d.instanceId === instanceId)) {
+    return
+  }
+  _detachedPanels.value = [..._detachedPanels.value, entry]
+}
+
+function unmarkDetached(panelId, instanceId) {
+  _detachedPanels.value = _detachedPanels.value.filter(
+    (d) => !(d.panelId === panelId && d.instanceId === instanceId),
+  )
+}
+
+// ── Per-scope setup ────────────────────────────────────────────────
+
+function _setupForScope(scope) {
+  return () => {
+    _refreshUserPresets()
+    const activeKey = scope ? `${ACTIVE_PRESET_KEY}:${scope}` : ACTIVE_PRESET_KEY
+    // Per-scope reactive state.
+    const activePresetId = ref(_readJson(activeKey, null))
+    const editMode = ref(false)
+    const editModeSnapshot = ref(null)
+    const editModeDirty = ref(false)
+
+    const activePreset = computed(() => {
+      if (!activePresetId.value) return null
+      return _allPresets.value[activePresetId.value] || null
+    })
+
+    function effectivePreset(instanceId) {
+      const base = activePreset.value
+      if (!base) return null
+      const override = instanceId ? _instanceOverrides.value[instanceId] : null
+      // Builtin presets are also subject to the per-scope (or __global)
+      // override stored under ``__global`` for the legacy v1 path or
+      // under the scope id when the v2 macro shell is the caller. The
+      // scope-id override is what keeps two attach tabs on the same
+      // preset from sharing zone-toggle state.
+      const scopeOverride = scope ? _instanceOverrides.value[scope] : null
+      const merged = _mergePreset(base, scopeOverride)
+      return _mergePreset(merged, override)
+    }
+
+    function slotsForZone(zoneId, instanceId = null) {
+      const preset = effectivePreset(instanceId)
+      if (!preset) return []
+      return preset.slots.filter((s) => s.zoneId === zoneId)
+    }
+
+    function switchPreset(id) {
+      if (_allPresets.value[id]) {
+        activePresetId.value = id
+        _writeJson(activeKey, id)
+        _restoreTreeRatios(id)
+      }
+    }
+
+    function toggleZone(zoneId) {
+      if (!activePreset.value) return
+      const preset = activePreset.value
+      const zone = preset.zones[zoneId] || { visible: true }
+      const nextZones = {
+        ...preset.zones,
+        [zoneId]: { ...zone, visible: !zone.visible },
+      }
+      if (preset.builtin) {
+        // Per-scope override (or __global for the default scope) so two
+        // attach tabs on the same builtin preset don't share their zone
+        // visibility toggles.
+        _setOverrideZone(scope || null, zoneId, { visible: !zone.visible })
+      } else {
+        _userPresets.value = {
+          ..._userPresets.value,
+          [preset.id]: { ...preset, zones: nextZones },
+        }
+        _writeJson(USER_PRESETS_KEY, _userPresets.value)
+      }
+    }
+
+    function setSlotSize(zoneId, size) {
+      if (!activePreset.value) return
+      const preset = activePreset.value
+      const zone = preset.zones[zoneId] || {}
+      const next = { ...zone, size }
+      if (preset.builtin) {
+        _setOverrideZone(scope || null, zoneId, { size })
+      } else {
+        _userPresets.value = {
+          ..._userPresets.value,
+          [preset.id]: {
+            ...preset,
+            zones: { ...preset.zones, [zoneId]: next },
+          },
+        }
+        _writeJson(USER_PRESETS_KEY, _userPresets.value)
+      }
+    }
+
+    function saveAsNewPreset(newId, label, shortcut = "") {
+      if (!activePreset.value || !newId) return null
+      const snapshot = _clone(activePreset.value)
+      snapshot.id = newId
+      snapshot.label = label || newId
+      snapshot.shortcut = shortcut
+      snapshot.builtin = false
+      _userPresets.value = { ..._userPresets.value, [newId]: snapshot }
+      _writeJson(USER_PRESETS_KEY, _userPresets.value)
+      activePresetId.value = newId
+      _writeJson(activeKey, newId)
+      return snapshot
+    }
+
+    function resetPresetToDefault(id) {
+      if (_userPresets.value[id]) {
+        const next = { ..._userPresets.value }
+        delete next[id]
+        _userPresets.value = next
+        _writeJson(USER_PRESETS_KEY, _userPresets.value)
+      }
+      // Clear this scope's override so builtin defaults show up again.
+      const key = scope || "__global"
+      if (_instanceOverrides.value[key]) {
+        const next = { ..._instanceOverrides.value }
+        delete next[key]
+        _instanceOverrides.value = next
+      }
+    }
+
+    function deleteUserPreset(id) {
+      if (!_userPresets.value[id]) return
+      const next = { ..._userPresets.value }
+      delete next[id]
+      _userPresets.value = next
+      _writeJson(USER_PRESETS_KEY, _userPresets.value)
+      if (activePresetId.value === id) {
+        const ids = Object.keys(_builtinPresets.value)
+        activePresetId.value = ids[0] || null
+        _writeJson(activeKey, activePresetId.value)
+      }
+    }
+
+    function _setOverrideZone(instanceId, zoneId, patch) {
+      const key = instanceId || "__global"
+      const current = _instanceOverrides.value[key] || { zones: {} }
+      const nextOverride = {
+        ...current,
+        zones: {
+          ...(current.zones || {}),
+          [zoneId]: { ...(current.zones?.[zoneId] || {}), ...patch },
         },
       }
-      _writeJson(USER_PRESETS_KEY, userPresets.value)
-    }
-  }
-
-  /** Register a panel definition. Idempotent; replaces if id matches. */
-  function registerPanel(meta) {
-    if (!meta || !meta.id) return
-    const normalized = {
-      id: meta.id,
-      label: meta.label || meta.id,
-      component: meta.component ? markRaw(meta.component) : null,
-      preferredZones: meta.preferredZones || [],
-      orientation: meta.orientation || "any",
-      supportsDetach: meta.supportsDetach !== false,
-      props: meta.props || null,
-    }
-    panels.value = { ...panels.value, [meta.id]: normalized }
-  }
-
-  function unregisterPanel(panelId) {
-    if (!panels.value[panelId]) return
-    const next = { ...panels.value }
-    delete next[panelId]
-    panels.value = next
-  }
-
-  /** Look up a panel definition by id. */
-  function getPanel(panelId) {
-    return panels.value[panelId] || null
-  }
-
-  /** Save the current active preset under a new name. Becomes a user preset. */
-  function saveAsNewPreset(newId, label, shortcut = "") {
-    if (!activePreset.value || !newId) return null
-    const snapshot = _clone(activePreset.value)
-    snapshot.id = newId
-    snapshot.label = label || newId
-    snapshot.shortcut = shortcut
-    snapshot.builtin = false
-    userPresets.value = { ...userPresets.value, [newId]: snapshot }
-    _writeJson(USER_PRESETS_KEY, userPresets.value)
-    activePresetId.value = newId
-    _writeJson(ACTIVE_PRESET_KEY, newId)
-    return snapshot
-  }
-
-  /** Reset a preset to its builtin default. Deletes any user patch for that id. */
-  function resetPresetToDefault(id) {
-    if (userPresets.value[id]) {
-      const next = { ...userPresets.value }
-      delete next[id]
-      userPresets.value = next
-      _writeJson(USER_PRESETS_KEY, userPresets.value)
-    }
-    // Also clear global override so builtin defaults show up again.
-    if (instanceOverrides.value.__global) {
-      const next = { ...instanceOverrides.value }
-      delete next.__global
-      instanceOverrides.value = next
-    }
-  }
-
-  /** Delete a user preset. Builtin presets cannot be deleted. */
-  function deleteUserPreset(id) {
-    if (!userPresets.value[id]) return
-    const next = { ...userPresets.value }
-    delete next[id]
-    userPresets.value = next
-    _writeJson(USER_PRESETS_KEY, userPresets.value)
-    if (activePresetId.value === id) {
-      // Fall back to any builtin.
-      const ids = Object.keys(builtinPresets.value)
-      activePresetId.value = ids[0] || null
-    }
-  }
-
-  /** Load per-instance overrides from localStorage. */
-  function loadInstanceOverrides(instanceId) {
-    if (!instanceId) return
-    const data =
-      _readJson(INSTANCE_OVERRIDE_PREFIX + instanceId, null) ||
-      _readBackendMap(BACKEND_INSTANCES_KEY)[instanceId] ||
-      null
-    if (data) {
-      instanceOverrides.value = {
-        ...instanceOverrides.value,
-        [instanceId]: data,
+      _instanceOverrides.value = {
+        ..._instanceOverrides.value,
+        [key]: nextOverride,
       }
-      _writeJson(INSTANCE_OVERRIDE_PREFIX + instanceId, data)
+      if (instanceId) {
+        _writeJson(INSTANCE_OVERRIDE_PREFIX + instanceId, nextOverride)
+      }
     }
-  }
 
-  /** Get the remembered preset id for an instance, or null. */
-  function getInstancePresetId(instanceId) {
-    if (!instanceId) return null
-    const data =
-      instanceOverrides.value[instanceId] || _readJson(INSTANCE_OVERRIDE_PREFIX + instanceId, null)
-    return data?.presetId || null
-  }
+    // ── edit mode actions ────────────────────────────────────────────
 
-  /** Persist the active preset for an instance. */
-  function rememberInstancePreset(instanceId, presetId) {
-    if (!instanceId || !presetId) return
-    const current =
-      instanceOverrides.value[instanceId] ||
-      _readJson(INSTANCE_OVERRIDE_PREFIX + instanceId, {}) ||
-      _readBackendMap(BACKEND_INSTANCES_KEY)[instanceId] ||
-      {}
-    const next = { ...current, presetId }
-    instanceOverrides.value = {
-      ...instanceOverrides.value,
-      [instanceId]: next,
+    function enterEditMode() {
+      if (editMode.value) return
+      const p = activePreset.value
+      if (!p) return
+      editModeSnapshot.value = _clone(p)
+      _mutateActivePreset(_clone(p))
+      editMode.value = true
+      editModeDirty.value = false
     }
-    _writeJson(INSTANCE_OVERRIDE_PREFIX + instanceId, next)
-    _writeBackendMap(BACKEND_INSTANCES_KEY, {
-      ..._readBackendMap(BACKEND_INSTANCES_KEY),
-      [instanceId]: next,
-    })
-  }
 
-  /** Set a per-instance override patch (merged into active preset). */
-  function setInstanceOverride(instanceId, patch) {
-    if (!instanceId) return
-    instanceOverrides.value = {
-      ...instanceOverrides.value,
-      [instanceId]: patch,
+    function exitEditMode() {
+      const snap = editModeSnapshot.value
+      if (snap) {
+        _mutateActivePreset(_clone(snap))
+      }
+      editMode.value = false
+      editModeSnapshot.value = null
+      editModeDirty.value = false
     }
-    _writeJson(INSTANCE_OVERRIDE_PREFIX + instanceId, patch)
-    _writeBackendMap(BACKEND_INSTANCES_KEY, {
-      ..._readBackendMap(BACKEND_INSTANCES_KEY),
-      [instanceId]: patch,
-    })
-  }
 
-  /** Clear all overrides for an instance. */
-  function clearInstanceOverride(instanceId) {
-    if (!instanceOverrides.value[instanceId]) return
-    const next = { ...instanceOverrides.value }
-    delete next[instanceId]
-    instanceOverrides.value = next
-    removeHybridPref(INSTANCE_OVERRIDE_PREFIX + instanceId)
-    const backendMap = { ..._readBackendMap(BACKEND_INSTANCES_KEY) }
-    delete backendMap[instanceId]
-    _writeBackendMap(BACKEND_INSTANCES_KEY, backendMap)
-  }
-
-  /** Internal: patch a single zone inside an instance (or global) override. */
-  function _setOverrideZone(instanceId, zoneId, patch) {
-    const key = instanceId || "__global"
-    const current = instanceOverrides.value[key] || { zones: {} }
-    const nextOverride = {
-      ...current,
-      zones: {
-        ...(current.zones || {}),
-        [zoneId]: { ...(current.zones?.[zoneId] || {}), ...patch },
-      },
-    }
-    instanceOverrides.value = {
-      ...instanceOverrides.value,
-      [key]: nextOverride,
-    }
-    if (instanceId) {
-      _writeJson(INSTANCE_OVERRIDE_PREFIX + instanceId, nextOverride)
-    }
-  }
-
-  // ── edit mode actions ──────────────────────────────────────────
-
-  function enterEditMode() {
-    if (editMode.value) return
-    const p = activePreset.value
-    if (!p) return
-    // Snapshot the original, then replace the live preset with a
-    // deep clone so mutations only touch the working copy.
-    editModeSnapshot.value = _clone(p)
-    _mutateActivePreset(_clone(p))
-    editMode.value = true
-    editModeDirty.value = false
-  }
-
-  function exitEditMode() {
-    // Restore the original preset (discard unsaved changes).
-    const snap = editModeSnapshot.value
-    if (snap) {
+    function revertEditMode() {
+      const snap = editModeSnapshot.value
+      if (!snap) return
       _mutateActivePreset(_clone(snap))
+      editModeDirty.value = false
     }
-    editMode.value = false
-    editModeSnapshot.value = null
-    editModeDirty.value = false
-  }
 
-  /** Discard edit mode changes and restore the preset as it was. */
-  function revertEditMode() {
-    const snap = editModeSnapshot.value
-    if (!snap) return
-    _mutateActivePreset(_clone(snap))
-    editModeDirty.value = false
-  }
-
-  /** Commit the current working copy to persistent storage.
-   *  Only works for user presets — builtins must use "Save as new". */
-  function saveEditMode() {
-    const p = activePreset.value
-    if (!p || p.builtin) return
-    userPresets.value = {
-      ...userPresets.value,
-      [p.id]: _clone(p),
-    }
-    _writeJson(USER_PRESETS_KEY, userPresets.value)
-    editModeSnapshot.value = _clone(p)
-    editModeDirty.value = false
-  }
-
-  /** Replace the panel at a given slot coordinate. */
-  function replaceSlotPanel(zoneId, oldPanelId, newPanelId) {
-    const p = activePreset.value
-    if (!p) return
-    const nextSlots = p.slots.map((s) => {
-      if (s.zoneId === zoneId && s.panelId === oldPanelId) {
-        return { ...s, panelId: newPanelId }
+    function saveEditMode() {
+      const p = activePreset.value
+      if (!p || p.builtin) return
+      _userPresets.value = {
+        ..._userPresets.value,
+        [p.id]: _clone(p),
       }
-      return s
-    })
-    _mutateActivePreset({ slots: nextSlots })
-    editModeDirty.value = true
-  }
-
-  /** Remove a slot entirely. */
-  function removeSlot(zoneId, panelId) {
-    const p = activePreset.value
-    if (!p) return
-    const nextSlots = p.slots.filter((s) => !(s.zoneId === zoneId && s.panelId === panelId))
-    _mutateActivePreset({ slots: nextSlots })
-    editModeDirty.value = true
-  }
-
-  /** Append a new slot to a zone. */
-  function addSlotToZone(zoneId, panelId) {
-    const p = activePreset.value
-    if (!p) return
-    const nextSlots = [...p.slots, { zoneId, panelId }]
-    // Also make the zone visible if it wasn't.
-    const nextZones = {
-      ...p.zones,
-      [zoneId]: { ...(p.zones[zoneId] || {}), visible: true },
+      _writeJson(USER_PRESETS_KEY, _userPresets.value)
+      editModeSnapshot.value = _clone(p)
+      editModeDirty.value = false
     }
-    _mutateActivePreset({ slots: nextSlots, zones: nextZones })
-    editModeDirty.value = true
-  }
 
-  /** Internal: mutate the active preset in place (either builtin or
-   *  user). Changes are kept in memory until saveEditMode(). */
-  function _mutateActivePreset(patch) {
-    const p = activePreset.value
-    if (!p) return
-    const next = { ...p, ...patch }
-    if (p.builtin) {
-      builtinPresets.value = {
-        ...builtinPresets.value,
-        [p.id]: next,
-      }
-    } else {
-      userPresets.value = {
-        ...userPresets.value,
-        [p.id]: next,
-      }
-    }
-  }
-
-  // ── tree-based mutations (for the binary split tree layout) ────
-
-  /** Walk the active preset's tree and find the node by reference,
-   *  returning its parent + child index. Returns null if not found. */
-  function _findInTree(tree, target) {
-    if (!tree || tree.type !== "split") return null
-    for (let i = 0; i < tree.children.length; i++) {
-      if (tree.children[i] === target) return { parent: tree, index: i }
-      const found = _findInTree(tree.children[i], target)
-      if (found) return found
-    }
-    return null
-  }
-
-  /** Replace a leaf node's panelId in the active preset tree. */
-  function replaceTreePanel(leafNode, newPanelId) {
-    leafNode.panelId = newPanelId
-    _mutateActivePreset({ tree: activePreset.value?.tree })
-    editModeDirty.value = true
-  }
-
-  /** Remove a leaf node from the tree. Its sibling takes the parent's
-   *  place, effectively collapsing the split. */
-  function removeTreeNode(leafNode) {
-    const p = activePreset.value
-    if (!p?.tree) return
-    // If the leaf IS the root, clear the tree.
-    if (p.tree === leafNode) {
-      _mutateActivePreset({ tree: { type: "leaf", panelId: "" } })
+    function replaceSlotPanel(zoneId, oldPanelId, newPanelId) {
+      const p = activePreset.value
+      if (!p) return
+      const nextSlots = p.slots.map((s) => {
+        if (s.zoneId === zoneId && s.panelId === oldPanelId) {
+          return { ...s, panelId: newPanelId }
+        }
+        return s
+      })
+      _mutateActivePreset({ slots: nextSlots })
       editModeDirty.value = true
-      return
     }
-    const found = _findInTree(p.tree, leafNode)
-    if (!found) return
-    const { parent, index } = found
-    const sibling = parent.children[1 - index]
-    // Replace the parent split with the sibling. We need to find the
-    // grandparent to do this.
-    if (p.tree === parent) {
-      // Parent is the root — replace root with sibling.
-      _mutateActivePreset({ tree: sibling })
-    } else {
-      const gp = _findInTree(p.tree, parent)
-      if (gp) {
-        gp.parent.children[gp.index] = sibling
-        _mutateActivePreset({ tree: p.tree })
+
+    function removeSlot(zoneId, panelId) {
+      const p = activePreset.value
+      if (!p) return
+      const nextSlots = p.slots.filter((s) => !(s.zoneId === zoneId && s.panelId === panelId))
+      _mutateActivePreset({ slots: nextSlots })
+      editModeDirty.value = true
+    }
+
+    function addSlotToZone(zoneId, panelId) {
+      const p = activePreset.value
+      if (!p) return
+      const nextSlots = [...p.slots, { zoneId, panelId }]
+      const nextZones = {
+        ...p.zones,
+        [zoneId]: { ...(p.zones[zoneId] || {}), visible: true },
       }
+      _mutateActivePreset({ slots: nextSlots, zones: nextZones })
+      editModeDirty.value = true
     }
-    editModeDirty.value = true
-  }
 
-  /** Split a leaf node into two (the leaf keeps its panel, a new empty
-   *  leaf is added next to it). */
-  function splitTreeNode(leafNode, direction = "horizontal") {
-    const p = activePreset.value
-    if (!p?.tree) return
-    const newSplit = {
-      type: "split",
-      direction,
-      ratio: 50,
-      children: [
-        { type: "leaf", panelId: leafNode.panelId },
-        { type: "leaf", panelId: "" },
-      ],
-    }
-    if (p.tree === leafNode) {
-      _mutateActivePreset({ tree: newSplit })
-    } else {
-      const found = _findInTree(p.tree, leafNode)
-      if (found) {
-        found.parent.children[found.index] = newSplit
-        _mutateActivePreset({ tree: p.tree })
-      }
-    }
-    editModeDirty.value = true
-  }
-
-  /** Update a split node's ratio (called during drag). */
-  function setTreeRatio(splitNode, newRatio) {
-    splitNode.ratio = Math.max(10, Math.min(90, newRatio))
-    // Don't set editModeDirty for drag — it's noisy. Only mark dirty
-    // on structural changes (replace/remove/split).
-  }
-
-  /** Persist the current tree ratios to localStorage (call on drag end). */
-  function persistTreeRatios() {
-    const p = activePreset.value
-    if (!p?.tree) return
-    _writeJson(PRESET_TREE_PREFIX + p.id, p.tree)
-    _writeBackendMap(BACKEND_TREES_KEY, { ..._readBackendMap(BACKEND_TREES_KEY), [p.id]: p.tree })
-  }
-
-  /** Restore saved tree ratios for a preset from localStorage. */
-  function _restoreTreeRatios(presetId) {
-    const saved =
-      _readJson(PRESET_TREE_PREFIX + presetId, null) ||
-      _readBackendMap(BACKEND_TREES_KEY)[presetId] ||
-      null
-    if (!saved) return
-    const p = allPresets.value[presetId]
-    if (!p?.tree) return
-    _applyRatios(p.tree, saved)
-    _writeJson(PRESET_TREE_PREFIX + presetId, saved)
-  }
-
-  /** Recursively apply saved ratio values onto a tree structure.
-   *  Only updates ratios — does not change tree topology. */
-  function _applyRatios(target, saved) {
-    if (!target || !saved) return
-    if (target.type === "split" && saved.type === "split") {
-      if (saved.ratio != null) target.ratio = saved.ratio
-      if (target.children && saved.children) {
-        for (let i = 0; i < target.children.length && i < saved.children.length; i++) {
-          _applyRatios(target.children[i], saved.children[i])
+    function _mutateActivePreset(patch) {
+      const p = activePreset.value
+      if (!p) return
+      const next = { ...p, ...patch }
+      if (p.builtin) {
+        _builtinPresets.value = {
+          ..._builtinPresets.value,
+          [p.id]: next,
+        }
+      } else {
+        _userPresets.value = {
+          ..._userPresets.value,
+          [p.id]: next,
         }
       }
     }
-  }
 
-  /** Attach a detached-window descriptor (Phase 11 will consume this). */
-  function markDetached(panelId, instanceId) {
-    const entry = { panelId, instanceId }
-    if (detachedPanels.value.some((d) => d.panelId === panelId && d.instanceId === instanceId)) {
-      return
+    // ── tree mutations (still operate on the shared preset object) ──
+
+    function _findInTree(tree, target) {
+      if (!tree || tree.type !== "split") return null
+      for (let i = 0; i < tree.children.length; i++) {
+        if (tree.children[i] === target) return { parent: tree, index: i }
+        const found = _findInTree(tree.children[i], target)
+        if (found) return found
+      }
+      return null
     }
-    detachedPanels.value = [...detachedPanels.value, entry]
-  }
 
-  function unmarkDetached(panelId, instanceId) {
-    detachedPanels.value = detachedPanels.value.filter(
-      (d) => !(d.panelId === panelId && d.instanceId === instanceId),
-    )
-  }
+    function replaceTreePanel(leafNode, newPanelId) {
+      leafNode.panelId = newPanelId
+      _mutateActivePreset({ tree: activePreset.value?.tree })
+      editModeDirty.value = true
+    }
 
-  return {
-    // state
-    builtinPresets,
-    userPresets,
-    activePresetId,
-    panels,
-    instanceOverrides,
-    detachedPanels,
-    editMode,
-    editModeSnapshot,
-    editModeDirty,
-    // getters
-    allPresets,
-    activePreset,
-    panelList,
-    // fns
-    effectivePreset,
-    slotsForZone,
-    registerBuiltinPreset,
-    switchPreset,
-    toggleZone,
-    setSlotSize,
-    registerPanel,
-    unregisterPanel,
-    getPanel,
-    saveAsNewPreset,
-    resetPresetToDefault,
-    deleteUserPreset,
-    loadInstanceOverrides,
-    getInstancePresetId,
-    rememberInstancePreset,
-    setInstanceOverride,
-    clearInstanceOverride,
-    markDetached,
-    unmarkDetached,
-    // edit mode
-    enterEditMode,
-    exitEditMode,
-    revertEditMode,
-    saveEditMode,
-    replaceSlotPanel,
-    removeSlot,
-    addSlotToZone,
-    // tree mutations
-    replaceTreePanel,
-    removeTreeNode,
-    splitTreeNode,
-    setTreeRatio,
-    persistTreeRatios,
+    function removeTreeNode(leafNode) {
+      const p = activePreset.value
+      if (!p?.tree) return
+      if (p.tree === leafNode) {
+        _mutateActivePreset({ tree: { type: "leaf", panelId: "" } })
+        editModeDirty.value = true
+        return
+      }
+      const found = _findInTree(p.tree, leafNode)
+      if (!found) return
+      const { parent, index } = found
+      const sibling = parent.children[1 - index]
+      if (p.tree === parent) {
+        _mutateActivePreset({ tree: sibling })
+      } else {
+        const gp = _findInTree(p.tree, parent)
+        if (gp) {
+          gp.parent.children[gp.index] = sibling
+          _mutateActivePreset({ tree: p.tree })
+        }
+      }
+      editModeDirty.value = true
+    }
+
+    function splitTreeNode(leafNode, direction = "horizontal") {
+      const p = activePreset.value
+      if (!p?.tree) return
+      const newSplit = {
+        type: "split",
+        direction,
+        ratio: 50,
+        children: [
+          { type: "leaf", panelId: leafNode.panelId },
+          { type: "leaf", panelId: "" },
+        ],
+      }
+      if (p.tree === leafNode) {
+        _mutateActivePreset({ tree: newSplit })
+      } else {
+        const found = _findInTree(p.tree, leafNode)
+        if (found) {
+          found.parent.children[found.index] = newSplit
+          _mutateActivePreset({ tree: p.tree })
+        }
+      }
+      editModeDirty.value = true
+    }
+
+    function setTreeRatio(splitNode, newRatio) {
+      splitNode.ratio = Math.max(10, Math.min(90, newRatio))
+    }
+
+    function persistTreeRatios() {
+      const p = activePreset.value
+      if (!p?.tree) return
+      _writeJson(PRESET_TREE_PREFIX + p.id, p.tree)
+      _writeBackendMap(BACKEND_TREES_KEY, {
+        ..._readBackendMap(BACKEND_TREES_KEY),
+        [p.id]: p.tree,
+      })
+    }
+
+    return {
+      // shared state (returned for back-compat with consumers that
+      // read these directly off the store)
+      builtinPresets: _builtinPresets,
+      userPresets: _userPresets,
+      panels: _panels,
+      instanceOverrides: _instanceOverrides,
+      detachedPanels: _detachedPanels,
+      // per-scope state
+      activePresetId,
+      editMode,
+      editModeSnapshot,
+      editModeDirty,
+      // getters
+      allPresets: _allPresets,
+      activePreset,
+      panelList: _panelList,
+      // fns
+      effectivePreset,
+      slotsForZone,
+      registerBuiltinPreset,
+      switchPreset,
+      toggleZone,
+      setSlotSize,
+      registerPanel,
+      unregisterPanel,
+      getPanel,
+      saveAsNewPreset,
+      resetPresetToDefault,
+      deleteUserPreset,
+      loadInstanceOverrides,
+      getInstancePresetId,
+      rememberInstancePreset,
+      setInstanceOverride,
+      clearInstanceOverride,
+      markDetached,
+      unmarkDetached,
+      // edit mode
+      enterEditMode,
+      exitEditMode,
+      revertEditMode,
+      saveEditMode,
+      replaceSlotPanel,
+      removeSlot,
+      addSlotToZone,
+      // tree mutations
+      replaceTreePanel,
+      removeTreeNode,
+      splitTreeNode,
+      setTreeRatio,
+      persistTreeRatios,
+    }
   }
-})
+}
+
+// ── Per-scope Pinia factory ────────────────────────────────────────
+
+const _layoutFactories = new Map()
+
+function _factoryFor(scope) {
+  const key = scope || "default"
+  let useFn = _layoutFactories.get(key)
+  if (!useFn) {
+    useFn = defineStore(`layout:${key}`, _setupForScope(scope))
+    _layoutFactories.set(key, useFn)
+    if (scope) {
+      // When the macro shell tabs store closes the last tab carrying
+      // this scope, free the per-attach layout store.
+      registerScopeDisposer(scope, () => {
+        try {
+          useFn().$dispose?.()
+        } catch {
+          /* swallow — disposer must not throw */
+        }
+        _layoutFactories.delete(key)
+      })
+    }
+  }
+  return useFn
+}
+
+/**
+ * Resolve the active layout store for the call site.
+ *
+ * - Explicit ``scope`` argument → that-scoped store. Useful for the
+ *   AttachTab itself (Vue ``inject()`` does not see the caller's own
+ *   ``provide()``, so an AttachTab needs to pass its target id in
+ *   explicitly when it wants its own scoped store).
+ * - Inside a Vue setup with a ``provideScope`` ancestor → the
+ *   per-attach store.
+ * - Anywhere else → the legacy singleton "default" store.
+ */
+export function useLayoutStore(scope) {
+  if (scope !== undefined) return _factoryFor(scope)()
+  if (getCurrentInstance()) return _factoryFor(injectScope())()
+  return _factoryFor(null)()
+}

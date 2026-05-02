@@ -5,15 +5,23 @@
  *
  * Tab state lives here too so deep-linking via ``?tab=trace`` survives
  * a refresh and switching tabs doesn't refetch the tree / summary.
+ *
+ * **Per-scope** (scope = session name). Two macro-shell session-viewer
+ * tabs for different saved sessions each get their own bucket and
+ * don't trample each other's tab state / loaded meta. Outside a
+ * provider (v1 page route) the default-scope store keeps the
+ * historical singleton behaviour.
  */
 
 import { defineStore } from "pinia"
+import { getCurrentInstance } from "vue"
 
+import { injectScope, registerScopeDisposer } from "@/composables/useScope"
 import { sessionAPI } from "@/utils/api"
 
 const VALID_TABS = new Set(["overview", "trace", "conv", "cost", "find", "diff"])
 
-export const useSessionDetailStore = defineStore("sessionDetail", {
+const _sessionDetailOptions = {
   state: () => ({
     name: "",
     activeTab: "overview",
@@ -52,8 +60,6 @@ export const useSessionDetailStore = defineStore("sessionDetail", {
         this.summary = null
         this.error = ""
       }
-      // Fetch metadata + tree + summary in parallel; surface the first
-      // failure but keep partial loads visible.
       await Promise.all([this.loadMeta(), this.loadTree(), this.loadSummary()])
     },
 
@@ -77,7 +83,6 @@ export const useSessionDetailStore = defineStore("sessionDetail", {
       try {
         this.tree = await sessionAPI.getTree(this.name)
       } catch (err) {
-        // Tree failure is non-fatal — the rest of the viewer still works.
         console.warn("Failed to load session tree:", err)
         this.tree = null
       } finally {
@@ -98,4 +103,32 @@ export const useSessionDetailStore = defineStore("sessionDetail", {
       }
     },
   },
-})
+}
+
+const _sessionDetailFactories = new Map()
+
+function _factoryFor(scope) {
+  const key = scope || "default"
+  let useFn = _sessionDetailFactories.get(key)
+  if (!useFn) {
+    useFn = defineStore(`sessionDetail:${key}`, _sessionDetailOptions)
+    _sessionDetailFactories.set(key, useFn)
+    if (scope) {
+      registerScopeDisposer(scope, () => {
+        try {
+          useFn().$dispose?.()
+        } catch {
+          /* swallow */
+        }
+        _sessionDetailFactories.delete(key)
+      })
+    }
+  }
+  return useFn
+}
+
+export function useSessionDetailStore(scope) {
+  if (scope !== undefined) return _factoryFor(scope)()
+  if (getCurrentInstance()) return _factoryFor(injectScope())()
+  return _factoryFor(null)()
+}
