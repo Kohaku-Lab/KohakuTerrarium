@@ -50,13 +50,16 @@ const editor = useEditorStore(target.value)
 const layout = useLayoutStore(target.value)
 const tabsStore = useTabsStore()
 
+const isActiveAttachTab = computed(() => tabsStore.activeId === props.tab.id)
+
 // Per-scope artifact scanning. App.vue keeps its own (default-scope)
 // detector for the v1 page-routed flow; this one feeds the scoped
 // canvas store from the scoped chat store. Without it, image_url
 // parts from agent-side image generation never reach the macro
 // shell's Canvas panel because the global detector reads the empty
-// default chat store.
-useArtifactDetector(target.value)
+// default chat store. Pass active state so returning to this macro tab
+// forces a catch-up scan for artifacts that arrived while hidden.
+useArtifactDetector(target.value, { active: isActiveAttachTab })
 
 const loadedInstance = ref(null)
 const loading = ref(true)

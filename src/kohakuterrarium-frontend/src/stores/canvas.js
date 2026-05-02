@@ -76,6 +76,8 @@ function _setupCanvasStore() {
         existing.content = content
         existing.lang = lang || existing.lang
         existing.type = type || existing.type
+        existing.name = _artifactName(seedName || content)
+        activeId.value = existing.id
         return existing
       }
       const id = `artifact_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
@@ -88,7 +90,7 @@ function _setupCanvasStore() {
         lang: lang || "text",
       }
       artifacts.value = [...artifacts.value, a]
-      if (!activeId.value) activeId.value = id
+      activeId.value = id
       return a
     }
 

@@ -55,10 +55,35 @@ describe("canvas store — artifact detection", () => {
 
   it("updates content on re-scan with changed content", () => {
     const store = useCanvasStore()
-    store.upsertArtifact({ sourceId: "abc", content: "v1 body", lang: "js" })
+    const art = store.upsertArtifact({ sourceId: "abc", content: "v1 body", lang: "js" })
     store.upsertArtifact({ sourceId: "abc", content: "v2 body", lang: "js" })
     expect(store.artifacts).toHaveLength(1)
+    expect(store.artifacts[0].id).toBe(art.id)
     expect(store.artifacts[0].content).toBe("v2 body")
+    expect(store.artifacts[0].name).toBe("v2 body")
+    expect(store.activeId).toBe(art.id)
+  })
+
+  it("auto-activates newly detected artifacts after an activation catch-up scan", () => {
+    const store = useCanvasStore()
+    const oldMsg = {
+      id: "old",
+      role: "assistant",
+      parts: [{ type: "text", content: "##canvas name=old lang=py##\nprint('old')\n##canvas##" }],
+    }
+    const newMsg = {
+      id: "new",
+      role: "assistant",
+      parts: [{ type: "text", content: "##canvas name=new lang=py##\nprint('new')\n##canvas##" }],
+    }
+
+    store.scanMessage(oldMsg)
+    const oldActive = store.activeId
+    store.scanMessage(newMsg)
+
+    expect(store.artifacts).toHaveLength(2)
+    expect(store.activeId).not.toBe(oldActive)
+    expect(store.activeArtifact.content).toContain("print('new')")
   })
 
   it("skips upsert when content is identical", () => {
