@@ -29,6 +29,7 @@ from kohakuterrarium.commands.read import (
     ReadCommand,
     WaitCommand,
 )
+from kohakuterrarium.core.controller_metrics import time_llm_call
 from kohakuterrarium.core.controller_plugins import (
     register_controller_command,
     run_post_llm_call_chain,
@@ -467,17 +468,19 @@ class Controller:
 
         provider_native_tools = self._get_provider_native_tools()
 
-        async for chunk in self.llm.chat(
-            messages,
-            stream=True,
-            tools=tool_schemas or None,
-            provider_native_tools=provider_native_tools or None,
-        ):
-            if self._interrupted:
-                break
-            assistant_content += chunk
-            if chunk:
-                yield TextEvent(text=chunk)
+        with time_llm_call(self.llm) as _t:
+            async for chunk in self.llm.chat(
+                messages,
+                stream=True,
+                tools=tool_schemas or None,
+                provider_native_tools=provider_native_tools or None,
+            ):
+                if self._interrupted:
+                    _t.status = "interrupted"
+                    break
+                assistant_content += chunk
+                if chunk:
+                    yield TextEvent(text=chunk)
 
         self._log_token_usage()
 
@@ -603,31 +606,33 @@ class Controller:
 
         provider_native_tools = self._get_provider_native_tools()
 
-        async for chunk in self.llm.chat(
-            messages,
-            stream=True,
-            provider_native_tools=provider_native_tools or None,
-        ):
-            if self._interrupted:
-                break
-            assistant_content += chunk
+        with time_llm_call(self.llm) as _t:
+            async for chunk in self.llm.chat(
+                messages,
+                stream=True,
+                provider_native_tools=provider_native_tools or None,
+            ):
+                if self._interrupted:
+                    _t.status = "interrupted"
+                    break
+                assistant_content += chunk
 
-            for event in self._parser.feed(chunk):
+                for event in self._parser.feed(chunk):
+                    if isinstance(event, CommandEvent):
+                        text, result_event = await self._execute_command_inline(event)
+                        assistant_content += text
+                        yield result_event
+                    else:
+                        yield event
+
+            # Flush remaining parser state
+            for event in self._parser.flush():
                 if isinstance(event, CommandEvent):
                     text, result_event = await self._execute_command_inline(event)
                     assistant_content += text
                     yield result_event
                 else:
                     yield event
-
-        # Flush remaining parser state
-        for event in self._parser.flush():
-            if isinstance(event, CommandEvent):
-                text, result_event = await self._execute_command_inline(event)
-                assistant_content += text
-                yield result_event
-            else:
-                yield event
 
         self._last_assistant_content = assistant_content
 

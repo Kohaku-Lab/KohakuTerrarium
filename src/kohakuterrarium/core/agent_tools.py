@@ -1,12 +1,16 @@
 """Agent tool execution mixin — handles tool dispatch, result collection, and background jobs."""
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from kohakuterrarium.core.agent_runtime_tools import (
     AgentRuntimeToolsMixin,
     _make_job_label,
+)
+from kohakuterrarium.core.agent_tools_metrics import (
+    emit_completion_metrics as _emit_completion_metrics,
 )
 from kohakuterrarium.core.backgroundify import BackgroundifyHandle, PromotionResult
 from kohakuterrarium.core.controller import Controller
@@ -196,6 +200,9 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             "background": False,
             "interruptible": True,
             "notify_controller_on_background_complete": notify_controller_on_background_complete,
+            # Used by ``_emit_direct_completion_activity`` to compute the
+            # tool/subagent execution duration for the metrics hook.
+            "started_at": time.monotonic(),
         }
 
     def _clear_direct_job_tracking(self, job_id: str) -> None:
@@ -210,6 +217,19 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         _, label = _make_job_label(job_id)
         error = getattr(result, "error", None) or "User manually interrupted this job."
         activity = "subagent_error" if kind == "subagent" else "tool_error"
+        # Process-metrics: interrupted-by-user counts as a terminal job.
+        # Compute duration if we still have ``started_at`` recorded; the
+        # name fallback mirrors ``_emit_direct_completion_activity``.
+        started_at = meta.get("started_at")
+        duration_ms = (
+            (time.monotonic() - started_at) * 1000.0
+            if isinstance(started_at, (int, float))
+            else 0.0
+        )
+        metric_name = meta.get("name") or job_id.rsplit("_", 1)[0]
+        _emit_completion_metrics(
+            kind == "subagent", metric_name, "interrupted", duration_ms
+        )
         activity_meta: dict[str, Any] = {
             "job_id": job_id,
             "interrupted": True,
@@ -336,6 +356,21 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         done_activity = "subagent_done" if is_subagent else "tool_done"
         error_activity = "subagent_error" if is_subagent else "tool_error"
 
+        # Process-metrics: compute duration from the tracked start
+        # timestamp; if the job ran in background and ``meta`` has been
+        # popped (or was never tracked) fall back to 0 so we still
+        # observe the count. ``metric_name`` is the canonical
+        # tool/subagent name (matches the registry key) — the
+        # ``_make_job_label`` form includes a job-id suffix and isn't a
+        # bounded label.
+        started_at = meta.get("started_at")
+        duration_ms = (
+            (time.monotonic() - started_at) * 1000.0
+            if isinstance(started_at, (int, float))
+            else 0.0
+        )
+        metric_name = meta.get("name") or job_id.rsplit("_", 1)[0]
+
         if isinstance(result, Exception):
             interrupted = isinstance(result, asyncio.CancelledError)
             error_text = (
@@ -368,6 +403,8 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                 f"[{label}] {'INTERRUPTED' if interrupted else 'FAILED'}: {error_text}",
                 metadata=metadata,
             )
+            status = "interrupted" if interrupted else "error"
+            _emit_completion_metrics(is_subagent, metric_name, status, duration_ms)
             return
 
         if result is not None and hasattr(result, "error") and result.error:
@@ -403,6 +440,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                 f"[{label}] {state_label}: {result.error}",
                 metadata=metadata,
             )
+            _emit_completion_metrics(is_subagent, metric_name, final_state, duration_ms)
             return
 
         output = (
@@ -434,6 +472,12 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             done_activity,
             f"[{label}] {status}",
             metadata=metadata,
+        )
+        _emit_completion_metrics(
+            is_subagent,
+            metric_name,
+            "ok" if exit_code == 0 else "error",
+            duration_ms,
         )
 
     # ------------------------------------------------------------------

@@ -8,6 +8,7 @@ Routes scratchpad writes and plugin hook timings through the
 
 from typing import Any
 
+from kohakuterrarium.core.metrics_hook import metrics
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -68,7 +69,8 @@ def wire_scratchpad_observer(agent: Any) -> None:
 
 
 def wire_plugin_hook_timing(agent: Any) -> None:
-    """Route plugin hook timings to the agent's output router.
+    """Route plugin hook timings to the agent's output router AND
+    forward into the process-metrics hook.
 
     No-op when plugins / callback hook is missing.
     """
@@ -97,6 +99,12 @@ def wire_plugin_hook_timing(agent: Any) -> None:
                 error=str(e),
                 exc_info=True,
             )
+        try:
+            metrics.observe_plugin_hook(plugin, hook, duration_ms)
+            if blocked:
+                metrics.observe_error("plugin")
+        except Exception:  # pragma: no cover — observability
+            pass
 
     plugins.set_hook_timing_callback(_observe)
 

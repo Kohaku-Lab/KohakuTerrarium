@@ -20,6 +20,7 @@ from kohakuterrarium.core.events import (
     TriggerEvent,
     create_tool_complete_event,
 )
+from kohakuterrarium.core.metrics_hook import metrics
 from kohakuterrarium.llm.message import content_parts_to_dicts
 from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.parsing import (
@@ -244,6 +245,7 @@ class AgentHandlersMixin(AgentToolsMixin):
                     "error": error_msg,
                 },
             )
+            metrics.observe_error("controller")
         finally:
             self._processing_task = None
         await self._finalize_processing(event, controller, all_round_text)
