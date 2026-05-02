@@ -20,6 +20,15 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    environmentOptions: {
+      jsdom: {
+        // Don't try to fetch <img> / <link> assets; they have no
+        // bundler context in tests so any reference to /foo.png throws
+        // a URL parse error.
+        resources: "usable",
+        url: "http://localhost/",
+      },
+    },
     globals: false,
     include: ["src/**/*.test.js", "src/**/*.test.ts"],
     // jsdom is flagged unstable for form elements — suppress the noise.
