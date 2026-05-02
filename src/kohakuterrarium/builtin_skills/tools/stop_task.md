@@ -11,8 +11,8 @@ Cancel a running background tool or sub-agent.
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
+| Arg    | Type   | Description                                                               |
+| ------ | ------ | ------------------------------------------------------------------------- |
 | job_id | string | Job ID to cancel (required). Use the `jobs` command to list running jobs. |
 
 ## Behavior

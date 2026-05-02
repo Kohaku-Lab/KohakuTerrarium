@@ -12,12 +12,12 @@ Use when you need to recall details that may have been compacted from context.
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
-| query | string | Search query (required) |
-| mode | string | Search mode: "fts", "semantic", "hybrid", or "auto" (default: "auto") |
-| k | integer | Max results to return (default: 5) |
-| agent | string | Filter results by agent name (optional) |
+| Arg   | Type    | Description                                                           |
+| ----- | ------- | --------------------------------------------------------------------- |
+| query | string  | Search query (required)                                               |
+| mode  | string  | Search mode: "fts", "semantic", "hybrid", or "auto" (default: "auto") |
+| k     | integer | Max results to return (default: 5)                                    |
+| agent | string  | Filter results by agent name (optional)                               |
 
 ## Search Modes
 
@@ -41,6 +41,7 @@ Use when you need to recall details that may have been compacted from context.
 ## Output
 
 Each result shows:
+
 - Round number (which conversation turn)
 - Block type (user, text, tool, trigger)
 - Tool name (if applicable)

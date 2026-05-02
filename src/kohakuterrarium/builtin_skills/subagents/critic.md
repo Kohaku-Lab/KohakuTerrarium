@@ -36,8 +36,8 @@ Review the following change and check for issues:
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
+| Arg  | Type    | Description                                           |
+| ---- | ------- | ----------------------------------------------------- |
 | body | content | Description of what to review plus the content itself |
 
 ## Examples
@@ -79,11 +79,13 @@ Evaluate whether this output is clear and complete for the user:
 ## CAPABILITIES
 
 The critic sub-agent has access to:
+
 - `read` - Read file contents for context
 - `grep` - Search for patterns to verify claims
 - `glob` - Find related files to check consistency
 
 It will:
+
 1. Analyze the provided content against its intended purpose
 2. Check for correctness, quality, and completeness
 3. Rate issues by severity (high/medium/low)
@@ -92,6 +94,7 @@ It will:
 ## OUTPUT
 
 Returns a structured review containing:
+
 - **Verdict** - PASS or FAIL
 - **Issues Found** - Severity-rated list of problems
 - **Suggestions** - Actionable improvement recommendations

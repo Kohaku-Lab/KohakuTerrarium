@@ -13,6 +13,7 @@ Execute shell commands and return output.
 ## IMPORTANT: Prefer Dedicated Tools
 
 Do NOT use bash for operations that have dedicated tools:
+
 - File reading: use `read` (NOT `cat`, `head`, `tail`)
 - File editing: use `edit` (NOT `sed`, `awk`)
 - File writing: use `write` (NOT `echo >`, `cat <<EOF`)
@@ -23,10 +24,10 @@ Using dedicated tools gives structured output and enables safety guards.
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
-| command | string | Shell command to execute (required) |
-| type | string | Shell type: bash, zsh, sh, fish, pwsh, powershell (default: bash) |
+| Arg     | Type   | Description                                                                                      |
+| ------- | ------ | ------------------------------------------------------------------------------------------------ |
+| command | string | Shell command to execute (required)                                                              |
+| type    | string | Shell type: bash, zsh, sh, fish, pwsh, powershell (default: bash)                                |
 | timeout | number | Maximum execution time in seconds for this call (default: tool config timeout; `0` = no timeout) |
 
 ## Shell Type

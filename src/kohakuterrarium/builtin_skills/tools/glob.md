@@ -35,20 +35,20 @@ pattern
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
-| pattern | body | Glob pattern (required) |
-| path | @@arg | Base directory (default: cwd) |
-| limit | @@arg | Max results (default: 100) |
+| Arg     | Type  | Description                   |
+| ------- | ----- | ----------------------------- |
+| pattern | body  | Glob pattern (required)       |
+| path    | @@arg | Base directory (default: cwd) |
+| limit   | @@arg | Max results (default: 100)    |
 
 ## Pattern Syntax
 
-| Pattern | Matches |
-|---------|---------|
-| `*` | Any chars except `/` |
-| `**` | Any chars including `/` (recursive) |
-| `?` | Single character |
-| `[abc]` | a, b, or c |
+| Pattern | Matches                             |
+| ------- | ----------------------------------- |
+| `*`     | Any chars except `/`                |
+| `**`    | Any chars including `/` (recursive) |
+| `?`     | Single character                    |
+| `[abc]` | a, b, or c                          |
 
 ## Examples
 

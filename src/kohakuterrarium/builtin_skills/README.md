@@ -8,11 +8,11 @@ override any file by placing a same-named file in their agent's
 
 ## Files
 
-| File | Description |
-|------|-------------|
-| `__init__.py` | Lookup functions: `get_builtin_tool_doc`, `get_builtin_subagent_doc`, listing and batch retrieval |
-| `tools/*.md` | One markdown doc per builtin tool (bash, read, edit, write, glob, grep, etc.) |
-| `subagents/*.md` | One markdown doc per builtin sub-agent (explore, plan, worker, critic, etc.) |
+| File             | Description                                                                                       |
+| ---------------- | ------------------------------------------------------------------------------------------------- |
+| `__init__.py`    | Lookup functions: `get_builtin_tool_doc`, `get_builtin_subagent_doc`, listing and batch retrieval |
+| `tools/*.md`     | One markdown doc per builtin tool (bash, read, edit, write, glob, grep, etc.)                     |
+| `subagents/*.md` | One markdown doc per builtin sub-agent (explore, plan, worker, critic, etc.)                      |
 
 ## Tool Docs (25)
 

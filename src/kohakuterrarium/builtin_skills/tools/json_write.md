@@ -30,11 +30,11 @@ The value (content body) is parsed as JSON. If it is not valid JSON, it is treat
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
-| path | @@arg | Path to JSON file (required) |
-| query | @@arg | Dot-path to modify (default: "." for entire file) |
-| value | content | JSON value to set (required) |
+| Arg   | Type    | Description                                       |
+| ----- | ------- | ------------------------------------------------- |
+| path  | @@arg   | Path to JSON file (required)                      |
+| query | @@arg   | Dot-path to modify (default: "." for entire file) |
+| value | content | JSON value to set (required)                      |
 
 ## Query Syntax
 
@@ -47,6 +47,7 @@ The value (content body) is parsed as JSON. If it is not valid JSON, it is treat
 ## Examples
 
 Set a string field:
+
 ```
 tool call: json_write(
   path: config.json
@@ -56,6 +57,7 @@ tool call: json_write(
 ```
 
 Set a number:
+
 ```
 tool call: json_write(
   path: config.json
@@ -65,6 +67,7 @@ tool call: json_write(
 ```
 
 Set an object:
+
 ```
 tool call: json_write(
   path: config.json
@@ -74,6 +77,7 @@ tool call: json_write(
 ```
 
 Replace entire file:
+
 ```
 tool call: json_write(
   path: data.json

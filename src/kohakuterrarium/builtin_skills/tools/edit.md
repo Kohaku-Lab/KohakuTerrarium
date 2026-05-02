@@ -19,10 +19,12 @@ Edit files using search/replace or unified diff. Mode is auto-detected from argu
 ## WHEN TO USE
 
 Use `edit` when:
+
 - you need a single search/replace change
 - you want to apply a unified diff patch
 
 Use `multi_edit` instead when:
+
 - you want to make several search/replace edits in the same file
 - you want one result showing what actually changed
 - you want strict atomic behavior for multiple edits
@@ -33,11 +35,11 @@ Find an exact string and replace it.
 
 ### Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
-| path | @@arg | Path to file (required) |
-| old | @@arg | Exact text to find (required) |
-| new | @@arg | Replacement text (required) |
+| Arg         | Type  | Description                              |
+| ----------- | ----- | ---------------------------------------- |
+| path        | @@arg | Path to file (required)                  |
+| old         | @@arg | Exact text to find (required)            |
+| new         | @@arg | Replacement text (required)              |
 | replace_all | @@arg | Replace all occurrences (default: false) |
 
 ### Rules
@@ -63,10 +65,10 @@ Apply standard unified diff patches.
 
 ### Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
-| path | @@arg | Path to file (required) |
-| diff | body | Unified diff content (required) |
+| Arg  | Type  | Description                     |
+| ---- | ----- | ------------------------------- |
+| path | @@arg | Path to file (required)         |
+| diff | body  | Unified diff content (required) |
 
 ### Format
 
@@ -100,12 +102,14 @@ tool call: edit(
 ## Output Format
 
 Search/replace:
+
 ```
 Edited /path/to/file.py
   1 replacement(s) made
 ```
 
 Unified diff:
+
 ```
 Edited /path/to/file.py
   2 hunk(s) applied

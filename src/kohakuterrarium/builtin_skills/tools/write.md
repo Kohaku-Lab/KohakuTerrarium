@@ -33,10 +33,10 @@ content here
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
-| path | @@arg | Path to file (required) |
-| content | body | Content to write |
+| Arg     | Type  | Description             |
+| ------- | ----- | ----------------------- |
+| path    | @@arg | Path to file (required) |
+| content | body  | Content to write        |
 
 ## Examples
 

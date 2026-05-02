@@ -32,8 +32,8 @@ task description
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
+| Arg  | Type    | Description                       |
+| ---- | ------- | --------------------------------- |
 | body | content | What needs to be planned/designed |
 
 ## Examples
@@ -65,11 +65,13 @@ Plan migration from REST to GraphQL
 ## CAPABILITIES
 
 The plan sub-agent has access to:
+
 - `glob` - Find relevant files
 - `grep` - Search for patterns
 - `read` - Examine existing code
 
 It will:
+
 1. Explore relevant existing code
 2. Identify affected files/modules
 3. Consider trade-offs
@@ -78,6 +80,7 @@ It will:
 ## OUTPUT
 
 Returns a structured plan including:
+
 - Overview of approach
 - Files to create/modify
 - Step-by-step implementation order

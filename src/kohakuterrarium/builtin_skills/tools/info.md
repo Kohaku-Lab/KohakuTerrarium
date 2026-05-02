@@ -11,13 +11,14 @@ Get full documentation for any tool or sub-agent.
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
+| Arg  | Type   | Description                                         |
+| ---- | ------ | --------------------------------------------------- |
 | name | string | Name of the tool or sub-agent to look up (required) |
 
 ## Behavior
 
 Looks up documentation in this order:
+
 1. Builtin tool docs (builtin_skills/tools/)
 2. Builtin sub-agent docs (builtin_skills/subagents/)
 3. Agent-local docs (prompts/tools/ or prompts/subagents/)

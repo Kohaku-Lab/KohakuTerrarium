@@ -32,8 +32,8 @@ task description
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
+| Arg  | Type    | Description                                                                                   |
+| ---- | ------- | --------------------------------------------------------------------------------------------- |
 | body | content | Full task description including what needs to be done and which channels/agents are available |
 
 ## Examples
@@ -62,11 +62,13 @@ Channels: plan, worker, critic
 ## CAPABILITIES
 
 The coordinator sub-agent has access to:
+
 - `send_message` - Dispatch subtasks to other agent channels
 - `wait_channel` - Wait for results from agent channels
 - `scratchpad` - Track dispatched tasks and intermediate state
 
 It will autonomously:
+
 1. Break the task into subtasks
 2. Dispatch subtasks to the appropriate channels
 3. Wait for and collect results
@@ -76,6 +78,7 @@ It will autonomously:
 ## OUTPUT
 
 Returns a structured summary including:
+
 - Task breakdown showing subtask-to-channel mapping
 - Individual results from each subtask
 - Final synthesized outcome combining all results

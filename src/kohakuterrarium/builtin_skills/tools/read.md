@@ -18,11 +18,11 @@ Read file contents. Supports text files, images, and PDFs.
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
-| path | string | Path to file (required) |
+| Arg    | Type    | Description                                                                             |
+| ------ | ------- | --------------------------------------------------------------------------------------- |
+| path   | string  | Path to file (required)                                                                 |
 | offset | integer | Start position. For text files: line number (0-based). For PDFs: page number (0-based). |
-| limit | integer | Count to read. For text files: number of lines. For PDFs: number of pages. |
+| limit  | integer | Count to read. For text files: number of lines. For PDFs: number of pages.              |
 
 The same offset/limit arguments work for both text files and PDFs — they
 just operate on lines vs pages respectively.
@@ -42,6 +42,7 @@ Returns extracted text per page + rendered page images for visual inspection.
 offset = starting page (0-based), limit = number of pages to read.
 For large PDFs (>20 pages), you MUST provide offset/limit to select a range.
 Examples:
+
 - `read(path="paper.pdf")` — reads all pages (warns if >20)
 - `read(path="paper.pdf", limit=10)` — first 10 pages
 - `read(path="paper.pdf", offset=5, limit=10)` — pages 6-15
@@ -62,6 +63,7 @@ to inspect binary files.
 ## Output Format
 
 Text files:
+
 ```
      1->first line content
      2->second line content

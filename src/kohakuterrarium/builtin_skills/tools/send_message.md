@@ -13,13 +13,13 @@ text output -- you MUST use send_message to communicate with them.
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
-| channel | string | Channel name to send to (required) |
-| message | string | Message content (required) |
-| metadata | string | Optional JSON metadata object |
-| channel_type | string | Channel type: "queue" (default) or "broadcast" |
-| reply_to | string | Optional message ID to reply to (for threading) |
+| Arg          | Type   | Description                                     |
+| ------------ | ------ | ----------------------------------------------- |
+| channel      | string | Channel name to send to (required)              |
+| message      | string | Message content (required)                      |
+| metadata     | string | Optional JSON metadata object                   |
+| channel_type | string | Channel type: "queue" (default) or "broadcast"  |
+| reply_to     | string | Optional message ID to reply to (for threading) |
 
 ## When to Use
 

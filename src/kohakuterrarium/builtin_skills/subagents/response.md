@@ -32,8 +32,8 @@ what to communicate
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
+| Arg  | Type    | Description                     |
+| ---- | ------- | ------------------------------- |
 | body | content | What to communicate to the user |
 
 ## Examples
@@ -59,6 +59,7 @@ Greet the user as the character
 ## OUTPUT ROUTING
 
 The response sub-agent is an **output sub-agent**:
+
 - `output_to: external` - Output streams directly to user
 - Does NOT return to controller
 - Designed for user-facing content
@@ -66,6 +67,7 @@ The response sub-agent is an **output sub-agent**:
 ## CAPABILITIES
 
 The response sub-agent:
+
 - Receives context from controller
 - Generates formatted responses
 - Can maintain character/style consistency

@@ -11,11 +11,11 @@ Search the web and return structured results with titles, URLs, and snippets.
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
-| query | string | Search query (required) |
-| max_results | integer | Max results to return (default: 10) |
-| region | string | Region code (optional, e.g., "us-en") |
+| Arg         | Type    | Description                           |
+| ----------- | ------- | ------------------------------------- |
+| query       | string  | Search query (required)               |
+| max_results | integer | Max results to return (default: 10)   |
+| region      | string  | Region code (optional, e.g., "us-en") |
 
 ## Behavior
 
@@ -33,6 +33,7 @@ Search the web and return structured results with titles, URLs, and snippets.
 ## Output
 
 Structured list with numbered results:
+
 ```
 Search results for: python asyncio tutorial
 

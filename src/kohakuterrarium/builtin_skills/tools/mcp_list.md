@@ -11,8 +11,8 @@ List connected MCP servers and their available tools.
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
+| Arg    | Type   | Description                                   |
+| ------ | ------ | --------------------------------------------- |
 | server | string | (optional) Server name for detailed tool info |
 
 ## Behavior
@@ -32,6 +32,7 @@ Call this BEFORE `mcp_call` to discover what tools are available:
 ## Output Format
 
 Overview:
+
 ```
 Connected MCP servers:
 
@@ -42,6 +43,7 @@ Connected MCP servers:
 ```
 
 Detailed (with server=):
+
 ```
 MCP server: github
 Tools (5):

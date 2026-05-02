@@ -34,8 +34,8 @@ task description
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
+| Arg  | Type    | Description                               |
+| ---- | ------- | ----------------------------------------- |
 | body | content | Research question or topic to investigate |
 
 ## Examples
@@ -67,11 +67,13 @@ What are the best practices for async Python error handling in long-running even
 ## CAPABILITIES
 
 The research sub-agent has access to:
+
 - `http` - Fetch external web pages, API docs, and data
 - `read` - Read local file contents
 - `grep` - Search local file contents by regex
 
 It will autonomously:
+
 1. Search local files for existing context
 2. Fetch external sources for additional information
 3. Cross-reference local and external findings
@@ -80,6 +82,7 @@ It will autonomously:
 ## OUTPUT
 
 Returns a structured research report including:
+
 - Restated research question
 - Numbered findings with source citations
 - Synthesized conclusion with confidence level

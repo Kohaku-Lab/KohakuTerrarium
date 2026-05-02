@@ -12,6 +12,7 @@ Apply multiple exact search/replace edits to a single file in order.
 This tool exists for cases where you want to make several related search/replace edits in the same file and want a clear policy for what happens if one of them fails.
 
 `multi_edit` is intentionally limited:
+
 - one file only
 - exact string matching only
 - ordered edits only
@@ -28,12 +29,14 @@ This tool exists for cases where you want to make several related search/replace
 ## WHEN TO USE
 
 Use `multi_edit` when:
+
 - you want to perform multiple search/replace edits in one file
 - several edits are logically related
 - you want atomic behavior (`strict=true`)
 - you want one result showing what the tool actually changed
 
 Use plain `edit` instead when:
+
 - you only need one search/replace edit
 - you want to apply a unified diff patch
 
@@ -43,8 +46,8 @@ Use plain `edit` instead when:
 {
   "path": "src/foo.py",
   "edits": [
-    {"old": "class OldName", "new": "class NewName"},
-    {"old": "OldName(", "new": "NewName(", "replace_all": true}
+    { "old": "class OldName", "new": "class NewName" },
+    { "old": "OldName(", "new": "NewName(", "replace_all": true }
   ],
   "strict": true,
   "best_effort": false
@@ -53,19 +56,19 @@ Use plain `edit` instead when:
 
 ## ARGUMENTS
 
-| Arg | Type | Description |
-|-----|------|-------------|
-| path | @@arg | File path to edit |
-| edits | @@arg | Non-empty array of ordered search/replace edits |
-| strict | @@arg | Default `true`. If any edit fails, do not write anything |
+| Arg         | Type  | Description                                                                           |
+| ----------- | ----- | ------------------------------------------------------------------------------------- |
+| path        | @@arg | File path to edit                                                                     |
+| edits       | @@arg | Non-empty array of ordered search/replace edits                                       |
+| strict      | @@arg | Default `true`. If any edit fails, do not write anything                              |
 | best_effort | @@arg | Default `false`. Try every edit, skipping failures. Cannot be used with `strict=true` |
 
 Each edit item has:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| old | string | Exact text to find. Must be non-empty |
-| new | string | Replacement text. Can be empty for deletion |
+| Field       | Type    | Description                                            |
+| ----------- | ------- | ------------------------------------------------------ |
+| old         | string  | Exact text to find. Must be non-empty                  |
+| new         | string  | Replacement text. Can be empty for deletion            |
 | replace_all | boolean | Replace all occurrences for this edit. Default `false` |
 
 ## MATCH RULES
@@ -73,12 +76,14 @@ Each edit item has:
 Matching is exact string matching.
 
 That means:
+
 - whitespace matters
 - indentation matters
 - punctuation matters
 - letter casing matters
 
 For each edit:
+
 - if `old` is not found: that edit fails
 - if `old` appears more than once and `replace_all` is not true: that edit fails
 - if `replace_all=true`: all occurrences in the current buffer are replaced
@@ -92,6 +97,7 @@ Edit `2` sees the file after edit `1`.
 And so on.
 
 This means earlier edits can:
+
 - remove text that later edits expected
 - create text that later edits will match
 
@@ -111,6 +117,7 @@ Default:
 ```
 
 Behavior:
+
 - apply edits in memory in order
 - if any edit fails, the whole call fails
 - **the file remains unchanged on disk**
@@ -127,6 +134,7 @@ Use this when you want atomic behavior.
 ```
 
 Behavior:
+
 - apply edits in order
 - stop at the first failure
 - write any successful earlier edits
@@ -144,6 +152,7 @@ Use this when partial progress is acceptable.
 ```
 
 Behavior:
+
 - attempt every edit in order
 - failed edits are recorded and skipped
 - successful edits are still written

@@ -32,8 +32,8 @@ content or task description
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
+| Arg  | Type    | Description                                                      |
+| ---- | ------- | ---------------------------------------------------------------- |
 | body | content | The content to summarize, or a task describing what to summarize |
 
 ## Examples
@@ -67,9 +67,11 @@ What are the main points in docs/architecture.md?
 ## CAPABILITIES
 
 The summarize sub-agent has access to:
+
 - `read` - Read file contents
 
 It will autonomously:
+
 1. Process the provided content or read specified files
 2. Identify the most important information
 3. Produce a structured summary with key points
@@ -77,6 +79,7 @@ It will autonomously:
 ## OUTPUT
 
 Returns a structured summary including:
+
 - Brief overview (1-2 sentences)
 - Bulleted key points
 - Additional details when relevant (file paths, line numbers, caveats)

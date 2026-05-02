@@ -32,8 +32,8 @@ task description
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
+| Arg  | Type    | Description                                            |
+| ---- | ------- | ------------------------------------------------------ |
 | body | content | Task description (what to implement, fix, or refactor) |
 
 ## Examples
@@ -65,6 +65,7 @@ Add error handling for network timeouts in src/client.py and write tests
 ## CAPABILITIES
 
 The worker sub-agent has access to:
+
 - `read` - Read file contents
 - `write` - Create or overwrite files
 - `edit` - Make targeted edits to existing files
@@ -73,6 +74,7 @@ The worker sub-agent has access to:
 - `grep` - Search file contents
 
 It will autonomously:
+
 1. Read and understand relevant code
 2. Make targeted modifications
 3. Run tests or checks to verify changes
@@ -81,6 +83,7 @@ It will autonomously:
 ## OUTPUT
 
 Returns a structured summary including:
+
 - Task that was performed
 - Files modified with descriptions of changes
 - Test results (if applicable)

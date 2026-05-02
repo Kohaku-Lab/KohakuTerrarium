@@ -13,9 +13,9 @@ Skills are markdown how-to bundles discovered from project, user, or package ski
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
-| name | string | Skill name to invoke (required) |
+| Arg       | Type   | Description                                                |
+| --------- | ------ | ---------------------------------------------------------- |
+| name      | string | Skill name to invoke (required)                            |
 | arguments | string | Optional free-form arguments or task context for the skill |
 
 ## Behavior

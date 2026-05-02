@@ -12,15 +12,15 @@ to see available tools and `mcp_call` to invoke them.
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
-| name | string | A name for this server connection (required) |
-| command | string | Executable command for stdio transport |
-| args | list | Command arguments for stdio transport |
-| transport | string | Optional transport override: `stdio`, `http` / `sse`, or `streamable_http` |
-| url | string | Server URL for SSE or streamable HTTP transport |
-| env | object | Environment variables for stdio transport |
-| connect_timeout | number | Optional connection timeout in seconds |
+| Arg             | Type   | Description                                                                |
+| --------------- | ------ | -------------------------------------------------------------------------- |
+| name            | string | A name for this server connection (required)                               |
+| command         | string | Executable command for stdio transport                                     |
+| args            | list   | Command arguments for stdio transport                                      |
+| transport       | string | Optional transport override: `stdio`, `http` / `sse`, or `streamable_http` |
+| url             | string | Server URL for SSE or streamable HTTP transport                            |
+| env             | object | Environment variables for stdio transport                                  |
+| connect_timeout | number | Optional connection timeout in seconds                                     |
 
 Provide either `command` (stdio) or `url` (HTTP transport). If `url` is given without an explicit `transport`, `streamable_http` is used by default.
 

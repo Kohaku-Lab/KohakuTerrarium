@@ -34,16 +34,16 @@ Notebook JSON is verbose and easy to corrupt. Prefer `notebook_read` over plain 
 
 ## ARGUMENTS
 
-| Arg | Type | Description |
-|-----|------|-------------|
-| path | string | Path to a `.ipynb` file |
-| cell_id | string | Optional real cell id or synthetic `cell-N` reference |
-| offset | integer | Optional cell offset when reading a range |
-| limit | integer | Optional maximum number of cells to read. `0` means all |
-| include_outputs | string | `none`, `summary`, or `all`. Default `summary` |
-| include_metadata | boolean | Include cell metadata. Default `false` |
-| max_source_chars | integer | Max source chars per cell. Default `8000` |
-| max_output_chars | integer | Max output chars per output. Default `4000` |
+| Arg              | Type    | Description                                             |
+| ---------------- | ------- | ------------------------------------------------------- |
+| path             | string  | Path to a `.ipynb` file                                 |
+| cell_id          | string  | Optional real cell id or synthetic `cell-N` reference   |
+| offset           | integer | Optional cell offset when reading a range               |
+| limit            | integer | Optional maximum number of cells to read. `0` means all |
+| include_outputs  | string  | `none`, `summary`, or `all`. Default `summary`          |
+| include_metadata | boolean | Include cell metadata. Default `false`                  |
+| max_source_chars | integer | Max source chars per cell. Default `8000`               |
+| max_output_chars | integer | Max output chars per output. Default `4000`             |
 
 ## CELL IDS
 
@@ -76,19 +76,19 @@ Synthetic `cell-N` references are index-based. They can shift after inserts/dele
 Read the whole notebook:
 
 ```json
-{"path": "analysis.ipynb"}
+{ "path": "analysis.ipynb" }
 ```
 
 Read only the first 5 cells:
 
 ```json
-{"path": "analysis.ipynb", "offset": 0, "limit": 5}
+{ "path": "analysis.ipynb", "offset": 0, "limit": 5 }
 ```
 
 Read one cell by id:
 
 ```json
-{"path": "analysis.ipynb", "cell_id": "abc123", "include_outputs": "all"}
+{ "path": "analysis.ipynb", "cell_id": "abc123", "include_outputs": "all" }
 ```
 
 ## WHEN TO USE RAW JSON TOOLS

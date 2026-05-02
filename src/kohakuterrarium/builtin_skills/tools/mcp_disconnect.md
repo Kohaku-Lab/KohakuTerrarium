@@ -12,8 +12,8 @@ be available via `mcp_call`.
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
+| Arg    | Type   | Description                                 |
+| ------ | ------ | ------------------------------------------- |
 | server | string | Name of the server to disconnect (required) |
 
 ## Example

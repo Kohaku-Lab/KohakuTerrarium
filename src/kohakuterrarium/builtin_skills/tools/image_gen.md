@@ -34,11 +34,11 @@ assistant message alongside any text you write.
 ## Prompting guidance
 
 - Describe the image you intend to produce in one or two concise
-  sentences *before* or *after* the image: scene / subject /
+  sentences _before_ or _after_ the image: scene / subject /
   style / composition / palette / constraints. This helps the
   backend and doubles as a caption for the user.
-- For edits, state the invariants explicitly: *"change only the
-  background; keep the subject, pose, and framing unchanged"*.
+- For edits, state the invariants explicitly: _"change only the
+  background; keep the subject, pose, and framing unchanged"_.
 - Quote any text that must appear in the image verbatim, in
   quotes, and specify placement.
 - If the user's request is vague, ask one clarifying question

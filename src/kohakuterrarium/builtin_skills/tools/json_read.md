@@ -35,9 +35,9 @@ tool call: json_read(
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
-| path | @@arg | Path to JSON file (required) |
+| Arg   | Type  | Description                                   |
+| ----- | ----- | --------------------------------------------- |
+| path  | @@arg | Path to JSON file (required)                  |
 | query | @@arg | Dot-path query (default: "." for entire file) |
 
 ## Query Syntax
@@ -51,6 +51,7 @@ tool call: json_read(
 ## Examples
 
 Read entire file:
+
 ```
 tool call: json_read(
   path: package.json
@@ -58,6 +59,7 @@ tool call: json_read(
 ```
 
 Read a nested value:
+
 ```
 tool call: json_read(
   path: config.json
@@ -66,6 +68,7 @@ tool call: json_read(
 ```
 
 Read from an array:
+
 ```
 tool call: json_read(
   path: data.json

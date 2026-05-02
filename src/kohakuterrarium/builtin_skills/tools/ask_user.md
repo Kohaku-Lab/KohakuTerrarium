@@ -15,11 +15,11 @@ patterns where the agent needs clarification, approval, or additional input.
 `ask_user` is for **free-text replies** — the user types an answer.
 For other interaction shapes, prefer the right tool:
 
-| Need | Tool |
-|------|------|
-| Free-text answer (a name, a path, a description) | **ask_user** (this tool) |
-| Pick from N labelled options ("Approve / Edit / Reject") | **show_card** with `actions` |
-| Display structured info beautifully (plan preview, status panel) | **show_card** display-only |
+| Need                                                             | Tool                         |
+| ---------------------------------------------------------------- | ---------------------------- |
+| Free-text answer (a name, a path, a description)                 | **ask_user** (this tool)     |
+| Pick from N labelled options ("Approve / Edit / Reject")         | **show_card** with `actions` |
+| Display structured info beautifully (plan preview, status panel) | **show_card** display-only   |
 
 Use `ask_user` when:
 
@@ -47,8 +47,8 @@ The question text is passed as the content body.
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
+| Arg      | Type    | Description                                    |
+| -------- | ------- | ---------------------------------------------- |
 | question | content | The question to present to the user (required) |
 
 ## Examples

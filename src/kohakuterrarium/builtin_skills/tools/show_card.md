@@ -22,18 +22,18 @@ rendering so the model still gets a useful result.
 ## WHEN TO USE
 
 `show_card` is for **structured display + button choices**. It's
-the right tool when the user shouldn't have to *type* the answer:
+the right tool when the user shouldn't have to _type_ the answer:
 they read a styled card and click one of 2–4 buttons.
 
-| Need | Tool |
-|------|------|
-| Free-text answer (a name, a path, a description) | **ask_user** |
+| Need                                                     | Tool                                     |
+| -------------------------------------------------------- | ---------------------------------------- |
+| Free-text answer (a name, a path, a description)         | **ask_user**                             |
 | Pick from N labelled options ("Approve / Edit / Reject") | **show_card** with `actions` (this tool) |
-| Display structured info beautifully | **show_card** display-only (this tool) |
+| Display structured info beautifully                      | **show_card** display-only (this tool)   |
 
 Use `show_card` when:
 
-- Display a structured summary the user should *see* prominently —
+- Display a structured summary the user should _see_ prominently —
   e.g. "Plan ready", "Migration complete", "Cost so far".
 - Approve / reject a single decision with 2-4 button options.
 - Present a survey-style choice between named options. Each click
@@ -78,19 +78,19 @@ actions:
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
-| title | str | Card header (required) |
-| subtitle | str | Optional smaller header line |
-| icon | str | Optional emoji shown next to title |
-| accent | str | One of `primary | info | success | warning | danger | neutral`. Renderers map to a semantic colour. |
-| body | str | Optional markdown body — supports code fences, lists, links. |
-| fields | list[dict] | Optional key/value rows. Each entry: `{label, value, inline?}`. `inline=true` packs into a 2-column grid. |
-| footer | str | Optional small italic line at the bottom. |
-| actions | list[dict] | Optional buttons. Each: `{id, label, style?, url?}`. `style` ∈ `primary | secondary | danger | link`. `link` actions open `url` in a browser without round-tripping the agent. |
-| wait_for_reply | bool | Whether to block for the user's button click. Defaults to `true` when `actions` is non-empty, `false` otherwise. |
-| timeout_s | float | Optional wait timeout. Default `null` = wait forever. |
-| surface | str | `chat` (default) or `modal`. |
+| Arg            | Type       | Description                                                                                                      |
+| -------------- | ---------- | ---------------------------------------------------------------------------------------------------------------- |
+| title          | str        | Card header (required)                                                                                           |
+| subtitle       | str        | Optional smaller header line                                                                                     |
+| icon           | str        | Optional emoji shown next to title                                                                               |
+| accent         | str        | One of `primary`, `info`, `success`, `warning`, `danger`, `neutral`. Renderers map to a semantic colour.         |
+| body           | str        | Optional markdown body — supports code fences, lists, links.                                                     |
+| fields         | list[dict] | Optional key/value rows. Each entry: `{label, value, inline?}`. `inline=true` packs into a 2-column grid.        |
+| footer         | str        | Optional small italic line at the bottom.                                                                        |
+| actions        | list[dict] | Optional buttons. Each: `{id, label, style?, url?}`. `style` ∈ `primary`, `secondary`, `danger`, `link`.         |
+| wait_for_reply | bool       | Whether to block for the user's button click. Defaults to `true` when `actions` is non-empty, `false` otherwise. |
+| timeout_s      | float      | Optional wait timeout. Default `null` = wait forever.                                                            |
+| surface        | str        | `chat` (default) or `modal`.                                                                                     |
 
 ## Output Format
 

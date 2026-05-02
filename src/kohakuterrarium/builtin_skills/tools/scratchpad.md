@@ -34,15 +34,16 @@ Supported actions: `get`, `set`, `delete`, `list`, `clear`.
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
-| action | @@arg | Action to perform: get, set, delete, list, or clear |
-| key | @@arg | Key name (required for get, set, delete) |
-| value | content | Value to store (required for set; everything after the args) |
+| Arg    | Type    | Description                                                  |
+| ------ | ------- | ------------------------------------------------------------ |
+| action | @@arg   | Action to perform: get, set, delete, list, or clear          |
+| key    | @@arg   | Key name (required for get, set, delete)                     |
+| value  | content | Value to store (required for set; everything after the args) |
 
 ## Examples
 
 Store a plan:
+
 ```
 tool call: scratchpad(
   action: set
@@ -55,6 +56,7 @@ tool call: scratchpad(
 ```
 
 Retrieve a value:
+
 ```
 tool call: scratchpad(
   action: get
@@ -63,6 +65,7 @@ tool call: scratchpad(
 ```
 
 List all stored keys:
+
 ```
 tool call: scratchpad(
   action: list
@@ -70,6 +73,7 @@ tool call: scratchpad(
 ```
 
 Delete a key:
+
 ```
 tool call: scratchpad(
   action: delete
@@ -78,6 +82,7 @@ tool call: scratchpad(
 ```
 
 Clear all data:
+
 ```
 tool call: scratchpad(
   action: clear

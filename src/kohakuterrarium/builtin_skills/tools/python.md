@@ -11,9 +11,9 @@ Execute Python code and return output.
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
-| code | string | Python code to execute (required) |
+| Arg     | Type   | Description                                                                                      |
+| ------- | ------ | ------------------------------------------------------------------------------------------------ |
+| code    | string | Python code to execute (required)                                                                |
 | timeout | number | Maximum execution time in seconds for this call (default: tool config timeout; `0` = no timeout) |
 
 ## WHEN TO USE

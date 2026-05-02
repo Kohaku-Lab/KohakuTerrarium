@@ -38,13 +38,13 @@ pattern
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
-| pattern | body | Python regex pattern to search (required) |
-| path | @@arg | Directory or file to search (default: cwd) |
-| glob | @@arg | File glob filter (default: `**/*`) |
-| limit | @@arg | Max matches to return (default: 50) |
-| ignore_case | @@arg | Case-insensitive search (default: false) |
+| Arg         | Type  | Description                                |
+| ----------- | ----- | ------------------------------------------ |
+| pattern     | body  | Python regex pattern to search (required)  |
+| path        | @@arg | Directory or file to search (default: cwd) |
+| glob        | @@arg | File glob filter (default: `**/*`)         |
+| limit       | @@arg | Max matches to return (default: 50)        |
+| ignore_case | @@arg | Case-insensitive search (default: false)   |
 
 ## Behavior
 

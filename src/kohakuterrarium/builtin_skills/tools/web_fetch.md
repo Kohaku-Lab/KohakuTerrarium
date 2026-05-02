@@ -11,8 +11,8 @@ Fetch a web page and return its content in clean, readable markdown format.
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
+| Arg | Type   | Description             |
+| --- | ------ | ----------------------- |
 | url | string | URL to fetch (required) |
 
 ## Behavior

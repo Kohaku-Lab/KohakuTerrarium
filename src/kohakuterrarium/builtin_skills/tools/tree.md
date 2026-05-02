@@ -12,13 +12,13 @@ Respects .gitignore by default and limits output to avoid flooding context.
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
-| path | string | Directory to list (default: cwd) |
-| depth | integer | Max recursion depth (default: 3) |
-| limit | integer | Max output lines (default: 100, 0 = unlimited) |
-| gitignore | boolean | Follow .gitignore rules (default: true) |
-| hidden | boolean | Show hidden files (default: false) |
+| Arg       | Type    | Description                                    |
+| --------- | ------- | ---------------------------------------------- |
+| path      | string  | Directory to list (default: cwd)               |
+| depth     | integer | Max recursion depth (default: 3)               |
+| limit     | integer | Max output lines (default: 100, 0 = unlimited) |
+| gitignore | boolean | Follow .gitignore rules (default: true)        |
+| hidden    | boolean | Show hidden files (default: false)             |
 
 ## Gitignore Support
 
@@ -38,6 +38,7 @@ Set `limit=0` to disable the limit.
 ## Frontmatter Extraction
 
 For markdown files, extracts and displays inline summaries from YAML frontmatter:
+
 - `summary`: Brief description (preferred)
 - `title`: File title (fallback)
 - `description`: Description (fallback)

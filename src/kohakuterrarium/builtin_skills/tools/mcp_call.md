@@ -11,11 +11,11 @@ Call a tool on a connected MCP server.
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
-| server | string | Name of the MCP server (required) |
-| tool | string | Name of the tool to call (required) |
-| args | object | Arguments to pass to the tool (default: {}) |
+| Arg    | Type   | Description                                 |
+| ------ | ------ | ------------------------------------------- |
+| server | string | Name of the MCP server (required)           |
+| tool   | string | Name of the tool to call (required)         |
+| args   | object | Arguments to pass to the tool (default: {}) |
 
 ## Usage
 

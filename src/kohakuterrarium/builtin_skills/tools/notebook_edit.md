@@ -70,18 +70,18 @@ If `edits` is present, it takes precedence over top-level single-edit fields.
 
 Top-level fields:
 
-| Arg | Type | Description |
-|-----|------|-------------|
-| path | string | Path to a `.ipynb` file |
-| cell_id | string | Cell id for single replace/delete, or insertion anchor |
-| edit_mode | string | `replace`, `insert`, or `delete`. Default `replace` |
-| new_source | string | New source for single replace/insert |
-| cell_type | string | `code`, `markdown`, or `raw`; required for insert; optional conversion for replace |
-| insert_location | string | `after`, `before`, `beginning`, or `end`. Default `after`; inserts at end when no anchor is given |
-| clear_outputs | boolean | Clear code cell outputs/execution count. Default `true` |
-| edits | array | Ordered batch of cell edits |
-| strict | boolean | Default `true`. If any edit fails, do not write anything |
-| best_effort | boolean | Default `false`. Try every edit, skipping failures. Cannot be used with `strict=true` |
+| Arg             | Type    | Description                                                                                       |
+| --------------- | ------- | ------------------------------------------------------------------------------------------------- |
+| path            | string  | Path to a `.ipynb` file                                                                           |
+| cell_id         | string  | Cell id for single replace/delete, or insertion anchor                                            |
+| edit_mode       | string  | `replace`, `insert`, or `delete`. Default `replace`                                               |
+| new_source      | string  | New source for single replace/insert                                                              |
+| cell_type       | string  | `code`, `markdown`, or `raw`; required for insert; optional conversion for replace                |
+| insert_location | string  | `after`, `before`, `beginning`, or `end`. Default `after`; inserts at end when no anchor is given |
+| clear_outputs   | boolean | Clear code cell outputs/execution count. Default `true`                                           |
+| edits           | array   | Ordered batch of cell edits                                                                       |
+| strict          | boolean | Default `true`. If any edit fails, do not write anything                                          |
+| best_effort     | boolean | Default `false`. Try every edit, skipping failures. Cannot be used with `strict=true`             |
 
 Each `edits[]` item has the same cell fields: `cell_id`, `edit_mode`, `new_source`, `cell_type`, `insert_location`, `clear_outputs`.
 
@@ -145,7 +145,7 @@ Like `multi_edit`, batch edits support three policies:
 Default:
 
 ```json
-{"strict": true, "best_effort": false}
+{ "strict": true, "best_effort": false }
 ```
 
 - applies edits in memory in order
@@ -155,7 +155,7 @@ Default:
 ### partial mode
 
 ```json
-{"strict": false, "best_effort": false}
+{ "strict": false, "best_effort": false }
 ```
 
 - applies edits in order
@@ -165,7 +165,7 @@ Default:
 ### best-effort mode
 
 ```json
-{"strict": false, "best_effort": true}
+{ "strict": false, "best_effort": true }
 ```
 
 - attempts every edit

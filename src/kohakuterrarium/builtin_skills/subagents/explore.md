@@ -33,8 +33,8 @@ task description
 
 ## Arguments
 
-| Arg | Type | Description |
-|-----|------|-------------|
+| Arg  | Type    | Description                                |
+| ---- | ------- | ------------------------------------------ |
 | body | content | Task description (what to find/understand) |
 
 ## Examples
@@ -66,11 +66,13 @@ What modules import the database module?
 ## CAPABILITIES
 
 The explore sub-agent has access to:
+
 - `glob` - Find files by pattern
 - `grep` - Search file contents
 - `read` - Read file contents
 
 It will autonomously:
+
 1. Search for relevant files
 2. Read and analyze contents
 3. Follow imports/references
@@ -79,6 +81,7 @@ It will autonomously:
 ## OUTPUT
 
 Returns a summary of what was found, including:
+
 - Relevant files discovered
 - Key code sections
 - How components connect
