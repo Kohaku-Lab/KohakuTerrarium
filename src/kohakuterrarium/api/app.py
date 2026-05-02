@@ -5,15 +5,20 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from kohakuterrarium.api.deps import get_engine
+from kohakuterrarium.serving.process_metrics import get_aggregator
 
 # Phase 0 stub routers — empty APIRouter()s pre-mounted so Phase 1
 # agents only need to populate handlers, not edit ``app.py``. Each
 # subpackage maps to a future Studio tier (catalog / identity /
 # sessions / persistence / attach). The legacy single-file routes
 # were removed in Phase 3; the studio layer is the only path now.
+from kohakuterrarium.api.routes import metrics as metrics_route
 from kohakuterrarium.api.routes.attach import files as catalog_attach_files
+from kohakuterrarium.api.routes.attach import policies as attach_policies
 from kohakuterrarium.api.routes.catalog import builtins as catalog_builtins
 from kohakuterrarium.api.routes.catalog import commands as catalog_commands
 from kohakuterrarium.api.routes.catalog import creatures as catalog_creatures
@@ -81,6 +86,10 @@ from kohakuterrarium.api.ws import trace as ws_trace
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown."""
+    # Process-metrics: subscribe the aggregator at startup so we
+    # capture events the very first turn produces, not from the first
+    # snapshot poll.
+    get_aggregator()
     yield
     # Shutdown: stop the engine (cleans up every active session).
     engine = get_engine()
@@ -182,6 +191,11 @@ def create_app(
 
     # Studio (embedded authoring tool) — touch point T1
     app.include_router(build_studio_router())
+
+    # Process-wide metrics snapshot — read by the Stats tab + the
+    # Dashboard mini-strip. Subscribes the aggregator on first call so
+    # mounting the route is enough to start collecting data.
+    app.include_router(metrics_route.router, prefix="/api/metrics", tags=["metrics"])
 
     # ── Phase 0 stub routers (empty APIRouter()s pre-mounted) ────────
     # Phase 1 agents will populate the handler bodies; mounting here
@@ -361,6 +375,10 @@ def _mount_phase0_stubs(app: FastAPI) -> None:
         catalog_attach_files.router, prefix="/api/files", tags=["attach"]
     )
 
+    # Attach — policy hints (informational; consumed by the macro shell's
+    # Inspector Overview "IO bindings" line — never used to gate UI).
+    app.include_router(attach_policies.router, prefix="/api/attach", tags=["attach"])
+
 
 def _mount_spa(app: FastAPI, static_dir: Path) -> None:
     """Mount built Vue SPA with static assets and catch-all fallback.
@@ -368,9 +386,6 @@ def _mount_spa(app: FastAPI, static_dir: Path) -> None:
     API and WebSocket routes are already registered above, so they take
     precedence. The catch-all only fires for unmatched paths.
     """
-    from fastapi.responses import FileResponse
-    from fastapi.staticfiles import StaticFiles
-
     # Serve hashed build assets (JS, CSS, images)
     assets_dir = static_dir / "assets"
     if assets_dir.is_dir():
