@@ -73,6 +73,14 @@
     <!-- Theme toggle -->
     <NavItem :expanded="expanded" :active="false" :icon="theme.dark ? 'i-carbon-sun' : 'i-carbon-moon'" :label="theme.dark ? t('common.lightMode') : t('common.darkMode')" @click="theme.toggle()" />
 
+    <!-- UI version (Classic v1 ↔ Workspace v2) — same affordance lives in the v2 macro shell -->
+    <div v-if="expanded" class="px-3 py-2 flex justify-center">
+      <UIVersionToggle />
+    </div>
+    <div v-else class="px-1 py-2 flex justify-center" :title="'UI version (click to switch)'">
+      <UIVersionToggle />
+    </div>
+
     <div class="h-2" />
   </nav>
 </template>
@@ -82,6 +90,7 @@ import { useThemeStore } from "@/stores/theme"
 import { useInstancesStore } from "@/stores/instances"
 import { useI18n } from "@/utils/i18n"
 import { getHybridPrefSync, setHybridPref } from "@/utils/uiPrefs"
+import UIVersionToggle from "@/components/common/UIVersionToggle.vue"
 
 const theme = useThemeStore()
 const instances = useInstancesStore()

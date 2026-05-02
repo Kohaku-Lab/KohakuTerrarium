@@ -318,6 +318,24 @@
       <!-- ════════════════════════ Preferences ════════════════════════ -->
       <el-tab-pane :label="t('settings.tabs.prefs')" name="prefs">
         <div class="settings-pane flex flex-col gap-4 max-w-xl">
+          <!-- UI version picker (Classic v1 ↔ Workspace v2) -->
+          <div class="card p-4">
+            <div class="font-medium text-warm-700 dark:text-warm-300 mb-1">UI version</div>
+            <div class="text-xs text-warm-400 mb-3">KohakuTerrarium ships two UI shells this release. Pick whichever fits your workflow — they share the same backend and persisted state. Reload required after switch.</div>
+            <div class="flex flex-col gap-2">
+              <label v-for="v in UI_VERSIONS" :key="v.id" class="flex items-start gap-3 px-3 py-2 rounded border cursor-pointer transition-colors" :class="uiVersion === v.id ? 'border-iolite bg-iolite/5' : 'border-warm-200 dark:border-warm-700 hover:border-warm-300 dark:hover:border-warm-600'">
+                <input v-model="uiVersion" type="radio" :value="v.id" class="mt-1 accent-iolite" @change="onUIVersionChange(v.id)" />
+                <div class="flex-1 min-w-0">
+                  <div class="text-sm font-medium text-warm-800 dark:text-warm-200">
+                    {{ v.label }}
+                    <span class="text-[10px] uppercase tracking-wider text-warm-400 ml-1">{{ v.id }}</span>
+                  </div>
+                  <div class="text-xs text-warm-500 mt-0.5">{{ v.description }}</div>
+                </div>
+              </label>
+            </div>
+          </div>
+
           <div class="card p-4">
             <div class="font-medium text-warm-700 dark:text-warm-300 mb-3">{{ t("settings.prefs.appearance") }}</div>
             <div class="flex items-center justify-between mb-3">
@@ -374,11 +392,22 @@ import { LOCALE_DISPLAY_NAMES, SUPPORTED_LOCALES, useLocaleStore } from "@/store
 import { DEFAULT_DESKTOP_ZOOM, DEFAULT_MOBILE_ZOOM, MAX_UI_ZOOM, MIN_UI_ZOOM, useThemeStore } from "@/stores/theme"
 import { useI18n } from "@/utils/i18n"
 import { configAPI, settingsAPI } from "@/utils/api"
+import { getUIVersion, setUIVersion, UI_VERSIONS } from "@/utils/uiVersion"
 
 const theme = useThemeStore()
 const localeStore = useLocaleStore()
 const { t } = useI18n()
 const activeTab = ref("providers")
+
+// UI version picker — paired with rail footer toggles in both shells.
+const uiVersion = ref(getUIVersion())
+function onUIVersionChange(v) {
+  setUIVersion(v)
+  ElMessage.success(`UI version set to ${v} — reload to apply.`)
+  setTimeout(() => {
+    if (typeof window !== "undefined") window.location.reload()
+  }, 250)
+}
 
 const localeOptions = computed(() =>
   SUPPORTED_LOCALES.map((value) => ({

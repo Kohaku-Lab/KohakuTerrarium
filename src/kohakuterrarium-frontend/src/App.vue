@@ -6,7 +6,18 @@
     <ShortcutHelp />
     <ToastCenter />
   </div>
-  <!-- Desktop layout: NavRail + content -->
+  <!-- Desktop layout, new macro shell (behind kt.shell.enabled flag) -->
+  <div v-else-if="shellEnabled" class="h-full overflow-hidden bg-warm-50 dark:bg-warm-950">
+    <MacroShell />
+    <button v-if="showMobileHint" class="fixed bottom-4 right-4 z-50 px-3 py-2 rounded-lg bg-iolite text-white text-xs shadow-lg flex items-center gap-1.5 hover:bg-iolite/90 transition-colors" @click="switchToMobile">
+      <div class="i-carbon-mobile text-sm" />
+      <span>{{ t("common.mobileView") }}</span>
+    </button>
+    <CommandPalette />
+    <ShortcutHelp />
+    <ToastCenter />
+  </div>
+  <!-- Desktop layout, legacy NavRail + content (default) -->
   <div v-else class="h-full flex overflow-hidden bg-warm-50 dark:bg-warm-950">
     <NavRail />
     <main class="flex-1 overflow-hidden">
@@ -30,6 +41,8 @@ import CommandPalette from "@/components/chrome/CommandPalette.vue"
 import ShortcutHelp from "@/components/chrome/ShortcutHelp.vue"
 import ToastCenter from "@/components/chrome/ToastCenter.vue"
 import NavRail from "@/components/layout/NavRail.vue"
+import MacroShell from "@/components/shell/MacroShell.vue"
+import { getUIVersion } from "@/utils/uiVersion"
 import { useArtifactDetector } from "@/composables/useArtifactDetector"
 import { useAutoTriggers } from "@/composables/useAutoTriggers"
 import { useBuiltinCommands } from "@/composables/useBuiltinCommands"
@@ -50,6 +63,23 @@ const { t } = useI18n()
 const isMobileRoute = computed(() => route.path.startsWith("/mobile"))
 const windowWidth = ref(window.innerWidth)
 const forceDesktop = ref(getHybridPrefSync("kt-force-desktop", false) === true)
+
+// UI version — Classic (v1) vs Workspace (v2). Both shells coexist
+// indefinitely; user picks via the footer toggle in either rail or
+// via Settings. Default is v1 this version (backward-compat); the
+// default flips to v2 once it reaches feature parity.
+const shellEnabled = ref(getUIVersion() === "v2")
+if (typeof window !== "undefined") {
+  window.addEventListener("kt:ui-version-changed", (e) => {
+    shellEnabled.value = e?.detail === "v2"
+  })
+  // Cross-tab: another window flipping the pref should propagate here.
+  window.addEventListener("storage", (e) => {
+    if (e.key === "kt-ui-version" || e.key === "kt.shell.enabled") {
+      shellEnabled.value = getUIVersion() === "v2"
+    }
+  })
+}
 
 // Show "switch to mobile" hint only when: small screen + user explicitly left mobile + on desktop route
 const showMobileHint = computed(() => windowWidth.value < MOBILE_WIDTH && forceDesktop.value && !isMobileRoute.value)

@@ -22,11 +22,31 @@ export const useLocaleStore = defineStore("locale", {
     locale: normalizeLocale(getHybridPrefSync(LOCALE_PREF_KEY, DEFAULT_LOCALE)),
   }),
 
+  getters: {
+    /** Convenience alias used by surfaces that don't want to know
+     *  whether the field is called ``locale`` or ``current``. */
+    current: (state) => state.locale,
+    /** Human-readable display name for the current locale. */
+    displayName: (state) => LOCALE_DISPLAY_NAMES[state.locale] ?? state.locale,
+    /** Ordered list of supported locales — used by the cycle button
+     *  AND by the Settings dropdown so they share the same source of
+     *  truth. */
+    supported: () => [...SUPPORTED_LOCALES],
+  },
+
   actions: {
     setLocale(value) {
       this.locale = normalizeLocale(value)
       setHybridPref(LOCALE_PREF_KEY, this.locale)
       this.apply()
+    },
+
+    /** Rotate to the next supported locale. Invoked by the rail
+     *  footer's tiny ``en``/``zh-TW``/... button. */
+    cycle() {
+      const idx = SUPPORTED_LOCALES.indexOf(this.locale)
+      const next = SUPPORTED_LOCALES[(idx + 1) % SUPPORTED_LOCALES.length]
+      this.setLocale(next)
     },
 
     apply() {
