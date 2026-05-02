@@ -31,6 +31,7 @@ directory, so a package + local-symlink combo never produces two
 entries.
 """
 
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -39,6 +40,30 @@ import yaml
 from kohakuterrarium.core.config import load_agent_config
 from kohakuterrarium.packages.locations import PACKAGES_DIR, get_package_root
 from kohakuterrarium.packages.walk import list_packages
+
+# In-memory TTL cache for the configured-base-dir scanners. The
+# Dashboard's "+ Creature" / "+ Terrarium" modals call these on every
+# open; without the cache, every click re-reads + re-parses every
+# YAML on disk. 10s is short enough that newly-scaffolded creatures
+# show up promptly without forcing the user to refresh.
+_SCAN_CACHE_TTL = 10.0
+_creatures_cache: tuple[list[dict], float, tuple[str, ...]] | None = None
+_terrariums_cache: tuple[list[dict], float, tuple[str, ...]] | None = None
+
+
+def _cache_key(base_dirs: list[Path]) -> tuple[str, ...]:
+    return tuple(str(p) for p in base_dirs)
+
+
+def invalidate_scan_caches() -> None:
+    """Force the next ``scan_*_in_dirs`` call to re-read disk.
+
+    Call after creating / deleting / renaming a creature or terrarium
+    on disk so the catalog reflects the change immediately.
+    """
+    global _creatures_cache, _terrariums_cache
+    _creatures_cache = None
+    _terrariums_cache = None
 
 
 @dataclass
@@ -306,8 +331,20 @@ def scan_creatures_in_dirs(base_dirs: list[Path]) -> list[dict]:
     as an ``@pkg/...`` ref when the directory lives inside a package,
     matching ``api.routes.configs._to_ref``.
 
-    Verbatim port of ``api.routes.configs._scan_creature_configs``.
+    Cached for ``_SCAN_CACHE_TTL`` seconds keyed by the resolved
+    base-dir tuple — the v2 dashboard quick-start modal otherwise pays
+    the YAML-parse cost every time it opens. Use
+    :func:`invalidate_scan_caches` after creating / deleting a creature
+    on disk to force a re-scan.
     """
+    global _creatures_cache
+    key = _cache_key(base_dirs)
+    now = time.time()
+    if _creatures_cache is not None:
+        cached_results, cached_at, cached_key = _creatures_cache
+        if cached_key == key and now - cached_at < _SCAN_CACHE_TTL:
+            return cached_results
+
     results: list[dict] = []
     package_roots = _build_package_root_map()
     for base_dir in base_dirs:
@@ -329,14 +366,24 @@ def scan_creatures_in_dirs(base_dirs: list[Path]) -> list[dict]:
                     "description": minimal["description"],
                 }
             )
+    _creatures_cache = (results, now, key)
     return results
 
 
 def scan_terrariums_in_dirs(base_dirs: list[Path]) -> list[dict]:
     """Scan configured base dirs for terrarium configs (raw-YAML only).
 
-    Verbatim port of ``api.routes.configs._scan_terrarium_configs``.
+    Cached for ``_SCAN_CACHE_TTL`` seconds (see
+    :func:`scan_creatures_in_dirs` for caching rationale).
     """
+    global _terrariums_cache
+    key = _cache_key(base_dirs)
+    now = time.time()
+    if _terrariums_cache is not None:
+        cached_results, cached_at, cached_key = _terrariums_cache
+        if cached_key == key and now - cached_at < _SCAN_CACHE_TTL:
+            return cached_results
+
     results: list[dict] = []
     package_roots = _build_package_root_map()
     for base_dir in base_dirs:
@@ -358,6 +405,7 @@ def scan_terrariums_in_dirs(base_dirs: list[Path]) -> list[dict]:
                     "description": minimal["description"],
                 }
             )
+    _terrariums_cache = (results, now, key)
     return results
 
 
