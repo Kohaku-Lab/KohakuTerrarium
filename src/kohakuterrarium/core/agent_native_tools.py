@@ -50,13 +50,45 @@ class NativeToolOptions:
     # ── Mutate ──────────────────────────────────────────────────
 
     def set(self, tool_name: str, values: dict[str, Any]) -> dict[str, Any]:
-        """Replace the override dict for one provider-native tool.
+        """Patch-merge the override dict for one provider-native tool.
 
-        Empty / falsy values clear the override (tool reverts to its
-        constructor defaults). Returns the cleaned dict that was
-        applied (after dropping empty entries).
+        Semantics:
+
+        * **Empty dict** ``{}`` — explicit reset. Clears the tool's
+          override; the tool reverts to constructor defaults. This
+          is what ``/tool_options <tool> --reset`` relies on, and
+          how callers wipe a tool's overrides.
+        * **Non-empty dict** — partial PATCH-style merge:
+            - Keys present in ``values`` are merged into the
+              existing override map; cleaned values overwrite any
+              prior override for those keys.
+            - Keys absent from ``values`` are left alone (the
+              prior override survives). This fixes the multi-step
+              edit flow where the studio modules panel only sends
+              the fields the user just changed.
+            - ``{"<key>": None}`` deletes that one key.
+
+        Returns the **full** post-merge override dict for the tool.
         """
-        cleaned = self._validate(tool_name, values or {})
+        incoming = values or {}
+        # ``{}`` is the explicit-reset sentinel. The studio frontend
+        # short-circuits empty payloads so this never fires for
+        # partial updates from the panel.
+        if not incoming:
+            self._values.pop(tool_name, None)
+            self._refresh_in_registry(tool_name, {})
+            self._persist()
+            return {}
+
+        existing = dict(self._values.get(tool_name, {}))
+        for key, val in incoming.items():
+            if val is None:
+                existing.pop(key, None)
+            else:
+                existing[key] = val
+        # Validation runs against the merged map so cross-field
+        # constraints still apply.
+        cleaned = self._validate(tool_name, existing)
         if cleaned:
             self._values[tool_name] = cleaned
         else:

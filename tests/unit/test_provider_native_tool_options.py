@@ -136,6 +136,41 @@ def test_set_updates_tool_in_place_and_persists():
     assert json.loads(raw) == {"image_gen": {"size": "2048x2048", "quality": "high"}}
 
 
+def test_partial_set_merges_into_existing_overrides():
+    """Multi-step edit: setting one field then another should preserve
+    the first. Regression for the studio modules panel sending only
+    changed keys per debounced save."""
+    tool = ImageGenTool()
+    agent = _make_fake_agent(tool)
+    helper = NativeToolOptions(agent)
+
+    # Step 1 — user sets size from the studio panel.
+    helper.set("image_gen", {"size": "2048x2048"})
+    assert helper.get("image_gen") == {"size": "2048x2048"}
+    assert tool.size == "2048x2048"
+
+    # Step 2 — user sets quality. The frontend only sends the changed
+    # key; size must survive.
+    applied = helper.set("image_gen", {"quality": "high"})
+    assert applied == {"size": "2048x2048", "quality": "high"}
+    assert helper.get("image_gen") == {"size": "2048x2048", "quality": "high"}
+    assert tool.size == "2048x2048"
+    assert tool.quality == "high"
+
+
+def test_partial_set_with_none_deletes_one_key():
+    """Sending ``{"<key>": None}`` should drop just that key from the
+    override, not wipe the rest."""
+    tool = ImageGenTool()
+    agent = _make_fake_agent(tool)
+    helper = NativeToolOptions(agent)
+
+    helper.set("image_gen", {"size": "2048x2048", "quality": "high"})
+    applied = helper.set("image_gen", {"size": None})
+    assert applied == {"quality": "high"}
+    assert helper.get("image_gen") == {"quality": "high"}
+
+
 def test_set_with_empty_dict_clears_override():
     tool = ImageGenTool()
     agent = _make_fake_agent(tool)
