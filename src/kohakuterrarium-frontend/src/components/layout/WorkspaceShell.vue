@@ -4,7 +4,7 @@
     <EditModeBanner />
 
     <!-- Top header: instance info + preset dropdown + Ctrl+K + stop -->
-    <AppHeader v-if="showHeader" @stop="$emit('stop')" />
+    <AppHeader v-if="showHeader" :instance-id="instanceId" @stop="$emit('stop')" />
 
     <!-- Save-as-new-preset modal -->
     <SavePresetModal v-model="saveModalOpen" @saved="onSaved" />
@@ -19,7 +19,7 @@
 
     <!-- Status bar (always at bottom, outside the tree) -->
     <div class="shrink-0">
-      <StatusBar />
+      <StatusBar :instance-id="instanceId" />
     </div>
   </div>
 </template>

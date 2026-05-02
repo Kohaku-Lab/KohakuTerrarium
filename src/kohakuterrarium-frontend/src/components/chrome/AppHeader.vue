@@ -2,7 +2,7 @@
   <div class="app-header flex items-center gap-2 px-3 h-8 border-b border-warm-200 dark:border-warm-700 bg-white dark:bg-warm-900 text-xs shrink-0">
     <StatusDot v-if="instance" :status="instance.status" />
     <span class="font-medium text-warm-700 dark:text-warm-300 truncate max-w-48">
-      {{ instance?.config_name || "—" }}
+      {{ instanceName }}
     </span>
     <span v-if="instance?.type" class="text-[9px] px-1.5 py-0.5 rounded bg-warm-100 dark:bg-warm-800 text-warm-400">{{ instanceTypeLabel }}</span>
 
@@ -55,11 +55,16 @@
 import { computed, ref } from "vue"
 
 import InstanceSettingsModal from "@/components/chrome/InstanceSettingsModal.vue"
+import { useInstanceContext } from "@/components/chrome/instanceContext"
 import StatusDot from "@/components/common/StatusDot.vue"
 import { useInstancesStore } from "@/stores/instances"
 import { useLayoutStore } from "@/stores/layout"
 import { useI18n } from "@/utils/i18n"
 import { fireLayoutEditRequested, firePaletteOpen } from "@/utils/layoutEvents"
+
+const props = defineProps({
+  instanceId: { type: String, default: "" },
+})
 
 defineEmits(["stop"])
 
@@ -70,12 +75,9 @@ const instances = useInstancesStore()
 const layout = useLayoutStore()
 const { t, presetLabel: translatePreset } = useI18n()
 
-const instance = computed(() => {
-  const id = String(route.params.id || "")
-  if (!id) return instances.current
-  if (instances.current?.id === id) return instances.current
-  return instances.list.find((item) => item.id === id) || null
-})
+const { resolvedInstanceId, instance } = useInstanceContext(props, route, instances)
+
+const instanceName = computed(() => instance.value?.config_name || instance.value?.creatures?.[0]?.name || resolvedInstanceId.value || "—")
 
 const instanceTypeLabel = computed(() => {
   if (!instance.value?.type) return ""

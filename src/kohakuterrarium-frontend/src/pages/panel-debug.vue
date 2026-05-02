@@ -18,7 +18,7 @@
       <SettingsPanel v-else-if="active === 'settings'" :instance="fakeInstance" />
       <DebugPanel v-else-if="active === 'debug'" :instance="fakeInstance" />
       <StatusDashboard v-else-if="active === 'status-dashboard'" :instance="fakeInstance" />
-      <StatusBar v-else-if="active === 'status-bar'" />
+      <StatusBar v-else-if="active === 'status-bar'" :instance-id="fakeInstance?.id || ''" />
       <EditorMain v-else-if="active === 'editor'" />
       <div v-else class="h-full flex items-center justify-center text-warm-400 text-sm">Select a panel tab above</div>
     </div>

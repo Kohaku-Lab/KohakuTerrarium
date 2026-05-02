@@ -1,7 +1,7 @@
 <template>
   <div class="flex items-center gap-2 min-w-0">
     <!-- Terrarium target (root vs creature) — only for terrarium instances -->
-    <el-select v-if="isTerrarium" :model-value="selectedTarget" size="small" class="status-select target-select" :disabled="!instanceId" @change="onPickTarget">
+    <el-select v-if="isTerrarium" :model-value="selectedTarget" size="small" class="status-select target-select" :disabled="!activeInstanceId" @change="onPickTarget">
       <el-option v-for="target in targetOptions" :key="target.value" :label="target.label" :value="target.value" />
     </el-select>
 
@@ -92,10 +92,15 @@ import { computed, ref, reactive, watch, onMounted, onUnmounted } from "vue"
 import { ElMessage } from "element-plus"
 import { ArrowDown } from "@element-plus/icons-vue"
 
+import { useInstanceContext } from "@/components/chrome/instanceContext"
 import { useChatStore } from "@/stores/chat"
 import { useInstancesStore } from "@/stores/instances"
 import { agentAPI, terrariumAPI, configAPI } from "@/utils/api"
 import { onLayoutEvent, LAYOUT_EVENTS } from "@/utils/layoutEvents"
+
+const props = defineProps({
+  instanceId: { type: String, default: "" },
+})
 
 const route = useRoute()
 const chat = useChatStore()
@@ -113,13 +118,8 @@ const draftSelections = reactive({})
 
 const availableModels = computed(() => models.value.filter((model) => model.available !== false))
 
-const currentInstance = computed(() => {
-  const id = String(route.params.id || "")
-  if (!id) return instances.current
-  if (instances.current?.id === id) return instances.current
-  return instances.list.find((item) => item.id === id) || null
-})
-const instanceId = computed(() => currentInstance.value?.id || null)
+const { instance: currentInstance } = useInstanceContext(props, route, instances)
+const activeInstanceId = computed(() => currentInstance.value?.id || null)
 const isTerrarium = computed(() => currentInstance.value?.type === "terrarium")
 const terrariumTarget = computed(() => (isTerrarium.value ? chat.terrariumTarget : null))
 const targetOptions = computed(() => {
@@ -128,7 +128,7 @@ const targetOptions = computed(() => {
   return [...(inst.has_root ? [{ value: "root", label: "root" }] : []), ...(inst.creatures || []).map((c) => ({ value: c.name, label: c.name }))]
 })
 const selectedTarget = computed(() => terrariumTarget.value || targetOptions.value[0]?.value || null)
-const canPickModel = computed(() => !!instanceId.value && (!isTerrarium.value || !!selectedTarget.value))
+const canPickModel = computed(() => !!activeInstanceId.value && (!isTerrarium.value || !!selectedTarget.value))
 
 const currentModel = computed(() => {
   const inst = currentInstance.value
@@ -318,7 +318,7 @@ function onPickTarget(target) {
 
 async function applySelection() {
   const modelName = draftSelector.value
-  const id = instanceId.value
+  const id = activeInstanceId.value
   if (!id || !modelName || modelName === currentModel.value) return
   applying.value = true
   try {

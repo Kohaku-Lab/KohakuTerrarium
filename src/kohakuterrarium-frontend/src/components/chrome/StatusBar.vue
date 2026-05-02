@@ -3,13 +3,13 @@
     <!-- Instance name + status -->
     <div class="status-seg flex items-center gap-1.5 shrink-0">
       <StatusDot v-if="instance" :status="instance.status" class="scale-75" />
-      <span class="truncate max-w-40">{{ instance?.config_name || "—" }}</span>
+      <span class="truncate max-w-40">{{ instanceName }}</span>
     </div>
 
     <div class="seg-sep" />
 
     <!-- Model quick switcher -->
-    <ModelSwitcher />
+    <ModelSwitcher :instance-id="resolvedInstanceId" />
 
     <div class="seg-sep" />
 
@@ -41,6 +41,7 @@
 <script setup>
 import { computed, ref } from "vue"
 
+import { useInstanceContext } from "@/components/chrome/instanceContext"
 import ModelSwitcher from "@/components/chrome/ModelSwitcher.vue"
 import StatusDot from "@/components/common/StatusDot.vue"
 import { useVisibilityInterval } from "@/composables/useVisibilityInterval"
@@ -48,17 +49,17 @@ import { useChatStore } from "@/stores/chat"
 import { useInstancesStore } from "@/stores/instances"
 import { useI18n } from "@/utils/i18n"
 
+const props = defineProps({
+  instanceId: { type: String, default: "" },
+})
+
 const route = useRoute()
 const instances = useInstancesStore()
 const chat = useChatStore()
 const { t } = useI18n()
 
-const instance = computed(() => {
-  const id = String(route.params.id || "")
-  if (!id) return instances.current
-  if (instances.current?.id === id) return instances.current
-  return instances.list.find((item) => item.id === id) || null
-})
+const { resolvedInstanceId, instance } = useInstanceContext(props, route, instances)
+const instanceName = computed(() => instance.value?.config_name || instance.value?.creatures?.[0]?.name || resolvedInstanceId.value || "—")
 const sessionId = computed(() => chat.sessionInfo.sessionId || instance.value?.session_id || "")
 const sessionIdShort = computed(() => {
   const s = sessionId.value

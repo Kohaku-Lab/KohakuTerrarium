@@ -7,7 +7,7 @@
 
     <div class="mb-4">
       <div class="text-[10px] text-warm-400 uppercase tracking-wider mb-2">Switch</div>
-      <ModelSwitcher />
+      <ModelSwitcher :instance-id="instance?.id || ''" />
     </div>
 
     <div v-if="profile" class="flex flex-col gap-1 text-warm-500">
