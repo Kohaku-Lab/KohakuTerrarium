@@ -24,11 +24,11 @@
           <div class="flex flex-col gap-1.5">
             <div class="flex items-center gap-2">
               <span class="text-warm-400 w-16">{{ t("common.agent") }}</span>
-              <span class="text-warm-600 dark:text-warm-400">{{ chat.sessionInfo.agentName || instance?.config_name || "--" }}</span>
+              <span class="text-warm-600 dark:text-warm-400">{{ agentLabel }}</span>
             </div>
             <div class="flex items-center gap-2">
               <span class="text-warm-400 w-16">{{ t("common.model") }}</span>
-              <span class="text-iolite font-mono text-[11px] break-all">{{ chat.modelDisplay || instance?.llm_name || instance?.model || "--" }}</span>
+              <span class="text-iolite font-mono text-[11px] break-all">{{ modelLabel }}</span>
             </div>
             <div class="flex items-center gap-2">
               <span class="text-warm-400 w-16">{{ t("common.provider") }}</span>
@@ -36,7 +36,7 @@
             </div>
             <div class="flex items-center gap-2">
               <span class="text-warm-400 w-16">{{ t("common.session") }}</span>
-              <span class="text-warm-600 dark:text-warm-400 font-mono text-[10px] truncate max-w-32">{{ chat.sessionInfo.sessionId || instance?.session_id || "--" }}</span>
+              <span class="text-warm-600 dark:text-warm-400 font-mono text-[10px] truncate max-w-32">{{ sessionIdLabel }}</span>
             </div>
             <div v-if="instance?.status" class="flex items-center gap-2">
               <span class="text-warm-400 w-16">{{ t("common.status") }}</span>
@@ -120,6 +120,10 @@ const activeLabel = computed(() => allTabs.value.find((tab) => tab.id === active
 
 const selectedModel = ref("")
 const availableModels = ref([])
+
+const agentLabel = computed(() => chat.sessionInfo.agentName || props.instance?.config_name || props.instance?.creatures?.[0]?.name || "--")
+const modelLabel = computed(() => chat.modelDisplay || props.instance?.llm_name || props.instance?.model || "--")
+const sessionIdLabel = computed(() => chat.sessionInfo.sessionId || props.instance?.session_id || props.instance?.id || "--")
 
 onMounted(() => {
   loadModels()

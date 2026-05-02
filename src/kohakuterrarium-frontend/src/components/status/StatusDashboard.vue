@@ -64,7 +64,7 @@
           <div class="flex items-center gap-2">
             <span class="text-warm-400 w-16">{{ t("common.agent") }}</span>
             <span class="text-warm-600 dark:text-warm-400">
-              {{ chat.sessionInfo.agentName || instance?.config_name || "--" }}
+              {{ chat.sessionInfo.agentName || instance?.config_name || instance?.creatures?.[0]?.name || "--" }}
             </span>
           </div>
           <div class="flex items-center gap-2">
@@ -82,7 +82,7 @@
           <div class="flex items-center gap-2">
             <span class="text-warm-400 w-16">{{ t("common.session") }}</span>
             <span class="text-warm-600 dark:text-warm-400 font-mono text-[10px] truncate max-w-32">
-              {{ chat.sessionInfo.sessionId || instance?.session_id || "--" }}
+              {{ chat.sessionInfo.sessionId || instance?.session_id || instance?.id || "--" }}
             </span>
           </div>
         </div>
