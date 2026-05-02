@@ -84,8 +84,7 @@ export default defineConfig({
     card: "bg-white dark:bg-warm-900 rounded-xl border border-warm-200/60 dark:border-warm-700/60",
     "card-hover":
       "card hover:border-warm-300/80 dark:hover:border-warm-600/60 hover:shadow-sm transition-all cursor-pointer",
-    "user-message":
-      "px-3.5 pt-2 pb-3 rounded-xl bg-warm-100 dark:bg-warm-800",
+    "user-message": "px-3.5 pt-2 pb-3 rounded-xl bg-warm-100 dark:bg-warm-800",
     "btn-primary":
       "px-4 py-2 rounded-lg bg-iolite text-white hover:bg-iolite-shadow transition-colors font-medium text-sm border-none",
     "btn-secondary":
