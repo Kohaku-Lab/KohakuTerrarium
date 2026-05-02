@@ -47,6 +47,7 @@
 <script setup>
 import ChatPanel from "@/components/chat/ChatPanel.vue"
 import { useChatStore, _convertHistory, _replayEvents } from "@/stores/chat"
+import { useSessionDetailStore } from "@/stores/sessionDetail"
 import { sessionAPI } from "@/utils/api"
 
 const props = defineProps({
@@ -57,8 +58,15 @@ const isMobile = inject("mobileLayout", false)
 const route = useRoute()
 const router = useRouter()
 const chat = useChatStore()
+const detail = useSessionDetailStore()
 
-const sessionName = computed(() => String(route.params.name || ""))
+// In v1 the URL is ``/sessions/:name`` and ``route.params.name`` is the
+// canonical source. In v2 the macro shell URL is ``/?tabs=session:foo``
+// — ``route.params.name`` is empty, but the parent ``pages/sessions/
+// [name].vue`` has already loaded the session into the ``sessionDetail``
+// store via its ``sessionNameProp``. Reading from the store first keeps
+// both paths working without forwarding props through ConvTab.
+const sessionName = computed(() => detail.name || String(route.params.name || ""))
 const loading = ref(false)
 const error = ref("")
 const viewerMeta = ref(null)
@@ -155,8 +163,9 @@ function tabLabel(tab) {
 }
 
 watch(
-  () => route.params.name,
-  () => {
+  sessionName,
+  (name) => {
+    if (!name) return
     chat.activeTab = null
     loadSession()
   },

@@ -55,11 +55,15 @@ import { useSessionDetailStore } from "@/stores/sessionDetail"
 import { useI18n } from "@/utils/i18n"
 
 const { t } = useI18n()
+// Optional prop — when this page is embedded as a SessionViewerTab in
+// the v2 macro shell, the route params are not available; the tab passes
+// the session name directly. Falls back to route.params.name in v1.
+const props = defineProps({ sessionNameProp: { type: String, default: null } })
 const route = useRoute()
 const router = useRouter()
 const detail = useSessionDetailStore()
 
-const sessionName = computed(() => String(route.params.name || ""))
+const sessionName = computed(() => props.sessionNameProp ?? String(route.params.name || ""))
 
 const tabs = computed(() => [
   { id: "overview", label: t("sessionViewer.tabs.overview"), icon: "i-carbon-dashboard" },
@@ -70,12 +74,26 @@ const tabs = computed(() => [
   { id: "diff", label: t("sessionViewer.tabs.diff"), icon: "i-carbon-compare" },
 ])
 
+// In v1 (page-routed) we deep-link the inner tab via ``?tab=trace`` etc.
+// In v2 (embedded as a SessionViewerTab) the URL is owned by the macro
+// shell's tabs store; mutating ``route.query`` here would race the
+// shell's URL sync. Detect via ``sessionNameProp`` — if it's set,
+// we're in v2 and only update local store state.
+const isEmbed = computed(() => props.sessionNameProp != null)
+
 function selectTab(tab) {
   detail.setTab(tab)
-  router.replace({ query: { ...route.query, tab } })
+  if (!isEmbed.value) {
+    router.replace({ query: { ...route.query, tab } })
+  }
 }
 
 function goBack() {
+  if (isEmbed.value) {
+    // In a tab — just close the inner detail by clearing the store.
+    // The user can use the macro shell's tab close button to leave.
+    return
+  }
   router.push("/sessions")
 }
 
