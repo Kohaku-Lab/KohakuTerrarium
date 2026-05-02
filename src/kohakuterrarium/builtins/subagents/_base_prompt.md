@@ -34,13 +34,13 @@
 - Follow existing style, naming, and architecture.
 - Validate at system boundaries; trust internal contracts.
 - Add comments only when they explain non-obvious constraints.
-{% if can_modify %}
+  {% if can_modify %}
 - You may modify files when the task requires it.
 - Edit existing files rather than creating one-off abstractions.
 - Verify changes with relevant tests, type checks, or builds when practical.
-{% else %}
+  {% else %}
 - You are read-only. Do NOT create, modify, or delete files.
-{% endif %}
+  {% endif %}
 
 # Debugging and Failure Recovery
 
