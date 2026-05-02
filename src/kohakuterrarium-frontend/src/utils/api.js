@@ -660,4 +660,44 @@ export const registryAPI = {
   },
 }
 
+/** Process-wide stats surface (Stats tab). */
+export const statsAPI = {
+  /** @returns {Promise<{count, total_bytes, oldest_at, newest_at, session_dir}>} */
+  async diskUsage() {
+    const { data } = await api.get("/sessions/disk-usage")
+    return data
+  },
+
+  /** Aggregations over the cached session index — cheap, no rebuild. */
+  async sessionStats() {
+    const { data } = await api.get("/sessions/stats")
+    return data
+  },
+
+  /**
+   * Process-wide metrics snapshot — counters, sliding histograms, rate
+   * buckets, gauges. Polled every 5 s by the Stats tab + the Dashboard
+   * mini-strip. See ``api/routes/metrics.py`` for the shape contract.
+   */
+  async metrics() {
+    const { data } = await api.get("/metrics/snapshot")
+    return data
+  },
+}
+
+/** Attach — informational policy hints consumed by Inspector Overview. */
+export const attachAPI = {
+  /** @returns {Promise<{policies: string[]}>} */
+  async getCreaturePolicies(creatureId) {
+    const { data } = await api.get(`/attach/policies/${encodeURIComponent(creatureId)}`)
+    return data
+  },
+
+  /** @returns {Promise<{policies: string[]}>} */
+  async getSessionPolicies(sessionId) {
+    const { data } = await api.get(`/attach/session_policies/${encodeURIComponent(sessionId)}`)
+    return data
+  },
+}
+
 export default api
