@@ -63,6 +63,7 @@ def build_skill_index(
 
 
 def _format_entry(skill: Skill) -> str:
-    desc = (skill.description or "").splitlines()[0].strip()
+    lines = (skill.description or "").splitlines()
+    desc = lines[0].strip() if lines else ""
     suffix = f" — {desc}" if desc else ""
     return f"- `{skill.name}`{suffix}\n"

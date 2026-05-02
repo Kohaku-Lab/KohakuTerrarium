@@ -80,7 +80,8 @@ class SkillPathScanner:
         )
         for skill in matched:
             patterns = ", ".join(f"`{p}`" for p in skill.paths)
-            desc = (skill.description or "").splitlines()[0][:200]
+            desc_lines = (skill.description or "").splitlines()
+            desc = desc_lines[0][:200] if desc_lines else ""
             lines.append(f"- **{skill.name}** — matches {patterns}. {desc}")
         return "\n".join(lines)
 

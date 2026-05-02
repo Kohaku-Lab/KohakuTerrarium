@@ -91,7 +91,8 @@ class SkillUserCommand(BaseUserCommand):
         for s in skills:
             status = "enabled" if s.enabled else "disabled"
             hidden = " (hidden)" if s.invocation_blocked else ""
-            desc = (s.description or "").splitlines()[0][:120]
+            desc_lines = (s.description or "").splitlines()
+            desc = desc_lines[0][:120] if desc_lines else ""
             lines.append(
                 f"{status:>8}{hidden:>9}  " f"{s.name:<24} [{s.origin}]  {desc}"
             )
