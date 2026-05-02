@@ -5,6 +5,8 @@ import subprocess
 from pathlib import Path
 
 from kohakuterrarium.packages.locations import _packages_dir
+from kohakuterrarium.packages.locations import get_package_root
+from kohakuterrarium.packages.locations import read_link
 from kohakuterrarium.packages.locations import remove_link
 from kohakuterrarium.packages.locations import write_link
 from kohakuterrarium.packages.manifest import _force_rmtree
@@ -72,13 +74,29 @@ def update_package(name: str) -> str:
     RuntimeError
         If the package is not a git clone, or ``git pull`` fails.
     """
-    target = _packages_dir() / name
-    if not target.exists() or not target.is_dir():
+    # Resolve through ``.link`` pointers / symlinks to the real
+    # checkout. ``_packages_dir() / name`` alone misses editable
+    # installs (which live as ``<name>.link`` siblings) and resolves
+    # to the *symlinked* path on Windows junctions — both of which
+    # break ``git -C`` when the checkout is a submodule. Submodule
+    # ``.git`` files carry a relative ``gitdir: ../.git/modules/<name>``
+    # that git resolves against the literal cwd; if that cwd is the
+    # symlink, git looks for the gitdir under the wrong parent and
+    # bails with "fatal: not a git repository".
+    target = get_package_root(name)
+    if target is None:
         raise FileNotFoundError(f"Package not installed: {name}")
+    target = target.resolve()
+    is_editable = read_link(name) is not None
     if not (target / ".git").exists():
         raise RuntimeError(f"Package is not a git clone: {name}")
 
-    logger.info("Updating package", package=name)
+    logger.info(
+        "Updating package",
+        package=name,
+        path=str(target),
+        editable=is_editable,
+    )
     try:
         subprocess.run(
             ["git", "-C", str(target), "pull", "--ff-only"],
