@@ -11,10 +11,32 @@ from fastapi import APIRouter, HTTPException
 from kohakuterrarium.studio.persistence.store import (
     build_session_index,
     delete_session_files,
+    disk_usage,
     get_session_index,
+    session_stats,
 )
 
 router = APIRouter()
+
+
+@router.get("/disk-usage")
+async def get_disk_usage():
+    """Aggregate disk usage of the saved-session directory.
+
+    Pure filesystem — stats every canonical session file + its
+    SQLite sidecars without opening any database.
+    """
+    return disk_usage()
+
+
+@router.get("/stats")
+async def get_session_stats():
+    """Aggregations over the cached session index.
+
+    Cheap — reads the in-memory index built by ``get_session_index``
+    (30s TTL). Does not force a rebuild.
+    """
+    return session_stats()
 
 
 @router.get("")
@@ -40,20 +62,38 @@ async def list_sessions(
     # Server-side search
     if search:
         q = search.lower()
+
+        def _as_str(v):
+            """Defensive coerce — session metadata fields are usually strings
+            but recent recordings may contain a list (e.g. multimodal
+            preview blocks). Flatten anything to a single space-joined
+            string for the search haystack.
+            """
+            if v is None:
+                return ""
+            if isinstance(v, str):
+                return v
+            if isinstance(v, list):
+                return " ".join(_as_str(x) for x in v)
+            if isinstance(v, dict):
+                return " ".join(_as_str(x) for x in v.values())
+            return str(v)
+
         all_sessions = [
             s
             for s in all_sessions
             if q
             in " ".join(
-                [
-                    s.get("name", ""),
-                    s.get("config_path", ""),
-                    s.get("config_type", ""),
-                    s.get("terrarium_name", ""),
-                    s.get("preview", ""),
-                    s.get("pwd", ""),
-                    " ".join(s.get("agents", [])),
-                ]
+                _as_str(s.get(k, ""))
+                for k in (
+                    "name",
+                    "config_path",
+                    "config_type",
+                    "terrarium_name",
+                    "preview",
+                    "pwd",
+                    "agents",
+                )
             ).lower()
         ]
 
