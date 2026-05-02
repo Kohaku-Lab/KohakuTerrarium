@@ -64,16 +64,33 @@ class TerrariumOutputWiringResolver:
                 self._warn_once(target, "terrarium has no root agent configured")
             return self._root_agent
 
-        handle = self._creatures.get(target)
+        handle = self._resolve_handle(target)
         if handle is None:
             self._warn_once(target, "no such creature in this terrarium")
             return None
         return handle.agent
 
+    def _resolve_handle(self, target: str):
+        handle = self._creatures.get(target)
+        if handle is not None:
+            return handle
+        for creature in self._creatures.values():
+            if getattr(creature, "name", None) == target:
+                return creature
+            agent = getattr(creature, "agent", None)
+            config = getattr(agent, "config", None)
+            if getattr(config, "name", None) == target:
+                return creature
+        return None
+
     def _target_identity(self, target: str, target_agent: "Agent") -> str:
         if target == ROOT_TARGET:
-            return getattr(target_agent.config, "name", ROOT_TARGET)
-        return target
+            return getattr(
+                target_agent,
+                "_creature_id",
+                getattr(target_agent.config, "name", ROOT_TARGET),
+            )
+        return getattr(target_agent, "_creature_id", target)
 
     def _warn_once(self, target: str, reason: str) -> None:
         if target in self._warned_missing:

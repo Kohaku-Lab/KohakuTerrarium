@@ -8,8 +8,10 @@ from kohakuterrarium.terrarium.output_wiring import TerrariumOutputWiringResolve
 
 
 class FakeAgent:
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, creature_id: str | None = None) -> None:
         self.config = SimpleNamespace(name=name)
+        if creature_id is not None:
+            self._creature_id = creature_id
         self._running = True
         self.events = []
 
@@ -54,6 +56,25 @@ async def test_resolver_allows_self_target_with_explicit_marker():
     await asyncio.sleep(0)
 
     assert len(agent.events) == 1
+
+
+@pytest.mark.asyncio
+async def test_resolver_blocks_self_target_by_creature_id():
+    agent = FakeAgent("alpha", creature_id="alpha_123")
+    resolver = TerrariumOutputWiringResolver(
+        creatures={"alpha_123": SimpleNamespace(name="alpha", agent=agent)},
+        root_agent=None,
+    )
+
+    await resolver.emit(
+        source="alpha_123",
+        content="loop",
+        source_event_type="test",
+        turn_index=1,
+        entries=[OutputWiringEntry(to="alpha")],
+    )
+
+    assert agent.events == []
 
 
 @pytest.mark.asyncio

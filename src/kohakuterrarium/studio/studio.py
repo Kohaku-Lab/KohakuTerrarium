@@ -474,6 +474,19 @@ class _SessionsNS:
     async def unwire_output(self, *args, **kwargs) -> Any:
         return await _session_wiring.unwire_output(self._studio.engine, *args, **kwargs)
 
+    def list_output_wiring(self, *args, **kwargs) -> Any:
+        return _session_wiring.list_output_wiring(self._studio.engine, *args, **kwargs)
+
+    async def wire_output_sink(self, *args, **kwargs) -> Any:
+        return await _session_wiring.wire_output_sink(
+            self._studio.engine, *args, **kwargs
+        )
+
+    async def unwire_output_sink(self, *args, **kwargs) -> Any:
+        return await _session_wiring.unwire_output_sink(
+            self._studio.engine, *args, **kwargs
+        )
+
     # memory search
     def search_memory(self, name: str, **kwargs) -> dict[str, Any]:
         return _session_memory.search_session_memory(name, **kwargs)

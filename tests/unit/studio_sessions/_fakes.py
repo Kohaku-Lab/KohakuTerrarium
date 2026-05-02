@@ -224,7 +224,10 @@ class _FakeAgent:
         with_session_store: Any = None,
     ) -> None:
         self.is_running = False
-        self.config = SimpleNamespace(name=name, model=model, pwd=None)
+        self._running = False
+        self.config = SimpleNamespace(
+            name=name, model=model, pwd=None, output_wiring=[]
+        )
         self.llm = SimpleNamespace(
             model=model,
             provider="test",
@@ -254,6 +257,7 @@ class _FakeAgent:
         self._working_dir = "."
         # Recording channels for assertions
         self.injected: list[tuple[Any, str]] = []
+        self.received_events: list[Any] = []
         self.start_calls = 0
         self.stop_calls = 0
         self.regen_calls = 0
@@ -274,14 +278,19 @@ class _FakeAgent:
 
     async def start(self) -> None:
         self.is_running = True
+        self._running = True
         self.start_calls += 1
 
     async def stop(self) -> None:
         self.is_running = False
+        self._running = False
         self.stop_calls += 1
 
     async def inject_input(self, message, *, source: str = "chat") -> None:
         self.injected.append((message, source))
+
+    async def _process_event(self, event) -> None:
+        self.received_events.append(event)
 
     async def regenerate_last_response(self) -> None:
         self.regen_calls += 1

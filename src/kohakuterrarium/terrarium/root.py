@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 import kohakuterrarium.terrarium.channels as _channels
 import kohakuterrarium.terrarium.topology as _topo
+import kohakuterrarium.terrarium.wiring as _wiring
 from kohakuterrarium.terrarium.events import RootAssignment
 from kohakuterrarium.terrarium.topology import ChannelKind
 
@@ -97,6 +98,7 @@ async def assign_root_to(
 
     # 5. mark the root for downstream callers.
     root.is_root = True
+    _wiring.install_output_wiring_resolver(engine)
     if hasattr(root.config, "is_root"):
         try:
             root.config.is_root = True

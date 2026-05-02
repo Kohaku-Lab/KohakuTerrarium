@@ -19,7 +19,7 @@ from kohakuterrarium.terrarium.creature import CreatureHandle
 from kohakuterrarium.terrarium.factory import build_creature, build_root_agent
 from kohakuterrarium.terrarium.hotplug import HotPlugMixin
 from kohakuterrarium.terrarium.observer import ChannelObserver
-from kohakuterrarium.terrarium.output_wiring import TerrariumOutputWiringResolver
+import kohakuterrarium.terrarium.wiring as _wiring
 from kohakuterrarium.terrarium.persistence import attach_session_store
 from kohakuterrarium.utils.logging import get_logger
 
@@ -195,14 +195,10 @@ class TerrariumRuntime(HotPlugMixin):
         NoopResolver behaviour. We replace it with the terrarium-aware
         resolver here.
         """
-        resolver = TerrariumOutputWiringResolver(
-            creatures=self._creatures,
+        _wiring.install_runtime_output_wiring_resolver(
+            self._creatures,
             root_agent=self._root_agent,
         )
-        for handle in self._creatures.values():
-            handle.agent._wiring_resolver = resolver
-        if self._root_agent is not None:
-            self._root_agent._wiring_resolver = resolver
         logger.debug(
             "Output wiring resolver installed",
             creature_count=len(self._creatures),

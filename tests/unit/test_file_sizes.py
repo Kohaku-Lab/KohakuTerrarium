@@ -33,6 +33,8 @@ ALLOWLIST_600 = {
     "core/controller.py",
     # Agent class, orchestrates all subsystems
     "core/agent.py",
+    # Terrarium engine public facade with cohesive topology/wiring surface.
+    "terrarium/engine.py",
     # CLI runner with argparse (barely over)
     "terrarium/cli.py",
     # Prompt aggregation pipeline (barely over)

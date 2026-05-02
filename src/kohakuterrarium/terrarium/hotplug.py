@@ -15,6 +15,7 @@ from kohakuterrarium.terrarium.config import (
     CreatureConfig,
     build_channel_topology_prompt,
 )
+import kohakuterrarium.terrarium.wiring as _wiring
 from kohakuterrarium.terrarium.creature import CreatureHandle
 from kohakuterrarium.terrarium.factory import build_creature
 from kohakuterrarium.utils.logging import get_logger
@@ -81,6 +82,10 @@ class HotPlugMixin:
         # Build creature via factory function
         handle = build_creature(creature_cfg, self.environment, self.config)
         self._creatures[creature_cfg.name] = handle
+        _wiring.install_runtime_output_wiring_resolver(
+            self._creatures,
+            root_agent=getattr(self, "_root_agent", None),
+        )
 
         # Start the agent
         await handle.agent.start()
@@ -150,6 +155,10 @@ class HotPlugMixin:
 
         # Remove from registry
         del self._creatures[name]
+        _wiring.install_runtime_output_wiring_resolver(
+            self._creatures,
+            root_agent=getattr(self, "_root_agent", None),
+        )
         _emit_hotplug_transition(self, "remove", creature=name)
         logger.info("Creature removed", creature=name)
         return True

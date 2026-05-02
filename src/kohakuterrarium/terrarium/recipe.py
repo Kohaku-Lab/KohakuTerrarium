@@ -33,7 +33,7 @@ from kohakuterrarium.terrarium.factory import (
     force_register_terrarium_tools,
     inject_prompt_section,
 )
-from kohakuterrarium.terrarium.output_wiring import TerrariumOutputWiringResolver
+import kohakuterrarium.terrarium.wiring as _wiring
 from kohakuterrarium.terrarium.tool_manager import (
     TERRARIUM_MANAGER_KEY,
     TerrariumToolManager,
@@ -321,16 +321,4 @@ class _EngineRuntimeAdapter:
 def _install_recipe_output_wiring_resolver(
     engine: "Terrarium", graph_id: str, root_creature: Creature | None
 ) -> None:
-    graph = engine.get_graph(graph_id)
-    graph_creatures = [engine.get_creature(cid) for cid in graph.creature_ids]
-    creatures = {
-        creature.creature_id: creature
-        for creature in graph_creatures
-        if not getattr(creature, "is_root", False)
-    }
-    resolver = TerrariumOutputWiringResolver(
-        creatures=creatures,
-        root_agent=root_creature.agent if root_creature is not None else None,
-    )
-    for creature in graph_creatures:
-        creature.agent._wiring_resolver = resolver
+    _wiring.install_output_wiring_resolver(engine)

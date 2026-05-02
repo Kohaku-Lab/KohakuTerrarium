@@ -170,22 +170,83 @@ class _RecordingSink(OutputModule):
 
 class TestWireOutput:
     @pytest.mark.asyncio
-    async def test_wire_then_unwire(self):
+    async def test_wire_then_unwire_output_edge(self):
+        engine = Terrarium()
+        a = await engine.add_creature(make_creature("alice"))
+        edge_id = await engine.wire_output(a, "bob")
+        assert edge_id.startswith("wire_bob_")
+        assert [entry["to"] for entry in engine.list_output_wiring(a)] == ["bob"]
+        assert a.agent.config.output_wiring[0].to == "bob"
+
+        ok = await engine.unwire_output(a, edge_id)
+        assert ok is True
+        assert engine.list_output_wiring(a) == []
+        assert a.agent.config.output_wiring == []
+
+    @pytest.mark.asyncio
+    async def test_output_edge_delivers_creature_output(self):
+        engine = Terrarium()
+        a = await engine.add_creature(make_creature("alice"))
+        b = await engine.add_creature(make_creature("bob"), graph=a.graph_id)
+        await engine.wire_output(a, "bob")
+
+        await a.agent._wiring_resolver.emit(
+            source=a.creature_id,
+            content="done",
+            source_event_type="test",
+            turn_index=1,
+            entries=a.agent.config.output_wiring,
+        )
+        await asyncio.sleep(0)
+
+        assert len(b.agent.received_events) == 1
+        event = b.agent.received_events[0]
+        assert event.type == "creature_output"
+        assert event.content == "done"
+        assert event.context["source"] == "alice"
+
+    @pytest.mark.asyncio
+    async def test_output_edge_resolves_target_by_creature_id(self):
+        engine = Terrarium()
+        a = await engine.add_creature(make_creature("alice"))
+        b = await engine.add_creature(make_creature("bob"), graph=a.graph_id)
+        await engine.wire_output(a, b.creature_id)
+
+        await a.agent._wiring_resolver.emit(
+            source=a.creature_id,
+            content="done",
+            source_event_type="test",
+            turn_index=1,
+            entries=a.agent.config.output_wiring,
+        )
+        await asyncio.sleep(0)
+
+        assert len(b.agent.received_events) == 1
+
+    @pytest.mark.asyncio
+    async def test_unwire_unknown_output_edge_returns_false(self):
+        engine = Terrarium()
+        a = await engine.add_creature(make_creature("alice"))
+        ok = await engine.unwire_output(a, "wire_missing")
+        assert ok is False
+
+    @pytest.mark.asyncio
+    async def test_wire_then_unwire_output_sink(self):
         engine = Terrarium()
         a = await engine.add_creature(make_creature("alice"))
         sink = _RecordingSink()
-        sink_id = await engine.wire_output(a, sink)
+        sink_id = await engine.wire_output_sink(a, sink)
         assert sink in a.agent.output_router._secondary_outputs
 
-        ok = await engine.unwire_output(a, sink_id)
+        ok = await engine.unwire_output_sink(a, sink_id)
         assert ok is True
         assert sink not in a.agent.output_router._secondary_outputs
 
     @pytest.mark.asyncio
-    async def test_unwire_unknown_returns_false(self):
+    async def test_unwire_unknown_sink_returns_false(self):
         engine = Terrarium()
         a = await engine.add_creature(make_creature("alice"))
-        ok = await engine.unwire_output(a, "sink_deadbeef")
+        ok = await engine.unwire_output_sink(a, "sink_deadbeef")
         assert ok is False
 
 

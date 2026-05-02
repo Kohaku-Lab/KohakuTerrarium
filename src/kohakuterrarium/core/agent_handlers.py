@@ -737,7 +737,7 @@ class AgentHandlersMixin(AgentToolsMixin):
         # value rather than bumping again here.
         try:
             await resolver.emit(
-                source=self.config.name,
+                source=getattr(self, "_creature_id", self.config.name),
                 content=content,
                 source_event_type=trigger_event.type,
                 turn_index=self._turn_index,

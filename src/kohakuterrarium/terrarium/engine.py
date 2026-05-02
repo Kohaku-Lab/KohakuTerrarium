@@ -22,7 +22,6 @@ import kohakuterrarium.terrarium.root as _root
 import kohakuterrarium.terrarium.topology as _topo
 import kohakuterrarium.terrarium.wiring as _wiring
 from kohakuterrarium.core.environment import Environment
-from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.terrarium.creature_host import (
     Creature,
     CreatureBuildInput,
@@ -210,6 +209,7 @@ class Terrarium:
         if gid not in self._environments:
             self._environments[gid] = Environment(env_id=f"env_{gid}")
         self._creatures[creature.creature_id] = creature
+        _wiring.install_output_wiring_resolver(self)
 
         if start:
             await creature.start()
@@ -236,6 +236,7 @@ class Terrarium:
             await c.stop()
         delta = _topo.remove_creature(self._topology, cid)
         self._creatures.pop(cid, None)
+        _wiring.install_output_wiring_resolver(self)
         # Drop the environment if its graph went away.
         if old_gid not in self._topology.graphs:
             self._environments.pop(old_gid, None)
@@ -359,16 +360,28 @@ class Terrarium:
     # output wiring
     # ------------------------------------------------------------------
 
-    async def wire_output(self, creature: CreatureRef, sink: OutputModule) -> str:
-        """Attach a secondary output sink to a creature.
+    async def wire_output(self, creature: CreatureRef, target) -> str:
+        """Add a runtime ``config.output_wiring`` edge; return its id."""
+        c = self._creature(creature)
+        return _wiring.add_output_edge(c.agent, target)
 
-        Returns a sink id usable with :meth:`unwire_output`.
-        """
+    async def unwire_output(self, creature: CreatureRef, edge_id: str) -> bool:
+        """Remove a runtime ``config.output_wiring`` edge by id."""
+        c = self._creature(creature)
+        return _wiring.remove_output_edge(c.agent, edge_id)
+
+    def list_output_wiring(self, creature: CreatureRef) -> list[dict]:
+        """List output-wiring edges on a creature."""
+        c = self._creature(creature)
+        return _wiring.list_output_edges(c.agent)
+
+    async def wire_output_sink(self, creature: CreatureRef, sink) -> str:
+        """Attach a secondary output sink to a creature."""
         c = self._creature(creature)
         return _wiring.add_secondary_sink(c.agent, sink)
 
-    async def unwire_output(self, creature: CreatureRef, sink_id: str) -> bool:
-        """Remove a previously-attached sink.  Returns True if found."""
+    async def unwire_output_sink(self, creature: CreatureRef, sink_id: str) -> bool:
+        """Remove a secondary output sink."""
         c = self._creature(creature)
         return _wiring.remove_secondary_sink(c.agent, sink_id)
 
