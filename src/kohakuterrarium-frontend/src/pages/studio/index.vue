@@ -67,19 +67,29 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue"
-import { useRouter } from "vue-router"
+import { computed, inject, onMounted, ref } from "vue"
 
 import FolderPickerDialog from "@/components/studio/common/FolderPickerDialog.vue"
 import KButton from "@/components/studio/common/KButton.vue"
 import KInput from "@/components/studio/common/KInput.vue"
 import { useStudioWorkspaceStore } from "@/stores/studio/workspace"
 import { metaAPI } from "@/utils/studio/api"
+import { useStudioNav } from "@/composables/useStudioNav"
+import { STUDIO_NAV_INJECT_KEY } from "@/composables/useStudioNav"
 import { useI18n } from "@/utils/i18n"
 
 const { t } = useI18n()
 const ws = useStudioWorkspaceStore()
-const router = useRouter()
+const studioNav = useStudioNav()
+
+// In v2 (macro shell) the host provides ``studioNav`` via inject.
+// When the user picks the Studio rail entry we land here and the
+// auto-redirect to the workspace tab below would fight any close —
+// closing the workspace tab makes Home active again, which would
+// re-redirect, looping. In v2 we keep Home as a regular surface and
+// let the rail decide which tab to open. v1 keeps the legacy
+// auto-redirect because /studio is a route, not a persistent tab.
+const isEmbed = inject(STUDIO_NAV_INJECT_KEY, null) !== null
 
 const pathInput = ref("")
 const loading = computed(() => ws.loading)
@@ -95,13 +105,11 @@ onMounted(async () => {
     // backend unreachable — show picker anyway
   }
   await ws.hydrate()
-  if (ws.isOpen) routeToDashboard(ws.root)
+  if (!isEmbed && ws.isOpen) routeToDashboard(ws.root)
 })
 
 function routeToDashboard(root) {
-  router.push({
-    path: `/studio/workspace/${encodeURIComponent(root)}`,
-  })
+  studioNav.openWorkspace(root)
 }
 
 async function openPath(path) {

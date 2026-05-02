@@ -50,8 +50,8 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from "vue"
-import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router"
+import { computed, inject, onMounted, onUnmounted, ref, watch } from "vue"
+import { onBeforeRouteLeave, useRoute } from "vue-router"
 
 import KButton from "@/components/studio/common/KButton.vue"
 import EditorFrame from "@/components/studio/frame/EditorFrame.vue"
@@ -64,19 +64,28 @@ import SkillDocEditor from "@/components/studio/module/SkillDocEditor.vue"
 import SourceGuard from "@/components/studio/module/SourceGuard.vue"
 import { useStudioModuleStore } from "@/stores/studio/module"
 import { useStudioWorkspaceStore } from "@/stores/studio/workspace"
+import { useStudioNav, STUDIO_NAV_INJECT_KEY } from "@/composables/useStudioNav"
 import { useI18n } from "@/utils/i18n"
 
 const KNOWN_KINDS = new Set(["tools", "subagents", "triggers", "plugins", "inputs", "outputs"])
 
+// Optional embed props — v2's StudioEditorTab passes kind/name directly
+// because route.params is empty when the page mounts as a tab. v1
+// page-routed instances fall back to route.params.
+const props = defineProps({
+  moduleKindProp: { type: String, default: null },
+  moduleNameProp: { type: String, default: null },
+})
+
 const { t } = useI18n()
 const route = useRoute()
-const router = useRouter()
+const studioNav = useStudioNav()
 
 const ws = useStudioWorkspaceStore()
 const mod = useStudioModuleStore()
 
-const kindParam = computed(() => String(route.params.kind || ""))
-const nameParam = computed(() => decodeURIComponent(String(route.params.name || "")))
+const kindParam = computed(() => props.moduleKindProp ?? String(route.params.kind || ""))
+const nameParam = computed(() => props.moduleNameProp ?? decodeURIComponent(String(route.params.name || "")))
 
 // Tab state — the middle column swaps between the editor tab and the
 // skill-doc tab. Mirrors the plan's "system prompt → Edit ⟶" flow.
@@ -142,14 +151,19 @@ const loadError404 = computed(() => {
   return mod.error?.status === 404
 })
 
+// In v2 don't redirect to Home on missing-workspace / unknown-kind —
+// see creature/[name].vue for full reasoning. We just render the
+// "loading" state and let the user navigate via the rail.
+const isEmbed = inject(STUDIO_NAV_INJECT_KEY, null) !== null
+
 onMounted(async () => {
   await ws.hydrate()
   if (!ws.isOpen) {
-    router.replace("/studio")
+    if (!isEmbed) studioNav.openHome()
     return
   }
   if (!KNOWN_KINDS.has(kindParam.value)) {
-    router.replace("/studio")
+    if (!isEmbed) studioNav.openHome()
     return
   }
   await reload()
@@ -181,16 +195,16 @@ async function reload() {
 
 function goBack() {
   if (ws.root) {
-    router.push(`/studio/workspace/${encodeURIComponent(ws.root)}`)
+    studioNav.openWorkspace(ws.root)
   } else {
-    router.push("/studio")
+    studioNav.openHome()
   }
 }
 
 function openModule(name) {
   if (name === nameParam.value) return
   closeDocTab(true)
-  router.push(`/studio/module/${kindParam.value}/${encodeURIComponent(name)}`)
+  studioNav.openModule(kindParam.value, name, { workspace: ws.root })
 }
 
 // ── Tabs ────────────────────────────────────────────────────────
@@ -269,7 +283,7 @@ async function onSave() {
 }
 
 function openCreature(name) {
-  router.push(`/studio/creature/${encodeURIComponent(name)}`)
+  studioNav.openCreature(name, { workspace: ws.root })
 }
 
 function onDiscard() {

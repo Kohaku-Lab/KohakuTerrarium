@@ -45,8 +45,8 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from "vue"
-import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router"
+import { computed, inject, onMounted, onUnmounted, ref, watch } from "vue"
+import { onBeforeRouteLeave, useRoute } from "vue-router"
 
 import KButton from "@/components/studio/common/KButton.vue"
 import CreatureDetail from "@/components/studio/creature/CreatureDetail.vue"
@@ -59,18 +59,26 @@ import { useStudioCatalogStore } from "@/stores/studio/catalog"
 import { useStudioCreatureStore } from "@/stores/studio/creature"
 import { useStudioUiStore } from "@/stores/studio/ui"
 import { useStudioWorkspaceStore } from "@/stores/studio/workspace"
+import { useStudioNav, STUDIO_NAV_INJECT_KEY } from "@/composables/useStudioNav"
 import { useI18n } from "@/utils/i18n"
+
+// Optional prop — when this page is embedded as a Studio creature tab
+// in v2, the route params are not populated; the host passes the
+// creature name directly. Falls back to route.params.name in v1.
+const props = defineProps({
+  creatureNameProp: { type: String, default: null },
+})
 
 const { t } = useI18n()
 const route = useRoute()
-const router = useRouter()
+const studioNav = useStudioNav()
 
 const ws = useStudioWorkspaceStore()
 const creature = useStudioCreatureStore()
 const catalog = useStudioCatalogStore()
 const ui = useStudioUiStore()
 
-const displayName = computed(() => decodeURIComponent(String(route.params.name || "")))
+const displayName = computed(() => props.creatureNameProp ?? decodeURIComponent(String(route.params.name || "")))
 
 const activeTab = ref("creature")
 const tabs = computed(() => [
@@ -83,10 +91,18 @@ const tabs = computed(() => [
   },
 ])
 
+// In v2 (host-injected studioNav) we never auto-redirect on
+// missing-workspace because that would spawn a Home tab as a side-
+// effect of activating this tab. Showing an inline empty state and
+// letting the user pick the rail's Studio button is the only sane
+// behaviour. v1 keeps the redirect because /studio/creature/x with no
+// open workspace would otherwise render a confused half-empty page.
+const isEmbed = inject(STUDIO_NAV_INJECT_KEY, null) !== null
+
 onMounted(async () => {
   await ws.hydrate()
   if (!ws.isOpen) {
-    router.replace("/studio")
+    if (!isEmbed) studioNav.openHome()
     return
   }
   await Promise.all([catalog.fetchAll(), reload()])
@@ -113,9 +129,9 @@ async function reload() {
 
 function goBack() {
   if (ws.root) {
-    router.push(`/studio/workspace/${encodeURIComponent(ws.root)}`)
+    studioNav.openWorkspace(ws.root)
   } else {
-    router.push("/studio")
+    studioNav.openHome()
   }
 }
 

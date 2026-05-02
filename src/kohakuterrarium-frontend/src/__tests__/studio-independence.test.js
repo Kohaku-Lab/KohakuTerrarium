@@ -26,8 +26,16 @@ const STUDIO_DIRS = [
 // Files permitted to import from studio (touch points)
 const ALLOWLIST = new Set([
   // NavRail has one router-link to /studio — string literal, not an import.
-  // No files actually need to import from studio/** right now; keep set
-  // empty so regressions trip immediately.
+  // StudioEditorTab is the v2 macro-shell embed for Studio (sanctioned
+  // bridge per the v1/v2 paradigm — Studio pages still own the surface,
+  // we just embed them as tabs). See plans/structure-hierarchy/UI/.
+  path.join(SRC_ROOT, "components", "shell", "tabs", "StudioEditorTab.vue"),
+  // RailGroupQuick reads the studio workspace store solely to decide
+  // which Studio tab to open from the rail (workspace dashboard if a
+  // workspace is open, picker otherwise). Read-only consumer; no
+  // mutation of studio state. Same sanctioned-bridge category as
+  // StudioEditorTab above.
+  path.join(SRC_ROOT, "components", "shell", "RailGroupQuick.vue"),
 ])
 
 const STUDIO_IMPORT_PATTERNS = [

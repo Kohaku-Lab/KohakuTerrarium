@@ -113,8 +113,8 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from "vue"
-import { useRoute, useRouter } from "vue-router"
+import { computed, inject, onMounted, ref, watch } from "vue"
+import { useRoute } from "vue-router"
 import { ElMessage, ElMessageBox } from "element-plus"
 
 import KButton from "@/components/studio/common/KButton.vue"
@@ -122,16 +122,24 @@ import NewCreatureDialog from "@/components/studio/dashboard/NewCreatureDialog.v
 import NewModuleDialog from "@/components/studio/dashboard/NewModuleDialog.vue"
 import { useStudioWorkspaceStore } from "@/stores/studio/workspace"
 import { creatureAPI, manifestAPI } from "@/utils/studio/api"
+import { useStudioNav, STUDIO_NAV_INJECT_KEY } from "@/composables/useStudioNav"
 import { useI18n } from "@/utils/i18n"
+
+// Optional embed prop — v2's StudioEditorTab passes the workspace path
+// directly because route.params is not populated when this page is
+// mounted as a tab. Falls back to route.params.path in v1.
+const props = defineProps({
+  workspacePathProp: { type: String, default: null },
+})
 
 const { t } = useI18n()
 const route = useRoute()
-const router = useRouter()
+const studioNav = useStudioNav()
 const ws = useStudioWorkspaceStore()
 
 const moduleKinds = ["tools", "subagents", "triggers", "plugins", "inputs", "outputs"]
 
-const urlPath = computed(() => decodeURIComponent(String(route.params.path || "")))
+const urlPath = computed(() => props.workspacePathProp ?? decodeURIComponent(String(route.params.path || "")))
 
 const resolvedRoot = computed(() => ws.root || urlPath.value)
 
@@ -140,11 +148,16 @@ const newModuleOpen = ref(false)
 
 const existingCreatureNames = computed(() => ws.creatures.map((c) => c.name))
 
+// v2 inhibits the openHome side-effect — see studio/index.vue for
+// reasoning. The tab carries its workspace path via prop so a fresh
+// mount with empty target only happens for a corrupted tab id.
+const isEmbed = inject(STUDIO_NAV_INJECT_KEY, null) !== null
+
 async function ensureOpen() {
   await ws.hydrate()
   const target = urlPath.value
   if (!target) {
-    router.replace("/studio")
+    if (!isEmbed) studioNav.openHome()
     return
   }
   if (ws.root !== target) {
@@ -161,19 +174,15 @@ watch(urlPath, ensureOpen)
 
 async function switchWorkspace() {
   await ws.close()
-  router.push("/studio")
+  studioNav.openHome()
 }
 
 function openCreature(name) {
-  router.push({
-    path: `/studio/creature/${encodeURIComponent(name)}`,
-  })
+  studioNav.openCreature(name, { workspace: ws.root || urlPath.value })
 }
 
 function openModule(kind, name) {
-  router.push({
-    path: `/studio/module/${kind}/${encodeURIComponent(name)}`,
-  })
+  studioNav.openModule(kind, name, { workspace: ws.root || urlPath.value })
 }
 
 /** A module is editable iff it's an author-local file — either
