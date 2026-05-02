@@ -5,21 +5,21 @@
 
 ## Files
 
-| File | Subcommand(s) |
-|------|---------------|
-| `__init__.py` | `main()` — argparse setup, `COMMANDS` dispatch table |
-| `run.py` | `kt run` — launch an agent from a config folder (rich CLI / plain / TUI modes) |
-| `resume.py` | `kt resume` — resume an agent or terrarium from a `.kohakutr` session file |
-| `auth.py` | `kt login` — API key / Codex OAuth flow for a backend |
-| `packages.py` | `kt list` / `kt info` / `kt install` / `kt uninstall` / `kt update` / `kt edit` |
-| `model.py` | `kt model list/default/show` — compatibility wrapper that delegates to `config_cli` |
-| `memory.py` | `kt embedding` / `kt search` — offline embedding build + session memory search |
-| `serve.py` | `kt serve start/stop/status` — manage a detached web server process (PID + state files under `~/.kohakuterrarium/run/`) |
-| `config.py` | `kt config` command group — unified LLM profile / backend / API-key / MCP management |
-| `config_mcp.py` | MCP subcommand helpers shared between `kt config mcp` and interactive prompts |
-| `extension.py` | `kt extension list` / `info` — inspect installed package extension modules (tools, plugins, presets) |
-| `mcp.py` | `kt mcp list` — list MCP servers declared in an agent config |
-| `version.py` | `kt --version` report (Python, git, platform, install source) |
+| File            | Subcommand(s)                                                                                                           |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `__init__.py`   | `main()` — argparse setup, `COMMANDS` dispatch table                                                                    |
+| `run.py`        | `kt run` — launch an agent from a config folder (rich CLI / plain / TUI modes)                                          |
+| `resume.py`     | `kt resume` — resume an agent or terrarium from a `.kohakutr` session file                                              |
+| `auth.py`       | `kt login` — API key / Codex OAuth flow for a backend                                                                   |
+| `packages.py`   | `kt list` / `kt info` / `kt install` / `kt uninstall` / `kt update` / `kt edit`                                         |
+| `model.py`      | `kt model list/default/show` — compatibility wrapper that delegates to `config_cli`                                     |
+| `memory.py`     | `kt embedding` / `kt search` — offline embedding build + session memory search                                          |
+| `serve.py`      | `kt serve start/stop/status` — manage a detached web server process (PID + state files under `~/.kohakuterrarium/run/`) |
+| `config.py`     | `kt config` command group — unified LLM profile / backend / API-key / MCP management                                    |
+| `config_mcp.py` | MCP subcommand helpers shared between `kt config mcp` and interactive prompts                                           |
+| `extension.py`  | `kt extension list` / `info` — inspect installed package extension modules (tools, plugins, presets)                    |
+| `mcp.py`        | `kt mcp list` — list MCP servers declared in an agent config                                                            |
+| `version.py`    | `kt --version` report (Python, git, platform, install source)                                                           |
 
 The top-level `kt run` entry point invokes `cli/__init__.py:main()` via the
 `pyproject.toml` console script.

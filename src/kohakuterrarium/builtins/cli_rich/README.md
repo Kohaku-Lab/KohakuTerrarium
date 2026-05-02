@@ -30,21 +30,21 @@ moves above the app area before stdout writes, then the app redraws below.
 
 ## Files
 
-| File | Responsibility |
-|------|----------------|
-| `__init__.py` | Public API (`RichCLIApp`, `RichCLIInput`, `RichCLIOutput`) |
-| `app.py` | `RichCLIApp` — the single `prompt_toolkit.Application`; owns layout, key bindings, lifecycle, streaming callbacks |
-| `composer.py` | `Composer` — `TextArea` + key bindings (history, multi-line, paste, completer) |
-| `completer.py` | Slash-command completer (builtin commands + per-command `get_completions`) |
-| `live_region.py` | `LiveRegion` — streaming message + active tool list + background strip + compaction banner → ANSI |
-| `commit.py` | `ScrollbackCommitter` / `SessionReplay` — rendering finished blocks into scrollback + replaying session events on resume |
-| `runtime.py` | Output backend selection, task spawner with exception trapping, stderr→logger redirection, enhanced-keyboard toggle |
-| `theme.py` | Glyphs, colors, spinner frames |
-| `input.py` | `RichCLIInput` — stub `InputModule` that sleeps forever (actual input driven by `RichCLIApp`) |
-| `output.py` | `RichCLIOutput` — `OutputModule` that routes agent events to `RichCLIApp` callbacks |
-| `blocks/footer.py` | `FooterBlock` — single-line bottom footer (tokens, model, mode) |
-| `blocks/message.py` | `AssistantMessageBlock` — accumulates streaming text with markdown detection |
-| `blocks/tool.py` | `ToolCallBlock` — status + args + output preview; supports sub-agent nesting + background promotion |
+| File                | Responsibility                                                                                                           |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `__init__.py`       | Public API (`RichCLIApp`, `RichCLIInput`, `RichCLIOutput`)                                                               |
+| `app.py`            | `RichCLIApp` — the single `prompt_toolkit.Application`; owns layout, key bindings, lifecycle, streaming callbacks        |
+| `composer.py`       | `Composer` — `TextArea` + key bindings (history, multi-line, paste, completer)                                           |
+| `completer.py`      | Slash-command completer (builtin commands + per-command `get_completions`)                                               |
+| `live_region.py`    | `LiveRegion` — streaming message + active tool list + background strip + compaction banner → ANSI                        |
+| `commit.py`         | `ScrollbackCommitter` / `SessionReplay` — rendering finished blocks into scrollback + replaying session events on resume |
+| `runtime.py`        | Output backend selection, task spawner with exception trapping, stderr→logger redirection, enhanced-keyboard toggle      |
+| `theme.py`          | Glyphs, colors, spinner frames                                                                                           |
+| `input.py`          | `RichCLIInput` — stub `InputModule` that sleeps forever (actual input driven by `RichCLIApp`)                            |
+| `output.py`         | `RichCLIOutput` — `OutputModule` that routes agent events to `RichCLIApp` callbacks                                      |
+| `blocks/footer.py`  | `FooterBlock` — single-line bottom footer (tokens, model, mode)                                                          |
+| `blocks/message.py` | `AssistantMessageBlock` — accumulates streaming text with markdown detection                                             |
+| `blocks/tool.py`    | `ToolCallBlock` — status + args + output preview; supports sub-agent nesting + background promotion                      |
 
 ## Dependency direction
 

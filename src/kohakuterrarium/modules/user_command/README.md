@@ -14,10 +14,10 @@ without importing frontend code. No runtime, no registry — those live in
 
 ## Files
 
-| File | Responsibility |
-|------|----------------|
-| `__init__.py` | Package marker (intentionally empty — consumers import from `.base`) |
-| `base.py` | `UserCommand` protocol, `BaseUserCommand` abstract class, `CommandLayer` enum, `UserCommandContext`, `UserCommandResult`, `parse_slash_command`, and the `ui_*` payload constructors |
+| File          | Responsibility                                                                                                                                                                       |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `__init__.py` | Package marker (intentionally empty — consumers import from `.base`)                                                                                                                 |
+| `base.py`     | `UserCommand` protocol, `BaseUserCommand` abstract class, `CommandLayer` enum, `UserCommandContext`, `UserCommandResult`, `parse_slash_command`, and the `ui_*` payload constructors |
 
 ## Dependency direction
 

@@ -9,13 +9,13 @@ and `EventRecorder` capture all output and events for test assertions.
 
 ## Files
 
-| File | Description |
-|------|-------------|
-| `__init__.py` | Re-exports all test primitives |
-| `llm.py` | `ScriptedLLM`, `ScriptEntry`: deterministic LLM that follows a script of predefined responses |
-| `agent.py` | `TestAgentBuilder`: builder for creating test agents with injected fakes and builtin tools |
-| `output.py` | `OutputRecorder`: captures writes, streaming chunks, and activity notifications for assertions |
-| `events.py` | `EventRecorder`, `RecordedEvent`: records events with timing and source information |
+| File          | Description                                                                                    |
+| ------------- | ---------------------------------------------------------------------------------------------- |
+| `__init__.py` | Re-exports all test primitives                                                                 |
+| `llm.py`      | `ScriptedLLM`, `ScriptEntry`: deterministic LLM that follows a script of predefined responses  |
+| `agent.py`    | `TestAgentBuilder`: builder for creating test agents with injected fakes and builtin tools     |
+| `output.py`   | `OutputRecorder`: captures writes, streaming chunks, and activity notifications for assertions |
+| `events.py`   | `EventRecorder`, `RecordedEvent`: records events with timing and source information            |
 
 ## Dependencies
 

@@ -9,15 +9,15 @@ OpenAI API format.
 
 ## Files
 
-| File | Description |
-|------|-------------|
-| `__init__.py` | Re-exports all provider classes, message types, and tool schema utilities |
-| `base.py` | `LLMProvider` protocol, `BaseLLMProvider` ABC, `LLMConfig`, `ChatChunk`, `ChatResponse`, `ToolSchema`, `NativeToolCall` |
-| `openai.py` | `OpenAIProvider`: OpenAI/OpenRouter/compatible API provider using httpx |
-| `codex_provider.py` | `CodexOAuthProvider`: ChatGPT subscription provider using OpenAI SDK |
-| `codex_auth.py` | OAuth PKCE authentication flows (browser redirect and device code) with token caching |
-| `message.py` | Typed message classes (`SystemMessage`, `UserMessage`, `AssistantMessage`, `ToolMessage`) with multimodal content support |
-| `tools.py` | `build_tool_schemas`: converts registered tools into `ToolSchema` objects for native function calling |
+| File                | Description                                                                                                               |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `__init__.py`       | Re-exports all provider classes, message types, and tool schema utilities                                                 |
+| `base.py`           | `LLMProvider` protocol, `BaseLLMProvider` ABC, `LLMConfig`, `ChatChunk`, `ChatResponse`, `ToolSchema`, `NativeToolCall`   |
+| `openai.py`         | `OpenAIProvider`: OpenAI/OpenRouter/compatible API provider using httpx                                                   |
+| `codex_provider.py` | `CodexOAuthProvider`: ChatGPT subscription provider using OpenAI SDK                                                      |
+| `codex_auth.py`     | OAuth PKCE authentication flows (browser redirect and device code) with token caching                                     |
+| `message.py`        | Typed message classes (`SystemMessage`, `UserMessage`, `AssistantMessage`, `ToolMessage`) with multimodal content support |
+| `tools.py`          | `build_tool_schemas`: converts registered tools into `ToolSchema` objects for native function calling                     |
 
 ## Dependencies
 

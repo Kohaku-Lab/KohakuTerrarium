@@ -8,11 +8,11 @@ suppressing tool blocks and dispatching named output targets.
 
 ## Files
 
-| File | Description |
-|------|-------------|
-| `__init__.py` | Re-exports protocol, base class, router, and state enum |
-| `base.py` | `OutputModule` protocol (`write`, `write_stream`, `flush`) and `BaseOutputModule` ABC |
-| `router.py` | `OutputRouter` (single-output state machine), `MultiOutputRouter`, `OutputState` enum, `CompletedOutput` record |
+| File          | Description                                                                                                     |
+| ------------- | --------------------------------------------------------------------------------------------------------------- |
+| `__init__.py` | Re-exports protocol, base class, router, and state enum                                                         |
+| `base.py`     | `OutputModule` protocol (`write`, `write_stream`, `flush`) and `BaseOutputModule` ABC                           |
+| `router.py`   | `OutputRouter` (single-output state machine), `MultiOutputRouter`, `OutputState` enum, `CompletedOutput` record |
 
 ## Dependencies
 

@@ -14,19 +14,19 @@ legacy CLI paths, but new code should prefer the `Terrarium` engine and the
 
 ## Files
 
-| File | Responsibility |
-|------|----------------|
-| `engine.py` | `Terrarium` engine: graph/session lifecycle, add/remove creatures, connect/disconnect, observe, output wiring. |
-| `creature_host.py` | `Creature` handle around a running `Agent`; exposes `chat()`, `inject_input()`, status, graph metadata. |
-| `topology.py` | Pure-data graph/channel topology model and merge/split deltas. |
-| `events.py` | `EngineEvent`, `EventKind`, `EventFilter` observable event model. |
-| `sessions.py`, `session_coord.py` | Engine-backed session stores and merge/split coordination. |
-| `recipe_loader.py`, `recipe_apply.py` | Load/apply terrarium recipes into the engine. |
-| `channels.py`, `output_wiring.py` | Channel trigger injection and deterministic turn-output routing. |
-| `runtime.py`, `api.py`, `factory.py`, `hotplug.py` | Legacy `TerrariumRuntime` / `TerrariumAPI` compatibility stack. |
-| `cli.py`, `legacy_resume.py` | CLI drivers and legacy terrarium resume path. |
-| `tool_manager.py`, `tool_registration.py` | Shared state and lazy registration for terrarium management tools. |
-| `observer.py`, `output_log.py`, `persistence.py` | Legacy observer/output/session helpers. |
+| File                                               | Responsibility                                                                                                 |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `engine.py`                                        | `Terrarium` engine: graph/session lifecycle, add/remove creatures, connect/disconnect, observe, output wiring. |
+| `creature_host.py`                                 | `Creature` handle around a running `Agent`; exposes `chat()`, `inject_input()`, status, graph metadata.        |
+| `topology.py`                                      | Pure-data graph/channel topology model and merge/split deltas.                                                 |
+| `events.py`                                        | `EngineEvent`, `EventKind`, `EventFilter` observable event model.                                              |
+| `sessions.py`, `session_coord.py`                  | Engine-backed session stores and merge/split coordination.                                                     |
+| `recipe_loader.py`, `recipe_apply.py`              | Load/apply terrarium recipes into the engine.                                                                  |
+| `channels.py`, `output_wiring.py`                  | Channel trigger injection and deterministic turn-output routing.                                               |
+| `runtime.py`, `api.py`, `factory.py`, `hotplug.py` | Legacy `TerrariumRuntime` / `TerrariumAPI` compatibility stack.                                                |
+| `cli.py`, `legacy_resume.py`                       | CLI drivers and legacy terrarium resume path.                                                                  |
+| `tool_manager.py`, `tool_registration.py`          | Shared state and lazy registration for terrarium management tools.                                             |
+| `observer.py`, `output_log.py`, `persistence.py`   | Legacy observer/output/session helpers.                                                                        |
 
 ## Dependency direction
 

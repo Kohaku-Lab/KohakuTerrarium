@@ -15,11 +15,11 @@ failures contained.
 
 ## Files
 
-| File | Responsibility |
-|------|----------------|
-| `__init__.py` | Package docstring |
-| `client.py` | `MCPClientManager`, `MCPServerConfig`, `MCPServerInfo` — per-server `ClientSession`, tool discovery, lock-protected connect/disconnect, tool dispatch |
-| `tools.py` | Four builtin tools (`@register_builtin`) — `mcp_list`, `mcp_call`, `mcp_connect`, `mcp_disconnect` |
+| File          | Responsibility                                                                                                                                        |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `__init__.py` | Package docstring                                                                                                                                     |
+| `client.py`   | `MCPClientManager`, `MCPServerConfig`, `MCPServerInfo` — per-server `ClientSession`, tool discovery, lock-protected connect/disconnect, tool dispatch |
+| `tools.py`    | Four builtin tools (`@register_builtin`) — `mcp_list`, `mcp_call`, `mcp_connect`, `mcp_disconnect`                                                    |
 
 ## Dependency direction
 

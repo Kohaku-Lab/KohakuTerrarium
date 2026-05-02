@@ -9,13 +9,13 @@ queue/append, flush/replace).
 
 ## Files
 
-| File | Description |
-|------|-------------|
-| `__init__.py` | Re-exports all sub-agent classes and enums |
-| `config.py` | `SubAgentConfig`, `SubAgentInfo`, `OutputTarget` enum, `ContextUpdateMode` enum |
-| `base.py` | `SubAgent` (single-run execution), `SubAgentJob`, `SubAgentResult` |
-| `interactive.py` | `InteractiveSubAgent` (long-lived), `ContextUpdate`, `InteractiveOutput` |
-| `manager.py` | `SubAgentManager`: spawn, track, wait for, and stop sub-agents |
+| File             | Description                                                                     |
+| ---------------- | ------------------------------------------------------------------------------- |
+| `__init__.py`    | Re-exports all sub-agent classes and enums                                      |
+| `config.py`      | `SubAgentConfig`, `SubAgentInfo`, `OutputTarget` enum, `ContextUpdateMode` enum |
+| `base.py`        | `SubAgent` (single-run execution), `SubAgentJob`, `SubAgentResult`              |
+| `interactive.py` | `InteractiveSubAgent` (long-lived), `ContextUpdate`, `InteractiveOutput`        |
+| `manager.py`     | `SubAgentManager`: spawn, track, wait for, and stop sub-agents                  |
 
 ## Dependencies
 

@@ -7,11 +7,11 @@ input registry. TUI output is registered at import time.
 
 ## Files
 
-| File | Description |
-|------|-------------|
-| `__init__.py` | Output registry, factory functions, builtin registration |
-| `stdout.py` | `StdoutOutput` (plain terminal) and `PrefixedStdoutOutput` (with agent name prefix) |
-| `tts.py` | TTS base classes (`TTSModule`, `TTSConfig`) and implementations (`ConsoleTTS`, `DummyTTS`) |
+| File          | Description                                                                                |
+| ------------- | ------------------------------------------------------------------------------------------ |
+| `__init__.py` | Output registry, factory functions, builtin registration                                   |
+| `stdout.py`   | `StdoutOutput` (plain terminal) and `PrefixedStdoutOutput` (with agent name prefix)        |
+| `tts.py`      | TTS base classes (`TTSModule`, `TTSConfig`) and implementations (`ConsoleTTS`, `DummyTTS`) |
 
 ## Registered Types
 

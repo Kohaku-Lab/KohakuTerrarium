@@ -7,10 +7,10 @@ live in `builtins/inputs/`.
 
 ## Files
 
-| File | Description |
-|------|-------------|
-| `__init__.py` | Re-exports `InputModule` protocol and `BaseInputModule` ABC |
-| `base.py` | `InputModule` protocol (`start`, `stop`, `get_input`) and `BaseInputModule` with running-state management |
+| File          | Description                                                                                               |
+| ------------- | --------------------------------------------------------------------------------------------------------- |
+| `__init__.py` | Re-exports `InputModule` protocol and `BaseInputModule` ABC                                               |
+| `base.py`     | `InputModule` protocol (`start`, `stop`, `get_input`) and `BaseInputModule` with running-state management |
 
 ## Dependencies
 

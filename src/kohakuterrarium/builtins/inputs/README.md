@@ -8,12 +8,11 @@ under `examples/` and are loaded as custom modules when explicitly configured.
 
 ## Files
 
-| File | Description |
-|------|-------------|
-| `__init__.py` | Input registry, factory functions, builtin registration |
-| `cli.py` | `CLIInput` (blocking terminal) and `NonBlockingCLIInput` (non-blocking polling) |
-| `none.py` | `NoneInput` for trigger-only agents with no user input |
-
+| File          | Description                                                                     |
+| ------------- | ------------------------------------------------------------------------------- |
+| `__init__.py` | Input registry, factory functions, builtin registration                         |
+| `cli.py`      | `CLIInput` (blocking terminal) and `NonBlockingCLIInput` (non-blocking polling) |
+| `none.py`     | `NoneInput` for trigger-only agents with no user input                          |
 
 ## Registered Types
 

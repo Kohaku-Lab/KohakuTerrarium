@@ -10,12 +10,12 @@ from saved state.
 
 ## Files
 
-| File | Description |
-|------|-------------|
-| `__init__.py` | Re-exports `SessionStore` |
-| `store.py` | `SessionStore`: persistent storage with 8 table groups (meta, state, events, channels, subagents, jobs, conversation, fts) via KohakuVault |
-| `output.py` | `SessionOutput`: output module that records text chunks, tool activity, and processing state to the store |
-| `resume.py` | `resume_agent`, `resume_terrarium`: rebuild from `.kohakutr` file, inject saved conversation and scratchpad |
+| File          | Description                                                                                                                                |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `__init__.py` | Re-exports `SessionStore`                                                                                                                  |
+| `store.py`    | `SessionStore`: persistent storage with 8 table groups (meta, state, events, channels, subagents, jobs, conversation, fts) via KohakuVault |
+| `output.py`   | `SessionOutput`: output module that records text chunks, tool activity, and processing state to the store                                  |
+| `resume.py`   | `resume_agent`, `resume_terrarium`: rebuild from `.kohakutr` file, inject saved conversation and scratchpad                                |
 
 ## Dependencies
 

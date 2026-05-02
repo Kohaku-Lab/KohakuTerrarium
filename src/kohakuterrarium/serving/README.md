@@ -15,13 +15,13 @@ embedding code migrates.
 
 ## Files
 
-| File | Description |
-|------|-------------|
-| `web.py` | Static frontend / FastAPI launcher used by `kt web`, `kt serve`, and `kt app`. |
+| File               | Description                                                                                                   |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `web.py`           | Static frontend / FastAPI launcher used by `kt web`, `kt serve`, and `kt app`.                                |
 | `agent_session.py` | Legacy `AgentSession` compatibility wrapper over `Agent`; prefer `Creature.chat()` or `Studio.sessions.chat`. |
-| `manager.py` | Legacy `KohakuManager` compatibility facade; prefer `Studio` + `Terrarium`. |
-| `events.py` | Compatibility event dataclasses for older transport-facing code. |
-| `__init__.py` | Empty public export surface; new code should import `Studio` / `Terrarium` from `kohakuterrarium`. |
+| `manager.py`       | Legacy `KohakuManager` compatibility facade; prefer `Studio` + `Terrarium`.                                   |
+| `events.py`        | Compatibility event dataclasses for older transport-facing code.                                              |
+| `__init__.py`      | Empty public export surface; new code should import `Studio` / `Terrarium` from `kohakuterrarium`.            |
 
 ## Dependency notes
 

@@ -8,10 +8,10 @@ and multimodal content (images).
 
 ## Files
 
-| File | Description |
-|------|-------------|
-| `__init__.py` | Re-exports protocol, base class, and all data types |
-| `base.py` | `Tool` protocol, `BaseTool` ABC, `ToolConfig`, `ToolContext`, `ToolResult`, `ToolInfo`, `ExecutionMode` enum |
+| File          | Description                                                                                                  |
+| ------------- | ------------------------------------------------------------------------------------------------------------ |
+| `__init__.py` | Re-exports protocol, base class, and all data types                                                          |
+| `base.py`     | `Tool` protocol, `BaseTool` ABC, `ToolConfig`, `ToolContext`, `ToolResult`, `ToolInfo`, `ExecutionMode` enum |
 
 ## Dependencies
 

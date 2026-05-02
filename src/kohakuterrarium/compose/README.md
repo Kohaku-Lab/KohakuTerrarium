@@ -7,12 +7,12 @@ else is pure async combinators.
 
 ## Files
 
-| File | Responsibility |
-|------|----------------|
+| File          | Responsibility                                                                                                                                                   |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `__init__.py` | Public API re-exports (`agent`, `factory`, `Runnable`, `Sequence`, `Product`, `Fallback`, `Retry`, `Router`, `Pure`, `FailsWhen`, `PipelineIterator`, `Effects`) |
-| `core.py` | `BaseRunnable` (operator overloads) + every combinator in one file to avoid circular imports |
-| `agent.py` | `AgentRunnable` (persistent session) + `AgentFactory` (ephemeral), and the `agent()` / `factory()` convenience constructors |
-| `effects.py` | `Effects` dataclass — optional cost/latency/reliability annotations; semiring-style composition (`sequential`, `parallel`) |
+| `core.py`     | `BaseRunnable` (operator overloads) + every combinator in one file to avoid circular imports                                                                     |
+| `agent.py`    | `AgentRunnable` (persistent session) + `AgentFactory` (ephemeral), and the `agent()` / `factory()` convenience constructors                                      |
+| `effects.py`  | `Effects` dataclass — optional cost/latency/reliability annotations; semiring-style composition (`sequential`, `parallel`)                                       |
 
 ## Dependency direction
 
@@ -32,17 +32,17 @@ Imports: `serving/agent_session` (`AgentSession`), `core/config_types`
 
 ## Operators
 
-| Op | Combinator | Semantics |
-|----|------------|-----------|
-| `a >> b` | `Sequence` | Run `a`, pipe output to `b`. Auto-wraps callables with `Pure`. Dict syntax builds a `Router`. |
-| `a & b` | `Product` | Run concurrently (`asyncio.gather`), return tuple. |
-| `a \| b` | `Fallback` | Try `a`; on `Exception`, run `b` with the original input. |
-| `a * N` | `Retry` | Retry `a` up to `N` times on exception. |
-| `p.map(fn)` | — | Post-process output. |
-| `p.contramap(fn)` | — | Pre-process input. |
-| `p.fails_when(pred)` | `FailsWhen` | Treat matching outputs as failure (triggers `\|` fallback). |
-| `await p(x)` | — | Run the pipeline. |
-| `p.iterate(x)` | `PipelineIterator` | Async iterate (supports `.feed(override)`). |
+| Op                   | Combinator         | Semantics                                                                                     |
+| -------------------- | ------------------ | --------------------------------------------------------------------------------------------- |
+| `a >> b`             | `Sequence`         | Run `a`, pipe output to `b`. Auto-wraps callables with `Pure`. Dict syntax builds a `Router`. |
+| `a & b`              | `Product`          | Run concurrently (`asyncio.gather`), return tuple.                                            |
+| `a \| b`             | `Fallback`         | Try `a`; on `Exception`, run `b` with the original input.                                     |
+| `a * N`              | `Retry`            | Retry `a` up to `N` times on exception.                                                       |
+| `p.map(fn)`          | —                  | Post-process output.                                                                          |
+| `p.contramap(fn)`    | —                  | Pre-process input.                                                                            |
+| `p.fails_when(pred)` | `FailsWhen`        | Treat matching outputs as failure (triggers `\|` fallback).                                   |
+| `await p(x)`         | —                  | Run the pipeline.                                                                             |
+| `p.iterate(x)`       | `PipelineIterator` | Async iterate (supports `.feed(override)`).                                                   |
 
 ## Notes
 

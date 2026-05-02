@@ -7,13 +7,13 @@ controller's event queue.
 
 ## Files
 
-| File | Description |
-|------|-------------|
-| `__init__.py` | Re-exports protocol, base class, and all trigger implementations |
-| `base.py` | `TriggerModule` protocol (`start`, `stop`, `wait_for_trigger`) and `BaseTrigger` ABC |
-| `timer.py` | `TimerTrigger`: fire at fixed intervals with optional immediate first fire |
-| `context.py` | `ContextUpdateTrigger`: fire when external context changes (with debounce) |
-| `channel.py` | `ChannelTrigger`: fire when a named channel receives a message |
+| File          | Description                                                                          |
+| ------------- | ------------------------------------------------------------------------------------ |
+| `__init__.py` | Re-exports protocol, base class, and all trigger implementations                     |
+| `base.py`     | `TriggerModule` protocol (`start`, `stop`, `wait_for_trigger`) and `BaseTrigger` ABC |
+| `timer.py`    | `TimerTrigger`: fire at fixed intervals with optional immediate first fire           |
+| `context.py`  | `ContextUpdateTrigger`: fire when external context changes (with debounce)           |
+| `channel.py`  | `ChannelTrigger`: fire when a named channel receives a message                       |
 
 ## Dependencies
 

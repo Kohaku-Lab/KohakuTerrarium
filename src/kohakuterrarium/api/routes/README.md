@@ -5,18 +5,18 @@ REST endpoint handlers. One file per resource. Each module exports a
 
 ## Files
 
-| File | Prefix | Responsibility |
-|------|--------|----------------|
-| `__init__.py` | — | Package marker |
-| `terrariums.py` | `/api/terrariums` | Terrarium CRUD + lifecycle + chat; scratchpad patch for individual creatures |
-| `creatures.py` | `/api/terrariums/{tid}/creatures` | List / add / remove / wire creatures; model switch |
-| `channels.py` | `/api/terrariums/{tid}/channels` | List channels, send a message to a channel |
-| `agents.py` | `/api/agents` | Standalone agent lifecycle + chat + slash commands + env redaction helper (`_redacted_env`) |
-| `configs.py` | `/api/configs` | Config discovery (scan creature + terrarium directories, list LLM profiles, list builtin user commands) |
-| `files.py` | `/api/files` | File tree browse / read / write / rename / delete / mkdir for the editor panel |
-| `registry.py` | `/api/registry` | Browse bundled `registry.json`, install / uninstall packages via git |
-| `sessions.py` | `/api/sessions` | List saved `.kohakutr` sessions, resume, search memory |
-| `settings.py` | `/api/settings` | LLM profiles + backends, API key storage, Codex OAuth, MCP server config |
+| File            | Prefix                            | Responsibility                                                                                          |
+| --------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `__init__.py`   | —                                 | Package marker                                                                                          |
+| `terrariums.py` | `/api/terrariums`                 | Terrarium CRUD + lifecycle + chat; scratchpad patch for individual creatures                            |
+| `creatures.py`  | `/api/terrariums/{tid}/creatures` | List / add / remove / wire creatures; model switch                                                      |
+| `channels.py`   | `/api/terrariums/{tid}/channels`  | List channels, send a message to a channel                                                              |
+| `agents.py`     | `/api/agents`                     | Standalone agent lifecycle + chat + slash commands + env redaction helper (`_redacted_env`)             |
+| `configs.py`    | `/api/configs`                    | Config discovery (scan creature + terrarium directories, list LLM profiles, list builtin user commands) |
+| `files.py`      | `/api/files`                      | File tree browse / read / write / rename / delete / mkdir for the editor panel                          |
+| `registry.py`   | `/api/registry`                   | Browse bundled `registry.json`, install / uninstall packages via git                                    |
+| `sessions.py`   | `/api/sessions`                   | List saved `.kohakutr` sessions, resume, search memory                                                  |
+| `settings.py`   | `/api/settings`                   | LLM profiles + backends, API key storage, Codex OAuth, MCP server config                                |
 
 ## Dependency direction
 

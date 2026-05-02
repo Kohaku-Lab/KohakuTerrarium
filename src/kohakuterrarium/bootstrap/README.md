@@ -8,16 +8,16 @@ failure (a tool that fails to import doesn't kill the agent).
 
 ## Files
 
-| File | Responsibility |
-|------|----------------|
-| `__init__.py` | Package marker |
+| File            | Responsibility                                                                                                                                                  |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `__init__.py`   | Package marker                                                                                                                                                  |
 | `agent_init.py` | `AgentInitMixin` — orchestrates the init-order dance (llm → registry → executor → subagents → output → controller → input → user_commands → triggers → plugins) |
-| `llm.py` | LLM provider factory (Codex OAuth, OpenAI-compatible, profile resolution) |
-| `tools.py` | Tool instance creation and registry wiring (builtin / path / package) |
-| `subagents.py` | Sub-agent config resolution; register into `SubAgentManager` + `Registry` |
-| `triggers.py` | Trigger creation (timer, context, channel, custom) and registration |
-| `io.py` | Input and output module factories with fallback to CLI/stdout |
-| `plugins.py` | Plugin discovery + load (config-declared + package-declared), returns a `PluginManager` |
+| `llm.py`        | LLM provider factory (Codex OAuth, OpenAI-compatible, profile resolution)                                                                                       |
+| `tools.py`      | Tool instance creation and registry wiring (builtin / path / package)                                                                                           |
+| `subagents.py`  | Sub-agent config resolution; register into `SubAgentManager` + `Registry`                                                                                       |
+| `triggers.py`   | Trigger creation (timer, context, channel, custom) and registration                                                                                             |
+| `io.py`         | Input and output module factories with fallback to CLI/stdout                                                                                                   |
+| `plugins.py`    | Plugin discovery + load (config-declared + package-declared), returns a `PluginManager`                                                                         |
 
 ## Dependency direction
 

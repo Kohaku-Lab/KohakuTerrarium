@@ -7,17 +7,17 @@ Built-in slash commands (`/help`, `/clear`, `/compact`, `/model`, `/plugin`,
 
 ## Files
 
-| File | Command | Layer | Aliases | Purpose |
-|------|---------|-------|---------|---------|
-| `__init__.py` | — | — | — | Catalog (`register_user_command`, `get_builtin_user_command`, `list_builtin_user_commands`); imports every command to trigger registration |
-| `help.py` | `/help` | INPUT | `h`, `?` | List available commands (`ui_list` payload) |
-| `exit.py` | `/exit` | INPUT | `quit`, `q` | Graceful shutdown (`ui_confirm`) |
-| `clear.py` | `/clear` | AGENT | — | Wipe conversation context; emit `context_cleared` event (`ui_confirm` + `ui_notify`) |
-| `compact.py` | `/compact` | AGENT | — | Trigger manual context compaction now (`ui_notify`) |
-| `model.py` | `/model [name]` | AGENT | `llm` | List models or switch profile (`ui_select` / `ui_notify`) |
-| `plugin.py` | `/plugin` | AGENT | `plugins` | List plugins or toggle enable/disable (`ui_select`) |
-| `regen.py` | `/regen` | AGENT | `regenerate` | Regenerate the last assistant response with current settings |
-| `status.py` | `/status` | AGENT | `info` | Show agent/session status (`ui_info_panel`) |
+| File          | Command         | Layer | Aliases      | Purpose                                                                                                                                    |
+| ------------- | --------------- | ----- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `__init__.py` | —               | —     | —            | Catalog (`register_user_command`, `get_builtin_user_command`, `list_builtin_user_commands`); imports every command to trigger registration |
+| `help.py`     | `/help`         | INPUT | `h`, `?`     | List available commands (`ui_list` payload)                                                                                                |
+| `exit.py`     | `/exit`         | INPUT | `quit`, `q`  | Graceful shutdown (`ui_confirm`)                                                                                                           |
+| `clear.py`    | `/clear`        | AGENT | —            | Wipe conversation context; emit `context_cleared` event (`ui_confirm` + `ui_notify`)                                                       |
+| `compact.py`  | `/compact`      | AGENT | —            | Trigger manual context compaction now (`ui_notify`)                                                                                        |
+| `model.py`    | `/model [name]` | AGENT | `llm`        | List models or switch profile (`ui_select` / `ui_notify`)                                                                                  |
+| `plugin.py`   | `/plugin`       | AGENT | `plugins`    | List plugins or toggle enable/disable (`ui_select`)                                                                                        |
+| `regen.py`    | `/regen`        | AGENT | `regenerate` | Regenerate the last assistant response with current settings                                                                               |
+| `status.py`   | `/status`       | AGENT | `info`       | Show agent/session status (`ui_info_panel`)                                                                                                |
 
 ## Dependency direction
 

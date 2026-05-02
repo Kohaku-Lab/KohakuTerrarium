@@ -23,27 +23,27 @@ Root package for the KohakuTerrarium agent framework.
 
 ## Subpackages
 
-| Package | Purpose |
-|---------|---------|
-| `core/` | Agent, Controller, Executor, events, config, session, registry, compact, runtime tools |
-| `bootstrap/` | Agent initialization factories (LLM, tools, IO, subagents, triggers, plugins) |
-| `builtins/` | Built-in tools, sub-agents, inputs, outputs, TUI, rich-CLI, user commands |
-| `builtin_skills/` | On-demand markdown documentation for tools and sub-agents |
-| `modules/` | Base classes and protocols (input, output, tool, trigger, subagent, user_command, plugin) |
-| `terrarium/` | `Terrarium` engine, `Creature` handle, graph topology, channels, output wiring, engine events |
-| `studio/` | Management facade: catalog, identity, active sessions, persistence, attach, editors |
-| `compose/` | Agent composition algebra (`>>`, `&`, `|`, `*`) for Python-side pipelines |
-| `mcp/` | MCP client manager + meta-tools for external MCP servers |
-| `serving/` | Web/desktop launch helpers and legacy compatibility wrappers |
-| `api/` | FastAPI HTTP + WebSocket adapters over Studio and Terrarium |
-| `cli/` | `kt` command dispatcher (run / resume / web / model / config / ...) |
-| `session/` | Session persistence via KohakuVault (.kohakutr files) + memory/FTS5/vector search |
-| `llm/` | LLM provider abstraction (OpenAI-compatible, Codex OAuth, native Anthropic, presets, profiles) |
-| `parsing/` | Streaming state machine for LLM output (bracket, XML, native) |
-| `prompt/` | System prompt aggregation, Jinja2 templating, plugin/skill loading |
-| `commands/` | Framework commands executed inline during LLM streaming (read, info, jobs, wait) |
-| `testing/` | Test infrastructure (ScriptedLLM, TestAgentBuilder, output recorders) |
-| `utils/` | Shared utilities (structured logging, async helpers, file safety guards) |
+| Package           | Purpose                                                                                       |
+| ----------------- | --------------------------------------------------------------------------------------------- |
+| `core/`           | Agent, Controller, Executor, events, config, session, registry, compact, runtime tools        |
+| `bootstrap/`      | Agent initialization factories (LLM, tools, IO, subagents, triggers, plugins)                 |
+| `builtins/`       | Built-in tools, sub-agents, inputs, outputs, TUI, rich-CLI, user commands                     |
+| `builtin_skills/` | On-demand markdown documentation for tools and sub-agents                                     |
+| `modules/`        | Base classes and protocols (input, output, tool, trigger, subagent, user_command, plugin)     |
+| `terrarium/`      | `Terrarium` engine, `Creature` handle, graph topology, channels, output wiring, engine events |
+| `studio/`         | Management facade: catalog, identity, active sessions, persistence, attach, editors           |
+| `compose/`        | Agent composition algebra (`>>`, `&`, `\|`, `*`) for Python-side pipelines                   |
+| `mcp/`            | MCP client manager + meta-tools for external MCP servers                                      |
+| `serving/`        | Web/desktop launch helpers and legacy compatibility wrappers                                  |
+| `api/`            | FastAPI HTTP + WebSocket adapters over Studio and Terrarium                                   |
+| `cli/`            | `kt` command dispatcher (run / resume / web / model / config / ...)                           |
+| `session/`        | Session persistence via KohakuVault (.kohakutr files) + memory/FTS5/vector search             |
+| `llm/`            | LLM provider abstraction (OpenAI-compatible, Codex OAuth, native Anthropic, presets, profiles) |
+| `parsing/`        | Streaming state machine for LLM output (bracket, XML, native)                                 |
+| `prompt/`         | System prompt aggregation, Jinja2 templating, plugin/skill loading                            |
+| `commands/`       | Framework commands executed inline during LLM streaming (read, info, jobs, wait)              |
+| `testing/`        | Test infrastructure (ScriptedLLM, TestAgentBuilder, output recorders)                         |
+| `utils/`          | Shared utilities (structured logging, async helpers, file safety guards)                      |
 
 ## Dependency flow
 

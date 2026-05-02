@@ -13,15 +13,15 @@ engine.
 
 ## Files
 
-| File | Responsibility |
-|------|----------------|
-| `__init__.py` | Package marker |
-| `app.py` | `create_app(creatures_dirs, terrariums_dirs, static_dir)` — FastAPI factory + CORS + router registration + optional SPA mount |
-| `main.py` | Uvicorn entrypoint (`python -m kohakuterrarium.api.main`), default port 8001 |
-| `deps.py` | `get_engine()` — singleton `Terrarium` dependency |
-| `schemas.py` | Pydantic request/response models (`TerrariumCreate`, `AgentChat`, `ChannelSend`, `FileWrite`, ...) |
-| `routes/` | REST endpoints (one file per resource); see `routes/README.md` |
-| `ws/` | WebSocket handlers for streaming events; see `ws/README.md` |
+| File          | Responsibility                                                                                                                |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `__init__.py` | Package marker                                                                                                                |
+| `app.py`      | `create_app(creatures_dirs, terrariums_dirs, static_dir)` — FastAPI factory + CORS + router registration + optional SPA mount |
+| `main.py`     | Uvicorn entrypoint (`python -m kohakuterrarium.api.main`), default port 8001                                                  |
+| `deps.py`     | `get_engine()` — singleton `Terrarium` dependency                                                                             |
+| `schemas.py`  | Pydantic request/response models (`TerrariumCreate`, `AgentChat`, `ChannelSend`, `FileWrite`, ...)                            |
+| `routes/`     | REST endpoints (one file per resource); see `routes/README.md`                                                                |
+| `ws/`         | WebSocket handlers for streaming events; see `ws/README.md`                                                                   |
 
 ## Dependency direction
 
@@ -46,7 +46,7 @@ imports from `api/`.
 - All REST routes are mounted under `/api/*`. WebSocket routes live at
   `/ws/*` so they don't collide with the SPA catch-all.
 - When `static_dir` is supplied to `create_app`, a catch-all `GET
-  /{full_path:path}` serves the Vue SPA's `index.html` (real files under
+/{full_path:path}` serves the Vue SPA's `index.html` (real files under
   `static_dir/assets/` are served first, so hashed bundles win).
 - The engine singleton is created on the first `get_engine()` call and
   shut down via FastAPI lifespan — `main.py` uses uvicorn's default

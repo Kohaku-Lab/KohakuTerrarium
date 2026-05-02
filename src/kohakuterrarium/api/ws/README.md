@@ -5,15 +5,15 @@ clients.
 
 ## Files
 
-| File | Route | Responsibility |
-|------|-------|----------------|
-| `__init__.py` | — | Package marker |
-| `chat.py` | `/ws/terrariums/{tid}`, `/ws/creatures/{agent_id}` | **Primary unified stream** — all events (text chunks, tool activity, channel messages, tokens, triggers) tagged by source for one mount point |
-| `agents.py` | `/ws/agents/{agent_id}/chat` | Legacy bidirectional chat with a standalone agent (simpler, single-agent) |
-| `channels.py` | `/ws/terrariums/{tid}/channels` | Stream ONLY channel messages for a terrarium |
-| `files.py` | `/ws/agents/{agent_id}/files` | Watch the agent's working directory (via `watchfiles`) and push change events |
-| `logs.py` | `/ws/logs` | Tail the API server's own log file (parsed into `{ts, level, module, text}`) |
-| `terminal.py` | `/ws/agents/{agent_id}/terminal` | PTY bridge — spawn a shell in the agent's working dir, stream stdin/stdout both ways |
+| File          | Route                                              | Responsibility                                                                                                                                |
+| ------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `__init__.py` | —                                                  | Package marker                                                                                                                                |
+| `chat.py`     | `/ws/terrariums/{tid}`, `/ws/creatures/{agent_id}` | **Primary unified stream** — all events (text chunks, tool activity, channel messages, tokens, triggers) tagged by source for one mount point |
+| `agents.py`   | `/ws/agents/{agent_id}/chat`                       | Legacy bidirectional chat with a standalone agent (simpler, single-agent)                                                                     |
+| `channels.py` | `/ws/terrariums/{tid}/channels`                    | Stream ONLY channel messages for a terrarium                                                                                                  |
+| `files.py`    | `/ws/agents/{agent_id}/files`                      | Watch the agent's working directory (via `watchfiles`) and push change events                                                                 |
+| `logs.py`     | `/ws/logs`                                         | Tail the API server's own log file (parsed into `{ts, level, module, text}`)                                                                  |
+| `terminal.py` | `/ws/agents/{agent_id}/terminal`                   | PTY bridge — spawn a shell in the agent's working dir, stream stdin/stdout both ways                                                          |
 
 ## Dependency direction
 

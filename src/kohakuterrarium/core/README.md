@@ -5,32 +5,32 @@ agent. All components communicate through a unified `TriggerEvent` model.
 
 ## Files
 
-| File | Responsibility |
-|------|----------------|
-| `__init__.py` | Package marker; re-exports for convenience |
-| `agent.py` | `Agent` class public API (`from_path`, `run`, `start`, `stop`, `inject_input`) |
-| `agent_handlers.py` | `AgentHandlersMixin` — event processing + controller loop orchestration |
-| `agent_tools.py` | `AgentToolsMixin` — tool dispatch, direct/background result collection |
-| `agent_runtime_tools.py` | Lower-level tool dispatch helpers used by `AgentToolsMixin` |
-| `agent_messages.py` | `AgentMessagesMixin` — edit / regenerate / rewind past messages |
-| `backgroundify.py` | `BackgroundifyHandle` / `PromotionResult` — mid-flight direct→background task promotion |
-| `controller.py` | `Controller` + `ControllerConfig` — LLM conversation loop + event queue |
-| `conversation.py` | `Conversation` context manager (message list, truncation, system prompt) |
-| `executor.py` | Background tool runner; `asyncio.create_task()` during streaming |
-| `events.py` | `TriggerEvent`, `EventType`, constructors (`create_tool_complete_event`, etc.) |
-| `channel.py` | `AgentChannel`, `ChannelMessage`, `ChannelRegistry` — named pub/sub channels |
-| `compact.py` | Non-blocking auto-compact (`CompactManager`) — background summarization of the old context zone |
-| `session.py` | `Session` — keyed shared state registry (channels, scratchpad, TUI, extras) |
-| `environment.py` | `Environment` — inter-creature state per user request |
-| `scratchpad.py` | Session-scoped key-value working memory (framework-managed, cheap) |
-| `termination.py` | `TerminationConditions` — max_turns / max_tokens / max_duration / idle / keywords |
-| `config.py` | `load_agent_config` / `build_agent_config` — YAML / JSON / TOML + env interpolation |
-| `config_types.py` | Config dataclasses (`AgentConfig`, `InputConfig`, `ControllerConfig`, …) |
-| `constants.py` | Framework magic numbers (truncation limits, status preview lengths) |
-| `trigger_manager.py` | `TriggerManager` — owns trigger instances + async tasks, hot-add/remove |
-| `job.py` | `JobStore`, `JobResult`, `JobState` — job status tracking |
-| `loader.py` | `ModuleLoader` — dynamic import of custom tools / inputs / outputs / subagents |
-| `registry.py` | `Registry` — generic module registry for tools and sub-agents |
+| File                     | Responsibility                                                                                  |
+| ------------------------ | ----------------------------------------------------------------------------------------------- |
+| `__init__.py`            | Package marker; re-exports for convenience                                                      |
+| `agent.py`               | `Agent` class public API (`from_path`, `run`, `start`, `stop`, `inject_input`)                  |
+| `agent_handlers.py`      | `AgentHandlersMixin` — event processing + controller loop orchestration                         |
+| `agent_tools.py`         | `AgentToolsMixin` — tool dispatch, direct/background result collection                          |
+| `agent_runtime_tools.py` | Lower-level tool dispatch helpers used by `AgentToolsMixin`                                     |
+| `agent_messages.py`      | `AgentMessagesMixin` — edit / regenerate / rewind past messages                                 |
+| `backgroundify.py`       | `BackgroundifyHandle` / `PromotionResult` — mid-flight direct→background task promotion         |
+| `controller.py`          | `Controller` + `ControllerConfig` — LLM conversation loop + event queue                         |
+| `conversation.py`        | `Conversation` context manager (message list, truncation, system prompt)                        |
+| `executor.py`            | Background tool runner; `asyncio.create_task()` during streaming                                |
+| `events.py`              | `TriggerEvent`, `EventType`, constructors (`create_tool_complete_event`, etc.)                  |
+| `channel.py`             | `AgentChannel`, `ChannelMessage`, `ChannelRegistry` — named pub/sub channels                    |
+| `compact.py`             | Non-blocking auto-compact (`CompactManager`) — background summarization of the old context zone |
+| `session.py`             | `Session` — keyed shared state registry (channels, scratchpad, TUI, extras)                     |
+| `environment.py`         | `Environment` — inter-creature state per user request                                           |
+| `scratchpad.py`          | Session-scoped key-value working memory (framework-managed, cheap)                              |
+| `termination.py`         | `TerminationConditions` — max_turns / max_tokens / max_duration / idle / keywords               |
+| `config.py`              | `load_agent_config` / `build_agent_config` — YAML / JSON / TOML + env interpolation             |
+| `config_types.py`        | Config dataclasses (`AgentConfig`, `InputConfig`, `ControllerConfig`, …)                        |
+| `constants.py`           | Framework magic numbers (truncation limits, status preview lengths)                             |
+| `trigger_manager.py`     | `TriggerManager` — owns trigger instances + async tasks, hot-add/remove                         |
+| `job.py`                 | `JobStore`, `JobResult`, `JobState` — job status tracking                                       |
+| `loader.py`              | `ModuleLoader` — dynamic import of custom tools / inputs / outputs / subagents                  |
+| `registry.py`            | `Registry` — generic module registry for tools and sub-agents                                   |
 
 ## Dependency direction
 

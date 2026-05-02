@@ -8,12 +8,12 @@ terminal access for a single agent or a group of cooperating agents.
 
 ## Files
 
-| File | Description |
-|------|-------------|
-| `__init__.py` | Exports `TUISession` |
-| `session.py` | `TUISession`: shared state (Textual app, input queue, output buffer, stop signal) |
-| `input.py` | `TUIInput`: input module that reads from the TUI app's input widget |
-| `output.py` | `TUIOutput`: output module that writes to the TUI app with visual turn separation |
+| File          | Description                                                                       |
+| ------------- | --------------------------------------------------------------------------------- |
+| `__init__.py` | Exports `TUISession`                                                              |
+| `session.py`  | `TUISession`: shared state (Textual app, input queue, output buffer, stop signal) |
+| `input.py`    | `TUIInput`: input module that reads from the TUI app's input widget               |
+| `output.py`   | `TUIOutput`: output module that writes to the TUI app with visual turn separation |
 
 ## Dependencies
 
