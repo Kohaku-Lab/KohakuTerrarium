@@ -32,16 +32,31 @@ def _subagent_failed(evt: dict) -> bool:
     )
 
 
-def _agents_for_summary(meta: dict[str, Any], requested: str | None) -> list[str]:
+def _agents_for_summary(
+    meta: dict[str, Any], store: SessionStore, requested: str | None
+) -> list[str]:
     """Return the agent list to summarise.
 
     ``requested`` narrows to one agent (404 if not present); ``None``
-    summarises every agent in ``meta["agents"]``.
+    summarises every main creature in ``meta["agents"]`` plus every
+    Wave F attached namespace, with ``meta["viewer_default_agent"]``
+    moved to the front when set so attach-driven sessions surface the
+    active namespace first in the Overview tab.
     """
-    all_agents = list(meta.get("agents") or [])
+    main_agents = list(meta.get("agents") or [])
+    attached_namespaces = [
+        e["namespace"] for e in store.discover_attached_agents() if e.get("namespace")
+    ]
+    known_agents = main_agents + [
+        n for n in attached_namespaces if n not in main_agents
+    ]
     if requested is None:
-        return all_agents
-    if requested not in all_agents:
+        default = meta.get("viewer_default_agent")
+        if isinstance(default, str) and default in known_agents:
+            ordered = [default] + [a for a in known_agents if a != default]
+            return ordered
+        return known_agents
+    if requested not in known_agents:
         raise HTTPException(404, f"Agent not found in session: {requested}")
     return [requested]
 
@@ -130,7 +145,7 @@ def build_summary_payload(
     top-5 by total tokens when cost is unavailable for the provider.
     """
     meta = store.load_meta()
-    agents = _agents_for_summary(meta, agent)
+    agents = _agents_for_summary(meta, store, agent)
 
     if agent is None:
         flat_rollups = aggregate_turn_rollups(store)

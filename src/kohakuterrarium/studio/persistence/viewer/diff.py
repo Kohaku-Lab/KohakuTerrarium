@@ -16,14 +16,32 @@ from kohakuterrarium.session.history import replay_conversation
 from kohakuterrarium.session.store import SessionStore
 
 
-def _agents_for(meta: dict[str, Any], requested: str | None) -> str:
-    """Pick a single agent name to diff (one slice at a time)."""
-    all_agents = list(meta.get("agents") or [])
+def _agents_for(
+    meta: dict[str, Any], store: SessionStore, requested: str | None
+) -> str:
+    """Pick a single agent name to diff (one slice at a time).
+
+    Accepts main creatures (``meta["agents"]``) and Wave F attached
+    namespaces (via ``discover_attached_agents``); when ``requested`` is
+    ``None``, prefers ``meta["viewer_default_agent"]`` over the first
+    main creature so attach-driven sessions diff against the namespace
+    that actually carries per-turn activity.
+    """
+    main_agents = list(meta.get("agents") or [])
+    attached_namespaces = [
+        e["namespace"] for e in store.discover_attached_agents() if e.get("namespace")
+    ]
+    known_agents = main_agents + [
+        n for n in attached_namespaces if n not in main_agents
+    ]
     if requested is None:
-        if not all_agents:
+        default = meta.get("viewer_default_agent")
+        if isinstance(default, str) and default in known_agents:
+            return default
+        if not main_agents:
             raise HTTPException(404, "Session has no agents")
-        return all_agents[0]
-    if requested not in all_agents:
+        return main_agents[0]
+    if requested not in known_agents:
         raise HTTPException(404, f"Agent not found in session: {requested}")
     return requested
 
@@ -84,7 +102,7 @@ def _load_messages(path: Path, agent_arg: str | None) -> tuple[list[dict], str, 
     try:
         meta = store.load_meta()
         name = str(meta.get("session_id") or path.stem)
-        agent = _agents_for(meta, agent_arg)
+        agent = _agents_for(meta, store, agent_arg)
         events = store.get_events(agent)
         msgs = replay_conversation(events) if events else []
         return msgs, name, agent

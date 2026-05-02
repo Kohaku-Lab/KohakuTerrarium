@@ -39,12 +39,24 @@ def build_turns_payload(
         rows = aggregate_turn_rollups(store)
         agent_used = None
     else:
+        main_agents = list(meta.get("agents") or [])
+        attached_namespaces = [
+            e["namespace"]
+            for e in store.discover_attached_agents()
+            if e.get("namespace")
+        ]
+        known_agents = main_agents + [
+            n for n in attached_namespaces if n not in main_agents
+        ]
         if agent is None:
-            all_agents = list(meta.get("agents") or [])
-            if not all_agents:
+            default = meta.get("viewer_default_agent")
+            if isinstance(default, str) and default in known_agents:
+                agent = default
+            elif main_agents:
+                agent = main_agents[0]
+            else:
                 raise HTTPException(404, f"Session has no agents: {session_name}")
-            agent = all_agents[0]
-        elif agent not in (meta.get("agents") or []):
+        elif agent not in known_agents:
             raise HTTPException(404, f"Agent not found in session: {agent}")
         rows = rollups_or_derived(store, agent)
         agent_used = agent

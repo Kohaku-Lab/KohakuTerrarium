@@ -632,6 +632,25 @@ class SessionStore:
         self.meta["status"] = status
         self.meta["last_active"] = datetime.now(timezone.utc).isoformat()
 
+    def set_viewer_default_agent(self, namespace: str) -> None:
+        """Record ``namespace`` as the session viewer's default agent.
+
+        Writes ``meta["viewer_default_agent"]``. Used by
+        ``attach_agent_to_session`` so the Wave F attach namespace
+        (``<host>:attached:<role>:<seq>``) becomes the default the viewer
+        dispatches under; without this the host namespace (which only
+        carries lineage events) would win and the conversation tab would
+        render empty. Last-attach wins; earlier attaches stay reachable
+        via ``discover_attached_agents`` and explicit ``?agent=`` query.
+
+        Kept off ``meta["agents"]`` so resume / hot-plug / token-loop
+        enumeration keep treating that list as main creatures only.
+        """
+
+        if not isinstance(namespace, str) or not namespace:
+            return
+        self.meta["viewer_default_agent"] = namespace
+
     def touch(self) -> None:
         """Update last_active timestamp."""
 
