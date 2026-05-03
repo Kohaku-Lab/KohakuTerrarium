@@ -52,6 +52,14 @@ export const configAPI = {
   },
 }
 
+/** Runtime graph snapshot for the graph editor. */
+export const runtimeGraphAPI = {
+  async snapshot() {
+    const { data } = await api.get("/runtime/graph")
+    return data
+  },
+}
+
 /** Terrarium lifecycle */
 export const terrariumAPI = {
   /** @returns {Promise<{terrarium_id: string}>} */
@@ -60,6 +68,13 @@ export const terrariumAPI = {
     if (pwd) body.pwd = pwd
     if (name) body.name = name
     const { data } = await api.post("/sessions/active/terrariums", body)
+    return data
+  },
+
+  async rename(id, name) {
+    const { data } = await api.post(`/sessions/active/terrariums/${encodeTarget(id)}/rename`, {
+      name,
+    })
     return data
   },
 
@@ -85,11 +100,73 @@ export const terrariumAPI = {
     return data
   },
 
-  async sendToChannel(id, channelName, content, sender = "human") {
-    const { data } = await api.post(`/sessions/topology/${id}/channels/${channelName}/send`, {
-      content,
-      sender,
+  async addChannel(id, name, channelType = "queue", description = "") {
+    const { data } = await api.post(`/sessions/topology/${encodeTarget(id)}/channels`, {
+      name,
+      channel_type: channelType,
+      description,
     })
+    return data
+  },
+
+  /** Merge graph ``b`` into graph ``a`` so both creature sets share
+   * one engine graph. Returns ``{session_id, merged}`` where
+   * ``session_id`` is the surviving graph id. No bridge channel is
+   * created — used when wiring a channel that lives in a different
+   * molecule from the creature being wired to it. */
+  async mergeGraphs(aSessionId, bSessionId) {
+    const { data } = await api.post(
+      `/sessions/topology/${encodeTarget(aSessionId)}/merge/${encodeTarget(bSessionId)}`,
+    )
+    return data
+  },
+
+  async sendToChannel(id, channelName, content, sender = "human") {
+    const { data } = await api.post(
+      `/sessions/topology/${encodeTarget(id)}/channels/${encodeURIComponent(channelName)}/send`,
+      {
+        content,
+        sender,
+      },
+    )
+    return data
+  },
+
+  async connect(id, sender, receiver, channel = null, channelType = "queue") {
+    const body = { sender, receiver, channel_type: channelType }
+    if (channel) body.channel = channel
+    const { data } = await api.post(`/sessions/topology/${encodeTarget(id)}/connect`, body)
+    return data
+  },
+
+  async disconnect(id, sender, receiver, channel = null) {
+    const body = { sender, receiver }
+    if (channel) body.channel = channel
+    const { data } = await api.post(`/sessions/topology/${encodeTarget(id)}/disconnect`, body)
+    return data
+  },
+
+  async wireCreature(id, creatureId, channelName, direction) {
+    const { data } = await api.post(
+      `/sessions/topology/${encodeTarget(id)}/creatures/${encodeTarget(creatureId)}/wire`,
+      {
+        channel: channelName,
+        direction,
+      },
+    )
+    return data
+  },
+
+  async unwireCreature(id, creatureId, channelName, direction) {
+    const { data } = await api.delete(
+      `/sessions/topology/${encodeTarget(id)}/creatures/${encodeTarget(creatureId)}/wire`,
+      {
+        data: {
+          channel: channelName,
+          direction,
+        },
+      },
+    )
     return data
   },
 
@@ -198,6 +275,22 @@ export const agentAPI = {
     return data
   },
 
+  async rename(creatureId, name) {
+    const { data } = await api.post(`/sessions/active/agents/${encodeTarget(creatureId)}/rename`, {
+      name,
+    })
+    return data
+  },
+
+  /** Rename a creature inside a multi-creature session. */
+  async renameWithin(sessionId, creatureId, name) {
+    const { data } = await api.post(
+      `/sessions/active/${encodeTarget(sessionId)}/creatures/${encodeTarget(creatureId)}/rename`,
+      { name },
+    )
+    return data
+  },
+
   /** @returns {Promise<object[]>} */
   async list() {
     const { data } = await api.get("/sessions/active/agents")
@@ -262,24 +355,43 @@ export const agentAPI = {
     return data
   },
 
-  /** Regenerate the last assistant response */
-  async regenerate(id) {
-    const { data } = await api.post(`/sessions/_/creatures/${id}/regenerate`)
+  /** Regenerate the last assistant response.
+   *
+   * ``sessionId`` is the terrarium's session id (or ``"_"`` for a
+   * standalone agent). ``creatureId`` is the target creature/agent
+   * name. Old call sites that pass only an agent id can still call
+   * ``regenerate(agentId)`` — the second arg defaults to the first.
+   */
+  async regenerate(sessionId, creatureId) {
+    const sid = sessionId || "_"
+    const cid = creatureId || sessionId
+    const { data } = await api.post(
+      `/sessions/${encodeTarget(sid)}/creatures/${encodeTarget(cid)}/regenerate`,
+    )
     return data
   },
 
   /** Edit a user message at a given index and re-run */
-  async editMessage(id, msgIdx, content, target = {}) {
+  async editMessage(sessionId, creatureId, msgIdx, content, target = {}) {
     const body = { content }
     if (target.turnIndex != null) body.turn_index = target.turnIndex
     if (target.userPosition != null) body.user_position = target.userPosition
-    const { data } = await api.post(`/sessions/_/creatures/${id}/messages/${msgIdx}/edit`, body)
+    const sid = sessionId || "_"
+    const cid = creatureId || sessionId
+    const { data } = await api.post(
+      `/sessions/${encodeTarget(sid)}/creatures/${encodeTarget(cid)}/messages/${msgIdx}/edit`,
+      body,
+    )
     return data
   },
 
   /** Rewind conversation to a point (drop messages onward) */
-  async rewindTo(id, msgIdx) {
-    const { data } = await api.post(`/sessions/_/creatures/${id}/messages/${msgIdx}/rewind`)
+  async rewindTo(sessionId, creatureId, msgIdx) {
+    const sid = sessionId || "_"
+    const cid = creatureId || sessionId
+    const { data } = await api.post(
+      `/sessions/${encodeTarget(sid)}/creatures/${encodeTarget(cid)}/messages/${msgIdx}/rewind`,
+    )
     return data
   },
 
@@ -377,6 +489,31 @@ export const moduleAPI = {
   async toggle(sessionId, creatureId, moduleType, name) {
     const { data } = await api.post(
       `/sessions/${encodeTarget(sessionId)}/creatures/${encodeTarget(creatureId)}/modules/${encodeURIComponent(moduleType)}/${encodeURIComponent(name)}/toggle`,
+    )
+    return data
+  },
+}
+
+/** Direct runtime output wiring between creatures. */
+export const wiringAPI = {
+  async listOutputs(sessionId, creatureId) {
+    const { data } = await api.get(
+      `/sessions/wiring/${encodeTarget(sessionId)}/creatures/${encodeTarget(creatureId)}/outputs`,
+    )
+    return data
+  },
+
+  async addOutput(sessionId, creatureId, target) {
+    const { data } = await api.post(
+      `/sessions/wiring/${encodeTarget(sessionId)}/creatures/${encodeTarget(creatureId)}/outputs`,
+      target,
+    )
+    return data
+  },
+
+  async removeOutput(sessionId, creatureId, edgeId) {
+    const { data } = await api.delete(
+      `/sessions/wiring/${encodeTarget(sessionId)}/creatures/${encodeTarget(creatureId)}/outputs/${encodeURIComponent(edgeId)}`,
     )
     return data
   },
