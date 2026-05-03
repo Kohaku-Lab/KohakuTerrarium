@@ -585,3 +585,130 @@ class TestTurnsAggregate:
         data = client.get("/api/sessions/alice/turns?aggregate=true&agent=ghost").json()
         assert data["aggregate"] is True
         assert data["turns"][0]["tokens_in"] == 300
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Wave F attached-agent viewer default (issue #53):
+# attach_agent_to_session emits events under
+# ``<host>:attached:<role>:<seq>:e*``. Before this fix the host
+# namespace (which only carries lineage events) won the default-agent
+# slot and the viewer's conversation tab rendered empty. The fix is
+# ``SessionStore.set_viewer_default_agent``: ``attach_agent_to_session``
+# records the attach namespace in ``meta["viewer_default_agent"]`` and
+# the viewer entry points (events / turns / summary / diff) honour it
+# while still treating the namespace as a valid agent for explicit
+# ``?agent=`` lookups. ``meta["agents"]`` stays untouched so resume,
+# hot-plug, and token-loop enumeration keep main-creature semantics.
+# ─────────────────────────────────────────────────────────────────────
+
+
+class TestAttachedAgentViewerDefault:
+    @staticmethod
+    def _seed_attached_events(
+        session_dir: Path, name: str = "host"
+    ) -> tuple[Path, str]:
+        """Create a session containing the kind of events
+        ``attach_agent_to_session`` produces. Does NOT set
+        ``viewer_default_agent`` — the per-test setup decides whether
+        to invoke it."""
+        path = session_dir / f"{name}.kohakutr"
+        store = SessionStore(path)
+        store.init_meta(
+            session_id=name,
+            config_type="agent",
+            config_path="",
+            pwd=str(session_dir),
+            agents=[],
+        )
+        ns = "host:attached:root:0"
+        store.append_event(
+            "host",
+            "agent_attached",
+            {"role": "root", "attach_seq": 0},
+            turn_index=1,
+        )
+        store.append_event(ns, "user_input", {"content": "go"}, turn_index=1)
+        store.append_event(ns, "tool_call", {"tool": "search"}, turn_index=1)
+        store.append_event(ns, "tool_result", {"ok": True}, turn_index=1)
+        store.save_turn_rollup(
+            ns,
+            1,
+            {"tokens_in": 42, "tokens_out": 7, "tokens_cached": 0, "cost_usd": 0.001},
+        )
+        store.close(update_status=False)
+        return path, ns
+
+    def test_default_dispatches_to_attach_namespace(self, app_with_sessions):
+        app, tmp = app_with_sessions
+        path, ns = self._seed_attached_events(tmp)
+        store = SessionStore(path)
+        store.set_viewer_default_agent(ns)
+        store.close(update_status=False)
+        client = TestClient(app)
+
+        events = client.get("/api/sessions/host/events").json()
+        assert events["agent"] == ns
+        types = sorted({e.get("type") for e in events["events"]})
+        assert "tool_call" in types and "tool_result" in types
+
+        summary = client.get("/api/sessions/host/summary").json()
+        assert summary["agents"][0] == ns
+        # The attach-namespace tool_call is visible in totals.
+        assert summary["totals"]["tool_calls"] == 1
+        assert summary["totals"]["tokens"]["prompt"] == 42
+
+        turns = client.get("/api/sessions/host/turns").json()
+        assert turns["agent"] == ns
+        assert turns["total"] == 1
+
+    def test_set_viewer_default_does_not_pollute_meta_agents(self, app_with_sessions):
+        app, tmp = app_with_sessions
+        path = _make_session(tmp, "alice", agents=["root"])
+        store = SessionStore(path)
+        store.set_viewer_default_agent("alice:attached:helper:0")
+        store.set_viewer_default_agent("alice:attached:helper:0")
+        agents = list(store.meta["agents"])
+        default = store.meta.get("viewer_default_agent")
+        store.close(update_status=False)
+
+        # meta["agents"] stays clean — last-attach wins, no list mutation.
+        assert agents == ["root"]
+        assert default == "alice:attached:helper:0"
+
+    def test_set_viewer_default_ignores_blank_input(self, app_with_sessions):
+        app, tmp = app_with_sessions
+        path = _make_session(tmp, "alice", agents=["root"])
+        store = SessionStore(path)
+        store.set_viewer_default_agent("")
+        store.set_viewer_default_agent(None)  # type: ignore[arg-type]
+        agents = list(store.meta["agents"])
+        default = store.meta.get("viewer_default_agent")
+        store.close(update_status=False)
+        assert agents == ["root"]
+        assert default is None
+
+    def test_attach_namespace_addressable_without_default(self, app_with_sessions):
+        """Even without ``viewer_default_agent`` set, the attach
+        namespace must be reachable via explicit ``?agent=`` so older
+        sessions and earlier-attached agents stay queryable."""
+        app, tmp = app_with_sessions
+        _, ns = self._seed_attached_events(tmp)
+        client = TestClient(app)
+        resp = client.get(f"/api/sessions/host/events?agent={ns}")
+        assert resp.status_code == 200
+        assert resp.json()["agent"] == ns
+
+    def test_unset_default_falls_through_to_host(self, app_with_sessions):
+        """Backwards-compat: a pre-fix session whose viewer default was
+        never set still resolves *something* — the viewer dispatches
+        under the host namespace (which carries the lineage event). The
+        conversation tab will look thin until the operator runs a
+        one-off backfill (``store.set_viewer_default_agent(ns)``) — issue
+        #53 has the recipe — but the endpoint must not 500."""
+        app, tmp = app_with_sessions
+        self._seed_attached_events(tmp)
+        client = TestClient(app)
+        resp = client.get("/api/sessions/host/events")
+        assert resp.status_code == 200
+        # Default agent is the host namespace (load_meta auto-discovered it).
+        assert resp.json()["agent"] == "host"

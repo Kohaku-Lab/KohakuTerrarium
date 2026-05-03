@@ -166,6 +166,22 @@ def attach_agent_to_session(
         session_id=session_id,
     )
 
+    # Tell the session viewer to dispatch under the attach namespace
+    # by default; otherwise the host namespace (which only carries
+    # lineage events) wins and the conversation tab renders empty.
+    # Last-attach wins; earlier attaches stay reachable via explicit
+    # ``?agent=``. Stored in a viewer-only meta field so resume /
+    # hot-plug / token-loop enumeration keep ``meta["agents"]`` clean.
+    try:
+        store.set_viewer_default_agent(prefix)
+    except Exception as e:  # pragma: no cover — observability
+        logger.debug(
+            "set_viewer_default_agent failed",
+            namespace=prefix,
+            error=str(e),
+            exc_info=True,
+        )
+
     logger.info(
         "Agent attached to session",
         agent_name=agent.config.name,
