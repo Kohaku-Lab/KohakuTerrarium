@@ -282,6 +282,7 @@ export const useTabsStore = defineStore("tabs", {
       configPath,
       sessionName,
       pwd,
+      name = null,
       attachMode = "chat",
       alsoOpenInspector = false,
     }) {
@@ -298,7 +299,7 @@ export const useTabsStore = defineStore("tabs", {
       } else {
         if (!configPath) throw new Error("createSession: configPath required")
         if (!pwd) throw new Error("createSession: pwd required")
-        id = await instances.create(kind, configPath, pwd)
+        id = await instances.create(kind, configPath, pwd, name)
       }
       // Hydrate the instance so the tab has a config_name / type to show.
       let inst = null
@@ -308,15 +309,20 @@ export const useTabsStore = defineStore("tabs", {
         /* ignore — tab still works with just the id */
       }
       const meta = inst ? { config_name: inst.config_name, type: inst.type } : {}
-      // Surface fan-out
-      const surfaces = []
-      if (attachMode === "chat" || attachMode === "both") surfaces.push("chat")
-      if (attachMode === "insp" || attachMode === "both" || alsoOpenInspector) {
-        surfaces.push("inspector")
-      }
-      if (surfaces.length === 0) surfaces.push("chat")
-      for (const s of surfaces) {
-        await this.openSurface(id, s, meta)
+      // Surface fan-out — ``attachMode === "none"`` is the explicit
+      // "create the session but don't open any tab" mode used by the
+      // graph editor. Every other path keeps the historical default
+      // of opening at least chat.
+      if (attachMode !== "none") {
+        const surfaces = []
+        if (attachMode === "chat" || attachMode === "both") surfaces.push("chat")
+        if (attachMode === "insp" || attachMode === "both" || alsoOpenInspector) {
+          surfaces.push("inspector")
+        }
+        if (surfaces.length === 0) surfaces.push("chat")
+        for (const s of surfaces) {
+          await this.openSurface(id, s, meta)
+        }
       }
       return id
     },

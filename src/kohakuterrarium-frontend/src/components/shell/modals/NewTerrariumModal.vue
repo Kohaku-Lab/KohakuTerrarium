@@ -3,6 +3,16 @@
     <template #title>New terrarium</template>
 
     <form class="space-y-4" @submit.prevent="onSubmit">
+      <!-- Name (random by default) -->
+      <div>
+        <label class="block text-xs uppercase tracking-wider text-warm-500 mb-1 flex items-center gap-2">
+          Name
+          <button type="button" class="ml-auto text-[10px] text-iolite hover:underline" title="Generate a fresh random name" @click="rerollName">reroll</button>
+        </label>
+        <input v-model="name" type="text" class="input-field w-full text-xs" :placeholder="namePlaceholder" />
+        <div class="text-[10px] text-warm-400 mt-1">Leave blank to use the placeholder.</div>
+      </div>
+
       <div>
         <label class="block text-xs uppercase tracking-wider text-warm-500 mb-1"> Working directory </label>
         <input v-model="pwd" type="text" required class="input-field w-full font-mono text-xs" placeholder="/home/user/my-project" />
@@ -23,7 +33,7 @@
         </div>
       </div>
 
-      <label class="flex items-center gap-2 text-sm">
+      <label v-if="!silent" class="flex items-center gap-2 text-sm">
         <input v-model="alsoOpenInspector" type="checkbox" class="accent-iolite" />
         Also open inspector
       </label>
@@ -49,7 +59,11 @@ import ModalShell from "@/components/common/ModalShell.vue"
 import { useConfigsStore } from "@/stores/configs"
 import { useTabsStore } from "@/stores/tabs"
 import { configAPI } from "@/utils/api"
+import { randomNameFor } from "@/utils/randomName"
 
+const props = defineProps({
+  silent: { type: Boolean, default: false },
+})
 const emit = defineEmits(["close"])
 
 const tabs = useTabsStore()
@@ -60,6 +74,13 @@ const selectedConfig = ref(null)
 const alsoOpenInspector = ref(false)
 const starting = ref(false)
 const errorMsg = ref("")
+const name = ref("")
+const namePlaceholder = ref(randomNameFor("terrarium"))
+
+function rerollName() {
+  namePlaceholder.value = randomNameFor("terrarium")
+  name.value = ""
+}
 
 onMounted(async () => {
   configs.fetchAll()
@@ -82,7 +103,8 @@ async function onSubmit() {
       kind: "terrarium",
       configPath: selectedConfig.value,
       pwd: pwd.value.trim(),
-      attachMode: alsoOpenInspector.value ? "both" : "chat",
+      name: (name.value.trim() || namePlaceholder.value).trim(),
+      attachMode: props.silent ? "none" : alsoOpenInspector.value ? "both" : "chat",
     })
     emit("close")
   } catch (err) {
