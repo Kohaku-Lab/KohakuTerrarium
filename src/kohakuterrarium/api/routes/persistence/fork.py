@@ -4,6 +4,8 @@ Path is ``/{session_name}/fork`` so the router can be mounted under
 ``/api/sessions`` for URL preservation.
 """
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 
 from kohakuterrarium.api.schemas import ForkRequest, ForkResponse
@@ -21,7 +23,7 @@ async def fork_session(session_name: str, payload: ForkRequest) -> ForkResponse:
     bad ``at_event_id`` or invalid mutation, 409 when the fork would
     split an in-flight job, and 404 if the source cannot be found.
     """
-    path = resolve_session_path_default(session_name)
+    path = await asyncio.to_thread(resolve_session_path_default, session_name)
     if path is None:
         raise HTTPException(404, f"Session not found: {session_name}")
 

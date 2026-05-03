@@ -10,6 +10,7 @@ the full :class:`Session` handle under ``session`` for callers that
 want it.
 """
 
+import asyncio
 from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -29,7 +30,7 @@ async def resume_session(session_name: str, engine=Depends(get_engine)):
     three fields are the legacy frontend contract; ``session`` is the
     full :class:`Session` handle dataclass-as-dict.
     """
-    path = resolve_session_path_default(session_name)
+    path = await asyncio.to_thread(resolve_session_path_default, session_name)
     if path is None:
         raise HTTPException(
             status_code=404, detail=f"Session not found: {session_name}"

@@ -6,6 +6,8 @@ lives in ``studio/persistence/store.py``. Mounted under both
 for the existing frontend ``sessionAPI`` callers).
 """
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 
 from kohakuterrarium.studio.persistence.store import (
@@ -24,9 +26,11 @@ async def get_disk_usage():
     """Aggregate disk usage of the saved-session directory.
 
     Pure filesystem — stats every canonical session file + its
-    SQLite sidecars without opening any database.
+    SQLite sidecars without opening any database. Off-loaded to a
+    worker thread so the directory walk doesn't block the event loop
+    on large session collections.
     """
-    return disk_usage()
+    return await asyncio.to_thread(disk_usage)
 
 
 @router.get("/stats")
@@ -34,9 +38,10 @@ async def get_session_stats():
     """Aggregations over the cached session index.
 
     Cheap — reads the in-memory index built by ``get_session_index``
-    (30s TTL). Does not force a rebuild.
+    (30s TTL). Does not force a rebuild. Run in a thread because a
+    cold cache triggers the same blocking rebuild as ``list_sessions``.
     """
-    return session_stats()
+    return await asyncio.to_thread(session_stats)
 
 
 @router.get("")
@@ -53,11 +58,15 @@ async def list_sessions(
         offset: Skip first N sessions (for pagination)
         search: Filter by name, config, agents, preview (case-insensitive)
         refresh: Force rebuild the session index
+
+    Index build opens every session SQLite to extract a preview, so
+    we run the whole fetch+filter pipeline on a worker thread to keep
+    other API calls responsive while the rail loads.
     """
     if refresh:
-        build_session_index()
+        await asyncio.to_thread(build_session_index)
 
-    all_sessions = get_session_index()
+    all_sessions = await asyncio.to_thread(get_session_index)
 
     # Server-side search
     if search:
@@ -112,7 +121,7 @@ async def delete_session(session_name: str):
     legacy raw stem.
     """
     try:
-        deleted_paths = delete_session_files(session_name)
+        deleted_paths = await asyncio.to_thread(delete_session_files, session_name)
     except HTTPException:
         raise
     except Exception as e:

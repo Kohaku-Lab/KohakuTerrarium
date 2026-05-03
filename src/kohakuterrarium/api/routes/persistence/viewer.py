@@ -5,10 +5,14 @@ Read-only endpoints for the Session Viewer (V1+V6 waves). Paths are
 ``/api/sessions`` for URL preservation.
 
 All handlers open the store read-only (``close(update_status=False)``)
-so browsing never bumps ``last_active``.
+so browsing never bumps ``last_active``. Every payload builder is
+sync (SQLite + filesystem), so each route dispatches the open +
+build + close sequence to a worker thread via ``asyncio.to_thread`` —
+the event loop stays free for concurrent API traffic.
 """
 
-from typing import Any
+import asyncio
+from typing import Any, Callable
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
@@ -26,31 +30,43 @@ from kohakuterrarium.studio.persistence.viewer.turns import build_turns_payload
 router = APIRouter()
 
 
-def _open_or_404(session_name: str) -> tuple[SessionStore, str]:
-    path = resolve_session_path_default(session_name)
+async def _resolve_or_404(session_name: str):
+    """Resolve a session path off-loop; raise 404 if missing."""
+    path = await asyncio.to_thread(resolve_session_path_default, session_name)
     if path is None:
         raise HTTPException(404, f"Session not found: {session_name}")
-    return SessionStore(path), normalize_session_stem(path)
+    return path
+
+
+def _run_with_store(path, builder: Callable[[SessionStore, str], Any]) -> Any:
+    """Open store, run builder, close — all on the calling thread.
+
+    Designed to be wrapped in :func:`asyncio.to_thread` so the SQLite
+    open + the payload build + the close happen as one off-loop unit.
+    """
+    store = SessionStore(path)
+    try:
+        return builder(store, normalize_session_stem(path))
+    finally:
+        store.close(update_status=False)
 
 
 @router.get("/{session_name}/tree")
 async def get_session_tree(session_name: str) -> dict[str, Any]:
-    store, canonical = _open_or_404(session_name)
-    try:
-        return build_tree_payload(store, canonical)
-    finally:
-        store.close(update_status=False)
+    path = await _resolve_or_404(session_name)
+    return await asyncio.to_thread(_run_with_store, path, build_tree_payload)
 
 
 @router.get("/{session_name}/summary")
 async def get_session_summary(
     session_name: str, agent: str | None = None
 ) -> dict[str, Any]:
-    store, canonical = _open_or_404(session_name)
-    try:
+    path = await _resolve_or_404(session_name)
+
+    def _build(store: SessionStore, canonical: str) -> dict[str, Any]:
         return build_summary_payload(store, canonical, agent)
-    finally:
-        store.close(update_status=False)
+
+    return await asyncio.to_thread(_run_with_store, path, _build)
 
 
 @router.get("/{session_name}/turns")
@@ -63,8 +79,9 @@ async def get_session_turns(
     offset: int = 0,
     aggregate: bool = False,
 ) -> dict[str, Any]:
-    store, canonical = _open_or_404(session_name)
-    try:
+    path = await _resolve_or_404(session_name)
+
+    def _build(store: SessionStore, canonical: str) -> dict[str, Any]:
         return build_turns_payload(
             store,
             canonical,
@@ -75,8 +92,8 @@ async def get_session_turns(
             offset=max(0, offset),
             aggregate=aggregate,
         )
-    finally:
-        store.close(update_status=False)
+
+    return await asyncio.to_thread(_run_with_store, path, _build)
 
 
 @router.get("/{session_name}/export")
@@ -86,16 +103,12 @@ async def get_session_export(
     agent: str | None = None,
 ) -> Response:
     """Stream a session transcript in ``md`` / ``html`` / ``jsonl``."""
-    path = resolve_session_path_default(session_name)
-    if path is None:
-        raise HTTPException(404, f"Session not found: {session_name}")
-    store = SessionStore(path)
-    try:
-        content_type, body = build_export(
-            store, normalize_session_stem(path), format.lower(), agent
-        )
-    finally:
-        store.close(update_status=False)
+    path = await _resolve_or_404(session_name)
+
+    def _build(store: SessionStore, canonical: str) -> tuple[str, bytes | str]:
+        return build_export(store, canonical, format.lower(), agent)
+
+    content_type, body = await asyncio.to_thread(_run_with_store, path, _build)
     ext = "md" if format == "md" else format.lower()
     filename = f"{normalize_session_stem(path)}.{ext}"
     return Response(
@@ -112,13 +125,11 @@ async def get_session_diff(
     agent: str | None = None,
 ) -> dict[str, Any]:
     """Structured diff against another saved session."""
-    a_path = resolve_session_path_default(session_name)
-    if a_path is None:
-        raise HTTPException(404, f"Session not found: {session_name}")
-    b_path = resolve_session_path_default(other)
+    a_path = await _resolve_or_404(session_name)
+    b_path = await asyncio.to_thread(resolve_session_path_default, other)
     if b_path is None:
         raise HTTPException(404, f"Other session not found: {other}")
-    return build_diff_payload(a_path, b_path, agent=agent)
+    return await asyncio.to_thread(build_diff_payload, a_path, b_path, agent=agent)
 
 
 @router.get("/{session_name}/events")
@@ -132,8 +143,9 @@ async def get_session_events(
     limit: int = 200,
     cursor: int | None = None,
 ) -> dict[str, Any]:
-    store, canonical = _open_or_404(session_name)
-    try:
+    path = await _resolve_or_404(session_name)
+
+    def _build(store: SessionStore, canonical: str) -> dict[str, Any]:
         return build_events_payload(
             store,
             canonical,
@@ -145,5 +157,5 @@ async def get_session_events(
             limit=max(1, min(limit, 1000)),
             cursor=cursor,
         )
-    finally:
-        store.close(update_status=False)
+
+    return await asyncio.to_thread(_run_with_store, path, _build)
