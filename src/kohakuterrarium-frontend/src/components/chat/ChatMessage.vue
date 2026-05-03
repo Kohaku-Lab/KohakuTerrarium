@@ -45,6 +45,24 @@
   </div>
 
   <!-- Trigger fired (expandable if has message content) -->
+  <!-- Inbound output-wiring delivery — another creature's turn-end
+       fired this creature via output_wiring. Rendered as a compact
+       accordion so the user knows why this creature suddenly started
+       processing without typing anything in this tab. -->
+  <div v-else-if="message.role === 'wire_inbound'" class="rounded-lg bg-iolite/6 dark:bg-iolite/8 border border-iolite/15 dark:border-iolite/20 overflow-hidden">
+    <div :role="message.preview ? 'button' : undefined" :tabindex="message.preview ? 0 : undefined" :aria-expanded="message.preview ? !!expandedTools['wire_' + message.id] : undefined" class="flex items-center gap-2 py-1.5 px-3" :class="message.preview ? 'cursor-pointer select-none' : ''" @click="message.preview && toggleTool('wire_' + message.id)" @keydown.enter="message.preview && toggleTool('wire_' + message.id)" @keydown.space.prevent="message.preview && toggleTool('wire_' + message.id)">
+      <span class="i-carbon-connect text-iolite dark:text-iolite-light text-xs shrink-0" />
+      <span class="text-xs text-iolite-shadow dark:text-iolite-light flex-1">
+        Inbound from <span class="font-semibold">{{ message.from }}</span>
+        <span v-if="!message.withContent" class="opacity-60"> · ping (no content)</span>
+      </span>
+      <span v-if="message.preview" class="i-carbon-chevron-down text-iolite/50 text-[10px] transition-transform" :class="{ 'rotate-180': expandedTools['wire_' + message.id] }" />
+    </div>
+    <div v-if="expandedTools['wire_' + message.id] && message.preview" class="px-3 py-2 border-t border-iolite/10 dark:border-iolite/15 text-xs max-h-32 overflow-y-auto">
+      <MarkdownRenderer :content="message.preview" />
+    </div>
+  </div>
+
   <div v-else-if="message.role === 'trigger'" class="rounded-lg bg-amber/6 dark:bg-amber/8 border border-amber/15 dark:border-amber/20 overflow-hidden">
     <div :role="message.triggerContent ? 'button' : undefined" :tabindex="message.triggerContent ? 0 : undefined" :aria-expanded="message.triggerContent ? !!expandedTools['trig_' + message.id] : undefined" class="flex items-center gap-2 py-1.5 px-3" :class="message.triggerContent ? 'cursor-pointer select-none' : ''" @click="message.triggerContent && toggleTool('trig_' + message.id)" @keydown.enter="message.triggerContent && toggleTool('trig_' + message.id)" @keydown.space.prevent="message.triggerContent && toggleTool('trig_' + message.id)">
       <span class="w-1.5 h-1.5 rounded-full bg-amber shrink-0" />

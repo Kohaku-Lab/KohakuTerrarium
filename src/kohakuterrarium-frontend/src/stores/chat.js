@@ -693,6 +693,22 @@ export function _replayEvents(messages, events, branchView = null) {
       }
 
       // ── SessionStore format (persistent): direct type names ──
+    } else if (t === "activity:wire_inbound") {
+      // Persisted output-wiring delivery — shows up on history reload
+      // so the user sees the same "Inbound from X" accordion they had
+      // live, instead of a mystery "B started processing" with no
+      // explanation.
+      cur = null
+      result.push({
+        id: "h_" + result.length,
+        role: "wire_inbound",
+        from: evt.from || evt.detail || "",
+        to: evt.to || "",
+        preview: evt.content_preview || "",
+        withContent: evt.with_content !== false,
+        turnIndex: evt.turn_index || 0,
+        timestamp: "",
+      })
     } else if (t === "trigger_fired") {
       cur = null
       const ch = evt.channel || ""
@@ -1136,8 +1152,20 @@ const _chatStoreOptions = {
       }
     },
 
-    initForInstance(instance) {
+    initForInstance(instance, options = {}) {
+      const { initialTab = null } = options
       if (this._instanceId === instance.id && this._ws) {
+        // Already inited; just switch the active tab if a hint was
+        // passed (used by the graph editor's "open chat" on inner
+        // creatures so the right sub-tab pops up without a reload).
+        if (initialTab && initialTab !== this.activeTab) {
+          this._addTab(initialTab)
+          this.activeTab = initialTab
+          this._saveTabs()
+          if (this._instanceType === "terrarium") {
+            this._loadHistory(initialTab)
+          }
+        }
         // Same instance, WS already up. Nothing to do — the live WS
         // is already streaming any new events into ``messagesByTab``,
         // so re-fetching ``/history`` here would be wasted work and
@@ -1177,10 +1205,29 @@ const _chatStoreOptions = {
       statusStore.reset()
 
       if (instance.type === "terrarium") {
+        // Pick the default tab off the live terrarium shape rather
+        // than guessing. The historical fallback was ``ch:tasks`` —
+        // a literal hardcoded channel name that does not exist for
+        // graphs built by merging two solo creatures, which is why
+        // the chat panel showed "Disconnected — reconnecting" and
+        // referenced a "task" channel nobody created.
+        let defaultTab = null
         if (instance.has_root) {
-          this._addTab("root")
-        } else {
-          this._addTab("ch:tasks")
+          defaultTab = "root"
+        } else if (instance.creatures && instance.creatures.length > 0) {
+          // Prefer the first creature so the WS URL's ``target``
+          // resolves to a real creature_name on the backend.
+          defaultTab = instance.creatures[0].name
+        } else if (instance.channels && instance.channels.length > 0) {
+          defaultTab = `ch:${instance.channels[0].name}`
+        }
+        if (defaultTab) this._addTab(defaultTab)
+        // Honour the caller's preferred tab (e.g. graph editor "open
+        // chat" on an inner creature picks that creature's name) by
+        // appending + activating it before the WS opens.
+        if (initialTab && initialTab !== defaultTab) {
+          this._addTab(initialTab)
+          this.activeTab = initialTab
         }
         this._connectTerrarium(instance.id, generation)
       } else {
@@ -1349,6 +1396,9 @@ const _chatStoreOptions = {
      * shell is ported (Stage 3 work).
      */
     _connectTerrarium(terrariumId, generation) {
+      // Bind the WS to whichever tab was added first — the backend
+      // routes per-message ``target`` so any sub-tab can drive its
+      // own creature over this connection.
       const target = this.tabs[0] || "root"
       this._openWs({
         generation,
@@ -1762,6 +1812,26 @@ const _chatStoreOptions = {
       if (!this.messagesByTab[source]) return
       const msgs = this.messagesByTab[source]
 
+      if (at === "wire_inbound") {
+        // Output-wiring delivery from another creature. The fields
+        // arrive at the top level of the WS frame (filtered through
+        // ``_STREAM_METADATA_KEYS`` on the backend) — not under a
+        // nested ``metadata`` object. That's also the shape the
+        // history replay produces, so reading from ``data.*``
+        // directly keeps live + reload paths consistent.
+        msgs.push({
+          id: `wire_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          role: "wire_inbound",
+          from: data.from || data.detail || "",
+          to: data.to || source,
+          preview: data.content_preview || "",
+          withContent: data.with_content !== false,
+          turnIndex: data.turn_index || 0,
+          timestamp: new Date().toISOString(),
+        })
+        return
+      }
+
       if (at === "compact_start") {
         const round = data.compact_round || data.round || 0
         const existing = [...msgs]
@@ -2078,31 +2148,37 @@ const _chatStoreOptions = {
      * ``<1/N>`` navigator can flip back.
      */
     async regenerateLastResponse() {
-      if (!this._instanceId || this._instanceType === "terrarium") {
-        console.warn("Regenerate only supported for standalone creature instances currently")
-        return
-      }
+      if (!this._instanceId) return
       // Dedupe rapid double-clicks: another regen already in flight.
       if (this._regenInFlight) return
       this._regenInFlight = true
       const tab = this.activeTab
-      this._markBranchResyncPending(tab)
-      if (tab) {
-        const msgs = this.messagesByTab[tab] || []
-        // Drop ALL trailing assistant messages back to the most recent
-        // user message. A single assistant turn may include multiple
-        // assistant entries (text → tool → text) — leaving stale
-        // intermediate parts breaks resync ordering.
-        let cutAt = msgs.length
-        for (let i = msgs.length - 1; i >= 0; i--) {
-          if (msgs[i].role === "user") break
-          cutAt = i
-        }
-        if (cutAt < msgs.length) msgs.splice(cutAt)
+      // Channel-message tabs aren't regen-eligible (the channel isn't a
+      // creature with a per-turn LLM response to retry).
+      if (!tab || tab.startsWith("ch:")) {
+        this._regenInFlight = false
+        return
       }
+      this._markBranchResyncPending(tab)
+      const msgs = this.messagesByTab[tab] || []
+      // Drop ALL trailing assistant messages back to the most recent
+      // user message. A single assistant turn may include multiple
+      // assistant entries (text → tool → text) — leaving stale
+      // intermediate parts breaks resync ordering.
+      let cutAt = msgs.length
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === "user") break
+        cutAt = i
+      }
+      if (cutAt < msgs.length) msgs.splice(cutAt)
       try {
         const { agentAPI } = await import("@/utils/api")
-        await agentAPI.regenerate(this._instanceId)
+        // For terrarium: session_id = the terrarium's id, creature_id =
+        // the active sub-tab's creature name. For standalone: pass the
+        // agent id as both (the API treats ``"_"`` as "any session").
+        const [sid, cid] =
+          this._instanceType === "terrarium" ? [this._instanceId, tab] : ["_", this._instanceId]
+        await agentAPI.regenerate(sid, cid)
         await this._resyncHistory(tab)
       } catch (e) {
         console.warn("Failed to regenerate:", e)
@@ -2125,8 +2201,10 @@ const _chatStoreOptions = {
      * server-side regardless of how many decorations sit in front of it.
      */
     async editMessage(messageIdx, newContent, target = {}) {
-      if (!this._instanceId || this._instanceType === "terrarium") return false
+      if (!this._instanceId) return false
       if (messageIdx == null) return false
+      // Channel-message tabs aren't editable through this path.
+      if (this.activeTab?.startsWith("ch:")) return false
       if (this._regenInFlight) return false
       this._regenInFlight = true
       const tab = this.activeTab
@@ -2185,7 +2263,9 @@ const _chatStoreOptions = {
       }
       try {
         const { agentAPI } = await import("@/utils/api")
-        const editResponse = await agentAPI.editMessage(this._instanceId, backendIdx, newContent, {
+        const [sid, cid] =
+          this._instanceType === "terrarium" ? [this._instanceId, tab] : ["_", this._instanceId]
+        const editResponse = await agentAPI.editMessage(sid, cid, backendIdx, newContent, {
           turnIndex,
           userPosition,
         })
@@ -2208,11 +2288,15 @@ const _chatStoreOptions = {
 
     /** Rewind conversation to a point (drop later messages). */
     async rewindTo(messageIdx) {
-      if (!this._instanceId || this._instanceType === "terrarium") return
+      if (!this._instanceId) return
+      const tab = this.activeTab
+      if (!tab || tab.startsWith("ch:")) return
       try {
         const { agentAPI } = await import("@/utils/api")
-        await agentAPI.rewindTo(this._instanceId, messageIdx)
-        await this._resyncHistory(this.activeTab)
+        const [sid, cid] =
+          this._instanceType === "terrarium" ? [this._instanceId, tab] : ["_", this._instanceId]
+        await agentAPI.rewindTo(sid, cid, messageIdx)
+        await this._resyncHistory(tab)
       } catch (e) {
         console.warn("Failed to rewind:", e)
       }

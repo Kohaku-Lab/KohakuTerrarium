@@ -115,7 +115,14 @@ async function loadInstance() {
       return
     }
     loadedInstance.value = loaded
-    chat.initForInstance(loaded)
+    // ``initialTab`` is only honoured on a *fresh* switch into this
+    // chat instance. On remount (e.g. user toggles to the graph
+    // editor tab and back) or on the 5 s poll, ``chat._instanceId``
+    // already matches and we pass null so the user's current sub-tab
+    // selection is preserved instead of getting snapped back.
+    const isFreshSwitch = chat._instanceId !== id
+    const initialTab = isFreshSwitch ? props.tab.initialTab || null : null
+    chat.initForInstance(loaded, { initialTab })
     applyPreset()
   } finally {
     loading.value = false
