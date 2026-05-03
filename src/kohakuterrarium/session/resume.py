@@ -159,6 +159,35 @@ def _restore_turn_branch_state(agent, store: SessionStore, agent_name: str) -> N
     )
 
 
+def align_agent_name(agent, agent_name: str) -> None:
+    """Force ``agent`` to identify as ``agent_name`` after resume.
+
+    All session-store keys are namespaced by the *runtime* agent name
+    (e.g. ``crisp-willow:e:42``). When the agent was first started the
+    name was a fresh random label; on resume :func:`Agent.from_path`
+    rebuilds the agent from the config, which generates a *new* random
+    label. Without re-aligning the name, the resumed agent looks up its
+    history under one key and writes new events under another — every
+    history endpoint then sees 0 events.
+
+    Updates every cached copy of the name that the agent's subsystems
+    keep, so subsequent lookups via ``creature.name`` /
+    ``agent.config.name`` (used by the chat history route, channel
+    routing, trigger ids, etc.) all converge on the saved name.
+    """
+    if getattr(agent, "config", None) is not None:
+        agent.config.name = agent_name
+    executor = getattr(agent, "executor", None)
+    if executor is not None and hasattr(executor, "_agent_name"):
+        executor._agent_name = agent_name
+    trigger_manager = getattr(agent, "trigger_manager", None)
+    if trigger_manager is not None and hasattr(trigger_manager, "_agent_name"):
+        trigger_manager._agent_name = agent_name
+    compact_manager = getattr(agent, "compact_manager", None)
+    if compact_manager is not None and hasattr(compact_manager, "_agent_name"):
+        compact_manager._agent_name = agent_name
+
+
 def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
     """Inject saved conversation, scratchpad, triggers, and resumable
     events from ``store`` into a freshly-rebuilt ``agent``.
@@ -166,7 +195,13 @@ def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
     Shared by :func:`resume_agent` (low-tier, builds Agent from config)
     and ``studio.persistence.resume.resume_into_engine`` (Studio,
     builds Creature graph via the engine then injects per-creature).
+
+    Also realigns ``agent.config.name`` (and the executor / trigger /
+    compact-manager name caches) to ``agent_name`` so the rebuilt
+    agent's *future* writes go to the same store key namespace as the
+    saved events we're injecting now.
     """
+    align_agent_name(agent, agent_name)
     saved_messages = _load_conversation_with_replay_fallback(store, agent_name)
     if saved_messages:
         agent.controller.conversation = _build_conversation(saved_messages)

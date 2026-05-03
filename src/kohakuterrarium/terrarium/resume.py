@@ -141,13 +141,46 @@ async def _resume_terrarium_into_engine(
     sid = graph.graph_id
 
     # Per-creature state injection.
+    #
+    # Resolve each rebuilt creature to its *saved* runtime name. Saved
+    # events are keyed by ``<saved_name>:e:<id>``, but ``apply_recipe``
+    # may have produced a creature whose current ``config.name`` does
+    # not match that key (the fresh build can re-roll random suffixes,
+    # or the saved recipe stored an explicit per-creature name that the
+    # rebuild collapsed to the config default). Match in this order:
+    #
+    #   1. fresh name already exists in the saved agents list;
+    #   2. otherwise consume the next unused saved name positionally.
+    #
+    # Without this we'd inject under the fresh name and recover zero
+    # events. Same root cause as the creature-resume bug fixed in
+    # ``session.resume.align_agent_name``.
+    saved_agents = list(meta.get("agents") or [])
+    saved_set = set(saved_agents)
+    consumed: set[str] = set()
     for cid in graph.creature_ids:
         try:
             creature = engine.get_creature(cid)
         except KeyError:
             continue
-        agent_name = creature.agent.config.name
+        fresh = creature.agent.config.name
+        if fresh in saved_set and fresh not in consumed:
+            agent_name = fresh
+        else:
+            # Pull the next saved name we haven't consumed yet.
+            agent_name = next(
+                (n for n in saved_agents if n not in consumed),
+                fresh,
+            )
+        consumed.add(agent_name)
         inject_saved_state(creature.agent, store, agent_name)
+        # ``inject_saved_state`` aligns ``agent.config.name``; mirror
+        # the saved name onto the Creature wrapper too so chat-history
+        # lookups (which key off ``creature.name``) hit the same
+        # namespace as the events we just injected.
+        creature.name = agent_name
+        if creature.config is not None:
+            creature.config.name = agent_name
         creature.agent.attach_session_store(store)
 
     # Attach at graph level. Each creature was already attached just
