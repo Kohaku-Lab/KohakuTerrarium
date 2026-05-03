@@ -11,6 +11,7 @@ class TerrariumCreate(BaseModel):
     config_path: str
     llm: str | None = None  # LLM profile override for all creatures
     pwd: str | None = None  # Working directory (default: server cwd)
+    name: str | None = None  # Display name override (defaults to recipe name)
 
 
 class TerrariumStatus(BaseModel):
@@ -91,6 +92,7 @@ class WireChannel(BaseModel):
 
     channel: str
     direction: str  # "listen" or "send"
+    enabled: bool = True
 
 
 class AgentCreate(BaseModel):
@@ -99,6 +101,13 @@ class AgentCreate(BaseModel):
     config_path: str
     llm: str | None = None  # LLM profile override
     pwd: str | None = None  # Working directory (default: server cwd)
+    name: str | None = None  # Display name override (defaults to config name)
+
+
+class RenameRequest(BaseModel):
+    """Request body for renaming a session or creature."""
+
+    name: str
 
 
 class ModelSwitch(BaseModel):

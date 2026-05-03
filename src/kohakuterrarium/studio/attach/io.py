@@ -227,6 +227,25 @@ async def attach_io(
     out_module = StreamOutput(creature.name, queue, log)
     agent.output_router.add_secondary(out_module)
 
+    # Multi-creature graphs: also subscribe to sibling creatures'
+    # output through the same WS so when the user types in another
+    # tab (alice → bob in the terrarium chat) bob's stream lands on
+    # this connection too. Without this every sibling tab would be
+    # silent until the user clicks back to the bound creature.
+    sibling_modules: list[tuple[Any, Any]] = []
+    if creature.graph_id and creature.graph_id in engine._topology.graphs:
+        graph = engine._topology.graphs[creature.graph_id]
+        for cid in graph.creature_ids:
+            if cid == creature.creature_id:
+                continue
+            try:
+                sibling = engine.get_creature(cid)
+            except KeyError:
+                continue
+            sib_module = StreamOutput(sibling.name, queue, log)
+            sibling.agent.output_router.add_secondary(sib_module)
+            sibling_modules.append((sibling.agent, sib_module))
+
     # Surface graph-level channels for multi-creature sessions.
     env = engine._environments.get(creature.graph_id)
     channel_cbs: list[tuple[Any, Any]] = []
@@ -282,9 +301,35 @@ async def attach_io(
             content = _normalize_input_content(data)
             if not content:
                 continue
+            # Resolve the target creature for THIS message. The frontend
+            # sends ``target`` so a single terrarium WS can drive every
+            # sub-tab; without honouring it, input from any non-bound
+            # tab would silently land on the bound creature.
+            target_name = (data.get("target") or "").strip()
+            target_creature = creature
+            target_agent = agent
+            if target_name and target_name != creature.name:
+                try:
+                    target_creature = find_creature(
+                        engine, creature.graph_id or session_id, target_name
+                    )
+                    target_agent = target_creature.agent
+                except KeyError:
+                    queue.put_nowait(
+                        {
+                            "type": "error",
+                            "source": target_name or creature.name,
+                            "content": (
+                                f"Cannot route to creature {target_name!r}: not "
+                                "found in this session."
+                            ),
+                            "ts": time.time(),
+                        }
+                    )
+                    continue
             user_evt = {
                 "type": "user_input",
-                "source": creature.name,
+                "source": target_creature.name,
                 "content": content,
                 "ts": time.time(),
             }
@@ -296,7 +341,7 @@ async def attach_io(
             # awaits a UIReply while this loop sits inside
             # ``inject_input`` unable to deliver it.
             task = asyncio.create_task(
-                _process_input(agent, content, queue, creature.name)
+                _process_input(target_agent, content, queue, target_creature.name)
             )
             input_tasks.append(task)
             # Drop completed tasks so the list doesn't grow forever.
@@ -317,6 +362,16 @@ async def attach_io(
                 error=str(e),
                 exc_info=True,
             )
+        # Detach sibling sinks too so we don't leak per-WS subscribers
+        # on each terrarium disconnect.
+        for sib_agent, sib_module in sibling_modules:
+            try:
+                sib_agent.output_router.remove_secondary(sib_module)
+            except Exception:
+                logger.debug(
+                    "Failed to remove sibling secondary output",
+                    exc_info=True,
+                )
         for ch, cb in channel_cbs:
             try:
                 ch.remove_on_send(cb)

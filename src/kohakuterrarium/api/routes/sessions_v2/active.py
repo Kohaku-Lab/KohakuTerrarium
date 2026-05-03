@@ -9,7 +9,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from kohakuterrarium.api.deps import get_engine
-from kohakuterrarium.api.schemas import AgentCreate, CreatureAdd, TerrariumCreate
+from kohakuterrarium.api.schemas import (
+    AgentCreate,
+    CreatureAdd,
+    RenameRequest,
+    TerrariumCreate,
+)
 from kohakuterrarium.studio.sessions import lifecycle
 from kohakuterrarium.terrarium.config import CreatureConfig
 
@@ -22,6 +27,7 @@ class CreaturePayload(BaseModel):
     config_path: str
     llm: str | None = None
     pwd: str | None = None
+    name: str | None = None
 
 
 @router.post("/creature")
@@ -33,6 +39,7 @@ async def create_creature_session(req: CreaturePayload, engine=Depends(get_engin
             config_path=req.config_path,
             llm_override=req.llm,
             pwd=req.pwd,
+            name=req.name,
         )
         return {**session.to_dict(), "status": "running"}
     except (ValueError, KeyError) as e:
@@ -44,7 +51,7 @@ async def create_terrarium_session(req: TerrariumCreate, engine=Depends(get_engi
     """Start a multi-creature terrarium session from a recipe."""
     try:
         session = await lifecycle.start_terrarium(
-            engine, config_path=req.config_path, pwd=req.pwd
+            engine, config_path=req.config_path, pwd=req.pwd, name=req.name
         )
         return {**session.to_dict(), "status": "running"}
     except (ValueError, KeyError) as e:
@@ -63,6 +70,7 @@ async def create_agent_compat(req: AgentCreate, engine=Depends(get_engine)):
             config_path=req.config_path,
             llm_override=req.llm,
             pwd=req.pwd,
+            name=req.name,
         )
         # Frontend reads ``agent_id`` (== creature_id) for routing.
         creature_id = (
@@ -82,10 +90,59 @@ async def create_terrarium_compat(req: TerrariumCreate, engine=Depends(get_engin
     """Legacy alias kept for the ``terrariumAPI.create`` frontend path."""
     try:
         session = await lifecycle.start_terrarium(
-            engine, config_path=req.config_path, pwd=req.pwd
+            engine, config_path=req.config_path, pwd=req.pwd, name=req.name
         )
         return {"terrarium_id": session.session_id, "status": "running"}
     except (ValueError, KeyError) as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/agents/{creature_id}/rename")
+async def rename_agent(
+    creature_id: str, req: RenameRequest, engine=Depends(get_engine)
+):
+    """Rename a standalone creature (mirrors the meta name on the
+    session).  The creature_id stays stable; only the display name
+    changes."""
+    try:
+        return lifecycle.rename_creature(engine, creature_id, req.name)
+    except KeyError:
+        raise HTTPException(404, f"creature {creature_id!r} not found")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/terrariums/{session_id}/rename")
+async def rename_terrarium(
+    session_id: str, req: RenameRequest, engine=Depends(get_engine)
+):
+    """Rename a terrarium session's display label.  Creature names
+    inside the recipe stay untouched."""
+    try:
+        sess = lifecycle.rename_session(engine, session_id, req.name)
+        return {"session_id": sess.session_id, "name": sess.name}
+    except KeyError:
+        raise HTTPException(404, f"session {session_id!r} not found")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/{session_id}/creatures/{creature_id}/rename")
+async def rename_session_creature(
+    session_id: str, creature_id: str, req: RenameRequest, engine=Depends(get_engine)
+):
+    """Rename a creature that lives inside a multi-creature session.
+
+    Used by the graph editor's per-card "Rename" action — kept as a
+    distinct route from the standalone-agent rename so callers can
+    address creatures within a terrarium recipe by id without having
+    to first resolve which graph they belong to.
+    """
+    try:
+        return lifecycle.rename_creature(engine, creature_id, req.name)
+    except KeyError:
+        raise HTTPException(404, f"creature {creature_id!r} not found")
+    except ValueError as e:
         raise HTTPException(400, str(e))
 
 

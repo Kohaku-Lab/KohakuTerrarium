@@ -244,6 +244,19 @@ class TestWireCreature:
             await topo_mod.wire_creature(engine, c.graph_id, "alice", "tasks", "listen")
             graph = engine.get_graph(c.graph_id)
             assert "tasks" in graph.listen_edges.get("alice", set())
+            assert "tasks" in c.listen_channels
+            assert "channel_alice_tasks" in c.agent.trigger_manager._triggers
+            await topo_mod.wire_creature(
+                engine,
+                c.graph_id,
+                "alice",
+                "tasks",
+                "listen",
+                enabled=False,
+            )
+            assert "tasks" not in graph.listen_edges.get("alice", set())
+            assert "tasks" not in c.listen_channels
+            assert "channel_alice_tasks" not in c.agent.trigger_manager._triggers
         finally:
             await engine.shutdown()
 
@@ -256,6 +269,17 @@ class TestWireCreature:
             await topo_mod.wire_creature(engine, c.graph_id, "alice", "out", "send")
             graph = engine.get_graph(c.graph_id)
             assert "out" in graph.send_edges.get("alice", set())
+            assert "out" in c.send_channels
+            await topo_mod.wire_creature(
+                engine,
+                c.graph_id,
+                "alice",
+                "out",
+                "send",
+                enabled=False,
+            )
+            assert "out" not in graph.send_edges.get("alice", set())
+            assert "out" not in c.send_channels
         finally:
             await engine.shutdown()
 
@@ -322,8 +346,13 @@ class TestResultToDict:
         out = topo_mod._connection_result_to_dict(result)
         assert out["channel"] == "x"
         assert out["graph_id"] == "g"
-        # Without a delta the dict has no "delta" key
+        # Without a delta or delta_kind the dict has no "delta" key
         assert "delta" not in out
+
+    def test_connection_result_with_delta_kind(self):
+        result = SimpleNamespace(channel="x", graph_id="g", delta_kind="nothing")
+        out = topo_mod._connection_result_to_dict(result)
+        assert out["delta"] == {"kind": "nothing"}
 
     def test_connection_result_with_partial_delta(self):
         delta = SimpleNamespace(

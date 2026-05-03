@@ -241,5 +241,12 @@ _STREAM_METADATA_KEYS = (
     "subagent",
     "tool",
     "interrupted",
+    # output_wiring delivery metadata (``wire_inbound`` activity)
+    "from",
+    "to",
+    "with_content",
+    "content_preview",
+    "source_event_type",
+    "turn_index",
     "final_state",
 )

@@ -93,6 +93,35 @@ async def test_wire_output_unknown_creature_raises():
 
 
 @pytest.mark.asyncio
+async def test_wire_output_across_graphs_merges_first():
+    """Cross-graph wiring must auto-merge so the resolver finds the target.
+
+    Without the merge, every creature spawned via the v2 sessions API
+    lives in its own graph — making a creature→creature drag in the
+    UI silently no-op because the output resolver only sees the
+    source's environment. The wiring helper has to merge the two
+    graphs first (no channel side effect).
+    """
+    engine = Terrarium()
+    try:
+        alice = await install_fake_creature(engine, "alice")
+        bob = await install_fake_creature(engine, "bob")
+        assert alice.graph_id != bob.graph_id
+
+        await wiring_mod.wire_output(engine, "alice", {"to": "bob"})
+
+        assert (
+            engine.get_creature("alice").graph_id == engine.get_creature("bob").graph_id
+        )
+        # The merge should not have spawned a channel — that's what
+        # `terrariumAPI.connect` does, not direct output wiring.
+        graph = engine._topology.graphs[engine.get_creature("alice").graph_id]
+        assert graph.channels == {}
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_wire_output_sink_returns_sink_id():
     engine = Terrarium()
     try:

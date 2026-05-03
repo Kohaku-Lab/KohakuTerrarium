@@ -94,39 +94,53 @@ class SendMessageTool(BaseTool):
                 )
             chan_registry = fallback_registry
 
-        # 4. For broadcast channels that don't exist yet, error with listing
-        if channel is None and channel_type == "broadcast":
-            available: list[dict[str, str]] = []
-            if context and context.session:
-                available.extend(context.session.channels.get_channel_info())
+        # 4. Channel didn't resolve. Anyone with an environment-aware
+        # context (i.e. an engine-backed creature, top-level OR
+        # sub-agent) is talking from inside a graph, and graphs only
+        # have channels that were explicitly declared. Silent
+        # auto-create for invented names lets LLMs send to dead-letter
+        # queues — ``report_to_root``, ``test``, ``tasks`` etc. — and
+        # report success without anyone reading the message. Refuse it
+        # and surface the real channel list so the agent can correct.
+        if channel is None:
+            shared_available: list[dict[str, str]] = []
+            private_available: list[dict[str, str]] = []
             if context and context.environment:
-                available.extend(context.environment.shared_channels.get_channel_info())
-            avail_str = (
-                ", ".join(f"`{c['name']}` ({c['type']})" for c in available) or "none"
-            )
-            return ToolResult(
-                error=(
-                    f"Broadcast channel '{channel_name}' does not exist. "
-                    f"Available channels: {avail_str}"
+                shared_available.extend(
+                    context.environment.shared_channels.get_channel_info()
                 )
-            )
+            if context and context.session:
+                private_available.extend(context.session.channels.get_channel_info())
 
-        # 5. Auto-create queue in private session (for sub-agent use)
-        if channel is None and context and context.session:
-            # Validate: warn if a shared channel has the same name
-            if context.environment:
-                conflict = context.environment.shared_channels.get(channel_name)
-                if conflict is not None:
-                    return ToolResult(
-                        error=(
-                            f"Channel '{channel_name}' exists in shared scope. "
-                            f"Use a unique name for private channels."
+            if context is not None:
+                # Engine-backed path: any unknown name is a confabulation.
+                avail_lines = []
+                if shared_available:
+                    avail_lines.append(
+                        "shared: "
+                        + ", ".join(
+                            f"`{c['name']}` ({c['type']})" for c in shared_available
                         )
                     )
-            channel = context.session.channels.get_or_create(
-                channel_name, channel_type=channel_type
-            )
-            chan_registry = context.session.channels
+                if private_available:
+                    avail_lines.append(
+                        "private: "
+                        + ", ".join(
+                            f"`{c['name']}` ({c['type']})" for c in private_available
+                        )
+                    )
+                avail_str = " | ".join(avail_lines) or "none"
+                return ToolResult(
+                    error=(
+                        f"Channel '{channel_name}' does not exist. "
+                        f"Available channels — {avail_str}. "
+                        "Pick one of the listed channels exactly as written; "
+                        "do NOT invent a name (the tool will keep rejecting "
+                        "invented names). If you genuinely need a new "
+                        "channel, ask the user to create it via the graph "
+                        "editor."
+                    )
+                )
 
         # Send message
         msg = ChannelMessage(

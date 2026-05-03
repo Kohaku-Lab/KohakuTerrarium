@@ -11,8 +11,13 @@ effect (the engine handles topology bookkeeping).
 
 from typing import Any
 
+import kohakuterrarium.terrarium.channels as _channels
 import kohakuterrarium.terrarium.topology as _topo
 from kohakuterrarium.core.channel import ChannelMessage
+from kohakuterrarium.studio.sessions.runtime_topology import (
+    refresh_creature_topology_prompt,
+    refresh_graph_topology_prompts,
+)
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.topology import ChannelKind
 from kohakuterrarium.utils.logging import get_logger
@@ -41,6 +46,10 @@ async def add_channel(
     info = await engine.add_channel(
         session_id, name, kind=_resolve_kind(channel_type), description=description
     )
+    # Surface the new channel to every creature in the graph so the
+    # next time one of them wants to send, the prompt already lists
+    # the channel as visible.
+    refresh_graph_topology_prompts(engine, session_id)
     return {
         "name": info.name,
         "type": info.kind.value if hasattr(info.kind, "value") else str(info.kind),
@@ -142,8 +151,10 @@ async def wire_creature(
     creature_id: str,
     channel: str,
     direction: str,
+    *,
+    enabled: bool = True,
 ) -> None:
-    """Add a listen / send edge for a creature on an existing channel.
+    """Toggle a listen / send edge for a creature on an existing channel.
 
     ``direction`` is ``"listen"`` or ``"send"``.  When ``creature_id``
     is the literal ``"root"`` the call resolves to the session's root
@@ -164,12 +175,53 @@ async def wire_creature(
         else:
             raise KeyError(f"session {session_id!r} has no root creature")
 
+    graph = engine.get_graph(session_id)
+    if creature_id not in graph.creature_ids:
+        raise KeyError(f"creature {creature_id!r} not in session {session_id!r}")
+    creature = engine.get_creature(creature_id)
+    if channel not in graph.channels:
+        raise KeyError(f"channel {channel!r} not in session {session_id!r}")
     if direction == "listen":
-        _topo.set_listen(engine._topology, creature_id, channel, listening=True)
+        _topo.set_listen(engine._topology, creature_id, channel, listening=enabled)
+        if enabled:
+            env = engine._environments.get(session_id)
+            registry = (
+                getattr(env, "shared_channels", None) if env is not None else None
+            )
+            if registry is None:
+                raise KeyError(f"session {session_id!r} has no shared channel registry")
+            _channels.register_channel_in_environment(registry, graph.channels[channel])
+            _channels.inject_channel_trigger(
+                creature.agent,
+                subscriber_id=creature.name,
+                channel_name=channel,
+                registry=registry,
+                ignore_sender=creature.name,
+            )
+            if channel not in creature.listen_channels:
+                creature.listen_channels.append(channel)
+        else:
+            _channels.remove_channel_trigger(
+                creature.agent,
+                subscriber_id=creature.name,
+                channel_name=channel,
+            )
+            if channel in creature.listen_channels:
+                creature.listen_channels.remove(channel)
     elif direction == "send":
-        _topo.set_send(engine._topology, creature_id, channel, sending=True)
+        _topo.set_send(engine._topology, creature_id, channel, sending=enabled)
+        if enabled and channel not in creature.send_channels:
+            creature.send_channels.append(channel)
+        elif not enabled and channel in creature.send_channels:
+            creature.send_channels.remove(channel)
     else:
         raise ValueError(f"direction must be 'listen' or 'send', got {direction!r}")
+
+    # Keep the agent's system prompt aligned with the live wiring.
+    # Without this the LLM keeps inventing channel names because
+    # nothing in its context tells it which channels actually exist
+    # (cf. confabulated ``report_to_root`` on solo creatures).
+    refresh_creature_topology_prompt(engine, creature_id)
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +239,8 @@ def _connection_result_to_dict(result: Any) -> dict[str, Any]:
             "new_graph_ids": list(getattr(delta, "new_graph_ids", []) or []),
             "affected": sorted(getattr(delta, "affected_creatures", []) or []),
         }
+    elif hasattr(result, "delta_kind"):
+        out["delta"] = {"kind": getattr(result, "delta_kind", "nothing")}
     out["graph_id"] = getattr(result, "graph_id", "")
     return out
 

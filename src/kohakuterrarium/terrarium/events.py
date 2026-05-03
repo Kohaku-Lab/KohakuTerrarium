@@ -78,13 +78,14 @@ class ConnectionResult:
     """Returned by ``Terrarium.connect``.
 
     Carries the channel name (created if needed), the trigger id
-    injected on the receiver, and the topology delta kind
-    (``"nothing"`` or ``"merge"``).
+    injected on the receiver, the graph id after connection, and the
+    topology delta kind (``"nothing"`` or ``"merge"``).
     """
 
     channel: str
     trigger_id: str = ""
     delta_kind: str = "nothing"
+    graph_id: str = ""
 
 
 @dataclass

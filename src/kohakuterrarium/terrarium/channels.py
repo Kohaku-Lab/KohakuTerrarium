@@ -15,6 +15,7 @@ they're kept here to keep ``engine.py`` under the 600-line cap and
 because every line of logic in them is channel-related.
 """
 
+import asyncio
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -76,11 +77,19 @@ def inject_channel_trigger(
     prompt: str | None = None,
     ignore_sender: str | None = None,
 ) -> str:
-    """Add a :class:`ChannelTrigger` to ``agent.trigger_manager``.
+    """Add a :class:`ChannelTrigger` to ``agent.trigger_manager`` and
+    actually start it so the receiver wakes up on each channel send.
 
-    Returns the trigger id.  Idempotent — re-injecting an existing
-    trigger replaces it (so callers can re-run after a hot-plug change
-    without leaking duplicates).
+    Idempotent — re-injecting an existing trigger tears the old one
+    down first so we don't leak run-loop tasks or end up with two
+    triggers fighting over the same subscription.
+
+    Important: the trigger MUST be started + driven by the manager's
+    run loop, otherwise it sits in ``_triggers`` looking installed
+    but ``wait_for_trigger`` never gets called and the creature never
+    receives a single message. The original implementation only did
+    the dict assignment, which is the root cause of every "I wired
+    listen but the creature still hears nothing" report.
     """
     prompt = prompt or "[Channel '{channel}' from {sender}]: {content}"
     trigger = ChannelTrigger(
@@ -91,8 +100,11 @@ def inject_channel_trigger(
         registry=registry,
     )
     trigger_id = f"channel_{subscriber_id}_{channel_name}"
+
+    _teardown_existing_trigger(agent, trigger_id)
     agent.trigger_manager._triggers[trigger_id] = trigger
     agent.trigger_manager._created_at[trigger_id] = datetime.now()
+    _spawn_trigger_runner(agent, trigger_id, trigger)
     logger.debug(
         "Injected channel trigger",
         subscriber=subscriber_id,
@@ -108,21 +120,89 @@ def remove_channel_trigger(
     subscriber_id: str,
     channel_name: str,
 ) -> bool:
-    """Remove a previously-injected trigger.  Returns True if removed."""
+    """Remove a previously-injected trigger.  Returns True if removed.
+
+    Cancels the trigger's run-loop task and schedules its
+    ``stop()`` (which unsubscribes from the channel) so we don't leak
+    background tasks each time the user toggles a wire.
+    """
     trigger_id = f"channel_{subscriber_id}_{channel_name}"
-    removed = False
-    if trigger_id in agent.trigger_manager._triggers:
-        del agent.trigger_manager._triggers[trigger_id]
-        removed = True
+    if trigger_id not in agent.trigger_manager._triggers:
+        return False
+    _teardown_existing_trigger(agent, trigger_id)
     agent.trigger_manager._created_at.pop(trigger_id, None)
-    if removed:
-        logger.debug(
-            "Removed channel trigger",
-            subscriber=subscriber_id,
-            channel=channel_name,
-            trigger_id=trigger_id,
+    logger.debug(
+        "Removed channel trigger",
+        subscriber=subscriber_id,
+        channel=channel_name,
+        trigger_id=trigger_id,
+    )
+    return True
+
+
+def _teardown_existing_trigger(agent: Any, trigger_id: str) -> None:
+    """Stop + remove a trigger if present. Safe to call when there is
+    no event loop running (pre-start wiring) and against minimal test
+    fakes that don't expose ``_tasks``/``stop()``.
+    """
+    manager = getattr(agent, "trigger_manager", None)
+    if manager is None:
+        return
+    triggers = getattr(manager, "_triggers", None)
+    if triggers is None:
+        return
+    existing = triggers.pop(trigger_id, None)
+    if existing is None:
+        return
+    tasks = getattr(manager, "_tasks", None)
+    if isinstance(tasks, dict):
+        task = tasks.pop(trigger_id, None)
+        if task is not None and not task.done():
+            task.cancel()
+    stop = getattr(existing, "stop", None)
+    if callable(stop):
+        try:
+            asyncio.get_running_loop()
+            asyncio.create_task(stop())
+        except RuntimeError:
+            # No loop — pre-start path; subscriptions weren't created yet.
+            pass
+
+
+def _spawn_trigger_runner(agent: Any, trigger_id: str, trigger: Any) -> None:
+    """Start the trigger and attach its run-loop task to the manager.
+
+    No-op when called outside an asyncio loop or against a manager
+    fake that doesn't implement ``_run_loop`` / ``_tasks`` — the
+    real agent's ``start_all`` picks the trigger up later, and tests
+    that don't care about runtime delivery don't need this branch.
+    """
+    manager = getattr(agent, "trigger_manager", None)
+    if manager is None:
+        return
+    if not hasattr(manager, "_run_loop") or not isinstance(
+        getattr(manager, "_tasks", None), dict
+    ):
+        return
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    async def _run() -> None:
+        start = getattr(trigger, "start", None)
+        if callable(start):
+            await start()
+        # Don't double-spawn if a previous run loop is still pending
+        # (e.g. teardown raced with a fresh inject).
+        if trigger_id in manager._tasks and not manager._tasks[trigger_id].done():
+            return
+        manager._tasks[trigger_id] = asyncio.create_task(
+            manager._run_loop(trigger_id, trigger),
+            name=f"trigger_{trigger_id}",
         )
-    return removed
+
+    asyncio.create_task(_run())
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +249,10 @@ async def connect_creatures(
                 c.graph_id = engine._topology.creature_to_graph.get(cid, c.graph_id)
         # Coordinate session-store side of the merge.
         _session_coord.apply_merge(engine, delta)
+        # Mirror the kind promotion done by ``ensure_same_graph`` so
+        # the rail's listing-by-kind doesn't flicker after a
+        # channel-based connect either.
+        _promote_session_kind_after_merge(keep_gid)
 
     gid = sender_creature.graph_id  # refreshed by the loop above
     env = engine._environments[gid]
@@ -203,7 +287,87 @@ async def connect_creatures(
         channel=channel_name,
         trigger_id=trigger_id,
         delta_kind=delta.kind,
+        graph_id=gid,
     )
+
+
+async def ensure_same_graph(
+    engine: "Terrarium", a: "CreatureRef", b: "CreatureRef"
+) -> str:
+    """Merge ``a``'s and ``b``'s graphs without creating a channel.
+
+    Used by callers (e.g. cross-graph output wiring) that need both
+    creatures in the same graph to function but don't want the
+    channel/trigger side effects ``connect_creatures`` brings.  Returns
+    the surviving graph id (unchanged if both creatures were already
+    in the same graph).
+    """
+    sid = engine._resolve_creature_id(a)
+    rid = engine._resolve_creature_id(b)
+    a_gid = engine._topology.creature_to_graph[sid]
+    b_gid = engine._topology.creature_to_graph[rid]
+    if a_gid == b_gid:
+        return a_gid
+    delta = _topo._merge_graphs(engine._topology, a_gid, b_gid)
+    keep_gid = delta.new_graph_ids[0]
+    drop_gids = [g for g in delta.old_graph_ids if g != keep_gid]
+    for drop_gid in drop_gids:
+        _merge_environment_into(engine, keep_gid, drop_gid)
+    for cid in delta.affected_creatures:
+        creature = engine._creatures.get(cid)
+        if creature is not None:
+            creature.graph_id = engine._topology.creature_to_graph.get(
+                cid, creature.graph_id
+            )
+    _session_coord.apply_merge(engine, delta)
+    # Promote the surviving session's meta kind from "creature" to
+    # "terrarium" when the merge produced a multi-creature graph so
+    # the v2 rail (which splits the listing by kind) stops bouncing
+    # between agentAPI.list and terrariumAPI.list as snapshots roll in.
+    _promote_session_kind_after_merge(keep_gid)
+    engine._emit(
+        EngineEvent(
+            kind=EventKind.TOPOLOGY_CHANGED,
+            graph_id=keep_gid,
+            payload={
+                "kind": delta.kind,
+                "old_graph_ids": list(delta.old_graph_ids),
+                "new_graph_ids": list(delta.new_graph_ids),
+                "affected": sorted(delta.affected_creatures),
+            },
+        )
+    )
+    return keep_gid
+
+
+# Callback list invoked after every cross-graph merge. Higher tiers
+# (notably ``studio.sessions.lifecycle``) register listeners here so
+# they can react to merges (e.g. promote the surviving session's kind
+# from "creature" to "terrarium" once it gains a second creature)
+# without making this module import any studio/ symbol.  We use a
+# registration hook rather than a lazy import to preserve the layer
+# rule that ``terrarium/`` may not depend on ``studio/``.
+_merge_listeners: list = []
+
+
+def register_merge_listener(callback) -> None:
+    """Register a ``callback(session_id: str)`` to fire after each
+    successful graph merge.  Idempotent on identity."""
+    if callback not in _merge_listeners:
+        _merge_listeners.append(callback)
+
+
+def _promote_session_kind_after_merge(session_id: str) -> None:
+    """Notify every registered listener that ``session_id`` has just
+    absorbed another graph.  Listener exceptions are swallowed so a
+    single misbehaving subscriber can't break the merge path."""
+    for callback in list(_merge_listeners):
+        try:
+            callback(session_id)
+        except Exception:
+            logger.debug(
+                "merge listener raised", listener=getattr(callback, "__name__", "?")
+            )
 
 
 def _merge_environment_into(engine: "Terrarium", keep_gid: str, drop_gid: str) -> None:
@@ -232,6 +396,24 @@ def _merge_environment_into(engine: "Terrarium", keep_gid: str, drop_gid: str) -
         creature = engine._creatures.get(cid)
         if creature is None:
             continue
+        # Repoint the agent's environment reference at the surviving
+        # one. Without this, tools that read ``context.environment``
+        # (notably send_message resolving shared channels) keep seeing
+        # the *dropped* registry — which is empty for a freshly-merged
+        # solo creature, so every channel send fails with "Available
+        # channels — none" even though the surviving graph has them.
+        if getattr(creature.agent, "environment", None) is not keep_env:
+            creature.agent.environment = keep_env
+        # The executor caches its own ``_environment`` reference at
+        # agent-init time and uses it to build every ToolContext —
+        # update that too so the next ``send_message`` call sees the
+        # surviving registry.
+        executor = getattr(creature.agent, "executor", None)
+        if (
+            executor is not None
+            and getattr(executor, "_environment", None) is not keep_env
+        ):
+            executor._environment = keep_env
         for ch_name in keep_g.listen_edges.get(cid, set()):
             # remove any stale trigger (pointing at drop_env) and
             # inject a fresh one pointing at keep_env.

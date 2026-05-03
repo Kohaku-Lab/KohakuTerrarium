@@ -18,6 +18,7 @@ from typing import Any
 from kohakuterrarium.packages.resolve import is_package_ref, resolve_package_path
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions.handles import Session, SessionListing
+from kohakuterrarium.terrarium.channels import register_merge_listener
 from kohakuterrarium.terrarium.config import (
     CreatureConfig,
     TerrariumConfig,
@@ -34,6 +35,23 @@ logger = get_logger(__name__)
 _meta: dict[str, dict[str, Any]] = {}
 # Per-session attached SessionStore (keyed by session_id == graph_id).
 _session_stores: dict[str, SessionStore] = {}
+
+
+def _on_graph_merge(session_id: str) -> None:
+    """React to a cross-graph merge by promoting the surviving
+    session's kind from ``"creature"`` to ``"terrarium"`` once it has
+    gained extra creatures.  Without this the v2 rail keeps showing the
+    merged graph as a single-creature listing under agentAPI.list and
+    only the first creature is visible — that's the 1↔2 flicker we
+    used to see right after a wire."""
+    meta = _meta.get(session_id)
+    if meta and meta.get("kind") == "creature":
+        meta["kind"] = "terrarium"
+
+
+# Registration is idempotent on the listener identity so module
+# reloads don't multiply the callback.
+register_merge_listener(_on_graph_merge)
 
 
 def _normalize_pwd(pwd: str | None) -> str | None:
@@ -69,12 +87,19 @@ async def start_creature(
     config=None,
     llm_override: str | None = None,
     pwd: str | None = None,
+    name: str | None = None,
 ) -> Session:
     """Create and start a standalone creature.  Returns a Session handle.
 
     ``config_path`` may be a path or a ``@pkg/...`` reference; ``config``
     is an already-loaded :class:`AgentConfig` for tests / programmatic
     callers.  Exactly one must be provided.
+
+    ``name`` is the optional display name for the new creature; when
+    omitted we keep the agent config's own name.  We override it after
+    construction so the creature_id (a stable internal handle) is
+    derived from the original config name and remains unique even if
+    several creatures share the same display name.
     """
     pwd = _normalize_pwd(pwd)
     if config_path:
@@ -87,6 +112,10 @@ async def start_creature(
         creature = await engine.add_creature(config, llm_override=llm_override, pwd=pwd)
     else:
         raise ValueError("Must provide config_path or config")
+
+    if name and name.strip():
+        clean = name.strip()
+        _apply_creature_name(creature, clean)
 
     sid = creature.graph_id
     cid = creature.creature_id
@@ -110,7 +139,7 @@ async def start_creature(
 
     _meta[sid] = {
         "kind": "creature",
-        "name": creature.agent.config.name,
+        "name": creature.name,
         "config_path": config_path or "",
         "pwd": pwd or os.getcwd(),
         "created_at": _now_iso(),
@@ -130,6 +159,7 @@ async def start_terrarium(
     config_path: str | None = None,
     config: TerrariumConfig | None = None,
     pwd: str | None = None,
+    name: str | None = None,
 ) -> Session:
     """Apply a terrarium recipe into a fresh graph and start every
     creature.  Returns a Session handle (session_id == graph_id)."""
@@ -182,7 +212,7 @@ async def start_terrarium(
 
     _meta[sid] = {
         "kind": "terrarium",
-        "name": cfg.name,
+        "name": (name.strip() if name and name.strip() else cfg.name),
         "config_path": config_path or "",
         "pwd": pwd or os.getcwd(),
         "created_at": _now_iso(),
@@ -222,6 +252,75 @@ def get_session(engine: Terrarium, session_id: str) -> Session:
     if session_id not in {g.graph_id for g in engine.list_graphs()}:
         raise KeyError(f"session {session_id!r} not found")
     return _build_session_handle(engine, session_id)
+
+
+def _apply_creature_name(creature, name: str) -> None:
+    """Push a display-name change onto every nested object that caches
+    it. Without this the executor (and its ToolContexts) keep emitting
+    channel messages with the original config name, the trigger manager
+    logs with the old name, etc. — even after we set ``creature.name``
+    and ``agent.config.name``.
+    """
+    creature.name = name
+    agent = getattr(creature, "agent", None)
+    if agent is None:
+        if creature.config is not None:
+            creature.config.name = name
+        return
+    if getattr(agent, "config", None) is not None:
+        agent.config.name = name
+    if creature.config is not None:
+        creature.config.name = name
+    executor = getattr(agent, "executor", None)
+    if executor is not None and hasattr(executor, "_agent_name"):
+        executor._agent_name = name
+    trigger_manager = getattr(agent, "trigger_manager", None)
+    if trigger_manager is not None and hasattr(trigger_manager, "_agent_name"):
+        trigger_manager._agent_name = name
+    compact_manager = getattr(agent, "compact_manager", None)
+    if compact_manager is not None and hasattr(compact_manager, "_agent_name"):
+        compact_manager._agent_name = name
+
+
+def rename_session(engine: Terrarium, session_id: str, name: str) -> Session:
+    """Update the display name of a session (and its single creature
+    when the session is creature-kind).  Returns the refreshed handle.
+    """
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("name must not be empty")
+    if session_id not in {g.graph_id for g in engine.list_graphs()}:
+        raise KeyError(f"session {session_id!r} not found")
+    meta = _meta.setdefault(session_id, {})
+    meta["name"] = name
+    if meta.get("kind") == "creature":
+        graph = next(g for g in engine.list_graphs() if g.graph_id == session_id)
+        for cid in graph.creature_ids:
+            try:
+                creature = engine.get_creature(cid)
+            except KeyError:
+                continue
+            _apply_creature_name(creature, name)
+            break
+    return _build_session_handle(engine, session_id)
+
+
+def rename_creature(engine: Terrarium, creature_id: str, name: str) -> dict:
+    """Rename a creature inside a session.  Returns the refreshed
+    creature status dict."""
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("name must not be empty")
+    creature = engine.get_creature(creature_id)
+    _apply_creature_name(creature, name)
+    # Mirror onto the session meta when the creature *is* the whole
+    # creature-kind session — that's the only case where the rail
+    # reads from meta.name rather than the creature directly.
+    sid = creature.graph_id
+    meta = _meta.get(sid)
+    if meta and meta.get("kind") == "creature":
+        meta["name"] = name
+    return creature.get_status()
 
 
 async def stop_session(engine: Terrarium, session_id: str) -> None:

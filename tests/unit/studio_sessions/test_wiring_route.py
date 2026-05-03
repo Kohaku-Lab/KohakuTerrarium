@@ -68,10 +68,12 @@ def test_route_wires_lists_and_unwires_output_edge():
         json={"to": "bob"},
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {
-        "status": "wired",
-        "edge_id": "wire_bob_content_simple_noself_811c9dc5",
-    }
+    body = resp.json()
+    assert body["status"] == "wired"
+    assert body["edge_id"] == "wire_bob_content_simple_noself_811c9dc5"
+    # The live graph id is included so the frontend knows which
+    # surviving graph the wire ended up in after a cross-graph merge.
+    assert body["graph_id"] == "s1"
 
     resp = client.get("/api/sessions/wiring/s1/creatures/alice/outputs")
     assert resp.status_code == 200, resp.text

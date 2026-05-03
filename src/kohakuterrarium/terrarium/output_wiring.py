@@ -157,6 +157,36 @@ class TerrariumOutputWiringResolver:
                 turn_index=turn_index,
                 prompt_override=prompt_text,
             )
+            # Surface the delivery as an activity event on the
+            # receiver's output bus so its chat tab can render an
+            # "inbound wire from <source>" block (instead of leaving
+            # the user wondering why the receiver suddenly started
+            # processing). This runs before the actual delivery task
+            # so the visual cue lands first.
+            try:
+                target_router = getattr(target_agent, "output_router", None)
+                if target_router is not None and hasattr(
+                    target_router, "notify_activity"
+                ):
+                    preview = (delivered_content or "").strip()
+                    if len(preview) > 240:
+                        preview = preview[:239] + "…"
+                    target_router.notify_activity(
+                        "wire_inbound",
+                        f"Inbound from {source}",
+                        metadata={
+                            "from": source,
+                            "to": entry.to,
+                            "with_content": entry.with_content,
+                            "content_preview": preview,
+                            "source_event_type": source_event_type,
+                            "turn_index": turn_index,
+                        },
+                    )
+            except Exception:
+                logger.debug(
+                    "wire_inbound notify failed; receiver router may not support activity emit",
+                )
             # Fire-and-forget: don't block the source's finalisation on
             # the target's turn-processing.
             task = asyncio.create_task(
