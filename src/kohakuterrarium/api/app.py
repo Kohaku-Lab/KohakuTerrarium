@@ -49,6 +49,7 @@ from kohakuterrarium.api.routes.persistence import history as persistence_histor
 from kohakuterrarium.api.routes.persistence import resume as persistence_resume
 from kohakuterrarium.api.routes.persistence import saved as persistence_saved
 from kohakuterrarium.api.routes.persistence import viewer as persistence_viewer
+from kohakuterrarium.api.routes import runtime_graph as runtime_graph_route
 from kohakuterrarium.api.routes.sessions_v2 import active as sessions_active
 from kohakuterrarium.api.routes.sessions_v2 import (
     creatures_chat as sessions_creatures_chat,
@@ -80,6 +81,7 @@ from kohakuterrarium.api.ws import io as ws_io
 from kohakuterrarium.api.ws import logs as ws_logs
 from kohakuterrarium.api.ws import observer as ws_observer
 from kohakuterrarium.api.ws import pty as ws_pty
+from kohakuterrarium.api.ws import runtime_graph as ws_runtime_graph
 from kohakuterrarium.api.ws import trace as ws_trace
 
 
@@ -197,6 +199,11 @@ def create_app(
     # mounting the route is enough to start collecting data.
     app.include_router(metrics_route.router, prefix="/api/metrics", tags=["metrics"])
 
+    # Runtime graph snapshot — read by the graph editor data layer.
+    app.include_router(
+        runtime_graph_route.router, prefix="/api/runtime", tags=["runtime"]
+    )
+
     # ── Phase 0 stub routers (empty APIRouter()s pre-mounted) ────────
     # Phase 1 agents will populate the handler bodies; mounting here
     # so URL prefixes are stable and ``app.py`` does not need to be
@@ -209,6 +216,7 @@ def create_app(
     app.include_router(ws_logs.router, tags=["ws"])
     app.include_router(ws_observer.router, tags=["ws"])
     app.include_router(ws_pty.router, tags=["ws"])
+    app.include_router(ws_runtime_graph.router, tags=["ws"])
     app.include_router(ws_trace.router, tags=["ws"])
 
     # Static file serving for built web frontend (SPA)
