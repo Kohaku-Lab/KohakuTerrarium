@@ -12,6 +12,18 @@ export const useInstancesStore = defineStore("instances", {
     _pollInterval: null,
     /** @type {number} Number of active subscribers (components using this store) */
     _subscribers: 0,
+    /** Single-flight guard for ``fetchAll``. Two parallel polls used to
+     * race and the older response could overwrite the newer one,
+     * which is exactly the "rail flickers between 1 and 2 entries"
+     * symptom we hit after a creature merge. We coalesce concurrent
+     * callers onto the in-flight promise so only one network round
+     * trip is ever in motion. */
+    _inflightFetch: null,
+    /** Monotonically incremented by every ``fetchAll`` call. Each
+     * fetch records the issue id and only writes ``list`` if its id
+     * is still the latest — so a slow response can't clobber a fresh
+     * one if a coalesce slip ever happens. */
+    _fetchSeq: 0,
   }),
 
   getters: {
@@ -21,20 +33,33 @@ export const useInstancesStore = defineStore("instances", {
   },
 
   actions: {
-    /** Fetch all running instances (both terrariums and standalone agents) */
+    /** Fetch all running instances (both terrariums and standalone agents).
+     *
+     * Single-flight: concurrent callers all await the same in-flight
+     * promise rather than firing parallel network requests that could
+     * land out-of-order and overwrite each other.
+     */
     async fetchAll() {
+      if (this._inflightFetch) return this._inflightFetch
       this.loading = true
-      try {
-        const [terrariums, agents] = await Promise.all([terrariumAPI.list(), agentAPI.list()])
-
-        const tInstances = terrariums.map((t) => _mapTerrarium(t))
-        const aInstances = agents.map((a) => _mapAgent(a))
-        this.list = [...tInstances, ...aInstances]
-      } catch (err) {
-        console.error("Failed to fetch instances:", err)
-      } finally {
-        this.loading = false
-      }
+      const seq = ++this._fetchSeq
+      this._inflightFetch = (async () => {
+        try {
+          const [terrariums, agents] = await Promise.all([terrariumAPI.list(), agentAPI.list()])
+          // Drop the response if a fresher fetch has already started —
+          // belt-and-suspenders alongside the in-flight gate above.
+          if (seq !== this._fetchSeq) return
+          const tInstances = terrariums.map((t) => _mapTerrarium(t))
+          const aInstances = agents.map((a) => _mapAgent(a))
+          this.list = [...tInstances, ...aInstances]
+        } catch (err) {
+          console.error("Failed to fetch instances:", err)
+        } finally {
+          this.loading = false
+          this._inflightFetch = null
+        }
+      })()
+      return this._inflightFetch
     },
 
     /** Fetch a single instance by ID.
@@ -69,8 +94,21 @@ export const useInstancesStore = defineStore("instances", {
         }
         this.current = loaded
         const idx = this.list.findIndex((item) => item.id === loaded.id)
-        if (idx >= 0) this.list.splice(idx, 1, loaded)
-        else this.list.unshift(loaded)
+        if (idx >= 0) {
+          // Update in place: preserves rail order and avoids the
+          // "row jumps to the top" surprise on every fetch.
+          this.list.splice(idx, 1, loaded)
+        } else if (loaded.type === "terrarium") {
+          // Brand-new terrarium not yet seen by ``fetchAll`` — surface
+          // it eagerly so the rail isn't blank for one polling cycle.
+          this.list.unshift(loaded)
+        }
+        // Inner-creature loads (alice fetched while alice lives inside
+        // a merged terrarium) are intentionally NOT inserted as a
+        // top-level row. ``fetchAll`` is the canonical source for
+        // rail entries; inserting here on every chat-tab hydration
+        // produced the per-second flicker between terrariumA and
+        // [terrariumA, alice-as-creature].
         return loaded
       } catch (err) {
         if (err?.response?.status === 404) {
