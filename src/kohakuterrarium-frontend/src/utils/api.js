@@ -55,9 +55,10 @@ export const configAPI = {
 /** Terrarium lifecycle */
 export const terrariumAPI = {
   /** @returns {Promise<{terrarium_id: string}>} */
-  async create(configPath, pwd) {
+  async create(configPath, pwd, name = null) {
     const body = { config_path: configPath }
     if (pwd) body.pwd = pwd
+    if (name) body.name = name
     const { data } = await api.post("/sessions/active/terrariums", body)
     return data
   },
@@ -189,9 +190,10 @@ export const terrariumAPI = {
 /** Standalone agent lifecycle */
 export const agentAPI = {
   /** @returns {Promise<{agent_id: string}>} */
-  async create(configPath, pwd) {
+  async create(configPath, pwd, name = null) {
     const body = { config_path: configPath }
     if (pwd) body.pwd = pwd
+    if (name) body.name = name
     const { data } = await api.post("/sessions/active/agents", body)
     return data
   },
