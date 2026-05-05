@@ -6,6 +6,7 @@ renderers). It produces a ``prompt_toolkit.widgets.TextArea`` that the
 loop, one bordered input box, no flicker.
 """
 
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -180,6 +181,19 @@ class Composer:
         self._completer = SlashCommandCompleter()
         self._paste_store = PasteStore()
 
+        # Paste burst-detector — fallback for Win32Input which never
+        # fires ``Keys.BracketedPaste`` (so pasted text arrives as a
+        # flood of single-char keystrokes; the first embedded newline
+        # would otherwise fire our Enter handler mid-paste). The Enter
+        # handler treats Enter as a paste-newline iff the current burst
+        # is both recent (< window) and substantial (>= min_count
+        # consecutive sub-window text changes), which keeps single
+        # programmatic ``buf.text = ...`` writes from false-positiving.
+        self._last_text_change_ts: float = 0.0
+        self._paste_burst_count: int = 0
+        self._paste_burst_window: float = 0.005  # 5 ms
+        self._paste_burst_min_count: int = 3
+
         # The bordered input box. Frame is added by RichCLIApp around this.
         #
         # ``dont_extend_height=True`` with ``height=None`` — the Window
@@ -199,7 +213,31 @@ class Composer:
             dont_extend_height=True,
         )
 
+        # Track the most recent buffer mutation so the Enter handler can
+        # tell paste-newlines apart from human-typed Enter. ``+=`` here
+        # registers the listener on prompt_toolkit's
+        # :class:`prompt_toolkit.eventloop.utils.Event` (``on_text_changed``
+        # is fired after every insert / delete / undo).
+        self.text_area.buffer.on_text_changed += self._record_text_change
+
         self.key_bindings = self._build_key_bindings()
+
+    def _record_text_change(self, _buf) -> None:
+        """Tick the paste burst-detector on every buffer mutation.
+
+        A real paste through Win32Input delivers a back-to-back run of
+        single-char inserts; this listener fires for each one. We count
+        how many fired within ``_paste_burst_window`` of the previous
+        change so the Enter handler can tell paste-newlines apart from
+        a single programmatic insert immediately followed by Enter (the
+        shape unit tests produce).
+        """
+        now = time.monotonic()
+        if now - self._last_text_change_ts < self._paste_burst_window:
+            self._paste_burst_count += 1
+        else:
+            self._paste_burst_count = 1
+        self._last_text_change_ts = now
 
     # Public accessor — the app resolves paste placeholders on submit.
     @property
@@ -314,6 +352,26 @@ class Composer:
             if buf.complete_state and buf.complete_state.current_completion:
                 buf.apply_completion(buf.complete_state.current_completion)
                 return
+            # Paste burst-detector. On Win32Input (Windows default), a
+            # ``Keys.BracketedPaste`` event never fires, so pasted text
+            # arrives as a stream of synthetic keystrokes — including
+            # the embedded newlines. If we treated those as submits the
+            # user would lose half the paste. Fall back to a timing
+            # heuristic: only treat Enter as a paste-newline when the
+            # current burst is BOTH rapid (last text change within
+            # ``_paste_burst_window``) AND substantial (at least
+            # ``_paste_burst_min_count`` consecutive rapid changes —
+            # a single programmatic ``buf.text = "..."`` fires only
+            # once, so test-shaped "set text then Enter" still submits
+            # normally). Human-typed Enter is preceded by a much bigger
+            # gap, so this never false-positives on real keyboard input.
+            now = time.monotonic()
+            if (
+                now - self._last_text_change_ts < self._paste_burst_window
+                and self._paste_burst_count >= self._paste_burst_min_count
+            ):
+                buf.insert_text("\n")
+                return
             text = buf.text
             if not text.strip():
                 return
@@ -348,6 +406,10 @@ class Composer:
             data = event.data or ""
             if not data:
                 return
+            # Normalise CRLF / lone-CR pastes to LF — Windows clipboards
+            # serve CRLF and Rich would otherwise render the stray ``\r``
+            # as a visible ``^M`` box in committed scrollback.
+            data = data.replace("\r\n", "\n").replace("\r", "\n")
             buf = event.current_buffer
             if should_placeholderize(data):
                 token = self._paste_store.stash(data)

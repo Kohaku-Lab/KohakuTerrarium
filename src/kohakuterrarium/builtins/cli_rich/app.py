@@ -876,6 +876,11 @@ class RichCLIApp(AppOutputMixin):
         # Send the standard "clear scrollback + screen" escape — handled
         # via the committer so it goes through run_in_terminal correctly.
         self.committer.ansi("\x1b[3J\x1b[H\x1b[2J")
+        # Once the user wipes the screen, the paste placeholder tokens
+        # they could see in scrollback are gone too — drop the cached
+        # paste bodies so the in-memory store doesn't grow unbounded
+        # over a long session.
+        self.composer.paste_store.clear()
 
     def _print_banner(self) -> None:
         name = getattr(self.agent.config, "name", "agent")
