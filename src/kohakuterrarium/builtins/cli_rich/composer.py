@@ -456,7 +456,17 @@ class Composer:
             if self._on_ctrl_c:
                 self._on_ctrl_c()
 
-        @kb.add("escape", eager=True)
+        # Esc binding — note the missing ``eager=True``. With ``eager``
+        # set, prompt_toolkit dispatches the bare-Esc handler the moment
+        # the parser has *only* seen ``\x1b``, before the timeout that
+        # waits for follow-up bytes elapses. That breaks every multi-key
+        # sequence starting with Esc — Alt+P / Alt+N (history recall),
+        # Alt+Enter (insert newline) — and on terminals where arrow
+        # keys still arrive as plain ``\x1b[A`` etc. it can also race
+        # with the CSI parser and leak the trailing ``[A`` bytes into
+        # the buffer. Without ``eager``, prompt_toolkit's normal escape
+        # timeout (a few milliseconds) is long enough to disambiguate.
+        @kb.add("escape")
         def _esc(event):
             if _picker("escape"):
                 return

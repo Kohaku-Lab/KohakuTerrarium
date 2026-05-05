@@ -827,7 +827,12 @@ class RichCLIApp(AppOutputMixin):
             if consumed:
                 self._invalidate()
             return consumed
-        if self.settings_overlay.visible and self.settings_overlay.is_capturing_text():
+        if self.settings_overlay.visible:
+            # Settings list mode wants ``d`` for delete (and silently
+            # consumes other letters so they don't leak into the chat
+            # textarea behind the overlay); form mode wants every
+            # printable char as field input. Same handler covers both
+            # — handle_text already routes by ``self.mode``.
             consumed = self.settings_overlay.handle_text(char)
             if consumed:
                 self._invalidate()
@@ -849,7 +854,12 @@ class RichCLIApp(AppOutputMixin):
             # nothing leaks into the chat textarea behind the
             # overlay.
             return True
-        if self.settings_overlay.visible and self.settings_overlay.is_capturing_text():
+        if self.settings_overlay.visible:
+            # Settings is also modal — list mode reserves ``d`` for
+            # delete and silently swallows the rest, form mode routes
+            # printable chars into the active field. Either way the
+            # composer's textarea must NOT receive these keystrokes,
+            # so claim them unconditionally while the overlay is up.
             return True
         return False
 
