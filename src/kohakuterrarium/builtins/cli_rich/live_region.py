@@ -391,6 +391,34 @@ class LiveRegion:
             return True
         return False
 
+    @property
+    def needs_animation(self) -> bool:
+        """True iff something on screen requires a periodic redraw to look right.
+
+        Drives the conditional refresh ticker in :class:`RichCLIApp` —
+        when this is False the ticker stops scheduling redraws so the
+        terminal stops repainting the prompt area five times a second
+        (which destroys mouse selection and makes copy unusable).
+
+        Sources of animation:
+          * compaction banner — static glyph, but the spinner inside the
+            activity pulse drawn while compacting still needs ticks
+          * activity pulse — spinner frame + elapsed clock
+          * any running (or backgrounded-but-not-finished) tool block —
+            elapsed clock in the panel header / bg strip
+        """
+        if self._compacting:
+            return True
+        if self._active or self._turn_active:
+            return True
+        for job_id in self._top_order:
+            block = self.tool_blocks.get(job_id)
+            if block is None:
+                continue
+            if block.status == "running":
+                return True
+        return False
+
     def _activity_label(self) -> str:
         """Return a contextual sub-label describing what the agent is doing.
 

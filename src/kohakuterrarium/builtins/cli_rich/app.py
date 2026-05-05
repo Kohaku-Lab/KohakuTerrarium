@@ -101,6 +101,7 @@ class RichCLIApp(AppOutputMixin):
         self._pending_task: asyncio.Task | None = None
         self._ctrl_c_armed = False
         self._ctrl_c_reset_task: asyncio.Task | None = None
+        self._render_ticker_task: asyncio.Task | None = None
 
         # Console used only for committing to scrollback (via run_in_terminal).
         self._scroll_console = Console(
@@ -170,12 +171,35 @@ class RichCLIApp(AppOutputMixin):
             # Terminals that don't support either silently ignore.
             enable_enhanced_keyboard()
 
-            await self.app.run_async(handle_sigint=False)
+            # Conditional render ticker — drives the spinner / elapsed
+            # clock animation while something is actually animating, and
+            # stays silent the rest of the time so the user's mouse
+            # selection sticks. Replaces the unconditional
+            # ``refresh_interval`` we used to pass to ``Application``.
+            self._render_ticker_task = spawn(self._render_ticker())
+
+            # ``handle_sigint`` MUST stay True (the default). It tells
+            # prompt_toolkit to install a SIGINT handler that translates
+            # the signal into a synthetic ``Keys.SIGINT`` keystroke — which
+            # is the only way our ``@kb.add(Keys.SIGINT, eager=True)``
+            # binding fires. With ``handle_sigint=False`` the signal
+            # bypasses prompt_toolkit entirely and Python's default
+            # handler raises ``KeyboardInterrupt``, tearing down the
+            # asyncio loop so neither the buffer-clear branch nor the
+            # double-tap-to-exit prompt ever runs (and on Windows the
+            # whole CLI just dies on the first Ctrl+C).
+            await self.app.run_async()
         finally:
             disable_enhanced_keyboard()
             sys.stderr = prev_stderr
             loop.set_exception_handler(prev_handler)
             # Cancel any in-flight agent task
+            if self._render_ticker_task and not self._render_ticker_task.done():
+                self._render_ticker_task.cancel()
+                try:
+                    await self._render_ticker_task
+                except (asyncio.CancelledError, Exception):
+                    pass
             if self._ctrl_c_reset_task and not self._ctrl_c_reset_task.done():
                 self._ctrl_c_reset_task.cancel()
                 try:
@@ -190,6 +214,34 @@ class RichCLIApp(AppOutputMixin):
                     pass
             self.app = None
             print()  # Trailing newline so the terminal cursor is clean
+
+    async def _render_ticker(self) -> None:
+        """Wake the renderer ~5 fps while something on screen needs to animate.
+
+        Replaces ``Application(refresh_interval=0.2)``. The unconditional
+        version of that flag fired even when the agent was idle, and
+        each redraw repainted the prompt area, which silently destroyed
+        any in-progress mouse selection — copy from the rich CLI was
+        effectively impossible. This loop only schedules a redraw when
+        :attr:`LiveRegion.needs_animation` is True (spinner up, elapsed
+        clock ticking, tool running). When the agent is idle we tick at
+        a slower cadence and don't invalidate, so selection sticks and
+        right-click / Ctrl+Shift+C work as expected.
+        """
+        idle_sleep = 0.5
+        active_sleep = 0.2
+        while True:
+            try:
+                if self.live_region.needs_animation:
+                    self._invalidate()
+                    await asyncio.sleep(active_sleep)
+                else:
+                    await asyncio.sleep(idle_sleep)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.debug("render ticker iteration failed", error=str(e))
+                await asyncio.sleep(active_sleep)
 
     def _loop_exception_handler(self, loop, context: dict) -> None:
         """Send asyncio loop exceptions to the file logger only.
@@ -319,9 +371,17 @@ class RichCLIApp(AppOutputMixin):
             erase_when_done=False,
             color_depth=ColorDepth.TRUE_COLOR,
             style=style,
-            # 5 fps redraw — drives the spinner animation and elapsed-time
-            # updates without burning CPU.
-            refresh_interval=0.2,
+            # NOTE: ``refresh_interval`` is intentionally left unset.
+            # An unconditional periodic redraw repaints the prompt area
+            # several times per second — which on every terminal we've
+            # tested clears any in-progress mouse selection, making it
+            # impossible to copy text out of the rich CLI. The
+            # ``_render_ticker`` task spawned in :meth:`run` instead
+            # invalidates the screen only while the live region has
+            # something animating (spinner / elapsed clock / running
+            # tools). When the agent is idle we never invalidate, so
+            # selection sticks and Ctrl+Shift+C / right-click-copy work
+            # as expected.
             output=make_output(),
         )
 
