@@ -38,6 +38,16 @@ def init_plugins(
     )
     config_names: set[str] = set()
 
+    # Pre-import every installed package so config-listed package
+    # plugins (``type: package`` with module like ``kt_biome.plugins.X``)
+    # resolve in Phase 1. Without this, packages installed via ``kt
+    # install`` (symlinked / copied into ``~/.kohakuterrarium/packages``
+    # but NOT pip-installed onto sys.path) fail to import in Phase 1 —
+    # config plugins land as None, get re-discovered by Phase 2, and
+    # arrive registered-but-disabled. The frontend Modules panel then
+    # shows config-enabled plugins as Off.
+    _pre_import_packages_for_config(merged_configs)
+
     # Phase 1: Load plugins from config (enabled)
     for cfg in merged_configs:
         plugin = _load_one(cfg, loader)
@@ -54,6 +64,43 @@ def init_plugins(
     _discover_package_plugins(manager, config_names, loader)
 
     return manager
+
+
+def _pre_import_packages_for_config(plugin_configs: list[dict[str, Any]]) -> None:
+    """Make every installed package's Python modules importable.
+
+    Called before Phase 1 so config plugins like
+    ``module: kt_biome.plugins.context_files`` import successfully even
+    when the package was installed via ``kt install`` (which symlinks
+    or copies into ``~/.kohakuterrarium/packages/``) rather than
+    ``pip install -e``. Without this, Phase 1 would fail on those
+    plugins and Phase 2 would re-discover them as registered-but-disabled.
+
+    The list-all approach is intentional: config plugins reference
+    packages by Python module path (``kt_biome.plugins.X``), not by
+    package name, so we can't know in advance which packages a config
+    needs. Adding all installed packages to ``sys.path`` is cheap and
+    idempotent (``ensure_package_importable`` early-exits on
+    already-added paths).
+    """
+    if not plugin_configs:
+        return
+    has_package_plugin = any(
+        isinstance(cfg, dict) and cfg.get("type", "package") == "package"
+        for cfg in plugin_configs
+    )
+    if not has_package_plugin:
+        return
+    try:
+        for pkg in list_packages():
+            name = pkg.get("name", "")
+            if name:
+                ensure_package_importable(name)
+    except Exception as e:
+        logger.debug(
+            "Pre-import package walk failed; falling back to Phase-2 discovery",
+            error=str(e),
+        )
 
 
 def _discover_catalog_plugins(
