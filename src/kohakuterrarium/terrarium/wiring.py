@@ -29,24 +29,10 @@ def install_output_wiring_resolver(engine: Any) -> Any:
     """Install a live terrarium resolver on every creature in ``engine``.
 
     The resolver points at ``engine._creatures`` by reference, so target
-    lookup follows later hot-plug changes.  Reinstalling is cheap and is
+    lookup follows later hot-plug changes. Reinstalling is cheap and is
     used after root changes so the magic ``root`` target stays current.
     """
-    root_agent = None
-    for creature in engine._creatures.values():
-        if getattr(creature, "is_root", False):
-            root_agent = creature.agent
-            break
-    return _install_resolver(engine._creatures, root_agent=root_agent)
-
-
-def install_runtime_output_wiring_resolver(
-    creatures: dict[str, Any],
-    *,
-    root_agent: Any | None = None,
-) -> Any:
-    """Install a resolver on legacy ``TerrariumRuntime`` handles."""
-    return _install_resolver(creatures, root_agent=root_agent)
+    return _install_resolver(engine._creatures, root_agent=None)
 
 
 def _install_resolver(creatures: dict[str, Any], *, root_agent: Any | None) -> Any:
@@ -57,9 +43,6 @@ def _install_resolver(creatures: dict[str, Any], *, root_agent: Any | None) -> A
     for name, creature in creatures.items():
         creature.agent._wiring_resolver = resolver
         creature.agent._creature_id = getattr(creature, "creature_id", name)
-    if root_agent is not None:
-        root_agent._wiring_resolver = resolver
-        root_agent._creature_id = "root"
     return resolver
 
 

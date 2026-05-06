@@ -65,6 +65,8 @@ def patched_add_creature(monkeypatch):
         llm_override: str | None = None,
         pwd: str | None = None,
         start: bool = True,
+        is_privileged: bool = False,
+        parent_creature_id: str | None = None,
     ):
         # Derive a name from whatever we got
         if isinstance(config, str):
@@ -73,8 +75,6 @@ def patched_add_creature(monkeypatch):
             name = getattr(config, "name", None) or "agent"
         creature = make_creature(name=name)
         creature.agent.config.pwd = pwd
-        # Adopt into engine via the real path
-
         # call original (now bypassed) via a sentinel
         return await _real_add_creature(
             self,
@@ -84,6 +84,8 @@ def patched_add_creature(monkeypatch):
             llm_override=llm_override,
             pwd=pwd,
             start=start,
+            is_privileged=is_privileged,
+            parent_creature_id=parent_creature_id,
         )
 
     _real_add_creature = Terrarium.add_creature
@@ -770,7 +772,7 @@ class TestFinders:
             controller = make_creature(name="controller")
             controller.creature_id = "controller_001"
             controller.name = "controller"
-            controller.is_root = True
+            controller.is_privileged = True
             worker = make_creature(name="worker")
             worker.creature_id = "worker_002"
             worker.name = "worker"

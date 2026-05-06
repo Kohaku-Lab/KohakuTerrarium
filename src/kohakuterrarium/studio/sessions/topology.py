@@ -1,12 +1,10 @@
 """Engine-backed topology operations — channels + connect/disconnect.
 
-Replaces ``KohakuManager.terrarium_channel_add / channel_list /
-channel_info / channel_send / channel_stream`` and ``creature_wire /
-creature_channel_*`` and ``agent_channel_*``.
-
 Channels live inside a graph (== session). ``connect`` / ``disconnect``
 operate at the engine layer and may merge / split graphs as a side
-effect (the engine handles topology bookkeeping).
+effect (the engine handles topology bookkeeping). Graph topology
+channels are always broadcast — channel-kind variants are sub-agent
+private comms only and live in :mod:`core.channel`.
 """
 
 from typing import Any
@@ -14,19 +12,11 @@ from typing import Any
 import kohakuterrarium.terrarium.channels as _channels
 import kohakuterrarium.terrarium.topology as _topo
 from kohakuterrarium.core.channel import ChannelMessage
-from kohakuterrarium.studio.sessions.runtime_topology import (
-    refresh_creature_topology_prompt,
-    refresh_graph_topology_prompts,
-)
 from kohakuterrarium.terrarium.engine import Terrarium
-from kohakuterrarium.terrarium.topology import ChannelKind
+from kohakuterrarium.terrarium.events import EngineEvent, EventKind
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
-
-
-def _resolve_kind(kind: str) -> ChannelKind:
-    return ChannelKind.BROADCAST if kind == "broadcast" else ChannelKind.QUEUE
 
 
 # ---------------------------------------------------------------------------
@@ -39,21 +29,38 @@ async def add_channel(
     session_id: str,
     name: str,
     *,
-    channel_type: str = "queue",
+    channel_type: str = "broadcast",
     description: str = "",
 ) -> dict[str, Any]:
-    """Declare a channel in a session."""
-    info = await engine.add_channel(
-        session_id, name, kind=_resolve_kind(channel_type), description=description
-    )
-    # Surface the new channel to every creature in the graph so the
-    # next time one of them wants to send, the prompt already lists
-    # the channel as visible.
-    refresh_graph_topology_prompts(engine, session_id)
+    """Declare a channel in a session.
+
+    ``channel_type`` is accepted for legacy HTTP payload compatibility;
+    graph channels are always broadcast at the Terrarium layer.
+    """
+    _ = channel_type
+    info = await engine.add_channel(session_id, name, description=description)
     return {
         "name": info.name,
-        "type": info.kind.value if hasattr(info.kind, "value") else str(info.kind),
+        "type": "broadcast",
         "description": info.description,
+    }
+
+
+async def remove_channel(
+    engine: Terrarium,
+    session_id: str,
+    name: str,
+) -> dict[str, Any]:
+    """Remove a channel from a session, returning the topology delta."""
+    delta = await engine.remove_channel(session_id, name)
+    return {
+        "removed": name,
+        "delta": {
+            "kind": delta.kind,
+            "old_graph_ids": list(delta.old_graph_ids),
+            "new_graph_ids": list(delta.new_graph_ids),
+            "affected": sorted(delta.affected_creatures),
+        },
     }
 
 
@@ -115,14 +122,16 @@ async def connect(
     receiver: str,
     *,
     channel: str | None = None,
-    channel_type: str = "queue",
+    channel_type: str = "broadcast",
 ) -> dict[str, Any]:
     """Wire ``sender → receiver`` via a channel.  Returns the engine
     ``ConnectionResult`` as a dict.
+
+    ``channel_type`` is accepted for legacy HTTP payload compatibility;
+    graph channels are always broadcast at the Terrarium layer.
     """
-    result = await engine.connect(
-        sender, receiver, channel=channel, kind=_resolve_kind(channel_type)
-    )
+    _ = channel_type
+    result = await engine.connect(sender, receiver, channel=channel)
     return _connection_result_to_dict(result)
 
 
@@ -141,7 +150,7 @@ async def disconnect(
 
 
 # ---------------------------------------------------------------------------
-# Hot-plug per-creature wire (legacy ``creature_wire`` parity)
+# Hot-plug per-creature wire
 # ---------------------------------------------------------------------------
 
 
@@ -157,23 +166,37 @@ async def wire_creature(
     """Toggle a listen / send edge for a creature on an existing channel.
 
     ``direction`` is ``"listen"`` or ``"send"``.  When ``creature_id``
-    is the literal ``"root"`` the call resolves to the session's root
-    creature (if any).  This mirrors the legacy
-    ``KohakuManager.creature_wire`` body — it only updates topology
-    edges; channel-trigger injection is the engine's responsibility.
+    is the literal ``"root"`` the call resolves to the session's
+    privileged creature (if any).  Updates topology edges and injects /
+    removes the channel trigger as needed.
     """
     if creature_id == "root":
+        # Disambiguation when multiple privileged creatures share a
+        # graph: prefer ``creature_id == "root"`` (recipe convention),
+        # then ``name == "root"``, then first sorted privileged id.
         graph = engine.get_graph(session_id)
-        for cid in graph.creature_ids:
+        privileged: list = []
+        for cid in sorted(graph.creature_ids):
             try:
                 c = engine.get_creature(cid)
             except KeyError:
                 continue
-            if getattr(c, "is_root", False):
-                creature_id = cid
-                break
-        else:
-            raise KeyError(f"session {session_id!r} has no root creature")
+            if getattr(c, "is_privileged", False):
+                privileged.append(c)
+        if not privileged:
+            raise KeyError(f"session {session_id!r} has no privileged creature")
+        chosen = (
+            next(
+                (c for c in privileged if c.creature_id == "root"),
+                None,
+            )
+            or next(
+                (c for c in privileged if c.name == "root"),
+                None,
+            )
+            or privileged[0]
+        )
+        creature_id = chosen.creature_id
 
     graph = engine.get_graph(session_id)
     if creature_id not in graph.creature_ids:
@@ -217,11 +240,24 @@ async def wire_creature(
     else:
         raise ValueError(f"direction must be 'listen' or 'send', got {direction!r}")
 
-    # Keep the agent's system prompt aligned with the live wiring.
-    # Without this the LLM keeps inventing channel names because
-    # nothing in its context tells it which channels actually exist
-    # (cf. confabulated ``report_to_root`` on solo creatures).
-    refresh_creature_topology_prompt(engine, creature_id)
+    # Emit a topology event so engine subscribers (notably the runtime
+    # graph prompt block) refresh affected creatures' system prompts.
+    # ``wire_creature`` doesn't change graph membership, so the delta
+    # is "nothing" — but the prompt content (listen/send lists) just
+    # changed, and that's what listeners care about.
+    engine._emit(
+        EngineEvent(
+            kind=EventKind.TOPOLOGY_CHANGED,
+            creature_id=creature_id,
+            graph_id=session_id,
+            payload={
+                "kind": "nothing",
+                "old_graph_ids": [session_id],
+                "new_graph_ids": [session_id],
+                "affected": [creature_id],
+            },
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -246,18 +282,15 @@ def _connection_result_to_dict(result: Any) -> dict[str, Any]:
 
 
 def _disconnection_result_to_dict(result: Any) -> dict[str, Any]:
+    """Serialize a :class:`DisconnectionResult` for the HTTP route.
+
+    The dataclass exposes ``channels`` (the unwired channel names) and
+    ``delta_kind``. The full ``TopologyDelta`` (with old/new graph ids
+    and affected-creatures sets) is not surfaced on the result today;
+    callers that need it should subscribe to the ``TOPOLOGY_CHANGED``
+    engine event instead.
+    """
     return {
-        "removed_channel": getattr(result, "removed_channel", None),
-        "delta": {
-            "kind": getattr(getattr(result, "delta", None), "kind", "nothing"),
-            "old_graph_ids": list(
-                getattr(getattr(result, "delta", None), "old_graph_ids", []) or []
-            ),
-            "new_graph_ids": list(
-                getattr(getattr(result, "delta", None), "new_graph_ids", []) or []
-            ),
-            "affected": sorted(
-                getattr(getattr(result, "delta", None), "affected_creatures", []) or []
-            ),
-        },
+        "channels": list(getattr(result, "channels", []) or []),
+        "delta": {"kind": getattr(result, "delta_kind", "nothing")},
     }

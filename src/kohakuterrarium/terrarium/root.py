@@ -15,7 +15,7 @@ import kohakuterrarium.terrarium.channels as _channels
 import kohakuterrarium.terrarium.topology as _topo
 import kohakuterrarium.terrarium.wiring as _wiring
 from kohakuterrarium.terrarium.events import RootAssignment
-from kohakuterrarium.terrarium.topology import ChannelKind
+from kohakuterrarium.terrarium.tools_group import force_register_privileged_tools
 
 if TYPE_CHECKING:
     from kohakuterrarium.terrarium.engine import CreatureRef, Terrarium
@@ -45,7 +45,6 @@ async def assign_root_to(
         await engine.add_channel(
             gid,
             report_channel,
-            kind=ChannelKind.QUEUE,
             description=f"Reports back to {root.name}",
         )
         injected_channels.append(report_channel)
@@ -96,14 +95,15 @@ async def assign_root_to(
             root.listen_channels.append(ch_name)
         listened.append(ch_name)
 
-    # 5. mark the root for downstream callers.
-    root.is_root = True
+    # 5. mark the root as privileged for downstream callers (group tool
+    # registration, UI mount). Privilege is creation-time/assignment-time
+    # and immutable thereafter — see ``terrarium.creature_host.Creature``.
+    root.is_privileged = True
     _wiring.install_output_wiring_resolver(engine)
-    if hasattr(root.config, "is_root"):
-        try:
-            root.config.is_root = True
-        except Exception:  # pragma: no cover - defensive
-            pass
+    # Force-register the privileged graph-mutating tools on the
+    # freshly-elevated creature. Basic comm tools (``send_channel`` /
+    # ``group_send``) were already attached at ``add_creature`` time.
+    force_register_privileged_tools(root.agent)
 
     return RootAssignment(
         graph_id=gid,

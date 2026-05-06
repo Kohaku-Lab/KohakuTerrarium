@@ -106,10 +106,18 @@ async def start_creature(
         if is_package_ref(config_path):
             config_path = str(resolve_package_path(config_path))
         creature = await engine.add_creature(
-            config_path, llm_override=llm_override, pwd=pwd
+            config_path,
+            llm_override=llm_override,
+            pwd=pwd,
+            is_privileged=True,
         )
     elif config is not None:
-        creature = await engine.add_creature(config, llm_override=llm_override, pwd=pwd)
+        creature = await engine.add_creature(
+            config,
+            llm_override=llm_override,
+            pwd=pwd,
+            is_privileged=True,
+        )
     else:
         raise ValueError("Must provide config_path or config")
 
@@ -120,22 +128,11 @@ async def start_creature(
     sid = creature.graph_id
     cid = creature.creature_id
 
-    # Session-store auto-attach (same behaviour as legacy manager).
-    try:
-        sess_dir = _session_dir()
-        Path(sess_dir).mkdir(parents=True, exist_ok=True)
-        store = SessionStore(Path(sess_dir) / f"{cid}.kohakutr")
-        store.init_meta(
-            session_id=cid,
-            config_type="agent",
-            config_path=config_path or "",
-            pwd=pwd or os.getcwd(),
-            agents=[creature.agent.config.name],
-        )
-        creature.agent.attach_session_store(store)
-        _session_stores[sid] = store
-    except Exception as e:  # pragma: no cover - defensive
-        logger.warning("Session store creation failed", error=str(e))
+    attach_session_store_for_creature(
+        engine,
+        creature,
+        config_path=config_path or "",
+    )
 
     _meta[sid] = {
         "kind": "creature",
@@ -146,6 +143,43 @@ async def start_creature(
     }
     logger.info("Creature session started", session_id=sid, creature_id=cid)
     return _build_session_handle(engine, sid)
+
+
+def attach_session_store_for_creature(
+    engine: Terrarium,
+    creature,
+    *,
+    config_path: str = "",
+    config_type: str = "agent",
+) -> None:
+    """Attach a fresh ``.kohakutr`` session store to ``creature``.
+
+    Shared between :func:`start_creature` (called directly) and the
+    terrarium-layer ``group_add_node`` tool (called via the
+    ``terrarium.group_hooks`` indirection so the layer rule holds).
+    Records the store on the module-level ``_session_stores`` map so
+    :func:`stop_session` can close it later. Failures are logged but
+    not propagated — session persistence is best-effort.
+    """
+    try:
+        sess_dir = _session_dir()
+        Path(sess_dir).mkdir(parents=True, exist_ok=True)
+        cid = creature.creature_id
+        sid = creature.graph_id
+        store = SessionStore(Path(sess_dir) / f"{cid}.kohakutr")
+        store.init_meta(
+            session_id=cid,
+            config_type=config_type,
+            config_path=config_path,
+            pwd=str(
+                getattr(getattr(creature.agent, "executor", None), "_working_dir", "")
+            ),
+            agents=[creature.agent.config.name],
+        )
+        creature.agent.attach_session_store(store)
+        _session_stores[sid] = store
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning("Session store creation failed", error=str(e))
 
 
 # ---------------------------------------------------------------------------
@@ -466,7 +500,7 @@ def find_creature(engine: Terrarium, session_id: str, name_or_id: str):
     engine's exact-id lookup first, then falls back to matching
     ``creature.name`` within the given session, and finally — when the
     caller asks for the literal string ``"root"`` — falls back to the
-    creature flagged ``is_root=True`` in the target session.
+    creature flagged ``is_privileged=True`` in the target session.
 
     ``session_id == "_"`` means "any session" — the resolver scans every
     creature in the engine.  Used by the standalone-agent WS path
@@ -506,15 +540,30 @@ def find_creature(engine: Terrarium, session_id: str, name_or_id: str):
     # The frontend sends the literal string "root" as the tab key for
     # terrariums that declare a root agent (see
     # ``stores/chat.js:1116, 1286``).  The engine identifies the root via
-    # the ``is_root`` flag set by ``Terrarium.assign_root``; resolve the
+    # the privileged flag set by ``Terrarium.assign_root``; resolve the
     # alias here so every per-creature HTTP/WS endpoint accepts it.
+    #
+    # Disambiguation order when multiple privileged creatures share a
+    # graph (e.g. user merged two solo sessions):
+    #   1. creature with ``creature_id == "root"`` (recipe convention)
+    #   2. creature with ``name == "root"``
+    #   3. first-by-sorted-id privileged creature
     if name_or_id == "root":
+        privileged: list = []
         for cid in candidates:
             try:
                 cand = engine.get_creature(cid)
             except KeyError:
                 continue
-            if getattr(cand, "is_root", False):
+            if getattr(cand, "is_privileged", False):
+                privileged.append(cand)
+        for cand in privileged:
+            if getattr(cand, "creature_id", "") == "root":
                 return cand
+        for cand in privileged:
+            if getattr(cand, "name", "") == "root":
+                return cand
+        if privileged:
+            return sorted(privileged, key=lambda c: c.creature_id)[0]
 
     raise KeyError(f"creature {name_or_id!r} not found in session {session_id!r}")

@@ -34,4 +34,5 @@ def get_engine() -> Terrarium:
     global _engine
     if _engine is None:
         _engine = Terrarium(session_dir=_session_dir())
+    _engine._runtime_prompt.attach()
     return _engine

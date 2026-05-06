@@ -7,7 +7,6 @@ from kohakuterrarium.api.routes import runtime_graph as route_mod
 from kohakuterrarium.core.channel import ChannelMessage
 from kohakuterrarium.studio.sessions import lifecycle
 from kohakuterrarium.terrarium.engine import Terrarium
-from kohakuterrarium.terrarium.topology import ChannelKind
 
 from tests.unit.terrarium._fakes import make_creature
 
@@ -19,7 +18,6 @@ async def _build_engine() -> Terrarium:
     await engine.add_channel(
         alice.graph_id,
         "tasks",
-        kind=ChannelKind.QUEUE,
         description="Task queue",
     )
     await engine.connect(alice, bob, channel="tasks")
@@ -45,9 +43,9 @@ async def test_runtime_graph_snapshot_contains_live_topology_and_wiring():
         assert graph_data["channels"] == [
             {
                 "name": "tasks",
-                "type": "queue",
+                "type": "broadcast",
                 "description": "Task queue",
-                "qsize": 1,
+                "qsize": 0,
                 "message_count": 1,
                 "last_message": {
                     "message_id": graph_data["channels"][0]["last_message"][

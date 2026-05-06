@@ -10,7 +10,7 @@ Example::
         TestTerrariumBuilder()
         .with_creature("alice")
         .with_creature("bob")
-        .with_channel("chat", kind=ChannelKind.QUEUE)
+        .with_channel("chat")
         .with_connection("alice", "bob", channel="chat")
     )
     async with await builder.build() as t:
@@ -25,7 +25,6 @@ from typing import Any
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.terrarium.creature_host import Creature
 from kohakuterrarium.terrarium.engine import Terrarium
-from kohakuterrarium.terrarium.topology import ChannelKind
 
 # ---------------------------------------------------------------------------
 # fake-agent stand-in — reused inside ``TestTerrariumBuilder``
@@ -133,7 +132,6 @@ class _CreatureSpec:
 @dataclass
 class _ChannelSpec:
     name: str
-    kind: ChannelKind = ChannelKind.QUEUE
     description: str = ""
 
 
@@ -175,13 +173,10 @@ class TestTerrariumBuilder:
         self,
         name: str,
         *,
-        kind: ChannelKind = ChannelKind.QUEUE,
         description: str = "",
     ) -> "TestTerrariumBuilder":
         """Declare a channel inside the (single) graph."""
-        self._channels.append(
-            _ChannelSpec(name=name, kind=kind, description=description)
-        )
+        self._channels.append(_ChannelSpec(name=name, description=description))
         return self
 
     def with_connection(
@@ -224,7 +219,6 @@ class TestTerrariumBuilder:
                 await engine.add_channel(
                     first_graph_id,
                     ch.name,
-                    kind=ch.kind,
                     description=ch.description,
                 )
         for c in self._connections:

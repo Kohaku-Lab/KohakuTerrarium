@@ -44,11 +44,15 @@ PROMPT_FORMAT_SIMPLE = "simple"
 PROMPT_FORMAT_JINJA = "jinja"
 
 #: Default prompt template when ``with_content=True`` and no explicit
-#: ``prompt`` is set on the entry.
-DEFAULT_PROMPT_WITH_CONTENT = "[Output from {source}] {content}"
+#: ``prompt`` is set on the entry. The ``[output-wire from X] ...`` tag
+#: distinguishes wire deliveries from channel messages and group_send
+#: directs in the receiver's turn context.
+DEFAULT_PROMPT_WITH_CONTENT = "[output-wire from {source}] {content}"
 
 #: Default prompt template when ``with_content=False`` (metadata-only ping).
-DEFAULT_PROMPT_WITHOUT_CONTENT = "[Turn-end from {source}]"
+DEFAULT_PROMPT_WITHOUT_CONTENT = (
+    "[output-wire from {source}] (turn-end signal, no content)"
+)
 
 
 # ---------------------------------------------------------------------------

@@ -16,6 +16,7 @@ because every line of logic in them is channel-related.
 """
 
 import asyncio
+import weakref
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -26,11 +27,10 @@ import kohakuterrarium.terrarium.session_coord as _session_coord
 import kohakuterrarium.terrarium.topology as _topo
 from kohakuterrarium.terrarium.events import (
     ConnectionResult,
-    DisconnectionResult,
     EngineEvent,
     EventKind,
 )
-from kohakuterrarium.terrarium.topology import ChannelInfo, ChannelKind
+from kohakuterrarium.terrarium.topology import ChannelInfo
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -42,12 +42,10 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-# Map between the engine's ``ChannelKind`` enum and the string keys used
-# by ``ChannelRegistry.get_or_create``.
-_KIND_TO_REGISTRY: dict[ChannelKind, str] = {
-    ChannelKind.BROADCAST: "broadcast",
-    ChannelKind.QUEUE: "queue",
-}
+# Environment registration key for the live engine weakref. Group tools
+# read it via ``ToolContext.environment.get(TERRARIUM_ENGINE_KEY)`` to
+# resolve the engine without a global singleton.
+TERRARIUM_ENGINE_KEY = "terrarium_engine"
 
 
 def register_channel_in_environment(
@@ -58,14 +56,39 @@ def register_channel_in_environment(
 ) -> Any:
     """Ensure the channel exists in the live ``ChannelRegistry``.
 
-    Returns the channel object (queue- or broadcast-flavoured).
+    Graph topology channels are always broadcast — every listener
+    receives every send.
     """
     return registry.get_or_create(
         info.name,
-        channel_type=_KIND_TO_REGISTRY.get(info.kind, "queue"),
+        channel_type="broadcast",
         maxsize=maxsize,
         description=info.description,
     )
+
+
+def bind_creature_to_environment(creature: Any, env: Environment) -> None:
+    """Repoint a creature's agent + executor at ``env``.
+
+    Called from :meth:`Terrarium.add_creature` (when the creature joins
+    an existing graph) and from :func:`_merge_environment_into` (when
+    two graphs merge). Without this, the creature's
+    ``ToolContext.environment.shared_channels`` points at the env it was
+    *built* with — which may be empty or different from the surviving
+    graph's env.
+    """
+    if getattr(creature.agent, "environment", None) is not env:
+        creature.agent.environment = env
+    executor = getattr(creature.agent, "executor", None)
+    if executor is not None and getattr(executor, "_environment", None) is not env:
+        executor._environment = env
+
+
+def register_engine_handle(env: Environment, engine: "Terrarium") -> None:
+    """Register a weakref to ``engine`` on ``env`` under
+    :data:`TERRARIUM_ENGINE_KEY`. Idempotent — overwrites any prior
+    registration with a fresh weakref."""
+    env.register(TERRARIUM_ENGINE_KEY, weakref.ref(engine))
 
 
 def inject_channel_trigger(
@@ -218,7 +241,6 @@ async def connect_creatures(
     receiver: "CreatureRef",
     *,
     channel: str | None = None,
-    kind: ChannelKind = ChannelKind.QUEUE,
 ) -> ConnectionResult:
     """Body of :meth:`Terrarium.connect` — see the engine docstring.
 
@@ -231,9 +253,7 @@ async def connect_creatures(
     sender_creature = engine.get_creature(sid)
     receiver_creature = engine.get_creature(rid)
 
-    channel_name, delta = _topo.connect(
-        engine._topology, sid, rid, channel=channel, kind=kind
-    )
+    channel_name, delta = _topo.connect(engine._topology, sid, rid, channel=channel)
     if delta.kind == "merge":
         # The kept graph's id is delta.new_graph_ids[0].  Move every
         # channel + re-point every trigger from the dropped env into
@@ -270,19 +290,23 @@ async def connect_creatures(
     if channel_name not in sender_creature.send_channels:
         sender_creature.send_channels.append(channel_name)
 
-    if delta.kind != "nothing":
-        engine._emit(
-            EngineEvent(
-                kind=EventKind.TOPOLOGY_CHANGED,
-                graph_id=gid,
-                payload={
-                    "kind": delta.kind,
-                    "old_graph_ids": list(delta.old_graph_ids),
-                    "new_graph_ids": list(delta.new_graph_ids),
-                    "affected": sorted(delta.affected_creatures),
-                },
-            )
+    # Always emit so engine subscribers (notably the runtime-graph
+    # prompt block) refresh both creatures' system prompts. ``delta.kind``
+    # is "merge" for cross-graph connects, "nothing" for intra-graph —
+    # both still mutate listen/send lists, so prompts must update.
+    engine._emit(
+        EngineEvent(
+            kind=EventKind.TOPOLOGY_CHANGED,
+            graph_id=gid,
+            payload={
+                "kind": delta.kind,
+                "old_graph_ids": list(delta.old_graph_ids),
+                "new_graph_ids": list(delta.new_graph_ids),
+                "affected": sorted(delta.affected_creatures)
+                or sorted({sender_creature.creature_id, receiver_creature.creature_id}),
+            },
         )
+    )
     return ConnectionResult(
         channel=channel_name,
         trigger_id=trigger_id,
@@ -373,11 +397,14 @@ def _promote_session_kind_after_merge(session_id: str) -> None:
 def _merge_environment_into(engine: "Terrarium", keep_gid: str, drop_gid: str) -> None:
     """Union the dropped graph's environment into the surviving one.
 
-    For every channel registered in the dropped env, register a
-    matching channel in the kept env.  For every creature that's now
-    in the kept graph but used to live in the dropped graph, re-inject
-    its channel triggers using the kept env's registry so it actually
-    receives messages.
+    The topology merge has already happened by the time this is called,
+    so ``keep_g.channels`` carries both graphs' channels. We iterate
+    every post-merge channel and ensure it's registered in the kept
+    env's :class:`ChannelRegistry` (idempotent for channels that were
+    already there). Then we repoint every creature now in the kept
+    graph at the kept env and re-inject their listen-channel triggers
+    using the kept registry, so messages flowing into the kept env are
+    actually delivered.
     """
     keep_env = engine._environments[keep_gid]
     drop_env = engine._environments.pop(drop_gid, None)
@@ -390,30 +417,24 @@ def _merge_environment_into(engine: "Terrarium", keep_gid: str, drop_gid: str) -
     for ch_name, info in keep_g.channels.items():
         register_channel_in_environment(keep_env.shared_channels, info)
 
+    # Make sure the kept env carries a live engine handle so group tools
+    # invoked on creatures that just got pulled into this graph can
+    # resolve the engine.
+    register_engine_handle(keep_env, engine)
+
     # Re-inject triggers for creatures whose graph_id is now keep_gid
     # but whose existing triggers still point at drop_env.
     for cid in keep_g.creature_ids:
         creature = engine._creatures.get(cid)
         if creature is None:
             continue
-        # Repoint the agent's environment reference at the surviving
+        # Repoint the agent's environment + executor at the surviving
         # one. Without this, tools that read ``context.environment``
         # (notably send_message resolving shared channels) keep seeing
         # the *dropped* registry — which is empty for a freshly-merged
         # solo creature, so every channel send fails with "Available
         # channels — none" even though the surviving graph has them.
-        if getattr(creature.agent, "environment", None) is not keep_env:
-            creature.agent.environment = keep_env
-        # The executor caches its own ``_environment`` reference at
-        # agent-init time and uses it to build every ToolContext —
-        # update that too so the next ``send_message`` call sees the
-        # surviving registry.
-        executor = getattr(creature.agent, "executor", None)
-        if (
-            executor is not None
-            and getattr(executor, "_environment", None) is not keep_env
-        ):
-            executor._environment = keep_env
+        bind_creature_to_environment(creature, keep_env)
         for ch_name in keep_g.listen_edges.get(cid, set()):
             # remove any stale trigger (pointing at drop_env) and
             # inject a fresh one pointing at keep_env.
@@ -431,59 +452,9 @@ def _merge_environment_into(engine: "Terrarium", keep_gid: str, drop_gid: str) -
             )
 
 
-async def disconnect_creatures(
-    engine: "Terrarium",
-    sender: "CreatureRef",
-    receiver: "CreatureRef",
-    *,
-    channel: str | None = None,
-) -> DisconnectionResult:
-    """Body of :meth:`Terrarium.disconnect` — see engine docstring."""
-    sid = engine._resolve_creature_id(sender)
-    rid = engine._resolve_creature_id(receiver)
-    sender_creature = engine.get_creature(sid)
-    receiver_creature = engine.get_creature(rid)
-    if sender_creature.graph_id != receiver_creature.graph_id:
-        return DisconnectionResult(channels=[], delta_kind="nothing")
-
-    gid = sender_creature.graph_id
-    g = engine._topology.graphs[gid]
-    targets = (
-        [channel]
-        if channel is not None
-        else sorted(g.send_edges.get(sid, set()) & g.listen_edges.get(rid, set()))
-    )
-    delta = _topo.disconnect(engine._topology, sid, rid, channel=channel)
-    for ch in targets:
-        remove_channel_trigger(
-            receiver_creature.agent,
-            subscriber_id=receiver_creature.name,
-            channel_name=ch,
-        )
-        if ch in receiver_creature.listen_channels:
-            receiver_creature.listen_channels.remove(ch)
-        if ch in sender_creature.send_channels:
-            sender_creature.send_channels.remove(ch)
-
-    if delta.kind == "split":
-        for new_gid in delta.new_graph_ids:
-            if new_gid not in engine._environments:
-                engine._environments[new_gid] = Environment(env_id=f"env_{new_gid}")
-        for cid in delta.affected_creatures:
-            c = engine._creatures.get(cid)
-            if c is not None:
-                c.graph_id = engine._topology.creature_to_graph.get(cid, c.graph_id)
-        # Coordinate session-store side of the split.
-        _session_coord.apply_split(engine, delta)
-        engine._emit(
-            EngineEvent(
-                kind=EventKind.TOPOLOGY_CHANGED,
-                payload={
-                    "kind": delta.kind,
-                    "old_graph_ids": list(delta.old_graph_ids),
-                    "new_graph_ids": list(delta.new_graph_ids),
-                    "affected": sorted(delta.affected_creatures),
-                },
-            )
-        )
-    return DisconnectionResult(channels=list(targets), delta_kind=delta.kind)
+# ``disconnect_creatures``, ``apply_split_bookkeeping``, and
+# ``remove_channel_from_graph`` all live in
+# :mod:`terrarium.channel_lifecycle`. Keeping them in the sibling
+# module satisfies two constraints at once: the 600-line per-file
+# budget on this file, and the layer-graph rule that
+# ``channels`` <-> ``channel_lifecycle`` must not cycle.

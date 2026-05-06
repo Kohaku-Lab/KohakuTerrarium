@@ -7,7 +7,6 @@ uniqueness, and the invariants the runtime engine relies on.
 import pytest
 
 from kohakuterrarium.terrarium.topology import (
-    ChannelKind,
     GraphTopology,
     TopologyState,
     add_channel,
@@ -94,7 +93,6 @@ class TestAddChannel:
         gid = add_creature(s, "alice")
         info = add_channel(s, gid, "ch1")
         assert info.name == "ch1"
-        assert info.kind == ChannelKind.QUEUE
         assert "ch1" in s.graphs[gid].channels
 
     def test_duplicate_name_rejected(self):

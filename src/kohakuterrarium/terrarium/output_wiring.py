@@ -49,7 +49,7 @@ class TerrariumOutputWiringResolver:
     def __init__(
         self,
         creatures: dict[str, "CreatureHandle"],
-        root_agent: "Agent | None",
+        root_agent: "Agent | None" = None,
     ) -> None:
         self._creatures = creatures
         self._root_agent = root_agent
@@ -57,12 +57,13 @@ class TerrariumOutputWiringResolver:
         # a mis-typed target doesn't spam the log every turn.
         self._warned_missing: set[str] = set()
 
-    def _resolve_target(self, target: str) -> "Agent | None":
+    def _resolve_target(self, target: str, source: str | None = None) -> "Agent | None":
         """Map a wiring target string to an Agent, or None if unknown."""
         if target == ROOT_TARGET:
-            if self._root_agent is None:
+            root_agent = self._resolve_graph_root_agent(source)
+            if root_agent is None:
                 self._warn_once(target, "terrarium has no root agent configured")
-            return self._root_agent
+            return root_agent
 
         handle = self._resolve_handle(target)
         if handle is None:
@@ -82,6 +83,27 @@ class TerrariumOutputWiringResolver:
             if getattr(config, "name", None) == target:
                 return creature
         return None
+
+    def _resolve_graph_root_agent(self, source: str | None) -> "Agent | None":
+        source_handle = self._resolve_handle(source or "")
+        source_graph = getattr(source_handle, "graph_id", None)
+        candidates = [
+            c
+            for c in self._creatures.values()
+            if getattr(c, "is_privileged", False)
+            and (source_graph is None or getattr(c, "graph_id", None) == source_graph)
+        ]
+        if not candidates and self._root_agent is not None:
+            return self._root_agent
+        if not candidates:
+            return None
+        for creature in candidates:
+            if getattr(creature, "creature_id", "") == ROOT_TARGET:
+                return creature.agent
+        for creature in candidates:
+            if getattr(creature, "name", "") == ROOT_TARGET:
+                return creature.agent
+        return sorted(candidates, key=lambda c: getattr(c, "creature_id", ""))[0].agent
 
     def _target_identity(self, target: str, target_agent: "Agent") -> str:
         if target == ROOT_TARGET:
@@ -119,7 +141,7 @@ class TerrariumOutputWiringResolver:
         receiver's own code path and do not propagate here.
         """
         for entry in entries:
-            target_agent = self._resolve_target(entry.to)
+            target_agent = self._resolve_target(entry.to, source=source)
             if target_agent is None:
                 continue
             target_identity = self._target_identity(entry.to, target_agent)

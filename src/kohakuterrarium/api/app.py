@@ -92,9 +92,13 @@ async def lifespan(app: FastAPI):
     # capture events the very first turn produces, not from the first
     # snapshot poll.
     get_aggregator()
+    get_engine()._runtime_prompt.attach()
     yield
-    # Shutdown: stop the engine (cleans up every active session).
+    # Shutdown: stop the engine (cleans up every active session) and
+    # detach loop-bound listeners so repeated lifespan cycles can
+    # reattach them to the next event loop.
     engine = get_engine()
+    engine._runtime_prompt.detach()
     await engine.shutdown()
 
 

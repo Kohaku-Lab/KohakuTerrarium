@@ -97,10 +97,9 @@ class ChannelObserver:
             logger.debug("Observing broadcast channel", channel=channel_name)
 
     def record(self, channel_name: str, msg: ChannelMessage) -> None:
-        """Record a message (called by TerrariumAPI after send).
-
-        Used for queue channels where non-destructive observation
-        is not possible.
+        """Record a message — called by Studio observer / API endpoints
+        after a send completes, for any channel kind where
+        non-destructive subscription isn't available.
         """
         observed = _to_observed(channel_name, msg)
         self._append(observed)

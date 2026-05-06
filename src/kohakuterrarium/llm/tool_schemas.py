@@ -498,110 +498,172 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
         },
         "required": ["prompt"],
     },
-    "terrarium_create": {
+    "group_status": {
+        "type": "object",
+        "properties": {
+            "include_history": {
+                "type": "boolean",
+                "description": "Include the last N channel messages (default false).",
+            },
+            "history_limit": {
+                "type": "integer",
+                "description": "Number of recent messages per channel (default 10).",
+            },
+            "include_spawnable": {
+                "type": "boolean",
+                "description": "Include catalog of creatures spawnable via group_add_node (default true).",
+            },
+        },
+    },
+    "group_add_node": {
         "type": "object",
         "properties": {
             "config_path": {
                 "type": "string",
-                "description": "Path or package reference to the terrarium config.",
+                "description": "Creature config path or @pkg/creatures/<name> reference.",
+            },
+            "name": {
+                "type": "string",
+                "description": "Optional display name override for the new creature.",
+            },
+            "llm": {
+                "type": "string",
+                "description": "Optional LLM profile override.",
+            },
+            "pwd": {
+                "type": "string",
+                "description": "Working directory; defaults to caller's pwd.",
             },
         },
         "required": ["config_path"],
     },
-    "terrarium_status": {
+    "group_remove_node": {
         "type": "object",
         "properties": {
-            "terrarium_id": {
+            "creature_id": {
                 "type": "string",
-                "description": "Terrarium id. Omit to list all running terrariums.",
+                "description": "Creature id (or name) to destroy. Privileged creatures are protected.",
             },
         },
+        "required": ["creature_id"],
     },
-    "terrarium_stop": {
+    "group_start_node": {
         "type": "object",
         "properties": {
-            "terrarium_id": {
+            "creature_id": {
                 "type": "string",
-                "description": "Terrarium id to stop.",
+                "description": "Creature id (or name) to start.",
             },
         },
-        "required": ["terrarium_id"],
+        "required": ["creature_id"],
     },
-    "terrarium_send": {
+    "group_stop_node": {
         "type": "object",
         "properties": {
-            "terrarium_id": {"type": "string", "description": "Terrarium id."},
-            "channel": {"type": "string", "description": "Channel name."},
-            "message": {"type": "string", "description": "Message content."},
+            "creature_id": {
+                "type": "string",
+                "description": "Creature id (or name) to stop.",
+            },
         },
-        "required": ["terrarium_id", "channel", "message"],
+        "required": ["creature_id"],
     },
-    "terrarium_observe": {
+    "group_channel": {
         "type": "object",
         "properties": {
-            "terrarium_id": {"type": "string", "description": "Terrarium id."},
-            "channel": {"type": "string", "description": "Channel name."},
-            "enabled": {
+            "action": {
+                "type": "string",
+                "enum": ["create", "delete", "wire", "unwire"],
+            },
+            "channel": {
+                "type": "string",
+                "description": "Channel name.",
+            },
+            "description": {
+                "type": "string",
+                "description": "Channel description (action='create' only).",
+            },
+            "creature_id": {
+                "type": "string",
+                "description": "Creature id (or name) to wire/unwire.",
+            },
+            "direction": {
+                "type": "string",
+                "enum": ["send", "listen"],
+                "description": "Edge direction for wire/unwire.",
+            },
+        },
+        "required": ["action", "channel"],
+    },
+    "group_wire": {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["add", "remove"]},
+            "to": {
+                "type": "string",
+                "description": "Target creature for action='add'.",
+            },
+            "from": {
+                "type": "string",
+                "description": "Source creature; defaults to caller.",
+            },
+            "with_content": {
                 "type": "boolean",
-                "description": "True to start observing, false to stop. Default true.",
+                "description": "Whether the wire delivers source content (default true).",
             },
-        },
-        "required": ["terrarium_id", "channel"],
-    },
-    "terrarium_history": {
-        "type": "object",
-        "properties": {
-            "terrarium_id": {"type": "string", "description": "Terrarium id."},
-            "channel": {"type": "string", "description": "Channel name."},
-            "limit": {
-                "type": "integer",
-                "description": "Max messages to return (default 10).",
-            },
-        },
-        "required": ["terrarium_id", "channel"],
-    },
-    "creature_start": {
-        "type": "object",
-        "properties": {
-            "terrarium_id": {"type": "string", "description": "Terrarium id."},
-            "name": {
+            "prompt": {
                 "type": "string",
-                "description": "Creature name (unique per terrarium).",
+                "description": "Optional receiver-side template.",
             },
-            "config_path": {
+            "prompt_format": {
                 "type": "string",
-                "description": "Path or package reference to the creature config.",
+                "enum": ["simple", "jinja"],
             },
-            "listen_channels": {
-                "type": "string",
-                "description": "Comma-separated channel names the creature listens on.",
-            },
-            "send_channels": {
-                "type": "string",
-                "description": "Comma-separated channel names the creature can send to.",
-            },
-        },
-        "required": ["terrarium_id", "name", "config_path"],
-    },
-    "creature_stop": {
-        "type": "object",
-        "properties": {
-            "terrarium_id": {"type": "string", "description": "Terrarium id."},
-            "name": {"type": "string", "description": "Creature name."},
-        },
-        "required": ["terrarium_id", "name"],
-    },
-    "creature_interrupt": {
-        "type": "object",
-        "properties": {
-            "terrarium_id": {"type": "string", "description": "Terrarium id."},
-            "name": {"type": "string", "description": "Creature name."},
-            "cancel_background": {
+            "allow_self_trigger": {
                 "type": "boolean",
-                "description": "Also cancel background jobs (default false).",
+                "description": "Allow source==target self-trigger (default false).",
+            },
+            "edge_id": {
+                "type": "string",
+                "description": "Edge id (action='remove' only).",
             },
         },
-        "required": ["terrarium_id", "name"],
+        "required": ["action"],
+    },
+    "group_send": {
+        "type": "object",
+        "properties": {
+            "to": {
+                "type": "string",
+                "description": "Target creature in your group.",
+            },
+            "message": {
+                "type": "string",
+                "description": "Message content delivered to the target's controller.",
+            },
+        },
+        "required": ["to", "message"],
+    },
+    "send_channel": {
+        "type": "object",
+        "properties": {
+            "channel": {
+                "type": "string",
+                "description": "Channel name (must be wired as outgoing for the caller).",
+            },
+            "message": {
+                "type": "string",
+                "description": "Message content broadcast to all listeners.",
+            },
+            "metadata": {
+                "type": "object",
+                "description": "Optional metadata bag.",
+            },
+            "reply_to": {
+                "type": "string",
+                "description": "Optional message id this is replying to.",
+            },
+        },
+        "required": ["channel", "message"],
     },
     "mcp_list": {
         "type": "object",

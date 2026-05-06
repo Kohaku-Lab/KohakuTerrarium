@@ -1,21 +1,17 @@
-"""CLI resume command — terminal-side wiring around session resume.
+"""CLI resume command — resume a session via the Terrarium engine.
 
-The session-format migration announcement and any logic shared with
-the HTTP route live in
-:mod:`kohakuterrarium.studio.persistence.resume`; this module is
-strictly the rich-CLI presentation layer.
+Uses :meth:`Terrarium.resume` to rebuild creatures from a saved
+``.kohakutr`` store, then runs the engine TUI focused on the privileged
+creature in the resumed graph.
 """
 
 import asyncio
-import sys
 
-from kohakuterrarium.builtins.cli_rich.input import RichCLIInput
-from kohakuterrarium.builtins.cli_rich.output import RichCLIOutput
-from kohakuterrarium.cli.run import _resolve_session, _run_agent_rich_cli
-from kohakuterrarium.session.resume import detect_session_type, resume_agent
+from kohakuterrarium.cli.run import _resolve_session
+from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.resume import announce_migration_if_needed
-from kohakuterrarium.terrarium.cli import run_terrarium_with_tui
-from kohakuterrarium.terrarium.legacy_resume import resume_terrarium
+from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine_cli import run_engine_with_tui
 from kohakuterrarium.utils.logging import (
     configure_utf8_stdio,
     enable_stderr_logging,
@@ -32,18 +28,22 @@ def resume_cli(
     llm_override: str | None = None,
     log_stderr: str = "auto",
 ) -> int:
-    """Resume an agent or terrarium from a session file."""
+    """Resume an agent or terrarium session via the engine.
+
+    ``io_mode`` is accepted but ignored — every resume runs the engine
+    TUI. ``log_stderr="auto"`` skips stderr mirroring because the TUI
+    owns the terminal.
+    """
     configure_utf8_stdio(log=True)
     set_level(log_level)
 
-    # Resolve mode the same way ``kt run`` does — rich CLI on a TTY,
-    # plain otherwise. Keeps resume behavior consistent with run.
-    if io_mode is None:
-        io_mode = "cli" if sys.stdout.isatty() else "plain"
+    if io_mode in ("cli", "plain"):
+        print(
+            f"Warning: --mode {io_mode} is not yet supported on the engine "
+            "path; using the TUI instead."
+        )
 
-    # Mirror logs to stderr when the terminal is not owned by a
-    # full-screen UI. ``auto`` treats plain as free; cli/tui as taken.
-    if log_stderr == "on" or (log_stderr == "auto" and io_mode not in {"cli", "tui"}):
+    if log_stderr == "on":
         enable_stderr_logging(log_level)
 
     path = _resolve_session(query, last=last)
@@ -54,51 +54,55 @@ def resume_cli(
             print("No sessions found in ~/.kohakuterrarium/sessions/")
         return 1
 
-    # Wave D: announce any pending upgrade before we open the store so
-    # the user sees what's happening; resume itself performs the work.
     announce_migration_if_needed(path)
 
-    session_type = detect_session_type(path)
-    store = None
-
     try:
-        if session_type == "terrarium":
-            # Don't pass io_mode - terrarium CLI controls all I/O
-            runtime, store = resume_terrarium(path, pwd_override)
-            asyncio.run(run_terrarium_with_tui(runtime))
-        else:
-            # ``cli`` mode lives in builtins.cli_rich, which sits above
-            # session/ in the layering — so the rich modules are built
-            # here and passed in directly. Other modes are handled by
-            # ``resume_agent`` itself via the ``io_mode`` shortcut.
-            resume_kwargs: dict = {
-                "pwd_override": pwd_override,
-                "llm_override": llm_override,
-            }
-            if io_mode == "cli":
-                resume_kwargs["input_module"] = RichCLIInput()
-                resume_kwargs["output_module"] = RichCLIOutput(app=None)
-            else:
-                resume_kwargs["io_mode"] = io_mode
-            agent, store = resume_agent(path, **resume_kwargs)
-            # ``cli`` mode uses RichCLIApp.run() as the main loop, not
-            # agent.run(). Without this dispatch, resume in CLI mode
-            # blocks forever showing nothing because the agent is started
-            # but no input/output frontend is actually running.
-            if io_mode == "cli":
-                asyncio.run(_run_agent_rich_cli(agent))
-            else:
-                asyncio.run(agent.run())
-        return 0
+        return asyncio.run(_run(path, pwd_override, llm_override))
     except KeyboardInterrupt:
         print("\nInterrupted")
         return 0
-    except Exception as e:
-        print(f"Error: {e}")
+    except Exception as exc:
+        print(f"Error: {exc}")
         return 1
     finally:
-        if store:
-            store.close()
         if path.exists():
             print("\nSession saved. To resume:")
             print(f"  kt resume {path.stem}")
+
+
+async def _run(path, pwd_override, llm_override) -> int:
+    store = SessionStore(path)
+    try:
+        engine = await Terrarium.resume(
+            store, pwd=pwd_override, llm_override=llm_override
+        )
+        async with engine:
+            graph_id = next(iter(engine._topology.graphs.keys()), None)
+            if graph_id is None:
+                print("Resume produced no graphs; session is empty.")
+                return 1
+            focus = _pick_focus(engine, graph_id)
+            await run_engine_with_tui(engine, focus, store)
+            return 0
+    finally:
+        store.close()
+
+
+def _pick_focus(engine: Terrarium, graph_id: str) -> str:
+    graph = engine.get_graph(graph_id)
+    privileged: list[str] = []
+    fallback: list[str] = []
+    for cid in sorted(graph.creature_ids):
+        try:
+            c = engine.get_creature(cid)
+        except KeyError:
+            continue
+        if getattr(c, "is_privileged", False):
+            privileged.append(cid)
+        else:
+            fallback.append(cid)
+    if privileged:
+        return privileged[0]
+    if fallback:
+        return fallback[0]
+    raise RuntimeError(f"resumed graph {graph_id!r} has no creatures")

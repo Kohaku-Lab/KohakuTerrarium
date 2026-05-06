@@ -7,13 +7,19 @@ recipe and calls them in dependency order.
 
 Auto-created channels (per legacy behaviour):
 
-- One queue channel named after each creature — the "direct" channel
-  any other creature can address.
-- ``report_to_root`` queue channel when the recipe declares a root.
+- One channel named after each creature — the "direct" channel any
+  other creature can address. (Graph topology channels are always
+  broadcast.)
+- ``report_to_root`` channel when the recipe declares a root.
 
-The root-agent itself (with terrarium-management tools force-registered)
-is wired up by the higher-level entry points; this loader marks it via
-``Creature.config`` but doesn't bind tools.
+When a root is declared it is built like any other creature, then the
+engine's :meth:`Terrarium.assign_root` is called against it.
+``assign_root`` sets ``creature.is_privileged = True``, wires the root
+as listener on every existing channel (including ``report_to_root``),
+and gives every other creature a send edge on ``report_to_root``.
+``assign_root`` also calls
+:func:`terrarium.tools_group.force_register_group_tools` on the root
+agent, so no recipe-side tool injection is needed.
 """
 
 from pathlib import Path
@@ -21,6 +27,7 @@ from typing import TYPE_CHECKING, Callable
 
 import kohakuterrarium.terrarium.channels as _channels
 import kohakuterrarium.terrarium.topology as _topo
+import kohakuterrarium.terrarium.wiring as _wiring
 from kohakuterrarium.core.environment import Environment
 from kohakuterrarium.terrarium.config import (
     CreatureConfig,
@@ -28,17 +35,7 @@ from kohakuterrarium.terrarium.config import (
     load_terrarium_config,
 )
 from kohakuterrarium.terrarium.creature_host import Creature, build_creature
-from kohakuterrarium.terrarium.factory import (
-    build_root_awareness_prompt,
-    force_register_terrarium_tools,
-    inject_prompt_section,
-)
-import kohakuterrarium.terrarium.wiring as _wiring
-from kohakuterrarium.terrarium.tool_manager import (
-    TERRARIUM_MANAGER_KEY,
-    TerrariumToolManager,
-)
-from kohakuterrarium.terrarium.topology import ChannelKind, GraphTopology
+from kohakuterrarium.terrarium.topology import GraphTopology
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -56,10 +53,6 @@ def _resolve_recipe(
     if isinstance(recipe, TerrariumConfig):
         return recipe
     return load_terrarium_config(recipe)
-
-
-def _kind_from_string(s: str) -> ChannelKind:
-    return ChannelKind.BROADCAST if s == "broadcast" else ChannelKind.QUEUE
 
 
 async def apply_recipe(
@@ -93,25 +86,24 @@ async def apply_recipe(
         engine._topology.graphs[graph_id] = _topo.GraphTopology(graph_id=graph_id)
         engine._environments[graph_id] = Environment(env_id=f"env_{graph_id}")
     env = engine._environments[graph_id]
+    _channels.register_engine_handle(env, engine)
 
     # 2. Pre-declare every channel the recipe wants.
     for ch_cfg in config.channels:
         await engine.add_channel(
             graph_id,
             ch_cfg.name,
-            kind=_kind_from_string(ch_cfg.channel_type),
             description=ch_cfg.description,
         )
         logger.debug("Recipe channel declared", channel=ch_cfg.name)
 
-    # 3. Auto-direct channels (one queue per creature) — added even for
+    # 3. Auto-direct channels (one per creature) — added even for
     #    creatures the recipe didn't list as having explicit inbound.
     for cr_cfg in config.creatures:
         if cr_cfg.name not in engine.get_graph(graph_id).channels:
             await engine.add_channel(
                 graph_id,
                 cr_cfg.name,
-                kind=ChannelKind.QUEUE,
                 description=f"Direct channel to {cr_cfg.name}",
             )
 
@@ -121,7 +113,6 @@ async def apply_recipe(
         await engine.add_channel(
             graph_id,
             "report_to_root",
-            kind=ChannelKind.QUEUE,
             description="Any creature can report to the root agent",
         )
 
@@ -157,7 +148,6 @@ async def apply_recipe(
             use_default_builder=use_default_builder,
         )
         await engine.add_creature(root_creature, graph=graph_id, start=False)
-        _prepare_root_creature(engine, config, graph_id, root_creature)
 
     # 6. Wire listen/send edges + inject triggers.
     for cr_cfg in config.creatures:
@@ -188,7 +178,7 @@ async def apply_recipe(
             if ch not in creature.listen_channels:
                 creature.listen_channels.append(ch)
         # send edges — no trigger needed; the agent emits to the channel
-        # via ``send_message`` tool, which uses the registry directly.
+        # via send_channel / send_message tool.
         all_send = list(cr_cfg.send_channels)
         if has_root and "report_to_root" not in all_send:
             all_send.append("report_to_root")
@@ -205,12 +195,14 @@ async def apply_recipe(
             if ch not in creature.send_channels:
                 creature.send_channels.append(ch)
 
+    # 7. Designate the root creature: makes it privileged and wires it
+    # as the listener on every channel in the graph.
     if root_creature is not None:
         await engine.assign_root(root_creature)
 
-    _install_recipe_output_wiring_resolver(engine, graph_id, root_creature)
+    _wiring.install_output_wiring_resolver(engine)
 
-    # 7. Start every creature now that wiring is complete.
+    # 8. Start every creature now that wiring is complete.
     for cid in list(engine.get_graph(graph_id).creature_ids):
         creature = engine.get_creature(cid)
         await creature.start()
@@ -248,77 +240,3 @@ def _build_recipe_creature(
     if getattr(creature.agent, "executor", None) is not None:
         creature.agent.executor._environment = env
     return creature
-
-
-def _prepare_root_creature(
-    engine: "Terrarium",
-    config: TerrariumConfig,
-    graph_id: str,
-    root: Creature,
-) -> None:
-    registry = getattr(root.agent, "registry", None)
-    if registry is not None and hasattr(registry, "register_tool"):
-        force_register_terrarium_tools(root.agent)
-    if getattr(root.agent, "controller", None) is not None:
-        inject_prompt_section(root.agent, build_root_awareness_prompt(config))
-    manager = TerrariumToolManager()
-    manager.register_runtime(
-        config.name,
-        _EngineRuntimeAdapter(engine, graph_id, config.name),
-    )
-    root.agent.environment.register(TERRARIUM_MANAGER_KEY, manager)
-
-
-class _EngineRuntimeAdapter:
-    def __init__(self, engine: "Terrarium", graph_id: str, name: str) -> None:
-        self.engine = engine
-        self.graph_id = graph_id
-        self.name = name
-        self.environment = engine._environments[graph_id]
-
-    def get_status(self) -> dict:
-        graph = self.engine.get_graph(self.graph_id)
-        return {
-            "name": self.name,
-            "running": True,
-            "has_root": any(
-                getattr(self.engine.get_creature(cid), "is_root", False)
-                for cid in graph.creature_ids
-            ),
-            "creatures": {
-                cid: self.engine.get_creature(cid).get_status()
-                for cid in graph.creature_ids
-            },
-            "channels": self.environment.shared_channels.get_channel_info(),
-        }
-
-    async def stop(self) -> None:
-        await self.engine.stop_graph(self.graph_id)
-
-    async def add_creature(self, creature_cfg: CreatureConfig) -> Creature:
-        return await self.engine.add_creature(creature_cfg, graph=self.graph_id)
-
-    async def remove_creature(self, name: str) -> bool:
-        try:
-            creature = self.engine.get_creature(name)
-        except KeyError:
-            return False
-        if creature.graph_id != self.graph_id:
-            return False
-        await self.engine.remove_creature(name)
-        return True
-
-    def get_creature_agent(self, name: str):
-        try:
-            creature = self.engine.get_creature(name)
-        except KeyError:
-            return None
-        if creature.graph_id != self.graph_id:
-            return None
-        return creature.agent
-
-
-def _install_recipe_output_wiring_resolver(
-    engine: "Terrarium", graph_id: str, root_creature: Creature | None
-) -> None:
-    _wiring.install_output_wiring_resolver(engine)

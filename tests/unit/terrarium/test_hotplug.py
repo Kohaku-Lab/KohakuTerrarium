@@ -11,7 +11,6 @@ import pytest
 
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.events import EventFilter, EventKind
-from kohakuterrarium.terrarium.topology import ChannelKind
 
 from tests.unit.terrarium._fakes import make_creature
 
@@ -112,7 +111,7 @@ class TestAddCreatureToExistingGraph:
         engine = Terrarium()
         a = await engine.add_creature(make_creature("alice"))
         b = await engine.add_creature(make_creature("bob"), graph=a.graph_id)
-        await engine.add_channel(a.graph_id, "ab", kind=ChannelKind.BROADCAST)
+        await engine.add_channel(a.graph_id, "ab")
         await engine.connect(a, b, channel="ab")
 
         # Add carol to the same graph after the channel exists.

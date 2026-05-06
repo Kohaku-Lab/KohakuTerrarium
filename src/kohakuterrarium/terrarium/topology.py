@@ -25,23 +25,19 @@ These rules drive the session merge/split policy in
 
 from collections import deque
 from dataclasses import dataclass, field
-from enum import Enum
 from uuid import uuid4
-
-
-class ChannelKind(str, Enum):
-    """Kind of channel — affects delivery semantics, not topology."""
-
-    BROADCAST = "broadcast"
-    QUEUE = "queue"
 
 
 @dataclass(frozen=True)
 class ChannelInfo:
-    """Static metadata about a channel."""
+    """Static metadata about a channel.
+
+    Graph topology channels are always broadcast — every listener
+    receives every send. Channel-kind variants (queue) live in
+    :mod:`core.channel` for sub-agent private comms only.
+    """
 
     name: str
-    kind: ChannelKind = ChannelKind.QUEUE
     description: str = ""
 
 
@@ -187,7 +183,6 @@ def add_channel(
     graph_id: str,
     name: str,
     *,
-    kind: ChannelKind = ChannelKind.QUEUE,
     description: str = "",
 ) -> ChannelInfo:
     """Declare a channel inside a graph.  Channel names are
@@ -198,7 +193,7 @@ def add_channel(
         raise KeyError(f"graph {graph_id!r} does not exist")
     if name in g.channels:
         raise ValueError(f"channel {name!r} already declared in graph {graph_id!r}")
-    info = ChannelInfo(name=name, kind=kind, description=description)
+    info = ChannelInfo(name=name, description=description)
     g.channels[name] = info
     return info
 
@@ -272,7 +267,6 @@ def connect(
     receiver_id: str,
     *,
     channel: str | None = None,
-    kind: ChannelKind = ChannelKind.QUEUE,
 ) -> tuple[str, TopologyDelta]:
     """Connect two creatures via a channel.
 
@@ -292,7 +286,7 @@ def connect(
     g = state.graph_of(sender_id)
     name = channel or f"{sender_id}__{receiver_id}__{uuid4().hex[:8]}"
     if name not in g.channels:
-        add_channel(state, g.graph_id, name, kind=kind)
+        add_channel(state, g.graph_id, name)
     g.send_edges.setdefault(sender_id, set()).add(name)
     g.listen_edges.setdefault(receiver_id, set()).add(name)
     if not delta.affected_creatures:

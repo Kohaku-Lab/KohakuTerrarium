@@ -391,6 +391,11 @@ class Controller:
             elif event.type == "subagent_output":
                 content_text = event.get_text_content()
                 text_parts.append(f"[Sub-agent {event.job_id} output]\n{content_text}")
+            elif event.prompt_override:
+                if isinstance(event.content, list):
+                    append_multimodal(event.prompt_override, event.content)
+                else:
+                    text_parts.append(event.prompt_override)
             else:
                 content_text = event.get_text_content()
                 text_parts.append(f"[{event.type}] {content_text}")

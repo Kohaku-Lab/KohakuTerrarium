@@ -15,6 +15,7 @@ from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+import kohakuterrarium.terrarium.channel_lifecycle as _lifecycle
 import kohakuterrarium.terrarium.channels as _channels
 import kohakuterrarium.terrarium.recipe as _recipe
 import kohakuterrarium.terrarium.resume as _resume
@@ -35,10 +36,15 @@ from kohakuterrarium.terrarium.events import (
     EventKind,
     RootAssignment,
 )
+from kohakuterrarium.terrarium.runtime_prompt import RuntimeGraphPrompt
+from kohakuterrarium.terrarium.tools_group import (
+    force_register_basic_tools,
+    force_register_privileged_tools,
+)
 from kohakuterrarium.terrarium.topology import (
     ChannelInfo,
-    ChannelKind,
     GraphTopology,
+    TopologyDelta,
     TopologyState,
 )
 from kohakuterrarium.utils.logging import get_logger
@@ -84,6 +90,11 @@ class Terrarium:
         self._session_stores: dict[str, "SessionStore"] = {}
         self._subscribers: list[_Subscriber] = []
         self._running = True
+        # Live runtime-graph prompt block — refreshed reactively when the
+        # engine emits topology / wire / parent-link events. Attaches
+        # lazily on the first ``async with`` / ``__aenter__`` so a sync
+        # construction in tests doesn't require an event loop.
+        self._runtime_prompt = RuntimeGraphPrompt(self)
 
     @classmethod
     async def from_recipe(
@@ -158,9 +169,11 @@ class Terrarium:
 
     async def __aenter__(self) -> "Terrarium":
         self._running = True
+        self._runtime_prompt.attach()
         return self
 
     async def __aexit__(self, *exc) -> None:
+        self._runtime_prompt.detach()
         await self.shutdown()
 
     # ------------------------------------------------------------------
@@ -176,6 +189,8 @@ class Terrarium:
         llm_override: str | None = None,
         pwd: str | None = None,
         start: bool = True,
+        is_privileged: bool = False,
+        parent_creature_id: str | None = None,
     ) -> Creature:
         """Add a creature to the engine.
 
@@ -183,6 +198,19 @@ class Terrarium:
         or a pre-built ``Creature`` (tests / advanced callers).  With
         ``graph=None`` a fresh singleton graph is minted.  ``start``
         toggles auto-start of the underlying agent.
+
+        ``is_privileged`` marks the creature as having access to the
+        group_* tool surface — set by direct user actions (solo
+        ``kt run``, Studio "new creature") and by recipe-root assignment
+        (via :meth:`assign_root`). False for tool-spawned workers.
+        **Elevate-only**: passing ``False`` here on a pre-built
+        :class:`Creature` whose ``is_privileged`` is already ``True``
+        (tests, advanced callers) does not demote it. Callers cannot
+        downgrade privilege through this method.
+
+        ``parent_creature_id`` is also additive: it overwrites only when
+        non-None. None means "leave whatever the pre-built creature
+        already has."
 
         Example: ``alice = await t.add_creature("alice.yaml")``.
         """
@@ -205,11 +233,30 @@ class Terrarium:
             self._topology, creature.creature_id, graph_id=graph_id
         )
         creature.graph_id = gid
-        # Allocate or reuse the graph's environment.
+        # ``is_privileged`` and ``parent_creature_id`` are additive. A
+        # pre-built creature (tests, advanced callers) may already carry
+        # these flags; we never demote them via add_creature.
+        if is_privileged:
+            creature.is_privileged = True
+        if parent_creature_id is not None:
+            creature.parent_creature_id = parent_creature_id
+        # Allocate or reuse the graph's environment, then bind the
+        # creature's agent + executor to it so ToolContext is correct
+        # even when joining a non-empty graph.
         if gid not in self._environments:
             self._environments[gid] = Environment(env_id=f"env_{gid}")
+        graph_env = self._environments[gid]
+        _channels.bind_creature_to_environment(creature, graph_env)
+        _channels.register_engine_handle(graph_env, self)
         self._creatures[creature.creature_id] = creature
         _wiring.install_output_wiring_resolver(self)
+
+        # Every engine-backed creature gets the basic comm tools
+        # (``send_channel`` / ``group_send``); only privileged creatures
+        # additionally get the graph-mutating ``group_*`` surface.
+        force_register_basic_tools(creature.agent)
+        if creature.is_privileged:
+            force_register_privileged_tools(creature.agent)
 
         if start:
             await creature.start()
@@ -225,7 +272,7 @@ class Terrarium:
     async def remove_creature(self, creature: CreatureRef) -> None:
         """Stop and remove a creature.  May split the graph it lived in.
 
-        Idempotent — removing an unknown creature raises ``KeyError``.
+        Raises ``KeyError`` when the creature is not in the engine.
         """
         cid = self._resolve_creature_id(creature)
         c = self._creatures.get(cid)
@@ -247,18 +294,12 @@ class Terrarium:
                 graph_id=old_gid,
             )
         )
-        if delta.kind != "nothing":
-            self._emit(
-                EngineEvent(
-                    kind=EventKind.TOPOLOGY_CHANGED,
-                    payload={
-                        "kind": delta.kind,
-                        "old_graph_ids": list(delta.old_graph_ids),
-                        "new_graph_ids": list(delta.new_graph_ids),
-                        "affected": sorted(delta.affected_creatures),
-                    },
-                )
-            )
+        # Removing a creature can split the graph (when it was the only
+        # bridge between two clusters). Run the shared bookkeeping so
+        # new envs are allocated, surviving creatures are repointed at
+        # their new graph_id, and session stores are coordinated.
+        # ``apply_split_bookkeeping`` is a no-op for non-split deltas.
+        _lifecycle.apply_split_bookkeeping(self, delta)
 
     def get_creature(self, creature_id: str) -> Creature:
         """Return the creature with the given id.  Raises ``KeyError``."""
@@ -295,28 +336,38 @@ class Terrarium:
         self,
         graph: GraphRef,
         name: str,
-        kind: ChannelKind = ChannelKind.BROADCAST,
         description: str = "",
     ) -> ChannelInfo:
         """Declare a channel inside a graph.
 
-        Channel names are graph-unique.  After declaration the channel
-        exists in the graph's :class:`Environment.shared_channels`
-        registry but no creature listens to or sends on it yet — use
-        :meth:`connect` (or set listen/send via topology helpers) to
-        wire creatures up.
+        Channel names are graph-unique. Graph topology channels are
+        always broadcast — every listener receives every send. After
+        declaration the channel exists in the graph's
+        :class:`Environment.shared_channels` registry but no creature
+        listens to or sends on it yet — use :meth:`connect` (or set
+        listen/send via topology helpers) to wire creatures up.
         """
         gid = self._resolve_graph_id(graph)
         info = _topo.add_channel(
             self._topology,
             gid,
             name,
-            kind=kind,
             description=description,
         )
         env = self._environments[gid]
         _channels.register_channel_in_environment(env.shared_channels, info)
         return info
+
+    async def remove_channel(self, graph: GraphRef, name: str) -> TopologyDelta:
+        """Remove a channel from a graph.
+
+        Tears down listen triggers, drops the channel from the live
+        registry and topology, and may split the graph if the channel
+        was the only connectivity bridge between two components. Body
+        in ``terrarium.channels.remove_channel_from_graph``.
+        """
+        gid = self._resolve_graph_id(graph)
+        return await _lifecycle.remove_channel_from_graph(self, gid, name)
 
     async def connect(
         self,
@@ -324,7 +375,6 @@ class Terrarium:
         receiver: CreatureRef,
         *,
         channel: str | None = None,
-        kind: ChannelKind = ChannelKind.QUEUE,
     ) -> "ConnectionResult":
         """Wire a sender → receiver link via a channel.
 
@@ -336,7 +386,7 @@ class Terrarium:
         Body lives in ``terrarium.channels.connect_creatures``.
         """
         return await _channels.connect_creatures(
-            self, sender, receiver, channel=channel, kind=kind
+            self, sender, receiver, channel=channel
         )
 
     async def disconnect(
@@ -350,9 +400,9 @@ class Terrarium:
 
         When ``channel`` is None, every sender→receiver edge is
         unwired.  Body lives in
-        ``terrarium.channels.disconnect_creatures``.
+        ``terrarium.channel_lifecycle.disconnect_creatures``.
         """
-        return await _channels.disconnect_creatures(
+        return await _lifecycle.disconnect_creatures(
             self, sender, receiver, channel=channel
         )
 
@@ -363,12 +413,31 @@ class Terrarium:
     async def wire_output(self, creature: CreatureRef, target) -> str:
         """Add a runtime ``config.output_wiring`` edge; return its id."""
         c = self._creature(creature)
-        return _wiring.add_output_edge(c.agent, target)
+        edge_id = _wiring.add_output_edge(c.agent, target)
+        self._emit(
+            EngineEvent(
+                kind=EventKind.OUTPUT_WIRE_ADDED,
+                creature_id=c.creature_id,
+                graph_id=c.graph_id,
+                payload={"edge_id": edge_id},
+            )
+        )
+        return edge_id
 
     async def unwire_output(self, creature: CreatureRef, edge_id: str) -> bool:
         """Remove a runtime ``config.output_wiring`` edge by id."""
         c = self._creature(creature)
-        return _wiring.remove_output_edge(c.agent, edge_id)
+        removed = _wiring.remove_output_edge(c.agent, edge_id)
+        if removed:
+            self._emit(
+                EngineEvent(
+                    kind=EventKind.OUTPUT_WIRE_REMOVED,
+                    creature_id=c.creature_id,
+                    graph_id=c.graph_id,
+                    payload={"edge_id": edge_id},
+                )
+            )
+        return removed
 
     def list_output_wiring(self, creature: CreatureRef) -> list[dict]:
         """List output-wiring edges on a creature."""
@@ -395,14 +464,19 @@ class Terrarium:
         *,
         report_channel: str = "report_to_root",
     ) -> RootAssignment:
-        """Designate ``creature`` as the root of its graph.
+        """Designate ``creature`` as the privileged root of its graph.
 
-        Channel + wiring helper that mirrors the legacy "root agent"
-        pattern: the root listens to every peer channel, every peer
-        gains a send edge on a dedicated ``report_channel``.  Sets
-        ``creature.is_root = True`` for downstream callers (UI mount,
-        tool force-registration).  Body lives in
-        :func:`terrarium.root.assign_root_to`.
+        Group-scoped helper — operates only on the creature's current
+        graph. Side effects:
+
+        - Declares ``report_channel`` if missing.
+        - Wires the root as listener on every channel in the graph.
+        - Wires every other creature as sender on ``report_channel``.
+        - Sets ``creature.is_privileged = True`` (elevate-only — already
+          privileged creatures stay privileged).
+        - Force-registers the ``group_*`` tools on the root agent.
+
+        Body lives in :func:`terrarium.root.assign_root_to`.
         """
         return await _root.assign_root_to(self, creature, report_channel=report_channel)
 
@@ -523,10 +597,9 @@ class Terrarium:
     def status(self, creature: CreatureRef | None = None) -> dict:
         """Status dict for one creature, or a roll-up if ``None``.
 
-        The single-creature shape mirrors today's
-        ``AgentSession.get_status()`` so existing API consumers don't
-        notice the swap.  The roll-up shape (no argument) lists every
-        creature plus graph membership.
+        The single-creature shape mirrors :meth:`Creature.get_status` —
+        the same shape every API / WS endpoint reads. The roll-up
+        shape (no argument) lists every creature plus graph membership.
         """
         if creature is not None:
             return self._creature(creature).get_status()

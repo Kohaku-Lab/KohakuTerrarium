@@ -1,11 +1,8 @@
-"""Unified creature wrapper used by the new Terrarium engine.
+"""Creature wrapper for the Terrarium engine.
 
-Combines today's split between ``serving.AgentSession`` (standalone
-agent wrapper used by ``KohakuManager``) and
-``terrarium.creature.CreatureHandle`` (channel-aware wrapper used by
-``TerrariumRuntime``).  In the new model **every** running agent is a
-:class:`Creature`; standalone agents are creatures in 1-creature
-graphs.
+Every running agent is a :class:`Creature`; a standalone ``kt run`` is
+a creature in a 1-creature graph, a recipe is several creatures in
+one graph wired by channels.
 
 Includes the wrapper plus a ``build_creature`` factory that handles
 both ``AgentConfig`` (file path or object) and ``CreatureConfig``
@@ -42,8 +39,8 @@ class Creature:
 
     A solo `kt run` creates one of these in a 1-creature graph; a
     terrarium recipe creates several in one graph wired by channels.
-    The class combines today's ``AgentSession`` + ``CreatureHandle``
-    surfaces so routes / CLI / programmatic users only need one type.
+    Every per-creature endpoint (HTTP, WS, CLI, tools) reads from this
+    one type.
 
     Programmatic usage::
 
@@ -61,10 +58,18 @@ class Creature:
     listen_channels: list[str] = field(default_factory=list)
     send_channels: list[str] = field(default_factory=list)
     output_log: OutputLogCapture | None = None
-    # Set by ``Terrarium.assign_root``.  Read by higher-level code that
-    # mounts user IO on the root creature or force-registers terrarium
-    # tools on it.
-    is_root: bool = False
+    # Privilege is elevate-only: set once (at creation or via
+    # ``Terrarium.assign_root``) and never demoted thereafter. True
+    # for creatures created by direct user action (solo ``kt run``,
+    # Studio "new creature") and recipe roots elevated by
+    # ``assign_root``. False for recipe non-root creatures and for
+    # workers spawned via ``group_add_node``.
+    is_privileged: bool = False
+    # Creature_id of the privileged creature that spawned this one via
+    # ``group_add_node``. None for user-created or recipe-created
+    # creatures. Used by ``group_status`` to surface workers that the
+    # caller spawned but hasn't wired into a graph yet.
+    parent_creature_id: str | None = None
 
     # Internal queue for chat() output streaming.  Created lazily so
     # the dataclass stays trivially constructible.
@@ -120,8 +125,7 @@ class Creature:
         """Inject ``message`` and stream the agent's text response.
 
         Yields chunks until the agent finishes processing the input.
-        Mirrors today's ``AgentSession.chat`` semantics so HTTP / WS
-        callers don't have to change.
+        Used by HTTP / WS chat endpoints and by tests.
         """
         self._ensure_chat_pipe()
         q = self._output_queue
@@ -172,11 +176,12 @@ class Creature:
     # ------------------------------------------------------------------
 
     def get_status(self) -> dict:
-        """Return a status dict matching ``AgentSession.get_status()``.
+        """Return a status dict for HTTP / WS / TUI consumers.
 
-        Every field today's frontend reads is included — model,
+        Every field the frontend reads is included — model,
         max_context, compact_threshold, provider, session_id, tools,
-        subagents, pwd.
+        subagents, pwd, plus ``is_privileged`` /
+        ``parent_creature_id`` for the group-tools view.
         """
         agent = self.agent
         model = (
@@ -241,10 +246,12 @@ class Creature:
             "pwd": pwd,
             "listen_channels": list(self.listen_channels),
             "send_channels": list(self.send_channels),
+            "is_privileged": self.is_privileged,
+            "parent_creature_id": self.parent_creature_id,
         }
 
     # ------------------------------------------------------------------
-    # output log helpers — mirror CreatureHandle's surface
+    # output log helpers
     # ------------------------------------------------------------------
 
     def get_log_entries(self, last_n: int = 20) -> list[LogEntry]:

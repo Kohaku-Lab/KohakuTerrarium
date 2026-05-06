@@ -18,7 +18,7 @@ class TestAssignRootBasics:
         result = await engine.assign_root(a)
         assert isinstance(result, RootAssignment)
         assert result.root_id == "alice"
-        assert a.is_root is True
+        assert a.is_privileged is True
 
     @pytest.mark.asyncio
     async def test_creates_report_channel(self):

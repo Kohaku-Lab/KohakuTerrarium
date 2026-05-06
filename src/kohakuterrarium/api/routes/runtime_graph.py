@@ -69,14 +69,50 @@ def _graph_to_dict(engine: Terrarium, graph: GraphTopology) -> dict[str, Any]:
 def _creatures_for_graph(
     engine: Terrarium, graph: GraphTopology
 ) -> list[dict[str, Any]]:
+    """Serialize every creature in ``graph`` for the snapshot.
+
+    ``is_root`` is retained as a synonym for legacy frontend code.
+    With multiple privileged creatures in one graph (possible after
+    merging two solo sessions, or hot-plugging a second user-spawn),
+    only one creature is tagged as the root: the one with
+    ``creature_id == "root"`` (recipe convention) or, failing that,
+    ``name == "root"``. ``is_privileged`` is the canonical flag and
+    every privileged creature carries it.
+    """
     creatures: list[dict[str, Any]] = []
+    privileged_ids: list[str] = []
+    raw_creatures: list = []
     for creature_id in sorted(graph.creature_ids):
         try:
             creature = engine.get_creature(creature_id)
         except KeyError:
             continue
+        raw_creatures.append((creature_id, creature))
+        if getattr(creature, "is_privileged", False):
+            privileged_ids.append(creature_id)
+
+    root_id = ""
+    if privileged_ids:
+        # Recipe convention first (``creature_id == "root"``), then
+        # ``name == "root"``, then the lowest-sorted privileged id.
+        for cid in privileged_ids:
+            if cid == "root":
+                root_id = cid
+                break
+        if not root_id:
+            for cid in privileged_ids:
+                c = engine._creatures.get(cid)
+                if c is not None and c.name == "root":
+                    root_id = cid
+                    break
+        if not root_id:
+            root_id = privileged_ids[0]
+
+    for creature_id, creature in raw_creatures:
         status = dict(creature.get_status())
-        status["is_root"] = bool(getattr(creature, "is_root", False))
+        status["is_privileged"] = bool(getattr(creature, "is_privileged", False))
+        status["is_root"] = creature_id == root_id
+        status["parent_creature_id"] = getattr(creature, "parent_creature_id", None)
         status["graph_id"] = graph.graph_id
         creatures.append(status)
     return creatures
@@ -98,8 +134,6 @@ def _channels_for_graph(
         channel_type = ""
         description = ""
         if topo_info is not None:
-            kind = getattr(topo_info, "kind", "")
-            channel_type = getattr(kind, "value", str(kind))
             description = getattr(topo_info, "description", "") or ""
         if runtime_channel is not None:
             channel_type = channel_type or getattr(runtime_channel, "channel_type", "")
@@ -110,7 +144,7 @@ def _channels_for_graph(
         channels.append(
             {
                 "name": name,
-                "type": channel_type or "queue",
+                "type": channel_type or "broadcast",
                 "description": description,
                 "qsize": int(getattr(runtime_channel, "qsize", 0) or 0),
                 "message_count": len(history),

@@ -1,16 +1,22 @@
-"""CLI run command — launch an agent from a config folder."""
+"""CLI run command — launch a creature or recipe via the Terrarium engine.
+
+A solo creature is added as a 1-creature graph with ``is_privileged=True``
+so the user-facing creature has the full ``group_*`` tool surface. A
+recipe is applied via :meth:`Terrarium.apply_recipe` and the privileged
+root (declared via the recipe's ``root:``) hosts the user's TUI focus.
+
+Both paths use the engine TUI from :mod:`terrarium.engine_cli`. The
+Rich-CLI variant has been removed in favor of the engine TUI.
+"""
 
 import asyncio
 from pathlib import Path
 from uuid import uuid4
 
-from kohakuterrarium.builtins.cli_rich.app import RichCLIApp
-from kohakuterrarium.builtins.cli_rich.input import RichCLIInput
-from kohakuterrarium.builtins.cli_rich.output import RichCLIOutput
-from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.core.config import load_agent_config
-from kohakuterrarium.session.resume import _create_io_modules
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.terrarium.config import load_terrarium_config
+from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine_cli import run_engine_with_tui
 from kohakuterrarium.utils.logging import (
     configure_utf8_stdio,
     enable_stderr_logging,
@@ -23,102 +29,6 @@ logger = get_logger(__name__)
 _SESSION_DIR = Path.home() / ".kohakuterrarium" / "sessions"
 
 
-async def _run_agent_rich_cli(agent: Agent) -> None:
-    """Run an agent under the rich CLI (prompt_toolkit Application).
-
-    The main loop is driven by RichCLIApp, not agent.run(). We start
-    the agent's modules manually, replay any pending resume events into
-    real terminal scrollback, then enter the rich CLI loop.
-    """
-    app = RichCLIApp(agent)
-    # Replace the agent's default output with one wired to the rich CLI app
-    rich_output = RichCLIOutput(app)
-    agent.output_router.default_output = rich_output
-
-    await agent.start()
-
-    # Resume: replay session history to scrollback. Normally agent.run()
-    # would do this, but we own the main loop so we have to do it
-    # ourselves. Has to happen BEFORE app.run_async() so the writes go
-    # to real terminal scrollback (not into prompt_toolkit's screen).
-    pending = getattr(agent, "_pending_resume_events", None)
-    if pending:
-        try:
-            app.replay_session(pending)
-        except Exception as e:
-            logger.debug("Failed to replay session history", error=str(e))
-        agent._pending_resume_events = None
-
-    try:
-        await app.run()
-    finally:
-        await agent.stop()
-
-
-def _has_custom_io(config) -> tuple[bool, bool]:
-    """Return whether the creature config uses custom/package input/output."""
-    custom_input = config.input.type in {"custom", "package"}
-    custom_output = config.output.type in {"custom", "package"}
-    return custom_input, custom_output
-
-
-def _should_capture_session_activity(config, io_mode: str | None) -> bool:
-    """Capture session activity only for CLI/rich CLI/TUI I/O.
-
-    When ``kt run`` uses creature-defined custom/package I/O, keep session
-    persistence for text/history but do not mirror activity/logging into the
-    session event stream. That capture is only intended for the built-in
-    terminal UIs.
-    """
-    if io_mode is not None:
-        return io_mode in {"cli", "tui"}
-    return config.input.type in {"cli", "tui"} or config.output.type in {
-        "cli",
-        "tui",
-    }
-
-
-def _resolve_effective_io(config, io_mode: str | None) -> tuple[str, str]:
-    """Return the effective (input_type, output_type) for the run.
-
-    Explicit ``--mode`` wins. Otherwise, use the creature's configured
-    I/O module types. Used to decide whether the terminal is free for
-    stderr logging.
-    """
-    if io_mode is not None:
-        return io_mode, io_mode
-    return config.input.type, config.output.type
-
-
-def _should_log_to_stderr(log_stderr: str, input_type: str, output_type: str) -> bool:
-    """Resolve the ``--log-stderr`` flag against the effective I/O types.
-
-    ``auto`` turns on stderr logging when neither input nor output is a
-    full-screen UI (``cli``/``tui``), so custom, package, stdout, and
-    plain I/O all get terminal logs without corrupting a UI frame.
-    """
-    if log_stderr == "on":
-        return True
-    if log_stderr == "off":
-        return False
-    terminal_ui = {"cli", "tui"}
-    return input_type not in terminal_ui and output_type not in terminal_ui
-
-
-def _warn_io_override_if_needed(config, io_mode: str) -> None:
-    """Warn when an explicit CLI mode overrides configured custom I/O."""
-    custom_input, custom_output = _has_custom_io(config)
-    overridden: list[str] = []
-    if custom_input:
-        overridden.append(f"input={config.input.type}")
-    if custom_output:
-        overridden.append(f"output={config.output.type}")
-    if not overridden:
-        return
-    joined = ", ".join(overridden)
-    print("Warning: --mode " f"{io_mode} overrides configured custom I/O ({joined}).")
-
-
 def run_agent_cli(
     agent_path: str,
     log_level: str,
@@ -127,116 +37,188 @@ def run_agent_cli(
     llm_override: str | None = None,
     log_stderr: str = "auto",
 ) -> int:
-    """Run an agent from CLI."""
+    """Run a creature or recipe from the CLI through the engine.
 
+    ``io_mode`` is currently accepted but ignored — every ``kt run``
+    invocation uses the engine TUI. ``cli`` / ``plain`` variants will
+    return in a follow-up; until then we warn when the user asks for
+    one explicitly so the silence isn't surprising.
+    """
     configure_utf8_stdio(log=True)
-
-    # Setup logging
     set_level(log_level)
-
-    # Check path exists
-    path = Path(agent_path)
-    if not path.exists():
-        print(f"Error: Agent path not found: {agent_path}")
-        return 1
-
-    config_file = path / "config.yaml"
-    if not config_file.exists():
-        config_file = path / "config.yml"
-        if not config_file.exists():
-            print(f"Error: No config.yaml found in {agent_path}")
-            return 1
-
-    config = load_agent_config(str(path))
-
-    input_type, output_type = _resolve_effective_io(config, io_mode)
-    if _should_log_to_stderr(log_stderr, input_type, output_type):
+    if log_stderr in ("on", "auto"):
         enable_stderr_logging(log_level)
 
-    # If the user does not specify --mode, respect the creature's configured
-    # input/output modules exactly. Only explicit --mode should override them.
-    resolved_mode = io_mode
-    use_rich_cli = resolved_mode == "cli"
+    if io_mode in ("cli", "plain"):
+        print(
+            f"Warning: --mode {io_mode} is not yet supported on the engine "
+            "path; using the TUI instead."
+        )
 
-    store = None
-    session_file = None
+    path = Path(agent_path)
+    if not path.exists():
+        print(f"Error: path not found: {agent_path}")
+        return 1
+
     try:
-        io_kwargs: dict = {}
-        if resolved_mode is not None:
-            _warn_io_override_if_needed(config, resolved_mode)
-            if use_rich_cli:
-                io_kwargs["input_module"] = RichCLIInput()
-                io_kwargs["output_module"] = RichCLIOutput(app=None)
-            else:
-                inp, out = _create_io_modules(resolved_mode)
-                io_kwargs["input_module"] = inp
-                io_kwargs["output_module"] = out
-
-        # Create agent
-        agent = Agent.from_path(str(path), llm_override=llm_override, **io_kwargs)
-
-        # Attach session store (default: ON)
-        if session is not None:
-            if session == "__auto__":
-                _SESSION_DIR.mkdir(parents=True, exist_ok=True)
-                session_file = (
-                    _SESSION_DIR / f"{agent.config.name}_{id(agent):08x}.kohakutr"
-                )
-            else:
-                session_file = Path(session)
-
-            store = SessionStore(session_file)
-            store.init_meta(
-                session_id=uuid4().hex,
-                config_type="agent",
-                config_path=str(path),
-                pwd=str(Path.cwd()),
-                agents=[agent.config.name],
+        return asyncio.run(
+            _run(
+                str(path),
+                session=session,
+                llm_override=llm_override,
             )
-            agent.attach_session_store(
-                store,
-                capture_activity=_should_capture_session_activity(
-                    config, resolved_mode
-                ),
-            )
-
-        if use_rich_cli:
-            asyncio.run(_run_agent_rich_cli(agent))
-        else:
-            asyncio.run(agent.run())
-        return 0
+        )
     except KeyboardInterrupt:
         print("\nInterrupted")
         return 0
-    except Exception as e:
-        print(f"Error: {e}")
+    except Exception as exc:
+        print(f"Error: {exc}")
+        logger.debug("kt run failed", error=str(exc), exc_info=True)
         return 1
-    finally:
-        if store:
-            store.close()
-        if session_file and session_file.exists():
-            print(f"\nSession saved. To resume:")
-            print(f"  kt resume {session_file.stem}")
+
+
+async def _run(
+    agent_path: str,
+    *,
+    session: str | None,
+    llm_override: str | None,
+) -> int:
+    pwd = str(Path.cwd())
+    is_recipe = _looks_like_recipe(agent_path)
+
+    async with Terrarium(pwd=pwd) as engine:
+        store: SessionStore | None = None
+        focus_creature_id = ""
+
+        if is_recipe:
+            cfg = load_terrarium_config(agent_path)
+            graph = await engine.apply_recipe(cfg, pwd=pwd, llm_override=llm_override)
+            focus_creature_id = _pick_focus_creature(engine, graph.graph_id)
+            if session is not None:
+                store = await _attach_session_store(
+                    engine,
+                    graph_id=graph.graph_id,
+                    session=session,
+                    config_path=agent_path,
+                    config_type="terrarium",
+                )
+        else:
+            creature = await engine.add_creature(
+                agent_path,
+                llm_override=llm_override,
+                pwd=pwd,
+                is_privileged=True,
+            )
+            focus_creature_id = creature.creature_id
+            if session is not None:
+                store = await _attach_session_store(
+                    engine,
+                    graph_id=creature.graph_id,
+                    session=session,
+                    config_path=agent_path,
+                    config_type="agent",
+                )
+
+        try:
+            await run_engine_with_tui(engine, focus_creature_id, store)
+        finally:
+            if store is not None:
+                if session is not None:
+                    print(f"\nSession saved. To resume:")
+                    print(f"  kt resume {Path(store.path).stem}")
+                store.close()
+        return 0
+
+
+def _looks_like_recipe(path: str) -> bool:
+    p = Path(path)
+    candidates = (
+        p / "terrarium.yaml",
+        p / "terrarium.yml",
+        p / "recipe.yaml",
+    )
+    if any(c.exists() for c in candidates):
+        return True
+    if p.is_file() and p.suffix.lower() in (".yaml", ".yml"):
+        try:
+            text = p.read_text(encoding="utf-8")
+        except Exception:
+            return False
+        return "creatures:" in text and ("channels:" in text or "root:" in text)
+    return False
+
+
+def _pick_focus_creature(engine: Terrarium, graph_id: str) -> str:
+    """Return the creature_id the TUI should focus on.
+
+    Preference order: the privileged root (recipe-declared), the first
+    privileged creature, the first creature in the graph.
+    """
+    graph = engine.get_graph(graph_id)
+    privileged: list[str] = []
+    fallback: list[str] = []
+    for cid in sorted(graph.creature_ids):
+        try:
+            c = engine.get_creature(cid)
+        except KeyError:
+            continue
+        if getattr(c, "is_privileged", False):
+            privileged.append(cid)
+        else:
+            fallback.append(cid)
+    if privileged:
+        return privileged[0]
+    if fallback:
+        return fallback[0]
+    raise RuntimeError(f"graph {graph_id!r} has no creatures to focus on")
+
+
+async def _attach_session_store(
+    engine: Terrarium,
+    *,
+    graph_id: str,
+    session: str,
+    config_path: str,
+    config_type: str,
+) -> SessionStore:
+    """Attach a session store to ``graph_id`` and return it.
+
+    Awaits the engine's :meth:`attach_session` so a failure surfaces
+    here (rather than disappearing into a fire-and-forget task).
+    """
+    if session == "__auto__":
+        _SESSION_DIR.mkdir(parents=True, exist_ok=True)
+        session_file = _SESSION_DIR / f"{graph_id}_{uuid4().hex[:8]}.kohakutr"
+    else:
+        session_file = Path(session)
+
+    store = SessionStore(session_file)
+    store.init_meta(
+        session_id=uuid4().hex,
+        config_type=config_type,
+        config_path=config_path,
+        pwd=str(Path.cwd()),
+        agents=[c.name for c in engine.list_creatures() if c.graph_id == graph_id],
+    )
+    await engine.attach_session(graph_id, store)
+    return store
 
 
 def _resolve_session(query: str | None, last: bool = False) -> Path | None:
-    """Resolve a session query to a file path.
+    """Resolve a session query to a file path. Used by ``kt resume``.
 
     Searches ~/.kohakuterrarium/sessions/ for matching files.
     Accepts: full path, filename, name prefix, or None (list/pick).
     """
-    # Full path provided
     if query and Path(query).exists():
         return Path(query)
 
-    # Strip extension from query if present (user may paste from hint)
     if query:
         for ext in (".kohakutr", ".kt"):
             if query.endswith(ext):
                 query = query[: -len(ext)]
                 break
 
-    # Search in default session directory
     if not _SESSION_DIR.exists():
         return None
 
@@ -245,7 +227,6 @@ def _resolve_session(query: str | None, last: bool = False) -> Path | None:
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
-    # Also check legacy .kt files (pre-.kohakutr extension)
     sessions.extend(
         sorted(
             _SESSION_DIR.glob("*.kt"),
@@ -257,11 +238,9 @@ def _resolve_session(query: str | None, last: bool = False) -> Path | None:
     if not sessions:
         return None
 
-    # --last: most recent
     if last:
         return sessions[0]
 
-    # No query: list recent and let user pick
     if not query:
         print("Recent sessions:")
         shown = sessions[:10]
@@ -280,7 +259,6 @@ def _resolve_session(query: str | None, last: bool = False) -> Path | None:
             return None
         query = choice
 
-    # Prefix match
     matches = [s for s in sessions if s.stem.startswith(query) or query in s.stem]
     if len(matches) == 1:
         return matches[0]
@@ -300,11 +278,9 @@ def _resolve_session(query: str | None, last: bool = False) -> Path | None:
                 return matches[idx]
         return None
 
-    # No match in session dir, try as path
     p = Path(query)
     if p.exists():
         return p
-    # Try appending extension
     for ext in (".kohakutr", ".kt"):
         if (_SESSION_DIR / f"{query}{ext}").exists():
             return _SESSION_DIR / f"{query}{ext}"

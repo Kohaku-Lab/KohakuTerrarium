@@ -292,13 +292,15 @@ class Agent(
             self._termination_checker.start()
 
     def _configure_tui_tabs(self) -> None:
-        """Configure TUI with terrarium tabs if available (set by runtime).
+        """Configure TUI with terrarium tabs if available (set by the
+        engine TUI launcher).
 
-        The terrarium runtime stores tab/runtime info on session.extra
-        before calling agent.run(). This method is a no-op hook that
-        confirms the data is already in place for TUIInput to read.
+        ``terrarium.engine_cli.run_engine_with_tui`` writes tab /
+        runtime info onto ``session.extra`` before invoking the agent
+        loop. This method is a no-op hook that confirms the data is
+        already in place for ``TUIInput`` to read.
         """
-        # Data is written to session.extra by TerrariumRuntime.run()
+        # Data is written to session.extra by the engine TUI launcher
         # before agent.run() -> agent.start() -> here, so nothing
         # needs to be copied. Just verify presence for debug logging.
         terrarium_tabs = self.session.extra.get("terrarium_tui_tabs")

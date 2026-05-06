@@ -133,12 +133,12 @@ class TestRootRecipe:
         assert "report_to_root" in graph.channels
         # Every non-root creature got it added to send_channels; root listens there.
         for c in engine.list_creatures():
-            if c.is_root:
+            if c.is_privileged:
                 assert "report_to_root" in c.listen_channels
             else:
                 assert "report_to_root" in c.send_channels
         root = engine.get_creature("root")
-        assert root.is_root
+        assert root.is_privileged
         assert root.agent.environment is engine._environments[graph.graph_id]
         assert find_creature(engine, graph.graph_id, "root") is root
 

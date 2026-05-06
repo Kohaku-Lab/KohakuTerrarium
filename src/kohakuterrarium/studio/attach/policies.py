@@ -153,7 +153,7 @@ def get_session_policies(engine: "Terrarium", session_id: str) -> list[Policy]:
             c = engine.get_creature(cid)
         except KeyError:
             continue
-        if getattr(c, "is_root", False):
+        if getattr(c, "is_privileged", False):
             policies.insert(0, Policy.IO)
             break
 

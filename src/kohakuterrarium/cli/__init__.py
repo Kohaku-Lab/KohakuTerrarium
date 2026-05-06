@@ -1,7 +1,16 @@
-"""KohakuTerrarium CLI — command dispatch and argument parsing."""
+"""KohakuTerrarium CLI — command dispatch and argument parsing.
+
+Importing this package also imports :mod:`kohakuterrarium.studio` for
+its side effect of registering studio-supplied hooks the terrarium
+group tools call into (session-store auto-attach, name propagation,
+spawnable creature catalog). Without this, ``kt run`` solo mode would
+boot with an empty spawnable list and no persistence on tool-spawned
+workers.
+"""
 
 import argparse
 
+import kohakuterrarium.studio  # noqa: F401 — registers terrarium.group_hooks
 from kohakuterrarium.cli.auth import login_cli
 from kohakuterrarium.cli.config import add_config_subparser, config_cli
 from kohakuterrarium.cli.extension import extension_info_cli, extension_list_cli
@@ -22,10 +31,6 @@ from kohakuterrarium.cli.serve import add_serve_subparser, serve_cli
 from kohakuterrarium.cli.version import format_version_report
 from kohakuterrarium.packages.resolve import resolve_package_path
 from kohakuterrarium.serving.web import run_desktop_app, run_web_server
-from kohakuterrarium.terrarium.cli import (
-    add_terrarium_subparser,
-    handle_terrarium_command,
-)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -108,9 +113,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "agent_path",
         help="Path to agent config folder",
     )
-
-    # Terrarium command group
-    add_terrarium_subparser(subparsers)
 
     # Resume command
     resume_parser = subparsers.add_parser(
@@ -364,14 +366,6 @@ def _dispatch_resume(args: argparse.Namespace) -> int:
     )
 
 
-def _dispatch_terrarium(args: argparse.Namespace) -> int:
-    """Handle the 'terrarium' command with @package path resolution."""
-    if hasattr(args, "terrarium_path") and args.terrarium_path:
-        if args.terrarium_path.startswith("@"):
-            args.terrarium_path = str(resolve_package_path(args.terrarium_path))
-    return handle_terrarium_command(args)
-
-
 def _dispatch_embedding(args: argparse.Namespace) -> int:
     """Handle the 'embedding' command."""
     return embedding_cli(args.session, args.provider, args.model, args.dimensions)
@@ -430,7 +424,6 @@ COMMANDS: dict[str, callable] = {
     "resume": _dispatch_resume,
     "list": lambda args: list_cli(args.path),
     "info": lambda args: show_agent_info_cli(args.agent_path),
-    "terrarium": _dispatch_terrarium,
     "login": lambda args: login_cli(args.provider),
     "install": lambda args: install_cli(args.source, args.editable, args.name),
     "uninstall": lambda args: uninstall_cli(args.name),

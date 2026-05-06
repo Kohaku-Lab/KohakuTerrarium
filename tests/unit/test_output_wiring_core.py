@@ -146,12 +146,12 @@ class TestRenderPromptSimple:
     def test_default_with_content(self):
         entry = OutputWiringEntry(to="runner", with_content=True)
         out = render_prompt(entry, **RENDER_VARS)
-        assert out == "[Output from coder] compiled output"
+        assert out == "[output-wire from coder] compiled output"
 
     def test_default_without_content(self):
         entry = OutputWiringEntry(to="runner", with_content=False)
         out = render_prompt(entry, **RENDER_VARS)
-        assert out == "[Turn-end from coder]"
+        assert out == "[output-wire from coder] (turn-end signal, no content)"
 
     def test_custom_template(self):
         entry = OutputWiringEntry(
@@ -222,8 +222,11 @@ class TestRenderPromptJinja:
 
 class TestRenderPromptDefaultsConstants:
     def test_constants_match_docs(self):
-        assert DEFAULT_PROMPT_WITH_CONTENT == "[Output from {source}] {content}"
-        assert DEFAULT_PROMPT_WITHOUT_CONTENT == "[Turn-end from {source}]"
+        assert DEFAULT_PROMPT_WITH_CONTENT == "[output-wire from {source}] {content}"
+        assert (
+            DEFAULT_PROMPT_WITHOUT_CONTENT
+            == "[output-wire from {source}] (turn-end signal, no content)"
+        )
 
 
 # ---------------------------------------------------------------------------

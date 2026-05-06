@@ -1,3 +1,18 @@
+"""Engine TUI launcher.
+
+Mounts the Textual-based TUI on top of a running :class:`Terrarium`
+engine. ``run_engine_with_tui`` is the single entry point shared
+between ``kt run creature.yaml`` (solo creature, focus on the
+privileged creature), ``kt run terrarium.yaml`` (recipe, focus on the
+declared root), and ``kt resume`` (focus on whatever creature in the
+resumed graph is privileged, falling back to the first creature).
+
+The TUI tabs are: focus creature first, then every other creature in
+the graph, then one ``#channel`` tab per shared channel. Channel send
+callbacks are wired here so each ``send`` lands as a transcript line
+on the channel's tab.
+"""
+
 import asyncio
 from collections.abc import Iterable
 
@@ -40,34 +55,43 @@ def wire_channel_registry_callbacks(
         ch.on_send(_make_ch_cb(ch_name))
 
 
-async def run_engine_terrarium_with_tui(
+async def run_engine_with_tui(
     engine: Terrarium,
-    graph_id: str,
+    focus_creature_id: str,
     store: SessionStore | None = None,
     *,
     handle_command=None,
 ) -> None:
-    root_creature = engine.get_creature("root")
-    root = root_creature.agent
+    """Run the engine TUI with focus on ``focus_creature_id``.
+
+    The focus creature is the one whose tab the TUI opens to and whose
+    inputs route from the user prompt by default. For solo ``kt run``
+    this is the lone creature; for a recipe it's the privileged root.
+    """
+    focus_creature = engine.get_creature(focus_creature_id)
+    focus = focus_creature.agent
+    graph_id = focus_creature.graph_id
     graph = engine.get_graph(graph_id)
     env = engine._environments[graph_id]
 
     graph_creatures = [engine.get_creature(cid) for cid in graph.creature_ids]
-    tui_tabs = ["root"]
-    tui_tabs.extend(c.creature_id for c in graph_creatures if c.creature_id != "root")
+    tui_tabs = [focus_creature_id]
+    tui_tabs.extend(
+        c.creature_id for c in graph_creatures if c.creature_id != focus_creature_id
+    )
     tui_tabs.extend(f"#{ch_info.name}" for ch_info in graph.channels.values())
 
     tui = TUISession(agent_name=graph_id)
     tui.set_terrarium_tabs(tui_tabs)
 
-    root_output = TUIOutput(session_key="root")
-    root_output._tui = tui
-    root_output._running = True
-    root_output._default_target = "root"
-    root.output_router.default_output = root_output
+    focus_output = TUIOutput(session_key=focus_creature_id)
+    focus_output._tui = tui
+    focus_output._running = True
+    focus_output._default_target = focus_creature_id
+    focus.output_router.default_output = focus_output
 
     for creature in graph_creatures:
-        if creature.creature_id == "root":
+        if creature.creature_id == focus_creature_id:
             continue
         creature_out = TUIOutput(session_key=creature.creature_id)
         creature_out._tui = tui
@@ -76,22 +100,22 @@ async def run_engine_terrarium_with_tui(
         creature.agent.output_router.default_output = creature_out
 
     if tui._app:
-        tui._app.on_interrupt = root.interrupt
-    tui.on_cancel_job = root._cancel_job
-    tui.on_promote_job = root._promote_handle
+        tui._app.on_interrupt = focus.interrupt
+    tui.on_cancel_job = focus._cancel_job
+    tui.on_promote_job = focus._promote_handle
 
     await tui.start()
     suppress_logging()
     app_task = asyncio.create_task(tui.run_app())
     await tui.wait_ready()
 
-    _update_session_info(tui, root, graph_id, store)
-    _update_terrarium_panel(tui, graph_creatures, env)
+    _update_session_info(tui, focus, graph_id, store)
+    _update_terrarium_panel(tui, graph_creatures, env, focus_creature_id)
     wire_channel_registry_callbacks(env.shared_channels._channels.values(), tui)
 
     commands = {n: get_builtin_user_command(n) for n in list_builtin_user_commands()}
     aliases = _build_command_aliases(commands)
-    cmd_context = UserCommandContext(agent=root, session=root.session)
+    cmd_context = UserCommandContext(agent=focus, session=focus.session)
     cmd_context.extra["command_registry"] = commands
     _set_command_hints(tui, commands)
 
@@ -109,14 +133,14 @@ async def run_engine_terrarium_with_tui(
                 if cmd_result is True:
                     continue
             active_tab = tui.get_active_tab()
-            if not active_tab or active_tab == "root":
-                tui.set_active_target("root")
-                await root.inject_input(text, source="tui")
+            if not active_tab or active_tab == focus_creature_id:
+                tui.set_active_target(focus_creature_id)
+                await focus.inject_input(text, source="tui")
             elif active_tab.startswith("#"):
                 await _send_to_channel_tab(tui, env, active_tab, text)
             else:
                 tui.set_active_target(active_tab)
-                await root.inject_input(
+                await focus.inject_input(
                     f"Send this to {active_tab}: {text}", source="tui"
                 )
     except (KeyboardInterrupt, asyncio.CancelledError):
@@ -132,10 +156,10 @@ async def run_engine_terrarium_with_tui(
 
 
 def _update_session_info(
-    tui: TUISession, root, graph_id: str, store: SessionStore | None
+    tui: TUISession, focus, graph_id: str, store: SessionStore | None
 ) -> None:
-    model = getattr(root.llm, "model", "") or getattr(
-        getattr(root.llm, "config", None), "model", ""
+    model = getattr(focus.llm, "model", "") or getattr(
+        getattr(focus.llm, "config", None), "model", ""
     )
     session_id = ""
     if store:
@@ -147,14 +171,16 @@ def _update_session_info(
                 "Failed to load session meta for TUI", error=str(e), exc_info=True
             )
     tui.update_session_info(session_id=session_id, model=model, agent_name=graph_id)
-    compact_mgr = getattr(root, "compact_manager", None)
+    compact_mgr = getattr(focus, "compact_manager", None)
     if compact_mgr:
         max_ctx = compact_mgr.config.max_tokens
         compact_at = int(max_ctx * compact_mgr.config.threshold) if max_ctx else 0
         tui.set_context_limits(max_ctx, compact_at)
 
 
-def _update_terrarium_panel(tui: TUISession, graph_creatures, env) -> None:
+def _update_terrarium_panel(
+    tui: TUISession, graph_creatures, env, focus_creature_id: str
+) -> None:
     creature_info = [
         {
             "name": creature.creature_id,
@@ -163,7 +189,7 @@ def _update_terrarium_panel(tui: TUISession, graph_creatures, env) -> None:
             "send": creature.send_channels,
         }
         for creature in graph_creatures
-        if creature.creature_id != "root"
+        if creature.creature_id != focus_creature_id
     ]
     tui.update_terrarium(creature_info, env.shared_channels.get_channel_info())
 

@@ -3,6 +3,7 @@ Send message tool - send to a named channel.
 """
 
 import json
+import weakref
 from typing import Any
 
 from kohakuterrarium.builtins.tools.registry import register_builtin
@@ -17,6 +18,53 @@ from kohakuterrarium.modules.tool.base import (
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _enforce_send_edge_in_engine_context(
+    context: ToolContext, channel_name: str
+) -> str | None:
+    """When the caller is part of a Terrarium engine graph, require a
+    declared send edge for ``channel_name``. Returns an error message
+    when the caller cannot send on the channel, or ``None`` to allow.
+
+    The sub-agent path (no engine in env) returns ``None`` — private
+    channels in :class:`Session.channels` keep their permissive
+    behavior.
+    """
+    if context is None or context.environment is None:
+        return None
+    engine_ref = context.environment.get("terrarium_engine")
+    engine = engine_ref() if isinstance(engine_ref, weakref.ref) else engine_ref
+    if engine is None:
+        return None
+    creature = None
+    by_id = engine._creatures.get(context.agent_name)
+    if by_id is not None:
+        creature = by_id
+    else:
+        for c in engine._creatures.values():
+            if c.name == context.agent_name:
+                creature = c
+                break
+            cfg = getattr(c.agent, "config", None)
+            if cfg is not None and getattr(cfg, "name", None) == context.agent_name:
+                creature = c
+                break
+    if creature is None:
+        return None
+    graph = engine._topology.graphs.get(creature.graph_id)
+    if graph is None or channel_name not in graph.channels:
+        return None
+    sends = graph.send_edges.get(creature.creature_id, set())
+    if channel_name in sends:
+        return None
+    return (
+        f"You are not wired as sender on channel '{channel_name}'. "
+        f"Your outgoing channels: {sorted(sends)}. "
+        f"Ask the privileged creature to wire you via "
+        f"group_channel(action='wire', direction='send', "
+        f"channel='{channel_name}', creature_id=you)."
+    )
 
 
 @register_builtin("send_message")
@@ -141,6 +189,17 @@ class SendMessageTool(BaseTool):
                         "editor."
                     )
                 )
+
+        # Engine-context send-edge gate: when the caller is in a
+        # Terrarium engine graph and the channel is one of the graph's
+        # shared channels, require a declared send edge. Sub-agent
+        # private channels in ``Session.channels`` are unaffected.
+        if context is not None and context.environment is not None:
+            shared = context.environment.shared_channels.get(channel_name)
+            if shared is not None:
+                deny = _enforce_send_edge_in_engine_context(context, channel_name)
+                if deny is not None:
+                    return ToolResult(error=deny)
 
         # Send message
         msg = ChannelMessage(

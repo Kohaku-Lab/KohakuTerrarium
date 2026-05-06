@@ -272,33 +272,6 @@ class TestFormatAwarePrompts:
         assert "{tool_name/}" in hints
 
 
-# ---------------------------------------------------------------------------
-# TerrariumToolManager
-# ---------------------------------------------------------------------------
-
-
-class TestTerrariumToolManager:
-    """Test the tool manager that binds root agent to terrariums."""
-
-    def test_register_and_get_runtime(self):
-        from kohakuterrarium.terrarium.tool_manager import TerrariumToolManager
-
-        manager = TerrariumToolManager()
-        mock_runtime = object()
-        manager.register_runtime("test_id", mock_runtime)
-        assert manager.get_runtime("test_id") is mock_runtime
-
-    def test_list_terrariums(self):
-        from kohakuterrarium.terrarium.tool_manager import TerrariumToolManager
-
-        manager = TerrariumToolManager()
-        manager.register_runtime("a", object())
-        manager.register_runtime("b", object())
-        assert sorted(manager.list_terrariums()) == ["a", "b"]
-
-    def test_get_nonexistent_raises(self):
-        from kohakuterrarium.terrarium.tool_manager import TerrariumToolManager
-
-        manager = TerrariumToolManager()
-        with pytest.raises(KeyError):
-            manager.get_runtime("nonexistent")
+# TerrariumToolManager + the legacy ``terrarium_*`` tool surface were
+# removed in the group-tools refactor; their replacements live in
+# ``terrarium.tools_group`` and are tested in the group-tools suite.
