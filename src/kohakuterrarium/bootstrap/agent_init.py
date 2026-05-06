@@ -329,6 +329,18 @@ class AgentInitMixin:
                 model=getattr(self.llm, "model", ""),
                 _host_agent=self,
             )
+        # ``extra_context`` is passed to the Jinja-style renderer so
+        # template variables like ``{{ agent_name }}`` /
+        # ``{{ creature_name }}`` / ``{{ pwd }}`` resolve in the base
+        # prompt. Without these, kt-biome's ``general/prompts/system.md``
+        # renders as ``# `` and ``You are , a general-purpose...`` —
+        # the empty-name footgun the user reported.
+        prompt_extra_context: dict = {
+            "agent_name": self.config.name,
+            "creature_name": self.config.name,
+            "pwd": str(self.executor._working_dir) if self.executor else "",
+            "model": getattr(self.llm, "model", ""),
+        }
         system_prompt = aggregate_system_prompt(
             base_prompt,
             self.registry,
@@ -336,6 +348,7 @@ class AgentInitMixin:
             include_hints=self.config.include_hints_in_prompt,
             tool_format=tool_format_name,
             known_outputs=known_outputs,
+            extra_context=prompt_extra_context,
             framework_hint_overrides=hint_overrides or None,
             skill_registry=getattr(self, "skills", None),
             skill_index_budget_bytes=getattr(
