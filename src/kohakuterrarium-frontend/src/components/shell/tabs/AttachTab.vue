@@ -129,10 +129,7 @@ async function loadInstance() {
     // a different handle for the same graph (creature_id ↔ graph_id
     // after a solo→multi upgrade) — otherwise every 5 s poll would
     // wipe the chat state and yank the user out of their tab.
-    const sameInstance =
-      chat._instanceId === id ||
-      chat._instanceId === loaded.id ||
-      chat._instanceId === loaded.graph_id
+    const sameInstance = chat._instanceId === id || chat._instanceId === loaded.id || chat._instanceId === loaded.graph_id
     if (chat._instanceId && !sameInstance) {
       chat.resetForRouteSwitch()
     }

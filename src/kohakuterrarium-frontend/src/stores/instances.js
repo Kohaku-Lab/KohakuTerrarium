@@ -166,8 +166,7 @@ function _mapSession(data) {
   }))
   // Pick the "primary" creature for legacy single-target panels:
   // root if recipe-flagged, else first creature.
-  const primary =
-    (data.has_root && creatures.find((c) => c.is_root)) || creatures[0] || {}
+  const primary = (data.has_root && creatures.find((c) => c.is_root)) || creatures[0] || {}
   const isMulti = creatures.length > 1
   return {
     id: data.session_id,

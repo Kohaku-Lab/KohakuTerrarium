@@ -300,8 +300,7 @@ async function handleModelSwitch(modelId) {
   if (!sid) return
   modelSwitchError.value = ""
   try {
-    const target =
-      currentTarget.value || props.instance?.creatures?.[0]?.name || "root"
+    const target = currentTarget.value || props.instance?.creatures?.[0]?.name || "root"
     await terrariumAPI.switchCreatureModel(sid, target, modelId)
   } catch (err) {
     modelSwitchError.value = err.response?.data?.detail || t("status.modelSwitchError")

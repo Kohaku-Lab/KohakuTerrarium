@@ -25,9 +25,7 @@ async def interrupt_creature(
     session_id: str, creature_id: str, engine=Depends(get_engine)
 ):
     try:
-        await asyncio.to_thread(
-            creature_ctl.interrupt, engine, session_id, creature_id
-        )
+        await asyncio.to_thread(creature_ctl.interrupt, engine, session_id, creature_id)
         return {"status": "interrupted"}
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")

@@ -19,7 +19,6 @@ const api = axios.create({
  * @typedef {{ id: string, role: string, content: string, timestamp: string, sender?: string, tool_calls?: object[] }} ChatMessage
  */
 
-
 /** Config discovery */
 export const configAPI = {
   /** @returns {Promise<ConfigItem[]>} */

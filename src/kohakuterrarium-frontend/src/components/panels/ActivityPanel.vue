@@ -112,10 +112,7 @@ async function stopJob(jobId, name) {
   const sid = props.instance?.graph_id || props.instance?.id
   if (!sid) return
   try {
-    const target =
-      chat.terrariumTarget ||
-      props.instance?.creatures?.[0]?.name ||
-      "root"
+    const target = chat.terrariumTarget || props.instance?.creatures?.[0]?.name || "root"
     await terrariumAPI.stopCreatureTask(sid, target, jobId)
   } catch (err) {
     console.error("Failed to stop job", name, err)
