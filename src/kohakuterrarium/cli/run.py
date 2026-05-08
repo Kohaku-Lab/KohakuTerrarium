@@ -45,16 +45,23 @@ def run_agent_cli(
 ) -> int:
     """Run a creature or recipe from the CLI through the engine.
 
-    ``io_mode`` selects the terminal surface:
+    ``io_mode`` is an *override* — when given, it replaces the focus
+    creature's configured input/output modules with a user-facing
+    shell:
 
-    - ``"tui"`` (default when omitted): Textual full-screen TUI with
-      one tab per creature and one ``#channel`` tab per shared
-      channel. Best for multi-creature graphs.
+    - ``"tui"``: Textual full-screen TUI with one tab per creature
+      and one ``#channel`` tab per shared channel.
     - ``"cli"``: prompt-toolkit inline rich CLI. Single creature
-      focus, output streams to scrollback. Best for solo creatures.
-    - ``"plain"``: not yet ported back from the pre-engine path —
-      falls through to the TUI with a warning so the silence isn't
-      surprising.
+      focus, output streams to scrollback.
+    - ``"plain"``: not yet ported back from the pre-engine path.
+    - ``"none"``: explicit "don't override anything" — same as
+      omitting ``--mode``.
+
+    **When ``io_mode`` is omitted, the creature's configured IO
+    modules drive the run.** This is the path long-running headless
+    background agents (Discord bot, webhook listener, custom polling
+    input, etc.) depend on — overriding their IO with a TUI breaks
+    them. Don't pass ``--mode`` and the engine just lets them run.
 
     ``extra_creatures`` and ``extra_channels`` let callers compose an
     ad-hoc team on the command line:
@@ -63,23 +70,22 @@ def run_agent_cli(
 
     Each ``--add`` spawns a non-privileged creature into the same
     graph; each ``--channel`` declares a shared channel and wires
-    every creature as both listener and sender. Useful for trying
-    out a recipe-shape without committing to a YAML file.
+    every creature as both listener and sender.
     """
     configure_utf8_stdio(log=True)
     set_level(log_level)
     # Stderr logging would corrupt prompt-toolkit's redraw region —
     # only enable it when the chosen surface leaves the terminal free.
-    suppresses_stderr = io_mode in (None, "tui", "cli")
-    if log_stderr == "on" or (log_stderr == "auto" and not suppresses_stderr):
+    overlay_owns_terminal = io_mode in ("tui", "cli")
+    if log_stderr == "on" or (log_stderr == "auto" and not overlay_owns_terminal):
         enable_stderr_logging(log_level)
 
     if io_mode == "plain":
         print(
             "Warning: --mode plain is not yet ported to the engine path; "
-            "using the TUI instead."
+            "falling back to the creature's configured IO."
         )
-        io_mode = "tui"
+        io_mode = None
 
     path = Path(agent_path)
     if not path.exists():
@@ -165,8 +171,23 @@ async def _run(
         try:
             if io_mode == "cli":
                 await run_engine_with_rich_cli(engine, focus_creature_id, store)
-            else:
+            elif io_mode == "tui":
                 await run_engine_with_tui(engine, focus_creature_id, store)
+            else:
+                # No override — the creature's configured input/output
+                # modules drive the run. The engine has already started
+                # them via ``creature.start``; we just keep the asyncio
+                # loop alive until the creature stops or the user hits
+                # Ctrl+C. This is the path background agents (Discord,
+                # webhook, custom polling input, …) depend on.
+                creature = engine.get_creature(focus_creature_id)
+                logger.info(
+                    "kt run — creature using configured IO",
+                    creature_id=focus_creature_id,
+                    creature_name=creature.name,
+                )
+                while creature.is_running:
+                    await asyncio.sleep(1)
         finally:
             if store is not None:
                 if session is not None:

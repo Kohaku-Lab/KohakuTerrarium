@@ -91,11 +91,18 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument(
         "--mode",
-        choices=["cli", "plain", "tui"],
+        choices=["cli", "plain", "tui", "none"],
         default=None,
         help=(
-            "Input/output mode. cli=rich inline (default if TTY), "
-            "plain=dumb stdout/stdin, tui=full-screen Textual app"
+            "Input/output mode. ``cli`` = rich inline prompt-toolkit "
+            "Application, ``tui`` = full-screen Textual app, "
+            "``plain`` = dumb stdout/stdin, ``none`` = headless: don't "
+            "mount any user-facing IO shell, let the creature drive "
+            "itself via its configured input/output modules (Discord "
+            "bot, webhook listener, etc.). When omitted, the choice "
+            "is auto-derived from the creature config's ``input.type`` "
+            "— ``cli`` / ``tui`` get the matching shell, anything "
+            "else (custom / package / none) runs headless."
         ),
     )
     run_parser.add_argument(
