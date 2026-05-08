@@ -2,15 +2,18 @@
 
 Mounts the Textual-based TUI on top of a running :class:`Terrarium`
 engine. ``run_engine_with_tui`` is the single entry point shared
-between ``kt run creature.yaml`` (solo creature, focus on the
-privileged creature), ``kt run terrarium.yaml`` (recipe, focus on the
-declared root), and ``kt resume`` (focus on whatever creature in the
-resumed graph is privileged, falling back to the first creature).
+between ``kt run creature.yaml`` (solo creature), ``kt run
+terrarium.yaml`` (recipe), and ``kt resume``. The TUI is uniform
+across all three — there is no creature-vs-terrarium fork at the
+runtime layer. Solo sessions are graphs with one creature; the same
+tab strip + channel-tab plumbing applies.
 
 The TUI tabs are: focus creature first, then every other creature in
-the graph, then one ``#channel`` tab per shared channel. Channel send
-callbacks are wired here so each ``send`` lands as a transcript line
-on the channel's tab.
+the graph, then one ``#channel`` tab per shared channel. The TUI
+subscribes to engine topology events so creatures spawned at runtime
+(via ``group_add_node``) and channels created at runtime (via
+``group_channel(action="create")``) are surfaced as new tabs without
+the user having to restart.
 """
 
 import asyncio
@@ -27,6 +30,7 @@ from kohakuterrarium.core.channel import BaseChannel, ChannelMessage
 from kohakuterrarium.modules.user_command.base import UserCommandContext
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.events import EventFilter, EventKind
 from kohakuterrarium.utils.logging import get_logger, restore_logging, suppress_logging
 
 logger = get_logger(__name__)
@@ -90,6 +94,7 @@ async def run_engine_with_tui(
     focus_output._default_target = focus_creature_id
     focus.output_router.default_output = focus_output
 
+    routed_creatures: set[str] = {focus_creature_id}
     for creature in graph_creatures:
         if creature.creature_id == focus_creature_id:
             continue
@@ -98,6 +103,7 @@ async def run_engine_with_tui(
         creature_out._running = True
         creature_out._default_target = creature.creature_id
         creature.agent.output_router.default_output = creature_out
+        routed_creatures.add(creature.creature_id)
 
     if tui._app:
         tui._app.on_interrupt = focus.interrupt
@@ -111,7 +117,18 @@ async def run_engine_with_tui(
 
     _update_session_info(tui, focus, graph_id, store)
     _update_terrarium_panel(tui, graph_creatures, env, focus_creature_id)
-    wire_channel_registry_callbacks(env.shared_channels._channels.values(), tui)
+    wired_channels: set[str] = set()
+    _wire_new_channels(env, tui, wired_channels)
+    refresh_task = asyncio.create_task(
+        _refresh_tui_on_topology_change(
+            engine,
+            tui,
+            graph_id,
+            focus_creature_id,
+            wired_channels,
+            routed_creatures,
+        )
+    )
 
     commands = {n: get_builtin_user_command(n) for n in list_builtin_user_commands()}
     aliases = _build_command_aliases(commands)
@@ -147,6 +164,11 @@ async def run_engine_with_tui(
         pass
     finally:
         restore_logging()
+        refresh_task.cancel()
+        try:
+            await refresh_task
+        except (asyncio.CancelledError, Exception):
+            pass
         app_task.cancel()
         try:
             await app_task
@@ -212,6 +234,88 @@ def _set_command_hints(tui: TUISession, commands: dict) -> None:
         logger.debug(
             "Failed to set command hints on TUI input", error=str(e), exc_info=True
         )
+
+
+def _wire_new_channels(env, tui: "TUISession", wired: set[str]) -> None:
+    """Install on_send callbacks on every channel not already wired.
+
+    Called once at startup and again on every topology change so
+    channels added at runtime (via ``group_channel(action="create")``)
+    show up as transcript-emitting tabs without a TUI restart.
+    ``wired`` is mutated in place so re-entry is idempotent.
+    """
+    for ch in env.shared_channels._channels.values():
+        if ch.name in wired:
+            continue
+        wire_channel_registry_callbacks([ch], tui)
+        wired.add(ch.name)
+
+
+async def _refresh_tui_on_topology_change(
+    engine: Terrarium,
+    tui: "TUISession",
+    graph_id: str,
+    focus_creature_id: str,
+    wired_channels: set[str],
+    routed_creatures: set[str],
+) -> None:
+    """Re-render the tab strip on every topology change in our graph.
+
+    Subscribes to ``CREATURE_STARTED`` / ``CREATURE_STOPPED`` /
+    ``TOPOLOGY_CHANGED`` (which fires on add/remove channel and on
+    cross-graph wires) so a creature spawning a peer mid-conversation
+    surfaces as a new tab on the next event tick. Channel callbacks
+    are also re-wired so the new ``#channel`` tab actually renders
+    incoming sends.
+    """
+    filt = EventFilter(
+        kinds={
+            EventKind.CREATURE_STARTED,
+            EventKind.CREATURE_STOPPED,
+            EventKind.TOPOLOGY_CHANGED,
+            EventKind.SESSION_KIND_CHANGED,
+        }
+    )
+    try:
+        async for _ev in engine.subscribe(filt):
+            graph = engine._topology.graphs.get(graph_id)
+            if graph is None:
+                continue
+            env = engine._environments.get(graph_id)
+            if env is None:
+                continue
+            graph_creatures = []
+            for cid in graph.creature_ids:
+                try:
+                    graph_creatures.append(engine.get_creature(cid))
+                except KeyError:
+                    continue
+            tabs = [focus_creature_id]
+            tabs.extend(
+                c.creature_id
+                for c in graph_creatures
+                if c.creature_id != focus_creature_id
+            )
+            tabs.extend(f"#{name}" for name in graph.channels)
+            try:
+                tui.set_terrarium_tabs(tabs)
+            except Exception as exc:
+                logger.debug("TUI tab refresh failed", error=str(exc))
+            _update_terrarium_panel(tui, graph_creatures, env, focus_creature_id)
+            _wire_new_channels(env, tui, wired_channels)
+            for creature in graph_creatures:
+                if creature.creature_id in routed_creatures:
+                    continue
+                creature_out = TUIOutput(session_key=creature.creature_id)
+                creature_out._tui = tui
+                creature_out._running = True
+                creature_out._default_target = creature.creature_id
+                creature.agent.output_router.default_output = creature_out
+                routed_creatures.add(creature.creature_id)
+    except asyncio.CancelledError:
+        return
+    except Exception as exc:
+        logger.debug("topology subscriber crashed", error=str(exc), exc_info=True)
 
 
 async def _send_to_channel_tab(
