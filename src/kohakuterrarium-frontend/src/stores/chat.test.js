@@ -533,7 +533,7 @@ describe("chat store — multimodal edit + branch resync", () => {
     const scheduleSpy = vi.spyOn(chat, "_scheduleBranchResync").mockImplementation(() => {})
     const importActual = await vi.importActual("@/utils/api")
     const getHistory = vi
-      .spyOn(importActual.agentAPI, "getHistory")
+      .spyOn(importActual.terrariumAPI, "getHistory")
       .mockResolvedValueOnce({
         events: [
           { type: "user_input", content: "hi", event_id: 1, turn_index: 1, branch_id: 1 },

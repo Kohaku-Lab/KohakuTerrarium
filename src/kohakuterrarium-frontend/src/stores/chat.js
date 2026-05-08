@@ -1079,6 +1079,14 @@ const _chatStoreOptions = {
     _jobTimer: null,
     /** @type {string | null} */
     _instanceId: null,
+    /** Canonical graph id for the active instance. For terrarium-typed
+     *  instances this is the routing key for ``terrariumAPI`` and the
+     *  ``/ws/sessions/{gid}/creatures/{target}/chat`` URL. For solo
+     *  creatures it equals ``_instanceId``. Tracked separately so
+     *  ``/instances/<creature_id>`` URLs keep working after the
+     *  graph grows past one member (the URL id is the creature id,
+     *  but the routing id must be the graph id). */
+    _instanceGraphId: null,
     /** @type {string | null} */
     _instanceType: null,
     /** @type {WebSocket | null} Single WS for the instance */
@@ -1128,8 +1136,11 @@ const _chatStoreOptions = {
      * yet (very first moments before the session_info event arrives).
      */
     modelDisplay: (state) => state.sessionInfo.llmName || state.sessionInfo.model || "",
+    /** Active creature target for per-creature endpoints. Returns the
+     *  active tab name when the user is on a creature tab (not a
+     *  channel tab). Used by side panels (scratchpad, env, …) to
+     *  route to the correct creature within the session. */
     terrariumTarget: (state) => {
-      if (state._instanceType !== "terrarium") return null
       const tab = state.activeTab
       if (!tab || tab.startsWith("ch:")) return null
       return tab
@@ -1154,7 +1165,24 @@ const _chatStoreOptions = {
 
     initForInstance(instance, options = {}) {
       const { initialTab = null } = options
-      if (this._instanceId === instance.id && this._ws) {
+      // A solo creature that grew via group_add_node is reported by
+      // the backend as ``terrarium`` after the second creature joins.
+      // Without this type-change check the chat store stays in
+      // creature mode forever — which is why the chat panel never
+      // surfaces the new peers' tabs even though the polling loop
+      // has the up-to-date ``instance`` shape.
+      const typeChanged = this._instanceId === instance.id && this._instanceType !== instance.type
+      // Preserve the previously-focused tab across any re-init (type
+      // flip OR canonical-id swap). When a solo creature gains a peer,
+      // the URL/tab handle stays as the creature_id but the canonical
+      // ``instance.id`` flips to the graph_id — both code paths reach
+      // the full re-init below, and in both cases the user is still
+      // chatting with the original creature; defaulting to ``creatures[0]``
+      // (sorted by creature_id) would yank focus to whichever creature
+      // happens to sort first.
+      const willReInit = !this._ws || this._instanceId !== instance.id || typeChanged
+      const preservedActiveTab = willReInit ? this.activeTab : null
+      if (this._instanceId === instance.id && this._ws && !typeChanged) {
         // Already inited; just switch the active tab if a hint was
         // passed (used by the graph editor's "open chat" on inner
         // creatures so the right sub-tab pops up without a reload).
@@ -1162,9 +1190,7 @@ const _chatStoreOptions = {
           this._addTab(initialTab)
           this.activeTab = initialTab
           this._saveTabs()
-          if (this._instanceType === "terrarium") {
-            this._loadHistory(initialTab)
-          }
+          this._loadHistory(initialTab)
         }
         // Same instance, WS already up. Nothing to do — the live WS
         // is already streaming any new events into ``messagesByTab``,
@@ -1177,6 +1203,7 @@ const _chatStoreOptions = {
       this._cleanup()
       const generation = ++this._instanceGeneration
       this._instanceId = instance.id
+      this._instanceGraphId = instance.graph_id || instance.id
       this._instanceType = instance.type
       this.tabs = []
       this.messagesByTab = {}
@@ -1204,40 +1231,44 @@ const _chatStoreOptions = {
       const statusStore = useStatusStore(scopeOfStoreId(this.$id))
       statusStore.reset()
 
-      if (instance.type === "terrarium") {
-        // Pick the default tab off the live terrarium shape rather
-        // than guessing. The historical fallback was ``ch:tasks`` —
-        // a literal hardcoded channel name that does not exist for
-        // graphs built by merging two solo creatures, which is why
-        // the chat panel showed "Disconnected — reconnecting" and
-        // referenced a "task" channel nobody created.
-        let defaultTab = null
-        if (instance.has_root) {
-          defaultTab = "root"
-        } else if (instance.creatures && instance.creatures.length > 0) {
-          // Prefer the first creature so the WS URL's ``target``
-          // resolves to a real creature_name on the backend.
-          defaultTab = instance.creatures[0].name
-        } else if (instance.channels && instance.channels.length > 0) {
-          defaultTab = `ch:${instance.channels[0].name}`
-        }
-        if (defaultTab) this._addTab(defaultTab)
-        // Honour the caller's preferred tab (e.g. graph editor "open
-        // chat" on an inner creature picks that creature's name) by
-        // appending + activating it before the WS opens.
-        if (initialTab && initialTab !== defaultTab) {
-          this._addTab(initialTab)
-          this.activeTab = initialTab
-        }
-        this._connectTerrarium(instance.id, generation)
+      // Unified session connect: every session has a session_id and
+      // a creatures[] roster. For solo sessions tabs[0] is the
+      // creature's name; for recipe-built terrariums it's "root" (or
+      // creatures[0].name when no root). The WS endpoint
+      // ``/ws/sessions/{sid}/creatures/{target}/chat`` works for
+      // both — there is no agent-vs-terrarium fork.
+      let defaultTab = null
+      if (instance.has_root) {
+        defaultTab = "root"
+      } else if (instance.creatures && instance.creatures.length > 0) {
+        defaultTab = instance.creatures[0].name
+      } else if (instance.channels && instance.channels.length > 0) {
+        defaultTab = `ch:${instance.channels[0].name}`
       } else {
-        const name = instance.creatures[0]?.name || instance.config_name
-        this._addTab(name)
-        this._connectCreature(instance.id, generation)
+        defaultTab = instance.config_name
       }
+      if (defaultTab) this._addTab(defaultTab)
+      if (initialTab && initialTab !== defaultTab) {
+        this._addTab(initialTab)
+        this.activeTab = initialTab
+      }
+      this._connectTerrarium(this._instanceGraphId, generation)
 
       // Restore saved tabs/active tab for this instance
       this._restoreTabs()
+      // After a type-change re-init, keep the user on the creature
+      // they were chatting with (still present in the new graph
+      // roster). Make sure the tab exists before we activate it —
+      // ``_restoreTabs`` may not include it if the user never
+      // explicitly switched tabs in the solo phase.
+      if (preservedActiveTab && !preservedActiveTab.startsWith("ch:")) {
+        const stillThere = (instance.creatures || []).some((c) => c.name === preservedActiveTab)
+        if (stillThere) {
+          this._addTab(preservedActiveTab)
+          this.activeTab = preservedActiveTab
+          this._saveTabs()
+        }
+      }
       if (!this.activeTab) this.activeTab = this.tabs[0] || null
     },
 
@@ -1245,11 +1276,10 @@ const _chatStoreOptions = {
       this._addTab(tabKey)
       this.activeTab = tabKey
       this._saveTabs()
-
-      // Load history for creature/root tabs
-      if (this._instanceType === "terrarium") {
-        this._loadHistory(tabKey)
-      }
+      // Always load history — the unified session endpoint handles
+      // both creature tabs (target=creature_name) and channel tabs
+      // (target=``ch:<channel>``).
+      this._loadHistory(tabKey)
     },
 
     _addTab(key) {
@@ -1273,7 +1303,11 @@ const _chatStoreOptions = {
       this.activeTab = tab
       if (tab) delete this.unreadCounts[tab]
       this._saveTabs()
-      if (tab && this._instanceType === "terrarium") {
+      // Lazy-load history for any newly-focused empty tab. The
+      // session endpoint accepts ``(session_id, creature_name)``
+      // for both solo and multi-creature sessions, so there's
+      // no need to fork by instance type here.
+      if (tab) {
         const msgs = this.messagesByTab[tab]
         if (msgs && msgs.length === 0) {
           this._loadHistory(tab, this._instanceGeneration)
@@ -1293,11 +1327,10 @@ const _chatStoreOptions = {
         // they have their own lifecycle and must be stopped individually
         // via stopTask() from the running jobs panel.
         if (this.processingByTab[target]) {
-          if (this._instanceType === "terrarium") {
-            await terrariumAPI.interruptCreature(this._instanceId, target)
-          } else {
-            await agentAPI.interrupt(this._instanceId)
-          }
+          // Unified routing: every session has a session_id (graph_id)
+          // and creatures keyed by name. ``interruptCreature`` works
+          // for both solo (1-creature graph) and multi-creature.
+          await terrariumAPI.interruptCreature(this._instanceGraphId, target)
           this.processingByTab[target] = false
         }
         // Do NOT mark running parts as interrupted or remove running jobs.
@@ -1336,7 +1369,7 @@ const _chatStoreOptions = {
       if (tab.startsWith("ch:")) {
         const chName = tab.slice(3)
         try {
-          await terrariumAPI.sendToChannel(this._instanceId, chName, contentParts, "human")
+          await terrariumAPI.sendToChannel(this._instanceGraphId, chName, contentParts, "human")
         } catch (err) {
           console.error("Channel send failed:", err)
         }
@@ -1355,7 +1388,7 @@ const _chatStoreOptions = {
 
     async _loadHistory(target, generation = this._instanceGeneration) {
       try {
-        const data = await terrariumAPI.getHistory(this._instanceId, target)
+        const data = await terrariumAPI.getHistory(this._instanceGraphId, target)
         if (generation !== this._instanceGeneration) return
         const { messages, events, is_processing: isProcessing } = data || {}
         if (events?.length) {
@@ -1404,38 +1437,29 @@ const _chatStoreOptions = {
         generation,
         url: wsUrl(`/ws/sessions/${terrariumId}/creatures/${target}/chat`),
         onOpen: () => {
-          // Load all tab histories, then flush WS buffer
+          // Load history for the *active* tab and the WS-bound tab
+          // (tabs[0]) plus every channel tab. After a typeChanged
+          // re-init the active tab may not be tabs[0] (we restore
+          // the user's pre-upgrade focus), so loading only tabs[0]
+          // would leave the active tab empty until the user clicks
+          // away and back.
           const loads = []
-          if (this.tabs[0]) {
-            loads.push(this._loadHistory(this.tabs[0], generation))
+          const seen = new Set()
+          const enqueue = (tab) => {
+            if (!tab || seen.has(tab)) return
+            seen.add(tab)
+            loads.push(this._loadHistory(tab, generation))
           }
+          if (this.tabs[0]) enqueue(this.tabs[0])
+          if (this.activeTab) enqueue(this.activeTab)
           for (const tab of this.tabs) {
-            if (tab.startsWith("ch:")) {
-              loads.push(this._loadHistory(tab, generation))
-            }
+            if (tab.startsWith("ch:")) enqueue(tab)
           }
           Promise.all(loads)
             .catch((err) => console.error("Terrarium history load failed:", err))
             .finally(() => this._flushWsBuffer(generation))
         },
         reconnect: () => this._connectTerrarium(terrariumId, generation),
-      })
-    },
-
-    /** Connect single WS for standalone creature */
-    _connectCreature(agentId, generation) {
-      this._openWs({
-        generation,
-        url: wsUrl(`/ws/sessions/_/creatures/${agentId}/chat`),
-        onOpen: () => {
-          const tabKey = this.tabs[0]
-          if (tabKey) {
-            this._loadAgentHistory(agentId, tabKey, generation)
-          } else {
-            this._flushWsBuffer(generation)
-          }
-        },
-        reconnect: () => this._connectCreature(agentId, generation),
       })
     },
 
@@ -1503,35 +1527,6 @@ const _chatStoreOptions = {
         }
         this._wsBuffer = []
       }
-    },
-
-    async _loadAgentHistory(agentId, tabKey, generation = this._instanceGeneration) {
-      try {
-        const data = await agentAPI.getHistory(agentId)
-        if (generation !== this._instanceGeneration) return
-        const { messages, events, is_processing: isProcessing } = data || {}
-        if (events?.length) {
-          const normalizedEvents = _dedupeAdjacentDuplicateEvents(events)
-          // Cache raw events so branch navigation works after resume
-          // without an extra network round-trip.
-          this.eventsByTab[tabKey] = normalizedEvents
-          const view = this.branchViewByTab[tabKey] || null
-          const { messages: msgs, pendingJobs } = _replayEvents(messages, normalizedEvents, view)
-          this.messagesByTab[tabKey] = msgs
-          this._restoreTokenUsage(tabKey, normalizedEvents)
-          this._restoreRunningState(tabKey, pendingJobs, isProcessing)
-        } else if (messages?.length) {
-          this.messagesByTab[tabKey] = _convertHistory(messages)
-          if (isProcessing) this.processingByTab[tabKey] = true
-        } else if (isProcessing) {
-          this.processingByTab[tabKey] = true
-        }
-      } catch (err) {
-        if (err?.response?.status !== 404) {
-          console.error("Failed to load agent history:", err)
-        }
-      }
-      this._flushWsBuffer(generation)
     },
 
     /** Restore running jobs from replay result. */
@@ -2076,21 +2071,15 @@ const _chatStoreOptions = {
 
     /** Promote a running direct task to background via API. */
     async promoteTask(jobId) {
-      if (!this._instanceId || !this._instanceType) return
+      if (!this._instanceId) return
       if (this.runningJobs[jobId]) {
         this.runningJobs[jobId].promotable = false
       }
       try {
-        if (this._instanceType === "terrarium") {
-          const target = this.activeTab
-          if (target && !target.startsWith("ch:")) {
-            const { terrariumAPI } = await import("@/utils/api")
-            await terrariumAPI.promoteCreatureTask(this._instanceId, target, jobId)
-          }
-        } else {
-          const { agentAPI } = await import("@/utils/api")
-          await agentAPI.promote(this._instanceId, jobId)
-        }
+        const target = this.activeTab
+        if (!target || target.startsWith("ch:")) return
+        const { terrariumAPI } = await import("@/utils/api")
+        await terrariumAPI.promoteCreatureTask(this._instanceGraphId, target, jobId)
       } catch (e) {
         console.warn("Failed to promote task:", e)
       }
@@ -2176,8 +2165,9 @@ const _chatStoreOptions = {
         // For terrarium: session_id = the terrarium's id, creature_id =
         // the active sub-tab's creature name. For standalone: pass the
         // agent id as both (the API treats ``"_"`` as "any session").
-        const [sid, cid] =
-          this._instanceType === "terrarium" ? [this._instanceId, tab] : ["_", this._instanceId]
+        // Unified routing — every session has a graph_id and creatures
+        // keyed by name. Solo sessions just have a 1-creature roster.
+        const [sid, cid] = [this._instanceGraphId, tab]
         await agentAPI.regenerate(sid, cid)
         await this._resyncHistory(tab)
       } catch (e) {
@@ -2263,8 +2253,7 @@ const _chatStoreOptions = {
       }
       try {
         const { agentAPI } = await import("@/utils/api")
-        const [sid, cid] =
-          this._instanceType === "terrarium" ? [this._instanceId, tab] : ["_", this._instanceId]
+        const [sid, cid] = [this._instanceGraphId, tab]
         const editResponse = await agentAPI.editMessage(sid, cid, backendIdx, newContent, {
           turnIndex,
           userPosition,
@@ -2293,8 +2282,7 @@ const _chatStoreOptions = {
       if (!tab || tab.startsWith("ch:")) return
       try {
         const { agentAPI } = await import("@/utils/api")
-        const [sid, cid] =
-          this._instanceType === "terrarium" ? [this._instanceId, tab] : ["_", this._instanceId]
+        const [sid, cid] = [this._instanceGraphId, tab]
         await agentAPI.rewindTo(sid, cid, messageIdx)
         await this._resyncHistory(tab)
       } catch (e) {
@@ -2324,8 +2312,8 @@ const _chatStoreOptions = {
     async _resyncHistory(tab = this.activeTab) {
       if (!this._instanceId || !tab) return false
       try {
-        const { agentAPI } = await import("@/utils/api")
-        const data = await agentAPI.getHistory(this._instanceId)
+        const { terrariumAPI } = await import("@/utils/api")
+        const data = await terrariumAPI.getHistory(this._instanceGraphId, tab)
         if (!data?.events) return false
         // Cache events + clear any stale branch override BEFORE the
         // promotion check, so the rebuild path always has fresh data.
@@ -2653,6 +2641,7 @@ const _chatStoreOptions = {
       this._cleanup()
       this._instanceGeneration++
       this._instanceId = null
+      this._instanceGraphId = null
       this._instanceType = null
       this.tabs = []
       this.messagesByTab = {}

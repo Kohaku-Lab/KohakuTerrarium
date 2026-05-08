@@ -66,12 +66,25 @@ const loading = ref(true)
 const confirmStop = ref(false)
 let refreshTimer = null
 
+// Lenient instance lookup: a tab opened pre-upgrade was keyed by
+// ``creature_id``, but after the graph grows past one member the
+// canonical instance handle is the ``graph_id``. Match by either
+// identity, or by membership in the graph's creature roster, so
+// the tab keeps resolving to its session without forcing the user
+// to re-open from the dashboard.
+function _matchesInstance(inst, id) {
+  if (!inst || !id) return false
+  if (inst.id === id) return true
+  if (inst.graph_id === id) return true
+  return (inst.creatures || []).some((c) => c.creature_id === id || c.agent_id === id || c.name === id)
+}
+
 const instance = computed(() => {
   const id = target.value
   if (!id) return null
-  if (loadedInstance.value?.id === id) return loadedInstance.value
-  if (instances.current?.id === id) return instances.current
-  return instances.list.find((it) => it.id === id) || null
+  if (_matchesInstance(loadedInstance.value, id)) return loadedInstance.value
+  if (_matchesInstance(instances.current, id)) return instances.current
+  return instances.list.find((it) => _matchesInstance(it, id)) || null
 })
 
 // Provide panelProps for the existing WorkspaceShell zones, mirroring
@@ -103,24 +116,32 @@ async function loadInstance() {
   if (!id) return
   loading.value = true
   try {
-    // If chat is bound to a different surface, clear it before init
-    // (matches pages/instances/[id].vue; ChatPanel handles _instanceId
-    // as the canonical field — we don't rename it).
-    if (chat._instanceId && chat._instanceId !== id) {
-      chat.resetForRouteSwitch()
-    }
     const loaded = await instances.fetchOne(id)
     if (!loaded) {
       loadedInstance.value = null
       return
     }
     loadedInstance.value = loaded
+    // Reset chat only when bound to a *truly different* instance
+    // (e.g. the session viewer left ``chat._instanceId`` pointing at
+    // ``session:<name>``, or the user opened a fresh tab for a
+    // different session). Skip the reset when the bound id is just
+    // a different handle for the same graph (creature_id ↔ graph_id
+    // after a solo→multi upgrade) — otherwise every 5 s poll would
+    // wipe the chat state and yank the user out of their tab.
+    const sameInstance =
+      chat._instanceId === id ||
+      chat._instanceId === loaded.id ||
+      chat._instanceId === loaded.graph_id
+    if (chat._instanceId && !sameInstance) {
+      chat.resetForRouteSwitch()
+    }
     // ``initialTab`` is only honoured on a *fresh* switch into this
     // chat instance. On remount (e.g. user toggles to the graph
     // editor tab and back) or on the 5 s poll, ``chat._instanceId``
     // already matches and we pass null so the user's current sub-tab
     // selection is preserved instead of getting snapped back.
-    const isFreshSwitch = chat._instanceId !== id
+    const isFreshSwitch = !sameInstance
     const initialTab = isFreshSwitch ? props.tab.initialTab || null : null
     chat.initForInstance(loaded, { initialTab })
     applyPreset()

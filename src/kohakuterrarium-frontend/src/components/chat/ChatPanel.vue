@@ -482,13 +482,9 @@ async function send() {
 async function triggerCompact() {
   if (props.readOnly) return
   try {
-    const tab = chat.activeTab
-    let response
-    if (chat._instanceType === "terrarium") {
-      response = await terrariumAPI.executeCreatureCommand(chat._instanceId, tab || "root", "compact")
-    } else {
-      response = await agentAPI.executeCommand(chat._instanceId, "compact")
-    }
+    const sid = chat._instanceGraphId || chat._instanceId
+    const tab = chat.activeTab || "root"
+    const response = await terrariumAPI.executeCreatureCommand(sid, tab, "compact")
     // ``/compact`` returns a ``ui_notify`` payload describing one of
     // four outcomes: triggered, no-controller, too-short, busy. Without
     // surfacing it the user has no signal that the click did anything
@@ -542,13 +538,9 @@ async function triggerClear() {
     return // user cancelled
   }
   try {
-    const tab = chat.activeTab
-    let response
-    if (chat._instanceType === "terrarium") {
-      response = await terrariumAPI.executeCreatureCommand(chat._instanceId, tab || "root", "clear", "--force")
-    } else {
-      response = await agentAPI.executeCommand(chat._instanceId, "clear", "--force")
-    }
+    const sid = chat._instanceGraphId || chat._instanceId
+    const tab = chat.activeTab || "root"
+    const response = await terrariumAPI.executeCreatureCommand(sid, tab, "clear", "--force")
     surfaceCommandResult(response)
   } catch (err) {
     console.error("Clear failed:", err)
@@ -559,11 +551,8 @@ async function triggerClear() {
 async function stopTask(jobId, jobName) {
   try {
     const tab = chat.activeTab
-    if (chat._instanceType === "terrarium") {
-      await terrariumAPI.stopCreatureTask(chat._instanceId, tab || "root", jobId)
-    } else {
-      await agentAPI.stopTask(chat._instanceId, jobId)
-    }
+    const sid = chat._instanceGraphId || chat._instanceId
+    await terrariumAPI.stopCreatureTask(sid, tab || "root", jobId)
     // Don't eagerly remove from runningJobs — the backend will send a
     // subagent_done/subagent_error or tool_done/tool_error event which
     // handles the removal properly. Just mark as cancelling for visual feedback.
