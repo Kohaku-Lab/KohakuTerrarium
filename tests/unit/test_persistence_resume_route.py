@@ -50,10 +50,10 @@ def _make_client(monkeypatch, *, returned_session: Session) -> TestClient:
 
 
 def test_resume_returns_legacy_shape_for_creature(monkeypatch, fake_session_path):
-    """A resumed 1-creature session returns ``type == "agent"``."""
+    """A resumed 1-creature session returns ``type == "agent"`` (derived
+    from creature count, not from a stored ``kind`` field)."""
     session = Session(
-        session_id="alice_abc123",
-        kind="creature",
+        session_id="graph_alice",
         name="alice",
         creatures=[{"agent_id": "alice_abc123", "name": "alice"}],
         created_at="2025-01-01T00:00:00Z",
@@ -66,21 +66,19 @@ def test_resume_returns_legacy_shape_for_creature(monkeypatch, fake_session_path
     assert response.status_code == 200
     body = response.json()
     # Legacy contract — what api.js + the resume page consume.
-    assert body["instance_id"] == "alice_abc123"
+    assert body["instance_id"] == "graph_alice"
     assert body["type"] == "agent"
     assert body["session_name"] == "alice"
     # And the full handle is still reachable for new callers.
-    assert body["session"]["session_id"] == "alice_abc123"
-    assert body["session"]["kind"] == "creature"
+    assert body["session"]["session_id"] == "graph_alice"
 
 
 def test_resume_returns_legacy_shape_for_terrarium(monkeypatch, fake_session_path):
-    """A resumed terrarium session returns ``type == "terrarium"``."""
+    """A resumed multi-creature session returns ``type == "terrarium"``."""
     session = Session(
         session_id="graph_xyz",
-        kind="terrarium",
         name="my-tank",
-        creatures=[],
+        creatures=[{"name": "a"}, {"name": "b"}],
         channels=[],
         has_root=True,
     )
