@@ -34,7 +34,7 @@
 import { computed, onMounted, ref, watch } from "vue"
 
 import { useChatStore } from "@/stores/chat"
-import { agentAPI, terrariumAPI } from "@/utils/api"
+import { terrariumAPI } from "@/utils/api"
 
 const props = defineProps({
   instance: { type: Object, default: null },
@@ -48,12 +48,20 @@ const loading = ref(false)
 const error = ref("")
 const showDiff = ref(false)
 const lastLoaded = ref("")
-const terrariumTarget = computed(() => (props.instance?.type === "terrarium" ? chat.terrariumTarget : null))
+// Per-creature panels resolve a target creature within the session.
+// Solo sessions auto-target their only creature so the panel works
+// without forcing a tab click.
+const target = computed(() => {
+  const creatures = props.instance?.creatures || []
+  if (creatures.length === 0) return null
+  if (creatures.length > 1) return chat.terrariumTarget
+  return chat.terrariumTarget || creatures[0].name
+})
 
 async function load() {
-  const id = props.instance?.id
-  if (!id) return
-  if (props.instance?.type === "terrarium" && !terrariumTarget.value) {
+  const sid = props.instance?.graph_id || props.instance?.id
+  if (!sid) return
+  if (!target.value) {
     error.value = "System prompt is only available for root/creature tabs."
     promptText.value = ""
     return
@@ -61,7 +69,7 @@ async function load() {
   loading.value = true
   error.value = ""
   try {
-    const data = props.instance?.type === "terrarium" ? await terrariumAPI.getSystemPrompt(id, terrariumTarget.value) : await agentAPI.getSystemPrompt(id)
+    const data = await terrariumAPI.getSystemPrompt(sid, target.value)
     if (promptText.value) previousText.value = promptText.value
     promptText.value = data?.text || ""
     lastLoaded.value = new Date().toLocaleTimeString()
@@ -117,5 +125,5 @@ function diffSymbol(kind) {
 }
 
 onMounted(load)
-watch(() => [props.instance?.id, terrariumTarget.value], load)
+watch(() => [props.instance?.id, target.value], load)
 </script>

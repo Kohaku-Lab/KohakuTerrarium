@@ -147,19 +147,37 @@ const activeTab = ref("scratchpad")
 
 const activeLabel = computed(() => tabs.value.find((t) => t.id === activeTab.value)?.label || "")
 
+// Unified routing — ``instance.id`` is always the canonical
+// session_id (graph_id). The scratchpad / triggers / env / prompt
+// endpoints all live under ``/sessions/{sid}/creatures/{target}/...``
+// and accept a creature name or id as ``target``. Solo sessions just
+// have one creature in the roster; the same routing works.
 const instanceId = computed(() => props.instance?.id || null)
-const terrariumTarget = computed(() => (props.instance?.type === "terrarium" ? chat.terrariumTarget : null))
+const routingId = instanceId
+const terrariumTarget = computed(() => {
+  const creatures = props.instance?.creatures || []
+  if (creatures.length === 0) return null
+  // Multi-creature: per-creature panels are scoped to the active tab.
+  // Solo: there's only one creature, default to its name so the
+  // scratchpad panel opens automatically without forcing a tab click.
+  if (creatures.length > 1) return chat.terrariumTarget
+  return chat.terrariumTarget || creatures[0].name
+})
 const scratchpadTarget = computed(() => terrariumTarget.value)
 const scratchpadKey = computed(() => {
-  const id = instanceId.value
+  const id = routingId.value
   if (!id) return null
   return scratchpadTarget.value ? `${id}:${scratchpadTarget.value}` : id
 })
-const canInspectScratchpad = computed(() => !!instanceId.value && (props.instance?.type !== "terrarium" || !!scratchpadTarget.value))
+// Scratchpad is inspectable whenever we have a session and a target
+// creature to scope to. ``terrariumTarget`` already resolves the
+// active creature for solo sessions (defaults to the only creature
+// in the roster) so there's no need to fork on instance.type here.
+const canInspectScratchpad = computed(() => !!routingId.value && !!scratchpadTarget.value)
 
 // ── Scratchpad ────────────────────────────────────────────────
 const entries = computed(() => {
-  const id = instanceId.value
+  const id = routingId.value
   if (!id || !canInspectScratchpad.value) return []
   return Object.entries(scratchpad.getFor(id, scratchpadTarget.value)).filter(([k]) => k !== "_plan" && !/^__.*__$/.test(k))
 })
@@ -170,7 +188,7 @@ const loading = computed(() => {
 })
 
 const errorMsg = computed(() => {
-  if (props.instance?.type === "terrarium" && !scratchpadTarget.value) {
+  if (!scratchpadTarget.value && (props.instance?.creatures?.length || 0) > 1) {
     return t("state.scratchpadUnavailable")
   }
   const key = scratchpadKey.value
@@ -178,12 +196,12 @@ const errorMsg = computed(() => {
 })
 
 function refreshScratchpad() {
-  if (instanceId.value && canInspectScratchpad.value) scratchpad.fetch(instanceId.value, scratchpadTarget.value)
+  if (routingId.value && canInspectScratchpad.value) scratchpad.fetch(routingId.value, scratchpadTarget.value)
 }
 
 async function deleteKey(key) {
-  if (!instanceId.value || !canInspectScratchpad.value) return
-  await scratchpad.patch(instanceId.value, { [key]: null }, scratchpadTarget.value)
+  if (!routingId.value || !canInspectScratchpad.value) return
+  await scratchpad.patch(routingId.value, { [key]: null }, scratchpadTarget.value)
 }
 
 // ── Tool History ──────────────────────────────────────────────
@@ -262,9 +280,9 @@ const compactions = computed(() => {
   return msgs.filter((m) => m.role === "compact")
 })
 
-// Fetch on mount and when agentId changes.
+// Fetch on mount and when routingId changes.
 watch(
-  [instanceId, scratchpadTarget],
+  [routingId, scratchpadTarget],
   ([id]) => {
     if (id && canInspectScratchpad.value) scratchpad.fetch(id, scratchpadTarget.value)
   },
@@ -279,7 +297,7 @@ watch(
   ([processing, _jobCount], [prevProcessing]) => {
     // Refetch when processing ends (agent finished a turn) or
     // when a job completes (job count decreased).
-    if ((!processing && prevProcessing) || instanceId.value) {
+    if ((!processing && prevProcessing) || routingId.value) {
       refreshScratchpad()
     }
   },

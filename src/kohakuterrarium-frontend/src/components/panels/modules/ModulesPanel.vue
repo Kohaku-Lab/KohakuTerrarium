@@ -162,12 +162,22 @@ function closeSearch() {
 }
 
 // Identity helpers ────────────────────────────────────────────────
+//
+// Unified routing — every session has a graph_id and creatures keyed
+// by name. Solo sessions auto-resolve their target so the panel works
+// without forcing a tab click. Multi-creature sessions follow the
+// active tab.
 
-const isTerrarium = computed(() => props.instance?.type === "terrarium")
-const terrariumTarget = computed(() => (isTerrarium.value ? chat.terrariumTarget : null))
+const target = computed(() => {
+  const creatures = props.instance?.creatures || []
+  if (creatures.length === 0) return null
+  if (creatures.length > 1) return chat.terrariumTarget
+  return chat.terrariumTarget || creatures[0].name
+})
+const isMulti = computed(() => (props.instance?.creatures?.length || 0) > 1)
 
-const sessionId = computed(() => (isTerrarium.value ? props.instance?.id : "_"))
-const creatureId = computed(() => (isTerrarium.value ? terrariumTarget.value : props.instance?.id))
+const sessionId = computed(() => props.instance?.graph_id || props.instance?.id || null)
+const creatureId = target
 
 // The reload key. Watching THIS (not the whole instance object or
 // instance.id alone) is what guarantees we reload only on actual
@@ -277,7 +287,7 @@ async function reload() {
     modules.value = []
     return
   }
-  if (isTerrarium.value && !terrariumTarget.value) {
+  if (isMulti.value && !target.value) {
     error.value = "Pick a creature tab to configure modules."
     modules.value = []
     return

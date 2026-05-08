@@ -28,7 +28,7 @@
 import { computed, onMounted, ref, watch } from "vue"
 
 import { useChatStore } from "@/stores/chat"
-import { agentAPI, terrariumAPI } from "@/utils/api"
+import { terrariumAPI } from "@/utils/api"
 
 const props = defineProps({
   instance: { type: Object, default: null },
@@ -39,15 +39,20 @@ const chat = useChatStore()
 const triggers = ref([])
 const loading = ref(false)
 const error = ref("")
-const terrariumTarget = computed(() => (props.instance?.type === "terrarium" ? chat.terrariumTarget : null))
+const target = computed(() => {
+  const creatures = props.instance?.creatures || []
+  if (creatures.length === 0) return null
+  if (creatures.length > 1) return chat.terrariumTarget
+  return chat.terrariumTarget || creatures[0].name
+})
 
 async function load() {
-  const id = props.instance?.id
-  if (!id) {
+  const sid = props.instance?.graph_id || props.instance?.id
+  if (!sid) {
     triggers.value = []
     return
   }
-  if (props.instance?.type === "terrarium" && !terrariumTarget.value) {
+  if (!target.value) {
     error.value = "Triggers are only available for root/creature tabs."
     triggers.value = []
     return
@@ -55,7 +60,7 @@ async function load() {
   loading.value = true
   error.value = ""
   try {
-    const data = props.instance?.type === "terrarium" ? await terrariumAPI.listTriggers(id, terrariumTarget.value) : await agentAPI.listTriggers(id)
+    const data = await terrariumAPI.listTriggers(sid, target.value)
     triggers.value = Array.isArray(data) ? data : []
   } catch (err) {
     error.value = err?.response?.data?.detail || err?.message || String(err)
@@ -75,5 +80,5 @@ function formatTs(ts) {
 }
 
 onMounted(load)
-watch(() => [props.instance?.id, terrariumTarget.value], load)
+watch(() => [props.instance?.id, target.value], load)
 </script>

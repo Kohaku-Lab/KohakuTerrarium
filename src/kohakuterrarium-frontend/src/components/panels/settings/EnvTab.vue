@@ -32,7 +32,7 @@
 import { computed, onMounted, ref, watch } from "vue"
 
 import { useChatStore } from "@/stores/chat"
-import { agentAPI, terrariumAPI } from "@/utils/api"
+import { terrariumAPI } from "@/utils/api"
 
 const props = defineProps({
   instance: { type: Object, default: null },
@@ -45,13 +45,18 @@ const env = ref(/** @type {Record<string, string>} */ ({}))
 const loading = ref(false)
 const error = ref("")
 const query = ref("")
-const terrariumTarget = computed(() => (props.instance?.type === "terrarium" ? chat.terrariumTarget : null))
+const target = computed(() => {
+  const creatures = props.instance?.creatures || []
+  if (creatures.length === 0) return null
+  if (creatures.length > 1) return chat.terrariumTarget
+  return chat.terrariumTarget || creatures[0].name
+})
 
 async function load() {
-  const id = props.instance?.id
-  if (!id) return
+  const sid = props.instance?.graph_id || props.instance?.id
+  if (!sid) return
   pwd.value = props.instance?.pwd || ""
-  if (props.instance?.type === "terrarium" && !terrariumTarget.value) {
+  if (!target.value) {
     error.value = "Environment is only available for root/creature tabs."
     env.value = {}
     return
@@ -59,7 +64,7 @@ async function load() {
   loading.value = true
   error.value = ""
   try {
-    const data = props.instance?.type === "terrarium" ? await terrariumAPI.getEnv(id, terrariumTarget.value) : await agentAPI.getEnv(id)
+    const data = await terrariumAPI.getEnv(sid, target.value)
     pwd.value = data.pwd || props.instance?.pwd || ""
     env.value = data.env || {}
   } catch (err) {
@@ -81,5 +86,5 @@ const filteredEnv = computed(() => {
 })
 
 onMounted(load)
-watch(() => [props.instance?.id, terrariumTarget.value, props.instance?.pwd], load)
+watch(() => [props.instance?.id, target.value, props.instance?.pwd], load)
 </script>

@@ -6,21 +6,23 @@
 import { defineStore } from "pinia"
 import { ref } from "vue"
 
-import { agentAPI, terrariumAPI } from "@/utils/api"
+import { terrariumAPI } from "@/utils/api"
 
 export const useScratchpadStore = defineStore("scratchpad", () => {
   const byAgent = ref(/** @type {Record<string, Record<string, string>>} */ ({}))
   const loading = ref(/** @type {Record<string, boolean>} */ ({}))
   const error = ref(/** @type {Record<string, string>} */ ({}))
 
-  async function fetch(agentId, target = null) {
-    if (!agentId) return
-    const key = target ? `${agentId}:${target}` : agentId
+  async function fetch(sessionId, target = null) {
+    if (!sessionId || !target) return
+    const key = `${sessionId}:${target}`
     loading.value = { ...loading.value, [key]: true }
     try {
-      const data = target
-        ? await terrariumAPI.getScratchpad(agentId, target)
-        : await agentAPI.getScratchpad(agentId)
+      // Unified routing — every session has a graph_id and creatures
+      // keyed by name. ``terrariumAPI.getScratchpad`` calls
+      // ``/sessions/{sid}/creatures/{target}/scratchpad`` which
+      // resolves both solo (1-creature graph) and multi-creature.
+      const data = await terrariumAPI.getScratchpad(sessionId, target)
       byAgent.value = { ...byAgent.value, [key]: data }
       const next = { ...error.value }
       delete next[key]
@@ -32,18 +34,17 @@ export const useScratchpadStore = defineStore("scratchpad", () => {
     }
   }
 
-  async function patch(agentId, updates, target = null) {
-    if (!agentId) return
-    const key = target ? `${agentId}:${target}` : agentId
-    const data = target
-      ? await terrariumAPI.patchScratchpad(agentId, target, updates)
-      : await agentAPI.patchScratchpad(agentId, updates)
+  async function patch(sessionId, updates, target = null) {
+    if (!sessionId || !target) return
+    const key = `${sessionId}:${target}`
+    const data = await terrariumAPI.patchScratchpad(sessionId, target, updates)
     byAgent.value = { ...byAgent.value, [key]: data }
     return data
   }
 
-  function getFor(agentId, target = null) {
-    const key = target ? `${agentId}:${target}` : agentId
+  function getFor(sessionId, target = null) {
+    if (!sessionId || !target) return {}
+    const key = `${sessionId}:${target}`
     return byAgent.value[key] || {}
   }
 

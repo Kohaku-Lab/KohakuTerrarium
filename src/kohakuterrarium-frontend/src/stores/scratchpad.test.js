@@ -3,10 +3,6 @@ import { createPinia, setActivePinia } from "pinia"
 
 vi.mock("@/utils/api", () => {
   return {
-    agentAPI: {
-      getScratchpad: vi.fn(),
-      patchScratchpad: vi.fn(),
-    },
     terrariumAPI: {
       getScratchpad: vi.fn(),
       patchScratchpad: vi.fn(),
@@ -14,7 +10,7 @@ vi.mock("@/utils/api", () => {
   }
 })
 
-import { agentAPI, terrariumAPI } from "@/utils/api"
+import { terrariumAPI } from "@/utils/api"
 import { useScratchpadStore } from "./scratchpad"
 
 beforeEach(() => {
@@ -23,23 +19,21 @@ beforeEach(() => {
 })
 
 describe("scratchpad store", () => {
-  it("uses terrarium scratchpad endpoint when target is provided", async () => {
+  it("routes to /sessions/{sid}/creatures/{target}/scratchpad", async () => {
     const store = useScratchpadStore()
     terrariumAPI.getScratchpad.mockResolvedValue({ answer: "42" })
 
-    await store.fetch("terrarium_1", "worker")
+    await store.fetch("graph_1", "worker")
 
-    expect(terrariumAPI.getScratchpad).toHaveBeenCalledWith("terrarium_1", "worker")
-    expect(store.getFor("terrarium_1", "worker")).toEqual({ answer: "42" })
+    expect(terrariumAPI.getScratchpad).toHaveBeenCalledWith("graph_1", "worker")
+    expect(store.getFor("graph_1", "worker")).toEqual({ answer: "42" })
   })
 
-  it("uses agent scratchpad endpoint without terrarium target", async () => {
+  it("requires a target — solo sessions pass their creature's name", async () => {
     const store = useScratchpadStore()
-    agentAPI.getScratchpad.mockResolvedValue({ note: "ok" })
-
-    await store.fetch("agent_1")
-
-    expect(agentAPI.getScratchpad).toHaveBeenCalledWith("agent_1")
-    expect(store.getFor("agent_1")).toEqual({ note: "ok" })
+    // No target → no fetch (caller must resolve a creature first).
+    await store.fetch("graph_1")
+    expect(terrariumAPI.getScratchpad).not.toHaveBeenCalled()
+    expect(store.getFor("graph_1")).toEqual({})
   })
 })
