@@ -157,16 +157,36 @@ def _wait_until_alive(pid: int, timeout: float = 3.0) -> bool:
     return _is_pid_alive(pid)
 
 
-def _wait_until_bound(pid: int, timeout: float = 3.0) -> bool:
-    """Wait for the subprocess to publish its actual bound port to the state file."""
+def _wait_until_bound(pid: int, timeout: float = 30.0) -> str:
+    """Wait for the subprocess to publish its actual bound port.
+
+    Returns one of:
+
+    - ``"bound"``  — state file flipped ``bound: true``; daemon is up.
+    - ``"dead"``   — subprocess exited before binding.
+    - ``"slow"``   — timeout reached, subprocess is still alive but
+                     hasn't published yet (cold-start engine load can
+                     legitimately take >15s — embedding model, plugin
+                     discovery, FastAPI mount).  Caller should treat
+                     this as a soft warning, not a hard failure: the
+                     daemon will almost certainly come up shortly.
+
+    The bump from the old 3s budget is what stops ``kt serve restart``
+    from reporting "Failed to start" while the daemon is still booting
+    fine.
+    """
     deadline = time.time() + timeout
     while time.time() < deadline:
         if not _is_pid_alive(pid):
-            return False
+            return "dead"
         if _load_state().get("bound"):
-            return True
+            return "bound"
         time.sleep(0.1)
-    return _is_pid_alive(pid) and bool(_load_state().get("bound"))
+    if not _is_pid_alive(pid):
+        return "dead"
+    if _load_state().get("bound"):
+        return "bound"
+    return "slow"
 
 
 def serve_start_cli(args: argparse.Namespace) -> int:
@@ -190,12 +210,25 @@ def serve_start_cli(args: argparse.Namespace) -> int:
         dev=args.dev,
         log_level=args.log_level,
     )
-    if not _wait_until_bound(pid):
-        print("Failed to start KohakuTerrarium web daemon.")
+    status = _wait_until_bound(pid)
+    if status == "dead":
+        print("Failed to start KohakuTerrarium web daemon — subprocess exited.")
         print(f"Check log: {LOG_PATH}")
+        _remove_runtime_files()
         return 1
 
     state = _load_state()
+    if status == "slow":
+        # Subprocess is alive but engine cold-start (embedding model,
+        # plugin discovery, etc.) hasn't finished publishing yet.
+        # Don't claim failure — the daemon is on its way up.
+        print("KohakuTerrarium web daemon starting (still booting)")
+        print(f"  pid:  {pid}")
+        print(f"  url:  {state.get('url', '') or f'http://{args.host}:{args.port}'}")
+        print(f"  log:  {LOG_PATH}")
+        print("  note: run 'kt serve status' in a few seconds to confirm.")
+        return 0
+
     print("KohakuTerrarium web daemon started")
     print(f"  pid:  {pid}")
     print(f"  url:  {state.get('url', '')}")
