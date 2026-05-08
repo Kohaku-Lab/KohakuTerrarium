@@ -19,6 +19,7 @@ const api = axios.create({
  * @typedef {{ id: string, role: string, content: string, timestamp: string, sender?: string, tool_calls?: object[] }} ChatMessage
  */
 
+
 /** Config discovery */
 export const configAPI = {
   /** @returns {Promise<ConfigItem[]>} */
@@ -544,8 +545,36 @@ export const filesAPI = {
   },
 }
 
-/** Saved sessions */
+/** Sessions API — covers both **active runtime sessions** (``listActive``
+ *  / ``getActive`` / ``stopActive``) and saved-session lookups (``list`` /
+ *  ``resume`` / ``getHistory`` / …). Active sessions all share one shape
+ *  regardless of how the session was created (creature config or
+ *  terrarium recipe); ``listActive`` is the canonical source for the
+ *  dashboard, while the legacy ``agentAPI`` / ``terrariumAPI`` exports
+ *  are kept for the per-creature URL methods.
+ */
 export const sessionAPI = {
+  /** Active sessions — list every running session. */
+  async listActive() {
+    const { data } = await api.get("/sessions/active")
+    return data
+  },
+
+  /** Active session lookup — accepts either a ``session_id`` or a
+   *  ``creature_id``; the backend resolver maps either to the same
+   *  session so deep links from before a graph grew past one member
+   *  keep working. */
+  async getActive(id) {
+    const { data } = await api.get(`/sessions/active/${encodeTarget(id)}`)
+    return data
+  },
+
+  async stopActive(id) {
+    await api.delete(`/sessions/active/${encodeTarget(id)}`)
+  },
+
+  // ── saved-session lookups ────────────────────────────────────────
+
   async list({ limit = 20, offset = 0, search = "", refresh = false } = {}) {
     const params = { limit, offset }
     if (search) params.search = search

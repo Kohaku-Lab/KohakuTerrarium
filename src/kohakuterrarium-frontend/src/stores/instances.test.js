@@ -3,22 +3,21 @@ import { createPinia, setActivePinia } from "pinia"
 
 vi.mock("@/utils/api", () => {
   return {
+    sessionAPI: {
+      listActive: vi.fn(),
+      getActive: vi.fn(),
+      stopActive: vi.fn(),
+    },
     agentAPI: {
-      get: vi.fn(),
-      list: vi.fn(),
-      stop: vi.fn(),
       create: vi.fn(),
     },
     terrariumAPI: {
-      get: vi.fn(),
-      list: vi.fn(),
-      stop: vi.fn(),
       create: vi.fn(),
     },
   }
 })
 
-import { agentAPI, terrariumAPI } from "@/utils/api"
+import { sessionAPI } from "@/utils/api"
 import { useInstancesStore } from "./instances"
 
 beforeEach(() => {
@@ -29,38 +28,86 @@ beforeEach(() => {
 describe("instances store", () => {
   it("clears stale current instance on fetchOne 404", async () => {
     const store = useInstancesStore()
-    store.list = [{ id: "agent_dead", type: "creature" }]
-    store.current = { id: "agent_dead", type: "creature" }
-    agentAPI.get.mockRejectedValue({ response: { status: 404 } })
+    store.list = [{ id: "graph_dead", type: "creature" }]
+    store.current = { id: "graph_dead", type: "creature" }
+    sessionAPI.getActive.mockRejectedValue({ response: { status: 404 } })
 
-    const result = await store.fetchOne("agent_dead")
+    const result = await store.fetchOne("graph_dead")
 
     expect(result).toBeNull()
     expect(store.current).toBeNull()
     expect(store.list).toEqual([])
   })
 
-  it("returns mapped terrarium with canonical root model when fetchOne succeeds", async () => {
+  it("maps a unified Session payload to a terrarium-shaped instance", async () => {
     const store = useInstancesStore()
-    terrariumAPI.get.mockResolvedValue({
-      terrarium_id: "terrarium_1",
+    sessionAPI.getActive.mockResolvedValue({
+      session_id: "graph_team",
       name: "team",
       pwd: "/repo",
-      running: true,
       has_root: true,
-      root_model: "model",
-      root_llm_name: "provider/model",
-      root_session_id: "sess",
-      root_max_context: 10,
-      root_compact_threshold: 5,
-      creatures: { worker: { running: true, listen_channels: [], send_channels: [] } },
+      created_at: "2024",
+      config_path: "team.yaml",
+      creatures: [
+        {
+          name: "root",
+          creature_id: "root_abc",
+          model: "model",
+          llm_name: "provider/model",
+          is_root: true,
+          running: true,
+          listen_channels: [],
+          send_channels: [],
+        },
+        {
+          name: "worker",
+          creature_id: "worker_def",
+          model: "model2",
+          llm_name: "provider/model2",
+          running: true,
+          listen_channels: [],
+          send_channels: [],
+        },
+      ],
       channels: [],
     })
 
-    const result = await store.fetchOne("terrarium_1")
+    const result = await store.fetchOne("graph_team")
 
-    expect(result.id).toBe("terrarium_1")
+    expect(result.id).toBe("graph_team")
+    expect(result.graph_id).toBe("graph_team")
+    expect(result.type).toBe("terrarium") // 2+ creatures
+    expect(result.creatures.length).toBe(2)
+    // Primary creature is the root flagged one — drives the model pill.
     expect(result.llm_name).toBe("provider/model")
-    expect(store.current.id).toBe("terrarium_1")
+    expect(store.current.id).toBe("graph_team")
+  })
+
+  it("maps a 1-creature Session as a creature-shaped instance", async () => {
+    const store = useInstancesStore()
+    sessionAPI.getActive.mockResolvedValue({
+      session_id: "graph_solo",
+      name: "alice",
+      pwd: "/repo",
+      has_root: false,
+      creatures: [
+        {
+          name: "alice",
+          creature_id: "alice_xyz",
+          model: "m",
+          llm_name: "p/m",
+          running: true,
+          listen_channels: [],
+          send_channels: [],
+        },
+      ],
+      channels: [],
+    })
+
+    const result = await store.fetchOne("graph_solo")
+
+    expect(result.type).toBe("creature")
+    expect(result.creatures.length).toBe(1)
+    expect(result.creatures[0].name).toBe("alice")
   })
 })
