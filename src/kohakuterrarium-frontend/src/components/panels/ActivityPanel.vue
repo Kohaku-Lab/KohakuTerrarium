@@ -109,16 +109,14 @@ function formatTokens(n) {
 }
 
 async function stopJob(jobId, name) {
-  const instanceId = props.instance?.id
-  if (!instanceId) return
+  const sid = props.instance?.graph_id || props.instance?.id
+  if (!sid) return
   try {
-    if (props.instance?.type === "terrarium") {
-      const target = chat.terrariumTarget
-      if (!target) return
-      await terrariumAPI.stopCreatureTask(instanceId, target, jobId)
-    } else {
-      await agentAPI.stopTask(instanceId, jobId)
-    }
+    const target =
+      chat.terrariumTarget ||
+      props.instance?.creatures?.[0]?.name ||
+      "root"
+    await terrariumAPI.stopCreatureTask(sid, target, jobId)
   } catch (err) {
     console.error("Failed to stop job", name, err)
   }

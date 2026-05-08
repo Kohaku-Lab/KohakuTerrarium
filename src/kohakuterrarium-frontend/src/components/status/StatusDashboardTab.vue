@@ -202,12 +202,9 @@ function formatTokens(value) {
 
 async function stopTask(jobId) {
   try {
-    const tab = chat.activeTab
-    if (chat._instanceType === "terrarium") {
-      await terrariumAPI.stopCreatureTask(chat._instanceId, tab || "root", jobId)
-    } else {
-      await agentAPI.stopTask(chat._instanceId, jobId)
-    }
+    const sid = chat._instanceGraphId || chat._instanceId
+    const tab = chat.activeTab || "root"
+    await terrariumAPI.stopCreatureTask(sid, tab, jobId)
     const job = chat.runningJobs[jobId]
     if (job) job.cancelling = true
   } catch (err) {

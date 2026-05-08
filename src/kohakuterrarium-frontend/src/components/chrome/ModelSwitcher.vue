@@ -322,21 +322,20 @@ async function applySelection() {
   if (!id || !modelName || modelName === currentModel.value) return
   applying.value = true
   try {
+    // Unified routing — every session uses
+    // ``/sessions/{sid}/creatures/{name}/model``. Solo sessions
+    // resolve their lone creature automatically; multi-creature
+    // sessions follow the user's active tab.
     const inst = currentInstance.value
-    if (inst?.type === "terrarium") {
-      const target = selectedTarget.value
-      if (!target) {
-        ElMessage.error("Select a root or creature first")
-        return
-      }
-      await terrariumAPI.switchCreatureModel(id, target, modelName)
-      await instances.fetchOne(id)
-      if (terrariumTarget.value === target) {
-        chat.sessionInfo.llmName = modelName
-        chat.sessionInfo.model = modelName
-      }
-    } else {
-      await agentAPI.switchModel(id, modelName)
+    const sid = inst?.graph_id || id
+    const target = selectedTarget.value || inst?.creatures?.[0]?.name
+    if (!target) {
+      ElMessage.error("Select a creature first")
+      return
+    }
+    await terrariumAPI.switchCreatureModel(sid, target, modelName)
+    await instances.fetchOne(id)
+    if (chat.terrariumTarget === target || (inst?.creatures?.length || 0) <= 1) {
       chat.sessionInfo.llmName = modelName
       chat.sessionInfo.model = modelName
     }

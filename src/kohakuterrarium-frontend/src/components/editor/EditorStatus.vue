@@ -128,12 +128,9 @@ const compactPct = computed(() => {
 
 async function stopTask(jobId) {
   try {
-    if (chat._instanceType === "terrarium") {
-      const tab = chat.activeTab || "root"
-      await terrariumAPI.stopCreatureTask(chat._instanceId, tab, jobId)
-    } else {
-      await agentAPI.stopTask(chat._instanceId, jobId)
-    }
+    const sid = chat._instanceGraphId || chat._instanceId
+    const tab = chat.activeTab || "root"
+    await terrariumAPI.stopCreatureTask(sid, tab, jobId)
   } catch (err) {
     console.error("Failed to stop task:", err)
   }

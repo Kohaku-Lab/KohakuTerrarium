@@ -273,12 +273,9 @@ function formatTokens(value) {
 
 async function stopTask(jobId, jobName) {
   try {
-    const tab = chat.activeTab
-    if (chat._instanceType === "terrarium") {
-      await terrariumAPI.stopCreatureTask(chat._instanceId, tab || "root", jobId)
-    } else {
-      await agentAPI.stopTask(chat._instanceId, jobId)
-    }
+    const sid = chat._instanceGraphId || chat._instanceId
+    const tab = chat.activeTab || "root"
+    await terrariumAPI.stopCreatureTask(sid, tab, jobId)
     const job = chat.runningJobs[jobId]
     if (job) job.cancelling = true
   } catch (err) {
@@ -299,19 +296,13 @@ async function loadModels() {
 }
 
 async function handleModelSwitch(modelId) {
-  if (!props.instance?.id) return
+  const sid = props.instance?.graph_id || props.instance?.id
+  if (!sid) return
   modelSwitchError.value = ""
   try {
-    if (props.instance.type === "terrarium") {
-      const target = currentTarget.value
-      if (!target) {
-        modelSwitchError.value = t("status.modelSwitchHint")
-        return
-      }
-      await terrariumAPI.switchCreatureModel(props.instance.id, target, modelId)
-    } else {
-      await agentAPI.switchModel(props.instance.id, modelId)
-    }
+    const target =
+      currentTarget.value || props.instance?.creatures?.[0]?.name || "root"
+    await terrariumAPI.switchCreatureModel(sid, target, modelId)
   } catch (err) {
     modelSwitchError.value = err.response?.data?.detail || t("status.modelSwitchError")
     selectedModel.value = sessionModel.value || ""
