@@ -5,8 +5,9 @@ so the user-facing creature has the full ``group_*`` tool surface. A
 recipe is applied via :meth:`Terrarium.apply_recipe` and the privileged
 root (declared via the recipe's ``root:``) hosts the user's TUI focus.
 
-Both paths use the engine TUI from :mod:`terrarium.engine_cli`. The
-Rich-CLI variant has been removed in favor of the engine TUI.
+Both paths use the Terrarium engine. The full-screen engine TUI is the
+default graph-aware surface; ``--mode cli`` mounts the rich inline CLI
+for a focused single-creature stream.
 """
 
 import asyncio
@@ -17,6 +18,7 @@ from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.config import load_terrarium_config
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.engine_cli import run_engine_with_tui
+from kohakuterrarium.terrarium.engine_rich_cli import run_engine_with_rich_cli
 from kohakuterrarium.utils.logging import (
     configure_utf8_stdio,
     enable_stderr_logging,
@@ -39,21 +41,31 @@ def run_agent_cli(
 ) -> int:
     """Run a creature or recipe from the CLI through the engine.
 
-    ``io_mode`` is currently accepted but ignored — every ``kt run``
-    invocation uses the engine TUI. ``cli`` / ``plain`` variants will
-    return in a follow-up; until then we warn when the user asks for
-    one explicitly so the silence isn't surprising.
+    ``io_mode`` selects the terminal surface:
+
+    - ``"tui"`` (default when omitted): Textual full-screen TUI with
+      one tab per creature and one ``#channel`` tab per shared
+      channel. Best for multi-creature graphs.
+    - ``"cli"``: prompt-toolkit inline rich CLI. Single creature
+      focus, output streams to scrollback. Best for solo creatures.
+    - ``"plain"``: not yet ported back from the pre-engine path —
+      falls through to the TUI with a warning so the silence isn't
+      surprising.
     """
     configure_utf8_stdio(log=True)
     set_level(log_level)
-    if log_stderr in ("on", "auto"):
+    # Stderr logging would corrupt prompt-toolkit's redraw region —
+    # only enable it when the chosen surface leaves the terminal free.
+    suppresses_stderr = io_mode in (None, "tui", "cli")
+    if log_stderr == "on" or (log_stderr == "auto" and not suppresses_stderr):
         enable_stderr_logging(log_level)
 
-    if io_mode in ("cli", "plain"):
+    if io_mode == "plain":
         print(
-            f"Warning: --mode {io_mode} is not yet supported on the engine "
-            "path; using the TUI instead."
+            "Warning: --mode plain is not yet ported to the engine path; "
+            "using the TUI instead."
         )
+        io_mode = "tui"
 
     path = Path(agent_path)
     if not path.exists():
@@ -66,6 +78,7 @@ def run_agent_cli(
                 str(path),
                 session=session,
                 llm_override=llm_override,
+                io_mode=io_mode,
             )
         )
     except KeyboardInterrupt:
@@ -82,6 +95,7 @@ async def _run(
     *,
     session: str | None,
     llm_override: str | None,
+    io_mode: str | None,
 ) -> int:
     pwd = str(Path.cwd())
     is_recipe = _looks_like_recipe(agent_path)
@@ -120,7 +134,10 @@ async def _run(
                 )
 
         try:
-            await run_engine_with_tui(engine, focus_creature_id, store)
+            if io_mode == "cli":
+                await run_engine_with_rich_cli(engine, focus_creature_id, store)
+            else:
+                await run_engine_with_tui(engine, focus_creature_id, store)
         finally:
             if store is not None:
                 if session is not None:
