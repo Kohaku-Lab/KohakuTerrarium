@@ -4,7 +4,7 @@
     <span class="font-medium text-warm-700 dark:text-warm-300 truncate max-w-48">
       {{ instanceName }}
     </span>
-    <span v-if="instance?.type" class="text-[9px] px-1.5 py-0.5 rounded bg-warm-100 dark:bg-warm-800 text-warm-400">{{ instanceTypeLabel }}</span>
+    <GraphCounts v-if="instance" :instance="instance" compact />
 
     <button v-if="instance" class="w-5 h-5 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" :title="t('appHeader.instanceSettings')" @click="settingsOpen = true">
       <div class="i-carbon-settings text-[11px]" />
@@ -56,6 +56,7 @@ import { computed, ref } from "vue"
 
 import InstanceSettingsModal from "@/components/chrome/InstanceSettingsModal.vue"
 import { useInstanceContext } from "@/components/chrome/instanceContext"
+import GraphCounts from "@/components/common/GraphCounts.vue"
 import StatusDot from "@/components/common/StatusDot.vue"
 import { useInstancesStore } from "@/stores/instances"
 import { useLayoutStore } from "@/stores/layout"
@@ -78,11 +79,6 @@ const { t, presetLabel: translatePreset } = useI18n()
 const { resolvedInstanceId, instance } = useInstanceContext(props, route, instances)
 
 const instanceName = computed(() => instance.value?.config_name || instance.value?.creatures?.[0]?.name || resolvedInstanceId.value || "—")
-
-const instanceTypeLabel = computed(() => {
-  if (!instance.value?.type) return ""
-  return instance.value.type === "terrarium" ? t("common.terrarium") : t("common.creature")
-})
 
 const presetLabel = computed(() => {
   const preset = layout.activePreset

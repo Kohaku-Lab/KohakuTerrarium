@@ -37,7 +37,7 @@
         <span v-else class="text-warm-400 text-[10px] text-center block">--</span>
       </div>
       <router-link v-for="inst in instances.list" :key="inst.id" v-slot="{ navigate, isActive }" :to="`/instances/${inst.id}`" custom>
-        <NavItem :expanded="expanded" :active="isActive" :icon="inst.type === 'terrarium' ? 'i-carbon-network-4' : 'i-carbon-bot'" :label="inst.config_name" :status="inst.status" @click="navigate" />
+        <NavItem :expanded="expanded" :active="isActive" icon="i-carbon-network-4" :label="inst.config_name" :status="inst.status" @click="navigate" />
       </router-link>
     </div>
 

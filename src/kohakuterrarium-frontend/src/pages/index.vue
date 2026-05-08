@@ -32,10 +32,7 @@
                 {{ inst.pwd }}
               </div>
             </div>
-            <GemBadge :gem="inst.type === 'terrarium' ? 'iolite' : 'aquamarine'">
-              {{ inst.type }}
-            </GemBadge>
-            <div class="text-secondary text-xs">{{ t("sessions.agentCount", { count: inst.creatures.length }) }}</div>
+            <GraphCounts :instance="inst" />
             <button class="btn-icon text-coral hover:text-coral-dark flex-shrink-0" :title="t('home.stopInstance')" @click.stop="handleStop(inst)">
               <span class="i-carbon-stop-filled" />
             </button>
@@ -68,7 +65,7 @@
 <script setup>
 import { ElMessage } from "element-plus"
 import StatusDot from "@/components/common/StatusDot.vue"
-import GemBadge from "@/components/common/GemBadge.vue"
+import GraphCounts from "@/components/common/GraphCounts.vue"
 import { useInstancesStore } from "@/stores/instances"
 import { useI18n } from "@/utils/i18n"
 

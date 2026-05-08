@@ -5,9 +5,7 @@
       <span class="font-medium truncate text-warm-800 dark:text-warm-200">
         {{ instance.config_name }}
       </span>
-      <span class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded" :class="instance.type === 'terrarium' ? 'bg-iolite/20 text-iolite' : 'bg-amber/20 text-amber'">
-        {{ instance.type }}
-      </span>
+      <GraphCounts :instance="instance" compact />
     </header>
 
     <dl class="grid grid-cols-[80px_1fr] gap-y-0.5 text-xs">
@@ -35,6 +33,7 @@
 import { computed, onMounted, ref } from "vue"
 
 import ConfirmStopDialog from "@/components/shell/tabs/ConfirmStopDialog.vue"
+import GraphCounts from "@/components/common/GraphCounts.vue"
 import { useTabsStore } from "@/stores/tabs"
 
 const props = defineProps({ instance: { type: Object, required: true } })
