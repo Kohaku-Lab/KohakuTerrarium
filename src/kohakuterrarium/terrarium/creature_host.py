@@ -76,33 +76,113 @@ class Creature:
     _output_queue: "asyncio.Queue[str | None] | None" = None
     _running: bool = False
     _chat_handler_installed: bool = False
+    # Background task driving the agent's configured input module.
+    # Spawned in ``start`` and reaped in ``stop`` — see ``start`` for
+    # why this lives at the creature layer rather than inside Agent.
+    _input_task: "asyncio.Task[None] | None" = None
 
     # ------------------------------------------------------------------
     # lifecycle
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        """Start the underlying agent.  Idempotent."""
+        """Start the underlying agent.  Idempotent.
+
+        Also spawns ``Agent._drive_input`` as a background task so the
+        configured input module's polling loop is driven by the engine
+        path (the standalone ``Agent.run`` path drives it directly).
+        Without this, headless agents (Discord bot, webhook listener,
+        custom polling input) never consume their queues — their
+        ``get_input`` is the only place ``_process_event`` is reached
+        for non-trigger, non-channel input. Cheap for ``NoneInput``-
+        backed creatures: ``get_input`` blocks on the stop event.
+
+        The ``_drive_input`` lookup is tolerant — agent-likes used in
+        tests or specialized hosts that don't expose this hook simply
+        skip the spawn (they're presumed to drive their own loop).
+        """
         if self._running:
             return
         self._ensure_chat_pipe()
         await self.agent.start()
         self._running = True
+        drive_input = getattr(self.agent, "_drive_input", None)
+        if callable(drive_input):
+            self._input_task = asyncio.create_task(
+                drive_input(),
+                name=f"creature-input-{self.creature_id}",
+            )
+            self._input_task.add_done_callback(self._on_input_task_done)
         logger.info(
             "Creature started", creature_id=self.creature_id, creature_name=self.name
         )
 
+    def _on_input_task_done(self, task: "asyncio.Task[None]") -> None:
+        """Mark the creature stopped once its input loop exits.
+
+        The loop ends naturally when the input module signals
+        ``exit_requested``, when ``Agent.stop`` flips ``_running``, or
+        when an unexpected exception escapes. Flipping ``_running``
+        here lets external lifecycle drivers (``kt run`` sleep loop,
+        engine ``__aexit__``) notice and proceed to ``stop``.
+        """
+        if task.cancelled():
+            self._running = False
+            return
+        exc = task.exception()
+        if exc is not None and not isinstance(exc, asyncio.CancelledError):
+            logger.error(
+                "Creature input loop exited with error",
+                creature_id=self.creature_id,
+                creature_name=self.name,
+                error=str(exc),
+            )
+        self._running = False
+
     async def stop(self) -> None:
         """Stop the underlying agent and close the chat pipe."""
-        if not self._running:
+        if not self._running and self._input_task is None:
             return
         self._running = False
         if self._output_queue is not None:
             self._output_queue.put_nowait(None)
+        # Stopping the agent flips ``Agent._running`` and stops the
+        # input module, which unblocks ``get_input`` and lets the
+        # background loop exit on its own.
         await self.agent.stop()
+        await self._reap_input_task()
         logger.info(
             "Creature stopped", creature_id=self.creature_id, creature_name=self.name
         )
+
+    async def _reap_input_task(self) -> None:
+        """Wait for the input-driver task to exit, cancelling on timeout."""
+        task = self._input_task
+        if task is None:
+            return
+        self._input_task = None
+        if task.done():
+            return
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
+        except asyncio.TimeoutError:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception) as e:
+                logger.debug(
+                    "input task cancel ended with exception",
+                    creature_id=self.creature_id,
+                    error=str(e),
+                )
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.debug(
+                "input task raised on stop",
+                creature_id=self.creature_id,
+                error=str(e),
+            )
 
     @property
     def is_running(self) -> bool:

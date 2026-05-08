@@ -4,10 +4,11 @@ Real ``Agent`` instances do too much (load LLM profiles, parse skills,
 etc.) for unit tests of the engine layer.  ``_FakeAgent`` exposes
 exactly the slice of the agent surface the engine touches:
 ``start`` / ``stop`` / ``is_running`` / ``set_output_handler`` /
-``inject_input`` plus enough attributes for ``Creature.get_status``
-and channel-trigger / output-sink injection.
+``inject_input`` / ``_drive_input`` plus enough attributes for
+``Creature.get_status`` and channel-trigger / output-sink injection.
 """
 
+import asyncio
 from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
@@ -77,6 +78,8 @@ class _FakeAgent:
         self.received_events: list[Any] = []
         self.start_calls = 0
         self.stop_calls = 0
+        self.drive_input_calls = 0
+        self._drive_input_stop: asyncio.Event = asyncio.Event()
 
     def set_output_handler(self, handler: Any, replace_default: bool = False) -> None:
         self.output_handlers.append(handler)
@@ -88,11 +91,18 @@ class _FakeAgent:
         self.is_running = True
         self._running = True
         self.start_calls += 1
+        self._drive_input_stop.clear()
 
     async def stop(self) -> None:
         self.is_running = False
         self._running = False
         self.stop_calls += 1
+        self._drive_input_stop.set()
+
+    async def _drive_input(self) -> None:
+        """Stand-in for ``Agent._drive_input``: block until ``stop``."""
+        self.drive_input_calls += 1
+        await self._drive_input_stop.wait()
 
     async def inject_input(self, message, *, source: str = "chat") -> None:
         self.injected.append((message, source))

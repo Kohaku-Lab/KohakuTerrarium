@@ -7,9 +7,11 @@ shutdown / context manager / ``with_creature``.
 Uses a tiny in-test ``_FakeAgent`` so we don't pay for real LLM init —
 the engine layer only touches a handful of agent attributes
 (``start``, ``stop``, ``is_running``, ``set_output_handler``,
-``inject_input``) plus the ones ``Creature.get_status`` reads.
+``inject_input``, ``_drive_input``) plus the ones
+``Creature.get_status`` reads.
 """
 
+import asyncio
 from types import SimpleNamespace
 from typing import Any
 
@@ -51,6 +53,9 @@ class _FakeAgent:
         self.injected: list[tuple[Any, str]] = []
         self.start_calls = 0
         self.stop_calls = 0
+        self.drive_input_calls = 0
+        self._drive_input_started: asyncio.Event = asyncio.Event()
+        self._drive_input_stop: asyncio.Event = asyncio.Event()
 
     def set_output_handler(self, handler: Any, replace_default: bool = False):
         self.output_handlers.append(handler)
@@ -61,10 +66,21 @@ class _FakeAgent:
     async def start(self) -> None:
         self.is_running = True
         self.start_calls += 1
+        # Reset the gate every start so the fake survives stop/start cycles.
+        self._drive_input_stop.clear()
+        self._drive_input_started.clear()
 
     async def stop(self) -> None:
         self.is_running = False
         self.stop_calls += 1
+        # Unblock the background driver so ``Creature.stop`` can reap it.
+        self._drive_input_stop.set()
+
+    async def _drive_input(self) -> None:
+        """Stand-in for ``Agent._drive_input`` — block until stop is set."""
+        self.drive_input_calls += 1
+        self._drive_input_started.set()
+        await self._drive_input_stop.wait()
 
     async def inject_input(self, message, *, source: str = "chat") -> None:
         self.injected.append((message, source))
@@ -228,6 +244,46 @@ class TestStartStopShutdown:
         await engine.stop(c)
         assert not c.is_running
         assert "alice" in engine  # still listed
+
+    @pytest.mark.asyncio
+    async def test_start_drives_input_loop_and_stop_reaps_it(self):
+        """Regression for headless configured-IO mode (Discord bot, …).
+
+        ``Creature.start`` must spawn ``Agent._drive_input`` so the
+        configured input module's polling loop runs without
+        ``Agent.run`` being called. ``Creature.stop`` must reap the
+        background task.
+        """
+        engine = Terrarium()
+        c = await engine.add_creature(_make_creature("alice"))
+        # Driver task spawned and actually running.
+        assert c._input_task is not None
+        await asyncio.wait_for(c.agent._drive_input_started.wait(), timeout=1.0)
+        assert c.agent.drive_input_calls == 1
+        assert not c._input_task.done()
+        # Stop reaps the task.
+        await engine.stop(c)
+        assert c._input_task is None
+        assert c.agent.stop_calls == 1
+
+    @pytest.mark.asyncio
+    async def test_input_loop_exit_flips_creature_running(self):
+        """Done-callback path: when the loop exits on its own (e.g.
+        ``exit_requested``) the creature must mark itself stopped so
+        external lifecycle drivers (``kt run`` sleep loop) notice."""
+        engine = Terrarium()
+        c = await engine.add_creature(_make_creature("alice"))
+        await asyncio.wait_for(c.agent._drive_input_started.wait(), timeout=1.0)
+        # Simulate the input loop exiting on its own (mirrors what
+        # ``Agent._drive_input`` does on ``exit_requested`` from CLI / TUI).
+        c.agent._drive_input_stop.set()
+        for _ in range(50):
+            if not c.is_running:
+                break
+            await asyncio.sleep(0.01)
+        assert not c.is_running
+        # Subsequent stop is still safe.
+        await engine.stop(c)
 
     @pytest.mark.asyncio
     async def test_shutdown_stops_every_creature(self):

@@ -660,7 +660,20 @@ class Agent(
         - Routing output
         """
         await self.start()
+        try:
+            await self._drive_input()
+        finally:
+            await self.stop()
 
+    async def _drive_input(self) -> None:
+        """Replay resume state, fire the startup trigger, then poll input.
+
+        Extracted from :meth:`run` so engine-managed creatures can spawn
+        this as a background task in ``Creature.start`` — that's the
+        path headless configured-IO agents (Discord bot, webhook
+        listener, custom polling input) depend on. ``run`` keeps the
+        non-engine standalone path; both routes share this body.
+        """
         try:
             # Replay session history to output if resuming
             if self._pending_resume_events:
@@ -722,6 +735,7 @@ class Agent(
             logger.info("Interrupted")
         except asyncio.CancelledError:
             logger.info("Agent cancelled")
+            raise
         except Exception as e:
             logger.error("Fatal agent error", error=str(e))
             # Try to show error in output before stopping
@@ -731,13 +745,13 @@ class Agent(
                     f"\n[Fatal Error] {error_type}: {e}\n"
                 )
                 await self.output_router.emit(OutputEvent(type="processing_end"))
-            except Exception as e:
+            except Exception as inner:
                 logger.debug(
-                    "Failed to write fatal error to output", error=str(e), exc_info=True
+                    "Failed to write fatal error to output",
+                    error=str(inner),
+                    exc_info=True,
                 )
             raise
-        finally:
-            await self.stop()
 
     # =========================================================================
     # Programmatic API
