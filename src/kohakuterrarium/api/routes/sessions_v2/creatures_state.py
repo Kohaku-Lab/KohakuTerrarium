@@ -1,7 +1,15 @@
 """Per-creature state routes — scratchpad / triggers / env / system
 prompt / working dir / native tool options.
+
+Every read goes through ``asyncio.to_thread``: each reads from the
+agent's scratchpad / config / session store, all of which are sync
+data structures (some backed by SQLite). Frontend panels poll these
+on every tab switch and on a 5 s cadence, so any blocking read here
+stalls every other in-flight request for the whole panel refresh
+window.
 """
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -29,7 +37,9 @@ class NativeToolOptionsRequest(BaseModel):
 @router.get("/{session_id}/creatures/{creature_id}/scratchpad")
 async def get_scratchpad(session_id: str, creature_id: str, engine=Depends(get_engine)):
     try:
-        return creature_state.get_scratchpad(engine, session_id, creature_id)
+        return await asyncio.to_thread(
+            creature_state.get_scratchpad, engine, session_id, creature_id
+        )
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
 
@@ -42,8 +52,12 @@ async def patch_scratchpad(
     engine=Depends(get_engine),
 ):
     try:
-        return creature_state.patch_scratchpad(
-            engine, session_id, creature_id, req.updates
+        return await asyncio.to_thread(
+            creature_state.patch_scratchpad,
+            engine,
+            session_id,
+            creature_id,
+            req.updates,
         )
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
@@ -54,7 +68,9 @@ async def patch_scratchpad(
 @router.get("/{session_id}/creatures/{creature_id}/triggers")
 async def list_triggers(session_id: str, creature_id: str, engine=Depends(get_engine)):
     try:
-        return creature_state.list_triggers(engine, session_id, creature_id)
+        return await asyncio.to_thread(
+            creature_state.list_triggers, engine, session_id, creature_id
+        )
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
 
@@ -62,7 +78,9 @@ async def list_triggers(session_id: str, creature_id: str, engine=Depends(get_en
 @router.get("/{session_id}/creatures/{creature_id}/env")
 async def get_env(session_id: str, creature_id: str, engine=Depends(get_engine)):
     try:
-        return creature_state.get_env(engine, session_id, creature_id)
+        return await asyncio.to_thread(
+            creature_state.get_env, engine, session_id, creature_id
+        )
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
 
@@ -72,7 +90,9 @@ async def get_system_prompt(
     session_id: str, creature_id: str, engine=Depends(get_engine)
 ):
     try:
-        return creature_state.get_system_prompt(engine, session_id, creature_id)
+        return await asyncio.to_thread(
+            creature_state.get_system_prompt, engine, session_id, creature_id
+        )
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
 
@@ -82,7 +102,10 @@ async def get_working_dir(
     session_id: str, creature_id: str, engine=Depends(get_engine)
 ):
     try:
-        return {"pwd": creature_state.get_working_dir(engine, session_id, creature_id)}
+        pwd = await asyncio.to_thread(
+            creature_state.get_working_dir, engine, session_id, creature_id
+        )
+        return {"pwd": pwd}
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
 
@@ -95,8 +118,8 @@ async def set_working_dir(
     engine=Depends(get_engine),
 ):
     try:
-        applied = creature_state.set_working_dir(
-            engine, session_id, creature_id, req.path
+        applied = await asyncio.to_thread(
+            creature_state.set_working_dir, engine, session_id, creature_id, req.path
         )
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
@@ -112,11 +135,10 @@ async def get_native_tool_options(
     session_id: str, creature_id: str, engine=Depends(get_engine)
 ):
     try:
-        return {
-            "tools": creature_state.native_tool_inventory(
-                engine, session_id, creature_id
-            )
-        }
+        tools = await asyncio.to_thread(
+            creature_state.native_tool_inventory, engine, session_id, creature_id
+        )
+        return {"tools": tools}
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
 
@@ -129,8 +151,13 @@ async def set_native_tool_options(
     engine=Depends(get_engine),
 ):
     try:
-        applied = creature_state.set_native_tool_options(
-            engine, session_id, creature_id, req.tool, req.values or {}
+        applied = await asyncio.to_thread(
+            creature_state.set_native_tool_options,
+            engine,
+            session_id,
+            creature_id,
+            req.tool,
+            req.values or {},
         )
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")

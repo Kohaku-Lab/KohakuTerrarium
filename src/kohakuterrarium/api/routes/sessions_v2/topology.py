@@ -4,13 +4,15 @@ Mounted at ``/api/sessions/topology``. Replaces the legacy
 ``/api/terrariums/{id}/channels*`` and the per-creature wire endpoint.
 """
 
+import asyncio
+
+import kohakuterrarium.terrarium.channels as _channels
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from kohakuterrarium.api.deps import get_engine
 from kohakuterrarium.api.schemas import ChannelAdd, ChannelSend, WireChannel
 from kohakuterrarium.studio.sessions import topology as topology_lib
-import kohakuterrarium.terrarium.channels as _channels
 from kohakuterrarium.terrarium.events import EngineEvent, EventKind
 
 router = APIRouter()
@@ -66,7 +68,7 @@ async def merge_sessions(
 async def list_session_channels(session_id: str, engine=Depends(get_engine)):
     """List shared channels in a session."""
     try:
-        return topology_lib.list_channels(engine, session_id)
+        return await asyncio.to_thread(topology_lib.list_channels, engine, session_id)
     except KeyError as e:
         raise HTTPException(404, str(e))
 
@@ -95,7 +97,9 @@ async def get_session_channel(
 ):
     """Inspect a single shared channel."""
     try:
-        info = topology_lib.channel_info(engine, session_id, channel)
+        info = await asyncio.to_thread(
+            topology_lib.channel_info, engine, session_id, channel
+        )
     except KeyError as e:
         raise HTTPException(404, str(e))
     if info is None:

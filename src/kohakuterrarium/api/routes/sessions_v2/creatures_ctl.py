@@ -2,7 +2,15 @@
 
 Mounted at ``/api/sessions``; URLs land at
 ``/api/sessions/{session_id}/creatures/{creature_id}/...``.
+
+Sync sub-functions (``interrupt``, ``list_jobs``, ``promote_job``) are
+funnelled through ``asyncio.to_thread``: each touches the agent's
+trigger / job manager which can hit small disk reads, and the
+running-jobs panel polls them frequently enough that any blocking
+read on the loop visibly stalls the rest of the UI.
 """
+
+import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -17,7 +25,9 @@ async def interrupt_creature(
     session_id: str, creature_id: str, engine=Depends(get_engine)
 ):
     try:
-        creature_ctl.interrupt(engine, session_id, creature_id)
+        await asyncio.to_thread(
+            creature_ctl.interrupt, engine, session_id, creature_id
+        )
         return {"status": "interrupted"}
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
@@ -28,7 +38,9 @@ async def list_creature_jobs(
     session_id: str, creature_id: str, engine=Depends(get_engine)
 ):
     try:
-        return creature_ctl.list_jobs(engine, session_id, creature_id)
+        return await asyncio.to_thread(
+            creature_ctl.list_jobs, engine, session_id, creature_id
+        )
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
 
@@ -57,7 +69,9 @@ async def promote_creature_job(
     engine=Depends(get_engine),
 ):
     try:
-        ok = creature_ctl.promote_job(engine, session_id, creature_id, job_id)
+        ok = await asyncio.to_thread(
+            creature_ctl.promote_job, engine, session_id, creature_id, job_id
+        )
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
     return {"status": "promoted" if ok else "not_found"}

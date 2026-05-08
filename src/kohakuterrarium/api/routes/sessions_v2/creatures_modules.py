@@ -13,6 +13,7 @@ Routes:
 * ``POST   /sessions/{sid}/creatures/{cid}/modules/{type}/{name}/toggle``  enable/disable
 """
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -31,9 +32,10 @@ class ModuleOptionsRequest(BaseModel):
 @router.get("/{session_id}/creatures/{creature_id}/modules")
 async def list_modules(session_id: str, creature_id: str, engine=Depends(get_engine)):
     try:
-        return {
-            "modules": creature_modules.list_modules(engine, session_id, creature_id)
-        }
+        modules = await asyncio.to_thread(
+            creature_modules.list_modules, engine, session_id, creature_id
+        )
+        return {"modules": modules}
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
 
@@ -49,8 +51,13 @@ async def get_module_options(
     engine=Depends(get_engine),
 ):
     try:
-        return creature_modules.get_module_options(
-            engine, session_id, creature_id, module_type, name
+        return await asyncio.to_thread(
+            creature_modules.get_module_options,
+            engine,
+            session_id,
+            creature_id,
+            module_type,
+            name,
         )
     except KeyError:
         raise HTTPException(
@@ -74,8 +81,14 @@ async def set_module_options(
     engine=Depends(get_engine),
 ):
     try:
-        applied = creature_modules.set_module_options(
-            engine, session_id, creature_id, module_type, name, req.values or {}
+        applied = await asyncio.to_thread(
+            creature_modules.set_module_options,
+            engine,
+            session_id,
+            creature_id,
+            module_type,
+            name,
+            req.values or {},
         )
     except KeyError:
         raise HTTPException(

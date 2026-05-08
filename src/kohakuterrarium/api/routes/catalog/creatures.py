@@ -1,4 +1,12 @@
-"""Creature CRUD + prompt file routes."""
+"""Creature CRUD + prompt file routes.
+
+Workspace methods walk the filesystem (yaml read, prompt-file IO,
+config validation) — every read goes through ``asyncio.to_thread``
+so the studio editor doesn't block the runtime API while the user
+edits configs side-by-side.
+"""
+
+import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -27,13 +35,13 @@ class PromptBody(BaseModel):
 
 @router.get("")
 async def list_creatures(ws: Workspace = Depends(get_workspace)) -> list[dict]:
-    return ws.list_creatures()
+    return await asyncio.to_thread(ws.list_creatures)
 
 
 @router.get("/{name}")
 async def load_creature(name: str, ws: Workspace = Depends(get_workspace)) -> dict:
     try:
-        return ws.load_creature(name)
+        return await asyncio.to_thread(ws.load_creature, name)
     except ValueError as e:
         raise HTTPException(400, detail={"code": "unsafe_path", "message": str(e)})
     except FileNotFoundError:
@@ -51,7 +59,9 @@ async def scaffold_creature(
     body: ScaffoldBody, ws: Workspace = Depends(get_workspace)
 ) -> dict:
     try:
-        return ws.scaffold_creature(body.name, body.base_config)  # type: ignore[attr-defined]
+        return await asyncio.to_thread(
+            ws.scaffold_creature, body.name, body.base_config
+        )  # type: ignore[attr-defined]
     except FileExistsError:
         raise HTTPException(
             409,
@@ -71,7 +81,8 @@ async def save_creature(
     ws: Workspace = Depends(get_workspace),
 ) -> dict:
     try:
-        return ws.save_creature(
+        return await asyncio.to_thread(
+            ws.save_creature,
             name,
             {
                 "config": body.config,
@@ -97,7 +108,7 @@ async def delete_creature(
             },
         )
     try:
-        ws.delete_creature(name)
+        await asyncio.to_thread(ws.delete_creature, name)
     except FileNotFoundError:
         raise HTTPException(
             404,
@@ -116,7 +127,7 @@ async def read_prompt(
     name: str, rel: str, ws: Workspace = Depends(get_workspace)
 ) -> dict:
     try:
-        content = ws.read_prompt(name, rel)
+        content = await asyncio.to_thread(ws.read_prompt, name, rel)
     except FileNotFoundError:
         raise HTTPException(404, detail={"code": "not_found", "message": rel})
     except (UnsafePath, ValueError) as e:
@@ -132,7 +143,7 @@ async def write_prompt(
     ws: Workspace = Depends(get_workspace),
 ) -> dict:
     try:
-        ws.write_prompt(name, rel, body.content)
+        await asyncio.to_thread(ws.write_prompt, name, rel, body.content)
     except (UnsafePath, ValueError) as e:
         raise HTTPException(400, detail={"code": "unsafe_path", "message": str(e)})
     return {"ok": True, "path": rel}

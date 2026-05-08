@@ -1,5 +1,11 @@
-"""Schema route — returns the param list for a module entry."""
+"""Schema route — returns the param list for a module entry.
 
+Built-in schemas are pure-Python introspection (cheap). Custom/package
+schemas read source files + optional ``<stem>.schema.json`` sidecars,
+so the resolution path goes through ``asyncio.to_thread``.
+"""
+
+import asyncio
 import json
 from pathlib import Path
 
@@ -23,6 +29,29 @@ class ModuleSchemaRequest(BaseModel):
     type: str = "builtin"  # builtin | custom | package | trigger
     module: str | None = None
     class_name: str | None = None
+
+
+def _resolve_custom_schema_sync(
+    root,
+    module: str,
+    class_name: str | None,
+    kind: str,
+) -> dict:
+    source = resolve_module_source(root, module)
+    if source is None:
+        return {
+            "params": [],
+            "warnings": [
+                {
+                    "code": "module_not_found",
+                    "message": f"could not resolve {module!r}",
+                }
+            ],
+        }
+    sidecar_schema = None
+    if kind == "plugins":
+        sidecar_schema = _load_plugin_sidecar(root, module)
+    return custom_schema(source, class_name, sidecar_schema=sidecar_schema)
 
 
 @router.post("")
@@ -51,25 +80,13 @@ async def module_schema(
                     }
                 ],
             }
-        source = resolve_module_source(ws.root_path, req.module)
-        if source is None:
-            return {
-                "params": [],
-                "warnings": [
-                    {
-                        "code": "module_not_found",
-                        "message": f"could not resolve {req.module!r}",
-                    }
-                ],
-            }
-        # Plugins carry a sibling ``<stem>.schema.json`` describing
-        # the per-key layout of their ``options: dict``. When present,
-        # custom_schema substitutes those descriptors for the anonymous
-        # blob so the creature pool renders a real form.
-        sidecar_schema = None
-        if req.kind == "plugins":
-            sidecar_schema = _load_plugin_sidecar(ws.root_path, req.module)
-        return custom_schema(source, req.class_name, sidecar_schema=sidecar_schema)
+        return await asyncio.to_thread(
+            _resolve_custom_schema_sync,
+            ws.root_path,
+            req.module,
+            req.class_name,
+            req.kind,
+        )
 
     return {"params": [], "warnings": []}
 

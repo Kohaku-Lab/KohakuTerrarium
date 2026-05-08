@@ -1,6 +1,13 @@
 """Per-creature chat routes — HTTP fallback chat / regen / edit /
 rewind / history / branches.
+
+Every read endpoint that reads from the session store funnels through
+``asyncio.to_thread`` so the SQLite hits don't stall the event loop —
+the chat panel polls history aggressively, so a blocking read here
+freezes every other in-flight WS / HTTP request for the duration.
 """
+
+import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -48,9 +55,6 @@ async def edit_creature_message(
     req: MessageEdit,
     engine=Depends(get_engine),
 ):
-    # Multimodal edit payloads arrive as a list of Pydantic content-part
-    # models — flatten to plain dicts so downstream code can rely on
-    # ``isinstance(item, dict)`` without needing to know about Pydantic.
     if isinstance(req.content, list):
         content: str | list[dict] = [
             part.model_dump() if hasattr(part, "model_dump") else part
@@ -98,7 +102,9 @@ async def creature_history(
     session_id: str, creature_id: str, engine=Depends(get_engine)
 ):
     try:
-        return creature_chat.history(engine, session_id, creature_id)
+        return await asyncio.to_thread(
+            creature_chat.history, engine, session_id, creature_id
+        )
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
 
@@ -108,6 +114,8 @@ async def creature_branches(
     session_id: str, creature_id: str, engine=Depends(get_engine)
 ):
     try:
-        return creature_chat.branches(engine, session_id, creature_id)
+        return await asyncio.to_thread(
+            creature_chat.branches, engine, session_id, creature_id
+        )
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")

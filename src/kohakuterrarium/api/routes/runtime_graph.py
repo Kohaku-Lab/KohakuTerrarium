@@ -6,6 +6,7 @@ wiring. This route is read-only and returns backend/runtime data only;
 frontend layout state remains a UI preference.
 """
 
+import asyncio
 import json
 import time
 from typing import Any
@@ -22,8 +23,16 @@ router = APIRouter()
 
 @router.get("/graph")
 async def runtime_graph_snapshot(engine: Terrarium = Depends(get_engine)):
-    """Return a normalized snapshot of every live runtime graph."""
-    return build_runtime_graph_snapshot(engine)
+    """Return a normalized snapshot of every live runtime graph.
+
+    Runs in a worker thread because ``build_runtime_graph_snapshot``
+    fans out to ``creature.get_status()`` which calls
+    ``agent.session_store.load_meta()`` — a synchronous SQLite read
+    per creature. On the asyncio loop that stalls every other request
+    for as long as the snapshot takes (seconds, with persisted
+    sessions). Worker thread isolates the disk I/O.
+    """
+    return await asyncio.to_thread(build_runtime_graph_snapshot, engine)
 
 
 def build_runtime_graph_snapshot(engine: Terrarium) -> dict[str, Any]:

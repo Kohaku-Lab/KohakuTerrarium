@@ -6,6 +6,8 @@ This file keeps only the plugin-list / toggle routes that pre-date
 the module unification.
 """
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from kohakuterrarium.api.deps import get_engine
@@ -17,7 +19,9 @@ router = APIRouter()
 @router.get("/{session_id}/creatures/{creature_id}/plugins")
 async def list_plugins(session_id: str, creature_id: str, engine=Depends(get_engine)):
     try:
-        return creature_plugins.list_plugins(engine, session_id, creature_id)
+        return await asyncio.to_thread(
+            creature_plugins.list_plugins, engine, session_id, creature_id
+        )
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
 

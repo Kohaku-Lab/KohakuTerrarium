@@ -6,6 +6,7 @@ under ``/api/sessions`` for URL preservation: the frontend's
 /sessions/{name}/memory/search``.
 """
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -31,7 +32,9 @@ async def search_session_memory_route(
     indexing behavior. Modes: ``auto`` (default), ``fts``, ``semantic``,
     ``hybrid``.
     """
-    path = resolve_session_path_default(session_name)
+    # ``resolve_session_path_default`` walks ``~/.kohakuterrarium/sessions``
+    # — a small but synchronous filesystem stat. Off-load it.
+    path = await asyncio.to_thread(resolve_session_path_default, session_name)
     if path is None:
         raise HTTPException(404, f"Session not found: {session_name}")
 

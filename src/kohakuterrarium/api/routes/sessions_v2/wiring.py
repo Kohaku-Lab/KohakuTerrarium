@@ -5,6 +5,7 @@ surface for direct turn-output routing between live creatures.  The live
 IO attach still owns websocket secondary sinks under the attach routes.
 """
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -44,7 +45,10 @@ async def list_creature_outputs(
 ):
     """List direct output-wiring edges for a creature."""
     try:
-        return {"outputs": wiring_lib.list_output_wiring(engine, creature_id)}
+        outputs = await asyncio.to_thread(
+            wiring_lib.list_output_wiring, engine, creature_id
+        )
+        return {"outputs": outputs}
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
 

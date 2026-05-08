@@ -1,5 +1,11 @@
-"""Studio skills routes — discover + runtime toggle (Qa)."""
+"""Studio skills routes — discover + runtime toggle (Qa).
 
+Skill discovery walks the filesystem (cwd ↑ to git root, ``~/.kohaku``,
+plus every installed package's ``skills/`` dir). Off-loaded to a
+worker thread so a slow filesystem scan can't stall the runtime API.
+"""
+
+import asyncio
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -16,6 +22,12 @@ from kohakuterrarium.studio.editors.workspace_manifest import Workspace
 router = APIRouter()
 
 
+def _discover_with_state(cwd: Path) -> list[dict]:
+    skills = discover_skills(cwd=cwd)
+    state = load_state()
+    return [serialize(s, state) for s in skills]
+
+
 @router.get("")
 async def list_skills(
     ws: Workspace | None = Depends(get_workspace_optional),
@@ -23,13 +35,23 @@ async def list_skills(
     """List every procedural skill discoverable from the workspace cwd."""
     cwd = Path(ws.root) if ws is not None else Path.cwd()
     try:
-        skills = discover_skills(cwd=cwd)
+        return await asyncio.to_thread(_discover_with_state, cwd)
     except Exception as exc:
         raise HTTPException(
             500, detail={"code": "discovery_failed", "message": str(exc)}
         ) from exc
+
+
+def _toggle_skill_sync(cwd: Path, name: str) -> dict:
+    skills = discover_skills(cwd=cwd)
+    matching = next((s for s in skills if s.name == name), None)
+    if matching is None:
+        raise FileNotFoundError(name)
     state = load_state()
-    return [serialize(s, state) for s in skills]
+    current = state.get(name, matching.enabled)
+    state[name] = not current
+    save_state(state)
+    return {"name": name, "enabled": state[name]}
 
 
 @router.post("/{name}/toggle")
@@ -40,13 +62,8 @@ async def toggle_skill(
     """Flip the persisted enabled state for ``name``."""
     cwd = Path(ws.root) if ws is not None else Path.cwd()
     try:
-        skills = discover_skills(cwd=cwd)
-    except Exception as exc:
-        raise HTTPException(
-            500, detail={"code": "discovery_failed", "message": str(exc)}
-        ) from exc
-    matching = next((s for s in skills if s.name == name), None)
-    if matching is None:
+        return await asyncio.to_thread(_toggle_skill_sync, cwd, name)
+    except FileNotFoundError:
         raise HTTPException(
             404,
             detail={
@@ -54,8 +71,7 @@ async def toggle_skill(
                 "message": f"Skill not found: {name!r}",
             },
         )
-    state = load_state()
-    current = state.get(name, matching.enabled)
-    state[name] = not current
-    save_state(state)
-    return {"name": name, "enabled": state[name]}
+    except Exception as exc:
+        raise HTTPException(
+            500, detail={"code": "discovery_failed", "message": str(exc)}
+        ) from exc
