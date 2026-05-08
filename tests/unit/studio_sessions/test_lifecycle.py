@@ -147,7 +147,7 @@ class TestStartCreature:
             session = await lifecycle.start_creature(
                 engine, config_path=str(tmp_path / "alice.yaml"), pwd=str(tmp_path)
             )
-            assert session.kind == "creature"
+            assert len(session.creatures) == 1
             assert session.session_id
             assert session.created_at  # iso timestamp populated
             # Auto-attached store registered
@@ -169,7 +169,7 @@ class TestStartCreature:
             )
             assert session.session_id
             meta = lifecycle.get_session_meta(session.session_id)
-            assert meta["kind"] == "creature"
+            assert "kind" not in meta  # kind concept removed
             assert meta["pwd"] == str(tmp_path.resolve())
         finally:
             await engine.shutdown()
@@ -282,13 +282,13 @@ class TestStartTerrarium:
             session = await lifecycle.start_terrarium(
                 engine, config=_basic_terrarium_config(), pwd=str(tmp_path)
             )
-            assert session.kind == "terrarium"
+            assert len(session.creatures) >= 1  # multi-creature recipe
             assert session.name == "basic-team"
             assert len(session.creatures) == 2
             # Channels were declared via the recipe
             assert len(session.channels) >= 1
             meta = lifecycle.get_session_meta(session.session_id)
-            assert meta["kind"] == "terrarium"
+            assert "kind" not in meta  # kind concept removed
             assert meta["has_root"] is False
             assert lifecycle.get_session_store(session.session_id) is not None
         finally:
@@ -325,7 +325,7 @@ class TestStartTerrarium:
             session = await lifecycle.start_terrarium(
                 engine, config_path=str(tmp_path / "team.yaml"), pwd=str(tmp_path)
             )
-            assert session.kind == "terrarium"
+            assert len(session.creatures) >= 1  # multi-creature recipe
         finally:
             await engine.shutdown()
 
@@ -444,13 +444,12 @@ class TestSessionQuery:
         try:
             c = await install_fake_creature(engine, "alice")
             lifecycle._meta[c.graph_id] = {
-                "kind": "creature",
                 "name": "alice",
             }
             listings = lifecycle.list_sessions(engine)
             assert len(listings) == 1
             assert listings[0].name == "alice"
-            assert listings[0].kind == "creature"
+            assert listings[0].creatures == 1
             assert listings[0].running is True
         finally:
             await engine.shutdown()
@@ -463,7 +462,7 @@ class TestSessionQuery:
             # No meta entry — ``list_sessions`` should still produce a row
             listings = lifecycle.list_sessions(engine)
             assert listings[0].name == c.graph_id
-            assert listings[0].kind == "creature"
+            assert listings[0].creatures == 1
         finally:
             await engine.shutdown()
 
@@ -474,7 +473,7 @@ class TestSessionQuery:
             c = await install_fake_creature(engine, "alice")
             sess = lifecycle.get_session(engine, c.graph_id)
             assert sess.session_id == c.graph_id
-            assert sess.kind == "creature"
+            assert len(sess.creatures) == 1
             assert any(cc["name"] == "alice" for cc in sess.creatures)
         finally:
             await engine.shutdown()
@@ -494,7 +493,7 @@ class TestSessionQuery:
         try:
             c = await install_fake_creature(engine, "alice")
             sid = c.graph_id
-            lifecycle._meta[sid] = {"kind": "creature", "name": "alice"}
+            lifecycle._meta[sid] = {"name": "alice"}
             await lifecycle.stop_session(engine, sid)
             assert "alice" not in engine
             assert lifecycle.get_session_meta(sid) == {}

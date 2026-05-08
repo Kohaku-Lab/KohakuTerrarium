@@ -6,7 +6,6 @@ from kohakuterrarium.studio.sessions.handles import Session, SessionListing
 def test_session_to_dict():
     sess = Session(
         session_id="s1",
-        kind="creature",
         name="alice",
         creatures=[{"name": "alice"}],
         channels=[{"name": "c"}],
@@ -19,16 +18,14 @@ def test_session_to_dict():
     assert d["session_id"] == "s1"
     assert d["creatures"] == [{"name": "alice"}]
     assert d["has_root"] is False
+    assert "kind" not in d
 
 
 def test_session_listing_to_dict():
-    listing = SessionListing(
-        session_id="s1", kind="terrarium", name="team", running=True, creatures=3
-    )
+    listing = SessionListing(session_id="s1", name="team", running=True, creatures=3)
     d = listing.to_dict()
     assert d == {
         "session_id": "s1",
-        "kind": "terrarium",
         "name": "team",
         "running": True,
         "creatures": 3,

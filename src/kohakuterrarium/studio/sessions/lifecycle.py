@@ -15,11 +15,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import kohakuterrarium.terrarium.channels as channel_module
 from kohakuterrarium.packages.resolve import is_package_ref, resolve_package_path
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions.handles import Session, SessionListing
-import kohakuterrarium.terrarium.channels as channel_module
-from kohakuterrarium.terrarium.channels import register_merge_listener
 from kohakuterrarium.terrarium.config import (
     CreatureConfig,
     TerrariumConfig,
@@ -36,23 +35,6 @@ logger = get_logger(__name__)
 _meta: dict[str, dict[str, Any]] = {}
 # Per-session attached SessionStore (keyed by session_id == graph_id).
 _session_stores: dict[str, SessionStore] = {}
-
-
-def _on_graph_merge(session_id: str) -> None:
-    """React to a cross-graph merge by promoting the surviving
-    session's kind from ``"creature"`` to ``"terrarium"`` once it has
-    gained extra creatures.  Without this the v2 rail keeps showing the
-    merged graph as a single-creature listing under agentAPI.list and
-    only the first creature is visible — that's the 1↔2 flicker we
-    used to see right after a wire."""
-    meta = _meta.get(session_id)
-    if meta and meta.get("kind") == "creature":
-        meta["kind"] = "terrarium"
-
-
-# Registration is idempotent on the listener identity so module
-# reloads don't multiply the callback.
-register_merge_listener(_on_graph_merge)
 
 
 def _normalize_pwd(pwd: str | None) -> str | None:
@@ -136,7 +118,6 @@ async def start_creature(
     )
 
     _meta[sid] = {
-        "kind": "creature",
         "name": creature.name,
         "config_path": config_path or "",
         "pwd": pwd or os.getcwd(),
@@ -153,12 +134,8 @@ def attach_session_store_for_creature(
     config_path: str = "",
     config_type: str = "agent",
 ) -> None:
-    """Attach a session store to ``creature``.
-
-    Reuses the existing graph-level store when present (group_add_node
-    case); else mints ``<cid>.kohakutr``. Prevents file proliferation
-    and store-pointer clobbering on shared graphs.
-    """
+    """Attach a session store to ``creature``. Reuses the graph-level
+    store when present, else mints ``<cid>.kohakutr``."""
     try:
         sid = creature.graph_id
         existing = _session_stores.get(sid) or getattr(
@@ -274,7 +251,6 @@ async def start_terrarium(
         logger.warning("Session store creation failed", error=str(e))
 
     _meta[sid] = {
-        "kind": "terrarium",
         "name": (name.strip() if name and name.strip() else cfg.name),
         "config_path": config_path or "",
         "pwd": pwd or os.getcwd(),
@@ -298,7 +274,6 @@ def list_sessions(engine: Terrarium) -> list[SessionListing]:
         out.append(
             SessionListing(
                 session_id=graph.graph_id,
-                kind=meta.get("kind", "creature"),
                 name=meta.get("name", graph.graph_id),
                 running=True,
                 creatures=len(graph.creature_ids),
@@ -346,9 +321,9 @@ def _apply_creature_name(creature, name: str) -> None:
 
 
 def rename_session(engine: Terrarium, session_id: str, name: str) -> Session:
-    """Update the display name of a session (and its single creature
-    when the session is creature-kind).  Returns the refreshed handle.
-    """
+    """Update the display name of a session. When the session has a
+    single creature, the creature is renamed too so the rail label
+    and the agent's identity stay in sync."""
     name = (name or "").strip()
     if not name:
         raise ValueError("name must not be empty")
@@ -356,8 +331,8 @@ def rename_session(engine: Terrarium, session_id: str, name: str) -> Session:
         raise KeyError(f"session {session_id!r} not found")
     meta = _meta.setdefault(session_id, {})
     meta["name"] = name
-    if meta.get("kind") == "creature":
-        graph = next(g for g in engine.list_graphs() if g.graph_id == session_id)
+    graph = next(g for g in engine.list_graphs() if g.graph_id == session_id)
+    if len(graph.creature_ids) == 1:
         for cid in graph.creature_ids:
             try:
                 creature = engine.get_creature(cid)
@@ -369,20 +344,24 @@ def rename_session(engine: Terrarium, session_id: str, name: str) -> Session:
 
 
 def rename_creature(engine: Terrarium, creature_id: str, name: str) -> dict:
-    """Rename a creature inside a session.  Returns the refreshed
-    creature status dict."""
+    """Rename a creature. Mirrors onto session meta name only when
+    the creature is the sole inhabitant of its session — otherwise
+    the rail still shows the session's display name and individual
+    creatures are addressed by name within the session."""
     name = (name or "").strip()
     if not name:
         raise ValueError("name must not be empty")
     creature = engine.get_creature(creature_id)
     _apply_creature_name(creature, name)
-    # Mirror onto the session meta when the creature *is* the whole
-    # creature-kind session — that's the only case where the rail
-    # reads from meta.name rather than the creature directly.
     sid = creature.graph_id
-    meta = _meta.get(sid)
-    if meta and meta.get("kind") == "creature":
-        meta["name"] = name
+    graph = next(
+        (g for g in engine.list_graphs() if g.graph_id == sid),
+        None,
+    )
+    if graph is not None and len(graph.creature_ids) == 1:
+        meta = _meta.get(sid)
+        if meta is not None:
+            meta["name"] = name
     return creature.get_status()
 
 
@@ -485,7 +464,6 @@ def _build_session_handle(engine: Terrarium, session_id: str) -> Session:
 
     return Session(
         session_id=session_id,
-        kind=meta.get("kind", "creature"),
         name=meta.get("name", session_id),
         creatures=creatures,
         channels=channels,

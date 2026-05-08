@@ -1,11 +1,14 @@
 """Session and SessionListing dataclasses.
 
-A *session* in Studio vocabulary corresponds to a Terrarium engine
-*graph*: one or more creatures sharing an environment. A standalone
-agent is a 1-creature graph and so is a 1-creature session.
+A *session* corresponds to a Terrarium engine *graph*: one or more
+creatures sharing an environment. There is no creature-vs-terrarium
+distinction at the runtime level — a session is a session, sized
+0..N creatures and 0..M channels. Solo creatures are graphs with
+one node; recipe-built terrariums are graphs with several. The same
+endpoints, the same shape, the same routing apply to both.
 
-These are read-only handles that describe what is currently running.
-The actual mutation entry points live in :mod:`studio.sessions.lifecycle`,
+These are read-only handles describing what is currently running.
+Mutations live in :mod:`studio.sessions.lifecycle`,
 :mod:`studio.sessions.topology`, etc.
 """
 
@@ -15,15 +18,9 @@ from typing import Any
 
 @dataclass
 class Session:
-    """A live engine session — one graph plus its creatures.
-
-    ``session_id`` is the graph id minted by the engine's topology
-    layer. Solo creatures have a fresh per-creature graph; recipe-built
-    terrariums share one graph among all their creatures.
-    """
+    """A live engine session — one graph plus its creatures."""
 
     session_id: str
-    kind: str  # "creature" or "terrarium"
     name: str
     creatures: list[dict] = field(default_factory=list)
     channels: list[dict] = field(default_factory=list)
@@ -35,7 +32,6 @@ class Session:
     def to_dict(self) -> dict[str, Any]:
         return {
             "session_id": self.session_id,
-            "kind": self.kind,
             "name": self.name,
             "creatures": self.creatures,
             "channels": self.channels,
@@ -51,7 +47,6 @@ class SessionListing:
     """A short-form listing entry used by ``list_sessions`` for UI tabs."""
 
     session_id: str
-    kind: str
     name: str
     running: bool = True
     creatures: int = 0
@@ -59,7 +54,6 @@ class SessionListing:
     def to_dict(self) -> dict[str, Any]:
         return {
             "session_id": self.session_id,
-            "kind": self.kind,
             "name": self.name,
             "running": self.running,
             "creatures": self.creatures,
