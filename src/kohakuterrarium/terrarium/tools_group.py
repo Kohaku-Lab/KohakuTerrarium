@@ -28,8 +28,6 @@ Importing this module imports all of them, which fires every
 
 from typing import Any
 
-from kohakuterrarium.builtins.tool_catalog import get_builtin_tool
-
 # Importing the submodules registers every group_* tool via their
 # ``@register_builtin`` decorators. Module-direct imports (rather than
 # ``from kohakuterrarium.terrarium import ...``) avoid pulling the
@@ -40,6 +38,7 @@ import kohakuterrarium.terrarium.tools_group_lifecycle as _lifecycle_mod  # noqa
 import kohakuterrarium.terrarium.tools_group_send as _send_mod  # noqa: F401
 import kohakuterrarium.terrarium.tools_group_status as _status_mod  # noqa: F401
 import kohakuterrarium.terrarium.tools_group_wire as _wire_mod  # noqa: F401
+from kohakuterrarium.builtins.tool_catalog import get_builtin_tool
 
 #: Tools every engine-backed creature gets — comm primitives that
 #: gate themselves at call time.

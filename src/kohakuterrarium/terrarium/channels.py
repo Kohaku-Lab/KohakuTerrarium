@@ -21,11 +21,11 @@ import weakref
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+import kohakuterrarium.terrarium.session_coord as _session_coord
+import kohakuterrarium.terrarium.topology as _topo
 from kohakuterrarium.core.channel import ChannelRegistry
 from kohakuterrarium.core.environment import Environment
 from kohakuterrarium.modules.trigger.channel import ChannelTrigger
-import kohakuterrarium.terrarium.session_coord as _session_coord
-import kohakuterrarium.terrarium.topology as _topo
 from kohakuterrarium.terrarium.events import (
     ConnectionResult,
     EngineEvent,

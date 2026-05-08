@@ -2,6 +2,7 @@
 
 from typing import Any
 
+import kohakuterrarium.terrarium.group_hooks as group_hooks
 from kohakuterrarium.builtins.tool_catalog import register_builtin
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
@@ -9,7 +10,6 @@ from kohakuterrarium.modules.tool.base import (
     ToolContext,
     ToolResult,
 )
-import kohakuterrarium.terrarium.group_hooks as group_hooks
 from kohakuterrarium.terrarium.group_tool_context import (
     GroupContext,
     compute_group,

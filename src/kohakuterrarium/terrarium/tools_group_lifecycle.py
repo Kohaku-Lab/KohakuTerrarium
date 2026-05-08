@@ -3,6 +3,7 @@
 
 from typing import Any
 
+import kohakuterrarium.terrarium.group_hooks as group_hooks
 from kohakuterrarium.builtins.tool_catalog import register_builtin
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
@@ -11,7 +12,6 @@ from kohakuterrarium.modules.tool.base import (
     ToolResult,
 )
 from kohakuterrarium.packages.resolve import is_package_ref, resolve_package_path
-import kohakuterrarium.terrarium.group_hooks as group_hooks
 from kohakuterrarium.terrarium.events import EngineEvent, EventKind
 from kohakuterrarium.terrarium.group_tool_context import (
     GroupContext,
