@@ -213,6 +213,7 @@ class SendChannelTool(BaseTool):
         reply_to = args.get("reply_to") or None
         msg = ChannelMessage(
             sender=gctx.caller.name,
+            sender_id=gctx.caller.creature_id,
             content=message,
             metadata=metadata if isinstance(metadata, dict) else {},
             reply_to=reply_to,

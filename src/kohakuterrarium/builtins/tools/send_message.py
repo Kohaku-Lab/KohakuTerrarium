@@ -99,10 +99,18 @@ class SendMessageTool(BaseTool):
         if not message:
             return ToolResult(error="Message content is required")
 
-        # Determine sender from context or default
+        # Determine sender from context or default. ``sender`` is the
+        # display name; ``sender_id`` is the stable creature_id used for
+        # self-echo filtering when two creatures share a config name.
         sender = "unknown"
+        sender_id: str | None = None
         if context:
             sender = context.agent_name
+            agent_obj = getattr(context, "agent", None)
+            if agent_obj is not None:
+                sender_id = getattr(agent_obj, "_creature_id", None) or getattr(
+                    agent_obj, "creature_id", None
+                )
 
         # Parse metadata if provided
         metadata: dict[str, Any] = {}
@@ -204,6 +212,7 @@ class SendMessageTool(BaseTool):
         # Send message
         msg = ChannelMessage(
             sender=sender,
+            sender_id=sender_id,
             content=message,
             metadata=metadata,
             reply_to=reply_to,

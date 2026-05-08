@@ -247,11 +247,28 @@ def _refresh_meta_for_split_graph(
 def _attach_store_to_graph(
     engine: "Terrarium", graph_id: str, store: SessionStore
 ) -> None:
-    """Point every creature in ``graph_id`` at ``store``."""
+    """Point every creature in ``graph_id`` at ``store``.
+
+    Uses the same path as :meth:`Terrarium.attach_session` — calls
+    ``Agent.attach_session_store`` so the ``SessionOutput`` sink, the
+    trigger / sub-agent / compact managers, and any saved compact_count
+    all get re-wired.  A direct ``c.agent.session_store = store`` would
+    leave a dangling field with no sink, so events on the merged
+    creature never reach the merged store.
+
+    No ``session_store is not None`` gate — newly-added creatures
+    coming from an unpersisted graph (the typical merge case) start
+    with ``session_store = None`` and explicitly need the merged store
+    attached, not skipped.
+    """
     g = engine._topology.graphs.get(graph_id)
     if g is None:
         return
     for cid in g.creature_ids:
         c = engine._creatures.get(cid)
-        if c is not None and getattr(c.agent, "session_store", None) is not None:
+        if c is None:
+            continue
+        if hasattr(c.agent, "attach_session_store"):
+            c.agent.attach_session_store(store)
+        elif hasattr(c.agent, "session_store"):
             c.agent.session_store = store

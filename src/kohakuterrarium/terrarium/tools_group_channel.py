@@ -200,6 +200,7 @@ async def _wire(
                 channel_name=channel,
                 registry=registry,
                 ignore_sender=target.name,
+                ignore_sender_id=target.creature_id,
             )
         if channel not in target.listen_channels:
             target.listen_channels.append(channel)

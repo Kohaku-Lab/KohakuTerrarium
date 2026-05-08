@@ -80,8 +80,18 @@ class GroupAddNodeTool(BaseTool):
 
         pwd = args.get("pwd") or _caller_pwd(gctx)
         try:
+            # Spawn directly into the caller's graph so the new creature
+            # is a group member from birth — never a homeless singleton.
+            # Without ``graph=``, ``add_creature`` mints a fresh graph
+            # for every spawn, which (a) leaves the spawned creature
+            # outside the caller's group until something wires it,
+            # (b) inflates ``_session_stores`` with one empty entry
+            # per spawn, and (c) makes the frontend rail show N+1
+            # instances. Joining the caller's graph at creation time
+            # is the simpler, correct shape.
             new = await gctx.engine.add_creature(
                 config_path,
+                graph=gctx.caller.graph_id,
                 llm_override=args.get("llm"),
                 pwd=pwd,
                 is_privileged=False,

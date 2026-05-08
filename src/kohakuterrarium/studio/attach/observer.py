@@ -107,15 +107,28 @@ async def _stream_from_registry(
 
     observer.on_message(on_message)
 
-    all_channels = registry.list_channels()
-    observe_channels = filter_channels or all_channels
-    for ch_name in observe_channels:
-        ch = registry.get(ch_name)
-        if ch is not None and isinstance(ch, AgentChannel):
+    def _subscribe_new_channels() -> None:
+        """Pick up any channel that's been created since the last tick.
+
+        The observer was originally a one-shot snapshot of
+        ``registry.list_channels()`` at attach time, which silently
+        dropped messages on channels created later (the typical
+        frontend flow: open the panel, then create the channel).
+        Re-polling on each tick is cheap and covers add/connect-merge
+        cases uniformly.
+        """
+        for ch_name in filter_channels or registry.list_channels():
+            if ch_name in observer._subscriptions:
+                continue
+            ch = registry.get(ch_name)
+            if ch is None or not isinstance(ch, AgentChannel):
+                continue
             sub = ch.subscribe(f"_stream_{source_id}_{ch_name}")
             observer._subscriptions[ch_name] = sub
             task = asyncio.create_task(observer._observe_loop(ch_name, sub))
             observer._observe_tasks.append(task)
+
+    _subscribe_new_channels()
 
     try:
         while running_check is None or running_check():
@@ -123,6 +136,9 @@ async def _stream_from_registry(
                 event = await asyncio.wait_for(event_queue.get(), timeout=1.0)
                 yield event
             except asyncio.TimeoutError:
+                _subscribe_new_channels()
                 continue
+            else:
+                _subscribe_new_channels()
     finally:
         await observer.stop()

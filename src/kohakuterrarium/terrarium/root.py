@@ -59,6 +59,7 @@ async def assign_root_to(
         channel_name=report_channel,
         registry=env.shared_channels,
         ignore_sender=root.name,
+        ignore_sender_id=root.creature_id,
     )
     if report_channel not in root.listen_channels:
         root.listen_channels.append(report_channel)
@@ -90,6 +91,7 @@ async def assign_root_to(
             channel_name=ch_name,
             registry=env.shared_channels,
             ignore_sender=root.name,
+            ignore_sender_id=root.creature_id,
         )
         if ch_name not in root.listen_channels:
             root.listen_channels.append(ch_name)

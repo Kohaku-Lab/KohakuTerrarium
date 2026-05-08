@@ -162,7 +162,9 @@ def apply_split_bookkeeping(engine: "Terrarium", delta: _topo.TopologyDelta) -> 
         for stale in sorted(live_names - topo_names):
             env.shared_channels.remove(stale)
         for info in graph.channels.values():
-            register_channel_in_environment(env.shared_channels, info)
+            register_channel_in_environment(
+                env.shared_channels, info, engine=engine, graph_id=new_gid
+            )
 
     # 3. Repoint creatures + 4. reinject listen triggers on the new env.
     for cid in delta.affected_creatures:
@@ -189,6 +191,7 @@ def apply_split_bookkeeping(engine: "Terrarium", delta: _topo.TopologyDelta) -> 
                 channel_name=ch_name,
                 registry=new_env.shared_channels,
                 ignore_sender=c.name,
+                ignore_sender_id=c.creature_id,
             )
 
     _session_coord.apply_split(engine, delta)

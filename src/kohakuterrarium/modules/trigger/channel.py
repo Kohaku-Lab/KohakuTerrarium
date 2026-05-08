@@ -1,6 +1,7 @@
 """Channel trigger - fires when a message arrives on a named channel."""
 
 import asyncio
+from collections import defaultdict
 from typing import Any
 
 from kohakuterrarium.core.channel import (
@@ -49,8 +50,9 @@ class ChannelTrigger(BaseTrigger):
             "prompt": {
                 "type": "string",
                 "description": (
-                    "Prompt injected when a message arrives. If it contains "
-                    "'{content}' the message content is substituted in."
+                    "Prompt injected when a message arrives. Supports "
+                    "{content}, {channel}, {sender}, {message_id}, and "
+                    "message metadata placeholders."
                 ),
             },
             "filter_sender": {
@@ -62,10 +64,11 @@ class ChannelTrigger(BaseTrigger):
     }
     setup_full_doc = (
         "Installs a ChannelTrigger. The agent wakes up whenever a message is "
-        "delivered to `channel_name`. Use the `{content}` placeholder inside "
-        "`prompt` to inline the incoming message. `filter_sender` limits the "
-        "trigger to a specific sender. The creature's own name is "
-        "auto-registered as the `ignore_sender` to prevent self-triggering."
+        "delivered to `channel_name`. Use `{content}`, `{channel}`, `{sender}`, "
+        "`{message_id}`, or message metadata placeholders inside `prompt` to "
+        "inline incoming message details. `filter_sender` limits the trigger "
+        "to a specific sender. The creature's own name is auto-registered as "
+        "the `ignore_sender` to prevent self-triggering."
     )
 
     @classmethod
@@ -87,6 +90,12 @@ class ChannelTrigger(BaseTrigger):
             agent_name = getattr(context, "agent_name", None)
             if agent_name:
                 trigger.ignore_sender = agent_name
+        if not trigger.ignore_sender_id and agent is not None:
+            creature_id = getattr(agent, "_creature_id", None) or getattr(
+                agent, "creature_id", None
+            )
+            if creature_id:
+                trigger.ignore_sender_id = creature_id
 
     def __init__(
         self,
@@ -95,6 +104,7 @@ class ChannelTrigger(BaseTrigger):
         prompt: str | None = None,
         filter_sender: str | None = None,
         ignore_sender: str | None = None,
+        ignore_sender_id: str | None = None,
         registry: ChannelRegistry | None = None,
         session: Any | None = None,
         **options: Any,
@@ -105,9 +115,15 @@ class ChannelTrigger(BaseTrigger):
         Args:
             channel_name: Name of the channel to listen on
             subscriber_id: Subscriber ID for broadcast channels (auto-generated if None)
-            prompt: Prompt template to include in event (supports {content} substitution)
+            prompt: Prompt template to include in event. Supports
+                ``{content}``, ``{channel}``, ``{sender}``, ``{message_id}``,
+                and message metadata placeholders.
             filter_sender: Only fire for messages from this sender (whitelist)
-            ignore_sender: Skip messages from this sender (blacklist, for self-filtering)
+            ignore_sender: Skip messages whose ``sender`` (display name) matches.
+                Kept for backward compat — when two creatures share a config
+                name, prefer ``ignore_sender_id`` instead.
+            ignore_sender_id: Skip messages whose ``sender_id`` (stable creature
+                identity) matches. Robust against display-name collisions.
             registry: Optional channel registry (defaults to global singleton)
             session: Optional session whose channel registry to use
             **options: Additional options
@@ -117,6 +133,7 @@ class ChannelTrigger(BaseTrigger):
         self.subscriber_id = subscriber_id
         self.filter_sender = filter_sender
         self.ignore_sender = ignore_sender
+        self.ignore_sender_id = ignore_sender_id
         self._registry = registry
         self._session = session
         self._subscription: ChannelSubscription | None = None
@@ -138,6 +155,7 @@ class ChannelTrigger(BaseTrigger):
             "prompt": self.prompt,
             "filter_sender": self.filter_sender,
             "ignore_sender": self.ignore_sender,
+            "ignore_sender_id": self.ignore_sender_id,
         }
 
     @classmethod
@@ -149,6 +167,7 @@ class ChannelTrigger(BaseTrigger):
             prompt=data.get("prompt"),
             filter_sender=data.get("filter_sender"),
             ignore_sender=data.get("ignore_sender"),
+            ignore_sender_id=data.get("ignore_sender_id"),
         )
 
     async def _on_stop(self) -> None:
@@ -181,19 +200,30 @@ class ChannelTrigger(BaseTrigger):
             # Filter by sender if configured
             if self.filter_sender and msg.sender != self.filter_sender:
                 continue
-            # Skip messages from self (prevent self-triggering)
+            # Skip messages from self (prevent self-triggering).
+            # Prefer the stable creature_id check — ``ignore_sender`` (display
+            # name) collides when two creatures share a config name.
+            if (
+                self.ignore_sender_id
+                and getattr(msg, "sender_id", None) == self.ignore_sender_id
+            ):
+                continue
             if self.ignore_sender and msg.sender == self.ignore_sender:
                 continue
 
             # Build content string
             content = msg.content if isinstance(msg.content, str) else str(msg.content)
 
-            # Build prompt with content substitution
-            event_prompt = self.prompt
-            if event_prompt and "{content}" in event_prompt:
-                event_prompt = event_prompt.replace("{content}", content)
+            # Build prompt with metadata substitution.  Terrarium channel
+            # injection uses the default template
+            # ``[Channel '{channel}' from {sender}]: {content}``, so all
+            # three placeholders must be rendered before the event reaches
+            # the controller.  Use ``format_map`` with a permissive mapping
+            # so custom prompts can reference message metadata while unknown
+            # placeholders remain visible instead of raising.
+            event_prompt = self._render_prompt(msg, content)
 
-            return self._create_event(
+            event = self._create_event(
                 EventType.CHANNEL_MESSAGE,
                 content=event_prompt or content,
                 context={
@@ -204,5 +234,33 @@ class ChannelTrigger(BaseTrigger):
                     **msg.metadata,
                 },
             )
+            # ``BaseTrigger._create_event`` defaults ``prompt_override`` to
+            # ``self.prompt`` — the *raw* template with literal ``{channel}``
+            # / ``{sender}`` / ``{content}``.  The controller (controller.py
+            # ~line 394) prefers ``event.prompt_override`` over
+            # ``event.content`` when assembling the LLM input, so without
+            # this override the receiver sees the unfilled template even
+            # though ``_render_prompt`` substituted the values into
+            # ``event.content``.  Pin the override to the rendered string.
+            if event_prompt is not None:
+                event.prompt_override = event_prompt
+            return event
 
         return None
+
+    def _render_prompt(self, msg: Any, content: str) -> str | None:
+        """Render the prompt template against channel message metadata."""
+        if not self.prompt:
+            return None
+        values = defaultdict(str, msg.metadata)
+        values.update(
+            {
+                "content": content,
+                "sender": msg.sender,
+                "channel": self.channel_name,
+                "message_id": msg.message_id,
+                "reply_to": msg.reply_to or "",
+                "sender_id": getattr(msg, "sender_id", None) or "",
+            }
+        )
+        return self.prompt.format_map(values)

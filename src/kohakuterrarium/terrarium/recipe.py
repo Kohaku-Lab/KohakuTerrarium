@@ -174,6 +174,7 @@ async def apply_recipe(
                 channel_name=ch,
                 registry=env.shared_channels,
                 ignore_sender=cr_cfg.name,
+                ignore_sender_id=creature.creature_id,
             )
             if ch not in creature.listen_channels:
                 creature.listen_channels.append(ch)

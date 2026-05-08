@@ -16,6 +16,7 @@ because every line of logic in them is channel-related.
 """
 
 import asyncio
+import time
 import weakref
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -53,18 +54,81 @@ def register_channel_in_environment(
     info: ChannelInfo,
     *,
     maxsize: int = 0,
+    engine: "Terrarium | None" = None,
+    graph_id: str | None = None,
 ) -> Any:
     """Ensure the channel exists in the live ``ChannelRegistry``.
 
-    Graph topology channels are always broadcast — every listener
-    receives every send.
+    Graph topology channels are always broadcast. When ``engine`` +
+    ``graph_id`` are supplied, also installs the persistence callback
+    that writes sends to the graph's session store.
     """
-    return registry.get_or_create(
+    channel = registry.get_or_create(
         info.name,
         channel_type="broadcast",
         maxsize=maxsize,
         description=info.description,
     )
+    if engine is not None and graph_id is not None:
+        _ensure_channel_persistence(channel, engine, graph_id)
+    return channel
+
+
+def _ensure_channel_persistence(
+    channel: Any, engine: "Terrarium", graph_id: str
+) -> None:
+    """Idempotent on_send → ``store.save_channel_message`` install.
+
+    ``graph_id`` refreshed on every call so merges that move the
+    channel home land in the surviving store. Store resolved at call
+    time, not at install time.
+    """
+    channel._terrarium_graph_id = graph_id
+    if getattr(channel, "_terrarium_persistence_installed", False):
+        return
+    engine_ref = weakref.ref(engine)
+
+    def _persist(channel_name: str, message: Any) -> None:
+        gid = getattr(channel, "_terrarium_graph_id", None)
+        if not gid:
+            return
+        live = engine_ref()
+        if live is None:
+            return
+        store = getattr(live, "_session_stores", {}).get(gid)
+        if store is None:
+            return
+        try:
+            ts_attr = getattr(message, "timestamp", None)
+            if hasattr(ts_attr, "timestamp"):
+                ts = ts_attr.timestamp()
+            else:
+                ts = time.time()
+            content = message.content
+            if not isinstance(content, (str, list, dict)):
+                content = str(content)
+            store.save_channel_message(
+                channel_name,
+                {
+                    "sender": getattr(message, "sender", ""),
+                    "sender_id": getattr(message, "sender_id", None),
+                    "content": content,
+                    "message_id": getattr(message, "message_id", ""),
+                    "metadata": dict(getattr(message, "metadata", None) or {}),
+                    "reply_to": getattr(message, "reply_to", None),
+                    "ts": ts,
+                },
+            )
+        except Exception as exc:
+            logger.debug(
+                "channel persistence failed",
+                channel=channel_name,
+                error=str(exc),
+                exc_info=True,
+            )
+
+    channel.on_send(_persist)
+    channel._terrarium_persistence_installed = True
 
 
 def bind_creature_to_environment(creature: Any, env: Environment) -> None:
@@ -99,6 +163,7 @@ def inject_channel_trigger(
     registry: ChannelRegistry,
     prompt: str | None = None,
     ignore_sender: str | None = None,
+    ignore_sender_id: str | None = None,
 ) -> str:
     """Add a :class:`ChannelTrigger` to ``agent.trigger_manager`` and
     actually start it so the receiver wakes up on each channel send.
@@ -113,13 +178,26 @@ def inject_channel_trigger(
     receives a single message. The original implementation only did
     the dict assignment, which is the root cause of every "I wired
     listen but the creature still hears nothing" report.
+
+    ``ignore_sender_id`` is the stable creature_id form of the
+    self-filter — robust against display-name collisions (two creatures
+    spawned from the same config sharing one name). Falls back to the
+    name-based ``ignore_sender`` filter when not provided.
     """
     prompt = prompt or "[Channel '{channel}' from {sender}]: {content}"
+    if ignore_sender_id is None:
+        # ``install_output_wiring_resolver`` stamps ``_creature_id`` on
+        # the agent at wiring time; fall back to that so we don't need
+        # every caller to thread the id through.
+        ignore_sender_id = getattr(agent, "_creature_id", None) or getattr(
+            agent, "creature_id", None
+        )
     trigger = ChannelTrigger(
         channel_name=channel_name,
         subscriber_id=f"{subscriber_id}_{channel_name}",
         prompt=prompt,
         ignore_sender=ignore_sender or subscriber_id,
+        ignore_sender_id=ignore_sender_id,
         registry=registry,
     )
     trigger_id = f"channel_{subscriber_id}_{channel_name}"
@@ -273,18 +351,36 @@ async def connect_creatures(
         # the rail's listing-by-kind doesn't flicker after a
         # channel-based connect either.
         _promote_session_kind_after_merge(keep_gid)
+        _emit_session_kind_changed(engine, keep_gid, drop_gids, delta)
 
     gid = sender_creature.graph_id  # refreshed by the loop above
     env = engine._environments[gid]
     info = engine._topology.graphs[gid].channels[channel_name]
-    register_channel_in_environment(env.shared_channels, info)
-    trigger_id = inject_channel_trigger(
-        receiver_creature.agent,
-        subscriber_id=receiver_creature.name,
-        channel_name=channel_name,
-        registry=env.shared_channels,
-        ignore_sender=receiver_creature.name,
+    register_channel_in_environment(
+        env.shared_channels, info, engine=engine, graph_id=gid
     )
+    # MERGE case: ``_merge_environment_into`` already injected the
+    # listen trigger for *every* listen edge in the kept graph,
+    # including the new one ``_topo.connect`` just added. Re-injecting
+    # here causes a teardown / re-create race — the first inject's
+    # outer ``_run`` task hasn't been scheduled yet, so
+    # ``_teardown_existing_trigger`` finds nothing in ``_tasks`` and
+    # silently leaves the orphan trigger task to subscribe + then get
+    # torn down by a stray ``stop()`` after the second inject's task
+    # has already bailed (because the first task is still ``done() ==
+    # False``). Net effect: the channel ends up with zero subscribers
+    # and the worker never receives sends. Skip the redundant inject.
+    if delta.kind == "merge":
+        trigger_id = f"channel_{receiver_creature.name}_{channel_name}"
+    else:
+        trigger_id = inject_channel_trigger(
+            receiver_creature.agent,
+            subscriber_id=receiver_creature.name,
+            channel_name=channel_name,
+            registry=env.shared_channels,
+            ignore_sender=receiver_creature.name,
+            ignore_sender_id=receiver_creature.creature_id,
+        )
     if channel_name not in receiver_creature.listen_channels:
         receiver_creature.listen_channels.append(channel_name)
     if channel_name not in sender_creature.send_channels:
@@ -349,6 +445,7 @@ async def ensure_same_graph(
     # the v2 rail (which splits the listing by kind) stops bouncing
     # between agentAPI.list and terrariumAPI.list as snapshots roll in.
     _promote_session_kind_after_merge(keep_gid)
+    _emit_session_kind_changed(engine, keep_gid, drop_gids, delta)
     engine._emit(
         EngineEvent(
             kind=EventKind.TOPOLOGY_CHANGED,
@@ -379,6 +476,39 @@ def register_merge_listener(callback) -> None:
     successful graph merge.  Idempotent on identity."""
     if callback not in _merge_listeners:
         _merge_listeners.append(callback)
+
+
+def _emit_session_kind_changed(
+    engine: "Terrarium",
+    keep_gid: str,
+    drop_gids: list[str],
+    delta: Any,
+) -> None:
+    """Emit a ``SESSION_KIND_CHANGED`` event after a graph merge.
+
+    The frontend rail keys agent-vs-terrarium WS attach off session
+    ``kind`` — without an explicit signal, a panel attached to a
+    pre-merge solo creature keeps using the creature WS endpoint while
+    the same id is now a terrarium session, and the user sees the
+    mismatch as "messages disappear".  Emitting lets the frontend
+    re-attach against the correct shape.
+    """
+    g = engine._topology.graphs.get(keep_gid)
+    creature_count = len(g.creature_ids) if g is not None else 0
+    new_kind = "terrarium" if creature_count > 1 else "creature"
+    engine._emit(
+        EngineEvent(
+            kind=EventKind.SESSION_KIND_CHANGED,
+            graph_id=keep_gid,
+            payload={
+                "session_id": keep_gid,
+                "kind": new_kind,
+                "absorbed_session_ids": list(drop_gids),
+                "creature_count": creature_count,
+                "delta_kind": getattr(delta, "kind", "merge"),
+            },
+        )
+    )
 
 
 def _promote_session_kind_after_merge(session_id: str) -> None:
@@ -414,8 +544,12 @@ def _merge_environment_into(engine: "Terrarium", keep_gid: str, drop_gid: str) -
 
     # Copy channels.  Both registries store ``BaseChannel`` objects;
     # we re-create rather than alias so ownership is unambiguous.
+    # Pass ``engine`` + ``graph_id`` so the persistence callback's
+    # captured ``_terrarium_graph_id`` refreshes to the surviving gid.
     for ch_name, info in keep_g.channels.items():
-        register_channel_in_environment(keep_env.shared_channels, info)
+        register_channel_in_environment(
+            keep_env.shared_channels, info, engine=engine, graph_id=keep_gid
+        )
 
     # Make sure the kept env carries a live engine handle so group tools
     # invoked on creatures that just got pulled into this graph can
@@ -449,6 +583,7 @@ def _merge_environment_into(engine: "Terrarium", keep_gid: str, drop_gid: str) -
                 channel_name=ch_name,
                 registry=keep_env.shared_channels,
                 ignore_sender=creature.name,
+                ignore_sender_id=creature.creature_id,
             )
 
 

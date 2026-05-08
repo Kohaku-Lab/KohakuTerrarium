@@ -22,6 +22,7 @@ class EventKind(str, Enum):
     ACTIVITY = "activity"
     CHANNEL_MESSAGE = "channel_message"
     TOPOLOGY_CHANGED = "topology_changed"
+    SESSION_KIND_CHANGED = "session_kind_changed"
     SESSION_FORKED = "session_forked"
     CREATURE_STARTED = "creature_started"
     CREATURE_STOPPED = "creature_stopped"

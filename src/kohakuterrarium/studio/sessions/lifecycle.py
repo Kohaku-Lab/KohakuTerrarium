@@ -18,6 +18,7 @@ from typing import Any
 from kohakuterrarium.packages.resolve import is_package_ref, resolve_package_path
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions.handles import Session, SessionListing
+import kohakuterrarium.terrarium.channels as channel_module
 from kohakuterrarium.terrarium.channels import register_merge_listener
 from kohakuterrarium.terrarium.config import (
     CreatureConfig,
@@ -152,20 +153,36 @@ def attach_session_store_for_creature(
     config_path: str = "",
     config_type: str = "agent",
 ) -> None:
-    """Attach a fresh ``.kohakutr`` session store to ``creature``.
+    """Attach a session store to ``creature``.
 
-    Shared between :func:`start_creature` (called directly) and the
-    terrarium-layer ``group_add_node`` tool (called via the
-    ``terrarium.group_hooks`` indirection so the layer rule holds).
-    Records the store on the module-level ``_session_stores`` map so
-    :func:`stop_session` can close it later. Failures are logged but
-    not propagated — session persistence is best-effort.
+    Reuses the existing graph-level store when present (group_add_node
+    case); else mints ``<cid>.kohakutr``. Prevents file proliferation
+    and store-pointer clobbering on shared graphs.
     """
     try:
+        sid = creature.graph_id
+        existing = _session_stores.get(sid) or getattr(
+            engine, "_session_stores", {}
+        ).get(sid)
+        if existing is not None:
+            creature.agent.attach_session_store(existing)
+            _session_stores[sid] = existing
+            engine._session_stores[sid] = existing
+            try:
+                meta_agents = list(existing.meta.get("agents") or [])
+                if creature.agent.config.name not in meta_agents:
+                    meta_agents.append(creature.agent.config.name)
+                    existing.meta["agents"] = meta_agents
+                    if len(meta_agents) > 1:
+                        existing.meta["config_type"] = "terrarium"
+            except Exception:
+                logger.debug("meta agent-list update skipped", exc_info=True)
+            _retro_install_channel_persistence(engine, sid)
+            return
+
         sess_dir = _session_dir()
         Path(sess_dir).mkdir(parents=True, exist_ok=True)
         cid = creature.creature_id
-        sid = creature.graph_id
         store = SessionStore(Path(sess_dir) / f"{cid}.kohakutr")
         store.init_meta(
             session_id=cid,
@@ -178,8 +195,20 @@ def attach_session_store_for_creature(
         )
         creature.agent.attach_session_store(store)
         _session_stores[sid] = store
+        # Mirror to engine map so channel-persistence callback finds it.
+        engine._session_stores[sid] = store
+        _retro_install_channel_persistence(engine, sid)
     except Exception as e:  # pragma: no cover - defensive
         logger.warning("Session store creation failed", error=str(e))
+
+
+def _retro_install_channel_persistence(engine: Terrarium, sid: str) -> None:
+    """Install persistence callback on every channel already in env."""
+    env = engine._environments.get(sid)
+    if env is None:
+        return
+    for channel in env.shared_channels._channels.values():
+        channel_module._ensure_channel_persistence(channel, engine, sid)
 
 
 # ---------------------------------------------------------------------------

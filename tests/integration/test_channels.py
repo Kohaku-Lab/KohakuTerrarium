@@ -273,26 +273,35 @@ class TestChannelTrigger:
         assert event.context["sender"] == "agent_b"
 
     async def test_trigger_prompt_template(self):
-        """Prompt template gets content substitution."""
+        """Prompt template gets channel metadata substitution."""
         reg = ChannelRegistry()
         ch = reg.get_or_create("templated")
 
         trigger = ChannelTrigger(
             "templated",
-            prompt="Process this request: {content}",
+            prompt="[Channel '{channel}' from {sender}]: {content} ({priority})",
             registry=reg,
         )
         await trigger.start()
 
         async def send_delayed():
             await asyncio.sleep(0.05)
-            await ch.send(ChannelMessage(sender="a", content="fix the bug"))
+            await ch.send(
+                ChannelMessage(
+                    sender="a",
+                    content="fix the bug",
+                    metadata={"priority": "high"},
+                )
+            )
 
         asyncio.create_task(send_delayed())
         event = await trigger.wait_for_trigger()
         await trigger.stop()
 
-        assert "Process this request: fix the bug" in event.get_text_content()
+        assert (
+            "[Channel 'templated' from a]: fix the bug (high)"
+            in event.get_text_content()
+        )
 
     async def test_trigger_cleanup_on_stop(self):
         """Broadcast subscription cleaned up on stop."""

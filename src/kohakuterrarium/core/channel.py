@@ -28,7 +28,18 @@ def generate_message_id() -> str:
 
 @dataclass
 class ChannelMessage:
-    """A message sent through a channel."""
+    """A message sent through a channel.
+
+    ``sender`` is the display name (what the model and the user see in
+    the rendered prompt). ``sender_id`` is the stable creature identity
+    used for routing — anti-echo filters and subscription bookkeeping
+    compare against it. They differ when two creatures share a config
+    name (both spawned from the same template) but live under different
+    creature_ids: without ``sender_id`` the trigger's anti-echo filter
+    would drop legitimate sends as self-echoes. ``sender_id`` is
+    optional for backward compat — when ``None``, the trigger falls
+    back to ``sender`` for matching.
+    """
 
     sender: str
     content: str | dict | list[dict]
@@ -37,6 +48,7 @@ class ChannelMessage:
     message_id: str = field(default_factory=generate_message_id)
     reply_to: str | None = None
     channel: str | None = None
+    sender_id: str | None = None
 
 
 class BaseChannel(ABC):

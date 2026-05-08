@@ -355,7 +355,9 @@ class Terrarium:
             description=description,
         )
         env = self._environments[gid]
-        _channels.register_channel_in_environment(env.shared_channels, info)
+        _channels.register_channel_in_environment(
+            env.shared_channels, info, engine=self, graph_id=gid
+        )
         return info
 
     async def remove_channel(self, graph: GraphRef, name: str) -> TopologyDelta:
@@ -627,6 +629,14 @@ class Terrarium:
         g = self._topology.graphs.get(gid)
         if g is None:
             return
+        # Retroactively wire channel persistence on every channel that
+        # was registered before the store was attached — without this,
+        # channels created at engine.add_channel time before
+        # attach_session lose every send to the void.
+        env = self._environments.get(gid)
+        if env is not None:
+            for channel in env.shared_channels._channels.values():
+                _channels._ensure_channel_persistence(channel, self, gid)
         for cid in g.creature_ids:
             c = self._creatures.get(cid)
             if c is None:

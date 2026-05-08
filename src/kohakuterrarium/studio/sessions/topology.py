@@ -213,13 +213,16 @@ async def wire_creature(
             )
             if registry is None:
                 raise KeyError(f"session {session_id!r} has no shared channel registry")
-            _channels.register_channel_in_environment(registry, graph.channels[channel])
+            _channels.register_channel_in_environment(
+                registry, graph.channels[channel], engine=engine, graph_id=session_id
+            )
             _channels.inject_channel_trigger(
                 creature.agent,
                 subscriber_id=creature.name,
                 channel_name=channel,
                 registry=registry,
                 ignore_sender=creature.name,
+                ignore_sender_id=creature.creature_id,
             )
             if channel not in creature.listen_channels:
                 creature.listen_channels.append(channel)
