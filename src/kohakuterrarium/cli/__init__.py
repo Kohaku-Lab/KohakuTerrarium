@@ -98,6 +98,33 @@ def _build_parser() -> argparse.ArgumentParser:
             "plain=dumb stdout/stdin, tui=full-screen Textual app"
         ),
     )
+    run_parser.add_argument(
+        "--add",
+        action="append",
+        default=[],
+        metavar="CONFIG",
+        dest="add_creatures",
+        help=(
+            "Spawn an additional creature into the same graph at startup. "
+            "Accepts a path or ``@pkg/creatures/<name>`` reference. May be "
+            "repeated to assemble an ad-hoc team without writing a recipe. "
+            "Spawned creatures are not privileged."
+        ),
+    )
+    run_parser.add_argument(
+        "--channel",
+        action="append",
+        default=[],
+        metavar="NAME",
+        dest="add_channels",
+        help=(
+            "Create a shared channel and wire every creature in the graph "
+            "as both listener and sender. May be repeated. Combined with "
+            "``--add`` this lets you compose a multi-creature graph from "
+            "the command line, e.g. ``kt run general --add critic "
+            "--channel reviews``."
+        ),
+    )
 
     # List command
     list_parser = subparsers.add_parser("list", help="List available agents")
@@ -343,6 +370,10 @@ def _dispatch_run(args: argparse.Namespace) -> int:
     if agent_path.startswith("@"):
         agent_path = str(resolve_package_path(agent_path))
     session = None if args.no_session else args.session
+    extra_creatures = [
+        str(resolve_package_path(p)) if p.startswith("@") else p
+        for p in (getattr(args, "add_creatures", None) or [])
+    ]
     return run_agent_cli(
         agent_path,
         args.log_level,
@@ -350,6 +381,8 @@ def _dispatch_run(args: argparse.Namespace) -> int:
         io_mode=args.mode,
         llm_override=args.llm,
         log_stderr=args.log_stderr,
+        extra_creatures=extra_creatures,
+        extra_channels=list(getattr(args, "add_channels", None) or []),
     )
 
 

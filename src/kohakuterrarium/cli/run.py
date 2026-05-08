@@ -14,6 +14,8 @@ import asyncio
 from pathlib import Path
 from uuid import uuid4
 
+import kohakuterrarium.terrarium.channels as _channels
+import kohakuterrarium.terrarium.topology as _topo
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.config import load_terrarium_config
 from kohakuterrarium.terrarium.engine import Terrarium
@@ -38,6 +40,8 @@ def run_agent_cli(
     io_mode: str | None = None,
     llm_override: str | None = None,
     log_stderr: str = "auto",
+    extra_creatures: list[str] | None = None,
+    extra_channels: list[str] | None = None,
 ) -> int:
     """Run a creature or recipe from the CLI through the engine.
 
@@ -51,6 +55,16 @@ def run_agent_cli(
     - ``"plain"``: not yet ported back from the pre-engine path —
       falls through to the TUI with a warning so the silence isn't
       surprising.
+
+    ``extra_creatures`` and ``extra_channels`` let callers compose an
+    ad-hoc team on the command line:
+
+        kt run general --add critic --add planner --channel reviews
+
+    Each ``--add`` spawns a non-privileged creature into the same
+    graph; each ``--channel`` declares a shared channel and wires
+    every creature as both listener and sender. Useful for trying
+    out a recipe-shape without committing to a YAML file.
     """
     configure_utf8_stdio(log=True)
     set_level(log_level)
@@ -79,6 +93,8 @@ def run_agent_cli(
                 session=session,
                 llm_override=llm_override,
                 io_mode=io_mode,
+                extra_creatures=extra_creatures or [],
+                extra_channels=extra_channels or [],
             )
         )
     except KeyboardInterrupt:
@@ -96,6 +112,8 @@ async def _run(
     session: str | None,
     llm_override: str | None,
     io_mode: str | None,
+    extra_creatures: list[str],
+    extra_channels: list[str],
 ) -> int:
     pwd = str(Path.cwd())
     is_recipe = _looks_like_recipe(agent_path)
@@ -108,10 +126,11 @@ async def _run(
             cfg = load_terrarium_config(agent_path)
             graph = await engine.apply_recipe(cfg, pwd=pwd, llm_override=llm_override)
             focus_creature_id = _pick_focus_creature(engine, graph.graph_id)
+            graph_id = graph.graph_id
             if session is not None:
                 store = await _attach_session_store(
                     engine,
-                    graph_id=graph.graph_id,
+                    graph_id=graph_id,
                     session=session,
                     config_path=agent_path,
                     config_type="terrarium",
@@ -124,14 +143,24 @@ async def _run(
                 is_privileged=True,
             )
             focus_creature_id = creature.creature_id
+            graph_id = creature.graph_id
             if session is not None:
                 store = await _attach_session_store(
                     engine,
-                    graph_id=creature.graph_id,
+                    graph_id=graph_id,
                     session=session,
                     config_path=agent_path,
                     config_type="agent",
                 )
+
+        await _apply_cli_topology(
+            engine,
+            graph_id=graph_id,
+            pwd=pwd,
+            llm_override=llm_override,
+            extra_creatures=extra_creatures,
+            extra_channels=extra_channels,
+        )
 
         try:
             if io_mode == "cli":
@@ -145,6 +174,83 @@ async def _run(
                     print(f"  kt resume {Path(store.path).stem}")
                 store.close()
         return 0
+
+
+async def _apply_cli_topology(
+    engine: Terrarium,
+    *,
+    graph_id: str,
+    pwd: str,
+    llm_override: str | None,
+    extra_creatures: list[str],
+    extra_channels: list[str],
+) -> None:
+    """Compose the on-the-fly team described by ``--add`` / ``--channel``.
+
+    Spawned creatures join the existing ``graph_id`` so they share the
+    session store and channel registry. Channels are declared
+    graph-wide; every creature in the graph (including the original)
+    is wired as both listener and sender, matching what the user
+    typically wants when assembling an ad-hoc review/peer setup from
+    the command line.
+    """
+    if not extra_creatures and not extra_channels:
+        return
+    for cfg_path in extra_creatures:
+        try:
+            await engine.add_creature(
+                cfg_path,
+                graph=graph_id,
+                pwd=pwd,
+                llm_override=llm_override,
+                is_privileged=False,
+            )
+        except Exception as exc:
+            logger.warning(
+                "kt run --add failed", config=cfg_path, error=str(exc), exc_info=True
+            )
+            print(f"Warning: --add {cfg_path} failed: {exc}")
+    for ch_name in extra_channels:
+        try:
+            await engine.add_channel(graph_id, ch_name)
+        except Exception as exc:
+            logger.warning(
+                "kt run --channel failed",
+                channel=ch_name,
+                error=str(exc),
+                exc_info=True,
+            )
+            print(f"Warning: --channel {ch_name} failed: {exc}")
+            continue
+        graph = engine.get_graph(graph_id)
+        for cid in sorted(graph.creature_ids):
+            try:
+                _topo.set_listen(engine._topology, cid, ch_name, listening=True)
+                _topo.set_send(engine._topology, cid, ch_name, sending=True)
+                creature = engine.get_creature(cid)
+                env = engine._environments.get(graph_id)
+                if env is None:
+                    continue
+                _channels.inject_channel_trigger(
+                    creature.agent,
+                    subscriber_id=creature.name,
+                    channel_name=ch_name,
+                    registry=env.shared_channels,
+                    ignore_sender=creature.name,
+                    ignore_sender_id=creature.creature_id,
+                )
+                if ch_name not in creature.listen_channels:
+                    creature.listen_channels.append(ch_name)
+                if ch_name not in creature.send_channels:
+                    creature.send_channels.append(ch_name)
+            except Exception as exc:
+                logger.warning(
+                    "wire on --channel failed",
+                    channel=ch_name,
+                    creature=cid,
+                    error=str(exc),
+                    exc_info=True,
+                )
 
 
 def _looks_like_recipe(path: str) -> bool:
