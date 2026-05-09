@@ -239,6 +239,19 @@ export const terrariumAPI = {
     return data
   },
 
+  async getWorkingDir(id, target) {
+    const { data } = await api.get(`/sessions/${id}/creatures/${encodeTarget(target)}/working-dir`)
+    return data
+  },
+
+  async setWorkingDir(id, target, path) {
+    const { data } = await api.put(
+      `/sessions/${id}/creatures/${encodeTarget(target)}/working-dir`,
+      { path },
+    )
+    return data
+  },
+
   async listPlugins(id, target) {
     const { data } = await api.get(`/sessions/${id}/creatures/${encodeTarget(target)}/plugins`)
     return data
@@ -307,54 +320,6 @@ export const agentAPI = {
     await api.delete(`/sessions/active/agents/${id}`)
   },
 
-  async interrupt(id) {
-    const { data } = await api.post(`/sessions/_/creatures/${id}/interrupt`)
-    return data
-  },
-
-  /** Get conversation history + event log */
-  async getHistory(id) {
-    const { data } = await api.get(`/sessions/_/creatures/${id}/history`)
-    return data
-  },
-
-  /** Non-streaming chat */
-  async chat(id, message) {
-    const body = Array.isArray(message) ? { content: message } : { message }
-    const { data } = await api.post(`/sessions/_/creatures/${id}/chat`, body)
-    return data
-  },
-
-  async listJobs(id) {
-    const { data } = await api.get(`/sessions/_/creatures/${id}/jobs`)
-    return data
-  },
-
-  async stopTask(id, jobId) {
-    const { data } = await api.post(`/sessions/_/creatures/${id}/tasks/${jobId}/stop`)
-    return data
-  },
-
-  /** Promote a running direct task to background */
-  async promote(id, jobId) {
-    const { data } = await api.post(`/sessions/_/creatures/${id}/promote/${jobId}`)
-    return data
-  },
-
-  /** List plugins with enabled/disabled status */
-  async listPlugins(id) {
-    const { data } = await api.get(`/sessions/_/creatures/${id}/plugins`)
-    return data
-  },
-
-  /** Toggle a plugin's enabled state */
-  async togglePlugin(id, pluginName) {
-    const { data } = await api.post(
-      `/sessions/_/creatures/${id}/plugins/${encodeURIComponent(pluginName)}/toggle`,
-    )
-    return data
-  },
-
   /** Regenerate the last assistant response.
    *
    * ``sessionId`` is the terrarium's session id (or ``"_"`` for a
@@ -392,59 +357,6 @@ export const agentAPI = {
     const { data } = await api.post(
       `/sessions/${encodeTarget(sid)}/creatures/${encodeTarget(cid)}/messages/${msgIdx}/rewind`,
     )
-    return data
-  },
-
-  /** Switch the model for a running agent */
-  async switchModel(id, model) {
-    const { data } = await api.post(`/sessions/_/creatures/${id}/model`, { model })
-    return data
-  },
-
-  /** Execute a slash command on an agent */
-  async executeCommand(id, command, args = "") {
-    const { data } = await api.post(`/sessions/_/creatures/${id}/command`, {
-      command,
-      args,
-    })
-    return data
-  },
-
-  // ── Phase 1 read-only inspection endpoints ───────────────────────
-
-  /** @returns {Promise<Record<string, string>>} */
-  async getScratchpad(id) {
-    const { data } = await api.get(`/sessions/_/creatures/${id}/scratchpad`)
-    return data
-  },
-
-  /**
-   * Patch the scratchpad. Values may be `null` to delete a key.
-   * @param {string} id
-   * @param {Record<string, string | null>} updates
-   */
-  async patchScratchpad(id, updates) {
-    const { data } = await api.patch(`/sessions/_/creatures/${id}/scratchpad`, {
-      updates,
-    })
-    return data
-  },
-
-  /** @returns {Promise<{trigger_id: string, trigger_type: string, running: boolean, created_at: string}[]>} */
-  async listTriggers(id) {
-    const { data } = await api.get(`/sessions/_/creatures/${id}/triggers`)
-    return data
-  },
-
-  /** @returns {Promise<{pwd: string, env: Record<string, string>}>} */
-  async getEnv(id) {
-    const { data } = await api.get(`/sessions/_/creatures/${id}/env`)
-    return data
-  },
-
-  /** @returns {Promise<{text: string}>} */
-  async getSystemPrompt(id) {
-    const { data } = await api.get(`/sessions/_/creatures/${id}/system-prompt`)
     return data
   },
 }

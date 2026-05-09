@@ -67,16 +67,16 @@ let fitAddon = null
 let ws = null
 let resizeObserver = null
 
-const agentId = computed(() => props.instance?.id || instances.current?.id || null)
+const sessionId = computed(() => props.instance?.graph_id || props.instance?.id || instances.current?.id || null)
 const isTerrarium = computed(() => props.instance?.type === "terrarium")
 
 /**
- * Names of every creature / root the terminal can attach to for the
- * active terrarium. The backend's terrarium terminal endpoint keys on
- * creature name (``root`` for the root agent).
+ * Names of every creature / root the terminal can attach to. The
+ * backend's pty endpoint keys on creature name (``root`` for the
+ * privileged creature). Solo sessions surface their single creature
+ * here too, so the path is uniform across solo and terrarium.
  */
 const terminalTargets = computed(() => {
-  if (!isTerrarium.value) return []
   const inst = props.instance
   const names = []
   if (inst?.has_root) names.push("root")
@@ -86,16 +86,16 @@ const terminalTargets = computed(() => {
   return names
 })
 
+const resolvedTarget = computed(() => {
+  if (isTerrarium.value) return selectedTarget.value
+  return terminalTargets.value[0] || null
+})
+
 const terminalPath = computed(() => {
-  const id = agentId.value
-  if (!id) return null
-  if (isTerrarium.value) {
-    const target = selectedTarget.value
-    if (!target) return null
-    return `/ws/sessions/${encodeURIComponent(id)}/creatures/${encodeURIComponent(target)}/pty`
-  }
-  // Standalone agent: cid is unused server-side, pass the agent id again.
-  return `/ws/sessions/${encodeURIComponent(id)}/creatures/${encodeURIComponent(id)}/pty`
+  const sid = sessionId.value
+  const target = resolvedTarget.value
+  if (!sid || !target) return null
+  return `/ws/sessions/${encodeURIComponent(sid)}/creatures/${encodeURIComponent(target)}/pty`
 })
 
 let unmounted = false
@@ -225,8 +225,8 @@ onMounted(async () => {
       }
     }
 
-    // Auto-connect if we have an agent AND a resolvable path.
-    if (agentId.value && terminalPath.value) connect()
+    // Auto-connect if we have a session AND a resolvable path.
+    if (sessionId.value && terminalPath.value) connect()
   } catch (err) {
     console.error("[TerminalPanel] onMounted error:", err)
   }
@@ -253,10 +253,10 @@ watch(terminalTargets, (targets) => {
 })
 
 // Reconnect whenever the target changes — either the instance itself
-// (agentId) or the terrarium creature selection (path rebuild).
-watch([agentId, terminalPath], ([id, path], [prevId, prevPath]) => {
-  if (prevId || prevPath) disconnect()
-  if (id && path) connect()
+// (sessionId) or the creature selection (path rebuild).
+watch([sessionId, terminalPath], ([sid, path], [prevSid, prevPath]) => {
+  if (prevSid || prevPath) disconnect()
+  if (sid && path) connect()
 })
 
 onUnmounted(() => {
