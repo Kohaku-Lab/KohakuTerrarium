@@ -33,9 +33,13 @@ just operate on lines vs pages respectively.
 Returns contents with line numbers (format: `line_num->content`).
 offset = starting line (0-based), limit = number of lines.
 
-**Images** (png, jpg, jpeg, gif, webp, svg, bmp, tiff, ico, heif, heic, avif):
+**Images** (png, jpg, jpeg, gif, webp):
 Returns the image for visual inspection by the model. No text extraction;
-the model sees the image directly. offset/limit are ignored.
+the model sees the image directly. offset/limit are ignored. Files are
+decode-verified with Pillow before being sent to the model — corrupt or
+non-image files fail here with a clear error rather than at the provider.
+Other formats (svg, bmp, tiff, ico, heif/heic, avif) aren't supported
+because not every LLM provider accepts them; convert first if needed.
 
 **PDFs** (.pdf files):
 Returns extracted text per page + rendered page images for visual inspection.

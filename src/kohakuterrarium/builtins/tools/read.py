@@ -3,6 +3,7 @@ Read tool - read file contents (text and images).
 """
 
 import base64
+import io
 import os
 import time
 from pathlib import Path
@@ -284,7 +285,13 @@ class ReadTool(BaseTool):
         return ToolResult(output=parts, exit_code=0)
 
     async def _read_image(self, file_path: Path, original_path: str) -> ToolResult:
-        """Read an image file and return as multimodal content."""
+        """Read an image file and return as multimodal content.
+
+        Only the four formats LLM providers reliably accept are
+        supported: PNG, JPEG, WEBP, GIF. The bytes are decoded with
+        Pillow before being base64-encoded so corrupt / mislabeled
+        files fail cleanly here instead of at the provider boundary.
+        """
         if not file_path.exists():
             return ToolResult(error=f"File not found: {original_path}")
 
@@ -298,73 +305,141 @@ class ReadTool(BaseTool):
             )
 
         suffix = file_path.suffix.lower()
-        mime = _IMAGE_MIME.get(suffix, "image/png")
+        if suffix not in _IMAGE_MIME:
+            return ToolResult(
+                error=(
+                    f"Unsupported image format {suffix!r}. "
+                    f"Supported: {', '.join(sorted(_IMAGE_MIME))}."
+                )
+            )
 
         try:
             async with aiofiles.open(file_path, "rb") as f:
                 data = await f.read()
-            b64 = base64.b64encode(data).decode("ascii")
-            data_url = f"data:{mime};base64,{b64}"
-
-            logger.info(
-                "Image read",
-                file_path=str(file_path),
-                size_kb=len(data) // 1024,
-                mime=mime,
-            )
-
-            return ToolResult(
-                output=[
-                    TextPart(
-                        text=f"Image: {original_path} ({len(data) // 1024}KB, {mime})"
-                    ),
-                    ImagePart(
-                        url=data_url,
-                        detail="auto",
-                        source_type="file",
-                        source_name=file_path.name,
-                    ),
-                ],
-                exit_code=0,
-            )
         except Exception as e:
             return ToolResult(error=f"Failed to read image: {e}")
 
+        # Verify the file actually decodes as a valid image of the
+        # expected format. Pillow's verify() does a header-level
+        # integrity check; we follow with a load on a fresh handle to
+        # confirm the pixel data is intact too (verify() invalidates
+        # the image afterwards, hence the second open).
+        verified_format = _verify_image(data)
+        if verified_format is None:
+            return ToolResult(
+                error=(
+                    f"File {original_path} is not a valid image, or its format "
+                    f"is unsupported (need PNG / JPEG / WEBP / GIF)."
+                )
+            )
+        mime = _PIL_FORMAT_TO_MIME.get(verified_format)
+        if mime is None:
+            return ToolResult(
+                error=(
+                    f"Image decoded as {verified_format!r}, which is not in the "
+                    f"supported set (PNG / JPEG / WEBP / GIF)."
+                )
+            )
 
-# Image extensions and MIME types
-_IMAGE_EXTENSIONS = {
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".gif",
-    ".webp",
-    ".bmp",
-    ".tiff",
-    ".tif",
-    ".ico",
-    ".svg",
-    ".heif",
-    ".heic",
-    ".avif",
-}
+        b64 = base64.b64encode(data).decode("ascii")
+        data_url = f"data:{mime};base64,{b64}"
 
+        logger.info(
+            "Image read",
+            file_path=str(file_path),
+            size_kb=len(data) // 1024,
+            mime=mime,
+        )
+
+        return ToolResult(
+            output=[
+                TextPart(
+                    text=f"Image: {original_path} ({len(data) // 1024}KB, {mime})"
+                ),
+                ImagePart(
+                    url=data_url,
+                    detail="auto",
+                    source_type="file",
+                    source_name=file_path.name,
+                ),
+            ],
+            exit_code=0,
+        )
+
+
+# The only image formats the supported LLM providers (OpenAI Responses,
+# Codex, Anthropic, Gemini) reliably accept. Anything else either gets
+# rejected at the provider boundary or silently degraded — restricting
+# here keeps the failure mode local and actionable.
 _IMAGE_MIME = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".gif": "image/gif",
     ".webp": "image/webp",
-    ".bmp": "image/bmp",
-    ".tiff": "image/tiff",
-    ".tif": "image/tiff",
-    ".ico": "image/x-icon",
-    ".svg": "image/svg+xml",
-    ".heif": "image/heif",
-    ".heic": "image/heic",
-    ".avif": "image/avif",
+}
+
+# Image extensions that are still recognized as images by the dispatcher
+# (so they don't fall through to the binary-file guard) but rejected
+# with a clear "unsupported" message in ``_read_image``.
+_UNSUPPORTED_IMAGE_EXTENSIONS = frozenset(
+    {
+        ".bmp",
+        ".tiff",
+        ".tif",
+        ".ico",
+        ".svg",
+        ".heif",
+        ".heic",
+        ".avif",
+    }
+)
+
+_PIL_FORMAT_TO_MIME = {
+    "PNG": "image/png",
+    "JPEG": "image/jpeg",
+    "GIF": "image/gif",
+    "WEBP": "image/webp",
 }
 
 
+def _verify_image(data: bytes) -> str | None:
+    """Decode-check ``data`` with Pillow; return the format name or ``None``.
+
+    Returns the Pillow format string (e.g. ``"PNG"``, ``"JPEG"``) when
+    the bytes parse cleanly, ``None`` when Pillow refuses them. Catches
+    every exception class Pillow may raise — corrupt headers, truncated
+    streams, decoder-not-available, etc.
+    """
+    # Optional-dep guard: Pillow is declared in pyproject but the
+    # tool should still work in stripped-down installs. Skip
+    # verification if missing — provider will surface any error.
+    try:
+        from PIL import Image, UnidentifiedImageError
+    except ImportError:
+        logger.warning("Pillow not installed — skipping image verification")
+        return "PNG"
+
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            img.verify()
+        # ``verify()`` leaves the image unusable; reopen for load().
+        with Image.open(io.BytesIO(data)) as img:
+            fmt = img.format
+            img.load()
+        return fmt
+    except (UnidentifiedImageError, OSError, ValueError, SyntaxError) as e:
+        logger.debug("Image verification failed", error=str(e))
+        return None
+
+
 def _is_image_file(path: Path) -> bool:
-    """Check if a file is a supported image format."""
-    return path.suffix.lower() in _IMAGE_EXTENSIONS
+    """Check if a file looks like an image (extension-based).
+
+    Includes both the supported set and a small list of legacy formats
+    we explicitly reject in ``_read_image`` — that routes them through
+    the image branch and yields a "supported set is PNG/JPEG/WEBP/GIF"
+    message instead of a generic "binary file detected".
+    """
+    suffix = path.suffix.lower()
+    return suffix in _IMAGE_MIME or suffix in _UNSUPPORTED_IMAGE_EXTENSIONS

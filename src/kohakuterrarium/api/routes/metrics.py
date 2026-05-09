@@ -50,14 +50,15 @@ def metrics_snapshot(engine=Depends(get_engine)) -> dict[str, Any]:
 def _build_gauges(engine) -> dict[str, int]:
     """Read instantaneous gauges off live engine state.
 
-    ``creature``-vs-``terrarium`` separation comes from the studio
-    handle's ``kind`` field; ``mcp_servers_connected`` peeks into the
-    agent's MCP manager because the engine doesn't surface it
-    directly.
+    Solo-vs-multi separation comes from the listing's creature count —
+    1 creature is a solo session, 2+ is a multi-creature graph
+    (matches the frontend's ``isMulti`` derivation).
+    ``mcp_servers_connected`` peeks into the agent's MCP manager
+    because the engine doesn't surface it directly.
     """
     sessions = list(sessions_lifecycle.list_sessions(engine))
-    creatures_running = sum(1 for s in sessions if s.kind == "creature")
-    terrariums_running = sum(1 for s in sessions if s.kind == "terrarium")
+    creatures_running = sum(1 for s in sessions if s.creatures <= 1)
+    terrariums_running = sum(1 for s in sessions if s.creatures > 1)
 
     # Each session is a graph; its creature count is on the listing.
     # ``creatures_total`` counts every creature across every active

@@ -265,10 +265,12 @@ def _parse_subagent_config(data: dict[str, Any] | str) -> SubAgentConfigItem:
 
 def load_agent_config(agent_path: str | Path) -> AgentConfig:
     """
-    Load agent configuration from folder.
+    Load agent configuration from a folder *or* a direct config file.
 
     Args:
-        agent_path: Path to agent folder containing config.yaml
+        agent_path: Path to the agent folder, or directly to its
+            ``config.{yaml,yml,json,toml}`` file. When a file path is
+            given, its parent directory is used as the agent folder.
 
     Returns:
         Loaded AgentConfig
@@ -280,12 +282,18 @@ def load_agent_config(agent_path: str | Path) -> AgentConfig:
     agent_path = Path(agent_path)
 
     if not agent_path.exists():
-        raise FileNotFoundError(f"Agent folder not found: {agent_path}")
+        raise FileNotFoundError(f"Agent path not found: {agent_path}")
 
-    # Find and load config file
-    config_file = _find_config_file(agent_path)
-    if config_file is None:
-        raise FileNotFoundError(f"No config file found in: {agent_path}")
+    # Accept either a folder or a direct config file. When the user
+    # points at the file itself, treat its parent as the agent folder
+    # so relative references inside the config still resolve correctly.
+    if agent_path.is_file():
+        config_file = agent_path
+        agent_path = agent_path.parent
+    else:
+        config_file = _find_config_file(agent_path)
+        if config_file is None:
+            raise FileNotFoundError(f"No config file found in: {agent_path}")
 
     logger.debug("Loading config", path=str(config_file))
     raw_config = _load_config_file(config_file)
