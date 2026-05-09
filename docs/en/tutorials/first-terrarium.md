@@ -19,11 +19,12 @@ running under the TUI, visibly passing messages from one to the other.
 **Prerequisites:** [First Creature](first-creature.md). You should have
 `kt-biome` installed and be able to `kt run` a single creature.
 
-A terrarium is a **pure wiring layer**: it owns channels and manages
-creature lifecycles. It has no LLM of its own. The intelligence stays
-inside each creature. See
-[terrarium concept](../concepts/multi-agent/terrarium.md) for the full
-contract.
+A terrarium is the **runtime engine**: it owns the channel graph,
+creature lifecycles, output wiring, and the topology + session
+bookkeeping that follows graph changes. It runs no LLM and has no
+reasoning loop — the LLMs and the reasoning live in the creatures
+inside it. See [terrarium concept](../concepts/multi-agent/terrarium.md)
+for the full contract.
 
 ## Step 1 — Create the folder
 
@@ -68,9 +69,9 @@ terrarium:
         can_send:  [feedback]
 
   channels:
-    tasks:    { type: queue, description: "Incoming work for the writer" }
-    review:   { type: queue, description: "Drafts sent to the reviewer" }
-    feedback: { type: queue, description: "Review notes sent back" }
+    tasks:    "Incoming work for the writer"
+    review:   "Drafts sent to the reviewer"
+    feedback: "Review notes sent back"
 ```
 
 What the wiring does:
@@ -80,8 +81,9 @@ What the wiring does:
 - `can_send` enumerates channels the creature's `send_message` tool is
   allowed to write to. A creature cannot reach channels that are not in
   this list.
-- Channels are declared once in `channels:`. `queue` delivers each
-  message to one consumer; `broadcast` delivers to all listeners.
+- Channels are declared once in `channels:` with an optional one-line
+  description. All channels are broadcast: every listener sees every
+  send.
 
 Inline `system_prompt:` is appended to the inherited base prompt. Do
 that here to keep the tutorial self-contained; prefer
@@ -153,8 +155,8 @@ terrarium:
         listen: []                # receives writer's output via wiring
         can_send: [feedback]      # reviewer's decision is conditional — keep on channel
   channels:
-    tasks:    { type: queue }
-    feedback: { type: queue }
+    tasks:    "Incoming work for the writer"
+    feedback: "Review notes sent back"
 ```
 
 What changed:
@@ -187,17 +189,20 @@ terrarium:
 Create `prompts/root.md` next to the terrarium yaml — it only needs
 to carry delegation style; the framework auto-generates the topology
 awareness section listing the team's creatures and channels, and
-force-injects the management toolset (`terrarium_send`,
-`creature_status`, `terrarium_history`, …).
+force-injects the [group tools](../concepts/glossary.md#group-tools)
+(`group_add_node`, `group_status`, `group_channel`, `group_wire`, …)
+that let root manage the graph from inside.
 
 The TUI mounts root on its main tab; you talk to root, root talks to
-the team. See [root agent concept](../concepts/multi-agent/root-agent.md)
+the team. See [privileged node concept](../concepts/multi-agent/privileged-node.md)
 for more.
 
 ## What you learned
 
-- A terrarium is wiring. It adds no intelligence.
-- Creatures stay standalone; the terrarium tells them who can hear
+- A terrarium is the runtime engine. It owns structure (the channel
+  graph, topology, sessions, output wiring) and runs no LLM of its
+  own.
+- Creatures stay standalone; the engine tells them who can hear
   what, who can send where, and where their turn-end output flows.
 - Two cooperation mechanisms compose freely:
   - **Channels** — conditional, optional, broadcast. The creature
@@ -211,9 +216,9 @@ for more.
 
 - [Terrarium concept](../concepts/multi-agent/terrarium.md) — the
   contract and its boundaries.
-- [Root agent concept](../concepts/multi-agent/root-agent.md) — the
-  user-facing creature.
+- [Privileged node concept](../concepts/multi-agent/privileged-node.md)
+  — the user-facing privileged node designated by `root:`.
 - [Terrariums guide](../guides/terrariums.md) — the practical how-to
   reference.
-- [Channel concept](../concepts/modules/channel.md) — queue vs
-  broadcast, observers, and where channels cross module lines.
+- [Channel concept](../concepts/modules/channel.md) — broadcast
+  semantics, observers, and where channels cross module lines.

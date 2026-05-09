@@ -168,7 +168,7 @@ Session 都保存在单个 `.kohakutr` 文件中，底层是 KohakuVault（SQLit
 
 旧版 `terrarium/runtime.py:TerrariumRuntime` 与 `serving/manager.py:KohakuManager` 在过渡期间还留在硬盘上 — 较旧的 HTTP route 与 CLI 还会用它们。`api/deps.py` 现在同时暴露 `get_engine()` (新) 与 `get_manager()` (旧) 这两个 singleton；route 会一条一条切过去。
 
-相关文档见 [concepts/multi-agent/terrarium.md](../concepts/multi-agent/terrarium.md) 和 [concepts/multi-agent/root-agent.md](../concepts/multi-agent/root-agent.md)。
+相关文档见 [concepts/multi-agent/terrarium.md](../concepts/multi-agent/terrarium.md) 和 [concepts/multi-agent/privileged-node.md](../concepts/multi-agent/privileged-node.md)。
 
 ### 3.2 Channels
 

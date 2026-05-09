@@ -64,8 +64,12 @@ A concrete list, for calibration:
   [what-is-an-agent](what-is-an-agent.md).
 - A session layer that is both runtime persistence and a searchable
   knowledge base.
-- A multi-agent wiring layer (terrarium) that is purely structural, no
-  LLM of its own.
+- A multi-agent runtime engine (terrarium) that hosts creatures,
+  owns the channel graph and topology bookkeeping, and runs no LLM
+  of its own.
+- A management framework (studio) that handles catalog, identity,
+  session lifecycle, persistence, and editors so every UI / CLI / API
+  shares one implementation.
 - Python-native composition: every module is a Python class, every
   agent is an async Python value.
 - Out-of-the-box runtime surfaces (CLI, TUI, HTTP, WebSocket, desktop,

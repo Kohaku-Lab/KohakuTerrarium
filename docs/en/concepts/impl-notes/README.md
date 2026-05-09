@@ -9,7 +9,7 @@ tags:
 
 # Impl notes
 
-Four specific implementation choices that deserve their own short
+Five specific implementation choices that deserve their own short
 concept doc — not because a user has to know them to use KT, but
 because they surface design decisions that recur elsewhere and are
 useful mental models in their own right.
@@ -25,6 +25,10 @@ useful mental models in their own right.
 - [Session persistence](session-persistence.md) — the dual-store model
   (append-only event log + conversation snapshots) that lets one
   `.kohakutr` serve resume, human search, and agent-side RAG.
+- [Graph and sessions](graph-and-sessions.md) — how the terrarium
+  engine computes connected components, mutates topology under
+  hot-plug calls, and keeps the session store consistent across
+  auto-merge and auto-split.
 
 Each doc follows the same shape: *problem → options considered → what
 we do → invariants preserved → where it lives in the code.*

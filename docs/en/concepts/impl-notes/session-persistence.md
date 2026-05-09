@@ -109,4 +109,7 @@ them as the tool result.
 
 - [Memory and compaction](../modules/memory-and-compaction.md) — the
   conceptual picture.
+- [Graph and sessions](graph-and-sessions.md) — how a session store
+  is rebuilt across terrarium merges and splits, and why the recipe
+  is the source of truth on resume.
 - [reference/cli.md — kt resume, kt search, kt embedding](../../reference/cli.md) — user surfaces.

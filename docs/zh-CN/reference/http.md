@@ -47,7 +47,7 @@ Serving 层和会话存储的结构请参见 [会话持久化概念](../concepts
 - Body：`TerrariumCreate` (`config_path`、选用 `llm`、`pwd`)。
 - Response：`{"terrarium_id": str, "status": "running"}`。
 - 状态：`200`、`400`。
-- Side effect：生出Terrarium、初始化 root 代理、启动Creature、设了就开 session store。
+- Side effect：生出 Terrarium、初始化特权 `root:` 节点、启动 Creature、设了就开 session store。
 
 ### `GET /api/terrariums`
 

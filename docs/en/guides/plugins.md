@@ -158,19 +158,29 @@ A `pre_llm_call` plugin that retrieves relevant past events and prepends them to
 
 ## Built-in runtime plugins
 
-Sub-agent budgets and auto-compaction are ordinary lifecycle plugins:
+Four cross-cutting concerns ship as ordinary plugins. None of them
+have any special status in the framework — they use the same hooks
+your own plugins do. Full reference:
+[reference/builtin-plugins](../reference/builtin-plugins.md).
 
-| Name | Kind | Use |
-|---|---|---|
-| `budget` | plugin | Unified turn/tool/walltime budget accounting and enforcement. Configure axes under `options`. |
-| `compact.auto` | plugin | Checks usage after LLM turns and triggers the configured compaction manager. |
-| `auto-compact` | pack | Expands to `compact.auto`. This is the only built-in runtime pack. |
+| Name | Kind | Hooks | Use |
+|---|---|---|---|
+| `sandbox` | plugin | `pre_tool_execute`, `runtime_services` | Hard capability gate: filesystem read / write scope, network allowlist, subprocess syscall level. Capability profile (`PURE` / `READ_ONLY` / `WORKSPACE` / `NETWORK` / `SHELL`) plus per-axis overrides. Hot-reconfigurable. |
+| `budget` | plugin | `pre_llm_call`, `post_llm_call`, `pre_tool_execute`, `pre_subagent_run`, `get_prompt_content` | Multi-axis budget accounting and enforcement (turns, tool calls, walltime). Configure axes under `options`. |
+| `permgate` | plugin | `pre_tool_execute`, `on_load` | Interactive user approval for tool calls — emits a confirmation prompt to the output bus and waits on the reply. |
+| `compact.auto` | plugin | `post_llm_call`, `on_load` | Trigger context compaction after high-token LLM calls. |
+| `auto-compact` | pack | — | Expands to `compact.auto`. The only built-in runtime pack. |
 
-Use budget + auto-compaction in a parent creature:
+Use them in a creature:
 
 ```yaml
 default_plugins: ["auto-compact"]
 plugins:
+  - name: sandbox
+    options:
+      profile: WORKSPACE
+      backend: auto                # or "audit" to log without blocking
+      network_allowlist: ["api.example.com"]
   - name: budget
     options:
       turn_budget: [40, 60]
@@ -194,8 +204,82 @@ subagents:
           tool_call_budget: [75, 100]
 ```
 
-Builtin sub-agents already use `auto-compact` and the `budget` plugin with
-these minimum options. See [Sub-agents](sub-agents.md) for the full guide.
+Builtin sub-agents already use `auto-compact` and the `budget` plugin
+with these minimum options. See [Sub-agents](sub-agents.md) for the
+full guide.
+
+## Worked example: why `sandbox` is a plugin, not a framework feature
+
+Security gating is the kind of concern many frameworks bake in as a
+core feature. KohakuTerrarium ships it as an ordinary plugin. The
+sandbox plugin is the clearest single illustration of where the
+framework / plugin boundary lives — and why keeping the framework
+lean works.
+
+### What sandbox actually does
+
+Sandbox declares a **capability profile** for an agent:
+
+| Profile     | fs read | fs write | network | syscall |
+|-------------|---------|----------|---------|---------|
+| `PURE`      | deny    | deny     | deny    | pure    |
+| `READ_ONLY` | broad   | deny     | default | fs      |
+| `WORKSPACE` | default | workspace | allow  | fs      |
+| `NETWORK`   | deny    | deny     | allow   | default |
+| `SHELL`     | default | workspace | allow  | shell  |
+
+Each axis is also overridable individually (`fs_read: deny`,
+`fs_write: workspace`, `network: allow`, …) and the plugin accepts
+a deny list, a network allowlist, and a list of hard-blocked tool
+names. Set `backend: audit` and violations are logged without being
+blocked — useful for first-pass discovery.
+
+### How sandbox plugs in
+
+Sandbox uses two hooks:
+
+- **`pre_tool_execute`** — runs before every tool call. It inspects
+  the args (paths for file tools, URLs for `web_fetch` / `web_search`)
+  and raises `PluginBlockError` when a path is denied or a URL is
+  off-allowlist.
+- **`runtime_services`** — publishes a per-call subprocess runner
+  service. Tools that need to spawn subprocesses (`bash`, etc.) read
+  this from `ToolContext.runtime_services` and use it instead of
+  spawning directly. The runner enforces syscall-level policy
+  before delegating to `asyncio.create_subprocess_exec`.
+
+That is all. The framework's tool executor knows nothing about
+sandbox semantics. It calls `pre_tool_execute` on every plugin in
+priority order; if any plugin raises `PluginBlockError`, the message
+becomes the tool result.
+
+### Why this matters
+
+If sandbox were a framework feature instead of a plugin:
+
+- The `Agent` class would carry sandbox-specific fields and special-
+  case sandbox checks in the tool executor.
+- Composition would be hard. Sandbox + budget + permgate would each
+  need their own special-case path.
+- Third parties couldn't drop in their own variant (a
+  compliance-audit plugin, an approval-by-Slack plugin, an
+  organisation-specific permission system) without forking.
+- Hot-reconfiguring the policy at runtime would require new framework
+  surface area; with the plugin, `refresh_options()` just rebuilds
+  the internal capability struct and the next `pre_tool_execute`
+  call sees the new policy.
+
+By keeping sandbox at the seam between framework and plugins, all
+four built-ins (`sandbox`, `budget`, `permgate`, `compact.auto`)
+coexist without any of them being privileged in the framework. They
+run in priority order, each returning `None` to pass-through or
+raising `PluginBlockError` to veto.
+
+The same logic applies to anything that sounds like a framework
+feature but really is a *cross-cutting policy*: rate limiting,
+output filtering, content moderation, audit trails, cost tracking.
+None of those need to be framework features. All of them want to be
+plugins for the same reason sandbox does.
 
 ## Managing plugins at runtime
 

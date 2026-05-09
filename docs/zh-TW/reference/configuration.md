@@ -421,7 +421,7 @@ creatures/<name>/
 ```yaml
 terrarium:
   name: str
-  root:                  # 選用 — 生態瓶外的 root 代理
+  root:                  # 選用 — 指定圖中面向使用者的特權節點
     base_config: str     # 或任何 AgentConfig 欄位直接行內寫
     ...
   creatures:
@@ -435,18 +435,20 @@ terrarium:
       ...                      # 任何 AgentConfig 覆寫
   channels:
     <name>:
-      type: queue | broadcast  # 預設 queue
       description: str
     # 或簡寫 — 字串就是 description：
     # <name>: "description"
 ```
+
+> 所有圖頻道都是廣播 —— 每個監聽者都收到每一次 send。舊的 `type:`
+> 欄位在引擎層被忽略，新 config 應該省略。
 
 生態瓶欄位摘要：
 
 | 欄位 | 型別 | 預設 | 說明 |
 |---|---|---|---|
 | `name` | str | — | 生態瓶名稱。 |
-| `root` | object | `null` | 選用的 root 代理設定。一定會拿到生態瓶管理工具。 |
+| `root` | object | `null` | 選用的 inline agent 設定，被提升為圖中面向使用者的特權節點 —— 拿到群組工具與標準的 `report_to_root` 接線。 |
 | `creatures` | list | `[]` | 跑在生態瓶裡的生物。 |
 | `channels` | dict | `{}` | 共享頻道宣告。 |
 
@@ -466,17 +468,21 @@ terrarium:
 
 | 欄位 | 型別 | 預設 | 說明 |
 |---|---|---|---|
-| `type` | `queue` \| `broadcast` | `queue` | 傳遞語意。 |
 | `description` | str | `""` | 會寫在頻道拓樸 prompt 裡。 |
+
+所有圖頻道都是廣播；引擎層不再有 kind 選擇。
 
 自動建立的頻道：
 
-- 每隻生物一條以它名字命名的 `queue` (DM 用)。
-- 設了 `root` 時多一條 `report_to_root` queue。
+- 每隻生物一條以它名字命名的頻道（DM 用，透過 `send_channel`）。
+- 設了 `root:` 時多一條 `report_to_root` 頻道，並把圖中其他每隻生物
+  接線為可送往該頻道、只讓 root 監聽。
 
-Root 代理：
+Root（面向使用者的特權節點）：
 
-- 拿到附有 `terrarium_*` 與 `creature_*` 工具的 `TerrariumToolManager`。
+- 強制註冊特權[群組工具](../concepts/glossary.md#group-tools--群組工具)
+  （`group_add_node`、`group_remove_node`、`group_start_node`、
+  `group_stop_node`、`group_channel`、`group_wire`、`group_status`）。
 - 自動 listen 每一條生物頻道、收 `report_to_root`。
 - 繼承 / 合併規則跟生物相同。
 

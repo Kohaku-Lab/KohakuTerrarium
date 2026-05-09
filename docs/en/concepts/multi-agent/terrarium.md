@@ -12,12 +12,16 @@ tags:
 ## What it is
 
 A **terrarium** is the runtime engine that hosts every running creature
-in the process. It has no LLM of its own, no intelligence, and no
-decisions. There is one engine per process; multiple disconnected
-graphs may coexist inside it.
+in the process. It runs no LLM of its own and has no reasoning loop —
+the LLMs and the reasoning live inside the creatures it hosts. What it
+does own is *structure*: which creatures share a connected component,
+which channels exist between them, where each turn-end output is
+delivered, which session store backs which graph, and the bookkeeping
+that follows when the topology changes. There is one engine per
+process; multiple disconnected graphs may coexist inside it.
 
 A standalone agent is a **1-creature graph** in the engine. A
-multi-agent team is a **connected graph** wired by channels. The
+multi-creature team is a **connected graph** wired by channels. The
 config file you used to call a "terrarium" is now a **recipe** — a
 sequence of "add these creatures, declare these channels, wire these
 edges" that the engine executes. The engine itself is always present;
@@ -29,10 +33,14 @@ The engine does:
 2. **Channel CRUD** — declare, connect creatures, disconnect.
 3. **Output wiring** — turn-end events into named targets.
 4. **Lifecycle** — start, stop, shutdown.
-5. **Session merge / split** when topology changes graph membership.
-6. **Observability** — `EngineEvent` stream for everything observable.
+5. **Topology bookkeeping** — auto-split / auto-merge of graphs when
+   connectivity changes.
+6. **Session merge / split** that mirrors the topology bookkeeping.
+7. **Observability** — `EngineEvent` stream for everything observable.
 
-That is the entire contract.
+That is the entire contract. None of it involves an LLM; all of it is
+deterministic structural work the engine does on behalf of the
+creatures inside.
 
 ### Mental model: one team, one root
 
@@ -41,24 +49,25 @@ team behind a user-facing root creature:
 
 ```
   +---------+       +---------------------------+
-  |  User   |<----->|        Root Agent         |
-  +---------+       |  (terrarium tools, TUI)   |
+  |  User   |<----->|     Privileged node       |
+  +---------+       |   (group tools, TUI)      |
                     +---------------------------+
                           |               ^
             sends tasks   |               |  observes
                           v               |
                     +---------------------------+
-                    |     Terrarium Layer       |
-                    |   (pure wiring, no LLM)   |
+                    |     Terrarium engine      |
+                    |  (topology, channels,     |
+                    |   sessions, no LLM)       |
                     +-------+----------+--------+
                     |  swe  | reviewer |  ....  |
                     +-------+----------+--------+
 ```
 
-This is the **per-graph view**: a root creature on top, a connected
-graph of peers below, the terrarium-as-wiring in between. It's what
-the framework natively provides and what most recipes encode. If this
-is all you need, stop here — the rest of this section is engine
+This is the **per-graph view**: a root creature alongside the team it
+manages, the engine underneath holding the channels and topology. It's
+what the framework natively provides and what most recipes encode. If
+this is all you need, stop here — the rest of this section is engine
 internals you can reach for when you outgrow the single-team picture.
 
 ### Engine-wide view: the runtime that hosts every graph
@@ -148,13 +157,15 @@ terrarium:
         listen:    [status]
         can_send:  [feedback, status]     # conditional: approve vs. revise stays on channels
   channels:
-    tasks:    { type: queue }
-    feedback: { type: queue }
-    status:   { type: broadcast }
+    tasks:    "work items the team pulls from"
+    feedback: "review comments routed back to the writer"
+    status:   "broadcast status pings"
 ```
 
-The runtime auto-creates one queue per creature (named after it, so
-others can DM it) and, if a root exists, a `report_to_root` channel.
+All channels are broadcast — every listener sees every send. The
+runtime auto-creates one channel per creature (named after it, so
+others can DM it via `send_channel`) and, if a root exists, a
+`report_to_root` channel that every other creature can send on.
 
 ## How we implement it
 
@@ -164,9 +175,11 @@ others can DM it) and, if a root exists, a `report_to_root` channel.
   (`async with Terrarium() as t:`) plus classmethod factories
   (`from_recipe`, `with_creature`, `resume`).
 - `terrarium/topology.py` — pure-data graph model
-  (`TopologyState`, `GraphTopology`, `ChannelKind`, `TopologyDelta`).
-  No live agent references; testable without asyncio. The engine
-  layers live state on top.
+  (`TopologyState`, `GraphTopology`, `ChannelInfo`, `TopologyDelta`).
+  No live agent references; testable without asyncio. Connected
+  components are computed via BFS over the bipartite creature ↔
+  channel graph; mutations return a delta describing
+  `merge` / `split` / `nothing`. The engine layers live state on top.
 - `terrarium/creature_host.py` — `Creature`, the engine's per-creature
   wrapper. Combines the old standalone-agent and channel-aware
   surfaces into one type.
@@ -201,16 +214,21 @@ management concerns above the engine, use [`Studio`](../studio.md).
 - **Explicit specialist teams.** Two `swe` creatures cooperating
   through a `tasks` / `review` / `feedback` channel topology, with a
   prompt-driven reviewer role.
-- **User-facing root agent.** See [root-agent](root-agent.md). Lets the
-  user talk to one agent and have that agent orchestrate the team.
+- **User-facing privileged node.** See
+  [privileged-node](privileged-node.md). Lets the user talk to one
+  agent and have that agent orchestrate the team.
 - **Deterministic pipeline edges via output wiring.** Declare in the
   creature's config that its turn-end output flows to the next stage
   automatically — no dependency on the LLM remembering `send_message`.
 - **Hot-plug specialists.** Add a new creature mid-session without
-  restart; the existing channels pick it up.
-- **Non-destructive monitoring.** Attach a `ChannelObserver` to see
-  every message in a queue channel without competing with the real
-  consumers.
+  restart; the existing channels pick it up. Available imperatively
+  on `Terrarium`, or to a privileged node inside the graph through
+  the [group tools](../glossary.md#group-tools) (`group_add_node`,
+  `group_channel`, `group_wire`, …).
+- **Non-destructive monitoring.** Subscribe to the engine event
+  stream with an `EventFilter` — channel messages flow through it
+  alongside topology, lifecycle, and tool events without competing
+  with any consumer.
 
 ## Output wiring alongside channels
 
@@ -264,6 +282,12 @@ across different runs — terrariums do not taint creatures.
 ## See also
 
 - [Multi-agent overview](README.md) — vertical vs horizontal.
-- [Root agent](root-agent.md) — the user-facing creature outside the team.
+- [Privileged node](privileged-node.md) — the per-graph creature
+  with group tools; the `root:` recipe keyword promotes one to
+  privileged.
+- [Dynamic graph](dynamic-graph.md) — auto-merge / auto-split and
+  the in-graph group-tool surface.
+- [impl-notes / graph and sessions](../impl-notes/graph-and-sessions.md)
+  — how merge / split bookkeeping is implemented.
 - [Channel](../modules/channel.md) — the primitive terrariums are made of.
 - [ROADMAP](../../../ROADMAP.md) — where terrariums are going.

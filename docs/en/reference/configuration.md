@@ -520,7 +520,7 @@ Loaded by `kohakuterrarium.terrarium.config.load_terrarium_config`.
 ```yaml
 terrarium:
   name: str
-  root:                  # optional — outside-terrarium root agent
+  root:                  # optional — designate the privileged user-facing node
     base_config: str     # or any AgentConfig field inline
     ...
   creatures:
@@ -534,18 +534,21 @@ terrarium:
       ...                      # any AgentConfig override
   channels:
     <name>:
-      type: queue | broadcast  # default queue
       description: str
     # or shorthand — string = description:
     # <name>: "description"
 ```
+
+> All graph channels are broadcast — every listener receives every
+> send. The previously-supported `type:` field is ignored at the
+> engine layer; new configs should omit it.
 
 Terrarium field summary:
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `name` | str | — | Terrarium name. |
-| `root` | object | `null` | Optional root-agent config. Forced to receive terrarium management tools. |
+| `root` | object | `null` | Optional inline agent config promoted to the privileged user-facing node — receives the group tools and the standard `report_to_root` wiring. |
 | `creatures` | list | `[]` | Creatures that run inside the terrarium. |
 | `channels` | dict | `{}` | Shared channel declarations. |
 
@@ -571,13 +574,17 @@ Channel entry fields:
 
 Auto-created channels:
 
-- One `queue` per creature, named after the creature (direct message).
-- `report_to_root` queue when `root` is set.
+- One channel per creature, named after the creature (direct message
+  via `send_channel`).
+- `report_to_root` channel when `root:` is set, with every other
+  creature wired to send on it and only root listening.
 
-Root agent:
+Root (privileged user-facing node):
 
-- Gets the `TerrariumToolManager` with `terrarium_*` and `creature_*`
-  tools.
+- Force-registered with the privileged
+  [group tools](../concepts/glossary.md#group-tools)
+  (`group_add_node`, `group_remove_node`, `group_start_node`,
+  `group_stop_node`, `group_channel`, `group_wire`, `group_status`).
 - Auto-listens to every creature channel; receives `report_to_root`.
 - Inheritance / merge rules are the same as for creatures.
 

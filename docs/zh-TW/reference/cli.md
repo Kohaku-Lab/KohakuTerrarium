@@ -10,7 +10,7 @@ tags:
 
 所有 `kt` 指令、子指令、旗標。CLI 是框架給操作者的介面：啟動生物、啟動生態瓶、管理套件、設定 LLM、提供 web UI、搜尋已儲存的工作階段。
 
-生物、生態瓶、root 代理的心智模型請看 [concepts/boundaries](../concepts/boundaries.md)。任務導向的路徑請看 [guides/getting-started](../guides/getting-started.md) 與 [guides/creatures](../guides/creatures.md)。
+生物、生態瓶、特權節點的心智模型請看 [concepts/boundaries](../concepts/boundaries.md)。任務導向的路徑請看 [guides/getting-started](../guides/getting-started.md) 與 [guides/creatures](../guides/creatures.md)。
 
 ## 入口
 

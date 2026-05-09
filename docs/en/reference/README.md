@@ -26,6 +26,8 @@ task-oriented paths, read [Guides](../guides/README.md).
 - [Built-ins](builtins.md) — every shipped tool, sub-agent, input,
   output, user command, framework command, LLM provider, and LLM
   preset.
+- [Built-in plugins](builtin-plugins.md) — sandbox, budget, permgate,
+  compact.auto: hooks, options, behaviour.
 - [Plugin hooks](plugin-hooks.md) — every lifecycle, LLM, tool,
   sub-agent, callback, and prompt hook, with signatures and timing.
 - [v1.3.0 release notes](release-notes-1.3.0.md) — final changelog,

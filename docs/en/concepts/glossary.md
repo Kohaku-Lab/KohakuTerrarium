@@ -73,10 +73,10 @@ one code path. Full: [composing an agent](foundations/composing-an-agent.md).
 
 ## Channel
 
-A named message pipe. Two types: **queue** (one consumer receives each
-message, FIFO) and **broadcast** (every subscriber receives every
-message). Channels live either in a creature's private session or in a
-terrarium's shared environment. A `send_message` tool plus a
+A named broadcast pipe. Every subscriber receives every message sent
+on it — there is no queue/consume semantics at the [graph](#graph)
+layer. Channels live either in a creature's private session or in a
+graph's shared environment. A `send_message` tool plus a
 `ChannelTrigger` is how cross-creature communication works. Full:
 [channel](modules/channel.md).
 
@@ -155,34 +155,117 @@ Command names share a namespace with tool names; the "read job
 output" command is deliberately called `read_job` so it does not
 collide with the `read` file-reader tool.
 
+## Studio
+
+The management layer above the [terrarium](#terrarium) engine. A
+Python class (`kohakuterrarium.Studio`) that exposes six namespaces —
+`catalog`, `identity`, `sessions`, `persistence`, `editors`, `attach`
+— for the concerns every UI and automation otherwise re-implements:
+package discovery, LLM profiles and API keys, active session
+lifecycle, saved-session resume / fork / export, workspace
+creature / module CRUD, and attach-policy advertisement. The web
+dashboard, desktop app, `kt` CLI, and your own Python code all
+delegate to Studio instead of duplicating logic. Studio is *not* a UI;
+the dashboard is one of several adapters over it. Full:
+[studio](studio.md).
+
 ## Terrarium
 
 The runtime engine that hosts every running creature in the process.
-A standalone agent is a 1-creature graph in the engine; a multi-agent
-team is a connected graph wired by channels. The engine owns creature
-CRUD, channel CRUD, hot-plug, output wiring, and the session merge /
-split bookkeeping that follows topology changes. It contains no LLM
-and makes no decisions — pure wiring. Creatures don't know they're in
-a terrarium; they still work standalone. Full:
+A standalone agent is a 1-creature [graph](#graph) inside the engine;
+a multi-creature team is a connected graph wired by channels. The
+engine owns creature CRUD, channel CRUD, output wiring, [hot-plug](#hot-plug),
+and the topology + session bookkeeping that follows graph changes
+([auto-split / auto-merge](#auto-split--auto-merge)). It does *not*
+run an LLM and does not have its own reasoning loop — that lives in
+creatures. What it does decide is structural: which creatures share a
+connected component, which session store backs which graph, where
+each turn-end output gets delivered. Creatures don't know they are
+in a terrarium; the same config still runs standalone. Full:
 [terrarium](multi-agent/terrarium.md).
+
+## Recipe
+
+The YAML config file that populates a fresh [terrarium](#terrarium)
+engine with a specific multi-creature setup. The engine itself is
+always present; a recipe is a sequence of "add these creatures,
+declare these channels, wire these edges, optionally promote one to
+[root](#root)." Recipes are the source of truth on resume — when
+a saved multi-creature session is reopened, the engine rebuilds the
+topology from the recipe path stored in session metadata, not from a
+frozen snapshot of the live graph.
 
 ## Graph
 
-A connected component inside the Terrarium engine: a set of creatures
-that share at least one channel path. Two unrelated creatures live in
-two graphs; drawing a channel between them merges the graphs (and
-unions their session histories). Removing the last channel between
-two halves splits a graph (and copies the history into each side).
-The graph is the unit of "session" — creatures in the same graph see
-the same `.kohakutr` file. Full:
+A connected component inside the [terrarium](#terrarium) engine: a
+set of creatures that share at least one channel path. Two unrelated
+creatures live in two graphs; drawing a channel between them merges
+the graphs (and unions their session histories). Removing the last
+channel between two halves splits a graph (and copies the history
+into each side). The graph is the unit of session — creatures in the
+same graph see the same `.kohakutr` file. Full:
 [terrarium](multi-agent/terrarium.md).
 
-## Root agent
+## Root
 
-A creature that sits *outside* a terrarium and represents the user
-inside it. Structurally a normal creature; what makes it "root" is
-the terrarium-management toolset it auto-receives and its position as
-the user's counterparty. Full: [root agent](multi-agent/root-agent.md).
+The recipe keyword (`root:` in a `terrarium.yaml`) that designates
+which node in the graph is the [privileged node](#privileged-node)
+representing the user. The recipe loader marks it privileged, opens a
+`report_to_root` channel that every other creature is wired to send
+on, makes it listen on every other channel, and mounts it as the
+user-facing surface (TUI / CLI / web). "Root" is a config convention,
+not a separate runtime type — at runtime it is a privileged node with
+the standard user-facing wiring. Full:
+[privileged node](multi-agent/privileged-node.md).
+
+## Privileged node
+
+A creature that has been granted the [group tools](#group-tools) to
+mutate the graph it belongs to: spawn or remove other creatures, draw
+or delete channels, start or stop members. The node designated by
+[`root:`](#root) is privileged by default; recipes can mark other
+members privileged inline (`privileged: true`); engines accept
+`is_privileged=True` at creature-add time. Tool-spawned worker
+creatures (via `group_add_node`) are *not* privileged, so workers
+cannot fork peers without explicit elevation. Privilege is a property
+of the runtime creature handle, not the underlying agent config — the
+same config can run privileged in one terrarium and unprivileged in
+another. Full: [privileged node](multi-agent/privileged-node.md).
+
+## Group tools
+
+The set of built-in tools (`group_add_node`, `group_remove_node`,
+`group_start_node`, `group_stop_node`, `group_channel`, `group_wire`,
+`group_status`, `group_send`) that mutate or inspect a [graph](#graph)
+from inside it. Registered only on
+[privileged nodes](#privileged-node). Together they form the runtime
+"graph editor" an LLM-driven privileged node uses to evolve a team
+mid-run — every change emits an `EngineEvent` so observers and
+runtime prompts stay in sync. Full:
+[builtins reference](../reference/builtins.md).
+
+## Hot-plug
+
+Adding or removing a creature, channel, or wiring edge in a running
+[terrarium](#terrarium) without restart. The engine handles the
+bookkeeping: trigger injection and persistence attachment for new
+pieces; trigger teardown and any [auto-split](#auto-split--auto-merge)
+for removed pieces. Available imperatively
+(`Terrarium.add_creature`, `connect`, `disconnect`) and via
+[group tools](#group-tools) called by a privileged node.
+
+## Auto-split / auto-merge
+
+The engine's response to topology changes that affect connectivity.
+When a `connect` crosses two graphs, the engine merges them — unions
+their environments, copies both session stores into a single merged
+store with `parent_session_ids` tracking lineage. When a `disconnect`
+or a creature / channel removal severs the only path between two
+halves, the engine splits the graph — allocates a fresh environment
+per side, re-injects channel triggers against the new env, and
+duplicates the session store into each side. All bookkeeping is
+automatic; observers see new graph ids appear in `EngineEvent`
+notifications.
 
 ## Package
 

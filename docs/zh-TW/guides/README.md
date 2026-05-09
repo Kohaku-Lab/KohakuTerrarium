@@ -21,7 +21,7 @@ tags:
 
 - [設定檔](configuration.md) — 生物設定的結構、繼承、prompt 鏈、日常會用到的欄位。
 - [撰寫生物](creatures.md) — 提示詞設計、工具與子代理挑選、LLM 設定檔、發佈生物供他人重用。
-- [生態瓶](terrariums.md) — 橫向多代理，頻道、輸出接線、root 代理、熱插拔、觀察。
+- [生態瓶](terrariums.md) — 橫向多代理，頻道、輸出接線、特權節點、熱插拔、觀察。
 - [組合代數](composition.md) — 用 Python 的 `>>`、`&`、`|`、`*` 把 agent 與 async callable 串起來。
 - [程式化使用](programmatic-usage.md) — 在你自己的 Python 程式碼裡驅動 `Terrarium`、`Creature`、`Studio` 與底層 `Agent`。
 

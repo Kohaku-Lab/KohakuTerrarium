@@ -13,7 +13,7 @@ surface over the framework: starting creatures, starting terrariums,
 managing packages, configuring LLMs, serving the web UI, and searching
 saved sessions.
 
-For the mental model of creatures, terrariums, and the root agent, read
+For the mental model of creatures, terrariums, and privileged nodes, read
 [concepts/boundaries](../concepts/boundaries.md). For task-oriented
 paths, see [guides/getting-started](../guides/getting-started.md) and
 [guides/creatures](../guides/creatures.md).

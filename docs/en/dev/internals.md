@@ -335,7 +335,7 @@ legacy CLI/embedding paths. The v1.3 HTTP route path uses
 new `KohakuManager` route dependency.
 
 See [concepts/multi-agent/terrarium.md](../concepts/multi-agent/terrarium.md)
-and [concepts/multi-agent/root-agent.md](../concepts/multi-agent/root-agent.md).
+and [concepts/multi-agent/privileged-node.md](../concepts/multi-agent/privileged-node.md).
 
 ### 3.2 Channels
 

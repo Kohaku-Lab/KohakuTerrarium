@@ -14,7 +14,7 @@ tags:
 
 **前置条件** ： 先看过 [第一个 Creature](first-creature.md)。你还需要安装好 `kt-biome`，并且已经能用 `kt run` 运行单个 Creature。
 
-terrarium 只负责接线。它持有 channels，也负责 creatures 的生命周期；自身并不包含 LLM。真正负责判断和决策的，仍然是各个 creature。完整约定请参阅 [Terrarium 概念](../concepts/multi-agent/terrarium.md)。
+terrarium 是**运行时引擎**：它持有频道图、creature 生命周期、输出接线、以及在图变化时跟着走的拓扑 + session 记账。它本身不执行 LLM、也没有推理回圈 —— LLM 与推理都活在它内部的 creature 里。完整契约请参阅 [Terrarium 概念](../concepts/multi-agent/terrarium.md)。
 
 ## 第 1 步：创建文件夹
 
@@ -58,16 +58,16 @@ terrarium:
         can_send:  [feedback]
 
   channels:
-    tasks:    { type: queue, description: "Incoming work for the writer" }
-    review:   { type: queue, description: "Drafts sent to the reviewer" }
-    feedback: { type: queue, description: "Review notes sent back" }
+    tasks:    "送给作者的待办工作"
+    review:   "发给审阅者的草稿"
+    feedback: "送回作者的审阅意见"
 ```
 
 这套接线的作用如下：
 
 - `listen` 会为 creature 挂上 `ChannelTrigger`。消息一旦到达这些 channel，creature 就会被唤醒并看到这条消息。
 - `can_send` 列出了该 creature 的 `send_message` 工具允许写入哪些 channel。未列出的 channel 不能发送。
-- Channels 只需要在 `channels:` 中定义一次。`queue` 会把每条消息交给一个消费者；`broadcast` 会发给所有 listener。
+- Channels 只需要在 `channels:` 中定义一次（带可选的一行描述）。所有频道都是广播：每个 listener 都会收到每一次 send。
 
 这里直接把 `system_prompt:` 写在配置中，是为了让教程能在一页内看完。实际长期使用时，更推荐使用 `system_prompt_file:`。
 
@@ -123,8 +123,8 @@ terrarium:
         listen: []                # writer 的输出通过 wiring 收到
         can_send: [feedback]      # reviewer 的决定是条件式的，继续使用 channel
   channels:
-    tasks:    { type: queue }
-    feedback: { type: queue }
+    tasks:    "送给作者的待办工作"
+    feedback: "送回作者的审阅意见"
 ```
 
 这次改动中最关键的点：
@@ -149,9 +149,9 @@ terrarium:
     - ...
 ```
 
-在 terrarium yaml 旁边新建一份 `prompts/root.md`。这里主要写委派风格和团队口吻即可；框架会自动补上一段团队拓扑说明，把有哪些 creatures、有哪些 channels 写进去，同时还会强制注入 terrarium 管理工具（`terrarium_send`、`creature_status`、`terrarium_history` 等）。
+在 terrarium yaml 旁边新建一份 `prompts/root.md`。这里主要写委派风格和团队口吻即可；框架会自动补上一段团队拓扑说明，把有哪些 creatures、有哪些 channels 写进去，同时还会强制注入[组工具](../concepts/glossary.md#group-tools--组工具)（`group_add_node`、`group_status`、`group_channel`、`group_wire` 等），让 root 可以从图内管理团队。
 
-这样一来，TUI 主标签页挂载的就是 root。你直接和 root 对话，再由 root 去驱动 writer 和 reviewer。更完整的模式说明请参阅 [Root agent 概念](../concepts/multi-agent/root-agent.md)。
+这样一来，TUI 主标签页挂载的就是 root。你直接和 root 对话，再由 root 去驱动 writer 和 reviewer。更完整的模式说明请参阅 [特权节点概念](../concepts/multi-agent/privileged-node.md)。
 
 ## 你学到了什么
 
@@ -165,6 +165,6 @@ terrarium:
 ## 接下来可以看什么
 
 - [Terrarium 概念](../concepts/multi-agent/terrarium.md) —— 介绍 terrarium 的边界与约定。
-- [Root agent 概念](../concepts/multi-agent/root-agent.md) —— 面向用户的那个 creature。
+- [特权节点概念](../concepts/multi-agent/privileged-node.md) —— 由 `root:` 指定、面向用户的那个特权 creature。
 - [Terrariums 指南](../guides/terrariums.md) —— 更偏实操的参考文档。
-- [Channel 概念](../concepts/modules/channel.md) —— `queue` 与 `broadcast` 的区别、observers，以及 channel 如何跨模块工作。
+- [Channel 概念](../concepts/modules/channel.md) —— 广播语意、observers，以及 channel 如何跨模块工作。

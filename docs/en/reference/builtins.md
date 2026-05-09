@@ -187,15 +187,44 @@ id; the trigger itself runs in the background.
 
 - Args: `prompt` (required); exactly one of `every_minutes`, `daily_at` (HH:MM), `hourly_at` (0-59).
 
-### Terrarium (root-only)
+### Group tools
 
-**`terrarium_create`** — Start a new terrarium instance. Root-only.
+These mutate or inspect the [graph](../concepts/glossary.md#graph) the
+caller belongs to. They split into two tiers:
 
-**`terrarium_send`** — Send to a channel in the root's terrarium.
+**Basic** — registered on every creature in a graph. The tool body
+gates per-call (e.g., `group_send` enforces the privileged-recipient
+rule for non-privileged callers):
 
-**`creature_start`** — Hot-plug a creature at runtime.
+- **`send_channel`** — Broadcast a message to a channel the caller is
+  wired to send on. Args: `channel`, `content`.
+- **`group_send`** — Direct point-to-point send to another creature in
+  the caller's graph (bypasses channels). Non-privileged callers can
+  only target privileged recipients (workers report to supervisors,
+  not peer-workers). Args: `target_creature_id`, `content`.
 
-**`creature_stop`** — Stop a creature at runtime.
+**Privileged** — registered ONLY on
+[privileged nodes](../concepts/glossary.md#privileged-node):
+
+- **`group_add_node`** — Spawn a creature into the caller's graph.
+  Args: `config_path` (file or `@pkg/ref`), optional `name`, `llm`,
+  `pwd`. Returns the new creature's id.
+- **`group_remove_node`** — Stop and remove a creature from the
+  graph. May trigger an [auto-split](../concepts/glossary.md#auto-split--auto-merge)
+  if it was a bridge. Args: `creature_id`.
+- **`group_start_node`** / **`group_stop_node`** — Start or stop a
+  creature without removing it. Args: `creature_id`.
+- **`group_channel`** — CRUD on channels and per-creature wiring.
+  Args: `action` ∈ `create` | `delete` | `wire` | `unwire`,
+  `channel`, optional `creature_id` and `direction`. Cross-graph
+  wires route through `Terrarium.connect` and may auto-merge.
+- **`group_wire`** — CRUD on output-wiring edges. Args: `action` ∈
+  `add` | `remove`, plus an edge spec (`from`, `to`, optional
+  `with_content`, `prompt`).
+- **`group_status`** — Snapshot the caller's graph: creatures (with
+  status, privilege, parent), channels (with history pointers,
+  connected creatures), output wires, and the available catalog to
+  spawn from. Args: none.
 
 ---
 

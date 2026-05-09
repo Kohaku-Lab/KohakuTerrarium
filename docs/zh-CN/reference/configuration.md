@@ -421,7 +421,7 @@ creatures/<name>/
 ```yaml
 terrarium:
   name: str
-  root:                  # 选用 — Terrarium外的 root 代理
+  root:                  # 选用 — 指定图中面向用户的特权节点
     base_config: str     # 或任何 AgentConfig 字段直接行内写
     ...
   creatures:
@@ -435,18 +435,20 @@ terrarium:
       ...                      # 任何 AgentConfig 覆盖
   channels:
     <name>:
-      type: queue | broadcast  # 默认 queue
       description: str
     # 或简写 — 字符串即为 description：
     # <name>: "description"
 ```
+
+> 所有图频道都是广播 —— 每个监听者都收到每一次 send。旧的 `type:`
+> 字段在引擎层被忽略，新 config 应该省略。
 
 Terrarium字段摘要：
 
 | 字段 | 型别 | 默认 | 说明 |
 |---|---|---|---|
 | `name` | str | — | Terrarium名称。 |
-| `root` | object | `null` | 选用的 root 代理配置。一定会拿到Terrarium管理工具。 |
+| `root` | object | `null` | 选用的内联 agent 配置，被提升为图中面向用户的特权节点 —— 拿到组工具与标准的 `report_to_root` 接线。 |
 | `creatures` | list | `[]` | 跑在Terrarium里的Creature。 |
 | `channels` | dict | `{}` | 共享频道宣告。 |
 
@@ -466,19 +468,23 @@ Creature条目字段 (也接受任何 AgentConfig 字段直接行内写，例如
 
 | 字段 | 型别 | 默认 | 说明 |
 |---|---|---|---|
-| `type` | `queue` \| `broadcast` | `queue` | 传递语意。 |
 | `description` | str | `""` | 会写在频道拓朴 prompt 里。 |
+
+所有图频道都是广播；引擎层不再有 kind 选择。
 
 自动创建的频道：
 
-- 每只Creature一条以它名字命名的 `queue` (DM 用)。
-- 设了 `root` 时多一条 `report_to_root` queue。
+- 每只 Creature 一条以它名字命名的频道（DM 用，透过 `send_channel`）。
+- 设了 `root:` 时多一条 `report_to_root` 频道，并把图中其他每只 Creature
+  接线为可送往该频道、只让 root 监听。
 
-Root 代理：
+Root（面向用户的特权节点）：
 
-- 拿到附有 `terrarium_*` 与 `creature_*` 工具的 `TerrariumToolManager`。
-- 自动 listen 每一条Creature频道、收 `report_to_root`。
-- 继承 / 合并规则跟Creature相同。
+- 强制注册特权[组工具](../concepts/glossary.md#group-tools--组工具)
+  （`group_add_node`、`group_remove_node`、`group_start_node`、
+  `group_stop_node`、`group_channel`、`group_wire`、`group_status`）。
+- 自动 listen 每一条 Creature 频道、收 `report_to_root`。
+- 继承 / 合并规则跟 Creature 相同。
 
 ---
 

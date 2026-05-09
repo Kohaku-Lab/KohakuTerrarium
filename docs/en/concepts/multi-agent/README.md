@@ -51,9 +51,11 @@ This is what CrewAI, AutoGen, and MetaGPT target.
 - **When to use:** the task fits an explicit multi-role workflow, and
   the roles are genuinely different agents (different prompts, tools,
   models), not just different sub-tasks of one agent.
-- **What KT gives you:** [terrariums](terrarium.md). A terrarium is a
-  pure wiring layer — no LLM, no decision-making. It runs creatures
-  and owns the channels between them.
+- **What KT gives you:** [terrariums](terrarium.md). A terrarium is
+  the runtime engine that hosts creatures, owns the channel graph,
+  and handles topology + session bookkeeping when the graph changes.
+  It runs no LLM of its own — the reasoning lives in the creatures
+  inside it.
 
 ## Rule of thumb
 
@@ -89,9 +91,14 @@ isolation" instincts. The framework doesn't pick between them.
 
 ## What's in this section
 
-- [Terrarium](terrarium.md) — the horizontal wiring layer.
-- [Root agent](root-agent.md) — the creature that sits outside a
-  terrarium and represents the user.
+- [Terrarium](terrarium.md) — the runtime engine for horizontal
+  multi-creature graphs.
+- [Privileged node](privileged-node.md) — the per-graph creature
+  that carries the group tools; the `root:` recipe keyword promotes
+  one to privileged.
+- [Dynamic graph](dynamic-graph.md) — auto-merge / auto-split, the
+  in-graph "graph editor", and how the recipe stays the source of
+  truth on resume.
 
 ## See also
 

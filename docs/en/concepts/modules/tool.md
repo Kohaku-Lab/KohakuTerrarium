@@ -97,8 +97,9 @@ Built-in tools include shell (`bash`), Python (`python`), file ops
 `tree`), JSON (`json_read`, `json_write`), web (`web_fetch`,
 `web_search`), communication (`send_message`), memory (`scratchpad`,
 `search_memory`), introspection (`info`, `stop_task`), provider-native
-media (`image_gen` on supported providers), and terrarium management
-(`terrarium_create`, `creature_start`, …).
+media (`image_gen` on supported providers), and graph management
+(`group_add_node`, `group_channel`, `group_wire`, …; registered on
+privileged nodes only).
 
 ## What you can therefore do
 
@@ -112,8 +113,8 @@ media (`image_gen` on supported providers), and terrarium management
   be exposed as a tool of its own — listing it under `tools:` with
   `type: trigger` makes `add_timer` / `watch_channel` / `add_schedule`
   show up in the tool list, and calling one installs that trigger on
-  the live `TriggerManager`. `terrarium_create` starts an entire
-  nested system.
+  the live `TriggerManager`. `group_add_node` spawns a new creature
+  into the caller's graph.
 - **Tools with built-in guidance.** A tool can contribute a short prompt
   section telling the model how to use it safely or effectively. Those
   hints are aggregated deterministically between the tool list and the

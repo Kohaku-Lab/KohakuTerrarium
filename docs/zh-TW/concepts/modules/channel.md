@@ -1,6 +1,6 @@
 ---
 title: 頻道
-summary: 具名的訊息管道 — queue 與 broadcast — 是多代理與跨模組通訊的底層基礎。
+summary: 具名的廣播管道 — 是多代理與跨模組通訊的底層基礎。
 tags:
   - concepts
   - module
@@ -12,9 +12,10 @@ tags:
 
 ## 它是什麼
 
-**頻道 (channel)** 是一種帶型別的訊息管道。一端可以送出；另一端
-或多端可以接收。頻道存在於生物的私有工作階段裡，或存在於多隻
-生物都看得到的共享 environment 裡。
+**頻道 (channel)** 是一條具名的訊息管道。一端可以送出；每個監聽者
+都會收到每一次 send。頻道存在於生物的私有工作階段裡，或存在於
+[圖](../glossary.md#graph--圖)的共享 environment 裡（圖中的生物
+都看得到）。
 
 它嚴格來說不是生物的「正典」模組之一 — 在 chat-bot → agent 的
 推導路徑裡，它從來沒有出現過。它是讓工具與觸發器能在多個代理之
@@ -32,34 +33,35 @@ tags:
 
 ## 我們怎麼定義它
 
-頻道有兩種類型：
-
-- **`SubAgentChannel` (queue)** — 訊息依 FIFO 排列，每則訊息由
-  *一個*接收者消費。適合 request/response 或任務派發。
-- **`AgentChannel` (broadcast)** — 每個訂閱者都有自己的佇列，
-  每則訊息都會送到每個訂閱者。適合公告。
+圖頻道是廣播：每個訂閱它的監聽者都會收到任何 sender 寫入的每一則
+訊息。在圖層級**沒有**queue / broadcast 的選擇 —— 所有
+[terrarium](../multi-agent/terrarium.md) 頻道都是廣播。
 
 頻道存在於 `ChannelRegistry` 裡。生物的私有工作階段有一份 registry；
-terrarium 的 environment 有一份共享 registry。生物可以監聽其中任一種。
+圖的共用 environment 有另一份。生物可以監聽任一邊的頻道。
 
 `ChannelTrigger` 會把頻道名稱綁到生物的事件流上 — 每當有訊息到達，
 就會推入一個 `channel_message` 事件。
 
 ## 我們怎麼實作它
 
-`core/channel.py` 實作了兩種頻道類別與 registry。
-`modules/trigger/channel.py` 實作了把頻道橋接進生物事件佇列的觸發器。
+`core/channel.py` 定義頻道原語與 registry。Terrarium 引擎一律把圖頻道
+註冊成廣播（`terrarium/channels.py`），所以監聽某條頻道的生物會按到
+達順序看見每一次送出。`modules/trigger/channel.py` 實作了把頻道橋接
+進生物事件佇列的觸發器。在單一生物內部還有一個 queue 原語
+（`SubAgentChannel`）用於子代理 stdout / 父控制器接線 —— 那是私有實
+作細節，不是圖頻道。
 
-自動建立的頻道：
+自動建立的頻道（引擎在你不宣告的情況下會幫你加好）：
 
-- 在 terrarium 裡，每隻生物各有一個 **queue**，名稱就是生物名稱
-  本身（所以其他生物可以直接 DM 它）。
-- 當存在 root agent 時，會建立 `report_to_root`。
+- 在圖裡，每隻生物各有一條頻道，名稱就是生物名稱本身（讓其他生物可
+  以透過 `send_channel` 直接 DM 它）。
+- 當配方宣告 `root:` 時，會建立 `report_to_root` 頻道，圖中其他每隻
+  生物都被接線為可送往該頻道，只有 root 監聽。
 
-`ChannelObserver`（`terrarium/observer.py`）可以在頻道上掛一個不破壞
-性的 callback：observer 能看見每一則送出的訊息，但不會消費它們。
-這就是 dashboard 能觀察那些已經有真實 consumer 在讀取的 queue 頻道
-的方式。
+要非破壞性地觀察頻道流量，可以訂閱引擎事件流 —— 每一次 send 都會發出
+`CHANNEL_MESSAGE` `EngineEvent`，不會與任何 consumer 競爭。這就是
+dashboard 在不參與監聽的前提下觀察流量的方式。
 
 ## 因此你可以做什麼
 
@@ -67,10 +69,10 @@ terrarium 的 environment 有一份共享 registry。生物可以監聽其中任
   都會解析成頻道操作。
 - **群聊模式。** `send_message` 工具（任一生物皆可用）+
   其他生物上的 `ChannelTrigger` = N 方群聊。不需要新的 primitive。
-- **死信 / 失敗頻道。** 把錯誤導到專用的 broadcast 頻道；一隻
-  `logger` 生物訂閱後寫入磁碟。
-- **非破壞式除錯。** 用 `ChannelObserver` 去偷看一個已有真實 consumer
-  持續排空的 queue。
+- **死信 / 失敗頻道。** 把錯誤導到專用的頻道；一隻 `logger` 生物
+  訂閱後寫入磁碟。
+- **非破壞式除錯。** 訂閱引擎事件流去偷看頻道流量，不參與監聽者的
+  競爭。
 - **跨生物 rendezvous。** 兩隻同時監聽同一個共享頻道的生物，可以
   輪流處理其中的項目。
 

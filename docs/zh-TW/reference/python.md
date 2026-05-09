@@ -77,8 +77,8 @@ Async context manager：
 
 頻道 CRUD：
 
-- `async add_channel(graph, name, kind=ChannelKind.BROADCAST, description="") -> ChannelInfo`
-- `async connect(sender, receiver, *, channel=None, kind=ChannelKind.QUEUE) -> ConnectionResult` — 跨 graph connect 會合併 graph (environment 取聯集，session store 合併)。
+- `async add_channel(graph, name, description="") -> ChannelInfo` —— 所有圖頻道都是廣播。
+- `async connect(sender, receiver, *, channel=None) -> ConnectionResult` —— 跨圖 connect 會合併圖（environment 取聯集、session store 合併）。
 - `async disconnect(sender, receiver, *, channel=None) -> DisconnectionResult` — 可能拆 graph (parent session 複製到兩邊)。
 
 輸出接線：
@@ -180,7 +180,7 @@ Session：
 - `channels: list[str]` — 被斷開的頻道。
 - `delta_kind: str` — `"nothing"` 或 `"split"`。
 
-### `GraphTopology`、`ChannelKind`、`ChannelInfo`
+### `GraphTopology`、`ChannelInfo`
 
 模組：`kohakuterrarium.terrarium.topology`。純資料拓樸模型 — 沒有 live agent 參考。
 
@@ -194,9 +194,7 @@ Session：
 - `has_creature(creature_id) -> bool`
 - `has_channel(name) -> bool`
 
-**`ChannelKind`** enum：`BROADCAST`、`QUEUE`。
-
-**`ChannelInfo`** — `name, kind, description`。
+**`ChannelInfo`** — `name, description`。所有圖頻道都是廣播 —— 拓樸層不存在 kind 選擇。
 
 ### Compose 互通
 
@@ -906,7 +904,7 @@ Attribute：`config: TerrariumConfig`、`environment: Environment`、`_creatures
 
 ### `TerrariumAPI`、`ChannelObserver`、`CreatureHandle`
 
-程式化控制介面。`TerrariumAPI` 對映 root 代理可用的生態瓶工具。`ChannelObserver` 提供非破壞性觀察。`CreatureHandle` 把一隻 `Agent` 加上它的生態瓶接線包起來。
+程式化控制介面。`TerrariumAPI` 對映特權節點透過群組工具暴露的圖操作（`group_add_node`、`group_remove_node`、`group_channel`、`group_wire` 等）。`ChannelObserver` 提供非破壞性觀察。`CreatureHandle` 把一隻 `Agent` 加上它的生態瓶接線包起來。
 
 ---
 

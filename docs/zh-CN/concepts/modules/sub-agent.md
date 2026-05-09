@@ -56,7 +56,7 @@ tags:
 - **规划 / 实现 / 审查**。 一个父Creature配三个子 Agent。父Creature负责协调；每个子 Agent专注在单一阶段。
 - **静默控制器**。 父Creature对 `response` 子 Agent使用 `output_to: external`。控制器本身不输出文字；只有子 Agent的回复会到达用户。这就是多数 kt-biome 聊天型Creature的工作方式。
 - **常驻专家**。 一个 `interactive: true` 的 reviewer，看见每一轮，只有在它有话要说时才开口。
-- **嵌套Terrarium**。 子 Agent可以用 `terrarium_create` 启动一个Terrarium。底层基础设施不在乎。
+- **嵌套 Terrarium**。 子 Agent 可以透过 `group_add_node`（若它是特权节点）把额外的 Creature 生成到图里。底层基础设施不在乎。
 - **纵向包在横向里**。 一个Terrarium中的 Creature本身还会使用子 Agent——混合两种多 Agent轴向。
 
 ## 不要被它框住

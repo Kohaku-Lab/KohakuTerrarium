@@ -48,8 +48,10 @@ You want to run a team of creatures.
 1. Start from the builder path.
 2. [Multi-agent overview](multi-agent/README.md)
 3. [Terrarium](multi-agent/terrarium.md)
-4. [Root agent](multi-agent/root-agent.md)
-5. [Channel](modules/channel.md) *(the primitive both rely on)*
+4. [Privileged node](multi-agent/privileged-node.md)
+5. [Dynamic graph](multi-agent/dynamic-graph.md) *(when the team
+   shape changes at runtime)*
+6. [Channel](modules/channel.md) *(the primitive they rely on)*
 
 ### Embedding / dashboard builder
 
@@ -77,7 +79,7 @@ concepts/
 ├── foundations/         Why this exists; what an agent is; how one is composed.
 ├── modules/             One doc per module of a creature.
 ├── python-native/       Agents as Python values; composition algebra.
-├── multi-agent/         Terrarium + root agent.
+├── multi-agent/         Terrarium engine + privileged nodes + dynamic graph.
 ├── studio.md            The management layer above Terrarium.
 ├── impl-notes/          Specific implementation choices worth teaching.
 ├── patterns.md          What emerges from combining modules.

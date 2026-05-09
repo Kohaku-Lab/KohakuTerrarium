@@ -10,7 +10,7 @@ tags:
 
 KohakuTerrarium is a framework for building real agents — not just LLM wrappers.
 
-The first-class abstraction is the **creature**: a standalone agent with its own controller, tools, sub-agents, triggers, prompts, and I/O. A creature runs by itself, inherits from another creature, or ships inside a package. A **terrarium** is the runtime engine that hosts creatures — a solo creature is a one-creature graph, and a team is a graph wired by channels. **Studio** is the management layer above the engine: catalog, identity, active sessions, saved-session persistence, attach streams, and editors. Everything is Python — you can embed any of it in your own code.
+It is layered. The first-class abstraction is the **creature**: a standalone agent with its own controller, tools, sub-agents, triggers, prompts, and I/O. A creature runs by itself, inherits from another creature, or ships inside a package. A **terrarium** is the runtime engine that hosts creatures — a solo creature is a one-creature graph, a team is a connected graph wired by channels, and the engine owns the topology, session, and hot-plug bookkeeping that follows graph changes. **Studio** is the management framework above the engine: package catalog, identity (LLM profiles, API keys, MCP), active session lifecycle, saved-session persistence, attach streams, and workspace editors. The web dashboard, desktop app, and `kt` CLI are all adapters over Studio. Everything is Python — you can embed any layer in your own code.
 
 These docs are split into four stacks: tutorials (guided), guides (task-oriented), concepts (mental models), and reference (exhaustive lookup). Pick whichever matches where you are.
 
@@ -40,7 +40,7 @@ Task-oriented docs: "how do I do X".
 
 - [Getting Started](guides/getting-started.md) — install, authenticate, run, resume.
 - [Creatures](guides/creatures.md) — anatomy, inheritance, packaging.
-- [Terrariums](guides/terrariums.md) — the `Terrarium` runtime engine, multi-agent wiring, and root agents.
+- [Terrariums](guides/terrariums.md) — the `Terrarium` runtime engine, multi-creature wiring, and privileged nodes.
 - [Studio](guides/studio.md) — the `Studio` management facade over catalog, identity, sessions, persistence, attach, and editors.
 - [Sessions](guides/sessions.md) — `.kohakutr` persistence and resume.
 - [Memory](guides/memory.md) — FTS, semantic, hybrid search over session history.
@@ -62,7 +62,7 @@ Mental models — why things are the way they are. The concept docs teach the mo
 - [Overview](concepts/README.md)
 - [Foundations](concepts/foundations/README.md)
 - [Modules](concepts/modules/README.md) — controller, input, trigger, tool, sub-agent, output, channel, plugin, memory, session.
-- [Multi-agent](concepts/multi-agent/README.md) — terrariums, root agents, channel topology.
+- [Multi-agent](concepts/multi-agent/README.md) — terrariums, privileged nodes, channel topology, dynamic graph.
 - [Python-native](concepts/python-native/README.md) — agents as Python values, composition algebra.
 - [Patterns](concepts/patterns.md) — agent-inside-plugin, agent-inside-tool, and related uses.
 - [Boundaries](concepts/boundaries.md) — when to ignore the abstraction, when the framework doesn't fit.
@@ -77,6 +77,7 @@ Exhaustive lookup.
 - [HTTP API](reference/http.md) — REST and WebSocket endpoints.
 - [Python API](reference/python.md) — classes, methods, and protocols.
 - [Built-ins Catalog](reference/builtins.md) — every shipped tool, sub-agent, I/O module.
+- [Built-in Plugins](reference/builtin-plugins.md) — sandbox, budget, permgate, compact.auto reference.
 - [Plugin Hooks](reference/plugin-hooks.md) — every hook signature.
 - [v1.3.0 Release Notes](reference/release-notes-1.3.0.md) — final changelog, compatibility notes, release flow, and validation summary.
 

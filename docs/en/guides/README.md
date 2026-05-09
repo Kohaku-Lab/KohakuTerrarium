@@ -34,7 +34,7 @@ If you want a guided first walk-through, go to [Tutorials](../tutorials/README.m
 
 ## Multi-agent and composition
 
-- [Terrariums](terrariums.md) — channels, root agents, hot-plug, observers, and the `Terrarium` runtime class.
+- [Terrariums](terrariums.md) — channels, privileged nodes, hot-plug, observers, and the `Terrarium` runtime class.
 - [Studio](studio.md) — manage running sessions and saved state through the `Studio` class.
 - [Composition](composition.md) — `>>`, `&`, `|`, `*` pipelines from Python.
 - [Programmatic Usage](programmatic-usage.md) — embedding `Terrarium`, `Studio`, `Creature`, and lower-level `Agent` objects.

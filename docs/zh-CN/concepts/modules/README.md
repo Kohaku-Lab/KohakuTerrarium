@@ -22,7 +22,7 @@ tags:
 
 ## 横跨多处的模块
 
-- [频道](channel.md) — 具名的消息管道 (queue vs. broadcast)，支撑多 Agent与跨模块通讯。
+- [频道](channel.md) — 具名的广播管道，支撑多 Agent 与跨模块通讯。
 - [会话与环境](session-and-environment.md) — 每个 Creature的私有状态 (session) vs. 整个Terrarium共享的状态 (environment)。
 - [记忆与压缩](memory-and-compaction.md) — 会话 store 同时做为可搜寻的记忆；非阻塞的压缩怎么让上下文保持在预算内。
 - [插件](plugin.md) — 修改模块之间 **连接** 的代码 — prompt 插件与 lifecycle 插件。

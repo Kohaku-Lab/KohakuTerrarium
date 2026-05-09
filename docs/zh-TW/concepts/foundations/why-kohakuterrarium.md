@@ -46,7 +46,8 @@ tags:
 - 一套統一的事件模型。使用者輸入、計時器觸發、工具完成、頻道訊息——全都用同一種信封。
 - 六模組生物抽象。參見 [what-is-an-agent](what-is-an-agent.md)。
 - 一層 session 系統，同時負責執行期持久化與可搜尋的知識庫。
-- 一個多代理 wiring 層（terrarium），它純粹是結構性的，本身沒有自己的 LLM。
+- 一個多代理執行期引擎（terrarium），托管生物、擁有頻道圖與拓樸記帳，但不執行自己的 LLM。
+- 一個管理框架（studio），處理 catalog、identity、session 生命週期、persistence 與 editor，讓每一個 UI / CLI / API 共用同一份實作。
 - Python-native 的組合方式：每個模組都是 Python class，每個 agent 都是一個 async Python value。
 - 開箱即用的執行期介面（CLI、TUI、HTTP、WebSocket、desktop、daemon），讓你不用自己寫 transport code。
 

@@ -150,7 +150,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-Recipe 会加载 Creature、宣告 channel，并接好 graph。Terrarium 本身没有 LLM，也不做决策；它只负责拓扑、channel 与 lifecycle。
+Recipe 会加载 Creature、宣告 channel，并接好 graph。Terrarium 自己不执行 LLM、也没有推理回圈；它负责的是结构 —— 拓扑、channel、lifecycle，以及在图变化时跟着走的 session 记账。
 
 ## 第 6 步：使用 Studio 管理 session
 

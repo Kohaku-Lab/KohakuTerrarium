@@ -56,7 +56,7 @@ Create and start a terrarium from a config path.
 - Body: `TerrariumCreate` (`config_path`, optional `llm`, `pwd`).
 - Response: `{"terrarium_id": str, "status": "running"}`.
 - Status: `200`, `400`.
-- Side effects: terrarium spawned; root agent initialised; creatures
+- Side effects: terrarium spawned; privileged `root:` node initialised; creatures
   started; session store opened when configured.
 
 ### `GET /api/terrariums`

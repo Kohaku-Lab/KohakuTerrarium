@@ -1,6 +1,6 @@
 ---
 title: Terrariums
-summary: Horizontal multi-agent with channels, output wiring, root agents, hot-plug, and observation.
+summary: Horizontal multi-agent with channels, output wiring, privileged nodes, hot-plug, and observation.
 tags:
   - guides
   - terrarium
@@ -11,11 +11,11 @@ tags:
 
 For readers composing several creatures that need to cooperate.
 
-A **terrarium** is the runtime engine that hosts every running creature in the process. A standalone agent is a 1-creature graph; a multi-agent team is a connected graph wired by channels. The engine owns lifecycles, shared channels, hot-plug, output wiring, and the session merge / split bookkeeping that follows topology changes. It has no LLM and makes no decisions — pure wiring. Creatures do not know they are in one; they listen on channel names, send on channel names, and the engine makes those names real.
+A **terrarium** is the runtime engine that hosts every running creature in the process. A standalone agent is a 1-creature graph; a multi-creature team is a connected graph wired by channels. The engine owns lifecycles, shared channels, hot-plug, output wiring, and the topology + session bookkeeping that follows graph changes. It runs no LLM and has no reasoning loop — the LLMs live in the creatures inside it. What the engine *does* decide is structural: which creatures share a connected component, which channel triggers fire on which agents, where each turn-end output gets delivered, which session store backs which graph. Creatures do not know they are in a terrarium; they listen on channel names, send on channel names, and the engine makes those names real.
 
 A `terrarium.yaml` config is a **recipe**: a sequence of "add these creatures, declare these channels, wire these edges" applied to the engine. It is no longer a distinct kind of entity.
 
-Concept primer: [terrarium](../concepts/multi-agent/terrarium.md), [root agent](../concepts/multi-agent/root-agent.md), [channel](../concepts/modules/channel.md).
+Concept primer: [terrarium](../concepts/multi-agent/terrarium.md), [privileged node](../concepts/multi-agent/privileged-node.md), [dynamic graph](../concepts/multi-agent/dynamic-graph.md), [channel](../concepts/modules/channel.md).
 
 We treat terrarium as a **proposed architecture** for horizontal multi-agent — the pieces work together (wiring + channels + hot-plug + observation + lifecycle pings to root), and kt-biome's four terrariums exercise them end to end. What we're still learning is the idiom; see [position, honestly](#position-honestly) below and the [ROADMAP](../../ROADMAP.md).
 
@@ -41,23 +41,16 @@ terrarium:
         listen:   [status]
         can_send: [feedback, results, status]  # conditional: approve → results, revise → feedback
   channels:
-    tasks:    { type: queue }
-    feedback: { type: queue }
-    results:  { type: queue }
-    status:   { type: broadcast }
+    tasks:    "work items the team pulls from"
+    feedback: "review notes routed back to the writer"
+    results:  "approved drafts"
+    status:   "broadcast status pings"
 ```
 
 - **`creatures`** — same inheritance and override rules as standalone creatures. Each creature additionally gets `channels.listen` / `channels.can_send` plus optional `output_wiring`.
-- **`channels`** — `queue` (one consumer per message) or `broadcast` (every subscriber gets every message).
+- **`channels`** — declared by name with an optional one-line description. All channels are broadcast: every listener sees every send. There is no queue / consume mode at the engine layer.
 - **`output_wiring`** — per-creature list of targets that receive this creature's turn-end output automatically. See [Output wiring](#output-wiring).
-- **`root`** — optional user-facing creature outside the terrarium; see below. kt-biome does not ship a standalone `root` creature — each terrarium brings its own `prompts/root.md`.
-
-Shorthand for channel description:
-
-```yaml
-channels:
-  tasks: "work items the team pulls from"
-```
+- **`root`** — optional user-facing creature promoted to manage the graph; see below. kt-biome does not ship a standalone `root` creature — each terrarium brings its own `prompts/root.md`.
 
 Field reference: [reference/configuration](../reference/configuration.md).
 
@@ -65,8 +58,10 @@ Field reference: [reference/configuration](../reference/configuration.md).
 
 The runtime always creates:
 
-- One `queue` per creature, named after it, so others can DM it.
-- A `report_to_root` queue, if `root` is set.
+- One channel per creature, named after it, so others can DM it via
+  `send_channel`.
+- A `report_to_root` channel, if `root` is set, wired so every other
+  creature can send on it and only root listens.
 
 You do not need to declare these.
 
@@ -108,14 +103,14 @@ Terrarium info without running:
 kt terrarium info @kt-biome/terrariums/swe_team
 ```
 
-## Root agent pattern
+## Privileged node (`root:`) pattern
 
-A root is a standalone creature with terrarium-management tools attached. It sits **outside** the terrarium and drives it from above:
+The recipe's `root:` keyword promotes a creature inside the graph to a [privileged node](../concepts/glossary.md#privileged-node). It manages the team from inside, not from outside:
 
-- Auto-listens to every creature channel.
-- Receives `report_to_root`.
-- Gets terrarium tools (`terrarium_create`, `terrarium_send`, `creature_start`, `creature_stop`, …).
-- Auto-receives a generated "terrarium awareness" prompt section listing the bound team's creatures and channels.
+- Auto-listens on every creature channel in its graph.
+- Receives the `report_to_root` channel that every other creature is wired to send on.
+- Carries the [group tools](../concepts/glossary.md#group-tools) (`group_add_node`, `group_remove_node`, `group_start_node`, `group_stop_node`, `group_channel`, `group_wire`, `group_status`).
+- Auto-receives a generated "graph awareness" prompt section listing the current creatures, channels, listen / send wiring, and output-wire edges; the section refreshes when the topology changes.
 - Is the user-facing interface when a terrarium runs in TUI/CLI mode.
 
 Use a root when you want a single conversational surface; skip it for headless cooperative flows.
@@ -129,7 +124,7 @@ terrarium:
 
 kt-biome does not ship a generic `root` creature. Each terrarium owns its own `root:` block and a co-located `prompts/root.md` — the prompt can name actual team members ("coding → send to `driver`") because it lives next to the team it orchestrates. The framework provides the management toolset and topology awareness automatically.
 
-See [concepts/multi-agent/root-agent](../concepts/multi-agent/root-agent.md) for the design rationale.
+See [concepts/multi-agent/privileged-node](../concepts/multi-agent/privileged-node.md) for the design rationale.
 
 ## Hot-plug at runtime
 
@@ -149,9 +144,9 @@ async with Terrarium() as engine:
     # result.delta_kind == "merge"
 ```
 
-Cross-graph `connect()` merges the two graphs — environments union, attached session stores merge into one, the new listener gets a `ChannelTrigger` injected. `disconnect()` may split a graph back apart and copy the parent session into each side. See [`examples/code/terrarium_hotplug.py`](../../examples/code/terrarium_hotplug.py).
+Cross-graph `connect()` merges the two graphs — environments union, attached session stores merge into one (with `parent_session_ids` recording lineage), the new listener gets a `ChannelTrigger` injected. `disconnect()` may split a graph back apart and copy the parent session into each side. See [`examples/code/terrarium_hotplug.py`](../../examples/code/terrarium_hotplug.py).
 
-Tool equivalents the root uses: `creature_start`, `creature_stop`, `terrarium_create`, `terrarium_send`.
+The same mutations are available to a privileged node inside the graph through the group tools: `group_add_node`, `group_remove_node`, `group_start_node`, `group_stop_node`, `group_channel`, `group_wire`. Together they form the in-graph "graph editor" an LLM-driven privileged node uses to evolve the team mid-run.
 
 Hot-plug is useful for provisioning ad-hoc specialists without restarting. Existing channels pick up the new listener; the new creature receives its channel topology in its system prompt.
 
@@ -211,7 +206,7 @@ A creature declares in its config where its turn-end output should go. At every 
 The full entry shape is in [reference / configuration — output wiring](../reference/configuration.md#output-wiring). Key properties:
 
 - **`to: <creature-name>`** resolves to another creature in the same terrarium.
-- **`to: root`** is a magic-string target — the root agent (which sits outside the terrarium). Useful for lifecycle pings; the root sees the event even when it wouldn't be listening to a channel.
+- **`to: root`** is a magic-string target — resolves to the privileged node designated by the recipe's `root:` keyword. Useful for lifecycle pings; root sees the event even when it wouldn't be listening to a channel.
 - **`with_content: false`** delivers the event with empty `content` — a metadata-only "turn-end happened" signal.
 - **`prompt` / `prompt_format`** customise the receiver-side prompt-override text.
 
@@ -250,7 +245,7 @@ Prefer **sub-agents** (vertical delegation inside one creature) when a single pa
   - Strengthen the sender's prompt about the channel obligation (for conditional edges that must remain channel-based).
   Use `--observe` to see channel traffic live.
 - **Creature doesn't react to a channel message.** Confirm `listen` contains the channel name and the `ChannelTrigger` registered (`kt terrarium info` prints the wiring).
-- **Root can't see what creatures are doing.** Two paths: add `report_to_root` to the creature's `can_send` (channel-based), or add `{to: root, with_content: false}` to its `output_wiring` (framework-level lifecycle ping; fires even if the creature never calls `send_message`).
+- **Root can't see what creatures are doing.** The `report_to_root` channel is auto-wired when `root:` is declared, so every creature can already report into it. If you've spawned creatures imperatively, ensure they're in root's graph (cross-graph creates leave them invisible until you `connect()`). For lifecycle pings independent of `send_message`, add `{to: root, with_content: false}` to `output_wiring`.
 - **Wiring target doesn't receive anything.** Check that the target creature exists in the same terrarium and is running. Wiring resolves by creature name (or the magic `root` token); unknown / stopped targets are logged and skipped.
 - **Slow startup with many creatures.** Each creature starts its own LLM provider and trigger manager; expect roughly linear startup time.
 

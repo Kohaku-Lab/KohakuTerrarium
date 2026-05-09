@@ -143,8 +143,9 @@ Creature CRUD:
 
 Channel CRUD:
 
-- `async add_channel(graph, name, kind=ChannelKind.BROADCAST, description="") -> ChannelInfo`
-- `async connect(sender, receiver, *, channel=None, kind=ChannelKind.QUEUE) -> ConnectionResult`
+- `async add_channel(graph, name, description="") -> ChannelInfo`
+  — all graph channels are broadcast.
+- `async connect(sender, receiver, *, channel=None) -> ConnectionResult`
   — cross-graph connect merges graphs (environment union, session
   stores merge).
 - `async disconnect(sender, receiver, *, channel=None) -> DisconnectionResult`
@@ -256,7 +257,7 @@ Module: `kohakuterrarium.terrarium.events`.
 - `channels: list[str]` — channels that were unwired.
 - `delta_kind: str` — `"nothing"` or `"split"`.
 
-### `GraphTopology`, `ChannelKind`, `ChannelInfo`
+### `GraphTopology`, `ChannelInfo`
 
 Module: `kohakuterrarium.terrarium.topology`. Pure-data topology
 model — no live agent references.
@@ -271,9 +272,8 @@ model — no live agent references.
 - `has_creature(creature_id) -> bool`
 - `has_channel(name) -> bool`
 
-**`ChannelKind`** enum: `BROADCAST`, `QUEUE`.
-
-**`ChannelInfo`** — `name, kind, description`.
+**`ChannelInfo`** — `name, description`. All graph channels are
+broadcast — there is no kind selection at the topology layer.
 
 ### Compose interop
 

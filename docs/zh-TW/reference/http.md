@@ -47,7 +47,7 @@ Serving 層與工作階段儲存的結構請看 [concepts/impl-notes/session-per
 - Body：`TerrariumCreate` (`config_path`、選用 `llm`、`pwd`)。
 - Response：`{"terrarium_id": str, "status": "running"}`。
 - 狀態：`200`、`400`。
-- Side effect：生出生態瓶、初始化 root 代理、啟動生物、設了就開 session store。
+- Side effect：生出生態瓶、初始化特權 `root:` 節點、啟動生物、設了就開 session store。
 
 ### `GET /api/terrariums`
 

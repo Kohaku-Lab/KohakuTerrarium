@@ -22,7 +22,7 @@ tags:
 
 ## 橫跨多處的模組
 
-- [頻道](channel.md) — 具名的訊息管道 (queue vs. broadcast)，支撐多代理與跨模組通訊。
+- [頻道](channel.md) — 具名的廣播管道，支撐多代理與跨模組通訊。
 - [工作階段與環境](session-and-environment.md) — 每隻生物的私有狀態 (session) vs. 整個生態瓶共用的狀態 (environment)。
 - [記憶與壓縮](memory-and-compaction.md) — 工作階段 store 同時做為可搜尋的記憶；非阻塞的壓縮怎麼讓上下文保持在預算內。
 - [外掛](plugin.md) — 修改模組之間**連接**的程式碼 — prompt 外掛與 lifecycle 外掛。

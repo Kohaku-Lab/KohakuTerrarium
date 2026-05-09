@@ -48,11 +48,13 @@ sake of one concept. It is also the natural way to do it, and
 pretending otherwise would introduce a new primitive that buys
 nothing.
 
-**Case: root agent.** A root is "a creature with a specific toolset
-and a specific listening wiring." Structurally it is not different
-from any other creature; conceptually its position matters. We call
-it out as a distinct role because the distinction is useful, not
-because the framework enforces it.
+**Case: the privileged user-facing node.** A `root:` node is "a
+creature with a specific toolset and a specific listening wiring."
+Structurally it is not different from any other creature; what
+matters is the privilege flag plus the standard report-to-root /
+listen-all wiring the engine applies. We call it out as a distinct
+role because the distinction is useful, not because the framework
+enforces it.
 
 The framework's abstractions are tools for thinking, not walls.
 

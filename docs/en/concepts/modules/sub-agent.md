@@ -95,8 +95,9 @@ Built-in sub-agents (in `kt-biome` + framework): `worker`, `plan`,
   chat-style creatures work.
 - **Persistent specialist.** An `interactive: true` reviewer that sees
   every turn and speaks only when it has something to say.
-- **Nested terrariums.** A sub-agent can start a terrarium with
-  `terrarium_create`. The substrate does not care.
+- **Nested terrariums.** A sub-agent can spawn additional creatures
+  into a graph via `group_add_node` (if it's a privileged node).
+  The substrate does not care.
 - **Vertical-inside-horizontal.** A terrarium creature that itself
   uses sub-agents — mixing axes of multi-agent.
 

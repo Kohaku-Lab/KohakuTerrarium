@@ -11,9 +11,17 @@ tags:
 
 ## 它是什么
 
-**Terrarium (terrarium)** 是托管行程内所有运行中Creature的运行时引擎。它自己没有 LLM、没有智慧，也不做决策。每个进程一个引擎；同一个引擎里可以共存多个互不相连的 graph。
+**Terrarium** 是托管行程内所有运行中 Creature 的运行时引擎。它自己不
+执行 LLM、也没有自己的推理回圈 —— LLM 与推理都活在它所托管的 Creature
+里。它**真正拥有**的是*结构*：哪些 Creature 共享一个连通分量、它们之间
+有哪些频道、每个回合结束的输出送往何处、哪个 session store 撑住哪个
+图，以及拓扑变更时跟着走的记账。每个进程一个引擎；同一个引擎里可以共
+存多个互不相连的图。
 
-独立 Agent 是引擎里的 **1-creature graph**。多 Agent 团队则是用频道连起来的 **connected graph**。你以前称为「terrarium」的设定档，现在是一份 **recipe** — 「加这些 Creature、宣告这些频道、接这些边」的序列，由引擎执行。引擎本身始终存在；recipe 只是把它填满。
+独立 Agent 是引擎里的 **1-creature 图**。多创造物团队则是用频道连起来
+的**连通图**。你以前称为「terrarium」的设定档，现在是一份 **recipe** ——
+「加这些 Creature、宣告这些频道、接这些边」的序列，由引擎执行。引擎
+本身始终存在；recipe 只是把它填满。
 
 引擎做这些事：
 
@@ -21,10 +29,12 @@ tags:
 2. **Channel CRUD** — 宣告、连接 Creature、断开。
 3. **输出接线** — 回合结束的事件送进指定目标。
 4. **生命周期** — start、stop、shutdown。
-5. **Session 合并 / 分裂**，跟著拓扑变更走。
-6. **可观测性** — 一切可观察的事都进 `EngineEvent` stream。
+5. **拓扑记账** — 连通性变化时图的自动分裂 / 自动合并。
+6. **Session 合并 / 分裂**，跟著拓扑记账走。
+7. **可观测性** — 一切可观察的事都进 `EngineEvent` stream。
 
-这就是它全部的契约。
+这就是它全部的契约。它一概不涉及 LLM；它做的全是引擎为内部 Creature 代
+劳的、确定性的结构性工作。
 
 ### 心智模型：单一团队、单一 Root
 
@@ -32,21 +42,25 @@ tags:
 
 ```
   +---------+       +---------------------------+
-  |  User   |<----->|        Root Agent         |
-  +---------+       |  (terrarium tools, TUI)   |
+  |  User   |<----->|     特权节点              |
+  +---------+       |   (group tools, TUI)      |
                     +---------------------------+
                           |               ^
             sends tasks   |               |  observes
                           v               |
                     +---------------------------+
-                    |     Terrarium Layer       |
-                    |   (pure wiring, no LLM)   |
+                    |     Terrarium engine      |
+                    |  (拓扑、频道、session、    |
+                    |   no LLM)                 |
                     +-------+----------+--------+
                     |  swe  | reviewer |  ....  |
                     +-------+----------+--------+
 ```
 
-这是 **per-graph 视角**：上方一只 Root，下方一张连通的同侪图，中间是「terrarium 即接线」。这是框架原生提供、也是大多数 recipe 编码的样子。如果你只需要这些，看到这就够了——本节剩下的是当你超出单一团队画面后才需要的引擎细节。
+这是 **per-graph 视角**：一只特权节点和它所管理的团队并存于同一张图，
+引擎在底下持有频道与拓扑。这是框架原生提供、也是大多数 recipe 编码的
+样子。如果你只需要这些，看到这就够了——本节剩下的是当你超出单一团队
+画面后才需要的引擎细节。
 
 ### 引擎全貌：执行所有 graph 的 runtime
 
@@ -114,17 +128,24 @@ terrarium:
   listen:  [status]
   can_send:  [feedback, status]  # 条件式：approve vs. revise 仍走频道
   channels:
-  tasks:  { type: queue }
-  feedback: { type: queue }
-  status:  { type: broadcast }
+  tasks:    "团队拉取的工作项"
+  feedback: "送回写者的审阅备注"
+  status:   "广播的状态 ping"
 ```
 
-运行时会自动为每个 Creature建立一个队列（名称就是它自己的名字，方便其他成员私讯它），而如果存在 root，还会建立一个 `report_to_root` 频道。
+所有频道都是广播 —— 每个监听者都收到每一次 send。运行时会自动为每个
+Creature 建立一条频道（名称就是它自己的名字，方便其他成员透过
+`send_channel` 私讯它），而如果存在 root，还会建立一个
+`report_to_root` 频道（其他每只 Creature 都被接线为可送往该频道）。
 
 ## 我们怎么实现它
 
 - `terrarium/engine.py` —— `Terrarium` 类。每个进程一个。拥有拓扑状态、live Creature、environment、挂著的 session store、订阅者列表。是 async context manager (`async with Terrarium() as t:`)，并附 classmethod factory (`from_recipe`、`with_creature`、`resume` — 最后一个尚未实现)。
-- `terrarium/topology.py` —— 纯数据 graph 模型 (`TopologyState`、`GraphTopology`、`ChannelKind`、`TopologyDelta`)。没有 live agent 引用；不需 asyncio 就能测。引擎在它上面叠 live state。
+- `terrarium/topology.py` —— 纯数据 graph 模型 (`TopologyState`、
+  `GraphTopology`、`ChannelInfo`、`TopologyDelta`)。没有 live agent 引
+  用；不需 asyncio 就能测。连通分量透过 BFS 在「creature ↔ channel」
+  二部图上算出；mutation 会回传一个 delta 描述 `merge` /
+  `split` / `nothing`。引擎在它上面叠 live state。
 - `terrarium/creature_host.py` —— `Creature`，引擎对每只 Creature 的 wrapper。把以前独立 Agent 与频道感知的两个面合成同一个型别。
 - `terrarium/recipe.py` —— 走完一份 `TerrariumConfig` 套到引擎上：宣告频道、为每只 Creature 加一条 direct channel、若有 root 加 `report_to_root`、接 listen / send 边、注入频道触发器、启动一切。
 - `terrarium/channels.py` —— 频道注入 (当一只 Creature 加入了一个有它要 listen 的频道的 graph，引擎会往它的 agent 加一个 `ChannelTrigger`)，以及 `connect_creatures` / `disconnect_creatures` 的本体。
@@ -137,10 +158,10 @@ terrarium:
 ## 因此你可以做什么
 
 - **明确分工的专家团队**。 两只 `swe` Creature透过 `tasks` / `review` / `feedback` 频道拓扑协作，而 reviewer 角色则由 prompt 驱动。
-- **面向用户的 root Agent**。 见 [root-Agent](root-agent.md)。它让用户只和一只 Agent 对话，再由那只 Agent 去编排整个团队。
+- **面向用户的特权节点**。 见 [privileged-node](privileged-node.md)。它让用户只和一只 Agent 对话，再由那只 Agent 去编排整个团队。
 - **透过输出接线建立确定性的 pipeline 边**。 在Creature配置里宣告它的回合结束输出要自动流向下一阶段——不需要依赖 LLM 记得调用 `send_message`。
-- **热插拔专家**。 不需重启，就能在会话中途加入新Creature；现有频道会直接接上。
-- **非破坏式监控**。 挂上一个 `ChannelObserver`，就能看见 queue 频道中的每则消息，而不会和真正的 consumer 抢消息。
+- **热插拔专家**。 不需重启，就能在会话中途加入新 Creature；现有频道会直接接上。可以透过命令式 API（`Terrarium.add_creature`、`connect`、`disconnect`）使用，也可以由图中的特权节点透过[组工具](../glossary.md#group-tools--组工具)（`group_add_node`、`group_channel`、`group_wire`、…）呼叫。
+- **非破坏式监控**。 用 `EventFilter` 订阅引擎事件流 —— 频道讯息会和拓扑、生命周期、工具事件一起流过来，而不会与任何 consumer 竞争。
 
 ## 与频道并存的输出接线
 
@@ -166,7 +187,10 @@ terrarium:
 
 ## 另见
 
-- [多 Agent概览](README.md) —— 纵向与横向。
-- [Root 代理](root-agent.md) —— 位于团队外、面向用户的 Creature。
-- [频道](../modules/channel.md) —— Terrarium所由之构成的原语。
-- [ROADMAP](../../../ROADMAP.md) —— Terrarium接下来的方向。
+- [多 Agent 概览](README.md) —— 纵向与横向。
+- [特权节点](privileged-node.md) —— 图中代表用户的特权 Creature。
+- [动态图](dynamic-graph.md) —— 自动合并 / 自动分裂与图内的组工具表面。
+- [impl-notes / graph and sessions](../impl-notes/graph-and-sessions.md)
+  —— 合并 / 分裂记账的实现细节。
+- [频道](../modules/channel.md) —— Terrarium 所由之构成的原语。
+- [ROADMAP](../../../ROADMAP.md) —— Terrarium 接下来的方向。

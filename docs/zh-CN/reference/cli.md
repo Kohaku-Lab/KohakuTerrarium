@@ -10,7 +10,7 @@ tags:
 
 所有 `kt` 指令、子指令、旗标。CLI 是框架给操作者的接口：启动Creature、启动Terrarium、管理套件、配置 LLM、提供 web UI、搜索已存储的会话。
 
-Creature、Terrarium、root 代理的心智模型请参见 [边界概念](../concepts/boundaries.md)。任务导向的路径请参见 [快速开始指南](../guides/getting-started.md) 和 [Creature 指南](../guides/creatures.md)。
+Creature、Terrarium、特权节点的心智模型请参见 [边界概念](../concepts/boundaries.md)。任务导向的路径请参见 [快速开始指南](../guides/getting-started.md) 和 [Creature 指南](../guides/creatures.md)。
 
 ## 入口
 

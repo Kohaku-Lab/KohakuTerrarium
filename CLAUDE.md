@@ -61,47 +61,112 @@ KohakuTerrarium is a Python framework that enables building any kind of agent sy
 
 ## Core Architecture Concepts (CRITICAL)
 
-### Creature vs Terrarium vs Root Agent
-
-**Creature**: A self-contained agent. Has its own LLM, tools, sub-agents, memory, I/O.
-Works standalone. Does NOT know it is in a terrarium. Sub-agents inside a creature
-are VERTICAL hierarchy (internal delegation, invisible to outside).
-
-**Terrarium**: Pure wiring layer. NO LLM, NO intelligence, NO decision-making.
-Loads standalone creature configs (unchanged), creates channels between them,
-injects ChannelTriggers, manages lifecycle. That's ALL it does.
-
-**Root Agent**: A creature that sits OUTSIDE the terrarium. Has terrarium management
-tools (create, stop, send, observe, hot-plug). The user talks to root; root orchestrates
-the terrarium from above. Root is NEVER a peer of terrarium creatures.
+### The four-layer hierarchy
 
 ```
-User <-> Root Agent (creature with terrarium tools)
+User <-> Studio (management framework)
               |
-              v  (creates, manages, observes via tools)
+              v  catalog / identity / sessions / persistence / editors / attach
          +-----------+
-         | Terrarium |  <-- pure wiring, no intelligence
-         +-----------+
-         | swe | reviewer | ... |  <-- opaque creatures
+         | Terrarium |  <-- runtime engine: graph topology, channels,
+         +-----------+      hot-plug, output wiring, session bookkeeping.
+              |             No LLM, no reasoning loop. Owns structure.
+              v
+         | creature | creature | ... |  <-- the agent framework runs here
+              |
+              v
+         | controller + LLM + tools + triggers + sub-agents + plugins + I/O |
 ```
+
+**Studio** (`src/kohakuterrarium/studio/`): the management framework above the
+engine. Six namespaces — `catalog`, `identity`, `sessions`, `persistence`,
+`editors`, `attach`. The web dashboard, desktop app, and `kt` CLI are all
+adapters over Studio. Studio is *not* a UI; it's the shared Python surface UIs
+delegate to.
+
+**Terrarium** (`src/kohakuterrarium/terrarium/engine.py`): the runtime engine
+that hosts every running creature in the process. It runs no LLM and has no
+reasoning loop — those live in the creatures it hosts. What it owns is
+*structure*: which creatures share a connected component, which channels
+exist between them, where each turn-end output is delivered, which session
+store backs which graph, and the bookkeeping that follows when the topology
+changes (auto-merge / auto-split, session lineage). One engine per process;
+multiple disconnected graphs may coexist inside it.
+
+**Creature**: dual concept. (1) Config: a folder with `agent.yaml` +
+`system.md` defining an agent. (2) Runtime: a `Creature` handle
+(`terrarium/creature_host.py`) wrapping a live `Agent` with engine-side
+metadata (`graph_id`, `is_privileged`, `listen_channels`, `send_channels`,
+`parent_creature_id`). Same agent config can run privileged in one terrarium
+and unprivileged in another. Sub-agents inside a creature are VERTICAL
+hierarchy (internal delegation, invisible to outside).
+
+**Privileged node**: a creature inside a graph that has been granted the
+[group tools](#privileged-tools-and-the-group_-surface) needed to mutate the
+graph: spawn / remove creatures, draw / delete channels, start / stop
+members. The recipe `root:` keyword is one way to make a node privileged;
+recipes can also use `privileged: true` inline; engines accept
+`is_privileged=True` at creature-add time. Workers spawned by `group_add_node`
+are NOT privileged.
 
 **Two composition levels (never mix them):**
-- VERTICAL (inside creature): controller -> sub-agents (private, hierarchical)
-- HORIZONTAL (terrarium): creature <-> creature via channels (peer, opaque)
+- VERTICAL (inside creature): controller → sub-agents (private, hierarchical)
+- HORIZONTAL (terrarium graph): creature ↔ creature via channels (peer, opaque)
 
-### Terrarium Config: Optional Root
+### Dynamic graph + session interaction
 
-```yaml
-terrarium:
-  root:                    # Optional: root agent sits OUTSIDE
-    config: creatures/root
-    interface: tui
-  creatures: [...]         # These run INSIDE the terrarium
-  channels: [...]
-```
+Topology can change at runtime. The engine keeps it consistent:
+- Add a creature → joins a specific graph (default: fresh singleton).
+- Remove a creature → may auto-split the graph if it was a bridge.
+- Connect across graphs → auto-merge graphs, union environments, merge
+  session stores into one (with `parent_session_ids` recording lineage).
+- Disconnect / remove channel → may auto-split, allocate fresh environments
+  per side, duplicate session store into each side.
+- Each graph has one session store; resume reconstructs topology from the
+  recipe path stored in session metadata, NOT from a frozen snapshot. The
+  recipe is the source of truth on resume; lineage metadata
+  (`parent_session_ids`, `merged_at`, `split_at`) survives but split state
+  does not.
 
-When root is present, it is force-given all terrarium tools and bound to this
-terrarium's runtime. It is the user-facing interface.
+### Privileged tools and the `group_*` surface
+
+Tools registered on every creature: `send_channel`, `group_send`.
+
+Tools registered ONLY on privileged nodes:
+- `group_add_node` — spawn a creature into the caller's graph
+- `group_remove_node` — remove a creature (may auto-split)
+- `group_start_node` / `group_stop_node` — start / stop members
+- `group_channel` — CRUD on channels and per-creature wiring
+- `group_wire` — output-wiring edges
+- `group_status` — snapshot the caller's graph
+
+These are the runtime "graph editor" — an LLM-driven privileged node uses
+them to evolve the team mid-run. Mutations go through topology pure
+functions (`terrarium/topology.py`) → environment updates → session
+coordination → emit `EngineEvent`.
+
+### Channels are broadcast-only at the graph layer
+
+All terrarium graph channels are broadcast — every listener receives every
+send. The `type:` field in older `terrarium.yaml` channel declarations is
+ignored at the engine layer; new configs should omit it. The
+`SubAgentChannel` queue primitive in `core/channel.py` still exists but is
+internal to creature ↔ sub-agent plumbing, not user-facing.
+
+### Built-in plugins (cross-cutting concerns are NOT framework features)
+
+Four cross-cutting concerns ship as ordinary plugins, not framework code:
+- `sandbox` — capability gating (filesystem / network / subprocess)
+- `budget` — turn / tool-call / walltime accounting
+- `permgate` — interactive user approval for tool calls
+- `compact.auto` — trigger context compaction on high token use
+
+The framework's tool executor knows nothing about any of these. They use
+`pre_tool_execute` + `runtime_services` hooks like any other plugin. This
+is the canonical example of where the framework / plugin boundary lives:
+security, resource limits, and user gating are all *cross-cutting policies*,
+not framework features. When designing new functionality, ask first whether
+it could be a plugin instead — usually it should.
 
 ## Architecture Overview
 

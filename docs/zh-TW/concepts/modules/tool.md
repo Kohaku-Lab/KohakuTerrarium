@@ -51,13 +51,13 @@ tags:
 - agent 名稱；
 - job store（讓 `wait` / `read_job` 框架命令能找到這個工具的作業）。
 
-內建工具包含 shell（`bash`）、Python（`python`）、檔案操作（`read`、`write`、`edit`、`multi_edit`）、搜尋（`glob`、`grep`、`tree`）、JSON（`json_read`、`json_write`）、Web（`web_fetch`、`web_search`）、通訊（`send_message`）、記憶（`scratchpad`、`search_memory`）、內省（`info`、`stop_task`），以及生態瓶管理（`terrarium_create`、`creature_start`、…）。
+內建工具包含 shell（`bash`）、Python（`python`）、檔案操作（`read`、`write`、`edit`、`multi_edit`）、搜尋（`glob`、`grep`、`tree`）、JSON（`json_read`、`json_write`）、Web（`web_fetch`、`web_search`）、通訊（`send_message`）、記憶（`scratchpad`、`search_memory`）、內省（`info`、`stop_task`），以及圖管理（`group_add_node`、`group_channel`、`group_wire`、…；只註冊在特權節點上）。
 
 ## 因此你可以做什麼
 
 - **把工具當成訊息匯流排。** `send_message` 會寫入某個頻道；另一隻生物上的 `ChannelTrigger` 會讀取它。兩個工具加上一個 trigger，就能重現群聊模式，而不需要新增任何原語。
 - **把工具當成狀態控制柄。** `scratchpad` 工具就是典型的 KV API；任何協作中的工具都可以透過它會合。
-- **會安裝 trigger 的工具。** 任何通用 trigger 類別（預設為 `TimerTrigger`、`ChannelTrigger`、`SchedulerTrigger`）都能以工具形式暴露——在 `tools:` 下列出 `type: trigger`，就會讓 `add_timer` / `watch_channel` / `add_schedule` 出現在工具清單中，而呼叫它就會把該 trigger 安裝到活躍的 `TriggerManager` 上。`terrarium_create` 更是會直接啟動一整個巢狀系統。
+- **會安裝 trigger 的工具。** 任何通用 trigger 類別（預設為 `TimerTrigger`、`ChannelTrigger`、`SchedulerTrigger`）都能以工具形式暴露——在 `tools:` 下列出 `type: trigger`，就會讓 `add_timer` / `watch_channel` / `add_schedule` 出現在工具清單中，而呼叫它就會把該 trigger 安裝到活躍的 `TriggerManager` 上。`group_add_node` 則會把一隻新的生物生成到呼叫者的圖裡。
 - **包裝子代理的工具。** 任何子代理呼叫本身就是工具形狀，因為 LLM 仍然是用名稱加參數去呼叫它。
 - **會執行 agent 的工具。** 因為工具就是普通 Python，某個工具可以內含一隻 agent——例如先用一個小型判斷 agent 檢查參數，再派發真正動作的 guard 工具。參見 [patterns](../patterns.md)。
 
