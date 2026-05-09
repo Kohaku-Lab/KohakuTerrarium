@@ -412,8 +412,11 @@ class TestToResponsesInput:
         png_bytes = b"\x89PNG\r\n\x1a\nFAKE"
         (artifacts / "tool_outputs" / "shot.png").write_bytes(png_bytes)
 
+        # codex_format imports ``_session_dir`` at module top, so the
+        # patched name lives there; the original-module binding is no
+        # longer the one read by ``_resolve_artifact_url``.
         monkeypatch.setattr(
-            "kohakuterrarium.studio.persistence.store._session_dir",
+            "kohakuterrarium.llm.codex_format._session_dir",
             lambda: sessions,
         )
 

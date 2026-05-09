@@ -156,18 +156,6 @@
     "reason": "time imported only on the cache-fallback branch"
   },
   {
-    "file": "src/kohakuterrarium/llm/codex_format.py",
-    "line": 54,
-    "function": "_resolve_artifact_url",
-    "reason": "studio.persistence (transitively pulls fastapi.HTTPException) is loaded only when round-tripping a tool image whose URL is a materialized /api/sessions/.../artifacts/... path — text-only conversations never touch this"
-  },
-  {
-    "file": "src/kohakuterrarium/llm/codex_format.py",
-    "line": 58,
-    "function": "_resolve_artifact_url",
-    "reason": "studio.persistence.store sibling import; same cold-path justification as the line-54 entry"
-  },
-  {
     "file": "src/kohakuterrarium/core/agent.py",
     "line": 346,
     "function": "_init_mcp",

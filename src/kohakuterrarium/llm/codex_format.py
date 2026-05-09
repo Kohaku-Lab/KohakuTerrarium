@@ -5,6 +5,11 @@ import json as _json
 import re
 from typing import Any
 
+from kohakuterrarium.studio.persistence.artifacts import (
+    resolve_artifact_file,
+    resolve_artifacts_dir,
+)
+from kohakuterrarium.studio.persistence.store import _session_dir
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -48,17 +53,6 @@ def _resolve_artifact_url(url: str) -> str:
         return url
     sid = match.group("sid")
     rel = match.group("path")
-    try:
-        # Lazy import — avoid pulling studio.persistence into every
-        # codex_format import (circular-import risk + cold-start cost).
-        from kohakuterrarium.studio.persistence.artifacts import (
-            resolve_artifact_file,
-            resolve_artifacts_dir,
-        )
-        from kohakuterrarium.studio.persistence.store import _session_dir
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.debug("artifact resolver import failed", error=str(exc))
-        return url
     try:
         artifacts = resolve_artifacts_dir(sid, _session_dir())
         path = resolve_artifact_file(artifacts, rel)
