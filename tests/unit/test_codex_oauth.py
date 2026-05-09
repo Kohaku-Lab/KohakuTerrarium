@@ -313,6 +313,136 @@ class TestToResponsesInput:
             }
         ]
 
+    def test_tool_result_multimodal_image(self):
+        """Tool results with images use the array form so the image
+        rides directly inside ``function_call_output.output`` — that's
+        the canonical Responses API shape for multimodal tool returns.
+        """
+        messages = [
+            {
+                "role": "tool",
+                "tool_call_id": "call_img",
+                "content": [
+                    {"type": "text", "text": "rendered chart"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,AAAA"},
+                    },
+                ],
+            }
+        ]
+        result = CodexOAuthProvider._to_responses_input(messages)
+        assert result == [
+            {
+                "type": "function_call_output",
+                "call_id": "call_img",
+                "output": [
+                    {"type": "input_text", "text": "rendered chart"},
+                    {
+                        "type": "input_image",
+                        "image_url": "data:image/png;base64,AAAA",
+                    },
+                ],
+            }
+        ]
+
+    def test_tool_result_image_only_uses_array_form(self):
+        """Tool results with only an image: array-form output with a
+        single ``input_image`` part, no synthetic followup, no
+        placeholder text.
+        """
+        messages = [
+            {
+                "role": "tool",
+                "tool_call_id": "call_img",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,AAAA"},
+                    },
+                ],
+            }
+        ]
+        result = CodexOAuthProvider._to_responses_input(messages)
+        assert result == [
+            {
+                "type": "function_call_output",
+                "call_id": "call_img",
+                "output": [
+                    {
+                        "type": "input_image",
+                        "image_url": "data:image/png;base64,AAAA",
+                    },
+                ],
+            }
+        ]
+
+    def test_tool_result_text_only_list_uses_string(self):
+        """Text-only list content keeps the historical string output —
+        no upgrade to the array form.
+        """
+        messages = [
+            {
+                "role": "tool",
+                "tool_call_id": "call_txt",
+                "content": [{"type": "text", "text": "ok"}],
+            }
+        ]
+        result = CodexOAuthProvider._to_responses_input(messages)
+        assert result == [
+            {
+                "type": "function_call_output",
+                "call_id": "call_txt",
+                "output": "ok",
+            }
+        ]
+
+    def test_artifact_url_resolved_to_data_url(self, tmp_path, monkeypatch):
+        """Relative ``/api/sessions/.../artifacts/...`` URLs are not
+        valid URLs to Codex's validator. Resolver reads the on-disk
+        artifact and rewrites the URL to a ``data:`` URL inline.
+        """
+        from kohakuterrarium.llm import codex_format
+
+        # Lay out a fake session + artifacts dir matching the URL.
+        sessions = tmp_path / "sessions"
+        sessions.mkdir()
+        artifacts = sessions / "graph_demo.artifacts"
+        (artifacts / "tool_outputs").mkdir(parents=True)
+        png_bytes = b"\x89PNG\r\n\x1a\nFAKE"
+        (artifacts / "tool_outputs" / "shot.png").write_bytes(png_bytes)
+
+        monkeypatch.setattr(
+            "kohakuterrarium.studio.persistence.store._session_dir",
+            lambda: sessions,
+        )
+
+        messages = [
+            {
+                "role": "tool",
+                "tool_call_id": "call_img",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "/api/sessions/graph_demo/artifacts/tool_outputs/shot.png"
+                        },
+                    },
+                ],
+            }
+        ]
+        result = codex_format.to_responses_input(messages)
+        assert len(result) == 1
+        out = result[0]["output"]
+        assert isinstance(out, list)
+        url = out[0]["image_url"]
+        assert url.startswith("data:image/png;base64,")
+        # Decode round-trip to confirm the bytes match.
+        import base64
+
+        decoded = base64.b64decode(url.split(",", 1)[1])
+        assert decoded == png_bytes
+
     def test_system_messages_skipped(self):
         messages = [{"role": "system", "content": "You are helpful."}]
         result = CodexOAuthProvider._to_responses_input(messages)
