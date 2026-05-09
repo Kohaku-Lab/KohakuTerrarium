@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import aiofiles
+from PIL import Image, UnidentifiedImageError
 
 from kohakuterrarium.builtins.tools.registry import register_builtin
 from kohakuterrarium.llm.message import ImagePart, TextPart
@@ -411,15 +412,6 @@ def _verify_image(data: bytes) -> str | None:
     every exception class Pillow may raise — corrupt headers, truncated
     streams, decoder-not-available, etc.
     """
-    # Optional-dep guard: Pillow is declared in pyproject but the
-    # tool should still work in stripped-down installs. Skip
-    # verification if missing — provider will surface any error.
-    try:
-        from PIL import Image, UnidentifiedImageError
-    except ImportError:
-        logger.warning("Pillow not installed — skipping image verification")
-        return "PNG"
-
     try:
         with Image.open(io.BytesIO(data)) as img:
             img.verify()
