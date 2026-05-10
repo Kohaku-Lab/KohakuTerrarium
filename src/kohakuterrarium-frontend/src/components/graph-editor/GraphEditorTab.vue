@@ -1,31 +1,65 @@
 <template>
   <div class="h-full w-full flex flex-col bg-warm-50 dark:bg-warm-950">
-    <!-- Title strip -->
-    <div class="shrink-0 px-4 py-2 border-b border-warm-200/60 dark:border-warm-800/60 flex items-center gap-3">
-      <div class="i-carbon-network-3 text-iolite text-base" />
-      <h1 class="text-sm font-semibold text-warm-800 dark:text-warm-200">Runtime Canvas</h1>
-      <span v-if="state.error" class="text-[11px] text-coral">{{ state.error }}</span>
-      <span v-else-if="state.loading" class="text-[11px] text-warm-500 dark:text-warm-400">loading…</span>
-      <span v-else-if="!state.wsConnected" class="text-[11px] text-amber">live updates offline · polling fallback</span>
+    <!-- Title strip — adapts to density.
+         Regular: full title + status text + 3 colored "+" pill buttons + help hint.
+         Compact: icon + short title + status icon + single "+" overflow menu (no help hint). -->
+    <div class="shrink-0 px-2 sm:px-4 py-2 border-b border-warm-200/60 dark:border-warm-800/60 flex items-center gap-2 sm:gap-3">
+      <div class="i-carbon-network-3 text-iolite text-base shrink-0" />
+      <h1 class="text-sm font-semibold text-warm-800 dark:text-warm-200 truncate">{{ isCompact ? "Canvas" : "Runtime Canvas" }}</h1>
 
-      <!-- Add buttons — drop a fresh node at the visible viewport
-           centre so the user sees it appear without panning. -->
-      <div class="flex items-center gap-1.5 ml-2">
-        <button class="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-iolite/10 text-iolite hover:bg-iolite/20 transition-colors" title="Add a new creature node at the viewport centre" @click="addNewNode('creature')">
-          <span class="i-carbon-add text-[12px]" />
-          Creature
-        </button>
-        <button class="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-aquamarine/15 text-aquamarine-dark dark:text-aquamarine-light hover:bg-aquamarine/25 transition-colors" title="Add a new channel node at the viewport centre" @click="addNewNode('channel')">
-          <span class="i-carbon-add text-[12px]" />
-          Channel
-        </button>
-        <button class="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-amber/15 text-amber-dark dark:text-amber-light hover:bg-amber/25 transition-colors" title="Add a new terrarium node at the viewport centre" @click="addNewNode('terrarium')">
-          <span class="i-carbon-add text-[12px]" />
-          Terrarium
-        </button>
-      </div>
+      <!-- Status — full text on regular, icon+tooltip on compact -->
+      <template v-if="!isCompact">
+        <span v-if="state.error" class="text-[11px] text-coral">{{ state.error }}</span>
+        <span v-else-if="state.loading" class="text-[11px] text-warm-500 dark:text-warm-400">loading…</span>
+        <span v-else-if="!state.wsConnected" class="text-[11px] text-amber">live updates offline · polling fallback</span>
+      </template>
+      <template v-else>
+        <span v-if="state.error" class="i-carbon-warning-alt text-coral text-base shrink-0" :title="state.error" />
+        <span v-else-if="state.loading" class="i-carbon-circle-dash text-warm-500 dark:text-warm-400 text-base shrink-0 animate-spin" title="loading…" />
+        <span v-else-if="!state.wsConnected" class="i-carbon-cloud-offline text-amber text-base shrink-0" title="live updates offline · polling fallback" />
+      </template>
 
-      <div class="ml-auto text-[11px] text-warm-500 dark:text-warm-400">drag the side handle of a card to weave a connection · click a midline toggle to flip a direction · drop a node out of its membrane to split</div>
+      <!-- Add buttons.
+           Regular: 3 inline pill buttons.
+           Compact: single "+" button → drop-down menu. -->
+      <template v-if="!isCompact">
+        <div class="flex items-center gap-1.5 ml-2">
+          <button class="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-iolite/10 text-iolite hover:bg-iolite/20 transition-colors" title="Add a new creature node at the viewport centre" @click="addNewNode('creature')">
+            <span class="i-carbon-add text-[12px]" />
+            Creature
+          </button>
+          <button class="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-aquamarine/15 text-aquamarine-dark dark:text-aquamarine-light hover:bg-aquamarine/25 transition-colors" title="Add a new channel node at the viewport centre" @click="addNewNode('channel')">
+            <span class="i-carbon-add text-[12px]" />
+            Channel
+          </button>
+          <button class="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-amber/15 text-amber-dark dark:text-amber-light hover:bg-amber/25 transition-colors" title="Add a new terrarium node at the viewport centre" @click="addNewNode('terrarium')">
+            <span class="i-carbon-add text-[12px]" />
+            Terrarium
+          </button>
+        </div>
+        <div class="ml-auto text-[11px] text-warm-500 dark:text-warm-400">drag the side handle of a card to weave a connection · click a midline toggle to flip a direction · drop a node out of its membrane to split</div>
+      </template>
+      <template v-else>
+        <div class="ml-auto relative">
+          <button class="w-8 h-8 flex items-center justify-center rounded text-iolite bg-iolite/10 hover:bg-iolite/20 transition-colors" title="Add node" @click="addMenuOpen = !addMenuOpen">
+            <span class="i-carbon-add-large text-base" />
+          </button>
+          <div v-if="addMenuOpen" class="absolute right-0 top-full mt-1 z-30 min-w-[10rem] rounded-md shadow-lg bg-white dark:bg-warm-800 border border-warm-200 dark:border-warm-700 py-1" @click.stop>
+            <button class="w-full flex items-center gap-2 px-3 py-2 text-sm text-iolite hover:bg-iolite/10" @click="onAddPick('creature')">
+              <span class="i-carbon-bot text-base" />
+              <span>Creature</span>
+            </button>
+            <button class="w-full flex items-center gap-2 px-3 py-2 text-sm text-aquamarine-dark dark:text-aquamarine-light hover:bg-aquamarine/15" @click="onAddPick('channel')">
+              <span class="i-carbon-flow-connection text-base" />
+              <span>Channel</span>
+            </button>
+            <button class="w-full flex items-center gap-2 px-3 py-2 text-sm text-amber-dark dark:text-amber-light hover:bg-amber/15" @click="onAddPick('terrarium')">
+              <span class="i-carbon-network-4 text-base" />
+              <span>Terrarium</span>
+            </button>
+          </div>
+        </div>
+      </template>
     </div>
 
     <!-- Canvas -->
@@ -76,14 +110,26 @@
       <NameInputModal v-if="nameModal.open" :title="nameModal.title" :input-label="nameModal.inputLabel" :placeholder="nameModal.placeholder" :initial="nameModal.initial" :submit-label="nameModal.submitLabel" :hint="nameModal.hint" @submit="onNameSubmit" @close="onNameClose" />
     </div>
 
-    <!-- Bottom status strip -->
-    <div class="shrink-0 px-4 py-2 border-t border-warm-200/60 dark:border-warm-800/60 flex items-center gap-3 text-[11px] text-warm-500 dark:text-warm-400">
-      <span>{{ statusLine }}</span>
-      <div class="ml-auto flex items-center gap-3">
-        <span>nodes {{ state.nodes.length }}</span>
-        <span>groups {{ state.groups.length }}</span>
-        <span>connections {{ state.connections.length }}</span>
-        <button class="px-2 py-0.5 rounded bg-warm-200/60 dark:bg-warm-800/60 hover:bg-warm-300/60 dark:hover:bg-warm-700/60 text-warm-600 dark:text-warm-300" title="Re-fetch the runtime graph snapshot" @click="refreshSnapshot">refresh</button>
+    <!-- Bottom status strip — abridged on compact (icons + counts only). -->
+    <div class="shrink-0 px-2 sm:px-4 py-2 border-t border-warm-200/60 dark:border-warm-800/60 flex items-center gap-2 sm:gap-3 text-[11px] text-warm-500 dark:text-warm-400">
+      <span v-if="!isCompact">{{ statusLine }}</span>
+      <div class="ml-auto flex items-center gap-2 sm:gap-3">
+        <span class="flex items-center gap-1" :title="`${state.nodes.length} nodes`">
+          <span class="i-carbon-circle-solid text-[8px]" />
+          <span>{{ state.nodes.length }}</span>
+        </span>
+        <span class="flex items-center gap-1" :title="`${state.groups.length} groups`">
+          <span class="i-carbon-group-objects text-[10px]" />
+          <span>{{ state.groups.length }}</span>
+        </span>
+        <span class="flex items-center gap-1" :title="`${state.connections.length} connections`">
+          <span class="i-carbon-connect text-[10px]" />
+          <span>{{ state.connections.length }}</span>
+        </span>
+        <button class="px-2 py-0.5 rounded bg-warm-200/60 dark:bg-warm-800/60 hover:bg-warm-300/60 dark:hover:bg-warm-700/60 text-warm-600 dark:text-warm-300" :title="isCompact ? 'Refresh' : 'Re-fetch the runtime graph snapshot'" @click="refreshSnapshot">
+          <span v-if="isCompact" class="i-carbon-renew text-[12px]" />
+          <span v-else>refresh</span>
+        </button>
       </div>
     </div>
   </div>
@@ -101,6 +147,7 @@ import RuntimeInlineMenu from "@/components/graph-editor/RuntimeInlineMenu.vue"
 import RuntimeMolecule from "@/components/graph-editor/RuntimeMolecule.vue"
 import RuntimeNodeCard from "@/components/graph-editor/RuntimeNodeCard.vue"
 import NameInputModal from "@/components/graph-editor/NameInputModal.vue"
+import { useDensity } from "@/composables/useDensity"
 import { FREE_STACK, NODE_HEIGHT, NODE_WIDTH, Z_BANDS, useRuntimeGraphStore } from "@/stores/runtimeGraph"
 import { useTabsStore } from "@/stores/tabs"
 import { agentAPI, terrariumAPI } from "@/utils/api"
@@ -111,6 +158,15 @@ const { state } = editor
 const { nodeById, groupById, nodesByGroup } = storeToRefs(editor)
 const { groupBounds, selectNode, selectGroup, selectConnection, clearSelection, addNode, addFreeChannel, registerCreateHook, moveNode, moveGroup, setRouteOffset, removeNodeFromGroup, joinGroup, dissolveGroup: dissolveGroupAction, connect, toggleDirection, deleteConnection, zoomBy, pan, resetView, loadSnapshot, startPolling, stopPolling, startLive, stopLive, toggleGroupCollapse, pushLog, stackZBase } = editor
 const tabsStore = useTabsStore()
+const { isCompact } = useDensity()
+// Compact-density "+" overflow menu — collapses the three colored
+// add-buttons (Creature/Channel/Terrarium) into one drop-down so the
+// title strip fits a 375px viewport.
+const addMenuOpen = ref(false)
+function onAddPick(kind) {
+  addMenuOpen.value = false
+  addNewNode(kind)
+}
 
 // Modal mount points — reused from the v2 quick-rail flow so we don't
 // duplicate the creature/terrarium creation form here.
@@ -293,21 +349,26 @@ function onConnectStart({ id, clientX, clientY, sourceX, sourceY }) {
   const sy = typeof sourceY === "number" ? sourceY : clientY
   pendingWire.value = buildWire(sx, sy, clientX, clientY)
 
+  // Pointer events (not mouse-only) so the ghost-wire drag works
+  // for touch and pen input as well — the same handler runs for any
+  // pointerType.
   const onMove = (ev) => {
     pendingWire.value = buildWire(sx, sy, ev.clientX, ev.clientY)
     const hover = pickNodeTarget(ev.clientX, ev.clientY, id)
     state.pendingDropTarget = hover ? { kind: "node", id: hover } : null
   }
   const onUp = (ev) => {
-    window.removeEventListener("mousemove", onMove)
-    window.removeEventListener("mouseup", onUp)
+    window.removeEventListener("pointermove", onMove)
+    window.removeEventListener("pointerup", onUp)
+    window.removeEventListener("pointercancel", onUp)
     const target = pickNodeTarget(ev.clientX, ev.clientY, id)
     pendingWire.value = null
     state.pendingDropTarget = null
     if (target) connect(id, target)
   }
-  window.addEventListener("mousemove", onMove)
-  window.addEventListener("mouseup", onUp)
+  window.addEventListener("pointermove", onMove)
+  window.addEventListener("pointerup", onUp)
+  window.addEventListener("pointercancel", onUp)
 }
 
 // Group drag ------------------------------------------------------

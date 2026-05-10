@@ -1,5 +1,5 @@
 <template>
-  <div ref="root" class="absolute select-none transition-shadow" :class="[dragging && 'cursor-grabbing']" :style="positionStyle" :data-node-id="node.id" @mouseenter="hovered = true" @mouseleave="hovered = false" @mousedown.stop="onMouseDown" @click.stop="onClick" @contextmenu.prevent.stop="onContextMenu">
+  <div ref="root" class="absolute select-none transition-shadow" :class="[dragging && 'cursor-grabbing']" :style="positionStyle" :data-node-id="node.id" @pointerenter="onPointerEnter" @pointerleave="hovered = false" @pointerdown.stop="onPointerDown" @click.stop="onClick" @contextmenu.prevent.stop="onContextMenu">
     <div class="border bg-warm-50 dark:bg-warm-900 transition-all" :class="[isChannel ? 'rounded-none' : 'rounded-xl', selected ? 'border-iolite ring-2 ring-iolite/40 shadow-lg shadow-iolite/10' : 'border-warm-300/70 dark:border-warm-700/70 hover:border-iolite/60 shadow-sm', dropTarget && 'ring-2 ring-iolite/60 border-iolite']" :style="{ width: width + 'px', height: height + 'px', clipPath: cardClipPath }">
       <div class="flex items-center gap-2 h-full" :class="isChannel ? 'px-5 py-2' : 'px-3 py-2'">
         <span class="relative flex shrink-0 items-center justify-center w-7 h-7" :class="[kindBg, isChannel ? 'rounded-full' : 'rounded-lg']">
@@ -19,7 +19,7 @@
          hover) so users can discover the gesture. The decoration's
          z-index sits at the very top of THIS group's band so it
          doesn't poke up through other groups. -->
-    <div class="absolute -right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full border-2 border-warm-50 dark:border-warm-900 shadow flex items-center justify-center cursor-crosshair transition-all" :style="{ zIndex: zDecoration }" :class="[hovered || selected ? 'bg-iolite scale-110' : 'bg-warm-300 dark:bg-warm-700 opacity-70 hover:opacity-100']" title="Drag to connect to another node" @mousedown.stop="onConnectHandleDown" @click.stop>
+    <div class="absolute -right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full border-2 border-warm-50 dark:border-warm-900 shadow flex items-center justify-center cursor-crosshair transition-all" :style="{ zIndex: zDecoration }" :class="[hovered || selected ? 'bg-iolite scale-110' : 'bg-warm-300 dark:bg-warm-700 opacity-70 hover:opacity-100']" title="Drag to connect to another node" @pointerdown.stop="onConnectHandleDown" @click.stop>
       <div class="i-carbon-connect text-[10px] text-warm-50" />
     </div>
 
@@ -27,11 +27,11 @@
          pill containing all actions with a clear background and a
          shadow so it stands out against the canvas. -->
     <div v-if="selected || hovered" class="absolute -bottom-3.5 left-1/2 -translate-x-1/2 flex items-stretch rounded-lg overflow-hidden bg-warm-50 dark:bg-warm-900 border border-warm-300/80 dark:border-warm-700/80 shadow-md" :style="{ zIndex: zDecoration }">
-      <button class="w-8 h-7 flex items-center justify-center text-warm-600 dark:text-warm-300 hover:text-iolite hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors" title="More options" @mousedown.stop @click.stop="$emit('open-menu', node.id, $event)">
+      <button class="w-8 h-7 flex items-center justify-center text-warm-600 dark:text-warm-300 hover:text-iolite hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors" title="More options" @pointerdown.stop @click.stop="$emit('open-menu', node.id, $event)">
         <div class="i-carbon-overflow-menu-vertical text-base" />
       </button>
       <div class="w-px bg-warm-200/80 dark:bg-warm-700/80" />
-      <button class="w-8 h-7 flex items-center justify-center text-warm-600 dark:text-warm-300 hover:text-amber hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" :disabled="!node.groupId" :title="node.groupId ? 'Split out of group' : 'Not in a group'" @mousedown.stop @click.stop="node.groupId && $emit('split', node.id)">
+      <button class="w-8 h-7 flex items-center justify-center text-warm-600 dark:text-warm-300 hover:text-amber hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" :disabled="!node.groupId" :title="node.groupId ? 'Split out of group' : 'Not in a group'" @pointerdown.stop @click.stop="node.groupId && $emit('split', node.id)">
         <div class="i-carbon-cut text-base" />
       </button>
     </div>
@@ -123,12 +123,44 @@ const statusDotClass = computed(() => {
 
 let dragStart = null
 let suppressClick = false
+let longPressTimer = null
+const LONG_PRESS_MS = 500
+const LONG_PRESS_MOVE_TOLERANCE = 8
 
-function onMouseDown(e) {
+function clearLongPress() {
+  if (longPressTimer != null) {
+    clearTimeout(longPressTimer)
+    longPressTimer = null
+  }
+}
+
+function onPointerEnter(e) {
+  // Treat hover-state as mouse-only — touch interactions toggle
+  // hovered=true on tap then false on lift, which would make the
+  // action chip flash on/off. For touch, the chip relies on
+  // `selected` (set on tap) instead.
+  if (e.pointerType === "touch") return
+  hovered.value = true
+}
+
+function onPointerDown(e) {
+  // Left button equivalent across pointer types: button 0 for mouse,
+  // button 0 (default) for touch as well.
   if (e.button !== 0) return
   dragStart = { x: e.clientX, y: e.clientY, dx: 0, dy: 0 }
   suppressClick = false
   emit("drag-start", { id: props.node.id, event: e })
+
+  // Long-press → context menu (touch primarily; works for mouse too).
+  // Cancelled by movement past the tolerance or by pointerup before
+  // the timer fires.
+  clearLongPress()
+  longPressTimer = setTimeout(() => {
+    longPressTimer = null
+    if (dragging.value) return
+    suppressClick = true
+    emit("open-menu", props.node.id, e)
+  }, LONG_PRESS_MS)
 
   const onMove = (ev) => {
     const dx = (ev.clientX - dragStart.x) / props.zoom
@@ -136,6 +168,17 @@ function onMouseDown(e) {
     if (!dragging.value && (Math.abs(dx) > 2 || Math.abs(dy) > 2)) {
       dragging.value = true
       suppressClick = true
+      // Real drag started — cancel pending long-press.
+      clearLongPress()
+    }
+    // Cancel long-press if movement exceeded tolerance even before
+    // the drag-start threshold (touch pointers can shake slightly).
+    if (longPressTimer != null) {
+      const absX = Math.abs(ev.clientX - dragStart.x)
+      const absY = Math.abs(ev.clientY - dragStart.y)
+      if (absX > LONG_PRESS_MOVE_TOLERANCE || absY > LONG_PRESS_MOVE_TOLERANCE) {
+        clearLongPress()
+      }
     }
     if (dragging.value) {
       const ddx = dx - dragStart.dx
@@ -152,21 +195,24 @@ function onMouseDown(e) {
     }
   }
   const onUp = (ev) => {
-    window.removeEventListener("mousemove", onMove)
-    window.removeEventListener("mouseup", onUp)
+    window.removeEventListener("pointermove", onMove)
+    window.removeEventListener("pointerup", onUp)
+    window.removeEventListener("pointercancel", onUp)
+    clearLongPress()
     if (dragging.value) {
       emit("drag-end", { id: props.node.id, clientX: ev.clientX, clientY: ev.clientY })
     }
     dragging.value = false
     dragStart = null
   }
-  window.addEventListener("mousemove", onMove)
-  window.addEventListener("mouseup", onUp)
+  window.addEventListener("pointermove", onMove)
+  window.addEventListener("pointerup", onUp)
+  window.addEventListener("pointercancel", onUp)
 }
 
 function onConnectHandleDown(e) {
   if (e.button !== 0) return
-  // Read the handle's actual screen rect at mousedown time and pass
+  // Read the handle's actual screen rect at pointerdown time and pass
   // its centre along. Lets the parent draw the ghost wire from the
   // exact handle position without doing any canvas-coord math (which
   // bit us repeatedly because of pan/zoom / scaled-SVG quirks).
