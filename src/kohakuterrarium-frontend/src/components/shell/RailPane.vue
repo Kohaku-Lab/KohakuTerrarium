@@ -36,7 +36,6 @@
       <div class="mx-2 border-t border-warm-200 dark:border-warm-700" />
       <div class="flex items-center justify-between gap-2 px-3 py-2">
         <button class="w-5 h-5 flex items-center justify-center text-warm-400 hover:text-warm-700" :class="theme.dark ? 'i-carbon-sun' : 'i-carbon-moon'" :title="theme.dark ? t('shell.rail.themeToLight') : t('shell.rail.themeToDark')" @click="theme.toggle()" />
-        <UIVersionToggle />
         <button class="text-[10px] uppercase tracking-wider text-warm-400 hover:text-warm-700" :title="t('shell.rail.cycleLocale')" @click="cycleLocale">
           {{ locale.current ?? "en" }}
         </button>
@@ -54,7 +53,6 @@ import RailGroupTop from "@/components/shell/RailGroupTop.vue"
 import RailGroupAttached from "@/components/shell/RailGroupAttached.vue"
 import RailGroupQuick from "@/components/shell/RailGroupQuick.vue"
 import RailGroupPinned from "@/components/shell/RailGroupPinned.vue"
-import UIVersionToggle from "@/components/common/UIVersionToggle.vue"
 import { useRailWidth } from "@/composables/useRailWidth"
 import { useThemeStore } from "@/stores/theme"
 import { useLocaleStore } from "@/stores/locale"

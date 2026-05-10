@@ -18,6 +18,27 @@ const router = createRouter({
   routes,
 })
 
+// Backward-compat guard for bookmarks to retired URLs. v1's NavRail
+// page-per-route tree (`/instances/<id>`, `/sessions`, `/settings`,
+// `/registry`, `/studio/*`, `/new`) and the `/mobile/*` mobile page
+// tree are gone — anyone hitting those gets quietly sent to "/" so
+// MacroShell can take over and restore tabs from persistence.
+const RETIRED_PREFIXES = [
+  "/mobile",
+  "/instances",
+  "/sessions",
+  "/settings",
+  "/registry",
+  "/studio",
+  "/new",
+]
+router.beforeEach((to) => {
+  if (RETIRED_PREFIXES.some((p) => to.path === p || to.path.startsWith(p + "/"))) {
+    return "/"
+  }
+  return undefined
+})
+
 async function bootstrap() {
   await ensureUIPrefsLoaded()
 

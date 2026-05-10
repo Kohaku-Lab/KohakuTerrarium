@@ -154,8 +154,6 @@
             <dt class="text-warm-500">KT version</dt>
             <dd class="text-warm-700 dark:text-warm-300 font-mono">{{ serverInfo.version }}</dd>
           </template>
-          <dt class="text-warm-500">UI version</dt>
-          <dd class="text-warm-700 dark:text-warm-300">{{ uiVersion }}</dd>
         </dl>
         <div v-else class="text-warm-400 italic text-sm">{{ t("shell.stats.loading") }}</div>
       </section>
@@ -256,7 +254,6 @@ import { useInstancesStore } from "@/stores/instances"
 import { useStatusStore } from "@/stores/status"
 import { configAPI, settingsAPI, statsAPI } from "@/utils/api"
 import { useI18n } from "@/utils/i18n"
-import { getUIVersion } from "@/utils/uiVersion"
 
 const { t } = useI18n()
 
@@ -397,7 +394,6 @@ async function loadMcp() {
 
 // ── System info ────────────────────────────────────────────────
 const serverInfo = ref(null)
-const uiVersion = computed(() => getUIVersion())
 
 async function loadServerInfo() {
   try {
