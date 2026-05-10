@@ -28,11 +28,25 @@
         </button>
       </div>
 
-      <!-- Token usage + session info for active tab -->
-      <div v-if="activeTokens > 0 || chat.modelDisplay" class="flex items-center gap-2 px-2 py-2 -mb-px text-[10px] text-warm-400 font-mono">
-        <template v-if="chat.modelDisplay">
+      <!-- Model switcher — only mounted on compact density. The
+           regular shell shows the switcher in StatusBar at the
+           bottom of the workspace, so a duplicate in the chat
+           header would be redundant (and the variation summary
+           overflows badly in this narrow slot anyway). On compact
+           StatusBar isn't rendered, so this is the user's primary
+           access point for changing model. -->
+      <div v-if="isCompact && props.instance?.id && !readOnly" class="flex items-center px-2 py-1 -mb-px chat-model-switcher">
+        <ModelSwitcher :instance-id="props.instance.id" />
+      </div>
+
+      <!-- Token usage + session info for active tab. The model name
+           text remains for non-compact contexts (where the
+           StatusBar handles model switching) and for read-only
+           viewers (no instance id). -->
+      <div v-if="activeTokens > 0 || (!isCompact && chat.modelDisplay) || (!props.instance?.id && chat.modelDisplay) || readOnly" class="flex items-center gap-2 px-2 py-2 -mb-px text-[10px] text-warm-400 font-mono">
+        <template v-if="(!isCompact || !props.instance?.id || readOnly) && chat.modelDisplay">
           <span class="text-warm-500 dark:text-warm-400">{{ chat.modelDisplay }}</span>
-          <span class="text-warm-300 dark:text-warm-600">|</span>
+          <span v-if="activeTokens > 0" class="text-warm-300 dark:text-warm-600">|</span>
         </template>
         <template v-if="activeTokens > 0">
           <span class="i-carbon-meter text-amber" />
@@ -159,6 +173,8 @@ import { ElMessage, ElMessageBox } from "element-plus"
 
 import StatusDot from "@/components/common/StatusDot.vue"
 import ChatMessage from "@/components/chat/ChatMessage.vue"
+import ModelSwitcher from "@/components/chrome/ModelSwitcher.vue"
+import { useDensity } from "@/composables/useDensity"
 import { useChatStore } from "@/stores/chat"
 import { useI18n } from "@/utils/i18n"
 import { terrariumAPI, agentAPI } from "@/utils/api"
@@ -176,6 +192,11 @@ const props = defineProps({
 
 const chat = useChatStore()
 const { t } = useI18n()
+// Compact density renders the chat header model pill (since the
+// StatusBar — which has its own ModelSwitcher — is hidden in the
+// compact shell). Regular/expansive density already shows the
+// switcher in StatusBar so this header-mounted copy is redundant.
+const { isCompact } = useDensity()
 const inputText = ref("")
 const messagesEl = ref(null)
 const inputEl = ref(null)
@@ -577,5 +598,25 @@ onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown))
 <style scoped>
 .chat-messages-viewport {
   container-type: size;
+}
+
+/* ModelSwitcher's pill defaults to min-width: 12rem which is too
+   wide for the chat tab-bar header on compact viewports. Shrink
+   here without touching the global StatusBar usage. The variation
+   summary is hidden in this context — it overflows badly in the
+   narrow slot, and the user can still see/change variations from
+   the picker popover itself. */
+.chat-model-switcher :deep(.model-pill) {
+  min-width: 0;
+  max-width: 14rem;
+  padding: 0.15rem 0.45rem;
+  min-height: 24px;
+  gap: 0.35rem;
+}
+.chat-model-switcher :deep(.model-pill-variation) {
+  display: none;
+}
+.chat-model-switcher :deep(.target-select) {
+  width: 7rem;
 }
 </style>

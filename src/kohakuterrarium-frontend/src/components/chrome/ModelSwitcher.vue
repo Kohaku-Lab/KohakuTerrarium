@@ -12,7 +12,7 @@
           <span v-if="loading && !models.length" class="text-warm-400 text-[11px]">Loading models…</span>
           <template v-else>
             <span class="font-mono text-[11px] truncate max-w-[18rem]">{{ currentLabel || "No model" }}</span>
-            <span v-if="currentVariationSummary" class="text-[10px] text-warm-400 shrink-0">
+            <span v-if="currentVariationSummary" class="model-pill-variation text-[10px] text-warm-400 shrink-0">
               {{ currentVariationSummary }}
             </span>
             <el-icon class="shrink-0 text-warm-400"><ArrowDown /></el-icon>

@@ -46,6 +46,7 @@
 
 <script setup>
 import ChatPanel from "@/components/chat/ChatPanel.vue"
+import { useDensity } from "@/composables/useDensity"
 import { useChatStore, _convertHistory, _replayEvents } from "@/stores/chat"
 import { useSessionDetailStore } from "@/stores/sessionDetail"
 import { sessionAPI } from "@/utils/api"
@@ -54,7 +55,12 @@ const props = defineProps({
   embedded: { type: Boolean, default: false },
 })
 
-const isMobile = inject("mobileLayout", false)
+// `goBack()` routes to either the v1 mobile sessions URL (kept for the
+// legacy /sessions/:name page) or the desktop equivalent. Density is
+// the right signal: compact users land on /mobile/sessions when v1 is
+// still active; once v1 retires the route guard rewrites it anyway.
+const { isCompact } = useDensity()
+const isMobile = isCompact
 const route = useRoute()
 const router = useRouter()
 const chat = useChatStore()
@@ -85,7 +91,7 @@ const viewerInstance = computed(() => {
 })
 
 function goBack() {
-  router.push(isMobile ? "/mobile/sessions" : "/sessions")
+  router.push(isMobile.value ? "/mobile/sessions" : "/sessions")
 }
 
 function resetViewer() {

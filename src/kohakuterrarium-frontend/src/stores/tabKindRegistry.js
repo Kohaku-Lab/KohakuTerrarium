@@ -34,11 +34,21 @@ export const BUILTIN_KINDS = [
   "code-editor",
 ]
 
-export function registerTabKind({ kind, component, capabilities = {} }) {
+/**
+ * Register a tab kind.
+ *
+ * `minDensity` (optional, default "compact") gates rendering at
+ * narrow viewports. Tab kinds that fundamentally need horizontal room
+ * (Studio's file-tree + Monaco, Catalog's master-detail browse)
+ * declare "regular"; the shell renders an UnderDensityPlaceholder
+ * with an override button instead of the real component when current
+ * density falls below this threshold.
+ */
+export function registerTabKind({ kind, component, capabilities = {}, minDensity = "compact" }) {
   if (tabKinds.has(kind)) {
     console.warn(`tab kind ${kind} already registered; overwriting`)
   }
-  tabKinds.set(kind, { component, capabilities })
+  tabKinds.set(kind, { component, capabilities, minDensity })
 }
 
 export function registerInspectorInnerTab({ id, component, label, order = 100 }) {

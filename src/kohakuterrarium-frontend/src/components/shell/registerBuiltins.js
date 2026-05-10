@@ -66,7 +66,13 @@ export function registerBuiltinTabKinds() {
   registerTabKind({ kind: "session-viewer", component: SessionViewerTab })
   registerTabKind({ kind: "saved-sessions", component: SavedSessionsTab })
   registerTabKind({ kind: "stats", component: StatsTab })
-  registerTabKind({ kind: "studio-editor", component: StudioEditorTab })
+  // Studio uses a file-tree + Monaco master-detail layout that
+  // genuinely needs horizontal room — Monaco on a phone is fiddly
+  // even ignoring the missing tree pane. On compact it shows an
+  // UnderDensityPlaceholder with a "switch to desktop mode" button.
+  // Catalog/Registry already reflows via Tailwind grid breakpoints
+  // (1 → 2 → 3 columns) so no gating needed.
+  registerTabKind({ kind: "studio-editor", component: StudioEditorTab, minDensity: "regular" })
   registerTabKind({ kind: "catalog", component: CatalogTab })
   registerTabKind({ kind: "settings", component: SettingsTab })
   registerTabKind({ kind: "code-editor", component: CodeEditorTab })

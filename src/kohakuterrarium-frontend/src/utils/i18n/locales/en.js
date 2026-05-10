@@ -58,6 +58,13 @@ export default {
   "common.local": "Local",
   "common.memory": "Memory",
   "common.mobileView": "Mobile view",
+
+  "density.thisView": "this view",
+  "density.useDesktopMode": "Switch to desktop mode",
+  "density.needsLargerScreen.title": "Needs a larger screen",
+  "density.needsLargerScreen.message": ({ panel }) =>
+    `${panel} works best on a wider window. Switch to desktop mode to use it here, or open this app on a larger screen.`,
+
   "common.model": "Model",
   "common.name": "Name",
   "common.noInstances": "No instances",
@@ -196,6 +203,7 @@ export default {
   "settings.models.storageHint":
     "Custom model profiles are stored in ~/.kohakuterrarium/llm_profiles.yaml",
   "settings.models.deleteConfirm": "Delete this profile?",
+  "settings.models.backToList": "Back to list",
   "settings.models.none": "No custom profiles yet",
   "settings.models.editProfile": "Edit Profile",
   "settings.models.addCustomModel": "Add Custom Model",

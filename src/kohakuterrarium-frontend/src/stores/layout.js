@@ -54,6 +54,11 @@ const PRESET_TREE_PREFIX = "kt.layout.tree."
 const INSTANCE_OVERRIDE_PREFIX = "kt.layout.instance."
 const BACKEND_TREES_KEY = "kt.layout.trees"
 const BACKEND_INSTANCES_KEY = "kt.layout.instances"
+// Compact-density: per-scope memory of which panel is currently
+// visible in the single-panel + tab-bar shell. The tree preset is
+// authoritative for *which* panels exist; this just tracks the
+// user's current selection within them.
+const COMPACT_ACTIVE_KEY = "kt.layout.compactActive"
 
 function _readJson(key, fallback) {
   return getHybridPrefSync(key, fallback, { json: true })
@@ -279,11 +284,19 @@ function _setupForScope(scope) {
   return () => {
     _refreshUserPresets()
     const activeKey = scope ? `${ACTIVE_PRESET_KEY}:${scope}` : ACTIVE_PRESET_KEY
+    const compactActiveKey = scope ? `${COMPACT_ACTIVE_KEY}:${scope}` : COMPACT_ACTIVE_KEY
     // Per-scope reactive state.
     const activePresetId = ref(_readJson(activeKey, null))
+    const compactActivePanelId = ref(_readJson(compactActiveKey, null))
     const editMode = ref(false)
     const editModeSnapshot = ref(null)
     const editModeDirty = ref(false)
+
+    function setCompactActivePanel(panelId) {
+      compactActivePanelId.value = panelId || null
+      if (panelId) _writeJson(compactActiveKey, panelId)
+      else _writeJson(compactActiveKey, null)
+    }
 
     const activePreset = computed(() => {
       if (!activePresetId.value) return null
@@ -602,9 +615,11 @@ function _setupForScope(scope) {
       detachedPanels: _detachedPanels,
       // per-scope state
       activePresetId,
+      compactActivePanelId,
       editMode,
       editModeSnapshot,
       editModeDirty,
+      setCompactActivePanel,
       // getters
       allPresets: _allPresets,
       activePreset,

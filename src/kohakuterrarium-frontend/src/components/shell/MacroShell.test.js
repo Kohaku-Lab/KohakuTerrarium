@@ -114,6 +114,42 @@ describe("MacroShell — render", () => {
   })
 })
 
+describe("MacroShell — density branch", () => {
+  it("renders CompactShell (not RailPane) at compact density", async () => {
+    // Narrow viewport BEFORE the composable initializes.
+    window.innerWidth = 600
+    const { _resetDensityForTests } = await import("@/composables/useDensity")
+    _resetDensityForTests()
+
+    const router = makeRouter()
+    const wrapper = mount(MacroShell, {
+      global: { plugins: [router] },
+    })
+    await router.isReady()
+    // CompactShell renders a hamburger + density-override button; the
+    // regular shell renders the BrandMark with full "Kohaku Terrarium"
+    // text and rail group entries like "No pinned tabs".
+    expect(wrapper.text()).not.toContain("No pinned tabs")
+
+    // Restore for downstream tests.
+    window.innerWidth = 1024
+    _resetDensityForTests()
+  })
+
+  it("renders the regular shell at desktop viewport", async () => {
+    window.innerWidth = 1024
+    const { _resetDensityForTests } = await import("@/composables/useDensity")
+    _resetDensityForTests()
+
+    const router = makeRouter()
+    const wrapper = mount(MacroShell, {
+      global: { plugins: [router] },
+    })
+    await router.isReady()
+    expect(wrapper.text()).toContain("No pinned tabs")
+  })
+})
+
 describe("MacroShell — surface indicators", () => {
   it("rail [C] click opens an attach tab; second click closes", async () => {
     const router = makeRouter()

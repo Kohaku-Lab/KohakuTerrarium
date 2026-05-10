@@ -1,6 +1,7 @@
 <template>
   <div v-if="instance" class="h-full overflow-hidden">
-    <WorkspaceShell :instance-id="target" @stop="confirmStop = true" />
+    <CompactWorkspaceShell v-if="isCompact" :instance-id="target" />
+    <WorkspaceShell v-else :instance-id="target" @stop="confirmStop = true" />
     <ConfirmStopDialog v-if="confirmStop" :instance="instance" @close="confirmStop = false" @stopped="onStopped" />
   </div>
   <div v-else class="h-full flex flex-col items-center justify-center text-secondary text-sm gap-2">
@@ -14,8 +15,10 @@
 import { computed, onMounted, onUnmounted, provide, ref, watch } from "vue"
 
 import WorkspaceShell from "@/components/layout/WorkspaceShell.vue"
+import CompactWorkspaceShell from "@/components/shell/CompactWorkspaceShell.vue"
 import ConfirmStopDialog from "@/components/shell/tabs/ConfirmStopDialog.vue"
 import { useArtifactDetector } from "@/composables/useArtifactDetector"
+import { useDensity } from "@/composables/useDensity"
 import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 import { provideScope } from "@/composables/useScope"
 import { useChatStore } from "@/stores/chat"
@@ -49,6 +52,7 @@ const chat = useChatStore(target.value)
 const editor = useEditorStore(target.value)
 const layout = useLayoutStore(target.value)
 const tabsStore = useTabsStore()
+const { isCompact } = useDensity()
 
 const isActiveAttachTab = computed(() => tabsStore.activeId === props.tab.id)
 
