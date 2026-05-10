@@ -3,9 +3,9 @@
 </template>
 
 <script setup>
-// Embed: pages/sessions/index.vue accepts onView/onResume callbacks
-// that win over its route-based defaults.
-import SessionsListPage from "@/pages/sessions/index.vue"
+// Embed: SessionsListPage accepts onView/onResume callbacks that win
+// over its route-based defaults.
+import SessionsListPage from "@/components/sessions/pages/SessionsListPage.vue"
 
 import { useTabsStore } from "@/stores/tabs"
 

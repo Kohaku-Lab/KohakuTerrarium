@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest"
 
 describe("studio home placeholder", () => {
   it("module loads", async () => {
-    const mod = await import("./index.vue")
+    const mod = await import("./StudioHomePage.vue")
     expect(mod.default).toBeTruthy()
   })
 })

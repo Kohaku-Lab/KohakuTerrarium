@@ -3,8 +3,8 @@
 </template>
 
 <script setup>
-// Thin embed: settings.vue is a self-contained page (no route params).
-import SettingsPage from "@/pages/settings.vue"
+// Thin embed: SettingsPage is a self-contained component.
+import SettingsPage from "@/components/settings/SettingsPage.vue"
 
 defineProps({ tab: { type: Object, required: true } })
 </script>

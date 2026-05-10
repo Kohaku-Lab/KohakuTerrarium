@@ -137,14 +137,15 @@ function previewText(session, limit = 200) {
   return extractTextPreview(session?.preview, limit)
 }
 
-// Optional embed callbacks — when this page is mounted as a v2 tab
-// (SavedSessionsTab), the host passes navigation callbacks instead of
-// relying on vue-router. v1 page callers use the route-based fallback.
+// Embed callbacks from SavedSessionsTab — the v2 macro shell mounts
+// this component and passes navigation callbacks rather than relying
+// on vue-router. The route-fallback branches below are kept as a
+// no-op safety net (they push to retired URLs that the main router
+// guard rewrites to "/").
 const props = defineProps({
   onView: { type: Function, default: null },
   onResume: { type: Function, default: null },
 })
-const isMobile = inject("mobileLayout", false)
 const router = useRouter()
 const instances = useInstancesStore()
 const { t } = useI18n()
@@ -209,7 +210,7 @@ function viewSession(session) {
     props.onView(session)
     return
   }
-  router.push(isMobile ? `/mobile/sessions/${session.name}` : `/sessions/${session.name}`)
+  router.push(`/sessions/${session.name}`)
 }
 
 async function resumeSession(session) {
@@ -222,7 +223,7 @@ async function resumeSession(session) {
       props.onResume({ session, result })
       return
     }
-    router.push(isMobile ? `/mobile/${result.instance_id}` : `/instances/${result.instance_id}`)
+    router.push(`/instances/${result.instance_id}`)
   } catch (err) {
     ElMessage.error(t("sessions.resumeFailed", { message: err.response?.data?.detail || err.message }))
   } finally {

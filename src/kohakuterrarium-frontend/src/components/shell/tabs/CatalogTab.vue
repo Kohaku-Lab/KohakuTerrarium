@@ -3,8 +3,8 @@
 </template>
 
 <script setup>
-// Thin embed: registry.vue is a self-contained page (no route params).
-import RegistryPage from "@/pages/registry.vue"
+// Thin embed: RegistryPage is a self-contained component.
+import RegistryPage from "@/components/registry/RegistryPage.vue"
 
 defineProps({ tab: { type: Object, required: true } })
 </script>

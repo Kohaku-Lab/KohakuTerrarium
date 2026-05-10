@@ -21,10 +21,10 @@
 <script setup>
 import { computed, provide } from "vue"
 
-import StudioHomePage from "@/pages/studio/index.vue"
-import StudioWorkspacePage from "@/pages/studio/workspace/[path].vue"
-import StudioCreaturePage from "@/pages/studio/creature/[name].vue"
-import StudioModulePage from "@/pages/studio/module/[kind]/[name].vue"
+import StudioHomePage from "@/components/studio/pages/StudioHomePage.vue"
+import StudioWorkspacePage from "@/components/studio/pages/StudioWorkspacePage.vue"
+import StudioCreaturePage from "@/components/studio/pages/StudioCreaturePage.vue"
+import StudioModulePage from "@/components/studio/pages/StudioModulePage.vue"
 import { STUDIO_NAV_INJECT_KEY } from "@/composables/useStudioNav"
 import { useTabsStore } from "@/stores/tabs"
 import { buildStudioTabId } from "@/utils/tabsUrl"

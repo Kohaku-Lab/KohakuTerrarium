@@ -1,7 +1,6 @@
 /**
  * Isolation contract: non-studio frontend code must not import
- * from studio subtrees. The only permitted touch point is
- * components/layout/NavRail.vue (T2) which links to /studio.
+ * from studio subtrees.
  *
  * Mirrors tests/unit/test_studio_independence.py on the backend.
  */
@@ -16,7 +15,6 @@ const SRC_ROOT = path.resolve(__dirname, "..")
 
 // Subtrees owned by studio — nothing outside of them may import from them.
 const STUDIO_DIRS = [
-  path.join(SRC_ROOT, "pages", "studio"),
   path.join(SRC_ROOT, "components", "studio"),
   path.join(SRC_ROOT, "stores", "studio"),
   path.join(SRC_ROOT, "composables", "studio"),
@@ -39,12 +37,10 @@ const ALLOWLIST = new Set([
 ])
 
 const STUDIO_IMPORT_PATTERNS = [
-  /from\s+["']@\/pages\/studio\//,
   /from\s+["']@\/components\/studio\//,
   /from\s+["']@\/stores\/studio\//,
   /from\s+["']@\/composables\/studio\//,
   /from\s+["']@\/utils\/studio\//,
-  /import\s+["']@\/pages\/studio\//,
   /import\s+["']@\/components\/studio\//,
   /import\s+["']@\/stores\/studio\//,
   /import\s+["']@\/composables\/studio\//,
@@ -101,11 +97,5 @@ describe("studio isolation contract", () => {
         true,
       )
     }
-  })
-
-  it("NavRail.vue links to /studio (touch point T2)", () => {
-    const navRail = path.join(SRC_ROOT, "components", "layout", "NavRail.vue")
-    const text = fs.readFileSync(navRail, "utf-8")
-    expect(text.includes('to="/studio"')).toBe(true)
   })
 })

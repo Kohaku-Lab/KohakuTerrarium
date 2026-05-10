@@ -134,10 +134,14 @@
         </div>
       </el-tab-pane>
 
-      <!-- ════════════════════════ Models (master-detail, scrollable list + fixed editor) ════════════════════════ -->
+      <!-- ════════════════════════ Models (master-detail, scrollable list + fixed editor) ════════════════════════
+           On compact density the side-by-side master-detail collapses
+           into a back/forward pattern: the list takes the full pane
+           until a preset is picked, then the editor takes the full
+           pane with a "← Back" button. -->
       <el-tab-pane :label="t('settings.tabs.models')" name="models" class="models-pane">
-        <div class="model-workspace">
-          <aside class="model-list-pane">
+        <div class="model-workspace" :class="{ 'is-compact': isCompact }">
+          <aside v-if="!isCompact || !showEditor" class="model-list-pane">
             <div class="model-list-head">
               <el-input v-model="presetSearch" size="small" placeholder="Search name/model…" clearable />
               <div class="flex items-center justify-between text-[11px] text-warm-400 mt-2">
@@ -168,7 +172,11 @@
             </div>
           </aside>
 
-          <section class="model-editor-pane">
+          <section v-if="!isCompact || showEditor" class="model-editor-pane">
+            <button v-if="isCompact && showEditor" type="button" class="model-back-button" @click="compactBackToList">
+              <span class="i-carbon-arrow-left" />
+              <span>{{ t("settings.models.backToList") }}</span>
+            </button>
             <PresetEditor v-if="showEditor" :preset="editorPreset" :backends="backends" :mode="editorMode" @save="handleSavePreset" @cancel="cancelEdit" @clone="clonePreset" @delete="confirmDeletePreset" />
             <div v-else class="model-editor-empty">
               <p class="text-sm">Select a preset on the left, or click "+ New" to create one.</p>
@@ -318,24 +326,6 @@
       <!-- ════════════════════════ Preferences ════════════════════════ -->
       <el-tab-pane :label="t('settings.tabs.prefs')" name="prefs">
         <div class="settings-pane flex flex-col gap-4 max-w-xl">
-          <!-- UI version picker (Classic v1 ↔ Workspace v2) -->
-          <div class="card p-4">
-            <div class="font-medium text-warm-700 dark:text-warm-300 mb-1">UI version</div>
-            <div class="text-xs text-warm-400 mb-3">KohakuTerrarium ships two UI shells this release. Pick whichever fits your workflow — they share the same backend and persisted state. Reload required after switch.</div>
-            <div class="flex flex-col gap-2">
-              <label v-for="v in UI_VERSIONS" :key="v.id" class="flex items-start gap-3 px-3 py-2 rounded border cursor-pointer transition-colors" :class="uiVersion === v.id ? 'border-iolite bg-iolite/5' : 'border-warm-200 dark:border-warm-700 hover:border-warm-300 dark:hover:border-warm-600'">
-                <input v-model="uiVersion" type="radio" :value="v.id" class="mt-1 accent-iolite" @change="onUIVersionChange(v.id)" />
-                <div class="flex-1 min-w-0">
-                  <div class="text-sm font-medium text-warm-800 dark:text-warm-200">
-                    {{ v.label }}
-                    <span class="text-[10px] uppercase tracking-wider text-warm-400 ml-1">{{ v.id }}</span>
-                  </div>
-                  <div class="text-xs text-warm-500 mt-0.5">{{ v.description }}</div>
-                </div>
-              </label>
-            </div>
-          </div>
-
           <div class="card p-4">
             <div class="font-medium text-warm-700 dark:text-warm-300 mb-3">{{ t("settings.prefs.appearance") }}</div>
             <div class="flex items-center justify-between mb-3">
@@ -388,26 +378,17 @@ import { ElMessage, ElMessageBox } from "element-plus"
 
 import BackendForm from "@/components/settings/BackendForm.vue"
 import PresetEditor from "@/components/settings/PresetEditor.vue"
+import { useDensity } from "@/composables/useDensity"
 import { LOCALE_DISPLAY_NAMES, SUPPORTED_LOCALES, useLocaleStore } from "@/stores/locale"
 import { DEFAULT_DESKTOP_ZOOM, DEFAULT_MOBILE_ZOOM, MAX_UI_ZOOM, MIN_UI_ZOOM, useThemeStore } from "@/stores/theme"
 import { useI18n } from "@/utils/i18n"
 import { configAPI, settingsAPI } from "@/utils/api"
-import { getUIVersion, setUIVersion, UI_VERSIONS } from "@/utils/uiVersion"
 
 const theme = useThemeStore()
 const localeStore = useLocaleStore()
 const { t } = useI18n()
+const { isCompact } = useDensity()
 const activeTab = ref("providers")
-
-// UI version picker — paired with rail footer toggles in both shells.
-const uiVersion = ref(getUIVersion())
-function onUIVersionChange(v) {
-  setUIVersion(v)
-  ElMessage.success(`UI version set to ${v} — reload to apply.`)
-  setTimeout(() => {
-    if (typeof window !== "undefined") window.location.reload()
-  }, 250)
-}
 
 const localeOptions = computed(() =>
   SUPPORTED_LOCALES.map((value) => ({
@@ -663,6 +644,13 @@ function cancelEdit() {
   editorPreset.value = null
 }
 
+// Compact-mode "back to list" — hides the editor pane without
+// clearing `selectedPresetKey`, so when the list re-appears the
+// previously selected row is still highlighted (one tap to re-open).
+function compactBackToList() {
+  showEditor.value = false
+}
+
 function clonePreset() {
   if (!editorPreset.value) return
   const base = editorPreset.value
@@ -855,6 +843,14 @@ watch(activeTab, (tab) => {
   overflow: hidden;
 }
 
+/* Reclaim horizontal room on compact viewports — the default 1.5rem
+   gutter leaves form fields cramped on a 375px screen. */
+@media (max-width: 767px) {
+  .settings-page {
+    padding: 0.75rem 0.75rem 0;
+  }
+}
+
 .settings-header {
   flex-shrink: 0;
   margin-bottom: 0.75rem;
@@ -906,6 +902,38 @@ watch(activeTab, (tab) => {
   flex-shrink: 0;
   border-right: 1px solid rgba(120, 109, 98, 0.18);
   min-height: 0;
+}
+
+/* Compact: list takes full width (no sidebar split) and the editor
+   takes full width when shown. v-if in the template handles which
+   pane renders; this just removes the fixed widths so each fills. */
+.model-workspace.is-compact .model-list-pane {
+  width: 100%;
+  border-right: none;
+}
+.model-workspace.is-compact .model-editor-pane {
+  width: 100%;
+}
+
+.model-back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.6rem;
+  margin-bottom: 0.75rem;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid rgba(120, 109, 98, 0.25);
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background 0.1s ease,
+    border-color 0.1s ease;
+}
+.model-back-button:hover {
+  background: rgba(120, 109, 98, 0.06);
+  border-color: rgba(120, 109, 98, 0.5);
 }
 
 .model-list-head {
