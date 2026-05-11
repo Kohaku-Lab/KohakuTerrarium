@@ -144,17 +144,38 @@ class AgentHandlersMixin(AgentToolsMixin):
                     self._parent_branch_path = list(self._parent_branch_path)
                     self._parent_branch_path.append((self._turn_index, self._branch_id))
                 self._turn_index += 1
-                self._branch_id = 1
-            # Record user input to session store. Pure regenerate (rerun
-            # with no new content) is a synthetic re-trigger of an existing
-            # user message, so we do NOT emit a fresh ``user_message``.
-            # Edit+rerun carries the new content (``edited=True``) and
-            # records normally — under the new branch_id so the navigator
-            # can flip back to the original.
+                # Collision-safe branch allocation. After the user has
+                # switched onto a non-latest branch and submits a fresh
+                # input, the event log may already carry events at this
+                # turn_index (the prior subtree's children). Resetting
+                # branch_id to 1 would collide on (turn, branch); the
+                # replay resolver in ``session/history.py`` dedupes
+                # turns by (turn, branch) and keeps the first occurrence
+                # — the orphaned events — which it then filters out as
+                # path-incompatible, dropping the whole new turn. Bump
+                # past anything existing to keep (turn, branch) globally
+                # unique. ``_max_branch_id_for_turn`` comes from the
+                # ``AgentMessagesMixin``; in narrow unit tests that mock
+                # ``Agent`` without the mixin we fall back to 1.
+                helper = getattr(self, "_max_branch_id_for_turn", None)
+                existing_max = helper(self._turn_index) if helper else 0
+                self._branch_id = existing_max + 1 if existing_max > 0 else 1
+            # Record user input to session store — fresh inputs only.
+            # Both pure regen and edit+rerun ride a TriggerEvent with
+            # ``rerun=True``; their event-log writes are owned by the
+            # ``AgentMessagesMixin`` callers
+            # (``regenerate_last_response``/``edit_and_rerun``) which
+            # have the correct branch_id + parent_branch_path already
+            # computed. Letting this block also run would DOUBLE-append
+            # the user_input/user_message events at the new branch — a
+            # subtle bug that bloated ``_live_user_turns`` with
+            # duplicates and shifted every subsequent edit's
+            # ``_resolve_edit_message_index`` to the wrong turn (matched
+            # the "edit drops huge swathes of context" symptom).
             if (
                 self.session_store is not None
                 and event.type == "user_input"
-                and not is_pure_rerun
+                and not is_rerun
             ):
                 content = (
                     content_parts_to_dicts(event.content)

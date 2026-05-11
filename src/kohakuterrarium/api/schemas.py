@@ -123,6 +123,23 @@ class AgentChat(BaseModel):
     content: list[ContentPartPayload] | None = None
 
 
+class RegenerateRequest(BaseModel):
+    """Request body for regenerating an assistant response.
+
+    ``turn_index=None`` regenerates the conversation tail (default).
+    A specific ``turn_index`` opens a new branch at that turn — used
+    when the user clicks "retry" on a non-tail message.
+
+    ``branch_view`` is the user's current ``{turn_index: branch_id}``
+    selection — required when retrying on a non-latest branch so the
+    backend can reload its in-memory conversation under that view
+    before opening the new branch.
+    """
+
+    turn_index: int | None = None
+    branch_view: dict[int, int] | None = None
+
+
 class MessageEdit(BaseModel):
     """Request body for editing a user message and re-running."""
 
@@ -136,6 +153,11 @@ class MessageEdit(BaseModel):
     # shift the target.
     turn_index: int | None = None
     user_position: int | None = None
+    # The user's current branch selection — needed when editing a
+    # message that lives on a non-latest branch so the backend can
+    # reload its conversation under that subtree before resolving the
+    # edit target.
+    branch_view: dict[int, int] | None = None
 
 
 class SlashCommand(BaseModel):

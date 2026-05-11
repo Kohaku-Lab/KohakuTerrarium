@@ -12,7 +12,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException
 
 from kohakuterrarium.api.deps import get_engine
-from kohakuterrarium.api.schemas import AgentChat, MessageEdit
+from kohakuterrarium.api.schemas import AgentChat, MessageEdit, RegenerateRequest
 from kohakuterrarium.studio.sessions import creature_chat
 
 router = APIRouter()
@@ -38,11 +38,29 @@ async def chat_creature(
 
 @router.post("/{session_id}/creatures/{creature_id}/regenerate")
 async def regenerate_creature(
-    session_id: str, creature_id: str, engine=Depends(get_engine)
+    session_id: str,
+    creature_id: str,
+    req: RegenerateRequest | None = None,
+    engine=Depends(get_engine),
 ):
+    """Regenerate an assistant response.
+
+    Empty body (or omitted ``turn_index``) regenerates the
+    conversation tail — backwards-compatible with older callers. With
+    ``turn_index`` set, opens a new branch at that turn (used when the
+    user clicks retry on a non-tail message).
+    """
+    turn_index = req.turn_index if req is not None else None
+    branch_view = req.branch_view if req is not None else None
     try:
-        await creature_chat.regenerate(engine, session_id, creature_id)
-        return {"status": "regenerating"}
+        await creature_chat.regenerate(
+            engine,
+            session_id,
+            creature_id,
+            turn_index=turn_index,
+            branch_view=branch_view,
+        )
+        return {"status": "regenerating", "turn_index": turn_index}
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
 
@@ -71,6 +89,7 @@ async def edit_creature_message(
             content,
             turn_index=req.turn_index,
             user_position=req.user_position,
+            branch_view=req.branch_view,
         )
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")

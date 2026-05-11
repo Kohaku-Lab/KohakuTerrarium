@@ -292,8 +292,15 @@ class _FakeAgent:
     async def _process_event(self, event) -> None:
         self.received_events.append(event)
 
-    async def regenerate_last_response(self) -> None:
+    async def regenerate_last_response(
+        self,
+        *,
+        turn_index: int | None = None,
+        branch_view: dict[int, int] | None = None,
+    ) -> None:
         self.regen_calls += 1
+        self.regen_turn_index = turn_index
+        self.regen_branch_view = branch_view
 
     async def edit_and_rerun(
         self,
@@ -302,8 +309,11 @@ class _FakeAgent:
         *,
         turn_index: int | None = None,
         user_position: int | None = None,
+        branch_view: dict[int, int] | None = None,
     ) -> bool:
-        self.edit_calls.append((msg_idx, content, turn_index, user_position))
+        self.edit_calls.append(
+            (msg_idx, content, turn_index, user_position, branch_view)
+        )
         return True
 
     async def rewind_to(self, msg_idx: int) -> None:

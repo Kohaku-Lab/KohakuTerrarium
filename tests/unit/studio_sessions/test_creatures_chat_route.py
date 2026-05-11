@@ -30,8 +30,9 @@ class _RecordingAgent:
         *,
         turn_index=None,
         user_position=None,
+        branch_view=None,
     ) -> bool:
-        self.edits.append((msg_idx, content, turn_index, user_position))
+        self.edits.append((msg_idx, content, turn_index, user_position, branch_view))
         return True
 
 
@@ -65,7 +66,7 @@ def test_edit_accepts_plain_string():
         json={"content": "hello"},
     )
     assert resp.status_code == 200, resp.text
-    assert agent.edits == [(0, "hello", None, None)]
+    assert agent.edits == [(0, "hello", None, None, None)]
 
 
 def test_edit_accepts_multimodal_list():
@@ -89,9 +90,9 @@ def test_edit_accepts_multimodal_list():
     # The route flattens Pydantic models back to plain dicts before
     # forwarding so the agent sees a normal list[dict] payload.
     assert len(agent.edits) == 1
-    msg_idx, content, ti, up = agent.edits[0]
+    msg_idx, content, ti, up, bv = agent.edits[0]
     assert msg_idx == 0
-    assert ti == 2 and up == 1
+    assert ti == 2 and up == 1 and bv is None
     assert isinstance(content, list)
     assert content[0]["type"] == "text"
     assert content[0]["text"] == "edited"

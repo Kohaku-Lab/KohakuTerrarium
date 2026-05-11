@@ -77,7 +77,7 @@ class TestChat:
                 user_position=1,
             )
             assert ok is True
-            assert c.agent.edit_calls == [(3, "new", 2, 1)]
+            assert c.agent.edit_calls == [(3, "new", 2, 1, None)]
         finally:
             await engine.shutdown()
 

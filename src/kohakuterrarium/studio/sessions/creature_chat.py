@@ -34,10 +34,32 @@ async def chat(
         yield chunk
 
 
-async def regenerate(engine: Terrarium, session_id: str, creature_id: str) -> None:
-    """Regenerate the last assistant response."""
+async def regenerate(
+    engine: Terrarium,
+    session_id: str,
+    creature_id: str,
+    *,
+    turn_index: int | None = None,
+    branch_view: dict[int, int] | None = None,
+) -> None:
+    """Regenerate an assistant response.
+
+    ``turn_index=None`` regenerates the conversation tail (legacy
+    behaviour). A specific ``turn_index`` opens a new branch under
+    that turn — used when the user clicks "retry" on a non-tail
+    message in the chat UI; without this parameter the click silently
+    targeted the tail no matter where the user clicked.
+
+    ``branch_view`` lets the caller retry on a NON-LATEST branch.
+    Without it, the agent's in-memory conversation reflects whichever
+    branch it last ran, and a retry click on an older branch in the
+    UI would silently target the wrong message.
+    """
     agent = _get_agent(engine, session_id, creature_id)
-    await agent.regenerate_last_response()
+    await agent.regenerate_last_response(
+        turn_index=turn_index,
+        branch_view=branch_view,
+    )
 
 
 async def edit_message(
@@ -49,11 +71,22 @@ async def edit_message(
     *,
     turn_index: int | None = None,
     user_position: int | None = None,
+    branch_view: dict[int, int] | None = None,
 ) -> bool:
-    """Edit a user message at ``msg_idx`` and re-run from there."""
+    """Edit a user message at ``msg_idx`` and re-run from there.
+
+    ``branch_view`` lets the caller edit a message on a NON-LATEST
+    branch — the agent reloads its in-memory conversation from
+    events under the chosen view before truncating + rerunning so
+    the resolution lands on the message the user actually clicked.
+    """
     agent = _get_agent(engine, session_id, creature_id)
     return await agent.edit_and_rerun(
-        msg_idx, content, turn_index=turn_index, user_position=user_position
+        msg_idx,
+        content,
+        turn_index=turn_index,
+        user_position=user_position,
+        branch_view=branch_view,
     )
 
 
