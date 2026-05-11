@@ -209,6 +209,28 @@ describe("chat store — branch-switch keeps consistent follow-ups", () => {
     expect(allText).toContain("next-a")
     expect(allText).not.toContain("1a")
   })
+
+  it("every replayed message carries its turnIndex even on single-branch turns", () => {
+    // Regression: the ChatMessage retry button reads `msg.turnIndex` to
+    // tell the backend which turn to regenerate. The nav-attach helpers
+    // used to early-return on single-branch turns, leaving turnIndex
+    // undefined → the retry click silently fell through to the
+    // conversation tail no matter which message the user clicked.
+    const events = [
+      { type: "user_input", content: "u1", event_id: 1, turn_index: 1, branch_id: 1 },
+      { type: "user_message", content: "u1", event_id: 2, turn_index: 1, branch_id: 1 },
+      { type: "text_chunk", content: "a1", event_id: 3, turn_index: 1, branch_id: 1 },
+      { type: "processing_end", event_id: 4, turn_index: 1, branch_id: 1 },
+      { type: "user_input", content: "u2", event_id: 5, turn_index: 2, branch_id: 1 },
+      { type: "user_message", content: "u2", event_id: 6, turn_index: 2, branch_id: 1 },
+      { type: "text_chunk", content: "a2", event_id: 7, turn_index: 2, branch_id: 1 },
+      { type: "processing_end", event_id: 8, turn_index: 2, branch_id: 1 },
+    ]
+    const { messages } = _replayEvents([], events)
+    // Expect [u1, a1, u2, a2] with turnIndex = [1, 1, 2, 2].
+    const turns = messages.map((m) => m.turnIndex)
+    expect(turns).toEqual([1, 1, 2, 2])
+  })
 })
 
 describe("chat store — regen vs edit navigator placement", () => {

@@ -567,6 +567,64 @@ describe("chat store — multimodal edit + branch resync", () => {
     scheduleSpy.mockRestore()
     getHistory.mockRestore()
   })
+
+  it("schedules a history resync on processing_end even when no branch op is pending", async () => {
+    // Regression: ``_scheduleBranchResync`` bailed when no branch
+    // resync was pending — but normal chat turns also need a post-
+    // processing_end resync so the WS-streamed messages (which
+    // lack turn_index) get rebuilt from events with turnIndex
+    // stamped. Without it, the retry button on a non-tail message
+    // can't tell the backend which turn to target → silently
+    // falls through to tail-regen.
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat.activeTab = "main"
+    chat.messagesByTab.main = []
+    chat._branchResyncPendingByTab = {} // intentionally no pending op
+
+    chat._scheduleBranchResync("main")
+    expect(chat._branchResyncTimers.main).toBeTruthy()
+
+    // Clean up timer so it doesn't fire in test.
+    clearTimeout(chat._branchResyncTimers.main)
+    delete chat._branchResyncTimers.main
+  })
+
+  it("preserves the user's branchViewByTab selection across resync", async () => {
+    // Regression: pre-fix, `_resyncHistory` unconditionally set
+    // ``branchViewByTab[tab] = {}`` after fetching events, which
+    // yanked the user back to the "latest branch everywhere"
+    // default any time a sibling action (edit/regen on a different
+    // turn, WS event, …) triggered a resync. Switching to branch 1
+    // of an earlier turn became a single-render flash before the
+    // resync wiped the override.
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat.activeTab = "main"
+    // User has explicitly switched to branch 1 of turn 2.
+    chat.branchViewByTab.main = { 2: 1 }
+
+    const rebuildSpy = vi.spyOn(chat, "_rebuildMessages").mockImplementation(() => {})
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistory = vi.spyOn(importActual.terrariumAPI, "getHistory").mockResolvedValue({
+      events: [
+        { type: "user_input", content: "u1", event_id: 1, turn_index: 1, branch_id: 1 },
+        { type: "user_message", content: "u1", event_id: 2, turn_index: 1, branch_id: 1 },
+        { type: "user_input", content: "u2", event_id: 3, turn_index: 2, branch_id: 1 },
+        { type: "user_message", content: "u2", event_id: 4, turn_index: 2, branch_id: 1 },
+        { type: "user_input", content: "u2_edited", event_id: 5, turn_index: 2, branch_id: 2 },
+        { type: "user_message", content: "u2_edited", event_id: 6, turn_index: 2, branch_id: 2 },
+      ],
+    })
+
+    await chat._resyncHistory("main")
+
+    expect(chat.branchViewByTab.main).toEqual({ 2: 1 })
+    expect(rebuildSpy).toHaveBeenCalledWith("main")
+
+    rebuildSpy.mockRestore()
+    getHistory.mockRestore()
+  })
 })
 
 describe("chat store — resetForRouteSwitch", () => {

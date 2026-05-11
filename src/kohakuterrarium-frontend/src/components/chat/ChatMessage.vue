@@ -412,7 +412,17 @@ async function confirmEdit() {
 }
 
 function regenerate() {
-  chat.regenerateLastResponse()
+  // Pass the clicked message's turnIndex so the backend regenerates
+  // at THIS turn (creates a new branch under the current subtree)
+  // rather than silently retargeting the conversation tail. Falls
+  // back to the legacy tail-regen path when the message lacks a
+  // turn_index (e.g. assistant messages from pre-v2 sessions).
+  const tIdx = props.message?.turnIndex
+  if (tIdx != null) {
+    chat.regenerateLastResponse({ turnIndex: tIdx })
+  } else {
+    chat.regenerateLastResponse()
+  }
 }
 
 // ── Branch navigator ──

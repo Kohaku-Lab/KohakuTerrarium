@@ -961,7 +961,6 @@ export function _replayEvents(messages, events, branchView = null) {
     const sel = branchSelection.get(ti)
     let groupIdx = groups.findIndex((g) => g.branches.includes(sel))
     if (groupIdx < 0) groupIdx = 0
-    msg.turnIndex = ti
     msg.branchAnchor = "user"
     msg.userGroupCount = groups.length
     msg.currentUserGroupIdx = groupIdx
@@ -980,7 +979,6 @@ export function _replayEvents(messages, events, branchView = null) {
     const sel = branchSelection.get(ti)
     const group = groups.find((g) => g.branches.includes(sel)) || groups[0]
     if (!group || group.branches.length <= 1) return
-    msg.turnIndex = ti
     msg.branchAnchor = "assistant"
     msg.assistantBranchCount = group.branches.length
     msg.currentAssistantIdx = group.branches.indexOf(sel)
@@ -996,11 +994,23 @@ export function _replayEvents(messages, events, branchView = null) {
     if (msg.role === "user") {
       const ti = userTurnsForResult[userMsgIdx]
       userMsgIdx += 1
-      if (typeof ti === "number") _attachUserNav(msg, ti)
+      // Always stamp turnIndex on the message so the regen / edit
+      // buttons can target THIS turn — even when there's no
+      // <x/N> navigator yet (single-branch turns). Without this,
+      // regenerate falls through to the conversation tail and
+      // retries on a non-tail message silently target the last
+      // message instead of the clicked one.
+      if (typeof ti === "number") {
+        msg.turnIndex = ti
+        _attachUserNav(msg, ti)
+      }
     } else if (msg.role === "assistant") {
       const ti = assistantTurnsForResult[assistantMsgIdx]
       assistantMsgIdx += 1
-      if (typeof ti === "number") _attachAssistantNav(msg, ti)
+      if (typeof ti === "number") {
+        msg.turnIndex = ti
+        _attachAssistantNav(msg, ti)
+      }
     }
   }
 
@@ -2098,12 +2108,17 @@ const _chatStoreOptions = {
     },
 
     _scheduleBranchResync(tab) {
-      const pending = tab ? this._branchResyncPendingByTab[tab] : null
-      if (!tab || !pending?.active) return
+      if (!tab) return
+      // Fire a resync on EVERY processing_end, not only when a branch
+      // op is pending. WS-streamed user/assistant messages don't
+      // carry turn_index, so without the post-turn resync the
+      // messages in ``messagesByTab`` stay turnIndex-less and the
+      // retry button can't tell the backend which turn was clicked
+      // (it silently falls through to tail-regen — that was the
+      // "retry only retries the last message" bug).
       if (this._branchResyncTimers[tab]) clearTimeout(this._branchResyncTimers[tab])
       this._branchResyncTimers[tab] = setTimeout(async () => {
         delete this._branchResyncTimers[tab]
-        if (!this._branchResyncPendingByTab[tab]?.active) return
         await this._resyncHistory(tab)
       }, BRANCH_RESYNC_DELAY_MS)
     },
@@ -2136,7 +2151,7 @@ const _chatStoreOptions = {
      * pulls the canonical event log including branch metadata so the
      * ``<1/N>`` navigator can flip back.
      */
-    async regenerateLastResponse() {
+    async regenerateLastResponse({ turnIndex = null } = {}) {
       if (!this._instanceId) return
       // Dedupe rapid double-clicks: another regen already in flight.
       if (this._regenInFlight) return
@@ -2150,14 +2165,24 @@ const _chatStoreOptions = {
       }
       this._markBranchResyncPending(tab)
       const msgs = this.messagesByTab[tab] || []
-      // Drop ALL trailing assistant messages back to the most recent
-      // user message. A single assistant turn may include multiple
-      // assistant entries (text → tool → text) — leaving stale
-      // intermediate parts breaks resync ordering.
+      // Locally splice for instant feedback. With a specific
+      // ``turnIndex`` (retry on non-tail), cut from the matching
+      // user message onward so the user sees just-the-rerun-target
+      // remain. Without a turnIndex (tail regen), drop trailing
+      // assistant messages back to the most recent user message.
       let cutAt = msgs.length
-      for (let i = msgs.length - 1; i >= 0; i--) {
-        if (msgs[i].role === "user") break
-        cutAt = i
+      if (turnIndex != null) {
+        for (let i = 0; i < msgs.length; i++) {
+          if (msgs[i]?.role === "user" && msgs[i]?.turnIndex === turnIndex) {
+            cutAt = i + 1
+            break
+          }
+        }
+      } else {
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          if (msgs[i].role === "user") break
+          cutAt = i
+        }
       }
       if (cutAt < msgs.length) msgs.splice(cutAt)
       try {
@@ -2168,7 +2193,12 @@ const _chatStoreOptions = {
         // Unified routing — every session has a graph_id and creatures
         // keyed by name. Solo sessions just have a 1-creature roster.
         const [sid, cid] = [this._instanceGraphId, tab]
-        await agentAPI.regenerate(sid, cid)
+        // Pass current branch selection so the backend can retry on
+        // an older branch correctly (otherwise the agent's in-memory
+        // is on whatever branch it last ran and the retry silently
+        // targets that branch's tail).
+        const branchView = this.branchViewByTab[tab] || null
+        await agentAPI.regenerate(sid, cid, { turnIndex, branchView })
         await this._resyncHistory(tab)
       } catch (e) {
         console.warn("Failed to regenerate:", e)
@@ -2254,9 +2284,16 @@ const _chatStoreOptions = {
       try {
         const { agentAPI } = await import("@/utils/api")
         const [sid, cid] = [this._instanceGraphId, tab]
+        // Pass the user's current branch selection so the backend can
+        // reload its in-memory conversation under that subtree before
+        // resolving the edit target. Without this an edit on a
+        // switched-to-older branch silently fails (the agent's
+        // conversation is on whatever branch it last ran).
+        const branchView = this.branchViewByTab[tab] || null
         const editResponse = await agentAPI.editMessage(sid, cid, backendIdx, newContent, {
           turnIndex,
           userPosition,
+          branchView,
         })
         if (turnIndex != null && editResponse?.branch_id != null) {
           this._markBranchResyncPending(tab, {
@@ -2315,10 +2352,15 @@ const _chatStoreOptions = {
         const { terrariumAPI } = await import("@/utils/api")
         const data = await terrariumAPI.getHistory(this._instanceGraphId, tab)
         if (!data?.events) return false
-        // Cache events + clear any stale branch override BEFORE the
-        // promotion check, so the rebuild path always has fresh data.
+        // Cache fresh events. PRESERVE the user's branch overrides:
+        // wiping ``branchViewByTab`` here was the historical source of
+        // "I switched to branch 1 of turn 2, did an unrelated action,
+        // and was yanked back to the latest branch." The replay's
+        // default-latest semantics already covers any turns the user
+        // hasn't explicitly overridden, so retaining existing overrides
+        // is safe and matches user intent.
         this.eventsByTab[tab] = data.events
-        this.branchViewByTab[tab] = {}
+        if (!this.branchViewByTab[tab]) this.branchViewByTab[tab] = {}
         this._rebuildMessages(tab)
 
         const pending = this._branchResyncPendingByTab[tab]
