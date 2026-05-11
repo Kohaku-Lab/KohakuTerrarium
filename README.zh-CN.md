@@ -7,7 +7,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/license-KohakuTerrarium--1.0-green" alt="License">
-  <img src="https://img.shields.io/badge/version-1.3.0-orange" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.4.0-orange" alt="Version">
 </p>
 
 <p align="center">
