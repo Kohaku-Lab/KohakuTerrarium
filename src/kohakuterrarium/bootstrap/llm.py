@@ -11,7 +11,7 @@ from typing import Any
 
 from kohakuterrarium.core.config import AgentConfig
 from kohakuterrarium.llm.anthropic_provider import AnthropicProvider
-from kohakuterrarium.llm.base import LLMProvider
+from kohakuterrarium.llm.base import LLMConfig, LLMProvider
 from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
 from kohakuterrarium.llm.litellm_provider import LiteLLMProvider
 from kohakuterrarium.llm.openai import OpenAIProvider
@@ -129,8 +129,6 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
 
     retry_policy = getattr(profile, "retry_policy", None)
     if profile.backend_type == "litellm":
-        from kohakuterrarium.llm.base import LLMConfig
-
         provider = LiteLLMProvider(
             model=profile.model,
             api_key=api_key or None,
