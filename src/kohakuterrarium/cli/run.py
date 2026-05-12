@@ -147,6 +147,16 @@ async def _run(
                 llm_override=llm_override,
                 pwd=pwd,
                 is_privileged=True,
+                # ``--mode cli`` mounts a prompt_toolkit Application that
+                # owns stdin in raw mode. If the configured input is
+                # ``CLIInput`` (the default) starting the creature here
+                # would spawn a blocking ``sys.stdin.readline`` in an
+                # executor thread that's unkillable and races
+                # prompt_toolkit for every byte. Defer start so
+                # ``run_engine_with_rich_cli`` can swap the input first.
+                # Every other mode (configured IO, tui) needs the
+                # creature already running on entry, so default ``True``.
+                start=(io_mode != "cli"),
             )
             focus_creature_id = creature.creature_id
             graph_id = creature.graph_id

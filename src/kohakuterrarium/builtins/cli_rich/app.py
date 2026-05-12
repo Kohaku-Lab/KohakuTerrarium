@@ -748,6 +748,19 @@ class RichCLIApp(AppOutputMixin):
 
     def _on_exit(self) -> None:
         self._exit_requested = True
+        # Wake the agent's input drive loop so the creature's input task
+        # exits cleanly when the user hits Ctrl+D. Without this the loop
+        # stays parked on whatever its module is awaiting (RichCLIInput's
+        # ``_wait_event``, a queue, etc.) and the engine teardown blocks.
+        # Only fires for modules that expose ``request_exit`` — leaves
+        # configured inputs without that hook (Discord, webhooks, …)
+        # untouched so the engine teardown drives their stop instead.
+        request_exit = getattr(self.agent.input, "request_exit", None)
+        if callable(request_exit):
+            try:
+                request_exit()
+            except Exception as e:
+                logger.debug("input request_exit failed", error=str(e))
 
     def _on_toggle_expand(self) -> None:
         """Expand/collapse the most recent top-level tool block."""
