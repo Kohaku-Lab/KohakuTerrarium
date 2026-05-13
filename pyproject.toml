@@ -79,6 +79,11 @@ demo = [
     "KohakuTerrarium[discord]",
 ]
 
+# ── litellm: 100+ LLM providers via unified SDK ─────────────────────
+litellm = [
+    "litellm>=1.60.0,<2.0.0",
+]
+
 # ── browser: full browser rendering for web_fetch (heavy: lxml) ──────
 browser = [
     "crawl4ai>=0.8.0",
