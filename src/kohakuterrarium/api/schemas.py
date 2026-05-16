@@ -12,6 +12,7 @@ class TerrariumCreate(BaseModel):
     llm: str | None = None  # LLM profile override for all creatures
     pwd: str | None = None  # Working directory (default: server cwd)
     name: str | None = None  # Display name override (defaults to recipe name)
+    on_node: str | None = None  # Lab target node; absent = ``_host``
 
 
 class TerrariumStatus(BaseModel):
@@ -102,6 +103,7 @@ class AgentCreate(BaseModel):
     llm: str | None = None  # LLM profile override
     pwd: str | None = None  # Working directory (default: server cwd)
     name: str | None = None  # Display name override (defaults to config name)
+    on_node: str | None = None  # Lab target node; absent = ``_host``
 
 
 class RenameRequest(BaseModel):

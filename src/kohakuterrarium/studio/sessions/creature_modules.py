@@ -27,6 +27,8 @@ from typing import Any
 
 from kohakuterrarium.studio.sessions import creature_plugins, creature_state
 from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium import TerrariumService
+from kohakuterrarium.studio._runtime import as_engine
 
 # ── Per-type adapters ────────────────────────────────────────────
 
@@ -163,8 +165,11 @@ def _adapter(module_type: str, op: str):
 # ── Public API ───────────────────────────────────────────────────
 
 
-def list_modules(engine: Terrarium, session_id: str, creature_id: str) -> list[dict]:
+def list_modules(
+    service: "TerrariumService", session_id: str, creature_id: str
+) -> list[dict]:
     """Return every configurable module across all known types."""
+    engine = as_engine(service)
     out: list[dict] = []
     for entry in _TYPE_DISPATCH.values():
         try:
@@ -178,19 +183,20 @@ def list_modules(engine: Terrarium, session_id: str, creature_id: str) -> list[d
 
 
 def get_module_options(
-    engine: Terrarium,
+    service: "TerrariumService",
     session_id: str,
     creature_id: str,
     module_type: str,
     name: str,
 ) -> dict:
     """Return ``{type, name, schema, options}`` for a single module."""
+    engine = as_engine(service)
     fn = _adapter(module_type, "get_options")
     return fn(engine, session_id, creature_id, name)
 
 
 def set_module_options(
-    engine: Terrarium,
+    service: "TerrariumService",
     session_id: str,
     creature_id: str,
     module_type: str,
@@ -198,17 +204,19 @@ def set_module_options(
     values: dict[str, Any],
 ) -> dict[str, Any]:
     """Apply runtime option overrides for a module of any supported type."""
+    engine = as_engine(service)
     fn = _adapter(module_type, "set_options")
     return fn(engine, session_id, creature_id, name, values or {})
 
 
 async def toggle_module(
-    engine: Terrarium,
+    service: "TerrariumService",
     session_id: str,
     creature_id: str,
     module_type: str,
     name: str,
 ) -> dict:
     """Flip a module's enabled state (only supported for some types)."""
+    engine = as_engine(service)
     fn = _adapter(module_type, "toggle")
     return await fn(engine, session_id, creature_id, name)

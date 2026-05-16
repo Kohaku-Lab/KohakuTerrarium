@@ -4,6 +4,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+from kohakuterrarium.utils.config_dir import config_dir
+
+# Import-time default — back-compat for display callers.  The live
+# read / write path goes through :func:`ui_prefs_path`.
 KT_DIR = Path.home() / ".kohakuterrarium"
 UI_PREFS_PATH = KT_DIR / "ui_prefs.json"
 
@@ -22,7 +26,12 @@ DEFAULTS: dict[str, Any] = {
 
 
 def ui_prefs_path() -> Path:
-    return UI_PREFS_PATH
+    """The ``ui_prefs.json`` path, honouring ``KT_CONFIG_DIR``.
+
+    Resolved fresh each call so test isolation / operator re-homing
+    works — a module constant computed once at import would not.
+    """
+    return config_dir() / "ui_prefs.json"
 
 
 def load_prefs() -> dict[str, Any]:

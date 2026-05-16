@@ -21,14 +21,18 @@ from typing import Any
 
 from fastapi import WebSocket
 
+from kohakuterrarium.laboratory.ws_proxy import proxy_ws_to_lab
 from kohakuterrarium.llm.message import (
     content_parts_to_dicts,
     normalize_content_parts,
 )
 from kohakuterrarium.modules.output.event import UIReply
+from kohakuterrarium.studio._runtime import host_engine_or_none
 from kohakuterrarium.studio.attach._event_stream import StreamOutput, get_event_log
+from kohakuterrarium.studio.attach.io_cluster import attach_io_cluster
+from kohakuterrarium.studio.sessions.cluster_fold import cluster_groups
 from kohakuterrarium.studio.sessions.lifecycle import find_creature
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium import TerrariumService
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -206,20 +210,134 @@ async def _send_channel_history(ws: WebSocket, env: Any) -> None:
             )
 
 
+async def _attach_io_remote(
+    websocket: WebSocket,
+    service: "TerrariumService",
+    creature_info: Any,
+    session_id: str,
+) -> None:
+    """Full-fidelity attach for a remote-worker creature.
+
+    Thin wrapper over :func:`laboratory.ws_proxy.proxy_ws_to_lab` —
+    the worker's :class:`TerrariumAttachAdapter` (a
+    :class:`WSProxyAdapter` subclass) mirrors the host-local
+    ``attach_io`` behaviour (StreamOutput + sibling subscribe +
+    channel callbacks + UIReply round-trip) and pumps every event
+    back through the unified ws-proxy.
+    """
+    cid = creature_info.creature_id
+    home = await _resolve_creature_home(service, cid)
+    if home is None or home == "_host":
+        raise KeyError(cid)
+    await proxy_ws_to_lab(
+        websocket=websocket,
+        sender=service.host,
+        demux=service.demux,
+        target_node=home,
+        namespace="terrarium.attach",
+        body={"creature_id": cid, "session_id": session_id},
+    )
+
+
+async def _resolve_creature_home(service: "TerrariumService", cid: str) -> str | None:
+    """Look up the creature's home node via the multi-node ``_home``
+    registry.
+
+    Returns:
+        - ``"_host"`` when the service has no multi-node routing
+          (standalone mode — :class:`LocalTerrariumService`).  The
+          caller treats this as "no remote path required" and the
+          standalone code path never reaches here in practice
+          because ``find_creature`` would have succeeded.
+        - The worker's ``client_id`` when the multi-node service
+          has the creature in its ``_home`` map.
+        - ``None`` when the resolver raises (transient lookup
+          failure); the caller surfaces this as ``KeyError``.
+    """
+    resolver = getattr(service, "_resolve_home", None)
+    if resolver is None:
+        return "_host"
+    try:
+        return await resolver(cid)
+    except Exception:
+        return None
+
+
 async def attach_io(
     websocket: WebSocket,
-    engine: Terrarium,
+    service: "TerrariumService",
     session_id: str,
     creature_id: str,
 ) -> None:
     """Run the IO attach loop on ``websocket`` until it disconnects.
 
-    Resolves the creature via the engine, attaches a ``StreamOutput``
-    secondary sink, and forwards every event through the WS.  When
-    the creature shares a graph with peers, the shared channels are
-    surfaced through the same connection (terrarium-style chat).
+    For a host-local creature, attaches a ``StreamOutput`` secondary
+    sink and forwards every event through the WS. For a remote
+    creature in a multi-node deployment, dispatches to the simpler
+    remote-streaming path below — the controller's engine doesn't
+    host the agent so there's no ``output_router`` to attach to;
+    instead we stream tokens via ``service.chat`` and events via
+    ``service.subscribe``.
     """
-    creature = find_creature(engine, session_id, creature_id)
+    # Lab-host mode has no host engine — ``host_engine_or_none``
+    # returns ``None`` and the attach goes straight to the remote
+    # streaming path.  Standalone resolves the creature on its
+    # host-local engine and attaches a StreamOutput sink directly.
+    engine = host_engine_or_none(service)
+    creature = None
+    if engine is not None:
+        try:
+            creature = find_creature(engine, session_id, creature_id)
+        except KeyError:
+            creature = None
+    if creature is None:
+        # CF-1 / CF-2: lab-host mode + cluster session — open one
+        # upstream per cluster member worker and multiplex inputs +
+        # outputs through a single client WS. Cross-worker ``target=``
+        # routes to the right upstream; channel messages from every
+        # member's replica converge onto the client WS (deduped by
+        # message_id) so chat history shows BOTH sides of a cluster
+        # channel rather than just the worker the URL is bound to.
+        groups = cluster_groups(service)
+        primary = None
+        for prim, member_sids in groups.items():
+            if session_id == prim or session_id in member_sids:
+                primary = prim
+                break
+        if primary is not None:
+            try:
+                await attach_io_cluster(websocket, service, primary, creature_id)
+                return
+            except KeyError:
+                # Cluster path lost — fall through to single-worker attach
+                # so a transient cluster-membership miss still serves the
+                # WS (degraded: single-worker view).
+                pass
+        # Not on a host engine (lab-host always; standalone when the
+        # creature genuinely doesn't exist) — try a remote worker via
+        # the service.  ``service.get_creature_info`` fans out in
+        # multi-node mode and returns the creature's home implicitly.
+        info = await service.get_creature_info(creature_id)
+        if info is None:
+            # ``get_creature_info`` is id-only, but the frontend keys
+            # its chat tab off the creature's *display name* (e.g.
+            # ``/creatures/quiet-meadow/chat``).  The standalone path
+            # resolves names via ``find_creature``; mirror that here
+            # for the lab-host path — scan the cluster-wide listing
+            # for a name match.  Without this the WebSocket closes
+            # with "creature '<name>' not found" and the user can't
+            # attach to a worker creature at all.
+            try:
+                for candidate in await service.list_creatures():
+                    if candidate.name == creature_id:
+                        info = candidate
+                        break
+            except Exception:  # pragma: no cover - defensive
+                info = None
+        if info is None:
+            raise KeyError(creature_id)
+        await _attach_io_remote(websocket, service, info, session_id)
+        return
     agent = creature.agent
 
     queue: asyncio.Queue = asyncio.Queue()

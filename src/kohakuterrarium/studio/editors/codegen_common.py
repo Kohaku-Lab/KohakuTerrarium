@@ -88,6 +88,49 @@ def replace_string_property(klass: cst.ClassDef, prop: str, value: str) -> cst.C
     return new_klass
 
 
+def replace_class_attr_bool(
+    klass: cst.ClassDef, attr: str, value: bool
+) -> cst.ClassDef:
+    """Set a class-level boolean attribute ``attr = True/False``.
+
+    Rewrites an existing ``attr = <bool>`` class assignment; if the class
+    has none, inserts one as the first statement of the class body. Used
+    by codegen round-trips to persist editor-form metadata toggles (e.g.
+    a trigger's ``universal`` flag) back into the source.
+    """
+    new_value = cst.Name(value="True" if value else "False")
+
+    class _BoolReplacer(cst.CSTTransformer):
+        touched: bool = False
+
+        def leave_Assign(self, orig, updated):
+            if len(updated.targets) != 1:
+                return updated
+            tgt = updated.targets[0].target
+            if isinstance(tgt, cst.Name) and tgt.value == attr:
+                self.touched = True
+                return updated.with_changes(value=new_value)
+            return updated
+
+    transformer = _BoolReplacer()
+    new_klass = klass.visit(transformer)
+    if transformer.touched:
+        return new_klass
+    # Not present — insert ``attr = <value>`` as the first class statement.
+    assign = cst.SimpleStatementLine(
+        body=[
+            cst.Assign(
+                targets=[cst.AssignTarget(target=cst.Name(value=attr))],
+                value=new_value,
+            )
+        ]
+    )
+    old_body = new_klass.body
+    return new_klass.with_changes(
+        body=old_body.with_changes(body=[assign, *old_body.body])
+    )
+
+
 def replace_method_body(
     klass: cst.ClassDef, method: str, body_source: str
 ) -> cst.ClassDef:

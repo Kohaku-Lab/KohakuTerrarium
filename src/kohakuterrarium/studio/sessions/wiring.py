@@ -11,10 +11,12 @@ from typing import Any
 import kohakuterrarium.terrarium.channels as _channels
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium import TerrariumService
+from kohakuterrarium.studio._runtime import as_engine
 
 
 async def wire_output(
-    engine: Terrarium,
+    service: "TerrariumService",
     creature_id: str,
     target: str | dict[str, Any],
 ) -> str:
@@ -26,6 +28,7 @@ async def wire_output(
     every emission. The merge is the engine's "ensure same graph"
     primitive, which does *not* introduce a channel side-effect.
     """
+    engine = as_engine(service)
     target_name = _extract_target_name(target)
     if target_name and target_name != "root":
         await _ensure_target_in_same_graph(engine, creature_id, target_name)
@@ -77,25 +80,35 @@ def _resolve_creature_by_name(engine: Terrarium, name: str):
     return None
 
 
-async def unwire_output(engine: Terrarium, creature_id: str, edge_id: str) -> bool:
+async def unwire_output(
+    service: "TerrariumService", creature_id: str, edge_id: str
+) -> bool:
     """Detach a previously-wired runtime output edge."""
+    engine = as_engine(service)
     return await engine.unwire_output(creature_id, edge_id)
 
 
-def list_output_wiring(engine: Terrarium, creature_id: str) -> list[dict[str, Any]]:
+def list_output_wiring(
+    service: "TerrariumService", creature_id: str
+) -> list[dict[str, Any]]:
     """List runtime/static output-wiring edges for a creature."""
+    engine = as_engine(service)
     return engine.list_output_wiring(creature_id)
 
 
 async def wire_output_sink(
-    engine: Terrarium,
+    service: "TerrariumService",
     creature_id: str,
     sink: OutputModule,
 ) -> str:
     """Attach a low-level secondary output sink to a creature."""
+    engine = as_engine(service)
     return await engine.wire_output_sink(creature_id, sink)
 
 
-async def unwire_output_sink(engine: Terrarium, creature_id: str, sink_id: str) -> bool:
+async def unwire_output_sink(
+    service: "TerrariumService", creature_id: str, sink_id: str
+) -> bool:
     """Detach a previously-wired secondary sink."""
+    engine = as_engine(service)
     return await engine.unwire_output_sink(creature_id, sink_id)

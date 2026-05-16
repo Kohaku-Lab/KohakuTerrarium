@@ -23,8 +23,10 @@ exposes IO + LOG + OBSERVER + TRACE all at once).
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
+from kohakuterrarium.studio._runtime import host_engine_or_none
+
 if TYPE_CHECKING:
-    from kohakuterrarium.terrarium.engine import Terrarium
+    pass
 
 
 class Policy(str, Enum):
@@ -108,15 +110,25 @@ def get_graph_policies(session_id: str, manager: Any | None = None) -> list[Poli
 # ---------------------------------------------------------------------------
 
 
-def get_creature_policies(engine: "Terrarium", creature_id: str) -> list[Policy]:
+def get_creature_policies(
+    service: "TerrariumService", creature_id: str
+) -> list[Policy]:
     """Engine-backed counterpart to :func:`get_policies`.
 
     Returns the attach policies a single creature supports.  ``IO`` is
     advertised only when the creature has a configured input module;
     ``OBSERVER`` is advertised when the creature lives in a graph that
     has shared channels; ``LOG`` and ``TRACE`` are baseline.
+
+    These hints are best-effort and informational only (never used to
+    gate UI).  In lab-host mode the creature lives on a worker and the
+    host can't introspect its modules — we advertise the safe baseline
+    rather than reach into a host engine that doesn't exist.
     """
+    engine = host_engine_or_none(service)
     policies: list[Policy] = [Policy.LOG, Policy.TRACE]
+    if engine is None:
+        return policies
 
     try:
         creature = engine.get_creature(creature_id)
@@ -135,13 +147,20 @@ def get_creature_policies(engine: "Terrarium", creature_id: str) -> list[Policy]
     return policies
 
 
-def get_session_policies(engine: "Terrarium", session_id: str) -> list[Policy]:
+def get_session_policies(service: "TerrariumService", session_id: str) -> list[Policy]:
     """Engine-backed counterpart to :func:`get_graph_policies`.
 
     Sessions always advertise ``LOG`` + ``OBSERVER`` + ``TRACE``;
     ``IO`` is added when the session has a creature flagged as root.
+
+    Best-effort + informational only.  In lab-host mode the session
+    lives on a worker — advertise the always-safe baseline rather than
+    reach into a host engine that does not exist.
     """
+    engine = host_engine_or_none(service)
     policies: list[Policy] = [Policy.LOG, Policy.OBSERVER, Policy.TRACE]
+    if engine is None:
+        return policies
 
     try:
         graph = engine.get_graph(session_id)

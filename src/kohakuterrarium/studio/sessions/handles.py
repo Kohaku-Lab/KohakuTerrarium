@@ -18,7 +18,14 @@ from typing import Any
 
 @dataclass
 class Session:
-    """A live engine session — one graph plus its creatures."""
+    """A live engine session — one graph plus its creatures.
+
+    ``home_node`` records which lab site this session's graph runs
+    on (``"_host"`` in standalone or for host-local graphs; the
+    worker's Lab ``client_id`` for remote graphs).  Each entry in
+    ``creatures`` also carries ``home_node`` so the frontend can
+    chip-render the site without cross-referencing.
+    """
 
     session_id: str
     name: str
@@ -28,6 +35,7 @@ class Session:
     config_path: str = ""
     pwd: str = ""
     has_root: bool = False
+    home_node: str = "_host"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -39,17 +47,26 @@ class Session:
             "config_path": self.config_path,
             "pwd": self.pwd,
             "has_root": self.has_root,
+            "home_node": self.home_node,
         }
 
 
 @dataclass
 class SessionListing:
-    """A short-form listing entry used by ``list_sessions`` for UI tabs."""
+    """A short-form listing entry used by ``list_sessions`` for UI tabs.
+
+    ``node_id`` is the home node — ``"_host"`` for standalone-mode
+    sessions (or host-local sessions in lab-host mode); the worker's
+    Lab ``client_id`` for remote-hosted sessions.  Frontends in
+    standalone mode can ignore the field; the lab-host node-picker
+    UI uses it for the per-session badge.
+    """
 
     session_id: str
     name: str
     running: bool = True
     creatures: int = 0
+    node_id: str = "_host"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -57,4 +74,5 @@ class SessionListing:
             "name": self.name,
             "running": self.running,
             "creatures": self.creatures,
+            "node_id": self.node_id,
         }

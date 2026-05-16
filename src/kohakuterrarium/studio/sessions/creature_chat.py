@@ -11,10 +11,12 @@ from typing import Any, AsyncIterator
 from kohakuterrarium.session.history import collect_branch_metadata
 from kohakuterrarium.studio.sessions.lifecycle import (
     find_creature,
-    find_session_for_creature,
     get_session_store,
+    list_session_stores,
 )
 from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium import TerrariumService
+from kohakuterrarium.studio._runtime import as_engine
 
 
 def _get_agent(engine: Terrarium, session_id: str, creature_id: str) -> Any:
@@ -22,20 +24,27 @@ def _get_agent(engine: Terrarium, session_id: str, creature_id: str) -> Any:
 
 
 async def chat(
-    engine: Terrarium,
+    service: "TerrariumService",
     session_id: str,
     creature_id: str,
     message: str | list[dict],
 ) -> AsyncIterator[str]:
     """Inject a message and stream the response.  HTTP fallback only —
-    the realtime IO path is the WS attach (Step 11)."""
-    creature = find_creature(engine, session_id, creature_id)
-    async for chunk in creature.chat(message):
+    the realtime IO path is the WS attach (Step 11).
+
+    Routes through the ``TerrariumService`` Protocol's ``chat`` rather
+    than resolving the creature on the host engine directly — a
+    worker-hosted creature isn't in the host engine's ``find_creature``
+    table, so ``service.chat`` (which routes by the creature's home
+    node) is the only path that reaches it. This mirrors the production
+    HTTP route ``api/routes/sessions_v2/creatures_chat.py``.
+    """
+    async for chunk in service.chat(creature_id, message):
         yield chunk
 
 
 async def regenerate(
-    engine: Terrarium,
+    service: "TerrariumService",
     session_id: str,
     creature_id: str,
     *,
@@ -54,16 +63,20 @@ async def regenerate(
     Without it, the agent's in-memory conversation reflects whichever
     branch it last ran, and a retry click on an older branch in the
     UI would silently target the wrong message.
+
+    CF-11: route through ``service.regenerate`` so worker-hosted
+    creatures (lab-host / cluster sessions) don't 404 on host-engine
+    ``find_creature``. Standalone services implement the same protocol
+    method on top of their host engine, so the path collapses to a
+    direct call there.
     """
-    agent = _get_agent(engine, session_id, creature_id)
-    await agent.regenerate_last_response(
-        turn_index=turn_index,
-        branch_view=branch_view,
+    await service.regenerate(
+        creature_id, turn_index=turn_index, branch_view=branch_view
     )
 
 
 async def edit_message(
-    engine: Terrarium,
+    service: "TerrariumService",
     session_id: str,
     creature_id: str,
     msg_idx: int,
@@ -79,9 +92,14 @@ async def edit_message(
     branch — the agent reloads its in-memory conversation from
     events under the chosen view before truncating + rerunning so
     the resolution lands on the message the user actually clicked.
+
+    CF-11: route via ``service.edit_message`` so the worker hosting
+    the creature receives the RPC. The local host engine doesn't know
+    about worker-hosted creatures, so the legacy ``as_engine`` path
+    raised ``KeyError`` in lab-host mode.
     """
-    agent = _get_agent(engine, session_id, creature_id)
-    return await agent.edit_and_rerun(
+    return await service.edit_message(
+        creature_id,
         msg_idx,
         content,
         turn_index=turn_index,
@@ -91,14 +109,19 @@ async def edit_message(
 
 
 async def rewind(
-    engine: Terrarium, session_id: str, creature_id: str, msg_idx: int
+    service: "TerrariumService", session_id: str, creature_id: str, msg_idx: int
 ) -> None:
-    """Drop messages from ``msg_idx`` onward without re-running."""
-    agent = _get_agent(engine, session_id, creature_id)
-    await agent.rewind_to(msg_idx)
+    """Drop messages from ``msg_idx`` onward without re-running.
+
+    CF-11: route via ``service.rewind`` so worker-hosted creatures
+    aren't looked up against the host engine.
+    """
+    await service.rewind(creature_id, msg_idx)
 
 
-def history(engine: Terrarium, session_id: str, creature_id: str) -> dict[str, Any]:
+def history(
+    service: "TerrariumService", session_id: str, creature_id: str
+) -> dict[str, Any]:
     """Return the conversation + event log for a creature OR channel.
 
     The frontend reuses this single endpoint for both per-creature
@@ -106,26 +129,44 @@ def history(engine: Terrarium, session_id: str, creature_id: str) -> dict[str, A
     map to a creature, so we shape a channel-history payload from the
     session store instead of 404ing.  See plan §6 / api-audit row 2.2.
     """
+    engine = as_engine(service)
     if creature_id.startswith("ch:"):
         return _channel_history(engine, session_id, creature_id[3:])
 
     creature = find_creature(engine, session_id, creature_id)
     agent = creature.agent
 
+    # Currently-in-flight job ids — promoted background sub-agents stay
+    # in ``_direct_job_meta`` until their final completion clears them,
+    # so they're the canonical "still running" set. Without this hint
+    # ``normalize_resumable_events`` would synthesize an interrupted
+    # ``subagent_result`` for the live bg sub-agent and the UI would
+    # flash "interrupted" until the real result event arrived.
+    live_job_ids: set[str] = set(getattr(agent, "_direct_job_meta", {}).keys())
+
     events: list[dict] = []
     if hasattr(agent, "session_store") and agent.session_store:
         try:
-            events = agent.session_store.get_resumable_events(creature.name)
+            events = agent.session_store.get_resumable_events(
+                creature.name, live_job_ids=live_job_ids
+            )
         except Exception:
             events = []
 
     if not events:
-        # Fallback to lifecycle-attached store if any.
-        sid = find_session_for_creature(engine, creature_id) or session_id
+        # Fallback to lifecycle-attached store if any. ``engine`` here is
+        # already the concrete engine hosting this creature, so resolve
+        # the graph by a direct local walk — no service round-trip.
+        sid = next(
+            (g.graph_id for g in engine.list_graphs() if creature_id in g.creature_ids),
+            session_id,
+        )
         store = get_session_store(sid)
         if store is not None:
             try:
-                events = store.get_resumable_events(creature.name)
+                events = store.get_resumable_events(
+                    creature.name, live_job_ids=live_job_ids
+                )
             except Exception:
                 events = []
 
@@ -150,13 +191,18 @@ def _channel_history(
     channel has no recorded messages — the frontend tolerates that.
     """
     store = get_session_store(session_id)
-    if store is None and session_id != "_":
+    if store is None:
         # Walk every active store as a last resort; useful when the
         # session id is the legacy "_" wildcard or when the studio
-        # bookkeeping disagrees with the engine after a fork.
-        for candidate in []:  # placeholder; explicit scan below
-            store = candidate
-            break
+        # bookkeeping disagrees with the engine after a fork. Pick the
+        # first active store that actually holds this channel.
+        for candidate in list_session_stores():
+            try:
+                if candidate.get_channel_messages(channel):
+                    store = candidate
+                    break
+            except Exception:
+                continue
 
     events: list[dict] = []
     if store is not None:
@@ -184,8 +230,11 @@ def _channel_history(
     }
 
 
-def branches(engine: Terrarium, session_id: str, creature_id: str) -> dict[str, Any]:
+def branches(
+    service: "TerrariumService", session_id: str, creature_id: str
+) -> dict[str, Any]:
     """Return per-turn branch metadata for the navigator UI."""
+    engine = as_engine(service)
     payload = history(engine, session_id, creature_id)
     meta = collect_branch_metadata(payload["events"])
     turns = [

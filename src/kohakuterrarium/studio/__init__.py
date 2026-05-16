@@ -2,8 +2,7 @@
 
 The :class:`Studio` class wraps a :class:`Terrarium` engine and
 exposes catalog / identity / sessions / persistence / editors /
-attach as nested namespaces.  See
-``plans/structure-hierarchy/studio-class/design.md``.
+attach as nested namespaces.
 
 Importing this package also registers the studio-supplied hooks the
 ``terrarium`` group tools call into (session-store auto-attach,
@@ -14,8 +13,10 @@ been registered, and degrades gracefully when nothing has.
 
 from kohakuterrarium.studio.catalog.spawnable import list_spawnable_creatures
 from kohakuterrarium.studio.editors.workspace_fs import LocalWorkspace
+from kohakuterrarium.studio.sessions.find import (
+    apply_creature_name as _apply_creature_name,
+)
 from kohakuterrarium.studio.sessions.lifecycle import (
-    _apply_creature_name,
     attach_session_store_for_creature,
 )
 from kohakuterrarium.studio.studio import Studio

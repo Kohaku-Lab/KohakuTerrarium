@@ -4,8 +4,6 @@ Body drained verbatim from ``api/ws/sessions.py`` (Phase 1, agent E).
 Subscribes to a running session's ``SessionStore.append_event`` and
 streams every new event to a connected WS client in real time.
 
-Design: ``plans/session-system/viewer-design.md`` §4 (Live attach) + §5.
-
 Mechanics:
 
 * Resolves the session against the studio's live store registry —

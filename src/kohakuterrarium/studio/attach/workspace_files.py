@@ -121,8 +121,30 @@ def _dir_entry(path: Path) -> dict:
     }
 
 
+def _has_visible_children(path: Path) -> bool:
+    """Peek into a directory and return True if it has any non-skipped entry.
+
+    Used to populate the ``has_children`` flag so the frontend can render
+    the expand chevron without fetching the subtree.
+    """
+    try:
+        for entry in path.iterdir():
+            if not _should_skip(entry.name):
+                return True
+    except (PermissionError, OSError):
+        return False
+    return False
+
+
 def _build_tree(path: Path, depth: int) -> dict:
-    """Recursively build a file tree dict."""
+    """Recursively build a file tree dict.
+
+    Directory entries carry ``has_children: bool`` so the frontend can
+    show expand chevrons for collapsed branches without a second
+    roundtrip.  ``depth <= 0`` returns the node only (no ``children``
+    key) — caller fetches children lazily by re-calling ``get_file_tree``
+    on the directory's path.
+    """
     node = _dir_entry(path)
 
     if path.is_file():
@@ -132,8 +154,10 @@ def _build_tree(path: Path, depth: int) -> dict:
             node["size"] = 0
         return node
 
+    # Directory node — advertise expand-ability for every collapsed branch.
+    node["has_children"] = _has_visible_children(path)
+
     if depth <= 0:
-        node["children"] = []
         return node
 
     children = []
@@ -167,15 +191,20 @@ def _detect_language(path: Path) -> str:
     return _EXT_LANG.get(ext, "plaintext")
 
 
-async def get_file_tree(root: str, depth: int = 3):
-    """Return a nested file tree starting from the given root directory."""
+async def get_file_tree(root: str, depth: int = 1):
+    """Return a nested file tree starting from the given root directory.
+
+    Defaults to ``depth=1`` (immediate children only) for lazy
+    expansion — the frontend re-fetches per branch as the user expands.
+    No upper cap: callers that want a full subtree can ask for it
+    explicitly.  Each directory entry carries ``has_children: bool`` so
+    the UI can render the expand chevron for collapsed branches.
+    """
     root_path = _validate_path(root)
     if not root_path.is_dir():
         raise HTTPException(400, f"Not a directory: {root}")
     if depth < 1:
         depth = 1
-    if depth > 10:
-        depth = 10
     return _build_tree(root_path, depth)
 
 

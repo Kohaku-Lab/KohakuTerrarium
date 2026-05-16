@@ -18,14 +18,18 @@ from kohakuterrarium.terrarium.engine import Terrarium
 
 
 def _live_store_for_path(
-    engine: Terrarium, path: Path
+    engine: Terrarium | None, path: Path
 ) -> tuple[Any, SessionStore | None]:
     """Find a live creature whose store points at ``path`` (if any).
 
     Returns ``(live_agent, live_store)``; both are ``None`` when the
-    session is not currently running. The caller then opens a fresh
+    session is not currently running OR ``engine`` is ``None`` (lab-host
+    mode runs no host agent engine — live creatures live on workers
+    and the host has nothing to walk).  The caller then opens a fresh
     ``SessionStore`` if needed.
     """
+    if engine is None:
+        return None, None
     for creature in engine.list_creatures():
         ag = creature.agent
         if ag and hasattr(ag, "session_store") and ag.session_store:
@@ -61,24 +65,29 @@ def build_embeddings(
         embedder = create_embedder(embed_config)
         memory = SessionMemory(str(path), embedder=embedder, store=store)
 
-        indexed: dict[str, dict[str, int]] = {}
-        for agent_name in agents:
-            events = store.get_events(agent_name)
-            if not events:
-                indexed[agent_name] = {"events": 0, "blocks": 0}
-                continue
-            count = memory.index_events(agent_name, events)
-            indexed[agent_name] = {"events": len(events), "blocks": count}
+        try:
+            indexed: dict[str, dict[str, int]] = {}
+            for agent_name in agents:
+                events = store.get_events(agent_name)
+                if not events:
+                    indexed[agent_name] = {"events": 0, "blocks": 0}
+                    continue
+                count = memory.index_events(agent_name, events)
+                indexed[agent_name] = {"events": len(events), "blocks": count}
 
-        stats = memory.get_stats()
-        return {
-            "path": str(path),
-            "agents": agents,
-            "provider": provider,
-            "model": model,
-            "indexed_per_agent": indexed,
-            "stats": stats,
-        }
+            stats = memory.get_stats()
+            return {
+                "path": str(path),
+                "agents": agents,
+                "provider": provider,
+                "model": model,
+                "indexed_per_agent": indexed,
+                "stats": stats,
+            }
+        finally:
+            # SessionMemory opens its own SQLite handles — release them
+            # so the .kohakutr file isn't left locked.
+            memory.close()
     finally:
         store.close()
 
@@ -108,7 +117,7 @@ async def search_session_memory(
     mode: str,
     k: int,
     agent: str | None,
-    engine: Terrarium,
+    engine: Terrarium | None,
 ) -> dict[str, Any]:
     """Run an FTS5 / vector / hybrid search across a saved session.
 
@@ -146,6 +155,11 @@ async def search_session_memory(
 
         results = memory.search(query=q, mode=mode, k=k, agent=agent)
 
+        # Release the SessionMemory's own SQLite handles — without this
+        # they linger until GC and (on Windows) block a later delete of
+        # the .kohakutr file. The shared SessionStore is closed only
+        # when it isn't a live creature's store.
+        memory.close()
         if not live_store:
             store.close(update_status=False)
     except Exception as e:

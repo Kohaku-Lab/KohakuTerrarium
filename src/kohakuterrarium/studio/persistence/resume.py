@@ -41,8 +41,9 @@ from kohakuterrarium.studio.sessions.lifecycle import (
     _now_iso,
     _session_stores,
 )
-from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.utils.logging import get_logger
+from kohakuterrarium.terrarium import TerrariumService
+from kohakuterrarium.studio._runtime import as_engine
 
 logger = get_logger(__name__)
 
@@ -77,7 +78,7 @@ def announce_migration_if_needed(path: Path) -> None:
 
 
 async def resume_session(
-    engine: Terrarium,
+    service: "TerrariumService",
     path: Path | str,
     *,
     pwd_override: str | None = None,
@@ -98,6 +99,7 @@ async def resume_session(
             session = await resume_session(t, "alice.kohakutr")
             print(f"resumed {session.name} with {len(session.creatures)} creature(s)")
     """
+    engine = as_engine(service)
     path = Path(path)
     sid = await engine.adopt_session(path, pwd=pwd_override, llm_override=llm_override)
 

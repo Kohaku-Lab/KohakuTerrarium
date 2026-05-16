@@ -10,16 +10,31 @@ import json
 from pathlib import Path
 
 from kohakuterrarium.skills import Skill
+from kohakuterrarium.utils.config_dir import config_dir
 
+
+def _state_file() -> Path:
+    """Resolve the skill-state path fresh, honouring KT_CONFIG_DIR.
+
+    The previous module-constant ``Path.home() / ".kohakuterrarium" /
+    "skill_state.json"`` was computed at import time and ignored the
+    env override, leaking test-suite writes into the operator's real
+    config dir.
+    """
+    return config_dir() / "skill_state.json"
+
+
+# Back-compat — display only; live read/write uses ``_state_file()``.
 _STATE_FILE = Path.home() / ".kohakuterrarium" / "skill_state.json"
 
 
 def load_state() -> dict[str, bool]:
     """Return the persisted ``{skill_name: enabled}`` map (empty when missing)."""
-    if not _STATE_FILE.exists():
+    path = _state_file()
+    if not path.exists():
         return {}
     try:
-        data = json.loads(_STATE_FILE.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     if not isinstance(data, dict):
@@ -29,8 +44,9 @@ def load_state() -> dict[str, bool]:
 
 def save_state(state: dict[str, bool]) -> None:
     """Atomically persist *state* to disk (creates parent dir if needed)."""
-    _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _STATE_FILE.write_text(json.dumps(state, indent=2, sort_keys=True), "utf-8")
+    path = _state_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, indent=2, sort_keys=True), "utf-8")
 
 
 def serialize(skill: Skill, state: dict[str, bool]) -> dict:

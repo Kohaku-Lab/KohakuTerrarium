@@ -19,8 +19,9 @@ from typing import Any, AsyncIterator
 
 from kohakuterrarium.core.channel import AgentChannel
 from kohakuterrarium.core.events import EventContent
-from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.observer import ChannelObserver
+from kohakuterrarium.terrarium import TerrariumService
+from kohakuterrarium.studio._runtime import host_engine_or_none
 
 
 @dataclass
@@ -37,12 +38,25 @@ class ChannelEvent:
 
 
 async def stream_session_channels(
-    engine: Terrarium,
+    service: "TerrariumService",
     session_id: str,
     *,
     filter_channels: list[str] | None = None,
 ) -> AsyncIterator[ChannelEvent]:
-    """Stream every shared-channel message from a session as it arrives."""
+    """Stream every shared-channel message from a session as it arrives.
+
+    The channel-observer stream taps a host engine's internal channel
+    registry directly — in lab-host mode there is no host engine, and a
+    cross-node observer path is not yet wired, so a worker session's
+    channels surface as ``KeyError`` (the standard "not here" signal
+    the WS route closes cleanly on) rather than an engine reach-in.
+    """
+    engine = host_engine_or_none(service)
+    if engine is None:
+        raise KeyError(
+            f"session {session_id!r} is not host-local — channel observer "
+            "streaming of worker sessions is not yet wired"
+        )
     env = engine._environments.get(session_id)
     if env is None:
         raise KeyError(f"session {session_id!r} not found")
@@ -58,12 +72,22 @@ async def stream_session_channels(
 
 
 async def stream_creature_channels(
-    engine: Terrarium,
+    service: "TerrariumService",
     creature_id: str,
     *,
     filter_channels: list[str] | None = None,
 ) -> AsyncIterator[ChannelEvent]:
-    """Stream a creature's private (sub-agent) channel messages."""
+    """Stream a creature's private (sub-agent) channel messages.
+
+    Host-engine-internal, like :func:`stream_session_channels` — a
+    worker creature surfaces as ``KeyError`` in lab-host mode.
+    """
+    engine = host_engine_or_none(service)
+    if engine is None:
+        raise KeyError(
+            f"creature {creature_id!r} is not host-local — channel observer "
+            "streaming of worker creatures is not yet wired"
+        )
     creature = engine.get_creature(creature_id)
     session = creature.agent.session
     async for event in _stream_from_registry(

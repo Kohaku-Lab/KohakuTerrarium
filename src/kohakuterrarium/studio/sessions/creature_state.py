@@ -11,6 +11,8 @@ from typing import Any
 from kohakuterrarium.core.scratchpad import is_reserved_scratchpad_key
 from kohakuterrarium.studio.sessions.lifecycle import find_creature
 from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium import TerrariumService
+from kohakuterrarium.studio._runtime import as_engine
 
 # Env var keys that must be filtered out of /env responses.
 _ENV_REDACT_SUBSTRINGS = (
@@ -40,23 +42,40 @@ def _get_agent(engine: Terrarium, session_id: str, creature_id: str) -> Any:
     return find_creature(engine, session_id, creature_id).agent
 
 
+def _agent_working_dir(agent: Any) -> str:
+    """Resolve a creature's working directory.
+
+    The working directory is owned by the workspace helper, or by
+    ``agent.executor._working_dir`` — never by a bare
+    ``agent._working_dir`` attribute (``Agent`` never sets one). Both
+    ``get_env`` and ``get_working_dir`` route through this helper so
+    they can never report different paths for the same creature.
+    """
+    ws = getattr(agent, "workspace", None)
+    if ws is None:
+        return str(getattr(agent.executor, "_working_dir", ""))
+    return ws.get()
+
+
 # ---------------------------------------------------------------------------
 # scratchpad
 # ---------------------------------------------------------------------------
 
 
 def get_scratchpad(
-    engine: Terrarium, session_id: str, creature_id: str
+    service: "TerrariumService", session_id: str, creature_id: str
 ) -> dict[str, str]:
+    engine = as_engine(service)
     return _get_agent(engine, session_id, creature_id).scratchpad.to_dict()
 
 
 def patch_scratchpad(
-    engine: Terrarium,
+    service: "TerrariumService",
     session_id: str,
     creature_id: str,
     updates: dict[str, str | None],
 ) -> dict[str, str]:
+    engine = as_engine(service)
     pad = _get_agent(engine, session_id, creature_id).scratchpad
     for key, value in updates.items():
         if is_reserved_scratchpad_key(key):
@@ -74,8 +93,9 @@ def patch_scratchpad(
 
 
 def list_triggers(
-    engine: Terrarium, session_id: str, creature_id: str
+    service: "TerrariumService", session_id: str, creature_id: str
 ) -> list[dict[str, Any]]:
+    engine = as_engine(service)
     agent = _get_agent(engine, session_id, creature_id)
     tm = agent.trigger_manager
     if tm is None:
@@ -96,15 +116,19 @@ def list_triggers(
 # ---------------------------------------------------------------------------
 
 
-def get_env(engine: Terrarium, session_id: str, creature_id: str) -> dict[str, Any]:
+def get_env(
+    service: "TerrariumService", session_id: str, creature_id: str
+) -> dict[str, Any]:
+    engine = as_engine(service)
     agent = _get_agent(engine, session_id, creature_id)
-    pwd = getattr(agent, "_working_dir", None) or os.getcwd()
+    pwd = _agent_working_dir(agent) or os.getcwd()
     return {"pwd": str(pwd), "env": _redacted_env()}
 
 
 def get_system_prompt(
-    engine: Terrarium, session_id: str, creature_id: str
+    service: "TerrariumService", session_id: str, creature_id: str
 ) -> dict[str, str]:
+    engine = as_engine(service)
     return {"text": _get_agent(engine, session_id, creature_id).get_system_prompt()}
 
 
@@ -113,17 +137,18 @@ def get_system_prompt(
 # ---------------------------------------------------------------------------
 
 
-def get_working_dir(engine: Terrarium, session_id: str, creature_id: str) -> str:
+def get_working_dir(
+    service: "TerrariumService", session_id: str, creature_id: str
+) -> str:
+    engine = as_engine(service)
     agent = _get_agent(engine, session_id, creature_id)
-    ws = getattr(agent, "workspace", None)
-    if ws is None:
-        return str(getattr(agent.executor, "_working_dir", ""))
-    return ws.get()
+    return _agent_working_dir(agent)
 
 
 def set_working_dir(
-    engine: Terrarium, session_id: str, creature_id: str, new_path: str
+    service: "TerrariumService", session_id: str, creature_id: str, new_path: str
 ) -> str:
+    engine = as_engine(service)
     agent = _get_agent(engine, session_id, creature_id)
     ws = getattr(agent, "workspace", None)
     if ws is None:
@@ -137,8 +162,9 @@ def set_working_dir(
 
 
 def native_tool_inventory(
-    engine: Terrarium, session_id: str, creature_id: str
+    service: "TerrariumService", session_id: str, creature_id: str
 ) -> list[dict]:
+    engine = as_engine(service)
     agent = _get_agent(engine, session_id, creature_id)
     registry = agent.registry
     helper = getattr(agent, "native_tool_options", None)
@@ -166,8 +192,9 @@ def native_tool_inventory(
 
 
 def get_native_tool_options(
-    engine: Terrarium, session_id: str, creature_id: str
+    service: "TerrariumService", session_id: str, creature_id: str
 ) -> dict[str, dict]:
+    engine = as_engine(service)
     agent = _get_agent(engine, session_id, creature_id)
     helper = getattr(agent, "native_tool_options", None)
     if helper is None:
@@ -176,12 +203,13 @@ def get_native_tool_options(
 
 
 def set_native_tool_options(
-    engine: Terrarium,
+    service: "TerrariumService",
     session_id: str,
     creature_id: str,
     tool: str,
     values: dict[str, Any],
 ) -> dict:
+    engine = as_engine(service)
     agent = _get_agent(engine, session_id, creature_id)
     helper = getattr(agent, "native_tool_options", None)
     if helper is None:

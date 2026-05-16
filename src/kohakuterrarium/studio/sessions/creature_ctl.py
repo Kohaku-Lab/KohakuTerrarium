@@ -1,49 +1,42 @@
 """Per-creature control: interrupt + jobs + cancel + promote.
 
-Replaces ``KohakuManager.agent_interrupt / agent_get_jobs /
-agent_cancel_job`` and ``creature_interrupt / creature_get_jobs /
-creature_cancel_job``.  Engine-backed via ``engine.get_creature(cid)``.
+Routes via the :class:`TerrariumService` so multi-node lab-host
+deployments hit the creature's home node automatically — no
+``as_engine`` unwrap here.  Resolution by ``creature_id`` mirrors
+``MultiNodeTerrariumService._route_per_creature``.
+
+The ``session_id`` parameter is kept for backwards compatibility
+with existing API routes (which thread it through unchanged) — it's
+not actually needed for routing since ``creature_id`` is globally
+unique, but the legacy signature lets the routes stay unchanged.
 """
 
-from typing import Any
-
-from kohakuterrarium.studio.sessions.lifecycle import find_creature
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium import TerrariumService
 
 
-def _get_agent(engine: Terrarium, session_id: str, creature_id: str) -> Any:
-    creature = find_creature(engine, session_id, creature_id)
-    return creature.agent
-
-
-def interrupt(engine: Terrarium, session_id: str, creature_id: str) -> None:
+async def interrupt(
+    service: "TerrariumService", session_id: str, creature_id: str
+) -> None:
     """Interrupt the creature's current turn."""
-    _get_agent(engine, session_id, creature_id).interrupt()
+    await service.interrupt(creature_id)
 
 
-def list_jobs(engine: Terrarium, session_id: str, creature_id: str) -> list[dict]:
+async def list_jobs(
+    service: "TerrariumService", session_id: str, creature_id: str
+) -> list[dict]:
     """Return the creature's running tool + sub-agent jobs."""
-    agent = _get_agent(engine, session_id, creature_id)
-    jobs = [j.to_dict() for j in agent.executor.get_running_jobs()]
-    jobs.extend(j.to_dict() for j in agent.subagent_manager.get_running_jobs())
-    return jobs
+    return await service.list_jobs(creature_id)
 
 
 async def cancel_job(
-    engine: Terrarium, session_id: str, creature_id: str, job_id: str
+    service: "TerrariumService", session_id: str, creature_id: str, job_id: str
 ) -> bool:
     """Cancel one running tool / sub-agent job.  Returns True on hit."""
-    agent = _get_agent(engine, session_id, creature_id)
-    if agent._interrupt_direct_job(job_id):
-        return True
-    if await agent.executor.cancel(job_id):
-        return True
-    return await agent.subagent_manager.cancel(job_id)
+    return await service.stop_job(creature_id, job_id)
 
 
-def promote_job(
-    engine: Terrarium, session_id: str, creature_id: str, job_id: str
+async def promote_job(
+    service: "TerrariumService", session_id: str, creature_id: str, job_id: str
 ) -> bool:
     """Promote a running direct job to background.  Returns True on hit."""
-    agent = _get_agent(engine, session_id, creature_id)
-    return bool(agent._promote_handle(job_id))
+    return await service.promote_job(creature_id, job_id)

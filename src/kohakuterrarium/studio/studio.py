@@ -25,9 +25,7 @@ Usage::
 
 The Studio class is *organizational* — every namespace method is a
 one-liner that forwards to an existing function under
-``kohakuterrarium.studio.<sub>.*``.  See
-``plans/structure-hierarchy/studio-class/design.md`` for the
-rationale.
+``kohakuterrarium.studio.<sub>.*``.
 """
 
 from pathlib import Path
@@ -83,27 +81,101 @@ from kohakuterrarium.studio.sessions import (
     topology as _session_topology,
     wiring as _session_wiring,
 )
+from kohakuterrarium.studio.nodes import NodeMap, build_node_map_if_multi_node
+from kohakuterrarium.terrarium import LocalTerrariumService, TerrariumService
 from kohakuterrarium.terrarium.engine import Terrarium
 
 
 class Studio:
     """Programmatic interface for the studio tier.
 
-    ``Studio()`` owns its own ``Terrarium`` engine; pass
-    ``engine=existing_engine`` to share one (e.g. with the HTTP
-    server's process-wide singleton).  The class is an async context
-    manager — entering starts the engine, exiting calls
-    :meth:`shutdown`.
+    ``Studio()`` owns its own runtime; pass ``engine=existing_engine``
+    to share one (e.g. with the HTTP server's process-wide singleton).
+    The class is an async context manager — entering starts the
+    engine, exiting calls :meth:`shutdown`.
+
+    **Runtime dependency.** Studio depends on a
+    :class:`TerrariumService` (an abstraction that can be a local
+    in-process :class:`LocalTerrariumService` or a future Lab-backed
+    remote service). Single-host code is unchanged because
+    ``LocalTerrariumService`` is a thin wrapper around the same
+    :class:`Terrarium` engine. The :attr:`service` property is the
+    new primary handle; :attr:`engine` remains as a backward-compat
+    escape hatch that returns ``service.engine``.
     """
 
-    def __init__(self, engine: Terrarium | None = None) -> None:
-        self.engine: Terrarium = engine or Terrarium()
+    def __init__(
+        self,
+        engine: Terrarium | None = None,
+        *,
+        service: TerrariumService | None = None,
+    ) -> None:
+        # Studio's runtime dependency is a TerrariumService. Three
+        # construction paths:
+        #
+        # - ``service=`` provided (multi-node host mode): use it
+        #   directly.  The caller is responsible for engine ownership.
+        # - ``engine=`` provided (single-host): wrap in
+        #   :class:`LocalTerrariumService`.
+        # - neither provided: fresh :class:`Terrarium` +
+        #   :class:`LocalTerrariumService` (default single-host case).
+        #
+        # NB: ``engine or Terrarium()`` is wrong here — Terrarium defines
+        # ``__len__`` (number of creatures) which makes an empty engine
+        # falsy, so the user's engine would get silently replaced. Test
+        # for ``None`` explicitly.
+        if service is not None and engine is not None:
+            raise TypeError(
+                "Studio accepts at most one of {service, engine}; "
+                "service implies its own engine"
+            )
+        if service is not None:
+            self._service: TerrariumService = service
+            # Only the service-injection path may hold a
+            # MultiNodeTerrariumService; calling the helper here is the
+            # only place we touch the laboratory layer.  The helper
+            # lazy-imports MultiNodeTerrariumService so this branch is
+            # the single trigger for that import.
+            self.nodes: NodeMap | None = build_node_map_if_multi_node(service)
+        else:
+            self._service = LocalTerrariumService(
+                engine if engine is not None else Terrarium()
+            )
+            # Standalone path — we just built a LocalTerrariumService.
+            # Skip the helper entirely so the laboratory layer never
+            # loads in single-host boots.
+            self.nodes = None
         self.catalog = _CatalogNS(self)
         self.identity = _IdentityNS(self)
         self.sessions = _SessionsNS(self)
         self.persistence = _PersistenceNS(self)
         self.editors = _EditorsNS(self)
         self.attach = _AttachNS(self)
+
+    @property
+    def service(self) -> TerrariumService:
+        """The runtime service Studio depends on.
+
+        In single-host mode this is a
+        :class:`LocalTerrariumService` wrapping the in-process
+        Terrarium engine. Multi-node deployments will swap in a
+        Lab-backed remote service implementation; Studio code is
+        agnostic to the choice.
+        """
+        return self._service
+
+    @property
+    def engine(self) -> Terrarium:
+        """The underlying Terrarium engine.
+
+        Backward-compatible accessor — equivalent to
+        ``studio.service.engine``. The escape hatch for code that
+        needs methods not on the :class:`TerrariumService` Protocol.
+        New code should prefer :attr:`service` plus the Protocol
+        surface; reaching into ``engine`` ties the call site to
+        single-host mode.
+        """
+        return self._service.engine
 
     # --- async context manager ---
 
@@ -187,7 +259,7 @@ class _CatalogPackages:
         self, source: str, *, editable: bool = False, name: str | None = None
     ) -> str:
         return _catalog_packages.install_package_op(
-            source, editable=editable, name_override=name
+            source, editable=editable, name=name
         )
 
     def uninstall(self, name: str) -> bool:
@@ -407,7 +479,7 @@ class _SessionsNS:
         llm_override: str | None = None,
     ) -> _session_handles.Session:
         return await _session_lifecycle.start_creature(
-            self._studio.engine,
+            self._studio._service,
             config_path=str(config_or_path),
             pwd=pwd,
             llm_override=llm_override,
@@ -420,76 +492,84 @@ class _SessionsNS:
         pwd: str | None = None,
     ) -> _session_handles.Session:
         return await _session_lifecycle.start_terrarium(
-            self._studio.engine, config_path=str(config_or_path), pwd=pwd
+            self._studio._service, config_path=str(config_or_path), pwd=pwd
         )
 
     def list(self) -> list[_session_handles.SessionListing]:
-        return _session_lifecycle.list_sessions(self._studio.engine)
+        return _session_lifecycle.list_sessions(self._studio._service)
 
     def get(self, session_id: str) -> _session_handles.Session:
-        return _session_lifecycle.get_session(self._studio.engine, session_id)
+        return _session_lifecycle.get_session(self._studio._service, session_id)
 
     async def stop(self, session_id: str) -> None:
-        await _session_lifecycle.stop_session(self._studio.engine, session_id)
+        await _session_lifecycle.stop_session(self._studio._service, session_id)
 
     def find_creature(self, session_id: str, name_or_id: str) -> Any:
         return _session_lifecycle.find_creature(
-            self._studio.engine, session_id, name_or_id
+            self._studio._service, session_id, name_or_id
         )
 
-    def find_session_for_creature(self, creature_id: str) -> str | None:
-        return _session_lifecycle.find_session_for_creature(
-            self._studio.engine, creature_id
+    async def find_session_for_creature(self, creature_id: str) -> str | None:
+        return await _session_lifecycle.find_session_for_creature(
+            self._studio._service, creature_id
         )
 
     # creature CRUD inside a running session (hot-plug)
     async def add_creature(self, session_id: str, config: Any) -> str:
         return await _session_lifecycle.add_creature(
-            self._studio.engine, session_id, config
+            self._studio._service, session_id, config
         )
 
     def list_creatures(self, session_id: str) -> "list[dict]":
-        return _session_lifecycle.list_creatures(self._studio.engine, session_id)
+        return _session_lifecycle.list_creatures(self._studio._service, session_id)
 
     async def remove_creature(self, session_id: str, creature_id: str) -> bool:
         return await _session_lifecycle.remove_creature(
-            self._studio.engine, session_id, creature_id
+            self._studio._service, session_id, creature_id
         )
 
     # topology + wiring
     async def add_channel(self, session_id: str, *args, **kwargs) -> Any:
         return await _session_topology.add_channel(
-            self._studio.engine, session_id, *args, **kwargs
+            self._studio._service, session_id, *args, **kwargs
         )
 
     async def connect(self, *args, **kwargs) -> Any:
-        return await _session_topology.connect(self._studio.engine, *args, **kwargs)
+        return await _session_topology.connect(self._studio._service, *args, **kwargs)
 
     async def disconnect(self, *args, **kwargs) -> Any:
-        return await _session_topology.disconnect(self._studio.engine, *args, **kwargs)
+        return await _session_topology.disconnect(
+            self._studio._service, *args, **kwargs
+        )
 
     async def wire_output(self, *args, **kwargs) -> Any:
-        return await _session_wiring.wire_output(self._studio.engine, *args, **kwargs)
+        return await _session_wiring.wire_output(self._studio._service, *args, **kwargs)
 
     async def unwire_output(self, *args, **kwargs) -> Any:
-        return await _session_wiring.unwire_output(self._studio.engine, *args, **kwargs)
+        return await _session_wiring.unwire_output(
+            self._studio._service, *args, **kwargs
+        )
 
     def list_output_wiring(self, *args, **kwargs) -> Any:
-        return _session_wiring.list_output_wiring(self._studio.engine, *args, **kwargs)
+        return _session_wiring.list_output_wiring(
+            self._studio._service, *args, **kwargs
+        )
 
     async def wire_output_sink(self, *args, **kwargs) -> Any:
         return await _session_wiring.wire_output_sink(
-            self._studio.engine, *args, **kwargs
+            self._studio._service, *args, **kwargs
         )
 
     async def unwire_output_sink(self, *args, **kwargs) -> Any:
         return await _session_wiring.unwire_output_sink(
-            self._studio.engine, *args, **kwargs
+            self._studio._service, *args, **kwargs
         )
 
     # memory search
-    def search_memory(self, name: str, **kwargs) -> dict[str, Any]:
-        return _session_memory.search_session_memory(name, **kwargs)
+    async def search_memory(self, name: str, **kwargs) -> dict[str, Any]:
+        # ``search_session_memory`` is ``async def`` — must be awaited,
+        # not returned as a bare coroutine.
+        return await _session_memory.search_session_memory(name, **kwargs)
 
 
 class _SessionsChat:
@@ -498,31 +578,37 @@ class _SessionsChat:
     def __init__(self, studio: Studio) -> None:
         self._studio = studio
 
-    async def chat(
+    def chat(
         self, session_id: str, creature_id: str, content: Any
     ) -> AsyncIterator[str]:
-        return _session_chat.chat(self._studio.engine, session_id, creature_id, content)
+        # ``_session_chat.chat`` is an async *generator* — calling it
+        # already returns an AsyncIterator. This wrapper must NOT be
+        # ``async def`` (that would make the call return a coroutine,
+        # breaking the documented ``async for chunk in ...chat(...)``).
+        return _session_chat.chat(
+            self._studio._service, session_id, creature_id, content
+        )
 
     async def regenerate(self, session_id: str, creature_id: str) -> None:
-        await _session_chat.regenerate(self._studio.engine, session_id, creature_id)
+        await _session_chat.regenerate(self._studio._service, session_id, creature_id)
 
     async def edit_message(
         self, session_id: str, creature_id: str, msg_idx: int, content: Any, **kwargs
     ) -> bool:
         return await _session_chat.edit_message(
-            self._studio.engine, session_id, creature_id, msg_idx, content, **kwargs
+            self._studio._service, session_id, creature_id, msg_idx, content, **kwargs
         )
 
     async def rewind(self, session_id: str, creature_id: str, msg_idx: int) -> None:
         await _session_chat.rewind(
-            self._studio.engine, session_id, creature_id, msg_idx
+            self._studio._service, session_id, creature_id, msg_idx
         )
 
     def history(self, session_id: str, creature_id: str) -> dict[str, Any]:
-        return _session_chat.history(self._studio.engine, session_id, creature_id)
+        return _session_chat.history(self._studio._service, session_id, creature_id)
 
     def branches(self, session_id: str, creature_id: str) -> dict[str, Any]:
-        return _session_chat.branches(self._studio.engine, session_id, creature_id)
+        return _session_chat.branches(self._studio._service, session_id, creature_id)
 
 
 class _SessionsCtl:
@@ -532,19 +618,23 @@ class _SessionsCtl:
         self._studio = studio
 
     async def interrupt(self, session_id: str, creature_id: str) -> None:
-        await _session_ctl.interrupt(self._studio.engine, session_id, creature_id)
+        await _session_ctl.interrupt(self._studio._service, session_id, creature_id)
 
-    def list_jobs(self, session_id: str, creature_id: str) -> list[dict]:
-        return _session_ctl.list_jobs(self._studio.engine, session_id, creature_id)
+    async def list_jobs(self, session_id: str, creature_id: str) -> list[dict]:
+        # ``_session_ctl.list_jobs`` is ``async def`` — must be awaited.
+        return await _session_ctl.list_jobs(
+            self._studio._service, session_id, creature_id
+        )
 
     async def cancel_job(self, session_id: str, creature_id: str, job_id: str) -> bool:
         return await _session_ctl.cancel_job(
-            self._studio.engine, session_id, creature_id, job_id
+            self._studio._service, session_id, creature_id, job_id
         )
 
-    def promote_job(self, session_id: str, creature_id: str, job_id: str) -> bool:
-        return _session_ctl.promote_job(
-            self._studio.engine, session_id, creature_id, job_id
+    async def promote_job(self, session_id: str, creature_id: str, job_id: str) -> bool:
+        # ``_session_ctl.promote_job`` is ``async def`` — must be awaited.
+        return await _session_ctl.promote_job(
+            self._studio._service, session_id, creature_id, job_id
         )
 
 
@@ -556,37 +646,37 @@ class _SessionsState:
 
     def scratchpad(self, session_id: str, creature_id: str) -> dict[str, str]:
         return _session_state.get_scratchpad(
-            self._studio.engine, session_id, creature_id
+            self._studio._service, session_id, creature_id
         )
 
     def patch_scratchpad(
         self, session_id: str, creature_id: str, updates: dict[str, str | None]
     ) -> dict[str, str]:
         return _session_state.patch_scratchpad(
-            self._studio.engine, session_id, creature_id, updates
+            self._studio._service, session_id, creature_id, updates
         )
 
     def triggers(self, session_id: str, creature_id: str) -> list[dict[str, Any]]:
         return _session_state.list_triggers(
-            self._studio.engine, session_id, creature_id
+            self._studio._service, session_id, creature_id
         )
 
     def env(self, session_id: str, creature_id: str) -> dict[str, Any]:
-        return _session_state.get_env(self._studio.engine, session_id, creature_id)
+        return _session_state.get_env(self._studio._service, session_id, creature_id)
 
     def system_prompt(self, session_id: str, creature_id: str) -> dict[str, str]:
         return _session_state.get_system_prompt(
-            self._studio.engine, session_id, creature_id
+            self._studio._service, session_id, creature_id
         )
 
     def working_dir(self, session_id: str, creature_id: str) -> str:
         return _session_state.get_working_dir(
-            self._studio.engine, session_id, creature_id
+            self._studio._service, session_id, creature_id
         )
 
     def set_working_dir(self, session_id: str, creature_id: str, new_path: str) -> str:
         return _session_state.set_working_dir(
-            self._studio.engine, session_id, creature_id, new_path
+            self._studio._service, session_id, creature_id, new_path
         )
 
 
@@ -598,12 +688,12 @@ class _SessionsPlugins:
 
     def list(self, session_id: str, creature_id: str) -> list[dict]:
         return _session_plugins.list_plugins(
-            self._studio.engine, session_id, creature_id
+            self._studio._service, session_id, creature_id
         )
 
     async def toggle(self, session_id: str, creature_id: str, plugin_name: str) -> dict:
         return await _session_plugins.toggle_plugin(
-            self._studio.engine, session_id, creature_id, plugin_name
+            self._studio._service, session_id, creature_id, plugin_name
         )
 
 
@@ -615,12 +705,12 @@ class _SessionsModel:
 
     def switch(self, session_id: str, creature_id: str, profile_name: str) -> str:
         return _session_model.switch_model(
-            self._studio.engine, session_id, creature_id, profile_name
+            self._studio._service, session_id, creature_id, profile_name
         )
 
     def native_tool_options(self, session_id: str, creature_id: str) -> dict[str, dict]:
         return _session_state.get_native_tool_options(
-            self._studio.engine, session_id, creature_id
+            self._studio._service, session_id, creature_id
         )
 
 
@@ -634,7 +724,7 @@ class _SessionsCommand:
         self, session_id: str, creature_id: str, command: str, args: str = ""
     ) -> dict:
         return await _session_command.execute_command(
-            self._studio.engine, session_id, creature_id, command, args
+            self._studio._service, session_id, creature_id, command, args
         )
 
 
@@ -661,7 +751,7 @@ class _PersistenceNS:
         llm_override: str | None = None,
     ) -> _session_handles.Session:
         return await _persistence_resume.resume_session(
-            self._studio.engine,
+            self._studio._service,
             store_or_path,
             pwd_override=pwd_override,
             llm_override=llm_override,
@@ -776,7 +866,7 @@ class _AttachNS:
         self._studio = studio
 
     def policies_for_creature(self, creature_id: str) -> list:
-        return _policies.get_creature_policies(self._studio.engine, creature_id)
+        return _policies.get_creature_policies(self._studio._service, creature_id)
 
     def policies_for_session(self, session_id: str) -> list:
-        return _policies.get_session_policies(self._studio.engine, session_id)
+        return _policies.get_session_policies(self._studio._service, session_id)

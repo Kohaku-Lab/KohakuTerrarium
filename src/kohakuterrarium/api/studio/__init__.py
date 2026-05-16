@@ -9,8 +9,7 @@ from the rest of the framework: core code never imports from
 Modules here may import freely from ``kohakuterrarium.core``,
 ``kohakuterrarium.builtins``, ``kohakuterrarium.modules``,
 ``kohakuterrarium.packages``, ``kohakuterrarium.llm``, and
-``kohakuterrarium.serving`` — read-only dependencies documented in
-``plans/kt-studio/architecture.md §9``.
+``kohakuterrarium.serving`` — read-only dependencies.
 """
 
 from kohakuterrarium.api.studio.app import build_studio_router

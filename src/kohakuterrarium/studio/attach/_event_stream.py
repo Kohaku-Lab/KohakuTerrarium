@@ -78,15 +78,17 @@ class StreamOutput(OutputModule):
 
     def on_activity(self, activity_type: str, detail: str) -> None:
         name, info = _parse_detail(detail)
+        frame_id = f"{activity_type}_{self._n}"
         self._put(
             {
                 "type": "activity",
                 "activity_type": activity_type,
                 "name": name,
                 "detail": info,
-                "id": f"{activity_type}_{self._n}",
+                "id": frame_id,
             }
         )
+        self._emit_typed_mirror(activity_type, name, info, frame_id, metadata=None)
         self._n += 1
 
     def on_assistant_image(
@@ -115,19 +117,60 @@ class StreamOutput(OutputModule):
         self, activity_type: str, detail: str, metadata: dict
     ) -> None:
         name, info = _parse_detail(detail)
+        frame_id = f"{activity_type}_{self._n}"
         msg: dict = {
             "type": "activity",
             "activity_type": activity_type,
             "name": name,
             "detail": info,
-            "id": f"{activity_type}_{self._n}",
+            "id": frame_id,
         }
         if metadata:
             for k in _STREAM_METADATA_KEYS:
                 if k in metadata:
                     msg[k] = metadata[k]
         self._put(msg)
+        self._emit_typed_mirror(activity_type, name, info, frame_id, metadata)
         self._n += 1
+
+    def _emit_typed_mirror(
+        self,
+        activity_type: str,
+        name: str,
+        detail: str,
+        frame_id: str,
+        metadata: dict | None,
+    ) -> None:
+        """Emit a duplicate frame whose ``type`` field literally equals
+        the activity_type, for tool / sub-agent lifecycle events.
+
+        The legacy WS contract wraps every activity in ``{type:
+        "activity", activity_type: ...}`` — the frontend dispatches on
+        ``activity_type`` so the wrapping stays.  But programmatic
+        consumers (the multi-node journey, future automation hooks)
+        match on ``frame.type.startswith("tool")``, which the wrapped
+        shape never satisfies.  Emitting an additional frame whose
+        ``type`` field is the raw activity_type lets both consumers
+        observe the same event without breaking the frontend dispatch.
+        Only the lifecycle-style events get the mirror; high-volume
+        events (text_chunk, processing_*) do not.
+        """
+        if not (
+            activity_type.startswith("tool_") or activity_type.startswith("subagent_")
+        ):
+            return
+        mirror: dict = {
+            "type": activity_type,
+            "activity_type": activity_type,
+            "name": name,
+            "detail": detail,
+            "id": frame_id,
+        }
+        if metadata:
+            for k in _STREAM_METADATA_KEYS:
+                if k in metadata:
+                    mirror[k] = metadata[k]
+        self._put(mirror)
 
     async def emit(self, event: OutputEvent) -> None:
         """Native event consumer. WS JSON frames stay byte-identical

@@ -31,14 +31,27 @@ def normalize_session_stem(path: Path) -> str:
 
 
 def all_session_files(session_dir: Path) -> list[Path]:
-    """Every ``.kohakutr`` / ``.kohakutr.v*`` / ``.kt`` file on disk."""
+    """Every ``.kohakutr`` / ``.kohakutr.v*`` / ``.kt`` file on disk.
+
+    Also scans the ``mirror/`` subdir: in lab-host mode the
+    ``SessionMirrorWriter`` writes worker-session mirrors under
+    ``<session_dir>/mirror/``, and the saved-session listing / history
+    endpoints are meant to surface them — ``_read_session_entry`` reads
+    ``meta['on_node']`` into each listing row precisely so mirrored
+    sessions show up tagged by their originating worker.
+    """
     if not session_dir.exists():
         return []
-    return (
-        list(session_dir.glob("*.kohakutr"))
-        + list(session_dir.glob("*.kohakutr.v*"))
-        + list(session_dir.glob("*.kt"))
-    )
+    patterns = ("*.kohakutr", "*.kohakutr.v*", "*.kt")
+    scan_dirs = [session_dir]
+    mirror_dir = session_dir / "mirror"
+    if mirror_dir.is_dir():
+        scan_dirs.append(mirror_dir)
+    found: list[Path] = []
+    for d in scan_dirs:
+        for pattern in patterns:
+            found.extend(d.glob(pattern))
+    return found
 
 
 def _version_rank(path: Path) -> int:

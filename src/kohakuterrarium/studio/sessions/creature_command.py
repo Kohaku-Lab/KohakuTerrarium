@@ -8,17 +8,19 @@ and ``routes/creatures.py:execute_creature_command``.
 from kohakuterrarium.builtins.user_commands import get_builtin_user_command
 from kohakuterrarium.modules.user_command.base import UserCommandContext
 from kohakuterrarium.studio.sessions.lifecycle import find_creature
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium import TerrariumService
+from kohakuterrarium.studio._runtime import as_engine
 
 
 async def execute_command(
-    engine: Terrarium,
+    service: "TerrariumService",
     session_id: str,
     creature_id: str,
     command: str,
     args: str = "",
 ) -> dict:
     """Run a built-in slash command against a creature."""
+    engine = as_engine(service)
     agent = find_creature(engine, session_id, creature_id).agent
     cmd = get_builtin_user_command(command)
     if cmd is None:

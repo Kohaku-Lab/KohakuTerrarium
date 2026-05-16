@@ -14,8 +14,10 @@ from kohakuterrarium.studio.editors.codegen_common import (
     parse,
     read_class_attr_bool,
     read_method_body,
+    replace_class_attr_bool,
     replace_class_in_module,
     replace_method_body,
+    replace_string_property,
 )
 from kohakuterrarium.studio.editors.templates import render
 
@@ -46,6 +48,21 @@ def update_existing(source: str, form: dict, execute_body: str) -> str:
         body = form["wait_for_trigger_body"]
     if body:
         klass = replace_method_body(klass, "wait_for_trigger", body)
+
+    # Persist the metadata class attributes from the form — the module
+    # docstring promises this round-trip, but ``update_existing``
+    # previously only touched the method body and silently dropped the
+    # ``universal`` / ``setup_tool_name`` / ``setup_description`` toggles.
+    if "universal" in form:
+        klass = replace_class_attr_bool(klass, "universal", bool(form["universal"]))
+    if "setup_tool_name" in form:
+        klass = replace_string_property(
+            klass, "setup_tool_name", str(form["setup_tool_name"])
+        )
+    if "setup_description" in form:
+        klass = replace_string_property(
+            klass, "setup_description", str(form["setup_description"])
+        )
 
     return replace_class_in_module(tree, klass.name.value, klass).code
 

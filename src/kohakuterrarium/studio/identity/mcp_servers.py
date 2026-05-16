@@ -17,13 +17,21 @@ from typing import Any, Callable
 
 import yaml
 
+from kohakuterrarium.utils.config_dir import config_dir
+
+# Import-time default — back-compat for display callers.  The live
+# read / write path goes through :func:`mcp_config_path`.
 KT_DIR = Path.home() / ".kohakuterrarium"
 MCP_SERVERS_PATH = KT_DIR / "mcp_servers.yaml"
 
 
 def mcp_config_path() -> Path:
-    """Return the canonical path to ``~/.kohakuterrarium/mcp_servers.yaml``."""
-    return MCP_SERVERS_PATH
+    """The ``mcp_servers.yaml`` path, honouring ``KT_CONFIG_DIR``.
+
+    Resolved fresh each call so test isolation / operator re-homing
+    works — a module constant computed once at import would not.
+    """
+    return config_dir() / "mcp_servers.yaml"
 
 
 def load_servers() -> list[dict[str, Any]]:
