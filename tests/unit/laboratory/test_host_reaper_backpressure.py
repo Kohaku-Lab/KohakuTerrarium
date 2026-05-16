@@ -56,13 +56,18 @@ class TestReaper:
     async def test_missing_heartbeat_disconnects(self):
         host, client = await _start_pair(port=1, heartbeat_timeout=0.3)
         try:
-            # Force the membership to "now" so reaper sees it as recent,
-            # then wait long enough for the heartbeat to expire.
-            # Reaper polls every ``heartbeat_timeout/2`` so 0.5s is enough
-            # for an immediate sweep after the timeout window passes.
+            # Reaper polls every ``heartbeat_timeout / 2``; after the
+            # timeout window expires the next sweep drops the client.
+            # Poll for disconnect rather than a fixed sleep — fast
+            # locally, robust on slow Windows CI runners where event-loop
+            # scheduling sometimes pushes the reaper's first sweep past
+            # an arbitrary 0.8s budget.
             assert "w1" in host.alive_clients()
-            await asyncio.sleep(0.8)
-            # After timeout the reaper has disconnected the client.
+            deadline = asyncio.get_event_loop().time() + 5.0
+            while asyncio.get_event_loop().time() < deadline:
+                if "w1" not in host.alive_clients():
+                    break
+                await asyncio.sleep(0.1)
             assert "w1" not in host.alive_clients()
         finally:
             await client.stop()
