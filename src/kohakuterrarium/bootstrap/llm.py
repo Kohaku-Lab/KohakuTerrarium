@@ -13,7 +13,6 @@ from kohakuterrarium.core.config import AgentConfig
 from kohakuterrarium.llm.anthropic_provider import AnthropicProvider
 from kohakuterrarium.llm.base import LLMConfig, LLMProvider
 from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
-from kohakuterrarium.llm.litellm_provider import LiteLLMProvider
 from kohakuterrarium.llm.openai import OpenAIProvider
 from kohakuterrarium.llm import api_keys as _api_keys
 from kohakuterrarium.llm.profiles import LLMProfile, get_api_key, resolve_controller_llm
@@ -173,6 +172,12 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
 
     retry_policy = getattr(profile, "retry_policy", None)
     if profile.backend_type == "litellm":
+        # LiteLLM is an optional extra (``kohakuterrarium[litellm]``).
+        # Import the provider only when a litellm profile is actually
+        # selected so core package imports / ``kt --help`` keep working
+        # in a minimal install.
+        from kohakuterrarium.llm.litellm_provider import LiteLLMProvider
+
         provider = LiteLLMProvider(
             model=profile.model,
             api_key=api_key or None,

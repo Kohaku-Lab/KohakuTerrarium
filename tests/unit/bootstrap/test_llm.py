@@ -21,7 +21,6 @@ from kohakuterrarium.bootstrap.llm import (
 from kohakuterrarium.core.config_types import AgentConfig
 from kohakuterrarium.llm.anthropic_provider import AnthropicProvider
 from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
-from kohakuterrarium.llm.litellm_provider import LiteLLMProvider
 from kohakuterrarium.llm.openai import OpenAIProvider
 from kohakuterrarium.llm.profile_types import LLMProfile
 
@@ -185,13 +184,31 @@ class TestCreateFromProfile:
         assert isinstance(provider, AnthropicProvider)
         assert provider.config.model == "claude-x"
 
-    def test_litellm_backend_builds_litellm_provider(self, monkeypatch):
+    def test_litellm_backend_imports_provider_lazily(self, monkeypatch):
         monkeypatch.setattr(llm_mod, "get_api_key", lambda p: "k")
+
+        class _StubLiteLLMProvider:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+        real_import = __import__
+
+        def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "kohakuterrarium.llm.litellm_provider":
+                return type(
+                    "_LiteLLMModule",
+                    (),
+                    {"LiteLLMProvider": _StubLiteLLMProvider},
+                )
+            return real_import(name, globals, locals, fromlist, level)
+
+        monkeypatch.setattr("builtins.__import__", fake_import)
         profile = LLMProfile(
             name="p", model="gemini/x", provider="vertex", backend_type="litellm"
         )
         provider = _create_from_profile(profile)
-        assert isinstance(provider, LiteLLMProvider)
+        assert isinstance(provider, _StubLiteLLMProvider)
+        assert provider.kwargs["model"] == "gemini/x"
 
     def test_codex_backend_builds_codex_provider(self):
         # Codex uses OAuth, no API key lookup.

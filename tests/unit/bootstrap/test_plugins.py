@@ -42,17 +42,13 @@ class TestInitPluginsCustom:
     def test_loads_custom_plugin(self, tmp_path):
         custom = tmp_path / "custom"
         custom.mkdir()
-        (custom / "plug.py").write_text(
-            textwrap.dedent(
-                """
+        (custom / "plug.py").write_text(textwrap.dedent("""
                 from kohakuterrarium.modules.plugin.base import BasePlugin
 
 
                 class MyPlugin(BasePlugin):
                     name = "custom_test_plug"
-                """
-            )
-        )
+                """))
         loader = ModuleLoader(agent_path=tmp_path)
         configs = [
             {
@@ -119,16 +115,12 @@ class TestInitPluginsBuiltinCatalog:
         # Build a real module the loader can import.
         custom = tmp_path / "custom"
         custom.mkdir()
-        (custom / "catalog_plug.py").write_text(
-            textwrap.dedent(
-                """
+        (custom / "catalog_plug.py").write_text(textwrap.dedent("""
                 from kohakuterrarium.modules.plugin.base import BasePlugin
 
                 class _FakeCatalogPlugin(BasePlugin):
                     name = "catalog_fake"
-                """
-            )
-        )
+                """))
         spec = {
             "name": "catalog_fake",
             "type": "custom",
@@ -186,16 +178,12 @@ class TestPackageDiscovery:
         # is registered but DISABLED (opt-in via UI).
         mod_dir = tmp_path / "pkgsrc"
         mod_dir.mkdir()
-        (mod_dir / "biome_plug.py").write_text(
-            textwrap.dedent(
-                """
+        (mod_dir / "biome_plug.py").write_text(textwrap.dedent("""
                 from kohakuterrarium.modules.plugin.base import BasePlugin
 
                 class BiomePlugin(BasePlugin):
                     name = "biome_disc"
-                """
-            )
-        )
+                """))
         monkeypatch.syspath_prepend(str(mod_dir))
         monkeypatch.setattr(
             plug_mod,
@@ -241,16 +229,12 @@ class TestLoadOne:
     def test_resolved_via_catalog_loads_plugin(self, monkeypatch, tmp_path):
         mod_dir = tmp_path / "src"
         mod_dir.mkdir()
-        (mod_dir / "cat_plug.py").write_text(
-            textwrap.dedent(
-                """
+        (mod_dir / "cat_plug.py").write_text(textwrap.dedent("""
                 from kohakuterrarium.modules.plugin.base import BasePlugin
 
                 class CatPlugin(BasePlugin):
                     name = "from_catalog"
-                """
-            )
-        )
+                """))
         monkeypatch.syspath_prepend(str(mod_dir))
         monkeypatch.setattr(
             plug_mod,
@@ -278,16 +262,12 @@ class TestLoadOne:
     def test_description_from_config_applied(self, monkeypatch, tmp_path):
         mod_dir = tmp_path / "src"
         mod_dir.mkdir()
-        (mod_dir / "descplug.py").write_text(
-            textwrap.dedent(
-                """
+        (mod_dir / "descplug.py").write_text(textwrap.dedent("""
                 from kohakuterrarium.modules.plugin.base import BasePlugin
 
                 class DescPlugin(BasePlugin):
                     name = "desc_plug"
-                """
-            )
-        )
+                """))
         monkeypatch.syspath_prepend(str(mod_dir))
         plugin = _load_one(
             {
@@ -314,16 +294,12 @@ class TestLoadOne:
         # attribute supplies the name.
         mod_dir = tmp_path / "src"
         mod_dir.mkdir()
-        (mod_dir / "selfnamed.py").write_text(
-            textwrap.dedent(
-                """
+        (mod_dir / "selfnamed.py").write_text(textwrap.dedent("""
                 from kohakuterrarium.modules.plugin.base import BasePlugin
 
                 class SelfNamed(BasePlugin):
                     name = "self_named"
-                """
-            )
-        )
+                """))
         monkeypatch.syspath_prepend(str(mod_dir))
         plugin = _load_one({"module": "selfnamed", "class": "SelfNamed"}, loader=None)
         sys.modules.pop("selfnamed", None)
@@ -487,16 +463,12 @@ class TestDiscoverPackagePluginsEdgeCases:
         # by package discovery (Phase 2).
         mod_dir = tmp_path / "src"
         mod_dir.mkdir()
-        (mod_dir / "shared_plug.py").write_text(
-            textwrap.dedent(
-                """
+        (mod_dir / "shared_plug.py").write_text(textwrap.dedent("""
                 from kohakuterrarium.modules.plugin.base import BasePlugin
 
                 class SharedPlugin(BasePlugin):
                     name = "shared_one"
-                """
-            )
-        )
+                """))
         monkeypatch.syspath_prepend(str(mod_dir))
         monkeypatch.setattr(
             plug_mod,
