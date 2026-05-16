@@ -129,7 +129,15 @@ functions.** Carve-out files (3rd-party providers, platform PTY,
 end-user CLI/UI, the pywebview boot path) are listed in
 `tests/README.md` and excluded from coverage targets.
 
-All three tiers run in CI on the full OS × Python matrix.
+Unit + integration run in CI on the full OS × Python matrix
+(3.12+). **The e2e tier is NOT run in CI** — those tests spin up
+real WebSocket-backed lab clusters, subprocess workers, and
+Vue-frontend journey simulations whose timing depends on
+hosted-runner network + scheduler behavior that's too volatile
+to gate every PR on. Run e2e locally before shipping anything
+that touches the multi-node / Studio / serving stack; bug
+anchoring + regression protection on `main` come from unit +
+integration.
 
 ## Core Architecture Concepts (CRITICAL)
 
@@ -608,7 +616,7 @@ Key files: `session/store.py`, `session/output.py`, `session/resume.py`, `sessio
 CI is defined in `.github/workflows/ci.yml`. PRs are not reviewed until CI is green on the contributor's fork. The matrix:
 
 - **Lint**: `ruff check src/ tests/` + `black --check src/ tests/` (Python 3.13)
-- **Tests**: `pytest tests/unit/` then `pytest tests/integration/ tests/e2e/` — all three tiers, on Python 3.10, 3.11, 3.12, 3.13, 3.14 × Linux / Windows / macOS (3.14 on Windows excluded — pythonnet has no wheel)
+- **Tests**: `pytest tests/unit/` then `pytest tests/integration/` — unit + integration tiers only, on Python 3.12, 3.13, 3.14 × Linux / Windows / macOS (3.14 on Windows excluded — pythonnet has no wheel). The e2e tier is intentionally NOT run in CI; see `tests/README.md` (run it locally before shipping multi-node / Studio / serving changes). Python 3.10 / 3.11 still install via `requires-python = ">=3.10"` but are supported best-effort — CI does not validate them.
 - **File-size guards**: `pytest tests/unit/test_file_sizes.py`
 - **Frontend**: `npm ci` + `npm run format:check` + `npm run build` in `src/kohakuterrarium-frontend/`, plus check that build output landed in `src/kohakuterrarium/web_dist/`
 - **Wheel build**: build wheel, install into clean venv, run `kt --help` and `kt app --help`

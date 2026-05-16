@@ -100,7 +100,7 @@ We do not review PRs with red CI. Before opening a PR:
 The CI matrix that must pass is defined in [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 
 - **Lint**: `ruff check` + `black --check` (Python 3.13)
-- **Tests**: all three tiers — `pytest tests/unit/` then `pytest tests/integration/ tests/e2e/` — on Python 3.10, 3.11, 3.12, 3.13, 3.14 × Linux / Windows / macOS (3.14 on Windows is excluded — pythonnet has no wheel yet)
+- **Tests**: `pytest tests/unit/` then `pytest tests/integration/` — unit + integration tiers only, on Python 3.12, 3.13, 3.14 × Linux / Windows / macOS (3.14 on Windows is excluded — pythonnet has no wheel yet). **The e2e tier is intentionally NOT run in CI** — those tests spin up real WebSocket-backed lab clusters, subprocess workers, and Vue-frontend journey simulations whose timing depends on hosted-runner network + scheduler behavior that's too volatile to gate every PR on. Run e2e locally before shipping anything that touches the multi-node / Studio / serving stack (`pytest tests/e2e/ -q`). Bug anchoring + regression protection on `main` come from unit + integration. Python 3.10 / 3.11 still install via `requires-python = ">=3.10"` but are supported best-effort — CI does not validate them.
 - **File-size guards**: `pytest tests/unit/test_file_sizes.py`
 - **Frontend**: `npm ci` + `npm run format:check` + `npm run build` in `src/kohakuterrarium-frontend/`, plus a check that the build output landed in `src/kohakuterrarium/web_dist/`
 - **Wheel build**: builds the wheel, installs it into a clean venv, runs `kt --help` and `kt app --help`
@@ -115,7 +115,10 @@ ruff check src/ tests/
 black --check src/ tests/
 pytest tests/unit/ -q --ignore=tests/unit/test_file_sizes.py
 pytest tests/unit/test_file_sizes.py -q
-pytest tests/integration/ tests/e2e/ -q
+pytest tests/integration/ -q
+# E2E runs locally only — required before shipping multi-node /
+# Studio / serving changes (not gated in CI; see tests/README.md).
+pytest tests/e2e/ -q
 
 # Frontend
 cd src/kohakuterrarium-frontend

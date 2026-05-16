@@ -26,9 +26,18 @@ pytest tests/unit/ -q --cov=src/kohakuterrarium --cov-report=term-missing
 ```
 
 `pytest` is configured in `pyproject.toml` with `asyncio_mode = "auto"`
-(no `@pytest.mark.asyncio` needed) and a per-test timeout. All three
-tiers run in CI on the full OS × Python matrix
-(`.github/workflows/ci.yml`).
+(no `@pytest.mark.asyncio` needed) and a per-test timeout.
+
+**CI policy (`.github/workflows/ci.yml`).** Unit and integration tiers
+run on the full OS × Python matrix (3.12+ on Linux / macOS / Windows).
+**The e2e tier is NOT run in CI.** It spins up real WebSocket-backed
+lab clusters, subprocess workers, multi-node session mirrors, and
+Vue-frontend-style HTTP/WS journeys; the resulting timing depends on
+hosted-runner network + scheduler behavior that is too volatile to
+gate every PR on. E2E is the developer surface for reproducing real
+user behavior locally — run it before shipping anything that touches
+the multi-node / Studio / serving stack. Bug anchoring and regression
+protection on `main` come from the unit + integration tiers.
 
 ## The three tiers — what each one actually is
 

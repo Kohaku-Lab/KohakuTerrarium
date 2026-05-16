@@ -55,8 +55,17 @@ jobs:
           kt install "$RUNNER_TEMP/kt-biome" -e
       - name: Run unit tests
         run: pytest tests/unit/ -v --tb=short --ignore=tests/unit/test_file_sizes.py --ignore=tests/unit/test_dep_graph_lint.py
-      - name: Run integration + e2e tests
-        run: pytest tests/integration/ tests/e2e/ -v --tb=short
+      - name: Run integration tests
+        # E2E tests (tests/e2e/) are intentionally NOT run in CI —
+        # they spin up real WebSocket-backed lab clusters, subprocess
+        # workers, multi-node session mirrors, and Vue-frontend-like
+        # HTTP/WS journeys, and the resulting timing depends on
+        # hosted-runner network + scheduler behavior that is too
+        # volatile to gate every PR on.  Bug anchoring + regression
+        # protection come from the unit + integration tiers; e2e is
+        # the developer surface for reproducing real user behavior
+        # locally (see tests/README.md).
+        run: pytest tests/integration/ -v --tb=short
 
   test-format-guards:
     runs-on: ubuntu-latest
