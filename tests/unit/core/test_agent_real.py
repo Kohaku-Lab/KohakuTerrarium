@@ -3264,21 +3264,33 @@ class TestPublishSessionInfoCacheKey:
 
 class TestPromoteHandleOffLoop:
     def test_promote_outside_event_loop(self, make_agent):
+        import asyncio as _asyncio
         from unittest.mock import MagicMock
 
         from kohakuterrarium.core.backgroundify import BackgroundifyHandle
 
         agent = make_agent()
-        h = MagicMock(spec=BackgroundifyHandle)
-        h.promote = MagicMock(return_value=True)
-        agent._active_handles["bash_x"] = h
-        # Called from a sync context with no running loop → hits the
-        # ``call_soon_threadsafe`` branch.
-        result = agent._promote_handle("bash_x")
-        assert result is True
+        # In production ``Agent.start()`` stashes the running loop on
+        # ``self._loop`` so cross-thread schedulers (TUI promote) can
+        # ``call_soon_threadsafe`` it.  Without ``start()`` the test
+        # has to seed the loop reference explicitly; on Python 3.14+
+        # ``asyncio.get_event_loop()`` would otherwise raise in this
+        # sync context and the production code would have nowhere to
+        # schedule the promote.
+        agent._loop = _asyncio.new_event_loop()
+        try:
+            h = MagicMock(spec=BackgroundifyHandle)
+            h.promote = MagicMock(return_value=True)
+            agent._active_handles["bash_x"] = h
+            # Called from a sync context with no running loop → hits the
+            # ``call_soon_threadsafe`` branch.
+            result = agent._promote_handle("bash_x")
+            assert result is True
+        finally:
+            agent._loop.close()
 
     def test_promote_off_loop_no_loop_returns_false(self, make_agent, monkeypatch):
-        """Inner ``get_event_loop`` raises RuntimeError → returns False (637)."""
+        """Inner ``get_event_loop`` raises RuntimeError → returns False."""
         from unittest.mock import MagicMock
 
         from kohakuterrarium.core.backgroundify import BackgroundifyHandle
@@ -3287,6 +3299,10 @@ class TestPromoteHandleOffLoop:
         h = MagicMock(spec=BackgroundifyHandle)
         h.promote = MagicMock()
         agent._active_handles["bash_x"] = h
+        # Explicitly clear any captured loop so the fall-through path
+        # under test (``_loop is None`` → ``get_event_loop`` → raises)
+        # is the only one available.
+        agent._loop = None
 
         import asyncio as _asyncio
 

@@ -40,8 +40,13 @@ jobs:
         run: |
           pip install -e ".[dev]"
       - name: Install kt-biome (default package the catalog tests assert is present)
+        # Catalog tests assert the package is installed editable
+        # (``biome["editable"] is True``), so clone + install with
+        # ``-e`` rather than a one-shot git URL install.
+        shell: bash
         run: |
-          kt install https://github.com/Kohaku-Lab/kt-biome.git
+          git clone https://github.com/Kohaku-Lab/kt-biome.git "$RUNNER_TEMP/kt-biome"
+          kt install "$RUNNER_TEMP/kt-biome" -e
       - name: Run unit tests
         run: pytest tests/unit/ -v --tb=short --ignore=tests/unit/test_file_sizes.py --ignore=tests/unit/test_dep_graph_lint.py
       - name: Run integration + e2e tests

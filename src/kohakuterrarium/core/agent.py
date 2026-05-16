@@ -257,6 +257,14 @@ class Agent(
         """Start all agent modules."""
         logger.info("Starting agent", agent_name=self.config.name)
 
+        # Capture the agent's running loop so cross-thread schedulers
+        # (TUI thread, ``_promote_handle``) can ``call_soon_threadsafe``
+        # without asking asyncio to guess. On Python 3.14+ a sync caller
+        # has no current loop and ``asyncio.get_event_loop()`` raises,
+        # so without this stash the TUI promote path can't reach the
+        # agent's loop at all.
+        self._loop = asyncio.get_running_loop()
+
         self._configure_tui_tabs()
 
         await self.input.start()
@@ -623,17 +631,25 @@ class Agent(
         # Thread-safe promotion: asyncio.Event.set() must run on the
         # event loop thread. TUI calls this from Textual's thread.
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
             # Already on the event loop (API handler) — promote directly
             if not handle.promote():
                 return False
         except RuntimeError:
-            # Not on an event loop (TUI thread) — schedule on the agent's loop
-            try:
-                loop = asyncio.get_event_loop()
-                loop.call_soon_threadsafe(handle.promote)
-            except RuntimeError:
-                return False
+            # Not on an event loop (TUI thread) — schedule on the
+            # agent's loop, captured at ``start()`` time.  Falling back
+            # to ``asyncio.get_event_loop()`` here is unsafe on Python
+            # 3.14+ (raises ``RuntimeError`` in sync contexts instead
+            # of auto-creating a loop), and a freshly created loop
+            # would not be the one actually running ``handle.promote``'s
+            # Event anyway — that promote would silently never fire.
+            loop = getattr(self, "_loop", None)
+            if loop is None or loop.is_closed():
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    return False
+            loop.call_soon_threadsafe(handle.promote)
 
         self.output_router.notify_activity(
             "task_promoted",

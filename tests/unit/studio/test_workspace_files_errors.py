@@ -107,24 +107,40 @@ class TestBuildTreeFileStatError:
         from kohakuterrarium.studio.attach import workspace_files as m
 
         original_stat = Path.stat
-        counter = {"n": 0}
+        # Stage 1 (before ``arm`` flips): is_dir() / is_file() and any
+        # other pathlib-internal stat calls in ``_dir_entry`` must
+        # succeed so the implementation reaches the size-lookup branch.
+        # Counting calls is fragile across CPython versions — 3.13
+        # routes is_file() through ``Path.stat``, 3.14 routes it
+        # through ``os.stat`` directly, so a ``counter <= 2`` gate
+        # silently lets every patched call through on 3.14 and the
+        # OSError never fires.  A bool flag the test arms only when
+        # ready to exercise the except branch is version-independent.
+        armed = {"v": False}
 
         def _conditional(self, *args, **kwargs):
-            counter["n"] += 1
-            # First two calls (is_file via is_dir + is_file checks)
-            # need to succeed. Only after the file has been resolved
-            # as a "file", _build_tree calls path.stat() once more for
-            # size — fail then.
-            if counter["n"] <= 2:
+            if not armed["v"]:
                 return original_stat(self, *args, **kwargs)
             raise OSError("can't stat")
 
+        # Pre-resolve everything _build_tree needs before patching so
+        # we can arm the failure right at the size lookup.
+        original_is_file = Path.is_file
+
+        def _is_file_then_arm(self, *args, **kwargs):
+            result = original_is_file(self, *args, **kwargs)
+            if result and self == f:
+                armed["v"] = True
+            return result
+
         monkeypatch.setattr(Path, "stat", _conditional)
+        monkeypatch.setattr(Path, "is_file", _is_file_then_arm)
         try:
             out = m._build_tree(f, depth=0)
             assert out["size"] == 0
         finally:
             monkeypatch.setattr(Path, "stat", original_stat)
+            monkeypatch.setattr(Path, "is_file", original_is_file)
 
 
 # ── browse_directories permission error during iterdir ─────
