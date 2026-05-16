@@ -413,6 +413,7 @@ class TestTerrariumIntegration:
 
         await service.shutdown()
 
+    @pytest.mark.timeout(120)
     async def test_privileged_node_evolves_the_graph_mid_run(
         self, make_service, tmp_path
     ):
@@ -867,6 +868,7 @@ class TestTerrariumIntegration:
 
         await service.shutdown()
 
+    @pytest.mark.timeout(120)
     async def test_hotplug_into_running_session_then_stop(self, make_service, tmp_path):
         """Hot-plug workflow: a session is already running with one
         creature; a second is added into the SAME graph at runtime

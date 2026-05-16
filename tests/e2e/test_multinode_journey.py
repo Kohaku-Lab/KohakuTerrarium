@@ -2727,6 +2727,21 @@ async def _drive_journey(
                         for e in evts
                         if isinstance(e, dict) and e.get("type") == "tool_result"
                     ]
+                    # If we see no tool_results AT ALL, also capture
+                    # the tail of every event so a CI failure tells
+                    # us whether the LLM emitted the tool call or
+                    # returned filler instead (different fix paths).
+                    if not last_tool_results and len(evts) >= 4:
+                        last_tool_results = [
+                            {
+                                "_diagnostic_no_tool_result": True,
+                                "last_event_types": [
+                                    e.get("type")
+                                    for e in evts[-12:]
+                                    if isinstance(e, dict)
+                                ],
+                            }
+                        ]
                     for e in evts:
                         if not isinstance(e, dict):
                             continue
