@@ -2708,7 +2708,9 @@ async def _drive_journey(
                     try:
                         alpha_creature = w1.engine.get_creature("alpha")
                         alpha_llm = getattr(alpha_creature.agent, "llm", None)
-                        if alpha_llm is not None and hasattr(alpha_llm, "_used_indices"):
+                        if alpha_llm is not None and hasattr(
+                            alpha_llm, "_used_indices"
+                        ):
                             alpha_llm._used_indices.clear()
                     except Exception:
                         pass
