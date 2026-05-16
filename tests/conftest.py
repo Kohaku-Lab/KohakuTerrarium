@@ -167,6 +167,25 @@ def tmp_config_dir(tmp_path, monkeypatch):
 os.environ.setdefault("PYTHONUTF8", "1")
 
 
+def pytest_configure(config):
+    """Use pytest-timeout's ``signal`` method on POSIX so a single
+    hanging test FAILS that test and continues with the next one,
+    instead of ``os._exit(1)``-ing the whole pytest process (which
+    is what the ``thread`` method does — it can't actually interrupt
+    a blocking native call from another thread).
+
+    ``signal`` mode relies on ``SIGALRM`` which is POSIX-only; on
+    Windows we keep the project default (``thread``) so the test
+    suite still runs.  The pyproject default stays at ``thread`` so
+    nothing changes for explicit ``--timeout-method`` overrides.
+    """
+    if sys.platform != "win32":
+        try:
+            config.option.timeout_method = "signal"
+        except Exception:
+            pass
+
+
 @pytest.fixture(autouse=True)
 def _default_isolated_config_dir(tmp_path, monkeypatch):
     """Belt-and-braces: every test gets a tmp ``KT_CONFIG_DIR``.

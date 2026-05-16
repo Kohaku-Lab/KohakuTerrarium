@@ -404,8 +404,13 @@ class TestModulesIntegration:
                 ),
                 ScriptEntry("rewrite turn done", match="rewritten-by-plugin"),
                 # Turn 2 (input "run forbidden"): blocked tool, then wrap-up.
+                # ``match`` must be a substring UNIQUE to the user input —
+                # ``"forbidden"`` alone also appears in the block-error tool
+                # result ("guardrail blocked: 'forbidden' is not allowed"),
+                # which would re-select this tool-call entry on the wrap-up
+                # turn and loop the controller forever.
                 ScriptEntry(
-                    "[/recorder]@@msg=forbidden\n[recorder/]", match="forbidden"
+                    "[/recorder]@@msg=forbidden\n[recorder/]", match="run forbidden"
                 ),
                 ScriptEntry("forbidden turn done", match="guardrail blocked"),
             ]
