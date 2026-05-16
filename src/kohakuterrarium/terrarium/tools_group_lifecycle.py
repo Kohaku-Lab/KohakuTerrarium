@@ -15,6 +15,7 @@ from kohakuterrarium.packages.resolve import is_package_ref, resolve_package_pat
 from kohakuterrarium.terrarium.events import EngineEvent, EventKind
 from kohakuterrarium.terrarium.group_tool_context import (
     GroupContext,
+    cross_cluster_target_error,
     resolve_group_target,
 )
 from kohakuterrarium.terrarium.tools_group_common import err, ok, resolve_or_error
@@ -155,9 +156,10 @@ class GroupRemoveNodeTool(BaseTool):
         gctx, err_result = resolve_or_error(context)
         if err_result is not None:
             return err_result
-        target = resolve_group_target(gctx, (args.get("creature_id") or "").strip())
+        ident = (args.get("creature_id") or "").strip()
+        target = resolve_group_target(gctx, ident)
         if target is None:
-            return err(f"creature {args.get('creature_id')!r} not in your group")
+            return err(cross_cluster_target_error(gctx.engine, ident))
         if target.is_privileged:
             return err(
                 f"cannot remove privileged creature {target.name!r}; "
@@ -215,9 +217,10 @@ class GroupStartNodeTool(BaseTool):
         gctx, err_result = resolve_or_error(context)
         if err_result is not None:
             return err_result
-        target = resolve_group_target(gctx, (args.get("creature_id") or "").strip())
+        ident = (args.get("creature_id") or "").strip()
+        target = resolve_group_target(gctx, ident)
         if target is None:
-            return err(f"creature {args.get('creature_id')!r} not in your group")
+            return err(cross_cluster_target_error(gctx.engine, ident))
         if target.is_privileged:
             return err(
                 f"cannot start/stop privileged creature {target.name!r}; "
@@ -264,9 +267,10 @@ class GroupStopNodeTool(BaseTool):
         gctx, err_result = resolve_or_error(context)
         if err_result is not None:
             return err_result
-        target = resolve_group_target(gctx, (args.get("creature_id") or "").strip())
+        ident = (args.get("creature_id") or "").strip()
+        target = resolve_group_target(gctx, ident)
         if target is None:
-            return err(f"creature {args.get('creature_id')!r} not in your group")
+            return err(cross_cluster_target_error(gctx.engine, ident))
         if target.is_privileged:
             return err(
                 f"cannot start/stop privileged creature {target.name!r}; "

@@ -95,18 +95,57 @@ def _ensure_channel_persistence(
         live = engine_ref()
         if live is None:
             return
+        ts_attr = getattr(message, "timestamp", None)
+        if hasattr(ts_attr, "timestamp"):
+            ts = ts_attr.timestamp()
+        else:
+            ts = time.time()
+        content = message.content
+        if not isinstance(content, (str, list, dict)):
+            content = str(content)
+        timestamp_str = (
+            ts_attr.isoformat() if hasattr(ts_attr, "isoformat") else str(ts)
+        )
+        # Persistence payload — same shape for engine event, store
+        # write, and cross-node forward.
+        wire_payload = {
+            "sender": getattr(message, "sender", ""),
+            "sender_id": getattr(message, "sender_id", None),
+            "content": content,
+            "message_id": getattr(message, "message_id", ""),
+            "timestamp": timestamp_str,
+            "ts": ts,
+        }
+        # Emit ``CHANNEL_MESSAGE`` for engine subscribers.
+        live._emit(
+            EngineEvent(
+                kind=EventKind.CHANNEL_MESSAGE,
+                graph_id=gid,
+                channel=channel_name,
+                payload=wire_payload,
+            )
+        )
+        # Cross-node forwarding (``terrarium.broadcast``): if peers are
+        # subscribed for this (graph, channel), forward the send.  Skip
+        # for messages flagged ``_injected`` — those came FROM a peer
+        # via the broadcast adapter; re-forwarding would loop.
+        if not getattr(message, "_injected", False):
+            broadcast = getattr(live, "_broadcast_adapter", None)
+            if broadcast is not None and broadcast.peers_for(gid, channel_name):
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(
+                        broadcast.forward_send(gid, channel_name, wire_payload)
+                    )
+                except RuntimeError:
+                    # No running loop — silently drop.  We can't
+                    # forward from a non-loop context (e.g. sync test
+                    # paths).
+                    pass
         store = getattr(live, "_session_stores", {}).get(gid)
         if store is None:
             return
         try:
-            ts_attr = getattr(message, "timestamp", None)
-            if hasattr(ts_attr, "timestamp"):
-                ts = ts_attr.timestamp()
-            else:
-                ts = time.time()
-            content = message.content
-            if not isinstance(content, (str, list, dict)):
-                content = str(content)
             store.save_channel_message(
                 channel_name,
                 {

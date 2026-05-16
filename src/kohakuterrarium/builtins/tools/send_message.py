@@ -20,23 +20,29 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-def _enforce_send_edge_in_engine_context(
+def _check_engine_send_edge(
     context: ToolContext, channel_name: str
-) -> str | None:
-    """When the caller is part of a Terrarium engine graph, require a
-    declared send edge for ``channel_name``. Returns an error message
-    when the caller cannot send on the channel, or ``None`` to allow.
+) -> tuple[bool, str | None]:
+    """Inspect the caller's engine graph for ``channel_name``.
 
-    The sub-agent path (no engine in env) returns ``None`` — private
-    channels in :class:`Session.channels` keep their permissive
-    behavior.
+    Returns ``(in_topology, deny_msg)`` where:
+
+    - ``in_topology`` is True iff the caller is an engine-backed
+      creature inside a graph that declares ``channel_name`` as a
+      topology channel. Callers use this flag to prefer the topology
+      channel over a same-name private session-channel shadow.
+    - ``deny_msg`` is a non-empty error string iff the caller is in
+      such a graph but is not wired as sender on the channel.
+      ``None`` means either the caller is outside an engine graph
+      (sub-agent path) or is properly wired — both cases allow the
+      send to proceed.
     """
     if context is None or context.environment is None:
-        return None
+        return False, None
     engine_ref = context.environment.get("terrarium_engine")
     engine = engine_ref() if isinstance(engine_ref, weakref.ref) else engine_ref
     if engine is None:
-        return None
+        return False, None
     creature = None
     by_id = engine._creatures.get(context.agent_name)
     if by_id is not None:
@@ -51,14 +57,14 @@ def _enforce_send_edge_in_engine_context(
                 creature = c
                 break
     if creature is None:
-        return None
+        return False, None
     graph = engine._topology.graphs.get(creature.graph_id)
     if graph is None or channel_name not in graph.channels:
-        return None
+        return False, None
     sends = graph.send_edges.get(creature.creature_id, set())
     if channel_name in sends:
-        return None
-    return (
+        return True, None
+    return True, (
         f"You are not wired as sender on channel '{channel_name}'. "
         f"Your outgoing channels: {sorted(sends)}. "
         f"Ask the privileged creature to wire you via "
@@ -125,22 +131,41 @@ class SendMessageTool(BaseTool):
             except json.JSONDecodeError:
                 pass
 
-        # Resolve channel: private session first, shared environment second
+        # Resolve channel.  Order is load-bearing for the send-edge
+        # gate: if the caller is in a Terrarium engine graph and the
+        # channel name is declared in that graph's topology, the gate
+        # MUST fire before private-channel resolution can pick a
+        # session-level shadow of the same name and quietly bypass it.
+        # A creature with a private "ops" channel that collides with a
+        # topology "ops" channel they aren't wired to as sender would
+        # otherwise broadcast into their own queue and return success.
         channel = None
         chan_registry = None
+        in_graph_topology, deny = _check_engine_send_edge(context, channel_name)
+        if deny is not None:
+            return ToolResult(error=deny)
 
-        # 1. Check creature's private channels (sub-agent channels)
-        if context and context.session:
+        # 1. Graph-topology channel wins when the name exists in the
+        #    caller's graph — it is the cluster-visible recipient, and
+        #    a private session-channel shadow must not silently capture
+        #    sends that the LLM intended for the topology channel.
+        if in_graph_topology and context and context.environment:
+            channel = context.environment.shared_channels.get(channel_name)
+            if channel is not None:
+                chan_registry = context.environment.shared_channels
+
+        # 2. Check creature's private channels (sub-agent channels)
+        if channel is None and context and context.session:
             chan_registry = context.session.channels
             channel = chan_registry.get(channel_name)
 
-        # 2. Check environment's shared channels (inter-creature channels)
+        # 3. Check environment's shared channels (inter-creature channels)
         if channel is None and context and context.environment:
             channel = context.environment.shared_channels.get(channel_name)
             if channel is not None:
                 chan_registry = context.environment.shared_channels
 
-        # 3. Fallback for no-context usage (standalone / testing)
+        # 4. Fallback for no-context usage (standalone / testing)
         if channel is None and not context:
             fallback_registry = get_channel_registry()
             channel = fallback_registry.get(channel_name)
@@ -150,7 +175,7 @@ class SendMessageTool(BaseTool):
                 )
             chan_registry = fallback_registry
 
-        # 4. Channel didn't resolve. Anyone with an environment-aware
+        # 5. Channel didn't resolve. Anyone with an environment-aware
         # context (i.e. an engine-backed creature, top-level OR
         # sub-agent) is talking from inside a graph, and graphs only
         # have channels that were explicitly declared. Silent
@@ -198,18 +223,10 @@ class SendMessageTool(BaseTool):
                     )
                 )
 
-        # Engine-context send-edge gate: when the caller is in a
-        # Terrarium engine graph and the channel is one of the graph's
-        # shared channels, require a declared send edge. Sub-agent
-        # private channels in ``Session.channels`` are unaffected.
-        if context is not None and context.environment is not None:
-            shared = context.environment.shared_channels.get(channel_name)
-            if shared is not None:
-                deny = _enforce_send_edge_in_engine_context(context, channel_name)
-                if deny is not None:
-                    return ToolResult(error=deny)
-
         # Send message
+        # (Engine-context send-edge gate fired earlier — before channel
+        # resolution — so a private session-channel cannot shadow a
+        # graph-topology channel and bypass the wiring check.)
         msg = ChannelMessage(
             sender=sender,
             sender_id=sender_id,

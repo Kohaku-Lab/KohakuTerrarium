@@ -10,7 +10,10 @@ from kohakuterrarium.modules.tool.base import (
     ToolContext,
     ToolResult,
 )
-from kohakuterrarium.terrarium.group_tool_context import resolve_group_target
+from kohakuterrarium.terrarium.group_tool_context import (
+    cross_cluster_target_error,
+    resolve_group_target,
+)
 from kohakuterrarium.terrarium.tools_group_common import err, ok, resolve_or_error
 
 
@@ -59,7 +62,7 @@ class GroupWireTool(BaseTool):
         from_id = (args.get("from") or "").strip() or gctx.caller.creature_id
         from_creature = resolve_group_target(gctx, from_id)
         if from_creature is None:
-            return err(f"from creature {from_id!r} not in your group")
+            return err(cross_cluster_target_error(gctx.engine, from_id))
 
         if action == "add":
             to_id = (args.get("to") or "").strip()
@@ -67,7 +70,7 @@ class GroupWireTool(BaseTool):
                 return err("'to' is required for action='add'")
             to_creature = resolve_group_target(gctx, to_id)
             if to_creature is None:
-                return err(f"to creature {to_id!r} not in your group")
+                return err(cross_cluster_target_error(gctx.engine, to_id))
             if from_creature.graph_id != to_creature.graph_id:
                 try:
                     await _channels.ensure_same_graph(

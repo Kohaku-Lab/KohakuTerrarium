@@ -29,6 +29,7 @@ from kohakuterrarium.modules.tool.base import (
 from kohakuterrarium.terrarium.events import EngineEvent, EventKind
 from kohakuterrarium.terrarium.group_tool_context import (
     GroupContext,
+    cross_cluster_target_error,
     resolve_group_target,
 )
 from kohakuterrarium.terrarium.tools_group_common import err, ok, resolve_or_error
@@ -134,9 +135,10 @@ class GroupChannelTool(BaseTool):
             )
 
         # wire / unwire need a creature_id and direction
-        target = resolve_group_target(gctx, (args.get("creature_id") or "").strip())
+        ident = (args.get("creature_id") or "").strip()
+        target = resolve_group_target(gctx, ident)
         if target is None:
-            return err(f"creature {args.get('creature_id')!r} not in your group")
+            return err(cross_cluster_target_error(gctx.engine, ident))
         direction = (args.get("direction") or "").strip()
         if direction not in ("send", "listen"):
             return err("direction must be 'send' or 'listen'")

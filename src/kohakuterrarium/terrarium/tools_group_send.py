@@ -26,7 +26,10 @@ from kohakuterrarium.modules.tool.base import (
     ToolContext,
     ToolResult,
 )
-from kohakuterrarium.terrarium.group_tool_context import resolve_group_target
+from kohakuterrarium.terrarium.group_tool_context import (
+    cross_cluster_target_error,
+    resolve_group_target,
+)
 from kohakuterrarium.terrarium.tools_group_common import err, ok, resolve_or_error
 from kohakuterrarium.utils.logging import get_logger
 
@@ -97,7 +100,7 @@ class GroupSendTool(BaseTool):
             return err("'to' and 'message' are required")
         target = resolve_group_target(gctx, to_id)
         if target is None:
-            return err(f"target {to_id!r} not in your group")
+            return err(cross_cluster_target_error(gctx.engine, to_id))
         if not target.is_running:
             return err(f"target {target.name!r} is not running")
         if not gctx.caller.is_privileged and not target.is_privileged:

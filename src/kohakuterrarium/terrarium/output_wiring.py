@@ -21,7 +21,7 @@ existing ``on_event`` notify in ``Agent._process_event``.
 """
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from kohakuterrarium.core.events import create_creature_output_event
 from kohakuterrarium.core.output_wiring import (
@@ -50,26 +50,67 @@ class TerrariumOutputWiringResolver:
         self,
         creatures: dict[str, "CreatureHandle"],
         root_agent: "Agent | None" = None,
+        *,
+        engine: Any | None = None,
     ) -> None:
         self._creatures = creatures
         self._root_agent = root_agent
+        # Engine reference is optional — only the terrarium runtime
+        # passes it; standalone construction (tests, embedded use) can
+        # leave it as None.  When present, the emit loop falls through
+        # to ``engine._output_wire_adapter`` for remote dispatch.
+        self._engine = engine
         # Remember which unknown targets we've already warned about so
         # a mis-typed target doesn't spam the log every turn.
         self._warned_missing: set[str] = set()
 
     def _resolve_target(self, target: str, source: str | None = None) -> "Agent | None":
-        """Map a wiring target string to an Agent, or None if unknown."""
+        """Map a wiring target string to an Agent, or None if unknown.
+
+        On a local miss, consult the engine-level cross-node forwarder
+        (``_output_wire_adapter.peer_for_target``) BEFORE warning. If a
+        peer is found, the emission will be delivered cross-node by the
+        caller (``emit``); log at DEBUG and skip the misleading WARN.
+        The WARN only fires when BOTH the local lookup AND the cross-
+        node peer lookup miss (i.e. the target truly does not exist
+        anywhere in the cluster).
+        """
         if target == ROOT_TARGET:
             root_agent = self._resolve_graph_root_agent(source)
-            if root_agent is None:
+            if root_agent is None and not self._has_cross_node_peer(target):
                 self._warn_once(target, "terrarium has no root agent configured")
             return root_agent
 
         handle = self._resolve_handle(target)
         if handle is None:
-            self._warn_once(target, "no such creature in this terrarium")
+            if not self._has_cross_node_peer(target):
+                self._warn_once(target, "no such creature in this terrarium")
             return None
         return handle.agent
+
+    def _has_cross_node_peer(self, target: str) -> bool:
+        """Return True iff a cross-node forwarder claims this target.
+
+        When True, also emit a DEBUG log noting the forward. Used by
+        ``_resolve_target`` to gate the "unresolved" WARN so it doesn't
+        fire for cross-node emissions that are actually delivered via
+        ``_output_wire_adapter.forward_event``.
+        """
+        forwarder = getattr(self._engine, "_output_wire_adapter", None)
+        if forwarder is None:
+            return False
+        try:
+            peer = forwarder.peer_for_target(target)
+        except Exception:
+            return False
+        if peer is None:
+            return False
+        logger.debug(
+            "output_wiring target forwarded cross-node",
+            target=target,
+            peer=peer,
+        )
+        return True
 
     def _resolve_handle(self, target: str):
         handle = self._creatures.get(target)
@@ -143,6 +184,39 @@ class TerrariumOutputWiringResolver:
         for entry in entries:
             target_agent = self._resolve_target(entry.to, source=source)
             if target_agent is None:
+                # Cross-node fallback: a remote forwarder may know
+                # which peer hosts this name.  Only fires when an
+                # engine-level adapter is installed (lab-host / lab-
+                # client mode); standalone runs miss and skip as before.
+                forwarder = getattr(self._engine, "_output_wire_adapter", None)
+                if forwarder is not None:
+                    peer = forwarder.peer_for_target(entry.to)
+                    if peer is not None:
+                        delivered_content = content if entry.with_content else ""
+                        prompt_text = render_prompt(
+                            entry,
+                            source=source,
+                            target=entry.to,
+                            content=delivered_content,
+                            turn_index=turn_index,
+                            source_event_type=source_event_type,
+                        )
+                        asyncio.create_task(
+                            forwarder.forward_event(
+                                peer,
+                                {
+                                    "target_name": entry.to,
+                                    "source": source,
+                                    "content": delivered_content,
+                                    "with_content": bool(entry.with_content),
+                                    "source_event_type": source_event_type,
+                                    "turn_index": turn_index,
+                                    "prompt_override": prompt_text,
+                                },
+                            ),
+                            name=f"wiring_remote_{source}_to_{entry.to}_{turn_index}",
+                        )
+                        continue
                 continue
             target_identity = self._target_identity(entry.to, target_agent)
             if source == target_identity and not entry.allow_self_trigger:

@@ -21,11 +21,13 @@ import kohakuterrarium.terrarium.recipe as _recipe
 import kohakuterrarium.terrarium.resume as _resume
 import kohakuterrarium.terrarium.root as _root
 import kohakuterrarium.terrarium.topology as _topo
+import kohakuterrarium.terrarium.topology_snapshot as _topo_snap
 import kohakuterrarium.terrarium.wiring as _wiring
 from kohakuterrarium.core.environment import Environment
 from kohakuterrarium.terrarium.creature_host import (
     Creature,
     CreatureBuildInput,
+    apply_creature_name,
     build_creature,
 )
 from kohakuterrarium.terrarium.events import (
@@ -191,6 +193,8 @@ class Terrarium:
         start: bool = True,
         is_privileged: bool = False,
         parent_creature_id: str | None = None,
+        suppress_io: bool = False,
+        name: str | None = None,
     ) -> Creature:
         """Add a creature to the engine.
 
@@ -198,6 +202,17 @@ class Terrarium:
         or a pre-built ``Creature`` (tests / advanced callers).  With
         ``graph=None`` a fresh singleton graph is minted.  ``start``
         toggles auto-start of the underlying agent.
+
+        ``suppress_io`` forces the creature's input module to
+        :class:`NoneInput` — set by Studio / Lab managed-spawn paths so
+        the creature is driven only through its attach WebSocket and
+        never boots its config's own ``input: cli`` loop.
+
+        ``name`` is a spawn-time display-name override (the name the
+        user typed in the Studio "new creature" form).  When set it is
+        applied across the creature + its nested objects, so a creature
+        spawned on a worker carries the user's chosen name — not the
+        config file's own ``name``.
 
         ``is_privileged`` marks the creature as having access to the
         group_* tool surface — set by direct user actions (solo
@@ -222,9 +237,12 @@ class Terrarium:
                 creature_id=creature_id,
                 pwd=pwd if pwd is not None else self._pwd,
                 llm_override=llm_override,
+                suppress_io=suppress_io,
             )
         if creature_id and creature.creature_id != creature_id:
             creature.creature_id = creature_id
+        if name and name.strip():
+            apply_creature_name(creature, name.strip())
         if creature.creature_id in self._creatures:
             raise ValueError(f"creature_id {creature.creature_id!r} already exists")
 
@@ -358,6 +376,7 @@ class Terrarium:
         _channels.register_channel_in_environment(
             env.shared_channels, info, engine=self, graph_id=gid
         )
+        _topo_snap.snapshot(self, gid)
         return info
 
     async def remove_channel(self, graph: GraphRef, name: str) -> TopologyDelta:
@@ -369,7 +388,11 @@ class Terrarium:
         in ``terrarium.channels.remove_channel_from_graph``.
         """
         gid = self._resolve_graph_id(graph)
-        return await _lifecycle.remove_channel_from_graph(self, gid, name)
+        delta = await _lifecycle.remove_channel_from_graph(self, gid, name)
+        # remove_channel may auto-split; snapshot every store-attached
+        # graph so each one reflects its post-removal topology.
+        _topo_snap.snapshot_all(self)
+        return delta
 
     async def connect(
         self,
@@ -387,9 +410,13 @@ class Terrarium:
 
         Body lives in ``terrarium.channels.connect_creatures``.
         """
-        return await _channels.connect_creatures(
+        result = await _channels.connect_creatures(
             self, sender, receiver, channel=channel
         )
+        # connect may merge graphs; snapshot every store-attached graph
+        # so each one reflects the post-connect topology.
+        _topo_snap.snapshot_all(self)
+        return result
 
     async def disconnect(
         self,
@@ -404,9 +431,15 @@ class Terrarium:
         unwired.  Body lives in
         ``terrarium.channel_lifecycle.disconnect_creatures``.
         """
-        return await _lifecycle.disconnect_creatures(
+        result = await _lifecycle.disconnect_creatures(
             self, sender, receiver, channel=channel
         )
+        # ``DisconnectionResult`` doesn't carry the affected gids; the
+        # mutation may also split a graph into multiple. Snapshot every
+        # store-attached graph so each one's saved topology reflects
+        # the post-disconnect wires.
+        _topo_snap.snapshot_all(self)
+        return result
 
     # ------------------------------------------------------------------
     # output wiring

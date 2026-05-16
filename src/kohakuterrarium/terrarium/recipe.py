@@ -117,11 +117,20 @@ async def apply_recipe(
         )
 
     # 5. Add every configured creature.
+    # Back-to-back spawns of the same recipe would collide on
+    # ``creature_id=cr_cfg.name``; suffix with a counter so a second
+    # ``apply_recipe`` against the same engine adds ``intake_2`` /
+    # ``intake_3`` / ... instead of 400ing on ``already exists``.
+    # We track the resolved id per cr_cfg.name so the wiring pass
+    # in step 6 can find the right Creature when names alias.
+    recipe_id_map: dict[str, str] = {}
     for cr_cfg in config.creatures:
+        cid = _allocate_unique_creature_id(engine, cr_cfg.name)
+        recipe_id_map[cr_cfg.name] = cid
         creature = _build_recipe_creature(
             builder,
             cr_cfg,
-            creature_id=cr_cfg.name,
+            creature_id=cid,
             pwd=pwd,
             llm_override=llm_override,
             env=env,
@@ -151,7 +160,7 @@ async def apply_recipe(
 
     # 6. Wire listen/send edges + inject triggers.
     for cr_cfg in config.creatures:
-        creature = engine.get_creature(cr_cfg.name)
+        creature = engine.get_creature(recipe_id_map[cr_cfg.name])
         # Always listen to the creature's own direct channel.
         all_listen = list(cr_cfg.listen_channels)
         if cr_cfg.name not in all_listen:
@@ -216,6 +225,31 @@ async def apply_recipe(
         root=has_root,
     )
     return engine.get_graph(graph_id)
+
+
+def _allocate_unique_creature_id(engine: "Terrarium", name: str) -> str:
+    """Return a creature_id starting with ``name`` that isn't taken on
+    ``engine``.
+
+    Recipe-spawned creatures historically use ``creature_id == name``;
+    when the same recipe is applied twice (or two recipes share a name
+    in the same engine) the second spawn collided with
+    ``ValueError: creature_id 'X' already exists``.  Suffix with a
+    counter (``X_2``, ``X_3``, ...) so back-to-back ``apply_recipe``
+    calls succeed deterministically.
+    """
+    try:
+        engine.get_creature(name)
+    except KeyError:
+        return name
+    n = 2
+    while True:
+        candidate = f"{name}_{n}"
+        try:
+            engine.get_creature(candidate)
+        except KeyError:
+            return candidate
+        n += 1
 
 
 def _build_recipe_creature(

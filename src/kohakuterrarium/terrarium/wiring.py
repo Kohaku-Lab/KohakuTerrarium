@@ -32,13 +32,16 @@ def install_output_wiring_resolver(engine: Any) -> Any:
     lookup follows later hot-plug changes. Reinstalling is cheap and is
     used after root changes so the magic ``root`` target stays current.
     """
-    return _install_resolver(engine._creatures, root_agent=None)
+    return _install_resolver(engine._creatures, root_agent=None, engine=engine)
 
 
-def _install_resolver(creatures: dict[str, Any], *, root_agent: Any | None) -> Any:
+def _install_resolver(
+    creatures: dict[str, Any], *, root_agent: Any | None, engine: Any | None = None
+) -> Any:
     resolver = TerrariumOutputWiringResolver(
         creatures=creatures,
         root_agent=root_agent,
+        engine=engine,
     )
     for name, creature in creatures.items():
         creature.agent._wiring_resolver = resolver

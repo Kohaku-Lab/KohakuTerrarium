@@ -353,6 +353,37 @@ class Creature:
 CreatureBuildInput = AgentConfig | CreatureConfig | str | Path
 
 
+def apply_creature_name(creature: "Creature", name: str) -> None:
+    """Push a display-name change onto every nested object that caches it.
+
+    Setting ``creature.name`` alone is not enough: the executor (and its
+    ToolContexts) keep emitting channel messages under the original
+    config name, the trigger manager logs with the old name, the compact
+    manager too. ``engine.add_creature`` uses this to apply a spawn-time
+    ``name`` override consistently; ``studio.sessions.lifecycle`` calls it
+    for post-spawn renames.
+    """
+    creature.name = name
+    agent = getattr(creature, "agent", None)
+    if agent is None:
+        if getattr(creature, "config", None) is not None:
+            creature.config.name = name
+        return
+    if getattr(agent, "config", None) is not None:
+        agent.config.name = name
+    if getattr(creature, "config", None) is not None:
+        creature.config.name = name
+    executor = getattr(agent, "executor", None)
+    if executor is not None and hasattr(executor, "_agent_name"):
+        executor._agent_name = name
+    trigger_manager = getattr(agent, "trigger_manager", None)
+    if trigger_manager is not None and hasattr(trigger_manager, "_agent_name"):
+        trigger_manager._agent_name = name
+    compact_manager = getattr(agent, "compact_manager", None)
+    if compact_manager is not None and hasattr(compact_manager, "_agent_name"):
+        compact_manager._agent_name = name
+
+
 def build_creature(
     config: CreatureBuildInput,
     *,
@@ -361,6 +392,7 @@ def build_creature(
     pwd: str | None = None,
     llm_override: str | None = None,
     environment: Environment | None = None,
+    suppress_io: bool = False,
 ) -> Creature:
     """Build a :class:`Creature` from any of the supported config shapes.
 
@@ -376,10 +408,20 @@ def build_creature(
       ``Agent(config, ...)``.
     - ``CreatureConfig`` — in-recipe creature dict.  Loaded via
       ``build_agent_config(config_data, base_dir)`` then ``Agent(...)``.
+
+    ``suppress_io`` forces the agent's input module to :class:`NoneInput`
+    regardless of what the config declares.  A creature managed by the
+    Studio / Lab layer is driven entirely through the attach WebSocket —
+    it must NEVER boot its config's own ``input: cli`` loop, which on a
+    worker process (a foreground ``kt lab-client``) would hijack the
+    terminal's stdin.  Only the standalone ``kt run`` path leaves
+    ``suppress_io=False`` so the config's IO actually runs.
     """
+    _io_override = NoneInput() if suppress_io else None
     if isinstance(config, (str, Path)):
         agent = Agent.from_path(
             str(config),
+            input_module=_io_override,
             session=(
                 environment.get_session(creature_id or Path(config).stem)
                 if environment is not None
@@ -404,6 +446,7 @@ def build_creature(
         )
         agent = Agent(
             config,
+            input_module=_io_override,
             session=session,
             environment=environment,
             llm_override=llm_override,
@@ -420,6 +463,8 @@ def build_creature(
 
     if isinstance(config, CreatureConfig):
         agent_config = build_agent_config(config.config_data, config.base_dir)
+        # CreatureConfig (in-recipe / hot-plug) is always engine-managed
+        # and channel-driven — its IO is suppressed unconditionally.
         agent = Agent(
             agent_config,
             input_module=NoneInput(),

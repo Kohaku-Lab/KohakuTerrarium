@@ -18,6 +18,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.session.resume import (
     _open_store_with_migration,
     detect_session_type,
@@ -27,6 +28,7 @@ from kohakuterrarium.session.resume import (
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.config import load_terrarium_config
 from kohakuterrarium.terrarium.creature_host import Creature, _safe_creature_id
+import kohakuterrarium.terrarium.topology_snapshot as _topo_snap
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -81,7 +83,15 @@ async def _resume_agent_into_engine(
     pwd: str | None,
     llm_override: str | None,
 ) -> str:
-    """Standalone-agent resume: rebuild Agent, wrap, adopt, attach."""
+    """Standalone-agent resume: rebuild Agent, wrap, adopt, attach.
+
+    The rebuilt agent is adopted into a live engine and driven through
+    the engine's wiring / attach WebSocket — never its config's own
+    ``input: cli`` loop. ``input_module=NoneInput()`` suppresses that
+    loop exactly as ``engine.add_creature(suppress_io=True)`` does for
+    the Studio / Lab spawn path; without it a worker-side resume boots
+    a stdin reader with no TTY and wedges the worker.
+    """
     # session.resume.resume_agent does the heavy lifting: opens store
     # with migration, rebuilds Agent from the saved config, injects
     # every state slot, and calls agent.attach_session_store(store).
@@ -90,6 +100,7 @@ async def _resume_agent_into_engine(
         pwd_override=pwd,
         io_mode=None,
         llm_override=llm_override,
+        input_module=NoneInput(),
     )
     creature_obj = Creature(
         creature_id=_safe_creature_id(agent.config.name),
@@ -188,6 +199,14 @@ async def _resume_terrarium_into_engine(
     # same store so this preserves graph/session bookkeeping safely.
     await engine.attach_session(sid, store)
     store.update_status("running")
+
+    # Replay runtime topology mutations on top of the recipe-rebuilt
+    # graph: any channel the user added via ``service.add_channel`` /
+    # any wire from ``service.connect`` after the original spawn lives
+    # in ``meta["runtime_topology"]`` (written by every engine topology
+    # method). Without this replay, those user-added channels + wires
+    # are lost on every resume.
+    await _topo_snap.replay(engine, sid)
 
     logger.info(
         "Terrarium session resumed into engine",

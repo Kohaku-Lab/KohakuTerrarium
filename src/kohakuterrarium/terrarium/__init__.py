@@ -43,12 +43,38 @@ from kohakuterrarium.terrarium.events import (
 )
 from kohakuterrarium.terrarium.observer import ChannelObserver, ObservedMessage
 from kohakuterrarium.terrarium.output_log import LogEntry, OutputLogCapture
+from kohakuterrarium.terrarium.service import (
+    CreatureInfo,
+    LocalTerrariumService,
+    TerrariumService,
+)
 from kohakuterrarium.terrarium.topology import (
     ChannelInfo,
     GraphTopology,
     TopologyDelta,
     TopologyState,
 )
+
+
+# Multi-node services live in their own submodules so callers that
+# never go remote (single-host mode) don't transitively import the
+# laboratory layer.  Re-exported here at module level for convenience
+# of multi-node callers.
+def __getattr__(name: str):
+    if name == "RemoteTerrariumService":
+        from kohakuterrarium.terrarium.remote_service import (
+            RemoteTerrariumService,
+        )
+
+        return RemoteTerrariumService
+    if name == "MultiNodeTerrariumService":
+        from kohakuterrarium.terrarium.multi_node_service import (
+            MultiNodeTerrariumService,
+        )
+
+        return MultiNodeTerrariumService
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "ChannelConfig",
@@ -57,17 +83,22 @@ __all__ = [
     "ConnectionResult",
     "Creature",
     "CreatureConfig",
+    "CreatureInfo",
     "DisconnectionResult",
     "EngineEvent",
     "EventFilter",
     "EventKind",
     "GraphTopology",
+    "LocalTerrariumService",
     "LogEntry",
+    "MultiNodeTerrariumService",
     "ObservedMessage",
     "OutputLogCapture",
+    "RemoteTerrariumService",
     "RootAssignment",
     "Terrarium",
     "TerrariumConfig",
+    "TerrariumService",
     "TopologyDelta",
     "TopologyState",
     "build_creature",

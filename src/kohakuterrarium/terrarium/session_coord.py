@@ -74,6 +74,43 @@ def copy_events_into(src: SessionStore, dst: SessionStore) -> int:
     return n
 
 
+# Resumable-config meta keys to inherit on split/merge. Without these
+# (especially ``config_path`` and ``config_snapshot``), the new child
+# stores carry only ``agents`` / ``status`` and a resume request 502s
+# with "Session has no config_path or config_snapshot in metadata".
+_RESUMABLE_META_KEYS: tuple[str, ...] = (
+    "config_type",
+    "config_path",
+    "config_snapshot",
+    "pwd",
+    "created_at",
+    "hostname",
+    "python_version",
+    "terrarium_name",
+    "terrarium_channels",
+    "terrarium_creatures",
+    "viewer_default_agent",
+)
+
+
+def _inherit_resumable_meta(src_meta: dict, dst_store: SessionStore) -> None:
+    """Copy the resumable-config subset of ``src_meta`` into ``dst_store``.
+
+    Best-effort: per-key writes that fail are logged at debug and the
+    rest still propagate.
+    """
+    for key in _RESUMABLE_META_KEYS:
+        if key not in src_meta:
+            continue
+        value = src_meta[key]
+        if value in (None, "", {}, []):
+            continue
+        try:
+            dst_store.meta[key] = value
+        except Exception:
+            logger.debug("split/merge: meta key %r write failed", key, exc_info=True)
+
+
 def merge_session_stores(
     old_stores: list[SessionStore],
     new_path: str | Path,
@@ -86,12 +123,17 @@ def merge_session_stores(
     """
     new_store = SessionStore(new_path)
     parents: list[str] = []
+    inherited_meta: dict = {}
     for old in old_stores:
         try:
             old_meta = old.load_meta()
             sid = old_meta.get("session_id")
             if sid:
                 parents.append(str(sid))
+            # First old store wins for the resumable subset; this keeps
+            # the merged store rebuildable from its original config.
+            if not inherited_meta:
+                inherited_meta = old_meta
         except Exception:
             logger.debug("merge: load_meta failed", exc_info=True)
         copy_events_into(old, new_store)
@@ -99,6 +141,7 @@ def merge_session_stores(
         new_store.meta["session_id"] = new_store.session_id
         new_store.meta["parent_session_ids"] = parents
         new_store.meta["merged_at"] = time.time()
+        _inherit_resumable_meta(inherited_meta, new_store)
     except Exception:
         logger.debug("merge: meta write failed", exc_info=True)
     logger.info(
@@ -120,6 +163,11 @@ def split_session_store(
         parent_id = old_meta.get("session_id", "")
     except Exception:
         parent_id = ""
+    try:
+        full_old_meta = old_store.load_meta()
+    except Exception:
+        full_old_meta = {}
+        logger.debug("split: load_meta failed for inheritance", exc_info=True)
     for path in new_paths:
         new_store = SessionStore(path)
         copy_events_into(old_store, new_store)
@@ -127,6 +175,7 @@ def split_session_store(
             new_store.meta["session_id"] = new_store.session_id
             new_store.meta["parent_session_ids"] = [str(parent_id)] if parent_id else []
             new_store.meta["split_at"] = time.time()
+            _inherit_resumable_meta(full_old_meta, new_store)
         except Exception:
             logger.debug("split: meta write failed", exc_info=True)
         new_stores.append(new_store)
@@ -181,7 +230,41 @@ def apply_merge(
         # references from the engine.
         kept = old_stores[0]
     else:
-        kept = merge_session_stores(old_stores, new_path)
+        kept_store = engine._session_stores.get(keep_gid)
+        kept_path = (
+            Path(getattr(kept_store, "_path", "")).resolve()
+            if kept_store is not None
+            else None
+        )
+        if kept_store is not None and kept_path == Path(new_path).resolve():
+            # The merge target is the kept graph's existing file —
+            # opening a second SessionStore at that path and copying
+            # the kept store back into itself would duplicate every
+            # row.  Instead reuse the live kept store and only copy
+            # events from the OTHER (dropped) old stores into it.
+            kept = kept_store
+            for old in old_stores:
+                if old is kept_store:
+                    continue
+                copy_events_into(old, kept)
+            # Stamp the merge lineage on the kept store's meta so
+            # downstream viewers still see ``parent_session_ids`` /
+            # ``merged_at`` like the multi-store branch produces.
+            parents: list[str] = []
+            for old in old_stores:
+                try:
+                    sid = old.load_meta().get("session_id")
+                    if sid:
+                        parents.append(str(sid))
+                except Exception:
+                    logger.debug("merge: load_meta failed", exc_info=True)
+            try:
+                kept.meta["parent_session_ids"] = parents
+                kept.meta["merged_at"] = time.time()
+            except Exception:
+                logger.debug("merge: meta write failed", exc_info=True)
+        else:
+            kept = merge_session_stores(old_stores, new_path)
     engine._session_stores[keep_gid] = kept
     for gid in drop_gids:
         engine._session_stores.pop(gid, None)

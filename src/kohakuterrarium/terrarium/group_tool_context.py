@@ -129,3 +129,40 @@ def resolve_group_target(gctx: GroupContext, identifier: str) -> "Creature | Non
         if cfg is not None and getattr(cfg, "name", None) == identifier:
             return c
     return None
+
+
+def engine_is_in_cluster(engine: "Terrarium") -> bool:
+    """Heuristic: is this engine part of a Lab cluster?
+
+    Workers stash :class:`TerrariumBroadcastAdapter` and
+    :class:`TerrariumOutputWireAdapter` on the engine when they wire it
+    into a multi-node Lab cluster (see ``cli/lab_client.py``).  Their
+    presence is the cheapest in-engine signal that "this engine is a
+    cluster member" — distinct from a host-local standalone engine
+    where neither stash exists.  Used by group tools to surface a
+    *cluster-aware* error when a target identifier resolves locally to
+    nothing: it might be a sibling cluster member living on a peer
+    worker that this engine cannot see.
+    """
+    return (
+        getattr(engine, "_broadcast_adapter", None) is not None
+        or getattr(engine, "_output_wire_adapter", None) is not None
+    )
+
+
+def cross_cluster_target_error(engine: "Terrarium", identifier: str) -> str:
+    """Build the standard ``cross-cluster`` error string used by every
+    ``group_*`` tool when ``resolve_group_target`` returns ``None`` on a
+    cluster member's engine.  CF-7: cluster-wide ``group_*`` routing is
+    not yet wired — surface the cause so the LLM/user can distinguish
+    a typo from a "lives on another worker" miss.
+    """
+    if engine_is_in_cluster(engine):
+        return (
+            f"cross-cluster: target {identifier!r} is not on this worker; "
+            "cluster-wide group_* routing is not yet wired (CF-7). The "
+            "privileged tool surface only mutates the caller's local "
+            "engine; ask the user (Studio) to perform cluster topology "
+            "ops for now."
+        )
+    return f"creature {identifier!r} not in your group"
