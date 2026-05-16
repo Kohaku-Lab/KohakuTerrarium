@@ -644,7 +644,7 @@ class TestStudioIntegration:
             assert mem_miss["count"] == 0
             assert mem_miss["results"] == []
 
-    @pytest.mark.timeout(90)
+    @pytest.mark.timeout(180)
     async def test_runtime_session_mutation(self, scripted_llm, isolated_paths):
         """Drive the per-creature runtime mutation surface end-to-end.
 

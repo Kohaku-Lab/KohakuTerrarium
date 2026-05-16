@@ -257,14 +257,10 @@ class Agent(
         """Start all agent modules."""
         logger.info("Starting agent", agent_name=self.config.name)
 
-        # Capture the agent's running loop so cross-thread schedulers
-        # (TUI thread, ``_promote_handle``) can ``call_soon_threadsafe``
-        # without asking asyncio to guess. On Python 3.14+ a sync caller
-        # has no current loop and ``asyncio.get_event_loop()`` raises,
-        # so without this stash the TUI promote path can't reach the
-        # agent's loop at all.
+        # Stash the running loop so cross-thread schedulers (TUI promote)
+        # can ``call_soon_threadsafe`` on it without ``get_event_loop()``
+        # (which raises in sync contexts on Python 3.14+).
         self._loop = asyncio.get_running_loop()
-
         self._configure_tui_tabs()
 
         await self.input.start()
@@ -636,13 +632,8 @@ class Agent(
             if not handle.promote():
                 return False
         except RuntimeError:
-            # Not on an event loop (TUI thread) — schedule on the
-            # agent's loop, captured at ``start()`` time.  Falling back
-            # to ``asyncio.get_event_loop()`` here is unsafe on Python
-            # 3.14+ (raises ``RuntimeError`` in sync contexts instead
-            # of auto-creating a loop), and a freshly created loop
-            # would not be the one actually running ``handle.promote``'s
-            # Event anyway — that promote would silently never fire.
+            # TUI thread — schedule on the loop captured at ``start()``.
+            # ``asyncio.get_event_loop()`` is unsafe on Python 3.14+.
             loop = getattr(self, "_loop", None)
             if loop is None or loop.is_closed():
                 try:
