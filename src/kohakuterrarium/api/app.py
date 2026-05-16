@@ -34,6 +34,8 @@ logger = get_logger(__name__)
 # subpackage maps to a future Studio tier (catalog / identity /
 # sessions / persistence / attach). The legacy single-file routes
 # were removed in Phase 3; the studio layer is the only path now.
+from kohakuterrarium.api.routes import health as health_route
+from kohakuterrarium.api.routes import lab_status as lab_status_route
 from kohakuterrarium.api.routes import metrics as metrics_route
 from kohakuterrarium.api.routes import nodes as nodes_route
 from kohakuterrarium.api.routes.attach import files as catalog_attach_files
@@ -451,6 +453,14 @@ def create_app(
     app.include_router(metrics_route.router, prefix="/api/metrics", tags=["metrics"])
     # /api/nodes — lab-only routes (404 in standalone mode).
     app.include_router(nodes_route.router, prefix="/api/nodes", tags=["nodes"])
+
+    # Health probes — /healthz (liveness) + /readyz (readiness).
+    # Mounted at root (no /api prefix) so reverse-proxy active-health
+    # checks don't need to know the API namespace.  Both routes are
+    # mode-aware via ``request.app.state.lab_mode``.
+    app.include_router(health_route.router, tags=["health"])
+    # /api/lab/status — operator dashboard snapshot of the cluster.
+    app.include_router(lab_status_route.router, prefix="/api/lab", tags=["lab"])
 
     # Runtime graph snapshot — read by the graph editor data layer.
     app.include_router(
