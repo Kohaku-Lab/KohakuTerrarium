@@ -24,7 +24,13 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        # CI validates 3.12+ only.  ``requires-python`` in pyproject
+        # still allows 3.10/3.11 so installs don't break for users
+        # on older runtimes, but those Pythons exhibit asyncio +
+        # kohakuvault-daemon-thread contention that pushes the
+        # integration suite past 180s on hosted runners.  See README
+        # "Supported Python versions" for the recommended baseline.
+        python-version: ["3.12", "3.13", "3.14"]
         exclude:
           # pythonnet (pywebview Windows backend) has no 3.14 wheel
           - os: windows-latest

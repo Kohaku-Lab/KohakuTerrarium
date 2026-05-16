@@ -87,6 +87,8 @@ A terrarium composes multiple creatures horizontally through channels, lifecycle
 
 ## Quick start
 
+> **Recommended Python version**: 3.12 or newer. CI validates 3.12+ only; 3.10 and 3.11 still install and run (`requires-python = ">=3.10"`) but are supported best-effort — older asyncio + SQLite-daemon-thread interaction is slower and the integration suite occasionally times out on those runtimes.
+
 ### 1. Install KohakuTerrarium
 
 ```bash
