@@ -183,6 +183,13 @@ kt app
 - [Why KohakuTerrarium](docs/zh-CN/concepts/foundations/why-kohakuterrarium.md)
 - [什么是 Agent](docs/zh-CN/concepts/foundations/what-is-an-agent.md)
 
+### 我想部署上线
+
+- [部署 — Docker](docs/zh-CN/guides/deployment-docker.md) — AIO、host + workers、分布式 compose
+- [部署 — systemd](docs/zh-CN/guides/deployment-systemd.md) — `kt service install` + 加固后的 unit
+- [部署 — 反向代理](docs/zh-CN/guides/deployment-reverse-proxy.md) — nginx / Cloudflare Tunnel + TLS
+- [Laboratory](docs/zh-CN/guides/laboratory.md) — 多节点 lab-host / lab-client 模式
+
 ### 我想为框架贡献代码
 
 - [开发者首页](docs/zh-CN/dev/README.md)
@@ -399,6 +406,35 @@ kt serve start               # 长期常驻
 
 `kt app` 会在原生桌面窗口中打开网页 UI（需要 `pywebview`）。
 
+### 部署（Docker / systemd / 多节点）
+
+GHCR 上提供三个官方 Docker 镜像 — 按形状选择：
+
+```bash
+# AIO：lab-host + 内嵌 worker 在同一容器
+docker run -d -p 8001:8001 -v kt:/home/kt/.kohakuterrarium \
+  ghcr.io/kohaku-lab/kohakuterrarium:1.5.0
+
+# Host + workers（不同机器）：两个镜像、同一共享 token
+docker run -d -p 8001:8001 -p 8100:8100 \
+  -e KT_HOST_TOKEN=$TOKEN ghcr.io/kohaku-lab/kohakuterrarium-host:1.5.0
+docker run -d -e KT_HOST_URL=ws://host:8100 -e KT_HOST_TOKEN=$TOKEN \
+  -e KT_CLIENT_NAME=worker-a ghcr.io/kohaku-lab/kohakuterrarium-client:1.5.0
+```
+
+或用 systemd 一行命令安装加固后的原生服务：
+
+```bash
+sudo kt service install --all                              # AIO unit
+sudo kt service install --host                             # host unit
+sudo kt service install --client --name worker-a --host-url ws://… --host-token …
+sudo systemctl enable --now kohakuterrarium-host kohakuterrarium-client@worker-a
+```
+
+`examples/deployment/` 下提供可立即使用的 compose 文件（AIO、host + workers、分布式）与 nginx TLS 终止模板。`/healthz` + `/readyz` 端点供 Docker `HEALTHCHECK` 与反向代理 active health 使用。
+
+详见 [部署 — Docker](docs/zh-CN/guides/deployment-docker.md)、[部署 — systemd](docs/zh-CN/guides/deployment-systemd.md)、[部署 — 反向代理](docs/zh-CN/guides/deployment-reverse-proxy.md)。
+
 ## 会话、记忆与恢复
 
 会话默认存储在 `~/.kohakuterrarium/sessions/` (除非停用)。
@@ -488,7 +524,7 @@ docs/                           # 包含教程、使用指南、核心概念、A
 [第一个智能体](docs/zh-CN/tutorials/first-creature.md) · [第一个生态瓶](docs/zh-CN/tutorials/first-terrarium.md) · [第一次 Python 嵌入](docs/zh-CN/tutorials/first-python-embedding.md) · [第一个自定义工具](docs/zh-CN/tutorials/first-custom-tool.md) · [第一个插件](docs/zh-CN/tutorials/first-plugin.md)
 
 ### 使用指南
-[快速开始](docs/zh-CN/guides/getting-started.md) · [编写智能体](docs/zh-CN/guides/creatures.md) · [生态瓶](docs/zh-CN/guides/terrariums.md) · [会话](docs/zh-CN/guides/sessions.md) · [记忆](docs/zh-CN/guides/memory.md) · [配置文件](docs/zh-CN/guides/configuration.md) · [程序化使用](docs/zh-CN/guides/programmatic-usage.md) · [组合](docs/zh-CN/guides/composition.md) · [自定义模块](docs/zh-CN/guides/custom-modules.md) · [插件](docs/zh-CN/guides/plugins.md) · [MCP](docs/zh-CN/guides/mcp.md) · [包](docs/zh-CN/guides/packages.md) · [Serving](docs/zh-CN/guides/serving.md) · [示例](docs/zh-CN/guides/examples.md)
+[快速开始](docs/zh-CN/guides/getting-started.md) · [编写智能体](docs/zh-CN/guides/creatures.md) · [生态瓶](docs/zh-CN/guides/terrariums.md) · [会话](docs/zh-CN/guides/sessions.md) · [记忆](docs/zh-CN/guides/memory.md) · [配置文件](docs/zh-CN/guides/configuration.md) · [程序化使用](docs/zh-CN/guides/programmatic-usage.md) · [组合](docs/zh-CN/guides/composition.md) · [自定义模块](docs/zh-CN/guides/custom-modules.md) · [插件](docs/zh-CN/guides/plugins.md) · [MCP](docs/zh-CN/guides/mcp.md) · [包](docs/zh-CN/guides/packages.md) · [Serving](docs/zh-CN/guides/serving.md) · [Laboratory](docs/zh-CN/guides/laboratory.md) · [部署 — Docker](docs/zh-CN/guides/deployment-docker.md) · [部署 — systemd](docs/zh-CN/guides/deployment-systemd.md) · [部署 — 反向代理](docs/zh-CN/guides/deployment-reverse-proxy.md) · [示例](docs/zh-CN/guides/examples.md)
 
 ### 概念
 [词汇表](docs/zh-CN/concepts/glossary.md) · [Why KohakuTerrarium](docs/zh-CN/concepts/foundations/why-kohakuterrarium.md) · [什么是 Agent](docs/zh-CN/concepts/foundations/what-is-an-agent.md) · [组合一个 Agent](docs/zh-CN/concepts/foundations/composing-an-agent.md) · [模块](docs/zh-CN/concepts/modules/README.md) · [Agent 作为 Python 对象](docs/zh-CN/concepts/python-native/agent-as-python-object.md) · [组合代数](docs/zh-CN/concepts/python-native/composition-algebra.md) · [多 Agent](docs/zh-CN/concepts/multi-agent/README.md) · [模式](docs/zh-CN/concepts/patterns.md) · [边界](docs/zh-CN/concepts/boundaries.md)

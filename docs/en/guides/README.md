@@ -48,6 +48,9 @@ If you want a guided first walk-through, go to [Tutorials](../tutorials/README.m
 
 - [Serving](serving.md) — `kt web`, `kt app`, the `kt serve` daemon.
 - [Laboratory](laboratory.md) — multi-node deployments: `kt serve --mode lab-host` + `kt lab-client`, per-worker credentials, multi-node terrariums, cluster resume.
+- [Deployment — Docker](deployment-docker.md) — three compose recipes (AIO, host + workers, distributed) using the official GHCR images.
+- [Deployment — systemd](deployment-systemd.md) — install as a hardened systemd service via `kt service install`.
+- [Deployment — reverse proxy](deployment-reverse-proxy.md) — nginx and Cloudflare Tunnel patterns for TLS termination.
 - [Frontend Layout](frontend-layout.md) — web dashboard panels and presets.
 
 ## Learn from code

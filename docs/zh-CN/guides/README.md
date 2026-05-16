@@ -42,5 +42,8 @@ tags:
 - [包指南](packages.md) — 通过 `kt install` 安装、`kohaku.yaml` manifest、`@pkg/` 参照、发布你自己的包。
 - [服务部署指南](serving.md) — `kt serve` 提供的 HTTP API + WebSocket + Web Dashboard、`kt app` 提供桌面版。
 - [Laboratory 指南](laboratory.md) — 多节点部署：`kt serve --mode lab-host` + `kt lab-client`、每工作节点凭据、多节点 terrarium、集群 resume。
+- [部署 — Docker](deployment-docker.md) — 三种 compose 模式（AIO、host + worker、分布式），均基于 GHCR 官方镜像。
+- [部署 — systemd](deployment-systemd.md) — 通过 `kt service install` 安装为加固后的 systemd 服务。
+- [部署 — 反向代理](deployment-reverse-proxy.md) — TLS 终止的 nginx 与 Cloudflare Tunnel 配置。
 - [前端布局指南](frontend-layout.md) — Vue 3 Dashboard 的组织方式、在哪里扩展、事件从后端流到 UI 的路径。
 - [示例指南](examples.md) — 内置示例 Creature、Terrarium、代码的阅读指引 — 建议先看哪些、为什么。
