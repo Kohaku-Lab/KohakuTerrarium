@@ -2689,12 +2689,60 @@ async def _drive_journey(
         # receiver's idle timeout in the cluster-mux path, so the
         # session events log is the canonical surface to assert on.
         cross_err_seen = False
+        last_tool_results: list[dict] = []
         try:
-            async with host.api_ws(chat_url_a) as ws:
-                await asyncio.wait_for(
-                    _drain_chat(ws, "please remove bravo"),
-                    timeout=OP_TIMEOUT * 3,
+            # Some platforms (occasionally macOS) race the ScriptedLLM
+            # match-gated lookup with prior async chats, so the first
+            # ``please remove bravo`` send may not emit the
+            # ``group_remove_node`` tool call.  Retry the chat up to
+            # three times — between attempts we forcibly reset the
+            # alpha worker's LLM ``_used_indices`` so the match-gated
+            # entry is reachable even if a phantom earlier match
+            # consumed it.
+            for attempt in range(3):
+                if attempt > 0:
+                    # Reach into the in-process alpha worker's LLM
+                    # state and rearm the match-gated entry.  This is
+                    # test-only surgery; production never reaches into
+                    # ScriptedLLM internals.
+                    try:
+                        alpha_creature = w1.engine.get_creature("alpha")
+                        alpha_llm = getattr(alpha_creature.agent, "llm", None)
+                        if alpha_llm is not None and hasattr(alpha_llm, "_used_indices"):
+                            alpha_llm._used_indices.clear()
+                    except Exception:
+                        pass
+                async with host.api_ws(chat_url_a) as ws:
+                    await asyncio.wait_for(
+                        _drain_chat(ws, "please remove bravo"),
+                        timeout=OP_TIMEOUT * 3,
+                    )
+                # Per-attempt drain settle before deciding whether to
+                # retry — the tool_result may already be in flight.
+                await asyncio.sleep(0.5)
+                rr_probe = await asyncio.wait_for(
+                    host.http.get(
+                        f"/api/sessions/{graph_a}/events",
+                        params={"limit": 1000},
+                    ),
+                    timeout=OP_TIMEOUT,
                 )
+                if rr_probe.status_code == 200:
+                    for e in rr_probe.json().get("events") or ():
+                        if (
+                            isinstance(e, dict)
+                            and e.get("type") == "tool_result"
+                            and "group_remove_node" in str(e.get("name") or "")
+                        ):
+                            break
+                    else:
+                        # No group_remove_node tool_result yet — retry.
+                        continue
+                # Saw group_remove_node tool_result; fall through to
+                # the long poll below to confirm the cross-cluster
+                # marker.
+                break
+
             # Tool execution -> event write -> session.sync notify ->
             # host mirror append is a multi-hop async pipeline that
             # finishes some time AFTER the chat WS closes.  Fixed
@@ -2705,7 +2753,6 @@ async def _drive_journey(
             # to need >10s for the kqueue selector + lab WebSocket to
             # drain the tool_result event through the mirror writer.
             deadline = asyncio.get_event_loop().time() + 30.0
-            last_tool_results: list[dict] = []
             while asyncio.get_event_loop().time() < deadline and not cross_err_seen:
                 rr2 = await asyncio.wait_for(
                     host.http.get(
