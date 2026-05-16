@@ -496,13 +496,18 @@ export const useRuntimeGraphStore = defineStore("runtimeGraph", () => {
       removeFreeChannel(channel.id)
       pushLog(`bound channel "${channelName}" to ${creature.label}'s molecule`)
     } else if (creature.graphId !== channel.graphId) {
-      // The channel and the creature live in different graphs. Without
-      // a merge, each side would see its OWN channel object with the
-      // same name and messages would never cross. ensure_same_graph on
-      // the backend folds them together (no bridge channel created),
-      // then we wire on the surviving graph.
+      // The channel and the creature live in different graphs. Merge
+      // them, threading the channel name through so the backend's
+      // ``connect`` REUSES the existing channel instead of creating a
+      // fresh auto-named ``{a}_to_{b}`` bridge alongside it (the
+      // user-reported "still create a_to_b" bug).  After the merge,
+      // wire on the surviving graph using the user's channel name.
       try {
-        const result = await terrariumAPI.mergeGraphs(channel.graphId, creature.graphId)
+        const result = await terrariumAPI.mergeGraphs(
+          channel.graphId,
+          creature.graphId,
+          channelName,
+        )
         targetGraphId = result?.session_id || channel.graphId
         pushLog(
           `merged ${creature.label}'s molecule into ${channelName}'s so they share the channel`,

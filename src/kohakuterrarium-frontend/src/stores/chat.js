@@ -4,9 +4,13 @@ import { getCurrentInstance } from "vue"
 import { terrariumAPI, agentAPI } from "@/utils/api"
 import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 import { injectScope, registerScopeDisposer, scopeOfStoreId } from "@/composables/useScope"
+import { useClusterStore } from "@/stores/cluster"
 import { useMessagesStore } from "@/stores/messages"
 import { useInstancesStore } from "@/stores/instances"
+import { useNotificationsStore } from "@/stores/notifications"
 import { useStatusStore } from "@/stores/status"
+import { translate } from "@/utils/i18n"
+import { useLocaleStore } from "@/stores/locale"
 import { getHybridPrefSync, setHybridPref } from "@/utils/uiPrefs"
 import { wsUrl } from "@/utils/wsUrl"
 
@@ -345,6 +349,14 @@ export function _replayEvents(messages, events, branchView = null) {
     const c = ensureCur()
     const tail = c.parts.length ? c.parts[c.parts.length - 1] : null
     if (tail && tail.type === "text") tail._streaming = false
+    // Sub-agents run asynchronously in the background — the assistant
+    // turn that spawned them can complete before they produce a result.
+    // Default their status to "running" so a rebuild that walks the
+    // event stream before ``subagent_result`` arrives doesn't fall
+    // through to the "interrupted" sweep below.  Synchronous tools
+    // still default to "done" because their result event almost always
+    // immediately follows the call in the stream.
+    const initialStatus = kind === "subagent" ? "running" : "done"
     const tool = {
       type: "tool",
       id: `tool_${_n++}`,
@@ -352,7 +364,7 @@ export function _replayEvents(messages, events, branchView = null) {
       name,
       kind,
       args: args || {},
-      status: "done",
+      status: initialStatus,
       result: "",
       tools_used: [],
       children: [],
@@ -707,6 +719,10 @@ export function _replayEvents(messages, events, branchView = null) {
         preview: evt.content_preview || "",
         withContent: evt.with_content !== false,
         turnIndex: evt.turn_index || 0,
+        // Cross-site delivery flag — backend sets metadata.cross_node
+        // on remote forwards via terrarium.broadcast.  The frontend
+        // chips the entry with a "cross-site" badge.
+        crossNode: !!(evt.cross_node || evt.metadata?.cross_node),
         timestamp: "",
       })
     } else if (t === "trigger_fired") {
@@ -865,21 +881,15 @@ export function _replayEvents(messages, events, branchView = null) {
     }
   }
 
-  // Only mark sub-agents as interrupted if they have NO job_id tracking
-  // (legacy events without job_id) AND have no result
-  for (const msg of result) {
-    for (const part of msg.parts || []) {
-      if (
-        part.type === "tool" &&
-        part.kind === "subagent" &&
-        part.status === "done" &&
-        !part.result &&
-        !part.jobId
-      ) {
-        part.status = "interrupted"
-      }
-    }
-  }
+  // Sub-agents are async / often background — ``addTool`` defaults
+  // their initial status to "running" so a rebuild that walks the
+  // stream before the (eventual) ``subagent_result`` arrives leaves
+  // them as "running" rather than "done with no result". The legacy
+  // "promote done-with-no-result-and-no-jobId to interrupted" sweep
+  // is intentionally NOT applied to sub-agents — a missing result
+  // for a background sub-agent means *still running*, not interrupted,
+  // and the live ``runningJobs`` map is the authoritative signal of
+  // actual interruption (the user clicked Stop).
 
   // Clean up empty parts
   for (const msg of result) {
@@ -1075,13 +1085,16 @@ const _chatStoreOptions = {
      * @type {Object<string, Object<number, number>>}
      */
     branchViewByTab: {},
-    /** @type {{sessionId: string, model: string, llmName: string, agentName: string, compactThreshold: number}} Session metadata */
+    /** @type {{sessionId: string, model: string, llmName: string, agentName: string, compactThreshold: number, homeNode: string}} Session metadata */
     sessionInfo: {
       sessionId: "",
       model: "",
       llmName: "",
       agentName: "",
       compactThreshold: 0,
+      // Lab cluster site that hosts this session ("_host" or
+      // worker-id). Set from the session payload at attach time.
+      homeNode: "_host",
     },
     /** Reactive tick counter - incremented every second when jobs are running */
     _jobTick: 0,
@@ -1232,6 +1245,11 @@ const _chatStoreOptions = {
         agentName: instance.config_name || instance.creatures?.[0]?.name || "",
         compactThreshold: instance.compact_threshold || 0,
         maxContext: instance.max_context || 0,
+        // Cluster site this session runs on.  Backend payload now
+        // carries ``home_node`` at both the session and per-creature
+        // level (lifecycle.py).  Default ``_host`` keeps standalone
+        // semantics intact.
+        homeNode: instance.home_node || instance.creatures?.[0]?.home_node || "_host",
       }
 
       // Reset status store too. Actions run detached from any Vue
@@ -1512,7 +1530,15 @@ const _chatStoreOptions = {
       }
       ws.onclose = () => {
         if (generation !== this._instanceGeneration || ws !== this._ws) return
+        const wasOpen = this.wsStatus === "open"
         this.wsStatus = "reconnecting"
+        // First disconnect (was-open → reconnecting): if this session
+        // is on a worker, surface a one-shot toast + mark the cluster
+        // site offline.  We only fire on the FIRST close — subsequent
+        // reconnect cycles don't re-spam.
+        if (wasOpen) {
+          this._notifyWorkerDisconnect()
+        }
         // Exponential backoff, capped at 10s.
         const delay = this._reconnectDelay
         this._reconnectDelay = Math.min(delay * 2, 10000)
@@ -1525,6 +1551,28 @@ const _chatStoreOptions = {
       ws.onerror = () => {
         // onclose fires after this; reconnect is scheduled there.
       }
+    },
+
+    /**
+     * Surface a one-shot toast when the WS drops for a worker-hosted
+     * session.  Only fires when the cluster store is in lab-host mode
+     * and the home site is not the host itself.  No-op in standalone.
+     */
+    _notifyWorkerDisconnect() {
+      const home = this.sessionInfo?.homeNode || "_host"
+      if (home === "_host") return
+      const cluster = useClusterStore()
+      if (!cluster.isCluster) return
+      cluster.markSiteOffline(home)
+      const locale = useLocaleStore()
+      const lang = locale.current || "en"
+      const notifications = useNotificationsStore()
+      notifications.push({
+        level: "warn",
+        title: translate(lang, "cluster.disconnect.title"),
+        body: translate(lang, "cluster.disconnect.body", { site: home }),
+        timeoutMs: 8000,
+      })
     },
 
     /** Flush any events that arrived while history was still loading. */
@@ -1832,6 +1880,9 @@ const _chatStoreOptions = {
           preview: data.content_preview || "",
           withContent: data.with_content !== false,
           turnIndex: data.turn_index || 0,
+          // Cross-site delivery flag — set by the backend forwarder
+          // (terrarium_output_wire.py) for cross-node wires.
+          crossNode: !!(data.cross_node || data.metadata?.cross_node),
           timestamp: new Date().toISOString(),
         })
         return
@@ -2704,6 +2755,7 @@ const _chatStoreOptions = {
         agentName: "",
         compactThreshold: 0,
         maxContext: 0,
+        homeNode: "_host",
       }
       const statusStore = useStatusStore(scopeOfStoreId(this.$id))
       statusStore.reset()

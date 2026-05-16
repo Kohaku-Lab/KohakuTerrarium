@@ -8,6 +8,11 @@
           <span class="text-xs font-semibold text-warm-700 dark:text-warm-300 truncate">
             {{ group.label }}
           </span>
+          <!-- One site chip per member when the cluster spans
+               multiple workers, else the single home-node chip.  The
+               "Lab makes N terrariums look like 1" molecule still
+               surfaces which workers it actually spans. -->
+          <SiteChip v-for="nid in nodeIdList" :key="nid" :node-id="nid" />
           <span class="text-[10px] text-warm-500 dark:text-warm-400 truncate"> · {{ memberCount }} obj · {{ relationCount }} rel </span>
         </div>
         <div class="flex items-center gap-1 shrink-0">
@@ -30,6 +35,8 @@
 
 <script setup>
 import { computed, ref } from "vue"
+
+import SiteChip from "@/components/cluster/SiteChip.vue"
 
 const props = defineProps({
   group: { type: Object, required: true },
@@ -55,6 +62,14 @@ const positionStyle = computed(() => ({
   height: props.bounds.height + "px",
   zIndex: props.z,
 }))
+
+// Deduped list of node ids to render as chips.  For a plain
+// engine-graph this collapses to ``[group.nodeId]``; for a multi-
+// worker cluster it shows one chip per member site.
+const nodeIdList = computed(() => {
+  const ids = Array.isArray(props.group.nodeIds) && props.group.nodeIds.length > 0 ? props.group.nodeIds : [props.group.nodeId || "_host"]
+  return Array.from(new Set(ids))
+})
 
 const dragging = ref(false)
 let dragStart = null

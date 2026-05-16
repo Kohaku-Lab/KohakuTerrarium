@@ -798,4 +798,35 @@ export default {
 
   "studio.module.usedIn.empty": "このモジュールを組み込んでいるクリーチャーはまだありません。",
   "studio.module.usedIn.summary": ({ n }) => `${n} 個のクリーチャーに組み込み済み:`,
+
+  // ─── Cluster (lab-host マルチノード UI) ──────────────────────────
+  "cluster.pill.hostOnly": "LAB · ホストのみ",
+  "cluster.pill.sites": ({ n }) => `LAB · ${n} サイト`,
+  "cluster.pill.tooltip": ({ n }) => `ラボクラスター：${n} サイト接続中 — クリックで詳細`,
+  "cluster.popover.title": "接続中のサイト",
+  "cluster.popover.close": "閉じる",
+  "cluster.site.host": "ホスト",
+  "cluster.site.creatureCount": ({ n }) => `${n} 体のクリーチャー`,
+  "cluster.chat.crossSiteFrom": ({ source, site }) => `${source} より · ${site}`,
+  "cluster.chat.crossSiteBadge": "サイト間",
+  "cluster.column.site": "サイト",
+  "cluster.filter.all": "すべてのサイト",
+  "cluster.spawn.label": "実行先",
+  "cluster.resume.label": "再開先",
+  "cluster.terminal.onSite": ({ site }) => `ターミナル · ${site}`,
+  "cluster.disconnect.title": "ワーカーが切断されました",
+  "cluster.disconnect.body": ({ site }) =>
+    `${site} はオフラインです。ワーカー再接続後にチャットが再開されます。`,
+  "cluster.disconnect.banner": ({ site }) =>
+    `ワーカー ${site} オフライン — 「設定 → サイト」から再接続してください。`,
+  "cluster.graphEditor.crossSiteEdge": "terrarium.broadcast 経由のサイト間チャネル",
+  "cluster.graphEditor.crossSiteWire": "サイト間出力配線",
+  "cluster.graphEditor.siteHeader": ({ site }) => `${site} 上`,
+  "cluster.settings.title": "サイト",
+  "cluster.settings.empty": "スタンドアロンモード — クラスターサイトなし。",
+  "cluster.settings.headers.site": "サイト",
+  "cluster.settings.headers.status": "ステータス",
+  "cluster.settings.headers.creatures": "クリーチャー数",
+  "cluster.settings.refresh": "更新",
+  "cluster.attach.policiesOrigin": ({ site }) => `${site} のポリシー`,
 }

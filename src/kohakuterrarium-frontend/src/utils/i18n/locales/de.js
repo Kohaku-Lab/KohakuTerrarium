@@ -754,4 +754,35 @@ export default {
 
   "studio.module.usedIn.empty": "Noch keine Kreatur bindet dieses Modul ein.",
   "studio.module.usedIn.summary": ({ n }) => `In ${n} Kreatur${n === 1 ? "" : "en"} eingebunden:`,
+
+  // ─── Cluster (lab-host Multi-Node-Oberfläche) ────────────────────
+  "cluster.pill.hostOnly": "LAB · nur Host",
+  "cluster.pill.sites": ({ n }) => `LAB · ${n} Standorte`,
+  "cluster.pill.tooltip": ({ n }) => `Lab-Cluster: ${n} verbundene Standorte — klicken für Details`,
+  "cluster.popover.title": "Verbundene Standorte",
+  "cluster.popover.close": "Schließen",
+  "cluster.site.host": "Host",
+  "cluster.site.creatureCount": ({ n }) => `${n} ${n === 1 ? "Kreatur" : "Kreaturen"}`,
+  "cluster.chat.crossSiteFrom": ({ source, site }) => `von ${source} · ${site}`,
+  "cluster.chat.crossSiteBadge": "standortübergreifend",
+  "cluster.column.site": "Standort",
+  "cluster.filter.all": "Alle Standorte",
+  "cluster.spawn.label": "Ausführen auf",
+  "cluster.resume.label": "Fortsetzen auf",
+  "cluster.terminal.onSite": ({ site }) => `Terminal · ${site}`,
+  "cluster.disconnect.title": "Worker getrennt",
+  "cluster.disconnect.body": ({ site }) =>
+    `${site} ist offline. Chat wird fortgesetzt, sobald der Worker wieder verbunden ist.`,
+  "cluster.disconnect.banner": ({ site }) =>
+    `Worker ${site} ist offline — über Einstellungen → Standorte neu verbinden.`,
+  "cluster.graphEditor.crossSiteEdge": "Standortübergreifender Kanal via terrarium.broadcast",
+  "cluster.graphEditor.crossSiteWire": "Standortübergreifende Output-Verdrahtung",
+  "cluster.graphEditor.siteHeader": ({ site }) => `auf ${site}`,
+  "cluster.settings.title": "Standorte",
+  "cluster.settings.empty": "Standalone-Modus — keine Cluster-Standorte.",
+  "cluster.settings.headers.site": "Standort",
+  "cluster.settings.headers.status": "Status",
+  "cluster.settings.headers.creatures": "Kreaturen",
+  "cluster.settings.refresh": "Aktualisieren",
+  "cluster.attach.policiesOrigin": ({ site }) => `Richtlinien von ${site}`,
 }

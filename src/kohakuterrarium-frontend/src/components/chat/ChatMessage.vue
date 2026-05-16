@@ -54,6 +54,10 @@
       <span class="i-carbon-connect text-iolite dark:text-iolite-light text-xs shrink-0" />
       <span class="text-xs text-iolite-shadow dark:text-iolite-light flex-1">
         Inbound from <span class="font-semibold">{{ message.from }}</span>
+        <span v-if="message.crossNode" class="ml-1 inline-flex items-center gap-0.5 px-1 py-px rounded text-[9px] uppercase tracking-wider bg-teal/20 text-teal-shadow dark:text-teal-light" :title="t('cluster.graphEditor.crossSiteEdge')">
+          <span class="i-carbon-network-3 w-2.5 h-2.5" />
+          {{ t("cluster.chat.crossSiteBadge") }}
+        </span>
         <span v-if="!message.withContent" class="opacity-60"> · ping (no content)</span>
       </span>
       <span v-if="message.preview" class="i-carbon-chevron-down text-iolite/50 text-[10px] transition-transform" :class="{ 'rotate-180': expandedTools['wire_' + message.id] }" />
@@ -217,6 +221,7 @@
         {{ message.sender.charAt(0).toUpperCase() }}
       </span>
       <span class="text-xs font-semibold" :style="{ color: senderGemColor }">{{ message.sender }}</span>
+      <SiteChip :node-id="senderHomeNode" />
       <span class="text-[10px] text-warm-400">{{ message.timestamp }}</span>
     </div>
     <div class="pl-7 text-body">
@@ -246,9 +251,14 @@ import { ElMessage } from "element-plus"
 import MarkdownRenderer from "@/components/common/MarkdownRenderer.vue"
 import ToolCallBlock from "@/components/chat/ToolCallBlock.vue"
 import UIEventBlock from "@/components/chat/UIEventBlock.vue"
+import SiteChip from "@/components/cluster/SiteChip.vue"
 import { useChatStore } from "@/stores/chat"
+import { useInstancesStore } from "@/stores/instances"
 import { GEM } from "@/utils/colors"
 import { buildMessageParts, contentToEditableDraft, formatBytes, MAX_ATTACHMENT_BYTES, MAX_IMAGE_BYTES } from "@/utils/chatAttachments"
+import { useI18n } from "@/utils/i18n"
+
+const { t } = useI18n()
 
 // Module-scoped so colors are stable across all ChatMessage instances.
 // If this were declared inside <script setup>, each message would have
@@ -322,6 +332,15 @@ const showSenderHeader = computed(() => {
 })
 
 const senderGemColor = computed(() => _gemForSender(props.message.sender))
+
+const instances = useInstancesStore()
+const senderHomeNode = computed(() => {
+  if (props.message.role !== "channel") return ""
+  const inst = instances.current
+  if (!inst) return ""
+  const c = (inst.creatures || []).find((c) => c.name === props.message.sender)
+  return c?.home_node || inst.home_node || "_host"
+})
 
 // ── Message actions (copy / edit / regenerate) ──
 

@@ -788,4 +788,35 @@ export default {
 
   "studio.module.usedIn.empty": "아직 이 모듈을 연결한 크리처가 없습니다.",
   "studio.module.usedIn.summary": ({ n }) => `${n}개의 크리처에 연결됨:`,
+
+  // ─── Cluster (lab-host 다중 노드 UI) ─────────────────────────────
+  "cluster.pill.hostOnly": "LAB · 호스트만",
+  "cluster.pill.sites": ({ n }) => `LAB · ${n}개 사이트`,
+  "cluster.pill.tooltip": ({ n }) => `랩 클러스터: ${n}개 연결된 사이트 — 자세히 보려면 클릭`,
+  "cluster.popover.title": "연결된 사이트",
+  "cluster.popover.close": "닫기",
+  "cluster.site.host": "호스트",
+  "cluster.site.creatureCount": ({ n }) => `크리처 ${n}개`,
+  "cluster.chat.crossSiteFrom": ({ source, site }) => `${source} · ${site} 에서`,
+  "cluster.chat.crossSiteBadge": "사이트 간",
+  "cluster.column.site": "사이트",
+  "cluster.filter.all": "모든 사이트",
+  "cluster.spawn.label": "실행 위치",
+  "cluster.resume.label": "재개 위치",
+  "cluster.terminal.onSite": ({ site }) => `터미널 · ${site}`,
+  "cluster.disconnect.title": "워커 연결 끊김",
+  "cluster.disconnect.body": ({ site }) =>
+    `${site} 오프라인. 워커가 다시 연결되면 채팅이 재개됩니다.`,
+  "cluster.disconnect.banner": ({ site }) =>
+    `워커 ${site} 오프라인 — 설정 → 사이트에서 다시 연결하세요.`,
+  "cluster.graphEditor.crossSiteEdge": "terrarium.broadcast 로 전달되는 사이트 간 채널",
+  "cluster.graphEditor.crossSiteWire": "사이트 간 출력 와이어링",
+  "cluster.graphEditor.siteHeader": ({ site }) => `${site} 에서 실행`,
+  "cluster.settings.title": "사이트",
+  "cluster.settings.empty": "독립 모드 — 클러스터 사이트 없음.",
+  "cluster.settings.headers.site": "사이트",
+  "cluster.settings.headers.status": "상태",
+  "cluster.settings.headers.creatures": "크리처",
+  "cluster.settings.refresh": "새로고침",
+  "cluster.attach.policiesOrigin": ({ site }) => `${site} 의 정책`,
 }

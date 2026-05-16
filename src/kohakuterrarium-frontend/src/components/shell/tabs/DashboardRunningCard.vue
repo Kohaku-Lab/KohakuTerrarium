@@ -6,6 +6,7 @@
         {{ instance.config_name }}
       </span>
       <GraphCounts :instance="instance" compact />
+      <SiteChip :node-id="instance.home_node || '_host'" class="ml-auto" />
     </header>
 
     <dl class="grid grid-cols-[80px_1fr] gap-y-0.5 text-xs">
@@ -34,6 +35,7 @@ import { computed, onMounted, ref } from "vue"
 
 import ConfirmStopDialog from "@/components/shell/tabs/ConfirmStopDialog.vue"
 import GraphCounts from "@/components/common/GraphCounts.vue"
+import SiteChip from "@/components/cluster/SiteChip.vue"
 import { useTabsStore } from "@/stores/tabs"
 
 const props = defineProps({ instance: { type: Object, required: true } })

@@ -17,6 +17,11 @@ vi.mock("@/utils/api", () => ({
   },
   terrariumAPI: { list: vi.fn().mockResolvedValue([]) },
   agentAPI: { list: vi.fn().mockResolvedValue([]) },
+  nodesAPI: {
+    list: vi.fn().mockResolvedValue({ nodes: [] }),
+    status: vi.fn(),
+    deployCreature: vi.fn(),
+  },
 }))
 
 import MacroShell from "./MacroShell.vue"

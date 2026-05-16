@@ -10,7 +10,7 @@
 </template>
 
 <script setup>
-import { onMounted } from "vue"
+import { onMounted, onBeforeUnmount } from "vue"
 
 import CompactShell from "@/components/shell/CompactShell.vue"
 import RailPane from "@/components/shell/RailPane.vue"
@@ -19,11 +19,13 @@ import TabContent from "@/components/shell/TabContent.vue"
 import { useDensity } from "@/composables/useDensity"
 import { useTabsStore } from "@/stores/tabs"
 import { useInstancesStore } from "@/stores/instances"
+import { useClusterStore } from "@/stores/cluster"
 import { useTabPersistence } from "@/composables/useTabPersistence"
 import { registerBuiltinTabKinds } from "@/components/shell/registerBuiltins"
 
 const tabs = useTabsStore()
 const instances = useInstancesStore()
+const cluster = useClusterStore()
 const { isCompact } = useDensity()
 
 // Register tab-kind components — only the kinds wired up at the
@@ -34,7 +36,7 @@ registerBuiltinTabKinds()
 // Hydrate from + persist to localStorage.
 useTabPersistence()
 
-onMounted(() => {
+onMounted(async () => {
   // Migrate per-instance preset memory once. Idempotent.
   tabs.migrateLayoutPresetKeys()
 
@@ -48,5 +50,14 @@ onMounted(() => {
   } else {
     instances.fetchAll()
   }
+
+  // Cluster: hydrate mode + sites once, then poll only in lab-host
+  // mode.  Standalone clients pay no polling cost.
+  await cluster.hydrate()
+  if (cluster.isCluster) cluster.startPolling()
+})
+
+onBeforeUnmount(() => {
+  cluster.stopPolling()
 })
 </script>

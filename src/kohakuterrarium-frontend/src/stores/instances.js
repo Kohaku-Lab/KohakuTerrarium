@@ -87,13 +87,14 @@ export const useInstancesStore = defineStore("instances", {
      * graph from a creature config, ``"terrarium"`` applies a recipe.
      * Both produce the same Session shape and end up in the same list.
      */
-    async create(mode, configPath, pwd, name = null) {
+    async create(mode, configPath, pwd, name = null, opts = {}) {
+      const { onNode = "_host" } = opts
       if (mode === "terrarium") {
-        const { terrarium_id } = await terrariumAPI.create(configPath, pwd, name)
+        const { terrarium_id } = await terrariumAPI.create(configPath, pwd, name, { onNode })
         await this.fetchAll()
         return terrarium_id
       }
-      const { agent_id, session_id } = await agentAPI.create(configPath, pwd, name)
+      const { agent_id, session_id } = await agentAPI.create(configPath, pwd, name, { onNode })
       await this.fetchAll()
       // Prefer the canonical session_id when the backend surfaces it
       // (newer paths do), otherwise fall back to the historical
@@ -146,7 +147,14 @@ export const useInstancesStore = defineStore("instances", {
  * ``creatures.length > 1`` directly.
  */
 function _mapSession(data) {
-  const creatures = (data.creatures || []).map((c) => ({
+  // ``GET /api/sessions/active`` returns ``SessionListing.to_dict()``
+  // whose ``creatures`` is an INT count and whose home-site lives on
+  // ``node_id``.  ``GET /api/sessions/active/{id}`` returns the full
+  // ``Session.to_dict()`` with ``creatures: [...]`` + ``home_node``.
+  // Coerce both shapes here so callers stay uniform.
+  const sessionHome = data.home_node || data.node_id || "_host"
+  const rawCreatures = Array.isArray(data.creatures) ? data.creatures : []
+  const creatures = rawCreatures.map((c) => ({
     name: c.name || c.creature_id || "",
     creature_id: c.creature_id || c.agent_id || "",
     status: c.running ? "running" : "idle",
@@ -157,6 +165,8 @@ function _mapSession(data) {
     listen_channels: c.listen_channels || [],
     send_channels: c.send_channels || [],
     is_root: !!c.is_root,
+    // Per-creature lab cluster site; fall back to session-level home.
+    home_node: c.home_node || sessionHome,
   }))
   const channels = (data.channels || []).map((ch) => ({
     name: ch.name,
@@ -167,7 +177,11 @@ function _mapSession(data) {
   // Pick the "primary" creature for legacy single-target panels:
   // root if recipe-flagged, else first creature.
   const primary = (data.has_root && creatures.find((c) => c.is_root)) || creatures[0] || {}
-  const isMulti = creatures.length > 1
+  // ``isMulti`` from creature array length OR from the int count on
+  // the listing payload — same semantics, different wire shape.
+  const creatureCount =
+    creatures.length || (typeof data.creatures === "number" ? data.creatures : 0)
+  const isMulti = creatureCount > 1
   return {
     id: data.session_id,
     graph_id: data.session_id,
@@ -187,6 +201,8 @@ function _mapSession(data) {
     // for solo creatures and root-flagged terrariums alike.
     max_context: primary.max_context || 0,
     compact_threshold: primary.compact_threshold || 0,
+    // Session-level home site for lab-host UI surfaces.
+    home_node: sessionHome,
     creatures,
     channels,
   }

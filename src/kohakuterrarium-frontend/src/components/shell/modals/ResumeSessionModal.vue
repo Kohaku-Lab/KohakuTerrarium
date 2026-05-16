@@ -36,6 +36,8 @@
         </div>
       </div>
 
+      <SitePicker v-model="onNode" :label="t('cluster.resume.label')" />
+
       <label class="flex items-center gap-2 text-sm">
         <input v-model="alsoOpenInspector" type="checkbox" class="accent-iolite" />
         {{ t("shell.modal.resume.alsoOpenInspector") }}
@@ -56,9 +58,10 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue"
+import { computed, onMounted, ref, watch } from "vue"
 
 import ModalShell from "@/components/common/ModalShell.vue"
+import SitePicker from "@/components/cluster/SitePicker.vue"
 import { useTabsStore } from "@/stores/tabs"
 import { sessionAPI } from "@/utils/api"
 import { useI18n } from "@/utils/i18n"
@@ -80,6 +83,7 @@ const selected = ref(null)
 const alsoOpenInspector = ref(false)
 const resuming = ref(false)
 const errorMsg = ref("")
+const onNode = ref("_host")
 
 onMounted(async () => {
   try {
@@ -99,6 +103,17 @@ const filteredSessions = computed(() => {
   return allSessions.value.filter((s) => (s.session_name ?? s.name ?? "").toLowerCase().includes(q))
 })
 
+// Default the site picker to the session's originating site when the
+// saved metadata records it.  Falls back to "_host" otherwise — same
+// as before.  Lookup is done lazily so we only consult the selected
+// session, not every entry in the list.
+watch(selected, (sid) => {
+  if (!sid) return
+  const match = allSessions.value.find((s) => (s.session_name ?? s.name) === sid)
+  const origin = match?.on_node || match?.home_node || match?.node_id
+  if (origin) onNode.value = origin
+})
+
 const canSubmit = computed(() => Boolean(selected.value && !resuming.value))
 
 async function onSubmit() {
@@ -110,6 +125,7 @@ async function onSubmit() {
       kind: "resume",
       sessionName: selected.value,
       attachMode: alsoOpenInspector.value ? "both" : "chat",
+      onNode: onNode.value,
     })
     emit("close")
   } catch (err) {

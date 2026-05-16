@@ -86,6 +86,11 @@ function addCreatureNode(nodes, creature, graphId, hasMembrane, graphIndex, item
     // single-member molecule.
     graphId,
     groupId: hasMembrane ? graphId : null,
+    // Per-creature home-node tag — surfaced by ``RuntimeNodeCard`` as
+    // a chip on the card itself so a cluster molecule with two
+    // creatures on different workers shows WHICH worker each runs on
+    // (a single chip on the molecule header doesn't disambiguate).
+    nodeId: creature.home_node || "_host",
     x: pos.x,
     y: pos.y,
     backend: creature,
@@ -190,10 +195,67 @@ function addOutputEdges(connections, graph, layout) {
   }
 }
 
+/**
+ * Build cluster-site lookup tables for cross-site derivation.
+ * Returns:
+ *   ``creatureToSite`` — creature_id → home_node
+ *   ``graphToSite``    — graph_id    → home_node
+ *   ``channelSites``   — channel_name → Set<home_node>
+ *
+ * Cross-site channel: same channel name appears in graphs on two
+ * different sites (the backend's broadcast forwarder replicates the
+ * channel on every participating node, so this is the cleanest test).
+ * Cross-site output wiring: from-creature and to-creature have
+ * different home_nodes.
+ */
+function buildSiteLookups(snapshot) {
+  const creatureToSite = {}
+  const graphToSite = {}
+  const channelSites = {}
+  for (const graph of snapshot?.graphs || []) {
+    const home = graph.node_id || "_host"
+    graphToSite[graph.graph_id] = home
+    for (const c of graph.creatures || []) {
+      const cid = c.creature_id || c.agent_id
+      if (cid) creatureToSite[cid] = c.home_node || home
+    }
+    for (const ch of graph.channels || []) {
+      if (!channelSites[ch.name]) channelSites[ch.name] = new Set()
+      channelSites[ch.name].add(home)
+    }
+  }
+  return { creatureToSite, graphToSite, channelSites }
+}
+
+function annotateCrossSite(connections, lookups) {
+  const { creatureToSite } = lookups
+  for (const conn of connections) {
+    const kind = conn.backend?.kind
+    if (kind === "output_edge") {
+      // Output edges expose ``to_creature_id`` — both endpoints are
+      // real creatures and we can compare their home sites directly.
+      const a = creatureToSite[conn.a] || "_host"
+      const b = creatureToSite[conn.b] || "_host"
+      conn.crossNode = a !== b
+    } else {
+      // Channel edges DON'T expose cross-site wiring in the snapshot.
+      // The backend forwards via terrarium.broadcast on a per
+      // (graph_id, channel) subscription basis; coincidental
+      // same-named channels on different sites are NOT forwarded.
+      // Until the snapshot carries explicit forwarder peers, we
+      // leave channel edges as local — false positives confuse users
+      // more than missing the dashed style would.
+      conn.crossNode = false
+    }
+  }
+}
+
 export function normalizeSnapshot(snapshot, layout) {
   const nodes = []
   const groups = []
   const connections = []
+
+  const siteLookups = buildSiteLookups(snapshot)
 
   for (const [graphIndex, graph] of (snapshot?.graphs || []).entries()) {
     const graphId = graph.graph_id
@@ -205,9 +267,26 @@ export function normalizeSnapshot(snapshot, layout) {
     // it in a one-card molecule is just visual noise.
     const hasMembrane = creatureCount > 1 || channelCount > 0
     if (hasMembrane) {
+      // Cluster-graph rendering: when the backend folded N worker
+      // engine-graphs into one cluster (``is_cluster: true``), surface
+      // every member's ``node_id`` so the molecule header shows a chip
+      // per worker — that's how the user sees that ONE logical graph
+      // actually spans multiple sites.  Falls back to the single
+      // ``graph.node_id`` for plain (un-clustered) engine graphs.
+      const memberNodeIds =
+        Array.isArray(graph.members) && graph.members.length > 0
+          ? graph.members.map((m) => m.node_id || "_host")
+          : [graph.node_id || "_host"]
       groups.push({
         id: graphId,
         label: graph.name || graphId,
+        // Single primary node id (back-compat with existing renderers).
+        nodeId: graph.node_id || "_host",
+        // Full membership list for multi-site clusters; renderers
+        // showing one chip per site read this.  Always at least one
+        // entry so the header layout doesn't have to special-case.
+        nodeIds: memberNodeIds,
+        isCluster: Boolean(graph.is_cluster),
         collapsed: layout.groups?.[graphId]?.collapsed === true,
         backend: graph,
       })
@@ -227,9 +306,14 @@ export function normalizeSnapshot(snapshot, layout) {
     addOutputEdges(connections, graph, layout)
   }
 
+  annotateCrossSite(connections, siteLookups)
+
   return {
     nodes: stableSortById(nodes),
     groups: stableSortById(groups),
     connections: stableSortById(connections),
   }
 }
+
+// Exported for tests.
+export { buildSiteLookups, annotateCrossSite }

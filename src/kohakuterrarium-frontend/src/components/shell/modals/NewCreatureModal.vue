@@ -13,10 +13,16 @@
         <div class="text-[10px] text-warm-400 mt-1">Leave blank to use the placeholder. We never call anyone "general → general".</div>
       </div>
 
+      <!-- Lab cluster site picker — only renders when ≥2 sites
+           connected. Backend defaults to host. Must precede the
+           working-dir input because the selected node decides which
+           filesystem the path resolves on. -->
+      <SitePicker v-model="onNode" :label="t('cluster.spawn.label')" />
+
       <!-- Working directory -->
       <div>
         <label class="block text-xs uppercase tracking-wider text-warm-500 mb-1"> Working directory </label>
-        <input v-model="pwd" type="text" required class="input-field w-full font-mono text-xs" placeholder="/home/user/my-project" />
+        <input v-model="pwd" type="text" required class="input-field w-full font-mono text-xs" placeholder="/home/user/my-project" @input="pwdUserTouched = true" />
       </div>
 
       <!-- Creature picker -->
@@ -60,12 +66,14 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue"
+import { computed, onMounted, ref, watch } from "vue"
 
 import ModalShell from "@/components/common/ModalShell.vue"
+import SitePicker from "@/components/cluster/SitePicker.vue"
 import { useConfigsStore } from "@/stores/configs"
 import { useTabsStore } from "@/stores/tabs"
 import { configAPI } from "@/utils/api"
+import { useI18n } from "@/utils/i18n"
 import { randomNameFor } from "@/utils/randomName"
 
 const props = defineProps({
@@ -79,6 +87,7 @@ const emit = defineEmits(["close"])
 
 const tabs = useTabsStore()
 const configs = useConfigsStore()
+const { t } = useI18n()
 
 const pwd = ref("")
 const selectedConfig = ref(null)
@@ -87,21 +96,44 @@ const starting = ref(false)
 const errorMsg = ref("")
 const name = ref("")
 const namePlaceholder = ref(randomNameFor("creature"))
+const onNode = ref("_host")
+
+// Tracks whether the user manually edited the working-dir input. While
+// false, the field is auto-populated from the server-info default and is
+// re-fetched whenever the user changes the site (B5/B6 follow-up): the
+// "Run on" picker determines which filesystem the path resolves on, so a
+// stale host-cwd would silently mislead the user. Once they type a path
+// of their own, we leave it alone — automatic overwrites would clobber a
+// path they may have spent thought on.
+const pwdUserTouched = ref(false)
 
 function rerollName() {
   namePlaceholder.value = randomNameFor("creature")
   name.value = ""
 }
 
-onMounted(async () => {
-  configs.fetchAll()
+async function refreshServerInfoDefault() {
   try {
-    const info = await configAPI.getServerInfo()
-    if (info.cwd && !pwd.value) pwd.value = info.cwd
+    const info = await configAPI.getServerInfo({ onNode: onNode.value })
+    if (info.cwd && !pwdUserTouched.value) pwd.value = info.cwd
   } catch {
     /* ignore */
   }
+}
+
+onMounted(() => {
+  configs.fetchAll()
+  refreshServerInfoDefault()
 })
+
+// Re-fetch the per-node default working dir when the user picks a
+// different site. We skip the update if the user has typed a path.
+watch(
+  () => onNode.value,
+  () => {
+    refreshServerInfoDefault()
+  },
+)
 
 const canSubmit = computed(() => Boolean(pwd.value.trim() && selectedConfig.value && !starting.value))
 
@@ -116,6 +148,7 @@ async function onSubmit() {
       pwd: pwd.value.trim(),
       name: (name.value.trim() || namePlaceholder.value).trim(),
       attachMode: props.silent ? "none" : alsoOpenInspector.value ? "both" : "chat",
+      onNode: onNode.value,
     })
     emit("close")
   } catch (err) {

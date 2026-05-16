@@ -21,9 +21,10 @@
     </section>
 
     <section class="mb-6">
-      <h3 class="text-warm-500 uppercase text-xs tracking-wider mb-2">
+      <h3 class="text-warm-500 uppercase text-xs tracking-wider mb-2 flex items-center gap-2">
         IO bindings
         <span v-if="policyHint" class="text-warm-400 normal-case font-normal"> (informational) </span>
+        <span v-if="policyOrigin" class="text-warm-400 normal-case font-normal text-[10px]" :title="t('cluster.attach.policiesOrigin', { site: policyOrigin })"> · {{ t("cluster.attach.policiesOrigin", { site: policyOrigin }) }} </span>
       </h3>
       <div v-if="policyHint === null" class="text-warm-400 italic text-xs">Policy hint unavailable</div>
       <div v-else-if="policyHint && policyHint.length > 0">
@@ -60,12 +61,26 @@
 <script setup>
 import { computed, onMounted, ref } from "vue"
 
+import { useClusterStore } from "@/stores/cluster"
 import { useStatusStore } from "@/stores/status"
 import { useTabsStore } from "@/stores/tabs"
+import { useI18n } from "@/utils/i18n"
 
 const props = defineProps({
   target: { type: String, required: true },
   instance: { type: Object, default: null },
+})
+
+const cluster = useClusterStore()
+const { t } = useI18n()
+// Surface the policy origin site only when (a) we're in lab-host
+// cluster mode and (b) the session lives on a non-host site.  In
+// every other case there's nothing useful to chip.
+const policyOrigin = computed(() => {
+  if (!cluster.isCluster) return ""
+  const home = props.instance?.home_node || "_host"
+  if (home === "_host") return ""
+  return home
 })
 
 const status = useStatusStore()

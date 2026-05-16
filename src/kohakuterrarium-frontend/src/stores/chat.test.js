@@ -63,6 +63,54 @@ describe("chat store — interrupted task handling", () => {
     expect(pendingJobs).toEqual({})
   })
 
+  it("background subagent without subagent_result rebuilds as running, not interrupted", () => {
+    // Background sub-agents finish AFTER the controller turn that spawned
+    // them — the event stream is allowed to end with subagent_call but no
+    // subagent_result yet.  A rebuild during that window must keep the
+    // accordion at "running" (the live ``runningJobs`` map is the source
+    // of truth for "actually interrupted") rather than fall through to
+    // the "done with no result" interrupted sweep.
+    const chat = useChatStore()
+    chat.messagesByTab = { main: [] }
+
+    const messages = []
+    const events = [
+      { type: "processing_start" },
+      { type: "subagent_call", name: "explore", job_id: "agent_explore_1", task: "find auth" },
+      { type: "processing_end" },
+    ]
+
+    const { messages: replayed, pendingJobs } = _replayEvents(messages, events)
+
+    const tool = replayed[0].parts[0]
+    expect(tool.kind).toBe("subagent")
+    expect(tool.status).toBe("running")
+    expect(pendingJobs.agent_explore_1).toBeTruthy()
+  })
+
+  it("background subagent without job_id still rebuilds as running, not interrupted", () => {
+    // The same scenario but with a legacy / buggy backend that emitted
+    // ``subagent_call`` without a ``job_id`` field. Pre-fix this fell
+    // through to the "interrupted" sweep because addTool defaulted to
+    // status="done"; now it stays "running" because addTool defaults
+    // sub-agents to "running" regardless of jobId.
+    const chat = useChatStore()
+    chat.messagesByTab = { main: [] }
+
+    const messages = []
+    const events = [
+      { type: "processing_start" },
+      { type: "subagent_call", name: "explore", task: "find auth" },
+      { type: "processing_end" },
+    ]
+
+    const { messages: replayed } = _replayEvents(messages, events)
+
+    const tool = replayed[0].parts[0]
+    expect(tool.kind).toBe("subagent")
+    expect(tool.status).toBe("running")
+  })
+
   it("live tool_error with interrupted metadata clears running job as interrupted", () => {
     const chat = useChatStore()
     chat.messagesByTab = { main: [{ id: "m1", role: "assistant", parts: [] }] }

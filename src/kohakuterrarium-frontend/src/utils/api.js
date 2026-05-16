@@ -33,9 +33,19 @@ export const configAPI = {
     return data
   },
 
-  /** @returns {Promise<{cwd: string, platform: string}>} */
-  async getServerInfo() {
-    const { data } = await api.get("/configs/server-info")
+  /**
+   * Fetch server runtime info. When ``opts.onNode`` is a connected worker
+   * (i.e. not ``"_host"``), the request includes ``?on_node=<node>`` so the
+   * backend returns that worker's default working directory instead of the
+   * host's cwd (B5). Standalone mode keeps the original behavior.
+   *
+   * @param {{ onNode?: string }} [opts]
+   * @returns {Promise<{cwd: string, platform: string}>}
+   */
+  async getServerInfo(opts = {}) {
+    const params = {}
+    if (opts.onNode && opts.onNode !== "_host") params.on_node = opts.onNode
+    const { data } = await api.get("/configs/server-info", { params })
     return data
   },
 
@@ -63,10 +73,13 @@ export const runtimeGraphAPI = {
 /** Terrarium lifecycle */
 export const terrariumAPI = {
   /** @returns {Promise<{terrarium_id: string}>} */
-  async create(configPath, pwd, name = null) {
+  async create(configPath, pwd, name = null, opts = {}) {
     const body = { config_path: configPath }
     if (pwd) body.pwd = pwd
     if (name) body.name = name
+    // Lab cluster site — backend defaults to "_host" if absent, so
+    // standalone mode is unaffected.
+    if (opts.onNode && opts.onNode !== "_host") body.on_node = opts.onNode
     const { data } = await api.post("/sessions/active/terrariums", body)
     return data
   },
@@ -111,13 +124,19 @@ export const terrariumAPI = {
 
   /** Merge graph ``b`` into graph ``a`` so both creature sets share
    * one engine graph. Returns ``{session_id, merged}`` where
-   * ``session_id`` is the surviving graph id. No bridge channel is
-   * created — used when wiring a channel that lives in a different
-   * molecule from the creature being wired to it. */
-  async mergeGraphs(aSessionId, bSessionId) {
-    const { data } = await api.post(
-      `/sessions/topology/${encodeTarget(aSessionId)}/merge/${encodeTarget(bSessionId)}`,
-    )
+   * ``session_id`` is the surviving graph id.
+   *
+   * ``channel`` (optional): when set, the backend's underlying
+   * ``service.connect`` reuses that channel name instead of creating
+   * a fresh auto-named ``{a}_to_{b}`` bridge.  Pass this when the
+   * user dragged FROM an existing channel — otherwise the merge would
+   * spawn a parallel channel alongside the user's, which is the
+   * wrong UX. */
+  async mergeGraphs(aSessionId, bSessionId, channel = null) {
+    const url =
+      `/sessions/topology/${encodeTarget(aSessionId)}/merge/${encodeTarget(bSessionId)}` +
+      (channel ? `?channel=${encodeURIComponent(channel)}` : "")
+    const { data } = await api.post(url)
     return data
   },
 
@@ -280,10 +299,11 @@ export const terrariumAPI = {
 /** Standalone agent lifecycle */
 export const agentAPI = {
   /** @returns {Promise<{agent_id: string}>} */
-  async create(configPath, pwd, name = null) {
+  async create(configPath, pwd, name = null, opts = {}) {
     const body = { config_path: configPath }
     if (pwd) body.pwd = pwd
     if (name) body.name = name
+    if (opts.onNode && opts.onNode !== "_host") body.on_node = opts.onNode
     const { data } = await api.post("/sessions/active/agents", body)
     return data
   },
@@ -447,7 +467,7 @@ export const filesAPI = {
     return data
   },
 
-  async getTree(root, depth = 3) {
+  async getTree(root, depth = 1) {
     const { data } = await api.get("/files/tree", { params: { root, depth } })
     return data
   },
@@ -502,8 +522,10 @@ export const sessionAPI = {
   },
 
   /** @returns {Promise<{instance_id: string, type: string, session_name: string}>} */
-  async resume(sessionName) {
-    const { data } = await api.post(`/sessions/${sessionName}/resume`)
+  async resume(sessionName, opts = {}) {
+    const body = {}
+    if (opts.onNode && opts.onNode !== "_host") body.on_node = opts.onNode
+    const { data } = await api.post(`/sessions/${sessionName}/resume`, body)
     return data
   },
 
@@ -637,18 +659,26 @@ export const sessionAPI = {
   },
 }
 
-/** Settings - API keys, custom models */
+/** Settings - API keys, custom models.
+ *
+ * Identity ops (keys, codex) accept an optional ``node`` argument that
+ * routes the call to a specific worker's local credential store (see
+ * src/kohakuterrarium/api/routes/identity/node_routing.py). Omit or
+ * pass "_host" to hit the host's own store (the default standalone
+ * behaviour). */
+const _nodeQuery = (node) => (node && node !== "_host" ? { params: { node } } : undefined)
 export const settingsAPI = {
-  async getKeys() {
-    const { data } = await api.get("/settings/keys")
+  async getKeys(node = "_host") {
+    const { data } = await api.get("/settings/keys", _nodeQuery(node))
     return data
   },
-  async saveKey(provider, key) {
-    const { data } = await api.post("/settings/keys", { provider, key })
+  async saveKey(provider, key, node = "_host") {
+    const cfg = _nodeQuery(node) || {}
+    const { data } = await api.post("/settings/keys", { provider, key }, cfg)
     return data
   },
-  async removeKey(provider) {
-    const { data } = await api.delete(`/settings/keys/${provider}`)
+  async removeKey(provider, node = "_host") {
+    const { data } = await api.delete(`/settings/keys/${provider}`, _nodeQuery(node))
     return data
   },
   async getBackends() {
@@ -708,12 +738,13 @@ export const settingsAPI = {
     const { data } = await api.get("/settings/codex-usage")
     return data
   },
-  async getCodexStatus() {
-    const { data } = await api.get("/settings/codex-status")
+  async getCodexStatus(node = "_host") {
+    const { data } = await api.get("/settings/codex-status", _nodeQuery(node))
     return data
   },
-  async codexLogin() {
-    const { data } = await api.post("/settings/codex-login", {}, { timeout: 300000 })
+  async codexLogin(node = "_host") {
+    const cfg = { timeout: 300000, ..._nodeQuery(node) }
+    const { data } = await api.post("/settings/codex-login", {}, cfg)
     return data
   },
   async getUIPrefs() {
@@ -782,6 +813,51 @@ export const attachAPI = {
   /** @returns {Promise<{policies: string[]}>} */
   async getSessionPolicies(sessionId) {
     const { data } = await api.get(`/attach/session_policies/${encodeURIComponent(sessionId)}`)
+    return data
+  },
+}
+
+/**
+ * Cluster (lab-host) nodes API.
+ *
+ * The lab-host mode exposes a list of connected sites (host + workers).
+ * In standalone mode every endpoint returns 404 — callers must catch.
+ * See ``api/routes/nodes.py`` for the backend.
+ *
+ * Wire field is ``node_id`` (immutable contract).  Frontend code uses
+ * ``siteId`` to avoid confusion with graph-node terminology — see
+ * planned-frontend-modification.md §0.
+ */
+export const nodesAPI = {
+  /**
+   * GET /api/nodes
+   * @returns {Promise<{nodes: Array<{node_id: string, is_host: boolean, status: string, creatures: number|null}>}>}
+   */
+  async list() {
+    const { data } = await api.get("/nodes")
+    return data
+  },
+
+  /**
+   * GET /api/nodes/:node_id/status
+   * @param {string} nodeId
+   * @returns {Promise<{node_id: string, is_host: boolean, ok: boolean, creatures: number, status_snapshot: object}>}
+   */
+  async status(nodeId) {
+    const { data } = await api.get(`/nodes/${encodeURIComponent(nodeId)}/status`)
+    return data
+  },
+
+  /**
+   * POST /api/nodes/:node_id/deploy/creature
+   * @param {string} nodeId
+   * @param {string} workspacePath  Local absolute path to a creature directory.
+   * @returns {Promise<{target_path: string, node_id: string}>}
+   */
+  async deployCreature(nodeId, workspacePath) {
+    const { data } = await api.post(`/nodes/${encodeURIComponent(nodeId)}/deploy/creature`, {
+      workspace_path: workspacePath,
+    })
     return data
   },
 }

@@ -285,6 +285,9 @@ export const useTabsStore = defineStore("tabs", {
       name = null,
       attachMode = "chat",
       alsoOpenInspector = false,
+      // Lab cluster site to spawn / resume on.  Defaults to "_host";
+      // standalone mode ignores the field.
+      onNode = "_host",
     }) {
       // Lazy-import the instances/session APIs to keep tabs.js light
       // and avoid a Pinia init race in tests.
@@ -294,12 +297,12 @@ export const useTabsStore = defineStore("tabs", {
       if (kind === "resume") {
         if (!sessionName) throw new Error("createSession: sessionName required for resume")
         const { sessionAPI } = await import("@/utils/api")
-        const result = await sessionAPI.resume(sessionName)
+        const result = await sessionAPI.resume(sessionName, { onNode })
         id = result.instance_id
       } else {
         if (!configPath) throw new Error("createSession: configPath required")
         if (!pwd) throw new Error("createSession: pwd required")
-        id = await instances.create(kind, configPath, pwd, name)
+        id = await instances.create(kind, configPath, pwd, name, { onNode })
       }
       // Hydrate the instance so the tab has a config_name / type to show.
       let inst = null

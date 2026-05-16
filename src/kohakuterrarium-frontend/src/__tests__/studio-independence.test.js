@@ -26,7 +26,7 @@ const ALLOWLIST = new Set([
   // NavRail has one router-link to /studio — string literal, not an import.
   // StudioEditorTab is the v2 macro-shell embed for Studio (sanctioned
   // bridge per the v1/v2 paradigm — Studio pages still own the surface,
-  // we just embed them as tabs). See plans/structure-hierarchy/UI/.
+  // we just embed them as tabs).
   path.join(SRC_ROOT, "components", "shell", "tabs", "StudioEditorTab.vue"),
   // RailGroupQuick reads the studio workspace store solely to decide
   // which Studio tab to open from the rail (workspace dashboard if a
@@ -85,7 +85,8 @@ describe("studio isolation contract", () => {
       const msg = offenders.map((o) => `  ${o.file}: matched ${o.pattern}`).join("\n")
       throw new Error(
         `Studio imports leaked into runner code:\n${msg}\n\n` +
-          "If you genuinely need this, amend plans/kt-studio/README.md §1 first.",
+          "If you genuinely need this, add the file to the ALLOWLIST at the top of this test " +
+          "with a comment explaining the sanctioned bridge.",
       )
     }
     expect(offenders).toEqual([])

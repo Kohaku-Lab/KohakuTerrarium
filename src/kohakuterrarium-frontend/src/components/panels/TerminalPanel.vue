@@ -4,6 +4,9 @@
     <div class="flex items-center gap-2 px-2 h-6 border-b text-[10px] shrink-0" :class="themeStore.dark ? 'bg-warm-900 border-warm-800 text-warm-400' : 'bg-warm-100 border-warm-200 text-warm-500'">
       <span class="i-carbon-terminal text-[11px]" />
       <span>Terminal</span>
+      <!-- Site chip — visible only in lab-host with ≥2 sites; tells
+           the user which machine this shell runs on. -->
+      <SiteChip :node-id="homeNode" />
       <!-- Terrarium: explicit creature selector so the terminal doesn't
            silently follow the chat tab. Each creature runs in its own
            working directory / environment, so the terminal target must
@@ -29,6 +32,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links"
 import { WebglAddon } from "@xterm/addon-webgl"
 import "@xterm/xterm/css/xterm.css"
 
+import SiteChip from "@/components/cluster/SiteChip.vue"
 import { useChatStore } from "@/stores/chat"
 import { useInstancesStore } from "@/stores/instances"
 import { useThemeStore } from "@/stores/theme"
@@ -96,6 +100,26 @@ const terminalPath = computed(() => {
   const target = resolvedTarget.value
   if (!sid || !target) return null
   return `/ws/sessions/${encodeURIComponent(sid)}/creatures/${encodeURIComponent(target)}/pty`
+})
+
+/**
+ * Home cluster site for the active creature.  Reads from:
+ *   1. the active creature's ``home_node`` (per-creature payload)
+ *   2. the instance's ``home_node`` (session-level)
+ *   3. ``_host`` fallback for standalone or unannotated sessions.
+ *
+ * Used by the SiteChip in the header so the user can tell at a glance
+ * which machine the proxied shell runs on.
+ */
+const homeNode = computed(() => {
+  const inst = props.instance
+  if (!inst) return "_host"
+  const target = resolvedTarget.value
+  if (target) {
+    const c = (inst.creatures || []).find((x) => x.creature_id === target || x.name === target)
+    if (c?.home_node) return c.home_node
+  }
+  return inst.home_node || "_host"
 })
 
 let unmounted = false

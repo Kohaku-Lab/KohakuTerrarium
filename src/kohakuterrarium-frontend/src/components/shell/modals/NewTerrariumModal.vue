@@ -13,9 +13,11 @@
         <div class="text-[10px] text-warm-400 mt-1">Leave blank to use the placeholder.</div>
       </div>
 
+      <SitePicker v-model="onNode" :label="t('cluster.spawn.label')" />
+
       <div>
         <label class="block text-xs uppercase tracking-wider text-warm-500 mb-1"> Working directory </label>
-        <input v-model="pwd" type="text" required class="input-field w-full font-mono text-xs" placeholder="/home/user/my-project" />
+        <input v-model="pwd" type="text" required class="input-field w-full font-mono text-xs" placeholder="/home/user/my-project" @input="pwdUserTouched = true" />
       </div>
 
       <div>
@@ -53,12 +55,14 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue"
+import { computed, onMounted, ref, watch } from "vue"
 
 import ModalShell from "@/components/common/ModalShell.vue"
+import SitePicker from "@/components/cluster/SitePicker.vue"
 import { useConfigsStore } from "@/stores/configs"
 import { useTabsStore } from "@/stores/tabs"
 import { configAPI } from "@/utils/api"
+import { useI18n } from "@/utils/i18n"
 import { randomNameFor } from "@/utils/randomName"
 
 const props = defineProps({
@@ -68,6 +72,7 @@ const emit = defineEmits(["close"])
 
 const tabs = useTabsStore()
 const configs = useConfigsStore()
+const { t } = useI18n()
 
 const pwd = ref("")
 const selectedConfig = ref(null)
@@ -76,21 +81,38 @@ const starting = ref(false)
 const errorMsg = ref("")
 const name = ref("")
 const namePlaceholder = ref(randomNameFor("terrarium"))
+const onNode = ref("_host")
+
+// See NewCreatureModal.vue for the rationale: track whether the user has
+// manually edited the working-dir input so we can safely overwrite it
+// when the "Run on" site changes, but never clobber a hand-typed path.
+const pwdUserTouched = ref(false)
 
 function rerollName() {
   namePlaceholder.value = randomNameFor("terrarium")
   name.value = ""
 }
 
-onMounted(async () => {
-  configs.fetchAll()
+async function refreshServerInfoDefault() {
   try {
-    const info = await configAPI.getServerInfo()
-    if (info.cwd && !pwd.value) pwd.value = info.cwd
+    const info = await configAPI.getServerInfo({ onNode: onNode.value })
+    if (info.cwd && !pwdUserTouched.value) pwd.value = info.cwd
   } catch {
     /* ignore */
   }
+}
+
+onMounted(() => {
+  configs.fetchAll()
+  refreshServerInfoDefault()
 })
+
+watch(
+  () => onNode.value,
+  () => {
+    refreshServerInfoDefault()
+  },
+)
 
 const canSubmit = computed(() => Boolean(pwd.value.trim() && selectedConfig.value && !starting.value))
 
@@ -105,6 +127,7 @@ async function onSubmit() {
       pwd: pwd.value.trim(),
       name: (name.value.trim() || namePlaceholder.value).trim(),
       attachMode: props.silent ? "none" : alsoOpenInspector.value ? "both" : "chat",
+      onNode: onNode.value,
     })
     emit("close")
   } catch (err) {

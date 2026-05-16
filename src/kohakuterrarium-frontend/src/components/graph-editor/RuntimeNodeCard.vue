@@ -7,7 +7,14 @@
           <span class="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-warm-50 dark:border-warm-900" :class="statusDotClass" />
         </span>
         <div class="min-w-0 flex-1">
-          <div class="text-xs font-semibold text-warm-800 dark:text-warm-200 truncate">{{ node.label }}</div>
+          <div class="flex items-center gap-1 min-w-0">
+            <span class="text-xs font-semibold text-warm-800 dark:text-warm-200 truncate">{{ node.label }}</span>
+            <!-- Per-creature site chip — disambiguates which worker
+                 a creature runs on within a multi-worker cluster
+                 molecule.  SiteChip hides itself when not in a
+                 multi-site lab so the standalone UI is unchanged. -->
+            <SiteChip v-if="node.nodeId" :node-id="node.nodeId" />
+          </div>
           <div class="text-[10px] text-warm-500 dark:text-warm-400 truncate">{{ node.kind }} · {{ node.status }}</div>
         </div>
       </div>
@@ -41,6 +48,7 @@
 <script setup>
 import { computed, ref } from "vue"
 
+import SiteChip from "@/components/cluster/SiteChip.vue"
 import { NODE_HEIGHT, NODE_WIDTH, STATUS_COLOR } from "./nodeStyle"
 
 const props = defineProps({

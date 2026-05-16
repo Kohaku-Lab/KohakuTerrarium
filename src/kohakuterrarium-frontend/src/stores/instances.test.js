@@ -25,6 +25,46 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
+describe("instances.fetchAll — SessionListing payload shape", () => {
+  it("handles the listing payload where `creatures` is an int (not an array)", async () => {
+    // Audit-loop regression: ``GET /api/sessions/active`` returns
+    // ``SessionListing.to_dict()`` whose ``creatures`` field is an
+    // INT count, not a creature array.  The pre-fix mapper did
+    // ``(data.creatures || []).map(...)`` which crashed on ``int.map``
+    // → silent fetchAll failure → empty dashboard for any session
+    // with ≥1 creature.  This test pins the recovery.
+    const store = useInstancesStore()
+    sessionAPI.listActive.mockResolvedValue([
+      {
+        session_id: "graph_alice",
+        name: "alice",
+        running: true,
+        creatures: 1,
+        node_id: "_host",
+      },
+    ])
+    await store.fetchAll()
+    expect(store.list).toHaveLength(1)
+    expect(store.list[0].id).toBe("graph_alice")
+    expect(store.list[0].home_node).toBe("_host")
+  })
+
+  it("preserves worker home_node from listing's node_id", async () => {
+    const store = useInstancesStore()
+    sessionAPI.listActive.mockResolvedValue([
+      {
+        session_id: "graph_remote",
+        name: "alice",
+        running: true,
+        creatures: 1,
+        node_id: "worker-1",
+      },
+    ])
+    await store.fetchAll()
+    expect(store.list[0].home_node).toBe("worker-1")
+  })
+})
+
 describe("instances store", () => {
   it("clears stale current instance on fetchOne 404", async () => {
     const store = useInstancesStore()

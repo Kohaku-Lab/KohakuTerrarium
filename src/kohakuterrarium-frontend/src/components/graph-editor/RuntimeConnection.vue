@@ -2,7 +2,9 @@
   <!-- Single SVG line for the wire body — no arrow head, no marker.
        Two direction toggles live at the midpoint as their own widget. -->
   <svg class="absolute pointer-events-none" :style="lineOuterStyle" :width="bbox.w" :height="bbox.h">
-    <line :x1="local.sx" :y1="local.sy" :x2="local.tx" :y2="local.ty" :stroke="strokeColor" :stroke-width="strokeWidth" stroke-linecap="round" class="transition-[stroke,stroke-width] duration-100" style="pointer-events: visiblePainted; cursor: pointer" @mouseenter="onHover(true)" @mouseleave="onHover(false)" @mousedown.stop="onMouseDown" @click.stop="onClick" />
+    <line :x1="local.sx" :y1="local.sy" :x2="local.tx" :y2="local.ty" :stroke="strokeColor" :stroke-width="strokeWidth" stroke-linecap="round" :stroke-dasharray="connection.crossNode ? '6 4' : undefined" class="transition-[stroke,stroke-width] duration-100" style="pointer-events: visiblePainted; cursor: pointer" :data-cross-site="connection.crossNode ? 'true' : undefined" @mouseenter="onHover(true)" @mouseleave="onHover(false)" @mousedown.stop="onMouseDown" @click.stop="onClick">
+      <title v-if="connection.crossNode">{{ crossSiteTooltip }}</title>
+    </line>
   </svg>
 
   <!-- Mid-line direction toggles. Stacked vertically so each row spells
@@ -56,7 +58,10 @@
 <script setup>
 import { computed, ref } from "vue"
 
+import { useI18n } from "@/utils/i18n"
 import { NODE_HEIGHT, NODE_WIDTH } from "./nodeStyle"
+
+const { t } = useI18n()
 
 const props = defineProps({
   connection: { type: Object, required: true },
@@ -70,6 +75,11 @@ const props = defineProps({
   // above this within the same band.
   z: { type: Number, default: 25 },
   zExpanded: { type: Number, default: 35 },
+})
+
+const crossSiteTooltip = computed(() => {
+  const kind = props.connection.backend?.kind
+  return kind === "output_edge" ? t("cluster.graphEditor.crossSiteWire") : t("cluster.graphEditor.crossSiteEdge")
 })
 
 const emit = defineEmits(["select", "hover", "drag", "toggle", "action"])

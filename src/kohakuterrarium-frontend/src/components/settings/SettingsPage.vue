@@ -10,6 +10,11 @@
         <div class="settings-pane flex flex-col gap-3 max-w-2xl">
           <p class="text-xs text-warm-400 mb-1">{{ t("settings.providers.description") }}</p>
           <p class="text-xs text-warm-400 mb-2">{{ t("settings.keys.storageHint") }}</p>
+          <!-- Multi-node target picker. Hidden in standalone mode by SitePicker itself. -->
+          <div class="flex items-center gap-2">
+            <SitePicker v-model="providerNode" :label="t('settings.providers.targetNode')" />
+            <span v-if="providerNode && providerNode !== '_host'" class="text-[11px] text-amber-shadow dark:text-amber-light">{{ t("settings.providers.targetNodeHint") }}</span>
+          </div>
 
           <!-- Built-in provider list (auth managed inline) -->
           <div class="card p-4">
@@ -323,6 +328,11 @@
         </div>
       </el-tab-pane>
 
+      <!-- ════════════════════════ Sites (lab cluster) ════════════════════════ -->
+      <el-tab-pane v-if="cluster.isCluster" :label="t('cluster.settings.title')" name="sites">
+        <SitesPane />
+      </el-tab-pane>
+
       <!-- ════════════════════════ Preferences ════════════════════════ -->
       <el-tab-pane :label="t('settings.tabs.prefs')" name="prefs">
         <div class="settings-pane flex flex-col gap-4 max-w-xl">
@@ -378,10 +388,15 @@ import { ElMessage, ElMessageBox } from "element-plus"
 
 import BackendForm from "@/components/settings/BackendForm.vue"
 import PresetEditor from "@/components/settings/PresetEditor.vue"
+import SitesPane from "@/components/settings/SitesPane.vue"
+import SitePicker from "@/components/cluster/SitePicker.vue"
 import { useDensity } from "@/composables/useDensity"
+import { useClusterStore } from "@/stores/cluster"
 import { LOCALE_DISPLAY_NAMES, SUPPORTED_LOCALES, useLocaleStore } from "@/stores/locale"
 import { DEFAULT_DESKTOP_ZOOM, DEFAULT_MOBILE_ZOOM, MAX_UI_ZOOM, MIN_UI_ZOOM, useThemeStore } from "@/stores/theme"
 import { useI18n } from "@/utils/i18n"
+
+const cluster = useClusterStore()
 import { configAPI, settingsAPI } from "@/utils/api"
 
 const theme = useThemeStore()
@@ -403,9 +418,16 @@ const providerKeys = ref([])
 const editingKey = ref("")
 const keyInput = ref("")
 
+// Multi-node: which node's identity store are we managing? "_host" by
+// default (today's behaviour). When the user picks a worker, every
+// key + Codex-OAuth op routes to THAT worker's local config so OAuth
+// tokens stay process-local and api_keys.yaml lives in the worker's
+// own ``--home-dir`` instead of the host's.
+const providerNode = ref("_host")
+
 async function loadKeys() {
   try {
-    const data = await settingsAPI.getKeys()
+    const data = await settingsAPI.getKeys(providerNode.value)
     providerKeys.value = data.providers || []
   } catch {
     providerKeys.value = []
@@ -420,7 +442,7 @@ function startEditKey(provider) {
 async function saveKey(provider) {
   if (!keyInput.value) return
   try {
-    await settingsAPI.saveKey(provider, keyInput.value)
+    await settingsAPI.saveKey(provider, keyInput.value, providerNode.value)
     ElMessage.success(t("settings.keys.saved", { provider }))
     editingKey.value = ""
     keyInput.value = ""
@@ -435,10 +457,11 @@ async function saveKey(provider) {
 const codexLoggingIn = ref(false)
 async function runCodexLogin() {
   codexLoggingIn.value = true
-  ElMessage.info("Codex OAuth started — complete the flow in your browser (or visit the console URL).")
+  const target = providerNode.value && providerNode.value !== "_host" ? providerNode.value : "host"
+  ElMessage.info(`Codex OAuth started on ${target} — complete the flow in the browser that opens (or visit the console URL).`)
   try {
-    await settingsAPI.codexLogin()
-    ElMessage.success("Codex login successful")
+    await settingsAPI.codexLogin(providerNode.value)
+    ElMessage.success(`Codex login successful on ${target}`)
     await loadKeys()
     await loadBackends()
   } catch (err) {
@@ -447,6 +470,13 @@ async function runCodexLogin() {
     codexLoggingIn.value = false
   }
 }
+
+// Re-fetch keys whenever the user switches target node. Backends and
+// presets remain host-managed metadata; only the key + Codex-OAuth
+// state is per-node.
+watch(providerNode, () => {
+  loadKeys()
+})
 
 // ───────── Backends / providers ─────────
 

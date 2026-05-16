@@ -21,6 +21,7 @@
         <template v-else>
           <StatusDot :status="getCreatureStatus(tab)" />
           <span>{{ tab }}</span>
+          <SiteChip :node-id="getCreatureHomeNode(tab)" />
         </template>
 
         <button v-if="tab !== 'root' && chat.tabs.length > 1" class="ml-1 w-4 h-4 flex items-center justify-center rounded-sm text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" :aria-label="t('chat.closeTab', { tab })" @click.stop="closeTab(tab)">
@@ -93,7 +94,7 @@
             </div>
           </template>
           <ChatMessage v-for="(msg, idx) in chat.currentMessages" :key="msg.id" :message="msg" :prev-message="idx > 0 ? chat.currentMessages[idx - 1] : null" :is-first="idx === 0" :message-idx="idx" :is-last-assistant="msg.role === 'assistant' && idx === chat.currentMessages.length - 1" />
-          <div v-if="chat.processing" class="flex items-center gap-2.5 py-2 pl-1">
+          <div v-if="chat.processing || chat.hasRunningJobs" class="flex items-center gap-2.5 py-2 pl-1">
             <span class="w-2 h-2 rounded-full bg-amber kohaku-pulse" />
             <span class="text-sm text-amber/80 kohaku-pulse">{{ t("chat.processing") }}</span>
           </div>
@@ -174,6 +175,7 @@ import { ElMessage, ElMessageBox } from "element-plus"
 import StatusDot from "@/components/common/StatusDot.vue"
 import ChatMessage from "@/components/chat/ChatMessage.vue"
 import ModelSwitcher from "@/components/chrome/ModelSwitcher.vue"
+import SiteChip from "@/components/cluster/SiteChip.vue"
 import { useDensity } from "@/composables/useDensity"
 import { useChatStore } from "@/stores/chat"
 import { useI18n } from "@/utils/i18n"
@@ -304,6 +306,11 @@ function scrollToPending() {
 function getCreatureStatus(name) {
   const creature = props.instance.creatures.find((c) => c.name === name)
   return creature?.status || "idle"
+}
+
+function getCreatureHomeNode(name) {
+  const creature = props.instance.creatures.find((c) => c.name === name)
+  return creature?.home_node || props.instance?.home_node || "_host"
 }
 
 function closeTab(tab) {
