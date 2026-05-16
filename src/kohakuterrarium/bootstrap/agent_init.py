@@ -14,6 +14,7 @@ from typing import Any
 
 from kohakuterrarium.bootstrap.io import create_input, create_output
 from kohakuterrarium.bootstrap.llm import create_llm_provider
+from kohakuterrarium.llm.deferred_provider import DeferredLLMProvider
 from kohakuterrarium.bootstrap.subagents import init_subagents
 from kohakuterrarium.bootstrap.tools import init_tools
 from kohakuterrarium.bootstrap.triggers import init_triggers
@@ -29,7 +30,7 @@ from kohakuterrarium.core.controller import Controller, ControllerConfig
 from kohakuterrarium.core.executor import Executor
 from kohakuterrarium.core.loader import ModuleLoader
 from kohakuterrarium.core.registry import Registry
-from kohakuterrarium.core.session import get_session
+from kohakuterrarium.core.session import Session, get_session
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.modules.output.router import OutputRouter
@@ -70,9 +71,29 @@ class AgentInitMixin:
     _loader: ModuleLoader
 
     def _init_llm(self) -> None:
-        """Initialize LLM provider from profile or inline config."""
+        """Initialize LLM provider, deferring on missing credentials.
+
+        Model selection is a runtime concern — the user can pick a
+        model in the Studio UI or via ``switch_model`` after the
+        creature exists.  Gating creature **creation** on a working
+        provider locks the user out of an existing conversation just
+        because the host's identity store doesn't carry that profile's
+        key today.
+
+        So: catch every construction error here, log it, and install a
+        :class:`DeferredLLMProvider` placeholder.  The creature runs;
+        a chat turn raises with a clear "pick a model" message until
+        the user rebinds via ``switch_model``.
+        """
         llm_override = getattr(self, "_llm_override", None)
-        self.llm = create_llm_provider(self.config, llm_override=llm_override)
+        try:
+            self.llm = create_llm_provider(self.config, llm_override=llm_override)
+        except (ValueError, RuntimeError) as exc:
+            logger.warning(
+                "agent build: no LLM provider yet, deferring (reason=%s)",
+                exc,
+            )
+            self.llm = DeferredLLMProvider(reason=str(exc))
 
     def _init_registry(self) -> None:
         """Initialize module registry and register tools.
@@ -178,14 +199,23 @@ class AgentInitMixin:
             if tool:
                 self.executor.register_tool(tool)
 
-        # Wire session for ToolContext building
-        # Use explicit session if provided, else create from session_key
+        # Wire session for ToolContext building.
+        #
+        # - An explicit `Session` (terrarium environment-scoped) wins.
+        # - An explicit `config.session_key` is the opt-in to a SHARED,
+        #   process-global session (cooperating standalone agents).
+        # - Otherwise the agent owns a FRESH, private Session. Falling
+        #   back to ``config.name`` as the global-registry key made two
+        #   unrelated creatures that happen to share a name (a restarted
+        #   creature, two ``general``s) silently share scratchpad +
+        #   channels across engine / Studio lifecycles.
         explicit = getattr(self, "_explicit_session", None)
         if explicit is not None:
             self.session = explicit
+        elif self.config.session_key:
+            self.session = get_session(self.config.session_key)
         else:
-            session_key = self.config.session_key or self.config.name
-            self.session = get_session(session_key)
+            self.session = Session(key=self.config.name)
 
         # Backward-compatible accessors
         self.channel_registry = self.session.channels
@@ -346,6 +376,7 @@ class AgentInitMixin:
             self.registry,
             include_tools=self.config.include_tools_in_prompt,
             include_hints=self.config.include_hints_in_prompt,
+            skill_mode=self.config.skill_mode,
             tool_format=tool_format_name,
             known_outputs=known_outputs,
             extra_context=prompt_extra_context,
@@ -474,6 +505,10 @@ class AgentInitMixin:
             controller.register_command("skill", SkillCommand(skill_registry))
             if hasattr(controller, "_context"):
                 controller._context.skills_registry = skill_registry
+        # Wire the creature's config folder so InfoCommand's documented
+        # priority-#1 override (prompts/tools/<name>.md) is reachable.
+        if hasattr(controller, "_context"):
+            controller._context.agent_path = getattr(self.config, "agent_path", None)
         return controller
 
     def _init_skills(self) -> None:

@@ -121,6 +121,11 @@ class SubAgentConfig:
             prompt_path = agent_path / self.prompt_file
             if prompt_path.exists():
                 prompt = prompt_path.read_text(encoding="utf-8")
+            else:
+                # prompt_file was configured but the file is missing —
+                # fall back to the base default rather than running the
+                # sub-agent with no system prompt at all.
+                prompt = f"You are a {self.name} sub-agent."
         else:
             prompt = f"You are a {self.name} sub-agent."
 
@@ -147,13 +152,16 @@ class SubAgentConfig:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SubAgentConfig":
         """Create config from dictionary (e.g., YAML config)."""
+        # Defensive copy FIRST — every mutation below (enum coercion,
+        # set conversion, key filtering) must write to our own copy,
+        # never through to the caller's dict.
+        data = dict(data)
+
         # Handle enum conversions
         if "output_to" in data and isinstance(data["output_to"], str):
             data["output_to"] = OutputTarget(data["output_to"])
         if "context_mode" in data and isinstance(data["context_mode"], str):
             data["context_mode"] = ContextUpdateMode(data["context_mode"])
-
-        data = dict(data)
 
         # Convert modifying_tools list to set if present
         if "modifying_tools" in data and isinstance(data["modifying_tools"], list):

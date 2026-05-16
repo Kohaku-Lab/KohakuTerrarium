@@ -65,7 +65,11 @@ class _FakeAgent:
         model: str = "test/model",
         responses: list[str] | None = None,
     ) -> None:
-        self.is_running = False
+        # The real Agent stores ``_running`` and exposes ``is_running``
+        # as a property over it — mirror that so collaborators reading
+        # *either* name (output-wiring checks ``_running``; Creature
+        # checks ``is_running``) see a consistent value.
+        self._running = False
         self.config = SimpleNamespace(name=name, model=model, pwd=None)
         self.llm = SimpleNamespace(
             model=model,
@@ -88,6 +92,15 @@ class _FakeAgent:
         self._chat_index = 0
         self.start_calls = 0
         self.stop_calls = 0
+        # Events delivered via ``_process_event`` — the real Agent
+        # method ``group_send`` / output-wiring fan-out push into.
+        self.processed_events: list[Any] = []
+
+    @property
+    def is_running(self) -> bool:
+        """Mirror :attr:`Agent.is_running` — a read-only view of
+        ``_running``."""
+        return self._running
 
     def set_output_handler(self, handler: Any, replace_default: bool = False) -> None:
         self.output_handlers.append(handler)
@@ -96,12 +109,31 @@ class _FakeAgent:
         return self.config.model
 
     async def start(self) -> None:
-        self.is_running = True
+        self._running = True
         self.start_calls += 1
 
     async def stop(self) -> None:
-        self.is_running = False
+        self._running = False
         self.stop_calls += 1
+
+    def attach_session_store(
+        self, store: Any, *, capture_activity: bool = True
+    ) -> None:
+        """Attach a session store — the real :class:`Agent` also wires a
+        :class:`SessionOutput` sink; the fake only needs the store
+        reference so collaborators (worker-side auto-attach) can verify
+        it landed."""
+        self.session_store = store
+
+    async def _process_event(self, event: Any) -> None:
+        """Record a delivered :class:`TriggerEvent`.
+
+        The real :class:`Agent` runs the controller loop here; the fake
+        only needs to prove the event arrived (``group_send`` and
+        output-wiring fan-out both push synthetic events through this
+        method on the *target* agent).
+        """
+        self.processed_events.append(event)
 
     async def inject_input(self, message, *, source: str = "chat") -> None:
         """Record the input and replay the next scripted response (if any)

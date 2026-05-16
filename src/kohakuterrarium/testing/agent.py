@@ -36,7 +36,14 @@ class TestAgentBuilder:
         # Assert
         assert "Hello" in env.output.all_text
         assert env.llm.call_count == 1
+
+    NOTE: ``__test__ = False`` opts this class out of pytest's
+    ``Test*`` auto-collection.  The name predates pytest's
+    convention; rather than rename and break every existing
+    import site, we tell pytest to skip it.
     """
+
+    __test__ = False
 
     def __init__(self):
         self._llm: ScriptedLLM | None = None
@@ -170,6 +177,8 @@ class TestAgentEnv:
 
     Provides convenient methods for injecting input and collecting output.
     """
+
+    __test__ = False
 
     def __init__(
         self,

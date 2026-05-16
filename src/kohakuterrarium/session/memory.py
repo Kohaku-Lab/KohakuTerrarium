@@ -125,6 +125,36 @@ class SessionMemory:
     def has_vectors(self) -> bool:
         return self._vec is not None
 
+    def close(self) -> None:
+        """Release the native SQLite handles this index opened.
+
+        ``SessionMemory`` opens its own ``TextVault`` / ``KVault`` /
+        ``VectorKVault`` against the ``.kohakutr`` file — separate from
+        the ``SessionStore``'s handles. ``KVault.close()`` flushes +
+        checkpoints but never releases its native ``_inner``, and
+        ``TextVault`` / ``VectorKVault`` have no ``close()`` at all, so
+        without this the handles linger until GC and (on Windows) keep
+        the file locked — blocking a later delete with WinError 32.
+        Drop the native references so refcounting frees them now.
+        """
+        state = getattr(self, "_state", None)
+        if state is not None and hasattr(state, "close"):
+            try:
+                state.close()
+            except Exception as e:  # pragma: no cover - defensive
+                logger.debug("memory state close failed", error=str(e))
+        for table, attr in (
+            (getattr(self, "_state", None), "_inner"),
+            (getattr(self, "_fts", None), "_vault"),
+            (getattr(self, "_vec", None), "_vault"),
+        ):
+            if table is None:
+                continue
+            try:
+                delattr(table, attr)
+            except AttributeError:
+                pass
+
     def _get_indexed_count(self, agent: str) -> int:
         """Get number of events already indexed for an agent."""
         try:

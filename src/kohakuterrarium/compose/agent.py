@@ -15,7 +15,6 @@ that shape so user code that previously relied on ``AgentSession``
 keeps working unchanged.
 """
 
-import asyncio
 from pathlib import Path
 from typing import Any, AsyncIterator, Protocol
 
@@ -148,30 +147,21 @@ class _EngineChatSession:
         self.agent_id = creature.creature_id
 
     async def chat(self, message: str) -> AsyncIterator[str]:
-        """Yield the creature's response one chunk at a time."""
-        agent = self._creature.agent
-        out_queue = _capture_output(agent)
-        await agent.send_user_input(message)
-        # Drain until the controller signals it's done with this turn.
-        while True:
-            chunk = await out_queue.get()
-            if chunk is None:
-                break
+        """Yield the creature's response one chunk at a time.
+
+        Delegates to :meth:`Creature.chat` — the canonical
+        inject-input + output-drain implementation. The previous
+        hand-rolled version called a non-existent
+        ``agent.send_user_input`` (the real method is
+        ``Agent.inject_input``) and drained a queue with no turn-end
+        sentinel, so it raised ``AttributeError`` and, even past that,
+        would have hung forever.
+        """
+        async for chunk in self._creature.chat(message):
             yield chunk
 
     async def stop(self) -> None:
         await self._engine.shutdown()
-
-
-def _capture_output(agent) -> "asyncio.Queue":
-    """Hook the agent's output handler so we can stream chunks out."""
-    queue: asyncio.Queue = asyncio.Queue()
-
-    def _on_chunk(text: str) -> None:
-        queue.put_nowait(text)
-
-    agent.set_output_handler(_on_chunk)
-    return queue
 
 
 async def _engine_session_from_path(config_path: str) -> _EngineChatSession:

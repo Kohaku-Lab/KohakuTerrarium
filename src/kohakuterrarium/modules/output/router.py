@@ -14,6 +14,7 @@ from kohakuterrarium.modules.output.router_interactive import (
 from kohakuterrarium.modules.output.router_parsing import OutputRouterParseEventMixin
 from kohakuterrarium.modules.output.router_state import CompletedOutput, OutputState
 from kohakuterrarium.parsing import (
+    AssistantImageEvent,
     CommandEvent,
     OutputCallEvent,
     SubAgentCallEvent,

@@ -23,18 +23,30 @@ backends and presets (``save_backend``, ``delete_backend``, ``save_profile``
 etc.) live in :mod:`profiles`.
 """
 
+from pathlib import Path
 from typing import Any
 
 import yaml
 
 from kohakuterrarium.llm.api_keys import KT_DIR, PROVIDER_KEY_MAP
 from kohakuterrarium.llm.profile_types import LLMBackend
+from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Import-time default — kept for back-compat display callers
+# (``cli/identity_llm.py``, the studio identity routes).  The actual
+# read / write path goes through :func:`_profiles_path`, resolved fresh
+# each call so ``KT_CONFIG_DIR`` wins (test isolation / re-homing).
 PROFILES_PATH = KT_DIR / "llm_profiles.yaml"
 _SCHEMA_VERSION = 3
+
+
+def _profiles_path() -> Path:
+    """The live ``llm_profiles.yaml`` path, honouring ``KT_CONFIG_DIR``."""
+    return config_dir() / "llm_profiles.yaml"
+
 
 _BUILTIN_PROVIDER_NAMES: set[str] = {
     "codex",
@@ -66,10 +78,11 @@ def _normalize_backend_type(value: str) -> str:
 
 def load_yaml_store() -> dict[str, Any]:
     """Read the shared ``llm_profiles.yaml`` — returns ``{}`` on missing/bad file."""
-    if not PROFILES_PATH.exists():
+    path = _profiles_path()
+    if not path.exists():
         return {}
     try:
-        with open(PROFILES_PATH, encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
     except Exception as e:
         logger.warning("Failed to load LLM profiles", error=str(e))
@@ -78,8 +91,9 @@ def load_yaml_store() -> dict[str, Any]:
 
 def save_yaml_store(data: dict[str, Any]) -> None:
     """Overwrite the shared ``llm_profiles.yaml``."""
-    PROFILES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(PROFILES_PATH, "w", encoding="utf-8") as f:
+    path = _profiles_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
 
@@ -179,8 +193,33 @@ def legacy_provider_from_data(data: dict[str, Any]) -> str:
     return ""
 
 
+_remote_backends: dict[str, LLMBackend] = {}
+
+
+def set_remote_backend(backend: LLMBackend) -> None:
+    """Stash a remote-resolved backend for the sync lookup path.
+
+    Worker mode counterpart of ``set_remote_preset``: profile bodies
+    fetched from the host's ``studio.identity`` may carry a backend
+    type the worker has never heard of (the worker has no local
+    ``llm_profiles.yaml``).  ``_resolve_preset`` rejects any preset
+    whose provider isn't in ``load_backends()`` — so without this the
+    host's profile arrives, the preset stashes, but resolution drops
+    it.  The runtime adapter's ``_prewarm_identity`` calls this with a
+    synthetic :class:`LLMBackend` derived from the profile's
+    ``backend_type`` field whenever the preset's provider isn't a
+    built-in or local-user-defined one.
+    """
+    _remote_backends[backend.name] = backend
+
+
+def clear_remote_backends() -> None:
+    """Drop every stashed remote backend (cache invalidate)."""
+    _remote_backends.clear()
+
+
 def load_backends() -> dict[str, LLMBackend]:
-    """Return merged built-in + user-defined providers."""
+    """Return merged built-in + user-defined + remote-fetched providers."""
     data = load_yaml_store()
     backends = _built_in_providers()
 
@@ -189,6 +228,13 @@ def load_backends() -> dict[str, LLMBackend]:
         for name, bdata in user_backends.items():
             if isinstance(bdata, dict):
                 backends[name] = LLMBackend.from_dict(name, bdata)
+
+    # Worker mode: backends fetched from the host's studio.identity.
+    # Local user definitions (from llm_profiles.yaml) win over remote
+    # entries with the same name — but if the worker has no local
+    # entry, the remote one fills the gap.
+    for name, backend in _remote_backends.items():
+        backends.setdefault(name, backend)
 
     # User-defined backends default ``provider_name`` to their own name
     # so provider-native tool compatibility has something concrete to

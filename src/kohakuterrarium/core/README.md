@@ -91,5 +91,5 @@ but NEVER imports them back.
 ## See also
 
 - `../bootstrap/README.md` — how the init factories plug into `AgentInitMixin`
-- `plans/inventory-runtime.md` §1–§3 — lifecycle, controller loop, tool pipeline
-- `docs/concepts/foundations/` — event model + execution semantics
+- `docs/en/dev/internals.md` §Agent runtime — lifecycle, controller loop, tool pipeline
+- `docs/en/concepts/foundations/` — event model + execution semantics

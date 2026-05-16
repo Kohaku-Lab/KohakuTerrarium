@@ -213,8 +213,7 @@ class Agent(
 
         Sub-agents that inherit share this counter. The parent
         controller also consumes one slot per turn in
-        ``AgentHandlersMixin._check_termination`` — see Cluster 6.1 in
-        ``plans/harness/extension-point-decisions.md``.
+        ``AgentHandlersMixin._check_termination``.
         """
         cap = getattr(self.config, "max_iterations", None)
         if not cap or cap <= 0:

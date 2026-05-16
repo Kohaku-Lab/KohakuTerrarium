@@ -395,10 +395,22 @@ class Conversation:
     def truncate_from(self, index: int) -> list[Message]:
         """Remove messages from ``index`` onward.
 
-        Returns the removed messages. If ``index`` is 0 or 1 (system only),
-        nothing is removed. Used by edit/regenerate/rewind features.
+        Leading system message(s) are never removed: an ``index`` that
+        would cut into them is clamped up to just past them, so
+        ``truncate_from(0)`` rewinds to a fresh conversation that still
+        carries the system prompt. Returns the removed messages.
+        Used by edit/regenerate/rewind features.
         """
         if index < 0 or index >= len(self._messages):
+            return []
+        leading_system = 0
+        for msg in self._messages:
+            if msg.role == "system":
+                leading_system += 1
+            else:
+                break
+        index = max(index, leading_system)
+        if index >= len(self._messages):
             return []
         removed = self._messages[index:]
         self._messages = self._messages[:index]

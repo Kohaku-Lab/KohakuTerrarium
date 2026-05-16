@@ -121,7 +121,9 @@ async def retry_async(
                 delay = min(delay * 2, max_delay)
 
     # Should never reach here, but for type checker
-    raise last_exception or RuntimeError("Unexpected retry state")
+    raise last_exception or RuntimeError(
+        "Unexpected retry state"
+    )  # pragma: no cover - unreachable defensive type-checker stub
 
 
 async def collect_async_iterator(

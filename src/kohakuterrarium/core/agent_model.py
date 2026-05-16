@@ -63,6 +63,14 @@ class AgentModelMixin:
         self._llm_identifier = identifier
         self.llm = new_llm
         self.controller.llm = new_llm
+        # Sub-agents resolve their LLM from the manager's ``llm`` at spawn
+        # time — ``resolve_llm(self.subagent_manager.llm, config)`` for
+        # task sub-agents, and ``llm=self.llm`` directly for interactive
+        # ones. Without this propagation a sub-agent dispatched AFTER a
+        # model switch still runs on the model the agent booted with.
+        subagent_manager = getattr(self, "subagent_manager", None)
+        if subagent_manager is not None:
+            subagent_manager.llm = new_llm
         if self.compact_manager:
             compact_llm = self._build_compact_llm(self.compact_manager.config)
             self.compact_manager._llm = compact_llm

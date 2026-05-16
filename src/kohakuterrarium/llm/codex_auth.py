@@ -28,6 +28,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 
+from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -45,8 +46,49 @@ DEVICE_REDIRECT_URI = f"{ISSUER}/deviceauth/callback"
 SCOPE = "openid email profile"
 AUDIENCE = "https://api.openai.com/v1"
 
-DEFAULT_TOKEN_PATH = Path.home() / ".kohakuterrarium" / "codex-auth.json"
 CODEX_CLI_TOKEN_PATH = Path.home() / ".codex" / "auth.json"
+
+
+def _default_token_path() -> Path:
+    """The Codex token cache path, honouring ``KT_CONFIG_DIR``.
+
+    Resolved fresh each call so test isolation / operator re-homing
+    works — a module constant computed at import would not.  Same
+    config root as API keys + LLM profiles, so a host that is
+    ``kt login``-ed for Codex stores the token where the lab-host's
+    identity surface can read and share it with workers.
+    """
+    return config_dir() / "codex-auth.json"
+
+
+# Back-compat: callers that imported the constant for *display* still
+# resolve; the live read / write path uses :func:`_default_token_path`.
+DEFAULT_TOKEN_PATH = Path.home() / ".kohakuterrarium" / "codex-auth.json"
+
+
+# Worker-side resolver: when set, ``CodexTokens.load()`` consults this
+# *before* the local on-disk paths.  Workers register a resolver that
+# fetches tokens from the host's identity store via the
+# ``studio.identity`` RPC + :class:`IdentityCache`, mirroring the api
+# key resolver pattern in :mod:`llm.api_keys`.  Production / standalone
+# runs never set the resolver, so the local-file load is unchanged.
+_resolver: Any = None  # Callable[[], "CodexTokens | None"] | None
+
+
+def register_codex_resolver(fn) -> None:
+    """Install a worker-side codex-token resolver.
+
+    The resolver is called from :meth:`CodexTokens.load` and must be a
+    synchronous callable returning a :class:`CodexTokens` or ``None``.
+    """
+    global _resolver
+    _resolver = fn
+
+
+def clear_codex_resolver() -> None:
+    """Remove any installed resolver.  Idempotent."""
+    global _resolver
+    _resolver = None
 
 
 @dataclass
@@ -71,7 +113,7 @@ class CodexTokens:
 
     def save(self, path: Path | None = None) -> None:
         """Persist tokens to disk."""
-        p = path or DEFAULT_TOKEN_PATH
+        p = path or _default_token_path()
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(
             json.dumps(
@@ -90,19 +132,34 @@ class CodexTokens:
     def load(cls, path: Path | None = None) -> "CodexTokens | None":
         """Load tokens from disk.
 
-        If `path` is given, only that file is tried. Otherwise we try
-        our default path first, then fall back to the Codex CLI file at
-        `~/.codex/auth.json`.
+        If `path` is given, only that file is tried. Otherwise:
+
+        - **Worker mode** (``register_codex_resolver`` installed): the
+          resolver is consulted first.  Worker-mode miss returns
+          ``None`` immediately so the worker's local file is not
+          silently substituted — same host-canonical rule as the api
+          key resolver in :mod:`llm.api_keys`.
+        - **Standalone**: we try our default path first, then fall back
+          to the Codex CLI file at ``~/.codex/auth.json``.
 
         Supports two on-disk shapes:
           1. Our flat shape: {access_token, refresh_token, expires_at, ...}
           2. Codex CLI shape: {tokens: {id_token, access_token, refresh_token,
              account_id}, last_refresh: ISO8601}
         """
+        if path is None and _resolver is not None:
+            try:
+                tokens = _resolver()
+            except Exception:  # pragma: no cover - defensive
+                logger.exception("codex resolver raised; treating as miss")
+                tokens = None
+            if isinstance(tokens, CodexTokens) and tokens.access_token:
+                return tokens
+            return None
         if path is not None:
             candidates = [path]
         else:
-            candidates = [DEFAULT_TOKEN_PATH, CODEX_CLI_TOKEN_PATH]
+            candidates = [_default_token_path(), CODEX_CLI_TOKEN_PATH]
         for p in candidates:
             if p and p.exists():
                 try:

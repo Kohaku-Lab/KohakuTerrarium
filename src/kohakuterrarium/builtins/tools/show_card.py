@@ -5,8 +5,7 @@ body + fields + footer + accent color) without inventing ad-hoc
 markdown formatting, and optionally collect user input via action
 buttons (a card-shaped survey form).
 
-The tool reads the same payload schema the renderers consume — see
-``plans/ui-event/design-phase-b.md`` §4.6 for full details. Two
+The tool reads the same payload schema the renderers consume. Two
 modes:
 
 - **Display-only** (no ``actions``, or ``wait_for_reply=False``):

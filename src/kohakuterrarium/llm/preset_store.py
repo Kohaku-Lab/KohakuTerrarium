@@ -37,6 +37,42 @@ def preset_from_data(name: str, data: dict[str, Any], provider: str = "") -> LLM
     return preset
 
 
+# ---------------------------------------------------------------------------
+# Worker-side remote presets
+# ---------------------------------------------------------------------------
+#
+# Production single-host runs read presets straight from
+# ``llm_profiles.yaml``.  A Lab worker, however, has no local profile
+# store — profiles live on the host and are reached via the
+# ``studio.identity`` RPC + :class:`IdentityCache`.  The worker's
+# runtime adapter pre-warms a few profiles at spawn time and stashes
+# them in this process-local dict so that the SYNC preset lookup path
+# (:func:`load_presets` ← :func:`profiles.resolve_controller_llm` ←
+# :func:`bootstrap.llm.create_llm_provider`) finds them.  No I/O, no
+# async hop on the lookup side — by the time ``add_creature`` returns
+# the agent build has whatever profile bodies the host published.
+_remote_presets: dict[tuple[str, str], LLMPreset] = {}
+
+
+def set_remote_preset(provider: str, name: str, preset: LLMPreset) -> None:
+    """Stash a remote-resolved preset for the sync lookup path.
+
+    Idempotent — repeated calls with the same ``(provider, name)``
+    overwrite.  The worker's identity adapter calls this after
+    fetching a profile body from the host via ``studio.identity``.
+    """
+    _remote_presets[(provider, name)] = preset
+
+
+def clear_remote_presets() -> None:
+    """Drop every stashed remote preset.
+
+    Called on worker teardown and on cache-invalidate broadcasts so a
+    stale-after-host-edit preset doesn't outlive its truth.
+    """
+    _remote_presets.clear()
+
+
 def _load_nested_presets(stored: Any) -> dict[tuple[str, str], LLMPreset]:
     """Read a presets block in nested ``{provider: {name: data}}`` shape."""
     presets: dict[tuple[str, str], LLMPreset] = {}
@@ -78,7 +114,15 @@ def _looks_nested(stored: dict[str, Any]) -> bool:
     Nested: the top-level values are dicts of preset entries (no
     ``model`` key directly). Flat: the values are preset entries with
     a ``model`` key.
+
+    An empty dict is NOT nested — returning ``True`` for ``{}`` would
+    make ``load_presets`` short-circuit into the empty-nested path and
+    never reach the legacy ``profiles:`` merge fallback, silently
+    losing every preset for users upgrading from a pre-2026-05 config
+    that stored presets only under ``profiles:``.
     """
+    if not stored:
+        return False
     for value in stored.values():
         if not isinstance(value, dict):
             return False
@@ -98,17 +142,26 @@ def load_presets() -> dict[tuple[str, str], LLMPreset]:
     (``presets: {name: {provider: ..., ...}}``). The next
     :func:`kohakuterrarium.llm.profiles.save_profile` rewrites the
     file in the nested shape.
+
+    Worker mode: any presets stashed via :func:`set_remote_preset`
+    (fetched on demand from the host's ``studio.identity``) are
+    merged on top of the local YAML so the sync lookup path sees the
+    host's authoritative profile bodies without an async hop.  Local
+    entries with the same ``(provider, name)`` are overridden by the
+    remote copy — the host is the source of truth.
     """
     data = _load_yaml()
     stored = data.get("presets", {})
     if isinstance(stored, dict) and _looks_nested(stored):
-        return _load_nested_presets(stored)
-
-    presets = _load_flat_presets_legacy(stored)
-    legacy = data.get("profiles", {})
-    if isinstance(legacy, dict) and not _looks_nested(legacy):
-        for key, preset in _load_flat_presets_legacy(legacy).items():
-            presets.setdefault(key, preset)
+        presets = _load_nested_presets(stored)
+    else:
+        presets = _load_flat_presets_legacy(stored)
+        legacy = data.get("profiles", {})
+        if isinstance(legacy, dict) and not _looks_nested(legacy):
+            for key, preset in _load_flat_presets_legacy(legacy).items():
+                presets.setdefault(key, preset)
+    if _remote_presets:
+        presets.update(_remote_presets)
     return presets
 
 

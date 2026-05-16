@@ -1,8 +1,7 @@
 """Fork / branch primitive for :class:`SessionStore` (Wave E).
 
 Copy-on-fork implementation: every fork is an independent v2 file.
-Lineage sidecar is deferred to a later wave (see
-``plans/session-system/implementation-plan.md`` §2.2).
+Lineage sidecar is deferred to a later wave.
 
 Kept out of ``session/store.py`` so the store module stays under the
 600-line soft cap. :meth:`SessionStore.fork` delegates straight here.
@@ -406,13 +405,25 @@ def perform_fork(
                 payload.setdefault("type", fork_point_event.get("type", "user_message"))
                 dest.events[fork_point_key] = payload
 
-        # --- other tables: copy wholesale. They are snapshots that
-        # make sense at the fork point (state, scratchpad, jobs, etc.).
-        _copy_table(source.state, dest.state)
+        # --- other tables: copy wholesale, with two fork-specific
+        # exclusions.
+        #
+        # 1. ``state`` copies EXCEPT the per-agent ``snapshot_event_id``
+        #    markers. The fork truncated the event log, so a marker
+        #    copied from the parent would outrank the child's last
+        #    event and make resume trust a stale snapshot.
+        # 2. The ``conversation`` snapshot is NOT copied at all — it
+        #    still holds the parent's post-fork turns. The child's event
+        #    log is correctly truncated; ``resume`` rebuilds the
+        #    conversation from it via replay (with no snapshot present,
+        #    ``_load_conversation_with_replay_fallback`` always replays).
+        state_keys = [
+            k for k in _iter_keys(source.state) if not k.endswith(":snapshot_event_id")
+        ]
+        _copy_table(source.state, dest.state, keys=state_keys)
         _copy_table(source.channels, dest.channels)
         _copy_table(source.subagents, dest.subagents)
         _copy_table(source.jobs, dest.jobs)
-        _copy_table(source.conversation, dest.conversation)
         _copy_table(source.turn_rollup, dest.turn_rollup)
 
         dest.flush()

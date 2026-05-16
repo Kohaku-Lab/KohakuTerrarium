@@ -264,9 +264,17 @@ class InteractiveSubAgent(SubAgent):
                 except asyncio.TimeoutError:
                     continue
 
-                # Process the update
-                if self.config.context_mode == ContextUpdateMode.QUEUE_APPEND:
-                    # For queue mode, process sequentially
+                # Process the update. Both QUEUE_APPEND and FLUSH_REPLACE
+                # arrive here via the queue and must generate a response —
+                # FLUSH_REPLACE has already flushed prior output in
+                # ``_handle_flush_replace``, so the remaining work is just
+                # generating against the (replaced) context. Without
+                # FLUSH_REPLACE in this guard the dequeued update was
+                # silently dropped and the sub-agent never responded.
+                if self.config.context_mode in (
+                    ContextUpdateMode.QUEUE_APPEND,
+                    ContextUpdateMode.FLUSH_REPLACE,
+                ):
                     await self._generate_response(update.context)
 
         except asyncio.CancelledError:

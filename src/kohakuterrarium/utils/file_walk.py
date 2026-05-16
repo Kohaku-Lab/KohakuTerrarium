@@ -244,43 +244,37 @@ def iter_matching_files(
                 continue
         return
 
-    # Split at the first "**/" boundary
+    # Recursive pattern. Use the leading literal segment (everything
+    # before the first "**/") only as a cheap walk-root narrowing, then
+    # walk that subtree once with ``walk_files`` and match each file's
+    # full *base-relative* path against the COMPLETE pattern.
+    #
+    # Two correctness reasons for matching the whole pattern via
+    # ``walk_files`` rather than per-directory ``Path.glob(suffix)``:
+    #   * matching the whole pattern (not the post-split suffix) is what
+    #     makes leading and intermediate "**/" segments work — e.g.
+    #     "**/c/**/*.py" must match "a/b/c/y.py" at any depth.
+    #   * ``walk_files`` filters ignored *files* against .gitignore, not
+    #     just ignored directories — ``Path.glob`` would leak them.
     parts = pattern.split("**/", 1)
     prefix = parts[0].rstrip("/").rstrip("\\")
-    suffix = parts[1] if len(parts) > 1 else "*"
 
     walk_root = base / prefix if prefix else base
     if not walk_root.is_dir():
         return
 
-    # If suffix itself contains "**", fall back to walk_files + full match
-    if "**" in suffix:
-        count = 0
-        for f in walk_files(walk_root, gitignore=gitignore, cap=cap):
-            try:
-                rel = f.relative_to(walk_root)
-            except ValueError:
-                continue
-            rel_str = str(rel).replace("\\", "/")
-            if _glob_match(rel_str, suffix):
-                yield f
-                count += 1
-                if cap and count >= cap:
-                    return
-        return
-
-    # Common case: walk dirs, per-dir non-recursive glob on suffix
     count = 0
-    for dir_path in walk_dirs(walk_root, gitignore=gitignore):
+    for f in walk_files(walk_root, gitignore=gitignore):
         try:
-            for f in dir_path.glob(suffix):
-                if f.is_file():
-                    yield f
-                    count += 1
-                    if cap and count >= cap:
-                        return
-        except (PermissionError, OSError):
+            rel = f.relative_to(base)
+        except ValueError:
             continue
+        rel_str = str(rel).replace("\\", "/")
+        if _glob_match(rel_str, pattern):
+            yield f
+            count += 1
+            if cap and count >= cap:
+                return
 
 
 # ── internal glob pattern matcher ────────────────────────────────────

@@ -97,7 +97,10 @@ def render_template(template: str, **variables: Any) -> str:
         result = jinja_template.render(**variables)
         return result
     except TemplateSyntaxError as e:
-        logger.error("Template syntax error", line=e.lineno, message=str(e))
+        # NB: ``message`` is a reserved LogRecord attribute — passing it
+        # as an extra kwarg makes the stdlib logging machinery raise
+        # KeyError, which would escape this handler before ``raise``.
+        logger.error("Template syntax error", line=e.lineno, error=str(e))
         raise
 
 

@@ -46,6 +46,107 @@ class MCPServerInfo:
     error: str = ""
 
 
+class _MCPConnection:
+    """Owns one MCP server's transport + session lifecycle on a single
+    dedicated asyncio task.
+
+    The MCP stdio / sse / streamable-http transports and ``ClientSession``
+    are built on ``anyio`` task groups, whose cancel scopes are
+    *task-bound*: the context-manager ``__aenter__`` and ``__aexit__``
+    MUST run on the same task. The manager's ``connect()`` runs on one
+    task (agent build) and ``disconnect()`` on another (the executor's
+    tool task) — entering the CM on one and exiting on the other raises
+    ``CancelledError`` (BUG B-mcp-1). This owner task enters the CMs,
+    signals readiness, waits for a close request, then exits the CMs —
+    every CM operation stays on ``self._task``.
+    """
+
+    def __init__(self) -> None:
+        self.session: Any = None
+        self.transports: tuple[Any, Any] | None = None
+        self.error: BaseException | None = None
+        self._ready = asyncio.Event()
+        self._close = asyncio.Event()
+        self._task: asyncio.Task[None] | None = None
+
+    async def open(self, name: str, ctx: Any, client_session_cls: Any) -> None:
+        """Start the owner task and block until the connection is ready
+        (or its open failed). Re-raises the open failure on the caller."""
+        self._task = asyncio.create_task(self._run(name, ctx, client_session_cls))
+        await self._ready.wait()
+        if self.error is not None:
+            # The owner task already unwound anything it entered.
+            raise self.error
+
+    async def _run(self, name: str, ctx: Any, client_session_cls: Any) -> None:
+        session: Any = None
+        entered_ctx = False
+        entered_session = False
+        try:
+            entered = await ctx.__aenter__()
+            entered_ctx = True
+            try:
+                read_stream = entered[0]
+                write_stream = entered[1]
+            except (IndexError, TypeError) as e:
+                raise ValueError(
+                    f"MCP server {name}: transport did not yield read/write streams"
+                ) from e
+            session = client_session_cls(read_stream, write_stream)
+            await session.__aenter__()
+            entered_session = True
+            await session.initialize()
+            self.session = session
+            self.transports = (read_stream, write_stream)
+        except BaseException as e:  # noqa: BLE001 — surfaced via self.error
+            self.error = e
+            # Unwind whatever we entered, on THIS task.
+            if entered_session and session is not None:
+                try:
+                    await session.__aexit__(type(e), e, e.__traceback__)
+                except Exception:
+                    logger.debug("MCP session unwind after open failure", exc_info=True)
+            if entered_ctx:
+                try:
+                    await ctx.__aexit__(type(e), e, e.__traceback__)
+                except Exception:
+                    logger.debug(
+                        "MCP transport unwind after open failure", exc_info=True
+                    )
+            self._ready.set()
+            return
+
+        # Open succeeded — let the connect() caller proceed, then hold
+        # the connection open until disconnect requests teardown.
+        self._ready.set()
+        await self._close.wait()
+        try:
+            await session.__aexit__(None, None, None)
+        except Exception as e:
+            logger.debug("Failed to close MCP session", error=str(e), exc_info=True)
+        try:
+            await ctx.__aexit__(None, None, None)
+        except Exception as e:
+            logger.debug(
+                "Failed to exit MCP transport context", error=str(e), exc_info=True
+            )
+
+    async def aclose(self) -> None:
+        """Request teardown and wait for the owner task to finish it.
+
+        Safe to call regardless of which task invokes it — the actual
+        CM exit happens on ``self._task``. Idempotent.
+        """
+        self._close.set()
+        task = self._task
+        if task is None:
+            return
+        try:
+            await task
+        except Exception as e:
+            logger.debug("MCP connection owner task error", error=str(e), exc_info=True)
+
+
 class MCPClientManager:
     """Manages connections to multiple MCP servers.
 
@@ -58,6 +159,7 @@ class MCPClientManager:
         self._sessions: dict[str, Any] = {}  # name -> ClientSession
         self._transports: dict[str, Any] = {}  # name -> (read, write)
         self._stdio_contexts: dict[str, Any] = {}  # name -> transport context manager
+        self._connections: dict[str, _MCPConnection] = {}  # name -> owner-task wrapper
         self._lock = asyncio.Lock()
 
     @property
@@ -168,41 +270,32 @@ class MCPClientManager:
     async def _open_transport_session(
         self, name: str, ctx: Any, client_session_cls: Any
     ) -> Any:
-        entered = await ctx.__aenter__()
+        conn = _MCPConnection()
+        # Register before opening so a cancelled / failed connect can
+        # still find the owner task to tear it down.
+        self._connections[name] = conn
         try:
-            read_stream = entered[0]
-            write_stream = entered[1]
-        except (IndexError, TypeError) as e:
-            raise ValueError(
-                f"MCP server {name}: transport did not yield read/write streams"
-            ) from e
+            await conn.open(name, ctx, client_session_cls)
+        except BaseException:
+            self._connections.pop(name, None)
+            await conn.aclose()
+            raise
 
         self._stdio_contexts[name] = ctx
-        session = client_session_cls(read_stream, write_stream)
-        await session.__aenter__()
-        await session.initialize()
-
-        self._sessions[name] = session
-        self._transports[name] = (read_stream, write_stream)
-        return session
+        self._sessions[name] = conn.session
+        self._transports[name] = conn.transports
+        return conn.session
 
     async def _cleanup_connection(self, name: str, *, remove_server: bool) -> None:
-        session = self._sessions.pop(name, None)
-        if session is not None:
-            try:
-                await session.__aexit__(None, None, None)
-            except Exception as e:
-                logger.debug("Failed to close MCP session", error=str(e), exc_info=True)
+        conn = self._connections.pop(name, None)
+        if conn is not None:
+            # aclose() drives the CM __aexit__ on the owner task — not
+            # on whatever task called disconnect() — so anyio's
+            # task-bound cancel scopes stay on a single task.
+            await conn.aclose()
 
-        ctx = self._stdio_contexts.pop(name, None)
-        if ctx is not None:
-            try:
-                await ctx.__aexit__(None, None, None)
-            except Exception as e:
-                logger.debug(
-                    "Failed to exit MCP transport context", error=str(e), exc_info=True
-                )
-
+        self._sessions.pop(name, None)
+        self._stdio_contexts.pop(name, None)
         self._transports.pop(name, None)
 
         if remove_server:

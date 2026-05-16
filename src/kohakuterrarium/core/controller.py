@@ -110,13 +110,17 @@ class ControllerContext:
     """Context passed to commands/handlers.
 
     ``skills_registry`` lets built-in skill/info handlers reach the runtime
-    :class:`SkillRegistry`.
+    :class:`SkillRegistry`. ``agent_path`` is the creature's config folder
+    — ``InfoCommand`` consults ``<agent_path>/prompts/tools/<name>.md`` as
+    its documented priority-#1 doc override. Both are populated by
+    ``bootstrap/agent_init`` after the controller is built.
     """
 
     controller: "Controller"
     job_store: JobStore
     registry: Registry
     skills_registry: Any | None = None
+    agent_path: Any | None = None
 
     def get_job_status(self, job_id: str) -> JobStatus | None:
         """Get job status."""

@@ -427,8 +427,7 @@ class CodexOAuthProvider(BaseLLMProvider):
                         # Built-in image_generation tool output. Status
                         # at this event is typically "generating" — the
                         # image bytes are already in `result`; don't
-                        # gate on status == "completed" (see
-                        # plans/codex-provider-image-generation-plan.md).
+                        # gate on status == "completed".
                         self._handle_image_generation_call(item)
                 case "response.completed":
                     # Extract usage from completed response

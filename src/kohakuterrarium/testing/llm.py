@@ -93,15 +93,25 @@ class ScriptedLLM:
                     )
                 break
 
-        # Try entries starting from call_count
+        # Priority pass: any match-gated entry whose ``match`` is found
+        # in the latest user message wins, regardless of ``call_count``.
+        # Without this pre-scan, plain entries (``match=None``) intercept
+        # at the call_count index and the match-gated ones are never
+        # reachable once call_count has advanced past them — defeating
+        # the documented purpose of ``match``.
+        for entry in self.script:
+            if entry.match is not None and entry.match in last_user:
+                return entry
+
+        # Fallback: walk from call_count using plain entries.
         idx = self.call_count
         while idx < len(self.script):
             entry = self.script[idx]
-            if entry.match is None or entry.match in last_user:
+            if entry.match is None:
                 return entry
             idx += 1
 
-        # Fallback: repeat last entry
+        # Last-resort fallback: repeat last entry.
         return self.script[-1]
 
     async def chat(

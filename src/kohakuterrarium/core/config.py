@@ -26,7 +26,7 @@ from kohakuterrarium.packages.resolve import resolve_package_path
 
 try:
     import tomllib
-except ImportError:
+except ImportError:  # pragma: no cover - Python <3.11 fallback
     import tomli as tomllib  # type: ignore
 
 from kohakuterrarium.prompt.template import render_template_safe
@@ -414,6 +414,7 @@ def _construct_agent_config(
         memory=dict(config_data.get("memory") or {}),
         output_wiring=parse_wiring_list(config_data.get("output_wiring")),
         skills=list(config_data.get("skills") or []),
+        disable_provider_tools=list(config_data.get("disable_provider_tools") or []),
         skill_index_budget_bytes=int(config_data.get("skill_index_budget_bytes", 4096)),
         framework_hint_overrides=dict(
             config_data.get("framework_hint_overrides")

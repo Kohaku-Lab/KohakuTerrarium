@@ -238,7 +238,18 @@ class SessionStore:
         """
         seq = self._next_event_seq(agent)
         key = f"{agent}:e{seq:06d}"
-        event_id = self._next_global_event_id()
+        # Preserve a caller-supplied ``event_id`` (e.g. the mirror writer
+        # forwards the worker's id verbatim so cross-node ``since=event_id``
+        # filters line up).  Only mint a fresh id when none was provided.
+        preset_eid = data.get("event_id")
+        if isinstance(preset_eid, int) and preset_eid > 0:
+            event_id = preset_eid
+            # Keep the local monotonic counter ahead of any externally
+            # supplied id so subsequent local appends don't collide.
+            if event_id > self._global_event_id:
+                self._global_event_id = event_id
+        else:
+            event_id = self._next_global_event_id()
         data["type"] = event_type
         data["event_id"] = event_id
         if turn_index is not None:
@@ -346,10 +357,22 @@ class SessionStore:
                 logger.debug("Failed to read event", error=str(e), exc_info=True)
         return result
 
-    def get_resumable_events(self, agent: str) -> list[dict]:
-        """Get agent events normalized for resume/history replay."""
+    def get_resumable_events(
+        self,
+        agent: str,
+        *,
+        live_job_ids: set[str] | None = None,
+    ) -> list[dict]:
+        """Get agent events normalized for resume/history replay.
+
+        ``live_job_ids`` (when provided) lists currently-in-flight job
+        ids; those jobs are NOT synthesized as interrupted. Callers
+        serving a live session's history should pass the running jobs;
+        resume-time callers (post-restart, every unfinished job IS dead)
+        leave it ``None``.
+        """
         events = dedupe_adjacent_duplicate_events(self.get_events(agent))
-        return normalize_resumable_events(events)
+        return normalize_resumable_events(events, live_job_ids=live_job_ids)
 
     def get_all_events(self) -> list[tuple[str, dict]]:
         """Get ALL events across all agents, sorted by timestamp.
@@ -692,6 +715,12 @@ class SessionStore:
         :meth:`discover_attached_agents` so ``resume_terrarium`` does
         not try to rebuild them as standalone creatures.
         """
+        # Flush the events cache before scanning keys — buffered events
+        # (a hot-plugged creature still under the durability gate) are
+        # otherwise invisible to the raw key scan, so the creature
+        # silently never appears in load_meta()'s agent list. Mirrors
+        # what get_events / get_all_events already do.
+        self.events.flush_cache()
         seen: list[str] = []
         excluded = {"terrarium"}
         for key_bytes in iter_kv_keys(self.events):
@@ -718,6 +747,8 @@ class SessionStore:
         "namespace": "<host>:attached:<role>:<seq>"}``. Ordering is
         first-seen (matches :meth:`discover_agents_from_events`).
         """
+        # Flush buffered events first — see discover_agents_from_events.
+        self.events.flush_cache()
         seen: dict[str, dict[str, Any]] = {}
         for key_bytes in iter_kv_keys(self.events):
             key = (
@@ -781,6 +812,39 @@ class SessionStore:
         self._unflushed_event_count = 0
         self._last_flush_at = time.monotonic()
 
+    def checkpoint(self) -> None:
+        """Flush every table cache and checkpoint the WAL — without closing.
+
+        A raw byte read of the ``.kohakutr`` file only sees data that
+        has reached the main SQLite database file: rows still sitting
+        in a write cache or the ``-wal`` sidecar are invisible. The
+        resume route copies a *live* mirror store's bytes to push a
+        session to a worker — without this checkpoint that copy is
+        missing the session meta (``config_type`` / ``config_path``)
+        and the worker rejects it as "Session is a None". Call this
+        before any out-of-band byte copy of an open store.
+        """
+        for table in (
+            self.events,
+            self.meta,
+            self.state,
+            self.channels,
+            self.subagents,
+            self.jobs,
+            self.conversation,
+            self.turn_rollup,
+        ):
+            try:
+                table.flush_cache()
+            except Exception:  # pragma: no cover - defensive
+                logger.debug("checkpoint: flush_cache failed", exc_info=True)
+            try:
+                table.checkpoint()
+            except Exception:  # pragma: no cover - defensive
+                logger.debug("checkpoint: WAL checkpoint failed", exc_info=True)
+        self._unflushed_event_count = 0
+        self._last_flush_at = time.monotonic()
+
     def close(self, update_status: bool = True) -> None:
         """Flush and close all tables.
 
@@ -798,14 +862,36 @@ class SessionStore:
                     error=str(e),
                     exc_info=True,
                 )
-        self.events.close()
-        self.meta.close()
-        self.state.close()
-        self.channels.close()
-        self.subagents.close()
-        self.jobs.close()
-        self.conversation.close()
-        self.turn_rollup.close()
+        tables = (
+            self.events,
+            self.meta,
+            self.state,
+            self.channels,
+            self.subagents,
+            self.jobs,
+            self.conversation,
+            self.turn_rollup,
+        )
+        for table in tables:
+            table.close()
+        # ``KVault.close()`` flushes + checkpoints + marks the wrapper
+        # closed, but it does NOT release the underlying native
+        # ``_KVault`` SQLite handle — that only happens when the wrapper
+        # is garbage-collected. ``TextVault`` (the FTS table) has no
+        # ``close()`` at all. On Windows a lingering handle keeps the
+        # ``.kohakutr`` file locked, so a subsequent delete / rename of a
+        # just-closed session fails with WinError 32. Drop the native
+        # references explicitly so CPython refcounting frees every handle
+        # now, not at some arbitrary later GC.
+        for table in tables:
+            try:
+                del table._inner
+            except AttributeError:
+                pass
+        try:
+            del self.fts._vault
+        except AttributeError:
+            pass
         logger.debug("SessionStore closed", path=self._path)
 
     # ─── Fork / Branch (Wave E) ─────────────────────────────────────
@@ -842,8 +928,7 @@ class SessionStore:
         """Return token counters for ``agent``.
 
         ``agent`` — controller-loop namespace to read. ``None`` raises
-        (Q2 in ``plans/session-system/implementation-plan.md``: no
-        silent "main" pick).
+        (no silent "main" pick).
 
         ``include_subagents`` — when ``True``, adds a ``"subagents"``
         sub-dict keyed by ``<agent>:subagent:<name>:<run>``. Sub-agent

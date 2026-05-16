@@ -412,6 +412,15 @@ class AgentHandlersMixin(AgentToolsMixin):
         run_bg = parse_event.args.pop("run_in_background", False)
 
         job_id, task, is_direct = await self._start_tool_async(parse_event)
+        # A tool the executor submitted as background (is_direct=False at
+        # submit time) gets its completion delivered by the executor's own
+        # ``_on_complete`` callback. The backgroundify handle below must
+        # NOT also fire ``_on_backgroundify_complete`` for it — that double
+        # completion runs the controller an extra turn (B-fat2-core-1).
+        # A *direct* tool promoted mid-flight (``run_bg`` or ``promote()``
+        # during the wait) was submitted is_direct=True, so the executor
+        # stays silent and the handle is the only completion path.
+        executor_delivers_completion = not is_direct
         tool = self.executor.get_tool(parse_event.name)
         notify_controller_on_background_complete = True
         if tool is not None and hasattr(tool, "config"):
@@ -434,7 +443,11 @@ class AgentHandlersMixin(AgentToolsMixin):
         handle = backgroundify(
             task,
             job_id,
-            on_bg_complete=self._on_backgroundify_complete,
+            on_bg_complete=(
+                None
+                if executor_delivers_completion
+                else self._on_backgroundify_complete
+            ),
             background_init=not is_direct,
         )
 

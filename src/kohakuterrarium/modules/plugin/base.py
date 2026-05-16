@@ -335,9 +335,25 @@ class BasePlugin:
         """
         return {}
 
+    def _options_dict(self) -> dict[str, Any]:
+        """The plugin's option store, lazily defaulted.
+
+        ``BasePlugin.__init__`` sets ``self.options = {}`` — but a
+        subclass that overrides ``__init__`` without calling
+        ``super().__init__()`` (several builtin plugins do) would
+        otherwise have no ``options`` attribute, and ``get_options`` /
+        ``set_options`` would ``AttributeError``. Defaulting here keeps
+        the option contract intact for every plugin shape.
+        """
+        opts = getattr(self, "options", None)
+        if not isinstance(opts, dict):
+            opts = {}
+            self.options = opts
+        return opts
+
     def get_options(self) -> dict[str, Any]:
         """Return a copy of the current option values."""
-        return dict(self.options)
+        return dict(self._options_dict())
 
     def set_options(self, values: dict[str, Any]) -> dict[str, Any]:
         """Validate, store, and re-apply option overrides.
@@ -354,8 +370,9 @@ class BasePlugin:
         cleaned = validate_plugin_options(
             getattr(self, "name", "?"), values or {}, schema or {}
         )
+        opts = self._options_dict()
         for key, value in cleaned.items():
-            self.options[key] = value
+            opts[key] = value
         try:
             self.refresh_options()
         except Exception as e:  # pragma: no cover — defensive

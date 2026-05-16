@@ -291,14 +291,26 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         Builds a TriggerEvent and reuses the existing ``_on_bg_complete``
         path for activity notification and event processing.
         """
-        if isinstance(result, Exception):
-            error = str(result)
-            extra_context: dict[str, Any] = {}
-            if isinstance(result, asyncio.CancelledError):
-                error = "User manually interrupted this job."
-                extra_context = {"interrupted": True, "final_state": "interrupted"}
+        # NOTE: ``asyncio.CancelledError`` is a ``BaseException`` (not
+        # ``Exception``) since Python 3.8, so it must be checked
+        # explicitly *before* the generic exception arm — otherwise a
+        # cancelled background task is misreported as an error instead
+        # of an interrupt.
+        if isinstance(result, asyncio.CancelledError):
+            extra_context: dict[str, Any] = {
+                "interrupted": True,
+                "final_state": "interrupted",
+            }
             event = create_tool_complete_event(
-                job_id=job_id, content="", error=error, **extra_context
+                job_id=job_id,
+                content="",
+                error="User manually interrupted this job.",
+                **extra_context,
+            )
+        elif isinstance(result, BaseException):
+            extra_context = {}
+            event = create_tool_complete_event(
+                job_id=job_id, content="", error=str(result), **extra_context
             )
         elif hasattr(result, "output"):
             # JobResult or SubAgentResult
@@ -450,7 +462,14 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         )
         output = output or ""
         exit_code = getattr(result, "exit_code", 0)
-        status = "OK" if exit_code == 0 else f"exit={exit_code}"
+        # ``ToolResult.success`` is the canonical success signal:
+        # ``exit_code=None`` (the default for tools that never shell out)
+        # with no error IS a success. A bare ``exit_code == 0`` check
+        # wrongly flags those tools as failures — both in the activity
+        # label and, worse, in the metrics status fed to
+        # ``serving.process_metrics``.
+        succeeded = result.success if hasattr(result, "success") else exit_code == 0
+        status = "OK" if succeeded else f"exit={exit_code}"
         preview = (
             result.get_text_output()[:5000]
             if hasattr(result, "get_text_output")
@@ -476,7 +495,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         _emit_completion_metrics(
             is_subagent,
             metric_name,
-            "ok" if exit_code == 0 else "error",
+            "ok" if succeeded else "error",
             duration_ms,
         )
 

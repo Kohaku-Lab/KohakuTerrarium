@@ -12,6 +12,7 @@ from typing import Any
 from kohakuterrarium.builtins.inputs import create_builtin_input
 from kohakuterrarium.builtins.outputs import create_builtin_output
 from kohakuterrarium.core.agent import Agent
+from kohakuterrarium.core.config_serde import unpack_agent_config
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
@@ -252,6 +253,37 @@ def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
         )
 
 
+def _rebuild_agent(
+    *,
+    config_path: str,
+    config_snapshot: dict[str, Any],
+    llm_override: str | None,
+    io_kwargs: dict[str, Any],
+) -> Agent:
+    """Build the ``Agent`` from saved meta.
+
+    Prefer ``config_path`` when present and points at a readable folder
+    on this machine.  Fall back to ``config_snapshot`` (set by the Lab
+    worker-side store attach for inline-spawn creatures and by the
+    Studio attach for host spawns) — this is what makes resume work on
+    a node that does not have the original recipe folder on disk.
+    """
+    if config_path:
+        path_obj = Path(config_path)
+        if path_obj.exists():
+            return Agent.from_path(config_path, llm_override=llm_override, **io_kwargs)
+    if not config_snapshot:
+        # config_path was set but unreachable, and no snapshot to fall
+        # back on — surface the original error so callers can deploy the
+        # recipe to this node before retrying.
+        raise FileNotFoundError(
+            f"Agent config folder not found at {config_path!r} and the "
+            "session has no config_snapshot to rebuild from"
+        )
+    cfg = unpack_agent_config(config_snapshot)
+    return Agent(cfg, llm_override=llm_override, **io_kwargs)
+
+
 def _open_store_with_migration(session_path: str | Path) -> SessionStore:
     """Open a session file, auto-migrating older formats upward first.
 
@@ -303,16 +335,28 @@ def resume_agent(
     store = _open_store_with_migration(session_path)
     meta = store.load_meta()
 
-    if meta.get("config_type") != "agent":
+    # Accept "agent" (worker-spawned single creature, host-spawned solo
+    # agent) and missing ``config_type`` (un-synced mirror file — the
+    # field never made it through ``terrarium.session.sync.meta`` before
+    # the file was checkpointed and pushed). ``detect_session_type``
+    # already defaults the unset case to "agent"; these two paths MUST
+    # agree or a worker-side resume 502s with the very error this guard
+    # used to raise.
+    config_type = meta.get("config_type")
+    if config_type not in (None, "", "agent"):
         raise ValueError(
-            f"Session is a {meta.get('config_type')}, not an agent. "
-            "Use the legacy resume_terrarium() in terrarium.legacy_resume "
-            "instead."
+            f"Session config_type is {config_type!r}, not 'agent'. "
+            "Resume the saved file via "
+            "`Terrarium.resume(path)` / `engine.adopt_session(path)` "
+            "(see kohakuterrarium.terrarium.resume.resume_into_engine) "
+            "which dispatches between the agent and terrarium rebuild "
+            "paths."
         )
 
     config_path = meta.get("config_path", "")
-    if not config_path:
-        raise ValueError("Session has no config_path in metadata")
+    config_snapshot = meta.get("config_snapshot") or {}
+    if not config_path and not config_snapshot:
+        raise ValueError("Session has no config_path or config_snapshot in metadata")
 
     pwd = pwd_override or meta.get("pwd", ".")
     if pwd and os.path.isdir(pwd):
@@ -340,8 +384,15 @@ def resume_agent(
         except (KeyError, Exception):
             pass
 
-    # Rebuild agent from config
-    agent = Agent.from_path(config_path, llm_override=effective_llm, **io_kwargs)
+    # Rebuild agent: prefer ``config_path`` when present and reachable;
+    # fall back to ``config_snapshot`` for inline-spawn / cross-node
+    # resume where the original folder may not exist on this filesystem.
+    agent = _rebuild_agent(
+        config_path=config_path,
+        config_snapshot=config_snapshot,
+        llm_override=effective_llm,
+        io_kwargs=io_kwargs,
+    )
     agent_name = meta.get("agents", [agent.config.name])[0]
 
     # Inject every state slot from the store.

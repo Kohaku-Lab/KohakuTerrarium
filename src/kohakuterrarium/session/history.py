@@ -467,13 +467,176 @@ def replay_conversation(
     return messages
 
 
-def normalize_resumable_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Mark unfinished tool/sub-agent work as interrupted for history replay."""
+def _coerce_tool_args_to_json(args: Any) -> str:
+    """Best-effort serialisation for ``assistant_tool_calls.arguments``.
+
+    Mirrors :func:`session.migrations.v1_to_v2._coerce_args`. The wire
+    contract for an OpenAI-shaped tool_call is that ``arguments`` is a
+    JSON-encoded string — replay_conversation passes it through unchanged
+    so downstream consumers (the orphan sanitiser, persistence fork
+    endpoints) expect a string here too.
+    """
+    if isinstance(args, str):
+        return args
+    if args is None:
+        return "{}"
+    try:
+        return json.dumps(args)
+    except (TypeError, ValueError):
+        return "{}"
+
+
+def _inject_synthetic_announcements(
+    events: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """B8: insert ``assistant_tool_calls`` before every orphan tool pair.
+
+    The live runtime emits ``tool_call`` + ``tool_result`` events but
+    NEVER an ``assistant_tool_calls`` announcement — that event type is
+    only written by the v1→v2 migrator. On the host-side session mirror
+    (which only sees ``append_event`` outputs, not conversation
+    snapshots), :func:`replay_conversation` therefore produces
+    ``role=tool`` messages with no preceding ``assistant.tool_calls``
+    list. :meth:`Conversation.sanitize_orphan_tool_pairs` then drops
+    every such tool message as orphan and logs a WARNING.
+
+    The fix mirrors the migrator's flush logic
+    (``migrations/v1_to_v2.py:_flush_pending_tool_calls``): buffer
+    pending ``tool_call`` events and flush them as a single
+    ``assistant_tool_calls`` announcement immediately before the next
+    structural event that consumes them — a ``tool_result`` for one of
+    them, the next user turn, or any other non-tool_call structural
+    event.
+
+    Idempotent: if an explicit ``assistant_tool_calls`` event already
+    announces a tool_call's id, we drop that id from the buffer so no
+    duplicate announcement is synthesised.
+
+    Synthetic events are stamped ``_synthetic_announce=True`` and carry
+    NO ``event_id`` — :func:`replay_conversation` bypasses the live-ids
+    filter for events without an integer event_id, so the synthetic
+    announcement always replays in its inserted position regardless of
+    branch view.
+    """
+    pending: list[dict[str, Any]] = []
+    announced_ids: set[str] = set()
+    result: list[dict[str, Any]] = []
+
+    def _build_announce(items: list[dict[str, Any]]) -> dict[str, Any]:
+        tool_calls: list[dict[str, Any]] = []
+        for tc in items:
+            tool_calls.append(
+                {
+                    "id": str(tc.get("call_id") or tc.get("job_id") or ""),
+                    "type": "function",
+                    "function": {
+                        "name": tc.get("name", "") or "",
+                        "arguments": _coerce_tool_args_to_json(tc.get("args")),
+                    },
+                }
+            )
+        return {
+            "type": "assistant_tool_calls",
+            "tool_calls": tool_calls,
+            "content": "",
+            "ts": items[0].get("ts", 0),
+            "_synthetic_announce": True,
+        }
+
+    def _flush_pending() -> None:
+        if not pending:
+            return
+        result.append(_build_announce(pending))
+        for tc in pending:
+            cid = str(tc.get("call_id") or tc.get("job_id") or "")
+            if cid:
+                announced_ids.add(cid)
+        pending.clear()
+
+    for evt in events:
+        etype = evt.get("type", "")
+
+        if etype == "tool_call":
+            cid = str(evt.get("call_id") or evt.get("job_id") or "")
+            # If a real ``assistant_tool_calls`` event already announced
+            # this id (or it was just flushed), don't buffer it again.
+            if cid and cid in announced_ids:
+                result.append(evt)
+                continue
+            pending.append(evt)
+            result.append(evt)
+            continue
+
+        if etype == "subagent_call":
+            # ``subagent_call`` is a sibling-pending event: a single LLM
+            # turn can interleave ``tool_call`` and ``subagent_call``
+            # dispatches, and they all belong to the SAME assistant
+            # message. Treating subagent_call as a structural flush
+            # trigger would split one turn's tool_calls into multiple
+            # synthetic ``assistant_tool_calls`` events, breaking the
+            # downstream conversation pairing for every tool_call that
+            # lands after the subagent_call.
+            result.append(evt)
+            continue
+
+        if etype == "assistant_tool_calls":
+            # Real announcement — record its ids and drop any pending
+            # tool_call entries that match (no double-announce).
+            for tc in evt.get("tool_calls") or []:
+                tid = str(tc.get("id") or "")
+                if tid:
+                    announced_ids.add(tid)
+            pending = [
+                tc
+                for tc in pending
+                if str(tc.get("call_id") or tc.get("job_id") or "") not in announced_ids
+            ]
+            result.append(evt)
+            continue
+
+        # Any other structural event flushes pending tool_calls so the
+        # announcement lands BEFORE whatever consumes them. This matches
+        # the migrator's behaviour where ``user_input``, ``text_chunk``,
+        # ``tool_result``, ``compact_complete``, … all flush the buffer.
+        _flush_pending()
+        result.append(evt)
+
+    # Trailing pending tool_calls (no terminating event in stream) —
+    # still announce them so replay sees a consistent assistant turn.
+    _flush_pending()
+    return result
+
+
+def normalize_resumable_events(
+    events: list[dict[str, Any]],
+    *,
+    live_job_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Mark unfinished tool/sub-agent work as interrupted for history replay.
+
+    When ``live_job_ids`` is provided, jobs whose id appears in that set
+    are treated as still-running and NOT synthesized as interrupted.
+    Pass it from the live history endpoint so in-flight background
+    sub-agents (whose ``subagent_result`` event hasn't been recorded yet)
+    don't render as interrupted while they're still working. Resume code
+    paths leave it unset — at resume time the process actually died, so
+    every unfinished job is truly interrupted and the synthetic event is
+    correct.
+
+    Also injects synthetic ``assistant_tool_calls`` announcements before
+    every ``tool_result`` / end-of-turn that has unannounced ``tool_call``
+    events ahead of it (see :func:`_inject_synthetic_announcements`).
+    Without this step the host-side session mirror (which never receives
+    conversation snapshots) replays as a series of orphan ``role=tool``
+    messages — the user-visible "high orphan tool call" rate on
+    multi-node creatures (B8).
+    """
     normalized = [dict(evt) for evt in events]
     started_tools: dict[str, dict[str, Any]] = {}
     finished_tools: set[str] = set()
     started_subagents: dict[str, dict[str, Any]] = {}
     finished_subagents: set[str] = set()
+    live = live_job_ids or set()
 
     for evt in normalized:
         etype = evt.get("type", "")
@@ -497,7 +660,7 @@ def normalize_resumable_events(events: list[dict[str, Any]]) -> list[dict[str, A
     synthetic_events: list[dict[str, Any]] = []
 
     for job_id, start_evt in started_tools.items():
-        if job_id in finished_tools:
+        if job_id in finished_tools or job_id in live:
             continue
         synthetic_events.append(
             {
@@ -516,7 +679,7 @@ def normalize_resumable_events(events: list[dict[str, Any]]) -> list[dict[str, A
         )
 
     for job_id, start_evt in started_subagents.items():
-        if job_id in finished_subagents:
+        if job_id in finished_subagents or job_id in live:
             continue
         synthetic_events.append(
             {
@@ -535,7 +698,5 @@ def normalize_resumable_events(events: list[dict[str, Any]]) -> list[dict[str, A
             }
         )
 
-    if not synthetic_events:
-        return normalized
-
-    return normalized + synthetic_events
+    full = normalized + synthetic_events
+    return _inject_synthetic_announcements(full)

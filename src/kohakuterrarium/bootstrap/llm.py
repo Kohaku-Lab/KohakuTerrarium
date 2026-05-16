@@ -15,6 +15,7 @@ from kohakuterrarium.llm.base import LLMConfig, LLMProvider
 from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
 from kohakuterrarium.llm.litellm_provider import LiteLLMProvider
 from kohakuterrarium.llm.openai import OpenAIProvider
+from kohakuterrarium.llm import api_keys as _api_keys
 from kohakuterrarium.llm.profiles import LLMProfile, get_api_key, resolve_controller_llm
 from kohakuterrarium.utils.logging import get_logger
 
@@ -106,6 +107,35 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
         backend_type=profile.backend_type,
     )
 
+    if profile.backend_type == "fake_test":
+        # Test-only backend — used by the multi-node test harness to
+        # exercise the FULL profile resolution + api-key fetch chain
+        # without performing any real network call.  The api_key value
+        # is *required* (the credential lookup below raises if empty),
+        # so a test using this backend genuinely proves the worker can
+        # reach the host's identity store.  Imported lazily so the
+        # production runtime never loads the ``testing`` package.
+        api_key = get_api_key(profile.provider) if profile.provider else ""
+        if not api_key and profile.api_key_env:
+            api_key = get_api_key(profile.api_key_env)
+        if not api_key:
+            raise ValueError(
+                f"API key not found for fake_test profile '{profile.name}' "
+                f"(provider={profile.provider!r}) — this is the credential "
+                "resolution path under test; set the key on the host."
+            )
+        from kohakuterrarium.testing.fake_llm_provider import FakeLLMProvider
+
+        script_path = (profile.extra_body or {}).get("script_path") or None
+        provider = FakeLLMProvider(
+            api_key=api_key,
+            model=profile.model or "fake-echo",
+            script_path=str(script_path) if script_path else None,
+        )
+        provider._profile_max_context = profile.max_context
+        _apply_backend_native_identity(provider, profile)
+        return provider
+
     if profile.backend_type == "codex":
         provider = CodexOAuthProvider(
             model=profile.model,
@@ -121,6 +151,20 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
     if not api_key and profile.api_key_env:
         api_key = get_api_key(profile.api_key_env)
     if not api_key:
+        # Worker mode: ``llm.api_keys._resolver`` is set; the controller's
+        # identity store is the only valid source.  Setting the env var
+        # on the worker is explicitly NOT consulted (host-canonical
+        # identity, per management-wiring.md § studio.identity).  Tell
+        # the operator that instead of the generic ``kt login`` hint.
+        if _api_keys._resolver is not None:
+            raise ValueError(
+                f"API key not found for profile '{profile.name}' (worker "
+                f"mode).  The controller's identity store is the only "
+                f"source — set the key on the host via "
+                f"``POST /api/settings/keys`` or ``kt login "
+                f"{profile.provider or 'openai'}`` (on the host).  The "
+                f"worker's own env / file is intentionally NOT consulted."
+            )
         raise ValueError(
             f"API key not found for profile '{profile.name}'. "
             f"Use 'kt login {profile.provider or 'openai'}' or set "

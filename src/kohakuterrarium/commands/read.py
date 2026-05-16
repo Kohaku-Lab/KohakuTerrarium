@@ -292,8 +292,14 @@ def _lookup_skill_registry(context: Any):
     session = getattr(context, "session", None)
     if session is not None:
         extras = getattr(session, "extra", None) or {}
-        if isinstance(extras, dict) and extras.get("skills_registry"):
-            return extras["skills_registry"]
+        if isinstance(extras, dict):
+            # Gate on ``is not None`` (mirroring every other lookup path
+            # above) — an *empty* SkillRegistry is falsy (``__len__`` is
+            # 0), so a truthiness check would drop a freshly-wired
+            # registry before any skill is added to it.
+            reg = extras.get("skills_registry")
+            if reg is not None:
+                return reg
     return None
 
 

@@ -41,7 +41,17 @@ def list_packages() -> list[dict]:
         manifest = _load_manifest(pkg_dir)
         results.append(
             {
-                "name": manifest.get("name", name),
+                # The install-dir name is the canonical package identity —
+                # ``get_package_root`` / ``resolve_package_path`` /
+                # ``uninstall_package`` all key on it, and a
+                # ``kt install --name X`` install lives under ``X/`` while
+                # its bundle's ``kohaku.yaml`` still says the original
+                # name. Reporting ``manifest["name"]`` here made such an
+                # install invisible to ``kt list`` / ``kt update`` under
+                # its real name. The bundle's self-declared name is kept
+                # separately as ``manifest_name`` for display.
+                "name": name,
+                "manifest_name": manifest.get("name", name),
                 "version": manifest.get("version", "?"),
                 "description": manifest.get("description", ""),
                 "path": str(pkg_dir),

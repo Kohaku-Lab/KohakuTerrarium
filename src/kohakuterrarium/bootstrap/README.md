@@ -52,4 +52,4 @@ wiring layer with no runtime loops of its own.
 
 - `../core/README.md` — how `AgentInitMixin` composes with the rest of Agent
 - `../modules/plugin/` — plugin protocol and manager
-- `plans/inventory-runtime.md` §1 — agent lifecycle
+- `docs/en/dev/internals.md` §Agent runtime — agent lifecycle

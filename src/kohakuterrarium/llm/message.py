@@ -272,19 +272,24 @@ class Message:
         """
         if isinstance(self.content, str):
             return self.content
+        # ``content`` can also be ``None`` — a valid wire shape that
+        # ``to_dict`` itself emits for a native-tool-call assistant turn.
+        # Only a list is iterable as content parts.
+        if not isinstance(self.content, list):
+            return ""
         return "\n".join(
             part.text for part in self.content if isinstance(part, TextPart)
         )
 
     def has_images(self) -> bool:
         """Check if message contains image content."""
-        if isinstance(self.content, str):
+        if not isinstance(self.content, list):
             return False
         return any(isinstance(part, ImagePart) for part in self.content)
 
     def get_images(self) -> list[ImagePart]:
         """Get all image parts from the message."""
-        if isinstance(self.content, str):
+        if not isinstance(self.content, list):
             return []
         return [part for part in self.content if isinstance(part, ImagePart)]
 

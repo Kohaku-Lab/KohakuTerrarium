@@ -1,10 +1,8 @@
 """Wave G — read-side token-usage helpers for :class:`SessionStore`.
 
-Implements the Q2-locked behaviour from
-``plans/session-system/implementation-plan.md`` §2.4 / §7: no aggregation
-by default, opt-in roll-up across sub-agents / attached agents, plus a
-flat enumeration of every controller loop in the session tree for
-consumers that want to display or sum tokens themselves.
+No aggregation by default, opt-in roll-up across sub-agents / attached
+agents, plus a flat enumeration of every controller loop in the session
+tree for consumers that want to display or sum tokens themselves.
 
 This module is the implementation heart of Wave G. Both
 ``SessionStore.token_usage`` and ``SessionStore.token_usage_all_loops``

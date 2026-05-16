@@ -41,8 +41,7 @@ and ``payload`` carries the existing metadata dict. For ``text``
 events, ``content`` carries the chunk. For ``assistant_image``,
 ``payload`` carries the image fields (url, detail, source_type,
 source_name, revised_prompt). For ``resume_batch``, ``payload``
-carries ``{"events": [...]}``. For Phase B kinds, see
-``plans/ui-event/design-phase-b.md`` §4 for the per-type schemas.
+carries ``{"events": [...]}``.
 """
 
 from dataclasses import dataclass, field
