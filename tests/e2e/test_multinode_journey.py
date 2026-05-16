@@ -2695,26 +2695,35 @@ async def _drive_journey(
                     _drain_chat(ws, "please remove bravo"),
                     timeout=OP_TIMEOUT * 3,
                 )
-            # Let the worker's tool execution + event-write settle.
-            await asyncio.sleep(3.0)
-            rr2 = await asyncio.wait_for(
-                host.http.get(
-                    f"/api/sessions/{graph_a}/events",
-                    params={"limit": 1000},
-                ),
-                timeout=OP_TIMEOUT,
-            )
-            if rr2.status_code == 200:
-                evts = rr2.json().get("events") or []
-                for e in evts:
-                    if not isinstance(e, dict):
-                        continue
-                    if e.get("type") != "tool_result":
-                        continue
-                    err_text = str(e.get("error") or "")
-                    if "cross-cluster" in err_text and "CF-7" in err_text:
-                        cross_err_seen = True
-                        break
+            # Tool execution -> event write -> session.sync notify ->
+            # host mirror append is a multi-hop async pipeline that
+            # finishes some time AFTER the chat WS closes.  Fixed
+            # sleeps race the pipeline on slow Windows / 3.13+ CI
+            # runners.  Poll the /events endpoint until the tool_result
+            # carrying the cross-cluster marker arrives or a generous
+            # deadline expires.
+            deadline = asyncio.get_event_loop().time() + 10.0
+            while asyncio.get_event_loop().time() < deadline and not cross_err_seen:
+                rr2 = await asyncio.wait_for(
+                    host.http.get(
+                        f"/api/sessions/{graph_a}/events",
+                        params={"limit": 1000},
+                    ),
+                    timeout=OP_TIMEOUT,
+                )
+                if rr2.status_code == 200:
+                    evts = rr2.json().get("events") or []
+                    for e in evts:
+                        if not isinstance(e, dict):
+                            continue
+                        if e.get("type") != "tool_result":
+                            continue
+                        err_text = str(e.get("error") or "")
+                        if "cross-cluster" in err_text and "CF-7" in err_text:
+                            cross_err_seen = True
+                            break
+                if not cross_err_seen:
+                    await asyncio.sleep(0.25)
         except asyncio.TimeoutError:
             bugs.record(
                 "29c3b alpha chat hung while emitting cross-cluster group_remove_node",
@@ -2984,24 +2993,46 @@ async def _drive_journey(
         # Find both saved sids.  graph_a / graph_b are the engine
         # graph_ids the workers minted; the mirror files on the host
         # use those names verbatim.
-        ls = await asyncio.wait_for(host.http.get("/api/sessions"), timeout=OP_TIMEOUT)
-        sessions = []
-        if ls.status_code == 200:
-            body = ls.json()
-            sessions = body if isinstance(body, list) else body.get("sessions", [])
-        sid_set = {
-            (s.get("session_id") or s.get("name") or s.get("session_name") or "")
-            for s in sessions
-        }
         # Lex-smallest is the cluster primary (matches the cluster-fold
         # invariant used everywhere else in the journey).
         primary_sid = min([graph_a, graph_b])
         peer_sid = max([graph_a, graph_b])
         primary_node = "w1" if primary_sid == graph_a else "w2"
         peer_node = "w2" if primary_sid == graph_a else "w1"
-        # Saved sids may carry a suffix on rotation; tolerate both forms.
-        has_primary = primary_sid in sid_set or any(primary_sid in s for s in sid_set)
-        has_peer = peer_sid in sid_set or any(peer_sid in s for s in sid_set)
+        # The mirror writer drains worker session.sync events
+        # asynchronously — closing graph_b returns before the worker's
+        # last events have been received by the host's
+        # ``SessionMirrorWriter`` and checkpointed to disk.  Poll the
+        # saved-sessions listing with ``?refresh=true`` (forces an
+        # index rebuild) until both member files show up or a
+        # generous deadline expires.  This keeps the assertion strict
+        # about the contract (both files MUST exist) without flaking
+        # on slow-CI runners that need a beat longer than the
+        # synchronous DELETE to drain.
+        sid_set: set[str] = set()
+        sessions: list = []
+        has_primary = False
+        has_peer = False
+        deadline = asyncio.get_event_loop().time() + 10.0
+        while asyncio.get_event_loop().time() < deadline:
+            ls = await asyncio.wait_for(
+                host.http.get("/api/sessions?refresh=true"), timeout=OP_TIMEOUT
+            )
+            sessions = []
+            if ls.status_code == 200:
+                body = ls.json()
+                sessions = body if isinstance(body, list) else body.get("sessions", [])
+            sid_set = {
+                (s.get("session_id") or s.get("name") or s.get("session_name") or "")
+                for s in sessions
+            }
+            has_primary = primary_sid in sid_set or any(
+                primary_sid in s for s in sid_set
+            )
+            has_peer = peer_sid in sid_set or any(peer_sid in s for s in sid_set)
+            if has_primary and has_peer:
+                break
+            await asyncio.sleep(0.25)
         bugs.check(
             "CF-6: both cluster member saved files are listed",
             has_primary and has_peer,

@@ -588,11 +588,23 @@ class TestProgCreatureJourney:
             )
         finally:
             await rec_agent.stop()
-        recorded_user_turns = [
-            e["content"]
-            for e in record_store.get_events("pilot")
-            if e["type"] == "user_input"
-        ]
+        # ``_process_event`` schedules the controller turn which appends
+        # the ``user_input`` event from a background task — the call
+        # returns before the event is committed to the store on the
+        # slowest CI runners (macOS 3.13/3.14).  Poll get_events until
+        # both turns are visible or a generous deadline expires; the
+        # post-stop flush guarantees eventual consistency.
+        recorded_user_turns: list[str] = []
+        deadline = asyncio.get_event_loop().time() + 5.0
+        while asyncio.get_event_loop().time() < deadline:
+            recorded_user_turns = [
+                e["content"]
+                for e in record_store.get_events("pilot")
+                if e["type"] == "user_input"
+            ]
+            if len(recorded_user_turns) >= 2:
+                break
+            await asyncio.sleep(0.1)
         assert recorded_user_turns == [
             "first recorded question",
             "second recorded question",
