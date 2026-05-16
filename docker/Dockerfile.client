@@ -1,0 +1,48 @@
+# syntax=docker/dockerfile:1.6
+#
+# KohakuTerrarium lab-client (worker) image.
+# Runs `kt lab-client` only. Outbound-only — does NOT expose ports.
+#
+# Build:
+#   docker build -f docker/Dockerfile.client \
+#     --build-arg WHEEL_GLOB=dist/kohakuterrarium-*.whl \
+#     -t kohaku/client:dev .
+#
+# Run:
+#   docker run -d --name kt-worker-1 \
+#     -e KT_HOST_URL=ws://host:8100 \
+#     -e KT_HOST_TOKEN=$(cat host-token.txt) \
+#     -e KT_CLIENT_NAME=worker-1 \
+#     -v kt-worker-1:/home/kt/.kohakuterrarium \
+#     kohaku/client:dev
+
+FROM python:3.12-slim
+
+ARG WHEEL_GLOB=dist/kohakuterrarium-*.whl
+
+ENV PYTHONUNBUFFERED=1 \
+    KT_CONFIG_DIR=/home/kt/.kohakuterrarium \
+    KT_LOG_STDERR=1
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        git ca-certificates tini && \
+    rm -rf /var/lib/apt/lists/* && \
+    useradd -u 1000 -m -s /bin/bash kt && \
+    mkdir -p /home/kt/.kohakuterrarium && \
+    chown -R kt:kt /home/kt/.kohakuterrarium
+
+COPY ${WHEEL_GLOB} /tmp/kt.whl
+COPY docker/kt-client-entrypoint.sh /usr/local/bin/kt-client-entrypoint.sh
+RUN pip install --no-cache-dir /tmp/kt.whl && \
+    rm /tmp/kt.whl && \
+    chmod +x /usr/local/bin/kt-client-entrypoint.sh
+
+USER kt
+WORKDIR /home/kt
+VOLUME /home/kt/.kohakuterrarium
+
+# Workers are outbound-only; no health endpoint to probe locally.
+# Operator-side: monitor connection via host's /api/lab/status.
+
+ENTRYPOINT ["tini", "--", "/usr/local/bin/kt-client-entrypoint.sh"]

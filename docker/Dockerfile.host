@@ -1,0 +1,52 @@
+# syntax=docker/dockerfile:1.6
+#
+# KohakuTerrarium lab-host image.
+# Runs `kt serve --mode lab-host` only — no embedded worker.
+# Use with a separate `kohaku/client` image (one per worker) for the
+# host + workers shape.
+#
+# Build:
+#   docker build -f docker/Dockerfile.host \
+#     --build-arg WHEEL_GLOB=dist/kohakuterrarium-*.whl \
+#     -t kohaku/host:dev .
+#
+# Run:
+#   docker run -d --name kt-host \
+#     -p 8001:8001 -p 8100:8100 \
+#     -e KT_HOST_TOKEN=$(openssl rand -hex 24) \
+#     -v kt-host:/home/kt/.kohakuterrarium \
+#     kohaku/host:dev
+
+FROM python:3.12-slim
+
+ARG WHEEL_GLOB=dist/kohakuterrarium-*.whl
+
+ENV PYTHONUNBUFFERED=1 \
+    KT_CONFIG_DIR=/home/kt/.kohakuterrarium \
+    KT_LOG_STDERR=1
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        git ca-certificates tini wget && \
+    rm -rf /var/lib/apt/lists/* && \
+    useradd -u 1000 -m -s /bin/bash kt && \
+    mkdir -p /home/kt/.kohakuterrarium && \
+    chown -R kt:kt /home/kt/.kohakuterrarium
+
+# Copy wheel via glob (the version-suffixed filename varies per build).
+COPY ${WHEEL_GLOB} /tmp/kt.whl
+RUN pip install --no-cache-dir /tmp/kt.whl && rm /tmp/kt.whl
+
+USER kt
+WORKDIR /home/kt
+EXPOSE 8001 8100
+VOLUME /home/kt/.kohakuterrarium
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=5 \
+    CMD wget -q -O- http://127.0.0.1:8001/healthz || exit 1
+
+ENTRYPOINT ["tini", "--"]
+CMD ["kt", "serve", "start", "--mode", "lab-host", "--foreground", \
+     "--host", "0.0.0.0", "--port", "8001", \
+     "--lab-bind", "0.0.0.0:8100", \
+     "--home-dir", "/home/kt/.kohakuterrarium"]

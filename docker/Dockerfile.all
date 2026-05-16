@@ -1,0 +1,53 @@
+# syntax=docker/dockerfile:1.6
+#
+# KohakuTerrarium All-In-One image.
+# One container, two processes: lab-host + an embedded lab-client
+# connected via loopback. Ideal for "I just want it running" on a
+# single machine. For host + workers across machines, use the
+# kohaku/host + kohaku/client images instead.
+#
+# Build:
+#   docker build -f docker/Dockerfile.all \
+#     --build-arg WHEEL_GLOB=dist/kohakuterrarium-*.whl \
+#     -t kohaku/all:dev .
+#
+# Run:
+#   docker run -d --name kt \
+#     -p 8001:8001 \
+#     -v kt-data:/home/kt/.kohakuterrarium \
+#     kohaku/all:dev
+#
+#   # Token is auto-generated on first boot; see logs:
+#   docker logs kt | grep "Lab token:"
+
+FROM python:3.12-slim
+
+ARG WHEEL_GLOB=dist/kohakuterrarium-*.whl
+
+ENV PYTHONUNBUFFERED=1 \
+    KT_CONFIG_DIR=/home/kt/.kohakuterrarium \
+    KT_LOG_STDERR=1
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        git ca-certificates tini wget netcat-traditional openssl && \
+    rm -rf /var/lib/apt/lists/* && \
+    useradd -u 1000 -m -s /bin/bash kt && \
+    mkdir -p /home/kt/.kohakuterrarium && \
+    chown -R kt:kt /home/kt/.kohakuterrarium
+
+COPY ${WHEEL_GLOB} /tmp/kt.whl
+COPY docker/kt-aio-entrypoint.sh /usr/local/bin/kt-aio-entrypoint.sh
+RUN pip install --no-cache-dir /tmp/kt.whl && \
+    rm /tmp/kt.whl && \
+    chmod +x /usr/local/bin/kt-aio-entrypoint.sh
+
+USER kt
+WORKDIR /home/kt
+EXPOSE 8001 8100
+VOLUME /home/kt/.kohakuterrarium
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=5 \
+    CMD wget -q -O- http://127.0.0.1:8001/healthz || exit 1
+
+ENTRYPOINT ["tini", "--", "/usr/local/bin/kt-aio-entrypoint.sh"]

@@ -1,0 +1,37 @@
+# Distributed deployment, WORKER side.
+#
+# Run on each worker box. Point KT_HOST_URL at the public-facing
+# reverse proxy on your host machine (e.g. wss://kt.example.com/lab).
+#
+# Token setup: paste the token from the host into a local file:
+#   mkdir -p secrets
+#   echo "<token-from-host>" > secrets/kt_host_token
+
+services:
+  worker:
+    image: ghcr.io/kohaku-blueleaf/kohakuterrarium-client:1.5.0
+    container_name: kt-worker
+    restart: unless-stopped
+    environment:
+      KT_HOST_URL: wss://kt.example.com/lab
+      KT_HOST_TOKEN_FILE: /run/secrets/kt_host_token
+      # Use the box's hostname so each worker is uniquely named in
+      # the cluster. Override if multiple workers run on one box.
+      KT_CLIENT_NAME: ${HOSTNAME:-worker-1}
+    volumes:
+      - worker-data:/home/kt/.kohakuterrarium
+    secrets:
+      - kt_host_token
+    # Uncomment if the worker box has a GPU you want creatures to use:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - capabilities: [gpu]
+
+secrets:
+  kt_host_token:
+    file: ./secrets/kt_host_token
+
+volumes:
+  worker-data:

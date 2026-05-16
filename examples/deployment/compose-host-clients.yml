@@ -1,0 +1,77 @@
+# Host + multiple workers on the same machine, in separate containers.
+#
+# Use case: you want PROCESS isolation between workers (e.g. so each
+# worker can hold its OWN Codex OAuth login, its own api_keys.yaml,
+# its own session store).  The lab transport uses the docker network's
+# internal DNS — workers reach the host via the service name `host`.
+#
+# Token is read from a docker secret. Generate one first:
+#   mkdir -p secrets
+#   openssl rand -hex 24 > secrets/kt_host_token
+#
+# Usage:
+#   docker compose -f compose-host-clients.yml up -d
+
+services:
+  host:
+    image: ghcr.io/kohaku-blueleaf/kohakuterrarium-host:1.5.0
+    container_name: kt-host
+    restart: unless-stopped
+    ports:
+      - "8001:8001"        # frontend + HTTP API + chat WS
+      # Lab port not exposed to the host machine — only the docker
+      # network. Uncomment to allow workers from OTHER machines.
+      # - "8100:8100"
+    environment:
+      KT_HOST_TOKEN_FILE: /run/secrets/kt_host_token
+    volumes:
+      - host-data:/home/kt/.kohakuterrarium
+    secrets:
+      - kt_host_token
+
+  worker-cpu:
+    image: ghcr.io/kohaku-blueleaf/kohakuterrarium-client:1.5.0
+    container_name: kt-worker-cpu
+    restart: unless-stopped
+    depends_on:
+      host:
+        condition: service_healthy
+    environment:
+      KT_HOST_URL: ws://host:8100
+      KT_HOST_TOKEN_FILE: /run/secrets/kt_host_token
+      KT_CLIENT_NAME: worker-cpu
+    volumes:
+      - worker-cpu-data:/home/kt/.kohakuterrarium
+    secrets:
+      - kt_host_token
+
+  worker-gpu:
+    image: ghcr.io/kohaku-blueleaf/kohakuterrarium-client:1.5.0
+    container_name: kt-worker-gpu
+    restart: unless-stopped
+    depends_on:
+      host:
+        condition: service_healthy
+    environment:
+      KT_HOST_URL: ws://host:8100
+      KT_HOST_TOKEN_FILE: /run/secrets/kt_host_token
+      KT_CLIENT_NAME: worker-gpu
+    volumes:
+      - worker-gpu-data:/home/kt/.kohakuterrarium
+    secrets:
+      - kt_host_token
+    # NVIDIA GPU access — uncomment if the host has nvidia-container-toolkit
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - capabilities: [gpu]
+
+secrets:
+  kt_host_token:
+    file: ./secrets/kt_host_token
+
+volumes:
+  host-data:
+  worker-cpu-data:
+  worker-gpu-data:

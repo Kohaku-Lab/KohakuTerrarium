@@ -1,0 +1,38 @@
+# Distributed deployment, HOST side.
+#
+# Use case: host runs on an edge VPS, workers run on dedicated boxes.
+# TLS is terminated by a reverse proxy (nginx/Cloudflare/Caddy); the
+# container binds only to loopback so the reverse proxy is the only
+# public-facing surface.
+#
+# See examples/deployment/nginx-host.conf for the matching reverse-
+# proxy template.
+#
+# Token setup:
+#   mkdir -p secrets
+#   openssl rand -hex 24 > secrets/kt_host_token
+#   # Copy this token to each worker box (paste into its compose file).
+
+services:
+  host:
+    image: ghcr.io/kohaku-blueleaf/kohakuterrarium-host:1.5.0
+    container_name: kt-host
+    restart: unless-stopped
+    ports:
+      # Bind to loopback only — nginx/Caddy on the host machine
+      # listens on 443 and proxies to these ports.
+      - "127.0.0.1:8001:8001"
+      - "127.0.0.1:8100:8100"
+    environment:
+      KT_HOST_TOKEN_FILE: /run/secrets/kt_host_token
+    volumes:
+      - host-data:/home/kt/.kohakuterrarium
+    secrets:
+      - kt_host_token
+
+secrets:
+  kt_host_token:
+    file: ./secrets/kt_host_token
+
+volumes:
+  host-data:

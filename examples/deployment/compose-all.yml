@@ -1,0 +1,28 @@
+# Trivial all-in-one deployment — one container, frontend on :8001.
+#
+# Use case: "I just want it running on my home server / NAS / VM."
+# The container runs the lab host + an embedded local worker
+# connected via loopback. To add EXTERNAL workers later, expose the
+# lab port and run kohaku/client containers pointing at this one.
+#
+# Usage:
+#   docker compose -f compose-all.yml up -d
+#   docker logs kt | grep "Lab token:"   # token written to volume too
+#   open http://localhost:8001
+
+services:
+  kt:
+    image: ghcr.io/kohaku-blueleaf/kohakuterrarium-all:1.5.0
+    container_name: kt
+    restart: unless-stopped
+    ports:
+      - "8001:8001"        # frontend + HTTP API + chat WS
+      # - "8100:8100"      # uncomment to allow external workers
+    environment:
+      KT_CLIENT_NAME: "local-1"
+      # KT_HOST_TOKEN: "set-me-or-let-the-entrypoint-generate-one"
+    volumes:
+      - kt-data:/home/kt/.kohakuterrarium
+
+volumes:
+  kt-data:
