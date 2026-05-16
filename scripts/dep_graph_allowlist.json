@@ -19,13 +19,13 @@
   },
   {
     "file": "src/kohakuterrarium/cli/serve.py",
-    "line": 30,
+    "line": 34,
     "function": "_is_pid_alive",
     "reason": "Win32-only ctypes import inside `if sys.platform == 'win32'` branch"
   },
   {
     "file": "src/kohakuterrarium/cli/serve.py",
-    "line": 31,
+    "line": 35,
     "function": "_is_pid_alive",
     "reason": "Win32-only ctypes.wintypes import inside `if sys.platform == 'win32'` branch"
   },
@@ -259,7 +259,7 @@
   },
   {
     "file": "src/kohakuterrarium/cli/lab_client.py",
-    "line": 146,
+    "line": 186,
     "function": "_run_worker",
     "reason": "test-only seam guarded by KT_TEST_LLM_SCRIPT env var; production runs never import the testing package"
   },

@@ -11,6 +11,12 @@ workers.
 import argparse
 
 import kohakuterrarium.studio  # noqa: F401 — registers terrarium.group_hooks
+from kohakuterrarium.cli._aliases import (
+    add_client_alias,
+    add_host_alias,
+    dispatch_client_alias,
+    dispatch_host_alias,
+)
 from kohakuterrarium.cli.auth import login_cli
 from kohakuterrarium.cli.config import add_config_subparser, config_cli
 from kohakuterrarium.cli.extension import extension_info_cli, extension_list_cli
@@ -29,6 +35,7 @@ from kohakuterrarium.cli.packages import (
 from kohakuterrarium.cli.resume import resume_cli
 from kohakuterrarium.cli.run import run_agent_cli
 from kohakuterrarium.cli.serve import add_serve_subparser, serve_cli
+from kohakuterrarium.cli.service import add_service_subparser, service_cli
 from kohakuterrarium.cli.version import format_version_report
 from kohakuterrarium.packages.resolve import resolve_package_path
 from kohakuterrarium.serving.web import run_desktop_app, run_web_server
@@ -359,6 +366,18 @@ def _build_parser() -> argparse.ArgumentParser:
     # Lab worker command (foreground)
     add_lab_client_subparser(subparsers)
 
+    # ── 1.5 distribution-infra aliases ────────────────────────────
+    # `kt host`   == `kt serve start --mode lab-host --foreground …`
+    # `kt client` == `kt lab-client …`
+    # These match the deployment-doc nomenclature (host / client) so
+    # operator instructions, systemd unit names, and Docker image
+    # names all read the same as the commands you actually type.
+    add_host_alias(subparsers)
+    add_client_alias(subparsers)
+
+    # ``kt service`` — systemd unit install / uninstall / status / edit
+    add_service_subparser(subparsers)
+
     internal_serve_parser = subparsers.add_parser(
         "__run-server", help=argparse.SUPPRESS
     )
@@ -501,6 +520,9 @@ COMMANDS: dict[str, callable] = {
         )
     ),
     "lab-client": lab_client_cli,
+    "host": dispatch_host_alias,
+    "client": dispatch_client_alias,
+    "service": service_cli,
     "extension": _dispatch_extension,
     "mcp": _dispatch_mcp,
 }

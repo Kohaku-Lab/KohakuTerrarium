@@ -1,0 +1,37 @@
+[Unit]
+Description=KohakuTerrarium Lab Host (HTTP + WebSocket + Lab WS)
+Documentation=https://github.com/Kohaku-Lab/KohakuTerrarium
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+StateDirectory=kohakuterrarium-host
+RuntimeDirectory=kohakuterrarium-host
+WorkingDirectory={home_dir}
+Environment=KT_CONFIG_DIR={home_dir}
+EnvironmentFile=-/etc/kohakuterrarium/host.env
+ExecStart={kt_bin} serve start --mode lab-host --foreground \
+    --host {http_host} --port {http_port} \
+    --lab-bind {lab_bind} \
+    --home-dir {home_dir}
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+
+# Hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

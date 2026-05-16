@@ -70,8 +70,20 @@ Issues = "https://github.com/Kohaku-Lab/KohakuTerrarium/issues"
 
 [project.scripts]
 kt = "kohakuterrarium.__main__:main"
+# `kt-aio` spawns lab-host + an embedded lab-client in one process.
+# Used by the kohaku/all Docker image's entrypoint and by the
+# `kohakuterrarium-all.service` systemd unit so the unit can call a
+# real ELF entry instead of bash.
+kt-aio = "kohakuterrarium.cli._aio_entrypoint:run"
 
 [project.optional-dependencies]
+# ── docs-only extras: these have no extra runtime deps, they're
+# named so operators can `pip install 'kohakuterrarium[host]'` /
+# `[client]` and have it work with the same wheel. Reserved for
+# future use if host- or client-specific deps appear.
+host = []
+client = []
+
 # ── demo: example agent-apps that need extra deps ────────────────────
 discord = [
     "discord.py>=2.0.0",
@@ -121,6 +133,7 @@ exclude = ["kohakuterrarium-frontend*"]
 "kohakuterrarium.builtin_skills" = ["**/*.md"]
 "kohakuterrarium.builtins.subagents" = ["*.md"]
 "kohakuterrarium.studio.editors" = ["templates_data/*.j2"]
+"kohakuterrarium.packaging.systemd" = ["*.template"]
 "kohakuterrarium" = ["web_dist/**/*", "app_icons/*"]
 
 [tool.pytest.ini_options]

@@ -8,6 +8,10 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from kohakuterrarium.cli._config_layers import (
+    apply_cli_to_overrides,
+    load_layered_config,
+)
 from kohakuterrarium.cli.version import get_git_info, get_package_version
 from kohakuterrarium.serving.web import run_web_server
 from kohakuterrarium.utils.logging import enable_stderr_logging
@@ -205,7 +209,48 @@ def _wait_until_bound(pid: int, timeout: float = 30.0) -> str:
     return "slow"
 
 
+def _apply_host_layered_config(args: argparse.Namespace) -> None:
+    """Fill empty argparse defaults from YAML / env layers.
+
+    CLI flags still win when the operator passes them explicitly;
+    layered config only fills the ``--port``-was-default case so a
+    systemd ``EnvironmentFile`` or ``/etc/kohakuterrarium/host.yaml``
+    can change the effective bind without editing the unit file.
+    """
+    overrides = apply_cli_to_overrides(
+        args,
+        {
+            "host": ("http", "host"),
+            "port": ("http", "port"),
+            "lab_bind": ("lab", "bind"),
+            "lab_token": ("lab", "token"),
+            "home_dir": ("home_dir",),
+            "log_level": ("log_level",),
+        },
+    )
+    # Drop CLI overrides that are still at their argparse default
+    # (so YAML / env can win); detect by comparing to the parser's
+    # advertised defaults.
+    if args.host == "127.0.0.1":
+        overrides.get("http", {}).pop("host", None)
+    if args.port == 8001:
+        overrides.get("http", {}).pop("port", None)
+    cfg = load_layered_config("host", overrides)
+    args.host = cfg["http"]["host"]
+    args.port = int(cfg["http"]["port"])
+    lab_bind = cfg["lab"].get("bind") or ""
+    lab_token = cfg["lab"].get("token") or ""
+    if lab_bind and not getattr(args, "lab_bind", ""):
+        args.lab_bind = lab_bind
+    if lab_token and not getattr(args, "lab_token", ""):
+        args.lab_token = lab_token
+    home = cfg.get("home_dir") or ""
+    if home and not getattr(args, "home_dir", ""):
+        args.home_dir = home
+
+
 def serve_start_cli(args: argparse.Namespace) -> int:
+    _apply_host_layered_config(args)
     # ``--home-dir`` re-homes every config_dir() consumer (api keys,
     # OAuth tokens, profiles, MCP servers, sessions). Set BEFORE
     # spawning the daemon — subprocess inherits KT_CONFIG_DIR.

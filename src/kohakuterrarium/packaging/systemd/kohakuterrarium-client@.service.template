@@ -1,0 +1,32 @@
+[Unit]
+Description=KohakuTerrarium Lab Client (worker %i)
+Documentation=https://github.com/Kohaku-Lab/KohakuTerrarium
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+StateDirectory=kohakuterrarium-client/%i
+WorkingDirectory={home_dir_base}/%i
+Environment=KT_CONFIG_DIR={home_dir_base}/%i
+EnvironmentFile=/etc/kohakuterrarium/client.env
+EnvironmentFile=-/etc/kohakuterrarium/client.%i.env
+ExecStart={kt_bin} lab-client \
+    --host ${{KT_HOST_URL}} \
+    --token ${{KT_HOST_TOKEN}} \
+    --name %i \
+    --home-dir {home_dir_base}/%i
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+
+[Install]
+WantedBy=multi-user.target

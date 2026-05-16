@@ -15,6 +15,7 @@ import os
 import signal
 import sys
 
+from kohakuterrarium.cli._config_layers import load_layered_config
 from kohakuterrarium.laboratory import ClientConfig
 from kohakuterrarium.laboratory._internal.client import ClientConnector
 from kohakuterrarium.laboratory._internal.transport_ws import WebSocketTransport
@@ -55,19 +56,24 @@ logger = get_logger(__name__)
 
 
 def _build_parser(parser: argparse.ArgumentParser) -> None:
+    # ``--host`` / ``--token`` / ``--name`` are NOT ``required=True``
+    # here so the layered-config loader (env-vars + YAML) can supply
+    # them when this command runs under systemd with an
+    # ``EnvironmentFile``.  ``lab_client_cli`` validates the resolved
+    # values and prints a clear error if any are still missing.
     parser.add_argument(
         "--host",
-        required=True,
+        default="",
         help="lab-host WebSocket URL, e.g. ws://127.0.0.1:8100",
     )
     parser.add_argument(
         "--token",
-        required=True,
+        default="",
         help="shared token (must match the lab-host's --lab-token)",
     )
     parser.add_argument(
         "--name",
-        required=True,
+        default="",
         help="this worker's client name (must be unique on the host)",
     )
     parser.add_argument(
@@ -108,6 +114,40 @@ def add_lab_client_subparser(subparsers) -> None:
 
 
 def lab_client_cli(args: argparse.Namespace) -> int:
+    cfg = load_layered_config("client")
+    # CLI > layered config (env / YAML / defaults).  Only fill empty
+    # argparse defaults so a flag the user typed always wins.
+    if not args.host:
+        args.host = cfg.get("host_url") or ""
+    if not args.token:
+        args.token = cfg.get("host_token") or ""
+    if not args.name:
+        args.name = cfg.get("client_name") or ""
+    if not getattr(args, "home_dir", ""):
+        args.home_dir = cfg.get("home_dir") or ""
+    if not getattr(args, "session_dir", ""):
+        args.session_dir = cfg.get("session_dir") or ""
+    if args.heartbeat_interval == 5.0 and cfg.get("heartbeat_interval"):
+        args.heartbeat_interval = float(cfg["heartbeat_interval"])
+    if args.log_level == "INFO" and cfg.get("log_level"):
+        args.log_level = cfg["log_level"]
+
+    missing = [
+        flag
+        for flag, value in (
+            ("--host (or KT_HOST_URL)", args.host),
+            ("--token (or KT_HOST_TOKEN)", args.token),
+            ("--name (or KT_CLIENT_NAME)", args.name),
+        )
+        if not value
+    ]
+    if missing:
+        print(
+            "lab-client: missing required configuration: " + ", ".join(missing),
+            file=sys.stderr,
+        )
+        return 2
+
     # Always a foreground process: route logs to stderr so the user
     # can actually see them.  Setting KT_LOG_STDERR alone isn't
     # enough — ``get_logger`` may have already initialised the
