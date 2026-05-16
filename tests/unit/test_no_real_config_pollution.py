@@ -46,6 +46,14 @@ def _is_runtime_state(p: Path) -> bool:
     except ValueError:
         return False
     parts = rel.parts
+    # Python's import system writes ``__pycache__/*.pyc`` next to any
+    # imported module — including modules under
+    # ``packages/<pkg>/<...>/`` from ``kt install``ed packages.  These
+    # are interpreter-managed bytecode caches, not framework config
+    # writes.  Skip them so simply importing an installed package
+    # during the test run doesn't trip the leak guard.
+    if "__pycache__" in parts or any(part.endswith(".pyc") for part in parts):
+        return True
     for sub in _RUNTIME_STATE_SUBDIRS:
         sub_parts = tuple(sub.split("/"))
         if parts[: len(sub_parts)] == sub_parts:
