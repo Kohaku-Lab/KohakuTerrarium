@@ -2701,8 +2701,11 @@ async def _drive_journey(
             # sleeps race the pipeline on slow Windows / 3.13+ CI
             # runners.  Poll the /events endpoint until the tool_result
             # carrying the cross-cluster marker arrives or a generous
-            # deadline expires.
-            deadline = asyncio.get_event_loop().time() + 10.0
+            # deadline expires.  macOS 3.13 specifically has been seen
+            # to need >10s for the kqueue selector + lab WebSocket to
+            # drain the tool_result event through the mirror writer.
+            deadline = asyncio.get_event_loop().time() + 30.0
+            last_tool_results: list[dict] = []
             while asyncio.get_event_loop().time() < deadline and not cross_err_seen:
                 rr2 = await asyncio.wait_for(
                     host.http.get(
@@ -2713,6 +2716,17 @@ async def _drive_journey(
                 )
                 if rr2.status_code == 200:
                     evts = rr2.json().get("events") or []
+                    # Snapshot every tool_result we see so the failure
+                    # message shows whether the tool fired at all and
+                    # what error it actually carried — invaluable for
+                    # diagnosing macOS-only timing regressions where
+                    # the script may have desynced (off-by-one LLM
+                    # call) or the engine_is_in_cluster gate flipped.
+                    last_tool_results = [
+                        {"name": e.get("name"), "error": e.get("error")}
+                        for e in evts
+                        if isinstance(e, dict) and e.get("type") == "tool_result"
+                    ]
                     for e in evts:
                         if not isinstance(e, dict):
                             continue
@@ -2735,7 +2749,8 @@ async def _drive_journey(
             cross_err_seen,
             "expected a tool_result event on graph_a with error mentioning "
             "'cross-cluster' and 'CF-7' so the LLM/user can distinguish a "
-            "typo from a cross-worker miss; found none in /events",
+            "typo from a cross-worker miss; observed tool_results="
+            f"{last_tool_results!r}",
         )
 
     # === 29c4. /command framework command (compact / status) ====
