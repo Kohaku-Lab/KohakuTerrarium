@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 
+import pytest
 
 from kohakuterrarium import studio as studio_pkg
 
@@ -39,14 +40,22 @@ class TestStudioInitHooks:
         # With no workspace the hook surfaces the installed-package
         # creature catalog; each entry must carry a resolvable ref +
         # name + source so a privileged node could spawn it.
+        # On a clean install / CI runner there may be NO packages —
+        # that's a valid empty state, not a failure. We still
+        # exercise the hook to confirm it runs and that anything it
+        # DOES return has the right shape; the kt-biome-specific
+        # assertion is gated on kt-biome actually being installed.
         out = studio_pkg._spawnable_hook(workspace=None)
-        assert out, "expected at least the kt-biome package creatures"
+        assert isinstance(out, list)
         for entry in out:
             assert entry["ref"].startswith("@")
             assert entry["name"]
             assert entry["source"]
-        # 'general' is the canonical base creature shipped by kt-biome.
-        assert any(e["name"] == "general" for e in out)
+        if not out:
+            pytest.skip("no installed packages on this runner — nothing to enumerate")
+        if any(e["source"] == "kt-biome" for e in out):
+            # 'general' is the canonical base creature shipped by kt-biome.
+            assert any(e["name"] == "general" for e in out)
 
 
 class TestResolveWorkspaceHook:

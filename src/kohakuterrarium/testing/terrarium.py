@@ -183,6 +183,13 @@ class TestTerrariumBuilder:
     is returned ready-started so tests can ``async with`` it directly.
     """
 
+    # Tell pytest to skip auto-collection — the class name starts with
+    # "Test" only because it BUILDS test fixtures, it isn't itself a
+    # test class.  Without this, pytest emits a ``PytestCollectionWarning``
+    # at every importing test module ("cannot collect TestTerrariumBuilder
+    # because it has a __init__ constructor").
+    __test__ = False
+
     def __init__(self) -> None:
         self._creatures: list[_CreatureSpec] = []
         self._channels: list[_ChannelSpec] = []

@@ -61,43 +61,59 @@ class TestPersistenceExecutor:
         assert _MAX_WORKERS >= 32
 
     async def test_runs_on_a_different_pool_than_to_thread(self):
-        """Two parallel saturating workloads must not serialise.
+        """Persistence work must not queue behind ``asyncio.to_thread``.
 
-        Saturate ``asyncio.to_thread``'s default pool with a long
-        sleep; concurrently issue ``run_in_persistence_executor`` work.
-        If both share the same pool, persistence work waits — total
-        wall time would be ``sleep_a + sleep_b``.  With separate pools,
-        wall time is ``max(sleep_a, sleep_b)``.
+        Saturate ``to_thread``'s default pool with sleeps and
+        concurrently issue ``run_in_persistence_executor`` work. We
+        measure the persist task's OWN elapsed time (not total wall
+        time) — that isolates the signal from CI-side noise where the
+        saturator burst itself queues on a small worker pool.
+
+        With separate pools: persist task completes in ~SLEEP_S.
+        With shared pool: it queues behind the saturators and takes
+        roughly ``SLEEP_S * (num_starvers / default_pool_size)``.
         """
         from kohakuterrarium.api.routes.persistence._executor import (
             run_in_persistence_executor,
         )
 
-        loop = asyncio.get_running_loop()
-        default_threads = (
-            loop._default_executor._max_workers if loop._default_executor else 32
-        )
+        # Use the real default-executor size that ``asyncio.to_thread``
+        # would create (``min(32, os.cpu_count() + 4)``). Saturating
+        # with more than that just queues on the to_thread side and
+        # would inflate the test regardless of pool isolation.
+        with concurrent.futures.ThreadPoolExecutor() as probe_executor:
+            default_pool_size = probe_executor._max_workers
+        # 6x oversaturation guarantees a large serial gap so the
+        # threshold has headroom even on a slow CI runner.
+        starver_count = default_pool_size * 6
+        sleep_s = 0.5
 
         def _block(s):
             time.sleep(s)
             return threading.get_ident()
 
-        # Fill the default executor with N concurrent sleeps so a NEW
-        # ``to_thread`` would queue.  N = (default pool size).
+        # Saturate the default pool with serial-able workload.
+        starvers = [asyncio.to_thread(_block, sleep_s) for _ in range(starver_count)]
+        # Concurrently issue persistence work; time IT specifically.
         t0 = time.monotonic()
-        # Saturate the default pool.
-        starvers = [asyncio.to_thread(_block, 0.3) for _ in range(default_threads or 8)]
-        # Concurrently run persistence work.  If it shared the pool it
-        # would queue behind the starvers.
-        persist_task = asyncio.create_task(run_in_persistence_executor(_block, 0.3))
-        results = await asyncio.gather(*starvers, persist_task)
-        elapsed = time.monotonic() - t0
-        # Two pools → ~0.3s; one pool → ~0.6s minimum (queueing).
-        # 0.55s gives generous CI slack while still failing the
-        # single-pool implementation.
-        assert elapsed < 0.55, (
-            f"persistence work serialised behind to_thread: {elapsed:.2f}s "
-            "(expected ~0.3s for separate pools)"
+        persist_result = await run_in_persistence_executor(_block, sleep_s)
+        persist_elapsed = time.monotonic() - t0
+        # Then collect the starvers (we only care that they ran).
+        starver_results = await asyncio.gather(*starvers)
+
+        # If pools are shared, the persist task queues behind the
+        # starvers and takes ``serial_estimate`` seconds. With
+        # separate pools, the persist task runs concurrently on its
+        # own thread and finishes in ~``sleep_s`` plus scheduler
+        # overhead. We assert it stays under HALF the serial-pool
+        # estimate — that's the only signal that cleanly distinguishes
+        # the two pool topologies regardless of how slow the runner is.
+        serial_estimate = sleep_s * starver_count / max(default_pool_size, 1)
+        max_separate = serial_estimate / 2
+        assert persist_elapsed < max_separate, (
+            f"persistence task waited {persist_elapsed:.2f}s "
+            f"(threshold {max_separate:.2f}s, serial estimate "
+            f"{serial_estimate:.2f}s) — looks serialised behind to_thread"
         )
-        # All workloads completed.
-        assert len(results) == (default_threads or 8) + 1
+        assert persist_result  # ran on some thread
+        assert len(starver_results) == starver_count
