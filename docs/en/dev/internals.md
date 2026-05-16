@@ -11,8 +11,7 @@ tags:
 Implementation-level map of the runtime, grouped into creature runtime, Terrarium engine, and Studio/API management layers.
 Reader is assumed to have `src/kohakuterrarium/` open alongside this
 doc. Concept docs under `../concepts/` explain *why*; this explains
-*where*. The public Python API reference (`plans/inventory-python-api.md`)
-has signatures.
+*where*.
 
 Sixteen flows are documented below. They are grouped as:
 
@@ -64,7 +63,7 @@ tears everything down in reverse order. The agent owns: `llm`,
 `compact_manager`, `plugins`.
 
 See [concepts/foundations/composing-an-agent.md](../concepts/foundations/composing-an-agent.md)
-for the conceptual picture. API signatures: `plans/inventory-python-api.md` §Core Agent Lifecycle.
+for the conceptual picture.
 
 ### 1.2 Controller loop and event model
 
@@ -129,7 +128,6 @@ Invariants (enforced in `agent_handlers.py` and `executor.py`):
 
 See [concepts/modules/tool.md](../concepts/modules/tool.md) and
 [impl-notes/stream-parser.md](../concepts/impl-notes/stream-parser.md).
-API: `plans/inventory-python-api.md` §Tool Execution.
 
 ### 1.4 Sub-agent dispatch
 
@@ -469,11 +467,4 @@ something.
   sessions. Shared state goes through `environment.shared_channels`,
   period.
 
-If you change any flow, re-check these. The inventory
-(`plans/inventory-runtime.md`) is the source of truth and should be
-updated alongside the code.
-
-TODO: the inventory does not yet cover the `compose/` package in
-full detail (beyond what's here), the `commands/` framework-command
-runtime, or the output router state machine. Expand those when the
-next inventory pass lands.
+If you change any flow, re-check these.

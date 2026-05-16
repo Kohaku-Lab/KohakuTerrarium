@@ -200,6 +200,51 @@ Model Context Protocol — 一個把工具暴露給 LLM 的外部協定。Kohaku
 
 當上下文快滿時，把舊的對話回合摘要掉的背景流程。非阻塞：控制器在 summariser 工作時繼續執行，切換動作在回合之間原子地完成。完整說明：[非阻塞壓縮](impl-notes/non-blocking-compaction.md)。
 
+## Laboratory (Lab)
+
+位於 Studio 與 Terrarium 之間的網路層，讓一個主機協調遠端 worker
+上的生物。基於 WebSocket，搭配自訂的二進位 envelope 讓檔案 blob
+與 session 事件能以原始形式承載。Studio 與 Terrarium 設計上不會
+察覺 Lab 的存在。完整說明：[laboratory](laboratory.md)。
+
+## Host / 主機
+
+執行 `kt serve --mode lab-host` 的行程。擁有 Studio + HostEngine
+（Lab 的伺服器側）。接受 worker 連線；在 lab-host 模式下
+**預設不執行任何生物**（recipe 可以使用協調引擎）。
+
+## Worker / 工作節點
+
+執行 `kt lab-client` 的行程。承載生物，透過 Lab adapter 把它們
+暴露給主機。有自己的檔案系統、自己的設定目錄、最好還有自己的
+憑證儲存。
+
+## Node / 節點
+
+主機或 worker —— 任何說 Lab 協定的行程。以 `node_id` 定址
+（主機是 `_host`，worker 是 client 的 `--name`）。
+
+## Adapter / 轉接器
+
+註冊在節點上、處理一個或多個 APP namespace 的 class。每個 Lab
+功能的 worker 側都是一個 adapter：`TerrariumRuntimeAdapter`
+（引擎操作）、`TerrariumSessionAdapter`（history + resume）、
+`TerrariumFilesAdapter`（檔案 IO）、`StudioIdentityAdapter`
+（每節點憑證）、…
+
+## Cluster / 叢集
+
+一組跨節點連線的圖，形成一個邏輯的多生物圖。記錄在
+`MultiNodeTerrariumService._cluster_links`。從使用者觀點看，
+列舉、歷史、chat、resume 都把 cluster 摺疊成單一 session。
+
+## Mirror / 鏡像
+
+主機側的 worker session 檔案複本。由 worker 上的
+`SessionEventTee` 透過 `terrarium.session.sync` APP namespace
+推送 meta + events，由主機的 `SessionMirrorWriter` 寫入。每個
+Studio 讀取 API 都從鏡像出餐。
+
 ## 延伸閱讀
 
 - [核心概念首頁](README.md) — 完整章節地圖。

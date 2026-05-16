@@ -200,6 +200,52 @@ Model Context Protocol — 一个把工具暴露给 LLM 的外部协定。Kohaku
 
 当上下文快满时，把旧的对话回合摘要掉的背景流程。非阻塞：控制器在 summariser 工作时继续执行，切换动作在回合之间原子地完成。完整说明：[非阻塞压缩](impl-notes/non-blocking-compaction.md)。
 
+## Laboratory (Lab) / Laboratory（Lab）
+
+Studio 与 Terrarium 之间的网络层，让一个主机能够协调远端工
+作节点上的生物。基于 WebSocket，搭配一个自定义二进制信封，
+让文件 blob 和 session 事件以原始字节穿行。Studio 与 Terrarium
+被设计为察觉不到 Lab 的存在。完整说明：[Laboratory](laboratory.md)。
+
+## Host / 主机
+
+运行 `kt serve --mode lab-host` 的进程。拥有 Studio + HostEngine
+（Lab 的服务端）。接受工作节点连接；在 lab-host 模式下 **默
+认不运行任何生物**（recipe 可使用 coordination engine）。
+
+## Worker / 工作节点
+
+运行 `kt lab-client` 的进程。托管生物，并通过 Lab 适配器把
+它们暴露给主机。拥有自己的文件系统、自己的配置目录，并理想
+地拥有自己的凭据存储。
+
+## Node / 节点
+
+主机或工作节点 —— 任何说 Lab 协议的进程。通过 `node_id`
+（主机为 `_host`，工作节点为 client 的 `--name`）寻址。
+
+## Adapter / 适配器
+
+注册在节点上、用于处理一个或多个 APP 命名空间的类。每个 Lab
+功能的工作节点侧实现都是一个适配器：`TerrariumRuntimeAdapter`
+（引擎操作）、`TerrariumSessionAdapter`（历史 + resume）、
+`TerrariumFilesAdapter`（文件 IO）、`StudioIdentityAdapter`
+（每节点凭据）、…
+
+## Cluster / 集群
+
+一组跨节点连接、组成单个逻辑多生物图的图。由
+`MultiNodeTerrariumService._cluster_links` 跟踪。列表、历
+史、聊天、resume 都会把这个集群折叠成用户视角下的单个
+session。
+
+## Mirror / 镜像
+
+工作节点 session 文件在主机侧的副本。由工作节点上的
+`SessionEventTee` 通过 `terrarium.session.sync` APP 命名空
+间推送 meta + 事件，再由主机的 `SessionMirrorWriter` 写入。
+每一个 Studio 读 API 都从镜像提供服务。
+
 ## 延伸阅读
 
 - [核心概念首页](README.md) — 完整章节地图。

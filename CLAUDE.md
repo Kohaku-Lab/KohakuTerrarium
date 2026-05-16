@@ -56,8 +56,80 @@ KohakuTerrarium is a Python framework that enables building any kind of agent sy
 ### Post-impl tasks
 1. Verify all your impl follow the rules (ESPECIALLY in-function import!)
 2. `black src/ tests/` and `ruff check src/ tests/`
-3. Ensure new stuff has corresponding test-suite
+3. Ensure new stuff has corresponding tests in the right tier (see "Test
+   suite" below) — new unit tests pin behaviour; touched folders/journeys
+   get their integration/e2e workflow extended, not a new test function
 4. Logically separated git commits and push (user may explicitly say "draft" — if so, don't push)
+
+### Audit loop (multi-step impl work — REQUIRED)
+
+For any task larger than a one-file change, do NOT stop at "tests
+pass." Run this loop until it converges:
+
+1. **Implement** the slice.
+2. **Write new tests** that pin the behaviour you added. Negative
+   cases (the bug you'd accidentally introduce) count more than
+   positive cases.
+3. **Execute the full test suite** for the affected tiers
+   (unit/integration/e2e + frontend vitest). Lint too (`black`,
+   `ruff`, `prettier`).
+4. **Audit** the diff with a critical eye — three categories:
+   - **Clear bugs:** typos, wrong field names, off-by-ones,
+     `await` missing on async calls, dead branches.
+   - **Integrity bugs:** invariants you broke — state that's
+     supposed to be in sync now drifts, two writers race a single
+     dict, a cache outlives the thing it caches.
+   - **Behavior bugs:** the code does what's typed but the wrong
+     thing for the spec — wrong default, silently-swallowed
+     error, condition gates the wrong branch.
+5. **If you find any bug the tests didn't catch:** first augment
+   the test so it *would* have caught it, confirm the augmented
+   test fails on the unfixed code, then fix the bug. Tests that
+   miss real bugs are evidence the test suite is the bug; patching
+   tests first prevents the same blind spot next time.
+6. **Loop** to step 3. Stop only when the audit finds nothing AND
+   every test is green.
+
+This loop is the difference between "I wrote code and tests passed"
+and "I delivered working code." Treat the loop as part of the
+definition-of-done, not optional polish.
+
+### Test suite (three tiers)
+
+`tests/` has three tiers, each a *different shape of test*, not just a
+different size. `tests/README.md` is the full spec — the summary:
+
+- **`tests/unit/` — one source file → one test (or test-class).** Tests
+  an individual class / method against its real dependencies
+  (deterministic stubs only for genuine I/O). Shape checks (`isinstance`,
+  `key in dict`, `is not None`) are legitimate **here and only here**.
+  Target: 95–100% line coverage per core-lib file; any sub-95% file
+  needs a written justification in the test or a tracking issue.
+- **`tests/integration/` — one core-lib folder → one test-class.** Each
+  test method runs a **complete feature workflow end-to-end in a single
+  function** (init → drive → read back → resume → verify), mirroring how
+  the real consumer drives that folder. Splitting a workflow into
+  separate "init" / "read" / "resume" tests is unit-tier thinking and
+  cannot catch cross-step bugs. The integration test for a folder *is*
+  that folder's most comprehensive usage example.
+- **`tests/e2e/` — whole project → a handful of fat journey tests.** Each
+  is a single function simulating an entire user session (chat → switch
+  model → toggle plugin → interrupt → resume → branch …). ~10 journeys
+  cover `{programmatic, HTTP+WS} × {creature, terrarium, studio}` +
+  multi-node. e2e answers one question: *is the system runnable, end to
+  end?*
+
+Tier discipline: **behavior asserts, not shape asserts** (every mutation
+test observes the side effect); **real collaborators, not mocks** (the
+only seam is the LLM — `kohakuterrarium.testing.llm.ScriptedLLM`,
+monkeypatched at BOTH `bootstrap.llm.create_llm_provider` and
+`bootstrap.agent_init.create_llm_provider`); **to raise integration/e2e
+coverage, fatten the existing workflow functions — do NOT add more test
+functions.** Carve-out files (3rd-party providers, platform PTY,
+end-user CLI/UI, the pywebview boot path) are listed in
+`tests/README.md` and excluded from coverage targets.
+
+All three tiers run in CI on the full OS × Python matrix.
 
 ## Core Architecture Concepts (CRITICAL)
 
@@ -536,7 +608,7 @@ Key files: `session/store.py`, `session/output.py`, `session/resume.py`, `sessio
 CI is defined in `.github/workflows/ci.yml`. PRs are not reviewed until CI is green on the contributor's fork. The matrix:
 
 - **Lint**: `ruff check src/ tests/` + `black --check src/ tests/` (Python 3.13)
-- **Tests**: `pytest tests/unit/` on Python 3.10, 3.11, 3.12, 3.13, 3.14 × Linux / Windows / macOS (3.14 on Windows excluded — pythonnet has no wheel)
+- **Tests**: `pytest tests/unit/` then `pytest tests/integration/ tests/e2e/` — all three tiers, on Python 3.10, 3.11, 3.12, 3.13, 3.14 × Linux / Windows / macOS (3.14 on Windows excluded — pythonnet has no wheel)
 - **File-size guards**: `pytest tests/unit/test_file_sizes.py`
 - **Frontend**: `npm ci` + `npm run format:check` + `npm run build` in `src/kohakuterrarium-frontend/`, plus check that build output landed in `src/kohakuterrarium/web_dist/`
 - **Wheel build**: build wheel, install into clean venv, run `kt --help` and `kt app --help`

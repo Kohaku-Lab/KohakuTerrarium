@@ -23,8 +23,9 @@ imports, logging instead of `print`).
 
 - [Architecture](internals.md) — implementation-level map of the 16
   runtime flows. Read alongside `src/kohakuterrarium/`.
-- [Testing](testing.md) — how to run the suite and use the
-  `ScriptedLLM` / `TestAgentBuilder` harness.
+- [Testing](testing.md) — three-tier discipline (unit / integration /
+  e2e), audit loop, the `ScriptedLLM` / `TestAgentBuilder` harness,
+  and the multi-node test patterns (`RealLabWorker`).
 - [Dependency rules](dependency-graph.md) — the leaf-first import
   discipline and how to verify with `scripts/dep_graph.py`.
 - [Frontend](frontend.md) — Vue 3 dashboard, panel registration,

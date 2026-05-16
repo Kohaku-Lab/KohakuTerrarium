@@ -46,7 +46,7 @@ The last two years produced a striking number of agent products: Claude Code, Co
 
 KohakuTerrarium's job is to put that substrate in one place so the next agent shape costs a config file and a few custom modules, not a new repo.
 
-The core abstraction is the **creature**: a standalone agent with its own controller, tools, sub-agents, triggers, memory, and I/O. Creatures are hosted by a **Terrarium** engine: a graph runtime for channels, lifecycle, output wiring, hot-plug, and the topology + session bookkeeping that follows graph changes. A **Studio** layer sits above that for catalog, identity, active sessions, persistence, live traces, and web/desktop/API management. Everything is Python, so agents can be embedded inside tools, triggers, plugins, and outputs of other agents.
+The core abstraction is the **creature**: a standalone agent with its own controller, tools, sub-agents, triggers, memory, and I/O. Creatures are hosted by a **Terrarium** engine: a graph runtime for channels, lifecycle, output wiring, hot-plug, and the topology + session bookkeeping that follows graph changes. A **Studio** layer sits above that for catalog, identity, active sessions, persistence, live traces, and web/desktop/API management. Optionally, a **Laboratory** transport layer can split host and engine across machines — Studio + Terrarium stay unchanged, with a WebSocket-based network hop slotted in between. Everything is Python, so agents can be embedded inside tools, triggers, plugins, and outputs of other agents.
 
 For out-of-the-box creatures you can try today, see [**kt-biome**](https://github.com/Kohaku-Lab/kt-biome) — the showcase pack of useful agents and plugins built on top of the framework.
 
@@ -228,6 +228,12 @@ User / API / Desktop
 +----------------------+
         |
         v
++----------------------+     optional: only in multi-node mode
+| Laboratory (Lab)     |  WebSocket transport + custom envelope,
+|                      |  spans the host across N worker machines
++----------------------+     transparent to Studio + Terrarium
+        |
+        v
 +----------------------+     no LLM; owns structure
 | Terrarium Engine     |  creature graph, topology, channels,
 |                      |  hot-plug, output wiring, session
@@ -247,6 +253,7 @@ Sub-agents inside each creature
 ```
 
 - **Studio** is the management framework used by the web dashboard, desktop app, and HTTP API. It owns catalog views, identity/settings, active sessions, persistence, attach/resume, editors, and live traces. It does not reason.
+- **Laboratory (Lab)** is the optional network layer between Studio and Terrarium. In single-machine mode it is not even imported. In `--mode lab-host` it lets one host coordinate creatures on N worker machines via WebSocket: Studio still calls one `TerrariumService`, Terrarium still ships local channel sends, but a `MultiNodeTerrariumService` routes per-creature ops to the right worker and a session-event tee mirrors every worker's session file back to the host. See [Laboratory concept](docs/en/concepts/laboratory.md) and the [Laboratory guide](docs/en/guides/laboratory.md).
 - **Terrarium** is the runtime engine that hosts every running creature in the process. A standalone agent is a one-creature graph; a multi-creature team is a connected graph. The engine runs no LLM and has no reasoning loop, but it owns *structure*: which creatures share a connected component, which channels exist, where each turn-end output is delivered, which session store backs which graph, and the auto-merge / auto-split bookkeeping that follows topology changes.
 - **Privileged node** is a creature inside a graph that has been granted the `group_*` tools (graph editor: spawn / remove creatures, draw / delete channels, start / stop members). The recipe `root:` keyword promotes one node to privileged + applies the standard user-facing wiring (`report_to_root` channel, listen on every channel). Privilege can also be granted inline (`privileged: true`) or imperatively (`is_privileged=True`).
 - **Creature** owns reasoning: controller, tools, triggers, sub-agents, plugins, memory, I/O, prompts, and private state. Creatures do not need to know whether they are alone or part of a graph.

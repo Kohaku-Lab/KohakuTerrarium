@@ -135,7 +135,7 @@ python scripts/dep_graph.py --fail
 # Graphviz DOT output (pipe into `dot -Tsvg`)
 python scripts/dep_graph.py --dot > deps.dot
 
-# Render a matplotlib group + module plot into plans/
+# Render a matplotlib group + module plot into ./dep-graph.png
 python scripts/dep_graph.py --plot
 
 # Stats + cycles + import lint
@@ -158,8 +158,9 @@ Key outputs:
   imports. Optional/platform imports are auto-allowed; intentional
   exceptions live in `scripts/dep_graph_allowlist.json`.
 
-The `--plot` flag writes `plans/dep-graph.png` (group-level, circular
-layout). It is useful for PR review when a refactor shuffles edges.
+The `--plot` flag writes `dep-graph.png` in the current working
+directory (group-level, circular layout). It is useful for PR review
+when a refactor shuffles edges.
 
 ### When to run it
 

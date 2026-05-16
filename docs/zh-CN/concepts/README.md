@@ -25,6 +25,34 @@ tags:
 6. [边界](boundaries.md) — Creature 抽象是预设值而不是铁律；框架何时可以弯曲自己的抽象；框架何时根本不适合你。
 7. [词汇表](glossary.md) — 文件中用到的术语的白话解释。
 
+## 多机器部署
+
+你想让生物跑在和 dashboard 不同的机器上（GPU 服务器、沙箱
+VM、云节点）。
+
+1. [Terrarium](multi-agent/terrarium.md) —— Lab 包裹的引擎。
+2. [Studio](studio.md) —— Lab 在独立模式和多节点模式之间保
+   持完全一致的管理面。
+3. [Laboratory](laboratory.md) —— wire 协议、session 同步、
+   resume、identity 模型。
+4. 运维 playbook：[guides/laboratory.md](../guides/laboratory.md)。
+
+## 章节结构
+
+```
+concepts/
+├── foundations/         为什么存在；什么是 Agent；如何组合一个。
+├── modules/             每个 Creature 模块一篇。
+├── python-native/       Agent 作为 Python 值；compose 代数。
+├── multi-agent/         Terrarium 引擎 + 特权节点 + 动态图。
+├── studio.md            Terrarium 之上的管理层。
+├── laboratory.md        跨多台机器的网络层。
+├── impl-notes/          值得专门讲的特定实现选择。
+├── patterns.md          组合模块所产生的典型用法。
+├── boundaries.md        抽象是默认值，不是铁律。
+└── glossary.md          白话定义。
+```
+
 ## 实现笔记
 
 不是必读，但对想理解系统实际怎么运作的人 (通常是贡献者) 很有帮助：

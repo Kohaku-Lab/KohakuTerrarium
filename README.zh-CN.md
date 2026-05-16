@@ -46,7 +46,7 @@ KohakuTerrarium 是**构建 Agent 的框架** — 而不仅仅是另一个 Agent
 
 KohakuTerrarium 的目标就是将这些底层基础设施统一起来。这样，下一个新形态的 Agent 只需要一份配置文件和几个自定义模块，而无需开启一个新的代码库。
 
-核心抽象是 **智能体 (Creature)**：一个独立的 Agent，拥有自己的控制器、工具、子代理、触发器、记忆和 I/O。智能体由 **Terrarium** 引擎托管：它是负责通道、生命周期、输出连线、热插拔和会话挂载的图运行时。其上还有 **Studio** 管理层，负责目录、身份、活动会话、持久化、实时 trace，以及 Web / 桌面 / API 管理。所有组件都是原生 Python 对象，因此 Agent 可以被无缝嵌入到其他 Agent 的工具、触发器、插件或输出中。
+核心抽象是 **智能体 (Creature)**：一个独立的 Agent，拥有自己的控制器、工具、子代理、触发器、记忆和 I/O。智能体由 **Terrarium** 引擎托管：它是负责通道、生命周期、输出连线、热插拔和会话挂载的图运行时。其上还有 **Studio** 管理层，负责目录、身份、活动会话、持久化、实时 trace，以及 Web / 桌面 / API 管理。可选的 **Laboratory** 传输层能把主机与引擎拆到不同机器上 —— Studio + Terrarium 保持不变，中间嵌入一段基于 WebSocket 的网络跳转。所有组件都是原生 Python 对象，因此 Agent 可以被无缝嵌入到其他 Agent 的工具、触发器、插件或输出中。
 
 想立刻体验开箱即用 (OOTB) 的智能体，看 [**kt-biome**](https://github.com/Kohaku-Lab/kt-biome) — 官方扩展包，其中包含基于本框架构建的各种实用 Agent 和插件。
 
@@ -231,6 +231,12 @@ kt run @package/path/to/creature
 +----------------------+
         |
         v
++----------------------+     可选：仅在多节点模式下
+| Laboratory (Lab)     |  WebSocket 传输 + 自定义信封，
+|                      |  让一台主机横跨 N 台工作机器
++----------------------+     对 Studio + Terrarium 透明
+        |
+        v
 +----------------------+     无 LLM、无决策
 | Terrarium 引擎       |  智能体图、拓扑、通道、生命周期、
 |                      |  输出连线、会话挂载
@@ -247,6 +253,7 @@ Root 智能体              工作团队智能体
 ```
 
 - **Studio** 是 Web Dashboard、桌面 App 和 HTTP API 使用的管理门面。它负责目录视图、身份与设置、活动会话、持久化、attach/resume、编辑器和实时 trace；它不做推理。
+- **Laboratory (Lab)** 是 Studio 与 Terrarium 之间可选的网络层。在单机模式下连 import 都不会发生。在 `--mode lab-host` 下，它让一台主机通过 WebSocket 协调 N 台工作机器上的智能体：Studio 仍然只调用一个 `TerrariumService`，Terrarium 仍然投递本地的 channel send，但 `MultiNodeTerrariumService` 会把每个生物粒度的操作路由到对应的工作节点，并由 session-event tee 把每个工作节点的 session 文件镜像回主机。详见 [Laboratory 概念](docs/zh-CN/concepts/laboratory.md) 与 [Laboratory 使用指南](docs/zh-CN/guides/laboratory.md)。
 - **Terrarium** 是托管进程内所有运行中智能体的运行时引擎。独立 Agent 是一个单智能体图；多 Agent 团队则是 connected graph。引擎管理拓扑、通道、生命周期、热插拔、输出连线和会话挂载；没有 LLM，也不做决策。
 - **Root 智能体** 是可选的。它是由同一个 Terrarium 引擎托管的普通智能体，在概念上位于工作团队之外，并通过 terrarium 管理工具面向用户。
 - **智能体 (Creature)** 拥有推理能力：控制器、工具、触发器、子代理、插件、记忆、I/O、提示词和私有状态。它不需要知道自己是独立运行还是图中的一个节点。

@@ -25,6 +25,32 @@ tags:
 6. [邊界](boundaries.md) — 生物抽象是預設值而不是鐵律；框架何時可以彎曲自己的抽象；框架何時根本不適合你。
 7. [詞彙表](glossary.md) — 文件中用到的術語的白話解釋。
 
+## 跨機器部署
+
+如果你想讓生物執行在和 dashboard 不同的機器上（GPU 伺服器、
+sandbox VM、雲端節點），請依序讀：
+
+1. [生態瓶](multi-agent/terrarium.md) — Lab 包覆的引擎。
+2. [Studio](studio.md) — Lab 在單機與多節點之間保持一致的管理表面。
+3. [Laboratory](laboratory.md) — 線路協定、session 同步、resume、identity 模型。
+4. 操作員 playbook：[guides/laboratory.md](../guides/laboratory.md)。
+
+## 結構
+
+```
+concepts/
+├── foundations/         為什麼這個框架存在；什麼是 agent；如何組合一隻。
+├── modules/             每個生物模組一份文件。
+├── python-native/       Agent 作為 Python 值；compose 代數。
+├── multi-agent/         Terrarium 引擎 + 特權節點 + 動態圖。
+├── studio.md            Terrarium 之上的管理層。
+├── laboratory.md        跨多台機器的網路層。
+├── impl-notes/          值得教學的特定實作選擇。
+├── patterns.md          模組組合後浮現的典型用法。
+├── boundaries.md        抽象是預設，不是鐵律。
+└── glossary.md          白話的一段式定義。
+```
+
 ## 實作筆記
 
 不是必讀，但對想理解系統實際怎麼運作的人 (通常是貢獻者) 很有幫助：

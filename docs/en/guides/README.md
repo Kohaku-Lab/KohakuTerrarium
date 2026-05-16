@@ -47,6 +47,7 @@ If you want a guided first walk-through, go to [Tutorials](../tutorials/README.m
 ## Run it somewhere
 
 - [Serving](serving.md) — `kt web`, `kt app`, the `kt serve` daemon.
+- [Laboratory](laboratory.md) — multi-node deployments: `kt serve --mode lab-host` + `kt lab-client`, per-worker credentials, multi-node terrariums, cluster resume.
 - [Frontend Layout](frontend-layout.md) — web dashboard panels and presets.
 
 ## Learn from code

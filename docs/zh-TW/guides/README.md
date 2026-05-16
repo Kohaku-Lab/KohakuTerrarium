@@ -41,5 +41,6 @@ tags:
 
 - [套件](packages.md) — 透過 `kt install` 安裝、`kohaku.yaml` manifest、`@pkg/` 參照、發佈自己的套件。
 - [Serving](serving.md) — `kt serve` 提供的 HTTP API + WebSocket + 網頁 dashboard、`kt app` 提供桌面版。
+- [Laboratory](laboratory.md) — 多節點部署：`kt serve --mode lab-host` + `kt lab-client`、每個 worker 的憑證、多節點生態瓶、cluster resume。
 - [前端版面](frontend-layout.md) — Vue 3 dashboard 的組織方式、在哪裡擴充、事件從後端流到 UI 的路徑。
 - [範例](examples.md) — 內附範例生物、生態瓶、程式碼的導覽 — 先看哪個、為什麼。

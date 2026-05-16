@@ -8,10 +8,102 @@ tags:
 
 # Testing
 
-The test suite lives under `tests/` and splits into unit tests
-(`tests/unit/`) and integration tests (`tests/integration/`). There is
-a reusable harness under `src/kohakuterrarium/testing/` for constructing
-agents with fake LLMs.
+The test suite lives under `tests/` and splits into **three tiers**
+(`tests/unit/`, `tests/integration/`, `tests/e2e/`). Each tier is a
+*different shape of test*, not just a different size — see
+[Three-tier discipline](#three-tier-discipline) below. A reusable
+harness under `src/kohakuterrarium/testing/` (and `tests/e2e/_lab_harness.py`)
+covers fake LLMs, real lab workers, and journey scaffolding.
+
+## Three-tier discipline
+
+The tiering is enforced by the [CLAUDE.md](../../../CLAUDE.md) test
+convention. Read `tests/README.md` for the full spec; the summary:
+
+### `tests/unit/` — one source file → one test (or test-class)
+
+Tests an individual class / method against its real dependencies
+(deterministic stubs only for genuine I/O). **Shape checks**
+(`isinstance`, `key in dict`, `is not None`) are legitimate **here
+and only here**. Target: 95–100% line coverage per core-lib file;
+any sub-95% file needs a written justification in the test or a
+tracking issue.
+
+### `tests/integration/` — one core-lib folder → one test-class
+
+Each test method runs a **complete feature workflow end-to-end in a
+single function** (init → drive → read back → resume → verify),
+mirroring how the real consumer drives that folder. Splitting a
+workflow into separate "init" / "read" / "resume" tests is
+unit-tier thinking and cannot catch cross-step bugs. The
+integration test for a folder *is* that folder's most comprehensive
+usage example.
+
+### `tests/e2e/` — whole project → a handful of fat journey tests
+
+Each is a single function simulating an entire user session
+(chat → switch model → toggle plugin → interrupt → resume → branch
+…). ~10 journeys cover `{programmatic, HTTP+WS} × {creature,
+terrarium, studio}` plus multi-node. e2e answers one question:
+*is the system runnable, end to end?*
+
+### Tier rules
+
+- **Behavior asserts, not shape asserts.** Every mutation test
+  observes the side effect, not just the return shape.
+- **Real collaborators, not mocks.** The only seam is the LLM —
+  use `kohakuterrarium.testing.llm.ScriptedLLM`, monkeypatched at
+  **both** `bootstrap.llm.create_llm_provider` and
+  `bootstrap.agent_init.create_llm_provider`. Everything else is
+  real (real session store, real engine, real lab clients).
+- **To raise integration / e2e coverage, fatten the existing
+  workflow functions — do NOT add more test functions.** This is
+  the most common review comment for new contributors. A new
+  scenario goes inside the existing journey via the
+  [`_BugLog`](../../../tests/e2e/test_multinode_journey.py)
+  fail-accumulator pattern, not a new top-level test.
+- **All three tiers run in CI** on the full OS × Python matrix.
+
+### Carve-outs
+
+Some files are intentionally excluded from the 95% per-file
+coverage target — third-party providers (`llm/codex_provider.py`),
+platform PTY (`api/ws/pty.py`), the end-user CLI/UI
+(`builtins/cli_rich/*`, `builtins/tui/*`), the pywebview boot path.
+The full list is in `tests/README.md`.
+
+## Audit loop (required for multi-step impl work)
+
+For any task larger than a one-file change, do **not** stop at
+"tests pass." Run this loop until it converges:
+
+1. **Implement** the slice.
+2. **Write new tests** that pin the behaviour you added. Negative
+   cases (the bug you'd accidentally introduce) count more than
+   positive cases.
+3. **Execute the full test suite** for the affected tiers
+   (unit/integration/e2e + frontend vitest). Lint too (`black`,
+   `ruff`, `prettier`).
+4. **Audit** the diff with a critical eye — three categories:
+   - **Clear bugs:** typos, wrong field names, off-by-ones,
+     `await` missing on async calls, dead branches.
+   - **Integrity bugs:** invariants you broke — state that's
+     supposed to be in sync now drifts, two writers race a single
+     dict, a cache outlives the thing it caches.
+   - **Behavior bugs:** the code does what's typed but the wrong
+     thing for the spec — wrong default, silently-swallowed error,
+     condition gates the wrong branch.
+5. **If you find any bug the tests didn't catch:** first augment
+   the test so it *would* have caught it, confirm the augmented
+   test fails on the unfixed code, then fix the bug. Tests that
+   miss real bugs are evidence the test suite is the bug; patching
+   tests first prevents the same blind spot next time.
+6. **Loop** to step 3. Stop only when the audit finds nothing AND
+   every test is green.
+
+This loop is the difference between "I wrote code and tests
+passed" and "I delivered working code." Treat the loop as part of
+the definition-of-done, not optional polish.
 
 ## Running tests
 
@@ -213,6 +305,68 @@ Cross-component flows go under `tests/integration/`:
 
 If the subsystem has no existing test file, add one and match the
 naming convention.
+
+Full user journeys go under `tests/e2e/` — one fat function per
+journey. Examples:
+
+- `test_multinode_journey.py` — `{programmatic, HTTP+WS} × multi-node`,
+  drives two real lab workers (in-process via `RealLabWorker`)
+  through the entire dashboard surface: spawn, chat, cross-node
+  connect, hot-plug, close, list saved, resume, cluster resume.
+- `test_prog_studio.py`, `test_prog_terrarium.py` — programmatic
+  journeys exercising the Studio + Terrarium APIs directly.
+- `test_api_creature.py` — the dashboard's HTTP+WS surface for a
+  single creature.
+
+## Testing multi-node code
+
+Multi-node code (Lab adapters, `MultiNodeTerrariumService`,
+session sync, cluster fold) needs at least one worker to be
+meaningful. Three patterns:
+
+### Unit: `_FakeNode` / `_RecordingNode`
+
+When testing a worker-side adapter or `IdentityCache`, use a tiny
+fake that implements `LabSender` / `LabRegistrar`. Example:
+`tests/unit/laboratory/test_worker_session.py` builds a
+`_FakeEngine` + `_RecordingNode` and drives the attacher directly.
+No Lab transport is started — these are sub-millisecond.
+
+### Integration: `InProcTransport`
+
+For workflows that span the actual Lab dispatch logic
+(handshake → APP request → response), use `InProcTransport` from
+`laboratory/_internal/transport_inproc.py`. It implements the
+same `LabTransport` Protocol as the WebSocket transport but
+keeps everything in one event loop. See
+`tests/unit/laboratory/test_client_host.py::_start_host` for
+the canonical setup helper.
+
+### E2E: `RealLabWorker`
+
+The journey tier uses `tests/e2e/_lab_harness.RealLabWorker` —
+spins up a real `ClientConnector` with the full ten-adapter
+stack (runtime, events, attach, pty, broadcast, output-wire,
+files, deploy, session, identity-cache, catalog, identity)
+against a real `HostEngine` on a real WebSocket transport.
+Despite "real lab," it shares the test's event loop, so
+breakpoints work.
+
+For full prod-like isolation (separate process), `_lab_harness.py`
+also has a subprocess-launched variant — used in the multinode
+journey to verify Win32 process boundaries and signal handling.
+
+Conventions:
+
+- Spawn workers with `--home-dir` pointed at a `tmp_path`
+  subdirectory so each test has its own credential store.
+- Use the `_BugLog` fail-accumulator pattern (see
+  `test_multinode_journey.py`) for journeys that should report
+  multiple failures in one run instead of bailing on the first
+  red assertion.
+- Multi-node tests live alongside single-node ones — there's no
+  separate `tests/multinode/` directory. Tag with descriptive
+  test function names (`test_full_creature_session_on_subprocess_worker`).
 
 ## Fast vs integration
 

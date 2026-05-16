@@ -46,7 +46,7 @@ KohakuTerrarium 是**建造 agent 的框架** — 不是又一個 agent。
 
 KohakuTerrarium 的工作就是把那套底層放在一個地方，這樣下一個新形態的 agent 只要一份設定檔 + 幾個自訂模組，不用開一個新 repo。
 
-核心抽象是 **生物 (creature)**：一個獨立的 agent，擁有自己的控制器、工具、子代理、觸發器、記憶、I/O。生物由 **Terrarium** 引擎托管：它是負責頻道、生命週期、輸出接線、熱插拔與工作階段掛載的圖執行期。其上還有 **Studio** 管理層，負責目錄、身份、活動工作階段、持久化、即時 trace，以及網頁 / 桌面 / API 管理。所有東西都是 Python，所以 agent 可以被嵌在其他 agent 的工具、觸發器、外掛、輸出裡。
+核心抽象是 **生物 (creature)**：一個獨立的 agent，擁有自己的控制器、工具、子代理、觸發器、記憶、I/O。生物由 **Terrarium** 引擎托管：它是負責頻道、生命週期、輸出接線、熱插拔與工作階段掛載的圖執行期。其上還有 **Studio** 管理層，負責目錄、身份、活動工作階段、持久化、即時 trace，以及網頁 / 桌面 / API 管理。可選的 **Laboratory** 傳輸層可以把主機與引擎拆到不同機器上 —— Studio + Terrarium 維持不變，中間插入一段基於 WebSocket 的網路跳躍。所有東西都是 Python，所以 agent 可以被嵌在其他 agent 的工具、觸發器、外掛、輸出裡。
 
 想立刻玩 OOTB 生物，看 [**kt-biome**](https://github.com/Kohaku-Lab/kt-biome) — 官方套件，裡面有好用的 agent 與外掛，都是建在這個框架上的。
 
@@ -228,6 +228,12 @@ kt run @package/path/to/creature
 +----------------------+
         |
         v
++----------------------+     可選：僅在多節點模式下
+| Laboratory (Lab)     |  WebSocket 傳輸 + 自訂封包,
+|                      |  讓一台主機橫跨 N 台 worker 機器
++----------------------+     對 Studio + Terrarium 透明
+        |
+        v
 +----------------------+     無 LLM、無決策
 | Terrarium 引擎       |  生物圖、拓樸、頻道、生命週期、
 |                      |  輸出接線、工作階段掛載
@@ -244,6 +250,7 @@ Root 生物               工作團隊生物
 ```
 
 - **Studio** 是網頁 dashboard、桌面 app 與 HTTP API 使用的管理門面。它負責目錄視圖、身份與設定、活動工作階段、持久化、attach/resume、編輯器與即時 trace；它不做推理。
+- **Laboratory (Lab)** 是 Studio 與 Terrarium 之間可選的網路層。在單機模式下連 import 都不會發生。在 `--mode lab-host` 下，它讓一台主機透過 WebSocket 協調 N 台 worker 機器上的生物：Studio 依然只呼叫一個 `TerrariumService`、Terrarium 依然送出本地的 channel send，但 `MultiNodeTerrariumService` 會把每個生物粒度的操作路由到對應的 worker，並由 session-event tee 把每個 worker 的 session 檔案鏡像回主機。詳見 [Laboratory 概念](docs/zh-TW/concepts/laboratory.md) 與 [Laboratory 使用指南](docs/zh-TW/guides/laboratory.md)。
 - **Terrarium** 是托管行程內所有運行中生物的執行期引擎。獨立 agent 是單生物圖；多代理團隊則是 connected graph。引擎管理拓樸、頻道、生命週期、熱插拔、輸出接線與工作階段掛載；沒有 LLM，也不做決策。
 - **Root 生物** 是可選的。它是由同一個 Terrarium 引擎托管的普通生物，概念上位於工作團隊之外，並透過 terrarium 管理工具面向使用者。
 - **生物 (Creature)** 擁有推理能力：控制器、工具、觸發器、子代理、外掛、記憶、I/O、提示詞與私有狀態。它不需要知道自己是獨立執行還是圖中的節點。

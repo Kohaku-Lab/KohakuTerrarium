@@ -41,6 +41,7 @@ const sidebarStructure = {
     "guides/mcp.md",
     "guides/packages.md",
     "guides/serving.md",
+    "guides/laboratory.md",
     "guides/examples.md",
     "guides/frontend-layout.md",
   ],
@@ -70,6 +71,7 @@ const sidebarStructure = {
     "concepts/multi-agent/privileged-node.md",
     "concepts/multi-agent/dynamic-graph.md",
     "concepts/studio.md",
+    "concepts/laboratory.md",
   ],
   conceptsPythonNative: [
     "concepts/python-native/README.md",

@@ -8,7 +8,7 @@ Horizontal multi-agent originally leaned on each creature reliably calling `send
 
 ### Shipped (first cut)
 
-- **Configurable automatic round output routing — `output_wiring`.** Per-creature config field that auto-delivers a creature's turn-end text into one or more target agents' event queues as a framework-emitted `creature_output` TriggerEvent. No channel round-trip, no dependency on the LLM remembering `send_message`. See [`plans/output-wiring.md`](plans/output-wiring.md) and the `output_wiring:` entry in [the configuration reference](docs/reference/configuration.md).
+- **Configurable automatic round output routing — `output_wiring`.** Per-creature config field that auto-delivers a creature's turn-end text into one or more target agents' event queues as a framework-emitted `creature_output` TriggerEvent. No channel round-trip, no dependency on the LLM remembering `send_message`. See the `output_wiring:` entry in [the configuration reference](docs/reference/configuration.md).
 - **Root creature lifecycle observation.** Same feature with `{to: root, with_content: false}` per wiring entry — every turn-end pings root with the lifecycle signal; content toggle decides whether the payload is carried. One mechanism, two use cases.
 - **Configuration-first.** Defaults to off; opt in per-creature. No silent framework behaviour.
 

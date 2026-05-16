@@ -304,6 +304,56 @@ context is getting full. Non-blocking: the controller keeps running
 while the summariser works, and the swap happens atomically between
 turns. Full: [non-blocking compaction](impl-notes/non-blocking-compaction.md).
 
+## Laboratory (Lab)
+
+The network layer between Studio and Terrarium that lets one host
+coordinate creatures on remote workers. WebSocket-based, with a custom
+binary envelope so file blobs and session events ride raw. Studio
+and Terrarium are designed to not notice the Lab is there. Full:
+[laboratory](laboratory.md).
+
+## Host
+
+The process running `kt serve --mode lab-host`. Owns Studio + the
+HostEngine (the Lab's server side). Accepts worker connections; runs
+**no creatures by default** in lab-host mode (recipes may use the
+coordination engine).
+
+## Worker
+
+A process running `kt lab-client`. Hosts creatures and exposes them
+to the host over Lab adapters. Has its own filesystem, its own
+config directory, and ideally its own credentials store.
+
+## Node
+
+A host or a worker — any process speaking the Lab protocol.
+Addressed by `node_id` (`_host` for the host, the client's
+`--name` for a worker).
+
+## Adapter
+
+A class registered on a node that handles one or more APP
+namespaces. The worker side of every Lab feature is an adapter:
+`TerrariumRuntimeAdapter` (engine ops), `TerrariumSessionAdapter`
+(history + resume), `TerrariumFilesAdapter` (file IO),
+`StudioIdentityAdapter` (per-node credentials), …
+
+## Cluster
+
+A set of cross-node-connected graphs that form one logical
+multi-creature graph. Tracked in
+`MultiNodeTerrariumService._cluster_links`. Listings, history,
+chat, and resume all fold the cluster into a single session from
+the user's perspective.
+
+## Mirror
+
+The host-side replica of a worker's session file. Populated by the
+`SessionEventTee` on the worker pushing meta + events over the
+`terrarium.session.sync` APP namespace, written by the host's
+`SessionMirrorWriter`. Every Studio read API serves from the mirror.
+
 ## See also
 
 - [Concepts index](README.md) — the full section map.

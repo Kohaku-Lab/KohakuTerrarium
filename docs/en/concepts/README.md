@@ -63,6 +63,18 @@ or UI.
 3. [Agent as a Python object](python-native/agent-as-python-object.md) — the lower-level creature internals.
 4. [Session and environment](modules/session-and-environment.md) — private creature state vs graph-shared state.
 
+### Multi-machine deployment
+
+You want creatures running on a different box than the dashboard
+(GPU server, sandbox VM, cloud node).
+
+1. [Terrarium](multi-agent/terrarium.md) — the engine the Lab wraps.
+2. [Studio](studio.md) — the management surface the Lab keeps
+   identical between standalone and multi-node.
+3. [Laboratory](laboratory.md) — wire protocol, session sync,
+   resume, identity model.
+4. Operator playbook: [guides/laboratory.md](../guides/laboratory.md).
+
 ### Contributor / deep read
 
 You want to change the framework itself.
@@ -81,6 +93,7 @@ concepts/
 ├── python-native/       Agents as Python values; composition algebra.
 ├── multi-agent/         Terrarium engine + privileged nodes + dynamic graph.
 ├── studio.md            The management layer above Terrarium.
+├── laboratory.md        The network layer that spans multiple machines.
 ├── impl-notes/          Specific implementation choices worth teaching.
 ├── patterns.md          What emerges from combining modules.
 ├── boundaries.md        The abstraction is a default, not a law.

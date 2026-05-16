@@ -47,9 +47,8 @@ Lower layers do not import higher layers:
   top.
 - `api/`, `cli/`, and the frontend are adapters over Studio.
 
-This is the practical result of the structure-hierarchy plan in
-`plans/structure-hierarchy/`: one runtime engine, one management layer,
-and thin UI adapters.
+The structure is: one runtime engine, one management layer, and thin
+UI adapters.
 
 ## Why Studio exists
 

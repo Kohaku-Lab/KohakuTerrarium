@@ -100,10 +100,12 @@ We do not review PRs with red CI. Before opening a PR:
 The CI matrix that must pass is defined in [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 
 - **Lint**: `ruff check` + `black --check` (Python 3.13)
-- **Tests**: `pytest tests/unit/` on Python 3.10, 3.11, 3.12, 3.13, 3.14 × Linux / Windows / macOS (3.14 on Windows is excluded — pythonnet has no wheel yet)
+- **Tests**: all three tiers — `pytest tests/unit/` then `pytest tests/integration/ tests/e2e/` — on Python 3.10, 3.11, 3.12, 3.13, 3.14 × Linux / Windows / macOS (3.14 on Windows is excluded — pythonnet has no wheel yet)
 - **File-size guards**: `pytest tests/unit/test_file_sizes.py`
 - **Frontend**: `npm ci` + `npm run format:check` + `npm run build` in `src/kohakuterrarium-frontend/`, plus a check that the build output landed in `src/kohakuterrarium/web_dist/`
 - **Wheel build**: builds the wheel, installs it into a clean venv, runs `kt --help` and `kt app --help`
+
+The test suite has three tiers — see [`tests/README.md`](tests/README.md) for what each tier is and how to write them.
 
 Local pre-flight (run all of these before pushing):
 
@@ -113,6 +115,7 @@ ruff check src/ tests/
 black --check src/ tests/
 pytest tests/unit/ -q --ignore=tests/unit/test_file_sizes.py
 pytest tests/unit/test_file_sizes.py -q
+pytest tests/integration/ tests/e2e/ -q
 
 # Frontend
 cd src/kohakuterrarium-frontend
@@ -181,7 +184,7 @@ Before opening the PR:
 
 1. Re-read your diff against CLAUDE.md rules. Especially in-function imports, `print()` calls, and the import order.
 2. Run `black src/ tests/` and `ruff check src/ tests/`.
-3. Add tests for new code under `tests/unit/`. Test suites can use simpler output than library code.
+3. Add tests in the right tier. New behaviour gets a `tests/unit/` test that pins it; if you touched a core-lib folder or a user journey, extend that folder's `tests/integration/` workflow or the relevant `tests/e2e/` journey rather than adding a new test function. See [`tests/README.md`](tests/README.md) for the tier conventions. Test suites can use simpler output than library code.
 4. Split commits along logical boundaries — one concept per commit, working on each commit.
 5. Fill out the PR template completely.
 6. If this is a feature PR, verify that the linked issue/discussion existed before the PR and that the approval is explicit.
