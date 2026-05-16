@@ -117,6 +117,9 @@ def run_web_server(
     dev: bool = False,
     log_level: str = "INFO",
     state_path: str | None = None,
+    mode: str = "standalone",
+    lab_bind: str | None = None,
+    lab_token: str | None = None,
 ) -> None:
     """Start the FastAPI server, optionally serving the built frontend.
 
@@ -126,6 +129,14 @@ def run_web_server(
         dev: If True, skip static file serving (user runs vite dev separately).
         state_path: When set (daemon mode), write the actual bound port back
             to this JSON file so the launching CLI can show the truth.
+        mode: ``"standalone"`` or ``"lab-host"``.  In lab-host mode a
+            :class:`HostEngine` is started in the FastAPI lifespan and a
+            :class:`MultiNodeTerrariumService` is installed for the API
+            routes that consume :func:`get_service`.
+        lab_bind: ``host:port`` for the Lab WebSocket transport (lab-host
+            only).  Defaults to ``127.0.0.1:8100``.
+        lab_token: shared token clients must present (lab-host only).
+            Required when ``mode == "lab-host"``.
     """
     configure_utf8_stdio(log=True)
 
@@ -144,12 +155,30 @@ def run_web_server(
         )
         sys.exit(1)
 
+    if mode == "lab-host":
+        if not lab_token:
+            logger.error("lab-host mode requires --lab-token")
+            sys.exit(1)
+        if not lab_bind:
+            lab_bind = "127.0.0.1:8100"
+        logger.info(
+            "boot mode: lab-host",
+            lab_bind=lab_bind,
+            token_present=bool(lab_token),
+        )
+        print(f"Lab-host mode: Lab transport on ws://{lab_bind}")
+    else:
+        logger.info("boot mode: standalone", host=host, port=port)
+
     creatures_dirs, terrariums_dirs = _resolve_config_dirs()
 
     app = create_app(
         creatures_dirs=creatures_dirs,
         terrariums_dirs=terrariums_dirs,
         static_dir=static_dir,
+        lab_mode=mode,
+        lab_bind=lab_bind,
+        lab_token=lab_token,
     )
 
     # Auto-find port if requested port is busy

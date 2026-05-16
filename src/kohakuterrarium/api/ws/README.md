@@ -50,4 +50,4 @@ on Windows and `pty` / `termios` / `fcntl` elsewhere.
 
 - `../events.py` — `StreamOutput` and shared event-log store
 - `../routes/README.md` — REST counterparts for non-streaming operations
-- `plans/inventory-runtime.md` §13 — serving layer + streaming
+- `docs/en/guides/serving.md` — operator-facing serving + streaming docs

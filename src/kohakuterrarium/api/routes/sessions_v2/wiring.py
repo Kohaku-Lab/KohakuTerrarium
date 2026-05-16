@@ -1,19 +1,19 @@
 """Sessions wiring — runtime ``config.output_wiring`` edges.
 
-Mounted at ``/api/sessions/wiring``.  This is the graph-editor-facing
-surface for direct turn-output routing between live creatures.  The live
-IO attach still owns websocket secondary sinks under the attach routes.
+Service-driven: each op routes by creature ``_home`` in multi-node
+mode.  Topology refresh events come from the engine layer; the route
+no longer emits a second TOPOLOGY_CHANGED (was causing duplicate
+events — fixed per kt-audit M3).
 """
 
-import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from kohakuterrarium.api.deps import get_engine
-from kohakuterrarium.studio.sessions import wiring as wiring_lib
-from kohakuterrarium.terrarium.events import EngineEvent, EventKind
+from kohakuterrarium.api.deps import get_service
+from kohakuterrarium.api.routes.sessions_v2._helpers import resolve_creature_id
+from kohakuterrarium.terrarium.service import TerrariumService
 
 router = APIRouter()
 
@@ -41,13 +41,12 @@ class OutputWirePayload(BaseModel):
 async def list_creature_outputs(
     session_id: str,
     creature_id: str,
-    engine=Depends(get_engine),
+    service: TerrariumService = Depends(get_service),
 ):
     """List direct output-wiring edges for a creature."""
+    cid = await resolve_creature_id(service, creature_id)
     try:
-        outputs = await asyncio.to_thread(
-            wiring_lib.list_output_wiring, engine, creature_id
-        )
+        outputs = await service.list_output_wiring(cid)
         return {"outputs": outputs}
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
@@ -58,24 +57,21 @@ async def wire_creature_output(
     session_id: str,
     creature_id: str,
     req: OutputWirePayload,
-    engine=Depends(get_engine),
+    service: TerrariumService = Depends(get_service),
 ):
     """Add a direct output-wiring edge for a creature."""
+    cid = await resolve_creature_id(service, creature_id)
     try:
-        edge_id = await wiring_lib.wire_output(engine, creature_id, req.as_entry())
-        # Cross-graph wiring may have merged the source's graph into
-        # another. Look up the current graph id rather than reusing the
-        # URL's session_id so the WS event lands on the surviving
-        # molecule.
-        live_graph_id = _live_graph_id(engine, creature_id, session_id)
-        _emit_output_wiring_changed(
-            engine, live_graph_id, creature_id, edge_id, "wired"
-        )
-        return {"status": "wired", "edge_id": edge_id, "graph_id": live_graph_id}
+        result = await service.wire_output(cid, req.as_entry())
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
     except ValueError as exc:
         raise HTTPException(400, str(exc))
+    return {
+        "status": "wired",
+        "edge_id": result.get("edge_id", ""),
+        "graph_id": session_id,
+    }
 
 
 @router.delete("/{session_id}/creatures/{creature_id}/outputs/{edge_id}")
@@ -83,15 +79,14 @@ async def unwire_creature_output(
     session_id: str,
     creature_id: str,
     edge_id: str,
-    engine=Depends(get_engine),
+    service: TerrariumService = Depends(get_service),
 ):
     """Detach a direct output-wiring edge."""
+    cid = await resolve_creature_id(service, creature_id)
     try:
-        ok = await wiring_lib.unwire_output(engine, creature_id, edge_id)
+        ok = await service.unwire_output(cid, edge_id)
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
-    if ok:
-        _emit_output_wiring_changed(engine, session_id, creature_id, edge_id, "unwired")
     return {"status": "unwired" if ok else "not_found"}
 
 
@@ -99,15 +94,18 @@ async def unwire_creature_output(
 async def list_creature_sinks(
     session_id: str,
     creature_id: str,
-    engine=Depends(get_engine),
+    service: TerrariumService = Depends(get_service),
 ):
     """Return secondary-sink ids attached to a creature.
 
-    There is still no engine-level sink enumerator; this endpoint is
-    kept for callers that only need to check creature existence.
+    No engine-level sink enumerator yet; this endpoint is kept for
+    callers that only need to check creature existence.
     """
+    cid = await resolve_creature_id(service, creature_id)
     try:
-        engine.get_creature(creature_id)
+        info = await service.get_creature_info(cid)
+        if info is None:
+            raise KeyError(creature_id)
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
     return {"sinks": []}
@@ -118,39 +116,12 @@ async def unwire_sink(
     session_id: str,
     creature_id: str,
     sink_id: str,
-    engine=Depends(get_engine),
+    service: TerrariumService = Depends(get_service),
 ):
     """Detach a previously-wired secondary output sink."""
+    cid = await resolve_creature_id(service, creature_id)
     try:
-        ok = await wiring_lib.unwire_output_sink(engine, creature_id, sink_id)
+        ok = await service.unwire_output_sink(cid, sink_id)
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
     return {"status": "unwired" if ok else "not_found"}
-
-
-def _live_graph_id(engine, creature_id: str, fallback: str) -> str:
-    try:
-        creature = engine.get_creature(creature_id)
-    except KeyError:
-        return fallback
-    return getattr(creature, "graph_id", "") or fallback
-
-
-def _emit_output_wiring_changed(
-    engine,
-    session_id: str,
-    creature_id: str,
-    edge_id: str,
-    status: str,
-) -> None:
-    emit = getattr(engine, "_emit", None)
-    if not callable(emit):
-        return
-    emit(
-        EngineEvent(
-            kind=EventKind.TOPOLOGY_CHANGED,
-            graph_id=session_id,
-            creature_id=creature_id,
-            payload={"kind": "output_wiring", "edge_id": edge_id, "status": status},
-        )
-    )

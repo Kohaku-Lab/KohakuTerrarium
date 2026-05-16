@@ -6,33 +6,33 @@ wiring. This route is read-only and returns backend/runtime data only;
 frontend layout state remains a UI preference.
 """
 
-import asyncio
 import json
 import time
 from typing import Any
 
 from fastapi import APIRouter, Depends
 
-from kohakuterrarium.api.deps import get_engine
+from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.studio.sessions import lifecycle
 from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.service import TerrariumService
 from kohakuterrarium.terrarium.topology import GraphTopology
 
 router = APIRouter()
 
 
 @router.get("/graph")
-async def runtime_graph_snapshot(engine: Terrarium = Depends(get_engine)):
+async def runtime_graph_snapshot(
+    service: TerrariumService = Depends(get_service),
+):
     """Return a normalized snapshot of every live runtime graph.
 
-    Runs in a worker thread because ``build_runtime_graph_snapshot``
-    fans out to ``creature.get_status()`` which calls
-    ``agent.session_store.load_meta()`` — a synchronous SQLite read
-    per creature. On the asyncio loop that stalls every other request
-    for as long as the snapshot takes (seconds, with persisted
-    sessions). Worker thread isolates the disk I/O.
+    In multi-node mode this fans out across nodes and unions the
+    per-node snapshots (each graph is annotated with ``node_id``).
+    The frontend graph editor keys by ``graph_id`` which is globally
+    unique, so it can render without further changes.
     """
-    return await asyncio.to_thread(build_runtime_graph_snapshot, engine)
+    return await service.runtime_graph_snapshot()
 
 
 def build_runtime_graph_snapshot(engine: Terrarium) -> dict[str, Any]:
@@ -123,6 +123,10 @@ def _creatures_for_graph(
         status["is_root"] = creature_id == root_id
         status["parent_creature_id"] = getattr(creature, "parent_creature_id", None)
         status["graph_id"] = graph.graph_id
+        # Default to the host site. The remote service rewrites this to
+        # the worker's node id when the snapshot crosses the wire (see
+        # ``RemoteTerrariumService.runtime_graph_snapshot``).
+        status["home_node"] = "_host"
         creatures.append(status)
     return creatures
 

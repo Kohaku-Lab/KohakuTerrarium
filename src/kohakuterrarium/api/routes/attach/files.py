@@ -16,8 +16,12 @@ router = APIRouter()
 
 
 @router.get("/tree")
-async def get_file_tree(root: str, depth: int = 3):
-    """Return a nested file tree starting from the given root directory."""
+async def get_file_tree(root: str, depth: int = 1):
+    """Return a nested file tree starting from the given root directory.
+
+    Defaults to ``depth=1`` for lazy expansion — the frontend re-calls
+    this endpoint per branch as the user clicks expand chevrons.
+    """
     return await workspace_files.get_file_tree(root, depth)
 
 

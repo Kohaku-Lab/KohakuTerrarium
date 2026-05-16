@@ -1,27 +1,41 @@
 """Per-creature plugin routes — list + toggle.
 
-Plugin **option** mutation lives in the unified module system —
-see :mod:`creatures_modules` (``/modules/plugin/{name}/options``).
-This file keeps only the plugin-list / toggle routes that pre-date
-the module unification.
+Accepts the display ``name`` or the engine's ``creature_id`` in the
+URL slot via :func:`resolve_creature_id` — the frontend stores
+names, so without this resolver every plugin-panel hit 404s.
 """
 
-import asyncio
-
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
-from kohakuterrarium.api.deps import get_engine
-from kohakuterrarium.studio.sessions import creature_plugins
+from kohakuterrarium.api.deps import get_service
+from kohakuterrarium.api.routes.sessions_v2._helpers import resolve_creature_id
+from kohakuterrarium.terrarium.service import TerrariumService
 
 router = APIRouter()
 
 
+class TogglePluginRequest(BaseModel):
+    """Optional body for the toggle endpoint.
+
+    Frontend posts ``{"enabled": <bool>}``.  Absent body or an empty
+    object defaults to ``True`` — matches the legacy behaviour where
+    the route had no body parser at all and effectively flipped the
+    plugin on.
+    """
+
+    enabled: bool = True
+
+
 @router.get("/{session_id}/creatures/{creature_id}/plugins")
-async def list_plugins(session_id: str, creature_id: str, engine=Depends(get_engine)):
+async def list_plugins(
+    session_id: str,
+    creature_id: str,
+    service: TerrariumService = Depends(get_service),
+):
+    cid = await resolve_creature_id(service, creature_id)
     try:
-        return await asyncio.to_thread(
-            creature_plugins.list_plugins, engine, session_id, creature_id
-        )
+        return await service.list_plugins(cid)
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
 
@@ -31,12 +45,13 @@ async def toggle_plugin(
     session_id: str,
     creature_id: str,
     plugin_name: str,
-    engine=Depends(get_engine),
+    req: TogglePluginRequest | None = None,
+    service: TerrariumService = Depends(get_service),
 ):
+    cid = await resolve_creature_id(service, creature_id)
+    enabled = req.enabled if req is not None else True
     try:
-        return await creature_plugins.toggle_plugin(
-            engine, session_id, creature_id, plugin_name
-        )
+        return await service.toggle_plugin(cid, plugin_name, enabled)
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
     except ValueError as e:

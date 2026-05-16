@@ -1,5 +1,6 @@
 """FastAPI application factory."""
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -8,8 +9,25 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from kohakuterrarium.api.deps import get_engine
+from kohakuterrarium.api._io_executor import run_in_io_executor
+from kohakuterrarium.api.deps import _session_dir, get_engine, set_service
+from kohakuterrarium.laboratory import HostConfig
+from kohakuterrarium.laboratory._internal.host import HostEngine
+from kohakuterrarium.laboratory._internal.membership import MembershipEvent
+from kohakuterrarium.laboratory._internal.transport_ws import WebSocketTransport
+from kohakuterrarium.laboratory.adapters import (
+    StudioCatalogAdapter,
+    StudioIdentityAdapter,
+    TerrariumBroadcastAdapter,
+    TerrariumOutputWireAdapter,
+)
 from kohakuterrarium.serving.process_metrics import get_aggregator
+from kohakuterrarium.session.sync import SessionMirrorWriter
+from kohakuterrarium.studio.sessions.lifecycle import get_session_meta
+from kohakuterrarium.terrarium import MultiNodeTerrariumService, Terrarium
+from kohakuterrarium.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 # Phase 0 stub routers — empty APIRouter()s pre-mounted so Phase 1
 # agents only need to populate handlers, not edit ``app.py``. Each
@@ -17,6 +35,7 @@ from kohakuterrarium.serving.process_metrics import get_aggregator
 # sessions / persistence / attach). The legacy single-file routes
 # were removed in Phase 3; the studio layer is the only path now.
 from kohakuterrarium.api.routes import metrics as metrics_route
+from kohakuterrarium.api.routes import nodes as nodes_route
 from kohakuterrarium.api.routes.attach import files as catalog_attach_files
 from kohakuterrarium.api.routes.attach import policies as attach_policies
 from kohakuterrarium.api.routes.catalog import builtins as catalog_builtins
@@ -87,25 +106,245 @@ from kohakuterrarium.api.ws import trace as ws_trace
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup and shutdown."""
+    """Startup and shutdown.
+
+    In standalone mode the lifespan attaches the runtime-graph prompt to
+    the local engine and shuts it down at exit.  In ``lab-host`` mode it
+    additionally starts a :class:`HostEngine`, wires a
+    :class:`MultiNodeTerrariumService`, and installs it as the active
+    service so routes calling :func:`get_service` see the multi-node
+    surface; ``get_engine`` still returns the host's own local engine
+    for the routes that haven't migrated.
+    """
     # Process-metrics: subscribe the aggregator at startup so we
     # capture events the very first turn produces, not from the first
     # snapshot poll.
     get_aggregator()
-    get_engine()._runtime_prompt.attach()
-    yield
-    # Shutdown: stop the engine (cleans up every active session) and
-    # detach loop-bound listeners so repeated lifespan cycles can
-    # reattach them to the next event loop.
-    engine = get_engine()
-    engine._runtime_prompt.detach()
-    await engine.shutdown()
+
+    lab_mode = getattr(app.state, "lab_mode", "standalone")
+    host_engine = None
+    multi_node_service = None
+    coordination_engine = None
+    membership_task = None
+    identity_adapter = None
+    catalog_adapter = None
+    broadcast_adapter = None
+    output_wire_adapter = None
+    mirror_writer = None
+
+    if lab_mode == "lab-host":
+        bind_host, bind_port = _parse_bind(app.state.lab_bind)
+        host_engine = HostEngine(
+            HostConfig(
+                bind_host=bind_host,
+                bind_port=bind_port,
+                token=app.state.lab_token,
+                heartbeat_timeout_seconds=30.0,
+            ),
+            WebSocketTransport(),
+        )
+        await host_engine.start()
+        # The lab-host runs NO agents — only worker processes run
+        # agents.  The host keeps just a *coordination* engine: a bare
+        # Terrarium that holds cross-node channel objects for the
+        # broadcast / output-wire forwarders.  Nothing ever calls
+        # ``add_creature`` on it; ``MultiNodeTerrariumService`` routes
+        # every agent op to a connected worker.
+        coordination_engine = Terrarium(session_dir=_session_dir())
+        multi_node_service = MultiNodeTerrariumService(
+            host=host_engine, coordination_engine=coordination_engine
+        )
+        # Wire the meta-lookup so ``runtime_graph_snapshot`` enriches
+        # each worker graph with the studio-tier session metadata (name
+        # / kind / created_at / config_path).  Terrarium tier can't
+        # reach studio directly, so we inject the callable here at boot.
+        multi_node_service.set_runtime_graph_meta_lookup(get_session_meta)
+        set_service(multi_node_service)
+        # Host-side adapters that workers query.
+        identity_adapter = StudioIdentityAdapter(host_engine)
+        # Catalog adapter on the host answers "what's installed here"
+        # reads from the aggregator.  ``is_host=True`` rejects the
+        # mutating ops (install/uninstall) from any worker — the host's
+        # local installs go through the operator-facing Studio API, not
+        # through this RPC, so an authed worker can't ``git clone`` on
+        # the operator's machine.
+        catalog_adapter = StudioCatalogAdapter(host_engine, is_host=True)
+        # Cross-node channel forwarder on the host side.  Binds the
+        # coordination engine so cross-node channel objects have a home,
+        # and answers ``subscribe`` / ``inject`` RPCs from workers
+        # wiring up cross-node connects.
+        broadcast_adapter = TerrariumBroadcastAdapter(coordination_engine, host_engine)
+        # Cross-node output-wiring forwarder on the host side.  The
+        # controller installs a target resolver driven by the multi-
+        # node service's ``_home`` registry so an emit can be forwarded
+        # to the worker that hosts the target name.
+        output_wire_adapter = TerrariumOutputWireAdapter(
+            coordination_engine, host_engine
+        )
+        output_wire_adapter.set_target_resolver(
+            _make_output_wire_target_resolver(multi_node_service)
+        )
+        # Session mirror — workers tee their session events here so
+        # Studio's persistence reads stay local-fast.  Mirror dir is
+        # under the controller's configured session dir.
+        mirror_dir = Path(_session_dir()) / "mirror"
+        mirror_writer = SessionMirrorWriter(host_engine, mirror_dir)
+        # Membership watcher: keep the multi-node service's remote
+        # registry in sync with the host's connected clients.
+        membership_task = asyncio.create_task(
+            _watch_membership(host_engine, multi_node_service)
+        )
+        # Stash on app.state so a programmatic caller (or a follow-up
+        # admin route) can reach them without poking module globals.
+        app.state.lab_host_engine = host_engine
+        app.state.identity_adapter = identity_adapter
+        app.state.session_mirror = mirror_writer
+
+    # The runtime-graph prompt block is a host-agent feature.  In
+    # lab-host mode the host runs no agents, so there is nothing to
+    # attach it to — only standalone mode has a host-local engine.
+    if multi_node_service is None:
+        get_engine()._runtime_prompt.attach()
+    try:
+        yield
+    finally:
+        # Detach loop-bound listeners so repeated lifespan cycles can
+        # reattach them to the next event loop.  Standalone only — the
+        # lab-host never attached one.
+        if multi_node_service is None:
+            try:
+                engine = get_engine()
+                engine._runtime_prompt.detach()
+            except Exception:  # pragma: no cover - defensive
+                pass
+        # Cancel the membership watcher first so it stops feeding the
+        # service while we're tearing it down, then ``await`` the
+        # cancellation to avoid "Task was destroyed but is pending".
+        if membership_task is not None:
+            membership_task.cancel()
+            await asyncio.gather(membership_task, return_exceptions=True)
+        # Close the mirror writer before stopping the host so any
+        # in-flight session-sync events stop being dispatched to a
+        # half-closed SessionStore.
+        if mirror_writer is not None:
+            try:
+                mirror_writer.close()
+            except Exception:  # pragma: no cover - defensive
+                logger.exception("session_mirror.close failed")
+        if identity_adapter is not None:
+            try:
+                identity_adapter.detach()
+            except Exception:  # pragma: no cover - defensive
+                logger.exception("identity_adapter.detach failed")
+        if catalog_adapter is not None:
+            try:
+                catalog_adapter.detach()
+            except Exception:  # pragma: no cover - defensive
+                logger.exception("catalog_adapter.detach failed")
+        if broadcast_adapter is not None:
+            try:
+                broadcast_adapter.detach()
+            except Exception:  # pragma: no cover - defensive
+                logger.exception("broadcast_adapter.detach failed")
+        if output_wire_adapter is not None:
+            try:
+                output_wire_adapter.detach()
+            except Exception:  # pragma: no cover - defensive
+                logger.exception("output_wire_adapter.detach failed")
+        # In lab-host mode the service runs no host agent engine — its
+        # shutdown() is a no-op.  What DOES need tearing down is the
+        # coordination engine (cross-node channel objects).  Standalone
+        # mode falls through to the host-local engine path.
+        if multi_node_service is not None:
+            try:
+                await multi_node_service.shutdown()
+            except Exception:  # pragma: no cover - defensive
+                logger.exception("multi_node_service.shutdown failed")
+            if coordination_engine is not None:
+                try:
+                    await coordination_engine.shutdown()
+                except Exception:  # pragma: no cover - defensive
+                    logger.exception("coordination_engine.shutdown failed")
+        else:
+            try:
+                await get_engine().shutdown()
+            except Exception:  # pragma: no cover - defensive
+                logger.exception("engine.shutdown failed")
+        if host_engine is not None:
+            try:
+                await host_engine.stop()
+            except Exception:  # pragma: no cover - defensive
+                logger.exception("host_engine.stop failed")
+
+
+def _parse_bind(bind: str) -> tuple[str, int]:
+    """Parse ``host:port`` into a tuple; ``port == 0`` selects ephemeral."""
+    if ":" not in bind:
+        raise ValueError(f"invalid lab bind {bind!r}; expected host:port")
+    host, _, port_str = bind.rpartition(":")
+    return host, int(port_str)
+
+
+def _make_output_wire_target_resolver(service: MultiNodeTerrariumService):
+    """Build a ``target_name -> (node_id, creature_id)`` lookup.
+
+    Used by the controller's :class:`TerrariumOutputWireAdapter` when a
+    local output-wiring emit can't resolve a target locally.  We scan
+    every connected node's last-known ``_home`` mapping plus the
+    creatures cached from prior ``list_creatures`` fan-outs.  The
+    resolver does NOT block — it reads what the service already knows.
+    A miss is fine: the resolver returns ``None`` and the source's emit
+    falls through to its existing "log and skip" branch.
+
+    Returned tuple's ``node_id`` is ``"_host"`` for host-local creatures,
+    which the adapter then treats as "don't forward, prefer local" by
+    surfacing ``None`` to the resolver.
+    """
+
+    def resolve(target_name: str) -> tuple[str, str] | None:
+        cache = getattr(service, "_creature_name_cache", None) or {}
+        entry = cache.get(target_name)
+        if entry is not None:
+            return entry
+        # No cache miss-walk: building one would require an async
+        # call, which we can't do from a sync resolver.  Callers can
+        # populate the cache by running ``list_creatures`` (the
+        # multi-node service already refreshes it as a side effect).
+        return None
+
+    return resolve
+
+
+async def _watch_membership(
+    host_engine: HostEngine,
+    service: MultiNodeTerrariumService,
+) -> None:
+    """Keep the multi-node service in sync with the host's membership.
+
+    Cancellation (during lifespan teardown) propagates naturally; any
+    other exception is logged before silencing so a buggy subscriber
+    doesn't take the rest of the FastAPI app down with it.
+    """
+    try:
+        async for event, node_id in host_engine.membership.subscribe():
+            if event == MembershipEvent.JOINED:
+                service.add_remote(node_id)
+            elif event in (MembershipEvent.LEFT, MembershipEvent.LOST):
+                service.drop_remote(node_id)
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # pragma: no cover - defensive
+        logger.exception("membership watcher crashed; multi-node routing stale")
 
 
 def create_app(
     creatures_dirs: list[str] | None = None,
     terrariums_dirs: list[str] | None = None,
     static_dir: Path | None = None,
+    *,
+    lab_mode: str = "standalone",
+    lab_bind: str | None = None,
+    lab_token: str | None = None,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -114,13 +353,21 @@ def create_app(
         terrariums_dirs: Directories to scan for terrarium configs.
         static_dir: Path to built web frontend (web_dist/).
             When provided, serves the SPA at / with API at /api/*.
+        lab_mode: ``"standalone"`` (default) or ``"lab-host"``.
+        lab_bind: ``host:port`` for the Lab WebSocket transport
+            (lab-host only).
+        lab_token: Shared token clients must present (lab-host only).
     """
     app = FastAPI(
         title="KohakuTerrarium API",
         description="HTTP API for managing agents and terrariums",
-        version="1.4.0",
+        version="1.5.0",
         lifespan=lifespan,
     )
+    # Lifespan reads these off app.state to start the Lab transport.
+    app.state.lab_mode = lab_mode
+    app.state.lab_bind = lab_bind or "127.0.0.1:8100"
+    app.state.lab_token = lab_token or ""
 
     app.add_middleware(
         CORSMiddleware,
@@ -202,6 +449,8 @@ def create_app(
     # Dashboard mini-strip. Subscribes the aggregator on first call so
     # mounting the route is enough to start collecting data.
     app.include_router(metrics_route.router, prefix="/api/metrics", tags=["metrics"])
+    # /api/nodes — lab-only routes (404 in standalone mode).
+    app.include_router(nodes_route.router, prefix="/api/nodes", tags=["nodes"])
 
     # Runtime graph snapshot — read by the graph editor data layer.
     app.include_router(
@@ -397,6 +646,21 @@ def _mount_spa(app: FastAPI, static_dir: Path) -> None:
 
     API and WebSocket routes are already registered above, so they take
     precedence. The catch-all only fires for unmatched paths.
+
+    Performance: the per-request filesystem checks (``is_file`` + two
+    ``resolve()`` calls) used to run synchronously on the event loop —
+    under concurrent traffic ``GET /`` could block other requests by
+    dozens of milliseconds (Windows path resolution + symlink traversal
+    is not free).  We now:
+
+    1. Cache ``static_dir.resolve()`` once at mount time.
+    2. Short-circuit ``GET /`` (empty path) straight to ``index.html``
+       — the common SPA-entry case never touches ``is_file``.
+    3. Cheap-string traversal-defence (``..`` / leading slash) skips
+       the resolve dance for obviously-malicious paths.
+    4. Off-load the existence check to the dedicated I/O executor for
+       genuine asset requests, so a slow filesystem call doesn't stall
+       every concurrent route.
     """
     # Serve hashed build assets (JS, CSS, images)
     assets_dir = static_dir / "assets"
@@ -404,16 +668,40 @@ def _mount_spa(app: FastAPI, static_dir: Path) -> None:
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
     index_html = static_dir / "index.html"
+    static_dir_resolved = static_dir.resolve()
+
+    def _resolve_static_path(full_path: str) -> Path | None:
+        """Sync helper run on the I/O executor.
+
+        Returns the file path to serve if ``full_path`` resolves to a
+        real file under ``static_dir``, else ``None``.
+        """
+        if not full_path or full_path.startswith("/"):
+            return None
+        if ".." in full_path.split("/"):
+            return None
+        candidate = static_dir / full_path
+        if not candidate.is_file():
+            return None
+        try:
+            resolved = candidate.resolve()
+        except (OSError, ValueError):
+            return None
+        if not resolved.is_relative_to(static_dir_resolved):
+            return None
+        return candidate
 
     @app.get("/{full_path:path}")
     async def spa_fallback(full_path: str):
-        # Serve actual files (favicon.ico, robots.txt, etc.)
-        file_path = static_dir / full_path
-        if (
-            full_path
-            and file_path.is_file()
-            and file_path.resolve().is_relative_to(static_dir.resolve())
-        ):
-            return FileResponse(str(file_path))
-        # Everything else → index.html (Vue Router handles client-side routing)
+        # Common case: ``GET /`` → index.html, no filesystem walk.
+        if not full_path:
+            return FileResponse(str(index_html))
+        # Real-file path: off-load the existence check so a slow disk
+        # doesn't stall the event loop.  ``FileResponse`` itself
+        # streams via anyio's threadpool, so once we've decided what
+        # to serve the body transfer is non-blocking.
+        target = await run_in_io_executor(_resolve_static_path, full_path)
+        if target is not None:
+            return FileResponse(str(target))
+        # Everything else → index.html (Vue Router handles client-side routing).
         return FileResponse(str(index_html))

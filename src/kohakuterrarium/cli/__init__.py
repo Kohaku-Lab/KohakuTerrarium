@@ -15,6 +15,7 @@ from kohakuterrarium.cli.auth import login_cli
 from kohakuterrarium.cli.config import add_config_subparser, config_cli
 from kohakuterrarium.cli.extension import extension_info_cli, extension_list_cli
 from kohakuterrarium.cli.identity_mcp import list_for_agent_cli as mcp_list_cli
+from kohakuterrarium.cli.lab_client import add_lab_client_subparser, lab_client_cli
 from kohakuterrarium.cli.memory import embedding_cli, search_cli
 from kohakuterrarium.cli.model import model_cli
 from kohakuterrarium.cli.packages import (
@@ -355,6 +356,9 @@ def _build_parser() -> argparse.ArgumentParser:
     # Serve command group
     add_serve_subparser(subparsers)
 
+    # Lab worker command (foreground)
+    add_lab_client_subparser(subparsers)
+
     internal_serve_parser = subparsers.add_parser(
         "__run-server", help=argparse.SUPPRESS
     )
@@ -367,6 +371,13 @@ def _build_parser() -> argparse.ArgumentParser:
         default="INFO",
     )
     internal_serve_parser.add_argument("--state-path", default=None)
+    internal_serve_parser.add_argument(
+        "--mode",
+        choices=["standalone", "lab-host"],
+        default="standalone",
+    )
+    internal_serve_parser.add_argument("--lab-bind", default=None)
+    internal_serve_parser.add_argument("--lab-token", default=None)
 
     return parser
 
@@ -484,8 +495,12 @@ COMMANDS: dict[str, callable] = {
             dev=args.dev,
             log_level=args.log_level,
             state_path=args.state_path,
+            mode=getattr(args, "mode", "standalone"),
+            lab_bind=getattr(args, "lab_bind", None),
+            lab_token=getattr(args, "lab_token", None),
         )
     ),
+    "lab-client": lab_client_cli,
     "extension": _dispatch_extension,
     "mcp": _dispatch_mcp,
 }

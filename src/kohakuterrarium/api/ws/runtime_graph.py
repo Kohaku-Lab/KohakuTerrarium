@@ -14,8 +14,8 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from kohakuterrarium.api.deps import get_engine
-from kohakuterrarium.api.routes.runtime_graph import build_runtime_graph_snapshot
+from kohakuterrarium.api.deps import get_service
+from kohakuterrarium.studio._runtime import host_engine_or_none
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -26,7 +26,15 @@ router = APIRouter()
 async def runtime_graph_stream(websocket: WebSocket):
     """Stream runtime graph events for graph-editor data wiring."""
     await websocket.accept()
-    engine = get_engine()
+    # The snapshot and engine-event stream both route through the
+    # ``TerrariumService`` Protocol, so they aggregate across workers
+    # in lab-host mode.  The per-channel ``on_send`` observer hooks
+    # still need a host engine's internal channel registry — in
+    # lab-host mode there is none (``host_engine_or_none`` → ``None``),
+    # so channel-message frames fall back to the generic engine-event
+    # stream rather than the richer callback shape.
+    service = get_service()
+    engine = host_engine_or_none(service)
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=1000)
     loop = asyncio.get_running_loop()
     channel_callbacks: dict[tuple[str, str], Any] = {}
@@ -51,6 +59,11 @@ async def runtime_graph_stream(websocket: WebSocket):
             logger.debug("Runtime graph WS loop closed - dropping event")
 
     async def sync_channel_observers() -> None:
+        # Channel ``on_send`` hooks need a host engine's channel
+        # registry.  Lab-host has none — skip; the generic engine-event
+        # stream still carries channel_message events.
+        if engine is None:
+            return
         for graph in engine.list_graphs():
             env = engine._environments.get(graph.graph_id)
             registry = (
@@ -71,32 +84,67 @@ async def runtime_graph_stream(websocket: WebSocket):
                 known_channels.add(key)
 
     async def engine_events() -> None:
-        async for event in engine.subscribe():
-            payload = {
-                "type": (
-                    event.kind.value
-                    if hasattr(event.kind, "value")
-                    else str(event.kind)
-                ),
-                "version": _version(),
-                "graph_id": event.graph_id,
-                "creature_id": event.creature_id,
-                "channel": event.channel,
-                "payload": event.payload or {},
-                "ts": event.ts,
-            }
-            await enqueue(payload)
+        # Service-routed: fans out across workers in lab-host mode.
+        async for event in service.subscribe():
+            kind = event.kind.value if hasattr(event.kind, "value") else str(event.kind)
+            # CHANNEL_MESSAGE events are normally delivered by the
+            # endpoint-local ``_make_channel_callback`` hook, which
+            # produces the richer flat shape the graph editor consumes
+            # (sender / content / content_preview / message_id) —
+            # forwarding the generic copy too would double-deliver
+            # (B-api-1). BUT in lab-host mode ``engine`` is ``None``,
+            # so ``sync_channel_observers`` registers NO local callbacks
+            # and the only source of channel_message frames is the
+            # service-routed engine-event stream itself (CF-8). In that
+            # mode synthesize the rich flat shape from the engine event
+            # payload and forward it; otherwise drop to avoid the dup.
+            if kind == "channel_message":
+                if engine is None:
+                    payload = event.payload or {}
+                    content = payload.get("content", "")
+                    await enqueue(
+                        {
+                            "type": "channel_message",
+                            "version": _version(),
+                            "graph_id": event.graph_id,
+                            "channel": event.channel,
+                            "sender": str(payload.get("sender", "")),
+                            "content": _jsonable(content),
+                            "content_preview": _preview(content),
+                            "message_id": str(payload.get("message_id", "")),
+                            "timestamp": _timestamp_to_string(payload.get("timestamp")),
+                        }
+                    )
+            else:
+                await enqueue(
+                    {
+                        "type": kind,
+                        "version": _version(),
+                        "graph_id": event.graph_id,
+                        "creature_id": event.creature_id,
+                        "channel": event.channel,
+                        "payload": event.payload or {},
+                        "ts": event.ts,
+                    }
+                )
             await sync_channel_observers()
 
-    engine_task = asyncio.create_task(engine_events())
-
+    # Build + send the initial snapshot BEFORE subscribing to engine
+    # events. Otherwise the engine_task pump can enqueue events with a
+    # ``version`` timestamp pre-dating the snapshot's ``version``; the
+    # client's patch logic uses that timestamp for ordering and would
+    # drop the earlier events as stale.
+    engine_task: asyncio.Task | None = None
     try:
         await sync_channel_observers()
-        snapshot = build_runtime_graph_snapshot(engine)
+        # Service-routed snapshot — host-local in standalone, fanned
+        # out across workers in lab-host mode.
+        snapshot = await service.runtime_graph_snapshot()
         await websocket.send_json(
             {"type": "subscribed", "version": snapshot["version"]}
         )
         await websocket.send_json({"type": "snapshot", "snapshot": snapshot})
+        engine_task = asyncio.create_task(engine_events())
         while True:
             event = await queue.get()
             await websocket.send_json(event)
@@ -109,9 +157,10 @@ async def runtime_graph_stream(websocket: WebSocket):
         with suppress(Exception):
             await websocket.close()
     finally:
-        engine_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await engine_task
+        if engine_task is not None:
+            engine_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await engine_task
         for channel, callback in channel_callbacks.values():
             with suppress(Exception):
                 channel.remove_on_send(callback)

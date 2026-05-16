@@ -8,7 +8,7 @@ URL shape per the Phase 2 plan.
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from kohakuterrarium.api.deps import get_engine
+from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.studio.attach.io import attach_io
 from kohakuterrarium.utils.logging import get_logger
 
@@ -23,10 +23,10 @@ async def session_creature_chat(
 ):
     """Bidirectional engine-backed chat for one creature."""
     await websocket.accept()
-    engine = get_engine()
+    service = get_service()
 
     try:
-        await attach_io(websocket, engine, session_id, creature_id)
+        await attach_io(websocket, service, session_id, creature_id)
     except KeyError:
         try:
             await websocket.send_json(

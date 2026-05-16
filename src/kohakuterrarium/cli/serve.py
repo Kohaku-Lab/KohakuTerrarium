@@ -10,6 +10,7 @@ from pathlib import Path
 
 from kohakuterrarium.cli.version import get_git_info, get_package_version
 from kohakuterrarium.serving.web import run_web_server
+from kohakuterrarium.utils.logging import enable_stderr_logging
 
 RUN_DIR = Path.home() / ".kohakuterrarium" / "run"
 PID_PATH = RUN_DIR / "web.pid"
@@ -115,7 +116,16 @@ def _write_started_state(
     PID_PATH.write_text(str(pid), encoding="utf-8")
 
 
-def _spawn_server_process(host: str, port: int, dev: bool, log_level: str) -> int:
+def _spawn_server_process(
+    host: str,
+    port: int,
+    dev: bool,
+    log_level: str,
+    *,
+    mode: str = "standalone",
+    lab_bind: str = "",
+    lab_token: str = "",
+) -> int:
     RUN_DIR.mkdir(parents=True, exist_ok=True)
     log_file = open(LOG_PATH, "a", encoding="utf-8")  # noqa: SIM115
     cmd = [
@@ -133,6 +143,12 @@ def _spawn_server_process(host: str, port: int, dev: bool, log_level: str) -> in
     if dev:
         cmd.append("--dev")
     cmd.extend(["--log-level", str(log_level)])
+    if mode and mode != "standalone":
+        cmd.extend(["--mode", mode])
+    if lab_bind:
+        cmd.extend(["--lab-bind", lab_bind])
+    if lab_token:
+        cmd.extend(["--lab-token", lab_token])
 
     kwargs: dict[str, object] = {
         "stdin": subprocess.DEVNULL,
@@ -190,6 +206,40 @@ def _wait_until_bound(pid: int, timeout: float = 30.0) -> str:
 
 
 def serve_start_cli(args: argparse.Namespace) -> int:
+    # ``--home-dir`` re-homes every config_dir() consumer (api keys,
+    # OAuth tokens, profiles, MCP servers, sessions). Set BEFORE
+    # spawning the daemon — subprocess inherits KT_CONFIG_DIR.
+    if getattr(args, "home_dir", ""):
+        os.environ["KT_CONFIG_DIR"] = args.home_dir
+    # Foreground mode: bypass the daemon machinery entirely.  Useful
+    # when running the host in a foreground terminal alongside a
+    # ``kt lab-client`` worker, or when iterating on the boot path.
+    if getattr(args, "foreground", False):
+        # Route logs to stderr so the user sees them in their terminal
+        # instead of the daemon's log file.
+        #
+        # KT_LOG_STDERR alone is not sufficient: by the time this
+        # function runs, ``serving.web`` has already been imported and
+        # called ``get_logger`` at module load (with KT_LOG_STDERR
+        # unset).  The ``if _handler is None`` guard then never
+        # re-enters, so a setenv here would have no effect.  Call
+        # ``enable_stderr_logging`` directly to wire the stderr handler
+        # regardless of import order.
+        os.environ.setdefault("KT_LOG_STDERR", "1")
+        enable_stderr_logging(args.log_level)
+        return run_server_internal(
+            argparse.Namespace(
+                host=args.host,
+                port=args.port,
+                dev=args.dev,
+                log_level=args.log_level,
+                state_path=None,
+                mode=getattr(args, "mode", "standalone"),
+                lab_bind=getattr(args, "lab_bind", None) or None,
+                lab_token=getattr(args, "lab_token", None) or None,
+            )
+        )
+
     runtime = _current_runtime()
     if runtime["alive"]:
         state = runtime["state"]
@@ -202,7 +252,15 @@ def serve_start_cli(args: argparse.Namespace) -> int:
     if runtime["pid"] and not runtime["alive"]:
         _remove_runtime_files()
 
-    pid = _spawn_server_process(args.host, args.port, args.dev, args.log_level)
+    pid = _spawn_server_process(
+        args.host,
+        args.port,
+        args.dev,
+        args.log_level,
+        mode=getattr(args, "mode", "standalone"),
+        lab_bind=getattr(args, "lab_bind", "") or "",
+        lab_token=getattr(args, "lab_token", "") or "",
+    )
     _write_started_state(
         pid=pid,
         host=args.host,
@@ -339,11 +397,18 @@ def serve_restart_cli(args: argparse.Namespace) -> int:
     stop_code = serve_stop_cli(stop_args)
     if stop_code not in (0,):
         return stop_code
+    # Carry every flag the start command accepts — without these the
+    # restart silently boots a standalone daemon even when the caller
+    # passed --mode lab-host / --lab-bind / --lab-token / --foreground.
     start_args = argparse.Namespace(
         host=args.host,
         port=args.port,
         dev=args.dev,
         log_level=args.log_level,
+        mode=getattr(args, "mode", "standalone"),
+        lab_bind=getattr(args, "lab_bind", ""),
+        lab_token=getattr(args, "lab_token", ""),
+        foreground=getattr(args, "foreground", False),
     )
     return serve_start_cli(start_args)
 
@@ -355,6 +420,9 @@ def run_server_internal(args: argparse.Namespace) -> int:
         dev=args.dev,
         log_level=args.log_level,
         state_path=getattr(args, "state_path", None),
+        mode=getattr(args, "mode", "standalone"),
+        lab_bind=getattr(args, "lab_bind", None),
+        lab_token=getattr(args, "lab_token", None),
     )
     return 0
 
@@ -397,6 +465,36 @@ def add_serve_subparser(subparsers) -> None:
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         default="INFO",
     )
+    start_parser.add_argument(
+        "--mode",
+        choices=["standalone", "lab-host"],
+        default="standalone",
+        help="standalone (default) or lab-host (multi-node controller)",
+    )
+    start_parser.add_argument(
+        "--lab-bind",
+        default="",
+        help="lab-host: host:port to bind the Lab WebSocket transport (default 127.0.0.1:8100)",
+    )
+    start_parser.add_argument(
+        "--lab-token",
+        default="",
+        help="lab-host: shared token clients must present (required for lab-host)",
+    )
+    start_parser.add_argument(
+        "--home-dir",
+        default="",
+        help=(
+            "config home (api keys, OAuth tokens, profiles, MCP servers, "
+            "sessions). Sets KT_CONFIG_DIR. Default: ~/.kohakuterrarium."
+        ),
+    )
+    start_parser.add_argument(
+        "-f",
+        "--foreground",
+        action="store_true",
+        help="Run inline instead of spawning a daemon (Ctrl+C to stop)",
+    )
 
     stop_parser = serve_sub.add_parser("stop", help="Stop the web daemon")
     stop_parser.add_argument("--timeout", type=float, default=5.0)
@@ -411,6 +509,13 @@ def add_serve_subparser(subparsers) -> None:
         default="INFO",
     )
     restart_parser.add_argument("--timeout", type=float, default=5.0)
+    restart_parser.add_argument(
+        "--mode", choices=["standalone", "lab-host"], default="standalone"
+    )
+    restart_parser.add_argument("--lab-bind", default="")
+    restart_parser.add_argument("--lab-token", default="")
+    restart_parser.add_argument("--home-dir", default="")
+    restart_parser.add_argument("-f", "--foreground", action="store_true")
 
     serve_sub.add_parser("status", help="Show daemon status")
 

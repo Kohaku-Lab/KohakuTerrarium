@@ -3,29 +3,33 @@
 Mounted at ``/api/sessions``; URLs land at
 ``/api/sessions/{session_id}/creatures/{creature_id}/...``.
 
-Sync sub-functions (``interrupt``, ``list_jobs``, ``promote_job``) are
-funnelled through ``asyncio.to_thread``: each touches the agent's
-trigger / job manager which can hit small disk reads, and the
-running-jobs panel polls them frequently enough that any blocking
-read on the loop visibly stalls the rest of the UI.
+Service-driven: the underlying ``creature_ctl.*`` helpers now go
+through the :class:`TerrariumService` Protocol, so in lab-host mode
+these routes correctly reach a remote creature on its home node.
+``MultiNodeTerrariumService._route_per_creature`` keeps the
+``_home`` registry fresh and retries once on stale routing — the
+route handler doesn't need to know about it.
 """
-
-import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from kohakuterrarium.api.deps import get_engine
+from kohakuterrarium.api.deps import get_service
+from kohakuterrarium.api.routes.sessions_v2._helpers import resolve_creature_id
 from kohakuterrarium.studio.sessions import creature_ctl
+from kohakuterrarium.terrarium.service import TerrariumService
 
 router = APIRouter()
 
 
 @router.post("/{session_id}/creatures/{creature_id}/interrupt")
 async def interrupt_creature(
-    session_id: str, creature_id: str, engine=Depends(get_engine)
+    session_id: str,
+    creature_id: str,
+    service: TerrariumService = Depends(get_service),
 ):
+    cid = await resolve_creature_id(service, creature_id)
     try:
-        await asyncio.to_thread(creature_ctl.interrupt, engine, session_id, creature_id)
+        await creature_ctl.interrupt(service, session_id, cid)
         return {"status": "interrupted"}
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
@@ -33,12 +37,13 @@ async def interrupt_creature(
 
 @router.get("/{session_id}/creatures/{creature_id}/jobs")
 async def list_creature_jobs(
-    session_id: str, creature_id: str, engine=Depends(get_engine)
+    session_id: str,
+    creature_id: str,
+    service: TerrariumService = Depends(get_service),
 ):
+    cid = await resolve_creature_id(service, creature_id)
     try:
-        return await asyncio.to_thread(
-            creature_ctl.list_jobs, engine, session_id, creature_id
-        )
+        return await creature_ctl.list_jobs(service, session_id, cid)
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
 
@@ -48,10 +53,11 @@ async def stop_creature_job(
     session_id: str,
     creature_id: str,
     job_id: str,
-    engine=Depends(get_engine),
+    service: TerrariumService = Depends(get_service),
 ):
+    cid = await resolve_creature_id(service, creature_id)
     try:
-        ok = await creature_ctl.cancel_job(engine, session_id, creature_id, job_id)
+        ok = await creature_ctl.cancel_job(service, session_id, cid, job_id)
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
     if not ok:
@@ -64,12 +70,11 @@ async def promote_creature_job(
     session_id: str,
     creature_id: str,
     job_id: str,
-    engine=Depends(get_engine),
+    service: TerrariumService = Depends(get_service),
 ):
+    cid = await resolve_creature_id(service, creature_id)
     try:
-        ok = await asyncio.to_thread(
-            creature_ctl.promote_job, engine, session_id, creature_id, job_id
-        )
+        ok = await creature_ctl.promote_job(service, session_id, cid, job_id)
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
     return {"status": "promoted" if ok else "not_found"}

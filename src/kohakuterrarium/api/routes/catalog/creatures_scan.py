@@ -10,6 +10,7 @@ from pathlib import Path
 
 from fastapi import APIRouter
 
+from kohakuterrarium.api._io_executor import run_in_io_executor
 from kohakuterrarium.studio.catalog.packages_scan import (
     dedupe_dirs,
     scan_creatures_in_dirs,
@@ -34,5 +35,11 @@ def set_creatures_dirs(creatures: list[str]) -> None:
 
 @router.get("")
 async def list_creature_configs():
-    """List available creature configs from configured directories."""
-    return scan_creatures_in_dirs(_creatures_dirs)
+    """List available creature configs from configured directories.
+
+    Off-loaded to the shared I/O executor — a cold cache walks every
+    configured base dir + reads + parses every ``config.yaml`` under
+    it.  Running synchronously on the event loop blocked the entire
+    server while the dashboard's quick-start modal opened.
+    """
+    return await run_in_io_executor(scan_creatures_in_dirs, _creatures_dirs)

@@ -1,26 +1,21 @@
 """Per-creature configurable-modules routes (unified across types).
 
-All runtime configuration of plugins, provider-native tools, and any
-future module type goes through this namespace. Replaces the
-per-type ``/plugins/{name}/options`` and
-``/native-tool-options`` endpoints for the runtime UI.
-
-Routes:
-
-* ``GET    /sessions/{sid}/creatures/{cid}/modules``                       inventory
-* ``GET    /sessions/{sid}/creatures/{cid}/modules/{type}/{name}/options`` schema + values
-* ``PUT    /sessions/{sid}/creatures/{cid}/modules/{type}/{name}/options`` apply
-* ``POST   /sessions/{sid}/creatures/{cid}/modules/{type}/{name}/toggle``  enable/disable
+Service-driven — route-by-home in lab-host mode.  All four endpoints
+go through the same Protocol surface as the rest of the per-creature
+ops; the worker adapter dispatches into ``terrarium.creature_ops``
+which mirrors the studio-tier registry shape.  Every handler
+resolves the ``creature_id`` slot through :func:`resolve_creature_id`
+so the modules pane (which posts the display name) works.
 """
 
-import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from kohakuterrarium.api.deps import get_engine
-from kohakuterrarium.studio.sessions import creature_modules
+from kohakuterrarium.api.deps import get_service
+from kohakuterrarium.api.routes.sessions_v2._helpers import resolve_creature_id
+from kohakuterrarium.terrarium.service import TerrariumService
 
 router = APIRouter()
 
@@ -30,11 +25,14 @@ class ModuleOptionsRequest(BaseModel):
 
 
 @router.get("/{session_id}/creatures/{creature_id}/modules")
-async def list_modules(session_id: str, creature_id: str, engine=Depends(get_engine)):
+async def list_modules(
+    session_id: str,
+    creature_id: str,
+    service: TerrariumService = Depends(get_service),
+):
+    cid = await resolve_creature_id(service, creature_id)
     try:
-        modules = await asyncio.to_thread(
-            creature_modules.list_modules, engine, session_id, creature_id
-        )
+        modules = await service.list_modules(cid)
         return {"modules": modules}
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
@@ -48,17 +46,11 @@ async def get_module_options(
     creature_id: str,
     module_type: str,
     name: str,
-    engine=Depends(get_engine),
+    service: TerrariumService = Depends(get_service),
 ):
+    cid = await resolve_creature_id(service, creature_id)
     try:
-        return await asyncio.to_thread(
-            creature_modules.get_module_options,
-            engine,
-            session_id,
-            creature_id,
-            module_type,
-            name,
-        )
+        return await service.get_module_options(cid, module_type, name)
     except KeyError:
         raise HTTPException(
             404,
@@ -78,17 +70,12 @@ async def set_module_options(
     module_type: str,
     name: str,
     req: ModuleOptionsRequest,
-    engine=Depends(get_engine),
+    service: TerrariumService = Depends(get_service),
 ):
+    cid = await resolve_creature_id(service, creature_id)
     try:
-        applied = await asyncio.to_thread(
-            creature_modules.set_module_options,
-            engine,
-            session_id,
-            creature_id,
-            module_type,
-            name,
-            req.values or {},
+        applied = await service.set_module_options(
+            cid, module_type, name, req.values or {}
         )
     except KeyError:
         raise HTTPException(
@@ -114,12 +101,11 @@ async def toggle_module(
     creature_id: str,
     module_type: str,
     name: str,
-    engine=Depends(get_engine),
+    service: TerrariumService = Depends(get_service),
 ):
+    cid = await resolve_creature_id(service, creature_id)
     try:
-        return await creature_modules.toggle_module(
-            engine, session_id, creature_id, module_type, name
-        )
+        return await service.toggle_module(cid, module_type, name)
     except KeyError:
         raise HTTPException(
             404,

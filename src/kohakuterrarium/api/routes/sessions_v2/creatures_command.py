@@ -2,9 +2,10 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from kohakuterrarium.api.deps import get_engine
+from kohakuterrarium.api.deps import get_service
+from kohakuterrarium.api.routes.sessions_v2._helpers import resolve_creature_id
 from kohakuterrarium.api.schemas import SlashCommand
-from kohakuterrarium.studio.sessions import creature_command
+from kohakuterrarium.terrarium.service import TerrariumService
 
 router = APIRouter()
 
@@ -14,12 +15,11 @@ async def execute_creature_command(
     session_id: str,
     creature_id: str,
     req: SlashCommand,
-    engine=Depends(get_engine),
+    service: TerrariumService = Depends(get_service),
 ):
+    cid = await resolve_creature_id(service, creature_id)
     try:
-        return await creature_command.execute_command(
-            engine, session_id, creature_id, req.command, req.args
-        )
+        return await service.execute_command(cid, req.command, req.args)
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
     except ValueError as e:

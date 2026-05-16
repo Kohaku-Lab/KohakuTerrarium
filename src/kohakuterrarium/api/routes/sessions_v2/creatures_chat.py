@@ -1,19 +1,20 @@
 """Per-creature chat routes — HTTP fallback chat / regen / edit /
 rewind / history / branches.
 
-Every read endpoint that reads from the session store funnels through
-``asyncio.to_thread`` so the SQLite hits don't stall the event loop —
-the chat panel polls history aggressively, so a blocking read here
-freezes every other in-flight WS / HTTP request for the duration.
+Service-driven: ``Depends(get_service)`` so multi-node lab-host
+deployments route by ``_home`` automatically.  ``service.chat`` and
+``service.chat_history`` already cross the lab transport for remote
+creatures.
 """
-
-import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from kohakuterrarium.api.deps import get_engine
+from kohakuterrarium.api.deps import get_service
+from kohakuterrarium.api.routes.sessions_v2._helpers import resolve_creature_id
 from kohakuterrarium.api.schemas import AgentChat, MessageEdit, RegenerateRequest
-from kohakuterrarium.studio.sessions import creature_chat
+from kohakuterrarium.studio._runtime import host_engine_or_none
+from kohakuterrarium.studio.sessions.creature_chat import _channel_history
+from kohakuterrarium.terrarium.service import TerrariumService
 
 router = APIRouter()
 
@@ -23,13 +24,14 @@ async def chat_creature(
     session_id: str,
     creature_id: str,
     req: AgentChat,
-    engine=Depends(get_engine),
+    service: TerrariumService = Depends(get_service),
 ):
-    """Non-streaming HTTP chat fallback."""
+    """Non-streaming HTTP chat fallback — collects the streaming chunks."""
+    cid = await resolve_creature_id(service, creature_id)
     content = req.content if req.content is not None else (req.message or "")
     try:
         chunks: list[str] = []
-        async for chunk in creature_chat.chat(engine, session_id, creature_id, content):
+        async for chunk in service.chat(cid, content):
             chunks.append(chunk)
         return {"response": "".join(chunks)}
     except KeyError:
@@ -41,25 +43,13 @@ async def regenerate_creature(
     session_id: str,
     creature_id: str,
     req: RegenerateRequest | None = None,
-    engine=Depends(get_engine),
+    service: TerrariumService = Depends(get_service),
 ):
-    """Regenerate an assistant response.
-
-    Empty body (or omitted ``turn_index``) regenerates the
-    conversation tail — backwards-compatible with older callers. With
-    ``turn_index`` set, opens a new branch at that turn (used when the
-    user clicks retry on a non-tail message).
-    """
+    cid = await resolve_creature_id(service, creature_id)
     turn_index = req.turn_index if req is not None else None
     branch_view = req.branch_view if req is not None else None
     try:
-        await creature_chat.regenerate(
-            engine,
-            session_id,
-            creature_id,
-            turn_index=turn_index,
-            branch_view=branch_view,
-        )
+        await service.regenerate(cid, turn_index=turn_index, branch_view=branch_view)
         return {"status": "regenerating", "turn_index": turn_index}
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
@@ -71,7 +61,7 @@ async def edit_creature_message(
     creature_id: str,
     msg_idx: int,
     req: MessageEdit,
-    engine=Depends(get_engine),
+    service: TerrariumService = Depends(get_service),
 ):
     if isinstance(req.content, list):
         content: str | list[dict] = [
@@ -80,11 +70,10 @@ async def edit_creature_message(
         ]
     else:
         content = req.content
+    cid = await resolve_creature_id(service, creature_id)
     try:
-        edited = await creature_chat.edit_message(
-            engine,
-            session_id,
-            creature_id,
+        edited = await service.edit_message(
+            cid,
             msg_idx,
             content,
             turn_index=req.turn_index,
@@ -107,10 +96,11 @@ async def rewind_creature(
     session_id: str,
     creature_id: str,
     msg_idx: int,
-    engine=Depends(get_engine),
+    service: TerrariumService = Depends(get_service),
 ):
+    cid = await resolve_creature_id(service, creature_id)
     try:
-        await creature_chat.rewind(engine, session_id, creature_id, msg_idx)
+        await service.rewind(cid, msg_idx)
         return {"status": "rewound"}
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
@@ -118,23 +108,67 @@ async def rewind_creature(
 
 @router.get("/{session_id}/creatures/{creature_id}/history")
 async def creature_history(
-    session_id: str, creature_id: str, engine=Depends(get_engine)
+    session_id: str,
+    creature_id: str,
+    service: TerrariumService = Depends(get_service),
 ):
+    # The frontend uses the same endpoint for per-creature chat tabs and
+    # per-channel tabs (``ch:<name>``).  In lab-host mode the host engine
+    # has no attached session store, but the service's cluster-aware
+    # ``channel_history`` already unions messages across every cluster
+    # member's worker store (CF-4). CF-9: delegate to it so the channel
+    # tab is non-empty even when ``_channel_history``'s studio-attached
+    # store walk finds nothing.
+    if creature_id.startswith("ch:"):
+        channel_name = creature_id[3:]
+        engine = host_engine_or_none(service)
+        if engine is not None:
+            payload = _channel_history(engine, session_id, channel_name)
+            if payload.get("events"):
+                return payload
+        # Fall back to (or default to in lab-host) the service-routed
+        # cluster fan-out. Shape the returned list of channel-message
+        # dicts as ``channel_message`` events so the frontend's chat
+        # replay can render them in the channel tab.
+        try:
+            messages = await service.channel_history(session_id, channel_name)
+        except (KeyError, AttributeError):
+            messages = []
+        except Exception:
+            messages = []
+        events: list[dict] = []
+        for m in messages or []:
+            events.append(
+                {
+                    "type": "channel_message",
+                    "channel": channel_name,
+                    "sender": m.get("sender", ""),
+                    "content": m.get("content", ""),
+                    "ts": m.get("ts", 0) or m.get("timestamp", 0),
+                }
+            )
+        return {
+            "creature_id": creature_id,
+            "session_id": session_id,
+            "messages": [],
+            "events": events,
+            "is_processing": False,
+        }
+    cid = await resolve_creature_id(service, creature_id)
     try:
-        return await asyncio.to_thread(
-            creature_chat.history, engine, session_id, creature_id
-        )
+        return await service.chat_history(cid)
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
 
 
 @router.get("/{session_id}/creatures/{creature_id}/branches")
 async def creature_branches(
-    session_id: str, creature_id: str, engine=Depends(get_engine)
+    session_id: str,
+    creature_id: str,
+    service: TerrariumService = Depends(get_service),
 ):
+    cid = await resolve_creature_id(service, creature_id)
     try:
-        return await asyncio.to_thread(
-            creature_chat.branches, engine, session_id, creature_id
-        )
+        return await service.chat_branches(cid)
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")

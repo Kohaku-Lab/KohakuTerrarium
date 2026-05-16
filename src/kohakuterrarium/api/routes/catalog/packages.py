@@ -13,6 +13,7 @@ Mounted twice by ``api/app.py``:
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from kohakuterrarium.api._io_executor import run_in_io_executor
 from kohakuterrarium.studio.catalog.packages import (
     install_package_op,
     uninstall_package_op,
@@ -40,15 +41,22 @@ class UninstallRequest(BaseModel):
 
 @router.get("")
 async def list_local():
-    """List all locally available creature and terrarium configs with details."""
-    return [entry.as_registry_dict() for entry in scan_catalog()]
+    """List all locally available creature and terrarium configs with details.
+
+    Off-loaded to the shared I/O executor — ``scan_catalog`` walks the
+    packages dir and reads metadata for every installed entry.
+    """
+    entries = await run_in_io_executor(scan_catalog)
+    return [entry.as_registry_dict() for entry in entries]
 
 
 @router.post("/install")
 async def install(req: InstallRequest):
     """Install a package from a git URL."""
     try:
-        name = install_package_op(source=req.url, name=req.name)
+        name = await run_in_io_executor(
+            install_package_op, source=req.url, name=req.name
+        )
         return {"status": "installed", "name": name}
     except Exception as e:
         logger.error("Install failed", url=req.url, error=str(e))
@@ -58,7 +66,7 @@ async def install(req: InstallRequest):
 @router.post("/uninstall")
 async def uninstall(req: UninstallRequest):
     """Uninstall a package by name."""
-    removed = uninstall_package_op(req.name)
+    removed = await run_in_io_executor(uninstall_package_op, req.name)
     if not removed:
         raise HTTPException(404, f"Package not found: {req.name}")
     return {"status": "uninstalled", "name": req.name}
