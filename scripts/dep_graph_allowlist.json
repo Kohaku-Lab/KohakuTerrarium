@@ -19,13 +19,13 @@
   },
   {
     "file": "src/kohakuterrarium/cli/serve.py",
-    "line": 29,
+    "line": 30,
     "function": "_is_pid_alive",
     "reason": "Win32-only ctypes import inside `if sys.platform == 'win32'` branch"
   },
   {
     "file": "src/kohakuterrarium/cli/serve.py",
-    "line": 30,
+    "line": 31,
     "function": "_is_pid_alive",
     "reason": "Win32-only ctypes.wintypes import inside `if sys.platform == 'win32'` branch"
   },
@@ -43,21 +43,21 @@
   },
   {
     "file": "src/kohakuterrarium/serving/web.py",
-    "line": 134,
+    "line": 145,
     "function": "run_web_server",
     "reason": "FastAPI app factory: serving->api lazy boot avoids pulling all routes when only the helper is touched"
   },
   {
     "file": "src/kohakuterrarium/serving/web.py",
-    "line": 188,
+    "line": 217,
     "function": "run_desktop_app",
     "reason": "subprocess used only when relaunching as desktop process"
   },
   {
     "file": "src/kohakuterrarium/serving/web.py",
-    "line": 252,
+    "line": 281,
     "function": "_run_desktop_app_blocking",
-    "reason": "FastAPI app factory: same as line 134, desktop variant"
+    "reason": "FastAPI app factory: same as run_web_server, desktop variant"
   },
   {
     "file": "src/kohakuterrarium/api/studio/introspect.py",
@@ -187,13 +187,13 @@
   },
   {
     "file": "src/kohakuterrarium/serving/web.py",
-    "line": 132,
+    "line": 143,
     "function": "run_web_server",
     "reason": "uvicorn is heavy; imported only when serving HTTP for real"
   },
   {
     "file": "src/kohakuterrarium/serving/web.py",
-    "line": 250,
+    "line": 279,
     "function": "_run_desktop_app_blocking",
     "reason": "uvicorn import deferred to desktop-app launch path"
   },
@@ -228,6 +228,12 @@
     "reason": "prompt.aggregator imports from builtin_skills and prompt.__init__ loads aggregator eagerly; lazy import here breaks the cycle"
   },
   {
+    "file": "src/kohakuterrarium/terrarium/engine_rich_cli.py",
+    "line": 78,
+    "function": "_input_conflicts_with_terminal",
+    "reason": "TUIInput pulls in Textual (third-party heavy); imported lazily so minimal installs don't have to take the Textual dependency"
+  },
+  {
     "file": "src/kohakuterrarium/studio/attach/pty_router.py",
     "line": 56,
     "function": "pty_session",
@@ -238,5 +244,47 @@
     "line": 64,
     "function": "pty_session",
     "reason": "POSIX-only PTY backend imported on non-Windows platforms (uses fcntl/pty/termios)"
+  },
+  {
+    "file": "src/kohakuterrarium/bootstrap/llm.py",
+    "line": 127,
+    "function": "_create_from_profile",
+    "reason": "test-only fake_test backend; FakeLLMProvider imported lazily so production runtime never loads the testing package"
+  },
+  {
+    "file": "src/kohakuterrarium/cli/lab_client.py",
+    "line": 146,
+    "function": "_run_worker",
+    "reason": "test-only seam guarded by KT_TEST_LLM_SCRIPT env var; production runs never import the testing package"
+  },
+  {
+    "file": "src/kohakuterrarium/mcp/client.py",
+    "line": 200,
+    "function": "_connect_impl",
+    "reason": "mcp SDK is heavy/optional; loaded only when a server is actually connecting"
+  },
+  {
+    "file": "src/kohakuterrarium/mcp/client.py",
+    "line": 201,
+    "function": "_connect_impl",
+    "reason": "mcp.client.stdio is loaded on the stdio-transport path"
+  },
+  {
+    "file": "src/kohakuterrarium/testing/subprocess_seam.py",
+    "line": 78,
+    "function": "maybe_install_test_llm_seam",
+    "reason": "test-only monkeypatch installer — imports deferred so production callers don't pay the cost when KT_TEST_LLM_SCRIPT is unset"
+  },
+  {
+    "file": "src/kohakuterrarium/testing/subprocess_seam.py",
+    "line": 84,
+    "function": "maybe_install_test_llm_seam",
+    "reason": "test-only monkeypatch installer — imports deferred so production callers don't pay the cost when KT_TEST_LLM_SCRIPT is unset"
+  },
+  {
+    "file": "src/kohakuterrarium/testing/subprocess_seam.py",
+    "line": 90,
+    "function": "maybe_install_test_llm_seam",
+    "reason": "test-only monkeypatch installer — imports deferred so production callers don't pay the cost when KT_TEST_LLM_SCRIPT is unset"
   }
 ]

@@ -41,6 +41,8 @@ jobs:
           pip install -e ".[dev]"
       - name: Run unit tests
         run: pytest tests/unit/ -v --tb=short --ignore=tests/unit/test_file_sizes.py --ignore=tests/unit/test_dep_graph_lint.py
+      - name: Run integration + e2e tests
+        run: pytest tests/integration/ tests/e2e/ -v --tb=short
 
   test-format-guards:
     runs-on: ubuntu-latest
