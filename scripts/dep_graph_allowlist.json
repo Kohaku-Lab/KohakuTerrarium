@@ -247,9 +247,15 @@
   },
   {
     "file": "src/kohakuterrarium/bootstrap/llm.py",
-    "line": 127,
+    "line": 126,
     "function": "_create_from_profile",
     "reason": "test-only fake_test backend; FakeLLMProvider imported lazily so production runtime never loads the testing package"
+  },
+  {
+    "file": "src/kohakuterrarium/bootstrap/llm.py",
+    "line": 179,
+    "function": "_create_from_profile",
+    "reason": "LiteLLM is an optional extra (`kohakuterrarium[litellm]`); LiteLLMProvider imported lazily on the litellm backend branch so a minimal install without that extra keeps `kt --help` and core imports working"
   },
   {
     "file": "src/kohakuterrarium/cli/lab_client.py",
