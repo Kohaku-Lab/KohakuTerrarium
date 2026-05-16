@@ -136,13 +136,19 @@ async def search_session_memory(
         else:
             store = SessionStore(path)
 
-        embed_config = _resolve_embed_config(store, live_agent)
-
-        try:
-            embedder = create_embedder(embed_config)
-        except Exception as e:
-            _ = e  # embedding unavailable, continue without
+        # FTS-only queries do not touch the embedder; skipping
+        # ``create_embedder`` here also dodges a slow / failing
+        # HuggingFace model fetch on first run (Windows CI has been
+        # observed timing out inside ``hf_hub_download``).
+        if mode == "fts":
             embedder = None
+        else:
+            embed_config = _resolve_embed_config(store, live_agent)
+            try:
+                embedder = create_embedder(embed_config)
+            except Exception as e:
+                _ = e  # embedding unavailable, continue without
+                embedder = None
 
         memory = SessionMemory(str(path), embedder=embedder, store=store)
 
