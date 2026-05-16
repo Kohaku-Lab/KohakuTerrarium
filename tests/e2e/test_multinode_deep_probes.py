@@ -941,11 +941,26 @@ class TestMultinodeDeepProbes:
                 dd = await host.http.delete(f"/api/sessions/active/{ga}")
                 assert dd.status_code in (200, 204, 404), dd.text
 
-                # Find the saved session in /api/sessions.
-                ls = await host.http.get("/api/sessions")
-                assert ls.status_code == 200, ls.text
-                body = ls.json()
-                sessions = body if isinstance(body, list) else body.get("sessions", [])
+                # Find the saved session in /api/sessions.  The mirror
+                # writer drains worker session.sync events asynchronously
+                # — the DELETE returns once the creature is removed on
+                # the worker, but the last queued sync notifications may
+                # land in the mirror dir a beat later. Poll with
+                # ``refresh=true`` so each retry forces a fresh disk
+                # scan instead of reading the 30s cached index.
+                sessions: list = []
+                body: dict | list = {}
+                deadline = asyncio.get_event_loop().time() + 5.0
+                while asyncio.get_event_loop().time() < deadline:
+                    ls = await host.http.get("/api/sessions?refresh=true")
+                    assert ls.status_code == 200, ls.text
+                    body = ls.json()
+                    sessions = (
+                        body if isinstance(body, list) else body.get("sessions", [])
+                    )
+                    if sessions:
+                        break
+                    await asyncio.sleep(0.1)
                 assert sessions, (
                     f"NEW BUG: saved sessions list empty after closing "
                     f"a worker creature session; body={body}"

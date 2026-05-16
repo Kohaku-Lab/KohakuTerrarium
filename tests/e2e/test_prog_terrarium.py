@@ -632,15 +632,28 @@ class TestProgTerrariumJourney:
         merged_env = engine._environments[a2.graph_id]
         assert engine._environments[c2.graph_id] is merged_env
         assert merged_env.shared_channels.get("reunite") is not None
-        # Merged session store with lineage back to BOTH pre-merge stores.
+        # Merged session store carries lineage back to BOTH pre-merge
+        # stores.  When the merge target's path is the kept graph's
+        # existing file, ``apply_merge`` reuses the live kept store and
+        # copies the OTHER side's events into it — opening a second
+        # ``SessionStore`` at the same path would duplicate every row.
+        # So ``merged_store`` may be identity-equal to whichever side
+        # ``new_graph_ids[0]`` selected; what we assert here is the
+        # *contract*: lineage and merge marker are stamped onto the
+        # surviving store regardless of which physical handle survived.
         merged_store = engine._session_stores[a2.graph_id]
-        assert merged_store is not store_alice
-        assert merged_store is not store_carol
         assert set(merged_store.meta["parent_session_ids"]) == {
             store_alice.session_id,
             store_carol.session_id,
         }
         assert "merged_at" in merged_store.meta
+        # The dropped side's store handle is no longer referenced by
+        # the engine — only one store survives per graph.
+        surviving_stores = set(engine._session_stores.values())
+        assert merged_store in surviving_stores
+        assert not (
+            store_alice in surviving_stores and store_carol in surviving_stores
+        ), "merge must drop one of the two pre-merge store handles"
         merged_gid = a2.graph_id
 
         # --- RE-MERGE then SPLIT-via-remove_channel -----------------------

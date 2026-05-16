@@ -135,6 +135,12 @@ def client(
     session_dir = tmp_path / "sessions"
     session_dir.mkdir()
     monkeypatch.setenv("KT_SESSION_DIR", str(session_dir))
+    # The model-switch journey flips the creature to ``openai/gpt-4o-mini``;
+    # the provider builder checks ``OPENAI_API_KEY`` before returning,
+    # so without a value the switch raises ValueError -> 400.  The
+    # ScriptedLLM intercepts the actual ``chat()`` call so this key is
+    # never used over the wire — it just unblocks the provider build.
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-used")
 
     engine = Terrarium(session_dir=str(session_dir))
     service = LocalTerrariumService(engine)

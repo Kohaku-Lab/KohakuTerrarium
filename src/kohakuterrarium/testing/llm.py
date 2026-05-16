@@ -64,6 +64,10 @@ class ScriptedLLM:
 
         self.call_count: int = 0
         self.call_log: list[list[dict[str, Any]]] = []  # All messages received per call
+        # Track which script entries have been returned so multiple
+        # entries sharing the same ``match`` advance through the
+        # script instead of all aliasing to the first matcher.
+        self._used_indices: set[int] = set()
 
     def _normalize_messages(
         self,
@@ -93,14 +97,20 @@ class ScriptedLLM:
                     )
                 break
 
-        # Priority pass: any match-gated entry whose ``match`` is found
-        # in the latest user message wins, regardless of ``call_count``.
-        # Without this pre-scan, plain entries (``match=None``) intercept
-        # at the call_count index and the match-gated ones are never
-        # reachable once call_count has advanced past them — defeating
-        # the documented purpose of ``match``.
-        for entry in self.script:
-            if entry.match is not None and entry.match in last_user:
+        # Priority pass: prefer the earliest UNUSED match-gated entry
+        # whose ``match`` is found in the latest user message.
+        # Tracking ``_used_indices`` lets multiple entries with the
+        # SAME ``match`` (regenerate / retry scenarios) advance through
+        # the script instead of all aliasing to the first one — without
+        # this, ``[("a", match=X), ("b", match=X)]`` returns "a" every
+        # call with X, defeating the purpose of scripting a sequence.
+        for idx, entry in enumerate(self.script):
+            if (
+                entry.match is not None
+                and entry.match in last_user
+                and idx not in self._used_indices
+            ):
+                self._used_indices.add(idx)
                 return entry
 
         # Fallback: walk from call_count using plain entries.
@@ -108,10 +118,13 @@ class ScriptedLLM:
         while idx < len(self.script):
             entry = self.script[idx]
             if entry.match is None:
+                self._used_indices.add(idx)
                 return entry
             idx += 1
 
-        # Last-resort fallback: repeat last entry.
+        # Last-resort fallback: repeat last entry (script exhausted —
+        # callers either over-script or accept a repeat; the matching
+        # tests below assert ``call_count`` so over-scripting surfaces).
         return self.script[-1]
 
     async def chat(
