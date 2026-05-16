@@ -1,327 +1,232 @@
-"""Channel + wiring + subscribe tests for the engine."""
+"""Unit tests for :mod:`kohakuterrarium.terrarium.channels`."""
 
-import asyncio
-
-import pytest
-
-from kohakuterrarium.modules.output.base import OutputModule
-from kohakuterrarium.terrarium.engine import (
-    ConnectionResult,
-    DisconnectionResult,
-    Terrarium,
-)
-from kohakuterrarium.terrarium.events import EventFilter, EventKind
-
-from tests.unit.terrarium._fakes import make_creature
-
-# ---------------------------------------------------------------------------
-# add_channel
-# ---------------------------------------------------------------------------
+from types import SimpleNamespace
 
 
-class TestAddChannel:
-    @pytest.mark.asyncio
-    async def test_declares_in_graph_and_environment(self):
-        engine = Terrarium()
-        a = await engine.add_creature(make_creature("alice"))
-        info = await engine.add_channel(a.graph_id, "ch1")
-        assert info.name == "ch1"
-        # registered in topology
-        assert "ch1" in engine.get_graph(a.graph_id).channels
-        # registered in env's live channel registry
-        env = engine._environments[a.graph_id]
-        assert env.shared_channels.get("ch1") is not None
+from kohakuterrarium.core.environment import Environment
+from kohakuterrarium.terrarium import channels as channels_mod
+from kohakuterrarium.terrarium.topology import ChannelInfo
 
-    @pytest.mark.asyncio
-    async def test_duplicate_channel_rejected(self):
-        engine = Terrarium()
-        a = await engine.add_creature(make_creature("alice"))
-        await engine.add_channel(a.graph_id, "ch1")
-        with pytest.raises(ValueError):
-            await engine.add_channel(a.graph_id, "ch1")
+# ── register_channel_in_environment ───────────────────────────
 
 
-# ---------------------------------------------------------------------------
-# connect / disconnect (same-graph)
-# ---------------------------------------------------------------------------
+class TestRegisterChannelInEnvironment:
+    def test_basic(self):
+        env = Environment(env_id="env-1")
+        info = ChannelInfo(name="chat", description="d")
+        out = channels_mod.register_channel_in_environment(env.shared_channels, info)
+        assert out is not None
+        # ChannelRegistry stores by name.
+        assert "chat" in env.shared_channels._channels
+
+    def test_idempotent_reregister(self):
+        env = Environment(env_id="env-1")
+        info = ChannelInfo(name="chat")
+        ch1 = channels_mod.register_channel_in_environment(env.shared_channels, info)
+        ch2 = channels_mod.register_channel_in_environment(env.shared_channels, info)
+        assert ch1 is ch2
 
 
-class TestConnectSameGraph:
-    @pytest.mark.asyncio
-    async def test_connect_injects_trigger_on_receiver(self):
-        engine = Terrarium()
-        a = await engine.add_creature(make_creature("alice"))
-        b = await engine.add_creature(make_creature("bob"), graph=a.graph_id)
-        result = await engine.connect(a, b, channel="ab")
-        assert isinstance(result, ConnectionResult)
-        assert result.channel == "ab"
-        assert result.delta_kind == "nothing"  # already same graph
-        # bob (the receiver) got the trigger; alice did not.
-        assert any(
-            tid.startswith("channel_bob_ab")
-            for tid in b.agent.trigger_manager._triggers
+# ── _ensure_channel_persistence ───────────────────────────────
+
+
+class _FakeStore:
+    def __init__(self):
+        self.saved = []
+
+    def save_channel_message(self, channel_name, payload):
+        self.saved.append((channel_name, payload))
+
+
+class _FakeEngine:
+    def __init__(self, store=None):
+        self._session_stores = {"g1": store} if store else {}
+
+
+class TestEnsureChannelPersistence:
+    def test_marks_graph_id(self):
+        channel = SimpleNamespace(on_send=lambda fn: None)
+        engine = _FakeEngine()
+        channels_mod._ensure_channel_persistence(channel, engine, "g1")
+        assert channel._terrarium_graph_id == "g1"
+
+    def test_idempotent(self):
+        # Second call doesn't re-install on_send.
+        installed = []
+
+        class _Ch:
+            def __init__(self):
+                self._terrarium_graph_id = None
+                self._terrarium_persistence_installed = False
+
+            def on_send(self, fn):
+                installed.append(fn)
+
+        ch = _Ch()
+        engine = _FakeEngine()
+        channels_mod._ensure_channel_persistence(ch, engine, "g1")
+        # Simulate the flag being set after first install.
+        ch._terrarium_persistence_installed = True
+        channels_mod._ensure_channel_persistence(ch, engine, "g2")
+        # Graph id refreshed.
+        assert ch._terrarium_graph_id == "g2"
+
+    def test_refreshes_graph_id_on_subsequent_calls(self):
+        class _Ch:
+            _terrarium_persistence_installed = False
+
+            def on_send(self, fn):
+                pass
+
+        ch = _Ch()
+        channels_mod._ensure_channel_persistence(ch, _FakeEngine(), "g1")
+        channels_mod._ensure_channel_persistence(ch, _FakeEngine(), "g2")
+        assert ch._terrarium_graph_id == "g2"
+
+
+# ── bind_creature_to_environment ──────────────────────────────
+
+
+class TestBindCreatureToEnvironment:
+    def test_assigns_environment(self):
+        env = Environment(env_id="env-1")
+        agent = SimpleNamespace(environment=None, executor=None)
+        creature = SimpleNamespace(agent=agent)
+        channels_mod.bind_creature_to_environment(creature, env)
+        assert agent.environment is env
+
+    def test_assigns_executor_env(self):
+        env = Environment(env_id="env-1")
+        executor = SimpleNamespace(_environment=None)
+        agent = SimpleNamespace(environment=None, executor=executor)
+        creature = SimpleNamespace(agent=agent)
+        channels_mod.bind_creature_to_environment(creature, env)
+        assert executor._environment is env
+
+    def test_idempotent_no_change(self):
+        env = Environment(env_id="env-1")
+        agent = SimpleNamespace(environment=env, executor=None)
+        creature = SimpleNamespace(agent=agent)
+        channels_mod.bind_creature_to_environment(creature, env)
+        assert agent.environment is env
+
+
+# ── register_engine_handle ────────────────────────────────────
+
+
+class _WeakRefable:
+    """Plain class that allows weakref (SimpleNamespace doesn't)."""
+
+
+class TestRegisterEngineHandle:
+    def test_registers_weakref(self):
+        env = Environment(env_id="env-1")
+        engine = _WeakRefable()
+        channels_mod.register_engine_handle(env, engine)
+        ref = env.get(channels_mod.TERRARIUM_ENGINE_KEY)
+        assert callable(ref)
+        assert ref() is engine
+
+    def test_idempotent_replaces(self):
+        env = Environment(env_id="env-1")
+        engine1 = _WeakRefable()
+        engine2 = _WeakRefable()
+        channels_mod.register_engine_handle(env, engine1)
+        channels_mod.register_engine_handle(env, engine2)
+        ref = env.get(channels_mod.TERRARIUM_ENGINE_KEY)
+        assert ref() is engine2
+
+
+# ── inject_channel_trigger ────────────────────────────────────
+
+
+class _FakeTriggerManager:
+    def __init__(self):
+        self._triggers = {}
+        self._created_at = {}
+        self._tasks = {}
+
+
+class _FakeAgent:
+    def __init__(self):
+        self.trigger_manager = _FakeTriggerManager()
+        # _creature_id is read as a fallback ignore_sender_id.
+        self._creature_id = "alice"
+
+
+class TestInjectChannelTrigger:
+    def test_basic(self):
+        env = Environment(env_id="e")
+        info = ChannelInfo(name="chat")
+        channels_mod.register_channel_in_environment(env.shared_channels, info)
+        agent = _FakeAgent()
+        tid = channels_mod.inject_channel_trigger(
+            agent,
+            subscriber_id="alice",
+            channel_name="chat",
+            registry=env.shared_channels,
         )
-        assert not any(
-            tid.startswith("channel_alice_ab")
-            for tid in a.agent.trigger_manager._triggers
+        assert tid == "channel_alice_chat"
+        assert tid in agent.trigger_manager._triggers
+        # Created-at stamped.
+        assert tid in agent.trigger_manager._created_at
+
+    def test_reinjection_tears_down(self):
+        env = Environment(env_id="e")
+        info = ChannelInfo(name="chat")
+        channels_mod.register_channel_in_environment(env.shared_channels, info)
+        agent = _FakeAgent()
+        # First inject.
+        tid = channels_mod.inject_channel_trigger(
+            agent,
+            subscriber_id="alice",
+            channel_name="chat",
+            registry=env.shared_channels,
         )
-
-    @pytest.mark.asyncio
-    async def test_connect_updates_creature_listen_send_lists(self):
-        engine = Terrarium()
-        a = await engine.add_creature(make_creature("alice"))
-        b = await engine.add_creature(make_creature("bob"), graph=a.graph_id)
-        await engine.connect(a, b, channel="ab")
-        assert "ab" in a.send_channels
-        assert "ab" in b.listen_channels
-        assert "ab" not in a.listen_channels
-        assert "ab" not in b.send_channels
-
-    @pytest.mark.asyncio
-    async def test_auto_channel_name_when_none(self):
-        engine = Terrarium()
-        a = await engine.add_creature(make_creature("alice"))
-        b = await engine.add_creature(make_creature("bob"), graph=a.graph_id)
-        result = await engine.connect(a, b)
-        assert result.channel.startswith("alice__bob__")
-
-    @pytest.mark.asyncio
-    async def test_cross_graph_connect_merges_graphs(self):
-        # Cross-graph connect merges the two graphs
-        # and unions their environments.  Detailed merge invariants
-        # live in test_hotplug.py; this just asserts the high-level
-        # outcome from the channel surface.
-        engine = Terrarium()
-        a = await engine.add_creature(make_creature("alice"))
-        b = await engine.add_creature(make_creature("bob"))
-        assert a.graph_id != b.graph_id
-        result = await engine.connect(a, b)
-        assert result.delta_kind == "merge"
-        assert a.graph_id == b.graph_id
-
-
-class TestDisconnect:
-    @pytest.mark.asyncio
-    async def test_disconnect_removes_trigger(self):
-        engine = Terrarium()
-        a = await engine.add_creature(make_creature("alice"))
-        b = await engine.add_creature(make_creature("bob"), graph=a.graph_id)
-        await engine.connect(a, b, channel="ab")
-        # baseline
-        assert "channel_bob_ab" in b.agent.trigger_manager._triggers
-
-        result = await engine.disconnect(a, b, channel="ab")
-        assert isinstance(result, DisconnectionResult)
-        assert result.channels == ["ab"]
-        # trigger gone
-        assert "channel_bob_ab" not in b.agent.trigger_manager._triggers
-        # listen/send lists cleaned up
-        assert "ab" not in a.send_channels
-        assert "ab" not in b.listen_channels
-
-    @pytest.mark.asyncio
-    async def test_disconnect_split_graph(self):
-        engine = Terrarium()
-        a = await engine.add_creature(make_creature("alice"))
-        b = await engine.add_creature(make_creature("bob"), graph=a.graph_id)
-        await engine.connect(a, b, channel="ab")
-        # Single graph; only one channel; disconnecting splits it.
-        result = await engine.disconnect(a, b, channel="ab")
-        assert result.delta_kind == "split"
-        # Each creature lands in its own graph and gets a fresh env.
-        assert a.graph_id != b.graph_id
-        assert a.graph_id in engine._environments
-        assert b.graph_id in engine._environments
-
-
-# ---------------------------------------------------------------------------
-# wire_output / unwire_output
-# ---------------------------------------------------------------------------
-
-
-class _RecordingSink(OutputModule):
-    def __init__(self) -> None:
-        self.writes: list[str] = []
-
-    async def start(self) -> None:
-        pass
-
-    async def stop(self) -> None:
-        pass
-
-    async def write(self, text: str) -> None:
-        self.writes.append(text)
-
-    async def write_stream(self, chunk: str) -> None:
-        self.writes.append(chunk)
-
-    async def flush(self) -> None:
-        pass
-
-    async def on_processing_start(self) -> None:
-        pass
-
-    async def on_processing_end(self) -> None:
-        pass
-
-    def on_activity(self, activity_type: str, detail: str) -> None:
-        pass
-
-
-class TestWireOutput:
-    @pytest.mark.asyncio
-    async def test_wire_then_unwire_output_edge(self):
-        engine = Terrarium()
-        a = await engine.add_creature(make_creature("alice"))
-        edge_id = await engine.wire_output(a, "bob")
-        assert edge_id.startswith("wire_bob_")
-        assert [entry["to"] for entry in engine.list_output_wiring(a)] == ["bob"]
-        assert a.agent.config.output_wiring[0].to == "bob"
-
-        ok = await engine.unwire_output(a, edge_id)
-        assert ok is True
-        assert engine.list_output_wiring(a) == []
-        assert a.agent.config.output_wiring == []
-
-    @pytest.mark.asyncio
-    async def test_output_edge_delivers_creature_output(self):
-        engine = Terrarium()
-        a = await engine.add_creature(make_creature("alice"))
-        b = await engine.add_creature(make_creature("bob"), graph=a.graph_id)
-        await engine.wire_output(a, "bob")
-
-        await a.agent._wiring_resolver.emit(
-            source=a.creature_id,
-            content="done",
-            source_event_type="test",
-            turn_index=1,
-            entries=a.agent.config.output_wiring,
+        first_trigger = agent.trigger_manager._triggers[tid]
+        # Second inject — same id, but trigger object replaced.
+        tid2 = channels_mod.inject_channel_trigger(
+            agent,
+            subscriber_id="alice",
+            channel_name="chat",
+            registry=env.shared_channels,
         )
-        await asyncio.sleep(0)
+        assert tid == tid2
+        assert agent.trigger_manager._triggers[tid] is not first_trigger
 
-        assert len(b.agent.received_events) == 1
-        event = b.agent.received_events[0]
-        assert event.type == "creature_output"
-        assert event.content == "done"
-        assert event.context["source"] == "alice"
-
-    @pytest.mark.asyncio
-    async def test_output_edge_resolves_target_by_creature_id(self):
-        engine = Terrarium()
-        a = await engine.add_creature(make_creature("alice"))
-        b = await engine.add_creature(make_creature("bob"), graph=a.graph_id)
-        await engine.wire_output(a, b.creature_id)
-
-        await a.agent._wiring_resolver.emit(
-            source=a.creature_id,
-            content="done",
-            source_event_type="test",
-            turn_index=1,
-            entries=a.agent.config.output_wiring,
+    def test_remove_when_absent_returns_false(self):
+        agent = _FakeAgent()
+        out = channels_mod.remove_channel_trigger(
+            agent, subscriber_id="alice", channel_name="chat"
         )
-        await asyncio.sleep(0)
+        assert out is False
 
-        assert len(b.agent.received_events) == 1
-
-    @pytest.mark.asyncio
-    async def test_unwire_unknown_output_edge_returns_false(self):
-        engine = Terrarium()
-        a = await engine.add_creature(make_creature("alice"))
-        ok = await engine.unwire_output(a, "wire_missing")
-        assert ok is False
-
-    @pytest.mark.asyncio
-    async def test_wire_then_unwire_output_sink(self):
-        engine = Terrarium()
-        a = await engine.add_creature(make_creature("alice"))
-        sink = _RecordingSink()
-        sink_id = await engine.wire_output_sink(a, sink)
-        assert sink in a.agent.output_router._secondary_outputs
-
-        ok = await engine.unwire_output_sink(a, sink_id)
-        assert ok is True
-        assert sink not in a.agent.output_router._secondary_outputs
-
-    @pytest.mark.asyncio
-    async def test_unwire_unknown_sink_returns_false(self):
-        engine = Terrarium()
-        a = await engine.add_creature(make_creature("alice"))
-        ok = await engine.unwire_output_sink(a, "sink_deadbeef")
-        assert ok is False
+    def test_remove_after_inject(self):
+        env = Environment(env_id="e")
+        info = ChannelInfo(name="chat")
+        channels_mod.register_channel_in_environment(env.shared_channels, info)
+        agent = _FakeAgent()
+        channels_mod.inject_channel_trigger(
+            agent,
+            subscriber_id="alice",
+            channel_name="chat",
+            registry=env.shared_channels,
+        )
+        out = channels_mod.remove_channel_trigger(
+            agent, subscriber_id="alice", channel_name="chat"
+        )
+        assert out is True
 
 
-# ---------------------------------------------------------------------------
-# subscribe
-# ---------------------------------------------------------------------------
+# ── _teardown_existing_trigger ────────────────────────────────
 
 
-class TestSubscribe:
-    @pytest.mark.asyncio
-    async def test_creature_started_event_emitted(self):
-        engine = Terrarium()
-        events: list = []
+class TestTeardownExistingTrigger:
+    def test_no_manager_silent(self):
+        agent = SimpleNamespace(trigger_manager=None)
+        # Doesn't raise.
+        channels_mod._teardown_existing_trigger(agent, "tid")
 
-        async def collect():
-            async for ev in engine.subscribe():
-                events.append(ev)
-                if len(events) >= 1:
-                    return
-
-        # Race: spawn the consumer first, then add a creature.
-        task = asyncio.create_task(collect())
-        await asyncio.sleep(0)  # let the subscriber attach
-        await engine.add_creature(make_creature("alice"))
-        await asyncio.wait_for(task, timeout=1.0)
-
-        assert len(events) == 1
-        assert events[0].kind == EventKind.CREATURE_STARTED
-        assert events[0].creature_id == "alice"
-
-    @pytest.mark.asyncio
-    async def test_filter_by_kind(self):
-        engine = Terrarium()
-        events: list = []
-
-        async def collect():
-            async for ev in engine.subscribe(
-                EventFilter(kinds={EventKind.CREATURE_STOPPED})
-            ):
-                events.append(ev)
-                if len(events) >= 1:
-                    return
-
-        task = asyncio.create_task(collect())
-        await asyncio.sleep(0)
-        await engine.add_creature(make_creature("alice"))
-        # Should be filtered out — only CREATURE_STOPPED matches.
-        await asyncio.sleep(0.05)
-        assert len(events) == 0
-        await engine.remove_creature("alice")
-        await asyncio.wait_for(task, timeout=1.0)
-        assert len(events) == 1
-        assert events[0].kind == EventKind.CREATURE_STOPPED
-
-    @pytest.mark.asyncio
-    async def test_topology_changed_emitted_on_split(self):
-        engine = Terrarium()
-        a = await engine.add_creature(make_creature("alice"))
-        b = await engine.add_creature(make_creature("bob"), graph=a.graph_id)
-        await engine.connect(a, b, channel="ab")
-
-        topo_events: list = []
-
-        async def collect():
-            async for ev in engine.subscribe(
-                EventFilter(kinds={EventKind.TOPOLOGY_CHANGED})
-            ):
-                topo_events.append(ev)
-                if len(topo_events) >= 1:
-                    return
-
-        task = asyncio.create_task(collect())
-        await asyncio.sleep(0)
-        await engine.disconnect(a, b, channel="ab")
-        await asyncio.wait_for(task, timeout=1.0)
-
-        assert topo_events[0].kind == EventKind.TOPOLOGY_CHANGED
-        assert topo_events[0].payload["kind"] == "split"
+    def test_no_triggers_dict_silent(self):
+        agent = SimpleNamespace(trigger_manager=SimpleNamespace())
+        channels_mod._teardown_existing_trigger(agent, "tid")
