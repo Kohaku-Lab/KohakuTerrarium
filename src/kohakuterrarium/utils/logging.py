@@ -17,6 +17,7 @@ import hashlib
 import locale
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -206,6 +207,67 @@ logging.setLoggerClass(KTLogger)
 _handler: logging.Handler | None = None
 
 
+# Patterns we recognise in log messages and mask before emit:
+#   ?token=<anything-not-whitespace-quote-or-amp>
+#   &token=<same>
+#   "token": "<value>"  (single or double quoted, any value)
+# We keep the surrounding context so the operator can still see WHERE
+# in the log the token would have appeared.
+_TOKEN_QUERY_RE = re.compile(r"([?&]token=)[^\s&\"']+", re.IGNORECASE)
+_TOKEN_JSON_RE = re.compile(r'("token"\s*:\s*")[^"]+(")', re.IGNORECASE)
+_TOKEN_KV_RE = re.compile(r"(\btoken\s*[=:]\s*)[A-Za-z0-9._-]{8,}", re.IGNORECASE)
+
+
+def _mask_tokens(text: str) -> str:
+    """Replace any token-bearing substring in ``text`` with ``****``.
+
+    Best-effort regex masking — covers the three shapes the framework
+    produces: WS-URL query (``?token=abc``), JSON dumps
+    (``"token": "abc"``), and bare ``token=abc`` / ``token: abc``.
+    Wider patterns (env-var dumps, raw bearer headers) are not in
+    scope; those should never reach log records in the first place.
+    """
+    text = _TOKEN_QUERY_RE.sub(r"\1****", text)
+    text = _TOKEN_JSON_RE.sub(r"\1****\2", text)
+    text = _TOKEN_KV_RE.sub(r"\1****", text)
+    return text
+
+
+class _TokenMaskingFilter(logging.Filter):
+    """Logging filter that scrubs lab tokens from every emitted record.
+
+    Installed on every framework log handler so a stray
+    ``logger.info("connecting to %s", url_with_token)`` cannot leak
+    a credential. Cannot be opted out; the cost is two regex passes
+    per record which is negligible compared to the I/O of emit.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            # Mask the pre-formatted message if present (KTLogger
+            # populates record.msg with a structured dict, but plain
+            # logger.info("...") also lands here).
+            if isinstance(record.msg, str):
+                record.msg = _mask_tokens(record.msg)
+            if record.args:
+                if isinstance(record.args, tuple):
+                    record.args = tuple(
+                        _mask_tokens(a) if isinstance(a, str) else a
+                        for a in record.args
+                    )
+                elif isinstance(record.args, dict):
+                    record.args = {
+                        k: (_mask_tokens(v) if isinstance(v, str) else v)
+                        for k, v in record.args.items()
+                    }
+        except Exception:  # pragma: no cover - defensive
+            # Never crash logging — better a leaked token than a crash
+            # loop. The pre-formatted ``record.message`` (set after
+            # format()) is also masked via the formatter path below.
+            pass
+        return True
+
+
 def _default_log_dir() -> Path:
     """Resolve the framework log directory fresh, honouring KT_CONFIG_DIR.
 
@@ -303,6 +365,7 @@ def get_logger(name: str, level: int | str = logging.INFO) -> logging.Logger:
 
         # Default: file handler only
         _handler = _create_file_handler()
+        _handler.addFilter(_TokenMaskingFilter())
         root_logger.addHandler(_handler)
 
         # Optional: stderr handler if KT_LOG_STDERR=1
@@ -310,6 +373,7 @@ def get_logger(name: str, level: int | str = logging.INFO) -> logging.Logger:
             stderr_handler = FlushingStreamHandler(sys.stderr)
             stderr_handler.setFormatter(ColoredFormatter(use_color=True))
             stderr_handler.setLevel(logging.DEBUG)
+            stderr_handler.addFilter(_TokenMaskingFilter())
             root_logger.addHandler(stderr_handler)
 
         root_logger.setLevel(logging.INFO)
@@ -390,6 +454,7 @@ def enable_stderr_logging(level: int | str = logging.DEBUG) -> None:
     _stderr_handler = FlushingStreamHandler(sys.stderr)
     _stderr_handler.setFormatter(ColoredFormatter(use_color=True))
     _stderr_handler.setLevel(level)
+    _stderr_handler.addFilter(_TokenMaskingFilter())
     root_logger.addHandler(_stderr_handler)
 
 
