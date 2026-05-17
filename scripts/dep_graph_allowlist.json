@@ -292,5 +292,29 @@
     "line": 90,
     "function": "maybe_install_test_llm_seam",
     "reason": "test-only monkeypatch installer — imports deferred so production callers don't pay the cost when KT_TEST_LLM_SCRIPT is unset"
+  },
+  {
+    "file": "src/kohakuterrarium/launcher/_lock.py",
+    "line": 68,
+    "function": "_acquire",
+    "reason": "Win32-only msvcrt import inside the `if sys.platform == 'win32'` branch of the cross-platform flock wrapper"
+  },
+  {
+    "file": "src/kohakuterrarium/launcher/_lock.py",
+    "line": 85,
+    "function": "_release",
+    "reason": "Win32-only msvcrt import inside the `if sys.platform == 'win32'` branch of the cross-platform flock wrapper"
+  },
+  {
+    "file": "src/kohakuterrarium/launcher/splash_window.py",
+    "line": 68,
+    "function": "_try_tk",
+    "reason": "tkinter is the optional fallback splash backend used only when pywebview is unavailable; deferred so headless / non-Tk environments aren't required to have it"
+  },
+  {
+    "file": "src/kohakuterrarium/launcher/splash_window.py",
+    "line": 69,
+    "function": "_try_tk",
+    "reason": "tkinter.ttk sibling of line 68 — same fallback rationale"
   }
 ]

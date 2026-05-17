@@ -1,0 +1,240 @@
+"""Orchestration of the first-launch + update flows.
+
+Glue between :mod:`launcher.settings`, :mod:`launcher.sources`,
+:mod:`launcher.venv_ops`, and :mod:`launcher._lock`.  Higher layers
+(the bootloader, the backend API, the CLI verb) call into one of:
+
+- :func:`first_install` — first launch, no venv present.
+- :func:`run_update`    — user-triggered update; replaces current venv
+                          via atomic swap with rollback on failure.
+- :func:`maybe_update`  — honour ``update.mode`` on launch (notify or
+                          auto).  Returns whether an update happened.
+- :func:`rollback_to_previous` — swap ``venv.old`` back into place.
+- :func:`reset_to_bundled`     — C2 recovery via bundled wheels.
+
+All entry points produce ``UpdateResult`` so callers can render the
+outcome consistently (CLI, API, splash UI).
+"""
+
+import datetime as _dt
+import shutil
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable
+
+from kohakuterrarium.launcher import settings as _settings
+from kohakuterrarium.launcher._lock import LockBusy, UpdateLock
+from kohakuterrarium.launcher.log import get_logger
+from kohakuterrarium.launcher.paths import (
+    lock_path,
+    venv_dir,
+    venv_new_dir,
+    venv_old_dir,
+)
+from kohakuterrarium.launcher.sources import (
+    is_auto_update_allowed,
+    resolve_pip_args,
+)
+from kohakuterrarium.launcher.venv_ops import (
+    VenvOpError,
+    atomic_swap,
+    create_venv,
+    install_into,
+    rollback as venv_rollback,
+    smoke_test,
+    write_wrapper_marker,
+)
+
+
+@dataclass
+class UpdateResult:
+    """Outcome of a runner entry point."""
+
+    ok: bool
+    version: str | None = None
+    error: str | None = None
+    restart_required: bool = False
+    skipped_reason: str | None = None
+
+
+# A progress callback takes (phase, percent, message) and is fire-and-
+# forget — exceptions inside it are swallowed so a flaky UI can never
+# break the update flow.  The bootloader / API wires the splash server
+# in via this hook.
+ProgressCallback = Callable[[str, float, str], None]
+
+
+def _now_iso() -> str:
+    return _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
+
+
+def _build_and_smoke(target: Path, pip_args: list[str]) -> str:
+    """Create ``target/`` venv, install ``pip_args`` into it, smoke-test.
+
+    Returns the framework version on success.  Cleans up ``target/`` on
+    failure so the caller never has to handle half-built directories.
+    """
+    log = get_logger()
+    try:
+        create_venv(target)
+        install_into(target, pip_args)
+        version = smoke_test(target)
+        write_wrapper_marker(target)
+        log.info("runner: built %s at version %s", target, version)
+        return version
+    except VenvOpError:
+        shutil.rmtree(target, ignore_errors=True)
+        raise
+
+
+def first_install() -> UpdateResult:
+    """Build the managed venv from the current settings' source.
+
+    Called when no venv exists at launcher startup.  Holds the update
+    lock for the duration so a second simultaneous launch (rare but
+    possible) doesn't race.
+    """
+    log = get_logger()
+    cfg = _settings.load()
+    try:
+        pip_args = resolve_pip_args(cfg.source)
+    except (ValueError, FileNotFoundError) as e:
+        return UpdateResult(ok=False, error=f"source resolution failed: {e}")
+
+    try:
+        with UpdateLock(lock_path()):
+            target = venv_dir()
+            if target.exists():
+                shutil.rmtree(target, ignore_errors=True)
+            try:
+                version = _build_and_smoke(target, pip_args)
+            except VenvOpError as e:
+                log.error("runner: first_install failed: %s", e)
+                return UpdateResult(ok=False, error=str(e))
+            cfg.runtime.last_installed_version = version
+            cfg.runtime.last_check_at = _now_iso()
+            cfg.runtime.venv_path = str(target)
+            _settings.save(cfg)
+            return UpdateResult(ok=True, version=version, restart_required=False)
+    except LockBusy as e:
+        return UpdateResult(ok=False, error=f"another update is in progress: {e}")
+
+
+def run_update() -> UpdateResult:
+    """User-triggered atomic update: install fresh venv.new, swap, persist."""
+    log = get_logger()
+    cfg = _settings.load()
+    try:
+        pip_args = resolve_pip_args(cfg.source)
+    except (ValueError, FileNotFoundError) as e:
+        return UpdateResult(ok=False, error=f"source resolution failed: {e}")
+
+    try:
+        with UpdateLock(lock_path()):
+            new = venv_new_dir()
+            if new.exists():
+                shutil.rmtree(new, ignore_errors=True)
+            try:
+                version = _build_and_smoke(new, pip_args)
+            except VenvOpError as e:
+                log.error("runner: update build failed: %s", e)
+                return UpdateResult(ok=False, error=str(e))
+            try:
+                atomic_swap(venv_dir(), new, venv_old_dir())
+            except VenvOpError as e:
+                log.error("runner: atomic_swap failed: %s", e)
+                shutil.rmtree(new, ignore_errors=True)
+                return UpdateResult(ok=False, error=str(e))
+            cfg.runtime.last_installed_version = version
+            cfg.runtime.last_check_at = _now_iso()
+            _settings.save(cfg)
+            return UpdateResult(ok=True, version=version, restart_required=True)
+    except LockBusy as e:
+        return UpdateResult(ok=False, error=f"another update is in progress: {e}")
+
+
+def maybe_update() -> UpdateResult:
+    """Honour ``update.mode`` on launch.
+
+    - ``manual`` → no-op (``skipped_reason="manual"``).
+    - ``notify-on-launch`` → no install; caller surfaces the banner
+      after independently checking version availability.
+    - ``auto-on-launch`` → run :func:`run_update` if source allows
+      auto-update; else no-op.
+    """
+    cfg = _settings.load()
+    if cfg.update.mode == "manual":
+        return UpdateResult(ok=True, skipped_reason="manual")
+    if cfg.update.mode == "notify-on-launch":
+        return UpdateResult(ok=True, skipped_reason="notify-only")
+    if not is_auto_update_allowed(cfg.source):
+        return UpdateResult(
+            ok=True,
+            skipped_reason=f"auto-update disabled for source.kind={cfg.source.kind}",
+        )
+    return run_update()
+
+
+def rollback_to_previous() -> UpdateResult:
+    """Swap ``venv.old/`` back into place.  No source resolution needed."""
+    log = get_logger()
+    try:
+        with UpdateLock(lock_path()):
+            try:
+                venv_rollback(
+                    current=venv_dir(),
+                    backup=venv_old_dir(),
+                    broken=Path(str(venv_dir()) + ".bad"),
+                )
+            except VenvOpError as e:
+                log.error("runner: rollback failed: %s", e)
+                return UpdateResult(ok=False, error=str(e))
+            cfg = _settings.load()
+            # We don't know the previous version exactly — leave the
+            # field as-is for now; a follow-up smoke could read the
+            # restored venv's ``__version__`` but adds latency we
+            # don't need for rollback hot-path.
+            _settings.save(cfg)
+            return UpdateResult(ok=True, restart_required=True)
+    except LockBusy as e:
+        return UpdateResult(ok=False, error=f"another update is in progress: {e}")
+
+
+def reset_to_bundled() -> UpdateResult:
+    """C2 recovery — wipe ``venv/`` and reinstall from bundled wheels."""
+    log = get_logger()
+    cfg = _settings.load()
+    # Force the source to bundled for this one operation.
+    bundled_source = _settings.SourceConfig(kind="bundled", spec=None, extras=[])
+    try:
+        pip_args = resolve_pip_args(bundled_source)
+    except FileNotFoundError as e:
+        return UpdateResult(ok=False, error=str(e))
+
+    try:
+        with UpdateLock(lock_path()):
+            target = venv_dir()
+            if target.exists():
+                shutil.rmtree(target, ignore_errors=True)
+            try:
+                version = _build_and_smoke(target, pip_args)
+            except VenvOpError as e:
+                log.error("runner: reset_to_bundled failed: %s", e)
+                return UpdateResult(ok=False, error=str(e))
+            cfg.runtime.last_installed_version = version
+            cfg.runtime.last_check_at = _now_iso()
+            cfg.runtime.venv_path = str(target)
+            _settings.save(cfg)
+            return UpdateResult(ok=True, version=version, restart_required=True)
+    except LockBusy as e:
+        return UpdateResult(ok=False, error=f"another update is in progress: {e}")
+
+
+__all__ = [
+    "UpdateResult",
+    "first_install",
+    "maybe_update",
+    "reset_to_bundled",
+    "rollback_to_previous",
+    "run_update",
+]

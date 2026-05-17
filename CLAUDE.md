@@ -488,7 +488,12 @@ src/kohakuterrarium/
 ├── utils/                    # Shared utilities (logging, async helpers, file_guard, file_walk)
 │
 ├── packages.py               # Package manager for `kt install` / `kt list` / resolve
-├── __briefcase__.py          # Briefcase desktop-app entry point
+├── launcher/                 # Thin Briefcase wrapper — owns the managed venv +
+│                             # self-update flow.  STRICT BOUNDARY: launcher/*.py
+│                             # imports nothing from kohakuterrarium.<not launcher>
+│                             # (enforced by tests/unit/test_dep_graph_lint.py).
+│                             # See plans/1.5.0-roadmap/06-app-update/ for design.
+├── __briefcase__.py          # Briefcase desktop entry — delegates to launcher.main
 ├── app_icon.{ico,icns,png}   # Desktop app icons
 └── web_dist/                 # Built Vue frontend (output of `npm run build`)
 ```
