@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 
+from kohakuterrarium.studio.sessions import memory_build as build_mod
 from kohakuterrarium.studio.sessions import memory_search as mem_mod
 
 # ── build_embeddings with model/dimensions overrides ────────
@@ -30,10 +31,14 @@ class TestBuildEmbeddingsConfigOverrides:
                 return []
 
         monkeypatch.setattr(
-            mem_mod, "create_embedder", lambda cfg: captured.update(cfg) or _Embed()
+            build_mod,
+            "create_embedder",
+            lambda cfg: captured.update(cfg) or _Embed(),
         )
 
         class _Mem:
+            has_vectors = False
+
             def __init__(self, *a, **kw):
                 pass
 
@@ -46,7 +51,13 @@ class TestBuildEmbeddingsConfigOverrides:
             def get_stats(self):
                 return {}
 
-        monkeypatch.setattr(mem_mod, "SessionMemory", _Mem)
+            def _set_indexed_count(self, *a, **kw):
+                pass
+
+            def _clear_fts(self, *a, **kw):
+                pass
+
+        monkeypatch.setattr(build_mod, "SessionMemory", _Mem)
         # build_embeddings is sync and takes model/dimensions.
         mem_mod.build_embeddings(path, provider="custom", model="m1", dimensions=512)
         # Verify the config was constructed with model and dimensions.

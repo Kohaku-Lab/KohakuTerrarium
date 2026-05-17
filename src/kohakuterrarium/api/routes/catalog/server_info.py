@@ -14,17 +14,42 @@ instead of the host's cwd.
 """
 
 import os
+import platform
 import sys
+import time
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from kohakuterrarium.api.deps import get_service
+from kohakuterrarium.launcher.paths import wrapper_marker_path
+from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+
+# Captured once at import — used as the daemon's start time.
+_PROCESS_START = time.time()
+
+
+def _get_version() -> str:
+    try:
+        return _pkg_version("kohakuterrarium")
+    except PackageNotFoundError:
+        return "unknown"
+
+
+def _install_kind() -> str:
+    """Wrapper-managed venv vs other."""
+    try:
+        return "wrapper" if wrapper_marker_path().is_file() else "user"
+    except OSError:
+        return "user"
 
 
 @router.get("")
@@ -67,4 +92,47 @@ async def server_info(
     return {
         "cwd": os.getcwd(),
         "platform": sys.platform,
+    }
+
+
+@router.get("/diagnostics")
+async def diagnostics(request: Request) -> dict[str, Any]:
+    """Full diagnostic snapshot for the About panel.
+
+    Single endpoint covering version, runtime, paths, and daemon
+    state — paste-ready content for bug reports. Equivalent of
+    ``kt --version --verbose`` plus the daemon's PID / uptime / mode.
+    """
+    home = config_dir()
+    python_impl = platform.python_implementation()
+    arch = platform.machine() or "unknown"
+    bits = "64-bit" if sys.maxsize > 2**32 else "32-bit"
+    return {
+        "version": _get_version(),
+        "python": {
+            "version": platform.python_version(),
+            "implementation": python_impl,
+            "bits": bits,
+        },
+        "platform": {
+            "system": platform.system(),
+            "release": platform.release(),
+            "machine": arch,
+            "raw": sys.platform,
+        },
+        "install_kind": _install_kind(),
+        "paths": {
+            "home": str(home),
+            "sessions": str(home / "sessions"),
+            "packages": str(home / "packages"),
+            "logs": str(home / "logs"),
+            "runtime": str(home / "runtime"),
+            "venv": str(home / "runtime" / "venv"),
+        },
+        "daemon": {
+            "pid": os.getpid(),
+            "uptime_seconds": int(time.time() - _PROCESS_START),
+            "mode": getattr(request.app.state, "lab_mode", "standalone"),
+            "lab_bind": getattr(request.app.state, "lab_bind", ""),
+        },
     }

@@ -149,6 +149,7 @@ class HostEngine:
         self._transport = transport
         self._framework_version = framework_version
         self._auth = TokenAuth(config.token)
+        self._blocked_clients: set[str] = set()
         self._membership = Membership(
             heartbeat_timeout_seconds=config.heartbeat_timeout_seconds
         )
@@ -247,6 +248,20 @@ class HostEngine:
     @property
     def membership(self) -> Membership:
         return self._membership
+
+    def set_token(self, token: str) -> None:
+        # HostConfig is frozen — swap _auth (the only thing the accept
+        # loop consults at handshake time).
+        self._auth = TokenAuth(token)
+
+    def block_client_id(self, client_id: str) -> None:
+        self._blocked_clients.add(client_id)
+
+    def unblock_client_id(self, client_id: str) -> None:
+        self._blocked_clients.discard(client_id)
+
+    def blocked_clients(self) -> set[str]:
+        return set(self._blocked_clients)
 
     @property
     def addressing(self) -> AddressDirectory:
@@ -492,10 +507,7 @@ class HostEngine:
             return None
 
         if not self._auth.validate_hello(hello):
-            _log.warning(
-                "rejecting client: auth failed",
-                client_name=hello.client_name,
-            )
+            _log.warning("rejecting client: auth failed", client_name=hello.client_name)
             await self._send_reject(
                 conn,
                 hello.client_name,
@@ -505,11 +517,17 @@ class HostEngine:
             return None
 
         client_id = hello.client_name
-        if client_id in self._clients:
-            _log.warning(
-                "rejecting client: name conflict",
-                client_name=client_id,
+        if client_id in self._blocked_clients:
+            _log.warning("rejecting client: blocked", client_name=client_id)
+            await self._send_reject(
+                conn,
+                client_id,
+                reason="blocked",
+                detail=f"client name {client_id!r} is blocked by operator policy",
             )
+            return None
+        if client_id in self._clients:
+            _log.warning("rejecting client: name conflict", client_name=client_id)
             await self._send_reject(
                 conn,
                 client_id,
@@ -531,10 +549,7 @@ class HostEngine:
         try:
             await conn.send_frame(build_welcome(welcome, to_node=client_id).encode())
         except ConnectionClosed:
-            _log.warning(
-                "welcome send failed (connection closed)",
-                client_name=client_id,
-            )
+            _log.warning("welcome send failed: closed", client_name=client_id)
             return None
 
         _log.debug("WELCOME sent", client_name=client_id)

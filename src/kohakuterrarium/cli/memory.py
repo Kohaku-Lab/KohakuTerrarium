@@ -1,15 +1,16 @@
 """CLI memory commands — terminal formatters around session memory.
 
-The actual indexing / search logic lives in
-:mod:`kohakuterrarium.studio.sessions.memory_search`; this module is
-strictly the rich-CLI presentation layer.
+The actual indexing logic lives in
+:mod:`kohakuterrarium.studio.sessions.memory_build` (write path) and
+:mod:`kohakuterrarium.studio.sessions.memory_search` (read path); this
+module is strictly the rich-CLI presentation layer.
 """
 
 from kohakuterrarium.cli.run import _resolve_session
 from kohakuterrarium.session.embedding import create_embedder
 from kohakuterrarium.session.memory import SessionMemory
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.studio.sessions.memory_search import build_embeddings
+from kohakuterrarium.studio.sessions.memory_build import build_index
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -28,8 +29,11 @@ def embedding_cli(
         return 1
 
     try:
-        result = build_embeddings(
-            path, provider=provider, model=model, dimensions=dimensions
+        result = build_index(
+            path,
+            provider=provider,
+            model=model,
+            dimensions=dimensions,
         )
     except Exception as e:
         print(f"Error: {e}")
@@ -37,7 +41,12 @@ def embedding_cli(
 
     print(f"Session: {path.name}")
     print(f"Agents: {', '.join(result['agents'])}")
-    print(f"Embedding: {provider}" + (f" ({model})" if model else ""))
+    # Print the resolved provider (build_index turns "auto" into
+    # "model2vec") so the user sees what actually ran.
+    print(
+        f"Embedding: {result.get('provider', provider)}"
+        + (f" ({model})" if model else "")
+    )
     print()
 
     for agent_name, info in result["indexed_per_agent"].items():
@@ -48,11 +57,11 @@ def embedding_cli(
                 f"  {agent_name}: {info['blocks']} blocks indexed ({info['events']} events)"
             )
 
-    stats = result["stats"]
+    stats = result["stats"] or {}
     print(
-        f"\nDone. FTS: {stats['fts_blocks']} blocks, "
-        f"Vector: {stats['vec_blocks']} blocks "
-        f"({stats['dimensions']}d)"
+        f"\nDone. FTS: {stats.get('fts_blocks', 0)} blocks, "
+        f"Vector: {stats.get('vec_blocks', 0)} blocks "
+        f"({stats.get('dimensions', 0)}d)"
     )
     return 0
 

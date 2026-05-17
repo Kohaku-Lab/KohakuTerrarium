@@ -118,6 +118,72 @@ class TestHandshakeEdgeCases:
         finally:
             await host.stop()
 
+    async def test_rotated_token_is_used_for_future_handshakes(self):
+        host = await _start_host(port=6)
+        try:
+            host.set_token("fresh")
+            transport = InProcTransport()
+
+            old_conn = await transport.connect("hs:6")
+            old_hello = HelloPayload(
+                protocol_version="1.0",
+                framework_version="test",
+                client_name="old-token",
+                token="t",
+                capabilities=(),
+            )
+            await old_conn.send_frame(build_hello(old_hello).encode())
+            old_raw = await old_conn.recv_frame()
+            old_env = Envelope.decode(old_raw)
+            assert old_env.kind is EnvelopeKind.CONTROL
+            assert "old-token" not in host.alive_clients()
+
+            new_conn = await transport.connect("hs:6")
+            new_hello = HelloPayload(
+                protocol_version="1.0",
+                framework_version="test",
+                client_name="new-token",
+                token="fresh",
+                capabilities=(),
+            )
+            await new_conn.send_frame(build_hello(new_hello).encode())
+            new_raw = await new_conn.recv_frame()
+            new_env = Envelope.decode(new_raw)
+            assert new_env.kind is EnvelopeKind.WELCOME
+            await asyncio.sleep(0.1)
+            assert "new-token" in host.alive_clients()
+        finally:
+            await host.stop()
+
+    async def test_blocked_client_id_is_rejected_on_handshake(self):
+        host = await _start_host(port=7)
+        try:
+            host.block_client_id("blocked-worker")
+            transport = InProcTransport()
+            conn = await transport.connect("hs:7")
+            hello = HelloPayload(
+                protocol_version="1.0",
+                framework_version="test",
+                client_name="blocked-worker",
+                token="t",
+                capabilities=(),
+            )
+            await conn.send_frame(build_hello(hello).encode())
+            raw = await conn.recv_frame()
+            env = Envelope.decode(raw)
+            assert env.kind is EnvelopeKind.CONTROL
+            await asyncio.sleep(0.1)
+            assert "blocked-worker" not in host.alive_clients()
+
+            host.unblock_client_id("blocked-worker")
+            retry_conn = await transport.connect("hs:7")
+            await retry_conn.send_frame(build_hello(hello).encode())
+            retry_raw = await retry_conn.recv_frame()
+            retry_env = Envelope.decode(retry_raw)
+            assert retry_env.kind is EnvelopeKind.WELCOME
+        finally:
+            await host.stop()
+
     async def test_handshake_recv_closed_silent(self):
         host = await _start_host(port=5)
         try:

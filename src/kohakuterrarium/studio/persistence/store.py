@@ -169,6 +169,28 @@ def _read_session_entry(path: Path) -> dict:
 
             lineage = meta.get("lineage") or {}
             forked_children = meta.get("forked_children") or []
+            # Cheap probe for "does this session have a vector index?".
+            # Reading the ``vec_dimensions`` state key the index builder
+            # writes is enough to answer the boolean. We DELIBERATELY
+            # avoid opening a fresh ``SessionMemory`` here even though
+            # it'd be more authoritative — the listing scans every
+            # saved session with up to 32 worker threads, and each
+            # SessionMemory open holds 3 native SQLite handles whose
+            # release timing is touchy on Windows (see the
+            # ``SessionMemory.close()`` docstring). A bare state read
+            # uses the already-open SessionStore's handle and never
+            # opens a new one.
+            has_vector_index = False
+            try:
+                saved_dims = store.state.get("vec_dimensions")
+                if isinstance(saved_dims, int) and saved_dims > 0:
+                    has_vector_index = True
+            except (KeyError, Exception) as e:
+                logger.debug(
+                    "Failed to probe vector index",
+                    error=str(e),
+                    path=str(path),
+                )
             return {
                 # Canonical name strips the version suffix so v1+v2 of
                 # the same session show as one entry — and the name
@@ -185,6 +207,7 @@ def _read_session_entry(path: Path) -> dict:
                 "preview": preview,
                 "pwd": meta.get("pwd", ""),
                 "format_version": meta.get("format_version", 1),
+                "has_vector_index": has_vector_index,
                 # Per-saved ``node_id`` (added 2026-05-13): the
                 # ``SessionMirrorWriter`` stamps this on the first
                 # mirrored event arrival so the saved-session listing

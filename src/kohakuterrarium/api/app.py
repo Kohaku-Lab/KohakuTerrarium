@@ -36,6 +36,7 @@ logger = get_logger(__name__)
 # were removed in Phase 3; the studio layer is the only path now.
 from kohakuterrarium.api.routes import app_update as app_update_route
 from kohakuterrarium.api.routes import health as health_route
+from kohakuterrarium.api.routes import lab_clients as lab_clients_route
 from kohakuterrarium.api.routes import lab_status as lab_status_route
 from kohakuterrarium.api.routes import metrics as metrics_route
 from kohakuterrarium.api.routes import nodes as nodes_route
@@ -45,6 +46,7 @@ from kohakuterrarium.api.routes.catalog import builtins as catalog_builtins
 from kohakuterrarium.api.routes.catalog import commands as catalog_commands
 from kohakuterrarium.api.routes.catalog import creatures as catalog_creatures
 from kohakuterrarium.api.routes.catalog import creatures_scan as catalog_creatures_scan
+from kohakuterrarium.api.routes.catalog import extensions as catalog_extensions
 from kohakuterrarium.api.routes.catalog import manifest as catalog_manifest
 from kohakuterrarium.api.routes.catalog import models as catalog_models
 from kohakuterrarium.api.routes.catalog import modules as catalog_modules
@@ -61,6 +63,7 @@ from kohakuterrarium.api.routes.catalog import validate as catalog_validate
 from kohakuterrarium.api.routes.catalog import workspace as catalog_workspace
 from kohakuterrarium.api.routes.identity import api_keys as identity_api_keys
 from kohakuterrarium.api.routes.identity import codex as identity_codex
+from kohakuterrarium.api.routes.identity import config_files as identity_config_files
 from kohakuterrarium.api.routes.identity import llm as identity_llm
 from kohakuterrarium.api.routes.identity import mcp as identity_mcp
 from kohakuterrarium.api.routes.identity import settings as identity_settings
@@ -68,6 +71,9 @@ from kohakuterrarium.api.routes.identity import ui_prefs as identity_ui_prefs
 from kohakuterrarium.api.routes.persistence import artifacts as persistence_artifacts
 from kohakuterrarium.api.routes.persistence import fork as persistence_fork
 from kohakuterrarium.api.routes.persistence import history as persistence_history
+from kohakuterrarium.api.routes.persistence import (
+    memory_index as persistence_memory_index,
+)
 from kohakuterrarium.api.routes.persistence import resume as persistence_resume
 from kohakuterrarium.api.routes.persistence import saved as persistence_saved
 from kohakuterrarium.api.routes.persistence import viewer as persistence_viewer
@@ -98,9 +104,11 @@ from kohakuterrarium.api.routes.sessions_v2 import memory as sessions_memory
 from kohakuterrarium.api.routes.sessions_v2 import topology as sessions_topology
 from kohakuterrarium.api.routes.sessions_v2 import wiring as sessions_wiring
 from kohakuterrarium.api.studio import build_studio_router
+from kohakuterrarium.api.ws import daemon_logs as ws_daemon_logs
 from kohakuterrarium.api.ws import files as ws_files
 from kohakuterrarium.api.ws import io as ws_io
 from kohakuterrarium.api.ws import logs as ws_logs
+from kohakuterrarium.api.ws import memory_build as ws_memory_build
 from kohakuterrarium.api.ws import observer as ws_observer
 from kohakuterrarium.api.ws import pty as ws_pty
 from kohakuterrarium.api.ws import runtime_graph as ws_runtime_graph
@@ -136,6 +144,11 @@ async def lifespan(app: FastAPI):
     mirror_writer = None
 
     if lab_mode == "lab-host":
+        # Pre-create the operator blocklist so the lab-clients route
+        # never has to do the lazy-init dance. Lifespan runs on one
+        # task before any request handler — no race possible here.
+        if not hasattr(app.state, "lab_blocklist"):
+            app.state.lab_blocklist = set()
         bind_host, bind_port = _parse_bind(app.state.lab_bind)
         host_engine = HostEngine(
             HostConfig(
@@ -412,6 +425,11 @@ def create_app(
     app.include_router(
         sessions_memory.router, prefix="/api/sessions", tags=["sessions"]
     )
+    # Memory-index build + status (kt embedding equivalent). Mounted
+    # under /api/sessions to match the search route's URL shape.
+    app.include_router(
+        persistence_memory_index.router, prefix="/api/sessions", tags=["sessions"]
+    )
 
     # Legacy URL preservation — the new catalog routers also serve under
     # the original ``/api/registry`` and ``/api/configs/*`` prefixes the
@@ -422,6 +440,14 @@ def create_app(
     )
     app.include_router(
         catalog_registry.router, prefix="/api/registry/remote", tags=["registry"]
+    )
+    # Extensions — aggregated view of plugin / tool / trigger / etc.
+    # modules contributed by installed packages. Pure read-only over
+    # ``packages.walk.list_packages``; no separate state.
+    app.include_router(
+        catalog_extensions.router,
+        prefix="/api/registry/extensions",
+        tags=["extensions"],
     )
     app.include_router(
         catalog_creatures_scan.router,
@@ -462,6 +488,8 @@ def create_app(
     app.include_router(health_route.router, tags=["health"])
     # /api/lab/status — operator dashboard snapshot of the cluster.
     app.include_router(lab_status_route.router, prefix="/api/lab", tags=["lab"])
+    # /api/lab/clients/* + /api/lab/pairing-tokens/* — Sites tab verbs.
+    app.include_router(lab_clients_route.router, prefix="/api/lab", tags=["lab"])
     # /api/app/* — wrapper-aware self-update HTTP surface.
     app.include_router(app_update_route.router, prefix="/api/app", tags=["app-update"])
     # /ws/app/update — progress stream for the update flow (no prefix).
@@ -479,9 +507,11 @@ def create_app(
     _mount_phase0_stubs(app)
 
     # WebSocket routes
+    app.include_router(ws_daemon_logs.router, tags=["ws"])
     app.include_router(ws_files.router, tags=["ws"])
     app.include_router(ws_io.router, tags=["ws"])
     app.include_router(ws_logs.router, tags=["ws"])
+    app.include_router(ws_memory_build.router, tags=["ws"])
     app.include_router(ws_observer.router, tags=["ws"])
     app.include_router(ws_pty.router, tags=["ws"])
     app.include_router(ws_runtime_graph.router, tags=["ws"])
@@ -574,6 +604,10 @@ def _mount_phase0_stubs(app: FastAPI) -> None:
     )
     app.include_router(
         identity_settings.router, prefix="/api/settings", tags=["identity"]
+    )
+    # Advanced — raw config-file listing + editor surface.
+    app.include_router(
+        identity_config_files.router, prefix="/api/settings", tags=["identity"]
     )
 
     # Sessions — engine-backed creature ops. Stub routers live in

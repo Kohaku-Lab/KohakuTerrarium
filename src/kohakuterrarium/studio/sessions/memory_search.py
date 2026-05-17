@@ -4,6 +4,12 @@ Verbatim port of ``api/routes/sessions.py:search_session_memory``. The
 HTTP route layer resolves the session name to a path, picks up the
 process-level :class:`Terrarium` engine (so a live creature's store
 can be reused), and delegates the search to this module.
+
+The companion *write* path — building / rebuilding the vector index —
+lives in :mod:`studio.sessions.memory_build`. ``build_embeddings``
+below is kept as a thin alias for back-compat (the CLI's
+``kt embedding`` and older tests both import it from here); new
+callers should use ``memory_build.build_index`` directly.
 """
 
 from pathlib import Path
@@ -14,6 +20,9 @@ from fastapi import HTTPException
 from kohakuterrarium.session.embedding import create_embedder
 from kohakuterrarium.session.memory import SessionMemory
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.studio.sessions.memory_build import (
+    build_index as _build_index,
+)
 from kohakuterrarium.terrarium.engine import Terrarium
 
 
@@ -46,50 +55,22 @@ def build_embeddings(
     model: str | None = None,
     dimensions: int | None = None,
 ) -> dict[str, Any]:
-    """Build embeddings for a saved session (offline / CLI).
+    """Build embeddings for a saved session (offline / CLI alias).
 
-    Returns ``{path, agents, indexed_per_agent, stats}``. The CLI
-    formatter renders the dict; tests assert on it directly.
+    Thin pass-through to :func:`memory_build.build_index` so the CLI
+    surface and the HTTP/WS surface share one implementation. The
+    canonical home for the build logic is ``memory_build``; this
+    function exists so the long-standing ``kt embedding`` import path
+    keeps working without touching every caller.
     """
-    store = SessionStore(path)
-    try:
-        meta = store.load_meta()
-        agents = list(meta.get("agents", []))
-
-        embed_config: dict[str, Any] = {"provider": provider}
-        if model:
-            embed_config["model"] = model
-        if dimensions:
-            embed_config["dimensions"] = dimensions
-
-        embedder = create_embedder(embed_config)
-        memory = SessionMemory(str(path), embedder=embedder, store=store)
-
-        try:
-            indexed: dict[str, dict[str, int]] = {}
-            for agent_name in agents:
-                events = store.get_events(agent_name)
-                if not events:
-                    indexed[agent_name] = {"events": 0, "blocks": 0}
-                    continue
-                count = memory.index_events(agent_name, events)
-                indexed[agent_name] = {"events": len(events), "blocks": count}
-
-            stats = memory.get_stats()
-            return {
-                "path": str(path),
-                "agents": agents,
-                "provider": provider,
-                "model": model,
-                "indexed_per_agent": indexed,
-                "stats": stats,
-            }
-        finally:
-            # SessionMemory opens its own SQLite handles — release them
-            # so the .kohakutr file isn't left locked.
-            memory.close()
-    finally:
-        store.close()
+    return _build_index(
+        path,
+        provider=provider,
+        model=model,
+        dimensions=dimensions,
+        force=False,
+        progress=None,
+    )
 
 
 def _resolve_embed_config(store: SessionStore, live_agent: Any) -> dict[str, Any]:

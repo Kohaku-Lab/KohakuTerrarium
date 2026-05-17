@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.studio.sessions import memory_build as build_mod
 from kohakuterrarium.studio.sessions import memory_search as mem_mod
 
 
@@ -101,9 +102,11 @@ class TestBuildEmbeddings:
             def encode(self, texts):
                 return []
 
-        monkeypatch.setattr(mem_mod, "create_embedder", lambda cfg: _FakeEmbedder())
+        monkeypatch.setattr(build_mod, "create_embedder", lambda cfg: _FakeEmbedder())
 
         class _FakeMemory:
+            has_vectors = False
+
             def __init__(self, *a, **kw):
                 pass
 
@@ -116,7 +119,13 @@ class TestBuildEmbeddings:
             def get_stats(self):
                 return {"fts": 1}
 
-        monkeypatch.setattr(mem_mod, "SessionMemory", _FakeMemory)
+            def _set_indexed_count(self, *a, **kw):
+                pass
+
+            def _clear_fts(self, *a, **kw):
+                pass
+
+        monkeypatch.setattr(build_mod, "SessionMemory", _FakeMemory)
         out = mem_mod.build_embeddings(path)
         assert out["path"] == str(path)
         assert "alice" in out["agents"]
@@ -137,9 +146,11 @@ class TestBuildEmbeddings:
             def encode(self, texts):
                 return []
 
-        monkeypatch.setattr(mem_mod, "create_embedder", lambda cfg: _FakeEmbedder())
+        monkeypatch.setattr(build_mod, "create_embedder", lambda cfg: _FakeEmbedder())
 
         class _FakeMemory:
+            has_vectors = False
+
             def __init__(self, *a, **kw):
                 pass
 
@@ -152,7 +163,13 @@ class TestBuildEmbeddings:
             def get_stats(self):
                 return {}
 
-        monkeypatch.setattr(mem_mod, "SessionMemory", _FakeMemory)
+            def _set_indexed_count(self, *a, **kw):
+                pass
+
+            def _clear_fts(self, *a, **kw):
+                pass
+
+        monkeypatch.setattr(build_mod, "SessionMemory", _FakeMemory)
         out = mem_mod.build_embeddings(path)
         # No events → indexed_per_agent reports {events: 0, blocks: 0}.
         assert out["indexed_per_agent"]["alice"] == {"events": 0, "blocks": 0}
