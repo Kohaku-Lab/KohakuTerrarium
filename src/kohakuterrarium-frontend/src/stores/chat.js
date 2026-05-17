@@ -292,7 +292,17 @@ function _dedupeAdjacentDuplicateEvents(events) {
   return out
 }
 
-export function _replayEvents(messages, events, branchView = null) {
+export function _replayEvents(messages, events, branchView = null, liveRunningJobIds = null) {
+  // ``liveRunningJobIds`` (optional Set of job_ids) is the
+  // authoritative "still running according to the live WS" signal.
+  // When the replay encounters a terminal event for a job that the
+  // live truth says is still running (i.e. a stale interrupted /
+  // error event from history that contradicts the live state), the
+  // terminal-state flip is suppressed so the part stays "running".
+  // Bugs this fixes:
+  //   - background sub-agents rendering as "interrupted" while
+  //     their accordion is still streaming, after a tab switch /
+  //     WS reconnect that triggered a history reload (Bug 1).
   if (!events?.length) return { messages: _convertHistory(messages), pendingJobs: {} }
 
   events = _dedupeAdjacentDuplicateEvents(events)
@@ -486,17 +496,48 @@ export function _replayEvents(messages, events, branchView = null) {
       tc.result = payload.result
       tc.resultParts = payload.resultParts
       tc.resultMeta = payload.resultMeta
-      if (opts?.interrupted || opts?.finalState === "interrupted") tc.status = "interrupted"
-      else if (opts?.error) tc.status = "error"
+      // Stale-interrupt guard: if the live WS still tracks this job
+      // as running, a "history says interrupted" replay must NOT
+      // overwrite the live "running" status. This is the root cause
+      // of "background sub-agent shows 'interrupted' while its
+      // accordion is still streaming" (Bug 1).  The guard only fires
+      // for the interrupt branch — a genuine error / completion is
+      // always honoured because the live truth would already have
+      // moved on too.
+      const isInterrupted = opts?.interrupted || opts?.finalState === "interrupted"
+      const effectiveJobId = jobId || tc.jobId
+      const stillLive = !!(
+        isInterrupted &&
+        effectiveJobId &&
+        liveRunningJobIds &&
+        liveRunningJobIds.has(effectiveJobId)
+      )
+      if (isInterrupted && !stillLive) {
+        tc.status = "interrupted"
+      } else if (opts?.error && !stillLive) {
+        tc.status = "error"
+      } else if (!stillLive) {
+        // Successful completion (subagent_done / tool_done with no
+        // error / interrupt flags). The replay path was previously
+        // missing this branch — sub-agents whose initial status is
+        // "running" (chat.js:359) would stay "running" forever after
+        // any history reload (Bug 2). Mirror the live handler's
+        // unconditional ``tc.status = "done"`` at line 2032.
+        tc.status = "done"
+      }
       if (opts?.tools_used) tc.tools_used = opts.tools_used
       if (opts?.turns != null) tc.turns = opts.turns
       if (opts?.duration != null) tc.duration = opts.duration
       if (opts?.total_tokens != null) tc.total_tokens = opts.total_tokens
       if (opts?.prompt_tokens != null) tc.prompt_tokens = opts.prompt_tokens
       if (opts?.completion_tokens != null) tc.completion_tokens = opts.completion_tokens
-      // Track completion for pending-job detection
-      if (tc.jobId) completedJobs.add(tc.jobId)
-      if (jobId) completedJobs.add(jobId)
+      // Track completion for pending-job detection — unless the live
+      // truth says this job is still running (in which case the
+      // pendingJobs sweep at line 862 must keep it on the radar).
+      if (!stillLive) {
+        if (tc.jobId) completedJobs.add(tc.jobId)
+        if (jobId) completedJobs.add(jobId)
+      }
     }
   }
 
@@ -1425,7 +1466,16 @@ const _chatStoreOptions = {
           // without a network round-trip after the user clicks <prev/next>.
           this.eventsByTab[target] = normalizedEvents
           const view = this.branchViewByTab[target] || null
-          const { messages: msgs, pendingJobs } = _replayEvents(messages, normalizedEvents, view)
+          // Pass the live-running job set so the replay's terminal-
+          // event handling won't overwrite a still-live "running"
+          // part with a stale "interrupted" from history (Bug 1).
+          const liveRunning = new Set(Object.keys(this.runningJobs || {}))
+          const { messages: msgs, pendingJobs } = _replayEvents(
+            messages,
+            normalizedEvents,
+            view,
+            liveRunning,
+          )
           this.messagesByTab[target] = msgs
           this._restoreTokenUsage(target, normalizedEvents)
           this._restoreRunningState(target, pendingJobs, isProcessing)
@@ -2450,7 +2500,11 @@ const _chatStoreOptions = {
       const events = this.eventsByTab[tab]
       if (!events) return
       const branchView = this.branchViewByTab[tab] || null
-      const { messages } = _replayEvents([], events, branchView)
+      // Same stale-interrupt guard as _loadHistory: a rebuild while
+      // a sub-agent is still live must not clobber its "running"
+      // status with a stale terminal event from the cached log.
+      const liveRunning = new Set(Object.keys(this.runningJobs || {}))
+      const { messages } = _replayEvents([], events, branchView, liveRunning)
       this.messagesByTab[tab] = messages
     },
 
