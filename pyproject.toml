@@ -167,50 +167,25 @@ author_email = "apolloyeh0123@gmail.com"
 formal_name = "KohakuTerrarium"
 description = "Universal Agent Framework - Desktop App"
 icon = "src/kohakuterrarium/app_icons/app"
+# Wrapper-only sources.  The full framework is INSTALLED into the
+# launcher's managed venv at first launch (offline from
+# ``wheels-bundle/`` or online from the configured source).  See
+# ``plans/1.5.0-roadmap/06-app-update/`` for the design.
 sources = ["src/kohakuterrarium"]
 startup_module = "kohakuterrarium.__briefcase__"
 requires = [
-    # All base dependencies are in [project].dependencies.
-    # Briefcase doesn't support extras, so we list them explicitly.
-    # Core
-    "httpx>=0.27.0",
-    "openai>=2.0.0",
-    "anthropic>=0.68.0",
-    "pydantic>=2.0.0",
-    "rich>=14.0.0",
-    "prompt_toolkit>=3.0.0",
-    "pyyaml>=6.0.0",
-    "ruamel.yaml>=0.18.0",
-    "jinja2>=3.1.0",
-    "libcst>=1.4.0",
-    "aiofiles>=25.1.0",
-    "python-dotenv>=1.0.0",
-    "kohakuvault>=0.8.1",
-    "textual>=8.0.0",
-    "html2text>=2025.0.0",
-    "gitpython>=3.1.0",
-    # API server
-    "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.34.0",
-    "websockets>=10.4",
-    # Web tools
-    "trafilatura>=2.0.0",
-    "ddgs>=9.0.0",
-    # PDF reading
-    "pymupdf>=1.24.0",
-    # Image decode-verification for the read tool (PNG/JPEG/WEBP/GIF)
-    "Pillow>=12.2.0",
-    # MCP client
-    "mcp>=1.0.0",
-    # Lightweight embeddings (no pytorch)
-    "model2vec>=0.8.0",
-    # Desktop webview
+    # Launcher needs only pip, packaging, and pywebview (for the
+    # splash window).  The framework + its 30+ runtime deps live in
+    # the venv the launcher creates, not the bundle.
+    "pip>=24.0",
+    "packaging>=23.0",
     "pywebview==6.1",
-    # Windows PTY for terminal panel (Nerd Font / PowerShell theme support)
-    "pywinpty>=2.0.0; sys_platform == 'win32'",
 ]
-# proxy_tools (pywebview dep) only has sdist on PyPI — pre-build wheel in CI
-requirement_installer_args = ["--find-links", "wheels"]
+# proxy_tools (pywebview dep) only has sdist on PyPI — pre-build wheel in CI.
+# ``wheels-bundle/`` carries the kohakuterrarium wheel + its transitive
+# deps for offline first-launch (populated by
+# ``scripts/build_wrapper_wheels.py`` before ``briefcase build``).
+requirement_installer_args = ["--find-links", "wheels", "--find-links", "wheels-bundle"]
 
 [tool.briefcase.app.kohakuterrarium.macOS]
 universal_build = false
@@ -219,6 +194,4 @@ requires = [
 ]
 
 [tool.briefcase.app.kohakuterrarium.windows]
-requires = [
-    "pywinpty>=2.0.0",
-]
+requires = []

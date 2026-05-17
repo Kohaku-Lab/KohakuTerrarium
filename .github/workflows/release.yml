@@ -99,6 +99,16 @@ jobs:
           mkdir -p wheels
           pip wheel proxy_tools -w wheels --no-deps
 
+      - name: Prebuild offline wheel cache for the launcher
+        # Topic 06 — the thin-wrapper Briefcase artifact installs the
+        # framework into its managed venv on first launch.  The
+        # ``wheels-bundle/`` directory carries the kohakuterrarium
+        # wheel + transitive deps so first launch works offline.
+        shell: bash
+        run: |
+          pip install build
+          python scripts/build_wrapper_wheels.py --from-source --out wheels-bundle
+
       - name: Create briefcase project
         run: briefcase create
 
