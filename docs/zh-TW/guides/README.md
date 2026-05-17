@@ -45,5 +45,6 @@ tags:
 - [部署 — Docker](deployment-docker.md) — 三種 compose 模式（AIO、host + worker、分散式），均使用 GHCR 官方映像。
 - [部署 — systemd](deployment-systemd.md) — 透過 `kt service install` 安裝為強化後的 systemd 服務。
 - [部署 — 反向代理](deployment-reverse-proxy.md) — TLS 終止的 nginx 與 Cloudflare Tunnel 設定。
+- [應用更新](app-update.md) — 桌面 app 透過托管 venv 自我更新（不用重下載安裝器）。
 - [前端版面](frontend-layout.md) — Vue 3 dashboard 的組織方式、在哪裡擴充、事件從後端流到 UI 的路徑。
 - [範例](examples.md) — 內附範例生物、生態瓶、程式碼的導覽 — 先看哪個、為什麼。

@@ -51,6 +51,7 @@ If you want a guided first walk-through, go to [Tutorials](../tutorials/README.m
 - [Deployment — Docker](deployment-docker.md) — three compose recipes (AIO, host + workers, distributed) using the official GHCR images.
 - [Deployment — systemd](deployment-systemd.md) — install as a hardened systemd service via `kt service install`.
 - [Deployment — reverse proxy](deployment-reverse-proxy.md) — nginx and Cloudflare Tunnel patterns for TLS termination.
+- [App update](app-update.md) — how the desktop app self-updates via its managed venv (no installer re-download).
 - [Frontend Layout](frontend-layout.md) — web dashboard panels and presets.
 
 ## Learn from code

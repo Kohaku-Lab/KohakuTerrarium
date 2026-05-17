@@ -45,6 +45,7 @@ const sidebarStructure = {
     "guides/deployment-docker.md",
     "guides/deployment-systemd.md",
     "guides/deployment-reverse-proxy.md",
+    "guides/app-update.md",
     "guides/examples.md",
     "guides/frontend-layout.md",
   ],
