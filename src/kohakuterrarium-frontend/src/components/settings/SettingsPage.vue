@@ -52,6 +52,13 @@
                     <el-button v-else size="small" @click="startEditKey(backend.name)">
                       {{ backend.has_key ? t("settings.keys.change") : t("settings.keys.setKey") }}
                     </el-button>
+                    <el-popconfirm v-if="editingKey !== backend.name && backend.has_key" :title="t('settings.keys.deleteConfirm', { provider: backend.name })" :confirm-button-text="t('common.delete')" :cancel-button-text="t('common.cancel')" @confirm="deleteKey(backend.name)">
+                      <template #reference>
+                        <el-button size="small" type="danger" plain :title="t('settings.keys.delete')">
+                          <span class="i-carbon-trash-can" />
+                        </el-button>
+                      </template>
+                    </el-popconfirm>
                   </template>
                   <template v-else>
                     <el-button size="small" type="primary" :loading="codexLoggingIn" @click="runCodexLogin">
@@ -111,6 +118,13 @@
                     <el-button v-else size="small" @click="startEditKey(backend.name)">
                       {{ backend.has_key ? t("settings.keys.change") : t("settings.keys.setKey") }}
                     </el-button>
+                    <el-popconfirm v-if="editingKey !== backend.name && backend.has_key" :title="t('settings.keys.deleteConfirm', { provider: backend.name })" :confirm-button-text="t('common.delete')" :cancel-button-text="t('common.cancel')" @confirm="deleteKey(backend.name)">
+                      <template #reference>
+                        <el-button size="small" type="danger" plain :title="t('settings.keys.delete')">
+                          <span class="i-carbon-trash-can" />
+                        </el-button>
+                      </template>
+                    </el-popconfirm>
                   </template>
                   <template v-else>
                     <el-button size="small" type="primary" :loading="codexLoggingIn" @click="runCodexLogin">
@@ -182,7 +196,7 @@
               <span class="i-carbon-arrow-left" />
               <span>{{ t("settings.models.backToList") }}</span>
             </button>
-            <PresetEditor v-if="showEditor" :preset="editorPreset" :backends="backends" :mode="editorMode" @save="handleSavePreset" @cancel="cancelEdit" @clone="clonePreset" @delete="confirmDeletePreset" />
+            <PresetEditor v-if="showEditor" :preset="editorPreset" :backends="backends" :mode="editorMode" @save="handleSavePreset" @cancel="cancelEdit" @clone="clonePreset" @delete="confirmDeletePreset" @set-default="handleSetDefault" />
             <div v-else class="model-editor-empty">
               <p class="text-sm">Select a preset on the left, or click "+ New" to create one.</p>
               <p class="text-[11px] mt-2">
@@ -204,6 +218,10 @@
               <span class="font-medium text-warm-700 dark:text-warm-300">{{ server.name }}</span>
               <span class="text-[10px] px-1.5 py-0.5 rounded bg-sapphire/15 text-sapphire dark:text-sapphire-light font-mono">{{ server.transport }}</span>
               <div class="flex-1" />
+              <el-button size="small" plain @click="openMCPEdit(server)">
+                <span class="i-carbon-edit mr-1" />
+                {{ t("common.edit") }}
+              </el-button>
               <el-popconfirm :title="t('settings.mcp.deleteConfirm')" @confirm="removeMCPServer(server.name)">
                 <template #reference>
                   <el-button size="small" type="danger" plain>{{ t("common.remove") }}</el-button>
@@ -340,6 +358,16 @@
         </div>
       </el-tab-pane>
 
+      <!-- ════════════════════════ Advanced ════════════════════════ -->
+      <el-tab-pane :label="t('settings.tabs.advanced')" name="advanced">
+        <AdvancedPanel />
+      </el-tab-pane>
+
+      <!-- ════════════════════════ About ════════════════════════ -->
+      <el-tab-pane :label="t('settings.tabs.about')" name="about">
+        <AboutPanel />
+      </el-tab-pane>
+
       <!-- ════════════════════════ Preferences ════════════════════════ -->
       <el-tab-pane :label="t('settings.tabs.prefs')" name="prefs">
         <div class="settings-pane flex flex-col gap-4 max-w-xl">
@@ -386,6 +414,7 @@
         </div>
       </el-tab-pane>
     </el-tabs>
+    <MCPServerEditModal v-model="mcpEditOpen" :server="mcpEditTarget" @saved="onMCPEditSaved" />
   </div>
 </template>
 
@@ -393,7 +422,10 @@
 import { computed, reactive, ref, onMounted, watch } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
 
+import AboutPanel from "@/components/settings/AboutPanel.vue"
+import AdvancedPanel from "@/components/settings/AdvancedPanel.vue"
 import BackendForm from "@/components/settings/BackendForm.vue"
+import MCPServerEditModal from "@/components/settings/modals/MCPServerEditModal.vue"
 import PresetEditor from "@/components/settings/PresetEditor.vue"
 import SitesPane from "@/components/settings/SitesPane.vue"
 import UpdatesPanel from "@/components/settings/UpdatesPanel.vue"
@@ -459,6 +491,18 @@ async function saveKey(provider) {
     await loadPresets()
   } catch (err) {
     ElMessage.error(err.response?.data?.detail || t("settings.keys.saveFailed"))
+  }
+}
+
+async function deleteKey(provider) {
+  try {
+    await settingsAPI.removeKey(provider, providerNode.value)
+    ElMessage.success(t("settings.keys.deleted", { provider }))
+    await loadKeys()
+    await loadBackends()
+    await loadPresets()
+  } catch (err) {
+    ElMessage.error(err.response?.data?.detail || t("settings.keys.deleteFailed"))
   }
 }
 
@@ -719,6 +763,20 @@ async function handleSavePreset(payload) {
   }
 }
 
+async function handleSetDefault(preset) {
+  if (!preset || !preset.name) return
+  try {
+    await settingsAPI.setDefaultModel(preset.name)
+    ElMessage.success(t("settings.models.defaultSet", { name: preset.name }))
+    await loadPresets()
+    // Refresh the editor's bound preset so the badge flips.
+    const refreshed = (presets.value || []).find((p) => p.name === preset.name && p.provider === preset.provider)
+    if (refreshed) editorPreset.value = refreshed
+  } catch (err) {
+    ElMessage.error(err.response?.data?.detail || t("settings.models.defaultSetFailed"))
+  }
+}
+
 async function confirmDeletePreset(name) {
   try {
     await ElMessageBox.confirm(t("settings.models.deleteConfirm"), {
@@ -756,6 +814,18 @@ const mcpForm = reactive({
   argsStr: "",
   url: "",
 })
+
+const mcpEditOpen = ref(false)
+const mcpEditTarget = ref(null)
+
+function openMCPEdit(server) {
+  mcpEditTarget.value = server
+  mcpEditOpen.value = true
+}
+
+function onMCPEditSaved() {
+  loadMCP()
+}
 
 async function loadMCP() {
   try {

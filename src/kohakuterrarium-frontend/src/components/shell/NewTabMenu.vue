@@ -14,6 +14,10 @@
       <span class="i-carbon-catalog" />
       Open Catalog
     </button>
+    <button class="w-full text-left px-3 py-1.5 hover:bg-warm-100 dark:hover:bg-warm-800 flex items-center gap-2" @click="openExtensions">
+      <span class="i-carbon-plug" />
+      Open Extensions
+    </button>
     <button class="w-full text-left px-3 py-1.5 hover:bg-warm-100 dark:hover:bg-warm-800 flex items-center gap-2" @click="openSettings">
       <span class="i-carbon-settings" />
       Open Settings
@@ -40,6 +44,10 @@ function goDashboard() {
 }
 function openCatalog() {
   tabs.openTab({ kind: "catalog", id: "catalog" })
+  emit("close")
+}
+function openExtensions() {
+  tabs.openTab({ kind: "extensions", id: "extensions" })
   emit("close")
 }
 function openSettings() {

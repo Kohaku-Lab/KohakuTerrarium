@@ -49,6 +49,12 @@ export const configAPI = {
     return data
   },
 
+  /** Full diagnostic snapshot for the About panel. */
+  async getDiagnostics() {
+    const { data } = await api.get("/configs/server-info/diagnostics")
+    return data
+  },
+
   /** @returns {Promise<{name: string, model: string, provider: string, available: boolean, variation_groups?: Record<string, Record<string, object>>, selected_variations?: Record<string, string>}[]>} */
   async getModels() {
     const { data } = await api.get("/configs/models")
@@ -543,6 +549,66 @@ export const sessionAPI = {
     return data
   },
 
+  /**
+   * Get the vector-index status for a saved session.
+   * @param {string} sessionName
+   * @returns {Promise<{indexed: boolean, embedder: string|null, model: string|null,
+   *                    dimensions: number|null, fts_blocks: number, vec_blocks: number,
+   *                    agents: string[]}>}
+   */
+  async getMemoryStatus(sessionName) {
+    const { data } = await api.get(`/sessions/${sessionName}/memory/status`)
+    return data
+  },
+
+  /**
+   * Acknowledge a build request and return the WS URL for progress.
+   * The actual work runs on the WS stream returned by ``openMemoryBuildStream``.
+   * @param {string} sessionName
+   * @param {{embedder?: string, model?: string|null, dimensions?: number|null, force?: boolean}} body
+   */
+  async buildMemory(sessionName, body = {}) {
+    const payload = {
+      embedder: body.embedder || "auto",
+      model: body.model || null,
+      dimensions: body.dimensions || null,
+      force: !!body.force,
+    }
+    const { data } = await api.post(`/sessions/${sessionName}/memory/build`, payload)
+    return data
+  },
+
+  /**
+   * Open the WS that streams memory-build progress. Caller is
+   * responsible for closing the socket; the server closes after the
+   * terminal ``{status: ok|failed|cancelled}`` frame.
+   * @param {string} sessionName
+   * @param {{embedder?: string, model?: string|null, dimensions?: number|null,
+   *          force?: boolean, onFrame: (frame: object) => void,
+   *          onClose?: () => void, onError?: (e: Event) => void}} opts
+   * @returns {WebSocket}
+   */
+  openMemoryBuildStream(sessionName, opts) {
+    const params = new URLSearchParams()
+    if (opts.embedder) params.set("embedder", opts.embedder)
+    if (opts.model) params.set("model", opts.model)
+    if (opts.dimensions) params.set("dimensions", String(opts.dimensions))
+    if (opts.force) params.set("force", "true")
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
+    const url = `${proto}//${window.location.host}/ws/sessions/${encodeURIComponent(sessionName)}/memory/build?${params.toString()}`
+    const ws = new WebSocket(url)
+    ws.onmessage = (e) => {
+      try {
+        opts.onFrame(JSON.parse(e.data))
+      } catch (err) {
+        opts.onError?.(err)
+      }
+    }
+    ws.onerror = (e) => opts.onError?.(e)
+    ws.onclose = () => opts.onClose?.()
+    return ws
+  },
+
   async getHistoryIndex(sessionName) {
     const { data } = await api.get(`/sessions/${sessionName}/history`)
     return data
@@ -721,6 +787,24 @@ export const settingsAPI = {
     const { data } = await api.post("/settings/default-model", { name })
     return data
   },
+  // Raw config files (Settings → Advanced)
+  async listConfigFiles() {
+    const { data } = await api.get("/settings/config-files")
+    return data
+  },
+  async readConfigFile(name) {
+    const { data } = await api.get(`/settings/config-files/${encodeURIComponent(name)}/content`)
+    return data
+  },
+  async writeConfigFile(name, content, sha256Expected = null) {
+    const body = { content }
+    if (sha256Expected) body.sha256_expected = sha256Expected
+    const { data } = await api.put(
+      `/settings/config-files/${encodeURIComponent(name)}/content`,
+      body,
+    )
+    return data
+  },
   // MCP server management
   async listMCP() {
     const { data } = await api.get("/settings/mcp")
@@ -732,6 +816,32 @@ export const settingsAPI = {
   },
   async removeMCP(name) {
     const { data } = await api.delete(`/settings/mcp/${name}`)
+    return data
+  },
+  /**
+   * Partial in-place edit of an existing MCP server.
+   * Send only the fields you want to change.
+   * @param {string} name
+   * @param {object} patch
+   */
+  async patchMCP(name, patch) {
+    const { data } = await api.patch(`/settings/mcp/${name}`, patch)
+    return data
+  },
+  /**
+   * Probe an MCP server: connect, list_tools, disconnect.
+   * @returns {Promise<{ok: boolean, error: string|null, tool_count: number|null, elapsed_ms: number|null}>}
+   */
+  async testMCP(name) {
+    const { data } = await api.post(`/settings/mcp/${name}/test`)
+    return data
+  },
+  /**
+   * List installed creatures / terrariums that reference this server.
+   * @returns {Promise<{name: string, kind: 'creature'|'terrarium', path: string}[]>}
+   */
+  async mcpUsage(name) {
+    const { data } = await api.get(`/settings/mcp/${name}/usage`)
     return data
   },
   async getCodexUsage() {
@@ -773,6 +883,99 @@ export const registryAPI = {
   },
   async uninstall(name) {
     const { data } = await api.post("/registry/uninstall", { name })
+    return data
+  },
+  /** Update a single git-backed installed package. */
+  async update(name) {
+    const { data } = await api.post(`/registry/${encodeURIComponent(name)}/update`)
+    return data
+  },
+  /** Aggregated list of plugin / tool / trigger / etc. extensions
+   *  contributed by installed packages.
+   *  @returns {Promise<{name, kind, package, package_version, description, module, editable}[]>}
+   */
+  // (also exposed as extensionsAPI.list — kept here for the
+  // packages-tab cross-reference; UI components use extensionsAPI.)
+  async listExtensions() {
+    const { data } = await api.get("/registry/extensions")
+    return data
+  },
+  /** Update every git-backed installed package. */
+  async updateAll() {
+    const { data } = await api.post("/registry/update-all")
+    return data
+  },
+  /** List files inside an installed package. */
+  async listFiles(name) {
+    const { data } = await api.get(`/registry/${encodeURIComponent(name)}/files`)
+    return data
+  },
+  /** Read one file from an installed package as UTF-8 text. */
+  async readFile(name, path) {
+    const { data } = await api.get(
+      `/registry/${encodeURIComponent(name)}/files/${path
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/")}`,
+    )
+    return data
+  },
+  /** Write one file inside an installed package. */
+  async writeFile(name, path, content, sha256Expected = null) {
+    const body = { content }
+    if (sha256Expected) body.sha256_expected = sha256Expected
+    const { data } = await api.put(
+      `/registry/${encodeURIComponent(name)}/files/${path
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/")}`,
+      body,
+    )
+    return data
+  },
+}
+
+/** Lab cluster control — Sites tab verbs (lab-host mode only). */
+export const labAPI = {
+  async status() {
+    const { data } = await api.get("/lab/status")
+    return data
+  },
+  async disconnectClient(nodeId) {
+    const { data } = await api.post(`/lab/clients/${encodeURIComponent(nodeId)}/disconnect`)
+    return data
+  },
+  async blockClient(nodeId, reason = "") {
+    const { data } = await api.post(`/lab/clients/${encodeURIComponent(nodeId)}/block`, { reason })
+    return data
+  },
+  async unblockClient(nodeId) {
+    const { data } = await api.delete(`/lab/clients/blocklist/${encodeURIComponent(nodeId)}`)
+    return data
+  },
+  async listBlocked() {
+    const { data } = await api.get("/lab/clients/blocklist")
+    return data
+  },
+  async rotatePairingToken() {
+    const { data } = await api.post("/lab/pairing-tokens/rotate")
+    return data
+  },
+}
+
+/** Extensions catalog — flattened view of plugins / tools / triggers /
+ *  io / llm-presets / skills / commands / prompts contributed by
+ *  installed packages.
+ */
+export const extensionsAPI = {
+  async list() {
+    const { data } = await api.get("/registry/extensions")
+    return data
+  },
+  async get(kind, name) {
+    const { data } = await api.get(
+      `/registry/extensions/${encodeURIComponent(kind)}/${encodeURIComponent(name)}`,
+    )
     return data
   },
 }

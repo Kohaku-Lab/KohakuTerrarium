@@ -12,22 +12,22 @@
       <h3 class="text-sm font-semibold mb-3">Source</h3>
       <div class="space-y-2 text-[13px]">
         <label class="flex items-center gap-3">
-          <input type="radio" v-model="form.sourceKind" value="pypi" @change="onFormChange" />
+          <input v-model="form.sourceKind" type="radio" value="pypi" @change="onFormChange" />
           <span>PyPI stable</span>
           <input v-if="form.sourceKind === 'pypi'" v-model="form.spec" class="flex-1 px-2 py-1 border rounded text-[12px] dark:bg-warm-900" placeholder="leave blank for latest, e.g. ==1.5.0 or <2.0" @blur="onFormChange" />
         </label>
         <label class="flex items-center gap-3">
-          <input type="radio" v-model="form.sourceKind" value="git" @change="onFormChange" />
+          <input v-model="form.sourceKind" type="radio" value="git" @change="onFormChange" />
           <span>Git ref</span>
           <input v-if="form.sourceKind === 'git'" v-model="form.spec" class="flex-1 px-2 py-1 border rounded text-[12px] dark:bg-warm-900" placeholder="https://github.com/.../KohakuTerrarium.git@main" @blur="onFormChange" />
         </label>
         <label class="flex items-center gap-3">
-          <input type="radio" v-model="form.sourceKind" value="local" @change="onFormChange" />
+          <input v-model="form.sourceKind" type="radio" value="local" @change="onFormChange" />
           <span>Local editable path</span>
           <input v-if="form.sourceKind === 'local'" v-model="form.spec" class="flex-1 px-2 py-1 border rounded text-[12px] dark:bg-warm-900" placeholder="/path/to/checkout" @blur="onFormChange" />
         </label>
         <label class="flex items-center gap-3">
-          <input type="radio" v-model="form.sourceKind" value="bundled" @change="onFormChange" />
+          <input v-model="form.sourceKind" type="radio" value="bundled" @change="onFormChange" />
           <span>Bundled (offline)</span>
         </label>
       </div>
@@ -38,15 +38,15 @@
       <h3 class="text-sm font-semibold mb-3">Update mode</h3>
       <div class="space-y-2 text-[13px]">
         <label class="flex items-center gap-3">
-          <input type="radio" v-model="form.updateMode" value="manual" @change="onFormChange" />
+          <input v-model="form.updateMode" type="radio" value="manual" @change="onFormChange" />
           <span>Manual — never check</span>
         </label>
         <label class="flex items-center gap-3">
-          <input type="radio" v-model="form.updateMode" value="notify-on-launch" @change="onFormChange" />
+          <input v-model="form.updateMode" type="radio" value="notify-on-launch" @change="onFormChange" />
           <span>Notify on launch — check daily, prompt me</span>
         </label>
         <label class="flex items-center gap-3">
-          <input type="radio" v-model="form.updateMode" value="auto-on-launch" @change="onFormChange" />
+          <input v-model="form.updateMode" type="radio" value="auto-on-launch" @change="onFormChange" />
           <span>Auto on launch — check and install on launch</span>
         </label>
       </div>

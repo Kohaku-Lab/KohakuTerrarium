@@ -45,8 +45,20 @@
     </template>
 
     <!-- Actions -->
-    <div class="flex justify-end mt-auto pt-1">
+    <div class="flex justify-end mt-auto pt-1 gap-2 flex-wrap">
       <template v-if="mode === 'local'">
+        <el-button size="small" plain :title="t('registry.info')" @click="$emit('info', config)">
+          <span class="i-carbon-information mr-1" />
+          {{ t("registry.info") }}
+        </el-button>
+        <el-button size="small" plain :title="t('registry.editFiles')" @click="$emit('edit-files', config)">
+          <span class="i-carbon-edit mr-1" />
+          {{ t("registry.editFiles") }}
+        </el-button>
+        <el-button size="small" type="primary" plain :loading="updating" @click="$emit('update', config)">
+          <span v-if="!updating" class="i-carbon-renew mr-1" />
+          {{ t("registry.update") }}
+        </el-button>
         <el-popconfirm :title="t('registry.uninstallConfirm')" :confirm-button-text="t('registry.uninstall')" :cancel-button-text="t('common.cancel')" @confirm="$emit('uninstall', config)">
           <template #reference>
             <el-button size="small" type="danger" plain> <span class="i-carbon-trash-can mr-1" /> {{ t("registry.uninstall") }} </el-button>
@@ -69,9 +81,10 @@ const props = defineProps({
   mode: { type: String, default: "local" },
   installed: { type: Boolean, default: false },
   installing: { type: Boolean, default: false },
+  updating: { type: Boolean, default: false },
 })
 
-defineEmits(["install", "uninstall"])
+defineEmits(["install", "uninstall", "update", "info", "edit-files"])
 const { t } = useI18n()
 
 const typeBadgeGem = computed(() => {

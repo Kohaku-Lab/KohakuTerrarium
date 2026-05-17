@@ -99,9 +99,27 @@
                 <span :class="resuming === session.name ? 'i-carbon-renew kohaku-pulse' : 'i-carbon-play'" />
                 {{ resuming === session.name ? t("sessions.resuming") : t("common.resume") }}
               </button>
-              <button class="btn-secondary flex items-center gap-1 text-coral hover:bg-coral/10" :title="t('common.delete')" @click="deleteSession(session)">
-                <span class="i-carbon-trash-can" />
-              </button>
+              <el-dropdown trigger="click" @command="(cmd) => onRowAction(cmd, session)">
+                <button class="btn-secondary flex items-center gap-1" :title="t('common.more')">
+                  <span class="i-carbon-overflow-menu-horizontal" />
+                </button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="buildEmbeddings" :disabled="!!session.has_vector_index">
+                      <span class="i-carbon-machine-learning-model mr-1" />
+                      {{ t("sessions.buildEmbeddings") }}
+                    </el-dropdown-item>
+                    <el-dropdown-item command="rebuildEmbeddings" :disabled="!session.has_vector_index">
+                      <span class="i-carbon-renew mr-1" />
+                      {{ t("sessions.rebuildEmbeddings") }}
+                    </el-dropdown-item>
+                    <el-dropdown-item divided command="delete" :class="'text-coral'">
+                      <span class="i-carbon-trash-can mr-1" />
+                      {{ t("common.delete") }}
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </div>
           </div>
 
@@ -116,12 +134,14 @@
         </div>
       </template>
     </div>
+    <BuildEmbeddingsModal v-if="buildTarget" v-model="buildModalOpen" :session-name="buildTarget.name" :rebuild="buildRebuild" @completed="onBuildCompleted" />
   </div>
 </template>
 
 <script setup>
 import { ElMessage, ElMessageBox } from "element-plus"
 
+import BuildEmbeddingsModal from "@/components/sessions/modals/BuildEmbeddingsModal.vue"
 import GemBadge from "@/components/common/GemBadge.vue"
 import { useInstancesStore } from "@/stores/instances"
 import { GEM } from "@/utils/colors"
@@ -159,6 +179,10 @@ const error = ref(null)
 const resuming = ref(null)
 const searchQuery = ref("")
 let searchTimer = null
+
+const buildModalOpen = ref(false)
+const buildTarget = ref(null)
+const buildRebuild = ref(false)
 
 watch(searchQuery, () => {
   clearTimeout(searchTimer)
@@ -229,6 +253,25 @@ async function resumeSession(session) {
   } finally {
     resuming.value = null
   }
+}
+
+function onRowAction(cmd, session) {
+  if (cmd === "buildEmbeddings") {
+    buildTarget.value = session
+    buildRebuild.value = false
+    buildModalOpen.value = true
+  } else if (cmd === "rebuildEmbeddings") {
+    buildTarget.value = session
+    buildRebuild.value = true
+    buildModalOpen.value = true
+  } else if (cmd === "delete") {
+    deleteSession(session)
+  }
+}
+
+function onBuildCompleted() {
+  // Refresh so the row's ``has_vector_index`` flips.
+  fetchSessions(true)
 }
 
 async function deleteSession(session) {

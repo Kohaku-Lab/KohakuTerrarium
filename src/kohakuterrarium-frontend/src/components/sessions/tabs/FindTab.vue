@@ -23,6 +23,15 @@
       <button v-for="chip in TYPE_CHIPS" :key="chip" class="px-1.5 py-0.5 rounded border" :class="activeChip === chip ? 'border-iolite bg-iolite/10 text-iolite' : 'border-warm-300 dark:border-warm-700 text-warm-500 hover:text-warm-700'" @click="toggleChip(chip)">{{ chip }}</button>
     </div>
 
+    <!-- Empty-state banner: Semantic/Hybrid on an un-indexed session -->
+    <div v-if="needsIndex" class="card p-3 flex items-center gap-3 text-[12px] border-iolite/30 bg-iolite/5">
+      <span class="i-carbon-information text-iolite shrink-0" />
+      <div class="flex-1">
+        <p class="text-warm-700 dark:text-warm-300">{{ t("sessionViewer.find.noIndex") }}</p>
+      </div>
+      <el-button type="primary" size="small" :disabled="!detail.name" @click="openBuildModal">{{ t("sessionViewer.find.buildEmbeddings") }}</el-button>
+    </div>
+
     <!-- Results -->
     <div class="flex-1 min-h-0 overflow-y-auto">
       <div v-if="error" class="card p-4 text-coral text-sm">{{ error }}</div>
@@ -43,6 +52,7 @@
         </button>
       </div>
     </div>
+    <BuildEmbeddingsModal v-if="detail.name" v-model="buildModalOpen" :session-name="detail.name" :rebuild="false" @completed="onIndexBuilt" />
   </div>
 </template>
 
@@ -50,6 +60,7 @@
 import { computed, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 
+import BuildEmbeddingsModal from "@/components/sessions/modals/BuildEmbeddingsModal.vue"
 import { useSessionDetailStore } from "@/stores/sessionDetail"
 import { sessionAPI } from "@/utils/api"
 import { useI18n } from "@/utils/i18n"
@@ -77,8 +88,39 @@ const loading = ref(false)
 const error = ref("")
 const submitted = ref(false)
 const results = ref([])
+const hasIndex = ref(false)
+const buildModalOpen = ref(false)
 
 const agents = computed(() => detail.agents || [])
+
+const needsIndex = computed(() => {
+  // Only nag the user when the chosen mode requires vectors AND we know
+  // the index is missing. ``auto`` falls back to FTS, so it's tolerant.
+  return ["semantic", "hybrid"].includes(mode.value) && !hasIndex.value
+})
+
+async function refreshIndexStatus() {
+  if (!detail.name) {
+    hasIndex.value = false
+    return
+  }
+  try {
+    const s = await sessionAPI.getMemoryStatus(detail.name)
+    hasIndex.value = !!s.indexed
+  } catch {
+    hasIndex.value = false
+  }
+}
+
+function openBuildModal() {
+  buildModalOpen.value = true
+}
+
+function onIndexBuilt() {
+  hasIndex.value = true
+  // Re-run the search if the user had one queued.
+  if (query.value.trim()) runSearch()
+}
 
 const filteredResults = computed(() => {
   if (!activeChip.value) return results.value
@@ -140,6 +182,8 @@ watch(
   () => {
     onClear()
     query.value = ""
+    refreshIndexStatus()
   },
+  { immediate: true },
 )
 </script>

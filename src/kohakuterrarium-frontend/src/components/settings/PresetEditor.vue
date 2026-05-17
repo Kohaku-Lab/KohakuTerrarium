@@ -15,6 +15,11 @@
       </div>
       <el-button v-if="isBuiltin" size="small" type="primary" @click="$emit('clone')">Clone</el-button>
       <el-button v-if="isEditing && !isBuiltin" size="small" @click="$emit('cancel')">Close</el-button>
+      <el-button v-if="isEditing && !preset?.is_default" size="small" type="success" plain :title="t('settings.models.setDefaultHint')" @click="$emit('set-default', preset)">
+        <span class="i-carbon-checkmark-filled mr-1" />
+        {{ t("settings.models.setAsDefault") }}
+      </el-button>
+      <el-tag v-if="isEditing && preset?.is_default" type="success" size="small">{{ t("settings.models.isDefault") }}</el-tag>
     </div>
 
     <!-- Core section -->
@@ -157,12 +162,16 @@
 import { computed, reactive, ref, watch } from "vue"
 import { Delete } from "@element-plus/icons-vue"
 
+import { useI18n } from "@/utils/i18n"
+
+const { t } = useI18n()
+
 const props = defineProps({
   preset: { type: Object, default: null },
   backends: { type: Array, default: () => [] },
   mode: { type: String, default: "new" }, // "new" | "edit" | "view"
 })
-const emit = defineEmits(["save", "cancel", "clone", "delete"])
+const emit = defineEmits(["save", "cancel", "clone", "delete", "set-default"])
 
 const PATCH_ROOTS = ["extra_body", "temperature", "reasoning_effort", "service_tier", "max_context", "max_output"]
 

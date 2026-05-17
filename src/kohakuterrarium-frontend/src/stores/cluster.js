@@ -58,6 +58,13 @@ export const useClusterStore = defineStore("cluster", () => {
   const sites = ref([])
   const error = ref("")
   const lastHydratedAt = ref(0)
+  // Most recent freshly-rotated pairing token, used by the
+  // Spawn-Client wizard to pre-fill the join command. Lives in
+  // memory only — never persisted, so reloading the page clears it.
+  const latestToken = ref("")
+  function setLatestToken(tok) {
+    latestToken.value = tok || ""
+  }
 
   let interval = null
 
@@ -165,6 +172,7 @@ export const useClusterStore = defineStore("cluster", () => {
     sites,
     error,
     lastHydratedAt,
+    latestToken,
     // getters
     isCluster,
     siteCount,
@@ -180,6 +188,7 @@ export const useClusterStore = defineStore("cluster", () => {
     stopPolling,
     reset,
     markSiteOffline,
+    setLatestToken,
   }
 })
 

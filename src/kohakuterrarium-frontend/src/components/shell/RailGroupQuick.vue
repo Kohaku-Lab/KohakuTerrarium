@@ -96,6 +96,12 @@ const entries = computed(() => [
     action: () => tabs.openTab({ kind: "catalog", id: "catalog" }),
   },
   {
+    id: "extensions",
+    label: t("shell.quick.extensions"),
+    icon: "i-carbon-plug",
+    action: () => tabs.openTab({ kind: "extensions", id: "extensions" }),
+  },
+  {
     id: "studio",
     label: t("shell.quick.studio"),
     icon: "i-carbon-tool-box",
