@@ -34,6 +34,7 @@ from kohakuterrarium.cli.packages import (
 )
 from kohakuterrarium.cli.resume import resume_cli
 from kohakuterrarium.cli.run import run_agent_cli
+from kohakuterrarium.cli.self_update import add_self_update_subparser, self_update_cli
 from kohakuterrarium.cli.serve import add_serve_subparser, serve_cli
 from kohakuterrarium.cli.service import add_service_subparser, service_cli
 from kohakuterrarium.cli.version import format_version_report
@@ -378,6 +379,9 @@ def _build_parser() -> argparse.ArgumentParser:
     # ``kt service`` — systemd unit install / uninstall / status / edit
     add_service_subparser(subparsers)
 
+    # ``kt self-update`` — wrapper-aware framework update with pip fallback
+    add_self_update_subparser(subparsers)
+
     internal_serve_parser = subparsers.add_parser(
         "__run-server", help=argparse.SUPPRESS
     )
@@ -523,6 +527,7 @@ COMMANDS: dict[str, callable] = {
     "host": dispatch_host_alias,
     "client": dispatch_client_alias,
     "service": service_cli,
+    "self-update": self_update_cli,
     "extension": _dispatch_extension,
     "mcp": _dispatch_mcp,
 }
