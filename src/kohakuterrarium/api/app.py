@@ -34,6 +34,7 @@ logger = get_logger(__name__)
 # subpackage maps to a future Studio tier (catalog / identity /
 # sessions / persistence / attach). The legacy single-file routes
 # were removed in Phase 3; the studio layer is the only path now.
+from kohakuterrarium.api.routes import app_update as app_update_route
 from kohakuterrarium.api.routes import health as health_route
 from kohakuterrarium.api.routes import lab_status as lab_status_route
 from kohakuterrarium.api.routes import metrics as metrics_route
@@ -461,6 +462,10 @@ def create_app(
     app.include_router(health_route.router, tags=["health"])
     # /api/lab/status — operator dashboard snapshot of the cluster.
     app.include_router(lab_status_route.router, prefix="/api/lab", tags=["lab"])
+    # /api/app/* — wrapper-aware self-update HTTP surface.
+    app.include_router(app_update_route.router, prefix="/api/app", tags=["app-update"])
+    # /ws/app/update — progress stream for the update flow (no prefix).
+    app.include_router(app_update_route.ws_router, tags=["app-update"])
 
     # Runtime graph snapshot — read by the graph editor data layer.
     app.include_router(
