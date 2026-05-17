@@ -333,6 +333,13 @@
         <SitesPane />
       </el-tab-pane>
 
+      <!-- ════════════════════════ Updates ════════════════════════ -->
+      <el-tab-pane label="Updates" name="updates">
+        <div class="settings-pane max-w-2xl">
+          <UpdatesPanel />
+        </div>
+      </el-tab-pane>
+
       <!-- ════════════════════════ Preferences ════════════════════════ -->
       <el-tab-pane :label="t('settings.tabs.prefs')" name="prefs">
         <div class="settings-pane flex flex-col gap-4 max-w-xl">
@@ -389,6 +396,7 @@ import { ElMessage, ElMessageBox } from "element-plus"
 import BackendForm from "@/components/settings/BackendForm.vue"
 import PresetEditor from "@/components/settings/PresetEditor.vue"
 import SitesPane from "@/components/settings/SitesPane.vue"
+import UpdatesPanel from "@/components/settings/UpdatesPanel.vue"
 import SitePicker from "@/components/cluster/SitePicker.vue"
 import { useDensity } from "@/composables/useDensity"
 import { useClusterStore } from "@/stores/cluster"
