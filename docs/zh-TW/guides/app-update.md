@@ -1,6 +1,6 @@
 ---
 title: 應用更新
-summary: KohakuTerrarium 桌面 app 的更新機制 —— 瘦殼層 Briefcase 包、托管 venv，以及來源 / 更新模式設定。
+summary: KohakuTerrarium 桌面 app 的更新機制 —— 下載預建的發布 tarball、版本並列安裝、原子指針切換、自訂鏡像、發布通道。
 tags:
   - guides
   - update
@@ -10,155 +10,228 @@ tags:
 
 # 應用更新
 
-KohakuTerrarium 桌面 app 是**包在托管 Python venv 外的瘦殼層**。殼層幾乎不變；框架本身透過 `pip` 在你設定的節奏下更新 —— 每次發版不需要重新下載安裝器。
+KohakuTerrarium 桌面 app 透過**下載與你的平台 + Python ABI 相符的預建
+發布 tarball**自我更新：在本機解壓到目前版本的並列目錄、做冒煙測試,
+再原子性地切換一個小指針檔來決定下次啟動哪一份。這個模型借鏡自
+Squirrel / Velopack / Sparkle 這類原生 app 更新器 —— 小、事務化,
+每次更新只需要一次 HTTPS GET + 一次解壓。
 
-本指南說明殼層在做什麼、狀態檔在哪、如何選擇框架來源、以及如何更新 / 回滾 / 復原。
+更關鍵的是:你的機器**不需要**執行 `pip`、`venv`、`git` 或 `ensurepip`。
+這些只存在於建置機上;你拿到的就是建置好的成品。
 
 ## 心智模型
 
 ```
-┌──────────────────────────────────────────────────────┐
-│  Briefcase 桌面包                                    │
-│  ┌────────────────────────────────────────────────┐  │
-│  │  Wrapper (kohakuterrarium-launcher)            │  │
-│  │  - Python runtime                              │  │
-│  │  - bootloader (~/.kohakuterrarium/runtime/...) │  │
-│  │  - 啟動畫面                                    │  │
-│  │  - 內建備用 wheels                             │  │
-│  └────────────────────────────────────────────────┘  │
-│                       │                              │
-│                       ▼                              │
-│  ┌────────────────────────────────────────────────┐  │
-│  │  托管 venv（第一次啟動時建立）                │  │
-│  │  ~/.kohakuterrarium/runtime/venv/              │  │
-│  │  └── kohakuterrarium == <你選的來源>           │  │
-│  └────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  Briefcase 桌面包                                            │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │  Launcher (~50KB Python，urllib + hashlib + tarfile)   │  │
+│  │  - 讀取 runtime/active                                 │  │
+│  │  - 下載 + 解壓發布 tarball                             │  │
+│  │  - exec 進入 versions/<active>/scripts/kt              │  │
+│  └────────────────────────────────────────────────────────┘  │
+│  + bundled-release/kohakuterrarium-<v>-<plat>-py<X.Y>.tar.zst│  ← 離線首次啟動
+└──────────────────────────────────────────────────────────────┘
+
+使用者家目錄 (~/.kohakuterrarium/):
+├── app-settings.json
+└── runtime/
+    ├── active                      ← 指針 JSON
+    ├── versions/
+    │   ├── 1.5.0/                  ← 解壓好的發布目錄
+    │   │   ├── site-packages/
+    │   │   ├── scripts/kt
+    │   │   └── manifest.json
+    │   ├── 1.5.1/
+    │   └── 1.5.2-nightly-2026-05-19/
+    └── manifest-cache/
+        ├── stable.json
+        ├── beta.json
+        └── nightly.json
 ```
 
-雙擊 app 時：
+每個版本都在自己的獨立目錄。切換版本只是改寫 50 byte 的 `active` 指針
+(在 POSIX 與 Windows 都是原子的)。目前執行中的行程不受影響 ——
+新版本在下次啟動時生效。
 
-1. 殼層讀 `~/.kohakuterrarium/app-settings.json`。
-2. 若 `~/.kohakuterrarium/runtime/venv/` 不存在，啟動畫面開啟，殼層按設定的來源把框架裝進去。
-3. 若 venv 存在，殼層用 `exec` 把自己換成 venv 裡的 `kt` 進入點 —— 從這一刻開始你直接在跑框架，殼層退場。
+## 首次啟動
 
-## 路徑
+如果安裝包帶了 `bundled-release/<tarball>`,首次啟動會把這個離線 tarball
+解壓到 `versions/<v>/` 並指向它。之後連網時你可以從 GUI 或 CLI 更新到
+更新的版本。
 
-| 路徑 | 用途 |
+沒有 bundled tarball(開發者安裝 / 最小化包)時,首次啟動會從配置的通道
+清單解析、下載、驗證、解壓相符的工件,再寫指針。如果連網也沒有,啟動器
+會顯示「首次啟動需要網路」錯誤,而不會悄悄變磚。
+
+## 更新
+
+| 入口 | 怎麼用 |
 |---|---|
-| `~/.kohakuterrarium/app-settings.json` | 來源 + 更新模式設定（**設定 → 更新** 分頁讀/寫這個檔） |
-| `~/.kohakuterrarium/runtime/venv/` | 當前活躍的托管 venv |
-| `~/.kohakuterrarium/runtime/venv.old/` | 上一次成功更新後保留的舊 venv，可一次性回滾 |
-| `~/.kohakuterrarium/runtime/.update.lock` | flock 檔，避免兩個 app 同時跑 `pip install` |
-| `~/.kohakuterrarium/logs/launcher.log` | 殼層輪轉日誌（1 MB × 3） |
+| 桌面 app Admin → Updates 分頁 | 設定 + 「立即檢查」+「更新」按鈕 |
+| `kt self-update` | CLI 對應入口 |
+| `kt self-update --check-only` | 解析並印出最新版;有更新回傳 0,已是最新回傳 1 |
+| `kt self-update --dry-run` | 解析並印出將要安裝的內容 |
+| `kt self-update --rollback` | 指針回退到上一個已安裝版本 |
 
-## 選擇來源
+更新不會修改目前執行的行程。更新成功後,離開並重新啟動 app —— 新指針
+會在下次啟動時讀取。
 
-殼層支援四種來源。在 **設定 → 更新 → 來源** 選擇：
+## 發布通道
 
-| 來源 | 執行的 pip 指令 | 適用情境 |
+| 通道 | 內容 | 何時選 |
 |---|---|---|
-| **PyPI stable** | `pip install -U kohakuterrarium` | 預設。最新正式版。 |
-| **PyPI 版本鎖定** | `pip install -U kohakuterrarium==1.5.0`（或 `<2.0`） | 暫時鎖在某版本測試或大規模部署前。 |
-| **Git ref** | `pip install -U "git+<url>@main"`（分支 / tag / commit） | 跟著開發分支、你自己的 fork、或還沒上 PyPI 的 RC。 |
-| **本地可編輯路徑** | `pip install -e /path/to/checkout` | 開發者直接從 Git checkout 跑。**停用自動更新** —— 你自己用 `git pull` 驅動。 |
-| **內建（離線）** | `pip install --no-index --find-links=wheels-bundle/ kohakuterrarium` | 離線機器第一次啟動，或遠端來源不可達時的復原。 |
+| `stable` | 經過測試的發布 | 預設、推薦 |
+| `beta` | 預發布候選 | 幫我們驗證下個大版本 |
+| `nightly` | 每日自動建置 | 追前緣 / 貢獻者 |
+
+通道選擇在 **Admin → Updates → Channel** 以及
+`kt self-update --channel <name>`(黏性 —— 會寫回設定)。
+
+## 版本固定
+
+固定到某個版本,忽略通道更新直到取消固定。適用於:
+
+- 新版本破壞了你依賴的行為,你想留時間回報 + 等修復。
+- 受管部署在多節點上統一一個已知版本。
+
+`kt self-update --pin 1.5.0` 設定;`--pin ""` 清除。GUI 提供下拉,
+內容來自通道清單。
+
+## 自訂 feed(鏡像 / 離線伺服器)
+
+公司 / 內網使用者可以把發布 tarball 託管到自己的 HTTPS 伺服器。
+啟動器需要:
+
+- `<channel>.json` 清單放在 `<your-base-url>/<channel>.json`。
+- 清單裡的 tarball URL 指向你放工件的位置(你的鏡像、內網、物件儲存…)。
+
+透過 **Admin → Updates → Release feed → Custom mirror** 貼上 base URL,
+或用 CLI 切換:
+
+```
+kt self-update --feed-url https://internal.mirror/kt --channel stable
+```
+
+啟動器會原樣抓取 `<base>/<channel>.json`,再下載並驗證
+`(platform, py_abi)` 相符的工件。自訂 feed 支援與預設 GitHub Releases
+feed 完全相同的通道 + 固定語意。
+
+### 通道清單結構
+
+```json
+{
+  "schema": 1,
+  "channel": "stable",
+  "generated_at": "2026-05-19T00:00:00Z",
+  "releases": [
+    {
+      "version": "1.5.1",
+      "build_id": "20260519-153000-abc1234",
+      "release_notes_url": "https://your.mirror/notes/1.5.1.md",
+      "artifacts": [
+        {
+          "platform": "linux-x64",
+          "py_abi": "cp313",
+          "url": "https://your.mirror/dl/kohakuterrarium-1.5.1-linux-x64-py3.13.tar.zst",
+          "sha256": "9f86d0...",
+          "size_bytes": 178234567
+        }
+      ]
+    }
+  ]
+}
+```
+
+平台標籤:`linux-x64`、`linux-arm64`、`macos-x64`、`macos-arm64`、
+`win-x64`。ABI 標籤:`cp311`、`cp312`、`cp313`、`cp314`。
 
 ## 更新模式
 
-| 模式 | 殼層啟動時的行為 |
+| 模式 | 啟動時行為 |
 |---|---|
-| **手動** | 永遠不檢查。標籤上「立即檢查」/「更新」由你按。 |
-| **啟動時通知** *（預設）* | 啟動後背景去查 PyPI / git（24 小時快取）。有新版會在 **設定 → 更新** 顯示橫幅；點「更新」安裝。 |
-| **啟動時自動** | 啟動時檢查 **並** 安裝（啟動畫面顯示進度）。可以取消；取消就回到現有 venv。 |
+| `manual` | 不檢查;你從 UI 顯式更新 |
+| `notify-on-launch` | 每天檢查;有新版本就跳橫幅 |
+| `auto-on-launch` | 在 exec 框架前先檢查並安裝 |
 
-`source.kind=local` 會強制把任何模式改成 **手動** —— 可編輯安裝是使用者自己管的。
-
-## 更新流程細節
-
-當你按 **更新**（或殼層觸發自動更新）：
-
-1. **Flock** `~/.kohakuterrarium/runtime/.update.lock`，避免兩次啟動同時跑。
-2. 在 `~/.kohakuterrarium/runtime/venv.new/` 建立新的 venv。
-3. 按來源跑 `pip install`。
-4. **冒煙測試**：import 框架、跑 `kt --help`。兩個都必須在 30 秒內成功。
-5. 通過後，**原子地** 把 `venv` 改名為 `venv.old`，再把 `venv.new` 改名為 `venv`（kernel 級的 rename，瞬間完成）。
-6. 把新版本 + 檢查時間戳寫回 `app-settings.json`。
-7. 釋放 flock。重新啟動 app 就能用新版。
-
-3-5 任何一步失敗，殼層會刪掉 `venv.new/`，現有 `venv/` 保留不動。錯誤顯示在進度彈窗；app 繼續跑原版本。
+在 **Admin → Updates → Update mode** 設定。
 
 ## 回滾
 
-每次更新成功後上一個 venv 保留在 `~/.kohakuterrarium/runtime/venv.old/`。在更新分頁按 **回滾** 就交換回去。只能回滾一次（下一次成功更新會覆蓋 `venv.old`）。
+並列安裝在磁碟上保留舊版本。回滾就是把指針改寫回最近的非活動版本。
+不需要重新下載。
 
-## 復原 —— 兩個 venv 都壞了
-
-如果 `venv/` 跟 `venv.old/` 都不在或都壞了,殼層會回退到 Briefcase 包內附的 **內建 wheels**。更新分頁會顯示「Recovery mode」橫幅,附 **從內建 wheels 重置 venv** 按鈕。即使網路或來源不可達,也能從離線副本把框架裝回來。
-
-## 離線首次啟動 —— 內建優先安裝
-
-桌面安裝包(MSI / `.app` / AppImage)**自帶一份框架 wheels**,與殼層並排打進包內。首次啟動時殼層會從這些內建 wheels 安裝,不會去打 PyPI —— 即使沒網或在防火牆後面,首啟一樣跑得起來。
-
-殼層的判斷規則:
-
-| 場景 | 首次安裝實際執行的 pip 指令 |
-|---|---|
-| 預設設定 + 安裝包內含內建 wheels | `pip install --no-index --find-links=<bundled>/ kohakuterrarium` |
-| 使用者改過 `source.kind`(例如選了 Git) | 按使用者選擇執行 —— 跳過內建 wheels |
-| 內建 wheels 不存在(開發安裝、損毀包) | 按設定來源走 PyPI 等備援 |
-| 內建安裝失敗(wheel 壞) + 預設來源 | 自動改用 PyPI 復原 |
-| 內建安裝失敗 + 使用者配了 Git / local | 直接報錯 —— 不掩蓋使用者的明確意圖 |
-
-首次安裝完成後,**設定 → 更新** 分頁的「Installed」那行會寫成 `Installed: 1.5.x (from bundled offline copy)`,一眼就知道目前 venv 是哪個來源裝出來的。
-
-### 後續更新預設仍走 PyPI
-
-內建優先只對**首次安裝**生效。之後的更新(手動、啟動時通知、啟動時自動)按 `source.kind` 走,預設是 PyPI。按 **更新** 時殼層照常從 PyPI 拉最新版;內建 wheels 不會動,繼續作為 C2 安全網保留。
-
-更新按鈕的文案會隨來源變化:
-
-- 來源 = PyPI → `Update to <X> from PyPI`
-- 來源 = Git → `Update from git`
-- 來源 = Local → `Reinstall editable`
-- 來源 = Bundled(明確設定) → `Reinstall from bundled (same version)`
-
-要**永遠停留在內建版本**,就把 **更新模式** 設為 **手動**,永遠不按更新 —— 殼層就再也不會碰網路。
-
-## CLI 對等：`kt self-update`
-
-同樣的流程在終端也能跑：
-
-```bash
-kt self-update                  # 按設定的來源更新
-kt self-update --dry-run        # 印出會跑什麼，不動任何東西
-kt self-update --check-only     # 有新版退 0，已是最新退 1
-kt self-update --source git --spec "https://github.com/.../@main"
+```
+kt self-update --rollback
 ```
 
-`kt self-update` 會自動偵測 KohakuTerrarium 的安裝方式並走對應路徑：
+或在 Admin → Updates 分頁點 **Rollback to <prev>**。GC 保留 active
++ 上一個 + `update.keep-versions` 個最近版本(預設 3,因此磁碟上
+最多 5 個版本)。
 
-- **殼層托管 venv** → 走原子 rename 流程（跟 GUI 一致）。
-- **pipx** → `pipx upgrade kohakuterrarium`。
-- **可編輯安裝** → 拒絕；告訴你去 checkout 跑 `git pull`。
-- **系統套件** （`/usr/bin/python`） → 拒絕；告訴你用平台套件管理器。
-- **其他使用者 venv** → 在當前直譯器跑 `pip install -U`。原子 rename + 回滾是殼層專屬，這裡沒有。
+## 設定檔
 
-## 從舊 Bundle 遷移
+`~/.kohakuterrarium/app-settings.json`:
 
-KohakuTerrarium 1.5.0 同時發布舊版「凍結整個框架」的 Briefcase 包跟新的殼層包。如果你在舊版上，**設定 → 更新** 會顯示一次性「切換到自動更新版本」橫幅，連到 release 頁。下載殼層安裝器**一次**、裝一遍，之後每次更新都是殼層 venv 裡的 pip 操作 —— 不再需要下載安裝器。
+```json
+{
+  "feed": {
+    "kind": "github_releases",
+    "repo": "Kohaku-Lab/KohakuTerrarium",
+    "url": null
+  },
+  "channel": "stable",
+  "pinned_version": null,
+  "update": {
+    "mode": "notify-on-launch",
+    "check-cache-hours": 24,
+    "keep-versions": 3
+  },
+  "runtime": {
+    "active-version": "1.5.1",
+    "active-build-id": "20260519-153000-abc1234",
+    "last-check-at": "2026-05-19T12:34:56Z",
+    "last-check-error": null
+  }
+}
+```
 
-殼層會保留你的 `~/.kohakuterrarium/` 使用者資料（session、設定、MCP server、API key）。所有設定原地不動，只是框架原始碼被重新裝到新的 venv。
+手動編輯沒問題;無效欄位會退回預設值並印一行警告,而不會卡住啟動器。
 
-## 疑難排解
+`--reset-settings` 用預設值覆寫;`--reset-runtime` 清空
+`runtime/versions/` 並重新首次安裝。
 
-- **第一次啟動卡在「Installing framework」** —— 看 `~/.kohakuterrarium/logs/launcher.log` 找 pip 的輸出。多半是網路 / proxy / 防火牆。把分頁裡的來源切到 **內建（離線）**，從備用 wheels 裝就好。
-- **「Another update is in progress」** —— 之前的更新崩了，留下 lockfile。10 分鐘後殼層會提示「覆寫過期鎖」，同意後重試。
-- **冒煙測試在安裝後失敗** —— 安裝完了但 `kt --help` 跑不起來。點 **回滾** 切回 `venv.old/`。如果也壞了就點 **從內建 wheels 重置 venv** 復原離線副本。
-- **可編輯安裝但 `kt self-update` 拒絕** —— 故意的。在你的 checkout 跑 `git pull`，再 `pip install -e .` 刷新已安裝的 metadata。
+## 啟動器**不**依賴的
 
-## 另請參閱
+- `pip` —— 沒打包、也不呼叫
+- `venv` / `ensurepip` —— 不使用(Windows 上 briefcase 殼層會剝掉這些,
+  這就是之前的設計走不通的原因)
+- `git` —— 不呼叫
+- PyPI —— 只查詢配置的 feed(github_releases 或 custom)
+- 任何第三方 HTTP 客戶端 —— 只用 `urllib`
 
-- [部署 — Docker](deployment-docker.md) —— 容器更新流程改用 `docker pull`。
-- [部署 — systemd](deployment-systemd.md) —— systemd 主機上跑 `kt self-update`，再 `systemctl restart kohakuterrarium-host` 讓新版本生效。
-- [Serving 指南](serving.md) —— 殼層 `exec` 後框架的 `kt` 入口跑的就是 `kt serve`。
+唯一可選的第三方依賴是 `zstandard`(用於 `.tar.zst`)。`.tar.gz` 是
+fallback 路徑;如果你的鏡像供應 `.tar.gz` 工件,沒有 `zstandard` 一切
+照常運作。
+
+## 開發者提示
+
+如果你從 git 工作樹執行框架(在你自己的 Python 裡 `pip install -e .`),
+啟動器與你無關。`kt self-update` 會發現你不在啟動器安裝裡,並以
+「用 git pull」的一行提示拒絕,而不會試圖管理你的開發環境。
+
+## 失敗復原
+
+| 失敗 | 表現 |
+|---|---|
+| tarball sha256 不相符 | 刪 partial,報「下載損毀」 |
+| 新版本冒煙測試失敗 | 刪 partial,活動版本不動 |
+| 解壓中盤滿 | 刪 partial |
+| 指針檔損毀 | 啟動器掃描 `versions/` 自動復原到最新的有效版本 |
+| 清單 URL 5xx | 用 <24h 的快取清單;否則報錯 |
+| `versions/` 與 bundled-release 都缺 | 「需要網路」錯誤,不靜默變磚 |
+
+## 參見
+
+- [設定參考](../reference/configuration.md) —— 所有設定欄位
+- [CLI 參考](../reference/cli.md) —— 全部 `kt self-update` 旗標

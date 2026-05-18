@@ -1,6 +1,6 @@
 ---
 title: App update
-summary: How the KohakuTerrarium desktop app updates itself — the thin-wrapper Briefcase bundle, the managed venv, and the source / update-mode settings.
+summary: How the KohakuTerrarium desktop app updates itself — release-bundle download, side-by-side versioned installs, atomic pointer swap, custom mirrors, channels.
 tags:
   - guides
   - update
@@ -10,213 +10,242 @@ tags:
 
 # App update
 
-KohakuTerrarium's desktop app is a **thin wrapper around a managed
-Python venv**.  The wrapper rarely changes; the framework inside it
-updates via `pip` on a schedule you control.  No re-downloading
-the installer for every release.
+The KohakuTerrarium desktop app updates itself by **downloading a
+pre-built release tarball** for your platform + Python ABI, extracting
+it side-by-side with the current install, smoke-testing it, and
+atomically flipping a small pointer file to switch which version
+launches next. The model is borrowed from native-app updaters like
+Squirrel / Velopack / Sparkle — small, transactional, and one
+HTTPS GET + one extract per update.
 
-This guide covers what the wrapper does, where it stores its state,
-how to choose where the framework comes from, and how to update / roll
-back / recover if something goes wrong.
+Crucially, your machine does **not** run `pip`, `venv`, `git`, or
+`ensurepip` to update. Those exist on the build machine; you receive
+the result.
 
 ## The mental model
 
 ```
-┌──────────────────────────────────────────────────────┐
-│  Briefcase desktop bundle                            │
-│  ┌────────────────────────────────────────────────┐  │
-│  │  Wrapper (kohakuterrarium-launcher)            │  │
-│  │  - Python runtime                              │  │
-│  │  - bootloader (~/.kohakuterrarium/runtime/...) │  │
-│  │  - splash UI                                   │  │
-│  │  - bundled fallback wheels                     │  │
-│  └────────────────────────────────────────────────┘  │
-│                       │                              │
-│                       ▼                              │
-│  ┌────────────────────────────────────────────────┐  │
-│  │  Managed venv (created on first launch)        │  │
-│  │  ~/.kohakuterrarium/runtime/venv/              │  │
-│  │  └── kohakuterrarium == <your chosen source>   │  │
-│  └────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  Briefcase desktop bundle                                    │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │  Launcher (~50KB Python, urllib + hashlib + tarfile)   │  │
+│  │  - reads runtime/active                                │  │
+│  │  - downloads + extracts release tarballs               │  │
+│  │  - exec's into versions/<active>/scripts/kt            │  │
+│  └────────────────────────────────────────────────────────┘  │
+│  + bundled-release/kohakuterrarium-<v>-<plat>-py<X.Y>.tar.zst│  ← offline first-launch
+└──────────────────────────────────────────────────────────────┘
+
+User home (~/.kohakuterrarium/):
+├── app-settings.json
+└── runtime/
+    ├── active                      ← pointer JSON
+    ├── versions/
+    │   ├── 1.5.0/                  ← extracted release tree
+    │   │   ├── site-packages/
+    │   │   ├── scripts/kt
+    │   │   └── manifest.json
+    │   ├── 1.5.1/
+    │   └── 1.5.2-nightly-2026-05-19/
+    └── manifest-cache/
+        ├── stable.json
+        ├── beta.json
+        └── nightly.json
 ```
 
-When you double-click the app:
+Each version lives in its own directory. Switching versions means
+rewriting the 50-byte `active` pointer (atomic on POSIX and Windows).
+The currently-running process is unaffected — the new version takes
+effect on next launch.
 
-1. The wrapper reads `~/.kohakuterrarium/app-settings.json`.
-2. If the venv at `~/.kohakuterrarium/runtime/venv/` doesn't exist,
-   the splash opens and the wrapper installs the framework from your
-   configured source.
-3. If the venv exists, the wrapper hands off (`exec`'s) to the venv's
-   `kt` entry point — from this moment on you're running the framework
-   directly, not the wrapper.
+## First launch
 
-## Where things live
+If the bundle was shipped with `bundled-release/<tarball>`, first
+launch extracts that offline tarball into `versions/<v>/` and points
+`active` at it. You can then update to a newer version from the GUI
+or CLI when network is available.
 
-| Path | What |
+Without a bundled tarball (developer install / minimal bundle), first
+launch resolves the configured channel manifest over the network,
+downloads + verifies + extracts the matching artifact, and writes the
+pointer. If no network is available either, the launcher surfaces a
+"network required for first launch" error rather than silently bricking.
+
+## Updating
+
+| Surface | How |
 |---|---|
-| `~/.kohakuterrarium/app-settings.json` | source + update-mode settings (this file is what the **Admin → Updates** tab reads/writes) |
-| `~/.kohakuterrarium/runtime/venv/` | the active managed venv |
-| `~/.kohakuterrarium/runtime/venv.old/` | the previous venv, kept for one-shot rollback after each update |
-| `~/.kohakuterrarium/runtime/.update.lock` | flock so two concurrent app launches don't race the same `pip install` |
-| `~/.kohakuterrarium/logs/launcher.log` | rotating launcher log (1 MB × 3) |
+| Admin → Updates tab in the desktop app | Settings + "Check now" + "Update" buttons |
+| `kt self-update` | CLI parity |
+| `kt self-update --check-only` | Resolve + print latest; exit 0 if newer, 1 if up-to-date |
+| `kt self-update --dry-run` | Resolve + print what would be installed |
+| `kt self-update --rollback` | Revert pointer to the previous installed version |
 
-## Choosing a source
+Updates do not modify the running process. After an update succeeds,
+quit and relaunch the app — the new pointer is read on next launch.
 
-The wrapper supports four source kinds.  Pick from **Settings → Updates → Source**:
+## Channels
 
-| Source | What pip install runs | When to use |
+| Channel | What | When you'd pick it |
 |---|---|---|
-| **PyPI stable** | `pip install -U kohakuterrarium` | Default for everyone. Latest released version. |
-| **PyPI version pin** | `pip install -U kohakuterrarium==1.5.0` (or `<2.0`, etc.) | Locking to a specific version while testing or before rolling out a fleet. |
-| **Git ref** | `pip install -U "git+<url>@main"` (branch/tag/commit) | Following a development branch, your own fork, or a release candidate not yet on PyPI. |
-| **Local editable path** | `pip install -e /path/to/checkout` | Developers running from a Git clone. **Disables auto-update** — you're driving via `git pull`. |
-| **Bundled (offline)** | `pip install --no-index --find-links=wheels-bundle/ kohakuterrarium` | First launch on an offline machine, or recovery when remote sources are unreachable. |
+| `stable` | Tested releases | default, recommended |
+| `beta` | Pre-release candidates | helping us validate the next major |
+| `nightly` | Daily automatic builds | cutting-edge / contributors |
 
-## Update mode
+The channel selector lives in **Admin → Updates → Channel** and in
+`kt self-update --channel <name>` (sticky — written back to settings).
 
-| Mode | What the wrapper does on launch |
+## Pinned version
+
+Pin to a specific version to ignore channel updates until you unpin.
+Useful when:
+
+- A new release regresses behaviour you depend on and you want time
+  to report + wait for a fix.
+- A managed deployment standardises on a known version across nodes.
+
+`kt self-update --pin 1.5.0` sets it; `--pin ""` clears it. The GUI
+exposes a dropdown populated from the channel manifest.
+
+## Custom feeds (mirrors / offline servers)
+
+Corporate / air-gapped users can host the release tarballs on their
+own HTTPS server. The launcher needs:
+
+- A `<channel>.json` manifest at `<your-base-url>/<channel>.json`
+  (schema documented below).
+- The tarball URLs inside the manifest pointing at wherever you've
+  staged the artifacts (your mirror, intranet, S3-like store…).
+
+Switch to a custom feed via **Admin → Updates → Release feed →
+Custom mirror**, paste the base URL, or via CLI:
+
+```
+kt self-update --feed-url https://internal.mirror/kt --channel stable
+```
+
+The launcher fetches `<base>/<channel>.json` exactly as written, then
+downloads + verifies the artifact whose `(platform, py_abi)` matches.
+Custom feeds support exactly the same channel + pinning semantics as
+the default GitHub Releases feed.
+
+### Channel manifest schema
+
+```json
+{
+  "schema": 1,
+  "channel": "stable",
+  "generated_at": "2026-05-19T00:00:00Z",
+  "releases": [
+    {
+      "version": "1.5.1",
+      "build_id": "20260519-153000-abc1234",
+      "release_notes_url": "https://your.mirror/notes/1.5.1.md",
+      "artifacts": [
+        {
+          "platform": "linux-x64",
+          "py_abi": "cp313",
+          "url": "https://your.mirror/dl/kohakuterrarium-1.5.1-linux-x64-py3.13.tar.zst",
+          "sha256": "9f86d0...",
+          "size_bytes": 178234567
+        }
+      ]
+    }
+  ]
+}
+```
+
+Platform tags: `linux-x64`, `linux-arm64`, `macos-x64`, `macos-arm64`,
+`win-x64`. ABI tags: `cp311`, `cp312`, `cp313`, `cp314`.
+
+## Update modes
+
+| Mode | Behaviour on launch |
 |---|---|
-| **Manual** | Never checks. You drive updates by clicking "Check now" / "Update" in the tab. |
-| **Notify on launch** *(default)* | Checks PyPI / git in the background (24-hour cache). If newer, a banner appears in Settings → Updates. You click "Update" to install. |
-| **Auto on launch** | Checks AND installs on launch (splash shows progress) if a newer version is available. You can cancel; cancel falls back to the existing venv. |
+| `manual` | Never check; you update from the UI explicitly |
+| `notify-on-launch` | Check daily; show a banner if newer is available |
+| `auto-on-launch` | Check + install before exec-ing the framework |
 
-`source.kind=local` overrides every mode to **Manual** — editable installs are
-user-managed.
-
-## The update flow, in detail
-
-When you click **Update** (or the wrapper triggers an auto-update):
-
-1. **Flock** `~/.kohakuterrarium/runtime/.update.lock` so a second
-   launch can't race.
-2. Build a fresh venv at `~/.kohakuterrarium/runtime/venv.new/`.
-3. Run `pip install` into it per your source.
-4. **Smoke-test**: import the framework, run `kt --help`. Both must
-   exit cleanly within 30 seconds.
-5. If smoke passes, rename `venv → venv.old` and `venv.new → venv`
-   atomically.  These are kernel-level renames (instant; no copy).
-6. Persist the new version + check timestamp to `app-settings.json`.
-7. Release the flock.  Restart the app to pick up the new version.
-
-If anything in steps 3-5 fails, the wrapper deletes `venv.new/` and
-leaves the existing `venv/` untouched.  You see the error in the
-progress modal; your app keeps working on the version it was already
-running.
+Set via **Admin → Updates → Update mode**.
 
 ## Rollback
 
-After every successful update, the previous venv is kept at
-`~/.kohakuterrarium/runtime/venv.old/`.  Click **Rollback** in the
-Updates tab to swap it back into place.  Only one rollback is
-available (the next successful update overwrites `venv.old`).
+Side-by-side installs keep prior versions on disk. Rollback rewrites
+the pointer to the most-recent non-active version. No re-download.
 
-## Recovery — when both venvs are broken
-
-If `venv/` and `venv.old/` are both gone or unusable, the wrapper
-falls back to the **bundled wheels** shipped inside the Briefcase
-artifact.  The Updates tab surfaces a "Recovery mode" banner with a
-**Reset venv from bundled wheels** button.  This reinstalls the
-framework from the offline copy, restoring a working app even when
-your network or chosen source is unreachable.
-
-## Offline first launch — bundled-first install
-
-The desktop bundle (MSI / `.app` / AppImage) **ships the framework as
-a directory of wheels** alongside the launcher.  On a fresh install
-the wrapper installs from those bundled wheels instead of reaching
-out to PyPI, so the first launch always works — even with no internet
-or behind a firewall.
-
-The rule the wrapper follows:
-
-| Scenario | First-install pip call |
-|---|---|
-| Default settings + bundled wheels present in the artifact | `pip install --no-index --find-links=<bundled>/ kohakuterrarium` |
-| User changed `source.kind` from the default (e.g. set Git) | Honour the user's choice — bundled wheels are ignored |
-| Bundled wheels missing (dev install, broken bundle) | Fall through to `pip install kohakuterrarium` per the configured source |
-| Bundled install fails (corrupt wheel) + default source | Auto-recover by trying PyPI |
-| Bundled install fails + user picked Git/local | Surface the error — don't paper over the user's intent |
-
-After the first install completes, the **Installed** line in the
-Updates tab reads `Installed: 1.5.x (from bundled offline copy)` so
-you can tell at a glance which source produced the running venv.
-
-### Updates remain a PyPI fetch by default
-
-The bundled-first behaviour applies only to the **initial install**.
-Subsequent updates (manual, notify-on-launch, auto-on-launch) honour
-`source.kind` — which defaults to PyPI.  When you click **Update**,
-the wrapper fetches the latest from PyPI as usual; the bundled wheels
-are untouched and remain the C2 fallback.
-
-The Update button label reflects what the click will do:
-
-- Source = PyPI → `Update to <X> from PyPI`
-- Source = Git → `Update from git`
-- Source = Local → `Reinstall editable`
-- Source = Bundled (explicit) → `Reinstall from bundled (same version)`
-
-If you want to **stay on the bundled version forever**, set
-**Update mode → Manual** and never click Update.  The wrapper will
-never reach the network.
-
-## CLI parity: `kt self-update`
-
-The same flow is available from the terminal:
-
-```bash
-kt self-update                  # update via configured source
-kt self-update --dry-run        # print what would run; don't change anything
-kt self-update --check-only     # exit 0 if newer available, 1 if up-to-date
-kt self-update --source git --spec "https://github.com/.../@main"
+```
+kt self-update --rollback
 ```
 
-`kt self-update` auto-detects how KohakuTerrarium was installed and
-picks the right protocol:
+Or click **Rollback to <prev>** in the Admin → Updates tab. GC keeps
+the active + previous + `update.keep-versions` most-recent (default
+3, so up to 5 versions on disk).
 
-- **Wrapper-managed venv** → runs the atomic-rename flow (same as the GUI).
-- **pipx** → `pipx upgrade kohakuterrarium`.
-- **Editable install** → refuses; tells you to `git pull` in your checkout.
-- **System package** (`/usr/bin/python`) → refuses; tells you to use the
-  platform package manager.
-- **Other user venv** → runs `pip install -U` in the current interpreter.
-  Atomic rename + rollback are wrapper-only and not available here.
+## Settings file
 
-## Migrating from the legacy bundle
+`~/.kohakuterrarium/app-settings.json`:
 
-KohakuTerrarium 1.5.0 ships both the old "frozen full framework"
-Briefcase bundle AND the new wrapper bundle.  If you're on the
-legacy bundle, Settings → Updates will show a one-shot
-"Switch to the new auto-updating bundle" banner with a link to the
-release page.  You download the wrapper installer **once**, run it,
-and from then on every update is a pip operation in the wrapper's
-venv.  No more installer downloads.
+```json
+{
+  "feed": {
+    "kind": "github_releases",
+    "repo": "Kohaku-Lab/KohakuTerrarium",
+    "url": null
+  },
+  "channel": "stable",
+  "pinned_version": null,
+  "update": {
+    "mode": "notify-on-launch",
+    "check-cache-hours": 24,
+    "keep-versions": 3
+  },
+  "runtime": {
+    "active-version": "1.5.1",
+    "active-build-id": "20260519-153000-abc1234",
+    "last-check-at": "2026-05-19T12:34:56Z",
+    "last-check-error": null
+  }
+}
+```
 
-The wrapper preserves your `~/.kohakuterrarium/` user data (sessions,
-profiles, MCP servers, API keys).  Nothing in your config moves; only
-the framework source code is re-installed into a fresh venv.
+Hand-editing is fine; invalid fields fall back to defaults with a
+one-line warning rather than wedging the launcher.
 
-## Troubleshooting
+`--reset-settings` overwrites with defaults; `--reset-runtime` wipes
+`runtime/versions/` and re-runs first install.
 
-- **First launch hangs at "Installing framework"** — check
-  `~/.kohakuterrarium/logs/launcher.log` for the pip output. Most
-  often it's a network / proxy / firewall issue. Try switching the
-  source to **Bundled (offline)** in the tab to install from the
-  fallback wheels.
-- **"Another update is in progress"** — a previous update crashed and
-  left the lockfile behind. After 10 minutes the wrapper offers an
-  "Override stale lock" prompt; agree and retry.
-- **Smoke test fails after install** — the install completed but `kt
-  --help` won't run. Click **Rollback** to swap back to `venv.old/`.
-  If that's also broken, click **Reset venv from bundled wheels** to
-  restore the offline copy.
-- **Editable install but `kt self-update` refuses** — that's
-  intentional. Update your checkout with `git pull`, then re-run
-  `pip install -e .` to refresh installed metadata.
+## What the launcher does NOT depend on
+
+- `pip` — not bundled, not invoked
+- `venv` / `ensurepip` — not used (the briefcase shell strips these
+  on Windows anyway, which is why the previous design didn't work)
+- `git` — not invoked
+- PyPI — only the configured feed (github_releases or custom) is queried
+- Any third-party HTTP client — `urllib` only
+
+The only optional third-party dep is `zstandard` for `.tar.zst`
+support. `.tar.gz` is the fallback path; everything works without
+`zstandard` if your mirror serves `.tar.gz` artifacts.
+
+## Developer note
+
+If you run the framework from a git checkout (`pip install -e .` in
+your own Python), the launcher is irrelevant. `kt self-update` will
+detect you're outside a launcher install and refuse with a one-line
+"use git pull" hint rather than try to manage your dev environment.
+
+## Failure recovery
+
+| Failure | What happens |
+|---|---|
+| Tarball sha256 mismatch | Partial dir removed, abort with "Download corrupted" |
+| Smoke test fails on new version | Partial dir removed, active version untouched |
+| Disk full mid-extract | Partial dir removed |
+| Pointer file corrupted | Launcher scans `versions/` and recovers the newest valid one |
+| Manifest URL returns 5xx | Use cached manifest if fresh (<24h) else surface error |
+| Both `versions/` and bundled-release missing | "Network required" error, no silent brick |
 
 ## See also
 
-- [Deployment — Docker](deployment-docker.md) — the container update flow uses `docker pull` instead.
-- [Deployment — systemd](deployment-systemd.md) — for systemd hosts, run `kt self-update` and then `systemctl restart kohakuterrarium-host` to pick up the new version.
-- [Serving](serving.md) — `kt serve` is what the framework's `kt` entry runs after the wrapper hands off.
+- [Configuration reference](../reference/configuration.md) — every settings field
+- [CLI reference](../reference/cli.md) — full `kt self-update` flags
