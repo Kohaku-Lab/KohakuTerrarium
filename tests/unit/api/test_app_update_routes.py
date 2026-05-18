@@ -1,4 +1,4 @@
-"""HTTP surface for ``/api/app/*``."""
+"""HTTP surface for ``/api/app/*`` (06b)."""
 
 import pytest
 from fastapi import FastAPI
@@ -22,40 +22,62 @@ class TestSettingsRoundTrip:
         resp = client.get("/api/app/settings")
         assert resp.status_code == 200
         body = resp.json()
-        assert body["source"]["kind"] == "pypi"
+        assert body["feed"]["kind"] == "github_releases"
+        assert body["channel"] == "stable"
         assert body["update"]["mode"] == "notify-on-launch"
 
     def test_put_persists(self, client):
         resp = client.put(
             "/api/app/settings",
-            json={"update": {"mode": "manual", "check-cache-hours": 12}},
+            json={
+                "feed": {"kind": "github_releases", "repo": "x/y"},
+                "channel": "beta",
+                "pinned_version": "1.5.0",
+                "update": {
+                    "mode": "manual",
+                    "check-cache-hours": 12,
+                    "keep-versions": 5,
+                },
+            },
         )
         assert resp.status_code == 200
-        assert resp.json()["update"]["mode"] == "manual"
-        # Round-trip via GET to confirm disk persistence.
+        echoed = resp.json()
+        assert echoed["channel"] == "beta"
+        assert echoed["pinned_version"] == "1.5.0"
+        assert echoed["feed"]["repo"] == "x/y"
+
         body = client.get("/api/app/settings").json()
         assert body["update"]["mode"] == "manual"
         assert body["update"]["check-cache-hours"] == 12
 
-    def test_invalid_kind_rejected_400(self, client):
-        resp = client.put("/api/app/settings", json={"source": {"kind": "bogus"}})
-        assert resp.status_code == 400
-        assert "invalid source.kind" in resp.json()["detail"]
-
-    def test_invalid_mode_rejected_400(self, client):
-        resp = client.put("/api/app/settings", json={"update": {"mode": "weekly"}})
-        assert resp.status_code == 400
-
-
-class TestUpdateStatus:
-    def test_cached_status_no_probe(self, client):
-        resp = client.get("/api/app/update-status")
+    def test_invalid_payload_coerces_silently(self, client):
+        # The new endpoint runs coercion rather than HTTP 400 — invalid
+        # fields snap back to defaults so the UI never gets stuck on a
+        # rejected save.
+        resp = client.put(
+            "/api/app/settings",
+            json={"channel": "experimental", "update": {"mode": "weekly"}},
+        )
         assert resp.status_code == 200
         body = resp.json()
-        # No network probe by default — latest is null.
-        assert body["latest-version"] is None
-        assert "install-kind" in body
-        assert "legacy-bundle" in body
+        assert body["channel"] == "stable"
+        assert body["update"]["mode"] == "notify-on-launch"
+
+
+class TestState:
+    def test_state_includes_install_metadata(self, client):
+        resp = client.get("/api/app/state")
+        assert resp.status_code == 200
+        body = resp.json()
+        for key in (
+            "active",
+            "installed",
+            "settings",
+            "launcher_install",
+            "platform",
+            "py_abi",
+        ):
+            assert key in body
 
 
 class TestRejectionPaths:
@@ -65,14 +87,12 @@ class TestRejectionPaths:
         app.state.lab_mode = "lab-client"
         app.include_router(_r.router, prefix="/api/app")
         c = TestClient(app)
-        for path in ("/api/app/settings", "/api/app/update-status"):
+        for path in ("/api/app/settings", "/api/app/state"):
             assert c.get(path).status_code == 404
 
-    def test_update_refuses_when_no_wrapper_marker(self, client):
-        # The default test environment has no wrapper marker — the
-        # update / rollback / reset-venv routes must refuse with 409
-        # so the UI surfaces the "use kt self-update from terminal"
-        # hint instead of silently producing a half-broken venv.
+    def test_update_refuses_outside_launcher(self, client):
+        # The default test environment has no active pointer — the
+        # update / rollback routes must refuse with 409 so the UI
+        # surfaces the "use kt self-update from terminal" hint.
         assert client.post("/api/app/update").status_code == 409
         assert client.post("/api/app/rollback").status_code == 409
-        assert client.post("/api/app/reset-venv").status_code == 409
