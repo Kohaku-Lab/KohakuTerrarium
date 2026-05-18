@@ -42,6 +42,8 @@ const sidebarStructure = {
     "guides/packages.md",
     "guides/serving.md",
     "guides/laboratory.md",
+    "guides/cli-and-ui-equivalents.md",
+    "guides/cli-multi-creature.md",
     "guides/deployment-docker.md",
     "guides/deployment-systemd.md",
     "guides/deployment-reverse-proxy.md",
