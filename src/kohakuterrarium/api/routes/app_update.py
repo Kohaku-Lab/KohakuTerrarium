@@ -60,6 +60,7 @@ def _settings_to_dict(s: _launcher_settings.AppSettings) -> dict[str, Any]:
             "venv-path": s.runtime.venv_path,
             "last-installed-version": s.runtime.last_installed_version,
             "last-check-at": s.runtime.last_check_at,
+            "install-source": s.runtime.install_source,
         },
     }
 
@@ -135,6 +136,7 @@ async def get_update_status(request: Request) -> dict[str, Any]:
         "available": None,
         "last-check-at": cfg.runtime.last_check_at,
         "source-kind": cfg.source.kind,
+        "install-source": cfg.runtime.install_source,
         "install-kind": _install_kind(),
         "legacy-bundle": is_legacy_bundle(),
     }
@@ -160,6 +162,7 @@ async def check_now(request: Request) -> dict[str, Any]:
         "available": available,
         "last-check-at": cfg.runtime.last_check_at,
         "source-kind": cfg.source.kind,
+        "install-source": cfg.runtime.install_source,
         "install-kind": _install_kind(),
         "legacy-bundle": is_legacy_bundle(),
     }

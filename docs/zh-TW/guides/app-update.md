@@ -94,7 +94,36 @@ KohakuTerrarium 桌面 app 是**包在托管 Python venv 外的瘦殼層**。殼
 
 ## 復原 —— 兩個 venv 都壞了
 
-如果 `venv/` 跟 `venv.old/` 都不在或都壞了，殼層會回退到 Briefcase 包內附的 **內建 wheels**。更新分頁會顯示「Recovery mode」橫幅，附 **從內建 wheels 重置 venv** 按鈕。即使網路或來源不可達，也能從離線副本把框架裝回來。
+如果 `venv/` 跟 `venv.old/` 都不在或都壞了,殼層會回退到 Briefcase 包內附的 **內建 wheels**。更新分頁會顯示「Recovery mode」橫幅,附 **從內建 wheels 重置 venv** 按鈕。即使網路或來源不可達,也能從離線副本把框架裝回來。
+
+## 離線首次啟動 —— 內建優先安裝
+
+桌面安裝包(MSI / `.app` / AppImage)**自帶一份框架 wheels**,與殼層並排打進包內。首次啟動時殼層會從這些內建 wheels 安裝,不會去打 PyPI —— 即使沒網或在防火牆後面,首啟一樣跑得起來。
+
+殼層的判斷規則:
+
+| 場景 | 首次安裝實際執行的 pip 指令 |
+|---|---|
+| 預設設定 + 安裝包內含內建 wheels | `pip install --no-index --find-links=<bundled>/ kohakuterrarium` |
+| 使用者改過 `source.kind`(例如選了 Git) | 按使用者選擇執行 —— 跳過內建 wheels |
+| 內建 wheels 不存在(開發安裝、損毀包) | 按設定來源走 PyPI 等備援 |
+| 內建安裝失敗(wheel 壞) + 預設來源 | 自動改用 PyPI 復原 |
+| 內建安裝失敗 + 使用者配了 Git / local | 直接報錯 —— 不掩蓋使用者的明確意圖 |
+
+首次安裝完成後,**設定 → 更新** 分頁的「Installed」那行會寫成 `Installed: 1.5.x (from bundled offline copy)`,一眼就知道目前 venv 是哪個來源裝出來的。
+
+### 後續更新預設仍走 PyPI
+
+內建優先只對**首次安裝**生效。之後的更新(手動、啟動時通知、啟動時自動)按 `source.kind` 走,預設是 PyPI。按 **更新** 時殼層照常從 PyPI 拉最新版;內建 wheels 不會動,繼續作為 C2 安全網保留。
+
+更新按鈕的文案會隨來源變化:
+
+- 來源 = PyPI → `Update to <X> from PyPI`
+- 來源 = Git → `Update from git`
+- 來源 = Local → `Reinstall editable`
+- 來源 = Bundled(明確設定) → `Reinstall from bundled (same version)`
+
+要**永遠停留在內建版本**,就把 **更新模式** 設為 **手動**,永遠不按更新 —— 殼層就再也不會碰網路。
 
 ## CLI 對等：`kt self-update`
 

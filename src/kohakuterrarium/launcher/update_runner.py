@@ -26,12 +26,14 @@ from kohakuterrarium.launcher import settings as _settings
 from kohakuterrarium.launcher._lock import LockBusy, UpdateLock
 from kohakuterrarium.launcher.log import get_logger
 from kohakuterrarium.launcher.paths import (
+    bundled_wheels_dir,
     lock_path,
     venv_dir,
     venv_new_dir,
     venv_old_dir,
 )
 from kohakuterrarium.launcher.sources import (
+    PACKAGE_NAME,
     is_auto_update_allowed,
     resolve_pip_args,
 )
@@ -68,6 +70,27 @@ def _now_iso() -> str:
     return _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
 
 
+def _is_default_source(source: _settings.SourceConfig) -> bool:
+    """True when the user hasn't explicitly chosen a non-default source.
+
+    Bundled-first first-install only kicks in for default-source
+    configs — if the user explicitly set ``source.kind = "git"`` or
+    pinned a version with ``source.spec``, we honour that intent.
+    """
+    return source.kind == "pypi" and not source.spec
+
+
+def _bundled_pip_args(wheels: Path, extras: list[str]) -> list[str]:
+    """Build the offline-install pip arg list for the bundled wheels dir.
+
+    Mirrors ``sources.resolve_pip_args`` for ``kind="bundled"`` but
+    takes the wheels dir + extras directly so callers can skip the
+    settings round-trip when they already know the wheels are present.
+    """
+    target = PACKAGE_NAME if not extras else f"{PACKAGE_NAME}[{','.join(extras)}]"
+    return ["--no-index", "--find-links", str(wheels), target]
+
+
 def _build_and_smoke(target: Path, pip_args: list[str]) -> str:
     """Create ``target/`` venv, install ``pip_args`` into it, smoke-test.
 
@@ -93,13 +116,31 @@ def first_install() -> UpdateResult:
     Called when no venv exists at launcher startup.  Holds the update
     lock for the duration so a second simultaneous launch (rare but
     possible) doesn't race.
+
+    **Bundled-first behaviour** (topic 06 / sub-plan 01): when the
+    Briefcase bundle ships ``wheels-bundle/`` AND the user hasn't
+    explicitly chosen a non-default source, install offline from the
+    bundled wheels regardless of ``cfg.source.kind``.  Falls through
+    to the configured source if the bundled install fails (so a
+    corrupt wheel doesn't brick first launch).  ``cfg.source`` is
+    unchanged — it represents the *update* source, which stays PyPI
+    by default.
     """
     log = get_logger()
     cfg = _settings.load()
-    try:
-        pip_args = resolve_pip_args(cfg.source)
-    except (ValueError, FileNotFoundError) as e:
-        return UpdateResult(ok=False, error=f"source resolution failed: {e}")
+
+    wheels = bundled_wheels_dir()
+    bundled_eligible = wheels is not None and _is_default_source(cfg.source)
+    using_bundled = False
+
+    if bundled_eligible:
+        pip_args = _bundled_pip_args(wheels, cfg.source.extras)
+        using_bundled = True
+    else:
+        try:
+            pip_args = resolve_pip_args(cfg.source)
+        except (ValueError, FileNotFoundError) as e:
+            return UpdateResult(ok=False, error=f"source resolution failed: {e}")
 
     try:
         with UpdateLock(lock_path()):
@@ -109,11 +150,32 @@ def first_install() -> UpdateResult:
             try:
                 version = _build_and_smoke(target, pip_args)
             except VenvOpError as e:
-                log.error("runner: first_install failed: %s", e)
-                return UpdateResult(ok=False, error=str(e))
+                # Bundled install failed (corrupt wheel, etc.) — fall
+                # through to the configured source as recovery.  Only
+                # when the user hasn't explicitly overridden source,
+                # because a custom git/local source failing is a real
+                # user-facing failure, not something to silently paper
+                # over with PyPI.
+                if using_bundled and _is_default_source(cfg.source):
+                    log.warning(
+                        "runner: bundled first_install failed (%s); "
+                        "falling through to PyPI",
+                        e,
+                    )
+                    try:
+                        pip_args = resolve_pip_args(cfg.source)
+                        version = _build_and_smoke(target, pip_args)
+                        using_bundled = False
+                    except (VenvOpError, ValueError, FileNotFoundError) as e2:
+                        log.error("runner: PyPI fallback also failed: %s", e2)
+                        return UpdateResult(ok=False, error=str(e2))
+                else:
+                    log.error("runner: first_install failed: %s", e)
+                    return UpdateResult(ok=False, error=str(e))
             cfg.runtime.last_installed_version = version
             cfg.runtime.last_check_at = _now_iso()
             cfg.runtime.venv_path = str(target)
+            cfg.runtime.install_source = "bundled" if using_bundled else cfg.source.kind
             _settings.save(cfg)
             return UpdateResult(ok=True, version=version, restart_required=False)
     except LockBusy as e:
@@ -147,6 +209,7 @@ def run_update() -> UpdateResult:
                 return UpdateResult(ok=False, error=str(e))
             cfg.runtime.last_installed_version = version
             cfg.runtime.last_check_at = _now_iso()
+            cfg.runtime.install_source = cfg.source.kind
             _settings.save(cfg)
             return UpdateResult(ok=True, version=version, restart_required=True)
     except LockBusy as e:
@@ -224,6 +287,7 @@ def reset_to_bundled() -> UpdateResult:
             cfg.runtime.last_installed_version = version
             cfg.runtime.last_check_at = _now_iso()
             cfg.runtime.venv_path = str(target)
+            cfg.runtime.install_source = "bundled"
             _settings.save(cfg)
             return UpdateResult(ok=True, version=version, restart_required=True)
     except LockBusy as e:

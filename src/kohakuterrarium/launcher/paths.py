@@ -65,19 +65,58 @@ def wrapper_marker_path() -> Path:
     return venv_dir() / ".kt-wrapper-marker"
 
 
+def _candidate_wheel_dirs() -> list[Path]:
+    """Compute the ordered list of ``wheels-bundle/`` candidate paths.
+
+    Factored out for testability — ``bundled_wheels_dir()`` is the
+    "search + validate" entry point; this helper is the "where would
+    we look?" piece.  Candidate order (first-match-wins in the caller):
+
+    1. Sibling of the ``kohakuterrarium/`` source as Briefcase lays it
+       out (three ``parent`` calls from this file lands at the ``app/``
+       root, where ``wheels-bundle/`` sits as a sibling of
+       ``kohakuterrarium/``).
+    2. Sibling of ``sys.executable`` (Briefcase Windows layout).
+    3. Parent of ``sys.executable``'s directory (Briefcase macOS legacy).
+    4. Repo root (four ``parent`` calls from this file lands at the
+       repo root for dev installs that ran
+       ``scripts/build_wrapper_wheels.py`` locally).
+    """
+    here = Path(__file__).resolve()
+    exe = Path(sys.executable)
+    return [
+        here.parent.parent.parent / "wheels-bundle",
+        exe.parent / "wheels-bundle",
+        exe.parent.parent / "wheels-bundle",
+        here.parents[3] / "wheels-bundle",
+    ]
+
+
+def _bundle_has_framework_wheel(path: Path) -> bool:
+    """Treat ``path`` as a valid bundle only when it carries the
+    framework wheel — guards against leftover scaffolding directories
+    that happen to be named ``wheels-bundle/``."""
+    return path.is_dir() and any(path.glob("kohakuterrarium-*.whl"))
+
+
 def bundled_wheels_dir() -> Path | None:
     """Directory inside the Briefcase bundle containing offline wheels.
 
-    Briefcase copies ``wheels-bundle/`` next to the launcher entry
-    when the bundle is built (see ``scripts/build_wrapper_wheels.py``).
-    Returns ``None`` when running outside a bundled context (dev install).
+    Briefcase copies ``wheels-bundle/`` as a sibling of the
+    ``kohakuterrarium/`` source tree when it builds the artifact (see
+    the ``sources = ["src/kohakuterrarium", "wheels-bundle"]`` entry in
+    ``pyproject.toml`` and ``scripts/build_wrapper_wheels.py``).  The
+    on-disk layout varies per backend; this function probes the
+    candidate paths from :func:`_candidate_wheel_dirs` and returns the
+    first that passes :func:`_bundle_has_framework_wheel`.
+
+    Returns ``None`` when running outside a bundled context (dev
+    install with no local wheels-bundle, or a packaged install where
+    the bundle is broken / missing).
     """
-    candidate = Path(sys.executable).parent.parent / "wheels-bundle"
-    if candidate.is_dir():
-        return candidate
-    candidate = Path(__file__).resolve().parents[3] / "wheels-bundle"
-    if candidate.is_dir():
-        return candidate
+    for candidate in _candidate_wheel_dirs():
+        if _bundle_has_framework_wheel(candidate):
+            return candidate
     return None
 
 
@@ -105,6 +144,8 @@ __all__ = [
     "lock_path",
     "wrapper_marker_path",
     "bundled_wheels_dir",
+    "_candidate_wheel_dirs",
+    "_bundle_has_framework_wheel",
     "venv_python",
     "venv_kt",
 ]

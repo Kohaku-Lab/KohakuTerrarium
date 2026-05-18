@@ -115,6 +115,14 @@ jobs:
       - name: Build briefcase app
         run: briefcase build
 
+      - name: Verify wheels-bundle is inside the built artifact
+        # Topic 06 / 01 — guards the bundled-first first-launch path.
+        # Fails if ``wheels-bundle/kohakuterrarium-*.whl`` is missing
+        # from the Briefcase build tree.
+        shell: bash
+        run: |
+          python scripts/verify_bundled_wheels.py build/
+
       - name: Package briefcase app
         shell: bash
         run: |

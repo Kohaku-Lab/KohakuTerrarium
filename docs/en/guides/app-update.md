@@ -120,6 +120,47 @@ artifact.  The Updates tab surfaces a "Recovery mode" banner with a
 framework from the offline copy, restoring a working app even when
 your network or chosen source is unreachable.
 
+## Offline first launch — bundled-first install
+
+The desktop bundle (MSI / `.app` / AppImage) **ships the framework as
+a directory of wheels** alongside the launcher.  On a fresh install
+the wrapper installs from those bundled wheels instead of reaching
+out to PyPI, so the first launch always works — even with no internet
+or behind a firewall.
+
+The rule the wrapper follows:
+
+| Scenario | First-install pip call |
+|---|---|
+| Default settings + bundled wheels present in the artifact | `pip install --no-index --find-links=<bundled>/ kohakuterrarium` |
+| User changed `source.kind` from the default (e.g. set Git) | Honour the user's choice — bundled wheels are ignored |
+| Bundled wheels missing (dev install, broken bundle) | Fall through to `pip install kohakuterrarium` per the configured source |
+| Bundled install fails (corrupt wheel) + default source | Auto-recover by trying PyPI |
+| Bundled install fails + user picked Git/local | Surface the error — don't paper over the user's intent |
+
+After the first install completes, the **Installed** line in the
+Updates tab reads `Installed: 1.5.x (from bundled offline copy)` so
+you can tell at a glance which source produced the running venv.
+
+### Updates remain a PyPI fetch by default
+
+The bundled-first behaviour applies only to the **initial install**.
+Subsequent updates (manual, notify-on-launch, auto-on-launch) honour
+`source.kind` — which defaults to PyPI.  When you click **Update**,
+the wrapper fetches the latest from PyPI as usual; the bundled wheels
+are untouched and remain the C2 fallback.
+
+The Update button label reflects what the click will do:
+
+- Source = PyPI → `Update to <X> from PyPI`
+- Source = Git → `Update from git`
+- Source = Local → `Reinstall editable`
+- Source = Bundled (explicit) → `Reinstall from bundled (same version)`
+
+If you want to **stay on the bundled version forever**, set
+**Update mode → Manual** and never click Update.  The wrapper will
+never reach the network.
+
 ## CLI parity: `kt self-update`
 
 The same flow is available from the terminal:

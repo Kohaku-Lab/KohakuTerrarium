@@ -83,3 +83,5 @@ src/kohakuterrarium/web_dist/
 
 kt-biome/
 kt-template/
+# Local exploration / cloned-for-reference repos (not tracked)
+/temp/

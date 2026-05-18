@@ -5,6 +5,13 @@
  * wrapper, settings + update routes act on the wrapper's managed
  * venv; otherwise non-wrapper actions return 409 with a hint message
  * the UI should surface verbatim.
+ *
+ * Response shapes carry an optional ``install-source`` field
+ * (``"bundled"`` / ``"pypi"`` / ``"git"`` / ``"local"`` / null) — see
+ * topic 06 / sub-plan 01.  The launcher writes this on every
+ * successful install / update; UpdatesPanel reads it to render
+ * "Installed from …" honestly.  Null on legacy installs that
+ * pre-date the field.
  */
 
 import axios from "axios"
