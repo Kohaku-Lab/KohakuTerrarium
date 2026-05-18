@@ -41,7 +41,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
 
       - name: Build frontend
         working-directory: src/kohakuterrarium-frontend
@@ -93,6 +93,8 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: tarballs
+          pattern: nightly-*
+          merge-multiple: true
 
       - name: Flatten artifacts
         shell: bash

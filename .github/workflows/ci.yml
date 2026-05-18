@@ -106,7 +106,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
       - run: npm ci
       - run: npm run format:check
       - run: npm run build
@@ -125,7 +125,7 @@ jobs:
           python-version: "3.13"
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
       - name: Build frontend
         working-directory: src/kohakuterrarium-frontend
         run: |

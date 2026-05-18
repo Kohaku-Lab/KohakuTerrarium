@@ -32,7 +32,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
 
       - name: Build frontend
         working-directory: src/kohakuterrarium-frontend
@@ -117,7 +117,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
 
       - name: Build frontend
         working-directory: src/kohakuterrarium-frontend
@@ -184,9 +184,16 @@ jobs:
         with:
           python-version: "3.13"
 
+      # Filter to ONLY the release-tree artifacts — the dist wheel job
+      # and docker job upload their own artifacts to the same run, and
+      # downloading 16MB of wheels + 100KB of dockerbuild metadata is
+      # both wasted bandwidth and a reliability hit when the run holds
+      # many artifacts in flight.
       - uses: actions/download-artifact@v4
         with:
           path: tarballs
+          pattern: release-tree-*
+          merge-multiple: true
 
       - name: Flatten artifacts
         shell: bash
@@ -285,7 +292,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
 
       - name: Build frontend
         working-directory: src/kohakuterrarium-frontend
@@ -438,9 +445,21 @@ jobs:
     needs: [build-wheel, build-release-tree, build-desktop, publish-channel-manifests]
     runs-on: ubuntu-latest
     steps:
+      # Pull only artifacts we actually publish to the release.  The
+      # ``Kohaku-Lab~*~*.dockerbuild`` blobs from the docker job are
+      # heavy provenance metadata we don't need here.
       - uses: actions/download-artifact@v4
         with:
           path: all-artifacts
+          pattern: dist
+      - uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts
+          pattern: release-tree-*
+      - uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts
+          pattern: desktop-*
 
       - name: Collect release assets
         run: |
