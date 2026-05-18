@@ -4,71 +4,83 @@ One single ``TestLauncherJourney`` class, one fat test method that
 drives:
 
   settings → bundled first_install → run_update (no-op) → manifest
-  fetch via loopback HTTP → run_update (real download path, with
-  smoke stubbed) → rollback → reset → state verified at every step.
+  fetch (urlopen monkeypatched) → run_update with full
+  download→extract→smoke→pointer-swap → rollback → reset.
 
 Per ``tests/README.md`` the integration tier holds at most one
 workflow function per folder; this file IS that function for the
-``launcher`` folder. Do not add additional ``def test_*`` here —
+``launcher`` folder. Do NOT add additional ``def test_*`` here —
 fatten this one.
+
+We monkeypatch ``urllib.request.urlopen`` rather than booting a real
+loopback HTTPServer. macOS CI runners (and some sandboxed Linux
+environments) deadlock inside ``server_bind`` →
+``socket.getfqdn("127.0.0.1")`` → ``gethostbyaddr`` because their
+DNS resolver chain refuses to answer for the loopback address. The
+test gets the same coverage by intercepting the network boundary one
+function deeper.
 """
 
 import hashlib
 import io
 import json
-import os
 import tarfile
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
-import pytest
-
+from kohakuterrarium.launcher import downloader as _dl
 from kohakuterrarium.launcher import feeds as _feeds
 from kohakuterrarium.launcher import paths as _paths
 from kohakuterrarium.launcher import settings as _settings
 from kohakuterrarium.launcher import tree_ops as _tree
 from kohakuterrarium.launcher import update_runner as _runner
 
-# ── Fixture HTTP server serving manifest + tarball ─────────────────
+
+# ── urlopen fake: routes URLs to in-memory payloads ────────────────
 
 
-class _LauncherFakeFeed(BaseHTTPRequestHandler):
-    manifest_payload: bytes = b""
-    tarball_payload: bytes = b""
-    tarball_url_path: str = "/release/x.tar.gz"
-    manifest_url_path: str = "/stable.json"
+class _FakeResponse:
+    def __init__(self, body: bytes, headers: dict | None = None, code: int = 200):
+        self._body = body
+        self._code = code
+        self.headers = headers or {
+            "ETag": '"x"',
+            "Content-Length": str(len(body)),
+        }
 
-    def do_GET(self):  # noqa: N802
-        if self.path.endswith(self.manifest_url_path):
-            self._serve(self.manifest_payload, "application/json")
-            return
-        if self.path.endswith(self.tarball_url_path):
-            self._serve(self.tarball_payload, "application/octet-stream")
-            return
-        self.send_response(404)
-        self.end_headers()
+    def read(self, size: int = -1) -> bytes:
+        if size < 0:
+            chunk = self._body
+            self._body = b""
+            return chunk
+        chunk = self._body[:size]
+        self._body = self._body[size:]
+        return chunk
 
-    def _serve(self, body: bytes, ctype: str) -> None:
-        self.send_response(200)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+    def getcode(self) -> int:
+        return self._code
 
-    def log_message(self, *_):
-        pass
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
 
 
-@pytest.fixture
-def fake_feed_server():
-    srv = HTTPServer(("127.0.0.1", 0), _LauncherFakeFeed)
-    port = srv.server_address[1]
-    t = threading.Thread(target=srv.serve_forever, daemon=True)
-    t.start()
-    try:
-        yield srv, f"http://127.0.0.1:{port}"
-    finally:
-        srv.shutdown()
+class _Routes:
+    """Maps URL paths to response bodies (and a 404 fallback)."""
+
+    def __init__(self):
+        self.map: dict[str, bytes] = {}
+
+    def add(self, url: str, body: bytes) -> None:
+        self.map[url] = body
+
+    def fetch(self, url: str) -> _FakeResponse:
+        for key, body in self.map.items():
+            if url == key or url.endswith(key):
+                return _FakeResponse(body)
+        # 404 — surface as URLError so the production cache-fallback
+        # path can be exercised too.
+        raise _feeds.urllib.error.HTTPError(url, 404, "not found", {}, None)
 
 
 # ── Tarball builder ─────────────────────────────────────────────────
@@ -94,8 +106,8 @@ def _build_release_tarball(path, *, version: str) -> str:
 
 
 class TestLauncherJourney:
-    def test_full_journey(self, monkeypatch, tmp_path, fake_feed_server):
-        # ── Setup: isolate config dir, point bundled-release at fixture
+    def test_full_journey(self, monkeypatch, tmp_path):
+        # ── Setup: isolate config dir, point bundled-release at fixture.
         monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path))
         bundled = tmp_path / "bundled-release"
         bundled.mkdir()
@@ -117,12 +129,12 @@ class TestLauncherJourney:
         cfg = _settings.load()
         assert cfg.runtime.active_version == "1.0.0"
 
-        # ── 2. Stand up the fake feed serving manifest + new tarball.
-        _, base_url = fake_feed_server
+        # ── 2. Stage the feed: tarball + manifest registered in the
+        # _Routes table, urlopen monkeypatched everywhere it gets used.
         new_tar_bytes_path = tmp_path / "release_2.0.0.tar.gz"
         sha = _build_release_tarball(new_tar_bytes_path, version="2.0.0")
-        _LauncherFakeFeed.tarball_payload = new_tar_bytes_path.read_bytes()
-        _LauncherFakeFeed.tarball_url_path = "/release/x.tar.gz"
+        tarball_url = "https://example.test/release/x.tar.gz"
+        manifest_url = "https://example.test/stable.json"
         manifest = {
             "schema": 1,
             "channel": "stable",
@@ -136,7 +148,7 @@ class TestLauncherJourney:
                         {
                             "platform": _feeds.current_platform_tag(),
                             "py_abi": _feeds.current_py_abi_tag(),
-                            "url": f"{base_url}/release/x.tar.gz",
+                            "url": tarball_url,
                             "sha256": sha,
                             "size_bytes": new_tar_bytes_path.stat().st_size,
                         }
@@ -144,36 +156,22 @@ class TestLauncherJourney:
                 }
             ],
         }
-        _LauncherFakeFeed.manifest_payload = json.dumps(manifest).encode()
-        monkeypatch.setattr(
-            _feeds,
-            "_channel_manifest_url",
-            lambda s: f"{base_url}/stable.json",
-        )
-        # Pre-emptively allow non-https for the test downloader call by
-        # patching the strict guard.
-        from kohakuterrarium.launcher import downloader as _dl
+        routes = _Routes()
+        routes.add(manifest_url, json.dumps(manifest).encode("utf-8"))
+        routes.add(tarball_url, new_tar_bytes_path.read_bytes())
 
-        real_download = _dl.download_to
+        def fake_urlopen(req, *_, **__):
+            url = req.full_url if hasattr(req, "full_url") else str(req)
+            return routes.fetch(url)
 
-        def loose_download(url, dest, sha, **kw):
-            # Bypass https-only guard by injecting the bytes directly
-            # so the integration journey can run on loopback http.
-            import urllib.request
-
-            req = urllib.request.Request(url)
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                body = resp.read()
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            actual = hashlib.sha256(body).hexdigest()
-            if actual.lower() != sha.lower():
-                raise _dl.DownloadError("sha mismatch")
-            dest.write_bytes(body)
-            _ = kw
-
-        monkeypatch.setattr(_dl, "download_to", loose_download)
-        # Also patch the alias the runner imported.
-        monkeypatch.setattr(_runner, "fetch_and_extract", _dl.fetch_and_extract)
+        # Both ``feeds.py`` (manifest fetch) and ``downloader.py``
+        # (tarball fetch) reach ``urllib.request.urlopen``; patch the
+        # alias on each module so both sites pick up the fake.
+        monkeypatch.setattr(_feeds.urllib.request, "urlopen", fake_urlopen)
+        monkeypatch.setattr(_dl.urllib.request, "urlopen", fake_urlopen)
+        # The manifest URL composer normally goes via the GitHub
+        # Releases CDN — redirect to our fake host.
+        monkeypatch.setattr(_feeds, "_channel_manifest_url", lambda s: manifest_url)
 
         # ── 3. Run an update; should pick up 2.0.0 from the feed.
         result = _runner.run_update()
@@ -205,5 +203,3 @@ class TestLauncherJourney:
         # ── 7. Settings round-trip survived everything.
         cfg = _settings.load()
         assert cfg.runtime.active_version == "1.0.0"
-        _ = real_download
-        _ = os  # silence
