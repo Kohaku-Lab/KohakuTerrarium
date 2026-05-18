@@ -12,15 +12,10 @@
           Installed: <span class="font-mono">{{ formatDate(state.active.installed_at) }}</span>
         </div>
         <div>
-          Platform: <span class="font-mono">{{ state.platform || "—" }}</span>
-          · ABI: <span class="font-mono">{{ state.py_abi || "—" }}</span>
+          Platform: <span class="font-mono">{{ state.platform || "—" }}</span> · ABI: <span class="font-mono">{{ state.py_abi || "—" }}</span>
         </div>
-        <div v-if="!state.launcher_install" class="text-warm-500">
-          Running outside the launcher — update controls are disabled.
-        </div>
-        <div v-if="state.last_check_error" class="text-red-500 text-[12px]">
-          Last probe: {{ state.last_check_error }}
-        </div>
+        <div v-if="!state.launcher_install" class="text-warm-500">Running outside the launcher — update controls are disabled.</div>
+        <div v-if="state.last_check_error" class="text-red-500 text-[12px]">Last probe: {{ state.last_check_error }}</div>
       </div>
       <div class="flex items-center gap-2 mt-3 flex-wrap">
         <button class="text-[12px] px-3 py-1 border rounded hover:bg-warm-100 dark:hover:bg-warm-800" :disabled="busy" @click="onCheckNow">Check now</button>
@@ -80,9 +75,7 @@
           </select>
           <button v-if="form.pinned" class="text-[12px] px-2 py-1 border rounded" @click="clearPin">Clear</button>
         </div>
-        <p class="text-warm-500 text-[12px]">
-          Pin to stay on a specific version regardless of channel updates.
-        </p>
+        <p class="text-warm-500 text-[12px]">Pin to stay on a specific version regardless of channel updates.</p>
       </div>
     </section>
 
