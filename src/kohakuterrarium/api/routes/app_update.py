@@ -1,31 +1,48 @@
 """``/api/app/*`` — app-update API for the Vue ``Admin → Updates`` tab.
 
-Wraps the launcher's update_runner + settings + version-check helpers
-in HTTP + WebSocket form so the frontend can drive the same flow
-``kt self-update`` exposes on the CLI.  Only mounted in standalone
-and lab-host modes; worker installs (lab-client) return 404 across
-the whole namespace.
+Wraps the launcher's update_runner + feeds + settings helpers in HTTP
++ WebSocket form so the frontend can drive the same flow the CLI's
+``kt self-update`` exposes. Only mounted in standalone and lab-host
+modes; worker installs (lab-client) return 404 across the whole
+namespace.
 
-See ``plans/1.5.0-roadmap/06-app-update/design.md`` §11 for the
-contract.
+Endpoints (canonical: ``plans/1.5.0-roadmap/06b-release-bundle-update/design.md`` §11):
+
+| GET  | ``/api/app/settings``       | round-trip settings |
+| PUT  | ``/api/app/settings``       | round-trip settings |
+| POST | ``/api/app/feeds/probe``    | force-fetch channel manifest |
+| GET  | ``/api/app/state``          | aggregate UI state |
+| POST | ``/api/app/update``         | start update; returns WS path |
+| POST | ``/api/app/rollback``       | revert pointer |
+| WS   | ``/ws/app/update``          | streams progress frames |
 """
 
 import asyncio
 import json
-from dataclasses import asdict
-from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 
-from kohakuterrarium.cli.self_update import _current_version, _latest_pypi_version
 from kohakuterrarium.launcher import settings as _launcher_settings
-from kohakuterrarium.launcher.migration import is_legacy_bundle
-from kohakuterrarium.launcher.paths import wrapper_marker_path
+from kohakuterrarium.launcher.feeds import (
+    FeedError,
+    current_platform_tag,
+    current_py_abi_tag,
+    fetch_manifest,
+    list_available_releases,
+)
+from kohakuterrarium.launcher.migration import (
+    is_launcher_install,
+    is_legacy_bundle,
+)
+from kohakuterrarium.launcher.tree_ops import (
+    list_installed_versions,
+    read_active_pointer,
+)
 from kohakuterrarium.launcher.update_runner import (
     UpdateResult,
-    reset_to_bundled,
-    rollback_to_previous,
+    probe_only,
+    rollback,
     run_update,
 )
 
@@ -36,12 +53,7 @@ ws_router = APIRouter()
 
 
 def _wrapper_mode_only(request: Request) -> None:
-    """Reject the call when the host isn't a wrapper / standalone install.
-
-    Worker mode (``lab-client``) doesn't expose this surface — the
-    operator manages the worker host's framework version via its own
-    install path, not over a remote API.
-    """
+    """Reject the call when the host isn't a wrapper / standalone install."""
     lab_mode = getattr(request.app.state, "lab_mode", "standalone")
     if lab_mode == "lab-client":
         raise HTTPException(
@@ -49,202 +61,180 @@ def _wrapper_mode_only(request: Request) -> None:
         )
 
 
-def _settings_to_dict(s: _launcher_settings.AppSettings) -> dict[str, Any]:
-    return {
-        "source": asdict(s.source),
-        "update": {
-            "mode": s.update.mode,
-            "check-cache-hours": s.update.check_cache_hours,
-        },
-        "runtime": {
-            "venv-path": s.runtime.venv_path,
-            "last-installed-version": s.runtime.last_installed_version,
-            "last-check-at": s.runtime.last_check_at,
-            "install-source": s.runtime.install_source,
-        },
-    }
-
-
 def _result_to_dict(r: UpdateResult) -> dict[str, Any]:
     return {
         "ok": r.ok,
         "version": r.version,
+        "build_id": r.build_id,
         "error": r.error,
         "restart-required": r.restart_required,
         "skipped-reason": r.skipped_reason,
     }
 
 
-def _install_kind() -> str:
-    """Cheap probe for the install kind — wrapper-managed vs other."""
-    return "wrapper" if wrapper_marker_path().is_file() else "user"
+# ── Settings ────────────────────────────────────────────────────────
 
 
 @router.get("/settings")
 async def get_settings(request: Request) -> dict[str, Any]:
     _wrapper_mode_only(request)
-    return _settings_to_dict(_launcher_settings.load())
+    return _launcher_settings.to_public_dict(_launcher_settings.load())
 
 
 @router.put("/settings")
 async def put_settings(request: Request, body: dict[str, Any]) -> dict[str, Any]:
     _wrapper_mode_only(request)
-    # Schema-validate by round-tripping through the launcher's
-    # coercion layer — invalid fields fall back to defaults with a
-    # warning, so the response always reflects what the launcher will
-    # actually use.
-    current = _launcher_settings.load()
-    src = body.get("source") or {}
-    upd = body.get("update") or {}
-    if "kind" in src:
-        if src["kind"] not in _launcher_settings.SOURCE_KINDS:
-            raise HTTPException(400, f"invalid source.kind {src['kind']!r}")
-        current.source.kind = src["kind"]
-    if "spec" in src:
-        spec = src["spec"]
-        if spec is not None and not isinstance(spec, str):
-            raise HTTPException(400, "source.spec must be a string or null")
-        current.source.spec = spec
-    if "extras" in src:
-        extras = src["extras"] or []
-        if not (isinstance(extras, list) and all(isinstance(e, str) for e in extras)):
-            raise HTTPException(400, "source.extras must be a list of strings")
-        current.source.extras = list(extras)
-    if "mode" in upd:
-        if upd["mode"] not in _launcher_settings.UPDATE_MODES:
-            raise HTTPException(400, f"invalid update.mode {upd['mode']!r}")
-        current.update.mode = upd["mode"]
-    if "check-cache-hours" in upd:
-        hours = upd["check-cache-hours"]
-        if not (isinstance(hours, int) and hours > 0):
-            raise HTTPException(400, "update.check-cache-hours must be a positive int")
-        current.update.check_cache_hours = hours
-    _launcher_settings.save(current)
-    return _settings_to_dict(current)
+    if not isinstance(body, dict):
+        raise HTTPException(400, "request body must be a JSON object")
+    new_settings = _launcher_settings.from_public_dict(body)
+    _launcher_settings.save(new_settings)
+    return _launcher_settings.to_public_dict(new_settings)
 
 
-@router.get("/update-status")
-async def get_update_status(request: Request) -> dict[str, Any]:
+# ── State + probe ───────────────────────────────────────────────────
+
+
+@router.get("/state")
+async def get_state(request: Request) -> dict[str, Any]:
     _wrapper_mode_only(request)
     cfg = _launcher_settings.load()
-    cur = cfg.runtime.last_installed_version or _current_version()
-    # No probe here — UI reads cached state.  Use POST /check-now to
-    # force a fresh probe.
+    ptr = read_active_pointer()
+    installed = [
+        {
+            "version": p.version,
+            "build_id": p.build_id,
+            "installed_at": p.installed_at,
+        }
+        for p in list_installed_versions()
+    ]
     return {
-        "current-version": cur,
-        "latest-version": None,
-        "available": None,
-        "last-check-at": cfg.runtime.last_check_at,
-        "source-kind": cfg.source.kind,
-        "install-source": cfg.runtime.install_source,
-        "install-kind": _install_kind(),
-        "legacy-bundle": is_legacy_bundle(),
+        "active": (
+            {
+                "version": ptr.version,
+                "build_id": ptr.build_id,
+                "installed_at": ptr.installed_at,
+            }
+            if ptr is not None
+            else None
+        ),
+        "installed": installed,
+        "settings": _launcher_settings.to_public_dict(cfg),
+        "launcher_install": is_launcher_install(),
+        "legacy_bundle": is_legacy_bundle(),
+        "platform": current_platform_tag(),
+        "py_abi": current_py_abi_tag(),
+        "last_check_at": cfg.runtime.last_check_at,
+        "last_check_error": cfg.runtime.last_check_error,
     }
 
 
-@router.post("/check-now")
-async def check_now(request: Request) -> dict[str, Any]:
+@router.post("/feeds/probe")
+async def post_feeds_probe(request: Request) -> dict[str, Any]:
+    """Force-fetch the channel manifest; return its releases filtered
+    for the running platform/abi (newest first)."""
     _wrapper_mode_only(request)
     cfg = _launcher_settings.load()
-    cur = cfg.runtime.last_installed_version or _current_version()
-    # Probe runs in a worker thread so the event loop stays responsive
-    # while urlopen does its DNS + TLS dance.
-    latest = await asyncio.to_thread(_latest_pypi_version)
-    if latest is not None:
-        cfg.runtime.last_check_at = datetime.now(timezone.utc).isoformat(
-            timespec="seconds"
-        )
-        _launcher_settings.save(cfg)
-    available = bool(latest and cur and latest != cur)
+    plat = current_platform_tag()
+    abi = current_py_abi_tag()
+    try:
+        manifest = await asyncio.to_thread(fetch_manifest, cfg, force_refresh=True)
+    except FeedError as e:
+        raise HTTPException(502, f"feed probe failed: {e}") from e
+    releases = list_available_releases(manifest, platform_tag=plat, py_abi_tag=abi)
+    latest = releases[0]["version"] if releases else None
     return {
-        "current-version": cur,
-        "latest-version": latest,
-        "available": available,
-        "last-check-at": cfg.runtime.last_check_at,
-        "source-kind": cfg.source.kind,
-        "install-source": cfg.runtime.install_source,
-        "install-kind": _install_kind(),
-        "legacy-bundle": is_legacy_bundle(),
+        "channel": cfg.channel,
+        "feed": _launcher_settings.to_public_dict(cfg)["feed"],
+        "platform": plat,
+        "py_abi": abi,
+        "latest_version": latest,
+        "releases": releases,
     }
+
+
+# ── Update / rollback ───────────────────────────────────────────────
 
 
 @router.post("/update")
 async def post_update(request: Request) -> dict[str, Any]:
     _wrapper_mode_only(request)
-    if _install_kind() != "wrapper":
+    if not is_launcher_install():
         raise HTTPException(
             409,
-            "this install is not wrapper-managed; run `kt self-update` "
-            "from the terminal instead",
+            "this install is not launcher-managed; "
+            "run `kt self-update` from the terminal instead",
         )
-    # Just acknowledge — the actual run happens over the WebSocket
-    # so progress can stream.  Returning the WS path here lets the
-    # frontend always reach the same endpoint shape regardless of
-    # base URL changes.
     return {"websocket": "/ws/app/update"}
 
 
 @router.post("/rollback")
 async def post_rollback(request: Request) -> dict[str, Any]:
     _wrapper_mode_only(request)
-    if _install_kind() != "wrapper":
-        raise HTTPException(409, "rollback is wrapper-only")
-    result = await asyncio.to_thread(rollback_to_previous)
+    if not is_launcher_install():
+        raise HTTPException(409, "rollback is launcher-only")
+    result = await asyncio.to_thread(rollback)
     return _result_to_dict(result)
 
 
-@router.post("/reset-venv")
-async def post_reset_venv(request: Request) -> dict[str, Any]:
+@router.post("/check")
+async def post_check(request: Request) -> dict[str, Any]:
+    """Probe what would be installed without doing it."""
     _wrapper_mode_only(request)
-    if _install_kind() != "wrapper":
-        raise HTTPException(409, "reset-venv is wrapper-only")
-    result = await asyncio.to_thread(reset_to_bundled)
+    result = await asyncio.to_thread(probe_only)
     return _result_to_dict(result)
 
 
-# WebSocket -----------------------------------------------------------
+# ── WebSocket ───────────────────────────────────────────────────────
 
 
 _WS_PATH = "/ws/app/update"
 
 
 async def _stream_update(ws: WebSocket) -> None:
-    """Drive run_update() to completion, streaming a coarse progress feed.
+    """Drive run_update() to completion, streaming progress frames."""
+    queue: asyncio.Queue = asyncio.Queue()
 
-    The launcher's update_runner doesn't yet expose a per-step
-    progress callback — Phase H wiring will pipe pip's stdout into a
-    real percent figure.  For now we emit pre/post frames so the
-    client UI exercises the same shape.
-    """
-    await ws.send_text(json.dumps({"phase": "starting", "percent": 5, "message": ""}))
-    await ws.send_text(
-        json.dumps({"phase": "installing", "percent": 35, "message": "pip install ..."})
-    )
-    result = await asyncio.to_thread(run_update)
-    if result.ok:
-        await ws.send_text(
-            json.dumps(
-                {
-                    "phase": "ready",
-                    "percent": 100,
-                    "message": f"updated to {result.version}",
-                    "status": "ok",
-                    "restart-required": result.restart_required,
-                }
+    def _push(phase: str, percent: float, message: str) -> None:
+        # Called from the worker thread; thread-safe enqueue.
+        try:
+            queue.put_nowait({"phase": phase, "percent": percent, "message": message})
+        except Exception:  # pragma: no cover - defensive
+            pass
+
+    loop = asyncio.get_running_loop()
+
+    async def _pump() -> UpdateResult:
+        return await loop.run_in_executor(None, lambda: run_update(_push))
+
+    runner_task = asyncio.create_task(_pump())
+    try:
+        while True:
+            done, _ = await asyncio.wait(
+                [runner_task, asyncio.create_task(queue.get())],
+                return_when=asyncio.FIRST_COMPLETED,
+                timeout=0.5,
             )
-        )
-    else:
-        await ws.send_text(
-            json.dumps(
-                {
-                    "phase": "failed",
-                    "percent": 100,
-                    "message": result.error or "update failed",
-                    "status": "failed",
-                    "restart-required": False,
-                }
-            )
-        )
+            # Drain whatever frames are pending.
+            while not queue.empty():
+                frame = queue.get_nowait()
+                await ws.send_text(json.dumps(frame))
+            if runner_task in done:
+                break
+    finally:
+        result = await runner_task
+    terminal = {
+        "phase": "done" if result.ok else "failed",
+        "percent": 100,
+        "message": (
+            f"updated to {result.version}" if result.ok else (result.error or "failed")
+        ),
+        "status": "ok" if result.ok else "failed",
+        "restart-required": result.restart_required,
+        "version": result.version,
+        "build_id": result.build_id,
+        "skipped-reason": result.skipped_reason,
+    }
+    await ws.send_text(json.dumps(terminal))
 
 
 @ws_router.websocket(_WS_PATH)
@@ -253,14 +243,14 @@ async def ws_update(ws: WebSocket) -> None:
     if lab_mode == "lab-client":
         await ws.close(code=4404)
         return
-    if _install_kind() != "wrapper":
+    if not is_launcher_install():
         await ws.accept()
         await ws.send_text(
             json.dumps(
                 {
                     "phase": "refused",
                     "percent": 0,
-                    "message": "non-wrapper install; use `kt self-update` from terminal",
+                    "message": "non-launcher install; use `kt self-update` from terminal",
                     "status": "failed",
                 }
             )

@@ -24,7 +24,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request
 
 from kohakuterrarium.api.deps import get_service
-from kohakuterrarium.launcher.paths import wrapper_marker_path
+from kohakuterrarium.launcher.migration import is_launcher_install
 from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import get_logger
 
@@ -45,9 +45,9 @@ def _get_version() -> str:
 
 
 def _install_kind() -> str:
-    """Wrapper-managed venv vs other."""
+    """Launcher-managed install vs other (dev, packaged python, etc.)."""
     try:
-        return "wrapper" if wrapper_marker_path().is_file() else "user"
+        return "launcher" if is_launcher_install() else "user"
     except OSError:
         return "user"
 

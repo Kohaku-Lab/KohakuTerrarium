@@ -1,35 +1,88 @@
 <template>
   <div class="updates-panel space-y-5">
-    <!-- ── Legacy-bundle migration banner ─────────────────────────── -->
-    <div v-if="status.legacyBundle" class="rounded border border-amber-300 bg-amber-50 dark:bg-amber-900/20 p-4 text-[13px]">
-      <div class="font-medium mb-1">Switch to the new auto-updating bundle</div>
-      <p class="opacity-80">You're running the legacy KohakuTerrarium Briefcase bundle. The new wrapper bundle updates the framework via pip, so you never have to re-download the installer again. Download once, switch over, and future updates land from this panel.</p>
-      <a href="https://github.com/Kohaku-Lab/KohakuTerrarium/releases" target="_blank" rel="noopener" class="inline-block mt-2 text-iolite underline"> Download the wrapper bundle → </a>
-    </div>
-
-    <!-- ── Source ─────────────────────────────────────────────────── -->
+    <!-- ── Active install summary ─────────────────────────────────── -->
     <section class="rounded border border-warm-200 dark:border-warm-700 p-4">
-      <h3 class="text-sm font-semibold mb-3">Source</h3>
+      <h3 class="text-sm font-semibold mb-3">Active install</h3>
+      <div class="text-[13px] space-y-1">
+        <div>
+          Version: <span class="font-mono">{{ state.active?.version || "—" }}</span>
+          <span v-if="state.active?.build_id" class="ml-2 text-warm-500">(build {{ state.active.build_id }})</span>
+        </div>
+        <div v-if="state.active?.installed_at">
+          Installed: <span class="font-mono">{{ formatDate(state.active.installed_at) }}</span>
+        </div>
+        <div>
+          Platform: <span class="font-mono">{{ state.platform || "—" }}</span>
+          · ABI: <span class="font-mono">{{ state.py_abi || "—" }}</span>
+        </div>
+        <div v-if="!state.launcher_install" class="text-warm-500">
+          Running outside the launcher — update controls are disabled.
+        </div>
+        <div v-if="state.last_check_error" class="text-red-500 text-[12px]">
+          Last probe: {{ state.last_check_error }}
+        </div>
+      </div>
+      <div class="flex items-center gap-2 mt-3 flex-wrap">
+        <button class="text-[12px] px-3 py-1 border rounded hover:bg-warm-100 dark:hover:bg-warm-800" :disabled="busy" @click="onCheckNow">Check now</button>
+        <button class="text-[12px] px-3 py-1 border rounded bg-iolite text-white hover:bg-iolite-dark disabled:opacity-50" :disabled="!canUpdate" @click="onUpdate">{{ updateButtonLabel }}</button>
+        <button class="text-[12px] px-3 py-1 border rounded hover:bg-warm-100 dark:hover:bg-warm-800 disabled:opacity-50" :disabled="!canRollback" @click="onRollback">{{ rollbackLabel }}</button>
+      </div>
+      <div v-if="error" class="mt-3 text-[12px] text-red-500">{{ error }}</div>
+    </section>
+
+    <!-- ── Channel ────────────────────────────────────────────────── -->
+    <section class="rounded border border-warm-200 dark:border-warm-700 p-4">
+      <h3 class="text-sm font-semibold mb-3">Channel</h3>
       <div class="space-y-2 text-[13px]">
+        <label v-for="opt in channelOptions" :key="opt.value" class="flex items-start gap-3">
+          <input v-model="form.channel" type="radio" :value="opt.value" @change="onFormChange" />
+          <div class="flex-1">
+            <div class="font-medium">{{ opt.label }}</div>
+            <div class="text-warm-500 text-[12px]">{{ opt.description }}</div>
+            <div v-if="probeByChannel[opt.value]" class="text-[12px] mt-1">
+              Latest: <span class="font-mono">{{ probeByChannel[opt.value].latest_version || "—" }}</span>
+            </div>
+          </div>
+        </label>
+      </div>
+    </section>
+
+    <!-- ── Feed source ────────────────────────────────────────────── -->
+    <section class="rounded border border-warm-200 dark:border-warm-700 p-4">
+      <h3 class="text-sm font-semibold mb-3">Release feed</h3>
+      <div class="space-y-3 text-[13px]">
         <label class="flex items-center gap-3">
-          <input v-model="form.sourceKind" type="radio" value="pypi" @change="onFormChange" />
-          <span>PyPI stable</span>
-          <input v-if="form.sourceKind === 'pypi'" v-model="form.spec" class="flex-1 px-2 py-1 border rounded text-[12px] dark:bg-warm-900" placeholder="leave blank for latest, e.g. ==1.5.0 or <2.0" @blur="onFormChange" />
+          <input v-model="form.feedKind" type="radio" value="github_releases" @change="onFormChange" />
+          <span>GitHub Releases</span>
+          <input v-if="form.feedKind === 'github_releases'" v-model="form.feedRepo" class="flex-1 px-2 py-1 border rounded text-[12px] dark:bg-warm-900" placeholder="Kohaku-Lab/KohakuTerrarium" @blur="onFormChange" />
         </label>
         <label class="flex items-center gap-3">
-          <input v-model="form.sourceKind" type="radio" value="git" @change="onFormChange" />
-          <span>Git ref</span>
-          <input v-if="form.sourceKind === 'git'" v-model="form.spec" class="flex-1 px-2 py-1 border rounded text-[12px] dark:bg-warm-900" placeholder="https://github.com/.../KohakuTerrarium.git@main" @blur="onFormChange" />
+          <input v-model="form.feedKind" type="radio" value="custom" @change="onFormChange" />
+          <span>Custom mirror</span>
+          <input v-if="form.feedKind === 'custom'" v-model="form.feedUrl" class="flex-1 px-2 py-1 border rounded text-[12px] dark:bg-warm-900" placeholder="https://my.mirror/kt" @blur="onFormChange" />
         </label>
-        <label class="flex items-center gap-3">
-          <input v-model="form.sourceKind" type="radio" value="local" @change="onFormChange" />
-          <span>Local editable path</span>
-          <input v-if="form.sourceKind === 'local'" v-model="form.spec" class="flex-1 px-2 py-1 border rounded text-[12px] dark:bg-warm-900" placeholder="/path/to/checkout" @blur="onFormChange" />
-        </label>
-        <label class="flex items-center gap-3">
-          <input v-model="form.sourceKind" type="radio" value="bundled" @change="onFormChange" />
-          <span>Bundled (offline)</span>
-        </label>
+        <p v-if="form.feedKind === 'custom'" class="text-[12px] text-warm-500">
+          Manifest path: <span class="font-mono">{{ form.feedUrl || "https://&lt;your-url&gt;" }}/{{ form.channel }}.json</span>
+        </p>
+      </div>
+    </section>
+
+    <!-- ── Pinned version ─────────────────────────────────────────── -->
+    <section class="rounded border border-warm-200 dark:border-warm-700 p-4">
+      <h3 class="text-sm font-semibold mb-3">Pinned version</h3>
+      <div class="space-y-2 text-[13px]">
+        <div class="flex items-center gap-3">
+          <select v-model="form.pinned" class="flex-1 px-2 py-1 border rounded text-[12px] dark:bg-warm-900" @change="onFormChange">
+            <option :value="null">No pin — follow channel latest</option>
+            <option v-for="rel in availableReleases" :key="rel.version" :value="rel.version">
+              {{ rel.version }}<span v-if="rel.build_id"> · {{ rel.build_id }}</span>
+            </option>
+          </select>
+          <button v-if="form.pinned" class="text-[12px] px-2 py-1 border rounded" @click="clearPin">Clear</button>
+        </div>
+        <p class="text-warm-500 text-[12px]">
+          Pin to stay on a specific version regardless of channel updates.
+        </p>
       </div>
     </section>
 
@@ -52,32 +105,16 @@
       </div>
     </section>
 
-    <!-- ── Status ─────────────────────────────────────────────────── -->
-    <section class="rounded border border-warm-200 dark:border-warm-700 p-4">
-      <h3 class="text-sm font-semibold mb-3">Status</h3>
-      <div class="text-[13px] space-y-1">
-        <div>
-          Installed: <span class="font-mono">{{ status.currentVersion || "—" }}</span>
-          <span v-if="installSourceLabel" class="ml-2 text-warm-500">{{ installSourceLabel }}</span>
-        </div>
-        <div>
-          Latest:
-          <span class="font-mono">{{ status.latestVersion || "—" }}</span>
-          <span v-if="status.available" class="ml-2 text-iolite">· update available</span>
-        </div>
-        <div>Last check: {{ formatLastCheck(status.lastCheckAt) }}</div>
-        <div>
-          Install kind:
-          <span class="font-mono">{{ status.installKind || "—" }}</span>
-          <span v-if="status.installKind !== 'wrapper'" class="ml-2 text-warm-500"> (wrapper-only features disabled) </span>
-        </div>
-      </div>
-      <div class="flex items-center gap-2 mt-3">
-        <button class="text-[12px] px-3 py-1 border rounded hover:bg-warm-100 dark:hover:bg-warm-800" :disabled="busy" @click="onCheckNow">Check now</button>
-        <button class="text-[12px] px-3 py-1 border rounded bg-iolite text-white hover:bg-iolite-dark disabled:opacity-50" :disabled="busy || status.installKind !== 'wrapper' || (!status.available && status.sourceKind !== 'bundled')" @click="onUpdate">{{ updateButtonLabel }}</button>
-        <button class="text-[12px] px-3 py-1 border rounded hover:bg-warm-100 dark:hover:bg-warm-800 disabled:opacity-50" :disabled="busy || status.installKind !== 'wrapper'" @click="onRollback">Rollback</button>
-      </div>
-      <div v-if="error" class="mt-3 text-[12px] text-red-500">{{ error }}</div>
+    <!-- ── Installed history ──────────────────────────────────────── -->
+    <section v-if="state.installed?.length" class="rounded border border-warm-200 dark:border-warm-700 p-4">
+      <h3 class="text-sm font-semibold mb-3">Installed versions on disk</h3>
+      <ul class="text-[13px] space-y-1">
+        <li v-for="v in state.installed" :key="v.version" class="font-mono flex items-center gap-2">
+          <span>{{ v.version }}</span>
+          <span v-if="v.version === state.active?.version" class="text-iolite">[active]</span>
+          <span v-else class="text-warm-500 text-[11px]">{{ formatDate(v.installed_at) }}</span>
+        </li>
+      </ul>
     </section>
 
     <!-- ── Progress modal ─────────────────────────────────────────── -->
@@ -90,13 +127,6 @@
         <p class="font-mono text-[11px] mt-3 break-words min-h-[14px] opacity-75">
           {{ progress.message }}
         </p>
-        <!--
-          When the update succeeded and requires a restart, surface the
-          instruction inline.  We don't expose a "Restart" button that
-          quits + relaunches the app: that needs a dedicated runtime
-          hook the framework doesn't yet provide.  Telling the user
-          what to do beats faking an action that doesn't.
-        -->
         <p v-if="progress.status === 'ok' && progress.restartRequired" class="text-[12px] mt-3 text-iolite">Quit and relaunch the app to use the new version.</p>
         <div class="mt-3 flex justify-end gap-2">
           <button class="text-[12px] px-3 py-1 border rounded" @click="closeProgress">
@@ -114,55 +144,34 @@ import { ElMessage } from "element-plus"
 
 import { appUpdateAPI } from "@/utils/appUpdateApi"
 
+const channelOptions = [
+  { value: "stable", label: "Stable", description: "Tested releases. Recommended." },
+  { value: "beta", label: "Beta", description: "Pre-release candidates." },
+  { value: "nightly", label: "Nightly", description: "Daily automatic builds. Cutting edge." },
+]
+
 const form = reactive({
-  sourceKind: "pypi",
-  spec: "",
+  channel: "stable",
+  feedKind: "github_releases",
+  feedRepo: "Kohaku-Lab/KohakuTerrarium",
+  feedUrl: "",
+  pinned: null,
   updateMode: "notify-on-launch",
 })
 
-const status = reactive({
-  currentVersion: null,
-  latestVersion: null,
-  available: null,
-  lastCheckAt: null,
-  installKind: null,
-  sourceKind: null,
-  installSource: null,
-  legacyBundle: false,
+const state = reactive({
+  active: null,
+  installed: [],
+  launcher_install: false,
+  legacy_bundle: false,
+  platform: null,
+  py_abi: null,
+  last_check_at: null,
+  last_check_error: null,
 })
 
-// Honest label for the Installed line — reflects which source
-// actually produced the currently-active venv, NOT what the user
-// has configured as the future update source.  See topic 06 / 01.
-const installSourceLabel = computed(() => {
-  switch (status.installSource) {
-    case "bundled":
-      return "(from bundled offline copy)"
-    case "pypi":
-      return "(from PyPI)"
-    case "git":
-      return "(from git)"
-    case "local":
-      return "(editable install)"
-    default:
-      return ""
-  }
-})
-
-// Update-button label adjusts to source.kind so the user is told
-// what the click will actually do.
-const updateButtonLabel = computed(() => {
-  if (status.sourceKind === "bundled") {
-    return "Reinstall from bundled (same version)"
-  }
-  if (status.sourceKind === "git") return "Update from git"
-  if (status.sourceKind === "local") return "Reinstall editable"
-  // Default + PyPI: include target version if we have it.
-  if (status.latestVersion && status.available) {
-    return `Update to ${status.latestVersion} from PyPI`
-  }
-  return "Update from PyPI"
-})
+const probeByChannel = reactive({})
+const availableReleases = ref([])
 
 const busy = ref(false)
 const error = ref("")
@@ -176,52 +185,105 @@ const progress = reactive({
   restartRequired: false,
 })
 
-function applySettings(payload) {
-  const src = payload.source || {}
-  const upd = payload.update || {}
-  form.sourceKind = src.kind || "pypi"
-  form.spec = src.spec || ""
-  form.updateMode = upd.mode || "notify-on-launch"
+const latestForChannel = computed(() => probeByChannel[form.channel]?.latest_version || null)
+
+const canUpdate = computed(() => {
+  if (busy.value || !state.launcher_install) return false
+  const latest = latestForChannel.value
+  if (!latest) return true // allow click; will probe if needed
+  return form.pinned ? form.pinned !== state.active?.version : latest !== state.active?.version
+})
+
+const canRollback = computed(() => {
+  if (busy.value || !state.launcher_install) return false
+  const active = state.active?.version
+  return (state.installed || []).some((v) => v.version !== active)
+})
+
+const updateButtonLabel = computed(() => {
+  if (form.pinned) return `Install pinned ${form.pinned}`
+  const latest = latestForChannel.value
+  return latest ? `Update to ${latest}` : "Update"
+})
+
+const rollbackLabel = computed(() => {
+  const active = state.active?.version
+  const prev = (state.installed || []).find((v) => v.version !== active)
+  return prev ? `Rollback to ${prev.version}` : "Rollback"
+})
+
+function formatDate(iso) {
+  if (!iso) return "—"
+  try {
+    return new Date(iso).toLocaleString()
+  } catch {
+    return iso
+  }
 }
 
-function applyStatus(payload) {
-  status.currentVersion = payload["current-version"] || null
-  status.latestVersion = payload["latest-version"] || null
-  status.available = payload.available
-  status.lastCheckAt = payload["last-check-at"] || null
-  status.installKind = payload["install-kind"] || null
-  status.sourceKind = payload["source-kind"] || null
-  status.installSource = payload["install-source"] || null
-  status.legacyBundle = !!payload["legacy-bundle"]
+function applySettings(payload) {
+  const feed = payload.feed || {}
+  form.channel = payload.channel || "stable"
+  form.feedKind = feed.kind || "github_releases"
+  form.feedRepo = feed.repo || "Kohaku-Lab/KohakuTerrarium"
+  form.feedUrl = feed.url || ""
+  form.pinned = payload.pinned_version || null
+  form.updateMode = (payload.update && payload.update.mode) || "notify-on-launch"
+}
+
+function applyState(payload) {
+  state.active = payload.active || null
+  state.installed = payload.installed || []
+  state.launcher_install = !!payload.launcher_install
+  state.legacy_bundle = !!payload.legacy_bundle
+  state.platform = payload.platform || null
+  state.py_abi = payload.py_abi || null
+  state.last_check_at = payload.last_check_at || null
+  state.last_check_error = payload.last_check_error || null
 }
 
 async function load() {
   try {
-    const [s, st] = await Promise.all([appUpdateAPI.getSettings(), appUpdateAPI.getUpdateStatus()])
-    applySettings(s)
-    applyStatus(st)
+    const st = await appUpdateAPI.getState()
+    applyState(st)
+    applySettings(st.settings || {})
   } catch (e) {
     error.value = e?.response?.data?.detail || e.message || "load failed"
   }
 }
 
-async function onFormChange() {
-  // Skip empty spec when kind requires one (UX nicety: don't 400 mid-typing).
-  if ((form.sourceKind === "git" || form.sourceKind === "local") && !form.spec) {
-    return
+async function probeCurrentChannel() {
+  try {
+    const data = await appUpdateAPI.probeFeed()
+    probeByChannel[data.channel] = data
+    availableReleases.value = data.releases || []
+  } catch (e) {
+    error.value = e?.response?.data?.detail || e.message || "probe failed"
   }
+}
+
+async function onFormChange() {
+  if (form.feedKind === "custom" && !form.feedUrl) return
   try {
     busy.value = true
     error.value = ""
-    const patch = {
-      source: {
-        kind: form.sourceKind,
-        spec: form.spec || null,
-        extras: [],
+    const payload = {
+      feed: {
+        kind: form.feedKind,
+        repo: form.feedRepo || "Kohaku-Lab/KohakuTerrarium",
+        url: form.feedKind === "custom" ? form.feedUrl : null,
       },
-      update: { mode: form.updateMode, "check-cache-hours": 24 },
+      channel: form.channel,
+      pinned_version: form.pinned || null,
+      update: {
+        mode: form.updateMode,
+        "check-cache-hours": 24,
+        "keep-versions": 3,
+      },
     }
-    await appUpdateAPI.putSettings(patch)
+    const echoed = await appUpdateAPI.putSettings(payload)
+    applySettings(echoed)
+    await probeCurrentChannel()
   } catch (e) {
     error.value = e?.response?.data?.detail || e.message || "save failed"
   } finally {
@@ -229,13 +291,18 @@ async function onFormChange() {
   }
 }
 
+function clearPin() {
+  form.pinned = null
+  onFormChange()
+}
+
 async function onCheckNow() {
   try {
     busy.value = true
     error.value = ""
-    const st = await appUpdateAPI.checkNow()
-    applyStatus(st)
-    if (!st.available) ElMessage.info("Already up-to-date")
+    await probeCurrentChannel()
+    await load()
+    ElMessage.success("Checked feed")
   } catch (e) {
     error.value = e?.response?.data?.detail || e.message || "check failed"
   } finally {
@@ -243,45 +310,48 @@ async function onCheckNow() {
   }
 }
 
-function closeProgress() {
-  if (ws.value) {
-    try {
-      ws.value.close()
-    } catch {
-      // Already closed.
-    }
-    ws.value = null
-  }
-  progress.open = false
-}
-
-async function onUpdate() {
-  closeProgress()
+function openProgress() {
   progress.open = true
   progress.phase = "Starting…"
   progress.percent = 0
   progress.message = ""
   progress.status = null
   progress.restartRequired = false
+}
+
+function closeProgress() {
+  progress.open = false
+  if (ws.value) {
+    try {
+      ws.value.close()
+    } catch {
+      /* ignore */
+    }
+    ws.value = null
+  }
+}
+
+async function onUpdate() {
   try {
+    error.value = ""
     await appUpdateAPI.startUpdate()
   } catch (e) {
-    progress.status = "failed"
-    progress.message = e?.response?.data?.detail || e.message || "update request failed"
+    error.value = e?.response?.data?.detail || e.message || "start failed"
     return
   }
+  openProgress()
   ws.value = appUpdateAPI.openProgressStream({
-    onFrame: (frame) => {
-      progress.phase = frame.phase || progress.phase
-      progress.percent = frame.percent ?? progress.percent
-      progress.message = frame.message || ""
+    onFrame(frame) {
+      if (frame.phase) progress.phase = frame.phase
+      if (typeof frame.percent === "number") progress.percent = frame.percent
+      if (frame.message !== undefined) progress.message = frame.message
       if (frame.status) {
         progress.status = frame.status
         progress.restartRequired = !!frame["restart-required"]
         if (frame.status === "ok") load()
       }
     },
-    onClose: () => {
+    onClose() {
       ws.value = null
     },
   })
@@ -291,12 +361,12 @@ async function onRollback() {
   try {
     busy.value = true
     error.value = ""
-    const r = await appUpdateAPI.rollback()
-    if (!r.ok) {
-      error.value = r.error || "rollback failed"
+    const result = await appUpdateAPI.rollback()
+    if (!result.ok) {
+      error.value = result.error || "rollback failed"
       return
     }
-    ElMessage.success("Rolled back. Restart the app to use the previous version.")
+    ElMessage.success(`Reverted to ${result.version}. Restart the app to use it.`)
     await load()
   } catch (e) {
     error.value = e?.response?.data?.detail || e.message || "rollback failed"
@@ -305,15 +375,19 @@ async function onRollback() {
   }
 }
 
-function formatLastCheck(iso) {
-  if (!iso) return "never"
-  try {
-    const d = new Date(iso)
-    return d.toLocaleString()
-  } catch {
-    return iso
-  }
-}
-
-onMounted(load)
+onMounted(async () => {
+  await load()
+  if (state.launcher_install) await probeCurrentChannel()
+})
 </script>
+
+<style scoped>
+.updates-panel input[type="text"],
+.updates-panel input[type="url"],
+.updates-panel input[type="search"],
+.updates-panel input:not([type]),
+.updates-panel select {
+  background-color: inherit;
+  color: inherit;
+}
+</style>

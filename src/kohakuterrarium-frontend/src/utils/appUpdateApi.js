@@ -1,17 +1,12 @@
 /**
- * Client for the ``/api/app/*`` self-update surface (topic 06).
+ * Client for the ``/api/app/*`` self-update surface (topic 06b —
+ * release-bundle update mechanism).
  *
- * The backend is wrapper-aware: when the host is the Briefcase thin
- * wrapper, settings + update routes act on the wrapper's managed
- * venv; otherwise non-wrapper actions return 409 with a hint message
- * the UI should surface verbatim.
- *
- * Response shapes carry an optional ``install-source`` field
- * (``"bundled"`` / ``"pypi"`` / ``"git"`` / ``"local"`` / null) — see
- * topic 06 / sub-plan 01.  The launcher writes this on every
- * successful install / update; UpdatesPanel reads it to render
- * "Installed from …" honestly.  Null on legacy installs that
- * pre-date the field.
+ * The backend is launcher-aware: when the host is the briefcase
+ * launcher install (active pointer + interpreter under
+ * runtime/versions/), settings + update routes operate on the
+ * versioned tree. Outside the launcher (dev install, lab worker),
+ * routes return 409 with a hint the UI surfaces verbatim.
  */
 
 import axios from "axios"
@@ -32,41 +27,40 @@ export const appUpdateAPI = {
     const { data } = await api.get("/settings")
     return data
   },
-  /** Persist a settings patch.  Server schema-validates; bad fields → 400. */
-  async putSettings(patch) {
-    const { data } = await api.put("/settings", patch)
+  /** Persist new settings (replaces — server runs coercion). */
+  async putSettings(payload) {
+    const { data } = await api.put("/settings", payload)
     return data
   },
-  /** Read cached update-status (no probe). */
-  async getUpdateStatus() {
-    const { data } = await api.get("/update-status")
+  /** Aggregate state: active version, installed list, settings, last-check. */
+  async getState() {
+    const { data } = await api.get("/state")
     return data
   },
-  /** Force a fresh PyPI / git probe; updates ``last-check-at``. */
-  async checkNow() {
-    const { data } = await api.post("/check-now")
+  /** Force-fetch the channel manifest; returns releases filtered for this machine. */
+  async probeFeed() {
+    const { data } = await api.post("/feeds/probe")
     return data
   },
-  /** Acknowledge intent to update; response gives WS URL for progress. */
+  /** Probe what would be installed without installing. */
+  async checkUpdate() {
+    const { data } = await api.post("/check")
+    return data
+  },
+  /** Acknowledge intent to update; response carries the WS path. */
   async startUpdate() {
     const { data } = await api.post("/update")
     return data
   },
-  /** Roll back to the previous venv (wrapper-only; 409 elsewhere). */
+  /** Revert pointer to previous installed version. */
   async rollback() {
     const { data } = await api.post("/rollback")
     return data
   },
-  /** Wipe the managed venv and reinstall from bundled wheels (C2 recovery). */
-  async resetVenv() {
-    const { data } = await api.post("/reset-venv")
-    return data
-  },
   /**
-   * Open the update-progress WebSocket.  Caller receives ``{phase,
-   * percent, message, status?}`` frames; the terminal frame's
-   * ``status`` is ``"ok"`` or ``"failed"``.  Returns the WebSocket
-   * object so the caller can close it on cancel.
+   * Open the update-progress WebSocket. ``onFrame`` receives
+   * ``{phase, percent, message, status?, version?, build_id?, restart-required?}``
+   * frames. Returns the WebSocket so the caller can close on cancel.
    */
   openProgressStream({ onFrame, onClose }) {
     const ws = new WebSocket(wsUrl("/ws/app/update"))
