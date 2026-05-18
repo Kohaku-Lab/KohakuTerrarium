@@ -200,7 +200,9 @@ class TestCreateInputPackageLoad:
 
         mod_dir = tmp_path / "pkgsrc"
         mod_dir.mkdir()
-        (mod_dir / "my_pkg_input.py").write_text(textwrap.dedent("""
+        (mod_dir / "my_pkg_input.py").write_text(
+            textwrap.dedent(
+                """
                 from kohakuterrarium.modules.input.base import BaseInputModule
 
                 class PkgInput(BaseInputModule):
@@ -209,7 +211,9 @@ class TestCreateInputPackageLoad:
 
                     async def get_input(self):
                         return None
-                """))
+                """
+            )
+        )
         monkeypatch.syspath_prepend(str(mod_dir))
         monkeypatch.setattr(
             io_mod,
@@ -267,7 +271,9 @@ class TestCreateOutputPackageLoad:
 
         mod_dir = tmp_path / "pkgsrc"
         mod_dir.mkdir()
-        (mod_dir / "my_pkg_output.py").write_text(textwrap.dedent("""
+        (mod_dir / "my_pkg_output.py").write_text(
+            textwrap.dedent(
+                """
                 from kohakuterrarium.modules.output.base import BaseOutputModule
 
                 class PkgOut(BaseOutputModule):
@@ -276,7 +282,9 @@ class TestCreateOutputPackageLoad:
 
                     async def write(self, content, **kw):
                         return None
-                """))
+                """
+            )
+        )
         monkeypatch.syspath_prepend(str(mod_dir))
         monkeypatch.setattr(
             io_mod,
@@ -309,7 +317,9 @@ class TestCreateInputCustomLoadSuccess:
     def test_loads_custom_input(self, tmp_path):
         custom = tmp_path / "custom"
         custom.mkdir()
-        (custom / "myinput.py").write_text(textwrap.dedent("""
+        (custom / "myinput.py").write_text(
+            textwrap.dedent(
+                """
                 from kohakuterrarium.modules.input.base import BaseInputModule
 
                 class MyInput(BaseInputModule):
@@ -318,7 +328,9 @@ class TestCreateInputCustomLoadSuccess:
 
                     async def get_input(self):
                         return None
-                """))
+                """
+            )
+        )
         loader = ModuleLoader(agent_path=tmp_path)
         cfg = AgentConfig(
             name="a",

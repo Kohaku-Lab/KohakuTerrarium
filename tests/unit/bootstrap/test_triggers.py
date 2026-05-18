@@ -81,7 +81,9 @@ class TestCreateTriggerCustom:
     def test_load_success(self, tmp_path):
         custom = tmp_path / "custom"
         custom.mkdir()
-        (custom / "trig.py").write_text(textwrap.dedent("""
+        (custom / "trig.py").write_text(
+            textwrap.dedent(
+                """
                 import asyncio
 
                 from kohakuterrarium.modules.trigger.base import BaseTrigger
@@ -91,7 +93,9 @@ class TestCreateTriggerCustom:
                     async def wait_for_trigger(self):
                         await asyncio.sleep(60)
                         return None
-                """))
+                """
+            )
+        )
         loader = ModuleLoader(agent_path=tmp_path)
         cfg = TriggerConfig(
             type="custom",

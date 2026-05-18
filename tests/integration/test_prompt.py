@@ -84,7 +84,8 @@ pytestmark = pytest.mark.timeout(30)
 # loaded by ``ModuleLoader`` exactly like a user-shipped plugin and its
 # ``get_prompt_content`` fragment must land in the assembled system
 # prompt (between tool guidance and framework hints).
-_PLUGIN_SOURCE = textwrap.dedent('''
+_PLUGIN_SOURCE = textwrap.dedent(
+    '''
     """A real prompt-contributing plugin for the prompt integration test."""
 
     from kohakuterrarium.modules.plugin.base import BasePlugin
@@ -96,18 +97,22 @@ _PLUGIN_SOURCE = textwrap.dedent('''
 
         def get_prompt_content(self, context):
             return "## Banner\\n\\nSAFETY-BANNER: always confirm destructive ops."
-    ''').strip()
+    '''
+).strip()
 
 
-_SYSTEM_MD = textwrap.dedent("""
+_SYSTEM_MD = textwrap.dedent(
+    """
     # {{ agent_name }}
 
     You are Prompttest, a meticulous file-handling assistant.
     PERSONALITY-MARKER: you always read before you write.
-    """).strip()
+    """
+).strip()
 
 
-_CONFIG_YAML = textwrap.dedent("""
+_CONFIG_YAML = textwrap.dedent(
+    """
     name: prompttest
     system_prompt_file: prompts/system.md
 
@@ -125,7 +130,8 @@ _CONFIG_YAML = textwrap.dedent("""
         type: custom
         module: custom/banner_plugin.py
         class: BannerPlugin
-    """).strip()
+    """
+).strip()
 
 
 def _write_agent(root: Path) -> Path:
@@ -343,7 +349,8 @@ class TestPromptIntegration:
         native_dir = tmp_path / "native_agent"
         (native_dir / "prompts").mkdir(parents=True)
         (native_dir / "config.yaml").write_text(
-            textwrap.dedent("""
+            textwrap.dedent(
+                """
                 name: nativeagent
                 system_prompt_file: prompts/system.md
                 controller:
@@ -354,7 +361,8 @@ class TestPromptIntegration:
                   framework.execution_model.native: "NATIVE-EXEC-OVERRIDE: be terse."
                 tools:
                   - { name: read, type: builtin }
-                """).strip(),
+                """
+            ).strip(),
             encoding="utf-8",
         )
         (native_dir / "prompts" / "system.md").write_text(
@@ -476,14 +484,16 @@ class TestPromptIntegration:
         agent_dir = tmp_path / "loop_agent"
         (agent_dir / "prompts").mkdir(parents=True)
         (agent_dir / "config.yaml").write_text(
-            textwrap.dedent("""
+            textwrap.dedent(
+                """
                 name: loopagent
                 system_prompt_file: prompts/system.md
                 controller:
                   llm: ""
                 tools:
                   - { name: read, type: builtin }
-                """).strip(),
+                """
+            ).strip(),
             encoding="utf-8",
         )
         # ``tools`` is injected by the aggregator from the registry, so a
@@ -539,7 +549,8 @@ class TestPromptIntegration:
         agent_dir = tmp_path / "static_agent"
         (agent_dir / "prompts").mkdir(parents=True)
         (agent_dir / "config.yaml").write_text(
-            textwrap.dedent("""
+            textwrap.dedent(
+                """
                 name: staticagent
                 system_prompt_file: prompts/system.md
                 controller:
@@ -547,7 +558,8 @@ class TestPromptIntegration:
                   skill_mode: static
                 tools:
                   - { name: read, type: builtin }
-                """).strip(),
+                """
+            ).strip(),
             encoding="utf-8",
         )
         (agent_dir / "prompts" / "system.md").write_text(

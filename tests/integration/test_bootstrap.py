@@ -105,7 +105,8 @@ def _write_minimal_creature(root: Path) -> Path:
     config_dir = root / "minimal_creature"
     config_dir.mkdir()
     (config_dir / "config.yaml").write_text(
-        textwrap.dedent("""\
+        textwrap.dedent(
+            """\
             name: minimal
             version: "1.0"
             controller:
@@ -119,7 +120,8 @@ def _write_minimal_creature(root: Path) -> Path:
               type: none
             output:
               type: stdout
-            """),
+            """
+        ),
         encoding="utf-8",
     )
     (config_dir / "system.md").write_text(
@@ -143,7 +145,8 @@ def _write_rich_creature(root: Path) -> Path:
     # A custom tool + a custom plugin, loaded via ModuleLoader from a
     # file inside the creature folder — the ``type: custom`` path.
     (custom_dir / "ext.py").write_text(
-        textwrap.dedent('''\
+        textwrap.dedent(
+            '''\
             """Custom tool + plugin for the bootstrap integration test."""
 
             from kohakuterrarium.modules.tool.base import (
@@ -188,7 +191,8 @@ def _write_rich_creature(root: Path) -> Path:
                 ) -> str:
                     self.calls += 1
                     return response + " [tagged]"
-            '''),
+            '''
+        ),
         encoding="utf-8",
     )
 
@@ -196,7 +200,8 @@ def _write_rich_creature(root: Path) -> Path:
     # loaded via ModuleLoader from the creature folder — the
     # ``type: custom`` trigger / sub-agent module paths.
     (custom_dir / "extras.py").write_text(
-        textwrap.dedent('''\
+        textwrap.dedent(
+            '''\
             """Custom trigger + sub-agent config for the bootstrap test."""
 
             import asyncio
@@ -232,12 +237,14 @@ def _write_rich_creature(root: Path) -> Path:
                 description="a module-defined scout sub-agent",
                 system_prompt="You are the scout.",
             )
-            '''),
+            '''
+        ),
         encoding="utf-8",
     )
 
     (config_dir / "config.yaml").write_text(
-        textwrap.dedent("""\
+        textwrap.dedent(
+            """\
             name: rich
             version: "1.0"
             controller:
@@ -304,7 +311,8 @@ def _write_rich_creature(root: Path) -> Path:
                 class: TagPlugin
               - name: budget
                 type: builtin
-            """),
+            """
+        ),
         encoding="utf-8",
     )
     (config_dir / "system.md").write_text(
@@ -735,7 +743,8 @@ class TestBootstrapIntegration:
         custom_dir = config_dir / "custom"
         custom_dir.mkdir()
         (custom_dir / "io.py").write_text(
-            textwrap.dedent('''\
+            textwrap.dedent(
+                '''\
                 """Custom input + output modules for the inline bootstrap test."""
 
                 from kohakuterrarium.modules.input.base import InputModule
@@ -760,7 +769,8 @@ class TestBootstrapIntegration:
 
                     async def write_stream(self, chunk: str) -> None:
                         self.collected.append(chunk)
-                '''),
+                '''
+            ),
             encoding="utf-8",
         )
 
@@ -1030,7 +1040,8 @@ class TestBootstrapIntegration:
         # sub-agent type, and a plugin that can't resolve. NONE of these
         # may abort the agent build — they degrade to "dropped + logged".
         (config_dir / "config.yaml").write_text(
-            textwrap.dedent("""\
+            textwrap.dedent(
+                """\
                 name: degraded
                 version: "1.0"
                 controller:
@@ -1069,7 +1080,8 @@ class TestBootstrapIntegration:
                     type: not_a_real_subagent_type
                 plugins:
                   - name: nonexistent_plugin_xyz
-                """),
+                """
+            ),
             encoding="utf-8",
         )
 
