@@ -87,8 +87,14 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--extras",
-        default="full",
-        help="pip extras to install (comma-separated, '' for none).",
+        default="",
+        help=(
+            "pip extras to install (comma-separated, '' for none — the "
+            "default). The bundled release intentionally omits heavy ML "
+            "extras (``[full]`` pulls in sentence-transformers → torch → "
+            "nvidia-* on Linux, ~2.5 GB per artifact). Users who want "
+            "those install them on demand into the active version tree."
+        ),
     )
     p.add_argument(
         "--out",
