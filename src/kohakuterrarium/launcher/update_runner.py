@@ -1,19 +1,19 @@
-"""Orchestration of the first-launch + update flows.
+"""Orchestration of first-launch + update + rollback.
 
-Glue between :mod:`launcher.settings`, :mod:`launcher.sources`,
-:mod:`launcher.venv_ops`, and :mod:`launcher._lock`.  Higher layers
-(the bootloader, the backend API, the CLI verb) call into one of:
+Glue layer over :mod:`launcher.settings`, :mod:`launcher.feeds`,
+:mod:`launcher.downloader`, and :mod:`launcher.tree_ops`. Callers
+(bootloader, API, CLI verb) drive one of:
 
-- :func:`first_install` — first launch, no venv present.
-- :func:`run_update`    — user-triggered update; replaces current venv
-                          via atomic swap with rollback on failure.
-- :func:`maybe_update`  — honour ``update.mode`` on launch (notify or
-                          auto).  Returns whether an update happened.
-- :func:`rollback_to_previous` — swap ``venv.old`` back into place.
-- :func:`reset_to_bundled`     — C2 recovery via bundled wheels.
+- :func:`first_install`  — no active pointer; install from bundled
+  release if present, else from the configured feed.
+- :func:`run_update`     — user-triggered: probe feed, download
+  newer release, smoke, atomic-pointer-swap.
+- :func:`maybe_update`   — honour ``update.mode`` on launch.
+- :func:`rollback`       — revert pointer to the previous version.
+- :func:`reset`          — wipe ``versions/`` and re-run first_install.
 
-All entry points produce ``UpdateResult`` so callers can render the
-outcome consistently (CLI, API, splash UI).
+All entry points produce :class:`UpdateResult` so callers can render
+the outcome consistently (CLI, API, splash UI).
 """
 
 import datetime as _dt
@@ -24,27 +24,31 @@ from typing import Callable
 
 from kohakuterrarium.launcher import settings as _settings
 from kohakuterrarium.launcher._lock import LockBusy, UpdateLock
+from kohakuterrarium.launcher.downloader import (
+    DownloadError,
+    extract_tarball,
+    fetch_and_extract,
+)
+from kohakuterrarium.launcher.feeds import FeedError, ReleaseTarget, resolve_feed
 from kohakuterrarium.launcher.log import get_logger
 from kohakuterrarium.launcher.paths import (
-    bundled_wheels_dir,
+    bundled_release_dir,
     lock_path,
-    venv_dir,
-    venv_new_dir,
-    venv_old_dir,
+    runtime_dir,
+    versions_dir,
 )
-from kohakuterrarium.launcher.sources import (
-    PACKAGE_NAME,
-    is_auto_update_allowed,
-    resolve_pip_args,
-)
-from kohakuterrarium.launcher.venv_ops import (
-    VenvOpError,
-    atomic_swap,
-    create_venv,
-    install_into,
-    rollback as venv_rollback,
-    smoke_test,
-    write_wrapper_marker,
+from kohakuterrarium.launcher.tree_ops import (
+    TreeOpError,
+    clear_active_pointer,
+    gc_old_versions,
+    partial_dir_for,
+    promote_partial,
+    read_active_pointer,
+    remove_partial,
+    revert_active_pointer,
+    smoke_test_tree,
+    sweep_stale_partials,
+    write_active_pointer,
 )
 
 
@@ -54,251 +58,337 @@ class UpdateResult:
 
     ok: bool
     version: str | None = None
+    build_id: str | None = None
     error: str | None = None
     restart_required: bool = False
     skipped_reason: str | None = None
 
 
-# A progress callback takes (phase, percent, message) and is fire-and-
-# forget — exceptions inside it are swallowed so a flaky UI can never
-# break the update flow.  The bootloader / API wires the splash server
-# in via this hook.
+# Progress callback: (phase, percent, message). Fire-and-forget;
+# exceptions inside it are swallowed.
 ProgressCallback = Callable[[str, float, str], None]
 
 
-def _now_iso() -> str:
+def _noop_progress(phase: str, percent: float, message: str) -> None:
+    return
+
+
+def _iso_now() -> str:
     return _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
 
 
-def _is_default_source(source: _settings.SourceConfig) -> bool:
-    """True when the user hasn't explicitly chosen a non-default source.
-
-    Bundled-first first-install only kicks in for default-source
-    configs — if the user explicitly set ``source.kind = "git"`` or
-    pinned a version with ``source.spec``, we honour that intent.
-    """
-    return source.kind == "pypi" and not source.spec
-
-
-def _bundled_pip_args(wheels: Path, extras: list[str]) -> list[str]:
-    """Build the offline-install pip arg list for the bundled wheels dir.
-
-    Mirrors ``sources.resolve_pip_args`` for ``kind="bundled"`` but
-    takes the wheels dir + extras directly so callers can skip the
-    settings round-trip when they already know the wheels are present.
-    """
-    target = PACKAGE_NAME if not extras else f"{PACKAGE_NAME}[{','.join(extras)}]"
-    return ["--no-index", "--find-links", str(wheels), target]
-
-
-def _build_and_smoke(target: Path, pip_args: list[str]) -> str:
-    """Create ``target/`` venv, install ``pip_args`` into it, smoke-test.
-
-    Returns the framework version on success.  Cleans up ``target/`` on
-    failure so the caller never has to handle half-built directories.
-    """
-    log = get_logger()
+def _safe_progress(cb: ProgressCallback, phase: str, percent: float, msg: str) -> None:
     try:
-        create_venv(target)
-        install_into(target, pip_args)
-        version = smoke_test(target)
-        write_wrapper_marker(target)
-        log.info("runner: built %s at version %s", target, version)
-        return version
-    except VenvOpError:
-        shutil.rmtree(target, ignore_errors=True)
-        raise
+        cb(phase, percent, msg)
+    except Exception as e:  # pragma: no cover - defensive
+        get_logger().debug("progress callback raised: %s", e)
 
 
-def first_install() -> UpdateResult:
-    """Build the managed venv from the current settings' source.
+# ── Bundled-release first-install ───────────────────────────────────
 
-    Called when no venv exists at launcher startup.  Holds the update
-    lock for the duration so a second simultaneous launch (rare but
-    possible) doesn't race.
 
-    **Bundled-first behaviour** (topic 06 / sub-plan 01): when the
-    Briefcase bundle ships ``wheels-bundle/`` AND the user hasn't
-    explicitly chosen a non-default source, install offline from the
-    bundled wheels regardless of ``cfg.source.kind``.  Falls through
-    to the configured source if the bundled install fails (so a
-    corrupt wheel doesn't brick first launch).  ``cfg.source`` is
-    unchanged — it represents the *update* source, which stays PyPI
-    by default.
-    """
+def _pick_bundled_tarball() -> Path | None:
+    """Return the single ``kohakuterrarium-*.tar.*`` in the bundled-release dir."""
+    root = bundled_release_dir()
+    if root is None:
+        return None
+    candidates = sorted(root.glob("kohakuterrarium-*.tar.*"))
+    return candidates[0] if candidates else None
+
+
+def _bundled_version_from_filename(tarball: Path) -> str:
+    """Parse ``kohakuterrarium-<version>-<plat>-py<X.Y>.tar.<ext>`` for the version."""
+    stem = tarball.name
+    # Strip trailing ``.tar.<ext>``
+    for ext in (".tar.zst", ".tar.gz", ".tgz", ".tzst", ".tar"):
+        if stem.endswith(ext):
+            stem = stem[: -len(ext)]
+            break
+    parts = stem.split("-")
+    if len(parts) >= 2 and parts[0] == "kohakuterrarium":
+        return parts[1]
+    return "bundled"
+
+
+def _install_from_bundled(progress: ProgressCallback) -> UpdateResult:
+    """Extract the offline tarball into ``versions/<v>/`` and point at it."""
     log = get_logger()
+    tarball = _pick_bundled_tarball()
+    if tarball is None:
+        return UpdateResult(
+            ok=False, error="no bundled release tarball found in the briefcase shell"
+        )
+    version = _bundled_version_from_filename(tarball)
+    _safe_progress(progress, "extract", 20.0, f"Unpacking bundled {version}")
+    partial = partial_dir_for(version)
+    if partial.exists():
+        shutil.rmtree(partial, ignore_errors=True)
+    try:
+        extract_tarball(tarball, partial)
+    except DownloadError as e:
+        remove_partial(version)
+        return UpdateResult(ok=False, error=f"bundled extract failed: {e}")
+    _safe_progress(progress, "smoke", 70.0, "Smoke testing")
+    try:
+        smoke_test_tree(partial)
+    except TreeOpError as e:
+        remove_partial(version)
+        return UpdateResult(ok=False, error=f"bundled smoke failed: {e}")
+    try:
+        final = promote_partial(version)
+    except TreeOpError as e:
+        remove_partial(version)
+        return UpdateResult(ok=False, error=str(e))
+    write_active_pointer(version, build_id="bundled")
+    log.info("runner: bundled first_install promoted %s", final)
+    _safe_progress(progress, "done", 100.0, f"Installed {version}")
+    return UpdateResult(ok=True, version=version, build_id="bundled")
+
+
+# ── Feed-driven install / update ────────────────────────────────────
+
+
+def _install_from_feed(
+    cfg: _settings.AppSettings,
+    progress: ProgressCallback,
+    *,
+    is_update: bool,
+) -> UpdateResult:
+    """Resolve feed → download → smoke → swap pointer.
+
+    Used by both first_install (when no bundled tarball) and run_update.
+    Skips re-install when the resolved version equals the active one
+    (``is_update=True`` only).
+    """
+    _safe_progress(progress, "resolve", 5.0, "Checking for updates")
+    try:
+        target = resolve_feed(cfg)
+    except FeedError as e:
+        return UpdateResult(ok=False, error=f"feed resolution failed: {e}")
+
+    if is_update:
+        current = read_active_pointer()
+        if current is not None and current.version == target.version:
+            _safe_progress(progress, "done", 100.0, f"Already on {target.version}")
+            return UpdateResult(
+                ok=True,
+                version=target.version,
+                skipped_reason="up-to-date",
+            )
+
+    return _download_smoke_swap(target, progress)
+
+
+def _download_smoke_swap(
+    target: ReleaseTarget, progress: ProgressCallback
+) -> UpdateResult:
+    log = get_logger()
+    partial = partial_dir_for(target.version)
+    cache_dir = runtime_dir() / "downloads"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    tarball = cache_dir / Path(target.url).name
+
+    def _dl_progress(done: int, total: int) -> None:
+        pct = (done * 60.0 / total + 10.0) if total > 0 else 35.0
+        _safe_progress(progress, "download", pct, f"{done // 1024} KiB")
+
+    try:
+        fetch_and_extract(
+            target.url, target.sha256, tarball, partial, progress=_dl_progress
+        )
+    except DownloadError as e:
+        remove_partial(target.version)
+        if tarball.exists():
+            try:
+                tarball.unlink()
+            except OSError:
+                pass
+        return UpdateResult(ok=False, error=str(e))
+
+    _safe_progress(progress, "smoke", 80.0, "Smoke testing")
+    try:
+        smoke_test_tree(partial)
+    except TreeOpError as e:
+        remove_partial(target.version)
+        return UpdateResult(ok=False, error=f"smoke failed: {e}")
+
+    try:
+        final = promote_partial(target.version)
+    except TreeOpError as e:
+        remove_partial(target.version)
+        return UpdateResult(ok=False, error=str(e))
+
+    write_active_pointer(target.version, target.build_id)
+    log.info("runner: promoted %s (build %s)", final, target.build_id)
+    try:
+        tarball.unlink()
+    except OSError:
+        pass
+    _safe_progress(progress, "done", 100.0, f"Installed {target.version}")
+    return UpdateResult(
+        ok=True,
+        version=target.version,
+        build_id=target.build_id,
+        restart_required=True,
+    )
+
+
+# ── Public entry points ─────────────────────────────────────────────
+
+
+def _first_install_locked(progress: ProgressCallback) -> UpdateResult:
+    """First-install body — caller must already hold the update flock."""
     cfg = _settings.load()
-
-    wheels = bundled_wheels_dir()
-    bundled_eligible = wheels is not None and _is_default_source(cfg.source)
-    using_bundled = False
-
-    if bundled_eligible:
-        pip_args = _bundled_pip_args(wheels, cfg.source.extras)
-        using_bundled = True
+    sweep_stale_partials()
+    if bundled_release_dir() is not None:
+        result = _install_from_bundled(progress)
+        if result.ok:
+            cfg.runtime.active_version = result.version
+            cfg.runtime.active_build_id = result.build_id
+            cfg.runtime.last_check_at = _iso_now()
+            cfg.runtime.last_check_error = None
+            _settings.save(cfg)
+            return result
+        get_logger().warning(
+            "runner: bundled first_install failed (%s); falling through to feed",
+            result.error,
+        )
+    result = _install_from_feed(cfg, progress, is_update=False)
+    if result.ok:
+        cfg.runtime.active_version = result.version
+        cfg.runtime.active_build_id = result.build_id
+        cfg.runtime.last_check_at = _iso_now()
+        cfg.runtime.last_check_error = None
     else:
-        try:
-            pip_args = resolve_pip_args(cfg.source)
-        except (ValueError, FileNotFoundError) as e:
-            return UpdateResult(ok=False, error=f"source resolution failed: {e}")
+        cfg.runtime.last_check_at = _iso_now()
+        cfg.runtime.last_check_error = result.error
+    _settings.save(cfg)
+    return result
 
+
+def first_install(progress: ProgressCallback | None = None) -> UpdateResult:
+    """Build ``versions/<v>/`` + write pointer. Called when no pointer.
+
+    Prefers the bundled-release tarball when the briefcase shell
+    shipped one; falls back to the configured feed when not (dev
+    install / minimal bundle).
+    """
+    progress = progress or _noop_progress
     try:
         with UpdateLock(lock_path()):
-            target = venv_dir()
-            if target.exists():
-                shutil.rmtree(target, ignore_errors=True)
-            try:
-                version = _build_and_smoke(target, pip_args)
-            except VenvOpError as e:
-                # Bundled install failed (corrupt wheel, etc.) — fall
-                # through to the configured source as recovery.  Only
-                # when the user hasn't explicitly overridden source,
-                # because a custom git/local source failing is a real
-                # user-facing failure, not something to silently paper
-                # over with PyPI.
-                if using_bundled and _is_default_source(cfg.source):
-                    log.warning(
-                        "runner: bundled first_install failed (%s); "
-                        "falling through to PyPI",
-                        e,
-                    )
-                    try:
-                        pip_args = resolve_pip_args(cfg.source)
-                        version = _build_and_smoke(target, pip_args)
-                        using_bundled = False
-                    except (VenvOpError, ValueError, FileNotFoundError) as e2:
-                        log.error("runner: PyPI fallback also failed: %s", e2)
-                        return UpdateResult(ok=False, error=str(e2))
-                else:
-                    log.error("runner: first_install failed: %s", e)
-                    return UpdateResult(ok=False, error=str(e))
-            cfg.runtime.last_installed_version = version
-            cfg.runtime.last_check_at = _now_iso()
-            cfg.runtime.venv_path = str(target)
-            cfg.runtime.install_source = "bundled" if using_bundled else cfg.source.kind
-            _settings.save(cfg)
-            return UpdateResult(ok=True, version=version, restart_required=False)
+            return _first_install_locked(progress)
     except LockBusy as e:
         return UpdateResult(ok=False, error=f"another update is in progress: {e}")
 
 
-def run_update() -> UpdateResult:
-    """User-triggered atomic update: install fresh venv.new, swap, persist."""
-    log = get_logger()
+def run_update(progress: ProgressCallback | None = None) -> UpdateResult:
+    """User-triggered update via the active feed."""
+    progress = progress or _noop_progress
     cfg = _settings.load()
     try:
-        pip_args = resolve_pip_args(cfg.source)
-    except (ValueError, FileNotFoundError) as e:
-        return UpdateResult(ok=False, error=f"source resolution failed: {e}")
-
-    try:
         with UpdateLock(lock_path()):
-            new = venv_new_dir()
-            if new.exists():
-                shutil.rmtree(new, ignore_errors=True)
-            try:
-                version = _build_and_smoke(new, pip_args)
-            except VenvOpError as e:
-                log.error("runner: update build failed: %s", e)
-                return UpdateResult(ok=False, error=str(e))
-            try:
-                atomic_swap(venv_dir(), new, venv_old_dir())
-            except VenvOpError as e:
-                log.error("runner: atomic_swap failed: %s", e)
-                shutil.rmtree(new, ignore_errors=True)
-                return UpdateResult(ok=False, error=str(e))
-            cfg.runtime.last_installed_version = version
-            cfg.runtime.last_check_at = _now_iso()
-            cfg.runtime.install_source = cfg.source.kind
+            sweep_stale_partials()
+            result = _install_from_feed(cfg, progress, is_update=True)
+            cfg.runtime.last_check_at = _iso_now()
+            if result.ok and result.skipped_reason is None:
+                cfg.runtime.active_version = result.version
+                cfg.runtime.active_build_id = result.build_id
+                cfg.runtime.last_check_error = None
+                # GC after successful promote.
+                ptr = read_active_pointer()
+                installed = []
+                if ptr is not None:
+                    installed.append(ptr.version)
+                gc_old_versions(
+                    keep=cfg.update.keep_versions,
+                    always_keep=set(installed),
+                )
+            elif not result.ok:
+                cfg.runtime.last_check_error = result.error
+            else:
+                cfg.runtime.last_check_error = None
             _settings.save(cfg)
-            return UpdateResult(ok=True, version=version, restart_required=True)
+            return result
     except LockBusy as e:
         return UpdateResult(ok=False, error=f"another update is in progress: {e}")
 
 
-def maybe_update() -> UpdateResult:
-    """Honour ``update.mode`` on launch.
-
-    - ``manual`` → no-op (``skipped_reason="manual"``).
-    - ``notify-on-launch`` → no install; caller surfaces the banner
-      after independently checking version availability.
-    - ``auto-on-launch`` → run :func:`run_update` if source allows
-      auto-update; else no-op.
-    """
+def maybe_update(progress: ProgressCallback | None = None) -> UpdateResult:
+    """Honour ``update.mode`` on launch."""
     cfg = _settings.load()
     if cfg.update.mode == "manual":
         return UpdateResult(ok=True, skipped_reason="manual")
     if cfg.update.mode == "notify-on-launch":
         return UpdateResult(ok=True, skipped_reason="notify-only")
-    if not is_auto_update_allowed(cfg.source):
-        return UpdateResult(
-            ok=True,
-            skipped_reason=f"auto-update disabled for source.kind={cfg.source.kind}",
-        )
-    return run_update()
+    # auto-on-launch
+    return run_update(progress)
 
 
-def rollback_to_previous() -> UpdateResult:
-    """Swap ``venv.old/`` back into place.  No source resolution needed."""
-    log = get_logger()
+def rollback() -> UpdateResult:
+    """Revert pointer to the previous installed version."""
     try:
         with UpdateLock(lock_path()):
             try:
-                venv_rollback(
-                    current=venv_dir(),
-                    backup=venv_old_dir(),
-                    broken=Path(str(venv_dir()) + ".bad"),
-                )
-            except VenvOpError as e:
-                log.error("runner: rollback failed: %s", e)
+                prev = revert_active_pointer()
+            except TreeOpError as e:
                 return UpdateResult(ok=False, error=str(e))
             cfg = _settings.load()
-            # We don't know the previous version exactly — leave the
-            # field as-is for now; a follow-up smoke could read the
-            # restored venv's ``__version__`` but adds latency we
-            # don't need for rollback hot-path.
+            cfg.runtime.active_version = prev.version
+            cfg.runtime.active_build_id = prev.build_id
+            cfg.runtime.last_check_at = _iso_now()
             _settings.save(cfg)
-            return UpdateResult(ok=True, restart_required=True)
+            return UpdateResult(
+                ok=True,
+                version=prev.version,
+                build_id=prev.build_id,
+                restart_required=True,
+            )
     except LockBusy as e:
         return UpdateResult(ok=False, error=f"another update is in progress: {e}")
 
 
-def reset_to_bundled() -> UpdateResult:
-    """C2 recovery — wipe ``venv/`` and reinstall from bundled wheels."""
-    log = get_logger()
-    cfg = _settings.load()
-    # Force the source to bundled for this one operation.
-    bundled_source = _settings.SourceConfig(kind="bundled", spec=None, extras=[])
-    try:
-        pip_args = resolve_pip_args(bundled_source)
-    except FileNotFoundError as e:
-        return UpdateResult(ok=False, error=str(e))
-
+def reset(progress: ProgressCallback | None = None) -> UpdateResult:
+    """Wipe ``versions/`` and re-run first_install."""
+    progress = progress or _noop_progress
     try:
         with UpdateLock(lock_path()):
-            target = venv_dir()
-            if target.exists():
-                shutil.rmtree(target, ignore_errors=True)
-            try:
-                version = _build_and_smoke(target, pip_args)
-            except VenvOpError as e:
-                log.error("runner: reset_to_bundled failed: %s", e)
-                return UpdateResult(ok=False, error=str(e))
-            cfg.runtime.last_installed_version = version
-            cfg.runtime.last_check_at = _now_iso()
-            cfg.runtime.venv_path = str(target)
-            cfg.runtime.install_source = "bundled"
-            _settings.save(cfg)
-            return UpdateResult(ok=True, version=version, restart_required=True)
+            clear_active_pointer()
+            root = versions_dir()
+            if root.exists():
+                shutil.rmtree(root, ignore_errors=True)
+            return _first_install_locked(progress)
     except LockBusy as e:
         return UpdateResult(ok=False, error=f"another update is in progress: {e}")
 
 
+def probe_only() -> UpdateResult:
+    """Resolve the feed without installing; report what would be installed.
+
+    Used by ``kt self-update --check-only`` and the API's status endpoint.
+    """
+    cfg = _settings.load()
+    try:
+        target = resolve_feed(cfg, force_refresh=True)
+    except FeedError as e:
+        return UpdateResult(ok=False, error=str(e))
+    current = read_active_pointer()
+    skipped = "up-to-date" if current and current.version == target.version else None
+    return UpdateResult(
+        ok=True,
+        version=target.version,
+        build_id=target.build_id,
+        skipped_reason=skipped,
+    )
+
+
+# Re-export Path import name for type hints in tests
 __all__ = [
     "UpdateResult",
+    "ProgressCallback",
     "first_install",
-    "maybe_update",
-    "reset_to_bundled",
-    "rollback_to_previous",
     "run_update",
+    "maybe_update",
+    "rollback",
+    "reset",
+    "probe_only",
 ]

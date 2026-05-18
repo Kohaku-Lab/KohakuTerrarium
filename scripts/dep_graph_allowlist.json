@@ -234,6 +234,12 @@
     "reason": "TUIInput pulls in Textual (third-party heavy); imported lazily so minimal installs don't have to take the Textual dependency"
   },
   {
+    "file": "src/kohakuterrarium/launcher/downloader.py",
+    "line": 112,
+    "function": "_open_tarball",
+    "reason": "zstandard is an optional launcher-only dep (briefcase bundles it; framework wheel doesn't require it). Lazy import so .tar.gz fallback path still works without zstandard installed."
+  },
+  {
     "file": "src/kohakuterrarium/studio/attach/pty_router.py",
     "line": 56,
     "function": "pty_session",

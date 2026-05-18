@@ -2,20 +2,14 @@
 
 Flow:
 
-1. Parse minimal launcher flags (``--reset-settings``, ``--no-exec``,
-   ``--splash-demo``).
-2. Load (or create) ``app-settings.json`` via :mod:`launcher.settings`.
-3. Detect the managed venv; if missing, run :func:`update_runner.first_install`
-   to build it per the configured source (see :mod:`launcher.sources`).
-4. If present, call :func:`update_runner.maybe_update` to honour
-   ``update.mode`` (``manual`` / ``notify-on-launch`` / ``auto-on-launch``).
-5. ``os.execv`` into the venv's ``kt`` to launch the framework process,
-   forwarding the original argv.
-
-The version-check probe that powers the ``notify-on-launch`` banner
-runs *inside the framework process* via ``POST /api/app/check-now``
-(see :mod:`kohakuterrarium.api.routes.app_update`) — the launcher itself
-does not reach the network on launch.
+1. Parse minimal launcher flags (``--reset-settings``, ``--reset-runtime``,
+   ``--no-exec``, ``--splash-demo``).
+2. Wipe legacy 06 venv if present (one-shot migration).
+3. Load (or create) ``app-settings.json``.
+4. Read ``runtime/active``:
+   - absent → :func:`update_runner.first_install` (bundled-release tarball or feed)
+   - present → :func:`update_runner.maybe_update` per ``update.mode``
+5. ``os.execv`` into ``versions/<active>/scripts/kt`` with the original argv.
 """
 
 import argparse
@@ -23,23 +17,30 @@ import os
 import sys
 import time
 
+from kohakuterrarium.launcher import migration as _migration
 from kohakuterrarium.launcher import settings as _settings
 from kohakuterrarium.launcher.log import get_logger
 from kohakuterrarium.launcher.paths import (
+    bundled_release_dir,
+    kt_script,
     runtime_dir,
     settings_path,
-    venv_dir,
-    venv_kt,
+    version_dir,
 )
-from kohakuterrarium.launcher.sources import resolve_pip_args
 from kohakuterrarium.launcher.splash_window import open_splash
-from kohakuterrarium.launcher.update_runner import first_install, maybe_update
+from kohakuterrarium.launcher.tree_ops import read_active_pointer
+from kohakuterrarium.launcher.update_runner import (
+    UpdateResult,
+    first_install,
+    maybe_update,
+    reset as runner_reset,
+)
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="kt-launcher",
-        description="KohakuTerrarium launcher — manages the framework venv.",
+        description="KohakuTerrarium launcher — manages versioned releases.",
         add_help=False,  # let the framework's own argparse handle --help post-exec
     )
     parser.add_argument(
@@ -48,16 +49,20 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Overwrite app-settings.json with defaults and exit.",
     )
     parser.add_argument(
+        "--reset-runtime",
+        action="store_true",
+        help="Wipe runtime/versions/ and re-run first_install.",
+    )
+    parser.add_argument(
         "--no-exec",
         action="store_true",
-        help="Resolve launcher state and exit (don't exec into the venv).",
+        help="Resolve launcher state and exit (don't exec into the version tree).",
     )
     parser.add_argument(
         "--splash-demo",
         action="store_true",
-        help="Open the splash window with a scripted progress sequence (Phase D smoke).",
+        help="Open the splash window with a scripted progress sequence.",
     )
-    # Unknown flags get forwarded to the framework's ``kt`` after exec.
     known, _ = parser.parse_known_args(argv)
     return known
 
@@ -74,86 +79,115 @@ def main(argv: list[str] | None = None) -> int:
         log.info("launcher: reset settings (wrote defaults to %s)", settings_path())
         return 0
 
-    if args.splash_demo:
-        log.info("launcher: --splash-demo running scripted sequence")
-        srv = open_splash()
-        try:
-            srv.publish("Starting…", percent=5, message="")
-            time.sleep(0.8)
-            srv.publish("Creating venv", percent=20, message="python -m venv …")
-            time.sleep(0.8)
-            srv.publish(
-                "Installing framework",
-                percent=55,
-                message="pip install kohakuterrarium",
-            )
-            time.sleep(0.8)
-            srv.publish("Smoke-testing", percent=85, message="kt --help")
-            time.sleep(0.4)
-            srv.publish("Ready", percent=100, message="", status="ok")
-            time.sleep(1.0)
-        finally:
-            srv.stop()
+    if args.reset_runtime:
+        log.info("launcher: --reset-runtime running first_install fresh")
+        result = runner_reset()
+        if not result.ok:
+            log.error("launcher: reset failed: %s", result.error)
+            return 6
+        log.info("launcher: reset succeeded at version %s", result.version)
         return 0
 
-    # Load settings on every non-reset call — defaults are written on
-    # first access so the rest of the wrapper can rely on a populated
-    # ``runtime.venv_path``.
-    cfg = _settings.load()
-    try:
-        pip_args = resolve_pip_args(cfg.source)
-    except (ValueError, FileNotFoundError) as e:
-        log.error("launcher: source resolution failed (%s); aborting", e)
-        return 4
+    if args.splash_demo:
+        return _run_splash_demo(log)
+
+    # One-shot 06 cleanup. Idempotent; no-op when nothing is there.
+    _migration.wipe_legacy_venv()
+
+    cfg = _settings.load()  # noqa: F841  - settings autoload also creates defaults
 
     if args.no_exec:
+        ptr = read_active_pointer()
         log.info(
-            "launcher: --no-exec — runtime_dir=%s venv_dir=%s venv_exists=%s "
-            "source=%s update_mode=%s pip_args=%s",
+            "launcher: --no-exec — runtime_dir=%s active=%s bundled_release=%s "
+            "feed.kind=%s channel=%s pinned=%s update_mode=%s",
             runtime_dir(),
-            venv_dir(),
-            venv_dir().exists(),
-            cfg.source.kind,
+            ptr.version if ptr else None,
+            bundled_release_dir(),
+            cfg.feed.kind,
+            cfg.channel,
+            cfg.pinned_version,
             cfg.update.mode,
-            pip_args,
         )
         return 0
 
-    venv = venv_dir()
-    if not venv.exists():
-        # First launch — build the managed venv from configured source.
-        log.info("launcher: no venv at %s — running first_install", venv)
+    pointer = read_active_pointer()
+    if pointer is None:
+        log.info("launcher: no active pointer — first_install")
         result = first_install()
         if not result.ok:
             log.error("launcher: first_install failed: %s", result.error)
             return 5
-        log.info(
-            "launcher: first_install succeeded at version %s",
-            result.version,
-        )
+        log.info("launcher: first_install succeeded at %s", result.version)
+        pointer = read_active_pointer()
+        if pointer is None:
+            log.error("launcher: first_install reported ok but pointer absent")
+            return 7
     else:
-        # Honour the update.mode on launch.
         result = maybe_update()
         if not result.ok:
             log.warning(
                 "launcher: maybe_update reported failure (%s); "
-                "exec-ing the existing venv anyway",
+                "exec-ing the existing version anyway",
                 result.error,
             )
+        elif result.restart_required and result.version is not None:
+            log.info("launcher: maybe_update installed %s (auto mode)", result.version)
+            pointer = read_active_pointer()
+            if pointer is None:
+                log.error("launcher: post-update pointer absent")
+                return 7
 
-    kt = venv_kt(venv)
+    target = version_dir(pointer.version)
+    kt = kt_script(target)
     if not kt.is_file():
-        log.error("launcher: managed venv is missing the 'kt' entry at %s", kt)
+        log.error("launcher: kt shim missing at %s", kt)
         return 3
 
     # Replace this process with the framework's entry, forwarding argv.
     forward = sys.argv[1:] if argv is None else list(argv)
+    # PYTHONPATH so the briefcase python finds the version's site-packages.
+    os.environ["PYTHONPATH"] = _build_pythonpath(target)
+    os.environ["PYTHONNOUSERSITE"] = "1"
     log.info("launcher: exec %s %s", kt, forward)
     os.execv(str(kt), [str(kt), *forward])
     return 0  # unreachable; execv replaces the process
 
 
-__all__ = ["main"]
+def _build_pythonpath(version_root) -> str:
+    """Prepend the version's ``site-packages/`` to any existing PYTHONPATH."""
+    site = str(version_root / "site-packages")
+    existing = os.environ.get("PYTHONPATH", "")
+    if not existing:
+        return site
+    return os.pathsep.join([site, existing])
+
+
+def _run_splash_demo(log) -> int:
+    """Demo the splash UI without doing any real install."""
+    log.info("launcher: --splash-demo running scripted sequence")
+    srv = open_splash()
+    try:
+        srv.publish("Starting…", percent=5, message="")
+        time.sleep(0.8)
+        srv.publish("Resolving feed", percent=20, message="stable.json")
+        time.sleep(0.8)
+        srv.publish(
+            "Downloading",
+            percent=55,
+            message="kohakuterrarium-1.5.1-linux-x64-py3.13.tar.zst",
+        )
+        time.sleep(0.8)
+        srv.publish("Smoke testing", percent=85, message="kt --version")
+        time.sleep(0.4)
+        srv.publish("Ready", percent=100, message="", status="ok")
+        time.sleep(1.0)
+    finally:
+        srv.stop()
+    return 0
+
+
+__all__ = ["main", "UpdateResult"]
 
 
 if __name__ == "__main__":

@@ -1,68 +1,79 @@
-"""Legacy-bundle detection + one-shot migration banner support.
+"""Legacy detection + one-shot cleanup.
 
-The 1.5.0 release ships two Briefcase artifacts side-by-side:
+Two kinds of legacy we may encounter on startup:
 
-- **Legacy bundle** — frozen full framework (the only shape before 1.5).
-- **Wrapper bundle** — the thin launcher introduced by topic 06.
+1. **06 layout** — ``~/.kohakuterrarium/runtime/venv/`` from the old
+   pip+venv-based launcher. The 06 launcher couldn't actually run on
+   the briefcase shell (missing ``venv`` module), so any venv on disk
+   was either built by a dev install or left dangling. Either way, the
+   06b launcher doesn't read it; we wipe it on first encounter.
 
-Existing legacy-bundle installs see a one-shot Admin → Updates banner
-prompting "switch to the new auto-updating bundle (one-time
-download)."  Once dismissed (or once the user has migrated), the
-banner doesn't reappear.  This module provides the probe the API uses
-to decide whether to render the banner.
+2. **Pre-launcher legacy bundle** — a frozen briefcase artifact from
+   before the wrapper existed at all. Detected via the
+   ``app_packages`` substring in ``sys.executable``.
+
+Both probes are stateless. The wipe action is one-shot and idempotent.
 """
 
+import shutil
 import sys
 from pathlib import Path
 
-from kohakuterrarium.launcher.paths import wrapper_marker_path
+from kohakuterrarium.launcher.log import get_logger
+from kohakuterrarium.launcher.paths import (
+    active_pointer_path,
+    legacy_venv_dir,
+)
 
 
-def is_wrapper_install() -> bool:
-    """Return True when this process runs inside a wrapper-managed venv.
+def legacy_venv_present() -> bool:
+    """True when ``runtime/venv/`` (06 layout) exists on disk."""
+    return legacy_venv_dir().is_dir()
 
-    The wrapper drops ``.kt-wrapper-marker`` at the root of the venv it
-    creates; the running interpreter must be that venv's Python for the
-    marker to be authoritative.  See :func:`paths.wrapper_marker_path`.
+
+def wipe_legacy_venv() -> Path | None:
+    """Delete the 06-layout venv if present.
+
+    Idempotent — returns the path that was wiped, or ``None`` if
+    nothing was there. Safe to call on every launcher startup.
     """
-    marker = wrapper_marker_path()
-    if not marker.is_file():
+    if not legacy_venv_present():
+        return None
+    log = get_logger()
+    target = legacy_venv_dir()
+    log.info("migration: wiping legacy 06 venv at %s", target)
+    shutil.rmtree(target, ignore_errors=True)
+    return target
+
+
+def is_launcher_install() -> bool:
+    """True when the running framework process was exec'd by the launcher.
+
+    Heuristic: a valid ``active`` pointer file exists AND
+    ``sys.executable``'s ancestor includes ``runtime/versions/``. The
+    framework's API layer uses this to gate ``/api/app/*`` (which is
+    meaningless for dev installs or laboratory worker nodes).
+    """
+    if not active_pointer_path().is_file():
         return False
-    # The sentinel could exist from a prior wrapper install while THIS
-    # interpreter is something else (system python, dev venv).  Cross-
-    # check that ``sys.executable`` is under the marker's parent venv.
-    try:
-        venv_root = marker.parent.resolve()
-        this_py = Path(sys.executable).resolve()
-    except OSError:
-        return False
-    try:
-        this_py.relative_to(venv_root)
-    except ValueError:
-        return False
-    return True
+    exe = Path(sys.executable).resolve()
+    for ancestor in exe.parents:
+        if ancestor.name == "versions" and ancestor.parent.name == "runtime":
+            return True
+    return False
 
 
 def is_legacy_bundle() -> bool:
-    """Best-effort: did the user launch a frozen full-framework Briefcase
-    bundle (the pre-1.5.0 shape)?
-
-    Heuristic: NOT a wrapper install, AND the interpreter sits under a
-    Briefcase-style ``app_packages`` layout.  Briefcase puts each
-    bundle's Python under
-    ``.../<formal_name>.app/Contents/Resources/app_packages/`` on macOS,
-    ``.../<formal_name>/app/`` on Windows, and a similar layout on
-    Linux AppImages.  The shared marker across all three is the
-    ``app_packages`` substring.
-
-    The wrapper bundle does NOT have ``app_packages`` in the runtime
-    interpreter path because it runs the user-owned venv's Python after
-    ``os.execv`` (see :func:`bootloader.main`).
-    """
-    if is_wrapper_install():
+    """Pre-launcher frozen briefcase bundle (no wrapper at all)."""
+    if is_launcher_install():
         return False
     exe = sys.executable.replace("\\", "/").lower()
     return "/app_packages/" in exe or exe.endswith("/app_packages")
 
 
-__all__ = ["is_legacy_bundle", "is_wrapper_install"]
+__all__ = [
+    "legacy_venv_present",
+    "wipe_legacy_venv",
+    "is_launcher_install",
+    "is_legacy_bundle",
+]
