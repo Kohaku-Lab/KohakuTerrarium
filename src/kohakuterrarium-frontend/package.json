@@ -1,6 +1,6 @@
 {
   "name": "kohakuterrarium-web",
-  "version": "2.0.0.dev1",
+  "version": "2.0.0.dev2",
   "private": true,
   "type": "module",
   "scripts": {

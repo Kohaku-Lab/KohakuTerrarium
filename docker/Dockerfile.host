@@ -34,8 +34,9 @@ RUN apt-get update && \
     chown -R kt:kt /home/kt/.kohakuterrarium
 
 # Copy wheel via glob (the version-suffixed filename varies per build).
-COPY ${WHEEL_GLOB} /tmp/kt.whl
-RUN pip install --no-cache-dir /tmp/kt.whl && rm /tmp/kt.whl
+# Keep the real PEP 427 filename — pip 25+ rejects renamed-to-``kt.whl``.
+COPY ${WHEEL_GLOB} /tmp/
+RUN pip install --no-cache-dir /tmp/kohakuterrarium-*.whl && rm /tmp/kohakuterrarium-*.whl
 
 USER kt
 WORKDIR /home/kt
