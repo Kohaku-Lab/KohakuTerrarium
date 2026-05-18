@@ -1,14 +1,52 @@
-"""Downloader: HTTPS-only, sha256 verification, tarball extract + zip-slip."""
+"""Downloader: HTTPS-only, sha256 verification, tarball extract + zip-slip.
+
+These are pure unit tests — we monkeypatch ``urllib.request.urlopen``
+rather than spinning up a real loopback HTTPServer, so the tests stay
+deterministic on every OS (the previous threaded-loopback variant
+timed out on some CI runners' sandbox-restricted networking).
+"""
 
 import hashlib
 import io
 import tarfile
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
 from kohakuterrarium.launcher import downloader as _d
+
+
+class _FakeResponse:
+    """Minimal stand-in for what ``urlopen()`` returns under ``with``."""
+
+    def __init__(self, body: bytes, headers: dict | None = None):
+        self._body = body
+        self._pos = 0
+        self.headers = headers or {"Content-Length": str(len(body))}
+
+    def read(self, size: int = -1) -> bytes:
+        if size < 0:
+            chunk = self._body[self._pos :]
+            self._pos = len(self._body)
+            return chunk
+        chunk = self._body[self._pos : self._pos + size]
+        self._pos += len(chunk)
+        return chunk
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+
+def _patch_urlopen(monkeypatch, body: bytes):
+    """Make ``urllib.request.urlopen`` return ``body`` regardless of URL."""
+
+    def fake_urlopen(req, *_, **__):
+        return _FakeResponse(body)
+
+    monkeypatch.setattr(_d.urllib.request, "urlopen", fake_urlopen)
+
 
 # ── HTTPS guard ─────────────────────────────────────────────────────
 
@@ -18,87 +56,55 @@ def test_download_to_rejects_non_https(tmp_path):
         _d.download_to("http://example.com/x", tmp_path / "x", "0" * 64)
 
 
-# ── Fixture HTTP server (the loopback exception we use for tests) ───
+# ── Streaming + sha verification ────────────────────────────────────
 
 
-class _BlobHandler(BaseHTTPRequestHandler):
-    blob: bytes = b""
-
-    def do_GET(self):  # noqa: N802
-        self.send_response(200)
-        self.send_header("Content-Type", "application/octet-stream")
-        self.send_header("Content-Length", str(len(self.blob)))
-        self.end_headers()
-        self.wfile.write(self.blob)
-
-    def log_message(self, *_):
-        pass
-
-
-@pytest.fixture
-def fake_blob_server():
-    srv = HTTPServer(("127.0.0.1", 0), _BlobHandler)
-    port = srv.server_address[1]
-    t = threading.Thread(target=srv.serve_forever, daemon=True)
-    t.start()
-    try:
-        yield srv, f"http://127.0.0.1:{port}"
-    finally:
-        srv.shutdown()
-
-
-def _set_blob(content: bytes) -> str:
-    _BlobHandler.blob = content
-    return hashlib.sha256(content).hexdigest()
-
-
-def test_download_to_writes_blob_with_correct_sha(
-    monkeypatch, fake_blob_server, tmp_path
-):
-    _, base = fake_blob_server
-    digest = _set_blob(b"hello world")
+def test_download_to_writes_blob_with_correct_sha(monkeypatch, tmp_path):
+    body = b"hello world"
+    digest = hashlib.sha256(body).hexdigest()
+    _patch_urlopen(monkeypatch, body)
     dest = tmp_path / "out.bin"
-    # Bypass the https:// guard for the loopback test.
-    monkeypatch.setattr(_d, "_noop_progress", lambda d, t: None)
-    real_download = _d.download_to
-
-    def http_download(url, dest, sha, **kw):
-        # Hack: temporarily allow http:// for the test by stripping the scheme guard.
-        # We achieve this by calling the internal logic directly.
-        import urllib.request
-
-        import hashlib as _hl
-
-        req = urllib.request.Request(url, headers={"User-Agent": _d.USER_AGENT})
-        h = _hl.sha256()
-        tmp = dest.with_suffix(dest.suffix + ".tmp")
-        if tmp.exists():
-            tmp.unlink()
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            with tmp.open("wb") as out:
-                while True:
-                    chunk = resp.read(65536)
-                    if not chunk:
-                        break
-                    out.write(chunk)
-                    h.update(chunk)
-        actual = h.hexdigest()
-        if actual.lower() != sha.lower():
-            tmp.unlink()
-            raise _d.DownloadError("sha mismatch")
-        tmp.replace(dest)
-
-    http_download(f"{base}/blob", dest, digest)
-    assert dest.read_bytes() == b"hello world"
-    _ = real_download  # silence unused-name warning
+    _d.download_to("https://example.test/blob", dest, digest)
+    assert dest.read_bytes() == body
+    # No tmp left behind.
+    assert not dest.with_suffix(dest.suffix + ".tmp").exists()
 
 
-def test_download_to_detects_sha_mismatch_via_https_guard(tmp_path):
-    """The https-only guard fires before we get a chance to mismatch sha,
-    so we just verify the guard. The sha logic is covered by the
-    extract tests below + the integration test."""
+def test_download_to_aborts_on_sha_mismatch(monkeypatch, tmp_path):
+    _patch_urlopen(monkeypatch, b"hello world")
+    dest = tmp_path / "out.bin"
     with pytest.raises(_d.DownloadError):
-        _d.download_to("http://example.com/x", tmp_path / "x", "0" * 64)
+        _d.download_to("https://example.test/blob", dest, "0" * 64)
+    assert not dest.exists()
+    # Mismatch path also cleans up the tmp.
+    assert not dest.with_suffix(dest.suffix + ".tmp").exists()
+
+
+def test_download_to_streams_progress_callback(monkeypatch, tmp_path):
+    body = b"x" * 200_000  # >chunk_size to force multiple read() calls
+    digest = hashlib.sha256(body).hexdigest()
+    _patch_urlopen(monkeypatch, body)
+    seen: list[tuple[int, int]] = []
+    dest = tmp_path / "out.bin"
+    _d.download_to(
+        "https://example.test/blob",
+        dest,
+        digest,
+        progress=lambda done, total: seen.append((done, total)),
+        chunk_size=65536,
+    )
+    # Final callback shows full size; we received multiple updates.
+    assert seen[-1][0] == len(body)
+    assert len(seen) >= 2
+    # Progress callback that raises is swallowed without breaking download.
+    seen.clear()
+    _d.download_to(
+        "https://example.test/blob",
+        dest,
+        digest,
+        progress=lambda *_: (_ for _ in ()).throw(RuntimeError("ui crash")),
+    )
+    assert dest.read_bytes() == body
 
 
 # ── Tarball extract ─────────────────────────────────────────────────

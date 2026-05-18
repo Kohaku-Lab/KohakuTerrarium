@@ -1,8 +1,11 @@
-"""Feed resolution: manifest fetch + release/artifact picking + caching."""
+"""Feed resolution: manifest fetch + release/artifact picking + caching.
+
+Network is monkeypatched at the ``urllib.request.urlopen`` boundary —
+no loopback server, no thread. Keeps the test deterministic across
+every OS / CI sandbox.
+"""
 
 import json
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
@@ -110,46 +113,50 @@ class TestManifestUrl:
         assert url == "https://m.example/kt/nightly.json"
 
 
-# ── Live HTTP fetch + cache ────────────────────────────────────────
+# ── Manifest fetch + cache (urlopen monkeypatched) ─────────────────
 
 
-class _ManifestHandler(BaseHTTPRequestHandler):
-    payload: bytes = b""
-    requests: int = 0
+class _FakeResponse:
+    """Stand-in for what ``urlopen()`` yields under ``with``."""
 
-    def do_GET(self):  # noqa: N802 - http handler convention
-        _ManifestHandler.requests += 1
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("ETag", '"abc"')
-        self.send_header("Content-Length", str(len(self.payload)))
-        self.end_headers()
-        self.wfile.write(self.payload)
+    def __init__(self, body: bytes, headers: dict | None = None, code: int = 200):
+        self._body = body
+        self._code = code
+        # urllib's headers object exposes .get(); a dict suffices.
+        self.headers = headers or {
+            "ETag": '"abc"',
+            "Content-Length": str(len(body)),
+        }
 
-    def log_message(self, *_):
-        pass
+    def read(self) -> bytes:
+        return self._body
 
+    def getcode(self) -> int:
+        return self._code
 
-@pytest.fixture
-def fake_manifest_server(cfg_home):
-    _ManifestHandler.requests = 0
-    _ManifestHandler.payload = json.dumps(_manifest()).encode("utf-8")
-    srv = HTTPServer(("127.0.0.1", 0), _ManifestHandler)
-    port = srv.server_address[1]
-    t = threading.Thread(target=srv.serve_forever, daemon=True)
-    t.start()
-    try:
-        yield f"http://127.0.0.1:{port}"
-    finally:
-        srv.shutdown()
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
 
 
-def test_fetch_manifest_writes_cache(monkeypatch, fake_manifest_server, cfg_home):
-    # _channel_manifest_url enforces https — patch it directly to point
-    # at our loopback server.
-    monkeypatch.setattr(
-        _f, "_channel_manifest_url", lambda s: fake_manifest_server + "/c.json"
-    )
+def _patch_urlopen(monkeypatch, body: bytes, *, code: int = 200):
+    def fake(req, *_, **__):
+        return _FakeResponse(body, code=code)
+
+    monkeypatch.setattr(_f.urllib.request, "urlopen", fake)
+
+
+def _patch_urlopen_raises(monkeypatch, exc: Exception):
+    def boom(*_, **__):
+        raise exc
+
+    monkeypatch.setattr(_f.urllib.request, "urlopen", boom)
+
+
+def test_fetch_manifest_writes_cache(monkeypatch, cfg_home):
+    _patch_urlopen(monkeypatch, json.dumps(_manifest()).encode("utf-8"))
     s = _s.AppSettings(channel="stable")
     data = _f.fetch_manifest(s)
     assert data["releases"][0]["version"] == "1.5.1"
@@ -160,18 +167,14 @@ def test_fetch_manifest_uses_cache_on_network_error(monkeypatch, cfg_home):
     cached_path = cfg_home / "runtime" / "manifest-cache" / "stable.json"
     cached_path.parent.mkdir(parents=True, exist_ok=True)
     cached_path.write_text(json.dumps(_manifest(version="1.0.0")), encoding="utf-8")
-    monkeypatch.setattr(
-        _f, "_channel_manifest_url", lambda s: "https://nowhere.invalid/x.json"
-    )
+    _patch_urlopen_raises(monkeypatch, _f.urllib.error.URLError("dns-bombed"))
     s = _s.AppSettings(channel="stable")
     data = _f.fetch_manifest(s)
     assert data["releases"][0]["version"] == "1.0.0"
 
 
-def test_resolve_feed_end_to_end(monkeypatch, fake_manifest_server, cfg_home):
-    monkeypatch.setattr(
-        _f, "_channel_manifest_url", lambda s: fake_manifest_server + "/c.json"
-    )
+def test_resolve_feed_end_to_end(monkeypatch, cfg_home):
+    _patch_urlopen(monkeypatch, json.dumps(_manifest()).encode("utf-8"))
     s = _s.AppSettings(channel="stable")
     target = _f.resolve_feed(s, platform_tag="linux-x64", py_abi_tag="cp313")
     assert target.version == "1.5.1"
