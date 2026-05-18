@@ -58,6 +58,7 @@
       <div class="text-[13px] space-y-1">
         <div>
           Installed: <span class="font-mono">{{ status.currentVersion || "—" }}</span>
+          <span v-if="installSourceLabel" class="ml-2 text-warm-500">{{ installSourceLabel }}</span>
         </div>
         <div>
           Latest:
@@ -73,7 +74,7 @@
       </div>
       <div class="flex items-center gap-2 mt-3">
         <button class="text-[12px] px-3 py-1 border rounded hover:bg-warm-100 dark:hover:bg-warm-800" :disabled="busy" @click="onCheckNow">Check now</button>
-        <button class="text-[12px] px-3 py-1 border rounded bg-iolite text-white hover:bg-iolite-dark disabled:opacity-50" :disabled="busy || status.installKind !== 'wrapper' || !status.available" @click="onUpdate">Update</button>
+        <button class="text-[12px] px-3 py-1 border rounded bg-iolite text-white hover:bg-iolite-dark disabled:opacity-50" :disabled="busy || status.installKind !== 'wrapper' || (!status.available && status.sourceKind !== 'bundled')" @click="onUpdate">{{ updateButtonLabel }}</button>
         <button class="text-[12px] px-3 py-1 border rounded hover:bg-warm-100 dark:hover:bg-warm-800 disabled:opacity-50" :disabled="busy || status.installKind !== 'wrapper'" @click="onRollback">Rollback</button>
       </div>
       <div v-if="error" class="mt-3 text-[12px] text-red-500">{{ error }}</div>
@@ -108,7 +109,7 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from "vue"
+import { computed, onMounted, reactive, ref } from "vue"
 import { ElMessage } from "element-plus"
 
 import { appUpdateAPI } from "@/utils/appUpdateApi"
@@ -126,7 +127,41 @@ const status = reactive({
   lastCheckAt: null,
   installKind: null,
   sourceKind: null,
+  installSource: null,
   legacyBundle: false,
+})
+
+// Honest label for the Installed line — reflects which source
+// actually produced the currently-active venv, NOT what the user
+// has configured as the future update source.  See topic 06 / 01.
+const installSourceLabel = computed(() => {
+  switch (status.installSource) {
+    case "bundled":
+      return "(from bundled offline copy)"
+    case "pypi":
+      return "(from PyPI)"
+    case "git":
+      return "(from git)"
+    case "local":
+      return "(editable install)"
+    default:
+      return ""
+  }
+})
+
+// Update-button label adjusts to source.kind so the user is told
+// what the click will actually do.
+const updateButtonLabel = computed(() => {
+  if (status.sourceKind === "bundled") {
+    return "Reinstall from bundled (same version)"
+  }
+  if (status.sourceKind === "git") return "Update from git"
+  if (status.sourceKind === "local") return "Reinstall editable"
+  // Default + PyPI: include target version if we have it.
+  if (status.latestVersion && status.available) {
+    return `Update to ${status.latestVersion} from PyPI`
+  }
+  return "Update from PyPI"
 })
 
 const busy = ref(false)
@@ -156,6 +191,7 @@ function applyStatus(payload) {
   status.lastCheckAt = payload["last-check-at"] || null
   status.installKind = payload["install-kind"] || null
   status.sourceKind = payload["source-kind"] || null
+  status.installSource = payload["install-source"] || null
   status.legacyBundle = !!payload["legacy-bundle"]
 }
 

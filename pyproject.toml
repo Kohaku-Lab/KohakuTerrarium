@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "KohakuTerrarium"
-version = "1.4.0"
+version = "2.0.0.dev1"
 description = "A universal agent framework for building self-driven AI agents and multi-agent teams"
 authors = [
     { name = "Shih-Ying Yeh (KohakuBlueLeaf)", email = "apolloyeh0123@gmail.com" },
@@ -157,7 +157,7 @@ select = ["F401", "F841"]
 [tool.briefcase]
 project_name = "KohakuTerrarium"
 bundle = "com.kohaku.terrarium"
-version = "1.4.0"
+version = "2.0.0.dev1"
 url = "https://github.com/Kohaku-Lab/KohakuTerrarium"
 license.file = "LICENSE"
 author = "Shih-Ying Yeh (KohakuBlueLeaf)"
@@ -171,7 +171,14 @@ icon = "src/kohakuterrarium/app_icons/app"
 # launcher's managed venv at first launch (offline from
 # ``wheels-bundle/`` or online from the configured source).  See
 # ``plans/1.5.0-roadmap/06-app-update/`` for the design.
-sources = ["src/kohakuterrarium"]
+#
+# ``wheels-bundle/`` ships as a sibling directory inside the bundle so
+# the launcher's ``bundled_wheels_dir()`` finds it at runtime.  CI
+# populates ``wheels-bundle/`` via ``scripts/build_wrapper_wheels.py``
+# before ``briefcase create``; the verify step in release.yml asserts
+# the produced artifact actually carries it.  See
+# ``plans/1.5.0-roadmap/06-app-update/01-bundled-first-install/``.
+sources = ["src/kohakuterrarium", "wheels-bundle"]
 startup_module = "kohakuterrarium.__briefcase__"
 requires = [
     # Launcher needs only pip, packaging, and pywebview (for the

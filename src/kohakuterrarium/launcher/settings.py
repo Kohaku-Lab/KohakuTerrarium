@@ -23,9 +23,16 @@ for the canonical reference):
       "runtime": {
         "venv-path": null | "<path>",
         "last-installed-version": null | "<pep440>",
-        "last-check-at": null | "<iso8601>"
+        "last-check-at": null | "<iso8601>",
+        "install-source": null | "bundled" | "pypi" | "git" | "local"
       }
     }
+
+``runtime.install-source`` records which source actually produced the
+currently-active venv.  It is informational — the UI uses it to render
+"Installed from <X>" honestly.  Distinct from ``source.kind`` which
+represents *intent for the next install operation*.  Legacy installs
+written by 1.5.0 don't have this field; loaders tolerate the absence.
 """
 
 import json
@@ -59,6 +66,11 @@ class RuntimeConfig:
     venv_path: str | None = None
     last_installed_version: str | None = None
     last_check_at: str | None = None
+    # Which source produced the currently-active venv.  Set by the
+    # update_runner on successful install / update / reset.  ``None``
+    # for legacy installs that pre-date this field — UI renders as
+    # "unknown" in that case.
+    install_source: str | None = None
 
 
 @dataclass
@@ -130,6 +142,19 @@ def _coerce_runtime(raw: Any, log) -> RuntimeConfig:
     last_check = raw.get("last-check-at")
     if last_check is not None and isinstance(last_check, str):
         cfg.last_check_at = last_check
+    install_src = raw.get("install-source")
+    if install_src is not None and isinstance(install_src, str):
+        # Validate against known kinds; unknown values are dropped
+        # silently so a hand-edited file with garbage doesn't wedge
+        # the loader.
+        if install_src in SOURCE_KINDS:
+            cfg.install_source = install_src
+        else:
+            log.warning(
+                "settings: runtime.install-source %r is not a known source kind; "
+                "ignoring",
+                install_src,
+            )
     return cfg
 
 
@@ -141,6 +166,7 @@ def _to_json(s: AppSettings) -> dict[str, Any]:
         "venv-path": s.runtime.venv_path,
         "last-installed-version": s.runtime.last_installed_version,
         "last-check-at": s.runtime.last_check_at,
+        "install-source": s.runtime.install_source,
     }
     return {"source": src, "update": upd, "runtime": rt}
 

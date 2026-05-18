@@ -95,3 +95,63 @@ class TestReset:
         assert out.source.kind == "pypi"
         on_disk = _s.load()
         assert on_disk.source.kind == "pypi"
+
+
+class TestInstallSourceField:
+    """Topic 06 / sub-plan 01 — runtime.install_source persistence."""
+
+    def test_default_is_none(self, _isolate_config_dir):
+        s = _s.load()
+        assert s.runtime.install_source is None
+
+    def test_round_trip_records_value(self, _isolate_config_dir):
+        s = _s.load()
+        s.runtime.install_source = "bundled"
+        _s.save(s)
+        on_disk = _s.load()
+        assert on_disk.runtime.install_source == "bundled"
+
+    def test_legacy_file_without_field_loads_as_none(self, _isolate_config_dir):
+        # A 1.5.0-era settings file pre-dating this field.
+        (_isolate_config_dir / "app-settings.json").write_text(
+            json.dumps(
+                {
+                    "source": {"kind": "pypi", "spec": None, "extras": []},
+                    "update": {"mode": "manual", "check-cache-hours": 24},
+                    "runtime": {
+                        "venv-path": "/tmp/x",
+                        "last-installed-version": "1.5.0",
+                        "last-check-at": "2026-05-18T00:00:00+00:00",
+                        # no "install-source"
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        s = _s.load()
+        assert s.runtime.install_source is None
+        # Loader populated the other fields though.
+        assert s.runtime.last_installed_version == "1.5.0"
+
+    def test_unknown_install_source_value_is_dropped(self, _isolate_config_dir):
+        (_isolate_config_dir / "app-settings.json").write_text(
+            json.dumps(
+                {
+                    "source": {"kind": "pypi", "spec": None, "extras": []},
+                    "update": {"mode": "manual", "check-cache-hours": 24},
+                    "runtime": {"install-source": "spaceships"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        s = _s.load()
+        assert s.runtime.install_source is None
+
+    def test_serialized_json_includes_field(self, _isolate_config_dir):
+        s = _s.AppSettings()
+        s.runtime.install_source = "git"
+        _s.save(s)
+        raw = json.loads(
+            (_isolate_config_dir / "app-settings.json").read_text(encoding="utf-8")
+        )
+        assert raw["runtime"]["install-source"] == "git"
