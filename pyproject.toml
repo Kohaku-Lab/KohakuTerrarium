@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "KohakuTerrarium"
-version = "2.0.0.dev2"
+version = "2.0.0.dev3"
 description = "A universal agent framework for building self-driven AI agents and multi-agent teams"
 authors = [
     { name = "Shih-Ying Yeh (KohakuBlueLeaf)", email = "apolloyeh0123@gmail.com" },
@@ -157,7 +157,7 @@ select = ["F401", "F841"]
 [tool.briefcase]
 project_name = "KohakuTerrarium"
 bundle = "com.kohaku.terrarium"
-version = "2.0.0.dev2"
+version = "2.0.0.dev3"
 url = "https://github.com/Kohaku-Lab/KohakuTerrarium"
 license.file = "LICENSE"
 author = "Shih-Ying Yeh (KohakuBlueLeaf)"
@@ -167,32 +167,29 @@ author_email = "apolloyeh0123@gmail.com"
 formal_name = "KohakuTerrarium"
 description = "Universal Agent Framework - Desktop App"
 icon = "src/kohakuterrarium/app_icons/app"
-# Wrapper-only sources.  The full framework is INSTALLED into the
-# launcher's managed venv at first launch (offline from
-# ``wheels-bundle/`` or online from the configured source).  See
-# ``plans/1.5.0-roadmap/06-app-update/`` for the design.
+# 06b — wrapper-only sources.  The framework is DOWNLOADED as a
+# pre-built release tarball at first launch (offline from
+# ``bundled-release/`` or online from the configured channel feed).
+# See ``plans/1.5.0-roadmap/06b-release-bundle-update/`` for the design.
 #
-# ``wheels-bundle/`` ships as a sibling directory inside the bundle so
-# the launcher's ``bundled_wheels_dir()`` finds it at runtime.  CI
-# populates ``wheels-bundle/`` via ``scripts/build_wrapper_wheels.py``
-# before ``briefcase create``; the verify step in release.yml asserts
-# the produced artifact actually carries it.  See
-# ``plans/1.5.0-roadmap/06-app-update/01-bundled-first-install/``.
-sources = ["src/kohakuterrarium", "wheels-bundle"]
+# ``bundled-release/`` ships as a sibling directory inside the bundle
+# so the launcher's ``bundled_release_dir()`` finds it at runtime.
+# CI populates ``bundled-release/`` from the matrix ``release-tree``
+# job before ``briefcase create``.
+sources = ["src/kohakuterrarium", "bundled-release"]
 startup_module = "kohakuterrarium.__briefcase__"
 requires = [
-    # Launcher needs only pip, packaging, and pywebview (for the
-    # splash window).  The framework + its 30+ runtime deps live in
-    # the venv the launcher creates, not the bundle.
-    "pip>=24.0",
+    # Launcher needs only packaging (version compare), pywebview
+    # (splash UI — optional, Tk fallback), and zstandard (preferred
+    # tarball compression — .tar.gz fallback). NO pip, NO venv,
+    # NO ensurepip — the 06 design that depended on those was dead-on-
+    # arrival on Windows briefcase shells that strip stdlib modules.
     "packaging>=23.0",
     "pywebview==6.1",
+    "zstandard>=0.22",
 ]
 # proxy_tools (pywebview dep) only has sdist on PyPI — pre-build wheel in CI.
-# ``wheels-bundle/`` carries the kohakuterrarium wheel + its transitive
-# deps for offline first-launch (populated by
-# ``scripts/build_wrapper_wheels.py`` before ``briefcase build``).
-requirement_installer_args = ["--find-links", "wheels", "--find-links", "wheels-bundle"]
+requirement_installer_args = ["--find-links", "wheels"]
 
 [tool.briefcase.app.kohakuterrarium.macOS]
 universal_build = false
