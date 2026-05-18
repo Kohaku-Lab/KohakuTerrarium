@@ -1,0 +1,158 @@
+name: Nightly
+
+on:
+  schedule:
+    # 03:00 UTC every day
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # Mirrors release.yml's build-release-tree matrix but pins the channel
+  # to ``nightly`` and derives the version from the commit + timestamp.
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            py: "3.13"
+            abi: cp313
+            plat: linux-x64
+          - os: macos-latest
+            py: "3.13"
+            abi: cp313
+            plat: macos-arm64
+          - os: windows-latest
+            py: "3.13"
+            abi: cp313
+            plat: win-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.py }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build frontend
+        working-directory: src/kohakuterrarium-frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install build deps
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install zstandard
+
+      - name: Compute nightly version
+        id: ver
+        shell: bash
+        run: |
+          ts=$(date -u +%Y%m%d%H%M%S)
+          sha=$(git rev-parse --short=7 HEAD)
+          # PEP 440 dev release: <base>.dev<N>+<local>
+          base="2.0.0"
+          echo "version=${base}.dev${ts}+${sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Build release tree
+        shell: bash
+        run: |
+          python scripts/build_release_tree.py \
+            --version "${{ steps.ver.outputs.version }}" \
+            --platform "${{ matrix.plat }}" \
+            --py-abi "${{ matrix.abi }}" \
+            --channel nightly \
+            --out dist/release-trees/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nightly-${{ matrix.plat }}-${{ matrix.abi }}
+          path: dist/release-trees/
+
+  publish:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: tarballs
+
+      - name: Flatten artifacts
+        shell: bash
+        run: |
+          mkdir -p release-trees
+          find tarballs -type f \( -name "*.tar.zst" -o -name "*.manifest.json" \) -exec cp {} release-trees/ \;
+          ls -la release-trees/
+
+      - name: Resolve nightly tag
+        id: tag
+        shell: bash
+        run: |
+          tag="nightly-$(date -u +%Y%m%d)"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Create dated nightly release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          tag="${{ steps.tag.outputs.tag }}"
+          if ! gh release view "${tag}" -R "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release create "${tag}" \
+              --title "Nightly $(date -u +%Y-%m-%d)" \
+              --notes "Automatic nightly build. Channel: nightly." \
+              --prerelease \
+              -R "${GITHUB_REPOSITORY}"
+          fi
+          for f in release-trees/*.tar.zst release-trees/*.manifest.json; do
+            [ -f "$f" ] && gh release upload "${tag}" "$f" --clobber -R "${GITHUB_REPOSITORY}"
+          done
+
+      - name: Fetch previous nightly manifest
+        shell: bash
+        run: |
+          curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/releases/download/manifests-nightly/nightly.json" \
+            -o previous-nightly.json || echo "no previous manifest"
+
+      - name: Build channel manifest
+        shell: bash
+        run: |
+          tag="${{ steps.tag.outputs.tag }}"
+          python scripts/publish_manifest.py \
+            --channel nightly \
+            --release-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}" \
+            --artifacts-dir release-trees/ \
+            --previous-manifest previous-nightly.json \
+            --release-notes-url "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}" \
+            --out nightly.json
+
+      - name: Publish manifest to manifests-nightly release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          if ! gh release view "manifests-nightly" -R "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release create "manifests-nightly" \
+              --title "Channel manifest: nightly" \
+              --notes "Auto-updated. Do not delete." \
+              --prerelease \
+              -R "${GITHUB_REPOSITORY}"
+          fi
+          gh release upload "manifests-nightly" nightly.json --clobber -R "${GITHUB_REPOSITORY}"
