@@ -42,6 +42,7 @@ from prompt_toolkit.styles import Style
 from rich.console import Console
 from rich.text import Text
 
+from kohakuterrarium.builtins.cli_rich.app_multi import AppMultiCreatureMixin
 from kohakuterrarium.builtins.cli_rich.app_output import AppOutputMixin
 from kohakuterrarium.builtins.cli_rich.commit import ScrollbackCommitter, SessionReplay
 from kohakuterrarium.builtins.cli_rich.composer import Composer
@@ -49,6 +50,7 @@ from kohakuterrarium.builtins.cli_rich.dialogs.bus_overlay import BusInteractive
 from kohakuterrarium.builtins.cli_rich.dialogs.model_picker import ModelPicker
 from kohakuterrarium.builtins.cli_rich.dialogs.module_picker import ModulePicker
 from kohakuterrarium.builtins.cli_rich.dialogs.settings import SettingsOverlay
+from kohakuterrarium.builtins.cli_rich.focus import FocusController, parse_at_name
 from kohakuterrarium.builtins.cli_rich.hint_bar import SlashHintBar
 from kohakuterrarium.builtins.cli_rich.live_region import LiveRegion
 from kohakuterrarium.builtins.cli_rich.runtime import (
@@ -72,7 +74,7 @@ logger = get_logger(__name__)
 DEFAULT_WIDTH = 100
 
 
-class RichCLIApp(AppOutputMixin):
+class RichCLIApp(AppOutputMixin, AppMultiCreatureMixin):
     """Single-Application orchestrator for ``--mode cli``.
 
     Output events from the agent's OutputRouter (``on_text_chunk``,
@@ -138,12 +140,23 @@ class RichCLIApp(AppOutputMixin):
             picker_key_handler=self._picker_handle_key,
             picker_text_handler=self._picker_handle_text,
             picker_captures_input=self._picker_captures_input,
+            on_focus_next=self.focus_next,
+            on_focus_prev=self.focus_prev,
+            on_open_overlay=self.open_agent_overlay,
         )
 
         self.app: Application | None = None
+        # Multi-creature state (topic 08) — see AppMultiCreatureMixin.
+        self.multi_creature_enabled = False
+        self.engine = None
+        self.focus_controller = FocusController()
+        self.live_regions = {}
+        self.draft_by_creature = {}
+        self.roster = None
+        self.agent_overlay = None
+        self.peek_panel = None
 
     # ── Public lifecycle ──
-
     async def run(self) -> None:
         """Run the rich CLI loop until exit."""
         self._wire_command_registry()
@@ -279,6 +292,7 @@ class RichCLIApp(AppOutputMixin):
                 or self.model_picker.visible
                 or self.module_picker.visible
                 or self.settings_overlay.visible
+                or (self.agent_overlay is not None and self.agent_overlay.visible)
                 or self.live_region.has_content
             ),
         )
@@ -322,6 +336,19 @@ class RichCLIApp(AppOutputMixin):
             filter=Condition(self._hint_has_content),
         )
 
+        # Topic 08 — roster row (hidden for single-creature).
+        roster_container = ConditionalContainer(
+            content=Window(
+                content=FormattedTextControl(
+                    text=self._roster_text, focusable=False, show_cursor=False
+                ),
+                height=Dimension.exact(1),
+                wrap_lines=False,
+                always_hide_cursor=True,
+            ),
+            filter=Condition(self.roster_visible),
+        )
+
         # Footer (single line).
         footer_control = FormattedTextControl(
             text=self._footer_text,
@@ -335,16 +362,10 @@ class RichCLIApp(AppOutputMixin):
             always_hide_cursor=True,
         )
 
-        # Layout order top → bottom:
-        #   status (live region)
-        #   hint bar (slash-command hints, above the input per user ask)
-        #   top rule  ─────────────────────────
-        #   textarea
-        #   bottom rule  ──────────────────────  (separates input from footer)
-        #   footer
         root_container = HSplit(
             [
                 status_container,
+                roster_container,
                 hint_container,
                 input_top_rule,
                 self.composer.text_area,
@@ -405,10 +426,17 @@ class RichCLIApp(AppOutputMixin):
         if self.settings_overlay.visible:
             ansi = self.settings_overlay.render(width)
             return ANSI(ansi) if ansi else ""
+        if self.agent_overlay is not None and self.agent_overlay.visible:
+            ansi = self.agent_overlay_ansi(width)
+            return ANSI(ansi) if ansi else ""
         ansi = self.live_region.to_ansi(width)
         if not ansi:
             return ""
         return ANSI(ansi)
+
+    def _roster_text(self):
+        ansi = self.roster_ansi(self._terminal_width())
+        return ANSI(ansi) if ansi else ""
 
     def _hint_text(self):
         width = self._terminal_width()
@@ -473,6 +501,31 @@ class RichCLIApp(AppOutputMixin):
         # already in progress will finish normally.
         if self._pending_task and not self._pending_task.done():
             self._pending_task.cancel()
+
+        # @name retargeting — runs BEFORE the slash-command check so
+        # ``@bob /help`` would send "/help" to bob (which then routes
+        # through bob's own command path, not the host UI's). Plain
+        # `@name` with no body is treated as regular text and falls
+        # through to the agent — parse_at_name returns None there.
+        if self.multi_creature_enabled:
+            redirect = parse_at_name(text)
+            if redirect is not None:
+                if redirect.is_broadcast:
+                    self.commit_user_message_broadcast(text)
+                    self._pending_task = spawn(self.broadcast_to_all(redirect.payload))
+                else:
+                    target = self.resolve_creature_by_name(redirect.name)
+                    if target is None:
+                        self.on_processing_error(
+                            "@name", f"unknown creature: @{redirect.name}"
+                        )
+                        self._invalidate()
+                        return
+                    self.commit_user_message_for(target.creature_id, text)
+                    self._pending_task = spawn(
+                        self.inject_to_creature(target.creature_id, redirect.payload)
+                    )
+                return
 
         # Print user message into scrollback (via run_in_terminal so the
         # app area is correctly redrawn below it).
@@ -557,6 +610,11 @@ class RichCLIApp(AppOutputMixin):
                 self.module_picker.open(edit_target=rest.strip())
                 self._invalidate()
                 return
+
+        # Multi-creature topology commands route through the mixin so
+        # the engine + creature_id reach their context.
+        if await self.dispatch_topology_command(name, args):
+            return
 
         try:
             result = await self.agent._try_slash_command_text(text)
@@ -814,6 +872,11 @@ class RichCLIApp(AppOutputMixin):
             if consumed:
                 self._invalidate()
             return consumed
+        if self.agent_overlay is not None and self.agent_overlay.visible:
+            consumed = self.agent_overlay.handle_key(key)
+            if consumed:
+                self._invalidate()
+            return consumed
         return False
 
     def _picker_handle_text(self, char: str) -> bool:
@@ -850,6 +913,11 @@ class RichCLIApp(AppOutputMixin):
             if consumed:
                 self._invalidate()
             return consumed
+        if self.agent_overlay is not None and self.agent_overlay.visible:
+            consumed = self.agent_overlay.handle_text(char)
+            if consumed:
+                self._invalidate()
+            return consumed
         return False
 
     def _picker_captures_input(self) -> bool:
@@ -873,6 +941,9 @@ class RichCLIApp(AppOutputMixin):
             # printable chars into the active field. Either way the
             # composer's textarea must NOT receive these keystrokes,
             # so claim them unconditionally while the overlay is up.
+            return True
+        if self.agent_overlay is not None and self.agent_overlay.visible:
+            # Topic 08 — printable chars go into the overlay's filter.
             return True
         return False
 

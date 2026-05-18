@@ -86,26 +86,28 @@ async def run_engine_with_rich_cli(
     focus_creature_id: str,
     store: SessionStore | None = None,
 ) -> None:
-    """Run the rich inline CLI against the engine's focus creature.
+    """Run the rich inline CLI against the engine's creatures.
 
-    For the solo ``kt run --mode cli`` path the caller has deferred
-    ``creature.start()`` so we can swap the focus creature's IO
-    modules first; we start the creature here once IO is wired. For
-    paths where the focus creature is already running (recipes —
-    which build the focus with ``NoneInput`` so there's no stdin
-    conflict) we leave the input alone and only attach the rich
-    output sink.
+    Single-creature topology behaves identically to the 1.4 path:
+    only the focus creature is wired, only its output reaches the
+    terminal. Multi-creature topology activates topic 08's surface —
+    a roster row above the input, focus switching via Tab/Shift+Tab,
+    ``@name`` retargeting, Ctrl+A overlay, topology-aware slash
+    commands (``/stop`` / ``/start`` / ``/jobs`` / ``/channels`` /
+    ``/scratchpad`` / ``/spawn``).
+
+    Input is still swapped only for the focus creature (stdin can't
+    be shared); every other creature gets a :class:`MultiplexedRichOutput`
+    sink that stamps events with its creature_id and routes them to
+    ``app._handle_creature_event``.
     """
     focus_creature = engine.get_creature(focus_creature_id)
     agent = focus_creature.agent
+    all_creatures = list(engine.list_creatures())
+    is_multi = len(all_creatures) > 1
 
     previous_input = agent.input
-    previous_output = agent.output_router.default_output
 
-    # Input swap is only safe *before* the creature starts (see module
-    # docstring). For the already-running case we accept the configured
-    # input as-is; in practice that's NoneInput (recipe focus) which
-    # doesn't touch stdin.
     swap_input = not focus_creature.is_running and _input_conflicts_with_terminal(
         previous_input
     )
@@ -118,11 +120,28 @@ async def run_engine_with_rich_cli(
         )
 
     app = RichCLIApp(agent)
-    rich_output = RichCLIOutput(app)
-    agent.output_router.default_output = rich_output
+
+    if is_multi:
+        # The app's setup populates ``live_regions`` + ``focus_controller``
+        # before any sink is mounted, so the very first event finds a
+        # ready state slot. Sink mounting goes through the mixin so it
+        # records the previous sink in ``_managed_outputs`` — the same
+        # path runtime spawns take.
+        app.setup_multi_creature(engine, focus_creature_id)
+        for c in all_creatures:
+            app.mount_creature_sink(c)
+    else:
+        rich_output = RichCLIOutput(app)
+        agent.output_router.default_output = rich_output
 
     if not focus_creature.is_running:
         await focus_creature.start()
+
+    if is_multi:
+        # Engine subscription starts after the focus creature is up so
+        # the watcher never observes a creature that didn't yet have a
+        # widget slot allocated.
+        app.start_engine_watch()
 
     pending = getattr(agent, "_pending_resume_events", None)
     if pending:
@@ -139,7 +158,15 @@ async def run_engine_with_rich_cli(
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     finally:
-        agent.output_router.default_output = previous_output
+        if is_multi:
+            try:
+                await app.teardown_multi_creature()
+            except Exception as exc:
+                logger.debug(
+                    "Rich CLI multi-creature teardown failed",
+                    error=str(exc),
+                    exc_info=True,
+                )
         if swap_input:
             # ``previous_input`` was never started (we deferred
             # creature.start() until after the swap). Restoring the

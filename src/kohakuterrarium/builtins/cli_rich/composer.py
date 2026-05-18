@@ -156,6 +156,12 @@ class Composer:
         picker_key_handler: Callable[[str], bool] | None = None,
         picker_text_handler: Callable[[str], bool] | None = None,
         picker_captures_input: Callable[[], bool] | None = None,
+        # Topic 08 — multi-creature focus controls. All optional: the
+        # composer treats ``None`` callbacks as "single-creature mode"
+        # and falls through to its existing Tab/Shift+Tab semantics.
+        on_focus_next: Callable[[], None] | None = None,
+        on_focus_prev: Callable[[], None] | None = None,
+        on_open_overlay: Callable[[], None] | None = None,
     ):
         self.creature_name = creature_name
         self._on_submit = on_submit
@@ -175,6 +181,9 @@ class Composer:
         # we only steal text when the overlay is genuinely capturing input.
         self._picker_text = picker_text_handler
         self._picker_captures_input = picker_captures_input
+        self._on_focus_next = on_focus_next
+        self._on_focus_prev = on_focus_prev
+        self._on_open_overlay = on_open_overlay
 
         HISTORY_DIR.mkdir(parents=True, exist_ok=True)
         self._history = FileHistory(str(HISTORY_DIR / f"{creature_name}.txt"))
@@ -330,6 +339,13 @@ class Composer:
             if buf.complete_state:
                 buf.complete_next()
                 return
+            # Topic 08 — multi-creature focus cycling. Only fires when
+            # the buffer is empty (so half-typed input isn't ambiguous)
+            # and the host wired a focus handler. Single-creature mode
+            # falls through to the literal tab insert.
+            if not buf.text and self._on_focus_next is not None:
+                self._on_focus_next()
+                return
             buf.insert_text("\t")
 
         @kb.add("s-tab")
@@ -339,6 +355,18 @@ class Composer:
             buf = event.current_buffer
             if buf.complete_state:
                 buf.complete_previous()
+                return
+            if not buf.text and self._on_focus_prev is not None:
+                self._on_focus_prev()
+
+        @kb.add("c-a")
+        def _open_overlay(event):
+            # Ctrl+A opens the multi-creature agent overlay (topic 08).
+            # Bound unconditionally so the binding doesn't drift between
+            # single/multi-creature builds; the callback is a no-op in
+            # single-creature mode (handler is None).
+            if self._on_open_overlay is not None:
+                self._on_open_overlay()
 
         @kb.add("enter")
         def _enter(event):

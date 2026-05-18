@@ -48,8 +48,23 @@ ALLOWLIST_600 = {
     "llm/profiles.py",
     # Rich CLI orchestrator — same shape as core/agent.py + manager.py
     # (top-level class owning lifecycle + layout + many small delegation
-    # methods). Output-event handlers already extracted to AppOutputMixin.
+    # methods). Output-event handlers already extracted to AppOutputMixin;
+    # multi-creature wiring extracted to AppMultiCreatureMixin.
     "builtins/cli_rich/app.py",
+    # Composer — prompt_toolkit TextArea + ~25 key bindings (paste
+    # detection, picker indirection, completion, multi-line edit, focus
+    # cycling). Splitting would scatter keymap setup from the TextArea.
+    "builtins/cli_rich/composer.py",
+    # Multi-creature mixin — cohesive surface for RichCLIApp's
+    # multi-creature mode (setup/teardown, focus controller, @name
+    # routing, multiplex demux, runtime CREATURE_STARTED/STOPPED
+    # subscriber + dynamic mount/unmount, B2 per-creature scrollback
+    # capture + on-focus redraw, user-message routing helpers). Every
+    # method here references the same RichCLIApp instance state
+    # (live_regions, draft_by_creature, committer, focus_controller);
+    # splitting along category lines would scatter handlers that all
+    # mutate the same dicts across files for no readability win.
+    "builtins/cli_rich/app_multi.py",
     # Settings overlay state machine — list/form/confirm modes + 4 tabs of
     # data loaders and action handlers. Rendering already split into
     # settings_render.py; splitting further would fragment a cohesive

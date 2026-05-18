@@ -63,8 +63,45 @@ class ScrollbackCommitter:
         # to the normal commit path. Also flushed at explicit turn
         # boundaries via ``flush_block_close``.
         self._pending_block_close: bool = False
+        # Per-creature capture buckets for multi-creature B2 redraw.
+        # Every public commit method appends (method_name, args) to the
+        # bucket for ``_capture_target`` (None ⇒ no capture). Replay
+        # sets ``_replaying`` so a replay-driven commit doesn't
+        # double-record into its own bucket.
+        self._capture_target: str | None = None
+        self._captures: dict[str, list[tuple[str, tuple]]] = {}
+        self._replaying: bool = False
+
+    # ── Multi-creature capture API ─────────────────────────────────
+
+    def set_capture_target(self, creature_id: str | None) -> None:
+        """Direct subsequent commits into ``creature_id``'s log bucket.
+
+        ``None`` disables capture. The capture sticks until changed —
+        ``RichCLIApp`` keeps it pointed at the focused creature and
+        flips it briefly for per-creature event dispatch.
+        """
+        self._capture_target = creature_id
+        if creature_id is not None:
+            self._captures.setdefault(creature_id, [])
+
+    def captured_for(self, creature_id: str) -> list[tuple[str, tuple]]:
+        return list(self._captures.get(creature_id, []))
+
+    def clear_capture(self, creature_id: str) -> None:
+        self._captures.pop(creature_id, None)
+
+    def set_replay_mode(self, replaying: bool) -> None:
+        """While True, commits do NOT get appended to capture buckets."""
+        self._replaying = replaying
+
+    def _record(self, method: str, args: tuple) -> None:
+        if self._replaying or self._capture_target is None:
+            return
+        self._captures.setdefault(self._capture_target, []).append((method, args))
 
     def renderable(self, renderable: Any) -> None:
+        self._record("renderable", (renderable,))
         self.flush_block_close()
         width = self.app._terminal_width()
         ansi = render_to_ansi(renderable, width)
@@ -98,6 +135,7 @@ class ScrollbackCommitter:
         No blank line between rules and content — the user flagged that
         blanks made tools feel "detached" from their own separators.
         """
+        self._record("block_renderable", (renderable,))
         width = self.app._terminal_width()
         content_ansi = render_to_ansi(renderable, width)
         # Rich's Rule renders with its own trailing newline; ``_raw_ansi``
@@ -146,6 +184,7 @@ class ScrollbackCommitter:
         self._last_was_blank = False
 
     def text(self, markup: str) -> None:
+        self._record("text", (markup,))
         self.flush_block_close()
         width = self.app._terminal_width()
         ansi = render_to_ansi(Text.from_markup(markup), width)
@@ -154,6 +193,7 @@ class ScrollbackCommitter:
         self.blank_line()
 
     def user_message(self, text: str) -> None:
+        self._record("user_message", (text,))
         self.flush_block_close()
         body = Text()
         body.append(f"{ICON_USER} ", style=COLOR_USER)
