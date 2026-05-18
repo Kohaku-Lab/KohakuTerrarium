@@ -140,9 +140,7 @@ class TestCreateToolCustom:
     def test_load_success(self, tmp_path):
         custom = tmp_path / "custom"
         custom.mkdir()
-        (custom / "my_tool.py").write_text(
-            textwrap.dedent(
-                """
+        (custom / "my_tool.py").write_text(textwrap.dedent("""
                 from kohakuterrarium.modules.tool.base import BaseTool, ToolResult
 
                 class MyTool(BaseTool):
@@ -156,9 +154,7 @@ class TestCreateToolCustom:
 
                     async def _execute(self, args, **kwargs):
                         return ToolResult(output="x")
-                """
-            )
-        )
+                """))
         loader = ModuleLoader(agent_path=tmp_path)
         cfg = ToolConfigItem(
             name="my_tool",

@@ -81,9 +81,7 @@ class TestCreateSubAgentConfigCustomModule:
     def test_load_success(self, tmp_path):
         custom = tmp_path / "custom"
         custom.mkdir()
-        (custom / "sa.py").write_text(
-            textwrap.dedent(
-                """
+        (custom / "sa.py").write_text(textwrap.dedent("""
                 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 
                 MY_CFG = SubAgentConfig(
@@ -91,9 +89,7 @@ class TestCreateSubAgentConfigCustomModule:
                     description="custom sub-agent",
                     tools=["bash"],
                 )
-                """
-            )
-        )
+                """))
         loader = ModuleLoader(agent_path=tmp_path)
         item = SubAgentConfigItem(
             name="my_sa",
