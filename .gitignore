@@ -85,3 +85,9 @@ kt-biome/
 kt-template/
 # Local exploration / cloned-for-reference repos (not tracked)
 /temp/
+
+# Briefcase bundled-release tarballs.  CI populates this from the
+# release-tree matrix; locally it's filled by
+# ``scripts/prep_local_briefcase.py`` before ``briefcase create``.
+# Either way the contents are build artifacts, not source.
+/bundled-release/
