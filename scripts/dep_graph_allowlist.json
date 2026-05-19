@@ -13,9 +13,9 @@
   },
   {
     "file": "src/kohakuterrarium/__briefcase__.py",
-    "line": 10,
+    "line": 70,
     "function": "main",
-    "reason": "briefcase bundle entry point — defers serving stack until app launch"
+    "reason": "briefcase bundle entry — MUST import cli post-sys.path-swap. The launcher first runs prepare() (briefcase-bundled), then evicts kohakuterrarium.* from sys.modules and prepends the active version tree to sys.path. Importing cli at module top would pin it to the briefcase-bundled framework (defeating the in-process version swap that makes self-update work on briefcase shells where _pth disables PYTHONPATH)."
   },
   {
     "file": "src/kohakuterrarium/cli/serve.py",

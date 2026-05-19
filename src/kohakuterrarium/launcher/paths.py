@@ -128,24 +128,35 @@ def bundled_release_dir() -> Path | None:
     return None
 
 
-# ── Per-version entrypoint paths ────────────────────────────────────
+# ── Per-version layout ──────────────────────────────────────────────
 
 
-def kt_script(version_root: Path) -> Path:
-    """Path to the ``kt`` console-script shim inside a version tree."""
-    if sys.platform == "win32":
-        return version_root / "scripts" / "kt.exe"
-    return version_root / "scripts" / "kt"
+def site_packages_dir(version_root: Path) -> Path:
+    """The flat ``site-packages/`` tree inside a version directory.
+
+    This is the only directory the launcher cares about at exec time —
+    it points ``PYTHONPATH`` at this path and the bundled briefcase
+    Python imports the framework from there. No shim scripts, no
+    per-platform entrypoint trampolines.
+    """
+    return version_root / "site-packages"
+
+
+def manifest_path(version_root: Path) -> Path:
+    """The ``manifest.json`` describing the version (version / abi / sha)."""
+    return version_root / "manifest.json"
 
 
 def python_for(version_root: Path) -> Path:
-    """Path to the python interpreter to run the version with.
+    """The Python interpreter the launcher uses for this version.
 
-    The launcher exec'd via the briefcase-shell-provided python — that
-    interpreter is what runs ``versions/<v>/scripts/kt`` after
-    ``os.execv``. We surface it here so smoke-testing can spawn the
-    SAME interpreter rather than the shell's, keeping ABI consistent.
+    Always ``sys.executable`` — the briefcase-shell-provided Python is
+    the one bundled with this exact site-packages tree (ABI-matched at
+    build time by CI). ``version_root`` is unused but kept in the
+    signature for API symmetry / future-proofing if we ever decide to
+    ship per-version pythons.
     """
+    _ = version_root
     return Path(sys.executable)
 
 
@@ -162,6 +173,7 @@ __all__ = [
     "bundled_release_dir",
     "_candidate_bundled_release_dirs",
     "_has_release_tarball",
-    "kt_script",
+    "site_packages_dir",
+    "manifest_path",
     "python_for",
 ]
