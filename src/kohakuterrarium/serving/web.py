@@ -9,8 +9,10 @@ import ctypes
 import json
 import os
 import socket
+import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 from kohakuterrarium.utils.logging import configure_utf8_stdio, get_logger, set_level
@@ -74,6 +76,12 @@ def find_free_port(
 
     Tries ``start``, ``start+1``, ... up to ``max_tries`` ports.
     Returns the first port that can be bound. Raises RuntimeError if none.
+
+    Note: this is a *probe* — the returned port can theoretically be
+    grabbed by another process between probe close and the real bind
+    (TOCTOU race). For the desktop / web entrypoints, prefer
+    :func:`start_uvicorn_with_port_fallback`, which retries the start
+    until uvicorn actually binds and returns the verified port.
     """
     for offset in range(max_tries):
         port = start + offset
@@ -84,6 +92,87 @@ def find_free_port(
             except OSError:
                 continue
     raise RuntimeError(f"No free port found in range {start}-{start + max_tries - 1}")
+
+
+def start_uvicorn_with_port_fallback(
+    app,
+    *,
+    requested_port: int = 8001,
+    host: str = "127.0.0.1",
+    max_tries: int = 50,
+    log_level: str = "warning",
+    startup_timeout: float = 10.0,
+):
+    """Start uvicorn in a daemon thread, returning ``(server, port)``.
+
+    Handles two failure modes that the bare ``threading.Thread(uvicorn.run)``
+    pattern silently swallows:
+
+    1. **TOCTOU between ``find_free_port`` and the real bind** — if
+       another process grabs the probed port in the interim, uvicorn's
+       startup task raises ``OSError`` and the daemon thread dies.
+       This helper detects the dead thread and retries the next port.
+    2. **Webview pointed at a dead port** — the previous code passed
+       the *requested* port to ``webview.create_window`` even if
+       uvicorn never bound it. Here we wait for ``server.started`` to
+       flip true and read the port from ``server.servers[0].sockets[0]``
+       so the caller always gets the verified-bound port.
+
+    The returned ``server`` is a live ``uvicorn.Server`` instance; the
+    caller can call ``server.should_exit = True`` to shut it down.
+    The thread is daemonised so the process can exit cleanly when the
+    webview window closes.
+    """
+    import uvicorn
+
+    last_exc: Exception | None = None
+    for offset in range(max_tries):
+        port = requested_port + offset
+        config = uvicorn.Config(app, host=host, port=port, log_level=log_level)
+        server = uvicorn.Server(config)
+        # Disable uvicorn's signal-handler install — pywebview owns the
+        # main thread on Windows / macOS, and uvicorn's ``signal.signal``
+        # calls from a worker thread raise ``ValueError: signal only
+        # works in main thread of the main interpreter``.
+        server.install_signal_handlers = lambda: None  # type: ignore[method-assign]
+        thread = threading.Thread(
+            target=server.run, daemon=True, name=f"uvicorn-{port}"
+        )
+        thread.start()
+
+        deadline = time.time() + startup_timeout
+        while time.time() < deadline:
+            if server.started:
+                actual_port = port
+                try:
+                    sockets = (server.servers or [None])[0].sockets
+                    if sockets:
+                        actual_port = sockets[0].getsockname()[1]
+                except Exception:
+                    pass
+                return server, actual_port
+            if not thread.is_alive():
+                # Bind failed; uvicorn's startup task raised + the
+                # thread exited. Try the next port.
+                last_exc = RuntimeError(
+                    f"uvicorn thread for port {port} died before binding"
+                )
+                break
+            time.sleep(0.05)
+        else:
+            # Timed out waiting for startup — try to shut it down and
+            # move on. Don't accumulate stuck threads across retries.
+            try:
+                server.should_exit = True
+            except Exception:
+                pass
+            last_exc = RuntimeError(
+                f"uvicorn for port {port} did not start within {startup_timeout}s"
+            )
+
+    raise RuntimeError(
+        f"failed to bind any port in [{requested_port}, {requested_port + max_tries})"
+    ) from last_exc
 
 
 def _publish_actual_port(state_path: str | None, host: str, port: int) -> None:
@@ -202,22 +291,52 @@ def run_web_server(
     uvicorn.run(app, host=host, port=port)
 
 
-def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
-    """Launch the desktop app as a detached process and return immediately.
+def _is_briefcase_runtime() -> bool:
+    """True when this process is running inside a Briefcase desktop bundle.
 
-    The caller's terminal is released right away. The child process
-    runs the server + pywebview window independently.
+    Briefcase Windows shells lay down ``python3XX._pth`` next to
+    ``sys.executable`` (which is the briefcase STUB binary, not a real
+    Python). We can't subprocess-detach via ``sys.executable -m ...``
+    because the stub doesn't honour ``-m`` — it routes argv straight
+    into the framework CLI parser.
 
-    On Windows, uses ``pythonw.exe`` (the windowless Python interpreter)
-    so no console window is created.  On Unix, starts a new session so
-    the child survives terminal close.
-
-    Stderr is redirected to ``~/.kohakuterrarium/app.log`` for debugging.
+    Detection mirrors ``kohakuterrarium.__main__._is_briefcase_bundle``;
+    the launcher additionally sets ``KT_LAUNCHER_EXEC=1`` after its
+    in-process sys.path swap so we have a second positive signal.
     """
-    import subprocess
+    if os.environ.get("KT_LAUNCHER_EXEC") == "1":
+        return True
+    try:
+        exe_dir = Path(sys.executable).resolve().parent
+    except OSError:
+        return False
+    return any(exe_dir.glob("python3*._pth"))
 
-    # Always use sys.executable — it's the Python that's running kt right now,
-    # guaranteed to have the correct env (works with uv, micromamba, venv, etc.)
+
+def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
+    """Launch the desktop app.
+
+    Two paths:
+
+    - **CLI / dev** (regular Python interpreter): detach a child process
+      via ``Popen`` so the caller's terminal is freed. Child writes
+      stderr to ``~/.kohakuterrarium/app.log``.
+    - **Briefcase desktop bundle**: there is no detachable Python — the
+      briefcase stub doesn't honour ``-m``. Run the server + pywebview
+      in this same process via :func:`_run_desktop_app_blocking`. The
+      briefcase stub IS the desktop app; releasing a terminal is
+      meaningless here.
+    """
+    if _is_briefcase_runtime():
+        # The briefcase stub IS the GUI process. Inline the desktop
+        # entry so the same process drives uvicorn + pywebview to
+        # completion. Spawning ``sys.executable -m kohakuterrarium.serving.web``
+        # would re-enter the briefcase CLI parser and exit silently
+        # with an "argument command: invalid choice" — exactly the
+        # "runs for a while then turns off" symptom seen in dev5.
+        _run_desktop_app_blocking(port=port, log_level=log_level)
+        return
+
     cmd = [
         sys.executable,
         "-m",
@@ -228,7 +347,6 @@ def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
         str(log_level),
     ]
 
-    # Redirect stderr to a log file so crashes aren't silent
     log_dir = Path.home() / ".kohakuterrarium"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = open(log_dir / "app.log", "w", encoding="utf-8")  # noqa: SIM115
@@ -240,12 +358,8 @@ def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
     }
 
     if sys.platform == "win32":
-        # CREATE_NO_WINDOW prevents python.exe from spawning a console.
-        # The child process runs independently — Popen is non-blocking and
-        # the child survives after the parent (kt app) exits.
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
     else:
-        # Unix: new session so the child survives terminal close
         kwargs["start_new_session"] = True
 
     subprocess.Popen(cmd, **kwargs)
@@ -276,8 +390,6 @@ def _run_desktop_app_blocking(port: int = 8001, log_level: str = "INFO") -> None
         print("Install: pip install 'KohakuTerrarium[desktop]'")
         sys.exit(1)
 
-    import uvicorn
-
     from kohakuterrarium.api.app import create_app
 
     if not WEB_DIST_DIR.is_dir():
@@ -295,25 +407,20 @@ def _run_desktop_app_blocking(port: int = 8001, log_level: str = "INFO") -> None
         static_dir=WEB_DIST_DIR,
     )
 
-    # Auto-find free port (multi-instance safe)
+    # Start uvicorn with fallback + verified bound port.  ``port`` from
+    # here on is the ACTUAL port uvicorn is listening on, not the
+    # requested one — webview opens against this.
     try:
-        port = find_free_port(start=port, host="127.0.0.1")
+        _server, port = start_uvicorn_with_port_fallback(
+            app,
+            requested_port=port,
+            host="127.0.0.1",
+            log_level="warning",
+        )
     except RuntimeError as e:
-        logger.error("Port allocation failed", error=str(e))
+        logger.error("Failed to start uvicorn", error=str(e))
         sys.exit(1)
-
-    # Uvicorn in a daemon thread — dies when the main thread (webview) exits
-    server_thread = threading.Thread(
-        target=uvicorn.run,
-        kwargs={
-            "app": app,
-            "host": "127.0.0.1",
-            "port": port,
-            "log_level": "warning",
-        },
-        daemon=True,
-    )
-    server_thread.start()
+    logger.info("desktop: uvicorn listening at http://127.0.0.1:%d", port)
 
     # Resolve icon paths
     icons_dir = Path(__file__).parent.parent / "app_icons"

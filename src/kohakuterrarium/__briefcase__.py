@@ -29,6 +29,7 @@ the new version tree. The briefcase shell installer itself doesn't
 need to be re-downloaded.
 """
 
+import os
 import sys
 
 from kohakuterrarium.launcher.bootloader import prepare
@@ -63,6 +64,16 @@ def main() -> int:
         return result.exit_code or 7
 
     _swap_to_version_tree(str(result.site_packages))
+
+    # Sentinel the framework's serving layer reads to skip its
+    # CLI-style "detach a subprocess" path — see
+    # ``kohakuterrarium.serving.web._is_briefcase_runtime``. On
+    # briefcase, the stub binary IS the GUI process and subprocess-
+    # detaching via ``sys.executable -m ...`` doesn't work (the stub
+    # routes -m straight into the kt CLI parser, child dies, parent
+    # exits — that was the dev5 "runs for a while then turns off"
+    # failure mode).
+    os.environ["KT_LAUNCHER_EXEC"] = "1"
 
     # The launcher's already-imported ``kohakuterrarium`` package was
     # just evicted — re-import the *framework's* version (now first in
