@@ -78,7 +78,13 @@ class TestBundledReleaseDir:
 
 
 class TestVersionEntrypointHelpers:
-    def test_kt_script_path(self, tmp_path):
-        kt = _p.kt_script(tmp_path)
-        assert kt.parent == tmp_path / "scripts"
-        assert kt.name in ("kt", "kt.exe")
+    def test_site_packages_dir(self, tmp_path):
+        assert _p.site_packages_dir(tmp_path) == tmp_path / "site-packages"
+
+    def test_manifest_path(self, tmp_path):
+        assert _p.manifest_path(tmp_path) == tmp_path / "manifest.json"
+
+    def test_python_for_is_sys_executable(self, tmp_path):
+        # The launcher always uses sys.executable; version_root is
+        # purely cosmetic in the signature.
+        assert str(_p.python_for(tmp_path)) == _p.sys.executable

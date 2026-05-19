@@ -19,7 +19,6 @@ def _make_version(version: str, *, build_id: str = "") -> None:
     """Lay down a stub version tree with a manifest.json."""
     root = _p.version_dir(version)
     (root / "site-packages").mkdir(parents=True, exist_ok=True)
-    (root / "scripts").mkdir(parents=True, exist_ok=True)
     info = {"version": version, "build_id": build_id, "generated_at": ""}
     (root / "manifest.json").write_text(json.dumps(info), encoding="utf-8")
 
@@ -140,3 +139,43 @@ class TestRollback:
         _t.write_active_pointer("1.5.0")
         with pytest.raises(_t.TreeOpError):
             _t.revert_active_pointer()
+
+
+# ── smoke ───────────────────────────────────────────────────────────
+
+
+class TestSmoke:
+    """End-to-end exercise of ``smoke_test_tree`` against a real subprocess.
+
+    Crafts a minimal ``site-packages/kohakuterrarium/__init__.py`` and
+    confirms the probe imports it under the current ``sys.executable``.
+    """
+
+    def test_smoke_returns_version_from_init(self, tmp_path):
+        root = tmp_path / "v1"
+        site = root / "site-packages" / "kohakuterrarium"
+        site.mkdir(parents=True)
+        (site / "__init__.py").write_text('__version__ = "1.2.3"\n', encoding="utf-8")
+        version = _t.smoke_test_tree(root)
+        assert version == "1.2.3"
+
+    def test_smoke_missing_site_packages_raises(self, tmp_path):
+        root = tmp_path / "vBAD"
+        root.mkdir()
+        with pytest.raises(_t.TreeOpError):
+            _t.smoke_test_tree(root)
+
+    def test_smoke_missing_kohakuterrarium_pkg_raises(self, tmp_path):
+        root = tmp_path / "vIncomplete"
+        # Has site-packages/ but no kohakuterrarium/ inside it — an
+        # incomplete tarball.
+        (root / "site-packages").mkdir(parents=True)
+        with pytest.raises(_t.TreeOpError):
+            _t.smoke_test_tree(root)
+
+    def test_smoke_missing_version_string_returns_placeholder(self, tmp_path):
+        root = tmp_path / "vNoVer"
+        site = root / "site-packages" / "kohakuterrarium"
+        site.mkdir(parents=True)
+        (site / "__init__.py").write_text("# no version assigned\n", encoding="utf-8")
+        assert _t.smoke_test_tree(root) == "<no-version>"

@@ -91,7 +91,6 @@ def _build_release_tarball(path, *, version: str) -> str:
         "site-packages/kohakuterrarium/__init__.py": (
             f'__version__ = "{version}"\n'
         ).encode(),
-        "scripts/kt": b"#!/bin/sh\necho ok\n",
     }
     with tarfile.open(str(path), mode="w:gz") as tar:
         for name, data in members.items():

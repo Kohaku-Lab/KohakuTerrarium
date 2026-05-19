@@ -19,16 +19,16 @@ def cfg_home(monkeypatch, tmp_path):
 
 
 def _make_smoke_passing_tarball(path, *, version: str) -> None:
-    """Build a tarball whose `scripts/kt --version` exits 0.
+    """Build a structurally-valid release tarball.
 
-    Uses /usr/bin/env python3 on POSIX or a python launcher on Windows
-    — the tests stub smoke_test_tree, so the contents don't actually
-    have to run; we just need a structurally-valid tarball.
+    Tests stub ``smoke_test_tree`` so the contents don't need to be
+    runnable — we only need ``site-packages/`` + ``manifest.json``
+    inside a single top-level directory so the launcher's extract +
+    promote paths exercise the real shapes.
     """
     site = {
         "manifest.json": json.dumps({"version": version, "build_id": "tb"}).encode(),
         "site-packages/kohakuterrarium/__init__.py": f'__version__ = "{version}"\n'.encode(),
-        "scripts/kt": b"#!/bin/sh\necho ok\n",
     }
     with tarfile.open(str(path), mode="w:gz") as tar:
         for name, data in site.items():
