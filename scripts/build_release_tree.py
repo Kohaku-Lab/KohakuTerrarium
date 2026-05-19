@@ -8,15 +8,15 @@ The tarball contains:
 ::
 
     kohakuterrarium-<version>-<plat>-py<X.Y>/
-    ├── site-packages/   ← `pip install kohakuterrarium[full] --target` output
-    ├── scripts/
-    │   ├── kt(.exe)
-    │   └── kt-app(.exe)
+    ├── site-packages/   ← `pip install kohakuterrarium --target` output
     └── manifest.json    ← {version, build_id, platform, py_abi, sha256, ...}
 
-The launcher's downloader extracts straight into
-``runtime/versions/<version>/`` so the top-level directory matches
-what ``tree_ops.smoke_test_tree`` expects.
+That's it. No ``scripts/`` directory, no kt shim — the launcher uses
+the briefcase-bundled Python directly (``sys.executable``) with
+``PYTHONPATH`` pointing at ``site-packages/`` and dispatches into the
+framework via ``-m kohakuterrarium.cli``. Shipping shim files would
+just add per-platform fragility (PATH lookup, execv-cmd quirks on
+Windows) for no benefit on top of what the launcher already has.
 
 Usage::
 
@@ -157,90 +157,6 @@ def _pip_install_to(target: Path, source: str, extras: str) -> None:
     subprocess.run(cmd, check=True)
 
 
-def _emit_kt_shim_unix(scripts_dir: Path, site_packages: Path) -> None:
-    """POSIX kt shim: shebang + `python -m kohakuterrarium.cli` style."""
-    scripts_dir.mkdir(parents=True, exist_ok=True)
-    shim = scripts_dir / "kt"
-    shim.write_text(
-        "#!/usr/bin/env python3\n"
-        '"""kt console-script shim emitted by build_release_tree.py."""\n'
-        "import os\n"
-        "import sys\n"
-        "from pathlib import Path\n"
-        "HERE = Path(__file__).resolve().parent.parent\n"
-        "sys.path.insert(0, str(HERE / 'site-packages'))\n"
-        "os.environ.setdefault('PYTHONNOUSERSITE', '1')\n"
-        "from kohakuterrarium.cli import main\n"
-        "if __name__ == '__main__':\n"
-        "    sys.exit(main())\n",
-        encoding="utf-8",
-    )
-    shim.chmod(0o755)
-    # kt-app alias points at the same entry — the framework's cli/main
-    # dispatches the ``app`` subcommand internally.
-    app = scripts_dir / "kt-app"
-    app.write_text(
-        "#!/usr/bin/env python3\n"
-        "import sys\n"
-        "from pathlib import Path\n"
-        "HERE = Path(__file__).resolve().parent.parent\n"
-        "sys.path.insert(0, str(HERE / 'site-packages'))\n"
-        "from kohakuterrarium.cli import main\n"
-        "if __name__ == '__main__':\n"
-        "    sys.exit(main(['app', *sys.argv[1:]]))\n",
-        encoding="utf-8",
-    )
-    app.chmod(0o755)
-    _ = site_packages
-
-
-def _emit_kt_shim_windows(scripts_dir: Path) -> None:
-    """Windows kt shim: a ``.py`` + a ``.cmd`` launcher.
-
-    A real ``.exe`` wrapper (the standard wheel installer shape) would
-    embed the python path at build time, which we can't predict — the
-    user's launcher provides the python at exec time. A ``.cmd`` that
-    calls ``python <shim>.py %*`` keeps the abstraction working
-    everywhere.
-    """
-    scripts_dir.mkdir(parents=True, exist_ok=True)
-    py_shim = scripts_dir / "kt.py"
-    py_shim.write_text(
-        "import os\n"
-        "import sys\n"
-        "from pathlib import Path\n"
-        "HERE = Path(__file__).resolve().parent.parent\n"
-        "sys.path.insert(0, str(HERE / 'site-packages'))\n"
-        "os.environ.setdefault('PYTHONNOUSERSITE', '1')\n"
-        "from kohakuterrarium.cli import main\n"
-        "if __name__ == '__main__':\n"
-        "    sys.exit(main())\n",
-        encoding="utf-8",
-    )
-    cmd_shim = scripts_dir / "kt.cmd"
-    cmd_shim.write_text(
-        "@echo off\r\n" 'python "%~dp0kt.py" %*\r\n',
-        encoding="utf-8",
-    )
-    # Same for kt-app
-    app_py = scripts_dir / "kt-app.py"
-    app_py.write_text(
-        "import sys\n"
-        "from pathlib import Path\n"
-        "HERE = Path(__file__).resolve().parent.parent\n"
-        "sys.path.insert(0, str(HERE / 'site-packages'))\n"
-        "from kohakuterrarium.cli import main\n"
-        "if __name__ == '__main__':\n"
-        "    sys.exit(main(['app', *sys.argv[1:]]))\n",
-        encoding="utf-8",
-    )
-    app_cmd = scripts_dir / "kt-app.cmd"
-    app_cmd.write_text(
-        "@echo off\r\n" 'python "%~dp0kt-app.py" %*\r\n',
-        encoding="utf-8",
-    )
-
-
 def _write_manifest(root: Path, info: dict) -> None:
     (root / "manifest.json").write_text(
         json.dumps(info, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -256,8 +172,16 @@ def _sha256(path: Path) -> str:
 
 
 def _pack_tarball(root: Path, tarball: Path, *, use_zstd: bool) -> None:
+    """Pack ``root``'s **contents** (not ``root`` itself) into a tarball.
+
+    The launcher extracts straight into ``runtime/versions/<v>/`` and
+    expects ``site-packages/`` + ``manifest.json`` at the top level —
+    no wrapping directory. Using ``tar.add(str(root), arcname=root.name)``
+    would add an extra ``kohakuterrarium-<v>-<plat>-py<X.Y>/`` layer
+    that ``smoke_test_tree`` then can't find.
+    """
     tarball.parent.mkdir(parents=True, exist_ok=True)
-    arcname = root.name
+    children = sorted(root.iterdir())
     if use_zstd:
         import zstandard  # only needed when packing zstd
 
@@ -265,16 +189,17 @@ def _pack_tarball(root: Path, tarball: Path, *, use_zstd: bool) -> None:
             cctx = zstandard.ZstdCompressor(level=19, threads=-1)
             with cctx.stream_writer(dst) as compressor:
                 with tarfile.open(fileobj=compressor, mode="w|") as tar:
-                    tar.add(str(root), arcname=arcname)
+                    for child in children:
+                        tar.add(str(child), arcname=child.name)
     else:
         with tarfile.open(str(tarball), mode="w:gz", compresslevel=9) as tar:
-            tar.add(str(root), arcname=arcname)
+            for child in children:
+                tar.add(str(child), arcname=child.name)
 
 
 def main() -> int:
     args = parse_args()
     build_id = args.build_id or default_build_id()
-    is_windows = args.platform.startswith("win")
 
     work = REPO_ROOT / "build" / "release-tree"
     if work.exists():
@@ -284,15 +209,9 @@ def main() -> int:
     )
     root = work / root_name
     site = root / "site-packages"
-    scripts = root / "scripts"
     site.mkdir(parents=True, exist_ok=True)
 
     _pip_install_to(site, args.source, args.extras)
-
-    if is_windows:
-        _emit_kt_shim_windows(scripts)
-    else:
-        _emit_kt_shim_unix(scripts, site)
 
     info = {
         "schema": 1,
