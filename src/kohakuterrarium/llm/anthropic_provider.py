@@ -35,6 +35,7 @@ from kohakuterrarium.llm.anthropic_format import (
     merge_usage,
     usage_to_dict,
 )
+from kohakuterrarium.llm.api_keys import get_api_key
 from kohakuterrarium.llm.base import (
     BaseLLMProvider,
     ChatResponse,
@@ -168,9 +169,59 @@ class AnthropicProvider(BaseLLMProvider):
         clone.provider_native_tools = getattr(
             self, "provider_native_tools", clone.provider_native_tools
         )
+        credential_provider = getattr(self, "_credential_provider", "")
+        if credential_provider:
+            clone._credential_provider = credential_provider
         if hasattr(self, "_profile_max_context"):
             clone._profile_max_context = self._profile_max_context
         return clone
+
+    def reload_credentials(self) -> bool:
+        """Re-resolve the API key + rebuild the SDK client in place.
+
+        Mirrors :meth:`OpenAIProvider.reload_credentials` for the
+        native Anthropic Messages path. Honours the same bearer-vs-
+        x-api-key wiring decision the constructor made — we keep
+        ``self.auth_as_bearer`` and re-emit ``X-Api-Key: Omit()`` on
+        the bearer route so the rebuilt client matches the original
+        auth shape.
+
+        Credential lookup uses :attr:`_credential_provider` (the
+        backend NAME — same key the boot path used) when set, falling
+        back to :attr:`provider_name`. Built-in backends leave
+        ``provider_name`` empty, so the credential field is what
+        actually rotates keys for the common openrouter/anthropic
+        paths.
+        """
+        lookup_key = getattr(self, "_credential_provider", "") or self.provider_name
+        if not lookup_key:
+            return False
+        new_key = get_api_key(lookup_key)
+        if not new_key or new_key == self._api_key:
+            return False
+        old = self._client
+        self._api_key = new_key
+        default_headers = dict(self._extra_headers)
+        if self.auth_as_bearer:
+            default_headers.setdefault("X-Api-Key", Omit())
+        self._client = AsyncAnthropic(
+            api_key=None if self.auth_as_bearer else new_key,
+            auth_token=new_key if self.auth_as_bearer else None,
+            base_url=self.base_url,
+            timeout=self._timeout,
+            max_retries=self._max_retries,
+            default_headers=default_headers,
+        )
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(old.close())
+        except RuntimeError:
+            pass
+        logger.info(
+            "AnthropicProvider credentials reloaded",
+            provider=lookup_key,
+        )
+        return True
 
     async def _stream_chat(
         self,

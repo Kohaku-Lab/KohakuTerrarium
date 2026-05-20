@@ -13,6 +13,7 @@ from kohakuterrarium.llm.openai_helpers import (
     delta_field_present,
     extract_usage,
     log_token_usage,
+    merge_reasoning_detail_stream,
     normalize_stateful_assistant_fields,
     pack_reasoning_fields,
     tool_call_from_pending,
@@ -241,3 +242,129 @@ class _RecordingHandler(logging.Handler):
 
     def emit(self, record):
         self.records.append(record)
+
+
+class TestMergeReasoningDetailStream:
+    """Pins the streaming-merge fix for OpenRouter+Claude thinking blocks.
+
+    OpenRouter streams ``reasoning_details`` as N+1 separate entries
+    sharing ``index``: N partial-text entries followed by one entry
+    carrying the HMAC ``signature``. A plain ``list.extend`` keeps them
+    as N+1 entries; sending that back trips Anthropic's
+    ``Invalid signature in thinking block`` 400 (verified live against
+    ``anthropic/claude-haiku-4.5`` over OpenRouter). The merge collapses
+    them by ``(type, index)`` so the assistant message carries one
+    entry per logical block with text accumulated and signature intact.
+    """
+
+    def test_single_entry_appended_as_is(self):
+        acc: list[dict] = []
+        merge_reasoning_detail_stream(
+            acc,
+            {"type": "reasoning.text", "index": 0, "text": "hello", "format": "x"},
+        )
+        assert acc == [
+            {"type": "reasoning.text", "index": 0, "text": "hello", "format": "x"}
+        ]
+
+    def test_text_chunks_concatenated_into_one_block(self):
+        acc: list[dict] = []
+        chunks = [
+            {"type": "reasoning.text", "index": 0, "text": "I need to ", "format": "x"},
+            {"type": "reasoning.text", "index": 0, "text": "calculate ", "format": "x"},
+            {"type": "reasoning.text", "index": 0, "text": "17*23.", "format": "x"},
+        ]
+        for c in chunks:
+            merge_reasoning_detail_stream(acc, c)
+        assert len(acc) == 1
+        assert acc[0]["text"] == "I need to calculate 17*23."
+
+    def test_final_signature_merged_into_existing_block(self):
+        acc: list[dict] = []
+        merge_reasoning_detail_stream(
+            acc,
+            {"type": "reasoning.text", "index": 0, "text": "thinking…", "format": "x"},
+        )
+        merge_reasoning_detail_stream(
+            acc,
+            {
+                "type": "reasoning.text",
+                "index": 0,
+                "signature": "ABCDEF0123",
+                "format": "x",
+            },
+        )
+        assert len(acc) == 1
+        assert acc[0]["text"] == "thinking…"
+        assert acc[0]["signature"] == "ABCDEF0123"
+        # ``format`` carried through from the first entry, not duplicated.
+        assert acc[0]["format"] == "x"
+
+    def test_distinct_indexes_kept_as_separate_blocks(self):
+        # Anthropic can emit multiple thinking blocks (e.g. between
+        # tool calls). They share ``type`` but have different ``index``.
+        acc: list[dict] = []
+        for idx in (0, 1):
+            merge_reasoning_detail_stream(
+                acc,
+                {
+                    "type": "reasoning.text",
+                    "index": idx,
+                    "text": f"block{idx}",
+                    "format": "x",
+                },
+            )
+            merge_reasoning_detail_stream(
+                acc,
+                {
+                    "type": "reasoning.text",
+                    "index": idx,
+                    "signature": f"sig{idx}",
+                    "format": "x",
+                },
+            )
+        assert len(acc) == 2
+        sigs = {e["index"]: e["signature"] for e in acc}
+        assert sigs == {0: "sig0", 1: "sig1"}
+
+    def test_distinct_types_kept_separate(self):
+        # ``reasoning.text`` vs ``reasoning.encrypted`` (hypothetical
+        # future Anthropic shape) share ``index=0`` but are different
+        # block types — must NOT collapse into one entry.
+        acc: list[dict] = []
+        merge_reasoning_detail_stream(
+            acc, {"type": "reasoning.text", "index": 0, "text": "a"}
+        )
+        merge_reasoning_detail_stream(
+            acc, {"type": "reasoning.encrypted", "index": 0, "data": "ZZZ"}
+        )
+        assert len(acc) == 2
+
+    def test_non_dict_piece_ignored(self):
+        acc: list[dict] = []
+        merge_reasoning_detail_stream(acc, "garbage")  # type: ignore[arg-type]
+        merge_reasoning_detail_stream(acc, None)  # type: ignore[arg-type]
+        assert acc == []
+
+    def test_signature_does_not_overwrite_with_empty(self):
+        # The provider could emit a follow-up entry with an empty
+        # signature field — that's not a "reset"; keep the last real
+        # value.
+        acc: list[dict] = []
+        merge_reasoning_detail_stream(
+            acc, {"type": "reasoning.text", "index": 0, "signature": "REAL"}
+        )
+        merge_reasoning_detail_stream(
+            acc, {"type": "reasoning.text", "index": 0, "signature": ""}
+        )
+        assert acc[0]["signature"] == "REAL"
+
+    def test_accumulator_isolated_from_provider_object(self):
+        # The provider's delta object should not be aliased into the
+        # accumulator — subsequent provider mutations would otherwise
+        # corrupt our captured state.
+        first = {"type": "reasoning.text", "index": 0, "text": "x"}
+        acc: list[dict] = []
+        merge_reasoning_detail_stream(acc, first)
+        first["text"] = "MUTATED"
+        assert acc[0]["text"] == "x"

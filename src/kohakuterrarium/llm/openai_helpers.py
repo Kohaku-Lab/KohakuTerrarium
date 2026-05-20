@@ -59,6 +59,63 @@ def delta_field_present(obj: Any, name: str) -> bool:
     return getattr(obj, name, None) is not None
 
 
+def merge_reasoning_detail_stream(
+    accumulator: list[dict[str, Any]],
+    piece: dict[str, Any],
+) -> None:
+    """Merge one streaming ``reasoning_details`` delta into the accumulator.
+
+    OpenRouter (and other Anthropic-thinking proxies) emit the
+    ``reasoning_details`` field across many SSE deltas. Each delta
+    carries a list of partial entries sharing an ``index`` field that
+    identifies the logical reasoning block they belong to. Anthropic
+    emits the BLOCK TEXT incrementally (one or more text-chunk entries
+    with ``text`` set + ``signature`` absent), then emits the HMAC
+    ``signature`` in the FINAL delta as a separate entry (``text``
+    absent, same ``index``).
+
+    A naive ``accumulator.extend(piece)`` produces ~25 separate entries
+    for one logical thinking block. Sending that back on the next turn
+    is broken two ways:
+
+    1. OpenRouter's safety net strips entries that lack a non-empty
+       ``signature`` → 24 text entries vanish, leaving only the
+       signature-only entry with empty text.
+    2. Anthropic validates the signature against the FULL block content
+       — an empty thinking block with the previously-emitted signature
+       fails with ``Invalid signature in thinking block``.
+
+    Merge by ``(type, index)``: concatenate the incremental text /
+    thinking fields, retain the final non-empty signature / data, and
+    carry the first-seen ``format`` so the assistant message ends up
+    with one entry per logical block — byte-identical to what
+    Anthropic produced on the originating turn.
+    """
+    if not isinstance(piece, dict):
+        return
+    idx = piece.get("index")
+    ptype = piece.get("type")
+    for existing in accumulator:
+        if existing.get("index") == idx and existing.get("type") == ptype:
+            for field in ("text", "thinking"):
+                value = piece.get(field)
+                if isinstance(value, str) and value:
+                    existing[field] = (existing.get(field, "") or "") + value
+                elif field in piece and field not in existing:
+                    existing[field] = piece[field]
+            for field in ("signature", "data"):
+                value = piece.get(field)
+                if value:
+                    existing[field] = value
+            for field in ("format", "id"):
+                if field in piece and field not in existing:
+                    existing[field] = piece[field]
+            return
+    # No existing match — append a fresh copy so subsequent merges
+    # don't mutate the provider's delta object.
+    accumulator.append(dict(piece))
+
+
 def pack_reasoning_fields(
     text: str,
     details: list[Any],

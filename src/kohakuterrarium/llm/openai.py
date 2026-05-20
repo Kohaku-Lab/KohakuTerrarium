@@ -14,6 +14,7 @@ from kohakuterrarium.llm.anthropic_cache import (
     apply_anthropic_cache_markers,
     is_anthropic_endpoint,
 )
+from kohakuterrarium.llm.api_keys import get_api_key
 from kohakuterrarium.llm.base import (
     BaseLLMProvider,
     ChatResponse,
@@ -25,6 +26,7 @@ from kohakuterrarium.llm.openai_helpers import (
     delta_field_present,
     extract_usage,
     log_token_usage,
+    merge_reasoning_detail_stream,
     normalize_stateful_assistant_fields,
     pack_reasoning_fields,
     tool_call_from_pending,
@@ -209,9 +211,69 @@ class OpenAIProvider(BaseLLMProvider):
         clone.provider_native_tools = getattr(
             self, "provider_native_tools", clone.provider_native_tools
         )
+        credential_provider = getattr(self, "_credential_provider", "")
+        if credential_provider:
+            clone._credential_provider = credential_provider
         if hasattr(self, "_profile_max_context"):
             clone._profile_max_context = self._profile_max_context
         return clone
+
+    def reload_credentials(self) -> bool:
+        """Re-resolve the API key + rebuild the SDK client in place.
+
+        Called by the engine when the user updates a provider key via
+        the frontend Settings → Providers page. Without this hot
+        rebuild, the cached :class:`AsyncOpenAI` would keep sending
+        the stale Authorization header — the user would have to restart
+        the creature (or the server) for the new key to take effect.
+
+        Resolution uses :func:`get_api_key` against
+        :attr:`_credential_provider` (the backend NAME, e.g.
+        ``"openrouter"`` — the same key the boot path used) when set,
+        falling back to :attr:`provider_name` for legacy callers that
+        only stamp the native-tool compat field. Built-in backends
+        (openai/openrouter/anthropic/gemini/mimo) leave
+        ``provider_name`` empty by design — credential lookup has to
+        use the backend NAME instead, which is what the boot path
+        already does when fetching ``profile.provider``'s key.
+
+        Inline configs (no profile / no backend name) get a no-op
+        since they only read env at construction; the user would have
+        to set the env + restart anyway.
+
+        Returns ``True`` when the credential rotated. The old SDK
+        client is closed on the running event loop best-effort —
+        in-flight requests against it either complete naturally or
+        surface the rotation as a one-shot 401 on the next attempt.
+        """
+        lookup_key = getattr(self, "_credential_provider", "") or self.provider_name
+        if not lookup_key:
+            return False
+        new_key = get_api_key(lookup_key)
+        if not new_key or new_key == self._api_key:
+            return False
+        old = self._client
+        self._api_key = new_key
+        self._client = AsyncOpenAI(
+            api_key=new_key,
+            base_url=self._base_url_input,
+            timeout=self._timeout,
+            max_retries=self._max_retries,
+            default_headers=self._extra_headers,
+        )
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(old.close())
+        except RuntimeError:
+            # No running loop — closing synchronously is unsafe (it'd
+            # spin up a temporary loop and confuse anyio). Drop the ref
+            # and let GC finalise the underlying httpx client.
+            pass
+        logger.info(
+            "OpenAIProvider credentials reloaded",
+            provider=lookup_key,
+        )
+        return True
 
     # ------------------------------------------------------------------
     # Streaming
@@ -406,7 +468,14 @@ class OpenAIProvider(BaseLLMProvider):
                     reasoning_details_seen = True
                 rd_piece = delta_field(delta, "reasoning_details")
                 if isinstance(rd_piece, list):
-                    reasoning_details.extend(rd_piece)
+                    # Merge by (type, index) so streaming text chunks +
+                    # final signature entry collapse into ONE logical
+                    # reasoning block. ``list.extend`` here is what
+                    # was breaking the Anthropic round-trip — see
+                    # :func:`merge_reasoning_detail_stream`.
+                    for entry in rd_piece:
+                        if isinstance(entry, dict):
+                            merge_reasoning_detail_stream(reasoning_details, entry)
                 # OpenRouter also occasionally emits a plain "reasoning"
                 # string alongside ``reasoning_details`` — keep it when
                 # present, even if the provider emitted an empty value.

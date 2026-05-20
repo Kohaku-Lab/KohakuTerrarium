@@ -181,6 +181,13 @@ ALLOWLIST_600 = {
     # runtime tool registration already extracted to
     # ``agent_runtime_tools.py`` and metrics to ``agent_tools_metrics.py``.
     "core/agent_tools.py",
+    # OpenAI-compat provider: streaming + non-streaming + tool calling +
+    # retry + emergency drop + reasoning capture + Anthropic-cache marker
+    # interop + live credential reload. One cohesive AsyncOpenAI wrapper
+    # — splitting along category lines would scatter retry / stream-state
+    # / extra_body handling across files that all touch the same
+    # ``create_kwargs`` dict.
+    "llm/openai.py",
     # Resumable-events normalization pipeline — cohesive replay/branch
     # logic: nested-branch parent-path resolution, branch-view selection,
     # OpenAI-shape conversation replay, interrupted-job synthesis, plus

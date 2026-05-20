@@ -209,6 +209,15 @@ class LLMProvider(Protocol):
         """
         ...
 
+    def reload_credentials(self) -> bool:
+        """Re-resolve API credentials + rebuild the SDK client.
+
+        Returns ``True`` when the credential rotated. See
+        :meth:`BaseLLMProvider.reload_credentials` for the default
+        (no-op) implementation.
+        """
+        ...
+
 
 class BaseLLMProvider:
     """
@@ -285,6 +294,23 @@ class BaseLLMProvider:
         so providers that don't capture anything stay a no-op.
         """
         return getattr(self, "_last_assistant_extra_fields", {}) or {}
+
+    def reload_credentials(self) -> bool:
+        """Re-resolve the API key from the launcher's resolver + rebuild
+        the underlying SDK client. Default: no-op.
+
+        Subclasses that hold a cached SDK client built around a baked-in
+        API key (``OpenAIProvider``, ``AnthropicProvider``) override
+        this to handle live key updates from the frontend's provider
+        page. Returns ``True`` when the credential actually rotated;
+        ``False`` when unchanged, unresolvable, or not applicable to
+        this provider class (Codex OAuth, FakeLLM, etc.).
+
+        Engine fan-out on key save calls this on every live agent's
+        provider — the next chat request then uses the new credential
+        with no creature restart.
+        """
+        return False
 
     def translate_provider_native_tool(self, tool: Any) -> dict | None:
         """Translate a KT provider-native tool into a wire-format tool spec.

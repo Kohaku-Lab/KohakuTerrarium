@@ -213,6 +213,14 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
             retry_policy=retry_policy,
         )
     provider._profile_max_context = profile.max_context
+    # The backend NAME (``"openrouter"``, ``"openai"``, ``"anthropic"``,
+    # ...) is the api_keys.yaml lookup key used at boot. Stash it on the
+    # provider so ``reload_credentials`` can re-fetch the same way when
+    # the user updates a key via Settings → Providers — built-in
+    # backends leave the native-tool ``provider_name`` empty, so the
+    # native-tool field alone is not enough.
+    if profile.provider:
+        provider._credential_provider = profile.provider
     _apply_backend_native_identity(provider, profile)
     return provider
 
