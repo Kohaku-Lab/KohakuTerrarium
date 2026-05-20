@@ -41,10 +41,13 @@ def _try_pywebview(server: SplashServer) -> bool:
         return False
 
     html = _render_html(server.endpoint)
+    # The splash window object is created on the background thread; the
+    # box lets the main-thread ``stop()`` reach it.
+    window_box: list = []
 
     def _run():
         try:
-            webview.create_window(
+            window = webview.create_window(
                 "KohakuTerrarium",
                 html=html,
                 width=420,
@@ -54,12 +57,27 @@ def _try_pywebview(server: SplashServer) -> bool:
                 resizable=False,
                 on_top=True,
             )
+            window_box.append(window)
             webview.start()
         except Exception as e:  # pragma: no cover - backend-specific
             get_logger().warning("splash: pywebview backend failed: %s", e)
 
     t = threading.Thread(target=_run, name="kt-splash-pywebview", daemon=True)
     t.start()
+
+    def _close() -> None:
+        # ``webview.start`` blocks the background thread until the last
+        # window closes, so destroying the splash here also lets the
+        # background thread exit and frees pywebview's global event
+        # loop for the framework's main UI window later.
+        if not window_box:
+            return
+        try:
+            window_box[0].destroy()
+        except Exception as e:  # pragma: no cover - backend-specific
+            get_logger().warning("splash: pywebview destroy failed: %s", e)
+
+    server.register_close_callback(_close)
     return True
 
 
@@ -70,9 +88,12 @@ def _try_tk(server: SplashServer) -> bool:
     except ImportError:
         return False
 
+    root_box: list = []
+
     def _run():
         try:
             root = tk.Tk()
+            root_box.append(root)
             root.title("KohakuTerrarium")
             root.geometry("420x180")
             tk.Label(
@@ -102,6 +123,19 @@ def _try_tk(server: SplashServer) -> bool:
 
     t = threading.Thread(target=_run, name="kt-splash-tk", daemon=True)
     t.start()
+
+    def _close() -> None:
+        # Tk's in-loop self-destroy only fires on a terminal status; if
+        # ``stop()`` is called before then (early exit, exception in
+        # the install loop), the window would linger.
+        if not root_box:
+            return
+        try:
+            root_box[0].after(0, root_box[0].destroy)
+        except Exception:  # pragma: no cover - root may already be gone
+            pass
+
+    server.register_close_callback(_close)
     return True
 
 

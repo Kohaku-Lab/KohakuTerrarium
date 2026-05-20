@@ -46,6 +46,17 @@ class SplashServer:
         self._frame = ProgressFrame()
         self._server: HTTPServer | None = None
         self._thread: threading.Thread | None = None
+        # Backend-specific window teardown callbacks.  pywebview /
+        # Tk register theirs at open time so ``stop()`` can close the
+        # window — without this the HTTP server shuts down but the
+        # pywebview splash sits on screen forever (Tk auto-closes on
+        # terminal status from inside its own poll loop, so it
+        # registers a no-op here).
+        self._close_callbacks: list = []
+
+    def register_close_callback(self, callback) -> None:
+        """Register a callable invoked from :meth:`stop` to close the UI."""
+        self._close_callbacks.append(callback)
 
     @property
     def endpoint(self) -> str:
@@ -89,9 +100,27 @@ class SplashServer:
             ):  # noqa: D401 - silence default access log
                 pass
 
+            def _emit_cors(self) -> None:
+                # The splash page is loaded into pywebview via the
+                # ``html=`` argument, which gives it an ``about:blank`` /
+                # ``data:`` origin.  A ``fetch`` from that origin to
+                # ``http://127.0.0.1:<port>/progress`` is cross-origin,
+                # and without these headers the browser drops the
+                # response so the page sits forever on its hardcoded
+                # "Starting…" / 0% defaults.
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+            def do_OPTIONS(self):  # noqa: N802
+                self.send_response(204)
+                self._emit_cors()
+                self.end_headers()
+
             def do_GET(self):  # noqa: N802
                 if not self.path.startswith("/progress"):
                     self.send_response(404)
+                    self._emit_cors()
                     self.end_headers()
                     return
                 frame = srv_ref.snapshot()
@@ -100,6 +129,7 @@ class SplashServer:
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header("Cache-Control", "no-store")
+                self._emit_cors()
                 self.end_headers()
                 self.wfile.write(body)
 
@@ -114,6 +144,17 @@ class SplashServer:
         return self
 
     def stop(self) -> None:
+        # Close the window FIRST so the user sees the splash disappear
+        # immediately; the HTTP server teardown happens after.  Order
+        # matters: if we kill the HTTP server first, the still-open
+        # pywebview window's JS poll starts failing and the page
+        # visibly degrades before the window itself disappears.
+        for cb in self._close_callbacks:
+            try:
+                cb()
+            except Exception:
+                get_logger().warning("splash: close callback raised", exc_info=True)
+        self._close_callbacks.clear()
         if self._server is None:
             return
         try:
