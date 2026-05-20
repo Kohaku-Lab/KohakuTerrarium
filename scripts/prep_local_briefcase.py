@@ -19,8 +19,6 @@ The produced tarball is named with the local Python's platform / ABI
 tags so the launcher's ``feeds.current_*_tag()`` match at runtime.
 """
 
-from __future__ import annotations
-
 import argparse
 import platform as _platform
 import shutil

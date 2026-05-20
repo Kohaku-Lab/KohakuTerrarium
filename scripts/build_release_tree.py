@@ -32,8 +32,6 @@ CI runs this once per matrix cell. Locally you can run it without
 machine's tags (useful for smoke).
 """
 
-from __future__ import annotations
-
 import argparse
 import hashlib
 import json

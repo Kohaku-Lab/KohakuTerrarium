@@ -68,39 +68,28 @@ jobs:
   # 06b/Phase H: each cell runs scripts/build_release_tree.py, producing
   # one ``kohakuterrarium-<v>-<plat>-py<X.Y>.tar.zst`` + sidecar manifest.
   # The launcher's downloader consumes these directly.
+  #
+  # cp313 only: briefcase bundles cp313 on Win/macOS, so the launcher
+  # only ever fetches cp313 trees. Earlier cp311/cp312 cells were built
+  # for hypothetical "user runs the launcher on their own Python"
+  # consumers; pip-installed users update via PyPI and docker users
+  # update via ``docker pull`` — neither uses launcher tarballs.
+  # The Linux cell is kept for advanced users running the launcher on
+  # their own Linux Python.
   build-release-tree:
     needs: [build-wheel]
     strategy:
       fail-fast: false
       matrix:
         include:
-          # linux x64
-          - os: ubuntu-latest
-            py: "3.11"
-            abi: cp311
-            plat: linux-x64
-          - os: ubuntu-latest
-            py: "3.12"
-            abi: cp312
-            plat: linux-x64
           - os: ubuntu-latest
             py: "3.13"
             abi: cp313
             plat: linux-x64
-          # macos arm64
-          - os: macos-latest
-            py: "3.12"
-            abi: cp312
-            plat: macos-arm64
           - os: macos-latest
             py: "3.13"
             abi: cp313
             plat: macos-arm64
-          # windows x64
-          - os: windows-latest
-            py: "3.12"
-            abi: cp312
-            plat: win-x64
           - os: windows-latest
             py: "3.13"
             abi: cp313
@@ -477,4 +466,12 @@ jobs:
           files: release/*
           generate_release_notes: true
           draft: false
-          prerelease: ${{ contains(github.ref, 'b') || contains(github.ref, 'rc') }}
+          # PEP 440 pre-release identifiers: alpha (``a``), beta (``b``),
+          # release-candidate (``rc``), and dev (``dev``).  The old check
+          # only looked at ``b`` / ``rc``, so ``v2.0.0.dev6`` was published
+          # as a *stable* release and showed up as "Latest" on the repo's
+          # release page.  Reading ``github.ref_name`` (the bare tag,
+          # e.g. ``v2.0.0.dev6``) keeps the ``contains`` matches scoped
+          # to user-supplied tag text instead of the literal
+          # ``refs/tags/`` prefix.
+          prerelease: ${{ contains(github.ref_name, 'dev') || contains(github.ref_name, 'rc') || contains(github.ref_name, 'a') || contains(github.ref_name, 'b') }}

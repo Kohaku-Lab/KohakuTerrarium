@@ -10,9 +10,44 @@ permissions:
   contents: write
 
 jobs:
-  # Mirrors release.yml's build-release-tree matrix but pins the channel
-  # to ``nightly`` and derives the version from the commit + timestamp.
-  build:
+  # Compute the nightly version ONCE so every downstream cell embeds the
+  # same string. The previous per-cell ``date`` call drifted by a few
+  # seconds across runners and made ``publish_manifest.py`` reject the
+  # sidecars with "sidecars span multiple versions".
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.compute.outputs.version }}
+      build_id: ${{ steps.compute.outputs.build_id }}
+      tag: ${{ steps.compute.outputs.tag }}
+      date: ${{ steps.compute.outputs.date }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compute nightly version
+        id: compute
+        shell: bash
+        run: |
+          ts=$(date -u +%Y%m%d%H%M%S)
+          date=$(date -u +%Y%m%d)
+          sha=$(git rev-parse --short=7 HEAD)
+          # PEP 440 dev release with +local segment for traceability.
+          # Pip accepts +local in URL / file installs (we don't push
+          # nightlies to PyPI, where +local is rejected).
+          version="2.0.0.dev${ts}+${sha}"
+          {
+            echo "version=${version}"
+            echo "build_id=${ts}-${sha}"
+            echo "tag=nightly-${date}"
+            echo "date=${date}"
+          } >> "$GITHUB_OUTPUT"
+          echo "nightly version=${version}"
+
+  # Per-platform release-tree tarballs the launcher consumes.
+  # Briefcase ships cp313 on Win/macOS, so cp313 is the only abi any
+  # user-facing path actually downloads. Linux x64 cp313 is kept for
+  # advanced users running the launcher on their own Linux Python.
+  build-release-tree:
+    needs: [version]
     strategy:
       fail-fast: false
       matrix:
@@ -55,21 +90,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install zstandard
 
-      - name: Compute nightly version
-        id: ver
+      - name: Patch pyproject.toml version
         shell: bash
         run: |
-          ts=$(date -u +%Y%m%d%H%M%S)
-          sha=$(git rev-parse --short=7 HEAD)
-          # PEP 440 dev release: <base>.dev<N>+<local>
-          base="2.0.0"
-          echo "version=${base}.dev${ts}+${sha}" >> "$GITHUB_OUTPUT"
+          python scripts/set_pyproject_version.py "${{ needs.version.outputs.version }}"
 
       - name: Build release tree
         shell: bash
         run: |
           python scripts/build_release_tree.py \
-            --version "${{ steps.ver.outputs.version }}" \
+            --version "${{ needs.version.outputs.version }}" \
+            --build-id "${{ needs.version.outputs.build_id }}" \
             --platform "${{ matrix.plat }}" \
             --py-abi "${{ matrix.abi }}" \
             --channel nightly \
@@ -77,11 +108,145 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: nightly-${{ matrix.plat }}-${{ matrix.abi }}
+          name: nightly-release-tree-${{ matrix.plat }}-${{ matrix.abi }}
           path: dist/release-trees/
 
+  # Wheel + sdist so ``pip install --pre`` users can update from the
+  # GH nightly release without waiting for a stable PyPI bump. The
+  # wheel is universal (pure Python ≥3.10) so one cell covers all
+  # pip users.
+  build-wheel:
+    needs: [version]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Build frontend
+        working-directory: src/kohakuterrarium-frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Patch pyproject.toml version
+        shell: bash
+        run: |
+          python scripts/set_pyproject_version.py "${{ needs.version.outputs.version }}"
+
+      - name: Build wheel + sdist
+        run: |
+          pip install build
+          python -m build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nightly-dist
+          path: dist/
+
+  # Briefcase desktop bundles. Nightlies may include launcher fixes,
+  # so we ship installers — both as a delivery vehicle for launcher
+  # changes AND so a fresh user can install the nightly directly
+  # (no "install stable then switch channels" detour).
+  build-desktop:
+    needs: [version, build-release-tree]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            plat_tag: win-x64
+            abi: cp313
+            py: "3.13"
+          - os: macos-latest
+            platform: macOS
+            plat_tag: macos-arm64
+            abi: cp313
+            py: "3.13"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.py }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Build frontend
+        working-directory: src/kohakuterrarium-frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Patch pyproject.toml version
+        shell: bash
+        run: |
+          python scripts/set_pyproject_version.py "${{ needs.version.outputs.version }}"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: nightly-release-tree-${{ matrix.plat_tag }}-${{ matrix.abi }}
+          path: bundled-release/
+
+      - name: Verify bundled-release has the right tarball
+        shell: bash
+        run: |
+          ls -la bundled-release/
+          test -n "$(find bundled-release -maxdepth 1 -name 'kohakuterrarium-*.tar.*' | head -n 1)"
+
+      - name: Install briefcase
+        run: pip install briefcase
+
+      - name: Pre-build wheels for sdist-only deps
+        shell: bash
+        run: |
+          mkdir -p wheels
+          pip wheel proxy_tools -w wheels --no-deps
+
+      - name: Create briefcase project
+        run: briefcase create
+
+      - name: Build briefcase app
+        run: briefcase build
+
+      - name: Package briefcase app
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" = "macOS" ]; then
+            briefcase package --adhoc-sign
+          else
+            briefcase package
+          fi
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          find dist/ -maxdepth 1 -type f \( -name "*.msi" -o -name "*.dmg" -o -name "*.zip" -o -name "*.exe" \) -exec cp {} artifacts/ \; 2>/dev/null || true
+          ls -la artifacts/
+          test -n "$(find artifacts -maxdepth 1 -type f | head -n 1)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nightly-desktop-${{ matrix.platform }}
+          path: artifacts/
+
   publish:
-    needs: [build]
+    needs: [version, build-release-tree, build-wheel, build-desktop]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -92,38 +257,48 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          path: tarballs
-          pattern: nightly-*
-          merge-multiple: true
+          path: all-artifacts
+          pattern: nightly-release-tree-*
+      - uses: actions/download-artifact@v4
+        with:
+          name: nightly-dist
+          path: all-artifacts/dist
+      - uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts
+          pattern: nightly-desktop-*
 
       - name: Flatten artifacts
         shell: bash
         run: |
-          mkdir -p release-trees
-          find tarballs -type f \( -name "*.tar.zst" -o -name "*.manifest.json" \) -exec cp {} release-trees/ \;
+          mkdir -p release-trees release-assets
+          # Launcher tarballs + sidecars (consumed by publish_manifest.py
+          # AND uploaded as release assets so the launcher can fetch them).
+          find all-artifacts -type f \( -name "*.tar.zst" -o -name "*.manifest.json" \) -exec cp {} release-trees/ \;
+          # Everything that becomes a GitHub release asset.
+          cp release-trees/* release-assets/
+          find all-artifacts/dist -type f -exec cp {} release-assets/ \;
+          find all-artifacts -path "*/nightly-desktop-*/*" -type f -exec cp {} release-assets/ \;
+          echo "--- release-trees/ ---"
           ls -la release-trees/
-
-      - name: Resolve nightly tag
-        id: tag
-        shell: bash
-        run: |
-          tag="nightly-$(date -u +%Y%m%d)"
-          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "--- release-assets/ ---"
+          ls -la release-assets/
 
       - name: Create dated nightly release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          tag="${{ steps.tag.outputs.tag }}"
+          tag="${{ needs.version.outputs.tag }}"
+          date="${{ needs.version.outputs.date }}"
           if ! gh release view "${tag}" -R "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release create "${tag}" \
-              --title "Nightly $(date -u +%Y-%m-%d)" \
-              --notes "Automatic nightly build. Channel: nightly." \
+              --title "Nightly ${date}" \
+              --notes "Automatic nightly build. Channel: nightly. Version: ${{ needs.version.outputs.version }}." \
               --prerelease \
               -R "${GITHUB_REPOSITORY}"
           fi
-          for f in release-trees/*.tar.zst release-trees/*.manifest.json; do
+          for f in release-assets/*; do
             [ -f "$f" ] && gh release upload "${tag}" "$f" --clobber -R "${GITHUB_REPOSITORY}"
           done
 
@@ -136,7 +311,7 @@ jobs:
       - name: Build channel manifest
         shell: bash
         run: |
-          tag="${{ steps.tag.outputs.tag }}"
+          tag="${{ needs.version.outputs.tag }}"
           python scripts/publish_manifest.py \
             --channel nightly \
             --release-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}" \
