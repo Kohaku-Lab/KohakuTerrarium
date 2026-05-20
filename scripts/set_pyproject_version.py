@@ -34,7 +34,7 @@ def patch(version: str) -> None:
     if count == 0:
         raise SystemExit("no ``version = ...`` line matched in pyproject.toml")
     PYPROJECT.write_text(updated, encoding="utf-8")
-    print(f"[set_pyproject_version] patched {count} version line(s) → {version}")
+    print(f"[set_pyproject_version] patched {count} version line(s) -> {version}")
 
 
 def main() -> int:
