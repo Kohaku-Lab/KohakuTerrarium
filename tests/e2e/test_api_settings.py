@@ -220,7 +220,18 @@ class TestApiSettingsJourney:
             json={"provider": "acme", "key": "acme-secret-key-1234"},
         )
         assert resp.status_code == 200
-        assert resp.json() == {"status": "saved", "provider": "acme"}
+        # ``rotated`` is the count of live creature providers whose
+        # cached LLM client was rebuilt with the new key (live
+        # credential reload — POST /keys fans out to every running
+        # creature so users don't need to restart after editing keys
+        # in the frontend's Providers panel).  Zero here because no
+        # creatures are running in this test setup; assert the shape
+        # is correct without pinning the count.
+        body = resp.json()
+        assert body["status"] == "saved"
+        assert body["provider"] == "acme"
+        assert "rotated" in body
+        assert isinstance(body["rotated"], int)
 
         # The key reads back as present + masked, and the backend now
         # reports a token.
