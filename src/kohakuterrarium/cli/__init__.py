@@ -17,6 +17,7 @@ from kohakuterrarium.cli._aliases import (
     dispatch_client_alias,
     dispatch_host_alias,
 )
+from kohakuterrarium.cli.admin import add_admin_subparser, admin_cli
 from kohakuterrarium.cli.auth import login_cli
 from kohakuterrarium.cli.config import add_config_subparser, config_cli
 from kohakuterrarium.cli.extension import extension_info_cli, extension_list_cli
@@ -379,6 +380,12 @@ def _build_parser() -> argparse.ArgumentParser:
     # ``kt service`` — systemd unit install / uninstall / status / edit
     add_service_subparser(subparsers)
 
+    # ``kt admin`` — operator auth admin: tokens, users, invitations,
+    # shared-state → user-namespace migration.  Runs locally; does NOT
+    # require the server.  Frontend has parity via /api/auth/* routes
+    # (admin-only) once Phase H-K Vue components land.
+    add_admin_subparser(subparsers)
+
     # ``kt self-update`` — wrapper-aware framework update with pip fallback
     add_self_update_subparser(subparsers)
 
@@ -530,6 +537,7 @@ COMMANDS: dict[str, callable] = {
     "self-update": self_update_cli,
     "extension": _dispatch_extension,
     "mcp": _dispatch_mcp,
+    "admin": admin_cli,
 }
 
 
