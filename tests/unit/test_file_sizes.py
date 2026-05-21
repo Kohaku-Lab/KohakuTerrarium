@@ -197,6 +197,13 @@ ALLOWLIST_600 = {
     # that all reference the same event stream and selected_branches
     # state.
     "session/history.py",
+    # Auth routes — capabilities + register / login / logout / me /
+    # tokens / users / invitations / admin token-rotation.  Each
+    # handler is short; what dominates the line count is the route
+    # catalogue itself (one ``@router.<verb>(...)`` per surface).
+    # Splitting along surface lines (auth vs admin) would scatter
+    # request/response Pydantic models that are shared across them.
+    "api/auth/routes.py",
 }
 
 

@@ -19,8 +19,14 @@ def _app(*routers) -> FastAPI:
 
 
 class TestUiPrefsRoute:
+    # Signatures take ``user_id=None`` because the route now passes
+    # the (anonymous = None) user id through to the studio layer for
+    # per-user prefs scoping under L4.
+
     def test_get(self, monkeypatch):
-        monkeypatch.setattr(ui_prefs_mod, "load_prefs", lambda: {"theme": "dark"})
+        monkeypatch.setattr(
+            ui_prefs_mod, "load_prefs", lambda user_id=None: {"theme": "dark"}
+        )
         client = TestClient(_app(ui_prefs_mod.router))
         resp = client.get("/ui-prefs")
         assert resp.status_code == 200
@@ -29,8 +35,9 @@ class TestUiPrefsRoute:
     def test_post_persists(self, monkeypatch):
         captured = {}
 
-        def fake_save(values):
+        def fake_save(values, *, user_id=None):
             captured["values"] = values
+            captured["user_id"] = user_id
             return {"theme": "light", **values}
 
         monkeypatch.setattr(ui_prefs_mod, "save_prefs", fake_save)
@@ -39,9 +46,11 @@ class TestUiPrefsRoute:
         assert resp.status_code == 200
         assert resp.json()["values"]["theme"] == "light"
         assert captured["values"] == {"theme": "light"}
+        # Anonymous (no L4 in this mini-app) → None → shared slot.
+        assert captured["user_id"] is None
 
     def test_post_empty(self, monkeypatch):
-        monkeypatch.setattr(ui_prefs_mod, "save_prefs", lambda v: {})
+        monkeypatch.setattr(ui_prefs_mod, "save_prefs", lambda v, *, user_id=None: {})
         client = TestClient(_app(ui_prefs_mod.router))
         resp = client.post("/ui-prefs", json={})
         assert resp.status_code == 200

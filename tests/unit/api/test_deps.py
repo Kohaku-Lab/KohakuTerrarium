@@ -7,7 +7,7 @@ from kohakuterrarium.api.deps import (
     _DEFAULT_SESSION_DIR,
     _session_dir,
     get_engine,
-    get_service,
+    get_service_legacy as get_service,
     set_service,
 )
 
