@@ -15,6 +15,7 @@ request — no creature restart required. See
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from kohakuterrarium.api.auth import verify_admin_token
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.api.routes.identity.node_routing import (
     call_node_identity,
@@ -76,7 +77,7 @@ async def get_keys(node: str = "", service: TerrariumService = Depends(get_servi
     return {"providers": resp.get("providers") or []}
 
 
-@router.post("/keys")
+@router.post("/keys", dependencies=[Depends(verify_admin_token)])
 async def set_key_route(
     req: ApiKeyRequest,
     node: str = "",
@@ -99,7 +100,7 @@ async def set_key_route(
     )
 
 
-@router.delete("/keys/{provider}")
+@router.delete("/keys/{provider}", dependencies=[Depends(verify_admin_token)])
 async def remove_key_route(
     provider: str,
     node: str = "",

@@ -13,10 +13,11 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from kohakuterrarium.api._io_executor import run_in_io_executor
+from kohakuterrarium.api.auth import verify_admin_token
 from kohakuterrarium.studio.identity import api_keys as _api_keys_mod
 from kohakuterrarium.studio.identity import llm_profiles as _llm_profiles_mod
 from kohakuterrarium.utils.config_dir import config_dir
@@ -205,7 +206,7 @@ async def read_config_file(name: str) -> ConfigFileContent:
     return await run_in_io_executor(_read_sync, name)
 
 
-@router.put("/config-files/{name}/content")
+@router.put("/config-files/{name}/content", dependencies=[Depends(verify_admin_token)])
 async def write_config_file(name: str, body: ConfigFileWrite):
     return await run_in_io_executor(_write_sync, name, body)
 

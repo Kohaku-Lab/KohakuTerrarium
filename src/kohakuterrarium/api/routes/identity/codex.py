@@ -9,6 +9,7 @@ are process-bound so the host's token cannot be reused remotely.
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from kohakuterrarium.api.auth import verify_admin_token
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.api.routes.identity.node_routing import (
     call_node_identity,
@@ -24,7 +25,7 @@ from kohakuterrarium.terrarium.service import TerrariumService
 router = APIRouter()
 
 
-@router.post("/codex-login")
+@router.post("/codex-login", dependencies=[Depends(verify_admin_token)])
 async def codex_login(
     node: str = "",
     service: TerrariumService = Depends(get_service),

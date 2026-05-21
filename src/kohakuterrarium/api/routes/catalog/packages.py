@@ -14,10 +14,11 @@ import hashlib
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from kohakuterrarium.api._io_executor import run_in_io_executor
+from kohakuterrarium.api.auth import verify_admin_token
 from kohakuterrarium.packages.locations import PACKAGES_DIR
 from kohakuterrarium.studio.catalog.packages import (
     install_package_op,
@@ -97,7 +98,7 @@ async def list_local():
     return [entry.as_registry_dict() for entry in entries]
 
 
-@router.post("/install")
+@router.post("/install", dependencies=[Depends(verify_admin_token)])
 async def install(req: InstallRequest):
     """Install a package from a git URL."""
     try:
@@ -110,7 +111,7 @@ async def install(req: InstallRequest):
         raise HTTPException(400, f"Install failed: {e}")
 
 
-@router.post("/uninstall")
+@router.post("/uninstall", dependencies=[Depends(verify_admin_token)])
 async def uninstall(req: UninstallRequest):
     """Uninstall a package by name."""
     removed = await run_in_io_executor(uninstall_package_op, req.name)
@@ -119,7 +120,7 @@ async def uninstall(req: UninstallRequest):
     return {"status": "uninstalled", "name": req.name}
 
 
-@router.post("/{name}/update")
+@router.post("/{name}/update", dependencies=[Depends(verify_admin_token)])
 async def update_one(name: str):
     """Update a single git-backed installed package.
 
@@ -132,7 +133,7 @@ async def update_one(name: str):
     raise HTTPException(500, msg)
 
 
-@router.post("/update-all")
+@router.post("/update-all", dependencies=[Depends(verify_admin_token)])
 async def update_all():
     """Update every git-backed installed package; returns a summary."""
     rc, messages, updated, skipped = await run_in_io_executor(update_all_packages_op)
@@ -247,6 +248,6 @@ async def read_package_file(name: str, path: str) -> FileContent:
     return await run_in_io_executor(_read_file_sync, name, path)
 
 
-@router.put("/{name}/files/{path:path}")
+@router.put("/{name}/files/{path:path}", dependencies=[Depends(verify_admin_token)])
 async def write_package_file(name: str, path: str, body: FileWrite):
     return await run_in_io_executor(_write_file_sync, name, path, body)

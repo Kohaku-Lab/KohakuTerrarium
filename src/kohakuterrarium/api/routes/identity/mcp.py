@@ -4,9 +4,10 @@ import asyncio
 import time
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from kohakuterrarium.api.auth import verify_admin_token
 from kohakuterrarium.mcp.client import MCPClientManager, MCPServerConfig
 from kohakuterrarium.studio.identity.mcp_servers import (
     delete_server,
@@ -63,7 +64,7 @@ async def list_mcp_servers():
     return {"servers": load_servers()}
 
 
-@router.post("/mcp")
+@router.post("/mcp", dependencies=[Depends(verify_admin_token)])
 async def add_mcp_server(req: MCPServerRequest):
     try:
         upsert_server(req.model_dump())
@@ -72,7 +73,7 @@ async def add_mcp_server(req: MCPServerRequest):
     return {"status": "saved", "name": req.name}
 
 
-@router.patch("/mcp/{name}")
+@router.patch("/mcp/{name}", dependencies=[Depends(verify_admin_token)])
 async def patch_mcp_server(name: str, body: MCPServerPatch):
     """Partial in-place edit of an existing MCP server.
 
@@ -93,14 +94,18 @@ async def patch_mcp_server(name: str, body: MCPServerPatch):
     return {"status": "saved", "name": name, "server": merged}
 
 
-@router.delete("/mcp/{name}")
+@router.delete("/mcp/{name}", dependencies=[Depends(verify_admin_token)])
 async def remove_mcp_server(name: str):
     if not delete_server(name):
         raise HTTPException(404, f"MCP server not found: {name}")
     return {"status": "removed", "name": name}
 
 
-@router.post("/mcp/{name}/test", response_model=MCPTestResult)
+@router.post(
+    "/mcp/{name}/test",
+    response_model=MCPTestResult,
+    dependencies=[Depends(verify_admin_token)],
+)
 async def test_mcp_server(name: str) -> MCPTestResult:
     """Probe the server: connect, list tools, disconnect.
 

@@ -2,9 +2,10 @@
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from kohakuterrarium.api.auth import verify_admin_token
 from kohakuterrarium.studio.identity.llm_backends import (
     list_backends,
     remove_backend,
@@ -56,7 +57,7 @@ async def get_backends():
     return {"backends": list_backends()}
 
 
-@router.post("/backends")
+@router.post("/backends", dependencies=[Depends(verify_admin_token)])
 async def create_backend(req: BackendRequest):
     try:
         save_backend_record(
@@ -72,7 +73,7 @@ async def create_backend(req: BackendRequest):
     return {"status": "saved", "name": req.name}
 
 
-@router.delete("/backends/{name}")
+@router.delete("/backends/{name}", dependencies=[Depends(verify_admin_token)])
 async def delete_backend_route(name: str):
     try:
         deleted = remove_backend(name)
@@ -94,7 +95,7 @@ async def get_profiles():
     return {"profiles": list_profiles_payload()}
 
 
-@router.post("/profiles")
+@router.post("/profiles", dependencies=[Depends(verify_admin_token)])
 async def create_profile(req: ProfileRequest):
     try:
         save_profile_record(
@@ -117,7 +118,9 @@ async def create_profile(req: ProfileRequest):
     return {"status": "saved", "name": req.name, "provider": req.provider}
 
 
-@router.delete("/profiles/{provider}/{name}")
+@router.delete(
+    "/profiles/{provider}/{name}", dependencies=[Depends(verify_admin_token)]
+)
 async def delete_profile_route(provider: str, name: str):
     if not remove_profile(name, provider):
         raise HTTPException(404, f"Profile not found: {provider}/{name}")
@@ -129,7 +132,7 @@ async def get_default_model_route():
     return {"default_model": get_default()}
 
 
-@router.post("/default-model")
+@router.post("/default-model", dependencies=[Depends(verify_admin_token)])
 async def set_default_model_route(req: DefaultModelRequest):
     set_default(req.name)
     return {"status": "set", "default_model": req.name}
