@@ -46,7 +46,7 @@ from tests.e2e._lab_harness import (
     RealLabWorker,
     install_scripted_llm,
 )
-from kohakuterrarium.api.deps import get_service
+from kohakuterrarium.api.deps import get_service_legacy as get_service
 from kohakuterrarium.studio.sessions import cluster_fold
 from kohakuterrarium.testing.llm import ScriptEntry
 

@@ -107,10 +107,18 @@ async def _spawn_cross_cluster(host, cfg_a, cfg_b):
 
 
 def _get_service(host):
-    """Pull the live :class:`MultiNodeTerrariumService` from API deps."""
+    """Pull the live :class:`MultiNodeTerrariumService` from API deps.
+
+    Uses ``get_service_legacy`` because the e2e helpers drive the
+    cluster from outside an HTTP request context — the HTTP-scoped
+    ``get_service`` dep needs a ``Request``/``HTTPConnection`` to
+    resolve per-user routing.  The legacy variant returns the
+    process-wide singleton, which is what the multi-node service
+    is regardless.
+    """
     from kohakuterrarium.api import deps as _deps
 
-    return _deps.get_service()
+    return _deps.get_service_legacy()
 
 
 class TestMultiNodeAuditFindings:

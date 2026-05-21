@@ -517,9 +517,13 @@ async def test_cross_subs_cleared_when_worker_drops(tmp_path, monkeypatch):
                 await _setup_cross_node_a_to_b(
                     host, w1.node_id, w2.node_id, cfg_a, cfg_b, "drop_ch"
                 )
-                from kohakuterrarium.api.deps import get_service
+                # ``get_service_legacy`` because we're driving the
+                # cluster from outside an HTTP request; the new
+                # HTTP-scoped ``get_service`` needs an HTTPConnection
+                # for per-user routing resolution.
+                from kohakuterrarium.api.deps import get_service_legacy
 
-                service = get_service()
+                service = get_service_legacy()
                 # Sanity: a cross-sub entry was recorded for the wire we
                 # just set up.
                 assert any(
