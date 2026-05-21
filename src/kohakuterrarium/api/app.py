@@ -10,6 +10,11 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from kohakuterrarium.api._io_executor import run_in_io_executor
+from kohakuterrarium.api.auth import load_auth_config
+from kohakuterrarium.api.auth import router as auth_router
+from kohakuterrarium.api.auth.db import ensure_migrated as ensure_auth_migrated
+from kohakuterrarium.api.auth.engine_pool import EnginePool
+from kohakuterrarium.api.auth.middleware import HostTokenMiddleware
 from kohakuterrarium.api.deps import _session_dir, get_engine, set_service
 from kohakuterrarium.laboratory import HostConfig
 from kohakuterrarium.laboratory._internal.host import HostEngine
@@ -132,6 +137,23 @@ async def lifespan(app: FastAPI):
     # snapshot poll.
     get_aggregator()
 
+    # Auth DB: apply pending migrations BEFORE any auth route handler
+    # can fire.  Idempotent — second startup in the same process is a
+    # cheap no-op.  Runs regardless of which auth layers are enabled
+    # because turning L4 on at runtime later needs a ready schema.
+    try:
+        ensure_auth_migrated()
+    except Exception:  # pragma: no cover - boot failures get logged + re-raised
+        logger.exception("auth: schema migration failed at startup")
+        raise
+
+    # Per-user engine-pool reaper — sweeps idle engines so a long-running
+    # multi-user host doesn't leak resources.  No-op when L4 is off
+    # because no per-user engines get pooled in that mode.
+    engine_pool: EnginePool | None = getattr(app.state, "engine_pool", None)
+    if engine_pool is not None:
+        await engine_pool.start_reaper()
+
     lab_mode = getattr(app.state, "lab_mode", "standalone")
     host_engine = None
     multi_node_service = None
@@ -233,6 +255,21 @@ async def lifespan(app: FastAPI):
                 engine._runtime_prompt.detach()
             except Exception:  # pragma: no cover - defensive
                 pass
+        # Tear down the engine pool's reaper + any cached engines so
+        # repeated lifespan cycles don't leak background tasks.
+        # ``evict_all_async`` actually awaits the engine shutdown
+        # coroutines (audit-caught: the sync variant just scheduled
+        # them with create_task, leaving them to "Task exception was
+        # never retrieved" warnings when the loop closed).
+        if engine_pool is not None:
+            try:
+                await engine_pool.stop_reaper()
+            except Exception:  # pragma: no cover - defensive
+                logger.exception("engine_pool.stop_reaper raised")
+            try:
+                await engine_pool.evict_all_async()
+            except Exception:  # pragma: no cover - defensive
+                logger.exception("engine_pool.evict_all_async raised")
         # Cancel the membership watcher first so it stops feeding the
         # service while we're tearing it down, then ``await`` the
         # cancellation to avoid "Task was destroyed but is pending".
@@ -385,6 +422,22 @@ def create_app(
     app.state.lab_bind = lab_bind or "127.0.0.1:8100"
     app.state.lab_token = lab_token or ""
 
+    # Snapshot the auth config once at boot.  ``get_auth_config``
+    # dependency reads from ``app.state.auth_config`` so all per-request
+    # auth decisions see one coherent view even if env vars change
+    # mid-process.  Tests that flip env mid-suite construct a fresh
+    # app or reassign ``app.state.auth_config`` explicitly.
+    app.state.auth_config = load_auth_config()
+
+    # Per-user engine pool — drives ``deps.get_service`` to a
+    # per-user :class:`Terrarium` when L4 is enabled.  When L4 is
+    # off, the pool exists but is bypassed by the dependency (a
+    # single shared engine handles every request).  Building the
+    # pool here unconditionally keeps the lifespan path identical
+    # across modes.  Capacity values are tunable via future
+    # ``[auth]`` config knobs; defaults work for family-server scale.
+    app.state.engine_pool = EnginePool(max_active=10, idle_timeout_s=1800)
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -392,10 +445,22 @@ def create_app(
         allow_headers=["*"],
     )
 
+    # L2 — host token gate (no-op when ``auth.host_token`` empty).
+    # Added AFTER CORS so the preflight short-circuits inside CORS
+    # without ever hitting the auth check (preflights don't carry
+    # Authorization headers; the browser sends the real request only
+    # after preflight succeeds).
+    app.add_middleware(HostTokenMiddleware)
+
     # Configure config discovery directories on the new catalog scan routers.
     if creatures_dirs or terrariums_dirs:
         catalog_creatures_scan.set_creatures_dirs(creatures_dirs or [])
         catalog_terrariums_scan.set_terrariums_dirs(terrariums_dirs or [])
+
+    # Auth router — mounted under ``/api/auth`` exposing
+    # ``/capabilities`` (Phase A) and later phases'
+    # ``/register`` / ``/login`` / ``/me`` / ``/tokens`` / ...
+    app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 
     # Sessions URL preservation — the new persistence + sessions/memory
     # routers carry the legacy ``/api/sessions/*`` URL surface that the

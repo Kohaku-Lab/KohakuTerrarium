@@ -8,7 +8,8 @@ URL shape per the Phase 2 plan.
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from kohakuterrarium.api.deps import get_service
+from kohakuterrarium.api.auth.ws_auth import accept_with_auth_echo
+from kohakuterrarium.api.deps import get_service_legacy as get_service
 from kohakuterrarium.studio.attach.io import attach_io
 from kohakuterrarium.utils.logging import get_logger
 
@@ -22,7 +23,12 @@ async def session_creature_chat(
     websocket: WebSocket, session_id: str, creature_id: str
 ):
     """Bidirectional engine-backed chat for one creature."""
-    await websocket.accept()
+    await accept_with_auth_echo(websocket)
+    # Per-user routing for WS chat is a future enhancement; today the
+    # WS uses the global legacy service so the standalone path and
+    # multi-user path both remain consistent with the existing chat
+    # session id contract.  Tests can still monkeypatch ``get_service``
+    # on this module — the alias keeps that seam working.
     service = get_service()
 
     try:

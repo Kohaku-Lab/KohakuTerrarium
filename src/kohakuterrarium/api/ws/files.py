@@ -16,6 +16,7 @@ Wire format (server → client):
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
+from kohakuterrarium.api.auth.ws_auth import accept_with_auth_echo
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.studio._runtime import host_engine_or_none
 from kohakuterrarium.studio.attach.workspace_watch import watch_directory
@@ -35,7 +36,7 @@ async def watch_files(
     service: TerrariumService = Depends(get_service),
 ):
     """Watch file changes in a creature's working directory."""
-    await websocket.accept()
+    await accept_with_auth_echo(websocket)
 
     # Lab-host has no host engine — ``host_engine_or_none`` returns
     # ``None`` and we go straight to the remote-check branch.

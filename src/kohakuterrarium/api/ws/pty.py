@@ -19,6 +19,7 @@ Wire format (server ↔ client):
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
+from kohakuterrarium.api.auth.ws_auth import accept_with_auth_echo
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.laboratory.ws_proxy import proxy_ws_to_lab
 from kohakuterrarium.studio._runtime import host_engine_or_none
@@ -40,7 +41,7 @@ async def session_pty_ws(
     service: TerrariumService = Depends(get_service),
 ):
     """Interactive terminal in the working directory of a creature."""
-    await websocket.accept()
+    await accept_with_auth_echo(websocket)
 
     # Lab-host has no host engine — ``host_engine_or_none`` returns
     # ``None`` and we go straight to the remote PTY-proxy branch.

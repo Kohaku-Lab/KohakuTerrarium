@@ -45,6 +45,9 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",
     "websockets>=10.4",
+    # API auth (L4 — multi-user accounts).  Used only by api/auth/crypto.py;
+    # CLI / TUI / framework core do not touch it.
+    "bcrypt>=4.0.0",
     # Web tools
     "trafilatura>=2.0.0",
     "ddgs>=9.0.0",

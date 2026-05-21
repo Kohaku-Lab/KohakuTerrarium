@@ -18,6 +18,7 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from kohakuterrarium.api.auth.ws_auth import accept_with_auth_echo
 from kohakuterrarium.api.routes.persistence.memory_index import run_build_sync
 from kohakuterrarium.utils.logging import get_logger
 
@@ -176,7 +177,7 @@ def _queue_put_nowait(queue: asyncio.Queue, frame: dict[str, Any] | None) -> Non
 
 @router.websocket("/ws/sessions/{session_name}/memory/build")
 async def ws_memory_build(ws: WebSocket, session_name: str) -> None:
-    await ws.accept()
+    await accept_with_auth_echo(ws)
     # Reject overlapping builds for the same session — they'd race
     # SessionMemory's clear-and-reindex path and produce torn FTS rows.
     async with _INFLIGHT_LOCK:

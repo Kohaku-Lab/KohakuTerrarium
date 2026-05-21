@@ -14,7 +14,8 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from kohakuterrarium.api.deps import get_service
+from kohakuterrarium.api.auth.ws_auth import accept_with_auth_echo
+from kohakuterrarium.api.deps import get_service_legacy as get_service
 from kohakuterrarium.studio._runtime import host_engine_or_none
 from kohakuterrarium.utils.logging import get_logger
 
@@ -25,7 +26,7 @@ router = APIRouter()
 @router.websocket("/ws/runtime/graph")
 async def runtime_graph_stream(websocket: WebSocket):
     """Stream runtime graph events for graph-editor data wiring."""
-    await websocket.accept()
+    await accept_with_auth_echo(websocket)
     # The snapshot and engine-event stream both route through the
     # ``TerrariumService`` Protocol, so they aggregate across workers
     # in lab-host mode.  The per-channel ``on_send`` observer hooks
@@ -33,6 +34,11 @@ async def runtime_graph_stream(websocket: WebSocket):
     # lab-host mode there is none (``host_engine_or_none`` → ``None``),
     # so channel-message frames fall back to the generic engine-event
     # stream rather than the richer callback shape.
+    # WebSocket runtime-graph stream is a long-lived global view; it
+    # does not scope to a user.  The legacy non-request service
+    # accessor (re-exported here as ``get_service``) provides this —
+    # multi-user per-engine isolation is enforced on creature-scoped
+    # routes, not the global graph snapshot.
     service = get_service()
     engine = host_engine_or_none(service)
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=1000)

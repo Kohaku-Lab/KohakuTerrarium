@@ -14,6 +14,7 @@ For a session that doesn't exist on any node we still send an
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
+from kohakuterrarium.api.auth.ws_auth import accept_with_auth_echo
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.terrarium.events import EventFilter, EventKind
 from kohakuterrarium.terrarium.service import TerrariumService
@@ -31,7 +32,7 @@ async def session_channel_observer(
     service: TerrariumService = Depends(get_service),
 ):
     """Stream every shared-channel message from a session in real time."""
-    await websocket.accept()
+    await accept_with_auth_echo(websocket)
 
     # Confirm the session exists somewhere in the cluster before
     # subscribing — surfaces "not found" as an explicit error frame

@@ -14,6 +14,7 @@ import os
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from kohakuterrarium.api.auth.ws_auth import accept_with_auth_echo
 from kohakuterrarium.studio.attach.log import (
     _find_current_process_log,
     _tail_file,
@@ -28,7 +29,7 @@ router = APIRouter()
 @router.websocket("/ws/logs")
 async def tail_logs(websocket: WebSocket):
     """Live tail of the current API server process log file."""
-    await websocket.accept()
+    await accept_with_auth_echo(websocket)
     path = _find_current_process_log()
     if path is None:
         await websocket.send_json(

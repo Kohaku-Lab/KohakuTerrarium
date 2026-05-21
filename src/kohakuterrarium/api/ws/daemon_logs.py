@@ -23,6 +23,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from kohakuterrarium.api.auth.ws_auth import accept_with_auth_echo
+
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -107,7 +109,7 @@ async def _tail(path: Path, send) -> None:
 
 @router.websocket("/ws/daemon/logs")
 async def ws_daemon_logs(ws: WebSocket) -> None:
-    await ws.accept()
+    await accept_with_auth_echo(ws)
     q = dict(ws.query_params)
     follow = q.get("follow", "true").lower() in ("1", "true", "yes")
     try:
