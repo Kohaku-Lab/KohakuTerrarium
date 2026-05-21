@@ -20,6 +20,14 @@ tags:
 - [第一個生態瓶](first-terrarium.md) — 用頻道與 output_wiring 把兩隻生物串起來，再加一個 root 提供對話介面。
 - [第一次 Python 嵌入](first-python-embedding.md) — 用 Creature.chat、Studio 與 compose 代數在自己的程式碼裡跑 agent。
 
+## 在伺服器上跑起來之後
+
+- [給你的主機加鎖](locking-down-your-host.md) — 四個遞進的認證級別,
+  每個 30 秒就能設好。從 Level 0（桌面什麼都不用做）開始,按需求
+  爬到主機權杖 / 管理員密碼 / 多使用者。跳過
+  [身份驗證](../guides/authentication.md) 裡的理論 — 這篇教學就是
+  複製貼上的捷徑。
+
 ## 讀完教學之後
 
 - **想理解背後原理** → 看[核心概念](../concepts/README.md)。

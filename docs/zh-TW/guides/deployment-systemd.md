@@ -173,8 +173,40 @@ client-instance 解除安裝會感知實例名稱：移除 *最後一個* 實例
 - **`/healthz` 200 但 `/readyz` 503 超過 30s** → Lab 傳輸沒綁定。`journalctl -u kohakuterrarium-host -e` 看是否出現 `address already in use` — 連接埠 `8100` 可能被佔用。
 - **worker 實例連不上** → 查 per-instance env 檔案：`sudo cat /etc/kohakuterrarium/client.<name>.env`。token 與 URL 必須與 host 一致。
 
+## 鎖定 API — 透過 systemd credentials 啟用 `[auth]`
+
+透過 `packaging/systemd/` 提供的 auth-secrets drop-in,任何 host
+unit 都可以變成加鎖主機:
+
+```bash
+sudo mkdir -p /etc/systemd/system/kohakuterrarium-host.service.d
+sudo cp packaging/systemd/auth-secrets.example.conf \
+    /etc/systemd/system/kohakuterrarium-host.service.d/auth.conf
+
+# 提供 credential 檔案(root 所有,權限 0400)。
+sudo mkdir -p /etc/kohakuterrarium/credentials
+python -c "import secrets;print(secrets.token_hex(32))" | \
+    sudo install -m 0400 /dev/stdin /etc/kohakuterrarium/credentials/host_token
+python -c "import secrets;print(secrets.token_hex(32))" | \
+    sudo install -m 0400 /dev/stdin /etc/kohakuterrarium/credentials/admin_token
+
+sudo systemctl daemon-reload
+sudo systemctl restart kohakuterrarium-host
+
+# 建立第一個管理員(互動式密碼提示)。
+sudo -u kohakuterrarium-host kt admin users add operator --role admin
+```
+
+drop-in 使用 systemd 的 ``LoadCredential=`` 指令 — 密鑰讀入 unit
+執行時憑證目錄(``%d/...``)並透過 ``KT_AUTH_*_FILE`` 環境變數暴露。
+它們永遠不會出現在 ``/proc/<pid>/environ`` 中。
+
+完整的四層模型以及每個 ``kt admin`` 動詞參見
+[身份驗證](authentication.md)。
+
 ## 另請參閱
 
+- [身份驗證](authentication.md) — 四層認證模型 + ``kt admin`` 營運者命令。
 - [部署 — Docker](deployment-docker.md) — 三種模式的容器化版本。
 - [部署 — 反向代理](deployment-reverse-proxy.md) — 在 `8001` / `8100` 前做 TLS 終止。
 - [Laboratory](laboratory.md) — unit 跑起來後,lab-host / lab-client 角色實際做什麼。

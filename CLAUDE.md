@@ -456,15 +456,19 @@ src/kohakuterrarium/
 │   └── tool_registration.py  # Deferred terrarium tool loading
 │
 ├── api/                      # FastAPI HTTP API (in-package)
-│   ├── app.py                # FastAPI factory + middleware
+│   ├── app.py                # FastAPI factory + middleware + lifespan
 │   ├── main.py               # CLI entry point (default port 8001)
-│   ├── deps.py               # Dependency injection
+│   ├── deps.py               # Dependency injection (per-user routing via engine pool)
 │   ├── schemas.py            # Pydantic request/response models
 │   ├── events.py             # Shared event log + StreamOutput
 │   ├── routes/               # REST endpoints (agents, configs, creatures, files,
 │   │                         #   registry, sessions, settings, terrariums)
-│   └── ws/                   # WebSocket handlers (agents, channels, chat,
-│                             #   files, logs, terminal)
+│   ├── ws/                   # WebSocket handlers (agents, channels, chat,
+│   │                         #   files, logs, terminal)
+│   └── auth/                 # Four-layer auth — capabilities, L2 host token
+│                             # middleware, L3 admin Depends, L4 user accounts +
+│                             # engine pool. Strictly API-server-scoped; nothing
+│                             # below api/ imports from here (dep-graph guard).
 │
 ├── compose/                  # Pythonic agent-composition algebra
 │   ├── core.py               # BaseRunnable + Sequence/Product/Fallback/Retry/Router
@@ -510,6 +514,21 @@ src/kohakuterrarium/
 8. **Compose algebra** (`compose/`) — `>>` sequence, `&` parallel, `|` fallback, `*` retry. User-facing only; framework does not depend on it.
 9. **Package system** (`packages.py` + `kt install` / `kt uninstall`) — Sharing creature / terrarium / plugin bundles.
 10. **Desktop packaging** (`__briefcase__.py` + briefcase tooling) — macOS / Windows / Linux native app builds.
+11. **Auth** (`api/auth/`) — four optional layers stacked at the API server: L1 host selection (frontend), L2 host token (middleware), L3 admin token (FastAPI Depends on config-mutating routes), L4 user accounts (sqlite + per-user `Terrarium` engine pool). Defaults to OFF; see `plans/1.5.0-roadmap/03-frontend-backend-connection/` + `docs/{en,zh-CN,zh-TW}/guides/authentication.md`.
+
+## Auth invariant (CRITICAL)
+
+**Auth lives entirely in `src/kohakuterrarium/api/auth/`.  Nothing
+below `api/` knows about users / tokens / hosts.**  When L4 (multi-user)
+is on, per-user isolation is achieved by routing each authenticated
+request to a per-user `Terrarium` from the engine pool — the engine
+itself stays single-tenant.  CLI / TUI / `kt run` paths construct a
+`Terrarium` directly and run unauthenticated; only the FastAPI server
+multiplexes.
+
+A dep-graph guard enforces `from kohakuterrarium.api.auth.*` cannot
+appear outside `src/kohakuterrarium/api/`.  This isolation parallels
+the launcher's strict-isolation rule.
 
 ## Plugin System
 

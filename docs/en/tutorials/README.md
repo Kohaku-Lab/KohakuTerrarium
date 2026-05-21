@@ -29,6 +29,15 @@ Tutorials are the bridge: a concrete build that makes one idea click.
 5. [First Plugin](first-plugin.md) — add behaviour at the seams:
    one prompt injector, one tool guard.
 
+## Once you're running on a server
+
+[Locking down your host](locking-down-your-host.md) — four ascending
+levels of auth, each 30 seconds away.  Start at Level 0 (do nothing
+on the desktop), climb to host token / admin password / multi-user
+as your situation demands.  Skip the theory in
+[Authentication](../guides/authentication.md) — this tutorial is the
+copy-paste path.
+
 ## Where to go after
 
 - [Creatures](../guides/creatures.md) — the full config surface.

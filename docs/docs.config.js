@@ -23,6 +23,7 @@ const sidebarStructure = {
     "tutorials/first-plugin.md",
     "tutorials/first-terrarium.md",
     "tutorials/first-python-embedding.md",
+    "tutorials/locking-down-your-host.md",
   ],
   guides: [
     "guides/README.md",
@@ -44,6 +45,7 @@ const sidebarStructure = {
     "guides/laboratory.md",
     "guides/cli-and-ui-equivalents.md",
     "guides/cli-multi-creature.md",
+    "guides/authentication.md",
     "guides/deployment-docker.md",
     "guides/deployment-systemd.md",
     "guides/deployment-reverse-proxy.md",

@@ -221,14 +221,65 @@ docker compose up -d
 
 Compose 會逐一重建服務；只要 readiness healthcheck 已接好，host 會完全啟動後 worker 再重連。
 
+## 鎖定 API — `[auth]` 設定
+
+任何 compose 形態都可以透過 Docker secrets 加上四層認證設定，
+成為多使用者 / 加鎖主機。可直接套用的範例：
+
+```yaml
+# examples/deployment/compose-host-auth.yml — 節錄
+services:
+  kohakuterrarium:
+    image: ghcr.io/kohaku-lab/kohakuterrarium:1.5.0
+    environment:
+      KT_AUTH_HOST_TOKEN_FILE: /run/secrets/host_token
+      KT_AUTH_ADMIN_TOKEN_FILE: /run/secrets/admin_token
+      KT_AUTH_MULTI_USER: "required"
+      KT_AUTH_REGISTRATION: "invite_only"
+      KT_AUTH_LOOPBACK_BYPASS: "0"   # 前面有代理;loopback ≠ 信任
+    secrets:
+      - host_token
+      - admin_token
+    volumes:
+      - kt-config:/root/.kohakuterrarium
+    ports:
+      - "127.0.0.1:8001:8001"        # 綁到 localhost;Caddy 在前
+    restart: unless-stopped
+
+secrets:
+  host_token:  { file: ./secrets/host_token }
+  admin_token: { file: ./secrets/admin_token }
+
+volumes:
+  kt-config:
+```
+
+啟動 stack 前在主機產生 secret 檔：
+
+```bash
+mkdir -p secrets
+python -c "import secrets;print(secrets.token_hex(32))" > secrets/host_token
+python -c "import secrets;print(secrets.token_hex(32))" > secrets/admin_token
+chmod 600 secrets/*
+```
+
+容器內 ``kt admin users add operator --role admin`` 會在
+``kt-config`` volume 上的共用 ``auth.db`` 中建立第一個使用者。
+
+完整的四層模型、所有 CLI 動詞（``kt admin set-host-token`` /
+``set-admin-token`` / ``invitations create`` 等）以及前端連線狀態
+機如何發現已啟用的層級,參見[身份驗證](authentication.md)。
+
 ## 故障排除
 
 - **worker 在 `/api/nodes` 始終 `unreachable`** → 查 worker 容器 log,是否出現 `lab-client: missing required configuration`（缺 token）或 `connection refused`（`KT_HOST_URL` 錯）。
 - **host log 反覆出現 `auth_failed`** → worker 端 token 與 host 不一致;重新產生並重新分發 file secret。
 - **`/healthz` 回 200 但 `/readyz` 回 503** → host 還在啟動 Lab 傳輸,等待或檢視 host log。
+- **瀏覽器每個請求都回 401** → ``host_token`` 已設定但 ``loopback_bypass = false`` 且瀏覽器在非 loopback 來源。需透過 ``Authorization: Bearer`` 提供 token（L2 啟用時前端連線狀態機會自動提示）。
 
 ## 另請參閱
 
+- [身份驗證](authentication.md) — 四層認證模型 + ``kt admin`` 營運者命令。
 - [部署 — systemd](deployment-systemd.md) — 等價的非容器化方案。
 - [部署 — 反向代理](deployment-reverse-proxy.md) — 分散式模式的 TLS 終止。
 - [Laboratory](laboratory.md) — lab-host / lab-client 概念詳解。

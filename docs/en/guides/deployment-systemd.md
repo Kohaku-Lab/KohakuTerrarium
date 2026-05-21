@@ -218,8 +218,42 @@ workers keep running.
   file: `sudo cat /etc/kohakuterrarium/client.<name>.env`. The
   token and URL must match the host's.
 
+## Locking down the API — `[auth]` via systemd credentials
+
+Any host unit becomes a locked-down host by installing the
+auth-secrets drop-in shipped under `packaging/systemd/`:
+
+```bash
+sudo mkdir -p /etc/systemd/system/kohakuterrarium-host.service.d
+sudo cp packaging/systemd/auth-secrets.example.conf \
+    /etc/systemd/system/kohakuterrarium-host.service.d/auth.conf
+
+# Provision credential files (root-owned, mode 0400).
+sudo mkdir -p /etc/kohakuterrarium/credentials
+python -c "import secrets;print(secrets.token_hex(32))" | \
+    sudo install -m 0400 /dev/stdin /etc/kohakuterrarium/credentials/host_token
+python -c "import secrets;print(secrets.token_hex(32))" | \
+    sudo install -m 0400 /dev/stdin /etc/kohakuterrarium/credentials/admin_token
+
+sudo systemctl daemon-reload
+sudo systemctl restart kohakuterrarium-host
+
+# Create the first admin (interactive password prompt).
+sudo -u kohakuterrarium-host kt admin users add operator --role admin
+```
+
+The drop-in uses systemd's ``LoadCredential=`` directive — secrets
+are read into the unit's runtime credential directory (``%d/...``)
+and exposed via ``KT_AUTH_*_FILE`` env vars.  They never appear in
+``/proc/<pid>/environ``.
+
+See [Authentication](authentication.md) for the full four-layer
+model + every ``kt admin`` verb.
+
 ## See also
 
+- [Authentication](authentication.md) — the four-layer auth model
+  + ``kt admin`` operator surface.
 - [Deployment — Docker](deployment-docker.md) — the containerised
   equivalent of these three shapes.
 - [Deployment — reverse proxy](deployment-reverse-proxy.md) — TLS

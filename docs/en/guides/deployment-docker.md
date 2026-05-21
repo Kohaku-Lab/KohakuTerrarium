@@ -250,6 +250,57 @@ docker compose up -d
 Compose recreates each service one at a time; with the readiness
 healthcheck wired, the host fully boots before workers reconnect.
 
+## Locking down the API — `[auth]` config
+
+Any compose shape becomes a multi-user / locked-down host by adding
+the four-layer auth config via Docker secrets.  Worked example:
+
+```yaml
+# examples/deployment/compose-host-auth.yml — abridged
+services:
+  kohakuterrarium:
+    image: ghcr.io/kohaku-lab/kohakuterrarium:1.5.0
+    environment:
+      KT_AUTH_HOST_TOKEN_FILE: /run/secrets/host_token
+      KT_AUTH_ADMIN_TOKEN_FILE: /run/secrets/admin_token
+      KT_AUTH_MULTI_USER: "required"
+      KT_AUTH_REGISTRATION: "invite_only"
+      KT_AUTH_LOOPBACK_BYPASS: "0"   # proxy in front; loopback ≠ trust
+    secrets:
+      - host_token
+      - admin_token
+    volumes:
+      - kt-config:/root/.kohakuterrarium
+    ports:
+      - "127.0.0.1:8001:8001"        # bind to localhost; Caddy in front
+    restart: unless-stopped
+
+secrets:
+  host_token:  { file: ./secrets/host_token }
+  admin_token: { file: ./secrets/admin_token }
+
+volumes:
+  kt-config:
+```
+
+Generate the secret files on the host before bringing the stack up:
+
+```bash
+mkdir -p secrets
+python -c "import secrets;print(secrets.token_hex(32))" > secrets/host_token
+python -c "import secrets;print(secrets.token_hex(32))" > secrets/admin_token
+chmod 600 secrets/*
+```
+
+Inside the container, ``kt admin users add operator --role admin``
+creates the first user against the shared ``auth.db`` on the
+``kt-config`` volume.
+
+See [Authentication](authentication.md) for the full four-layer
+model, all CLI verbs (``kt admin set-host-token`` /
+``set-admin-token`` / ``invitations create`` / etc.), and how the
+frontend's connection state machine discovers what's enabled.
+
 ## Troubleshooting
 
 - **Workers stay `unreachable`** in `/api/nodes` → check the worker
@@ -259,9 +310,16 @@ healthcheck wired, the host fully boots before workers reconnect.
   from the host's. Re-generate, re-distribute the file secret.
 - **`/healthz` returns 200 but `/readyz` returns 503** → host is
   still booting the Lab transport. Wait or check the host logs.
+- **Browser sees 401 on every request** → ``host_token`` is set but
+  ``loopback_bypass = false`` AND the browser is on a non-loopback
+  origin.  Provide the token via ``Authorization: Bearer`` (the
+  frontend's connection state machine prompts for it when L2 is
+  enabled).
 
 ## See also
 
+- [Authentication](authentication.md) — the four-layer auth model
+  + ``kt admin`` operator surface.
 - [Deployment — systemd](deployment-systemd.md) — same shapes, no
   containers.
 - [Deployment — reverse proxy](deployment-reverse-proxy.md) — TLS

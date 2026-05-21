@@ -83,6 +83,7 @@ A terrarium composes multiple creatures horizontally through channels, lifecycle
 - **Python-native.** Agents are async Python objects. Embed them inside tools, triggers, plugins, or outputs of other agents.
 - **Composition algebra.** `>>`, `&`, `|`, `*`, `.iterate` operators for stitching agents into pipelines programmatically.
 - **Multiple runtime surfaces.** CLI, TUI, web dashboard, and desktop app out of the box.
+- **Optional four-layer auth.** Host token, admin password, multi-user accounts — opt in per layer for LAN / family-server / internet-exposed deployments. Defaults are everything off (current single-user behaviour preserved). See [Authentication](docs/en/guides/authentication.md).
 - **Useful OOTB creatures via [`kt-biome`](https://github.com/Kohaku-Lab/kt-biome).** Start by running strong default agents; customise or inherit from them later.
 
 ## Quick start

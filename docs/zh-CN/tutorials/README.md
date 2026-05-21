@@ -21,6 +21,14 @@ tags:
 - [第一个自定义工具](first-custom-tool.md) — 编写自己的 Tool 类。
 - [第一个插件](first-plugin.md) — 拦截工具调用并添加审计。
 
+## 在服务器上跑起来之后
+
+- [给你的主机加锁](locking-down-your-host.md) — 四个递进的认证级别,
+  每个 30 秒就能配好。从 Level 0（桌面什么都不用做）开始,按需要
+  爬到主机令牌 / 管理员密码 / 多用户。跳过
+  [身份验证](../guides/authentication.md) 里的理论 — 这篇教程就是
+  复制粘贴的捷径。
+
 每篇教程都默认你已经完成 [快速开始](../guides/getting-started.md)。
 
 ## 参考
