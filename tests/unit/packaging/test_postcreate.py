@@ -169,6 +169,62 @@ class TestPatchLauncherActivity:
         assert rc == 1
 
 
+class TestCopyWheelhouse:
+    """Pin: ``./wheels/*.whl`` (populated by CI from KohakuVault's
+    GitHub Releases) lands under the generated Gradle app dir so
+    Chaquopy's ``--find-links wheels`` resolves it."""
+
+    def test_no_source_dir_is_noop(self, tmp_path, postcreate):
+        gen = _build_fake_generated(tmp_path)
+        # postcreate.copy_wheelhouse() reads from
+        # ``REPO_ROOT/wheels`` — which doesn't exist in tests
+        # unless we create it.  No-op behaviour: don't fail.
+        rc = postcreate.copy_wheelhouse(gen)
+        assert rc == 0
+
+    def test_copies_wheels_when_present(self, tmp_path, postcreate, monkeypatch):
+        gen = _build_fake_generated(tmp_path)
+        # Pretend the repo root has a ``wheels/`` with two
+        # wheel files.  Patch REPO_ROOT so the helper reads from
+        # our fixture instead of the real repo.
+        fake_repo = tmp_path / "fake_repo"
+        wheels = fake_repo / "wheels"
+        wheels.mkdir(parents=True)
+        (
+            wheels / "kohakuvault-0.8.3-cp313-cp313-linux_android_24_arm64_v8a.whl"
+        ).write_bytes(b"PK\x03\x04 fake wheel arm64")
+        (
+            wheels / "kohakuvault-0.8.3-cp313-cp313-linux_android_24_x86_64.whl"
+        ).write_bytes(b"PK\x03\x04 fake wheel x86_64")
+        monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
+
+        rc = postcreate.copy_wheelhouse(gen)
+        assert rc == 0
+        # Both wheels landed at the path Chaquopy resolves
+        # ``--find-links wheels`` against — i.e., the generated
+        # gradle app dir's ``wheels/`` subdir.
+        dst = gen / "wheels"
+        assert dst.is_dir()
+        assert (
+            dst / "kohakuvault-0.8.3-cp313-cp313-linux_android_24_arm64_v8a.whl"
+        ).is_file()
+        assert (
+            dst / "kohakuvault-0.8.3-cp313-cp313-linux_android_24_x86_64.whl"
+        ).is_file()
+
+    def test_empty_source_dir_is_noop(self, tmp_path, postcreate, monkeypatch):
+        # Source dir exists but contains no wheels — common on
+        # the desktop matrix where Android wheels aren't fetched.
+        gen = _build_fake_generated(tmp_path)
+        fake_repo = tmp_path / "fake_repo"
+        (fake_repo / "wheels").mkdir(parents=True)
+        monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
+        rc = postcreate.copy_wheelhouse(gen)
+        assert rc == 0
+        # No destination dir created when source has nothing.
+        assert not (gen / "wheels" / "anything.whl").exists()
+
+
 class TestPatchAllowBackup:
     def test_flips_true_to_false(self, tmp_path, postcreate):
         gen = _build_fake_generated(tmp_path)

@@ -99,6 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     rc = 0
     rc |= copy_java_overrides(args.template, gen)
     rc |= copy_sandbox_assets(args.sandbox, gen, args.skip_sandbox_check)
+    rc |= copy_wheelhouse(gen)
     rc |= patch_launcher_activity(gen)
     rc |= patch_allow_backup(gen)
     rc |= remove_default_activity(gen)
@@ -159,6 +160,47 @@ def copy_sandbox_assets(sandbox_dir: Path, generated: Path, skip_check: bool) ->
         shutil.copy2(src, dst)
         copied += 1
     print(f"  sandbox  {copied} file(s) -> {dst_root.relative_to(generated)}")
+    return 0
+
+
+def copy_wheelhouse(generated: Path) -> int:
+    """Copy ``./wheels/*.whl`` into the generated Gradle app dir.
+
+    The Briefcase config sets
+    ``requirement_installer_args = ["--find-links", "wheels"]``,
+    which Chaquopy honours when running pip — but the path is
+    resolved RELATIVE to the gradle app dir
+    (``build/kohakuterrarium/android/gradle/app/``), not the
+    repo root.  CI populates the repo-root ``wheels/`` dir with
+    KohakuVault's Android wheels; we copy them into the gradle
+    project so Chaquopy's pip ``--find-links wheels`` actually
+    resolves.
+
+    Without this, Chaquopy logs:
+        WARNING: Location 'wheels' is ignored: it is either a
+        non-existing path or lacks a specific scheme.
+    and downstream pip fails on every Android-only package that
+    isn't in Chaquopy's curated index (kohakuvault being the
+    first one we hit).
+
+    Idempotent — overwrites existing wheels under the target dir.
+    No-op when the source ``wheels/`` is empty or absent (a desktop
+    dev rebuild doesn't need them).
+    """
+    src = REPO_ROOT / "wheels"
+    if not src.is_dir() or not any(src.iterdir()):
+        print("  wheels  no ./wheels/ to copy (Android-only deps not needed)")
+        return 0
+    dst = generated / "wheels"
+    dst.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    for whl in src.glob("*.whl"):
+        target = dst / whl.name
+        shutil.copy2(whl, target)
+        copied += 1
+        print(f"  wheels  {whl.name} -> {target.relative_to(generated)}")
+    if copied == 0:
+        print("  wheels  source dir present but contained no .whl files")
     return 0
 
 
