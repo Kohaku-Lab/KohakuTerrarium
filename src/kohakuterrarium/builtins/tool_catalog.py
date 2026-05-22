@@ -19,11 +19,37 @@ transitive dependencies.
 from typing import TYPE_CHECKING, Callable, TypeVar
 
 from kohakuterrarium.utils.logging import get_logger
+from kohakuterrarium.utils.mobile_sandbox import is_mobile_profile
 
 if TYPE_CHECKING:
     from kohakuterrarium.modules.tool.base import BaseTool, ToolConfig
 
 logger = get_logger(__name__)
+
+
+# Tools intentionally HIDDEN under ``KT_PROFILE=mobile``.  These
+# tools have no working implementation on Android even with the
+# bundled busybox sandbox — either because the platform doesn't
+# provide the substrate (long-lived subprocess workers, kernel
+# features), or because the Android SAF model breaks the tool's
+# contract (arbitrary path access).
+#
+# The list is opt-out (not opt-in) so brand-new tools default to
+# being available everywhere; only platform-incompatible tools
+# need to be marked.  ``bash`` is NOT here because we ship a
+# bundled busybox sandbox that makes shell-out workable on Android.
+_MOBILE_HIDDEN_TOOLS: frozenset[str] = frozenset({})
+
+
+def _is_hidden_under_mobile_profile(name: str) -> bool:
+    """Cheap predicate used by the lookup / list helpers below.
+
+    Lives at module scope (no inner imports) so the catalog stays
+    side-effect-free; the env-var read inside ``is_mobile_profile``
+    is the only runtime cost.
+    """
+    return is_mobile_profile() and name in _MOBILE_HIDDEN_TOOLS
+
 
 # Global registry of built-in tool classes, populated by @register_builtin
 _BUILTIN_TOOLS: dict[str, type["BaseTool"]] = {}
@@ -87,7 +113,14 @@ def get_builtin_tool(
     On first miss, invokes any registered deferred loaders (which may
     populate the catalog with additional tools) and retries.
     Returns None if still not found after all loaders have run.
+
+    Under ``KT_PROFILE=mobile``, tools listed in
+    :data:`_MOBILE_HIDDEN_TOOLS` are unreachable — callers see
+    ``None`` exactly as they would for a missing tool, so the LLM
+    can't accidentally invoke a platform-broken tool by name.
     """
+    if _is_hidden_under_mobile_profile(name):
+        return None
     tool_cls = _BUILTIN_TOOLS.get(name)
     if tool_cls is None and _DEFERRED_LOADERS:
         _run_deferred_loaders()
@@ -98,12 +131,26 @@ def get_builtin_tool(
 
 
 def list_builtin_tools() -> list[str]:
-    """List all registered built-in tool names."""
+    """List all registered built-in tool names.
+
+    Under ``KT_PROFILE=mobile`` the listing is filtered through
+    :data:`_MOBILE_HIDDEN_TOOLS` so callers (the system-prompt
+    aggregator, `kt config tools list`, the frontend's Tools panel)
+    see only the catalog that actually works on the device.
+    """
+    if is_mobile_profile() and _MOBILE_HIDDEN_TOOLS:
+        return [n for n in _BUILTIN_TOOLS if n not in _MOBILE_HIDDEN_TOOLS]
     return list(_BUILTIN_TOOLS.keys())
 
 
 def is_builtin_tool(name: str) -> bool:
-    """Check if a tool name is a registered built-in."""
+    """Check if a tool name is a registered built-in.
+
+    Honours ``KT_PROFILE=mobile`` — hidden tools report ``False``
+    so existence checks line up with the lookup contract.
+    """
+    if _is_hidden_under_mobile_profile(name):
+        return False
     return name in _BUILTIN_TOOLS
 
 

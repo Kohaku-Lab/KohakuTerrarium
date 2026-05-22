@@ -14,6 +14,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from kohakuterrarium.builtins.tools.bash_windows import windows_git_bash_candidates
 from kohakuterrarium.builtins.tools.registry import register_builtin
 from kohakuterrarium.builtins.tools.subprocess.shell_utils import terminate_process_tree
 from kohakuterrarium.modules.tool.base import (
@@ -23,6 +24,12 @@ from kohakuterrarium.modules.tool.base import (
     ToolResult,
 )
 from kohakuterrarium.utils.logging import get_logger
+from kohakuterrarium.utils.mobile_sandbox import (
+    bundled_sh_command,
+    is_mobile_profile,
+    sandbox_bin_dir,
+    sandbox_binary,
+)
 
 logger = get_logger(__name__)
 
@@ -59,62 +66,18 @@ def _shell_override_env(shell_type: str) -> str | None:
     return None
 
 
-def _windows_git_bash_candidates() -> list[str]:
-    candidates: list[str] = []
-    program_files = [
-        os.environ.get("ProgramW6432"),
-        os.environ.get("ProgramFiles"),
-        os.environ.get("ProgramFiles(x86)"),
-    ]
-    local_app_data = os.environ.get("LOCALAPPDATA")
-    home = os.environ.get("USERPROFILE") or os.path.expanduser("~")
-
-    for base in [p for p in program_files if p]:
-        candidates.extend(
-            [
-                str(Path(base) / "Git" / "bin" / "bash.exe"),
-                str(Path(base) / "Git" / "usr" / "bin" / "bash.exe"),
-            ]
-        )
-    if local_app_data:
-        candidates.append(
-            str(Path(local_app_data) / "Programs" / "Git" / "bin" / "bash.exe")
-        )
-    if home:
-        candidates.extend(
-            [
-                str(
-                    Path(home)
-                    / "AppData"
-                    / "Local"
-                    / "Programs"
-                    / "Git"
-                    / "bin"
-                    / "bash.exe"
-                ),
-                str(
-                    Path(home)
-                    / "scoop"
-                    / "apps"
-                    / "git"
-                    / "current"
-                    / "bin"
-                    / "bash.exe"
-                ),
-            ]
-        )
-
-    seen: set[str] = set()
-    unique: list[str] = []
-    for candidate in candidates:
-        key = candidate.lower()
-        if key not in seen:
-            seen.add(key)
-            unique.append(candidate)
-    return unique
-
-
 def _resolve_shell_executable(shell_type: str) -> str | None:
+    # Mobile profile (Android): the bundled busybox provides
+    # ``sh``-compatible behaviour for bash/sh/zsh requests.  We
+    # check this FIRST so an operator-supplied override env still
+    # wins for testing, but the default path on Android is the
+    # bundled sandbox (Android has no /bin and no PATH lookups
+    # produce useful results).
+    if is_mobile_profile() and shell_type in {"bash", "sh", "zsh"}:
+        bundled = sandbox_binary("sh")
+        if bundled is not None:
+            return str(bundled)
+
     override = _shell_override_env(shell_type)
     if override and shutil.which(override):
         return shutil.which(override)
@@ -123,10 +86,30 @@ def _resolve_shell_executable(shell_type: str) -> str | None:
 
     exe = _SHELL_SPECS[shell_type][0]
     if sys.platform == "win32" and shell_type == "bash":
-        for candidate in _windows_git_bash_candidates():
+        for candidate in windows_git_bash_candidates():
             if Path(candidate).exists():
                 return candidate
     return shutil.which(exe)
+
+
+def _build_shell_argv(shell_type: str, resolved_exe: str, command: str) -> list[str]:
+    """Compose the ``argv`` list for the resolved shell + command.
+
+    On the mobile profile with a bundled busybox, the canonical
+    invocation is ``busybox sh -c <command>`` (multicall dispatch
+    via the applet name).  Everywhere else we use the per-shell
+    prefix args from ``_SHELL_SPECS``.
+    """
+    if (
+        is_mobile_profile()
+        and shell_type in {"bash", "sh", "zsh"}
+        and Path(resolved_exe).name == "busybox"
+    ):
+        bundled = bundled_sh_command(command)
+        if bundled is not None:
+            return bundled
+    prefix_args = _SHELL_SPECS[shell_type][1]
+    return [resolved_exe, *prefix_args, command]
 
 
 def _create_output_file() -> tuple[Path, Any]:
@@ -300,7 +283,7 @@ class ShellTool(BaseTool):
                 f"Available: {', '.join(available) or 'none found'}"
             )
 
-        spec_exe, prefix_args = _SHELL_SPECS[shell_type]
+        spec_exe, _prefix_args = _SHELL_SPECS[shell_type]
         resolved_exe = _resolve_shell_executable(shell_type)
         if not resolved_exe:
             available = _get_available_shells()
@@ -314,7 +297,7 @@ class ShellTool(BaseTool):
                 )
             )
 
-        full_command = [resolved_exe, *prefix_args, command]
+        full_command = _build_shell_argv(shell_type, resolved_exe, command)
 
         logger.debug("Executing command", shell=shell_type, command=command[:100])
 
@@ -322,6 +305,22 @@ class ShellTool(BaseTool):
         env = os.environ.copy()
         if self.config.env:
             env.update(self.config.env)
+        # Mobile profile: prepend the bundled sandbox bin dir to
+        # PATH so busybox sh can find its own applets via
+        # ``argv[0] = ls`` lookups when scripts shell out (busybox
+        # checks PATH after its internal applet table, which only
+        # matches when the symlink/binary literally exists).
+        # Without this, ``bash -c "ls"`` from inside our wrapped
+        # busybox would say "ls: not found" because Android has
+        # no /bin/ls.
+        if is_mobile_profile():
+            bin_dir = sandbox_bin_dir()
+            if bin_dir is not None:
+                env["PATH"] = (
+                    f"{bin_dir}{os.pathsep}{env.get('PATH', '')}".rstrip(
+                        os.pathsep
+                    )
+                )
 
         # Set working directory: context (agent-aware) > tool config > process cwd
         if context and getattr(context, "working_dir", None):
