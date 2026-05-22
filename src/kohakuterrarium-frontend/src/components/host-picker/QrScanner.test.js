@@ -18,9 +18,7 @@ function parseFromComponent(uri) {
 
 describe("parseKtConnect", () => {
   it("decodes a well-formed http URI", () => {
-    const out = parseFromComponent(
-      "ktconnect://1.2.3.4:8001/?token=abc&scheme=http",
-    )
+    const out = parseFromComponent("ktconnect://1.2.3.4:8001/?token=abc&scheme=http")
     expect(out).toEqual({
       url: "http://1.2.3.4:8001",
       token: "abc",
@@ -29,9 +27,7 @@ describe("parseKtConnect", () => {
   })
 
   it("decodes a well-formed https URI", () => {
-    const out = parseFromComponent(
-      "ktconnect://kt.home.lan:8001/?token=secret&scheme=https",
-    )
+    const out = parseFromComponent("ktconnect://kt.home.lan:8001/?token=secret&scheme=https")
     expect(out).toEqual({
       url: "https://kt.home.lan:8001",
       token: "secret",
@@ -46,9 +42,7 @@ describe("parseKtConnect", () => {
   })
 
   it("rejects wrong scheme", () => {
-    expect(() => parseFromComponent("https://kt.home.lan?token=x")).toThrow(
-      /ktconnect/,
-    )
+    expect(() => parseFromComponent("https://kt.home.lan?token=x")).toThrow(/ktconnect/)
   })
 
   it("rejects missing token", () => {
@@ -72,15 +66,15 @@ describe("parseKtConnect", () => {
     // reject — otherwise the WebView could end up at
     // javascript://kt.home.lan?token=... and execute attacker
     // code.  Audit fix.
-    expect(() =>
-      parseFromComponent("ktconnect://h:1/?token=x&scheme=javascript"),
-    ).toThrow(/unsupported scheme/)
+    expect(() => parseFromComponent("ktconnect://h:1/?token=x&scheme=javascript")).toThrow(
+      /unsupported scheme/,
+    )
   })
 
   it("rejects file: scheme", () => {
-    expect(() =>
-      parseFromComponent("ktconnect://h:1/?token=x&scheme=file"),
-    ).toThrow(/unsupported scheme/)
+    expect(() => parseFromComponent("ktconnect://h:1/?token=x&scheme=file")).toThrow(
+      /unsupported scheme/,
+    )
   })
 
   it("accepts only http and https case-insensitively", () => {

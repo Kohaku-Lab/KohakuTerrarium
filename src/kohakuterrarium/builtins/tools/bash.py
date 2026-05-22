@@ -316,10 +316,8 @@ class ShellTool(BaseTool):
         if is_mobile_profile():
             bin_dir = sandbox_bin_dir()
             if bin_dir is not None:
-                env["PATH"] = (
-                    f"{bin_dir}{os.pathsep}{env.get('PATH', '')}".rstrip(
-                        os.pathsep
-                    )
+                env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}".rstrip(
+                    os.pathsep
                 )
 
         # Set working directory: context (agent-aware) > tool config > process cwd

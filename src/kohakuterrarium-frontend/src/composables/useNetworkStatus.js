@@ -63,23 +63,19 @@ async function _initialize() {
   // ``addNetworkListener``, we use it; otherwise we rely on
   // navigator events alone (web build path).
   //
-  // The Briefcase Android MainActivity registers KohakuBridge.
   // The Briefcase Android MainActivity registers KohakuBridge
   // via ``WebView.addJavascriptInterface``.  No Capacitor SDK
   // is in tree; this APK is a Briefcase + native WebView shell.
   const bridge = typeof window !== "undefined" ? window.KohakuBridge : null
   if (bridge && typeof bridge.addNetworkListener === "function") {
     try {
-      const initial = bridge.getNetworkStatus
-        ? Boolean(bridge.getNetworkStatus())
-        : true
+      const initial = bridge.getNetworkStatus ? Boolean(bridge.getNetworkStatus()) : true
       _navigatorOnline.value = initial
       const unsub = bridge.addNetworkListener((connected) => {
         _navigatorOnline.value = Boolean(connected)
         _markTransition()
       })
-      _bridgeUnsub =
-        typeof unsub === "function" ? unsub : () => {}
+      _bridgeUnsub = typeof unsub === "function" ? unsub : () => {}
     } catch (_err) {
       // Bridge present but errored — fall back to navigator events.
     }

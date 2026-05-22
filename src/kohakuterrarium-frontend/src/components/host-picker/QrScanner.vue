@@ -36,8 +36,7 @@ const errorMessage = ref("")
 const manualInput = ref("")
 
 onMounted(() => {
-  const bridge =
-    typeof window !== "undefined" ? window.KohakuBridge : null
+  const bridge = typeof window !== "undefined" ? window.KohakuBridge : null
   hasNativeQr.value = !!bridge && typeof bridge.scanQr === "function"
 })
 
@@ -75,9 +74,7 @@ async function startScan() {
   errorMessage.value = ""
   const bridge = window.KohakuBridge
   if (!bridge || typeof bridge.scanQr !== "function") {
-    errorMessage.value =
-      "In-app QR scanning isn't wired in this build — scan the host " +
-      "QR with your device's camera app, or paste the ktconnect:// URI below."
+    errorMessage.value = "In-app QR scanning isn't wired in this build — scan the host " + "QR with your device's camera app, or paste the ktconnect:// URI below."
     return
   }
   try {
@@ -122,34 +119,13 @@ defineExpose({ parseKtConnect })
 
 <template>
   <div class="qr-scanner">
-    <button
-      v-if="hasNativeQr"
-      type="button"
-      class="qr-scanner__scan-button"
-      :disabled="isScanning"
-      @click="startScan"
-    >
+    <button v-if="hasNativeQr" type="button" class="qr-scanner__scan-button" :disabled="isScanning" @click="startScan">
       {{ isScanning ? "Scanning…" : "Scan host QR" }}
     </button>
     <div class="qr-scanner__manual">
-      <label class="qr-scanner__label" for="qr-scanner-uri">
-        Or paste the host's ktconnect:// URI:
-      </label>
-      <input
-        id="qr-scanner-uri"
-        v-model="manualInput"
-        type="text"
-        class="qr-scanner__input"
-        placeholder="ktconnect://kt.home.lan:8001/?token=..."
-        @keydown.enter="submitManual"
-      />
-      <button
-        type="button"
-        class="qr-scanner__submit"
-        @click="submitManual"
-      >
-        Add host
-      </button>
+      <label class="qr-scanner__label" for="qr-scanner-uri"> Or paste the host's ktconnect:// URI: </label>
+      <input id="qr-scanner-uri" v-model="manualInput" type="text" class="qr-scanner__input" placeholder="ktconnect://kt.home.lan:8001/?token=..." @keydown.enter="submitManual" />
+      <button type="button" class="qr-scanner__submit" @click="submitManual">Add host</button>
     </div>
     <p v-if="errorMessage" class="qr-scanner__error">
       {{ errorMessage }}

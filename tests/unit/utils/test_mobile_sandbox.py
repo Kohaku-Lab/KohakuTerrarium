@@ -102,9 +102,9 @@ class TestSandboxBinary:
         (tmp_path / "busybox").write_bytes(b"#!fake\n")
         for name in ("sh", "bash", "grep", "find", "sed", "awk", "curl"):
             resolved = mobile_sandbox.sandbox_binary(name)
-            assert resolved == tmp_path / "busybox", (
-                f"{name!r} should resolve to bundled busybox; got {resolved}"
-            )
+            assert (
+                resolved == tmp_path / "busybox"
+            ), f"{name!r} should resolve to bundled busybox; got {resolved}"
 
     def test_unknown_name_returns_none(self, monkeypatch, tmp_path):
         monkeypatch.setenv("KT_SANDBOX_BIN_DIR", str(tmp_path))
@@ -251,9 +251,7 @@ class TestEnsureExtracted:
         # Must have picked the arm64 binary, not the x86_64 one.
         assert (dest / "busybox").read_bytes() == b"#!arm64\n"
 
-    def test_per_abi_layout_falls_back_to_manifest_abis(
-        self, monkeypatch, tmp_path
-    ):
+    def test_per_abi_layout_falls_back_to_manifest_abis(self, monkeypatch, tmp_path):
         # No KT_SANDBOX_ABI set; the helper walks the manifest's
         # ``abis`` list in order and picks the first match present.
         assets = tmp_path / "assets"

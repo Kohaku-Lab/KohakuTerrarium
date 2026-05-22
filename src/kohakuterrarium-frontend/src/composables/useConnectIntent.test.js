@@ -1,9 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
-import {
-  _resetConnectIntentForTests,
-  useConnectIntent,
-} from "./useConnectIntent.js"
+import { _resetConnectIntentForTests, useConnectIntent } from "./useConnectIntent.js"
 
 beforeEach(() => {
   _resetConnectIntentForTests()
@@ -23,9 +20,7 @@ describe("useConnectIntent", () => {
     const { pendingUri } = useConnectIntent()
     window.__KT_PENDING_CONNECT_URI = "ktconnect://kt.home.lan:8001/?token=x"
     window.dispatchEvent(new Event("kt-connect-uri"))
-    expect(pendingUri.value).toBe(
-      "ktconnect://kt.home.lan:8001/?token=x",
-    )
+    expect(pendingUri.value).toBe("ktconnect://kt.home.lan:8001/?token=x")
   })
 
   it("picks up URI that arrived BEFORE first composable use", () => {

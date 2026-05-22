@@ -1,10 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import {
-  _resetNetworkStatusForTests,
-  pingHost,
-  useNetworkStatus,
-} from "./useNetworkStatus.js"
+import { _resetNetworkStatusForTests, pingHost, useNetworkStatus } from "./useNetworkStatus.js"
 
 beforeEach(() => {
   // jsdom's navigator.onLine is read-only; redefine for the test
@@ -72,10 +68,7 @@ describe("useNetworkStatus", () => {
       .spyOn(window, "fetch")
       .mockResolvedValue(new Response("{}", { status: 200 }))
     await pingHost("http://kt.home.lan:8001")
-    expect(fetchSpy).toHaveBeenCalledWith(
-      "http://kt.home.lan:8001/healthz",
-      expect.any(Object),
-    )
+    expect(fetchSpy).toHaveBeenCalledWith("http://kt.home.lan:8001/healthz", expect.any(Object))
   })
 
   it("ping failure flips hostReachable false", async () => {

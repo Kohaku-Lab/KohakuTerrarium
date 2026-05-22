@@ -157,9 +157,7 @@ def _write_port_file(port: int) -> None:
     """
     path = os.environ.get("KT_PORT_FILE", "").strip()
     if not path:
-        logger.warning(
-            "android launcher: KT_PORT_FILE not set; Java will poll forever"
-        )
+        logger.warning("android launcher: KT_PORT_FILE not set; Java will poll forever")
         return
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)

@@ -127,9 +127,7 @@ def copy_java_overrides(template_dir: Path, generated: Path) -> int:
     return 0
 
 
-def copy_sandbox_assets(
-    sandbox_dir: Path, generated: Path, skip_check: bool
-) -> int:
+def copy_sandbox_assets(sandbox_dir: Path, generated: Path, skip_check: bool) -> int:
     """Copy ``packaging/android/bin/<abi>/*`` into
     ``app/src/main/assets/sandbox/bin/<abi>/*``."""
     if not sandbox_dir.is_dir():
@@ -175,9 +173,7 @@ def patch_launcher_activity(generated: Path) -> int:
     """
     manifest = generated / "src" / "main" / "AndroidManifest.xml"
     if not manifest.is_file():
-        print(
-            f"error: manifest missing at {manifest}", file=sys.stderr
-        )
+        print(f"error: manifest missing at {manifest}", file=sys.stderr)
         return 1
     text = manifest.read_text(encoding="utf-8")
     original = text
@@ -271,8 +267,14 @@ def remove_default_activity(generated: Path) -> int:
     refactor), this is a no-op.
     """
     candidates = [
-        generated / "src" / "main" / "java" / "org" / "beeware" / "android" /
-        "MainActivity.java",
+        generated
+        / "src"
+        / "main"
+        / "java"
+        / "org"
+        / "beeware"
+        / "android"
+        / "MainActivity.java",
     ]
     removed = 0
     for path in candidates:

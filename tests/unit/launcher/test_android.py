@@ -14,7 +14,6 @@ fake ``start_uvicorn_with_port_fallback`` to return a stub server
 blocks until ``server.should_exit`` flips.
 """
 
-
 import pytest
 
 from kohakuterrarium.launcher import android as android_launcher
@@ -92,9 +91,7 @@ class TestServeAndReport:
     where a pre-bound port could disagree with uvicorn's actual
     bind."""
 
-    def test_writes_actual_bound_port_not_requested(
-        self, monkeypatch, tmp_path
-    ):
+    def test_writes_actual_bound_port_not_requested(self, monkeypatch, tmp_path):
         target = tmp_path / "port.txt"
         monkeypatch.setenv("KT_PORT_FILE", str(target))
         monkeypatch.setenv("KT_SERVE_PORT", "8001")
@@ -110,16 +107,12 @@ class TestServeAndReport:
         # Patch the symbol the launcher imports.
         from kohakuterrarium.serving import web as web_mod
 
-        monkeypatch.setattr(
-            web_mod, "start_uvicorn_with_port_fallback", fake_start
-        )
+        monkeypatch.setattr(web_mod, "start_uvicorn_with_port_fallback", fake_start)
         # Also patch app creation so we don't actually build the
         # framework's app graph in this unit test.
         from kohakuterrarium.api import app as app_mod
 
-        monkeypatch.setattr(
-            app_mod, "create_app", lambda **kwargs: object()
-        )
+        monkeypatch.setattr(app_mod, "create_app", lambda **kwargs: object())
 
         stub.stop_soon(0.05)
         rc = android_launcher._serve_and_report()
@@ -129,9 +122,7 @@ class TestServeAndReport:
         # not the requested one (8001).
         assert target.read_text(encoding="utf-8").strip() == "8003"
 
-    def test_default_requested_port_8001_when_env_unset(
-        self, monkeypatch, tmp_path
-    ):
+    def test_default_requested_port_8001_when_env_unset(self, monkeypatch, tmp_path):
         target = tmp_path / "port.txt"
         monkeypatch.setenv("KT_PORT_FILE", str(target))
         stub = _StubServer()
@@ -144,12 +135,8 @@ class TestServeAndReport:
         from kohakuterrarium.serving import web as web_mod
         from kohakuterrarium.api import app as app_mod
 
-        monkeypatch.setattr(
-            web_mod, "start_uvicorn_with_port_fallback", fake_start
-        )
-        monkeypatch.setattr(
-            app_mod, "create_app", lambda **kwargs: object()
-        )
+        monkeypatch.setattr(web_mod, "start_uvicorn_with_port_fallback", fake_start)
+        monkeypatch.setattr(app_mod, "create_app", lambda **kwargs: object())
 
         stub.stop_soon(0.05)
         android_launcher._serve_and_report()
@@ -171,12 +158,8 @@ class TestServeAndReport:
         from kohakuterrarium.serving import web as web_mod
         from kohakuterrarium.api import app as app_mod
 
-        monkeypatch.setattr(
-            web_mod, "start_uvicorn_with_port_fallback", fake_start
-        )
-        monkeypatch.setattr(
-            app_mod, "create_app", lambda **kwargs: object()
-        )
+        monkeypatch.setattr(web_mod, "start_uvicorn_with_port_fallback", fake_start)
+        monkeypatch.setattr(app_mod, "create_app", lambda **kwargs: object())
         stub.stop_soon(0.05)
         android_launcher._serve_and_report()
         assert captured["requested"] == 8001
@@ -187,16 +170,12 @@ class TestMain:
         from kohakuterrarium.serving import web as web_mod
         from kohakuterrarium.api import app as app_mod
 
-        monkeypatch.setattr(
-            app_mod, "create_app", lambda **kwargs: object()
-        )
+        monkeypatch.setattr(app_mod, "create_app", lambda **kwargs: object())
 
         def boom(app, **kwargs):
             raise RuntimeError("uvicorn refused to bind")
 
-        monkeypatch.setattr(
-            web_mod, "start_uvicorn_with_port_fallback", boom
-        )
+        monkeypatch.setattr(web_mod, "start_uvicorn_with_port_fallback", boom)
         rc = android_launcher.main()
         assert rc == 1
 
@@ -204,16 +183,12 @@ class TestMain:
         from kohakuterrarium.serving import web as web_mod
         from kohakuterrarium.api import app as app_mod
 
-        monkeypatch.setattr(
-            app_mod, "create_app", lambda **kwargs: object()
-        )
+        monkeypatch.setattr(app_mod, "create_app", lambda **kwargs: object())
 
         def interrupted(app, **kwargs):
             raise KeyboardInterrupt()
 
-        monkeypatch.setattr(
-            web_mod, "start_uvicorn_with_port_fallback", interrupted
-        )
+        monkeypatch.setattr(web_mod, "start_uvicorn_with_port_fallback", interrupted)
         rc = android_launcher.main()
         assert rc == 0
 

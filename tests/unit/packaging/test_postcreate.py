@@ -19,9 +19,7 @@ _POSTCREATE_PATH = (
 
 @pytest.fixture(scope="module")
 def postcreate():
-    spec = importlib.util.spec_from_file_location(
-        "postcreate", _POSTCREATE_PATH
-    )
+    spec = importlib.util.spec_from_file_location("postcreate", _POSTCREATE_PATH)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     sys.modules["postcreate"] = module
@@ -44,16 +42,16 @@ def _build_fake_generated(root: Path) -> Path:
         '<?xml version="1.0" encoding="utf-8"?>\n'
         '<manifest xmlns:android="http://schemas.android.com/apk/res/android" '
         'package="org.kohaku.terrarium">\n'
-        '    <application>\n'
+        "    <application>\n"
         '        <activity android:name=".MainActivity"\n'
         '            android:exported="true">\n'
-        '            <intent-filter>\n'
+        "            <intent-filter>\n"
         '                <action android:name="android.intent.action.MAIN" />\n'
         '                <category android:name="android.intent.category.LAUNCHER" />\n'
-        '            </intent-filter>\n'
-        '        </activity>\n'
-        '    </application>\n'
-        '</manifest>\n',
+        "            </intent-filter>\n"
+        "        </activity>\n"
+        "    </application>\n"
+        "</manifest>\n",
         encoding="utf-8",
     )
     return app
@@ -62,9 +60,7 @@ def _build_fake_generated(root: Path) -> Path:
 def _build_fake_template(root: Path) -> Path:
     """Mirror of our ``packaging/android/template/`` for tests."""
     tpl = root / "template"
-    java = (
-        tpl / "app" / "src" / "main" / "java" / "org" / "kohaku" / "terrarium"
-    )
+    java = tpl / "app" / "src" / "main" / "java" / "org" / "kohaku" / "terrarium"
     java.mkdir(parents=True)
     (java / "MainActivity.java").write_text(
         "package org.kohaku.terrarium;\npublic class MainActivity {}\n",
@@ -98,9 +94,8 @@ class TestCopyJavaOverrides:
         java = gen / "src" / "main" / "java" / "org" / "kohaku" / "terrarium"
         assert (java / "MainActivity.java").is_file()
         assert (java / "KohakuHostService.java").is_file()
-        assert (
-            "org.kohaku.terrarium"
-            in (java / "MainActivity.java").read_text(encoding="utf-8")
+        assert "org.kohaku.terrarium" in (java / "MainActivity.java").read_text(
+            encoding="utf-8"
         )
 
     def test_missing_template_returns_1(self, tmp_path, postcreate):
@@ -122,16 +117,12 @@ class TestCopySandboxAssets:
 
     def test_missing_sandbox_fails_without_skip(self, tmp_path, postcreate):
         gen = _build_fake_generated(tmp_path)
-        rc = postcreate.copy_sandbox_assets(
-            tmp_path / "nope", gen, skip_check=False
-        )
+        rc = postcreate.copy_sandbox_assets(tmp_path / "nope", gen, skip_check=False)
         assert rc == 1
 
     def test_missing_sandbox_passes_with_skip(self, tmp_path, postcreate):
         gen = _build_fake_generated(tmp_path)
-        rc = postcreate.copy_sandbox_assets(
-            tmp_path / "nope", gen, skip_check=True
-        )
+        rc = postcreate.copy_sandbox_assets(tmp_path / "nope", gen, skip_check=True)
         assert rc == 0
 
     def test_re_run_replaces_old_assets(self, tmp_path, postcreate):
@@ -184,11 +175,11 @@ class TestPatchAllowBackup:
         manifest_path = gen / "src" / "main" / "AndroidManifest.xml"
         manifest_path.write_text(
             '<?xml version="1.0"?>\n'
-            '<manifest>\n'
+            "<manifest>\n"
             '    <application android:allowBackup="true"\n'
             '        android:icon="@mipmap/ic_launcher">\n'
-            '    </application>\n'
-            '</manifest>\n',
+            "    </application>\n"
+            "</manifest>\n",
             encoding="utf-8",
         )
         rc = postcreate.patch_allow_backup(gen)
@@ -202,10 +193,10 @@ class TestPatchAllowBackup:
         manifest_path = gen / "src" / "main" / "AndroidManifest.xml"
         manifest_path.write_text(
             '<?xml version="1.0"?>\n'
-            '<manifest>\n'
+            "<manifest>\n"
             '    <application android:allowBackup="false">\n'
-            '    </application>\n'
-            '</manifest>\n',
+            "    </application>\n"
+            "</manifest>\n",
             encoding="utf-8",
         )
         rc = postcreate.patch_allow_backup(gen)
@@ -219,10 +210,10 @@ class TestPatchAllowBackup:
         manifest_path = gen / "src" / "main" / "AndroidManifest.xml"
         manifest_path.write_text(
             '<?xml version="1.0"?>\n'
-            '<manifest>\n'
+            "<manifest>\n"
             '    <application android:icon="@mipmap/ic_launcher">\n'
-            '    </application>\n'
-            '</manifest>\n',
+            "    </application>\n"
+            "</manifest>\n",
             encoding="utf-8",
         )
         rc = postcreate.patch_allow_backup(gen)
@@ -295,8 +286,14 @@ class TestFullRun:
         assert rc == 0
         # Everything landed.
         assert (
-            gen / "src" / "main" / "java" / "org" / "kohaku" / "terrarium" /
-            "MainActivity.java"
+            gen
+            / "src"
+            / "main"
+            / "java"
+            / "org"
+            / "kohaku"
+            / "terrarium"
+            / "MainActivity.java"
         ).is_file()
         assert (
             gen / "src" / "main" / "assets" / "sandbox" / "bin" / "manifest.json"
