@@ -169,60 +169,105 @@ class TestPatchLauncherActivity:
         assert rc == 1
 
 
-class TestCopyWheelhouse:
-    """Pin: ``./wheels/*.whl`` (populated by CI from KohakuVault's
-    GitHub Releases) lands under the generated Gradle app dir so
-    Chaquopy's ``--find-links wheels`` resolves it."""
+class TestPatchAndroidRequirements:
+    """Pin: ``requirements.txt`` gets kohakuvault rewritten to
+    direct URL refs against KV's GitHub Releases, with PEP 508
+    platform_machine markers picking the right ABI."""
 
-    def test_no_source_dir_is_noop(self, tmp_path, postcreate):
-        gen = _build_fake_generated(tmp_path)
-        # postcreate.copy_wheelhouse() reads from
-        # ``REPO_ROOT/wheels`` — which doesn't exist in tests
-        # unless we create it.  No-op behaviour: don't fail.
-        rc = postcreate.copy_wheelhouse(gen)
-        assert rc == 0
+    def _seed_pyproject(self, fake_repo: Path, kv_spec: str) -> None:
+        (fake_repo / "pyproject.toml").write_text(
+            f'[project]\nname = "x"\ndependencies = [\n    "{kv_spec}",\n]\n',
+            encoding="utf-8",
+        )
 
-    def test_copies_wheels_when_present(self, tmp_path, postcreate, monkeypatch):
-        gen = _build_fake_generated(tmp_path)
-        # Pretend the repo root has a ``wheels/`` with two
-        # wheel files.  Patch REPO_ROOT so the helper reads from
-        # our fixture instead of the real repo.
-        fake_repo = tmp_path / "fake_repo"
-        wheels = fake_repo / "wheels"
-        wheels.mkdir(parents=True)
-        (
-            wheels / "kohakuvault-0.8.3-cp313-cp313-linux_android_24_arm64_v8a.whl"
-        ).write_bytes(b"PK\x03\x04 fake wheel arm64")
-        (
-            wheels / "kohakuvault-0.8.3-cp313-cp313-linux_android_24_x86_64.whl"
-        ).write_bytes(b"PK\x03\x04 fake wheel x86_64")
-        monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
+    def _seed_requirements(self, gen: Path, content: str) -> Path:
+        path = gen / "requirements.txt"
+        path.write_text(content, encoding="utf-8")
+        return path
 
-        rc = postcreate.copy_wheelhouse(gen)
-        assert rc == 0
-        # Both wheels landed at the path Chaquopy resolves
-        # ``--find-links wheels`` against — i.e., the generated
-        # gradle app dir's ``wheels/`` subdir.
-        dst = gen / "wheels"
-        assert dst.is_dir()
-        assert (
-            dst / "kohakuvault-0.8.3-cp313-cp313-linux_android_24_arm64_v8a.whl"
-        ).is_file()
-        assert (
-            dst / "kohakuvault-0.8.3-cp313-cp313-linux_android_24_x86_64.whl"
-        ).is_file()
-
-    def test_empty_source_dir_is_noop(self, tmp_path, postcreate, monkeypatch):
-        # Source dir exists but contains no wheels — common on
-        # the desktop matrix where Android wheels aren't fetched.
+    def test_rewrites_kohakuvault_to_url_refs(self, tmp_path, postcreate, monkeypatch):
         gen = _build_fake_generated(tmp_path)
         fake_repo = tmp_path / "fake_repo"
-        (fake_repo / "wheels").mkdir(parents=True)
+        fake_repo.mkdir()
+        self._seed_pyproject(fake_repo, "kohakuvault>=0.8.3")
+        self._seed_requirements(
+            gen,
+            "fastapi>=0.115.0\nkohakuvault>=0.8.3\npyyaml>=6.0.0\n",
+        )
         monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
-        rc = postcreate.copy_wheelhouse(gen)
+
+        rc = postcreate.patch_android_requirements(gen)
         assert rc == 0
-        # No destination dir created when source has nothing.
-        assert not (gen / "wheels" / "anything.whl").exists()
+        text = (gen / "requirements.txt").read_text(encoding="utf-8")
+        assert "kohakuvault>=0.8.3" not in text
+        assert (
+            "kohakuvault @ https://github.com/Kohaku-Lab/KohakuVault/releases/"
+            "download/v0.8.3/kohakuvault-0.8.3-cp313-cp313-linux_aarch64.whl"
+            " ; platform_machine == 'aarch64'"
+        ) in text
+        assert (
+            "kohakuvault @ https://github.com/Kohaku-Lab/KohakuVault/releases/"
+            "download/v0.8.3/kohakuvault-0.8.3-cp313-cp313-linux_x86_64.whl"
+            " ; platform_machine == 'x86_64'"
+        ) in text
+        assert "fastapi>=0.115.0" in text
+        assert "pyyaml>=6.0.0" in text
+
+    def test_idempotent_re_run_keeps_url_refs(self, tmp_path, postcreate, monkeypatch):
+        gen = _build_fake_generated(tmp_path)
+        fake_repo = tmp_path / "fake_repo"
+        fake_repo.mkdir()
+        self._seed_pyproject(fake_repo, "kohakuvault>=0.8.3")
+        self._seed_requirements(gen, "kohakuvault>=0.8.3\n")
+        monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
+
+        postcreate.patch_android_requirements(gen)
+        first = (gen / "requirements.txt").read_text(encoding="utf-8")
+        postcreate.patch_android_requirements(gen)
+        second = (gen / "requirements.txt").read_text(encoding="utf-8")
+        assert first == second
+
+    def test_missing_requirements_is_noop(self, tmp_path, postcreate):
+        gen = _build_fake_generated(tmp_path)
+        rc = postcreate.patch_android_requirements(gen)
+        assert rc == 0
+
+    def test_missing_kohakuvault_line_is_noop(self, tmp_path, postcreate, monkeypatch):
+        gen = _build_fake_generated(tmp_path)
+        fake_repo = tmp_path / "fake_repo"
+        fake_repo.mkdir()
+        self._seed_pyproject(fake_repo, "kohakuvault>=0.8.3")
+        self._seed_requirements(gen, "fastapi>=0.115.0\npyyaml>=6.0.0\n")
+        monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
+        rc = postcreate.patch_android_requirements(gen)
+        assert rc == 0
+
+    def test_version_extracted_from_pyproject(self, tmp_path, postcreate, monkeypatch):
+        gen = _build_fake_generated(tmp_path)
+        fake_repo = tmp_path / "fake_repo"
+        fake_repo.mkdir()
+        self._seed_pyproject(fake_repo, "kohakuvault>=1.2.3")
+        self._seed_requirements(gen, "kohakuvault>=1.2.3\n")
+        monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
+        postcreate.patch_android_requirements(gen)
+        text = (gen / "requirements.txt").read_text(encoding="utf-8")
+        assert "/releases/download/v1.2.3/" in text
+        assert "kohakuvault-1.2.3-cp313-cp313-linux_aarch64.whl" in text
+
+    def test_extras_form_matched(self, tmp_path, postcreate, monkeypatch):
+        # Briefcase may emit ``kohakuvault[extra]>=0.8.3`` if a
+        # consumer ever uses extras.  Match the package name
+        # regardless of extras / equality operator.
+        gen = _build_fake_generated(tmp_path)
+        fake_repo = tmp_path / "fake_repo"
+        fake_repo.mkdir()
+        self._seed_pyproject(fake_repo, "kohakuvault>=0.8.3")
+        self._seed_requirements(gen, "kohakuvault[fast]>=0.8.3\n")
+        monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
+        postcreate.patch_android_requirements(gen)
+        text = (gen / "requirements.txt").read_text(encoding="utf-8")
+        assert "kohakuvault[fast]>=0.8.3" not in text
+        assert "kohakuvault @ https://github.com/" in text
 
 
 class TestPatchAllowBackup:

@@ -94,37 +94,16 @@ jobs:
           python packaging/android/fetch_sandbox.py
           ls -lh packaging/android/bin/*/
 
-      - name: Fetch KohakuVault Android wheels into wheels/
-        # KohakuVault publishes Android wheels to its GH Releases
-        # (only arm64 + x86_64 — those are the ABIs PyO3/maturin-action
-        # ships an Android cross-prefix for).  Chaquopy's pip resolves
-        # them on Android because the Chaquopy environment claims
-        # ``linux_<arch>`` compatibility; we drop them into
-        # ``./wheels/`` and postcreate.py mirrors that into the
-        # gradle app dir so Chaquopy's ``--find-links wheels`` finds
-        # them.  Without this, pip fails with
-        # ``No matching distribution found for kohakuvault`` since
-        # Chaquopy's curated index doesn't carry kohakuvault.
-        #
-        # Pattern note: KV's CI produces ``kohakuvault-X.Y.Z-cp313-
-        # cp313-linux_<arch>.whl`` for Android.  Desktop Linux wheels
-        # use ``manylinux_*`` tags, so the plain ``linux_*`` glob
-        # excludes them automatically — no risk of pulling a desktop
-        # glibc wheel into the Android bundle.
-        env:
-          KOHAKUVAULT_VERSION: "0.8.3"
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          mkdir -p wheels
-          gh release download "v${KOHAKUVAULT_VERSION}" \
-              --repo Kohaku-Lab/KohakuVault \
-              --pattern "kohakuvault-*-linux_*.whl" \
-              --dir wheels/ || {
-              echo "::warning::No KohakuVault Android wheels found for v${KOHAKUVAULT_VERSION}."
-              echo "::warning::Publish v${KOHAKUVAULT_VERSION} on Kohaku-Lab/KohakuVault first."
-              echo "::warning::Build will fail downstream in installDebugPythonRequirements."
-          }
-          ls -lh wheels/ || true
+      # KohakuVault Android wheels are NOT fetched locally; instead
+      # ``packaging/android/postcreate.py::patch_android_requirements``
+      # rewrites the generated ``app/requirements.txt`` to use direct
+      # URL refs against KV's GitHub Releases.  This sidesteps the
+      # ``--find-links wheels`` path-resolution problem: Chaquopy's
+      # pip runs from ``<module>/build/python/env/<variant>/`` (a
+      # dir that doesn't exist at postcreate time), so a relative
+      # ``wheels`` path is unresolvable.  PEP 508 direct refs
+      # download the wheel from the URL directly — no local
+      # wheelhouse needed.
 
       - name: Build frontend
         # The framework's setup expects web_dist/ to exist; the

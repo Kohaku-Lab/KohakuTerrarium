@@ -99,7 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     rc = 0
     rc |= copy_java_overrides(args.template, gen)
     rc |= copy_sandbox_assets(args.sandbox, gen, args.skip_sandbox_check)
-    rc |= copy_wheelhouse(gen)
+    rc |= patch_android_requirements(gen)
     rc |= patch_launcher_activity(gen)
     rc |= patch_allow_backup(gen)
     rc |= remove_default_activity(gen)
@@ -163,45 +163,139 @@ def copy_sandbox_assets(sandbox_dir: Path, generated: Path, skip_check: bool) ->
     return 0
 
 
-def copy_wheelhouse(generated: Path) -> int:
-    """Copy ``./wheels/*.whl`` into the generated Gradle app dir.
+def patch_android_requirements(generated: Path) -> int:
+    """Rewrite ``app/requirements.txt`` to pin Android-only packages
+    to direct URL refs of their GitHub-Releases wheels.
 
-    The Briefcase config sets
-    ``requirement_installer_args = ["--find-links", "wheels"]``,
-    which Chaquopy honours when running pip — but the path is
-    resolved RELATIVE to the gradle app dir
-    (``build/kohakuterrarium/android/gradle/app/``), not the
-    repo root.  CI populates the repo-root ``wheels/`` dir with
-    KohakuVault's Android wheels; we copy them into the gradle
-    project so Chaquopy's pip ``--find-links wheels`` actually
-    resolves.
+    The parent Briefcase config sets
+    ``requirement_installer_args = ["--find-links", "wheels"]`` —
+    that works on desktop, where pip is invoked from the project
+    root, but on Android Chaquopy invokes pip from
+    ``<module>/build/python/env/<variant>/`` (a path that doesn't
+    exist at postcreate time, so we can't pre-populate it).  The
+    result is the warning every CI run shows:
 
-    Without this, Chaquopy logs:
         WARNING: Location 'wheels' is ignored: it is either a
         non-existing path or lacks a specific scheme.
-    and downstream pip fails on every Android-only package that
-    isn't in Chaquopy's curated index (kohakuvault being the
-    first one we hit).
 
-    Idempotent — overwrites existing wheels under the target dir.
-    No-op when the source ``wheels/`` is empty or absent (a desktop
-    dev rebuild doesn't need them).
+    Direct URL refs sidestep the path-resolution entirely — pip
+    downloads the wheel from the GH release server using only the
+    URL.  PEP 508 environment markers select the right ABI per
+    device:
+
+        kohakuvault @ <arm64-url> ; platform_machine == 'aarch64'
+        kohakuvault @ <x86_64-url> ; platform_machine == 'x86_64'
+
+    Chaquopy reports ``platform_machine`` correctly per ABI
+    (``aarch64`` for arm64-v8a, ``x86_64`` for x86_64); the matching
+    line wins, the other is skipped.
+
+    KohakuVault ships only arm64 + x86_64 Android wheels (the two
+    ABIs PyO3/maturin-action's cross-prefix covers); armv7 / x86
+    devices fall through with no matching ref + pip errors with a
+    clear message.  That's intentional — armv7 isn't in our target
+    matrix.
+
+    Idempotent — running twice produces the same file.
     """
-    src = REPO_ROOT / "wheels"
-    if not src.is_dir() or not any(src.iterdir()):
-        print("  wheels  no ./wheels/ to copy (Android-only deps not needed)")
+    req_path = generated / "requirements.txt"
+    if not req_path.is_file():
+        print(f"warning: requirements.txt missing at {req_path}", file=sys.stderr)
+        return 0  # not fatal — older Briefcase versions might place it elsewhere
+
+    kv_version = _kohakuvault_version_from_pyproject()
+    if not kv_version:
+        print(
+            "warning: could not infer kohakuvault version from "
+            "pyproject.toml; skipping requirements.txt patch",
+            file=sys.stderr,
+        )
         return 0
-    dst = generated / "wheels"
-    dst.mkdir(parents=True, exist_ok=True)
-    copied = 0
-    for whl in src.glob("*.whl"):
-        target = dst / whl.name
-        shutil.copy2(whl, target)
-        copied += 1
-        print(f"  wheels  {whl.name} -> {target.relative_to(generated)}")
-    if copied == 0:
-        print("  wheels  source dir present but contained no .whl files")
+
+    base = (
+        "https://github.com/Kohaku-Lab/KohakuVault/releases/download/" f"v{kv_version}"
+    )
+    arm64_url = f"{base}/kohakuvault-{kv_version}-cp313-cp313-linux_aarch64.whl"
+    x86_64_url = f"{base}/kohakuvault-{kv_version}-cp313-cp313-linux_x86_64.whl"
+
+    lines = req_path.read_text(encoding="utf-8").splitlines()
+    patched: list[str] = []
+    replaced = False
+    seen_url_form = False
+    for line in lines:
+        stripped = line.strip()
+        # Skip lines already in our URL-ref form so re-runs are
+        # idempotent.  Without this guard, the first run replaces
+        # the spec line with two URL lines; the second run would
+        # see those URL lines (which also start with "kohakuvault ")
+        # and replace each with two MORE URL lines → 4 lines, 8
+        # lines, etc.
+        if " @ https://github.com/Kohaku-Lab/KohakuVault/" in stripped:
+            patched.append(line)
+            seen_url_form = True
+            continue
+        # Match the kohakuvault dep line — Briefcase emits it
+        # verbatim from project.dependencies, so the form is
+        # ``kohakuvault>=0.8.3`` (possibly with extras).  We
+        # detect by the package name + spec operator and replace
+        # with the URL refs.  The ``@`` check above already
+        # excludes the URL form so we don't need to here.
+        if stripped.startswith("kohakuvault") and (
+            stripped == "kohakuvault"
+            or (
+                len(stripped) > len("kohakuvault")
+                and stripped[len("kohakuvault")] in "=<>~![@"
+            )
+        ):
+            patched.append(f"kohakuvault @ {arm64_url} ; platform_machine == 'aarch64'")
+            patched.append(f"kohakuvault @ {x86_64_url} ; platform_machine == 'x86_64'")
+            replaced = True
+            continue
+        patched.append(line)
+
+    # If we saw the URL form but didn't replace anything, this is
+    # a re-run on an already-patched file — that's a successful
+    # no-op, not a "missing kohakuvault" warning.
+    if not replaced and not seen_url_form:
+        print(
+            "warning: no kohakuvault line found in requirements.txt; "
+            "Android install may fail with No matching distribution",
+            file=sys.stderr,
+        )
+        return 0
+    if not replaced and seen_url_form:
+        # Already patched — keep file as-is.
+        return 0
+
+    req_path.write_text("\n".join(patched) + "\n", encoding="utf-8")
+    print(
+        "  requirements  kohakuvault -> direct URL refs "
+        f"(v{kv_version}, aarch64 + x86_64)"
+    )
     return 0
+
+
+def _kohakuvault_version_from_pyproject() -> str | None:
+    """Read the kohakuvault dep spec from ``pyproject.toml`` and
+    extract a concrete version string for the URL build.
+
+    The spec is ``kohakuvault>=X.Y.Z`` — we use ``X.Y.Z`` as the
+    version-to-fetch.  Avoids pinning the URL version in two
+    places (pyproject + postcreate); operator bumps the floor and
+    this script follows.
+    """
+    pyproject = REPO_ROOT / "pyproject.toml"
+    if not pyproject.is_file():
+        return None
+    text = pyproject.read_text(encoding="utf-8")
+    # Match the line: ``"kohakuvault>=0.8.3"``  (possibly preceded
+    # by indentation + followed by a comma).  Regex avoids needing
+    # a full TOML parser since we only want one value.
+    m = re.search(
+        r'"kohakuvault>=([0-9]+\.[0-9]+\.[0-9]+)"',
+        text,
+    )
+    return m.group(1) if m else None
 
 
 def patch_launcher_activity(generated: Path) -> int:
