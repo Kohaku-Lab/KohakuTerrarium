@@ -113,6 +113,9 @@ async def run_engine_with_rich_cli(
     )
     if swap_input:
         agent.input = RichCLIInput()
+        # Slash commands were wired to ``previous_input`` during agent init.
+        # Re-register on the stub so ``RichCLIApp`` dispatch finds /clear, etc.
+        agent._init_user_commands()
         logger.debug(
             "Rich CLI swapped focus creature input",
             previous=type(previous_input).__name__,
