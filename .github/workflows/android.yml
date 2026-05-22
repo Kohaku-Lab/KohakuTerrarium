@@ -95,33 +95,30 @@ jobs:
           ls -lh packaging/android/bin/*/
 
       - name: Fetch KohakuVault Android wheels into wheels/
-        # KohakuVault publishes Android wheels (PEP 738 platform
-        # tags) to its GitHub Releases.  Chaquopy's pip looks at
-        # ``--find-links wheels/`` per the briefcase config; we
-        # populate that dir here so kohakuvault resolves to the
-        # native Android wheel instead of failing as
-        # ``No matching distribution found`` (Chaquopy's curated
-        # index doesn't carry kohakuvault and won't for the
-        # foreseeable future — it's a small enough project that
-        # we host wheels ourselves on GH Releases).
+        # KohakuVault publishes Android wheels to its GH Releases
+        # (only arm64 + x86_64 — those are the ABIs PyO3/maturin-action
+        # ships an Android cross-prefix for).  Chaquopy's pip resolves
+        # them on Android because the Chaquopy environment claims
+        # ``linux_<arch>`` compatibility; we drop them into
+        # ``./wheels/`` and postcreate.py mirrors that into the
+        # gradle app dir so Chaquopy's ``--find-links wheels`` finds
+        # them.  Without this, pip fails with
+        # ``No matching distribution found for kohakuvault`` since
+        # Chaquopy's curated index doesn't carry kohakuvault.
         #
-        # Pinned via KOHAKUVAULT_VERSION below — must match the
-        # ``[project] dependencies`` floor in ``pyproject.toml``.
+        # Pattern note: KV's CI produces ``kohakuvault-X.Y.Z-cp313-
+        # cp313-linux_<arch>.whl`` for Android.  Desktop Linux wheels
+        # use ``manylinux_*`` tags, so the plain ``linux_*`` glob
+        # excludes them automatically — no risk of pulling a desktop
+        # glibc wheel into the Android bundle.
         env:
           KOHAKUVAULT_VERSION: "0.8.3"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p wheels
-          # ``gh release download`` resolves Android wheel filenames
-          # by glob; pip picks the right ABI tag at install time.
-          # If the release doesn't exist yet (KohakuVault hasn't
-          # published v${KOHAKUVAULT_VERSION} with Android wheels),
-          # we warn loudly + let the build fail downstream with a
-          # clear pip error rather than swallow it silently.
           gh release download "v${KOHAKUVAULT_VERSION}" \
               --repo Kohaku-Lab/KohakuVault \
-              --pattern "kohakuvault-*-linux_android*.whl" \
-              --pattern "kohakuvault-*-android_*.whl" \
+              --pattern "kohakuvault-*-linux_*.whl" \
               --dir wheels/ || {
               echo "::warning::No KohakuVault Android wheels found for v${KOHAKUVAULT_VERSION}."
               echo "::warning::Publish v${KOHAKUVAULT_VERSION} on Kohaku-Lab/KohakuVault first."
