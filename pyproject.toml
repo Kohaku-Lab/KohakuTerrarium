@@ -9,7 +9,13 @@ description = "A universal agent framework for building self-driven AI agents an
 authors = [
     { name = "Shih-Ying Yeh (KohakuBlueLeaf)", email = "apolloyeh0123@gmail.com" },
 ]
-license = { text = "KohakuTerrarium-1.0" }
+# PEP 639 license format.  The license is custom (see ``LICENSE``),
+# so we use the SPDX ``LicenseRef-`` form rather than a registered
+# identifier.  Briefcase 0.3.21+ requires this shape; the older
+# ``license = { text = ... }`` + ``license.file = ...`` combo
+# triggers a deprecation warning and (in 0.3.22+) a hard error.
+license = "LicenseRef-KohakuTerrarium-1.0"
+license-files = ["LICENSE"]
 readme = "README.md"
 requires-python = ">=3.10"
 keywords = ["ai", "agent", "llm", "multi-agent", "terrarium", "framework"]
@@ -175,7 +181,8 @@ project_name = "KohakuTerrarium"
 bundle = "com.kohaku.terrarium"
 version = "2.0.0.dev6"
 url = "https://github.com/Kohaku-Lab/KohakuTerrarium"
-license.file = "LICENSE"
+# License is read from PEP 639 ``[project]`` above; Briefcase
+# 0.3.21+ no longer accepts ``license.file`` here.
 author = "Shih-Ying Yeh (KohakuBlueLeaf)"
 author_email = "apolloyeh0123@gmail.com"
 
@@ -183,16 +190,19 @@ author_email = "apolloyeh0123@gmail.com"
 formal_name = "KohakuTerrarium"
 description = "Universal Agent Framework - Desktop App"
 icon = "src/kohakuterrarium/app_icons/app"
-# 06b — wrapper-only sources.  The framework is DOWNLOADED as a
-# pre-built release tarball at first launch (offline from
-# ``bundled-release/`` or online from the configured channel feed).
-# See ``plans/1.5.0-roadmap/06b-release-bundle-update/`` for the design.
-#
-# ``bundled-release/`` ships as a sibling directory inside the bundle
-# so the launcher's ``bundled_release_dir()`` finds it at runtime.
-# CI populates ``bundled-release/`` from the matrix ``release-tree``
-# job before ``briefcase create``.
-sources = ["src/kohakuterrarium", "bundled-release"]
+# Parent-level sources contain ONLY the wrapper package.  The
+# ``bundled-release/`` directory (the 06b release-tarball update
+# mechanism — see plans/1.5.0-roadmap/06b-release-bundle-update/)
+# is desktop-specific, so it lives under each desktop platform's
+# ``sources`` rather than here.  Briefcase MERGES (not replaces)
+# platform-level ``sources`` into parent-level, so keeping
+# bundled-release here would force every platform — including
+# Android — to populate it.  Android doesn't (updates go through
+# Play Store), which would dupe-error or fail-source-not-found.
+# CI populates ``bundled-release/`` from the matrix
+# ``release-tree`` job before ``briefcase create`` on desktop
+# targets only.
+sources = ["src/kohakuterrarium"]
 startup_module = "kohakuterrarium.__briefcase__"
 requires = [
     # Launcher needs only packaging (version compare), pywebview
@@ -209,6 +219,10 @@ requirement_installer_args = ["--find-links", "wheels"]
 
 [tool.briefcase.app.kohakuterrarium.macOS]
 universal_build = false
+# ``bundled-release/`` is the 06b release-tarball directory the
+# launcher reads on first boot.  Per-desktop-platform so Android
+# doesn't inherit it.
+sources = ["bundled-release"]
 requires = [
     "std-nslog~=1.0.0",
     # Desktop bundles wrap the framework in a pywebview shell —
@@ -219,10 +233,13 @@ requires = [
 ]
 
 [tool.briefcase.app.kohakuterrarium.windows]
+sources = ["bundled-release"]
 requires = [
     "KohakuTerrarium[desktop]",
 ]
+
 [tool.briefcase.app.kohakuterrarium.linux]
+sources = ["bundled-release"]
 requires = [
     "KohakuTerrarium[desktop]",
 ]
@@ -246,14 +263,9 @@ requires = [
 # step is the supported pattern.  CI runs it between
 # ``briefcase create android`` and ``briefcase update android``.
 [tool.briefcase.app.kohakuterrarium.android]
-# Override the desktop ``sources`` — Briefcase Android pulls in
-# Python via Chaquopy (no separate launcher binary), and the
-# desktop ``bundled-release/`` tarball-update mechanism doesn't
-# apply on Android (updates go through Play Store).  Without
-# this override, ``briefcase create android`` fails with
-# ``Application source 'bundled-release' does not exist``
-# because CI doesn't populate that dir on the Android matrix.
-sources = ["src/kohakuterrarium"]
+# No ``sources`` override needed — the parent-level sources are
+# now wrapper-only (``src/kohakuterrarium``).  ``bundled-release``
+# lives under each desktop platform.
 
 # Briefcase pulls fastapi / uvicorn / httpx / pydantic /
 # sqlite-bound deps from ``[project] dependencies`` automatically

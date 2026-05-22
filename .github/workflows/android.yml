@@ -174,7 +174,8 @@ jobs:
   validate-manifest:
     # Runs on every PR + every push to catch manifest schema mistakes
     # without waiting for the slow full-build job.  No JDK / NDK /
-    # Briefcase needed — just Python + the fetcher's unit tests.
+    # Briefcase needed — just Python + pytest (no framework install
+    # required; the fetcher + postcreate scripts are stdlib-only).
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -182,11 +183,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: Validate sandbox manifest schema
-        # --check-only verifies hashes if the URLs are reachable
-        # but doesn't error on placeholder URLs (which fail the
-        # full --check-only on `git` until that artifact is
-        # populated).  We rely on the test suite under
-        # tests/unit/packaging/ to verify the script's logic.
-        run: |
-          python -m pytest tests/unit/packaging/ -q
+      - name: Install pytest
+        # The fetcher / postcreate scripts use only stdlib (tomllib,
+        # urllib, shutil, re), so we don't need the framework wheel —
+        # just pytest itself.  Quick install (~2s) beats a full
+        # ``pip install -e ".[dev]"`` which would drag in fastapi /
+        # uvicorn / etc. for no reason.
+        run: python -m pip install --quiet pytest
+      - name: Validate sandbox manifest schema + postcreate logic
+        run: python -m pytest tests/unit/packaging/ -q
