@@ -42,6 +42,12 @@ _ALLOWED_OUTSIDE_API: dict[str, str] = {
         "callers must converge on one TOML writer to avoid wire-format "
         "drift between CLI and frontend."
     ),
+    "cli/admin_qr.py": (
+        "``kt admin show-host-qr`` reads ``host_token`` from the auth "
+        "config to build the ``ktconnect://`` URI; same boundary "
+        "rationale as cli/admin.py.  Split out only to keep "
+        "admin.py under the 600-line file-size budget."
+    ),
 }
 
 

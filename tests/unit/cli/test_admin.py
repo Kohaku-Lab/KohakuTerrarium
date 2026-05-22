@@ -92,6 +92,67 @@ class TestShowHostToken:
         assert "(host_token is not set)" in captured.out
 
 
+class TestShowHostQr:
+    def test_requires_yes(self, cli_env, capsys):
+        admin_cli(_ns(admin_command="set-host-token"))
+        rc = admin_cli(_ns(admin_command="show-host-qr", url="", yes=False))
+        captured = capsys.readouterr()
+        assert rc == 1
+        assert "re-run with --yes" in captured.err
+
+    def test_returns_1_when_no_token(self, cli_env, capsys):
+        rc = admin_cli(_ns(admin_command="show-host-qr", url="", yes=True))
+        captured = capsys.readouterr()
+        assert rc == 1
+        assert "host_token is not set" in captured.err
+
+    def test_prints_qr_and_uri(self, cli_env, capsys):
+        admin_cli(_ns(admin_command="set-host-token"))
+        rc = admin_cli(
+            _ns(
+                admin_command="show-host-qr",
+                url="https://kt.home.lan:8001",
+                yes=True,
+            )
+        )
+        captured = capsys.readouterr()
+        assert rc == 0
+        # The URI form is what the mobile client decodes.
+        assert "ktconnect://kt.home.lan:8001/?token=" in captured.out
+        assert "https://kt.home.lan:8001" in captured.out
+
+    def test_uri_scheme_param_captures_https(self, cli_env, capsys):
+        # The ktconnect URI carries the original scheme as a query
+        # param so the mobile client knows TLS vs plain.  Pin so the
+        # contract doesn't drift if a future refactor drops it.
+        admin_cli(_ns(admin_command="set-host-token"))
+        admin_cli(
+            _ns(
+                admin_command="show-host-qr",
+                url="https://example.com:443",
+                yes=True,
+            )
+        )
+        out = capsys.readouterr().out
+        assert "scheme=https" in out
+
+    def test_token_in_uri_is_url_encoded(self, cli_env, capsys):
+        # Manually seed a token with special chars to verify quoting.
+        from kohakuterrarium.api.auth.config_write import write_auth_section
+
+        write_auth_section({"host_token": "abc def/+="})
+        admin_cli(
+            _ns(
+                admin_command="show-host-qr",
+                url="http://1.2.3.4:8001",
+                yes=True,
+            )
+        )
+        out = capsys.readouterr().out
+        # `+`, `=`, `/`, ` ` all need encoding.
+        assert "token=abc%20def%2F%2B%3D" in out
+
+
 class TestRotateHostToken:
     def test_rotation_generates_distinct_token(self, cli_env):
         admin_cli(_ns(admin_command="set-host-token"))

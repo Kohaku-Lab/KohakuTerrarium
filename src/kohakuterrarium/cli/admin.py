@@ -50,6 +50,7 @@ from kohakuterrarium.api.auth.namespace import (
     user_session_dir,
 )
 from kohakuterrarium.api.auth.sessions import delete_user_sessions
+from kohakuterrarium.cli.admin_qr import show_host_qr
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -89,6 +90,30 @@ def add_admin_subparser(subparsers: argparse._SubParsersAction) -> None:
     admin_sub.add_parser(
         "rotate-host-token",
         help="Generate + save a new host_token; existing clients lose access",
+    )
+
+    qr = admin_sub.add_parser(
+        "show-host-qr",
+        help=(
+            "Print a QR code (ASCII art) that mobile clients scan to "
+            "pair with this host.  Encodes the host URL + host_token "
+            "as a ``ktconnect://`` URI."
+        ),
+    )
+    qr.add_argument(
+        "--url",
+        default="",
+        help=(
+            "Public URL of this host (e.g. ``https://kt.home.lan:8001``). "
+            "Defaults to ``http://<lan-ip>:8001`` when omitted; lookup is "
+            "best-effort and may not pick the right interface on multi-NIC "
+            "hosts — pass --url explicitly if so."
+        ),
+    )
+    qr.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm you want to print the host_token in plaintext via QR",
     )
 
     # Users --------------------------------------------------------------
@@ -190,6 +215,8 @@ def admin_cli(args: argparse.Namespace) -> int:
         return _show_host_token(args.yes)
     if verb == "rotate-host-token":
         return _set_host_token(rotate=True)
+    if verb == "show-host-qr":
+        return show_host_qr(getattr(args, "url", ""), getattr(args, "yes", False))
     if verb == "users":
         return _dispatch_users(args)
     if verb == "invitations":
@@ -274,6 +301,8 @@ def _show_host_token(yes: bool) -> int:
         return 0
     print(cfg.host_token)
     return 0
+
+
 
 
 # ---------------------------------------------------------------------------

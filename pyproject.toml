@@ -48,6 +48,10 @@ dependencies = [
     # API auth (L4 — multi-user accounts).  Used only by api/auth/crypto.py;
     # CLI / TUI / framework core do not touch it.
     "bcrypt>=4.0.0",
+    # QR code generation for ``kt admin show-host-qr`` — tiny
+    # pure-Python (~80KB), zero deps.  Picked over ``qrcode`` so
+    # there's no transitive PIL.
+    "segno>=1.6.0",
     # Web tools
     "trafilatura>=2.0.0",
     "ddgs>=9.0.0",
