@@ -97,6 +97,31 @@ class TestLruEviction:
         assert {1, 3}.issubset(live)
         pool.evict_all()
 
+    def test_touch_under_clock_tie(self, fresh_dirs):
+        # Simulates the Windows ``time.monotonic()`` low-resolution
+        # case: back-to-back calls in a busy loop can all return the
+        # same float value (the kernel scheduler tick + float
+        # precision conspire to lose ~100ns deltas).  In that case
+        # LRU eviction must fall back on dict iteration order =
+        # insertion / touch order, not the tied timestamps.  Audit
+        # caught this when the CI matrix for Windows + py312 went
+        # red on ``test_touch_keeps_user_alive`` with the wrong
+        # user evicted.
+        pool = EnginePool(max_active=2, idle_timeout_s=0)
+        # Pin every monotonic() read to the same value so ALL
+        # touches tie.
+        pool._monotonic = lambda: 42.0  # type: ignore[assignment]
+        pool.get_or_create(1)
+        pool.get_or_create(2)
+        pool.get_or_create(1)  # touch 1 — must reorder despite tie
+        pool.get_or_create(3)
+        live = set(pool.live_user_ids())
+        assert (
+            2 not in live
+        ), f"under clock-tie, 2 should be evicted (LRU); got live={live}"
+        assert {1, 3}.issubset(live)
+        pool.evict_all()
+
 
 class TestEvict:
     def test_evict_specific_user(self, fresh_dirs):

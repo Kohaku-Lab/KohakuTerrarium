@@ -93,6 +93,20 @@ class EnginePool:
         engine_to_shut_down: Terrarium | None = None
         with self._lock:
             if key in self._engines:
+                # Touch path: pop + reinsert so the dict's insertion
+                # order tracks LRU recency.  Without the pop, two
+                # back-to-back ``get_or_create`` calls on Windows can
+                # both return identical ``time.monotonic()`` values
+                # (the kernel scheduler tick caps resolution at
+                # ~100ns; float precision near boot-time then makes
+                # them indistinguishable), so the timestamp-based
+                # tie-break collapses to dict iteration order — and
+                # without the pop, that order is INSERTION order,
+                # which is the opposite of LRU.  Pop + reinsert
+                # ensures iteration order is "oldest first", so
+                # ``min(_last_used, key=get)`` evicts the genuinely-
+                # LRU entry even when timestamps tie.
+                del self._last_used[key]
                 self._last_used[key] = self._monotonic()
                 return self._engines[key]
 

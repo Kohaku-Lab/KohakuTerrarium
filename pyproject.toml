@@ -40,7 +40,20 @@ dependencies = [
     "pyyaml>=6.0.0",
     "ruamel.yaml>=0.18.0",
     "jinja2>=3.1.0",
-    "libcst>=1.4.0",
+    # libcst — used by the studio codegen editors.  Pin allows
+    # both PyPI's 1.x (desktop / CI) and Chaquopy's back-ported
+    # 0.3.23 (the only version Chaquopy publishes a Python-3.13
+    # Android wheel for).  All ``cst.*`` symbols our codegen
+    # modules touch (``Module``, ``parse_module``, ``ClassDef``,
+    # ``CSTTransformer``, ``SimpleString``, ``IndentedBlock``,
+    # ``Return``, ``Name``, ``Attribute``, ``Call``, ``Tuple``,
+    # ``List``, ``Element``, …) are stable since 0.3.x, so a
+    # split-version policy across desktop + Android is safe.
+    # The audit-driven first ``briefcase build android`` failed on
+    # ``libcst>=1.4.0`` because Chaquopy's index tops at 0.3.23;
+    # relaxing the floor lets the resolver pick the highest
+    # available on each target.
+    "libcst>=0.3.23,<2",
     "aiofiles>=25.1.0",
     "python-dotenv>=1.0.0",
     "kohakuvault>=0.8.1",
