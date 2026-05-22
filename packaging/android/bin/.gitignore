@@ -1,0 +1,5 @@
+# Sandbox binaries are downloaded by CI, never committed.
+# This directory holds the per-ABI bin trees + a generated
+# manifest.json; everything inside is build output.
+*
+!.gitignore

@@ -1,0 +1,192 @@
+name: Android
+
+# Builds the Android APK + AAB.
+#
+# Two trigger modes:
+#   * On tag push (``v*``) → builds + signs + uploads to the matching
+#     GitHub Release.  Same release artifact stream as
+#     ``release.yml``'s desktop builds.
+#   * On workflow_dispatch → builds unsigned APK for verification.
+#     The sandbox-fetch + briefcase build + test passes still run.
+#
+# CI-bundled-sandbox flow (the headline of this workflow):
+#   1. Set up Python + Briefcase Android prerequisites (JDK, Android SDK)
+#   2. Run ``packaging/android/fetch_sandbox.py`` to download
+#      busybox (the only bundled binary; see design.md §4) per the
+#      manifest + verify SHA256.  Cached across runs.
+#   3. ``briefcase build android`` — Briefcase packs Python + framework
+#      + Vue web_dist + the sandbox bin dir into the APK.
+#   4. (Tag only) Sign the AAB + APK with the release keystore.
+#   5. Upload artifacts to the GitHub release.
+#
+# Sandbox binaries are NEVER committed to git — only the
+# ``sandbox_manifest.toml`` (pinned versions + SHA256) is committed.
+# CI populates ``packaging/android/bin/`` on every run.
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    # PRs only run the lightweight ``validate-manifest`` job below
+    # (the full Briefcase build is slow + needs Android SDK + NDK
+    # downloads).  The ``build`` job is gated to tags + dispatch.
+    paths:
+      - "packaging/android/**"
+      - ".github/workflows/android.yml"
+      - "src/kohakuterrarium/utils/mobile_sandbox.py"
+      - "src/kohakuterrarium/builtins/tools/bash.py"
+      - "tests/unit/packaging/**"
+      - "tests/unit/utils/test_mobile_sandbox.py"
+  workflow_dispatch:
+    inputs:
+      sign:
+        description: "Sign the output APK/AAB (requires release secrets)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # Heavy job: only on tag pushes + manual dispatch.  PRs hit the
+    # ``validate-manifest`` job below which is ~1 minute vs the full
+    # build's ~15-30 minutes.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up JDK 17
+        # Briefcase Android currently builds against JDK 17 — newer
+        # JDKs hit Gradle compatibility issues with the python-for-android
+        # backend.  Pinned until that's resolved upstream.
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Install Briefcase + framework
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install briefcase
+          python -m pip install -e ".[dev]"
+
+      - name: Cache sandbox-fetch downloads
+        # The fetcher dedupes by SHA256-of-URL so re-runs are cache
+        # hits.  Cache the dir between CI runs to avoid pulling
+        # ~30MB of binaries every build.
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/kohakuterrarium/android-sandbox
+          key: sandbox-${{ hashFiles('packaging/android/sandbox_manifest.toml') }}
+          restore-keys: |
+            sandbox-
+
+      - name: Fetch + verify sandbox binaries
+        run: |
+          python packaging/android/fetch_sandbox.py
+          ls -lh packaging/android/bin/*/
+
+      - name: Build frontend
+        # The framework's setup expects web_dist/ to exist; the
+        # release pipeline normally builds it but the Android job
+        # runs in isolation, so build here too.
+        working-directory: src/kohakuterrarium-frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Run sandbox + tool-catalog tests (sanity)
+        run: |
+          python -m pytest \
+            tests/unit/utils/test_mobile_sandbox.py \
+            tests/unit/builtins/test_tool_catalog_mobile.py \
+            tests/unit/packaging/test_fetch_sandbox.py \
+            -q
+
+      - name: Briefcase create
+        run: briefcase create android
+
+      - name: Apply template overrides + sandbox assets
+        # Briefcase Android has no native ``merge a tree into the
+        # generated project`` mechanism, so we run a post-create
+        # script between ``create`` and ``update`` that copies our
+        # custom MainActivity / KohakuHostService into the
+        # generated tree and mounts the busybox bin tree at
+        # assets/sandbox/bin/.  See packaging/android/postcreate.py.
+        run: python packaging/android/postcreate.py
+
+      - name: Briefcase update + build (debug)
+        run: |
+          briefcase update android
+          briefcase build android
+
+      - name: Sign + package (release)
+        if: github.event_name == 'push' || inputs.sign
+        env:
+          # All four secrets must be set in GitHub repository
+          # settings → Secrets → Actions before the signed build
+          # job runs.  Without them, the job falls through to the
+          # debug-APK path above.
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "${ANDROID_KEYSTORE_B64}" ]; then
+            echo "::warning::No signing secrets configured; skipping signing."
+            exit 0
+          fi
+          echo "${ANDROID_KEYSTORE_B64}" | base64 -d > /tmp/release.jks
+          briefcase package android \
+            --adhoc-sign \
+            --keystore /tmp/release.jks \
+            --keystore-pass "${ANDROID_KEYSTORE_PASSWORD}" \
+            --key-alias "${ANDROID_KEY_ALIAS}" \
+            --key-pass "${ANDROID_KEY_PASSWORD}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-${{ github.sha }}
+          path: |
+            build/kohakuterrarium/android/**/*.apk
+            build/kohakuterrarium/android/**/*.aab
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Attach to release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/kohakuterrarium/android/**/*.apk
+            build/kohakuterrarium/android/**/*.aab
+          fail_on_unmatched_files: false
+
+  validate-manifest:
+    # Runs on every PR + every push to catch manifest schema mistakes
+    # without waiting for the slow full-build job.  No JDK / NDK /
+    # Briefcase needed — just Python + the fetcher's unit tests.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Validate sandbox manifest schema
+        # --check-only verifies hashes if the URLs are reachable
+        # but doesn't error on placeholder URLs (which fail the
+        # full --check-only on `git` until that artifact is
+        # populated).  We rely on the test suite under
+        # tests/unit/packaging/ to verify the script's logic.
+        run: |
+          python -m pytest tests/unit/packaging/ -q

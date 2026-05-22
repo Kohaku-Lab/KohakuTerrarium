@@ -63,8 +63,6 @@ dependencies = [
     "mcp>=1.0.0",
     # Lightweight embeddings (no pytorch)
     "model2vec>=0.8.0",
-    # Desktop webview
-    "pywebview==6.1",
     # Windows PTY for terminal panel (Nerd Font / PowerShell theme support)
     "pywinpty>=2.0.0; sys_platform == 'win32'",
 ]
@@ -90,6 +88,15 @@ kt-aio = "kohakuterrarium.cli._aio_entrypoint:run"
 # future use if host- or client-specific deps appear.
 host = []
 client = []
+
+# ── desktop: deps the desktop bundles need (pywebview shell).
+# Excluded from the framework wheel's hard deps so the Android
+# build via Briefcase + Chaquopy doesn't try to install
+# pywebview (which has no Android wheel and would fail the
+# build).  Desktop builds opt in via this extra.
+desktop = [
+    "pywebview==6.1",
+]
 
 # ── demo: example agent-apps that need extra deps ────────────────────
 discord = [
@@ -204,7 +211,124 @@ requirement_installer_args = ["--find-links", "wheels"]
 universal_build = false
 requires = [
     "std-nslog~=1.0.0",
+    # Desktop bundles wrap the framework in a pywebview shell —
+    # pulled in via the ``[desktop]`` extra so the Android bundle
+    # (which uses a native WebView instead) doesn't try to install
+    # pywebview, which has no aarch64-Android wheel.
+    "KohakuTerrarium[desktop]",
 ]
 
 [tool.briefcase.app.kohakuterrarium.windows]
+requires = [
+    "KohakuTerrarium[desktop]",
+]
+[tool.briefcase.app.kohakuterrarium.linux]
+requires = [
+    "KohakuTerrarium[desktop]",
+]
+
+# ── Android — Briefcase-driven APK / AAB ──────────────────────────────
+#
+# The Android bundle ships:
+#   * The framework wheel + its deps (Briefcase + Chaquopy wheel
+#     them; ``[project] dependencies`` is the source of truth).
+#   * The Vue web_dist (already pulled in by the setuptools
+#     ``package_data`` rule under ``kohakuterrarium``).
+#   * One static busybox per ABI for the bash tool — fetched by
+#     ``packaging/android/fetch_sandbox.py``, then copied into
+#     the generated project's ``assets/sandbox/bin/`` by
+#     ``packaging/android/postcreate.py``.
+#
+# Custom Java (MainActivity + KohakuHostService) lives under
+# ``packaging/android/template/`` and is copied into the
+# Briefcase-generated tree by ``postcreate.py``.  Briefcase does
+# NOT have native "merge tree" support — the post-create copy
+# step is the supported pattern.  CI runs it between
+# ``briefcase create android`` and ``briefcase update android``.
+[tool.briefcase.app.kohakuterrarium.android]
+# Briefcase pulls fastapi / uvicorn / httpx / pydantic /
+# sqlite-bound deps from ``[project] dependencies`` automatically
+# via the Chaquopy wheel installer.  ``requires`` here is for
+# Android-only extras — we have none.
 requires = []
+# Real Briefcase Android cookiecutter vars (verified against
+# https://github.com/beeware/briefcase-android-gradle-template/
+# cookiecutter.json):
+#
+# - ``min_os_version``: minSdk.  **26** = Android 8.0.  We use
+#   ``java.nio.file.Files.readAllBytes`` + ``String.join`` in
+#   ``MainActivity.java`` which require API 26+ without
+#   core-library desugaring — Briefcase Android doesn't ship that
+#   desugaring, so anything below 26 fails at runtime.
+#   ``startForegroundService`` also needs 26.  Cost: ~1% device
+#   coverage loss vs API 24 (Android 7), all in 2017-era hardware.
+# - ``target_os_version``: targetSdk.  34 = Android 14, the Play
+#   Store baseline for new uploads.
+# - ``permissions`` / ``features``: empty here — we inject the
+#   full XML via the ``android_manifest_*_extra_content`` knobs
+#   below so we can express the foreground-service-type attr +
+#   the ktconnect:// intent filter, which the bare ``permissions``
+#   field cannot.
+min_os_version = "26"
+target_os_version = "34"
+# Version code: 1.5.0 → 1_05_000.  Encodes <major><MM><NN><PP>.
+version_code = "10500000"
+# Foreground service + camera + notification permissions, plus
+# the foreground-service-type sub-permission for Android 14+.
+android_manifest_extra_content = """
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+<uses-permission android:name="android.permission.CAMERA" />
+<uses-feature android:name="android.hardware.camera" android:required="false" />
+"""
+# Foreground service declaration.  The class name MUST be the
+# fully-qualified ``org.kohaku.terrarium.KohakuHostService`` —
+# NOT a relative ``.KohakuHostService``, because:
+#
+#   * Briefcase Android generates the app under a separate
+#     ``applicationId`` derived from the cookiecutter bundle
+#     (typically ``<bundle>.<app_name>``), so the relative
+#     ``.`` prefix would resolve to ``<applicationId>.KohakuHostService``
+#     — which has no matching class anywhere, and Android
+#     would refuse to start the service as undeclared.
+#   * Our service class lives in ``org.kohaku.terrarium`` (the
+#     namespace the postcreate.py script drops Java into) which
+#     does NOT match Briefcase's auto-generated applicationId.
+#
+# The audit caught this drift after the launcher Activity
+# patcher already handled it via postcreate.py; the service
+# declaration is injected via Briefcase's cookiecutter knob
+# and so isn't patched the same way.
+android_manifest_application_extra_content = """
+<service
+    android:name="org.kohaku.terrarium.KohakuHostService"
+    android:exported="false"
+    android:foregroundServiceType="dataSync" />
+"""
+# ktconnect:// deep-link intent filter on the main activity.
+android_manifest_activity_extra_content = """
+<intent-filter android:autoVerify="false">
+    <action android:name="android.intent.action.VIEW" />
+    <category android:name="android.intent.category.DEFAULT" />
+    <category android:name="android.intent.category.BROWSABLE" />
+    <data android:scheme="ktconnect" />
+</intent-filter>
+"""
+# Activity attributes — ``singleTop`` so a ``ktconnect://`` deep
+# link routed while the app is already running re-enters the
+# existing activity via ``onNewIntent`` instead of stacking a
+# second instance (which would attempt a second Python boot +
+# delete the port file).
+android_manifest_activity_attrs_extra_content = """
+android:launchMode="singleTop"
+"""
+# Cleartext traffic — needed for 127.0.0.1 (loopback host has no
+# TLS).  ``android:allowBackup`` is NOT injected here because
+# Briefcase's own template already emits it set to ``true`` and
+# duplicate attributes on ``<application>`` make AAPT fail.
+# Postcreate.py flips it to ``false`` via surgical attribute
+# replace instead.
+android_manifest_application_attrs_extra_content = """
+android:usesCleartextTraffic="true"
+"""
