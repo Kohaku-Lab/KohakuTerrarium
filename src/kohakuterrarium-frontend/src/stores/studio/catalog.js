@@ -19,12 +19,23 @@ export const useStudioCatalogStore = defineStore("studio-catalog", () => {
   const models = ref([])
   const pluginHooks = ref([])
 
-  const loaded = ref(false)
+  // The previous version stashed a ``loaded`` flag and short-
+  // circuited on subsequent calls (``if (loaded.value && !force)
+  // return``).  No caller ever passed ``force: true``, so the
+  // catalog froze on first load — a user who ran ``kt install``
+  // mid-session never saw the new package's tools / sub-agents /
+  // plugins / triggers / models / hooks until a full page reload.
+  // The catalog endpoints are read-only directory scans on the
+  // backend; refetching on every editor open is the right shape.
   const loading = ref(false)
+  const loaded = ref(false) // kept for backwards-compat with any
+  // consumer reading ``catalog.loaded``;
+  // flips true after the first successful
+  // fetch and stays true (data is always
+  // fresh because we always fetch).
   const error = ref(null)
 
-  async function fetchAll({ force = false } = {}) {
-    if (loaded.value && !force) return
+  async function fetchAll() {
     if (loading.value) return
     loading.value = true
     error.value = null
