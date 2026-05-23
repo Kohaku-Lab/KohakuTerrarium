@@ -1345,6 +1345,7 @@ export default {
   "codexLogin.openUrl": "Open",
   "codexLogin.cancel": "Cancel",
   "codexLogin.close": "Close",
+  "codexLogin.retry": "Try again",
   "codexLogin.expiresIn": ({ minutes }) =>
     `The code expires in ~${minutes} min — finish before then.`,
   "codexLogin.success": "Signed in!  Closing…",

@@ -70,6 +70,14 @@
     </div>
 
     <template #footer>
+      <!-- "Retry" appears in error state so the user can request a
+           fresh device code without closing + reopening the modal.
+           The previous abort+restart pattern relied on parent unmount
+           which leaked a half-cancelled SSE connection on Android. -->
+      <el-button v-if="phase === 'error'" size="small" type="primary" @click="start">
+        <span class="i-carbon-renew text-[11px] mr-1" aria-hidden="true" />
+        {{ t("codexLogin.retry") }}
+      </el-button>
       <el-button size="small" @click="onCancel">
         {{ phase === "success" ? t("codexLogin.close") : t("codexLogin.cancel") }}
       </el-button>
@@ -163,6 +171,13 @@ async function start() {
         try {
           event = JSON.parse(line)
         } catch (_err) {
+          continue
+        }
+        if (event.event === "ping") {
+          // Heartbeat from the backend — discarded.  Its only job
+          // is to push bytes onto the wire so mobile / WebView
+          // fetches don't idle-timeout the SSE during the multi-
+          // minute device-code poll window.
           continue
         }
         if (event.event === "device_code") {

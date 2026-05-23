@@ -1111,6 +1111,7 @@ export default {
   "codexLogin.openUrl": "打开",
   "codexLogin.cancel": "取消",
   "codexLogin.close": "关闭",
+  "codexLogin.retry": "重试",
   "codexLogin.expiresIn": ({ minutes }) => `代码大约 ${minutes} 分钟后过期 — 请在此之前完成。`,
   "codexLogin.success": "登录成功!正在关闭...",
   "codexLogin.failed": ({ error }) => `登录失败:${error}`,

@@ -1107,6 +1107,7 @@ export default {
   "codexLogin.openUrl": "打開",
   "codexLogin.cancel": "取消",
   "codexLogin.close": "關閉",
+  "codexLogin.retry": "重試",
   "codexLogin.expiresIn": ({ minutes }) => `代碼大約 ${minutes} 分鐘後過期 — 請在此之前完成。`,
   "codexLogin.success": "登入成功!正在關閉...",
   "codexLogin.failed": ({ error }) => `登入失敗:${error}`,
