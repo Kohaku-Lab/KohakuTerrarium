@@ -63,6 +63,77 @@ class TestInstallUninstall:
         monkeypatch.setattr(pkg_mod, "uninstall_package", lambda n: True)
         assert pkg_mod.uninstall_package_op("demo") is True
 
+    # ── scan-cache invalidation contract ────────────────────────
+    # The 10s TTL on packages_scan._creatures_cache /
+    # _terrariums_cache used to outlive a fresh install /
+    # uninstall / update, so /api/configs/{creatures,terrariums}
+    # would echo the pre-install state for up to 10 seconds.
+    # The frontend NewCreatureModal then showed "No creature
+    # configs available" even when the user had just installed a
+    # package that contained creature configs.  Pin the invalidation
+    # contract here so the bug can't quietly come back.
+
+    def test_install_invalidates_scan_cache(self, monkeypatch):
+        from kohakuterrarium.studio.catalog import packages_scan as scan_mod
+
+        called = []
+        monkeypatch.setattr(pkg_mod, "install_package", lambda *a, **kw: "newpkg")
+        monkeypatch.setattr(
+            scan_mod, "invalidate_scan_caches", lambda: called.append("invalidated")
+        )
+        # The module imports the symbol directly, so monkeypatch the
+        # importing module's local binding too.
+        monkeypatch.setattr(
+            pkg_mod, "invalidate_scan_caches", lambda: called.append("invalidated")
+        )
+
+        pkg_mod.install_package_op("git+https://x")
+        assert called == ["invalidated"]
+
+    def test_uninstall_invalidates_scan_cache_on_removal(self, monkeypatch):
+        called = []
+        monkeypatch.setattr(pkg_mod, "uninstall_package", lambda n: True)
+        monkeypatch.setattr(
+            pkg_mod, "invalidate_scan_caches", lambda: called.append("invalidated")
+        )
+
+        assert pkg_mod.uninstall_package_op("demo") is True
+        assert called == ["invalidated"]
+
+    def test_uninstall_skips_invalidation_when_nothing_removed(self, monkeypatch):
+        # Don't bust the cache when the package wasn't actually
+        # removed — the on-disk state didn't change, so a needless
+        # cache miss penalises the next catalog read for no benefit.
+        called = []
+        monkeypatch.setattr(pkg_mod, "uninstall_package", lambda n: False)
+        monkeypatch.setattr(
+            pkg_mod, "invalidate_scan_caches", lambda: called.append("invalidated")
+        )
+
+        assert pkg_mod.uninstall_package_op("ghost") is False
+        assert called == []
+
+    def test_update_invalidates_scan_cache_on_success(self, monkeypatch, tmp_path):
+        # update_package_op success path must invalidate — the new
+        # revision may have added / removed creature manifests, and
+        # update_all_packages_op() composes update_package_op() per
+        # package so this also covers the bulk path.
+        (tmp_path / ".git").mkdir()
+        monkeypatch.setattr(
+            pkg_mod,
+            "list_packages",
+            lambda: [{"name": "demo", "path": str(tmp_path), "editable": False}],
+        )
+        monkeypatch.setattr(pkg_mod, "update_package", lambda n: None)
+        called = []
+        monkeypatch.setattr(
+            pkg_mod, "invalidate_scan_caches", lambda: called.append("invalidated")
+        )
+
+        rc, _ = pkg_mod.update_package_op("demo")
+        assert rc == 0
+        assert called == ["invalidated"]
+
 
 # ── update_package_op ────────────────────────────────────────
 

@@ -19,6 +19,7 @@ from kohakuterrarium.packages.install import (
 from kohakuterrarium.packages.locations import PACKAGES_DIR
 from kohakuterrarium.packages.resolve import resolve_package_path
 from kohakuterrarium.packages.walk import list_packages
+from kohakuterrarium.studio.catalog.packages_scan import invalidate_scan_caches
 
 # ---------------------------------------------------------------------------
 # Package summaries
@@ -55,13 +56,32 @@ def install_package_op(
     Verbatim wrapper around ``packages.install.install_package`` —
     propagates exceptions to the caller for transport-specific
     error rendering.
+
+    Invalidates the ``packages_scan`` disk-walk cache on success so
+    the next ``/api/configs/creatures`` (or ``terrariums``) call
+    sees the newly installed configs immediately instead of waiting
+    out the 10s TTL.  The frontend ``useConfigsStore`` always re-
+    fetches on modal open, so the only place a stale cache could
+    leak into the UI is this short post-install window — closing
+    that loop here keeps the contract tight regardless of which
+    transport (HTTP, future Lab APP) called the op.
     """
-    return install_package(source, editable=editable, name_override=name)
+    name = install_package(source, editable=editable, name_override=name)
+    invalidate_scan_caches()
+    return name
 
 
 def uninstall_package_op(name: str) -> bool:
-    """Uninstall a package by name; returns ``True`` if it was removed."""
-    return uninstall_package(name)
+    """Uninstall a package by name; returns ``True`` if it was removed.
+
+    Invalidates the ``packages_scan`` cache on a successful
+    removal so the next catalog read doesn't surface a
+    no-longer-installed creature/terrarium entry.
+    """
+    removed = uninstall_package(name)
+    if removed:
+        invalidate_scan_caches()
+    return removed
 
 
 def normalize_package_name(target: str) -> str:
@@ -103,6 +123,10 @@ def update_package_op(name: str) -> tuple[int, str]:
     except Exception as e:
         return 1, f"Failed to update {name}: {e}"
 
+    # Update may have changed the package's creature/terrarium
+    # manifest on disk — bust the scan cache so the catalog
+    # reflects whatever the new revision exposes.
+    invalidate_scan_caches()
     return 0, f"Updated: {name}"
 
 
