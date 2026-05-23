@@ -387,15 +387,24 @@ build_gradle_dependencies = [
 #   desugaring, so anything below 26 fails at runtime.
 #   ``startForegroundService`` also needs 26.  Cost: ~1% device
 #   coverage loss vs API 24 (Android 7), all in 2017-era hardware.
-# - ``target_os_version``: targetSdk.  34 = Android 14, the Play
-#   Store baseline for new uploads.
+# - ``target_os_version``: targetSdk + compileSdk.  35 = Android 15.
+#   Required because Briefcase's Android template ships
+#   ``res/values-v35/values-v35.xml`` referencing the API 35
+#   attribute ``android:attr/windowOptOutEdgeToEdgeEnforcement``
+#   (edge-to-edge enforcement opt-out, new in Android 15).  With
+#   compileSdk < 35, ``processDebugResources`` fails:
+#       error: style attribute
+#       'android:attr/windowOptOutEdgeToEdgeEnforcement' not found
+#   Bumping to 35 also matches the Play Store baseline for new
+#   uploads from August 2025 onward, so we'd need this anyway
+#   before Play Store submission.
 # - ``permissions`` / ``features``: empty here — we inject the
 #   full XML via the ``android_manifest_*_extra_content`` knobs
 #   below so we can express the foreground-service-type attr +
 #   the ktconnect:// intent filter, which the bare ``permissions``
 #   field cannot.
 min_os_version = "26"
-target_os_version = "34"
+target_os_version = "35"
 # Version code: 1.5.0 → 1_05_000.  Encodes <major><MM><NN><PP>.
 version_code = "10500000"
 # Restrict to arm64-v8a only.  x86_64 emulator support is not worth
