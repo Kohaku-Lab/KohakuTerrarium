@@ -34,7 +34,25 @@ dependencies = [
     "httpx>=0.27.0",
     "openai>=2.0.0",
     "anthropic>=0.68.0",
-    "pydantic>=2.0.0",
+    # Pin pydantic to ≥2.12,<2.13 because the matching pydantic-core
+    # (2.41.x) is what we have an Android wheel for in
+    # dep/android-dep-collection (release v2026.05.25).  pydantic
+    # 2.13.x demands pydantic-core==2.46.4 which would force pip on
+    # Android to backtrack — keeping the pin tight here makes the
+    # resolution one-step and matches the wheel we ship.  Bump both
+    # when bumping the android-dep-collection's pydantic-core
+    # version.
+    "pydantic>=2.12.0,<2.13",
+    # pydantic-core declared as a DIRECT dep (even though it's a
+    # transitive of pydantic) so Briefcase Android emits a
+    # ``pydantic-core>=...`` line into the generated requirements.txt
+    # — postcreate.py's ``_ANDROID_URL_REFS`` only rewrites lines
+    # that Briefcase actually emits.  Without this, the URL ref is
+    # dead code and Chaquopy pip fails with "no matching distributions
+    # available for pydantic-core" (Rust+PyO3, no Chaquopy wheel,
+    # no pure-Python wheel on PyPI).  Same rationale applies to
+    # jiter / rpds-py / safetensors / tokenizers / primp below.
+    "pydantic-core>=2.41.0,<2.42",
     "rich>=14.0.0",
     "prompt_toolkit>=3.0.0",
     "pyyaml>=6.0.0",
@@ -113,8 +131,26 @@ dependencies = [
     "Pillow>=11.0.0",
     # MCP client
     "mcp>=1.0.0",
+    # rpds-py: hard transitive via mcp -> jsonschema -> referencing.
+    # Declared as direct dep so Briefcase emits the line into
+    # requirements.txt and postcreate's URL ref can fire on Android.
+    # Rust + PyO3, no pure-Python wheel.
+    "rpds-py>=0.30.0",
+    # jiter: hard transitive via openai (jiter<1,>=0.10.0) and
+    # anthropic.  Declared as direct dep so the Android URL ref
+    # fires.  Rust + PyO3 streaming JSON parser.
+    "jiter>=0.10.0,<1",
+    # primp: hard transitive via ddgs.  Direct-dep for Android URL ref.
+    "primp>=1.3.0",
     # Lightweight embeddings (no pytorch)
     "model2vec>=0.8.0",
+    # safetensors + tokenizers: hard transitives via model2vec.
+    # Declared as direct deps so Briefcase emits the lines and
+    # postcreate's URL refs fire on Android.  On desktop / PyPI
+    # both packages have manylinux wheels, so the redundancy is
+    # harmless.
+    "safetensors>=0.7.0",
+    "tokenizers>=0.23.1",
     # Windows PTY for terminal panel (Nerd Font / PowerShell theme support)
     "pywinpty>=2.0.0; sys_platform == 'win32'",
 ]
