@@ -83,6 +83,9 @@ src/kohakuterrarium/web_dist/
 
 kt-biome/
 kt-template/
+# Sibling-repo working dirs (each is its own git repo managed
+# alongside KT; gitignored so KT's git doesn't try to track them).
+dep/
 # Local exploration / cloned-for-reference repos (not tracked)
 /temp/
 

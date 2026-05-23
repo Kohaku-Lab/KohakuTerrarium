@@ -254,6 +254,117 @@ class TestPatchAndroidRequirements:
         assert "/releases/download/v1.2.3/" in text
         assert "kohakuvault-1.2.3-cp313-cp313-android_24_arm64_v8a.whl" in text
 
+    def test_drops_pymupdf_line(self, tmp_path, postcreate, monkeypatch):
+        # pymupdf has no Chaquopy wheel and our consumers
+        # lazy-import → Android build needs to drop the line
+        # entirely so Chaquopy's pip doesn't try (and fail) to
+        # install it.  General ``pip install kohakuterrarium``
+        # gets pymupdf via the core dep; only the Android
+        # postcreate carves it out.
+        gen = _build_fake_generated(tmp_path)
+        fake_repo = tmp_path / "fake_repo"
+        fake_repo.mkdir()
+        self._seed_pyproject(fake_repo, "kohakuvault>=0.8.5")
+        self._seed_requirements(
+            gen,
+            "fastapi>=0.115.0\npymupdf>=1.24.0\nkohakuvault>=0.8.5\n",
+        )
+        monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
+        postcreate.patch_android_requirements(gen)
+        text = (gen / "requirements.txt").read_text(encoding="utf-8")
+        # pymupdf line gone entirely.
+        assert "pymupdf" not in text.lower()
+        # Other deps preserved.
+        assert "fastapi>=0.115.0" in text
+        assert "kohakuvault @ " in text
+
+    def test_drops_gitpython_line(self, tmp_path, postcreate, monkeypatch):
+        gen = _build_fake_generated(tmp_path)
+        fake_repo = tmp_path / "fake_repo"
+        fake_repo.mkdir()
+        self._seed_pyproject(fake_repo, "kohakuvault>=0.8.5")
+        self._seed_requirements(
+            gen,
+            "fastapi>=0.115.0\ngitpython>=3.1.0\nkohakuvault>=0.8.5\n",
+        )
+        monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
+        postcreate.patch_android_requirements(gen)
+        text = (gen / "requirements.txt").read_text(encoding="utf-8")
+        assert "gitpython" not in text.lower()
+
+    def test_rewrites_pydantic_core_to_url_refs(
+        self, tmp_path, postcreate, monkeypatch
+    ):
+        # pydantic-core has no Chaquopy wheel and we host our own
+        # via Kohaku-Lab/android-dep-collection.  postcreate must
+        # rewrite the dep spec to direct URL refs for arm64 + x86_64.
+        gen = _build_fake_generated(tmp_path)
+        fake_repo = tmp_path / "fake_repo"
+        fake_repo.mkdir()
+        self._seed_pyproject(fake_repo, "kohakuvault>=0.8.5")
+        self._seed_requirements(
+            gen,
+            "pydantic>=2.0.0\npydantic-core>=2.41.1\nkohakuvault>=0.8.5\n",
+        )
+        monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
+        postcreate.patch_android_requirements(gen)
+        text = (gen / "requirements.txt").read_text(encoding="utf-8")
+        # Original pydantic-core spec line gone.
+        assert "pydantic-core>=2.41.1" not in text
+        # Two URL refs landed for pydantic-core.
+        assert (
+            "pydantic-core @ https://github.com/Kohaku-Lab/android-dep-collection/"
+            "releases/download/v2026.05.23/"
+            "pydantic_core-2.41.1-cp313-cp313-android_24_arm64_v8a.whl"
+            " ; platform_machine == 'aarch64'"
+        ) in text
+        assert (
+            "pydantic-core @ https://github.com/Kohaku-Lab/android-dep-collection/"
+            "releases/download/v2026.05.23/"
+            "pydantic_core-2.41.1-cp313-cp313-android_24_x86_64.whl"
+            " ; platform_machine == 'x86_64'"
+        ) in text
+        # pydantic shell (pure-Python) preserved.
+        assert "pydantic>=2.0.0" in text
+
+    def test_pydantic_core_idempotent_on_re_run(
+        self, tmp_path, postcreate, monkeypatch
+    ):
+        # Re-running postcreate.py shouldn't multiply the
+        # pydantic-core URL refs the same way it shouldn't
+        # multiply kohakuvault's.
+        gen = _build_fake_generated(tmp_path)
+        fake_repo = tmp_path / "fake_repo"
+        fake_repo.mkdir()
+        self._seed_pyproject(fake_repo, "kohakuvault>=0.8.5")
+        self._seed_requirements(gen, "pydantic-core>=2.41.1\nkohakuvault>=0.8.5\n")
+        monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
+        postcreate.patch_android_requirements(gen)
+        first = (gen / "requirements.txt").read_text(encoding="utf-8")
+        postcreate.patch_android_requirements(gen)
+        second = (gen / "requirements.txt").read_text(encoding="utf-8")
+        assert first == second
+
+    def test_strips_uvicorn_standard_extra(self, tmp_path, postcreate, monkeypatch):
+        # uvicorn[standard] pulls uvloop + httptools + watchfiles
+        # — none have Chaquopy wheels.  Bare ``uvicorn`` works
+        # via pure-Python asyncio + h11.  postcreate strips the
+        # extra without dropping uvicorn entirely.
+        gen = _build_fake_generated(tmp_path)
+        fake_repo = tmp_path / "fake_repo"
+        fake_repo.mkdir()
+        self._seed_pyproject(fake_repo, "kohakuvault>=0.8.5")
+        self._seed_requirements(
+            gen,
+            "uvicorn[standard]>=0.34.0\nkohakuvault>=0.8.5\n",
+        )
+        monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
+        postcreate.patch_android_requirements(gen)
+        text = (gen / "requirements.txt").read_text(encoding="utf-8")
+        # ``[standard]`` extra gone; the bare uvicorn line kept.
+        assert "uvicorn[standard]" not in text
+        assert "uvicorn>=0.34.0" in text
+
     def test_extras_form_matched(self, tmp_path, postcreate, monkeypatch):
         # Briefcase may emit ``kohakuvault[extra]>=0.8.3`` if a
         # consumer ever uses extras.  Match the package name

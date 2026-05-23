@@ -163,6 +163,93 @@ def copy_sandbox_assets(sandbox_dir: Path, generated: Path, skip_check: bool) ->
     return 0
 
 
+# Packages to entirely DROP from requirements.txt on Android.
+# Each entry is the canonical package name (the prefix Briefcase
+# emits as ``<name>(<spec>)?`` in the generated requirements.txt).
+# These are "in core deps for general install, stripped on
+# Android" — the project keeps a desktop-friendly hard-dep list
+# while postcreate.py carves out the Android-incompatible ones.
+_ANDROID_DROP_PACKAGES: tuple[str, ...] = (
+    # PDF reading.  Native C bindings to MuPDF; no Chaquopy wheel.
+    # ``read_pdf`` tool consumers already lazy-import → absence is
+    # a graceful tool-unavailable error, not a boot crash.
+    "pymupdf",
+    # gitpython itself is pure-Python and installs fine, but it
+    # shells out to the system ``git`` binary which Android
+    # doesn't ship.  Currently unused in our source; keeping out
+    # of Android prevents future regressions where someone adds
+    # an importer expecting git to work.
+    "gitpython",
+)
+
+# Packages where Android needs the BASE package but NOT the
+# specified extras.  Briefcase emits ``uvicorn[standard]>=X`` from
+# project deps; the [standard] extra pulls uvloop + httptools +
+# watchfiles, none of which have Chaquopy wheels.  Stripping the
+# extras leaves bare uvicorn which falls back to stdlib asyncio +
+# h11 (pure-Python, ships with uvicorn itself).
+_ANDROID_STRIP_EXTRAS: dict[str, str] = {
+    "uvicorn": "uvicorn",  # drop any ``[...]`` suffix on the uvicorn line
+}
+
+# Packages that need to be installed from a direct URL on Android
+# (no Chaquopy wheel + native-code build = pip can't resolve via
+# the curated index).  Each entry is:
+#
+#   pkg name → (
+#       wheel-filename-prefix on the release server,
+#       template-fn(version) → (arm64_url, x86_64_url),
+#       version-extractor reading pyproject.toml's [project] deps
+#   )
+#
+# The version-extractor reads our pyproject so bumping the floor
+# in one place drives both the dep spec AND the URL ref version.
+# Adding a new URL-ref package = one entry here + (if applicable)
+# the upstream wheel needs to exist at the URL the template
+# produces.
+_ANDROID_URL_REFS: dict[str, dict[str, object]] = {
+    "kohakuvault": {
+        # Wheel name in the release uses underscores (PEP 491 wheel
+        # filename normalisation) even though the dep name is the
+        # hyphenated form on PyPI.  ``kohakuvault`` happens to be
+        # one word so no transform is needed; the dict key is the
+        # exact name Briefcase emits in requirements.txt.
+        "wheel_basename": "kohakuvault",
+        "release_base": (
+            "https://github.com/KohakuBlueleaf/KohakuVault/releases/download/"
+            "v{version}"
+        ),
+        "filename": ("kohakuvault-{version}-cp313-cp313-android_24_{abi_tag}.whl"),
+    },
+    "pydantic-core": {
+        # PyPI dep name: ``pydantic-core``.  Wheel filename uses
+        # the underscore form ``pydantic_core``.  Briefcase passes
+        # the hyphenated form through into requirements.txt, so we
+        # match on the hyphenated key but emit the underscored
+        # filename.
+        "wheel_basename": "pydantic_core",
+        "release_base": (
+            "https://github.com/Kohaku-Lab/android-dep-collection/releases/download/"
+            "v2026.05.23"
+        ),
+        # pydantic-core's version on Android tracks our
+        # android-dep-collection manifest (currently 2.41.1).
+        # When pydantic bumps in pyproject.toml, the manifest +
+        # release tag on the collection repo also need to bump.
+        # See dep/android-dep-collection/manifest.toml.
+        "filename": ("pydantic_core-{version}-cp313-cp313-android_24_{abi_tag}.whl"),
+        "pinned_version": "2.41.1",
+    },
+}
+
+# Wheel-tag suffix per Android ABI (Chaquopy's wheels use these
+# exact strings — e.g. ``android_24_arm64_v8a`` for arm64-v8a).
+_ABI_WHEEL_TAGS: dict[str, str] = {
+    "aarch64": "arm64_v8a",
+    "x86_64": "x86_64",
+}
+
+
 def patch_android_requirements(generated: Path) -> int:
     """Rewrite ``app/requirements.txt`` to pin Android-only packages
     to direct URL refs of their GitHub-Releases wheels.
@@ -203,84 +290,181 @@ def patch_android_requirements(generated: Path) -> int:
         print(f"warning: requirements.txt missing at {req_path}", file=sys.stderr)
         return 0  # not fatal — older Briefcase versions might place it elsewhere
 
-    kv_version = _kohakuvault_version_from_pyproject()
-    if not kv_version:
-        print(
-            "warning: could not infer kohakuvault version from "
-            "pyproject.toml; skipping requirements.txt patch",
-            file=sys.stderr,
-        )
-        return 0
-
-    base = (
-        "https://github.com/KohakuBlueleaf/KohakuVault/releases/download/" f"v{kv_version}"
-    )
-    # KohakuVault's release.yml retags maturin's ``linux_<arch>``
-    # output to ``android_24_<abi>`` because Chaquopy's pip on the
-    # device only accepts the ``android_*`` platform tag (matching
-    # the curated-index convention, e.g.
-    # ``pyyaml-6.0.3-0-cp313-cp313-android_24_arm64_v8a.whl``).  A
-    # ``linux_aarch64``-tagged wheel fails install with
-    #     ERROR: kohakuvault-... is not a supported wheel on this platform.
-    # The URL filenames here MUST match KV's retag step output.
-    arm64_url = f"{base}/kohakuvault-{kv_version}-cp313-cp313-android_24_arm64_v8a.whl"
-    x86_64_url = f"{base}/kohakuvault-{kv_version}-cp313-cp313-android_24_x86_64.whl"
+    # Pre-resolve each URL-ref package's version + URL templates.
+    # If a package's version can't be inferred we skip its
+    # replacement (still applies drop/strip carve-outs).
+    url_ref_plan = _build_url_ref_plan()
 
     lines = req_path.read_text(encoding="utf-8").splitlines()
     patched: list[str] = []
-    replaced = False
-    seen_url_form = False
+    replaced_pkgs: set[str] = set()
+    seen_url_pkgs: set[str] = set()
+
     for line in lines:
         stripped = line.strip()
-        # Skip lines already in our URL-ref form so re-runs are
+
+        # Skip lines already in any URL-ref form so re-runs are
         # idempotent.  Without this guard, the first run replaces
-        # the spec line with two URL lines; the second run would
-        # see those URL lines (which also start with "kohakuvault ")
-        # and replace each with two MORE URL lines → 4 lines, 8
-        # lines, etc.
-        if " @ https://github.com/KohakuBlueleaf/KohakuVault/" in stripped:
+        # the spec line with N URL lines; the second run would see
+        # those URL lines (which start with the same package
+        # name) and replace each AGAIN, multiplying lines.  The
+        # ``@ <known-release-base>`` substring is the signature.
+        already_url_form = False
+        for pkg, plan in url_ref_plan.items():
+            if f" @ {plan['release_base']}" in stripped:
+                seen_url_pkgs.add(pkg)
+                already_url_form = True
+                break
+        if already_url_form:
             patched.append(line)
-            seen_url_form = True
             continue
-        # Match the kohakuvault dep line — Briefcase emits it
-        # verbatim from project.dependencies, so the form is
-        # ``kohakuvault>=0.8.3`` (possibly with extras).  We
-        # detect by the package name + spec operator and replace
-        # with the URL refs.  The ``@`` check above already
-        # excludes the URL form so we don't need to here.
-        if stripped.startswith("kohakuvault") and (
-            stripped == "kohakuvault"
-            or (
-                len(stripped) > len("kohakuvault")
-                and stripped[len("kohakuvault")] in "=<>~![@"
-            )
-        ):
-            patched.append(f"kohakuvault @ {arm64_url} ; platform_machine == 'aarch64'")
-            patched.append(f"kohakuvault @ {x86_64_url} ; platform_machine == 'x86_64'")
-            replaced = True
-            continue
+
+        # Android carve-outs: drop entire lines for packages with
+        # no Android wheel (pymupdf, gitpython), strip ``[extras]``
+        # from packages where only the bare form has Android
+        # support (uvicorn[standard] → uvicorn).
+        pkg_name = _extract_package_name(stripped)
+        if pkg_name is not None:
+            pkg_lower = pkg_name.lower()
+            if pkg_lower in _ANDROID_DROP_PACKAGES:
+                # Silently drop the line — Android doesn't get this
+                # dep at all.  The consumer code is expected to
+                # lazy-import + degrade gracefully (see pymupdf
+                # consumers; gitpython is unused in our source).
+                continue
+            if pkg_lower in _ANDROID_STRIP_EXTRAS:
+                patched.append(_strip_extras(stripped, pkg_lower))
+                continue
+            # URL-ref replacement.  ``pkg_name`` here is the raw
+            # form Briefcase emitted (e.g. ``pydantic-core``);
+            # match against the table case-insensitively.
+            url_plan = url_ref_plan.get(pkg_lower)
+            if url_plan is not None and _is_dep_spec_for(stripped, pkg_name):
+                patched.append(
+                    f"{pkg_lower} @ {url_plan['arm64_url']}"
+                    " ; platform_machine == 'aarch64'"
+                )
+                patched.append(
+                    f"{pkg_lower} @ {url_plan['x86_64_url']}"
+                    " ; platform_machine == 'x86_64'"
+                )
+                replaced_pkgs.add(pkg_lower)
+                continue
+
         patched.append(line)
 
-    # If we saw the URL form but didn't replace anything, this is
-    # a re-run on an already-patched file — that's a successful
-    # no-op, not a "missing kohakuvault" warning.
-    if not replaced and not seen_url_form:
+    # Warn for any URL-ref package we expected to replace but
+    # didn't see (Briefcase format drift / dep was removed).
+    missing = set(url_ref_plan) - replaced_pkgs - seen_url_pkgs
+    for pkg in missing:
         print(
-            "warning: no kohakuvault line found in requirements.txt; "
+            f"warning: no {pkg} line found in requirements.txt; "
             "Android install may fail with No matching distribution",
             file=sys.stderr,
         )
-        return 0
-    if not replaced and seen_url_form:
-        # Already patched — keep file as-is.
-        return 0
 
     req_path.write_text("\n".join(patched) + "\n", encoding="utf-8")
-    print(
-        "  requirements  kohakuvault -> direct URL refs "
-        f"(v{kv_version}, aarch64 + x86_64)"
-    )
+    for pkg in sorted(replaced_pkgs):
+        print(f"  requirements  {pkg} -> direct URL refs (aarch64 + x86_64)")
     return 0
+
+
+def _is_dep_spec_for(stripped: str, pkg_name: str) -> bool:
+    """True iff ``stripped`` is a dep-spec line for ``pkg_name``
+    (vs a line that just happens to start with the name as a
+    prefix of something else).  Form check: name must be followed
+    by end-of-line, ``[``, an operator, ``@``, or ``!`` / ``;``.
+    """
+    if stripped == pkg_name:
+        return True
+    if len(stripped) <= len(pkg_name):
+        return False
+    next_char = stripped[len(pkg_name)]
+    return next_char in "=<>~![@; "
+
+
+def _build_url_ref_plan() -> dict[str, dict[str, str]]:
+    """Resolve concrete arm64 + x86_64 URLs for each URL-ref
+    package in ``_ANDROID_URL_REFS``.
+
+    For kohakuvault, the version is read from pyproject.toml
+    (matches the dep floor).  For pydantic-core, the version is
+    pinned in the table (it tracks the
+    ``dep/android-dep-collection`` manifest, not our pyproject).
+    """
+    plan: dict[str, dict[str, str]] = {}
+    for pkg_name, entry in _ANDROID_URL_REFS.items():
+        if pkg_name == "kohakuvault":
+            version = _kohakuvault_version_from_pyproject()
+        else:
+            version = str(entry.get("pinned_version") or "")
+        if not version:
+            print(
+                f"warning: could not infer {pkg_name} version; "
+                "skipping URL-ref replacement for it",
+                file=sys.stderr,
+            )
+            continue
+        release_base = str(entry["release_base"]).format(version=version)
+        filename_arm = str(entry["filename"]).format(
+            version=version, abi_tag="arm64_v8a"
+        )
+        filename_x86 = str(entry["filename"]).format(version=version, abi_tag="x86_64")
+        plan[pkg_name] = {
+            "release_base": release_base,
+            "arm64_url": f"{release_base}/{filename_arm}",
+            "x86_64_url": f"{release_base}/{filename_x86}",
+        }
+    return plan
+
+
+def _extract_package_name(req_line: str) -> str | None:
+    """Pull the canonical package name off the front of a
+    requirements.txt line.  Handles:
+
+    - ``uvicorn[standard]>=0.34.0``   → ``uvicorn``
+    - ``pymupdf>=1.24.0``             → ``pymupdf``
+    - ``pyyaml`` (no spec)            → ``pyyaml``
+    - ``# comment``                   → ``None``
+    - ``-e ./local`` / ``--option``   → ``None``
+    - ``pkg @ http://...``            → ``pkg``
+
+    The matcher is intentionally permissive — we don't fully
+    parse PEP 508, just identify the package-name prefix so the
+    Android carve-out tables can match against it.
+    """
+    text = req_line.strip()
+    if not text or text.startswith("#") or text.startswith("-"):
+        return None
+    # Find where the name ends — first char that's not a valid
+    # package-name char (PEP 503 normalised names allow [A-Za-z0-9._-]).
+    name_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
+    end = 0
+    while end < len(text) and text[end] in name_chars:
+        end += 1
+    if end == 0:
+        return None
+    return text[:end]
+
+
+def _strip_extras(req_line: str, pkg_name: str) -> str:
+    """Rewrite ``pkg[extra1,extra2]>=1.0`` → ``pkg>=1.0``.
+
+    Used for Android where the bare package has a wheel but the
+    extras pull in native deps that don't (e.g. uvicorn vs
+    uvicorn[standard]).  Preserves whitespace + the version
+    spec + any trailing PEP 508 marker.
+    """
+    text = req_line
+    # The ``[...]`` is always right after the package name (no
+    # whitespace in the canonical form Briefcase emits).
+    bracket_start = text.find("[", len(pkg_name) - 1)
+    if bracket_start == -1:
+        return text  # nothing to strip
+    bracket_end = text.find("]", bracket_start)
+    if bracket_end == -1:
+        return text  # malformed — leave alone
+    return text[:bracket_start] + text[bracket_end + 1 :]
 
 
 def _kohakuvault_version_from_pyproject() -> str | None:

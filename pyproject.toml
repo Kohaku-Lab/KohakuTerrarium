@@ -70,6 +70,13 @@ dependencies = [
     "gitpython>=3.1.0",
     # API server
     "fastapi>=0.115.0",
+    # ``[standard]`` pulls in uvloop + httptools + watchfiles for
+    # better perf on desktop / server.  On Android these have no
+    # Chaquopy wheels — ``postcreate.py`` strips the ``[standard]``
+    # extra from the generated requirements.txt at briefcase-build
+    # time, so the framework still installs (falling back to the
+    # stdlib asyncio loop + h11 parser).  General ``pip install
+    # kohakuterrarium`` gets the full ``[standard]`` set.
     "uvicorn[standard]>=0.34.0",
     "websockets>=10.4",
     # API auth (L4 — multi-user accounts).  Used only by api/auth/crypto.py;
@@ -82,7 +89,11 @@ dependencies = [
     # Web tools
     "trafilatura>=2.0.0",
     "ddgs>=9.0.0",
-    # PDF reading
+    # PDF reading.  C bindings to MuPDF; no Chaquopy Android
+    # wheel.  ``postcreate.py`` strips this line from Android's
+    # requirements.txt at build time; the ``read_pdf`` tool's
+    # consumers already lazy-import, so absence on Android is a
+    # graceful "tool unavailable" not a boot crash.
     "pymupdf>=1.24.0",
     # Image decode-verification for the read tool (PNG/JPEG/WEBP/GIF)
     "Pillow>=12.2.0",
@@ -121,6 +132,18 @@ client = []
 # build via Briefcase + Chaquopy doesn't try to install
 # pywebview (which has no Android wheel and would fail the
 # build).  Desktop builds opt in via this extra.
+#
+# Note: ``uvicorn[standard]`` and ``pymupdf`` are NOT in extras —
+# they're in core ``[project] dependencies`` because a normal
+# ``pip install kohakuterrarium`` should get them.  The Android
+# build's ``packaging/android/postcreate.py`` is what strips them
+# from the generated Chaquopy requirements.txt, since none of the
+# three native packages ``[standard]`` brings (uvloop / httptools
+# / watchfiles) nor pymupdf's MuPDF bindings have Android wheels.
+# Inverting the polarity — hard deps with an Android carve-out —
+# means the "Android special case" stays in one file
+# (``postcreate.py``), not spread across pyproject + briefcase
+# per-platform requires.
 desktop = [
     "pywebview==6.1",
 ]
