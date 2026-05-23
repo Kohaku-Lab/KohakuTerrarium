@@ -328,7 +328,9 @@ async def _browser_flow() -> CodexTokens:
 # =========================================================================
 
 
-async def _device_code_flow() -> CodexTokens:
+async def _device_code_flow(
+    on_device_code: "callable | None" = None,
+) -> CodexTokens:
     """OAuth device code flow for headless environments.
 
     Uses OpenAI's Codex-specific device auth endpoints:
@@ -337,6 +339,14 @@ async def _device_code_flow() -> CodexTokens:
     3. Poll /api/accounts/deviceauth/token until user completes auth
     4. Server returns authorization_code + PKCE codes
     5. Exchange at /oauth/token for access + refresh tokens
+
+    ``on_device_code`` is an optional async callback ``(verification_url,
+    user_code, expires_in) -> None`` invoked AS SOON AS the user code
+    is obtained — before we start polling.  The SSE / WebSocket layer
+    uses this to push the code to the frontend modal so the user can
+    paste it on another device while the server polls in background.
+    Tests and the CLI invoker pass ``None`` to keep the existing
+    print-only behaviour.
     """
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
@@ -361,6 +371,21 @@ async def _device_code_flow() -> CodexTokens:
     print(f"  Code: {user_code}")
     print()
     print("Waiting for authentication (either method)...")
+
+    # Push the user code + URL to any subscribed event sink (SSE /
+    # WebSocket modal) so the frontend can show them immediately
+    # instead of waiting for the entire poll-and-exchange to finish.
+    if on_device_code is not None:
+        try:
+            res = on_device_code(DEVICE_VERIFY_URL, user_code, expires_in)
+            if asyncio.iscoroutine(res):
+                await res
+        except Exception as exc:
+            logger.warning(
+                "on_device_code callback raised",
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
 
     deadline = time.time() + expires_in
     async with httpx.AsyncClient(timeout=30) as client:
@@ -479,7 +504,9 @@ async def _exchange_code(
 # =========================================================================
 
 
-async def oauth_login() -> CodexTokens:
+async def oauth_login(
+    on_device_code: "callable | None" = None,
+) -> CodexTokens:
     """
     Authenticate with OpenAI Codex OAuth.
 
@@ -489,10 +516,16 @@ async def oauth_login() -> CodexTokens:
     - SSH/headless: user visits URL on another device, enters code
     - Remote desktop: either flow may work
     - Windows reserved port: browser fails fast, device code continues
+    - **Android / WebView frontend**: no browser opener available,
+      ``on_device_code`` callback pushes the verification URL + code
+      to the UI modal so the user can paste them on another device.
+
+    ``on_device_code`` is forwarded verbatim to the device-code branch;
+    pass ``None`` (default) for the original print-only behaviour.
     """
     # Start both flows as concurrent tasks
     browser_task = asyncio.create_task(_browser_flow_safe())
-    device_task = asyncio.create_task(_device_code_flow())
+    device_task = asyncio.create_task(_device_code_flow(on_device_code=on_device_code))
 
     tasks = {browser_task, device_task}
     last_error: Exception | None = None

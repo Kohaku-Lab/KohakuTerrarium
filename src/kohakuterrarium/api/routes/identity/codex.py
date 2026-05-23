@@ -7,7 +7,11 @@ This is the ONLY sound way to use Codex from a worker — OAuth tokens
 are process-bound so the host's token cannot be reused remotely.
 """
 
+import asyncio
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 
 from kohakuterrarium.api.auth import verify_admin_token
 from kohakuterrarium.api.deps import get_service
@@ -40,6 +44,88 @@ async def codex_login(
     # device-code entry). Bump the lab-request timeout so the user has
     # time to complete the flow.
     return await call_node_identity(service, node, "codex_login", timeout=300.0)
+
+
+@router.post(
+    "/codex-login-stream",
+    dependencies=[Depends(verify_admin_token)],
+)
+async def codex_login_stream(node: str = ""):
+    """Run Codex login while streaming progress events to the client.
+
+    The frontend ``CodexLoginModal`` consumes this endpoint as a
+    line-delimited JSON stream (one JSON object per line).  Events:
+
+      * ``{"event": "device_code", "verification_url": ..., "user_code": ..., "expires_in": int}``
+        — fired as soon as the device-code branch obtains the user
+        code, BEFORE the poll loop starts.  The modal renders this
+        so the user can manually open the URL + enter the code on
+        any device.
+      * ``{"event": "completed", "expires_at": float}`` — final
+        success.  Modal closes itself with a success toast.
+      * ``{"event": "error", "message": str}`` — terminal failure.
+
+    Only the host path streams events directly.  Worker-side login
+    falls back to the existing one-shot ``/codex-login`` route since
+    cross-node event streaming isn't wired in 1.5.0; this leaves the
+    modal-based UX functional in the common case (local Codex login
+    on the host's own machine) and the host-router lab path for the
+    rare worker case.
+    """
+    if not is_host_target(node):
+        raise HTTPException(
+            400,
+            (
+                "Streaming Codex login is only supported on the host node "
+                '(node=""); for worker-side login use POST /codex-login.'
+            ),
+        )
+
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def emit_device_code(verification_url: str, user_code: str, expires_in: int):
+        await queue.put(
+            {
+                "event": "device_code",
+                "verification_url": verification_url,
+                "user_code": user_code,
+                "expires_in": expires_in,
+            }
+        )
+
+    async def run_login():
+        try:
+            result = await login_async(on_device_code=emit_device_code)
+            await queue.put(
+                {
+                    "event": "completed",
+                    "expires_at": result.get("expires_at"),
+                }
+            )
+        except Exception as exc:
+            await queue.put(
+                {"event": "error", "message": f"{type(exc).__name__}: {exc}"}
+            )
+        finally:
+            await queue.put(None)  # sentinel — close the stream
+
+    async def stream():
+        task = asyncio.create_task(run_login())
+        try:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    break
+                yield json.dumps(event) + "\n"
+        finally:
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson")
 
 
 @router.get("/codex-status")

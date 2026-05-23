@@ -13,9 +13,15 @@ from kohakuterrarium.llm.codex_auth import CodexTokens, oauth_login, refresh_tok
 from kohakuterrarium.llm.codex_rate_limits import get_cached as _get_cached_usage
 
 
-async def login_async() -> dict[str, Any]:
-    """Run the Codex OAuth flow and return ``{status, expires_at}``."""
-    tokens = await oauth_login()
+async def login_async(on_device_code=None) -> dict[str, Any]:
+    """Run the Codex OAuth flow and return ``{status, expires_at}``.
+
+    ``on_device_code`` is forwarded to :func:`oauth_login` so the
+    SSE-streaming route in ``api/routes/identity/codex.py`` can push
+    the verification URL + user code to the frontend modal as soon
+    as the device-code flow obtains them.
+    """
+    tokens = await oauth_login(on_device_code=on_device_code)
     return {"status": "ok", "expires_at": tokens.expires_at}
 
 
