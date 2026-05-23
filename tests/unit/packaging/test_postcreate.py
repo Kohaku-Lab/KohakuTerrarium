@@ -201,12 +201,12 @@ class TestPatchAndroidRequirements:
         text = (gen / "requirements.txt").read_text(encoding="utf-8")
         assert "kohakuvault>=0.8.3" not in text
         assert (
-            "kohakuvault @ https://github.com/Kohaku-Lab/KohakuVault/releases/"
+            "kohakuvault @ https://github.com/KohakuBlueleaf/KohakuVault/releases/"
             "download/v0.8.3/kohakuvault-0.8.3-cp313-cp313-android_24_arm64_v8a.whl"
             " ; platform_machine == 'aarch64'"
         ) in text
         assert (
-            "kohakuvault @ https://github.com/Kohaku-Lab/KohakuVault/releases/"
+            "kohakuvault @ https://github.com/KohakuBlueleaf/KohakuVault/releases/"
             "download/v0.8.3/kohakuvault-0.8.3-cp313-cp313-android_24_x86_64.whl"
             " ; platform_machine == 'x86_64'"
         ) in text

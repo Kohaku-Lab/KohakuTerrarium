@@ -213,7 +213,7 @@ def patch_android_requirements(generated: Path) -> int:
         return 0
 
     base = (
-        "https://github.com/Kohaku-Lab/KohakuVault/releases/download/" f"v{kv_version}"
+        "https://github.com/KohakuBlueleaf/KohakuVault/releases/download/" f"v{kv_version}"
     )
     # KohakuVault's release.yml retags maturin's ``linux_<arch>``
     # output to ``android_24_<abi>`` because Chaquopy's pip on the
@@ -238,7 +238,7 @@ def patch_android_requirements(generated: Path) -> int:
         # see those URL lines (which also start with "kohakuvault ")
         # and replace each with two MORE URL lines → 4 lines, 8
         # lines, etc.
-        if " @ https://github.com/Kohaku-Lab/KohakuVault/" in stripped:
+        if " @ https://github.com/KohakuBlueleaf/KohakuVault/" in stripped:
             patched.append(line)
             seen_url_form = True
             continue
