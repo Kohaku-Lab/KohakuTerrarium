@@ -1,16 +1,76 @@
 /**
  * API client for KohakuTerrarium backend.
+ *
+ * The ``baseURL`` is resolved dynamically per request:
+ *
+ *   - **same-origin mode** (default, ``kt serve`` / web build): the
+ *     hosts store has no active host; we send relative ``/api/...``
+ *     so the request hits whatever served the page.
+ *   - **remote mode** (bundled-app build / user-added host): the
+ *     hosts store has an active host; we send absolute
+ *     ``http(s)://host:port/api/...`` plus ``Authorization: Bearer
+ *     <token>`` from the active host's stored token.
+ *
+ * Resolution happens in an axios request interceptor so the SAME
+ * ``api`` instance works for every consumer — no plumbing through
+ * route components.  Components that need to react to host changes
+ * subscribe to ``useHostsStore()`` directly.
+ *
+ * The hosts store is imported LAZILY inside the interceptor.  This
+ * avoids a circular import during module load (utils/api.js is
+ * imported very early; the store needs Pinia which needs the Vue
+ * app), and also keeps SSR / test bootstraps happy.
  */
 
 import axios from "axios"
+
+import { useHostsStore } from "@/stores/hosts"
+import { wsUrl } from "@/utils/wsUrl"
 
 function encodeTarget(target) {
   return encodeURIComponent(target)
 }
 
+// ``baseURL`` stays empty so the interceptor controls every URL.
 const api = axios.create({
-  baseURL: "/api",
+  baseURL: "",
   timeout: 30000,
+})
+
+api.interceptors.request.use((config) => {
+  // useHostsStore() is safe at request time because requests only
+  // fire after Vue + Pinia are mounted.  If pinia hasn't been
+  // initialised yet (some test harnesses) the call throws — we
+  // catch and fall through to same-origin mode.
+  let active = null
+  try {
+    active = useHostsStore().activeHost
+  } catch (_err) {
+    active = null
+  }
+  // For same-origin we want ``/api/<path>``; for remote we want
+  // ``<host>/api/<path>``.  Absolute URLs (rare — only the few
+  // helpers that build their own) pass through unchanged.
+  const path = config.url || ""
+  const isAbsolute = /^https?:\/\//.test(path)
+  if (isAbsolute) {
+    return config
+  }
+  const apiPath = path.startsWith("/") ? `/api${path}` : `/api/${path}`
+  if (active) {
+    config.url = `${active.url}${apiPath}`
+    if (active.token) {
+      config.headers = config.headers || {}
+      // Don't clobber an explicit Authorization header on a per-
+      // request basis (e.g. login flows passing their own creds).
+      if (!config.headers.Authorization) {
+        config.headers.Authorization = `Bearer ${active.token}`
+      }
+    }
+  } else {
+    config.url = apiPath
+  }
+  return config
 })
 
 /**
@@ -594,8 +654,12 @@ export const sessionAPI = {
     if (opts.model) params.set("model", opts.model)
     if (opts.dimensions) params.set("dimensions", String(opts.dimensions))
     if (opts.force) params.set("force", "true")
-    const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
-    const url = `${proto}//${window.location.host}/ws/sessions/${encodeURIComponent(sessionName)}/memory/build?${params.toString()}`
+    // Route via wsUrl so the active host's authority + token gets
+    // applied (was hardcoded to window.location.host before the
+    // host-picker work).
+    const url = wsUrl(
+      `/ws/sessions/${encodeURIComponent(sessionName)}/memory/build?${params.toString()}`,
+    )
     const ws = new WebSocket(url)
     ws.onmessage = (e) => {
       try {

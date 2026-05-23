@@ -11,15 +11,38 @@
 
 import axios from "axios"
 
+import { useHostsStore } from "@/stores/hosts"
+import { wsUrl } from "@/utils/wsUrl"
+
+// Same dynamic-baseURL treatment as utils/api.js — the launcher-
+// aware endpoints live under ``/api/app`` on the active host (or
+// same-origin when no remote host is selected).
 const api = axios.create({
-  baseURL: "/api/app",
+  baseURL: "",
   timeout: 30000,
 })
 
-function wsUrl(path) {
-  const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
-  return `${proto}//${window.location.host}${path}`
-}
+api.interceptors.request.use((config) => {
+  let active = null
+  try {
+    active = useHostsStore().activeHost
+  } catch (_err) {
+    active = null
+  }
+  const path = config.url || ""
+  if (/^https?:\/\//.test(path)) return config
+  const apiPath = path.startsWith("/") ? `/api/app${path}` : `/api/app/${path}`
+  if (active) {
+    config.url = `${active.url}${apiPath}`
+    if (active.token && !(config.headers && config.headers.Authorization)) {
+      config.headers = config.headers || {}
+      config.headers.Authorization = `Bearer ${active.token}`
+    }
+  } else {
+    config.url = apiPath
+  }
+  return config
+})
 
 export const appUpdateAPI = {
   /** Fetch the launcher's current app-settings.json. */

@@ -10,9 +10,35 @@
 
 import axios from "axios"
 
+import { useHostsStore } from "@/stores/hosts"
+
+// Dynamic baseURL: same-origin by default, route through the active
+// host when one is selected.  Mirrors utils/api.js.
 const http = axios.create({
-  baseURL: "/api/studio",
+  baseURL: "",
   timeout: 30000,
+})
+
+http.interceptors.request.use((config) => {
+  let active = null
+  try {
+    active = useHostsStore().activeHost
+  } catch (_err) {
+    active = null
+  }
+  const path = config.url || ""
+  if (/^https?:\/\//.test(path)) return config
+  const apiPath = path.startsWith("/") ? `/api/studio${path}` : `/api/studio/${path}`
+  if (active) {
+    config.url = `${active.url}${apiPath}`
+    if (active.token && !(config.headers && config.headers.Authorization)) {
+      config.headers = config.headers || {}
+      config.headers.Authorization = `Bearer ${active.token}`
+    }
+  } else {
+    config.url = apiPath
+  }
+  return config
 })
 
 /** Unwrap FastAPI's { detail: {...} } error envelope into a plain Error. */
