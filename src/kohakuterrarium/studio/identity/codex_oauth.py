@@ -13,15 +13,23 @@ from kohakuterrarium.llm.codex_auth import CodexTokens, oauth_login, refresh_tok
 from kohakuterrarium.llm.codex_rate_limits import get_cached as _get_cached_usage
 
 
-async def login_async(on_device_code=None) -> dict[str, Any]:
+async def login_async(on_device_code=None, open_browser: bool = True) -> dict[str, Any]:
     """Run the Codex OAuth flow and return ``{status, expires_at}``.
 
     ``on_device_code`` is forwarded to :func:`oauth_login` so the
     SSE-streaming route in ``api/routes/identity/codex.py`` can push
     the verification URL + user code to the frontend modal as soon
     as the device-code flow obtains them.
+
+    ``open_browser`` is forwarded too: the SSE route passes ``False``
+    because the user already has the modal driving their interaction;
+    auto-popping a system browser on the server's machine is
+    redundant (web UI = same machine) and on Android Chaquopy /
+    headless boxes actively harmful.  The CLI ``run_login_blocking``
+    path keeps the default ``True`` since CLI users expect an
+    auto-opened browser.
     """
-    tokens = await oauth_login(on_device_code=on_device_code)
+    tokens = await oauth_login(on_device_code=on_device_code, open_browser=open_browser)
     return {"status": "ok", "expires_at": tokens.expires_at}
 
 

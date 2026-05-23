@@ -28,6 +28,16 @@ from kohakuterrarium.terrarium.service import TerrariumService
 
 router = APIRouter()
 
+# Heartbeat cadence for ``codex-login-stream``.  Without periodic
+# writes the NDJSON stream goes silent for up to 15 minutes (the
+# device-code poll window) and Android WebView / mobile browsers
+# happily kill the connection mid-poll.  When the ``completed``
+# event finally enqueues, it has nowhere to go and the modal stays
+# open forever.  15s is a comfortable margin under typical mobile
+# NAT idle timeouts (30–60s).  Exposed at module level so tests can
+# monkeypatch it down to a sub-second value.
+HEARTBEAT_INTERVAL = 15.0
+
 
 @router.post("/codex-login", dependencies=[Depends(verify_admin_token)])
 async def codex_login(
@@ -95,7 +105,18 @@ async def codex_login_stream(node: str = ""):
 
     async def run_login():
         try:
-            result = await login_async(on_device_code=emit_device_code)
+            # ``open_browser=False`` — the frontend modal is already
+            # the user's interaction surface.  Auto-popping a system
+            # browser on the host machine (same machine in standalone
+            # mode) is at best redundant; on Android Chaquopy it
+            # blocks the event loop hunting for a non-existent
+            # system browser.  The browser-redirect HTTP server on
+            # :1455 still runs in parallel — codex-rs ships the same
+            # dual-flow shape — so a user who manually clicks the
+            # printed auth URL still completes via the browser path.
+            result = await login_async(
+                on_device_code=emit_device_code, open_browser=False
+            )
             await queue.put(
                 {
                     "event": "completed",
@@ -113,7 +134,17 @@ async def codex_login_stream(node: str = ""):
         task = asyncio.create_task(run_login())
         try:
             while True:
-                event = await queue.get()
+                try:
+                    event = await asyncio.wait_for(
+                        queue.get(), timeout=HEARTBEAT_INTERVAL
+                    )
+                except asyncio.TimeoutError:
+                    # Heartbeat — keeps the underlying TCP / WebView
+                    # fetch alive during the long device-code poll.
+                    # The frontend ignores ``ping`` events; their
+                    # only job is to push bytes onto the wire.
+                    yield json.dumps({"event": "ping"}) + "\n"
+                    continue
                 if event is None:
                     break
                 yield json.dumps(event) + "\n"

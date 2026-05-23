@@ -61,11 +61,10 @@ class TestGetStatus:
 
 class TestLoginAsync:
     async def test_returns_status(self, monkeypatch):
-        async def fake_oauth(*, on_device_code=None):
-            # ``oauth_login`` gained an ``on_device_code`` callback for
-            # the SSE streaming route; ``login_async`` forwards it
-            # unchanged.  Stub accepts + ignores it so this older
-            # contract test keeps passing.
+        async def fake_oauth(*, on_device_code=None, open_browser=True):
+            # Stub accepts + ignores the kwargs so the legacy
+            # contract test keeps passing as ``oauth_login`` grows
+            # new parameters.
             return _FakeTokens(expires_at=12345)
 
         monkeypatch.setattr(mod, "oauth_login", fake_oauth)
@@ -77,8 +76,9 @@ class TestLoginAsync:
         # through to oauth_login.  Verify the kwarg actually arrives.
         seen = {}
 
-        async def fake_oauth(*, on_device_code=None):
+        async def fake_oauth(*, on_device_code=None, open_browser=True):
             seen["callback"] = on_device_code
+            seen["open_browser"] = open_browser
             return _FakeTokens(expires_at=999)
 
         monkeypatch.setattr(mod, "oauth_login", fake_oauth)
@@ -88,6 +88,26 @@ class TestLoginAsync:
 
         await login_async(on_device_code=cb)
         assert seen["callback"] is cb
+        # Default ``open_browser`` is True for back-compat with the
+        # CLI ``run_login_blocking`` entry point.
+        assert seen["open_browser"] is True
+
+    async def test_forwards_open_browser_false(self, monkeypatch):
+        # The SSE route MUST pass ``open_browser=False`` so the
+        # backend doesn't auto-pop a system browser on the host
+        # machine while the modal is already driving the user's
+        # interaction.  Pin the forwarding contract; a future
+        # refactor that drops this kwarg would let the Android
+        # event-loop-blocking ``webbrowser.open`` bug come back.
+        seen = {}
+
+        async def fake_oauth(*, on_device_code=None, open_browser=True):
+            seen["open_browser"] = open_browser
+            return _FakeTokens(expires_at=42)
+
+        monkeypatch.setattr(mod, "oauth_login", fake_oauth)
+        await login_async(on_device_code=None, open_browser=False)
+        assert seen["open_browser"] is False
 
 
 # ── get_usage_async ─────────────────────────────────────────────
