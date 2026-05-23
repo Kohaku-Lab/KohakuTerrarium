@@ -7,32 +7,32 @@
     <span class="text-sm font-medium text-warm-700 dark:text-warm-200 truncate flex-1">
       {{ title }}
     </span>
-    <button class="w-8 h-8 flex items-center justify-center rounded text-warm-400 hover:text-iolite hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors" :title="t('density.useDesktopMode')" @click="forceDesktop">
-      <div class="i-carbon-laptop text-base" />
-    </button>
+    <!-- Host-picker chip — replaces the old "force desktop mode"
+         button which was a one-way trap on Android (no way back
+         once switched).  Density auto-detect handles small screens
+         without user intervention now. -->
+    <HostStatusChip :show-label="false" @open="openHostPicker" />
   </div>
 </template>
 
 <script setup>
 import { computed } from "vue"
 
+import HostStatusChip from "@/components/host-picker/HostStatusChip.vue"
 import BrandMark from "@/components/shell/BrandMark.vue"
-import { useDensity } from "@/composables/useDensity"
 import { useTabsStore } from "@/stores/tabs"
 import { useI18n } from "@/utils/i18n"
 
 defineEmits(["open-rail"])
 
 const tabs = useTabsStore()
-const { setOverride } = useDensity()
 const { t } = useI18n()
 
 const title = computed(() => tabs.activeTab?.label || "Kohaku Terrarium")
 
-function forceDesktop() {
-  // Pin to regular density so the user gets the multi-panel shell
-  // even on a narrow viewport (the same affordance v1 mobile users
-  // had via "Switch to desktop view").
-  setOverride("regular")
+function openHostPicker() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("kt-open-host-picker"))
+  }
 }
 </script>

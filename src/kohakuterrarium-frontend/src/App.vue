@@ -9,19 +9,22 @@
     <CommandPalette />
     <ShortcutHelp />
     <ToastCenter />
+    <HostPickerModal :open="hostPickerOpen" @close="hostPickerOpen = false" />
   </div>
 </template>
 
 <script setup>
-import { watch } from "vue"
+import { ref, watch } from "vue"
 
 import CommandPalette from "@/components/chrome/CommandPalette.vue"
 import ShortcutHelp from "@/components/chrome/ShortcutHelp.vue"
 import ToastCenter from "@/components/chrome/ToastCenter.vue"
+import HostPickerModal from "@/components/host-picker/HostPickerModal.vue"
 import MacroShell from "@/components/shell/MacroShell.vue"
 import { useArtifactDetector } from "@/composables/useArtifactDetector"
 import { useAutoTriggers } from "@/composables/useAutoTriggers"
 import { useBuiltinCommands } from "@/composables/useBuiltinCommands"
+import { useConnectIntent } from "@/composables/useConnectIntent"
 import { useDensity } from "@/composables/useDensity"
 import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts"
 import { useInstancesStore } from "@/stores/instances"
@@ -48,4 +51,21 @@ useKeyboardShortcuts()
 useBuiltinCommands()
 useAutoTriggers()
 useArtifactDetector()
+
+// Host picker state — accessed by ``HostStatusChip`` via a global
+// event so we don't have to thread a prop through every shell
+// component.  The chip dispatches ``kt-open-host-picker`` on click.
+const hostPickerOpen = ref(false)
+
+if (typeof window !== "undefined") {
+  window.addEventListener("kt-open-host-picker", () => {
+    hostPickerOpen.value = true
+  })
+  // Auto-open when an Android ``ktconnect://`` deep-link is
+  // queued — the modal's own watcher will consume + apply the URI.
+  const { pendingUri } = useConnectIntent()
+  watch(pendingUri, (uri) => {
+    if (uri) hostPickerOpen.value = true
+  })
+}
 </script>

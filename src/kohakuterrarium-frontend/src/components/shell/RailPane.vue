@@ -36,6 +36,11 @@
 
       <!-- Footer -->
       <div class="mx-2 border-t border-warm-200 dark:border-warm-700" />
+      <div class="flex items-center justify-between gap-2 px-3 py-1.5">
+        <!-- Host-picker chip — clickable indicator of which backend
+             we're talking to, opens the modal to add / switch hosts. -->
+        <HostStatusChip :show-label="true" @open="openHostPicker" />
+      </div>
       <div class="flex items-center justify-between gap-2 px-3 py-2">
         <button class="w-5 h-5 flex items-center justify-center text-warm-400 hover:text-warm-700" :class="theme.dark ? 'i-carbon-sun' : 'i-carbon-moon'" :title="theme.dark ? t('shell.rail.themeToLight') : t('shell.rail.themeToDark')" @click="theme.toggle()" />
         <button class="text-[10px] uppercase tracking-wider text-warm-400 hover:text-warm-700" :title="t('shell.rail.cycleLocale')" @click="cycleLocale">
@@ -52,6 +57,7 @@
 <script setup>
 import { ref } from "vue"
 
+import HostStatusChip from "@/components/host-picker/HostStatusChip.vue"
 import BrandMark from "@/components/shell/BrandMark.vue"
 import RailGroupTop from "@/components/shell/RailGroupTop.vue"
 import RailGroupAttached from "@/components/shell/RailGroupAttached.vue"
@@ -80,6 +86,12 @@ function openPalette() {
   // Palette store exposes openPalette / closePalette / toggle.
   if (typeof palette.openPalette === "function") palette.openPalette()
   else if (typeof palette.toggle === "function") palette.toggle()
+}
+
+function openHostPicker() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("kt-open-host-picker"))
+  }
 }
 
 function cycleLocale() {
