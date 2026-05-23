@@ -292,6 +292,46 @@ class TestPatchAndroidRequirements:
         text = (gen / "requirements.txt").read_text(encoding="utf-8")
         assert "gitpython" not in text.lower()
 
+    def test_drops_bcrypt_line(self, tmp_path, postcreate, monkeypatch):
+        # bcrypt 4.x+ is Rust/PyO3; Chaquopy's curated index only
+        # has 3.2.2.  Pinning ``>=4`` would either need
+        # android-dep-collection to build it OR a drop.  We chose
+        # drop because Android is single-tenant (L4 multi-user auth
+        # not used) and api/auth/crypto.py imports bcrypt lazily.
+        gen = _build_fake_generated(tmp_path)
+        fake_repo = tmp_path / "fake_repo"
+        fake_repo.mkdir()
+        self._seed_pyproject(fake_repo, "kohakuvault>=0.8.5")
+        self._seed_requirements(
+            gen,
+            "fastapi>=0.115.0\nbcrypt>=4.0.0\nkohakuvault>=0.8.5\n",
+        )
+        monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
+        postcreate.patch_android_requirements(gen)
+        text = (gen / "requirements.txt").read_text(encoding="utf-8")
+        assert "bcrypt" not in text.lower()
+        assert "fastapi>=0.115.0" in text
+
+    def test_drops_pywebview_line(self, tmp_path, postcreate, monkeypatch):
+        # pywebview leaks into Android via Briefcase's parent-level
+        # ``requires`` concatenation (the launcher venv spec lists
+        # pywebview).  No Android wheel exists for pywebview — the
+        # Android side uses a native WebView via MainActivity.java
+        # — so postcreate strips it just like pymupdf.
+        gen = _build_fake_generated(tmp_path)
+        fake_repo = tmp_path / "fake_repo"
+        fake_repo.mkdir()
+        self._seed_pyproject(fake_repo, "kohakuvault>=0.8.5")
+        self._seed_requirements(
+            gen,
+            "fastapi>=0.115.0\npywebview==6.1\nkohakuvault>=0.8.5\n",
+        )
+        monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
+        postcreate.patch_android_requirements(gen)
+        text = (gen / "requirements.txt").read_text(encoding="utf-8")
+        assert "pywebview" not in text.lower()
+        assert "fastapi>=0.115.0" in text
+
     def test_rewrites_pydantic_core_to_url_refs(
         self, tmp_path, postcreate, monkeypatch
     ):
@@ -326,6 +366,115 @@ class TestPatchAndroidRequirements:
         ) in text
         # pydantic shell (pure-Python) preserved.
         assert "pydantic>=2.0.0" in text
+
+    def test_rewrites_safetensors_to_url_refs(self, tmp_path, postcreate, monkeypatch):
+        # safetensors is a model2vec transitive (Rust/PyO3, no
+        # Chaquopy wheel).  Briefcase emits it into Android's
+        # requirements.txt; postcreate replaces with URL refs to
+        # android-dep-collection's v2026.05.24 release.
+        gen = _build_fake_generated(tmp_path)
+        fake_repo = tmp_path / "fake_repo"
+        fake_repo.mkdir()
+        self._seed_pyproject(fake_repo, "kohakuvault>=0.8.5")
+        self._seed_requirements(
+            gen,
+            "model2vec>=0.8.0\nsafetensors>=0.6.0\nkohakuvault>=0.8.5\n",
+        )
+        monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
+        postcreate.patch_android_requirements(gen)
+        text = (gen / "requirements.txt").read_text(encoding="utf-8")
+        assert "safetensors>=0.6.0" not in text
+        # safetensors actually ships as cp38-abi3 (upstream Cargo
+        # enables pyo3/abi3-py38) — verified against v2026.05.24
+        # release artifacts.
+        assert (
+            "safetensors @ https://github.com/Kohaku-Lab/android-dep-collection/"
+            "releases/download/v2026.05.24/"
+            "safetensors-0.7.0-cp38-abi3-android_24_arm64_v8a.whl"
+            " ; platform_machine == 'aarch64'"
+        ) in text
+        assert (
+            "safetensors @ https://github.com/Kohaku-Lab/android-dep-collection/"
+            "releases/download/v2026.05.24/"
+            "safetensors-0.7.0-cp38-abi3-android_24_x86_64.whl"
+            " ; platform_machine == 'x86_64'"
+        ) in text
+        # model2vec shell preserved (it's pure-Python; only its
+        # native deps get URL-ref'd).
+        assert "model2vec>=0.8.0" in text
+
+    def test_rewrites_tokenizers_to_url_refs(self, tmp_path, postcreate, monkeypatch):
+        gen = _build_fake_generated(tmp_path)
+        fake_repo = tmp_path / "fake_repo"
+        fake_repo.mkdir()
+        self._seed_pyproject(fake_repo, "kohakuvault>=0.8.5")
+        self._seed_requirements(
+            gen,
+            "tokenizers>=0.20.0\nkohakuvault>=0.8.5\n",
+        )
+        monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
+        postcreate.patch_android_requirements(gen)
+        text = (gen / "requirements.txt").read_text(encoding="utf-8")
+        assert "tokenizers>=0.20.0" not in text
+        # tokenizers actually ships as cp310-abi3 (upstream Cargo
+        # pins pyo3/abi3-py310) — verified against v2026.05.24
+        # release artifacts.
+        assert (
+            "tokenizers-0.23.1-cp310-abi3-android_24_arm64_v8a.whl"
+            " ; platform_machine == 'aarch64'"
+        ) in text
+        assert (
+            "tokenizers-0.23.1-cp310-abi3-android_24_x86_64.whl"
+            " ; platform_machine == 'x86_64'"
+        ) in text
+
+    def test_rewrites_primp_with_abi3_tag(self, tmp_path, postcreate, monkeypatch):
+        # primp ships as ABI3 — the URL filename must use an abi3
+        # tag, NOT ``cp313-cp313``.  v1.3.0's source-tree Cargo
+        # pins ``pyo3/abi3-py310`` so our cross-built wheel emits
+        # ``cp310-abi3`` (PyPI's manylinux releases use cp38-abi3,
+        # but that's a different Cargo features set on a separate
+        # CI path).  Verified against the v2026.05.24 release.
+        gen = _build_fake_generated(tmp_path)
+        fake_repo = tmp_path / "fake_repo"
+        fake_repo.mkdir()
+        self._seed_pyproject(fake_repo, "kohakuvault>=0.8.5")
+        self._seed_requirements(
+            gen,
+            "ddgs>=9.0.0\nprimp>=1.2.3\nkohakuvault>=0.8.5\n",
+        )
+        monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
+        postcreate.patch_android_requirements(gen)
+        text = (gen / "requirements.txt").read_text(encoding="utf-8")
+        assert "primp>=1.2.3" not in text
+        assert "primp-1.3.0-cp310-abi3-android_24_arm64_v8a.whl" in text
+        assert "primp-1.3.0-cp310-abi3-android_24_x86_64.whl" in text
+        # No mismatched python/abi tags should appear on primp lines.
+        primp_lines = [line for line in text.splitlines() if "primp-1.3.0" in line]
+        for line in primp_lines:
+            assert "cp313-cp313" not in line
+            assert "cp38-abi3" not in line
+        # ddgs shell preserved (pure-Python).
+        assert "ddgs>=9.0.0" in text
+
+    def test_new_url_refs_all_idempotent(self, tmp_path, postcreate, monkeypatch):
+        # All four URL-ref packages together — re-run produces
+        # identical output (no line multiplication).
+        gen = _build_fake_generated(tmp_path)
+        fake_repo = tmp_path / "fake_repo"
+        fake_repo.mkdir()
+        self._seed_pyproject(fake_repo, "kohakuvault>=0.8.5")
+        self._seed_requirements(
+            gen,
+            "pydantic-core>=2.41.1\nsafetensors>=0.6.0\n"
+            "tokenizers>=0.20.0\nprimp>=1.2.3\nkohakuvault>=0.8.5\n",
+        )
+        monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
+        postcreate.patch_android_requirements(gen)
+        first = (gen / "requirements.txt").read_text(encoding="utf-8")
+        postcreate.patch_android_requirements(gen)
+        second = (gen / "requirements.txt").read_text(encoding="utf-8")
+        assert first == second
 
     def test_pydantic_core_idempotent_on_re_run(
         self, tmp_path, postcreate, monkeypatch

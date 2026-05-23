@@ -180,6 +180,31 @@ _ANDROID_DROP_PACKAGES: tuple[str, ...] = (
     # of Android prevents future regressions where someone adds
     # an importer expecting git to work.
     "gitpython",
+    # bcrypt 4.x migrated from C/cffi to Rust/PyO3 (Oct 2022); the
+    # Chaquopy curated index tops out at 3.2.2 and we pin the
+    # framework at ``>=4.0.0`` in pyproject.  Android doesn't run
+    # the L4 multi-user auth surface (a phone is single-tenant),
+    # so dropping the dep + lazy-importing in api/auth/crypto.py
+    # is the chosen carve-out instead of building bcrypt as a
+    # fourth maturin wheel.  Importing :mod:`kohakuterrarium.api.auth`
+    # without bcrypt is fine — only ``hash_password`` /
+    # ``verify_password`` raise ``RuntimeError`` if invoked, and
+    # the L4 routes only get invoked when ``auth_config.users``
+    # is enabled.
+    "bcrypt",
+    # pywebview is the desktop launcher's pywebview shell.  It
+    # has no Android wheel (Android uses a native WebView via
+    # MainActivity.java + a WebView widget).  Briefcase
+    # concatenates ``[tool.briefcase.app.kohakuterrarium].requires``
+    # (which contains ``pywebview==6.1`` for the desktop launcher
+    # venv) into every platform's requires — see Briefcase docs:
+    # "the final set of requirements will be the concatenation of
+    # requirements from all levels, starting from least to most
+    # specific."  That leaks pywebview into the Android Chaquopy
+    # install where it has no wheel.  Stripping here is the
+    # simplest fix (vs. restructuring the parent ``requires`` to
+    # be per-desktop-platform).
+    "pywebview",
 )
 
 # Packages where Android needs the BASE package but NOT the
@@ -239,6 +264,50 @@ _ANDROID_URL_REFS: dict[str, dict[str, object]] = {
         # See dep/android-dep-collection/manifest.toml.
         "filename": ("pydantic_core-{version}-cp313-cp313-android_24_{abi_tag}.whl"),
         "pinned_version": "2.41.1",
+    },
+    "safetensors": {
+        # safetensors is a transitive dep via model2vec (embeddings).
+        # Rust/PyO3, no Chaquopy wheel.  Upstream Cargo enables
+        # ``pyo3/abi3-py38`` so the cross-built wheel actually emits
+        # the ABI3 tag ``cp38-abi3`` (one wheel ≥ Python 3.8 per
+        # ABI), not ``cp313-cp313``.  Verified against the actual
+        # build artifacts attached to release v2026.05.24.
+        "wheel_basename": "safetensors",
+        "release_base": (
+            "https://github.com/Kohaku-Lab/android-dep-collection/releases/download/"
+            "v2026.05.24"
+        ),
+        "filename": ("safetensors-{version}-cp38-abi3-android_24_{abi_tag}.whl"),
+        "pinned_version": "0.7.0",
+    },
+    "tokenizers": {
+        # tokenizers is a transitive dep via model2vec.  Rust/PyO3.
+        # Upstream Cargo declares ``pyo3/abi3-py310`` so the wheel
+        # tag is ``cp310-abi3`` (one wheel ≥ Python 3.10 per ABI).
+        # Verified against the v2026.05.24 release artifacts.
+        "wheel_basename": "tokenizers",
+        "release_base": (
+            "https://github.com/Kohaku-Lab/android-dep-collection/releases/download/"
+            "v2026.05.24"
+        ),
+        "filename": ("tokenizers-{version}-cp310-abi3-android_24_{abi_tag}.whl"),
+        "pinned_version": "0.23.1",
+    },
+    "primp": {
+        # primp is a transitive dep via ddgs (DuckDuckGo search
+        # tool).  Wraps reqwest with rustls-tls (no system OpenSSL).
+        # Upstream's manylinux releases on PyPI carry ``cp38-abi3``,
+        # but the v1.3.0 source-tree Cargo features pin
+        # ``pyo3/abi3-py310`` — so our cross-built Android wheel
+        # ships as ``cp310-abi3``.  Verified against the v2026.05.24
+        # release artifacts.
+        "wheel_basename": "primp",
+        "release_base": (
+            "https://github.com/Kohaku-Lab/android-dep-collection/releases/download/"
+            "v2026.05.24"
+        ),
+        "filename": ("primp-{version}-cp310-abi3-android_24_{abi_tag}.whl"),
+        "pinned_version": "1.3.0",
     },
 }
 
