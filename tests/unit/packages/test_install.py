@@ -5,8 +5,6 @@ run for real against ``tmp_path``. Every test asserts the on-disk
 result: a copied tree, a ``.link`` pointer, or a clean removal.
 """
 
-import subprocess
-
 import pytest
 
 from kohakuterrarium.packages import install as install_mod
@@ -115,29 +113,36 @@ class TestInstallErrors:
     def test_git_url_routes_to_git_install(
         self, pkg_dir, tmp_path, monkeypatch, no_deps
     ):
+        # install_package no longer shells out directly — it goes
+        # through ``packages.git_backend``.  Stub the backend's
+        # clone helper so we don't actually touch the network.
+        from kohakuterrarium.packages import git_backend
+
         captured = {}
 
-        def fake_run(cmd, **kw):
-            captured["cmd"] = cmd
+        def fake_clone(url, target):
+            captured["url"] = url
+            captured["target"] = target
             # Simulate a successful clone by creating the target dir.
-            target = pkg_dir / "myrepo"
-            (target / "creatures").mkdir(parents=True)
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "creatures").mkdir()
             (target / "kohaku.yaml").write_text("name: myrepo")
-            return subprocess.CompletedProcess(cmd, 0)
 
-        monkeypatch.setattr(install_mod.subprocess, "run", fake_run)
+        monkeypatch.setattr(git_backend, "clone_repo", fake_clone)
         name = install_package("https://example.com/myrepo.git")
         assert name == "myrepo"
-        assert captured["cmd"][:2] == ["git", "clone"]
+        assert captured["url"] == "https://example.com/myrepo.git"
         assert (pkg_dir / "myrepo").is_dir()
 
     def test_git_clone_failure_raises_runtime_error(
         self, pkg_dir, monkeypatch, no_deps
     ):
-        def boom(cmd, **kw):
-            raise subprocess.CalledProcessError(1, cmd, stderr=b"clone denied")
+        from kohakuterrarium.packages import git_backend
 
-        monkeypatch.setattr(install_mod.subprocess, "run", boom)
+        def boom(url, target):
+            raise RuntimeError("Git clone failed: clone denied")
+
+        monkeypatch.setattr(git_backend, "clone_repo", boom)
         with pytest.raises(RuntimeError, match="Git clone failed"):
             install_package("https://example.com/x.git")
 
@@ -146,16 +151,19 @@ class TestInstallErrors:
         target = pkg_dir / "myrepo"
         (target / "creatures").mkdir(parents=True)
         (target / "kohaku.yaml").write_text("name: myrepo")
-        calls = []
-        monkeypatch.setattr(
-            install_mod.subprocess,
-            "run",
-            lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0),
-        )
+        from kohakuterrarium.packages import git_backend
+
+        pulled = []
+
+        def fake_pull(t):
+            pulled.append(t)
+
+        monkeypatch.setattr(git_backend, "pull_repo", fake_pull)
         name = install_package("https://example.com/myrepo.git")
         assert name == "myrepo"
-        # Existing checkout → git pull, not git clone.
-        assert "pull" in calls[0]
+        # Existing checkout → pull_repo invoked (not clone_repo).
+        assert len(pulled) == 1
+        assert pulled[0].name == "myrepo"
 
     def test_git_install_existing_dir_pull_failure_raises(
         self, pkg_dir, monkeypatch, no_deps
@@ -163,11 +171,12 @@ class TestInstallErrors:
         target = pkg_dir / "myrepo"
         target.mkdir(parents=True)
         (target / "kohaku.yaml").write_text("name: myrepo")
+        from kohakuterrarium.packages import git_backend
 
-        def boom(cmd, **kw):
-            raise subprocess.CalledProcessError(1, cmd, stderr=b"pull rejected")
+        def boom(t):
+            raise RuntimeError("Git pull failed: pull rejected")
 
-        monkeypatch.setattr(install_mod.subprocess, "run", boom)
+        monkeypatch.setattr(git_backend, "pull_repo", boom)
         with pytest.raises(RuntimeError, match="Git pull failed"):
             install_package("https://example.com/myrepo.git")
 
@@ -192,17 +201,19 @@ class TestUpdatePackage:
         (pkg / ".git").mkdir(parents=True)
         (pkg / "creatures").mkdir()
         (pkg / "kohaku.yaml").write_text("name: gitpkg")
+        from kohakuterrarium.packages import git_backend
+
         calls = []
-        monkeypatch.setattr(
-            install_mod.subprocess,
-            "run",
-            lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0),
-        )
+
+        def fake_pull(t):
+            calls.append(t)
+
+        monkeypatch.setattr(git_backend, "pull_repo", fake_pull)
         name = update_package("gitpkg")
         assert name == "gitpkg"
-        # git -C <pkg> pull --ff-only was invoked.
-        assert calls[0][:2] == ["git", "-C"]
-        assert "pull" in calls[0]
+        # pull_repo was invoked against the gitpkg checkout.
+        assert len(calls) == 1
+        assert calls[0].name == "gitpkg"
 
     def test_git_pull_failure_raises_runtime_error(
         self, pkg_dir, tmp_path, monkeypatch, no_deps
@@ -210,11 +221,12 @@ class TestUpdatePackage:
         pkg = pkg_dir / "gitpkg"
         (pkg / ".git").mkdir(parents=True)
         (pkg / "kohaku.yaml").write_text("name: gitpkg")
+        from kohakuterrarium.packages import git_backend
 
-        def boom(cmd, **kw):
-            raise subprocess.CalledProcessError(1, cmd, stderr=b"diverged")
+        def boom(t):
+            raise RuntimeError("Git pull failed: diverged")
 
-        monkeypatch.setattr(install_mod.subprocess, "run", boom)
+        monkeypatch.setattr(git_backend, "pull_repo", boom)
         with pytest.raises(RuntimeError, match="Git pull failed for gitpkg"):
             update_package("gitpkg")
 

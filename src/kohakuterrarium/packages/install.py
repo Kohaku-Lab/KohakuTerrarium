@@ -1,9 +1,22 @@
-"""Install / update / uninstall installed packages."""
+"""Install / update / uninstall installed packages.
+
+Git operations go through :mod:`kohakuterrarium.packages.git_backend`
+which picks the best available implementation at call time:
+
+    1. The native ``git`` binary via ``subprocess`` (fastest, used on
+       desktop / CI where ``git`` is on ``$PATH``).
+    2. The pure-Python ``dulwich`` library (slower but binary-free,
+       used on **Android** Briefcase / Chaquopy where no ``git``
+       binary ships in the APK).
+
+Both backends present the same ``clone`` / ``pull`` API so the rest
+of this module doesn't know which is running.
+"""
 
 import shutil
-import subprocess
 from pathlib import Path
 
+from kohakuterrarium.packages import git_backend
 from kohakuterrarium.packages.locations import _packages_dir
 from kohakuterrarium.packages.locations import get_package_root
 from kohakuterrarium.packages.locations import read_link
@@ -98,14 +111,9 @@ def update_package(name: str) -> str:
         editable=is_editable,
     )
     try:
-        subprocess.run(
-            ["git", "-C", str(target), "pull", "--ff-only"],
-            check=True,
-            capture_output=True,
-        )
-    except subprocess.CalledProcessError as e:
-        stderr = e.stderr.decode(errors="replace").strip() if e.stderr else str(e)
-        raise RuntimeError(f"Git pull failed for {name}: {stderr}")
+        git_backend.pull_repo(target)
+    except RuntimeError as e:
+        raise RuntimeError(f"Git pull failed for {name}: {e}") from e
 
     _validate_package(target, name)
     _install_python_deps(target)
@@ -129,25 +137,11 @@ def _install_from_git(url: str, name_override: str | None = None) -> str:
     if target.exists():
         # Update existing
         logger.info("Updating package", package=name)
-        try:
-            subprocess.run(
-                ["git", "-C", str(target), "pull", "--ff-only"],
-                check=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"Git pull failed: {e.stderr.decode()}")
+        git_backend.pull_repo(target)
     else:
         # Fresh clone
         logger.info("Cloning package", package=name, url=url)
-        try:
-            subprocess.run(
-                ["git", "clone", url, str(target)],
-                check=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"Git clone failed: {e.stderr.decode()}")
+        git_backend.clone_repo(url, target)
 
     _validate_package(target, name)
     _install_python_deps(target)
