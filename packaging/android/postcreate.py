@@ -223,6 +223,19 @@ _ANDROID_DROP_PACKAGES: tuple[str, ...] = (
     # resolver pass produced the line.
     "lxml_html_clean",
     "lxml-html-clean",
+    # hf-xet is HuggingFace's LFS transfer accelerator (Rust+PyO3).
+    # huggingface_hub declares it via a ``platform_machine == 'aarch64'
+    # or ... or 'x86_64'`` marker — that marker is ACTIVE on Android
+    # so huggingface_hub pulls hf-xet by default.  hf-xet has no
+    # Android wheel and is genuinely optional: at runtime
+    # huggingface_hub falls back to its standard HTTP download path
+    # when ``import hf_xet`` fails.  Stripping the requirements.txt
+    # line lets that runtime fallback kick in without Chaquopy pip
+    # ever attempting the install.  Two forms because Briefcase and
+    # pip have been observed to emit both the hyphen and underscore
+    # normalised names.
+    "hf-xet",
+    "hf_xet",
 )
 
 # Packages where Android needs the BASE package but NOT the
@@ -310,6 +323,35 @@ _ANDROID_URL_REFS: dict[str, dict[str, object]] = {
         ),
         "filename": ("tokenizers-{version}-cp310-abi3-android_24_{abi_tag}.whl"),
         "pinned_version": "0.23.1",
+    },
+    "jiter": {
+        # jiter is a hard transitive via anthropic and openai — both
+        # pin ``jiter<1,>=X`` unconditionally, so no pyproject pin
+        # can dodge it.  Rust + PyO3 + maturin; per-CPython wheel
+        # tag (``cp313-cp313``) — verified against v2026.05.25
+        # release artifacts.
+        "wheel_basename": "jiter",
+        "release_base": (
+            "https://github.com/Kohaku-Lab/android-dep-collection/releases/download/"
+            "v2026.05.25"
+        ),
+        "filename": ("jiter-{version}-cp313-cp313-android_24_{abi_tag}.whl"),
+        "pinned_version": "0.15.0",
+    },
+    "rpds-py": {
+        # rpds-py is a hard transitive via jsonschema ->
+        # referencing -> rpds-py.  Rust + PyO3; per-CPython wheel.
+        # PyPI distribution name is hyphenated but wheel filename
+        # uses the underscore form ``rpds_py-...`` — match on the
+        # hyphenated key, emit the underscored filename (same
+        # transform we apply to pydantic-core / pydantic_core).
+        "wheel_basename": "rpds_py",
+        "release_base": (
+            "https://github.com/Kohaku-Lab/android-dep-collection/releases/download/"
+            "v2026.05.25"
+        ),
+        "filename": ("rpds_py-{version}-cp313-cp313-android_24_{abi_tag}.whl"),
+        "pinned_version": "0.30.0",
     },
     "primp": {
         # primp is a transitive dep via ddgs (DuckDuckGo search

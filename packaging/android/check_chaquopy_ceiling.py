@@ -45,12 +45,162 @@ import argparse
 import json
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
 from packaging.markers import default_environment
 from packaging.requirements import Requirement
 from packaging.version import Version
+
+# Every package the Chaquopy 13.1 curated index publishes wheels for.
+# Source: https://chaquo.com/pypi-13.1/ (verified 2026-05-23).
+# Used by ``find_missing_wheels`` to recognise packages Chaquopy
+# already serves — even without a known version ceiling, presence
+# in the index means pip can resolve them on Android.
+CHAQUOPY_INDEX: frozenset[str] = frozenset(
+    {
+        "aiohttp",
+        "argon2-cffi",
+        "argon2-cffi-bindings",
+        "astropy",
+        "aubio",
+        "backports-zoneinfo",
+        "bcrypt",
+        "bitarray",
+        "blis",
+        "brotli",
+        "cffi",
+        "chaquopy-crc32c",
+        "chaquopy-curl",
+        "chaquopy-curl-openssl-3",
+        "chaquopy-flac",
+        "chaquopy-freetype",
+        "chaquopy-geos",
+        "chaquopy-hdf5",
+        "chaquopy-lame",
+        "chaquopy-libcxx",
+        "chaquopy-libffi",
+        "chaquopy-libgfortran",
+        "chaquopy-libiconv",
+        "chaquopy-libjpeg",
+        "chaquopy-libogg",
+        "chaquopy-libomp",
+        "chaquopy-libpng",
+        "chaquopy-libraw",
+        "chaquopy-libsndfile",
+        "chaquopy-libtiff",
+        "chaquopy-libvorbis",
+        "chaquopy-libxml2",
+        "chaquopy-libxslt",
+        "chaquopy-libyaml",
+        "chaquopy-libzmq",
+        "chaquopy-llvm",
+        "chaquopy-openblas",
+        "chaquopy-proj",
+        "chaquopy-proj-openssl-3",
+        "chaquopy-secp256k1",
+        "chaquopy-ta-lib",
+        "chaquopy-zbar",
+        "coincurve",
+        "contourpy",
+        "cryptography",
+        "cvxopt",
+        "cymem",
+        "cytoolz",
+        "depthai",
+        "dlib",
+        "editdistance",
+        "ephem",
+        "frozenlist",
+        "gensim",
+        "gevent",
+        "google-crc32c",
+        "greenlet",
+        "grpcio",
+        "h5py",
+        "igraph",
+        "jpegio",
+        "kiwisolver",
+        "lameenc",
+        "llvmlite",
+        "lru-dict",
+        "lxml",
+        "lz4",
+        "marisa-trie",
+        "markupsafe",
+        "matplotlib",
+        "miniaudio",
+        "multidict",
+        "murmurhash",
+        "netifaces",
+        "numba",
+        "numpy",
+        "opencv-contrib-python",
+        "opencv-contrib-python-headless",
+        "opencv-python",
+        "opencv-python-headless",
+        "pandas",
+        "photutils",
+        "pillow",
+        "preshed",
+        "psutil",
+        "pycares",
+        "pycocotools",
+        "pycrypto",
+        "pycryptodome",
+        "pycryptodomex",
+        "pycurl",
+        "pyerfa",
+        "pynacl",
+        "pyproj",
+        "pysha3",
+        "pywavelets",
+        "pyyaml",
+        "pyzbar",
+        "pyzmq",
+        "qutip",
+        "rawpy",
+        "regex",
+        "ruamel-yaml-clib",
+        "scandir",
+        "scikit-image",
+        "scikit-learn",
+        "scipy",
+        "sentencepiece",
+        "shapely",
+        "soundfile",
+        "soxr",
+        "spacy",
+        "spectrum",
+        "srsly",
+        "statsmodels",
+        "ta-lib",
+        "tensorflow",
+        "tensorflow-gpu",
+        "tflite-runtime",
+        "tgcrypto",
+        "thinc",
+        "tokenizers",
+        "torch",
+        "torchvision",
+        "tornado",
+        "twisted",
+        "typed-ast",
+        "ujson",
+        "wordcloud",
+        "xgboost",
+        "yarl",
+        "zope-interface",
+        "zstandard",
+    }
+)
+
+# PyPI metadata cache for the pure-Python wheel detection.  File-
+# backed so re-runs are fast.  Set via ``--cache <path>`` on the CLI.
+_PYPI_CACHE_PATH: Path | None = None
+
 
 # Maximum cp313 Android wheel version Chaquopy 13.1 publishes per
 # native dep.  Verified against https://chaquo.com/pypi-13.1/<pkg>/
@@ -73,7 +223,22 @@ CHAQUOPY_MAX: dict[str, str] = {
 # we control the wheel.  See packaging/android/postcreate.py's
 # _ANDROID_URL_REFS for the URL-ref consumer side.
 URL_REF_PACKAGES: frozenset[str] = frozenset(
-    {"kohakuvault", "pydantic-core", "safetensors", "tokenizers", "primp"}
+    {
+        "kohakuvault",
+        "pydantic-core",
+        "safetensors",
+        "tokenizers",
+        "primp",
+        # jiter: Rust JSON streaming parser.  Required UNCONDITIONALLY
+        # by both openai>=2.0 and anthropic>=0.68 — no escape via pin
+        # because every recent version of either package demands it.
+        # Built via dep/android-dep-collection.
+        "jiter",
+        # rpds-py: Rust persistent-data-structures.  Hard transitive
+        # via jsonschema -> referencing -> rpds-py.  No pure-Python
+        # fallback.  Built via dep/android-dep-collection.
+        "rpds-py",
+    }
 )
 
 # Packages we drop entirely from Android requirements.  See
@@ -91,6 +256,17 @@ DROPPED_PACKAGES: frozenset[str] = frozenset(
         "uvloop",
         "httptools",
         "watchfiles",
+        # hf-xet: HuggingFace LFS transfer accelerator (Rust+PyO3).
+        # huggingface_hub pulls it via a ``platform_machine ==
+        # 'aarch64' ...`` marker which is ACTIVE on Android.  hf-xet
+        # has no Android wheel and is genuinely OPTIONAL — at
+        # runtime, huggingface_hub falls back to its standard HTTP
+        # download path when hf-xet isn't importable.  Postcreate
+        # strips the line so pip doesn't try to install.  Two name
+        # forms because Briefcase / pip have been observed to emit
+        # both depending on which resolver pass produced the line.
+        "hf-xet",
+        "hf_xet",
     }
 )
 
@@ -120,6 +296,291 @@ class Blocker:
     floor: Version  # highest version any active demander requires
     demander: str  # the package whose metadata declared the floor
     spec: str  # the raw requirement string for diagnostic context
+
+
+@dataclass(frozen=True)
+class MissingWheel:
+    """A resolved package has NO Android-installable source.
+
+    Detected when a package is in the install tree but is:
+        * NOT in Chaquopy's curated index (no prebuilt Android wheel)
+        * NOT URL-ref'd by us (no own wheel hosted)
+        * NOT dropped by us (we don't strip it from requirements)
+        * AND has no pure-Python wheel on PyPI (must build from C/Rust)
+
+    This is the family of failure that bit us with ``jiter``: a Rust
+    extension pulled in transitively by openai, never previously on
+    our radar.
+    """
+
+    package: str
+    version: str
+    pulled_by: str  # which package's requires_dist pulled this in
+
+
+def _load_pypi_cache() -> dict[str, bool]:
+    if _PYPI_CACHE_PATH is None or not _PYPI_CACHE_PATH.is_file():
+        return {}
+    try:
+        with open(_PYPI_CACHE_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_pypi_cache(cache: dict[str, bool]) -> None:
+    if _PYPI_CACHE_PATH is None:
+        return
+    try:
+        with open(_PYPI_CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(cache, f, indent=2, sort_keys=True)
+    except OSError:
+        pass
+
+
+def has_pure_python_wheel(package: str, version: str) -> bool:
+    """True iff PyPI publishes a pure-Python wheel for ``package==version``.
+
+    A pure-Python wheel has the platform tag ``py3-none-any`` or
+    ``py2.py3-none-any`` — Chaquopy pip can install these on Android
+    without any native build step.
+    """
+    cache = _load_pypi_cache()
+    cache_key = f"{package}=={version}"
+    if cache_key in cache:
+        return cache[cache_key]
+    url = f"https://pypi.org/pypi/{package}/{version}/json"
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            data = json.loads(resp.read())
+    except (urllib.error.URLError, json.JSONDecodeError, TimeoutError):
+        # Conservative: if PyPI is unreachable, treat as NOT pure-Python
+        # so we err on the side of flagging.  Caller can re-run.
+        result = False
+        cache[cache_key] = result
+        _save_pypi_cache(cache)
+        return result
+    has_pure = False
+    for entry in data.get("urls", []):
+        fn = entry.get("filename", "")
+        if fn.endswith(".whl") and (
+            "-py3-none-any.whl" in fn or "-py2.py3-none-any.whl" in fn
+        ):
+            has_pure = True
+            break
+    cache[cache_key] = has_pure
+    _save_pypi_cache(cache)
+    return has_pure
+
+
+def has_any_pure_python_version(package: str) -> bool:
+    """True iff PyPI has at least ONE release of ``package`` with a
+    pure-Python wheel.
+
+    This is the second check needed beyond ``has_pure_python_wheel``:
+    pip on Chaquopy will fall back from binary-only newer versions to
+    an older pure-Python version if the dep range allows it.  Example:
+    ``libcst`` 1.x is Rust+PyO3 (binary), but 0.3.23 was pure-Python
+    (``libcst-0.3.23-py3-none-any.whl``).  Our pin ``libcst<2`` lets
+    Chaquopy pip walk back to 0.3.23.
+
+    We don't try to be precise about the demand range — if ANY version
+    is pure-Python, we assume the consumer's pin can be relaxed (or
+    already allows it).  Audit users who hit a false-negative can add
+    the package to ``SOFT_CARVE_OUT``.
+    """
+    cache = _load_pypi_cache()
+    cache_key = f"{package}::any-pure"
+    if cache_key in cache:
+        return cache[cache_key]
+    url = f"https://pypi.org/pypi/{package}/json"
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            data = json.loads(resp.read())
+    except (urllib.error.URLError, json.JSONDecodeError, TimeoutError):
+        result = False
+        cache[cache_key] = result
+        _save_pypi_cache(cache)
+        return result
+    has_pure = False
+    for _ver, entries in (data.get("releases") or {}).items():
+        for entry in entries:
+            fn = entry.get("filename", "")
+            if fn.endswith(".whl") and (
+                "-py3-none-any.whl" in fn or "-py2.py3-none-any.whl" in fn
+            ):
+                has_pure = True
+                break
+        if has_pure:
+            break
+    cache[cache_key] = has_pure
+    _save_pypi_cache(cache)
+    return has_pure
+
+
+def _android_reachable(
+    install_report: dict,
+    env: dict[str, str],
+    active_extras: dict[str, frozenset[str]],
+) -> set[str]:
+    """Return the set of normalised package names reachable from the
+    project root under Android markers.
+
+    Pip's install report contains the host-resolved tree, which on
+    Windows includes ``pywin32`` (``sys_platform == 'win32'``) and on
+    cp314 free-threaded includes ``PyYAML-ft`` (``python_version >=
+    '3.14'``).  These are FALSE POSITIVES for an Android audit: they'd
+    never be in the Chaquopy install set.  This BFS walks the demand
+    graph from the project root, accepting an edge only if its
+    PEP 508 marker evaluates true on Android (cp313 Linux aarch64).
+    """
+    by_name = {
+        _normalize_name(p["metadata"]["name"]): p
+        for p in install_report.get("install", [])
+    }
+    # Roots: packages marked ``is_direct`` AND with no PyPI-style
+    # URL (i.e. our editable project install).  Also accept any
+    # explicit ``requested`` entry which pip sets for top-level deps.
+    roots: set[str] = set()
+    for p in install_report.get("install", []):
+        if p.get("is_direct") or p.get("requested"):
+            roots.add(_normalize_name(p["metadata"]["name"]))
+    if not roots:
+        # Fallback: walk everything (audit still runs, just no
+        # marker filtering benefit).
+        return set(by_name)
+
+    reachable: set[str] = set(roots)
+    frontier = list(roots)
+    soft_carve_norm = {_normalize_name(n) for n in SOFT_CARVE_OUT}
+    while frontier:
+        cur = frontier.pop()
+        # SOFT_CARVE_OUT packages resolve to a DIFFERENT version on
+        # Android (the fallback pure-Python version) which has
+        # different transitives.  Don't walk into their current-
+        # version requires_dist — that would propagate Android-
+        # irrelevant transitives (e.g. libcst 1.8.6 demands
+        # ``pyyaml-ft>=8.0.0; python_version == "3.13"`` but 0.3.23
+        # only needs PyYAML and typing-extensions).
+        if cur in soft_carve_norm:
+            continue
+        pkg = by_name.get(cur)
+        if pkg is None:
+            continue
+        for req_str in pkg["metadata"].get("requires_dist") or []:
+            try:
+                req = Requirement(req_str)
+            except Exception:
+                continue
+            if not _demand_active(
+                req,
+                demander_name=pkg["metadata"]["name"],
+                env=env,
+                active_extras=active_extras,
+            ):
+                continue
+            child = _normalize_name(req.name)
+            if child not in reachable:
+                reachable.add(child)
+                frontier.append(child)
+    return reachable
+
+
+# Packages we've manually verified install OK on Chaquopy via a
+# pure-Python fallback version even though their LATEST version on
+# PyPI is binary-only.  These are skipped by the missing-wheel check.
+SOFT_CARVE_OUT: frozenset[str] = frozenset(
+    {
+        # libcst: pin ``libcst<2`` in pyproject lets pip fall back to
+        # 0.3.23 which ships ``libcst-0.3.23-py3-none-any.whl`` on
+        # PyPI.  1.x is Rust+PyO3 (binary) and not in Chaquopy.
+        "libcst",
+    }
+)
+
+
+def find_missing_wheels(install_report: dict) -> list[MissingWheel]:
+    """For every Android-reachable resolved package, check it has SOME
+    way to install on Android.  Returns the HARD blockers — packages
+    pip will fail to resolve with ``no matching distributions``.
+
+    Filtering logic (each True short-circuits to "fine"):
+      1. dropped via ``_ANDROID_DROP_PACKAGES`` (postcreate strips it)
+      2. URL-ref'd by us (own wheel in android-dep-collection)
+      3. in Chaquopy's curated index (any version)
+      4. in ``SOFT_CARVE_OUT`` (manually verified fallback)
+      5. has a pure-Python wheel at this version OR any version on PyPI
+         (pip on Chaquopy walks down to that version)
+
+    Anything that survives all five is reported.
+
+    The set we audit over is ANDROID-REACHABLE only: packages pulled
+    by Windows-only markers (``sys_platform == 'win32'``) or
+    free-threaded-only markers (``python_version >= '3.14'``) are
+    excluded by walking the demand graph from the project root with
+    the Android environment.
+    """
+    dropped_norm = {_normalize_name(n) for n in DROPPED_PACKAGES}
+    url_ref_norm = {_normalize_name(n) for n in URL_REF_PACKAGES}
+    chaquopy_norm = {_normalize_name(n) for n in CHAQUOPY_INDEX}
+    soft_carve_norm = {_normalize_name(n) for n in SOFT_CARVE_OUT}
+
+    env = _android_marker_env()
+    android_reachable = _android_reachable(install_report, env, ANDROID_ACTIVE_EXTRAS)
+
+    missing: list[MissingWheel] = []
+    # Build a reverse-demand map so we can name "who pulled this in?"
+    pulled_by: dict[str, str] = {}
+    for pkg in install_report.get("install", []):
+        meta = pkg["metadata"]
+        parent = meta["name"]
+        for req_str in meta.get("requires_dist") or []:
+            try:
+                req = Requirement(req_str)
+            except Exception:
+                continue
+            child = _normalize_name(req.name)
+            pulled_by.setdefault(child, parent)
+
+    for pkg in install_report.get("install", []):
+        meta = pkg["metadata"]
+        name = meta["name"]
+        norm = _normalize_name(name)
+        if norm not in android_reachable:
+            continue
+        if (
+            norm in dropped_norm
+            or norm in url_ref_norm
+            or norm in chaquopy_norm
+            or norm in soft_carve_norm
+        ):
+            continue
+        # Skip the project itself — pip's report marks editable
+        # installs and our top-level project with ``is_direct`` and
+        # a file:// download URL.
+        is_local = pkg.get("is_direct", False) or pkg.get("download_info", {}).get(
+            "url", ""
+        ).startswith("file:")
+        if is_local:
+            continue
+        # Pure-Python at current resolved version?  If yes, pip on
+        # Chaquopy uses that wheel directly.
+        if has_pure_python_wheel(name, meta["version"]):
+            continue
+        # Pure-Python at ANY version?  If yes, pip on Chaquopy walks
+        # back through versions until it finds the pure-Python one.
+        # (Slow but functional — see libcst 0.3.23 fallback.)
+        if has_any_pure_python_version(name):
+            continue
+        missing.append(
+            MissingWheel(
+                package=name,
+                version=meta["version"],
+                pulled_by=pulled_by.get(norm, "(direct)"),
+            )
+        )
+    missing.sort(key=lambda m: m.package)
+    return missing
 
 
 def _normalize_name(name: str) -> str:
@@ -296,7 +757,18 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="Pre-built pip report JSON to analyse instead of resolving fresh",
     )
+    parser.add_argument(
+        "--cache",
+        type=Path,
+        help=(
+            "Path to a JSON cache of PyPI pure-Python-wheel lookups "
+            "(speeds up re-runs).  Default: no cache."
+        ),
+    )
     args = parser.parse_args(argv)
+
+    global _PYPI_CACHE_PATH
+    _PYPI_CACHE_PATH = args.cache
 
     if args.report:
         with open(args.report, encoding="utf-8") as f:
@@ -308,25 +780,49 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: pip dry-run failed: {exc}", file=sys.stderr)
             return 2
 
-    blockers = analyse(report)
-    if not blockers:
+    total = len(report.get("install", []))
+    ceiling_blockers = analyse(report)
+    missing_wheels = find_missing_wheels(report)
+
+    if not ceiling_blockers and not missing_wheels:
         print(
-            f"ok: {len(report.get('install', []))} packages resolved; "
-            f"no Chaquopy ceiling violations."
+            f"ok: {total} packages resolved; no Chaquopy ceiling "
+            f"violations; no missing-wheel issues."
         )
         return 0
-    print(f"FOUND {len(blockers)} Chaquopy ceiling violation(s):", file=sys.stderr)
-    for b in blockers:
+
+    if ceiling_blockers:
         print(
-            f"  {b.dep}: floor {b.floor} > Chaquopy ceiling {b.ceiling}"
-            f"  (demanded by {b.demander!r}: {b.spec!r})",
+            f"FOUND {len(ceiling_blockers)} Chaquopy CEILING violation(s):",
             file=sys.stderr,
         )
+        for b in ceiling_blockers:
+            print(
+                f"  {b.dep}: floor {b.floor} > ceiling {b.ceiling}"
+                f"  (demanded by {b.demander!r}: {b.spec!r})",
+                file=sys.stderr,
+            )
+
+    if missing_wheels:
+        print(
+            f"FOUND {len(missing_wheels)} package(s) with NO Android-installable source:",
+            file=sys.stderr,
+        )
+        for m in missing_wheels:
+            print(
+                f"  {m.package}=={m.version}"
+                f"  (pulled by: {m.pulled_by})"
+                f"  -- not in Chaquopy index, no pure-Python wheel on PyPI",
+                file=sys.stderr,
+            )
+
     print(
-        "Fix one of: (a) relax the demander's floor; "
-        "(b) add the package to URL_REF_PACKAGES + ship an Android wheel "
-        "via dep/android-dep-collection; "
-        "(c) add to DROPPED_PACKAGES + lazy-import on the consumer side.",
+        "\nFix each blocker by one of:\n"
+        "  (a) for ceiling violations: relax the demander's floor;\n"
+        "  (b) add to URL_REF_PACKAGES + ship an Android wheel via "
+        "dep/android-dep-collection;\n"
+        "  (c) add to DROPPED_PACKAGES + lazy-import on the consumer side;\n"
+        "  (d) pin to an older version that has a pure-Python wheel.",
         file=sys.stderr,
     )
     return 1

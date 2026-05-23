@@ -312,6 +312,84 @@ class TestPatchAndroidRequirements:
         assert "bcrypt" not in text.lower()
         assert "fastapi>=0.115.0" in text
 
+    def test_drops_hf_xet_line(self, tmp_path, postcreate, monkeypatch):
+        # huggingface_hub pulls hf-xet via a ``platform_machine ==
+        # 'aarch64' or ...`` marker which is ACTIVE on Android.
+        # hf-xet has no Android wheel; runtime falls back to
+        # standard HTTP downloads when hf_xet isn't importable.
+        # Both name forms (hyphen + underscore) must be stripped.
+        gen = _build_fake_generated(tmp_path)
+        fake_repo = tmp_path / "fake_repo"
+        fake_repo.mkdir()
+        self._seed_pyproject(fake_repo, "kohakuvault>=0.8.6")
+        self._seed_requirements(
+            gen,
+            "huggingface_hub>=1.0\nhf-xet>=1.4.3\nhf_xet>=1.4.3\nkohakuvault>=0.8.6\n",
+        )
+        monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
+        postcreate.patch_android_requirements(gen)
+        text = (gen / "requirements.txt").read_text(encoding="utf-8")
+        assert "hf-xet" not in text.lower()
+        assert "hf_xet" not in text.lower()
+        # huggingface_hub itself preserved.
+        assert "huggingface_hub>=1.0" in text
+
+    def test_rewrites_jiter_to_url_refs(self, tmp_path, postcreate, monkeypatch):
+        # jiter is demanded by openai + anthropic unconditionally;
+        # built via android-dep-collection v2026.05.25 release.
+        gen = _build_fake_generated(tmp_path)
+        fake_repo = tmp_path / "fake_repo"
+        fake_repo.mkdir()
+        self._seed_pyproject(fake_repo, "kohakuvault>=0.8.6")
+        self._seed_requirements(
+            gen,
+            "openai>=2.0.0\njiter>=0.10.0,<1\nkohakuvault>=0.8.6\n",
+        )
+        monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
+        postcreate.patch_android_requirements(gen)
+        text = (gen / "requirements.txt").read_text(encoding="utf-8")
+        assert "jiter>=0.10.0" not in text
+        assert (
+            "jiter @ https://github.com/Kohaku-Lab/android-dep-collection/"
+            "releases/download/v2026.05.25/"
+            "jiter-0.15.0-cp313-cp313-android_24_arm64_v8a.whl"
+            " ; platform_machine == 'aarch64'"
+        ) in text
+        assert (
+            "jiter-0.15.0-cp313-cp313-android_24_x86_64.whl"
+            " ; platform_machine == 'x86_64'"
+        ) in text
+        assert "openai>=2.0.0" in text
+
+    def test_rewrites_rpds_py_to_url_refs(self, tmp_path, postcreate, monkeypatch):
+        # rpds-py is a hard transitive via jsonschema -> referencing.
+        # Hyphenated dep name, underscored wheel basename — same
+        # transform we apply to pydantic-core.
+        gen = _build_fake_generated(tmp_path)
+        fake_repo = tmp_path / "fake_repo"
+        fake_repo.mkdir()
+        self._seed_pyproject(fake_repo, "kohakuvault>=0.8.6")
+        self._seed_requirements(
+            gen,
+            "jsonschema>=4.0.0\nrpds-py>=0.30.0\nkohakuvault>=0.8.6\n",
+        )
+        monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
+        postcreate.patch_android_requirements(gen)
+        text = (gen / "requirements.txt").read_text(encoding="utf-8")
+        assert "rpds-py>=0.30.0" not in text
+        assert (
+            "rpds-py @ https://github.com/Kohaku-Lab/android-dep-collection/"
+            "releases/download/v2026.05.25/"
+            "rpds_py-0.30.0-cp313-cp313-android_24_arm64_v8a.whl"
+            " ; platform_machine == 'aarch64'"
+        ) in text
+        assert (
+            "rpds_py-0.30.0-cp313-cp313-android_24_x86_64.whl"
+            " ; platform_machine == 'x86_64'"
+        ) in text
+        # jsonschema shell preserved (pure-Python).
+        assert "jsonschema>=4.0.0" in text
+
     def test_drops_lxml_html_clean_line(self, tmp_path, postcreate, monkeypatch):
         # lxml_html_clean is a metadata-only shim package that
         # demands ``lxml>=6.1.1`` — Chaquopy 13.1 tops at lxml
