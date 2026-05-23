@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "KohakuTerrarium"
-version = "2.0.0.dev7"
+version = "2.0.0.dev8"
 description = "A universal agent framework for building self-driven AI agents and multi-agent teams"
 authors = [
     { name = "Shih-Ying Yeh (KohakuBlueLeaf)", email = "apolloyeh0123@gmail.com" },
@@ -92,6 +92,15 @@ dependencies = [
     "textual>=8.0.0",
     "html2text>=2025.0.0",
     "gitpython>=3.1.0",
+    # dulwich: pure-Python git impl used as the Android fallback for
+    # ``kt install <url>`` when no system ``git`` binary is on PATH.
+    # On Chaquopy Android there's no shellable ``git``; dulwich's
+    # ``py3-none-any`` wheel installs cleanly and the
+    # ``packages/git_backend.py`` shim auto-selects it when
+    # ``shutil.which('git')`` returns None.  Slightly slower than
+    # native git for big repos but fine for creature / terrarium /
+    # plugin package sizes.
+    "dulwich>=0.22",
     # API server
     "fastapi>=0.115.0",
     # ``[standard]`` pulls in uvloop + httptools + watchfiles for
@@ -147,10 +156,19 @@ dependencies = [
     # safetensors + tokenizers: hard transitives via model2vec.
     # Declared as direct deps so Briefcase emits the lines and
     # postcreate's URL refs fire on Android.  On desktop / PyPI
-    # both packages have manylinux wheels, so the redundancy is
-    # harmless.
+    # both packages have manylinux wheels.
+    #
+    # ``tokenizers`` floor must match what ``sentence-transformers``
+    # (in the ``full`` extra) can satisfy: it pulls
+    # ``transformers>=4.41.0`` which only accepts
+    # ``tokenizers<=0.23.0``.  Using ``>=0.23.1`` here makes
+    # ``uv pip install -e .[full]`` unsolvable.  Floor 0.20 matches
+    # model2vec's own pin and is satisfied by both PyPI's manylinux
+    # wheel chain AND our Android wheel (0.23.1 — version constraint
+    # on the wheel-filename URL ref is independent of the dep-spec
+    # range we accept here).
     "safetensors>=0.7.0",
-    "tokenizers>=0.23.1",
+    "tokenizers>=0.20,<0.24",
     # Windows PTY for terminal panel (Nerd Font / PowerShell theme support)
     "pywinpty>=2.0.0; sys_platform == 'win32'",
 ]
@@ -273,7 +291,7 @@ select = ["F401", "F841"]
 [tool.briefcase]
 project_name = "KohakuTerrarium"
 bundle = "com.kohaku.terrarium"
-version = "2.0.0.dev7"
+version = "2.0.0.dev8"
 url = "https://github.com/Kohaku-Lab/KohakuTerrarium"
 # License is read from PEP 639 ``[project]`` above; Briefcase
 # 0.3.21+ no longer accepts ``license.file`` here.
