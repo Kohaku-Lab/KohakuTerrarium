@@ -205,6 +205,24 @@ _ANDROID_DROP_PACKAGES: tuple[str, ...] = (
     # simplest fix (vs. restructuring the parent ``requires`` to
     # be per-desktop-platform).
     "pywebview",
+    # lxml_html_clean is a tiny shim package that exists only
+    # because lxml 5.4 moved ``lxml.html.clean.Cleaner`` out of
+    # the core distribution.  The shim metadata demands
+    # ``lxml>=6.1.1`` — but Chaquopy 13.1's curated index tops
+    # out at ``lxml 5.3.0``.  Crucially, lxml 5.3.0 STILL ships
+    # ``lxml.html.clean.Cleaner`` natively (the removal happened
+    # in 5.4), so jusText's runtime use (``from lxml.html.clean
+    # import Cleaner``) works fine without the shim.  The shim
+    # arrives in our tree as a metadata-only transitive via the
+    # chain KT -> trafilatura -> jusText -> ``lxml[html_clean]``
+    # extra -> lxml_html_clean.  Dropping it from Android
+    # requirements.txt removes the metadata friction with zero
+    # functional impact on the Android build.  Two entries
+    # because Briefcase has been observed to emit both the
+    # underscore and hyphen normalised forms depending on which
+    # resolver pass produced the line.
+    "lxml_html_clean",
+    "lxml-html-clean",
 )
 
 # Packages where Android needs the BASE package but NOT the

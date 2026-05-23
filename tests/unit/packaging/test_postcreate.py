@@ -312,6 +312,32 @@ class TestPatchAndroidRequirements:
         assert "bcrypt" not in text.lower()
         assert "fastapi>=0.115.0" in text
 
+    def test_drops_lxml_html_clean_line(self, tmp_path, postcreate, monkeypatch):
+        # lxml_html_clean is a metadata-only shim package that
+        # demands ``lxml>=6.1.1`` — Chaquopy 13.1 tops at lxml
+        # 5.3.0.  Dropping the shim is safe because Chaquopy's
+        # lxml 5.3.0 still ships ``lxml.html.clean.Cleaner``
+        # natively (it was removed only in lxml 5.4).
+        # Briefcase has been seen to emit both ``lxml_html_clean``
+        # (underscore form) and ``lxml-html-clean`` (hyphen form)
+        # in requirements.txt.  Drop both forms.
+        gen = _build_fake_generated(tmp_path)
+        fake_repo = tmp_path / "fake_repo"
+        fake_repo.mkdir()
+        self._seed_pyproject(fake_repo, "kohakuvault>=0.8.5")
+        self._seed_requirements(
+            gen,
+            "trafilatura>=2.0.0\nlxml_html_clean>=0.4.0\n"
+            "lxml-html-clean>=0.4.0\nkohakuvault>=0.8.5\n",
+        )
+        monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
+        postcreate.patch_android_requirements(gen)
+        text = (gen / "requirements.txt").read_text(encoding="utf-8")
+        assert "lxml_html_clean" not in text.lower()
+        assert "lxml-html-clean" not in text.lower()
+        # trafilatura preserved (pure-Python; needs Chaquopy lxml).
+        assert "trafilatura>=2.0.0" in text
+
     def test_drops_pywebview_line(self, tmp_path, postcreate, monkeypatch):
         # pywebview leaks into Android via Briefcase's parent-level
         # ``requires`` concatenation (the launcher venv spec lists

@@ -56,15 +56,21 @@ dependencies = [
     "libcst>=0.3.23,<2",
     "aiofiles>=25.1.0",
     "python-dotenv>=1.0.0",
-    # 0.8.5+ is required because that's when KohakuVault landed
-    # the maturin v1.13.3 + ``ANDROID_API_VERSION=24`` build path
-    # that emits properly-tagged ``android_24_<abi>`` Android wheels
-    # (PEP 738).  Earlier versions tagged Android wheels as
-    # ``linux_<arch>`` which Chaquopy's pip rejects with
-    # ``ERROR: ... is not a supported wheel on this platform``.
-    # The postcreate.py URL refs target ``android_24_arm64_v8a`` +
-    # ``android_24_x86_64`` filenames published in KV's GH Release.
-    "kohakuvault>=0.8.5",
+    # 0.8.6+ is required because:
+    #   * 0.8.5 introduced the maturin v1.13.3 +
+    #     ``ANDROID_API_VERSION=24`` build path that emits
+    #     properly-tagged ``android_24_<abi>`` Android wheels
+    #     (PEP 738).  Earlier versions tagged Android wheels as
+    #     ``linux_<arch>`` which Chaquopy's pip rejects with
+    #     ``ERROR: ... is not a supported wheel on this platform``.
+    #   * 0.8.6 relaxed KV's own ``numpy>=2.0.0`` pin to
+    #     ``numpy>=1.26`` — Chaquopy 13.1 tops at numpy 1.26.2,
+    #     so the prior floor blocked the Android Chaquopy resolve
+    #     with ``No matching distribution found for numpy>=2.0.0``.
+    # postcreate.py reads the floor from pyproject and substitutes
+    # it into the KV URL-ref filename, so bumping here drives the
+    # Android wheel URL automatically.
+    "kohakuvault>=0.8.6",
     "textual>=8.0.0",
     "html2text>=2025.0.0",
     "gitpython>=3.1.0",
