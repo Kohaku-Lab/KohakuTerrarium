@@ -56,12 +56,15 @@ dependencies = [
     "libcst>=0.3.23,<2",
     "aiofiles>=25.1.0",
     "python-dotenv>=1.0.0",
-    # 0.8.3+ is required because that's when KohakuVault started
-    # publishing Android wheels (PEP 738 platform tags) via its
-    # release.yml.  The KohakuTerrarium Android CI workflow
-    # fetches the matching wheel from KV's GitHub Releases and
-    # places it in ``./wheels/`` for Chaquopy's pip to pick up.
-    "kohakuvault>=0.8.3",
+    # 0.8.5+ is required because that's when KohakuVault landed
+    # the maturin v1.13.3 + ``ANDROID_API_VERSION=24`` build path
+    # that emits properly-tagged ``android_24_<abi>`` Android wheels
+    # (PEP 738).  Earlier versions tagged Android wheels as
+    # ``linux_<arch>`` which Chaquopy's pip rejects with
+    # ``ERROR: ... is not a supported wheel on this platform``.
+    # The postcreate.py URL refs target ``android_24_arm64_v8a`` +
+    # ``android_24_x86_64`` filenames published in KV's GH Release.
+    "kohakuvault>=0.8.5",
     "textual>=8.0.0",
     "html2text>=2025.0.0",
     "gitpython>=3.1.0",

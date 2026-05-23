@@ -215,8 +215,16 @@ def patch_android_requirements(generated: Path) -> int:
     base = (
         "https://github.com/Kohaku-Lab/KohakuVault/releases/download/" f"v{kv_version}"
     )
-    arm64_url = f"{base}/kohakuvault-{kv_version}-cp313-cp313-linux_aarch64.whl"
-    x86_64_url = f"{base}/kohakuvault-{kv_version}-cp313-cp313-linux_x86_64.whl"
+    # KohakuVault's release.yml retags maturin's ``linux_<arch>``
+    # output to ``android_24_<abi>`` because Chaquopy's pip on the
+    # device only accepts the ``android_*`` platform tag (matching
+    # the curated-index convention, e.g.
+    # ``pyyaml-6.0.3-0-cp313-cp313-android_24_arm64_v8a.whl``).  A
+    # ``linux_aarch64``-tagged wheel fails install with
+    #     ERROR: kohakuvault-... is not a supported wheel on this platform.
+    # The URL filenames here MUST match KV's retag step output.
+    arm64_url = f"{base}/kohakuvault-{kv_version}-cp313-cp313-android_24_arm64_v8a.whl"
+    x86_64_url = f"{base}/kohakuvault-{kv_version}-cp313-cp313-android_24_x86_64.whl"
 
     lines = req_path.read_text(encoding="utf-8").splitlines()
     patched: list[str] = []

@@ -202,12 +202,12 @@ class TestPatchAndroidRequirements:
         assert "kohakuvault>=0.8.3" not in text
         assert (
             "kohakuvault @ https://github.com/Kohaku-Lab/KohakuVault/releases/"
-            "download/v0.8.3/kohakuvault-0.8.3-cp313-cp313-linux_aarch64.whl"
+            "download/v0.8.3/kohakuvault-0.8.3-cp313-cp313-android_24_arm64_v8a.whl"
             " ; platform_machine == 'aarch64'"
         ) in text
         assert (
             "kohakuvault @ https://github.com/Kohaku-Lab/KohakuVault/releases/"
-            "download/v0.8.3/kohakuvault-0.8.3-cp313-cp313-linux_x86_64.whl"
+            "download/v0.8.3/kohakuvault-0.8.3-cp313-cp313-android_24_x86_64.whl"
             " ; platform_machine == 'x86_64'"
         ) in text
         assert "fastapi>=0.115.0" in text
@@ -252,7 +252,7 @@ class TestPatchAndroidRequirements:
         postcreate.patch_android_requirements(gen)
         text = (gen / "requirements.txt").read_text(encoding="utf-8")
         assert "/releases/download/v1.2.3/" in text
-        assert "kohakuvault-1.2.3-cp313-cp313-linux_aarch64.whl" in text
+        assert "kohakuvault-1.2.3-cp313-cp313-android_24_arm64_v8a.whl" in text
 
     def test_extras_form_matched(self, tmp_path, postcreate, monkeypatch):
         # Briefcase may emit ``kohakuvault[extra]>=0.8.3`` if a
