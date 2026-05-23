@@ -415,6 +415,7 @@
       </el-tab-pane>
     </el-tabs>
     <MCPServerEditModal v-model="mcpEditOpen" :server="mcpEditTarget" @saved="onMCPEditSaved" />
+    <CodexLoginModal :open="codexModalOpen" :node="codexModalNode" @close="codexModalOpen = false" @done="onCodexLoginDone" />
   </div>
 </template>
 
@@ -425,6 +426,7 @@ import { ElMessage, ElMessageBox } from "element-plus"
 import AboutPanel from "@/components/settings/AboutPanel.vue"
 import AdvancedPanel from "@/components/settings/AdvancedPanel.vue"
 import BackendForm from "@/components/settings/BackendForm.vue"
+import CodexLoginModal from "@/components/settings/CodexLoginModal.vue"
 import MCPServerEditModal from "@/components/settings/modals/MCPServerEditModal.vue"
 import PresetEditor from "@/components/settings/PresetEditor.vue"
 import SitesPane from "@/components/settings/SitesPane.vue"
@@ -507,13 +509,31 @@ async function deleteKey(provider) {
 }
 
 const codexLoggingIn = ref(false)
-async function runCodexLogin() {
+const codexModalOpen = ref(false)
+const codexModalNode = ref("_host")
+
+function runCodexLogin() {
+  // Worker-side login still uses the one-shot REST endpoint (the
+  // streaming variant only supports the host node in 1.5.0).  For
+  // host-side login we open the streaming modal so the user sees
+  // the manual URL + device code immediately — required for
+  // environments where ``webbrowser.open()`` silently fails
+  // (Android WebView, headless CI, SSH).
+  const target = providerNode.value
+  if (target && target !== "_host") {
+    void runCodexLoginRemote(target)
+    return
+  }
+  codexModalNode.value = "_host"
+  codexModalOpen.value = true
+}
+
+async function runCodexLoginRemote(node) {
   codexLoggingIn.value = true
-  const target = providerNode.value && providerNode.value !== "_host" ? providerNode.value : "host"
-  ElMessage.info(`Codex OAuth started on ${target} — complete the flow in the browser that opens (or visit the console URL).`)
+  ElMessage.info(`Codex OAuth started on ${node} — complete the flow in the browser that opens on that worker.`)
   try {
-    await settingsAPI.codexLogin(providerNode.value)
-    ElMessage.success(`Codex login successful on ${target}`)
+    await settingsAPI.codexLogin(node)
+    ElMessage.success(`Codex login successful on ${node}`)
     await loadKeys()
     await loadBackends()
   } catch (err) {
@@ -521,6 +541,12 @@ async function runCodexLogin() {
   } finally {
     codexLoggingIn.value = false
   }
+}
+
+async function onCodexLoginDone() {
+  ElMessage.success("Codex login successful")
+  await loadKeys()
+  await loadBackends()
 }
 
 // Re-fetch keys whenever the user switches target node. Backends and
