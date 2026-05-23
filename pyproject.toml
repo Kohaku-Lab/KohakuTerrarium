@@ -398,6 +398,18 @@ min_os_version = "26"
 target_os_version = "34"
 # Version code: 1.5.0 → 1_05_000.  Encodes <major><MM><NN><PP>.
 version_code = "10500000"
+# Restrict to arm64-v8a only.  x86_64 emulator support is not worth
+# the CI time + matrix complexity for a personal-agent app, and
+# pip/Chaquopy on x86_64 had a marker-eval quirk where our
+# ``platform_machine == 'x86_64'`` URL refs did not activate during
+# the per-ABI second pass (arm64 install resolved fine; x86_64 then
+# failed with "no matching distribution found for rpds-py==0.30.0"
+# because Chaquopy locks resolved versions across ABIs and the URL
+# ref line did not carry over).  arm64-v8a covers 99%+ of physical
+# Android devices in 2026; armv7 and x86 are not in our matrix
+# anyway.  If a real need for x86_64 (emulator-only debugging?)
+# arises, debug the marker-eval quirk first.
+android_abis = ["arm64-v8a"]
 # Foreground service + camera + notification permissions, plus
 # the foreground-service-type sub-permission for Android 14+.
 android_manifest_extra_content = """
