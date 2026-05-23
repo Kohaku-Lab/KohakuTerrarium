@@ -300,15 +300,32 @@ class TestScanCatalog:
 
 
 class TestScanInDirs:
-    def test_empty(self):
-        assert scan_mod.scan_creatures_in_dirs([]) == []
+    """Behavioural tests for scan_{creatures,terrariums}_in_dirs.
 
-    def test_skips_non_dir(self, tmp_path):
-        scan_mod.invalidate_scan_caches()
-        # base dir doesn't exist.
+    The scanners drive discovery from ``list_packages()`` (the same
+    source ``scan_catalog`` uses) PLUS any extra ``base_dirs`` the
+    caller passes — see the function docstring for why both sources
+    are required (Android boot wires no base_dirs; desktop captured
+    them only once at boot).  Every test below monkeypatches
+    ``list_packages`` and ``_build_package_root_map`` so it never
+    leaks into the developer's real ``~/.kohakuterrarium/packages``.
+    """
+
+    def test_empty_no_packages(self, monkeypatch):
+        # No packages installed AND no base_dirs → empty result.
+        monkeypatch.setattr(scan_mod, "list_packages", lambda: [])
+        monkeypatch.setattr(scan_mod, "_build_package_root_map", lambda: {})
+        assert scan_mod.scan_creatures_in_dirs([]) == []
+        assert scan_mod.scan_terrariums_in_dirs([]) == []
+
+    def test_skips_non_dir(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(scan_mod, "list_packages", lambda: [])
+        monkeypatch.setattr(scan_mod, "_build_package_root_map", lambda: {})
+        # Base dir doesn't exist — should be silently skipped.
         assert scan_mod.scan_creatures_in_dirs([tmp_path / "ghost"]) == []
 
-    def test_scans_creatures(self, monkeypatch, tmp_path):
+    def test_scans_creatures_from_base_dir(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(scan_mod, "list_packages", lambda: [])
         monkeypatch.setattr(scan_mod, "_build_package_root_map", lambda: {})
         cdir = tmp_path / "alice"
         cdir.mkdir()
@@ -317,6 +334,7 @@ class TestScanInDirs:
         assert out[0]["name"] == "alice"
 
     def test_cache_hit(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(scan_mod, "list_packages", lambda: [])
         monkeypatch.setattr(scan_mod, "_build_package_root_map", lambda: {})
         cdir = tmp_path / "alice"
         cdir.mkdir()
@@ -327,24 +345,189 @@ class TestScanInDirs:
         assert first == second
 
     def test_skips_dir_without_config(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(scan_mod, "list_packages", lambda: [])
         monkeypatch.setattr(scan_mod, "_build_package_root_map", lambda: {})
         (tmp_path / "no-config").mkdir()
         out = scan_mod.scan_creatures_in_dirs([tmp_path])
         assert out == []
 
     def test_skips_non_dir_children(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(scan_mod, "list_packages", lambda: [])
         monkeypatch.setattr(scan_mod, "_build_package_root_map", lambda: {})
         (tmp_path / "file.txt").write_text("x")
         out = scan_mod.scan_creatures_in_dirs([tmp_path])
         assert out == []
 
-    def test_scans_terrariums(self, monkeypatch, tmp_path):
+    def test_scans_terrariums_from_base_dir(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(scan_mod, "list_packages", lambda: [])
         monkeypatch.setattr(scan_mod, "_build_package_root_map", lambda: {})
         tdir = tmp_path / "t1"
         tdir.mkdir()
         (tdir / "terrarium.yaml").write_text("name: t1")
         out = scan_mod.scan_terrariums_in_dirs([tmp_path])
         assert out[0]["name"] == "t1"
+
+    # ── package-driven discovery contract ─────────────────────
+    #
+    # These are the pin tests for the Android-restart bug: when
+    # ``base_dirs`` is empty (Android launcher wires nothing) the
+    # scanners MUST still surface every creature / terrarium that
+    # ``list_packages`` reports.  Without these tests, a future
+    # refactor that "simplifies" the scanner back to base-dirs-only
+    # would silently reintroduce the empty-modal regression.
+
+    def test_creatures_from_packages_with_no_base_dirs(self, monkeypatch, tmp_path):
+        # Simulate an installed package whose manifest declares two
+        # creature paths.  The Android scenario: ``base_dirs=[]``
+        # because the launcher never wired ``set_creatures_dirs``,
+        # but the catalog endpoint already sees the package — so
+        # the configs endpoint must too.
+        pkg_root = tmp_path / "kt-biome"
+        pkg_root.mkdir()
+        for name in ("general", "swe"):
+            cdir = pkg_root / "creatures" / name
+            cdir.mkdir(parents=True)
+            (cdir / "config.yaml").write_text(f"name: {name}")
+
+        monkeypatch.setattr(
+            scan_mod,
+            "list_packages",
+            lambda: [
+                {
+                    "name": "kt-biome",
+                    "path": str(pkg_root),
+                    "creatures": [
+                        {"name": "general", "path": "creatures/general"},
+                        {"name": "swe", "path": "creatures/swe"},
+                    ],
+                    "terrariums": [],
+                }
+            ],
+        )
+        monkeypatch.setattr(
+            scan_mod,
+            "_build_package_root_map",
+            lambda: {str(pkg_root.resolve()): "kt-biome"},
+        )
+
+        # base_dirs intentionally empty — this is the Android case.
+        out = scan_mod.scan_creatures_in_dirs([])
+        names = sorted(c["name"] for c in out)
+        assert names == ["general", "swe"]
+        # Paths should be ``@pkg/...`` refs since the creatures live
+        # inside the package root.
+        for c in out:
+            assert c["path"].startswith("@kt-biome/")
+
+    def test_terrariums_from_packages_with_no_base_dirs(self, monkeypatch, tmp_path):
+        pkg_root = tmp_path / "kt-biome"
+        pkg_root.mkdir()
+        tdir = pkg_root / "terrariums" / "swe_team"
+        tdir.mkdir(parents=True)
+        (tdir / "terrarium.yaml").write_text("name: swe_team")
+
+        monkeypatch.setattr(
+            scan_mod,
+            "list_packages",
+            lambda: [
+                {
+                    "name": "kt-biome",
+                    "path": str(pkg_root),
+                    "creatures": [],
+                    "terrariums": [{"name": "swe_team", "path": "terrariums/swe_team"}],
+                }
+            ],
+        )
+        monkeypatch.setattr(
+            scan_mod,
+            "_build_package_root_map",
+            lambda: {str(pkg_root.resolve()): "kt-biome"},
+        )
+
+        out = scan_mod.scan_terrariums_in_dirs([])
+        assert [t["name"] for t in out] == ["swe_team"]
+        assert out[0]["path"].startswith("@kt-biome/")
+
+    def test_packages_and_base_dirs_combine(self, monkeypatch, tmp_path):
+        # A user with both an installed package AND a cwd/creatures
+        # dir wired into base_dirs should see both sources in the
+        # result.
+        pkg_root = tmp_path / "kt-biome"
+        pkg_cdir = pkg_root / "creatures" / "general"
+        pkg_cdir.mkdir(parents=True)
+        (pkg_cdir / "config.yaml").write_text("name: general")
+
+        cwd_base = tmp_path / "workspace" / "creatures"
+        cwd_base.mkdir(parents=True)
+        local_cdir = cwd_base / "alice"
+        local_cdir.mkdir()
+        (local_cdir / "config.yaml").write_text("name: alice")
+
+        monkeypatch.setattr(
+            scan_mod,
+            "list_packages",
+            lambda: [
+                {
+                    "name": "kt-biome",
+                    "path": str(pkg_root),
+                    "creatures": [{"name": "general", "path": "creatures/general"}],
+                    "terrariums": [],
+                }
+            ],
+        )
+        monkeypatch.setattr(scan_mod, "_build_package_root_map", lambda: {})
+
+        out = scan_mod.scan_creatures_in_dirs([cwd_base])
+        names = sorted(c["name"] for c in out)
+        assert names == ["alice", "general"]
+
+    def test_dedup_when_base_dir_overlaps_package(self, monkeypatch, tmp_path):
+        # Passing a base_dir that points INSIDE a package's
+        # ``creatures/`` subtree must not produce duplicate entries.
+        # Resolved-path dedup is the contract.
+        pkg_root = tmp_path / "kt-biome"
+        cdir = pkg_root / "creatures" / "general"
+        cdir.mkdir(parents=True)
+        (cdir / "config.yaml").write_text("name: general")
+
+        monkeypatch.setattr(
+            scan_mod,
+            "list_packages",
+            lambda: [
+                {
+                    "name": "kt-biome",
+                    "path": str(pkg_root),
+                    "creatures": [{"name": "general", "path": "creatures/general"}],
+                    "terrariums": [],
+                }
+            ],
+        )
+        monkeypatch.setattr(scan_mod, "_build_package_root_map", lambda: {})
+
+        # base_dir == pkg_root/creatures/ — same place the package's
+        # manifest already pointed at.
+        out = scan_mod.scan_creatures_in_dirs([pkg_root / "creatures"])
+        assert len(out) == 1
+        assert out[0]["name"] == "general"
+
+    def test_skips_creature_with_no_path_in_manifest(self, monkeypatch, tmp_path):
+        # Defensive: a manifest entry missing the ``path`` key should
+        # be silently skipped rather than crashing on KeyError.
+        monkeypatch.setattr(
+            scan_mod,
+            "list_packages",
+            lambda: [
+                {
+                    "name": "broken",
+                    "path": str(tmp_path),
+                    "creatures": [{"name": "ghost"}],  # no path
+                    "terrariums": [],
+                }
+            ],
+        )
+        monkeypatch.setattr(scan_mod, "_build_package_root_map", lambda: {})
+
+        assert scan_mod.scan_creatures_in_dirs([]) == []
 
 
 # ── dedupe_dirs ─────────────────────────────────────────────

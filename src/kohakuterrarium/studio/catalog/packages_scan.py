@@ -324,18 +324,34 @@ def scan_catalog() -> list[CatalogEntry]:
 
 
 def scan_creatures_in_dirs(base_dirs: list[Path]) -> list[dict]:
-    """Scan configured base dirs for creature configs (raw-YAML only).
+    """Discover creature configs for the ``/api/configs/creatures`` endpoint.
 
-    Used by the ``/api/configs/creatures`` endpoint. Returns the
-    legacy ``{name, path, description}`` shape; ``path`` is rendered
-    as an ``@pkg/...`` ref when the directory lives inside a package,
-    matching ``api.routes.configs._to_ref``.
+    Returns the legacy ``{name, path, description}`` shape; ``path``
+    is rendered as an ``@pkg/...`` ref when the directory lives
+    inside a package, matching ``api.routes.configs._to_ref``.
+
+    Discovery now matches ``scan_catalog`` exactly: every installed
+    package's manifest-declared creatures (read at request time via
+    ``list_packages()``) PLUS any extra ``base_dirs`` the caller
+    passes in (env-var overrides + cwd creature dirs, when wired).
+
+    Earlier versions of this scanner only walked ``base_dirs`` —
+    which were captured ONCE at API-server boot via
+    ``set_creatures_dirs``.  On Android the launcher never wires the
+    base dirs (packages can only be installed at runtime via the
+    frontend, so there's nothing to capture at boot), and on desktop
+    a package installed mid-session never showed up in the New-
+    creature modal because ``_creatures_dirs`` was frozen at startup.
+    Driving discovery from ``list_packages()`` at request time fixes
+    both — the modal now reflects whatever the catalog reflects, with
+    no boot-time wiring required.
 
     Cached for ``_SCAN_CACHE_TTL`` seconds keyed by the resolved
-    base-dir tuple — the v2 dashboard quick-start modal otherwise pays
-    the YAML-parse cost every time it opens. Use
-    :func:`invalidate_scan_caches` after creating / deleting a creature
-    on disk to force a re-scan.
+    base-dir tuple — the dashboard quick-start modal otherwise pays
+    the YAML-parse cost every time it opens.  The 10s TTL is short
+    enough that newly-scaffolded creatures show up promptly; the
+    package install / uninstall / update ops explicitly call
+    :func:`invalidate_scan_caches` for immediate visibility.
     """
     global _creatures_cache
     key = _cache_key(base_dirs)
@@ -346,35 +362,68 @@ def scan_creatures_in_dirs(base_dirs: list[Path]) -> list[dict]:
             return cached_results
 
     results: list[dict] = []
+    seen: set[str] = set()
     package_roots = _build_package_root_map()
+
+    def _emit(config_dir: Path) -> None:
+        # Resolved-path dedup so a base_dir that overlaps a package
+        # directory doesn't produce two entries for the same creature.
+        try:
+            resolved = str(config_dir.resolve())
+        except OSError:
+            return
+        if resolved in seen:
+            return
+        seen.add(resolved)
+        config_file = config_dir / "config.yaml"
+        if not config_file.exists():
+            config_file = config_dir / "config.yml"
+        if not config_file.exists():
+            return
+        minimal = _parse_creature_minimal(config_dir)
+        results.append(
+            {
+                "name": minimal["name"],
+                "path": to_ref(config_dir, package_roots),
+                "description": minimal["description"],
+            }
+        )
+
+    # 1. Manifest-declared creatures from every installed package.
+    #    This is the source of truth ``scan_catalog`` uses; matching
+    #    it here keeps the two endpoints from diverging.
+    for pkg in list_packages():
+        pkg_path = Path(pkg["path"])
+        for c in pkg.get("creatures", []):
+            rel = c.get("path") if isinstance(c, dict) else None
+            if not rel:
+                continue
+            _emit(pkg_path / rel)
+
+    # 2. Configured base dirs — env-var overrides + cwd/creatures,
+    #    when the API-server boot path wired them.  Each subdir of a
+    #    base_dir is treated as a creature config dir.
     for base_dir in base_dirs:
         if not base_dir.is_dir():
             continue
         for child in sorted(base_dir.iterdir()):
-            if not child.is_dir():
-                continue
-            config_file = child / "config.yaml"
-            if not config_file.exists():
-                config_file = child / "config.yml"
-            if not config_file.exists():
-                continue
-            minimal = _parse_creature_minimal(child)
-            results.append(
-                {
-                    "name": minimal["name"],
-                    "path": to_ref(child, package_roots),
-                    "description": minimal["description"],
-                }
-            )
+            if child.is_dir():
+                _emit(child)
+
     _creatures_cache = (results, now, key)
     return results
 
 
 def scan_terrariums_in_dirs(base_dirs: list[Path]) -> list[dict]:
-    """Scan configured base dirs for terrarium configs (raw-YAML only).
+    """Discover terrarium configs for the ``/api/configs/terrariums`` endpoint.
 
-    Cached for ``_SCAN_CACHE_TTL`` seconds (see
-    :func:`scan_creatures_in_dirs` for caching rationale).
+    Mirror of :func:`scan_creatures_in_dirs` — see that function's
+    docstring for the rationale.  Discovery walks every installed
+    package's manifest-declared terrariums via ``list_packages()``
+    plus any extra ``base_dirs`` the caller supplies.
+
+    Cached for ``_SCAN_CACHE_TTL`` seconds; the package install /
+    uninstall / update ops bust the cache for immediate visibility.
     """
     global _terrariums_cache
     key = _cache_key(base_dirs)
@@ -385,26 +434,48 @@ def scan_terrariums_in_dirs(base_dirs: list[Path]) -> list[dict]:
             return cached_results
 
     results: list[dict] = []
+    seen: set[str] = set()
     package_roots = _build_package_root_map()
+
+    def _emit(config_dir: Path) -> None:
+        try:
+            resolved = str(config_dir.resolve())
+        except OSError:
+            return
+        if resolved in seen:
+            return
+        seen.add(resolved)
+        config_file = config_dir / "terrarium.yaml"
+        if not config_file.exists():
+            config_file = config_dir / "terrarium.yml"
+        if not config_file.exists():
+            return
+        minimal = _parse_terrarium_minimal(config_dir)
+        results.append(
+            {
+                "name": minimal["name"],
+                "path": to_ref(config_dir, package_roots),
+                "description": minimal["description"],
+            }
+        )
+
+    # 1. Manifest-declared terrariums from every installed package.
+    for pkg in list_packages():
+        pkg_path = Path(pkg["path"])
+        for t in pkg.get("terrariums", []):
+            rel = t.get("path") if isinstance(t, dict) else None
+            if not rel:
+                continue
+            _emit(pkg_path / rel)
+
+    # 2. Configured base dirs (env-var overrides + cwd/terrariums).
     for base_dir in base_dirs:
         if not base_dir.is_dir():
             continue
         for child in sorted(base_dir.iterdir()):
-            if not child.is_dir():
-                continue
-            config_file = child / "terrarium.yaml"
-            if not config_file.exists():
-                config_file = child / "terrarium.yml"
-            if not config_file.exists():
-                continue
-            minimal = _parse_terrarium_minimal(child)
-            results.append(
-                {
-                    "name": minimal["name"],
-                    "path": to_ref(child, package_roots),
-                    "description": minimal["description"],
-                }
-            )
+            if child.is_dir():
+                _emit(child)
+
     _terrariums_cache = (results, now, key)
     return results
 

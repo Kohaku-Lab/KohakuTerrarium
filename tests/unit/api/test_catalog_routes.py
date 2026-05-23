@@ -104,24 +104,31 @@ class TestServerInfoRoute:
 
 
 class TestCreaturesScanRoute:
-    def test_empty_dirs(self):
+    def test_empty_dirs(self, monkeypatch):
+        from kohakuterrarium.studio.catalog import packages_scan as scan_mod
         from kohakuterrarium.studio.catalog.packages_scan import (
             invalidate_scan_caches,
         )
 
+        # Isolate from the developer's real ``~/.kohakuterrarium/packages``
+        # so the assertion isn't shape-fragile across machines.
+        monkeypatch.setattr(scan_mod, "list_packages", lambda: [])
         creatures_scan_mod.set_creatures_dirs([])
         invalidate_scan_caches()
         r = _client(creatures_scan_mod.router).get(PREFIX)
         assert r.status_code == 200
-        # No configured dirs → nothing to scan.
+        # No packages installed AND no configured dirs → nothing.
         assert r.json() == []
 
-    def test_set_dirs_then_scan(self, tmp_path):
+    def test_set_dirs_then_scan(self, monkeypatch, tmp_path):
+        from kohakuterrarium.studio.catalog import packages_scan as scan_mod
         from kohakuterrarium.studio.catalog.packages_scan import (
             invalidate_scan_caches,
         )
 
-        # The scanner keys on config.yaml, not agent.yaml.
+        # The scanner keys on config.yaml, not agent.yaml.  Stub
+        # list_packages so this test only sees the base-dir source.
+        monkeypatch.setattr(scan_mod, "list_packages", lambda: [])
         c = tmp_path / "alice"
         c.mkdir()
         (c / "config.yaml").write_text("name: alice\ndescription: a bot\n")
@@ -138,28 +145,83 @@ class TestCreaturesScanRoute:
             creatures_scan_mod.set_creatures_dirs([])
             invalidate_scan_caches()
 
+    def test_packages_discovered_with_no_base_dirs(self, monkeypatch, tmp_path):
+        # The Android-restart contract pinned at the route layer:
+        # even with ``set_creatures_dirs([])`` (which is what the
+        # Android launcher leaves it as), an installed package's
+        # manifest-declared creatures MUST surface on the
+        # ``/api/configs/creatures`` endpoint.  Previously this
+        # silently returned ``[]``, which is why the "New creature"
+        # modal stayed empty on Android even after kt-biome had been
+        # installed via the catalog tab and an app restart.
+        from kohakuterrarium.studio.catalog import packages_scan as scan_mod
+        from kohakuterrarium.studio.catalog.packages_scan import (
+            invalidate_scan_caches,
+        )
+
+        pkg_root = tmp_path / "kt-biome"
+        cdir = pkg_root / "creatures" / "general"
+        cdir.mkdir(parents=True)
+        (cdir / "config.yaml").write_text("name: general\n")
+
+        monkeypatch.setattr(
+            scan_mod,
+            "list_packages",
+            lambda: [
+                {
+                    "name": "kt-biome",
+                    "path": str(pkg_root),
+                    "creatures": [{"name": "general", "path": "creatures/general"}],
+                    "terrariums": [],
+                }
+            ],
+        )
+        # _build_package_root_map normally re-queries the real
+        # ~/.kohakuterrarium/packages lookup via get_package_root.
+        # Stub it to point at our tmp pkg_root so to_ref renders
+        # the @pkg/... reference instead of an absolute path.
+        monkeypatch.setattr(
+            scan_mod,
+            "_build_package_root_map",
+            lambda: {str(pkg_root.resolve()): "kt-biome"},
+        )
+        creatures_scan_mod.set_creatures_dirs([])
+        invalidate_scan_caches()
+        r = _client(creatures_scan_mod.router).get(PREFIX)
+        assert r.status_code == 200
+        body = r.json()
+        assert [c["name"] for c in body] == ["general"]
+        # Path rendered as an ``@pkg/...`` ref since the creature
+        # lives inside an installed package.
+        assert body[0]["path"].startswith("@kt-biome/")
+
 
 # ── /terrariums_scan ───────────────────────────────────────────
 
 
 class TestTerrariumsScanRoute:
-    def test_empty_dirs(self):
+    def test_empty_dirs(self, monkeypatch):
+        from kohakuterrarium.studio.catalog import packages_scan as scan_mod
         from kohakuterrarium.studio.catalog.packages_scan import (
             invalidate_scan_caches,
         )
 
+        monkeypatch.setattr(scan_mod, "list_packages", lambda: [])
         terrariums_scan_mod.set_terrariums_dirs([])
         invalidate_scan_caches()
         r = _client(terrariums_scan_mod.router).get(PREFIX)
         assert r.status_code == 200
         assert r.json() == []
 
-    def test_set_dirs(self, tmp_path):
+    def test_set_dirs(self, monkeypatch, tmp_path):
+        from kohakuterrarium.studio.catalog import packages_scan as scan_mod
         from kohakuterrarium.studio.catalog.packages_scan import (
             invalidate_scan_caches,
         )
 
-        # Scanner keys on terrarium.yaml.
+        # Scanner keys on terrarium.yaml.  Stub list_packages so the
+        # test sees only the base-dir source.
+        monkeypatch.setattr(scan_mod, "list_packages", lambda: [])
         t = tmp_path / "swarm"
         t.mkdir()
         (t / "terrarium.yaml").write_text("name: swarm\n")
