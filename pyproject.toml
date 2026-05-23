@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "KohakuTerrarium"
-version = "2.0.0.dev9"
+version = "2.0.0.dev10"
 description = "A universal agent framework for building self-driven AI agents and multi-agent teams"
 authors = [
     { name = "Shih-Ying Yeh (KohakuBlueLeaf)", email = "apolloyeh0123@gmail.com" },
@@ -291,7 +291,7 @@ select = ["F401", "F841"]
 [tool.briefcase]
 project_name = "KohakuTerrarium"
 bundle = "com.kohaku.terrarium"
-version = "2.0.0.dev9"
+version = "2.0.0.dev10"
 url = "https://github.com/Kohaku-Lab/KohakuTerrarium"
 # License is read from PEP 639 ``[project]`` above; Briefcase
 # 0.3.21+ no longer accepts ``license.file`` here.
