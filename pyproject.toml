@@ -95,8 +95,16 @@ dependencies = [
     # consumers already lazy-import, so absence on Android is a
     # graceful "tool unavailable" not a boot crash.
     "pymupdf>=1.24.0",
-    # Image decode-verification for the read tool (PNG/JPEG/WEBP/GIF)
-    "Pillow>=12.2.0",
+    # Image decode-verification for the read tool (PNG/JPEG/WEBP/GIF).
+    # Floor relaxed to 11.0.0 because Chaquopy 13.1 (the Briefcase
+    # Android Python runtime) ships Pillow 11.0.0 max and rejects
+    # ``>=12`` at install time.  The APIs we actually use
+    # (``Image.open`` + ``img.verify`` + ``img.format`` + ``img.load``
+    # — see ``builtins/tools/read.py``) are stable across Pillow 2.x→
+    # 12.x, so a single floor that works on both Chaquopy and PyPI is
+    # safe.  Same split-version policy as ``libcst>=0.3.23,<2``.
+    # Chaquopy version index: https://chaquo.com/pypi-13.1/pillow/
+    "Pillow>=11.0.0",
     # MCP client
     "mcp>=1.0.0",
     # Lightweight embeddings (no pytorch)
