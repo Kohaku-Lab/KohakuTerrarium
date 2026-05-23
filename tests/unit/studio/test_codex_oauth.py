@@ -61,12 +61,33 @@ class TestGetStatus:
 
 class TestLoginAsync:
     async def test_returns_status(self, monkeypatch):
-        async def fake_oauth():
+        async def fake_oauth(*, on_device_code=None):
+            # ``oauth_login`` gained an ``on_device_code`` callback for
+            # the SSE streaming route; ``login_async`` forwards it
+            # unchanged.  Stub accepts + ignores it so this older
+            # contract test keeps passing.
             return _FakeTokens(expires_at=12345)
 
         monkeypatch.setattr(mod, "oauth_login", fake_oauth)
         out = await login_async()
         assert out == {"status": "ok", "expires_at": 12345}
+
+    async def test_forwards_on_device_code_callback(self, monkeypatch):
+        # The SSE route relies on login_async piping the callback
+        # through to oauth_login.  Verify the kwarg actually arrives.
+        seen = {}
+
+        async def fake_oauth(*, on_device_code=None):
+            seen["callback"] = on_device_code
+            return _FakeTokens(expires_at=999)
+
+        monkeypatch.setattr(mod, "oauth_login", fake_oauth)
+
+        async def cb(url, code, expires_in):  # pragma: no cover
+            pass
+
+        await login_async(on_device_code=cb)
+        assert seen["callback"] is cb
 
 
 # ── get_usage_async ─────────────────────────────────────────────
