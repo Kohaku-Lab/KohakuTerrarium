@@ -6,27 +6,34 @@
     Bubble has equal margin left/right/bottom
   -->
   <div class="h-full flex flex-col bg-warm-100 dark:bg-[#211F1D]">
-    <!-- Tab bar on panel bg -->
-    <div role="tablist" class="flex items-end gap-0 px-4 pt-2 shrink-0">
-      <div v-for="tab in chat.tabs" :key="tab" role="tab" tabindex="0" :aria-selected="chat.activeTab === tab" class="relative flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium cursor-pointer select-none rounded-t-lg -mb-px transition-colors" :class="chat.activeTab === tab ? 'bg-white dark:bg-warm-900 text-warm-800 dark:text-warm-200 border border-warm-200 dark:border-warm-700 border-b-white dark:border-b-warm-900 z-10' : 'text-warm-400 dark:text-warm-500 hover:text-warm-600 dark:hover:text-warm-400 border border-transparent'" @click="chat.setActiveTab(tab)" @keydown.enter="chat.setActiveTab(tab)" @keydown.space.prevent="chat.setActiveTab(tab)">
-        <template v-if="tab === 'root'">
-          <span class="w-2 h-2 rounded-full bg-amber shrink-0" />
-          <span>{{ t("common.rootAgent") }}</span>
-        </template>
-        <template v-else-if="tab.startsWith('ch:')">
-          <span class="text-aquamarine font-bold shrink-0">&rarr;</span>
-          <span>{{ tab.slice(3) }}</span>
-          <span v-if="chat.unreadCounts[tab]" class="ml-1 px-1.5 py-0.5 rounded-full bg-amber text-white text-[9px] font-bold leading-none">{{ chat.unreadCounts[tab] }}</span>
-        </template>
-        <template v-else>
-          <StatusDot :status="getCreatureStatus(tab)" />
-          <span>{{ tab }}</span>
-          <SiteChip :node-id="getCreatureHomeNode(tab)" />
-        </template>
+    <!-- Tab bar on panel bg.  The tabs themselves live in their own
+         ``overflow-x-auto`` scroller so on narrow viewports (and when
+         the user opens many channel tabs) the bar scrolls horizontally
+         within its own box instead of pushing the whole page sideways.
+         Model switcher + token-usage chips stay outside that scroller
+         so they remain visible. -->
+    <div role="tablist" class="flex items-end gap-0 px-4 pt-2 shrink-0 min-w-0">
+      <div class="flex items-end overflow-x-auto scrollbar-none min-w-0">
+        <div v-for="tab in chat.tabs" :key="tab" role="tab" tabindex="0" :aria-selected="chat.activeTab === tab" class="relative flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium cursor-pointer select-none rounded-t-lg -mb-px transition-colors shrink-0" :class="chat.activeTab === tab ? 'bg-white dark:bg-warm-900 text-warm-800 dark:text-warm-200 border border-warm-200 dark:border-warm-700 border-b-white dark:border-b-warm-900 z-10' : 'text-warm-400 dark:text-warm-500 hover:text-warm-600 dark:hover:text-warm-400 border border-transparent'" @click="chat.setActiveTab(tab)" @keydown.enter="chat.setActiveTab(tab)" @keydown.space.prevent="chat.setActiveTab(tab)">
+          <template v-if="tab === 'root'">
+            <span class="w-2 h-2 rounded-full bg-amber shrink-0" />
+            <span>{{ t("common.rootAgent") }}</span>
+          </template>
+          <template v-else-if="tab.startsWith('ch:')">
+            <span class="text-aquamarine font-bold shrink-0">&rarr;</span>
+            <span>{{ tab.slice(3) }}</span>
+            <span v-if="chat.unreadCounts[tab]" class="ml-1 px-1.5 py-0.5 rounded-full bg-amber text-white text-[9px] font-bold leading-none">{{ chat.unreadCounts[tab] }}</span>
+          </template>
+          <template v-else>
+            <StatusDot :status="getCreatureStatus(tab)" />
+            <span>{{ tab }}</span>
+            <SiteChip :node-id="getCreatureHomeNode(tab)" />
+          </template>
 
-        <button v-if="tab !== 'root' && chat.tabs.length > 1" class="ml-1 w-4 h-4 flex items-center justify-center rounded-sm text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" :aria-label="t('chat.closeTab', { tab })" @click.stop="closeTab(tab)">
-          <div class="i-carbon-close text-[10px]" />
-        </button>
+          <button v-if="tab !== 'root' && chat.tabs.length > 1" class="ml-1 w-7 h-7 sm:w-4 sm:h-4 flex items-center justify-center rounded-sm text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" :aria-label="t('chat.closeTab', { tab })" @click.stop="closeTab(tab)">
+            <div class="i-carbon-close text-sm sm:text-[10px]" />
+          </button>
+        </div>
       </div>
 
       <!-- Model switcher — only mounted on compact density. The
@@ -124,9 +131,9 @@
         <div v-if="showPendingBanner" class="mb-2 flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-amber/10 dark:bg-amber/15 border border-amber/30 text-xs">
           <span class="i-carbon-warning-alt text-amber" />
           <span class="text-amber-shadow dark:text-amber-light">
-            {{ pendingCount === 1 ? "1 pending request needs your reply" : `${pendingCount} pending requests need your reply` }}
+            {{ t("chat.pendingBanner", { count: pendingCount }) }}
           </span>
-          <button class="ml-auto text-amber hover:underline" @click="scrollToPending">show</button>
+          <button class="ml-auto text-amber hover:underline" @click="scrollToPending">{{ t("chat.pendingShow") }}</button>
         </div>
         <div v-if="attachments.length" class="mb-2 flex flex-wrap gap-2">
           <div v-for="(file, idx) in attachments" :key="file.name + ':' + idx" class="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-iolite/8 dark:bg-iolite/12 border border-iolite/20 text-xs">
@@ -141,26 +148,26 @@
           <input ref="imageInputEl" type="file" accept="image/*" class="hidden" @change="(e) => onFileChange(e, 'image')" />
           <input ref="fileInputEl" type="file" class="hidden" @change="(e) => onFileChange(e, 'file')" />
           <div class="flex items-center gap-0 shrink-0 mb-0.5">
-            <button class="w-7 h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-aquamarine dark:hover:text-aquamarine hover:bg-aquamarine/10" title="Attach file" aria-label="Attach file" @click="fileInputEl?.click()">
-              <span class="i-carbon-add text-xs" />
+            <button class="w-10 h-10 sm:w-7 sm:h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-aquamarine dark:hover:text-aquamarine hover:bg-aquamarine/10" title="Attach file" aria-label="Attach file" @click="fileInputEl?.click()">
+              <span class="i-carbon-add text-sm sm:text-xs" />
             </button>
-            <button class="w-7 h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-iolite dark:hover:text-iolite-light hover:bg-iolite/10" :title="t('chat.attachImage')" :aria-label="t('chat.attachImage')" @click="imageInputEl?.click()">
-              <span class="i-carbon-image text-xs" />
+            <button class="w-10 h-10 sm:w-7 sm:h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-iolite dark:hover:text-iolite-light hover:bg-iolite/10" :title="t('chat.attachImage')" :aria-label="t('chat.attachImage')" @click="imageInputEl?.click()">
+              <span class="i-carbon-image text-sm sm:text-xs" />
             </button>
           </div>
-          <textarea ref="inputEl" v-model="inputText" rows="1" class="flex-1 bg-transparent border-none outline-none text-sm text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 resize-none max-h-32 leading-relaxed py-1 min-w-0" style="min-height: 2em" :placeholder="inputPlaceholder" @keydown="onInputKeydown" @input="autoResize" />
+          <textarea ref="inputEl" v-model="inputText" rows="1" class="flex-1 bg-transparent border-none outline-none text-sm text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 resize-none max-h-32 leading-relaxed py-1 min-w-0" style="min-height: 2em" :placeholder="inputPlaceholder" @keydown="onInputKeydown" @input="autoResize" @paste="onPaste" />
           <div class="flex items-center gap-1 shrink-0 mb-0.5">
-            <button class="w-7 h-7 flex items-center justify-center rounded-md transition-colors text-warm-400 hover:text-iolite dark:hover:text-iolite-light hover:bg-iolite/10" :title="t('chat.compactContext')" :aria-label="t('chat.compactContext')" @click="triggerCompact">
-              <span class="i-carbon-collapse-all text-xs" />
+            <button class="w-10 h-10 sm:w-7 sm:h-7 flex items-center justify-center rounded-md transition-colors text-warm-400 hover:text-iolite dark:hover:text-iolite-light hover:bg-iolite/10" :title="t('chat.compactContext')" :aria-label="t('chat.compactContext')" @click="triggerCompact">
+              <span class="i-carbon-collapse-all text-sm sm:text-xs" />
             </button>
-            <button class="w-7 h-7 flex items-center justify-center rounded-md transition-colors text-warm-400 hover:text-coral hover:bg-coral/10" :title="t('chat.clearContext')" :aria-label="t('chat.clearContext')" @click="triggerClear">
-              <span class="i-carbon-clean text-xs" />
+            <button class="w-10 h-10 sm:w-7 sm:h-7 flex items-center justify-center rounded-md transition-colors text-warm-400 hover:text-coral hover:bg-coral/10" :title="t('chat.clearContext')" :aria-label="t('chat.clearContext')" @click="triggerClear">
+              <span class="i-carbon-clean text-sm sm:text-xs" />
             </button>
-            <button v-if="chat.processing || chat.hasRunningJobs" class="w-8 h-8 flex items-center justify-center rounded-lg transition-all bg-coral/90 text-white hover:bg-coral shadow-sm shadow-coral/20" :title="`${t('chat.stopGeneration')} (Esc)`" :aria-label="t('chat.stopGeneration')" @click="chat.interrupt()">
-              <span class="i-carbon-stop-filled text-sm" />
+            <button v-if="chat.processing || chat.hasRunningJobs" class="w-11 h-11 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg transition-all bg-coral/90 text-white hover:bg-coral shadow-sm shadow-coral/20" :title="`${t('chat.stopGeneration')} (Esc)`" :aria-label="t('chat.stopGeneration')" @click="chat.interrupt()">
+              <span class="i-carbon-stop-filled text-base sm:text-sm" />
             </button>
-            <button v-else class="w-8 h-8 flex items-center justify-center rounded-lg transition-all" :class="inputCanSend ? 'bg-iolite text-white hover:bg-iolite-shadow shadow-sm shadow-iolite/20' : 'text-warm-300 dark:text-warm-600 cursor-not-allowed'" :disabled="!inputCanSend" :aria-label="t('chat.sendMessage')" @click="send">
-              <span class="i-carbon-send text-sm" />
+            <button v-else class="w-11 h-11 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg transition-all" :class="inputCanSend ? 'bg-iolite text-white hover:bg-iolite-shadow shadow-sm shadow-iolite/20' : 'text-warm-300 dark:text-warm-600 cursor-not-allowed'" :disabled="!inputCanSend" :aria-label="t('chat.sendMessage')" @click="send">
+              <span class="i-carbon-send text-base sm:text-sm" />
             </button>
           </div>
         </div>
@@ -223,13 +230,37 @@ function draftKey() {
   return `kt.chat.draft.${instanceId}.${tab}`
 }
 
+// Monotonic counter incremented on every tab/instance change.  The
+// in-flight ``restoreDraft`` captures the value at call time and
+// checks it again after the async storage read — if a newer switch
+// has happened (i.e. the user moved to a different tab while the
+// read was pending), the resolved value is dropped instead of
+// overwriting the current tab's input.  Without this guard a
+// late-resolving restore for tab B can stomp the user's typing in
+// tab C, and the ``watch(inputText, persistDraft)`` below would
+// then write B's content to C's storage key — silent corruption.
+let _draftRestoreGen = 0
+
 async function restoreDraft() {
+  const myGen = ++_draftRestoreGen
   const key = draftKey()
+  // Snapshot what the input held when the restore started.  Same
+  // tab can produce its own race: user starts typing into a freshly-
+  // mounted ChatPanel while the initial restore is still in flight;
+  // when storage resolves it would overwrite that fresh typing.
+  // Only apply the restored value if the input is still at the
+  // pre-restore snapshot.
+  const preInput = inputText.value
   if (!key) {
-    inputText.value = ""
+    if (myGen === _draftRestoreGen && inputText.value === preInput) {
+      inputText.value = ""
+    }
     return
   }
-  inputText.value = (await getHybridPref(key, "")) || ""
+  const value = (await getHybridPref(key, "")) || ""
+  if (myGen !== _draftRestoreGen) return
+  if (inputText.value !== preInput) return
+  inputText.value = value
   nextTick(autoResize)
 }
 
@@ -486,6 +517,63 @@ function onDrop(e) {
   for (const file of files) {
     const kind = file.type.startsWith("image/") ? "image" : "file"
     _pushAttachment(file, kind)
+  }
+}
+
+// ── Paste: clipboard image / file → attachment.  Lets users
+// Ctrl-V a screenshot (Win+Shift+S buffer, "copy image"
+// from a browser, etc.) or any file copied from the OS file
+// manager.  Text paste falls through untouched — we only
+// preventDefault when at least one file item was consumed.
+function onPaste(e) {
+  if (props.readOnly) return
+  const cd = e.clipboardData
+  if (!cd) return
+
+  // 1. Some browsers (Chromium on file copy from Explorer) populate
+  //    ``clipboardData.files`` directly.
+  const direct = Array.from(cd.files || [])
+  const collected = []
+  for (const file of direct) collected.push(file)
+
+  // 2. Screenshots / copied images surface via ``items`` with
+  //    ``kind === "file"`` but no ``files`` entry on some
+  //    browsers — fall through to that path too.
+  if (collected.length === 0 && cd.items) {
+    for (const item of cd.items) {
+      if (item.kind !== "file") continue
+      const file = item.getAsFile()
+      if (file) collected.push(file)
+    }
+  }
+  if (collected.length === 0) return // nothing pasted — let the textarea handle text
+
+  // Synthesise a friendlier name for the clipboard's anonymous
+  // ``image.png`` blobs so the attachment chip + the backend log
+  // both carry a unique stem.  Existing files keep their name.
+  let any = false
+  for (const file of collected) {
+    const kind = (file.type || "").startsWith("image/") ? "image" : "file"
+    const named = file.name && file.name !== "image.png" && file.name !== "blob" ? file : _renameClipboardBlob(file, kind)
+    if (_pushAttachment(named, kind)) any = true
+  }
+  if (any) e.preventDefault()
+}
+
+function _renameClipboardBlob(file, kind) {
+  const ts = new Date().toISOString().replace(/[:.]/g, "-").replace(/T/, "_").replace(/Z$/, "")
+  const ext = (file.type.split("/")[1] || (kind === "image" ? "png" : "bin")).split("+")[0] // image/svg+xml → svg
+  const stem = kind === "image" ? `pasted-image-${ts}` : `pasted-file-${ts}`
+  // The File constructor accepts the underlying blob + a new name,
+  // preserving size / type / lastModified.  Falls back to the raw
+  // file when File isn't constructible (older Safari).
+  try {
+    return new File([file], `${stem}.${ext}`, {
+      type: file.type,
+      lastModified: file.lastModified,
+    })
+  } catch {
+    return file
   }
 }
 

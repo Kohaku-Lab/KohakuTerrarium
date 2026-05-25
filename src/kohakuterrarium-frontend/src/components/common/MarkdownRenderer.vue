@@ -292,6 +292,11 @@ onBeforeUnmount(() => {
   border-radius: 4px;
   font-size: 0.9em;
   font-family: var(--font-mono);
+  /* Inline code can carry long unbroken tokens (URLs, hashes,
+     identifiers).  Without word-break the chat bubble pushes its
+     parent layout sideways on mobile. */
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 html.dark .md-content code {
   background: rgba(255, 255, 255, 0.08);
@@ -402,6 +407,13 @@ html.dark .md-content a {
   border-collapse: collapse;
   margin: 0.5em 0;
   font-size: 0.9em;
+  display: block;
+  /* Tables overflow horizontally inside their own scoped scroller so
+     a wide markdown table never pushes the chat bubble (and the rest
+     of the layout) sideways on a narrow viewport. ``display: block``
+     is the simplest way to make a ``<table>`` honour ``overflow-x``. */
+  overflow-x: auto;
+  max-width: 100%;
 }
 .md-content th,
 .md-content td {

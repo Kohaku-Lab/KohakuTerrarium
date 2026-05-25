@@ -35,7 +35,7 @@
         </div>
         <div v-if="message.payload?.prompt" class="text-sm py-2 px-1">{{ message.payload.prompt }}</div>
         <div v-if="!isResolved" class="flex gap-2 items-stretch">
-          <el-input v-model="textValue" :placeholder="message.payload?.placeholder || 'Type your reply…'" :type="message.payload?.multiline ? 'textarea' : 'text'" :rows="message.payload?.multiline ? 3 : 1" autofocus class="flex-1" @keydown.enter.exact.prevent="onSubmitText" />
+          <el-input v-model="textValue" :placeholder="message.payload?.placeholder || 'Type your reply…'" :type="message.payload?.multiline ? 'textarea' : 'text'" :autosize="message.payload?.multiline ? { minRows: 3, maxRows: 12 } : false" autofocus class="flex-1" @keydown.enter.exact.prevent="onSubmitText" />
           <el-button type="primary" :disabled="!textValue.trim()" @click="onSubmitText">Send</el-button>
           <el-button @click="onCancel">Cancel</el-button>
         </div>

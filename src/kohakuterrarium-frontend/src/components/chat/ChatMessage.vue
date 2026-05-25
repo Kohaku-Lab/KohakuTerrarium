@@ -102,11 +102,11 @@
           <input ref="editImageInputEl" type="file" accept="image/*" class="hidden" @change="(e) => onEditFileChange(e, 'image')" />
           <input ref="editFileInputEl" type="file" class="hidden" @change="(e) => onEditFileChange(e, 'file')" />
           <div class="flex items-center gap-0 shrink-0 mb-0.5">
-            <button class="w-7 h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-aquamarine dark:hover:text-aquamarine hover:bg-aquamarine/10 disabled:opacity-50" title="Attach file" aria-label="Attach file" :disabled="editSaving" @click="editFileInputEl?.click()">
-              <span class="i-carbon-add text-xs" />
+            <button class="w-10 h-10 sm:w-7 sm:h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-aquamarine dark:hover:text-aquamarine hover:bg-aquamarine/10 disabled:opacity-50" title="Attach file" aria-label="Attach file" :disabled="editSaving" @click="editFileInputEl?.click()">
+              <span class="i-carbon-add text-sm sm:text-xs" />
             </button>
-            <button class="w-7 h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-iolite dark:hover:text-iolite-light hover:bg-iolite/10 disabled:opacity-50" title="Attach image" aria-label="Attach image" :disabled="editSaving" @click="editImageInputEl?.click()">
-              <span class="i-carbon-image text-xs" />
+            <button class="w-10 h-10 sm:w-7 sm:h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-iolite dark:hover:text-iolite-light hover:bg-iolite/10 disabled:opacity-50" title="Attach image" aria-label="Attach image" :disabled="editSaving" @click="editImageInputEl?.click()">
+              <span class="i-carbon-image text-sm sm:text-xs" />
             </button>
           </div>
           <textarea ref="editTextareaEl" v-model="editText" class="message-edit-textarea message-edit-inline" :rows="Math.min(16, Math.max(6, editText.split('\n').length))" :disabled="editSaving" @keydown.meta.enter="confirmEdit" @keydown.ctrl.enter="confirmEdit" @keydown.esc="cancelEdit" />
@@ -138,7 +138,7 @@
       </div>
     </div>
     <!-- Hover actions for user messages -->
-    <div v-if="!editing && !message.queued && messageIdx != null" class="absolute -bottom-5 right-2 flex gap-1 items-center opacity-0 group-hover:opacity-100 transition-opacity">
+    <div v-if="!editing && !message.queued && messageIdx != null" class="absolute -bottom-5 right-2 flex gap-1 items-center hover-only-action chat-msg-actions chat-msg-actions--right">
       <!-- Branch navigator on user message: shown only when this turn
            has multiple distinct user contents (i.e. an edit produced
            a sibling branch at this divergence point). -->
@@ -160,24 +160,35 @@
     </div>
   </div>
 
-  <!-- Assistant message (parts-based: ordered text + tools + images) -->
+  <!-- Assistant message (parts-based: ordered text + tools + images).
+       Runs of ≥3 consecutive non-subagent tool calls collapse into a
+       single ToolCallBatch accordion (default collapsed). Sub-agent
+       parts, text, and images break the run — the batch identity is
+       keyed on the first tool's id so streaming new tools into an
+       in-progress batch doesn't reshuffle ``expandedTools`` state. -->
   <div v-else-if="message.role === 'assistant' && message.parts" class="max-w-[90%] group relative">
-    <template v-for="(part, pi) in message.parts" :key="pi">
-      <!-- Text part -->
-      <div v-if="part.type === 'text' && part.content" class="text-body mb-1">
-        <MarkdownRenderer :content="part.content" />
-      </div>
-      <!-- Tool/subagent part -->
-      <div v-else-if="part.type === 'tool'" class="mb-1.5">
-        <ToolCallBlock :tc="part" :expanded="expandedTools[part.id]" @toggle="toggleTool(part.id)" />
-      </div>
-      <!-- Image part (same render + CSS as user-side attached images) -->
-      <div v-else-if="part.type === 'image_url'" class="mb-1.5">
-        <img :src="part.image_url?.url" class="chat-inline-image" :alt="part.meta?.source_name || 'generated image'" />
+    <template v-for="(group, gi) in renderGroups" :key="gi">
+      <!-- Pass-through part -->
+      <template v-if="group.type === 'part'">
+        <div v-if="group.part.type === 'text' && group.part.content" class="text-body mb-1">
+          <MarkdownRenderer :content="group.part.content" />
+        </div>
+        <div v-else-if="group.part.type === 'tool'" class="mb-1.5">
+          <ToolCallBlock :tc="group.part" :expanded="expandedTools[group.part.id]" @toggle="toggleTool(group.part.id)" />
+        </div>
+        <div v-else-if="group.part.type === 'image_url'" class="mb-1.5">
+          <img :src="group.part.image_url?.url" class="chat-inline-image" :alt="group.part.meta?.source_name || 'generated image'" />
+        </div>
+      </template>
+      <!-- Tool-batch group (collapsed by default; per-tool expand state
+           lives in the same ``expandedTools`` map keyed by tool id, so
+           opening the batch doesn't open the tools and vice-versa). -->
+      <div v-else-if="group.type === 'tool-batch'" class="mb-1.5">
+        <ToolCallBatch :tools="group.tools" :expanded="!!expandedTools[group.id]" :tool-expanded="expandedTools" @toggle="toggleTool(group.id)" @tool-toggle="toggleTool" />
       </div>
     </template>
     <!-- Hover actions -->
-    <div class="absolute -bottom-5 left-2 flex gap-1 items-center opacity-0 group-hover:opacity-100 transition-opacity">
+    <div class="absolute -bottom-5 left-2 flex gap-1 items-center hover-only-action chat-msg-actions chat-msg-actions--left">
       <!-- Branch navigator on the assistant bubble: shown only when
            the current user-content group has more than one regen
            alternative. Edit-only branching does NOT light this up —
@@ -249,6 +260,7 @@
 import { ElMessage } from "element-plus"
 
 import MarkdownRenderer from "@/components/common/MarkdownRenderer.vue"
+import ToolCallBatch from "@/components/chat/ToolCallBatch.vue"
 import ToolCallBlock from "@/components/chat/ToolCallBlock.vue"
 import UIEventBlock from "@/components/chat/UIEventBlock.vue"
 import SiteChip from "@/components/cluster/SiteChip.vue"
@@ -256,6 +268,7 @@ import { useChatStore } from "@/stores/chat"
 import { useInstancesStore } from "@/stores/instances"
 import { GEM } from "@/utils/colors"
 import { buildMessageParts, contentToEditableDraft, formatBytes, MAX_ATTACHMENT_BYTES, MAX_IMAGE_BYTES } from "@/utils/chatAttachments"
+import { computeRenderGroups } from "@/utils/chatToolGrouping"
 import { useI18n } from "@/utils/i18n"
 
 const { t } = useI18n()
@@ -298,6 +311,13 @@ const props = defineProps({
 
 const expandedTools = reactive({})
 const editing = ref(false)
+
+// Group consecutive non-subagent tool parts into a single batch so a
+// turn that fired 10+ tools doesn't flood the chat with stacked cards.
+// Sub-agent parts and any text / image break the run; runs below the
+// threshold (default 3) render flat.  See utils/chatToolGrouping.js.
+const renderGroups = computed(() => computeRenderGroups(props.message.parts || []))
+
 const editText = ref("")
 const editAttachments = ref([])
 const editTextareaEl = ref(null)
@@ -571,5 +591,37 @@ function goToNextAssistantBranch() {
   background: var(--color-card-hover);
   color: var(--color-text);
   border-color: var(--color-border-hover);
+}
+
+/* Mobile / touch fallback for the floating action rows.
+ *
+ * On fine pointers the rows sit ``-bottom-5`` (= -1.25rem) outside
+ * the bubble so they only appear on hover and don't take vertical
+ * space.  On coarse pointers ``hover-only-action`` is always
+ * visible, and that negative offset overlaps the next message —
+ * stealing tap targets the user is trying to hit.  Switch to inline
+ * flow with a small top margin so the actions sit in their own
+ * stacking slot below the bubble without overlap.
+ *
+ * Specificity: ``hover-only-action`` is the source class for the
+ * absolute positioning, but its style sits in the global stylesheet.
+ * ``!important`` here is the cleanest seam — anything fancier
+ * (e.g. duplicating the rule with a coarse-pointer media query in
+ * style.css) would split the layout intent across two files.
+ */
+@media (pointer: coarse) {
+  .chat-msg-actions {
+    position: static !important;
+    bottom: auto !important;
+    margin-top: 0.4rem;
+  }
+  .chat-msg-actions--right {
+    justify-content: flex-end;
+    width: 100%;
+  }
+  .chat-msg-actions--left {
+    justify-content: flex-start;
+    width: 100%;
+  }
 }
 </style>

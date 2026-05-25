@@ -402,6 +402,14 @@ export default {
   "chat.dropToAttach": "Drop files to attach",
   "chat.queueShowMore": ({ count }) => `+${count} more queued`,
   "chat.queueCollapse": "Show fewer",
+  "chat.pendingBanner": ({ count }) =>
+    count === 1
+      ? "1 pending request needs your reply"
+      : `${count} pending requests need your reply`,
+  "chat.pendingShow": "show",
+  "chat.toolBatchHeader": ({ count }) => `${count} tool calls`,
+  "chat.toolBatchExpand": "Expand tool calls",
+  "chat.toolBatchCollapse": "Collapse tool calls",
   "chat.cumulativeInputTokens": "Cumulative input tokens",
   "chat.cachedInputTokens": "Cached input tokens",
   "chat.cumulativeOutputTokens": "Cumulative output tokens",
