@@ -999,6 +999,25 @@ export const registryAPI = {
   },
 }
 
+/** Installed-package browser — one row per kt package (not per
+ *  creature/terrarium).  Used by the Catalog tab's "Installed packages"
+ *  accordion to show each package's full manifest contributions
+ *  (creatures, terrariums, tools, plugins, llm_presets, io, triggers,
+ *  skills, commands, user_commands, prompts).
+ *
+ *  Backend: ``/api/studio/packages`` (wraps ``packages.walk.list_packages``).
+ */
+export const packagesAPI = {
+  async list() {
+    const { data } = await api.get("/studio/packages")
+    return data
+  },
+  async summary(name) {
+    const { data } = await api.get(`/studio/packages/${encodeURIComponent(name)}`)
+    return data
+  },
+}
+
 /** Lab cluster control — Sites tab verbs (lab-host mode only). */
 export const labAPI = {
   async status() {
