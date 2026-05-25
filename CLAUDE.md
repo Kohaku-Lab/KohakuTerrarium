@@ -349,6 +349,7 @@ src/kohakuterrarium/
 │   ├── memory.py             # kt embedding / search — session memory
 │   ├── model.py              # kt model              — profile management
 │   ├── packages.py           # kt list/info/install/uninstall/edit
+│   ├── marketplace.py        # kt marketplace list/add/remove/refresh/search/info
 │   └── version.py            # kt version
 │
 ├── modules/                  # Plugin API for devs (extension protocols)
@@ -462,7 +463,8 @@ src/kohakuterrarium/
 │   ├── schemas.py            # Pydantic request/response models
 │   ├── events.py             # Shared event log + StreamOutput
 │   ├── routes/               # REST endpoints (agents, configs, creatures, files,
-│   │                         #   registry, sessions, settings, terrariums)
+│   │                         #   registry, sessions, settings, terrariums,
+│   │                         #   catalog/marketplace — @<name> resolver + sources)
 │   ├── ws/                   # WebSocket handlers (agents, channels, chat,
 │   │                         #   files, logs, terminal)
 │   └── auth/                 # Four-layer auth — capabilities, L2 host token
@@ -491,7 +493,15 @@ src/kohakuterrarium/
 │
 ├── utils/                    # Shared utilities (logging, async helpers, file_guard, file_walk)
 │
-├── packages.py               # Package manager for `kt install` / `kt list` / resolve
+├── packages/                 # Package install / resolve / git-backend / marketplace
+│   ├── install.py            # install_package + install_package_spec (routes @<name>)
+│   ├── manifest.py           # kohaku.yaml parsing + python_dependencies installer
+│   ├── locations.py          # PACKAGES_DIR + .link helpers
+│   ├── resolve.py            # @<pkg>/<sub/path> → absolute Path (installed packages)
+│   ├── walk.py               # list_packages (installed scan)
+│   ├── git_backend.py        # native git + dulwich fallback (Android)
+│   ├── marketplace.py        # TerrariumMarket resolver (fetch + cache + search)
+│   └── marketplace_types.py  # Frozen dataclasses + typed errors
 ├── launcher/                 # Thin Briefcase wrapper — owns the managed venv +
 │                             # self-update flow.  STRICT BOUNDARY: launcher/*.py
 │                             # imports nothing from kohakuterrarium.<not launcher>
@@ -512,7 +522,7 @@ src/kohakuterrarium/
 6. **Plugin system** (`modules/plugin/`) — Pre/post hooks around tool execution, LLM calls, sub-agent runs, plus fire-and-forget callbacks. `PluginBlockError` in a `pre_tool_execute` becomes the tool result. All plugins run linearly by priority.
 7. **MCP integration** (`mcp/`) — Stdio + HTTP transport. Tools indirected through four meta-tools instead of mirrored — keeps the agent's prompt small.
 8. **Compose algebra** (`compose/`) — `>>` sequence, `&` parallel, `|` fallback, `*` retry. User-facing only; framework does not depend on it.
-9. **Package system** (`packages.py` + `kt install` / `kt uninstall`) — Sharing creature / terrarium / plugin bundles.
+9. **Package system** (`packages/` + `kt install` / `kt uninstall`) — Sharing creature / terrarium / plugin bundles.  Marketplace integration (`packages/marketplace.py` + `kt marketplace …` + `/api/catalog/marketplace/*`) resolves `@<name>` install specs against [TerrariumMarket](https://github.com/Kohaku-Lab/TerrariumMarket) (default source; user-configurable list at `~/.kohakuterrarium/marketplace-sources.json`).  Cache at `~/.kohakuterrarium/marketplace/cache.json` (1h TTL, ETag-revalidated, `KT_MARKETPLACE_CACHE_TTL` overridable, `KT_MARKETPLACE_SOURCES` env override).  Frontend Settings → Extensions tab is now a two-pane Catalog view (Browse + Installed) backed by `stores/marketplace.js` + `utils/marketplaceApi.js`.
 10. **Desktop packaging** (`__briefcase__.py` + briefcase tooling) — macOS / Windows / Linux native app builds.
 11. **Auth** (`api/auth/`) — four optional layers stacked at the API server: L1 host selection (frontend), L2 host token (middleware), L3 admin token (FastAPI Depends on config-mutating routes), L4 user accounts (sqlite + per-user `Terrarium` engine pool). Defaults to OFF; see `plans/1.5.0-roadmap/03-frontend-backend-connection/` + `docs/{en,zh-CN,zh-TW}/guides/authentication.md`.
 

@@ -24,8 +24,8 @@
 ```bash
 pip install kohakuterrarium                                         # install
 kt login codex                                                      # authenticate
-kt install https://github.com/Kohaku-Lab/kt-biome.git            # get OOTB creatures
-kt run @kt-biome/creatures/swe --mode cli                        # run one
+kt install @kt-biome                                                # get OOTB creatures (via marketplace)
+kt run @kt-biome/creatures/swe --mode cli                           # run one
 ```
 
 You get an interactive shell with a full coding agent — file tools, shell access, web search, sub-agents, resumable sessions. `Ctrl+D` exits; `kt resume --last` picks back up.
@@ -110,13 +110,19 @@ npm run build --prefix src/kohakuterrarium-frontend
 ### 2. Install OOTB creatures and plugins
 
 ```bash
-# Official showcase pack
-kt install https://github.com/Kohaku-Lab/kt-biome.git
+# Official showcase pack — via the TerrariumMarket marketplace
+kt install @kt-biome
 
-# Any third-party package
+# Browse what else is available
+kt marketplace search                # all listed packages
+kt marketplace search swe            # substring + tag filter
+
+# Or install any third-party package by URL / local path
 kt install <git-url>
-kt install ./my-creatures -e        # editable install
+kt install ./my-creatures -e         # editable install
 ```
+
+The `@<name>` form resolves through [TerrariumMarket](https://github.com/Kohaku-Lab/TerrariumMarket); direct git URLs still work and bypass it.  See [`docs/en/guides/packages.md`](docs/en/guides/packages.md) for the full marketplace walkthrough (sources, version pinning, env-var overrides).
 
 ### 3. Authenticate a model provider
 

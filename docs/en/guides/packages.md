@@ -20,9 +20,11 @@ Concept primer: [boundaries](../concepts/boundaries.md) — packages are how the
 The first package most people install is `kt-biome` — the showcase pack containing `swe`, `reviewer`, `researcher`, `ops`, `creative`, `general`, `root` creatures, terrariums like `swe_team` and `deep_research`, and a handful of plugins.
 
 ```bash
-kt install https://github.com/Kohaku-Lab/kt-biome.git
+kt install @kt-biome
 kt run @kt-biome/creatures/swe
 ```
+
+The `@kt-biome` short form resolves via the marketplace (see below); `kt install https://github.com/Kohaku-Lab/kt-biome.git` still works if you'd rather bypass it.
 
 Study `kt-biome` as a reference when you build your own pack.
 
@@ -134,6 +136,16 @@ Collision policy is intentionally mixed:
 
 ## Install modes
 
+### Marketplace spec (`@name`)
+
+```bash
+kt install @kt-biome              # newest non-yanked version
+kt install @kt-biome@v1.2.0       # explicit version pin
+kt install @myfork/kt-biome       # name restricted to a specific source
+```
+
+The `@`-prefix form resolves through the marketplace ([see below](#the-marketplace-and-name-resolution)) to a git URL, then clones into `~/.kohakuterrarium/packages/<name>/` the same way `kt install <git-url>` does. **Editable mode is unsupported for `@` specs** — clone first, then install with `-e`.
+
 ### Git URL (clone)
 
 ```bash
@@ -173,6 +185,55 @@ kt uninstall my-pack
 
 Used by `kt run`, `kt terrarium run`, `kt edit`, `kt update`, `base_config:` inheritance, and programmatic loaders such as `Terrarium.with_creature(...)`, `engine.add_creature(...)`, `Studio.sessions.start_creature(...)`, and lower-level `Agent.from_path(...)`.
 
+## The marketplace and `@name` resolution
+
+[TerrariumMarket](https://github.com/Kohaku-Lab/TerrariumMarket) is the public marketplace for KohakuTerrarium packages.  It's a public GitHub repo containing one YAML file (`registry.yaml`) plus a per-package entry directory.  `kt install @<name>` reads that file to resolve the name to a git URL, then installs normally.
+
+The framework fetches and caches the index at `~/.kohakuterrarium/marketplace/cache.json` with a 1-hour TTL (ETag-revalidated against upstream).  Cold-cache offline = clear error.  Warm-cache offline = silent fallback to cached data with a warning log.
+
+### CLI verbs
+
+```bash
+kt marketplace            # alias for `list`: show configured sources
+kt marketplace list
+kt marketplace refresh    # force cache bust + re-fetch
+kt marketplace search [query] [--tag <t>] [--author <a>] [--json]
+kt marketplace info @<name>
+
+kt marketplace add <url> [--alias <name>]   # add a custom source
+kt marketplace remove <url-or-alias>
+kt marketplace reset                         # restore the default-only source list
+```
+
+### Spec syntax
+
+| Form | Resolves to |
+|---|---|
+| `@kt-biome` | Newest non-yanked version of `kt-biome` from the first source that lists it |
+| `@kt-biome@v1.2.0` | Exact version pin (yanked versions allowed for reproducibility) |
+| `@myfork/kt-biome` | `kt-biome` restricted to the source aliased `myfork` |
+
+### Configuring sources
+
+The default source list is just TerrariumMarket.  Add a fork or your own server:
+
+```bash
+kt marketplace add https://raw.githubusercontent.com/<owner>/<repo>/main/registry.yaml --alias myfork
+```
+
+Sources are merged in lookup order; the first occurrence of a name wins (shadowing is logged).  Settings persist under `~/.kohakuterrarium/marketplace-sources.json`.
+
+Env-var overrides (one-shot, no settings file write):
+
+```bash
+KT_MARKETPLACE_SOURCES=https://a.test/r.yaml,https://b.test/r.yaml kt marketplace search
+KT_MARKETPLACE_CACHE_TTL=0 kt marketplace search   # bypass cache for this call
+```
+
+### Browsing from the app
+
+The desktop / web app's **Settings → Extensions** tab is now a two-pane "Catalog" view: **Browse** (marketplace packages with Install buttons) and **Installed** (your local set with Uninstall + "Update available" badges).  The same `@<name>` install flow runs in the background, so `kt install @kt-biome` from the CLI and clicking Install in the app land on the same code path.
+
 ## Discovery commands
 
 ```bash
@@ -180,9 +241,13 @@ kt list                         # installed packages + local agents
 kt info path/or/@pkg/creature   # details of one config
 kt extension list               # all tools/plugins/presets from all packages
 kt extension info my-pack       # package metadata + what it ships
+kt marketplace                  # configured marketplace sources
+kt marketplace search           # browse the marketplace (all packages)
+kt marketplace search biome     # substring + tag filter
+kt marketplace info @kt-biome   # detail view for a marketplace entry
 ```
 
-`kt extension list` is the easiest way to see what's available across your install base.
+`kt extension list` is the easiest way to see what's installed locally; `kt marketplace search` is the equivalent for what's available to install.
 
 ## Editing installed configs
 
@@ -197,9 +262,10 @@ Opens `config.yaml` in `$EDITOR` (falls back to `$VISUAL`, then `nano`). For edi
 1. Push the repo to git (GitHub, GitLab, self-hosted — anything `git clone` handles).
 2. Tag a version: `git tag v0.1.0 && git push --tags`.
 3. Bump `version:` in `kohaku.yaml` for each release.
-4. Share the URL: `kt install https://your/repo.git`.
+4. **Optional but recommended**: list your package on TerrariumMarket so users can install with `kt install @your-package`.  Open a PR adding `entries/<your-package>/entry.yaml` + `entries/<your-package>/README.md` to [Kohaku-Lab/TerrariumMarket](https://github.com/Kohaku-Lab/TerrariumMarket); CI validates the schema + tag existence; a maintainer merges.  See [the contributing guide](https://github.com/Kohaku-Lab/TerrariumMarket/blob/main/CONTRIBUTING.md) for the walkthrough.
+5. Otherwise, just share the URL: `kt install https://your/repo.git`.
 
-There is no central registry. Packages are just git repos with a `kohaku.yaml`.
+Listing on TerrariumMarket is **not required** — packages are still just git repos with a `kohaku.yaml`, and the direct-URL install path is unchanged.  The marketplace is a discovery layer over that, not a replacement.
 
 ### Versioning
 

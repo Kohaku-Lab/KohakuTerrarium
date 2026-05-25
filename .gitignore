@@ -17,6 +17,13 @@ poc/
 kt-tipo-agent/
 *-old/
 
+# Registry hub frontend lives in a dedicated companion repo
+# (Kohaku-Lab/kohaku-registry-hub).  Cloned locally into
+# ./registry-hub/ for convenient side-by-side development with the
+# framework; never committed back into this repo.  See
+# plans/1.5.0-roadmap/07-registry-hub/ for the design + impl plan.
+/registry-hub/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
