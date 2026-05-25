@@ -1,9 +1,22 @@
 """Persistence saved — list / delete saved sessions.
 
-Routes drain from the legacy ``api/routes/sessions.py``; all logic
-lives in ``studio/persistence/store.py``. Mounted under both
-``/api/persistence/saved`` and ``/api/sessions`` (URL preservation
-for the existing frontend ``sessionAPI`` callers).
+The listing path is backed by the SessionIndex sidecar
+(``studio/persistence/session_index``): a single SQLite file at
+``<session_dir>/.kt-index.kvault`` cached across server restarts.
+Cold-listing 1000 sessions is one file open + one table scan
+instead of N parallel ``.kohakutr`` opens.
+
+Search uses FTS5 (BM25) when a query is present; faceted filters
+(``status``, ``config_type``, ``node_id``) apply after the FTS
+hit-set is collected so the rank stays meaningful.
+
+``refresh=true`` triggers an **incremental** reconcile — every
+file whose ``(mtime, size)`` fingerprint matches the sidecar is
+skipped without opening it.  Pass ``full_rescan=true`` to force
+a re-read of every file (use after a manual disk edit).
+
+Mounted under both ``/api/persistence/saved`` and ``/api/sessions``
+(URL preservation for the existing frontend ``sessionAPI`` callers).
 """
 
 from fastapi import APIRouter, HTTPException
@@ -11,12 +24,15 @@ from fastapi import APIRouter, HTTPException
 from kohakuterrarium.api.routes.persistence._executor import (
     run_in_persistence_executor,
 )
+from kohakuterrarium.studio.persistence.session_index import (
+    aggregate_stats,
+    get_session_index_default,
+)
+from kohakuterrarium.studio.persistence.session_index.reconcile import reconcile
 from kohakuterrarium.studio.persistence.store import (
-    build_session_index,
+    _session_dir,
     delete_session_files,
     disk_usage,
-    get_session_index,
-    session_stats,
 )
 
 router = APIRouter()
@@ -37,56 +53,66 @@ async def get_disk_usage():
 
 @router.get("/stats")
 async def get_session_stats():
-    """Aggregations over the cached session index.
+    """Aggregations over the session index sidecar.
 
-    Cheap — reads the in-memory index built by ``get_session_index``
-    (30s TTL). Does not force a rebuild. Runs on the persistence
-    executor because a cold cache triggers the same blocking rebuild
-    as ``list_sessions``.
+    Pure read of the cached sidecar — no ``.kohakutr`` is opened.
+    Sub-millisecond for ~thousands of sessions; runs on the
+    persistence executor because the underlying KVault scan is sync.
     """
-    return await run_in_persistence_executor(session_stats)
+    return await run_in_persistence_executor(_stats_via_index)
 
 
-def _filter_sessions(all_sessions, search: str):
-    """Server-side search across session metadata fields.
+def _stats_via_index() -> dict:
+    """Sync entrypoint — runs on the persistence executor.
 
-    Pure CPU on Python dicts — moved out of the event loop into the
-    persistence executor so a 1000-session search doesn't block other
-    requests.  Same coerce-anything-to-str rules as before (multimodal
-    preview blocks render as nested lists/dicts).
+    Passes ``_session_dir()`` explicitly so the SessionIndex
+    singleton picks up the same path that tests monkeypatch via
+    ``store._SESSION_DIR`` + ``KT_SESSION_DIR`` (same pattern
+    :func:`_list_via_index` uses).
     """
-    if not search:
-        return all_sessions
-    q = search.lower()
+    session_dir = _session_dir()
+    index = get_session_index_default(session_dir)
+    return aggregate_stats(index)
 
-    def _as_str(v):
-        if v is None:
-            return ""
-        if isinstance(v, str):
-            return v
-        if isinstance(v, list):
-            return " ".join(_as_str(x) for x in v)
-        if isinstance(v, dict):
-            return " ".join(_as_str(x) for x in v.values())
-        return str(v)
 
-    return [
-        s
-        for s in all_sessions
-        if q
-        in " ".join(
-            _as_str(s.get(k, ""))
-            for k in (
-                "name",
-                "config_path",
-                "config_type",
-                "terrarium_name",
-                "preview",
-                "pwd",
-                "agents",
-            )
-        ).lower()
-    ]
+def _list_via_index(
+    *,
+    search: str,
+    sort: str,
+    order: str,
+    status: str | None,
+    config_type: str | None,
+    node_id: str | None,
+    limit: int,
+    offset: int,
+    refresh: bool,
+    full_rescan: bool,
+) -> dict:
+    """Sync entrypoint — runs on the persistence executor.
+
+    Resolved here (not inline in the route) so the executor sees
+    a single function call.  Bridges the route's keyword args to
+    the SessionIndex API.
+
+    Passes ``_session_dir()`` explicitly so the SessionIndex
+    singleton picks up the same path that tests monkeypatch via
+    ``store._SESSION_DIR`` + ``KT_SESSION_DIR``.
+    """
+    session_dir = _session_dir()
+    index = get_session_index_default(session_dir)
+    if refresh or full_rescan:
+        reconcile(index, session_dir, full=full_rescan)
+    page = index.list(
+        search=search,
+        status=status,
+        config_type=config_type,
+        node_id=node_id,
+        sort=sort,
+        order=order,
+        limit=limit,
+        offset=offset,
+    )
+    return page.to_dict()
 
 
 @router.get("")
@@ -95,23 +121,47 @@ async def list_sessions(
     offset: int = 0,
     search: str = "",
     refresh: bool = False,
+    full_rescan: bool = False,
+    sort: str = "last_active",
+    order: str = "desc",
+    status: str | None = None,
+    config_type: str | None = None,
+    node_id: str | None = None,
 ):
-    """List saved sessions with search and pagination.
+    """List saved sessions with search, sort, filter, pagination.
 
-    The entire fetch + filter + paginate pipeline runs on the
-    dedicated persistence executor so concurrent route work
-    (chat-WS handshake, runtime-graph snapshot, identity reads)
-    keeps streaming even while a cold-cache index rebuild fans out
-    SQLite opens across all saved sessions.
+    Backed by the SessionIndex sidecar.  Cold-list cost is one
+    file open regardless of how many sessions exist (vs the
+    legacy "open N ``.kohakutr`` files" path).
+
+    Query params:
+      * ``search`` — FTS5 query over name / preview / config_path /
+        agents / pwd.  When set, ``sort=relevance`` orders by
+        BM25 (most relevant first); any other ``sort`` orders the
+        FTS hit-set by that field.
+      * ``sort`` — ``last_active`` (default) | ``created_at`` |
+        ``name`` | ``status`` | ``relevance``.
+      * ``order`` — ``desc`` (default) | ``asc``.
+      * ``status`` / ``config_type`` / ``node_id`` — exact-match
+        facet filters.
+      * ``refresh=true`` — incremental reconcile before listing
+        (re-reads only files whose mtime/size changed).
+      * ``full_rescan=true`` — force-re-read every file regardless
+        of fingerprint (use after manual disk edits).
     """
-    if refresh:
-        await run_in_persistence_executor(build_session_index)
-
-    all_sessions = await run_in_persistence_executor(get_session_index)
-    filtered = await run_in_persistence_executor(_filter_sessions, all_sessions, search)
-    total = len(filtered)
-    page = filtered[offset : offset + limit]
-    return {"sessions": page, "total": total, "offset": offset, "limit": limit}
+    return await run_in_persistence_executor(
+        _list_via_index,
+        search=search,
+        sort=sort,
+        order=order,
+        status=status,
+        config_type=config_type,
+        node_id=node_id,
+        limit=limit,
+        offset=offset,
+        refresh=refresh,
+        full_rescan=full_rescan,
+    )
 
 
 @router.delete("/{session_name}")
@@ -144,6 +194,8 @@ async def delete_session(session_name: str):
         raise HTTPException(
             status_code=404, detail=f"Session not found: {session_name}"
         )
+    # ``delete_session_files`` itself purges the matching entries
+    # from the session-index sidecar — see store._purge_index_entries.
     return {
         "status": "deleted",
         "name": session_name,

@@ -26,7 +26,10 @@ import pytest
 from kohakuterrarium.studio.identity import ui_prefs as _identity_ui_prefs_mod
 from kohakuterrarium.studio.studio import Studio
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.studio.persistence import store as _persistence_store_mod
+from kohakuterrarium.studio.persistence import (
+    session_index as _persistence_session_index,
+    store as _persistence_store_mod,
+)
 from kohakuterrarium.studio.sessions import lifecycle as _lifecycle
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder
 
@@ -384,9 +387,12 @@ class TestPersistence:
     @pytest.fixture(autouse=True)
     def _redirect(self, tmp_path, monkeypatch):
         monkeypatch.setattr(_persistence_store_mod, "_SESSION_DIR", tmp_path)
-        monkeypatch.setattr(_persistence_store_mod, "_session_index", [])
-        monkeypatch.setattr(_persistence_store_mod, "_index_built_at", 0)
+        # Reset the session-index sidecar singleton between cases so
+        # each test sees a fresh per-tmp_path index instance.
+        _persistence_session_index.close_session_index()
         self._dir = tmp_path
+        yield
+        _persistence_session_index.close_session_index()
 
     def test_list_finds_saved_sessions(self):
         _make_saved_session(self._dir / "alice.kohakutr")

@@ -452,7 +452,7 @@ class TestProgStudioJourney:
 
         async with Studio() as studio:
             # --- persistence.list: the saved session is indexed --------
-            saved = studio.persistence.list(max_age=0.0)
+            saved = studio.persistence.list(refresh=True)
             entry = next(e for e in saved if e["name"] == saved_stem)
             assert entry["config_type"] == "agent"
             assert entry["agents"] == ["scout"]
@@ -582,7 +582,7 @@ class TestProgStudioJourney:
             assert fork_path.exists()
             # The saved-session index reflects the deletion + the fork.
             fork_stem = fork_path.name.split(".kohakutr")[0]
-            remaining = studio.persistence.list(max_age=0.0)
+            remaining = studio.persistence.list(refresh=True)
             remaining_names = {e["name"] for e in remaining}
             assert saved_stem not in remaining_names
             assert fork_stem in remaining_names

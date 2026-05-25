@@ -25,91 +25,115 @@ class TestPersistenceSaved:
         assert resp.json() == {"total_bytes": 1024}
 
     def test_stats(self, monkeypatch):
-        monkeypatch.setattr(saved_mod, "session_stats", lambda: {"count": 5})
+        # Route now delegates to ``_stats_via_index`` which reads the
+        # sidecar — stub it so the route plumbing is exercised in
+        # isolation from KohakuVault.
+        monkeypatch.setattr(saved_mod, "_stats_via_index", lambda: {"count": 5})
         client = TestClient(_app(saved_mod.router))
         resp = client.get("/saved/stats")
         assert resp.status_code == 200
         assert resp.json()["count"] == 5
 
     def test_list_sessions_basic(self, monkeypatch):
-        monkeypatch.setattr(
-            saved_mod,
-            "get_session_index",
-            lambda: [{"name": "a"}, {"name": "b"}, {"name": "c"}],
-        )
+        # Route delegates to ``_list_via_index`` which hits the
+        # SessionIndex sidecar — stub it directly so we exercise the
+        # route plumbing (executor offload + param marshalling)
+        # without spinning up KohakuVault for every test.
+        captured = {}
+
+        def fake(**kw):
+            captured.update(kw)
+            return {
+                "sessions": [{"name": "a"}, {"name": "b"}, {"name": "c"}],
+                "total": 3,
+                "offset": kw["offset"],
+                "limit": kw["limit"],
+            }
+
+        monkeypatch.setattr(saved_mod, "_list_via_index", fake)
         client = TestClient(_app(saved_mod.router))
         resp = client.get("/saved")
         body = resp.json()
         assert body["total"] == 3
         assert body["limit"] == 20
+        # Defaults — sort key, ordering, no refresh.
+        assert captured["sort"] == "last_active"
+        assert captured["order"] == "desc"
+        assert captured["refresh"] is False
 
     def test_list_sessions_pagination(self, monkeypatch):
-        monkeypatch.setattr(
-            saved_mod,
-            "get_session_index",
-            lambda: [{"name": f"s{i}"} for i in range(10)],
-        )
+        def fake(**kw):
+            offset, limit = kw["offset"], kw["limit"]
+            assert offset == 2 and limit == 3
+            return {
+                "sessions": [{"name": f"s{i}"} for i in range(2, 5)],
+                "total": 10,
+                "offset": offset,
+                "limit": limit,
+            }
+
+        monkeypatch.setattr(saved_mod, "_list_via_index", fake)
         client = TestClient(_app(saved_mod.router))
         resp = client.get("/saved?limit=3&offset=2")
         body = resp.json()
         assert len(body["sessions"]) == 3
         assert body["sessions"][0]["name"] == "s2"
 
-    def test_list_sessions_search(self, monkeypatch):
-        sessions = [
-            {"name": "alice-session", "config_type": "agent"},
-            {"name": "bob-session", "config_type": "terrarium"},
-            {"name": "carol-session", "agents": ["dave"]},
-        ]
-        monkeypatch.setattr(saved_mod, "get_session_index", lambda: sessions)
+    def test_list_sessions_search_forwards_query(self, monkeypatch):
+        # The route should forward ``search`` verbatim; semantic
+        # matching is the SessionIndex's job (covered by its own
+        # unit tests).  This test pins the wire forwarding only.
+        captured = {}
+
+        def fake(**kw):
+            captured.update(kw)
+            return {"sessions": [], "total": 0, "offset": 0, "limit": 20}
+
+        monkeypatch.setattr(saved_mod, "_list_via_index", fake)
         client = TestClient(_app(saved_mod.router))
         resp = client.get("/saved?search=alice")
-        names = [s["name"] for s in resp.json()["sessions"]]
-        assert "alice-session" in names
-        assert "bob-session" not in names
+        assert resp.status_code == 200
+        assert captured["search"] == "alice"
 
-    def test_list_sessions_search_with_list_field(self, monkeypatch):
-        sessions = [{"name": "x", "agents": ["alice", "bob"]}]
-        monkeypatch.setattr(saved_mod, "get_session_index", lambda: sessions)
-        client = TestClient(_app(saved_mod.router))
-        resp = client.get("/saved?search=alice")
-        assert resp.json()["total"] == 1
+    def test_list_sessions_facets_forwarded(self, monkeypatch):
+        # New query params (``status``, ``config_type``, ``node_id``,
+        # ``sort``, ``order``, ``full_rescan``) must reach the index
+        # layer untouched.
+        captured = {}
 
-    def test_search_coerces_none_dict_and_scalar_fields(self, monkeypatch):
-        # The search haystack defensively coerces every metadata field:
-        # None → "", dict → its space-joined values, scalars → str().
-        # An entry where the match only lives in a dict-valued field
-        # must still be found; a None field must not crash the coerce.
-        sessions = [
-            # match buried inside a dict-valued ``preview`` field; ``pwd``
-            # is None (must coerce to "" without raising).
-            {
-                "name": None,
-                "preview": {"block": "needle-in-dict"},
-                "pwd": None,
-            },
-            # match in a scalar (int) field — coerced via str().
-            {"name": "plain", "config_path": 12345},
-        ]
-        monkeypatch.setattr(saved_mod, "get_session_index", lambda: sessions)
+        def fake(**kw):
+            captured.update(kw)
+            return {"sessions": [], "total": 0, "offset": 0, "limit": 20}
+
+        monkeypatch.setattr(saved_mod, "_list_via_index", fake)
         client = TestClient(_app(saved_mod.router))
-        # The dict-valued preview is searchable.
-        r1 = client.get("/saved?search=needle-in-dict")
-        assert r1.json()["total"] == 1
-        # The int config_path is coerced to a string and searchable.
-        r2 = client.get("/saved?search=12345")
-        assert r2.json()["total"] == 1
+        resp = client.get(
+            "/saved?status=running&config_type=terrarium&node_id=worker-1"
+            "&sort=name&order=asc&full_rescan=true"
+        )
+        assert resp.status_code == 200
+        assert captured["status"] == "running"
+        assert captured["config_type"] == "terrarium"
+        assert captured["node_id"] == "worker-1"
+        assert captured["sort"] == "name"
+        assert captured["order"] == "asc"
+        assert captured["full_rescan"] is True
 
     def test_list_sessions_refresh(self, monkeypatch):
-        called = []
-        monkeypatch.setattr(
-            saved_mod, "build_session_index", lambda: called.append("built")
-        )
-        monkeypatch.setattr(saved_mod, "get_session_index", lambda: [])
+        # ``refresh=true`` must propagate to the index layer; the
+        # SessionIndex unit tests verify it triggers reconcile.
+        captured = {}
+
+        def fake(**kw):
+            captured.update(kw)
+            return {"sessions": [], "total": 0, "offset": 0, "limit": 20}
+
+        monkeypatch.setattr(saved_mod, "_list_via_index", fake)
         client = TestClient(_app(saved_mod.router))
         resp = client.get("/saved?refresh=true")
         assert resp.status_code == 200
-        assert called == ["built"]
+        assert captured["refresh"] is True
+        assert captured["full_rescan"] is False
 
     def test_delete_success(self, monkeypatch):
         from pathlib import Path

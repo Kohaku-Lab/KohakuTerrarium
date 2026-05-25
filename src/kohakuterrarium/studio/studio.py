@@ -60,6 +60,13 @@ from kohakuterrarium.studio.persistence import (
     resume as _persistence_resume,
     store as _persistence_store,
 )
+from kohakuterrarium.studio.persistence.session_index import (
+    aggregate_stats as _persistence_aggregate_stats,
+    get_session_index_default as _persistence_get_index,
+)
+from kohakuterrarium.studio.persistence.session_index.reconcile import (
+    reconcile as _persistence_reconcile,
+)
 from kohakuterrarium.studio.persistence.viewer import (
     diff as _viewer_diff,
     events as _viewer_events,
@@ -740,8 +747,65 @@ class _PersistenceNS:
         self._studio = studio
         self.viewer = _PersistenceViewer()
 
-    def list(self, **kwargs) -> list[dict]:
-        return _persistence_store.get_session_index(**kwargs)
+    def list(
+        self,
+        *,
+        refresh: bool = False,
+        full_rescan: bool = False,
+        search: str = "",
+        sort: str = "last_active",
+        order: str = "desc",
+        status: str | None = None,
+        config_type: str | None = None,
+        node_id: str | None = None,
+    ) -> list[dict]:
+        """All saved sessions matching the given filters.
+
+        Backed by the session-index sidecar — no ``.kohakutr`` file
+        is opened.  Returns every matching row (no pagination); use
+        :meth:`stats` for aggregations or ``GET /api/sessions`` for a
+        paginated HTTP listing.
+
+        ``refresh=True`` runs an incremental reconcile first (catches
+        sessions written by sibling processes); ``full_rescan=True``
+        re-reads every file regardless of the fingerprint cache.
+        """
+        session_dir = _persistence_store._session_dir()
+        index = _persistence_get_index(session_dir)
+        if refresh or full_rescan:
+            _persistence_reconcile(index, session_dir, full=full_rescan)
+        # Unpaginated: programmatic callers expect the full list.  The
+        # sidecar list method's ``limit`` is enforced for the HTTP
+        # surface only; here we widen it to the index size.
+        total = index.count() or 1
+        page = index.list(
+            search=search,
+            status=status,
+            config_type=config_type,
+            node_id=node_id,
+            sort=sort,
+            order=order,
+            limit=total,
+            offset=0,
+        )
+        return page.rows
+
+    def stats(
+        self,
+        *,
+        refresh: bool = False,
+        full_rescan: bool = False,
+    ) -> dict[str, Any]:
+        """Aggregations over the sidecar.  Same shape as ``GET /api/sessions/stats``.
+
+        ``refresh`` / ``full_rescan`` follow the same semantics as
+        :meth:`list`.
+        """
+        session_dir = _persistence_store._session_dir()
+        index = _persistence_get_index(session_dir)
+        if refresh or full_rescan:
+            _persistence_reconcile(index, session_dir, full=full_rescan)
+        return _persistence_aggregate_stats(index)
 
     async def resume(
         self,

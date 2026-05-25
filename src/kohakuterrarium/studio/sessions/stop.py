@@ -43,6 +43,7 @@ async def stop_session(
     meta: dict[str, dict[str, Any]],
     session_stores: dict[str, SessionStore],
     mirror_dir: Path,
+    index_hooks: dict[str, Any] | None = None,
 ) -> None:
     """Stop every creature in the session and drop the graph + metadata.
 
@@ -105,6 +106,21 @@ async def stop_session(
     engine_stores = getattr(engine, "_session_stores", None) if engine else None
     if isinstance(engine_stores, dict):
         store = engine_stores.pop(session_id, None) or store
+    # Detach the live SessionIndexHook (if one was bound at session
+    # start) BEFORE closing the store so its final flush sees a still-
+    # subscribable store.  Detach is idempotent + best-effort.
+    if index_hooks is not None:
+        hook = index_hooks.pop(session_id, None)
+        if hook is not None:
+            try:
+                hook.flush()
+                hook.detach()
+            except Exception as e:
+                logger.debug(
+                    "Failed to detach session-index hook on stop",
+                    session_id=session_id,
+                    error=str(e),
+                )
     if store is not None and hasattr(store, "close"):
         try:
             store.close()

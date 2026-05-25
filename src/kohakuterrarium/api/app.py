@@ -110,6 +110,7 @@ from kohakuterrarium.api.routes.sessions_v2 import memory as sessions_memory
 from kohakuterrarium.api.routes.sessions_v2 import topology as sessions_topology
 from kohakuterrarium.api.routes.sessions_v2 import wiring as sessions_wiring
 from kohakuterrarium.api.studio import build_studio_router
+from kohakuterrarium.studio.persistence.session_index import close_session_index
 from kohakuterrarium.api.ws import daemon_logs as ws_daemon_logs
 from kohakuterrarium.api.ws import files as ws_files
 from kohakuterrarium.api.ws import io as ws_io
@@ -329,6 +330,15 @@ async def lifespan(app: FastAPI):
                 await host_engine.stop()
             except Exception:  # pragma: no cover - defensive
                 logger.exception("host_engine.stop failed")
+
+        # Release the session-index sidecar's native SQLite handles.
+        # Doing it here (last) means any other shutdown step that
+        # touches the listing endpoint (e.g. a final reconcile) still
+        # has the index open.
+        try:
+            close_session_index()
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("close_session_index failed")
 
 
 def _parse_bind(bind: str) -> tuple[str, int]:

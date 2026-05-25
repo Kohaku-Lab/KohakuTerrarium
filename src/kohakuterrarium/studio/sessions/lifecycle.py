@@ -19,6 +19,7 @@ import kohakuterrarium.terrarium.channels as channel_module
 from kohakuterrarium.packages.resolve import is_package_ref, resolve_package_path
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions import cluster_fold, remote_meta, stop as _stop
+from kohakuterrarium.studio.sessions import index_hooks as _index_hooks
 from kohakuterrarium.studio.sessions.find import (
     apply_creature_name,
     apply_creature_name as _apply_creature_name,  # noqa: F401 — legacy alias
@@ -290,6 +291,7 @@ def attach_session_store_for_creature(
         _session_stores[sid] = store
         # Mirror to engine map so channel-persistence callback finds it.
         engine._session_stores[sid] = store
+        _index_hooks.attach(sid, store, sess_dir)
         _retro_install_channel_persistence(engine, sid)
     except Exception as e:  # pragma: no cover - defensive
         logger.warning("Session store creation failed", error=str(e))
@@ -401,6 +403,7 @@ async def start_terrarium(
         )
         await engine.attach_session(sid, store)
         _session_stores[sid] = store
+        _index_hooks.attach(sid, store, sess_dir)
     except Exception as e:  # pragma: no cover - defensive
         logger.warning("Session store creation failed", error=str(e))
 
@@ -760,9 +763,7 @@ def _persist_cluster_members_to_mirror(service, session_id):
 async def stop_session(service: "TerrariumService", session_id: str) -> None:
     """Thin delegator — see :func:`studio.sessions.stop.stop_session`.
 
-    Passes the lifecycle-owned ``_meta`` / ``_session_stores`` registries
-    by reference so the extracted helper mutates the same state every
-    other lifecycle function reads.
+    Passes the lifecycle-owned registries by reference.
     """
     await _stop.stop_session(
         service,
@@ -770,6 +771,7 @@ async def stop_session(service: "TerrariumService", session_id: str) -> None:
         meta=_meta,
         session_stores=_session_stores,
         mirror_dir=Path(_session_dir()) / "mirror",
+        index_hooks=_index_hooks.registry(),
     )
 
 

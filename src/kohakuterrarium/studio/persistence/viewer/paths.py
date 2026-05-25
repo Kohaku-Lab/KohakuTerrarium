@@ -36,9 +36,10 @@ def all_session_files(session_dir: Path) -> list[Path]:
     Also scans the ``mirror/`` subdir: in lab-host mode the
     ``SessionMirrorWriter`` writes worker-session mirrors under
     ``<session_dir>/mirror/``, and the saved-session listing / history
-    endpoints are meant to surface them — ``_read_session_entry`` reads
-    ``meta['on_node']`` into each listing row precisely so mirrored
-    sessions show up tagged by their originating worker.
+    endpoints are meant to surface them — the session-index sidecar
+    reads ``meta['on_node']`` into each entry's ``node_id`` field
+    precisely so mirrored sessions show up tagged by their originating
+    worker.
     """
     if not session_dir.exists():
         return []

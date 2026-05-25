@@ -381,7 +381,7 @@ class TestStudioIntegration:
             # --- persistence.list: the saved session is indexed --------
             # max_age=0.0 forces a rebuild — the index is a module global
             # that may be stale from an earlier test.
-            saved = studio.persistence.list(max_age=0.0)
+            saved = studio.persistence.list(refresh=True)
             entry = next(e for e in saved if e["name"] == saved_stem)
             assert entry["config_type"] == "agent"
             assert entry["agents"] == ["scout"]
@@ -594,7 +594,7 @@ class TestStudioIntegration:
 
             # --- persistence.list sees both sessions now ----------------
             fork_stem = fork_path.name.split(".kohakutr")[0]
-            both = studio.persistence.list(max_age=0.0)
+            both = studio.persistence.list(refresh=True)
             assert {saved_stem, fork_stem} <= {e["name"] for e in both}
 
             # --- sessions.search_memory: FTS over the saved session ----

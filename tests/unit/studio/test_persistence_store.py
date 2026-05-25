@@ -1,87 +1,21 @@
-"""Unit tests for :mod:`kohakuterrarium.studio.persistence.store`."""
+"""Unit tests for :mod:`kohakuterrarium.studio.persistence.store`.
 
-import time
+The legacy in-memory listing helpers (``build_session_index`` /
+``get_session_index`` / ``session_stats`` / ``_read_session_entry`` /
+``_extract_text_preview`` / ``_max_mtime``) have been removed in
+favour of the sidecar at :mod:`studio.persistence.session_index`.
+Those code paths are covered by the test suite under
+``tests/unit/studio/persistence/session_index/``.  What remains
+here is the per-session filesystem + history surface that this
+module still owns: ``_session_dir`` resolution, ``disk_usage``,
+path helpers, ``session_targets`` / ``session_history_payload``,
+``delete_session_files``.
+"""
 
+from pathlib import Path
 
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence import store as store_mod
-
-# ── _extract_text_preview ─────────────────────────────────────
-
-
-class TestExtractTextPreview:
-    def test_none(self):
-        assert store_mod._extract_text_preview(None) == ""
-
-    def test_short_string(self):
-        assert store_mod._extract_text_preview("hello") == "hello"
-
-    def test_long_string_truncated(self):
-        out = store_mod._extract_text_preview("x" * 500, limit=10)
-        assert len(out) == 10
-
-    def test_list_of_text_parts(self):
-        out = store_mod._extract_text_preview(
-            [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]
-        )
-        assert "a" in out and "b" in out
-
-    def test_image_part(self):
-        out = store_mod._extract_text_preview(
-            [{"type": "image_url"}, {"type": "text", "text": "ok"}]
-        )
-        assert "[image]" in out
-        assert "ok" in out
-
-    def test_file_part(self):
-        out = store_mod._extract_text_preview([{"type": "file"}])
-        assert "[file]" in out
-
-    def test_unknown_attachment(self):
-        out = store_mod._extract_text_preview([{"type": "custom"}])
-        assert "[custom]" in out
-
-    def test_str_in_list(self):
-        out = store_mod._extract_text_preview(
-            ["bare-string", {"type": "text", "text": "x"}]
-        )
-        assert "bare-string" in out
-
-    def test_dict_input(self):
-        out = store_mod._extract_text_preview({"type": "text", "text": "hi"})
-        assert "hi" in out
-
-    def test_fallback_to_str(self):
-        out = store_mod._extract_text_preview(42)
-        assert out == "42"
-
-
-# ── _max_mtime ────────────────────────────────────────────────
-
-
-class TestMaxMtime:
-    def test_missing_file_zero(self, tmp_path):
-        assert store_mod._max_mtime(tmp_path / "no-such") == 0.0
-
-    def test_basic(self, tmp_path):
-        f = tmp_path / "s.kohakutr"
-        f.write_bytes(b"")
-        out = store_mod._max_mtime(f)
-        assert out > 0
-
-    def test_picks_wal_max(self, tmp_path):
-        f = tmp_path / "s.kohakutr"
-        f.write_bytes(b"")
-        wal = tmp_path / "s.kohakutr-wal"
-        wal.write_bytes(b"")
-        # Touch the wal to make it newer than the main file.
-        future = time.time() + 10
-        import os
-
-        os.utime(wal, (future, future))
-        out = store_mod._max_mtime(f)
-        assert out >= future - 1
-
 
 # ── _session_dir ──────────────────────────────────────────────
 
@@ -93,7 +27,7 @@ class TestSessionDir:
         assert out.name == "sessions"
 
 
-# ── _read_session_entry ───────────────────────────────────────
+# ── shared helper ────────────────────────────────────────────
 
 
 def _make_session(tmp_path, name="alice", agent="alice", meta_extra=None):
@@ -109,109 +43,6 @@ def _make_session(tmp_path, name="alice", agent="alice", meta_extra=None):
     finally:
         s.close()
     return path
-
-
-class TestReadSessionEntry:
-    def test_basic(self, tmp_path):
-        path = _make_session(tmp_path)
-        out = store_mod._read_session_entry(path)
-        assert out["name"] == "alice"
-        # Preview captured.
-        assert "hello" in out["preview"]
-        assert out["config_type"] == "agent"
-
-    def test_with_lineage(self, tmp_path):
-        path = _make_session(
-            tmp_path,
-            meta_extra={
-                "lineage": {
-                    "fork": {"parent_session_id": "p", "fork_point": 3},
-                    "migration": {"source_version": 1},
-                }
-            },
-        )
-        out = store_mod._read_session_entry(path)
-        assert out["parent_session_id"] == "p"
-        assert out["fork_point"] == 3
-        assert out["migrated_from_version"] == 1
-
-    def test_corrupt_returns_error(self, tmp_path):
-        # Non-SQLite file → SessionStore opens it as a new vault; we
-        # can't easily corrupt the format, so simulate by mocking.
-        path = tmp_path / "bad.kohakutr"
-        path.write_bytes(b"")
-        out = store_mod._read_session_entry(path)
-        # The empty file is still opened by KVault — assert structure.
-        assert out["name"] == "bad"
-
-
-# ── build_session_index / get_session_index ────────────────────
-
-
-class TestBuildSessionIndex:
-    def test_empty_dir_returns_empty(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(store_mod, "_SESSION_DIR", tmp_path / "missing")
-        out = store_mod.build_session_index()
-        assert out == []
-
-    def test_with_sessions(self, tmp_path, monkeypatch):
-        _make_session(tmp_path, name="alice")
-        monkeypatch.setattr(store_mod, "_SESSION_DIR", tmp_path)
-        out = store_mod.build_session_index()
-        names = [e["name"] for e in out]
-        assert "alice" in names
-
-    def test_get_session_index_uses_cache(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(store_mod, "_session_index", [{"cached": True}])
-        monkeypatch.setattr(store_mod, "_index_built_at", time.time())
-        out = store_mod.get_session_index()
-        assert out == [{"cached": True}]
-
-    def test_get_session_index_rebuilds_when_stale(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(store_mod, "_SESSION_DIR", tmp_path)
-        monkeypatch.setattr(store_mod, "_session_index", [{"stale": True}])
-        monkeypatch.setattr(store_mod, "_index_built_at", 0)
-        # Stale cache + empty session dir → rebuilds to an empty list,
-        # discarding the stale entry.
-        out = store_mod.get_session_index(max_age=0.0)
-        assert out == []
-
-
-# ── session_stats ─────────────────────────────────────────────
-
-
-class TestSessionStats:
-    def test_empty(self, monkeypatch):
-        monkeypatch.setattr(store_mod, "_session_index", [])
-        monkeypatch.setattr(store_mod, "_index_built_at", time.time())
-        out = store_mod.session_stats()
-        assert out["count"] == 0
-
-    def test_with_sessions(self, monkeypatch):
-        now = time.time()
-        entries = [
-            {
-                "config_type": "agent",
-                "status": "running",
-                "format_version": 2,
-                "agents": ["alice"],
-                "last_active": "2025-01-01T00:00:00+00:00",
-            },
-            {
-                "config_type": "agent",
-                "status": "paused",
-                "format_version": 2,
-                "agents": ["bob"],
-                "last_active": "2026-12-01T00:00:00+00:00",
-            },
-            {"error": True},  # skipped
-        ]
-        monkeypatch.setattr(store_mod, "_session_index", entries)
-        monkeypatch.setattr(store_mod, "_index_built_at", now)
-        out = store_mod.session_stats()
-        assert out["count"] == 3
-        assert out["by_config_type"]["agent"] == 2
-        assert "alice" in [a[0] for a in out["agents_top"]]
 
 
 # ── disk_usage ────────────────────────────────────────────────
@@ -324,3 +155,46 @@ class TestDeleteSessionFiles:
         assert len(deleted) >= 1
         # Path is gone.
         assert not path.exists()
+
+    def test_deletes_wal_shm_sidecars(self, tmp_path, monkeypatch):
+        # Bug #59: SQLite WAL mode writes ``-wal`` + ``-shm`` next to
+        # the main file.  Pre-fix ``delete_session_files`` only
+        # globbed ``*.kohakutr*``, leaving the sidecars behind to
+        # waste disk and confuse re-creates of the same session name.
+        path = _make_session(tmp_path)
+        wal = path.with_name(path.name + "-wal")
+        shm = path.with_name(path.name + "-shm")
+        wal.write_bytes(b"fake wal")
+        shm.write_bytes(b"fake shm")
+        monkeypatch.setattr(store_mod, "_SESSION_DIR", tmp_path)
+        store_mod.delete_session_files("alice")
+        assert not path.exists()
+        assert not wal.exists(), "WAL sidecar leaked after delete"
+        assert not shm.exists(), "SHM sidecar leaked after delete"
+
+    def test_retries_on_transient_permission_error(self, tmp_path, monkeypatch):
+        # Bug #59 (Windows-only repro in production): the close-handles
+        # nudge happens via Python refcounting which can lag a few ms
+        # behind ``unlink``.  ``_unlink_with_retry`` must retry rather
+        # than propagate the first ``PermissionError`` straight to the
+        # 409 handler.
+        path = _make_session(tmp_path)
+        monkeypatch.setattr(store_mod, "_SESSION_DIR", tmp_path)
+        # Speed up the backoff so the test isn't slow.
+        monkeypatch.setattr(store_mod.time, "sleep", lambda _s: None)
+
+        real_unlink = Path.unlink
+        calls = {"n": 0}
+
+        def flaky_unlink(self_path, *args, **kw):
+            # First call on the main file raises; subsequent succeed.
+            if self_path == path and calls["n"] == 0:
+                calls["n"] += 1
+                raise PermissionError(13, "simulated Windows file lock")
+            return real_unlink(self_path, *args, **kw)
+
+        monkeypatch.setattr(Path, "unlink", flaky_unlink)
+        deleted = store_mod.delete_session_files("alice")
+        assert len(deleted) >= 1
+        assert not path.exists()
+        assert calls["n"] == 1, "the flaky path should have been retried"
