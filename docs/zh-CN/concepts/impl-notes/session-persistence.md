@@ -85,6 +85,66 @@ tags:
   能辨识它。
 - **Resume 可选择停用**。 `--no-session` 会完全停用这个 store。
 
+## 列表用 sidecar
+
+`.kohakutr` 文件是数据的来源，但用来「列表」的形状不对 ——
+当 `GET /api/sessions` 面对 1000 个 session 时，不应该为了渲染
+侧边栏就打开 1000 个 SQLite 文件。我们在上层加了一个 write-through
+cache：
+
+```
+<session_dir>/.kt-index.kvault   ← 单一 SQLite 文件，三张表：
+    entries  (KVault)    filename → 打包后的 SessionIndexEntry
+    search   (TextVault) 针对 name / preview / config_path /
+                         agents / pwd 的 FTS5（用 BM25 排名）
+    meta     (KVault)    schema_version、bootstrap_completed 等
+```
+
+一笔 `SessionIndexEntry` 是列表形状的扁平 dict（`name`、
+`last_active`、`status`、`config_type`、`node_id`、
+`terrarium_name`、`preview`、`agents`、`parent_session_id`、
+`forked_children`…），再加上从 `stat()` 拿到的 `(mtime, size)`
+指纹。一只 session 一列。冷列表现在只需要一次文件打开 + 一次表格
+扫描，与 session 数量无关；搜寻则是单一 FTS5 查询。
+
+### 索引怎么和磁盘保持一致
+
+三条独立路径让 entries 与磁盘上的文件同步 —— 任一条都不是单点：
+
+1. **Push hook**（`session_index/hooks.py`）。当 API server 自身
+   拥有一个 `SessionStore` 时，`SessionIndexHook` 会订阅其事件流，
+   每 20 个事件或 5 秒（先到先发）就 upsert 一次条目。同一个 store
+   既写事件也更新索引 —— 不会落后。
+
+2. **Pull reconcile**（`session_index/reconcile.py`）。走访 session
+   目录，把每个文件做指纹比对，只打开 `(mtime, size)` 和索引不同
+   （或索引中尚未存在）的文件，重新读取它们的 meta 与 preview。
+   已删除的文件会从索引剔除。这就是 API 在 `?refresh=true` 时
+   触发的路径。`?full_rescan=true` 则强制重新读取所有文件 ——
+   用在手动修改 `.kohakutr` 之后。
+
+3. **Startup reconcile**。`get_session_index_default` 这个 singleton
+   在每个进程第一次打开时跑 reconcile。第一次开启时跑 full
+   reconcile（bootstrap）并设置 `bootstrap_completed` 旗标；之后的
+   每次开启（server 重启）跑增量路径，于是另一个进程在 server
+   关闭期间产出的 sessions（例如另一个终端跑的 `kt run`）会被自动
+   接进来。这里若失败会大声 log，但绝不挡 server 启动 —— 提供
+   过期数据，仍比完全无法服务好。
+
+### 为什么要用 sidecar（而不是只放在内存）
+
+- **可以撑过重启**。 一个跑了很久的 server 即便崩在列表中途，下次
+  开起来只要做指纹差异比对，毫秒级就能恢复，不需要重新打开 N 个文件。
+- **可以撑过搬家**。 `mv ~/.kohakuterrarium/sessions /backup` 会把
+  sidecar 一起带过去；之后在 `/backup` 列表是瞬间完成。
+- **一次打开、一次查询**。 列出 1000 个 sessions 是一次 SQLite 打开
+  + 一次 `ORDER BY last_active LIMIT 20`（或一次 FTS5 match）。
+  没有 sidecar 之前的路径，光是渲染首页都要打开 1000 个文件。
+
+Sidecar 是可以直接删除的；下次调用 `get_session_index_default` 就会
+重建。它没有迁移路径，因为里面没有任何不存在于 `.kohakutr` 来源
+文件中的状态。
+
 ## 代码中的位置
 
 - `src/kohakuterrarium/session/store.py` — `SessionStore` API。
@@ -93,6 +153,13 @@ tags:
 - `src/kohakuterrarium/session/resume.py` — 重建路径。
 - `src/kohakuterrarium/session/memory.py` — FTS 与向量查询。
 - `src/kohakuterrarium/session/embedding.py` — embedding providers。
+- `src/kohakuterrarium/studio/persistence/session_index/` — 列表用
+  sidecar：`entry.py`（列结构）、`store.py`（KVault + TextVault 包装）、
+  `reconcile.py`（指纹差异 + 并行重读）、`hooks.py`（来自运行中
+  SessionStore 的 live push）、`__init__.py`（进程内 singleton +
+  启动 reconcile）。
+- `src/kohakuterrarium/api/routes/persistence/saved.py` — HTTP 介面
+  （`GET /api/sessions`、`DELETE /api/sessions/{name}`）。
 
 ## 另请参阅
 

@@ -135,6 +135,65 @@ Manual compaction:
 
 from the CLI/TUI prompt. Useful before handing off a long session or shipping it as context into another run.
 
+## Listing and searching sessions
+
+The `kt serve` web UI and `GET /api/sessions` are backed by a
+sidecar index — one SQLite file at
+`<session_dir>/.kt-index.kvault` that caches listing-shape metadata
+(name, status, last-active timestamp, agents, preview, …) per
+session and exposes BM25 search over the text columns. You never
+interact with it directly; it stays consistent across server
+restarts and `kt run` sessions started while the server was down.
+
+Query parameters on `GET /api/sessions`:
+
+| Param | Default | Notes |
+|---|---|---|
+| `limit` | `20` | page size |
+| `offset` | `0` | page offset |
+| `search` | `""` | FTS5 query over `name` / `preview` / `config_path` / `agents` / `pwd` |
+| `sort` | `last_active` | `last_active` \| `created_at` \| `name` \| `status` \| `relevance` |
+| `order` | `desc` | `desc` \| `asc` |
+| `status` | (none) | exact match (`running`, `paused`, …) |
+| `config_type` | (none) | exact match (`agent`, `terrarium`) |
+| `node_id` | (none) | exact match — filter by which lab node ran the session |
+| `refresh` | `false` | incremental reconcile before listing — re-reads only files whose `(mtime, size)` changed |
+| `full_rescan` | `false` | force re-read of every file (use after manually editing a `.kohakutr` on disk) |
+
+`sort=relevance` is only meaningful when `search` is set; with any
+other sort, the FTS hit-set is collected first and then ordered by
+the requested field.
+
+How the index stays in sync without manual refresh:
+
+- **Push.** While the API server is running, each `SessionStore` it
+  owns pushes updates into the index on a debounce (every 20 events
+  or 5 seconds, whichever first), so the index never falls behind
+  during normal use.
+- **Startup reconcile.** On every server start, the index does a
+  fingerprint-diff pass over the session directory and re-reads only
+  the files that changed. First-ever startup does a full read of
+  every file (the *bootstrap* step) and remembers it succeeded.
+- **`?refresh=true`.** Trigger the same incremental reconcile on
+  demand — useful right after copying a backup `.kohakutr` into the
+  session directory.
+
+The sidecar is safe to delete: the next listing rebuilds it from
+the `.kohakutr` files. Nothing inside the index is unique state.
+
+Programmatic listing without the HTTP layer:
+
+```python
+from kohakuterrarium.studio.persistence.session_index import (
+    get_session_index_default,
+)
+
+index = get_session_index_default()
+page = index.list(search="auth bug", sort="relevance", limit=10)
+for row in page.rows:
+    print(row["name"], row["last_active"], row["preview"])
+```
+
 ## Memory search
 
 Sessions are also a searchable knowledge base. After building an index:

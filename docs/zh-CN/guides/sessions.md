@@ -133,6 +133,60 @@ compact:
 
 要把长会话交给人接手、或把它当成下一次执行的 context 时很实用。
 
+## 列表与搜索会话
+
+`kt serve` 的 Web UI 与 `GET /api/sessions` 背后是一个 sidecar 索引
+—— 位于 `<session_dir>/.kt-index.kvault` 的一个 SQLite 文件，
+会快取每只会话的列表形 metadata（name、status、最后活动时间戳、
+agents、preview…），并对文字栏目做 BM25 搜索。你不需要直接操作它；
+即便 server 重启、或在 server 关闭期间用 `kt run` 起了会话，它都能
+维持一致。
+
+`GET /api/sessions` 的 query 参数：
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `limit` | `20` | 单页笔数 |
+| `offset` | `0` | 翻页偏移 |
+| `search` | `""` | 对 `name` / `preview` / `config_path` / `agents` / `pwd` 做 FTS5 查询 |
+| `sort` | `last_active` | `last_active` \| `created_at` \| `name` \| `status` \| `relevance` |
+| `order` | `desc` | `desc` \| `asc` |
+| `status` | （无） | 精确比对（`running`、`paused`…） |
+| `config_type` | （无） | 精确比对（`agent`、`terrarium`） |
+| `node_id` | （无） | 精确比对 —— 筛选哪个 lab node 执行了该会话 |
+| `refresh` | `false` | 列表前跑一次增量 reconcile，只重读 `(mtime, size)` 改变的文件 |
+| `full_rescan` | `false` | 强制重读所有文件（手动改了磁盘上的 `.kohakutr` 后使用） |
+
+`sort=relevance` 只有在带 `search` 时才有意义；其他 sort 会先收集
+FTS hit-set，再依指定字段排序。
+
+索引在不需要手动 refresh 的情况下，如何保持同步：
+
+- **Push**。API server 运行期间，它名下的每个 `SessionStore` 都会在
+  debounce 之后把更新推进索引（每 20 个事件或 5 秒，先到先发），
+  正常使用时不会落后。
+- **启动 reconcile**。每次 server 启动时，索引会针对 session 目录
+  做指纹比对，只重读改变了的文件。第一次启动时会做一次「bootstrap」
+  全量读取，并记下成功。
+- **`?refresh=true`**。可按需触发同样的增量 reconcile —— 适用于
+  刚把备份的 `.kohakutr` 复制进 session 目录之后。
+
+Sidecar 可以放心删除：下次列表会从 `.kohakutr` 文件重建。它里面
+没有任何独立保存的状态。
+
+不透过 HTTP 层的程序化列表：
+
+```python
+from kohakuterrarium.studio.persistence.session_index import (
+    get_session_index_default,
+)
+
+index = get_session_index_default()
+page = index.list(search="auth bug", sort="relevance", limit=10)
+for row in page.rows:
+    print(row["name"], row["last_active"], row["preview"])
+```
+
 ## 记忆搜索
 
 会话本身也是一个可搜索的知识库。建立索引后：

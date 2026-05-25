@@ -93,6 +93,74 @@ them as the tool result.
   directory.
 - **Resume is opt-out.** `--no-session` disables the store entirely.
 
+## The listing sidecar
+
+`.kohakutr` files are the source of truth, but they are the wrong
+shape for *listing* — `GET /api/sessions` on a 1000-session install
+must not open 1000 SQLite files just to render a sidebar. We layer
+a write-through cache on top:
+
+```
+<session_dir>/.kt-index.kvault   ← one SQLite file, three tables:
+    entries  (KVault)   filename → packed SessionIndexEntry
+    search   (TextVault) FTS5 over name / preview / config_path /
+                        agents / pwd  (BM25 ranked)
+    meta     (KVault)   schema_version, bootstrap_completed, …
+```
+
+A `SessionIndexEntry` is a flat dict of the listing-shape fields
+(`name`, `last_active`, `status`, `config_type`, `node_id`,
+`terrarium_name`, `preview`, `agents`, `parent_session_id`,
+`forked_children`, …) plus a `(mtime, size)` fingerprint pulled
+from `stat()`. One row per session file. Cold listing is now one
+file open + one table scan regardless of how many sessions exist;
+search is a single FTS5 query.
+
+### How the index stays honest
+
+Three independent paths keep entries in sync with the files on
+disk — none of them is load-bearing on its own:
+
+1. **Push hook** (`session_index/hooks.py`). When the API server
+   itself owns a `SessionStore`, a `SessionIndexHook` subscribes to
+   its event stream and re-upserts the entry on a debounce
+   (every 20 events or 5 seconds, whichever first). The same store
+   instance both writes events and updates the index — no lag.
+
+2. **Pull reconcile** (`session_index/reconcile.py`). Walks the
+   session directory, fingerprints every file, opens only the ones
+   whose `(mtime, size)` differs from the stored entry (or that have
+   no entry yet), and re-reads their meta + preview. Files that
+   have been deleted are dropped from the index. This is the fallback
+   the API surfaces as `?refresh=true`. `?full_rescan=true` forces
+   re-read of every file — use it after manually editing a
+   `.kohakutr` on disk.
+
+3. **Startup reconcile**. The `get_session_index_default` singleton
+   runs reconcile on first open of a process. First-ever open does
+   a full reconcile (bootstrap) and sets the `bootstrap_completed`
+   flag; subsequent opens (server restart) run the incremental
+   path so sessions produced by sibling processes (`kt run` in
+   another terminal while the server was down) get picked up
+   automatically. A failure here logs loudly but never blocks
+   server startup — stale data is preferable to no service.
+
+### Why a sidecar (not in-memory)
+
+- **Survives restarts.** A long-running server that crashed mid-list
+  rebuilds in ms via the fingerprint diff, not minutes via N file
+  opens.
+- **Survives moves.** `mv ~/.kohakuterrarium/sessions /backup` carries
+  the sidecar along; the next listing on `/backup` is instant.
+- **One open, one query.** Listing 1000 sessions is one SQLite open
+  + one `ORDER BY last_active LIMIT 20` (or one FTS5 match). The
+  pre-sidecar path opened 1000 files even to render the first page.
+
+The sidecar is safe to delete; the next `get_session_index_default`
+call rebuilds it. There is no migration path because there is no
+schema in it that the source of truth (the `.kohakutr` files
+themselves) does not already hold.
+
 ## Where it lives in the code
 
 - `src/kohakuterrarium/session/store.py` — `SessionStore` API.
@@ -104,6 +172,13 @@ them as the tool result.
 - `src/kohakuterrarium/session/resume.py` — the rebuild path.
 - `src/kohakuterrarium/session/memory.py` — FTS and vector queries.
 - `src/kohakuterrarium/session/embedding.py` — embedding providers.
+- `src/kohakuterrarium/studio/persistence/session_index/` — listing
+  sidecar: `entry.py` (row schema), `store.py` (KVault + TextVault
+  wrapper), `reconcile.py` (fingerprint diff + parallel re-read),
+  `hooks.py` (live push from a running SessionStore), `__init__.py`
+  (process-wide singleton + startup reconcile).
+- `src/kohakuterrarium/api/routes/persistence/saved.py` — the
+  HTTP surface (`GET /api/sessions`, `DELETE /api/sessions/{name}`).
 
 ## See also
 
