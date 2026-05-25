@@ -120,9 +120,10 @@ class TestInstallErrors:
 
         captured = {}
 
-        def fake_clone(url, target):
+        def fake_clone(url, target, ref=None):
             captured["url"] = url
             captured["target"] = target
+            captured["ref"] = ref
             # Simulate a successful clone by creating the target dir.
             target.mkdir(parents=True, exist_ok=True)
             (target / "creatures").mkdir()
@@ -139,7 +140,7 @@ class TestInstallErrors:
     ):
         from kohakuterrarium.packages import git_backend
 
-        def boom(url, target):
+        def boom(url, target, ref=None):
             raise RuntimeError("Git clone failed: clone denied")
 
         monkeypatch.setattr(git_backend, "clone_repo", boom)
@@ -229,6 +230,227 @@ class TestUpdatePackage:
         monkeypatch.setattr(git_backend, "pull_repo", boom)
         with pytest.raises(RuntimeError, match="Git pull failed for gitpkg"):
             update_package("gitpkg")
+
+    def test_refuses_pinned_install(self, pkg_dir, tmp_path, monkeypatch, no_deps):
+        # AUDIT FIX #2 (round-2): a package installed at a pinned ref
+        # (recorded in .kt_install_info.json) is on a detached HEAD
+        # after ``git clone -b <tag>``; ``git pull --ff-only`` against
+        # detached HEAD fails with a confusing message.  update_package
+        # must detect the marker and error cleanly, telling the user
+        # to ``kt install @<name>@<newversion>`` instead.
+        import json
+
+        pkg = pkg_dir / "gitpkg"
+        (pkg / ".git").mkdir(parents=True)
+        (pkg / "kohaku.yaml").write_text("name: gitpkg")
+        (pkg / ".kt_install_info.json").write_text(
+            json.dumps({"source": "https://x/y.git", "ref": "v1.0.0"})
+        )
+        with pytest.raises(RuntimeError, match="pinned ref 'v1.0.0'"):
+            update_package("gitpkg")
+
+
+class TestPinnedReinstallReplacesCheckout:
+    """AUDIT FIX #1 (round-2): re-install with a ref must replace, not pull."""
+
+    def test_existing_pkg_with_ref_replaces_checkout(
+        self, pkg_dir, tmp_path, monkeypatch, no_deps
+    ):
+        # Pre-create an "installed" package — this is the bug
+        # scenario where ``install_package(url, ref="v2.0.0")`` on an
+        # existing checkout used to silently fall through to
+        # ``pull_repo`` (leaving the previous ref in place).
+        existing = pkg_dir / "myrepo"
+        (existing / ".git").mkdir(parents=True)
+        (existing / "kohaku.yaml").write_text("name: myrepo")
+        (existing / "OLD_MARKER").touch()
+
+        from kohakuterrarium.packages import git_backend
+
+        captured = {}
+
+        def fake_clone(url, target, ref=None):
+            captured["url"] = url
+            captured["target"] = target
+            captured["ref"] = ref
+            # Simulate a fresh clone at the requested ref.
+            target.mkdir(parents=True, exist_ok=True)
+            (target / ".git").mkdir()
+            (target / "kohaku.yaml").write_text("name: myrepo")
+            (target / "NEW_MARKER").touch()
+
+        def fake_pull(target):
+            captured["pulled"] = True
+
+        monkeypatch.setattr(git_backend, "clone_repo", fake_clone)
+        monkeypatch.setattr(git_backend, "pull_repo", fake_pull)
+        install_package("https://x/myrepo.git", ref="v2.0.0")
+
+        # clone_repo invoked, pull_repo NOT invoked.
+        assert captured.get("ref") == "v2.0.0"
+        assert "pulled" not in captured
+        # Previous checkout torn down — OLD_MARKER gone, NEW_MARKER
+        # present.
+        assert not (pkg_dir / "myrepo" / "OLD_MARKER").exists()
+        assert (pkg_dir / "myrepo" / "NEW_MARKER").exists()
+
+    def test_pinned_reinstall_rolls_back_on_validation_failure(
+        self, pkg_dir, tmp_path, monkeypatch, no_deps
+    ):
+        # AUDIT FIX (round-3): the previous wipe-then-clone left the
+        # user with NO package if the new clone or its validation
+        # blew up.  Transactional install must keep the old checkout
+        # intact when staging fails.
+        existing = pkg_dir / "myrepo"
+        (existing / ".git").mkdir(parents=True)
+        (existing / "kohaku.yaml").write_text("name: myrepo")
+        (existing / "OLD_MARKER").touch()
+
+        from kohakuterrarium.packages import git_backend, install as install_mod
+
+        def fake_clone(url, target, ref=None):
+            # Simulate a successful clone into the staging dir so
+            # _validate_package gets a chance to run and "fail."
+            target.mkdir(parents=True, exist_ok=True)
+            (target / ".git").mkdir()
+            (target / "kohaku.yaml").write_text("name: myrepo")
+            (target / "NEW_MARKER").touch()
+
+        def angry_validate(pkg_dir_arg, name):
+            raise RuntimeError("simulated post-clone validation failure")
+
+        monkeypatch.setattr(git_backend, "clone_repo", fake_clone)
+        monkeypatch.setattr(install_mod, "_validate_package", angry_validate)
+
+        with pytest.raises(RuntimeError, match="simulated post-clone"):
+            install_package("https://x/myrepo.git", ref="v2.0.0")
+
+        # OLD install untouched — user keeps a working package.
+        assert (pkg_dir / "myrepo").is_dir()
+        assert (pkg_dir / "myrepo" / "OLD_MARKER").exists()
+        assert (pkg_dir / "myrepo" / ".git").is_dir()
+        assert not (pkg_dir / "myrepo" / "NEW_MARKER").exists()
+        # Staging + backup dirs cleaned up.
+        leftovers = [
+            p
+            for p in pkg_dir.iterdir()
+            if p.name.startswith("myrepo.tmp-") or p.name.startswith("myrepo.bak-")
+        ]
+        assert leftovers == [], f"transactional install leaked: {leftovers}"
+
+    def test_pinned_reinstall_rolls_back_on_clone_failure(
+        self, pkg_dir, tmp_path, monkeypatch, no_deps
+    ):
+        # Same invariant when the failure is in the clone itself —
+        # not just validation.  The staging dir must be torn down and
+        # the original install left in place.
+        existing = pkg_dir / "myrepo"
+        (existing / ".git").mkdir(parents=True)
+        (existing / "kohaku.yaml").write_text("name: myrepo")
+        (existing / "OLD_MARKER").touch()
+
+        from kohakuterrarium.packages import git_backend
+
+        def angry_clone(url, target, ref=None):
+            # Leave a partial dir behind, as a real failing
+            # subprocess clone might.
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "junk").touch()
+            raise RuntimeError("simulated clone failure")
+
+        monkeypatch.setattr(git_backend, "clone_repo", angry_clone)
+
+        with pytest.raises(RuntimeError, match="simulated clone"):
+            install_package("https://x/myrepo.git", ref="v2.0.0")
+
+        # OLD install untouched.
+        assert (pkg_dir / "myrepo" / "OLD_MARKER").exists()
+        # Staging cleaned up despite the partial dir the failing
+        # clone left behind.
+        leftovers = [
+            p
+            for p in pkg_dir.iterdir()
+            if p.name.startswith("myrepo.tmp-") or p.name.startswith("myrepo.bak-")
+        ]
+        assert leftovers == [], f"transactional install leaked: {leftovers}"
+
+    def test_pinned_reinstall_first_swap_failure_cleans_staging(
+        self, pkg_dir, tmp_path, monkeypatch, no_deps
+    ):
+        # AUDIT FIX (round-4): if the FIRST ``os.replace(target,
+        # backup)`` fails (e.g. Windows lock on the existing
+        # install), the validated staging clone must still be torn
+        # down — otherwise a leftover ``<name>.tmp-<id>`` dir
+        # accumulates next to the package on every failed retry.
+        existing = pkg_dir / "myrepo"
+        (existing / ".git").mkdir(parents=True)
+        (existing / "kohaku.yaml").write_text("name: myrepo")
+        (existing / "OLD_MARKER").touch()
+
+        from kohakuterrarium.packages import git_backend, install as install_mod
+
+        def fake_clone(url, target, ref=None):
+            target.mkdir(parents=True, exist_ok=True)
+            (target / ".git").mkdir()
+            (target / "kohaku.yaml").write_text("name: myrepo")
+
+        monkeypatch.setattr(git_backend, "clone_repo", fake_clone)
+
+        real_replace = install_mod.os.replace
+        calls = {"n": 0}
+
+        def angry_replace(src, dst):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                # Simulate Windows refusing the first move.
+                raise OSError(13, "permission denied (simulated)")
+            return real_replace(src, dst)
+
+        monkeypatch.setattr(install_mod.os, "replace", angry_replace)
+
+        with pytest.raises(OSError, match="permission denied"):
+            install_package("https://x/myrepo.git", ref="v2.0.0")
+
+        # OLD install untouched, no staging leftover.
+        assert (pkg_dir / "myrepo" / "OLD_MARKER").exists()
+        leftovers = [
+            p
+            for p in pkg_dir.iterdir()
+            if p.name.startswith("myrepo.tmp-") or p.name.startswith("myrepo.bak-")
+        ]
+        assert (
+            leftovers == []
+        ), f"staging/backup leaked on first-swap failure: {leftovers}"
+
+    def test_existing_pkg_without_ref_still_pulls(
+        self, pkg_dir, tmp_path, monkeypatch, no_deps
+    ):
+        # The unpinned re-install path must still pull-in-place
+        # (existing behaviour for ``kt update``).
+        existing = pkg_dir / "myrepo"
+        (existing / ".git").mkdir(parents=True)
+        (existing / "kohaku.yaml").write_text("name: myrepo")
+
+        from kohakuterrarium.packages import git_backend
+
+        captured = {}
+
+        def fake_pull(target):
+            captured["pulled"] = target
+
+        def fake_clone(url, target, ref=None):
+            captured["cloned"] = (url, target, ref)
+            # Re-create the dir if pull-in-place tore it down (it shouldn't).
+            target.mkdir(parents=True, exist_ok=True)
+            (target / ".git").mkdir()
+            (target / "kohaku.yaml").write_text("name: myrepo")
+
+        monkeypatch.setattr(git_backend, "pull_repo", fake_pull)
+        monkeypatch.setattr(git_backend, "clone_repo", fake_clone)
+        install_package("https://x/myrepo.git")  # no ref
+        # pull_repo invoked, clone_repo NOT invoked.
+        assert "pulled" in captured
+        assert "cloned" not in captured
 
 
 class TestUninstallPackage:

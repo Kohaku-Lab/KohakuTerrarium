@@ -54,7 +54,12 @@ class TestInstallUninstall:
             captured.append((src, editable, name_override))
             return "demo"
 
-        monkeypatch.setattr(pkg_mod, "install_package", _install)
+        # ``install_package_op`` now routes through ``install_package_spec``
+        # (which handles ``@`` marketplace specs).  Non-spec inputs fall
+        # straight through to ``install_package``, but the test monkeypatch
+        # has to land on the spec wrapper since that's the now-immediate
+        # callee.
+        monkeypatch.setattr(pkg_mod, "install_package_spec", _install)
         out = pkg_mod.install_package_op("git+https://x", editable=True, name="d")
         assert out == "demo"
         assert captured == [("git+https://x", True, "d")]
@@ -77,7 +82,7 @@ class TestInstallUninstall:
         from kohakuterrarium.studio.catalog import packages_scan as scan_mod
 
         called = []
-        monkeypatch.setattr(pkg_mod, "install_package", lambda *a, **kw: "newpkg")
+        monkeypatch.setattr(pkg_mod, "install_package_spec", lambda *a, **kw: "newpkg")
         monkeypatch.setattr(
             scan_mod, "invalidate_scan_caches", lambda: called.append("invalidated")
         )

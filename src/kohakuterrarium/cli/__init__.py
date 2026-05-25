@@ -23,6 +23,7 @@ from kohakuterrarium.cli.config import add_config_subparser, config_cli
 from kohakuterrarium.cli.extension import extension_info_cli, extension_list_cli
 from kohakuterrarium.cli.identity_mcp import list_for_agent_cli as mcp_list_cli
 from kohakuterrarium.cli.lab_client import add_lab_client_subparser, lab_client_cli
+from kohakuterrarium.cli.marketplace import marketplace_cli
 from kohakuterrarium.cli.memory import embedding_cli, search_cli
 from kohakuterrarium.cli.model import model_cli
 from kohakuterrarium.cli.packages import (
@@ -215,7 +216,13 @@ def _build_parser() -> argparse.ArgumentParser:
     install_parser = subparsers.add_parser(
         "install", help="Install a creature/terrarium package"
     )
-    install_parser.add_argument("source", help="Git URL or local path to package")
+    install_parser.add_argument(
+        "source",
+        help=(
+            "Marketplace spec (@name, @name@version, @source/name), git URL, "
+            "or local path"
+        ),
+    )
     install_parser.add_argument(
         "-e",
         "--editable",
@@ -348,6 +355,49 @@ def _build_parser() -> argparse.ArgumentParser:
         "info", help="Show details of a specific package"
     )
     ext_info_parser.add_argument("name", help="Package name")
+
+    # Marketplace command group — discovery + source-list management
+    # for the TerrariumMarket-backed package registry.  ``kt install
+    # @<name>`` already routes through the same resolver, so this
+    # surface is mostly for browsing + curating sources.
+    mp_parser = subparsers.add_parser(
+        "marketplace",
+        help="Browse + manage TerrariumMarket sources (kt install @<name> uses these)",
+    )
+    mp_sub = mp_parser.add_subparsers(dest="marketplace_command")
+    mp_sub.add_parser("list", help="List configured marketplace sources")
+    mp_add_parser = mp_sub.add_parser("add", help="Add a marketplace source URL")
+    mp_add_parser.add_argument("url", help="https URL to a registry.yaml")
+    mp_add_parser.add_argument(
+        "--alias", default=None, help="Short name for the source (default: URL)"
+    )
+    mp_remove_parser = mp_sub.add_parser(
+        "remove", help="Remove a marketplace source by URL or alias"
+    )
+    mp_remove_parser.add_argument("target", help="URL or alias of the source")
+    mp_sub.add_parser("reset", help="Restore the built-in default source list")
+    mp_sub.add_parser("refresh", help="Force cache bust + re-fetch every source")
+    mp_search_parser = mp_sub.add_parser(
+        "search", help="Search packages across configured sources"
+    )
+    mp_search_parser.add_argument(
+        "query",
+        nargs="?",
+        default="",
+        help="Substring matched against name + description",
+    )
+    mp_search_parser.add_argument("--tag", default=None, help="Filter by tag")
+    mp_search_parser.add_argument("--author", default=None, help="Filter by author")
+    mp_search_parser.add_argument(
+        "--json", action="store_true", help="Emit machine-readable JSON"
+    )
+    mp_info_parser = mp_sub.add_parser(
+        "info", help="Show full detail for a marketplace entry"
+    )
+    mp_info_parser.add_argument(
+        "spec",
+        help="@name, @name@version, or @source/name (the leading @ is optional)",
+    )
 
     # MCP command group
     mcp_parser = subparsers.add_parser("mcp", help="MCP server management")
@@ -537,6 +587,7 @@ COMMANDS: dict[str, callable] = {
     "self-update": self_update_cli,
     "extension": _dispatch_extension,
     "mcp": _dispatch_mcp,
+    "marketplace": marketplace_cli,
     "admin": admin_cli,
 }
 

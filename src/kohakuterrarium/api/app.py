@@ -53,6 +53,7 @@ from kohakuterrarium.api.routes.catalog import creatures as catalog_creatures
 from kohakuterrarium.api.routes.catalog import creatures_scan as catalog_creatures_scan
 from kohakuterrarium.api.routes.catalog import extensions as catalog_extensions
 from kohakuterrarium.api.routes.catalog import manifest as catalog_manifest
+from kohakuterrarium.api.routes.catalog import marketplace as catalog_marketplace
 from kohakuterrarium.api.routes.catalog import models as catalog_models
 from kohakuterrarium.api.routes.catalog import modules as catalog_modules
 from kohakuterrarium.api.routes.catalog import packages as catalog_packages
@@ -605,6 +606,15 @@ def _mount_phase0_stubs(app: FastAPI) -> None:
     )
     app.include_router(
         catalog_registry.router, prefix="/api/catalog/registry", tags=["catalog"]
+    )
+    # Marketplace — TerrariumMarket-backed browse + install + source mgmt.
+    # Separate from /api/catalog/registry (which is the legacy bundled
+    # static index) — this one hits live remote sources via
+    # ``packages/marketplace.py``.
+    app.include_router(
+        catalog_marketplace.router,
+        prefix="/api/catalog/marketplace",
+        tags=["catalog"],
     )
     app.include_router(
         catalog_creatures_scan.router,

@@ -204,6 +204,23 @@ ALLOWLIST_600 = {
     # Splitting along surface lines (auth vs admin) would scatter
     # request/response Pydantic models that are shared across them.
     "api/auth/routes.py",
+    # CLI argparse + COMMANDS dispatcher — one subparser per ``kt``
+    # verb (run / resume / list / install / uninstall / update / edit /
+    # embedding / search / login / web / app / model / config / serve /
+    # lab-client / host / client / service / admin / extension / mcp /
+    # marketplace / self-update / __run-server).  Adding a new verb
+    # always extends this file; the actual handler bodies live in
+    # ``cli/<verb>.py``.  Splitting the parser build would scatter
+    # subcommands across files for no readability win.
+    "cli/__init__.py",
+    # Marketplace resolver — single cohesive surface (source-list mgmt
+    # + disk + in-memory cache + ETag-conditional fetch + parse +
+    # dedup + framework-compat check + spec parsing + resolve + sync
+    # wrappers).  The dataclasses + typed errors already live in the
+    # sibling marketplace_types.py.  Splitting the resolver further
+    # would scatter the cache / dedup / resolve trio that all share
+    # the same module-global state.
+    "packages/marketplace.py",
 }
 
 

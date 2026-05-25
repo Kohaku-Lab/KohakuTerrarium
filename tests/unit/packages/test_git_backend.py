@@ -74,6 +74,90 @@ class TestNativeClonePath:
         with pytest.raises(RuntimeError, match="Git clone failed"):
             git_backend.clone_repo("https://example.com/x.git", tmp_path / "x")
 
+    def test_clone_with_ref_uses_dash_b(self, monkeypatch, tmp_path):
+        # AUDIT FIX #1: ``ref`` parameter must pass through to
+        # ``git clone -b <ref>`` so the cloned working tree is
+        # actually pinned to that ref — fixes the silent
+        # "kt install @x@v1.2.0 clones default HEAD" bug.
+        monkeypatch.setattr(git_backend.shutil, "which", lambda _: "/usr/bin/git")
+        captured = {}
+
+        def fake_run(cmd, **kw):
+            captured.setdefault("cmds", []).append(cmd)
+            return subprocess.CompletedProcess(cmd, 0)
+
+        monkeypatch.setattr(git_backend.subprocess, "run", fake_run)
+        git_backend.clone_repo(
+            "https://example.com/x.git", tmp_path / "x", ref="v1.2.0"
+        )
+        # Single call with -b <ref> shape on the happy path.
+        assert len(captured["cmds"]) == 1
+        cmd = captured["cmds"][0]
+        assert cmd[:2] == ["git", "clone"]
+        assert "-b" in cmd
+        assert cmd[cmd.index("-b") + 1] == "v1.2.0"
+
+    def test_clone_with_sha_ref_falls_back_to_checkout(self, monkeypatch, tmp_path):
+        # ``-b <SHA>`` is rejected by native git.  The fallback path
+        # must clone bare + ``git checkout <SHA>``.
+        monkeypatch.setattr(git_backend.shutil, "which", lambda _: "/usr/bin/git")
+        captured = {"cmds": []}
+        # First call (clone -b SHA) errors; subsequent succeed.
+        call_count = {"n": 0}
+
+        def fake_run(cmd, **kw):
+            captured["cmds"].append(cmd)
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise subprocess.CalledProcessError(
+                    128, cmd, stderr=b"not a tag/branch"
+                )
+            return subprocess.CompletedProcess(cmd, 0)
+
+        # Pretend the partial target was created so the cleanup branch runs.
+        target = tmp_path / "x"
+        target.mkdir(parents=True)
+        monkeypatch.setattr(git_backend.subprocess, "run", fake_run)
+        git_backend.clone_repo(
+            "https://example.com/x.git",
+            target,
+            ref="deadbeefcafebabedeadbeefcafebabedeadbeef",
+        )
+        # Three commands total: -b SHA (failed), plain clone, checkout SHA.
+        assert len(captured["cmds"]) == 3
+        assert "checkout" in captured["cmds"][2]
+        assert captured["cmds"][2][-1] == "deadbeefcafebabedeadbeefcafebabedeadbeef"
+
+    def test_checkout_failure_tears_down_target(self, monkeypatch, tmp_path):
+        # AUDIT FIX #6 (round-2): clone succeeds but checkout fails →
+        # target must be removed, otherwise the next install_package
+        # call sees ``target.exists()`` and silently falls through
+        # the pull-in-place branch (skipping the requested ref).
+        monkeypatch.setattr(git_backend.shutil, "which", lambda _: "/usr/bin/git")
+        target = tmp_path / "x"
+        call_count = {"n": 0}
+
+        def fake_run(cmd, **kw):
+            call_count["n"] += 1
+            if cmd[1] == "clone" and "-b" in cmd:
+                # First attempt: clone -b SHA fails.
+                raise subprocess.CalledProcessError(128, cmd, stderr=b"bad ref")
+            if cmd[1] == "clone":
+                # Second attempt: plain clone succeeds + creates dir.
+                target.mkdir(parents=True, exist_ok=True)
+                return subprocess.CompletedProcess(cmd, 0)
+            if "checkout" in cmd:
+                # Third attempt: checkout fails → cleanup should fire.
+                raise subprocess.CalledProcessError(1, cmd, stderr=b"unknown ref")
+            return subprocess.CompletedProcess(cmd, 0)
+
+        monkeypatch.setattr(git_backend.subprocess, "run", fake_run)
+        with pytest.raises(RuntimeError, match="checkout"):
+            git_backend.clone_repo("https://example.com/x.git", target, ref="bogus-ref")
+        # Cleanup contract: target dir gone so the next attempt
+        # starts from scratch.
+        assert not target.exists()
+
 
 class TestNativePullPath:
     def test_pull_runs_git_pull_ff_only(self, monkeypatch, tmp_path):

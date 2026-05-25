@@ -12,7 +12,7 @@ from pathlib import Path
 import yaml
 
 from kohakuterrarium.packages.install import (
-    install_package,
+    install_package_spec,
     uninstall_package,
     update_package,
 )
@@ -66,7 +66,7 @@ def install_package_op(
     that loop here keeps the contract tight regardless of which
     transport (HTTP, future Lab APP) called the op.
     """
-    name = install_package(source, editable=editable, name_override=name)
+    name = install_package_spec(source, editable=editable, name_override=name)
     invalidate_scan_caches()
     return name
 
