@@ -30,7 +30,7 @@
       </div>
     </div>
 
-    <div class="grid grid-cols-2 gap-2 pt-2 border-t border-warm-200/70 dark:border-warm-800/70">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-warm-200/70 dark:border-warm-800/70">
       <StatCell :label="t('studio.creature.detail.tools')" :value="toolCount" />
       <StatCell :label="t('studio.creature.detail.subagents')" :value="subagentCount" />
       <StatCell :label="t('studio.creature.detail.triggers')" :value="triggerCount" />

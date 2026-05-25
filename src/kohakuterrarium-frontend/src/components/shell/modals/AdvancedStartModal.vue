@@ -6,7 +6,7 @@
       <!-- Type -->
       <fieldset>
         <legend class="text-xs uppercase tracking-wider text-warm-500 mb-2">Type</legend>
-        <div class="grid grid-cols-2 gap-2">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <label v-for="opt in TYPES" :key="opt.value" class="flex items-center gap-2 px-3 py-2 rounded border cursor-pointer text-sm" :class="form.type === opt.value ? 'border-iolite bg-iolite/10' : 'border-warm-200 dark:border-warm-700 hover:border-warm-300'">
             <input v-model="form.type" type="radio" :value="opt.value" class="accent-iolite" />
             {{ opt.label }}

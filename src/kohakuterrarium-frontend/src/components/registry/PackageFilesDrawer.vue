@@ -3,9 +3,11 @@
     <div class="h-full flex flex-col gap-3 text-[13px]">
       <div v-if="loading" class="py-8 text-center text-secondary">{{ t("common.loading") }}</div>
       <template v-else>
-        <div class="flex gap-3 flex-1 min-h-0">
-          <!-- File list -->
-          <div class="w-64 shrink-0 border-r border-warm-200 dark:border-warm-700 pr-2 overflow-y-auto">
+        <div class="flex flex-col sm:flex-row gap-3 flex-1 min-h-0">
+          <!-- File list: stacks above the editor on mobile (capped
+               height so the editor still gets the bulk of the
+               viewport), 256px sidebar on >=sm. -->
+          <div class="w-full sm:w-64 shrink-0 max-h-40 sm:max-h-none border-b sm:border-b-0 sm:border-r border-warm-200 dark:border-warm-700 sm:pr-2 overflow-y-auto">
             <div class="text-[11px] text-warm-400 mb-2">{{ t("registry.editFilesCount", { n: editableFiles.length }) }}</div>
             <ul class="space-y-0.5">
               <li v-for="f in editableFiles" :key="f.path">

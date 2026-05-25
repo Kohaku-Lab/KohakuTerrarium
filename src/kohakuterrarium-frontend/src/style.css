@@ -55,15 +55,151 @@ html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   height: 100%;
+  /* Mobile: prevent the whole page from scrolling sideways.  Scoped
+     scrollers (settings tab strip, code blocks, log panels) opt back
+     in via ``overflow-x: auto`` on their own container.  Without
+     this an offending ``text-xs whitespace-nowrap`` inside the chat
+     bubble can push the layout off-screen and break the touch-pan
+     experience for the rest of the page. */
+  overflow-x: hidden;
+  /* Disable iOS double-tap zoom on UI chrome — pinch-zoom is still
+     enabled via the viewport meta.  This stops a fast double-tap on
+     buttons from accidentally zooming the whole viewport. */
+  touch-action: manipulation;
 }
 
 body {
   height: 100%;
+  overflow-x: hidden;
 }
 
 #app {
   height: 100%;
   overflow: hidden;
+}
+
+/* ===== Mobile / touch-only rules =====================================
+ *
+ * iOS Safari auto-zooms when a text input has font-size < 16px on
+ * focus.  We use ``text-xs`` (12px) and ``text-sm`` (14px) extensively
+ * for desktop density — fine on mouse, jarring on touch.  Bump every
+ * editable element to 16px on coarse pointers (touch screens) so the
+ * viewport doesn't snap-zoom every time the keyboard appears.
+ *
+ * ``pointer: coarse`` is the canonical media query for "user interacts
+ * primarily through touch."  It targets phones + tablets without
+ * affecting desktop laptops with touchscreens (which report ``pointer:
+ * fine`` for the trackpad / mouse). */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  textarea,
+  select,
+  [contenteditable="true"] {
+    font-size: 16px !important;
+  }
+
+  /* Bump the canonical text-button utilities (defined in uno.config.js)
+     so they meet the 44px minimum tap target on touch.  The visual
+     padding bump is invisible on desktop because ``pointer: fine`` is
+     the dominant input there. */
+  .btn-primary,
+  .btn-secondary {
+    padding-top: 0.6rem;
+    padding-bottom: 0.6rem;
+    min-height: 40px;
+  }
+}
+
+/* ===== ``scrollbar-none`` utility ==================================
+ *
+ * Hide the native scrollbar but keep scrolling working.  Used on
+ * horizontally-scrollable tab strips (chat tabs, studio tabs, settings
+ * tab strips, session-viewer tabs) where a visible scrollbar would
+ * waste vertical real estate and look like a UI bug. */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  scrollbar-width: none;
+}
+
+/* ===== ``hover-only-action`` utility ===============================
+ *
+ * Replaces the ``opacity-0 group-hover:opacity-100 transition-opacity``
+ * pattern used on row / card / message action toolbars.  Desktop gets
+ * the clean "appears on hover" UX it had; touch screens (which have
+ * no hover) get the actions always visible so users can actually use
+ * edit / delete / branch / close buttons.
+ *
+ * Usage:
+ *   <div class="group">
+ *     <div class="hover-only-action">…buttons…</div>
+ *   </div>
+ *
+ * Always pair with an explicit non-overlay layout fallback — the
+ * action group should not depend on absolute positioning to avoid
+ * stealing tap targets from the underlying card on mobile. */
+.hover-only-action {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.group:hover .hover-only-action,
+.group:focus-within .hover-only-action {
+  opacity: 1;
+}
+@media (pointer: coarse) {
+  .hover-only-action {
+    opacity: 1;
+  }
+}
+
+/* ===== Mobile dialogs / drawers → fullscreen ========================
+ *
+ * Element Plus dialogs hardcode pixel widths (520-820px) per component.
+ * On a 360-414px phone every one of them overflows horizontally.  One
+ * CSS rule here saves us from sprinkling ``:fullscreen="isCompact"``
+ * across 20+ dialog templates and ensures any future dialog inherits
+ * the right mobile behaviour for free.
+ *
+ * Threshold matches ``useDensity``'s COMPACT_MAX (768px).  Drawers use
+ * 100% on every axis so an RTL drawer doesn't leave a stripe; the
+ * overlay padding strips so the dialog truly fills the viewport. */
+@media (max-width: 767px) {
+  .el-overlay-dialog {
+    padding: 0 !important;
+  }
+  .el-dialog {
+    width: 100% !important;
+    max-width: 100vw !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    /* Let the dialog grow with its content but cap at the visual
+       viewport (which excludes the on-screen keyboard on most
+       mobile browsers via ``dvh``). */
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+  .el-dialog__body {
+    /* Without this, long forms (PresetEditor, MCPServerEditModal)
+       hide the bottom actions below the soft keyboard. */
+    max-height: calc(100dvh - 120px);
+    overflow-y: auto;
+  }
+  .el-drawer.ltr,
+  .el-drawer.rtl,
+  .el-drawer.btt,
+  .el-drawer.ttb {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
+  }
+  /* Element Plus' MessageBox (ElMessageBox.confirm / .alert) uses its
+     own width; same treatment so destructive confirms aren't tiny. */
+  .el-message-box {
+    width: calc(100% - 32px) !important;
+    max-width: 100vw !important;
+  }
 }
 
 code,

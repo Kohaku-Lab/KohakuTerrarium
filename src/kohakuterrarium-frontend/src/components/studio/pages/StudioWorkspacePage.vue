@@ -1,23 +1,29 @@
 <template>
   <div class="h-full w-full overflow-y-auto bg-warm-50 dark:bg-warm-950">
-    <!-- Sticky header strip -->
-    <header class="sticky top-0 z-10 flex items-center gap-3 px-6 py-3 bg-warm-50/95 dark:bg-warm-950/95 backdrop-blur border-b border-warm-200 dark:border-warm-800">
-      <div class="i-carbon-folder text-warm-500 text-lg shrink-0" />
-      <div class="flex-1 min-w-0">
-        <div class="text-xs text-warm-500 dark:text-warm-500 leading-tight">Workspace</div>
-        <div class="font-mono text-sm text-warm-800 dark:text-warm-200 truncate" :title="resolvedRoot">
-          {{ resolvedRoot || "—" }}
+    <!-- Sticky header strip — stacks the action buttons under the
+         workspace path on narrow viewports (the two buttons + the
+         long path can't all fit on one row at <640px). -->
+    <header class="sticky top-0 z-10 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 px-4 sm:px-6 py-3 bg-warm-50/95 dark:bg-warm-950/95 backdrop-blur border-b border-warm-200 dark:border-warm-800">
+      <div class="flex items-center gap-3 flex-1 min-w-0">
+        <div class="i-carbon-folder text-warm-500 text-lg shrink-0" />
+        <div class="flex-1 min-w-0">
+          <div class="text-xs text-warm-500 dark:text-warm-500 leading-tight">Workspace</div>
+          <div class="font-mono text-sm text-warm-800 dark:text-warm-200 truncate" :title="resolvedRoot">
+            {{ resolvedRoot || "—" }}
+          </div>
         </div>
       </div>
-      <KButton icon="i-carbon-refresh" :disabled="ws.loading" @click="ws.refresh()">
-        {{ t("studio.dashboard.refreshing") }}
-      </KButton>
-      <KButton variant="secondary" icon="i-carbon-arrows-horizontal" @click="switchWorkspace">
-        {{ t("studio.dashboard.switchWorkspace") }}
-      </KButton>
+      <div class="flex items-center gap-2 sm:gap-3 shrink-0">
+        <KButton icon="i-carbon-refresh" :disabled="ws.loading" @click="ws.refresh()">
+          {{ t("studio.dashboard.refreshing") }}
+        </KButton>
+        <KButton variant="secondary" icon="i-carbon-arrows-horizontal" @click="switchWorkspace">
+          {{ t("studio.dashboard.switchWorkspace") }}
+        </KButton>
+      </div>
     </header>
 
-    <div class="max-w-6xl mx-auto px-6 py-6 flex flex-col gap-8">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 py-6 flex flex-col gap-8">
       <div v-if="ws.error" class="px-3 py-2 rounded bg-coral/10 text-coral text-sm border border-coral/20">
         {{ ws.error.message || String(ws.error) }}
       </div>
@@ -49,9 +55,11 @@
                   {{ c.description }}
                 </div>
               </div>
-              <!-- Delete button appears on hover -->
-              <button class="w-6 h-6 inline-flex items-center justify-center rounded text-warm-400 hover:bg-coral/20 hover:text-coral opacity-0 group-hover:opacity-100 transition-opacity shrink-0" :title="t('studio.dashboard.deleteCreature')" @click.stop="confirmDelete(c)">
-                <div class="i-carbon-trash-can text-sm" />
+              <!-- Delete button: hover-only-action keeps the desktop
+                   "appears on hover" UX while staying always-visible
+                   on touch (where there is no hover state). -->
+              <button class="w-9 h-9 sm:w-6 sm:h-6 inline-flex items-center justify-center rounded text-warm-400 hover:bg-coral/20 hover:text-coral hover-only-action shrink-0" :title="t('studio.dashboard.deleteCreature')" @click.stop="confirmDelete(c)">
+                <div class="i-carbon-trash-can text-base sm:text-sm" />
               </button>
             </div>
             <div v-if="c.base_config" class="text-[11px] text-warm-500 dark:text-warm-500 flex items-center gap-1 mt-2">

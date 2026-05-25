@@ -2,7 +2,7 @@
   <div class="p-4 text-xs">
     <div class="mb-3 text-[10px] text-warm-400 italic">Cost shown when a price is known for the active model. Tokens alone are always visible.</div>
 
-    <div class="grid grid-cols-2 gap-2 mb-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
       <div class="rounded border border-warm-200 dark:border-warm-700 px-3 py-2">
         <div class="text-[9px] uppercase tracking-wider text-warm-400">Input tokens</div>
         <div class="font-mono text-lg text-warm-700 dark:text-warm-300">

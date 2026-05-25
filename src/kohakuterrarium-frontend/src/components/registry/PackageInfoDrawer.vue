@@ -8,7 +8,7 @@
         <p v-if="info.description" class="text-secondary">{{ info.description }}</p>
       </div>
 
-      <div class="grid grid-cols-2 gap-2 text-[12px]">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[12px]">
         <div>
           <div class="text-warm-400">{{ t("registry.infoKind") }}</div>
           <div class="font-mono">{{ info.config_type || info.type || "creature" }}</div>
@@ -17,7 +17,7 @@
           <div class="text-warm-400">{{ t("registry.infoModel") }}</div>
           <div class="font-mono">{{ info.model }}</div>
         </div>
-        <div v-if="info.path" class="col-span-2">
+        <div v-if="info.path" class="sm:col-span-2">
           <div class="text-warm-400">{{ t("registry.infoPath") }}</div>
           <div class="font-mono text-[11px] break-all">{{ info.path }}</div>
         </div>

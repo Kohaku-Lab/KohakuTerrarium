@@ -5,7 +5,7 @@
       <h3 class="text-xs font-semibold uppercase tracking-wider text-warm-500">
         {{ t("studio.module.form.identity") }}
       </h3>
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <KField :label="t('studio.module.form.toolName')" :hint="t('studio.module.form.toolNameHint')" required>
           <KInput :model-value="form.tool_name || ''" placeholder="my_tool" @update:model-value="patch('tool_name', $event)" />
         </KField>
@@ -26,7 +26,7 @@
       <h3 class="text-xs font-semibold uppercase tracking-wider text-warm-500">
         {{ t("studio.module.form.behavior") }}
       </h3>
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <KField :label="t('studio.module.form.executionMode')" :hint="t('studio.module.form.executionModeHint')">
           <KSelect :model-value="form.execution_mode || 'direct'" :options="EXEC_MODE_OPTIONS" @update:model-value="patch('execution_mode', $event)" />
         </KField>

@@ -5,7 +5,7 @@
       <h3 class="text-xs font-semibold uppercase tracking-wider text-warm-500">
         {{ t("studio.module.form.identity") }}
       </h3>
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <KField :label="t('studio.module.form.className')" :hint="t('studio.module.form.ioClassNameHint')" required>
           <KInput :model-value="form.class_name || ''" :placeholder="kind === 'inputs' ? 'MyInput' : 'MyOutput'" @update:model-value="patch('class_name', $event)" />
         </KField>

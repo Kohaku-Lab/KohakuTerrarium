@@ -90,7 +90,7 @@ export default defineConfig({
     "btn-secondary":
       "px-4 py-2 rounded-lg bg-warm-100 dark:bg-warm-800 text-warm-700 dark:text-warm-300 hover:bg-warm-200 dark:hover:bg-warm-700 transition-colors font-medium text-sm border border-warm-200/50 dark:border-warm-700/50",
     "gem-badge": "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium",
-    "container-page": "max-w-6xl mx-auto px-6 py-6",
+    "container-page": "max-w-6xl mx-auto px-4 sm:px-6 py-4 sm:py-6",
     "section-title": "text-lg font-semibold text-warm-800 dark:text-warm-200 mb-4",
     "text-body": "text-sm text-warm-800 dark:text-warm-200",
     "text-secondary": "text-sm text-warm-500 dark:text-warm-400",

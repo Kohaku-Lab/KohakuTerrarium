@@ -1,9 +1,9 @@
 <template>
-  <div class="flex items-center gap-2 px-2 h-11 border-b border-warm-200 dark:border-warm-700 shrink-0 bg-white dark:bg-warm-900">
-    <button class="w-8 h-8 flex items-center justify-center rounded text-warm-500 hover:text-iolite hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors" :title="t('shell.rail.commandPalette')" @click="$emit('open-rail')">
-      <div class="i-carbon-menu text-base" />
+  <div class="flex items-center gap-2 px-2 h-12 border-b border-warm-200 dark:border-warm-700 shrink-0 bg-white dark:bg-warm-900">
+    <button class="w-10 h-10 flex items-center justify-center rounded text-warm-500 hover:text-iolite hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors" :title="t('shell.rail.commandPalette')" @click="$emit('open-rail')">
+      <div class="i-carbon-menu text-lg" />
     </button>
-    <BrandMark v-if="!tabs.activeTab" class="w-6 h-6 rounded-full shrink-0" />
+    <BrandMark v-if="!tabs.activeTab" class="w-7 h-7 rounded-full shrink-0" />
     <span class="text-sm font-medium text-warm-700 dark:text-warm-200 truncate flex-1">
       {{ title }}
     </span>

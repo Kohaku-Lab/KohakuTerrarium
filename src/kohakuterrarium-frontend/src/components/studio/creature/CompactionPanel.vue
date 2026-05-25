@@ -6,7 +6,7 @@
       </KField>
 
       <template v-if="enabled">
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <KField :label="t('studio.compact.maxTokens')" :hint="t('studio.compact.maxTokensHint')">
             <KInput :model-value="numStr(compact?.max_tokens)" type="number" placeholder="auto" @update:model-value="onNum('max_tokens', $event)" />
           </KField>

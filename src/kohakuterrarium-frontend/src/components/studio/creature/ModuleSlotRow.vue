@@ -20,18 +20,18 @@
         {{ type }}
       </span>
 
-      <button v-if="!inherited" class="w-6 h-6 inline-flex items-center justify-center rounded text-warm-500 hover:bg-coral/20 hover:text-coral opacity-0 group-hover:opacity-100 transition-opacity" :title="t('studio.creature.modules.remove')" @click.stop="$emit('remove')">
-        <div class="i-carbon-close text-sm" />
+      <button v-if="!inherited" class="w-9 h-9 sm:w-6 sm:h-6 inline-flex items-center justify-center rounded text-warm-500 hover:bg-coral/20 hover:text-coral hover-only-action" :title="t('studio.creature.modules.remove')" @click.stop="$emit('remove')">
+        <div class="i-carbon-close text-base sm:text-sm" />
       </button>
-      <button v-else class="w-6 h-6 inline-flex items-center justify-center rounded text-warm-400 opacity-0 group-hover:opacity-100 transition-opacity cursor-not-allowed" :title="t('studio.creature.modules.convertOverride')" disabled>
-        <div class="i-carbon-edit text-sm" />
+      <button v-else class="w-9 h-9 sm:w-6 sm:h-6 inline-flex items-center justify-center rounded text-warm-400 hover-only-action cursor-not-allowed" :title="t('studio.creature.modules.convertOverride')" disabled>
+        <div class="i-carbon-edit text-base sm:text-sm" />
       </button>
     </div>
 
     <!-- Expanded panel -->
     <div v-if="expanded && !inherited" class="ml-4 mr-1 mb-1 border-l-2 border-iolite/30 pl-3 py-2 flex flex-col gap-2">
       <!-- Custom-type: module + class inputs -->
-      <div v-if="type === 'custom' || type === 'package'" class="grid grid-cols-2 gap-2">
+      <div v-if="type === 'custom' || type === 'package'" class="grid grid-cols-1 sm:grid-cols-2 gap-2">
         <KField :label="t('studio.moduleOptions.module')">
           <KInput :model-value="entry.module || ''" placeholder="./custom/my_tool.py" @update:model-value="emitTopLevel('module', $event || undefined)" />
         </KField>

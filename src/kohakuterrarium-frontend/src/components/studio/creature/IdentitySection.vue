@@ -1,6 +1,6 @@
 <template>
   <SectionCard :title="t('studio.creature.identity.title')" icon="i-carbon-id">
-    <div class="grid grid-cols-2 gap-3">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <KField :label="t('studio.creature.identity.name')">
         <KInput :model-value="config.name || ''" @update:model-value="patch('name', $event)" />
       </KField>
@@ -19,7 +19,7 @@
       <div class="text-[11px] uppercase tracking-wider font-medium text-warm-500 dark:text-warm-400 mb-2">
         {{ t("studio.creature.identity.controller") }}
       </div>
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <KField :label="t('studio.creature.identity.reasoning')" :hint="t('studio.creature.identity.reasoningHint')">
           <KSelect :model-value="reasoningValue" :options="reasoningOptions" @update:model-value="onReasoning($event)" />
         </KField>

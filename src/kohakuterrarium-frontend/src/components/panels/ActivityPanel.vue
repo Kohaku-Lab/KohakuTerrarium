@@ -38,7 +38,7 @@
           <span class="text-warm-400 font-mono text-[10px]">
             {{ chat.getJobElapsed(job) }}
           </span>
-          <button class="text-warm-400 hover:text-coral transition-colors opacity-0 group-hover:opacity-100" :title="t('common.stopTask')" @click="stopJob(jobId, job.name)">
+          <button class="text-warm-400 hover:text-coral transition-colors hover-only-action" :title="t('common.stopTask')" @click="stopJob(jobId, job.name)">
             <span class="i-carbon-close text-[10px]" />
           </button>
         </div>

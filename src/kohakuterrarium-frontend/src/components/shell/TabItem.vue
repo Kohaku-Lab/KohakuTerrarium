@@ -6,8 +6,8 @@
     <span v-if="isPinned && !isDashboard" class="i-carbon-pin-filled text-iolite text-xs shrink-0" />
     <span :class="[iconClass, isDashboard ? 'text-iolite' : '']" class="text-sm shrink-0" />
     <span class="truncate max-w-32">{{ label }}</span>
-    <button class="i-carbon-renew ml-1 opacity-0 group-hover:opacity-100 hover:text-iolite" :title="t('shell.tab.refreshTip')" @click.stop="onRefresh" />
-    <button v-if="!isDashboard" class="i-carbon-close opacity-0 group-hover:opacity-100 hover:text-warm-700" :title="t('shell.tab.closeTab')" @click.stop="$emit('close')" />
+    <button class="i-carbon-renew ml-1 hover-only-action hover:text-iolite" :title="t('shell.tab.refreshTip')" @click.stop="onRefresh" />
+    <button v-if="!isDashboard" class="i-carbon-close hover-only-action hover:text-warm-700" :title="t('shell.tab.closeTab')" @click.stop="$emit('close')" />
   </div>
 
   <TabContextMenu v-if="menuOpen" :tab="tab" :is-pinned="isPinned" :position="menuPos" :index="tabIndex" :total="totalTabs" @close="menuOpen = false" @refresh="onRefresh" @toggle-pin="togglePin" @close-tab="$emit('close')" @close-left="closeLeft" @close-right="closeRight" @close-others="closeOthers" @close-all="closeAll" />

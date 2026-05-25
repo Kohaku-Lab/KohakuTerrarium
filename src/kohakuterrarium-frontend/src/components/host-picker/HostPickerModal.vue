@@ -33,11 +33,11 @@
                 </span>
                 <span v-if="hosts.activeHostId === h.id" class="i-carbon-checkmark text-iolite text-[12px] shrink-0" aria-hidden="true" />
               </button>
-              <button type="button" class="w-6 h-6 flex items-center justify-center rounded text-warm-400 hover:text-iolite hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors opacity-0 group-hover:opacity-100" :title="t('hostPicker.editAction')" @click="onEdit(h)">
-                <span class="i-carbon-edit text-[11px]" />
+              <button type="button" class="w-9 h-9 sm:w-6 sm:h-6 flex items-center justify-center rounded text-warm-400 hover:text-iolite hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors hover-only-action" :title="t('hostPicker.editAction')" @click="onEdit(h)">
+                <span class="i-carbon-edit text-sm sm:text-[11px]" />
               </button>
-              <button type="button" class="w-6 h-6 flex items-center justify-center rounded text-warm-400 hover:text-coral hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors opacity-0 group-hover:opacity-100" :title="t('hostPicker.removeAction')" @click="onRemove(h)">
-                <span class="i-carbon-trash-can text-[11px]" />
+              <button type="button" class="w-9 h-9 sm:w-6 sm:h-6 flex items-center justify-center rounded text-warm-400 hover:text-coral hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors hover-only-action" :title="t('hostPicker.removeAction')" @click="onRemove(h)">
+                <span class="i-carbon-trash-can text-sm sm:text-[11px]" />
               </button>
             </div>
           </li>

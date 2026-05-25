@@ -5,7 +5,7 @@
       <h3 class="text-xs font-semibold uppercase tracking-wider text-warm-500">
         {{ t("studio.module.form.identity") }}
       </h3>
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <KField :label="t('studio.module.form.triggerName')" :hint="t('studio.module.form.triggerNameHint')" required>
           <KInput :model-value="form.class_name || ''" placeholder="MyTrigger" @update:model-value="patch('class_name', $event)" />
         </KField>
@@ -22,7 +22,7 @@
       <KField :label="t('studio.module.form.universal')" :hint="t('studio.module.form.universalHint')">
         <KCheckbox :model-value="!!form.universal" :label="t('studio.module.form.universalLabel')" @update:model-value="patch('universal', $event)" />
       </KField>
-      <div v-if="form.universal" class="grid grid-cols-2 gap-3">
+      <div v-if="form.universal" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <KField :label="t('studio.module.form.setupToolName')" :hint="t('studio.module.form.setupToolNameHint')">
           <KInput :model-value="form.setup_tool_name || ''" placeholder="add_my_trigger" @update:model-value="patch('setup_tool_name', $event)" />
         </KField>

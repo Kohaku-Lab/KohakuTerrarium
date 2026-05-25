@@ -5,7 +5,7 @@
         <h3 class="text-sm font-medium text-warm-800 dark:text-warm-200">
           <slot name="title" />
         </h3>
-        <button class="i-carbon-close w-5 h-5 text-warm-400 hover:text-warm-700" @click="$emit('close')" />
+        <button class="i-carbon-close w-9 h-9 sm:w-5 sm:h-5 text-warm-400 hover:text-warm-700 flex items-center justify-center rounded sm:rounded-none hover:bg-warm-100 dark:hover:bg-warm-800 sm:hover:bg-transparent" @click="$emit('close')" />
       </header>
       <div class="flex-1 overflow-y-auto p-4">
         <slot />

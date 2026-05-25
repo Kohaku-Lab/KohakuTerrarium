@@ -26,7 +26,7 @@
         {{ entry.description || t("studio.creature.detail.noDescription") }}
       </p>
 
-      <div class="grid grid-cols-2 gap-2">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
         <Tag v-if="entry.execution_mode" :label="t('studio.creature.detail.executionMode')" :value="entry.execution_mode" />
         <Tag v-if="entry.needs_context != null" :label="t('studio.creature.detail.needsContext')" :value="entry.needs_context ? 'yes' : 'no'" />
       </div>

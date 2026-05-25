@@ -1,5 +1,5 @@
 <template>
-  <div v-if="open" class="absolute left-full top-0 ml-1 z-50 w-64 rounded-md border border-warm-200 dark:border-warm-700 bg-warm-50 dark:bg-warm-900 shadow-lg" @click.stop>
+  <div v-if="open" class="absolute left-full top-0 ml-1 z-50 w-64 max-w-[calc(100vw-3rem)] rounded-md border border-warm-200 dark:border-warm-700 bg-warm-50 dark:bg-warm-900 shadow-lg" @click.stop>
     <div class="px-3 py-2 border-b border-warm-200 dark:border-warm-700 flex items-center justify-between">
       <span class="text-xs font-medium text-warm-700 dark:text-warm-200">
         {{ t("cluster.popover.title") }}

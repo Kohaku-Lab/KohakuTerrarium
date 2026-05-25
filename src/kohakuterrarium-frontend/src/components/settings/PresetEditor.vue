@@ -25,7 +25,7 @@
     <!-- Core section -->
     <section class="card p-4">
       <div class="section-title">Core</div>
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label class="field-label">Preset name</label>
           <el-input v-model="form.name" size="small" :disabled="isBuiltin || isEditing" :placeholder="isEditing ? '' : 'my-model'" />
@@ -54,7 +54,7 @@
     <!-- Defaults section -->
     <section class="card p-4">
       <div class="section-title">Defaults <span class="text-[10px] text-warm-400 font-normal">applied unless a variation overrides</span></div>
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label class="field-label">Temperature</label>
           <el-input-number v-model="form.temperature" size="small" :min="0" :max="2" :step="0.1" :precision="2" :disabled="isBuiltin" class="!w-full" placeholder="leave empty for API default" />
@@ -72,7 +72,7 @@
             <label class="field-label !mb-0">extra_body (JSON)</label>
             <el-button size="small" text :disabled="isBuiltin" @click="formatExtraBody"> Format </el-button>
           </div>
-          <el-input v-model="form.extra_body" type="textarea" :rows="4" :disabled="isBuiltin" placeholder='{"reasoning":{"enabled":true,"effort":"high"}}' class="font-mono" />
+          <el-input v-model="form.extra_body" type="textarea" :autosize="{ minRows: 4, maxRows: 16 }" :disabled="isBuiltin" placeholder='{"reasoning":{"enabled":true,"effort":"high"}}' class="font-mono" />
           <div v-if="extraBodyError" class="text-[10px] text-coral mt-1 font-mono">
             {{ extraBodyError }}
           </div>

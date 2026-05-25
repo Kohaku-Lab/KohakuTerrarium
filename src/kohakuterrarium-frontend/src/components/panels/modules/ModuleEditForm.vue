@@ -1,5 +1,5 @@
 <template>
-  <div class="grid grid-cols-2 gap-x-3 gap-y-2.5">
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-2.5">
     <p v-if="!entries.length" class="col-span-2 text-[11px] text-warm-400 italic">This module has no runtime-mutable options.</p>
 
     <div v-for="entry in entries" :key="entry.key" class="flex flex-col gap-1 min-w-0" :class="isWide(entry) ? 'col-span-2' : 'col-span-1'">
@@ -23,10 +23,10 @@
       <el-input-number v-else-if="entry.spec?.type === 'int' || entry.spec?.type === 'float'" v-model="draft[entry.key]" :min="entry.spec?.min" :max="entry.spec?.max" :step="entry.spec?.type === 'float' ? 0.1 : 1" :precision="entry.spec?.type === 'float' ? undefined : 0" size="small" controls-position="right" class="!w-full" />
 
       <!-- list of strings (newline-separated textarea) -->
-      <el-input v-else-if="entry.spec?.type === 'list' && (entry.spec?.item_type === 'string' || !entry.spec?.item_type)" :model-value="listToText(draft[entry.key])" type="textarea" :rows="3" size="small" placeholder="One value per line" @update:model-value="draft[entry.key] = textToList($event)" />
+      <el-input v-else-if="entry.spec?.type === 'list' && (entry.spec?.item_type === 'string' || !entry.spec?.item_type)" :model-value="listToText(draft[entry.key])" type="textarea" :autosize="{ minRows: 3, maxRows: 12 }" size="small" placeholder="One value per line" @update:model-value="draft[entry.key] = textToList($event)" />
 
       <!-- dict (JSON textarea) -->
-      <el-input v-else-if="entry.spec?.type === 'dict'" :model-value="objToJson(draft[entry.key])" type="textarea" :rows="3" size="small" placeholder='{"soft": 30, "hard": 50}' @update:model-value="onDictInput(entry.key, $event)" />
+      <el-input v-else-if="entry.spec?.type === 'dict'" :model-value="objToJson(draft[entry.key])" type="textarea" :autosize="{ minRows: 3, maxRows: 12 }" size="small" placeholder='{"soft": 30, "hard": 50}' @update:model-value="onDictInput(entry.key, $event)" />
 
       <!-- string (default) -->
       <el-input v-else v-model="draft[entry.key]" size="small" :placeholder="String(entry.spec?.default ?? '')" />

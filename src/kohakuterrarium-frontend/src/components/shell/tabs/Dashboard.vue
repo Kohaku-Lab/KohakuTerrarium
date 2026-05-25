@@ -1,6 +1,6 @@
 <template>
   <div class="h-full overflow-y-auto bg-warm-50 dark:bg-warm-950">
-    <div class="max-w-6xl mx-auto py-6 px-6 space-y-6">
+    <div class="max-w-6xl mx-auto py-4 sm:py-6 px-4 sm:px-6 space-y-6">
       <!-- Header -->
       <header class="flex items-end justify-between">
         <div>

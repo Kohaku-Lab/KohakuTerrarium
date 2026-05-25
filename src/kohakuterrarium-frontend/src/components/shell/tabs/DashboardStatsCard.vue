@@ -16,7 +16,7 @@
          Sparklines mirror the StatsTab's full panel; the headline
          number is the last-minute LLM p95 + the last-minute error
          count. Click the card to land on the full Stats tab. -->
-    <div class="mt-3 grid grid-cols-2 gap-3 pt-3 border-t border-warm-200/60 dark:border-warm-700/60">
+    <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-warm-200/60 dark:border-warm-700/60">
       <div class="flex items-center gap-2">
         <Sparkline :values="metrics.rates?.llm ?? []" :width="64" :height="20" />
         <div class="flex flex-col leading-tight">

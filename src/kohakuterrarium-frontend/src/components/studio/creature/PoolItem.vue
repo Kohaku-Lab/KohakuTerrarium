@@ -7,12 +7,14 @@
       {{ label }}
     </span>
     <!-- Source badge — visible on hover to avoid visual noise in the happy path -->
-    <span v-if="sourceBadge" :class="['shrink-0 text-[9px] font-medium uppercase tracking-wider px-1 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity', sourceBadgeClass]" :title="source">
+    <span v-if="sourceBadge" :class="['shrink-0 text-[9px] font-medium uppercase tracking-wider px-1 py-0.5 rounded hover-only-action', sourceBadgeClass]" :title="source">
       {{ sourceBadge }}
     </span>
-    <!-- Inline add / remove button — always visible; brighter on hover -->
-    <button :class="['shrink-0 w-5 h-5 inline-flex items-center justify-center rounded transition-opacity', wired ? 'text-iolite hover:text-coral hover:bg-coral/15' : 'text-warm-400 hover:text-iolite hover:bg-iolite/15 opacity-0 group-hover:opacity-100']" :title="wired ? t('studio.creature.detail.remove') : t('studio.creature.detail.add')" @click.stop="$emit('click')">
-      <div :class="[wired ? 'i-carbon-subtract' : 'i-carbon-add', 'text-sm']" />
+    <!-- Inline add / remove button — wired version is always visible
+         (remove must remain reachable on touch); unwired version
+         uses hover-only-action (which always shows on touch). -->
+    <button :class="['shrink-0 w-8 h-8 sm:w-5 sm:h-5 inline-flex items-center justify-center rounded', wired ? 'text-iolite hover:text-coral hover:bg-coral/15' : 'text-warm-400 hover:text-iolite hover:bg-iolite/15 hover-only-action']" :title="wired ? t('studio.creature.detail.remove') : t('studio.creature.detail.add')" @click.stop="$emit('click')">
+      <div :class="[wired ? 'i-carbon-subtract' : 'i-carbon-add', 'text-base sm:text-sm']" />
     </button>
   </div>
 </template>

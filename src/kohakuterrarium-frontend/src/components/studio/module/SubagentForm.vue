@@ -5,7 +5,7 @@
       <h3 class="text-xs font-semibold uppercase tracking-wider text-warm-500">
         {{ t("studio.module.form.identity") }}
       </h3>
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <KField :label="t('studio.module.form.subagentName')" :hint="t('studio.module.form.subagentNameHint')" required>
           <KInput :model-value="form.name || ''" placeholder="my_subagent" @update:model-value="patch('name', $event)" />
         </KField>

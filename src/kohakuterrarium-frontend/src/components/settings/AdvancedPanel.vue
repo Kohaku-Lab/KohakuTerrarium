@@ -2,8 +2,8 @@
   <div class="settings-pane flex flex-col gap-3 max-w-4xl text-[13px]">
     <p class="text-xs text-warm-400 mb-2">{{ t("advanced.description") }}</p>
 
-    <div class="card">
-      <table class="w-full text-[12px]">
+    <div class="card overflow-x-auto">
+      <table class="w-full text-[12px] min-w-[640px]">
         <thead>
           <tr class="text-left text-warm-400 text-[11px]">
             <th class="px-3 py-2">{{ t("advanced.colName") }}</th>

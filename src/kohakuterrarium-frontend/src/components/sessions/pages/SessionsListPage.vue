@@ -32,94 +32,106 @@
         <div v-if="sessions.length === 0" class="card p-8 text-center text-secondary">{{ t("sessions.noMatch", { query: searchQuery }) }}</div>
 
         <div v-else class="flex flex-col gap-2">
-          <div v-for="session in sessions" :key="session.name" class="card-hover p-4 flex items-center gap-4">
-            <div
-              :class="session.config_type === 'terrarium' ? 'i-carbon-network-4' : 'i-carbon-bot'"
-              class="text-lg shrink-0"
-              :style="{
-                color: session.config_type === 'terrarium' ? GEM.iolite.main : GEM.aquamarine.main,
-              }"
-            />
-
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2 mb-0.5 flex-wrap">
-                <span class="font-medium text-warm-800 dark:text-warm-200 truncate">
-                  {{ session.name }}
-                </span>
-                <GemBadge :gem="session.config_type === 'terrarium' ? 'iolite' : 'aquamarine'">
-                  {{ session.config_type }}
-                </GemBadge>
-                <!-- Lineage badges (Wave E fork / Wave D migration) -->
-                <span v-if="session.parent_session_id" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-iolite/10 text-iolite-shadow dark:text-iolite-light" :title="`Forked from ${session.parent_session_id} at event ${session.fork_point}`">
-                  <span class="i-carbon-fork-vertical text-[10px]" />
-                  fork
-                </span>
-                <span v-if="session.forked_children && session.forked_children.length" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-aquamarine/10 text-aquamarine-shadow dark:text-aquamarine-light" :title="`${session.forked_children.length} fork(s) of this session`">
-                  <span class="i-carbon-tree-view-alt text-[10px]" />
-                  {{ session.forked_children.length }} fork{{ session.forked_children.length === 1 ? "" : "s" }}
-                </span>
-                <span v-if="session.migrated_from_version" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber/10 text-amber-shadow dark:text-amber-light" :title="`Migrated from format v${session.migrated_from_version}`">
-                  <span class="i-carbon-migrate text-[10px]" />
-                  migrated v{{ session.migrated_from_version }}
-                </span>
-                <span v-if="session.format_version && session.format_version > 1" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-warm-100 dark:bg-warm-800 text-warm-500" :title="`Format version ${session.format_version}`"> v{{ session.format_version }} </span>
-              </div>
-              <div class="flex items-center gap-3 text-xs text-secondary">
-                <span v-if="session.config_path" class="font-mono truncate">
-                  {{ session.config_path }}
-                </span>
-                <span v-if="session.agents && session.agents.length > 0"> {{ t("sessions.agentCount", { count: session.agents.length }) }} </span>
-                <span v-if="session.pwd" class="font-mono truncate text-warm-400" :title="session.pwd">
-                  {{ session.pwd }}
-                </span>
-              </div>
-              <div v-if="previewText(session)" class="text-xs text-warm-400 dark:text-warm-500 mt-1 truncate italic" :title="previewText(session, 600)">"{{ previewText(session) }}"</div>
-            </div>
-
-            <div class="text-xs text-warm-400 shrink-0 text-right min-w-24">
-              <div>{{ formatTime(session.last_active) }}</div>
-              <div class="text-warm-400/60">
-                {{ formatDate(session.last_active) }}
-              </div>
-            </div>
-
-            <div class="flex gap-2 shrink-0">
-              <button class="btn-secondary flex items-center gap-1" @click="viewSession(session)">
-                <span class="i-carbon-view" />
-                {{ t("common.view") }}
-              </button>
-              <button
-                class="btn-primary flex items-center gap-1"
-                :disabled="resuming === session.name"
-                :class="{
-                  'opacity-50 cursor-not-allowed': resuming === session.name,
+          <!-- Card layout: stacks vertically on mobile (icon+meta row,
+               then date+actions row) and goes inline on >=sm so the
+               desktop layout is unchanged. -->
+          <div v-for="session in sessions" :key="session.name" class="card-hover p-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+            <div class="flex items-start sm:items-center gap-3 sm:gap-4 flex-1 min-w-0">
+              <div
+                :class="session.config_type === 'terrarium' ? 'i-carbon-network-4' : 'i-carbon-bot'"
+                class="text-lg shrink-0 mt-0.5 sm:mt-0"
+                :style="{
+                  color: session.config_type === 'terrarium' ? GEM.iolite.main : GEM.aquamarine.main,
                 }"
-                @click="resumeSession(session)"
-              >
-                <span :class="resuming === session.name ? 'i-carbon-renew kohaku-pulse' : 'i-carbon-play'" />
-                {{ resuming === session.name ? t("sessions.resuming") : t("common.resume") }}
-              </button>
-              <el-dropdown trigger="click" @command="(cmd) => onRowAction(cmd, session)">
-                <button class="btn-secondary flex items-center gap-1" :title="t('common.more')">
-                  <span class="i-carbon-overflow-menu-horizontal" />
+              />
+
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-0.5 flex-wrap">
+                  <span class="font-medium text-warm-800 dark:text-warm-200 truncate">
+                    {{ session.name }}
+                  </span>
+                  <GemBadge :gem="session.config_type === 'terrarium' ? 'iolite' : 'aquamarine'">
+                    {{ session.config_type }}
+                  </GemBadge>
+                  <!-- Lineage badges (Wave E fork / Wave D migration) -->
+                  <span v-if="session.parent_session_id" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-iolite/10 text-iolite-shadow dark:text-iolite-light" :title="`Forked from ${session.parent_session_id} at event ${session.fork_point}`">
+                    <span class="i-carbon-fork-vertical text-[10px]" />
+                    fork
+                  </span>
+                  <span v-if="session.forked_children && session.forked_children.length" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-aquamarine/10 text-aquamarine-shadow dark:text-aquamarine-light" :title="`${session.forked_children.length} fork(s) of this session`">
+                    <span class="i-carbon-tree-view-alt text-[10px]" />
+                    {{ session.forked_children.length }} fork{{ session.forked_children.length === 1 ? "" : "s" }}
+                  </span>
+                  <span v-if="session.migrated_from_version" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber/10 text-amber-shadow dark:text-amber-light" :title="`Migrated from format v${session.migrated_from_version}`">
+                    <span class="i-carbon-migrate text-[10px]" />
+                    migrated v{{ session.migrated_from_version }}
+                  </span>
+                  <span v-if="session.format_version && session.format_version > 1" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-warm-100 dark:bg-warm-800 text-warm-500" :title="`Format version ${session.format_version}`"> v{{ session.format_version }} </span>
+                </div>
+                <div class="flex items-center gap-3 text-xs text-secondary">
+                  <span v-if="session.config_path" class="font-mono truncate">
+                    {{ session.config_path }}
+                  </span>
+                  <span v-if="session.agents && session.agents.length > 0"> {{ t("sessions.agentCount", { count: session.agents.length }) }} </span>
+                  <span v-if="session.pwd" class="font-mono truncate text-warm-400" :title="session.pwd">
+                    {{ session.pwd }}
+                  </span>
+                </div>
+                <div v-if="previewText(session)" class="text-xs text-warm-400 dark:text-warm-500 mt-1 truncate italic" :title="previewText(session, 600)">"{{ previewText(session) }}"</div>
+              </div>
+            </div>
+
+            <!-- Date + action buttons: their own row on mobile (below
+                 the icon/content stack), inline on sm+.  Allow wrap +
+                 drop the date min-width on narrow phones so the three
+                 buttons (View / Resume / ⋯) don't get clipped under
+                 the global ``overflow-x: hidden`` page guard. -->
+            <div class="flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-3 justify-between sm:justify-end sm:shrink-0">
+              <div class="text-xs text-warm-400 sm:text-right min-w-0 sm:min-w-24 sm:order-none">
+                <div>{{ formatTime(session.last_active) }}</div>
+                <div class="text-warm-400/60">
+                  {{ formatDate(session.last_active) }}
+                </div>
+              </div>
+
+              <div class="flex gap-2 shrink-0 ml-auto sm:ml-0">
+                <button class="btn-secondary flex items-center gap-1" @click="viewSession(session)">
+                  <span class="i-carbon-view" />
+                  {{ t("common.view") }}
                 </button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item command="buildEmbeddings" :disabled="!!session.has_vector_index">
-                      <span class="i-carbon-machine-learning-model mr-1" />
-                      {{ t("sessions.buildEmbeddings") }}
-                    </el-dropdown-item>
-                    <el-dropdown-item command="rebuildEmbeddings" :disabled="!session.has_vector_index">
-                      <span class="i-carbon-renew mr-1" />
-                      {{ t("sessions.rebuildEmbeddings") }}
-                    </el-dropdown-item>
-                    <el-dropdown-item divided command="delete" :class="'text-coral'">
-                      <span class="i-carbon-trash-can mr-1" />
-                      {{ t("common.delete") }}
-                    </el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
+                <button
+                  class="btn-primary flex items-center gap-1"
+                  :disabled="resuming === session.name"
+                  :class="{
+                    'opacity-50 cursor-not-allowed': resuming === session.name,
+                  }"
+                  @click="resumeSession(session)"
+                >
+                  <span :class="resuming === session.name ? 'i-carbon-renew kohaku-pulse' : 'i-carbon-play'" />
+                  {{ resuming === session.name ? t("sessions.resuming") : t("common.resume") }}
+                </button>
+                <el-dropdown trigger="click" @command="(cmd) => onRowAction(cmd, session)">
+                  <button class="btn-secondary flex items-center gap-1" :title="t('common.more')">
+                    <span class="i-carbon-overflow-menu-horizontal" />
+                  </button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="buildEmbeddings" :disabled="!!session.has_vector_index">
+                        <span class="i-carbon-machine-learning-model mr-1" />
+                        {{ t("sessions.buildEmbeddings") }}
+                      </el-dropdown-item>
+                      <el-dropdown-item command="rebuildEmbeddings" :disabled="!session.has_vector_index">
+                        <span class="i-carbon-renew mr-1" />
+                        {{ t("sessions.rebuildEmbeddings") }}
+                      </el-dropdown-item>
+                      <el-dropdown-item divided command="delete" :class="'text-coral'">
+                        <span class="i-carbon-trash-can mr-1" />
+                        {{ t("common.delete") }}
+                      </el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </div>
             </div>
           </div>
 
@@ -150,10 +162,10 @@ import { sessionAPI } from "@/utils/api"
 import { extractTextPreview } from "@/utils/multimodal"
 
 function previewText(session, limit = 200) {
-  // Backend flattens preview to a string in ``_read_session_entry``,
-  // but legacy session-index entries cached during older runs may
-  // still surface a list of multi-modal parts. Defensive flatten so
-  // the row never renders ``[object Object]`` or a base64 blob.
+  // The sidecar flattens preview to a string before it lands in the
+  // index, but older cached entries may still surface a list of
+  // multi-modal parts. Defensive flatten so the row never renders
+  // ``[object Object]`` or a base64 blob.
   return extractTextPreview(session?.preview, limit)
 }
 
@@ -287,7 +299,10 @@ async function deleteSession(session) {
   try {
     await sessionAPI.delete(session.name)
     ElMessage.success(t("sessions.deleted"))
-    await fetchSessions()
+    // Force a backend rebuild (skip the 30s cache) — without it the
+    // freshly-deleted row would still show up in the list because the
+    // index cache hasn't expired.  Bug #59.
+    await fetchSessions(true)
   } catch (err) {
     ElMessage.error(t("sessions.deleteFailed", { message: err.response?.data?.detail || err.message }))
   }

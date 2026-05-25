@@ -112,7 +112,7 @@
 
     <!-- ── Progress modal ─────────────────────────────────────────── -->
     <div v-if="progress.open" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-      <div class="bg-warm-50 dark:bg-warm-900 rounded shadow-lg p-5 w-[420px]">
+      <div class="bg-warm-50 dark:bg-warm-900 rounded shadow-lg p-5 w-[420px] max-w-[calc(100vw-2rem)]">
         <h3 class="text-sm font-semibold mb-2">{{ progress.phase || "Working…" }}</h3>
         <div class="h-2 bg-warm-200 dark:bg-warm-800 rounded overflow-hidden">
           <div class="h-full bg-iolite transition-all" :style="{ width: Math.max(0, Math.min(100, progress.percent || 0)) + '%' }" />

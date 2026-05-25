@@ -6,7 +6,7 @@
     </el-select>
 
     <!-- Current-model pill: click to open switcher popover -->
-    <el-popover v-model:visible="popoverVisible" :width="560" placement="bottom-end" trigger="click" :hide-after="0" :disabled="!canPickModel" popper-class="model-switcher-popover">
+    <el-popover v-model:visible="popoverVisible" :width="popoverWidth" placement="bottom-end" trigger="click" :hide-after="0" :disabled="!canPickModel" popper-class="model-switcher-popover">
       <template #reference>
         <button type="button" class="model-pill" :class="{ 'is-disabled': !canPickModel }" :disabled="!canPickModel">
           <span v-if="loading && !models.length" class="text-warm-400 text-[11px]">Loading models…</span>
@@ -20,26 +20,36 @@
         </button>
       </template>
 
-      <div class="flex flex-col gap-3 p-1 max-h-[70vh]">
+      <div class="flex flex-col gap-3 p-1 max-h-[80vh] sm:max-h-[70vh]">
         <!-- Search -->
         <div class="flex items-center gap-2">
           <el-input v-model="searchQuery" size="small" placeholder="Search model or provider…" clearable @keydown.esc="popoverVisible = false" />
           <el-button size="small" :loading="loading" @click="loadModels">Refresh</el-button>
         </div>
 
-        <!-- Main three-pane layout: providers | models | variations -->
-        <div class="flex gap-3 min-h-[18rem] max-h-[50vh]">
-          <!-- Provider column -->
-          <div class="flex flex-col w-32 shrink-0 overflow-y-auto border-r border-warm-100 dark:border-warm-800 pr-2">
-            <div class="text-[10px] uppercase tracking-wide text-warm-400 mb-1">Provider</div>
-            <button v-for="provider in providerOptions" :key="provider.name" type="button" class="provider-tab" :class="{ 'is-active': draftProvider === provider.name, 'is-unavailable': !provider.available }" @click="selectProvider(provider.name)">
-              <span class="truncate">{{ provider.name }}</span>
-              <span class="text-[9px] text-warm-400 shrink-0">{{ provider.count }}</span>
-            </button>
+        <!-- Three-pane (provider | model | variation) on desktop;
+             stacked (provider chips on top, then model, then
+             variations) on mobile.  The provider strip lives INSIDE
+             this row on desktop so its ``sm:w-32 sm:border-r`` rail
+             classes apply against the model list as a sibling
+             (pre-fix it sat above the row and the desktop rail
+             classes had nothing to lay against — collapsed to a
+             narrow block above the list). -->
+        <div class="flex flex-col sm:flex-row gap-3 min-h-0 flex-1 sm:min-h-[18rem] sm:max-h-[50vh]">
+          <!-- Provider strip — horizontal scrollable chip row on
+               mobile, column rail on desktop. -->
+          <div class="model-switcher-providers sm:flex-col sm:w-32 sm:shrink-0 sm:overflow-y-auto sm:border-r sm:border-warm-100 sm:dark:border-warm-800 sm:pr-2">
+            <div class="text-[10px] uppercase tracking-wide text-warm-400 mb-1 sm:mb-1 hidden sm:block">Provider</div>
+            <div class="flex sm:flex-col gap-1 sm:gap-0 overflow-x-auto sm:overflow-x-visible scrollbar-none -mx-1 px-1 sm:mx-0 sm:px-0 pb-1 sm:pb-0">
+              <button v-for="provider in providerOptions" :key="provider.name" type="button" class="provider-tab shrink-0 sm:shrink" :class="{ 'is-active': draftProvider === provider.name, 'is-unavailable': !provider.available }" @click="selectProvider(provider.name)">
+                <span class="truncate">{{ provider.name }}</span>
+                <span class="text-[9px] text-warm-400 shrink-0">{{ provider.count }}</span>
+              </button>
+            </div>
           </div>
 
-          <!-- Model column -->
-          <div class="flex flex-col flex-1 min-w-0 overflow-y-auto pr-2">
+          <!-- Model list -->
+          <div class="flex flex-col flex-1 min-w-0 max-h-[40vh] sm:max-h-none overflow-y-auto sm:pr-2">
             <div class="text-[10px] uppercase tracking-wide text-warm-400 mb-1">Model</div>
             <button v-for="preset in filteredPresets" :key="preset.name" type="button" class="model-row" :class="{ 'is-active': draftPreset === preset.name, 'is-unavailable': !preset.available }" @click="selectPreset(preset.name)">
               <div class="flex items-center gap-2 w-full">
@@ -54,33 +64,36 @@
             <div v-if="!filteredPresets.length" class="text-warm-400 text-[11px] italic p-2 text-center">No matching models.</div>
           </div>
 
-          <!-- Variation column -->
-          <div class="flex flex-col w-48 shrink-0 overflow-y-auto">
+          <!-- Variation chips: column on desktop, collapsible section
+               on mobile (only rendered when there ARE variation groups
+               so the footer doesn't get pushed off-screen). -->
+          <div v-if="draftPresetData && hasVariations(draftPresetData)" class="flex flex-col sm:w-48 sm:shrink-0 max-h-[24vh] sm:max-h-none overflow-y-auto border-t sm:border-t-0 pt-2 sm:pt-0 border-warm-100 dark:border-warm-800">
             <div class="text-[10px] uppercase tracking-wide text-warm-400 mb-1">Variations</div>
-            <div v-if="!draftPresetData || !hasVariations(draftPresetData)" class="text-warm-400 text-[11px] italic">No variation groups.</div>
-            <template v-else>
-              <div v-for="group in draftVariationGroups" :key="group.name" class="flex flex-col mb-3">
-                <div class="text-[10px] text-warm-500 font-medium mb-1">{{ group.name }}</div>
-                <div class="flex flex-wrap gap-1">
-                  <button v-for="option in group.options" :key="option" type="button" class="variation-chip" :class="{ 'is-active': draftSelections[group.name] === option }" @click="toggleVariation(group.name, option)">
-                    {{ option }}
-                  </button>
-                </div>
+            <div v-for="group in draftVariationGroups" :key="group.name" class="flex flex-col mb-3">
+              <div class="text-[10px] text-warm-500 font-medium mb-1">{{ group.name }}</div>
+              <div class="flex flex-wrap gap-1">
+                <button v-for="option in group.options" :key="option" type="button" class="variation-chip" :class="{ 'is-active': draftSelections[group.name] === option }" @click="toggleVariation(group.name, option)">
+                  {{ option }}
+                </button>
               </div>
-            </template>
+            </div>
           </div>
         </div>
 
-        <!-- Footer: selector preview + actions -->
-        <div class="flex items-center gap-2 pt-2 border-t border-warm-100 dark:border-warm-800">
+        <!-- Footer: selector preview + actions.  Stacks the action
+             buttons under the selector preview on narrow widths so
+             they don't squeeze. -->
+        <div class="flex flex-col sm:flex-row sm:items-center gap-2 pt-2 border-t border-warm-100 dark:border-warm-800">
           <div class="flex-1 min-w-0">
             <div class="text-[10px] text-warm-400">Selector</div>
-            <code class="font-mono text-[11px] text-warm-700 dark:text-warm-300 truncate block">
+            <code class="font-mono text-[11px] text-warm-700 dark:text-warm-300 break-all sm:truncate block">
               {{ draftSelector || "—" }}
             </code>
           </div>
-          <el-button size="small" @click="popoverVisible = false">Cancel</el-button>
-          <el-button size="small" type="primary" :disabled="!draftSelector || draftSelector === currentModel" :loading="applying" @click="applySelection"> Switch </el-button>
+          <div class="flex items-center gap-2 justify-end shrink-0">
+            <el-button size="small" @click="popoverVisible = false">Cancel</el-button>
+            <el-button size="small" type="primary" :disabled="!draftSelector || draftSelector === currentModel" :loading="applying" @click="applySelection"> Switch </el-button>
+          </div>
         </div>
       </div>
     </el-popover>
@@ -93,6 +106,7 @@ import { ElMessage } from "element-plus"
 import { ArrowDown } from "@element-plus/icons-vue"
 
 import { useInstanceContext } from "@/components/chrome/instanceContext"
+import { useDensity } from "@/composables/useDensity"
 import { useChatStore } from "@/stores/chat"
 import { useInstancesStore } from "@/stores/instances"
 import { agentAPI, terrariumAPI, configAPI } from "@/utils/api"
@@ -111,6 +125,19 @@ const loading = ref(false)
 const applying = ref(false)
 const popoverVisible = ref(false)
 const searchQuery = ref("")
+
+// Popover width — Element Plus accepts either a number (px) or a
+// CSS string.  ``useDensity().isCompact`` is the canonical mobile
+// signal (it already owns the resize listener + override prefs); a
+// hand-rolled ``window.innerWidth`` watcher here would duplicate
+// that and skip the density override the user might've pinned.
+const { isCompact } = useDensity()
+const popoverWidth = computed(() =>
+  // Almost-full-bleed (minus 12px on each side) when compact so the
+  // multi-pane layout has room to breathe; desktop keeps the
+  // original 560px that anchors neatly under the pill.
+  isCompact.value ? "calc(100vw - 24px)" : 560,
+)
 
 const draftProvider = ref("")
 const draftPreset = ref("")
@@ -204,7 +231,21 @@ const filteredPresets = computed(() => {
     })
 })
 
-const draftPresetData = computed(() => filteredPresets.value.find((m) => m.name === draftPreset.value) || models.value.find((m) => m.name === draftPreset.value) || null)
+// Look up the draft preset's full record so the variation panel can
+// render its option groups.  ALWAYS match on (provider, name) — under
+// the (provider, name) hierarchy the same preset name (e.g. ``gpt-5.4``)
+// exists on multiple providers, and a name-only fallback would pull
+// variation metadata from whichever provider's row happens to come
+// first in ``models.value``.  When the active provider has no match
+// (in-flight filter / search edge cases), return null and skip the
+// variation panel instead of silently displaying the wrong provider's
+// data.
+const draftPresetData = computed(() => {
+  const provider = draftProvider.value
+  const name = draftPreset.value
+  if (!name) return null
+  return filteredPresets.value.find((m) => m.name === name) || models.value.find((m) => m.name === name && (m.provider || m.login_provider) === provider) || null
+})
 
 const draftVariationGroups = computed(() => {
   const groups = draftPresetData.value?.variation_groups || {}
@@ -379,7 +420,12 @@ onUnmounted(() => {
 }
 
 .target-select {
-  width: 8.5rem;
+  width: 7rem;
+}
+@media (min-width: 768px) {
+  .target-select {
+    width: 8.5rem;
+  }
 }
 
 .model-pill {
@@ -387,7 +433,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.5rem;
   padding: 0.25rem 0.6rem;
-  min-height: 28px;
+  min-height: 32px;
   border-radius: 6px;
   border: 1px solid rgba(120, 109, 98, 0.25);
   background: transparent;
@@ -396,8 +442,13 @@ onUnmounted(() => {
   transition:
     border-color 0.1s ease,
     background 0.1s ease;
-  min-width: 12rem;
+  min-width: 7rem;
   max-width: 24rem;
+}
+@media (min-width: 768px) {
+  .model-pill {
+    min-width: 12rem;
+  }
 }
 .model-pill:hover:not(.is-disabled) {
   border-color: rgba(120, 109, 98, 0.5);
@@ -480,5 +531,42 @@ onUnmounted(() => {
 
 .model-switcher-popover {
   padding: 0.75rem !important;
+  /* Hard cap so even if a parent passes a wider ``:width`` prop the
+     popover still respects the visual viewport.  ``min-width: 0``
+     overrides Element Plus's default 150px to allow narrow viewports
+     to control the width down to ``calc(100vw - 24px)``. */
+  max-width: calc(100vw - 16px) !important;
+  min-width: 0 !important;
+}
+
+/* Provider strip: column rail on desktop, horizontal chip strip on
+   mobile.  The base ``.model-switcher-providers`` switches the
+   wrapper from flex-row (mobile) → flex-col (desktop, via the
+   ``sm:flex-col`` utility on the element).  Chip-mode styling is
+   below; default rail-mode styling is overridden inside @media. */
+@media (max-width: 767px) {
+  .provider-tab {
+    /* Pill-shaped chips on mobile so the horizontal strip reads as
+       a tab bar rather than a stacked menu. */
+    border-radius: 9999px;
+    padding: 0.35rem 0.7rem;
+    margin-bottom: 0;
+    font-size: 12px;
+    border: 1px solid rgba(120, 109, 98, 0.25);
+  }
+  .provider-tab.is-active {
+    border-color: var(--el-color-primary, #5a8cc8);
+  }
+}
+
+/* Tap target bump for variation chips on touch devices. */
+@media (pointer: coarse) {
+  .variation-chip {
+    padding: 0.4rem 0.8rem;
+    font-size: 13px;
+  }
+  .model-row {
+    padding: 0.6rem 0.5rem;
+  }
 }
 </style>

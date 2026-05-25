@@ -4,8 +4,8 @@
       <div v-if="tab.icon" :class="[tab.icon, 'text-sm shrink-0']" />
       <span>{{ tab.label }}</span>
       <span v-if="tab.dirty" class="w-1.5 h-1.5 rounded-full bg-iolite shrink-0" aria-label="unsaved" />
-      <button v-if="!tab.pinned" class="ml-0.5 w-4 h-4 inline-flex items-center justify-center rounded hover:bg-warm-200 dark:hover:bg-warm-700 opacity-0 group-hover:opacity-100 transition-opacity text-warm-500" :title="`Close ${tab.label}`" @click.stop="$emit('close', tab.id)">
-        <div class="i-carbon-close text-[10px]" />
+      <button v-if="!tab.pinned" class="ml-0.5 w-7 h-7 sm:w-4 sm:h-4 inline-flex items-center justify-center rounded hover:bg-warm-200 dark:hover:bg-warm-700 hover-only-action text-warm-500" :title="`Close ${tab.label}`" @click.stop="$emit('close', tab.id)">
+        <div class="i-carbon-close text-sm sm:text-[10px]" />
       </button>
       <!-- active indicator -->
       <div v-if="tab.id === active" class="absolute left-0 right-0 top-0 h-0.5 bg-iolite" aria-hidden="true" />

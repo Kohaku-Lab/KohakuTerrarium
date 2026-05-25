@@ -1,6 +1,6 @@
 <template>
   <div class="h-full w-full overflow-y-auto bg-warm-50 dark:bg-warm-950">
-    <div class="max-w-3xl mx-auto px-6 py-10">
+    <div class="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
       <!-- Header -->
       <div class="flex items-center gap-3 mb-2">
         <div class="i-carbon-tool-box text-3xl text-iolite dark:text-iolite-light" />

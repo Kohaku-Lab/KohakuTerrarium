@@ -47,7 +47,7 @@
     <!-- Token usage breakdown -->
     <div v-if="tokens" class="shrink-0 flex flex-col gap-1">
       <div class="text-[10px] uppercase tracking-wider text-warm-400">{{ t("sessionViewer.detail.tokens") }}</div>
-      <div class="grid grid-cols-2 gap-2 font-mono">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono">
         <div v-if="tokens.in != null"><span class="text-warm-400">in:</span> {{ tokens.in }}</div>
         <div v-if="tokens.out != null"><span class="text-warm-400">out:</span> {{ tokens.out }}</div>
         <div v-if="tokens.cached != null"><span class="text-warm-400">cached:</span> {{ tokens.cached }}</div>

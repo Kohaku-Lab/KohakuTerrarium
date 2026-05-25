@@ -1,6 +1,6 @@
 <template>
   <div class="h-full overflow-y-auto bg-warm-50 dark:bg-warm-950">
-    <div class="max-w-5xl mx-auto py-6 px-6 space-y-6">
+    <div class="max-w-5xl mx-auto py-4 sm:py-6 px-4 sm:px-6 space-y-6">
       <!-- Header -->
       <header class="flex items-end justify-between">
         <div>
@@ -179,26 +179,28 @@
           <span class="text-[10px] text-warm-400">{{ t("shell.stats.latencyWindow") }}</span>
         </div>
         <div v-if="latencyRows.length === 0" class="text-warm-400 italic text-xs py-3">{{ t("shell.stats.latencyEmpty") }}</div>
-        <table v-else class="w-full text-xs">
-          <thead>
-            <tr class="text-warm-500">
-              <th class="text-left font-medium pb-1.5 pl-1 w-20">Kind</th>
-              <th class="text-left font-medium pb-1.5">Label</th>
-              <th class="text-right font-medium pb-1.5 w-16">n</th>
-              <th class="text-right font-medium pb-1.5 w-20">p50</th>
-              <th class="text-right font-medium pb-1.5 w-20 pr-1">p95</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in latencyRows" :key="`${row.kind}|${row.label}`" class="border-t border-warm-100 dark:border-warm-800/50">
-              <td class="pl-1 py-1 text-warm-500 uppercase text-[10px] tracking-wider">{{ row.kind }}</td>
-              <td class="font-mono truncate text-warm-700 dark:text-warm-300" :title="row.label">{{ row.label }}</td>
-              <td class="text-right text-warm-500 font-mono">{{ row.n }}</td>
-              <td class="text-right font-mono text-warm-700 dark:text-warm-300">{{ fmtMs(row.p50) }}</td>
-              <td class="text-right font-mono pr-1" :class="row.p95 > 5000 ? 'text-coral' : row.p95 > 1500 ? 'text-amber' : 'text-warm-700 dark:text-warm-300'">{{ fmtMs(row.p95) }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div v-else class="overflow-x-auto">
+          <table class="w-full text-xs min-w-[480px]">
+            <thead>
+              <tr class="text-warm-500">
+                <th class="text-left font-medium pb-1.5 pl-1 w-20">Kind</th>
+                <th class="text-left font-medium pb-1.5">Label</th>
+                <th class="text-right font-medium pb-1.5 w-16">n</th>
+                <th class="text-right font-medium pb-1.5 w-20">p50</th>
+                <th class="text-right font-medium pb-1.5 w-20 pr-1">p95</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in latencyRows" :key="`${row.kind}|${row.label}`" class="border-t border-warm-100 dark:border-warm-800/50">
+                <td class="pl-1 py-1 text-warm-500 uppercase text-[10px] tracking-wider">{{ row.kind }}</td>
+                <td class="font-mono truncate text-warm-700 dark:text-warm-300" :title="row.label">{{ row.label }}</td>
+                <td class="text-right text-warm-500 font-mono">{{ row.n }}</td>
+                <td class="text-right font-mono text-warm-700 dark:text-warm-300">{{ fmtMs(row.p50) }}</td>
+                <td class="text-right font-mono pr-1" :class="row.p95 > 5000 ? 'text-coral' : row.p95 > 1500 ? 'text-amber' : 'text-warm-700 dark:text-warm-300'">{{ fmtMs(row.p95) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <!-- ── Process metrics: tokens ────── -->
@@ -208,24 +210,26 @@
           <span class="text-[10px] text-warm-400">{{ t("shell.stats.tokensSinceUptime", { uptime: fmtUptime(metrics.uptime_s) }) }}</span>
         </div>
         <div v-if="tokenRows.length === 0" class="text-warm-400 italic text-xs py-3">{{ t("shell.stats.tokensEmpty") }}</div>
-        <table v-else class="w-full text-xs">
-          <thead>
-            <tr class="text-warm-500">
-              <th class="text-left font-medium pb-1.5 pl-1">Provider · model</th>
-              <th class="text-right font-medium pb-1.5 w-24">Prompt</th>
-              <th class="text-right font-medium pb-1.5 w-24">Completion</th>
-              <th class="text-right font-medium pb-1.5 w-24 pr-1">Cache R/W</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in tokenRows" :key="row.label" class="border-t border-warm-100 dark:border-warm-800/50">
-              <td class="pl-1 py-1 font-mono text-warm-700 dark:text-warm-300 truncate">{{ row.label }}</td>
-              <td class="text-right font-mono text-warm-700 dark:text-warm-300">{{ formatNum(row.prompt) }}</td>
-              <td class="text-right font-mono text-warm-700 dark:text-warm-300">{{ formatNum(row.completion) }}</td>
-              <td class="text-right font-mono text-warm-500 pr-1">{{ formatNum(row.cache_read) }} / {{ formatNum(row.cache_write) }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div v-else class="overflow-x-auto">
+          <table class="w-full text-xs min-w-[480px]">
+            <thead>
+              <tr class="text-warm-500">
+                <th class="text-left font-medium pb-1.5 pl-1">Provider · model</th>
+                <th class="text-right font-medium pb-1.5 w-24">Prompt</th>
+                <th class="text-right font-medium pb-1.5 w-24">Completion</th>
+                <th class="text-right font-medium pb-1.5 w-24 pr-1">Cache R/W</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in tokenRows" :key="row.label" class="border-t border-warm-100 dark:border-warm-800/50">
+                <td class="pl-1 py-1 font-mono text-warm-700 dark:text-warm-300 truncate">{{ row.label }}</td>
+                <td class="text-right font-mono text-warm-700 dark:text-warm-300">{{ formatNum(row.prompt) }}</td>
+                <td class="text-right font-mono text-warm-700 dark:text-warm-300">{{ formatNum(row.completion) }}</td>
+                <td class="text-right font-mono text-warm-500 pr-1">{{ formatNum(row.cache_read) }} / {{ formatNum(row.cache_write) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <!-- ── Process metrics: errors ────── -->

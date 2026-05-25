@@ -65,7 +65,7 @@
             <span class="text-amber-shadow dark:text-amber-light font-mono truncate">{{ job.name }}</span>
             <span class="flex-1" />
             <span class="text-warm-400 shrink-0">{{ chat.getJobElapsed(job) }}</span>
-            <button class="text-warm-400 hover:text-coral transition-colors opacity-0 group-hover:opacity-100" :title="t('common.stopTask')" @click="stopTask(jobId)">
+            <button class="text-warm-400 hover:text-coral transition-colors hover-only-action" :title="t('common.stopTask')" @click="stopTask(jobId)">
               <span class="i-carbon-close text-[9px]" />
             </button>
           </div>

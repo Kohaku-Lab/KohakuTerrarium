@@ -27,7 +27,7 @@
         </div>
         <div>
           <label class="text-[11px] text-warm-400 block mb-1">{{ t("settings.mcp.env") }}</label>
-          <el-input v-model="form.envStr" size="small" type="textarea" :rows="3" placeholder="KEY=value" />
+          <el-input v-model="form.envStr" size="small" type="textarea" :autosize="{ minRows: 3, maxRows: 12 }" placeholder="KEY=value" />
           <p class="text-[11px] text-warm-400 mt-1">{{ t("settings.mcp.envHint") }}</p>
         </div>
       </template>

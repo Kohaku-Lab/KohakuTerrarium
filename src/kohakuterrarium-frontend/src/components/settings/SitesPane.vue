@@ -22,52 +22,54 @@
       {{ t("cluster.settings.empty") }}
     </div>
 
-    <table v-else class="w-full text-sm border-collapse">
-      <thead>
-        <tr class="text-[11px] uppercase tracking-wider text-warm-500 border-b border-warm-200 dark:border-warm-700">
-          <th class="text-left py-2 px-3">{{ t("cluster.settings.headers.site") }}</th>
-          <th class="text-left py-2 px-3">{{ t("cluster.settings.headers.status") }}</th>
-          <th class="text-right py-2 px-3">{{ t("cluster.settings.headers.creatures") }}</th>
-          <th class="text-right py-2 px-3">{{ t("cluster.settings.headers.actions") }}</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="site in cluster.sites" :key="site.nodeId" class="border-b border-warm-100 dark:border-warm-800 hover:bg-warm-100/50 dark:hover:bg-warm-800/30">
-          <td class="py-2 px-3 flex items-center gap-2">
-            <SiteChip :node-id="site.nodeId" always-show />
-            <span class="text-warm-700 dark:text-warm-200 font-mono text-xs">{{ site.nodeId }}</span>
-          </td>
-          <td class="py-2 px-3">
-            <span class="inline-flex items-center gap-1">
-              <span class="w-1.5 h-1.5 rounded-full" :class="dotClass(site)" />
-              <span :class="statusClass(site)">{{ site.status }}</span>
-            </span>
-          </td>
-          <td class="py-2 px-3 text-right text-warm-600 dark:text-warm-300">
-            {{ site.creatures !== null ? site.creatures : "—" }}
-          </td>
-          <td class="py-2 px-3 text-right">
-            <el-dropdown v-if="site.nodeId !== '_host'" trigger="click" @command="(c) => onRowCommand(c, site)">
-              <button class="text-[11px] px-2 py-0.5 rounded border border-warm-300 dark:border-warm-700 hover:border-iolite hover:text-iolite">
-                <span class="i-carbon-overflow-menu-horizontal" />
-              </button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="disconnect">
-                    <span class="i-carbon-logout mr-1" />
-                    {{ t("cluster.settings.disconnect") }}
-                  </el-dropdown-item>
-                  <el-dropdown-item command="block" :class="'text-coral'">
-                    <span class="i-carbon-block-storage mr-1" />
-                    {{ t("cluster.settings.block") }}
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <div v-else class="overflow-x-auto">
+      <table class="w-full text-sm border-collapse min-w-[480px]">
+        <thead>
+          <tr class="text-[11px] uppercase tracking-wider text-warm-500 border-b border-warm-200 dark:border-warm-700">
+            <th class="text-left py-2 px-3">{{ t("cluster.settings.headers.site") }}</th>
+            <th class="text-left py-2 px-3">{{ t("cluster.settings.headers.status") }}</th>
+            <th class="text-right py-2 px-3">{{ t("cluster.settings.headers.creatures") }}</th>
+            <th class="text-right py-2 px-3">{{ t("cluster.settings.headers.actions") }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="site in cluster.sites" :key="site.nodeId" class="border-b border-warm-100 dark:border-warm-800 hover:bg-warm-100/50 dark:hover:bg-warm-800/30">
+            <td class="py-2 px-3 flex items-center gap-2">
+              <SiteChip :node-id="site.nodeId" always-show />
+              <span class="text-warm-700 dark:text-warm-200 font-mono text-xs">{{ site.nodeId }}</span>
+            </td>
+            <td class="py-2 px-3">
+              <span class="inline-flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full" :class="dotClass(site)" />
+                <span :class="statusClass(site)">{{ site.status }}</span>
+              </span>
+            </td>
+            <td class="py-2 px-3 text-right text-warm-600 dark:text-warm-300">
+              {{ site.creatures !== null ? site.creatures : "—" }}
+            </td>
+            <td class="py-2 px-3 text-right">
+              <el-dropdown v-if="site.nodeId !== '_host'" trigger="click" @command="(c) => onRowCommand(c, site)">
+                <button class="text-[11px] px-2 py-0.5 rounded border border-warm-300 dark:border-warm-700 hover:border-iolite hover:text-iolite">
+                  <span class="i-carbon-overflow-menu-horizontal" />
+                </button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="disconnect">
+                      <span class="i-carbon-logout mr-1" />
+                      {{ t("cluster.settings.disconnect") }}
+                    </el-dropdown-item>
+                    <el-dropdown-item command="block" :class="'text-coral'">
+                      <span class="i-carbon-block-storage mr-1" />
+                      {{ t("cluster.settings.block") }}
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
     <div v-if="cluster.error" class="text-coral text-xs">{{ cluster.error }}</div>
 
