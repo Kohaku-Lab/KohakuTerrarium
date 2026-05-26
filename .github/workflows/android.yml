@@ -157,53 +157,140 @@ jobs:
         # assets/sandbox/bin/.  See packaging/android/postcreate.py.
         run: python packaging/android/postcreate.py
 
-      - name: Briefcase update + build (debug)
+      - name: Briefcase update + build
+        # ``briefcase build`` produces the debug-keystore-signed
+        # ``app-debug.apk`` under
+        # ``build/.../gradle/app/build/outputs/apk/debug/`` (used
+        # as the fallback when signing secrets aren't configured).
+        # ``briefcase package -p {apk,aab}`` below runs the release
+        # Gradle tasks (``assembleRelease`` / ``bundleRelease``)
+        # and moves the UNSIGNED release artifact to ``dist/``.
+        # Briefcase Android has zero signing surface — every flag
+        # the older workflow tried (``--keystore`` / ``--key-alias``
+        # / ``--keystore-pass`` / ``--key-pass``) is rejected by
+        # the ``package android gradle`` argparser.  Signing is
+        # done by ``apksigner`` (APK) + ``jarsigner`` (AAB) in the
+        # ``Sign release artifacts`` step below.
         run: |
           briefcase update android
           briefcase build android
 
-      - name: Sign + package (release)
+      - name: Package release (unsigned)
+        # Always run for tag pushes + manual dispatches.  When the
+        # signing secrets are absent the ``Sign release artifacts``
+        # step below short-circuits and the unsigned APK / AAB still
+        # land on the release for inspection.
+        if: github.event_name == 'push' || inputs.sign
+        run: |
+          briefcase package android -p apk --adhoc-sign
+          briefcase package android -p aab --adhoc-sign
+          echo "=== dist/ after package ==="
+          ls -la dist/ || true
+
+      - name: Sign release artifacts
         if: github.event_name == 'push' || inputs.sign
         env:
-          # All four secrets must be set in GitHub repository
-          # settings → Secrets → Actions before the signed build
-          # job runs.  Without them, the job falls through to the
-          # debug-APK path above.
+          # Four secrets read from the ``release`` environment
+          # (see ``environment: release`` on this job above).
+          # When ``ANDROID_KEYSTORE_B64`` is empty the step
+          # short-circuits with a warning and the unsigned artifact
+          # from ``Package release`` is what gets uploaded.
           ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          set -euo pipefail
           if [ -z "${ANDROID_KEYSTORE_B64}" ]; then
-            echo "::warning::No signing secrets configured; skipping signing."
+            echo "::warning::No signing secrets configured; uploading unsigned artifacts."
             exit 0
           fi
-          echo "${ANDROID_KEYSTORE_B64}" | base64 -d > /tmp/release.jks
-          briefcase package android \
-            --adhoc-sign \
-            --keystore /tmp/release.jks \
-            --keystore-pass "${ANDROID_KEYSTORE_PASSWORD}" \
-            --key-alias "${ANDROID_KEY_ALIAS}" \
-            --key-pass "${ANDROID_KEY_PASSWORD}"
+          echo "${ANDROID_KEYSTORE_B64}" | base64 -d > "${RUNNER_TEMP}/release.jks"
+
+          # Pick the newest installed build-tools (apksigner +
+          # zipalign live there).  ``sort -V | tail -1`` covers
+          # alpha/beta version strings cleanly.
+          BT_VER=$(ls "${ANDROID_HOME}/build-tools" | sort -V | tail -1)
+          BT="${ANDROID_HOME}/build-tools/${BT_VER}"
+          APKSIGNER="${BT}/apksigner"
+          ZIPALIGN="${BT}/zipalign"
+          echo "using build-tools ${BT_VER}"
+
+          shopt -s nullglob
+          # Sign every release APK Briefcase moved into dist/.
+          # ``*.debug.apk`` is the Gradle-debug-keystore-signed
+          # build from ``briefcase build`` — leave it alone, it's
+          # already signed (re-signing it would just break it).
+          for apk in dist/*.apk; do
+            case "${apk}" in
+              *.debug.apk) continue ;;
+            esac
+            base="${apk%.apk}"
+            aligned="${base}-aligned.apk"
+            signed="${base}-signed.apk"
+            echo "zipalign + sign: ${apk}"
+            "${ZIPALIGN}" -p -f 4 "${apk}" "${aligned}"
+            "${APKSIGNER}" sign \
+              --ks "${RUNNER_TEMP}/release.jks" \
+              --ks-key-alias "${ANDROID_KEY_ALIAS}" \
+              --ks-pass "env:ANDROID_KEYSTORE_PASSWORD" \
+              --key-pass "env:ANDROID_KEY_PASSWORD" \
+              --v1-signing-enabled true \
+              --v2-signing-enabled true \
+              --v3-signing-enabled true \
+              --out "${signed}" \
+              "${aligned}"
+            "${APKSIGNER}" verify --verbose "${signed}"
+            # Replace the unsigned dist/*.apk with the signed copy
+            # so the rename + upload steps below pick up the
+            # canonical file (and clean up intermediates).
+            mv "${signed}" "${apk}"
+            rm -f "${aligned}"
+          done
+
+          # AAB: apksigner can't handle bundles — use jarsigner.
+          # Play App Signing (the recommended Play Store flow)
+          # only needs the upload key on the AAB, which jarsigner
+          # provides via v1 (JAR signing).  ``-storepass:env`` /
+          # ``-keypass:env`` keep the secrets off the command line.
+          for aab in dist/*.aab; do
+            echo "jarsigner: ${aab}"
+            jarsigner -keystore "${RUNNER_TEMP}/release.jks" \
+              -storepass:env ANDROID_KEYSTORE_PASSWORD \
+              -keypass:env ANDROID_KEY_PASSWORD \
+              -sigalg SHA256withRSA -digestalg SHA-256 \
+              "${aab}" "${ANDROID_KEY_ALIAS}"
+            jarsigner -verify -verbose "${aab}" | tail -5
+          done
+
+          rm -f "${RUNNER_TEMP}/release.jks"
+          echo "=== signed dist/ ==="
+          ls -la dist/
 
       - name: Stage + rename artifacts
-        # Briefcase emits its APK / AAB under
-        # ``build/kohakuterrarium/android/gradle/app/build/outputs/``
-        # with generic Gradle names (``app-debug.apk``, ``app-release.aab``)
-        # — fine for dev iteration, useless for a public release where
-        # the filename is the only handle the user has on the build.
-        # Copy each into ``dist/android/`` with a versioned name:
+        # Two source roots:
         #
-        #     kohakuterrarium-<version>[-<variant>]-android.<ext>
+        #   * ``dist/*.{apk,aab}`` — Briefcase's release output.
+        #     ``briefcase package android -p {apk,aab}`` moves the
+        #     unsigned release artifact into ``dist/`` (Briefcase
+        #     convention: ``<FormalName>-<version>.{apk,aab}``).
+        #     The ``Sign release artifacts`` step above overwrites
+        #     these in place with signed copies when secrets are
+        #     present.
+        #   * ``build/kohakuterrarium/android/**/app-debug.apk`` —
+        #     the Gradle-debug-keystore-signed APK from
+        #     ``briefcase build``.  Used as the FALLBACK when the
+        #     release pipeline didn't run (unsigned PR / dispatch
+        #     without ``sign=true``) so the workflow always
+        #     uploads SOMETHING the user can sideload.
         #
-        # Version source:
-        #   - tag push  → ``GITHUB_REF_NAME`` minus ``v`` prefix
-        #   - manual    → pyproject ``[project] version``
-        # Variant suffix:
-        #   - ``debug`` for the unsigned debug build (workflow_dispatch
-        #     without the sign flag)
-        #   - omitted for ``release`` builds (tag / sign=true) so the
-        #     headline filename is the cleanest possible
+        # Both get renamed into ``dist/android/`` as:
+        #
+        #     kohakuterrarium-<version>[-debug]-android.<ext>
+        #
+        # Version source: ``GITHUB_REF_NAME`` on tag push,
+        # ``pyproject`` otherwise.  Debug builds keep the ``-debug``
+        # suffix; release builds emit clean unsuffixed names.
         id: stage
         shell: bash
         run: |
@@ -218,44 +305,43 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
           shopt -s globstar nullglob
-          src_root="build/kohakuterrarium/android"
-          # Briefcase emits ``app-debug.apk`` from every ``briefcase
-          # build``, plus ``app-release.{apk,aab}`` when ``briefcase
-          # package`` succeeds with signing.  Prefer release outputs
-          # for distribution; only fall through to the debug APK when
-          # no release artifact exists (unsigned PR / dispatch path).
-          # Otherwise a successful release publish ships three files
-          # where two would do, and the user has to guess which APK
-          # to install.
-          release_apks=("${src_root}"/**/app-release.apk)
-          release_aabs=("${src_root}"/**/app-release.aab)
-          has_release=0
-          if [ ${#release_apks[@]} -gt 0 ] || [ ${#release_aabs[@]} -gt 0 ]; then
-            has_release=1
-          fi
-
           copied=0
-          for src in "${src_root}"/**/*.apk "${src_root}"/**/*.aab; do
+
+          # Release artifacts (Briefcase already moved them to dist/).
+          # Skip our own staging subdir so re-runs don't re-process.
+          release_apks=(dist/*.apk)
+          release_aabs=(dist/*.aab)
+          has_release=0
+          for src in "${release_apks[@]}" "${release_aabs[@]}"; do
             [ -f "${src}" ] || continue
-            base=$(basename "${src}")
-            ext="${base##*.}"
-            if [[ "${base}" == *debug* ]]; then
-              # Skip the debug APK whenever a release artifact landed
-              # alongside it — release is the canonical output then.
-              if [ "${has_release}" -eq 1 ]; then
-                continue
-              fi
-              variant="debug-"
-            else
-              variant=""
-            fi
-            dest="dist/android/kohakuterrarium-${version}-${variant}android.${ext}"
+            has_release=1
+            ext="${src##*.}"
+            dest="dist/android/kohakuterrarium-${version}-android.${ext}"
             cp "${src}" "${dest}"
-            echo "  ${src} -> ${dest}"
+            echo "  release  ${src} -> ${dest}"
             copied=$((copied + 1))
           done
+
+          # Fallback: debug APK from ``briefcase build`` when no
+          # release artifact was emitted (unsigned dispatch run).
+          if [ "${has_release}" -eq 0 ]; then
+            for src in build/kohakuterrarium/android/**/*.apk; do
+              [ -f "${src}" ] || continue
+              base=$(basename "${src}")
+              # Only pick the Gradle ``app-debug.apk`` — Briefcase's
+              # own intermediate APKs under app/build/ are not
+              # standalone-installable.
+              [[ "${base}" == *debug* ]] || continue
+              dest="dist/android/kohakuterrarium-${version}-debug-android.apk"
+              cp "${src}" "${dest}"
+              echo "  debug    ${src} -> ${dest}"
+              copied=$((copied + 1))
+              break
+            done
+          fi
+
           if [ "${copied}" -eq 0 ]; then
-            echo "::warning::no APK/AAB found under ${src_root}"
+            echo "::warning::no APK/AAB found under dist/ or build/"
           fi
           ls -la dist/android/
 
