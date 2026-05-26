@@ -13,8 +13,15 @@ UI_PREFS_PATH = KT_DIR / "ui_prefs.json"
 
 DEFAULTS: dict[str, Any] = {
     "theme": "system",
-    "kt-desktop-zoom": 1.15,
-    "kt-mobile-zoom": 1.25,
+    # Zoom defaults MUST match the frontend's ``DEFAULT_*_ZOOM``
+    # constants in ``src/stores/theme.js``.  The frontend reads
+    # this dict via ``settingsAPI.getUIPrefs()`` on first launch
+    # and uses the backend value before its own fallback fires —
+    # so a mismatch here silently overrides the frontend default
+    # on every fresh install (the "fresh install still shows
+    # 125 %" bug we kept hitting).  Keep both sides at 1.0.
+    "kt-desktop-zoom": 1.0,
+    "kt-mobile-zoom": 1.0,
     "nav-expanded": True,
     "kt-force-desktop": False,
     "kt.presets.user": {},
