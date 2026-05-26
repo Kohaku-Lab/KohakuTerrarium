@@ -5,39 +5,34 @@
       <el-option v-for="target in targetOptions" :key="target.value" :label="target.label" :value="target.value" />
     </el-select>
 
-    <!-- Current-model pill: click to open switcher popover -->
-    <el-popover v-model:visible="popoverVisible" :width="popoverWidth" placement="bottom-end" trigger="click" :hide-after="0" :disabled="!canPickModel" popper-class="model-switcher-popover">
-      <template #reference>
-        <button type="button" class="model-pill" :class="{ 'is-disabled': !canPickModel }" :disabled="!canPickModel">
-          <span v-if="loading && !models.length" class="text-warm-400 text-[11px]">Loading models…</span>
-          <template v-else>
-            <span class="font-mono text-[11px] truncate max-w-[18rem]">{{ currentLabel || "No model" }}</span>
-            <span v-if="currentVariationSummary" class="model-pill-variation text-[10px] text-warm-400 shrink-0">
-              {{ currentVariationSummary }}
-            </span>
-            <el-icon class="shrink-0 text-warm-400"><ArrowDown /></el-icon>
-          </template>
-        </button>
+    <!-- Current-model pill: click to open switcher drawer.  Drawer
+         (not popover) for both mobile and desktop — popper.js
+         positions teleported popovers using layout-coord math that
+         CSS ``zoom`` on ``<html>`` inflates relative to the visual
+         viewport, which pushed the popover off-screen at zoom > 1.
+         Drawer positions relative to the viewport itself. -->
+    <button type="button" class="model-pill" :class="{ 'is-disabled': !canPickModel }" :disabled="!canPickModel" @click="popoverVisible = !popoverVisible">
+      <span v-if="loading && !models.length" class="text-warm-400 text-[11px]">Loading models…</span>
+      <template v-else>
+        <span class="font-mono text-[11px] truncate max-w-[18rem]">{{ currentLabel || "No model" }}</span>
+        <span v-if="currentVariationSummary" class="model-pill-variation text-[10px] text-warm-400 shrink-0">
+          {{ currentVariationSummary }}
+        </span>
+        <el-icon class="shrink-0 text-warm-400"><ArrowDown /></el-icon>
       </template>
-
-      <div class="flex flex-col gap-3 p-1 max-h-[80vh] sm:max-h-[70vh]">
+    </button>
+    <el-drawer v-model="popoverVisible" :direction="drawerDirection" :with-header="false" :size="drawerSize" :modal="true" :close-on-click-modal="true" :destroy-on-close="false" class="model-switcher-drawer">
+      <div class="flex flex-col gap-3 p-3 h-full overflow-hidden">
         <!-- Search -->
         <div class="flex items-center gap-2">
           <el-input v-model="searchQuery" size="small" placeholder="Search model or provider…" clearable @keydown.esc="popoverVisible = false" />
           <el-button size="small" :loading="loading" @click="loadModels">Refresh</el-button>
         </div>
 
-        <!-- Three-pane (provider | model | variation) on desktop;
-             stacked (provider chips on top, then model, then
-             variations) on mobile.  The provider strip lives INSIDE
-             this row on desktop so its ``sm:w-32 sm:border-r`` rail
-             classes apply against the model list as a sibling
-             (pre-fix it sat above the row and the desktop rail
-             classes had nothing to lay against — collapsed to a
-             narrow block above the list). -->
-        <div class="flex flex-col sm:flex-row gap-3 min-h-0 flex-1 sm:min-h-[18rem] sm:max-h-[50vh]">
-          <!-- Provider strip — horizontal scrollable chip row on
-               mobile, column rail on desktop. -->
+        <!-- Three-pane on desktop (provider rail | model list |
+             variation column); stacked on mobile (provider chip
+             strip on top, then model, then variations). -->
+        <div class="flex flex-col sm:flex-row gap-3 min-h-0 flex-1">
           <div class="model-switcher-providers sm:flex-col sm:w-32 sm:shrink-0 sm:overflow-y-auto sm:border-r sm:border-warm-100 sm:dark:border-warm-800 sm:pr-2">
             <div class="text-[10px] uppercase tracking-wide text-warm-400 mb-1 sm:mb-1 hidden sm:block">Provider</div>
             <div class="flex sm:flex-col gap-1 sm:gap-0 overflow-x-auto sm:overflow-x-visible scrollbar-none -mx-1 px-1 sm:mx-0 sm:px-0 pb-1 sm:pb-0">
@@ -48,8 +43,7 @@
             </div>
           </div>
 
-          <!-- Model list -->
-          <div class="flex flex-col flex-1 min-w-0 max-h-[40vh] sm:max-h-none overflow-y-auto sm:pr-2">
+          <div class="flex flex-col flex-1 min-w-0 min-h-0 overflow-y-auto sm:pr-2">
             <div class="text-[10px] uppercase tracking-wide text-warm-400 mb-1">Model</div>
             <button v-for="preset in filteredPresets" :key="preset.name" type="button" class="model-row" :class="{ 'is-active': draftPreset === preset.name, 'is-unavailable': !preset.available }" @click="selectPreset(preset.name)">
               <div class="flex items-center gap-2 w-full">
@@ -64,9 +58,6 @@
             <div v-if="!filteredPresets.length" class="text-warm-400 text-[11px] italic p-2 text-center">No matching models.</div>
           </div>
 
-          <!-- Variation chips: column on desktop, collapsible section
-               on mobile (only rendered when there ARE variation groups
-               so the footer doesn't get pushed off-screen). -->
           <div v-if="draftPresetData && hasVariations(draftPresetData)" class="flex flex-col sm:w-48 sm:shrink-0 max-h-[24vh] sm:max-h-none overflow-y-auto border-t sm:border-t-0 pt-2 sm:pt-0 border-warm-100 dark:border-warm-800">
             <div class="text-[10px] uppercase tracking-wide text-warm-400 mb-1">Variations</div>
             <div v-for="group in draftVariationGroups" :key="group.name" class="flex flex-col mb-3">
@@ -80,9 +71,7 @@
           </div>
         </div>
 
-        <!-- Footer: selector preview + actions.  Stacks the action
-             buttons under the selector preview on narrow widths so
-             they don't squeeze. -->
+        <!-- Footer: selector preview + actions -->
         <div class="flex flex-col sm:flex-row sm:items-center gap-2 pt-2 border-t border-warm-100 dark:border-warm-800">
           <div class="flex-1 min-w-0">
             <div class="text-[10px] text-warm-400">Selector</div>
@@ -96,7 +85,7 @@
           </div>
         </div>
       </div>
-    </el-popover>
+    </el-drawer>
   </div>
 </template>
 
@@ -126,18 +115,14 @@ const applying = ref(false)
 const popoverVisible = ref(false)
 const searchQuery = ref("")
 
-// Popover width — Element Plus accepts either a number (px) or a
-// CSS string.  ``useDensity().isCompact`` is the canonical mobile
-// signal (it already owns the resize listener + override prefs); a
-// hand-rolled ``window.innerWidth`` watcher here would duplicate
-// that and skip the density override the user might've pinned.
+// Mobile → bottom drawer (full-bleed sheet).  Desktop → right-side
+// drawer (sized to fit common widths without dominating the screen).
+// Drawer position is viewport-relative, so it stays correct under
+// CSS ``zoom`` on ``<html>`` regardless of zoom level.
 const { isCompact } = useDensity()
-const popoverWidth = computed(() =>
-  // Almost-full-bleed (minus 12px on each side) when compact so the
-  // multi-pane layout has room to breathe; desktop keeps the
-  // original 560px that anchors neatly under the pill.
-  isCompact.value ? "calc(100vw - 24px)" : 560,
-)
+
+const drawerDirection = computed(() => (isCompact.value ? "btt" : "rtl"))
+const drawerSize = computed(() => (isCompact.value ? "85%" : "min(640px, 90vw)"))
 
 const draftProvider = ref("")
 const draftPreset = ref("")
@@ -527,16 +512,6 @@ onUnmounted(() => {
   border-color: var(--el-color-primary, #5a8cc8);
   color: var(--el-color-primary, #5a8cc8);
   font-weight: 500;
-}
-
-.model-switcher-popover {
-  padding: 0.75rem !important;
-  /* Hard cap so even if a parent passes a wider ``:width`` prop the
-     popover still respects the visual viewport.  ``min-width: 0``
-     overrides Element Plus's default 150px to allow narrow viewports
-     to control the width down to ``calc(100vw - 24px)``. */
-  max-width: calc(100vw - 16px) !important;
-  min-width: 0 !important;
 }
 
 /* Provider strip: column rail on desktop, horizontal chip strip on
