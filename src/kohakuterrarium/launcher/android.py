@@ -38,7 +38,7 @@ import time
 from pathlib import Path
 
 from kohakuterrarium.utils.logging import get_logger
-from kohakuterrarium.utils.mobile_sandbox import ensure_extracted
+from kohakuterrarium.utils.mobile_sandbox import default_workdir, ensure_extracted
 
 logger = get_logger(__name__)
 
@@ -56,6 +56,20 @@ def main() -> int:
     # failed (couldn't find assets, permission issue), we may
     # still recover here if the operator sideloaded binaries.
     ensure_extracted()
+
+    # Briefcase boots Python with ``cwd = /`` on Android.  The app
+    # has no permission to read or write there, so every relative-
+    # path tool call (read, write, bash, glob, …) would
+    # PermissionError before this chdir.  Defense in depth — the
+    # executor's own default also resolves through ``default_workdir``,
+    # but subprocess children (busybox, future bundled binaries)
+    # inherit our cwd, so we set it explicitly here too.
+    try:
+        os.chdir(default_workdir())
+    except OSError as exc:  # pragma: no cover - defensive
+        logger.warning(
+            "android launcher: chdir to default workdir failed", error=str(exc)
+        )
 
     try:
         return _serve_and_report()

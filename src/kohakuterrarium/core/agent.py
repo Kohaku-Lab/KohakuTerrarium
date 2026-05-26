@@ -56,6 +56,7 @@ from kohakuterrarium.session.agent_attach import (
 )
 from kohakuterrarium.session.output import SessionOutput
 from kohakuterrarium.utils.logging import get_logger
+from kohakuterrarium.utils.mobile_sandbox import default_workdir
 
 if TYPE_CHECKING:
     from kohakuterrarium.core.environment import Environment
@@ -450,7 +451,7 @@ class Agent(
         """Load plugins, register pluggable commands, fire on_agent_start."""
         if not self.plugins:
             return
-        wd = Path(self.executor._working_dir) if self.executor else Path.cwd()
+        wd = Path(self.executor._working_dir) if self.executor else default_workdir()
         ctx = PluginContext(
             agent_name=self.config.name,
             working_dir=wd,

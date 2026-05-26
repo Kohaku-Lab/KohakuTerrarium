@@ -314,10 +314,49 @@ def _is_executable(path: Path) -> bool:
         return False
 
 
+def default_workdir() -> Path:
+    """Process-wide default working directory for newly-spawned agents.
+
+    The historical default was ``Path.cwd()`` which works fine on
+    desktop (the operator launched ``kt run`` from a directory and
+    expects that directory to be the agent's workspace) but is
+    broken on Android — Briefcase boots Python with ``cwd = /``,
+    which the app has no permission to read or write.  Tools that
+    resolve relative paths against cwd then fail with
+    ``PermissionError`` on their first invocation.
+
+    On the mobile profile this returns ``<KT_CONFIG_DIR>/work/``,
+    which is the app's private files dir on Android (writable
+    without permissions, visible to the user via the Files app
+    under the KohakuTerrarium namespace).  The directory is created
+    lazily on first call so callers don't have to.
+
+    On any other platform — and as a fallback when the mobile
+    profile is set but ``KT_CONFIG_DIR`` is not — this returns
+    ``Path.cwd()`` so the desktop behaviour is unchanged.
+    """
+    if is_mobile_profile():
+        config_root = os.environ.get("KT_CONFIG_DIR", "").strip()
+        if config_root:
+            workdir = Path(config_root) / "work"
+            try:
+                workdir.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:  # pragma: no cover - defensive
+                logger.warning(
+                    "default_workdir mkdir failed; falling back to cwd",
+                    path=str(workdir),
+                    error=str(exc),
+                )
+                return Path.cwd()
+            return workdir
+    return Path.cwd()
+
+
 __all__ = [
     "is_mobile_profile",
     "sandbox_bin_dir",
     "sandbox_binary",
     "bundled_sh_command",
+    "default_workdir",
     "ensure_extracted",
 ]

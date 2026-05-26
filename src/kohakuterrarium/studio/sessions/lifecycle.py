@@ -36,6 +36,7 @@ from kohakuterrarium.terrarium import TerrariumService
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import get_logger
+from kohakuterrarium.utils.mobile_sandbox import default_workdir
 
 logger = get_logger(__name__)
 
@@ -46,8 +47,7 @@ _meta: dict[str, dict[str, Any]] = {}
 # Per-session attached SessionStore (keyed by session_id == graph_id).
 _session_stores: dict[str, SessionStore] = {}
 
-# Legacy private aliases — tests reach in via these names; kept as thin
-# delegators so the extraction into ``cluster_fold`` is a no-op for callers.
+# Legacy private aliases — tests reach in via these names.
 _cluster_groups = cluster_fold.cluster_groups
 _sid_to_primary = cluster_fold.sid_to_primary
 _fold_session_listings = cluster_fold.fold_session_listings
@@ -152,7 +152,7 @@ async def start_creature(
         _meta[sid] = {
             "name": creature.name,
             "config_path": config_path or "",
-            "pwd": pwd or os.getcwd(),
+            "pwd": pwd or str(default_workdir()),
             "created_at": _now_iso(),
         }
         logger.info("Creature session started", session_id=sid, creature_id=cid)
@@ -381,7 +381,7 @@ async def start_terrarium(
             session_id=sid,
             config_type="terrarium",
             config_path=config_path or "",
-            pwd=pwd or os.getcwd(),
+            pwd=pwd or str(default_workdir()),
             agents=[c.name for c in cfg.creatures] + (["root"] if cfg.root else []),
             terrarium_name=cfg.name,
             terrarium_channels=[
@@ -410,7 +410,7 @@ async def start_terrarium(
     _meta[sid] = {
         "name": (name.strip() if name and name.strip() else cfg.name),
         "config_path": config_path or "",
-        "pwd": pwd or os.getcwd(),
+        "pwd": pwd or str(default_workdir()),
         "created_at": _now_iso(),
         "has_root": cfg.root is not None,
     }

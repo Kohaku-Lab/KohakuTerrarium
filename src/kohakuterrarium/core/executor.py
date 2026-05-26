@@ -21,6 +21,7 @@ from kohakuterrarium.core.tool_output import normalize_tool_output
 from kohakuterrarium.modules.tool.base import BaseTool, Tool, ToolContext
 from kohakuterrarium.parsing.events import ToolCallEvent
 from kohakuterrarium.utils.logging import get_logger
+from kohakuterrarium.utils.mobile_sandbox import default_workdir
 
 logger = get_logger(__name__)
 
@@ -83,7 +84,12 @@ class Executor:
         self._agent: Any = None  # Agent instance, set during init
         self._session: Any = None  # Session, set by agent during init
         self._environment: Any = None  # Environment, set by agent during init
-        self._working_dir: Path = Path.cwd()
+        # Default to ``Path.cwd()`` on desktop and to the writable
+        # app-private dir on Android (mobile profile). Without this
+        # override, Briefcase boots Python with ``cwd = /`` and every
+        # relative-path tool call fails with PermissionError on its
+        # first invocation. See ``utils.mobile_sandbox.default_workdir``.
+        self._working_dir: Path = default_workdir()
         self._memory_path: Path | None = None
         self._file_read_state: Any = None  # FileReadState, set by agent
         self._path_guard: Any = None  # PathBoundaryGuard, set by agent

@@ -117,6 +117,65 @@ class TestSandboxBinary:
         assert mobile_sandbox.sandbox_binary("sh") is None
 
 
+class TestDefaultWorkdir:
+    def test_off_mobile_returns_cwd(self, monkeypatch, tmp_path):
+        # Without ``KT_PROFILE=mobile`` we keep the historical
+        # ``Path.cwd()`` behaviour — desktop operators launched
+        # ``kt run`` from a directory and expect that directory to
+        # be the agent's workspace.
+        monkeypatch.chdir(tmp_path)
+        assert mobile_sandbox.default_workdir() == Path(tmp_path).resolve()
+
+    def test_mobile_returns_config_work_subdir(self, monkeypatch, tmp_path):
+        # On mobile, ``cwd`` is ``/`` (Briefcase boots Python there)
+        # and unwritable.  The helper redirects to
+        # ``<KT_CONFIG_DIR>/work/`` which Java guarantees is writable.
+        monkeypatch.setenv("KT_PROFILE", "mobile")
+        monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path))
+        out = mobile_sandbox.default_workdir()
+        assert out == tmp_path / "work"
+        # And the helper creates it so callers can write immediately.
+        assert out.is_dir()
+
+    def test_mobile_creates_workdir_lazily(self, monkeypatch, tmp_path):
+        # The dir doesn't exist before the first call.
+        monkeypatch.setenv("KT_PROFILE", "mobile")
+        monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path))
+        target = tmp_path / "work"
+        assert not target.exists()
+        mobile_sandbox.default_workdir()
+        assert target.is_dir()
+
+    def test_mobile_without_config_dir_falls_back(self, monkeypatch, tmp_path):
+        # Defensive: mobile profile is set but Java forgot to populate
+        # ``KT_CONFIG_DIR``.  Falls back to ``Path.cwd()`` rather than
+        # raising — the executor's downstream consumer at least sees
+        # a Path object.
+        monkeypatch.setenv("KT_PROFILE", "mobile")
+        monkeypatch.chdir(tmp_path)
+        assert mobile_sandbox.default_workdir() == Path(tmp_path).resolve()
+
+    def test_mobile_mkdir_failure_falls_back(self, monkeypatch, tmp_path):
+        # If ``<config>/work`` can't be created (e.g. permission
+        # flap), the helper logs + falls back to cwd so the caller
+        # never gets a path it can't use.
+        monkeypatch.setenv("KT_PROFILE", "mobile")
+        monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path))
+
+        original_mkdir = Path.mkdir
+
+        def _boom(self, *args, **kwargs):
+            if self == tmp_path / "work":
+                raise OSError("mkdir refused")
+            return original_mkdir(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "mkdir", _boom)
+        monkeypatch.chdir(tmp_path)
+        out = mobile_sandbox.default_workdir()
+        # Fell back to cwd.
+        assert out == Path(tmp_path).resolve()
+
+
 class TestBundledShCommand:
     def test_returns_argv_when_busybox_present(self, monkeypatch, tmp_path):
         monkeypatch.setenv("KT_SANDBOX_BIN_DIR", str(tmp_path))

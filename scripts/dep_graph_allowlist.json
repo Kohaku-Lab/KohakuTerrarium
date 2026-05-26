@@ -1,13 +1,13 @@
 [
   {
     "file": "src/kohakuterrarium/launcher/android.py",
-    "line": 78,
+    "line": 92,
     "function": "_serve_and_report",
     "reason": "Lazy import of api.app.create_app — the Android launcher loads via JNI before the framework's heavy api/serving graph needs to be in memory.  Lazy import means an import-time failure surfaces in the foreground-service log (visible via adb logcat) instead of silently killing the Python interpreter at module load."
   },
   {
     "file": "src/kohakuterrarium/launcher/android.py",
-    "line": 79,
+    "line": 93,
     "function": "_serve_and_report",
     "reason": "Lazy import of serving.web.start_uvicorn_with_port_fallback — paired with the create_app lazy import above; both share the same JNI-cold-start rationale."
   },

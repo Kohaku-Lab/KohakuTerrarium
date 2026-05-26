@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING
 
 from kohakuterrarium.utils.file_guard import FileReadState, PathBoundaryGuard
 from kohakuterrarium.utils.logging import get_logger
+from kohakuterrarium.utils.mobile_sandbox import default_workdir
 
 if TYPE_CHECKING:
     from kohakuterrarium.core.agent import Agent
@@ -56,7 +57,7 @@ class WorkspaceController:
         executor = getattr(self._agent, "executor", None)
         wd = getattr(executor, "_working_dir", None) if executor else None
         if wd is None:
-            return str(Path.cwd())
+            return str(default_workdir())
         return str(Path(wd).resolve())
 
     # ── Mutate ──────────────────────────────────────────────────
