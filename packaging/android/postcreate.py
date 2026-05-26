@@ -98,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
 
     rc = 0
     rc |= copy_java_overrides(args.template, gen)
+    rc |= copy_sandbox_jni_libs(args.sandbox, gen, args.skip_sandbox_check)
     rc |= copy_sandbox_assets(args.sandbox, gen, args.skip_sandbox_check)
     rc |= patch_android_requirements(gen)
     rc |= patch_launcher_activity(gen)
@@ -128,9 +129,75 @@ def copy_java_overrides(template_dir: Path, generated: Path) -> int:
     return 0
 
 
+def copy_sandbox_jni_libs(sandbox_dir: Path, generated: Path, skip_check: bool) -> int:
+    """Copy ``packaging/android/bin/<abi>/lib*.so`` into
+    ``app/src/main/jniLibs/<abi>/lib*.so``.
+
+    Files placed under ``jniLibs/<abi>/`` are recognised by the
+    Android Gradle plugin as native libraries.  At install time,
+    Android's PackageManager extracts the matching-ABI subset
+    into ``ApplicationInfo.nativeLibraryDir`` — the ONLY location
+    in the app's installation that escapes Android 10+'s W^X /
+    noexec policy.  Anything else (e.g. ``assets/`` extracted to
+    ``/data/data/<pkg>/files/``) is rejected by ``execve()`` even
+    after ``chmod +x``.
+
+    Files NOT matching ``lib*.so`` are silently ignored — the
+    Gradle plugin filters them out anyway, and we keep the
+    ``copy_sandbox_assets`` pass alongside so the legacy asset
+    extraction path still has its inputs.
+
+    Idempotent — re-running on an already-populated tree replaces
+    files with the current source.
+    """
+    if not sandbox_dir.is_dir():
+        msg = f"sandbox bin dir missing: {sandbox_dir}"
+        if skip_check:
+            print(f"warning: {msg} (skipping per --skip-sandbox-check)")
+            return 0
+        print(
+            f"error: {msg}.  Run "
+            "``python packaging/android/fetch_sandbox.py`` first.",
+            file=sys.stderr,
+        )
+        return 1
+
+    dst_root = generated / "src" / "main" / "jniLibs"
+    if dst_root.exists():
+        shutil.rmtree(dst_root)
+    dst_root.mkdir(parents=True, exist_ok=True)
+
+    copied = 0
+    for abi_dir in sandbox_dir.iterdir():
+        if not abi_dir.is_dir():
+            continue
+        for src in abi_dir.iterdir():
+            if not src.is_file():
+                continue
+            # Gradle only ships entries that look like native libs.
+            # ``lib<name>.so`` is the canonical form; anything else
+            # is silently dropped at apk-package time and would only
+            # waste build cache.
+            if not (src.name.startswith("lib") and src.name.endswith(".so")):
+                continue
+            dst = dst_root / abi_dir.name / src.name
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            copied += 1
+    print(f"  jniLibs  {copied} file(s) -> {dst_root.relative_to(generated)}")
+    return 0
+
+
 def copy_sandbox_assets(sandbox_dir: Path, generated: Path, skip_check: bool) -> int:
     """Copy ``packaging/android/bin/<abi>/*`` into
-    ``app/src/main/assets/sandbox/bin/<abi>/*``."""
+    ``app/src/main/assets/sandbox/bin/<abi>/*``.
+
+    Kept as a fallback alongside :func:`copy_sandbox_jni_libs` for
+    non-Android mobile-profile testing (where the binaries are
+    sideloaded from assets rather than the native-library dir),
+    and so ``ensure_extracted`` still has a known asset source
+    when Java extraction is skipped.
+    """
     if not sandbox_dir.is_dir():
         msg = f"sandbox bin dir missing: {sandbox_dir}"
         if skip_check:
@@ -356,17 +423,27 @@ _ANDROID_URL_REFS: dict[str, dict[str, object]] = {
     "primp": {
         # primp is a transitive dep via ddgs (DuckDuckGo search
         # tool).  Wraps reqwest with rustls-tls (no system OpenSSL).
-        # Upstream's manylinux releases on PyPI carry ``cp38-abi3``,
-        # but the v1.3.0 source-tree Cargo features pin
-        # ``pyo3/abi3-py310`` — so our cross-built Android wheel
-        # ships as ``cp310-abi3``.  Verified against the v2026.05.24
-        # release artifacts.
+        # Upstream's source-tree Cargo features pin
+        # ``pyo3/abi3-py310`` so the unpatched build emits a
+        # ``cp310-abi3`` wheel — but the resulting .so references
+        # ``_Py_FalseStruct``, a non-stable-ABI CPython internal
+        # symbol that the Android runtime's libpython.so exports
+        # under Python 3.13 but NOT under the abi3 stable-API
+        # surface.  dlopen on the device fails with
+        #     cannot locate symbol "_Py_FalseStruct"
+        # Our cross-build now strips the ``abi3-py310`` Cargo
+        # feature + the ``py-limited-api`` pyproject setting before
+        # maturin runs (see android-dep-collection's
+        # ``build.py:_strip_abi3_features``), so the wheel emits
+        # as ``cp313-cp313`` and links against the same libpython
+        # that exposes ``_Py_FalseStruct``.  Verified against the
+        # v2026.05.26 release artifacts.
         "wheel_basename": "primp",
         "release_base": (
             "https://github.com/Kohaku-Lab/android-dep-collection/releases/download/"
-            "v2026.05.24"
+            "v2026.05.26"
         ),
-        "filename": ("primp-{version}-cp310-abi3-android_24_{abi_tag}.whl"),
+        "filename": ("primp-{version}-cp313-cp313-android_24_{abi_tag}.whl"),
         "pinned_version": "1.3.0",
     },
 }

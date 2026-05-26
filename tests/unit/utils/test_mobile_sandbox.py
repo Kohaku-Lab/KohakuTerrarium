@@ -182,14 +182,60 @@ class TestBundledShCommand:
         (tmp_path / "busybox").write_bytes(b"#!fake\n")
         argv = mobile_sandbox.bundled_sh_command("echo hi")
         assert argv is not None
-        # Shape: ``[<bin>/busybox, "sh", "-c", "echo hi"]``
-        assert len(argv) == 4
-        assert argv[0].endswith("busybox")
-        assert argv[1:] == ["sh", "-c", "echo hi"]
+        # New shape: argv[0] is the LITERAL string "busybox" — not a
+        # path.  The caller passes the actual executable path via
+        # ``subprocess.Popen(executable=…)`` from
+        # :func:`bundled_sh_exe`.  This split is required on Android
+        # where the on-disk file is ``libbusybox.so`` but busybox's
+        # multicall dispatcher needs ``argv[0]="busybox"`` to find
+        # its own applet table.
+        assert argv == ["busybox", "sh", "-c", "echo hi"]
 
     def test_returns_none_without_busybox(self, monkeypatch, tmp_path):
         monkeypatch.setenv("KT_SANDBOX_BIN_DIR", str(tmp_path))
         assert mobile_sandbox.bundled_sh_command("echo hi") is None
+
+
+class TestBundledShExe:
+    def test_returns_path_when_busybox_present(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("KT_SANDBOX_BIN_DIR", str(tmp_path))
+        (tmp_path / "busybox").write_bytes(b"#!fake\n")
+        exe = mobile_sandbox.bundled_sh_exe()
+        assert exe == tmp_path / "busybox"
+
+    def test_prefers_libbusybox_so_when_both_present(self, monkeypatch, tmp_path):
+        # Native-library layout (Android) wins over the legacy
+        # ``busybox`` name when both are populated — the
+        # ``libbusybox.so`` form is the only one that survives
+        # Android's W^X policy because PackageManager extracts it
+        # into the execute-allowed nativeLibraryDir.
+        monkeypatch.setenv("KT_SANDBOX_BIN_DIR", str(tmp_path))
+        (tmp_path / "libbusybox.so").write_bytes(b"#!fake-native-lib\n")
+        (tmp_path / "busybox").write_bytes(b"#!fake-legacy\n")
+        assert mobile_sandbox.bundled_sh_exe() == tmp_path / "libbusybox.so"
+
+    def test_falls_back_to_legacy_busybox(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("KT_SANDBOX_BIN_DIR", str(tmp_path))
+        (tmp_path / "busybox").write_bytes(b"#!fake\n")
+        assert mobile_sandbox.bundled_sh_exe() == tmp_path / "busybox"
+
+    def test_returns_none_when_neither_present(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("KT_SANDBOX_BIN_DIR", str(tmp_path))
+        assert mobile_sandbox.bundled_sh_exe() is None
+
+
+class TestSandboxBinaryNativeLibLayout:
+    def test_resolves_libbusybox_so_for_every_applet(self, monkeypatch, tmp_path):
+        # Pin that every shell-applet short name finds the bundled
+        # ``libbusybox.so`` — busybox dispatches via argv[0] at
+        # runtime so the same multicall file backs every name.
+        monkeypatch.setenv("KT_SANDBOX_BIN_DIR", str(tmp_path))
+        (tmp_path / "libbusybox.so").write_bytes(b"#!fake-native-lib\n")
+        for name in ("sh", "bash", "grep", "find", "sed", "awk", "curl"):
+            resolved = mobile_sandbox.sandbox_binary(name)
+            assert resolved == tmp_path / "libbusybox.so", (
+                f"{name!r} should resolve to bundled libbusybox.so; " f"got {resolved}"
+            )
 
 
 class TestEnsureExtracted:

@@ -45,8 +45,19 @@ abis = ["arm64-v8a", "armeabi-v7a", "x86_64"]
 # busybox.net only ship x86_64; for cross-arm coverage we stick to
 # 1.31.0.  CVE follow-ups: this release predates 2024 — should be
 # rebuilt-from-source in 1.5.1 once the build infra lands.
+#
+# The output filename is ``libbusybox.so`` rather than ``busybox``
+# so the binary can ship in the APK's ``jniLibs/<abi>/`` slot —
+# Android's PackageManager extracts ``lib*.so`` files in that slot
+# into ``ApplicationInfo.nativeLibraryDir``, which is the only
+# directory in an app's installation that survives Android 10+'s
+# W^X / noexec policy.  Binaries copied to any other writable path
+# under ``/data/data/<pkg>/`` get rejected by ``execve()`` with
+# EACCES regardless of their +x bit.  The bash tool overrides
+# argv[0] back to ``busybox`` at exec time so busybox's multicall
+# dispatcher still recognises its own applet name.
 [[binaries]]
-name = "busybox"
+name = "libbusybox.so"
 version = "1.31.0"
 
   [[binaries.artifacts]]

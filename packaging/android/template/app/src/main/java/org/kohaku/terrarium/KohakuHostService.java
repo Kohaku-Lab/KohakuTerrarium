@@ -242,22 +242,44 @@ public class KohakuHostService extends Service {
                 LAUNCHER_RUNNING = true;
             }
             try {
-                // Extract bundled sandbox before Python sees the
-                // env var pointing at it — Python may try to use
-                // ``busybox`` on the first bash-tool call.
-                try {
-                    extractSandbox();
-                } catch (IOException e) {
-                    Log.e(TAG, "sandbox extraction failed; bash tool unavailable", e);
+                // Native libraries packaged under ``jniLibs/<abi>/`` get
+                // extracted by Android's PackageManager into
+                // ``ApplicationInfo.nativeLibraryDir`` at install time
+                // — the ONLY directory in the app's installation that
+                // escapes Android 10+'s W^X / noexec policy on data
+                // dirs.  ``libbusybox.so`` lives there; the Python
+                // bash tool reads ``KT_SANDBOX_BIN_DIR`` and invokes
+                // it via ``subprocess.Popen(executable=…)`` with
+                // ``argv[0]="busybox"`` so busybox's multicall
+                // dispatcher still recognises its own applet name.
+                //
+                // The legacy ``extractSandbox()`` (copy from assets
+                // → configDir/bin/, chmod +x) is kept as a fallback
+                // for dev / emulator installs where the jniLibs
+                // path is empty, but its output is no longer the
+                // primary lookup target — Python's
+                // ``utils.mobile_sandbox.sandbox_binary`` probes
+                // ``libbusybox.so`` first and ``busybox`` second.
+                String nativeLibDir = getApplicationInfo().nativeLibraryDir;
+                File jniBusybox = new File(nativeLibDir, "libbusybox.so");
+                String sandboxBinDir = jniBusybox.isFile()
+                    ? nativeLibDir
+                    : new File(configDir, "bin").getAbsolutePath();
+                if (!jniBusybox.isFile()) {
+                    Log.w(TAG,
+                        "libbusybox.so missing from nativeLibraryDir " + nativeLibDir
+                        + "; falling back to legacy asset extraction (bash tool "
+                        + "will fail with execve EACCES on Android 10+ data dirs)");
+                    try {
+                        extractSandbox();
+                    } catch (IOException e) {
+                        Log.e(TAG, "sandbox extraction failed; bash tool unavailable", e);
+                    }
                 }
                 try {
                     Os.setenv("KT_PROFILE", "mobile", true);
                     Os.setenv("KT_CONFIG_DIR", configDir.getAbsolutePath(), true);
-                    Os.setenv(
-                        "KT_SANDBOX_BIN_DIR",
-                        new File(configDir, "bin").getAbsolutePath(),
-                        true
-                    );
+                    Os.setenv("KT_SANDBOX_BIN_DIR", sandboxBinDir, true);
                     Os.setenv("KT_PORT_FILE", portFile.getAbsolutePath(), true);
                     Os.setenv("KT_SERVE_PORT", "8001", true);
                 } catch (Throwable t) {

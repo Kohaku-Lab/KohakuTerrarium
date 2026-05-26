@@ -532,13 +532,17 @@ class TestPatchAndroidRequirements:
             " ; platform_machine == 'x86_64'"
         ) in text
 
-    def test_rewrites_primp_with_abi3_tag(self, tmp_path, postcreate, monkeypatch):
-        # primp ships as ABI3 — the URL filename must use an abi3
-        # tag, NOT ``cp313-cp313``.  v1.3.0's source-tree Cargo
-        # pins ``pyo3/abi3-py310`` so our cross-built wheel emits
-        # ``cp310-abi3`` (PyPI's manylinux releases use cp38-abi3,
-        # but that's a different Cargo features set on a separate
-        # CI path).  Verified against the v2026.05.24 release.
+    def test_rewrites_primp_with_cp313_tag(self, tmp_path, postcreate, monkeypatch):
+        # primp's URL filename must be the per-CPython ``cp313-cp313``
+        # tag, NOT abi3.  The earlier release shipped a ``cp310-abi3``
+        # wheel built with ``pyo3/abi3-py310`` enabled — that wheel
+        # references ``_Py_FalseStruct`` (a non-stable-ABI CPython
+        # internal) and fails ``dlopen`` on the device with
+        #     cannot locate symbol "_Py_FalseStruct"
+        # The cross-build now strips the abi3 feature before maturin
+        # runs so the wheel emits as ``cp313-cp313`` — linking
+        # against the same libpython.so the runtime loads, which
+        # exposes the symbol.  Verified against v2026.05.26.
         gen = _build_fake_generated(tmp_path)
         fake_repo = tmp_path / "fake_repo"
         fake_repo.mkdir()
@@ -551,13 +555,16 @@ class TestPatchAndroidRequirements:
         postcreate.patch_android_requirements(gen)
         text = (gen / "requirements.txt").read_text(encoding="utf-8")
         assert "primp>=1.2.3" not in text
-        assert "primp-1.3.0-cp310-abi3-android_24_arm64_v8a.whl" in text
-        assert "primp-1.3.0-cp310-abi3-android_24_x86_64.whl" in text
-        # No mismatched python/abi tags should appear on primp lines.
+        assert "primp-1.3.0-cp313-cp313-android_24_arm64_v8a.whl" in text
+        assert "primp-1.3.0-cp313-cp313-android_24_x86_64.whl" in text
+        # The release tag bumped to v2026.05.26 alongside the
+        # disable-abi3 rebuild — pin so a future stray pointer to
+        # the broken ``v2026.05.24`` wheel is caught here.
+        assert "v2026.05.26" in text
+        # No abi3-tag artefacts should appear on primp lines.
         primp_lines = [line for line in text.splitlines() if "primp-1.3.0" in line]
         for line in primp_lines:
-            assert "cp313-cp313" not in line
-            assert "cp38-abi3" not in line
+            assert "abi3" not in line
         # ddgs shell preserved (pure-Python).
         assert "ddgs>=9.0.0" in text
 

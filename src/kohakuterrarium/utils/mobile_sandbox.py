@@ -34,27 +34,38 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-# Canonical short-name → bundled binary basename mapping.  The
-# fetcher script (``packaging/android/fetch_sandbox.py``) lays down
-# binaries under these exact names so runtime resolution doesn't
-# need to know upstream filenames.
+# Canonical short-name → ordered candidate bundled-filename list.
+# The bundled busybox provides ``sh``, ``grep``, ``find``, ``sed``,
+# ``awk``, ``curl``, and ~290 other commands as a single multicall
+# binary.  The framework's standalone ``grep`` / ``glob`` tools are
+# pure-Python (no subprocess), so we don't need ripgrep / fd as
+# separate binaries.
 #
-# Only ``busybox`` ships — it provides ``sh``, ``grep``, ``find``,
-# ``sed``, ``awk``, ``curl``, and ~290 other commands as a single
-# multicall binary.  The framework's standalone ``grep`` / ``glob``
-# tools are pure-Python (no subprocess), so we don't need
-# ripgrep / fd as separate binaries.  ``kt install`` works via
-# pip without git on mobile; git-URL installs are documented as
-# a 1.5.1 add via pygit2.
-_CANONICAL_NAMES: dict[str, str] = {
-    "sh": "busybox",
-    "bash": "busybox",  # busybox sh is bash-compatible enough for the bash tool
-    "busybox": "busybox",
-    "curl": "busybox",  # busybox includes wget/curl applet
-    "grep": "busybox",
-    "find": "busybox",
-    "sed": "busybox",
-    "awk": "busybox",
+# Two acceptable bundled names:
+#
+# - ``libbusybox.so`` — when shipped as a native library (the
+#   ``jniLibs/<abi>/libbusybox.so`` slot extracted by Android's
+#   PackageManager into ``ApplicationInfo.nativeLibraryDir``).
+#   This is the ONLY layout that survives Android 10+'s W^X /
+#   noexec policy on app data dirs — executables anywhere else
+#   under ``/data/data/<pkg>/`` are rejected by ``execve()``.
+# - ``busybox`` — legacy / desktop-emulator name, kept for backward
+#   compatibility with dev environments that sideload a binary
+#   into ``KT_SANDBOX_BIN_DIR`` without the ``lib*.so`` prefix.
+#
+# Resolution probes in order: first match wins.  When the bundled
+# name is ``libbusybox.so`` callers can detect that via
+# :func:`sandbox_binary` returning a path whose name ends in
+# ``.so`` and override argv[0] with the canonical applet name.
+_CANONICAL_NAMES: dict[str, tuple[str, ...]] = {
+    "sh": ("libbusybox.so", "busybox"),
+    "bash": ("libbusybox.so", "busybox"),
+    "busybox": ("libbusybox.so", "busybox"),
+    "curl": ("libbusybox.so", "busybox"),
+    "grep": ("libbusybox.so", "busybox"),
+    "find": ("libbusybox.so", "busybox"),
+    "sed": ("libbusybox.so", "busybox"),
+    "awk": ("libbusybox.so", "busybox"),
 }
 
 
@@ -103,35 +114,56 @@ def sandbox_bin_dir() -> Path | None:
 def sandbox_binary(name: str) -> Path | None:
     """Resolve a bundled binary by canonical short name.
 
-    Returns ``None`` when the bin dir doesn't exist or the binary
-    isn't present.  Callers should distinguish between "no sandbox
+    Probes the candidates from :data:`_CANONICAL_NAMES` in order
+    (``libbusybox.so`` first — the Android native-library layout —
+    then plain ``busybox``).  Returns ``None`` when no candidate
+    file exists in the bin dir, or when the bin dir itself
+    doesn't exist.  Callers should distinguish between "no sandbox
     on this host" (mobile profile off) and "sandbox present but
     this tool missing" by checking :func:`is_mobile_profile` first.
     """
-    canonical = _CANONICAL_NAMES.get(name)
-    if canonical is None:
+    candidates = _CANONICAL_NAMES.get(name)
+    if not candidates:
         return None
     bin_dir = sandbox_bin_dir()
     if bin_dir is None:
         return None
-    candidate = bin_dir / canonical
-    return candidate if candidate.is_file() else None
+    for candidate in candidates:
+        target = bin_dir / candidate
+        if target.is_file():
+            return target
+    return None
 
 
 def bundled_sh_command(command: str) -> list[str] | None:
-    """Return the argv to run ``command`` via the bundled
-    ``busybox sh``.
+    """Return the argv to run ``command`` via the bundled busybox.
 
     Returns ``None`` when there's no bundled busybox — caller falls
     back to a clear error.  The shape is
-    ``[<bin>/busybox, "sh", "-c", <command>]`` which matches how
-    busybox's multicall binary dispatches to its built-in ``sh``
-    applet.
+    ``["busybox", "sh", "-c", <command>]`` (argv[0] always reads as
+    the canonical applet name ``busybox``); the actual executable
+    path comes from :func:`bundled_sh_exe` so callers running on
+    Android can pass that to :data:`subprocess.Popen` via the
+    ``executable=`` kwarg — required when the bundled binary is
+    named ``libbusybox.so`` (the native-library layout), since
+    busybox's multicall dispatch can't recognise ``libbusybox.so``
+    as its own applet name.
     """
-    busybox = sandbox_binary("sh")
-    if busybox is None:
+    if bundled_sh_exe() is None:
         return None
-    return [str(busybox), "sh", "-c", command]
+    return ["busybox", "sh", "-c", command]
+
+
+def bundled_sh_exe() -> Path | None:
+    """Path to the bundled busybox executable.
+
+    Companion to :func:`bundled_sh_command` — that returns the argv
+    with a forced ``argv[0] = "busybox"``, this returns the actual
+    file to ``execve()``.  Pass to ``subprocess.Popen(executable=…)``
+    so the kernel runs the right binary while busybox sees the
+    multicall name it expects.
+    """
+    return sandbox_binary("sh")
 
 
 def ensure_extracted(
@@ -357,6 +389,7 @@ __all__ = [
     "sandbox_bin_dir",
     "sandbox_binary",
     "bundled_sh_command",
+    "bundled_sh_exe",
     "default_workdir",
     "ensure_extracted",
 ]
