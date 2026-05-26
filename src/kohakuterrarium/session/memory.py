@@ -416,6 +416,46 @@ def _block_metadata(block: Block, include_content: bool = False) -> dict[str, An
     return meta
 
 
+def _content_to_text(content: Any) -> str:
+    """Flatten an event's ``content`` to a single searchable string.
+
+    Multimodal events store ``content`` as a list of parts
+    (``[{"type":"text","text":"..."}, {"type":"image_url",...}]``).
+    Older single-modal events use a bare string.  Tool-result events
+    occasionally surface a dict.  This helper normalises all three so
+    downstream FTS / embedding callers can always ``.strip()``,
+    ``.split()``, slice, etc.
+
+    Without this, ``user_input`` events with multimodal content (an
+    image attached to a message) blew up the entire memory-search
+    pipeline with ``AttributeError: 'list' object has no attribute
+    'strip'`` because we tried to call ``.strip()`` directly on the
+    list, taking down search across the whole session.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        chunks: list[str] = []
+        for part in content:
+            if isinstance(part, str):
+                chunks.append(part)
+            elif isinstance(part, dict):
+                if isinstance(part.get("text"), str):
+                    chunks.append(part["text"])
+                elif isinstance(part.get("content"), str):
+                    chunks.append(part["content"])
+                else:
+                    kind = part.get("type") or ""
+                    if kind in ("image_url", "image"):
+                        chunks.append("[image]")
+                    elif kind == "file":
+                        chunks.append("[file]")
+        return " ".join(c for c in chunks if c)
+    if isinstance(content, dict):
+        return _content_to_text([content])
+    return "" if content is None else str(content)
+
+
 def _extract_blocks(
     agent: str, events: list[dict], event_offset: int = 0
 ) -> list[Block]:
@@ -438,7 +478,7 @@ def _extract_blocks(
             round_num += 1
             block_num = 0
             in_round = True
-            content = evt.get("content", "")
+            content = _content_to_text(evt.get("content", ""))
             if content.strip():
                 blocks.append(
                     Block(
@@ -457,7 +497,7 @@ def _extract_blocks(
             block_num = 0
             in_round = True
             channel = evt.get("channel", "")
-            content = evt.get("content", "")
+            content = _content_to_text(evt.get("content", ""))
             label = f"[trigger:{channel}] {content}" if channel else content
             if label.strip():
                 blocks.append(
@@ -478,7 +518,7 @@ def _extract_blocks(
             # Index the same way; FTS treats consecutive chunks as
             # separate blocks (callers can reassemble via event_id
             # ordering if needed).
-            content = evt.get("content", "")
+            content = _content_to_text(evt.get("content", ""))
             # Split long text on double newlines for finer-grained blocks
             paragraphs = content.split("\n\n") if len(content) > 300 else [content]
             for para in paragraphs:
@@ -519,8 +559,8 @@ def _extract_blocks(
 
         elif etype == "tool_result" and in_round:
             name = evt.get("name", "")
-            output = evt.get("output", "")
-            error = evt.get("error", "")
+            output = _content_to_text(evt.get("output", ""))
+            error = _content_to_text(evt.get("error", ""))
             content = f"[result:{name}] {error or output}"
             if content.strip() and len(content) > 20:
                 blocks.append(

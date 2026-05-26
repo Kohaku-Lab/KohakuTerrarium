@@ -10,6 +10,7 @@ from kohakuterrarium.session.memory import (
     SearchResult,
     SessionMemory,
     _block_metadata,
+    _content_to_text,
     _extract_blocks,
 )
 
@@ -47,6 +48,88 @@ class TestBlockMetadata:
 
 
 # ── _extract_blocks ──────────────────────────────────────────────
+
+
+class TestContentToText:
+    """Regression coverage for the 500 on memory/search when an event's
+    ``content`` is a multimodal list and a caller naively calls
+    ``.strip()`` / ``.split()`` on it."""
+
+    def test_string_passthrough(self):
+        assert _content_to_text("hello") == "hello"
+
+    def test_empty_string(self):
+        assert _content_to_text("") == ""
+
+    def test_none_returns_empty(self):
+        assert _content_to_text(None) == ""
+
+    def test_list_of_text_parts(self):
+        parts = [
+            {"type": "text", "text": "first"},
+            {"type": "text", "text": "second"},
+        ]
+        assert _content_to_text(parts) == "first second"
+
+    def test_list_with_image_part(self):
+        parts = [
+            {"type": "text", "text": "look at this"},
+            {"type": "image_url", "image_url": {"url": "https://x"}},
+        ]
+        # Image is preserved as a placeholder, not dropped silently.
+        assert _content_to_text(parts) == "look at this [image]"
+
+    def test_list_with_file_part(self):
+        parts = [{"type": "file", "name": "x.pdf"}]
+        assert _content_to_text(parts) == "[file]"
+
+    def test_bare_string_inside_list(self):
+        # Some pre-multimodal sessions stored content as ["text"]
+        assert _content_to_text(["raw"]) == "raw"
+
+    def test_dict_input_wrapped(self):
+        assert _content_to_text({"type": "text", "text": "x"}) == "x"
+
+    def test_other_type_str_fallback(self):
+        # Numbers shouldn't crash — get coerced to str.
+        assert _content_to_text(42) == "42"
+
+
+class TestExtractBlocksMultimodal:
+    """Regression: ``user_input`` events with multimodal content
+    (image attached to a message) used to take down ``index_events`` →
+    memory.search with ``'list' object has no attribute 'strip'``.
+    """
+
+    def test_multimodal_user_input_is_indexed(self):
+        events = [
+            {
+                "type": "user_input",
+                "content": [
+                    {"type": "text", "text": "what's in this picture"},
+                    {"type": "image_url", "image_url": {"url": "data:..."}},
+                ],
+                "event_id": 1,
+            }
+        ]
+        # Must not raise.
+        blocks = _extract_blocks("alice", events)
+        assert len(blocks) == 1
+        assert blocks[0].block_type == "user"
+        assert "what's in this picture" in blocks[0].content
+        assert "[image]" in blocks[0].content
+
+    def test_empty_multimodal_input_skipped(self):
+        events = [
+            {
+                "type": "user_input",
+                "content": [],
+                "event_id": 1,
+            }
+        ]
+        blocks = _extract_blocks("alice", events)
+        # Empty list flattens to "" which strips to "" → skipped.
+        assert blocks == []
 
 
 class TestExtractBlocks:

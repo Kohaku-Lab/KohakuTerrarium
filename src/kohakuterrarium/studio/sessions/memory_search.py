@@ -24,6 +24,9 @@ from kohakuterrarium.studio.sessions.memory_build import (
     build_index as _build_index,
 )
 from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def _live_store_for_path(
@@ -150,7 +153,18 @@ async def search_session_memory(
         if not live_store:
             store.close(update_status=False)
     except Exception as e:
-        raise HTTPException(500, f"Memory search failed: {e}")
+        # Log the FULL traceback so we can diagnose 500s (the
+        # HTTPException detail is one line and gets surfaced to the
+        # client; the traceback is what we actually need server-side).
+        logger.exception(
+            "memory_search failed",
+            path=str(path),
+            query=q,
+            mode=mode,
+            k=k,
+            agent=agent,
+        )
+        raise HTTPException(500, f"Memory search failed: {type(e).__name__}: {e}")
 
     return {
         "session_name": path.stem,
