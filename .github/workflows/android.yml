@@ -55,6 +55,18 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # Pin to the ``release`` environment so the signing secrets
+    # (``ANDROID_KEYSTORE_*``, ``ANDROID_KEY_*``) read from
+    # ``Settings → Environments → release → Environment secrets``
+    # rather than repository-wide secrets.  Same environment the
+    # PyPI publish job (``release.yml`` → ``publish-pypi``) uses, so
+    # any branch-restriction / approval rule already configured
+    # there applies to keystore access too.  Unsigned manual builds
+    # (``workflow_dispatch`` without ``sign=true``) still run — the
+    # ``Sign + package`` step short-circuits when the secrets aren't
+    # present, so the environment association is a no-op for the
+    # debug-APK path.
+    environment: release
     steps:
       - uses: actions/checkout@v4
 
@@ -174,13 +186,84 @@ jobs:
             --key-alias "${ANDROID_KEY_ALIAS}" \
             --key-pass "${ANDROID_KEY_PASSWORD}"
 
+      - name: Stage + rename artifacts
+        # Briefcase emits its APK / AAB under
+        # ``build/kohakuterrarium/android/gradle/app/build/outputs/``
+        # with generic Gradle names (``app-debug.apk``, ``app-release.aab``)
+        # — fine for dev iteration, useless for a public release where
+        # the filename is the only handle the user has on the build.
+        # Copy each into ``dist/android/`` with a versioned name:
+        #
+        #     kohakuterrarium-<version>[-<variant>]-android.<ext>
+        #
+        # Version source:
+        #   - tag push  → ``GITHUB_REF_NAME`` minus ``v`` prefix
+        #   - manual    → pyproject ``[project] version``
+        # Variant suffix:
+        #   - ``debug`` for the unsigned debug build (workflow_dispatch
+        #     without the sign flag)
+        #   - omitted for ``release`` builds (tag / sign=true) so the
+        #     headline filename is the cleanest possible
+        id: stage
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/android
+          ref="${GITHUB_REF_NAME:-}"
+          if [[ "${ref}" == v* ]]; then
+            version="${ref#v}"
+          else
+            version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+          shopt -s globstar nullglob
+          src_root="build/kohakuterrarium/android"
+          # Briefcase emits ``app-debug.apk`` from every ``briefcase
+          # build``, plus ``app-release.{apk,aab}`` when ``briefcase
+          # package`` succeeds with signing.  Prefer release outputs
+          # for distribution; only fall through to the debug APK when
+          # no release artifact exists (unsigned PR / dispatch path).
+          # Otherwise a successful release publish ships three files
+          # where two would do, and the user has to guess which APK
+          # to install.
+          release_apks=("${src_root}"/**/app-release.apk)
+          release_aabs=("${src_root}"/**/app-release.aab)
+          has_release=0
+          if [ ${#release_apks[@]} -gt 0 ] || [ ${#release_aabs[@]} -gt 0 ]; then
+            has_release=1
+          fi
+
+          copied=0
+          for src in "${src_root}"/**/*.apk "${src_root}"/**/*.aab; do
+            [ -f "${src}" ] || continue
+            base=$(basename "${src}")
+            ext="${base##*.}"
+            if [[ "${base}" == *debug* ]]; then
+              # Skip the debug APK whenever a release artifact landed
+              # alongside it — release is the canonical output then.
+              if [ "${has_release}" -eq 1 ]; then
+                continue
+              fi
+              variant="debug-"
+            else
+              variant=""
+            fi
+            dest="dist/android/kohakuterrarium-${version}-${variant}android.${ext}"
+            cp "${src}" "${dest}"
+            echo "  ${src} -> ${dest}"
+            copied=$((copied + 1))
+          done
+          if [ "${copied}" -eq 0 ]; then
+            echo "::warning::no APK/AAB found under ${src_root}"
+          fi
+          ls -la dist/android/
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: android-${{ github.sha }}
-          path: |
-            build/kohakuterrarium/android/**/*.apk
-            build/kohakuterrarium/android/**/*.aab
+          name: android-${{ steps.stage.outputs.version }}-${{ github.sha }}
+          path: dist/android/*
           if-no-files-found: warn
           retention-days: 30
 
@@ -188,9 +271,7 @@ jobs:
         if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            build/kohakuterrarium/android/**/*.apk
-            build/kohakuterrarium/android/**/*.aab
+          files: dist/android/*
           fail_on_unmatched_files: false
 
   validate-manifest:
