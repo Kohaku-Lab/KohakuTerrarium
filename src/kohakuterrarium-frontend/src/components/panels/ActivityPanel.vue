@@ -75,7 +75,12 @@ const props = defineProps({
   instance: { type: Object, default: null },
 })
 
-const chat = useChatStore()
+// Bind to the instance prop EXPLICITLY — matches StatusDashboard's
+// pattern.  Two sessions with the same creature config name share
+// scope when ``injectScope()`` returns null and ``useChatStore()``
+// falls back to the "default" singleton, which is what produced the
+// "identical token usage across two sessions" symptom.
+const chat = useChatStore(props.instance?.id || props.instance?.graph_id || undefined)
 const { t } = useI18n()
 
 const jobCount = computed(() => Object.keys(chat.runningJobs || {}).length)

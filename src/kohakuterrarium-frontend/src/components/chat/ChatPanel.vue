@@ -236,7 +236,13 @@ const props = defineProps({
   emptySubtitle: { type: String, default: "" },
 })
 
-const chat = useChatStore()
+// Bind the chat store to the instance prop EXPLICITLY.  Two sessions
+// with the same creature config name (e.g. two ``creative-art``
+// instances) have unique ``instance.id``; passing one here picks the
+// per-session scoped chat store and dodges the "ChatPanel shares
+// messages with the previous session because injectScope returned
+// null and fell back to the default singleton" failure mode.
+const chat = useChatStore(props.instance?.id || props.instance?.graph_id || undefined)
 const { t } = useI18n()
 // Compact density renders the chat header model pill (since the
 // StatusBar — which has its own ModelSwitcher — is hidden in the

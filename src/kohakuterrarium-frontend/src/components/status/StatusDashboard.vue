@@ -156,7 +156,16 @@ const props = defineProps({
   onOpenTab: { type: Function, default: () => {} },
 })
 
-const chat = useChatStore()
+// Bind the chat store to the instance prop EXPLICITLY rather than
+// relying on ``injectScope()`` from a parent provider.  Two sessions
+// of the same creature config (same ``config_name``, e.g. two
+// ``creative-art`` instances) have unique ``instance.id`` /
+// ``instance.graph_id`` values; passing one of those here picks the
+// per-session scoped chat store and dodges the "both panels read
+// the default singleton because provideScope wasn't found" failure
+// mode that produced identical token-usage across two sessions
+// sharing the same creature name.
+const chat = useChatStore(props.instance?.id || props.instance?.graph_id || undefined)
 const { t } = useI18n()
 
 const selectedModel = ref("")
