@@ -101,3 +101,9 @@ dep/
 # ``scripts/prep_local_briefcase.py`` before ``briefcase create``.
 # Either way the contents are build artifacts, not source.
 /bundled-release/
+
+# Mobile-UX audit working tree — Playwright + Pillow renders, MD
+# write-ups, capture/annotate scripts.  Lives in-tree for sharing
+# inside the agent loop but never committed (binary screenshots +
+# rapidly-iterated notes).
+/audit/
