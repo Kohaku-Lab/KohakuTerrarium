@@ -17,7 +17,7 @@ async def execute_creature_command(
     req: SlashCommand,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         return await service.execute_command(cid, req.command, req.args)
     except KeyError:

@@ -41,7 +41,7 @@ async def get_scratchpad(
     creature_id: str,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         return await service.get_scratchpad(cid)
     except KeyError:
@@ -55,7 +55,7 @@ async def patch_scratchpad(
     req: ScratchpadPatch,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         return await service.patch_scratchpad(cid, req.updates)
     except KeyError:
@@ -70,7 +70,7 @@ async def list_triggers(
     creature_id: str,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         return await service.list_triggers(cid)
     except KeyError:
@@ -83,7 +83,7 @@ async def get_env(
     creature_id: str,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         return await service.get_env(cid)
     except KeyError:
@@ -96,7 +96,7 @@ async def get_system_prompt(
     creature_id: str,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         return await service.get_system_prompt(cid)
     except KeyError:
@@ -109,7 +109,7 @@ async def get_working_dir(
     creature_id: str,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         pwd = await service.get_working_dir(cid)
         return {"pwd": pwd}
@@ -124,7 +124,7 @@ async def set_working_dir(
     req: WorkingDirRequest,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         applied = await service.set_working_dir(cid, req.path)
     except KeyError:
@@ -142,7 +142,7 @@ async def get_native_tool_options(
     creature_id: str,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         tools = await service.native_tool_inventory(cid)
         return {"tools": tools}
@@ -157,7 +157,7 @@ async def set_native_tool_options(
     req: NativeToolOptionsRequest,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         applied = await service.set_native_tool_options(cid, req.tool, req.values or {})
     except KeyError:

@@ -36,6 +36,7 @@ from kohakuterrarium.terrarium.service import TerrariumService
 async def resolve_creature_id(
     service: TerrariumService,
     name_or_id: str,
+    session_id: str | None = None,
 ) -> str:
     """Return the canonical ``creature_id`` for either form.
 
@@ -43,21 +44,46 @@ async def resolve_creature_id(
     tab is opened), then falls back to ``name`` match — matching the
     pre-v2 ``find_creature`` semantics.
 
+    ``session_id`` (the graph_id from the URL) MUST be passed by
+    every route that owns a session-scoped path.  Without it, the
+    name-fallback walks every creature visible through the service
+    and returns the first hit — which means two running sessions
+    that share a creature ``name`` (the common case: two
+    ``creative-art`` instances of the same config) both resolve to
+    whichever session was created first.  The downstream
+    ``service.chat_history(cid)`` then returns the FIRST session's
+    transcript for both, producing the "newly-created session
+    shares the old session's chat content" bug.
+
+    The fix: when ``session_id`` is provided, filter the creature
+    roster to that graph before either match phase.  Exact
+    ``creature_id`` matches are also filtered — a creature with the
+    target id BUT in a different graph means the URL was tampered
+    with (or the frontend kept a stale handle); 404 is the right
+    answer in both cases.
+
+    ``session_id=None`` retains the global-search semantics for
+    legacy callers + tests that pre-date the v2 session-scoped
+    routes; new code paths SHOULD pass the session_id.
+
     Raises :class:`HTTPException` 404 when neither id nor name
-    matches any creature visible through the service.  Errors are
-    raised at the route boundary so callers can use it inline without
-    a second try/except.
+    matches any creature visible through the service (filtered by
+    session if provided).
     """
     try:
         creatures = await service.list_creatures()
     except Exception as exc:  # noqa: BLE001 — service errors map to 503
         raise HTTPException(503, f"service unavailable: {exc}") from exc
 
+    if session_id:
+        creatures = tuple(c for c in creatures if c.graph_id == session_id)
+
     # Exact id match wins.
     for info in creatures:
         if info.creature_id == name_or_id:
             return info.creature_id
-    # Display-name fallback.
+    # Display-name fallback (now scoped to the requested session when
+    # session_id is set — see the docstring rationale above).
     for info in creatures:
         if info.name == name_or_id:
             return info.creature_id

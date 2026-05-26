@@ -18,7 +18,7 @@ def _info(cid="cid-1", name="alice") -> CreatureInfo:
     return CreatureInfo(
         creature_id=cid,
         name=name,
-        graph_id="g",
+        graph_id="sess",
         is_running=True,
         is_privileged=False,
         parent_creature_id=None,

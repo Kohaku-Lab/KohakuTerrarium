@@ -27,7 +27,7 @@ async def chat_creature(
     service: TerrariumService = Depends(get_service),
 ):
     """Non-streaming HTTP chat fallback — collects the streaming chunks."""
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     content = req.content if req.content is not None else (req.message or "")
     try:
         chunks: list[str] = []
@@ -45,7 +45,7 @@ async def regenerate_creature(
     req: RegenerateRequest | None = None,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     turn_index = req.turn_index if req is not None else None
     branch_view = req.branch_view if req is not None else None
     try:
@@ -70,7 +70,7 @@ async def edit_creature_message(
         ]
     else:
         content = req.content
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         edited = await service.edit_message(
             cid,
@@ -98,7 +98,7 @@ async def rewind_creature(
     msg_idx: int,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         await service.rewind(cid, msg_idx)
         return {"status": "rewound"}
@@ -154,7 +154,7 @@ async def creature_history(
             "events": events,
             "is_processing": False,
         }
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         return await service.chat_history(cid)
     except KeyError:
@@ -167,7 +167,7 @@ async def creature_branches(
     creature_id: str,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         return await service.chat_branches(cid)
     except KeyError:

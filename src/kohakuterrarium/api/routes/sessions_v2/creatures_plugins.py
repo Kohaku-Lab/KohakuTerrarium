@@ -33,7 +33,7 @@ async def list_plugins(
     creature_id: str,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         return await service.list_plugins(cid)
     except KeyError:
@@ -48,7 +48,7 @@ async def toggle_plugin(
     req: TogglePluginRequest | None = None,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     enabled = req.enabled if req is not None else True
     try:
         return await service.toggle_plugin(cid, plugin_name, enabled)

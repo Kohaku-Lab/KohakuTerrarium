@@ -18,7 +18,7 @@ async def switch_creature_model(
     req: ModelSwitch,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         model = await service.switch_model(cid, req.model)
     except KeyError:

@@ -27,7 +27,7 @@ async def interrupt_creature(
     creature_id: str,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         await creature_ctl.interrupt(service, session_id, cid)
         return {"status": "interrupted"}
@@ -41,7 +41,7 @@ async def list_creature_jobs(
     creature_id: str,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         return await creature_ctl.list_jobs(service, session_id, cid)
     except KeyError:
@@ -55,7 +55,7 @@ async def stop_creature_job(
     job_id: str,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         ok = await creature_ctl.cancel_job(service, session_id, cid, job_id)
     except KeyError:
@@ -72,7 +72,7 @@ async def promote_creature_job(
     job_id: str,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         ok = await creature_ctl.promote_job(service, session_id, cid, job_id)
     except KeyError:

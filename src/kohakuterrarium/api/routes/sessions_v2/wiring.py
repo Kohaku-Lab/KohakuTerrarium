@@ -44,7 +44,7 @@ async def list_creature_outputs(
     service: TerrariumService = Depends(get_service),
 ):
     """List direct output-wiring edges for a creature."""
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         outputs = await service.list_output_wiring(cid)
         return {"outputs": outputs}
@@ -60,7 +60,7 @@ async def wire_creature_output(
     service: TerrariumService = Depends(get_service),
 ):
     """Add a direct output-wiring edge for a creature."""
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         result = await service.wire_output(cid, req.as_entry())
     except KeyError:
@@ -82,7 +82,7 @@ async def unwire_creature_output(
     service: TerrariumService = Depends(get_service),
 ):
     """Detach a direct output-wiring edge."""
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         ok = await service.unwire_output(cid, edge_id)
     except KeyError:
@@ -101,7 +101,7 @@ async def list_creature_sinks(
     No engine-level sink enumerator yet; this endpoint is kept for
     callers that only need to check creature existence.
     """
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         info = await service.get_creature_info(cid)
         if info is None:
@@ -119,7 +119,7 @@ async def unwire_sink(
     service: TerrariumService = Depends(get_service),
 ):
     """Detach a previously-wired secondary output sink."""
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         ok = await service.unwire_output_sink(cid, sink_id)
     except KeyError:

@@ -30,7 +30,7 @@ async def list_modules(
     creature_id: str,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         modules = await service.list_modules(cid)
         return {"modules": modules}
@@ -48,7 +48,7 @@ async def get_module_options(
     name: str,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         return await service.get_module_options(cid, module_type, name)
     except KeyError:
@@ -72,7 +72,7 @@ async def set_module_options(
     req: ModuleOptionsRequest,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         applied = await service.set_module_options(
             cid, module_type, name, req.values or {}
@@ -103,7 +103,7 @@ async def toggle_module(
     name: str,
     service: TerrariumService = Depends(get_service),
 ):
-    cid = await resolve_creature_id(service, creature_id)
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
         return await service.toggle_module(cid, module_type, name)
     except KeyError:
