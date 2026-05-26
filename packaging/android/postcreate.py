@@ -303,6 +303,17 @@ _ANDROID_DROP_PACKAGES: tuple[str, ...] = (
     # normalised names.
     "hf-xet",
     "hf_xet",
+    # ``ddgs`` (DuckDuckGo Search) hard-requires ``primp`` per its
+    # PyPI metadata.  ``primp`` is a Rust+reqwest HTTP client; even
+    # with the abi3 wheel bug fixed in v2026.05.26, its tokio /
+    # rustls runtime hard-crashes the Android process on first
+    # call (no catchable Python exception — the agent host dies).
+    # Drop both so pip never tries to install them on Android.
+    # ``web_search.py`` detects the missing ddgs and falls through
+    # to a pure-httpx scrape of DDG's HTML endpoint — same data
+    # source ddgs uses, no native code.
+    "ddgs",
+    "primp",
 )
 
 # Packages where Android needs the BASE package but NOT the
@@ -420,32 +431,14 @@ _ANDROID_URL_REFS: dict[str, dict[str, object]] = {
         "filename": ("rpds_py-{version}-cp313-cp313-android_24_{abi_tag}.whl"),
         "pinned_version": "0.30.0",
     },
-    "primp": {
-        # primp is a transitive dep via ddgs (DuckDuckGo search
-        # tool).  Wraps reqwest with rustls-tls (no system OpenSSL).
-        # Upstream's source-tree Cargo features pin
-        # ``pyo3/abi3-py310`` so the unpatched build emits a
-        # ``cp310-abi3`` wheel — but the resulting .so references
-        # ``_Py_FalseStruct``, a non-stable-ABI CPython internal
-        # symbol that the Android runtime's libpython.so exports
-        # under Python 3.13 but NOT under the abi3 stable-API
-        # surface.  dlopen on the device fails with
-        #     cannot locate symbol "_Py_FalseStruct"
-        # Our cross-build now strips the ``abi3-py310`` Cargo
-        # feature + the ``py-limited-api`` pyproject setting before
-        # maturin runs (see android-dep-collection's
-        # ``build.py:_strip_abi3_features``), so the wheel emits
-        # as ``cp313-cp313`` and links against the same libpython
-        # that exposes ``_Py_FalseStruct``.  Verified against the
-        # v2026.05.26 release artifacts.
-        "wheel_basename": "primp",
-        "release_base": (
-            "https://github.com/Kohaku-Lab/android-dep-collection/releases/download/"
-            "v2026.05.26"
-        ),
-        "filename": ("primp-{version}-cp313-cp313-android_24_{abi_tag}.whl"),
-        "pinned_version": "1.3.0",
-    },
+    # NOTE: ``primp`` previously lived here as a direct URL ref to
+    # the android-dep-collection wheel.  Removed: even with the
+    # cp313-cp313 rebuild that fixed the abi3 dlopen failure, the
+    # Rust runtime hard-crashes the Android app on first search
+    # call.  ``web_search.py`` now falls through to a pure-httpx
+    # DDG-HTML scrape when ``ddgs`` / ``primp`` are absent, so we
+    # drop both from Android requirements entirely (see
+    # ``_ANDROID_DROP_PACKAGES`` above) and rely on the fallback.
 }
 
 # Wheel-tag suffix per Android ABI (Chaquopy's wheels use these
