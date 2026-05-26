@@ -16,7 +16,7 @@ from kohakuterrarium.terrarium import (
     Terrarium,
 )
 
-__version__ = "2.0.0.dev2"
+__version__ = "2.0.0.dev12"
 
 __all__ = [
     "ConnectionResult",
