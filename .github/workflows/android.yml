@@ -90,9 +90,20 @@ jobs:
             sandbox-
 
       - name: Fetch + verify sandbox binaries
+        # ``sandbox_manifest.toml`` declares no binaries in the
+        # current build (Android uses ``/system/bin/sh`` instead of
+        # a bundled busybox — see ``bash.py`` mobile profile path).
+        # The fetcher still runs as a no-op so the manifest contract
+        # stays exercised; the ``ls`` only fires when binaries are
+        # actually emitted, otherwise the empty-bin case would fail
+        # the workflow with "No such file or directory".
         run: |
           python packaging/android/fetch_sandbox.py
-          ls -lh packaging/android/bin/*/
+          if compgen -G "packaging/android/bin/*/" > /dev/null; then
+            ls -lh packaging/android/bin/*/
+          else
+            echo "no sandbox binaries declared — skipping listing"
+          fi
 
       # KohakuVault Android wheels are NOT fetched locally; instead
       # ``packaging/android/postcreate.py::patch_android_requirements``
