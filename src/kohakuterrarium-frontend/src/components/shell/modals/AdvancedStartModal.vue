@@ -14,6 +14,17 @@
         </div>
       </fieldset>
 
+      <!-- Name (random by default — wandb-style) — only meaningful
+           for new sessions; resume uses the picked session name. -->
+      <div v-if="form.type !== 'resume'">
+        <label class="block text-xs uppercase tracking-wider text-warm-500 mb-1 flex items-center gap-2">
+          Name
+          <button type="button" class="ml-auto text-[10px] text-iolite hover:underline" title="Generate a fresh random name" @click="rerollName">reroll</button>
+        </label>
+        <input v-model="form.name" type="text" class="input-field w-full text-xs" :placeholder="namePlaceholder" />
+        <div class="text-[10px] text-warm-400 mt-1">Leave blank to use the placeholder. Two sessions with the same name are allowed but harder to tell apart.</div>
+      </div>
+
       <!-- Config (varies by type) -->
       <div>
         <label class="block text-xs uppercase tracking-wider text-warm-500 mb-1">
@@ -86,6 +97,7 @@ import ModalShell from "@/components/common/ModalShell.vue"
 import { useConfigsStore } from "@/stores/configs"
 import { useTabsStore } from "@/stores/tabs"
 import { configAPI, sessionAPI } from "@/utils/api"
+import { randomNameFor } from "@/utils/randomName"
 
 const emit = defineEmits(["close"])
 
@@ -106,11 +118,36 @@ const form = reactive({
   pwd: "",
   attachMode: "chat",
   displayName: "",
+  // Per-session display name — drives backend session.name + every
+  // frontend display surface (rail, status, tab title).  Defaulting
+  // to a wandb-style placeholder makes "two sessions of the same
+  // config" trivially distinguishable; users can override.
+  name: "",
 })
 
 const allSessions = ref([])
 const starting = ref(false)
 const errorMsg = ref("")
+const namePlaceholder = ref(randomNameFor("creature"))
+
+function rerollName() {
+  namePlaceholder.value = randomNameFor("creature")
+  form.name = ""
+}
+
+// Re-roll the placeholder when switching session type so the
+// suggestion fits the kind the user picked (creature names look
+// different from terrarium names).
+watch(
+  () => form.type,
+  () => {
+    if (form.type === "terrarium") {
+      namePlaceholder.value = randomNameFor("terrarium")
+    } else if (form.type !== "resume") {
+      namePlaceholder.value = randomNameFor("creature")
+    }
+  },
+)
 
 onMounted(async () => {
   configs.fetchAll()
@@ -175,6 +212,12 @@ async function onSubmit() {
       sessionName: form.sessionName,
       pwd: form.pwd?.trim(),
       attachMode: form.attachMode,
+      // For new sessions, pass the user-rolled name (or the
+      // wandb-style placeholder when blank) so the backend assigns
+      // a non-default ``session.name`` — important for distinguishing
+      // multiple sessions of the same config in the rail / status
+      // surfaces.  Resume mode reuses the picked session's name.
+      name: form.type === "resume" ? null : (form.name.trim() || namePlaceholder.value).trim(),
     })
     emit("close")
   } catch (err) {
