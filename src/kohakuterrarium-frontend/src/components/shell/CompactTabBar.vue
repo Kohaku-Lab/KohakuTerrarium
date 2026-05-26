@@ -2,11 +2,11 @@
   <div class="flex items-stretch border-t border-warm-200 dark:border-warm-700 bg-white dark:bg-warm-900 shrink-0" style="padding-bottom: env(safe-area-inset-bottom, 0px)">
     <button v-for="p in visiblePanels" :key="p.id" class="flex-1 flex flex-col items-center gap-0.5 py-2 min-w-0 transition-colors" :class="activeId === p.id ? 'text-iolite' : 'text-warm-400 hover:text-warm-600 dark:hover:text-warm-200'" :title="labelFor(p)" @click="$emit('select', p.id)">
       <div :class="iconFor(p.id)" class="text-lg" />
-      <span class="text-[9px] leading-tight truncate w-full px-1 text-center">{{ labelFor(p) }}</span>
+      <span class="kt-text-caption leading-tight truncate w-full px-1 text-center">{{ labelFor(p) }}</span>
     </button>
     <button v-if="overflowPanels.length" ref="moreBtn" class="flex-1 flex flex-col items-center gap-0.5 py-2 min-w-0 transition-colors text-warm-400 hover:text-warm-600 dark:hover:text-warm-200" :class="overflowOpen ? 'text-iolite' : ''" @click="overflowOpen = !overflowOpen">
       <div class="i-carbon-overflow-menu-horizontal text-lg" />
-      <span class="text-[9px] leading-tight">More</span>
+      <span class="kt-text-caption leading-tight">More</span>
     </button>
 
     <!-- Overflow popover. Constrained to 60vh + overflow-y-auto so

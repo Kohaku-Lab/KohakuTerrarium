@@ -1,11 +1,11 @@
 <template>
   <div>
     <div class="px-3 py-1">
-      <span class="text-[10px] uppercase tracking-wider text-warm-500 font-medium"> {{ t("shell.rail.quick") }} </span>
+      <span class="kt-text-caption uppercase tracking-wider text-warm-500 font-medium"> {{ t("shell.rail.quick") }} </span>
     </div>
     <div class="flex flex-col gap-0.5">
-      <button v-for="entry in entries" :key="entry.id" class="flex items-center gap-2 px-3 py-1.5 text-sm text-warm-600 dark:text-warm-400 hover:bg-warm-300/50 dark:hover:bg-warm-700/50 hover:text-warm-800 dark:hover:text-warm-200 cursor-pointer text-left" @click="entry.action">
-        <span :class="entry.icon" class="text-sm shrink-0" />
+      <button v-for="entry in entries" :key="entry.id" class="flex items-center gap-2 px-3 py-1.5 kt-text-body text-warm-600 dark:text-warm-400 hover:bg-warm-300/50 dark:hover:bg-warm-700/50 hover:text-warm-800 dark:hover:text-warm-200 cursor-pointer text-left" @click="entry.action">
+        <span :class="entry.icon" class="kt-text-body shrink-0" />
         <span>{{ entry.label }}</span>
       </button>
     </div>

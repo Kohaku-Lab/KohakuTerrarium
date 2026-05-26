@@ -4,7 +4,7 @@
     <span class="w-2 h-2 rounded-full shrink-0" :class="statusColor" />
 
     <!-- Name (truncates) -->
-    <span class="flex-1 text-sm truncate text-warm-800 dark:text-warm-200">
+    <span class="flex-1 kt-text-body truncate text-warm-800 dark:text-warm-200">
       {{ instance.config_name }}
     </span>
 

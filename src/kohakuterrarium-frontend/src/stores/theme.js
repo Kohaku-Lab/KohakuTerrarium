@@ -61,7 +61,17 @@ export const useThemeStore = defineStore("theme", {
     },
 
     applyZoom() {
-      const el = document.getElementById("app")
+      // Apply zoom to ``<html>`` (documentElement), NOT ``#app``.  Vue
+      // ``<Teleport to="body">`` (rail drawer, host-picker modal) and
+      // every Element Plus dialog / drawer / popover / select dropdown
+      // mount as direct children of ``<body>`` — i.e. OUTSIDE #app.
+      // Scoping zoom to #app left those teleported surfaces at 1.0×
+      // while the rest of the UI scaled, producing the "navbar super
+      // small / dropdown overflows on mobile" mismatch the user sees
+      // every time they tune the zoom preference.  Setting zoom on
+      // ``<html>`` covers everything inside the document, including
+      // teleported content.
+      const el = document.documentElement
       if (!el) return
       const z = clampZoom(this.uiZoom, this._isMobile ? DEFAULT_MOBILE_ZOOM : DEFAULT_DESKTOP_ZOOM)
       el.style.zoom = z === 1.0 ? "" : String(z)

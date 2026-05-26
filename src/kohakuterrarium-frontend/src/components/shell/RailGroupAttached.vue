@@ -1,8 +1,8 @@
 <template>
   <div>
     <div class="flex items-center justify-between px-3 py-1">
-      <span class="text-[10px] uppercase tracking-wider text-warm-500 font-medium"> {{ t("shell.rail.attached") }} </span>
-      <span class="text-[10px] text-warm-400">{{ instances.list.length }}</span>
+      <span class="kt-text-caption uppercase tracking-wider text-warm-500 font-medium"> {{ t("shell.rail.attached") }} </span>
+      <span class="kt-text-caption text-warm-400">{{ instances.list.length }}</span>
     </div>
     <div class="flex flex-col gap-0.5">
       <RailItem v-for="inst in instances.list" :key="inst.id" :instance="inst" />

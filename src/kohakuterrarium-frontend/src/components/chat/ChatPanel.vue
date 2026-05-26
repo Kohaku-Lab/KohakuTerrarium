@@ -144,32 +144,69 @@
             </button>
           </div>
         </div>
-        <div class="flex gap-2 pl-2 pr-3 py-2 rounded-xl bg-warm-50 dark:bg-warm-800 border border-warm-200 dark:border-warm-700 focus-within:border-iolite/40 dark:focus-within:border-iolite-light/30 transition-colors items-end">
+        <div class="chat-input-shell relative flex gap-2 pl-2 pr-3 py-2 rounded-xl bg-warm-50 dark:bg-warm-800 border border-warm-200 dark:border-warm-700 focus-within:border-iolite/40 dark:focus-within:border-iolite-light/30 transition-colors items-end" :class="{ 'is-active': inputActive }">
           <input ref="imageInputEl" type="file" accept="image/*" class="hidden" @change="(e) => onFileChange(e, 'image')" />
           <input ref="fileInputEl" type="file" class="hidden" @change="(e) => onFileChange(e, 'file')" />
-          <div class="flex items-center gap-0 shrink-0 mb-0.5">
-            <button class="w-10 h-10 sm:w-7 sm:h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-aquamarine dark:hover:text-aquamarine hover:bg-aquamarine/10" title="Attach file" aria-label="Attach file" @click="fileInputEl?.click()">
-              <span class="i-carbon-add text-sm sm:text-xs" />
+
+          <!-- LEFT cluster
+               desktop: always inline [+ file] [image]
+               mobile resting: inline [+ file] [image]
+               mobile active (focus or content): collapsed to a single
+               [+] that toggles an inline popover above the input. -->
+          <button v-if="isCompact && inputActive" class="kt-input-pill-btn shrink-0 mb-0.5 text-warm-400 hover:text-iolite hover:bg-iolite/10" :title="t('chat.moreActions')" :aria-label="t('chat.moreActions')" @click="toggleSecondaryMenu">
+            <span class="i-carbon-add" />
+          </button>
+          <div v-else class="flex items-center gap-0 shrink-0 mb-0.5">
+            <button class="kt-input-pill-btn text-warm-400 hover:text-aquamarine hover:bg-aquamarine/10" :title="t('chat.attachFile')" :aria-label="t('chat.attachFile')" @click="fileInputEl?.click()">
+              <span class="i-carbon-add" />
             </button>
-            <button class="w-10 h-10 sm:w-7 sm:h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-iolite dark:hover:text-iolite-light hover:bg-iolite/10" :title="t('chat.attachImage')" :aria-label="t('chat.attachImage')" @click="imageInputEl?.click()">
-              <span class="i-carbon-image text-sm sm:text-xs" />
+            <button class="kt-input-pill-btn text-warm-400 hover:text-iolite hover:bg-iolite/10" :title="t('chat.attachImage')" :aria-label="t('chat.attachImage')" @click="imageInputEl?.click()">
+              <span class="i-carbon-image" />
             </button>
           </div>
-          <textarea ref="inputEl" v-model="inputText" rows="1" class="flex-1 bg-transparent border-none outline-none text-sm text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 resize-none max-h-32 leading-relaxed py-1 min-w-0" style="min-height: 2em" :placeholder="inputPlaceholder" @keydown="onInputKeydown" @input="autoResize" @paste="onPaste" />
+
+          <textarea ref="inputEl" v-model="inputText" rows="1" class="chat-input-textarea flex-1 bg-transparent border-none outline-none kt-text-body text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 resize-none max-h-32 leading-relaxed py-1 min-w-0" style="min-height: 2em" :placeholder="inputPlaceholder" @keydown="onInputKeydown" @input="autoResize" @paste="onPaste" @focus="onInputFocus" @blur="onInputBlur" />
+
+          <!-- RIGHT cluster
+               desktop / mobile resting: [compact] [clean] [send/stop]
+               mobile active: [send/stop] only — compact/clean are in
+               the popover triggered by [+]. -->
           <div class="flex items-center gap-1 shrink-0 mb-0.5">
-            <button class="w-10 h-10 sm:w-7 sm:h-7 flex items-center justify-center rounded-md transition-colors text-warm-400 hover:text-iolite dark:hover:text-iolite-light hover:bg-iolite/10" :title="t('chat.compactContext')" :aria-label="t('chat.compactContext')" @click="triggerCompact">
-              <span class="i-carbon-collapse-all text-sm sm:text-xs" />
+            <button v-if="!(isCompact && inputActive)" class="kt-input-pill-btn text-warm-400 hover:text-iolite hover:bg-iolite/10" :title="t('chat.compactContext')" :aria-label="t('chat.compactContext')" @click="triggerCompact">
+              <span class="i-carbon-collapse-all" />
             </button>
-            <button class="w-10 h-10 sm:w-7 sm:h-7 flex items-center justify-center rounded-md transition-colors text-warm-400 hover:text-coral hover:bg-coral/10" :title="t('chat.clearContext')" :aria-label="t('chat.clearContext')" @click="triggerClear">
-              <span class="i-carbon-clean text-sm sm:text-xs" />
+            <button v-if="!(isCompact && inputActive)" class="kt-input-pill-btn text-warm-400 hover:text-coral hover:bg-coral/10" :title="t('chat.clearContext')" :aria-label="t('chat.clearContext')" @click="triggerClear">
+              <span class="i-carbon-clean" />
             </button>
-            <button v-if="chat.processing || chat.hasRunningJobs" class="w-11 h-11 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg transition-all bg-coral/90 text-white hover:bg-coral shadow-sm shadow-coral/20" :title="`${t('chat.stopGeneration')} (Esc)`" :aria-label="t('chat.stopGeneration')" @click="chat.interrupt()">
-              <span class="i-carbon-stop-filled text-base sm:text-sm" />
+            <button v-if="chat.processing || chat.hasRunningJobs" class="kt-input-send-btn bg-coral/90 text-white hover:bg-coral shadow-sm shadow-coral/20" :title="`${t('chat.stopGeneration')} (Esc)`" :aria-label="t('chat.stopGeneration')" @click="chat.interrupt()">
+              <span class="i-carbon-stop-filled" />
             </button>
-            <button v-else class="w-11 h-11 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg transition-all" :class="inputCanSend ? 'bg-iolite text-white hover:bg-iolite-shadow shadow-sm shadow-iolite/20' : 'text-warm-300 dark:text-warm-600 cursor-not-allowed'" :disabled="!inputCanSend" :aria-label="t('chat.sendMessage')" @click="send">
-              <span class="i-carbon-send text-base sm:text-sm" />
+            <button v-else class="kt-input-send-btn" :class="inputCanSend ? 'bg-iolite text-white hover:bg-iolite-shadow shadow-sm shadow-iolite/20' : 'text-warm-300 dark:text-warm-600 cursor-not-allowed'" :disabled="!inputCanSend" :aria-label="t('chat.sendMessage')" @click="send">
+              <span class="i-carbon-send" />
             </button>
           </div>
+
+          <!-- Secondary actions popover (mobile-active only). Anchored
+               just above the input shell; backdrop closes on tap. -->
+          <template v-if="isCompact && secondaryMenuOpen">
+            <div class="fixed inset-0 z-40" @click="secondaryMenuOpen = false" />
+            <div class="absolute left-0 right-0 bottom-full mb-2 z-50 flex items-center gap-1 px-2 py-2 rounded-xl bg-white dark:bg-warm-800 border border-warm-200 dark:border-warm-700 shadow-lg" @click.stop>
+              <button class="kt-input-pill-btn text-warm-500 hover:text-aquamarine hover:bg-aquamarine/10" :aria-label="t('chat.attachFile')" @click="onSecondaryAction(() => fileInputEl?.click())">
+                <span class="i-carbon-add" />
+                <span class="kt-text-caption ml-1">{{ t("chat.attachFile") }}</span>
+              </button>
+              <button class="kt-input-pill-btn text-warm-500 hover:text-iolite hover:bg-iolite/10" :aria-label="t('chat.attachImage')" @click="onSecondaryAction(() => imageInputEl?.click())">
+                <span class="i-carbon-image" />
+                <span class="kt-text-caption ml-1">{{ t("chat.attachImage") }}</span>
+              </button>
+              <button class="kt-input-pill-btn text-warm-500 hover:text-iolite hover:bg-iolite/10" :aria-label="t('chat.compactContext')" @click="onSecondaryAction(triggerCompact)">
+                <span class="i-carbon-collapse-all" />
+              </button>
+              <button class="kt-input-pill-btn text-warm-500 hover:text-coral hover:bg-coral/10" :aria-label="t('chat.clearContext')" @click="onSecondaryAction(triggerClear)">
+                <span class="i-carbon-clean" />
+              </button>
+            </div>
+          </template>
         </div>
       </div>
     </div>
@@ -367,6 +404,38 @@ function autoResize() {
   if (!el) return
   el.style.height = "auto"
   el.style.height = Math.min(el.scrollHeight, 128) + "px"
+}
+
+// Mobile chat-input collapse pattern (Discord-style).  On the touch
+// shell (``isCompact``), once the textarea takes focus OR contains
+// any content, the secondary toolbar buttons (attach file, attach
+// image, compact, clean) collapse into a single ``[+]`` trigger so
+// the textarea + send button take the full bar width.  The collapsed
+// buttons re-appear behind a tap-to-open popover anchored above the
+// shell.  Desktop never engages the collapse — pointer:fine has no
+// real-estate problem.
+const inputFocused = ref(false)
+const secondaryMenuOpen = ref(false)
+const inputActive = computed(() => inputFocused.value || inputText.value.length > 0)
+
+function onInputFocus() {
+  inputFocused.value = true
+}
+
+function onInputBlur() {
+  inputFocused.value = false
+  // If the user blurs by tapping the [+] popover, keep it open —
+  // the click on a popover button (which calls onSecondaryAction)
+  // will close it explicitly.
+}
+
+function toggleSecondaryMenu() {
+  secondaryMenuOpen.value = !secondaryMenuOpen.value
+}
+
+function onSecondaryAction(fn) {
+  secondaryMenuOpen.value = false
+  if (typeof fn === "function") fn()
 }
 
 // Auto-scroll: only when new visible content arrives and the user is already near bottom.
@@ -713,5 +782,46 @@ onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown))
 }
 .chat-model-switcher :deep(.target-select) {
   width: 7rem;
+}
+
+/* Pill button sizing for the chat input row.  Single source of
+ * truth so [+], [attach], [image], [compact], [clean] all match.
+ * Coarse pointer bumps to 40×40 for tap-target compliance. */
+.kt-input-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.375rem;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+  flex-shrink: 0;
+}
+@media (pointer: coarse) {
+  .kt-input-pill-btn {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+}
+
+/* Send / stop button — slightly bigger + rounded-lg to anchor the
+ * right side of the input row.  Coarse pointer = 44×44 tap target. */
+.kt-input-send-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.5rem;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+@media (pointer: coarse) {
+  .kt-input-send-btn {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
 }
 </style>

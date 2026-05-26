@@ -8,6 +8,30 @@
     "Consolas NF", "CaskaydiaCove NF", "JetBrainsMono NF", "FiraCode NF", "Hack NF",
     "JetBrains Mono", "Fira Code", "Consolas", monospace;
 
+  /* ════ Semantic size scale — SINGLE SOURCE OF TRUTH ════
+   *
+   * Every chrome surface (rail items, header titles, settings tabs,
+   * chat tab strip, bottom tab labels, etc.) must derive its
+   * font-size from one of these vars — NOT from a one-off
+   * ``text-[Npx]`` or ``text-sm`` literal.  That way bumping a tier
+   * once changes every site consistently AND the user's zoom
+   * preference (CSS ``zoom`` on ``<html>``) scales them uniformly.
+   *
+   * Tier names map to semantic roles, not visual sizes — pick by
+   * what the text DOES, not by what looks right at one viewport.
+   *
+   * The mobile @media block below redefines a subset so chrome on
+   * touch viewports gets readable defaults without per-component
+   * overrides.
+   */
+  --kt-fs-micro: 0.65rem; /* badge counter / superscript */
+  --kt-fs-caption: 0.75rem; /* section header (ATTACHED / QUICK), tab labels */
+  --kt-fs-body: 0.875rem; /* default body / rail item / chat tab / header title */
+  --kt-fs-emphasis: 1rem; /* prominent body */
+  --kt-fs-title: 1.125rem; /* card title */
+  --kt-fs-h2: 1.25rem;
+  --kt-fs-h1: 1.5rem;
+
   /* Light mode surfaces */
   --color-bg: #f7f5f2;
   --color-surface: #ffffff;
@@ -16,6 +40,23 @@
   --color-text: #3a3632;
   --color-text-muted: #8a8480;
   --color-text-faint: #b5b0aa;
+}
+
+/* Mobile: bump every chrome tier so the rail / nav / tabs hit
+ * readable sizes without per-component overrides.  The "body" tier
+ * jumps to 1rem (16px @ html base) — matching the input-font-size
+ * floor and the iOS HIG nav-title target.  The "caption" tier stays
+ * below body but above the 11px Material caption floor. */
+@media (pointer: coarse) {
+  :root {
+    --kt-fs-micro: 0.75rem;
+    --kt-fs-caption: 0.85rem;
+    --kt-fs-body: 1rem;
+    --kt-fs-emphasis: 1.05rem;
+    --kt-fs-title: 1.2rem;
+    --kt-fs-h2: 1.35rem;
+    --kt-fs-h1: 1.6rem;
+  }
 }
 
 html.dark {
@@ -55,6 +96,18 @@ html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   height: 100%;
+  /* Disable Android WebView / Chrome mobile "Font Boosting" (a.k.a.
+   * text autosizing).  Without this, any text inside a narrow flex
+   * column — chat textarea, settings tab strip, sidebar lists —
+   * gets inflated to 2-3× the declared size to "look readable",
+   * blowing past our ``font-size: 16px !important`` on inputs and
+   * making the chat input render at ~32-40px on a 360-414px phone.
+   * ``100%`` keeps our declared sizes intact while still allowing
+   * user pinch-zoom (which ``none`` would break).
+   * Spec: https://developer.mozilla.org/en-US/docs/Web/CSS/text-size-adjust
+   */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
   /* Mobile: prevent the whole page from scrolling sideways.  Scoped
      scrollers (settings tab strip, code blocks, log panels) opt back
      in via ``overflow-x: auto`` on their own container.  Without
@@ -108,6 +161,49 @@ body {
     padding-bottom: 0.6rem;
     min-height: 40px;
   }
+
+  /* Element Plus tab strip: bring it onto the same semantic body
+   * tier so the settings tabs match other chrome on mobile. */
+  .el-tabs__item {
+    padding-left: 0.85rem !important;
+    padding-right: 0.85rem !important;
+    font-size: var(--kt-fs-body) !important;
+  }
+}
+
+/* ===== Semantic size utility classes ================================
+ *
+ * Use these in markup INSTEAD OF ``text-sm`` / ``text-xs`` /
+ * ``text-[Npx]`` whenever the element belongs to a chrome surface
+ * (rail, header, tab strip, etc.).  This guarantees every site that
+ * wants "rail-item body text" gets THE SAME size, and a future tier
+ * tweak (mobile bump, density preset) reaches all of them in one
+ * place.
+ *
+ * Component-internal text (chat message bubbles, code blocks,
+ * etc.) can stay on UnoCSS classes — they aren't part of the
+ * cross-surface "alignment" concern.
+ */
+.kt-text-micro {
+  font-size: var(--kt-fs-micro);
+}
+.kt-text-caption {
+  font-size: var(--kt-fs-caption);
+}
+.kt-text-body {
+  font-size: var(--kt-fs-body);
+}
+.kt-text-emphasis {
+  font-size: var(--kt-fs-emphasis);
+}
+.kt-text-title {
+  font-size: var(--kt-fs-title);
+}
+.kt-text-h2 {
+  font-size: var(--kt-fs-h2);
+}
+.kt-text-h1 {
+  font-size: var(--kt-fs-h1);
 }
 
 /* ===== ``scrollbar-none`` utility ==================================

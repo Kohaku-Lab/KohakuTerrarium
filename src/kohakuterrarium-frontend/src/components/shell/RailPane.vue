@@ -4,7 +4,7 @@
       <!-- Brand + cluster pill + command palette trigger -->
       <div class="relative flex items-center gap-2 px-3 py-3">
         <BrandMark class="w-7 h-7 rounded-full shrink-0" />
-        <span class="text-sm flex-1 truncate">
+        <span class="kt-text-body flex-1 truncate">
           <span class="font-bold text-amber">Kohaku</span>
           <span class="font-light text-iolite-light dark:text-iolite-light">Terrarium</span>
         </span>

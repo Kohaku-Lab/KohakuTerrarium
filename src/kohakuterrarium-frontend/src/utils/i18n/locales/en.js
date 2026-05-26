@@ -407,6 +407,9 @@ export default {
       ? "1 pending request needs your reply"
       : `${count} pending requests need your reply`,
   "chat.pendingShow": "show",
+  "chat.attachFile": "Attach file",
+  "chat.attachImage": "Attach image",
+  "chat.moreActions": "More actions",
   "chat.toolBatchHeader": ({ count }) => `${count} tool calls`,
   "chat.toolBatchExpand": "Expand tool calls",
   "chat.toolBatchCollapse": "Collapse tool calls",

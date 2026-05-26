@@ -4,7 +4,7 @@
       <div class="i-carbon-menu text-lg" />
     </button>
     <BrandMark v-if="!tabs.activeTab" class="w-7 h-7 rounded-full shrink-0" />
-    <span class="text-sm font-medium text-warm-700 dark:text-warm-200 truncate flex-1">
+    <span class="kt-text-body font-medium text-warm-700 dark:text-warm-200 truncate flex-1">
       {{ title }}
     </span>
     <!-- Host-picker chip — replaces the old "force desktop mode"
