@@ -67,13 +67,31 @@ def _shell_override_env(shell_type: str) -> str | None:
 
 
 def _resolve_shell_executable(shell_type: str) -> str | None:
-    # Mobile profile (Android): the bundled busybox provides
-    # ``sh``-compatible behaviour for bash/sh/zsh requests.  We
-    # check this FIRST so an operator-supplied override env still
-    # wins for testing, but the default path on Android is the
-    # bundled sandbox (Android has no /bin and no PATH lookups
-    # produce useful results).
+    # Mobile profile (Android): every device since Android 1.0 ships
+    # ``/system/bin/sh`` (mksh — MirBSD Korn shell) plus toybox-backed
+    # ``/system/bin/{ls,grep,cat,find,…}``.  ``/system`` is mounted
+    # with the ``exec`` flag (unlike ``/data``) and the binaries are
+    # world-executable, so an app's subprocess can spawn them
+    # without any of the W^X / SELinux / PIE complications that
+    # block bundled busybox in the app's data dir.
+    #
+    # mksh is POSIX-compliant — every plain shell command the agent
+    # emits works; only bash-only extensions (``[[``, ``(( ))``,
+    # arrays, ``$'…'``) would break, and those are uncommon in tool
+    # use.  ``bash`` / ``sh`` / ``zsh`` requests all land on mksh
+    # here because none of those have stock-Android binaries either.
+    #
+    # The bundled-sandbox fallback below is kept for desktops that
+    # opt into the mobile profile for testing (and for any future
+    # APK that ships a proper PIE+bionic busybox).  Order:
+    #
+    #   1. ``/system/bin/sh`` (Android stock)
+    #   2. bundled ``sandbox_binary("sh")`` (when present)
+    #   3. operator override env / PATH lookup (desktop path)
     if is_mobile_profile() and shell_type in {"bash", "sh", "zsh"}:
+        system_sh = Path("/system/bin/sh")
+        if system_sh.is_file():
+            return str(system_sh)
         bundled = sandbox_binary("sh")
         if bundled is not None:
             return str(bundled)
@@ -377,19 +395,28 @@ class ShellTool(BaseTool):
         env = os.environ.copy()
         if self.config.env:
             env.update(self.config.env)
-        # Mobile profile: prepend the bundled sandbox bin dir to
-        # PATH so busybox sh can find its own applets via
-        # ``argv[0] = ls`` lookups when scripts shell out (busybox
-        # checks PATH after its internal applet table, which only
-        # matches when the symlink/binary literally exists).
-        # Without this, ``bash -c "ls"`` from inside our wrapped
-        # busybox would say "ls: not found" because Android has
-        # no /bin/ls.
+        # Mobile profile: Android has no ``/bin`` and no ``/usr/bin``,
+        # but ``/system/bin`` + ``/system/xbin`` carry the stock
+        # toybox-backed coreutils (``ls``, ``cat``, ``grep``,
+        # ``find``, ``sed``, ``awk``, ``date``, ``head``, ``tail``,
+        # …) plus the mksh shell and a few platform tools (``am``,
+        # ``pm``, ``logcat``).  Prepend both so ``sh -c "ls -la"``
+        # and the like resolve without needing a bundled busybox.
+        # The bundled sandbox bin dir is added LAST as a fallback
+        # for any applet toybox lacks (or for non-Android mobile-
+        # profile sideloads).
         if is_mobile_profile():
+            android_path_parts = []
+            for system_path in ("/system/bin", "/system/xbin"):
+                if Path(system_path).is_dir():
+                    android_path_parts.append(system_path)
             bin_dir = sandbox_bin_dir()
             if bin_dir is not None:
-                env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}".rstrip(
-                    os.pathsep
+                android_path_parts.append(str(bin_dir))
+            if android_path_parts:
+                existing = env.get("PATH", "")
+                env["PATH"] = os.pathsep.join(android_path_parts) + (
+                    os.pathsep + existing if existing else ""
                 )
 
         # Set working directory: context (agent-aware) > tool config > process cwd

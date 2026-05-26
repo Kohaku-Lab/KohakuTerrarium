@@ -128,8 +128,18 @@ def fetch_all(
     data = _load_manifest(manifest)
     abis: list[str] = list(data.get("abis", []))
     binaries: list[dict] = list(data.get("binaries", []))
-    if not abis or not binaries:
-        raise FetchError("manifest missing required keys 'abis' and 'binaries'")
+    if not abis:
+        raise FetchError("manifest missing required key 'abis'")
+    if not binaries:
+        # Empty manifest is legal — we use ``/system/bin/sh`` on
+        # Android now, no bundled binaries required.  Skip the
+        # download/verify loop entirely so the build doesn't fail
+        # on a perfectly-fine no-op manifest.
+        if not check_only:
+            out.mkdir(parents=True, exist_ok=True)
+            _write_runtime_manifest(out, binaries, abis)
+        print("no binaries declared in manifest — nothing to fetch")
+        return 0
 
     cache.mkdir(parents=True, exist_ok=True)
     if not check_only:

@@ -1,80 +1,33 @@
 # KohakuTerrarium Android sandbox — bundled static binaries
 #
-# The Android APK ships ~6MB of static Linux binaries (one busybox
-# per ABI) that the framework's bash tool + MCP-stdio path shell
-# out to.  These binaries CANNOT live in source control — they're
-# binary blobs that change per security release.  Instead this
-# manifest pins canonical-name + upstream-URL + SHA256 per
-# (binary, ABI).  ``packaging/android/fetch_sandbox.py`` downloads
-# each, verifies the hash, and lays them out under
-# ``packaging/android/bin/<abi>/<canonical_name>`` ready for
-# Briefcase to bundle as APK assets.
+# Reserved for future PIE+bionic-linked Android-native binaries.
+# **Currently empty.**  The bash tool resolves to ``/system/bin/sh``
+# (mksh) on the mobile profile and prepends ``/system/bin:/system/xbin``
+# to PATH so toybox-backed coreutils (``ls``, ``grep``, ``find``,
+# ``cat``, ``sed``, ``awk``, …) are found without any bundled
+# binary — ``/system`` is mounted with the ``exec`` flag (unlike
+# ``/data``) so apps can spawn those stock binaries without W^X /
+# PIE / SELinux gymnastics.
 #
-# We bundle ONLY busybox.  Rationale:
+# Previous attempt (commit hash in git log): bundled busybox from
+# https://busybox.net/downloads/binaries/1.31.0-defconfig-multiarch-musl/.
+# Two showstoppers caught after the fact:
 #
-#   - busybox provides ``sh``, ``grep``, ``find``, ``sed``, ``awk``,
-#     ``curl``, and ~290 other commands as a single multicall binary
-#   - The framework's ``grep`` and ``glob`` tools are pure-Python
-#     (verified — no subprocess calls), so we don't need standalone
-#     ripgrep / fd
-#   - There is no reliable static ``git`` for aarch64-Android.  The
-#     ``kt install`` tool works without git for PyPI + tarball URLs;
-#     git-URL install is documented as a 1.5.1 add via pygit2
+#   1. ``busybox-armv8l`` is named for the 32-bit ARMv8 userspace
+#      variant — it's actually a **32-bit** ARM ELF, not aarch64.
+#      Android rejects it in the ``arm64-v8a`` slot.
+#   2. All three (armv8l / armv7l / x86_64) are **non-PIE**.
+#      Android ≥ API 21 rejects non-PIE ``execve()`` with EACCES.
 #
-# Bumping the busybox version:
-#   1. Edit the URL + version below
-#   2. Run ``python packaging/android/fetch_sandbox.py --refresh``
-#      to get the new SHA256s
-#   3. Paste them in
-#   4. Commit only this file
+# Termux ships a proper aarch64-PIE ``libbusybox.so`` but it links
+# against ``libandroid-selinux.so`` (Termux-specific), so adopting
+# that would require shipping the selinux lib too.
+#
+# If we later need a real busybox (bash-only scripts, applets toybox
+# lacks like ``ash``-quirks), build PIE+bionic-linked binaries via
+# the NDK in ``dep/android-dep-collection`` and put the URLs back here.
 
-# Android ABIs we target.
-# - arm64-v8a: required by Play Store for new apps in 2026
-# - armeabi-v7a: still ~10% of active Android devices
-# - x86_64: emulator coverage (developers' workstations) +
-#   ChromeOS Android subsystem
 abis = ["arm64-v8a", "armeabi-v7a", "x86_64"]
 
-# --------------------------------------------------------------------------
-# busybox — single multicall binary, provides sh + ~300 commands
-# --------------------------------------------------------------------------
-# Source: https://busybox.net/downloads/binaries/ — official static
-# build via the "1.31.0-defconfig-multiarch-musl" snapshot.  This is
-# the most recent set busybox.net publishes for a wide ABI range
-# (arm32 + arm64 + x86_64 all available).  Newer releases on
-# busybox.net only ship x86_64; for cross-arm coverage we stick to
-# 1.31.0.  CVE follow-ups: this release predates 2024 — should be
-# rebuilt-from-source in 1.5.1 once the build infra lands.
-#
-# The output filename is ``libbusybox.so`` rather than ``busybox``
-# so the binary can ship in the APK's ``jniLibs/<abi>/`` slot —
-# Android's PackageManager extracts ``lib*.so`` files in that slot
-# into ``ApplicationInfo.nativeLibraryDir``, which is the only
-# directory in an app's installation that survives Android 10+'s
-# W^X / noexec policy.  Binaries copied to any other writable path
-# under ``/data/data/<pkg>/`` get rejected by ``execve()`` with
-# EACCES regardless of their +x bit.  The bash tool overrides
-# argv[0] back to ``busybox`` at exec time so busybox's multicall
-# dispatcher still recognises its own applet name.
-[[binaries]]
-name = "libbusybox.so"
-version = "1.31.0"
-
-  [[binaries.artifacts]]
-  abi = "arm64-v8a"
-  # busybox publishes arm64 as "armv8l" (the 32-bit-userspace
-  # variant of armv8); Android 64-bit userspace runs these via
-  # the bionic linker fine.  Confirmed via ``file busybox-armv8l``
-  # → ELF 64-bit LSB executable, ARM aarch64.
-  url = "https://busybox.net/downloads/binaries/1.31.0-defconfig-multiarch-musl/busybox-armv8l"
-  sha256 = "141adb1b625a6f44c4b114f76b4387b4ea4f7ab802b88eb40e0d2f6adcccb1c3"
-
-  [[binaries.artifacts]]
-  abi = "armeabi-v7a"
-  url = "https://busybox.net/downloads/binaries/1.31.0-defconfig-multiarch-musl/busybox-armv7l"
-  sha256 = "cd04052b8b6885f75f50b2a280bfcbf849d8710c8e61d369c533acf307eda064"
-
-  [[binaries.artifacts]]
-  abi = "x86_64"
-  url = "https://busybox.net/downloads/binaries/1.31.0-defconfig-multiarch-musl/busybox-x86_64"
-  sha256 = "51fcb60efbdf3e579550e9ab893730df56b33d0cc928a2a6467bd846cdfef7d8"
+# Reserved for future binaries.  Empty for now — see header.
+binaries = []
