@@ -19,6 +19,7 @@ from kohakuterrarium.builtins.tool_catalog import (
 # Import tools to trigger registration via @register_builtin decorator
 from kohakuterrarium.builtins.tools.ask_user import AskUserTool
 from kohakuterrarium.builtins.tools.bash import BashTool
+from kohakuterrarium.builtins.tools.delete_trigger import DeleteTriggerTool
 from kohakuterrarium.builtins.tools.python import PythonTool
 from kohakuterrarium.builtins.tools.edit import EditTool
 from kohakuterrarium.builtins.tools.glob import GlobTool
@@ -55,6 +56,7 @@ __all__ = [
     # Tools
     "AskUserTool",
     "BashTool",
+    "DeleteTriggerTool",
     "PythonTool",
     "ReadTool",
     "ScratchpadTool",
