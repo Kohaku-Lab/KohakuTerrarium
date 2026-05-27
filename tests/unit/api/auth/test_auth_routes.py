@@ -238,6 +238,82 @@ class TestLogin:
             )
         assert r.status_code == 401
 
+    def test_browser_kind_default_no_bearer(self, app):
+        """``client_kind`` defaults to ``browser`` — response body must
+        NOT carry a ``token`` field.  The session cookie alone is the
+        credential for same-origin web flows."""
+        self._seed(app)
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/auth/login",
+                json={"username": "alice", "password": "hunter2"},
+            )
+        assert r.status_code == 200
+        body = r.json()
+        assert "token" not in body
+        # Cookie is still set in browser mode.
+        assert "kt_session" in r.cookies
+
+    def test_api_kind_returns_bearer_token(self, app):
+        """``client_kind=api`` mints a long-lived bearer alongside the
+        cookie.  Cross-origin clients (which can't carry cookies due to
+        CORS-without-credentials) use this to bootstrap a credential.
+        """
+        self._seed(app)
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/auth/login",
+                json={
+                    "username": "alice",
+                    "password": "hunter2",
+                    "client_kind": "api",
+                },
+            )
+        assert r.status_code == 200
+        body = r.json()
+        token = body.get("token")
+        assert isinstance(token, str) and token
+        # The minted token must authenticate subsequent requests sent
+        # as ``Authorization: Bearer ...`` — without ever sending the
+        # cookie.  We use a fresh client so no cookie jar bleeds in.
+        with TestClient(app) as client_b:
+            r2 = client_b.get(
+                "/api/auth/me", headers={"Authorization": f"Bearer {token}"}
+            )
+        assert r2.status_code == 200
+        assert r2.json()["username"] == "alice"
+
+
+class TestRegisterReturnsBearer:
+    def test_browser_kind_no_bearer(self, app):
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/auth/register",
+                json={"username": "alice", "password": "x"},
+            )
+        assert r.status_code == 200
+        assert "token" not in r.json()
+
+    def test_api_kind_mints_bearer(self, app):
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/auth/register",
+                json={
+                    "username": "alice",
+                    "password": "x",
+                    "client_kind": "api",
+                },
+            )
+        assert r.status_code == 200
+        token = r.json().get("token")
+        assert isinstance(token, str) and token
+        with TestClient(app) as client_b:
+            r2 = client_b.get(
+                "/api/auth/me", headers={"Authorization": f"Bearer {token}"}
+            )
+        assert r2.status_code == 200
+        assert r2.json()["username"] == "alice"
+
 
 class TestLogout:
     def test_logout_clears_cookie(self, app):
