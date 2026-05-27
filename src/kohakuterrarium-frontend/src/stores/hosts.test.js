@@ -167,9 +167,31 @@ describe("hosts store — persistence", () => {
     const raw = localStorage.getItem("kt.hosts.v1")
     expect(raw).toBeTruthy()
     const parsed = JSON.parse(raw)
-    expect(parsed.schema).toBe(1)
+    // Schema v2 — bumped when adminToken / userToken / currentUser
+    // fields were added.  v1 reads remain accepted by the loader.
+    expect(parsed.schema).toBe(2)
     expect(parsed.hosts).toHaveLength(1)
     expect(parsed.hosts[0].url).toBe("http://kt")
+  })
+
+  it("accepts schema v1 persisted state (lossless migration)", () => {
+    localStorage.setItem(
+      "kt.hosts.v1",
+      JSON.stringify({
+        schema: 1,
+        hosts: [{ id: "legacy", name: "Legacy", url: "http://kt", token: "t" }],
+        activeHostId: "legacy",
+      }),
+    )
+    setActivePinia(createPinia())
+    const store = useHostsStore()
+    expect(store.hosts).toHaveLength(1)
+    expect(store.hosts[0].url).toBe("http://kt")
+    expect(store.hosts[0].token).toBe("t")
+    // Missing auth fields backfill to safe defaults.
+    expect(store.hosts[0].adminToken).toBe("")
+    expect(store.hosts[0].userToken).toBe("")
+    expect(store.hosts[0].currentUser).toBeNull()
   })
 
   it("setActive writes to localStorage", () => {
@@ -210,6 +232,88 @@ describe("hosts store — persistence", () => {
     setActivePinia(createPinia())
     const store = useHostsStore()
     expect(store.activeHostId).toBeNull()
+  })
+})
+
+describe("hosts store — L3 admin token", () => {
+  it("addHost stores adminToken when supplied", () => {
+    const store = useHostsStore()
+    store.addHost({ name: "X", url: "http://kt", adminToken: "admin-secret" })
+    expect(store.hosts[0].adminToken).toBe("admin-secret")
+  })
+
+  it("updateHost rotates adminToken", () => {
+    const store = useHostsStore()
+    const id = store.addHost({ name: "X", url: "http://kt", adminToken: "old" })
+    store.updateHost(id, { adminToken: "new" })
+    expect(store.hosts[0].adminToken).toBe("new")
+  })
+
+  it("activeAdminToken getter reflects the active host", () => {
+    const store = useHostsStore()
+    const id = store.addHost({ name: "X", url: "http://kt", adminToken: "secret" })
+    store.setActive(id)
+    expect(store.activeAdminToken).toBe("secret")
+  })
+
+  it("activeAdminToken is empty in same-origin mode", () => {
+    expect(useHostsStore().activeAdminToken).toBe("")
+  })
+})
+
+describe("hosts store — L4 user session", () => {
+  it("setUserSession records token + user snapshot", () => {
+    const store = useHostsStore()
+    const id = store.addHost({ name: "X", url: "http://kt" })
+    store.setUserSession(id, {
+      userToken: "bearer-abc",
+      user: { id: 1, username: "alice", role: "admin" },
+    })
+    expect(store.hosts[0].userToken).toBe("bearer-abc")
+    expect(store.hosts[0].currentUser).toEqual({
+      id: 1,
+      username: "alice",
+      role: "admin",
+    })
+  })
+
+  it("clearUserSession resets token + user", () => {
+    const store = useHostsStore()
+    const id = store.addHost({ name: "X", url: "http://kt" })
+    store.setUserSession(id, { userToken: "x", user: { id: 1, username: "a" } })
+    store.clearUserSession(id)
+    expect(store.hosts[0].userToken).toBe("")
+    expect(store.hosts[0].currentUser).toBeNull()
+  })
+
+  it("activeUserToken + activeUser getters reflect the active host", () => {
+    const store = useHostsStore()
+    const id = store.addHost({ name: "X", url: "http://kt" })
+    store.setActive(id)
+    store.setUserSession(id, {
+      userToken: "u",
+      user: { id: 7, username: "bob", role: "user" },
+    })
+    expect(store.activeUserToken).toBe("u")
+    expect(store.activeUser).toEqual({ id: 7, username: "bob", role: "user" })
+  })
+
+  it("setUserSession persists across store reloads", () => {
+    const s1 = useHostsStore()
+    const id = s1.addHost({ name: "X", url: "http://kt" })
+    s1.setUserSession(id, {
+      userToken: "u-persist",
+      user: { id: 1, username: "alice" },
+    })
+    setActivePinia(createPinia())
+    const s2 = useHostsStore()
+    expect(s2.hosts[0].userToken).toBe("u-persist")
+    expect(s2.hosts[0].currentUser?.username).toBe("alice")
+  })
+
+  it("setUserSession returns false for unknown host id", () => {
+    const store = useHostsStore()
+    expect(store.setUserSession("ghost", { userToken: "x", user: {} })).toBe(false)
   })
 })
 
