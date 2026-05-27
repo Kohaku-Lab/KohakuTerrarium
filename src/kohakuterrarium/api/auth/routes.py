@@ -84,11 +84,29 @@ class RegisterRequest(BaseModel):
     invitation_token: str = Field(
         default="", description="Required in invite_only mode"
     )
+    client_kind: Literal["browser", "api"] = Field(
+        default="browser",
+        description=(
+            "``browser`` (default) sets a session cookie only — fine for "
+            "same-origin web frontends.  ``api`` ALSO mints a long-lived "
+            "API token and returns its plaintext in the response body so "
+            "cross-origin frontends, CLIs, and bundled apps can carry the "
+            "credential in ``Authorization: Bearer ...`` without relying "
+            "on cookies (which CORS-without-credentials blocks)."
+        ),
+    )
 
 
 class LoginRequest(BaseModel):
     username: str
     password: str
+    client_kind: Literal["browser", "api"] = Field(
+        default="browser",
+        description=(
+            "Same semantics as on ``RegisterRequest`` — ``api`` returns "
+            "an additional plaintext bearer token alongside the cookie."
+        ),
+    )
 
 
 class TokenCreateRequest(BaseModel):
@@ -167,6 +185,32 @@ def _set_session_cookie(
     # Surface the expiry to the frontend as well so it can prompt the
     # user before the cookie silently dies.
     response.headers["X-Session-Expires"] = expires_at
+
+
+# Auto-token name used when login/register mints a bearer for an ``api``
+# client.  Distinct from user-named tokens (created via ``POST /tokens``)
+# so the listing UI can mark these as session-derived if desired.
+_AUTO_API_TOKEN_NAME = "auto:web-login"
+
+
+def _maybe_mint_api_token(
+    conn,
+    user: User,
+    client_kind: str,
+) -> str:
+    """Return a fresh plaintext bearer token for ``api`` clients.
+
+    ``browser`` clients return ``""`` — the cookie alone is enough for
+    same-origin web flows.  ``api`` clients ALWAYS receive a freshly
+    minted token (we do not reuse existing rows because the plaintext
+    only exists at creation time; reusing the row would force the user
+    to re-issue regardless).  Multiple sessions are fine — the user can
+    revoke stale ones via ``DELETE /api/auth/tokens/{id}``.
+    """
+    if client_kind != "api":
+        return ""
+    plaintext, _ = tokens_db.create_token(conn, user.id, _AUTO_API_TOKEN_NAME)
+    return plaintext
 
 
 def _registration_allowed_or_raise(
@@ -293,9 +337,13 @@ def register(
             conn, user.id, expire_hours=auth_config.session_expire_hours
         )
         users_db.touch_last_login(conn, user.id)
+        bearer = _maybe_mint_api_token(conn, user, req.client_kind)
 
     _set_session_cookie(response, session_id, expires_at)
-    return {"user": _user_public(user), "expires_at": expires_at}
+    payload: dict[str, object] = {"user": _user_public(user), "expires_at": expires_at}
+    if bearer:
+        payload["token"] = bearer
+    return payload
 
 
 @router.post("/login")
@@ -328,9 +376,13 @@ def login(
             conn, user.id, expire_hours=auth_config.session_expire_hours
         )
         users_db.touch_last_login(conn, user.id)
+        bearer = _maybe_mint_api_token(conn, user, req.client_kind)
 
     _set_session_cookie(response, session_id, expires_at)
-    return {"user": _user_public(user), "expires_at": expires_at}
+    payload: dict[str, object] = {"user": _user_public(user), "expires_at": expires_at}
+    if bearer:
+        payload["token"] = bearer
+    return payload
 
 
 @router.post("/logout")
