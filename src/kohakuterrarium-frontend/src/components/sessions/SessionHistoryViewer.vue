@@ -63,7 +63,6 @@ const { isCompact } = useDensity()
 const isMobile = isCompact
 const route = useRoute()
 const router = useRouter()
-const chat = useChatStore()
 const detail = useSessionDetailStore()
 
 // In v1 the URL is ``/sessions/:name`` and ``route.params.name`` is the
@@ -73,6 +72,44 @@ const detail = useSessionDetailStore()
 // store via its ``sessionNameProp``. Reading from the store first keeps
 // both paths working without forwarding props through ConvTab.
 const sessionName = computed(() => detail.name || String(route.params.name || ""))
+
+// ChatPanel scopes its store by ``props.instance.id`` (see
+// ``useChatStore`` factory). The viewer renders ``<ChatPanel
+// :instance="viewerInstance">`` with ``id = "session:<name>"``, so the
+// viewer's own writes (``loadTarget`` → ``messagesByTab[tab]``) MUST go
+// into that SAME scope or ChatPanel's reads come up empty and the
+// transcript renders blank. Previously this called ``useChatStore()``
+// with no argument, which inside ``<script setup>`` resolves through
+// ``injectScope()`` — in the v1 ``/sessions/:name`` route there's no
+// AttachTab ancestor providing a scope, so it fell back to the
+// ``"default"`` singleton; ChatPanel meanwhile created a fresh
+// ``"session:<name>"``-scoped store and read its empty
+// ``messagesByTab``. Result: the saved session viewer showed nothing.
+const _chatStoreRef = shallowRef(null)
+const chat = new Proxy(
+  {},
+  {
+    get(_target, key) {
+      const inner = _chatStoreRef.value
+      if (!inner) return undefined
+      return inner[key]
+    },
+    set(_target, key, value) {
+      const inner = _chatStoreRef.value
+      if (!inner) return false
+      inner[key] = value
+      return true
+    },
+  },
+)
+watch(
+  sessionName,
+  (name) => {
+    if (!name) return
+    _chatStoreRef.value = useChatStore(`session:${name}`)
+  },
+  { immediate: true },
+)
 const loading = ref(false)
 const error = ref("")
 const viewerMeta = ref(null)
@@ -103,7 +140,7 @@ function resetViewer() {
   chat.tokenUsage = {}
   chat.runningJobs = {}
   chat.unreadCounts = {}
-  chat.queuedMessages = []
+  chat.queuedMessagesByTab = {}
   chat.processingByTab = {}
   chat.sessionInfo = {
     sessionId: viewerMeta.value?.session_id || "",

@@ -111,7 +111,7 @@
       <!-- Queued messages: shown above input, not in main chat.
            Capped to QUEUE_VISIBLE items; overflow collapses into a "+N more"
            toggle so the input doesn't get pushed off-screen. -->
-      <div v-if="!readOnly && chat.queuedMessages.length" class="px-4 pt-2 flex flex-col gap-1.5">
+      <div v-if="!readOnly && activeQueue.length" class="px-4 pt-2 flex flex-col gap-1.5">
         <div v-for="qm in visibleQueued" :key="qm.id" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber/5 dark:bg-amber/5 border border-amber/20 text-sm">
           <span class="i-carbon-time text-amber/60 text-xs flex-shrink-0" />
           <span class="text-warm-500 dark:text-warm-400 truncate">{{ qm.content }}</span>
@@ -259,12 +259,16 @@ const queueExpanded = ref(false)
 const dragOver = ref(false)
 let dragDepth = 0
 
+// Active tab's queue — the chat store keeps queues per tab so the
+// "queued" banner only appears on the tab that owns the queued
+// message, never on a sibling tab the user happens to be looking at.
+const activeQueue = computed(() => chat.activeQueuedMessages)
 const visibleQueued = computed(() => {
-  const queue = chat.queuedMessages
+  const queue = activeQueue.value
   if (queueExpanded.value || queue.length <= QUEUE_VISIBLE) return queue
   return queue.slice(0, QUEUE_VISIBLE)
 })
-const hiddenQueuedCount = computed(() => Math.max(0, chat.queuedMessages.length - QUEUE_VISIBLE))
+const hiddenQueuedCount = computed(() => Math.max(0, activeQueue.value.length - QUEUE_VISIBLE))
 
 function draftKey() {
   const instanceId = props.instance?.id || chat._instanceId || ""

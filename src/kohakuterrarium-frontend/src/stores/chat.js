@@ -51,11 +51,41 @@ function contentSignature(content) {
   return JSON.stringify(normalized)
 }
 
+function textSignature(content) {
+  // Coarser comparator used as a fallback by ``_handleUserInputInjected``
+  // when the strict ``contentSignature`` comparison fails. Strips
+  // multimodal parts and trims whitespace so a queue entry whose
+  // ``contentParts`` slightly differs from the backend's drained
+  // ``data.content`` (extra image part, mismatched dict-vs-typed
+  // shape, trailing whitespace) still matches by the text the user
+  // actually typed. Returns ``""`` when no text content present.
+  if (typeof content === "string") return content.trim()
+  if (!Array.isArray(content)) return ""
+  return content
+    .filter((p) => p && typeof p === "object" && p.type === "text")
+    .map((p) => String(p.text || "").trim())
+    .join("\n")
+    .trim()
+}
+
 function toolResultPayload(result, data = {}) {
+  // Backend flattens whitelisted metadata fields onto the top level
+  // of the WS frame (see ``_STREAM_METADATA_KEYS`` in
+  // studio/attach/_event_stream.py) — including ``canvas_preview``.
+  // History events do the same shape: canvas_preview lives at the
+  // top level of the persisted ``tool_result`` event row. The FE's
+  // ``resultMeta`` is the unified bag we expose to renderers, so
+  // fold the flat keys back into a nested object here. Without this,
+  // ``data.metadata`` is undefined and the canvas store never picks
+  // the file preview up (Feat 1 wire-up bug).
+  let resultMeta = data.result_meta || data.output_meta || data.metadata || null
+  if (data.canvas_preview && (!resultMeta || !resultMeta.canvas_preview)) {
+    resultMeta = { ...(resultMeta || {}), canvas_preview: data.canvas_preview }
+  }
   return {
     result,
     resultParts: normalizeContentParts(result),
-    resultMeta: data.result_meta || data.output_meta || data.metadata || null,
+    resultMeta,
   }
 }
 
@@ -200,7 +230,6 @@ function _resolveSelectedBranches(events, parentPaths, branchView) {
   const turns = [...branchesByTurn.keys()].sort((a, b) => a - b)
   for (const ti of turns) {
     const candidates = branchesByTurn.get(ti).filter((entry) => _pathMatches(entry.path, selected))
-    if (!candidates.length) continue
     if (branchView && Object.prototype.hasOwnProperty.call(branchView, ti)) {
       const requested = branchView[ti]
       const match = candidates.find((entry) => entry.branch === requested)
@@ -208,7 +237,19 @@ function _resolveSelectedBranches(events, parentPaths, branchView) {
         selected.set(ti, match.branch)
         continue
       }
+      // Honor the override STRICTLY even when no candidate carries the
+      // requested branch yet. Edit-regen / regenerate set ``branchView``
+      // to a predicted branch BEFORE the backend's events arrive; the
+      // previous ``Math.max(candidates)`` fallback flipped the render
+      // back to the OLD branch during that gap, which the user
+      // reported as "previous branch content suddenly displayed".
+      // Returning ``requested`` keeps the predicted branch sticky;
+      // ``liveIds`` then renders empty for that (turn, branch) until
+      // the real events land. The next resync rebuilds correctly.
+      selected.set(ti, requested)
+      continue
     }
+    if (!candidates.length) continue
     selected.set(ti, Math.max(...candidates.map((entry) => entry.branch)))
   }
   return selected
@@ -306,6 +347,18 @@ export function _replayEvents(messages, events, branchView = null, liveRunningJo
   if (!events?.length) return { messages: _convertHistory(messages), pendingJobs: {} }
 
   events = _dedupeAdjacentDuplicateEvents(events)
+  // Drop ``_synthetic_resume``-marked events emitted by the backend's
+  // ``normalize_resumable_events`` when it sees an unfinished
+  // tool_call / subagent_call AND the caller failed to flag that job
+  // as live. These synthetic terminals were the source of Bug 1: a
+  // background-promoted sub-agent (no longer in ``_direct_job_meta``
+  // but still alive in ``subagent_manager``) was wrongly synthesized
+  // as ``interrupted`` and the running bubble flipped to "interrupted
+  // by session resume". The defensive fix is on the FE side because
+  // backend can lag in tracking promoted jobs; the still-live jobs
+  // then fall through to the pendingJobs sweep below and surface
+  // as "running" with no terminal event consumed.
+  events = events.filter((evt) => !evt?._synthetic_resume)
   const { byTurn, liveIds, branchSelection } = _collectBranchMetadata(events, branchView)
 
   // Pre-pass: compact_replace ranges hide every event whose event_id
@@ -621,6 +674,33 @@ export function _replayEvents(messages, events, branchView = null, liveRunningJo
         contentParts: normalized.contentParts,
         timestamp: "",
       })
+    } else if (t === "user_input_injected") {
+      // Mid-turn injection (Feat 3) — the user typed during processing
+      // and the backend folded it into the running turn. Distinct
+      // event type because it shares (turn, branch) with the trigger
+      // that started the turn and would collide with the dedupe above.
+      //
+      // Order invariant: this bubble lands AFTER the assistant that
+      // was streaming when it arrived, and the next text_chunk starts
+      // a FRESH assistant after it. Without resetting ``cur``, every
+      // subsequent text part would keep folding into the round-1
+      // assistant — yielding [user(A), user(B), assistant("to-A to-B")]
+      // instead of [user(A), assistant("to-A"), user(B), assistant("to-B")].
+      if (cur) {
+        for (const p of cur.parts) {
+          if (p.type === "text") p._streaming = false
+        }
+      }
+      cur = null
+      const normalized = normalizeMessageContent(evt.content)
+      result.push({
+        id: "h_" + result.length,
+        role: "user",
+        content: normalized.content,
+        contentParts: normalized.contentParts,
+        injectedMidTurn: true,
+        timestamp: "",
+      })
     } else if (t === "processing_start") {
       cur = {
         id: "h_" + result.length,
@@ -717,7 +797,7 @@ export function _replayEvents(messages, events, branchView = null, liveRunningJo
         updateTool(
           evt.name,
           evt.result || evt.output || evt.detail,
-          { tools_used: evt.tools_used },
+          { tools_used: evt.tools_used, canvas_preview: evt.canvas_preview },
           evt.job_id,
         )
       } else if (at === "tool_error") {
@@ -792,6 +872,11 @@ export function _replayEvents(messages, events, branchView = null, liveRunningJo
           output_meta: evt.output_meta,
           result_meta: evt.result_meta,
           metadata: evt.metadata,
+          // Backend persists canvas_preview at the top level of the
+          // tool_result event row (session/output._handle_tool_done).
+          // Forward it so updateTool's resultMeta picks it up — that's
+          // what the canvas store later reads (Feat 1).
+          canvas_preview: evt.canvas_preview,
         },
         evt.call_id || evt.job_id,
       )
@@ -1162,8 +1247,15 @@ const _chatStoreOptions = {
     /** Connection status for the single instance WS. Used by the UI to
      *  show "reconnecting" banners. "open" | "reconnecting" | "closed" */
     wsStatus: "closed",
-    /** @type {Array<{id: string, content: string, timestamp: string}>} Messages queued while agent is processing */
-    queuedMessages: [],
+    /**
+     * Per-tab user-message queue. Messages submitted while the target
+     * tab is mid-stream sit here until ``_promoteQueuedMessages`` flushes
+     * them into the main message list — and they MUST be tab-scoped so
+     * typing into tab A while tab A's agent is busy does not show a
+     * "queued" banner on tabs B/C the user happens to look at.
+     * @type {Object<string, Array<{id: string, content: string, timestamp: string}>>}
+     */
+    queuedMessagesByTab: {},
     /** @type {number} Monotonic token to ignore stale history/WS callbacks after instance switches */
     _instanceGeneration: 0,
     /** @type {Record<string, number>} Recent user message signatures for cross-tab dedupe */
@@ -1213,6 +1305,18 @@ const _chatStoreOptions = {
     processing: (state) => (state.activeTab ? !!state.processingByTab[state.activeTab] : false),
     /** True when any tab is currently streaming. */
     anyProcessing: (state) => Object.values(state.processingByTab).some(Boolean),
+    /**
+     * Per-tab queued-message accessor. Templates that previously read
+     * ``chat.queuedMessages`` should switch to ``chat.activeQueuedMessages``
+     * so the "Queued" banner only appears on the tab where the message
+     * is waiting — typing into tab A's busy stream must not surface a
+     * banner on tab B.
+     */
+    activeQueuedMessages: (state) => {
+      const tab = state.activeTab
+      if (!tab) return []
+      return state.queuedMessagesByTab[tab] || []
+    },
     /**
      * True when the active tab is currently generating AND the user is
      * viewing the very branch that's being generated. The "KohakUwUing..."
@@ -1322,7 +1426,7 @@ const _chatStoreOptions = {
       this.tokenUsage = {}
       this.runningJobs = {}
       this.unreadCounts = {}
-      this.queuedMessages = []
+      this.queuedMessagesByTab = {}
       this.processingByTab = {}
       this._recentUserInputs = {}
       this._branchResyncPendingByTab = {}
@@ -1477,9 +1581,13 @@ const _chatStoreOptions = {
 
       this._recentUserInputs[`${tab}:${signature}`] = now
       if (this.processingByTab[tab]) {
-        // Don't put in main chat — hold in queue, shown above input box
+        // Don't put in main chat — hold in this tab's queue, shown
+        // above the input box. The queue is per-tab so a busy stream
+        // on tab A never surfaces a "queued" banner on tab B (Bug 3).
         msg.queued = true
-        this.queuedMessages.push(msg)
+        msg.queuedTab = tab
+        if (!this.queuedMessagesByTab[tab]) this.queuedMessagesByTab[tab] = []
+        this.queuedMessagesByTab[tab].push(msg)
       } else {
         this._addMsg(tab, msg)
       }
@@ -1975,6 +2083,31 @@ const _chatStoreOptions = {
           cached: prev.cached + (data.cached_tokens || 0),
           lastPrompt: data.prompt_tokens || prev.lastPrompt,
         }
+        return
+      }
+
+      if (at === "user_input_injected") {
+        // Feat 3 — backend just folded a buffered user_input into
+        // the current turn. Clear the matching queued banner and
+        // surface the message in the chat as a normal user bubble.
+        // Branch-isolation: only relevant for the viewed branch.
+        if (this._frameMatchesViewedBranch(source, data)) {
+          this._handleUserInputInjected(source, data)
+        }
+        return
+      }
+
+      if (at === "interrupt") {
+        // The agent's controller was cancelled mid-turn (user clicked
+        // interrupt, or the backend's flush-after-interrupt promoted
+        // buffered events into fresh turns). The FE's queue MUST clear
+        // here — otherwise the queued banner sticks forever because the
+        // expected ``user_input_injected`` activity never fires for the
+        // cancelled turn. Promotes the queue into chat history so the
+        // user still sees what they typed; the next turn (started by
+        // the agent's flush-after-interrupt) will pick those messages
+        // up as fresh inputs.
+        this._promoteQueuedMessages(source)
         return
       }
 
@@ -2793,37 +2926,54 @@ const _chatStoreOptions = {
         const { terrariumAPI } = await import("@/utils/api")
         const data = await terrariumAPI.getHistory(this._instanceGraphId, tab)
         if (!data?.events) return false
-        // Cache fresh events. PRESERVE the user's branch overrides:
-        // wiping ``branchViewByTab`` here was the historical source of
-        // "I switched to branch 1 of turn 2, did an unrelated action,
-        // and was yanked back to the latest branch." The replay's
-        // default-latest semantics already covers any turns the user
-        // hasn't explicitly overridden, so retaining existing overrides
-        // is safe and matches user intent.
-        this.eventsByTab[tab] = data.events
-        if (!this.branchViewByTab[tab]) this.branchViewByTab[tab] = {}
-        this._rebuildMessages(tab)
 
+        // Check completeness BEFORE touching state. If a branch op is
+        // pending (regen / edit-and-rerun) and the expected new branch
+        // hasn't landed in /history yet, do NOT clobber the optimistic
+        // ``eventsByTab`` / ``messagesByTab`` with stale data.
+        //
+        // Bug class fixed here (user-reported): with an edit pending
+        // for ``turn=1, expected_branch=2``, a /history fetch that
+        // races ahead of backend persistence may return ONLY old
+        // branch events. ``_resolveSelectedBranches`` then falls back
+        // to ``Math.max(candidates)=1`` (old branch), and the rebuild
+        // POPS the old branch's content onto the screen — even though
+        // ``branchView[1]=2``. Plus this used to return ``false`` →
+        // ``ChatMessage.confirmEdit`` re-opens the edit panel with
+        // the user's text. Guarding the rebuild keeps the optimistic
+        // UI visible until the new branch lands.
         const pending = this._branchResyncPendingByTab[tab]
         const expectedBranchByTurn = pending?.expectedBranchByTurn || {}
+        let complete = true
         if (Object.keys(expectedBranchByTurn).length) {
           const { branchMeta } = _replayEvents([], data.events)
           const branchSelection = branchMeta?.branchSelection || new Map()
-          let complete = true
           for (const [turn, branch] of Object.entries(expectedBranchByTurn)) {
             if (branchSelection.get(Number(turn)) !== branch) {
               complete = false
               break
             }
           }
-          if (!complete) {
-            // Messages already rebuilt with what we have; just keep
-            // retrying so the navigator catches up once the new branch
-            // is fully written to the session store.
-            this._scheduleBranchResync(tab)
-            return false
-          }
         }
+
+        if (!complete) {
+          // Don't replace events / rebuild — keep optimistic state
+          // visible. Schedule a retry so the navigator eventually
+          // catches up once the new branch is fully written.
+          this._scheduleBranchResync(tab)
+          // Return true so callers (editMessage / regenerate) don't
+          // treat this as a hard failure that re-opens the edit panel.
+          // The retry timer will reconcile when the backend catches up.
+          return true
+        }
+
+        // Cache fresh events. PRESERVE the user's branch overrides:
+        // wiping ``branchViewByTab`` here was the historical source of
+        // "I switched to branch 1 of turn 2, did an unrelated action,
+        // and was yanked back to the latest branch."
+        this.eventsByTab[tab] = data.events
+        if (!this.branchViewByTab[tab]) this.branchViewByTab[tab] = {}
+        this._rebuildMessages(tab)
         delete this._branchResyncPendingByTab[tab]
         return true
       } catch (e) {
@@ -2966,6 +3116,93 @@ const _chatStoreOptions = {
       })
     },
 
+    _handleUserInputInjected(source, data) {
+      // Backend just folded a buffered ``user_input`` into the
+      // current turn (Feat 3 mid-turn drain). If the FE had a
+      // matching ``queuedMessagesByTab[source]`` entry — the typical
+      // path when the user typed during processing — promote that
+      // exact entry to the visible chat. If no match exists (e.g.
+      // a programmatic/trigger injection), append a fresh user
+      // bubble so the model's view stays consistent with the chat.
+      if (!source) return
+      if (!this.messagesByTab[source]) return
+      const queue = this.queuedMessagesByTab[source] || []
+      const target = contentSignature(data.content || "")
+      const targetText = textSignature(data.content || "")
+      // Try strict JSON signature match first (catches the common
+      // case where FE queued contentParts exactly match the backend's
+      // drained content). Fall back to a text-only comparator so a
+      // queue entry whose shape diverged from the backend's drained
+      // form (e.g. backend emitted a plain string while FE queued a
+      // content-parts list) still pops the right entry instead of
+      // sticking the banner forever AND appending a phantom bubble.
+      let idx = queue.findIndex(
+        (m) => contentSignature(m.contentParts || m.content || "") === target,
+      )
+      if (idx === -1 && targetText) {
+        idx = queue.findIndex(
+          (m) => textSignature(m.contentParts || m.content || "") === targetText,
+        )
+      }
+      if (idx !== -1) {
+        // Snapshot a fresh object before splicing — mutating + reusing
+        // the reactive proxy that just left ``queuedMessagesByTab`` has
+        // historically caused render hiccups when both collections
+        // briefly track the same identity. Building a clean clone
+        // detaches the new message from the queue's reactivity graph.
+        const original = queue[idx]
+        queue.splice(idx, 1)
+        // Close the currently-streaming assistant (if any) before
+        // pushing user(B). Without this, the next text_chunk's
+        // ``_ensureAssistantMsg`` reuses the same assistant because
+        // it's still ``_streaming``, folding round-2 chunks into the
+        // round-1 bubble — same bug class as the replay path.
+        this._closeStreamingAssistant(source)
+        this._addMsg(source, {
+          id: original.id,
+          role: "user",
+          content: original.content,
+          contentParts: original.contentParts,
+          timestamp: original.timestamp,
+          injectedMidTurn: true,
+        })
+        return
+      }
+      // Programmatic / trigger injection — no FE counterpart.
+      const normalized = normalizeMessageContent(data.content || "")
+      const now = Date.now()
+      this._closeStreamingAssistant(source)
+      this._addMsg(source, {
+        id: `u_inj_${now}`,
+        role: "user",
+        content: normalized.content,
+        contentParts: normalized.contentParts,
+        timestamp: data.timestamp || new Date((data.ts || now / 1000) * 1000).toISOString(),
+        injectedMidTurn: true,
+      })
+    },
+
+    _closeStreamingAssistant(source) {
+      // Mark the currently-streaming assistant (last in
+      // ``messagesByTab[source]``) as finished so the NEXT text_chunk
+      // starts a fresh assistant via ``_ensureAssistantMsg`` instead
+      // of folding into the old one. Used by mid-turn injection paths
+      // to keep the interleaving order
+      //   [user(A), assistant("to-A"), user(B), assistant("to-B")]
+      // visible to the user instead of merging round 1 + round 2 text
+      // into one bubble.
+      const msgs = this.messagesByTab[source]
+      if (!msgs || !msgs.length) return
+      const last = msgs[msgs.length - 1]
+      if (!last || last.role !== "assistant") return
+      last._streaming = false
+      if (Array.isArray(last.parts)) {
+        for (const p of last.parts) {
+          if (p && p.type === "text") p._streaming = false
+        }
+      }
+    },
+
     _handleChannelMessage(data) {
       const tabKey = `ch:${data.channel}`
 
@@ -3005,16 +3242,21 @@ const _chatStoreOptions = {
       }
     },
 
-    /** Move queued messages from the hold queue into the main chat. */
+    /** Move queued messages for ``source`` from its hold queue into the
+     *  main message list. Other tabs' queues are untouched — they each
+     *  flush on their own ``processing_start``. */
     _promoteQueuedMessages(source) {
-      if (!this.queuedMessages.length) return
+      if (!source) return
+      const queue = this.queuedMessagesByTab[source]
+      if (!queue || !queue.length) return
       const msgs = this.messagesByTab[source]
       if (!msgs) return
-      for (const msg of this.queuedMessages) {
+      for (const msg of queue) {
         delete msg.queued
+        delete msg.queuedTab
         msgs.push(msg)
       }
-      this.queuedMessages = []
+      this.queuedMessagesByTab[source] = []
     },
 
     _ensureAssistantMsg(msgs) {
@@ -3158,7 +3400,7 @@ const _chatStoreOptions = {
       this.tokenUsage = {}
       this.runningJobs = {}
       this.unreadCounts = {}
-      this.queuedMessages = []
+      this.queuedMessagesByTab = {}
       this.processingByTab = {}
       this.eventsByTab = {}
       this.branchViewByTab = {}

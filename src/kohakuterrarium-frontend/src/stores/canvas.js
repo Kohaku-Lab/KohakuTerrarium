@@ -94,10 +94,10 @@ function _setupCanvasStore() {
       return a
     }
 
-    /** Scan a single assistant message for image parts, ``##canvas##``
-     *  markers, or long fenced code blocks, upserting one artifact per
-     *  match. Idempotent — running twice on the same message produces
-     *  the same set of artifacts. */
+    /** Scan a single assistant message for image parts, file write /
+     *  edit tool previews, ``##canvas##`` markers, or long fenced code
+     *  blocks, upserting one artifact per match. Idempotent — running
+     *  twice on the same message produces the same set of artifacts. */
     function scanMessage(msg) {
       if (!msg || msg.role !== "assistant") return
 
@@ -121,6 +121,32 @@ function _setupCanvasStore() {
               meta.revised_prompt || meta.source_name || meta.source_type || `image_${imgIdx + 1}`,
           })
           imgIdx += 1
+        }
+      }
+
+      // Feat 1 — tool parts carrying a ``canvas_preview`` payload (from
+      // write / edit / multi_edit) become code artifacts keyed by
+      // file path. Re-editing the same file refreshes the existing
+      // artifact in place; the canvas latches onto the latest one
+      // because ``upsertArtifact`` updates ``activeId`` on touch.
+      // ``content === null`` means the file exceeded the preview cap;
+      // skip those so the canvas doesn't show an empty bubble.
+      if (msg.parts && Array.isArray(msg.parts)) {
+        for (const p of msg.parts) {
+          if (p.type !== "tool") continue
+          const preview = p.resultMeta?.canvas_preview
+          if (!preview || preview.content == null) continue
+          if (!preview.file_path) continue
+          upsertArtifact({
+            // Key by file path — the artifact tracks the file, not the
+            // tool call. Two write calls to the same path produce ONE
+            // artifact with the latest content.
+            sourceId: `file:${preview.file_path}`,
+            content: preview.content,
+            lang: preview.lang || "text",
+            type: _guessTypeFromLang(preview.lang),
+            seedName: preview.file_path,
+          })
         }
       }
 

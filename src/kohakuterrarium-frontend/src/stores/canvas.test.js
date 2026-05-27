@@ -171,3 +171,115 @@ describe("canvas store — artifact detection", () => {
     expect(worker.dismissed).toBe(false)
   })
 })
+
+describe("canvas store — write / edit canvas_preview (Feat 1)", () => {
+  it("picks up write tool result canvas_preview as a code artifact", () => {
+    const store = useCanvasStore()
+    const msg = {
+      id: "m_write",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool",
+          name: "write",
+          status: "done",
+          resultMeta: {
+            canvas_preview: {
+              kind: "write",
+              file_path: "/repo/foo.py",
+              lang: "python",
+              content: "def hello():\n    return 1\n",
+              bytes: 27,
+              truncated: false,
+            },
+          },
+        },
+      ],
+    }
+    store.scanMessage(msg)
+    expect(store.artifacts).toHaveLength(1)
+    const a = store.artifacts[0]
+    expect(a.type).toBe("code")
+    expect(a.lang).toBe("python")
+    expect(a.content).toBe("def hello():\n    return 1\n")
+    expect(a.sourceId).toBe("file:/repo/foo.py")
+  })
+
+  it("re-editing the same file updates the existing artifact in place", () => {
+    // Two write/edit calls to the same path produce ONE artifact —
+    // the canvas tracks the file, not the tool call. The sourceId is
+    // ``file:<path>`` precisely so the upsert finds the previous entry.
+    const store = useCanvasStore()
+    const make = (id, content) => ({
+      id,
+      role: "assistant",
+      parts: [
+        {
+          type: "tool",
+          name: "edit",
+          resultMeta: {
+            canvas_preview: {
+              kind: "edit",
+              file_path: "/repo/foo.py",
+              lang: "python",
+              content,
+              bytes: content.length,
+              truncated: false,
+            },
+          },
+        },
+      ],
+    })
+    store.scanMessage(make("m1", "v1"))
+    store.scanMessage(make("m2", "v2"))
+    expect(store.artifacts).toHaveLength(1)
+    expect(store.artifacts[0].content).toBe("v2")
+    // Active artifact follows the most recent touch — keeps the canvas
+    // panel on the file the agent just changed.
+    expect(store.activeArtifact?.content).toBe("v2")
+  })
+
+  it("skips tool parts whose preview is truncated (content === null)", () => {
+    // Files over PREVIEW_MAX_BYTES surface ``content: null, truncated:
+    // true``. Showing an empty code bubble would be misleading —
+    // better to skip and let the FE offer a "fetch full content" stub.
+    const store = useCanvasStore()
+    const msg = {
+      id: "m_huge",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool",
+          name: "write",
+          resultMeta: {
+            canvas_preview: {
+              kind: "write",
+              file_path: "/repo/huge.bin",
+              lang: "text",
+              content: null,
+              bytes: 999999,
+              truncated: true,
+            },
+          },
+        },
+      ],
+    }
+    store.scanMessage(msg)
+    expect(store.artifacts).toHaveLength(0)
+  })
+
+  it("tool parts without canvas_preview are ignored", () => {
+    // Regression: non-file tools (bash, glob, etc.) must NOT spawn
+    // canvas artifacts. The detector only fires when the tool result
+    // carries a ``canvas_preview`` dict — which only write / edit /
+    // multi_edit produce today.
+    const store = useCanvasStore()
+    const msg = {
+      id: "m_bash",
+      role: "assistant",
+      parts: [{ type: "tool", name: "bash", resultMeta: { other: "data" }, result: "ok" }],
+    }
+    store.scanMessage(msg)
+    expect(store.artifacts).toHaveLength(0)
+  })
+})
