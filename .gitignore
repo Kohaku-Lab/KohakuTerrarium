@@ -16,6 +16,7 @@ poc/
 .coverage*
 kt-tipo-agent/
 *-old/
+kt-paper/
 
 # Registry hub frontend lives in a dedicated companion repo
 # (Kohaku-Lab/kohaku-registry-hub).  Cloned locally into
