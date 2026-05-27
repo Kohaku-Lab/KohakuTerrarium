@@ -8,22 +8,43 @@
  *     so the request hits whatever served the page.
  *   - **remote mode** (bundled-app build / user-added host): the
  *     hosts store has an active host; we send absolute
- *     ``http(s)://host:port/api/...`` plus ``Authorization: Bearer
- *     <token>`` from the active host's stored token.
+ *     ``http(s)://host:port/api/...``.
+ *
+ * Auth headers are injected per request from the active host record.
+ * "Higher level has priority" — when both L2 and L4 are configured,
+ * L4 takes the ``Authorization`` slot and L2 moves to its dedicated
+ * ``X-KT-Host-Token`` header:
+ *
+ *   | Layer | Header                          | When sent                |
+ *   |-------|---------------------------------|--------------------------|
+ *   | L2    | ``X-KT-Host-Token: <token>``    | active.token set         |
+ *   | L3    | ``X-Admin-Token: <token>``      | active.adminToken set    |
+ *   | L4    | ``Authorization: Bearer <tok>`` | active.userToken set     |
+ *
+ * The interceptor never falls back from L4 to L2 in the Authorization
+ * slot — when L4 is present, that slot is L4's.  L2 always lives in
+ * its dedicated header.  This keeps the mental model clean and
+ * matches the backend's preferred wire shape (see
+ * ``api/auth/middleware.py``'s ``_bearer_from_http_headers`` docstring).
+ *
+ * A response interceptor converts 401 + ``X-Auth-Required`` headers
+ * into UI prompts: ``user`` opens the LoginPane, ``admin`` opens the
+ * admin-token modal, then the original request is retried.
  *
  * Resolution happens in an axios request interceptor so the SAME
  * ``api`` instance works for every consumer — no plumbing through
  * route components.  Components that need to react to host changes
  * subscribe to ``useHostsStore()`` directly.
  *
- * The hosts store is imported LAZILY inside the interceptor.  This
- * avoids a circular import during module load (utils/api.js is
+ * The hosts/auth stores are imported LAZILY inside the interceptor.
+ * This avoids a circular import during module load (utils/api.js is
  * imported very early; the store needs Pinia which needs the Vue
  * app), and also keeps SSR / test bootstraps happy.
  */
 
 import axios from "axios"
 
+import { useAuthStore } from "@/stores/auth"
 import { useHostsStore } from "@/stores/hosts"
 import { wsUrl } from "@/utils/wsUrl"
 
@@ -57,21 +78,81 @@ api.interceptors.request.use((config) => {
     return config
   }
   const apiPath = path.startsWith("/") ? `/api${path}` : `/api/${path}`
+  config.headers = config.headers || {}
   if (active) {
     config.url = `${active.url}${apiPath}`
-    if (active.token) {
-      config.headers = config.headers || {}
-      // Don't clobber an explicit Authorization header on a per-
-      // request basis (e.g. login flows passing their own creds).
-      if (!config.headers.Authorization) {
-        config.headers.Authorization = `Bearer ${active.token}`
-      }
+    // L2 — dedicated host-token header.  Always sent when configured,
+    // independent of L4.  The backend prefers this over a bearer-shaped
+    // fallback (which would collide with L4's user token).
+    if (active.token && !config.headers["X-KT-Host-Token"]) {
+      config.headers["X-KT-Host-Token"] = active.token
+    }
+    // L3 — admin token for config-mutating routes.  Sent on every
+    // request when configured; harmless on non-admin routes (the
+    // backend gate only fires inside ``verify_admin_token``).
+    if (active.adminToken && !config.headers["X-Admin-Token"]) {
+      config.headers["X-Admin-Token"] = active.adminToken
+    }
+    // L4 — Authorization slot.  Higher level wins: when a userToken
+    // exists, the slot belongs to L4 (user identity).  When only L2
+    // is configured (no userToken), we leave Authorization empty —
+    // ``X-KT-Host-Token`` carries the host gate.  Per-request callers
+    // (e.g. login) can still set their own Authorization explicitly,
+    // which we don't clobber.
+    if (active.userToken && !config.headers.Authorization) {
+      config.headers.Authorization = `Bearer ${active.userToken}`
     }
   } else {
     config.url = apiPath
   }
   return config
 })
+
+/** Was this 401 triggered by an L3 admin gate or an L4 user gate?
+ *  Returns ``"admin"`` / ``"user"`` / ``null``. */
+function _authRequiredKind(error) {
+  const resp = error?.response
+  if (!resp || resp.status !== 401) return null
+  const hdr = resp.headers?.["x-auth-required"] || resp.headers?.["X-Auth-Required"]
+  if (hdr === "admin") return "admin"
+  if (hdr === "user") return "user"
+  return null
+}
+
+/** Mark a retried request so a second 401 doesn't infinite-loop. */
+const RETRY_FLAG = "__kt_auth_retry"
+
+api.interceptors.response.use(
+  (resp) => resp,
+  async (error) => {
+    const kind = _authRequiredKind(error)
+    if (!kind) return Promise.reject(error)
+    const config = error.config || {}
+    if (config[RETRY_FLAG]) return Promise.reject(error)
+    let auth
+    try {
+      auth = useAuthStore()
+    } catch (_err) {
+      return Promise.reject(error)
+    }
+    config[RETRY_FLAG] = true
+    if (kind === "admin") {
+      try {
+        await auth.requestAdminToken()
+      } catch (_err) {
+        return Promise.reject(error)
+      }
+      return api.request(config)
+    }
+    // kind === "user"
+    try {
+      await auth.requestLogin()
+    } catch (_err) {
+      return Promise.reject(error)
+    }
+    return api.request(config)
+  },
+)
 
 /**
  * @typedef {{ name: string, path: string, description: string }} ConfigItem
