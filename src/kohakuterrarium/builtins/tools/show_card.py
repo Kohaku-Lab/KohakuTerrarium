@@ -115,7 +115,7 @@ class ShowCardTool(BaseTool):
                 await router.emit(event)
                 return ToolResult(output="card displayed", exit_code=0)
             except Exception as e:
-                logger.debug("show_card emit failed", error=str(e), exc_info=True)
+                logger.warning("show_card emit failed", error=str(e), exc_info=True)
                 return ToolResult(
                     error=f"failed to emit card: {e}",
                     output=self._fallback_text(payload),
@@ -124,7 +124,9 @@ class ShowCardTool(BaseTool):
         try:
             reply = await router.emit_and_wait(event, timeout_s=timeout_s)
         except Exception as e:
-            logger.debug("show_card emit_and_wait failed", error=str(e), exc_info=True)
+            logger.warning(
+                "show_card emit_and_wait failed", error=str(e), exc_info=True
+            )
             return ToolResult(error=f"card interaction failed: {e}")
 
         if reply.is_timeout:

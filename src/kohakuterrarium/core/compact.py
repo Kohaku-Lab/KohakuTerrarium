@@ -368,7 +368,7 @@ class CompactManager:
                         conversation.to_messages(),
                     )
                 except Exception as e:
-                    logger.debug(
+                    logger.warning(
                         "Failed to save compacted conversation",
                         error=str(e),
                         exc_info=True,
@@ -398,7 +398,7 @@ class CompactManager:
                         f"{self._agent_name}:last_compact_time"
                     ] = self._last_compact_time
                 except Exception as e:
-                    logger.debug(
+                    logger.warning(
                         "Failed to save compact_count state",
                         error=str(e),
                         exc_info=True,

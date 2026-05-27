@@ -129,7 +129,7 @@ async def run_log_attach(websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        logger.debug("log WS error", error=str(e), exc_info=True)
+        logger.warning("log WS error", error=str(e), exc_info=True)
         try:
             await websocket.send_json({"type": "error", "text": str(e)})
         except Exception:
@@ -137,4 +137,4 @@ async def run_log_attach(websocket: WebSocket) -> None:
         try:
             await websocket.close()
         except Exception as e:
-            logger.debug("Failed to close log WS", error=str(e), exc_info=True)
+            logger.warning("Failed to close log WS", error=str(e), exc_info=True)

@@ -71,7 +71,7 @@ async def _capture_rate_limit_headers(response: Any) -> None:
         snap = capture_from_headers(response.headers)
         set_cached(snap)
     except Exception as exc:  # pragma: no cover - defensive
-        logger.debug(
+        logger.warning(
             "Codex rate-limit header capture failed",
             error=str(exc),
             exc_info=True,

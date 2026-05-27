@@ -72,7 +72,7 @@ async def session_channel_observer(
     except WebSocketDisconnect:
         pass
     except Exception as exc:  # pragma: no cover - defensive
-        logger.debug("Observer WS error", error=str(exc), exc_info=True)
+        logger.warning("Observer WS error", error=str(exc), exc_info=True)
         try:
             await websocket.send_json({"type": "error", "content": str(exc)})
         except Exception:

@@ -123,7 +123,7 @@ def _copy_table(src: KVault, dst: KVault, keys: list[str] | None = None) -> int:
         except KeyError:
             continue
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 "Fork failed to copy table row",
                 key=key,
                 error=str(e),
@@ -237,7 +237,7 @@ def _collect_copy_range(
         try:
             evt = source.events[key_bytes]
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 "Fork failed to read event during scan",
                 key=key,
                 error=str(e),
@@ -308,7 +308,7 @@ def perform_fork(
         try:
             parent_meta[key] = source.meta[key_bytes]
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 "Fork failed to read parent meta key",
                 key=key,
                 error=str(e),
@@ -329,7 +329,7 @@ def perform_fork(
             try:
                 dest.meta[key] = value
             except Exception as e:
-                logger.debug(
+                logger.warning(
                     "Fork failed to write child meta key",
                     key=key,
                     error=str(e),
@@ -390,7 +390,7 @@ def perform_fork(
                 try:
                     dest.events[key] = source.events[key]
                 except Exception as e:
-                    logger.debug(
+                    logger.warning(
                         "Fork failed to copy non-fork event",
                         key=key,
                         error=str(e),

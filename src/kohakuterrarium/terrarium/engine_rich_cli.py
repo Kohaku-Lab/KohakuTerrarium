@@ -151,7 +151,7 @@ async def run_engine_with_rich_cli(
         try:
             app.replay_session(pending)
         except Exception as exc:
-            logger.debug(
+            logger.warning(
                 "Rich CLI session replay failed", error=str(exc), exc_info=True
             )
         agent._pending_resume_events = None
@@ -165,7 +165,7 @@ async def run_engine_with_rich_cli(
             try:
                 await app.teardown_multi_creature()
             except Exception as exc:
-                logger.debug(
+                logger.warning(
                     "Rich CLI multi-creature teardown failed",
                     error=str(exc),
                     exc_info=True,
@@ -181,7 +181,7 @@ async def run_engine_with_rich_cli(
             try:
                 store.flush()
             except Exception as exc:
-                logger.debug(
+                logger.warning(
                     "Rich CLI session store flush failed",
                     error=str(exc),
                     exc_info=True,

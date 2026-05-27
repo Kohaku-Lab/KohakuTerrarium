@@ -116,18 +116,20 @@ async def stop_session(
                 hook.flush()
                 hook.detach()
             except Exception as e:
-                logger.debug(
+                logger.warning(
                     "Failed to detach session-index hook on stop",
                     session_id=session_id,
                     error=str(e),
+                    exc_info=True,
                 )
     if store is not None and hasattr(store, "close"):
         try:
             store.close()
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 "Failed to close session store on stop",
                 session_id=session_id,
                 error=str(e),
+                exc_info=True,
             )
     logger.info("Session stopped", session_id=session_id)

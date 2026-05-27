@@ -174,7 +174,7 @@ class IdentityCache:
         except IdentityNotFound:
             pass
         except Exception:  # pragma: no cover - defensive
-            logger.debug("prefetch_for_codex_if_needed failed")
+            logger.warning("prefetch_for_codex_if_needed failed", exc_info=True)
 
     def sync_api_key(self, provider: str) -> str:
         """Non-blocking lookup for an API key.
@@ -213,7 +213,11 @@ class IdentityCache:
             # from elsewhere, or the LLM call is non-authed).
             pass
         except Exception:  # pragma: no cover - defensive
-            logger.debug("prefetch_for_provider failed", extra={"provider": provider})
+            logger.warning(
+                "prefetch_for_provider failed",
+                extra={"provider": provider},
+                exc_info=True,
+            )
 
     def invalidate(self, *, kind: str, name: str | None = None) -> None:
         """Drop cache entries.

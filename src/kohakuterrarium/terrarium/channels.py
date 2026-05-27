@@ -159,7 +159,7 @@ def _ensure_channel_persistence(
                 },
             )
         except Exception as exc:
-            logger.debug(
+            logger.warning(
                 "channel persistence failed",
                 channel=channel_name,
                 error=str(exc),
@@ -558,8 +558,10 @@ def _promote_session_kind_after_merge(session_id: str) -> None:
         try:
             callback(session_id)
         except Exception:
-            logger.debug(
-                "merge listener raised", listener=getattr(callback, "__name__", "?")
+            logger.warning(
+                "merge listener raised",
+                listener=getattr(callback, "__name__", "?"),
+                exc_info=True,
             )
 
 

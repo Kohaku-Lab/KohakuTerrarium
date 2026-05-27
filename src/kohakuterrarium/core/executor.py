@@ -124,7 +124,7 @@ class Executor:
                 },
             )
         except Exception as e:  # pragma: no cover — pure observability
-            logger.debug("tool_wait emit failed", error=str(e), exc_info=True)
+            logger.warning("tool_wait emit failed", error=str(e), exc_info=True)
 
     def _wrap_tool_execute(
         self,

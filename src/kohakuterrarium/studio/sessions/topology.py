@@ -124,7 +124,12 @@ async def channel_info(
     except KeyError:
         history = []
     except Exception:  # pragma: no cover - defensive
-        logger.debug("channel_history failed", session_id=session_id, channel=channel)
+        logger.warning(
+            "channel_history failed",
+            session_id=session_id,
+            channel=channel,
+            exc_info=True,
+        )
         history = []
     return {
         "name": target.name,

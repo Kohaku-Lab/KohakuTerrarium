@@ -142,7 +142,7 @@ class SessionMemory:
             try:
                 state.close()
             except Exception as e:  # pragma: no cover - defensive
-                logger.debug("memory state close failed", error=str(e))
+                logger.warning("memory state close failed", error=str(e), exc_info=True)
         for table, attr in (
             (getattr(self, "_state", None), "_inner"),
             (getattr(self, "_fts", None), "_vault"),

@@ -144,7 +144,7 @@ class AgentTUI(App):
             try:
                 self.query_one("#queued-area", Vertical).mount(qw)
             except Exception as e:
-                logger.debug(
+                logger.warning(
                     "Failed to mount queued widget", error=str(e), exc_info=True
                 )
         else:
@@ -163,7 +163,7 @@ class AgentTUI(App):
             elif not self._is_processing:
                 status.update(IDLE_STATUS)
         except Exception as e:
-            logger.debug("Failed to update command hint", error=str(e), exc_info=True)
+            logger.warning("Failed to update command hint", error=str(e), exc_info=True)
 
     def on_chat_input_edit_queued(self, event: ChatInput.EditQueued) -> None:
         """Pull the last queued message back into the input box for editing."""
@@ -185,7 +185,7 @@ class AgentTUI(App):
             for item in items:
                 self._input_queue.put_nowait(item)
         except Exception as e:
-            logger.debug("Failed to rebuild input queue", error=str(e), exc_info=True)
+            logger.warning("Failed to rebuild input queue", error=str(e), exc_info=True)
         # Put text back in input box
         try:
             inp = self.query_one("#input-box", ChatInput)
@@ -193,7 +193,7 @@ class AgentTUI(App):
             inp.insert(text)
             inp.focus()
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 "Failed to restore text to input box", error=str(e), exc_info=True
             )
 
@@ -229,7 +229,7 @@ class AgentTUI(App):
                     return self.query_one(f"#{scroll_id}", VerticalScroll)
             return self.query_one("#chat-scroll", VerticalScroll)
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 "Failed to get active chat scroll", error=str(e), exc_info=True
             )
             return None
@@ -244,7 +244,7 @@ class AgentTUI(App):
             if active_id:
                 return _id_to_name(active_id.replace("tab-", ""))
         except Exception as e:
-            logger.debug("Failed to get active tab name", error=str(e), exc_info=True)
+            logger.warning("Failed to get active tab name", error=str(e), exc_info=True)
         return self._terrarium_tabs[0] if self._terrarium_tabs else ""
 
     def action_interrupt(self) -> None:
@@ -293,7 +293,7 @@ class AgentTUI(App):
         try:
             self.call_from_thread(self._clear_status)
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 "Failed to clear status on stop thinking", error=str(e), exc_info=True
             )
 
@@ -304,7 +304,7 @@ class AgentTUI(App):
             try:
                 self.call_from_thread(self._set_status_text, frame)
             except Exception as e:
-                logger.debug(
+                logger.warning(
                     "Thinking animation loop ended", error=str(e), exc_info=True
                 )
                 break
@@ -315,13 +315,13 @@ class AgentTUI(App):
         try:
             self.query_one("#quick-status", Static).update(text)
         except Exception as e:
-            logger.debug("Failed to set status text", error=str(e), exc_info=True)
+            logger.warning("Failed to set status text", error=str(e), exc_info=True)
 
     def _clear_status(self) -> None:
         try:
             self.query_one("#quick-status", Static).update("")
         except Exception as e:
-            logger.debug("Failed to clear status", error=str(e), exc_info=True)
+            logger.warning("Failed to clear status", error=str(e), exc_info=True)
 
 
 # ── Helpers ─────────────────────────────────────────────────────

@@ -79,7 +79,7 @@ def connection(path: Path | None = None) -> Iterator[sqlite3.Connection]:
         try:
             conn.close()
         except Exception:  # pragma: no cover - defensive
-            logger.debug("auth.db: connection close raised", exc_info=True)
+            logger.warning("auth.db: connection close raised", exc_info=True)
 
 
 # ---------------------------------------------------------------------------

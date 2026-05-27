@@ -84,7 +84,9 @@ class PluginManager:
         try:
             cb(hook, getattr(plugin, "name", "?"), duration_ms, blocked)
         except Exception as e:  # pragma: no cover — defensive
-            logger.debug("plugin_hook_timing emit failed", error=str(e), exc_info=True)
+            logger.warning(
+                "plugin_hook_timing emit failed", error=str(e), exc_info=True
+            )
 
     def __bool__(self) -> bool:
         return len(self._plugins) > 0
@@ -364,7 +366,7 @@ class PluginManager:
             try:
                 await _call_method(plugin, "on_unload")
             except Exception as e:
-                logger.debug(
+                logger.warning(
                     "Plugin on_unload failed",
                     plugin_name=getattr(plugin, "name", "?"),
                     error=str(e),

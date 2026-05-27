@@ -205,7 +205,9 @@ class SessionIndex:
                     if hasattr(meta, "_inner"):
                         del meta._inner
                 except Exception as exc:  # noqa: BLE001
-                    logger.debug("meta probe close failed", error=str(exc))
+                    logger.warning(
+                        "meta probe close failed", error=str(exc), exc_info=True
+                    )
         if isinstance(stored, list) and stored == list(SEARCH_COLUMNS):
             return
         logger.info(
@@ -247,8 +249,11 @@ class SessionIndex:
                 self._search.update(id=rowid, texts=cols, value=entry.filename)
                 entry._search_rowid = rowid
             except Exception as exc:  # noqa: BLE001
-                logger.debug(
-                    "FTS row missing; reinserting", rowid=rowid, error=str(exc)
+                logger.warning(
+                    "FTS row missing; reinserting",
+                    rowid=rowid,
+                    error=str(exc),
+                    exc_info=True,
                 )
                 entry._search_rowid = int(
                     self._search.insert(cols, value=entry.filename)
@@ -278,7 +283,9 @@ class SessionIndex:
             try:
                 self._search.delete(rowid)
             except Exception as exc:  # noqa: BLE001
-                logger.debug("FTS row already gone", rowid=rowid, error=str(exc))
+                logger.warning(
+                    "FTS row already gone", rowid=rowid, error=str(exc), exc_info=True
+                )
         self._entries.delete(filename)
         return True
 
@@ -287,11 +294,11 @@ class SessionIndex:
         try:
             self._entries.clear()
         except Exception as exc:  # noqa: BLE001
-            logger.debug("clear entries failed", error=str(exc))
+            logger.warning("clear entries failed", error=str(exc), exc_info=True)
         try:
             self._search.clear()
         except Exception as exc:  # noqa: BLE001
-            logger.debug("clear search failed", error=str(exc))
+            logger.warning("clear search failed", error=str(exc), exc_info=True)
 
     # ── Reads ─────────────────────────────────────────────────
 
@@ -508,7 +515,7 @@ class SessionIndex:
             try:
                 table.close()
             except Exception as exc:  # noqa: BLE001
-                logger.debug("close table failed", error=str(exc))
+                logger.warning("close table failed", error=str(exc), exc_info=True)
         for table in (self._entries, self._meta):
             try:
                 del table._inner

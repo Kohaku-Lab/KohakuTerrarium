@@ -738,7 +738,11 @@ class Controller:
                 try:
                     Path(temp_path).unlink(missing_ok=True)
                 except OSError:
-                    logger.debug("Failed to clean temp upload", path=temp_path)
+                    logger.warning(
+                        "Failed to clean temp upload",
+                        path=temp_path,
+                        exc_info=True,
+                    )
 
     async def _resolve_message_files(
         self, messages: list[dict[str, Any]]

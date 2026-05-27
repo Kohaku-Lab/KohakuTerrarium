@@ -325,10 +325,11 @@ def persist_cluster_members_to_mirror(
             finally:
                 tmp_store.close()
         except Exception as e:  # pragma: no cover - defensive
-            logger.debug(
+            logger.warning(
                 "CF-6: failed to persist cluster_members",
                 session_id=sid,
                 error=str(e),
+                exc_info=True,
             )
 
 

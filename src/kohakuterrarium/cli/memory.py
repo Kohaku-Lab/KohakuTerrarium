@@ -87,7 +87,7 @@ def search_cli(
             try:
                 embedder = create_embedder({"provider": "auto"})
             except Exception as e:
-                logger.debug(
+                logger.warning(
                     "Failed to create embedder for search", error=str(e), exc_info=True
                 )
 

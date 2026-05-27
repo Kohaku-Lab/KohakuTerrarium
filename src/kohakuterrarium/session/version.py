@@ -53,12 +53,13 @@ def detect_format_version(path: str | Path) -> int:
             try:
                 meta.close()
             except Exception as e:
-                logger.debug(
+                logger.warning(
                     "Failed to close meta while probing format_version",
                     error=str(e),
+                    exc_info=True,
                 )
     except Exception as e:
-        logger.debug(
+        logger.warning(
             "detect_format_version fell back to 1",
             path=str(p),
             error=str(e),

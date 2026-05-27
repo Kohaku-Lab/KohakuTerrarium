@@ -321,4 +321,6 @@ def _purge_index_entries(deleted_paths: list[Path]) -> None:
         for path in deleted_paths:
             index.delete(path.name)
     except Exception as exc:  # noqa: BLE001 — best-effort
-        logger.debug("session-index purge after delete failed", error=str(exc))
+        logger.warning(
+            "session-index purge after delete failed", error=str(exc), exc_info=True
+        )

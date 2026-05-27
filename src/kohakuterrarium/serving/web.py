@@ -15,7 +15,12 @@ import threading
 import time
 from pathlib import Path
 
-from kohakuterrarium.utils.logging import configure_utf8_stdio, get_logger, set_level
+from kohakuterrarium.utils.logging import (
+    configure_utf8_stdio,
+    enable_stderr_logging,
+    get_logger,
+    set_level,
+)
 
 logger = get_logger(__name__)
 
@@ -234,6 +239,16 @@ def run_web_server(
     from kohakuterrarium.api.app import create_app
 
     set_level(log_level)
+    # Mirror kohakuterrarium logs to stderr so the daemon's redirected
+    # stderr (~/.kohakuterrarium/run/web.log) captures BOTH uvicorn AND
+    # our own logger output. Without this, ``kt serve logs`` shows only
+    # uvicorn — our INFO logs (e.g. "Event buffered for mid-turn
+    # injection", "Drained N mid-turn buffered event(s)") get
+    # silently routed to a separate file (~/.kohakuterrarium/logs/kt.log)
+    # the user has no reason to know about. Idempotent: if stderr
+    # logging is already on (foreground path), this just resets the
+    # level.
+    enable_stderr_logging(log_level)
     static_dir = None if dev else WEB_DIST_DIR
 
     if not dev and not (static_dir and static_dir.is_dir()):
@@ -382,6 +397,7 @@ def _run_desktop_app_blocking(port: int = 8001, log_level: str = "INFO") -> None
             pass
 
     set_level(log_level)
+    enable_stderr_logging(log_level)
 
     try:
         import webview

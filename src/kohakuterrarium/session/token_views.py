@@ -274,11 +274,11 @@ def _attached_usage_map(store: "SessionStore") -> dict[str, dict[str, int]]:
     try:
         store.events.flush_cache()
     except Exception as e:  # pragma: no cover — defensive
-        logger.debug("events.flush_cache failed", error=str(e), exc_info=True)
+        logger.warning("events.flush_cache failed", error=str(e), exc_info=True)
     try:
         attached = store.discover_attached_agents()
     except Exception as e:  # pragma: no cover — defensive
-        logger.debug("discover_attached_agents failed", error=str(e), exc_info=True)
+        logger.warning("discover_attached_agents failed", error=str(e), exc_info=True)
         attached = []
     for entry in attached:
         namespace = entry.get("namespace")
@@ -300,7 +300,7 @@ def _by_turn_from_rollup(store: "SessionStore", agent: str) -> list[dict[str, in
     try:
         rows = store.list_turn_rollups(agent)
     except Exception as e:  # pragma: no cover — defensive
-        logger.debug("list_turn_rollups failed", error=str(e), exc_info=True)
+        logger.warning("list_turn_rollups failed", error=str(e), exc_info=True)
         return []
     out: list[dict[str, int]] = []
     for row in rows:
@@ -411,7 +411,7 @@ def token_usage_all_loops(
     try:
         meta = store.load_meta()
     except Exception as e:  # pragma: no cover — defensive
-        logger.debug("load_meta failed in all_loops", error=str(e), exc_info=True)
+        logger.warning("load_meta failed in all_loops", error=str(e), exc_info=True)
         meta = {}
 
     mains: list[str] = []
@@ -427,7 +427,7 @@ def token_usage_all_loops(
     try:
         extra_mains = store.discover_agents_from_events()
     except Exception as e:  # pragma: no cover — defensive
-        logger.debug(
+        logger.warning(
             "discover_agents_from_events failed in all_loops",
             error=str(e),
             exc_info=True,
@@ -449,7 +449,7 @@ def token_usage_all_loops(
     try:
         attached_entries = store.discover_attached_agents()
     except Exception as e:  # pragma: no cover — defensive
-        logger.debug(
+        logger.warning(
             "discover_attached_agents failed in all_loops",
             error=str(e),
             exc_info=True,

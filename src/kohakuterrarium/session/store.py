@@ -283,7 +283,7 @@ class SessionStore:
                     },
                 )
             except Exception as e:
-                logger.debug("FTS indexing failed", error=str(e), exc_info=True)
+                logger.warning("FTS indexing failed", error=str(e), exc_info=True)
 
         # Fan out to live subscribers. Each callback is isolated — a
         # slow or failing listener must not block the appending agent.
@@ -291,7 +291,7 @@ class SessionStore:
             try:
                 cb(key, data)
             except Exception as e:
-                logger.debug("Event subscriber failed", error=str(e), exc_info=True)
+                logger.warning("Event subscriber failed", error=str(e), exc_info=True)
 
         # Durability gate — flush when either threshold is exceeded.
         # See ``DEFAULT_FLUSH_EVERY_N_EVENTS`` /
@@ -316,7 +316,7 @@ class SessionStore:
         try:
             self.events.flush_cache()
         except Exception as e:
-            logger.debug("Events flush_cache failed", error=str(e), exc_info=True)
+            logger.warning("Events flush_cache failed", error=str(e), exc_info=True)
             return
         self._unflushed_event_count = 0
         self._last_flush_at = time.monotonic()
@@ -354,7 +354,7 @@ class SessionStore:
             try:
                 result.append(self.events[key_bytes])
             except Exception as e:
-                logger.debug("Failed to read event", error=str(e), exc_info=True)
+                logger.warning("Failed to read event", error=str(e), exc_info=True)
         return result
 
     def get_resumable_events(
@@ -391,7 +391,7 @@ class SessionStore:
                 evt = self.events[key_bytes]
                 all_events.append((key, evt))
             except Exception as e:
-                logger.debug(
+                logger.warning(
                     "Failed to read event in get_all_events",
                     error=str(e),
                     exc_info=True,
@@ -535,7 +535,7 @@ class SessionStore:
                     },
                 )
             except Exception as e:
-                logger.debug(
+                logger.warning(
                     "FTS indexing channel message failed", error=str(e), exc_info=True
                 )
 
@@ -549,7 +549,7 @@ class SessionStore:
             try:
                 result.append(self.channels[key_bytes])
             except Exception as e:
-                logger.debug(
+                logger.warning(
                     "Failed to read channel message", error=str(e), exc_info=True
                 )
         return result
@@ -697,7 +697,7 @@ class SessionStore:
             try:
                 result[key] = self.meta[key_bytes]
             except Exception as e:
-                logger.debug("Failed to read meta key", error=str(e), exc_info=True)
+                logger.warning("Failed to read meta key", error=str(e), exc_info=True)
         known = list(result.get("agents") or [])
         discovered = self.discover_agents_from_events()
         for name in discovered:
@@ -837,11 +837,11 @@ class SessionStore:
             try:
                 table.flush_cache()
             except Exception:  # pragma: no cover - defensive
-                logger.debug("checkpoint: flush_cache failed", exc_info=True)
+                logger.warning("checkpoint: flush_cache failed", exc_info=True)
             try:
                 table.checkpoint()
             except Exception:  # pragma: no cover - defensive
-                logger.debug("checkpoint: WAL checkpoint failed", exc_info=True)
+                logger.warning("checkpoint: WAL checkpoint failed", exc_info=True)
         self._unflushed_event_count = 0
         self._last_flush_at = time.monotonic()
 
@@ -857,7 +857,7 @@ class SessionStore:
             try:
                 self.update_status("paused")
             except Exception as e:
-                logger.debug(
+                logger.warning(
                     "Failed to update session status on close",
                     error=str(e),
                     exc_info=True,

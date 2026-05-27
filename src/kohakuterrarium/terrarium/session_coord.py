@@ -108,7 +108,7 @@ def _inherit_resumable_meta(src_meta: dict, dst_store: SessionStore) -> None:
         try:
             dst_store.meta[key] = value
         except Exception:
-            logger.debug("split/merge: meta key %r write failed", key, exc_info=True)
+            logger.warning("split/merge: meta key %r write failed", key, exc_info=True)
 
 
 def merge_session_stores(
@@ -135,7 +135,7 @@ def merge_session_stores(
             if not inherited_meta:
                 inherited_meta = old_meta
         except Exception:
-            logger.debug("merge: load_meta failed", exc_info=True)
+            logger.warning("merge: load_meta failed", exc_info=True)
         copy_events_into(old, new_store)
     try:
         new_store.meta["session_id"] = new_store.session_id
@@ -143,7 +143,7 @@ def merge_session_stores(
         new_store.meta["merged_at"] = time.time()
         _inherit_resumable_meta(inherited_meta, new_store)
     except Exception:
-        logger.debug("merge: meta write failed", exc_info=True)
+        logger.warning("merge: meta write failed", exc_info=True)
     logger.info(
         "Merged session stores",
         parents=parents,
@@ -167,7 +167,7 @@ def split_session_store(
         full_old_meta = old_store.load_meta()
     except Exception:
         full_old_meta = {}
-        logger.debug("split: load_meta failed for inheritance", exc_info=True)
+        logger.warning("split: load_meta failed for inheritance", exc_info=True)
     for path in new_paths:
         new_store = SessionStore(path)
         copy_events_into(old_store, new_store)
@@ -177,7 +177,7 @@ def split_session_store(
             new_store.meta["split_at"] = time.time()
             _inherit_resumable_meta(full_old_meta, new_store)
         except Exception:
-            logger.debug("split: meta write failed", exc_info=True)
+            logger.warning("split: meta write failed", exc_info=True)
         new_stores.append(new_store)
     logger.info(
         "Split session store",
@@ -257,12 +257,12 @@ def apply_merge(
                     if sid:
                         parents.append(str(sid))
                 except Exception:
-                    logger.debug("merge: load_meta failed", exc_info=True)
+                    logger.warning("merge: load_meta failed", exc_info=True)
             try:
                 kept.meta["parent_session_ids"] = parents
                 kept.meta["merged_at"] = time.time()
             except Exception:
-                logger.debug("merge: meta write failed", exc_info=True)
+                logger.warning("merge: meta write failed", exc_info=True)
         else:
             kept = merge_session_stores(old_stores, new_path)
     engine._session_stores[keep_gid] = kept
@@ -324,7 +324,7 @@ def _refresh_meta_for_split_graph(
         store.meta["agents"] = agents
         store.meta["config_type"] = "agent" if len(agents) <= 1 else "terrarium"
     except Exception:
-        logger.debug("split: meta refresh failed", exc_info=True)
+        logger.warning("split: meta refresh failed", exc_info=True)
 
 
 def _attach_store_to_graph(

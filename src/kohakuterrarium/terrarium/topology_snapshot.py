@@ -71,7 +71,7 @@ def snapshot(engine: "Terrarium", graph_id: str) -> None:
     try:
         store.meta[META_KEY] = payload
     except Exception:  # pragma: no cover - defensive
-        logger.debug("runtime-topology snapshot write failed", exc_info=True)
+        logger.warning("runtime-topology snapshot write failed", exc_info=True)
 
 
 def snapshot_all(engine: "Terrarium") -> None:

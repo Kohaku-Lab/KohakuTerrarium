@@ -143,7 +143,7 @@ async def run_trace_attach(
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        logger.debug("Session WS error", error=str(e), exc_info=True)
+        logger.warning("Session WS error", error=str(e), exc_info=True)
         try:
             await websocket.send_json({"type": "error", "message": str(e)})
         except Exception:

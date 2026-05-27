@@ -44,7 +44,7 @@ async def session_creature_chat(
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        logger.debug("IO WS error", error=str(e), exc_info=True)
+        logger.warning("IO WS error", error=str(e), exc_info=True)
         try:
             await websocket.send_json({"type": "error", "content": str(e)})
         except Exception:

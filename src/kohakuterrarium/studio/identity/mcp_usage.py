@@ -63,10 +63,11 @@ def _scan_kind(root: Path, kind: str) -> list[tuple[Path, dict[str, Any]]]:
                         with open(cfg_path, encoding="utf-8") as f:
                             data = yaml.safe_load(f) or {}
                     except (OSError, yaml.YAMLError) as e:
-                        logger.debug(
+                        logger.warning(
                             "mcp_usage: scan parse failed",
                             path=str(cfg_path),
                             error=str(e),
+                            exc_info=True,
                         )
                         continue
                     if isinstance(data, dict):

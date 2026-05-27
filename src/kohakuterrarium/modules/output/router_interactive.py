@@ -186,7 +186,7 @@ class OutputRouterInteractiveMixin:
             try:
                 handler(event_id)
             except Exception as e:  # pragma: no cover — defensive
-                logger.debug(
+                logger.warning(
                     "on_supersede handler raised",
                     error=str(e),
                     exc_info=True,

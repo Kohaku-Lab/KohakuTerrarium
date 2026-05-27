@@ -129,7 +129,11 @@ def _restore_turn_branch_state(agent, store: SessionStore, agent_name: str) -> N
     try:
         events = store.get_events(agent_name)
     except Exception as e:
-        logger.debug("Failed to read events for turn/branch restore", error=str(e))
+        logger.warning(
+            "Failed to read events for turn/branch restore",
+            error=str(e),
+            exc_info=True,
+        )
         return
     # Walk events: track the most recent live branch of every turn so
     # we can derive both the leaf (turn, branch) and the parent path

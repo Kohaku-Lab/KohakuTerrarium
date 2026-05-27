@@ -61,7 +61,7 @@ def push_index_update(
         index.upsert(entry)
         return entry
     except Exception as exc:  # noqa: BLE001
-        logger.debug("push_index_update failed", error=str(exc))
+        logger.warning("push_index_update failed", error=str(exc), exc_info=True)
         return None
 
 
@@ -153,7 +153,7 @@ class SessionIndexHook:
         try:
             self._store.unsubscribe(self._listener)
         except Exception as exc:  # noqa: BLE001
-            logger.debug("detach unsubscribe failed", error=str(exc))
+            logger.warning("detach unsubscribe failed", error=str(exc), exc_info=True)
         self._attached = False
         self._listener = None
 

@@ -278,7 +278,9 @@ class BusInteractiveOverlay:
                 )
             )
         except Exception as e:
-            logger.debug("BusInteractiveOverlay submit failed", error=str(e))
+            logger.warning(
+                "BusInteractiveOverlay submit failed", error=str(e), exc_info=True
+            )
 
     # ── Rendering ───────────────────────────────────────────────
 

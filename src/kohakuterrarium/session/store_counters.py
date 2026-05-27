@@ -52,7 +52,7 @@ def restore_event_counters(events: KVault, event_seq: dict[str, int]) -> int:
                 if isinstance(eid, int) and eid > max_event_id:
                     max_event_id = eid
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 "Failed to read event for id scan",
                 error=str(e),
                 exc_info=True,

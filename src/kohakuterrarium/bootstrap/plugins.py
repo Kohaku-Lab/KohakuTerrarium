@@ -97,9 +97,10 @@ def _pre_import_packages_for_config(plugin_configs: list[dict[str, Any]]) -> Non
             if name:
                 ensure_package_importable(name)
     except Exception as e:
-        logger.debug(
+        logger.warning(
             "Pre-import package walk failed; falling back to Phase-2 discovery",
             error=str(e),
+            exc_info=True,
         )
 
 
@@ -208,7 +209,7 @@ def _discover_package_plugins(
     try:
         packages = list_packages()
     except Exception as e:
-        logger.debug(
+        logger.warning(
             "Failed to list packages for plugin discovery", error=str(e), exc_info=True
         )
         return
@@ -255,7 +256,7 @@ def _resolve_from_packages(name: str) -> tuple[str, str] | None:
                     if module and cls:
                         return (module, cls)
     except Exception as e:
-        logger.debug(
+        logger.warning(
             "Failed to resolve plugin from packages", error=str(e), exc_info=True
         )
     return None

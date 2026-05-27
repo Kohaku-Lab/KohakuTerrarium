@@ -146,10 +146,11 @@ class RuntimeGraphPrompt:
             section = build_runtime_graph_section(self._engine, creature)
             apply_managed_section(creature.agent, section)
         except Exception as exc:  # pragma: no cover - defensive
-            logger.debug(
+            logger.warning(
                 "runtime-graph refresh failed",
                 creature_id=creature_id,
                 error=str(exc),
+                exc_info=True,
             )
 
     async def refresh_creature(self, creature: "Creature") -> None:

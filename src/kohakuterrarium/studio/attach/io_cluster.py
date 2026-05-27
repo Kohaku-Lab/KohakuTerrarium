@@ -50,7 +50,7 @@ async def _forward_queue(queue: asyncio.Queue, ws: WebSocket) -> None:
                 break
             await ws.send_json(msg)
     except Exception as e:
-        logger.debug("cluster mux: forward queue error", error=str(e), exc_info=True)
+        logger.warning("cluster mux: forward queue error", error=str(e), exc_info=True)
 
 
 async def attach_io_cluster(
@@ -185,7 +185,12 @@ async def attach_io_cluster(
                 except asyncio.QueueFull:
                     logger.debug("cluster mux: outbox queue full")
         except Exception as exc:
-            logger.debug("cluster mux upstream ended", node=node_id, error=str(exc))
+            logger.warning(
+                "cluster mux upstream ended",
+                node=node_id,
+                error=str(exc),
+                exc_info=True,
+            )
 
     pump_tasks = [
         asyncio.create_task(_pump_upstream(node_id, rs))
@@ -204,7 +209,9 @@ async def attach_io_cluster(
                 timeout=10.0,
             )
         except Exception as exc:
-            logger.debug("cluster mux input forward failed", error=str(exc))
+            logger.warning(
+                "cluster mux input forward failed", error=str(exc), exc_info=True
+            )
 
     try:
         while True:
@@ -244,7 +251,7 @@ async def attach_io_cluster(
                             timeout=10.0,
                         )
                     except Exception:
-                        logger.debug(
+                        logger.warning(
                             "cluster mux: ui_reply forward failed",
                             node=node_id,
                             exc_info=True,
@@ -261,7 +268,7 @@ async def attach_io_cluster(
             try:
                 await rs.aclose()
             except Exception:
-                logger.debug("cluster mux: aclose failed", exc_info=True)
+                logger.warning("cluster mux: aclose failed", exc_info=True)
 
 
 __all__ = ["attach_io_cluster"]

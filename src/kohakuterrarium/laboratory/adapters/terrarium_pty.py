@@ -115,7 +115,7 @@ class TerrariumPtyAdapter(WSProxyAdapter):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            logger.debug("pty session ended", error=str(exc), exc_info=True)
+            logger.warning("pty session ended", error=str(exc), exc_info=True)
             sink.send_json_nowait({"type": "error", "data": str(exc)})
 
 

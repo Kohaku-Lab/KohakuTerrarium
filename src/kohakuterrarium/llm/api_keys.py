@@ -171,5 +171,5 @@ def _load_api_keys() -> dict[str, str]:
             data = yaml.safe_load(f)
             return data if isinstance(data, dict) else {}
     except Exception as e:
-        logger.debug("Failed to load API keys file", error=str(e))
+        logger.warning("Failed to load API keys file", error=str(e), exc_info=True)
         return {}

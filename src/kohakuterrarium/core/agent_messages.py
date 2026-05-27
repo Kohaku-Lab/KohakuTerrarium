@@ -260,7 +260,7 @@ class AgentMessagesMixin:
                     self.config.name, conv.to_messages()
                 )
             except Exception as e:
-                logger.debug(
+                logger.warning(
                     "Failed to save conversation after rewind",
                     error=str(e),
                     exc_info=True,
@@ -367,7 +367,9 @@ class AgentMessagesMixin:
         try:
             events = self.session_store.get_events(self.config.name)
         except Exception as e:
-            logger.debug("Failed to read events for live turns", error=str(e))
+            logger.warning(
+                "Failed to read events for live turns", error=str(e), exc_info=True
+            )
             return []
         live_ids = select_live_event_ids(events, branch_view=branch_view)
         seen_turns: set[int] = set()
@@ -419,7 +421,9 @@ class AgentMessagesMixin:
         try:
             events = self.session_store.get_events(self.config.name)
         except Exception as e:
-            logger.debug("Failed to read events for branch lookup", error=str(e))
+            logger.warning(
+                "Failed to read events for branch lookup", error=str(e), exc_info=True
+            )
             return 0
         max_branch = 0
         for evt in events:
@@ -450,9 +454,10 @@ class AgentMessagesMixin:
         try:
             events = self.session_store.get_events(self.config.name)
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 "Failed to read events for turn-content lookup",
                 error=str(e),
+                exc_info=True,
             )
             return None
         parent_paths = _index_parent_paths(events)
@@ -489,9 +494,10 @@ class AgentMessagesMixin:
         try:
             events = self.session_store.get_events(self.config.name)
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 "Failed to read events for branch_view reload",
                 error=str(e),
+                exc_info=True,
             )
             return
 
@@ -551,7 +557,11 @@ class AgentMessagesMixin:
         try:
             events = self.session_store.get_events(self.config.name)
         except Exception as e:
-            logger.debug("Failed to read events for prev-branch user", error=str(e))
+            logger.warning(
+                "Failed to read events for prev-branch user",
+                error=str(e),
+                exc_info=True,
+            )
             return None
         latest_for_turn: dict | None = None
         latest_branch = -1

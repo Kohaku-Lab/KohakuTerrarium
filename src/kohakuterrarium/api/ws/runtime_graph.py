@@ -157,7 +157,7 @@ async def runtime_graph_stream(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     except Exception as exc:
-        logger.debug("Runtime graph WS error", error=str(exc), exc_info=True)
+        logger.warning("Runtime graph WS error", error=str(exc), exc_info=True)
         with suppress(Exception):
             await websocket.send_json({"type": "error", "message": str(exc)})
         with suppress(Exception):

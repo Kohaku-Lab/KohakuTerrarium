@@ -270,7 +270,7 @@ def attach_session_store_for_creature(
                     if len(meta_agents) > 1:
                         existing.meta["config_type"] = "terrarium"
             except Exception:
-                logger.debug("meta agent-list update skipped", exc_info=True)
+                logger.warning("meta agent-list update skipped", exc_info=True)
             _retro_install_channel_persistence(engine, sid)
             return
 

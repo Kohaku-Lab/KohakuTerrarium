@@ -58,10 +58,11 @@ def _resolve_artifact_url(url: str) -> str:
         path = resolve_artifact_file(artifacts, rel)
         data = path.read_bytes()
     except Exception as exc:
-        logger.debug(
+        logger.warning(
             "Codex artifact URL resolve failed — sending as-is",
             url=url,
             error=str(exc),
+            exc_info=True,
         )
         return url
     ext = path.suffix.lower()
@@ -145,7 +146,7 @@ def maybe_capture_stream_rate_limit(
         if snap is not None and snap.has_data():
             set_cached(usage_snapshot_cls(snapshots=[snap]))
     except Exception as exc:  # pragma: no cover - defensive
-        logger.debug(
+        logger.warning(
             "Codex rate-limit event capture failed",
             error=str(exc),
             exc_info=True,

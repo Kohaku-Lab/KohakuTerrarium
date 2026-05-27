@@ -439,7 +439,7 @@ async def proxy_ws_to_lab(
                 ws_frame = {k: v for k, v in frame.items() if k != "stream_id"}
                 await websocket.send_json(ws_frame)
         except Exception as exc:  # pragma: no cover - defensive
-            logger.debug("ws-proxy forward ended", error=str(exc))
+            logger.warning("ws-proxy forward ended", error=str(exc), exc_info=True)
 
     fwd_task = asyncio.create_task(_forward_stream_to_ws())
     stream_id = rs.stream_id
@@ -456,7 +456,9 @@ async def proxy_ws_to_lab(
                     timeout=input_timeout,
                 )
             except Exception as exc:  # pragma: no cover - defensive
-                logger.debug("ws-proxy input forward failed", error=str(exc))
+                logger.warning(
+                    "ws-proxy input forward failed", error=str(exc), exc_info=True
+                )
     finally:
         fwd_task.cancel()
         await rs.aclose()

@@ -46,11 +46,15 @@ def attach(sid: str, store: SessionStore, sess_dir: str | Path) -> None:
             try:
                 existing.detach()
             except Exception as exc:  # noqa: BLE001
-                logger.debug("prior index-hook detach failed", error=str(exc))
+                logger.warning(
+                    "prior index-hook detach failed", error=str(exc), exc_info=True
+                )
         index = get_session_index_default(Path(sess_dir))
         _session_index_hooks[sid] = SessionIndexHook(store, index)
     except Exception as exc:  # noqa: BLE001
-        logger.debug("session-index hook attach failed", error=str(exc))
+        logger.warning(
+            "session-index hook attach failed", error=str(exc), exc_info=True
+        )
 
 
 def registry() -> dict[str, Any]:

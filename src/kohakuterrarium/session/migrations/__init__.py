@@ -108,10 +108,11 @@ def discover_versions(base_path: str | Path) -> list[tuple[int, Path]]:
             try:
                 version = detect_format_version(candidate)
             except Exception as e:
-                logger.debug(
+                logger.warning(
                     "Failed to probe bare session version",
                     path=str(candidate),
                     error=str(e),
+                    exc_info=True,
                 )
                 version = 1
             # Prefer the bare path entry only when no suffix file has

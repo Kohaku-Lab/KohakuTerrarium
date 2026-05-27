@@ -127,7 +127,7 @@ class Session:
             try:
                 jobs = list(list_fn())
             except Exception as e:
-                logger.debug(
+                logger.warning(
                     "Session.fork failed to list executor pending jobs",
                     error=str(e),
                     exc_info=True,

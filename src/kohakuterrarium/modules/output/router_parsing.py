@@ -104,7 +104,7 @@ class OutputRouterParseEventMixin:
                     revised_prompt=event.revised_prompt,
                 )
             except Exception as e:  # pragma: no cover — defensive
-                logger.debug(
+                logger.warning(
                     "on_assistant_image handler raised",
                     error=str(e),
                     exc_info=True,

@@ -355,7 +355,7 @@ class AppMultiCreatureMixin:
                 try:
                     self.on_text_chunk(text)
                 except Exception as e:  # pragma: no cover - defensive
-                    logger.debug("on_text_chunk failed", error=str(e))
+                    logger.warning("on_text_chunk failed", error=str(e), exc_info=True)
             elif kind == "processing_start":
                 try:
                     self.on_processing_start()
@@ -476,10 +476,11 @@ class AppMultiCreatureMixin:
                 try:
                     method(*args)
                 except Exception as e:  # pragma: no cover - defensive
-                    logger.debug(
+                    logger.warning(
                         "replay step failed",
                         method=method_name,
                         error=str(e),
+                        exc_info=True,
                     )
         finally:
             self.committer.set_replay_mode(False)
@@ -603,7 +604,7 @@ class AppMultiCreatureMixin:
         except asyncio.CancelledError:
             return
         except Exception as e:  # pragma: no cover - defensive
-            logger.debug("engine subscribe loop crashed", error=str(e), exc_info=True)
+            logger.warning("engine subscribe loop crashed", error=str(e), exc_info=True)
 
     def _on_creature_started(self, creature_id: str) -> None:
         """A creature was added — wire it into the rich CLI surface."""

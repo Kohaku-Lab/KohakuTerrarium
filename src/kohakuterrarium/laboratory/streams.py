@@ -106,7 +106,7 @@ class StreamDemux:
             try:
                 on_disc(self._on_node_disconnect)
             except Exception:  # pragma: no cover - defensive
-                logger.debug(
+                logger.warning(
                     "stream demux: on_node_disconnect registration failed",
                     exc_info=True,
                 )
@@ -167,10 +167,11 @@ class StreamDemux:
                     {"stream_id": stream_id, "eof": True, "disconnected": True}
                 )
             except asyncio.QueueFull:  # pragma: no cover - defensive
-                logger.debug(
+                logger.warning(
                     "stream demux: queue full for stream %s on disconnect " "of %s",
                     stream_id,
                     node_id,
+                    exc_info=True,
                 )
 
 

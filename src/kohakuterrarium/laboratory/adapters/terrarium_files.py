@@ -138,7 +138,7 @@ class TerrariumFilesAdapter:
             try:
                 transfer.staging.unlink(missing_ok=True)
             except OSError:  # pragma: no cover - defensive
-                logger.debug("orphan staging cleanup failed", exc_info=True)
+                logger.warning("orphan staging cleanup failed", exc_info=True)
         self._transfers.clear()
         logger.info("lab adapter detached", namespace=self.NAMESPACE)
 
@@ -406,7 +406,7 @@ class TerrariumFilesAdapter:
         try:
             await asyncio.to_thread(transfer.staging.unlink, True)
         except OSError:  # pragma: no cover - defensive
-            logger.debug("staging cleanup failed for %s", transfer_id, exc_info=True)
+            logger.warning("staging cleanup failed for %s", transfer_id, exc_info=True)
 
     async def _op_delete(self, body: dict[str, Any]) -> dict[str, Any]:
         scope = body["scope"]

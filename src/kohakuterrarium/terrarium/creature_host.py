@@ -181,18 +181,20 @@ class Creature:
             try:
                 await task
             except (asyncio.CancelledError, Exception) as e:
-                logger.debug(
+                logger.warning(
                     "input task cancel ended with exception",
                     creature_id=self.creature_id,
                     error=str(e),
+                    exc_info=True,
                 )
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 "input task raised on stop",
                 creature_id=self.creature_id,
                 error=str(e),
+                exc_info=True,
             )
 
     @property
@@ -320,7 +322,9 @@ class Creature:
             try:
                 llm_identifier = get_ident() or ""
             except Exception as e:
-                logger.debug("llm_identifier resolve failed", error=str(e))
+                logger.warning(
+                    "llm_identifier resolve failed", error=str(e), exc_info=True
+                )
         max_context = getattr(agent.llm, "_profile_max_context", 0)
         compact_threshold = 0
         if agent.compact_manager and max_context:
@@ -343,7 +347,7 @@ class Creature:
                 meta = agent.session_store.load_meta()
                 session_id = meta.get("session_id", "")
             except Exception as e:
-                logger.debug(
+                logger.warning(
                     "Failed to load session meta",
                     error=str(e),
                     exc_info=True,

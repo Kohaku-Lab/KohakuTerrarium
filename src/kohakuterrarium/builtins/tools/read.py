@@ -257,8 +257,10 @@ class ReadTool(BaseTool):
                     )
                 )
             except Exception as e:
-                logger.debug(
-                    "PDF page render failed, text still available", error=str(e)
+                logger.warning(
+                    "PDF page render failed, text still available",
+                    error=str(e),
+                    exc_info=True,
                 )
 
         doc.close()

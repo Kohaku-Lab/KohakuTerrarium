@@ -606,10 +606,11 @@ class SubAgent:
                     conv_json=self.conversation.to_json(),
                 )
             except Exception as e:
-                logger.debug(
+                logger.warning(
                     "Failed to save sub-agent conversation",
                     subagent=self.config.name,
                     error=str(e),
+                    exc_info=True,
                 )
 
         return SubAgentResult(

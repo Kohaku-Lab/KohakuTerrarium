@@ -97,7 +97,7 @@ class AskUserTool(BaseTool):
         try:
             reply = await router.emit_and_wait(event, timeout_s=timeout_s)
         except Exception as e:
-            logger.debug("ask_user bus emit failed", error=str(e), exc_info=True)
+            logger.warning("ask_user bus emit failed", error=str(e), exc_info=True)
             return await self._stdin_fallback(question)
 
         if reply.is_timeout:

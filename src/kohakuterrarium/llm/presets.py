@@ -855,7 +855,7 @@ def _merge_package_presets() -> dict[tuple[str, str], dict[str, Any]]:
                 }
                 merged[key] = preset_data
     except Exception as e:
-        logger.debug("Failed to load package presets", error=str(e), exc_info=True)
+        logger.warning("Failed to load package presets", error=str(e), exc_info=True)
 
     return merged
 

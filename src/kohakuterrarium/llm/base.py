@@ -336,7 +336,7 @@ class BaseLLMProvider:
             try:
                 callback(messages)
             except Exception as exc:  # pragma: no cover - defensive
-                logger.debug(
+                logger.warning(
                     "Emergency-drop callback failed", error=str(exc), exc_info=True
                 )
 

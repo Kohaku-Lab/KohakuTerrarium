@@ -81,7 +81,7 @@ class BaseChannel(ABC):
             try:
                 cb(self.name, message)
             except Exception as e:
-                logger.debug("on_send callback error", error=str(e), exc_info=True)
+                logger.warning("on_send callback error", error=str(e), exc_info=True)
 
     @abstractmethod
     async def send(self, message: ChannelMessage) -> None: ...

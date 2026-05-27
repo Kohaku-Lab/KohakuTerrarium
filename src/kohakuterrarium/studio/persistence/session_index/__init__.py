@@ -187,7 +187,9 @@ def get_session_index_default(session_dir: Path | None = None) -> SessionIndex:
             try:
                 _singleton.close()
             except Exception as exc:  # noqa: BLE001
-                logger.debug("singleton close-on-rotate failed", error=str(exc))
+                logger.warning(
+                    "singleton close-on-rotate failed", error=str(exc), exc_info=True
+                )
         sidecar = sidecar_path_for(session_dir)
         instance = SessionIndex(sidecar)
         is_first_bootstrap = instance.meta_get(_BOOTSTRAP_FLAG) != "1"
@@ -232,7 +234,7 @@ def close_session_index() -> None:
         try:
             _singleton.close()
         except Exception as exc:  # noqa: BLE001
-            logger.debug("close_session_index failed", error=str(exc))
+            logger.warning("close_session_index failed", error=str(exc), exc_info=True)
         _singleton = None
         _singleton_dir = None
 

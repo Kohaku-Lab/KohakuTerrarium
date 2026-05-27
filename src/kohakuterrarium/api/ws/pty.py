@@ -81,7 +81,7 @@ async def session_pty_ws(
             except WebSocketDisconnect:
                 pass
             except Exception as exc:
-                logger.debug("remote PTY proxy error", error=str(exc), exc_info=True)
+                logger.warning("remote PTY proxy error", error=str(exc), exc_info=True)
                 try:
                     await websocket.close()
                 except Exception:

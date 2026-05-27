@@ -360,7 +360,7 @@ def _copy_state(source: SessionStore, dest: SessionStore) -> None:
         try:
             dest.state[key] = source.state[key_bytes]
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 "Migrator failed to copy state key",
                 key=key,
                 error=str(e),
@@ -379,7 +379,7 @@ def _copy_kvault_table(source_table: Any, dest_table: Any, label: str) -> None:
         try:
             dest_table[key] = source_table[key_bytes]
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 f"Migrator failed to copy {label} key",
                 key=key,
                 error=str(e),
@@ -399,7 +399,7 @@ def _copy_meta_fields(source: SessionStore, dest: SessionStore) -> dict[str, Any
         try:
             value = source.meta[key_bytes]
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 "Migrator failed to read meta key",
                 key=key,
                 error=str(e),
@@ -412,7 +412,7 @@ def _copy_meta_fields(source: SessionStore, dest: SessionStore) -> dict[str, Any
         try:
             dest.meta[key] = value
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 "Migrator failed to write meta key",
                 key=key,
                 error=str(e),
@@ -521,7 +521,7 @@ def migrate(source_path: str, target_path: str) -> None:
                         _highest_synthetic_event_id(dest, agent)
                     )
                 except Exception as e:
-                    logger.debug(
+                    logger.warning(
                         "Migrator failed to stamp snapshot_event_id",
                         agent=agent,
                         error=str(e),

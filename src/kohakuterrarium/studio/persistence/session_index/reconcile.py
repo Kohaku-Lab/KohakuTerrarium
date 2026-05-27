@@ -107,7 +107,9 @@ def _first_user_input_preview(store: SessionStore) -> str:
                 if preview:
                     return preview
     except Exception as exc:  # noqa: BLE001
-        logger.debug("preview read failed; using empty", error=str(exc))
+        logger.warning(
+            "preview read failed; using empty", error=str(exc), exc_info=True
+        )
     return ""
 
 
@@ -143,7 +145,7 @@ def _has_vector_index(store: SessionStore) -> bool:
             v = store.state.get("vec_dimensions")
             return isinstance(v, int) and v > 0
     except Exception as exc:  # noqa: BLE001
-        logger.debug("vector-index probe failed", error=str(exc))
+        logger.warning("vector-index probe failed", error=str(exc), exc_info=True)
     return False
 
 
@@ -170,7 +172,9 @@ def read_entry_from_disk(path: Path) -> SessionIndexEntry | None:
             pre_mtime = _max_mtime_with_wal(path, fallback=st.st_mtime)
             pre_size = st.st_size
         except OSError as exc:
-            logger.debug("pre-open stat failed", path=str(path), error=str(exc))
+            logger.warning(
+                "pre-open stat failed", path=str(path), error=str(exc), exc_info=True
+            )
             return None
         store = SessionStore(path)
         try:
@@ -188,7 +192,12 @@ def read_entry_from_disk(path: Path) -> SessionIndexEntry | None:
         finally:
             store.close(update_status=False)
     except Exception as exc:  # noqa: BLE001
-        logger.debug("read_entry_from_disk failed", path=str(path), error=str(exc))
+        logger.warning(
+            "read_entry_from_disk failed",
+            path=str(path),
+            error=str(exc),
+            exc_info=True,
+        )
         return None
 
 
@@ -236,8 +245,11 @@ def reconcile(
         try:
             st = path.stat()
         except OSError as exc:
-            logger.debug(
-                "stat failed; will retry next reconcile", path=str(path), error=str(exc)
+            logger.warning(
+                "stat failed; will retry next reconcile",
+                path=str(path),
+                error=str(exc),
+                exc_info=True,
             )
             continue
         live_mtime = _max_mtime_with_wal(path, fallback=st.st_mtime)

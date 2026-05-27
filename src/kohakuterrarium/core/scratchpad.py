@@ -50,7 +50,7 @@ class Scratchpad:
         try:
             cb(key, action, size_bytes)
         except Exception as e:  # pragma: no cover — defensive
-            logger.debug("scratchpad observer failed", error=str(e), exc_info=True)
+            logger.warning("scratchpad observer failed", error=str(e), exc_info=True)
 
     def set(self, key: str, value: str) -> None:
         """Set a key-value pair."""

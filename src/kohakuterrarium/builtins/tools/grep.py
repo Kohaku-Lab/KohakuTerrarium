@@ -196,5 +196,5 @@ async def _search_single_file(
                     }
                 )
     except Exception as e:
-        logger.debug("Failed to search file for matches", error=str(e), exc_info=True)
+        logger.warning("Failed to search file for matches", error=str(e), exc_info=True)
     return matches

@@ -136,7 +136,9 @@ def build_index(
                 }
             )
         except Exception as e:  # pragma: no cover - defensive
-            logger.debug("memory build progress callback raised", error=str(e))
+            logger.warning(
+                "memory build progress callback raised", error=str(e), exc_info=True
+            )
 
     emit("scan", 0, blocks_indexed=0, blocks_total=0)
     store = SessionStore(path)
@@ -180,10 +182,11 @@ def build_index(
                         memory._set_indexed_count(agent_name, 0)
                         memory._clear_fts(agent_name)
                     except Exception as e:  # pragma: no cover - defensive
-                        logger.debug(
+                        logger.warning(
                             "force-rebuild clear failed",
                             agent=agent_name,
                             error=str(e),
+                            exc_info=True,
                         )
 
             indexed_per_agent: dict[str, dict[str, int]] = {}

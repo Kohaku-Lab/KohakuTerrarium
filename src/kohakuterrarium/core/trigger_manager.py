@@ -113,7 +113,9 @@ class TriggerManager:
                     ],
                 )
             except Exception as e:
-                logger.debug("Failed to save trigger state", error=str(e))
+                logger.warning(
+                    "Failed to save trigger state", error=str(e), exc_info=True
+                )
         else:
             logger.debug(
                 "Trigger registered (not started)",
@@ -141,7 +143,9 @@ class TriggerManager:
             except asyncio.CancelledError:
                 pass
             except Exception as e:
-                logger.debug("Trigger task cleanup error", error=str(e), exc_info=True)
+                logger.warning(
+                    "Trigger task cleanup error", error=str(e), exc_info=True
+                )
 
         await trigger.stop()
         self._created_at.pop(trigger_id, None)
@@ -235,7 +239,7 @@ class TriggerManager:
                         try:
                             self.on_trigger_fired(trigger_id, event)
                         except Exception as e:
-                            logger.debug(
+                            logger.warning(
                                 "on_trigger_fired callback error",
                                 error=str(e),
                                 exc_info=True,
@@ -286,4 +290,4 @@ class TriggerManager:
                 },
             )
         except Exception as e:  # pragma: no cover — observability
-            logger.debug("schedule_drift emit failed", error=str(e), exc_info=True)
+            logger.warning("schedule_drift emit failed", error=str(e), exc_info=True)

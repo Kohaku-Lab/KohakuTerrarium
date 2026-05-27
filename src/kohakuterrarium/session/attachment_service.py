@@ -37,7 +37,7 @@ def _host_agent_name(session: "Session") -> str:
         try:
             meta = store.load_meta()
         except Exception as e:  # pragma: no cover — defensive
-            logger.debug("load_meta failed in attach", error=str(e), exc_info=True)
+            logger.warning("load_meta failed in attach", error=str(e), exc_info=True)
             meta = {}
         agents = meta.get("agents") if isinstance(meta, dict) else None
         if isinstance(agents, list) and agents:
@@ -64,7 +64,7 @@ def _next_attach_seq(store: "SessionStore", host: str, role: str) -> int:
     try:
         store.state[key] = next_seq
     except Exception as e:  # pragma: no cover — defensive
-        logger.debug("Failed to persist attach_seq", error=str(e), exc_info=True)
+        logger.warning("Failed to persist attach_seq", error=str(e), exc_info=True)
     return next_seq
 
 
@@ -94,7 +94,7 @@ def _emit_lineage(
     try:
         store.append_event(host, event_type, payload)
     except Exception as e:  # pragma: no cover — observability
-        logger.debug(
+        logger.warning(
             "Lineage event emit failed",
             event_type=event_type,
             error=str(e),
@@ -153,7 +153,7 @@ def attach_agent_to_session(
     try:
         session_id = store.session_id
     except Exception as e:  # pragma: no cover — defensive
-        logger.debug("session_id read failed", error=str(e), exc_info=True)
+        logger.warning("session_id read failed", error=str(e), exc_info=True)
 
     _emit_lineage(
         store,
@@ -175,7 +175,7 @@ def attach_agent_to_session(
     try:
         store.set_viewer_default_agent(prefix)
     except Exception as e:  # pragma: no cover — observability
-        logger.debug(
+        logger.warning(
             "set_viewer_default_agent failed",
             namespace=prefix,
             error=str(e),
@@ -212,13 +212,13 @@ def detach_agent_from_session(agent: "Agent") -> None:
         if hasattr(store, "flush"):
             store.flush()
     except Exception as e:  # pragma: no cover — observability
-        logger.debug("Store flush on detach failed", error=str(e), exc_info=True)
+        logger.warning("Store flush on detach failed", error=str(e), exc_info=True)
 
     session_id = ""
     try:
         session_id = store.session_id
     except Exception as e:  # pragma: no cover — defensive
-        logger.debug("session_id read failed", error=str(e), exc_info=True)
+        logger.warning("session_id read failed", error=str(e), exc_info=True)
 
     _emit_lineage(
         store,

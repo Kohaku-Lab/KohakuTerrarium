@@ -331,7 +331,7 @@ class TerrariumAttachAdapter(WSProxyAdapter):
         try:
             _ok, ack_status = agent.output_router.submit_reply_with_status(reply)
         except Exception:
-            logger.debug("submit_reply failed", exc_info=True)
+            logger.warning("submit_reply failed", exc_info=True)
             ack_status = "unknown"
         sink.send_json_nowait(
             {
