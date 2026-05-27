@@ -199,11 +199,15 @@ class TestSessionsChatControlForward:
     async def test_edit_message_forwards_idx_and_content_and_returns_result(
         self, studio_engine
     ):
+        # Successful edits return a ``{status, [turn_index, branch_id]}``
+        # dict so the frontend can promote its <N/M> navigator before
+        # the post-turn resync. False is reserved for "edit refused".
         s, engine = studio_engine
         agent = _attach_chat_agent(engine)
         gid = engine.get_creature("alice").graph_id
         out = await s.sessions.chat.edit_message(gid, "alice", 0, "edited text")
-        assert out is True
+        assert isinstance(out, dict)
+        assert out["status"] == "edited"
         assert agent.edit_args == (0, "edited text")
 
     async def test_rewind_reaches_the_agent(self, studio_engine):

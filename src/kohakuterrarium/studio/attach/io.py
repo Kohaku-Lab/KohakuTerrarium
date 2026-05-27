@@ -342,7 +342,7 @@ async def attach_io(
 
     queue: asyncio.Queue = asyncio.Queue()
     log = get_event_log(f"{session_id}:{creature.creature_id}")
-    out_module = StreamOutput(creature.name, queue, log)
+    out_module = StreamOutput(creature.name, queue, log, agent=agent)
     agent.output_router.add_secondary(out_module)
 
     # Multi-creature graphs: also subscribe to sibling creatures'
@@ -360,7 +360,7 @@ async def attach_io(
                 sibling = engine.get_creature(cid)
             except KeyError:
                 continue
-            sib_module = StreamOutput(sibling.name, queue, log)
+            sib_module = StreamOutput(sibling.name, queue, log, agent=sibling.agent)
             sibling.agent.output_router.add_secondary(sib_module)
             sibling_modules.append((sibling.agent, sib_module))
 

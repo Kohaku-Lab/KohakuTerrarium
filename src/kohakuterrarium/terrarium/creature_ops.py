@@ -34,6 +34,21 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+
+def branch_status_payload(agent: Any, status: str) -> dict[str, Any]:
+    """Status dict for ``regenerate`` / ``edit_message`` carrying the
+    agent's just-opened ``(turn_index, branch_id)`` so the frontend
+    navigator promotes without waiting for the post-turn resync.
+    """
+    out: dict[str, Any] = {"status": status}
+    ti, bi = getattr(agent, "_turn_index", None), getattr(agent, "_branch_id", None)
+    if isinstance(ti, int):
+        out["turn_index"] = ti
+    if isinstance(bi, int):
+        out["branch_id"] = bi
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Env / system prompt / working dir
 # ---------------------------------------------------------------------------

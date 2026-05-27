@@ -273,9 +273,49 @@ class TestChatOps:
                     },
                 )
             )
+            # Stub agent has no ``_turn_index`` / ``_branch_id``
+            # attributes, so the dispatcher only echoes the status.
             assert out == {"status": "regenerating"}
             # The turn/branch selectors are passed through verbatim.
             assert calls == [(3, "v")]
+        finally:
+            await adapter._engine.shutdown()
+
+    async def test_regenerate_returns_opened_branch_for_navigator_promotion(self):
+        # The frontend's chevron navigator <N/M> needs to promote
+        # immediately on Retry / Save&Rerun — it can't wait for the
+        # post-turn history resync. The dispatcher therefore surfaces
+        # the agent's freshly-opened branch_id (and the turn_index it
+        # belongs to) so the worker -> remote_service hop carries it
+        # back to the frontend.
+        adapter = await _make_adapter()
+        try:
+            creature = adapter._engine.get_creature("alice")
+
+            async def _regen(*, turn_index, branch_view):
+                pass
+
+            creature.agent = SimpleNamespace(
+                is_running=False,
+                regenerate_last_response=_regen,
+                _turn_index=3,
+                _branch_id=2,
+            )
+            out = await adapter._dispatch(
+                _msg(
+                    "regenerate",
+                    {
+                        "creature_id": "alice",
+                        "turn_index": 3,
+                        "branch_view": None,
+                    },
+                )
+            )
+            assert out == {
+                "status": "regenerating",
+                "turn_index": 3,
+                "branch_id": 2,
+            }
         finally:
             await adapter._engine.shutdown()
 
@@ -299,7 +339,82 @@ class TestChatOps:
                     },
                 )
             )
-            assert out == {"edited": True}
+            # Successful edit echoes the canonical ``edited`` flag plus
+            # the ``status: edited`` marker the remote_service shim
+            # uses to detect "new-style" replies. Stub agent has no
+            # ``_turn_index`` / ``_branch_id`` attributes, so those
+            # keys are absent.
+            assert out == {"edited": True, "status": "edited"}
+        finally:
+            await adapter._engine.shutdown()
+
+    async def test_edit_message_returns_branch_id_when_agent_assigns_one(self):
+        # Same rationale as the regenerate case above — the navigator
+        # promotion is gated on receiving the new branch_id back from
+        # the worker, so the dispatcher must surface it.
+        adapter = await _make_adapter()
+        try:
+            creature = adapter._engine.get_creature("alice")
+
+            async def _edit(msg_idx, content, **kw):
+                return True
+
+            creature.agent = SimpleNamespace(
+                is_running=False,
+                edit_and_rerun=_edit,
+                _turn_index=4,
+                _branch_id=3,
+            )
+            out = await adapter._dispatch(
+                _msg(
+                    "edit_message",
+                    {
+                        "creature_id": "alice",
+                        "msg_idx": 2,
+                        "content": "fixed",
+                    },
+                )
+            )
+            assert out == {
+                "edited": True,
+                "status": "edited",
+                "turn_index": 4,
+                "branch_id": 3,
+            }
+        finally:
+            await adapter._engine.shutdown()
+
+    async def test_edit_message_failure_does_not_leak_branch_metadata(self):
+        # When the agent refuses the edit (wrong target, etc.) the
+        # ``edited: False`` reply must NOT carry a stale branch_id —
+        # the frontend uses the truthiness of ``edited`` to decide
+        # whether to promote the navigator, and a sticky branch_id
+        # from a previous successful call would flip <1/1> to <2/2>
+        # on a bona fide failure.
+        adapter = await _make_adapter()
+        try:
+            creature = adapter._engine.get_creature("alice")
+
+            async def _edit(msg_idx, content, **kw):
+                return False
+
+            creature.agent = SimpleNamespace(
+                is_running=False,
+                edit_and_rerun=_edit,
+                _turn_index=7,
+                _branch_id=9,
+            )
+            out = await adapter._dispatch(
+                _msg(
+                    "edit_message",
+                    {
+                        "creature_id": "alice",
+                        "msg_idx": 2,
+                        "content": "fixed",
+                    },
+                )
+            )
+            assert out == {"edited": False}
         finally:
             await adapter._engine.shutdown()
 

@@ -239,3 +239,109 @@ class TestStreamOutputEmit:
         )
         msg = q.get_nowait()
         assert msg["args"] == ["x"]
+
+
+# ── Branch tagging via the optional ``agent`` arg ────────────
+
+
+class _StubAgent:
+    """Minimal agent stub for the branch-tag tests.
+
+    The real ``Agent`` has many fields; only ``_turn_index`` /
+    ``_branch_id`` matter for the tagging path. Anything else the
+    StreamOutput might reach for is left absent on purpose so we
+    catch unintended coupling.
+    """
+
+    def __init__(self, turn: int | None = None, branch: int | None = None):
+        self._turn_index = turn
+        self._branch_id = branch
+
+
+class TestStreamOutputBranchTagging:
+    """Frontend depends on every streaming frame carrying
+    ``turn_index`` + ``branch_id`` so it can route chunks to the
+    branch the user is currently viewing. Without these the chat
+    panel can't tell a regen / edit-rerun stream apart from the
+    sibling branch the user clicked back to. The tagging path lives
+    inside ``_put``, so every frame the StreamOutput emits is
+    affected — text chunks, processing markers, activities, image
+    events, supersede notices.
+    """
+
+    async def test_text_chunk_tagged(self):
+        q = asyncio.Queue()
+        log: list = []
+        agent = _StubAgent(turn=3, branch=2)
+        so = StreamOutput("src", q, log, agent=agent)
+        await so.write_stream("chunk")
+        msg = q.get_nowait()
+        assert msg["turn_index"] == 3
+        assert msg["branch_id"] == 2
+
+    async def test_processing_markers_tagged(self):
+        q = asyncio.Queue()
+        agent = _StubAgent(turn=5, branch=7)
+        so = StreamOutput("src", q, [], agent=agent)
+        await so.on_processing_start()
+        await so.on_processing_end()
+        start = q.get_nowait()
+        end = q.get_nowait()
+        assert start["turn_index"] == 5 and start["branch_id"] == 7
+        assert end["turn_index"] == 5 and end["branch_id"] == 7
+
+    def test_activity_tagged(self):
+        q = asyncio.Queue()
+        agent = _StubAgent(turn=1, branch=4)
+        so = StreamOutput("src", q, [], agent=agent)
+        so.on_activity("tool_call", "[bash] ls")
+        # activity_with_metadata also goes via _put — the typed mirror
+        # gets the same tag for free.
+        msg = q.get_nowait()
+        assert msg["turn_index"] == 1
+        assert msg["branch_id"] == 4
+
+    async def test_no_agent_means_no_branch_tag(self):
+        # Legacy call sites (and tests) construct StreamOutput without
+        # an agent. Frames stay un-tagged so the frontend treats them
+        # as branch-agnostic and falls back to its legacy behaviour.
+        q = asyncio.Queue()
+        so = StreamOutput("src", q, [])
+        await so.write_stream("chunk")
+        msg = q.get_nowait()
+        assert "turn_index" not in msg
+        assert "branch_id" not in msg
+
+    async def test_unassigned_branch_skipped(self):
+        # Very early in agent startup ``_turn_index`` / ``_branch_id``
+        # are 0 — not yet assigned. Tagging them would write
+        # ``branch_id=0`` everywhere, which the frontend's branch gate
+        # would treat as a real (mismatching) branch. The guard in
+        # ``_current_turn_branch`` returns (None, None) until both
+        # fields are >= 1.
+        q = asyncio.Queue()
+        agent = _StubAgent(turn=0, branch=0)
+        so = StreamOutput("src", q, [], agent=agent)
+        await so.write_stream("chunk")
+        msg = q.get_nowait()
+        assert "turn_index" not in msg
+        assert "branch_id" not in msg
+
+    def test_explicit_metadata_not_overwritten(self):
+        # ``on_activity_with_metadata`` already populates ``turn_index``
+        # from the metadata dict before ``_put`` runs. The tagging
+        # path must preserve that explicit value (the metadata might
+        # carry a different turn for a deferred event) rather than
+        # clobber it with the agent's current turn.
+        q = asyncio.Queue()
+        agent = _StubAgent(turn=10, branch=2)
+        so = StreamOutput("src", q, [], agent=agent)
+        so.on_activity_with_metadata(
+            "tool_done",
+            "[bash] done",
+            metadata={"turn_index": 5, "branch_id": 9, "job_id": "j1"},
+        )
+        msg = q.get_nowait()
+        assert msg["turn_index"] == 5
+        assert msg["branch_id"] == 9
+        assert msg["job_id"] == "j1"

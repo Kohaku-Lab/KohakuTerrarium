@@ -49,10 +49,17 @@ async def regenerate_creature(
     turn_index = req.turn_index if req is not None else None
     branch_view = req.branch_view if req is not None else None
     try:
-        await service.regenerate(cid, turn_index=turn_index, branch_view=branch_view)
-        return {"status": "regenerating", "turn_index": turn_index}
+        result = await service.regenerate(
+            cid, turn_index=turn_index, branch_view=branch_view
+        )
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
+    # Pass through ``turn_index`` / ``branch_id`` from the service so
+    # the frontend can promote the <N/M> navigator the instant the API
+    # call returns, instead of waiting for the post-turn resync.
+    if isinstance(result, dict):
+        return result
+    return {"status": "regenerating", "turn_index": turn_index}
 
 
 @router.post("/{session_id}/creatures/{creature_id}/messages/{msg_idx}/edit")
@@ -84,6 +91,15 @@ async def edit_creature_message(
         raise HTTPException(404, f"creature {creature_id!r} not found")
     if not edited:
         raise HTTPException(400, "Invalid edit target; expected a user message")
+    # Newer service implementations return a dict carrying the just-
+    # opened branch_id / turn_index so the frontend's navigator can
+    # promote immediately. Older ones still return ``True`` — fall
+    # back to echoing the request fields then.
+    if isinstance(edited, dict):
+        return {
+            "user_position": req.user_position,
+            **edited,
+        }
     return {
         "status": "edited",
         "turn_index": req.turn_index,

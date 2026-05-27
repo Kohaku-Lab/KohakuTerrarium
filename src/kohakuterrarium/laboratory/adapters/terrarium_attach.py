@@ -121,7 +121,7 @@ class TerrariumAttachAdapter(WSProxyAdapter):
 
         log = get_event_log(f"{session_id}:{creature.creature_id}")
         queue_shim = _SinkQueueAdapter(sink)
-        primary = StreamOutput(creature.name, queue_shim, log)  # type: ignore[arg-type]
+        primary = StreamOutput(creature.name, queue_shim, log, agent=agent)  # type: ignore[arg-type]
         agent.output_router.add_secondary(primary)
 
         # Sibling subscribe — mirrors the host attach for terrarium graphs.
@@ -135,7 +135,9 @@ class TerrariumAttachAdapter(WSProxyAdapter):
                     sibling = self._engine.get_creature(cid)
                 except KeyError:
                     continue
-                sib_module = StreamOutput(sibling.name, queue_shim, log)  # type: ignore[arg-type]
+                sib_module = StreamOutput(
+                    sibling.name, queue_shim, log, agent=sibling.agent
+                )  # type: ignore[arg-type]
                 sibling.agent.output_router.add_secondary(sib_module)
                 sibling_modules.append((sibling.agent, sib_module))
 

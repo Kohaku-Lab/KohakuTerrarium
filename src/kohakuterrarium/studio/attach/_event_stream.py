@@ -8,6 +8,7 @@ TTS) may grow their own variants — this one is the WS-shaped one.
 
 import asyncio
 import time
+from typing import Any
 
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.modules.output.event import OutputEvent
@@ -40,17 +41,56 @@ def _parse_detail(detail: str) -> tuple[str, str]:
 
 class StreamOutput(OutputModule):
     """Secondary output that tags events with source and pushes to a
-    shared queue.  Attached to creatures' agents as a secondary sink."""
+    shared queue.  Attached to creatures' agents as a secondary sink.
 
-    def __init__(self, source: str, queue: asyncio.Queue, log: list):
+    ``agent`` (optional) is the live ``Agent`` whose ``_turn_index`` /
+    ``_branch_id`` are snapshotted into every emitted frame. Required
+    for branch-aware streaming on the frontend — without it the WS
+    chunks arrive with no branch info and the chat panel cannot tell
+    which branch a chunk belongs to when the user has switched away
+    from the streaming branch during a regen / edit-rerun.
+    """
+
+    def __init__(
+        self,
+        source: str,
+        queue: asyncio.Queue,
+        log: list,
+        agent: Any | None = None,
+    ):
         self._src = source
         self._q = queue
         self._log = log
         self._n = 0
+        self._agent = agent
+
+    def _current_turn_branch(self) -> tuple[int | None, int | None]:
+        """Return ``(turn_index, branch_id)`` from the agent, or
+        ``(None, None)`` when no agent is attached or the agent has
+        not assigned its turn/branch ids yet (very early startup).
+        """
+        agent = self._agent
+        if agent is None:
+            return None, None
+        ti = getattr(agent, "_turn_index", None)
+        bi = getattr(agent, "_branch_id", None)
+        if isinstance(ti, int) and ti > 0 and isinstance(bi, int) and bi > 0:
+            return ti, bi
+        return None, None
 
     def _put(self, msg: dict) -> None:
         msg["source"] = self._src
         msg["ts"] = time.time()
+        # Tag every frame with the agent's current (turn, branch) so
+        # the frontend can route streaming chunks to the right branch
+        # — without this the chat panel mis-renders a regen / edit-
+        # rerun stream onto whichever branch the user happens to be
+        # viewing.
+        ti, bi = self._current_turn_branch()
+        if ti is not None and "turn_index" not in msg:
+            msg["turn_index"] = ti
+        if bi is not None and "branch_id" not in msg:
+            msg["branch_id"] = bi
         self._q.put_nowait(msg)
         self._log.append(msg)
 
@@ -291,5 +331,6 @@ _STREAM_METADATA_KEYS = (
     "content_preview",
     "source_event_type",
     "turn_index",
+    "branch_id",
     "final_state",
 )

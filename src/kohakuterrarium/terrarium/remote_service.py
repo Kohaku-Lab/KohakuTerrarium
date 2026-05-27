@@ -313,7 +313,7 @@ class RemoteTerrariumService:
         turn_index: int | None = None,
         user_position: int | None = None,
         branch_view: dict[int, int] | None = None,
-    ) -> bool:
+    ) -> bool | dict[str, Any]:
         body = _maybe_raise(
             await self._req(
                 "edit_message",
@@ -327,7 +327,19 @@ class RemoteTerrariumService:
                 },
             )
         )
-        return bool(body.get("edited", False))
+        # Newer workers return the freshly-opened branch_id in the
+        # body so callers can promote their navigator immediately.
+        # Legacy workers only set ``edited`` — fall back to that.
+        if not bool(body.get("edited", False)):
+            return False
+        result_keys = ("status", "turn_index", "branch_id", "user_position")
+        out: dict[str, Any] = {
+            k: body[k] for k in result_keys if body.get(k) is not None
+        }
+        if not out:
+            return True
+        out.setdefault("status", "edited")
+        return out
 
     async def rewind(self, creature_id: str, msg_idx: int) -> None:
         _maybe_raise(

@@ -597,23 +597,41 @@ class TerrariumRuntimeAdapter:
             case "regenerate":
                 cid = msg.body["creature_id"]
                 creature = self._require_hosted(cid)
-                await creature.agent.regenerate_last_response(
+                agent = creature.agent
+                await agent.regenerate_last_response(
                     turn_index=msg.body.get("turn_index"),
                     branch_view=msg.body.get("branch_view"),
                 )
-                return {"status": "regenerating"}
+                regen_out: dict[str, Any] = {"status": "regenerating"}
+                _ti = getattr(agent, "_turn_index", None)
+                _bi = getattr(agent, "_branch_id", None)
+                if isinstance(_ti, int):
+                    regen_out["turn_index"] = _ti
+                if isinstance(_bi, int):
+                    regen_out["branch_id"] = _bi
+                return regen_out
 
             case "edit_message":
                 cid = msg.body["creature_id"]
                 creature = self._require_hosted(cid)
-                ok = await creature.agent.edit_and_rerun(
+                agent = creature.agent
+                ok = await agent.edit_and_rerun(
                     msg.body["msg_idx"],
                     unpack_content(msg.body["content"]),
                     turn_index=msg.body.get("turn_index"),
                     user_position=msg.body.get("user_position"),
                     branch_view=msg.body.get("branch_view"),
                 )
-                return {"edited": bool(ok)}
+                edit_out: dict[str, Any] = {"edited": bool(ok)}
+                if ok:
+                    edit_out["status"] = "edited"
+                    _ti = getattr(agent, "_turn_index", None)
+                    _bi = getattr(agent, "_branch_id", None)
+                    if isinstance(_ti, int):
+                        edit_out["turn_index"] = _ti
+                    if isinstance(_bi, int):
+                        edit_out["branch_id"] = _bi
+                return edit_out
 
             case "rewind":
                 cid = msg.body["creature_id"]

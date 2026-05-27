@@ -55,6 +55,7 @@ from kohakuterrarium.terrarium.creature_ops import (
     agent_triggers as _agent_triggers,
     agent_working_dir as _agent_working_dir,
     attach_policies_for as _attach_policies_for,
+    branch_status_payload as _branch_status,
     build_runtime_graph_snapshot_for as _build_runtime_graph_snapshot_for,
     chat_branches_for as _chat_branches_for,
     chat_history_for as _chat_history_for,
@@ -776,7 +777,7 @@ class LocalTerrariumService:
         await agent.regenerate_last_response(
             turn_index=turn_index, branch_view=branch_view
         )
-        return {"status": "regenerating"}
+        return _branch_status(agent, "regenerating")
 
     async def edit_message(
         self,
@@ -787,15 +788,16 @@ class LocalTerrariumService:
         turn_index: int | None = None,
         user_position: int | None = None,
         branch_view: dict[int, int] | None = None,
-    ) -> bool:
+    ) -> bool | dict[str, Any]:
         agent = self._agent(creature_id)
-        return await agent.edit_and_rerun(
+        ok = await agent.edit_and_rerun(
             msg_idx,
             content,
             turn_index=turn_index,
             user_position=user_position,
             branch_view=branch_view,
         )
+        return _branch_status(agent, "edited") if ok else False
 
     async def rewind(self, creature_id: str, msg_idx: int) -> None:
         await self._agent(creature_id).rewind_to(msg_idx)

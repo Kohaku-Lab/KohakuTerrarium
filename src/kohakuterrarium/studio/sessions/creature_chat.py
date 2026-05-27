@@ -85,7 +85,7 @@ async def edit_message(
     turn_index: int | None = None,
     user_position: int | None = None,
     branch_view: dict[int, int] | None = None,
-) -> bool:
+) -> bool | dict[str, object]:
     """Edit a user message at ``msg_idx`` and re-run from there.
 
     ``branch_view`` lets the caller edit a message on a NON-LATEST

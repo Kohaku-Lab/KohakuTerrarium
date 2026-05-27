@@ -567,7 +567,7 @@ class MultiNodeTerrariumService:
         turn_index: int | None = None,
         user_position: int | None = None,
         branch_view: dict[int, int] | None = None,
-    ) -> bool:
+    ) -> bool | dict[str, Any]:
         return await self._route_per_creature(
             creature_id,
             lambda svc: svc.edit_message(

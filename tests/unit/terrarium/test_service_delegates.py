@@ -269,10 +269,23 @@ class TestPerCreatureOps:
         c.agent.regenerate_last_response.assert_awaited()
 
     async def test_edit_message(self):
+        # Successful edits return a dict carrying the freshly-opened
+        # branch — the frontend reads ``branch_id`` to promote its
+        # <N/M> navigator without waiting for the post-turn resync.
         svc, c = _build_service()
         out = await svc.edit_message("cid", 2, "new content")
-        assert out is True
+        assert isinstance(out, dict)
+        assert out["status"] == "edited"
         c.agent.edit_and_rerun.assert_awaited()
+
+    async def test_edit_message_rejected_target_returns_false(self):
+        # Edits that name a non-user message must surface as a plain
+        # ``False`` so the route hands the client a 400. Returning the
+        # dict shape here would mask the failure.
+        svc, c = _build_service()
+        c.agent.edit_and_rerun.return_value = False
+        out = await svc.edit_message("cid", 2, "new content")
+        assert out is False
 
     async def test_rewind(self):
         svc, c = _build_service()
