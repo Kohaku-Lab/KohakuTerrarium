@@ -102,25 +102,55 @@ class TestPrepareMessages:
         assert body == []
 
     def test_consecutive_tool_results_coalesce_into_one_user_message(self):
+        # Consecutive tool messages following an assistant with two
+        # tool_calls coalesce into one user message containing both
+        # ``tool_result`` blocks. The preceding assistant is required
+        # by Anthropic — orphan tool_results are dropped by
+        # ``fix_anthropic_tool_block_pairing``.
         _system, body = prepare_messages(
             [
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {"id": "a", "function": {"name": "f1", "arguments": "{}"}},
+                        {"id": "b", "function": {"name": "f2", "arguments": "{}"}},
+                    ],
+                },
                 {"role": "tool", "tool_call_id": "a", "content": "ra"},
                 {"role": "tool", "tool_call_id": "b", "content": "rb"},
             ]
         )
-        assert len(body) == 1
-        assert body[0]["role"] == "user"
-        assert [p["tool_use_id"] for p in body[0]["content"]] == ["a", "b"]
+        # assistant + one user(tool_result a, tool_result b)
+        assert len(body) == 2
+        assert body[0]["role"] == "assistant"
+        assert body[1]["role"] == "user"
+        assert [p["tool_use_id"] for p in body[1]["content"]] == ["a", "b"]
 
     def test_tool_result_after_user_text_starts_new_message(self):
+        # An assistant.tool_call followed by user text then the tool
+        # result lands the splice in: the tool_result is moved up to
+        # immediately follow the assistant, and the user text stays
+        # in place (just AFTER the tool_result group now).
         _system, body = prepare_messages(
             [
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {"id": "x", "function": {"name": "f", "arguments": "{}"}}
+                    ],
+                },
                 {"role": "user", "content": "question"},
                 {"role": "tool", "tool_call_id": "x", "content": "answer"},
             ]
         )
-        assert len(body) == 2
+        assert len(body) == 3
+        assert body[0]["role"] == "assistant"
+        assert body[1]["role"] == "user"
         assert body[1]["content"][0]["tool_use_id"] == "x"
+        assert body[2]["role"] == "user"
+        assert body[2]["content"] == "question"
 
 
 class TestAssistantMessage:
@@ -482,3 +512,224 @@ class TestCacheMarkers:
         ]
         out = mark_tail_cache(messages, slots=1)
         assert out[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+
+
+# ── fix_anthropic_tool_block_pairing ─────────────────────────────
+
+
+from kohakuterrarium.llm.anthropic_format import (  # noqa: E402
+    SYNTHETIC_TOOL_RESULT_TEXT,
+    fix_anthropic_tool_block_pairing,
+    sanitized_native_content,
+)
+
+
+def _asst_tool_use(*pairs):
+    """Build a synthetic assistant message with N tool_use blocks."""
+    content = [
+        {"type": "tool_use", "id": id_, "name": name, "input": {}}
+        for id_, name in pairs
+    ]
+    return {"role": "assistant", "content": content}
+
+
+def _user_tool_results(*pairs):
+    """Build a synthetic user message with N tool_result blocks."""
+    content = [
+        {"type": "tool_result", "tool_use_id": id_, "content": text}
+        for id_, text in pairs
+    ]
+    return {"role": "user", "content": content}
+
+
+class TestFixAnthropicToolBlockPairing:
+    """Anthropic's API rejects (400) any conversation where a
+    ``tool_use`` content block has no matching ``tool_result`` in the
+    immediately-following user message, OR a ``tool_result`` block
+    references no preceding ``tool_use``. This post-pass runs on
+    every request to keep the wire shape valid even after interrupts,
+    branch switches, opportunistic input injection, or compaction.
+    """
+
+    def test_well_formed_pair_passes_through_unchanged(self):
+        messages = [
+            _asst_tool_use(("a", "bash")),
+            _user_tool_results(("a", "ok")),
+        ]
+        out = fix_anthropic_tool_block_pairing(messages)
+        assert len(out) == 2
+        assert out[0] == messages[0]
+        # The spliced user message has the same single tool_result.
+        assert out[1]["role"] == "user"
+        assert len(out[1]["content"]) == 1
+        assert out[1]["content"][0]["tool_use_id"] == "a"
+        assert out[1]["content"][0]["content"] == "ok"
+
+    def test_idempotent(self):
+        # Running the pass twice yields the same shape — the second
+        # call must be a no-op given the first call's output.
+        messages = [
+            _asst_tool_use(("a", "bash")),
+            _user_tool_results(("a", "ok")),
+            {"role": "assistant", "content": [{"type": "text", "text": "done"}]},
+        ]
+        once = fix_anthropic_tool_block_pairing(messages)
+        twice = fix_anthropic_tool_block_pairing(once)
+        assert once == twice
+
+    def test_synthesises_placeholder_for_missing_tool_result(self):
+        # Assistant has two tool_use blocks but only one tool_result.
+        # The missing one MUST be replaced with a synthetic is_error
+        # block carrying the "interrupted or removed" wording so the
+        # API doesn't 400 and the model can decide whether to retry.
+        messages = [
+            _asst_tool_use(("a", "bash"), ("b", "edit")),
+            _user_tool_results(("a", "first ok")),
+        ]
+        out = fix_anthropic_tool_block_pairing(messages)
+        assert len(out) == 2
+        user_blocks = out[1]["content"]
+        assert len(user_blocks) == 2
+        assert user_blocks[0]["tool_use_id"] == "a"
+        assert user_blocks[0]["content"] == "first ok"
+        # Synthetic placeholder for b.
+        synth = user_blocks[1]
+        assert synth["tool_use_id"] == "b"
+        assert synth["is_error"] is True
+        assert "[edit]" in synth["content"]
+        assert SYNTHETIC_TOOL_RESULT_TEXT in synth["content"]
+
+    def test_splices_tool_result_up_past_user_text(self):
+        # Real user text landed between assistant.tool_use and the
+        # tool_result (e.g. opportunistic input injection). Splice
+        # the tool_result up so it immediately follows the assistant;
+        # keep the user text exactly where it was — just now AFTER
+        # the spliced tool_result group. The user explicitly OKs
+        # this re-ordering as a non-logical bug, just bad ordering.
+        messages = [
+            _asst_tool_use(("a", "bash")),
+            {"role": "user", "content": "what about Y?"},
+            _user_tool_results(("a", "X done")),
+        ]
+        out = fix_anthropic_tool_block_pairing(messages)
+        assert len(out) == 3
+        assert out[0]["role"] == "assistant"
+        assert out[1]["role"] == "user"
+        assert out[1]["content"][0]["tool_use_id"] == "a"
+        assert out[1]["content"][0]["content"] == "X done"
+        assert out[2] == {"role": "user", "content": "what about Y?"}
+
+    def test_drops_orphan_tool_result(self):
+        # tool_result with no preceding tool_use — drop the block.
+        # The user message that carried it becomes empty and is
+        # dropped along with it.
+        messages = [
+            {"role": "user", "content": "hello"},
+            _user_tool_results(("ghost", "leftover")),
+            {"role": "assistant", "content": [{"type": "text", "text": "hi"}]},
+        ]
+        out = fix_anthropic_tool_block_pairing(messages)
+        assert len(out) == 2
+        assert out[0]["content"] == "hello"
+        assert out[1]["content"][0]["text"] == "hi"
+
+    def test_drops_orphan_tool_result_keeps_rest_of_user_message(self):
+        # A user message that mixes a real text block with an orphan
+        # tool_result must keep the real text and drop only the
+        # orphan. (Defensive — our converter doesn't usually mix
+        # these, but the pass must be robust to bad input.)
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "hi"},
+                    {"type": "tool_result", "tool_use_id": "ghost", "content": "stale"},
+                ],
+            },
+        ]
+        out = fix_anthropic_tool_block_pairing(messages)
+        assert len(out) == 1
+        assert out[0]["content"] == [{"type": "text", "text": "hi"}]
+
+    def test_two_consecutive_pairs_pass_through(self):
+        messages = [
+            _asst_tool_use(("a", "bash")),
+            _user_tool_results(("a", "first")),
+            _asst_tool_use(("b", "edit")),
+            _user_tool_results(("b", "second")),
+        ]
+        out = fix_anthropic_tool_block_pairing(messages)
+        assert len(out) == 4
+        assert out[1]["content"][0]["tool_use_id"] == "a"
+        assert out[3]["content"][0]["tool_use_id"] == "b"
+
+    def test_synthesises_for_assistant_at_end_of_list(self):
+        # Assistant.tool_use with NOTHING after — no following user
+        # at all. Must synthesise a placeholder user(tool_result).
+        messages = [_asst_tool_use(("a", "bash"))]
+        out = fix_anthropic_tool_block_pairing(messages)
+        assert len(out) == 2
+        assert out[1]["role"] == "user"
+        assert out[1]["content"][0]["tool_use_id"] == "a"
+        assert out[1]["content"][0]["is_error"] is True
+
+    def test_empty_message_list_passes_through(self):
+        assert fix_anthropic_tool_block_pairing([]) == []
+
+
+class TestSanitizedNativeContentNoneHole:
+    """Regression: when ``tool_calls`` is missing from the assistant
+    message (key absent, not just empty), the legacy code returned
+    ALL ``_kt_anthropic_content`` blocks — including orphan
+    ``tool_use`` from a previous round-trip the canonical OpenAI
+    shape has since lost track of. That orphan tool_use then went
+    out on the wire and Claude rejected the request. The fix
+    treats missing-key and empty-list identically: any tool_use in
+    native content with no announcing tool_call is an orphan.
+    """
+
+    def test_missing_tool_calls_drops_native_tool_use(self):
+        msg = {
+            "role": "assistant",
+            "content": "",
+            # NO ``tool_calls`` key at all — but the Anthropic round-
+            # trip stored a tool_use in native content.
+            KT_CONTENT_KEY: [
+                {"type": "text", "text": "thinking"},
+                {"type": "tool_use", "id": "ghost", "name": "bash", "input": {}},
+            ],
+        }
+        out = sanitized_native_content(msg)
+        # Text block kept; orphan tool_use dropped.
+        assert out == [{"type": "text", "text": "thinking"}]
+
+    def test_empty_tool_calls_list_drops_native_tool_use(self):
+        # Same behaviour for empty list — already worked pre-fix but
+        # the new code path is unified, so guard against regression.
+        msg = {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [],
+            KT_CONTENT_KEY: [
+                {"type": "tool_use", "id": "ghost", "name": "bash", "input": {}},
+            ],
+        }
+        out = sanitized_native_content(msg)
+        assert out == []
+
+    def test_announced_tool_use_kept(self):
+        # The matching id IS in tool_calls — the block survives.
+        msg = {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "real", "function": {"name": "bash", "arguments": "{}"}}
+            ],
+            KT_CONTENT_KEY: [
+                {"type": "tool_use", "id": "real", "name": "bash", "input": {}},
+                {"type": "tool_use", "id": "ghost", "name": "edit", "input": {}},
+            ],
+        }
+        out = sanitized_native_content(msg)
+        ids = [b.get("id") for b in out if b.get("type") == "tool_use"]
+        assert ids == ["real"]

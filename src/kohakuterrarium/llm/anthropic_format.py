@@ -5,7 +5,15 @@ import re
 from copy import deepcopy
 from typing import Any
 
+from kohakuterrarium.llm.anthropic_pairing import (
+    SYNTHETIC_TOOL_RESULT_TEXT,
+    fix_anthropic_tool_block_pairing,
+)
 from kohakuterrarium.llm.base import NativeToolCall, ToolSchema
+
+# Re-exported for back-compat with any callers that imported it from
+# ``anthropic_format``. Canonical home is ``anthropic_pairing``.
+__all__ = ["SYNTHETIC_TOOL_RESULT_TEXT", "fix_anthropic_tool_block_pairing"]
 
 KT_CONTENT_KEY = "_kt_anthropic_content"
 DATA_IMAGE_RE = re.compile(r"^data:(?P<mime>[^;,]+);base64,(?P<data>.*)$", re.S)
@@ -63,6 +71,12 @@ def prepare_messages(
             continue
         if role == "tool":
             append_tool_result(body, msg)
+    # Final pass — enforce Anthropic's strict ``tool_use`` ↔ ``tool_result``
+    # pairing rule. Mirrors what ``fix_tool_call_pairing`` does for the
+    # Codex Responses API at codex_format.py:90. Runs on every request,
+    # not just on resume, so any orderings introduced by mid-turn
+    # injection / branch switches get normalised before the API call.
+    body = fix_anthropic_tool_block_pairing(body)
     return "\n\n".join(system_parts), body
 
 
@@ -90,14 +104,22 @@ def assistant_message(msg: dict[str, Any]) -> dict[str, Any]:
 
 
 def sanitized_native_content(msg: dict[str, Any]) -> list[dict[str, Any]]:
+    """Round-trip the previous Anthropic response's native content blocks,
+    filtering out ``tool_use`` blocks the canonical OpenAI-shape no
+    longer announces.
+
+    Treats ``tool_calls`` MISSING the same as ``tool_calls: []`` —
+    both mean "this assistant announces no tool calls in the canonical
+    shape, so any ``tool_use`` in native content is orphan". The
+    legacy code returned ALL native content when the key was absent,
+    which let orphan ``tool_use`` blocks slip through to the API and
+    trigger 400 ("tool_use ids found without tool_result blocks").
+    """
     native_content = msg.get(KT_CONTENT_KEY)
     if not isinstance(native_content, list) or not native_content:
         return []
 
-    tool_calls = msg.get("tool_calls")
-    if tool_calls is None:
-        return deepcopy(native_content)
-
+    tool_calls = msg.get("tool_calls") or []
     valid_ids = {
         str(call.get("id") or "")
         for call in tool_calls
