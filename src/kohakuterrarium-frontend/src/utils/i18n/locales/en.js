@@ -1342,6 +1342,37 @@ export default {
   "hostPicker.removeAction": "Remove",
   "hostPicker.editAction": "Edit",
   "hostPicker.noHosts": "No hosts saved yet. Add one above, or scan a host QR.",
+  "hostPicker.adminToken": "Admin token",
+  "hostPicker.adminTokenOptional": "(only if host has admin token)",
+  "hostPicker.adminTokenPlaceholder": "kt-admin-token",
+  "hostPicker.adminTokenSet": "admin set",
+
+  // ── Auth — L4 user accounts ─────────────────────────────────────
+  "auth.login.title": "Log in",
+  "auth.login.hint": ({ host }) => (host ? `Log in to ${host}` : "Log in to this host"),
+  "auth.login.username": "Username",
+  "auth.login.password": "Password",
+  "auth.login.submit": "Log in",
+  "auth.login.register": "Register",
+  "auth.login.toggleToRegister": "Need an account? Register",
+  "auth.login.toggleToLogin": "Have an account? Log in",
+  "auth.login.invitationToken": "Invitation token",
+  "auth.login.invitationHint": "This host requires an invitation token to register.",
+  "auth.login.registrationClosed":
+    "This host does not allow self-registration. Ask the operator to add you (kt admin users add).",
+  "auth.login.invalidCredentials": "Invalid username or password.",
+  "auth.login.connectionFailed":
+    "Could not reach the host. Check the URL and host token, then try again.",
+  "auth.login.cancel": "Cancel",
+  "auth.user.menuTitle": ({ username }) => `Logged in as ${username}`,
+  "auth.user.logout": "Log out",
+  "auth.gate.required": "This host requires login. Please sign in to continue.",
+  "auth.admin.title": "Admin token required",
+  "auth.admin.hint":
+    "This operation needs the host's admin token (X-Admin-Token). Paste it below — it will be stored locally and sent on future config-mutating requests.",
+  "auth.admin.placeholder": "kt-admin-token",
+  "auth.admin.submit": "Save & retry",
+  "auth.admin.cancel": "Cancel",
 
   // ── Codex login modal (URL + device-code path, Android-friendly) ─
   "codexLogin.title": "Sign in to Codex",

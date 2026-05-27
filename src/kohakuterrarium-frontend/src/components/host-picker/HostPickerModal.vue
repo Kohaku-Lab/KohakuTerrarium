@@ -28,10 +28,18 @@
                 <span class="flex-1 min-w-0">
                   <span class="font-medium block truncate" :class="hosts.activeHostId === h.id ? 'text-iolite dark:text-iolite-light' : 'text-warm-700 dark:text-warm-300'">{{ h.name }}</span>
                   <span class="block text-[11px] text-warm-400 truncate font-mono">
-                    {{ h.url }}<span v-if="h.token" class="text-aquamarine"> · {{ t("hostPicker.tokenSet") }}</span>
+                    {{ h.url }}<span v-if="h.token" class="text-aquamarine"> · {{ t("hostPicker.tokenSet") }}</span
+                    ><span v-if="h.adminToken" class="text-iolite"> · {{ t("hostPicker.adminTokenSet") }}</span
+                    ><span v-if="h.currentUser" class="text-iolite"> · {{ h.currentUser.username }}</span>
                   </span>
                 </span>
                 <span v-if="hosts.activeHostId === h.id" class="i-carbon-checkmark text-iolite text-[12px] shrink-0" aria-hidden="true" />
+              </button>
+              <button v-if="h.currentUser" type="button" class="w-9 h-9 sm:w-6 sm:h-6 flex items-center justify-center rounded text-iolite hover:text-coral hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors hover-only-action" :title="t('auth.user.menuTitle', { username: h.currentUser.username }) + ' — ' + t('auth.user.logout')" @click="onLogout(h)">
+                <span class="i-carbon-logout text-sm sm:text-[11px]" />
+              </button>
+              <button v-else-if="canLoginOnHost(h)" type="button" class="w-9 h-9 sm:w-6 sm:h-6 flex items-center justify-center rounded text-warm-400 hover:text-iolite hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors hover-only-action" :title="t('auth.login.title')" @click="onLogin(h)">
+                <span class="i-carbon-login text-sm sm:text-[11px]" />
               </button>
               <button type="button" class="w-9 h-9 sm:w-6 sm:h-6 flex items-center justify-center rounded text-warm-400 hover:text-iolite hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors hover-only-action" :title="t('hostPicker.editAction')" @click="onEdit(h)">
                 <span class="i-carbon-edit text-sm sm:text-[11px]" />
@@ -75,6 +83,13 @@
             </label>
             <input v-model="form.token" type="password" autocomplete="off" class="input-field font-mono" :placeholder="t('hostPicker.tokenPlaceholder')" @keydown.enter="onSubmitForm" />
           </div>
+          <div>
+            <label class="text-[11px] text-warm-400 block mb-1">
+              {{ t("hostPicker.adminToken") }}
+              <span class="text-warm-400 font-normal">{{ t("hostPicker.adminTokenOptional") }}</span>
+            </label>
+            <input v-model="form.adminToken" type="password" autocomplete="off" class="input-field font-mono" :placeholder="t('hostPicker.adminTokenPlaceholder')" @keydown.enter="onSubmitForm" />
+          </div>
           <p v-if="errorMessage" class="text-[12px] text-coral mt-1">{{ errorMessage }}</p>
           <div class="flex items-center justify-end gap-2 mt-1">
             <el-button v-if="isEditingId" size="small" @click="resetForm">{{ t("common.cancel") }}</el-button>
@@ -89,8 +104,16 @@
         </div>
       </section>
 
+      <!-- Inline login pane — appears when the user clicks "Log in"
+           on a host that has multi_user enabled.  The pane lives
+           inside the modal so the user can switch hosts without
+           leaving the picker context. -->
+      <section v-if="loginForHostId" class="flex flex-col gap-2 pt-3 border-t border-warm-200 dark:border-warm-700">
+        <LoginPane :cancellable="true" @success="onLoginSuccess" @cancel="loginForHostId = null" />
+      </section>
+
       <!-- QR scanner -->
-      <section v-if="!isEditingId" class="flex flex-col gap-2 pt-3 border-t border-warm-200 dark:border-warm-700">
+      <section v-if="!isEditingId && !loginForHostId" class="flex flex-col gap-2 pt-3 border-t border-warm-200 dark:border-warm-700">
         <h3 class="text-[11px] uppercase tracking-wider text-warm-400 font-medium px-1">
           {{ t("hostPicker.qrTitle") }}
         </h3>
@@ -104,8 +127,10 @@
 import { computed, ref, watch } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
 
+import LoginPane from "@/components/auth/LoginPane.vue"
 import QrScanner from "@/components/host-picker/QrScanner.vue"
 import { useConnectIntent } from "@/composables/useConnectIntent"
+import { useAuthStore } from "@/stores/auth"
 import { useHostsStore } from "@/stores/hosts"
 import { useI18n } from "@/utils/i18n"
 
@@ -115,8 +140,16 @@ const props = defineProps({
 const emit = defineEmits(["close"])
 
 const hosts = useHostsStore()
+const auth = useAuthStore()
 const { pendingUri, consume } = useConnectIntent()
 const { t } = useI18n()
+
+/** Host id we're prompting login for.  When non-null the embedded
+ *  ``LoginPane`` renders below the host list.  Selecting a host for
+ *  login also switches the active host so the LoginPane's request
+ *  targets the right backend (capabilities + login URL are derived
+ *  from ``hosts.activeHost``). */
+const loginForHostId = ref(null)
 
 const visible = computed({
   get: () => props.open,
@@ -125,14 +158,14 @@ const visible = computed({
   },
 })
 
-const form = ref({ name: "", url: "", token: "" })
+const form = ref({ name: "", url: "", token: "", adminToken: "" })
 const errorMessage = ref("")
 const isEditingId = ref(null)
 
 const isFormValid = computed(() => Boolean(form.value.url.trim()))
 
 function resetForm() {
-  form.value = { name: "", url: "", token: "" }
+  form.value = { name: "", url: "", token: "", adminToken: "" }
   errorMessage.value = ""
   isEditingId.value = null
 }
@@ -159,6 +192,33 @@ function onUseSameOrigin() {
   emit("close")
 }
 
+/** Show the "Log in" icon only when the host has multi_user enabled
+ *  per the cached capabilities probe.  Falls back to ``true`` if we
+ *  haven't probed this host yet — the LoginPane re-probes when
+ *  activated, so a stale "show login" decision self-corrects. */
+function canLoginOnHost(host) {
+  if (!host) return false
+  const cached = auth.capabilitiesByHost[host.id]
+  if (!cached) return true
+  return !!cached.multi_user?.enabled
+}
+
+async function onLogin(host) {
+  hosts.setActive(host.id)
+  loginForHostId.value = host.id
+  await auth.fetch()
+}
+
+function onLoginSuccess() {
+  loginForHostId.value = null
+  emit("close")
+}
+
+async function onLogout(host) {
+  hosts.setActive(host.id)
+  await auth.logout()
+}
+
 async function onRemove(host) {
   try {
     await ElMessageBox.confirm(t("hostPicker.removeConfirm", { name: host.name }), t("hostPicker.removeAction"), {
@@ -174,7 +234,12 @@ async function onRemove(host) {
 
 function onEdit(host) {
   isEditingId.value = host.id
-  form.value = { name: host.name, url: host.url, token: host.token || "" }
+  form.value = {
+    name: host.name,
+    url: host.url,
+    token: host.token || "",
+    adminToken: host.adminToken || "",
+  }
   errorMessage.value = ""
 }
 
@@ -185,6 +250,7 @@ function onSaveEdit() {
     hosts.updateHost(isEditingId.value, {
       name: form.value.name,
       token: form.value.token,
+      adminToken: form.value.adminToken,
     })
     resetForm()
   } catch (e) {
@@ -198,6 +264,7 @@ function onQrScan(parsed) {
     name: form.value.name || parsed.url,
     url: parsed.url,
     token: parsed.token,
+    adminToken: "",
   }
   onSubmitForm()
 }
