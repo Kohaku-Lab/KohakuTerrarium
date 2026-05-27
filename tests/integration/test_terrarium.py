@@ -1190,15 +1190,23 @@ class TestTerrariumIntegration:
         # ``regenerate`` re-runs the assistant tail; ``edit_message``
         # rewrites a user message and re-runs from there; ``rewind``
         # drops the tail without re-running. All route to the live agent.
+        # Both regen + edit now return ``{status, turn_index, branch_id}``
+        # — the freshly-opened branch_id lets the frontend's <N/M>
+        # navigator promote before the post-turn resync lands. ``False``
+        # is reserved for refused edits.
         regen = await service.regenerate("writer")
-        assert regen == {"status": "regenerating"}
+        assert regen["status"] == "regenerating"
+        assert isinstance(regen["turn_index"], int) and regen["turn_index"] >= 1
+        assert isinstance(regen["branch_id"], int) and regen["branch_id"] >= 1
         # find the user message index to edit (the "hello writer" turn).
         hist2 = await service.chat_history("writer")
         user_idx = next(
             i for i, m in enumerate(hist2["messages"]) if m.get("role") == "user"
         )
         edited = await service.edit_message("writer", user_idx, "edited writer message")
-        assert edited is True
+        assert isinstance(edited, dict)
+        assert edited["status"] == "edited"
+        assert isinstance(edited["branch_id"], int) and edited["branch_id"] >= 1
         hist3 = await service.chat_history("writer")
         joined3 = " ".join(
             m.get("content", "") if isinstance(m.get("content"), str) else ""

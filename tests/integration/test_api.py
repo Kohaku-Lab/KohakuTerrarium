@@ -666,9 +666,17 @@ class TestApiIntegration:
         assert "a second http turn" in joined
         assert _REPLY_ONE in joined
         # Regenerate the conversation tail — fires another LLM call.
+        # Response now carries the agent's freshly-opened
+        # ``(turn_index, branch_id)`` so the frontend's branch
+        # navigator can promote without waiting for the post-turn
+        # resync. The exact ids come from the agent's state, but the
+        # status is always "regenerating".
         resp = client.post(f"{base}/regenerate", json={})
         assert resp.status_code == 200
-        assert resp.json() == {"status": "regenerating", "turn_index": None}
+        body = resp.json()
+        assert body["status"] == "regenerating"
+        assert isinstance(body["turn_index"], int) and body["turn_index"] >= 1
+        assert isinstance(body["branch_id"], int) and body["branch_id"] >= 1
         # Edit the first user message in place and re-run from there.
         resp = client.post(
             f"{base}/messages/0/edit",
