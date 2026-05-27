@@ -235,7 +235,7 @@ class TestGroupStatusBranches:
         )
         caller.listen_channels = []
         caller.send_channels = []
-        caller.is_running = True
+        caller.status = "idle"
         caller.parent_creature_id = None
         gctx = SimpleNamespace(engine=engine, caller=caller, graph=graph)
         monkeypatch.setattr(status_mod, "resolve_or_error", lambda c, **_: (gctx, None))
@@ -248,6 +248,155 @@ class TestGroupStatusBranches:
 
         body = json.loads(result.output)
         assert body["output_edges"] == []
+
+
+# ---------------------------------------------------------------------------
+# group_status output shape — ``status`` enum replaces ``running`` bool
+# ---------------------------------------------------------------------------
+
+
+class TestGroupStatusOutputShape:
+    """The snapshot must carry the new ``status`` field per creature
+    and must NOT carry the legacy ``running`` field. The old boolean
+    was structurally broken (flipped to ``False`` after one round
+    even for a healthy idle worker) so callers cannot fall back to
+    it without re-introducing the bug.
+    """
+
+    def _build_gctx(self, status_value: str):
+        caller = SimpleNamespace(
+            creature_id="root",
+            name="root",
+            graph_id="g1",
+            is_privileged=True,
+            listen_channels=[],
+            send_channels=[],
+            status=status_value,
+            parent_creature_id=None,
+        )
+        graph = SimpleNamespace(
+            graph_id="g1",
+            creature_ids={"root"},
+            channels={},
+            listen_edges={},
+            send_edges={},
+        )
+        engine = SimpleNamespace(
+            _environments={},
+            _creatures={"root": caller},
+            list_output_wiring=lambda cid: [],
+        )
+        return SimpleNamespace(engine=engine, caller=caller, graph=graph), caller
+
+    async def _run(self, monkeypatch, status_value: str):
+        gctx, caller = self._build_gctx(status_value)
+        monkeypatch.setattr(status_mod, "resolve_or_error", lambda c, **_: (gctx, None))
+        monkeypatch.setattr(status_mod, "compute_group", lambda g: {"root": caller})
+        monkeypatch.setattr(status_mod, "_list_spawnable_for_caller", lambda g: [])
+        result = await status_mod.GroupStatusTool()._execute(
+            {"include_spawnable": False}
+        )
+        import json
+
+        return json.loads(result.output)
+
+    async def test_emits_status_field(self, monkeypatch):
+        body = await self._run(monkeypatch, "idle")
+        creature = body["creatures"][0]
+        assert creature["status"] == "idle"
+
+    async def test_does_not_emit_legacy_running_field(self, monkeypatch):
+        """If ``running`` came back, callers would still read the
+        broken signal. The whole point of the migration is to make
+        the legacy key unreachable."""
+        body = await self._run(monkeypatch, "idle")
+        creature = body["creatures"][0]
+        assert "running" not in creature
+
+    async def test_propagates_each_status_value(self, monkeypatch):
+        """The snapshot must surface each enum value verbatim — not
+        coerce to a bool, not normalise to ``alive``/``dead``."""
+        for value in ("not_started", "idle", "busy", "stopped", "error"):
+            body = await self._run(monkeypatch, value)
+            assert body["creatures"][0]["status"] == value
+
+
+# ---------------------------------------------------------------------------
+# group_status prompt_contribution — team-building paradigm hint
+# ---------------------------------------------------------------------------
+
+
+class TestGroupStatusPromptContribution:
+    """``group_status`` owns the paradigm prose for the whole
+    privileged ``group_*`` surface. The aggregator inlines it into
+    the ``## Tool guidance`` block once per session, only for
+    creatures that actually have the tool (privileged ones)."""
+
+    def test_contribution_is_non_empty(self):
+        tool = status_mod.GroupStatusTool()
+        contribution = tool.prompt_contribution()
+        assert isinstance(contribution, str)
+        assert contribution.strip()
+
+    def test_bucket_is_first(self):
+        """``first`` bucket guarantees this prose lands ahead of any
+        future alphabetical neighbour that opts in to the same
+        section — important because this hint frames the whole
+        team-building workflow."""
+        tool = status_mod.GroupStatusTool()
+        assert tool.prompt_contribution_bucket == "first"
+
+    def test_mentions_each_group_tool_in_workflow(self):
+        """The paradigm hint must walk through the actual privileged
+        toolset (status → add_node → channel → wire → send). If any
+        of these names drift out of the prose, the agent loses the
+        recipe."""
+        tool = status_mod.GroupStatusTool()
+        contribution = tool.prompt_contribution()
+        for name in (
+            "group_add_node",
+            "group_channel",
+            "group_wire",
+            "group_remove_node",
+            "send_channel",
+            "group_send",
+        ):
+            assert name in contribution, f"prompt_contribution missing {name!r}"
+
+    def test_mentions_status_enum_values(self):
+        """Reading the snapshot is meaningless without knowing what
+        the enum values mean — the contribution must enumerate them
+        so the model can interpret ``busy`` vs ``idle`` vs ``error``."""
+        contribution = status_mod.GroupStatusTool().prompt_contribution()
+        for value in ("idle", "busy", "stopped", "error", "not_started"):
+            assert value in contribution
+
+    def test_mentions_team_vs_subagent_distinction(self):
+        """The contribution must call out when teams beat sub-agents —
+        otherwise the model defaults to sub-agent dispatch for heavy
+        work where a team would be the right shape."""
+        contribution = status_mod.GroupStatusTool().prompt_contribution()
+        assert "sub-agent" in contribution
+        assert "team" in contribution
+
+    def test_lands_in_assembled_tool_guidance_section(self):
+        """End-to-end check: when the tool is registered on an agent
+        and ``build_tool_guidance_section`` runs, the contribution
+        actually appears in the output (and in the ``first`` bucket,
+        i.e. before any other bucket)."""
+        from kohakuterrarium.core.registry import Registry
+        from kohakuterrarium.prompt.tool_contributions import (
+            build_tool_guidance_section,
+        )
+
+        registry = Registry()
+        registry.register_tool(status_mod.GroupStatusTool())
+        section = build_tool_guidance_section(registry)
+        assert section
+        # The contribution arrived under the ``group_status`` bullet.
+        assert "group_status" in section
+        # And a key phrase from it survived assembly.
+        assert "team-building workflow" in section.lower()
 
 
 # ---------------------------------------------------------------------------

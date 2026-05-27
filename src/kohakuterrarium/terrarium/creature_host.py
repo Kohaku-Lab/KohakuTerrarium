@@ -80,6 +80,14 @@ class Creature:
     # Spawned in ``start`` and reaped in ``stop`` — see ``start`` for
     # why this lives at the creature layer rather than inside Agent.
     _input_task: "asyncio.Task[None] | None" = None
+    # Has ``start()`` ever been called? Used to distinguish "not yet
+    # started" from "stopped" in :attr:`status`. ``_running`` alone
+    # cannot tell them apart because both states leave it ``False``.
+    _ever_started: bool = False
+    # If the input-driver task exits with an exception, the exception
+    # is captured here so :attr:`status` can report ``"error"`` until
+    # the next ``start()`` clears it.
+    _input_loop_error: BaseException | None = None
 
     # ------------------------------------------------------------------
     # lifecycle
@@ -106,6 +114,8 @@ class Creature:
         self._ensure_chat_pipe()
         await self.agent.start()
         self._running = True
+        self._ever_started = True
+        self._input_loop_error = None
         drive_input = getattr(self.agent, "_drive_input", None)
         if callable(drive_input):
             self._input_task = asyncio.create_task(
@@ -137,6 +147,7 @@ class Creature:
                 creature_name=self.name,
                 error=str(exc),
             )
+            self._input_loop_error = exc
         self._running = False
 
     async def stop(self) -> None:
@@ -187,6 +198,40 @@ class Creature:
     @property
     def is_running(self) -> bool:
         return self._running and self.agent.is_running
+
+    @property
+    def status(self) -> str:
+        """Lifecycle status — what the creature is doing right now.
+
+        Replacement for the legacy ``running: bool`` view used by
+        ``group_status``. ``running`` collapsed several distinct states
+        (never-started, mid-turn, idle-waiting, stopped, crashed) into a
+        single boolean that flipped to ``False`` whenever the input
+        loop exited, even on clean stop — so a privileged caller could
+        not tell whether a worker was idle, busy, or dead.
+
+        Values:
+
+        - ``"not_started"``: ``start()`` has never completed.
+        - ``"error"``: the input loop exited with an exception that
+          was not a normal cancel. Cleared on the next ``start()``.
+        - ``"busy"``: a controller turn is in flight (the agent has a
+          live ``_processing_task``).
+        - ``"idle"``: the agent is alive and waiting for input / a
+          trigger / a channel message.
+        - ``"stopped"``: ``stop()`` was called or the input loop
+          finished naturally; the agent is no longer servicing events.
+        """
+        if not self._ever_started:
+            return "not_started"
+        if self._input_loop_error is not None:
+            return "error"
+        if not self.agent.is_running:
+            return "stopped"
+        proc = getattr(self.agent, "_processing_task", None)
+        if proc is not None and not proc.done():
+            return "busy"
+        return "idle"
 
     # ------------------------------------------------------------------
     # chat — streaming inject_input + output drain
