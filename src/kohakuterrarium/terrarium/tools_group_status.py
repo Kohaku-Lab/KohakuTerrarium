@@ -24,6 +24,11 @@ from kohakuterrarium.terrarium.tools_group_common import (
 @register_builtin("group_status")
 class GroupStatusTool(BaseTool):
     needs_context = True
+    # ``group_status`` owns the team-building paradigm hint for the
+    # whole privileged ``group_*`` surface, so its contribution must
+    # land at the top of the ``## Tool guidance`` block ahead of any
+    # alphabetical neighbours that might also opt in later.
+    prompt_contribution_bucket = "first"
 
     @property
     def tool_name(self) -> str:
@@ -39,6 +44,78 @@ class GroupStatusTool(BaseTool):
     @property
     def execution_mode(self) -> ExecutionMode:
         return ExecutionMode.DIRECT
+
+    def prompt_contribution(self) -> str | None:
+        # Anchors the team-building paradigm for any privileged caller.
+        # ``group_*`` tools are registered as a set on privileged
+        # creatures, so contributing the paradigm prose from a single
+        # well-known entry point (``group_status`` — the natural "look
+        # at your team" tool) avoids fragmenting guidance across every
+        # sibling tool. Non-privileged creatures never see this because
+        # the tool itself is not registered for them.
+        return (
+            "The `group_*` tools let you build and run a **team of "
+            "creatures** for heavy or parallel work that benefits from "
+            "more than one independent agent context. Reach for a team "
+            "(over a sub-agent) when workers need their own toolset / "
+            "cwd / model, when they should react to each other "
+            "asynchronously through channels rather than as nested "
+            "calls, or when the work fans out into many sub-tasks you "
+            "want to dispatch in parallel and recombine. Sub-agents "
+            "stay better for one-shot delegated computations — "
+            "spawning a creature has higher fixed cost.\n\n"
+            "**Team-building workflow** (call in order):\n\n"
+            "  1. `group_status` — snapshot the current group. Pass "
+            "`include_spawnable=true` to see which creature configs "
+            "you can spawn (e.g. `@<pkg>/creatures/<name>`). Run this "
+            "before dispatching so you know who is already wired and "
+            "what is available.\n"
+            "  2. `group_add_node(config_path, name?, pwd?)` — spawn a "
+            "worker into your graph. Pass `pwd=` to give the worker "
+            "its own working directory (sandbox, per-task subdir, …); "
+            "omit to inherit yours. The worker starts isolated — "
+            "nothing reaches it until you wire it.\n"
+            '  3. `group_channel(action="create", channel, '
+            "description)` — declare a channel for routing messages. "
+            "Channels are broadcast: every listener receives every "
+            "send. A creature's own messages are filtered out, so do "
+            "not rely on self-loops to drive iteration.\n"
+            '  4. `group_channel(action="wire", channel, '
+            "creature_id, direction)` — attach each creature as "
+            '`"listen"`, `"send"`, or `"both"`. Typical '
+            "dispatch pattern: you `send` and workers `listen` on a "
+            "task channel; workers `send` and you `listen` on a "
+            "results channel.\n"
+            '  5. `group_wire(action="add", from_id, to_id, '
+            "with_content?)` — optional output-wire when you want a "
+            "worker's final turn text auto-delivered to another "
+            "creature without an explicit send. Use channels for "
+            "dispatch, wires for pipeline hand-off.\n"
+            "  6. `send_channel(channel, message)` to broadcast, or "
+            "`group_send(to, message)` for a one-shot direct delivery "
+            "to a single creature. From this point workers wake up "
+            "and run their own loops in parallel; you stay free to "
+            "plan, dispatch more work, or read replies on your listen "
+            "channels.\n\n"
+            "**Lifecycle and teardown.** When a worker is no longer "
+            "needed: `group_stop_node(creature_id)` pauses it without "
+            "removing (session preserved; resume with "
+            '`group_start_node`). `group_channel(action="unwire", '
+            "…)` drops a creature's edge on a channel, and "
+            '`group_channel(action="delete", channel)` drops the '
+            'channel entirely. `group_wire(action="remove", …)` '
+            "undoes an output-wire. `group_remove_node(creature_id)` "
+            "destroys a non-privileged worker outright. Tear down "
+            "channels and wires touching a creature **before** "
+            "removing it for a clean snapshot.\n\n"
+            "**Reading the snapshot.** Each creature carries a "
+            "`status` field — one of `not_started`, `idle`, `busy`, "
+            "`stopped`, `error`. `busy` means a controller turn is in "
+            "flight (your dispatch queues rather than preempts); "
+            "`idle` means the worker is ready for the next message; "
+            "`error` means its input loop crashed and it needs a "
+            "restart."
+        )
 
     def get_parameters_schema(self) -> dict:
         return {
@@ -72,7 +149,7 @@ class GroupStatusTool(BaseTool):
                 {
                     "creature_id": cid,
                     "name": c.name,
-                    "running": c.is_running,
+                    "status": c.status,
                     "is_privileged": c.is_privileged,
                     "in_my_graph": cid in graph.creature_ids,
                     "is_my_child": (

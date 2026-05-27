@@ -118,6 +118,112 @@ class TestStatus:
         assert out["running"] is False
 
 
+# ── status enum (Creature.status) ────────────────────────────
+
+
+class TestCreatureStatusEnum:
+    """The ``status`` property replaces the broken ``running: bool``
+    view used by ``group_status``. It must distinguish five lifecycle
+    states; the old bool collapsed all of them into ``False`` once the
+    input loop exited even on clean stop.
+    """
+
+    def test_not_started_before_first_start(self):
+        c = _creature()
+        # Constructed but ``start()`` has never run.
+        assert c.status == "not_started"
+
+    async def test_idle_after_start(self):
+        c = _creature()
+        await c.start()
+        # Alive, no in-flight processing task.
+        assert c.status == "idle"
+
+    async def test_busy_when_processing_task_present(self):
+        """A live ``Agent._processing_task`` should surface as ``busy``."""
+        c = _creature()
+        await c.start()
+
+        async def loop_body():
+            await asyncio.sleep(0.5)
+
+        c.agent._processing_task = asyncio.create_task(loop_body())
+        try:
+            assert c.status == "busy"
+        finally:
+            c.agent._processing_task.cancel()
+            try:
+                await c.agent._processing_task
+            except asyncio.CancelledError:
+                pass
+            c.agent._processing_task = None
+
+    async def test_busy_clears_back_to_idle_when_task_done(self):
+        """``_processing_task.done()`` → idle again, even if the task
+        attribute hasn't been cleared yet (it's only nulled in the
+        ``finally`` block of ``_process_event_with_controller``)."""
+        c = _creature()
+        await c.start()
+
+        async def already_done():
+            return None
+
+        task = asyncio.create_task(already_done())
+        await task
+        c.agent._processing_task = task
+        # Task is done — status must read idle, not busy.
+        assert c.status == "idle"
+
+    async def test_stopped_after_stop(self):
+        c = _creature()
+        await c.start()
+        await c.stop()
+        assert c.status == "stopped"
+
+    async def test_stopped_distinct_from_not_started(self):
+        """The whole point of the new enum: stopped ≠ not_started.
+        The old ``running: False`` could mean either."""
+        fresh = _creature(name="fresh")
+        cycled = _creature(name="cycled")
+        await cycled.start()
+        await cycled.stop()
+        assert fresh.status == "not_started"
+        assert cycled.status == "stopped"
+        # They must be observably different.
+        assert fresh.status != cycled.status
+
+    async def test_error_when_input_loop_crashes(self):
+        c = _creature()
+        await c.start()
+
+        async def boom():
+            raise RuntimeError("input crash")
+
+        task = asyncio.create_task(boom())
+        try:
+            await task
+        except RuntimeError:
+            pass
+        c._on_input_task_done(task)
+        # The agent itself may still report alive — the error state is
+        # carried on the creature wrapper, not the agent.
+        assert c.status == "error"
+
+    async def test_restart_clears_prior_error(self):
+        """A fresh ``start()`` must wipe stale error state — otherwise
+        a creature that crashed once would be permanently un-recoverable."""
+        c = _creature()
+        await c.start()
+        c._input_loop_error = RuntimeError("ancient history")
+        # While alive but flagged as error, status should reflect error.
+        assert c.status == "error"
+        await c.stop()
+        await c.start()
+        # Error cleared, agent alive again.
+        assert c._input_loop_error is None
+        assert c.status == "idle"
+
+
 # ── _on_input_task_done ──────────────────────────────────────
 
 
@@ -164,6 +270,30 @@ class TestOnInputTaskDone:
             pass
         c._on_input_task_done(task)
         assert c._running is False
+        # The exception must be captured on the creature so ``status``
+        # can surface it. A bare ``_running = False`` flip silently
+        # discarded the error before — that's the regression this
+        # assertion pins.
+        assert isinstance(c._input_loop_error, RuntimeError)
+
+    async def test_cancelled_does_not_record_error(self):
+        """A clean cancel must NOT poison ``_input_loop_error`` —
+        otherwise ``stop()`` would leave the creature reading "error"
+        forever on the next ``status`` query."""
+        c = _creature()
+        c._running = True
+
+        async def cancelled_coro():
+            await asyncio.sleep(100)
+
+        task = asyncio.create_task(cancelled_coro())
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        c._on_input_task_done(task)
+        assert c._input_loop_error is None
 
 
 # ── _reap_input_task ─────────────────────────────────────────
