@@ -283,7 +283,60 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             )
 
         self._emit_interrupted_activity(job_id, result)
+        self._append_interrupted_tool_message(job_id, meta, result)
         self._clear_direct_job_tracking(job_id)
+
+    def _append_interrupted_tool_message(
+        self, job_id: str, meta: dict[str, Any], result: Any
+    ) -> None:
+        """Synthesise the matching ``role=tool`` conversation entry for an
+        interrupted direct job (Bug 2).
+
+        User-initiated interrupt cancels ``_processing_task`` and the
+        controller loop dies BEFORE ``_add_native_results_to_conversation``
+        can append the tool messages that pair with the assistant turn's
+        ``tool_calls``. Without this synthesised entry the next LLM call
+        ships ``assistant.tool_calls`` with no matching ``role=tool``
+        message and most providers (OpenAI / Anthropic-compat) reject it
+        with a 400.
+
+        Idempotent: skipped when the controller already appended a tool
+        message for this ``tool_call_id`` (defensive against the race
+        where ``_add_native_results_to_conversation`` actually ran before
+        the cancel propagated).
+        """
+        controller = getattr(self, "controller", None)
+        conversation = getattr(controller, "conversation", None)
+        if conversation is None:
+            return
+        tool_call_id = meta.get("tool_call_id") or job_id
+        if not tool_call_id:
+            return
+        try:
+            existing = conversation.get_messages()
+        except Exception:  # pragma: no cover - defensive
+            return
+        for msg in existing:
+            if getattr(msg, "role", None) == "tool" and (
+                getattr(msg, "tool_call_id", None) == tool_call_id
+            ):
+                return
+        tool_name = meta.get("name") or _make_job_label(job_id)[0]
+        error_text = getattr(result, "error", None) or "User cancelled this job."
+        try:
+            conversation.append(
+                "tool",
+                f"Interrupted: {error_text}",
+                tool_call_id=tool_call_id,
+                name=tool_name,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "Synthetic interrupted-tool append failed",
+                job_id=job_id,
+                error=str(exc),
+                exc_info=True,
+            )
 
     async def _on_backgroundify_complete(self, job_id: str, result: Any) -> None:
         """Callback when a promoted (backgroundified) task completes.
@@ -487,6 +540,15 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             metadata["tools_used"] = getattr(result, "metadata", {}).get(
                 "tools_used", []
             )
+        # Canvas-preview metadata (Feat 1) — write / edit / multi_edit
+        # tools attach a ``canvas_preview`` dict to their ToolResult so
+        # the frontend's canvas panel can render the just-touched file
+        # in place. Pass it straight through so the WS / event log both
+        # carry it; the FE picks it up via ``resultMeta.canvas_preview``.
+        tool_metadata = getattr(result, "metadata", None) or {}
+        canvas_preview = tool_metadata.get("canvas_preview")
+        if canvas_preview:
+            metadata["canvas_preview"] = canvas_preview
         self.output_router.notify_activity(
             done_activity,
             f"[{label}] {status}",

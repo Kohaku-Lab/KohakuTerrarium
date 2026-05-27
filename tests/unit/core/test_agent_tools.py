@@ -572,6 +572,98 @@ class TestFinalizeInterruptedDirectJob:
         kinds = [c[0] for c in agent.output_router.activity_calls]
         assert "subagent_error" in kinds
 
+    async def test_appends_role_tool_message_so_llm_apis_dont_400(self, agent):
+        # Bug 2 regression: when ``agent.interrupt()`` cancels the
+        # controller task mid-tool, the controller loop dies BEFORE
+        # ``_add_native_results_to_conversation`` runs. Without a
+        # synthesised ``role=tool`` message paired to the assistant
+        # turn's ``tool_calls``, the next LLM request ships orphan
+        # tool_calls and most providers (OpenAI / Anthropic-compat)
+        # 400 the call. ``_finalize_interrupted_direct_job`` MUST
+        # therefore append the matching tool message itself.
+        agent.controller.conversation.append(
+            "assistant",
+            "",
+            tool_calls=[
+                {
+                    "id": "call_user_42",
+                    "type": "function",
+                    "function": {"name": "ask_user", "arguments": "{}"},
+                }
+            ],
+        )
+        agent._register_direct_job(
+            "ask_user_42", kind="tool", name="ask_user", tool_call_id="call_user_42"
+        )
+
+        async def runner():
+            raise asyncio.CancelledError()
+
+        task = asyncio.create_task(runner())
+        h = BackgroundifyHandle(job_id="ask_user_42", task=task)
+        agent._active_handles["ask_user_42"] = h
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+        await agent._finalize_interrupted_direct_job("ask_user_42")
+
+        msgs = agent.controller.conversation.get_messages()
+        tool_msg = next(
+            (m for m in msgs if getattr(m, "role", None) == "tool"),
+            None,
+        )
+        assert tool_msg is not None, "interrupt path must emit a paired tool message"
+        assert tool_msg.tool_call_id == "call_user_42"
+        # Content must mention the interruption so the LLM understands.
+        assert (
+            "Interrupted" in tool_msg.content or "interrupt" in tool_msg.content.lower()
+        )
+
+    async def test_synthetic_tool_message_is_idempotent(self, agent):
+        # Defensive: if the controller loop happened to append the
+        # tool message before the interrupt-finalize task ran, we
+        # must NOT append a duplicate (the next LLM call would have
+        # two tool messages for one tool_call id, which most providers
+        # also reject).
+        agent.controller.conversation.append(
+            "assistant",
+            "",
+            tool_calls=[
+                {
+                    "id": "call_double",
+                    "type": "function",
+                    "function": {"name": "bash", "arguments": "{}"},
+                }
+            ],
+        )
+        agent.controller.conversation.append(
+            "tool",
+            "already-here",
+            tool_call_id="call_double",
+            name="bash",
+        )
+        agent._register_direct_job(
+            "bash_double", kind="tool", name="bash", tool_call_id="call_double"
+        )
+
+        async def runner():
+            raise asyncio.CancelledError()
+
+        task = asyncio.create_task(runner())
+        h = BackgroundifyHandle(job_id="bash_double", task=task)
+        agent._active_handles["bash_double"] = h
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+        await agent._finalize_interrupted_direct_job("bash_double")
+
+        msgs = agent.controller.conversation.get_messages()
+        tool_msgs = [m for m in msgs if getattr(m, "role", None) == "tool"]
+        assert len(tool_msgs) == 1
+        assert tool_msgs[0].content == "already-here"
+
 
 # ── _on_backgroundify_complete subagent metadata ─────────────────
 

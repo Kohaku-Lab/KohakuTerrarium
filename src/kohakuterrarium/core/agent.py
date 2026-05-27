@@ -140,15 +140,12 @@ class Agent(
         self._running = False
         self._shutdown_event = asyncio.Event()
         self._processing_lock = asyncio.Lock()
+        self._pending_mid_turn_inputs: list[TriggerEvent] = []
         self.trigger_manager = TriggerManager(self._process_event)
 
         # LLM profile override (from --llm CLI flag)
         self._llm_override = llm_override
-        # Canonical ``provider/name[@variations]`` identifier for the
-        # currently-bound profile, populated lazily by ``llm_identifier()``
-        # and refreshed on every ``switch_model()`` call. Used by the
-        # rich-CLI banner, ``/model`` output, session_info metadata, and
-        # the web ModelSwitcher pill so every surface shows the same form.
+        # Canonical provider/name[@variations] id; lazy via llm_identifier().
         self._llm_identifier: str = ""
 
         # Explicit working directory (from web API pwd field)
@@ -494,7 +491,7 @@ class Agent(
                 meta = self.session_store.load_meta()
                 session_id = meta.get("session_id", "")
             except Exception as e:
-                logger.debug(
+                logger.warning(
                     "Failed to load session meta for session_id",
                     error=str(e),
                     exc_info=True,
@@ -551,31 +548,20 @@ class Agent(
         )
 
     def interrupt(self) -> None:
-        """Interrupt the current processing cycle immediately.
-
-        Cancels the processing task directly, which propagates
-        CancelledError through whatever is awaiting (LLM stream,
-        tool gather, etc.). The agent stays alive for the next input.
-
-        Only direct jobs owned by the active processing cycle are cancelled.
-        Background jobs keep running.
-        """
+        """Cancel the active processing task; background jobs untouched.
+        Buffered mid-turn events get re-fired as fresh turns via
+        ``_flush_buffer_after_interrupt`` (Bug 3)."""
         self._interrupt_requested = True
         self.controller._interrupted = True
-
-        # Cancel the processing task (immediate, not flag-based)
         processing = getattr(self, "_processing_task", None)
         if processing and not processing.done():
             processing.cancel()
-
-        # Cancel only direct, non-promoted jobs from the active run.
         for job_id in list(self._active_handles.keys()):
             self._interrupt_direct_job(job_id)
-
-        # Plugin callback (fire-and-forget, non-blocking)
         if self.plugins:
             asyncio.create_task(self.plugins.notify("on_interrupt"))
-
+        if self._pending_mid_turn_inputs:
+            asyncio.create_task(self._flush_buffer_after_interrupt())
         logger.info("Agent interrupted", agent_name=self.config.name)
 
     def _cancel_job(self, job_id: str, job_name: str) -> None:
@@ -753,7 +739,7 @@ class Agent(
                 )
                 await self.output_router.emit(OutputEvent(type="processing_end"))
             except Exception as inner:
-                logger.debug(
+                logger.warning(
                     "Failed to write fatal error to output",
                     error=str(inner),
                     exc_info=True,
@@ -786,17 +772,26 @@ class Agent(
 
     async def inject_input(
         self, content: str | list[ContentPart], source: str = "programmatic"
-    ) -> None:
-        """Inject user input programmatically."""
+    ) -> bool:
+        """Inject user input programmatically.
+
+        Returns True when the event ran; False when buffered for
+        mid-turn drain — callers (WS attach) skip the post-call
+        ``idle`` frame on False so KohakUwUing stays visible.
+        """
         content = await self._prepare_injected_input(content, source)
         if content is None:
-            return
+            # Slash-command or filter consumed the input — treat the
+            # same as "processed" so the caller still gets its idle.
+            return True
         event = create_user_input_event(content, source=source)
-        await self._process_event(event)
+        return await self._process_event(event)
 
-    async def inject_event(self, event: TriggerEvent) -> None:
-        """Inject a custom TriggerEvent programmatically."""
-        await self._process_event(event)
+    async def inject_event(self, event: TriggerEvent) -> bool:
+        """Inject a custom TriggerEvent programmatically.
+
+        Same return contract as :meth:`inject_input`."""
+        return await self._process_event(event)
 
     def attach_session_store(
         self, store: Any, *, capture_activity: bool = True
@@ -836,17 +831,18 @@ class Agent(
                 if saved is not None:
                     self.compact_manager._compact_count = int(saved)
             except (KeyError, TypeError, ValueError) as e:
-                logger.debug(
+                logger.warning(
                     "compact_count restore skipped",
                     agent=self.config.name,
                     error=str(e),
+                    exc_info=True,
                 )
         native_tool_options = getattr(self, "native_tool_options", None)
         if native_tool_options is not None:
             try:
                 native_tool_options.apply()
             except Exception as e:
-                logger.debug(
+                logger.warning(
                     "native tool option apply skipped",
                     agent=self.config.name,
                     error=str(e),
@@ -857,7 +853,7 @@ class Agent(
             try:
                 plugin_options.apply()
             except Exception as e:
-                logger.debug(
+                logger.warning(
                     "plugin options apply skipped",
                     agent=self.config.name,
                     error=str(e),

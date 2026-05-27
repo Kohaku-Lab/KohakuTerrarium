@@ -24,8 +24,10 @@ from kohakuterrarium.builtins.cli_rich.theme import (
     COLOR_AI,
     COLOR_BG,
     COLOR_COMPACT_BANNER,
+    COLOR_USER,
     ICON_BG,
     ICON_COMPACT,
+    ICON_USER,
     THINKING_LABEL,
     spinner_frame,
 )
@@ -76,6 +78,9 @@ class LiveRegion:
         self._active_started_at: float = 0.0
         # Counter for synthetic sub-agent child block ids
         self._sa_child_counter = 0
+        # Feat 3 mid-turn queue: rendered above the input until the
+        # agent's drain emits user_input_injected (then committed).
+        self._queued_inputs: list[str] = []
 
     # ── Assistant message ──
 
@@ -487,6 +492,31 @@ class LiveRegion:
             lines.append(block.build_compact_line())
         return Group(*lines)
 
+    # ── Mid-turn queued inputs (Feat 3) ──
+
+    def add_queued_input(self, text: str) -> None:
+        if text:
+            self._queued_inputs.append(text)
+
+    def remove_queued_input(self, text: str) -> bool:
+        try:
+            self._queued_inputs.remove(text)
+            return True
+        except ValueError:
+            return False
+
+    def _render_queued_inputs(self) -> RenderableType | None:
+        if not self._queued_inputs:
+            return None
+        lines: list[RenderableType] = []
+        for text in self._queued_inputs:
+            body = Text()
+            body.append(f"{ICON_USER} ", style=COLOR_USER)
+            body.append(text, style="dim")
+            body.append("  (queued)", style="dim italic")
+            lines.append(body)
+        return Group(*lines)
+
     def _build_renderable(self) -> RenderableType:
         """Build a Rich Group of live items (no footer).
 
@@ -531,17 +561,19 @@ class LiveRegion:
                 continue
             _add(block)
 
-        # Standalone activity region — sticks at the bottom of the live
-        # area while the turn is active, visually separated from all
-        # content by its own blank line. This gives KohakUwUing the
-        # "always present, never competing for space" behaviour the
-        # user asked for.
+        # Standalone activity region — KohakUwUing at the bottom of the
+        # live area, separated from content by a blank line.
         if self._active or self._turn_active:
             _add(self._render_activity_line())
 
         bg_strip = self._render_bg_strip()
         if bg_strip is not None:
             _add(bg_strip)
+
+        # Feat 3 queued mid-turn inputs — sit just above the input prompt.
+        queued = self._render_queued_inputs()
+        if queued is not None:
+            _add(queued)
 
         if not items:
             return Text("")

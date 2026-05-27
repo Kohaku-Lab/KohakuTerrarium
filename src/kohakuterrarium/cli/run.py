@@ -108,7 +108,7 @@ def run_agent_cli(
         return 0
     except Exception as exc:
         print(f"Error: {exc}")
-        logger.debug("kt run failed", error=str(exc), exc_info=True)
+        logger.warning("kt run failed", error=str(exc), exc_info=True)
         return 1
 
 
@@ -147,16 +147,19 @@ async def _run(
                 llm_override=llm_override,
                 pwd=pwd,
                 is_privileged=True,
-                # ``--mode cli`` mounts a prompt_toolkit Application that
-                # owns stdin in raw mode. If the configured input is
+                # ``--mode cli`` AND ``--mode tui`` both mount their own
+                # terminal-owning surface (prompt_toolkit Application for
+                # cli, Textual App for tui). If the configured input is
                 # ``CLIInput`` (the default) starting the creature here
                 # would spawn a blocking ``sys.stdin.readline`` in an
-                # executor thread that's unkillable and races
-                # prompt_toolkit for every byte. Defer start so
-                # ``run_engine_with_rich_cli`` can swap the input first.
-                # Every other mode (configured IO, tui) needs the
-                # creature already running on entry, so default ``True``.
-                start=(io_mode != "cli"),
+                # executor thread that races the terminal surface for
+                # every byte — Textual + CLIInput both consuming stdin
+                # produced the user-visible "TUI fully non-functional"
+                # freeze. Defer start so ``run_engine_with_rich_cli`` /
+                # ``run_engine_with_tui`` can swap the input first.
+                # Every other mode (configured IO) needs the creature
+                # already running on entry, so default ``True``.
+                start=(io_mode not in ("cli", "tui")),
             )
             focus_creature_id = creature.creature_id
             graph_id = creature.graph_id
@@ -453,5 +456,5 @@ def _session_preview(path: Path) -> str:
         name = Path(config_path).name if config_path else "?"
         return f"({config_type}: {name})"
     except Exception as e:
-        logger.debug("Failed to read session label", error=str(e))
+        logger.warning("Failed to read session label", error=str(e), exc_info=True)
         return ""

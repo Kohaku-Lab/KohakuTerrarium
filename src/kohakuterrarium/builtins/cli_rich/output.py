@@ -370,7 +370,39 @@ class RichCLIOutput(BaseOutputModule):
             )
             return
 
+        if activity_type == "user_input_injected":
+            # Mid-turn injection (Feat 3) — backend's drain just folded
+            # a buffered input into the running turn. Clear the matching
+            # queued indicator in the live region (added by
+            # ``RichCLIApp._handle_submit``) and commit the canonical
+            # user-message line to scrollback so the transcript shows
+            # the message at the moment it lands in the turn.
+            text = self._extract_injected_text(metadata.get("content", ""))
+            if text:
+                live_region = getattr(self.app, "live_region", None)
+                if live_region is not None:
+                    live_region.remove_queued_input(text)
+                self.app._commit_user_message(text)
+                invalidate = getattr(self.app, "_invalidate", None)
+                if callable(invalidate):
+                    invalidate()
+            return
+
         # Other activity types: ignore silently in v1
+
+    @staticmethod
+    def _extract_injected_text(content: Any) -> str:
+        """Resolve text from a ``user_input_injected`` content field —
+        either a plain string or an OpenAI-shape list of content parts."""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return "\n".join(
+                str(p.get("text", ""))
+                for p in content
+                if isinstance(p, dict) and p.get("type") == "text"
+            )
+        return ""
 
     @staticmethod
     def _extract_name(detail: str) -> str:

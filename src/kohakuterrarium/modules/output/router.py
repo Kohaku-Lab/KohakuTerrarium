@@ -263,7 +263,7 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
             try:
                 await target.emit(event)
             except Exception as e:  # pragma: no cover — defensive
-                logger.debug(
+                logger.warning(
                     "output emit failed",
                     output=type(target).__name__,
                     event_type=event.type,
@@ -289,10 +289,30 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
         metadata = event.payload or None
         targets = [self.default_output, *self._secondary_outputs]
         for target in targets:
-            if metadata and hasattr(target, "on_activity_with_metadata"):
-                target.on_activity_with_metadata(event.type, detail, metadata)
-            else:
-                target.on_activity(event.type, detail)
+            # Per-target isolation: a misbehaving output (e.g. a plugin
+            # / renderer whose ``on_activity_with_metadata`` raises) MUST
+            # NOT prevent downstream targets from receiving the event.
+            # Previously this loop had no try/except, so one throw
+            # silently aborted the whole dispatch — most catastrophically
+            # killing the StreamOutput WS sink without any browser-side
+            # log. Convergent root-cause analysis fingered this as a
+            # likely cause of the "FE never updates after queue has
+            # entry" symptom (no errors anywhere, just frames vanishing).
+            try:
+                if metadata and hasattr(target, "on_activity_with_metadata"):
+                    # logger.warning(f"Dispatch to {target} with metadata")
+                    target.on_activity_with_metadata(event.type, detail, metadata)
+                else:
+                    # logger.warning(f"Dispatch to {target}")
+                    target.on_activity(event.type, detail)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning(
+                    "Output target raised in dispatch",
+                    output=type(target).__name__,
+                    event_type=event.type,
+                    error=str(exc),
+                    exc_info=True,
+                )
 
     # ─────────────────────────────────────────────────────────────
     # Phase B: interactive bus

@@ -6,6 +6,7 @@ from typing import Any
 from textual.containers import VerticalScroll
 from textual.widgets import Markdown
 
+from kohakuterrarium.builtins.tui._injection import handle_user_input_injected
 from kohakuterrarium.builtins.tui.session import CULL_KEEP, TUISession
 from kohakuterrarium.builtins.tui.widgets import (
     CompactSummaryBlock,
@@ -57,6 +58,19 @@ class TUIOutput(BaseOutputModule):
         return self._default_target
 
     async def _on_start(self) -> None:
+        # If a caller (engine_cli.run_engine_with_tui) already wired
+        # ``self._tui`` directly, keep that assignment — don't clobber
+        # it with a freshly-created TUISession. Without this guard the
+        # engine's pre-mount direct wiring was overwritten the first
+        # time ``output_router.start()`` ran, the user's screen sat on
+        # a TUI rendered against one session while the output stream
+        # went to a separate session (no AgentTUI, no visible response).
+        if self._tui is not None:
+            logger.debug(
+                "TUI output reusing externally-wired session",
+                session_key=self._session_key,
+            )
+            return
         session = get_session(self._session_key)
         if session.tui is None:
             session.tui = TUISession(
@@ -293,7 +307,7 @@ class TUIOutput(BaseOutputModule):
                 target=self._target,
             )
         except Exception as e:
-            logger.debug("progress render failed", error=str(e))
+            logger.warning("progress render failed", error=str(e), exc_info=True)
 
     def _handle_notification_event(self, event: OutputEvent) -> None:
         if self._tui is None:
@@ -306,7 +320,7 @@ class TUIOutput(BaseOutputModule):
                 target=self._target,
             )
         except Exception as e:
-            logger.debug("notification render failed", error=str(e))
+            logger.warning("notification render failed", error=str(e), exc_info=True)
 
     def _handle_card_event(self, event: OutputEvent) -> None:
         if self._tui is None:
@@ -322,7 +336,7 @@ class TUIOutput(BaseOutputModule):
                 target=self._target,
             )
         except Exception as e:
-            logger.debug("card render failed", error=str(e))
+            logger.warning("card render failed", error=str(e), exc_info=True)
 
     def _make_card_action_callback(self):
         """Return a callable that wraps card button presses into a
@@ -397,15 +411,15 @@ class TUIOutput(BaseOutputModule):
                 error_msg = metadata.get("error", rest)
                 self._tui.add_error_block(error_type, error_msg, target=t)
             case "interrupt":
+                # End streaming only — sub-agents / bg jobs cancel
+                # themselves via their own lifecycle.
                 self._tui.end_streaming(target=self._target)
-                # Only end streaming — do NOT clear running panel or
-                # interrupt sub-agents. Background jobs have their own
-                # lifecycle and are cancelled individually.
                 self._turn_started = False
             case "processing_complete":
-                # Don't clear running panel — background jobs may still be
-                # running. They remove themselves individually when done.
+                # Bg jobs may still run; they remove themselves on done.
                 pass
+            case "user_input_injected":
+                self._handle_user_input_injected(metadata, t)
             case _:
                 pass
 
@@ -533,6 +547,9 @@ class TUIOutput(BaseOutputModule):
             summary = metadata.get("summary", "")
             self._tui.update_compact_summary(round_num, summary, target=t)
             self._tui.update_running("compact", "", remove=True)
+
+    def _handle_user_input_injected(self, metadata: dict, target: str) -> None:
+        handle_user_input_injected(self._tui, metadata, target)
 
     def _handle_session_info(self, metadata: dict) -> None:
         session_id = metadata.get("session_id", "")

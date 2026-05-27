@@ -102,7 +102,7 @@ class SessionOutput(OutputModule):
                 parent_branch_path=self._current_parent_path(),
             )
         except Exception as e:
-            logger.debug("Session record failed", error=str(e))
+            logger.warning("Session record failed", error=str(e), exc_info=True)
 
     async def start(self) -> None:
         # Restore cumulative token totals from session state. Wave F:
@@ -150,7 +150,7 @@ class SessionOutput(OutputModule):
                 parent_branch_path=self._current_parent_path(),
             )
         except Exception as e:
-            logger.debug("text_chunk record failed", error=str(e))
+            logger.warning("text_chunk record failed", error=str(e), exc_info=True)
 
     async def flush(self) -> None:
         pass
@@ -186,7 +186,7 @@ class SessionOutput(OutputModule):
                     last_event_id
                 )
             except Exception as e:
-                logger.debug(
+                logger.warning(
                     "Failed to save snapshot_event_id",
                     error=str(e),
                     exc_info=True,
@@ -214,7 +214,7 @@ class SessionOutput(OutputModule):
                 if state_kwargs:
                     self._store.save_state(self._event_key_prefix, **state_kwargs)
         except Exception as e:
-            logger.debug("State save failed", error=str(e))
+            logger.warning("State save failed", error=str(e), exc_info=True)
 
         # Flush the events cache so the per-turn snapshot we just wrote
         # is consistent with the on-disk event log. Without this, the
@@ -228,7 +228,9 @@ class SessionOutput(OutputModule):
             if callable(flush):
                 flush()
         except Exception as e:
-            logger.debug("Events flush at turn end failed", error=str(e))
+            logger.warning(
+                "Events flush at turn end failed", error=str(e), exc_info=True
+            )
 
     def on_activity(self, activity_type: str, detail: str) -> None:
         if not self._capture_activity:
@@ -336,6 +338,12 @@ class SessionOutput(OutputModule):
         "plugin_hook_timing": "_handle_plugin_hook_timing",
         "cache_stats": "_handle_cache_stats",
         "scratchpad_write": "_handle_scratchpad_write",
+        # Feat 3 — mid-turn user-input injection. The agent's drain
+        # path writes the canonical ``user_input`` session event
+        # directly with the correct (turn_index, branch_id); this
+        # handler exists ONLY to suppress the catch-all from logging
+        # a duplicate ``activity:user_input_injected`` row.
+        "user_input_injected": "_handle_user_input_injected",
     }
 
     def _record_activity(
@@ -374,15 +382,19 @@ class SessionOutput(OutputModule):
         )
 
     def _handle_tool_done(self, name: str, detail: str, metadata: dict) -> None:
-        self._record(
-            "tool_result",
-            {
-                "name": name,
-                "call_id": metadata.get("job_id", ""),
-                "output": metadata.get("result", metadata.get("output", detail)),
-                "exit_code": 0,
-            },
-        )
+        event_data: dict[str, Any] = {
+            "name": name,
+            "call_id": metadata.get("job_id", ""),
+            "output": metadata.get("result", metadata.get("output", detail)),
+            "exit_code": 0,
+        }
+        # Feat 1 — preserve the canvas-preview dict so resume + history
+        # reload both surface the file in the canvas panel without
+        # re-reading from disk.
+        canvas_preview = metadata.get("canvas_preview")
+        if canvas_preview:
+            event_data["canvas_preview"] = canvas_preview
+        self._record("tool_result", event_data)
 
     def _handle_tool_error(self, name: str, detail: str, metadata: dict) -> None:
         self._record(
@@ -525,7 +537,7 @@ class SessionOutput(OutputModule):
                 conv_json=json.dumps(convo),
             )
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 "Failed to persist sub-agent conversation via SessionOutput",
                 error=str(e),
                 exc_info=True,
@@ -561,7 +573,7 @@ class SessionOutput(OutputModule):
                 },
             )
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 "Failed to save token usage state", error=str(e), exc_info=True
             )
 
@@ -677,7 +689,7 @@ class SessionOutput(OutputModule):
                     },
                 )
             except Exception as e:
-                logger.debug(
+                logger.warning(
                     "save_turn_rollup failed",
                     error=str(e),
                     turn_index=turn_index,
@@ -718,6 +730,16 @@ class SessionOutput(OutputModule):
                 "size_bytes": metadata.get("size_bytes", 0),
             },
         )
+
+    def _handle_user_input_injected(
+        self, name: str, detail: str, metadata: dict
+    ) -> None:
+        # No-op — the canonical ``user_input`` row was already written
+        # by the agent's drain path with the correct (turn_index,
+        # branch_id) and parent_branch_path. Registering a handler
+        # here just suppresses the catch-all that would otherwise log
+        # a duplicate ``activity:user_input_injected`` event.
+        return
 
 
 def _subagent_name(fallback: str, metadata: dict) -> str:

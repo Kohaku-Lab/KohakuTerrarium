@@ -2921,6 +2921,501 @@ class TestCollectFeedbackNativeResultsAdded:
             await agent.stop()
 
 
+# ── Feat 3: opportunistic input injection ────────────────────────
+
+
+class TestOpportunisticInputInjection:
+    """Mid-turn ``user_input`` / ``trigger`` events that arrive while
+    the agent's ``_processing_lock`` is held by another turn must be
+    buffered on ``Agent._pending_mid_turn_inputs`` and drained from
+    inside the current turn's ``_collect_and_push_feedback`` AFTER
+    the tool results land. The drain appends a coalesced ``role=user``
+    message to the conversation (so the LLM sees them on the next
+    round of the SAME turn), emits one ``user_input_injected``
+    activity per event (so the FE clears each queued banner), and
+    records canonical ``user_input`` session events under the
+    current ``(turn_index, branch_id)``.
+    """
+
+    async def test_inject_input_buffers_when_lock_held(self, make_agent):
+        from kohakuterrarium.core.events import TriggerEvent
+
+        agent = make_agent()
+        await agent.start()
+        try:
+            # Simulate the agent being mid-turn — acquire the lock
+            # to force the buffer path. Without this the inject
+            # short-circuits to the normal _process_event flow.
+            async with agent._processing_lock:
+                await agent.inject_input("hi", source="web")
+                # Lock was held → event landed in the buffer, NOT
+                # blocked on the lock and NOT processed yet.
+                assert len(agent._pending_mid_turn_inputs) == 1
+                buffered = agent._pending_mid_turn_inputs[0]
+                assert buffered.type == "user_input"
+                assert isinstance(buffered, TriggerEvent)
+        finally:
+            await agent.stop()
+
+    async def test_drain_appends_combined_user_message(self, make_agent):
+        from kohakuterrarium.core.events import TriggerEvent
+
+        agent = make_agent()
+        await agent.start()
+        try:
+            # Buffer two events directly — the drain coalesces them
+            # into one user message joined by a blank line so the
+            # LLM sees them as one contiguous turn.
+            agent._pending_mid_turn_inputs.append(
+                TriggerEvent(type="user_input", content="line one")
+            )
+            agent._pending_mid_turn_inputs.append(
+                TriggerEvent(type="user_input", content="line two")
+            )
+            count = await agent._drain_mid_turn_pending_inputs(agent.controller)
+            assert count == 2
+            # Buffer cleared.
+            assert agent._pending_mid_turn_inputs == []
+            user_msgs = [
+                m
+                for m in agent.controller.conversation.get_messages()
+                if getattr(m, "role", None) == "user"
+            ]
+            assert user_msgs, "drain must append at least one user message"
+            assert user_msgs[-1].content == "line one\n\nline two"
+        finally:
+            await agent.stop()
+
+    async def test_drain_emits_one_activity_per_event(self, make_agent):
+        from kohakuterrarium.core.events import TriggerEvent
+
+        agent = make_agent()
+        await agent.start()
+        try:
+            captured: list[tuple] = []
+            original = agent.output_router.notify_activity
+
+            def spy(activity_type, detail, metadata=None):
+                captured.append((activity_type, dict(metadata or {})))
+                return original(activity_type, detail, metadata)
+
+            agent.output_router.notify_activity = spy  # type: ignore[assignment]
+            agent._pending_mid_turn_inputs.append(
+                TriggerEvent(type="user_input", content="A")
+            )
+            agent._pending_mid_turn_inputs.append(
+                TriggerEvent(type="user_input", content="B")
+            )
+            await agent._drain_mid_turn_pending_inputs(agent.controller)
+            injected = [c for c in captured if c[0] == "user_input_injected"]
+            # One activity per drained event — so the FE can pop each
+            # queued banner separately.
+            assert len(injected) == 2
+            assert injected[0][1]["content"] == "A"
+            assert injected[1][1]["content"] == "B"
+            # Both carry the current turn/branch ids so the FE knows
+            # which (turn, branch) the injection landed on.
+            assert "turn_index" in injected[0][1]
+            assert "branch_id" in injected[0][1]
+        finally:
+            await agent.stop()
+
+    async def test_drain_returns_zero_when_buffer_is_empty(self, make_agent):
+        agent = make_agent()
+        await agent.start()
+        try:
+            before = list(agent.controller.conversation.get_messages())
+            count = await agent._drain_mid_turn_pending_inputs(agent.controller)
+            assert count == 0
+            assert list(agent.controller.conversation.get_messages()) == before
+        finally:
+            await agent.stop()
+
+    async def test_trigger_events_also_buffered_and_drained(self, make_agent):
+        from kohakuterrarium.core.events import TriggerEvent
+
+        agent = make_agent()
+        await agent.start()
+        try:
+            evt = TriggerEvent(
+                type="trigger",
+                content="",
+                prompt_override="timer fired: snapshot",
+                context={"trigger_id": "tm_1"},
+            )
+            async with agent._processing_lock:
+                await agent._process_event(evt)
+                # Trigger fired mid-turn: buffered, NOT blocked.
+                assert agent._pending_mid_turn_inputs == [evt]
+            # Drain folds the trigger's ``prompt_override`` into the
+            # conversation as a user message.
+            await agent._drain_mid_turn_pending_inputs(agent.controller)
+            user_msgs = [
+                m
+                for m in agent.controller.conversation.get_messages()
+                if getattr(m, "role", None) == "user"
+            ]
+            assert user_msgs[-1].content == "timer fired: snapshot"
+        finally:
+            await agent.stop()
+
+    async def test_rerun_events_bypass_buffer(self, make_agent):
+        # Regen / edit-rerun pre-increment the branch_id and MUST run
+        # against the original lock-held turn — they cannot be
+        # buffered for next round. The buffer path explicitly skips
+        # ``context["rerun"]=True`` events.
+        from kohakuterrarium.core.events import TriggerEvent
+
+        agent = make_agent()
+        await agent.start()
+        try:
+            rerun = TriggerEvent(
+                type="user_input",
+                content="re-run",
+                context={"rerun": True},
+            )
+            # Hold the lock and check that the buffer path is NOT
+            # taken — the call would normally block on the lock,
+            # so we run it in a task we cancel immediately to verify
+            # it didn't return early via the buffer shortcut.
+            async with agent._processing_lock:
+                # The buffer-skip check is what we want to assert,
+                # so we drive _process_event in a way that lets us
+                # observe state without actually blocking the test.
+                # Run with a short timeout; expect TimeoutError
+                # because the rerun was waiting on the lock (which
+                # we still hold).
+                try:
+                    await asyncio.wait_for(agent._process_event(rerun), timeout=0.05)
+                except asyncio.TimeoutError:
+                    pass
+                # Critical: the buffer was NOT used.
+                assert agent._pending_mid_turn_inputs == []
+        finally:
+            await agent.stop()
+
+    async def test_inject_input_returns_false_when_buffered(self, make_agent):
+        # Bug 1 root cause: ``_process_input`` in studio/attach/io.py
+        # always emits ``{type: idle}`` after ``inject_input`` returns.
+        # When the lock is held the call buffers and returns
+        # immediately, so ``idle`` fires within milliseconds and the
+        # FE clears ``processingByTab`` → KohakUwUing disappears.
+        # Fix: ``inject_input`` returns False when buffered so the
+        # caller can skip the ``idle`` emission.
+        agent = make_agent()
+        await agent.start()
+        try:
+            async with agent._processing_lock:
+                result = await agent.inject_input("queued msg", source="web")
+                assert result is False, (
+                    "inject_input must return False when the event was "
+                    "buffered for mid-turn injection — caller must NOT "
+                    "emit an ``idle`` WS frame in this case"
+                )
+                assert len(agent._pending_mid_turn_inputs) == 1
+        finally:
+            await agent.stop()
+
+    async def test_inject_input_returns_true_when_processed(self, make_agent):
+        # Counterpart: when the lock isn't held, inject_input runs
+        # the event normally and returns True — caller may emit the
+        # ``idle`` frame as before.
+        agent = make_agent(script=["x"])
+        await agent.start()
+        try:
+            result = await agent.inject_input("first turn", source="web")
+            assert result is True
+        finally:
+            await agent.stop()
+
+    async def test_drain_emits_real_ws_frame_via_stream_output(self, make_agent):
+        # Wire a real StreamOutput onto the agent's output_router so we
+        # observe the EXACT frame the FE would see. Bug repro: the
+        # user types "Hello" mid-turn → drain runs → must emit a
+        # ``{type: activity, activity_type: user_input_injected,
+        # content: ..., turn_index, branch_id, source}`` frame. If
+        # this test fails, the FE wiring is correct and the bug is
+        # backend-side; if it passes, the issue is FE rendering /
+        # signature matching.
+        import asyncio as _asyncio
+        from kohakuterrarium.core.events import TriggerEvent
+        from kohakuterrarium.studio.attach._event_stream import StreamOutput
+
+        agent = make_agent()
+        await agent.start()
+        try:
+            queue: _asyncio.Queue = _asyncio.Queue()
+            stream = StreamOutput("test_agent", queue, [], agent=agent)
+            agent.output_router.add_secondary(stream)
+            # Simulate the FE-typed content shape: a list of content
+            # parts (NOT a bare string) so the signature path is
+            # exercised the way the real WS layer drives it.
+            content = [{"type": "text", "text": "Hello"}]
+            agent._pending_mid_turn_inputs.append(
+                TriggerEvent(type="user_input", content=content)
+            )
+            await agent._drain_mid_turn_pending_inputs(agent.controller)
+            # Pull frames off the queue.
+            frames: list[dict] = []
+            while not queue.empty():
+                frames.append(queue.get_nowait())
+            # The user_input_injected activity frame MUST be present.
+            inj = [
+                f
+                for f in frames
+                if f.get("type") == "activity"
+                and f.get("activity_type") == "user_input_injected"
+            ]
+            assert len(inj) == 1, (
+                f"drain did not emit user_input_injected to StreamOutput; "
+                f"got frames: {frames}"
+            )
+            frame = inj[0]
+            # Content shape must match what the FE sees on the wire.
+            assert frame["content"] == content, (
+                "content field on the WS frame must be the list-of-parts "
+                "shape the FE handler matches its queue entry signature "
+                "against"
+            )
+            assert "turn_index" in frame
+            assert "branch_id" in frame
+            assert frame["source"] == "test_agent"
+        finally:
+            await agent.stop()
+
+    async def test_drain_persists_distinct_event_type_for_replay(self, make_agent):
+        # Replay-dedupe bug: the FE replay path dedupes
+        # ``user_input`` / ``user_message`` by ``(turn, branch)``
+        # because live flows emit BOTH for every user-driven turn. A
+        # mid-turn injection shares those ids with the trigger that
+        # started the turn — if we persist it as ``user_input``, refresh
+        # drops it and the user's message vanishes from history. So the
+        # drain persists a distinct ``user_input_injected`` type and the
+        # FE replay handles it separately.
+        import tempfile
+        from pathlib import Path
+
+        from kohakuterrarium.core.events import TriggerEvent
+        from kohakuterrarium.session.store import SessionStore
+
+        agent = make_agent()
+        with tempfile.TemporaryDirectory() as td:
+            store_path = Path(td) / "test.kohakutr"
+            store = SessionStore(store_path)
+            agent.session_store = store
+            await agent.start()
+            try:
+                agent._turn_index = 1
+                agent._branch_id = 1
+                agent._pending_mid_turn_inputs.append(
+                    TriggerEvent(type="user_input", content="mid-turn typed")
+                )
+                await agent._drain_mid_turn_pending_inputs(agent.controller)
+                events = list(store.get_events(agent.config.name))
+                injected = [e for e in events if e["type"] == "user_input_injected"]
+                assert len(injected) == 1, (
+                    "drain must persist exactly one user_input_injected "
+                    "event per buffered input — distinct from user_input "
+                    "so the FE (turn,branch) dedupe doesn't drop it"
+                )
+                assert injected[0]["turn_index"] == 1
+                assert injected[0]["branch_id"] == 1
+                # And NOT as plain user_input (the type that gets
+                # deduped by the FE replay path).
+                plain = [e for e in events if e["type"] == "user_input"]
+                assert plain == [], (
+                    "drain must NOT persist as user_input — that type "
+                    "collides with the (turn,branch) dedupe and would "
+                    "make the typed message vanish after refresh"
+                )
+            finally:
+                await agent.stop()
+                store.close()
+
+    async def test_full_flow_real_agent_real_store_real_stream(self, make_agent):
+        # END-TO-END: drive the agent through a real ``_process_event``
+        # call with a real session_store + real StreamOutput attached.
+        # The agent runs turn A (with a slow tool), and DURING turn A
+        # another inject_input("B") is fired from a sibling task. Verify
+        # that AFTER the turn completes:
+        #   1. controller.conversation contains B as a user message
+        #      (the agent saw it on the next round — what the user
+        #      confirmed in production)
+        #   2. session_store has a ``user_input_injected`` event with
+        #      content == B and the running turn's (turn_index,
+        #      branch_id)  ← the refresh-time render depends on this
+        #   3. StreamOutput's queue has a ``user_input_injected``
+        #      activity frame with content == B  ← the live FE banner
+        #      pop depends on this
+        # If any one of these fails, that's the leg of the wiring
+        # production is missing.
+        import asyncio as _asyncio
+        import tempfile
+        from pathlib import Path
+
+        from kohakuterrarium.session.store import SessionStore
+        from kohakuterrarium.studio.attach._event_stream import StreamOutput
+
+        # Tool that blocks until released. Lets us inject B WHILE turn A
+        # is running, then unblock so the drain runs at the round
+        # boundary.
+        release = _asyncio.Event()
+        injected_during_tool = _asyncio.Event()
+
+        class _SlowTool(BaseTool):
+            @property
+            def tool_name(self):
+                return "wait"
+
+            @property
+            def description(self):
+                return "wait"
+
+            @property
+            def execution_mode(self):
+                return ExecutionMode.DIRECT
+
+            async def _execute(self, args, **kwargs):
+                injected_during_tool.set()
+                await release.wait()
+                return ToolResult(output="waited")
+
+        agent = make_agent(
+            script=[
+                "[/wait]ok=1[wait/]",
+                "Done, saw B!",
+            ]
+        )
+        agent.registry.register_tool(_SlowTool())
+        agent.executor.register_tool(_SlowTool())
+
+        with tempfile.TemporaryDirectory() as td:
+            store = SessionStore(Path(td) / "test.kohakutr")
+            agent.session_store = store
+            await agent.start()
+            try:
+                ws_queue: _asyncio.Queue = _asyncio.Queue()
+                stream = StreamOutput("test_agent", ws_queue, [], agent=agent)
+                agent.output_router.add_secondary(stream)
+
+                # Fire turn A — runs in background so we can inject B.
+                turn_a = _asyncio.create_task(
+                    agent._process_event(create_user_input_event("A"))
+                )
+                # Wait until the tool started — at this point the lock
+                # is held and inject_input WILL buffer.
+                await _asyncio.wait_for(injected_during_tool.wait(), timeout=5.0)
+                # Inject B from a sibling task (mirrors how io.py does it).
+                processed = await agent.inject_input("B", source="web")
+                assert processed is False, (
+                    "B must buffer mid-turn — _process_event returns False "
+                    "when the lock is held by another turn"
+                )
+                # Unblock the tool so the round completes and drain fires.
+                release.set()
+                await _asyncio.wait_for(turn_a, timeout=10.0)
+
+                # 1) Agent sees B in conversation (confirmed in prod).
+                user_msgs = [
+                    m
+                    for m in agent.controller.conversation.get_messages()
+                    if getattr(m, "role", None) == "user"
+                ]
+                contents = [getattr(m, "content", "") for m in user_msgs]
+                assert any(
+                    "B" in (c if isinstance(c, str) else str(c)) for c in contents
+                ), f"agent must see B in conversation; got user msgs: {contents}"
+
+                # 2) Session store has user_input_injected event for B.
+                events = list(store.get_events(agent.config.name))
+                injected = [e for e in events if e.get("type") == "user_input_injected"]
+                assert len(injected) == 1, (
+                    f"session store must record exactly one user_input_injected "
+                    f"event; got types: {[e.get('type') for e in events]}"
+                )
+                assert injected[0].get("content") == "B"
+                assert injected[0].get("turn_index") == agent._turn_index
+                assert injected[0].get("branch_id") == agent._branch_id
+
+                # 3) StreamOutput queue has user_input_injected frame for B.
+                frames: list[dict] = []
+                while not ws_queue.empty():
+                    frames.append(ws_queue.get_nowait())
+                inj_frames = [
+                    f
+                    for f in frames
+                    if f.get("type") == "activity"
+                    and f.get("activity_type") == "user_input_injected"
+                ]
+                assert len(inj_frames) == 1, (
+                    f"WS queue must carry exactly one user_input_injected frame; "
+                    f"got frame types: {[(f.get('type'), f.get('activity_type')) for f in frames]}"
+                )
+                assert inj_frames[0].get("content") == "B"
+                assert inj_frames[0].get("source") == "test_agent"
+            finally:
+                release.set()
+                await agent.stop()
+                store.close()
+
+    async def test_interrupt_drains_buffered_inputs_as_new_turn(self, make_agent):
+        # Bug 3: when the user interrupts mid-turn, buffered messages
+        # stay stranded in ``_pending_mid_turn_inputs`` — never
+        # processed unless something else kicks a new turn off. The
+        # fix: ``agent.interrupt()`` schedules a follow-up task that
+        # waits for the cancellation to settle, then re-fires
+        # buffered events as fresh turns.
+        from kohakuterrarium.core.events import TriggerEvent
+
+        # Two scripted LLM responses: the first is what the
+        # interrupted turn was working on (we'll cancel before it
+        # finishes); the second is what the drained event triggers.
+        agent = make_agent(script=["after-interrupt reply"])
+        await agent.start()
+        try:
+            evt = TriggerEvent(type="user_input", content="user msg after interrupt")
+            # Simulate the lock being held by another (in-flight)
+            # turn — buffer the event the same way ``send()`` →
+            # ``inject_input`` does.
+            async with agent._processing_lock:
+                await agent.inject_input("queued during turn", source="web")
+                assert len(agent._pending_mid_turn_inputs) == 1
+            # Lock released — but the buffered event is still
+            # stranded because no other turn has fired. The
+            # ``interrupt()`` flush should pick it up. Simulate
+            # interrupt-after-buffer by calling interrupt then
+            # giving the event loop time to run the follow-up task.
+            agent.interrupt()
+            # Yield enough times for the scheduled flush task to
+            # acquire the lock, process the buffered event, and
+            # complete a full turn against the scripted LLM.
+            for _ in range(50):
+                await asyncio.sleep(0.01)
+                if (
+                    not agent._pending_mid_turn_inputs
+                    and not agent._processing_lock.locked()
+                ):
+                    break
+            assert agent._pending_mid_turn_inputs == [], (
+                "buffered events must be drained after interrupt — they "
+                "represent the user's next intent, not the cancelled turn"
+            )
+            # The scripted LLM ran once with the drained content, so
+            # the conversation now carries the user message that was
+            # originally queued.
+            user_msgs = [
+                m
+                for m in agent.controller.conversation.get_messages()
+                if getattr(m, "role", None) == "user"
+            ]
+            queued_contents = [m.content for m in user_msgs]
+            assert "queued during turn" in queued_contents
+            # Silence the unused-import warning — evt is documentation.
+            _ = evt
+        finally:
+            await agent.stop()
+
+
 # ── TUI callbacks wired in start (lines 269, 271-272) ───────────
 
 

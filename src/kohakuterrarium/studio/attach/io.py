@@ -87,7 +87,7 @@ def _handle_ui_reply(
     try:
         _accepted, ack_status = agent.output_router.submit_reply_with_status(reply)
     except Exception as e:
-        logger.debug("submit_reply failed", error=str(e), exc_info=True)
+        logger.warning("submit_reply failed", error=str(e), exc_info=True)
         ack_status = "unknown"
 
     ack = {
@@ -116,9 +116,17 @@ async def _process_input(
     Errors and the post-turn ``idle`` notice are pushed via the same
     outbound queue that ``_forward_queue`` drains, so the caller
     doesn't need to share the websocket reference.
+
+    ``idle`` is suppressed when ``inject_input`` returned ``False`` —
+    the event was buffered for opportunistic mid-turn drain
+    (``Agent._pending_mid_turn_inputs``) and the OTHER turn that's
+    still running owns the next ``idle`` / ``processing_end`` frame.
+    Emitting our own here would race the FE's ``processingByTab``
+    flag off and the KohakUwUing indicator would blink off until
+    the next streaming chunk arrived (Bug 1).
     """
     try:
-        await agent.inject_input(content, source="web")
+        processed = await agent.inject_input(content, source="web")
     except asyncio.CancelledError:
         raise
     except Exception as e:
@@ -134,6 +142,11 @@ async def _process_input(
         except asyncio.QueueFull:
             logger.debug("input error frame dropped — queue full")
         return
+    if not processed:
+        # Buffered for mid-turn drain — do NOT emit ``idle``; the
+        # turn that's actually running will fire its own terminal
+        # frames when it ends.
+        return
     try:
         queue.put_nowait({"type": "idle", "source": source_name, "ts": time.time()})
     except asyncio.QueueFull:
@@ -141,14 +154,40 @@ async def _process_input(
 
 
 async def _forward_queue(queue: asyncio.Queue, ws: WebSocket) -> None:
+    """Drain ``queue`` to the WS sink. Per-send isolation: a TypeError
+    / serialization failure on ONE frame must NOT kill the forward task
+    and silently stall every subsequent frame.
+
+    The original implementation exited the loop on the first send
+    failure. That ate 8 hours of debugging on 2026-05-28:
+    ``create_user_input_event`` was passing ``[TextPart(...)]`` (a
+    dataclass) into ``user_input_injected`` metadata, ``ws.send_json``
+    raised ``TypeError: Object of type TextPart is not JSON
+    serializable``, the forward task exited, and every subsequent frame
+    piled up in the queue forever. The FE saw the previous
+    ``tool_done`` and nothing after — backend logs showed the drain ran
+    and round-2 LLM ran to completion, but the WS had quietly died.
+    Hard-refresh "fixed" it by opening a new WS.
+    """
     try:
         while True:
             msg = await queue.get()
             if msg is None:
                 break
-            await ws.send_json(msg)
+            try:
+                await ws.send_json(msg)
+            except Exception as send_exc:
+                logger.warning(
+                    "WS send_json failed — dropping frame, forward task continues",
+                    msg_type=(msg.get("type") if isinstance(msg, dict) else None),
+                    activity_type=(
+                        msg.get("activity_type") if isinstance(msg, dict) else None
+                    ),
+                    error=str(send_exc),
+                    exc_info=True,
+                )
     except Exception as e:
-        logger.debug("WS forward queue error", error=str(e), exc_info=True)
+        logger.warning("WS forward queue error", error=str(e), exc_info=True)
 
 
 def _register_channel_callbacks(
@@ -475,7 +514,7 @@ async def attach_io(
         try:
             agent.output_router.remove_secondary(out_module)
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 "Failed to remove secondary output",
                 error=str(e),
                 exc_info=True,
@@ -486,7 +525,7 @@ async def attach_io(
             try:
                 sib_agent.output_router.remove_secondary(sib_module)
             except Exception:
-                logger.debug(
+                logger.warning(
                     "Failed to remove sibling secondary output",
                     exc_info=True,
                 )
@@ -494,7 +533,7 @@ async def attach_io(
             try:
                 ch.remove_on_send(cb)
             except Exception as e:
-                logger.debug(
+                logger.warning(
                     "Failed to remove channel callback",
                     error=str(e),
                     exc_info=True,
