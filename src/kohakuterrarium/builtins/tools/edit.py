@@ -17,6 +17,7 @@ from typing import Any
 
 import aiofiles
 
+from kohakuterrarium.builtins.tools.canvas_preview import build_canvas_preview
 from kohakuterrarium.builtins.tools.registry import register_builtin
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
@@ -397,6 +398,13 @@ class EditTool(BaseTool):
             return ToolResult(
                 output=(f"Edited {file_path}\n" f"  {replaced} replacement(s) made"),
                 exit_code=0,
+                metadata={
+                    "canvas_preview": build_canvas_preview(
+                        kind="edit",
+                        file_path=str(file_path),
+                        content=new_content,
+                    ),
+                },
             )
 
         except PermissionError:
@@ -489,6 +497,13 @@ class EditTool(BaseTool):
                     f"  +{added} -{removed} lines"
                 ),
                 exit_code=0,
+                metadata={
+                    "canvas_preview": build_canvas_preview(
+                        kind="edit",
+                        file_path=str(file_path),
+                        content=new_content,
+                    ),
+                },
             )
 
         except PermissionError:

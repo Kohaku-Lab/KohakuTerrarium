@@ -8,6 +8,7 @@ from typing import Any
 
 import aiofiles
 
+from kohakuterrarium.builtins.tools.canvas_preview import build_canvas_preview
 from kohakuterrarium.builtins.tools.registry import register_builtin
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
@@ -104,6 +105,17 @@ class WriteTool(BaseTool):
             return ToolResult(
                 output=f"{action} {file_path} ({lines} lines, {len(content)} bytes)",
                 exit_code=0,
+                metadata={
+                    # Canvas preview — frontend's canvas panel reads this
+                    # to render the just-written file without re-fetching
+                    # via /files. Keeps the panel in sync with whatever
+                    # the agent just changed.
+                    "canvas_preview": build_canvas_preview(
+                        kind="write",
+                        file_path=str(file_path),
+                        content=content,
+                    ),
+                },
             )
 
         except PermissionError:

@@ -333,4 +333,7 @@ _STREAM_METADATA_KEYS = (
     "turn_index",
     "branch_id",
     "final_state",
+    # Feat 1 — write / edit / multi_edit tools attach a ``canvas_preview``
+    # dict so the frontend canvas panel can render the just-touched file.
+    "canvas_preview",
 )

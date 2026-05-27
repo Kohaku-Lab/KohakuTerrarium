@@ -10,6 +10,7 @@ from kohakuterrarium.builtins.tools.edit import (
     check_edit_guards,
     update_edit_read_state,
 )
+from kohakuterrarium.builtins.tools.canvas_preview import build_canvas_preview
 from kohakuterrarium.builtins.tools.registry import register_builtin
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
@@ -249,10 +250,23 @@ class MultiEditTool(BaseTool):
                 file_changed=file_changed,
             )
 
+            preview_meta = (
+                {
+                    "canvas_preview": build_canvas_preview(
+                        kind="multi_edit",
+                        file_path=str(file_path),
+                        content=current,
+                    ),
+                }
+                if file_changed
+                else {}
+            )
+
             if failed:
                 return ToolResult(
                     output=output,
                     error=f"multi_edit completed with {failed} failed edit(s)",
+                    metadata=preview_meta,
                 )
 
             logger.debug(
@@ -262,7 +276,7 @@ class MultiEditTool(BaseTool):
                 edits=len(edits),
                 changed=file_changed,
             )
-            return ToolResult(output=output, exit_code=0)
+            return ToolResult(output=output, exit_code=0, metadata=preview_meta)
 
         except PermissionError:
             return ToolResult(error=f"Permission denied: {path}")
