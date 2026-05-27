@@ -889,3 +889,335 @@ describe("chat store — focus-return resync", () => {
     resyncSpy.mockRestore()
   })
 })
+
+describe("chat store — branch isolation during streaming", () => {
+  // Bug we're guarding against: user clicks Save & Rerun on turn 1.
+  // Backend opens branch 2 and starts streaming. User clicks <1/2> to
+  // peek at the old branch. WS chunks for branch 2 keep arriving — if
+  // we don't gate on branch_id, those chunks would corrupt the
+  // branch-1 view (appending streaming text to the wrong assistant
+  // bubble).
+  it("drops off-branch text chunks instead of corrupting the viewed branch", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = { main: [{ id: "h1", role: "user", content: "hi" }] }
+    chat.activeTab = "main"
+    // Viewing branch 1 of turn 1; branch 2 is streaming in the
+    // background.
+    chat.branchViewByTab = { main: { 1: 1 } }
+    chat._streamingBranchByTab = { main: { turnIndex: 1, branchId: 2 } }
+
+    chat._onMessage({
+      type: "text",
+      source: "main",
+      content: "SHOULD NOT LAND",
+      turn_index: 1,
+      branch_id: 2,
+    })
+
+    // Message list must be untouched — no phantom assistant bubble.
+    expect(chat.messagesByTab.main).toHaveLength(1)
+    expect(chat.messagesByTab.main[0]).toMatchObject({ role: "user", content: "hi" })
+    // Tab IS still processing — the indicator follows the running
+    // branch, not the viewed one.
+    expect(chat.processingByTab.main).toBe(true)
+    // viewingRunningBranch must report false so KohakUwUing hides.
+    expect(chat.viewingRunningBranch).toBe(false)
+  })
+
+  it("appends on-branch text chunks normally and reports viewingRunningBranch=true", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = { main: [{ id: "h1", role: "user", content: "hi" }] }
+    chat.activeTab = "main"
+    chat.branchViewByTab = { main: { 1: 2 } }
+    chat._streamingBranchByTab = { main: { turnIndex: 1, branchId: 2 } }
+    chat.processingByTab = { main: true }
+
+    chat._onMessage({
+      type: "text",
+      source: "main",
+      content: "hello world",
+      turn_index: 1,
+      branch_id: 2,
+    })
+
+    expect(chat.messagesByTab.main).toHaveLength(2)
+    expect(chat.messagesByTab.main[1].role).toBe("assistant")
+    expect(chat.messagesByTab.main[1].parts[0].content).toBe("hello world")
+    expect(chat.viewingRunningBranch).toBe(true)
+  })
+
+  it("processing_start frames update the streaming-branch target", () => {
+    // Regression: when the optimistic prediction is off (e.g. another
+    // tab also branched), the authoritative branch_id must come from
+    // the backend's processing_start frame; otherwise the branch
+    // navigator's selection drifts away from the actually-running
+    // branch and KohakUwUing mis-attaches.
+    const chat = useChatStore()
+    chat.messagesByTab = { main: [] }
+    chat.activeTab = "main"
+    chat._streamingBranchByTab = { main: { turnIndex: 1, branchId: 2 } }
+
+    chat._onMessage({
+      type: "processing_start",
+      source: "main",
+      turn_index: 1,
+      branch_id: 5,
+    })
+
+    expect(chat._streamingBranchByTab.main).toEqual({ turnIndex: 1, branchId: 5 })
+    expect(chat.processingByTab.main).toBe(true)
+  })
+
+  it("processing_end clears the streaming-branch target so KohakUwUing detaches", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = { main: [] }
+    chat.activeTab = "main"
+    chat.processingByTab = { main: true }
+    chat._streamingBranchByTab = { main: { turnIndex: 1, branchId: 2 } }
+    // Stub branch-resync timer setup so the test doesn't leak setTimeout.
+    vi.spyOn(chat, "_scheduleBranchResync").mockImplementation(() => {})
+
+    chat._onMessage({
+      type: "processing_end",
+      source: "main",
+      turn_index: 1,
+      branch_id: 2,
+    })
+
+    expect(chat.processingByTab.main).toBe(false)
+    expect(chat._streamingBranchByTab.main).toBeUndefined()
+    expect(chat.viewingRunningBranch).toBe(false)
+  })
+
+  it("frames without branch_id pass through (legacy streams stay compatible)", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = { main: [] }
+    chat.activeTab = "main"
+    chat.processingByTab = { main: true }
+    // No streaming target, no branch_id on the frame — legacy stream
+    // should still mutate messagesByTab.
+    chat._onMessage({ type: "text", source: "main", content: "ok" })
+    expect(chat.messagesByTab.main).toHaveLength(1)
+    expect(chat.messagesByTab.main[0].parts[0].content).toBe("ok")
+  })
+
+  it("off-branch tool_start activities are dropped instead of injected into the wrong branch", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = { main: [{ id: "h1", role: "user", content: "hi" }] }
+    chat.activeTab = "main"
+    chat.branchViewByTab = { main: { 1: 1 } }
+    chat._streamingBranchByTab = { main: { turnIndex: 1, branchId: 2 } }
+
+    chat._handleActivity("main", {
+      activity_type: "tool_start",
+      name: "bash",
+      job_id: "job_1",
+      args: { cmd: "ls" },
+      turn_index: 1,
+      branch_id: 2,
+    })
+
+    // The tool call would have created an assistant message + tool
+    // part if it had landed — guard says it must not.
+    expect(chat.messagesByTab.main).toHaveLength(1)
+    expect(chat.runningJobs.job_1).toBeUndefined()
+  })
+})
+
+describe("chat store — optimistic branch promotion", () => {
+  it("injects user_input + user_message + processing_start with the predicted branch_id", () => {
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat.activeTab = "main"
+    chat.eventsByTab = {
+      main: [
+        { type: "user_input", content: "hi", event_id: 1, turn_index: 1, branch_id: 1 },
+        { type: "user_message", content: "hi", event_id: 2, turn_index: 1, branch_id: 1 },
+        { type: "processing_start", event_id: 3, turn_index: 1, branch_id: 1 },
+        { type: "text_chunk", content: "old", event_id: 4, turn_index: 1, branch_id: 1 },
+        { type: "processing_end", event_id: 5, turn_index: 1, branch_id: 1 },
+      ],
+    }
+
+    const ok = chat._injectOptimisticBranch("main", {
+      turnIndex: 1,
+      branchId: 2,
+      content: "edited",
+    })
+
+    expect(ok).toBe(true)
+    const injected = chat.eventsByTab.main.slice(-3)
+    expect(injected.map((e) => e.type)).toEqual(["user_input", "user_message", "processing_start"])
+    for (const evt of injected) {
+      expect(evt.turn_index).toBe(1)
+      expect(evt.branch_id).toBe(2)
+      expect(evt._optimistic).toBe(true)
+    }
+  })
+
+  it("editMessage promotes the chevron navigator to <N+1/N+1> before the API resolves", async () => {
+    // We can't easily intercept the dynamic ``await import("@/utils/api")``
+    // mid-call without a top-level ``vi.mock``, so this regression test
+    // drives the *side effects* of the optimistic-injection path
+    // directly: the same sequence ``editMessage`` runs before reaching
+    // the API. If the injection is broken the navigator stays at <1/1>
+    // until the resync lands, which is the bug we're guarding against.
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat.activeTab = "main"
+    chat.eventsByTab = {
+      main: [
+        { type: "user_input", content: "hi", event_id: 1, turn_index: 1, branch_id: 1 },
+        { type: "user_message", content: "hi", event_id: 2, turn_index: 1, branch_id: 1 },
+        { type: "processing_start", event_id: 3, turn_index: 1, branch_id: 1 },
+        { type: "text_chunk", content: "reply", event_id: 4, turn_index: 1, branch_id: 1 },
+        { type: "processing_end", event_id: 5, turn_index: 1, branch_id: 1 },
+      ],
+    }
+
+    // Mirror the four lines from editMessage that promote the
+    // navigator + streaming target before awaiting the network call.
+    const turnIndex = 1
+    const predictedBranch = 2 // latestBranch (1) + 1
+    chat._injectOptimisticBranch("main", {
+      turnIndex,
+      branchId: predictedBranch,
+      content: "edited",
+    })
+    if (!chat.branchViewByTab.main) chat.branchViewByTab.main = {}
+    chat.branchViewByTab.main[turnIndex] = predictedBranch
+    chat._streamingBranchByTab.main = { turnIndex, branchId: predictedBranch }
+    chat.processingByTab.main = true
+    chat._rebuildMessages("main")
+
+    // <2/2> navigator metadata visible on the assistant turn now.
+    const branchMeta = _replayEvents(
+      [],
+      chat.eventsByTab.main,
+      chat.branchViewByTab.main,
+    ).branchMeta
+    expect(branchMeta.byTurn.get(1).branches).toEqual([1, 2])
+    expect(branchMeta.branchSelection.get(1)).toBe(2)
+    expect(chat.viewingRunningBranch).toBe(true)
+  })
+
+  it("editMessage rolls back the optimistic events when the API throws", async () => {
+    // Regression: pre-fix the optimistic branch was injected but the
+    // catch block left ``processingByTab[tab] = true`` plus the
+    // synthetic events in ``eventsByTab[tab]``. With no WS
+    // ``processing_end`` to follow (the backend never started a turn),
+    // the tab stayed stuck showing "KohakUwUing..." forever and the
+    // navigator showed a <2/2> for a branch that doesn't exist.
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    const originalEvents = [
+      { type: "user_input", content: "hi", event_id: 1, turn_index: 1, branch_id: 1 },
+      { type: "user_message", content: "hi", event_id: 2, turn_index: 1, branch_id: 1 },
+    ]
+    chat.messagesByTab = {
+      main: [
+        {
+          id: "u1",
+          role: "user",
+          content: "hi",
+          turnIndex: 1,
+          latestBranch: 1,
+          userPosition: 0,
+        },
+      ],
+    }
+    chat.eventsByTab = { main: [...originalEvents] }
+
+    const importActual = await vi.importActual("@/utils/api")
+    const editSpy = vi
+      .spyOn(importActual.agentAPI, "editMessage")
+      .mockRejectedValue(new Error("boom"))
+
+    const ok = await chat.editMessage(0, "edited", {
+      turnIndex: 1,
+      userPosition: 0,
+      latestBranch: 1,
+    })
+
+    expect(ok).toBe(false)
+    // Events restored to pre-optimistic state.
+    expect(chat.eventsByTab.main).toEqual(originalEvents)
+    expect(chat._streamingBranchByTab.main).toBeUndefined()
+    expect(chat.branchViewByTab.main).toBeUndefined()
+    // CRITICAL: ``processingByTab`` must be reset — no WS processing_end
+    // is ever coming when the API itself rejected. Without this fix the
+    // KohakUwUing label would stay on screen forever.
+    expect(chat.processingByTab.main).toBe(false)
+    editSpy.mockRestore()
+  })
+
+  it("regenerateLastResponse rolls back processing flag when the API throws", async () => {
+    // Same processing-stuck regression as editMessage above — the
+    // optimistic ``processingByTab[tab] = true`` must NOT survive an
+    // API rejection, or the indicator hangs forever.
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.messagesByTab = {
+      main: [
+        { id: "u1", role: "user", content: "hi", turnIndex: 1, latestBranch: 1 },
+        { id: "a1", role: "assistant", parts: [{ type: "text", content: "reply" }] },
+      ],
+    }
+    chat.eventsByTab = {
+      main: [{ type: "user_input", content: "hi", event_id: 1, turn_index: 1, branch_id: 1 }],
+    }
+    // Suppress the catch-block resync so the test doesn't leak timers.
+    vi.spyOn(chat, "_scheduleBranchResync").mockImplementation(() => {})
+
+    const importActual = await vi.importActual("@/utils/api")
+    const regenSpy = vi
+      .spyOn(importActual.agentAPI, "regenerate")
+      .mockRejectedValue(new Error("net"))
+
+    await chat.regenerateLastResponse({ turnIndex: 1 })
+
+    expect(chat.processingByTab.main).toBe(false)
+    expect(chat._streamingBranchByTab.main).toBeUndefined()
+    regenSpy.mockRestore()
+  })
+})
+
+describe("chat store — viewingRunningBranch getter", () => {
+  it("true when no streaming target is set but the tab is processing (legacy turn)", () => {
+    const chat = useChatStore()
+    chat.activeTab = "main"
+    chat.processingByTab = { main: true }
+    expect(chat.viewingRunningBranch).toBe(true)
+  })
+
+  it("true when the viewed branch matches the streaming target", () => {
+    const chat = useChatStore()
+    chat.activeTab = "main"
+    chat.processingByTab = { main: true }
+    chat._streamingBranchByTab = { main: { turnIndex: 3, branchId: 7 } }
+    chat.branchViewByTab = { main: { 3: 7 } }
+    expect(chat.viewingRunningBranch).toBe(true)
+  })
+
+  it("false when the viewed branch differs from the streaming target", () => {
+    const chat = useChatStore()
+    chat.activeTab = "main"
+    chat.processingByTab = { main: true }
+    chat._streamingBranchByTab = { main: { turnIndex: 3, branchId: 7 } }
+    chat.branchViewByTab = { main: { 3: 1 } }
+    expect(chat.viewingRunningBranch).toBe(false)
+  })
+
+  it("false when the tab is not processing", () => {
+    const chat = useChatStore()
+    chat.activeTab = "main"
+    chat.processingByTab = { main: false }
+    chat._streamingBranchByTab = { main: { turnIndex: 3, branchId: 7 } }
+    chat.branchViewByTab = { main: { 3: 7 } }
+    expect(chat.viewingRunningBranch).toBe(false)
+  })
+})

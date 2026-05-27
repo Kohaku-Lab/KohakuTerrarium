@@ -336,7 +336,7 @@ export default {
 
   "chat.noMessagesYet": "尚无消息",
   "chat.getStarted": "发送消息开始使用",
-  "chat.processing": "处理中...",
+  "chat.processing": "KohakUwUing...",
   "chat.queued": "排队中",
   "chat.pendingBanner": ({ count }) =>
     count === 1 ? "有 1 个待处理请求等待回复" : `有 ${count} 个待处理请求等待回复`,

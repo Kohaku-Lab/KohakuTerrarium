@@ -432,19 +432,43 @@ function removeEditAttachment(index) {
 async function confirmEdit() {
   if (editSaving.value || (!editText.value.trim() && editAttachments.value.length === 0)) return
   editSaving.value = true
+  let newContent
   try {
-    const newContent = await buildMessageParts(editText.value, editAttachments.value)
+    newContent = await buildMessageParts(editText.value, editAttachments.value)
+  } catch (err) {
+    console.error("Failed to prepare edited message:", err)
+    editSaving.value = false
+    return
+  }
+  // Close the editor IMMEDIATELY — the new branch is locked in the
+  // moment the user clicks Save & Rerun. Leaving the textarea on
+  // screen until the API + resync round-trip lands made it look
+  // like the rerun hadn't started yet; worse, the streaming reply
+  // appears underneath while the editor still covers the original
+  // bubble, hiding the user message that prompted it.
+  editing.value = false
+  const submittedText = editText.value
+  const submittedAttachments = editAttachments.value
+  editText.value = ""
+  editAttachments.value = []
+  try {
     const ok = await chat.editMessage(props.messageIdx, newContent, {
       turnIndex: props.message.turnIndex,
       userPosition: props.message.userPosition,
       latestBranch: props.message.latestBranch,
     })
-    if (!ok) return
-    editing.value = false
-    editText.value = ""
-    editAttachments.value = []
+    if (!ok) {
+      // Restore the draft so the user can retry — the rerun didn't
+      // land, so don't leave them with an empty edit buffer.
+      editText.value = submittedText
+      editAttachments.value = submittedAttachments
+      editing.value = true
+    }
   } catch (err) {
     console.error("Failed to prepare edited message:", err)
+    editText.value = submittedText
+    editAttachments.value = submittedAttachments
+    editing.value = true
   } finally {
     editSaving.value = false
   }

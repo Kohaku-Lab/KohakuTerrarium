@@ -384,7 +384,7 @@ export default {
 
   "chat.noMessagesYet": "No messages yet",
   "chat.getStarted": "Send a message to get started",
-  "chat.processing": "Processing...",
+  "chat.processing": "KohakUwUing...",
   "chat.queued": "queued",
   "chat.selectTab": "Select a tab...",
   "chat.sendToChannel": "Send to {channel} channel...",

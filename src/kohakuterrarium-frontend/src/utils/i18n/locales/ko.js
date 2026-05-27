@@ -359,7 +359,7 @@ export default {
 
   "chat.noMessagesYet": "아직 메시지가 없습니다",
   "chat.getStarted": "메시지를 보내서 시작하세요",
-  "chat.processing": "처리 중...",
+  "chat.processing": "KohakUwUing...",
   "chat.queued": "대기 중",
   "chat.selectTab": "탭 선택...",
   "chat.sendToChannel": "{channel} 채널로 보내기...",

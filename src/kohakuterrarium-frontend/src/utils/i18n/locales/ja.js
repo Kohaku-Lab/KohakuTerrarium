@@ -364,7 +364,7 @@ export default {
 
   "chat.noMessagesYet": "まだメッセージはありません",
   "chat.getStarted": "メッセージを送って始めましょう",
-  "chat.processing": "処理中...",
+  "chat.processing": "KohakUwUing...",
   "chat.queued": "待機中",
   "chat.selectTab": "タブを選択...",
   "chat.sendToChannel": "{channel} チャンネルに送信...",

@@ -1172,6 +1172,27 @@ const _chatStoreOptions = {
     _branchResyncPendingByTab: {},
     /** @type {Record<string, number>} Debounce timers for post-branch history resync */
     _branchResyncTimers: {},
+    /**
+     * Per-tab streaming target — the (turn_index, branch_id) the
+     * backend is currently writing to. Set by ``regenerateLastResponse`` /
+     * ``editMessage`` BEFORE the new chunks land, cleared on
+     * ``processing_end``. Two consumers:
+     *
+     * 1. WS frame routing — text / tool_* / subagent_* frames carry a
+     *    ``branch_id`` (backend-tagged in studio/attach/_event_stream.py).
+     *    Frames whose ``branch_id`` doesn't match the user's currently-
+     *    viewed branch for the streaming turn are dropped from the live
+     *    mutation path — they would otherwise corrupt the sibling
+     *    branch the user actually has on screen. The events are still
+     *    persisted by SessionOutput, so a switch back to the streaming
+     *    branch resyncs the missed content.
+     *
+     * 2. KohakUwUing visibility — only shown when the viewed branch IS
+     *    the one currently generating; the indicator follows the
+     *    running branch, not the tab.
+     * @type {Record<string, {turnIndex: number, branchId: number} | null>}
+     */
+    _streamingBranchByTab: {},
   }),
 
   getters: {
@@ -1192,6 +1213,33 @@ const _chatStoreOptions = {
     processing: (state) => (state.activeTab ? !!state.processingByTab[state.activeTab] : false),
     /** True when any tab is currently streaming. */
     anyProcessing: (state) => Object.values(state.processingByTab).some(Boolean),
+    /**
+     * True when the active tab is currently generating AND the user is
+     * viewing the very branch that's being generated. The "KohakUwUing..."
+     * label binds to this — a regen / edit-rerun that opens branch 2 is
+     * still generating in the background when the user clicks <1/2> to
+     * see the old branch, but the label belongs to branch 2 (the running
+     * one), not the bubble on screen. Without this gate the label would
+     * mis-attach to whichever branch happens to be visible.
+     *
+     * Defaults to plain ``processing`` when no streaming-branch target
+     * is set (legacy bursts, tail regens that don't carry branch info).
+     */
+    viewingRunningBranch: (state) => {
+      const tab = state.activeTab
+      if (!tab || !state.processingByTab[tab]) return false
+      const target = state._streamingBranchByTab[tab]
+      if (!target) return true
+      const view = state.branchViewByTab[tab]
+      // No explicit override means "latest branch" — the latest branch
+      // for the streaming turn IS the streaming branch, since the
+      // backend always opens a fresh max_branch+1. So an unset view
+      // implies the user is on the running branch.
+      if (!view || !Object.prototype.hasOwnProperty.call(view, target.turnIndex)) {
+        return true
+      }
+      return view[target.turnIndex] === target.branchId
+    },
     /**
      * Canonical display form of the active model, preferring the
      * ``provider/name[@variations]`` identifier so every display surface
@@ -1278,6 +1326,7 @@ const _chatStoreOptions = {
       this.processingByTab = {}
       this._recentUserInputs = {}
       this._branchResyncPendingByTab = {}
+      this._streamingBranchByTab = {}
       this._clearBranchResyncTimers()
       this.sessionInfo = {
         sessionId: instance.session_id || instance.id || "",
@@ -1704,9 +1753,27 @@ const _chatStoreOptions = {
         if (source && !this.processingByTab[source]) {
           this.processingByTab[source] = true
         }
-        this._appendStreamChunk(source, data.content)
+        // Branch isolation — only mutate ``messagesByTab`` when this
+        // chunk belongs to the branch the user is currently viewing.
+        // Off-branch chunks (e.g. user clicked <1/2> to see the old
+        // branch while branch 2 is still streaming) are dropped from
+        // the live mutation path; SessionOutput already persists them
+        // and a switch back to the streaming branch will resync.
+        if (this._frameMatchesViewedBranch(source, data)) {
+          this._appendStreamChunk(source, data.content)
+        }
       } else if (data.type === "processing_start") {
         if (source) this.processingByTab[source] = true
+        // Update the streaming-branch target whenever the backend
+        // tells us which (turn, branch) it just started on. The
+        // optimistic prediction we made in regenerate/editMessage
+        // gets corrected here if the real branch differs.
+        if (source && typeof data.turn_index === "number" && typeof data.branch_id === "number") {
+          this._streamingBranchByTab[source] = {
+            turnIndex: data.turn_index,
+            branchId: data.branch_id,
+          }
+        }
         // Promote queued user messages (agent is now processing them)
         this._promoteQueuedMessages(source)
       } else if (data.type === "processing_end") {
@@ -1913,6 +1980,14 @@ const _chatStoreOptions = {
 
       // Ensure we have a tab for this source
       if (!this.messagesByTab[source]) return
+      // Branch isolation — every remaining activity below mutates the
+      // displayed message list. If this frame is for a branch the user
+      // isn't currently viewing (e.g. branch 2 is streaming while the
+      // user clicked back to branch 1), DROP the mutation; the event is
+      // still persisted server-side and the next resync picks it up
+      // when the user switches back. Frames without branch metadata
+      // pass through (legacy / non-per-turn activity).
+      if (!this._frameMatchesViewedBranch(source, data)) return
       const msgs = this.messagesByTab[source]
 
       if (at === "wire_inbound") {
@@ -2231,6 +2306,130 @@ const _chatStoreOptions = {
       this._branchResyncTimers = {}
     },
 
+    /**
+     * Decide whether an incoming WS frame's ``(turn_index, branch_id)``
+     * matches the branch the user is currently viewing for that turn.
+     *
+     * Backend frames now carry ``turn_index`` / ``branch_id``; legacy
+     * frames don't. The contract:
+     *
+     *   - Frame has no ``branch_id`` → trusted (legacy stream, assume
+     *     it's for the active branch — most callers have nothing else
+     *     to compare against).
+     *   - Frame's ``branch_id`` matches the user's branch selection
+     *     for that turn (or matches the default-latest when no
+     *     explicit selection) → trusted.
+     *   - Otherwise → reject, return false. The caller drops the
+     *     mutation; the chunk is still persisted server-side and a
+     *     branch switch + resync will surface it later.
+     */
+    _frameMatchesViewedBranch(tab, data) {
+      const fb = data?.branch_id
+      const ft = data?.turn_index
+      if (typeof fb !== "number" || typeof ft !== "number") return true
+      const view = this.branchViewByTab[tab]
+      if (view && Object.prototype.hasOwnProperty.call(view, ft)) {
+        return view[ft] === fb
+      }
+      // No explicit override — the replay defaults each turn to its
+      // latest branch. The streaming target is by construction the
+      // latest branch of its turn (the backend opens max+1 before
+      // emitting any chunk), so an unset view aligns with "viewing
+      // the running branch".
+      const streaming = this._streamingBranchByTab[tab]
+      if (streaming && streaming.turnIndex === ft) {
+        return streaming.branchId === fb
+      }
+      // Fall back to the per-tab branch metadata: latest known branch
+      // for this turn IS what the user sees by default.
+      const cached = this.eventsByTab[tab]
+      if (cached) {
+        let latest = 0
+        for (const evt of cached) {
+          if (evt?.turn_index === ft && typeof evt?.branch_id === "number") {
+            if (evt.branch_id > latest) latest = evt.branch_id
+          }
+        }
+        if (latest > 0) return latest === fb
+      }
+      return true
+    },
+
+    /**
+     * Splice synthetic ``user_input`` + ``user_message`` events for a
+     * newly-opened branch into ``eventsByTab[tab]`` so the chevron
+     * navigator promotes to ``<N/M>`` the instant Save & Rerun / Retry
+     * fires — instead of waiting for the post-turn history resync.
+     * The injected events get fenced with negative ``event_id`` so
+     * the next real resync recognises them as placeholders and the
+     * canonical ones from the backend take over without duplication.
+     *
+     * Caller is responsible for setting ``branchViewByTab[tab][turnIndex]``
+     * to the new branch and calling ``_rebuildMessages`` afterwards.
+     * Returns ``true`` when the splice landed, ``false`` if turn /
+     * branch metadata were missing (callers can still proceed; the
+     * navigator will catch up on resync).
+     */
+    _injectOptimisticBranch(tab, { turnIndex, branchId, content }) {
+      if (!tab || typeof turnIndex !== "number" || typeof branchId !== "number") {
+        return false
+      }
+      const events = this.eventsByTab[tab] || []
+      // Compute parent_branch_path snapshot from currently-selected
+      // branches of prior turns, so the optimistic event's path matches
+      // what the backend will write (otherwise the path-aware replay
+      // hides this branch when the user has chosen non-latest branches
+      // on earlier turns).
+      const view = this.branchViewByTab[tab] || {}
+      const latestByTurn = new Map()
+      for (const evt of events) {
+        const ti = evt?.turn_index
+        const bi = evt?.branch_id
+        if (typeof ti !== "number" || typeof bi !== "number") continue
+        const prev = latestByTurn.get(ti) || 0
+        if (bi > prev) latestByTurn.set(ti, bi)
+      }
+      const parentPath = []
+      for (const [ti, latest] of latestByTurn) {
+        if (ti >= turnIndex) continue
+        const chosen = Object.prototype.hasOwnProperty.call(view, ti) ? view[ti] : latest
+        parentPath.push([ti, chosen])
+      }
+      parentPath.sort((a, b) => a[0] - b[0])
+      // Negative event ids so the natural-number ones the backend
+      // assigns sort after these; the next resync overwrites the cache
+      // wholesale, so the negatives are inherently transient.
+      const baseId = -Date.now()
+      const userInput = {
+        type: "user_input",
+        content,
+        event_id: baseId,
+        turn_index: turnIndex,
+        branch_id: branchId,
+        parent_branch_path: parentPath,
+        _optimistic: true,
+      }
+      const userMessage = {
+        type: "user_message",
+        content,
+        event_id: baseId - 1,
+        turn_index: turnIndex,
+        branch_id: branchId,
+        parent_branch_path: parentPath,
+        _optimistic: true,
+      }
+      const processingStart = {
+        type: "processing_start",
+        event_id: baseId - 2,
+        turn_index: turnIndex,
+        branch_id: branchId,
+        parent_branch_path: parentPath,
+        _optimistic: true,
+      }
+      this.eventsByTab[tab] = [...events, userInput, userMessage, processingStart]
+      return true
+    },
+
     _conversationUserPosition(tab, messageIdx) {
       const msgs = this.messagesByTab[tab] || []
       if (messageIdx == null || messageIdx < 0 || messageIdx >= msgs.length) return null
@@ -2266,6 +2465,24 @@ const _chatStoreOptions = {
       }
       this._markBranchResyncPending(tab)
       const msgs = this.messagesByTab[tab] || []
+      // Resolve the target user message + its turn so we can predict
+      // the freshly-opened branch and promote the chevron navigator
+      // before the backend round-trip completes.
+      let targetUserMsg = null
+      let resolvedTurnIndex = turnIndex
+      if (turnIndex != null) {
+        targetUserMsg = msgs.find((m) => m?.role === "user" && m.turnIndex === turnIndex)
+      } else {
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          if (msgs[i]?.role === "user") {
+            targetUserMsg = msgs[i]
+            if (typeof targetUserMsg.turnIndex === "number") {
+              resolvedTurnIndex = targetUserMsg.turnIndex
+            }
+            break
+          }
+        }
+      }
       // Locally splice for instant feedback. With a specific
       // ``turnIndex`` (retry on non-tail), cut from the matching
       // user message onward so the user sees just-the-rerun-target
@@ -2286,6 +2503,42 @@ const _chatStoreOptions = {
         }
       }
       if (cutAt < msgs.length) msgs.splice(cutAt)
+      // Snapshot state BEFORE the optimistic mutation so the catch
+      // block can roll back cleanly when the API call fails. Without
+      // this the tab gets stuck showing KohakUwUing forever (no WS
+      // processing_end will fire if the backend never started a turn).
+      const previousEvents = this.eventsByTab[tab]
+      const previousBranchView =
+        tab && this.branchViewByTab[tab] ? { ...this.branchViewByTab[tab] } : null
+      const previousStreaming = tab ? this._streamingBranchByTab[tab] : null
+      const previousProcessing = !!this.processingByTab[tab]
+      // Optimistic branch promotion: when we know the turn AND its
+      // current latest branch, synthesise placeholder events into the
+      // event log so the navigator promotes to <N+1/N+1> immediately
+      // and the KohakUwUing label binds to the right branch. The next
+      // resync replaces these with canonical backend events.
+      const predictedBranch =
+        typeof targetUserMsg?.latestBranch === "number" ? targetUserMsg.latestBranch + 1 : null
+      let optimisticApplied = false
+      if (typeof resolvedTurnIndex === "number" && predictedBranch != null) {
+        const originalContent = targetUserMsg?.contentParts || targetUserMsg?.content || ""
+        const injected = this._injectOptimisticBranch(tab, {
+          turnIndex: resolvedTurnIndex,
+          branchId: predictedBranch,
+          content: originalContent,
+        })
+        if (injected) {
+          if (!this.branchViewByTab[tab]) this.branchViewByTab[tab] = {}
+          this.branchViewByTab[tab][resolvedTurnIndex] = predictedBranch
+          this._streamingBranchByTab[tab] = {
+            turnIndex: resolvedTurnIndex,
+            branchId: predictedBranch,
+          }
+          this.processingByTab[tab] = true
+          this._rebuildMessages(tab)
+          optimisticApplied = true
+        }
+      }
       try {
         const { agentAPI } = await import("@/utils/api")
         // For terrarium: session_id = the terrarium's id, creature_id =
@@ -2294,15 +2547,42 @@ const _chatStoreOptions = {
         // Unified routing — every session has a graph_id and creatures
         // keyed by name. Solo sessions just have a 1-creature roster.
         const [sid, cid] = [this._instanceGraphId, tab]
-        // Pass current branch selection so the backend can retry on
-        // an older branch correctly (otherwise the agent's in-memory
-        // is on whatever branch it last ran and the retry silently
-        // targets that branch's tail).
-        const branchView = this.branchViewByTab[tab] || null
-        await agentAPI.regenerate(sid, cid, { turnIndex, branchView })
+        // Pass the user's ORIGINAL branch view (pre-optimistic) so the
+        // backend reloads its in-memory conversation under the subtree
+        // the user was actually viewing. The predicted-branch override
+        // we set above is only for our own navigator; the backend
+        // doesn't know about it yet (it opens that branch itself).
+        const branchView = previousBranchView
+        const regenResponse = await agentAPI.regenerate(sid, cid, {
+          turnIndex,
+          branchView,
+        })
+        if (regenResponse?.branch_id != null && regenResponse?.turn_index != null) {
+          // Trust the backend's exact branch_id over our prediction —
+          // the latest seen by the user might lag the persisted state
+          // (e.g. another tab also branched this turn before us). Re-
+          // select the navigator and the streaming target to match.
+          const realTurn = regenResponse.turn_index
+          const realBranch = regenResponse.branch_id
+          if (!this.branchViewByTab[tab]) this.branchViewByTab[tab] = {}
+          if (this.branchViewByTab[tab][realTurn] !== realBranch) {
+            this.branchViewByTab[tab][realTurn] = realBranch
+          }
+          this._streamingBranchByTab[tab] = { turnIndex: realTurn, branchId: realBranch }
+        }
         await this._resyncHistory(tab)
       } catch (e) {
         console.warn("Failed to regenerate:", e)
+        if (optimisticApplied && tab) {
+          if (previousEvents == null) delete this.eventsByTab[tab]
+          else this.eventsByTab[tab] = previousEvents
+          if (previousBranchView != null) this.branchViewByTab[tab] = previousBranchView
+          else delete this.branchViewByTab[tab]
+          if (previousStreaming != null) this._streamingBranchByTab[tab] = previousStreaming
+          else delete this._streamingBranchByTab[tab]
+          this.processingByTab[tab] = previousProcessing
+          this._rebuildMessages(tab)
+        }
         this._scheduleBranchResync(tab)
       } finally {
         this._regenInFlight = false
@@ -2361,6 +2641,21 @@ const _chatStoreOptions = {
         return false
       }
       const previousMessages = tab ? [...(this.messagesByTab[tab] || [])] : null
+      const previousEvents = tab ? this.eventsByTab[tab] : null
+      const previousBranchView =
+        tab && this.branchViewByTab[tab] ? { ...this.branchViewByTab[tab] } : null
+      const previousStreaming = tab ? this._streamingBranchByTab[tab] : null
+      const previousProcessing = tab ? !!this.processingByTab[tab] : false
+      // Optimistic branch promotion: predict the new branch_id and
+      // splice synthetic events so the navigator flips to <N+1/N+1>
+      // BEFORE the API round-trip. ``latestBranch`` came from the
+      // message metadata when the user clicked Edit, so it's the
+      // accurate "previous max" for this turn.
+      const predictedBranch =
+        turnIndex != null && typeof expectedLatestBranch === "number"
+          ? expectedLatestBranch + 1
+          : null
+      let optimisticApplied = false
       if (validTarget && tab) {
         // Keep the user row at ``messageIdx`` visible (with the new
         // content) and drop everything after it — the old assistant
@@ -2382,15 +2677,34 @@ const _chatStoreOptions = {
         }
         msgs.splice(messageIdx, msgs.length - messageIdx, editedRow)
       }
+      if (predictedBranch != null && tab) {
+        const injected = this._injectOptimisticBranch(tab, {
+          turnIndex,
+          branchId: predictedBranch,
+          content: newContent,
+        })
+        if (injected) {
+          if (!this.branchViewByTab[tab]) this.branchViewByTab[tab] = {}
+          this.branchViewByTab[tab][turnIndex] = predictedBranch
+          this._streamingBranchByTab[tab] = {
+            turnIndex,
+            branchId: predictedBranch,
+          }
+          this.processingByTab[tab] = true
+          this._rebuildMessages(tab)
+          optimisticApplied = true
+        }
+      }
       try {
         const { agentAPI } = await import("@/utils/api")
         const [sid, cid] = [this._instanceGraphId, tab]
-        // Pass the user's current branch selection so the backend can
-        // reload its in-memory conversation under that subtree before
-        // resolving the edit target. Without this an edit on a
-        // switched-to-older branch silently fails (the agent's
-        // conversation is on whatever branch it last ran).
-        const branchView = this.branchViewByTab[tab] || null
+        // Pass the user's ORIGINAL branch selection (pre-optimistic)
+        // so the backend reloads its in-memory conversation under the
+        // subtree the user was viewing when they clicked Edit. The
+        // predicted-branch override we wrote into ``branchViewByTab``
+        // above is only for our own navigator; the backend doesn't
+        // know about it yet (it opens that branch itself).
+        const branchView = previousBranchView
         const editResponse = await agentAPI.editMessage(sid, cid, backendIdx, newContent, {
           turnIndex,
           userPosition,
@@ -2400,12 +2714,38 @@ const _chatStoreOptions = {
           this._markBranchResyncPending(tab, {
             expectedBranchByTurn: { [turnIndex]: editResponse.branch_id },
           })
+          // Realign the navigator if our optimistic guess was off.
+          if (!this.branchViewByTab[tab]) this.branchViewByTab[tab] = {}
+          if (this.branchViewByTab[tab][turnIndex] !== editResponse.branch_id) {
+            this.branchViewByTab[tab][turnIndex] = editResponse.branch_id
+          }
+          this._streamingBranchByTab[tab] = {
+            turnIndex,
+            branchId: editResponse.branch_id,
+          }
         }
         const resynced = await this._resyncHistory(tab)
         return resynced !== false
       } catch (e) {
         delete this._branchResyncPendingByTab[tab]
         if (previousMessages && tab) this.messagesByTab[tab] = previousMessages
+        if (optimisticApplied && tab) {
+          if (previousEvents !== undefined) {
+            if (previousEvents == null) delete this.eventsByTab[tab]
+            else this.eventsByTab[tab] = previousEvents
+          }
+          if (previousBranchView != null) {
+            this.branchViewByTab[tab] = previousBranchView
+          } else {
+            delete this.branchViewByTab[tab]
+          }
+          if (previousStreaming != null) {
+            this._streamingBranchByTab[tab] = previousStreaming
+          } else {
+            delete this._streamingBranchByTab[tab]
+          }
+          this.processingByTab[tab] = previousProcessing
+        }
         console.warn("Failed to edit message:", e)
         return false
       } finally {
@@ -2511,6 +2851,11 @@ const _chatStoreOptions = {
     /**
      * Switch the active branch for a turn. Re-runs replay against
      * the cached event log; no network round-trip.
+     *
+     * When the user switches AWAY from the streaming branch (or
+     * back to it), schedule a quick resync so any chunks dropped
+     * by the branch-isolation gate while they were elsewhere get
+     * pulled in from the persisted event log.
      */
     selectBranch(turnIndex, branchId) {
       const tab = this.activeTab
@@ -2518,6 +2863,12 @@ const _chatStoreOptions = {
       if (!this.branchViewByTab[tab]) this.branchViewByTab[tab] = {}
       this.branchViewByTab[tab][turnIndex] = branchId
       this._rebuildMessages(tab)
+      // If a stream is still in flight on this tab, an off-branch
+      // switch may have missed chunks; the on-branch path back also
+      // benefits from a fresh pull of persisted chunks.
+      if (this._streamingBranchByTab[tab]) {
+        this._scheduleBranchResync(tab)
+      }
     },
 
     /**
@@ -2590,6 +2941,10 @@ const _chatStoreOptions = {
 
     _handleUserInput(source, data) {
       if (!source || !this.messagesByTab[source]) return
+      // Branch isolation: a user_input echo for a non-viewed branch
+      // (e.g. another tab branched while this tab was on branch 1)
+      // must not push into the visible message list.
+      if (!this._frameMatchesViewedBranch(source, data)) return
       const normalized = normalizeMessageContent(data.content)
       const signature = `${source}:${contentSignature(data.content)}`
       const now = Date.now()
@@ -2716,6 +3071,14 @@ const _chatStoreOptions = {
 
     _finishStream(source) {
       if (source) this.processingByTab[source] = false
+      // The branch the user just generated on becomes "frozen" — no
+      // more chunks arrive for it. The next resync rebuilds messages
+      // from canonical events (including the persisted text_chunks),
+      // so we drop the streaming-branch target here to free the
+      // navigator from the "this is a live target" gate.
+      if (source && this._streamingBranchByTab[source]) {
+        delete this._streamingBranchByTab[source]
+      }
       const msgs = this.messagesByTab[source]
       if (msgs) {
         const last = msgs[msgs.length - 1]
@@ -2801,6 +3164,7 @@ const _chatStoreOptions = {
       this.branchViewByTab = {}
       this._recentUserInputs = {}
       this._branchResyncPendingByTab = {}
+      this._streamingBranchByTab = {}
       this._clearBranchResyncTimers()
       this.sessionInfo = {
         sessionId: "",
@@ -2820,6 +3184,7 @@ const _chatStoreOptions = {
       this._historyLoaded = false
       this._wsBuffer = []
       this._branchResyncPendingByTab = {}
+      this._streamingBranchByTab = {}
       this._clearBranchResyncTimers()
       if (this._reconnectTimer) {
         clearTimeout(this._reconnectTimer)

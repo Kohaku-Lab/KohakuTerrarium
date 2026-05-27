@@ -101,7 +101,7 @@
             </div>
           </template>
           <ChatMessage v-for="(msg, idx) in chat.currentMessages" :key="msg.id" :message="msg" :prev-message="idx > 0 ? chat.currentMessages[idx - 1] : null" :is-first="idx === 0" :message-idx="idx" :is-last-assistant="msg.role === 'assistant' && idx === chat.currentMessages.length - 1" />
-          <div v-if="chat.processing || chat.hasRunningJobs" class="flex items-center gap-2.5 py-2 pl-1">
+          <div v-if="showKohakUwUingIndicator" class="flex items-center gap-2.5 py-2 pl-1">
             <span class="w-2 h-2 rounded-full bg-amber kohaku-pulse" />
             <span class="text-sm text-amber/80 kohaku-pulse">{{ t("chat.processing") }}</span>
           </div>
@@ -356,6 +356,18 @@ const pendingCount = computed(() => {
 })
 
 const showPendingBanner = computed(() => pendingCount.value > 0 && inputText.value.length > 0)
+
+// KohakUwUing label binds to the running branch, not to the tab — when
+// the user clicks <1/2> to peek at the previous branch while a regen
+// is still streaming branch 2, the label belongs to branch 2 and must
+// disappear from the branch-1 view. ``chat.viewingRunningBranch``
+// returns true only when the viewed branch IS the one generating; a
+// background tool with no associated stream still surfaces the
+// indicator (running job state is tab-scoped, not branch-scoped).
+const showKohakUwUingIndicator = computed(() => {
+  if (chat.hasRunningJobs) return true
+  return chat.processing && chat.viewingRunningBranch
+})
 
 function scrollToPending() {
   const tab = chat.activeTab
