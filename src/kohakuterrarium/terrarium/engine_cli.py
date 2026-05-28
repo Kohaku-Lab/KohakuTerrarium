@@ -34,7 +34,10 @@ from kohakuterrarium.builtins.user_commands import (
 )
 from kohakuterrarium.core.channel import BaseChannel, ChannelMessage
 from kohakuterrarium.modules.input.base import InputModule
-from kohakuterrarium.modules.user_command.base import UserCommandContext, parse_slash_command
+from kohakuterrarium.modules.user_command.base import (
+    UserCommandContext,
+    parse_slash_command,
+)
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.events import EventFilter, EventKind

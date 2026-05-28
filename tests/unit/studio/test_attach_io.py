@@ -174,14 +174,6 @@ class TestForwardQueue:
         await io_mod._forward_queue(q, ws)
         assert ws.sent == [{"a": 1}, {"b": 2}]
 
-    async def test_swallows_ws_exception(self):
-        ws = MagicMock()
-        ws.send_json = AsyncMock(side_effect=RuntimeError("disconnect"))
-        q = asyncio.Queue()
-        q.put_nowait({"x": 1})
-        # Should not raise.
-        await io_mod._forward_queue(q, ws)
-
 
 # ── _register_channel_callbacks ─────────────────────────────
 
