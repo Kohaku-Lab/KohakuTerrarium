@@ -7,7 +7,7 @@
  *   LeafNode  = { type: "leaf", panelId: string }
  */
 
-import ChatPanel from "@/components/chat/ChatPanel.vue"
+import ChatPanelContainer from "@/components/chat/ChatPanelContainer.vue"
 import EditorMain from "@/components/editor/EditorMain.vue"
 import EditorStatus from "@/components/editor/EditorStatus.vue"
 import FileTree from "@/components/editor/FileTree.vue"
@@ -158,7 +158,15 @@ export function registerBuiltinPanels() {
   const layout = useLayoutStore()
 
   // ── Panels ──
-  layout.registerPanel({ id: "chat", label: "Chat", component: ChatPanel })
+  //
+  // ``id: "chat"`` points at the new ``ChatPanelContainer`` (Option E).
+  // The container renders a legacy single ``ChatPanel`` when the
+  // chat-internal group tree is empty (default + back-compat path),
+  // or the recursive ``ChatGroupNode`` tree when the user has opted
+  // into multi-group via the Settings toggle / context-menu split.
+  // The legacy ``ChatPanel`` is still exported and used directly by
+  // ``SessionHistoryViewer.vue`` (read-only session viewer) and tests.
+  layout.registerPanel({ id: "chat", label: "Chat", component: ChatPanelContainer })
   layout.registerPanel({
     id: "status-dashboard",
     label: "Status",

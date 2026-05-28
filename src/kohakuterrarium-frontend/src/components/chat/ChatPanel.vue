@@ -5,7 +5,7 @@
     Tab bar sits on panel bg, active tab = bubble bg
     Bubble has equal margin left/right/bottom
   -->
-  <div class="h-full flex flex-col bg-warm-100 dark:bg-[#211F1D]">
+  <div class="h-full flex flex-col bg-warm-100 dark:bg-[#211F1D]" :class="showFocusRing ? 'ring-1 ring-inset ring-iolite/40 dark:ring-iolite-light/30' : ''" @focusin="onGroupFocus" @mousedown="onGroupFocus">
     <!-- Tab bar on panel bg.  The tabs themselves live in their own
          ``overflow-x-auto`` scroller so on narrow viewports (and when
          the user opens many channel tabs) the bar scrolls horizontally
@@ -14,7 +14,7 @@
          so they remain visible. -->
     <div role="tablist" class="flex items-end gap-0 px-4 pt-2 shrink-0 min-w-0">
       <div class="flex items-end overflow-x-auto scrollbar-none min-w-0">
-        <div v-for="tab in chat.tabs" :key="tab" role="tab" tabindex="0" :aria-selected="chat.activeTab === tab" class="relative flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium cursor-pointer select-none rounded-t-lg -mb-px transition-colors shrink-0" :class="chat.activeTab === tab ? 'bg-white dark:bg-warm-900 text-warm-800 dark:text-warm-200 border border-warm-200 dark:border-warm-700 border-b-white dark:border-b-warm-900 z-10' : 'text-warm-400 dark:text-warm-500 hover:text-warm-600 dark:hover:text-warm-400 border border-transparent'" @click="chat.setActiveTab(tab)" @keydown.enter="chat.setActiveTab(tab)" @keydown.space.prevent="chat.setActiveTab(tab)">
+        <div v-for="tab in viewTabs" :key="tab" role="tab" tabindex="0" :draggable="!!props.groupId" :aria-selected="viewActiveTab === tab" class="relative flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium cursor-pointer select-none rounded-t-lg -mb-px transition-colors shrink-0" :class="viewActiveTab === tab ? 'bg-white dark:bg-warm-900 text-warm-800 dark:text-warm-200 border border-warm-200 dark:border-warm-700 border-b-white dark:border-b-warm-900 z-10' : 'text-warm-400 dark:text-warm-500 hover:text-warm-600 dark:hover:text-warm-400 border border-transparent'" @click="onTabClick(tab)" @keydown.enter="onTabClick(tab)" @keydown.space.prevent="onTabClick(tab)" @dragstart="onTabDragStart($event, tab)" @dragend="onTabDragEnd" @dragover.prevent="onTabStripDragOver($event)" @drop.prevent.stop="onTabStripDrop($event, viewTabs.indexOf(tab))">
           <template v-if="tab === 'root'">
             <span class="w-2 h-2 rounded-full bg-amber shrink-0" />
             <span>{{ t("common.rootAgent") }}</span>
@@ -30,7 +30,7 @@
             <SiteChip :node-id="getCreatureHomeNode(tab)" />
           </template>
 
-          <button v-if="tab !== 'root' && chat.tabs.length > 1" class="ml-1 w-7 h-7 sm:w-4 sm:h-4 flex items-center justify-center rounded-sm text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" :aria-label="t('chat.closeTab', { tab })" @click.stop="closeTab(tab)">
+          <button v-if="tab !== 'root' && (viewTabs.length > 1 || multipleGroupsExist)" class="ml-1 w-7 h-7 sm:w-4 sm:h-4 flex items-center justify-center rounded-sm text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" :aria-label="t('chat.closeTab', { tab })" @click.stop="closeTab(tab)">
             <div class="i-carbon-close text-sm sm:text-[10px]" />
           </button>
         </div>
@@ -73,7 +73,19 @@
     </div>
 
     <!-- Chat bubble: surface-level bg, equal margin left/right/bottom -->
-    <div class="flex-1 mx-4 mb-4 bg-white dark:bg-warm-900 rounded-b-xl rounded-tr-xl border border-warm-200 dark:border-warm-700 border-t-0 overflow-hidden flex flex-col shadow-sm relative" :class="{ 'ring-2 ring-iolite/40 ring-inset': dragOver }" @dragenter.prevent="onDragEnter" @dragleave.prevent="onDragLeave" @dragover.prevent @drop.prevent="onDrop">
+    <div ref="bubbleEl" class="flex-1 mx-4 mb-4 bg-white dark:bg-warm-900 rounded-b-xl rounded-tr-xl border border-warm-200 dark:border-warm-700 border-t-0 overflow-hidden flex flex-col shadow-sm relative" :class="{ 'ring-2 ring-iolite/40 ring-inset': dragOver }" @dragenter.prevent="onDragEnter" @dragleave.prevent="onDragLeave" @dragover.prevent="onBubbleDragOver" @drop.prevent="onDrop">
+      <!-- Drop-zone edge overlays (Option E drag-to-split) — visible
+           only when a chat tab is being dragged over THIS group's
+           bubble. Each overlay shows when the cursor is in the
+           corresponding 25% edge zone; the center 50% surfaces a
+           full-bubble "move tab here" tint. -->
+      <template v-if="props.groupId && tabDragHoverEdge">
+        <div v-if="tabDragHoverEdge === 'left'" class="absolute inset-y-0 left-0 w-1/4 bg-iolite/15 dark:bg-iolite-light/12 border-r-2 border-iolite/50 pointer-events-none z-20" />
+        <div v-if="tabDragHoverEdge === 'right'" class="absolute inset-y-0 right-0 w-1/4 bg-iolite/15 dark:bg-iolite-light/12 border-l-2 border-iolite/50 pointer-events-none z-20" />
+        <div v-if="tabDragHoverEdge === 'top'" class="absolute inset-x-0 top-0 h-1/4 bg-iolite/15 dark:bg-iolite-light/12 border-b-2 border-iolite/50 pointer-events-none z-20" />
+        <div v-if="tabDragHoverEdge === 'bottom'" class="absolute inset-x-0 bottom-0 h-1/4 bg-iolite/15 dark:bg-iolite-light/12 border-t-2 border-iolite/50 pointer-events-none z-20" />
+        <div v-if="tabDragHoverEdge === 'center'" class="absolute inset-0 bg-iolite/8 dark:bg-iolite-light/8 border-2 border-iolite/40 rounded pointer-events-none z-20" />
+      </template>
       <!-- Decorative top accent: subtle gem gradient -->
       <div class="h-0.5 w-full bg-gradient-to-r from-iolite/30 via-taaffeite/20 to-aquamarine/30" />
 
@@ -91,7 +103,7 @@
       <!-- Messages -->
       <div ref="messagesEl" class="chat-messages-viewport flex-1 overflow-y-auto px-5 py-4" @scroll="onMessagesScroll">
         <div class="flex flex-col gap-3">
-          <template v-if="chat.currentMessages.length === 0">
+          <template v-if="viewMessages.length === 0">
             <div class="text-center py-16">
               <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-iolite/10 to-amber/10 dark:from-iolite/5 dark:to-amber/5 flex items-center justify-center mx-auto mb-3">
                 <div class="i-carbon-chat text-xl text-iolite/40 dark:text-iolite-light/30" />
@@ -100,7 +112,7 @@
               <p class="text-warm-300 dark:text-warm-600 text-xs mt-1">{{ resolvedEmptySubtitle }}</p>
             </div>
           </template>
-          <ChatMessage v-for="(msg, idx) in chat.currentMessages" :key="msg.id" :message="msg" :prev-message="idx > 0 ? chat.currentMessages[idx - 1] : null" :is-first="idx === 0" :message-idx="idx" :is-last-assistant="msg.role === 'assistant' && idx === chat.currentMessages.length - 1" />
+          <ChatMessage v-for="(msg, idx) in viewMessages" :key="msg.id" :message="msg" :prev-message="idx > 0 ? viewMessages[idx - 1] : null" :is-first="idx === 0" :message-idx="idx" :is-last-assistant="msg.role === 'assistant' && idx === viewMessages.length - 1" />
           <div v-if="showKohakUwUingIndicator" class="flex items-center gap-2.5 py-2 pl-1">
             <span class="w-2 h-2 rounded-full bg-amber kohaku-pulse" />
             <span class="text-sm text-amber/80 kohaku-pulse">{{ t("chat.processing") }}</span>
@@ -216,12 +228,15 @@
 <script setup>
 import { ElMessage, ElMessageBox } from "element-plus"
 
+import { inject } from "vue"
+
 import StatusDot from "@/components/common/StatusDot.vue"
 import ChatMessage from "@/components/chat/ChatMessage.vue"
 import ModelSwitcher from "@/components/chrome/ModelSwitcher.vue"
 import SiteChip from "@/components/cluster/SiteChip.vue"
 import { useDensity } from "@/composables/useDensity"
 import { useChatStore } from "@/stores/chat"
+import { useChatTabDrag } from "@/composables/useChatTabDrag"
 import { useI18n } from "@/utils/i18n"
 import { terrariumAPI, agentAPI } from "@/utils/api"
 import { buildMessageParts, formatBytes, MAX_ATTACHMENT_BYTES, MAX_IMAGE_BYTES } from "@/utils/chatAttachments"
@@ -234,15 +249,34 @@ const props = defineProps({
   readOnly: { type: Boolean, default: false },
   emptyTitle: { type: String, default: "" },
   emptySubtitle: { type: String, default: "" },
+  // ── Multi-chat-panel additions (Option E) ──
+  // When ``groupId`` is set, this panel reads its ``tabs``/``activeTab``
+  // from ``chat.groups[groupId]`` instead of the scope-singleton
+  // legacy state. The container (``ChatPanelContainer``) passes this
+  // prop down to every leaf in the chat-internal split tree. When
+  // ``groupId`` is null (back-compat / SessionHistoryViewer), the
+  // panel behaves exactly as today.
+  groupId: { type: String, default: null },
+  // When the parent has already resolved the scoped chat store
+  // (``ChatPanelContainer`` does this once via ``useChatStore`` +
+  // ``provide``), prefer reading via ``inject('chatStore')``. This
+  // closes the scope-mismatch hazard documented in the
+  // ``SessionHistoryViewer.vue`` precedent: descendants must NOT
+  // re-resolve ``useChatStore()`` with a potentially-different scope.
 })
 
-// Bind the chat store to the instance prop EXPLICITLY.  Two sessions
-// with the same creature config name (e.g. two ``creative-art``
-// instances) have unique ``instance.id``; passing one here picks the
-// per-session scoped chat store and dodges the "ChatPanel shares
-// messages with the previous session because injectScope returned
-// null and fell back to the default singleton" failure mode.
-const chat = useChatStore(props.instance?.id || props.instance?.graph_id || undefined)
+const emit = defineEmits(["focus-group"])
+
+// SCOPE INVARIANT — read order:
+//   1. Injected (preferred): ``ChatPanelContainer`` provided the
+//      scoped store. Use it verbatim; do NOT call ``useChatStore``
+//      with a fallback that might land on the "default" singleton.
+//   2. Fallback (back-compat): legacy callers (``SessionHistoryViewer``,
+//      direct mounts in tests) instantiate ``ChatPanel`` without a
+//      container, so we resolve our own scope here. Same call signature
+//      as before so v1 paths keep working.
+const injectedChat = inject("chatStore", null)
+const chat = injectedChat || useChatStore(props.instance?.id || props.instance?.graph_id || undefined)
 const { t } = useI18n()
 // Compact density renders the chat header model pill (since the
 // StatusBar — which has its own ModelSwitcher — is hidden in the
@@ -254,15 +288,105 @@ const messagesEl = ref(null)
 const inputEl = ref(null)
 const imageInputEl = ref(null)
 const fileInputEl = ref(null)
+const bubbleEl = ref(null)
 const attachments = ref([])
 const queueExpanded = ref(false)
 const dragOver = ref(false)
 let dragDepth = 0
 
+// ── Per-group view shims (Option E) ──
+//
+// When ``groupId`` is set we read tabs/activeTab/messages/queue from
+// the group bucket; otherwise we fall through to the legacy
+// scope-singleton fields exactly as today. ``isFocusedGroup`` drives
+// the iolite focus ring + which group "owns" the global ``chat.send``
+// dispatch (we focus the group on composer focus so ``chat.activeTab``
+// — kept synced by ``_syncLegacyFromGroups`` — matches what the
+// composer is visually pointing at).
+const viewGroup = computed(() => (props.groupId ? chat.groups?.[props.groupId] || null : null))
+const viewTabs = computed(() => (viewGroup.value ? viewGroup.value.tabs : chat.tabs))
+const viewActiveTab = computed(() => (viewGroup.value ? viewGroup.value.activeTab : chat.activeTab))
+const viewMessages = computed(() => {
+  const t = viewActiveTab.value
+  return t ? chat.messagesByTab[t] || [] : []
+})
+const viewProcessing = computed(() => {
+  const t = viewActiveTab.value
+  return t ? !!chat.processingByTab[t] : false
+})
+const isFocusedGroup = computed(() => !!(props.groupId && chat.focusedGroupId === props.groupId))
+
+// Whether the chat-internal tree has more than one leaf — drives
+// the focus ring (single-group layouts don't need disambiguation)
+// AND the close-tab button (closing the only tab in the only
+// group would leave the surface empty).
+const multipleGroupsExist = computed(() => Object.keys(chat.groups || {}).length > 1)
+
+// Show the iolite focus ring ONLY when there are multiple groups.
+// With a single group the ring is just visual noise — there's
+// nothing to disambiguate from.
+const showFocusRing = computed(() => isFocusedGroup.value && multipleGroupsExist.value)
+
+function onTabClick(tab) {
+  if (props.groupId) {
+    chat.setGroupActiveTab(props.groupId, tab)
+    chat.setFocusedGroup(props.groupId)
+    emit("focus-group", props.groupId)
+  } else {
+    chat.setActiveTab(tab)
+  }
+}
+
+function onGroupFocus() {
+  if (!props.groupId) return
+  if (chat.focusedGroupId !== props.groupId) {
+    chat.setFocusedGroup(props.groupId)
+  }
+  emit("focus-group", props.groupId)
+}
+
+// ── Drag-and-drop (Option E) ──
+//
+// Drag composable is wired only when this panel is rendered inside a
+// group (``groupId`` set). Legacy single-panel mode keeps the original
+// file-drop semantics on the bubble and does not participate in
+// tab-drag-to-split.
+const tabDrag = useChatTabDrag(chat)
+const tabDragHoverEdge = computed(() => (props.groupId ? tabDrag.isHoveringEdgeOf(props.groupId) : null))
+
+function onTabDragStart(ev, tab) {
+  if (!props.groupId) return
+  tabDrag.onTabDragStart(ev, props.groupId, tab)
+}
+function onTabDragEnd() {
+  tabDrag.onTabDragEnd()
+}
+function onTabStripDragOver(ev) {
+  if (!props.groupId) return
+  tabDrag.onTabStripDragOver(ev, props.groupId)
+}
+function onTabStripDrop(ev, dstIndex) {
+  if (!props.groupId) return
+  tabDrag.onTabStripDrop(ev, props.groupId, dstIndex)
+}
+function onBubbleDragOver(ev) {
+  // The bubble already handles file drag-over for attachment intake;
+  // file drags carry ``Files`` in ``dataTransfer.types``, tab drags
+  // carry ``application/x-kt-tab``. The two paths are mutually
+  // exclusive — onDragEnter handles files, the composable handles
+  // tab drags. Falling through to the composable is safe because it
+  // ignores non-tab drags.
+  if (props.groupId) tabDrag.onBubbleDragOver(ev, props.groupId)
+}
+
 // Active tab's queue — the chat store keeps queues per tab so the
 // "queued" banner only appears on the tab that owns the queued
 // message, never on a sibling tab the user happens to be looking at.
-const activeQueue = computed(() => chat.activeQueuedMessages)
+// In group mode, route through the per-group activeTab.
+const activeQueue = computed(() => {
+  const t = viewActiveTab.value
+  return t ? chat.queuedMessagesByTab[t] || [] : []
+})
 const visibleQueued = computed(() => {
   const queue = activeQueue.value
   if (queueExpanded.value || queue.length <= QUEUE_VISIBLE) return queue
@@ -272,9 +396,15 @@ const hiddenQueuedCount = computed(() => Math.max(0, activeQueue.value.length - 
 
 function draftKey() {
   const instanceId = props.instance?.id || chat._instanceId || ""
-  const tab = chat.activeTab || ""
+  const tab = viewActiveTab.value || ""
   if (!instanceId || !tab || props.readOnly) return ""
-  return `kt.chat.draft.${instanceId}.${tab}`
+  // Drafts are keyed by (instance, tab, groupId?). In legacy mode
+  // (no groupId) the key stays compatible with prior versions so
+  // existing localStorage drafts survive the upgrade. In group mode
+  // we suffix the groupId so two groups viewing the same tab can
+  // have independent drafts.
+  const suffix = props.groupId ? `.${props.groupId}` : ""
+  return `kt.chat.draft.${instanceId}.${tab}${suffix}`
 }
 
 // Monotonic counter incremented on every tab/instance change.  The
@@ -319,7 +449,7 @@ function persistDraft() {
 }
 
 const activeUsage = computed(() => {
-  const tab = chat.activeTab
+  const tab = viewActiveTab.value
   if (!tab) return { prompt: 0, completion: 0, total: 0 }
   return chat.tokenUsage[tab] || { prompt: 0, completion: 0, total: 0 }
 })
@@ -341,8 +471,9 @@ function formatTokens(n) {
 }
 
 const inputPlaceholder = computed(() => {
-  if (!chat.activeTab) return t("chat.selectTab")
-  if (chat.activeTab.startsWith("ch:")) return t("chat.sendToChannel", { channel: chat.activeTab.slice(3) })
+  const tab = viewActiveTab.value
+  if (!tab) return t("chat.selectTab")
+  if (tab.startsWith("ch:")) return t("chat.sendToChannel", { channel: tab.slice(3) })
   return t("chat.messagePlaceholder")
 })
 
@@ -353,7 +484,7 @@ const resolvedEmptySubtitle = computed(() => props.emptySubtitle || t("chat.getS
 // or superseded yet, scoped to the active tab. Banner appears when
 // the user starts typing while there are pending requests.
 const pendingCount = computed(() => {
-  const tab = chat.activeTab
+  const tab = viewActiveTab.value
   if (!tab) return 0
   const list = chat.messagesByTab?.[tab] || []
   return list.filter((m) => m.role === "ui_event" && m.interactive && !m.replied && !m.superseded && !m.timedOut).length
@@ -368,13 +499,20 @@ const showPendingBanner = computed(() => pendingCount.value > 0 && inputText.val
 // returns true only when the viewed branch IS the one generating; a
 // background tool with no associated stream still surfaces the
 // indicator (running job state is tab-scoped, not branch-scoped).
+// In group mode, ``viewingRunningBranch`` still tracks the global
+// chat.activeTab — which equals THIS group's activeTab only when this
+// group is focused. Unfocused groups fall back to the per-tab
+// processing flag alone (no branch-anchor narrowing).
 const showKohakUwUingIndicator = computed(() => {
   if (chat.hasRunningJobs) return true
-  return chat.processing && chat.viewingRunningBranch
+  if (!props.groupId || isFocusedGroup.value) {
+    return chat.processing && chat.viewingRunningBranch
+  }
+  return viewProcessing.value
 })
 
 function scrollToPending() {
-  const tab = chat.activeTab
+  const tab = viewActiveTab.value
   if (!tab) return
   const list = chat.messagesByTab?.[tab] || []
   const target = list.filter((m) => m.role === "ui_event" && m.interactive && !m.replied && !m.superseded && !m.timedOut).pop()
@@ -465,9 +603,12 @@ const isNearBottom = ref(true)
 const forceScrollOnNextMessageUpdate = ref(true)
 const scrollPositions = new Map()
 
-function getScrollKey(instanceId = props.instance?.id || chat._instanceId, tab = chat.activeTab) {
+function getScrollKey(instanceId = props.instance?.id || chat._instanceId, tab = viewActiveTab.value) {
   if (!instanceId || !tab) return ""
-  return `${instanceId}:${tab}`
+  // Suffix the groupId in group mode so two groups viewing the same
+  // tab can each restore their own scrolltop on focus / re-render.
+  const suffix = props.groupId ? `:${props.groupId}` : ""
+  return `${instanceId}:${tab}${suffix}`
 }
 
 function updateNearBottom() {
@@ -476,14 +617,14 @@ function updateNearBottom() {
   isNearBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 80
 }
 
-function saveScrollPosition(instanceId = props.instance?.id || chat._instanceId, tab = chat.activeTab) {
+function saveScrollPosition(instanceId = props.instance?.id || chat._instanceId, tab = viewActiveTab.value) {
   const el = messagesEl.value
   const key = getScrollKey(instanceId, tab)
   if (!el || !key) return
   scrollPositions.set(key, el.scrollTop)
 }
 
-function restoreScrollPosition(instanceId = props.instance?.id || chat._instanceId, tab = chat.activeTab) {
+function restoreScrollPosition(instanceId = props.instance?.id || chat._instanceId, tab = viewActiveTab.value) {
   const el = messagesEl.value
   const key = getScrollKey(instanceId, tab)
   if (!el || !key) return false
@@ -512,7 +653,7 @@ function scrollToBottom() {
 }
 
 const messageTailSignature = computed(() => {
-  const messages = chat.currentMessages
+  const messages = viewMessages.value
   const last = messages[messages.length - 1]
   if (!last) return "0"
   const contentLen = typeof last.content === "string" ? last.content.length : Array.isArray(last.content) ? last.content.length : 0
@@ -536,7 +677,7 @@ watch(messageTailSignature, (nextSig, prevSig) => {
 })
 
 watch(
-  () => chat.processing,
+  () => viewProcessing.value,
   (val) => {
     if (val && isNearBottom.value) {
       nextTick(scrollToBottom)
@@ -545,7 +686,7 @@ watch(
 )
 
 watch(
-  () => [props.instance?.id, chat.activeTab],
+  () => [props.instance?.id, viewActiveTab.value],
   ([instanceId, tab], previous) => {
     const [prevInstanceId, prevTab] = previous || []
     if (prevInstanceId && prevTab) saveScrollPosition(prevInstanceId, prevTab)
@@ -601,6 +742,21 @@ function onDragLeave() {
   if (dragDepth === 0) dragOver.value = false
 }
 function onDrop(e) {
+  // Dispatch by payload type: a chat tab drag carries
+  // ``application/x-kt-tab`` and is routed to the multi-group
+  // composable for move/split. Anything else (file drag for
+  // attachments) falls through to the existing file-intake path.
+  // Without this dispatch the tab payload would land in the
+  // attachment intake — which silently does nothing because the
+  // tab payload has no ``files`` entry — and the multi-group
+  // composable would never fire for bubble drops.
+  if (props.groupId && e.dataTransfer?.types) {
+    const types = Array.from(e.dataTransfer.types)
+    if (types.includes("application/x-kt-tab")) {
+      tabDrag.onBubbleDrop(e, props.groupId)
+      return
+    }
+  }
   dragDepth = 0
   dragOver.value = false
   if (props.readOnly) return
@@ -674,6 +830,12 @@ function removeAttachment(index) {
 
 async function send() {
   if (props.readOnly || (!inputText.value.trim() && attachments.value.length === 0)) return
+  // Group mode: focus this group BEFORE ``chat.send`` so the
+  // legacy-synced ``chat.activeTab`` matches this group's activeTab.
+  // ``chat.send`` dispatches on ``chat.activeTab`` under the hood;
+  // without this focus the message would route to whichever group is
+  // currently focused instead of the one whose composer was used.
+  if (props.groupId) onGroupFocus()
   const parts = await buildMessageParts(inputText.value, attachments.value)
   chat.send(parts)
   inputText.value = ""
@@ -688,9 +850,10 @@ async function send() {
 
 async function triggerCompact() {
   if (props.readOnly) return
+  if (props.groupId) onGroupFocus()
   try {
     const sid = chat._instanceGraphId || chat._instanceId
-    const tab = chat.activeTab || "root"
+    const tab = viewActiveTab.value || "root"
     const response = await terrariumAPI.executeCreatureCommand(sid, tab, "compact")
     // ``/compact`` returns a ``ui_notify`` payload describing one of
     // four outcomes: triggered, no-controller, too-short, busy. Without
@@ -735,6 +898,7 @@ function surfaceCommandResult(response) {
 
 async function triggerClear() {
   if (props.readOnly) return
+  if (props.groupId) onGroupFocus()
   try {
     await ElMessageBox.confirm(t("chat.clearConfirm"), t("chat.clearContext"), {
       type: "warning",
@@ -746,7 +910,7 @@ async function triggerClear() {
   }
   try {
     const sid = chat._instanceGraphId || chat._instanceId
-    const tab = chat.activeTab || "root"
+    const tab = viewActiveTab.value || "root"
     const response = await terrariumAPI.executeCreatureCommand(sid, tab, "clear", "--force")
     surfaceCommandResult(response)
   } catch (err) {
@@ -757,7 +921,7 @@ async function triggerClear() {
 
 async function stopTask(jobId, jobName) {
   try {
-    const tab = chat.activeTab
+    const tab = viewActiveTab.value
     const sid = chat._instanceGraphId || chat._instanceId
     await terrariumAPI.stopCreatureTask(sid, tab || "root", jobId)
     // Don't eagerly remove from runningJobs — the backend will send a
@@ -770,10 +934,13 @@ async function stopTask(jobId, jobName) {
   }
 }
 
-// Escape key interrupt
+// Escape key interrupt — only the FOCUSED group (or legacy single
+// panel) handles the global keystroke. Otherwise N panels would all
+// react to one Escape and call chat.interrupt() N times.
 function onGlobalKeydown(e) {
   if (props.readOnly) return
-  if (e.key === "Escape" && (chat.processing || chat.hasRunningJobs)) {
+  if (props.groupId && !isFocusedGroup.value) return
+  if (e.key === "Escape" && (viewProcessing.value || chat.hasRunningJobs)) {
     chat.interrupt()
   }
 }

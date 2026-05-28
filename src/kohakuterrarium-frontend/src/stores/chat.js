@@ -11,7 +11,7 @@ import { useNotificationsStore } from "@/stores/notifications"
 import { useStatusStore } from "@/stores/status"
 import { translate } from "@/utils/i18n"
 import { useLocaleStore } from "@/stores/locale"
-import { getHybridPrefSync, setHybridPref } from "@/utils/uiPrefs"
+import { getHybridPrefSync, removeHybridPref, setHybridPref } from "@/utils/uiPrefs"
 import { wsUrl } from "@/utils/wsUrl"
 
 const BRANCH_RESYNC_DELAY_MS = 350
@@ -1165,6 +1165,154 @@ function _parseArgs(args) {
   return args
 }
 
+// ─── Multi-chat-panel group tree helpers (Option E) ──────────────
+//
+// A *group* is the unit of chat surface — one ``ChatPanel`` instance
+// in the workspace. A *groupTree* is a binary split-tree over group
+// ids that mirrors the workspace ``LayoutNode`` shape so the same
+// rendering pattern applies recursively. ``groupTree`` is per-scope
+// and lives entirely in the chat store; the workspace layout tree
+// is NOT involved.
+//
+//   leaf  ->  { type: "leaf", groupId: "g_<n>" }
+//   split ->  { type: "split", direction: "horizontal" | "vertical",
+//                ratio: 0-100, children: [Node, Node] }
+//
+// Helpers here are pure (no store mutation, no side effects) so
+// vitest can pin each one against synthetic trees. Actions in the
+// store mutate via these and persist the result.
+
+/** Depth-first walk over a group tree. ``visit(groupId, path)`` runs
+ *  on every leaf in tree-traversal order. ``path`` is an array of
+ *  child indices used by the resize-handle path lookup. */
+function _walkGroupTree(tree, visit, path = []) {
+  if (!tree) return
+  if (tree.type === "leaf") {
+    visit(tree.groupId, path)
+    return
+  }
+  if (tree.type === "split") {
+    _walkGroupTree(tree.children?.[0], visit, [...path, 0])
+    _walkGroupTree(tree.children?.[1], visit, [...path, 1])
+  }
+}
+
+/** Return the first leaf's groupId in tree-traversal order. */
+function _firstLeafGroupId(tree) {
+  let found = null
+  _walkGroupTree(tree, (gid) => {
+    if (found == null) found = gid
+  })
+  return found
+}
+
+/** Find the path (array of child indices) to the leaf with the given
+ *  groupId. Returns ``null`` if not present. */
+function _findLeafPath(tree, groupId, path = []) {
+  if (!tree) return null
+  if (tree.type === "leaf") return tree.groupId === groupId ? path : null
+  if (tree.type === "split") {
+    const left = _findLeafPath(tree.children?.[0], groupId, [...path, 0])
+    if (left) return left
+    return _findLeafPath(tree.children?.[1], groupId, [...path, 1])
+  }
+  return null
+}
+
+/** Split the leaf with id ``targetGroupId`` into a split node. The
+ *  new group lands on the side indicated by ``edge`` (``"before"`` =
+ *  left/top, ``"after"`` = right/bottom). Returns a new tree.
+ *  No-op if ``targetGroupId`` is not present. */
+function _splitTreeLeaf(tree, targetGroupId, direction, edge, newGroupId) {
+  if (!tree) return tree
+  if (tree.type === "leaf") {
+    if (tree.groupId !== targetGroupId) return tree
+    const movedLeaf = { type: "leaf", groupId: newGroupId }
+    const keptLeaf = { type: "leaf", groupId: tree.groupId }
+    const children = edge === "before" ? [movedLeaf, keptLeaf] : [keptLeaf, movedLeaf]
+    return { type: "split", direction, ratio: 50, children }
+  }
+  if (tree.type === "split") {
+    return {
+      ...tree,
+      children: [
+        _splitTreeLeaf(tree.children?.[0], targetGroupId, direction, edge, newGroupId),
+        _splitTreeLeaf(tree.children?.[1], targetGroupId, direction, edge, newGroupId),
+      ],
+    }
+  }
+  return tree
+}
+
+/** Remove the leaf with the given groupId, collapsing the surviving
+ *  sibling into the parent's slot. Returns the new tree (possibly
+ *  ``null`` if the last leaf was removed). */
+function _pruneTreeLeaf(tree, groupId) {
+  if (!tree) return null
+  if (tree.type === "leaf") {
+    return tree.groupId === groupId ? null : tree
+  }
+  if (tree.type === "split") {
+    const left = _pruneTreeLeaf(tree.children?.[0], groupId)
+    const right = _pruneTreeLeaf(tree.children?.[1], groupId)
+    if (!left && !right) return null
+    if (!left) return right
+    if (!right) return left
+    return { ...tree, children: [left, right] }
+  }
+  return tree
+}
+
+/** Mutate a split's ``ratio`` at the given path, IN PLACE.
+ *
+ *  Why in-place: during a splitter drag, the ratio updates on every
+ *  pointermove. If we replaced ``groupTree`` with a fresh object on
+ *  every move, Vue would unmount + remount the recursive
+ *  ``ChatGroupNode`` tree — the in-flight pointer capture lives on
+ *  the OLD handle's DOM node, so the drag would break after the
+ *  first move. Mutating in place keeps the DOM stable and the
+ *  pointer capture intact. Pinia's reactive proxy still detects the
+ *  mutation on the nested object, so the ``:style`` bindings update.
+ *
+ *  Silent no-op if the path doesn't point at a split node. */
+function _setSplitRatio(tree, path, ratio) {
+  if (!tree || !Array.isArray(path)) return
+  if (path.length === 0) {
+    if (tree.type !== "split") return
+    tree.ratio = Math.max(10, Math.min(90, ratio))
+    return
+  }
+  if (tree.type !== "split") return
+  const [idx, ...rest] = path
+  if (idx !== 0 && idx !== 1) return
+  _setSplitRatio(tree.children?.[idx], rest, ratio)
+}
+
+/** Union of all tabs across the tree, in stable tree-traversal order,
+ *  de-duplicated. */
+function _unionGroupTabs(groups, tree) {
+  if (!tree) return []
+  const out = []
+  const seen = new Set()
+  _walkGroupTree(tree, (gid) => {
+    const g = groups?.[gid]
+    if (!g || !Array.isArray(g.tabs)) return
+    for (const t of g.tabs) {
+      if (seen.has(t)) continue
+      seen.add(t)
+      out.push(t)
+    }
+  })
+  return out
+}
+
+/** Storage key for the per-scope group state. ``scope`` is the
+ *  store's ``_instanceId`` (creature_id or terrarium_id), or
+ *  ``"default"`` for the v1 singleton path. */
+function _groupStorageKey(scope) {
+  return `kt.chat.groupTree.${scope || "default"}`
+}
+
 /**
  * Chat store options. The same options block is fed into a Pinia
  * factory below — one store per scope id (creature_id /
@@ -1285,6 +1433,31 @@ const _chatStoreOptions = {
      * @type {Record<string, {turnIndex: number, branchId: number} | null>}
      */
     _streamingBranchByTab: {},
+
+    // ── Multi-chat-panel state (Option E) ───────────────────────
+    //
+    // When ``groupTree`` is ``null`` the chat panel runs in legacy
+    // single-group mode and reads/writes ``tabs``/``activeTab``
+    // directly — visually byte-identical to pre-Option-E. Once the
+    // user explicitly splits (or enables groups), ``groupTree`` is
+    // populated and ``ChatPanelContainer`` switches to rendering the
+    // recursive ``ChatGroupNode``. Every group-mutating action also
+    // syncs ``tabs`` / ``activeTab`` for the legacy readers (chat
+    // store internals, ``SessionHistoryViewer``, scripted-history
+    // viewer, etc.) so the two stay in lock-step.
+    //
+    // Persisted per-scope to ``localStorage[kt.chat.groupTree.<scope>]``.
+
+    /**
+     * @type {Record<string, { tabs: string[], activeTab: string | null, draftText: string }>}
+     */
+    groups: {},
+    /** @type {object | null} */
+    groupTree: null,
+    /** @type {string | null} */
+    focusedGroupId: null,
+    /** Monotonic counter for synthesising new group ids. Persisted. */
+    _groupCounter: 0,
   }),
 
   getters: {
@@ -1361,6 +1534,12 @@ const _chatStoreOptions = {
       if (!tab || tab.startsWith("ch:")) return null
       return tab
     },
+    /** True when the chat surface is running in multi-group mode (the
+     *  user explicitly split or enabled groups). When false the chat
+     *  panel runs in legacy single-group mode. */
+    groupsActive: (state) => state.groupTree != null,
+    /** The currently-focused group's record, or ``null``. */
+    focusedGroup: (state) => state.groups[state.focusedGroupId] || null,
   },
 
   actions: {
@@ -1432,6 +1611,16 @@ const _chatStoreOptions = {
       this._branchResyncPendingByTab = {}
       this._streamingBranchByTab = {}
       this._clearBranchResyncTimers()
+      // Reset multi-group state — group tree is per-scope, so a
+      // different ``_instanceId`` means a different layout to load.
+      // ``ChatPanelContainer`` calls ``_loadGroupState()`` on mount
+      // after this re-init lands, so saved state for the new scope
+      // is restored without races against the legacy ``_addTab``
+      // calls below.
+      this.groups = {}
+      this.groupTree = null
+      this.focusedGroupId = null
+      this._groupCounter = 0
       this.sessionInfo = {
         sessionId: instance.session_id || instance.id || "",
         model: instance.model || "",
@@ -1509,6 +1698,31 @@ const _chatStoreOptions = {
         this.tabs.push(key)
         this.messagesByTab[key] = []
       }
+      // When groups are active, also drop the tab into the focused
+      // group so backend ``creature_added`` events surface in the
+      // group the user is currently looking at. The ``_syncLegacy…``
+      // call at the end re-derives ``tabs`` from groups, but since
+      // we already pushed above the union order matches the legacy
+      // append. No-op if already present in any group.
+      if (this.groupTree) {
+        let present = false
+        for (const g of Object.values(this.groups)) {
+          if (g.tabs.includes(key)) {
+            present = true
+            break
+          }
+        }
+        if (!present) {
+          const targetId = this.focusedGroupId || _firstLeafGroupId(this.groupTree)
+          if (targetId && this.groups[targetId]) {
+            this.groups[targetId].tabs.push(key)
+            if (!this.groups[targetId].activeTab) {
+              this.groups[targetId].activeTab = key
+            }
+          }
+        }
+        this._syncLegacyFromGroups()
+      }
     },
 
     closeTab(tab) {
@@ -1519,12 +1733,42 @@ const _chatStoreOptions = {
         this.setActiveTab(this.tabs[Math.min(idx, this.tabs.length - 1)] || null)
       }
       this._saveTabs()
+      // Mirror removal into groups when active. ``pruneTab`` already
+      // syncs legacy state — we've done that ourselves above, so call
+      // it after the legacy mutation to keep groups authoritative.
+      if (this.groupTree) {
+        // Snapshot ids to avoid mutation during iteration.
+        const ids = Object.keys(this.groups)
+        for (const gid of ids) {
+          const g = this.groups[gid]
+          if (!g) continue
+          const i2 = g.tabs.indexOf(tab)
+          if (i2 === -1) continue
+          g.tabs.splice(i2, 1)
+          if (g.activeTab === tab) g.activeTab = g.tabs[0] || null
+          if (g.tabs.length === 0) this.removeGroup(gid)
+        }
+        this._syncLegacyFromGroups()
+        this._persistGroupState()
+      }
     },
 
     setActiveTab(tab) {
       this.activeTab = tab
       if (tab) delete this.unreadCounts[tab]
       this._saveTabs()
+      // Mirror to the focused group when groups are active so the
+      // status bar / model switcher / per-group reads stay in sync.
+      // Only updates the focused group; a different group's
+      // ``activeTab`` is unaffected (use ``setGroupActiveTab`` for
+      // explicit per-group changes).
+      if (this.groupTree && this.focusedGroupId) {
+        const g = this.groups[this.focusedGroupId]
+        if (g && tab && g.tabs.includes(tab) && g.activeTab !== tab) {
+          g.activeTab = tab
+          this._persistGroupState()
+        }
+      }
       // Lazy-load history for any newly-focused empty tab. The
       // session endpoint accepts ``(session_id, creature_name)``
       // for both solo and multi-creature sessions, so there's
@@ -3408,6 +3652,12 @@ const _chatStoreOptions = {
       this._branchResyncPendingByTab = {}
       this._streamingBranchByTab = {}
       this._clearBranchResyncTimers()
+      // Drop multi-group state along with the legacy buckets — the
+      // next ``initForInstance`` runs for a different scope.
+      this.groups = {}
+      this.groupTree = null
+      this.focusedGroupId = null
+      this._groupCounter = 0
       this.sessionInfo = {
         sessionId: "",
         model: "",
@@ -3479,6 +3729,351 @@ const _chatStoreOptions = {
           this.activeTab = saved.activeTab
         }
       }
+    },
+
+    // ─── Multi-chat-panel actions (Option E) ─────────────────────
+    //
+    // Group state is the source of truth ONLY when ``groupTree`` is
+    // non-null. Otherwise legacy ``tabs`` / ``activeTab`` are
+    // authoritative and the group bucket is empty. The transition
+    // happens lazily via ``enableGroups()`` (called when the user
+    // splits for the first time or when the user toggles the
+    // Settings flag mid-session).
+    //
+    // Every group-mutating action calls ``_syncLegacyFromGroups()``
+    // before returning so back-compat readers (chat-store internals,
+    // the v1 ``SessionHistoryViewer`` viewer, tests) keep observing
+    // a consistent ``tabs`` / ``activeTab``.
+
+    /** Mirror ``tabs[]`` and ``activeTab`` from the current group
+     *  state. Called after every group mutation. Safe to call when
+     *  ``groupTree`` is null — does nothing in that case. */
+    _syncLegacyFromGroups() {
+      if (!this.groupTree) return
+      const union = _unionGroupTabs(this.groups, this.groupTree)
+      this.tabs = union
+      const focused = this.groups[this.focusedGroupId]
+      const nextActive = focused?.activeTab || union[0] || null
+      if (this.activeTab !== nextActive) this.activeTab = nextActive
+    },
+
+    /** Persist groups + groupTree + focusedGroupId to localStorage
+     *  under ``kt.chat.groupTree.<scope>``. Schema version ``1`` so
+     *  future shape changes can migrate. Idempotent and synchronous —
+     *  ``setHybridPref`` debounces internally on the storage side. */
+    _persistGroupState() {
+      const scope = this._instanceId || "default"
+      const key = _groupStorageKey(scope)
+      if (!this.groupTree) {
+        // No groups active — clear any stale storage so the next
+        // load doesn't resurrect a stale tree.
+        try {
+          removeHybridPref(key)
+        } catch {
+          /* swallow */
+        }
+        return
+      }
+      const payload = {
+        version: 1,
+        groups: this.groups,
+        groupTree: this.groupTree,
+        focusedGroupId: this.focusedGroupId,
+        _groupCounter: this._groupCounter,
+      }
+      try {
+        setHybridPref(key, payload, { json: true })
+      } catch {
+        /* swallow — storage may be unavailable */
+      }
+    },
+
+    /** Read persisted group state for the current scope. Returns
+     *  ``true`` if a valid version-1 payload was applied. */
+    _loadGroupState() {
+      const scope = this._instanceId || "default"
+      const key = _groupStorageKey(scope)
+      let saved = null
+      try {
+        saved = getHybridPrefSync(key, null, { json: true })
+      } catch {
+        return false
+      }
+      if (!saved || saved.version !== 1) return false
+      if (!saved.groupTree || !saved.groups) return false
+      // Sanity: every leaf groupId must exist in groups.
+      let ok = true
+      _walkGroupTree(saved.groupTree, (gid) => {
+        if (!saved.groups[gid]) ok = false
+      })
+      if (!ok) return false
+      this.groups = saved.groups
+      this.groupTree = saved.groupTree
+      this.focusedGroupId =
+        saved.focusedGroupId && saved.groups[saved.focusedGroupId]
+          ? saved.focusedGroupId
+          : _firstLeafGroupId(saved.groupTree)
+      this._groupCounter = saved._groupCounter || Object.keys(saved.groups).length
+      this._syncLegacyFromGroups()
+      return true
+    },
+
+    /** Activate multi-group mode by wrapping the current ``tabs`` /
+     *  ``activeTab`` into a single group + single-leaf tree. Safe to
+     *  call when already active (no-op). */
+    enableGroups() {
+      if (this.groupTree) return this.focusedGroupId
+      const legacyTabs = Array.isArray(this.tabs) ? [...this.tabs] : []
+      const legacyActive = this.activeTab || legacyTabs[0] || null
+      this._groupCounter += 1
+      const id = `g_${this._groupCounter}`
+      this.groups = {
+        [id]: {
+          tabs: legacyTabs,
+          activeTab: legacyActive,
+          draftText: "",
+        },
+      }
+      this.groupTree = { type: "leaf", groupId: id }
+      this.focusedGroupId = id
+      this._syncLegacyFromGroups()
+      this._persistGroupState()
+      return id
+    },
+
+    /** Deactivate multi-group mode — collapse back to legacy single-
+     *  group state. Tabs/activeTab survive the transition (taken from
+     *  the previously-focused group, falling back to the union). */
+    disableGroups() {
+      if (!this.groupTree) return
+      // Preserve the focused group's tabs/activeTab as the new
+      // single-surface state — that's the surface the user was last
+      // looking at, so least surprise.
+      const focused = this.groups[this.focusedGroupId]
+      const union = _unionGroupTabs(this.groups, this.groupTree)
+      const nextTabs = focused?.tabs?.length ? [...focused.tabs] : union
+      const nextActive = focused?.activeTab || nextTabs[0] || null
+      this.groups = {}
+      this.groupTree = null
+      this.focusedGroupId = null
+      this.tabs = nextTabs
+      this.activeTab = nextActive
+      // Clear storage so a future page-load doesn't auto-re-enable.
+      this._persistGroupState()
+    },
+
+    /** Allocate a new group with the given tabs. ``activeTab``
+     *  defaults to the first tab. Returns the new groupId. Does NOT
+     *  insert the group into ``groupTree`` — callers are responsible
+     *  for placing it (e.g. via ``splitGroup``). */
+    addGroup(tabs = [], activeTab = null) {
+      this._groupCounter += 1
+      const id = `g_${this._groupCounter}`
+      const tabList = Array.isArray(tabs) ? [...tabs] : []
+      this.groups[id] = {
+        tabs: tabList,
+        activeTab: activeTab || tabList[0] || null,
+        draftText: "",
+      }
+      return id
+    },
+
+    /** Remove a group: drops its entry from ``groups`` and prunes its
+     *  leaf from ``groupTree``. Promotes the surviving sibling when a
+     *  split collapses. If the focused group is removed, focus jumps
+     *  to the new first leaf (or ``null`` when nothing is left). */
+    removeGroup(groupId) {
+      if (!this.groups[groupId]) return
+      delete this.groups[groupId]
+      this.groupTree = _pruneTreeLeaf(this.groupTree, groupId)
+      if (!this.groupTree) {
+        // Last group removed → fall back to legacy single-group
+        // mode so the chat panel keeps rendering something.
+        this.focusedGroupId = null
+        this.groups = {}
+        // Keep tabs / activeTab as-is so the panel re-renders the
+        // last view rather than going blank.
+      } else if (this.focusedGroupId === groupId) {
+        this.focusedGroupId = _firstLeafGroupId(this.groupTree)
+      }
+      this._syncLegacyFromGroups()
+      this._persistGroupState()
+    },
+
+    /** Set a group's active tab. No-op if the group doesn't exist or
+     *  the tab isn't in the group's tab list. */
+    setGroupActiveTab(groupId, tab) {
+      const g = this.groups[groupId]
+      if (!g || !g.tabs.includes(tab)) return
+      g.activeTab = tab
+      if (tab) delete this.unreadCounts[tab]
+      this._syncLegacyFromGroups()
+      this._persistGroupState()
+    },
+
+    /** Bring a group to keyboard focus. Drives which group receives
+     *  the global ``/`` hotkey, where new tabs land, and what the
+     *  StatusBar model switcher reads. */
+    setFocusedGroup(groupId) {
+      if (!this.groups[groupId]) return
+      if (this.focusedGroupId === groupId) return
+      this.focusedGroupId = groupId
+      this._syncLegacyFromGroups()
+      this._persistGroupState()
+    },
+
+    /** Resize the split at ``path`` (array of child indices) to
+     *  ``ratio``. Path ``[]`` targets the root split. Mutates the
+     *  ``groupTree`` in place — see ``_setSplitRatio`` for why.
+     *  Persistence runs on every call; cheap localStorage writes
+     *  during a drag are acceptable, and committing on every move
+     *  means a refresh mid-drag preserves what the user saw. */
+    setGroupSplitRatio(path, ratio) {
+      if (!this.groupTree) return
+      _setSplitRatio(this.groupTree, path || [], ratio)
+      this._persistGroupState()
+    },
+
+    /** Split the target group's leaf in two. The target group stays
+     *  on one side, a fresh group lands on the other (carrying
+     *  ``movedTab`` as its single tab, or empty when ``movedTab`` is
+     *  ``null``).
+     *
+     *  When ``movedTab`` originated in a DIFFERENT group (a drag-to-
+     *  split across the chat-internal tree), pass that group's id as
+     *  ``srcGroupId`` so the tab is removed from there. Without it,
+     *  the tab would be duplicated (left in the source AND in the new
+     *  split's sibling) — that's the
+     *  ``a|b|c drag c onto a's side → a|c|b|c`` bug.
+     *
+     *  Returns the new groupId, or ``null`` on no-op. */
+    splitGroup(targetGroupId, direction, edge, movedTab = null, srcGroupId = null) {
+      if (!this.groups[targetGroupId]) return null
+      if (direction !== "horizontal" && direction !== "vertical") return null
+      if (edge !== "before" && edge !== "after") return null
+      // Refuse the split if it would empty the source group with no
+      // sibling to promote — collapse-then-split races the
+      // tree-mutation reflow. The "moving a tab is the only way to
+      // create a split" path doesn't apply to keyboard / context-menu
+      // splits which pass ``movedTab=null``.
+      const realSrcId = srcGroupId || targetGroupId
+      if (movedTab) {
+        const realSrc = this.groups[realSrcId]
+        if (!realSrc || !realSrc.tabs.includes(movedTab)) return null
+        if (realSrc.tabs.length <= 1 && realSrcId === targetGroupId) return null
+      }
+      const newId = this.addGroup(movedTab ? [movedTab] : [])
+      this.groupTree = _splitTreeLeaf(this.groupTree, targetGroupId, direction, edge, newId)
+      if (movedTab) {
+        // Remove from the REAL source group; the new group already
+        // owns the moved tab via ``addGroup``.
+        const realSrc = this.groups[realSrcId]
+        const idx = realSrc.tabs.indexOf(movedTab)
+        if (idx !== -1) {
+          realSrc.tabs.splice(idx, 1)
+          if (realSrc.activeTab === movedTab) realSrc.activeTab = realSrc.tabs[0] || null
+        }
+        // If the source group emptied (cross-group split where src
+        // had only that one tab), collapse it. The tree-prune is
+        // safe because the split we just did inserted the new leaf
+        // beside the target — the empty leaf is unrelated.
+        if (realSrcId !== targetGroupId && realSrc.tabs.length === 0) {
+          this.removeGroup(realSrcId)
+        }
+      }
+      this.focusedGroupId = newId
+      this._syncLegacyFromGroups()
+      this._persistGroupState()
+      return newId
+    },
+
+    /** Move a tab between groups (or reorder within one). When
+     *  ``dstIndex`` is past the end, appends. If the source group is
+     *  emptied by the move, it is removed and its tree slot collapses. */
+    moveTab(srcGroupId, tab, dstGroupId, dstIndex = -1, opts = {}) {
+      const src = this.groups[srcGroupId]
+      const dst = this.groups[dstGroupId]
+      if (!src || !dst) return
+      const idx = src.tabs.indexOf(tab)
+      if (idx === -1) return
+      // Same-group reorder
+      if (srcGroupId === dstGroupId) {
+        src.tabs.splice(idx, 1)
+        const insertAt = dstIndex < 0 ? src.tabs.length : Math.min(dstIndex, src.tabs.length)
+        src.tabs.splice(insertAt, 0, tab)
+        src.activeTab = tab
+        this._syncLegacyFromGroups()
+        this._persistGroupState()
+        return
+      }
+      // Cross-group move
+      src.tabs.splice(idx, 1)
+      if (src.activeTab === tab) src.activeTab = src.tabs[0] || null
+      // Remove from destination first (if it was already there); we
+      // re-insert at the requested index in canonical position.
+      const dstExisting = dst.tabs.indexOf(tab)
+      if (dstExisting !== -1) dst.tabs.splice(dstExisting, 1)
+      const insertAt = dstIndex < 0 ? dst.tabs.length : Math.min(dstIndex, dst.tabs.length)
+      dst.tabs.splice(insertAt, 0, tab)
+      dst.activeTab = tab
+      if (!opts.preserveFocus) this.focusedGroupId = dstGroupId
+      if (src.tabs.length === 0) {
+        // Source emptied → collapse the group. ``removeGroup`` will
+        // call ``_syncLegacyFromGroups`` + persist on its own.
+        this.removeGroup(srcGroupId)
+        return
+      }
+      this._syncLegacyFromGroups()
+      this._persistGroupState()
+    },
+
+    /** Add ``tab`` to the focused group (or first group) when groups
+     *  are active. When groups are inactive, falls through to
+     *  ``_addTab`` for legacy single-surface behaviour. Idempotent —
+     *  duplicate tabs are no-ops. */
+    ensureTab(tab) {
+      if (!tab) return
+      this._addTab(tab)
+      if (!this.groupTree) return
+      // Already in any group? Done.
+      for (const g of Object.values(this.groups)) {
+        if (g.tabs.includes(tab)) return
+      }
+      const targetId = this.focusedGroupId || _firstLeafGroupId(this.groupTree)
+      if (!targetId) return
+      const g = this.groups[targetId]
+      g.tabs.push(tab)
+      if (!g.activeTab) g.activeTab = tab
+      this._syncLegacyFromGroups()
+      this._persistGroupState()
+    },
+
+    /** Remove ``tab`` from every group + the legacy tabs list. Groups
+     *  emptied as a result collapse. */
+    pruneTab(tab) {
+      if (!tab) return
+      // Legacy tabs
+      const legacyIdx = this.tabs.indexOf(tab)
+      if (legacyIdx !== -1) {
+        this.tabs = this.tabs.filter((t) => t !== tab)
+        if (this.activeTab === tab) {
+          this.activeTab = this.tabs[Math.min(legacyIdx, this.tabs.length - 1)] || null
+        }
+      }
+      if (!this.groupTree) return
+      // Snapshot ids first — ``removeGroup`` mutates the dict while we iterate.
+      const ids = Object.keys(this.groups)
+      for (const gid of ids) {
+        const g = this.groups[gid]
+        if (!g) continue
+        const idx = g.tabs.indexOf(tab)
+        if (idx === -1) continue
+        g.tabs.splice(idx, 1)
+        if (g.activeTab === tab) g.activeTab = g.tabs[0] || null
+        if (g.tabs.length === 0) this.removeGroup(gid)
+      }
+      this._syncLegacyFromGroups()
+      this._persistGroupState()
     },
   },
 }
