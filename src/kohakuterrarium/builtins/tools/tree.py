@@ -274,7 +274,14 @@ class TreeTool(BaseTool):
                 show_hidden=show_hidden,
                 follow_gitignore=follow_gitignore,
             )
-            builder._add_line(f"{path.name}/")
+            # Preserve the user's input string for the root label so a
+            # plain "." doesn't get resolved into the CWD's basename
+            # (e.g. ``KohakuTerrarium/``). Rule: either absolute or
+            # relative — whatever the caller typed wins. Trailing slash
+            # is appended for non-"." paths to match the per-line
+            # directory convention below; "." prints bare.
+            display_root = path_str if path_str == "." else path_str.rstrip("/") + "/"
+            builder._add_line(display_root)
             await builder.build(path)
 
             output = "\n".join(builder.lines)
