@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions.handles import SessionListing
+from kohakuterrarium.terrarium.multi_node_cluster import cluster_groups
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -30,53 +31,11 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def cluster_groups(service: "TerrariumService") -> dict[str, set[str]]:
-    """Return cluster groups keyed by primary sid (lex-smallest graph_id).
-
-    Reads ``service._cluster_links`` — a set of ``frozenset({(node,
-    graph), (node, graph)})`` pairs recorded by ``cross_node_connect``
-    / ``ensure_channel_replicated``. Builds connected components via
-    union-find, then for each component returns the set of member
-    graph_ids. Returns an empty dict when the service has no cluster-
-    link surface (standalone mode) or no links recorded.
-
-    Cluster IDs use the graph_id (sid) directly — the ``node`` part of
-    each pair is dropped because the studio's ``_meta`` is keyed by sid
-    and the multi-node journey's B1 invariant addresses the cluster as
-    the lex-smallest sid (matching ``multi_node_cluster.fold_clusters``).
-    """
-    links = getattr(service, "_cluster_links", None)
-    if not links:
-        return {}
-    parent: dict[str, str] = {}
-
-    def find(x: str) -> str:
-        while parent.get(x, x) != x:
-            parent[x] = parent.get(parent[x], parent[x])
-            x = parent[x]
-        return x
-
-    def union(a: str, b: str) -> None:
-        ra, rb = find(a), find(b)
-        if ra == rb:
-            return
-        root, other = sorted([ra, rb])
-        parent[other] = root
-
-    for pair in links:
-        pair_list = list(pair)
-        if len(pair_list) < 2:
-            continue
-        sids = [gid for (_node, gid) in pair_list]
-        for sid in sids:
-            parent.setdefault(sid, sid)
-        # Pair is exactly two endpoints (self-loops fold to a no-op).
-        union(sids[0], sids[1])
-
-    groups: dict[str, set[str]] = {}
-    for sid in parent:
-        groups.setdefault(find(sid), set()).add(sid)
-    return groups
+# ``cluster_groups`` moved to ``terrarium.multi_node_cluster`` so the
+# multi-node channel routing in the terrarium tier can consume it
+# without inverting the layer (terrarium → studio was the original
+# tier violation). Re-exported here so studio callers that historically
+# read it from this module keep working.
 
 
 def sid_to_primary(service: "TerrariumService") -> dict[str, str]:

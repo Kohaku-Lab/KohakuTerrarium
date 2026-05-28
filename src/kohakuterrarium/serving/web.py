@@ -15,6 +15,11 @@ import threading
 import time
 from pathlib import Path
 
+import uvicorn
+
+from kohakuterrarium.api.app import create_app
+from kohakuterrarium.packages.locations import PACKAGES_DIR, get_package_root
+from kohakuterrarium.packages.walk import list_packages
 from kohakuterrarium.utils.logging import (
     configure_utf8_stdio,
     enable_stderr_logging,
@@ -36,9 +41,6 @@ def _resolve_config_dirs() -> tuple[list[str], list[str]]:
       2. Installed packages (``~/.kohakuterrarium/packages/``)
       3. Local project dirs (``creatures/``, ``terrariums/`` in project root)
     """
-    from kohakuterrarium.packages.locations import PACKAGES_DIR, get_package_root
-    from kohakuterrarium.packages.walk import list_packages
-
     creatures: list[str] = []
     terrariums: list[str] = []
 
@@ -128,8 +130,6 @@ def start_uvicorn_with_port_fallback(
     The thread is daemonised so the process can exit cleanly when the
     webview window closes.
     """
-    import uvicorn
-
     last_exc: Exception | None = None
     for offset in range(max_tries):
         port = requested_port + offset
@@ -233,10 +233,6 @@ def run_web_server(
             Required when ``mode == "lab-host"``.
     """
     configure_utf8_stdio(log=True)
-
-    import uvicorn
-
-    from kohakuterrarium.api.app import create_app
 
     set_level(log_level)
     # Mirror kohakuterrarium logs to stderr so the daemon's redirected
@@ -405,8 +401,6 @@ def _run_desktop_app_blocking(port: int = 8001, log_level: str = "INFO") -> None
         print("pywebview is required for 'kt app'.")
         print("Install: pip install 'KohakuTerrarium[desktop]'")
         sys.exit(1)
-
-    from kohakuterrarium.api.app import create_app
 
     if not WEB_DIST_DIR.is_dir():
         logger.error(

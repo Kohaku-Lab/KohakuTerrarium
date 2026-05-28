@@ -19,7 +19,7 @@ Three pieces live here:
 
 from typing import Any
 
-from kohakuterrarium.studio.sessions.cluster_fold import cluster_groups
+from kohakuterrarium.terrarium.multi_node_cluster import cluster_groups
 from kohakuterrarium.terrarium.topology import ChannelInfo
 from kohakuterrarium.utils.logging import get_logger
 

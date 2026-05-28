@@ -16,9 +16,7 @@ class TestTreeToolRootLabel:
     async def test_relative_path_preserves_typed_root_label(self, tmp_path):
         sub = tmp_path / "subdir"
         sub.mkdir()
-        (sub / "note.md").write_text(
-            "---\nsummary: hello\n---\nbody", encoding="utf-8"
-        )
+        (sub / "note.md").write_text("---\nsummary: hello\n---\nbody", encoding="utf-8")
         ctx = ToolContext(agent_name="agent", session=None, working_dir=tmp_path)
 
         result = await TreeTool().execute({"path": "subdir", "limit": 10}, context=ctx)

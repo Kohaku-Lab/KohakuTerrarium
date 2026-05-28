@@ -17,6 +17,7 @@ the user having to restart.
 """
 
 import asyncio
+import shlex
 from collections.abc import Iterable
 from typing import Any
 
@@ -33,7 +34,7 @@ from kohakuterrarium.builtins.user_commands import (
 )
 from kohakuterrarium.core.channel import BaseChannel, ChannelMessage
 from kohakuterrarium.modules.input.base import InputModule
-from kohakuterrarium.modules.user_command.base import UserCommandContext
+from kohakuterrarium.modules.user_command.base import UserCommandContext, parse_slash_command
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.events import EventFilter, EventKind
@@ -56,10 +57,6 @@ async def _handle_tui_slash(text: str, tui: "TUISession", focus: Any) -> bool:
     here, the runner-level loop where the engine already has the
     TUISession + focus agent in scope.
     """
-    import shlex
-
-    from kohakuterrarium.modules.user_command.base import parse_slash_command
-
     name, args = parse_slash_command(text)
     stripped_args = (args or "").strip()
 
