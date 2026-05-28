@@ -44,6 +44,7 @@ from rich.text import Text
 
 from kohakuterrarium.builtins.cli_rich.app_multi import AppMultiCreatureMixin
 from kohakuterrarium.builtins.cli_rich.app_output import AppOutputMixin
+from kohakuterrarium.builtins.cli_rich.app_pickers import AppPickersMixin
 from kohakuterrarium.builtins.cli_rich.commit import ScrollbackCommitter, SessionReplay
 from kohakuterrarium.builtins.cli_rich.composer import Composer
 from kohakuterrarium.builtins.cli_rich.dialogs.bus_overlay import BusInteractiveOverlay
@@ -74,7 +75,7 @@ logger = get_logger(__name__)
 DEFAULT_WIDTH = 100
 
 
-class RichCLIApp(AppOutputMixin, AppMultiCreatureMixin):
+class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin):
     """Single-Application orchestrator for ``--mode cli``.
 
     Output events from the agent's OutputRouter (``on_text_chunk``,
@@ -847,109 +848,6 @@ class RichCLIApp(AppOutputMixin, AppMultiCreatureMixin):
         if not selector:
             return
         self._pending_task = spawn(self._handle_slash(f"/model {selector}"))
-
-    def _picker_handle_key(self, key: str) -> bool:
-        """Forward a named-key event to whichever overlay is open.
-
-        Composer bindings call this on every named key (``up``, ``enter``,
-        ``escape``, ``tab``, ``backspace``, …). The first overlay that
-        claims to own the keyboard (``visible``) gets the key; if it
-        consumes it, the composer skips its own default handling.
-        """
-        if self.bus_overlay.visible:
-            consumed = self.bus_overlay.handle_key(key)
-            if consumed:
-                self._invalidate()
-            return consumed
-        if self.model_picker.visible:
-            consumed = self.model_picker.handle_key(key)
-            if consumed:
-                self._invalidate()
-            return consumed
-        if self.module_picker.visible:
-            consumed = self.module_picker.handle_key(key)
-            if consumed:
-                self._invalidate()
-            return consumed
-        if self.settings_overlay.visible:
-            consumed = self.settings_overlay.handle_key(key)
-            if consumed:
-                self._invalidate()
-            return consumed
-        if self.agent_overlay is not None and self.agent_overlay.visible:
-            consumed = self.agent_overlay.handle_key(key)
-            if consumed:
-                self._invalidate()
-            return consumed
-        return False
-
-    def _picker_handle_text(self, char: str) -> bool:
-        """Forward a printable-character event to whichever overlay wants text.
-
-        Invoked from the composer's ``Keys.Any`` binding which is
-        conditionally active only when ``_picker_captures_input`` is
-        True — so this runs only for forms inside the settings overlay.
-        """
-        if self.bus_overlay.captures_input():
-            consumed = self.bus_overlay.handle_text(char)
-            if consumed:
-                self._invalidate()
-            return consumed
-        if self.module_picker.visible and self.module_picker.is_capturing_text():
-            consumed = self.module_picker.handle_text(char)
-            if consumed:
-                self._invalidate()
-            return consumed
-        if self.module_picker.visible:
-            # In list mode, ``t`` toggles current row. Consume any
-            # other char so it doesn't leak into the textarea.
-            consumed = self.module_picker.handle_text(char)
-            if consumed:
-                self._invalidate()
-            return consumed
-        if self.settings_overlay.visible:
-            # Settings list mode wants ``d`` for delete (and silently
-            # consumes other letters so they don't leak into the chat
-            # textarea behind the overlay); form mode wants every
-            # printable char as field input. Same handler covers both
-            # — handle_text already routes by ``self.mode``.
-            consumed = self.settings_overlay.handle_text(char)
-            if consumed:
-                self._invalidate()
-            return consumed
-        if self.agent_overlay is not None and self.agent_overlay.visible:
-            consumed = self.agent_overlay.handle_text(char)
-            if consumed:
-                self._invalidate()
-            return consumed
-        return False
-
-    def _picker_captures_input(self) -> bool:
-        """True when an overlay is capturing printable characters.
-
-        Drives the ``Condition`` filter on the composer's ``Keys.Any``
-        binding — we only intercept text when an overlay genuinely wants
-        it (form mode), so list-mode keystrokes still go through the
-        normal ``handle_key`` path.
-        """
-        if self.bus_overlay.captures_input():
-            return True
-        if self.module_picker.visible:
-            # Modal: consume both list-mode and form-mode chars so
-            # nothing leaks into the chat textarea behind the
-            # overlay.
-            return True
-        if self.settings_overlay.visible:
-            # Settings is also modal — list mode reserves ``d`` for
-            # delete and silently swallows the rest, form mode routes
-            # printable chars into the active field. Either way the
-            # composer's textarea must NOT receive these keystrokes,
-            # so claim them unconditionally while the overlay is up.
-            return True
-        if self.agent_overlay is not None and self.agent_overlay.visible:
-            # Topic 08 — printable chars go into the overlay's filter.
-            return True
-        return False
 
     def _get_composer_text(self) -> str:
         """Read the composer textarea contents — for the bus overlay's
