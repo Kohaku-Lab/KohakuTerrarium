@@ -52,6 +52,7 @@ const sidebarStructure = {
     "guides/app-update.md",
     "guides/examples.md",
     "guides/frontend-layout.md",
+    "guides/split-tabs.md",
   ],
   conceptsRoot: ["concepts/README.md"],
   conceptsFoundations: [
