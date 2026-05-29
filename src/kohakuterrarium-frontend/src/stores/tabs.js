@@ -1,30 +1,39 @@
 /**
- * Macro shell tabs store. Owns the list of open tabs, active id,
- * pinned set, recently-closed ring buffer, and policy-hint cache.
+ * Macro shell tabs store. Owns the open tabs, their arrangement into
+ * **tab-groups** (a binary split tree — VS Code-style editor groups),
+ * the focused group, pinned set, recently-closed ring buffer, and
+ * policy-hint cache.
  *
  * Pure window-manager — does NOT own per-tab content. Chat messages
  * live in `chat`, trace events in `eventStream`, etc.
  *
- * **Persistence**: tab list + active id live in `localStorage` under
- * `kt.tabs.state` via the ``useTabPersistence`` composable; the store
- * fires a ``kt:tabs:dirty`` event after each CRUD action, the
- * composable debounces and writes. Earlier versions kept tab state in
- * the URL query — that left ugly `?tabs=...&active=...` strings in the
- * address bar and broke the "shareable URL == content" mental model
- * (we never wanted bookmarks of tab layouts). Bookmark the route, not
- * the tab strip.
+ * ## Tab-group model
  *
- * Surface model (per design D2): every running target offers two
- * surfaces — chat (`attach:<id>`) and inspector (`inspect:<id>`) —
- * available regardless of policy. Policy hints are informational
- * only.
+ * - `byId` — registry of every open tab spec, keyed by id. Source of
+ *   truth for "what tabs exist".
+ * - `tabGroups` — `{ groupId: { tabIds: string[], activeId } }`. A
+ *   group is one tab strip + its visible tab. A tab id lives in exactly
+ *   one group.
+ * - `tabTree` — binary split tree over group ids (see
+ *   `utils/splitTree.js`). `null` only before first hydrate; otherwise
+ *   always at least a single leaf. A single-leaf tree is visually
+ *   identical to the old flat strip — the split affordances are simply
+ *   live the whole time, no flag.
+ * - `focusedGroupId` — where new tabs open + the keyboard target.
+ *
+ * `tabs` and `activeId` are kept as a derived FLAT VIEW (union of all
+ * groups in tree-reading order; focused group's active tab) so the many
+ * existing consumers that read `tabs.tabs` / `tabs.activeId` keep
+ * working unchanged. `_syncFlat()` recomputes them after every mutation.
+ *
+ * **Persistence**: snapshot lives in `localStorage` under
+ * `kt.tabs.state` via the `useTabPersistence` composable; the store
+ * fires a `kt:tabs:dirty` event after each CRUD action, the composable
+ * debounces and writes. Layout is deliberately NOT in the URL (bookmark
+ * the route, not the tab strip).
  *
  * **Dashboard is the protected baseline**: every close-* action skips
- * the dashboard tab even if the user targets it directly. The
- * dashboard is the "home" of the macro shell — closing it would leave
- * the user nowhere to go. Mirrors how Chrome/Firefox keep at least one
- * tab around even if the user "closes" the last one (they replace it
- * with new-tab-page; we replace it with the dashboard).
+ * the dashboard tab even if targeted directly; `closeAll` re-seeds it.
  */
 
 import { defineStore } from "pinia"
@@ -32,10 +41,21 @@ import { defineStore } from "pinia"
 import { acquireScope, releaseScope } from "@/composables/useScope"
 import { attachAPI } from "@/utils/api"
 import { parseTabId } from "@/utils/tabsUrl"
+import {
+  firstLeafId,
+  leafOrder,
+  findLeafPath,
+  splitLeaf,
+  pruneLeaf,
+  setRatioAt,
+  leafTree,
+  walkTree,
+} from "@/utils/splitTree"
 
 const RECENTLY_CLOSED_MAX = 10
 const PINNED_KEY = "kt.tabs.pinned"
 const MIGRATION_KEY = "kt.tabs.migrationV1"
+const SNAPSHOT_VERSION = 2
 
 /** ID of the never-closeable home tab. */
 const DASHBOARD_ID = "dashboard"
@@ -56,10 +76,25 @@ function _loadPinned() {
 
 export const useTabsStore = defineStore("tabs", {
   state: () => ({
-    /** @type {Array<object>} */
+    /** Derived flat view — union of all groups in tree order.
+     *  @type {Array<object>} */
     tabs: [],
-    /** @type {string | null} */
+    /** Derived — focused group's active tab id.
+     *  @type {string | null} */
     activeId: null,
+
+    /** Registry of all open tab specs, keyed by id.
+     *  @type {Record<string, object>} */
+    byId: {},
+    /** @type {Record<string, { tabIds: string[], activeId: string|null }>} */
+    tabGroups: {},
+    /** Split tree over group ids. @type {object | null} */
+    tabTree: null,
+    /** @type {string | null} */
+    focusedGroupId: null,
+    /** Monotonic group-id allocator → `tg_<n>`. */
+    _groupCounter: 0,
+
     /** @type {Set<string>} */
     pinnedIds: _loadPinned(),
     /** Informational policy-hint cache. Not used to gate surfaces. */
@@ -68,154 +103,296 @@ export const useTabsStore = defineStore("tabs", {
     /** Ring buffer of recently-closed tabs. */
     /** @type {Array<object>} */
     recentlyClosed: [],
-    /**
-     * Per-tab refresh counter. ``TabContent`` uses this in its ``:key``
-     * so bumping a tab's revision force-remounts the underlying
-     * component (re-runs onMounted, re-fetches data) without closing
-     * or re-creating the tab itself.
-     * @type {Record<string, number>}
-     */
+    /** Per-tab refresh counter (force-remount key). */
+    /** @type {Record<string, number>} */
     revisions: {},
   }),
 
   getters: {
-    activeTab: (state) => state.tabs.find((t) => t.id === state.activeId) ?? null,
-    isOpen: (state) => (id) => state.tabs.some((t) => t.id === id),
+    activeTab: (state) => state.byId[state.activeId] ?? null,
+    isOpen: (state) => (id) => !!state.byId[id],
     surfaceTabsForTarget: (state) => (target) => ({
-      chat: state.tabs.find((t) => t.id === `attach:${target}`),
-      inspector: state.tabs.find((t) => t.id === `inspect:${target}`),
+      chat: state.byId[`attach:${target}`],
+      inspector: state.byId[`inspect:${target}`],
     }),
+    focusedGroup: (state) => state.tabGroups[state.focusedGroupId] ?? null,
+    groupCount: (state) => Object.keys(state.tabGroups).length,
+    /** Tab specs in a group, in the group's strip order. */
+    tabsInGroup: (state) => (groupId) =>
+      (state.tabGroups[groupId]?.tabIds ?? []).map((id) => state.byId[id]).filter(Boolean),
+    /** Active tab spec for a group. */
+    groupActiveTab: (state) => (groupId) => state.byId[state.tabGroups[groupId]?.activeId] ?? null,
   },
 
   actions: {
+    // ─── group-tree internals ──────────────────────────────────
+
+    /** Allocate a fresh group. Returns its id. Does NOT place it in
+     *  the tree — callers (`_ensureTree`, `splitTabGroup`) do that. */
+    _newGroup(tabIds = [], activeId = null) {
+      this._groupCounter += 1
+      const id = `tg_${this._groupCounter}`
+      const ids = Array.isArray(tabIds) ? [...tabIds] : []
+      this.tabGroups[id] = { tabIds: ids, activeId: activeId ?? ids[0] ?? null }
+      return id
+    },
+
+    /** Guarantee a non-null tree (a single empty group). Idempotent. */
+    _ensureTree() {
+      if (this.tabTree) return
+      const gid = this._newGroup()
+      this.tabTree = leafTree(gid)
+      this.focusedGroupId = gid
+    },
+
+    /** Group id holding `tabId`, or `null`. */
+    _groupOf(tabId) {
+      for (const [gid, g] of Object.entries(this.tabGroups)) {
+        if (g.tabIds.includes(tabId)) return gid
+      }
+      return null
+    },
+
+    /** All tab ids across the tree, in reading order, de-duplicated. */
+    _unionTabIds() {
+      const out = []
+      const seen = new Set()
+      walkTree(this.tabTree, (gid) => {
+        const g = this.tabGroups[gid]
+        if (!g) return
+        for (const id of g.tabIds) {
+          if (seen.has(id)) continue
+          seen.add(id)
+          out.push(id)
+        }
+      })
+      return out
+    },
+
+    /** Recompute the derived flat view (`tabs`, `activeId`) from group
+     *  state. Called after every mutation. */
+    _syncFlat() {
+      if (this.focusedGroupId && !this.tabGroups[this.focusedGroupId]) {
+        this.focusedGroupId = firstLeafId(this.tabTree)
+      }
+      const ids = this._unionTabIds()
+      this.tabs = ids.map((id) => this.byId[id]).filter(Boolean)
+      const focused = this.tabGroups[this.focusedGroupId]
+      this.activeId = focused?.activeId ?? ids[0] ?? null
+    },
+
+    /** Remove a group entry + prune its leaf. Collapses the surviving
+     *  sibling. Never leaves a null tree (reseeds an empty group). */
+    _removeGroup(groupId) {
+      if (!this.tabGroups[groupId]) return
+      delete this.tabGroups[groupId]
+      this.tabTree = pruneLeaf(this.tabTree, groupId)
+      if (!this.tabTree) {
+        const gid = this._newGroup()
+        this.tabTree = leafTree(gid)
+        this.focusedGroupId = gid
+      } else if (this.focusedGroupId === groupId) {
+        this.focusedGroupId = firstLeafId(this.tabTree)
+      }
+    },
+
     // ─── tab CRUD ──────────────────────────────────────────────
 
-    /** Add or activate a tab. No-op if id already open (just activates). */
+    /** Add or activate a tab. No-op (just activates + focuses) if the
+     *  id is already open. New tabs land in the focused group. */
     openTab(spec) {
-      if (this.isOpen(spec.id)) {
-        this.activeId = spec.id
+      this._ensureTree()
+      if (this.byId[spec.id]) {
+        const gid = this._groupOf(spec.id)
+        if (gid) {
+          this.tabGroups[gid].activeId = spec.id
+          this.focusedGroupId = gid
+        }
+        this._syncFlat()
         this._dirty()
         return
       }
-      this.tabs.push(spec)
-      this.activeId = spec.id
-      // Per-instance Pinia stores (chat / status / editor / layout)
-      // are scoped by the macro tab's ``target``. We acquire one
-      // ref per opened tab; every close path below releases it. When
-      // the last tab carrying a target closes, the scope's stores +
-      // their WS connections are disposed.
+      this.byId[spec.id] = spec
+      const gid = this.tabGroups[this.focusedGroupId]
+        ? this.focusedGroupId
+        : firstLeafId(this.tabTree)
+      const g = this.tabGroups[gid]
+      g.tabIds.push(spec.id)
+      g.activeId = spec.id
+      this.focusedGroupId = gid
+      // Per-instance Pinia stores (chat / status / editor / layout) are
+      // scoped by the tab's `target`; acquire one ref per opened tab,
+      // released on every close path. (Moving a tab between groups does
+      // NOT touch scope — only open/close do.)
       if (spec.target) acquireScope(spec.target)
+      this._syncFlat()
       this._dirty()
     },
 
-    /** Remove a tab; activate neighbour. Records to recentlyClosed.
-     *  Dashboard is never removed even when targeted directly. */
+    /** Remove a tab; activate a neighbour in its group. Records to
+     *  recentlyClosed. Dashboard is never removed. */
     closeTab(id) {
       if (isDashboard(id)) return
-      const idx = this.tabs.findIndex((t) => t.id === id)
-      if (idx < 0) return
-      const [closed] = this.tabs.splice(idx, 1)
-      this._pushRecentlyClosed(closed)
-      if (this.activeId === id) {
-        this.activeId = this.tabs[idx]?.id ?? this.tabs[idx - 1]?.id ?? null
+      const spec = this.byId[id]
+      if (!spec) return
+      const gid = this._groupOf(id)
+      this._pushRecentlyClosed(spec)
+      if (gid) {
+        const g = this.tabGroups[gid]
+        const idx = g.tabIds.indexOf(id)
+        g.tabIds.splice(idx, 1)
+        if (g.activeId === id) {
+          g.activeId = g.tabIds[idx] ?? g.tabIds[idx - 1] ?? null
+        }
       }
-      if (closed.target) releaseScope(closed.target)
+      delete this.byId[id]
+      if (spec.target) releaseScope(spec.target)
+      if (gid && this.tabGroups[gid] && this.tabGroups[gid].tabIds.length === 0) {
+        this._removeGroup(gid)
+      }
+      this._syncFlat()
       this._dirty()
     },
 
-    /** Close everything except `id` (and dashboard + pinned). */
+    /** Internal: drop a set of tab ids (records recentlyClosed +
+     *  releases scope), then prune any emptied groups. */
+    _dropTabs(ids) {
+      const dropped = []
+      for (const id of ids) {
+        const spec = this.byId[id]
+        if (!spec) continue
+        dropped.push(spec)
+        const gid = this._groupOf(id)
+        if (gid) {
+          const g = this.tabGroups[gid]
+          const idx = g.tabIds.indexOf(id)
+          if (idx !== -1) g.tabIds.splice(idx, 1)
+          if (g.activeId === id) g.activeId = g.tabIds[0] ?? null
+        }
+        delete this.byId[id]
+        if (spec.target) releaseScope(spec.target)
+      }
+      this._pushRecentlyClosed(...dropped)
+      for (const gid of Object.keys(this.tabGroups)) {
+        if (this.tabGroups[gid].tabIds.length === 0) this._removeGroup(gid)
+      }
+    },
+
+    /** Close everything except `id` (and dashboard + pinned), across
+     *  all groups. Focuses `id`'s group. */
     closeOthers(id) {
-      const closed = this.tabs.filter(
-        (t) => t.id !== id && !isDashboard(t.id) && !this.pinnedIds.has(t.id),
+      const victims = Object.keys(this.byId).filter(
+        (tid) => tid !== id && !isDashboard(tid) && !this.pinnedIds.has(tid),
       )
-      this.tabs = this.tabs.filter(
-        (t) => t.id === id || isDashboard(t.id) || this.pinnedIds.has(t.id),
-      )
-      this._pushRecentlyClosed(...closed)
-      for (const t of closed) if (t.target) releaseScope(t.target)
-      this.activeId = id
+      this._dropTabs(victims)
+      const gid = this._groupOf(id)
+      if (gid) {
+        this.tabGroups[gid].activeId = id
+        this.focusedGroupId = gid
+      }
+      this._syncFlat()
       this._dirty()
     },
 
-    /** Close every tab to the LEFT of `id`. Dashboard + pinned survive. */
+    /** Close tabs to the LEFT of `id` within its group. Dashboard +
+     *  pinned survive. */
     closeLeft(id) {
-      const idx = this.tabs.findIndex((t) => t.id === id)
+      const gid = this._groupOf(id)
+      if (!gid) return
+      const tabIds = this.tabGroups[gid].tabIds
+      const idx = tabIds.indexOf(id)
       if (idx <= 0) return
-      const left = this.tabs.slice(0, idx)
-      const dropped = left.filter((t) => !isDashboard(t.id) && !this.pinnedIds.has(t.id))
-      const survivors = left.filter((t) => isDashboard(t.id) || this.pinnedIds.has(t.id))
-      this.tabs = [...survivors, ...this.tabs.slice(idx)]
-      this._pushRecentlyClosed(...dropped)
-      for (const t of dropped) if (t.target) releaseScope(t.target)
-      // Active tab might have been one of the dropped ones (Cmd+W on a
-      // left-side tab while another to its right is the menu anchor).
-      if (!this.tabs.some((t) => t.id === this.activeId)) {
-        this.activeId = id
+      const victims = tabIds
+        .slice(0, idx)
+        .filter((tid) => !isDashboard(tid) && !this.pinnedIds.has(tid))
+      this._dropTabs(victims)
+      const g = this.tabGroups[gid]
+      // The anchor always survives a directional close → focus it.
+      if (g) {
+        g.activeId = id
+        this.focusedGroupId = gid
       }
+      this._syncFlat()
       this._dirty()
     },
 
-    /** Close every tab to the RIGHT of `id`. Dashboard + pinned survive. */
+    /** Close tabs to the RIGHT of `id` within its group. */
     closeRight(id) {
-      const idx = this.tabs.findIndex((t) => t.id === id)
-      if (idx < 0 || idx === this.tabs.length - 1) return
-      const right = this.tabs.slice(idx + 1)
-      const dropped = right.filter((t) => !isDashboard(t.id) && !this.pinnedIds.has(t.id))
-      const survivors = right.filter((t) => isDashboard(t.id) || this.pinnedIds.has(t.id))
-      this.tabs = [...this.tabs.slice(0, idx + 1), ...survivors]
-      this._pushRecentlyClosed(...dropped)
-      for (const t of dropped) if (t.target) releaseScope(t.target)
-      if (!this.tabs.some((t) => t.id === this.activeId)) {
-        this.activeId = id
+      const gid = this._groupOf(id)
+      if (!gid) return
+      const tabIds = this.tabGroups[gid].tabIds
+      const idx = tabIds.indexOf(id)
+      if (idx < 0 || idx === tabIds.length - 1) return
+      const victims = tabIds
+        .slice(idx + 1)
+        .filter((tid) => !isDashboard(tid) && !this.pinnedIds.has(tid))
+      this._dropTabs(victims)
+      const g = this.tabGroups[gid]
+      if (g) {
+        g.activeId = id
+        this.focusedGroupId = gid
       }
+      this._syncFlat()
       this._dirty()
     },
 
-    /** Close all tabs. Dashboard + pinned survive. */
+    /** Close all tabs. Dashboard + pinned survive, collapsed into a
+     *  single group. */
     closeAll() {
-      const dropped = this.tabs.filter((t) => !isDashboard(t.id) && !this.pinnedIds.has(t.id))
-      const survivors = this.tabs.filter((t) => isDashboard(t.id) || this.pinnedIds.has(t.id))
-      this._pushRecentlyClosed(...dropped)
-      for (const t of dropped) if (t.target) releaseScope(t.target)
-      // Guarantee dashboard exists. The user may have started in a
-      // bare-init state where dashboard wasn't auto-added (tests, fresh
-      // localStorage corruption). closeAll is also the recovery path if
-      // the user wants to reset; ensure they land somewhere usable.
-      if (!survivors.some((t) => isDashboard(t.id))) {
-        survivors.unshift({ kind: "dashboard", id: DASHBOARD_ID })
+      const survivors = this._unionTabIds().filter(
+        (id) => isDashboard(id) || this.pinnedIds.has(id),
+      )
+      const victims = Object.keys(this.byId).filter((id) => !survivors.includes(id))
+      this._pushRecentlyClosed(...victims.map((id) => this.byId[id]).filter(Boolean))
+      for (const id of victims) {
+        const spec = this.byId[id]
+        if (spec?.target) releaseScope(spec.target)
+        delete this.byId[id]
       }
-      this.tabs = survivors
-      this.activeId = survivors[0]?.id ?? null
+      // Guarantee a dashboard.
+      const finalIds = [...survivors]
+      if (!finalIds.some((id) => isDashboard(id))) {
+        this.byId[DASHBOARD_ID] = this.byId[DASHBOARD_ID] ?? { kind: "dashboard", id: DASHBOARD_ID }
+        finalIds.unshift(DASHBOARD_ID)
+      }
+      // Collapse to one group.
+      this.tabGroups = {}
+      this._groupCounter += 1
+      const gid = `tg_${this._groupCounter}`
+      this.tabGroups[gid] = { tabIds: finalIds, activeId: finalIds[0] ?? null }
+      this.tabTree = leafTree(gid)
+      this.focusedGroupId = gid
+      this._syncFlat()
       this._dirty()
     },
 
     /** Append closed-tab specs to the recently-closed ring buffer. */
     _pushRecentlyClosed(...closed) {
-      if (closed.length === 0) return
-      this.recentlyClosed.unshift(...closed)
+      const real = closed.filter(Boolean)
+      if (real.length === 0) return
+      this.recentlyClosed.unshift(...real)
       if (this.recentlyClosed.length > RECENTLY_CLOSED_MAX) {
         this.recentlyClosed.length = RECENTLY_CLOSED_MAX
       }
     },
 
+    /** Activate a tab (and focus its group). */
     activateTab(id) {
-      if (!this.isOpen(id)) return
-      this.activeId = id
+      if (!this.byId[id]) return
+      const gid = this._groupOf(id)
+      if (!gid) return
+      this.tabGroups[gid].activeId = id
+      this.focusedGroupId = gid
+      this._syncFlat()
       this._dirty()
     },
 
-    /**
-     * Force-remount the active component for a tab without closing it.
-     * Bumps the per-tab revision counter; ``TabContent`` keys its
-     * ``<component>`` on it, so Vue tears down the old subtree and
-     * mounts a fresh one. URL/tab state are unchanged.
-     */
+    /** Force-remount the active component for a tab (bumps revision). */
     refreshTab(id) {
-      if (!this.isOpen(id)) return
+      if (!this.byId[id]) return
       this.revisions[id] = (this.revisions[id] ?? 0) + 1
     },
 
-    /** Refresh the currently active tab. */
     refreshActive() {
       if (this.activeId) this.refreshTab(this.activeId)
     },
@@ -235,34 +412,171 @@ export const useTabsStore = defineStore("tabs", {
       this._persistPinned()
     },
 
-    /** Reorder tabs by id list; missing ids preserved at the end. */
-    reorderTabs(idList) {
+    /** Reorder tabs within a group by id list (missing ids trail).
+     *  Defaults to the focused group. */
+    reorderTabs(idList, groupId = null) {
+      const gid = groupId ?? this.focusedGroupId
+      const g = this.tabGroups[gid]
+      if (!g) return
       const seen = new Set(idList)
-      const lookup = Object.fromEntries(this.tabs.map((t) => [t.id, t]))
-      const reordered = idList.map((id) => lookup[id]).filter(Boolean)
-      const trailing = this.tabs.filter((t) => !seen.has(t.id))
-      this.tabs = [...reordered, ...trailing]
+      const reordered = idList.filter((id) => g.tabIds.includes(id))
+      const trailing = g.tabIds.filter((id) => !seen.has(id))
+      g.tabIds = [...reordered, ...trailing]
+      this._syncFlat()
       this._dirty()
+    },
+
+    // ─── tab-group actions (split / move / focus) ──────────────
+
+    /** Split the target group's leaf in two. The target group stays on
+     *  one side; a fresh group lands on the other (`edge`: "before" =
+     *  left/top, "after" = right/bottom), carrying `movedTabId` when
+     *  given. Pass `srcGroupId` when the moved tab came from a DIFFERENT
+     *  group so it is removed there. Returns the new group id, or null. */
+    splitTabGroup(targetGroupId, direction, edge, movedTabId = null, srcGroupId = null) {
+      if (!this.tabGroups[targetGroupId]) return null
+      if (direction !== "horizontal" && direction !== "vertical") return null
+      if (edge !== "before" && edge !== "after") return null
+      const realSrcId = srcGroupId || targetGroupId
+      if (movedTabId) {
+        const realSrc = this.tabGroups[realSrcId]
+        if (!realSrc || !realSrc.tabIds.includes(movedTabId)) return null
+        // Refuse a self-split that would empty the only group.
+        if (realSrc.tabIds.length <= 1 && realSrcId === targetGroupId) return null
+      }
+      const newId = this._newGroup(movedTabId ? [movedTabId] : [])
+      this.tabTree = splitLeaf(this.tabTree, targetGroupId, direction, edge, newId)
+      if (movedTabId) {
+        const realSrc = this.tabGroups[realSrcId]
+        const idx = realSrc.tabIds.indexOf(movedTabId)
+        if (idx !== -1) {
+          realSrc.tabIds.splice(idx, 1)
+          if (realSrc.activeId === movedTabId) realSrc.activeId = realSrc.tabIds[0] ?? null
+        }
+        if (realSrcId !== targetGroupId && realSrc.tabIds.length === 0) {
+          this._removeGroup(realSrcId)
+        }
+      }
+      this.focusedGroupId = newId
+      this._syncFlat()
+      this._dirty()
+      return newId
+    },
+
+    /** Move a tab between groups (or reorder within one). Prunes the
+     *  source group if emptied. Does NOT touch scope (placement only). */
+    moveTabToGroup(srcGroupId, tabId, dstGroupId, dstIndex = -1) {
+      const src = this.tabGroups[srcGroupId]
+      const dst = this.tabGroups[dstGroupId]
+      if (!src || !dst) return
+      const idx = src.tabIds.indexOf(tabId)
+      if (idx === -1) return
+      if (srcGroupId === dstGroupId) {
+        src.tabIds.splice(idx, 1)
+        const at = dstIndex < 0 ? src.tabIds.length : Math.min(dstIndex, src.tabIds.length)
+        src.tabIds.splice(at, 0, tabId)
+        src.activeId = tabId
+        this.focusedGroupId = srcGroupId
+        this._syncFlat()
+        this._dirty()
+        return
+      }
+      src.tabIds.splice(idx, 1)
+      if (src.activeId === tabId) src.activeId = src.tabIds[0] ?? null
+      const existing = dst.tabIds.indexOf(tabId)
+      if (existing !== -1) dst.tabIds.splice(existing, 1)
+      const at = dstIndex < 0 ? dst.tabIds.length : Math.min(dstIndex, dst.tabIds.length)
+      dst.tabIds.splice(at, 0, tabId)
+      dst.activeId = tabId
+      this.focusedGroupId = dstGroupId
+      if (src.tabIds.length === 0) {
+        this._removeGroup(srcGroupId)
+      }
+      this._syncFlat()
+      this._dirty()
+    },
+
+    /** Close a whole group: drop its non-dashboard/non-pinned tabs,
+     *  relocate any survivors (dashboard / pinned) to a sibling, then
+     *  prune. Never removes the last group. */
+    removeTabGroup(groupId) {
+      const g = this.tabGroups[groupId]
+      if (!g) return
+      if (this.groupCount <= 1) return
+      const keep = g.tabIds.filter((id) => isDashboard(id) || this.pinnedIds.has(id))
+      const victims = g.tabIds.filter((id) => !keep.includes(id))
+      this._dropTabs(victims)
+      // _dropTabs may already have pruned the group if it emptied.
+      if (this.tabGroups[groupId]) {
+        if (keep.length) {
+          // Relocate protected survivors into a sibling group.
+          this.tabTree = pruneLeaf(this.tabTree, groupId)
+          delete this.tabGroups[groupId]
+          const sibling = firstLeafId(this.tabTree)
+          if (sibling) {
+            const sg = this.tabGroups[sibling]
+            for (const id of keep) if (!sg.tabIds.includes(id)) sg.tabIds.push(id)
+            sg.activeId = keep[0]
+            this.focusedGroupId = sibling
+          } else {
+            // No sibling (shouldn't happen given groupCount>1 guard) —
+            // reseed so we never strand the survivors.
+            const gid = this._newGroup(keep, keep[0])
+            this.tabTree = leafTree(gid)
+            this.focusedGroupId = gid
+          }
+        } else {
+          this._removeGroup(groupId)
+        }
+      }
+      this._syncFlat()
+      this._dirty()
+    },
+
+    /** Resize the split at `path` to `ratio`. Mutates in place. */
+    setTabGroupRatio(path, ratio) {
+      if (!this.tabTree) return
+      setRatioAt(this.tabTree, path || [], ratio)
+      this._dirty()
+    },
+
+    /** Bring a group to keyboard focus (new tabs land here). */
+    setFocusedGroup(groupId) {
+      if (!this.tabGroups[groupId]) return
+      if (this.focusedGroupId === groupId) return
+      this.focusedGroupId = groupId
+      this._syncFlat()
+      this._dirty()
+    },
+
+    /** Set a group's active tab. */
+    setGroupActiveTab(groupId, tabId) {
+      const g = this.tabGroups[groupId]
+      if (!g || !g.tabIds.includes(tabId)) return
+      g.activeId = tabId
+      this.focusedGroupId = groupId
+      this._syncFlat()
+      this._dirty()
+    },
+
+    /** Path (child indices) to a group's leaf — for resize wiring. */
+    pathOfGroup(groupId) {
+      return findLeafPath(this.tabTree, groupId)
+    },
+
+    /** Group ids in tree reading order — for keyboard cycle / Ctrl+N. */
+    groupOrder() {
+      return leafOrder(this.tabTree)
     },
 
     // ─── live-attach lifecycle ────────────────────────────────
 
-    /** Open a surface tab for a running target.  */
+    /** Open a surface tab for a running target. */
     async openSurface(target, surface, meta = {}) {
       if (surface === "chat") {
-        this.openTab({
-          kind: "attach",
-          id: `attach:${target}`,
-          target,
-          ...meta,
-        })
+        this.openTab({ kind: "attach", id: `attach:${target}`, target, ...meta })
       } else if (surface === "inspector") {
-        this.openTab({
-          kind: "inspector",
-          id: `inspect:${target}`,
-          target,
-          ...meta,
-        })
+        this.openTab({ kind: "inspector", id: `inspect:${target}`, target, ...meta })
       }
     },
 
@@ -273,9 +587,9 @@ export const useTabsStore = defineStore("tabs", {
     },
 
     /**
-     * High-level "start a session and open its surfaces" action used by the
-     * dashboard's Quick Start modals + the rail's "+ New…" entry. Returns
-     * the new instance id on success, or throws.
+     * High-level "start a session and open its surfaces" action used by
+     * the dashboard's Quick Start modals + the rail's "+ New…" entry.
+     * Returns the new instance id on success, or throws.
      */
     async createSession({
       kind,
@@ -285,12 +599,8 @@ export const useTabsStore = defineStore("tabs", {
       name = null,
       attachMode = "chat",
       alsoOpenInspector = false,
-      // Lab cluster site to spawn / resume on.  Defaults to "_host";
-      // standalone mode ignores the field.
       onNode = "_host",
     }) {
-      // Lazy-import the instances/session APIs to keep tabs.js light
-      // and avoid a Pinia init race in tests.
       const { useInstancesStore } = await import("@/stores/instances")
       const instances = useInstancesStore()
       let id
@@ -304,7 +614,6 @@ export const useTabsStore = defineStore("tabs", {
         if (!pwd) throw new Error("createSession: pwd required")
         id = await instances.create(kind, configPath, pwd, name, { onNode })
       }
-      // Hydrate the instance so the tab has a config_name / type to show.
       let inst = null
       try {
         inst = await instances.fetchOne(id)
@@ -312,10 +621,6 @@ export const useTabsStore = defineStore("tabs", {
         /* ignore — tab still works with just the id */
       }
       const meta = inst ? { config_name: inst.config_name, type: inst.type } : {}
-      // Surface fan-out — ``attachMode === "none"`` is the explicit
-      // "create the session but don't open any tab" mode used by the
-      // graph editor. Every other path keeps the historical default
-      // of opening at least chat.
       if (attachMode !== "none") {
         const surfaces = []
         if (attachMode === "chat" || attachMode === "both") surfaces.push("chat")
@@ -336,11 +641,7 @@ export const useTabsStore = defineStore("tabs", {
       await this.closeSurface(target, "inspector")
     },
 
-    /**
-     * Fetch and cache the policy hint for `target`. Optional / silent —
-     * frontend never gates UI on this.  Callers may use the cached
-     * value to render an informational "IO bindings" line.
-     */
+    /** Fetch and cache the policy hint for `target`. Silent. */
     async fetchPolicyHint(target) {
       if (this.policyHints[target] !== undefined) return this.policyHints[target]
       try {
@@ -355,20 +656,16 @@ export const useTabsStore = defineStore("tabs", {
 
     // ─── persistence sync ────────────────────────────────────
 
-    /** Debounce-fire ``kt:tabs:dirty``; the persistence composable
-     *  writes the snapshot to localStorage. */
+    /** Debounce-fire `kt:tabs:dirty`; the persistence composable writes
+     *  the snapshot to localStorage. */
     _dirty() {
       if (typeof window === "undefined") return
       window.dispatchEvent(new CustomEvent("kt:tabs:dirty"))
     },
 
-    /** JSON-serializable snapshot of the tab list + active id. */
-    serializeToStorage() {
-      // Strip non-serializable keys from each tab spec (none currently,
-      // but defensive — tab callers occasionally pass functions for
-      // ``onView``/``onResume`` callbacks). ``JSON.stringify`` would
-      // drop them anyway; we explicitly cherry-pick known fields.
-      const tabs = this.tabs.map((t) => ({
+    /** Cherry-pick the serializable fields of a tab spec. */
+    _specFields(t) {
+      return {
         kind: t.kind,
         id: t.id,
         target: t.target,
@@ -380,48 +677,133 @@ export const useTabsStore = defineStore("tabs", {
         entity: t.entity,
         entityKind: t.entityKind,
         module_kind: t.module_kind,
-      }))
-      return { tabs, activeId: this.activeId }
+      }
+    },
+
+    /** JSON-serializable v2 snapshot: flat specs + group layout. */
+    serializeToStorage() {
+      const ids = this._unionTabIds()
+      const tabs = ids
+        .map((id) => this.byId[id])
+        .filter(Boolean)
+        .map((t) => this._specFields(t))
+      const tabGroups = {}
+      for (const [gid, g] of Object.entries(this.tabGroups)) {
+        tabGroups[gid] = { tabIds: [...g.tabIds], activeId: g.activeId }
+      }
+      return {
+        version: SNAPSHOT_VERSION,
+        tabs,
+        tabGroups,
+        tabTree: this.tabTree,
+        focusedGroupId: this.focusedGroupId,
+        activeId: this.activeId,
+      }
     },
 
     /**
-     * Apply a localStorage snapshot to the store. Keeps every
-     * structurally-valid tab (``parseTabId`` validates id shape). Tabs
-     * whose kind is not in the registry yet still ride along —
-     * ``TabContent.vue`` falls back to ``PlaceholderTab.vue`` for them.
-     * This lets the macro shell migrate phase-by-phase: each new tab
-     * kind starts as a placeholder and lights up as its phase lands.
-     *
-     * Accepts both the new ``{tabs, activeId}`` shape and the legacy
-     * URL-query ``{tabs: "csv,of,ids", active: "n"}`` shape so users
-     * who had tabs in the URL pre-migration don't lose them.
+     * Apply a localStorage snapshot. Accepts three shapes:
+     *  - v2 `{version:2, tabs, tabGroups, tabTree, focusedGroupId}` —
+     *    the split-layout form;
+     *  - v1 `{tabs:[specs], activeId}` — wrapped into a single group;
+     *  - legacy URL `{tabs:"csv,of,ids", active:"n"}` — re-parsed, then
+     *    wrapped into a single group.
+     * Tabs whose id fails `parseTabId` are dropped; unknown kinds ride
+     * along (TabContent falls back to a placeholder).
      */
     loadFromStorage(snapshot) {
       if (!snapshot) return
-      // New shape: pre-validated array of tab specs.
-      if (Array.isArray(snapshot.tabs) && snapshot.tabs.every((t) => typeof t === "object")) {
-        const valid = snapshot.tabs.filter((t) => t && typeof t.id === "string" && parseTabId(t.id))
-        this.tabs = valid
-        this.activeId = valid.find((t) => t.id === snapshot.activeId)?.id ?? valid[0]?.id ?? null
-        // Restored tabs must acquire scope so the per-instance Pinia
-        // stores stay alive for them. ``openTab`` does this on the
-        // explicit-add path; we replicate it here for the bulk-load.
-        for (const t of valid) if (t.target) acquireScope(t.target)
+      // ── v2 split-layout ──
+      if (
+        snapshot.version === SNAPSHOT_VERSION &&
+        snapshot.tabTree &&
+        Array.isArray(snapshot.tabs)
+      ) {
+        this._loadV2(snapshot)
         return
       }
-      // Legacy URL-query shape — re-parse via parseTabId.
+      // ── v1 flat array → wrap ──
+      if (Array.isArray(snapshot.tabs)) {
+        const valid = snapshot.tabs.filter((t) => t && typeof t.id === "string" && parseTabId(t.id))
+        this._loadFlat(valid, snapshot.activeId)
+        return
+      }
+      // ── legacy URL csv → wrap ──
       if (typeof snapshot.tabs === "string") {
         const ids = snapshot.tabs.split(",").filter(Boolean)
-        const tabs = []
+        const specs = []
         for (const id of ids) {
           const tab = parseTabId(id)
-          if (tab) tabs.push(tab)
+          if (tab) specs.push(tab)
         }
         const idx = parseInt(snapshot.active ?? "0", 10) || 0
-        this.tabs = tabs
-        this.activeId = tabs[Math.min(idx, tabs.length - 1)]?.id ?? tabs[0]?.id ?? null
-        for (const t of tabs) if (t.target) acquireScope(t.target)
+        this._loadFlat(specs, specs[Math.min(idx, specs.length - 1)]?.id ?? null)
       }
+    },
+
+    /** Build a single-group layout from a flat spec list. */
+    _loadFlat(specs, activeId) {
+      this.byId = {}
+      for (const s of specs) this.byId[s.id] = s
+      const ids = specs.map((s) => s.id)
+      const active = ids.includes(activeId) ? activeId : (ids[0] ?? null)
+      this._groupCounter += 1
+      const gid = `tg_${this._groupCounter}`
+      this.tabGroups = { [gid]: { tabIds: ids, activeId: active } }
+      this.tabTree = leafTree(gid)
+      this.focusedGroupId = gid
+      for (const s of specs) if (s.target) acquireScope(s.target)
+      this._syncFlat()
+    },
+
+    /** Restore a v2 split layout with an integrity pass. */
+    _loadV2(snapshot) {
+      const byId = {}
+      for (const t of snapshot.tabs) {
+        if (t && typeof t.id === "string" && parseTabId(t.id)) byId[t.id] = t
+      }
+      const groups = {}
+      for (const [gid, g] of Object.entries(snapshot.tabGroups || {})) {
+        const tabIds = (g?.tabIds ?? []).filter((id) => byId[id])
+        const activeId = tabIds.includes(g?.activeId) ? g.activeId : (tabIds[0] ?? null)
+        groups[gid] = { tabIds, activeId }
+      }
+      // Prune tree leaves whose group is missing.
+      let tree = snapshot.tabTree
+      for (const gid of leafOrder(tree)) {
+        if (!groups[gid]) tree = pruneLeaf(tree, gid)
+      }
+      // Drop groups not referenced by the (pruned) tree.
+      const live = new Set(leafOrder(tree))
+      for (const gid of Object.keys(groups)) if (!live.has(gid)) delete groups[gid]
+      // Empty / corrupt → seed a single group from whatever survived.
+      if (!tree || live.size === 0) {
+        this._loadFlat(
+          Object.values(byId).map((t) => this._specFields(t)),
+          snapshot.activeId,
+        )
+        return
+      }
+      this.byId = byId
+      this.tabGroups = groups
+      this.tabTree = tree
+      this.focusedGroupId =
+        snapshot.focusedGroupId && groups[snapshot.focusedGroupId]
+          ? snapshot.focusedGroupId
+          : firstLeafId(tree)
+      this._groupCounter = this._deriveCounter(groups, snapshot._groupCounter)
+      for (const t of Object.values(byId)) if (t.target) acquireScope(t.target)
+      this._syncFlat()
+    },
+
+    /** Next-safe `tg_<n>` counter from existing group ids. */
+    _deriveCounter(groups, hint) {
+      let max = typeof hint === "number" ? hint : 0
+      for (const gid of Object.keys(groups)) {
+        const m = /^tg_(\d+)$/.exec(gid)
+        if (m) max = Math.max(max, parseInt(m[1], 10))
+      }
+      return max
     },
 
     // ─── persistence helpers ─────────────────────────────────
@@ -436,8 +818,8 @@ export const useTabsStore = defineStore("tabs", {
 
     /**
      * One-time migration: copy `kt.layout.preset.<id>` →
-     * `kt.attach.<id>.preset` so per-instance preset memory survives
-     * the macro-shell cutover. Idempotent.
+     * `kt.attach.<id>.preset` so per-instance preset memory survives the
+     * macro-shell cutover. Idempotent.
      */
     migrateLayoutPresetKeys() {
       try {

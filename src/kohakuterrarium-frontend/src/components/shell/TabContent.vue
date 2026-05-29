@@ -7,8 +7,8 @@
       (re-fetch data) without closing the tab.
     -->
     <UnderDensityPlaceholder v-if="underDensity" :required="underDensity.required" :panel-label="underDensity.label" />
-    <component :is="ActiveComp" v-else-if="ActiveComp && tabs.activeTab" :key="contentKey" :tab="tabs.activeTab" />
-    <PlaceholderTab v-else-if="tabs.activeTab" :tab="tabs.activeTab" />
+    <component :is="ActiveComp" v-else-if="ActiveComp && activeTab" :key="contentKey" :tab="activeTab" />
+    <PlaceholderTab v-else-if="activeTab" :tab="activeTab" />
     <PlaceholderTab v-else :tab="null" />
   </div>
 </template>
@@ -22,17 +22,26 @@ import { useDensity, meetsDensity } from "@/composables/useDensity"
 import { useTabsStore } from "@/stores/tabs"
 import { tabKindRegistry } from "@/stores/tabKindRegistry"
 
+// Optional ``groupId``: when set, this content renders the active tab
+// of THAT tab-group (macro split layout). When omitted, it renders the
+// global focused-group active tab (CompactShell / legacy callers).
+const props = defineProps({
+  groupId: { type: String, default: null },
+})
+
 const tabs = useTabsStore()
 const { density } = useDensity()
 
+const activeTab = computed(() => (props.groupId ? tabs.groupActiveTab(props.groupId) : tabs.activeTab))
+
 const ActiveComp = computed(() => {
-  const t = tabs.activeTab
+  const t = activeTab.value
   if (!t) return null
   return tabKindRegistry.get(t.kind)?.component ?? null
 })
 
 const contentKey = computed(() => {
-  const t = tabs.activeTab
+  const t = activeTab.value
   if (!t) return "no-tab"
   return `${t.id}@${tabs.revisions[t.id] ?? 0}`
 })
@@ -40,7 +49,7 @@ const contentKey = computed(() => {
 // `null` when the active tab is allowed at current density. Otherwise
 // `{ required, label }` describing what to render in the placeholder.
 const underDensity = computed(() => {
-  const t = tabs.activeTab
+  const t = activeTab.value
   if (!t) return null
   const entry = tabKindRegistry.get(t.kind)
   if (!entry) return null

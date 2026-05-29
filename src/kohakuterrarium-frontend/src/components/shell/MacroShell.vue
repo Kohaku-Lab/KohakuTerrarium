@@ -2,10 +2,7 @@
   <CompactShell v-if="isCompact" />
   <div v-else class="h-full flex overflow-hidden bg-warm-50 dark:bg-warm-950">
     <RailPane />
-    <div class="flex-1 flex flex-col overflow-hidden">
-      <TabStrip />
-      <TabContent />
-    </div>
+    <TabGroupContainer />
   </div>
 </template>
 
@@ -14,8 +11,7 @@ import { onMounted, onBeforeUnmount } from "vue"
 
 import CompactShell from "@/components/shell/CompactShell.vue"
 import RailPane from "@/components/shell/RailPane.vue"
-import TabStrip from "@/components/shell/TabStrip.vue"
-import TabContent from "@/components/shell/TabContent.vue"
+import TabGroupContainer from "@/components/shell/TabGroupContainer.vue"
 import { useDensity } from "@/composables/useDensity"
 import { useTabsStore } from "@/stores/tabs"
 import { useInstancesStore } from "@/stores/instances"
