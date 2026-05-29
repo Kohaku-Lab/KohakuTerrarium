@@ -13,6 +13,7 @@
     <ToastCenter />
     <HostPickerModal :open="hostPickerOpen" @close="hostPickerOpen = false" />
     <AdminTokenModal />
+    <LoginPromptModal />
   </div>
 </template>
 
@@ -21,6 +22,7 @@ import { ref, watch } from "vue"
 
 import AdminTokenModal from "@/components/auth/AdminTokenModal.vue"
 import AuthGate from "@/components/auth/AuthGate.vue"
+import LoginPromptModal from "@/components/auth/LoginPromptModal.vue"
 import CommandPalette from "@/components/chrome/CommandPalette.vue"
 import ShortcutHelp from "@/components/chrome/ShortcutHelp.vue"
 import ToastCenter from "@/components/chrome/ToastCenter.vue"
@@ -57,10 +59,14 @@ watch(isCompact, (compact) => theme.setMobileMode(compact), { immediate: true })
 // switch via the AuthGate's own watcher.
 const auth = useAuthStore()
 const hostsStoreInstance = useHostsStore()
-auth.fetch()
+// fetchMe runs AFTER fetch resolves so it can read the freshly-probed
+// multi_user flag (it no-ops on single-user hosts).  This populates the
+// logged-in identity (incl. same-origin cookie sessions) so the account
+// surface + admin-portal gate know who the user is on boot.
+auth.fetch().then(() => auth.fetchMe())
 watch(
   () => hostsStoreInstance.activeHostId,
-  () => auth.fetch(),
+  () => auth.fetch().then(() => auth.fetchMe()),
 )
 
 const instances = useInstancesStore()

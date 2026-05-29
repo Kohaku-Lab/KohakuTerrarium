@@ -196,6 +196,27 @@ describe("auth store — logout", () => {
   })
 })
 
+describe("auth store — login prompt", () => {
+  it("requestLogin coalesces concurrent calls into one slot", async () => {
+    const auth = useAuthStore()
+    const p1 = auth.requestLogin()
+    const p2 = auth.requestLogin()
+    expect(auth.pendingLoginPrompt).not.toBeNull()
+    auth.resolveLoginPrompt()
+    const results = await Promise.all([p1, p2])
+    expect(results).toEqual([undefined, undefined])
+    expect(auth.pendingLoginPrompt).toBeNull()
+  })
+
+  it("rejectLoginPrompt rejects the awaiter (interceptor won't hang)", async () => {
+    const auth = useAuthStore()
+    const p = auth.requestLogin()
+    auth.rejectLoginPrompt()
+    await expect(p).rejects.toThrow(/cancelled/)
+    expect(auth.pendingLoginPrompt).toBeNull()
+  })
+})
+
 describe("auth store — admin prompt", () => {
   it("requestAdminToken coalesces concurrent calls", async () => {
     // Pinia proxies state-stored objects, so promise identity (===)
@@ -294,5 +315,150 @@ describe("auth store — needsLogin gate", () => {
     const auth = useAuthStore()
     await auth.fetch()
     expect(auth.needsLogin).toBe(false)
+  })
+})
+
+describe("auth store — fetchMe + identity", () => {
+  // Capabilities response with multi-user ON — fetchMe no-ops unless
+  // this has been probed first.
+  function capsMultiUser(mode = "optional") {
+    return { data: { auth: { multi_user: { enabled: true, mode, registration: "open" } } } }
+  }
+
+  it("same-origin: GET /me fills sameOriginUser + currentUser", async () => {
+    axios.get.mockResolvedValueOnce(capsMultiUser())
+    axios.get.mockResolvedValueOnce({
+      data: { id: 1, username: "root", role: "admin", is_active: true },
+    })
+    const auth = useAuthStore()
+    await auth.fetch()
+    const me = await auth.fetchMe()
+    expect(me.username).toBe("root")
+    expect(auth.currentUser.username).toBe("root")
+    expect(auth.sameOriginUser.username).toBe("root")
+    expect(auth.isAdmin).toBe(true)
+    // Cookie path: relative URL + withCredentials, no host token.
+    const [url, cfg] = axios.get.mock.calls[1]
+    expect(url).toBe("/api/auth/me")
+    expect(cfg.withCredentials).toBe(true)
+  })
+
+  it("same-origin: 401 clears identity", async () => {
+    axios.get.mockResolvedValueOnce(capsMultiUser())
+    axios.get.mockRejectedValueOnce({ response: { status: 401 } })
+    const auth = useAuthStore()
+    await auth.fetch()
+    auth.sameOriginUser = { id: 9, username: "stale", role: "user" }
+    const me = await auth.fetchMe()
+    expect(me).toBeNull()
+    expect(auth.sameOriginUser).toBeNull()
+    expect(auth.currentUser).toBeNull()
+  })
+
+  it("same-origin: a transient network error keeps existing identity", async () => {
+    axios.get.mockResolvedValueOnce(capsMultiUser())
+    axios.get.mockRejectedValueOnce(new Error("ECONNREFUSED"))
+    const auth = useAuthStore()
+    await auth.fetch()
+    auth.sameOriginUser = { id: 9, username: "kept", role: "user" }
+    await auth.fetchMe()
+    expect(auth.sameOriginUser.username).toBe("kept")
+  })
+
+  it("no-ops (no /me call) when multi_user is off", async () => {
+    axios.get.mockResolvedValueOnce({
+      data: { auth: { multi_user: { enabled: false, mode: "off" } } },
+    })
+    const auth = useAuthStore()
+    await auth.fetch()
+    const callsBefore = axios.get.mock.calls.length
+    const me = await auth.fetchMe()
+    expect(me).toBeNull()
+    expect(axios.get.mock.calls.length).toBe(callsBefore)
+  })
+
+  it("remote: refreshes the persisted user snapshot via bearer", async () => {
+    const hosts = useHostsStore()
+    const id = hosts.addHost({ name: "X", url: "http://kt", token: "h" })
+    hosts.setActive(id)
+    hosts.setUserSession(id, {
+      userToken: "bearer-1",
+      user: { id: 1, username: "a", role: "user" },
+    })
+    axios.get.mockResolvedValueOnce(capsMultiUser())
+    axios.get.mockResolvedValueOnce({
+      data: { id: 1, username: "a", role: "admin", is_active: true },
+    })
+    const auth = useAuthStore()
+    await auth.fetch()
+    await auth.fetchMe()
+    // Role promoted server-side → reflected locally; token preserved.
+    expect(hosts.activeHost.currentUser.role).toBe("admin")
+    expect(hosts.activeHost.userToken).toBe("bearer-1")
+    expect(auth.isAdmin).toBe(true)
+    const [url, cfg] = axios.get.mock.calls[1]
+    expect(url).toBe("http://kt/api/auth/me")
+    expect(cfg.headers.Authorization).toBe("Bearer bearer-1")
+    expect(cfg.headers["X-KT-Host-Token"]).toBe("h")
+  })
+
+  it("remote: 401 drops the stale session", async () => {
+    const hosts = useHostsStore()
+    const id = hosts.addHost({ name: "X", url: "http://kt" })
+    hosts.setActive(id)
+    hosts.setUserSession(id, { userToken: "bad", user: { id: 1, username: "a", role: "user" } })
+    axios.get.mockResolvedValueOnce(capsMultiUser())
+    axios.get.mockRejectedValueOnce({ response: { status: 401 } })
+    const auth = useAuthStore()
+    await auth.fetch()
+    await auth.fetchMe()
+    expect(hosts.activeHost.userToken).toBe("")
+    expect(hosts.activeHost.currentUser).toBeNull()
+  })
+
+  it("remote: no bearer → anonymous, no /me call", async () => {
+    const hosts = useHostsStore()
+    const id = hosts.addHost({ name: "X", url: "http://kt" })
+    hosts.setActive(id)
+    axios.get.mockResolvedValueOnce(capsMultiUser())
+    const auth = useAuthStore()
+    await auth.fetch()
+    const callsBefore = axios.get.mock.calls.length
+    const me = await auth.fetchMe()
+    expect(me).toBeNull()
+    expect(axios.get.mock.calls.length).toBe(callsBefore)
+  })
+
+  it("isAdmin is false for a non-admin user", async () => {
+    axios.get.mockResolvedValueOnce(capsMultiUser())
+    axios.get.mockResolvedValueOnce({
+      data: { id: 2, username: "bob", role: "user", is_active: true },
+    })
+    const auth = useAuthStore()
+    await auth.fetch()
+    await auth.fetchMe()
+    expect(auth.currentUser.username).toBe("bob")
+    expect(auth.isAdmin).toBe(false)
+  })
+
+  it("login stores same-origin identity in the runtime store", async () => {
+    axios.post.mockResolvedValueOnce({
+      data: { user: { id: 1, username: "alice", role: "admin" }, expires_at: "2030" },
+    })
+    const auth = useAuthStore()
+    await auth.login({ username: "alice", password: "x" })
+    expect(auth.sameOriginUser.username).toBe("alice")
+  })
+
+  it("logout clears same-origin identity", async () => {
+    axios.post.mockResolvedValueOnce({ data: { status: "logged_out" } })
+    const auth = useAuthStore()
+    auth.sameOriginUser = { id: 1, username: "alice", role: "admin" }
+    await auth.logout()
+    expect(auth.sameOriginUser).toBeNull()
+    // Same-origin logout posts to the relative path with credentials.
+    const [url, , cfg] = axios.post.mock.calls[0]
+    expect(url).toBe("/api/auth/logout")
+    expect(cfg.withCredentials).toBe(true)
   })
 })

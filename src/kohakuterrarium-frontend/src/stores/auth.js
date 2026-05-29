@@ -74,6 +74,11 @@ export const useAuthStore = defineStore("auth", {
     /** True after the first capabilities fetch for the active host —
      *  components can use this to hold UI until we know what's on. */
     ready: false,
+    /** L4 identity for SAME-ORIGIN mode.  Remote hosts persist the
+     *  logged-in user on their host record (``hosts.activeUser``);
+     *  same-origin has no host record, so the ``GET /me`` snapshot
+     *  lives here in the runtime store.  Reset on logout / 401. */
+    sameOriginUser: null,
   }),
 
   getters: {
@@ -133,6 +138,25 @@ export const useAuthStore = defineStore("auth", {
       // packaged-host case where cookies work natively.
       if (!active) return false
       return !active.userToken
+    },
+
+    /** The logged-in user for the active host, or ``null``.  Remote
+     *  hosts persist this on the host record; same-origin (cookie)
+     *  keeps it in ``sameOriginUser`` since there's no host record to
+     *  attach to.  Populated by ``fetchMe`` on boot + after login. */
+    currentUser() {
+      const hosts = useHostsStore()
+      if (hosts.activeHostId) return hosts.activeUser
+      return this.sameOriginUser
+    },
+
+    /** True when the active host has multi-user enabled AND the current
+     *  user's role is ``admin``.  This is the ONLY gate for the admin
+     *  portal — the backend enforces the same (``_require_admin`` on the
+     *  current user); the L3 admin token does NOT unlock user
+     *  management. */
+    isAdmin() {
+      return this.multiUserEnabled && this.currentUser?.role === "admin"
     },
   },
 
@@ -211,6 +235,10 @@ export const useAuthStore = defineStore("auth", {
           userToken: data.token,
           user: data.user,
         })
+      } else if (!active && data?.user) {
+        // Same-origin: no host record to attach to — hold identity in
+        // the runtime store (cookie carries the actual session).
+        this.sameOriginUser = data.user
       }
       // Resolve any pending login prompt (AuthGate listeners).
       if (this.pendingLoginPrompt) {
@@ -244,6 +272,8 @@ export const useAuthStore = defineStore("auth", {
           userToken: data.token,
           user: data.user,
         })
+      } else if (!active && data?.user) {
+        this.sameOriginUser = data.user
       }
       if (this.pendingLoginPrompt) {
         this.pendingLoginPrompt.resolve()
@@ -260,18 +290,70 @@ export const useAuthStore = defineStore("auth", {
     async logout() {
       const hosts = useHostsStore()
       const active = hosts.activeHost
-      if (active?.userToken) {
-        const base = active.url
+      // Same-origin always calls (cookie session drop); remote only when
+      // we hold a bearer.  Best-effort — local clear below always runs.
+      const shouldCall = active ? !!active.userToken : true
+      if (shouldCall) {
+        const base = active ? active.url : ""
         const url = `${base}/api/auth/logout`
-        const headers = { Authorization: `Bearer ${active.userToken}` }
-        if (active.token) headers["X-KT-Host-Token"] = active.token
+        const headers = {}
+        if (active?.userToken) headers.Authorization = `Bearer ${active.userToken}`
+        if (active?.token) headers["X-KT-Host-Token"] = active.token
+        const config = { headers, timeout: 10000 }
+        if (!active) config.withCredentials = true
         try {
-          await axios.post(url, {}, { headers, timeout: 10000 })
+          await axios.post(url, {}, config)
         } catch (_err) {
           // Best-effort — local clear below always happens.
         }
       }
       if (active) hosts.clearUserSession(active.id)
+      else this.sameOriginUser = null
+    },
+
+    /** Validate + refresh the current session via ``GET /api/auth/me``.
+     *
+     *  Called on boot (and host switch) AFTER ``fetch()`` so we know
+     *  whether the host even has user accounts.  Uses RAW axios (like
+     *  ``login``) so a boot-time 401 does NOT trigger the interceptor's
+     *  login-modal prompt — boot should populate identity silently.
+     *
+     *  - Same-origin: hits ``/me`` with the cookie (``withCredentials``);
+     *    200 fills ``sameOriginUser``, 401 clears it.
+     *  - Remote: only meaningful when we hold a stored bearer token;
+     *    200 refreshes the persisted user snapshot (role may have
+     *    changed), 401 drops the stale session.
+     *
+     *  Network / non-401 errors leave existing state intact — the host
+     *  may be transiently unreachable and we must not silently log the
+     *  user out. */
+    async fetchMe() {
+      if (!this.multiUserEnabled) return null
+      const hosts = useHostsStore()
+      const active = hosts.activeHost
+      if (active && !active.userToken) return null
+      const base = active ? active.url : ""
+      const url = `${base}/api/auth/me`
+      const headers = {}
+      if (active?.token) headers["X-KT-Host-Token"] = active.token
+      if (active?.userToken) headers.Authorization = `Bearer ${active.userToken}`
+      const config = { headers, timeout: 10000 }
+      if (!active) config.withCredentials = true
+      try {
+        const { data } = await axios.get(url, config)
+        if (active) {
+          hosts.setUserSession(active.id, { userToken: active.userToken, user: data })
+        } else {
+          this.sameOriginUser = data
+        }
+        return data
+      } catch (err) {
+        if (err?.response?.status === 401) {
+          if (active) hosts.clearUserSession(active.id)
+          else this.sameOriginUser = null
+        }
+        return null
+      }
     },
 
     /** Record an L3 admin token.  Stored on the active host so future
@@ -345,6 +427,26 @@ export const useAuthStore = defineStore("auth", {
       // See ``requestAdminToken`` — return via the stored slot so the
       // ref identity matches subsequent coalesced calls.
       return this.pendingLoginPrompt.promise
+    },
+
+    /** Resolve the pending login prompt without going through
+     *  ``login`` (e.g. the user dismissed the modal after a cookie
+     *  session already became valid).  Normally ``login``/``register``
+     *  resolve it themselves on success. */
+    resolveLoginPrompt() {
+      if (!this.pendingLoginPrompt) return
+      this.pendingLoginPrompt.resolve()
+      this.pendingLoginPrompt = null
+    },
+
+    /** Reject the pending login prompt — modal cancelled.  Lets the
+     *  awaiting api.js interceptor reject the original request instead
+     *  of hanging forever. */
+    rejectLoginPrompt() {
+      if (!this.pendingLoginPrompt) return
+      const reject = this.pendingLoginPrompt.reject
+      this.pendingLoginPrompt = null
+      reject(new Error("login prompt cancelled"))
     },
   },
 })

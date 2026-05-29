@@ -5,6 +5,32 @@
          narrow viewports.  Cap at 70vh so long host lists + the QR
          scanner scroll INSIDE the modal instead of the page. -->
     <div class="flex flex-col gap-4 text-[13px] max-h-[70vh] overflow-y-auto pr-1 -mr-1">
+      <!-- Active-host session (L4).  Only shown when the active host
+           advertises user accounts.  This is the primary, always-
+           visible "log in" entry — including for same-origin, which
+           has no row-level login button. -->
+      <section v-if="auth.multiUserEnabled" class="flex flex-col gap-1">
+        <h3 class="text-[11px] uppercase tracking-wider text-warm-400 font-medium px-1">
+          {{ t("hostPicker.session") }}
+        </h3>
+        <div class="flex items-center gap-2 px-2 py-1.5 rounded bg-warm-100 dark:bg-warm-800/50">
+          <span class="i-carbon-user-avatar text-iolite text-lg shrink-0" aria-hidden="true" />
+          <div class="flex-1 min-w-0">
+            <span v-if="auth.currentUser" class="block truncate text-warm-700 dark:text-warm-300">
+              {{ t("auth.account.signedInAs", { username: auth.currentUser.username }) }}
+            </span>
+            <span v-else class="block text-warm-400">{{ t("hostPicker.notSignedIn") }}</span>
+          </div>
+          <el-button v-if="auth.currentUser" size="small" @click="onLogoutActive">
+            {{ t("auth.user.logout") }}
+          </el-button>
+          <el-button v-else size="small" type="primary" @click="onLoginActive">
+            <span class="i-carbon-login mr-1" />
+            {{ t("auth.login.title") }}
+          </el-button>
+        </div>
+      </section>
+
       <!-- Saved hosts list -->
       <section class="flex flex-col gap-1">
         <h3 class="text-[11px] uppercase tracking-wider text-warm-400 font-medium px-1">
@@ -207,6 +233,17 @@ async function onLogin(host) {
   hosts.setActive(host.id)
   loginForHostId.value = host.id
   await auth.fetch()
+}
+
+/** Reveal the inline login pane for the ACTIVE host (same-origin or
+ *  remote).  ``"_self"`` is just a truthy sentinel — LoginPane targets
+ *  ``hosts.activeHost`` (null = same-origin browser/cookie login). */
+function onLoginActive() {
+  loginForHostId.value = hosts.activeHostId || "_self"
+}
+
+async function onLogoutActive() {
+  await auth.logout()
 }
 
 function onLoginSuccess() {
