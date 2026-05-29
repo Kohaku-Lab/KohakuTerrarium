@@ -22,14 +22,20 @@
       <span class="i-carbon-settings" />
       Open Settings
     </button>
+    <button v-if="auth.isAdmin" class="w-full text-left px-3 py-1.5 hover:bg-warm-100 dark:hover:bg-warm-800 flex items-center gap-2" @click="openAdmin">
+      <span class="i-carbon-user-admin" />
+      Open Admin
+    </button>
   </div>
 </template>
 
 <script setup>
 import { computed } from "vue"
 import { useTabsStore } from "@/stores/tabs"
+import { useAuthStore } from "@/stores/auth"
 
 const tabs = useTabsStore()
+const auth = useAuthStore()
 const emit = defineEmits(["close"])
 
 const canReopen = computed(() => tabs.recentlyClosed.length > 0)
@@ -52,6 +58,10 @@ function openExtensions() {
 }
 function openSettings() {
   tabs.openTab({ kind: "settings", id: "settings" })
+  emit("close")
+}
+function openAdmin() {
+  tabs.openTab({ kind: "admin", id: "admin" })
   emit("close")
 }
 </script>

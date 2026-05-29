@@ -27,6 +27,7 @@ import ResumeSessionModal from "@/components/shell/modals/ResumeSessionModal.vue
 import AdvancedStartModal from "@/components/shell/modals/AdvancedStartModal.vue"
 import GraphEditorTab from "@/components/graph-editor/GraphEditorTab.vue"
 import { registerTabKind, tabKindRegistry } from "@/stores/tabKindRegistry"
+import { useAuthStore } from "@/stores/auth"
 import { useTabsStore } from "@/stores/tabs"
 import { useStudioWorkspaceStore } from "@/stores/studio/workspace"
 import { buildStudioTabId } from "@/utils/tabsUrl"
@@ -39,6 +40,7 @@ if (!tabKindRegistry.has("graph-editor")) {
 }
 
 const tabs = useTabsStore()
+const auth = useAuthStore()
 const ws = useStudioWorkspaceStore()
 const modal = ref(null)
 const { t } = useI18n()
@@ -131,5 +133,18 @@ const entries = computed(() => [
     icon: "i-carbon-settings",
     action: () => tabs.openTab({ kind: "settings", id: "settings" }),
   },
+  // Admin portal — only for an admin-role user on a multi-user host.
+  // ``isAdmin`` is false on single-user / anonymous hosts, so this
+  // entry simply doesn't render there.
+  ...(auth.isAdmin
+    ? [
+        {
+          id: "admin",
+          label: t("shell.quick.admin"),
+          icon: "i-carbon-user-admin",
+          action: () => tabs.openTab({ kind: "admin", id: "admin" }),
+        },
+      ]
+    : []),
 ])
 </script>

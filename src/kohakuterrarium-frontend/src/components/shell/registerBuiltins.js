@@ -25,6 +25,7 @@ import CatalogTab from "@/components/shell/tabs/CatalogTab.vue"
 import ExtensionsTab from "@/components/shell/tabs/ExtensionsTab.vue"
 import SettingsTab from "@/components/shell/tabs/SettingsTab.vue"
 import CodeEditorTab from "@/components/shell/tabs/CodeEditorTab.vue"
+import AdminTab from "@/components/shell/tabs/AdminTab.vue"
 
 let _registered = false
 
@@ -78,4 +79,7 @@ export function registerBuiltinTabKinds() {
   registerTabKind({ kind: "extensions", component: ExtensionsTab })
   registerTabKind({ kind: "settings", component: SettingsTab })
   registerTabKind({ kind: "code-editor", component: CodeEditorTab })
+  // Admin portal (L4 user/invitation/token management). The launcher is
+  // gated on the admin role in the rail; the tab itself re-checks.
+  registerTabKind({ kind: "admin", component: AdminTab })
 }
