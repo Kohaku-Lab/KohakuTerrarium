@@ -275,6 +275,9 @@
       <!-- ════════════════════════ Account (Codex usage) ════════════════════════ -->
       <el-tab-pane :label="t('settings.tabs.account')" name="account">
         <div class="settings-pane flex flex-col gap-4 max-w-xl">
+          <!-- KohakuTerrarium account (L4) — only when logged into a
+               multi-user host.  Provider/Codex usage follows below. -->
+          <AccountSection v-if="auth.currentUser" />
           <div v-if="codexUsageLoading" class="text-warm-400 text-sm py-4 text-center">{{ t("common.loading") }}</div>
           <div v-else-if="codexUsageError" class="card p-4 border-l-3 border-l-coral">
             <p class="text-sm text-warm-600 dark:text-warm-400">{{ codexUsageError }}</p>
@@ -423,6 +426,7 @@
 import { computed, reactive, ref, onMounted, watch } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
 
+import AccountSection from "@/components/account/AccountSection.vue"
 import AboutPanel from "@/components/settings/AboutPanel.vue"
 import AdvancedPanel from "@/components/settings/AdvancedPanel.vue"
 import BackendForm from "@/components/settings/BackendForm.vue"
@@ -433,12 +437,14 @@ import SitesPane from "@/components/settings/SitesPane.vue"
 import UpdatesPanel from "@/components/settings/UpdatesPanel.vue"
 import SitePicker from "@/components/cluster/SitePicker.vue"
 import { useDensity } from "@/composables/useDensity"
+import { useAuthStore } from "@/stores/auth"
 import { useClusterStore } from "@/stores/cluster"
 import { LOCALE_DISPLAY_NAMES, SUPPORTED_LOCALES, useLocaleStore } from "@/stores/locale"
 import { DEFAULT_DESKTOP_ZOOM, DEFAULT_MOBILE_ZOOM, MAX_UI_ZOOM, MIN_UI_ZOOM, useThemeStore } from "@/stores/theme"
 import { useI18n } from "@/utils/i18n"
 
 const cluster = useClusterStore()
+const auth = useAuthStore()
 import { configAPI, settingsAPI } from "@/utils/api"
 
 const theme = useThemeStore()
