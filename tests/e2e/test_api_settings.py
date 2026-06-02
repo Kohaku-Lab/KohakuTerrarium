@@ -154,7 +154,7 @@ class TestApiSettingsJourney:
         scripted_llm: ScriptedLLM,
     ) -> None:
         # ── 1. Identity: LLM backend CRUD ─────────────────────────────
-        # Baseline: only the six built-in backends, no user backends.
+        # Baseline: only the built-in backends, no user backends.
         resp = client.get("/api/settings/backends")
         assert resp.status_code == 200
         baseline = resp.json()["backends"]
@@ -166,6 +166,8 @@ class TestApiSettingsJourney:
             "anthropic",
             "gemini",
             "mimo",
+            "kimi-code",
+            "glm-coding",
         }
         assert "acme" not in baseline_names
 

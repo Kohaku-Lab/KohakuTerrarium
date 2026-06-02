@@ -524,7 +524,7 @@ presets:
 
 舊值 `codex-oauth` 為了向後相容仍會被接受，讀取時會正規化為 `codex`。
 
-內建 provider 名稱 (`codex`、`openai`、`openrouter`、`anthropic`、`gemini`、`mimo`) 不能刪除；它們的 base URL 與 `api_key_env` 由內建預設值寫死。每隻代理仍然可以用 `controller.base_url` / `controller.api_key_env` 覆寫。
+內建 provider 名稱 (`codex`、`openai`、`openrouter`、`anthropic`、`gemini`、`mimo`、`kimi-code`、`glm-coding`) 不能刪除；它們的 base URL 與 `api_key_env` 由內建預設值寫死。每隻代理仍然可以用 `controller.base_url` / `controller.api_key_env` 覆寫。
 
 ### 新增自訂 LLM backend provider
 

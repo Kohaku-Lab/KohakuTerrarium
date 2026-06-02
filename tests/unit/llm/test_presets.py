@@ -114,6 +114,8 @@ class TestResolveAlias:
     def test_short_friendly_alias(self):
         assert resolve_alias("opus") == ("anthropic", "claude-opus-4.7")
         assert resolve_alias("gpt5") == ("codex", "gpt-5.4")
+        assert resolve_alias("kimi-code") == ("kimi-code", "kimi-for-coding")
+        assert resolve_alias("glm-coding") == ("glm-coding", "glm-5.1")
 
     def test_legacy_suffixed_alias(self):
         assert resolve_alias("gpt-5.4-or") == ("openrouter", "gpt-5.4")
@@ -182,6 +184,32 @@ class TestPresetsDataIntegrity:
     def test_anthropic_direct_presets_use_anthropic_provider(self):
         assert PRESETS["claude-opus-4.7"]["provider"] == "anthropic"
         assert PRESETS["claude-opus-4.7"]["model"] == "claude-opus-4-7"
+
+    def test_kimi_code_direct_preset_uses_kimi_code_provider(self):
+        preset = PRESETS["kimi-for-coding"]
+        assert preset["provider"] == "kimi-code"
+        assert preset["model"] == "kimi-for-coding"
+        assert preset["max_context"] == 262144
+        assert preset["max_output"] == 32768
+
+    def test_glm_coding_direct_presets_use_bearer_auth(self):
+        expected = {
+            "glm-5.1": ("GLM-5.1", 204800, 131072),
+            "glm-5-turbo": ("GLM-5-Turbo", 204800, 131072),
+            "glm-4.7": ("GLM-4.7", 204800, 131072),
+            "glm-4.5-air": ("GLM-4.5-Air", 131072, 98304),
+        }
+        for name, (model, max_context, max_output) in expected.items():
+            preset = PRESETS[name]
+            assert preset["provider"] == "glm-coding"
+            assert preset["model"] == model
+            assert preset["max_context"] == max_context
+            assert preset["max_output"] == max_output
+            assert preset["extra_body"]["auth_as_bearer"] is True
+
+    def test_glm_coding_legacy_suffixed_aliases_resolve(self):
+        assert resolve_alias("glm-5.1-coding") == ("glm-coding", "glm-5.1")
+        assert resolve_alias("glm-4.7-coding") == ("glm-coding", "glm-4.7")
 
 
 # ---------------------------------------------------------------------------

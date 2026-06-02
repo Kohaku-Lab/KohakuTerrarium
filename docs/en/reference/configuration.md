@@ -631,9 +631,10 @@ Canonical `backend_type` values are:
 Legacy `codex-oauth` is accepted for back-compat and normalized to `codex`.
 
 Built-in provider names (`codex`, `openai`, `openrouter`, `anthropic`,
-`gemini`, `mimo`) cannot be deleted; their base URLs and `api_key_env`
-values are fixed via built-in defaults. Per-agent overrides via
-`controller.base_url` / `controller.api_key_env` still work.
+`gemini`, `mimo`, `kimi-code`, `glm-coding`) cannot be deleted; their
+base URLs and `api_key_env` values are fixed via built-in defaults.
+Per-agent overrides via `controller.base_url` / `controller.api_key_env`
+still work.
 
 
 ### Adding a custom LLM backend provider

@@ -739,7 +739,7 @@ Module-level 函式：
 - `resolve_controller_llm(controller_config, llm_override=None) -> LLMProfile | None`
 - `list_all() -> list[dict]`
 
-内置 provider 名称：`codex`、`openai`、`openrouter`、`anthropic`、`gemini`、`mimo`。
+内置 provider 名称：`codex`、`openai`、`openrouter`、`anthropic`、`gemini`、`mimo`、`kimi-code`、`glm-coding`。
 
 ### API key
 

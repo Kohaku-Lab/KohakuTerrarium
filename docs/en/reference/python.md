@@ -861,7 +861,7 @@ Module-level functions:
 - `list_all() -> list[dict]`
 
 Built-in provider names: `codex`, `openai`, `openrouter`, `anthropic`,
-`gemini`, `mimo`.
+`gemini`, `mimo`, `kimi-code`, `glm-coding`.
 
 ### API keys
 

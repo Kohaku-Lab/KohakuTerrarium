@@ -2,7 +2,15 @@
 API key storage and retrieval.
 
 Keys are stored in ~/.kohakuterrarium/api_keys.yaml
-Format: { openrouter: "sk-or-...", openai: "sk-...", anthropic: "sk-ant-...", gemini: "AI..." }
+Format:
+  {
+    openrouter: "sk-or-...",
+    openai: "sk-...",
+    anthropic: "sk-ant-...",
+    gemini: "AI...",
+    kimi-code: "sk-...",
+    glm-coding: "...",
+  }
 
 Resolution order in :func:`get_api_key`:
 
@@ -50,6 +58,8 @@ PROVIDER_KEY_MAP: dict[str, str] = {
     "anthropic": "ANTHROPIC_API_KEY",
     "gemini": "GEMINI_API_KEY",
     "mimo": "MIMO_API_KEY",
+    "kimi-code": "KIMI_CODE_API_KEY",
+    "glm-coding": "GLM_CODING_API_KEY",
 }
 
 # Process-wide sync resolver hook.  ``Callable[[str], str]`` — given a

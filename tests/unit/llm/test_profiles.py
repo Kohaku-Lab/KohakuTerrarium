@@ -140,6 +140,25 @@ class TestGetProfile:
         assert profile.api_key_env == "OPENAI_API_KEY"
         assert profile.backend_type == "openai"
 
+    def test_kimi_code_direct_profile_resolves(self):
+        profile = get_profile("kimi-code/kimi-for-coding")
+        assert profile is not None
+        assert profile.provider == "kimi-code"
+        assert profile.backend_type == "anthropic"
+        assert profile.model == "kimi-for-coding"
+        assert profile.base_url == "https://api.kimi.com/coding/"
+        assert profile.api_key_env == "KIMI_CODE_API_KEY"
+
+    def test_glm_coding_direct_profile_resolves_with_bearer_auth(self):
+        profile = get_profile("glm-coding/glm-5.1")
+        assert profile is not None
+        assert profile.provider == "glm-coding"
+        assert profile.backend_type == "anthropic"
+        assert profile.model == "GLM-5.1"
+        assert profile.base_url == "https://open.bigmodel.cn/api/anthropic"
+        assert profile.api_key_env == "GLM_CODING_API_KEY"
+        assert profile.extra_body["auth_as_bearer"] is True
+
 
 # ---------------------------------------------------------------------------
 # Variation selectors
@@ -372,6 +391,18 @@ class TestDefaultModel:
         # codex unavailable (no tokens), openrouter is first available
         assert get_default_model() == "openrouter/mimo-v2-pro"
 
+    def test_default_picks_kimi_code_when_only_kimi_key_available(self):
+        from kohakuterrarium.llm.api_keys import save_api_key
+
+        save_api_key("kimi-code", "sk-kimi")
+        assert get_default_model() == "kimi-code/kimi-for-coding"
+
+    def test_default_picks_glm_coding_when_only_glm_key_available(self):
+        from kohakuterrarium.llm.api_keys import save_api_key
+
+        save_api_key("glm-coding", "glm-key")
+        assert get_default_model() == "glm-coding/glm-5.1"
+
     def test_upgrade_bare_default_via_alias(self):
         # 'gpt-5.4-or' is an alias -> (openrouter, gpt-5.4)
         assert _upgrade_bare_default("gpt-5.4-or") == "openrouter/gpt-5.4"
@@ -412,6 +443,14 @@ class TestIsAvailable:
     def test_provider_available_via_api_key_env(self, monkeypatch):
         monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-env")
         assert _is_available("openrouter") is True
+
+    def test_new_coding_providers_available_via_keys(self, monkeypatch):
+        from kohakuterrarium.llm.api_keys import save_api_key
+
+        save_api_key("kimi-code", "sk-kimi")
+        monkeypatch.setenv("GLM_CODING_API_KEY", "glm-env-key")
+        assert _is_available("kimi-code") is True
+        assert _is_available("glm-coding") is True
 
     def test_provider_unavailable_without_any_key(self):
         assert _is_available("gemini") is False

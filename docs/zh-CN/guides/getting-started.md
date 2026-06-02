@@ -78,7 +78,7 @@ kt config llm add                 # 交互式默认建立器
 kt model default <preset-name>
 ```
 
- **其他提供者**：`anthropic`、`openrouter`、`gemini` 等都是内置后端。详情请见 `kt config provider list` 与 [配置](configuration.md)。
+ **其他提供者**：`anthropic`、`openrouter`、`gemini`、`kimi-code`、`glm-coding` 等都是内置后端。详情请见 `kt config provider list` 与 [配置](configuration.md)。
 
 ## 4. 执行一只 Creature
 

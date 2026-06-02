@@ -45,7 +45,16 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-_BUILTIN_PROVIDERS = {"codex", "openai", "openrouter", "anthropic", "gemini", "mimo"}
+_BUILTIN_PROVIDERS = {
+    "codex",
+    "openai",
+    "openrouter",
+    "anthropic",
+    "gemini",
+    "mimo",
+    "kimi-code",
+    "glm-coding",
+}
 _BACKEND_TYPES = ["openai", "codex"]
 _TRANSPORTS = ["stdio", "http", "streamable_http"]
 

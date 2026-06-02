@@ -124,10 +124,10 @@ kt install ./my-creatures -e        # 可編輯安裝
 kt login codex
 kt model default gpt-5.4
 
-# 或原生 Anthropic / OpenAI 相容提供者：`kt config llm add`
+# 或內建 API-key 提供者：`kt config key set <provider>`
 ```
 
-支援 Codex OAuth、OpenRouter/OpenAI、原生 Anthropic、Google Gemini，以及任何 OpenAI 相容 API。
+支援 Codex OAuth、OpenRouter/OpenAI、原生 Anthropic、Google Gemini、Kimi Code、GLM Coding Plan，以及任何 OpenAI 相容 API。
 
 ### 4. 跑看看
 

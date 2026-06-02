@@ -65,6 +65,9 @@ _CANONICAL_NAMES: dict[str, str] = {
     # MiMo via OpenRouter — ``-or`` suffix.
     "mimo-v2-pro-or": "mimo-v2-pro",
     "mimo-v2-flash-or": "mimo-v2-flash",
+    # GLM via OpenRouter — ``-or`` suffix.
+    "glm-5-or": "glm-5",
+    "glm-5-turbo-or": "glm-5-turbo",
 }
 
 
@@ -95,9 +98,12 @@ ALIASES: dict[str, tuple[str, str]] = {
     "qwen": ("openrouter", "qwen3.5-plus"),
     "qwen-coder": ("openrouter", "qwen3-coder"),
     "kimi": ("openrouter", "kimi-k2.5"),
+    "kimi-code": ("kimi-code", "kimi-for-coding"),
     "minimax": ("openrouter", "minimax-m2.7"),
     "mimo": ("mimo", "mimo-v2-pro"),
     "glm": ("openrouter", "glm-5-turbo"),
+    "glm-code": ("glm-coding", "glm-5.1"),
+    "glm-coding": ("glm-coding", "glm-5.1"),
     "grok": ("openrouter", "grok-4"),
     "grok-fast": ("openrouter", "grok-4-fast"),
     "grok-code": ("openrouter", "grok-code-fast"),
@@ -168,4 +174,13 @@ ALIASES: dict[str, tuple[str, str]] = {
     "mimo-v2-flash-direct": ("mimo", "mimo-v2-flash"),
     "mimo-v2-pro-or": ("openrouter", "mimo-v2-pro"),
     "mimo-v2-flash-or": ("openrouter", "mimo-v2-flash"),
+    # GLM direct + OR.
+    "glm-5.1-coding": ("glm-coding", "glm-5.1"),
+    "glm-5-turbo-coding": ("glm-coding", "glm-5-turbo"),
+    "glm-4.7-coding": ("glm-coding", "glm-4.7"),
+    "glm-4.5-air-coding": ("glm-coding", "glm-4.5-air"),
+    "glm-5": ("openrouter", "glm-5"),
+    "glm-5-turbo": ("openrouter", "glm-5-turbo"),
+    "glm-5-or": ("openrouter", "glm-5"),
+    "glm-5-turbo-or": ("openrouter", "glm-5-turbo"),
 }

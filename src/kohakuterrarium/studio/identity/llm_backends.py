@@ -24,6 +24,8 @@ _BUILT_IN_BACKEND_NAMES = {
     "anthropic",
     "gemini",
     "mimo",
+    "kimi-code",
+    "glm-coding",
 }
 _SUPPORTED_BACKEND_TYPES = {"openai", "codex", "anthropic"}
 

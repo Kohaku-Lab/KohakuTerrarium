@@ -165,6 +165,8 @@ _PROVIDER_DEFAULT_MODELS: list[tuple[str, str]] = [
     ("openai", "gpt-5.4"),
     ("gemini", "gemini-3.1-pro"),
     ("mimo", "mimo-v2-pro"),
+    ("kimi-code", "kimi-for-coding"),
+    ("glm-coding", "glm-5.1"),
 ]
 
 

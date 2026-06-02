@@ -219,3 +219,5 @@ class TestProviderKeyMap:
         assert PROVIDER_KEY_MAP["openrouter"] == "OPENROUTER_API_KEY"
         assert PROVIDER_KEY_MAP["gemini"] == "GEMINI_API_KEY"
         assert PROVIDER_KEY_MAP["mimo"] == "MIMO_API_KEY"
+        assert PROVIDER_KEY_MAP["kimi-code"] == "KIMI_CODE_API_KEY"
+        assert PROVIDER_KEY_MAP["glm-coding"] == "GLM_CODING_API_KEY"
