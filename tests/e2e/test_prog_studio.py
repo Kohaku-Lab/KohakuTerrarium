@@ -628,7 +628,7 @@ class TestProgStudioJourney:
             assert studio.identity.keys.get("openai") == ""
 
             # --- identity.llm: backend CRUD -----------------------------
-            # Six built-in backends ship with every install.
+            # Built-in backends ship with every install.
             assert {b["name"] for b in studio.identity.llm.list_backends()} == {
                 "codex",
                 "openai",
@@ -636,6 +636,8 @@ class TestProgStudioJourney:
                 "anthropic",
                 "gemini",
                 "mimo",
+                "kimi-code",
+                "glm-coding",
             }
             studio.identity.llm.save_backend(
                 "acme",

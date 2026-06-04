@@ -2,9 +2,10 @@
 Built-in LLM presets and model aliases.
 
 A preset references a **provider by name** (codex, openai, openrouter,
-anthropic, gemini, mimo, …). The provider owns the backend_type, base_url,
-and api_key_env. Presets only carry model-facing metadata (model id, context
-window, reasoning effort, extra_body, variation groups).
+anthropic, gemini, mimo, kimi-code, glm-coding, …). The provider owns the
+backend_type, base_url, and api_key_env. Presets only carry model-facing
+metadata (model id, context window, reasoning effort, extra_body, variation
+groups).
 
 Variation groups let one preset expose multiple knobs (reasoning effort,
 fast mode, thinking level, …) without duplicating the entry. Selection is
@@ -551,6 +552,16 @@ PRESETS: dict[str, dict[str, Any]] = {
         "variation_groups": {"reasoning": _OR_REASONING_GROUP},
     },
     # ═══════════════════════════════════════════════════════
+    #  Moonshot Kimi Code Direct API (Anthropic-compatible).
+    #  Kimi Code's documented fixed model id is ``kimi-for-coding``.
+    # ═══════════════════════════════════════════════════════
+    "kimi-for-coding": {
+        "provider": "kimi-code",
+        "model": "kimi-for-coding",
+        "max_context": 262144,
+        "max_output": 32768,
+    },
+    # ═══════════════════════════════════════════════════════
     #  Moonshot Kimi K2.5 / K2-thinking (OpenRouter).
     #   K2.5:          configurable reasoning via OR unified.
     #   K2-thinking:   always-on thinking — no variation group.
@@ -583,6 +594,38 @@ PRESETS: dict[str, dict[str, Any]] = {
         "model": "minimax/minimax-m2.5",
         "max_context": 197000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+    },
+    # ═══════════════════════════════════════════════════════
+    #  GLM Coding Plan Direct API (Anthropic-compatible).
+    #  GLM's Anthropic-compatible endpoint uses Bearer-token auth.
+    # ═══════════════════════════════════════════════════════
+    "glm-5.1": {
+        "provider": "glm-coding",
+        "model": "GLM-5.1",
+        "max_context": 204800,
+        "max_output": 131072,
+        "extra_body": {"auth_as_bearer": True},
+    },
+    "glm-5-turbo": {
+        "provider": "glm-coding",
+        "model": "GLM-5-Turbo",
+        "max_context": 204800,
+        "max_output": 131072,
+        "extra_body": {"auth_as_bearer": True},
+    },
+    "glm-4.7": {
+        "provider": "glm-coding",
+        "model": "GLM-4.7",
+        "max_context": 204800,
+        "max_output": 131072,
+        "extra_body": {"auth_as_bearer": True},
+    },
+    "glm-4.5-air": {
+        "provider": "glm-coding",
+        "model": "GLM-4.5-Air",
+        "max_context": 131072,
+        "max_output": 98304,
+        "extra_body": {"auth_as_bearer": True},
     },
     # ═══════════════════════════════════════════════════════
     #  Xiaomi MiMo Direct API (primary — ``kt login mimo``).
@@ -621,14 +664,14 @@ PRESETS: dict[str, dict[str, Any]] = {
     # ═══════════════════════════════════════════════════════
     #  GLM (Z.ai, OpenRouter).
     # ═══════════════════════════════════════════════════════
-    "glm-5": {
+    "glm-5-or": {
         "provider": "openrouter",
         "model": "z-ai/glm-5",
         "max_context": 80000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
         "variation_groups": {"reasoning": _OR_REASONING_GROUP},
     },
-    "glm-5-turbo": {
+    "glm-5-turbo-or": {
         "provider": "openrouter",
         "model": "z-ai/glm-5-turbo",
         "max_context": 202752,

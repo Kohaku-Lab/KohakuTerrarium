@@ -131,10 +131,11 @@ The `@<name>` form resolves through [TerrariumMarket](https://github.com/Kohaku-
 kt login codex
 kt model default gpt-5.4
 
-# Or native Anthropic / OpenAI-compatible providers via `kt config llm add`
+# Or built-in API-key providers via `kt config key set <provider>`
 ```
 
-Supports Codex OAuth, OpenRouter/OpenAI, native Anthropic, Google Gemini, and any OpenAI-compatible API.
+Supports Codex OAuth, OpenRouter/OpenAI, native Anthropic, Google Gemini,
+Kimi Code, GLM Coding Plan, and any OpenAI-compatible API.
 
 ### 4. Run something
 
@@ -579,7 +580,7 @@ Unlike monolithic frameworks, KohakuTerrarium keeps responsibilities separated: 
 Python 3.10 or higher. Install via `pip install kohakuterrarium`. **Python 3.12+ is recommended** — that's what CI validates and what the agent runtime is tuned for. 3.10 and 3.11 are supported on a best-effort basis (everything installs and runs, but the asyncio + SQLite-daemon-thread interaction on those older runtimes is slower and occasionally fights the per-test timeouts in the integration suite).
 
 **Which LLM providers are supported?**
-Codex OAuth, OpenAI/OpenRouter-style providers, native Anthropic, Google Gemini, local OpenAI-compatible servers (Ollama, vLLM), and other OpenAI-compatible cloud providers. Configure with `kt login`, `kt config llm add`, `kt config provider add`, or provider API keys.
+Codex OAuth, OpenAI/OpenRouter-style providers, native Anthropic, Google Gemini, Kimi Code, GLM Coding Plan, local OpenAI-compatible servers (Ollama, vLLM), and other OpenAI-compatible cloud providers. Configure with `kt login`, `kt config llm add`, `kt config provider add`, or provider API keys.
 
 **Can I use local models?**
 Yes. Point the LLM endpoint to your local server (Ollama, vLLM, etc.) and configure the model name in your creature configuration.

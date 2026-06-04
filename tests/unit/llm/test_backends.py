@@ -63,6 +63,12 @@ class TestLoadBackends:
         assert backends["openai"].base_url == "https://api.openai.com/v1"
         assert backends["openrouter"].base_url == "https://openrouter.ai/api/v1"
         assert backends["anthropic"].backend_type == "anthropic"
+        assert backends["kimi-code"].backend_type == "anthropic"
+        assert backends["kimi-code"].base_url == "https://api.kimi.com/coding/"
+        assert backends["glm-coding"].backend_type == "anthropic"
+        assert (
+            backends["glm-coding"].base_url == "https://open.bigmodel.cn/api/anthropic"
+        )
         assert backends["codex"].backend_type == "codex"
 
     def test_codex_builtin_advertises_image_gen_native_tool(self):
@@ -159,10 +165,52 @@ class TestLegacyProviderFromData:
             legacy_provider_from_data({"base_url": "https://api.mimo.test"}) == "mimo"
         )
 
+    def test_kimi_code_inferred_from_base_url(self):
+        assert (
+            legacy_provider_from_data({"base_url": "https://api.kimi.com/coding/"})
+            == "kimi-code"
+        )
+        assert (
+            legacy_provider_from_data(
+                {
+                    "provider": "anthropic",
+                    "base_url": "https://api.kimi.com/coding/",
+                }
+            )
+            == "kimi-code"
+        )
+
+    def test_glm_coding_inferred_from_base_url(self):
+        assert (
+            legacy_provider_from_data(
+                {"base_url": "https://open.bigmodel.cn/api/anthropic"}
+            )
+            == "glm-coding"
+        )
+        assert (
+            legacy_provider_from_data(
+                {
+                    "provider": "anthropic",
+                    "base_url": "https://open.bigmodel.cn/api/anthropic",
+                }
+            )
+            == "glm-coding"
+        )
+
     def test_inferred_from_api_key_env(self):
         assert (
             legacy_provider_from_data({"api_key_env": "OPENROUTER_API_KEY"})
             == "openrouter"
+        )
+
+    def test_kimi_and_glm_inferred_from_api_key_env(self):
+        assert (
+            legacy_provider_from_data({"api_key_env": "KIMI_CODE_API_KEY"})
+            == "kimi-code"
+        )
+        assert (
+            legacy_provider_from_data({"api_key_env": "GLM_CODING_API_KEY"})
+            == "glm-coding"
         )
 
     def test_unresolvable_data_returns_empty(self):

@@ -55,6 +55,8 @@ _BUILTIN_PROVIDER_NAMES: set[str] = {
     "anthropic",
     "gemini",
     "mimo",
+    "kimi-code",
+    "glm-coding",
 }
 
 # Historical values that appeared under a preset's ``provider`` field to
@@ -147,6 +149,18 @@ def _built_in_providers() -> dict[str, LLMBackend]:
             base_url="https://api.xiaomimimo.com/v1",
             api_key_env="MIMO_API_KEY",
         ),
+        "kimi-code": LLMBackend(
+            name="kimi-code",
+            backend_type="anthropic",
+            base_url="https://api.kimi.com/coding/",
+            api_key_env="KIMI_CODE_API_KEY",
+        ),
+        "glm-coding": LLMBackend(
+            name="glm-coding",
+            backend_type="anthropic",
+            base_url="https://open.bigmodel.cn/api/anthropic",
+            api_key_env="GLM_CODING_API_KEY",
+        ),
     }
 
 
@@ -171,8 +185,6 @@ def legacy_provider_from_data(data: dict[str, Any]) -> str:
 
     if backend_type == "codex":
         return "codex"
-    if raw_backend_type == "anthropic" or "api.anthropic.com" in base_url:
-        return "anthropic"
     if "openrouter.ai" in base_url:
         return "openrouter"
     if "generativelanguage.googleapis.com" in base_url:
@@ -181,12 +193,20 @@ def legacy_provider_from_data(data: dict[str, Any]) -> str:
         return "openai"
     if "mimo" in base_url:
         return "mimo"
+    if "api.kimi.com/coding" in base_url:
+        return "kimi-code"
+    if "open.bigmodel.cn/api/anthropic" in base_url:
+        return "glm-coding"
+    if raw_backend_type == "anthropic" or "api.anthropic.com" in base_url:
+        return "anthropic"
     if api_key_env in {
         "OPENAI_API_KEY",
         "OPENROUTER_API_KEY",
         "ANTHROPIC_API_KEY",
         "GEMINI_API_KEY",
         "MIMO_API_KEY",
+        "KIMI_CODE_API_KEY",
+        "GLM_CODING_API_KEY",
     }:
         reverse = {v: k for k, v in PROVIDER_KEY_MAP.items()}
         return reverse[api_key_env]

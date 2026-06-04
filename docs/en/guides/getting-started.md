@@ -78,7 +78,9 @@ kt config llm add                 # interactive preset builder
 kt model default <preset-name>
 ```
 
-**Other providers**: `anthropic`, `openrouter`, `gemini`, etc. are built-in backends. See `kt config provider list` and [Configuration](configuration.md) for details.
+**Other providers**: `anthropic`, `openrouter`, `gemini`, `kimi-code`,
+`glm-coding`, etc. are built-in backends. See `kt config provider list` and
+[Configuration](configuration.md) for details.
 
 ## 4. Run a creature
 

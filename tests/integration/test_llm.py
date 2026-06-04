@@ -693,12 +693,48 @@ class TestLlmIntegration:
             legacy_provider_from_data({"base_url": "https://api.openai.com/v1"})
             == "openai"
         )
+        assert (
+            legacy_provider_from_data({"base_url": "https://api.kimi.com/coding/"})
+            == "kimi-code"
+        )
+        assert (
+            legacy_provider_from_data(
+                {
+                    "provider": "anthropic",
+                    "base_url": "https://api.kimi.com/coding/",
+                }
+            )
+            == "kimi-code"
+        )
+        assert (
+            legacy_provider_from_data(
+                {"base_url": "https://open.bigmodel.cn/api/anthropic"}
+            )
+            == "glm-coding"
+        )
+        assert (
+            legacy_provider_from_data(
+                {
+                    "provider": "anthropic",
+                    "base_url": "https://open.bigmodel.cn/api/anthropic",
+                }
+            )
+            == "glm-coding"
+        )
         assert legacy_provider_from_data({"provider": "codex-oauth"}) == "codex"
         # An explicit non-backend-type provider value passes straight
         # through.
         assert legacy_provider_from_data({"provider": "my-custom"}) == "my-custom"
         # api_key_env inference when no base_url hints at the provider.
         assert legacy_provider_from_data({"api_key_env": "MIMO_API_KEY"}) == "mimo"
+        assert (
+            legacy_provider_from_data({"api_key_env": "KIMI_CODE_API_KEY"})
+            == "kimi-code"
+        )
+        assert (
+            legacy_provider_from_data({"api_key_env": "GLM_CODING_API_KEY"})
+            == "glm-coding"
+        )
         # Nothing identifiable -> empty string.
         assert legacy_provider_from_data({}) == ""
 

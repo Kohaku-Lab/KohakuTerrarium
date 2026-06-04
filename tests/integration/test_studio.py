@@ -918,7 +918,7 @@ class TestStudioIntegration:
             assert studio.identity.keys.get("openai") == ""
 
             # --- identity.llm: backend CRUD -----------------------------
-            # The six built-in backends ship with every install; no
+            # The built-in backends ship with every install; no
             # user backends until we add one.
             baseline_backends = {b["name"] for b in studio.identity.llm.list_backends()}
             assert baseline_backends == {
@@ -928,6 +928,8 @@ class TestStudioIntegration:
                 "anthropic",
                 "gemini",
                 "mimo",
+                "kimi-code",
+                "glm-coding",
             }
             studio.identity.llm.save_backend(
                 "acme",

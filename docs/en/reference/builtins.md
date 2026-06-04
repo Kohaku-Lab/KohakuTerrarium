@@ -357,6 +357,8 @@ Built-in provider types (backends):
 | `anthropic` | `anthropic` | Anthropic-compatible Messages API | API-key auth (`ANTHROPIC_API_KEY`). Uses the official `anthropic` SDK. Claude-specific knobs go through `extra_body` (`thinking.*`, `output_config.*`). Prompt-caching markers are auto-applied unless disabled. |
 | `gemini` | `openai` | Google's OpenAI-compat endpoint | API-key auth (`GEMINI_API_KEY`). |
 | `mimo` | `openai` | Xiaomi MiMo | `kt login mimo`. |
+| `kimi-code` | `anthropic` | Kimi Code Anthropic-compatible endpoint | API-key auth (`KIMI_CODE_API_KEY`). |
+| `glm-coding` | `anthropic` | GLM Coding Plan Anthropic-compatible endpoint | API-key auth (`GLM_CODING_API_KEY`) with Bearer-token wiring. |
 
 Canonical backend types are `openai`, `anthropic`, and `codex`. Legacy
 `codex-oauth` backend type values are silently migrated on read (see
@@ -461,6 +463,10 @@ Routed through the native Anthropic-compatible Messages API. Effort via
 - `kimi-k2.5` (`kimi`)
 - `kimi-k2-thinking`
 
+### Moonshot Kimi Code Direct (Anthropic-compatible)
+
+- `kimi-for-coding` (`kimi-code`)
+
 ### MiniMax (OpenRouter)
 
 - `minimax-m2.7` (`minimax`)
@@ -480,6 +486,13 @@ Routed through the native Anthropic-compatible Messages API. Effort via
 
 - `glm-5`
 - `glm-5-turbo` (alias: `glm`)
+
+### GLM Coding Plan Direct (Anthropic-compatible)
+
+- `glm-5.1` (`glm-code`, `glm-coding`)
+- `glm-5-turbo`
+- `glm-4.7`
+- `glm-4.5-air`
 
 ### xAI Grok (OpenRouter)
 
