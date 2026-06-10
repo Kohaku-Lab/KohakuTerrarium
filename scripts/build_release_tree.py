@@ -106,6 +106,11 @@ def parse_args() -> argparse.Namespace:
         help="Override the build_id (default: <UTC-timestamp>-<git-sha-short>).",
     )
     p.add_argument(
+        "--commit-sha",
+        default=None,
+        help="Full source commit SHA to record in the release manifest.",
+    )
+    p.add_argument(
         "--no-zstd",
         action="store_true",
         help="Emit .tar.gz instead of .tar.zst (broader compatibility).",
@@ -217,6 +222,7 @@ def main() -> int:
         "version": args.version,
         "build_id": build_id,
         "channel": args.channel,
+        **({"commit_sha": args.commit_sha} if args.commit_sha else {}),
         "platform": args.platform,
         "py_abi": args.py_abi,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
