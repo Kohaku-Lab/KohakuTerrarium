@@ -5,6 +5,16 @@ on:
     # 03:00 UTC every day
     - cron: "0 3 * * *"
   workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: "Build even if this commit is already in the nightly manifest"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -21,6 +31,7 @@ jobs:
       build_id: ${{ steps.compute.outputs.build_id }}
       tag: ${{ steps.compute.outputs.tag }}
       date: ${{ steps.compute.outputs.date }}
+      commit_sha: ${{ steps.compute.outputs.commit_sha }}
     steps:
       - uses: actions/checkout@v4
       - name: Compute nightly version
@@ -30,6 +41,7 @@ jobs:
           ts=$(date -u +%Y%m%d%H%M%S)
           date=$(date -u +%Y%m%d)
           sha=$(git rev-parse --short=7 HEAD)
+          commit_sha=$(git rev-parse HEAD)
           # PEP 440 dev release with +local segment for traceability.
           # Pip accepts +local in URL / file installs (we don't push
           # nightlies to PyPI, where +local is rejected).
@@ -39,15 +51,50 @@ jobs:
             echo "build_id=${ts}-${sha}"
             echo "tag=nightly-${date}"
             echo "date=${date}"
+            echo "commit_sha=${commit_sha}"
           } >> "$GITHUB_OUTPUT"
           echo "nightly version=${version}"
+
+  nightly_gate:
+    needs: [version]
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.gate.outputs.should_build }}
+      skip_reason: ${{ steps.gate.outputs.skip_reason }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch previous nightly manifest
+        shell: bash
+        run: |
+          curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/releases/download/manifests-nightly/nightly.json" \
+            -o previous-nightly.json || echo "no previous manifest"
+
+      - name: Check nightly duplicate
+        id: gate
+        shell: bash
+        run: |
+          python scripts/nightly_gate.py \
+            --manifest previous-nightly.json \
+            --commit-sha "${{ needs.version.outputs.commit_sha }}" \
+            --force-rebuild "${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild == true || false }}" \
+            --github-output "$GITHUB_OUTPUT"
+
+  skipped:
+    needs: [nightly_gate]
+    if: needs.nightly_gate.outputs.should_build != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report skipped nightly
+        run: echo "${{ needs.nightly_gate.outputs.skip_reason }}"
 
   # Per-platform release-tree tarballs the launcher consumes.
   # Briefcase ships cp313 on Win/macOS, so cp313 is the only abi any
   # user-facing path actually downloads. Linux x64 cp313 is kept for
   # advanced users running the launcher on their own Linux Python.
   build-release-tree:
-    needs: [version]
+    needs: [version, nightly_gate]
+    if: needs.nightly_gate.outputs.should_build == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -101,6 +148,7 @@ jobs:
           python scripts/build_release_tree.py \
             --version "${{ needs.version.outputs.version }}" \
             --build-id "${{ needs.version.outputs.build_id }}" \
+            --commit-sha "${{ needs.version.outputs.commit_sha }}" \
             --platform "${{ matrix.plat }}" \
             --py-abi "${{ matrix.abi }}" \
             --channel nightly \
@@ -116,7 +164,8 @@ jobs:
   # wheel is universal (pure Python ≥3.10) so one cell covers all
   # pip users.
   build-wheel:
-    needs: [version]
+    needs: [version, nightly_gate]
+    if: needs.nightly_gate.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -157,7 +206,8 @@ jobs:
   # changes AND so a fresh user can install the nightly directly
   # (no "install stable then switch channels" detour).
   build-desktop:
-    needs: [version, build-release-tree]
+    needs: [version, nightly_gate, build-release-tree]
+    if: needs.nightly_gate.outputs.should_build == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -246,7 +296,8 @@ jobs:
           path: artifacts/
 
   publish:
-    needs: [version, build-release-tree, build-wheel, build-desktop]
+    needs: [version, nightly_gate, build-release-tree, build-wheel, build-desktop]
+    if: needs.nightly_gate.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -291,10 +342,17 @@ jobs:
         run: |
           tag="${{ needs.version.outputs.tag }}"
           date="${{ needs.version.outputs.date }}"
+          notes="Automatic nightly build. Channel: nightly. Version: ${{ needs.version.outputs.version }}. Commit: ${{ needs.version.outputs.commit_sha }}."
           if ! gh release view "${tag}" -R "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release create "${tag}" \
               --title "Nightly ${date}" \
-              --notes "Automatic nightly build. Channel: nightly. Version: ${{ needs.version.outputs.version }}." \
+              --notes "${notes}" \
+              --prerelease \
+              -R "${GITHUB_REPOSITORY}"
+          else
+            gh release edit "${tag}" \
+              --title "Nightly ${date}" \
+              --notes "${notes}" \
               --prerelease \
               -R "${GITHUB_REPOSITORY}"
           fi

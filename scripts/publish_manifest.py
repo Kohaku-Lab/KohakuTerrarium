@@ -82,7 +82,11 @@ def _group_into_release(sidecars: list[dict], prefix: str, notes: str | None) ->
         raise SystemExit(f"sidecars span multiple versions: {versions}")
     version = next(iter(versions))
     build_ids = {s.get("build_id") for s in sidecars}
-    build_id = sorted(b for b in build_ids if b)[-1] if build_ids else ""
+    valid_build_ids = sorted(b for b in build_ids if b)
+    build_id = valid_build_ids[-1] if valid_build_ids else ""
+    commit_shas = sorted({s.get("commit_sha") for s in sidecars if s.get("commit_sha")})
+    if len(commit_shas) > 1:
+        raise SystemExit(f"sidecars span multiple commit SHAs: {commit_shas}")
     artifacts: list[dict] = []
     for s in sidecars:
         url = _artifact_url(prefix, s)
@@ -96,12 +100,15 @@ def _group_into_release(sidecars: list[dict], prefix: str, notes: str | None) ->
             }
         )
     artifacts.sort(key=lambda a: (a["platform"], a["py_abi"]))
-    return {
+    release = {
         "version": version,
         "build_id": build_id,
         "release_notes_url": notes,
         "artifacts": artifacts,
     }
+    if commit_shas:
+        release["commit_sha"] = next(iter(commit_shas))
+    return release
 
 
 def _artifact_url(prefix: str, sidecar: dict) -> str:
