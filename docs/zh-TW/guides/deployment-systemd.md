@@ -1,5 +1,5 @@
 ---
-title: 部署 — systemd
+title: systemd 部署
 summary: 透過內附的 `kt service install` 指令把 KohakuTerrarium 安裝為 systemd 服務。
 tags:
   - guides
@@ -8,13 +8,13 @@ tags:
   - linux
 ---
 
-# 部署 — systemd
+# systemd 部署
 
 對於不需要 Docker 的 Linux 主機,KohakuTerrarium 內附可立即使用的 systemd unit。`kt service` 子指令會依據打包的範本渲染 unit 檔、安裝到 `/etc/systemd/system/`、選擇性啟用,並 reload systemd。
 
 ## 前置條件
 
-- Linux（systemd ≥ 240 的任意發行版 — Ubuntu 20.04+、Debian 11+、Fedora 36+、RHEL 9+ 均可）。
+- Linux（systemd ≥ 240 的任意發行版，Ubuntu 20.04+、Debian 11+、Fedora 36+、RHEL 9+ 均可）。
 - Python ≥ 3.10,並已安裝 `kohakuterrarium` 與 `kt` / `kt-aio` 指令腳本（在 `PATH` 中）：
 
   ```bash
@@ -32,9 +32,9 @@ tags:
 
 同 Docker 指南：AIO、host + worker、分散式。任選其一。
 
-### 模式 1 — AIO
+### 模式 1：AIO
 
-一個跑 `kt-aio` 的服務 — 等價於 AIO Docker 映像：
+一個跑 `kt-aio` 的服務，等價於 AIO Docker 映像：
 
 ```bash
 sudo kt service install --all \
@@ -46,10 +46,10 @@ sudo systemctl status kohakuterrarium-all.service
 
 安裝器會寫入：
 
-- `/etc/systemd/system/kohakuterrarium-all.service` — unit 檔
-- `/etc/kohakuterrarium/all.env` — `KT_HOST_TOKEN` + `KT_CONFIG_DIR`
+- `/etc/systemd/system/kohakuterrarium-all.service`：unit 檔
+- `/etc/kohakuterrarium/all.env`：`KT_HOST_TOKEN` + `KT_CONFIG_DIR`
 
-兩者均屬 root、權限 `0600` — token 不會出現在行程參數中,只存在於受保護的 `EnvironmentFile` 中。
+兩者均屬 root、權限 `0600`：token 不會出現在行程參數中,只存在於受保護的 `EnvironmentFile` 中。
 
 確認健康端點：
 
@@ -57,9 +57,9 @@ sudo systemctl status kohakuterrarium-all.service
 curl http://localhost:8001/healthz
 ```
 
-### 模式 2 — host + 同機 N 個 worker
+### 模式 2：host + 同機 N 個 worker
 
-先安裝一次 host unit,然後為每個 worker 安裝一個 client 實例。client unit 是 instance template（`@.service`）— 一份範本,多個實例。
+先安裝一次 host unit,然後為每個 worker 安裝一個 client 實例。client unit 是 instance template（`@.service`）：一份範本,多個實例。
 
 ```bash
 # 1. 安裝 host unit
@@ -92,19 +92,19 @@ sudo systemctl enable --now kohakuterrarium-client@worker-b.service
 - `/etc/systemd/system/kohakuterrarium-host.service`
 - `/etc/systemd/system/kohakuterrarium-client@.service`（範本）
 - `/etc/kohakuterrarium/host.env`
-- `/etc/kohakuterrarium/client.env` — 共享（URL + token）
-- `/etc/kohakuterrarium/client.worker-a.env` — per-instance
-- `/etc/kohakuterrarium/client.worker-b.env` — per-instance
+- `/etc/kohakuterrarium/client.env`：共享（URL + token）
+- `/etc/kohakuterrarium/client.worker-a.env`：per-instance
+- `/etc/kohakuterrarium/client.worker-b.env`：per-instance
 
 共享 `client.env` 承載 `KT_HOST_URL` + `KT_HOST_TOKEN`;per-instance 檔案承載 `KT_CLIENT_NAME` 及任何 worker 專屬覆寫。
 
-### 模式 3 — 分散式（host 在邊緣 VPS、worker 在他處）
+### 模式 3：分散式（host 在邊緣 VPS、worker 在他處）
 
 指令同模式 2,只是部署在不同機器。host VPS 上僅安裝 `--host` unit;每個 worker 機器上僅安裝 `--client` 實例,並把 `--host-url wss://your-host/lab` 與共享 token 傳進去。
 
-用 nginx 在 host 的 `8001`（與 `8100` 若直接對外）前面做反向代理 — 詳見[反向代理指南](deployment-reverse-proxy.md)。
+用 nginx 在 host 的 `8001`（與 `8100` 若直接對外）前面做反向代理，詳見[反向代理指南](deployment-reverse-proxy.md)。
 
-## 強化 — 範本自帶設定
+## 強化：範本自帶設定
 
 隨範本出貨的 unit 已套用 systemd 最佳實踐強化：
 
@@ -126,9 +126,9 @@ NoNewPrivileges=yes
 SystemCallArchitectures=native
 ```
 
-`DynamicUser=yes` 會在啟動時配發暫時 UID;`StateDirectory` 即是該 user 的可寫 home（`/var/lib/kohakuterrarium-host`）。配合 `ProtectSystem=strict`,該服務在其狀態目錄外沒有任何寫權限 — 即便被攻破,也無法竄改系統其餘部分。
+`DynamicUser=yes` 會在啟動時配發暫時 UID;`StateDirectory` 即是該 user 的可寫 home（`/var/lib/kohakuterrarium-host`）。配合 `ProtectSystem=strict`,該服務在其狀態目錄外沒有任何寫權限：即便被攻破,也無法竄改系統其餘部分。
 
-如需偏離（例如為共用資料集目錄加 `ReadWritePaths=`),請用 `sudo systemctl edit kohakuterrarium-host.service` — 不要修改安裝器寫出的檔案,下次 `kt service install --host` 會覆寫你的修改。
+如需偏離（例如為共用資料集目錄加 `ReadWritePaths=`),請用 `sudo systemctl edit kohakuterrarium-host.service`，不要修改安裝器寫出的檔案,下次 `kt service install --host` 會覆寫你的修改。
 
 ## 自訂渲染
 
@@ -151,7 +151,7 @@ sudo systemctl status kohakuterrarium-host.service
 sudo journalctl -u kohakuterrarium-host.service -f --output cat
 ```
 
-`--output cat` 會剝掉 systemd 的逐行 metadata,讓 KohakuTerrarium 的 log 原樣輸出。[token 遮罩過濾器](../reference/cli.md)會在內容進 journal 前將 `?token=...` query 字串與 JSON `"token"` 鍵替換為遮罩 — 因此 `journalctl` 可直接分享給協助排查的人。
+`--output cat` 會剝掉 systemd 的逐行 metadata,讓 KohakuTerrarium 的 log 原樣輸出。[token 遮罩過濾器](../reference/cli.md)會在內容進 journal 前將 `?token=...` query 字串與 JSON `"token"` 鍵替換為遮罩，因此 `journalctl` 可直接分享給協助排查的人。
 
 ## 解除安裝
 
@@ -170,10 +170,10 @@ client-instance 解除安裝會感知實例名稱：移除 *最後一個* 實例
 ## 故障排除
 
 - **unit 啟動報「executable not found」** → `kt` / `kt-aio` 不在 root 的 `PATH` 上。要麼系統級安裝,要麼依上文建立 `/usr/local/bin/` 連結。安裝器在 install 時解析 `kt` / `kt-aio` 的絕對路徑,所以 venv-on-PATH 的安裝使用者也可用。
-- **`/healthz` 200 但 `/readyz` 503 超過 30s** → Lab 傳輸沒綁定。`journalctl -u kohakuterrarium-host -e` 看是否出現 `address already in use` — 連接埠 `8100` 可能被佔用。
+- **`/healthz` 200 但 `/readyz` 503 超過 30s** → Lab 傳輸沒綁定。`journalctl -u kohakuterrarium-host -e` 看是否出現 `address already in use`，連接埠 `8100` 可能被佔用。
 - **worker 實例連不上** → 查 per-instance env 檔案：`sudo cat /etc/kohakuterrarium/client.<name>.env`。token 與 URL 必須與 host 一致。
 
-## 鎖定 API — 透過 systemd credentials 啟用 `[auth]`
+## 鎖定 API：透過 systemd credentials 啟用 `[auth]`
 
 透過 `packaging/systemd/` 提供的 auth-secrets drop-in,任何 host
 unit 都可以變成加鎖主機:
@@ -197,7 +197,7 @@ sudo systemctl restart kohakuterrarium-host
 sudo -u kohakuterrarium-host kt admin users add operator --role admin
 ```
 
-drop-in 使用 systemd 的 ``LoadCredential=`` 指令 — 密鑰讀入 unit
+drop-in 使用 systemd 的 ``LoadCredential=`` 指令：密鑰讀入 unit
 執行時憑證目錄(``%d/...``)並透過 ``KT_AUTH_*_FILE`` 環境變數暴露。
 它們永遠不會出現在 ``/proc/<pid>/environ`` 中。
 
@@ -206,7 +206,7 @@ drop-in 使用 systemd 的 ``LoadCredential=`` 指令 — 密鑰讀入 unit
 
 ## 另請參閱
 
-- [身份驗證](authentication.md) — 四層認證模型 + ``kt admin`` 營運者命令。
-- [部署 — Docker](deployment-docker.md) — 三種模式的容器化版本。
-- [部署 — 反向代理](deployment-reverse-proxy.md) — 在 `8001` / `8100` 前做 TLS 終止。
-- [Laboratory](laboratory.md) — unit 跑起來後,lab-host / lab-client 角色實際做什麼。
+- [身份驗證](authentication.md)：四層認證模型 + ``kt admin`` 營運者命令。
+- [Docker 部署](deployment-docker.md)：三種模式的容器化版本。
+- [反向代理部署](deployment-reverse-proxy.md)：在 `8001` / `8100` 前做 TLS 終止。
+- [Laboratory](laboratory.md)：unit 跑起來後,lab-host / lab-client 角色實際做什麼。

@@ -35,7 +35,7 @@ tags:
 
 讓 **打造一隻目的明確的 agent 變得便宜**。
 
-如果每一種新的 agent 形狀，只需要一份設定檔、幾個自訂模組，以及一個清楚的心智模型，這個領域就不會一直重造輪子。那層基底——每個 agent 都需要，而且彼此幾乎一樣的部分——就可以集中留在同一個地方。真正新的部分，才是你自己去寫的。
+如果每一種新的 agent 形狀，只需要一份設定檔、幾個自訂模組，以及一個清楚的心智模型，這個領域就不會一直重造輪子。那層基底（每個 agent 都需要、而且彼此幾乎一樣的部分）就可以集中留在同一個地方。真正新的部分，才是你自己去寫的。
 
 那層基底就是 KohakuTerrarium：一個 **給 agents 用的 framework**，而不是另一個 agent。
 
@@ -43,7 +43,7 @@ tags:
 
 給一份具體清單方便校準：
 
-- 一套統一的事件模型。使用者輸入、計時器觸發、工具完成、頻道訊息——全都用同一種信封。
+- 一套統一的事件模型。使用者輸入、計時器觸發、工具完成、頻道訊息，全都用同一種信封。
 - 六模組生物抽象。參見 [what-is-an-agent](what-is-an-agent.md)。
 - 一層 session 系統，同時負責執行期持久化與可搜尋的知識庫。
 - 一個多代理執行期引擎（terrarium），托管生物、擁有頻道圖與拓樸記帳，但不執行自己的 LLM。
@@ -65,6 +65,6 @@ tags:
 
 ## 延伸閱讀
 
-- [什麼是 agent](what-is-an-agent.md) — 這個 framework 所圍繞的定義。
-- [邊界](../boundaries.md) — 什麼情況 KT 適合，什麼情況不適合。
-- [kt-biome](https://github.com/Kohaku-Lab/kt-biome) — 展示用生物與 plugin 套件。
+- [什麼是 agent](what-is-an-agent.md)：這個 framework 所圍繞的定義。
+- [邊界](../boundaries.md)：什麼情況 KT 適合，什麼情況不適合。
+- [kt-biome](https://github.com/Kohaku-Lab/kt-biome)：展示用生物與 plugin 套件。

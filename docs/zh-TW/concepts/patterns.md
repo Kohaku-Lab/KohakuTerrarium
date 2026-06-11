@@ -1,6 +1,6 @@
 ---
 title: 模式
-summary: 把既有模組組合起來就會自然長出的做法——群組聊天、智慧守門員、自適應監看器、輸出接線。
+summary: 把既有模組組合起來就會自然長出的做法：群組聊天、智慧守門員、自適應監看器、輸出接線。
 tags:
   - concepts
   - patterns
@@ -37,11 +37,11 @@ triggers:
 
 ## 1b. 用 output wiring 做確定性的 pipeline 邊
 
-**形狀。** 一隻生物在設定中宣告 `output_wiring:`，指定一個或多個目標生物。每次 turn 結束時，框架都會往每個目標的事件佇列送出一個 `creature_output` `TriggerEvent`——攜帶該生物最後一輪 assistant 產生的文字（如果 `with_content: false`，則只送 lifecycle ping）。
+**形狀。** 一隻生物在設定中宣告 `output_wiring:`，指定一個或多個目標生物。每次 turn 結束時，框架都會往每個目標的事件佇列送出一個 `creature_output` `TriggerEvent`，攜帶該生物最後一輪 assistant 產生的文字（如果 `with_content: false`，則只送 lifecycle ping）。
 
 **為什麼可行。** 這個接線存在於框架層，不需要 sender 呼叫 tool，也不需要 receiver 訂閱 trigger，中間也沒有 channel。目標端透過原本就拿來處理使用者輸入、timer 觸發、channel 訊息的同一條 `agent._process_event` 路徑看到這個事件。
 
-**適合用在。** 這條 pipeline 邊是確定性的——也就是「每次 A 完成一輪，B 都會收到輸出」。如果是 reviewer / navigator 這類角色，或 analyzer 需要依內容決定分支，還是比較適合留在模式 1（channels），因為 wiring 不能條件式觸發。
+**適合用在。** 這條 pipeline 邊是確定性的，也就是「每次 A 完成一輪，B 都會收到輸出」。如果是 reviewer / navigator 這類角色，或 analyzer 需要依內容決定分支，還是比較適合留在模式 1（channels），因為 wiring 不能條件式觸發。
 
 **最小設定。**
 
@@ -54,7 +54,7 @@ triggers:
     - { to: root, with_content: false }   # lifecycle ping
 ```
 
-**對照。** Channels 需要 LLM 記得去送；wiring 不管 LLM 做什麼都一定會觸發。兩種機制可以在同一個 terrarium 裡自由共存——kt-biome 的 `auto_research` 就是用 wiring 來處理棘輪式邊（ideator → coder → runner → analyzer），再用 channels 處理 analyzer 的保留 / 丟棄決策，以及團隊聊天狀態。
+**對照。** Channels 需要 LLM 記得去送；wiring 不管 LLM 做什麼都一定會觸發。兩種機制可以在同一個 terrarium 裡自由共存：kt-biome 的 `auto_research` 就是用 wiring 來處理棘輪式邊（ideator → coder → runner → analyzer），再用 channels 處理 analyzer 的保留 / 丟棄決策，以及團隊聊天狀態。
 
 ## 2. 用 agent-in-plugin 做智慧守門員
 
@@ -62,13 +62,13 @@ triggers:
 
 **為什麼可行。** Plugins 是 Python；agents 也是 Python。plugin 呼叫 agent，就和呼叫任何 async 函式沒有差別。
 
-**適合用在。** 你需要基於策略的工具守門機制，而這個判斷本身並不簡單——太複雜，不能靠靜態規則；又太偏領域，不適合用通用解法。
+**適合用在。** 你需要基於策略的工具守門機制，而這個判斷本身並不簡單：太複雜，不能靠靜態規則；又太偏領域，不適合用通用解法。
 
 ## 3. 用 agent-in-plugin 做無縫記憶
 
 **形狀。** 一個 `pre_llm_call` plugin 會跑一個小型 retrieval agent。retrieval agent 會搜尋 session store（或外部向量資料庫）中和目前上下文相關的事件，整理命中結果，再把它們以前置 system messages 的方式插入。外層生物不用呼叫任何 tool，prompt 就會悄悄變得更豐富。
 
-**為什麼可行。** 生物本身不需要決定「我現在要不要檢索某些東西」——plugin 會固定替它做，而 LLM 每一輪都看得到結果。
+**為什麼可行。** 生物本身不需要決定「我現在要不要檢索某些東西」，plugin 會固定替它做，而 LLM 每一輪都看得到結果。
 
 **適合用在。** RAG 風格記憶對你有幫助，但你不想讓主 agent 為此消耗 tool 預算。
 
@@ -82,7 +82,7 @@ triggers:
 
 ## 5. 沉默 controller + 外部 sub-agent
 
-**形狀。** 某隻生物的 controller 不產生任何對使用者可見的文字——只做 tool calls，最後派發一個 sub-agent。這個 sub-agent 設定為 `output_to: external`，因此真正串流給使用者看的是**它**的文字，而父層自己保持隱形。
+**形狀。** 某隻生物的 controller 不產生任何對使用者可見的文字，只做 tool calls，最後派發一個 sub-agent。這個 sub-agent 設定為 `output_to: external`，因此真正串流給使用者看的是**它**的文字，而父層自己保持隱形。
 
 **為什麼可行。** Output routing 會把 sub-agent 的串流和 controller 本身的串流視為平行地位。你可以決定要讓使用者看到哪一條。
 
@@ -106,7 +106,7 @@ triggers:
 
 ## 8. 用 framework commands 做 inline control
 
-**形狀。** 在同一輪內，controller 可以送出一些直接跟框架對話的小型 inline 指令：`info` 可按需載入某個 tool 的完整文件，`read_job` 可讀取執行中背景工具的部分輸出，`jobs` 可列出待處理工作，`wait` 可等待某個 stateful sub-agent。這些都是 inline 執行——不需要新的 LLM round-trip。
+**形狀。** 在同一輪內，controller 可以送出一些直接跟框架對話的小型 inline 指令：`info` 可按需載入某個 tool 的完整文件，`read_job` 可讀取執行中背景工具的部分輸出，`jobs` 可列出待處理工作，`wait` 可等待某個 stateful sub-agent。這些都是 inline 執行，不需要新的 LLM round-trip。
 
 語法取決於生物設定的 `tool_format`；在預設的 bracket 形式下，一個 command 呼叫會長成 `[/info]tool_name[info/]`。
 
@@ -120,9 +120,9 @@ triggers:
 
 ## 延伸閱讀
 
-- [Agent 作為 Python 物件](python-native/agent-as-python-object.md)
-  — 讓第 2–4 種模式成立的關鍵性質。
+- [Agent 作為 Python 物件](python-native/agent-as-python-object.md)：
+  讓第 2–4 種模式成立的關鍵性質。
 - [Tool](modules/tool.md)、[Trigger](modules/trigger.md)、
-  [Channel](modules/channel.md)、[Plugin](modules/plugin.md) —
+  [Channel](modules/channel.md)、[Plugin](modules/plugin.md)：
   這些模式所組合的基本元件。
-- [邊界](boundaries.md) — 抽象是預設值，不是法律；有些模式就是刻意跨越預設邊界。
+- [邊界](boundaries.md)：抽象是預設值，不是法律；有些模式就是刻意跨越預設邊界。

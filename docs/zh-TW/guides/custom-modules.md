@@ -17,7 +17,7 @@ KohakuTerrarium 每個可擴充的介面都是一個 Python 協定。你實作�
 
 ## 自訂模組長什麼樣
 
-每個模組就是一支 Python 檔 (放哪都可以 — 通常放在生物資料夾裡、或某個套件裡)。Config 用 `module: ./path/to/file.py` + `class: YourClass` 指過去。(每種模組的 YAML key 都是 `class`。外掛為了向後相容也接受 `class_name`；見 [外掛](plugins.md)。)
+每個模組就是一支 Python 檔 (放哪都可以，通常放在生物資料夾裡、或某個套件裡)。Config 用 `module: ./path/to/file.py` + `class: YourClass` 指過去。(每種模組的 YAML key 都是 `class`。外掛為了向後相容也接受 `class_name`；見 [外掛](plugins.md)。)
 
 五種模組接線方式都一樣。差別只在實作哪個協定。
 
@@ -69,9 +69,9 @@ tools:
 
 工具執行模式 (在 `BaseTool` 設)：
 
-- **direct** (預設) — 在同一回合 await，結果變成 `tool_complete` 事件。
-- **background** — 送出後回傳 job id，結果晚點再到。
-- **stateful** — 類似 generator，跨回合 yield 中間結果。
+- **direct** (預設)：在同一回合 await，結果變成 `tool_complete` 事件。
+- **background**：送出後回傳 job id，結果晚點再到。
+- **stateful**：類似 generator，跨回合 yield 中間結果。
 
 測試：
 
@@ -147,11 +147,11 @@ input:
 契約 (`kohakuterrarium.modules.output.base`)：
 
 - `async start()`、`async stop()`
-- `async write(content: str)` — 完整訊息
-- `async write_stream(chunk: str)` — 串流 chunk
+- `async write(content: str)`：完整訊息
+- `async write_stream(chunk: str)`：串流 chunk
 - `async flush()`
 - `async on_processing_start()`、`async on_processing_end()`
-- `def on_activity(activity_type: str, detail: str)` — 工具/子代理事件
+- `def on_activity(activity_type: str, detail: str)`：工具/子代理事件
 - 選用：`async on_user_input(text)`、`async on_resume(events)`
 
 ```python
@@ -263,7 +263,7 @@ triggers:
 
 ## 子代理
 
-子代理由 `SubAgentConfig` (一個 config dataclass) 定義 — 你很少需要直接繼承 `SubAgent`。通常的做法是寫一支 Python 模組、export 一個 config 物件：
+子代理由 `SubAgentConfig` (一個 config dataclass) 定義，你很少需要直接繼承 `SubAgent`。通常的做法是寫一支 Python 模組、export 一個 config 物件：
 
 ```python
 # subagents/specialist.py
@@ -376,13 +376,13 @@ assert env.output.all_text == "..."
 ## 疑難排解
 
 - **Module not found。** `module:` 路徑是相對於生物資料夾。如果會有歧義就用絕對路徑。
-- **工具沒出現在 prompt 裡。** 跑 `kt info path/to/creature`。八成是被默默拒絕了 — 確認 YAML 裡 `class:` 的值跟模組實際的 class 名稱有對上。(YAML key 是 `class`、不是 `class_name`；外掛為了向後相容也接 `class_name`，但 tool / input / output / trigger / 子代理都要用 `class`。)
+- **工具沒出現在 prompt 裡。** 跑 `kt info path/to/creature`。八成是被默默拒絕了：確認 YAML 裡 `class:` 的值跟模組實際的 class 名稱有對上。(YAML key 是 `class`、不是 `class_name`；外掛為了向後相容也接 `class_name`，但 tool / input / output / trigger / 子代理都要用 `class`。)
 - **`needs_context=True` 但測試裡 `context` 是 `None`。** `TestAgentBuilder` 會提供 context；如果要用頻道或草稿區，確認你有呼叫 `.with_session(...)`。
 - **觸發器不會 resume。** 在類別設 `resumable = True` 並實作 `to_resume_dict()`。
 
 ## 延伸閱讀
 
-- [外掛](plugins.md) — 模組之間**接縫**的行為 (pre/post hook)。
-- [套件](packages.md) — 把模組打包出去重用。
-- [Reference / Python API](../reference/python.md) — `BaseTool`、`BaseInputModule`、`BaseOutputModule`、`BaseTrigger`、`SubAgentConfig`。
-- [概念 / 模組](../concepts/modules/README.md) — 每個模組一頁。
+- [外掛](plugins.md)：模組之間**接縫**的行為 (pre/post hook)。
+- [套件](packages.md)：把模組打包出去重用。
+- [Reference / Python API](../reference/python.md)：`BaseTool`、`BaseInputModule`、`BaseOutputModule`、`BaseTrigger`、`SubAgentConfig`。
+- [概念 / 模組](../concepts/modules/README.md)：每個模組一頁。

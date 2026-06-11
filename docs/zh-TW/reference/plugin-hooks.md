@@ -97,7 +97,7 @@ async def get_content(self, context: PromptContext) -> str | None
 - `get_content(context) -> str | None`：回傳要插入的文字區塊；回傳 `None` 代表不提供內容。
 - `priority`：排序鍵。內建外掛大致落在 50/45/40/30。
 
-內建 prompt plugins 請看 [builtins.md — Prompt plugins](builtins.md#prompt-plugins)。
+內建 prompt plugins 請看 [builtins.md：Prompt plugins](builtins.md#prompt-plugins)。
 
 自訂 prompt plugin 一樣透過 creature config 的 `plugins` 欄位註冊；框架會依 plugin class 是 subclass 自 lifecycle `Plugin` protocol，還是 prompt `BasePlugin`，來決定走哪一套調度。
 
@@ -127,7 +127,7 @@ plugins:
     class: GuardPlugin
 ```
 
-執行時可透過 `/plugin toggle guard`（見 [builtins.md — User commands](builtins.md#user-commands)）或 HTTP 的外掛切換端點啟用／停用。
+執行時可透過 `/plugin toggle guard`（見 [builtins.md：User commands](builtins.md#user-commands)）或 HTTP 的外掛切換端點啟用／停用。
 
 ---
 

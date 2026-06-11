@@ -17,7 +17,7 @@ tags:
 
 ## 為什麼它存在
 
-上下文視窗是有限的。真實任務——例如「探索這個 repo，然後告訴我 auth 是怎麼運作的」——可能會牽涉上百次讀檔。如果把這些探索都放在父生物自己的對話裡，就會把主要工作的預算吃光。改由子代理去做，通常會消耗另一份預算，而回傳的只是一份摘要。
+上下文視窗是有限的。真實任務（例如「探索這個 repo，然後告訴我 auth 是怎麼運作的」）可能會牽涉上百次讀檔。如果把這些探索都放在父生物自己的對話裡，就會把主要工作的預算吃光。改由子代理去做，通常會消耗另一份預算，而回傳的只是一份摘要。
 
 這份預算現在可以設定。子代理可以有自己的多軸執行期預算（turn、工具呼叫，以及可選的 walltime），也可以不設限制，或共享父級的舊式 iteration budget。內建子代理會帶一組保守的最小執行期預算：turn 軟/硬限制 `40/60`、工具呼叫軟/硬限制 `75/100`，並且沒有 walltime 限制。
 
@@ -37,15 +37,15 @@ tags:
 
 有三種重要型態：
 
-- **One-shot**（預設）——派生後執行到完成，只回傳一次。
-- **輸出型子代理**（`output_to: external`）——它的文字會和控制器的文字並行（或取而代之）串流到父生物的 `OutputRouter`。你可以把它想成：控制器在背後默默協調；真正讓使用者讀到的是子代理。
-- **互動型**（`interactive: true`）——跨多輪持續存在，會接收上下文更新，也能被餵入新提示。適合那些能從對話連續性中受益的專家（持續運作的 reviewer、長駐 planner）。
+- **One-shot**（預設）：派生後執行到完成，只回傳一次。
+- **輸出型子代理**（`output_to: external`）：它的文字會和控制器的文字並行（或取而代之）串流到父生物的 `OutputRouter`。你可以把它想成：控制器在背後默默協調；真正讓使用者讀到的是子代理。
+- **互動型**（`interactive: true`）：跨多輪持續存在，會接收上下文更新，也能被餵入新提示。適合那些能從對話連續性中受益的專家（持續運作的 reviewer、長駐 planner）。
 
 ## 我們怎麼實作它
 
 `SubAgentManager`（`modules/subagent/manager.py`）會把 `SubAgent`（`modules/subagent/base.py`）派生成 `asyncio.Task`，依 job id 追蹤它們，並把完成結果作為 `TriggerEvent` 送出。
 
-深度由 `max_subagent_depth`（設定層級）限制，以防止遞迴失控。取消採合作式機制——父生物可以呼叫 `stop_task` 中斷正在執行的子代理。
+深度由 `max_subagent_depth`（設定層級）限制，以防止遞迴失控。取消採合作式機制：父生物可以呼叫 `stop_task` 中斷正在執行的子代理。
 
 執行期預算由統一的 `budget` 外掛執行，並透過 `plugins[].options` 設定 `turn_budget`、`tool_call_budget` 以及可選的 `walltime_budget`。自動壓縮另外透過 `auto-compact` 外掛包啟用（它展開為 `compact.auto`）。舊式共享 iteration budget 在派生時解析：`budget_allocation` 優先，否則 `budget_inherit: true` 會在存在父級預算時複用同一個預算物件。
 
@@ -57,7 +57,7 @@ tags:
 - **靜默控制器。** 父生物對 `response` 子代理使用 `output_to: external`。控制器本身不輸出文字；只有子代理的回覆會到達使用者。這就是多數 kt-biome 聊天型生物的工作方式。
 - **常駐專家。** 一個 `interactive: true` 的 reviewer，看見每一輪，只有在它有話要說時才開口。
 - **巢狀生態瓶。** 子代理可以透過 `group_add_node`（若它是特權節點）把額外的生物生成到圖裡。底層基礎設施不在乎。
-- **縱向包在橫向裡。** 一個生態瓶中的生物本身還會使用子代理——混合兩種多代理軸向。
+- **縱向包在橫向裡。** 一個生態瓶中的生物本身還會使用子代理，混合兩種多代理軸向。
 
 ## 不要被它框住
 
@@ -65,8 +65,8 @@ tags:
 
 ## 另見
 
-- [工具](tool.md) ——「它也是一種工具」這個視角。
-- [多代理概覽](../multi-agent/README.md) —— 縱向（子代理）與橫向（生態瓶）的差異。
-- [模式——靜默控制器](../patterns.md) —— 輸出型子代理這個慣用法。
-- [子代理指南](../../guides/sub-agents.md) —— 設定內建/內聯子代理、預算與執行期外掛。
-- [reference/builtins.md — Sub-agents](../../reference/builtins.md) —— 內建子代理工具包。
+- [工具](tool.md)：「它也是一種工具」這個視角。
+- [多代理概覽](../multi-agent/README.md)：縱向（子代理）與橫向（生態瓶）的差異。
+- [模式：靜默控制器](../patterns.md)：輸出型子代理這個慣用法。
+- [子代理指南](../../guides/sub-agents.md)：設定內建/內聯子代理、預算與執行期外掛。
+- [reference/builtins.md：Sub-agents](../../reference/builtins.md)：內建子代理工具包。

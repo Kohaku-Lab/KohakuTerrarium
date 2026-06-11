@@ -13,7 +13,7 @@ tags:
 
 MCP 是一種 client-server 協定，可透過 stdio 或 HTTP 暴露工具（以及其他原語）。KohakuTerrarium 是 client：你在設定裡註冊伺服器後，框架會啟動子程序或開啟 HTTP 連線，接著把該伺服器的工具，透過一組精簡的 meta-tool 暴露給 agent 呼叫。
 
-概念先讀：[tool](../concepts/modules/tool.md) —— MCP 工具本質上「就只是工具」，只是以動態方式暴露。
+概念先讀：[tool](../concepts/modules/tool.md)，MCP 工具本質上「就只是工具」，只是以動態方式暴露。
 
 ## 宣告伺服器的兩個位置
 
@@ -66,9 +66,9 @@ kt config mcp delete sqlite
 
 ## 傳輸方式
 
-- **stdio** — 啟動一個子程序（`command` + `args` + `env`）。最適合本機伺服器，延遲低，每個 agent 都有獨立的程序生命週期。
-- **http** / **sse** — 對 `url` 開一個傳統 SSE 連線。適合明確暴露 `/sse` 之類端點的舊式伺服器。
-- **streamable_http** — 對 `url` 開一個現代 streamable HTTP 連線。許多新的 FastMCP 伺服器（例如 `FastMCP.streamable_http_app()`）預設就是這個模式。
+- **stdio**：啟動一個子程序（`command` + `args` + `env`）。最適合本機伺服器，延遲低，每個 agent 都有獨立的程序生命週期。
+- **http** / **sse**：對 `url` 開一個傳統 SSE 連線。適合明確暴露 `/sse` 之類端點的舊式伺服器。
+- **streamable_http**：對 `url` 開一個現代 streamable HTTP 連線。許多新的 FastMCP 伺服器（例如 `FastMCP.streamable_http_app()`）預設就是這個模式。
 
 本機 MCP 伺服器（sqlite、filesystem、git）通常選 stdio；大多數現代託管伺服器優先選 `streamable_http`；只有伺服器明確提供舊式 SSE 端點時再選 `http` / `sse`。
 
@@ -76,9 +76,9 @@ kt config mcp delete sqlite
 
 當伺服器連上後，KohakuTerrarium 會透過 **meta-tool** 暴露它的工具：
 
-- `mcp_list` — 列出所有已連線伺服器上的 MCP 工具。
-- `mcp_call` — 指定工具名稱與參數，呼叫某個 MCP 工具。
-- `mcp_connect` / `mcp_disconnect` — 執行時管理連線。
+- `mcp_list`：列出所有已連線伺服器上的 MCP 工具。
+- `mcp_call`：指定工具名稱與參數，呼叫某個 MCP 工具。
+- `mcp_connect` / `mcp_disconnect`：執行時管理連線。
 
 system prompt 會多出一個「Available MCP Tools」區段，列出每台伺服器上的所有工具（名稱 + 一行說明）。接著 LLM 只要用 `server`、`tool`、`args` 呼叫 `mcp_call` 即可。在預設 bracket 格式下會長這樣：
 
@@ -135,6 +135,6 @@ Agent 執行時底層就是用這套機制。
 
 ## 延伸閱讀
 
-- [設定檔](configuration.md) — `mcp_servers:` 欄位。
-- [參考 / CLI](../reference/cli.md) — `kt config mcp`、`kt mcp list`。
-- [概念 / tool](../concepts/modules/tool.md) — 為什麼 MCP 工具不被特別對待。
+- [設定檔](configuration.md)：`mcp_servers:` 欄位。
+- [參考 / CLI](../reference/cli.md)：`kt config mcp`、`kt mcp list`。
+- [概念 / tool](../concepts/modules/tool.md)：為什麼 MCP 工具不被特別對待。

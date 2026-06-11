@@ -84,14 +84,14 @@ loop:
 
 ## 不要被它框住
 
-沒有控制器的生物是說不通的 — 沒有迴圈就沒有 agent。但迴圈的*形狀*
+沒有控制器的生物是說不通的：沒有迴圈就沒有 agent。但迴圈的*形狀*
 是可以談的。plugin hook（`pre_llm_call`、`post_llm_call`、
 `pre_tool_execute`、…）讓你能從外部重寫迴圈中的每一步，而不必碰
 `Controller` 類別本身。見 [外掛](plugin.md)。
 
 ## 另見
 
-- [組成一個 agent](../foundations/composing-an-agent.md) — 控制器位在什麼位置。
-- [impl-notes/stream-parser](../impl-notes/stream-parser.md) — 為什麼工具會在 LLM 停下前就開始。
-- [impl-notes/prompt-aggregation](../impl-notes/prompt-aggregation.md) — 控制器實際在驅動的是哪一份提示詞。
-- [reference/python.md — Agent, Controller](../../reference/python.md) — 簽名。
+- [組成一個 agent](../foundations/composing-an-agent.md)：控制器位在什麼位置。
+- [impl-notes/stream-parser](../impl-notes/stream-parser.md)：為什麼工具會在 LLM 停下前就開始。
+- [impl-notes/prompt-aggregation](../impl-notes/prompt-aggregation.md)：控制器實際在驅動的是哪一份提示詞。
+- [reference/python.md：Agent, Controller](../../reference/python.md)：簽名。

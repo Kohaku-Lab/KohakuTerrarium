@@ -1,6 +1,6 @@
 ---
 title: Laboratory 層
-summary: KohakuTerrarium 如何跨越多台機器 — 基於 WebSocket 的傳輸層、自訂封包系統，以及讓 Studio 與 Terrarium 把遠端節點當成本地節點看待的透明化技巧。
+summary: KohakuTerrarium 如何跨越多台機器：基於 WebSocket 的傳輸層、自訂封包系統，以及讓 Studio 與 Terrarium 把遠端節點當成本地節點看待的透明化技巧。
 tags:
   - concepts
   - laboratory
@@ -85,7 +85,7 @@ Studio 仍然只呼叫單一的 `TerrariumService` Protocol。在這個
 Protocol 後面，`MultiNodeTerrariumService` 會把對單一生物的
 操作分流路由到對應的節點。Studio 從來不需要 import Lab。
 
-主機行程也可以執行 agent —— 在一個「協調引擎」裡 —— 也就是
+主機行程也可以執行 agent（在一個「協調引擎」裡），也就是
 一個本地 Terrarium，用於跨節點頻道路由，以及在沒有指定 worker
 時承載 recipe 生成的生物。Worker 是完全相同的行程（同一個
 `Terrarium` class、同一組 adapter、同樣的 session store 佈局）；
@@ -100,14 +100,14 @@ gRPC、不是原始 TCP、也不是 QUIC。三個原因：
    單一一個 TCP/443 跳躍就承載整個協定。不必設防火牆規則、
    也不必另開 signalling 通道。
 2. **瀏覽器會講這個。** Studio 的網頁 UI 與 worker client
-   使用同一套線路格式與同一套 envelope codec —— 未來瀏覽器
+   使用同一套線路格式與同一套 envelope codec；未來瀏覽器
    dashboard 自己也可以當成 Lab client 出現，完全不需要
    重新實作任何東西。
 3. **它是雙向且訊息成幀的。** L2 envelope 一對一地坐在 WebSocket
    的二進位 frame 裡；我們不需要在 byte stream 上重新發明
    訊息邊界。
 
-WebSocket 對設計來說並非 load-bearing —— [傳輸層](#l1-transport)
+WebSocket 對設計來說並非 load-bearing：[傳輸層](#l1-transport)
 是一個小 Protocol，`InProcTransport` 也實作它（每個測試都會用）。
 換成 QUIC 或 Unix socket 只需要寫一份新的 `_internal/transport_*.py`。
 
@@ -134,7 +134,7 @@ tokenizer 狀態），而不要被 flat msgpack 設計強制做的 base64 膨脹
 +----------------------------------------------------------+
 ```
 
-Header 是 msgpack（小、schema 彈性、快）。Payload 是任意 bytes ——
+Header 是 msgpack（小、schema 彈性、快）。Payload 是任意 bytes，
 由 L4 codec 決定怎麼解讀。
 
 實作請看 `src/kohakuterrarium/laboratory/_internal/envelope.py`。
@@ -152,8 +152,8 @@ Header 是 msgpack（小、schema 彈性、快）。Payload 是任意 bytes —�
 
 | Kind | 用途 |
 |------|---------|
-| `SEND` | 點對點傳遞（L4 `Channel.send`）—— 在訂閱者之間做負載平衡 |
-| `BROADCAST` | pub-sub 扇出（L4 `Topic.publish`）—— 每個訂閱者都收到一份 |
+| `SEND` | 點對點傳遞（L4 `Channel.send`），在訂閱者之間做負載平衡 |
+| `BROADCAST` | pub-sub 扇出（L4 `Topic.publish`），每個訂閱者都收到一份 |
 | `APP` | 結構化的應用訊息：`{namespace, type, body}`，可選擇做 request/response 配對 |
 | `ACK` | 對需要 ack 的 `SEND` 的確認 |
 | `HELLO` / `WELCOME` / `HEARTBEAT` | 連線生命週期 |
@@ -172,11 +172,11 @@ Studio 永遠不需要知道一隻生物住在行程內還是遠端機器上。
 （`src/kohakuterrarium/terrarium/service.py`）有 `add_creature`、
 `list_creatures`、`chat`、`connect` 之類的方法。三個實作滿足它：
 
-- `LocalTerrariumService` —— 直接呼叫行程內的 Terrarium。
-- `RemoteTerrariumService` —— 把參數封裝成 `terrarium.runtime`
+- `LocalTerrariumService`：直接呼叫行程內的 Terrarium。
+- `RemoteTerrariumService`：把參數封裝成 `terrarium.runtime`
   上的 APP 請求送出去、解開回應。每個已連線 worker 對應一個
   實例。
-- `MultiNodeTerrariumService` —— 同時持有一個 `LocalTerrariumService`
+- `MultiNodeTerrariumService`：同時持有一個 `LocalTerrariumService`
   與每個 worker 一份的 `RemoteTerrariumService`，依
   `creature_id → home_node` 註冊表路由單一生物操作、扇出全域操作。
 
@@ -187,8 +187,8 @@ Studio 永遠不需要知道一隻生物住在行程內還是遠端機器上。
 ## 透明化目標 2：Terrarium 看到單一引擎
 
 頻道與圖拓樸也是單一命名空間。worker-1 上呼叫
-`send_channel("ch1", "hello")` 的生物應該要送達每個 listener ——
-包括 worker-2 上的 listener —— 就好像兩隻生物住在同一個行程裡
+`send_channel("ch1", "hello")` 的生物應該要送達每個 listener，
+包括 worker-2 上的 listener，就好像兩隻生物住在同一個行程裡
 一樣。Lab 用兩個機制達成這點：
 
 - **跨節點 connect**（`terrarium/multi_node_replication.py`）。
@@ -206,8 +206,8 @@ Studio 永遠不需要知道一隻生物住在行程內還是遠端機器上。
   指向其他 worker 上生物的 output-wire 目標也是經由相同的
   broadcast adapter 解析。
 
-跨節點 connect 之後，兩個 worker 的圖形成一個*叢集*（cluster）——
-一個橫跨機器的邏輯多生物圖。主機的 `MultiNodeTerrariumService`
+跨節點 connect 之後，兩個 worker 的圖形成一個*叢集*（cluster），
+即一個橫跨機器的邏輯多生物圖。主機的 `MultiNodeTerrariumService`
 利用 cluster 集合把列舉做摺疊（`list_creatures` 顯示聯集；
 `list_channels` 按名稱去重），所以前端看到的是一個連通分量，
 即使每個 worker 各自保留自己的引擎圖。
@@ -223,7 +223,7 @@ Lab 中最獨特的設計選擇是持久化的運作方式。
 ### 權威寫入者 + 讀取側鏡像
 
 每一隻執行中的生物有恰好一個**權威的** `SessionStore`
-（透過 KohakuVault 開的 SQLite 檔案）—— 在承載它的 worker 上。
+（透過 KohakuVault 開的 SQLite 檔案），位於承載它的 worker 上。
 每個 session 檔案恰好只有一個 writer。生物產生的每一個事件
 都先落在那個檔案。
 
@@ -249,7 +249,7 @@ Studio 的讀取 API（history、viewer、search、fork）都從鏡像讀，
 ### 順序與耐久性
 
 - Tee 使用每 session 一個的外送 asyncio queue。事件以 append
-  順序送達主機。如果連線斷了，pump 會用有界 backoff 重試 ——
+  順序送達主機。如果連線斷了，pump 會用有界 backoff 重試；
   事件會被緩衝，不會遺失。
 - 鏡像 writer 先寫 meta key（這樣 `config_path` /
   `config_snapshot` 會在任何事件之前落地），然後依到達順序
@@ -265,8 +265,8 @@ Studio 的讀取 API（history、viewer、search、fork）都從鏡像讀，
 1. **即時讀取。** Studio 的歷史檢視器可以在事件抵達的那一刻
    顯示；不需要 polling、也不會有秒等級的最終一致性意外。
 2. **斷線存活。** 如果一個 worker 在對話進行到一半時掉線，
-   主機仍然擁有截至斷線為止的每一個事件 —— Studio 持續回應
-   歷史查詢 —— 而當 worker 重新連線時，鏡像已經是最新狀態；
+   主機仍然擁有截至斷線為止的每一個事件，Studio 持續回應
+   歷史查詢；而當 worker 重新連線時，鏡像已經是最新狀態；
    Tee 從下一個事件接著上，不需要做 resync RPC。
 
 取捨是一個 session 同時存在於兩個地方。我們永遠把 worker 的
@@ -284,7 +284,7 @@ Studio 的讀取 API（history、viewer、search、fork）都從鏡像讀，
 
 ## Resume：把磁碟映像推回去
 
-Resume 跑的還是同一個 `engine.adopt_session(path)` —— 只是在
+Resume 跑的還是同一個 `engine.adopt_session(path)`，只是在
 多節點模式下，path 在主機上、引擎在 worker 上。主機橋接這個
 落差：
 
@@ -339,8 +339,8 @@ host: register session in _meta; respond with the synthesized Session handle
 
 ### 多生物圖 resume（CF-6 cluster）
 
-對一個橫跨多個 worker 的 cluster —— 每個 worker 承載 cluster 連
-通分量的一部分 —— 使用者傳入一份 `members` 清單：
+對一個橫跨多個 worker 的 cluster（每個 worker 承載 cluster 連
+通分量的一部分），使用者傳入一份 `members` 清單：
 
 ```http
 POST /api/sessions/{primary_sid}/resume
@@ -377,9 +377,9 @@ w2 生 bravo、在兩者之間形成一條跨節點頻道、把 chat 流量推�
 ### 執行期拓樸變更：快照 + replay
 
 Recipe（`terrarium.yaml`）描述圖一開始的拓樸。recipe 載入
-**之後**由使用者（或特權工具）追加的所有東西 —— 透過
+**之後**由使用者（或特權工具）追加的所有東西（透過
 `service.add_channel` 加的頻道、透過 `service.connect` 加的
-接線、透過 `disconnect` / `unwire` 做的移除 —— 只存在於引
+接線、透過 `disconnect` / `unwire` 做的移除）只存在於引
 擎記憶體中的 `GraphTopology`。沒有持久化的話，每一次 close
 + resume 都會遺失。
 
@@ -400,7 +400,7 @@ Resume 時，`_resume_terrarium_into_engine` 先重建 recipe 描
 述的拓樸，再呼叫 `topology_snapshot.replay(engine, sid)`，
 把儲存的快照中尚未出現在圖裡的每一個頻道 + 接線都加進去。
 因為快照是*完整*的（不是 delta log），使用者的移除也會被
-反映出來 —— 任何被使用者移除的東西就是不在快照裡。
+反映出來：任何被使用者移除的東西就是不在快照裡。
 
 實作：`src/kohakuterrarium/terrarium/topology_snapshot.py`。
 測試：`tests/integration/test_runtime_topology_resume.py`。
@@ -413,9 +413,9 @@ Resume 時，`_resume_terrarium_into_engine` 先重建 recipe 描
 | Recipe 生成的多生物圖在協調引擎上 | ✅ 用標準的 `_resume_terrarium_into_engine` |
 | N=2 worker 的 cluster，各 1 隻生物，跨節點橋接 | ✅ 已測試（journey 32g / CF-6） |
 | 3+ worker 的 cluster | ⚠ 未測試（機制相同，只是 member 多） |
-| 每個 worker 有多隻生物的 cluster | ⚠ 未測試但應該可動 —— 每個 worker 的 resume 各自獨立重建自己的圖 |
-| Recipe 檔案內每隻生物標 `on_node` | ❌ 不支援 —— recipe schema 沒有 node 欄位。請透過個別的 `add_creature(on_node=…)` + `service.connect` 手動組裝 |
-| 目標 worker 離線時 resume | ❌ 回 404 並附上缺席 worker 的名稱 —— 操作員必須先重連 |
+| 每個 worker 有多隻生物的 cluster | ⚠ 未測試但應該可動：每個 worker 的 resume 各自獨立重建自己的圖 |
+| Recipe 檔案內每隻生物標 `on_node` | ❌ 不支援：recipe schema 沒有 node 欄位。請透過個別的 `add_creature(on_node=…)` + `service.connect` 手動組裝 |
+| 目標 worker 離線時 resume | ❌ 回 404 並附上缺席 worker 的名稱，操作員必須先重連 |
 
 ## Identity：local-first
 
@@ -427,7 +427,7 @@ LLM 憑證是 per-process，不是 per-cluster。1.5.x 的預設是
    環境變數。
 2. 只在 miss 時才回退到主機最近透過 `studio.identity` 推下來
    的內容。
-3. Codex OAuth token（`<KT_CONFIG_DIR>/codex-auth.json`）也一樣 ——
+3. Codex OAuth token（`<KT_CONFIG_DIR>/codex-auth.json`）也一樣：
    先 local、後 host。**Codex token 必須在本地**，因為 OAuth
    refresh 是行程綁定的：試圖從一個 worker 行程使用主機的
    token，永遠會再次向使用者要登入。
@@ -439,24 +439,24 @@ LLM 憑證是 per-process，不是 per-cluster。1.5.x 的預設是
 在 Settings → Providers 裡，使用者透過 **Manage on:** 選擇正在
 編輯哪一個節點的憑證儲存。在選定 worker 的情況下儲存一把 key
 會透過 Lab APP 把寫入動作送到該 worker 的 `StudioIdentityAdapter`，
-adapter 會把它持久化到 worker 本地的檔案。Codex 登入也一樣 ——
+adapter 會把它持久化到 worker 本地的檔案。Codex 登入也一樣：
 在選定 worker 的情況下點 **Codex login** 會*在該 worker 上*跑
 OAuth 流程，所以瀏覽器是在 worker 的機器上開啟、產生的 token
 住在 worker 的磁碟上。
 
 ## Files、deployment 與 sandboxing
 
-- **`terrarium.files`** —— 透過 Lab APP 做 scope 受限的檔案 IO。
+- **`terrarium.files`**：透過 Lab APP 做 scope 受限的檔案 IO。
   五個 scope：`workspace://<creature>`、`memory://<creature>`、
   `package://<name>`、`recipe://<id>`、`config://`。對 >512 KB
   的 payload 做串流讀寫；冪等的 atomic commit（被 adopt 的
-  SessionStore 持有著開啟的目標檔案不會被重寫 —— 見
+  SessionStore 持有著開啟的目標檔案不會被重寫，見
   `_op_write_commit`）。
-- **`studio.deploy`** —— `push_creature_bundle`：走訪 creature
+- **`studio.deploy`**：`push_creature_bundle`：走訪 creature
   資料夾、計算每個檔案的 SHA、透過 `terrarium.files` 推送、
   atomic rename 到 `recipe://<name>/...`。重新推送透過 hash 檢查
   做冪等，所以已經有 recipe 的 worker 不會重新下載。
-- **`terrarium.pty`** —— 把 worker 的 shell session 代理到主機側
+- **`terrarium.pty`**：把 worker 的 shell session 代理到主機側
   的 WebSocket。前端的 terminal 面板對著遠端生物的工作目錄可以
   完全不變地運作。
 - 路徑形式的 `add_creature("./my-creature/")` 在 worker 檔案系統
@@ -484,7 +484,7 @@ OAuth 流程，所以瀏覽器是在 worker 的機器上開啟、產生的 token
 | **Lab / Laboratory** | `kohakuterrarium.laboratory` 套件；網路層。 |
 | **Host / 主機** | 執行 `kt serve --mode lab-host` 的行程。擁有 Studio + `HostEngine`。也可能透過協調引擎承載 agent。 |
 | **Worker / 工作節點** | 執行 `kt lab-client` 的行程。承載生物，透過 Lab adapter 暴露它們。 |
-| **Node / 節點** | 主機或 worker —— 任何說 Lab 協定的人。以 `node_id`（`_host` 或 client 的 `--name`）定址。 |
+| **Node / 節點** | 主機或 worker：任何說 Lab 協定的人。以 `node_id`（`_host` 或 client 的 `--name`）定址。 |
 | **Adapter / 轉接器** | 實作一個或多個 APP namespace 的 class（例如 `TerrariumRuntimeAdapter` 服務 `terrarium.runtime` namespace）。 |
 | **`TerrariumService`** | Studio 呼叫的 Protocol。三個實作：`Local`、`Remote`、`MultiNode`。 |
 | **Cluster / 叢集** | 一組跨節點連線的圖。記錄在 `MultiNodeTerrariumService._cluster_links`。從使用者觀點看是一個邏輯 session。 |
@@ -493,6 +493,6 @@ OAuth 流程，所以瀏覽器是在 worker 的機器上開啟、產生的 token
 
 ## 延伸閱讀
 
-- [Laboratory 使用指南](../guides/laboratory.md) —— 怎麼實際跑起來。
-- [工作階段與恢復](../../guides/sessions.md) —— 單節點下的持久化基礎。
-- [生態瓶](./multi-agent/terrarium.md) —— Lab 包覆的引擎。
+- [Laboratory 使用指南](../guides/laboratory.md)：怎麼實際跑起來。
+- [工作階段與恢復](../../guides/sessions.md)：單節點下的持久化基礎。
+- [生態瓶](./multi-agent/terrarium.md)：Lab 包覆的引擎。

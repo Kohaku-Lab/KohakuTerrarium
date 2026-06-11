@@ -1,6 +1,6 @@
 ---
 title: 身份驗證
-summary: 四個可選的身份驗證層 — 主機權杖、管理員密碼、使用者帳戶 — 在 API 伺服器邊界堆疊。依部署形態設定；預設全部關閉（目前行為）。
+summary: 四個可選的身份驗證層（主機權杖、管理員密碼、使用者帳戶）在 API 伺服器邊界堆疊。依部署形態設定；預設全部關閉（目前行為）。
 tags:
   - guides
   - deployment
@@ -9,7 +9,7 @@ tags:
 
 # 身份驗證
 
-KohakuTerrarium 預設以無身份驗證模式執行 — 適合桌面應用程式在
+KohakuTerrarium 預設以無身份驗證模式執行，適合桌面應用程式在
 loopback 上執行，作業系統使用者即為信任邊界。其他情境（區網主機、
 家庭伺服器、網際網路暴露的部署）有四個可選的身份驗證層在 API
 伺服器上堆疊。每一層都透過 ``[auth]`` 設定區段選擇性啟用；預設值
@@ -19,7 +19,7 @@ loopback 上執行，作業系統使用者即為信任邊界。其他情境（�
 
 | 層級 | 關卡 | 使用情境 |
 |---|---|---|
-| **L1** 主機選擇 | 僅前端 — 應用程式連接哪個後端 | 總是啟用（打包應用程式內建） |
+| **L1** 主機選擇 | 僅前端：應用程式連接哪個後端 | 總是啟用（打包應用程式內建） |
 | **L2** 主機權杖 | "用戶端是否被允許連接此主機？" | 區網 / 網際網路暴露的主機 |
 | **L3** 管理員權杖 | "呼叫者是否被允許修改主機設定？" | 你希望家人使用主機但不給設定權限 |
 | **L4** 使用者帳戶 | "請求作用於哪個使用者的工作階段 / UI 偏好？" | 多使用者共用主機 |
@@ -32,7 +32,7 @@ loopback 上執行，作業系統使用者即為信任邊界。其他情境（�
 身份驗證完全位於 API 伺服器邊界（``api/auth/``）。引擎、Studio、
 terrarium runtime 和 session store 對使用者、權杖、主機**毫不知情**。
 當 L4 啟用時，按使用者隔離透過引擎池將每個已認證請求路由到一個按
-使用者分配的 ``Terrarium`` 引擎 — 引擎本身保持單租戶。
+使用者分配的 ``Terrarium`` 引擎，引擎本身保持單租戶。
 
 這意味著 CLI（``kt run``、``kt list``、``kt resume``）和內嵌 TUI
 在所有身份驗證模式下保持不變；只有 FastAPI 伺服器進行多路復用。
@@ -66,7 +66,7 @@ bcrypt_rounds = 12                # 密碼雜湊成本因子
 | ``KT_AUTH_LOOPBACK_BYPASS`` | ``0`` / ``1`` |
 
 ``*_FILE`` 變體的存在是為了讓密鑰透過 Docker ``secrets:`` 掛載或
-systemd ``LoadCredential=`` 指令傳遞 — 它們永遠不會出現在
+systemd ``LoadCredential=`` 指令傳遞，它們永遠不會出現在
 ``/proc/<pid>/environ`` 中。
 
 ## 發現主機啟用了什麼
@@ -76,7 +76,7 @@ GET /api/auth/capabilities                   （無需認證）
 ```
 
 前端在任何其他 API 呼叫之前先存取這個端點，以了解需要提示什麼。
-回應不包含任何密鑰 — 只有啟用旗標 + 模式中繼資料：
+回應不包含任何密鑰，只有啟用旗標 + 模式中繼資料：
 
 ```json
 {
@@ -90,7 +90,7 @@ GET /api/auth/capabilities                   （無需認證）
 }
 ```
 
-## 第 2 層 — 主機權杖
+## 第 2 層：主機權杖
 
 一個共用密鑰控制每一個 ``/api/*`` 和 ``/ws/*`` 請求。
 
@@ -109,7 +109,7 @@ kt admin rotate-host-token
   （便於 curl 使用的回退方案）。
 
 **Loopback 旁路。** 預設情況下，來自 ``127.0.0.1`` / ``::1`` 的請求
-跳過 L2（``loopback_bypass = true``）。這讓桌面應用程式使用順暢 —
+跳過 L2（``loopback_bypass = true``）。這讓桌面應用程式使用順暢：
 你的應用程式不需要知道權杖就能與自己捆綁的主機通訊。在反向代理後
 的生產部署中停用此功能：
 
@@ -122,9 +122,9 @@ loopback_bypass = false
 **CORS 預檢。** ``OPTIONS`` 請求無條件通過 L2，使跨來源瀏覽器能夠在
 傳送實際（已認證）請求之前完成預檢。
 
-## 第 3 層 — 管理員權杖
+## 第 3 層：管理員權杖
 
-第二個共用密鑰**僅**控制設定修改路由 — 新增 LLM 密鑰、註冊 MCP
+第二個共用密鑰**僅**控制設定修改路由：新增 LLM 密鑰、註冊 MCP
 伺服器、安裝套件、編輯模型 / 設定檔。讀取存取和對話使用不被控制。
 
 ```bash
@@ -138,7 +138,7 @@ kt admin set-admin-token
 這就是**家庭伺服器**模式：擁有主機權杖的人可以對話 / 讀取設定；
 只有持有管理員權杖的營運者可以修改 LLM 設定檔或安裝套件。
 
-## 第 4 層 — 使用者帳戶
+## 第 4 層：使用者帳戶
 
 帶隔離工作階段、UI 偏好和 API 權杖的按使用者帳戶。
 
@@ -169,9 +169,9 @@ registration = "invite_only"
 ```
 <config_dir>/
 ├── auth.db
-├── api_keys.yaml          # 共用 — 管理員維護
-├── llm_profiles.yaml      # 共用 — 管理員維護
-├── mcp_servers.yaml       # 共用 — 管理員維護
+├── api_keys.yaml          # 共用，管理員維護
+├── llm_profiles.yaml      # 共用，管理員維護
+├── mcp_servers.yaml       # 共用，管理員維護
 └── users/
     └── <user_id>/
         ├── ui_prefs.json
@@ -219,7 +219,7 @@ kt serve start --host 0.0.0.0
 kt admin migrate --from-shared-state --to-user operator
 ```
 
-這是刻意設計 — 多使用者升級中的自動遷移可能把某人的工作階段移到
+這是刻意設計：多使用者升級中的自動遷移可能把某人的工作階段移到
 錯誤的命名空間。
 
 ## 加密原語
@@ -231,7 +231,7 @@ kt admin migrate --from-shared-state --to-user operator
 | 工作階段 ID 產生 | ``secrets.token_urlsafe(32)``（256 位元） |
 | 權杖 / 管理員比較 | ``secrets.compare_digest``（常數時間） |
 
-API 權杖和邀請由 CSPRNG 產生並以雜湊形式儲存 — DB 洩漏無法被重放。
+API 權杖和邀請由 CSPRNG 產生並以雜湊形式儲存，DB 洩漏無法被重放。
 
 ## 威脅模型
 
@@ -244,24 +244,24 @@ API 權杖和邀請由 CSPRNG 產生並以雜湊形式儲存 — DB 洩漏無法
 
 身份驗證**不**防禦：
 
-- 擁有 ``<config_dir>/`` shell 存取權限的使用者 — 他們能讀取
+- 擁有 ``<config_dir>/`` shell 存取權限的使用者：他們能讀取
   ``auth.db``（bcrypt 雜湊；離線破解是標準成本）以及每位使用者的
   工作階段檔案。身份驗證是 API 邊界，不是作業系統邊界。
-- 旁路通道攻擊（時序、流量分析） — 不在範圍內。
+- 旁路通道攻擊（時序、流量分析）不在範圍內。
 
 ## TLS
 
 框架在 1.5.0 中**不**自己終止 TLS。營運者在前面放置反向代理
 （Caddy / nginx / Traefik）來處理 HTTPS。請參閱
-[部署 — 反向代理](deployment-reverse-proxy.md)。當 ``auth`` 啟用
+[反向代理部署](deployment-reverse-proxy.md)。當 ``auth`` 啟用
 但主機 URL 為明文 ``http://`` 且非 loopback 時，前端會顯示橫幅
 *"連線未加密"*。
 
 ## 參見
 
-- [部署 — Docker](deployment-docker.md) — 透過 ``secrets:`` 掛載
+- [Docker 部署](deployment-docker.md)：透過 ``secrets:`` 掛載
   傳遞 ``[auth]`` 設定
-- [部署 — systemd](deployment-systemd.md) — 透過 ``LoadCredential=``
+- [systemd 部署](deployment-systemd.md)：透過 ``LoadCredential=``
   指令傳遞 ``[auth]`` 設定
-- [部署 — 反向代理](deployment-reverse-proxy.md) — TLS 終止 +
+- [反向代理部署](deployment-reverse-proxy.md)：TLS 終止 +
   CORS 白名單用於託管的靜態前端

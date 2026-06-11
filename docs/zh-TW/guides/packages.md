@@ -1,6 +1,6 @@
 ---
 title: 套件
-summary: 透過 kt install 安裝 pack、理解 kohaku.yaml manifest、@pkg/ 參照，以及發佈你自己的 pack。
+summary: 用 kt install 安裝套件包、kohaku.yaml manifest、@pkg/ 參照，以及發佈你自己的套件包。
 tags:
   - guides
   - package
@@ -9,24 +9,24 @@ tags:
 
 # 套件
 
-給想在專案之間共享生物、生態瓶、工具或外掛的讀者。
+寫給想在專案之間分享生物 (creature)、生態瓶、工具或外掛的讀者。
 
-KohakuTerrarium 的 package，就是一個帶有 `kohaku.yaml` manifest 的目錄。它可以包含 creatures、terrariums、自訂工具、plugins 與 LLM presets。`kt install` 會把它安裝到 `~/.kohakuterrarium/packages/<name>/`，而 `@<name>/path` 語法則可以參照其中任何內容。
+一個 KohakuTerrarium 套件就是一個帶 `kohaku.yaml` manifest 的目錄。裡面可以放生物、生態瓶、自訂工具、外掛、觸發器、I/O 模組、程序性 skill、控制器指令、使用者 slash 指令、提示詞片段、framework-hint 覆寫與 LLM preset。`kt install` 會把它放到 `~/.kohakuterrarium/packages/<name>/` 底下，之後就能用 `@<name>/path` 語法參照裡面的任何東西。
 
-概念先讀：[邊界](../concepts/boundaries.md) —— package 是框架用來讓「共享可重用零件」變得廉價的機制。
+概念入門：[邊界](../concepts/boundaries.md)，套件就是框架讓「分享可重用元件」變便宜的方式。
 
-## 官方 pack：`kt-biome`
+## 官方套件包：`kt-biome`
 
-多數人第一個會安裝的 package 是 `kt-biome`——這是展示型 pack，裡面有 `swe`、`reviewer`、`researcher`、`ops`、`creative`、`general`、`root` 生物，也有像 `swe_team` 與 `deep_research` 這些生態瓶，外加一些外掛。
+大多數人安裝的第一個套件是 `kt-biome`：展示用套件包，內含 `swe`、`reviewer`、`researcher`、`ops`、`creative`、`general`、`root` 等生物、`swe_team` 與 `deep_research` 等生態瓶，還有幾個外掛。
 
 ```bash
 kt install @kt-biome
 kt run @kt-biome/creatures/swe
 ```
 
-`@kt-biome` 短寫會透過 marketplace 解析（詳見下文）；若想繞過 marketplace，`kt install https://github.com/Kohaku-Lab/kt-biome.git` 仍然有效。
+`@kt-biome` 這個短寫透過市集解析 (見下文)；想繞過市集的話，`kt install https://github.com/Kohaku-Lab/kt-biome.git` 一樣可以用。
 
-當你要做自己的 pack 時，把 `kt-biome` 當成參考範本來看。
+要做自己的套件包時，把 `kt-biome` 當參考範本來研究。
 
 ## Manifest：`kohaku.yaml`
 
@@ -36,10 +36,10 @@ version: "0.1.0"
 description: "My shared agent components"
 
 creatures:
-  - name: researcher           # 對應 creatures/researcher/ 資料夾
+  - name: researcher           # folder at creatures/researcher/
 
 terrariums:
-  - name: research_team        # 對應 terrariums/research_team/ 資料夾
+  - name: research_team        # folder at terrariums/research_team/
 
 tools:
   - name: my_tool
@@ -51,6 +51,39 @@ plugins:
     module: my_pack.plugins.my_guard
     class: MyGuard
 
+io:
+  - name: discord_input
+    module: my_pack.io.discord
+    class: DiscordInput
+
+triggers:
+  - name: webhook
+    module: my_pack.triggers.webhook
+    class: WebhookTrigger
+
+skills:
+  - name: repo-surgery
+    path: skills/repo-surgery
+    description: Shared repo surgery workflow
+
+commands:
+  - name: handoff
+    module: my_pack.commands.handoff
+    class: HandoffCommand
+
+user_commands:
+  - name: deploy
+    module: my_pack.user_commands.deploy
+    class: DeployCommand
+
+prompts:
+  - name: git-safety
+    path: prompts/git-safety.md
+
+framework_hints:
+  framework.execution_model.dynamic: |
+    Use background work aggressively, but never duplicate it.
+
 llm_presets:
   - name: my-custom-model
 
@@ -59,7 +92,7 @@ python_dependencies:
   - pymupdf>=1.24
 ```
 
-目錄結構：
+資料夾佈局：
 
 ```
 my-pack/
@@ -68,7 +101,7 @@ my-pack/
   terrariums/research_team/config.yaml
   prompts/git-safety.md
   skills/repo-surgery/SKILL.md
-  my_pack/                     # 可安裝的 python package
+  my_pack/                     # installable python package
     __init__.py
     tools/my_tool.py
     plugins/my_guard.py
@@ -78,64 +111,67 @@ my-pack/
     user_commands/deploy.py
 ```
 
-Python 模組會用點分路徑解析（`my_pack.tools.my_tool:MyTool`）。設定則透過 `@my-pack/creatures/researcher` 解析。
+Python 模組用點分路徑解析 (`my_pack.tools.my_tool:MyTool`)。設定檔用 `@my-pack/creatures/researcher` 解析。
 
-如果宣告了 `python_dependencies`，`kt install` 安裝時也會一併安裝這些 Python 依賴。
+`python_dependencies` (加上 `requirements.txt`，若存在的話) 由
+`kt install` 透過 `sys.executable -m pip` 安裝，也就是裝進
+KohakuTerrarium 自己所在的環境。傳 `--no-deps` 可以跳過；
+依賴安裝失敗會拋 `PackageError`，不會降級成警告。
 
-### 更多 manifest 槽位
+### 較新的 manifest 槽位
 
-除了 `tools`、`plugins`、`llm_presets`，package 還可以貢獻：
+除了 `tools`、`plugins` 與 `llm_presets`，套件現在還可以提供：
 
-- `io:` — package 解析的輸入 / 輸出模組類別
-- `triggers:` — package 解析的 trigger 類別
-- `skills:` — creature 可發現的程序化技能包（`SKILL.md`）
-- `commands:` — Controller `##name##` 指令
-- `user_commands:` — 使用者可輸入的斜線命令
-- `prompts:` / `templates:` — Prompt 的可重用 Jinja include 片段
-- `framework_hints:` — 對內建 framework-hint 文案的 package 級覆寫
+- `io:`：由套件解析的輸入 / 輸出模組類別
+- `triggers:`：由套件解析的觸發器類別
+- `skills:`：生物可以發現的程序性 skill 包 (`SKILL.md`)
+- `commands:`：控制器的 `##name##` 指令
+- `user_commands:`：人可以打的 slash 指令
+- `prompts:` / `templates:`：提示詞用的可重用 Jinja include 片段
+- `framework_hints:`：套件層級覆寫內建的 framework-hint 文字
 
-衝突策略是混合的：
+衝突政策刻意分成兩種：
 
-- tools / plugins / io / triggers / user_commands / commands 共享同一個名稱
-  空間，衝突時報錯或要求顯式覆寫；
-- 程序化技能（skills）相反 —— last-wins，且較窄的作用域（project / user /
-  creature）會覆寫 package 自帶的副本。
+- 工具 / 外掛 / I/O / 觸發器 / 使用者指令 / 控制器指令共用同一個
+  名稱空間，衝突視為錯誤或必須明確覆寫；
+- 程序性 skill 是例外：後者勝出 (last-wins)，作用域較窄的
+  (專案 / 使用者 / 生物) 覆蓋套件附帶的版本。
 
 ## 安裝模式
 
-### Marketplace 短寫（`@name`）
+### 市集 spec (`@name`)
 
 ```bash
-kt install @kt-biome              # 解析到最新的 non-yanked 版本
-kt install @kt-biome@v1.2.0       # 指定版本
-kt install @myfork/kt-biome       # 限定來源
+kt install @kt-biome              # 最新的未下架版本
+kt install @kt-biome@v1.2.0       # 明確鎖定版本
+kt install @myfork/kt-biome       # 限定到特定來源的名稱
 ```
 
-`@`-前綴形式會透過 marketplace（[詳見下文](#marketplace-與-name-解析)）解析為 git URL，然後跟 `kt install <git-url>` 一樣 clone 到 `~/.kohakuterrarium/packages/<name>/`。**`@` 形式不支援 editable 安裝** —— 請先 clone，再用 `-e` 安裝。
+`@` 開頭的形式透過市集解析 ([見下文](#市集與-name-解析)) 成 git URL，再像 `kt install <git-url>` 一樣 clone 進 `~/.kohakuterrarium/packages/<name>/`。**`@` spec 不支援 editable 模式**：想用 editable 就先 clone，再用 `-e` 安裝。
 
-### Git URL（clone）
+### Git URL (clone)
 
 ```bash
 kt install https://github.com/you/my-pack.git
 ```
 
-會 clone 到 `~/.kohakuterrarium/packages/my-pack/`。更新則用 `kt update my-pack`。
+Clone 進 `~/.kohakuterrarium/packages/my-pack/`。用 `kt update my-pack` 更新。
 
-### 本機路徑（copy）
+### 本地路徑 (複製)
 
 ```bash
 kt install ./my-pack
 ```
 
-會把整個資料夾複製進去。更新方式是重新執行 `kt install`，或直接修改那份複本。
+把資料夾複製進去。更新時重跑 `kt install`，或直接編輯複製出來的版本。
 
-### 本機路徑（editable）
+### 本地路徑 (editable)
 
 ```bash
 kt install ./my-pack -e
 ```
 
-會寫入 `~/.kohakuterrarium/packages/my-pack.link`，指向原始碼目錄。之後你在原始碼的修改會立即生效——不需要重新安裝。很適合開發時迭代。
+寫一個指向原始目錄的 `~/.kohakuterrarium/packages/my-pack.link`。原始目錄裡的修改立即可見，不用重新安裝。開發迭代時非常好用。
 
 ### 解除安裝
 
@@ -147,125 +183,195 @@ kt uninstall my-pack
 
 `@my-pack/creatures/researcher` →
 
-- 如果存在 `my-pack.link`：追蹤這個指標。
-- 否則：解析到 `~/.kohakuterrarium/packages/my-pack/creatures/researcher/`。
+- 如果 `my-pack.link` 存在：跟著指標走。
+- 否則：`~/.kohakuterrarium/packages/my-pack/creatures/researcher/`。
 
-這套機制會被 `kt run`、`kt terrarium run`、`kt edit`、`kt update`、`base_config:` 繼承，以及程式化的 `Agent.from_path(...)` 使用。
+`@pkg/...` 參照在設定載入的瓶頸點解析，所以每個消費者都統一支援：
+`kt run`、`kt edit`、`kt update`、`base_config:` 繼承、配方，
+以及程式化載入器，例如 `Agent.build(...)`、`engine.add_creature(...)`、
+`Terrarium.from_recipe(...)`、`compose.agent(...)`、
+`Studio.sessions.start_creature(...)`。參照到未安裝的套件會拋
+`kt.errors.PackageNotInstalledError` (指名套件、附上 `kt install`
+提示)；格式錯誤的參照 (裸 `@`、跳脫套件根目錄的路徑) 拋
+`kt.errors.PackageRefError`。
 
-## Marketplace 與 `@name` 解析
+## 程式化 API：`kohakuterrarium.packages`
 
-[TerrariumMarket](https://github.com/Kohaku-Lab/TerrariumMarket) 是 KohakuTerrarium package 的公共 marketplace。它是一個公開 GitHub repo，裡面有一個 `registry.yaml` 與每個 package 一個目錄。`kt install @<name>` 讀這個檔案、解析出 git URL，然後照常安裝。
+`kt install` / `kt list` 做的事都可以從
+`kohakuterrarium.packages` import，它是惰性門面，import 本身
+不會拖進市集 / 安裝器那一疊，碰到那些名稱才載入。
 
-框架會把索引快取在 `~/.kohakuterrarium/marketplace/cache.json`，TTL 一小時（ETag 條件式重新驗證）。冷快取離線 = 明確錯誤。暖快取離線 = 靜默落回快取資料 + 警告 log。
+```python
+from kohakuterrarium import packages
 
-### CLI 指令
+# 冪等安裝：批次腳本開頭就該呼叫這個。
+# 回傳套件名稱；同名套件已安裝就立即返回
+# (不做版本檢查，連鎖定版本的 spec 也一樣)。
+packages.ensure("@kt-biome")
+
+# 明確安裝 (市集 spec / git URL / 本地目錄)：
+packages.install_package_spec("@kt-biome@v1.2.0")
+packages.install_package("https://github.com/you/my-pack.git")
+packages.install_package("./my-pack", editable=True)
+
+packages.update_package("my-pack")        # git pull --ff-only；鎖定版本會拒絕
+packages.uninstall_package("my-pack")
+
+# 解析與列舉：
+path = packages.resolve_package_path("@kt-biome/creatures/swe")
+packages.is_package_ref("@kt-biome/creatures/swe")   # True
+packages.packages_dir()                   # 尊重 KT_CONFIG_DIR
+for pkg in packages.list_packages():
+    print(pkg["name"], pkg["version"])
+```
+
+依賴政策：安裝函式都吃 `deps="auto" | "never"`
+(`"auto"` 是預設，用 `sys.executable -m pip` 安裝；`"never"`
+跳過 Python 依賴，等同 `--no-deps`)。失敗拋出
+`PackageError` 家族的型別化錯誤 (`PackageRefError`、
+`PackageNotInstalledError`、`PackagePathNotFoundError`)，
+為了方便也從這個門面 re-export。
+
+`packages.ensure(spec)` 只保證*存在*，不保證版本：要把特定版本
+壓到既有的安裝上，呼叫 `install_package_spec("@pkg@vX.Y.Z")`。
+
+完整符號列表 (manifest 槽位解析器、套件根目錄查詢) 在
+[Python API 參考](../reference/python.md#packages)。
+
+## 市集與 `@name` 解析
+
+[TerrariumMarket](https://github.com/Kohaku-Lab/TerrariumMarket) 是 KohakuTerrarium 套件的公開市集。它是一個公開的 GitHub repo，裡面是一個 YAML 檔 (`registry.yaml`) 加上每個套件一個條目目錄。`kt install @<name>` 讀那個檔案把名稱解析成 git URL，然後照常安裝。
+
+框架會抓取索引並快取在 `~/.kohakuterrarium/marketplace/cache.json`，TTL 一小時 (對上游做 ETag 重新驗證)。冷快取 + 離線 = 清楚的錯誤。熱快取 + 離線 = 靜默退回快取資料，並留一條警告 log。
+
+### CLI 動詞
 
 ```bash
-kt marketplace            # 等同 `list`：顯示已配置的來源
+kt marketplace            # `list` 的別名：顯示已設定的來源
 kt marketplace list
-kt marketplace refresh    # 強制 bust 快取 + 重抓
+kt marketplace refresh    # 強制清快取 + 重抓
 kt marketplace search [query] [--tag <t>] [--author <a>] [--json]
 kt marketplace info @<name>
 
-kt marketplace add <url> [--alias <name>]   # 新增自訂來源
+kt marketplace add <url> [--alias <name>]   # 加一個自訂來源
 kt marketplace remove <url-or-alias>
-kt marketplace reset                         # 還原預設（只剩 TerrariumMarket）
+kt marketplace reset                         # 還原成只剩預設來源
 ```
 
 ### Spec 語法
 
-| 形式 | 解析到 |
+| 形式 | 解析成 |
 |---|---|
-| `@kt-biome` | `kt-biome` 在第一個有的來源中、最新的 non-yanked 版本 |
-| `@kt-biome@v1.2.0` | 指定版本（即使 yanked 也允許，方便可重現） |
-| `@myfork/kt-biome` | 限制 `kt-biome` 只從別名 `myfork` 的來源查找 |
+| `@kt-biome` | 第一個有列出它的來源裡，`kt-biome` 最新的未下架版本 |
+| `@kt-biome@v1.2.0` | 精確的版本鎖定 (為了可重現性，允許已下架的版本) |
+| `@myfork/kt-biome` | 限定到別名 `myfork` 來源的 `kt-biome` |
 
-### 配置來源
+### 設定來源
 
-預設來源只有 TerrariumMarket。要加 fork 或自架：
+預設來源列表只有 TerrariumMarket。要加 fork 或自己的伺服器：
 
 ```bash
 kt marketplace add https://raw.githubusercontent.com/<owner>/<repo>/main/registry.yaml --alias myfork
 ```
 
-來源按設定順序合併；同名 package 以最先出現的為準（影子化會記 log）。設定儲存在 `~/.kohakuterrarium/marketplace-sources.json`。
+來源按查詢順序合併；同名第一個出現的勝出 (遮蔽會記 log)。設定持久化在 `~/.kohakuterrarium/marketplace-sources.json`。
 
-環境變數一次性覆寫（不寫設定檔）：
+環境變數覆寫 (一次性，不寫設定檔)：
 
 ```bash
 KT_MARKETPLACE_SOURCES=https://a.test/r.yaml,https://b.test/r.yaml kt marketplace search
-KT_MARKETPLACE_CACHE_TTL=0 kt marketplace search   # 這次跳過快取
+KT_MARKETPLACE_CACHE_TTL=0 kt marketplace search   # 這次呼叫繞過快取
 ```
 
-### 在 app 裡瀏覽
+### 從 app 裡瀏覽
 
-桌面 / 網頁 app 的 **Settings → Extensions** tab 現在是兩欄的 Catalog 檢視：**Browse**（marketplace package + Install 按鈕）與 **Installed**（本地已裝的，可 Uninstall、有 "Update available" 提示）。同樣走 `@<name>` 的安裝流程，所以 CLI 的 `kt install @kt-biome` 與 app 裡按 Install 走的是同一條程式路徑。
+桌面 / 網頁 app 的 **Settings → Extensions** 分頁現在是雙欄的「Catalog」視圖：**Browse** (市集套件 + Install 按鈕) 與 **Installed** (你本地的集合 + Uninstall 與「Update available」徽章)。背後跑的是同一套 `@<name>` 安裝流程，所以 CLI 的 `kt install @kt-biome` 和在 app 裡點 Install 走的是同一條程式路徑。
 
 ## 探索指令
 
 ```bash
-kt list                         # 已安裝 package + 本機 agents
-kt info path/or/@pkg/creature   # 查看單一設定的細節
-kt extension list               # 所有 package 提供的 tools/plugins/presets
-kt extension info my-pack       # package 中繼資料 + 內容清單
-kt marketplace                  # 已配置的 marketplace 來源
-kt marketplace search           # 瀏覽 marketplace（全部）
-kt marketplace search biome     # 子串 / tag 過濾
-kt marketplace info @kt-biome   # marketplace 條目詳細資訊
+kt list                         # 已安裝套件 + 本地 agent
+kt info path/or/@pkg/creature   # 單一設定的細節
+kt extension list               # 所有套件提供的工具/外掛/preset
+kt extension info my-pack       # 套件 metadata + 內容物
+kt marketplace                  # 已設定的市集來源
+kt marketplace search           # 瀏覽市集 (所有套件)
+kt marketplace search biome     # 子字串 + tag 過濾
+kt marketplace info @kt-biome   # 市集條目的詳細視圖
 ```
 
-`kt extension list` 看本地裝了什麼；`kt marketplace search` 看可以裝什麼。
+`kt extension list` 是看本地裝了什麼最簡單的方式；`kt marketplace search` 則是看有什麼可以裝。
 
-## 編輯已安裝設定
+## 編輯已安裝的設定
 
 ```bash
 kt edit @my-pack/creatures/researcher
 ```
 
-會用 `$EDITOR` 開啟 `config.yaml`（沒有的話退回 `$VISUAL`，再退回 `nano`）。如果是 editable install，編到的是原始碼；如果是一般安裝，編到的是 `~/.kohakuterrarium/packages/` 下面那份複本。
+用 `$EDITOR` 開啟 `config.yaml` (退而求其次用 `$VISUAL`，再來 `nano`)。Editable 安裝會編輯原始目錄；一般安裝會編輯 `~/.kohakuterrarium/packages/` 下的副本。
 
 ## 發佈
 
-1. 把 repo push 到 git（GitHub、GitLab、自架都可以——只要 `git clone` 能處理）。
+1. 把 repo 推上 git (GitHub、GitLab、自架，只要 `git clone` 拿得到就行)。
 2. 打版本 tag：`git tag v0.1.0 && git push --tags`。
-3. 每次發版時同步更新 `kohaku.yaml` 裡的 `version:`。
-4. **建議**：到 TerrariumMarket 登記 package，讓使用者可以用 `kt install @your-package`。開 PR 加 `entries/<your-package>/entry.yaml` 與 `entries/<your-package>/README.md` 到 [Kohaku-Lab/TerrariumMarket](https://github.com/Kohaku-Lab/TerrariumMarket)；CI 會驗證 schema 與 tag 存在性；維護者審核後合併。詳見 [contributing guide](https://github.com/Kohaku-Lab/TerrariumMarket/blob/main/CONTRIBUTING.md)。
-5. 不登記也行，直接分享 URL：`kt install https://your/repo.git`。
-4. 分享 URL：`kt install https://your/repo.git`。
+3. 每次發佈時更新 `kohaku.yaml` 裡的 `version:`。
+4. **選用但建議**：把套件上架到 TerrariumMarket，讓使用者可以用 `kt install @your-package` 安裝。對 [Kohaku-Lab/TerrariumMarket](https://github.com/Kohaku-Lab/TerrariumMarket) 開 PR，加上 `entries/<your-package>/entry.yaml` + `entries/<your-package>/README.md`；CI 會驗證 schema 與 tag 存在；維護者合併。流程細節見[貢獻指南](https://github.com/Kohaku-Lab/TerrariumMarket/blob/main/CONTRIBUTING.md)。
+5. 不上架也行，直接分享 URL：`kt install https://your/repo.git`。
 
-登記到 TerrariumMarket **不是必要** —— package 仍然只是帶有 `kohaku.yaml` 的 git repo，直接 URL 安裝的路徑完全沒變。Marketplace 只是疊在上面的探索層，不是取代品。
+上架 TerrariumMarket **不是必須的**：套件本質上仍是一個帶 `kohaku.yaml` 的 git repo，直接 URL 的安裝路徑沒有改變。市集是疊在那之上的探索層，不是替代品。
 
 ### 版本管理
 
-請讓 `version:` 與 git tag 保持一致。`kt update` 底層就是做 `git pull`；如果使用者想固定在某個 tag，也可以手動 checkout：
+讓 `version:` 跟 git tag 保持同步。`kt update` 底層做 `git pull`；鎖定在某個 tag 的使用者可以手動 checkout：
 
 ```bash
 cd ~/.kohakuterrarium/packages/my-pack
 git checkout v0.1.0
 ```
 
-## 執行時的擴充發現
+## 執行期的擴充探索
 
-當框架載入一個生物時，loader 會先在生物自己的設定裡查工具／外掛名稱，再查已安裝 package 的 manifest。Package 宣告的工具，會透過設定中的 `type: package` 暴露出來：
+框架載入生物時，載入器先在生物的本地設定裡找工具 / 外掛名稱，再去已安裝套件的 manifest 找。套件宣告的工具在設定裡用 `type: package` 引用：
 
 ```yaml
 tools:
   - name: my_tool
-    type: package          # 透過 kohaku.yaml 裡的 `tools:` 清單解析
+    type: package          # 透過 kohaku.yaml 的 `tools:` 清單解析
 ```
 
-這讓某個 package 裡的 creature，也能參照另一個 package 宣告的工具，只要兩者都已安裝即可。
+套件宣告的 I/O 與觸發器也是同一個模式：
+
+```yaml
+input:
+  type: package
+  name: discord_input
+
+triggers:
+  - type: package
+    name: webhook
+```
+
+提示詞片段透過 Jinja include 解析：
+
+```md
+{% include "git-safety" %}
+```
+
+控制器 / 使用者指令則從套件 manifest 探索，不從生物資料夾。
+
+只要兩個套件都有安裝，一個套件裡的生物就能引用另一個套件宣告的擴充。
 
 ## 疑難排解
 
-- **`@my-pack/...` 無法解析。** 用 `kt list` 確認 package 已安裝。若是 editable install，也檢查 `.link` 檔是否指向存在的目錄。
-- **`kt update my-pack` 顯示 "skipped"。** Editable 與非 git package 都不能透過 `kt update` 更新。請直接改原始碼（editable），或重新安裝（copy）。
-- **`python_dependencies` 沒有安裝。** 確認 `kt install` 在目前環境中有安裝權限（建議用 virtualenv，或 `pip install --user`）。
-- **Package 工具遮蔽了內建工具。** 內建工具會優先解析。若你想讓自己的版本生效，請替 package 工具改名。
+- **`@my-pack/...` 解析失敗。** 先 `kt list` 確認套件有裝。Editable 安裝的話，檢查 `.link` 檔指向的目錄還存在。
+- **`kt update my-pack` 說 "skipped"。** Editable 和非 git 的套件不能透過 `kt update` 更新。Editable 直接改原始目錄，複製安裝就重裝。
+- **`python_dependencies` 沒裝起來。** 確認 `kt install` 在目前環境有安裝套件的權限 (用 virtualenv 或 `pip install --user`)。
+- **套件工具被內建工具遮蔽。** 內建工具優先解析。想讓你的版本勝出，就改名。
 
-## 延伸閱讀
+## 另見
 
-- [生物](creatures.md) — 如何把 creature 打包。
-- [自訂模組](custom-modules.md) — 撰寫要隨 package 一起發佈的工具／外掛。
-- [參考 / CLI](../reference/cli.md) — `kt install`、`kt list`、`kt extension`。
-- [`kt-biome`](https://github.com/Kohaku-Lab/kt-biome) — 參考 package。
+- [撰寫生物](creatures.md)：把生物打包。
+- [自訂模組](custom-modules.md)：撰寫要出貨的工具 / 外掛。
+- [參考 / CLI](../reference/cli.md)：`kt install`、`kt list`、`kt extension`。
+- [參考 / Python API](../reference/python.md#packages)：`kohakuterrarium.packages` 門面。
+- [`kt-biome`](https://github.com/Kohaku-Lab/kt-biome)：參考套件。

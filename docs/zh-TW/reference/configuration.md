@@ -30,7 +30,7 @@ Config 裡指到其他檔案或套件的欄位，解析順序：
 
 | 欄位 | 型別 | 預設 | 必要 | 說明 |
 |---|---|---|---|---|
-| `name` | str | — | 是 | 生物名稱。沒設 `session_key` 時就拿來當預設 session key。 |
+| `name` | str |（無）| 是 | 生物名稱。沒設 `session_key` 時就拿來當預設 session key。 |
 | `version` | str | `"1.0"` | 否 | 資訊用。 |
 | `base_config` | str | `null` | 否 | 要繼承的 parent config (`@package/path`、`creatures/<name>`、或相對路徑)。 |
 | `controller` | dict | `{}` | 否 | LLM/控制器區塊。見 [Controller](#controller-區塊)。 |
@@ -68,7 +68,7 @@ Config 裡指到其他檔案或套件的欄位，解析順序：
 | `llm` | str | `""` | `~/.kohakuterrarium/llm_profiles.yaml` 裡的 profile 參照 (例如 `gpt-5.4`、`claude-opus-4.7`)。可帶上行內的 variation selector，例如 `claude-opus-4.7@reasoning=xhigh`。 |
 | `model` | str | `""` | 沒設 `llm` 時用的行內 model id。也接受 `name@group=option` 形式的 selector。 |
 | `provider` | str | `""` | 當 `model` 同一個 id 綁到多個 backend 時 (例如 `openai` vs `openrouter`) 用來消除歧義。 |
-| `variation_selections` | dict[str,str] | `{}` | 每個 group 的 variation 覆寫 — `{group_name: option_name}`。見 [Variation selector](#variation-selector)。 |
+| `variation_selections` | dict[str,str] | `{}` | 每個 group 的 variation 覆寫：`{group_name: option_name}`。見 [Variation selector](#variation-selector)。 |
 | `variation` | str | `""` | 單一 option 選擇的簡寫；會對 preset 的 group 做解析。 |
 | `auth_mode` | str | `""` | 空 (自動)、`codex-oauth` 等。 |
 | `api_key_env` | str | `""` | 裝 key 的環境變數。 |
@@ -84,13 +84,13 @@ Config 裡指到其他檔案或套件的欄位，解析順序：
 
 1. CLI 旗標 `--llm` 勝過 YAML 裡的 `controller.llm`。
 2. 否則用 `controller.llm` (preset 名稱 + 可選的 `@group=option` selector)。
-3. 否則用 `controller.model` — 依 model id 對內建與使用者 preset registry 做比對。`controller.provider` 用來消除跨 backend 的碰撞；`name@group=option` 形式的 selector 也會被拆出來。
+3. 否則用 `controller.model`：依 model id 對內建與使用者 preset registry 做比對。`controller.provider` 用來消除跨 backend 的碰撞；`name@group=option` 形式的 selector 也會被拆出來。
 4. 如果 `llm` 跟 `model` 都沒設，fallback 到 `llm_profiles.yaml` 的 `default_model`。
 5. Profile 解析完成後，控制器的 `temperature`、`reasoning_effort`、`service_tier`、`max_tokens` (remap 到 `max_output`) 與 `extra_body` 會疊加上去。`extra_body` 是深層合併，其他覆寫是純量取代。
 
 ### Variation selector
 
-Preset 可以暴露 **variation groups** — 兩層 dict `{group_name: {option_name: patch}}`，讓單一 preset 服務多組旋鈕 (reasoning effort、speed、thinking level) 而不用重複建立條目。選擇可以寫在 preset 參照字串裡，或透過 controller 上明確的 dict 欄位。
+Preset 可以暴露 **variation groups**：兩層 dict `{group_name: {option_name: patch}}`，讓單一 preset 服務多組旋鈕 (reasoning effort、speed、thinking level) 而不用重複建立條目。選擇可以寫在 preset 參照字串裡，或透過 controller 上明確的 dict 欄位。
 
 簡寫形式 (`--llm`、`controller.llm`、或 `controller.model` 都能用)：
 
@@ -115,20 +115,20 @@ controller:
 
 規則：
 
-- 裸簡寫 (`@xhigh`) 如果有多個 group 都吻合該 option，會被拒絕 — 請用 `@group=option` 消除歧義。
+- 裸簡寫 (`@xhigh`) 如果有多個 group 都吻合該 option，會被拒絕，請用 `@group=option` 消除歧義。
 - 未知 group 或 option 在解析時會 raise。
 - Variation patch 只能寫入下列 root：`temperature`、`reasoning_effort`、`service_tier`、`max_context`、`max_output`、`extra_body`。其他都會被拒絕。
-- 同一個 dotted path 上的跨 group 碰撞會 raise — 兩個 selection 不能同時宣告 `extra_body.reasoning.effort`。
+- 同一個 dotted path 上的跨 group 碰撞會 raise：兩個 selection 不能同時宣告 `extra_body.reasoning.effort`。
 
-每個 preset 的 group 與 option 目錄請看 [builtins.md — Variation groups](builtins.md#variation-groups)。
+每個 preset 的 group 與 option 目錄請看 [builtins.md：Variation groups](builtins.md#variation-groups)。
 
 ### Provider 專屬 `extra_body` 說明
 
-`extra_body` 會被深層合併進 JSON request body。每個 provider 讀 reasoning/effort 旋鈕的路徑不一樣 — 請設 provider 實際會認的那個旋鈕：
+`extra_body` 會被深層合併進 JSON request body。每個 provider 讀 reasoning/effort 旋鈕的路徑不一樣，請設 provider 實際會認的那個旋鈕：
 
 | Provider | 標準路徑 | 說明 |
 |---|---|---|
-| Codex (ChatGPT-OAuth) | 頂層 `reasoning_effort`、`service_tier` | `reasoning_effort`：`none\|low\|medium\|high\|xhigh`。Fast 模式：在 `gpt-5.4` 上用 `speed=fast` variation — 它會對映到 `service_tier: priority`。直接寫 `service_tier: fast` 會被 OpenAI API 拒絕。 |
+| Codex (ChatGPT-OAuth) | 頂層 `reasoning_effort`、`service_tier` | `reasoning_effort`：`none\|low\|medium\|high\|xhigh`。Fast 模式：在 `gpt-5.4` 上用 `speed=fast` variation，它會對映到 `service_tier: priority`。直接寫 `service_tier: fast` 會被 OpenAI API 拒絕。 |
 | OpenAI direct (`-api` preset) | `extra_body.reasoning.effort` | 完整級距 `none\|low\|medium\|high\|xhigh`。 |
 | OpenRouter (`-or` preset) | `extra_body.reasoning.effort` | 統一級距 `minimal\|low\|medium\|high`；只有少數幾個 model (Opus 4.7、GPT-5.x) 會認 `xhigh`。 |
 | Anthropic direct | `extra_body.output_config.effort` | Compat endpoint 會默默丟掉頂層 `reasoning_effort` / `service_tier`。Opus 4.7：`low\|medium\|high\|xhigh\|max`；Opus 4.6 / Sonnet 4.6：`low\|medium\|high\|max`。Haiku 4.5 用較舊的 `thinking.budget_tokens`。 |
@@ -143,10 +143,10 @@ Dict 欄位：`{type, module?, class?, options?, ...型別專屬 key}`。
 | 欄位 | 型別 | 預設 | 說明 |
 |---|---|---|---|
 | `type` | str | `"cli"` | `cli`、`cli_nonblocking`、`tui`、`none`、`custom`、`package`。音訊/ASR 輸入是 custom/package 模組。 |
-| `module` | str | — | 給 `custom` (例如 `./custom/input.py`) 或 `package` (例如 `pkg.mod`) 用。 |
-| `class` | str | — | 要 instantiate 的類別。YAML key 是 `class`；loader 會存到 dataclass 屬性 `class_name`。 |
+| `module` | str |（無）| 給 `custom` (例如 `./custom/input.py`) 或 `package` (例如 `pkg.mod`) 用。 |
+| `class` | str |（無）| 要 instantiate 的類別。YAML key 是 `class`；loader 會存到 dataclass 屬性 `class_name`。 |
 | `options` | dict | `{}` | 模組專屬選項。 |
-| `prompt` | str | `"> "` | CLI prompt (只對 plain `cli` input 有效 — Rich CLI 跟 TUI 會忽略)。 |
+| `prompt` | str | `"> "` | CLI prompt (只對 plain `cli` input 有效；Rich CLI 跟 TUI 會忽略)。 |
 | `exit_commands` | list[str] | `[]` | 觸發離開的字串。 |
 
 ### Output
@@ -156,8 +156,8 @@ Dict 欄位：`{type, module?, class?, options?, ...型別專屬 key}`。
 | 欄位 | 型別 | 預設 | 說明 |
 |---|---|---|---|
 | `type` | str | `"stdout"` | `stdout`、`stdout_prefixed`、`console_tts`、`dummy_tts`、`tui`、`custom`、`package`。 |
-| `module` | str | — | `custom`/`package` 輸出模組用。 |
-| `class` | str | — | 要 instantiate 的類別。YAML key 是 `class`；loader 會存到 dataclass 屬性 `class_name`。 |
+| `module` | str |（無）| `custom`/`package` 輸出模組用。 |
+| `class` | str |（無）| 要 instantiate 的類別。YAML key 是 `class`；loader 會存到 dataclass 屬性 `class_name`。 |
 | `options` | dict | `{}` | 模組專屬選項。 |
 | `controller_direct` | bool | `true` | 把控制器文字透過預設輸出送出。 |
 | `named_outputs` | dict[str, OutputConfigItem] | `{}` | Named 側輸出。每個 item 結構跟預設相同。 |
@@ -168,18 +168,18 @@ Dict 欄位：`{type, module?, class?, options?, ...型別專屬 key}`。
 
 | 欄位 | 型別 | 預設 | 說明 |
 |---|---|---|---|
-| `name` | str | — | 工具名 (必填)。如果 `type: trigger`，必須與 trigger 的 `setup_tool_name` 相符。 |
+| `name` | str |（無）| 工具名 (必填)。如果 `type: trigger`，必須與 trigger 的 `setup_tool_name` 相符。 |
 | `type` | str | `"builtin"` | `builtin`、`trigger`、`custom`、`package`。 |
-| `module` | str | — | 給 `custom` (例如 `./custom/tools/my_tool.py`) 或 `package` 用。 |
-| `class` | str | — | `custom`/`package` 要 instantiate 的類別。YAML key 是 `class`；存到 dataclass 屬性 `class_name`。 |
-| `doc` | str | — | 覆寫 skill 文件檔。 |
+| `module` | str |（無）| 給 `custom` (例如 `./custom/tools/my_tool.py`) 或 `package` 用。 |
+| `class` | str |（無）| `custom`/`package` 要 instantiate 的類別。YAML key 是 `class`；存到 dataclass 屬性 `class_name`。 |
+| `doc` | str |（無）| 覆寫 skill 文件檔。 |
 | `options` | dict | `{}` | 工具專屬選項。 |
 
 工具類型：
 
-- `builtin` — 依 `name` 對內建工具目錄做解析。
-- `trigger` — 把一個通用 trigger 類別暴露成 LLM 可呼叫的 setup 工具。`name` 必須與 trigger 的 `setup_tool_name` 相符。出廠 setup 工具：`add_timer` (TimerTrigger)、`watch_channel` (ChannelTrigger)、`add_schedule` (SchedulerTrigger)。
-- `custom` / `package` — 從 `module` + `class` 載入類別。
+- `builtin`：依 `name` 對內建工具目錄做解析。
+- `trigger`：把一個通用 trigger 類別暴露成 LLM 可呼叫的 setup 工具。`name` 必須與 trigger 的 `setup_tool_name` 相符。出廠 setup 工具：`add_timer` (TimerTrigger)、`watch_channel` (ChannelTrigger)、`add_schedule` (SchedulerTrigger)。
+- `custom` / `package`：從 `module` + `class` 載入類別。
 
 簡寫：
 
@@ -194,11 +194,11 @@ tools:
 
 | 欄位 | 型別 | 預設 | 說明 |
 |---|---|---|---|
-| `name` | str | — | 子代理識別字。 |
+| `name` | str |（無）| 子代理識別字。 |
 | `type` | str | `"builtin"` | `builtin`、`custom`、`package`。 |
-| `module` | str | — | 給 `custom`/`package` 用。 |
-| `config` | str | — | 模組裡具名的 config 物件 (例如 `MY_AGENT_CONFIG`)。YAML key 是 `config`；存到 dataclass 屬性 `config_name`。 |
-| `description` | str | — | 父代理 prompt 裡用到的描述。 |
+| `module` | str |（無）| 給 `custom`/`package` 用。 |
+| `config` | str |（無）| 模組裡具名的 config 物件 (例如 `MY_AGENT_CONFIG`)。YAML key 是 `config`；存到 dataclass 屬性 `config_name`。 |
+| `description` | str |（無）| 父代理 prompt 裡用到的描述。 |
 | `tools` | list[str] | `[]` | 子代理被允許使用的工具。 |
 | `can_modify` | bool | `false` | 子代理能不能做會改東西的操作。 |
 | `interactive` | bool | `false` | 跨回合持續活著、接收 context update。 |
@@ -232,26 +232,26 @@ subagents:
 
 子代理選項欄位還包括執行期與共享預算控制：
 
-- `default_plugins: ["auto-compact"]` — 展開為 `compact.auto`；當子代理的 `compact:` 需要自動觸發時使用。
-- `plugins: [{name: budget, options: {...}}]` — 統一執行期預算外掛。選項包括 `turn_budget: [soft, hard]`、`tool_call_budget: [soft, hard]`，以及可選的 `walltime_budget: [soft, hard]`（秒）。
-- `budget_inherit: true`（預設）— 如果父級存在共享舊式 iteration budget，子代理會複用它。
-- `budget_allocation: N` — 子代理得到一份新的獨立舊式 `N` turn 預算。
-- `budget_inherit: false` 且無 allocation — 子代理不使用父級共享舊式預算。
+- `default_plugins: ["auto-compact"]`：展開為 `compact.auto`；當子代理的 `compact:` 需要自動觸發時使用。
+- `plugins: [{name: budget, options: {...}}]`：統一執行期預算外掛。選項包括 `turn_budget: [soft, hard]`、`tool_call_budget: [soft, hard]`，以及可選的 `walltime_budget: [soft, hard]`（秒）。
+- `budget_inherit: true`（預設）：如果父級存在共享舊式 iteration budget，子代理會複用它。
+- `budget_allocation: N`：子代理得到一份新的獨立舊式 `N` turn 預算。
+- `budget_inherit: false` 且無 allocation：子代理不使用父級共享舊式預算。
 
 ### 觸發器
 
 | 欄位 | 型別 | 預設 | 說明 |
 |---|---|---|---|
-| `type` | str | — | `timer`、`context`、`channel`、`custom`、`package`。 |
-| `module` | str | — | 給 `custom`/`package` 用。 |
-| `class` | str | — | 要 instantiate 的類別。YAML key 是 `class`；存到 dataclass 屬性 `class_name`。 |
-| `prompt` | str | — | 觸發器觸發時注入的預設 prompt。 |
+| `type` | str |（無）| `timer`、`context`、`channel`、`custom`、`package`。 |
+| `module` | str |（無）| 給 `custom`/`package` 用。 |
+| `class` | str |（無）| 要 instantiate 的類別。YAML key 是 `class`；存到 dataclass 屬性 `class_name`。 |
+| `prompt` | str |（無）| 觸發器觸發時注入的預設 prompt。 |
 | `options` | dict | `{}` | 觸發器專屬選項。 |
 
 各型別常見選項：
 
 - `timer`：`interval` (秒)、`immediate` (bool，預設 `false`)。
-- `context`：`debounce_ms` (int，預設 `100`) — 做 debounce 的 context-update 觸發器。
+- `context`：`debounce_ms` (int，預設 `100`)，做 debounce 的 context-update 觸發器。
 - `channel`：`channel` (名稱)、`filter_sender` (選用)。
 
 如果要用時鐘對齊的 scheduler，請在 `tools` 條目裡用 `type: trigger, name: add_schedule` 把 `SchedulerTrigger` 暴露成 LLM 可呼叫的 setup 工具 (見 [工具](#工具))，不要寫在 `triggers:` list 裡。
@@ -269,20 +269,20 @@ subagents:
 
 ### 輸出接線
 
-框架層級路由條目的 list。每回合結束時，框架會組一個 `creature_output` `TriggerEvent`，直接推進每個目標生物的事件佇列 — 完全繞過頻道。討論見 [生態瓶指南 — 輸出接線](../guides/terrariums.md#輸出接線) 與 [patterns.md — pattern 1b](../concepts/patterns.md)；這一節是 config 參考。
+框架層級路由條目的 list。每回合結束時，框架會組一個 `creature_output` `TriggerEvent`，直接推進每個目標生物的事件佇列，完全繞過頻道。討論見 [生態瓶指南：輸出接線](../guides/terrariums.md#輸出接線) 與 [patterns.md：pattern 1b](../concepts/patterns.md)；這一節是 config 參考。
 
 條目欄位：
 
 | 欄位 | 型別 | 預設 | 說明 |
 |---|---|---|---|
-| `to` | str | — | 目標生物名稱，或魔術字串 `"root"`。 |
+| `to` | str |（無）| 目標生物名稱，或魔術字串 `"root"`。 |
 | `with_content` | bool | `true` | 設 `false` 時，事件 `content` 為空 (只是 metadata ping)。 |
 | `prompt` | str \| null | `null` | 接收端 prompt override 的模板。沒設時依 `with_content` 用預設模板。 |
 | `prompt_format` | `simple` \| `jinja` | `"simple"` | `simple` 用 `str.format_map`；`jinja` 用 `prompt.template` 渲染 (支援條件式 / filter)。 |
 
 模板變數 (兩種格式都有)：`source`、`target`、`content`、`turn_index`、`source_event_type`、`with_content`。
 
-簡寫 — 裸字串等同於 `{to: <str>, with_content: true}`：
+簡寫：裸字串等同於 `{to: <str>, with_content: true}`：
 
 ```yaml
 output_wiring:
@@ -299,7 +299,7 @@ output_wiring:
 
 - 只有生物跑在生態瓶裡時才有意義。獨立生物設了 `output_wiring` 也不會發出任何東西 (resolver 是生態瓶 runtime 掛上去的；獨立代理拿到的是 no-op resolver，只會 log 一次)。
 - 未知 / 停掉的目標會被 log 然後跳過；不會往源頭生物的 turn finalisation 丟例外。
-- 源頭的 `_finalize_processing` 會立刻跑完 — 每個目標的 `_process_event` 各自在自己的 `asyncio.Task` 裡跑，不會因為某個接收者慢就把源頭卡住。
+- 源頭的 `_finalize_processing` 會立刻跑完：每個目標的 `_process_event` 各自在自己的 `asyncio.Task` 裡跑，不會因為某個接收者慢就把源頭卡住。
 
 ### 終止
 
@@ -319,22 +319,22 @@ output_wiring:
 
 | 欄位 | 型別 | 預設 | 說明 |
 |---|---|---|---|
-| `name` | str | — | Server 識別字。 |
+| `name` | str |（無）| Server 識別字。 |
 | `transport` | `stdio` \| `streamable_http` \| `http` \| `sse` | `stdio` | Transport。`streamable_http` 是現代 HTTP MCP 首選；`http`/`sse` 是舊式 SSE alias。 |
-| `command` | str | — | stdio 執行檔。 |
+| `command` | str |（無）| stdio 執行檔。 |
 | `args` | list[str] | `[]` | stdio 參數。 |
 | `env` | dict[str,str] | `{}` | stdio 環境變數。 |
-| `url` | str | — | `streamable_http`、`http` 或 `sse` transport 的 URL。 |
+| `url` | str |（無）| `streamable_http`、`http` 或 `sse` transport 的 URL。 |
 
 ### 外掛
 
 | 欄位 | 型別 | 預設 | 說明 |
 |---|---|---|---|
-| `name` | str | — | 外掛識別字。 |
+| `name` | str |（無）| 外掛識別字。 |
 | `type` | str | `"builtin"` | `builtin`、`custom`、`package`。 |
-| `module` | str | — | 給 `custom` (例如 `./custom/plugins/my.py`) 或 `package` 用。 |
-| `class` 或 `class_name` | str | — | 要 instantiate 的類別。 |
-| `description` | str | — | 自由格式 metadata。 |
+| `module` | str |（無）| 給 `custom` (例如 `./custom/plugins/my.py`) 或 `package` 用。 |
+| `class` 或 `class_name` | str |（無）| 要 instantiate 的類別。 |
+| `description` | str |（無）| 自由格式 metadata。 |
 | `options` | dict | `{}` | 外掛專屬選項。 |
 
 簡寫：裸字串會被當成套件解析的外掛名。
@@ -359,18 +359,18 @@ Preset 別名：`@tiny`、`@base`、`@retrieval`、`@best`、`@multilingual`、`
 
 `base_config` 走前面路徑解析規則。合併用一套規則套在所有欄位上：
 
-- **純量** — 子層覆寫。
-- **Dict** (`controller`、`input`、`output`、`memory`、`compact`…) — 淺層合併；子層 key 在頂層覆寫父層。
-- **以 identity 為 key 的 list** (`tools`、`subagents`、`plugins`、`mcp_servers`、`triggers`) — 依 `name` 聯集。撞名時**子層勝出**並原地取代 base 條目 (保留 base 順序)。沒 `name` 的項目會串接。
-- **其他 list** — 子層取代父層。
-- **Prompt 檔** — `system_prompt_file` 沿繼承鏈串接；行內 `system_prompt` 最後附上。
+- **純量**：子層覆寫。
+- **Dict** (`controller`、`input`、`output`、`memory`、`compact`…)：淺層合併；子層 key 在頂層覆寫父層。
+- **以 identity 為 key 的 list** (`tools`、`subagents`、`plugins`、`mcp_servers`、`triggers`)：依 `name` 聯集。撞名時**子層勝出**並原地取代 base 條目 (保留 base 順序)。沒 `name` 的項目會串接。
+- **其他 list**：子層取代父層。
+- **Prompt 檔**：`system_prompt_file` 沿繼承鏈串接；行內 `system_prompt` 最後附上。
 
 兩個可以退出預設行為的指令：
 
 | 指令 | 效果 |
 |-----------|--------|
 | `no_inherit: [field, …]` | 列出的欄位拋棄繼承值。對純量、dict、identity list、prompt 鏈都適用。 |
-| `prompt_mode: concat \| replace` | `concat` (預設) 保留繼承 prompt 檔鏈 + 行內；`replace` 清空繼承 prompt — 等同 `no_inherit: [system_prompt, system_prompt_file]`。 |
+| `prompt_mode: concat \| replace` | `concat` (預設) 保留繼承 prompt 檔鏈 + 行內；`replace` 清空繼承 prompt，等同 `no_inherit: [system_prompt, system_prompt_file]`。 |
 
 **範例。**
 
@@ -410,7 +410,7 @@ creatures/<name>/
   subagents/            # 自訂子代理 config (慣例)
 ```
 
-這些子資料夾名稱只是慣例。Loader 透過 `ModuleLoader` 依每個 `module:` 路徑相對於代理資料夾解析 — 並不會自動掃 `tools/` 或 `subagents/`，所以每個自訂模組都必須在 `config.yaml` 裡宣告。
+這些子資料夾名稱只是慣例。Loader 透過 `ModuleLoader` 依每個 `module:` 路徑相對於代理資料夾解析，並不會自動掃 `tools/` 或 `subagents/`，所以每個自訂模組都必須在 `config.yaml` 裡宣告。
 
 ---
 
@@ -421,7 +421,7 @@ creatures/<name>/
 ```yaml
 terrarium:
   name: str
-  root:                  # 選用 — 指定圖中面向使用者的特權節點
+  root:                  # 選用：指定圖中面向使用者的特權節點
     base_config: str     # 或任何 AgentConfig 欄位直接行內寫
     ...
   creatures:
@@ -436,19 +436,19 @@ terrarium:
   channels:
     <name>:
       description: str
-    # 或簡寫 — 字串就是 description：
+    # 或簡寫，字串就是 description：
     # <name>: "description"
 ```
 
-> 所有圖頻道都是廣播 —— 每個監聽者都收到每一次 send。舊的 `type:`
+> 所有圖頻道都是廣播：每個監聽者都收到每一次 send。舊的 `type:`
 > 欄位在引擎層被忽略，新 config 應該省略。
 
 生態瓶欄位摘要：
 
 | 欄位 | 型別 | 預設 | 說明 |
 |---|---|---|---|
-| `name` | str | — | 生態瓶名稱。 |
-| `root` | object | `null` | 選用的 inline agent 設定，被提升為圖中面向使用者的特權節點 —— 拿到群組工具與標準的 `report_to_root` 接線。 |
+| `name` | str |（無）| 生態瓶名稱。 |
+| `root` | object | `null` | 選用的 inline agent 設定，被提升為圖中面向使用者的特權節點：拿到群組工具與標準的 `report_to_root` 接線。 |
 | `creatures` | list | `[]` | 跑在生態瓶裡的生物。 |
 | `channels` | dict | `{}` | 共享頻道宣告。 |
 
@@ -456,8 +456,8 @@ terrarium:
 
 | 欄位 | 型別 | 預設 | 說明 |
 |---|---|---|---|
-| `name` | str | — | 生物名稱。 |
-| `base_config` (或 `config`) | str | — | Config 路徑 (代理 config)。 |
+| `name` | str |（無）| 生物名稱。 |
+| `base_config` (或 `config`) | str |（無）| Config 路徑 (代理 config)。 |
 | `channels.listen` | list[str] | `[]` | 生物消費的頻道。 |
 | `channels.can_send` | list[str] | `[]` | 生物能發佈的頻道。 |
 | `output_log` | bool | `false` | 每隻生物抓 stdout。 |
@@ -470,7 +470,8 @@ terrarium:
 |---|---|---|---|
 | `description` | str | `""` | 會寫在頻道拓樸 prompt 裡。 |
 
-所有圖頻道都是廣播；引擎層不再有 kind 選擇。
+所有圖頻道都是廣播：每個監聽者都收到每一次 send。
+舊的 `type:` 欄位仍會被解析，但引擎層直接忽略；新設定請省略它。
 
 自動建立的頻道：
 
@@ -510,7 +511,7 @@ presets:
     reasoning_effort: str      # none | minimal | low | medium | high | xhigh
     service_tier: str          # priority | flex
     extra_body: dict
-    variation_groups:          # 選用 — 見 Variation selector
+    variation_groups:          # 選用，見 Variation selector
       <group>:
         <option>:
           <dotted.path>: value
@@ -518,9 +519,9 @@ presets:
 
 標準的 `backend_type` 值是：
 
-- `openai` — OpenAI-compatible `/chat/completions` endpoint。
-- `anthropic` — 透過官方 `anthropic` Python package 存取 Anthropic-compatible Messages API endpoint (Claude、MiniMax 的 `/anthropic/v1/messages`，以及相容 proxy)。
-- `codex` — ChatGPT 訂閱 Codex OAuth。
+- `openai`：OpenAI-compatible `/chat/completions` endpoint。
+- `anthropic`：透過官方 `anthropic` Python package 存取 Anthropic-compatible Messages API endpoint (Claude、MiniMax 的 `/anthropic/v1/messages`，以及相容 proxy)。
+- `codex`：ChatGPT 訂閱 Codex OAuth。
 
 舊值 `codex-oauth` 為了向後相容仍會被接受，讀取時會正規化為 `codex`。
 
@@ -550,7 +551,7 @@ Anthropic backend preset 可以透過 `extra_body` 傳遞 SDK request field；pr
 
 若要在程式碼裡加入新的 transport 實作，請在 `src/kohakuterrarium/llm/` 下建立 `BaseLLMProvider` 子類，用 KohakuTerrarium 內部 OpenAI-shaped message dict 實作 `_stream_chat()` 與 `_complete_chat()`，把 backend type 加進 `validate_backend_type()`，並擴充 `bootstrap/llm.py` 讓解析後的 `LLMProfile.backend_type` 能實例化它。provider 專屬的 request/response 轉換應停留在這個邊界，不要為了單一 provider 改 controller 或 conversation storage。
 
-所有附帶的 preset 請看 [builtins.md — LLM presets](builtins.md#llm-presets)；每個 preset 的 group 與 option 目錄見 [builtins.md — Variation groups](builtins.md#variation-groups)；在 controller config 裡怎麼選特定 variation 見 [Variation selector](#variation-selector)。
+所有附帶的 preset 請看 [builtins.md：LLM presets](builtins.md#llm-presets)；每個 preset 的 group 與 option 目錄見 [builtins.md：Variation groups](builtins.md#variation-groups)；在 controller config 裡怎麼選特定 variation 見 [Variation selector](#variation-selector)。
 
 ---
 
@@ -574,12 +575,12 @@ Anthropic backend preset 可以透過 `extra_body` 傳遞 SDK request field；pr
 
 | 欄位 | 型別 | 預設 | 說明 |
 |---|---|---|---|
-| `name` | str | — | 唯一識別字。 |
+| `name` | str |（無）| 唯一識別字。 |
 | `transport` | `stdio` \| `streamable_http` \| `http` \| `sse` | `stdio` | Transport。`streamable_http` 是現代 HTTP MCP 首選；`http`/`sse` 是舊式 SSE alias。 |
-| `command` | str | — | stdio 執行檔。 |
+| `command` | str |（無）| stdio 執行檔。 |
 | `args` | list[str] | `[]` | stdio 參數。 |
 | `env` | dict[str,str] | `{}` | stdio 環境變數。 |
-| `url` | str | — | `streamable_http`、`http` 或 `sse` transport 的 URL。 |
+| `url` | str |（無）| `streamable_http`、`http` 或 `sse` transport 的 URL。 |
 
 ---
 
@@ -612,18 +613,18 @@ python_dependencies:
 | `name` | str | 套件名稱；會裝在 `~/.kohakuterrarium/packages/<name>/`。 |
 | `version` | str | Semver。 |
 | `description` | str | 自由格式。 |
-| `creatures` | list | `[{name}]` — `creatures/<name>/` 下的生物 config。 |
-| `terrariums` | list | `[{name}]` — `terrariums/<name>/` 下的生態瓶 config。 |
-| `tools` | list | `[{name, module, class}]` — 提供的工具類別。 |
-| `plugins` | list | `[{name, module, class}]` — 提供的外掛。 |
-| `llm_presets` | list | `[{name}]` — 提供的 LLM preset (實際值在套件裡)。 |
+| `creatures` | list | `[{name}]`：`creatures/<name>/` 下的生物 config。 |
+| `terrariums` | list | `[{name}]`：`terrariums/<name>/` 下的生態瓶 config。 |
+| `tools` | list | `[{name, module, class}]`：提供的工具類別。 |
+| `plugins` | list | `[{name, module, class}]`：提供的外掛。 |
+| `llm_presets` | list | `[{name}]`：提供的 LLM preset (實際值在套件裡)。 |
 | `python_dependencies` | list[str] | Pip requirement 字串。 |
 
 安裝模式：
 
-- `kt install <git_url>` — clone。
-- `kt install <path>` — 複製。
-- `kt install <path> -e` — 寫一個指到來源的 `<name>.link`。
+- `kt install <git_url>`：clone。
+- `kt install <path>`：複製。
+- `kt install <path> -e`：寫一個指到來源的 `<name>.link`。
 
 ---
 

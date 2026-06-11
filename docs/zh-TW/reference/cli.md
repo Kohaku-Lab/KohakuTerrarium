@@ -1,6 +1,6 @@
 ---
 title: CLI
-summary: 每一個 kt 子指令 — run、resume、login、install、list、info、model、embedding、search、terrarium、serve、app。
+summary: 每一個 kt 子指令：run、resume、login、install、list、info、model、embedding、search、terrarium、serve、app。
 tags:
   - reference
   - cli
@@ -14,8 +14,8 @@ tags:
 
 ## 入口
 
-- `kt` — 安裝後的 console script。
-- `python -m kohakuterrarium` — 同上。
+- `kt`：安裝後的 console script。
+- `python -m kohakuterrarium`：同上。
 - 不加子指令執行 (例如從 Briefcase 雙擊) 時，`kt` 會自動開桌面 app。
 
 ## 全域旗標
@@ -39,7 +39,7 @@ kt run <agent_path> [flags]
 
 Positional：
 
-- `agent_path` — 本地資料夾 (要有 `config.yaml`)，或套件參照，例如 `@kt-biome/creatures/swe`。
+- `agent_path`：本地資料夾 (要有 `config.yaml`)，或套件參照，例如 `@kt-biome/creatures/swe`。
 
 旗標：
 
@@ -48,8 +48,8 @@ Positional：
 | `--log-level` | `DEBUG\|INFO\|WARNING\|ERROR` | `INFO` | Root logger 等級。 |
 | `--log-stderr` | `auto\|on\|off` | `auto` | 把 log 鏡射到 stderr。`auto` = I/O 模式不是 cli/tui 時開啟 (例如 `plain`、`stdout`、`custom`、`package`)；`off` = 永不；`on` = 永遠開。 |
 | `--session` | path | 自動 | 工作階段檔；絕對路徑或放在 `~/.kohakuterrarium/sessions/` 下的名字。 |
-| `--no-session` | flag | — | 完全不做持久化。 |
-| `--llm` | str | — | 覆寫 LLM profile (例如 `gpt-5.4`、`claude-opus-4.7`)。接受 variation selector — 見 [configuration 參考](configuration.md#variation-selector)。 |
+| `--no-session` | flag |（無）| 完全不做持久化。 |
+| `--llm` | str |（無）| 覆寫 LLM profile (例如 `gpt-5.4`、`claude-opus-4.7`)。接受 variation selector，見 [configuration 參考](configuration.md#variation-selector)。 |
 | `--mode` | `cli\|plain\|tui` | 自動 | 互動模式。TTY 上預設 `cli`，非 TTY 預設 `plain`。 |
 
 行為：
@@ -69,14 +69,14 @@ kt resume [session] [flags]
 
 Positional：
 
-- `session` — 名字前綴、完整檔名、或完整路徑。不給就進互動式選單 (顯示最近 10 個)。
+- `session`：名字前綴、完整檔名、或完整路徑。不給就進互動式選單 (顯示最近 10 個)。
 
 旗標：
 
 | 旗標 | 型別 | 預設 | 說明 |
 |---|---|---|---|
 | `--pwd` | path | 工作階段記錄的 cwd | 覆寫工作目錄。 |
-| `--last` | flag | — | 直接 resume 最近一個，不彈選單。 |
+| `--last` | flag |（無）| 直接 resume 最近一個，不彈選單。 |
 | `--log-level` | 同 `kt run` | | |
 | `--log-stderr` | 同 `kt run` | `auto` | 把 log 鏡射到 stderr。 |
 | `--mode` | 同 `kt run` | | 生態瓶工作階段強制 `tui`。 |
@@ -121,25 +121,25 @@ kt terrarium run <terrarium_path> [flags]
 
 Positional：
 
-- `terrarium_path` — YAML 檔或 `@package/terrariums/<name>`。
+- `terrarium_path`：YAML 檔或 `@package/terrariums/<name>`。
 
 旗標：
 
 | 旗標 | 型別 | 預設 | 說明 |
 |---|---|---|---|
 | `--log-level` | 同 `kt run` | | |
-| `--seed` | str | — | 啟動時注入到 seed 頻道的 prompt。 |
+| `--seed` | str |（無）| 啟動時注入到 seed 頻道的 prompt。 |
 | `--seed-channel` | str | `seed` | 接收 `--seed` 的頻道。 |
-| `--observe` | 頻道名字 list | — | 要觀察的頻道 (plain/log 模式)。 |
-| `--no-observe` | flag | — | 關掉所有觀察。 |
+| `--observe` | 頻道名字 list |（無）| 要觀察的頻道 (plain/log 模式)。 |
+| `--no-observe` | flag |（無）| 關掉所有觀察。 |
 | `--session` | path | 自動 | 工作階段檔路徑。 |
-| `--no-session` | flag | — | 關掉持久化。 |
-| `--llm` | str | — | 覆寫**每一隻**生物 (含 root) 的 LLM profile。 |
+| `--no-session` | flag |（無）| 關掉持久化。 |
+| `--llm` | str |（無）| 覆寫**每一隻**生物 (含 root) 的 LLM profile。 |
 | `--mode` | `cli\|plain\|tui` | `tui` | UI 模式。 |
 
 行為：
 
-- `tui`：多 tab view — root + 每隻生物 + 每條頻道。
+- `tui`：多 tab view（root + 每隻生物 + 每條頻道）。
 - `cli`：把 root (有的話) 或第一隻生物掛到 RichCLI。
 - `plain`：把觀察到的頻道訊息串流到 stdout。
 
@@ -165,7 +165,7 @@ kt install <source> [-e|--editable] [--name <name>]
 
 | 旗標 | 型別 | 預設 | 說明 |
 |---|---|---|---|
-| `-e`、`--editable` | flag | — | 寫一個 `<name>.link` 指向來源，而不是複製內容。 |
+| `-e`、`--editable` | flag |（無）| 寫一個 `<name>.link` 指向來源，而不是複製內容。 |
 | `--name` | str | 從 URL/路徑推得 | 覆寫安裝的套件名稱。 |
 
 `<source>` 可以是：
@@ -269,7 +269,7 @@ kt config provider delete <name>
 
 | 旗標 | 型別 | 預設 | 說明 |
 |---|---|---|---|
-| `--all` | flag | — | 一併列出所有內建 preset。列會分組 (使用者 preset / 內建 preset)；Legend 會標出哪些條目已有 API key / OAuth 設定。 |
+| `--all` | flag |（無）| 一併列出所有內建 preset。列會分組 (使用者 preset / 內建 preset)；Legend 會標出哪些條目已有 API key / OAuth 設定。 |
 
 #### `kt config llm show`
 
@@ -339,10 +339,10 @@ kt config key delete <provider>
 
 管理全域 MCP server 目錄 (`~/.kohakuterrarium/mcp_servers.yaml`)。
 
-- `list` — 顯示檔案路徑與 server 清單。
-- `add [name]` — 互動式。會問 transport (`stdio`/`streamable_http`/`http`)、command、args JSON、env JSON、URL。
-- `edit <name>` — 互動式編輯。
-- `delete <name>` — 移除條目。
+- `list`：顯示檔案路徑與 server 清單。
+- `add [name]`：互動式。會問 transport (`stdio`/`streamable_http`/`http`)、command、args JSON、env JSON、URL。
+- `edit <name>`：互動式編輯。
+- `delete <name>`：移除條目。
 
 ---
 
@@ -389,7 +389,7 @@ kt embedding <session> [--provider ...] [--model ...] [--dimensions N]
 |---|---|---|---|
 | `--provider` | `auto\|model2vec\|sentence-transformer\|api` | `auto` | Auto 優先用 jina-v5-nano。 |
 | `--model` | str | 視 provider 而定 | 該 provider 對應的 model，含別名如 `@tiny`、`@best`、`@multilingual-best`。 |
-| `--dimensions` | int | — | Matryoshka 截斷 (較短的向量)。 |
+| `--dimensions` | int |（無）| Matryoshka 截斷 (較短的向量)。 |
 
 ### `kt search`
 
@@ -402,7 +402,7 @@ kt search <session> <query> [flags]
 | 旗標 | 型別 | 預設 | 說明 |
 |---|---|---|---|
 | `--mode` | `fts\|semantic\|hybrid\|auto` | `auto` | 搜尋模式。Auto 有向量就走 semantic，否則走 FTS。 |
-| `--agent` | str | — | 只看某隻代理的事件。 |
+| `--agent` | str |（無）| 只看某隻代理的事件。 |
 | `-k` | int | `10` | 最多回傳幾筆。 |
 
 ---
@@ -421,7 +421,7 @@ kt web [flags]
 |---|---|---|---|
 | `--host` | str | `127.0.0.1` | 綁定 host。 |
 | `--port` | int | `8001` | 綁定 port。被佔用會自動遞增。 |
-| `--dev` | flag | — | 只起 API (前端自己用 `vite dev` 起)。 |
+| `--dev` | flag |（無）| 只起 API (前端自己用 `vite dev` 起)。 |
 | `--log-level` | 同 `kt run` | | |
 
 ### `kt app`
@@ -474,7 +474,7 @@ kt serve logs [--follow] [--lines 80]
 
 | 旗標 | 型別 | 預設 | 說明 |
 |---|---|---|---|
-| `--follow` | flag | — | Tail log。 |
+| `--follow` | flag |（無）| Tail log。 |
 | `--lines` | int | `80` | 一開始印的行數。 |
 
 ---
@@ -505,7 +505,7 @@ kt extension info <name>
 kt mcp list --agent <path>
 ```
 
-MCP server 也可以放在 `~/.kohakuterrarium/mcp_servers.yaml` 的全域目錄裡，由 [`kt config mcp`](#kt-config-mcp) 管理。兩邊的 registry 是獨立的 — 每隻代理的條目會在代理啟動時連上；目錄裡的條目不會自動連，但可以用名字引用。
+MCP server 也可以放在 `~/.kohakuterrarium/mcp_servers.yaml` 的全域目錄裡，由 [`kt config mcp`](#kt-config-mcp) 管理。兩邊的 registry 是獨立的：每隻代理的條目會在代理啟動時連上；目錄裡的條目不會自動連，但可以用名字引用。
 
 ---
 
@@ -535,9 +535,9 @@ MCP server 也可以放在 `~/.kohakuterrarium/mcp_servers.yaml` 的全域目錄
 
 ## Exit code
 
-- `0` — 成功。
-- `1` — 一般錯誤。
-- 編輯器的 exit code — 用於 `kt edit` / `kt config edit`。
+- `0`：成功。
+- `1`：一般錯誤。
+- 編輯器的 exit code，用於 `kt edit` / `kt config edit`。
 
 ## 互動式 prompt
 

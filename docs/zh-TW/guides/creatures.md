@@ -30,7 +30,7 @@ creatures/my-agent/
   memory/                # 可選的文字 / Markdown 記憶檔案 (慣例)
 ```
 
-查找順序為：`config.yaml` → `config.yml` → `config.json` → `config.toml`。環境變數插值（`${VAR}` 或 `${VAR:default}`）可在 YAML 任意位置使用。子資料夾名稱只是慣例 — loader 會依每個 `module:` 路徑相對於代理資料夾解析，但並不會自動掃 `tools/` 或 `subagents/`。
+查找順序為：`config.yaml` → `config.yml` → `config.json` → `config.toml`。環境變數插值（`${VAR}` 或 `${VAR:default}`）可在 YAML 任意位置使用。子資料夾名稱只是慣例：loader 會依每個 `module:` 路徑相對於代理資料夾解析，但並不會自動掃 `tools/` 或 `subagents/`。
 
 ### 最小設定
 
@@ -62,7 +62,7 @@ tools:
     module: ./tools/my_tool.py
 ```
 
-規則——所有欄位都遵循同一套統一模型：
+規則：所有欄位都遵循同一套統一模型：
 
 - **純量**：子層覆蓋父層。
 - **字典**（`controller`、`input`、`output`、`memory`、`compact`……）：淺層合併。
@@ -123,7 +123,7 @@ tools:
 
 ## 提示詞檔案
 
-請將 system prompt 放在 Markdown 中。裡面只放**人格與指引**——工具列表、呼叫語法與完整工具文件都會自動聚合。
+請將 system prompt 放在 Markdown 中。裡面只放**人格與指引**；工具列表、呼叫語法與完整工具文件都會自動聚合。
 
 ```markdown
 <!-- prompts/system.md -->
@@ -153,8 +153,8 @@ prompt_context_files:
 
 ## Skill mode：dynamic 與 static
 
-- `skill_mode: dynamic`（預設）— 工具會以單行描述出現在提示詞中。控制器會在需要時透過 `info` 框架指令載入完整文件。
-- `skill_mode: static` — 所有工具文件都會預先內嵌（system prompt 較大，但 round-trip 較少）。
+- `skill_mode: dynamic`（預設）：工具會以單行描述出現在提示詞中。控制器會在需要時透過 `info` 框架指令載入完整文件。
+- `skill_mode: static`：所有工具文件都會預先內嵌（system prompt 較大，但 round-trip 較少）。
 
 除非你需要固定、可稽核的提示詞，否則建議使用 `dynamic`。
 
@@ -164,20 +164,20 @@ prompt_context_files:
 
 以下是 `bash` 呼叫、`command=ls` 的具體例子：
 
-- `bracket`（預設）— 以 `[/name]` 開始、`[name/]` 結束，參數用 `@@key=value` 行表示：
+- `bracket`（預設）：以 `[/name]` 開始、`[name/]` 結束，參數用 `@@key=value` 行表示：
   ```
   [/bash]
   @@command=ls
   [bash/]
   ```
-- `xml` — 標準的帶屬性標籤形式：
+- `xml`：標準的帶屬性標籤形式：
   ```
   <bash command="ls"></bash>
   ```
-- `native` — 提供者原生 function calling（OpenAI / Anthropic tool use）。LLM 不輸出文字區塊，而由 API 以結構化方式攜帶呼叫。
-- dict — 自訂分隔符（見 [configuration reference — `tool_format`](../reference/configuration.md)）。
+- `native`：提供者原生 function calling（OpenAI / Anthropic tool use）。LLM 不輸出文字區塊，而由 API 以結構化方式攜帶呼叫。
+- dict：自訂分隔符（見 [configuration reference：`tool_format`](../reference/configuration.md)）。
 
-三種格式可以互換——選擇最適合你模型的即可。`native` 在主流提供者上通常最穩定；`bracket` 則幾乎到處都能用，包括本機模型。
+三種格式可以互換，選擇最適合你模型的即可。`native` 在主流提供者上通常最穩定；`bracket` 則幾乎到處都能用，包括本機模型。
 
 ## 工具與子代理
 
@@ -192,9 +192,9 @@ tools:
   - name: web_search
     options:
       max_results: 5
-  # 把通用 trigger 暴露成 setup tool —— LLM 可以在執行期
+  # 把通用 trigger 暴露成 setup tool：LLM 可以在執行期
   # 呼叫這個工具名稱來安裝它。框架會以 `CallableTriggerTool`
-  # 包裝 trigger 類別；簡短描述前面會加上「**Trigger** — 」
+  # 包裝 trigger 類別；簡短描述前面會加上「**Trigger**: 」
   # 讓 LLM 知道這是在安裝長期副作用，而不是立即執行一次行為。
   - { name: add_timer, type: trigger }
   - { name: watch_channel, type: trigger }
@@ -211,7 +211,7 @@ subagents:
     can_modify: true
 ```
 
-可安裝型 trigger 是逐生物 opt-in 的——沒有任何 `type: trigger` 項目的生物，無法在執行期安裝 trigger。每個通用 `BaseTrigger` 子類別都會宣告自己的 `setup_tool_name`（例如 `add_timer`）、`setup_description` 與 `setup_param_schema`。若要自己撰寫，請見[自訂模組 — Triggers](custom-modules.md)。
+可安裝型 trigger 是逐生物 opt-in 的：沒有任何 `type: trigger` 項目的生物，無法在執行期安裝 trigger。每個通用 `BaseTrigger` 子類別都會宣告自己的 `setup_tool_name`（例如 `add_timer`）、`setup_description` 與 `setup_param_schema`。若要自己撰寫，請見[自訂模組：Triggers](custom-modules.md)。
 
 完整的工具與子代理目錄請見 [reference/builtins](../reference/builtins.md)；撰寫自訂內容請見[自訂模組](custom-modules.md)。
 
@@ -226,7 +226,7 @@ triggers:
     options: { channel: alerts }
   - type: context
     options: { debounce_ms: 200 }
-    prompt: "Context shifted — reconsider plan."
+    prompt: "Context shifted; reconsider plan."
   - type: custom
     module: ./triggers/webhook.py
     class: WebhookTrigger
@@ -269,12 +269,12 @@ session_key: shared_workspace
 
 控制器可以輸出內嵌指令直接與框架溝通（不需工具 round-trip）。這些指令會記錄在提示詞中的 framework-hints 區塊。
 
-框架指令與工具呼叫共用同一語法家族——也就是你設定的 `tool_format`（bracket、XML、native）是什麼，它就用什麼。以下為預設 bracket 例子，placeholder 以裸識別字表示：
+框架指令與工具呼叫共用同一語法家族，也就是你設定的 `tool_format`（bracket、XML、native）是什麼，它就用什麼。以下為預設 bracket 例子，placeholder 以裸識別字表示：
 
-- `[/info]tool_or_subagent[info/]` — 按需載入完整文件。
-- `[/read_job]job_id[read_job/]` — 讀取背景作業輸出（在 body 中接受 `--lines N` 與 `--offset M`）。
-- `[/jobs][jobs/]` — 列出執行中的作業與其 ID。
-- `[/wait]job_id[wait/]` — 阻塞目前這一輪，直到背景作業完成。
+- `[/info]tool_or_subagent[info/]`：按需載入完整文件。
+- `[/read_job]job_id[read_job/]`：讀取背景作業輸出（在 body 中接受 `--lines N` 與 `--offset M`）。
+- `[/jobs][jobs/]`：列出執行中的作業與其 ID。
+- `[/wait]job_id[wait/]`：阻塞目前這一輪，直到背景作業完成。
 
 指令名稱與工具名稱共享同一個命名空間；讀取作業輸出的指令之所以叫 `read_job`，就是為了避免與 `read` 檔案讀取工具衝突。
 

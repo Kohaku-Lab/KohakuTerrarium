@@ -156,7 +156,7 @@ Route 頁面 (例如 `pages/instances/[id].vue`) 透過 Vue 的 `provide("panelP
 ## WebSocket 協定
 
 ### Chat (`/ws/creatures/{agent_id}` 或 `/ws/terrariums/{id}`)
-已存在 — 由 `stores/chat.js` 管理。串流文字 chunk、tool start/done、token usage、session info、壓縮事件。
+已存在，由 `stores/chat.js` 管理。串流文字 chunk、tool start/done、token usage、session info、壓縮事件。
 
 ### Logs (`/ws/logs`)
 Server 程序的 log tail。訊息：`{type: "meta"|"line"|"error", ...}`。Line 會解析成 `{ts, level, module, text}`。
@@ -187,4 +187,4 @@ Server 程序的 log tail。訊息：`{type: "meta"|"line"|"error", ...}`。Line
 
 `stores/theme.js` 管 dark/light 模式。元件用 `useThemeStore().dark` 反應式讀取。CSS 以 `html.dark` class 做暗色覆寫。UnoCSS 的 `dark:` prefix 整個 app 都通。
 
-Vditor 與 xterm.js 各自有主題系統 — 兩邊都 watch `themeStore.dark`、呼叫它們各自的主題切換 API。
+Vditor 與 xterm.js 各自有主題系統，兩邊都 watch `themeStore.dark`、呼叫它們各自的主題切換 API。

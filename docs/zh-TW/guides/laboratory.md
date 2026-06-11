@@ -1,6 +1,6 @@
 ---
 title: Laboratory（多節點）
-summary: 跨兩台以上機器執行 KohakuTerrarium —— kt lab-host + kt lab-client、每個 worker 的憑證、程式化使用、多節點生態瓶、與 resume。
+summary: 跨兩台以上機器執行 KohakuTerrarium：kt lab-host + kt lab-client、每個 worker 的憑證、程式化使用、多節點生態瓶、與 resume。
 tags:
   - guides
   - laboratory
@@ -21,14 +21,14 @@ Laboratory 層讓一個**主機**行程協調執行在遠端 **worker** 機器
 - 你想讓生物在和 UI 不同的機器上執行（GPU 機器、sandbox VM、
   雲端節點）。
 - 你需要每隻生物有**自己的** OAuth 登入（Codex、ChatGPT
-  訂閱）—— OAuth 是行程綁定的，不能共享，而 worker 上的
+  訂閱）：OAuth 是行程綁定的，不能共享，而 worker 上的
   local-first identity 模型代表每個 worker 可以持有自己的
   token。
 - 你想讓生物的檔案系統動作（workspace 檔案、subprocess shell、
   MCP 伺服器）落在和 dashboard 不同的主機上。
 
 其他情境（單使用者、單機）請繼續用 `kt serve` / `kt web` /
-`kt app` —— 它們比較簡單。
+`kt app`，它們比較簡單。
 
 ## 啟動主機
 
@@ -49,16 +49,16 @@ kt serve start --mode lab-host \
 
 旗標：
 
-- `--mode lab-host` —— 在正常 web stack 之外接受 worker 連線。
+- `--mode lab-host`：在正常 web stack 之外接受 worker 連線。
   主機在 lab-host 模式下**預設不執行任何生物**；每次 spawn
   都必須指定 worker（或回退到 recipe-only 的協調引擎）。
-- `--lab-bind host:port` —— worker 連線到的 WebSocket 端點。
+- `--lab-bind host:port`：worker 連線到的 WebSocket 端點。
   使用 worker 可達的 bind 位址；生產環境請放在 nginx /
   Cloudflare 後面做 TLS 終結。
-- `--lab-token` —— shared secret。每個 worker 在 Hello
+- `--lab-token`：shared secret。每個 worker 在 Hello
   handshake 中提示這個；token 不符會被拒絕。在綁定非 loopback
   位址時**永遠要設定這個**。
-- `--home-dir` —— 重新指定 `KT_CONFIG_DIR`。API key、OAuth
+- `--home-dir`：重新指定 `KT_CONFIG_DIR`。API key、OAuth
   token、LLM profile、MCP 伺服器、session 都住在這底下。省略
   時預設 `~/.kohakuterrarium`。
 
@@ -80,17 +80,17 @@ kt lab-client \
 
 旗標：
 
-- `--host` —— 純文字用 `ws://`、TLS 用 `wss://`。如果你用
+- `--host`：純文字用 `ws://`、TLS 用 `wss://`。如果你用
   Cloudflare 或 nginx 代理，這裡填公開端點；Lab 協定可以
   不變樣地穿越懂 WebSocket 的代理。
-- `--token` —— 必須與主機的 `--lab-token` 相符。
-- `--name` —— 主機認識這個 worker 用的 node id。在連線的
+- `--token`：必須與主機的 `--lab-token` 相符。
+- `--name`：主機認識這個 worker 用的 node id。在連線的
   workers 中必須唯一。
-- `--home-dir` —— **每個 worker 各自的** 設定 home。給每個
+- `--home-dir`：**每個 worker 各自的** 設定 home。給每個
   worker 自己的目錄，這樣它們的 `api_keys.yaml`、Codex OAuth
   token 與 session 檔案才不會撞在一起。從 worker 使用 Codex
   時，這是唯一合理的做法。
-- `--session-dir` —— 選用 override；預設 `<home-dir>/sessions`。
+- `--session-dir`：選用 override；預設 `<home-dir>/sessions`。
 
 worker 連上時，主機會記錄一條 CONTROL `register_creature`
 trace，dashboard 的 site 選單會出現新項目。
@@ -100,9 +100,9 @@ trace，dashboard 的 site 選單會出現新項目。
 `Settings → Providers` 有一個 **Manage on:** 下拉，用來挑選
 你正在編輯哪個節點的憑證儲存。
 
-- **Host** —— key + Codex token 落在主機（lab-host 行程的
+- **Host**：key + Codex token 落在主機（lab-host 行程的
   `--home-dir`）。
-- **某個 worker 的名字** —— key + Codex 登入透過 Lab APP 路由
+- **某個 worker 的名字**：key + Codex 登入透過 Lab APP 路由
   到該 worker；worker 寫到自己 `--home-dir/api_keys.yaml`，
   並啟動自己的 OAuth 瀏覽器流程。
 
@@ -112,7 +112,7 @@ OpenAI key：
 1. `worker-gpu-1` 自己的 `<--home-dir>/api_keys.yaml`
 2. worker 上的 `OPENAI_API_KEY` 環境變數
 3. 主機的 identity 儲存（透過 Lab APP `studio.identity`
-   namespace）—— 只有在 (1) 和 (2) 都 miss 的情況下。
+   namespace），只有在 (1) 和 (2) 都 miss 的情況下。
 
 特別是 Codex：OAuth refresh token 是行程綁定的，所以
 **Codex 必須在實際用它的 worker 上登入**。主機沒辦法以一種
@@ -134,7 +134,7 @@ POST /api/sessions/active/creature
 }
 ```
 
-（在 lab-host 模式下，`start_creature` 必須帶 `on_node` ——
+（在 lab-host 模式下，`start_creature` 必須帶 `on_node`：
 在主機上 spawn 會被拒絕，因為主機不執行 agent。）
 
 ### 從 HTTP API
@@ -179,7 +179,7 @@ async def my_spawn(service: TerrariumService = Depends(get_service)):
 
 在 lab-host 模式下，被注入的 `service` 就是執行中的
 `MultiNodeTerrariumService`。**你不能在 module load 時就呼叫
-`get_service()`** —— 它是一個相依性 provider，結果取決於 API
+`get_service()`**：它是一個相依性 provider，結果取決於 API
 啟動路徑（`api/app.py` 的 startup hook 只在傳入 `--mode
 lab-host` 時才會呼叫 `set_service(...)`）。
 
@@ -210,7 +210,7 @@ from kohakuterrarium.utils.config_dir import config_dir
 
 
 async def main():
-    # 1. Lab 傳輸 —— 接受 worker 的 WebSocket 連線。
+    # 1. Lab 傳輸：接受 worker 的 WebSocket 連線。
     host = HostEngine(
         HostConfig(
             bind_host="0.0.0.0",
@@ -222,7 +222,7 @@ async def main():
     )
     await host.start()
 
-    # 2. 協調引擎 —— 一個裸的 Terrarium,承載跨節點的頻道物件,
+    # 2. 協調引擎：一個裸的 Terrarium,承載跨節點的頻道物件,
     #    以及(可選地)由 recipe 生成的生物。Worker 才是真正執行
     #    agent 工作的一方;這個引擎永遠不會對綁定 worker 的
     #    spawn 收到 add_creature。
@@ -247,7 +247,7 @@ async def main():
     print("connected nodes:", list(service.connected_nodes()))
 
     # 6. 現在 spawn。``on_node`` **必須**指向一個已連線的
-    #    worker —— 在 lab-host 模式下,start_creature 會拒絕在主
+    #    worker；在 lab-host 模式下,start_creature 會拒絕在主
     #    機上 spawn(協調引擎僅供 recipe 使用)。
     info = await service.add_creature(
         "/abs/path/to/creature/on/worker/disk",
@@ -268,9 +268,9 @@ asyncio.run(main())
 
 兩種讓路徑在 worker 上可解析的方法：
 
-1. **共享檔案系統** —— 主機與 worker 掛載同一個網路 share；
+1. **共享檔案系統**：主機與 worker 掛載同一個網路 share；
    不需要 deploy。
-2. **`studio.deploy`** —— 透過 Lab 推送 creature 資料夾：
+2. **`studio.deploy`**：透過 Lab 推送 creature 資料夾：
 
 ```python
 from pathlib import Path
@@ -285,7 +285,7 @@ info = await service.add_creature(target_path, on_node="worker-gpu-1")
 ```
 
 對於 inline `AgentConfig`（任何地方都沒有資料夾在磁碟上），
-直接傳 config 物件 —— 它會以打包過的 dict 形式跨越線路：
+直接傳 config 物件，它會以打包過的 dict 形式跨越線路：
 
 ```python
 from kohakuterrarium.core.config_types import AgentConfig, InputConfig, OutputConfig
@@ -311,7 +311,7 @@ Recipe 檔案（目前）不包含每隻生物的節點指定，所以用命令�
 alpha = await service.add_creature(alpha_cfg, on_node="worker-1")
 bravo = await service.add_creature(bravo_cfg, on_node="worker-2")
 
-# 跨節點 connect —— 自動在兩側建頻道、接好 send + listen、
+# 跨節點 connect：自動在兩側建頻道、接好 send + listen、
 # 透過 broadcast adapter 交叉訂閱、記錄 cluster 連結。
 result = await service.connect(alpha.creature_id, bravo.creature_id)
 print(result.channel, result.delta_kind)  # "alpha_to_bravo", "cross_node"
@@ -319,7 +319,7 @@ print(result.channel, result.delta_kind)  # "alpha_to_bravo", "cross_node"
 
 `connect` 之後，`alpha` 與 `bravo` 形成一個**叢集**。從每個讀取
 API（列舉、history viewer、執行期圖快照、chat WS）看起來，叢集
-看起來像一個有兩隻生物的邏輯 session —— 即使每個 worker 仍然
+看起來像一個有兩隻生物的邏輯 session，即使每個 worker 仍然
 持有自己的引擎圖 + session 檔案。
 
 ## Resume
@@ -348,7 +348,7 @@ POST /api/sessions/{primary_sid}/resume
 ```
 
 當你省略 `members` 時，route 會從 primary 持久化的
-`cluster_members` meta 自動探索 members —— 這份資料在
+`cluster_members` meta 自動探索 members；這份資料在
 `stop_session` 時被存下，所以 cluster 拓樸可以撐過完整的重啟。
 
 > Resume 要求每一個指定的 worker 都已連線。如果有一個離線，
@@ -420,7 +420,7 @@ print(svc._cluster_links)               # set of frozenset((node, gid)) pairs
 ```
 
 如果一個 worker 出現在 `connected_nodes()` 但它的生物看不到：
-看看 worker 的 stderr —— 大部分啟動時的 adapter 錯誤是在
+看看 worker 的 stderr：大部分啟動時的 adapter 錯誤是在
 worker 側以 WARNING 等級記錄，不會出現在主機的 log 裡。
 
 ## 疑難排解
@@ -444,6 +444,6 @@ worker 側以 WARNING 等級記錄，不會出現在主機的 log 裡。
 - Python：`kohakuterrarium.terrarium.MultiNodeTerrariumService`
   （lab-host 模式）、`RemoteTerrariumService`（單 worker handle）、
   `kohakuterrarium.laboratory.ClientConnector`（worker 的 client
-  物件 —— 驅動你自己嵌入的 worker）。
-- 概念：[Laboratory](../concepts/laboratory.md) —— 線路格式、
+  物件，驅動你自己嵌入的 worker）。
+- 概念：[Laboratory](../concepts/laboratory.md)，涵蓋線路格式、
   session 同步、resume 語意、identity 模型。

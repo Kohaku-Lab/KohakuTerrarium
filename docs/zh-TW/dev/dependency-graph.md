@@ -14,7 +14,7 @@ tags:
 
 ## 一段話說完規則
 
-`utils/` 是葉節點。所有東西都可以匯入它；它本身不會從框架匯入任何內容。`modules/` 只放協定。`core/` 是 Creature runtime——它會匯入 `modules/` 和 `utils/`，但**絕不**匯入 `builtins/`、`terrarium/`、`studio/`、`bootstrap/`、`api/` 或 `cli/`。`bootstrap/` 與 `builtins/` 在 `core/` + `modules/` 之上組裝具體元件。`terrarium/` 托管 graph 中的 Creature 並匯入 `core/` + `bootstrap/`。`studio/` 位於 `terrarium/` 之上，負責管理政策。`cli/` 與 `api/` 是 `studio/` / `terrarium/` 加啟動 glue 的頂層 adapter。
+`utils/` 是葉節點。所有東西都可以匯入它；它本身不會從框架匯入任何內容。`modules/` 只放協定。`core/` 是 Creature runtime：它會匯入 `modules/` 和 `utils/`，但**絕不**匯入 `builtins/`、`terrarium/`、`studio/`、`bootstrap/`、`api/` 或 `cli/`。`bootstrap/` 與 `builtins/` 在 `core/` + `modules/` 之上組裝具體元件。`terrarium/` 托管 graph 中的 Creature 並匯入 `core/` + `bootstrap/`。`studio/` 位於 `terrarium/` 之上，負責管理政策。`cli/` 與 `api/` 是 `studio/` / `terrarium/` 加啟動 glue 的頂層 adapter。
 
 ## 分層
 
@@ -35,15 +35,15 @@ tags:
 
 各層細節：
 
-- **`utils/`** —— 記錄、非同步輔助工具、檔案防護。不得從框架匯入任何內容。在這裡加入框架匯入幾乎一定是錯的。
-- **`modules/`** —— 協定與基底類別定義。像是 `BaseTool`、`BaseOutputModule`、`BaseTrigger` 等。不含實作，因此上層任何模組都能依賴它們。
-- **`core/`** —— `Agent`、`Controller`、`Executor`、`Conversation`、`Environment`、`Session`、頻道、事件、registry。也就是 Creature runtime。`core/` 絕不能匯入 `terrarium/`、`studio/`、`builtins/`、`bootstrap/`、`serving/`、`cli/` 或 `api/`。這麼做會重新引入循環。
-- **`bootstrap/`** —— 從設定建立 `core/` 元件的工廠函式（LLM、工具、IO、子 Agent、觸發器）。會匯入 `core/` 與 `builtins/`。
-- **`builtins/`** —— 具體工具、子 Agent、輸入、輸出、TUI、使用者命令。內部 catalog（`tool_catalog`、`subagent_catalog`）是具有延遲載入器的葉模組。
-- **`terrarium/`** —— Creature graph runtime。匯入 `core/`、`bootstrap/`、`builtins/`。但它們都不會反向匯入 `terrarium/`。
-- **`studio/`** —— catalog、identity、active sessions、saved-session persistence、attach policy 與 editor 的管理 facade。依賴 `terrarium/` 以及更低層。
-- **`serving/`** —— Web/desktop launch helper 加舊版相容 wrapper。新的管理程式碼應放在 `studio/`。
-- **`cli/`、`api/`** —— 最上層。一個是 argparse 進入點，另一個是 FastAPI 應用。它們把管理工作交給 `studio/`，把執行期機制交給 `terrarium/`。
+- **`utils/`**：記錄、非同步輔助工具、檔案防護。不得從框架匯入任何內容。在這裡加入框架匯入幾乎一定是錯的。
+- **`modules/`**：協定與基底類別定義。像是 `BaseTool`、`BaseOutputModule`、`BaseTrigger` 等。不含實作，因此上層任何模組都能依賴它們。
+- **`core/`**：`Agent`、`Controller`、`Executor`、`Conversation`、`Environment`、`Session`、頻道、事件、registry。也就是 Creature runtime。`core/` 絕不能匯入 `terrarium/`、`studio/`、`builtins/`、`bootstrap/`、`serving/`、`cli/` 或 `api/`。這麼做會重新引入循環。
+- **`bootstrap/`**：從設定建立 `core/` 元件的工廠函式（LLM、工具、IO、子 Agent、觸發器）。會匯入 `core/` 與 `builtins/`。
+- **`builtins/`**：具體工具、子 Agent、輸入、輸出、TUI、使用者命令。內部 catalog（`tool_catalog`、`subagent_catalog`）是具有延遲載入器的葉模組。
+- **`terrarium/`**：Creature graph runtime。匯入 `core/`、`bootstrap/`、`builtins/`。但它們都不會反向匯入 `terrarium/`。
+- **`studio/`**：catalog、identity、active sessions、saved-session persistence、attach policy 與 editor 的管理 facade。依賴 `terrarium/` 以及更低層。
+- **`serving/`**：Web/desktop launch helper 加舊版相容 wrapper。新的管理程式碼應放在 `studio/`。
+- **`cli/`、`api/`**：最上層。一個是 argparse 進入點，另一個是 FastAPI 應用。它們把管理工作交給 `studio/`，把執行期機制交給 `terrarium/`。
 
 請參閱 [`src/kohakuterrarium/README.md`](../../src/kohakuterrarium/README.md)，其中的 ASCII 相依流程圖是唯一可信來源。
 
@@ -61,9 +61,9 @@ tags:
 
 靜態 AST 分析器。會以 UTF-8 讀取並走訪 `src/kohakuterrarium/` 下每個 `.py`，解析 `import` / `from ... import`，並把每條邊分類為：
 
-- **runtime** —— 在模組載入時於頂層執行的匯入。
-- **TYPE_CHECKING** —— 受 `if TYPE_CHECKING:` 保護，不會進入執行期圖。
-- **in-function** —— 函式內匯入。預設/循環視圖會包含這些邊，以便找出隱藏循環；`--module-only` 可恢復舊版的僅頂層匯入圖。
+- **runtime**：在模組載入時於頂層執行的匯入。
+- **TYPE_CHECKING**：受 `if TYPE_CHECKING:` 保護，不會進入執行期圖。
+- **in-function**：函式內匯入。預設/循環視圖會包含這些邊，以便找出隱藏循環；`--module-only` 可恢復舊版的僅頂層匯入圖。
 
 import hygiene lint 會根據 stdlib、必要依賴、可選依賴、平台限定模組與 `scripts/dep_graph_allowlist.json` 來分類函式內匯入。每個 allowlist 條目都要寫明 reason。
 
