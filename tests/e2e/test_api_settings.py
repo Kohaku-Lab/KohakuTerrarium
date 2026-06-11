@@ -81,7 +81,7 @@ def scripted_llm(monkeypatch: pytest.MonkeyPatch) -> ScriptedLLM:
     """
     llm = ScriptedLLM([_REPLY, _REPLY, _REPLY])
 
-    def _fake_create(config, llm_override=None):
+    def _fake_create(config, selector=None):
         return llm
 
     monkeypatch.setattr(_bootstrap_llm, "create_llm_provider", _fake_create)
@@ -450,7 +450,8 @@ class TestApiSettingsJourney:
         assert values["theme"] == "dark"
         assert values["nav-expanded"] is False
         # An untouched default key is still present (merge, not replace).
-        assert values["kt-desktop-zoom"] == 1.15
+        # 1.0 = the 100% default aligned with the frontend (7222561c).
+        assert values["kt-desktop-zoom"] == 1.0
 
         # ── 7. Per-creature settings on a live creature ───────────────
         # Start a 1-creature session (frontend: agentAPI.create).

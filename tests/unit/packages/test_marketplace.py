@@ -608,7 +608,7 @@ class TestInstallSpecCommitPreferred:
         def fake_resolve(spec: str):
             return entry, version
 
-        def fake_install(source, *, editable, name_override, ref=None):
+        def fake_install(source, *, editable, name_override, ref=None, deps="auto"):
             captured["ref"] = ref
             return name_override
 
@@ -639,7 +639,7 @@ class TestInstallSpecCommitPreferred:
         )
         captured: dict[str, object] = {}
 
-        def fake_install(source, *, editable, name_override, ref=None):
+        def fake_install(source, *, editable, name_override, ref=None, deps="auto"):
             captured["ref"] = ref
             return name_override
 
@@ -755,3 +755,36 @@ def test_add_source_invalidates_cache():
     )
     asyncio.run(marketplace.fetch_marketplace())
     assert len(_FakeAsyncClient.requests) > n_after
+
+
+# ── Loop-safe sync wrappers (E10) ───────────────────────────────
+
+
+class TestSyncWrappersInsideEventLoop:
+    """The sync wrappers must fail with a *named* error inside a loop.
+
+    ``asyncio.run`` raises a cryptic RuntimeError from deep inside
+    asyncio; the wrappers now name themselves + their async twin so
+    the caller knows exactly what to await instead.
+    """
+
+    async def test_resolve_sync_raises_clear_error(self):
+        with pytest.raises(RuntimeError, match=r"resolve_sync.*await.*resolve"):
+            marketplace.resolve_sync("@kt-biome")
+
+    async def test_fetch_marketplace_sync_raises_clear_error(self):
+        with pytest.raises(
+            RuntimeError, match=r"fetch_marketplace_sync.*await.*fetch_marketplace"
+        ):
+            marketplace.fetch_marketplace_sync()
+
+    async def test_search_sync_raises_clear_error(self):
+        with pytest.raises(RuntimeError, match=r"search_sync.*await.*search"):
+            marketplace.search_sync("kt")
+
+    def test_resolve_sync_still_works_without_a_loop(self):
+        _FakeAsyncClient.responses = {
+            marketplace.DEFAULT_SOURCE_URL: _yaml_response(_sample_yaml()),
+        }
+        entry, _version = marketplace.resolve_sync("@kt-biome")
+        assert entry.name == "kt-biome"

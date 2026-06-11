@@ -45,7 +45,7 @@ class TestSpecRouting:
             captured["spec"] = spec
             return entry, version
 
-        def fake_install(source, *, editable, name_override, ref=None):
+        def fake_install(source, *, editable, name_override, ref=None, deps="auto"):
             captured["install"] = (source, editable, name_override, ref)
             return name_override or "fallback"
 
@@ -72,7 +72,7 @@ class TestSpecRouting:
             install_mod.marketplace, "resolve_sync", lambda s: (entry, version)
         )
 
-        def fake_install(source, *, editable, name_override, ref=None):
+        def fake_install(source, *, editable, name_override, ref=None, deps="auto"):
             captured["name_override"] = name_override
             captured["ref"] = ref
             return name_override or "fallback"
@@ -91,7 +91,7 @@ class TestSpecRouting:
     def test_git_url_passes_through(self, monkeypatch):
         captured: dict[str, object] = {}
 
-        def fake_install(source, *, editable, name_override):
+        def fake_install(source, *, editable, name_override, deps="auto"):
             captured["args"] = (source, editable, name_override)
             return "biome"
 
@@ -109,7 +109,7 @@ class TestSpecRouting:
     def test_local_path_passes_through(self, monkeypatch, tmp_path):
         captured: dict[str, object] = {}
 
-        def fake_install(source, *, editable, name_override):
+        def fake_install(source, *, editable, name_override, deps="auto"):
             captured["args"] = (source, editable, name_override)
             return tmp_path.name
 
@@ -130,3 +130,20 @@ class TestSpecRouting:
         monkeypatch.setattr(install_mod.marketplace, "resolve_sync", raise_not_found)
         with pytest.raises(MarketplaceNotFoundError):
             install_mod.install_package_spec("@nope")
+
+    def test_path_ref_misuse_gets_disambiguating_hint(self, monkeypatch):
+        # ``kt install @kt-biome/creatures/general`` is a config *path
+        # reference*, not an install spec — the error must say so and
+        # point at ``kt install @kt-biome``.
+        from kohakuterrarium.packages.marketplace_types import (
+            MarketplaceNotFoundError,
+        )
+
+        def raise_not_found(_spec: str):
+            raise MarketplaceNotFoundError(
+                "No marketplace entry named 'creatures/general' " "in source 'kt-biome'"
+            )
+
+        monkeypatch.setattr(install_mod.marketplace, "resolve_sync", raise_not_found)
+        with pytest.raises(MarketplaceNotFoundError, match="kt install @kt-biome"):
+            install_mod.install_package_spec("@kt-biome/creatures/general")

@@ -47,6 +47,7 @@ from kohakuterrarium.api.routes.catalog import _deps as _catalog_deps
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.core import agent_model as _agent_model
+from kohakuterrarium.studio.catalog import packages as _catalog_packages_ops
 from kohakuterrarium.studio.sessions import lifecycle
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM
@@ -93,7 +94,7 @@ def scripted_llm(monkeypatch: pytest.MonkeyPatch) -> ScriptedLLM:
     """
     llm = ScriptedLLM([_REPLY_ONE] + [_REPLY_TWO] * 60)
 
-    def _fake_create(config, llm_override=None):
+    def _fake_create(config, selector=None):
         return llm
 
     def _fake_from_profile_name(name):
@@ -105,6 +106,28 @@ def scripted_llm(monkeypatch: pytest.MonkeyPatch) -> ScriptedLLM:
         _agent_model, "create_llm_from_profile_name", _fake_from_profile_name
     )
     return llm
+
+
+def _find_kt_biome_source() -> Path | None:
+    """Locate a kt-biome bundle to install into the isolated catalog.
+
+    Dev machines carry a repo-local ``kt-biome/`` checkout; CI installs
+    kt-biome editable into the operator config dir before the suite
+    runs, leaving a ``kt-biome.link`` pointing at the cloned source.
+    """
+    repo_local = Path(__file__).resolve().parents[2] / "kt-biome"
+    if (repo_local / "kohaku.yaml").exists():
+        return repo_local
+    real_pkgs = Path.home() / ".kohakuterrarium" / "packages"
+    link = real_pkgs / "kt-biome.link"
+    if link.exists():
+        target = Path(link.read_text(encoding="utf-8").strip())
+        if (target / "kohaku.yaml").exists():
+            return target
+    direct = real_pkgs / "kt-biome"
+    if (direct / "kohaku.yaml").exists():
+        return direct
+    return None
 
 
 @pytest.fixture
@@ -449,35 +472,41 @@ class TestApiIntegration:
         resp = client.post("/api/studio/skills/no-such-skill/toggle")
         assert resp.status_code == 404
 
-        # Package browser — ``kt-biome`` ships with the repo, so its
-        # summary + extension lists resolve; an uninstalled name 404s.
-        resp = client.get("/api/studio/packages")
-        assert resp.status_code == 200
-        package_names = {p["name"] for p in resp.json()}
-        assert "kt-biome" in package_names
-        resp = client.get("/api/studio/packages/kt-biome")
-        assert resp.status_code == 200
-        biome = resp.json()
-        assert biome["name"] == "kt-biome"
-        assert biome["tools"] >= 1
-        resp = client.get("/api/studio/packages/kt-biome/creatures")
-        assert resp.status_code == 200
-        assert any(c["name"] == "general" for c in resp.json())
-        resp = client.get("/api/studio/packages/kt-biome/tools")
-        assert resp.status_code == 200
-        # kt-biome ships tools (``biome["tools"] >= 1`` above) — the
-        # per-package tool list surfaces them as named records.
-        assert resp.json() and all("name" in t for t in resp.json())
-        resp = client.get("/api/studio/packages/kt-biome/plugins")
-        assert resp.status_code == 200
-        resp = client.get("/api/studio/packages/kt-biome/triggers")
-        assert resp.status_code == 200
-        resp = client.get("/api/studio/packages/kt-biome/io")
-        assert resp.status_code == 200
-        resp = client.get("/api/studio/packages/kt-biome/skills")
-        assert resp.status_code == 200
-        resp = client.get("/api/studio/packages/kt-biome/modules/tools")
-        assert resp.status_code == 200
+        # Package browser — the packages dir honours ``KT_CONFIG_DIR``
+        # (per-test isolation), so the catalog starts empty; install the
+        # repo-shipped ``kt-biome`` editable into the isolated dir first
+        # so its summary + extension lists resolve.  An uninstalled name
+        # 404s regardless.
+        biome_src = _find_kt_biome_source()
+        if biome_src is not None:
+            _catalog_packages_ops.install_package_op(str(biome_src), editable=True)
+            resp = client.get("/api/studio/packages")
+            assert resp.status_code == 200
+            package_names = {p["name"] for p in resp.json()}
+            assert "kt-biome" in package_names
+            resp = client.get("/api/studio/packages/kt-biome")
+            assert resp.status_code == 200
+            biome = resp.json()
+            assert biome["name"] == "kt-biome"
+            assert biome["tools"] >= 1
+            resp = client.get("/api/studio/packages/kt-biome/creatures")
+            assert resp.status_code == 200
+            assert any(c["name"] == "general" for c in resp.json())
+            resp = client.get("/api/studio/packages/kt-biome/tools")
+            assert resp.status_code == 200
+            # kt-biome ships tools (``biome["tools"] >= 1`` above) — the
+            # per-package tool list surfaces them as named records.
+            assert resp.json() and all("name" in t for t in resp.json())
+            resp = client.get("/api/studio/packages/kt-biome/plugins")
+            assert resp.status_code == 200
+            resp = client.get("/api/studio/packages/kt-biome/triggers")
+            assert resp.status_code == 200
+            resp = client.get("/api/studio/packages/kt-biome/io")
+            assert resp.status_code == 200
+            resp = client.get("/api/studio/packages/kt-biome/skills")
+            assert resp.status_code == 200
+            resp = client.get("/api/studio/packages/kt-biome/modules/tools")
+            assert resp.status_code == 200
         resp = client.get("/api/studio/packages/no-such-package")
         assert resp.status_code == 404
         resp = client.get("/api/studio/packages/no-such-package/creatures")

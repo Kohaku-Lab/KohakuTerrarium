@@ -2,7 +2,7 @@
 :mod:`kohakuterrarium.studio.persistence.viewer.diff` helpers."""
 
 import pytest
-from fastapi import HTTPException
+from kohakuterrarium.errors import NotFoundError
 
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.viewer.diff import (
@@ -184,9 +184,8 @@ class TestAgentsFor:
         try:
             s.init_meta("sess", "agent", "/p", "/w", ["alice"])
             meta = s.load_meta()
-            with pytest.raises(HTTPException) as exc:
+            with pytest.raises(NotFoundError):
                 _agents_for(meta, s, "ghost")
-            assert exc.value.status_code == 404
         finally:
             s.close()
 
@@ -217,7 +216,7 @@ class TestAgentsFor:
         try:
             s.init_meta("sess", "agent", "/p", "/w", [])
             meta = s.load_meta()
-            with pytest.raises(HTTPException):
+            with pytest.raises(NotFoundError):
                 _agents_for(meta, s, None)
         finally:
             s.close()

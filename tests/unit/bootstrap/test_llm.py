@@ -132,9 +132,66 @@ class TestCreateLLMProviderInlinePath:
     def test_inline_no_api_key_raises(self, monkeypatch):
         monkeypatch.setattr(llm_mod, "resolve_controller_llm", lambda *a, **kw: None)
         cfg = AgentConfig(name="a", model="gpt-4", api_key_env="NONEXISTENT_KEY_XYZ")
-        # No API key in env → raises.
-        with pytest.raises(ValueError, match="API key not found"):
+        # No API key in env → raises, naming the env var to set.
+        with pytest.raises(ValueError, match="Set the NONEXISTENT_KEY_XYZ"):
             create_llm_provider(cfg)
+
+    def test_inline_empty_env_name_gets_real_hint(self, monkeypatch):
+        # Regression: with api_key_env empty the old message read
+        # "Set  environment variable." (double space, no name).
+        from kohakuterrarium.errors import LLMNotConfiguredError
+
+        monkeypatch.setattr(llm_mod, "resolve_controller_llm", lambda *a, **kw: None)
+        cfg = AgentConfig(name="a", model="inline-model", api_key_env="")
+        cfg.get_api_key = lambda: ""
+        with pytest.raises(LLMNotConfiguredError) as exc_info:
+            create_llm_provider(cfg)
+        msg = str(exc_info.value)
+        assert "Set  environment" not in msg
+        assert "kt login" in msg
+
+
+class TestCoerceLLMProvider:
+    """The single coercion point behind every ``llm=`` parameter (E5)."""
+
+    def test_none_resolves_from_config(self, monkeypatch):
+        built = object()
+        monkeypatch.setattr(llm_mod, "create_llm_provider", lambda cfg, sel=None: built)
+        cfg = AgentConfig(name="a")
+        assert llm_mod.coerce_llm_provider(None, cfg) is built
+
+    def test_string_is_selector(self, monkeypatch):
+        captured = {}
+
+        def fake_create(cfg, sel=None):
+            captured["sel"] = sel
+            return object()
+
+        monkeypatch.setattr(llm_mod, "create_llm_provider", fake_create)
+        cfg = AgentConfig(name="a")
+        llm_mod.coerce_llm_provider("openai/gpt-5@reasoning=high", cfg)
+        assert captured["sel"] == "openai/gpt-5@reasoning=high"
+
+    def test_profile_instantiates_directly(self, monkeypatch):
+        profile = LLMProfile(
+            name="p", model="gpt-4", provider="openai", backend_type="openai"
+        )
+        monkeypatch.setattr(llm_mod, "get_api_key", lambda p: "fake-key")
+        provider = llm_mod.coerce_llm_provider(profile, AgentConfig(name="a"))
+        assert isinstance(provider, OpenAIProvider)
+
+    def test_provider_instance_passes_through(self):
+        from kohakuterrarium.testing.llm import ScriptedLLM
+
+        inst = ScriptedLLM(["hi"])
+        cfg = AgentConfig(name="a")
+        # Used as-is — no resolution, no copy.
+        assert llm_mod.coerce_llm_provider(inst, cfg) is inst
+
+    def test_invalid_type_raises_type_error(self):
+        cfg = AgentConfig(name="a")
+        with pytest.raises(TypeError, match="llm= accepts"):
+            llm_mod.coerce_llm_provider(12345, cfg)
 
 
 class TestCreateLLMFromProfileName:
@@ -470,14 +527,17 @@ class TestDeferredOnMissingKey:
         from kohakuterrarium.bootstrap import agent_init as ai_mod
         from kohakuterrarium.llm.deferred_provider import DeferredLLMProvider
 
-        def _raise(config, llm_override=None):
+        def _raise(config, llm=None):
             raise ValueError("API key not found for profile 'defprofile'")
 
         monkeypatch.setattr(ai_mod, "create_llm_provider", _raise)
 
-        # Minimal shape that ``_init_llm`` needs.
+        # Minimal shape that ``_init_llm`` needs.  ``_strict = False``:
+        # the deferred fallback is the lenient-frontend path; strict
+        # construction re-raises (covered below).
         class _Stub:
             _init_llm = ai_mod.AgentInitMixin._init_llm
+            _strict = False
 
         stub = _Stub()
         stub.config = type("C", (), {"model": ""})()

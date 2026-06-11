@@ -35,6 +35,9 @@ ALLOWLIST_600 = {
     "core/agent.py",
     # Terrarium engine public facade with cohesive topology/wiring surface.
     "terrarium/engine.py",
+    # Creature wrapper + build factory + typed turn drivers (E3) —
+    # barely over; the turn methods are thin delegates to Agent.
+    "terrarium/creature_host.py",
     # CLI runner with argparse (barely over)
     "terrarium/cli.py",
     # Prompt aggregation pipeline (barely over)

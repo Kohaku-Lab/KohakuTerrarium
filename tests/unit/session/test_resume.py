@@ -5,6 +5,8 @@ on disk plus a ``ScriptedLLM`` injected via the monkeypatched LLM
 bootstrap, so resumption is tested end-to-end without a live provider.
 """
 
+import os
+
 import pytest
 
 from kohakuterrarium.bootstrap import agent_init as _agent_init
@@ -32,7 +34,7 @@ def patched_llm(monkeypatch):
     ``Agent.from_path`` (called by resume_agent) never needs a real
     provider."""
 
-    def _fake_create(config, llm_override=None):
+    def _fake_create(config, llm=None):
         return ScriptedLLM(["OK"])
 
     monkeypatch.setattr(_bootstrap_llm, "create_llm_provider", _fake_create)
@@ -597,6 +599,32 @@ class TestResumeAgent:
             # The store was re-attached + marked running for continued
             # recording.
             assert store.load_meta()["status"] == "running"
+        finally:
+            store.close()
+
+    def test_resume_does_not_chdir(self, tmp_path, patched_llm):
+        # E8: resume used to ``os.chdir(saved_pwd)`` process-wide — a
+        # race for concurrent multi-session programs.  The saved pwd now
+        # flows into the rebuilt agent's workspace instead.
+        config_dir = tmp_path / "creature"
+        _write_agent_config(config_dir)
+        workdir = tmp_path / "saved-pwd"
+        workdir.mkdir()
+        path = tmp_path / "sess.kohakutr.v2"
+        s = SessionStore(str(path))
+        try:
+            s.meta["format_version"] = 2
+            s.init_meta("sess", "agent", str(config_dir), str(workdir), ["resumee"])
+            s.flush()
+        finally:
+            s.close()
+
+        cwd_before = os.getcwd()
+        agent, store = resume_agent(path)
+        try:
+            assert os.getcwd() == cwd_before
+            # The saved pwd landed on the agent's executor workspace.
+            assert str(agent.executor._working_dir) == str(workdir.resolve())
         finally:
             store.close()
 

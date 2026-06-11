@@ -99,22 +99,20 @@ class TestClassmethodConstructors:
         # Patch start_creature so we don't load a real config.
         captured = {}
 
-        async def fake_start(self, config, *, pwd=None, llm_override=None):
+        async def fake_start(self, config, *, pwd=None, llm=None):
             captured["config"] = config
             captured["pwd"] = pwd
-            captured["llm_override"] = llm_override
+            captured["llm"] = llm
 
         # Patch _SessionsNS.start_creature.
         from kohakuterrarium.studio.studio import _SessionsNS
 
         monkeypatch.setattr(_SessionsNS, "start_creature", fake_start)
-        studio = await Studio.with_creature(
-            "/some/cfg", pwd="/x", llm_override="claude"
-        )
+        studio = await Studio.with_creature("/some/cfg", pwd="/x", llm="claude")
         assert isinstance(studio, Studio)
         assert captured["config"] == "/some/cfg"
         assert captured["pwd"] == "/x"
-        assert captured["llm_override"] == "claude"
+        assert captured["llm"] == "claude"
         await studio.shutdown()
 
     async def test_resume_delegates(self, monkeypatch):
@@ -122,7 +120,7 @@ class TestClassmethodConstructors:
 
         captured = {}
 
-        async def fake_resume(self, path, *, pwd_override=None, llm_override=None):
+        async def fake_resume(self, path, *, pwd_override=None, llm=None):
             captured["path"] = path
 
         monkeypatch.setattr(_PersistenceNS, "resume", fake_resume)
@@ -132,17 +130,29 @@ class TestClassmethodConstructors:
         await studio.shutdown()
 
     async def test_from_recipe_delegates(self, monkeypatch):
-        # Patch Terrarium.from_recipe to avoid loading a real recipe.
+        # from_recipe MUST behave exactly like sessions.start_terrarium
+        # (store attach + meta registration) — pin the delegation and the
+        # llm/name passthrough.
+        from types import SimpleNamespace
+
+        from kohakuterrarium.studio.sessions import lifecycle as _lifecycle
+
         captured = {}
 
-        async def fake_from_recipe(recipe, *, pwd=None):
-            captured["recipe"] = recipe
-            return Terrarium()
+        async def fake_start_terrarium(
+            service, *, config_path=None, config=None, pwd=None, name=None, llm=None
+        ):
+            captured["config_path"] = config_path
+            captured["llm"] = llm
+            captured["name"] = name
+            return SimpleNamespace(session_id="g1")
 
-        monkeypatch.setattr(Terrarium, "from_recipe", fake_from_recipe)
-        studio = await Studio.from_recipe("/x")
+        monkeypatch.setattr(_lifecycle, "start_terrarium", fake_start_terrarium)
+        studio = await Studio.from_recipe("/x", llm="profile-x", name="team")
         assert isinstance(studio, Studio)
-        assert captured["recipe"] == "/x"
+        assert captured["config_path"] == "/x"
+        assert captured["llm"] == "profile-x"
+        assert captured["name"] == "team"
         await studio.shutdown()
 
 

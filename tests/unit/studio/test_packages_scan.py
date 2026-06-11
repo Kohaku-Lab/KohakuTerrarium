@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from kohakuterrarium.packages import locations as loc_mod
 from kohakuterrarium.studio.catalog import packages_scan as scan_mod
 
 
@@ -48,12 +49,13 @@ class TestCatalogEntry:
 
 class TestBuildPackageRootMap:
     def test_no_packages_dir(self, monkeypatch):
-        # Simulate missing dir.
-        monkeypatch.setattr(scan_mod, "PACKAGES_DIR", Path("/definitely/nowhere"))
+        # Simulate missing dir (patch the locations hook — the scan
+        # module resolves via ``packages_dir()`` at call time).
+        monkeypatch.setattr(loc_mod, "PACKAGES_DIR", Path("/definitely/nowhere"))
         assert scan_mod._build_package_root_map() == {}
 
     def test_with_packages(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(scan_mod, "PACKAGES_DIR", tmp_path)
+        monkeypatch.setattr(loc_mod, "PACKAGES_DIR", tmp_path)
         monkeypatch.setattr(
             scan_mod,
             "list_packages",
@@ -64,7 +66,7 @@ class TestBuildPackageRootMap:
         assert str(tmp_path.resolve()) in out
 
     def test_get_package_root_none_skipped(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(scan_mod, "PACKAGES_DIR", tmp_path)
+        monkeypatch.setattr(loc_mod, "PACKAGES_DIR", tmp_path)
         monkeypatch.setattr(
             scan_mod,
             "list_packages",

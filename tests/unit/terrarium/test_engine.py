@@ -285,13 +285,85 @@ class TestSubscribe:
             creature = Creature(creature_id="alice", name="alice", agent=agent)
             await t.add_creature(creature)
             await asyncio.wait_for(task, timeout=1.0)
-            # add_creature emits exactly one CREATURE_STARTED for alice.
+            # add_creature emits CREATURE_ADDED first (then STARTED,
+            # which this single-event consumer doesn't wait for).
             assert len(received) == 1
-            assert received[0].kind == EventKind.CREATURE_STARTED
+            assert received[0].kind == EventKind.CREATURE_ADDED
             assert received[0].creature_id == "alice"
             assert received[0].graph_id == t.get_creature("alice").graph_id
         finally:
             await t.shutdown()
+
+    async def test_add_creature_event_split_added_vs_started(self):
+        # E12: ``start=False`` adds used to emit CREATURE_STARTED for an
+        # agent that never started.  ADDED always fires; STARTED only
+        # for actually-started creatures.
+        from kohakuterrarium.terrarium.events import EngineEvent  # noqa: F401
+
+        t = Terrarium()
+        try:
+            events: list = []
+            t._emit = (lambda orig: lambda ev: (events.append(ev), orig(ev)))(t._emit)
+            cold = Creature(
+                creature_id="cold", name="cold", agent=_FakeAgent(name="cold")
+            )
+            await t.add_creature(cold, start=False)
+            kinds = [ev.kind for ev in events if ev.creature_id == "cold"]
+            assert EventKind.CREATURE_ADDED in kinds
+            assert EventKind.CREATURE_STARTED not in kinds
+
+            hot = Creature(creature_id="hot", name="hot", agent=_FakeAgent(name="hot"))
+            await t.add_creature(hot, start=True)
+            kinds = [ev.kind for ev in events if ev.creature_id == "hot"]
+            assert kinds == [
+                EventKind.CREATURE_ADDED,
+                EventKind.CREATURE_STARTED,
+            ]
+        finally:
+            await t.shutdown()
+
+    async def test_add_prebuilt_creature_rejects_build_kwargs(self):
+        # Build-time kwargs were silently ignored for pre-built
+        # creatures — now a loud error.
+        t = Terrarium()
+        try:
+            pre = Creature(creature_id="pre", name="pre", agent=_FakeAgent(name="pre"))
+            with pytest.raises(ValueError, match="pre-built Creature"):
+                await t.add_creature(pre, llm="some/selector")
+        finally:
+            await t.shutdown()
+
+    async def test_subscribe_registers_eagerly(self):
+        # E3 fix: events emitted between ``subscribe()`` and the first
+        # ``await`` used to be lost (the async generator only registered
+        # on first __anext__).
+        from kohakuterrarium.terrarium.events import EngineEvent
+
+        t = Terrarium()
+        try:
+            it = t.subscribe()
+            # Emit BEFORE iteration starts.
+            t._emit(EngineEvent(kind=EventKind.CHANNEL_MESSAGE, creature_id="pre"))
+            ev = await asyncio.wait_for(it.__anext__(), timeout=1.0)
+            assert ev.creature_id == "pre"
+        finally:
+            await t.shutdown()
+
+    async def test_subscribe_terminates_on_shutdown(self):
+        # ``async for ev in t.subscribe()`` used to hang forever after
+        # shutdown; it now ends cleanly.
+        t = Terrarium()
+        received = []
+
+        async def consume():
+            async for ev in t.subscribe():
+                received.append(ev)
+
+        task = asyncio.create_task(consume())
+        await asyncio.sleep(0)
+        await t.shutdown()
+        await asyncio.wait_for(task, timeout=1.0)
+        assert task.done()
 
     async def test_subscribe_with_filter(self):
         from kohakuterrarium.terrarium.events import EngineEvent
@@ -415,7 +487,8 @@ class TestApplyRecipe:
             *,
             graph=None,
             pwd=None,
-            llm_override=None,
+            llm=None,
+            strict=True,
             creature_builder=None,
         ):
             captured["recipe"] = recipe
@@ -443,5 +516,97 @@ class TestOutputWiring:
         try:
             # A freshly-added creature has declared no output-wiring edges.
             assert t.list_output_wiring("alice") == []
+        finally:
+            await t.shutdown()
+
+
+# ── environment() / channel() public accessors ─────────────────
+
+
+class TestEnvironmentChannelAccessors:
+    async def test_environment_returns_live_env(self):
+        t = await TestTerrariumBuilder().with_creature("alice").build()
+        try:
+            gid = t.get_creature("alice").graph_id
+            env = t.environment(gid)
+            # The SAME object the engine wires creatures into — not a
+            # copy. (Scripts used to reach engine._environments.)
+            assert env is t._environments[gid]
+        finally:
+            await t.shutdown()
+
+    async def test_environment_unknown_graph_raises(self):
+        t = Terrarium()
+        with pytest.raises(KeyError):
+            t.environment("no_such_graph")
+
+    async def test_channel_returns_live_channel_and_none(self):
+        t = await TestTerrariumBuilder().with_creature("alice").build()
+        try:
+            gid = t.get_creature("alice").graph_id
+            await t.add_channel(gid, "tasks")
+            ch = t.channel(gid, "tasks")
+            assert ch is not None
+            assert t.channel(gid, "nonexistent") is None
+        finally:
+            await t.shutdown()
+
+
+# ── add_creature(tools=, plugins=) threading ────────────────────
+
+
+class TestAddCreatureExtensionInjection:
+    async def test_tools_reach_the_agent_registry(self, tmp_path):
+        from kohakuterrarium import tool
+        from kohakuterrarium.core.config_types import (
+            AgentConfig,
+            InputConfig,
+            OutputConfig,
+        )
+        from kohakuterrarium.testing.llm import ScriptedLLM
+
+        @tool
+        def lookup(key: str) -> str:
+            """Find a value."""
+            return key
+
+        cfg = AgentConfig(
+            name="tooled",
+            system_prompt="x",
+            agent_path=tmp_path,
+            input=InputConfig(type="none"),
+            output=OutputConfig(type="none"),
+            include_hints_in_prompt=False,
+        )
+        t = Terrarium()
+        try:
+            creature = await t.add_creature(
+                cfg, start=False, llm=ScriptedLLM(["ok"]), tools=[lookup]
+            )
+            # The injected instance is registered AND in the prompt —
+            # the same contract as Agent.build(tools=[...]).
+            assert "lookup" in creature.agent.registry.list_tools()
+            assert "lookup" in creature.agent._controller_config.system_prompt
+        finally:
+            await t.shutdown()
+
+    async def test_prebuilt_creature_rejects_tools_kwarg(self):
+        from kohakuterrarium import tool
+
+        @tool
+        def x() -> str:
+            """No-op."""
+            return ""
+
+        t = await TestTerrariumBuilder().with_creature("alice").build()
+        try:
+            prebuilt = Creature(
+                creature_id="bob",
+                name="bob",
+                agent=_FakeAgent("bob"),
+                graph_id="",
+            )
+            with pytest.raises(ValueError, match="tools"):
+                await t.add_creature(prebuilt, tools=[x])
         finally:
             await t.shutdown()

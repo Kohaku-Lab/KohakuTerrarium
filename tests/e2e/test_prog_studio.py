@@ -38,7 +38,7 @@ observable side effect.
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException
+from kohakuterrarium.errors import NotFoundError
 
 from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
@@ -68,7 +68,7 @@ def scripted_llm(monkeypatch):
     """
     holder: dict[str, list] = {"script": ["OK"]}
 
-    def _fake_create(config, llm_override=None):
+    def _fake_create(config, llm=None):
         return ScriptedLLM(holder["script"])
 
     monkeypatch.setattr(_bootstrap_llm_mod, "create_llm_provider", _fake_create)
@@ -595,9 +595,8 @@ class TestProgStudioJourney:
             assert "scout" in index["targets"]
             scout_history = studio.persistence.history(fork_path, "scout")
             assert scout_history["meta"]["agents"] == ["scout"]
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(NotFoundError):
                 studio.persistence.history(fork_path, "no-such-target")
-            assert exc_info.value.status_code == 404
 
     async def test_identity_and_attach_journey(self, scripted_llm, isolated_paths):
         """The config + attach arc, end-to-end through the façade.

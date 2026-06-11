@@ -169,12 +169,12 @@ class TestBuildRecipeCreature:
     def test_use_default_builder_passes_kwargs(self):
         called = {}
 
-        def default(cfg, *, creature_id, pwd, llm_override, environment):
+        def default(cfg, *, creature_id, pwd, llm, environment, strict=True):
             called.update(
                 {
                     "creature_id": creature_id,
                     "pwd": pwd,
-                    "llm_override": llm_override,
+                    "llm": llm,
                     "environment": environment,
                 }
             )
@@ -191,14 +191,14 @@ class TestBuildRecipeCreature:
             cfg,
             creature_id="cid",
             pwd="/wd",
-            llm_override="model",
+            llm="model",
             env=env,
             use_default_builder=True,
         )
         assert called == {
             "creature_id": "cid",
             "pwd": "/wd",
-            "llm_override": "model",
+            "llm": "model",
             "environment": env,
         }
 
@@ -210,7 +210,7 @@ class TestBuildRecipeCreature:
             cfg,
             creature_id="cid",
             pwd=None,
-            llm_override=None,
+            llm=None,
             env=env,
             use_default_builder=False,
         )

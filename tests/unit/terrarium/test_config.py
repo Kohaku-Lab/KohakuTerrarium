@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from kohakuterrarium.errors import PackageNotInstalledError
+from kohakuterrarium.packages import locations as loc_mod
 from kohakuterrarium.terrarium.config import (
     ChannelConfig,
     CreatureConfig,
@@ -291,3 +293,18 @@ class TestLoadTerrariumConfig:
         cfg = load_terrarium_config(path)
         # default name is "terrarium".
         assert cfg.name == "terrarium"
+
+    def test_loads_from_package_ref(self, tmp_path, monkeypatch):
+        # @pkg refs resolve at the loader chokepoint (E1).
+        pkg = tmp_path / "packages" / "biome"
+        terr = pkg / "terrariums" / "team"
+        terr.mkdir(parents=True)
+        (terr / "terrarium.yaml").write_text(yaml.safe_dump({"name": "team"}))
+        monkeypatch.setattr(loc_mod, "PACKAGES_DIR", tmp_path / "packages")
+        cfg = load_terrarium_config("@biome/terrariums/team")
+        assert cfg.name == "team"
+
+    def test_package_ref_uninstalled_raises_typed(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(loc_mod, "PACKAGES_DIR", tmp_path / "none")
+        with pytest.raises(PackageNotInstalledError):
+            load_terrarium_config("@ghost/terrariums/x")

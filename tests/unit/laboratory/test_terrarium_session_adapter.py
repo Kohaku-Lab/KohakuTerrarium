@@ -39,10 +39,8 @@ class _FakeEngine:
         self._adopt_result: str | None = None
         self._adopt_calls: list[dict] = []
 
-    async def adopt_session(self, path, *, pwd=None, llm_override=None):
-        self._adopt_calls.append(
-            {"path": path, "pwd": pwd, "llm_override": llm_override}
-        )
+    async def adopt_session(self, path, *, pwd=None, llm=None):
+        self._adopt_calls.append({"path": path, "pwd": pwd, "llm": llm})
         if self._adopt_result is None:
             raise RuntimeError("adopt not configured")
         return self._adopt_result
@@ -259,7 +257,7 @@ class TestResume:
                 {
                     "path": str(kohakutr),
                     "pwd_override": "/work",
-                    "llm_override": "gpt",
+                    "llm": "gpt",
                 },
             )
         )
@@ -268,7 +266,7 @@ class TestResume:
         # The override params were forwarded to engine.adopt_session.
         call = _engine._adopt_calls[0]
         assert call["pwd"] == "/work"
-        assert call["llm_override"] == "gpt"
+        assert call["llm"] == "gpt"
 
     async def test_resume_adopt_with_no_resulting_store_returns_empty_meta(
         self, _adapter, _engine, tmp_path

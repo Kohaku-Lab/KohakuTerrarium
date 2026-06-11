@@ -352,7 +352,7 @@ class TestLlmIntegration:
         # 4. Resolve by name exactly how bootstrap/llm.py does: it builds a
         #    controller-config dict and calls resolve_controller_llm.
         controller_data = {"llm": "acme/acme-fast"}
-        resolved = resolve_controller_llm(controller_data, llm_override=None)
+        resolved = resolve_controller_llm(controller_data, llm=None)
         assert resolved is not None
         assert resolved.name == "acme-fast"
         assert resolved.model == "acme-model-1"
@@ -648,7 +648,7 @@ class TestLlmIntegration:
 
         # 4. A built-in preset resolves with the built-in backend's
         #    transport metadata — codex's bespoke backend_type.
-        codex_profile = resolve_controller_llm({}, llm_override="codex/gpt-5.4")
+        codex_profile = resolve_controller_llm({}, llm="codex/gpt-5.4")
         assert codex_profile is not None
         assert codex_profile.name == "gpt-5.4"
         assert codex_profile.provider == "codex"
@@ -656,9 +656,7 @@ class TestLlmIntegration:
         # bootstrap/llm.py branches on backend_type == "codex" -> CodexOAuthProvider.
 
         # 5. A built-in anthropic preset resolves to the anthropic backend.
-        claude_profile = resolve_controller_llm(
-            {}, llm_override="anthropic/claude-opus-4.7"
-        )
+        claude_profile = resolve_controller_llm({}, llm="anthropic/claude-opus-4.7")
         assert claude_profile is not None
         assert claude_profile.backend_type == "anthropic"
         assert claude_profile.base_url == "https://api.anthropic.com"

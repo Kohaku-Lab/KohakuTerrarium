@@ -232,16 +232,17 @@ class TestSearchSessionMemory:
         assert out["count"] == 1
         assert out["results"][0]["content"] == "hi"
 
-    async def test_failure_raises_500(self, tmp_path, monkeypatch):
+    async def test_failure_raises_session_error(self, tmp_path, monkeypatch):
         path = tmp_path / "no.kohakutr"
+        path.write_bytes(b"")
 
         def boom(*a, **kw):
             raise RuntimeError("dead")
 
         monkeypatch.setattr(mem_mod, "_live_store_for_path", boom)
-        from fastapi import HTTPException
+        from kohakuterrarium.errors import SessionError
 
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(SessionError) as exc:
             await mem_mod.search_session_memory(
                 path,
                 q="x",
@@ -250,4 +251,15 @@ class TestSearchSessionMemory:
                 agent=None,
                 engine=SimpleNamespace(),
             )
-        assert exc.value.status_code == 500
+        assert "Memory search failed" in str(exc.value)
+
+    async def test_missing_path_raises_not_found_without_creating_it(self, tmp_path):
+        from kohakuterrarium.errors import SessionNotFoundError
+
+        ghost = tmp_path / "ghost.kohakutr"
+        with pytest.raises(SessionNotFoundError):
+            await mem_mod.search_session_memory(
+                ghost, q="x", mode="fts", k=5, agent=None, engine=None
+            )
+        # The audit defect: the lookup minted an empty .kohakutr.
+        assert not ghost.exists()

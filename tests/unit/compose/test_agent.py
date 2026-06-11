@@ -23,7 +23,7 @@ from kohakuterrarium.core.config_types import AgentConfig
 # attribute ``kohakuterrarium.compose.agent`` is the *function*, not
 # the submodule — ``import ... as`` would bind the function. Use
 # ``importlib.import_module`` to get the actual module object (needed
-# for monkeypatching its ``_engine_session_*`` helpers).
+# for monkeypatching its ``_engine_session`` helper).
 compose_agent = importlib.import_module("kohakuterrarium.compose.agent")
 
 
@@ -44,6 +44,17 @@ class _FakeSession:
 
     async def stop(self) -> None:
         self.stop_count += 1
+
+
+def _stub_engine_session(monkeypatch, sess, created=None):
+    """Patch ``_engine_session`` to return ``sess`` and log its args."""
+
+    async def fake_session(config, *, engine, pwd, llm):
+        if created is not None:
+            created.append({"config": config, "engine": engine, "pwd": pwd, "llm": llm})
+        return sess
+
+    monkeypatch.setattr(compose_agent, "_engine_session", fake_session)
 
 
 # ── AgentRunnable ────────────────────────────────────────────────
@@ -96,32 +107,44 @@ class TestAgentFactory:
     async def test_run_creates_destroys_session(self, monkeypatch):
         sess = _FakeSession(chunks=["fresh-"])
         created = []
-
-        async def fake_from_path(path):
-            created.append(path)
-            return sess
-
-        monkeypatch.setattr(compose_agent, "_engine_session_from_path", fake_from_path)
+        _stub_engine_session(monkeypatch, sess, created)
         f = AgentFactory("/some/path")
         out = await f.run("task")
         assert out == "fresh-"
-        assert created == ["/some/path"]
+        assert [c["config"] for c in created] == ["/some/path"]
         # Session stopped after the call.
         assert sess.stop_count == 1
 
     async def test_run_with_agent_config(self, monkeypatch):
         sess = _FakeSession(chunks=["x"])
-
-        async def fake_from_config(cfg):
-            return sess
-
-        monkeypatch.setattr(
-            compose_agent, "_engine_session_from_config", fake_from_config
-        )
+        created = []
+        _stub_engine_session(monkeypatch, sess, created)
         cfg = AgentConfig(name="c", agent_path=Path("."))
         f = AgentFactory(cfg)
         out = await f.run("task")
         assert out == "x"
+        assert created[0]["config"] is cfg
+
+    async def test_engine_pwd_llm_threaded_through(self, monkeypatch):
+        # E11: the constructor keywords reach the engine adapter
+        # verbatim on EVERY run() — they used to not exist at all.
+        sess = _FakeSession(chunks=["y"])
+        created = []
+        _stub_engine_session(monkeypatch, sess, created)
+        shared_engine = object()
+        provider = object()
+        f = AgentFactory(
+            "@pkg/creatures/x", engine=shared_engine, pwd="/work", llm=provider
+        )
+        await f.run("task")
+        assert created == [
+            {
+                "config": "@pkg/creatures/x",
+                "engine": shared_engine,
+                "pwd": "/work",
+                "llm": provider,
+            }
+        ]
 
     async def test_session_stopped_even_on_exception(self, monkeypatch):
         class _BadSession(_FakeSession):
@@ -131,11 +154,7 @@ class TestAgentFactory:
                 raise RuntimeError("chat boom")
 
         sess = _BadSession()
-
-        async def fake_from_path(path):
-            return sess
-
-        monkeypatch.setattr(compose_agent, "_engine_session_from_path", fake_from_path)
+        _stub_engine_session(monkeypatch, sess)
         f = AgentFactory("p")
         with pytest.raises(RuntimeError, match="chat boom"):
             await f.run("x")
@@ -158,30 +177,32 @@ class TestAgentFactory:
 class TestAgentHelper:
     async def test_agent_from_path(self, monkeypatch):
         sess = _FakeSession(chunks=["from-path"])
-
-        async def fake_from_path(path):
-            return sess
-
-        monkeypatch.setattr(compose_agent, "_engine_session_from_path", fake_from_path)
+        created = []
+        _stub_engine_session(monkeypatch, sess, created)
         a = await agent("/x")
         # The runnable wraps the session built from the path, and
         # running it streams through that session.
         assert a._session is sess
+        assert created[0]["config"] == "/x"
         assert await a.run("hi") == "from-path"
 
     async def test_agent_from_config(self, monkeypatch):
         sess = _FakeSession(chunks=["from-config"])
-
-        async def fake_from_config(cfg):
-            return sess
-
-        monkeypatch.setattr(
-            compose_agent, "_engine_session_from_config", fake_from_config
-        )
+        _stub_engine_session(monkeypatch, sess)
         cfg = AgentConfig(name="c", agent_path=Path("."))
         a = await agent(cfg)
         assert a._session is sess
         assert await a.run("hi") == "from-config"
+
+    async def test_agent_keywords_threaded_through(self, monkeypatch):
+        sess = _FakeSession()
+        created = []
+        _stub_engine_session(monkeypatch, sess, created)
+        shared_engine = object()
+        await agent("/x", engine=shared_engine, pwd="/w", llm="profile-name")
+        assert created[0]["engine"] is shared_engine
+        assert created[0]["pwd"] == "/w"
+        assert created[0]["llm"] == "profile-name"
 
 
 class TestFactoryHelper:
@@ -196,6 +217,33 @@ class TestFactoryHelper:
 # ── _EngineChatSession behaviour ─────────────────────────────────
 
 
+class _FakeCreature:
+    creature_id = "cid"
+
+    def __init__(self):
+        self.received: list[str] = []
+
+    async def chat(self, message):
+        # Mirror Creature.chat's real shape: an async generator
+        # that yields the response chunks and then simply ends
+        # (no caller-visible sentinel).
+        self.received.append(message)
+        yield "part-1"
+        yield "part-2"
+
+
+class _FakeEngine:
+    def __init__(self):
+        self.shut = False
+        self.removed: list[str] = []
+
+    async def shutdown(self):
+        self.shut = True
+
+    async def remove_creature(self, creature_id):
+        self.removed.append(creature_id)
+
+
 class TestEngineChatSession:
     async def test_chat_delegates_to_creature_chat(self):
         """Contract: ``_EngineChatSession.chat`` adapts a Terrarium
@@ -205,30 +253,9 @@ class TestEngineChatSession:
         version called a non-existent ``agent.send_user_input``.)"""
         from kohakuterrarium.compose.agent import _EngineChatSession
 
-        class _FakeCreature:
-            creature_id = "cid"
-
-            def __init__(self):
-                self.received: list[str] = []
-
-            async def chat(self, message):
-                # Mirror Creature.chat's real shape: an async generator
-                # that yields the response chunks and then simply ends
-                # (no caller-visible sentinel).
-                self.received.append(message)
-                yield "part-1"
-                yield "part-2"
-
-        class _FakeEngine:
-            def __init__(self):
-                self.shut = False
-
-            async def shutdown(self):
-                self.shut = True
-
         creature = _FakeCreature()
         engine = _FakeEngine()
-        sess = _EngineChatSession(engine, creature)
+        sess = _EngineChatSession(engine, creature, owns_engine=True)
 
         assert sess.agent_id == "cid"
         chunks = [c async for c in sess.chat("hi")]
@@ -239,3 +266,17 @@ class TestEngineChatSession:
 
         await sess.stop()
         assert engine.shut is True
+
+    async def test_shared_engine_survives_stop(self):
+        """E11: with a caller-shared engine, ``stop()`` removes ONLY
+        this session's creature — shutting down the user's engine
+        would kill every other compose agent riding on it."""
+        from kohakuterrarium.compose.agent import _EngineChatSession
+
+        creature = _FakeCreature()
+        engine = _FakeEngine()
+        sess = _EngineChatSession(engine, creature, owns_engine=False)
+
+        await sess.stop()
+        assert engine.shut is False
+        assert engine.removed == ["cid"]

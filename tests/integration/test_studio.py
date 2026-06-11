@@ -35,8 +35,12 @@ side effect.
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException
 
+from kohakuterrarium.errors import (
+    InvalidRequestError,
+    NotFoundError,
+    SessionNotFoundError,
+)
 from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
 from kohakuterrarium.session.store import SessionStore
@@ -63,7 +67,7 @@ def scripted_llm(monkeypatch):
     """
     holder: dict[str, list] = {"script": ["OK"]}
 
-    def _fake_create(config, llm_override=None):
+    def _fake_create(config, llm=None):
         return ScriptedLLM(holder["script"])
 
     monkeypatch.setattr(_bootstrap_llm_mod, "create_llm_provider", _fake_create)
@@ -108,6 +112,29 @@ async def _drain_chat(
     async for chunk in studio.sessions.chat.chat(session_id, creature_id, msg):
         chunks.append(chunk)
     return "".join(chunks)
+
+
+def _find_kt_biome_source() -> Path | None:
+    """Locate a kt-biome bundle to install into the isolated catalog.
+
+    Dev machines carry a repo-local ``kt-biome/`` checkout; CI installs
+    kt-biome editable into the operator config dir before the suite
+    runs (see ``.github/workflows/ci.yml``), which leaves a
+    ``kt-biome.link`` pointing at the cloned source.
+    """
+    repo_local = Path(__file__).resolve().parents[2] / "kt-biome"
+    if (repo_local / "kohaku.yaml").exists():
+        return repo_local
+    real_pkgs = Path.home() / ".kohakuterrarium" / "packages"
+    link = real_pkgs / "kt-biome.link"
+    if link.exists():
+        target = Path(link.read_text(encoding="utf-8").strip())
+        if (target / "kohaku.yaml").exists():
+            return target
+    direct = real_pkgs / "kt-biome"
+    if (direct / "kohaku.yaml").exists():
+        return direct
+    return None
 
 
 def _scaffold_creature(studio: Studio, workspace_root: Path, name: str) -> Path:
@@ -511,11 +538,11 @@ class TestStudioIntegration:
                 )
                 assert ct_agent == "text/markdown; charset=utf-8"
                 assert "ping one" in agent_body
-                # An unsupported export format is a hard 400, never a
+                # An unsupported export format is a hard typed error
+                # (mapped to 400 at the api adapter), never a
                 # silently-empty body.
-                with pytest.raises(HTTPException) as exc_export:
+                with pytest.raises(InvalidRequestError):
                     studio.persistence.viewer.export(store, saved_stem, "pdf", None)
-                assert exc_export.value.status_code == 400
             finally:
                 store.close(update_status=False)
 
@@ -568,10 +595,10 @@ class TestStudioIntegration:
             scout_history = studio.persistence.history(saved_path, "scout")
             assert scout_history["session_name"] == saved_stem
             assert scout_history["meta"]["agents"] == ["scout"]
-            # An unknown target is a hard 404, never a fake-empty payload.
-            with pytest.raises(HTTPException) as exc_info:
+            # An unknown target is a hard typed NotFound (mapped to 404
+            # at the api adapter), never a fake-empty payload.
+            with pytest.raises(NotFoundError):
                 studio.persistence.history(saved_path, "no-such-target")
-            assert exc_info.value.status_code == 404
 
             # --- persistence.viewer.diff: parent vs fork ---------------
             # The fork dropped the trailing turn, so the diff is a
@@ -602,7 +629,7 @@ class TestStudioIntegration:
             # opens the .kohakutr off disk. ``ping one`` was a recorded
             # user_input — an FTS query for it must hit.
             mem = await studio.sessions.search_memory(
-                saved_path, q="ping", mode="fts", k=10, agent=None, engine=studio.engine
+                saved_stem, "ping", mode="fts", k=10, agent=None
             )
             assert mem["query"] == "ping"
             assert mem["mode"] == "fts"
@@ -611,12 +638,11 @@ class TestStudioIntegration:
             # ``auto`` mode resolves the embedder + falls back to FTS when
             # no vector index exists — still hits the recorded turn.
             mem_auto = await studio.sessions.search_memory(
-                saved_path,
-                q="ping",
+                saved_path,  # a direct .kohakutr path works too
+                "ping",
                 mode="auto",
                 k=5,
                 agent=None,
-                engine=studio.engine,
             )
             assert mem_auto["mode"] == "auto"
             assert mem_auto["k"] == 5
@@ -624,25 +650,30 @@ class TestStudioIntegration:
             # An agent-scoped search narrows to the named creature; every
             # hit is attributed to ``scout``.
             mem_scoped = await studio.sessions.search_memory(
-                saved_path,
-                q="ping",
+                saved_stem,
+                "ping",
                 mode="fts",
                 k=10,
                 agent="scout",
-                engine=studio.engine,
             )
             assert all(r["agent"] == "scout" for r in mem_scoped["results"])
             # A query with no matches is a clean empty result, not an error.
             mem_miss = await studio.sessions.search_memory(
-                saved_path,
-                q="zzz-no-such-token-zzz",
+                saved_stem,
+                "zzz-no-such-token-zzz",
                 mode="fts",
                 k=10,
                 agent=None,
-                engine=studio.engine,
             )
             assert mem_miss["count"] == 0
             assert mem_miss["results"] == []
+            # A MISSING session is a typed NotFound raised BEFORE any
+            # file is opened — and never mints a junk .kohakutr in the
+            # session dir as a lookup side effect.
+            before = sorted(isolated_paths["session_dir"].glob("*.kohakutr*"))
+            with pytest.raises(SessionNotFoundError):
+                await studio.sessions.search_memory("no-such-session", "x")
+            assert sorted(isolated_paths["session_dir"].glob("*.kohakutr*")) == before
 
     @pytest.mark.timeout(120)
     async def test_runtime_session_mutation(self, scripted_llm, isolated_paths):
@@ -889,6 +920,29 @@ class TestStudioIntegration:
                 studio.service, team_sid, "ops-net", "all hands", sender="human"
             )
             assert team_msg
+
+            # --- Studio.from_recipe: identical bookkeeping to
+            # sessions.start_terrarium (the audit defect: it used to
+            # apply the recipe onto a bare engine and silently skip the
+            # session store + meta registration).
+            studio2 = await Studio.from_recipe(str(recipe), name="rt-team-2")
+            try:
+                listed2 = studio2.sessions.list()
+                assert [x.name for x in listed2] == ["rt-team-2"]
+                sid2 = listed2[0].session_id
+                # The session store was attached: a real .kohakutr for
+                # this graph exists in the session dir.
+                session_dir = isolated_paths["session_dir"]
+                assert (session_dir / f"{sid2}.kohakutr").exists()
+                # Instance-scoped state: the FIRST studio must not see
+                # the second studio's session (and vice versa) — two
+                # engines in one process no longer share bookkeeping.
+                assert sid2 not in {x.session_id for x in studio.sessions.list()}
+                assert team_sid not in {x.session_id for x in listed2}
+                await studio2.sessions.stop(sid2)
+            finally:
+                await studio2.shutdown()
+
             await studio.sessions.stop(team_sid)
             assert studio.sessions.list() == []
 
@@ -1053,9 +1107,20 @@ class TestStudioIntegration:
             assert "params" in trigger_schema
 
             # --- catalog.packages: the installed-package catalog --------
-            # The repo ships the ``kt-biome`` default package installed
-            # editable, so both the installed-list and the catalog scan
-            # surface it.
+            # The packages dir honours ``KT_CONFIG_DIR`` (per-test
+            # isolation), so the isolated catalog starts EMPTY — install
+            # ``kt-biome`` through the façade's own install op (editable)
+            # and assert the catalog surfaces it.  The source is the
+            # repo-local checkout on dev machines, or the operator-level
+            # editable install CI provisions before running the suite.
+            biome_src = _find_kt_biome_source()
+            if biome_src is None:
+                pytest.skip("kt-biome source not available on this machine")
+            assert studio.catalog.packages.list() == []
+            installed_name = studio.catalog.packages.install(
+                str(biome_src), editable=True
+            )
+            assert installed_name == "kt-biome"
             installed = studio.catalog.packages.list()
             assert "kt-biome" in {p["name"] for p in installed}
             biome = next(p for p in installed if p["name"] == "kt-biome")
@@ -1101,12 +1166,11 @@ class TestStudioIntegration:
 
         async with Studio() as studio:
             mem = await studio.sessions.search_memory(
-                saved_path,
-                q="index",
+                saved_stem,
+                "index",
                 mode="fts",
                 k=10,
                 agent=None,
-                engine=studio.engine,
             )
             assert mem["count"] >= 1
             # The search is done — the file must be releasable. With the

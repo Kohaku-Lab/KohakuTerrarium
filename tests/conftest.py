@@ -53,13 +53,10 @@ def isolate_global_state():
     """
     snapshots: dict[str, object] = {}
 
-    try:
-        from kohakuterrarium.studio.sessions import lifecycle
-
-        snapshots["lifecycle._meta"] = dict(lifecycle._meta)
-        snapshots["lifecycle._session_stores"] = dict(lifecycle._session_stores)
-    except Exception:
-        pass
+    # NB: studio session bookkeeping (the old ``lifecycle._meta`` /
+    # ``_session_stores`` module globals) is now INSTANCE-scoped on the
+    # engine/service (``studio.sessions.registry``) — it dies with the
+    # per-test engine and needs no snapshot here.
 
     try:
         from kohakuterrarium.api import deps
@@ -93,16 +90,6 @@ def isolate_global_state():
         pass
 
     yield snapshots
-
-    try:
-        from kohakuterrarium.studio.sessions import lifecycle
-
-        lifecycle._meta.clear()
-        lifecycle._meta.update(snapshots.get("lifecycle._meta", {}))
-        lifecycle._session_stores.clear()
-        lifecycle._session_stores.update(snapshots.get("lifecycle._session_stores", {}))
-    except Exception:
-        pass
 
     try:
         from kohakuterrarium.api import deps

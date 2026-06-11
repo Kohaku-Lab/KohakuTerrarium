@@ -1,16 +1,6 @@
 """Unit tests for :mod:`kohakuterrarium.core.registry`."""
 
-import pytest
-
-from kohakuterrarium.core import registry as reg_mod
-from kohakuterrarium.core.registry import (
-    Registry,
-    command,
-    get_registry,
-    register_command,
-    register_tool,
-    tool,
-)
+from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.tool.base import ExecutionMode, ToolResult
 
 # ── helpers ──────────────────────────────────────────────────────
@@ -37,15 +27,6 @@ class _FakeTool:
 
     async def execute(self, args, context=None) -> ToolResult:
         return ToolResult(output="ok")
-
-
-@pytest.fixture(autouse=True)
-def reset_global_registry():
-    """Avoid leaking the global Registry between tests."""
-    snap = reg_mod._global_registry
-    reg_mod._global_registry = None
-    yield
-    reg_mod._global_registry = snap
 
 
 # ── Registry — tools ─────────────────────────────────────────────
@@ -169,78 +150,7 @@ class TestClear:
         assert r.list_subagents() == []
 
 
-# ── global registry ──────────────────────────────────────────────
-
-
-class TestGlobalRegistry:
-    def test_lazy_singleton(self):
-        a = get_registry()
-        b = get_registry()
-        assert a is b
-
-    def test_register_tool_module_fn(self):
-        register_tool(_FakeTool(name="globt"))
-        assert get_registry().get_tool("globt").tool_name == "globt"
-
-    def test_register_command_module_fn(self):
-        def h():
-            return "x"
-
-        register_command("doit", h)
-        assert get_registry().get_command("doit") is h
-
-
-# ── decorators ───────────────────────────────────────────────────
-
-
-class TestToolDecorator:
-    def test_registers_via_decorator(self):
-        @tool()
-        class MyDec:
-            @property
-            def tool_name(self):
-                return "deco"
-
-            @property
-            def description(self):
-                return "from decorator"
-
-            @property
-            def execution_mode(self):
-                return ExecutionMode.DIRECT
-
-            async def execute(self, args, context=None):
-                return ToolResult(output="ok")
-
-        assert get_registry().get_tool("deco") is not None
-        # Decorator returns the class unchanged.
-        assert MyDec.__name__ == "MyDec"
-
-    def test_class_without_tool_name_attr_not_registered(self):
-        # Defensive — decorator silently skips registration when the
-        # class lacks tool_name (so it can be safely applied to base
-        # classes / shells without crashing).
-        before = set(get_registry().list_tools())
-
-        @tool()
-        class NotATool:
-            pass
-
-        after = set(get_registry().list_tools())
-        assert after == before
-
-
-class TestCommandDecorator:
-    def test_registers_via_decorator(self):
-        @command("greet")
-        def handler(**kwargs):
-            return "hi"
-
-        assert get_registry().get_command("greet") is handler
-
-    def test_decorator_returns_function_unchanged(self):
-        def hello():
-            return "h"
-
-        wrapped = command("h")(hello)
-        assert wrapped is hello
+# NOTE: the module-level global registry + its ``@tool`` / ``@command``
+# decorators were dead surface (nothing read them into an agent) and
+# were removed (E7).  ``@kohakuterrarium.tool`` — the real adapter — is
+# covered in ``tests/unit/core/test_agent_extensions.py``.

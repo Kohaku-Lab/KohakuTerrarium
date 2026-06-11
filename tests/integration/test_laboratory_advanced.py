@@ -79,7 +79,7 @@ pytestmark = pytest.mark.timeout(60)
 
 
 def _patch_scripted(monkeypatch, script: list):
-    def _create(config, llm_override=None):
+    def _create(config, llm=None):
         return ScriptedLLM(script)
 
     monkeypatch.setattr(_bootstrap_llm_mod, "create_llm_provider", _create)
@@ -908,7 +908,7 @@ class TestLaboratoryAgentMessagesWorkflow:
             store = SessionStore(tmp_path / "rewind.kohakutr")
             store.init_meta(
                 session_id=creature.graph_id,
-                config_type="creature",
+                config_type="agent",
                 config_path=str(cdir),
                 pwd=str(tmp_path),
                 agents=["rewind-1"],

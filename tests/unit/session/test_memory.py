@@ -3,6 +3,7 @@
 import time
 
 import numpy as np
+import pytest
 
 from kohakuterrarium.session.embedding import BaseEmbedder, NullEmbedder
 from kohakuterrarium.session.memory import (
@@ -435,13 +436,12 @@ class TestSessionMemorySearch:
         results = m.search("authentication", mode="fts", agent="other", k=5)
         assert results == []
 
-    def test_semantic_falls_back_to_fts_when_no_vec(self, tmp_path):
+    def test_semantic_without_vec_raises(self, tmp_path):
         m = self._setup(tmp_path)
-        # Without an embedder, semantic falls back to FTS — which still
-        # finds the postgres block by keyword.
-        results = m.search("postgres", mode="semantic", k=5)
-        assert len(results) == 1
-        assert "postgres" in results[0].content.lower()
+        # E4: an EXPLICIT semantic request without an embedder raises —
+        # it used to silently degrade to FTS.
+        with pytest.raises(ValueError, match="embedding model"):
+            m.search("postgres", mode="semantic", k=5)
 
     def test_hybrid_falls_back_to_fts_when_no_vec(self, tmp_path):
         m = self._setup(tmp_path)
@@ -455,11 +455,10 @@ class TestSessionMemorySearch:
         assert len(results) == 1
         assert "postgres" in results[0].content.lower()
 
-    def test_unknown_mode_falls_back_to_fts(self, tmp_path):
+    def test_unknown_mode_raises(self, tmp_path):
         m = self._setup(tmp_path)
-        results = m.search("postgres", mode="not-a-mode", k=5)
-        assert len(results) == 1
-        assert "postgres" in results[0].content.lower()
+        with pytest.raises(ValueError, match="Unknown search mode"):
+            m.search("postgres", mode="not-a-mode", k=5)
 
     def test_semantic_with_embedder(self, tmp_path):
         m = self._setup(tmp_path, embedder=_FakeEmbedder())

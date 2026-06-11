@@ -2,7 +2,9 @@
 
 import pytest
 
+from kohakuterrarium.errors import ConfigNotFoundError, PackageNotInstalledError
 from kohakuterrarium.core import config as cfg_mod
+from kohakuterrarium.packages import locations as loc_mod
 from kohakuterrarium.core.config import (
     _construct_agent_config,
     _find_config_file,
@@ -365,6 +367,74 @@ class TestLoadAgentConfig:
         c = load_agent_config(tmp_path)
         assert c.model == "gpt-7"
 
+    # -- @pkg chokepoint resolution (E1) ------------------------------
+
+    def test_loads_from_package_ref(self, tmp_path, monkeypatch):
+        # ``@pkg/...`` resolves HERE, at the chokepoint — every entry
+        # point (engine.add_creature, Agent.build, compose) inherits it.
+        pkg_root = tmp_path / "packages" / "biome"
+        agent_dir = pkg_root / "creatures" / "swe"
+        agent_dir.mkdir(parents=True)
+        (agent_dir / "config.yaml").write_text("name: swe\n")
+        monkeypatch.setattr(loc_mod, "PACKAGES_DIR", tmp_path / "packages")
+        c = load_agent_config("@biome/creatures/swe")
+        assert c.name == "swe"
+        assert c.agent_path == agent_dir.resolve()
+
+    def test_package_ref_uninstalled_raises_typed(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(loc_mod, "PACKAGES_DIR", tmp_path / "empty-pkgs")
+        with pytest.raises(PackageNotInstalledError):
+            load_agent_config("@ghost/creatures/x")
+
+    def test_missing_path_raises_config_not_found(self, tmp_path):
+        # New typed error is still a FileNotFoundError for old callers.
+        with pytest.raises(ConfigNotFoundError):
+            load_agent_config(tmp_path / "ghost")
+
+    def test_tilde_path_expanded(self, tmp_path, monkeypatch):
+        agent_dir = tmp_path / "home" / "agents" / "a"
+        agent_dir.mkdir(parents=True)
+        (agent_dir / "config.yaml").write_text("name: a\n")
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+        c = load_agent_config("~/agents/a")
+        assert c.name == "a"
+
+    # -- scope coherence (E12): every controller key accepts both
+    # controller-block and top-level YAML scope -----------------------
+
+    def test_top_level_controller_keys_respected(self, tmp_path):
+        # max_messages / ephemeral / tool_format used to be silently
+        # ignored at top level.
+        (tmp_path / "config.yaml").write_text(
+            "name: x\nmax_messages: 7\nephemeral: true\ntool_format: xml\n"
+        )
+        c = load_agent_config(tmp_path)
+        assert c.max_messages == 7
+        assert c.ephemeral is True
+        assert c.tool_format == "xml"
+
+    def test_controller_scope_wins_over_top_level(self, tmp_path):
+        (tmp_path / "config.yaml").write_text(
+            "name: x\nmax_messages: 7\ncontroller:\n  max_messages: 3\n"
+        )
+        c = load_agent_config(tmp_path)
+        assert c.max_messages == 3
+
+    def test_llm_profile_yaml_alias_accepted(self, tmp_path):
+        # Writing the dataclass field name in YAML used to be silently
+        # dropped; it is now an accepted alias for ``llm:``.
+        (tmp_path / "config.yaml").write_text("name: x\nllm_profile: openai/gpt-5\n")
+        c = load_agent_config(tmp_path)
+        assert c.llm_profile == "openai/gpt-5"
+
+    def test_llm_key_wins_over_alias(self, tmp_path):
+        (tmp_path / "config.yaml").write_text(
+            "name: x\nllm: canonical/sel\nllm_profile: alias/sel\n"
+        )
+        c = load_agent_config(tmp_path)
+        assert c.llm_profile == "canonical/sel"
+
 
 # ── inheritance ──────────────────────────────────────────────────
 
@@ -375,12 +445,14 @@ class TestResolveInheritance:
         out = _resolve_inheritance(data, tmp_path)
         assert out == data
 
-    def test_base_unresolvable_returns_original(self, tmp_path, monkeypatch):
-        # Reference to a creatures/ path that doesn't exist anywhere.
-        out = _resolve_inheritance(
-            {"name": "x", "base_config": "creatures/missing"}, tmp_path
-        )
-        assert "_base_path" not in out
+    def test_base_unresolvable_raises(self, tmp_path, monkeypatch):
+        # E4: a declared-but-unresolvable base used to warn-and-continue,
+        # producing an agent missing its base prompt/tools/model.  It is
+        # now a hard error.
+        with pytest.raises(ConfigNotFoundError, match="base_config"):
+            _resolve_inheritance(
+                {"name": "x", "base_config": "creatures/missing"}, tmp_path
+            )
 
     def test_base_merge_succeeds(self, tmp_path):
         # /root/creatures/base + child at /root/sub/x
@@ -541,3 +613,15 @@ class TestBuildAgentConfig:
         assert "BASE_P" in cfg.system_prompt
         assert "INLINE" in cfg.system_prompt
         assert cfg.name == "child"
+
+    def test_inline_dict_without_path(self):
+        # E12: a fully-inline config needs NO path context.
+        cfg = build_agent_config(
+            {"name": "inline", "system_prompt": "hi", "model": "m"}
+        )
+        assert cfg.name == "inline"
+        assert cfg.system_prompt == "hi"
+
+    def test_inline_dict_without_path_or_name_defaults(self):
+        cfg = build_agent_config({"system_prompt": "hi"})
+        assert cfg.name == "agent"

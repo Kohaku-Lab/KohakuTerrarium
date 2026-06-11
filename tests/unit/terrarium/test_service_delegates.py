@@ -145,7 +145,7 @@ class TestLifecycle:
             parent_creature_id="p",
             start=False,
             pwd="/wd",
-            llm_override="m",
+            llm="m",
         )
         assert out.creature_id == "cid"
 

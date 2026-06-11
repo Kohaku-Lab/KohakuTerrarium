@@ -202,5 +202,48 @@ class TestInitTools:
         )
         reg = Registry()
         init_tools(cfg, reg, loader=None)
-        # The unknown one was skipped without crashing.
+        # The unknown one was skipped without crashing (lenient default
+        # of the bare factory — Agent construction passes strict=True).
         assert "definitely_no_tool" not in reg.list_tools()
+
+
+class TestStrictMode:
+    """E4: strict raises ConfigError instead of warn-skipping."""
+
+    def test_unknown_builtin_raises(self):
+        from kohakuterrarium.errors import ConfigError
+
+        cfg = ToolConfigItem(name="definitely_no_tool", type="builtin")
+        with pytest.raises(ConfigError, match="Unknown built-in tool"):
+            create_tool(cfg, loader=None, strict=True)
+
+    def test_unknown_type_raises(self):
+        from kohakuterrarium.errors import ConfigError
+
+        cfg = ToolConfigItem(name="x", type="not_a_real_type")
+        with pytest.raises(ConfigError, match="Unknown tool type"):
+            create_tool(cfg, loader=None, strict=True)
+
+    def test_custom_missing_module_raises(self):
+        from kohakuterrarium.errors import ConfigError
+
+        cfg = ToolConfigItem(name="x", type="custom")
+        with pytest.raises(ConfigError, match="missing"):
+            create_tool(cfg, loader=None, strict=True)
+
+    def test_invalid_config_value_raises(self):
+        from kohakuterrarium.errors import ConfigError
+
+        cfg = ToolConfigItem(name="bash", type="builtin", options={"timeout": "soon"})
+        with pytest.raises(ConfigError, match="Invalid config value"):
+            create_tool(cfg, loader=None, strict=True)
+
+    def test_init_tools_strict_raises_on_first_bad(self):
+        from kohakuterrarium.errors import ConfigError
+
+        cfg = AgentConfig(
+            name="a",
+            tools=[ToolConfigItem(name="definitely_no_tool", type="builtin")],
+        )
+        with pytest.raises(ConfigError):
+            init_tools(cfg, Registry(), loader=None, strict=True)

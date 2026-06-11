@@ -98,7 +98,7 @@ def scripted_llm(monkeypatch):
         ]
     }
 
-    def _create(config, llm_override=None):
+    def _create(config, llm=None):
         return ScriptedLLM(holder["script"])
 
     monkeypatch.setattr(_bootstrap_llm_mod, "create_llm_provider", _create)
@@ -411,7 +411,7 @@ class TestLaboratoryMultiNodeService:
                 store_a = SessionStore(_P(tmp_path) / "merge-a.kohakutr")
                 store_a.init_meta(
                     session_id=hc_a.graph_id,
-                    config_type="creature",
+                    config_type="agent",
                     config_path=cfg_alpha,
                     pwd=str(tmp_path),
                     agents=["host-alpha"],
@@ -420,7 +420,7 @@ class TestLaboratoryMultiNodeService:
                 store_b = SessionStore(_P(tmp_path) / "merge-b.kohakutr")
                 store_b.init_meta(
                     session_id=hc_b.graph_id,
-                    config_type="creature",
+                    config_type="agent",
                     config_path=cfg_bravo,
                     pwd=str(tmp_path),
                     agents=["host-bravo"],
@@ -607,7 +607,7 @@ class TestLaboratoryDeepWorkflows:
             ScriptEntry("fallback3"),
         ]
 
-        def _create(config, llm_override=None):
+        def _create(config, llm=None):
             return ScriptedLLM(script)
 
         monkeypatch.setattr(_bootstrap_llm_mod, "create_llm_provider", _create)
@@ -625,7 +625,7 @@ class TestLaboratoryDeepWorkflows:
             store = SessionStore(sessions_dir / "writer.kohakutr")
             store.init_meta(
                 session_id=creature.graph_id,
-                config_type="creature",
+                config_type="agent",
                 config_path=cfg_path,
                 pwd=str(tmp_path),
                 agents=["writer-1"],
@@ -708,7 +708,7 @@ class TestLaboratoryModulesViaAgent:
             ScriptEntry("ack-fallback2"),
         ]
 
-        def _create(config, llm_override=None):
+        def _create(config, llm=None):
             return ScriptedLLM(script)
 
         monkeypatch.setattr(_bootstrap_llm_mod, "create_llm_provider", _create)
@@ -846,7 +846,7 @@ class TestLaboratoryModulesViaAgent:
             ScriptEntry("fallback"),
         ]
 
-        def _create(config, llm_override=None):
+        def _create(config, llm=None):
             return ScriptedLLM(script)
 
         monkeypatch.setattr(_bootstrap_llm_mod, "create_llm_provider", _create)
@@ -1012,7 +1012,7 @@ class TestLaboratoryModulesViaAgent:
             ScriptEntry("plain ack 3"),
         ]
 
-        def _create(config, llm_override=None):
+        def _create(config, llm=None):
             return ScriptedLLM(script)
 
         monkeypatch.setattr(_bootstrap_llm_mod, "create_llm_provider", _create)
@@ -1092,7 +1092,7 @@ class TestLaboratoryModulesViaAgent:
             ScriptEntry("LLM-fallback"),
         ]
 
-        def _create(config, llm_override=None):
+        def _create(config, llm=None):
             return ScriptedLLM(script)
 
         monkeypatch.setattr(_bootstrap_llm_mod, "create_llm_provider", _create)
@@ -1201,7 +1201,7 @@ class TestLaboratoryAdapterDirect:
 
         script = ["streamed-reply-chunk-1", "streamed-reply-chunk-2"]
 
-        def _create(config, llm_override=None):
+        def _create(config, llm=None):
             return ScriptedLLM(script)
 
         monkeypatch.setattr(_bootstrap_llm_mod, "create_llm_provider", _create)

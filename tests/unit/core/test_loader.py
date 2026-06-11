@@ -10,6 +10,7 @@ from kohakuterrarium.core.loader import (
     ModuleLoader,
     load_custom_module,
 )
+from kohakuterrarium.packages import locations as loc_mod
 
 # ── fixtures ──────────────────────────────────────────────────────
 
@@ -72,6 +73,32 @@ class TestLoadCustomFile:
         loader = ModuleLoader(agent_path=agent_dir)
         with pytest.raises(ModuleLoadError, match="Failed to load"):
             loader.load_class("custom/bad.py", "X", module_type="custom")
+
+    # -- @pkg refs + absolute paths (E1 chokepoint) -------------------
+
+    def test_loads_from_package_ref(self, tmp_path, monkeypatch):
+        pkg = tmp_path / "packages" / "toolkit"
+        pkg.mkdir(parents=True)
+        (pkg / "trace.py").write_text("class Trace:\n    NAME = 'trace'\n")
+        monkeypatch.setattr(loc_mod, "PACKAGES_DIR", tmp_path / "packages")
+        # No agent_path needed — the @ref is self-contained.
+        loader = ModuleLoader(agent_path=None)
+        cls = loader.load_class("@toolkit/trace.py", "Trace", module_type="custom")
+        assert cls.NAME == "trace"
+
+    def test_loads_from_absolute_path(self, tmp_path):
+        mod = tmp_path / "elsewhere" / "abs_tool.py"
+        mod.parent.mkdir(parents=True)
+        mod.write_text("class AbsTool:\n    NAME = 'abs'\n")
+        loader = ModuleLoader(agent_path=None)
+        cls = loader.load_class(str(mod), "AbsTool", module_type="custom")
+        assert cls.NAME == "abs"
+
+    def test_package_ref_uninstalled_wrapped(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(loc_mod, "PACKAGES_DIR", tmp_path / "none")
+        loader = ModuleLoader(agent_path=None)
+        with pytest.raises(ModuleLoadError, match="Failed to load"):
+            loader.load_class("@ghost/x.py", "X", module_type="custom")
 
 
 # ── load_class — package ──────────────────────────────────────────

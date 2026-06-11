@@ -18,17 +18,9 @@ from kohakuterrarium.testing.terrarium import (
     _FakeAgent,
 )
 
-
-@pytest.fixture(autouse=True)
-def _reset_module_state():
-    """Lifecycle keeps _meta and _session_stores as module-globals.
-    Reset them between tests so failures don't leak.
-    """
-    lifecycle._meta.clear()
-    lifecycle._session_stores.clear()
-    yield
-    lifecycle._meta.clear()
-    lifecycle._session_stores.clear()
+# Session bookkeeping is instance-scoped (studio.sessions.registry) —
+# each test builds its own engine/service, so no module-state reset is
+# needed between tests.
 
 
 # ── start_creature (local, in-memory config) ──────────────────
@@ -117,7 +109,7 @@ class TestStartCreatureLocal:
             )
             assert sess.home_node == "worker-1"
             # _meta entry retained.
-            assert sess.session_id in lifecycle._meta
+            assert sess.session_id in lifecycle.meta_for(svc)
         finally:
             await engine.shutdown()
 
@@ -150,9 +142,9 @@ class TestAttachSessionStoreForCreature:
             )
             assert creature.agent._attached is not None
             sid = creature.graph_id
-            assert sid in lifecycle._session_stores
+            assert sid in lifecycle.stores_for(svc)
             # Cleanup
-            store = lifecycle._session_stores[sid]
+            store = lifecycle.stores_for(svc)[sid]
             store.close()
         finally:
             await t.shutdown()
@@ -180,7 +172,7 @@ class TestAttachSessionStoreForCreature:
             try:
                 lifecycle.attach_session_store_for_creature(svc, creature)
                 # Reused — same store.
-                assert lifecycle._session_stores[sid] is existing
+                assert lifecycle.stores_for(svc)[sid] is existing
                 assert attached[0] is existing
             finally:
                 existing.close()
@@ -208,7 +200,7 @@ class TestStartTerrarium:
 
         cfg = TerrariumConfig(name="test-terra", creatures=[], channels=[])
 
-        async def _apply(c, pwd=None, llm_override=None):
+        async def _apply(c, pwd=None, llm=None, strict=True):
             return SimpleNamespace(graph_id="g-new", creature_ids=set())
 
         engine.apply_recipe = _apply
@@ -244,7 +236,7 @@ class TestListGetSession:
         t = await TestTerrariumBuilder().build()
         svc = LocalTerrariumService(t)
         try:
-            lifecycle._meta["remote-sid"] = {
+            lifecycle.meta_for(svc)["remote-sid"] = {
                 "name": "remote-sess",
                 "on_node": "worker-1",
             }
@@ -267,7 +259,7 @@ class TestListGetSession:
         t = await TestTerrariumBuilder().build()
         svc = LocalTerrariumService(t)
         try:
-            lifecycle._meta["sid-r"] = {
+            lifecycle.meta_for(svc)["sid-r"] = {
                 "name": "rs",
                 "on_node": "worker-1",
                 "creature_id": "cid-r",
@@ -353,9 +345,9 @@ class TestRename:
         svc = LocalTerrariumService(t)
         try:
             gid = t.get_creature("alice").graph_id
-            lifecycle._meta[gid] = {"name": "old"}
+            lifecycle.meta_for(svc)[gid] = {"name": "old"}
             lifecycle.rename_creature(svc, "alice", "new")
-            assert lifecycle._meta[gid]["name"] == "new"
+            assert lifecycle.meta_for(svc)[gid]["name"] == "new"
         finally:
             await t.shutdown()
 
@@ -370,7 +362,7 @@ class TestStopSession:
         try:
             gid = t.get_creature("alice").graph_id
             await lifecycle.stop_session(svc, gid)
-            assert gid not in lifecycle._meta
+            assert gid not in lifecycle.meta_for(svc)
         finally:
             await t.shutdown()
 
@@ -380,13 +372,13 @@ class TestStopSession:
         # Add a fake remote_creature method.
         svc.remove_creature = AsyncMock()
         try:
-            lifecycle._meta["sid-r"] = {
+            lifecycle.meta_for(svc)["sid-r"] = {
                 "on_node": "worker-1",
                 "creature_id": "cid-r",
             }
             await lifecycle.stop_session(svc, "sid-r")
             svc.remove_creature.assert_awaited_with("cid-r")
-            assert "sid-r" not in lifecycle._meta
+            assert "sid-r" not in lifecycle.meta_for(svc)
         finally:
             await t.shutdown()
 
@@ -432,7 +424,7 @@ class TestHotPlug:
         t = await TestTerrariumBuilder().build()
         svc = LocalTerrariumService(t)
         try:
-            lifecycle._meta["sid-r"] = {
+            lifecycle.meta_for(svc)["sid-r"] = {
                 "name": "n",
                 "on_node": "worker-1",
                 "creature_id": "cid-r",

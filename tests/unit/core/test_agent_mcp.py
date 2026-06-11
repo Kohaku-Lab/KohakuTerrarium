@@ -41,10 +41,13 @@ def _agent_with_mcp(*, mcp_configs=None):
 
 
 class TestInitMCP:
-    async def test_no_configs_sets_manager_to_none(self):
+    async def test_no_configs_still_constructs_manager(self):
+        # E7: the manager is ALWAYS built — the ``mcp_connect`` runtime
+        # tool must work on a configless agent (it used to get None).
         a = _agent_with_mcp()
         await init_mcp(a)
-        assert a._mcp_manager is None
+        assert a._mcp_manager is not None
+        assert a._mcp_manager.list_servers() == []
 
     async def test_connects_all_servers(self, monkeypatch):
         fake = _FakeManager()

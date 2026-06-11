@@ -68,36 +68,8 @@ class TestSessionDir:
         assert lifecycle._session_dir() == "/custom"
 
 
-# ── get_session_meta / get_session_store / list_session_stores ─
-
-
-class TestPureLookups:
-    def test_get_session_meta_unknown(self, monkeypatch):
-        monkeypatch.setattr(lifecycle, "_meta", {})
-        assert lifecycle.get_session_meta("ghost") == {}
-
-    def test_get_session_meta_returns_copy(self, monkeypatch):
-        meta = {"k": "v"}
-        monkeypatch.setattr(lifecycle, "_meta", {"g1": meta})
-        out = lifecycle.get_session_meta("g1")
-        out["k"] = "mutated"
-        # Original unchanged.
-        assert meta["k"] == "v"
-
-    def test_get_session_store_none(self, monkeypatch):
-        monkeypatch.setattr(lifecycle, "_session_stores", {})
-        assert lifecycle.get_session_store("ghost") is None
-
-    def test_list_session_stores(self, monkeypatch):
-        stores = {"g1": object(), "g2": object()}
-        monkeypatch.setattr(lifecycle, "_session_stores", stores)
-        out = lifecycle.list_session_stores()
-        assert len(out) == 2
-
-    def test_list_session_stores_skips_none(self, monkeypatch):
-        monkeypatch.setattr(lifecycle, "_session_stores", {"g1": object(), "g2": None})
-        out = lifecycle.list_session_stores()
-        assert len(out) == 1
+# get_session_meta / get_session_store / list_session_stores moved to
+# ``studio/sessions/registry.py`` — covered by test_session_registry.py.
 
 
 # ── _apply_creature_name ──────────────────────────────────────
@@ -230,9 +202,8 @@ class TestRenameSession:
         monkeypatch.setattr(
             lifecycle,
             "_build_session_handle",
-            lambda eng, sid: Session(session_id=sid, name="new"),
+            lambda eng, sid, meta_registry=None: Session(session_id=sid, name="new"),
         )
-        monkeypatch.setattr(lifecycle, "_meta", {})
         out = lifecycle.rename_session(_LocalService(eng), "g1", "new")
         # Creature was renamed.
         assert c.name == "new"
@@ -253,11 +224,11 @@ class TestRenameCreature:
             [_FakeGraph("g1", ["c1"])],
             creatures={"c1": c},
         )
-        monkeypatch.setattr(lifecycle, "_meta", {"g1": {"name": "old"}})
+        lifecycle.meta_for(eng)["g1"] = {"name": "old"}
         out = lifecycle.rename_creature(_LocalService(eng), "c1", "new")
         assert out == {"creature_id": "c1", "name": "new"}
         # Meta name mirrored because solo creature.
-        assert lifecycle._meta["g1"]["name"] == "new"
+        assert lifecycle.meta_for(eng)["g1"]["name"] == "new"
 
 
 # ── find_session_for_creature / find_creature ─────────────────
@@ -298,9 +269,7 @@ class TestBuildSessionHandle:
                 shared_channels=SimpleNamespace(get_channel_info=lambda: [])
             )
         }
-        monkeypatch.setattr(
-            lifecycle, "_meta", {"g1": {"name": "alice", "config_path": "/x"}}
-        )
+        lifecycle.meta_for(eng)["g1"] = {"name": "alice", "config_path": "/x"}
         out = lifecycle._build_session_handle(eng, "g1")
         assert out.name == "alice"
         assert out.config_path == "/x"

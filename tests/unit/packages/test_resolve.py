@@ -5,14 +5,21 @@ collision-aware per-kind manifest scanners (tools / io / triggers).
 """
 
 import sys
+from pathlib import Path
 
 import pytest
 
+from kohakuterrarium.errors import (
+    PackageNotInstalledError,
+    PackagePathNotFoundError,
+    PackageRefError,
+)
 from kohakuterrarium.packages import locations as loc_mod
 from kohakuterrarium.packages import resolve as res_mod
 from kohakuterrarium.packages.resolve import (
     ensure_package_importable,
     is_package_ref,
+    resolve_any_path,
     resolve_package_io,
     resolve_package_path,
     resolve_package_tool,
@@ -64,6 +71,71 @@ class TestResolvePackagePath:
         (pkg_dir / "biome").mkdir()
         with pytest.raises(FileNotFoundError, match="Path not found"):
             resolve_package_path("@biome/missing/dir")
+
+    # -- hardening: typed errors + malformed-ref rejection ------------
+
+    def test_uninstalled_package_error_is_typed(self, pkg_dir):
+        with pytest.raises(PackageNotInstalledError):
+            resolve_package_path("@ghost/anything")
+
+    def test_missing_subpath_error_is_typed(self, pkg_dir):
+        (pkg_dir / "biome").mkdir()
+        with pytest.raises(PackagePathNotFoundError):
+            resolve_package_path("@biome/missing")
+
+    def test_bare_at_raises_ref_error(self, pkg_dir):
+        # A bare "@" used to resolve to the whole packages dir.
+        with pytest.raises(PackageRefError, match="Empty package name"):
+            resolve_package_path("@")
+
+    def test_bare_at_slash_raises_ref_error(self, pkg_dir):
+        with pytest.raises(PackageRefError, match="Empty package name"):
+            resolve_package_path("@/etc")
+
+    def test_traversal_escape_raises_ref_error(self, pkg_dir):
+        (pkg_dir / "biome").mkdir()
+        (pkg_dir / "sibling").mkdir()
+        # ``..`` that escapes the package root must be rejected even
+        # though the target exists.
+        with pytest.raises(PackageRefError, match="escapes the package root"):
+            resolve_package_path("@biome/../sibling")
+
+    def test_internal_dotdot_within_package_allowed(self, pkg_dir):
+        # ``..`` that stays inside the package is harmless.
+        sub = pkg_dir / "biome" / "creatures" / "swe"
+        sub.mkdir(parents=True)
+        resolved = resolve_package_path("@biome/creatures/../creatures/swe")
+        assert resolved == sub.resolve()
+
+    def test_typed_errors_remain_builtin_compatible(self, pkg_dir):
+        # Migration contract: old except sites keep working.
+        with pytest.raises(FileNotFoundError):
+            resolve_package_path("@ghost")
+        with pytest.raises(ValueError):
+            resolve_package_path("@")
+
+
+class TestResolveAnyPath:
+    def test_at_ref_resolves_through_packages(self, pkg_dir):
+        sub = pkg_dir / "biome" / "creatures"
+        sub.mkdir(parents=True)
+        assert resolve_any_path("@biome/creatures") == sub.resolve()
+
+    def test_plain_string_becomes_path(self):
+        assert resolve_any_path("some/dir") == Path("some/dir")
+
+    def test_path_object_passes_through(self):
+        assert resolve_any_path(Path("x/y")) == Path("x/y")
+
+    def test_tilde_expanded(self):
+        resolved = resolve_any_path("~/somewhere")
+        assert "~" not in str(resolved)
+        assert resolved == Path.home() / "somewhere"
+
+    def test_no_existence_check_for_plain_paths(self):
+        # Plain paths are returned untouched even when missing —
+        # callers own their own not-found handling.
+        assert resolve_any_path("definitely/not/here") == Path("definitely/not/here")
 
 
 class TestEnsurePackageImportable:

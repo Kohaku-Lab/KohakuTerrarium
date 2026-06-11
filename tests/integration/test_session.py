@@ -119,7 +119,7 @@ def patched_llm(monkeypatch):
 
     holder: dict[str, list] = {"script": ["OK"]}
 
-    def _fake_create(config, llm_override=None):
+    def _fake_create(config, llm=None):
         return ScriptedLLM(holder["script"])
 
     monkeypatch.setattr(_bootstrap_llm, "create_llm_provider", _fake_create)
@@ -660,7 +660,7 @@ class TestSessionIntegration:
         events = store.get_events("seeker")
 
         # FTS keyword search (always available).
-        fts_memory = SessionMemory(str(session_path), embedder=None, store=store)
+        fts_memory = SessionMemory(str(session_path), embedder=None)
         indexed = fts_memory.index_events("seeker", events)
         assert indexed > 0
         fts_hits = fts_memory.search("authentication", mode="fts", k=5)
@@ -678,9 +678,7 @@ class TestSessionIntegration:
 
         # Semantic search over the deterministic embedder. The exact
         # phrase embeds to the exact stored vector → top hit is itself.
-        sem_memory = SessionMemory(
-            str(session_path), embedder=_HashEmbedder(), store=store
-        )
+        sem_memory = SessionMemory(str(session_path), embedder=_HashEmbedder())
         sem_memory.index_events("seeker", events)
         assert sem_memory.has_vectors
         sem_hits = sem_memory.search(
@@ -733,15 +731,16 @@ class TestSessionIntegration:
         tool_hits = fts_memory.search("echo", mode="fts", k=10)
         assert any(h.block_type == "tool" for h in tool_hits)
 
-        # An embedder-less memory asked for "semantic" mode logs a
-        # warning and degrades to FTS rather than returning nothing.
-        degraded = fts_memory.search("authentication", mode="semantic", k=5)
-        assert degraded and degraded[0].content == (
-            "the authentication subsystem has a bug"
-        )
-        # An unknown mode also falls back to FTS (no crash).
-        bogus = fts_memory.search("authentication", mode="not-a-mode", k=5)
-        assert bogus and bogus[0].block_type == "user"
+        # E4: an embedder-less memory asked for EXPLICIT "semantic"
+        # mode raises (it used to silently degrade to FTS); "auto"
+        # remains the graceful-fallback spelling.
+        with pytest.raises(ValueError, match="embedding model"):
+            fts_memory.search("authentication", mode="semantic", k=5)
+        graceful = fts_memory.search("authentication", mode="auto", k=5)
+        assert graceful and graceful[0].block_type == "user"
+        # An unknown mode is a loud error, not a silent FTS fallback.
+        with pytest.raises(ValueError, match="Unknown search mode"):
+            fts_memory.search("authentication", mode="not-a-mode", k=5)
 
         # close() releases the native handles SessionMemory opened.
         # Re-opening the same file embedder-less must rediscover the
@@ -750,7 +749,7 @@ class TestSessionIntegration:
         sem_stat_before = sem_memory.get_stats()
         sem_memory.close()
         fts_memory.close()
-        reopened_mem = SessionMemory(str(session_path), embedder=None, store=store)
+        reopened_mem = SessionMemory(str(session_path), embedder=None)
         try:
             # The ``has_vectors`` property tracks the reopened vec table
             # even though the embedder-less stats row reports the

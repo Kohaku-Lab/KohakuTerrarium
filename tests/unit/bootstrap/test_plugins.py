@@ -208,6 +208,51 @@ class TestPackageDiscovery:
         assert mgr.is_enabled("biome_disc") is False
 
 
+class TestLoadOneStrict:
+    """E4: a config-listed plugin that fails to load raises under
+    strict instead of being silently dropped (a vanished sandbox /
+    budget / permgate plugin is a policy hole)."""
+
+    def test_unknown_name_raises(self, monkeypatch):
+        from kohakuterrarium.errors import ConfigError
+
+        monkeypatch.setattr(plug_mod, "lookup_plugin", lambda name: None)
+        monkeypatch.setattr(plug_mod, "list_packages", lambda: [])
+        with pytest.raises(ConfigError, match="not found"):
+            _load_one("ghost_name", loader=None, strict=True)
+
+    def test_missing_module_raises(self):
+        from kohakuterrarium.errors import ConfigError
+
+        with pytest.raises(ConfigError, match="missing module/class"):
+            _load_one({"name": ""}, loader=None, strict=True)
+
+    def test_not_a_baseplugin_raises(self, monkeypatch, tmp_path):
+        from kohakuterrarium.errors import ConfigError
+
+        mod_dir = tmp_path / "src"
+        mod_dir.mkdir()
+        (mod_dir / "notplug2.py").write_text("class NotAPlugin:\n    pass\n")
+        monkeypatch.syspath_prepend(str(mod_dir))
+        with pytest.raises(ConfigError, match="not a"):
+            _load_one(
+                {"name": "x", "module": "notplug2", "class": "NotAPlugin"},
+                loader=None,
+                strict=True,
+            )
+        sys.modules.pop("notplug2", None)
+
+    def test_import_failure_raises(self):
+        from kohakuterrarium.errors import ConfigError
+
+        with pytest.raises(ConfigError, match="Failed to load plugin"):
+            _load_one(
+                {"name": "x", "module": "no_such_mod_xyz", "class": "C"},
+                loader=None,
+                strict=True,
+            )
+
+
 class TestLoadOne:
     def test_string_config_treated_as_name(self, monkeypatch):
         # A bare string entry resolves through the catalog by name.

@@ -2,8 +2,13 @@
 
 import asyncio
 
+import pytest
 
-from kohakuterrarium.terrarium.creature_host import Creature
+from kohakuterrarium.builtins.inputs.none import NoneInput
+from kohakuterrarium.builtins.outputs.none import NoneOutput
+from kohakuterrarium.builtins.outputs.stdout import StdoutOutput
+from kohakuterrarium.terrarium.creature_host import Creature, build_creature
+from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.testing.terrarium import _FakeAgent
 
 
@@ -14,6 +19,103 @@ def _creature(*, name="alice", agent=None, **kw):
         agent=agent or _FakeAgent(name=name),
         **kw,
     )
+
+
+# ── build_creature: llm= instance injection (E5) ───────────────
+
+
+class TestBuildCreatureLLMInjection:
+    def test_provider_instance_flows_to_agent(self, tmp_path):
+        # ``engine.add_creature(path, llm=ScriptedLLM(...))`` must bind
+        # the instance — this is the engine-side seam that replaces the
+        # old two-site create_llm_provider monkeypatch.
+        (tmp_path / "config.yaml").write_text(
+            "name: scripted\ninput:\n  type: none\noutput:\n  type: stdout\n",
+            encoding="utf-8",
+        )
+        scripted = ScriptedLLM(["hi"])
+        creature = build_creature(str(tmp_path), llm=scripted, io="none")
+        assert creature.agent.llm is scripted
+
+
+# ── typed turn drivers on Creature (E3) ────────────────────────
+
+
+class TestCreatureTurnAPI:
+    def _creature_cfg(self, tmp_path):
+        (tmp_path / "config.yaml").write_text(
+            "name: turnc\ninput:\n  type: none\noutput:\n  type: none\n",
+            encoding="utf-8",
+        )
+        return str(tmp_path)
+
+    async def test_run_returns_result(self, tmp_path):
+        c = build_creature(
+            self._creature_cfg(tmp_path),
+            llm=ScriptedLLM(["creature reply"]),
+            io="headless",
+        )
+        await c.start()
+        try:
+            result = await c.run("hi")
+            assert result.ok
+            assert "creature reply" in result.text
+        finally:
+            await c.stop()
+
+    async def test_attach_streams_a_chat_turn(self, tmp_path):
+        from kohakuterrarium.core.turn import TextChunk
+
+        c = build_creature(
+            self._creature_cfg(tmp_path),
+            llm=ScriptedLLM(["observed"]),
+            io="headless",
+        )
+        await c.start()
+        try:
+            async with c.attach() as stream:
+                await c.run("hi")
+                text = ""
+                while "observed" not in text:
+                    ev = await asyncio.wait_for(stream._queue.get(), timeout=2)
+                    if isinstance(ev, TextChunk):
+                        text += ev.text
+                assert "observed" in text
+        finally:
+            await c.stop()
+
+
+# ── build_creature: io= modes (E12) ────────────────────────────
+
+
+class TestBuildCreatureIOModes:
+    def _write_cfg(self, tmp_path):
+        # Config declares cli input + stdout output — the io= modes
+        # must override what the config says.
+        (tmp_path / "config.yaml").write_text(
+            "name: iomodes\ninput:\n  type: none\noutput:\n  type: stdout\n",
+            encoding="utf-8",
+        )
+        return str(tmp_path)
+
+    def test_headless_silences_default_output(self, tmp_path):
+        creature = build_creature(
+            self._write_cfg(tmp_path), llm=ScriptedLLM(["x"]), io="headless"
+        )
+        assert isinstance(creature.agent.output_router.default_output, NoneOutput)
+        assert isinstance(creature.agent.input, NoneInput)
+
+    def test_none_keeps_config_output(self, tmp_path):
+        creature = build_creature(
+            self._write_cfg(tmp_path), llm=ScriptedLLM(["x"]), io="none"
+        )
+        # Input suppressed, but the config's stdout output still boots.
+        assert isinstance(creature.agent.input, NoneInput)
+        assert isinstance(creature.agent.output_router.default_output, StdoutOutput)
+
+    def test_invalid_io_value_raises(self, tmp_path):
+        with pytest.raises(ValueError, match="io= must be"):
+            build_creature(self._write_cfg(tmp_path), io="quiet")
 
 
 # ── start / stop ───────────────────────────────────────────────

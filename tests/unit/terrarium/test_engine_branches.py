@@ -270,7 +270,7 @@ class TestRecipeBranches:
             cfg,
             creature_id="alice",
             pwd=None,
-            llm_override=None,
+            llm=None,
             env=env,
             use_default_builder=False,
         )

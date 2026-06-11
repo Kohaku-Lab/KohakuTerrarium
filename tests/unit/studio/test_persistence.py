@@ -5,7 +5,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from fastapi import HTTPException
+from kohakuterrarium.errors import (
+    InvalidRequestError,
+    NotFoundError,
+    SessionError,
+    SessionNotFoundError,
+)
 
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence import (
@@ -39,23 +44,21 @@ class TestResolveArtifactsDir:
         monkeypatch.setattr(
             artifacts_mod, "resolve_session_path_default", lambda n: None
         )
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(NotFoundError):
             artifacts_mod.resolve_artifacts_dir("ghost", tmp_path)
-        assert exc.value.status_code == 404
 
 
 class TestResolveArtifactFile:
     def test_empty_filepath_raises(self, tmp_path):
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(InvalidRequestError):
             artifacts_mod.resolve_artifact_file(tmp_path, "")
-        assert exc.value.status_code == 400
 
     def test_absolute_path_rejected(self, tmp_path):
-        with pytest.raises(HTTPException):
+        with pytest.raises(InvalidRequestError):
             artifacts_mod.resolve_artifact_file(tmp_path, "/etc/passwd")
 
     def test_parent_traversal_rejected(self, tmp_path):
-        with pytest.raises(HTTPException):
+        with pytest.raises(InvalidRequestError):
             artifacts_mod.resolve_artifact_file(tmp_path, "../escape")
 
     def test_outside_artifacts_rejected(self, tmp_path):
@@ -63,14 +66,13 @@ class TestResolveArtifactFile:
         artifacts.mkdir()
         # Symlinks could allow escape, but here we just trust the resolve.
         # Pass a name that resolves outside.
-        with pytest.raises(HTTPException):
+        with pytest.raises(InvalidRequestError):
             artifacts_mod.resolve_artifact_file(artifacts, "../outside.png")
 
     def test_not_a_file_raises(self, tmp_path):
         (tmp_path / "subdir").mkdir()
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(NotFoundError):
             artifacts_mod.resolve_artifact_file(tmp_path, "subdir")
-        assert exc.value.status_code == 404
 
     def test_valid_file(self, tmp_path):
         (tmp_path / "img.png").write_bytes(b"x")
@@ -94,15 +96,24 @@ class TestHistoryIndexPayload:
         assert "meta" in out
         assert "targets" in out
 
-    def test_failure_raises_500(self, tmp_path, monkeypatch):
+    def test_missing_file_raises_not_found_without_creating_it(self, tmp_path):
+        ghost = tmp_path / "ghost.kohakutr"
+        with pytest.raises(SessionNotFoundError):
+            history_mod.history_index_payload(ghost)
+        # The lookup must NOT mint an empty .kohakutr as a side effect.
+        assert not ghost.exists()
+
+    def test_failure_raises_session_error(self, tmp_path, monkeypatch):
         # Force SessionStore() to raise so the except branch fires.
+        path = tmp_path / "any.kohakutr"
+        path.write_bytes(b"")
+
         def _boom(p):
             raise RuntimeError("boom")
 
         monkeypatch.setattr(history_mod, "SessionStore", _boom)
-        with pytest.raises(HTTPException) as exc:
-            history_mod.history_index_payload(tmp_path / "any.kohakutr")
-        assert exc.value.status_code == 500
+        with pytest.raises(SessionError, match="boom"):
+            history_mod.history_index_payload(path)
 
 
 class TestHistoryPayload:
@@ -111,9 +122,8 @@ class TestHistoryPayload:
         store = SessionStore(str(path))
         store.init_meta("s1", "agent", "/p", "/w", ["alice"])
         store.close()
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(NotFoundError, match="Target not found"):
             history_mod.history_payload(path, "ghost")
-        assert exc.value.status_code == 404
 
     def test_valid_target(self, tmp_path):
         path = tmp_path / "s.kohakutr"
@@ -125,14 +135,22 @@ class TestHistoryPayload:
         out = history_mod.history_payload(path, "alice")
         assert out["session_name"] == "s"
 
-    def test_failure_raises_500(self, tmp_path, monkeypatch):
+    def test_missing_file_raises_not_found_without_creating_it(self, tmp_path):
+        ghost = tmp_path / "ghost.kohakutr"
+        with pytest.raises(SessionNotFoundError):
+            history_mod.history_payload(ghost, "alice")
+        assert not ghost.exists()
+
+    def test_failure_raises_session_error(self, tmp_path, monkeypatch):
+        path = tmp_path / "any.kohakutr"
+        path.write_bytes(b"")
+
         def _boom(p):
             raise RuntimeError("boom")
 
         monkeypatch.setattr(history_mod, "SessionStore", _boom)
-        with pytest.raises(HTTPException) as exc:
-            history_mod.history_payload(tmp_path / "any.kohakutr", "alice")
-        assert exc.value.status_code == 500
+        with pytest.raises(SessionError, match="boom"):
+            history_mod.history_payload(path, "alice")
 
 
 # ── resume ──────────────────────────────────────────────────
@@ -202,9 +220,6 @@ class TestResumeSessionStudio:
     async def test_full_flow(self, monkeypatch, tmp_path):
         from kohakuterrarium.studio.sessions import lifecycle
 
-        lifecycle._meta.clear()
-        lifecycle._session_stores.clear()
-
         # Build a real saved store so resolve_session_kind sees real meta.
         path = tmp_path / "s.kohakutr"
         store = SessionStore(str(path))
@@ -227,13 +242,11 @@ class TestResumeSessionStudio:
         store2 = SessionStore(str(path))
         engine._session_stores = {"g1": store2}
 
-        session = await resume_mod.resume_session(MagicMock(), path)
+        svc = MagicMock()
+        session = await resume_mod.resume_session(svc, path)
         assert session.session_id == "g1"
-        assert "g1" in lifecycle._meta
+        assert "g1" in lifecycle.meta_for(svc)
         store2.close()
-
-        lifecycle._meta.clear()
-        lifecycle._session_stores.clear()
 
 
 class TestOpenStore:
@@ -271,7 +284,7 @@ class TestMutationFromPayload:
         assert fn({"x": 1}) is None
 
     def test_edit_user_message_wrong_type(self):
-        with pytest.raises(HTTPException):
+        with pytest.raises(InvalidRequestError):
             fork_mod.mutation_from_payload(
                 "edit_user_message",
                 {"content": "x"},
@@ -279,7 +292,7 @@ class TestMutationFromPayload:
             )
 
     def test_edit_user_message_missing_content(self):
-        with pytest.raises(HTTPException):
+        with pytest.raises(InvalidRequestError):
             fork_mod.mutation_from_payload(
                 "edit_user_message", {}, {"type": "user_message"}
             )
@@ -303,13 +316,13 @@ class TestMutationFromPayload:
         assert out["_appended_user_message"] == "x"
 
     def test_inject_user_message_missing_content(self):
-        with pytest.raises(HTTPException):
+        with pytest.raises(InvalidRequestError):
             fork_mod.mutation_from_payload(
                 "inject_user_message", {}, {"type": "user_message"}
             )
 
     def test_inject_tool_result_wrong_type(self):
-        with pytest.raises(HTTPException):
+        with pytest.raises(InvalidRequestError):
             fork_mod.mutation_from_payload(
                 "inject_tool_result",
                 {"tool_call_id": "x", "output": "y"},
@@ -317,7 +330,7 @@ class TestMutationFromPayload:
             )
 
     def test_inject_tool_result_missing_fields(self):
-        with pytest.raises(HTTPException):
+        with pytest.raises(InvalidRequestError):
             fork_mod.mutation_from_payload(
                 "inject_tool_result",
                 {},
@@ -334,7 +347,7 @@ class TestMutationFromPayload:
         assert out["_injected_tool_results"][0]["call_id"] == "tc"
 
     def test_unknown_kind(self):
-        with pytest.raises(HTTPException):
+        with pytest.raises(InvalidRequestError):
             fork_mod.mutation_from_payload("ghost_op", None, {"type": "user_message"})
 
 
@@ -363,7 +376,7 @@ class TestForkSessionHandler:
         store = SessionStore(str(path))
         store.init_meta("s1", "agent", "/p", "/w", ["alice"])
         store.close()
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(InvalidRequestError, match=">= 1"):
             await fork_mod.fork_session_handler(
                 path,
                 at_event_id=0,
@@ -371,14 +384,13 @@ class TestForkSessionHandler:
                 mutate_args=None,
                 name=None,
             )
-        assert exc.value.status_code == 400
 
     async def test_event_not_found(self, tmp_path):
         path = tmp_path / "s.kohakutr"
         store = SessionStore(str(path))
         store.init_meta("s1", "agent", "/p", "/w", ["alice"])
         store.close()
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(InvalidRequestError, match="No event with"):
             await fork_mod.fork_session_handler(
                 path,
                 at_event_id=999,
@@ -386,4 +398,17 @@ class TestForkSessionHandler:
                 mutate_args=None,
                 name=None,
             )
-        assert exc.value.status_code == 400
+
+    async def test_missing_source_raises_not_found_without_creating_it(self, tmp_path):
+        ghost = tmp_path / "ghost.kohakutr"
+        with pytest.raises(SessionNotFoundError):
+            await fork_mod.fork_session_handler(
+                ghost,
+                at_event_id=1,
+                mutate_kind=None,
+                mutate_args=None,
+                name=None,
+            )
+        # The audit defect: SessionStore(path) minted an empty file even
+        # when the source never existed.
+        assert not ghost.exists()

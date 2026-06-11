@@ -30,11 +30,13 @@ class TestNormalizePackageName:
 
 
 class TestPassthroughs:
-    def test_packages_dir_returns_configured_constant(self):
-        from kohakuterrarium.packages.locations import PACKAGES_DIR
+    def test_packages_dir_is_locations_indirection(self, monkeypatch, tmp_path):
+        from kohakuterrarium.packages import locations as loc_mod
 
-        # The helper is pure indirection over the locations constant.
-        assert pkg_mod.packages_dir() == PACKAGES_DIR
+        # The helper is pure indirection over ``locations.packages_dir()``
+        # — a patched locations hook must be visible through it.
+        monkeypatch.setattr(loc_mod, "PACKAGES_DIR", tmp_path / "pkgs")
+        assert pkg_mod.packages_dir() == tmp_path / "pkgs"
 
     def test_list_installed_packages_delegates(self, monkeypatch):
         sentinel = [{"name": "demo"}]
@@ -50,7 +52,7 @@ class TestInstallUninstall:
     def test_install_passes_through(self, monkeypatch):
         captured = []
 
-        def _install(src, *, editable, name_override):
+        def _install(src, *, editable, name_override, deps="auto"):
             captured.append((src, editable, name_override))
             return "demo"
 

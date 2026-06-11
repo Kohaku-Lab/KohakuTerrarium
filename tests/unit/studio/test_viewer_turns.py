@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi import HTTPException
+from kohakuterrarium.errors import NotFoundError
 
 from kohakuterrarium.studio.persistence.viewer import turns as turns_mod
 
@@ -82,15 +82,14 @@ class TestBuildTurnsPayload:
 
     def test_per_agent_no_agents_raises(self):
         store = _make_store({"agents": []})
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(NotFoundError):
             turns_mod.build_turns_payload(
                 store, "x", agent=None, from_turn=None, to_turn=None, limit=10, offset=0
             )
-        assert exc.value.status_code == 404
 
     def test_per_agent_unknown_agent_raises(self):
         store = _make_store({"agents": ["alice"]})
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(NotFoundError):
             turns_mod.build_turns_payload(
                 store,
                 "x",
@@ -100,7 +99,6 @@ class TestBuildTurnsPayload:
                 limit=10,
                 offset=0,
             )
-        assert exc.value.status_code == 404
 
     def test_attached_agent_namespace_accepted(self, monkeypatch):
         store = _make_store(

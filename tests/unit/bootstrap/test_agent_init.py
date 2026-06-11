@@ -55,14 +55,14 @@ class TestInitLLM:
         built = object()
         captured = {}
 
-        def fake_create(config, llm_override=None):
+        def fake_create(config, llm=None):
             captured["config"] = config
-            captured["override"] = llm_override
+            captured["override"] = llm
             return built
 
         monkeypatch.setattr(ai_mod, "create_llm_provider", fake_create)
         cfg = AgentConfig(name="a")
-        fake = SimpleNamespace(config=cfg, _llm_override="prof-x")
+        fake = SimpleNamespace(config=cfg, _llm_spec="prof-x")
         AgentInitMixin._init_llm(fake)
         # The created provider is stored as self.llm and the override flows through.
         assert fake.llm is built
@@ -170,7 +170,7 @@ class TestInitRegistry:
 
         calls = []
 
-        def fake_init_tools(cfg, reg, loader):
+        def fake_init_tools(cfg, reg, loader, strict=False):
             calls.append("init_tools")
             # Wire a provider-native tool the active provider can't serve.
             reg.register_tool(get_builtin_tool("image_gen"))

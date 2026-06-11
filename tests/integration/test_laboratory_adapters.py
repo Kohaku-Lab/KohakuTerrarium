@@ -72,7 +72,7 @@ def _reset_inproc():
 def scripted_llm(monkeypatch):
     """Patch LLM factory in case anything spawns a creature."""
 
-    def _create(config, llm_override=None):
+    def _create(config, llm=None):
         return ScriptedLLM(["ok"])
 
     monkeypatch.setattr(_bootstrap_llm_mod, "create_llm_provider", _create)

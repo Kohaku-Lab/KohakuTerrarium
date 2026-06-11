@@ -243,6 +243,18 @@ class TestLifecycle:
         with pytest.raises(ValueError, match="mismatches"):
             await svc.add_creature(cfg, on_node="other-worker")
 
+    async def test_add_creature_rejects_llm_instance(self):
+        # Provider instances can't cross node boundaries — only a
+        # selector string travels on the wire (E5).
+        from pathlib import Path
+
+        from kohakuterrarium.testing.llm import ScriptedLLM
+
+        svc = _make_service()
+        cfg = AgentConfig(name="alice", agent_path=Path("."))
+        with pytest.raises(TypeError, match="selector string"):
+            await svc.add_creature(cfg, llm=ScriptedLLM(["x"]))
+
     async def test_remove_creature_returns_none(self):
         svc = _make_service({"remove_creature": {}})
         assert await svc.remove_creature("cid") is None
@@ -569,6 +581,6 @@ class TestStreamingHelpers:
         import inspect
 
         svc = _make_service()
-        gen = svc.subscribe(EventFilter(kinds={EventKind.TEXT}))
+        gen = svc.subscribe(EventFilter(kinds={EventKind.CHANNEL_MESSAGE}))
         assert hasattr(gen, "__aiter__")
         assert not inspect.iscoroutine(gen)
