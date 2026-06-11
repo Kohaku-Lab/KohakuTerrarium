@@ -11,7 +11,8 @@ the public API from `builtins.tool_catalog`.
 | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `__init__.py`                           | Imports all tools (triggers registration), re-exports catalog API                                                 |
 | `registry.py`                           | Backward-compatible re-exports from `builtins.tool_catalog`                                                       |
-| `bash.py`                               | `bash` (shell commands) and `python` (subprocess python)                                                          |
+| `bash.py`                               | `bash`: shell commands (+ `bash_windows.py`, `subprocess/shell_utils.py`)                                          |
+| `python.py`                             | `python`: subprocess python execution                                                                              |
 | `read.py`                               | `read`: read file contents with optional line range                                                               |
 | `write.py`                              | `write`: create or overwrite files                                                                                |
 | `edit.py`                               | `edit`: single-diff edit with guard rails; exports `check_edit_guards` / `build_result_diff` used by `multi_edit` |
@@ -30,9 +31,13 @@ the public API from `builtins.tool_catalog`.
 | `search_memory.py`                      | `search_memory`: FTS5 + semantic search over the current session's event log                                      |
 | `web_fetch.py`                          | `web_fetch`: clean-read a URL (crawl4ai → trafilatura → jina → naive fallback)                                    |
 | `web_search.py`                         | `web_search`: DuckDuckGo search (optional `duckduckgo-search` dep)                                                |
-| `terrarium_lifecycle.py`                | `terrarium_create` / `terrarium_status` / `terrarium_stop`                                                        |
-| `terrarium_messaging.py`                | `terrarium_send` / `terrarium_observe` / `terrarium_history`                                                      |
-| `terrarium_creature.py`                 | `creature_start` / `creature_stop` / `creature_interrupt`                                                         |
+| `skill.py`                              | `skill`: load a named skill's full documentation                                                                  |
+| `image_gen.py`                          | `image_gen`: provider-backed image generation                                                                     |
+| `canvas_preview.py` / `show_card.py`    | UI surfaces: canvas preview + structured cards                                                                    |
+| `delete_trigger.py`                     | Remove an installed setup-able trigger                                                                            |
+
+Graph management tools (`send_channel`, `group_send`, and the privileged
+`group_*` surface) are NOT here; they live in `terrarium/tools_group*.py`.
 
 ## Dependency direction
 
@@ -42,8 +47,6 @@ names a builtin tool. Imports:
 - `kohakuterrarium.builtins.tool_catalog` (`register_builtin`)
 - `kohakuterrarium.modules.tool.base` (`BaseTool`, `ToolResult`, `ToolContext`, `ExecutionMode`)
 - `kohakuterrarium.core.channel` / `core.session` (channel + scratchpad tools)
-- `kohakuterrarium.terrarium.*` (terrarium*\* and creature*\* tools — lazy-loaded
-  via `terrarium/tool_registration.py` to avoid circular imports)
 - `kohakuterrarium.session.memory` / `session.store` (`search_memory`)
 - `kohakuterrarium.utils.logging`
 
@@ -57,14 +60,11 @@ No tool imports another tool's implementation except `multi_edit` and
 
 ## Notes
 
-- Terrarium tools register lazily via
-  `terrarium/tool_registration.ensure_terrarium_tools_registered()` to break
-  the `core ← builtins ← terrarium ← core` cycle.
 - Web tools degrade gracefully when optional deps (crawl4ai, trafilatura,
-  duckduckgo-search) aren't installed — they log a warning and return a
+  duckduckgo-search) aren't installed; they log a warning and return a
   useful `ToolResult.error`.
 - Setup-able triggers (`add_timer`, `watch_channel`, `add_schedule`) are
-  not defined here — they come from
+  not defined here; they come from
   `modules/trigger/callable.py:CallableTriggerTool` wrapping each
   `universal = True` trigger class. A creature opts in per-entry with
   `- { name: add_timer, type: trigger }` in its `tools:` list. Installed
@@ -73,7 +73,7 @@ No tool imports another tool's implementation except `multi_edit` and
 
 ## See also
 
-- `../README.md` — full builtin catalog (tools + subagents + io + TUI)
-- `../../modules/tool/` — `BaseTool` protocol + execution modes
-- `../../builtin_skills/` — full-doc markdown loaded via the `info` tool
-- `../../terrarium/README.md` — terrarium management tool context
+- `../README.md`: full builtin catalog (tools + subagents + io + TUI)
+- `../../modules/tool/`: `BaseTool` protocol + execution modes
+- `../../builtin_skills/`: full-doc markdown loaded via the `info` tool
+- `../../terrarium/README.md`: terrarium management tool context

@@ -1,54 +1,44 @@
 # api/routes/
 
-REST endpoint handlers. One file per resource. Each module exports a
-`router: APIRouter` that `api/app.py` mounts under the appropriate prefix.
+REST endpoint handlers, grouped by Studio namespace. Each module (or
+subpackage) exports a `router: APIRouter` that `api/app.py` mounts under the
+appropriate prefix.
 
 ## Files
 
-| File            | Prefix                            | Responsibility                                                                                          |
-| --------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `__init__.py`   | —                                 | Package marker                                                                                          |
-| `terrariums.py` | `/api/terrariums`                 | Terrarium CRUD + lifecycle + chat; scratchpad patch for individual creatures                            |
-| `creatures.py`  | `/api/terrariums/{tid}/creatures` | List / add / remove / wire creatures; model switch                                                      |
-| `channels.py`   | `/api/terrariums/{tid}/channels`  | List channels, send a message to a channel                                                              |
-| `agents.py`     | `/api/agents`                     | Standalone agent lifecycle + chat + slash commands + env redaction helper (`_redacted_env`)             |
-| `configs.py`    | `/api/configs`                    | Config discovery (scan creature + terrarium directories, list LLM profiles, list builtin user commands) |
-| `files.py`      | `/api/files`                      | File tree browse / read / write / rename / delete / mkdir for the editor panel                          |
-| `registry.py`   | `/api/registry`                   | Browse bundled `registry.json`, install / uninstall packages via git                                    |
-| `sessions.py`   | `/api/sessions`                   | List saved `.kohakutr` sessions, resume, search memory                                                  |
-| `settings.py`   | `/api/settings`                   | LLM profiles + backends, API key storage, Codex OAuth, MCP server config                                |
+| File / dir         | Responsibility                                                                          |
+| ------------------ | ---------------------------------------------------------------------------------------- |
+| `__init__.py`      | Package marker                                                                          |
+| `catalog/`         | Package / registry / marketplace / config discovery, module + creature CRUD, workspace, templates, validation, server info |
+| `identity/`        | LLM backends + profiles, API keys, Codex OAuth, MCP server registry, UI prefs, config files |
+| `sessions_v2/`     | Engine-backed active sessions: per-creature chat / control / model / plugins / state, topology, wiring, memory search |
+| `persistence/`     | Saved `.kohakutr` sessions: list / delete, resume into the engine, fork, history, viewer, artifacts, memory index |
+| `attach/`          | Workspace files + attach policy hints                                                   |
+| `app_update.py`    | App-update API for the Vue `Admin → Updates` tab                                        |
+| `health.py`        | Liveness + readiness endpoints                                                          |
+| `metrics.py`       | Process-wide metrics REST snapshot                                                      |
+| `runtime_graph.py` | Runtime graph snapshot for the graph editor                                             |
+| `nodes.py`, `lab_clients.py`, `lab_status.py` | Lab cluster: node discovery, per-client management, status snapshot |
 
 ## Dependency direction
 
-Imported by `api/app.py` only. Imports: `fastapi`, `pydantic`; `serving/`
-(via `api/deps.get_manager`), `session/` (resume, store, memory, embedding),
-`llm/` (profiles + codex_auth), `packages.py`, `core/config`,
-`terrarium/config`, `builtins/user_commands` (just for discovery).
-
-## Key entry points
-
-Each file's `router` symbol is the entry point. Shared helpers:
-
-- `agents._redacted_env()` — scrub secrets from an env dump; reused by `terrariums.py`
-- `configs.set_config_dirs(creatures, terrariums)` — wired once at startup by `create_app`
-- `settings._load_mcp_config` / `_save_mcp_config` — reused by `cli/config_mcp.py`
+Imported by `api/app.py` only. Imports: `fastapi`, `pydantic`; `studio/`
+namespaces and the `Terrarium` engine (via `api/deps.get_engine`),
+`session/` (resume, store, memory, embedding), `llm/` (profiles +
+codex_auth), `packages/`, `core/config`, `terrarium/config`.
 
 ## Notes
 
 - Every handler runs inside the FastAPI event loop; long-running work
-  (agent turns, terrarium lifecycle) is delegated to `KohakuManager`
-  which owns its own task group.
-- `configs.py` scans directories lazily the first time each endpoint is
-  hit; callers trigger a rescan by re-calling `set_config_dirs`.
-- `files.py` resolves paths against each agent's working directory and
-  refuses requests that escape the root — enforced with
-  `Path.resolve().is_relative_to(root)`.
-- `settings.py` writes to `~/.kohakuterrarium/` files (`profiles.yaml`,
-  `api_keys.json`, `mcp.json`, `codex_tokens.json`) using the same helpers
-  `cli/config.py` uses, so CLI and web UI stay in sync.
+  (agent turns, terrarium lifecycle) is delegated to the Studio
+  namespaces and the engine; there is no separate service manager.
+- `files`-style routes resolve paths against each agent's working
+  directory and refuse requests that escape the root.
+- Identity routes write to `~/.kohakuterrarium/` files using the same
+  helpers `cli/config.py` uses, so CLI and web UI stay in sync.
 
 ## See also
 
-- `../README.md` — api layer overview
-- `../ws/README.md` — WebSocket counterparts (streaming chat, logs, file watcher)
-- `../../serving/manager.py` — where the actual work happens
+- `../README.md`: api layer overview
+- `../ws/README.md`: WebSocket counterparts (streaming chat, logs, file watcher)
+- `../../studio/`: the management facade the routes delegate to

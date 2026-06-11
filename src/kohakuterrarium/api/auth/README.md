@@ -1,4 +1,4 @@
-# `api.auth` — authentication / authorization at the API server layer
+# `api.auth`: authentication / authorization at the API server layer
 
 Four optional, independent gates that stack at the API server boundary:
 
@@ -16,7 +16,7 @@ leak into Studio, the engine, the terrarium runtime, the session
 store, or any module below `src/kohakuterrarium/api/`.**
 
 A request that reaches a handler may carry `request.state.user` (an
-authenticated User dataclass) — but the handler hands that user's
+authenticated User dataclass), but the handler hands that user's
 identity off to `engine_pool.get_or_create(user.id)` and then operates
 on the returned `Terrarium` exactly as the standalone code path
 operates on its single global engine.  The engine itself never sees
@@ -43,6 +43,6 @@ importer must be added to the allowlist with a written reason.
 
 See `plans/1.5.0-roadmap/03-frontend-backend-connection/`:
 
-- `README.md` — index + phases at a glance
-- `design.md` — canonical design (capabilities, schema, engine pool, deployment shapes)
-- `implementation-plan.md` — phase-by-phase work breakdown
+- `README.md`: index + phases at a glance
+- `design.md`: canonical design (capabilities, schema, engine pool, deployment shapes)
+- `implementation-plan.md`: phase-by-phase work breakdown
