@@ -108,6 +108,14 @@ async def search_session_memory(
     behavior. Modes: ``auto`` (default), ``fts``, ``semantic``,
     ``hybrid``.
 
+    This adapter keeps the legacy HTTP contract: ``SessionMemory.search``
+    is strict (an explicit ``semantic`` request without an embedder, or
+    an unknown mode, raises ``ValueError`` — E4), but the web frontend
+    offers ``semantic`` in its mode picker regardless of whether an
+    index / embedding model exists, and the old endpoint answered that
+    with FTS-fallback results.  Degrade here (log + fall back to FTS)
+    instead of bubbling the ValueError into a 500.
+
     Raises :class:`SessionNotFoundError` when ``path`` does not exist
     (BEFORE opening anything — ``SessionStore(path)`` would otherwise
     mint an empty ``.kohakutr`` as a side effect of the lookup) and
@@ -150,7 +158,17 @@ async def search_session_memory(
             if events:
                 memory.index_events(agent_name, events)
 
-        results = memory.search(query=q, mode=mode, k=k, agent=agent)
+        # Legacy graceful fallback (see docstring): the library search
+        # is strict; the HTTP surface keeps the old 200-with-FTS answer.
+        effective_mode = mode
+        if effective_mode not in ("auto", "fts", "semantic", "hybrid"):
+            logger.warning("Unknown search mode, falling back to FTS", requested=mode)
+            effective_mode = "fts"
+        elif effective_mode == "semantic" and not memory.has_vectors:
+            logger.warning("No embedding model, falling back to FTS")
+            effective_mode = "fts"
+
+        results = memory.search(query=q, mode=effective_mode, k=k, agent=agent)
 
         # Release the SessionMemory's own SQLite handles — without this
         # they linger until GC and (on Windows) block a later delete of

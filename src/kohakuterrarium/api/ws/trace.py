@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, WebSocket
 
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.studio.attach.trace import run_trace_attach
-from kohakuterrarium.studio.sessions.lifecycle import list_session_stores
+from kohakuterrarium.studio.sessions.registry import stores_for
 from kohakuterrarium.terrarium.service import TerrariumService
 
 router = APIRouter()
@@ -28,6 +28,4 @@ async def session_events_stream(
     store registry is instance-scoped, so this shell resolves it from
     the request's service and hands the iterable to the attach helper.
     """
-    await run_trace_attach(
-        websocket, session_name, agent, stores=list_session_stores(service)
-    )
+    await run_trace_attach(websocket, session_name, agent, stores=stores_for(service))

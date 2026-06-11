@@ -156,7 +156,15 @@ async def _resume_terrarium_into_engine(
     # begins with an empty conversation; we inject the saved state
     # below.  Since input hasn't started flowing yet, injection lands
     # before any new turn begins.
-    graph = await engine.apply_recipe(config, pwd=pwd, llm=llm)
+    #
+    # ``session=False``: the SAVED store attaches below.  Under
+    # autosession (``Terrarium(session_dir=...)`` — every API-server
+    # engine) ``apply_recipe`` would otherwise mint a fresh
+    # ``<new_gid>.kohakutr`` that the saved-store attach immediately
+    # orphans: an empty ghost file stuck at ``status="running"`` in
+    # the saved-session list, plus a leaked open handle.  Mirrors the
+    # ``session=False`` in ``_resume_agent_into_engine``.
+    graph = await engine.apply_recipe(config, pwd=pwd, llm=llm, session=False)
     sid = graph.graph_id
 
     # Per-creature state injection.

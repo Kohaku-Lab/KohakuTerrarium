@@ -57,6 +57,12 @@ def attach_session_store_for_creature(
                 )
             except Exception:
                 logger.warning("meta agent-list update skipped", exc_info=True)
+            # The reused store may have been minted by the ENGINE
+            # (autosession) — which knows nothing about the studio's
+            # saved-sessions index sidecar.  Without this hook the
+            # session never appears in the saved list until a manual
+            # ``?refresh=true`` reconcile.  Idempotent on ``sid``.
+            _index_hooks.attach(sid, existing, session_dir())
             _retro_install_channel_persistence(engine, sid)
             return
 

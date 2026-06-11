@@ -47,8 +47,10 @@ from kohakuterrarium.api.routes.catalog import _deps as _catalog_deps
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.core import agent_model as _agent_model
+from kohakuterrarium.session.embedding import NullEmbedder
 from kohakuterrarium.studio.catalog import packages as _catalog_packages_ops
 from kohakuterrarium.studio.sessions import lifecycle
+from kohakuterrarium.studio.sessions import memory_search as _memory_search
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM
 
@@ -224,6 +226,8 @@ class TestApiIntegration:
         creature_dir: Path,
         workspace_dir: Path,
         scripted_llm: ScriptedLLM,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         """Create → list → WS chat → settings round-trip → catalog /
         identity / metrics / attach surfaces → per-creature control →
@@ -288,6 +292,58 @@ class TestApiIntegration:
         # Every entry is a well-formed package record (vacuously true
         # for an empty catalog — the installed set is environment state).
         assert all(isinstance(p, dict) and "name" in p for p in resp.json())
+
+        # ── Registry round-trip with a docs-shorthand package ─────────
+        # ``registryAPI.install`` → ``listLocal`` → ``configAPI
+        # .listCreatures`` → ``listFiles`` → ``uninstall``.  The package
+        # manifest declares its creature as ``- name: shorty`` (the
+        # shorthand from docs/en/guides/packages.md) — the registry list
+        # used to 500 on it (``entry["path"]`` KeyError/TypeError) and
+        # the configs scan silently hid it.  PACKAGES_DIR is pinned to
+        # tmp so the step never touches the developer's real installs.
+        from kohakuterrarium.packages import locations as _pkg_locations
+        from kohakuterrarium.studio.catalog import packages_scan as _packages_scan
+
+        monkeypatch.setattr(_pkg_locations, "PACKAGES_DIR", tmp_path / "pkgs")
+        _packages_scan.invalidate_scan_caches()
+        pkg_src = tmp_path / "shorthand-pkg"
+        (pkg_src / "creatures" / "shorty").mkdir(parents=True)
+        (pkg_src / "kohaku.yaml").write_text(
+            "name: shorthand-pkg\nversion: 1.0.0\n" "creatures:\n  - name: shorty\n",
+            encoding="utf-8",
+        )
+        (pkg_src / "creatures" / "shorty" / "config.yaml").write_text(
+            "name: shorty\ndescription: shorthand creature\n" "system_prompt: probe\n",
+            encoding="utf-8",
+        )
+        resp = client.post(
+            "/api/registry/install", json={"url": str(pkg_src), "name": None}
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "installed", "name": "shorthand-pkg"}
+
+        resp = client.get("/api/registry")
+        assert resp.status_code == 200
+        registry_rows = {e["name"]: e for e in resp.json()}
+        assert registry_rows["shorty"]["type"] == "creature"
+        assert registry_rows["shorty"]["source"] == "shorthand-pkg"
+
+        resp = client.get("/api/configs/creatures")
+        assert resp.status_code == 200
+        shorty_rows = [e for e in resp.json() if e["name"] == "shorty"]
+        assert shorty_rows and shorty_rows[0]["path"].startswith("@shorthand-pkg/")
+
+        resp = client.get("/api/registry/shorthand-pkg/files")
+        assert resp.status_code == 200
+        file_paths = {f["path"] for f in resp.json()}
+        assert "kohaku.yaml" in file_paths
+
+        resp = client.post("/api/registry/uninstall", json={"name": "shorthand-pkg"})
+        assert resp.status_code == 200
+        resp = client.get("/api/registry")
+        assert resp.status_code == 200
+        assert all(e["source"] != "shorthand-pkg" for e in resp.json())
+        _packages_scan.invalidate_scan_caches()
 
         # Catalog without an open workspace → catalog/creatures requires
         # one and 409s; the workspace-optional listers still answer.
@@ -1117,11 +1173,18 @@ class TestApiIntegration:
         assert resp.status_code == 404
 
     def test_session_persistence_and_resume_workflow(
-        self, client: TestClient, creature_dir: Path, scripted_llm: ScriptedLLM
+        self,
+        client: TestClient,
+        creature_dir: Path,
+        scripted_llm: ScriptedLLM,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         """Run a turn → saved-session list → persistence viewer (tree /
         summary / turns / events / export / history / memory search /
-        fork) → stop → resume → delete.
+        fork) → stop → resume → delete — then the same persistence loop
+        for a RECIPE terrarium session (spawn → turn → stop → saved
+        meta → on-disk delete → resume without ghost stores).
 
         Mirrors the ``sessionAPI`` saved-session surface plus the
         Session Viewer's read-only endpoints: ``list`` / ``getHistory``
@@ -1346,6 +1409,32 @@ class TestApiIntegration:
         assert resp.status_code == 200
         search_payload = resp.json()
         assert search_payload["count"] == len(search_payload["results"]) >= 1
+        # Explicit ``semantic`` with NO embedding model keeps the legacy
+        # graceful contract: 200 with FTS-fallback hits, never a 500.
+        # The frontend's Find tab / StatePanel offer "semantic" before
+        # any index exists (regression caught by the old-vs-new probe:
+        # the strict post-E4 ``SessionMemory.search`` raised ValueError
+        # and the route surfaced it as a 500).  ``create_embedder`` is
+        # pinned to the NullEmbedder so the assertion doesn't depend on
+        # whether this machine can build a real model.
+        monkeypatch.setattr(
+            _memory_search, "create_embedder", lambda cfg: NullEmbedder()
+        )
+        resp = client.get(
+            f"/api/sessions/{saved_name}/memory/search",
+            params={"q": "persist", "mode": "semantic"},
+        )
+        assert resp.status_code == 200
+        semantic_payload = resp.json()
+        assert semantic_payload["mode"] == "semantic"
+        assert semantic_payload["count"] == len(semantic_payload["results"]) >= 1
+        # Unknown mode: same legacy contract — FTS answer, not an error.
+        resp = client.get(
+            f"/api/sessions/{saved_name}/memory/search",
+            params={"q": "persist", "mode": "bogus-mode"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["count"] >= 1
         resp = client.get(
             "/api/sessions/no-such-session/memory/search", params={"q": "x"}
         )
@@ -1407,6 +1496,122 @@ class TestApiIntegration:
         resp = client.get("/api/sessions", params={"refresh": "true"})
         assert resp.status_code == 200
         assert resp.json()["total"] == 1
+
+        # ── Recipe-terrarium persistence loop ─────────────────────────
+        # The same save → stop → delete → resume arc for a session
+        # spawned from a terrarium RECIPE (frontend: terrariumAPI.create
+        # with name=).  The engine runs with autosession
+        # (``Terrarium(session_dir=...)``), which makes this segment pin
+        # two regressions the redesign introduced:
+        #   * the Studio store and an engine-autosession store opening
+        #     TWO live handles on the same ``<gid>.kohakutr`` — the
+        #     leaked handle locked the file on Windows, so the saved
+        #     delete after stop 409'd with WinError 32;
+        #   * terrarium resume letting ``apply_recipe`` mint a fresh
+        #     ``<new_gid>.kohakutr`` ghost (empty, status=running) that
+        #     the saved-store attach immediately orphaned.
+        recipe_dir = tmp_path / "persist-team"
+        recipe_dir.mkdir()
+        (recipe_dir / "terrarium.yaml").write_text(
+            """\
+terrarium:
+  name: persist-team
+  channels:
+    link: {description: shared link}
+  creatures:
+    - name: rex
+      system_prompt: "You are rex."
+      tool_format: bracket
+      input: {type: none}
+      output: {type: stdout}
+      channels: {listen: [link], can_send: [link]}
+    - name: sam
+      system_prompt: "You are sam."
+      tool_format: bracket
+      input: {type: none}
+      output: {type: stdout}
+      channels: {listen: [link]}
+""",
+            encoding="utf-8",
+        )
+        session_dir = tmp_path / "sessions"
+
+        resp = client.post(
+            "/api/sessions/active/terrariums",
+            json={"config_path": str(recipe_dir), "name": "Persist Team"},
+        )
+        assert resp.status_code == 200
+        terra_id = resp.json()["terrarium_id"]
+
+        # A turn on one creature so the store carries real events.
+        resp = client.post(
+            f"/api/sessions/{terra_id}/creatures/rex/chat",
+            json={"message": "remember this terrarium turn"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["response"]
+
+        # Exactly ONE graph-named store file backs the terrarium
+        # session (graph stores are ``graph_*.kohakutr``; any leftover
+        # files from the solo segment above use the creature naming
+        # scheme and are not counted here).
+        assert [f.name for f in session_dir.glob("graph_*.kohakutr")] == [
+            f"{terra_id}.kohakutr"
+        ]
+
+        # Stop, then verify the saved listing carries the terrarium
+        # session with resumable meta.
+        resp = client.delete(f"/api/sessions/active/{terra_id}")
+        assert resp.status_code == 200
+        resp = client.get("/api/sessions", params={"refresh": "true"})
+        assert resp.status_code == 200
+        saved_by_name = {s["name"]: s for s in resp.json()["sessions"]}
+        assert terra_id in saved_by_name
+        assert saved_by_name[terra_id]["config_type"] == "terrarium"
+        assert {"rex", "sam"} <= set(saved_by_name[terra_id]["agents"])
+        # Saved events are readable per creature DISPLAY name.
+        resp = client.get(f"/api/sessions/{terra_id}/events", params={"agent": "rex"})
+        assert resp.status_code == 200
+        assert resp.json()["count"] >= 1
+        assert "remember this terrarium turn" in str(resp.json()["events"])
+
+        # The saved file is deletable right after stop — a leaked
+        # second store handle makes this 409 on Windows (WinError 32).
+        resp = client.delete(f"/api/sessions/{terra_id}")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "deleted"
+        assert not (session_dir / f"{terra_id}.kohakutr").exists()
+
+        # Spawn → stop → resume: the resumed graph must reuse the SAVED
+        # store — no ghost ``<new_gid>.kohakutr`` may appear.
+        resp = client.post(
+            "/api/sessions/active/terrariums",
+            json={"config_path": str(recipe_dir), "name": "Persist Team B"},
+        )
+        assert resp.status_code == 200
+        terra_b = resp.json()["terrarium_id"]
+        resp = client.delete(f"/api/sessions/active/{terra_b}")
+        assert resp.status_code == 200
+        files_before = sorted(f.name for f in session_dir.glob("*.kohakutr"))
+
+        resp = client.post(f"/api/sessions/{terra_b}/resume")
+        assert resp.status_code == 200
+        resumed_terra = resp.json()
+        assert resumed_terra["type"] == "terrarium"
+        live_id = resumed_terra["instance_id"]
+        # Live again, with both recipe creatures...
+        resp = client.get(f"/api/sessions/active/{live_id}")
+        assert resp.status_code == 200
+        assert {c["name"] for c in resp.json()["creatures"]} == {"rex", "sam"}
+        # ...and the session dir is unchanged: no orphaned autosession
+        # store was minted during the resume rebuild.
+        assert sorted(f.name for f in session_dir.glob("*.kohakutr")) == files_before
+
+        # Tear down: stop the resumed instance, delete the saved file.
+        resp = client.delete(f"/api/sessions/active/{live_id}")
+        assert resp.status_code == 200
+        resp = client.delete(f"/api/sessions/{terra_b}")
+        assert resp.status_code == 200
 
     def test_terrarium_hotplug_and_runtime_graph_workflow(
         self, client: TestClient, creature_dir: Path, scripted_llm: ScriptedLLM

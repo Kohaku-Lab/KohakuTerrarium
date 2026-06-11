@@ -44,18 +44,23 @@ class TestTraceWs:
         sentinel_store = object()
 
         async def fake_run(ws, name, agent, stores=None):
-            called.append((name, agent, list(stores or ())))
+            called.append((name, agent, stores))
 
         monkeypatch.setattr(trace_mod, "run_trace_attach", fake_run)
         svc = SimpleNamespace()
         # The shell must hand the SERVICE's instance-scoped store
-        # registry to the attach helper.
+        # registry MAPPING to the attach helper -- the live-session URL
+        # carries the graph id, which only the mapping KEY can resolve
+        # (P0 regression: an iterable of stores lost the key and every
+        # live session read as "not_live").
         monkeypatch.setattr(
-            trace_mod, "list_session_stores", lambda service: [sentinel_store]
+            trace_mod,
+            "stores_for",
+            lambda service: {"graph-1": sentinel_store},
         )
         ws = _FakeWebSocket()
         await trace_mod.session_events_stream(ws, "sess-1", agent="alice", service=svc)
-        assert called == [("sess-1", "alice", [sentinel_store])]
+        assert called == [("sess-1", "alice", {"graph-1": sentinel_store})]
 
 
 # ── observer WS ───────────────────────────────────────────────

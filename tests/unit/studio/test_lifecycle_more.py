@@ -46,6 +46,14 @@ class TestStartCreaturePackageRef:
 
         async def _fake_add(cfg, *args, **kw):
             captured["cfg"] = cfg
+            captured["name"] = kw.get("name")
+            # Mirror the real engine: ``name=`` is applied INSIDE
+            # add_creature (before autosession attaches the event
+            # recorder) -- the P0 fix moved the rename here from a
+            # post-hoc studio call.
+            if kw.get("name"):
+                fake_creature.name = kw["name"]
+                agent.config.name = kw["name"]
             return fake_creature
 
         engine.add_creature = _fake_add
@@ -202,7 +210,7 @@ class TestStartTerrariumPackageRef:
         )
         monkeypatch.setattr(lifecycle, "_session_dir", lambda: str(tmp_path))
 
-        async def _apply(c, pwd=None, llm=None, strict=True):
+        async def _apply(c, pwd=None, llm=None, strict=True, session=None):
             return SimpleNamespace(graph_id="g-new", creature_ids=set())
 
         engine.apply_recipe = _apply

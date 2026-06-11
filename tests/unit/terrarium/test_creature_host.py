@@ -429,3 +429,62 @@ class TestReapInputTask:
         await c._reap_input_task()
         # Reaped.
         assert c._input_task is None
+
+
+class TestApplyCreatureName:
+    """P0 regression pins — the display-name rename must follow onto
+    every name-keyed recorder, INCLUDING a SessionOutput attached
+    before the rename (the engine's autosession attaches during
+    add_creature; events recorded under the stale config name are
+    invisible to history reads, which use the display name)."""
+
+    def _creature(self, agent_name="alice"):
+        from types import SimpleNamespace
+
+        session_output = SimpleNamespace(
+            _agent_name=agent_name, _event_key_prefix=agent_name
+        )
+        agent = SimpleNamespace(
+            config=SimpleNamespace(name=agent_name),
+            executor=SimpleNamespace(_agent_name=agent_name),
+            trigger_manager=SimpleNamespace(_agent_name=agent_name),
+            compact_manager=SimpleNamespace(_agent_name=agent_name),
+            _session_output=session_output,
+        )
+        creature = SimpleNamespace(
+            name=agent_name,
+            agent=agent,
+            config=SimpleNamespace(name=agent_name),
+        )
+        return creature, session_output
+
+    def test_rename_retargets_session_output(self):
+        from kohakuterrarium.terrarium.creature_host import apply_creature_name
+
+        creature, out = self._creature()
+        apply_creature_name(creature, "warm-ember")
+        assert creature.name == "warm-ember"
+        assert creature.agent.config.name == "warm-ember"
+        # The live event recorder follows — future events key under the
+        # display name the history endpoint resolves.
+        assert out._agent_name == "warm-ember"
+        assert out._event_key_prefix == "warm-ember"
+
+    def test_rename_keeps_custom_attached_prefix(self):
+        from kohakuterrarium.terrarium.creature_host import apply_creature_name
+
+        creature, out = self._creature()
+        # Wave F attached agents record under a host-scoped namespace —
+        # a rename must not clobber it.
+        out._event_key_prefix = "host:attached:reviewer:1"
+        apply_creature_name(creature, "warm-ember")
+        assert out._agent_name == "warm-ember"
+        assert out._event_key_prefix == "host:attached:reviewer:1"
+
+    def test_rename_without_session_output(self):
+        from kohakuterrarium.terrarium.creature_host import apply_creature_name
+
+        creature, _ = self._creature()
+        creature.agent._session_output = None
+        apply_creature_name(creature, "warm-ember")
+        assert creature.agent.config.name == "warm-ember"

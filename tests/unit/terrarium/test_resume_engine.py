@@ -214,3 +214,48 @@ class TestResumeIntoEngine:
             assert c.name == "bob"
         finally:
             await t.shutdown()
+
+    async def test_terrarium_resume_no_autosession_ghost(self, monkeypatch, tmp_path):
+        # REGRESSION PIN: resuming a terrarium into an engine that has
+        # autosession configured (``Terrarium(session_dir=...)`` — every
+        # API-server engine) must NOT let ``apply_recipe`` mint a fresh
+        # ``<new_gid>.kohakutr``.  The saved store attaches right after,
+        # so the minted file would be an instantly-orphaned ghost stuck
+        # at ``status="running"`` in the saved-session list, plus a
+        # leaked open SQLite handle.
+        monkeypatch.setattr(resume_mod, "detect_session_type", lambda p: "terrarium")
+        fake_store = SimpleNamespace(
+            load_meta=lambda: {
+                "config_path": "/tmp/recipe.yaml",
+                "pwd": ".",
+                "agents": [],
+            },
+            update_status=lambda s: None,
+        )
+        monkeypatch.setattr(
+            resume_mod, "_open_store_with_migration", lambda p: fake_store
+        )
+
+        from kohakuterrarium.terrarium.config import TerrariumConfig
+        from kohakuterrarium.terrarium.engine import Terrarium
+
+        fake_config = TerrariumConfig(name="t", creatures=[], channels=[])
+        monkeypatch.setattr(resume_mod, "load_terrarium_config", lambda p: fake_config)
+        monkeypatch.setattr(resume_mod, "inject_saved_state", lambda *a, **kw: None)
+
+        session_dir = tmp_path / "sessions"
+        session_dir.mkdir()
+        t = Terrarium(session_dir=str(session_dir))
+        try:
+            # Real ``apply_recipe`` (empty recipe) + real autosession
+            # machinery — only ``attach_session`` is stubbed so the
+            # SimpleNamespace store does not have to behave like a
+            # SessionStore.
+            t.attach_session = AsyncMock()
+            await resume_mod.resume_into_engine(t, tmp_path / "saved.kohakutr")
+            # No ghost store file was minted next to the saved session,
+            # and the engine claims ownership of nothing.
+            assert list(session_dir.glob("*.kohakutr")) == []
+            assert t._owned_sessions == set()
+        finally:
+            await t.shutdown()

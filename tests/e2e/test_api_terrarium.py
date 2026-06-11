@@ -256,6 +256,7 @@ class TestApiTerrariumJourney:
         recipe_two_dir: Path,
         creature_dir: Path,
         scripted_llm: ScriptedLLM,
+        tmp_path: Path,
     ) -> None:
         # 1. POST create a terrarium session from the recipe
         #    (frontend: terrariumAPI.create).
@@ -685,3 +686,47 @@ class TestApiTerrariumJourney:
         assert resp.status_code == 200
         assert resp.json() == {"status": "stopped"}
         assert client.get("/api/sessions/active").json() == []
+
+        # 10. Saved-session lifecycle for a recipe terrarium — the flow
+        #     a user runs daily: spawn → stop → it shows in the saved
+        #     list as a terrarium → resume it (NO ghost store file may
+        #     appear: the engine's autosession must stay out of the
+        #     studio/resume-managed paths) → stop → DELETE the saved
+        #     file (a leaked second store handle 409s here on Windows).
+        session_dir = Path(tmp_path) / "sessions"
+        resp = client.post(
+            "/api/sessions/active/terrariums",
+            json={"config_path": str(recipe_dir), "name": "journey replay"},
+        )
+        assert resp.status_code == 200
+        replay_id = resp.json()["terrarium_id"]
+        # One graph store file appeared for the new session.
+        assert (session_dir / f"{replay_id}.kohakutr").exists()
+        resp = client.delete(f"/api/sessions/active/{replay_id}")
+        assert resp.status_code == 200
+
+        resp = client.get("/api/sessions", params={"refresh": "true"})
+        assert resp.status_code == 200
+        saved_by_name = {s["name"]: s for s in resp.json()["sessions"]}
+        assert replay_id in saved_by_name
+        assert saved_by_name[replay_id]["config_type"] == "terrarium"
+
+        files_before = sorted(f.name for f in session_dir.glob("*.kohakutr"))
+        resp = client.post(f"/api/sessions/{replay_id}/resume")
+        assert resp.status_code == 200
+        assert resp.json()["type"] == "terrarium"
+        live_id = resp.json()["instance_id"]
+        resp = client.get(f"/api/sessions/active/{live_id}")
+        assert resp.status_code == 200
+        assert {c["name"] for c in resp.json()["creatures"]} == {"alice", "bob"}
+        # The resume reused the SAVED store — the session dir carries
+        # exactly the same file set as before the resume.
+        assert sorted(f.name for f in session_dir.glob("*.kohakutr")) == files_before
+
+        resp = client.delete(f"/api/sessions/active/{live_id}")
+        assert resp.status_code == 200
+        # The saved file is deletable right after stop.
+        resp = client.delete(f"/api/sessions/{replay_id}")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "deleted"
+        assert not (session_dir / f"{replay_id}.kohakutr").exists()

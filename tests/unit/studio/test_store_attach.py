@@ -41,3 +41,41 @@ class TestRetroInstall:
         engine = SimpleNamespace(_environments={})
         # No env for sid → early return.
         store_attach._retro_install_channel_persistence(engine, "ghost")
+
+
+class TestReuseBranchIndexHook:
+    """P0 regression pin — a store minted by the ENGINE (autosession)
+    and merely REUSED by the studio attach must still be registered
+    with the saved-sessions index sidecar, or the session never shows
+    up in the saved list until a manual ``?refresh=true``."""
+
+    def test_reuse_attaches_index_hook(self, monkeypatch, tmp_path):
+        calls = []
+        monkeypatch.setattr(
+            store_attach._index_hooks,
+            "attach",
+            lambda sid, store, sess_dir: calls.append((sid, store)),
+        )
+        monkeypatch.setenv("KT_SESSION_DIR", str(tmp_path))
+
+        existing = SimpleNamespace()  # engine-minted store stand-in
+        agent = SimpleNamespace(
+            config=SimpleNamespace(name="alice"),
+            attach_session_store=lambda store: None,
+        )
+        creature = SimpleNamespace(
+            graph_id="graph_1", creature_id="alice_1", agent=agent
+        )
+        engine = SimpleNamespace(
+            _session_stores={"graph_1": existing}, _environments={}
+        )
+        monkeypatch.setattr(store_attach, "as_engine", lambda svc: engine)
+        monkeypatch.setattr(store_attach, "stores_for", lambda svc: {})
+        monkeypatch.setattr(
+            store_attach._autosession,
+            "register_agents_in_meta",
+            lambda store, names: None,
+        )
+
+        store_attach.attach_session_store_for_creature(engine, creature)
+        assert calls == [("graph_1", existing)]

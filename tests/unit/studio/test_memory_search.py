@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from kohakuterrarium.session.embedding import NullEmbedder
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions import memory_build as build_mod
 from kohakuterrarium.studio.sessions import memory_search as mem_mod
@@ -252,6 +253,58 @@ class TestSearchSessionMemory:
                 engine=SimpleNamespace(),
             )
         assert "Memory search failed" in str(exc.value)
+
+    @staticmethod
+    def _seed_store(path: Path) -> None:
+        store = SessionStore(str(path))
+        try:
+            store.init_meta("sess", "agent", "/p", "/w", ["alice"])
+            store.append_event("alice", "user_input", {"content": "hello world"})
+            store.append_event("alice", "text_chunk", {"content": "general reply"})
+            store.flush()
+        finally:
+            store.close()
+
+    async def test_semantic_without_embedder_falls_back_to_fts(
+        self, tmp_path, monkeypatch
+    ):
+        """Legacy HTTP contract: explicit ``semantic`` with no embedding
+        model answers with FTS hits — NOT a SessionError (which the API
+        adapter would surface as a 500).  ``SessionMemory.search`` is
+        strict post-E4; the studio adapter must degrade gracefully
+        because the frontend's Find tab / StatePanel offer "semantic"
+        before any index exists (regression caught by the old-vs-new
+        differential probe)."""
+        path = tmp_path / "s.kohakutr"
+        self._seed_store(path)
+        monkeypatch.setattr(
+            mem_mod, "_live_store_for_path", lambda eng, p: (None, None)
+        )
+        monkeypatch.setattr(mem_mod, "create_embedder", lambda cfg: NullEmbedder())
+        out = await mem_mod.search_session_memory(
+            path, q="hello", mode="semantic", k=5, agent=None, engine=None
+        )
+        # Payload echoes the REQUESTED mode (old wire shape) but the
+        # results come from the FTS fallback.
+        assert out["mode"] == "semantic"
+        assert out["count"] == len(out["results"]) >= 1
+        assert out["results"][0]["content"] == "hello world"
+
+    async def test_unknown_mode_falls_back_to_fts(self, tmp_path, monkeypatch):
+        """An unrecognised ``mode`` used to silently run FTS (200); the
+        strict library now raises ValueError — the adapter must keep
+        answering with FTS results instead of erroring."""
+        path = tmp_path / "s.kohakutr"
+        self._seed_store(path)
+        monkeypatch.setattr(
+            mem_mod, "_live_store_for_path", lambda eng, p: (None, None)
+        )
+        monkeypatch.setattr(mem_mod, "create_embedder", lambda cfg: NullEmbedder())
+        out = await mem_mod.search_session_memory(
+            path, q="hello", mode="weird", k=5, agent=None, engine=None
+        )
+        assert out["mode"] == "weird"
+        assert out["count"] == len(out["results"]) >= 1
 
     async def test_missing_path_raises_not_found_without_creating_it(self, tmp_path):
         from kohakuterrarium.errors import SessionNotFoundError

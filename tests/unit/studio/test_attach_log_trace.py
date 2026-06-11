@@ -320,3 +320,41 @@ class TestRunTraceAttach:
         keys = [p["key"] for p in enqueued]
         assert keys == ["alice:e0", "alice:attached:bob:e1"]
         assert [p["event"] for p in enqueued] == [{"v": 1}, {"v": 3}]
+
+
+class TestFindLiveStore:
+    """P0 regression pins — the live-session events WS resolves the
+    store registry MAPPING by key (the URL carries the graph id, which
+    is unrelated to the store's file name) with a file-stem fallback
+    for saved-session names."""
+
+    def _store(self, path):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(_path=path, path=path)
+
+    def test_mapping_key_match_wins(self):
+        from kohakuterrarium.studio.attach.trace import _find_live_store
+
+        store = self._store("C:/sessions/alice_12345678.kohakutr")
+        found = _find_live_store("graph_abc", {"graph_abc": store})
+        assert found is store
+
+    def test_mapping_falls_back_to_file_stem(self):
+        from kohakuterrarium.studio.attach.trace import _find_live_store
+
+        store = self._store("C:/sessions/alice_12345678.kohakutr")
+        found = _find_live_store("alice_12345678", {"graph_abc": store})
+        assert found is store
+
+    def test_iterable_still_matches_stem(self):
+        from kohakuterrarium.studio.attach.trace import _find_live_store
+
+        store = self._store("C:/sessions/alice_12345678.kohakutr")
+        assert _find_live_store("alice_12345678", [store]) is store
+        assert _find_live_store("graph_abc", [store]) is None
+
+    def test_none_registry_finds_nothing(self):
+        from kohakuterrarium.studio.attach.trace import _find_live_store
+
+        assert _find_live_store("anything", None) is None

@@ -297,6 +297,96 @@ class TestScanCatalog:
         # Path dedup ensures only one entry.
         assert len(names) == 1
 
+    def test_manifest_shorthand_entries_do_not_crash_scan(self, monkeypatch, tmp_path):
+        """``GET /api/registry`` 500'd whenever any installed package
+        declared its creatures/terrariums in the docs-blessed shorthand
+        (``- name: x`` without ``path``, or a bare string) — the scan
+        indexed ``entry["path"]`` unconditionally.  Pin: shorthand
+        entries resolve via the ``<kind>/<name>`` convention, garbage
+        entries are skipped, and the scan never raises."""
+        for sub in ("creatures/shorty", "creatures/strpath", "terrariums/tshort"):
+            d = tmp_path / "pkg" / sub
+            d.mkdir(parents=True)
+        (tmp_path / "pkg" / "creatures" / "shorty" / "config.yaml").write_text(
+            "name: shorty"
+        )
+        (tmp_path / "pkg" / "creatures" / "strpath" / "config.yaml").write_text(
+            "name: strpath"
+        )
+        (tmp_path / "pkg" / "terrariums" / "tshort" / "terrarium.yaml").write_text(
+            "name: tshort\ncreatures: []"
+        )
+
+        from types import SimpleNamespace
+
+        monkeypatch.setattr(
+            scan_mod,
+            "load_agent_config",
+            lambda d: SimpleNamespace(
+                name=Path(d).name, model="", system_prompt="", tools=[]
+            ),
+        )
+        monkeypatch.setattr(
+            scan_mod,
+            "list_packages",
+            lambda: [
+                {
+                    "name": "pkg",
+                    "path": str(tmp_path / "pkg"),
+                    "creatures": [
+                        {"name": "shorty"},  # docs shorthand
+                        "creatures/strpath",  # bare string path
+                        {"description": "no name no path"},  # garbage
+                        42,  # garbage
+                    ],
+                    "terrariums": ["tshort"],  # bare string name
+                }
+            ],
+        )
+        monkeypatch.chdir(tmp_path)
+        out = scan_mod.scan_catalog()
+        assert {e.name for e in out} == {"shorty", "strpath", "tshort"}
+        assert all(e.source == "pkg" for e in out)
+
+
+# ── manifest_entry_rel_path ─────────────────────────────────
+
+
+class TestManifestEntryRelPath:
+    def test_canonical_dict_path_wins(self):
+        entry = {"name": "x", "path": "creatures/elsewhere"}
+        assert (
+            scan_mod.manifest_entry_rel_path(entry, "creatures")
+            == "creatures/elsewhere"
+        )
+
+    def test_name_only_dict_derives_conventional_path(self):
+        assert (
+            scan_mod.manifest_entry_rel_path({"name": "researcher"}, "creatures")
+            == "creatures/researcher"
+        )
+        assert (
+            scan_mod.manifest_entry_rel_path({"name": "team"}, "terrariums")
+            == "terrariums/team"
+        )
+
+    def test_bare_string_with_slash_is_a_path(self):
+        assert (
+            scan_mod.manifest_entry_rel_path("creatures/tiny", "creatures")
+            == "creatures/tiny"
+        )
+
+    def test_bare_string_without_slash_is_a_name(self):
+        assert scan_mod.manifest_entry_rel_path("tiny", "creatures") == "creatures/tiny"
+
+    def test_malformed_entries_return_none(self):
+        assert scan_mod.manifest_entry_rel_path({}, "creatures") is None
+        assert scan_mod.manifest_entry_rel_path({"path": ""}, "creatures") is None
+        assert scan_mod.manifest_entry_rel_path({"name": ""}, "creatures") is None
+        assert scan_mod.manifest_entry_rel_path("", "creatures") is None
+        assert scan_mod.manifest_entry_rel_path(None, "creatures") is None
+        assert scan_mod.manifest_entry_rel_path(42, "creatures") is None
+
 
 # ── scan_creatures_in_dirs / scan_terrariums_in_dirs ────────
 
@@ -334,6 +424,29 @@ class TestScanInDirs:
         (cdir / "config.yaml").write_text("name: alice")
         out = scan_mod.scan_creatures_in_dirs([tmp_path])
         assert out[0]["name"] == "alice"
+
+    def test_manifest_shorthand_creature_is_discovered(self, monkeypatch, tmp_path):
+        """`{name: x}` manifest entries (no ``path``) used to be
+        silently invisible to ``/api/configs/creatures`` — the modal
+        never offered them.  They now resolve via ``creatures/<name>``."""
+        cdir = tmp_path / "pkg" / "creatures" / "shorty"
+        cdir.mkdir(parents=True)
+        (cdir / "config.yaml").write_text("name: shorty\ndescription: d")
+        monkeypatch.setattr(
+            scan_mod,
+            "list_packages",
+            lambda: [
+                {
+                    "name": "pkg",
+                    "path": str(tmp_path / "pkg"),
+                    "creatures": [{"name": "shorty"}],
+                    "terrariums": [],
+                }
+            ],
+        )
+        monkeypatch.setattr(scan_mod, "_build_package_root_map", lambda: {})
+        out = scan_mod.scan_creatures_in_dirs([])
+        assert [e["name"] for e in out] == ["shorty"]
 
     def test_cache_hit(self, monkeypatch, tmp_path):
         monkeypatch.setattr(scan_mod, "list_packages", lambda: [])
