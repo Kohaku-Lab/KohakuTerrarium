@@ -11,7 +11,7 @@ failure (a tool that fails to import doesn't kill the agent).
 | File            | Responsibility                                                                                                                                                  |
 | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `__init__.py`   | Package marker                                                                                                                                                  |
-| `agent_init.py` | `AgentInitMixin` — orchestrates the init-order dance (llm → registry → executor → subagents → output → controller → input → user_commands → triggers → plugins) |
+| `agent_init.py` | `AgentInitMixin`: orchestrates the init-order dance (llm → registry → executor → subagents → output → controller → input → user_commands → triggers → plugins) |
 | `llm.py`        | LLM provider factory (Codex OAuth, OpenAI-compatible, profile resolution)                                                                                       |
 | `tools.py`      | Tool instance creation and registry wiring (builtin / path / package)                                                                                           |
 | `subagents.py`  | Sub-agent config resolution; register into `SubAgentManager` + `Registry`                                                                                       |
@@ -25,12 +25,12 @@ Imported by `core/agent.py` via `AgentInitMixin`. Imports from `core/`
 (config, loader, registry, session, trigger_manager), `builtins/` (catalogs
 and io modules), `llm/`, `modules/*`, `packages.py`, and `utils/logging`.
 
-Nothing inside `bootstrap/` imports anything outside these — it is a thin
+Nothing inside `bootstrap/` imports anything outside these; it is a thin
 wiring layer with no runtime loops of its own.
 
 ## Key entry points
 
-- `AgentInitMixin` — mixed into `Agent`; defines `_init_*` helpers
+- `AgentInitMixin`: mixed into `Agent`; defines `_init_*` helpers
 - `bootstrap.llm.create_llm_provider(config) -> LLMProvider`
 - `bootstrap.tools.build_tool_registry(...)` / `bootstrap.tools.register_tool(...)`
 - `bootstrap.subagents.register_subagents(...)`
@@ -41,7 +41,7 @@ wiring layer with no runtime loops of its own.
 
 - Factories MUST NOT raise on partial failure; log and continue so the agent
   boots with a degraded feature set rather than crashing.
-- `plugins.py` is the newest addition — it walks both the agent's `plugins:`
+- `plugins.py` is the newest addition. It walks both the agent's `plugins:`
   config list and package-declared `plugins/` directories to produce a
   unified `PluginManager`.
 - Initialization order matters (see `agent_init.py`): the controller cannot
@@ -50,6 +50,6 @@ wiring layer with no runtime loops of its own.
 
 ## See also
 
-- `../core/README.md` — how `AgentInitMixin` composes with the rest of Agent
-- `../modules/plugin/` — plugin protocol and manager
-- `docs/en/dev/internals.md` §Agent runtime — agent lifecycle
+- `../core/README.md`: how `AgentInitMixin` composes with the rest of Agent
+- `../modules/plugin/`: plugin protocol and manager
+- `docs/en/dev/internals.md` §Agent runtime: agent lifecycle

@@ -1,6 +1,6 @@
 ---
 title: App update
-summary: How the KohakuTerrarium desktop app updates itself — release-bundle download, side-by-side versioned installs, atomic pointer swap, custom mirrors, channels.
+summary: How the KohakuTerrarium desktop app updates itself. Release-bundle download, side-by-side versioned installs, atomic pointer swap, custom mirrors, channels.
 tags:
   - guides
   - update
@@ -15,7 +15,7 @@ pre-built release tarball** for your platform + Python ABI, extracting
 it side-by-side with the current install, smoke-testing it, and
 atomically flipping a small pointer file to switch which version
 launches next. The model is borrowed from native-app updaters like
-Squirrel / Velopack / Sparkle — small, transactional, and one
+Squirrel / Velopack / Sparkle: small, transactional, and one
 HTTPS GET + one extract per update.
 
 Crucially, your machine does **not** run `pip`, `venv`, `git`, or
@@ -55,7 +55,7 @@ User home (~/.kohakuterrarium/):
 
 Each version lives in its own directory. Switching versions means
 rewriting the 50-byte `active` pointer (atomic on POSIX and Windows).
-The currently-running process is unaffected — the new version takes
+The currently-running process is unaffected; the new version takes
 effect on next launch.
 
 ## First launch
@@ -82,7 +82,7 @@ pointer. If no network is available either, the launcher surfaces a
 | `kt self-update --rollback` | Revert pointer to the previous installed version |
 
 Updates do not modify the running process. After an update succeeds,
-quit and relaunch the app — the new pointer is read on next launch.
+quit and relaunch the app; the new pointer is read on next launch.
 
 ## Channels
 
@@ -93,7 +93,7 @@ quit and relaunch the app — the new pointer is read on next launch.
 | `nightly` | Daily automatic builds | cutting-edge / contributors |
 
 The channel selector lives in **Admin → Updates → Channel** and in
-`kt self-update --channel <name>` (sticky — written back to settings).
+`kt self-update --channel <name>` (sticky; written back to settings).
 
 ## Pinned version
 
@@ -216,12 +216,12 @@ one-line warning rather than wedging the launcher.
 
 ## What the launcher does NOT depend on
 
-- `pip` — not bundled, not invoked
-- `venv` / `ensurepip` — not used (the briefcase shell strips these
+- `pip`: not bundled, not invoked
+- `venv` / `ensurepip`: not used (the briefcase shell strips these
   on Windows anyway, which is why the previous design didn't work)
-- `git` — not invoked
-- PyPI — only the configured feed (github_releases or custom) is queried
-- Any third-party HTTP client — `urllib` only
+- `git`: not invoked
+- PyPI: only the configured feed (github_releases or custom) is queried
+- Any third-party HTTP client: `urllib` only
 
 The only optional third-party dep is `zstandard` for `.tar.zst`
 support. `.tar.gz` is the fallback path; everything works without
@@ -247,5 +247,5 @@ detect you're outside a launcher install and refuse with a one-line
 
 ## See also
 
-- [Configuration reference](../reference/configuration.md) — every settings field
-- [CLI reference](../reference/cli.md) — full `kt self-update` flags
+- [Configuration reference](../reference/configuration.md): every settings field
+- [CLI reference](../reference/cli.md): full `kt self-update` flags

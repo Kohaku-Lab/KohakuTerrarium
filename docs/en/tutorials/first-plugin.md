@@ -10,7 +10,7 @@ tags:
 # First Plugin
 
 **Problem:** you need a behaviour that does not belong to any single
-module — inject context into every LLM call, or block a tool call
+module: inject context into every LLM call, or block a tool call
 pattern everywhere it appears. A new tool is the wrong shape. A new
 output module is the wrong shape. A plugin is the right shape.
 
@@ -23,14 +23,14 @@ output module is the wrong shape. A plugin is the right shape.
    with an informative error the model can read.
 
 **Prerequisites:** [First Creature](first-creature.md) and ideally
-[First Custom Tool](first-custom-tool.md) — you should be comfortable
+[First Custom Tool](first-custom-tool.md); you should be comfortable
 editing a creature's `config.yaml` and dropping Python files next to it.
 
 A plugin modifies the **connections between modules**, not the modules
 themselves. See [plugin concept](../concepts/modules/plugin.md) for
 why this boundary exists.
 
-## Step 1 — Pick a folder
+## Step 1: Pick a folder
 
 Reuse a creature you already have, or make a fresh one:
 
@@ -46,7 +46,7 @@ creatures/tutorial-creature/
 mkdir -p creatures/tutorial-creature/plugins
 ```
 
-Both plugins below are lifecycle plugins — they subclass
+Both plugins below are lifecycle plugins: they subclass
 `BasePlugin` from `kohakuterrarium.modules.plugin.base`. That is the
 class wired through the `plugins:` section of a creature config.
 
@@ -56,7 +56,7 @@ class wired through the `plugins:` section of a creature config.
 > primitive and not config-wired. For "add something to every call",
 > a `pre_llm_call` lifecycle plugin (as below) is the right on-ramp.
 
-## Step 2 — Write the context-injector plugin
+## Step 2: Write the context-injector plugin
 
 `creatures/tutorial-creature/plugins/utc_injector.py`:
 
@@ -70,7 +70,7 @@ from kohakuterrarium.modules.plugin.base import BasePlugin, PluginContext
 
 class UTCInjectorPlugin(BasePlugin):
     name = "utc_injector"
-    priority = 90  # Late — run after other pre_llm_call plugins.
+    priority = 90  # Late: run after other pre_llm_call plugins.
 
     async def on_load(self, context: PluginContext) -> None:
         # Nothing to do here; defined to show the lifecycle hook.
@@ -106,7 +106,7 @@ Notes:
 - The `[utc_injector]` prefix is a convention so you can see which
   plugin contributed what when you log messages.
 
-## Step 3 — Write the tool-guard plugin
+## Step 3: Write the tool-guard plugin
 
 `creatures/tutorial-creature/plugins/bash_guard.py`:
 
@@ -124,7 +124,7 @@ DANGEROUS_PATTERNS = ("rm -rf",)
 
 class BashGuardPlugin(BasePlugin):
     name = "bash_guard"
-    priority = 1  # First — block before anything else runs.
+    priority = 1  # First: block before anything else runs.
 
     async def on_load(self, context: PluginContext) -> None:
         return
@@ -138,7 +138,7 @@ class BashGuardPlugin(BasePlugin):
         for pattern in DANGEROUS_PATTERNS:
             if pattern in command:
                 raise PluginBlockError(
-                    f"bash_guard: blocked — command contains "
+                    f"bash_guard: blocked; command contains "
                     f"'{pattern}'. Use a safer approach (explicit paths, "
                     f"trash instead of delete)."
                 )
@@ -149,14 +149,14 @@ Notes:
 
 - `pre_tool_execute` receives `args` and keyword arguments including
   `tool_name` and `job_id`. Filter on `tool_name` before inspecting
-  args — this hook fires for *every* tool.
+  args; this hook fires for *every* tool.
 - Raise `PluginBlockError(message)` to abort the call. The message
   becomes the tool result the LLM sees, so make it informative enough
   for the model to choose a different action.
 - Return `None` to allow the call unchanged. Return a modified dict
   to rewrite args (e.g. force a safer flag) before execution.
 
-## Step 4 — Wire both into the creature config
+## Step 4: Wire both into the creature config
 
 `creatures/tutorial-creature/config.yaml`:
 
@@ -181,16 +181,16 @@ plugins:
 
 Fields mirror the custom-tool wiring from the previous tutorial:
 
-- `type: custom` — load from a local file.
-- `module` — relative to the agent folder.
-- `class` — the plugin class to instantiate. (Both `class` and
+- `type: custom`: load from a local file.
+- `module`: relative to the agent folder.
+- `class`: the plugin class to instantiate. (Both `class` and
   `class_name` are accepted.)
 
 Options are passed via `options:` (a dict) and received as
 `__init__(self, options=...)`. The examples above take no options, so
 the block is omitted.
 
-## Step 5 — Run and confirm
+## Step 5: Run and confirm
 
 ```bash
 kt run creatures/tutorial-creature --mode cli
@@ -218,10 +218,10 @@ Ask the agent to delete something recursively:
 
 The controller dispatches the tool call, the guard raises
 `PluginBlockError`, and the model receives the error text as the tool
-result — typically reacting with "I cannot run that" and suggesting an
+result, typically reacting with "I cannot run that" and suggesting an
 alternative. No files are touched.
 
-## Step 6 — Know the rest of the hook surface
+## Step 6: Know the rest of the hook surface
 
 The two hooks used above are just the most common pair. The full
 lifecycle-plugin surface is:
@@ -242,21 +242,21 @@ every hook.
 
 ## What you learned
 
-- A plugin adds behaviour *between* modules — the seams, not the
+- A plugin adds behaviour *between* modules: the seams, not the
   blocks. The two most useful hooks are `pre_llm_call` (inject
   context) and `pre_tool_execute` (gate / rewrite).
 - `PluginBlockError` is how a plugin says "no" in a way the model can
   read and react to.
 - `plugins:` in `config.yaml` wires one the same way `tools:` wires a
-  custom tool — `type: custom`, `module:`, `class:`.
+  custom tool: `type: custom`, `module:`, `class:`.
 - Priority is an int; lower runs earlier in `pre_*`, later in
   `post_*`.
 
 ## What to read next
 
-- [Plugin concept](../concepts/modules/plugin.md) — why plugins exist
+- [Plugin concept](../concepts/modules/plugin.md): why plugins exist
   and what they unlock, including agent-inside-a-plugin patterns.
-- [Plugins guide](../guides/plugins.md) — full hook reference with
+- [Plugins guide](../guides/plugins.md): full hook reference with
   examples.
-- [Composing patterns](../concepts/patterns.md) — "smart guard" and
+- [Composing patterns](../concepts/patterns.md): "smart guard" and
   "seamless memory" patterns that scale these ideas up.

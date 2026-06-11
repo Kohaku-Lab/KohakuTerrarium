@@ -1,6 +1,6 @@
 ---
 title: Development
-summary: Contributor-facing docs — internals, dep graph, frontend, and the test strategy.
+summary: Contributor-facing docs. Internals, dep graph, frontend, and the test strategy.
 tags:
   - dev
   - overview
@@ -14,21 +14,21 @@ For contributors working on the framework itself. Not for users.
 
 See the top-level [CONTRIBUTING.md](../../CONTRIBUTING.md) for setup,
 branch conventions, and PR flow. Read [CLAUDE.md](../../CLAUDE.md)
-before touching code — it encodes the architecture rules (Creature vs
+before touching code; it encodes the architecture rules (Creature vs
 Terrarium vs Root, controller-as-orchestrator, non-blocking tool
 dispatch) and the style conventions (modern type hints, no in-function
 imports, logging instead of `print`).
 
 ## In this section
 
-- [Architecture](internals.md) — implementation-level map of the 16
+- [Architecture](internals.md): implementation-level map of the 16
   runtime flows. Read alongside `src/kohakuterrarium/`.
-- [Testing](testing.md) — three-tier discipline (unit / integration /
+- [Testing](testing.md): three-tier discipline (unit / integration /
   e2e), audit loop, the `ScriptedLLM` / `TestAgentBuilder` harness,
   and the multi-node test patterns (`RealLabWorker`).
-- [Dependency rules](dependency-graph.md) — the leaf-first import
+- [Dependency rules](dependency-graph.md): the leaf-first import
   discipline and how to verify with `scripts/dep_graph.py`.
-- [Frontend](frontend.md) — Vue 3 dashboard, panel registration,
+- [Frontend](frontend.md): Vue 3 dashboard, panel registration,
   WebSocket contracts.
 
 ## When to read what
@@ -40,7 +40,7 @@ imports, logging instead of `print`).
   The concepts explain *why*; this section explains *where*.
 - Changing the agent lifecycle or the controller loop? Read
   [internals.md §Agent runtime](internals.md#1-agent-runtime) and the
-  impl-notes — especially
+  impl-notes, especially
   [non-blocking-compaction](../concepts/impl-notes/non-blocking-compaction.md)
   and [stream-parser](../concepts/impl-notes/stream-parser.md).
 - Touching persistence? Read

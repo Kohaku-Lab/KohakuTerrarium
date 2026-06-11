@@ -176,7 +176,7 @@ persists the clone (user presets only).
 ## WebSocket protocols
 
 ### Chat (`/ws/creatures/{agent_id}` or `/ws/terrariums/{id}`)
-Existing — managed by `stores/chat.js`. Streams text chunks, tool
+Existing; managed by `stores/chat.js`. Streams text chunks, tool
 start/done, token usage, session info, compaction events.
 
 ### Logs (`/ws/logs`)
@@ -214,5 +214,5 @@ File system watcher (watchfiles). Messages:
 `useThemeStore().dark` reactively. CSS uses `html.dark` class for dark
 mode overrides. UnoCSS `dark:` prefix works throughout.
 
-Vditor and xterm.js have their own theme systems — both watch
+Vditor and xterm.js have their own theme systems; both watch
 `themeStore.dark` and call their respective theme-switch APIs.

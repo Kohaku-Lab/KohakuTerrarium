@@ -1,6 +1,6 @@
 ---
 title: Implementation notes
-summary: Deep dives into how specific subsystems actually work — for contributors and curious readers.
+summary: Deep dives into how specific subsystems actually work, for contributors and curious readers.
 tags:
   - concepts
   - impl-notes
@@ -10,22 +10,22 @@ tags:
 # Impl notes
 
 Five specific implementation choices that deserve their own short
-concept doc — not because a user has to know them to use KT, but
+concept doc, not because a user has to know them to use KT, but
 because they surface design decisions that recur elsewhere and are
 useful mental models in their own right.
 
-- [Non-blocking compaction](non-blocking-compaction.md) — how a
+- [Non-blocking compaction](non-blocking-compaction.md): how a
   creature summarises its own history without pausing the controller.
-- [Stream parser](stream-parser.md) — why tools start before the LLM
+- [Stream parser](stream-parser.md): why tools start before the LLM
   stops talking.
-- [Prompt aggregation](prompt-aggregation.md) — how the final system
+- [Prompt aggregation](prompt-aggregation.md): how the final system
   prompt is assembled (base + tools + hints + topology + named
   outputs + plugins), and why `skill_mode` lets you choose "ship full
   docs" vs "load on demand."
-- [Session persistence](session-persistence.md) — the dual-store model
+- [Session persistence](session-persistence.md): the dual-store model
   (append-only event log + conversation snapshots) that lets one
   `.kohakutr` serve resume, human search, and agent-side RAG.
-- [Graph and sessions](graph-and-sessions.md) — how the terrarium
+- [Graph and sessions](graph-and-sessions.md): how the terrarium
   engine computes connected components, mutates topology under
   hot-plug calls, and keeps the session store consistent across
   auto-merge and auto-split.

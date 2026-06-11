@@ -1,19 +1,19 @@
 ---
-title: Deployment — Docker
-summary: Three Docker compose patterns for running KohakuTerrarium — AIO, host + same-box workers, and distributed host / worker.
+title: "Deployment: Docker"
+summary: Three Docker compose patterns for running KohakuTerrarium. AIO, host + same-box workers, and distributed host / worker.
 tags:
   - guides
   - deployment
   - docker
 ---
 
-# Deployment — Docker
+# Docker deployment
 
 KohakuTerrarium ships three first-party Docker images on GHCR:
 
 | Image | Purpose | Ports |
 |---|---|---|
-| `ghcr.io/kohaku-lab/kohakuterrarium` | **AIO** — lab-host + embedded worker in one container | `8001` (HTTP), `8100` (Lab WS) |
+| `ghcr.io/kohaku-lab/kohakuterrarium` | **AIO**: lab-host + embedded worker in one container | `8001` (HTTP), `8100` (Lab WS) |
 | `ghcr.io/kohaku-lab/kohakuterrarium-host` | lab-host only (Studio + Web UI) | `8001`, `8100` |
 | `ghcr.io/kohaku-lab/kohakuterrarium-client` | worker only (connects out to a host) | (outbound only) |
 
@@ -27,9 +27,9 @@ cosign verify ghcr.io/kohaku-lab/kohakuterrarium:1.5.0 \
 ```
 
 The compose files referenced below ship under `examples/deployment/`
-in the source tree — copy the one closest to your shape and edit.
+in the source tree; copy the one closest to your shape and edit.
 
-## Shape 1 — AIO (single container)
+## Shape 1: AIO (single container)
 
 The smallest possible deployment. One container; host + one worker
 share the same Python interpreter. Everything persists on a single
@@ -42,7 +42,7 @@ services:
     image: ghcr.io/kohaku-lab/kohakuterrarium:1.5.0
     ports:
       - "8001:8001"   # Studio web UI + API
-      - "8100:8100"   # Lab — optional, only needed for external workers
+      - "8100:8100"   # Lab; optional, only needed for external workers
     environment:
       # If omitted, the entrypoint generates one and logs it to stderr.
       KT_HOST_TOKEN: "${KT_HOST_TOKEN:-}"
@@ -67,12 +67,12 @@ The first log line shows the generated token (or echoes your env var):
 [kt-aio] To attach external workers: KT_HOST_URL=ws://<this-host>:8100 KT_HOST_TOKEN=8a3f7c…
 ```
 
-Visit `http://localhost:8001` — the Studio UI shows one connected
+Visit `http://localhost:8001`; the Studio UI shows one connected
 worker named `local-1`.
 
 ### When to use AIO
 
-- Single-machine dev / staging — no cluster planning needed.
+- Single-machine dev / staging, with no cluster planning needed.
 - A self-contained appliance you can ship as one container.
 - Demos: one `docker run` is everything.
 
@@ -80,16 +80,16 @@ worker named `local-1`.
 
 - You cannot scale beyond what one container's CPU / memory allows.
 - The embedded worker shares the host container's filesystem and
-  credential store — no per-worker isolation.
+  credential store; there is no per-worker isolation.
 
-## Shape 2 — host + N workers on the same box
+## Shape 2: host + N workers on the same box
 
 When you want isolated worker processes (per-worker LLM credentials,
 per-worker compute) but you do not need them on separate machines.
 Use Docker secrets so the shared token is never in `docker inspect`.
 
 ```yaml
-# examples/deployment/compose-host-clients.yml — abridged
+# examples/deployment/compose-host-clients.yml (abridged)
 services:
   host:
     image: ghcr.io/kohaku-lab/kohakuterrarium-host:1.5.0
@@ -148,7 +148,7 @@ docker compose -f examples/deployment/compose-host-clients.yml up -d
 Both workers point `KT_HOST_URL` at the **service name** `host`,
 which Docker's embedded DNS resolves inside the compose network.
 No port publishing is required on the host service for the workers
-themselves — only the Studio UI publishes port `8001`.
+themselves; only the Studio UI publishes port `8001`.
 
 ### Scaling
 
@@ -157,7 +157,7 @@ and named volumes. Each worker has its own
 `~/.kohakuterrarium/` so LLM profiles and API keys can differ per
 worker.
 
-## Shape 3 — distributed: host on edge VPS, workers on home boxes
+## Shape 3: distributed: host on edge VPS, workers on home boxes
 
 Run the host on a small VPS that has a stable public address; run
 workers on whatever boxes have GPUs / API quota. The Lab WebSocket
@@ -205,7 +205,7 @@ services:
       - kt-worker-home-data:/home/kt/.kohakuterrarium
 ```
 
-`wss://` (TLS-WebSocket) is mandatory across the public internet —
+`wss://` (TLS-WebSocket) is mandatory across the public internet:
 the shared token authenticates the worker but does not encrypt the
 channel.
 
@@ -220,7 +220,7 @@ them for:
   during a rolling restart).
 
 `/healthz` is "process is up." `/readyz` is "lab transport is bound
-and accepting clients" — use it for load-balancer rotation.
+and accepting clients"; use it for load-balancer rotation.
 
 ## Persistent state
 
@@ -250,13 +250,13 @@ docker compose up -d
 Compose recreates each service one at a time; with the readiness
 healthcheck wired, the host fully boots before workers reconnect.
 
-## Locking down the API — `[auth]` config
+## Locking down the API: `[auth]` config
 
 Any compose shape becomes a multi-user / locked-down host by adding
 the four-layer auth config via Docker secrets.  Worked example:
 
 ```yaml
-# examples/deployment/compose-host-auth.yml — abridged
+# examples/deployment/compose-host-auth.yml (abridged)
 services:
   kohakuterrarium:
     image: ghcr.io/kohaku-lab/kohakuterrarium:1.5.0
@@ -318,11 +318,11 @@ frontend's connection state machine discovers what's enabled.
 
 ## See also
 
-- [Authentication](authentication.md) — the four-layer auth model
+- [Authentication](authentication.md): the four-layer auth model
   + ``kt admin`` operator surface.
-- [Deployment — systemd](deployment-systemd.md) — same shapes, no
+- [systemd deployment](deployment-systemd.md): same shapes, no
   containers.
-- [Deployment — reverse proxy](deployment-reverse-proxy.md) — TLS
+- [Reverse-proxy deployment](deployment-reverse-proxy.md): TLS
   termination for the distributed shape.
-- [Laboratory](laboratory.md) — what the lab-host / lab-client roles
+- [Laboratory](laboratory.md): what the lab-host / lab-client roles
   actually are, conceptually.

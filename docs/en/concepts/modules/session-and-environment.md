@@ -14,10 +14,10 @@ tags:
 
 Two levels of state:
 
-- **Session** — private to one creature. Holds the creature's
+- **Session**: private to one creature. Holds the creature's
   scratchpad, private channels, TUI reference, job store, and any
   custom extras.
-- **Environment** — shared across a whole run (specifically, a whole
+- **Environment**: shared across a whole run (specifically, a whole
   terrarium). Holds the shared channel registry and a small
   custom-context dict.
 
@@ -89,11 +89,11 @@ registry (private first, then shared).
 
 Standalone creatures do not need environments. Trigger-only creatures
 do not strictly need scratchpads. The framework enforces the
-private/shared split only where it matters — it is happy to treat a
+private/shared split only where it matters; it is happy to treat a
 single-creature session as the only state.
 
 ## See also
 
-- [Channel](channel.md) — the opt-in sharing primitive.
-- [Multi-agent / terrarium](../multi-agent/terrarium.md) — where environments matter.
-- [impl-notes/session-persistence](../impl-notes/session-persistence.md) — how session state actually lives on disk.
+- [Channel](channel.md): the opt-in sharing primitive.
+- [Multi-agent / terrarium](../multi-agent/terrarium.md): where environments matter.
+- [impl-notes/session-persistence](../impl-notes/session-persistence.md): how session state actually lives on disk.

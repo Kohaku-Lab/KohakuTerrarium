@@ -1,6 +1,6 @@
 ---
 title: Boundaries
-summary: The creature abstraction is a default, not a corset — where the framework bends, and when it doesn't fit at all.
+summary: The creature abstraction is a default, not a corset. Where the framework bends, and when it doesn't fit at all.
 tags:
   - concepts
   - philosophy
@@ -10,7 +10,7 @@ tags:
 
 The creature abstraction is the default shape of an agent in
 KohakuTerrarium. It is *not* a law. This page collects the cases where
-ignoring the default is the right move — and the cases where the
+ignoring the default is the right move, and the cases where the
 framework is not a good fit at all.
 
 ## The abstraction is a default, not a corset
@@ -19,7 +19,7 @@ The six modules (Controller, Input, Trigger, Tool, Sub-agent, Output)
 appear together in most creatures, but each is independently optional:
 
 - **No input.** `input: { type: none }`. A cron creature, a
-  webhook-only receiver, a background monitor — none need a user
+  webhook-only receiver, a background monitor: none need a user
   typing.
 - **No triggers.** A pure request/response chat creature works fine
   without any ambient wake-ups.
@@ -64,8 +64,8 @@ The framework's abstractions are tools for thinking, not walls.
   You don't yet know what tools, triggers, or prompts will survive
   the next round. A framework pays off when the thing you are
   building will change shape.
-- You want to **try a new agent design** — a novel combination of
-  tools, triggers, or sub-agent shapes — without rebuilding the
+- You want to **try a new agent design** (a novel combination of
+  tools, triggers, or sub-agent shapes) without rebuilding the
   substrate.
 - You want **OOTB creatures you can customise**. `kt-biome` gives
   a starting point; inherit from it, swap a few modules, done.
@@ -85,9 +85,9 @@ The framework's abstractions are tools for thinking, not walls.
 - Your **mental model does not match the framework's.** If you think
   about agents in a way that does not map onto
   controller/tools/triggers/sub-agents/channels, forcing the fit
-  makes things worse, not better. Use something else — or write a
+  makes things worse, not better. Use something else, or write a
   different framework.
-- Your workload needs **ultra-low latency** — sub-50 ms per-operation
+- Your workload needs **ultra-low latency**, where sub-50 ms per-operation
   matters to you. KohakuTerrarium is optimised for correctness and
   flexibility; the asyncio overhead, the event queue, the output
   router, the session persistence all cost a little. Usually fine;
@@ -106,10 +106,10 @@ cases describes you, the rest of the docs are for you.
 
 ## See also
 
-- [Why KohakuTerrarium](foundations/why-kohakuterrarium.md) — the framing that motivates
+- [Why KohakuTerrarium](foundations/why-kohakuterrarium.md): the framing that motivates
   the framework.
-- [What is an agent](foundations/what-is-an-agent.md) — the canonical
+- [What is an agent](foundations/what-is-an-agent.md): the canonical
   derivation this page lets you deviate from.
-- [Patterns](patterns.md) — ways to combine modules that break the
+- [Patterns](patterns.md): ways to combine modules that break the
   "one module = one purpose" intuition on purpose.
-- [ROADMAP](../../ROADMAP.md) — where the rough parts are going.
+- [ROADMAP](../../ROADMAP.md): where the rough parts are going.

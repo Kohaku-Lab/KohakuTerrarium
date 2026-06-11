@@ -17,7 +17,7 @@ Concept primer: [modules](../concepts/modules/README.md), and the per-module pag
 
 ## Shape of a custom module
 
-Each module lives in a Python file (anywhere you like — usually under your creature folder or inside a package). The config points at `module: ./path/to/file.py` + `class: YourClass`. (The YAML key is `class` for every module kind. Plugins also accept `class_name` for back-compat; see [Plugins](plugins.md).)
+Each module lives in a Python file (anywhere you like; usually under your creature folder or inside a package). The config points at `module: ./path/to/file.py` + `class: YourClass`. (The YAML key is `class` for every module kind. Plugins also accept `class_name` for back-compat; see [Plugins](plugins.md).)
 
 All five module kinds use the same wiring pattern. They differ only in the protocol their class implements.
 
@@ -69,9 +69,9 @@ tools:
 
 Tool execution modes (set via `BaseTool.execution_mode`):
 
-- **direct** — awaited within the turn, result becomes a `tool_complete` event.
-- **background** — submitted, returns a job id; result arrives later.
-- **stateful** — generator-like, yields intermediate results over multiple turns.
+- **direct**: awaited within the turn, result becomes a `tool_complete` event.
+- **background**: submitted, returns a job id; result arrives later.
+- **stateful**: generator-like, yields intermediate results over multiple turns.
 
 Concurrency is a separate knob: set `is_concurrency_safe = False` on tools
 that mutate shared state unsafely (destructive shell commands, writes to the
@@ -155,11 +155,11 @@ input:
 Contract (`kohakuterrarium.modules.output.base`):
 
 - `async start()`, `async stop()`
-- `async write(content: str)` — complete message
-- `async write_stream(chunk: str)` — streaming chunk
+- `async write(content: str)`: complete message
+- `async write_stream(chunk: str)`: streaming chunk
 - `async flush()`
 - `async on_processing_start()`, `async on_processing_end()`
-- `def on_activity(activity_type: str, detail: str)` — tool/subagent events
+- `def on_activity(activity_type: str, detail: str)`: tool/subagent events
 - optional `async on_user_input(text)`, `async on_resume(events)`
 
 ```python
@@ -271,7 +271,7 @@ triggers:
 
 ## Sub-agents
 
-Sub-agents are defined by `SubAgentConfig` (a config dataclass) — you rarely subclass `SubAgent` directly. The usual pattern is to ship a Python module exporting a config object:
+Sub-agents are defined by `SubAgentConfig` (a config dataclass); you rarely subclass `SubAgent` directly. The usual pattern is to ship a Python module exporting a config object:
 
 ```python
 # subagents/specialist.py
@@ -385,13 +385,13 @@ For triggers: use `EventRecorder` and verify `TriggerEvent` shape.
 ## Troubleshooting
 
 - **Module not found.** `module:` paths are relative to the creature folder. Use absolute paths if that's ambiguous.
-- **Tool isn't in the prompt.** Check `kt info path/to/creature`. The tool is probably silently rejected — confirm the YAML `class:` value matches the actual class name in the module. (The YAML key is `class`, not `class_name`; plugins also accept `class_name` for back-compat, but tools/inputs/outputs/triggers/sub-agents require `class`.)
+- **Tool isn't in the prompt.** Check `kt info path/to/creature`. The tool is probably silently rejected; confirm the YAML `class:` value matches the actual class name in the module. (The YAML key is `class`, not `class_name`; plugins also accept `class_name` for back-compat, but tools/inputs/outputs/triggers/sub-agents require `class`.)
 - **`needs_context=True` but `context` is `None` in tests.** `TestAgentBuilder` provides a context; make sure you called `.with_session(...)` if you need channels or scratchpad.
 - **Trigger doesn't resume.** Set `resumable = True` on the class and implement `to_resume_dict()`.
 
 ## See also
 
-- [Plugins](plugins.md) — for behaviour at the *seams* between modules (pre/post hooks).
-- [Packages](packages.md) — shipping modules for reuse.
-- [Reference / Python API](../reference/python.md) — `BaseTool`, `BaseInputModule`, `BaseOutputModule`, `BaseTrigger`, `SubAgentConfig`.
-- [Concepts / modules](../concepts/modules/README.md) — one page per module.
+- [Plugins](plugins.md): for behaviour at the *seams* between modules (pre/post hooks).
+- [Packages](packages.md): shipping modules for reuse.
+- [Reference / Python API](../reference/python.md): `BaseTool`, `BaseInputModule`, `BaseOutputModule`, `BaseTrigger`, `SubAgentConfig`.
+- [Concepts / modules](../concepts/modules/README.md): one page per module.

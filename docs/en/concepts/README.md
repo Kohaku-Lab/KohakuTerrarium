@@ -8,9 +8,9 @@ tags:
 
 # Concepts
 
-Concept docs teach mental models. They are not a reference — field names,
+Concept docs teach mental models. They are not a reference: field names,
 signatures, and commands live in [reference/](../reference/README.md).
-They are not a guide — task-by-task instructions live in
+They are not a guide: task-by-task instructions live in
 [guides/](../guides/README.md). They exist to make the rest of the
 docs *feel obvious* by the time you touch them.
 
@@ -58,20 +58,20 @@ You want to run a team of creatures.
 You want to host KohakuTerrarium from your own Python process, service,
 or UI.
 
-1. [Terrarium](multi-agent/terrarium.md) — the runtime engine and graph model.
-2. [Studio](studio.md) — the management layer above the engine.
-3. [Agent as a Python object](python-native/agent-as-python-object.md) — the lower-level creature internals.
-4. [Session and environment](modules/session-and-environment.md) — private creature state vs graph-shared state.
+1. [Terrarium](multi-agent/terrarium.md): the runtime engine and graph model.
+2. [Studio](studio.md): the management layer above the engine.
+3. [Agent as a Python object](python-native/agent-as-python-object.md): the lower-level creature internals.
+4. [Session and environment](modules/session-and-environment.md): private creature state vs graph-shared state.
 
 ### Multi-machine deployment
 
 You want creatures running on a different box than the dashboard
 (GPU server, sandbox VM, cloud node).
 
-1. [Terrarium](multi-agent/terrarium.md) — the engine the Lab wraps.
-2. [Studio](studio.md) — the management surface the Lab keeps
+1. [Terrarium](multi-agent/terrarium.md): the engine the Lab wraps.
+2. [Studio](studio.md): the management surface the Lab keeps
    identical between standalone and multi-node.
-3. [Laboratory](laboratory.md) — wire protocol, session sync,
+3. [Laboratory](laboratory.md): wire protocol, session sync,
    resume, identity model.
 4. Operator playbook: [guides/laboratory.md](../guides/laboratory.md).
 
@@ -114,6 +114,6 @@ fastest lookup.
 
 ## See also
 
-- [Guides](../guides/README.md) — task-oriented how-tos.
-- [Reference](../reference/README.md) — exhaustive lookup for commands, APIs, fields.
-- [Development](../dev/README.md) — contributor-facing internals.
+- [Guides](../guides/README.md): task-oriented how-tos.
+- [Reference](../reference/README.md): exhaustive lookup for commands, APIs, fields.
+- [Development](../dev/README.md): contributor-facing internals.

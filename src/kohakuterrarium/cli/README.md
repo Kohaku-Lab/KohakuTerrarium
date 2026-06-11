@@ -7,19 +7,23 @@
 
 | File            | Subcommand(s)                                                                                                           |
 | --------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `__init__.py`   | `main()` — argparse setup, `COMMANDS` dispatch table                                                                    |
-| `run.py`        | `kt run` — launch an agent from a config folder (rich CLI / plain / TUI modes)                                          |
-| `resume.py`     | `kt resume` — resume an agent or terrarium from a `.kohakutr` session file                                              |
-| `auth.py`       | `kt login` — API key / Codex OAuth flow for a backend                                                                   |
-| `packages.py`   | `kt list` / `kt info` / `kt install` / `kt uninstall` / `kt update` / `kt edit`                                         |
-| `model.py`      | `kt model list/default/show` — compatibility wrapper that delegates to `config_cli`                                     |
-| `memory.py`     | `kt embedding` / `kt search` — offline embedding build + session memory search                                          |
-| `serve.py`      | `kt serve start/stop/status` — manage a detached web server process (PID + state files under `~/.kohakuterrarium/run/`) |
-| `config.py`     | `kt config` command group — unified LLM profile / backend / API-key / MCP management                                    |
-| `config_mcp.py` | MCP subcommand helpers shared between `kt config mcp` and interactive prompts                                           |
-| `extension.py`  | `kt extension list` / `info` — inspect installed package extension modules (tools, plugins, presets)                    |
-| `mcp.py`        | `kt mcp list` — list MCP servers declared in an agent config                                                            |
-| `version.py`    | `kt --version` report (Python, git, platform, install source)                                                           |
+| `__init__.py`    | `main()`: argparse setup, `COMMANDS` dispatch table (+ `_aliases.py`, `_config_layers.py`, `_aio_entrypoint.py`)        |
+| `run.py`         | `kt run`: launch a creature or recipe through the Terrarium engine (rich CLI / TUI modes)                               |
+| `resume.py`      | `kt resume`: resume an agent or terrarium from a `.kohakutr` session file                                               |
+| `doctor.py`      | `kt doctor`: pre-flight environment + config validation (wraps `kohakuterrarium.validate`)                              |
+| `auth.py`        | `kt login`: API key / Codex OAuth flow for a backend                                                                    |
+| `packages.py`    | `kt list` / `kt info` / `kt install` / `kt uninstall` / `kt update` / `kt edit`                                          |
+| `marketplace.py` | `kt marketplace`: list / add / remove / refresh / search / info over marketplace sources                                |
+| `model.py`       | `kt model list/default/show`: compatibility wrapper that delegates to `config_cli`                                      |
+| `memory.py`      | `kt embedding` / `kt search`: offline embedding build + session memory search                                           |
+| `serve.py`       | `kt serve start/stop/status`: manage a detached web server process (PID + state files under `~/.kohakuterrarium/run/`)  |
+| `config.py`      | `kt config` command group: unified LLM profile / backend / API-key / MCP management (+ `config_prompts.py`)             |
+| `identity_*.py`  | Settings backends behind `kt config` (LLM, keys, MCP registry, codex, general settings)                                  |
+| `extension.py`   | `kt extension list` / `info`: inspect installed package extension modules (tools, plugins, presets)                     |
+| `admin.py`       | Auth-layer administration (admin token, users) (+ `admin_qr.py`)                                                         |
+| `service.py`     | Multi-node service runner (+ `lab_client.py`)                                                                            |
+| `self_update.py` | Launcher-managed self-update                                                                                             |
+| `version.py`     | `kt --version` report (Python, git, platform, install source)                                                            |
 
 The top-level `kt run` entry point invokes `cli/__init__.py:main()` via the
 `pyproject.toml` console script.
@@ -27,19 +31,19 @@ The top-level `kt run` entry point invokes `cli/__init__.py:main()` via the
 ## Dependency direction
 
 Imported only as the process entry point. Imports nearly everything it
-drives: `core/agent`, `serving/web` (web + desktop), `terrarium/cli`,
-`session/resume`, `session/store`, `llm/*`, `packages`, `builtins/cli_rich`,
-`utils/logging`.
+drives: `terrarium/engine` (+ `engine_cli` / `engine_rich_cli`),
+`serving/web` (web + desktop), `session/resume`, `session/store`, `llm/*`,
+`packages/`, `builtins/cli_rich`, `utils/logging`.
 
-Nothing inside the framework imports `cli/` — it is the top of the graph.
+Nothing inside the framework imports `cli/`; it is the top of the graph.
 
 ## Key entry points
 
-- `cli/__init__.py:main()` — argparse + dispatch
-- `cli/run.py:run_agent_cli()` — standalone agent launcher
-- `cli/resume.py:resume_cli()` — session resume
-- `cli/serve.py:serve_cli()` — detached web server control
-- `cli/config.py:config_cli()` — unified profile / backend / key config
+- `cli/__init__.py:main()`: argparse + dispatch
+- `cli/run.py:run_agent_cli()`: creature / recipe launcher via the engine
+- `cli/resume.py:resume_cli()`: session resume
+- `cli/serve.py:serve_cli()`: detached web server control
+- `cli/config.py:config_cli()`: unified profile / backend / key config
 
 ## Notes
 
@@ -50,11 +54,13 @@ Nothing inside the framework imports `cli/` — it is the top of the graph.
 - `_dispatch_*` helpers in `__init__.py` exist only to adapt between the
   argparse `Namespace` and the handler signatures; the real logic is in
   the per-command modules.
-- `@package/path` syntax (e.g. `@kt-biome/creatures/swe`) is resolved
-  via `packages.resolve_package_path` before dispatch.
+- `@package/path` syntax (e.g. `@kt-biome/creatures/swe`) passes through
+  the dispatchers verbatim; resolution happens once, inside the config
+  loaders (`core/config.py:load_agent_config` /
+  `terrarium/config.py:load_terrarium_config`), for every entry point.
 
 ## See also
 
-- `../api/README.md` — the HTTP server `kt serve` / `kt web` launches
-- `../serving/README.md` — `KohakuManager` + desktop app wiring
-- `../terrarium/cli.py` — terrarium subcommand implementations
+- `../api/README.md`: the HTTP server `kt serve` / `kt web` launches
+- `../serving/README.md`: static frontend / desktop app launcher
+- `run.py`: agent / terrarium execution implementation

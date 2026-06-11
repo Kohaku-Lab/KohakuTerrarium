@@ -17,7 +17,7 @@ runtime cycles; keep it that way.
 
 `utils/` is a leaf. Everything imports from it; it imports nothing
 from the framework. `modules/` is protocols only. `core/` is the
-creature runtime — it imports `modules/` and `utils/` but **never**
+creature runtime; it imports `modules/` and `utils/` but **never**
 `builtins/`, `terrarium/`, `studio/`, `bootstrap/`, `api/`, or `cli/`.
 `bootstrap/` and `builtins/` assemble concrete runtime pieces on top of
 `core/` + `modules/`. `terrarium/` hosts creatures in graphs and imports
@@ -44,30 +44,30 @@ From leaf (bottom) to transport (top):
 
 Per-tier detail:
 
-- **`utils/`** — logging, async helpers, file guards. Must not import
+- **`utils/`**: logging, async helpers, file guards. Must not import
   anything from the framework. Adding a framework import here is
   almost always wrong.
-- **`modules/`** — protocol and base class definitions. `BaseTool`,
+- **`modules/`**: protocol and base class definitions. `BaseTool`,
   `BaseOutputModule`, `BaseTrigger`, etc. Implementation-free so any
   layer above can depend on them.
-- **`core/`** — `Agent`, `Controller`, `Executor`, `Conversation`,
+- **`core/`**: `Agent`, `Controller`, `Executor`, `Conversation`,
   `Environment`, `Session`, channels, events, registry. The runtime.
   `core/` must never import `terrarium/`, `builtins/`, `bootstrap/`,
   `serving/`, `cli/`, or `api/`. Doing so reintroduces a cycle.
-- **`bootstrap/`** — factory functions that build `core/` components
+- **`bootstrap/`**: factory functions that build `core/` components
   from config (LLM, tools, IO, subagents, triggers). Imports `core/`
   and `builtins/`.
-- **`builtins/`** — concrete tools, sub-agents, inputs, outputs, TUI,
+- **`builtins/`**: concrete tools, sub-agents, inputs, outputs, TUI,
   user commands. Internal catalogs (`tool_catalog`,
   `subagent_catalog`) are leaf modules with deferred loaders.
-- **`terrarium/`** — creature graph runtime. Imports `core/`,
+- **`terrarium/`**: creature graph runtime. Imports `core/`,
   `bootstrap/`, `builtins/`. Not imported by any of them.
-- **`studio/`** — management facade for catalog, identity, active sessions,
+- **`studio/`**: management facade for catalog, identity, active sessions,
   saved-session persistence, attach policy, and editors. Depends on
   `terrarium/` and lower layers.
-- **`serving/`** — web/desktop launch helpers plus legacy compatibility
+- **`serving/`**: web/desktop launch helpers plus legacy compatibility
   wrappers. New management code should live in `studio/`.
-- **`cli/`, `api/`** — top layer. One is an argparse entry point, the
+- **`cli/`, `api/`**: top layer. One is an argparse entry point, the
   other a FastAPI app. They delegate management to `studio/` and runtime
   mechanics to `terrarium/`.
 
@@ -96,16 +96,16 @@ for lazy public exports, but new function-local imports should be
 justified by the dep-graph allowlist rather than used as a cycle
 workaround.
 
-## The tool — `scripts/dep_graph.py`
+## The tool: `scripts/dep_graph.py`
 
 Static AST analyzer. Walks every `.py` under `src/kohakuterrarium/`,
 reads files as UTF-8, parses `import` / `from ... import`, and classifies
 edges as:
 
-- **runtime** — top-level import that executes on module load.
-- **TYPE_CHECKING** — guarded by `if TYPE_CHECKING:`. Not in the
+- **runtime**: top-level import that executes on module load.
+- **TYPE_CHECKING**: guarded by `if TYPE_CHECKING:`. Not in the
   runtime graph.
-- **in-function** — import inside a function body. The default/cycle view
+- **in-function**: import inside a function body. The default/cycle view
   includes these so hidden cycles are still visible; `--module-only`
   restores the older top-level-only graph.
 
@@ -144,17 +144,17 @@ python scripts/dep_graph.py --all
 
 Key outputs:
 
-- **Top fan-out** — modules that import the most. Usually assembly
+- **Top fan-out**: modules that import the most. Usually assembly
   code (`bootstrap/`, `core/agent.py`).
-- **Top fan-in** — modules imported the most. `utils/`, `modules/base`,
+- **Top fan-in**: modules imported the most. `utils/`, `modules/base`,
   `core/events.py` should dominate.
-- **Cross-group edges** — a bar-chart-style readout of how many edges
+- **Cross-group edges**: a bar-chart-style readout of how many edges
   cross package boundaries. If a new edge appears from `core/` into
   `terrarium/`, investigate.
-- **SCCs** — should always be empty. If Tarjan's algorithm finds a
+- **SCCs**: should always be empty. If Tarjan's algorithm finds a
   non-trivial SCC, the runtime graph has a cycle. Cycle reports include
   a sample path and the import statements that form it.
-- **Import hygiene** — `--lint-imports` reports disallowed in-function
+- **Import hygiene**: `--lint-imports` reports disallowed in-function
   imports. Optional/platform imports are auto-allowed; intentional
   exceptions live in `scripts/dep_graph_allowlist.json`.
 
@@ -205,9 +205,9 @@ over with an in-function import. In-function imports are discouraged
 
 ## See also
 
-- [CLAUDE.md §Import Rules](../../CLAUDE.md) — the conventions this
+- [CLAUDE.md §Import Rules](../../CLAUDE.md): the conventions this
   discipline enforces.
-- [`src/kohakuterrarium/README.md`](../../src/kohakuterrarium/README.md) —
+- [`src/kohakuterrarium/README.md`](../../src/kohakuterrarium/README.md):
   the canonical ASCII flow diagram.
-- [internals.md](internals.md) — flow-by-flow map of what each
+- [internals.md](internals.md): flow-by-flow map of what each
   subpackage is for.

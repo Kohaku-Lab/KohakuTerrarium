@@ -16,10 +16,10 @@ move between them without guessing.
 
 Legend:
 
-- ✅ — Shipped in the UI; no need to leave the desktop app.
-- ⚠️ — Partial; the UI covers the common path, the CLI is still needed
+- ✅: Shipped in the UI; no need to leave the desktop app.
+- ⚠️: Partial; the UI covers the common path, the CLI is still needed
   for edge cases (listed in *Notes*).
-- 🔧 — CLI-only by design (deployment / ops). The UI deliberately
+- 🔧: CLI-only by design (deployment / ops). The UI deliberately
   does not expose it.
 
 ## Identity / configuration
@@ -43,7 +43,7 @@ Legend:
 
 | `kt` verb | UI surface | Status |
 |---|---|---|
-| `kt list` (sessions) | Sessions tab — saved-session list | ✅ |
+| `kt list` (sessions) | Sessions tab: saved-session list | ✅ |
 | `kt resume <session>` | Sessions tab → row → **Resume** | ✅ |
 | `kt search <session> <query> --mode --agent -k` | Session viewer → **Find** tab | ✅ |
 | `kt embedding <session> --provider --model --dimensions` | Sessions tab → row kebab menu → **Build embeddings** (or Find tab empty-state banner) | ✅ |
@@ -93,11 +93,11 @@ Legend:
 
 | `kt` verb | UI surface | Status |
 |---|---|---|
-| `kt service install/uninstall/status/edit` | (none) | 🔧 By design — systemd unit installation runs as root on a server. Operators use the CLI or Ansible / Docker. |
+| `kt service install/uninstall/status/edit` | (none) | 🔧 By design: systemd unit installation runs as root on a server. Operators use the CLI or Ansible / Docker. |
 
 ## See also
 
-- [Desktop UI walkthrough](desktop-ui-walkthrough.md) — guided tour of each tab.
-- [App update](app-update.md) — full update flow internals.
-- [Serving guide](serving.md) — how the daemon is wired.
-- [`kt --help`](../../README.md) — terminal-side reference.
+- [Desktop UI walkthrough](desktop-ui-walkthrough.md): guided tour of each tab.
+- [App update](app-update.md): full update flow internals.
+- [Serving guide](serving.md): how the daemon is wired.
+- [`kt --help`](../../README.md): terminal-side reference.

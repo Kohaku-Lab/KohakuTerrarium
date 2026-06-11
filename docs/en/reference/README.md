@@ -1,6 +1,6 @@
 ---
 title: Reference
-summary: Full-surface specifications — every field, command, endpoint, hook, and Python entry point.
+summary: Full-surface specifications. Every field, command, endpoint, hook, and Python entry point.
 tags:
   - reference
   - overview
@@ -17,20 +17,20 @@ task-oriented paths, read [Guides](../guides/README.md).
 
 ## Pages
 
-- [CLI](cli.md) — every `kt` command and flag.
-- [HTTP and WebSocket API](http.md) — every REST route, WebSocket
+- [CLI](cli.md): every `kt` command and flag.
+- [HTTP and WebSocket API](http.md): every REST route, WebSocket
   endpoint, and Pydantic schema.
-- [Python API](python.md) — every public class, function, and protocol.
-- [Configuration](configuration.md) — every field of creature configs,
+- [Python API](python.md): every public class, function, and protocol.
+- [Configuration](configuration.md): every field of creature configs,
   terrarium configs, LLM profiles, MCP catalog, and package manifests.
-- [Built-ins](builtins.md) — every shipped tool, sub-agent, input,
+- [Built-ins](builtins.md): every shipped tool, sub-agent, input,
   output, user command, framework command, LLM provider, and LLM
   preset.
-- [Built-in plugins](builtin-plugins.md) — sandbox, budget, permgate,
+- [Built-in plugins](builtin-plugins.md): sandbox, budget, permgate,
   compact.auto: hooks, options, behaviour.
-- [Plugin hooks](plugin-hooks.md) — every lifecycle, LLM, tool,
+- [Plugin hooks](plugin-hooks.md): every lifecycle, LLM, tool,
   sub-agent, callback, and prompt hook, with signatures and timing.
-- [v1.3.0 release notes](release-notes-1.3.0.md) — final changelog,
+- [v1.3.0 release notes](release-notes-1.3.0.md): final changelog,
   compatibility notes, packaging flow, and validation summary.
 
 ## What belongs here

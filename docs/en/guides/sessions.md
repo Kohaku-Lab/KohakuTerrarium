@@ -11,7 +11,7 @@ tags:
 
 For readers persisting, resuming, or archiving agent runs.
 
-A session captures the operational state of a run — conversation, events, sub-agent conversations, channel history, scratchpad, jobs, resumable triggers, and config metadata — as a single `.kohakutr` file. You can stop a creature at any point and resume exactly where it left off.
+A session captures the operational state of a run (conversation, events, sub-agent conversations, channel history, scratchpad, jobs, resumable triggers, and config metadata) as a single `.kohakutr` file. You can stop a creature at any point and resume exactly where it left off.
 
 Concept primer: [memory and compaction](../concepts/modules/memory-and-compaction.md), [session and environment](../concepts/modules/session-and-environment.md).
 
@@ -45,14 +45,14 @@ The format is append-only for event data and versioned through KohakuVault's aut
 
 On each turn KohakuTerrarium records:
 
-- **Conversation snapshots** — raw message dicts via msgpack. Preserves `tool_calls`, multimodal content, and metadata.
-- **Event log** — one entry per chunk, tool call, sub-agent output, trigger fire, channel message, compact, interrupt, or error. This is the canonical history.
-- **Sub-agent conversations** — saved before the sub-agent is destroyed, so you can inspect what it did after the fact.
-- **Scratchpad and channel messages** — per-agent and per-channel.
-- **Job records** — outputs of long-running tools and sub-agents.
-- **Resumable triggers** — any `BaseTrigger` subclass with `resumable: True` serializes to `state` and restores on resume.
-- **Config snapshot** — the fully-resolved config at run time, so resume can rebuild the agent even if the on-disk config changed.
-- **Binary artifacts** — generated images and similar binary outputs written under `<session>.artifacts/` beside the session file.
+- **Conversation snapshots**: raw message dicts via msgpack. Preserves `tool_calls`, multimodal content, and metadata.
+- **Event log**: one entry per chunk, tool call, sub-agent output, trigger fire, channel message, compact, interrupt, or error. This is the canonical history.
+- **Sub-agent conversations**: saved before the sub-agent is destroyed, so you can inspect what it did after the fact.
+- **Scratchpad and channel messages**: per-agent and per-channel.
+- **Job records**: outputs of long-running tools and sub-agents.
+- **Resumable triggers**: any `BaseTrigger` subclass with `resumable: True` serializes to `state` and restores on resume.
+- **Config snapshot**: the fully-resolved config at run time, so resume can rebuild the agent even if the on-disk config changed.
+- **Binary artifacts**: generated images and similar binary outputs written under `<session>.artifacts/` beside the session file.
 
 ## Resuming
 
@@ -67,6 +67,23 @@ Resume is auto-detected: agent sessions mount a single creature; terrarium sessi
 
 Flags the same as `kt run`: `--mode`, `--llm`, `--log-level`, plus `--pwd <dir>` to override the working directory.
 
+Programmatic resume mirrors this (see [Sessions from Python](#sessions-from-python)):
+
+```python
+from kohakuterrarium import Terrarium
+
+# Fresh engine from a saved session...
+engine = await Terrarium.resume("runs/swe_20240101.kohakutr", pwd="/work", llm=None)
+
+# ...or adopt into an engine that's already running other graphs.
+graph_id = await engine.adopt_session("runs/other.kohakutr")
+```
+
+Both accept a path or a `SessionStore`; `llm=` is an optional selector
+string override. A file that exists but cannot be resumed (unknown
+saved-session type, missing config path in the metadata) raises a
+`ValueError`.
+
 What resume does:
 
 1. Reads the config snapshot from `meta`.
@@ -75,7 +92,7 @@ What resume does:
 4. Rebuilds the agent, attaches the same `SessionStore`, reinjects the conversation snapshot, replays scratchpad/channel/trigger state.
 5. Starts the controller fresh; previous events are in context.
 
-This means small config drift is fine (swapping an LLM, changing a prompt). Structural drift (renaming the creature, removing a tool it was actively using) can cause replay errors — pin a session to its original config if you need perfect fidelity.
+This means small config drift is fine (swapping an LLM, changing a prompt). Structural drift (renaming the creature, removing a tool it was actively using) can cause replay errors; pin a session to its original config if you need perfect fidelity.
 
 ## Interrupt and resume workflow
 
@@ -97,20 +114,88 @@ cp -r ~/.kohakuterrarium/sessions/swe_20240101.artifacts ~/backups/   # if prese
 
 # Resume from a moved location
 kt resume ~/backups/swe_20240101.kohakutr
-
-# Inspect without a full resume (read-only CLI coming; for now use Python)
 ```
 
-Programmatic inspection:
+Inspect without resuming via `SessionReader` (below); it opens the
+file read-only, so inspection never touches `status` or `last_active`.
+
+## Sessions from Python
+
+### Creating sessions: engine-owned persistence
+
+Persistence is a keyword on the engine; the framework writes and
+validates the session metadata itself:
 
 ```python
-from kohakuterrarium.session.store import SessionStore
-store = SessionStore("~/backups/swe_20240101.kohakutr")
-print(store.load_meta())
-for agent, event in store.get_all_events():
-    print(agent, event["type"])
-store.close()
+from kohakuterrarium import Terrarium
+
+# Autosession: every graph gets <session_dir>/<graph_id>.kohakutr
+# automatically (merge/split children land there too).
+engine = Terrarium(session_dir="runs/")
+
+# Per-creature control via session=:
+c = await engine.add_creature(
+    "@kt-biome/creatures/general",
+    session="runs/student-42.kohakutr",   # mint the store at this exact path
+)
+# session=True   -> mint in the default session dir
+# session=False  -> no persistence, even under autosession
+# session=<SessionStore> -> attach an existing store as-is
+# session=None (default) -> follow the engine (autosession / graph store / off)
+
+# Recipes: one terrarium-typed store for the whole graph.
+await engine.apply_recipe("@kt-biome/terrariums/swe_team", session="runs/team.kohakutr")
 ```
+
+`await engine.shutdown()` (or leaving the `async with` block) closes
+every store the engine minted, so files no longer get stuck at
+`status: "running"`.
+
+### Resuming
+
+- `await Terrarium.resume(store_or_path, *, pwd=None, llm=None)`:
+  build a fresh engine and adopt the saved session.
+- `await engine.adopt_session(store_or_path, *, pwd=None, llm=None)`:
+  resume into a running engine; returns the new `graph_id`.
+
+Resume reconstructs topology from the config path recorded in the
+session metadata (`@pkg` refs included) and runs with a per-agent
+working directory; it does not `os.chdir` your process.
+
+### Reading: `SessionReader`
+
+`SessionReader` is the read-only inspection surface over a
+`.kohakutr` file. It opens via `SessionStore.open_readonly`, so
+reading never bumps `last_active` or flips `status`:
+
+```python
+from kohakuterrarium import SessionReader
+
+with SessionReader("~/backups/swe_20240101.kohakutr") as r:
+    print(r.meta["status"], r.agents)
+
+    for turn in r.turns():               # live-branch turns, reassembled
+        tools = [tc["name"] for tc in turn.tool_calls]
+        print(f"[{turn.source}] {turn.user_text!r} -> "
+              f"{turn.assistant_text[:60]!r} tools={tools}")
+
+    events = r.events()                  # the raw append-only log
+    convo = r.conversation()             # final snapshot (message dicts)
+    chan = r.channel_messages("tasks")   # one channel's history
+
+    r.index()                            # ad-hoc FTS index, then:
+    hits = r.search("score.json", k=5)
+```
+
+`turns()` skips regenerated / edited siblings, so you see the same live
+branch every viewer shows. `search()` returns hits only for indexed
+sessions (`kt embedding`, or `reader.index()` for FTS ad hoc).
+
+If you need raw read-write access, `SessionStore(path)` is still
+there, but for any listing / preview / viewer purpose use
+`SessionStore.open_readonly(path)` (or just `SessionReader`): a plain
+open + close marks the session paused and bumps `last_active`,
+corrupting recency ordering.
 
 ## Compaction
 
@@ -125,7 +210,7 @@ compact:
   compact_model: gpt-4o-mini  # cheaper model for the summarization pass
 ```
 
-Compaction runs in the background (see [concepts/modules/memory-and-compaction](../concepts/modules/memory-and-compaction.md)) — the controller keeps running; when the new summary is ready, the conversation is swapped. Each compaction is logged as an event.
+Compaction runs in the background (see [concepts/modules/memory-and-compaction](../concepts/modules/memory-and-compaction.md)): the controller keeps running; when the new summary is ready, the conversation is swapped. Each compaction is logged as an event.
 
 Manual compaction:
 
@@ -138,7 +223,7 @@ from the CLI/TUI prompt. Useful before handing off a long session or shipping it
 ## Listing and searching sessions
 
 The `kt serve` web UI and `GET /api/sessions` are backed by a
-sidecar index — one SQLite file at
+sidecar index: one SQLite file at
 `<session_dir>/.kt-index.kvault` that caches listing-shape metadata
 (name, status, last-active timestamp, agents, preview, …) per
 session and exposes BM25 search over the text columns. You never
@@ -156,8 +241,8 @@ Query parameters on `GET /api/sessions`:
 | `order` | `desc` | `desc` \| `asc` |
 | `status` | (none) | exact match (`running`, `paused`, …) |
 | `config_type` | (none) | exact match (`agent`, `terrarium`) |
-| `node_id` | (none) | exact match — filter by which lab node ran the session |
-| `refresh` | `false` | incremental reconcile before listing — re-reads only files whose `(mtime, size)` changed |
+| `node_id` | (none) | exact match; filter by which lab node ran the session |
+| `refresh` | `false` | incremental reconcile before listing; re-reads only files whose `(mtime, size)` changed |
 | `full_rescan` | `false` | force re-read of every file (use after manually editing a `.kohakutr` on disk) |
 
 `sort=relevance` is only meaningful when `search` is set; with any
@@ -175,7 +260,7 @@ How the index stays in sync without manual refresh:
   the files that changed. First-ever startup does a full read of
   every file (the *bootstrap* step) and remembers it succeeded.
 - **`?refresh=true`.** Trigger the same incremental reconcile on
-  demand — useful right after copying a backup `.kohakutr` into the
+  demand; useful right after copying a backup `.kohakutr` into the
   session directory.
 
 The sidecar is safe to delete: the next listing rebuilds it from
@@ -226,7 +311,8 @@ No `.kohakutr` is created. This also disables compaction's ability to recover pr
 
 ## See also
 
-- [Memory](memory.md) — FTS, semantic, and hybrid search over session history.
-- [Configuration](configuration.md) — compaction recipes and session flags.
-- [Programmatic Usage](programmatic-usage.md) — `SessionStore` API for custom inspection.
-- [Concepts / memory and compaction](../concepts/modules/memory-and-compaction.md) — how compaction works.
+- [Memory](memory.md): FTS, semantic, and hybrid search over session history.
+- [Configuration](configuration.md): compaction recipes and session flags.
+- [Programmatic Usage](programmatic-usage.md): driving agents and engines from Python.
+- [Reference / Python API](../reference/python.md#sessions): `SessionReader` / `SessionStore` signatures.
+- [Concepts / memory and compaction](../concepts/modules/memory-and-compaction.md): how compaction works.

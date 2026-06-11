@@ -1,6 +1,6 @@
 ---
 title: Multi-agent
-summary: Two axes — vertical (sub-agents) and horizontal (terrarium + channels + output wiring) — and when to pick which.
+summary: Two axes, vertical (sub-agents) and horizontal (terrarium + channels + output wiring), and when to pick which.
 tags:
   - concepts
   - multi-agent
@@ -54,7 +54,7 @@ This is what CrewAI, AutoGen, and MetaGPT target.
 - **What KT gives you:** [terrariums](terrarium.md). A terrarium is
   the runtime engine that hosts creatures, owns the channel graph,
   and handles topology + session bookkeeping when the graph changes.
-  It runs no LLM of its own — the reasoning lives in the creatures
+  It runs no LLM of its own; the reasoning lives in the creatures
   inside it.
 
 ## Rule of thumb
@@ -73,12 +73,12 @@ We treat terrarium as a **proposed architecture** for horizontal
 multi-agent. The pieces work together today: channels for optional /
 conditional traffic, **output wiring** for deterministic pipeline
 edges (a framework-level config that auto-delivers a creature's
-turn-end text into a target's event queue — no `send_message` needed),
+turn-end text into a target's event queue, no `send_message` needed),
 plus hot-plug, observation, and lifecycle pings to root. kt-biome's
 `auto_research`, `deep_research`, `swe_team`, and `pair_programming`
 terrariums exercise these end-to-end.
 
-What we're still learning is the idiom — when to prefer wiring vs.
+What we're still learning is the idiom: when to prefer wiring vs.
 channels, how to express conditional branches without hand-rolled
 channel plumbing, how to surface wiring activity in the UI on par
 with channel traffic. Those open questions live in the
@@ -86,22 +86,22 @@ with channel traffic. Those open questions live in the
 
 Use terrarium where you genuinely want different creatures
 cooperating. Use sub-agents when the task decomposes naturally inside
-one creature — vertical stays simpler for most "I need context
+one creature; vertical stays simpler for most "I need context
 isolation" instincts. The framework doesn't pick between them.
 
 ## What's in this section
 
-- [Terrarium](terrarium.md) — the runtime engine for horizontal
+- [Terrarium](terrarium.md): the runtime engine for horizontal
   multi-creature graphs.
-- [Privileged node](privileged-node.md) — the per-graph creature
+- [Privileged node](privileged-node.md): the per-graph creature
   that carries the group tools; the `root:` recipe keyword promotes
   one to privileged.
-- [Dynamic graph](dynamic-graph.md) — auto-merge / auto-split, the
+- [Dynamic graph](dynamic-graph.md): auto-merge / auto-split, the
   in-graph "graph editor", and how the recipe stays the source of
   truth on resume.
 
 ## See also
 
-- [Sub-agent](../modules/sub-agent.md) — the vertical primitive.
-- [Channel](../modules/channel.md) — the substrate both terrariums and
+- [Sub-agent](../modules/sub-agent.md): the vertical primitive.
+- [Channel](../modules/channel.md): the substrate both terrariums and
   some sub-agent patterns rely on.

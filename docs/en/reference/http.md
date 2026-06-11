@@ -34,16 +34,19 @@ For task-oriented use, see
 When `create_app(static_dir=Path)` is called with a valid built SPA
 directory:
 
-- `/assets/*` — hashed build assets.
-- `/{path}` — SPA fallback, serves `index.html` for any unmatched path.
+- `/assets/*`: hashed build assets.
+- `/{path}`: SPA fallback, serves `index.html` for any unmatched path.
 - `/api/*` and WebSocket routes take precedence.
 
 ## Response conventions
 
 - Status codes: `200` success, `400` bad input, `404` missing resource,
-  `500` server error. `201` is not used.
+  `409` conflict, `500` server error. `201` is not used.
 - Payloads are JSON unless otherwise noted.
-- Errors use FastAPI `HTTPException` with `{"detail": "<message>"}`.
+- Error bodies are `{"detail": "<message>"}`. The Studio layer raises
+  typed `kohakuterrarium.errors` exceptions; a single adapter in
+  `api/app.py` maps them (`NotFoundError` → 404, `ConflictError` → 409,
+  `InvalidRequestError`/`ValueError` → 400, other `KTError` → 500).
 
 ---
 
@@ -78,8 +81,9 @@ effects: all creatures stopped, channels cleaned, session store closed.
 
 Add a channel at runtime.
 
-- Body: `ChannelAdd` (`name`, `channel_type` default `"queue"`,
-  `description`).
+- Body: `ChannelAdd` (`name`, `description`; `channel_type` is accepted
+  for legacy payload compatibility but ignored; every channel is
+  broadcast).
 - Response: `{"status": "created", "channel": <name>}`.
 
 ### `GET /api/terrariums/{terrarium_id}/channels`
@@ -377,7 +381,7 @@ Query params:
 |---|---|---|---|
 | `limit` | int | `20` | Max sessions. |
 | `offset` | int | `0` | Skip N. |
-| `search` | str | — | Filter by name, config, agents, preview (case-insensitive). |
+| `search` | str | (none) | Filter by name, config, agents, preview (case-insensitive). |
 | `refresh` | bool | `false` | Force rebuild of the session index. |
 
 Response:
@@ -437,7 +441,7 @@ Query params:
 | `q` | str | required | Query. |
 | `mode` | `auto\|fts\|semantic\|hybrid` | `auto` | Search mode. |
 | `k` | int | `10` | Max results. |
-| `agent` | str | — | Filter by agent. |
+| `agent` | str | (none) | Filter by agent. |
 
 Response: `{"session_name", "query", "mode", "k", "count", "results"}`.
 Each result: `{content, round, block, agent, block_type, score, ts, tool_name, channel}`.
@@ -632,7 +636,7 @@ Response: `{"status": "removed", "name"}`.
 All WebSocket endpoints are bidirectional over a standard upgrade (no
 custom headers or subprotocols). Clients receive a stream of JSON
 frames and may send input frames. The server closes on error; there
-is no auto-reconnect or heartbeat — the client is responsible.
+is no auto-reconnect or heartbeat; the client is responsible.
 
 ### `WS /ws/terrariums/{terrarium_id}`
 
@@ -641,21 +645,21 @@ channels).
 
 Inbound frames:
 
-- `{"type": "input", "target": "root"|<creature>, "content": str|list[dict], "message"?: str}` —
+- `{"type": "input", "target": "root"|<creature>, "content": str|list[dict], "message"?: str}`:
   queues input for the target. Server acknowledges with
   `{"type": "idle", "source": <target>, "ts": float}`.
 - Other message types are ignored.
 
 Outbound frames:
 
-- `{"type": "activity", "activity_type": ..., "source", "ts", ...}` —
+- `{"type": "activity", "activity_type": ..., "source", "ts", ...}`:
   activity types include `session_info`, `tool_call`, `tool_result`,
   `token_usage`, `job_update`, `job_completed`, and more (see
   [Event types](#event-types)).
-- `{"type": "text", "content", "source", "ts"}` — streaming text chunk.
+- `{"type": "text", "content", "source", "ts"}`: streaming text chunk.
 - `{"type": "processing_start", "source", "ts"}`.
 - `{"type": "processing_end", "source", "ts"}`.
-- `{"type": "channel_message", "source": "channel", "channel", "sender", "content", "message_id", "timestamp", "ts", "history"?: bool}` —
+- `{"type": "channel_message", "source": "channel", "channel", "sender", "content", "message_id", "timestamp", "ts", "history"?: bool}`:
   `history` is `true` for the replay of messages that pre-date the
   connection.
 - `{"type": "error", "content", "source"?, "ts"}`.
@@ -703,8 +707,8 @@ File-change watch on an agent's working directory.
 
 Outbound:
 
-- `{"type": "ready", "root"}` — watcher started.
-- `{"type": "change", "changes": [{"path", "abs_path", "action": "added"|"modified"|"deleted"}]}` —
+- `{"type": "ready", "root"}`: watcher started.
+- `{"type": "change", "changes": [{"path", "abs_path", "action": "added"|"modified"|"deleted"}]}`:
   batched every 1 second. Hidden/ignored directories (`.git`,
   `node_modules`, `__pycache__`, `.venv`, `.mypy_cache`, …) are
   filtered.
@@ -716,8 +720,8 @@ Live tail of the server process's log file.
 
 Outbound:
 
-- `{"type": "meta", "path", "pid"}` — sent on connect.
-- `{"type": "line", "ts", "level", "module", "text"}` — streamed.
+- `{"type": "meta", "path", "pid"}`: sent on connect.
+- `{"type": "line", "ts", "level", "module", "text"}`: streamed.
 - `{"type": "error", "text"}`.
 
 The server first replays the last ~200 lines, then streams new ones.
@@ -728,7 +732,7 @@ Interactive PTY inside the agent's working directory.
 
 Inbound:
 
-- `{"type": "input", "data": str}` — shell input (include `\n` to submit).
+- `{"type": "input", "data": str}`: shell input (include `\n` to submit).
 - `{"type": "resize", "rows": int, "cols": int}`.
 
 Outbound:
@@ -787,7 +791,7 @@ Pydantic models used in request and response bodies.
 | Field | Type | Required | Default |
 |---|---|---|---|
 | `name` | str | yes | |
-| `channel_type` | str | no | `"queue"` |
+| `channel_type` | str | no | accepted for legacy compatibility, ignored (channels are broadcast) |
 | `description` | str | no | `""` |
 
 ### `ChannelSend`
@@ -1003,11 +1007,11 @@ Events are persisted to `SessionStore` and streamed over WebSockets.
 Every event carries `type`, `source` (originating agent/creature name),
 and `ts` (Unix seconds).
 
-- `text` — streaming text chunk.
+- `text`: streaming text chunk.
   - `content: str`.
-- `activity: assistant_message_edited` — emitted when a `post_llm_call`
+- `activity: assistant_message_edited`: emitted when a `post_llm_call`
   plugin rewrites the final assistant message.
-- `activity` — diverse type discriminated by `activity_type`, e.g.
+- `activity`: diverse type discriminated by `activity_type`, e.g.
   `session_info`, `tool_call`, `tool_result`, `token_usage`,
   `job_update`, `job_completed`, `model_switch`, `interrupt`,
   `regenerate`, `edit`, `rewind`, `promote`, `background_result`,
@@ -1022,8 +1026,8 @@ and `ts` (Unix seconds).
     `compact_threshold`, `error_type`, `error`, `messages_cleared`,
     `background`, `subagent`, `tool`, `interrupted`, `final_state`.
 - `processing_start`, `processing_end`.
-- `user_input` — `content: str | list[dict]`.
-- `channel_message` — `channel`, `sender`, `content`, `message_id`,
+- `user_input`: `content: str | list[dict]`.
+- `channel_message`: `channel`, `sender`, `content`, `message_id`,
   `timestamp`.
 
 ## Session storage

@@ -41,7 +41,7 @@ order: `config.yaml` → `config.yml` → `config.json` → `config.toml`.
 
 | Field | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `name` | str | — | yes | Creature name. Default session key if `session_key` unset. |
+| `name` | str | (none) | yes | Creature name. Default session key if `session_key` unset. |
 | `version` | str | `"1.0"` | no | Informational. |
 | `base_config` | str | `null` | no | Parent config to inherit from (`@package/path`, `creatures/<name>`, or relative). |
 | `controller` | dict | `{}` | no | LLM/controller block. See [Controller](#controller-block). |
@@ -85,7 +85,7 @@ All fields may also be set at the top level for backward compatibility.
 | `llm` | str | `""` | Profile reference in `~/.kohakuterrarium/llm_profiles.yaml` (e.g. `gpt-5.4`, `claude-opus-4.7`). May carry an inline variation selector, e.g. `claude-opus-4.7@reasoning=xhigh`. |
 | `model` | str | `""` | Inline model id if `llm` unset. Also accepts a `name@group=option` selector. |
 | `provider` | str | `""` | Disambiguator when `model` is set and the same model id is bound to multiple backends (e.g. `openai` vs `openrouter`). |
-| `variation_selections` | dict[str,str] | `{}` | Per-group variation overrides — `{group_name: option_name}`. See [Variation selector](#variation-selector). |
+| `variation_selections` | dict[str,str] | `{}` | Per-group variation overrides, `{group_name: option_name}`. See [Variation selector](#variation-selector). |
 | `variation` | str | `""` | Shorthand for a single-option selection; resolved against the preset's groups. |
 | `auth_mode` | str | `""` | Blank (auto), `codex-oauth`, etc. |
 | `api_key_env` | str | `""` | Env var holding the key. |
@@ -103,13 +103,13 @@ Resolution order per turn (see `llm/profiles.py:resolve_controller_llm`):
 
 1. `--llm` CLI flag wins over the YAML `controller.llm`.
 2. Otherwise `controller.llm` (preset name + optional `@group=option` selector).
-3. Otherwise `controller.model` — matched against the built-in and user preset registry by model id. `controller.provider` disambiguates cross-backend collisions; a `name@group=option` selector is also parsed out.
+3. Otherwise `controller.model`: matched against the built-in and user preset registry by model id. `controller.provider` disambiguates cross-backend collisions; a `name@group=option` selector is also parsed out.
 4. If neither `llm` nor `model` was set, fall back to `default_model` from `llm_profiles.yaml`.
 5. After a profile is resolved, the controller's `temperature`, `reasoning_effort`, `service_tier`, `max_tokens` (remapped to `max_output`), and `extra_body` are layered on top. `extra_body` is deep-merged, every other override is a scalar replace.
 
 ### Variation selector
 
-A preset may expose **variation groups** — two-level dicts of `{group_name:
+A preset may expose **variation groups**: two-level dicts of `{group_name:
 {option_name: patch}}` that let one preset serve multiple knobs (reasoning
 effort, speed, thinking level) without duplicating the entry. Selection
 happens either inside the preset reference string or via explicit dict fields
@@ -139,26 +139,26 @@ controller:
 Rules:
 
 - The bare-shorthand form (`@xhigh`) is rejected when more than one group
-  would match the option — disambiguate with `@group=option`.
+  would match the option; disambiguate with `@group=option`.
 - Unknown groups or options raise at resolve time.
 - Variation patches may write to only these roots: `temperature`,
   `reasoning_effort`, `service_tier`, `max_context`, `max_output`,
   `extra_body`. Anything else is rejected.
-- Cross-group collisions on the same dotted path raise — two selections
+- Cross-group collisions on the same dotted path raise: two selections
   cannot both claim `extra_body.reasoning.effort`.
 
-See [builtins.md — Variation groups](builtins.md#variation-groups) for the
+See [Variation groups in builtins.md](builtins.md#variation-groups) for the
 per-preset catalogue of groups and options.
 
 ### Provider-specific `extra_body` notes
 
 `extra_body` is deep-merged into the JSON request body. Each provider reads
-reasoning/effort knobs from a different path — set the knob the provider
+reasoning/effort knobs from a different path; set the knob the provider
 actually honours:
 
 | Provider | Canonical path | Notes |
 |---|---|---|
-| Codex (ChatGPT-OAuth) | top-level `reasoning_effort`, `service_tier` | `reasoning_effort`: `none\|low\|medium\|high\|xhigh`. Fast mode: use the `speed=fast` variation on `gpt-5.4` — it maps to `service_tier: priority`. Setting `service_tier: fast` literally is rejected by the OpenAI API. |
+| Codex (ChatGPT-OAuth) | top-level `reasoning_effort`, `service_tier` | `reasoning_effort`: `none\|low\|medium\|high\|xhigh`. Fast mode: use the `speed=fast` variation on `gpt-5.4`, which maps to `service_tier: priority`. Setting `service_tier: fast` literally is rejected by the OpenAI API. |
 | OpenAI direct (`-api` presets) | `extra_body.reasoning.effort` | Full scale `none\|low\|medium\|high\|xhigh`. |
 | OpenRouter (`-or` presets) | `extra_body.reasoning.effort` | Unified scale `minimal\|low\|medium\|high`; `xhigh` only honoured by a handful of models (Opus 4.7, GPT-5.x). |
 | Anthropic direct | `extra_body.output_config.effort` | Compat endpoint silently drops top-level `reasoning_effort` / `service_tier`. Opus 4.7: `low\|medium\|high\|xhigh\|max`; Opus 4.6 / Sonnet 4.6: `low\|medium\|high\|max`. Haiku 4.5 uses the older `thinking.budget_tokens`. |
@@ -180,10 +180,10 @@ Dict fields: `{type, module?, class?, options?, ...type-specific keys}`.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `type` | str | `"cli"` | `cli`, `cli_nonblocking`, `tui`, `none`, `custom`, `package`. Audio/ASR inputs are custom/package modules. |
-| `module` | str | — | For `custom` (e.g. `./custom/input.py`) or `package` (e.g. `pkg.mod`). |
-| `class` | str | — | Class to instantiate. YAML key is `class`; the loader stores it on the `class_name` dataclass attribute. |
+| `module` | str | (none) | For `custom` (e.g. `./custom/input.py`) or `package` (e.g. `pkg.mod`). |
+| `class` | str | (none) | Class to instantiate. YAML key is `class`; the loader stores it on the `class_name` dataclass attribute. |
 | `options` | dict | `{}` | Module-specific options. |
-| `prompt` | str | `"> "` | CLI prompt (plain `cli` input only — ignored by the Rich CLI and TUI). |
+| `prompt` | str | `"> "` | CLI prompt (plain `cli` input only; ignored by the Rich CLI and TUI). |
 | `exit_commands` | list[str] | `[]` | Strings that trigger exit. |
 
 ### Output
@@ -194,8 +194,8 @@ channels (e.g. a Discord webhook).
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `type` | str | `"stdout"` | `stdout`, `stdout_prefixed`, `console_tts`, `dummy_tts`, `tui`, `custom`, `package`. |
-| `module` | str | — | For `custom`/`package` output modules. |
-| `class` | str | — | Class to instantiate. YAML key is `class`; the loader stores it on the `class_name` dataclass attribute. |
+| `module` | str | (none) | For `custom`/`package` output modules. |
+| `class` | str | (none) | Class to instantiate. YAML key is `class`; the loader stores it on the `class_name` dataclass attribute. |
 | `options` | dict | `{}` | Module-specific options. |
 | `controller_direct` | bool | `true` | Route controller text through the default output. |
 | `named_outputs` | dict[str, OutputConfigItem] | `{}` | Named side outputs. Each item has the same shape as the default. |
@@ -207,21 +207,21 @@ List of tool entries. Each entry is a dict or a shorthand string
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `name` | str | — | Tool name (required). For `type: trigger`, must match the trigger's `setup_tool_name`. |
+| `name` | str | (none) | Tool name (required). For `type: trigger`, must match the trigger's `setup_tool_name`. |
 | `type` | str | `"builtin"` | `builtin`, `trigger`, `custom`, `package`. |
-| `module` | str | — | For `custom` (e.g. `./custom/tools/my_tool.py`) or `package`. |
-| `class` | str | — | Class to instantiate for `custom`/`package`. YAML key is `class`; stored on the `class_name` dataclass attribute. |
-| `doc` | str | — | Override for the skill documentation file. |
+| `module` | str | (none) | For `custom` (e.g. `./custom/tools/my_tool.py`) or `package`. |
+| `class` | str | (none) | Class to instantiate for `custom`/`package`. YAML key is `class`; stored on the `class_name` dataclass attribute. |
+| `doc` | str | (none) | Override for the skill documentation file. |
 | `options` | dict | `{}` | Tool-specific options. For builtins, top-level keys such as `timeout`, `max_output`, `working_dir`, `env`, and `notify_controller_on_background_complete` are mapped into `ToolConfig`; remaining keys stay in `config.extra`. |
 
 Tool types:
 
-- `builtin` — resolved against the built-in tool catalog by `name`.
-- `trigger` — exposes a universal trigger class as an LLM-callable setup
+- `builtin`: resolved against the built-in tool catalog by `name`.
+- `trigger`: exposes a universal trigger class as an LLM-callable setup
   tool. `name` must match the trigger's `setup_tool_name`. Shipped
   setup tools: `add_timer` (TimerTrigger), `watch_channel`
   (ChannelTrigger), `add_schedule` (SchedulerTrigger).
-- `custom` / `package` — load the class at `module` + `class`.
+- `custom` / `package`: load the class at `module` + `class`.
 
 Provider-native tools are auto-injected from the active backend's
 `provider_native_tools` declaration. The creature does not need to list
@@ -241,11 +241,11 @@ tools:
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `name` | str | — | Sub-agent identifier. |
+| `name` | str | (none) | Sub-agent identifier. |
 | `type` | str | `"builtin"` | `builtin`, `custom`, `package`. |
-| `module` | str | — | For `custom`/`package`. |
-| `config` | str | — | Named config object inside the module (e.g. `MY_AGENT_CONFIG`). YAML key is `config`; stored on the `config_name` dataclass attribute. |
-| `description` | str | — | Description used in the parent's prompt. |
+| `module` | str | (none) | For `custom`/`package`. |
+| `config` | str | (none) | Named config object inside the module (e.g. `MY_AGENT_CONFIG`). YAML key is `config`; stored on the `config_name` dataclass attribute. |
+| `description` | str | (none) | Description used in the parent's prompt. |
 | `tools` | list[str] | `[]` | Tools this sub-agent is allowed to use. |
 | `can_modify` | bool | `false` | Whether the sub-agent can perform mutating operations. |
 | `interactive` | bool | `false` | Stay alive across turns; receive context updates. |
@@ -298,26 +298,26 @@ With this flag set to `false`, the background job still emits normal activity/lo
 
 Sub-agent option fields also include runtime and shared-budget controls:
 
-- `default_plugins: ["auto-compact"]` — expands to `compact.auto`; use it when the sub-agent has a `compact:` block that should auto-trigger.
-- `plugins: [{name: budget, options: {...}}]` — unified runtime budget plugin. Its options include `turn_budget: [soft, hard]`, `tool_call_budget: [soft, hard]`, and optional `walltime_budget: [soft, hard]` in seconds.
-- `budget_inherit: true` (default) — child reuses the parent's shared legacy iteration budget if one exists.
-- `budget_allocation: N` — child gets a fresh isolated legacy budget of `N` turns.
-- `budget_inherit: false` with no allocation — child runs without the parent's shared legacy budget.
+- `default_plugins: ["auto-compact"]`: expands to `compact.auto`; use it when the sub-agent has a `compact:` block that should auto-trigger.
+- `plugins: [{name: budget, options: {...}}]`: unified runtime budget plugin. Its options include `turn_budget: [soft, hard]`, `tool_call_budget: [soft, hard]`, and optional `walltime_budget: [soft, hard]` in seconds.
+- `budget_inherit: true` (default): child reuses the parent's shared legacy iteration budget if one exists.
+- `budget_allocation: N`: child gets a fresh isolated legacy budget of `N` turns.
+- `budget_inherit: false` with no allocation: child runs without the parent's shared legacy budget.
 
 ### Triggers
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `type` | str | — | `timer`, `context`, `channel`, `custom`, `package`. |
-| `module` | str | — | For `custom`/`package`. |
-| `class` | str | — | Class to instantiate. YAML key is `class`; stored on the `class_name` dataclass attribute. |
-| `prompt` | str | — | Default prompt injection when the trigger fires. |
+| `type` | str | (none) | `timer`, `context`, `channel`, `custom`, `package`. |
+| `module` | str | (none) | For `custom`/`package`. |
+| `class` | str | (none) | Class to instantiate. YAML key is `class`; stored on the `class_name` dataclass attribute. |
+| `prompt` | str | (none) | Default prompt injection when the trigger fires. |
 | `options` | dict | `{}` | Trigger-specific options. |
 
 Common per-type options:
 
 - `timer`: `interval` (seconds), `immediate` (bool, default `false`).
-- `context`: `debounce_ms` (int, default `100`) — debounced context-update trigger.
+- `context`: `debounce_ms` (int, default `100`); a debounced context-update trigger.
 - `channel`: `channel` (name), `filter_sender` (optional).
 
 For a clock-aligned scheduler, expose `SchedulerTrigger` as an LLM-callable
@@ -339,16 +339,16 @@ setup tool via a `tools` entry with `type: trigger, name: add_schedule`
 
 A list of framework-level routing entries. At each turn-end, the
 framework constructs a `creature_output` `TriggerEvent` and pushes it
-directly into each target creature's event queue — bypassing channels
-entirely. See [terrariums guide — output wiring](../guides/terrariums.md#output-wiring)
-and [patterns.md — pattern 1b](../concepts/patterns.md) for
+directly into each target creature's event queue, bypassing channels
+entirely. See [output wiring in the terrariums guide](../guides/terrariums.md#output-wiring)
+and [pattern 1b in patterns.md](../concepts/patterns.md) for
 discussion; this section is the config reference.
 
 Entry fields:
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `to` | str | — | Target creature name, or the magic string `"root"`. |
+| `to` | str | (none) | Target creature name, or the magic string `"root"`. |
 | `with_content` | bool | `true` | If `false`, the event carries an empty `content` (metadata-only ping). |
 | `prompt` | str \| null | `null` | Template for the receiver's prompt override. When unset, a default template is used depending on `with_content`. |
 | `prompt_format` | `simple` \| `jinja` | `"simple"` | `simple` uses `str.format_map`; `jinja` uses the `prompt.template` renderer for conditionals / filters. |
@@ -356,7 +356,7 @@ Entry fields:
 Available template variables (both formats): `source`, `target`,
 `content`, `turn_index`, `source_event_type`, `with_content`.
 
-Shorthand — a bare string is sugar for `{to: <str>, with_content: true}`:
+Shorthand: a bare string is sugar for `{to: <str>, with_content: true}`:
 
 ```yaml
 output_wiring:
@@ -377,7 +377,7 @@ Notes:
   no-op resolver that logs once).
 - Unknown / stopped targets are logged and skipped; they never raise
   into the source creature's turn-finalisation.
-- The source's `_finalize_processing` runs to completion immediately —
+- The source's `_finalize_processing` runs to completion immediately;
   each target's `_process_event` runs in its own `asyncio.Task` so a
   slow receiver doesn't block the source.
 
@@ -405,22 +405,22 @@ the same schema; agents declare the ones they want per-config.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `name` | str | — | Server identifier. |
+| `name` | str | (none) | Server identifier. |
 | `transport` | `stdio` \| `streamable_http` \| `http` \| `sse` | `stdio` | Transport. `streamable_http` is preferred for modern HTTP MCP; `http`/`sse` are legacy SSE aliases. |
-| `command` | str | — | stdio executable. |
+| `command` | str | (none) | stdio executable. |
 | `args` | list[str] | `[]` | stdio args. |
 | `env` | dict[str,str] | `{}` | stdio env. |
-| `url` | str | — | URL for `streamable_http`, `http`, or `sse` transports. |
+| `url` | str | (none) | URL for `streamable_http`, `http`, or `sse` transports. |
 
 ### Plugins
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `name` | str | — | Plugin identifier. |
+| `name` | str | (none) | Plugin identifier. |
 | `type` | str | `"builtin"` | `builtin`, `custom`, `package`. |
-| `module` | str | — | For `custom` (e.g. `./custom/plugins/my.py`) or `package`. |
-| `class` or `class_name` | str | — | Class to instantiate. Plugins accept both keys (see `bootstrap/plugins.py`); every other module kind uses `class`. |
-| `description` | str | — | Free-form metadata. |
+| `module` | str | (none) | For `custom` (e.g. `./custom/plugins/my.py`) or `package`. |
+| `class` or `class_name` | str | (none) | Class to instantiate. Plugins accept both keys (see `bootstrap/plugins.py`); every other module kind uses `class`. |
+| `description` | str | (none) | Free-form metadata. |
 | `options` | dict | `{}` | Plugin-specific options. |
 
 Shorthand: a bare string is treated as a package-resolved plugin name.
@@ -450,15 +450,15 @@ Preset aliases: `@tiny`, `@base`, `@retrieval`, `@best`,
 `base_config` resolves via the path rules above. Merging follows one
 unified rule set for every field:
 
-- **Scalars** — child overrides.
-- **Dicts** (`controller`, `input`, `output`, `memory`, `compact`, …) —
+- **Scalars**: child overrides.
+- **Dicts** (`controller`, `input`, `output`, `memory`, `compact`, …):
   shallow merge; child keys override at the top level.
 - **Identity-keyed lists** (`tools`, `subagents`, `plugins`,
-  `mcp_servers`, `triggers`) — union by `name`. On name collision
+  `mcp_servers`, `triggers`): union by `name`. On name collision
   **child wins** and replaces the base entry in place (preserving base
   order). Items without a `name` value concatenate.
-- **Other lists** — child replaces base.
-- **Prompt files** — `system_prompt_file` concatenates along the chain;
+- **Other lists**: child replaces base.
+- **Prompt files**: `system_prompt_file` concatenates along the chain;
   inline `system_prompt` is appended last.
 
 Two directives opt out of defaults:
@@ -466,7 +466,7 @@ Two directives opt out of defaults:
 | Directive | Effect |
 |-----------|--------|
 | `no_inherit: [field, …]` | Drops the inherited value for each listed field. Applies uniformly to scalars, dicts, identity lists, and the prompt chain. |
-| `prompt_mode: concat \| replace` | `concat` (default) keeps inherited prompt file chain + inline. `replace` wipes inherited prompts — sugar for `no_inherit: [system_prompt, system_prompt_file]`. |
+| `prompt_mode: concat \| replace` | `concat` (default) keeps inherited prompt file chain + inline. `replace` wipes inherited prompts, sugar for `no_inherit: [system_prompt, system_prompt_file]`. |
 
 **Examples.**
 
@@ -507,7 +507,7 @@ creatures/<name>/
 ```
 
 These subfolder names are conventions only. The loader resolves each
-`module:` path relative to the agent folder via `ModuleLoader` — there
+`module:` path relative to the agent folder via `ModuleLoader`; there
 is no auto-scan of `tools/` or `subagents/`, so every custom module
 must be declared in `config.yaml`.
 
@@ -520,7 +520,7 @@ Loaded by `kohakuterrarium.terrarium.config.load_terrarium_config`.
 ```yaml
 terrarium:
   name: str
-  root:                  # optional — designate the privileged user-facing node
+  root:                  # optional: designate the privileged user-facing node
     base_config: str     # or any AgentConfig field inline
     ...
   creatures:
@@ -535,11 +535,11 @@ terrarium:
   channels:
     <name>:
       description: str
-    # or shorthand — string = description:
+    # or shorthand: string = description:
     # <name>: "description"
 ```
 
-> All graph channels are broadcast — every listener receives every
+> All graph channels are broadcast: every listener receives every
 > send. The previously-supported `type:` field is ignored at the
 > engine layer; new configs should omit it.
 
@@ -547,8 +547,8 @@ Terrarium field summary:
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `name` | str | — | Terrarium name. |
-| `root` | object | `null` | Optional inline agent config promoted to the privileged user-facing node — receives the group tools and the standard `report_to_root` wiring. |
+| `name` | str | (none) | Terrarium name. |
+| `root` | object | `null` | Optional inline agent config promoted to the privileged user-facing node; it receives the group tools and the standard `report_to_root` wiring. |
 | `creatures` | list | `[]` | Creatures that run inside the terrarium. |
 | `channels` | dict | `{}` | Shared channel declarations. |
 
@@ -557,8 +557,8 @@ Creature entry fields (also accepts any AgentConfig field inline, e.g.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `name` | str | — | Creature name. |
-| `base_config` (or `config`) | str | — | Config path (agent config). |
+| `name` | str | (none) | Creature name. |
+| `base_config` (or `config`) | str | (none) | Config path (agent config). |
 | `channels.listen` | list[str] | `[]` | Channels the creature consumes. |
 | `channels.can_send` | list[str] | `[]` | Channels the creature can publish to. |
 | `output_log` | bool | `false` | Capture stdout per creature. |
@@ -569,8 +569,11 @@ Channel entry fields:
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `type` | `queue` \| `broadcast` | `queue` | Delivery semantics. |
 | `description` | str | `""` | Documented in the channel topology prompt. |
+
+All graph channels are broadcast: every listener receives every send.
+A legacy `type:` key is still parsed but ignored at the engine layer;
+omit it in new configs.
 
 Auto-created channels:
 
@@ -614,7 +617,7 @@ presets:
     reasoning_effort: str      # none | minimal | low | medium | high | xhigh
     service_tier: str          # priority | flex
     extra_body: dict
-    variation_groups:          # optional — see Variation selector
+    variation_groups:          # optional; see Variation selector
       <group>:
         <option>:
           <dotted.path>: value
@@ -622,11 +625,11 @@ presets:
 
 Canonical `backend_type` values are:
 
-- `openai` — OpenAI-compatible `/chat/completions` endpoints.
-- `anthropic` — Anthropic-compatible Messages API endpoints via the official
+- `openai`: OpenAI-compatible `/chat/completions` endpoints.
+- `anthropic`: Anthropic-compatible Messages API endpoints via the official
   `anthropic` Python package (Claude, MiniMax's `/anthropic/v1/messages`, and
   compatible proxies).
-- `codex` — ChatGPT-subscription Codex OAuth.
+- `codex`: ChatGPT-subscription Codex OAuth.
 
 Legacy `codex-oauth` is accepted for back-compat and normalized to `codex`.
 
@@ -674,13 +677,13 @@ change controller or conversation storage for one provider.
 
 Custom backends may also declare:
 
-- `provider_name` — the compatibility identity used when checking whether a
+- `provider_name`: the compatibility identity used when checking whether a
   provider-native tool supports this backend.
-- `provider_native_tools` — the built-in provider-native tools to auto-inject
+- `provider_native_tools`: the built-in provider-native tools to auto-inject
   into creatures using this backend.
 
-See [builtins.md — LLM presets](builtins.md#llm-presets) for every
-shipped preset, [builtins.md — Variation groups](builtins.md#variation-groups)
+See [LLM presets in builtins.md](builtins.md#llm-presets) for every
+shipped preset, [Variation groups in builtins.md](builtins.md#variation-groups)
 for the per-preset catalogue, and [Variation selector](#variation-selector)
 for how to pick a specific variation in a controller config.
 
@@ -706,12 +709,12 @@ Fields:
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `name` | str | — | Unique identifier. |
+| `name` | str | (none) | Unique identifier. |
 | `transport` | `stdio` \| `streamable_http` \| `http` \| `sse` | `stdio` | Transport. `streamable_http` is preferred for modern HTTP MCP; `http`/`sse` are legacy SSE aliases. |
-| `command` | str | — | stdio executable. |
+| `command` | str | (none) | stdio executable. |
 | `args` | list[str] | `[]` | stdio args. |
 | `env` | dict[str,str] | `{}` | stdio env. |
-| `url` | str | — | URL for `streamable_http`, `http`, or `sse` transports. |
+| `url` | str | (none) | URL for `streamable_http`, `http`, or `sse` transports. |
 
 ---
 
@@ -768,25 +771,25 @@ python_dependencies:
 | `name` | str | Package name; installed as `~/.kohakuterrarium/packages/<name>/`. |
 | `version` | str | Semver. |
 | `description` | str | Free-form. |
-| `creatures` | list | `[{name}]` — creature configs under `creatures/<name>/`. |
-| `terrariums` | list | `[{name}]` — terrarium configs under `terrariums/<name>/`. |
-| `tools` | list | `[{name, module, class}]` — contributed tool classes. |
-| `plugins` | list | `[{name, module, class}]` — contributed plugins. |
-| `io` | list | `[{name, module, class}]` — contributed input/output modules resolved by package name. |
-| `triggers` | list | `[{name, module, class}]` — contributed trigger classes. |
-| `skills` | list | `[{name, path, description?}]` — contributed procedural skill bundles. |
-| `commands` | list | `[{name, module, class, override?}]` — controller `##name##` commands. |
-| `user_commands` | list | `[{name, module, class}]` — human-facing slash commands. |
-| `prompts` / `templates` | list | `[{name, path}]` — reusable prompt fragments for Jinja `{% include %}`. |
+| `creatures` | list | `[{name}]`: creature configs under `creatures/<name>/`. |
+| `terrariums` | list | `[{name}]`: terrarium configs under `terrariums/<name>/`. |
+| `tools` | list | `[{name, module, class}]`: contributed tool classes. |
+| `plugins` | list | `[{name, module, class}]`: contributed plugins. |
+| `io` | list | `[{name, module, class}]`: contributed input/output modules resolved by package name. |
+| `triggers` | list | `[{name, module, class}]`: contributed trigger classes. |
+| `skills` | list | `[{name, path, description?}]`: contributed procedural skill bundles. |
+| `commands` | list | `[{name, module, class, override?}]`: controller `##name##` commands. |
+| `user_commands` | list | `[{name, module, class}]`: human-facing slash commands. |
+| `prompts` / `templates` | list | `[{name, path}]`: reusable prompt fragments for Jinja `{% include %}`. |
 | `framework_hints` | dict[str,str] | Package-level override map for framework-hint prose blocks. |
-| `llm_presets` | list | `[{name}]` — contributed LLM presets (values live in the package). |
+| `llm_presets` | list | `[{name}]`: contributed LLM presets (values live in the package). |
 | `python_dependencies` | list[str] | Pip requirement strings. |
 
 Install modes:
 
-- `kt install <git_url>` — clone.
-- `kt install <path>` — copy.
-- `kt install <path> -e` — write `<name>.link` pointer to the source.
+- `kt install <git_url>`: clone.
+- `kt install <path>`: copy.
+- `kt install <path> -e`: write `<name>.link` pointer to the source.
 
 ---
 

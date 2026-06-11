@@ -1,6 +1,6 @@
 ---
 title: Built-ins
-summary: The bundled tools, sub-agents, triggers, inputs, and outputs — argument shapes, behaviours, and defaults.
+summary: The bundled tools, sub-agents, triggers, inputs, and outputs, with argument shapes, behaviours, and defaults.
 tags:
   - reference
   - builtins
@@ -25,95 +25,95 @@ config under `tools:` by bare name.
 
 ### Shell and scripting
 
-**`bash`** — Run a shell command. Picks the first available of `bash`,
+**`bash`**: Run a shell command. Picks the first available of `bash`,
 `zsh`, `sh`, `fish`, `pwsh`. Respects `KT_SHELL_PATH`. Captures stdout
 and stderr, truncated to a cap. Direct execution.
 
 - Args: `command` (str), `working_dir` (str, optional),
   `timeout` (float, optional).
 
-**`python`** — Run a Python subprocess. Respects `working_dir` and
+**`python`**: Run a Python subprocess. Respects `working_dir` and
 `timeout`. Direct.
 
 - Args: `code` (str), `working_dir`, `timeout`.
 
 ### File operations
 
-**`read`** — Read text, image, or PDF content. Records read-state per
+**`read`**: Read text, image, or PDF content. Records read-state per
 file. Images are returned as `base64` data URLs. PDF support requires
 `pymupdf`. Direct.
 
 - Args: `path` (str), `offset` (int, optional), `limit` (int, optional).
 
-**`write`** — Create or overwrite a file. Creates parent directories.
+**`write`**: Create or overwrite a file. Creates parent directories.
 Blocks overwrites unless the file was read first (unless `new`). Direct.
 
 - Args: `path`, `content`, `new` (bool, optional).
 
-**`edit`** — Auto-detects unified-diff (`@@`) or search/replace form.
+**`edit`**: Auto-detects unified-diff (`@@`) or search/replace form.
 Refuses binary files. Direct.
 
 - Args: `path`, `old_text`/`new_text` or `diff`, `replace_all` (bool).
 
-**`multi_edit`** — Apply an ordered list of edits to one file. Atomic
+**`multi_edit`**: Apply an ordered list of edits to one file. Atomic
 per file. Modes: `strict` (every edit must apply), `best_effort` (skip
 failures), default (partial apply with report). Direct.
 
 - Args: `path`, `edits: list[{old, new}]`, `mode`.
 
-**`glob`** — mtime-sorted glob. Respects `.gitignore`. Early-terminates.
+**`glob`**: mtime-sorted glob. Respects `.gitignore`. Early-terminates.
 Direct.
 
 - Args: `pattern`, `root` (optional), `limit` (optional).
 
-**`grep`** — Regex search across files. Supports `ignore_case`. Skips
+**`grep`**: Regex search across files. Supports `ignore_case`. Skips
 binaries. Direct.
 
 - Args: `pattern`, `path` (optional), `ignore_case` (bool),
   `max_matches`.
 
-**`tree`** — Directory listing with YAML-frontmatter summaries for
+**`tree`**: Directory listing with YAML-frontmatter summaries for
 markdown files. Direct.
 
 - Args: `path`, `depth`.
 
-**`notebook_read`** — Read Jupyter notebooks (`.ipynb`) as compact markdown
+**`notebook_read`**: Read Jupyter notebooks (`.ipynb`) as compact markdown
 summaries, selected cells, or raw JSON. Direct.
 
 - Args: `path`, `cell`, `include_outputs`, `mode`.
 
-**`notebook_edit`** — Edit Jupyter notebooks by replacing, inserting, deleting,
+**`notebook_edit`**: Edit Jupyter notebooks by replacing, inserting, deleting,
 or appending cells while preserving notebook metadata. Direct.
 
 - Args: `path`, `cell`, `source`, `cell_type`, `action`.
 
 ### Structured data
 
-**`json_read`** — Read a JSON document by dot-path. Direct.
+**`json_read`**: Read a JSON document by dot-path. Direct.
 
 - Args: `path`, `query` (dot-path).
 
-**`json_write`** — Assign a value at a dot-path. Creates nested objects
+**`json_write`**: Assign a value at a dot-path. Creates nested objects
 as needed. Direct.
 
 - Args: `path`, `query`, `value`.
 
 ### Web
 
-**`web_fetch`** — Fetch a URL as markdown. Tries `crawl4ai` →
+**`web_fetch`**: Fetch a URL as markdown. Tries `crawl4ai` →
 `trafilatura` → Jina proxy → `httpx + html2text`. 100k-char cap, 30s
 timeout. Direct.
 
 - Args: `url`.
 
-**`web_search`** — DuckDuckGo search returning markdown-formatted
+**`web_search`**: DuckDuckGo search returning markdown-formatted
 results. Direct.
 
 - Args: `query`, `max_results` (int), `region` (str).
 
 ### Provider-native media
 
-**`image_gen`** — Generate or edit an image through the provider's own
+**`image_gen`**: Generate or edit an image through the provider's own
 native image backend. Currently auto-injected for Codex-backed creatures
 unless opted out with `disable_provider_tools: [image_gen]`. The executor
 never runs it; the provider returns structured image content and the
@@ -124,22 +124,22 @@ session store persists the generated file into the session artifacts dir.
 
 ### Interactive and memory
 
-**`ask_user`** — Prompt the user over stdin (CLI or TUI only).
+**`ask_user`**: Prompt the user over stdin (CLI or TUI only).
 Stateful.
 
 - Args: `question`.
 
-**`think`** — No-op; preserves reasoning as a tool event for the event
+**`think`**: No-op; preserves reasoning as a tool event for the event
 log. Direct.
 
 - Args: `thought`.
 
-**`scratchpad`** — Session-scoped KV store. Shared across agents in a
+**`scratchpad`**: Session-scoped KV store. Shared across agents in a
 session.
 
 - Args: `action` (`get` | `set` | `delete` | `list`), `key`, `value`.
 
-**`search_memory`** — FTS / semantic / auto search over the session's
+**`search_memory`**: FTS / semantic / auto search over the session's
 indexed events. Per-agent filter.
 
 - Args: `query`, `mode` (`auto`/`fts`/`semantic`/`hybrid`), `k`,
@@ -147,20 +147,20 @@ indexed events. Per-agent filter.
 
 ### Communication
 
-**`send_message`** — Emit a message to a channel. Resolves creature-
+**`send_message`**: Emit a message to a channel. Resolves creature-
 local channels first, then the environment's shared channels. Direct.
 
 - Args: `channel`, `content`, `sender` (optional).
 
 ### Introspection
 
-**`info`** — Load on-demand documentation for any tool or sub-agent.
+**`info`**: Load on-demand documentation for any tool or sub-agent.
 Delegates to skill manifests under
 `src/kohakuterrarium/builtin_skills/` and per-agent overrides. Direct.
 
 - Args: `target` (tool or sub-agent name).
 
-**`stop_task`** — Cancel a running background task or trigger by id. Direct.
+**`stop_task`**: Cancel a running background task or trigger by id. Direct.
 
 - Args: `job_id` (job id from any tool call; or the trigger id returned by `add_timer`/`watch_channel`/`add_schedule`).
 
@@ -170,20 +170,20 @@ Each universal trigger class is wrapped as its own tool via
 `modules/trigger/callable.py:CallableTriggerTool`. A creature opts in by
 listing the trigger's `setup_tool_name` under `tools:` with
 `type: trigger`. The tool's description is prefixed with
-`**Trigger** — ` so the LLM knows calling it installs a long-lived
+`**Trigger**: ` so the LLM knows calling it installs a long-lived
 side-effect. All three return immediately with the installed trigger
 id; the trigger itself runs in the background.
 
-**`add_timer`** (wraps `TimerTrigger`) — Install a periodic timer.
+**`add_timer`** (wraps `TimerTrigger`): Install a periodic timer.
 
 - Args: `interval` (seconds, required), `prompt` (required), `immediate` (bool, default false).
 
-**`watch_channel`** (wraps `ChannelTrigger`) — Listen on a named channel.
+**`watch_channel`** (wraps `ChannelTrigger`): Listen on a named channel.
 
 - Args: `channel_name` (required), `prompt` (optional, supports `{content}`), `filter_sender` (optional).
 - The agent's own name is auto-set as `ignore_sender` to prevent self-triggering.
 
-**`add_schedule`** (wraps `SchedulerTrigger`) — Clock-aligned schedule.
+**`add_schedule`** (wraps `SchedulerTrigger`): Clock-aligned schedule.
 
 - Args: `prompt` (required); exactly one of `every_minutes`, `daily_at` (HH:MM), `hourly_at` (0-59).
 
@@ -192,36 +192,36 @@ id; the trigger itself runs in the background.
 These mutate or inspect the [graph](../concepts/glossary.md#graph) the
 caller belongs to. They split into two tiers:
 
-**Basic** — registered on every creature in a graph. The tool body
+**Basic**: registered on every creature in a graph. The tool body
 gates per-call (e.g., `group_send` enforces the privileged-recipient
 rule for non-privileged callers):
 
-- **`send_channel`** — Broadcast a message to a channel the caller is
+- **`send_channel`**: Broadcast a message to a channel the caller is
   wired to send on. Args: `channel`, `content`.
-- **`group_send`** — Direct point-to-point send to another creature in
+- **`group_send`**: Direct point-to-point send to another creature in
   the caller's graph (bypasses channels). Non-privileged callers can
   only target privileged recipients (workers report to supervisors,
   not peer-workers). Args: `target_creature_id`, `content`.
 
-**Privileged** — registered ONLY on
+**Privileged**: registered ONLY on
 [privileged nodes](../concepts/glossary.md#privileged-node):
 
-- **`group_add_node`** — Spawn a creature into the caller's graph.
+- **`group_add_node`**: Spawn a creature into the caller's graph.
   Args: `config_path` (file or `@pkg/ref`), optional `name`, `llm`,
   `pwd`. Returns the new creature's id.
-- **`group_remove_node`** — Stop and remove a creature from the
+- **`group_remove_node`**: Stop and remove a creature from the
   graph. May trigger an [auto-split](../concepts/glossary.md#auto-split--auto-merge)
   if it was a bridge. Args: `creature_id`.
-- **`group_start_node`** / **`group_stop_node`** — Start or stop a
+- **`group_start_node`** / **`group_stop_node`**: Start or stop a
   creature without removing it. Args: `creature_id`.
-- **`group_channel`** — CRUD on channels and per-creature wiring.
+- **`group_channel`**: CRUD on channels and per-creature wiring.
   Args: `action` ∈ `create` | `delete` | `wire` | `unwire`,
   `channel`, optional `creature_id` and `direction`. Cross-graph
   wires route through `Terrarium.connect` and may auto-merge.
-- **`group_wire`** — CRUD on output-wiring edges. Args: `action` ∈
+- **`group_wire`**: CRUD on output-wiring edges. Args: `action` ∈
   `add` | `remove`, plus an edge spec (`from`, `to`, optional
   `with_content`, `prompt`).
-- **`group_status`** — Snapshot the caller's graph: creatures (with
+- **`group_status`**: Snapshot the caller's graph: creatures (with
   status, privilege, parent), channels (with history pointers,
   connected creatures), output wires, and the available catalog to
   spawn from. Args: none.
@@ -257,13 +257,13 @@ soft/hard `75/100`, and no walltime budget.
 
 Shipped input modules under `src/kohakuterrarium/builtins/inputs/`.
 
-**`cli`** — Stdin prompt. Options: `prompt`, `exit_commands`.
+**`cli`**: Stdin prompt. Options: `prompt`, `exit_commands`.
 
-**`cli_nonblocking`** — Same surface as `cli` but returns control to
+**`cli_nonblocking`**: Same surface as `cli` but returns control to
 the event loop between keystrokes (useful when triggers fire during
 input).
 
-**`none`** — No input. For trigger-only agents.
+**`none`**: No input. For trigger-only agents.
 
 Audio/ASR implementations are not built-ins. The conversational example ships
 opt-in `ASRModule`/Whisper custom input files under
@@ -271,8 +271,8 @@ opt-in `ASRModule`/Whisper custom input files under
 
 Two further input types are resolved dynamically:
 
-- `tui` — mounted by the Textual app when running under TUI mode.
-- `custom` / `package` — loaded via `module` + `class` fields.
+- `tui`: mounted by the Textual app when running under TUI mode.
+- `custom` / `package`: loaded via `module` + `class` fields.
 
 ---
 
@@ -280,23 +280,23 @@ Two further input types are resolved dynamically:
 
 Shipped output modules under `src/kohakuterrarium/builtins/outputs/`.
 
-**`stdout`** — Print to stdout. Options:
+**`stdout`**: Print to stdout. Options:
 `prefix`, `suffix`, `stream_suffix`, `flush_on_stream`.
 
-**`stdout_prefixed`** — `stdout` with a per-line prefix, useful for
+**`stdout_prefixed`**: `stdout` with a per-line prefix, useful for
 tagging side outputs.
 
-**`console_tts`** — Console-only TTS shim that prints the synthesized
+**`console_tts`**: Console-only TTS shim that prints the synthesized
 text character-by-character with a configurable `char_delay`. Intended
-for demos and testing — no audio backend.
+for demos and testing; there is no audio backend.
 
-**`dummy_tts`** — Silent TTS that fires the usual TTS lifecycle
+**`dummy_tts`**: Silent TTS that fires the usual TTS lifecycle
 events without any output. Useful in tests.
 
 Additional routed types:
 
-- `tui` — renders into the Textual TUI widget tree.
-- `custom` / `package` — loaded via `module` + `class`.
+- `tui`: renders into the Textual TUI widget tree.
+- `custom` / `package`: loaded via `module` + `class`.
 
 There is no plain `tts` registry key. Real TTS backends (Fish, Edge,
 OpenAI, etc.) are shipped as custom/package outputs that subclass
@@ -317,12 +317,12 @@ Slash commands available inside input modules. Under
 | `/model [name]` | `/llm` | Show current model or switch profile. Accepts canonical `provider/name[@variations]`. |
 | `/compact` | | Manual context compaction. |
 | `/regen` | `/regenerate`, `/retry` | Re-run the last assistant turn as a sibling branch. |
-| `/edit <message_index> <new content>` | — | Edit a past user message and re-run from that point as a new branch. |
+| `/edit <message_index> <new content>` | (none) | Edit a past user message and re-run from that point as a new branch. |
 | `/branch [<turn> <branch_id>\|latest]` | `/br` | List or switch the live branch for regen/edit alternatives. |
-| `/fork [event_id] [--name name]` | — | Copy the current session into a new `.kohakutr` file for alternate exploration. |
+| `/fork [event_id] [--name name]` | (none) | Copy the current session into a new `.kohakutr` file for alternate exploration. |
 | `/plugin [list\|enable\|disable\|toggle] [name]` | `/plugins` | Inspect or toggle plugins. |
 | `/skill [list\|enable\|disable\|toggle\|show] [name]` | `/skills` | Inspect or toggle procedural skills. |
-| `/<skill-name> [args]` | — | User-invoke path for an enabled procedural skill when no built-in slash command shadows that name. |
+| `/<skill-name> [args]` | (none) | User-invoke path for an enabled procedural skill when no built-in slash command shadows that name. |
 | `/exit` | `/quit`, `/q` | Graceful exit. On web, a force flag may be required. |
 
 ---
@@ -333,13 +333,13 @@ Inline directives the LLM can emit instead of a tool call. They talk
 to the framework directly (no tool round-trip). Defined under
 `src/kohakuterrarium/commands/`.
 
-Framework commands use the **same syntax family** as tool calls — they follow the creature's configured `tool_format` (bracket / XML / native). The default bracket form with bare-identifier placeholders:
+Framework commands use the **same syntax family** as tool calls: they follow the creature's configured `tool_format` (bracket / XML / native). The default bracket form with bare-identifier placeholders:
 
-- `[/info]tool_or_subagent[info/]` — Load a tool's, sub-agent's, or procedural skill's documentation on demand.
-- `[/read_job]job_id[read_job/]` — Read output from a background job. Supports `--lines N` and `--offset M` in the body.
-- `[/jobs][jobs/]` — List running jobs with IDs.
-- `[/wait]job_id[wait/]` — Block the current turn until a background job finishes.
-- `[/skill]skill_name [args][skill/]` — Return a procedural skill body to the model for explicit invocation.
+- `[/info]tool_or_subagent[info/]`: Load a tool's, sub-agent's, or procedural skill's documentation on demand.
+- `[/read_job]job_id[read_job/]`: Read output from a background job. Supports `--lines N` and `--offset M` in the body.
+- `[/jobs][jobs/]`: List running jobs with IDs.
+- `[/wait]job_id[wait/]`: Block the current turn until a background job finishes.
+- `[/skill]skill_name [args][skill/]`: Return a procedural skill body to the model for explicit invocation.
 
 Command names share a namespace with tool names; the command for reading job output is called `read_job` to avoid colliding with the `read` file-reader tool. Defined under `src/kohakuterrarium/commands/`.
 
@@ -411,7 +411,7 @@ Naming convention (post-2026-04 refactor):
 - `gpt-4o-or` (`or-gpt-4o`)
 - `gpt-4o-mini-or` (`or-gpt-4o-mini`)
 
-### Anthropic Claude Direct (no suffix — primary)
+### Anthropic Claude Direct (no suffix: primary)
 
 Routed through the native Anthropic-compatible Messages API. Effort via
 `extra_body.output_config.effort`.
@@ -472,7 +472,7 @@ Routed through the native Anthropic-compatible Messages API. Effort via
 - `minimax-m2.7` (`minimax`)
 - `minimax-m2.5`
 
-### Xiaomi MiMo Direct (no suffix — primary)
+### Xiaomi MiMo Direct (no suffix: primary)
 
 - `mimo-v2-pro` (`mimo`; legacy alias: `mimo-v2-pro-direct`)
 - `mimo-v2-flash` (legacy alias: `mimo-v2-flash-direct`)
@@ -522,26 +522,26 @@ Routed through the native Anthropic-compatible Messages API. Effort via
 - `ministral-3-14b` (`ministral`)
 - `ministral-3-8b`
 
-Preset token windows (`max_context` / `max_output`) are set per preset —
+Preset token windows (`max_context` / `max_output`) are set per preset;
 see `src/kohakuterrarium/llm/presets.py` for the exact values, or
 `kt config llm show <name>`. `controller.max_tokens` overrides
 `max_output`; to adjust the compaction window, set `compact.max_tokens`.
 
 Built-in preset merging also picks up `llm_presets` contributed by
 installed packages; see
-[configuration.md — Package manifest](configuration.md#package-manifest-kohakuyaml).
+[Package manifest in configuration.md](configuration.md#package-manifest-kohakuyaml).
 
 ## Variation groups
 
 A variation group lets one preset expose multiple knobs without
 duplicating the entry. Select with the `preset@group=option` shorthand
 in `llm:` / `--llm`, or via `controller.variation_selections`; see
-[configuration reference — Variation selector](configuration.md#variation-selector).
+[Variation selector in the configuration reference](configuration.md#variation-selector).
 
-Presets not listed here have no variation group — their defaults are
+Presets not listed here have no variation group; their defaults are
 fixed.
 
-### OpenAI — Codex OAuth
+### OpenAI: Codex OAuth
 
 | Preset | Group | Options |
 |---|---|---|
@@ -552,7 +552,7 @@ fixed.
 | `gpt-5.3-codex` | `reasoning` | `none`, `low`, `medium`, `high`, `xhigh` |
 | `gpt-5.1` | `reasoning` | `none`, `low`, `medium`, `high`, `xhigh` |
 
-### OpenAI — Direct API (`-api` suffix)
+### OpenAI: Direct API (`-api` suffix)
 
 Patches `extra_body.reasoning.effort`.
 
@@ -560,7 +560,7 @@ Patches `extra_body.reasoning.effort`.
 |---|---|---|
 | `gpt-5.4-api`, `gpt-5.4-mini-api`, `gpt-5.4-nano-api`, `gpt-5.3-codex-api`, `gpt-5.1-api` | `reasoning` | `none`, `low`, `medium`, `high`, `xhigh` |
 
-### OpenAI — OpenRouter (`-or` suffix)
+### OpenAI: OpenRouter (`-or` suffix)
 
 Patches `extra_body.reasoning.effort` via OpenRouter's unified param.
 
@@ -568,7 +568,7 @@ Patches `extra_body.reasoning.effort` via OpenRouter's unified param.
 |---|---|---|
 | `gpt-5.4-or`, `gpt-5.4-mini-or`, `gpt-5.4-nano-or`, `gpt-5.3-codex-or`, `gpt-5.1-or` | `reasoning` | `minimal`, `low`, `medium`, `high`, `xhigh` |
 
-### Anthropic — Direct
+### Anthropic: Direct
 
 Patches `extra_body.output_config.effort` via the compat layer.
 
@@ -580,7 +580,7 @@ Patches `extra_body.output_config.effort` via the compat layer.
 Haiku 4.5 uses the older extended-thinking (`budget_tokens`) and has
 no variation group.
 
-### Anthropic — OpenRouter (`-or` suffix)
+### Anthropic: OpenRouter (`-or` suffix)
 
 Patches `extra_body.reasoning.effort`. `xhigh` is only honoured by
 Opus 4.7.
@@ -591,7 +591,7 @@ Opus 4.7.
 | `claude-opus-4.6-or`, `claude-sonnet-4.6-or`, `claude-sonnet-4.5-or`, `claude-opus-4-or`, `claude-sonnet-4-or` | `reasoning` | `minimal`, `low`, `medium`, `high` |
 | `claude-haiku-4.5-or` | `reasoning` | `off`, `low`, `medium`, `high` |
 
-### Google Gemini — Direct
+### Google Gemini: Direct
 
 Patches `extra_body.google.thinking_config.thinking_level`.
 
@@ -600,13 +600,13 @@ Patches `extra_body.google.thinking_config.thinking_level`.
 | `gemini-3.1-pro` | `thinking` | `low`, `medium`, `high` |
 | `gemini-3-flash`, `gemini-3.1-flash-lite` | `thinking` | `minimal`, `low`, `medium`, `high` |
 
-### Google Gemini — OpenRouter
+### Google Gemini: OpenRouter
 
 | Preset | Group | Options |
 |---|---|---|
 | `gemini-3.1-pro-or`, `gemini-3-flash-or`, `gemini-3.1-flash-lite-or` | `reasoning` | `minimal`, `low`, `medium`, `high` |
 
-### Gemma / Qwen / Kimi / MiMo / GLM — OpenRouter
+### Gemma / Qwen / Kimi / MiMo / GLM: OpenRouter
 
 Share the same OpenRouter unified reasoning group (unless noted).
 
@@ -618,9 +618,9 @@ Share the same OpenRouter unified reasoning group (unless noted).
 | `mimo-v2-pro`, `mimo-v2-flash`, `mimo-v2-pro-or`, `mimo-v2-flash-or` | `reasoning` | `minimal`, `low`, `medium`, `high` |
 | `glm-5`, `glm-5-turbo` | `reasoning` | `minimal`, `low`, `medium`, `high` |
 
-`kimi-k2-thinking` has always-on thinking — no variation group.
+`kimi-k2-thinking` has always-on thinking and no variation group.
 
-### Mistral — OpenRouter
+### Mistral: OpenRouter
 
 | Preset | Group | Options |
 |---|---|---|
@@ -629,9 +629,9 @@ Share the same OpenRouter unified reasoning group (unless noted).
 Other Mistral presets (`mistral-large-3`, `mistral-medium-*`,
 `mistral-small-3.2`, `codestral`, `devstral-*`, `pixtral-large`,
 `ministral-*`) are not reasoning models. `magistral-medium` and
-`magistral-small` have always-on reasoning — no variation group.
+`magistral-small` have always-on reasoning and no variation group.
 
-### Grok / MiniMax — OpenRouter
+### Grok / MiniMax: OpenRouter
 
 Grok 4.x (`grok-4`, `grok-4.20`, `grok-4.20-multi`, `grok-4-fast`,
 `grok-4.1-fast`, `grok-code-fast`) has mandatory non-configurable
@@ -676,7 +676,6 @@ Operator precedence: `* > | > & > >>`.
 Factories: `Pure`, `Sequence`, `Product`, `Fallback`, `Retry`,
 `Router`, `Iterator`. Wrapping helpers: `agent(config_path)` for
 persistent agents, `factory(config)` for ephemeral per-call agents.
-`effects.Effects()` provides a side-effect logging handle.
 
 Runnable methods: `.map(f)` (post-transform output),
 `.contramap(f)` (pre-transform input),
@@ -688,10 +687,10 @@ Runnable methods: `.map(f)` (post-transform output),
 
 Built-in MCP meta-tools (exposed when `mcp_servers` is configured):
 
-- `mcp_list` — list connected servers and their tools.
-- `mcp_call` — invoke a tool on a specific server.
-- `mcp_connect` — connect to a server declared in config.
-- `mcp_disconnect` — tear down a connection.
+- `mcp_list`: list connected servers and their tools.
+- `mcp_call`: invoke a tool on a specific server.
+- `mcp_connect`: connect to a server declared in config.
+- `mcp_disconnect`: tear down a connection.
 
 Server tools are surfaced in the system prompt under
 `## Available MCP Tools`. Transports: `stdio` (subprocess), `streamable_http`
@@ -709,7 +708,7 @@ A package's `kohaku.yaml` may contribute `creatures`, `terrariums`,
 `user_commands`, `prompts`, `framework_hints`, `llm_presets`, and
 `python_dependencies`. `kt extension list` inventories them. Python modules
 resolve by `module:class` refs; configs resolve via `@pkg/path`. See
-[configuration.md — Package manifest](configuration.md#package-manifest-kohakuyaml).
+[Package manifest in configuration.md](configuration.md#package-manifest-kohakuyaml).
 
 ---
 

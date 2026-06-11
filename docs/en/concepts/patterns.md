@@ -1,6 +1,6 @@
 ---
 title: Patterns
-summary: Recipes that fall out of combining existing modules — group chat, smart guards, adaptive watchers, output wiring.
+summary: Recipes that fall out of combining existing modules. Group chat, smart guards, adaptive watchers, output wiring.
 tags:
   - concepts
   - patterns
@@ -48,17 +48,17 @@ triggers:
 
 **Shape.** A creature declares `output_wiring:` in its config, naming
 one or more target creatures. At each turn-end, the framework emits a
-`creature_output` `TriggerEvent` into every target's event queue —
+`creature_output` `TriggerEvent` into every target's event queue,
 carrying the creature's final-round assistant text (or just a
 lifecycle ping if `with_content: false`).
 
-**Why it works.** The wiring lives at the framework level — no tool
+**Why it works.** The wiring lives at the framework level: no tool
 call on the sender, no trigger subscription on the receiver, no
 channel in between. The target sees the event through the same
 `agent._process_event` path it already uses for user input, timer
 fires, and channel messages.
 
-**Use when.** The pipeline edge is deterministic — "every time A
+**Use when.** The pipeline edge is deterministic: "every time A
 finishes a turn, B gets the output." Reviewer / navigator roles, or
 analyzer decisions that branch on content, stay on pattern 1
 (channels) because wiring can't conditionally fire.
@@ -76,7 +76,7 @@ analyzer decisions that branch on content, stay on pattern 1
 
 **Contrast.** Channels require the LLM to remember to send; wiring
 fires regardless of what the LLM does. Both mechanisms coexist freely
-in one terrarium — kt-biome's `auto_research` uses wiring for the
+in one terrarium; kt-biome's `auto_research` uses wiring for the
 ratchet edges (ideator → coder → runner → analyzer) and channels for
 the analyzer's keep-vs-discard decision and for team-chat status.
 
@@ -90,8 +90,8 @@ returns the rewritten args or raises `PluginBlockError` accordingly.
 **Why it works.** Plugins are Python; agents are Python. A plugin can
 call an agent just like it can call any async function.
 
-**Use when.** You need policy-based gating that is itself non-trivial
-— too complex for a static rule, too domain-specific for a one-size
+**Use when.** You need policy-based gating that is itself non-trivial:
+too complex for a static rule, too domain-specific for a one-size
 solution.
 
 ## 3. Seamless memory via agent-in-plugin
@@ -103,7 +103,7 @@ prepends them as system messages. The outer creature's prompt
 quietly gets richer without any tool call.
 
 **Why it works.** The creature never has to decide "should I retrieve
-something now" — the plugin always does, and the LLM sees the result
+something now"; the plugin always does, and the LLM sees the result
 in every turn.
 
 **Use when.** RAG-style memory is useful but you do not want the
@@ -125,7 +125,7 @@ brittle, but a full LLM turn per-tick is affordable.
 
 ## 5. Silent controller + external sub-agent
 
-**Shape.** A creature's controller produces no user-facing text —
+**Shape.** A creature's controller produces no user-facing text,
 only tool calls and a final sub-agent dispatch. The sub-agent is
 configured with `output_to: external`, so *its* text streams to the
 user while the parent stays invisible.
@@ -165,7 +165,7 @@ be visible as separate creatures.
 
 ## 8. Inline control via framework commands
 
-**Shape.** Inside a turn, the controller emits small inline directives that talk to the framework: the `info` command loads a tool's full docs on demand, `read_job` reads partial output from a running background tool, `jobs` lists pending work, `wait` blocks on a stateful sub-agent. These run inline — no new LLM round-trip.
+**Shape.** Inside a turn, the controller emits small inline directives that talk to the framework: the `info` command loads a tool's full docs on demand, `read_job` reads partial output from a running background tool, `jobs` lists pending work, `wait` blocks on a stateful sub-agent. These run inline, with no new LLM round-trip.
 
 The syntax is whichever `tool_format` the creature is configured with; in the default bracket form, a command call looks like `[/info]tool_name[info/]`.
 
@@ -185,10 +185,10 @@ one, open a PR against this file.
 
 ## See also
 
-- [Agent as a Python object](python-native/agent-as-python-object.md)
-  — the property that makes 2–4 possible.
+- [Agent as a Python object](python-native/agent-as-python-object.md):
+  the property that makes 2–4 possible.
 - [Tool](modules/tool.md), [Trigger](modules/trigger.md),
-  [Channel](modules/channel.md), [Plugin](modules/plugin.md) — the
+  [Channel](modules/channel.md), [Plugin](modules/plugin.md): the
   building blocks these patterns combine.
-- [Boundaries](boundaries.md) — the abstraction is a default, not a
+- [Boundaries](boundaries.md): the abstraction is a default, not a
   law; patterns sometimes cross the default intentionally.

@@ -92,9 +92,9 @@ You land in an interactive prompt with the SWE agent. Type a request; it uses sh
 
 Modes:
 
-- `cli` — Rich inline (default on TTY)
-- `tui` — Full-screen Textual app
-- `plain` — Bare stdout/stdin, for piping or CI
+- `cli`: Rich inline (default on TTY)
+- `tui`: Full-screen Textual app
+- `plain`: Bare stdout/stdin, for piping or CI
 
 Override the model for one run:
 

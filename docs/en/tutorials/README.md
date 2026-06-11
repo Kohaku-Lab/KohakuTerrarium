@@ -18,32 +18,32 @@ Tutorials are the bridge: a concrete build that makes one idea click.
 
 ## Order
 
-1. [First Creature](first-creature.md) — install, log in, run, resume,
+1. [First Creature](first-creature.md): install, log in, run, resume,
    customise, add a tool. The single-agent loop end-to-end.
-2. [First Terrarium](first-terrarium.md) — wire two creatures together
+2. [First Terrarium](first-terrarium.md): wire two creatures together
    with channels, watch the messages flow, meet the honest limits.
-3. [First Python Embedding](first-python-embedding.md) — drive a creature
+3. [First Python Embedding](first-python-embedding.md): drive a creature
    from a Python script. Agents are values, not just CLIs.
-4. [First Custom Tool](first-custom-tool.md) — write a `BaseTool`
+4. [First Custom Tool](first-custom-tool.md): write a `BaseTool`
    subclass, register it via config, have the LLM call it.
-5. [First Plugin](first-plugin.md) — add behaviour at the seams:
+5. [First Plugin](first-plugin.md): add behaviour at the seams:
    one prompt injector, one tool guard.
 
 ## Once you're running on a server
 
-[Locking down your host](locking-down-your-host.md) — four ascending
+[Locking down your host](locking-down-your-host.md): four ascending
 levels of auth, each 30 seconds away.  Start at Level 0 (do nothing
 on the desktop), climb to host token / admin password / multi-user
 as your situation demands.  Skip the theory in
-[Authentication](../guides/authentication.md) — this tutorial is the
+[Authentication](../guides/authentication.md); this tutorial is the
 copy-paste path.
 
 ## Where to go after
 
-- [Creatures](../guides/creatures.md) — the full config surface.
-- [Terrariums](../guides/terrariums.md) — more advanced topologies.
-- [Custom modules](../guides/custom-modules.md) — beyond one tool.
-- [Plugins](../guides/plugins.md) — every hook, and when to use each.
-- [Programmatic usage](../guides/programmatic-usage.md) — the Python
+- [Creatures](../guides/creatures.md): the full config surface.
+- [Terrariums](../guides/terrariums.md): more advanced topologies.
+- [Custom modules](../guides/custom-modules.md): beyond one tool.
+- [Plugins](../guides/plugins.md): every hook, and when to use each.
+- [Programmatic usage](../guides/programmatic-usage.md): the Python
   surface in full.
-- [Concepts](../concepts/README.md) — the mental model this all rests on.
+- [Concepts](../concepts/README.md): the mental model this all rests on.

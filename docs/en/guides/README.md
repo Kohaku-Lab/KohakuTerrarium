@@ -16,50 +16,50 @@ If you want a guided first walk-through, go to [Tutorials](../tutorials/README.m
 
 ## Start here
 
-- [Getting Started](getting-started.md) — install, authenticate, run your first creature, resume, and open the web UI.
-- [Creatures](creatures.md) — anatomy, inheritance, prompt files, tool/subagent wiring, packaging.
-- [Terrariums](terrariums.md) — the runtime engine for solo and multi-creature graphs.
-- [Studio](studio.md) — the management layer for catalog, identity, sessions, persistence, attach, and editors.
-- [Sessions](sessions.md) — `.kohakutr` files, resume, compaction.
+- [Getting Started](getting-started.md): install, authenticate, run your first creature, resume, and open the web UI.
+- [Creatures](creatures.md): anatomy, inheritance, prompt files, tool/subagent wiring, packaging.
+- [Terrariums](terrariums.md): the runtime engine for solo and multi-creature graphs.
+- [Studio](studio.md): the management layer for catalog, identity, sessions, persistence, attach, and editors.
+- [Sessions](sessions.md): `.kohakutr` files, resume, compaction.
 
 ## Build and configure
 
-- [Configuration](configuration.md) — task-oriented "how do I configure X" recipes.
-- [Creatures](creatures.md) — authoring standalone agents.
-- [Plugins](plugins.md) — prompt and lifecycle plugins.
-- [Sub-agents](sub-agents.md) — builtin and inline specialists, runtime budget plugins, and auto-compaction.
-- [Custom Modules](custom-modules.md) — writing tools, inputs, outputs, triggers, sub-agents.
-- [MCP](mcp.md) — registering MCP servers per-agent or globally.
-- [Packages](packages.md) — `kohaku.yaml` manifests, install modes, publishing.
+- [Configuration](configuration.md): task-oriented "how do I configure X" recipes.
+- [Creatures](creatures.md): authoring standalone agents.
+- [Plugins](plugins.md): prompt and lifecycle plugins.
+- [Sub-agents](sub-agents.md): builtin and inline specialists, runtime budget plugins, and auto-compaction.
+- [Custom Modules](custom-modules.md): writing tools, inputs, outputs, triggers, sub-agents.
+- [MCP](mcp.md): registering MCP servers per-agent or globally.
+- [Packages](packages.md): `kohaku.yaml` manifests, install modes, publishing.
 
 ## Multi-agent and composition
 
-- [Terrariums](terrariums.md) — channels, privileged nodes, hot-plug, observers, and the `Terrarium` runtime class.
-- [Studio](studio.md) — manage running sessions and saved state through the `Studio` class.
-- [Composition](composition.md) — `>>`, `&`, `|`, `*` pipelines from Python.
-- [Programmatic Usage](programmatic-usage.md) — embedding `Terrarium`, `Studio`, `Creature`, and lower-level `Agent` objects.
+- [Terrariums](terrariums.md): channels, privileged nodes, hot-plug, observers, and the `Terrarium` runtime class.
+- [Studio](studio.md): manage running sessions and saved state through the `Studio` class.
+- [Composition](composition.md): `>>`, `&`, `|`, `*` pipelines from Python.
+- [Programmatic Usage](programmatic-usage.md): embedding `Terrarium`, `Studio`, `Creature`, and lower-level `Agent` objects.
 
 ## Persist and search
 
-- [Sessions](sessions.md) — persistence model and resume.
-- [Memory](memory.md) — embedding providers, FTS and vector search, `search_memory` tool.
+- [Sessions](sessions.md): persistence model and resume.
+- [Memory](memory.md): embedding providers, FTS and vector search, `search_memory` tool.
 
 ## Run it somewhere
 
-- [Serving](serving.md) — `kt web`, `kt app`, the `kt serve` daemon.
-- [Laboratory](laboratory.md) — multi-node deployments: `kt serve --mode lab-host` + `kt lab-client`, per-worker credentials, multi-node terrariums, cluster resume.
-- [Deployment — Docker](deployment-docker.md) — three compose recipes (AIO, host + workers, distributed) using the official GHCR images.
-- [Deployment — systemd](deployment-systemd.md) — install as a hardened systemd service via `kt service install`.
-- [Deployment — reverse proxy](deployment-reverse-proxy.md) — nginx and Cloudflare Tunnel patterns for TLS termination.
-- [App update](app-update.md) — how the desktop app self-updates via its managed venv (no installer re-download).
-- [Frontend Layout](frontend-layout.md) — web dashboard panels and presets.
+- [Serving](serving.md): `kt web`, `kt app`, the `kt serve` daemon.
+- [Laboratory](laboratory.md): multi-node deployments: `kt serve --mode lab-host` + `kt lab-client`, per-worker credentials, multi-node terrariums, cluster resume.
+- [Docker deployment](deployment-docker.md): three compose recipes (AIO, host + workers, distributed) using the official GHCR images.
+- [systemd deployment](deployment-systemd.md): install as a hardened systemd service via `kt service install`.
+- [Reverse-proxy deployment](deployment-reverse-proxy.md): nginx and Cloudflare Tunnel patterns for TLS termination.
+- [App update](app-update.md): how the desktop app self-updates via its managed venv (no installer re-download).
+- [Frontend Layout](frontend-layout.md): web dashboard panels and presets.
 
 ## Learn from code
 
-- [Examples](examples.md) — what every folder under `examples/` demonstrates.
+- [Examples](examples.md): what every folder under `examples/` demonstrates.
 
 ## See also
 
-- [Concepts](../concepts/README.md) — why things work the way they do.
-- [Reference](../reference/README.md) — exhaustive lookup.
-- [Development](../dev/README.md) — contributing to the framework itself.
+- [Concepts](../concepts/README.md): why things work the way they do.
+- [Reference](../reference/README.md): exhaustive lookup.
+- [Development](../dev/README.md): contributing to the framework itself.

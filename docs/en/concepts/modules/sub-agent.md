@@ -22,8 +22,8 @@ calling any other tool.
 
 ## Why it exists
 
-Context windows are finite. A real task — "explore this repo and tell
-me how auth works" — can involve hundreds of file reads. Doing that
+Context windows are finite. A real task ("explore this repo and tell
+me how auth works") can involve hundreds of file reads. Doing that
 exploration in the parent's conversation blows the budget for the main
 work. Doing it in a sub-agent usually spends a separate budget and returns
 just the summary.
@@ -55,12 +55,12 @@ A sub-agent is a creature config + a parent registry. When spawned:
 
 Three flavours matter:
 
-- **One-shot** (default) — spawned, runs to completion, returns once.
-- **Output sub-agent** (`output_to: external`) — its text streams to
+- **One-shot** (default): spawned, runs to completion, returns once.
+- **Output sub-agent** (`output_to: external`): its text streams to
   the parent's `OutputRouter` in parallel with (or instead of) the
   controller's text. Think: the controller silently orchestrates; the
   sub-agent is what the user reads.
-- **Interactive** (`interactive: true`) — persists across turns,
+- **Interactive** (`interactive: true`): persists across turns,
   receives context updates, can be fed new prompts. Useful for
   specialists that benefit from conversation continuity (a running
   reviewer, a persistent planner).
@@ -72,7 +72,7 @@ Three flavours matter:
 job id, and delivers completions as `TriggerEvent`s.
 
 Depth is bounded by `max_subagent_depth` (config-level) to prevent
-runaway recursion. Cancellation is cooperative — the parent can invoke
+runaway recursion. Cancellation is cooperative: the parent can invoke
 `stop_task` to interrupt a running sub-agent. Runtime budgets are enforced by
 the unified `budget` plugin, configured through `plugins[].options` with axes
 such as `turn_budget`, `tool_call_budget`, and optional `walltime_budget`.
@@ -99,7 +99,7 @@ Built-in sub-agents (in `kt-biome` + framework): `worker`, `plan`,
   into a graph via `group_add_node` (if it's a privileged node).
   The substrate does not care.
 - **Vertical-inside-horizontal.** A terrarium creature that itself
-  uses sub-agents — mixing axes of multi-agent.
+  uses sub-agents, mixing axes of multi-agent.
 
 ## Don't be bounded
 
@@ -111,8 +111,8 @@ point of view that is indistinguishable from a sub-agent call.
 
 ## See also
 
-- [Tool](tool.md) — the "also a tool" framing.
-- [Multi-agent overview](../multi-agent/README.md) — vertical (sub-agents) vs horizontal (terrariums).
-- [Patterns — silent controller](../patterns.md) — the output-sub-agent idiom.
-- [Sub-agent guide](../../guides/sub-agents.md) — configuring builtin/inline sub-agents, budgets, and runtime plugins.
-- [reference/builtins.md — Sub-agents](../../reference/builtins.md) — the kit bag.
+- [Tool](tool.md): the "also a tool" framing.
+- [Multi-agent overview](../multi-agent/README.md): vertical (sub-agents) vs horizontal (terrariums).
+- [Silent controller in Patterns](../patterns.md): the output-sub-agent idiom.
+- [Sub-agent guide](../../guides/sub-agents.md): configuring builtin/inline sub-agents, budgets, and runtime plugins.
+- [Sub-agents in reference/builtins.md](../../reference/builtins.md): the kit bag.

@@ -1,6 +1,6 @@
 ---
 title: Authentication
-summary: Four optional auth layers — host token, admin password, user accounts — stack at the API server boundary.  Configure per deployment shape; defaults are everything off (current behaviour).
+summary: Four optional auth layers (host token, admin password, user accounts) stack at the API server boundary.  Configure per deployment shape; defaults are everything off (current behaviour).
 tags:
   - guides
   - deployment
@@ -9,7 +9,7 @@ tags:
 
 # Authentication
 
-KohakuTerrarium runs unauthenticated by default — perfect for the
+KohakuTerrarium runs unauthenticated by default, which is perfect for the
 desktop app on loopback, where the OS user is your trust boundary.
 For everything else (LAN host, family server, internet-exposed
 deployment) four optional auth layers stack at the API server.
@@ -20,7 +20,7 @@ single-user open-host behaviour.
 
 | Layer | Gate | Use when |
 |---|---|---|
-| **L1** Host selection | Frontend-only — which backend the app talks to | Always (built into bundled apps) |
+| **L1** Host selection | Frontend-only: which backend the app talks to | Always (built into bundled apps) |
 | **L2** Host token | "Is this client allowed to reach the host at all?" | LAN / internet-exposed host |
 | **L3** Admin token | "Is this caller allowed to mutate host config?" | You want family members to use the host without giving them config rights |
 | **L4** User accounts | "Whose sessions / UI prefs is this request scoped to?" | Multi-user shared host |
@@ -35,7 +35,7 @@ Auth lives entirely at the API server boundary (``api/auth/``).  The
 engine, Studio, terrarium runtime, and session store have **zero**
 knowledge of users, tokens, or hosts.  When L4 is enabled, per-user
 isolation is enforced by routing each authenticated request to a
-per-user ``Terrarium`` engine via an engine pool — the engine itself
+per-user ``Terrarium`` engine via an engine pool; the engine itself
 stays single-tenant.
 
 This means the CLI (``kt run``, ``kt list``, ``kt resume``) and the
@@ -71,7 +71,7 @@ Environment-variable overrides (highest precedence):
 | ``KT_AUTH_LOOPBACK_BYPASS`` | ``0`` / ``1`` |
 
 The ``*_FILE`` variants exist so secrets land via Docker
-``secrets:`` mounts or systemd ``LoadCredential=`` directives — they
+``secrets:`` mounts or systemd ``LoadCredential=`` directives, so they
 never appear in ``/proc/<pid>/environ``.
 
 ## Discovering what a host has enabled
@@ -81,7 +81,7 @@ GET /api/auth/capabilities                   (no auth required)
 ```
 
 The frontend hits this BEFORE any other API call to know what to
-prompt for.  The response carries no secrets — only the enabled
+prompt for.  The response carries no secrets, only the enabled
 flags + mode metadata:
 
 ```json
@@ -96,7 +96,7 @@ flags + mode metadata:
 }
 ```
 
-## Layer 2 — host token
+## Layer 2: host token
 
 A single shared secret gates every ``/api/*`` and ``/ws/*`` request.
 
@@ -116,7 +116,7 @@ The token lands in ``<config_dir>/config.toml``.  Clients present it as:
 
 **Loopback bypass.**  Requests from ``127.0.0.1`` / ``::1`` skip L2
 by default (``loopback_bypass = true``).  This keeps the desktop app
-friction-free — your app doesn't need to know the token to talk to
+friction-free: your app doesn't need to know the token to talk to
 its own bundled host.  Disable for production deployments behind a
 reverse proxy:
 
@@ -130,9 +130,9 @@ loopback_bypass = false
 so cross-origin browsers can complete preflight before sending the
 real (authenticated) request.
 
-## Layer 3 — admin token
+## Layer 3: admin token
 
-A second shared secret gates **config-mutating routes only** —
+A second shared secret gates **config-mutating routes only**:
 adding LLM keys, registering MCP servers, installing packages,
 editing models / profiles.  Read access and chat use are not gated.
 
@@ -148,7 +148,7 @@ This is the **family server** pattern: anyone with the host token can
 chat / read configs; only the operator with the admin token can
 change LLM profiles or install packages.
 
-## Layer 4 — user accounts
+## Layer 4: user accounts
 
 Per-user accounts with isolated sessions, UI prefs, and API tokens.
 
@@ -180,9 +180,9 @@ Three registration modes:
 ```
 <config_dir>/
 ├── auth.db
-├── api_keys.yaml          # SHARED — admin-managed
-├── llm_profiles.yaml      # SHARED — admin-managed
-├── mcp_servers.yaml       # SHARED — admin-managed
+├── api_keys.yaml          # SHARED; admin-managed
+├── llm_profiles.yaml      # SHARED; admin-managed
+├── mcp_servers.yaml       # SHARED; admin-managed
 └── users/
     └── <user_id>/
         ├── ui_prefs.json
@@ -232,7 +232,7 @@ Claim them explicitly:
 kt admin migrate --from-shared-state --to-user operator
 ```
 
-This is deliberate — automatic migration in a multi-user upgrade could
+This is deliberate: automatic migration in a multi-user upgrade could
 move someone else's session into the wrong namespace.
 
 ## Cryptography
@@ -244,8 +244,8 @@ move someone else's session into the wrong namespace.
 | Session ID generation | ``secrets.token_urlsafe(32)`` (256 bits) |
 | Token / admin compare | ``secrets.compare_digest`` (constant-time) |
 
-API tokens and invitations are generated CSPRNG and stored hashed —
-a DB leak cannot be replayed.
+API tokens and invitations are generated CSPRNG and stored hashed,
+so a DB leak cannot be replayed.
 
 ## Threat model
 
@@ -258,25 +258,25 @@ a DB leak cannot be replayed.
 
 What auth does **not** defend against:
 
-- A user with shell access to ``<config_dir>/`` — they can read
+- A user with shell access to ``<config_dir>/``: they can read
   ``auth.db`` (bcrypt hashes; offline crack is the standard cost)
   AND every user's session files.  Auth is an API boundary, not an
   OS boundary.
-- Side-channel attacks (timing, traffic analysis) — out of scope.
+- Side-channel attacks (timing, traffic analysis): out of scope.
 
 ## TLS
 
 The framework does NOT terminate TLS itself in 1.5.0.  Operators put
 a reverse proxy (Caddy / nginx / Traefik) in front for HTTPS.  See
-[Deployment — Reverse proxy](deployment-reverse-proxy.md).  The
+[Reverse-proxy deployment](deployment-reverse-proxy.md).  The
 frontend nags with a banner *"connection is not encrypted"* when
 ``auth`` is on but the host URL is plain ``http://`` and non-loopback.
 
 ## See also
 
-- [Deployment — Docker](deployment-docker.md) — ``[auth]`` config via
+- [Docker deployment](deployment-docker.md): ``[auth]`` config via
   ``secrets:`` mounts
-- [Deployment — systemd](deployment-systemd.md) — ``[auth]`` config
+- [systemd deployment](deployment-systemd.md): ``[auth]`` config
   via ``LoadCredential=`` directives
-- [Deployment — Reverse proxy](deployment-reverse-proxy.md) — TLS
+- [Reverse-proxy deployment](deployment-reverse-proxy.md): TLS
   termination + CORS allowlist for hosted static frontends

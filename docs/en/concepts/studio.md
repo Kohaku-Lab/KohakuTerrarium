@@ -1,6 +1,6 @@
 ---
 title: Studio
-summary: The management layer above the Terrarium engine — catalog, identity, sessions, persistence, attach policies, and editors.
+summary: The management layer above the Terrarium engine. Catalog, identity, sessions, persistence, attach policies, and editors.
 tags:
   - concepts
   - studio
@@ -43,9 +43,13 @@ Lower layers do not import higher layers:
 - Creature code does not know `Terrarium` or `Studio` exist.
 - `Terrarium` hosts creatures, but does not know about `Studio`, HTTP,
   or CLI.
-- `Studio` takes a `Terrarium` engine and adds management semantics on
-  top.
-- `api/`, `cli/`, and the frontend are adapters over Studio.
+- `Studio` wraps a `Terrarium` engine (pass `engine=`, or let `Studio()`
+  own one) and adds management semantics on top. Its state is
+  instance-scoped: two Studios over two engines never share session
+  registries.
+- `api/`, `cli/`, and the frontend are adapters over Studio. Studio
+  itself raises typed `kohakuterrarium.errors` exceptions; only the
+  `api/` adapter translates them into HTTP status codes.
 
 The structure is: one runtime engine, one management layer, and thin
 UI adapters.
@@ -76,8 +80,8 @@ Connecting two graphs merges them; disconnecting can split them.
 Studio names a graph a **session** when a user or UI is managing it.
 That session handle carries:
 
-- `session_id` — the graph id;
-- `kind` — `"creature"` for a one-creature graph, `"terrarium"` for a
+- `session_id`: the graph id;
+- `kind`: `"creature"` for a one-creature graph, `"terrarium"` for a
   multi-creature graph started from a recipe;
 - creature summaries for UI tabs and per-creature operations;
 - metadata Studio cares about, such as config path, working directory,
@@ -104,7 +108,7 @@ this running creature or session?"
 | Policy | Shape | Use |
 |---|---|---|
 | IO chat | read/write stream | Conversational creatures. |
-| Channel observer | read-only stream | Inspect graph channel traffic without consuming queue messages. |
+| Channel observer | read-only stream | Inspect graph channel traffic without disturbing the listeners. |
 | Trace | read-only stream | Engine events, turns, topology changes, tool activity. |
 | Log | read-only stream | Process/runtime logs. |
 | Workspace files | browse/watch | File panels and editor refresh. |
@@ -151,7 +155,7 @@ Terrarium runs creatures.
 
 ## See also
 
-- [Terrarium](multi-agent/terrarium.md) — the runtime engine Studio wraps.
-- [Programmatic Usage](../guides/programmatic-usage.md) — how to embed `Studio` and `Terrarium`.
-- [Studio guide](../guides/studio.md) — task-oriented examples.
-- [Python API](../reference/python.md) — signatures and namespace map.
+- [Terrarium](multi-agent/terrarium.md): the runtime engine Studio wraps.
+- [Programmatic Usage](../guides/programmatic-usage.md): how to embed `Studio` and `Terrarium`.
+- [Studio guide](../guides/studio.md): task-oriented examples.
+- [Python API](../reference/python.md): signatures and namespace map.

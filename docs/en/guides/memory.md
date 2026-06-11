@@ -9,7 +9,7 @@ tags:
 
 # Memory
 
-For readers who want to search past session events — from the CLI, from Python, or from an agent at runtime.
+For readers who want to search past session events from the CLI, from Python, or from an agent at runtime.
 
 A session's event log is also a small local knowledge base. Building a search index over it gives you FTS keyword search (free, fast), semantic search (needs an embedder), and hybrid search that reranks keyword hits with embedding similarity. Agents can query their own or another session's memory through the built-in `search_memory` tool.
 
@@ -21,12 +21,12 @@ Every event in `~/.kohakuterrarium/sessions/*.kohakutr` is a searchable "block":
 
 Search returns `SearchResult` records with:
 
-- `content` — the matched text
-- `agent` — which creature produced it
-- `block_type` — `text` / `tool` / `trigger` / `user`
-- `round_num`, `block_num` — position in the session
-- `score` — match quality
-- `ts` — timestamp
+- `content`: the matched text
+- `agent`: which creature produced it
+- `block_type`: `text` / `tool` / `trigger` / `user`
+- `round_num`, `block_num`: position in the session
+- `score`: match quality
+- `ts`: timestamp
 
 ## Embedding providers
 
@@ -37,16 +37,16 @@ Three providers, pick one that matches your environment:
 | `model2vec` (default) | no torch, pure NumPy | Extremely fast, smallest install. Quality is good for keyword-adjacent retrieval, weaker for long-form semantic. |
 | `sentence-transformer` | `torch` | Slower but much stronger semantic quality. GPU-friendly. |
 | `api` | network + API key | Remote embedders (OpenAI, Jina, Gemini). Best quality, pay per call. |
-| `auto` | — | Prefers `jina-v5-nano` if API available, else falls back to `model2vec`. |
+| `auto` | (none) | Prefers `jina-v5-nano` if API available, else falls back to `model2vec`. |
 
 Preset model names (portable across providers):
 
-- `@tiny` — smallest/fastest
-- `@base` — default balance
-- `@retrieval` — tuned for retrieval
-- `@best` — highest quality
-- `@multilingual`, `@multilingual-best` — non-English sessions
-- `@science`, `@nomic`, `@gemma` — specialized
+- `@tiny`: smallest/fastest
+- `@base`: default balance
+- `@retrieval`: tuned for retrieval
+- `@best`: highest quality
+- `@multilingual`, `@multilingual-best`: non-English sessions
+- `@science`, `@nomic`, `@gemma`: specialized
 
 You can also pass a Hugging Face path directly.
 
@@ -65,7 +65,7 @@ kt embedding swe.kohakutr \
   --dimensions 384
 ```
 
-`--dimensions` is Matryoshka truncation — use it to shrink vectors on the fly when the model supports it.
+`--dimensions` is Matryoshka truncation; use it to shrink vectors on the fly when the model supports it.
 
 Incremental: running `kt embedding` again only indexes new events.
 
@@ -81,10 +81,10 @@ kt search swe "auth bug" --agent swe -k 5
 
 Modes:
 
-- **`fts`** — BM25 over FTS5. No embeddings needed. Fastest. Great for literal phrases.
-- **`semantic`** — pure vector similarity. Needs an index. Great for paraphrases.
-- **`hybrid`** — BM25 candidates reranked by vector similarity. Default when both are available.
-- **`auto`** — picks the richest mode the session supports.
+- **`fts`**: BM25 over FTS5. No embeddings needed. Fastest. Great for literal phrases.
+- **`semantic`**: pure vector similarity. Needs an index. Great for paraphrases.
+- **`hybrid`**: BM25 candidates reranked by vector similarity. Default when both are available.
+- **`auto`**: picks the richest mode the session supports.
 
 `-k` caps results. `--agent` filters to one creature inside a terrarium session.
 
@@ -104,9 +104,9 @@ memory:
     model: "@base"
 ```
 
-When the LLM calls `search_memory`, the tool runs over the *current* session's index. This is the seamless-memory primitive — agents can look up what they (or their teammates) said in earlier rounds without explicit RAG scaffolding.
+When the LLM calls `search_memory`, the tool runs over the *current* session's index. This is the seamless-memory primitive: agents can look up what they (or their teammates) said in earlier rounds without explicit RAG scaffolding.
 
-Tool args (shape; concrete syntax depends on your `tool_format` — default bracket shown):
+Tool args (shape; concrete syntax depends on your `tool_format`; default bracket shown):
 
 ```
 [/search_memory]
@@ -128,7 +128,7 @@ memory:
     model: "@retrieval"       # preset or HF path
 ```
 
-Agents with this block indexed automatically as events land — no `kt embedding` call needed. Agents without it keep an unembedded session (still FTS-searchable).
+Agents with this block indexed automatically as events land; no `kt embedding` call needed. Agents without it keep an unembedded session (still FTS-searchable).
 
 ## Inspecting programmatically
 
@@ -155,11 +155,11 @@ store.close()
 - **Slow `kt embedding`.** `sentence-transformer` is CPU-bound by default. Install torch with CUDA, or drop to `model2vec`.
 - **Provider install fails.** `kt embedding --provider model2vec` has no native deps and works everywhere. `sentence-transformer` needs `torch`; `api` needs the provider SDK (`openai`, `google-generativeai`, etc.).
 - **Hybrid mode returns noise.** Lower `-k` and prefer `semantic` over `hybrid` for paraphrase-heavy queries; prefer `fts` for literal-phrase queries.
-- **search_memory returns nothing.** The session's embedding config is missing or the session started before you added memory config — rebuild with `kt embedding`.
+- **search_memory returns nothing.** The session's embedding config is missing or the session started before you added memory config; rebuild with `kt embedding`.
 
 ## See also
 
-- [Sessions](sessions.md) — the `.kohakutr` format that memory sits on top of.
-- [Plugins](plugins.md) — seamless-memory plugin pattern (`pre_llm_call` retrieval).
-- [Reference / CLI](../reference/cli.md) — `kt embedding`, `kt search` flags.
-- [Concepts / memory and compaction](../concepts/modules/memory-and-compaction.md) — the design rationale.
+- [Sessions](sessions.md): the `.kohakutr` format that memory sits on top of.
+- [Plugins](plugins.md): seamless-memory plugin pattern (`pre_llm_call` retrieval).
+- [Reference / CLI](../reference/cli.md): `kt embedding`, `kt search` flags.
+- [Concepts / memory and compaction](../concepts/modules/memory-and-compaction.md): the design rationale.

@@ -1,6 +1,6 @@
 ---
 title: CLI
-summary: Every kt subcommand — run, resume, login, install, list, info, model, embedding, search, terrarium, serve, app.
+summary: Every kt subcommand. Run, resume, login, install, list, info, model, embedding, search, terrarium, serve, app.
 tags:
   - reference
   - cli
@@ -20,8 +20,8 @@ paths, see [guides/getting-started](../guides/getting-started.md) and
 
 ## Entry points
 
-- `kt` — installed console script.
-- `python -m kohakuterrarium` — equivalent.
+- `kt`: installed console script.
+- `python -m kohakuterrarium`: equivalent.
 - Invoked with no subcommand (e.g. from a Briefcase double-click), `kt`
   starts the desktop app automatically.
 
@@ -46,7 +46,7 @@ kt run <agent_path> [flags]
 
 Positional:
 
-- `agent_path` — local folder containing `config.yaml`, or a package
+- `agent_path`: local folder containing `config.yaml`, or a package
   reference like `@kt-biome/creatures/swe`.
 
 Flags:
@@ -56,8 +56,8 @@ Flags:
 | `--log-level` | `DEBUG\|INFO\|WARNING\|ERROR` | `INFO` | Root logger level. |
 | `--log-stderr` | `auto\|on\|off` | `auto` | Mirror logs to stderr. `auto` = on when the I/O mode is not cli/tui (e.g. `plain`, `stdout`, `custom`, `package`); `off` = never; `on` = always. |
 | `--session` | path | auto | Session file to write; absolute or name under `~/.kohakuterrarium/sessions/`. |
-| `--no-session` | flag | — | Disable session persistence entirely. |
-| `--llm` | str | — | Override LLM profile (e.g. `gpt-5.4`, `claude-opus-4.7`). Accepts a variation selector — see [configuration reference](configuration.md#variation-selector). |
+| `--no-session` | flag | (none) | Disable session persistence entirely. |
+| `--llm` | str | (none) | Override LLM profile (e.g. `gpt-5.4`, `claude-opus-4.7`). Accepts a variation selector; see [configuration reference](configuration.md#variation-selector). |
 | `--mode` | `cli\|plain\|tui` | auto | Interaction mode. Defaults to `cli` on TTY, `plain` otherwise. |
 
 Behaviour:
@@ -80,7 +80,7 @@ kt resume [session] [flags]
 
 Positional:
 
-- `session` — name prefix, full filename, or full path. Omit for an
+- `session`: name prefix, full filename, or full path. Omit for an
   interactive picker of the 10 most-recent sessions.
 
 Flags:
@@ -88,7 +88,7 @@ Flags:
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--pwd` | path | session's stored cwd | Override working directory. |
-| `--last` | flag | — | Resume the most-recent session without prompting. |
+| `--last` | flag | (none) | Resume the most-recent session without prompting. |
 | `--log-level` | as `kt run` | | |
 | `--log-stderr` | as `kt run` | `auto` | Mirror logs to stderr. |
 | `--mode` | as `kt run` | | Terrarium sessions force `tui`. |
@@ -134,20 +134,20 @@ kt terrarium run <terrarium_path> [flags]
 
 Positional:
 
-- `terrarium_path` — YAML file or `@package/terrariums/<name>`.
+- `terrarium_path`: YAML file or `@package/terrariums/<name>`.
 
 Flags:
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--log-level` | as `kt run` | | |
-| `--seed` | str | — | Prompt to inject into the seed channel at startup. |
+| `--seed` | str | (none) | Prompt to inject into the seed channel at startup. |
 | `--seed-channel` | str | `seed` | Channel to receive `--seed`. |
-| `--observe` | list of channel names | — | Channels to observe (plain/log mode). |
-| `--no-observe` | flag | — | Disable observation entirely. |
+| `--observe` | list of channel names | (none) | Channels to observe (plain/log mode). |
+| `--no-observe` | flag | (none) | Disable observation entirely. |
 | `--session` | path | auto | Session file path. |
-| `--no-session` | flag | — | Disable persistence. |
-| `--llm` | str | — | Override LLM profile for *every* creature (and root). |
+| `--no-session` | flag | (none) | Disable persistence. |
+| `--llm` | str | (none) | Override LLM profile for *every* creature (and root). |
 | `--mode` | `cli\|plain\|tui` | `tui` | UI mode. |
 
 Behaviour:
@@ -178,7 +178,7 @@ kt install <source> [-e|--editable] [--name <name>]
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `-e`, `--editable` | flag | — | Write a `<name>.link` pointing at the source instead of copying. |
+| `-e`, `--editable` | flag | (none) | Write a `<name>.link` pointing at the source instead of copying. |
 | `--name` | str | derived from URL/path | Override installed package name. |
 
 `<source>` may be:
@@ -292,7 +292,7 @@ user-defined presets.
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `--all` | flag | — | Also include every built-in preset. Rows are grouped (User presets / Built-in presets); the Legend marks which entries have API key / OAuth configured. |
+| `--all` | flag | (none) | Also include every built-in preset. Rows are grouped (User presets / Built-in presets); the Legend marks which entries have API key / OAuth configured. |
 
 #### `kt config llm show`
 
@@ -370,11 +370,11 @@ Alias of `kt login`. See [Auth](#auth).
 Manage the global MCP server catalog
 (`~/.kohakuterrarium/mcp_servers.yaml`).
 
-- `list` — show file path and server inventory.
-- `add [name]` — interactive. Prompts for transport (`stdio`/`streamable_http`/`http`),
+- `list`: show file path and server inventory.
+- `add [name]`: interactive. Prompts for transport (`stdio`/`streamable_http`/`http`),
   command, args JSON, env JSON, URL.
-- `edit <name>` — interactive edit.
-- `delete <name>` — remove entry.
+- `edit <name>`: interactive edit.
+- `delete <name>`: remove entry.
 
 ---
 
@@ -426,7 +426,7 @@ kt embedding <session> [--provider ...] [--model ...] [--dimensions N]
 |---|---|---|---|
 | `--provider` | `auto\|model2vec\|sentence-transformer\|api` | `auto` | Auto prefers jina-v5-nano. |
 | `--model` | str | provider-dependent | Provider-specific model, including aliases like `@tiny`, `@best`, `@multilingual-best`. |
-| `--dimensions` | int | — | Matryoshka truncation (shorter vectors). |
+| `--dimensions` | int | (none) | Matryoshka truncation (shorter vectors). |
 
 ### `kt search`
 
@@ -440,7 +440,7 @@ kt search <session> <query> [flags]
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--mode` | `fts\|semantic\|hybrid\|auto` | `auto` | Search mode. Auto picks semantic when vectors exist, else FTS. |
-| `--agent` | str | — | Restrict to events from one agent. |
+| `--agent` | str | (none) | Restrict to events from one agent. |
 | `-k` | int | `10` | Max results. |
 
 ---
@@ -459,7 +459,7 @@ kt web [flags]
 |---|---|---|---|
 | `--host` | str | `127.0.0.1` | Bind host. |
 | `--port` | int | `8001` | Bind port. Auto-increments if busy. |
-| `--dev` | flag | — | API-only (serve frontend separately via `vite dev`). |
+| `--dev` | flag | (none) | API-only (serve frontend separately via `vite dev`). |
 | `--log-level` | as `kt run` | | |
 
 ### `kt app`
@@ -514,7 +514,7 @@ kt serve logs [--follow] [--lines 80]
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `--follow` | flag | — | Tail the log. |
+| `--follow` | flag | (none) | Tail the log. |
 | `--lines` | int | `80` | Initial lines to print. |
 
 ---
@@ -550,7 +550,7 @@ kt mcp list --agent <path>
 
 MCP servers can also live in the global catalog at
 `~/.kohakuterrarium/mcp_servers.yaml`, managed by
-[`kt config mcp`](#kt-config-mcp). The two registries are independent —
+[`kt config mcp`](#kt-config-mcp). The two registries are independent:
 per-agent entries are attached on agent start; catalog entries are not
 auto-attached but can be referenced by name.
 
@@ -582,9 +582,9 @@ auto-attached but can be referenced by name.
 
 ## Exit codes
 
-- `0` — success.
-- `1` — generic error.
-- Editor exit code — for `kt edit` / `kt config edit`.
+- `0`: success.
+- `1`: generic error.
+- Editor exit code, for `kt edit` / `kt config edit`.
 
 ## Interactive prompts
 
