@@ -129,6 +129,13 @@ async def start_creature(
         # Standalone path — direct engine call.  ``strict=False``: Studio
         # spawns keep degrade-and-continue (dashboard rebinds models);
         # ``@pkg/...`` refs pass through — ``load_agent_config`` resolves.
+        # ``name=`` MUST travel through add_creature (not be applied
+        # post-hoc): the engine's autosession may attach a SessionStore
+        # during add_creature, and the SessionOutput event-key prefix is
+        # baked from ``config.name`` at attach time.  A post-hoc rename
+        # left agent events keyed under the config name while the chat
+        # WS wrote user events under the display name — history (read by
+        # display name) then showed ONLY the user's prompts.
         engine = as_engine(service)
         if config_path:
             creature = await engine.add_creature(
@@ -137,6 +144,7 @@ async def start_creature(
                 pwd=pwd,
                 is_privileged=True,
                 strict=False,
+                name=name,
             )
         elif config is not None:
             creature = await engine.add_creature(
@@ -145,11 +153,10 @@ async def start_creature(
                 pwd=pwd,
                 is_privileged=True,
                 strict=False,
+                name=name,
             )
         else:
             raise ValueError("Must provide config_path or config")
-        if name and name.strip():
-            apply_creature_name(creature, name.strip())
         sid = creature.graph_id
         cid = creature.creature_id
         attach_session_store_for_creature(
@@ -311,7 +318,18 @@ async def start_terrarium(
     else:
         raise ValueError("Must provide config_path or config")
 
-    graph = await engine.apply_recipe(cfg, pwd=pwd, llm=llm, strict=False)
+    # ``session=False``: Studio mints its own richer store below
+    # (terrarium_name / terrarium_channels / terrarium_creatures meta
+    # the resume + viewer paths read).  Under autosession
+    # (``Terrarium(session_dir=...)``) ``apply_recipe`` would otherwise
+    # mint a store at the SAME ``<graph_id>.kohakutr`` path first; the
+    # Studio store then re-opens that file as a second live handle and
+    # the engine-minted handle leaks — on Windows the lingering handle
+    # locks the file, so deleting the saved session after stop 409s
+    # with WinError 32.
+    graph = await engine.apply_recipe(
+        cfg, pwd=pwd, llm=llm, strict=False, session=False
+    )
     sid = graph.graph_id
 
     # Session-store auto-attach.

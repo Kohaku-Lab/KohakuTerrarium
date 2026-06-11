@@ -470,6 +470,18 @@ def apply_creature_name(creature: "Creature", name: str) -> None:
     compact_manager = getattr(agent, "compact_manager", None)
     if compact_manager is not None and hasattr(compact_manager, "_agent_name"):
         compact_manager._agent_name = name
+    # A SessionOutput attached BEFORE the rename keeps recording events
+    # under the old name — but the history/read side resolves events by
+    # the creature's display name, so the rename must follow it onto the
+    # recorder. Only retarget the prefix when it still equals the old
+    # name: attached-agent recorders use custom ``<host>:attached:...``
+    # prefixes that a rename must not clobber.
+    session_output = getattr(agent, "_session_output", None)
+    if session_output is not None:
+        old = getattr(session_output, "_agent_name", None)
+        session_output._agent_name = name
+        if getattr(session_output, "_event_key_prefix", None) == old:
+            session_output._event_key_prefix = name
 
 
 def build_creature(

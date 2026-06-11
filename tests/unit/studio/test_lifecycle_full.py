@@ -199,8 +199,10 @@ class TestStartTerrarium:
         from kohakuterrarium.terrarium.config import TerrariumConfig
 
         cfg = TerrariumConfig(name="test-terra", creatures=[], channels=[])
+        seen_apply_kwargs: dict = {}
 
-        async def _apply(c, pwd=None, llm=None, strict=True):
+        async def _apply(c, pwd=None, llm=None, strict=True, session=None):
+            seen_apply_kwargs.update(strict=strict, session=session)
             return SimpleNamespace(graph_id="g-new", creature_ids=set())
 
         engine.apply_recipe = _apply
@@ -214,6 +216,45 @@ class TestStartTerrarium:
             sess = await lifecycle.start_terrarium(svc, config=cfg)
             assert sess.session_id == "g-new"
             assert sess.name == "test-terra"
+            # Studio mints its own (richer-meta) store right after the
+            # recipe applies — engine autosession MUST stay off for
+            # this call or the same ``<gid>.kohakutr`` gets a second
+            # live handle (leak; Windows file lock on saved delete).
+            assert seen_apply_kwargs["session"] is False
+        finally:
+            await engine.shutdown()
+
+    async def test_autosession_engine_single_store_handle(self, tmp_path, monkeypatch):
+        # REGRESSION PIN: on an autosession engine
+        # (``Terrarium(session_dir=...)`` — every API-server engine) a
+        # Studio terrarium spawn must produce exactly ONE live store
+        # handle: the Studio-minted one.  The engine-autosession path
+        # minting a sibling handle at the same path leaked it forever —
+        # on Windows the lingering SQLite handle locked the file, so
+        # deleting the saved session after stop failed with WinError 32.
+        from kohakuterrarium.terrarium.config import TerrariumConfig
+
+        session_dir = tmp_path / "sessions"
+        session_dir.mkdir()
+        monkeypatch.setenv("KT_SESSION_DIR", str(session_dir))
+        engine = Terrarium(session_dir=str(session_dir))
+        svc = LocalTerrariumService(engine)
+        cfg = TerrariumConfig(name="solo-terra", creatures=[], channels=[])
+        try:
+            sess = await lifecycle.start_terrarium(svc, config=cfg)
+            sid = sess.session_id
+            # One store file, owned by Studio — the engine minted (and
+            # therefore owns) nothing.
+            files = list(session_dir.glob("*.kohakutr"))
+            assert [f.name for f in files] == [f"{sid}.kohakutr"]
+            assert engine._owned_sessions == set()
+            store = lifecycle.get_session_store(svc, sid)
+            assert store is not None
+            assert engine._session_stores[sid] is store
+            # Stop closes the single handle; the file is then deletable
+            # (on Windows a leaked second handle makes this raise).
+            await lifecycle.stop_session(svc, sid)
+            files[0].unlink()
         finally:
             await engine.shutdown()
 

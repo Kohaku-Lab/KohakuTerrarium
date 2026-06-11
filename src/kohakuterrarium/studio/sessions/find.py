@@ -15,37 +15,26 @@ avoid a cycle.
 from typing import TYPE_CHECKING
 
 from kohakuterrarium.studio._runtime import as_engine
+from kohakuterrarium.terrarium.creature_host import (
+    apply_creature_name as _engine_apply_creature_name,
+)
 
 if TYPE_CHECKING:
     from kohakuterrarium.terrarium import TerrariumService
 
 
 def apply_creature_name(creature, name: str) -> None:
-    """Push a display-name change onto every nested object that caches
-    it. Without this the executor (and its ToolContexts) keep emitting
-    channel messages with the original config name, the trigger manager
-    logs with the old name, etc. — even after we set ``creature.name``
-    and ``agent.config.name``.
+    """Push a display-name change onto every nested object that caches it.
+
+    Delegates to the engine's canonical implementation
+    (:func:`kohakuterrarium.terrarium.creature_host.apply_creature_name`)
+    so studio renames and engine spawn-time renames stay byte-identical.
+    This used to be a hand-maintained duplicate; it drifted when the
+    canonical copy learned to retarget the live ``SessionOutput`` event
+    recorder — a studio rename then kept recording events under the OLD
+    name while history reads used the new display name.
     """
-    creature.name = name
-    agent = getattr(creature, "agent", None)
-    if agent is None:
-        if creature.config is not None:
-            creature.config.name = name
-        return
-    if getattr(agent, "config", None) is not None:
-        agent.config.name = name
-    if creature.config is not None:
-        creature.config.name = name
-    executor = getattr(agent, "executor", None)
-    if executor is not None and hasattr(executor, "_agent_name"):
-        executor._agent_name = name
-    trigger_manager = getattr(agent, "trigger_manager", None)
-    if trigger_manager is not None and hasattr(trigger_manager, "_agent_name"):
-        trigger_manager._agent_name = name
-    compact_manager = getattr(agent, "compact_manager", None)
-    if compact_manager is not None and hasattr(compact_manager, "_agent_name"):
-        compact_manager._agent_name = name
+    _engine_apply_creature_name(creature, name)
 
 
 def find_creature(service: "TerrariumService", session_id: str, name_or_id: str):

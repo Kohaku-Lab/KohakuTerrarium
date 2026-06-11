@@ -61,6 +61,9 @@ _REPLY_AFTER_TOOL = "I stored the topic in the scratchpad."
 # per-chunk delay, so the turn stays in flight long enough for the
 # journey to fire an interrupt over HTTP before it completes.
 _REPLY_SLOW = "x" * 200
+_REPLY_TRACE = "Live trace turn observed."
+_REPLY_RENAMED = "Reply after the rename."
+_REPLY_SECOND_APP = "Second app instance reply."
 
 _CREATURE_CONFIG = """\
 name: alice
@@ -95,6 +98,9 @@ def scripted_llm(monkeypatch: pytest.MonkeyPatch) -> ScriptedLLM:
             ScriptEntry(
                 _REPLY_SLOW, match="long turn", chunk_size=1, delay_per_chunk=0.05
             ),
+            ScriptEntry(_REPLY_TRACE, match="trace turn"),
+            ScriptEntry(_REPLY_RENAMED, match="after rename"),
+            ScriptEntry(_REPLY_SECOND_APP, match="second app turn"),
             # Persistence journey + regenerate/edit fall through to the
             # generic tail entry below.
             ScriptEntry(_REPLY_GREET),
@@ -192,9 +198,15 @@ class TestApiCreatureJourney:
         tool-call turn → settings round-trip → interrupt → history →
         branch (regenerate + edit) → delete."""
         # 1. POST create a creature session (frontend: agentAPI.create).
+        #    The frontend ALWAYS sends a generated display name
+        #    (utils/randomName.js) — spawning named is the real path,
+        #    and it is what regressed: the engine's autosession attached
+        #    the SessionOutput recorder BEFORE the display name applied,
+        #    so agent events were keyed under the config name while the
+        #    chat WS + history used the display name.
         resp = client.post(
             "/api/sessions/active/agents",
-            json={"config_path": str(creature_dir)},
+            json={"config_path": str(creature_dir), "name": "warm-ember"},
         )
         assert resp.status_code == 200
         created = resp.json()
@@ -219,7 +231,7 @@ class TestApiCreatureJourney:
         with client.websocket_connect(ws_url) as ws:
             info = ws.receive_json()
             assert info["activity_type"] == "session_info"
-            assert info["agent_name"] == "alice"
+            assert info["agent_name"] == "warm-ember"
 
             reply_one, _ = _stream_turn(ws, "hello creature")
             assert reply_one == _REPLY_GREET
@@ -252,16 +264,10 @@ class TestApiCreatureJourney:
         assert resp.json().get("topic") == "e2e-journey"
 
         # 5. Per-creature settings round-trip — change, then read back.
-        # 5a. Model switch (frontend: terrariumAPI.switchCreatureModel).
-        resp = client.post(
-            f"/api/sessions/{session_id}/creatures/{creature_id}/model",
-            json={"model": "openai/gpt-4o-mini"},
-        )
-        assert resp.status_code == 200
-        assert resp.json() == {"status": "switched", "model": "openai/gpt-4o-mini"}
-        resp = client.get(f"/api/sessions/active/{session_id}")
-        assert resp.status_code == 200
-        assert resp.json()["creatures"][0]["llm_name"] == "openai/gpt-4o-mini"
+        # (5a, the model switch, runs at the END of the journey — it
+        # replaces the scripted provider with a real one, so every
+        # chat-driven leg must come before it. The old ordering made
+        # all post-switch turns silently hollow.)
 
         # 5b. Plugin toggle (frontend: terrariumAPI.togglePlugin). The
         #     ``budget`` catalog plugin is registered disabled-but-
@@ -371,8 +377,8 @@ class TestApiCreatureJourney:
         assert cmd_body["command"] == "status"
         assert cmd_body["success"] is True
         # The status command reads live off the Agent — the creature's
-        # real config name appears in its output.
-        assert "alice" in cmd_body["output"]
+        # DISPLAY name (applied at spawn) appears in its output.
+        assert "warm-ember" in cmd_body["output"]
         # It also reports the live conversation message count — three
         # streamed turns + one post-tool round produced a non-empty
         # conversation, so "Messages" is well above zero.
@@ -440,6 +446,30 @@ class TestApiCreatureJourney:
             # Clean cancellation: the 200-char slow reply was cut short.
             assert collected != _REPLY_SLOW
 
+        # 6.5 Live trace — the inspect-mode event stream. BOTH name
+        #     shapes the frontend uses must resolve the live store: the
+        #     graph id (live session URLs) and the saved-file stem (the
+        #     session viewer). While subscribed, a chat turn must push
+        #     live ``event`` frames keyed under the DISPLAY name.
+        with client.websocket_connect(
+            f"/ws/sessions/{creature_id}/events"
+        ) as events_ws_stem:
+            hello = events_ws_stem.receive_json()
+            assert hello.get("type") == "subscribed", hello
+        with client.websocket_connect(f"/ws/sessions/{session_id}/events") as events_ws:
+            hello = events_ws.receive_json()
+            assert hello.get("type") == "subscribed", hello
+            with client.websocket_connect(ws_url) as ws:
+                ws.receive_json()  # session_info
+                reply_trace, _ = _stream_turn(ws, "trace turn please")
+                assert reply_trace == _REPLY_TRACE
+            live_keys = []
+            for _ in range(3):
+                frame = events_ws.receive_json()
+                assert frame.get("type") == "event", frame
+                live_keys.append(frame.get("key", ""))
+            assert all(k.startswith("warm-ember:") for k in live_keys), live_keys
+
         # 7. GET history — the turns we streamed are recorded; the
         #    interrupted slow reply did NOT fully land.
         resp = client.get(f"/api/sessions/{session_id}/creatures/{creature_id}/history")
@@ -456,6 +486,36 @@ class TestApiCreatureJourney:
         assert _REPLY_GREET in joined
         assert _REPLY_FOLLOWUP in joined
         assert _REPLY_SLOW not in joined  # interrupted before completion
+
+        # 7.1 The SAME history must resolve by DISPLAY NAME (the
+        #     frontend keys chat tabs off the name) and its event log
+        #     must contain the full agent-side record — not just the
+        #     user's prompts. These exact types vanishing is the
+        #     "chat is empty after the turn finishes" regression.
+        resp = client.get(f"/api/sessions/{session_id}/creatures/warm-ember/history")
+        assert resp.status_code == 200
+        by_name = resp.json()
+        assert len(by_name["messages"]) == len(messages)
+        event_types = {e.get("type") for e in by_name["events"]}
+        for required in (
+            "user_input",
+            "processing_start",
+            "text_chunk",
+            "tool_call",
+            "tool_result",
+            "processing_end",
+        ):
+            assert required in event_types, (
+                f"{required!r} missing from history events — agent-side "
+                f"events are not being recorded under the display name; "
+                f"got {sorted(event_types)}"
+            )
+        chunk_text = "".join(
+            e.get("content", "")
+            for e in by_name["events"]
+            if e.get("type") == "text_chunk"
+        )
+        assert _REPLY_GREET in chunk_text
 
         # 8. Branch bookkeeping — regenerate the tail then edit a user
         #    message. Both open new branches at their turn; the history
@@ -510,11 +570,107 @@ class TestApiCreatureJourney:
             "edited hello creature" in (m.get("content") or "") for m in live_user
         )
 
-        # 9. DELETE the session — it leaves the active list.
+        # 8.5 Rename the live creature (frontend: agentAPI.rename), run
+        #     another turn, and read history under the NEW display name.
+        #     The rename must retarget the live event recorder too.
+        resp = client.post(
+            f"/api/sessions/active/agents/{creature_id}/rename",
+            json={"name": "calm-river"},
+        )
+        assert resp.status_code == 200
+        with client.websocket_connect(ws_url) as ws:
+            info = ws.receive_json()
+            assert info["agent_name"] == "calm-river"
+            reply_renamed, _ = _stream_turn(ws, "after rename please")
+            assert reply_renamed == _REPLY_RENAMED
+        resp = client.get(f"/api/sessions/{session_id}/creatures/calm-river/history")
+        assert resp.status_code == 200
+        renamed_history = resp.json()
+        renamed_msgs = " ".join(
+            m.get("content", "") if isinstance(m.get("content"), str) else ""
+            for m in renamed_history["messages"]
+        )
+        assert _REPLY_RENAMED in renamed_msgs
+        renamed_chunks = "".join(
+            e.get("content", "")
+            for e in renamed_history["events"]
+            if e.get("type") == "text_chunk"
+        )
+        assert _REPLY_RENAMED in renamed_chunks
+
+        # 5a (deferred). Model switch — LAST chat-affecting op: it
+        #     swaps the scripted provider for a real one, so it must
+        #     not run before the chat-driven legs above.
+        resp = client.post(
+            f"/api/sessions/{session_id}/creatures/{creature_id}/model",
+            json={"model": "openai/gpt-4o-mini"},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "switched", "model": "openai/gpt-4o-mini"}
+        resp = client.get(f"/api/sessions/active/{session_id}")
+        assert resp.status_code == 200
+        assert resp.json()["creatures"][0]["llm_name"] == "openai/gpt-4o-mini"
+
+        # 9. DELETE the session — it leaves the active list, the
+        #    ``.kohakutr`` survives on disk, and the saved-sessions list
+        #    (what the frontend shows after a page reload) contains it.
         resp = client.delete(f"/api/sessions/active/{session_id}")
         assert resp.status_code == 200
         assert resp.json() == {"status": "stopped"}
         assert client.get("/api/sessions/active").json() == []
+
+        session_dir = creature_dir.parent / "sessions"
+        on_disk = sorted(p.name for p in session_dir.glob("*.kohakutr"))
+        assert f"{creature_id}.kohakutr" in on_disk, on_disk
+        resp = client.get("/api/sessions")
+        assert resp.status_code == 200
+        saved = resp.json()["sessions"]
+        assert any(
+            s.get("filename", "").startswith(creature_id) for s in saved
+        ), f"closed session missing from saved list: {saved!r}"
+
+        # 10. "Server restart" — a SECOND app over the same session dir
+        #     (the saved-index sidecar now pre-exists, like any real
+        #     deployment after its first boot). A new named session must
+        #     still reach the saved list after close; the old one stays.
+        engine2 = Terrarium(session_dir=str(session_dir))
+        service2 = LocalTerrariumService(engine2)
+        set_service(service2)
+        app2 = create_app()
+        with TestClient(app2) as client2:
+            resp = client2.get("/api/sessions")
+            assert resp.status_code == 200
+            assert any(
+                s.get("filename", "").startswith(creature_id)
+                for s in resp.json()["sessions"]
+            ), "previous session lost after restart"
+
+            resp = client2.post(
+                "/api/sessions/active/agents",
+                json={"config_path": str(creature_dir), "name": "still-water"},
+            )
+            assert resp.status_code == 200
+            sid2 = resp.json()["session_id"]
+            cid2 = resp.json()["agent_id"]
+            with client2.websocket_connect(
+                f"/ws/sessions/{sid2}/creatures/{cid2}/chat"
+            ) as ws:
+                ws.receive_json()  # session_info
+                reply2, _ = _stream_turn(ws, "second app turn please")
+                assert reply2 == _REPLY_SECOND_APP
+            resp = client2.get(f"/api/sessions/{sid2}/creatures/still-water/history")
+            assert resp.status_code == 200
+            types2 = {e.get("type") for e in resp.json()["events"]}
+            assert "text_chunk" in types2, sorted(types2)
+            resp = client2.delete(f"/api/sessions/active/agents/{cid2}")
+            assert resp.status_code == 200
+            resp = client2.get("/api/sessions")
+            filenames = [s.get("filename", "") for s in resp.json()["sessions"]]
+            assert any(f.startswith(cid2) for f in filenames), (
+                "session created AFTER the index sidecar existed never "
+                f"reached the saved list: {filenames!r}"
+            )
+            assert any(f.startswith(creature_id) for f in filenames)
 
     def test_persistence_and_resume_journey(
         self, client: TestClient, creature_dir: Path, scripted_llm: ScriptedLLM

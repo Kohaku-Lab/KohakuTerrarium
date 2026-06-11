@@ -104,6 +104,40 @@ class CatalogEntry:
         return d
 
 
+def manifest_entry_rel_path(entry, kind: str) -> str | None:
+    """Relative path of a manifest ``creatures:`` / ``terrariums:`` entry.
+
+    ``kohaku.yaml`` accepts three spellings for these lists (all of
+    which appear in docs / shipped packages):
+
+    - ``{name: x, path: creatures/x}`` — canonical (kt-biome style).
+    - ``{name: x}`` — docs shorthand; the folder is ``<kind>/<x>``
+      by convention (``docs/en/guides/packages.md``).
+    - ``"creatures/x"`` / ``"x"`` — bare string; treated as a path
+      when it contains ``/``, else as a name.
+
+    Returns ``None`` for entries that carry neither a usable path nor
+    a name — callers skip those instead of crashing the whole scan
+    (a single malformed entry must not 500 the catalog endpoints).
+
+    Args:
+        entry: One element of the manifest list (dict or str).
+        kind: ``"creatures"`` or ``"terrariums"`` — the conventional
+            folder used to derive a path from a bare name.
+    """
+    if isinstance(entry, dict):
+        rel = entry.get("path")
+        if isinstance(rel, str) and rel:
+            return rel
+        entry_name = entry.get("name")
+        if isinstance(entry_name, str) and entry_name:
+            return f"{kind}/{entry_name}"
+        return None
+    if isinstance(entry, str) and entry:
+        return entry if "/" in entry else f"{kind}/{entry}"
+    return None
+
+
 def _build_package_root_map() -> dict[str, str]:
     """Return ``{resolved_pkg_root_str: pkg_name}`` for installed packages.
 
@@ -301,9 +335,13 @@ def scan_catalog() -> list[CatalogEntry]:
         pkg_path = Path(pkg["path"])
         pkg_name = pkg["name"]
         for c in pkg.get("creatures", []):
-            _add_creature(pkg_path / c["path"], source=pkg_name)
+            rel = manifest_entry_rel_path(c, "creatures")
+            if rel:
+                _add_creature(pkg_path / rel, source=pkg_name)
         for t in pkg.get("terrariums", []):
-            _add_terrarium(pkg_path / t["path"], source=pkg_name)
+            rel = manifest_entry_rel_path(t, "terrariums")
+            if rel:
+                _add_terrarium(pkg_path / rel, source=pkg_name)
 
     # Scan local project directories
     cwd = Path.cwd()
@@ -395,7 +433,7 @@ def scan_creatures_in_dirs(base_dirs: list[Path]) -> list[dict]:
     for pkg in list_packages():
         pkg_path = Path(pkg["path"])
         for c in pkg.get("creatures", []):
-            rel = c.get("path") if isinstance(c, dict) else None
+            rel = manifest_entry_rel_path(c, "creatures")
             if not rel:
                 continue
             _emit(pkg_path / rel)
@@ -463,7 +501,7 @@ def scan_terrariums_in_dirs(base_dirs: list[Path]) -> list[dict]:
     for pkg in list_packages():
         pkg_path = Path(pkg["path"])
         for t in pkg.get("terrariums", []):
-            rel = t.get("path") if isinstance(t, dict) else None
+            rel = manifest_entry_rel_path(t, "terrariums")
             if not rel:
                 continue
             _emit(pkg_path / rel)
