@@ -1,641 +1,481 @@
-# AGENTS.md — Guide for AI Agents Working With This Repo
+# AGENTS.md: Building Agents With (and On) KohakuTerrarium
 
-This file tells an AI agent everything it needs to operate on, develop for, or
-extend KohakuTerrarium. Split into two halves: **user-facing** (running,
-configuring, and extending as a user) and **developer-facing** (contributing to
-the framework itself).
+A one-file brief for coding agents. Two jobs are covered:
+
+1. **Building an agent**: config files, custom modules, terrarium recipes.
+2. **Using agents from Python**: the programmatic API, end to end.
+
+A short final section covers contributing to the framework itself (the
+authoritative rules live in `CLAUDE.md` and `CONTRIBUTING.md`).
 
 ---
 
-## Part 1 — User-Facing
+## 0. Orientation in 30 seconds
 
-### 1. What Is KohakuTerrarium?
+KohakuTerrarium is a framework for building agents, not another agent.
 
-A **framework for building agents** — not another agent. The core abstraction
-is the **creature**: a standalone agent with its own controller, tools,
-sub-agents, triggers, memory, and I/O. Creatures compose horizontally into a
-**terrarium** (pure wiring layer, no LLM). Everything is async Python.
+- **Creature** = the agent unit: controller (LLM loop) + tools + triggers +
+  sub-agents + plugins + memory + I/O. Defined by a config folder, or built
+  in Python.
+- **Terrarium** = the runtime engine hosting every running creature in the
+  process. Graphs, channels, lifecycle, sessions. No LLM of its own.
+- **Studio** = the management layer above the engine (catalog, sessions,
+  persistence) that the web/desktop/HTTP surfaces delegate to.
+- `@<package>/<path>` references resolve into installed packages
+  (`~/.kohakuterrarium/packages/`); they work everywhere a config path does.
 
-The entry point is the `kt` CLI.
-
-### 2. Installation
-
-```bash
-# From PyPI (stable)
-pip install kohakuterrarium           # core
-pip install "kohakuterrarium[full]"   # everything including torch embeddings
-
-# From source (editable, for development)
-git clone --recurse-submodules https://github.com/Kohaku-Lab/KohakuTerrarium.git
-cd KohakuTerrarium
-uv pip install -e ".[dev]"
-
-# Build the web frontend (required for kt web / kt app from source)
-npm install --prefix src/kohakuterrarium-frontend
-npm run build --prefix src/kohakuterrarium-frontend
-```
-
-Verify: `kt --version`
-
-### 3. Authentication
+Setup + sanity check:
 
 ```bash
-# Option A: Codex OAuth (ChatGPT subscription, no API key needed)
-kt login codex
-kt model default gpt-5.4
-
-# Option B: Any OpenAI-compatible provider
-kt config key set openai              # or anthropic, openrouter, gemini
-kt config llm add                     # interactive preset builder
-kt model default <preset-name>
+pip install kohakuterrarium
+kt login codex                      # or: kt config key set <provider>
+kt install @kt-biome                # official creature pack
+kt doctor                           # verifies provider, profiles, configs
+kt run @kt-biome/creatures/swe      # interactive run
+kt resume --last                    # pick a previous session back up
 ```
 
-Supported backends: OpenRouter, OpenAI, Anthropic, Google Gemini, any
-OpenAI-compatible API, and Codex OAuth.
+---
 
-### 4. Installing Packages (Creatures, Plugins, Terrariums)
+## Part 1: Building an agent
 
-```bash
-# Official showcase pack (SWE, reviewer, researcher, ops, creative, general, root)
-kt install https://github.com/Kohaku-Lab/kt-biome.git
+### 1.1 Anatomy of a creature config
 
-# Any third-party package
-kt install <git-url>
-kt install ./my-creatures -e          # editable local install
+A creature is a folder:
 
-# Manage
-kt list                               # show installed packages
-kt info @kt-biome/creatures/swe       # inspect a creature config
-kt update kt-biome                     # pull latest
-kt uninstall kt-biome                  # remove
+```
+my-agent/
+├── config.yaml        # the agent definition (config.yml/.json/.toml also work)
+├── system.md          # system prompt (or inline `system_prompt:` in YAML)
+└── prompts/, custom/  # optional: extra prompt files, custom module code
 ```
 
-Packages live at `~/.kohakuterrarium/packages/<name>/`. Reference anything
-inside with `@<package>/path`.
-
-### 5. Running Agents
-
-#### Single creature
-
-```bash
-kt run @kt-biome/creatures/swe --mode cli     # Rich inline (default on TTY)
-kt run @kt-biome/creatures/swe --mode tui     # Full-screen Textual app
-kt run @kt-biome/creatures/swe --mode plain   # Bare stdout, for piping/CI
-kt run @kt-biome/creatures/swe --llm claude-opus-4.7   # override model
-kt run ./my-creature                           # local path
-```
-
-`Ctrl+C` exits cleanly and prints a `kt resume` hint.
-
-#### Multi-agent terrarium
-
-```bash
-kt terrarium run @kt-biome/terrariums/swe_team --mode tui
-kt terrarium run ./my-terrarium --seed "Fix the auth bug"
-```
-
-TUI mode gives you multi-tab view: root agent + each creature + each channel.
-
-#### Web dashboard and desktop app
-
-```bash
-kt serve start                        # detached daemon (outlives terminal)
-kt web                                # foreground web server at 127.0.0.1:8001
-kt app                                # native desktop window via pywebview
-```
-
-### 6. Session Persistence and Resume
-
-Every run creates a `.kohakutr` file (SQLite) under
-`~/.kohakuterrarium/sessions/`. It stores: conversation snapshots, event log,
-sub-agent conversations, channel history, scratchpad, jobs, triggers, config
-snapshot, and binary artifacts.
-
-```bash
-kt resume --last                      # most recent session
-kt resume                             # interactive picker (10 most recent)
-kt resume my-agent_20240101           # by name prefix
-kt resume ~/backup/run.kohakutr       # full path
-kt resume --llm gpt-5.4              # override model on resume
-```
-
-Resume auto-detects agent vs terrarium from the session file.
-
-### 7. Memory and Search
-
-```bash
-# Build an embedding index over a session
-kt embedding ~/.kohakuterrarium/sessions/swe.kohakutr
-kt embedding swe.kohakutr --provider sentence-transformer --model @best
-
-# Search from CLI
-kt search swe "auth bug"              # auto (hybrid if vectors exist, else fts)
-kt search swe "auth bug" --mode fts   # keyword only
-kt search swe "auth bug" --mode semantic
-```
-
-Embedding providers: `model2vec` (default, no torch), `sentence-transformer`
-(needs torch), `api` (remote), `auto` (picks best available).
-
-Agents can search their own memory at runtime via the `search_memory` tool.
-
-### 8. MCP (Model Context Protocol) Integration
-
-Declare MCP servers per-agent or globally:
+A representative `config.yaml`:
 
 ```yaml
-# Per-agent in config.yaml
-mcp_servers:
-  - name: sqlite
-    transport: stdio
-    command: mcp-server-sqlite
-    args: ["/var/db/my.db"]
-  - name: docs_api
-    transport: http
-    url: https://mcp.example.com/sse
-```
+name: my_agent
+llm: default                # LLM profile/preset name (alias: llm_profile)
 
-```bash
-# Global (all agents)
-kt config mcp list
-kt config mcp add                     # interactive
-kt config mcp edit sqlite
-kt config mcp delete sqlite
-```
+system_prompt_file: system.md
 
-MCP tools are surfaced through four meta-tools (`mcp_list`, `mcp_call`,
-`mcp_connect`, `mcp_disconnect`) — keeps the system prompt small regardless
-of how many servers are connected.
-
-### 9. LLM Profile Management
-
-```bash
-kt config llm add                     # interactive preset builder
-kt config llm list                    # show configured profiles
-kt model default <preset-name>        # set default model
-kt config provider add <name>         # add an OpenAI-compatible provider
-kt config provider list               # show providers
-kt config key set <provider>          # set API key
-```
-
-### 10. Configuration Reference
-
-A creature lives in a folder with `config.yaml` (or `.yml`/`.json`/`.toml`):
-
-```yaml
-name: my-agent
-base_config: "@kt-biome/creatures/swe"   # inherit from existing creature
-controller:
-  llm: claude-opus-4.7
-  reasoning_effort: high
-system_prompt_file: prompts/system.md     # personality + guidelines ONLY
-tools:
-  - read
-  - write
-  - bash
-  - name: my_custom_tool
-    type: custom
-    module: ./tools/my_tool.py
-subagents:
-  - explore
-  - plan
-  - worker
-plugins:
-  - name: my_guard
-    type: custom
-    module: ./plugins/my_guard.py
-mcp_servers: [...]
-triggers: [...]
 input:
-  type: cli                              # or tui, none, custom, package
+  type: cli                 # cli / tui / none (trigger-driven agents use none)
 output:
-  type: stdout                           # or tts, custom
-memory:
-  folder: memory/
-compact:
-  enabled: true
+  type: stdout
+
+tools:
+  - name: read
+    type: builtin
+  - name: bash
+    type: builtin
+    config: { timeout: 120 }
+  - name: my_tool           # custom tool, loaded from your module
+    type: custom
+    module: custom/my_tool.py
+    class: MyTool
+
+triggers:
+  - type: timer
+    interval: 300
+    prompt: "Periodic check: anything new in the watched folder?"
+
+subagents:
+  - name: researcher
+    type: builtin           # builtin sub-agents: explore, plan, critic, research, ...
+
+plugins:
+  - name: budget
+    options: { max_tool_calls: 200 }
+
+mcp_servers:                # optional MCP servers (stdio / streamable HTTP)
+  - name: fs
+    transport: stdio
+    command: mcp-server-filesystem
 ```
 
-**What goes where:**
-| Content | Location |
-|---------|----------|
-| Agent personality / role | `system.md` |
-| Agent-specific guidelines | `system.md` |
-| Tool list (name + description) | **AUTO-GENERATED** — never put in system.md |
-| Tool call syntax | **AUTO-GENERATED** — in framework hints |
-| Full tool documentation | `##info <tool_name>##` on-demand |
+Rules that matter:
 
-**NEVER** put tool lists, tool call syntax, or full tool docs in `system.md`.
+- **Never put the tool list, tool-call syntax, or full tool docs in
+  `system.md`.** The framework aggregates the tool list and framework hints
+  into the prompt automatically; full docs load on demand via `##info##`.
+- `system.md` is for personality / role / agent-specific guidelines only.
+- The controller is an **orchestrator**: short outputs, tool calls, dispatch.
+  Long user-facing content should come from output sub-agents.
+- Any config path field accepts `@pkg/...` references, including
+  `base_config:` for inheritance:
 
-### 11. Inheritance
+```yaml
+base_config: "@kt-biome/creatures/swe"   # inherit, then override below
+name: my_swe_variant
+```
 
-Creatures inherit from other creatures via `base_config`:
+Run it: `kt run ./my-agent` (or `kt run @my-pack/creatures/my-agent` once
+packaged).
 
-- **Scalars**: child wins
-- **Dicts** (`controller`, `input`, `output`, etc.): shallow merge
-- **Identity-keyed lists** (`tools`, `subagents`, `plugins`): union by `name`; on collision, child wins
-- **Prompt files**: concatenate along the chain; inline prompt appended last
-- `no_inherit: [tools, plugins]` drops inherited fields entirely
+### 1.2 Custom tools
 
-### 12. Built-in Tools
-
-| Category | Tools |
-|----------|-------|
-| Shell | `bash`, `python` |
-| File ops | `read`, `write`, `edit`, `multi_edit`, `notebook_read`, `notebook_edit`, `glob`, `grep`, `tree` |
-| Structured data | `json_read`, `json_write` |
-| Web | `web_fetch`, `web_search` |
-| Interactive/Memory | `ask_user`, `think`, `scratchpad`, `search_memory` |
-| Communication | `send_message` |
-| Introspection | `info`, `stop_task` |
-| Triggers | `add_timer`, `add_schedule`, `watch_channel` (type: trigger) |
-| Terrarium (root-only) | `terrarium_create`, `terrarium_send`, `creature_start`, `creature_stop` |
-| Media | `image_gen` (provider-native) |
-
-### 13. Built-in Sub-agents
-
-| Name | Purpose |
-|------|---------|
-| `worker` | Fix bugs, refactor, run validations |
-| `coordinator` | Decompose, dispatch, aggregate |
-| `explore` | Read-only codebase exploration |
-| `plan` | Read-only planning |
-| `research` | External web research |
-| `critic` | Code review |
-| `response` | User-facing copy generation (typically `output_to: external`) |
-| `memory_read` / `memory_write` | Recall / persist findings to memory folder |
-| `summarize` | Condense conversation for handoff or reset |
-
-### 14. Plugins
-
-Two flavours:
-
-1. **Prompt plugins** — contribute to the system prompt via `get_content(context)`.
-2. **Lifecycle plugins** — hook into: `on_load`, `on_unload`, `pre_llm_call`,
-   `post_llm_call`, `pre_tool_dispatch`, `pre_tool_execute`,
-   `post_tool_execute`, `pre_subagent_run`, `post_subagent_run`, and more.
-
-`PluginBlockError` raised in a pre-hook replaces the call result (blocking it).
-
-Plugin context exposes: `agent_name`, `working_dir`, `session_id`, `model`,
-`switch_model()`, `inject_event()`, plugin-scoped `get_state()`/`set_state()`.
-
-### 15. Programmatic Usage (Python Embedding)
+Two ways. For a quick function-shaped tool (programmatic injection only),
+decorate a plain function. The schema comes from the type hints and the
+description from the docstring:
 
 ```python
-import asyncio
-from kohakuterrarium.core.agent import Agent
+import kohakuterrarium as kt
 
-async def main():
-    agent = Agent.from_path("@kt-biome/creatures/swe")
-    agent.set_output_handler(lambda text: print(text, end=""), replace_default=True)
-    await agent.start()
-    await agent.inject_input("Explain what this codebase does.")
-    await agent.stop()
+@kt.tool
+def check_stock(item: str, warehouse: str = "main") -> str:
+    """Look up how many units of an item are in stock."""
+    return lookup(item, warehouse)
 
-asyncio.run(main())
+agent = await kt.Agent.build("./my-agent", tools=[check_stock])
 ```
 
-**Composition algebra** (user-facing only, framework does not depend on it):
+For a config-loadable tool (shareable, packageable), subclass the protocol:
 
 ```python
-from kohakuterrarium.compose import agent, factory
-pipeline = writer >> (lambda text: f"Review this:\n{text}") >> reviewer
-result = await (pipeline | fallback) * 3    # sequence | fallback * retry
+# my-agent/custom/my_tool.py
+from kohakuterrarium.modules.tool.base import BaseTool, ToolResult
+
+
+class MyTool(BaseTool):
+    @property
+    def tool_name(self) -> str:
+        return "my_tool"
+
+    @property
+    def description(self) -> str:
+        return "One-line description shown in the aggregated prompt."
+
+    def get_parameters_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        }
+
+    async def execute(self, args: dict, context=None) -> ToolResult:
+        try:
+            return ToolResult(output=do_work(args["query"]))
+        except Exception as e:
+            return ToolResult(output="", error=str(e))
 ```
 
-| Operator | Meaning |
-|----------|---------|
-| `a >> b` | Sequence: run `a`, pipe output to `b` |
-| `a & b` | Parallel: run concurrently, return tuple |
-| `a \| b` | Fallback: try `a`, on exception run `b` |
-| `a * N` | Retry: retry up to N times |
+Declare it under `tools:` with `type: custom` + `module:` + `class:` (see
+1.1). Execution is async and parallel by design: tools start the moment the
+controller emits the call, never sequentially queued.
 
-### 16. Terrarium Config
+### 1.3 Custom input / output / trigger modules
+
+Same pattern: subclass the protocol in `modules/<kind>/base.py`, point config
+at your module. Sketches:
+
+```python
+# Input: push external events into the agent
+from kohakuterrarium.modules.input.base import BaseInputModule
+
+class WebhookInput(BaseInputModule):
+    async def get_input(self):        # await the next external event;
+        ...                           # return a TriggerEvent (or None)
+
+# Output: deliver the agent's text somewhere
+from kohakuterrarium.modules.output.base import BaseOutputModule
+
+class DiscordOutput(BaseOutputModule):
+    async def write(self, content: str): ...
+    async def write_stream(self, chunk: str): ...
+
+# Trigger: wake the agent automatically
+from kohakuterrarium.modules.trigger.base import BaseTrigger
+
+class FileWatchTrigger(BaseTrigger):
+    async def wait_for_trigger(self):  # block until the condition fires;
+        ...                            # return a TriggerEvent (or None)
+```
+
+Working examples: `examples/agent-apps/discord_bot/custom/` (full Discord
+I/O + trigger set), `examples/agent-apps/monitor_agent/custom/alert_output.py`.
+The guide: `docs/en/guides/custom-modules.md`.
+
+### 1.4 Plugins (cross-cutting behavior)
+
+Plugins wrap the framework with pre/post hooks; sandboxing, budgets, and
+permission gating all ship this way. Don't add framework features when a
+plugin can do it.
+
+```python
+from kohakuterrarium.modules.plugin.base import BasePlugin, PluginBlockError
+
+
+class ToolGuard(BasePlugin):
+    name = "tool_guard"
+
+    def __init__(self, blocked: list[str] | None = None):
+        self.blocked = set(blocked or [])
+
+    async def pre_tool_execute(self, tool_name, args, context=None):
+        if tool_name in self.blocked:
+            raise PluginBlockError(f"{tool_name} is blocked by policy")
+        return None        # None = unchanged; or return transformed args
+
+    async def post_llm_call(self, response, context=None):
+        return None        # may transform the response
+```
+
+Hook inventory: `pre/post_tool_execute`, `pre/post_llm_call`,
+`pre/post_subagent_run`, plus fire-and-forget callbacks (`on_load`,
+`on_agent_start/stop`, `on_event`, `on_interrupt`, `on_compact_end`, ...).
+The constructor contract is `cls(**options)`: your `options:` dict from
+config arrives as keyword arguments. `PluginContext` exposes `agent_name`,
+`working_dir`, `session_id`, `model`, `switch_model()`, `inject_event()`, and
+session-persisted `get_state()` / `set_state()`.
+
+Inject programmatically (`Agent.build(plugins=[ToolGuard(...)])`,
+`agent.add_plugin(...)`, which works after start too) or declare in config with
+`module:`/`class:`/`options:`. Eight worked examples: `examples/plugins/`.
+
+### 1.5 Terrarium recipes (multi-agent)
+
+A terrarium is a YAML recipe wiring creatures through broadcast channels:
 
 ```yaml
 terrarium:
-  name: swe-team
-  root:                                         # optional, sits OUTSIDE
-    base_config: "@kt-biome/creatures/general"
-    system_prompt_file: prompts/root.md
+  name: review_team
+
+  root:                                    # promotes ONE privileged node and
+    base_config: "@kt-biome/creatures/root"   # wires it to observe everything
+
   creatures:
-    - name: swe
-      base_config: "@kt-biome/creatures/swe"
-      output_wiring: [reviewer]                 # deterministic pipeline edge
+    - name: developer
+      config: ./creatures/developer/
       channels:
         listen: [tasks, feedback]
-        can_send: [status]
+        can_send: [review]
     - name: reviewer
-      base_config: "@kt-biome/creatures/swe"
-      system_prompt_file: prompts/reviewer.md
+      config: ./creatures/reviewer/
       channels:
-        listen: [status]
-        can_send: [feedback, results, status]
+        listen: [review]
+        can_send: [feedback, results]
+
   channels:
-    tasks:    { type: queue }       # one consumer per message
-    feedback: { type: queue }
-    results:  { type: queue }
-    status:   { type: broadcast }   # all subscribers get every message
+    tasks:    { description: "Incoming work" }
+    review:   { description: "Code for review" }
+    feedback: { description: "Review feedback" }
+    results:  { description: "Final results" }
 ```
 
-Auto-created channels: one `queue` per creature (named after it for DMs) and
-a `report_to_root` queue if root is set.
+Facts that prevent design mistakes:
 
-### 17. Quick Reference: CLI Commands
+- **All channels are broadcast**: every listener receives every send. There
+  is no queue kind; don't write `type:` on a channel.
+- **Graph = connected component.** Connecting creatures across graphs merges
+  them (environments union, session stores merge); removing a bridge
+  creature or channel auto-splits. This bookkeeping is load-bearing.
+- **Privileged node** (the `root:` creature, or `privileged: true`) gets the
+  `group_*` tools: spawn/remove creatures, draw/delete channels, start/stop
+  members. These are the runtime graph editor. Workers it spawns are NOT privileged.
+- Sub-agents are *vertical* (private, inside one creature); channels are
+  *horizontal* (peer creatures). Never mix the two levels.
 
-| Command | Purpose |
-|---------|---------|
-| `kt run <path>` | Run a single creature |
-| `kt resume [session]` | Resume a prior session |
-| `kt terrarium run <path>` | Run a multi-agent terrarium |
-| `kt install <source>` | Install a package |
-| `kt list` | List installed packages |
-| `kt info <path>` | Inspect a creature config |
-| `kt login <provider>` | Authenticate (codex, etc.) |
-| `kt config ...` | Settings (LLM, providers, keys, MCP) |
-| `kt model ...` | Profile management |
-| `kt embedding <session>` | Build vector index |
-| `kt search <session> <query>` | Search session memory |
-| `kt serve start/stop/status/logs` | Web API daemon |
-| `kt web` | Foreground web server |
-| `kt app` | Desktop app |
-| `kt extension ...` | Plugin/extension management |
-| `kt mcp ...` | MCP client tooling |
-| `kt version` | Version info |
+Run: `kt terrarium run ./my-team/` or programmatically
+`await Terrarium.from_recipe("./my-team/")`.
+
+### 1.6 Packaging and sharing
+
+A package is a repo/folder with a `kohaku.yaml` manifest and conventional
+dirs (`creatures/`, `terrariums/`), optionally declaring `tools:`,
+`plugins:`, `io:`, `triggers:`, `skills:`, `commands:`, `user_commands:`,
+`prompts:`, `llm_presets:`, and `python_dependencies:`.
+
+```bash
+kt install ./my-pack -e        # editable while developing
+kt install @name               # marketplace (TerrariumMarket)
+kt install <git-url>           # any repo
+kt install <src> --no-deps     # skip its python_dependencies
+```
+
+Everything becomes addressable as `@my-pack/...`. See
+`docs/en/guides/packages.md`.
 
 ---
 
-## Part 2 — Agent/Developer-Facing
+## Part 2: Using agents from Python
 
-### 1. Repository Structure
+Everything below imports from the package root unless noted:
 
-```
-KohakuTerrarium/
-├── src/kohakuterrarium/          # Framework source
-│   ├── core/                     # Runtime engine (agent, controller, executor, events, channels)
-│   ├── bootstrap/                # Agent initialization factories
-│   ├── cli/                      # `kt` entry point and subcommands
-│   ├── modules/                  # Plugin protocols (input, trigger, tool, output, subagent, plugin)
-│   ├── builtins/                 # Built-in tools, sub-agents, inputs, outputs, TUI, slash commands
-│   ├── builtin_skills/           # On-demand markdown docs for tools/sub-agents
-│   ├── llm/                      # LLM provider abstraction + presets + profiles
-│   ├── prompt/                   # Prompt aggregation and templating
-│   ├── parsing/                  # Stream parser (state machine for tool-call detection)
-│   ├── commands/                 # Framework commands (##info##, ##read##)
-│   ├── session/                  # Session persistence (.kohakutr files via KohakuVault)
-│   ├── serving/                  # Transport-agnostic agent/terrarium serving layer
-│   ├── terrarium/                # Multi-agent runtime
-│   ├── api/                      # FastAPI HTTP API + WebSocket
-│   ├── compose/                  # Pythonic agent-composition algebra (>> & | *)
-│   ├── mcp/                      # MCP client integration
-│   ├── testing/                  # Test infrastructure (ScriptedLLM, recorders, harness)
-│   ├── utils/                    # Shared utilities
-│   ├── packages.py               # Package manager
-│   └── web_dist/                 # Built Vue frontend output
-├── src/kohakuterrarium-frontend/ # Vue 3 + Vite frontend (JS only, no TypeScript)
-├── tests/                        # Unit + integration tests
-├── examples/                     # Example agent-apps, terrariums, plugins, code samples
-├── docs/                         # Documentation (en, zh-CN, zh-TW)
-├── scripts/                      # Dev scripts
-├── CLAUDE.md                     # Architecture rules and code conventions (authoritative)
-├── CONTRIBUTING.md               # Contribution policy
-├── ROADMAP.md                    # Future directions
-└── AGENTS.md                     # This file
+```python
+from kohakuterrarium import (
+    Agent, Terrarium, Creature, Studio,
+    TurnResult, TextChunk, Activity, TurnEnded,
+    SessionReader, SessionStore,
+    tool, errors, validate, packages,
+)
 ```
 
-### 2. Architecture Rules (CRITICAL — Violations Will Be Rejected)
+Errors are typed and strict by default: a wrong LLM name, a missing config,
+an unknown tool. These **raise** (`errors.ConfigError`,
+`errors.LLMNotConfiguredError`, `errors.PackageNotInstalledError`,
+`errors.TurnError`, ...) instead of degrading silently. Interactive
+frontends pass `strict=False`; your scripts shouldn't.
 
-#### Creature vs Terrarium vs Root Agent
+### 2.1 One agent, typed turns
 
-- **Creature**: Self-contained agent. Has its own LLM, tools, sub-agents, memory,
-  I/O. Does **NOT** know it is in a terrarium. Sub-agents are VERTICAL hierarchy.
-- **Terrarium**: Pure wiring layer. **No LLM, no intelligence, no decisions.**
-  Loads creatures, creates channels, manages lifecycle.
-- **Root Agent**: A creature that sits **OUTSIDE** the terrarium. Has terrarium
-  management tools. **Never** a peer of creatures inside.
+```python
+agent = await Agent.build(
+    "@kt-biome/creatures/general",   # path, @ref, or AgentConfig
+    llm="default",                   # profile/preset name, LLMProfile, or a
+                                     #   provider INSTANCE (e.g. ScriptedLLM)
+    pwd="/work/dir",                 # working dir; no global os.chdir
+    io="headless",                   # "config" | "none" | "headless"
+    tools=[my_tool],                 # @kt.tool adapters / Tool instances
+    plugins=[MyPlugin()],            # plugin instances, enabled
+)
+await agent.start()
 
-#### Two Composition Levels (NEVER MIX)
+result = await agent.run("Do the thing.", timeout=600)
+# TurnResult: .status ("ok"|"error"|"timeout"|"interrupted"), .ok, .text,
+#             .error, .tool_calls, .activities, .usage, .duration_s
+# A failed turn RAISES TurnError / TurnTimeoutError by default;
+# pass raise_on_error=False to branch on result.status yourself.
+# timeout= actually interrupts the turn, so no orphan task burns tokens.
 
-- **VERTICAL** (inside creature): controller -> sub-agents (private, hierarchical)
-- **HORIZONTAL** (terrarium): creature <-> creature via channels (peer, opaque)
+async for event in agent.run_stream("Stream this one."):
+    match event:
+        case TextChunk(text=t):       print(t, end="")
+        case Activity(kind=k):        ...   # tool_start/tool_done/...
+        case TurnEnded(result=r):     print(r.status)
 
-#### Controller Is an Orchestrator
-
-- Controller outputs should be SHORT: tool calls, sub-agent dispatches, status updates
-- Long user-facing content comes from **output sub-agents**
-- This keeps controller lightweight, fast, and focused on decision-making
-
-#### Tool Execution Is Async, Non-Blocking, Parallel
-
-- Start tools the moment `##tool##` is detected during streaming via `asyncio.create_task()`
-- **NEVER** queue tools until LLM finishes
-- **NEVER** execute tools sequentially — run in parallel with `gather()`
-- **NEVER** block LLM output for tool execution
-
-### 3. Code Conventions
-
-#### Python Style
-
-- **Python 3.10+** minimum (CI matrix: 3.10–3.14)
-- Modern type hints: `list`, `tuple`, `dict`, `X | None` — **NEVER** `List`, `Tuple`,
-  `Dict`, `Optional`, `Union` from typing
-- Prefer `match-case` over deeply nested `if-elif-else`
-- Full asyncio throughout (mark sync modules as "require blocking" or "can be to_thread")
-
-#### Import Rules
-
-1. **No imports inside functions** (except optional deps and lazy imports to avoid long init time)
-2. Import grouping order: built-in modules → third-party packages → `kohakuterrarium.*` modules
-3. Within each group: `import` before `from`, shorter paths first, alphabetical
-
-#### Logging
-
-- **NEVER use `print()` in library code** — use structured logging
-- Custom logger based on `logging` module (NOT loguru)
-- Format: `[HH:MM:SS] [module.name] [LEVEL] message`
-- **Avoid reserved LogRecord attributes** in extra kwargs: `name`, `msg`, `args`,
-  `levelname`, `levelno`, `pathname`, `filename`, `module`, `lineno`, `funcName`,
-  `created`, `msecs`, `relativeCreated`, `thread`, `threadName`, `process`,
-  `processName`, `message`
-
-#### File Limits
-
-- Max 600 lines per file (hard max 1000, enforced by `tests/unit/test_file_sizes.py`)
-- Highly modularized — one responsibility per module
-
-#### Frontend
-
-- Vue 3 + Vite, JavaScript only (no TypeScript)
-- Run `npm run format:check` and `npm run build` before committing
-
-### 4. Development Setup
-
-```bash
-git clone --recurse-submodules https://github.com/Kohaku-Lab/KohakuTerrarium.git
-cd KohakuTerrarium
-uv pip install -e ".[dev]"
-
-# Frontend (if touching the web UI)
-cd src/kohakuterrarium-frontend && npm install
+await agent.stop()
+# Runtime additions (prompt refreshes live):
+agent.add_tool(my_tool); await agent.add_plugin(p); agent.add_subagent(cfg)
 ```
 
-**Never** use `sys.path.insert` hacks in examples or tests. Always import from
-the installed package (`kohakuterrarium.*`).
+(`agent.run_forever()` is the autonomous main loop used by `kt run`; you
+almost never call it when embedding.)
 
-### 5. Pre-Flight Checks (Before Every Commit)
+### 2.2 The engine: many creatures, sessions, channels
 
-```bash
-# Python lint and format
-black src/ tests/
-ruff check src/ tests/
-
-# Unit tests
-pytest tests/unit/ -q --ignore=tests/unit/test_file_sizes.py
-pytest tests/unit/test_file_sizes.py -q
-
-# Frontend (if applicable)
-cd src/kohakuterrarium-frontend
-npm ci
-npm run format:check
-npm run build
+```python
+async with Terrarium(session_dir="runs/") as engine:   # autosession: every
+    worker = await engine.add_creature(                # creature persists
+        "@kt-biome/creatures/swe",
+        llm="fast",                       # raises at add time if unknown
+        pwd=folder,                       # per-creature cwd
+        session=folder / "run.kohakutr",  # or True / False / a SessionStore;
+                                          #   overrides the engine default
+        io="headless",                    # batch runs: no console interleave
+        tools=[check_stock],              # same injection as Agent.build
+        start=True,
+    )
+    result = await worker.run(PROMPT, timeout=1800, raise_on_error=False)
+    await engine.remove_creature(worker)
 ```
 
-### 6. Post-Implementation Checklist
+- `Creature.run / run_stream` mirror the Agent API; `.chat(msg)` remains as
+  plain-text streaming sugar; `creature.attach()` opens a non-destructive
+  typed event stream (`async with ... as stream`) that also sees
+  trigger-initiated turns.
+- Topology: `await engine.connect(a, b, channel="x")` (merges graphs),
+  `await engine.disconnect(a, b, channel="x")` (may split),
+  `await engine.add_channel(graph, "tasks")`,
+  `engine.channel(graph, "tasks")` → live channel handle
+  (`await ch.send(ChannelMessage(sender="user", content="..."))`),
+  `engine.environment(graph)`, `engine.list_graphs()`, `engine.subscribe()`
+  for typed `EngineEvent`s.
+- Recipes: `engine = await Terrarium.from_recipe("@pack/terrariums/team")`.
+- The batch pattern (N folders × one engine, bounded concurrency):
+  `examples/code/batch_grading.py`. It is about 50 lines; start there.
 
-1. Verify all rules (ESPECIALLY no in-function imports, no `print()`, import order)
-2. Run `black src/ tests/` and `ruff check src/ tests/`
-3. Ensure new code has corresponding tests under `tests/unit/`
-4. Logically separated git commits (one concept per commit)
-5. For feature PRs: linked issue/discussion with maintainer approval **before** the PR
+### 2.3 Sessions: resume and read back
 
-### 7. Adding New Things
+```python
+# Resume a saved run (topology rebuilt from the recipe/config in meta):
+engine = await Terrarium.resume("runs/run.kohakutr", llm="default")
+# or into a running engine:  await engine.adopt_session(path)
 
-#### Adding a Built-in Tool
+# Read a finished run offline (read-only, no engine needed):
+with SessionReader("runs/run.kohakutr") as r:
+    r.meta, r.agents
+    for turn in r.turns():          # live branch only
+        turn.user_text, turn.assistant_text, turn.tool_calls
+    r.events(); r.conversation(); r.channel_messages("tasks")
+    r.search("auth bug")            # FTS over the recorded events
+```
 
-1. Read `src/kohakuterrarium/builtins/tools/README.md`
-2. Copy the pattern from a small existing tool (e.g., `glob.py`, `grep.py`)
-3. Register in `builtins/tool_catalog.py`
-4. Add matching skill doc under `builtin_skills/tools/<name>.md`
-5. Add tests under `tests/unit/`
+CLI equivalents: `kt resume`, `kt search`, `kt embedding`.
 
-#### Adding a Built-in Sub-agent
+### 2.4 Packages from Python
 
-1. Read `src/kohakuterrarium/builtins/subagents/README.md`
-2. Use an existing config (e.g., `explore.py`, `research.py`) as template
-3. Register in `builtins/subagent_catalog.py`
-4. Add matching skill doc under `builtin_skills/subagents/<name>.md`
-5. Add tests
+```python
+from kohakuterrarium import packages
 
-#### Adding an LLM Preset
+packages.ensure("@kt-biome")                 # idempotent install
+path = packages.resolve_package_path("@kt-biome/creatures/swe")
+packages.list_packages()
+packages.install_package_spec("@pack@v1.2.0", deps="never")
+```
 
-See `src/kohakuterrarium/llm/presets.py` for the dict shape, or use
-`kt config llm add` interactively.
+### 2.5 Composition algebra
 
-#### Adding a Plugin
+```python
+from kohakuterrarium.compose import agent, factory, pure
 
-Subclass `BasePlugin` from `modules/plugin/base.py`. Implement the hooks you
-need. Register via config or via a package manifest. See
-`examples/plugins/` for working examples.
+swe = await agent("@kt-biome/creatures/swe", engine=shared, llm="default")
+pipeline = swe >> pure(extract_code) >> reviewer
+result = await (pipeline | fallback).retry(3, backoff=2.0)(task)
+```
 
-#### Adding an Example or Package
+`>>` sequence · `&` parallel (first failure cancels siblings) · `|` fallback
+(double failure chains the original as `__cause__`) · `* N` retry ·
+`.retry(n, backoff=)` · `.iterate(x)`. `factory(...)` builds a fresh
+creature per call; `agent(...)` is persistent. Pass `engine=` to share one
+engine; closing a runnable then removes only its creature.
 
-Copy an existing folder under `examples/` and adapt. Packages need a
-`kohaku.yaml` manifest — see `docs/en/guides/packages.md`.
+### 2.6 Validation and testing
 
-### 8. Testing
+```python
+from kohakuterrarium import validate
+report = validate.creature("@pack/creatures/x")   # config + llm + tools
+validate.llm("default"); validate.ping("default") # resolve / live-call check
+```
 
-- **Unit tests**: `tests/unit/` — fast, no network, use `ScriptedLLM` for
-  deterministic LLM mock
-- **Integration tests**: `tests/integration/` — may need API keys or network
-- **Test harness**: `testing/llm.py` (ScriptedLLM), `testing/output.py`
-  (OutputRecorder), `testing/events.py` (EventRecorder), `testing/agent.py`
-  (TestAgentBuilder)
-- **File-size guards**: `tests/unit/test_file_sizes.py` enforces 600-line limit
-- Run `pytest tests/unit/ -q` locally; CI runs full matrix across Python
-  3.10–3.14 × Linux/Windows/macOS
+For deterministic tests, inject the scripted provider directly, no
+monkeypatching needed:
 
-### 9. CI Matrix
+```python
+from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
+agent = await Agent.build(cfg, llm=ScriptedLLM(["reply 1", "reply 2"]))
+```
 
-Defined in `.github/workflows/ci.yml`. PRs are not reviewed until CI is green
-on the contributor's fork:
+---
 
-1. **Lint**: `ruff check` + `black --check` (Python 3.13)
-2. **Tests**: `pytest tests/unit/` on Python 3.10–3.14 × Linux/Windows/macOS
-3. **File-size guards**: `pytest tests/unit/test_file_sizes.py`
-4. **Frontend**: `npm ci` + `npm run format:check` + `npm run build`
-5. **Wheel build**: build, install in clean venv, verify `kt --help`
+## Part 3: Working on the framework itself
 
-**You must enable GitHub Actions on your fork** (Settings → Actions → Allow all
-actions) and wait for green CI before opening a PR.
+`CLAUDE.md` (architecture + conventions) and `CONTRIBUTING.md` (policy +
+pre-flight) are authoritative. The compressed version:
 
-### 10. Key Design Principles
-
-1. **Controller as orchestrator** — dispatches, never does heavy work itself
-2. **Non-blocking everything** — tools, sub-agents, compaction all async
-3. **Prompt auto-aggregation** — tool list and syntax are auto-generated, never
-   manually maintained in system.md
-4. **On-demand documentation** — `##info##` loads full docs only when needed
-5. **Config-first** — creatures are defined by config + optional custom modules
-6. **Two composition levels** — vertical (sub-agents) and horizontal (terrarium)
-   are never mixed
-7. **Append-only sessions** — event log is canonical history; conversation
-   snapshots are a fast-resume optimization
-8. **Module protocol** — every extensible surface (input, output, tool, trigger,
-   sub-agent, plugin, user_command) follows a defined protocol in `modules/`
-
-### 11. Contribution Rules
-
-- **English only** for code, comments, commits, issues, PRs
-- **Feature PRs require prior maintainer approval** (issue or Discord/QQ discussion)
-- Bug fixes, docs, tests, and small refactors can go straight to PR (but
-  still recommended to discuss first)
-- Follow the PR template completely
-- CI must be green on your fork before opening a PR
-- See `CONTRIBUTING.md` for the full policy
-
-### 12. Key Documentation Paths
-
-| Topic | Path |
-|-------|------|
-| Architecture rules | `CLAUDE.md` |
-| Contribution policy | `CONTRIBUTING.md` |
-| Getting started | `docs/en/guides/getting-started.md` |
-| First creature tutorial | `docs/en/tutorials/first-creature.md` |
-| First terrarium tutorial | `docs/en/tutorials/first-terrarium.md` |
-| First custom tool tutorial | `docs/en/tutorials/first-custom-tool.md` |
-| First plugin tutorial | `docs/en/tutorials/first-plugin.md` |
-| Creature authoring | `docs/en/guides/creatures.md` |
-| Terrariums guide | `docs/en/guides/terrariums.md` |
-| Configuration reference | `docs/en/reference/configuration.md` |
-| CLI reference | `docs/en/reference/cli.md` |
-| Built-ins reference | `docs/en/reference/builtins.md` |
-| Plugin hooks reference | `docs/en/reference/plugin-hooks.md` |
-| HTTP API reference | `docs/en/reference/http.md` |
-| Python API reference | `docs/en/reference/python.md` |
-| Internals / architecture | `docs/en/dev/internals.md` |
-| Testing guide | `docs/en/dev/testing.md` |
-| Frontend dev | `docs/en/dev/frontend.md` |
-| Roadmap | `ROADMAP.md` |
-
-### 13. Glossary
-
-| Term | Meaning |
-|------|---------|
-| **Creature** | Self-contained agent with its own LLM, tools, sub-agents, triggers, memory, I/O |
-| **Terrarium** | Pure wiring layer composing multiple creatures via channels |
-| **Root Agent** | Creature outside the terrarium that manages it via tools |
-| **Controller** | The main LLM reasoning loop inside a creature |
-| **Sub-agent** | Nested agent with own controller + tools, delegated by the controller |
-| **Channel** | Communication substrate (queue or broadcast) between creatures |
-| **Trigger** | Automatic event source (timer, scheduler, channel message, custom) |
-| **Plugin** | Hook-based extension that modifies connections between modules |
-| **Skill** | Procedural knowledge loaded on-demand (markdown manifest) |
-| **Tool** | Executable function the LLM can call |
-| **Package** | Shareable bundle of creatures, tools, plugins, etc. with `kohaku.yaml` manifest |
-| **Session** | Persisted `.kohakutr` file capturing operational state |
-| **Scratchpad** | Session-scoped key-value store shared across agents |
-| **Output wiring** | Config-driven deterministic delivery of creature output to targets |
-| **Compose algebra** | `>>` (sequence), `&` (parallel), `\|` (fallback), `*` (retry) operators |
-| **MCP** | Model Context Protocol — client-server tool exposure over stdio/HTTP |
-| **kt-biome** | Official showcase pack of OOTB creatures, terrariums, and plugins |
+- **Style**: Python 3.10+; modern type hints (`list`, `X | None`, never
+  `Optional`/`Union`); full asyncio; no `print()` in library code (structured
+  logging, `[HH:MM:SS] [module] [LEVEL]`); no imports inside functions except
+  allowlisted lazy ones (`scripts/dep_graph_allowlist.json` pins file+line).
+- **Size**: max 600 lines/file (hard 1000; `tests/unit/test_file_sizes.py`).
+- **Frontend**: Vue 3 + Vite, JavaScript only. `npm run format:check` +
+  `npm run build` before committing.
+- **Tests, three tiers** (`tests/README.md` is the spec): unit = one source
+  file → one test file; integration = one core-lib folder → one test-class
+  whose methods are *complete single-function workflows*; e2e = a handful of
+  fat user-journey tests (NOT run in CI; run locally for multi-node /
+  Studio / serving changes). Behavior asserts, real collaborators; the only
+  seam is the LLM (`ScriptedLLM`, preferably via direct `llm=` injection).
+  To raise integration/e2e coverage, fatten existing workflow functions
+  instead of adding new test functions.
+- **The audit loop is required** for any multi-file change: implement →
+  write negative-case tests → run the affected tiers + lint (`black src/
+  tests/`, `ruff check src/ tests/`) → audit the diff (clear bugs, integrity
+  bugs, behavior bugs) → if a bug slipped past the tests, FIX THE TEST FIRST
+  (prove it catches the bug), then the bug → loop until clean.
+- **Invariants that must not break**: auto-merge/auto-split of graphs;
+  broadcast-only channels; auth lives entirely in `api/auth/` (nothing below
+  `api/` may import it); `launcher/` imports nothing from the rest of the
+  package; the controller never blocks on tool execution; "privileged node"
+  is the runtime concept (`root:` is just recipe syntax).
+- **Never edit** `src/kohakuterrarium/web_dist/` by hand; it's Vite build
+  output.
