@@ -29,8 +29,12 @@ from dataclasses import dataclass, field
 import discord
 from discord import app_commands
 
+from kohakuterrarium import Terrarium
 from kohakuterrarium.core.config import load_agent_config
-from kohakuterrarium.serving.agent_session import AgentSession
+from kohakuterrarium.terrarium.creature_host import Creature
+
+# One engine hosts every NPC creature for the whole bot process.
+ENGINE = Terrarium()
 
 # ── Game state ───────────────────────────────────────────────────────
 
@@ -41,7 +45,7 @@ class NPC:
 
     name: str
     role: str
-    session: AgentSession
+    creature: Creature
 
 
 @dataclass
@@ -92,22 +96,22 @@ async def create_npc(
         "Never break the fourth wall."
     )
 
-    session = await AgentSession.from_config(config)
-    return NPC(name=name, role=role, session=session)
+    # ``io="headless"`` — NPCs speak only through TurnResult, never the
+    # bot process's console.
+    creature = await ENGINE.add_creature(config, io="headless")
+    return NPC(name=name, role=role, creature=creature)
 
 
 async def talk_to_npc(npc: NPC, message: str) -> str:
-    """Send a message to an NPC and collect the full response."""
-    parts: list[str] = []
-    async for chunk in npc.session.chat(message):
-        parts.append(chunk)
-    return "".join(parts).strip()
+    """Send a message to an NPC and return its reply."""
+    result = await npc.creature.run(message, timeout=120, raise_on_error=False)
+    return result.text.strip() if result.ok else f"*{npc.name} is at a loss*"
 
 
 async def destroy_adventure(adventure: Adventure) -> None:
     """Stop all NPC agents in an adventure."""
     for npc in adventure.npcs.values():
-        await npc.session.stop()
+        await ENGINE.remove_creature(npc.creature)
     adventure.npcs.clear()
 
 
@@ -324,8 +328,8 @@ async def arena(interaction: discord.Interaction, topic: str):
         await thread.send("**The debate has concluded! React to vote for the winner.**")
 
     finally:
-        await npc_for.session.stop()
-        await npc_against.session.stop()
+        await ENGINE.remove_creature(npc_for.creature)
+        await ENGINE.remove_creature(npc_against.creature)
 
 
 # ── Cleanup ──────────────────────────────────────────────────────────

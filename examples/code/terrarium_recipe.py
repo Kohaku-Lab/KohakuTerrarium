@@ -20,7 +20,7 @@ async def main() -> None:
         print(f"[recipe] graph {graph_id[:14]} hosts " f"{len(engine)} creatures")
 
         # Inject a seed task into the "tasks" channel.
-        tasks = engine._environments[graph_id].shared_channels.get("tasks")
+        tasks = engine.channel(graph_id, "tasks")
         if tasks is not None:
             await tasks.send(
                 ChannelMessage(

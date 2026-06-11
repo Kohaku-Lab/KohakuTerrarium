@@ -35,10 +35,10 @@ terrarium:
         can_send: [reports, team_chat]
 
   channels:
-    questions:      { type: queue, description: "Research questions from user" }
-    search_tasks:   { type: queue, description: "Search queries from coordinator" }
-    findings:       { type: queue, description: "Raw findings from searcher" }
-    analysis_tasks: { type: queue, description: "Analysis requests with findings" }
-    reports:        { type: queue, description: "Synthesized reports from analyst" }
-    results:        { type: queue, description: "Final results to user" }
-    team_chat:      { type: broadcast, description: "Team coordination" }
+    questions:      { description: "Research questions from user" }
+    search_tasks:   { description: "Search queries from coordinator" }
+    findings:       { description: "Raw findings from searcher" }
+    analysis_tasks: { description: "Analysis requests with findings" }
+    reports:        { description: "Synthesized reports from analyst" }
+    results:        { description: "Final results to user" }
+    team_chat:      { description: "Team coordination" }

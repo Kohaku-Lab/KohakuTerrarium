@@ -14,7 +14,7 @@ three KohakuTerrarium 1.5 deployment shapes.
 
 ## Reverse proxy
 
-[`nginx-host.conf`](nginx-host.conf) — drop-in template for nginx
+[`nginx-host.conf`](nginx-host.conf): drop-in template for nginx
 with Let's Encrypt TLS, proxying both the frontend (`8001`) and the
 lab transport (`8100`) under one TLS endpoint.
 
@@ -38,9 +38,9 @@ worker's local `secrets/kt_host_token`.
 
 ## See also
 
-- [Deployment with Docker](../../docs/en/guides/deployment-docker.md) —
+- [Deployment with Docker](../../docs/en/guides/deployment-docker.md):
   full operator guide.
-- [Deployment with systemd](../../docs/en/guides/deployment-systemd.md) —
+- [Deployment with systemd](../../docs/en/guides/deployment-systemd.md):
   bare-metal install via `kt service install`.
-- [Reverse proxy](../../docs/en/guides/deployment-reverse-proxy.md) —
+- [Reverse proxy](../../docs/en/guides/deployment-reverse-proxy.md):
   nginx + Cloudflare + TLS notes.

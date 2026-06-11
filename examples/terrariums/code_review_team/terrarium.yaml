@@ -35,10 +35,10 @@ terrarium:
         can_send: [test_results, results, team_chat]
 
   channels:
-    tasks:        { type: queue, description: "Incoming coding tasks" }
-    review:       { type: queue, description: "Code submitted for review" }
-    feedback:     { type: queue, description: "Review feedback to developer" }
-    approved:     { type: queue, description: "Approved code sent to tester" }
-    test_results: { type: queue, description: "Test results back to reviewer" }
-    results:      { type: queue, description: "Final verified results" }
-    team_chat:    { type: broadcast, description: "Team coordination" }
+    tasks:        { description: "Incoming coding tasks" }
+    review:       { description: "Code submitted for review" }
+    feedback:     { description: "Review feedback to developer" }
+    approved:     { description: "Approved code sent to tester" }
+    test_results: { description: "Test results back to reviewer" }
+    results:      { description: "Final verified results" }
+    team_chat:    { description: "Team coordination" }

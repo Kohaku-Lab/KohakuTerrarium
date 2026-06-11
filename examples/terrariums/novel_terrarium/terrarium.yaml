@@ -30,12 +30,12 @@ terrarium:
         can_send: [draft, feedback, team_chat]
 
   channels:
-    seed:       { type: queue, description: "User's story seed prompt" }
-    ideas:      { type: queue, description: "Story concept from brainstorm to planner" }
-    outline:    { type: queue, description: "Chapter outlines from planner to writer" }
-    draft:      { type: queue, description: "Completed chapter summaries" }
-    feedback:   { type: queue, description: "Feedback from writer back to brainstorm" }
-    team_chat:  { type: broadcast, description: "Team-wide shared context and announcements" }
+    seed:       { description: "User's story seed prompt" }
+    ideas:      { description: "Story concept from brainstorm to planner" }
+    outline:    { description: "Chapter outlines from planner to writer" }
+    draft:      { description: "Completed chapter summaries" }
+    feedback:   { description: "Feedback from writer back to brainstorm" }
+    team_chat:  { description: "Team-wide shared context and announcements" }
 
   interface:
     type: cli

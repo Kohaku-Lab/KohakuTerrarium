@@ -30,7 +30,7 @@ plugins:
 
 ## Plugin Hook Reference
 
-### Pre/Post Hooks (pipeline — can transform or block)
+### Pre/Post Hooks (pipeline: can transform or block)
 
 - **`pre_llm_call(messages, **kw)`** → modified `messages` or `None`
 - **`post_llm_call(messages, response, usage, **kw)`** → observation only
@@ -39,16 +39,16 @@ plugins:
 - **`pre_subagent_run(task, **kw)`** → modified `task` or `None` (raise `PluginBlockError` to block)
 - **`post_subagent_run(result, **kw)`** → modified `result` or `None`
 
-### Callbacks (fire-and-forget — observe only)
+### Callbacks (fire-and-forget: observe only)
 
 - **`on_agent_start()`** / **`on_agent_stop()`**
-- **`on_event(event)`** — every incoming trigger event
-- **`on_interrupt()`** — user pressed Escape
-- **`on_task_promoted(job_id, tool_name)`** — direct task → background
+- **`on_event(event)`**: every incoming trigger event
+- **`on_interrupt()`**: user pressed Escape
+- **`on_task_promoted(job_id, tool_name)`**: direct task → background
 - **`on_compact_start(context_length)`** / **`on_compact_end(summary, messages_removed)`**
 
 ### PluginContext Methods
 
-- `get_state(key)` / `set_state(key, value)` — persist plugin data in session
-- `inject_event(event)` — push a TriggerEvent into the agent's queue
-- `switch_model(name)` — change the LLM model at runtime
+- `get_state(key)` / `set_state(key, value)`: persist plugin data in session
+- `inject_event(event)`: push a TriggerEvent into the agent's queue
+- `switch_model(name)`: change the LLM model at runtime
