@@ -15,8 +15,7 @@ callers should use ``memory_build.build_index`` directly.
 from pathlib import Path
 from typing import Any
 
-from fastapi import HTTPException
-
+from kohakuterrarium.errors import SessionError, SessionNotFoundError
 from kohakuterrarium.session.embedding import create_embedder
 from kohakuterrarium.session.memory import SessionMemory
 from kohakuterrarium.session.store import SessionStore
@@ -98,17 +97,25 @@ async def search_session_memory(
     path: Path,
     *,
     q: str,
-    mode: str,
-    k: int,
-    agent: str | None,
-    engine: Terrarium | None,
+    mode: str = "auto",
+    k: int = 10,
+    agent: str | None = None,
+    engine: Terrarium | None = None,
 ) -> dict[str, Any]:
     """Run an FTS5 / vector / hybrid search across a saved session.
 
     Wraps the existing ``SessionMemory.search()`` — no new indexing
     behavior. Modes: ``auto`` (default), ``fts``, ``semantic``,
     ``hybrid``.
+
+    Raises :class:`SessionNotFoundError` when ``path`` does not exist
+    (BEFORE opening anything — ``SessionStore(path)`` would otherwise
+    mint an empty ``.kohakutr`` as a side effect of the lookup) and
+    :class:`SessionError` when the search itself fails.
     """
+    path = Path(path)
+    if not path.exists():
+        raise SessionNotFoundError(f"Session not found: {path}")
     try:
         # Find the live creature (if running) to reuse its store
         # and embedder — same pattern as the search_memory builtin tool.
@@ -134,7 +141,7 @@ async def search_session_memory(
                 _ = e  # embedding unavailable, continue without
                 embedder = None
 
-        memory = SessionMemory(str(path), embedder=embedder, store=store)
+        memory = SessionMemory(str(path), embedder=embedder)
 
         # Index unindexed events (idempotent — skips already indexed)
         meta = store.load_meta()
@@ -153,8 +160,8 @@ async def search_session_memory(
         if not live_store:
             store.close(update_status=False)
     except Exception as e:
-        # Log the FULL traceback so we can diagnose 500s (the
-        # HTTPException detail is one line and gets surfaced to the
+        # Log the FULL traceback so we can diagnose failures (the
+        # error detail is one line and gets surfaced to the caller /
         # client; the traceback is what we actually need server-side).
         logger.exception(
             "memory_search failed",
@@ -164,7 +171,7 @@ async def search_session_memory(
             k=k,
             agent=agent,
         )
-        raise HTTPException(500, f"Memory search failed: {type(e).__name__}: {e}")
+        raise SessionError(f"Memory search failed: {type(e).__name__}: {e}")
 
     return {
         "session_name": path.stem,

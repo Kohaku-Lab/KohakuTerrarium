@@ -28,6 +28,7 @@ Layer mapping:
 import os
 from pathlib import Path
 
+from kohakuterrarium.errors import SessionNotFoundError
 from kohakuterrarium.session.migrations import (
     MAX_SUPPORTED_VERSION,
     discover_versions,
@@ -37,10 +38,9 @@ from kohakuterrarium.session.resume import _open_store_with_migration
 from kohakuterrarium.studio.sessions.handles import Session
 from kohakuterrarium.studio.sessions.lifecycle import (
     _build_session_handle,
-    _meta,
-    _now_iso,
-    _session_stores,
+    now_iso as _now_iso,
 )
+from kohakuterrarium.studio.sessions.registry import meta_for, stores_for
 from kohakuterrarium.utils.logging import get_logger
 from kohakuterrarium.terrarium import TerrariumService
 from kohakuterrarium.studio._runtime import as_engine
@@ -82,7 +82,7 @@ async def resume_session(
     path: Path | str,
     *,
     pwd_override: str | None = None,
-    llm_override: str | None = None,
+    llm: str | None = None,
 ) -> Session:
     """Adopt a saved session into ``engine`` and register Studio metadata.
 
@@ -101,7 +101,13 @@ async def resume_session(
     """
     engine = as_engine(service)
     path = Path(path)
-    sid = await engine.adopt_session(path, pwd=pwd_override, llm_override=llm_override)
+    # Guard BEFORE any store open: ``SessionStore(path)`` (which the
+    # resume internals use) creates the SQLite file as a side effect of
+    # construction, so resuming a typo'd path used to mint an empty
+    # ``.kohakutr`` on disk and then fail anyway.
+    if not path.exists() and not discover_versions(path):
+        raise SessionNotFoundError(f"Session not found: {path}")
+    sid = await engine.adopt_session(path, pwd=pwd_override, llm=llm)
 
     # Register studio-tier metadata so list_sessions / get_session
     # surface the resumed graph alongside fresh ones.  Pull config
@@ -109,7 +115,7 @@ async def resume_session(
     store = engine._session_stores.get(sid)
     meta = store.load_meta() if store is not None else {}
     kind = _resolve_session_kind(meta)
-    _meta[sid] = {
+    meta_for(service)[sid] = {
         "kind": kind,
         "name": meta.get("terrarium_name") or _first_agent_name(meta) or sid,
         "config_path": meta.get("config_path", ""),
@@ -119,7 +125,7 @@ async def resume_session(
         "resumed_from": str(path),
     }
     if store is not None:
-        _session_stores[sid] = store
+        stores_for(service)[sid] = store
 
     logger.info(
         "Resumed session registered with studio",
@@ -127,7 +133,7 @@ async def resume_session(
         kind=kind,
         path=str(path),
     )
-    return _build_session_handle(engine, sid)
+    return _build_session_handle(engine, sid, meta_for(service))
 
 
 def _first_agent_name(meta: dict) -> str | None:

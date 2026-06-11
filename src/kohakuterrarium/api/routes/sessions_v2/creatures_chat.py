@@ -13,7 +13,7 @@ from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.api.routes.sessions_v2._helpers import resolve_creature_id
 from kohakuterrarium.api.schemas import AgentChat, MessageEdit, RegenerateRequest
 from kohakuterrarium.studio._runtime import host_engine_or_none
-from kohakuterrarium.studio.sessions.creature_chat import _channel_history
+from kohakuterrarium.studio.sessions.creature_chat import channel_history
 from kohakuterrarium.terrarium.service import TerrariumService
 
 router = APIRouter()
@@ -133,13 +133,13 @@ async def creature_history(
     # has no attached session store, but the service's cluster-aware
     # ``channel_history`` already unions messages across every cluster
     # member's worker store (CF-4). CF-9: delegate to it so the channel
-    # tab is non-empty even when ``_channel_history``'s studio-attached
+    # tab is non-empty even when ``channel_history``'s studio-attached
     # store walk finds nothing.
     if creature_id.startswith("ch:"):
         channel_name = creature_id[3:]
         engine = host_engine_or_none(service)
         if engine is not None:
-            payload = _channel_history(engine, session_id, channel_name)
+            payload = channel_history(engine, session_id, channel_name)
             if payload.get("events"):
                 return payload
         # Fall back to (or default to in lab-host) the service-routed

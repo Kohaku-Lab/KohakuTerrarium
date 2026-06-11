@@ -1,8 +1,21 @@
-"""``@pkg/path`` references and per-kind manifest resolvers."""
+"""``@pkg/path`` references and per-kind manifest resolvers.
+
+This module owns the ``@`` *path-reference* grammar
+(``@<package>[/sub/path]`` → filesystem path).  The marketplace
+*install-spec* grammar (``@name`` / ``@name@version`` / ``@source/name``)
+lives in :mod:`kohakuterrarium.packages.marketplace` — the two look alike
+but are routed by context: config loaders call :func:`resolve_any_path`,
+installers call ``install_package_spec``.
+"""
 
 import sys
 from pathlib import Path
 
+from kohakuterrarium.errors import (
+    PackageNotInstalledError,
+    PackagePathNotFoundError,
+    PackageRefError,
+)
 from kohakuterrarium.packages.locations import get_package_root
 from kohakuterrarium.packages.walk import list_packages
 from kohakuterrarium.utils.logging import get_logger
@@ -11,36 +24,71 @@ logger = get_logger(__name__)
 
 
 def resolve_package_path(ref: str) -> Path:
-    """Resolve a @package/path reference to an absolute path.
+    """Resolve a ``@package/path`` reference to an absolute path.
 
     Args:
-        ref: Reference like "@kt-biome/creatures/swe"
+        ref: Reference like ``"@kt-biome/creatures/swe"``.  A bare
+            ``"@pkg"`` resolves to the package root.
 
     Returns:
-        Absolute path to the resolved location.
+        Absolute path to the resolved location.  Always inside the
+        package root — ``..`` segments that would escape it are rejected.
 
     Raises:
-        FileNotFoundError: If the package or path doesn't exist.
+        PackageRefError: Malformed reference (no ``@``, empty package
+            name, or a sub-path that escapes the package root).
+        PackageNotInstalledError: The named package isn't installed.
+        PackagePathNotFoundError: Package exists, sub-path doesn't.
     """
     if not ref.startswith("@"):
-        raise ValueError(f"Not a package reference (must start with @): {ref}")
+        raise PackageRefError(f"Not a package reference (must start with @): {ref}")
 
-    ref = ref[1:]  # strip @
-    parts = ref.split("/", 1)
-    package_name = parts[0]
+    body = ref[1:]
+    parts = body.split("/", 1)
+    package_name = parts[0].strip()
     sub_path = parts[1] if len(parts) > 1 else ""
+
+    if not package_name:
+        raise PackageRefError(
+            f"Empty package name in reference: {ref!r} "
+            "(expected @<package>[/sub/path])"
+        )
 
     pkg_root = get_package_root(package_name)
     if pkg_root is None:
-        raise FileNotFoundError(
-            f"Package not installed: {package_name}. Run: kt install <url-or-path>"
+        raise PackageNotInstalledError(
+            f"Package not installed: {package_name}. "
+            f"Run: kt install @{package_name} (marketplace) "
+            "or kt install <url-or-path>"
         )
 
-    resolved = pkg_root / sub_path if sub_path else pkg_root
+    pkg_root = pkg_root.resolve()
+    resolved = (pkg_root / sub_path).resolve() if sub_path else pkg_root
+    if not resolved.is_relative_to(pkg_root):
+        raise PackageRefError(
+            f"Reference escapes the package root: {ref!r} " f"(resolved to {resolved})"
+        )
     if not resolved.exists():
-        raise FileNotFoundError(f"Path not found in package {package_name}: {sub_path}")
+        raise PackagePathNotFoundError(
+            f"Path not found in package {package_name}: {sub_path}"
+        )
 
-    return resolved.resolve()
+    return resolved
+
+
+def resolve_any_path(path: str | Path) -> Path:
+    """Resolve a user-supplied path *or* ``@pkg`` reference to a Path.
+
+    The single chokepoint helper for every config-loading entry point
+    (``load_agent_config``, ``load_terrarium_config``, ``ModuleLoader``):
+    ``@``-prefixed strings go through :func:`resolve_package_path`,
+    everything else becomes a ``Path`` with ``~`` expanded.  No existence
+    check is performed for plain paths — callers keep their own
+    not-found handling.
+    """
+    if isinstance(path, str) and path.startswith("@"):
+        return resolve_package_path(path)
+    return Path(path).expanduser()
 
 
 def is_package_ref(path: str) -> bool:

@@ -6,10 +6,11 @@ All operators live in ONE file to avoid circular imports.
 
 Operators:
   ``>>``  sequence (auto-wraps plain callables)
-  ``&``   parallel product (asyncio.gather)
-  ``|``   fallback (try first, if exception try second)
+  ``&``   parallel product (siblings cancelled on first failure)
+  ``|``   fallback (try first, if exception try second; failures chain)
   ``*N``  retry N times
   ``()``  run (await pipeline(x))
+  ``.retry(n, backoff=…)``  retry with exponential backoff
   ``.iterate(x)``  async-for loop
   ``.map(fn)``  / ``.contramap(fn)``  profunctor transforms
   ``.fails_when(pred)``  custom failure predicate
@@ -20,7 +21,6 @@ import inspect
 from collections.abc import Callable
 from typing import Any, Protocol, runtime_checkable
 
-from kohakuterrarium.compose.effects import Effects
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -48,8 +48,6 @@ class BaseRunnable:
 
     Combinators inherit this so they all get ``>>``, ``&``, ``|``, ``*``.
     """
-
-    effects: Effects | None = None
 
     async def run(self, input: Any) -> Any:
         raise NotImplementedError
@@ -106,6 +104,18 @@ class BaseRunnable:
 
     def __rmul__(self, n: Any) -> "BaseRunnable":
         return self.__mul__(n)
+
+    def retry(
+        self, max_attempts: int, *, backoff: float = 0.0, max_backoff: float = 30.0
+    ) -> "BaseRunnable":
+        """Retry with optional exponential backoff.
+
+        ``pipeline * 3`` is sugar for ``pipeline.retry(3)``; use this
+        form when you need a delay between attempts: ``backoff`` is the
+        sleep after the first failure, doubling per attempt and capped
+        at ``max_backoff`` seconds.
+        """
+        return Retry(self, max_attempts, backoff=backoff, max_backoff=max_backoff)
 
     # ── Iterate (async for) ──────────────────────────────────────────
 
@@ -164,6 +174,11 @@ class Pure(BaseRunnable):
         return f"<Pure {name}>"
 
 
+# Lowercase alias — the documented spelling for wrapping a function
+# inline: ``pure(extract_code) >> reviewer``.
+pure = Pure
+
+
 # ── Sequence ─────────────────────────────────────────────────────────
 
 
@@ -199,16 +214,26 @@ class Sequence(BaseRunnable):
 
 
 class Product(BaseRunnable):
-    """Run branches concurrently, return tuple of results."""
+    """Run branches concurrently, return tuple of results.
+
+    On the first branch failure the surviving siblings are CANCELLED
+    and awaited before the exception propagates — a bare ``gather``
+    would leave them running detached, burning LLM turns whose
+    results nobody will ever read.
+    """
 
     def __init__(self, *branches: BaseRunnable):
         self._branches: tuple[BaseRunnable, ...] = branches
 
     async def run(self, input: Any) -> tuple[Any, ...]:
-        results = await asyncio.gather(
-            *(branch.run(input) for branch in self._branches)
-        )
-        return tuple(results)
+        tasks = [asyncio.ensure_future(branch.run(input)) for branch in self._branches]
+        try:
+            return tuple(await asyncio.gather(*tasks))
+        except BaseException:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
 
     @classmethod
     def _flat(cls, *parts: BaseRunnable) -> "Product":
@@ -230,7 +255,12 @@ class Product(BaseRunnable):
 
 
 class Fallback(BaseRunnable):
-    """Try primary; if it raises ``Exception``, run fallback instead."""
+    """Try primary; if it raises ``Exception``, run fallback instead.
+
+    When the fallback ALSO fails, the primary's exception is chained
+    as the ``__cause__`` — debugging a dead pipeline needs the
+    original failure, not just the last resort's.
+    """
 
     def __init__(self, primary: BaseRunnable, fallback: BaseRunnable):
         self._primary = primary
@@ -239,14 +269,17 @@ class Fallback(BaseRunnable):
     async def run(self, input: Any) -> Any:
         try:
             return await self._primary.run(input)
-        except Exception as e:
+        except Exception as primary_exc:
             logger.debug(
                 "Fallback triggered",
                 primary=repr(self._primary),
                 fallback=repr(self._fallback),
-                error=str(e),
+                error=str(primary_exc),
             )
-            return await self._fallback.run(input)
+            try:
+                return await self._fallback.run(input)
+            except Exception as fallback_exc:
+                raise fallback_exc from primary_exc
 
     def __repr__(self) -> str:
         return f"<Fallback {self._primary!r} | {self._fallback!r}>"
@@ -276,11 +309,25 @@ class FailsWhen(BaseRunnable):
 
 
 class Retry(BaseRunnable):
-    """Retry a Runnable up to *max_attempts* times on ``Exception``."""
+    """Retry a Runnable up to *max_attempts* times on ``Exception``.
 
-    def __init__(self, inner: BaseRunnable, max_attempts: int):
+    ``backoff`` (seconds) sleeps after each failed attempt, doubling
+    every attempt and capped at ``max_backoff``. The default 0.0
+    preserves ``pipeline * N`` semantics (immediate retry).
+    """
+
+    def __init__(
+        self,
+        inner: BaseRunnable,
+        max_attempts: int,
+        *,
+        backoff: float = 0.0,
+        max_backoff: float = 30.0,
+    ):
         self._inner = inner
         self._max_attempts = max_attempts
+        self._backoff = backoff
+        self._max_backoff = max_backoff
 
     async def run(self, input: Any) -> Any:
         last_error: Exception | None = None
@@ -295,6 +342,9 @@ class Retry(BaseRunnable):
                     max=self._max_attempts,
                     error=str(e)[:200],
                 )
+                if self._backoff > 0 and attempt < self._max_attempts:
+                    delay = min(self._backoff * (2 ** (attempt - 1)), self._max_backoff)
+                    await asyncio.sleep(delay)
         raise last_error  # type: ignore[misc]
 
     def __repr__(self) -> str:

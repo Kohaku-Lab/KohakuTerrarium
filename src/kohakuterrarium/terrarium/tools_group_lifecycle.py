@@ -11,7 +11,6 @@ from kohakuterrarium.modules.tool.base import (
     ToolContext,
     ToolResult,
 )
-from kohakuterrarium.packages.resolve import is_package_ref, resolve_package_path
 from kohakuterrarium.terrarium.events import EngineEvent, EventKind
 from kohakuterrarium.terrarium.group_tool_context import (
     GroupContext,
@@ -73,11 +72,8 @@ class GroupAddNodeTool(BaseTool):
         config_path = (args.get("config_path") or "").strip()
         if not config_path:
             return err("config_path is required")
-        if is_package_ref(config_path):
-            try:
-                config_path = str(resolve_package_path(config_path))
-            except FileNotFoundError as exc:
-                return err(str(exc))
+        # ``@pkg/...`` refs resolve inside ``load_agent_config`` (with
+        # traversal hardening) — no pre-resolution here.
 
         pwd = args.get("pwd") or _caller_pwd(gctx)
         try:
@@ -93,7 +89,7 @@ class GroupAddNodeTool(BaseTool):
             new = await gctx.engine.add_creature(
                 config_path,
                 graph=gctx.caller.graph_id,
-                llm_override=args.get("llm"),
+                llm=args.get("llm"),
                 pwd=pwd,
                 is_privileged=False,
                 parent_creature_id=gctx.caller.creature_id,

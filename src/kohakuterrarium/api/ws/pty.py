@@ -23,7 +23,7 @@ from kohakuterrarium.api.auth.ws_auth import accept_with_auth_echo
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.laboratory.ws_proxy import proxy_ws_to_lab
 from kohakuterrarium.studio._runtime import host_engine_or_none
-from kohakuterrarium.studio.attach.pty_router import _session_cwd, pty_session
+from kohakuterrarium.studio.attach.pty_router import pty_session, session_cwd
 from kohakuterrarium.studio.sessions.lifecycle import find_creature
 from kohakuterrarium.terrarium.service import TerrariumService
 from kohakuterrarium.utils.logging import get_logger
@@ -93,7 +93,7 @@ async def session_pty_ws(
         await websocket.close()
         return
 
-    cwd = _session_cwd(creature)
+    cwd = session_cwd(creature)
     logger.info("Pty session", sid=sid, cid=cid, cwd=cwd)
 
     try:

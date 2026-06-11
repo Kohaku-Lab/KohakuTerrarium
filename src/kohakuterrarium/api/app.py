@@ -2,11 +2,12 @@
 
 import asyncio
 from contextlib import asynccontextmanager
+from functools import partial
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from kohakuterrarium.api._io_executor import run_in_io_executor
@@ -16,6 +17,7 @@ from kohakuterrarium.api.auth.db import ensure_migrated as ensure_auth_migrated
 from kohakuterrarium.api.auth.engine_pool import EnginePool
 from kohakuterrarium.api.auth.middleware import HostTokenMiddleware
 from kohakuterrarium.api.deps import _session_dir, get_engine, set_service
+from kohakuterrarium.errors import ConflictError, KTError, NotFoundError
 from kohakuterrarium.laboratory import HostConfig
 from kohakuterrarium.laboratory._internal.host import HostEngine
 from kohakuterrarium.laboratory._internal.membership import MembershipEvent
@@ -198,7 +200,9 @@ async def lifespan(app: FastAPI):
         # each worker graph with the studio-tier session metadata (name
         # / kind / created_at / config_path).  Terrarium tier can't
         # reach studio directly, so we inject the callable here at boot.
-        multi_node_service.set_runtime_graph_meta_lookup(get_session_meta)
+        multi_node_service.set_runtime_graph_meta_lookup(
+            partial(get_session_meta, multi_node_service)
+        )
         set_service(multi_node_service)
         # Host-side adapters that workers query.
         identity_adapter = StudioIdentityAdapter(host_engine)
@@ -341,6 +345,31 @@ async def lifespan(app: FastAPI):
             logger.exception("close_session_index failed")
 
 
+def kt_error_status(exc: KTError) -> int:
+    """Map a typed studio/framework error onto an HTTP status code.
+
+    This is the ONE exception→status table for the whole API adapter —
+    the studio tier raises ``kohakuterrarium.errors`` types and knows
+    nothing about HTTP.  Order matters: not-found flavours win over
+    value flavours (``ConfigNotFoundError`` is both).
+    """
+    if isinstance(exc, (NotFoundError, FileNotFoundError)):
+        return 404
+    if isinstance(exc, ConflictError):
+        return 409
+    if isinstance(exc, ValueError):
+        return 400
+    return 500
+
+
+async def kt_error_handler(request: Request, exc: KTError) -> JSONResponse:
+    """Convert an escaped :class:`KTError` into the legacy
+    ``HTTPException``-shaped ``{"detail": ...}`` JSON body so the wire
+    contract is byte-equivalent with the pre-typed-error surface."""
+    _ = request
+    return JSONResponse(status_code=kt_error_status(exc), content={"detail": str(exc)})
+
+
 def _parse_bind(bind: str) -> tuple[str, int]:
     """Parse ``host:port`` into a tuple; ``port == 0`` selects ephemeral."""
     if ":" not in bind:
@@ -428,6 +457,10 @@ def create_app(
         version="1.5.0",
         lifespan=lifespan,
     )
+    # Typed-error adapter: studio raises ``kohakuterrarium.errors``
+    # types; this single handler maps them onto HTTP status codes.
+    app.add_exception_handler(KTError, kt_error_handler)
+
     # Lifespan reads these off app.state to start the Lab transport.
     app.state.lab_mode = lab_mode
     app.state.lab_bind = lab_bind or "127.0.0.1:8100"

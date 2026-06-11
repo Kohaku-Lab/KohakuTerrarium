@@ -57,7 +57,7 @@ async def create_creature_session(
         session = await lifecycle.start_creature(
             service,
             config_path=req.config_path,
-            llm_override=req.llm,
+            llm=req.llm,
             pwd=req.pwd,
             name=req.name,
             on_node=req.on_node or "_host",
@@ -90,7 +90,7 @@ async def create_terrarium_session(
             config_path=req.config_path,
             pwd=req.pwd,
             name=req.name,
-            llm_override=req.llm,
+            llm=req.llm,
         )
         return {**session.to_dict(), "status": "running"}
     except (ValueError, KeyError, FileNotFoundError) as e:
@@ -111,7 +111,7 @@ async def create_agent_compat(
         session = await lifecycle.start_creature(
             service,
             config_path=req.config_path,
-            llm_override=req.llm,
+            llm=req.llm,
             pwd=req.pwd,
             name=req.name,
             on_node=req.on_node or "_host",
@@ -144,7 +144,7 @@ async def create_terrarium_compat(
             config_path=req.config_path,
             pwd=req.pwd,
             name=req.name,
-            llm_override=req.llm,
+            llm=req.llm,
         )
         return {"terrarium_id": session.session_id, "status": "running"}
     except (ValueError, KeyError, FileNotFoundError) as e:
@@ -266,7 +266,9 @@ async def list_active_agents(service: TerrariumService = Depends(get_service)):
     Refreshes remote ``_meta`` before reading so worker-side
     ``switch_model`` paths that bypass the host route do not leave
     this listing surfacing the stale identifier (S6-2)."""
-    await remote_meta.refresh_all_remote_creature_meta(lifecycle._meta, service)
+    await remote_meta.refresh_all_remote_creature_meta(
+        lifecycle.meta_for(service), service
+    )
     return await asyncio.to_thread(_list_solo_legacy_sync, service)
 
 
@@ -278,7 +280,9 @@ async def list_active_terrariums(service: TerrariumService = Depends(get_service
     Refreshes remote ``_meta`` before reading so worker-side
     ``switch_model`` paths that bypass the host route do not leave
     this listing surfacing the stale identifier (S6-2)."""
-    await remote_meta.refresh_all_remote_creature_meta(lifecycle._meta, service)
+    await remote_meta.refresh_all_remote_creature_meta(
+        lifecycle.meta_for(service), service
+    )
     return await asyncio.to_thread(_list_multi_legacy_sync, service)
 
 
@@ -318,7 +322,9 @@ async def list_active_sessions(service: TerrariumService = Depends(get_service))
     ``switch_model`` paths that bypass the host route (``/model`` slash
     command, ``PluginContext.switch_model``, compact-LLM swap) still
     surface on the next list read (S6-2)."""
-    await remote_meta.refresh_all_remote_creature_meta(lifecycle._meta, service)
+    await remote_meta.refresh_all_remote_creature_meta(
+        lifecycle.meta_for(service), service
+    )
     sessions = await asyncio.to_thread(lifecycle.list_sessions, service)
     return [s.to_dict() for s in sessions]
 

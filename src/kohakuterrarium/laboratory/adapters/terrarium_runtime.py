@@ -407,7 +407,7 @@ class TerrariumRuntimeAdapter:
                     config,
                     graph=msg.body.get("graph_id"),
                     creature_id=msg.body.get("creature_id"),
-                    llm_override=msg.body.get("llm_override"),
+                    llm=msg.body.get("llm"),
                     pwd=msg.body.get("pwd"),
                     start=msg.body.get("start", True),
                     is_privileged=msg.body.get("is_privileged", False),
@@ -420,7 +420,13 @@ class TerrariumRuntimeAdapter:
                     # drives it through the attach WebSocket. Its config
                     # IO (``input: cli``) must NOT boot — on a foreground
                     # ``kt lab-client`` it would hijack terminal stdin.
-                    suppress_io=True,
+                    io="none",
+                    # Lab spawns keep degrade-and-continue: the host
+                    # rebinds models / fixes config through the UI.
+                    strict=False,
+                    # WorkerSessionAttacher owns persistence below —
+                    # engine autosession must not mint a sibling file.
+                    session=False,
                 )
                 # Worker mode only: attach a SessionStore + Tee so the
                 # creature's events persist locally AND mirror to the

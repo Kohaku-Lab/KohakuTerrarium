@@ -116,7 +116,7 @@ class SearchMemoryTool(BaseTool):
             logger.warning("Embedder creation failed, using FTS only", error=str(e))
             embedder = None
 
-        memory = SessionMemory(store._path, embedder=embedder, store=store)
+        memory = SessionMemory(store._path, embedder=embedder)
 
         # Cache on session for reuse
         if session:

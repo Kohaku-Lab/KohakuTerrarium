@@ -96,10 +96,20 @@ def show_agent_info_cli(agent_path: str) -> int:
     return 0
 
 
-def install_cli(source: str, editable: bool = False, name: str | None = None) -> int:
+def install_cli(
+    source: str,
+    editable: bool = False,
+    name: str | None = None,
+    no_deps: bool = False,
+) -> int:
     """Install a creature/terrarium package."""
     try:
-        pkg_name = install_package_op(source, editable=editable, name=name)
+        pkg_name = install_package_op(
+            source,
+            editable=editable,
+            name=name,
+            deps="never" if no_deps else "auto",
+        )
     except Exception as e:
         print(f"Error: {e}")
         return 1

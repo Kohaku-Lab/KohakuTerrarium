@@ -38,7 +38,7 @@ from pathlib import Path
 import yaml
 
 from kohakuterrarium.core.config import load_agent_config
-from kohakuterrarium.packages.locations import PACKAGES_DIR, get_package_root
+from kohakuterrarium.packages.locations import get_package_root, packages_dir
 from kohakuterrarium.packages.walk import list_packages
 
 # In-memory TTL cache for the configured-base-dir scanners. The
@@ -111,7 +111,7 @@ def _build_package_root_map() -> dict[str, str]:
     back into an ``@package/...`` reference.
     """
     mapping: dict[str, str] = {}
-    if not PACKAGES_DIR.exists():
+    if not packages_dir().exists():
         return mapping
     for pkg in list_packages():
         pkg_root = get_package_root(pkg["name"])

@@ -134,7 +134,7 @@ class TerrariumSessionAdapter:
             {
                 "path": "<worker-side absolute path to .kohakutr>",
                 "pwd_override": str | None,
-                "llm_override": str | None,
+                "llm": str | None,
             }
         """
         path = body.get("path")
@@ -146,7 +146,7 @@ class TerrariumSessionAdapter:
         sid = await self._engine.adopt_session(
             local,
             pwd=body.get("pwd_override"),
-            llm_override=body.get("llm_override"),
+            llm=body.get("llm"),
         )
         store = getattr(self._engine, "_session_stores", {}).get(sid)
         meta = store.load_meta() if store is not None else {}

@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from kohakuterrarium.api._io_executor import run_in_io_executor
 from kohakuterrarium.api.auth import verify_admin_token
-from kohakuterrarium.packages.locations import PACKAGES_DIR
+from kohakuterrarium.packages.locations import packages_dir
 from kohakuterrarium.studio.catalog.packages import (
     install_package_op,
     uninstall_package_op,
@@ -151,8 +151,8 @@ async def update_all():
 
 
 def _resolve_pkg_root(name: str) -> Path:
-    """Find ``<PACKAGES_DIR>/<name>`` or raise 404."""
-    root = PACKAGES_DIR / name
+    """Find ``<packages_dir()>/<name>`` or raise 404."""
+    root = packages_dir() / name
     if not root.is_dir():
         raise HTTPException(404, f"Package not found: {name}")
     return root

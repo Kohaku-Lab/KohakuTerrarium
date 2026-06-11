@@ -18,6 +18,9 @@ from kohakuterrarium.core.agent_compact import (
     AgentCompactMixin,
     restore_compact_state_from_session,
 )
+from kohakuterrarium.core.agent_construct import AgentConstructMixin
+from kohakuterrarium.core.agent_extensions import AgentExtensionsMixin
+from kohakuterrarium.core.agent_turn import AgentTurnMixin
 from kohakuterrarium.core.agent_handlers import AgentHandlersMixin
 from kohakuterrarium.core.agent_lifecycle import AgentLifecycleMixin
 from kohakuterrarium.core.agent_messages import AgentMessagesMixin
@@ -33,7 +36,6 @@ from kohakuterrarium.core.agent_observability import (
 from kohakuterrarium.core.agent_budget_recovery import (
     sync_emergency_drop_conversation,
 )
-from kohakuterrarium.core.budget import IterationBudget
 from kohakuterrarium.core.compact import CompactConfig, CompactManager
 from kohakuterrarium.core.config import AgentConfig, load_agent_config
 from kohakuterrarium.core.controller_plugins import register_plugin_and_package_commands
@@ -42,7 +44,6 @@ from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.core.job import JobState
 from kohakuterrarium.core.loader import ModuleLoader
 from kohakuterrarium.core.session import Session
-from kohakuterrarium.core.termination import TerminationChecker, TerminationConfig
 from kohakuterrarium.core.trigger_manager import TriggerManager
 from kohakuterrarium.llm.message import ContentPart
 from kohakuterrarium.modules.input.base import InputModule
@@ -65,6 +66,9 @@ logger = get_logger(__name__)
 
 
 class Agent(
+    AgentConstructMixin,
+    AgentTurnMixin,
+    AgentExtensionsMixin,
     AgentInitMixin,
     AgentHandlersMixin,
     AgentMessagesMixin,
@@ -72,45 +76,14 @@ class Agent(
     AgentCompactMixin,
     AgentLifecycleMixin,
 ):
-    """Main agent orchestrator. Wires LLM, controller, executor, I/O."""
+    """Main agent orchestrator. Wires LLM, controller, executor, I/O.
 
-    @classmethod
-    def from_path(
-        cls,
-        config_path: str,
-        *,
-        input_module: InputModule | None = None,
-        output_module: OutputModule | None = None,
-        session: Session | None = None,
-        environment: "Environment | None" = None,
-        llm_override: str | None = None,
-        pwd: str | None = None,
-    ) -> "Agent":
-        """
-        Create agent from config directory path.
-
-        Args:
-            config_path: Path to agent config folder (e.g., "agents/my_agent")
-            input_module: Custom input module (overrides config)
-            output_module: Custom output module (overrides config)
-            session: Explicit session (creature-private state)
-            environment: Shared environment (inter-creature state)
-            llm_override: Override LLM profile name (from --llm CLI flag)
-            pwd: Explicit working directory (overrides process cwd)
-
-        Returns:
-            Configured Agent instance
-        """
-        config = load_agent_config(config_path)
-        return cls(
-            config,
-            input_module=input_module,
-            output_module=output_module,
-            session=session,
-            environment=environment,
-            llm_override=llm_override,
-            pwd=pwd,
-        )
+    Construction entry points (``Agent.build`` / ``Agent.from_path``)
+    live in :class:`AgentConstructMixin`; the typed turn drivers
+    (``run`` / ``run_stream``) in :class:`AgentTurnMixin`; runtime
+    extension injection (``add_tool`` / ``add_plugin``) in
+    :class:`AgentExtensionsMixin`.
+    """
 
     def __init__(
         self,
@@ -120,8 +93,14 @@ class Agent(
         output_module: OutputModule | None = None,
         session: Session | None = None,
         environment: "Environment | None" = None,
-        llm_override: str | None = None,
+        llm: Any = None,
         pwd: str | None = None,
+        strict: bool = True,
+        tools: list[Any] | None = None,
+        plugins: list[Any] | None = None,
+        subagents: list[Any] | None = None,
+        outputs: dict[str, OutputModule] | None = None,
+        user_commands: dict[str, Any] | None = None,
     ):
         """
         Initialize agent from config.
@@ -133,18 +112,37 @@ class Agent(
             session: Explicit session (creature-private state). Created from
                      session_key if not provided.
             environment: Shared environment (inter-creature state). None for
-            llm_override: Override LLM profile name (from --llm CLI flag)
                          standalone agents.
+            llm: LLM binding — provider instance, selector string,
+                 ``LLMProfile``, or None (resolve from config)
+            pwd: Explicit working directory (overrides process cwd)
+            strict: Raise on construction problems (unresolvable LLM,
+                    unknown tool, broken plugin) instead of degrading
+                    silently.  Interactive frontends (Studio / Lab /
+                    ``kt run``) pass ``strict=False`` so a user can fix
+                    the problem at runtime (e.g. rebind the model);
+                    programmatic callers get loud failures by default.
+            tools: Tool INSTANCES to register alongside the config's
+                   tools (e.g. ``kt.tool(fn)`` adapters) — present in
+                   the initial system prompt.
+            plugins: Plugin INSTANCES to register (enabled).
+            subagents: ``SubAgentConfig`` instances to register.
+            outputs: Extra named outputs ``{name: OutputModule}``.
+            user_commands: Extra slash commands ``{name: UserCommand}``.
         """
         self.config = config
+        self._strict = strict
         self._running = False
         self._shutdown_event = asyncio.Event()
         self._processing_lock = asyncio.Lock()
         self._pending_mid_turn_inputs: list[TriggerEvent] = []
         self.trigger_manager = TriggerManager(self._process_event)
 
-        # LLM profile override (from --llm CLI flag)
-        self._llm_override = llm_override
+        # Raw llm= argument (instance | selector string | profile | None).
+        self._llm_spec = llm
+        # Selector string, when one was given — feeds llm_identifier()
+        # and compact-LLM resolution.  Instance injections leave it None.
+        self._llm_selector = llm if isinstance(llm, str) else None
         # Canonical provider/name[@variations] id; lazy via llm_identifier().
         self._llm_identifier: str = ""
 
@@ -180,6 +178,9 @@ class Agent(
         # Initialize termination checker
         self._termination_checker = self._init_termination()
 
+        # Extra slash commands merged in by _init_user_commands.
+        self._extra_user_commands = dict(user_commands or {})
+
         # Initialize components (methods from AgentInitMixin)
         # Order matters: output before controller (need known_outputs for parser)
         self._init_llm()
@@ -187,10 +188,24 @@ class Agent(
             self.llm.on_emergency_drop(self._on_provider_emergency_drop)
         self._init_registry()
         self._init_executor()
+        # Instance-injected tools (E7) — registered BEFORE the
+        # controller so they land in the initial system prompt.
+        for tool_instance in tools or []:
+            self.registry.register_tool(tool_instance)
+            self.executor.register_tool(tool_instance)
         self._init_plugins()
+        for plugin_instance in plugins or []:
+            self.plugins.register(plugin_instance)
         self._init_subagents()
+        for subagent_cfg in subagents or []:
+            self.subagent_manager.register(subagent_cfg)
         self._init_iteration_budget()
         self._init_output(output_module)  # Before controller - sets _known_outputs
+        # Instance-injected named outputs join before the parser learns
+        # the known-output set.
+        for output_name, extra_output in (outputs or {}).items():
+            self.output_router.named_outputs[output_name] = extra_output
+            self._known_outputs.add(output_name)
         self._init_skills()  # Before controller so skill index is in prompt
         self._init_controller()
         self._init_input(input_module)
@@ -206,46 +221,13 @@ class Agent(
             ephemeral=config.ephemeral,
         )
 
-    def _init_iteration_budget(self) -> None:
-        """Create shared IterationBudget; parent + children consume it.
-
-        Sub-agents that inherit share this counter. The parent
-        controller also consumes one slot per turn in
-        ``AgentHandlersMixin._check_termination``.
-        """
-        cap = getattr(self.config, "max_iterations", None)
-        if not cap or cap <= 0:
-            self.iteration_budget = None
-            return
-        self.iteration_budget = IterationBudget(remaining=int(cap), total=int(cap))
-        if hasattr(self, "subagent_manager") and self.subagent_manager is not None:
-            self.subagent_manager.iteration_budget = self.iteration_budget
-        logger.info(
-            "Iteration budget configured",
-            agent_name=self.config.name,
-            max_iterations=cap,
-        )
+    # ``_init_iteration_budget`` + ``_init_termination`` live in
+    # AgentInitMixin (bootstrap/agent_init.py) with the other _init_*
+    # factories — moved to keep this file under the size cap.
 
     def _on_provider_emergency_drop(self, messages: list[dict[str, Any]]) -> None:
         """Synchronize controller conversation after provider emergency drop."""
         sync_emergency_drop_conversation(self, messages)
-
-    def _init_termination(self) -> TerminationChecker | None:
-        """Initialize termination checker from config."""
-        if not self.config.termination:
-            return None
-
-        tc = TerminationConfig(
-            max_turns=self.config.termination.get("max_turns", 0),
-            max_tokens=self.config.termination.get("max_tokens", 0),
-            max_duration=self.config.termination.get("max_duration", 0),
-            idle_timeout=self.config.termination.get("idle_timeout", 0),
-            keywords=self.config.termination.get("keywords", []),
-        )
-        checker = TerminationChecker(tc)
-        if checker.is_active:
-            logger.info("Termination conditions configured", config=str(tc))
-        return checker
 
     # =========================================================================
     # Lifecycle
@@ -302,7 +284,7 @@ class Agent(
         already in place for ``TUIInput`` to read.
         """
         # Data is written to session.extra by the engine TUI launcher
-        # before agent.run() -> agent.start() -> here, so nothing
+        # before agent.run_forever() -> agent.start() -> here, so nothing
         # needs to be copied. Just verify presence for debug logging.
         terrarium_tabs = self.session.extra.get("terrarium_tui_tabs")
         if terrarium_tabs and hasattr(self.input, "_tui"):
@@ -423,6 +405,7 @@ class Agent(
             plugin_cfgs,
             self._loader,
             default_plugins=getattr(self.config, "default_plugins", []) or [],
+            strict=self._strict,
         )
         if not self.plugins:
             return
@@ -498,7 +481,7 @@ class Agent(
                 )
 
         # Save selected preset/profile name to session state for resume
-        selected_llm_name = self._llm_override or self.config.llm_profile or ""
+        selected_llm_name = self._llm_selector or self.config.llm_profile or ""
         if self.session_store and selected_llm_name:
             self.session_store.state[f"{self.config.name}:llm_profile"] = (
                 selected_llm_name
@@ -641,9 +624,9 @@ class Agent(
     # see ``core/agent_model.py``. Split out to keep this file under
     # the per-file size guard.
 
-    async def run(self) -> None:
+    async def run_forever(self) -> None:
         """
-        Run the agent main loop.
+        Run the agent main loop until its input module exits.
 
         Handles:
         - Startup triggers
@@ -651,6 +634,9 @@ class Agent(
         - Running controller
         - Processing tool calls
         - Routing output
+
+        (Renamed from ``run()`` — ``Agent.run(content)`` is now the
+        single-turn driver from :class:`AgentTurnMixin`.)
         """
         await self.start()
         try:
@@ -993,4 +979,4 @@ async def run_agent(config_path: str) -> None:
     """
     config = load_agent_config(config_path)
     agent = Agent(config)
-    await agent.run()
+    await agent.run_forever()

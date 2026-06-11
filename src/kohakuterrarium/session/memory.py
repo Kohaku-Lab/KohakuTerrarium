@@ -7,9 +7,17 @@ and vector (semantic) search. Two-level hierarchy:
   Round: one processing cycle (user input -> agent response)
   Block: a segment within a round (text paragraph, tool call, trigger)
 
-Usage:
-    memory = SessionMemory(store, embedder)
-    memory.index_events("root")           # index all unindexed events
+Usage::
+
+    from kohakuterrarium.session.embedding import create_embedder
+    from kohakuterrarium.session.memory import SessionMemory
+    from kohakuterrarium.session.store import SessionStore
+
+    store = SessionStore.open_readonly("run.kohakutr")
+    memory = SessionMemory(
+        "run.kohakutr", embedder=create_embedder({"provider": "auto"})
+    )
+    memory.index_events("alice", store.get_events("alice"))
     results = memory.search("auth bug", mode="hybrid", k=5)
 """
 
@@ -83,10 +91,8 @@ class SessionMemory:
         self,
         db_path: str,
         embedder: BaseEmbedder | None = None,
-        store: Any = None,
     ):
         self._path = db_path
-        self._store = store  # SessionStore, for looking up full event content
         self._embedder = embedder or NullEmbedder()
         self._has_vectors = not isinstance(self._embedder, NullEmbedder)
 
@@ -284,15 +290,26 @@ class SessionMemory:
                 return self._search_fts(query, k, agent)
             case "semantic":
                 if not self._has_vectors:
-                    logger.warning("No embedding model, falling back to FTS")
-                    return self._search_fts(query, k, agent)
+                    # E4: an EXPLICIT semantic request without an
+                    # embedder used to silently degrade to FTS — the
+                    # caller asked for vectors, tell them why they
+                    # can't have them.
+                    raise ValueError(
+                        "semantic search needs an embedding model — "
+                        "pass embedder= (see session.embedding."
+                        "create_embedder) or run `kt embedding` first; "
+                        "use mode='auto'/'hybrid' for graceful fallback"
+                    )
                 return self._search_semantic(query, k, agent)
             case "hybrid":
                 if not self._has_vectors:
                     return self._search_fts(query, k, agent)
                 return self._search_hybrid(query, k, agent)
             case _:
-                return self._search_fts(query, k, agent)
+                raise ValueError(
+                    f"Unknown search mode {mode!r} — expected 'fts', "
+                    "'semantic', 'hybrid', or 'auto'"
+                )
 
     def _search_fts(self, query: str, k: int, agent: str | None) -> list[SearchResult]:
         """FTS5 keyword search."""

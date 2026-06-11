@@ -189,7 +189,7 @@ class RemoteTerrariumService:
         parent_creature_id: str | None = None,
         start: bool = True,
         pwd: str | None = None,
-        llm_override: Any = None,
+        llm: Any = None,
         on_node: str | None = None,
         name: str | None = None,
     ) -> CreatureInfo:
@@ -197,6 +197,11 @@ class RemoteTerrariumService:
             raise TypeError(
                 "RemoteTerrariumService.add_creature does not accept "
                 "pre-built Creature objects (they hold local references)"
+            )
+        if llm is not None and not isinstance(llm, str):
+            raise TypeError(
+                "remote add_creature only accepts a selector string for "
+                "llm= — provider instances cannot cross node boundaries"
             )
         if on_node is not None and on_node != self._target_node:
             raise ValueError(
@@ -219,7 +224,7 @@ class RemoteTerrariumService:
                     "parent_creature_id": parent_creature_id,
                     "start": start,
                     "pwd": pwd if isinstance(pwd, str) or pwd is None else str(pwd),
-                    "llm_override": llm_override,
+                    "llm": llm,
                     "name": name,
                 },
             )

@@ -111,70 +111,9 @@ class Registry:
         self._commands.clear()
 
 
-# Global registry instance
-_global_registry: Registry | None = None
-
-
-def get_registry() -> Registry:
-    """Get the global registry instance."""
-    global _global_registry
-    if _global_registry is None:
-        _global_registry = Registry()
-    return _global_registry
-
-
-def register_tool(tool: Tool) -> None:
-    """Register a tool to the global registry."""
-    get_registry().register_tool(tool)
-
-
-def register_command(command_name: str, handler: Callable[..., Any]) -> None:
-    """Register a command to the global registry."""
-    get_registry().register_command(command_name, handler)
-
-
-# Decorator for tool registration
-def tool(
-    tool_name: str | None = None,
-) -> Callable[[type[T]], type[T]]:
-    """
-    Decorator to register a tool class.
-
-    Usage:
-        @tool("my_tool")
-        class MyTool(BaseTool):
-            ...
-
-        @tool()  # Uses class name
-        class AnotherTool(BaseTool):
-            ...
-    """
-
-    def decorator(cls: type[T]) -> type[T]:
-        # Create instance and register
-        instance = cls()  # type: ignore
-        if hasattr(instance, "tool_name"):
-            get_registry().register_tool(instance)  # type: ignore
-        return cls
-
-    return decorator
-
-
-# Decorator for command registration
-def command(
-    command_name: str,
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """
-    Decorator to register a command handler.
-
-    Usage:
-        @command("read")
-        async def handle_read(job_id: str, **kwargs):
-            ...
-    """
-
-    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        get_registry().register_command(command_name, func)
-        return func
-
-    return decorator
+# NOTE: the old module-level "global registry" (``get_registry`` /
+# ``register_tool`` / ``@tool`` / ``@command``) was dead surface —
+# nothing ever read it into an agent.  ``@kohakuterrarium.tool``
+# (modules/tool/function.py) is the real function→tool adapter, and
+# ``Agent.add_tool`` / ``Agent.build(tools=[...])`` are the real
+# registration paths (E7).

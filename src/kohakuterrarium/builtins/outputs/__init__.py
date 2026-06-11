@@ -3,11 +3,13 @@ Built-in output modules.
 
 Contains:
 - stdout: Terminal output (StdoutOutput, PrefixedStdoutOutput)
+- none: Null output (NoneOutput — headless / batch runs)
 - tts: TTS base classes and implementations (TTSModule, ConsoleTTS, DummyTTS)
 """
 
 from typing import Any
 
+from kohakuterrarium.builtins.outputs.none import NoneOutput
 from kohakuterrarium.builtins.outputs.stdout import PrefixedStdoutOutput, StdoutOutput
 from kohakuterrarium.builtins.outputs.tts import (
     ConsoleTTS,
@@ -20,6 +22,7 @@ from kohakuterrarium.builtins.outputs.tts import (
 _BUILTIN_OUTPUTS: dict[str, type] = {
     "stdout": StdoutOutput,
     "stdout_prefixed": PrefixedStdoutOutput,
+    "none": NoneOutput,
     "console_tts": ConsoleTTS,
     "dummy_tts": DummyTTS,
 }
@@ -105,6 +108,7 @@ __all__ = [
     # Implementations
     "StdoutOutput",
     "PrefixedStdoutOutput",
+    "NoneOutput",
     "TTSModule",
     "TTSConfig",
     "ConsoleTTS",

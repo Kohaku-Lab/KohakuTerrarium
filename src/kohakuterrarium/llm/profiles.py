@@ -481,9 +481,9 @@ def _legacy_model_provider_hint(controller_config: dict[str, Any]) -> str:
 
 def resolve_controller_llm(
     controller_config: dict[str, Any],
-    llm_override: str | None = None,
+    llm: str | None = None,
 ) -> LLMProfile | None:
-    name = llm_override or controller_config.get("llm")
+    name = llm or controller_config.get("llm")
     raw_model = controller_config.get("model", "")
     provider = controller_config.get("provider", "") or ""
 

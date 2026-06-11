@@ -8,8 +8,7 @@ private helpers it uses (``_aggregate_rollups``,
 from collections.abc import Iterable
 from typing import Any
 
-from fastapi import HTTPException
-
+from kohakuterrarium.errors import NotFoundError
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.viewer.rollups import (
     ERROR_EVENT_TYPES,
@@ -57,7 +56,7 @@ def _agents_for_summary(
             return ordered
         return known_agents
     if requested not in known_agents:
-        raise HTTPException(404, f"Agent not found in session: {requested}")
+        raise NotFoundError(f"Agent not found in session: {requested}")
     return [requested]
 
 

@@ -31,7 +31,7 @@ from typing import Any
 
 from kohakuterrarium.laboratory.protocols import LabRegistrar
 from kohakuterrarium.laboratory.ws_proxy import WSFrameSink, WSProxyAdapter
-from kohakuterrarium.studio.attach.pty_router import _session_cwd, pty_session
+from kohakuterrarium.studio.attach.pty_router import pty_session, session_cwd
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.utils.logging import get_logger
 
@@ -85,7 +85,7 @@ class TerrariumPtyAdapter(WSProxyAdapter):
     ) -> dict[str, Any] | None:
         creature_id = body["creature_id"]
         creature = self._engine.get_creature(creature_id)
-        cwd = _session_cwd(creature)
+        cwd = session_cwd(creature)
 
         fake_ws = _FakeWebSocket(sink)
         # ``pty_session`` is long-running until the shell exits or the

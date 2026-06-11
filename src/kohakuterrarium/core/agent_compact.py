@@ -20,7 +20,7 @@ class AgentCompactMixin:
 
     llm: Any
     config: Any
-    _llm_override: str | None
+    _llm_selector: str | None
 
     def _build_compact_llm(self, compact_cfg: CompactConfig) -> Any:
         """Build an isolated LLM instance for compaction.
@@ -29,7 +29,7 @@ class AgentCompactMixin:
         cannot be constructed.
         """
         profile_name = (
-            compact_cfg.compact_model or self._llm_override or self.config.llm_profile
+            compact_cfg.compact_model or self._llm_selector or self.config.llm_profile
         )
         if not profile_name:
             controller_data: dict[str, Any] = {
@@ -39,9 +39,7 @@ class AgentCompactMixin:
                 "variation_selections": dict(self.config.variation_selections or {}),
             }
             controller_data = {k: v for k, v in controller_data.items() if v}
-            profile = resolve_controller_llm(
-                controller_data, llm_override=self._llm_override
-            )
+            profile = resolve_controller_llm(controller_data, llm=self._llm_selector)
             if profile is not None:
                 profile_name = profile_to_identifier(profile)
         if profile_name:

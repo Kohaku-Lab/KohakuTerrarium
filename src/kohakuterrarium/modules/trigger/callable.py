@@ -5,7 +5,7 @@ with ``setup_*`` metadata filled in) as a :class:`BaseTool` so that the
 agent can install it at runtime by making a normal tool call.
 
 The adapter keeps the "trigger-ness" of the action visible in the short
-description (``**Trigger** — …``) so the LLM knows calling it produces
+description (``**Trigger**: …``) so the LLM knows calling it produces
 a long-lived side-effect rather than an immediate result. The tool
 itself always runs in ``DIRECT`` mode — it validates args against the
 trigger class's schema, instantiates the trigger, wires any
@@ -58,7 +58,7 @@ class CallableTriggerTool(BaseTool):
     @property
     def description(self) -> str:
         base = self._cls.setup_description or self._cls.__doc__ or ""
-        return f"**Trigger** — {base.strip()}"
+        return f"**Trigger**: {base.strip()}"
 
     @property
     def execution_mode(self) -> ExecutionMode:

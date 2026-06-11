@@ -2,10 +2,18 @@
 Tool initialization factory.
 
 Registers tools from agent config into the module registry.
+
+``strict`` semantics (E4): programmatic construction defaults to
+strict — a misconfigured tool raises :class:`ConfigError` instead of
+being warn-skipped, because a silently missing tool turns into "the
+agent ran and produced nothing" hours later.  Interactive frontends
+(Studio / Lab managed spawns) pass ``strict=False`` to keep
+degrade-and-continue.
 """
 
 from typing import Any
 
+from kohakuterrarium.errors import ConfigError
 from kohakuterrarium.builtins.tool_catalog import get_builtin_tool
 from kohakuterrarium.core.config import AgentConfig
 from kohakuterrarium.core.loader import ModuleLoader, ModuleLoadError
@@ -17,6 +25,13 @@ from kohakuterrarium.modules.trigger.universal import list_universal_trigger_cla
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _fail(strict: bool, message: str, **log_fields: Any) -> None:
+    """Raise :class:`ConfigError` in strict mode; warn otherwise."""
+    if strict:
+        raise ConfigError(message)
+    logger.warning(message, **log_fields)
 
 
 def _coerce_tool_config_value(key: str, value: Any) -> Any:
@@ -56,11 +71,14 @@ def _lookup_trigger_class(name: str) -> type[BaseTrigger] | None:
 def create_tool(
     tool_config: Any,
     loader: ModuleLoader | None,
+    *,
+    strict: bool = False,
 ) -> BaseTool | None:
     """Create a single tool instance from a tool config entry.
 
     Handles builtin, custom, and package tool types. Returns None
-    if the tool could not be created.
+    if the tool could not be created (lenient mode); raises
+    :class:`ConfigError` instead when ``strict``.
     """
     match tool_config.type:
         case "builtin":
@@ -80,16 +98,20 @@ def create_tool(
                             key, raw_options.pop(key)
                         )
             except ValueError as exc:
-                logger.warning(
-                    "Invalid tool config value",
+                _fail(
+                    strict,
+                    f"Invalid config value for tool " f"{tool_config.name!r}: {exc}",
                     tool_name=tool_config.name,
-                    error=str(exc),
                 )
                 return None
             tool_cfg = ToolConfig(**tool_cfg_values, extra=raw_options)
             tool = get_builtin_tool(tool_config.name, config=tool_cfg)
             if tool is None:
-                logger.warning("Unknown built-in tool", tool_name=tool_config.name)
+                _fail(
+                    strict,
+                    f"Unknown built-in tool: {tool_config.name!r}",
+                    tool_name=tool_config.name,
+                )
             return tool
 
         case "trigger":
@@ -98,24 +120,28 @@ def create_tool(
                 available = ", ".join(
                     cls.setup_tool_name for cls in _universal_trigger_classes()
                 )
-                logger.warning(
-                    "Unknown setup-able trigger",
+                _fail(
+                    strict,
+                    f"Unknown setup-able trigger {tool_config.name!r} "
+                    f"(available: {available})",
                     tool_name=tool_config.name,
-                    available=available,
                 )
                 return None
             return CallableTriggerTool(trigger_cls)
 
         case "custom" | "package":
             if not tool_config.module or not tool_config.class_name:
-                logger.warning(
-                    "Custom tool missing module or class",
+                _fail(
+                    strict,
+                    f"Custom tool {tool_config.name!r} is missing " "module or class",
                     tool_name=tool_config.name,
                 )
                 return None
             if loader is None:
-                logger.warning(
-                    "No module loader available for custom tool",
+                _fail(
+                    strict,
+                    f"No module loader available for custom tool "
+                    f"{tool_config.name!r}",
                     tool_name=tool_config.name,
                 )
                 return None
@@ -127,11 +153,20 @@ def create_tool(
                     options=tool_config.options,
                 )
             except ModuleLoadError as e:
+                if strict:
+                    raise ConfigError(
+                        f"Failed to load custom tool " f"{tool_config.name!r}: {e}"
+                    ) from e
                 logger.error("Failed to load custom tool", error=str(e))
                 return None
 
         case _:
-            logger.warning("Unknown tool type", tool_type=tool_config.type)
+            _fail(
+                strict,
+                f"Unknown tool type {tool_config.type!r} for tool "
+                f"{tool_config.name!r}",
+                tool_type=tool_config.type,
+            )
             return None
 
 
@@ -139,13 +174,16 @@ def init_tools(
     config: AgentConfig,
     registry: Registry,
     loader: ModuleLoader | None,
+    *,
+    strict: bool = False,
 ) -> None:
     """Register all tools from agent config into the registry.
 
     Iterates over config.tools and creates each tool via create_tool(),
-    registering successful results in the registry.
+    registering successful results in the registry.  ``strict`` raises
+    on the first misconfigured tool instead of skipping it.
     """
     for tool_config in config.tools:
-        tool = create_tool(tool_config, loader)
+        tool = create_tool(tool_config, loader, strict=strict)
         if tool:
             registry.register_tool(tool)

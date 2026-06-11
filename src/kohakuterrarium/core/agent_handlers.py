@@ -3,6 +3,7 @@
 import asyncio
 import importlib
 
+from kohakuterrarium.errors import AgentNotRunningError
 from kohakuterrarium.core.agent_mid_turn import AgentMidTurnMixin
 from kohakuterrarium.core.agent_pre_dispatch import (
     run_pre_subagent_dispatch,
@@ -146,9 +147,11 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin):
         the next chunk arrives (Bug 1).
         """
         is_rerun = bool(event.context.get("rerun")) if event.context else False
+        awaits_turn = bool(event.context.get("await_turn")) if event.context else False
         if (
             self._running
             and not is_rerun
+            and not awaits_turn
             and event.type in ("user_input", "trigger")
             and self._processing_lock.locked()
         ):
@@ -163,8 +166,19 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin):
                 return False
         async with self._processing_lock:
             if not self._running:
+                # E4: dropping an event used to return ``True`` — the
+                # same value as success — so a script injecting into a
+                # stopped agent saw "accepted" and waited forever.
+                # Strict (programmatic default) raises for user input;
+                # internal event kinds (trigger / tool_complete racing
+                # a shutdown) and lenient agents get an honest False.
+                if event.type == "user_input" and getattr(self, "_strict", True):
+                    raise AgentNotRunningError(
+                        f"Agent {self.config.name!r} is not running — "
+                        "start() it before injecting input"
+                    )
                 logger.debug("Dropping event, agent stopped", event_type=event.type)
-                return True
+                return False
 
             is_rerun = bool(event.context.get("rerun"))
             is_edited = bool(event.context.get("edited"))

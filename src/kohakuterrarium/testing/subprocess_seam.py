@@ -60,7 +60,7 @@ def maybe_install_test_llm_seam() -> bool:
         return False
     script_path = Path(script_path_str)
 
-    def _fake_create(config, llm_override=None):
+    def _fake_create(config, llm=None):
         return ScriptedLLM(_load_script(script_path))
 
     def _fake_from_profile(name):

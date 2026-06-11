@@ -9,6 +9,7 @@ from pathlib import Path
 
 import yaml
 
+from kohakuterrarium.errors import PackageError
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -60,33 +61,63 @@ def _validate_package(pkg_dir: Path, name: str) -> None:
             )
 
 
-def _install_python_deps(pkg_dir: Path) -> None:
-    """Install Python dependencies and the package itself if applicable."""
-    manifest = _load_manifest(pkg_dir)
-    deps = manifest.get("python_dependencies", [])
-    if deps:
-        logger.info("Installing Python dependencies", count=len(deps))
-        try:
-            subprocess.run(
-                ["pip", "install", *deps],
-                check=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError as e:
-            logger.warning("Dependency install failed", error=e.stderr.decode()[:200])
+DEP_POLICIES = ("auto", "never")
 
+
+def _pip_install(args: list[str], *, what: str) -> None:
+    """Run ``<this interpreter> -m pip install <args>``; raise on failure.
+
+    Always targets the running interpreter's environment —
+    a bare PATH ``pip`` may belong to a different Python entirely.
+    """
+    cmd = [sys.executable, "-m", "pip", "install", *args]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        stderr = (e.stderr or b"").decode(errors="replace")[-500:]
+        raise PackageError(
+            f"Dependency install failed ({what}). The package files are "
+            f"installed but its Python dependencies are not — install them "
+            f"manually or re-run with the issue fixed.\npip stderr: {stderr}"
+        ) from e
+
+
+def _install_python_deps(pkg_dir: Path, *, deps: str = "auto") -> None:
+    """Install a package's declared Python dependencies.
+
+    Args:
+        pkg_dir: Package root holding ``kohaku.yaml`` /
+            ``requirements.txt``.
+        deps: ``"auto"`` installs ``python_dependencies`` +
+            ``requirements.txt`` into the *running interpreter's*
+            environment (``sys.executable -m pip``); ``"never"`` skips
+            dependency installation entirely.
+
+    Raises:
+        PackageError: ``deps`` is not a known policy, or pip failed.
+    """
+    if deps not in DEP_POLICIES:
+        raise PackageError(
+            f"Unknown deps policy: {deps!r} (expected one of {DEP_POLICIES})"
+        )
+    manifest = _load_manifest(pkg_dir)
+    declared = manifest.get("python_dependencies", [])
     req_file = pkg_dir / "requirements.txt"
+
+    if deps == "never":
+        if declared or req_file.exists():
+            logger.info(
+                "Skipping Python dependency install (deps='never')",
+                package=pkg_dir.name,
+            )
+        return
+
+    if declared:
+        logger.info("Installing Python dependencies", count=len(declared))
+        _pip_install([*declared], what="python_dependencies in kohaku.yaml")
+
     if req_file.exists():
-        try:
-            subprocess.run(
-                ["pip", "install", "-r", str(req_file)],
-                check=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError as e:
-            logger.warning(
-                "requirements.txt install failed", error=e.stderr.decode()[:200]
-            )
+        _pip_install(["-r", str(req_file)], what="requirements.txt")
 
 
 def get_package_framework_hints(pkg_root: Path | None) -> dict[str, str]:

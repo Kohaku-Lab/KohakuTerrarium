@@ -39,6 +39,7 @@ _END = "<!-- /runtime-graph -->"
 
 _REFRESH_DEBOUNCE_SEC = 0.1
 _REFRESH_KINDS = {
+    EventKind.CREATURE_ADDED,
     EventKind.CREATURE_STARTED,
     EventKind.CREATURE_STOPPED,
     EventKind.TOPOLOGY_CHANGED,

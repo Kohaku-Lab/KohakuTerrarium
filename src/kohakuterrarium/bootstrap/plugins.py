@@ -3,6 +3,7 @@
 import importlib
 from typing import Any
 
+from kohakuterrarium.errors import ConfigError
 from kohakuterrarium.builtins.plugin_catalog import (
     list_catalog_plugins,
     lookup_plugin,
@@ -23,12 +24,20 @@ def init_plugins(
     loader: ModuleLoader | None = None,
     default_plugins: list[str] | None = None,
     default_plugin_specs: list[dict[str, Any]] | None = None,
+    *,
+    strict: bool = False,
 ) -> PluginManager:
     """Create a PluginManager with config plugins + discovered packages.
 
-    1. Plugins listed in config are loaded and enabled.
+    1. Plugins listed in config are loaded and enabled.  With
+       ``strict`` (the programmatic default at the Agent layer), a
+       config-listed plugin that fails to load raises
+       :class:`ConfigError` — a silently dropped plugin is a policy
+       hole (sandbox / budget / permgate gone without a trace).
     2. Plugins found in installed packages (but not in config) are
-       registered as available but disabled — user can enable at runtime.
+       registered as available but disabled — user can enable at
+       runtime.  Discovery stays lenient even under ``strict``: a
+       broken *unrelated* installed package must not block this agent.
 
     Returns a PluginManager (possibly empty).
     """
@@ -50,7 +59,7 @@ def init_plugins(
 
     # Phase 1: Load plugins from config (enabled)
     for cfg in merged_configs:
-        plugin = _load_one(cfg, loader)
+        plugin = _load_one(cfg, loader, strict=strict)
         if plugin:
             config_names.add(plugin.name)
             manager.register(plugin)
@@ -145,9 +154,17 @@ def _merge_default_plugin_specs(
 
 
 def _load_one(
-    cfg: dict[str, Any] | str, loader: ModuleLoader | None
+    cfg: dict[str, Any] | str,
+    loader: ModuleLoader | None,
+    *,
+    strict: bool = False,
 ) -> BasePlugin | None:
-    """Load a single plugin from a config entry."""
+    """Load a single plugin from a config entry.
+
+    Lenient mode returns ``None`` on any failure (logged); ``strict``
+    raises :class:`ConfigError` so a config-listed plugin can never be
+    silently dropped.
+    """
     if isinstance(cfg, str):
         cfg = {"name": cfg}
 
@@ -163,10 +180,17 @@ def _load_one(
         if resolved:
             module, class_name = resolved
         else:
+            if strict:
+                raise ConfigError(
+                    f"Plugin {name!r} not found in the builtin catalog "
+                    "or any installed package"
+                )
             logger.debug("Plugin not found", plugin_name=name)
             return None
 
     if not module or not class_name:
+        if strict:
+            raise ConfigError(f"Plugin {name!r} is missing module/class")
         logger.warning("Plugin missing module/class", plugin_name=name)
         return None
 
@@ -179,11 +203,19 @@ def _load_one(
                 module, class_name, module_type=ptype, options=options
             )
         else:
+            # SAME constructor contract as the loader path:
+            # ``cls(**options)``.  The old ``cls(options=options)``
+            # spelling here meant a plugin worked on one load path and
+            # was silently dropped on the other.
             mod = importlib.import_module(module)
             cls = getattr(mod, class_name)
-            plugin = cls(options=options) if options else cls()
+            plugin = cls(**options) if options else cls()
 
         if not isinstance(plugin, BasePlugin):
+            if strict:
+                raise ConfigError(
+                    f"Plugin {name!r} ({module}.{class_name}) is not a " "BasePlugin"
+                )
             logger.warning("Not a BasePlugin", plugin_name=name)
             return None
 
@@ -195,7 +227,13 @@ def _load_one(
             plugin.description = cfg["description"]
         return plugin
 
+    except ConfigError:
+        raise
     except Exception as e:
+        if strict:
+            raise ConfigError(
+                f"Failed to load plugin {name!r} " f"({module}.{class_name}): {e}"
+            ) from e
         logger.warning(
             "Failed to load plugin", plugin_name=name, error=str(e), exc_info=True
         )

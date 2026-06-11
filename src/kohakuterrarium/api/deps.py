@@ -23,6 +23,7 @@ in lab-host mode is looking at nothing; it must migrate to
 
 import os
 import sys
+from functools import partial
 from pathlib import Path
 
 from fastapi import Depends, HTTPException
@@ -143,14 +144,16 @@ def get_service(
         user_id = user.id if user is not None else None
         engine = pool.get_or_create(user_id)
         service = LocalTerrariumService(engine)
-        service.set_runtime_graph_meta_lookup(get_session_meta)
+        # Session meta is instance-scoped — bind THIS service so the
+        # terrarium tier's gid-only lookup hits the right registry.
+        service.set_runtime_graph_meta_lookup(partial(get_session_meta, service))
         return service
 
     # Legacy single-engine path — standalone mode without L4.
     if _service is None:
         engine = Terrarium(session_dir=_session_dir())
         _service = LocalTerrariumService(engine)
-        _service.set_runtime_graph_meta_lookup(get_session_meta)
+        _service.set_runtime_graph_meta_lookup(partial(get_session_meta, _service))
     return _service
 
 
@@ -165,7 +168,7 @@ def get_service_legacy() -> TerrariumService:
     if _service is None:
         engine = Terrarium(session_dir=_session_dir())
         _service = LocalTerrariumService(engine)
-        _service.set_runtime_graph_meta_lookup(get_session_meta)
+        _service.set_runtime_graph_meta_lookup(partial(get_session_meta, _service))
     return _service
 
 
