@@ -50,40 +50,56 @@ See [`plugins/README.md`](plugins/README.md) for the full reference.
 
 ## Code (`code/`)
 
-Programmatic usage — embedding agents in your own applications.
+Programmatic usage: embedding agents in your own applications.
 
 The key distinction from config-based usage: **your program is the
 orchestrator, agents are workers you invoke.** The agent doesn't run
-itself — you control when, what, and how it processes.
+itself; you control when, what, and how it processes.
 
-Uses the **composition algebra** (`kohakuterrarium.compose`):
+Two complementary surfaces:
 
 ```python
+# Direct: typed turns on an agent or engine-hosted creature
+from kohakuterrarium import Agent, Terrarium
+
+agent = await Agent.build("@kt-biome/creatures/general")
+await agent.start()
+result = await agent.run("summarize ./notes.md", timeout=300)
+print(result.status, result.text, result.usage)
+
+async with Terrarium() as engine:
+    worker = await engine.add_creature(
+        "@kt-biome/creatures/swe", llm="fast",
+        pwd=workdir, session=workdir / "run.kohakutr",
+    )
+    result = await worker.run(task)
+```
+
+```python
+# Compose: pipeline operators over agents and plain callables
 from kohakuterrarium.compose import agent, factory
 
-# Persistent agent (reused across calls, accumulates context)
 async with await agent("@kt-biome/creatures/swe") as swe:
     result = await (swe >> extract_code >> reviewer)(task)
-
-# Ephemeral agent (fresh per call, no state carry-over)
-specialist = factory(make_config("coder"))
-result = await (specialist >> validate)(task)
 
 # Operators: >> (sequence), & (parallel), | (fallback), * (retry)
 safe = (expert * 2) | generalist
 results = await (analyst & writer & designer)(task)
 
-# Loop with native control flow
 async for result in (writer >> reviewer).iterate(task):
     if "APPROVED" in result:
         break
 ```
 
-| Script | Pattern | Compose features used |
-|--------|---------|----------------------|
-| programmatic_chat | Agent as library (baseline) | `AgentSession.chat()` |
-| run_terrarium | Terrarium from code | `TerrariumRuntime` API |
-| discord_adventure_bot | Bot-owned interaction | `agent()`, dynamic creation, game state |
+| Script | Pattern | Key API |
+|--------|---------|---------|
+| programmatic_chat | Agent as library (baseline) | `Agent.build`, `run` → TurnResult, `run_stream` |
+| batch_grading | N work folders, one engine | `add_creature(llm=, pwd=, session=)`, `TurnResult` |
+| custom_tools | Tools from plain functions | `@kt.tool`, `add_creature(tools=)`, `SessionReader` |
+| terrarium_solo | Single creature on the engine | `Terrarium.with_creature`, `chat` streaming |
+| terrarium_recipe | Run a terrarium from code | `Terrarium.from_recipe`, `engine.channel`, `subscribe` |
+| terrarium_hotplug | Live graph merge / split | `add_creature`, `connect` / `disconnect`, events |
+| discord_adventure_bot | Bot-owned interaction | shared engine, dynamic NPC creatures, game state |
 | debate_arena | Multi-agent turn-taking | `agent()`, `>>`, `async for`, `async with` |
 | task_orchestrator | Dynamic agent topology | `factory()`, `>>`, `asyncio.gather` |
 | ensemble_voting | Redundancy through diversity | `&` (parallel), `>>` auto-wrap, `\|` fallback, `*` retry |

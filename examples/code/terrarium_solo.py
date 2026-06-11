@@ -2,9 +2,9 @@
 Single creature via the unified Terrarium engine.
 
 The same engine that hosts multi-creature graphs hosts standalone
-agents — they're just creatures in a 1-creature graph.  This is the
-direct programmatic replacement for ``AgentSession.from_path`` once
-the engine cutover lands.
+agents — they're just creatures in a 1-creature graph.  Use this when
+you want engine features (sessions, channels, hot-plug) around a
+single agent; for a bare agent, see ``programmatic_chat.py``.
 """
 
 import asyncio
