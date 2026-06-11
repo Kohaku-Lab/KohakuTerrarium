@@ -1,6 +1,6 @@
 ---
 title: Laboratory 层
-summary: KohakuTerrarium 如何跨越多台机器 —— 基于 WebSocket 的传输、自定义 packet 系统，以及让 Studio 与 Terrarium 把远端节点当作本地节点对待的透明化技巧。
+summary: KohakuTerrarium 如何跨越多台机器：基于 WebSocket 的传输、自定义 packet 系统，以及让 Studio 与 Terrarium 把远端节点当作本地节点对待的透明化技巧。
 tags:
   - concepts
   - laboratory
@@ -85,7 +85,7 @@ Studio 仍然只调用一个 `TerrariumService` Protocol。在 Protocol
 背后，`MultiNodeTerrariumService` 把每个生物粒度的操作 fan-out
 并路由到正确的节点。Studio 永远不会 import Lab。
 
-主机进程也可以运行 Agent —— 一个 "coordination engine"：保留一
+主机进程也可以运行 Agent，即一个 "coordination engine"：保留一
 个本地 Terrarium，用于跨节点通道路由，以及在没有指定目标工作节
 点时托管由 recipe 生成的生物。工作节点是完全相同的进程（同样的
 `Terrarium` 类、同样的适配器、同样的 session store 布局）；它们
@@ -100,13 +100,13 @@ gRPC、不是裸 TCP，也不是 QUIC。三个原因：
    在单条 TCP/443 上即可，不需要额外的防火墙规则、也不需要单
    独的信令通道。
 2. **浏览器原生支持。** Studio 的 web UI 与工作节点客户端使用
-   同一份 wire 格式与同一份 envelope codec —— 浏览器 dashboard
+   同一份 wire 格式与同一份 envelope codec，因此浏览器 dashboard
    未来某个版本本身就可以充当 Lab 客户端，无需重新实现任何
    东西。
 3. **天然双向、消息成帧。** L2 envelope 与一个 WebSocket binary
    frame 一一对应；不需要在字节流上再造一层消息边界。
 
-WebSocket 并不是设计上的承重墙 —— [传输层](#l1-transport) 是一
+WebSocket 并不是设计上的承重墙：[传输层](#l1-transport) 是一
 个小型 Protocol，`InProcTransport` 也实现了它（每个测试都在
 用）。换成 QUIC 或 Unix socket 就只是再写一个
 `_internal/transport_*.py`。
@@ -135,8 +135,8 @@ session 事件 blob、tokenizer 状态），不希望承受扁平 msgpack 设
 +----------------------------------------------------------+
 ```
 
-Header 是 msgpack（小、schema 灵活、快）。Payload 是任意字节
-—— 由 L4 编解码器决定如何解释。
+Header 是 msgpack（小、schema 灵活、快）。Payload 是任意字节，
+由 L4 编解码器决定如何解释。
 
 实现见 `src/kohakuterrarium/laboratory/_internal/envelope.py`。
 
@@ -153,8 +153,8 @@ Header 是 msgpack（小、schema 灵活、快）。Payload 是任意字节
 
 | Kind | 用途 |
 |------|------|
-| `SEND` | 点对点投递（L4 `Channel.send`）—— 在订阅者之间负载均衡 |
-| `BROADCAST` | pub-sub 扇出（L4 `Topic.publish`）—— 每个订阅者都收到一份副本 |
+| `SEND` | 点对点投递（L4 `Channel.send`），在订阅者之间负载均衡 |
+| `BROADCAST` | pub-sub 扇出（L4 `Topic.publish`），每个订阅者都收到一份副本 |
 | `APP` | 结构化的应用消息：`{namespace, type, body}`，可选的 request/response 关联 |
 | `ACK` | 对需要 ack 的 `SEND` 的确认 |
 | `HELLO` / `WELCOME` / `HEARTBEAT` | 连接生命周期 |
@@ -173,11 +173,11 @@ Studio 永远不知道某个生物是跑在进程内、还是远端机器上。
 有 `add_creature`、`list_creatures`、`chat`、`connect` 这些方法。
 有三个实现：
 
-- `LocalTerrariumService` —— 直接调用进程内的 Terrarium。
-- `RemoteTerrariumService` —— 把参数打包成 `terrarium.runtime`
+- `LocalTerrariumService`：直接调用进程内的 Terrarium。
+- `RemoteTerrariumService`：把参数打包成 `terrarium.runtime`
   上的一个 APP 请求、发送、再把响应解包。每个已连接的工作节点
   对应一个实例。
-- `MultiNodeTerrariumService` —— 持有一个 `LocalTerrariumService`
+- `MultiNodeTerrariumService`：持有一个 `LocalTerrariumService`
   加上每个工作节点一个 `RemoteTerrariumService`，按
   `creature_id → home_node` 注册表路由每个生物粒度的操作、对全
   局操作做 fan-out。
@@ -189,8 +189,8 @@ Studio 永远不知道某个生物是跑在进程内、还是远端机器上。
 ## 透明化目标 2：Terrarium 只看到一个引擎
 
 通道和图拓扑也是单命名空间。一个 worker-1 上的生物调用
-`send_channel("ch1", "hello")` 应该投递给每一个 listener ——
-包括 worker-2 上的 listener —— 就像两个生物住在同一个进程里一
+`send_channel("ch1", "hello")` 应该投递给每一个 listener
+（包括 worker-2 上的 listener），就像两个生物住在同一个进程里一
 样。Lab 通过两个机制实现这一点：
 
 - **跨节点 connect**（`terrarium/multi_node_replication.py`）。
@@ -208,7 +208,7 @@ Studio 永远不知道某个生物是跑在进程内、还是远端机器上。
   其他工作节点上生物的输出接线目标，也通过 broadcast 适配器
   以同样的方式解析。
 
-跨节点 connect 之后，两个工作节点的图就组成了一个 *集群* ——
+跨节点 connect 之后，两个工作节点的图就组成了一个 *集群*：
 一个跨机器分布的逻辑多生物图。主机的
 `MultiNodeTerrariumService` 用集群集合对列表进行折叠（fold）
 （`list_creatures` 显示并集；`list_channels` 按名称去重），所
@@ -226,7 +226,7 @@ Lab 中最独特的设计选择就是持久化的实现方式。
 ### 权威写入端 + 读侧镜像
 
 每个运行中的生物都恰好有一个 **权威的** `SessionStore`（通过
-KohakuVault 的 SQLite 文件）—— 就在托管它的那个工作节点上。
+KohakuVault 的 SQLite 文件），就在托管它的那个工作节点上。
 每个 session 文件只有一个写入者。生物产生的所有事件先落到那
 个文件里。
 
@@ -252,8 +252,8 @@ Studio 的读 API（history、viewer、search、fork）都从镜像读，
 ### 顺序与持久性
 
 - Tee 使用一个每 session 一份的 outbound asyncio 队列。事件按
-  append 顺序投递到主机。如果链接掉了，pump 会有界回退重试
-  —— 事件被缓冲，不会丢失。
+  append 顺序投递到主机。如果链接掉了，pump 会有界回退重试，
+  事件被缓冲，不会丢失。
 - 镜像写入器会先 apply meta 键（这样 `config_path` /
   `config_snapshot` 会先于任何事件落地），再随到达顺序追加事
   件。每个 key 的写入是独立的：单个失败的 key 不会中止其他
@@ -268,7 +268,7 @@ Studio 的读 API（history、viewer、search、fork）都从镜像读，
 1. **实时读取。** Studio 的历史 viewer 一收到事件就能展示；
    没有 polling、没有秒级的最终一致性意外。
 2. **断线生还。** 如果工作节点在对话中途掉线，主机仍然拥有
-   到断线为止的每一个事件 —— Studio 继续响应历史查询 —— 而
+   到断线为止的每一个事件（Studio 继续响应历史查询），而
    当工作节点重连时，镜像已经是最新的；tee 从下一个事件继续
    推送，无需 resync RPC。
 
@@ -287,8 +287,8 @@ Studio 的读 API（history、viewer、search、fork）都从镜像读，
 
 ## Resume：把磁盘镜像推回去
 
-Resume 跑的还是它一直跑的那段 `engine.adopt_session(path)`
-—— 但在多节点模式下，path 在主机上，而引擎在工作节点上。主
+Resume 跑的还是它一直跑的那段 `engine.adopt_session(path)`，
+但在多节点模式下，path 在主机上，而引擎在工作节点上。主
 机负责架起这座桥：
 
 1. 用户在 "Saved" 标签页里选一个 session，点击 **Resume on
@@ -344,8 +344,8 @@ host: register session in _meta; respond with the synthesized Session handle
 
 ### 多生物图 resume（CF-6 cluster）
 
-对于跨多个工作节点的集群 —— 每个工作节点托管该集群连通分量
-的一部分 —— 用户传入一个 `members` 列表：
+对于跨多个工作节点的集群（每个工作节点托管该集群连通分量
+的一部分），用户传入一个 `members` 列表：
 
 ```http
 POST /api/sessions/{primary_sid}/resume
@@ -383,9 +383,9 @@ w2 上生成 bravo，在它们之间建立一条跨节点通道，驱动跨桥�
 ### 运行时拓扑变更：快照 + 回放
 
 Recipe（`terrarium.yaml`）描述图启动时的拓扑。在 recipe 加载
-**之后**由用户（或特权工具）追加的一切 —— 通过
+**之后**由用户（或特权工具）追加的一切（通过
 `service.add_channel` 增加的通道、通过 `service.connect` 增加
-的接线、通过 `disconnect` / `unwire` 做的移除 —— 只存在于引
+的接线、通过 `disconnect` / `unwire` 做的移除）只存在于引
 擎内存中的 `GraphTopology`。如果不做持久化，每一次 close +
 resume 都会丢失。
 
@@ -405,8 +405,8 @@ resume 都会丢失。
 Resume 时，`_resume_terrarium_into_engine` 先重建 recipe 描述
 的拓扑，然后调用 `topology_snapshot.replay(engine, sid)`，把
 保存的快照里尚未出现在图中的每一个通道 + 接线都加进去。因
-为快照是*完整的*（不是 delta log），用户的移除也被反映出来
-—— 任何被用户移除的东西就是不在快照里。
+为快照是*完整的*（不是 delta log），用户的移除也被反映出来：
+任何被用户移除的东西就是不在快照里。
 
 实现：`src/kohakuterrarium/terrarium/topology_snapshot.py`。
 测试：`tests/integration/test_runtime_topology_resume.py`。
@@ -419,9 +419,9 @@ Resume 时，`_resume_terrarium_into_engine` 先重建 recipe 描述
 | coordination engine 上的 recipe 生成的多生物图 | ✅ 使用标准的 `_resume_terrarium_into_engine` |
 | N=2 工作节点、每个 1 生物、跨节点桥接的集群 | ✅ 已测试（journey 32g / CF-6） |
 | 3+ 工作节点的集群 | ⚠ 未测试（机制相同，只是成员更多） |
-| 每个工作节点带多个生物的集群 | ⚠ 未测试但应该可以工作 —— 每个工作节点的 resume 各自独立地重建自己的图 |
-| recipe 文件内的每生物 `on_node` | ❌ 不支持 —— recipe schema 没有 node 字段。请通过逐个 `add_creature(on_node=…)` + `service.connect` 手动组合 |
-| 目标工作节点离线时 resume | ❌ 返回 404 并带上缺失的工作节点名 —— 运维需要先重连 |
+| 每个工作节点带多个生物的集群 | ⚠ 未测试但应该可以工作：每个工作节点的 resume 各自独立地重建自己的图 |
+| recipe 文件内的每生物 `on_node` | ❌ 不支持：recipe schema 没有 node 字段。请通过逐个 `add_creature(on_node=…)` + `service.connect` 手动组合 |
+| 目标工作节点离线时 resume | ❌ 返回 404 并带上缺失的工作节点名，运维需要先重连 |
 
 ## Identity：本地优先
 
@@ -434,7 +434,7 @@ LLM 凭据是 per-process 的，而不是 per-cluster 的。1.5.x 的默
 2. 只有 miss 时才会 fallback 到主机最近一次通过
    `studio.identity` 推过来的内容。
 3. Codex OAuth token（`<KT_CONFIG_DIR>/codex-auth.json`）也一
-   样 —— 本地优先、主机其次。**Codex token 必须在本地**，因
+   样：本地优先、主机其次。**Codex token 必须在本地**，因
    为 OAuth refresh 是进程绑定的：试图在工作节点进程里使用主
    机的 token 永远会让用户被重新提示。
 
@@ -446,22 +446,22 @@ LLM 凭据是 per-process 的，而不是 per-cluster 的。1.5.x 的默
 编辑哪个节点的凭据存储。在选中某个工作节点时保存一个 key，会
 通过 Lab APP 把写入路由到该工作节点的
 `StudioIdentityAdapter`，由它持久化到工作节点的本地文件。
-Codex login 也是一样 —— 在选中工作节点时点击 **Codex
+Codex login 也是一样：在选中工作节点时点击 **Codex
 login**，会在 *那个工作节点上* 跑 OAuth 流程，所以浏览器在
 工作节点机器上打开，最终的 token 落在工作节点的磁盘上。
 
 ## 文件、部署与沙箱
 
-- **`terrarium.files`** —— 通过 Lab APP 的 scope 受限文件
+- **`terrarium.files`**：通过 Lab APP 的 scope 受限文件
   IO。五个 scope：`workspace://<creature>`、`memory://<creature>`、
   `package://<name>`、`recipe://<id>`、`config://`。>512 KB
   payload 流式读写；幂等原子 commit（被采纳的 SessionStore 持
-  开的目标文件不会被重写 —— 见 `_op_write_commit`）。
-- **`studio.deploy`** —— `push_creature_bundle`：遍历一个生物
+  开的目标文件不会被重写，见 `_op_write_commit`）。
+- **`studio.deploy`**：`push_creature_bundle`：遍历一个生物
   文件夹，计算每文件 SHA，通过 `terrarium.files` 推送，原子
   rename 到 `recipe://<name>/...`。重复推送通过哈希检查保持
   幂等，所以已经有该 recipe 的工作节点不会再下载一次。
-- **`terrarium.pty`** —— 把工作节点的 shell session 代理到主
+- **`terrarium.pty`**：把工作节点的 shell session 代理到主
   机侧的 WebSocket。前端的 terminal 面板针对远端生物的工作目
   录的运作方式毫无变化。
 - 路径形式的 `add_creature("./my-creature/")` 如果工作节点的
@@ -489,7 +489,7 @@ login**，会在 *那个工作节点上* 跑 OAuth 流程，所以浏览器在
 | **Lab / Laboratory** | `kohakuterrarium.laboratory` 包；网络层。 |
 | **Host / 主机** | 运行 `kt serve --mode lab-host` 的进程。拥有 Studio + `HostEngine`。也可能通过 coordination engine 托管 Agent。 |
 | **Worker / 工作节点** | 运行 `kt lab-client` 的进程。托管生物，通过 Lab 适配器把它们暴露出来。 |
-| **Node / 节点** | 主机或工作节点 —— 任何说 Lab 协议的进程。通过 `node_id`（`_host` 或 client 的 `--name`）寻址。 |
+| **Node / 节点** | 主机或工作节点，即任何说 Lab 协议的进程。通过 `node_id`（`_host` 或 client 的 `--name`）寻址。 |
 | **Adapter / 适配器** | 实现一个或多个 APP 命名空间的类（例如 `TerrariumRuntimeAdapter` 服务 `terrarium.runtime` 命名空间）。 |
 | **`TerrariumService`** | Studio 调用的 Protocol。三个实现：`Local`、`Remote`、`MultiNode`。 |
 | **Cluster / 集群** | 一组跨节点连接的图。由 `MultiNodeTerrariumService._cluster_links` 跟踪。从用户视角看就是一个逻辑 session。 |
@@ -498,8 +498,8 @@ login**，会在 *那个工作节点上* 跑 OAuth 流程，所以浏览器在
 
 ## 延伸阅读
 
-- [Laboratory 使用指南](../guides/laboratory.md) —— 如何实际
+- [Laboratory 使用指南](../guides/laboratory.md)：如何实际
   运行它。
-- [会话](../../guides/sessions.md) —— 持久化的基础知识（单
+- [会话](../../guides/sessions.md)：持久化的基础知识（单
   节点）。
-- [Terrarium](./multi-agent/terrarium.md) —— Lab 包裹的引擎。
+- [Terrarium](./multi-agent/terrarium.md)：Lab 包裹的引擎。

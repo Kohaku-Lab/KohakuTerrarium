@@ -17,7 +17,7 @@ KohakuTerrarium 每个可扩展的介面都是一个 Python 协定。你实作�
 
 ## 自定义模块长什么样
 
-每个模块就是一支 Python 档 (放哪都可以 — 通常放在Creature目录里、或某个包里)。Config 用 `module: ./path/to/file.py` + `class: YourClass` 指过去。(每种模块的 YAML key 都是 `class`。插件另外为向后兼容接受 `class_name`；见 [插件指南](plugins.md)。)
+每个模块就是一支 Python 档 (放哪都可以，通常放在Creature目录里、或某个包里)。Config 用 `module: ./path/to/file.py` + `class: YourClass` 指过去。(每种模块的 YAML key 都是 `class`。插件另外为向后兼容接受 `class_name`；见 [插件指南](plugins.md)。)
 
 五种模块接线方式都一样。差别只在实作哪个协定。
 
@@ -68,9 +68,9 @@ tools:
 
 工具执行模式 (在 `BaseTool` 设)：
 
-- **direct** (默认) — 在同一回合 await，结果变成 `tool_complete` 事件。
-- **background** — 送出后回传 job id，结果晚点再到。
-- **stateful** — 类似 generator，跨回合 yield 中间结果。
+- **direct** (默认)：在同一回合 await，结果变成 `tool_complete` 事件。
+- **background**：送出后回传 job id，结果晚点再到。
+- **stateful**：类似 generator，跨回合 yield 中间结果。
 
 测试：
 
@@ -145,11 +145,11 @@ input:
 契约 (`kohakuterrarium.modules.output.base`)：
 
 - `async start()`、`async stop()`
-- `async write(content: str)` — 完整消息
-- `async write_stream(chunk: str)` — 串流 chunk
+- `async write(content: str)`：完整消息
+- `async write_stream(chunk: str)`：串流 chunk
 - `async flush()`
 - `async on_processing_start()`、`async on_processing_end()`
-- `def on_activity(activity_type: str, detail: str)` — 工具/子代理事件
+- `def on_activity(activity_type: str, detail: str)`：工具/子代理事件
 - 选用：`async on_user_input(text)`、`async on_resume(events)`
 
 ```python
@@ -259,7 +259,7 @@ triggers:
 
 ## 子代理
 
-子代理由 `SubAgentConfig` (一个 config dataclass) 定义 — 你很少需要直接继承 `SubAgent`。通常的做法是写一支 Python 模块、export 一个 config 物件：
+子代理由 `SubAgentConfig` (一个 config dataclass) 定义，你很少需要直接继承 `SubAgent`。通常的做法是写一支 Python 模块、export 一个 config 物件：
 
 ```python
 # subagents/specialist.py
@@ -372,13 +372,13 @@ assert env.output.all_text == "..."
 ## 疑难排解
 
 - **Module not found**。 `module:` 路径是相对于Creature目录。如果会有歧义就用绝对路径。
-- **工具没有出现在 prompt 里**。 跑 `kt info path/to/creature`。八成是被默默拒绝了 — 确认 YAML 的 `class:` 值有对上模组里实际的 class 名称。(YAML key 是 `class`，不是 `class_name`；只有插件为了向后兼容也接受 `class_name`，tools/inputs/outputs/triggers/sub-agents 都必须用 `class`。)
+- **工具没有出现在 prompt 里**。 跑 `kt info path/to/creature`。八成是被默默拒绝了，请确认 YAML 的 `class:` 值有对上模组里实际的 class 名称。(YAML key 是 `class`，不是 `class_name`；只有插件为了向后兼容也接受 `class_name`，tools/inputs/outputs/triggers/sub-agents 都必须用 `class`。)
 - **`needs_context=True` 但测试里 `context` 是 `None`**。 `TestAgentBuilder` 会提供 context；如果要用频道或草稿区，确认你有调用 `.with_session(...)`。
 - **触发器不会 resume**。 在类别将 `resumable = True` 并实作 `to_resume_dict()`。
 
 ## 延伸阅读
 
-- [插件指南](plugins.md) — 模块之间 **接缝** 的行为 (pre/post hook)。
-- [包指南](packages.md) — 把模块打包出去重用。
-- [Reference / Python API 参考](../reference/python.md) — `BaseTool`、`BaseInputModule`、`BaseOutputModule`、`BaseTrigger`、`SubAgentConfig`。
-- [概念 / 模块](../concepts/modules/README.md) — 每个模块一页。
+- [插件指南](plugins.md)：模块之间 **接缝** 的行为 (pre/post hook)。
+- [包指南](packages.md)：把模块打包出去重用。
+- [Reference / Python API 参考](../reference/python.md)：`BaseTool`、`BaseInputModule`、`BaseOutputModule`、`BaseTrigger`、`SubAgentConfig`。
+- [概念 / 模块](../concepts/modules/README.md)：每个模块一页。

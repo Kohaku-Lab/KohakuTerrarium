@@ -1,6 +1,6 @@
 ---
 title: Studio
-summary: Terrarium 引擎之上的管理层：catalog、identity、sessions、persistence、attach policy 与 editors。
+summary: Terrarium 引擎之上的管理层：目录、身份、会话、持久化、挂载策略与编辑器。
 tags:
   - concepts
   - studio
@@ -11,79 +11,105 @@ tags:
 
 ## 它是什么
 
-**Studio** 是 `Terrarium` runtime engine 之上的管理层。它不是 UI，也不是另一个 agent。它是一个 Python facade，让 CLI、HTTP API、web dashboard 和你自己的代码共用同一套管理逻辑。
+**Studio** 是 `Terrarium` 运行时引擎之上的管理层。它不是 UI，也不是
+又一个 Agent。它是一层共享的 Python 接口，承担每个 UI 和自动化脚本
+原本都得各自重写的那些事：
 
-Studio 负责：
+- 包与内置组件的**目录**查询；
+- LLM profile、API key、MCP、UI 偏好等**身份**状态；
+- 基于 `Terrarium` 引擎的活动**会话生命周期**；
+- 已保存会话的**持久化**：列表、恢复、fork、历史、导出；
+- 实时**挂载策略**：IO 聊天、频道观察、trace、日志、工作区文件、pty；
+- Studio **编辑器**：工作区的生物 (creature) / 模块 CRUD 与脚手架。
 
-- 包与内置项的 **catalog** 查询；
-- LLM profile、API key、MCP、UI preferences 等 **identity** 状态；
-- engine-backed **active session** lifecycle；
-- 保存的 `.kohakutr` **persistence**：list、resume、fork、history、export；
-- live **attach policy**：IO chat、channel observer、trace、logs、workspace files、pty；
-- Studio **editors**：workspace 内的 Creature / module CRUD 与 scaffold。
+Python 门面是 `kohakuterrarium.Studio`。HTTP API、Web UI、`kt` 命令
+和你自己的代码都应该委托给同一套 Studio 操作，而不是各自复制
+目录/会话/设置逻辑。
 
-Python facade 是 `kohakuterrarium.Studio`。HTTP API、web UI、`kt` commands 与自定义 embedding code 都应该调用 Studio，而不是各自重写 package/session/settings policy。
+## 层级栈
 
-## 分层模型
+按三个编程门面来想：
 
-| Facade | Layer | 负责 |
+| 门面 | 层 | 掌管 |
 |---|---|---|
-| `Agent` / creature internals | Creature | 单一 LLM controller，以及 tools、triggers、sub-agents、plugins、memory、I/O。 |
-| `Terrarium` | Runtime engine | live creatures、graph topology、channels、output wiring、hot-plug、engine events。 |
-| `Studio` | Management layer | catalog、identity、active sessions、saved sessions、attach policies、editor workflows。 |
+| `Agent` / 生物内部 | 生物 | 一个 LLM 控制器及其工具、触发器、子代理、插件、记忆、I/O。 |
+| `Terrarium` | 运行时引擎 | 活动生物、图拓扑、频道、输出连线、热插拔、引擎事件。 |
+| `Studio` | 管理层 | 目录、身份、活动会话、已保存会话、挂载策略、编辑器工作流。 |
 
-低层不 import 高层：
+下层不导入上层：
 
-- Creature code 不知道 `Terrarium` 或 `Studio` 存在。
-- `Terrarium` host creatures，但不需要知道 Studio、HTTP 或 CLI。
-- `Studio` 接收一个 `Terrarium` engine，并在其上提供管理语义。
-- `api/`、`cli/`、frontend 是 Studio 的 adapter。
+- 生物代码不知道 `Terrarium` 或 `Studio` 的存在。
+- `Terrarium` 托管生物，但不知道 `Studio`、HTTP 或 CLI。
+- `Studio` 包住一个 `Terrarium` 引擎（传 `engine=`，或让 `Studio()`
+  自己持有一个），在其上叠加管理语义。它的状态以实例为作用域：
+  两个 Studio 包两个引擎，会话注册表绝不共享。
+- `api/`、`cli/` 和前端是 Studio 上的适配器。Studio 自己抛类型化的
+  `kohakuterrarium.errors` 异常；只有 `api/` 适配器把它们翻译成
+  HTTP 状态码。
 
-结构为：一个 runtime engine、一个 management layer，以及薄 UI adapter。
+结构就是：一个运行时引擎、一个管理层、几层薄薄的 UI 适配器。
 
 ## 为什么需要 Studio
 
-没有 Studio 时，很多策略会在不同地方重复：
+Studio 出现之前，同样的职责散落在多个地方：
 
-- package listing 同时出现在 CLI 与 web route；
-- profile/key/MCP logic 分散在 `kt config`、`kt model`、`kt login` 与 `/api/settings`；
-- active agent / terrarium route 重复 lifecycle logic；
-- saved-session viewer/export/diff/resume 与 runtime session creation 分开；
-- WebSocket chat/log/file/terminal endpoints 各自实现 attach policy。
+- 包列表同时活在 `kt list` 和 Web 路由里；
+- profile/key/MCP 逻辑分散在 `kt config`、`kt model`、`kt login` 和
+  `/api/settings`；
+- 活动 agent 路由与 terrarium 路由各有一份重复的生命周期逻辑；
+- 已保存会话的查看/导出/对比/恢复代码与运行时会话创建彼此独立；
+- WebSocket 的聊天/日志/文件/终端端点各自维护一套挂载策略。
 
-Studio 把这些整理成每个 concern 一个 implementation。CLI 负责输出终端格式；HTTP API 负责 JSON；frontend 负责 panel；实际工作交给 Studio。
+Studio 把这些收敛成每个关注点一份实现。CLI 输出终端形状的内容，
+HTTP API 序列化 JSON，前端渲染面板，但干活的都是 Studio。
 
-## Session 与 graph
+## Studio 的会话 vs Terrarium 的图
 
-`Terrarium` 拥有 **graphs**：live creatures 的 connected components。单一 Creature 是一个 graph；multi-creature team 也是一个 graph。连接两个 graph 会 merge；移除连接可能 split。
+`Terrarium` 掌管的是**图**：活动生物的连通分量。单个生物是一张图，
+多生物团队也是一张图。连接两张图会合并；断开可能拆分。
 
-Studio 在用户或 UI 管理某个 graph 时，把它称为 **session**。这个 session handle 包含：
+当用户或 UI 在管理一张图时，Studio 把它叫作**会话**。会话句柄携带：
 
-- `session_id` — graph id；
-- `kind` — `"creature"` 或 `"terrarium"`；
-- creature summaries，用于 UI tabs 与 per-creature 操作；
-- config path、working directory、creation time 等 Studio metadata。
+- `session_id`：即图 id；
+- `kind`：单生物图是 `"creature"`，由配方启动的多生物图是
+  `"terrarium"`；
+- 供 UI 标签页和生物级操作使用的生物摘要；
+- Studio 关心的元数据，如配置路径、工作目录、创建时间。
 
-保存的 session 是磁盘上的 `.kohakutr` 文件。Studio persistence 可以 list、resume、fork、生成 viewer payload，或删除它们。
+这就是为什么公开的活动会话 API 用
+`/api/sessions/{sid}/creatures/{cid}/...` 这样的 URL：生物操作总是
+以拥有它的图/会话为作用域。
 
-## Attach policy
+已保存会话则不同：它们是磁盘上的 `.kohakutr` 文件。Studio 的
+persistence 可以列出它们、把它们恢复进运行中的引擎、fork 它们，
+以及构建事后的查看器载荷。
 
-不是每个 Creature 都是聊天机器人。Monitor 可能没有 user input；scheduler 可能只输出 logs；multi-agent team 可能需要 channel observer 而不是 chat box。Studio 把“运行 Creature”与“把 UI attach 到它”分开。
+## 挂载策略
 
-Attach policy 回答：“对这个 running creature/session，哪些 live view/control surface 合理？”
+不是每个生物都是聊天机器人。监控器可能没有用户输入；调度器可能只
+产日志；多 Agent 团队需要的可能是频道观察器而不是聊天框。Studio 把
+**运行**一个生物和把 UI **挂载**到它上面分开。
 
-| Policy | 形状 | 用途 |
+挂载策略回答的是：“对这个运行中的生物或会话，哪种实时视图 / 控制面
+说得通？”
+
+| 策略 | 形态 | 用途 |
 |---|---|---|
-| IO chat | read/write stream | 对话型 Creature。 |
-| Channel observer | read-only stream | 不消耗 queue message 的 channel traffic 观察。 |
-| Trace | read-only stream | Engine events、turns、topology changes、tool activity。 |
-| Log | read-only stream | Process/runtime logs。 |
-| Workspace files | browse/watch | File panel 与 editor refresh。 |
-| PTY | read/write terminal | 附着到 Creature working directory 的 shell。 |
+| IO 聊天 | 读/写流 | 对话型生物。 |
+| 频道观察 | 只读流 | 不打扰监听者地检视图频道流量。 |
+| Trace | 只读流 | 引擎事件、轮次、拓扑变化、工具活动。 |
+| 日志 | 只读流 | 进程/运行时日志。 |
+| 工作区文件 | 浏览/监视 | 文件面板与编辑器刷新。 |
+| PTY | 读/写终端 | 挂到生物工作目录的 Shell。 |
 
-## Studio 不是 web dashboard
+Web 仪表盘通过 HTTP/WebSocket 适配器暴露这些。`Studio.attach` 命名
+空间目前提供可用策略的通告；更多编程式流辅助方法可以加在那里，
+不需要改运行时引擎。
 
-Web dashboard 是 UI；Studio 是 dashboard 调用的 Python management layer。你可以完全不启动 web server：
+## 别把 Studio 和 Web 仪表盘混为一谈
+
+Web 仪表盘是 UI。Studio 是仪表盘所调用的 Python 管理层。不起 Web
+服务器也能用 Studio：
 
 ```python
 from kohakuterrarium import Studio
@@ -93,21 +119,27 @@ async with Studio() as studio:
     print(session.session_id)
 ```
 
-也可以启动 web dashboard；它只是把 FastAPI routes 与 WebSocket endpoints 接到相同的 Studio/Terrarium model：
+也可以运行 Web 仪表盘，它在同一套 Studio/Terrarium 概念之上挂载
+FastAPI 路由和 WebSocket 端点：
 
 ```bash
 kt web
 ```
 
-## 何时使用哪一层
+两条路共享同一个心智模型：Studio 管理会话；Terrarium 运行生物。
 
-- 用 **`Agent`** 直接控制一个 Creature 的 modules、event queue、output handlers 或测试 harness。
-- 用 **`Terrarium`** 处理 runtime topology：add creatures、connect channels、hot-plug、observe engine events。
-- 用 **`Studio`** 建 UI、service 或 automation：packages、settings、active sessions、saved sessions、attach policies、editors。
+## 该用哪一层
 
-## 参见
+- 需要对单个生物的模块、事件队列、输出处理器或测试脚手架做完全的
+  底层控制时，直接用 **`Agent`**。
+- 需要运行时拓扑（添加生物、连接频道、热插拔、观察引擎事件）时，
+  用 **`Terrarium`**。
+- 构建 UI、服务、自动化或脚本，需要面向用户的管理面（包、设置、
+  活动会话、已保存会话、挂载策略、编辑器）时，用 **`Studio`**。
 
-- [Terrarium](multi-agent/terrarium.md)
-- [程序化使用](../guides/programmatic-usage.md)
-- [Studio 使用指南](../guides/studio.md)
-- [Python API](../reference/python.md)
+## 另请参阅
+
+- [Terrarium](multi-agent/terrarium.md)：Studio 所包的运行时引擎。
+- [编程式用法](../guides/programmatic-usage.md)：如何嵌入 `Studio` 和 `Terrarium`。
+- [Studio 指南](../guides/studio.md)：任务导向的示例。
+- [Python API](../reference/python.md)：签名与命名空间地图。

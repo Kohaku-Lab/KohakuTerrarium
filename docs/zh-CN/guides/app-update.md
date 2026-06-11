@@ -1,6 +1,6 @@
 ---
 title: 应用更新
-summary: KohakuTerrarium 桌面应用的更新机制 —— 下载预构建的发布 tarball、版本并列安装、原子指针切换、自定义镜像、发布通道。
+summary: KohakuTerrarium 桌面应用的更新机制：下载预构建的发布 tarball、版本并列安装、原子指针切换、自定义镜像、发布通道。
 tags:
   - guides
   - update
@@ -13,7 +13,7 @@ tags:
 KohakuTerrarium 桌面应用通过**下载与你的平台 + Python ABI 匹配的预构建
 发布 tarball**来自我更新：在本地解压到当前版本的并列目录、做冒烟测试，
 然后原子性地切换一个小指针文件来决定下次启动哪一份。这个模型借鉴自
-Squirrel / Velopack / Sparkle 这类原生应用更新器 —— 小、事务化，
+Squirrel / Velopack / Sparkle 这类原生应用更新器：小、事务化，
 每次更新只需要一次 HTTPS GET + 一次解压。
 
 更关键的是：你的机器**不需要**运行 `pip`、`venv`、`git` 或 `ensurepip`。
@@ -51,7 +51,7 @@ Squirrel / Velopack / Sparkle 这类原生应用更新器 —— 小、事务化
 ```
 
 每个版本都在自己独立的目录。切换版本只是改写 50 字节的 `active` 指针
-（在 POSIX 和 Windows 上都是原子的）。当前正在运行的进程不受影响 ——
+（在 POSIX 和 Windows 上都是原子的）。当前正在运行的进程不受影响，
 新版本在下次启动时生效。
 
 ## 首次启动
@@ -74,7 +74,7 @@ Squirrel / Velopack / Sparkle 这类原生应用更新器 —— 小、事务化
 | `kt self-update --dry-run` | 解析并打印将要安装的内容 |
 | `kt self-update --rollback` | 指针回退到上一个已安装版本 |
 
-更新不会修改当前运行的进程。更新成功后，退出并重新启动应用 —— 新指针
+更新不会修改当前运行的进程。更新成功后，退出并重新启动应用，新指针
 会在下次启动时被读取。
 
 ## 发布通道
@@ -86,7 +86,7 @@ Squirrel / Velopack / Sparkle 这类原生应用更新器 —— 小、事务化
 | `nightly` | 每日自动构建 | 追前沿 / 贡献者 |
 
 通道选择在 **Admin → Updates → Channel** 以及
-`kt self-update --channel <name>`（粘性 —— 会写回设置）。
+`kt self-update --channel <name>`（粘性，会写回设置）。
 
 ## 版本固定
 
@@ -202,12 +202,12 @@ kt self-update --rollback
 
 ## 启动器**不**依赖的
 
-- `pip` —— 没打包、也不调用
-- `venv` / `ensurepip` —— 不使用（Windows 上 briefcase 壳层会剥掉这些，
+- `pip`：没打包、也不调用
+- `venv` / `ensurepip`：不使用（Windows 上 briefcase 壳层会剥掉这些，
   这就是之前的设计走不通的原因）
-- `git` —— 不调用
-- PyPI —— 只查询配置的 feed（github_releases 或 custom）
-- 任何第三方 HTTP 客户端 —— 只用 `urllib`
+- `git`：不调用
+- PyPI：只查询配置的 feed（github_releases 或 custom）
+- 任何第三方 HTTP 客户端：只用 `urllib`
 
 唯一可选的第三方依赖是 `zstandard`（用于 `.tar.zst`）。`.tar.gz` 是
 fallback 路径；如果你的镜像服务 `.tar.gz` 工件，没有 `zstandard` 一切
@@ -232,5 +232,5 @@ fallback 路径；如果你的镜像服务 `.tar.gz` 工件，没有 `zstandard`
 
 ## 参见
 
-- [配置参考](../reference/configuration.md) —— 所有设置字段
-- [CLI 参考](../reference/cli.md) —— 全部 `kt self-update` 选项
+- [配置参考](../reference/configuration.md)：所有设置字段
+- [CLI 参考](../reference/cli.md)：全部 `kt self-update` 选项

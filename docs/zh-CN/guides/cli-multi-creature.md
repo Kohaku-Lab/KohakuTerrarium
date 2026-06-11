@@ -1,6 +1,6 @@
 ---
 title: Rich CLI 多 creature
-summary: 在 `kt run --mode cli` 中使用多 creature terrarium —— roster、焦点切换、@name 重定向、slash 命令、Ctrl+A 总览。
+summary: 在 `kt run --mode cli` 中使用多 creature terrarium：roster、焦点切换、@name 重定向、slash 命令、Ctrl+A 总览。
 tags:
   - guides
   - cli
@@ -10,7 +10,7 @@ tags:
 # Rich CLI 多 creature
 
 `kt run --mode cli` 打开 rich 行内 CLI。**单 creature 配置**与 1.4 行为
-一致 —— 带边框的输入框、live 区域、slash 命令、prompt-toolkit 历史。
+一致：带边框的输入框、live 区域、slash 命令、prompt-toolkit 历史。
 **多 creature terrarium** 则在输入框上方显示一行 **roster**，并提供
 焦点切换、按 creature 保留的草稿、`@name` 重定向、以及拓扑感知的
 slash 命令。
@@ -36,7 +36,7 @@ slash 命令。
 | `✗` | failed | 上一轮发生异常 |
 | `■` | stopped | 已显式停止 |
 
-`▸` 标记当前**焦点 creature** —— 你的输入会发到它。非焦点 creature 自
+`▸` 标记当前**焦点 creature**，你的输入会发到它。非焦点 creature 自
 上次查看以来有新活动时，名字旁边会出现 `●N` 徽章。
 
 ### 终端较窄时
@@ -60,24 +60,24 @@ working 与 waiting 的 creature 始终以名字可见（它们是需要你注�
 | `Shift+Tab` | 切到上一个 creature |
 | `Ctrl+A` | 打开 agent 总览（见下） |
 
-切换焦点时，rich CLI 提供**完整的上下文切换** —— 你只会看到新焦点
+切换焦点时，rich CLI 提供**完整的上下文切换**：你只会看到新焦点
 creature 的历史，而不是所有 creature 的交错日志：
 
 - 输入提示前缀变化：`[clawd]> ` → `[physics]> `
 - live 区域（正在流式输出 + 活跃工具）切到该 creature 的缓冲
-- **底栏**根据新 creature 的 agent 重绘 —— 模型名、上下文预算、token
+- **底栏**根据新 creature 的 agent 重绘：模型名、上下文预算、token
   累计都反映 `physics` 实际在跑的内容，而不是 `clawd` 之前的内容
-- **未发送的草稿与你之前定位的 creature 一起保留** —— 切回来时半写
+- **未发送的草稿与你之前定位的 creature 一起保留**：切回来时半写
   的消息还在
 - **终端滚动历史会清空并重新回放**：新焦点 creature 的每一条已提交
   消息、工具结果面板、提示都会重新发到滚动区。PgUp / 鼠标向上滚动
-  之后只会看到该 creature 的历史。共享的交错日志不复存在 —— Tab 是
+  之后只会看到该 creature 的历史。共享的交错日志不复存在；Tab 是
   真正的上下文切换，而不是「偷看」。
 
 重绘由对话进行时在内存中捕获的「每 creature commit 日志」驱动。
 尚未完成的流式文本不会被捕获（它还在产生它的 creature 的 live
-区里），但所有已提交到滚动区的内容 —— 用户消息、完成的助理回合、
-工具块、子代理面板 —— 都会在每次切换时忠实重放。
+区里），但所有已提交到滚动区的内容（用户消息、完成的助理回合、
+工具块、子代理面板）都会在每次切换时忠实重放。
 
 一个自然的代价：长时间运行、creature 数量多时，每次 Tab 都会触发
 真正的屏幕重绘。几百回合内你几乎感觉不到；非常长的会话中，切换会
@@ -96,7 +96,7 @@ creature 的历史，而不是所有 creature 的交错日志：
 `@all <msg>` 广播到所有 creature，但只有焦点是**特权** creature
 （recipe 根或用户启动的顶层）时才有效。
 
-`@name` 消息记录在**接收方**的滚动历史中，不在发送方 ——
+`@name` 消息记录在**接收方**的滚动历史中，不在发送方：
 之后切到 `physics` 你能看到问题和 physics 的回答在一起，不会孤立。
 `@all` 广播会写入每个 creature 的历史，这样切到哪个 creature
 都能看到同样的可见上下文。
@@ -116,7 +116,7 @@ creature 的历史，而不是所有 creature 的交错日志：
 | `/channels` | 列出焦点 creature 参与的 channels |
 | `/scratchpad` | 显示焦点 creature 的草稿区 |
 
-## Ctrl+A — agent 总览
+## Ctrl+A：agent 总览
 
 按 `Ctrl+A` 打开按状态分组的完整列表：
 
@@ -150,7 +150,7 @@ creature 的历史，而不是所有 creature 的交错日志：
 ### Peek
 
 `Space` 在选中行打开右侧面板，显示该 creature 最近 30 秒的输出。
-**peek 打开时键入的内容会发到 peek 的 creature** —— 用于不切焦点回答
+**peek 打开时键入的内容会发到 peek 的 creature**，用于不切焦点回答
 `ask_user` 提示。
 
 ## 何时选用此前端
@@ -166,6 +166,6 @@ attach，请用 web UI。
 
 ## 另请参阅
 
-- [`kt --help`](../../README.md) — 完整 CLI 参考
-- [CLI 与 UI 对照](cli-and-ui-equivalents.md) — 每个 `kt` 命令对应的 UI 位置
-- [配置指南](configuration.md) — terrarium recipe 的样子
+- [`kt --help`](../../README.md)：完整 CLI 参考
+- [CLI 与 UI 对照](cli-and-ui-equivalents.md)：每个 `kt` 命令对应的 UI 位置
+- [配置指南](configuration.md)：terrarium recipe 的样子

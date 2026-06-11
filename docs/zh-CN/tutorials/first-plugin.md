@@ -55,7 +55,7 @@ from kohakuterrarium.modules.plugin.base import BasePlugin, PluginContext
 
 class UTCInjectorPlugin(BasePlugin):
     name = "utc_injector"
-    priority = 90  # Late — run after other pre_llm_call plugins.
+    priority = 90  # Late: run after other pre_llm_call plugins.
 
     async def on_load(self, context: PluginContext) -> None:
         # Nothing to do here; defined to show the lifecycle hook.
@@ -106,7 +106,7 @@ DANGEROUS_PATTERNS = ("rm -rf",)
 
 class BashGuardPlugin(BasePlugin):
     name = "bash_guard"
-    priority = 1  # First — block before anything else runs.
+    priority = 1  # First: block before anything else runs.
 
     async def on_load(self, context: PluginContext) -> None:
         return
@@ -120,7 +120,7 @@ class BashGuardPlugin(BasePlugin):
         for pattern in DANGEROUS_PATTERNS:
             if pattern in command:
                 raise PluginBlockError(
-                    f"bash_guard: blocked — command contains "
+                    f"bash_guard: blocked, command contains "
                     f"'{pattern}'. Use a safer approach (explicit paths, "
                     f"trash instead of delete)."
                 )
@@ -158,9 +158,9 @@ plugins:
 
 这些字段和上一篇教程中的自定义工具接线方式相同：
 
-- `type: custom` —— 从本地文件加载。
-- `module` —— 相对于 Agent 目录的路径。
-- `class` —— 要实例化的插件类。（`class` 与 `class_name` 都支持。）
+- `type: custom`：从本地文件加载。
+- `module`：相对于 Agent 目录的路径。
+- `class`：要实例化的插件类。（`class` 与 `class_name` 都支持。）
 
 如果插件有选项，可以通过 `options:`（一个 dict）传入，并在 `__init__(self, options=...)` 中接收。上面的示例不需要任何选项，因此省略了这一块。
 
@@ -211,6 +211,6 @@ controller 会分发这次工具调用，随后守卫会抛出 `PluginBlockError
 
 ## 接下来读什么
 
-- [插件概念](../concepts/modules/plugin.md) —— 为什么需要插件，以及它能解锁什么，包括“把 Agent 放进插件中”的模式。
-- [插件指南](../guides/plugins.md) —— 带示例的完整 hook 参考。
-- [组合模式](../concepts/patterns.md) —— 可以把这些想法扩展成更大系统中的 “smart guard” 和 “seamless memory” 模式。
+- [插件概念](../concepts/modules/plugin.md)：为什么需要插件，以及它能解锁什么，包括“把 Agent 放进插件中”的模式。
+- [插件指南](../guides/plugins.md)：带示例的完整 hook 参考。
+- [组合模式](../concepts/patterns.md)：可以把这些想法扩展成更大系统中的 “smart guard” 和 “seamless memory” 模式。

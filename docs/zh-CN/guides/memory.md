@@ -21,12 +21,12 @@ tags:
 
 搜索会回传 `SearchResult` 记录，包含：
 
-- `content` — 命中的文字
-- `agent` — 由哪个Creature产生
-- `block_type` — `text` / `tool` / `trigger` / `user`
-- `round_num`, `block_num` — 在会话中的位置
-- `score` — 命中品质
-- `ts` — 时间戳记
+- `content`：命中的文字
+- `agent`：由哪个Creature产生
+- `block_type`：`text` / `tool` / `trigger` / `user`
+- `round_num`, `block_num`：在会话中的位置
+- `score`：命中品质
+- `ts`：时间戳记
 
 ## Embedding 提供者
 
@@ -37,16 +37,16 @@ tags:
 | `model2vec`（默认） | 不需要 torch、纯 NumPy | 极快，安装最精简。对接近关键字的检索品质不错，但长文本语意搜索较弱。 |
 | `sentence-transformer` | `torch` | 较慢，但语意品质强很多。也适合 GPU。 |
 | `api` | 网路 + API key | 远端 embedder（OpenAI、Jina、Gemini）。品质最好，但按次计费。 |
-| `auto` | — | 若可用 API，优先用 `jina-v5-nano`，否则退回 `model2vec`。 |
+| `auto` | （无） | 若可用 API，优先用 `jina-v5-nano`，否则退回 `model2vec`。 |
 
 默认模型名称（可跨 provider 使用）：
 
-- `@tiny` — 最小、最快
-- `@base` — 默认平衡
-- `@retrieval` — 为检索调校
-- `@best` — 最高品质
-- `@multilingual`, `@multilingual-best` — 非英文会话
-- `@science`, `@nomic`, `@gemma` — 特化用途
+- `@tiny`：最小、最快
+- `@base`：默认平衡
+- `@retrieval`：为检索调校
+- `@best`：最高品质
+- `@multilingual`, `@multilingual-best`：非英文会话
+- `@science`, `@nomic`, `@gemma`：特化用途
 
 你也可以直接传入 Hugging Face 路径。
 
@@ -65,7 +65,7 @@ kt embedding swe.kohakutr \
   --dimensions 384
 ```
 
-`--dimensions` 是 Matryoshka truncation——如果模型支持，可用它在执行时直接缩小向量维度。
+`--dimensions` 是 Matryoshka truncation：如果模型支持，可用它在执行时直接缩小向量维度。
 
 增量建立：再次执行 `kt embedding` 时，只会索引新增事件。
 
@@ -81,10 +81,10 @@ kt search swe "auth bug" --agent swe -k 5
 
 模式：
 
-- **`fts`** — 在 FTS5 上跑 BM25。不需要 embedding。最快，适合精确片语。
-- **`semantic`** — 纯向量相似度。需要索引。适合同义改写。
-- **`hybrid`** — 先用 BM25 找候选，再以向量相似度重排。当两者都可用时会是默认。
-- **`auto`** — 自动选择该会话支持的最完整模式。
+- **`fts`**：在 FTS5 上跑 BM25。不需要 embedding。最快，适合精确片语。
+- **`semantic`**：纯向量相似度。需要索引。适合同义改写。
+- **`hybrid`**：先用 BM25 找候选，再以向量相似度重排。当两者都可用时会是默认。
+- **`auto`**：自动选择该会话支持的最完整模式。
 
 `-k` 用来限制结果数量。`--agent` 可把搜索范围限制在Terrarium会话中的单一Creature。
 
@@ -104,9 +104,9 @@ memory:
     model: "@base"
 ```
 
-当 LLM 调用 `search_memory` 时，工具会对 *目前* 会话的索引执行搜索。这是 seamless-memory 的基本原语——agent 不需要额外搭 RAG 架构，就能查出自己（或队友）在前几轮说过什么。
+当 LLM 调用 `search_memory` 时，工具会对 *目前* 会话的索引执行搜索。这是 seamless-memory 的基本原语：agent 不需要额外搭 RAG 架构，就能查出自己（或队友）在前几轮说过什么。
 
-工具参数（形状；实际语法取决于你的 `tool_format`——下面示范默认 bracket 格式）：
+工具参数（形状；实际语法取决于你的 `tool_format`，下面示范默认 bracket 格式）：
 
 ```
 [/search_memory]
@@ -128,7 +128,7 @@ memory:
     model: "@retrieval"      # preset 或 HF 路径
 ```
 
-带有这个区块的 agent，事件一进来就会自动建立索引——不需要再手动调用 `kt embedding`。没有这个区块的 agent，仍然会保留未嵌入的会话（但还是能用 FTS 搜索）。
+带有这个区块的 agent，事件一进来就会自动建立索引，不需要再手动调用 `kt embedding`。没有这个区块的 agent，仍然会保留未嵌入的会话（但还是能用 FTS 搜索）。
 
 ## 用程式检查
 
@@ -155,11 +155,11 @@ store.close()
 - **`kt embedding` 很慢**。 `sentence-transformer` 默认是 CPU-bound。请安装支持 CUDA 的 torch，或改用 `model2vec`。
 - **Provider 安装失败**。 `kt embedding --provider model2vec` 没有 native 依赖，在哪里都能跑。`sentence-transformer` 需要 `torch`；`api` 需要对应 provider 的 SDK（`openai`、`google-generativeai` 等）。
 - **Hybrid 模式结果噪声很多**。 把 `-k` 调低；如果查询很多改写语句，偏向用 `semantic` 而不是 `hybrid`；如果查的是精确片语，偏向用 `fts`。
-- **`search_memory` 没有返回任何结果**。 会话缺少 embedding 设置，或这个会话是在加入记忆设置之前启动的——请用 `kt embedding` 重新建立。
+- **`search_memory` 没有返回任何结果**。 会话缺少 embedding 设置，或这个会话是在加入记忆设置之前启动的，请用 `kt embedding` 重新建立。
 
 ## 延伸阅读
 
-- [会话](sessions.md) — 记忆建立在 `.kohakutr` 格式之上。
-- [插件指南](plugins.md) — seamless-memory 插件模式（`pre_llm_call` 检索）。
-- [参考 / CLI](../reference/cli.md) — `kt embedding`、`kt search` 的旗标。
-- [概念 / 记忆与压缩](../concepts/modules/memory-and-compaction.md) — 背后的设计理由。
+- [会话](sessions.md)：记忆建立在 `.kohakutr` 格式之上。
+- [插件指南](plugins.md)：seamless-memory 插件模式（`pre_llm_call` 检索）。
+- [参考 / CLI](../reference/cli.md)：`kt embedding`、`kt search` 的旗标。
+- [概念 / 记忆与压缩](../concepts/modules/memory-and-compaction.md)：背后的设计理由。

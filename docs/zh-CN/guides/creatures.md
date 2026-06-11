@@ -30,7 +30,7 @@ creatures/my-agent/
   memory/                # 可选的文字 / Markdown 记忆文件 (惯例)
 ```
 
-查找顺序为：`config.yaml` → `config.yml` → `config.json` → `config.toml`。环境变量插值（`${VAR}` 或 `${VAR:default}`）可在 YAML 任意位置使用。子目录名称只是惯例 — loader 依代理目录解析 `module:` 路径，不会自动扫描 `tools/` 或 `subagents/`。
+查找顺序为：`config.yaml` → `config.yml` → `config.json` → `config.toml`。环境变量插值（`${VAR}` 或 `${VAR:default}`）可在 YAML 任意位置使用。子目录名称只是惯例：loader 依代理目录解析 `module:` 路径，不会自动扫描 `tools/` 或 `subagents/`。
 
 ### 最小设置
 
@@ -62,7 +62,7 @@ tools:
     module: ./tools/my_tool.py
 ```
 
-规则——所有字段都遵循同一套统一模型：
+规则：所有字段都遵循同一套统一模型。
 
 - **纯量**：子层覆盖父层。
 - **字典** （`controller`、`input`、`output`、`memory`、`compact`……）：浅层合并。
@@ -123,7 +123,7 @@ tools:
 
 ## 提示词文件
 
-请将 system prompt 放在 Markdown 中。里面只放 **人格与指引** ——工具列表、调用语法与完整工具文件都会自动聚合。
+请将 system prompt 放在 Markdown 中。里面只放 **人格与指引** ；工具列表、调用语法与完整工具文件都会自动聚合。
 
 ```markdown
 <!-- prompts/system.md -->
@@ -153,8 +153,8 @@ prompt_context_files:
 
 ## Skill mode：dynamic 与 static
 
-- `skill_mode: dynamic`（默认）— 工具会以单行描述出现在提示词中。控制器会在需要时通过 `info` 框架指令加载完整文件。
-- `skill_mode: static` — 所有工具文件都会预先内嵌（system prompt 较大，但 round-trip 较少）。
+- `skill_mode: dynamic`（默认）：工具会以单行描述出现在提示词中。控制器会在需要时通过 `info` 框架指令加载完整文件。
+- `skill_mode: static`：所有工具文件都会预先内嵌（system prompt 较大，但 round-trip 较少）。
 
 除非你需要固定、可稽核的提示词，否则建议使用 `dynamic`。
 
@@ -164,20 +164,20 @@ prompt_context_files:
 
 以下是 `bash` 调用、`command=ls` 的具体例子：
 
-- `bracket`（默认）— 以 `[/name]` 开始、`[name/]` 结束，参数用 `@@key=value` 行表示：
+- `bracket`（默认）：以 `[/name]` 开始、`[name/]` 结束，参数用 `@@key=value` 行表示：
  ```
  [/bash]
  @@command=ls
  [bash/]
  ```
-- `xml` — 标准的带属性标签形式：
+- `xml`：标准的带属性标签形式：
  ```
  <bash command="ls"></bash>
  ```
-- `native` — 提供者原生 function calling（OpenAI / Anthropic tool use）。LLM 不输出文字区块，而由 API 以结构化方式携带调用。
-- dict — 自定义分隔符（见 [配置参考](../reference/configuration.md)）。
+- `native`：提供者原生 function calling（OpenAI / Anthropic tool use）。LLM 不输出文字区块，而由 API 以结构化方式携带调用。
+- dict：自定义分隔符（见 [配置参考](../reference/configuration.md)）。
 
-三种格式可以互换——选择最适合你模型的即可。`native` 在主流提供者上通常最稳定；`bracket` 则几乎到处都能用，包括本地模型。
+三种格式可以互换，选择最适合你模型的即可。`native` 在主流提供者上通常最稳定；`bracket` 则几乎到处都能用，包括本地模型。
 
 ## 工具与子代理
 
@@ -192,9 +192,9 @@ tools:
   - name: web_search
     options:
       max_results: 5
-  # 把通用 trigger 暴露成 setup tool —— LLM 可以在执行期
+  # 把通用 trigger 暴露成 setup tool：LLM 可以在执行期
   # 调用这个工具名称来安装它。框架会以 `CallableTriggerTool`
-  # 包装 trigger 类别；简短描述前面会加上「 **Trigger**  — 」
+  # 包装 trigger 类别；简短描述前面会加上「**Trigger**: 」前缀，
   # 让 LLM 知道这是在安装长期副作用，而不是立即执行一次行为。
   - { name: add_timer, type: trigger }
   - { name: watch_channel, type: trigger }
@@ -211,7 +211,7 @@ subagents:
     can_modify: true
 ```
 
-可安装型 trigger 是逐Creature opt-in 的——没有任何 `type: trigger` 项目的Creature，无法在执行期安装 trigger。每个通用 `BaseTrigger` 子类别都会宣告自己的 `setup_tool_name`（例如 `add_timer`）、`setup_description` 与 `setup_param_schema`。若要自己编写，请见[自定义模块 — Triggers](custom-modules.md)。
+可安装型 trigger 是逐Creature opt-in 的：没有任何 `type: trigger` 项目的Creature，无法在执行期安装 trigger。每个通用 `BaseTrigger` 子类别都会宣告自己的 `setup_tool_name`（例如 `add_timer`）、`setup_description` 与 `setup_param_schema`。若要自己编写，请见[自定义模块指南的 Triggers 一节](custom-modules.md)。
 
 完整的工具与子代理目录请见 [reference/builtins 参考](../reference/builtins.md)；编写自定义内容请见[自定义模块指南](custom-modules.md)。
 
@@ -226,7 +226,7 @@ triggers:
     options: { channel: alerts }
   - type: context
     options: { debounce_ms: 200 }
-    prompt: "Context shifted — reconsider plan."
+    prompt: "Context shifted, reconsider plan."
   - type: custom
     module: ./triggers/webhook.py
     class: WebhookTrigger
@@ -269,12 +269,12 @@ session_key: shared_workspace
 
 控制器可以输出内嵌指令直接与框架沟通（不需工具 round-trip）。这些指令会记录在提示词中的 framework-hints 区块。
 
-框架指令与工具调用共用同一语法家族——也就是你设置的 `tool_format`（bracket、XML、native）是什么，它就用什么。以下为默认 bracket 例子，placeholder 以裸识别字表示：
+框架指令与工具调用共用同一语法家族：你设置的 `tool_format`（bracket、XML、native）是什么，它就用什么。以下为默认 bracket 例子，placeholder 以裸识别字表示：
 
-- `[/info]tool_or_subagent[info/]` — 按需加载完整文件。
-- `[/read_job]job_id[read_job/]` — 读取背景作业输出（在 body 中接受 `--lines N` 与 `--offset M`）。
-- `[/jobs][jobs/]` — 列出执行中的作业与其 ID。
-- `[/wait]job_id[wait/]` — 阻塞目前这一轮，直到背景作业完成。
+- `[/info]tool_or_subagent[info/]`：按需加载完整文件。
+- `[/read_job]job_id[read_job/]`：读取背景作业输出（在 body 中接受 `--lines N` 与 `--offset M`）。
+- `[/jobs][jobs/]`：列出执行中的作业与其 ID。
+- `[/wait]job_id[wait/]`：阻塞目前这一轮，直到背景作业完成。
 
 指令名称与工具名称共享同一个命名空间；读取作业输出的指令之所以叫 `read_job`，就是为了避免与 `read` 文件读取工具冲突。
 

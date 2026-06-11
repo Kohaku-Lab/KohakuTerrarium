@@ -14,7 +14,7 @@ tags:
 
 **前置条件** ： 先看过 [第一个 Creature](first-creature.md)。你还需要安装好 `kt-biome`，并且已经能用 `kt run` 运行单个 Creature。
 
-terrarium 是**运行时引擎**：它持有频道图、creature 生命周期、输出接线、以及在图变化时跟着走的拓扑 + session 记账。它本身不执行 LLM、也没有推理回圈 —— LLM 与推理都活在它内部的 creature 里。完整契约请参阅 [Terrarium 概念](../concepts/multi-agent/terrarium.md)。
+terrarium 是**运行时引擎**：它持有频道图、creature 生命周期、输出接线、以及在图变化时跟着走的拓扑 + session 记账。它本身不执行 LLM、也没有推理回圈，LLM 与推理都活在它内部的 creature 里。完整契约请参阅 [Terrarium 概念](../concepts/multi-agent/terrarium.md)。
 
 ## 第 1 步：创建文件夹
 
@@ -137,7 +137,7 @@ terrarium:
 
 ## 第 6 步：如果需要交互入口，再加 root（可选）
 
-有了 channel 和输出路由，你已经拥有了一个可以自行协作的无头小团队。如果你还想要一个统一的对话入口——用户只和一个 Agent 对话，再由它驱动整个团队——那就再加一个 **root**：
+有了 channel 和输出路由，你已经拥有了一个可以自行协作的无头小团队。如果你还想要一个统一的对话入口（用户只和一个 Agent 对话，再由它驱动整个团队），那就再加一个 **root**：
 
 ```yaml
 terrarium:
@@ -158,13 +158,13 @@ terrarium:
 - terrarium 只负责接线，不负责思考。
 - creatures 仍然各自独立；terrarium 只是规定谁能听见什么、谁能往哪里发送消息，以及谁在回合结束后把输出自动流向谁。
 - 横向协作现在有两种机制，而且可以混合使用：
-  - **channel** —— 适合条件分支、可选消息和广播。
-  - **输出路由** —— 适合确定性的流水线边；每轮结束自动触发，不依赖 creature 自己记得发送。
+  - **channel**：适合条件分支、可选消息和广播。
+  - **输出路由**：适合确定性的流水线边；每轮结束自动触发，不依赖 creature 自己记得发送。
 - root 是可选的。做无头工作流时可以不要；如果想给用户一个统一入口，就加上它。
 
 ## 接下来可以看什么
 
-- [Terrarium 概念](../concepts/multi-agent/terrarium.md) —— 介绍 terrarium 的边界与约定。
-- [特权节点概念](../concepts/multi-agent/privileged-node.md) —— 由 `root:` 指定、面向用户的那个特权 creature。
-- [Terrariums 指南](../guides/terrariums.md) —— 更偏实操的参考文档。
-- [Channel 概念](../concepts/modules/channel.md) —— 广播语意、observers，以及 channel 如何跨模块工作。
+- [Terrarium 概念](../concepts/multi-agent/terrarium.md)：介绍 terrarium 的边界与约定。
+- [特权节点概念](../concepts/multi-agent/privileged-node.md)：由 `root:` 指定、面向用户的那个特权 creature。
+- [Terrariums 指南](../guides/terrariums.md)：更偏实操的参考文档。
+- [Channel 概念](../concepts/modules/channel.md)：广播语意、observers，以及 channel 如何跨模块工作。

@@ -12,9 +12,9 @@ tags:
 
 `examples/` 目录依类型整理可执行内容：独立代理设置、Terrarium设置、插件实作，以及将框架嵌入其中的 Python 脚本。每个目录都示范了一种你可以直接复制或继承的模式。
 
-概念阅读指引：[boundaries 概念](../concepts/boundaries.md) —— 示例刻意涵盖系统边界情况。
+概念阅读指引：[boundaries 概念](../concepts/boundaries.md)，示例刻意涵盖系统边界情况。
 
-## `examples/agent-apps/` —— 独立Creature
+## `examples/agent-apps/`：独立Creature
 
 单一Creature 设置。执行方式：
 
@@ -34,7 +34,7 @@ kt run examples/agent-apps/<name>
 
 相关指南：[Creatures 指南](creatures.md)、[配置指南](configuration.md)。
 
-## `examples/terrariums/` —— 多代理Terrarium设置
+## `examples/terrariums/`：多代理Terrarium设置
 
 ```bash
 kt terrarium run examples/terrariums/<name>
@@ -48,7 +48,7 @@ kt terrarium run examples/terrariums/<name>
 
 相关指南：[Terrarium 指南](terrariums.md)。
 
-## `examples/plugins/` —— 插件 hooks
+## `examples/plugins/`：插件 hooks
 
 每个 hook 类别各有一个示例。编写自己的插件时，可把它们当成参考。
 
@@ -65,27 +65,31 @@ kt terrarium run examples/terrariums/<name>
 
 相关指南：[插件指南](plugins.md)。完整逐字段说明请见 `examples/plugins/README.md`。
 
-## `examples/code/` —— Python 嵌入
+## `examples/code/`：Python 嵌入
 
 这些脚本示范如何把框架嵌入你的程式中，并由你的代码担任协调者。每个示例都使用 compose algebra 的不同片段，或 `Terrarium` / `Creature` / `Studio` / 底层 `Agent` API。
 
 | Script | 模式 | 使用的功能 |
 |---|---|---|
-| `programmatic_chat.py` | 将 Creature 当作函数库使用 | `Creature.chat()` |
-| `run_terrarium.py` | 以代码建立 Terrarium | `Terrarium`、频道注入 |
-| `discord_adventure_bot.py` | 由 Bot 拥有互动流程 | `agent()`、动态建立、游戏状态 |
-| `debate_arena.py` | 多代理轮流互动 | `agent()`、`>>`、`async for`、持久代理 |
-| `task_orchestrator.py` | 动态代理拓扑 | `factory()`、`>>`、`asyncio.gather` |
+| `programmatic_chat.py` | 把 Agent 当库用 | `Agent.build()`、`run()` → `TurnResult`、`run_stream()` |
+| `custom_tools.py` | 用代码定义函数工具 | `@kt.tool`、`tools=[...]`、`add_tool`、`SessionReader` |
+| `batch_grading.py` | 对工作文件夹做批处理 | 一个共享引擎、每个文件夹一个生物、`TurnResult` |
+| `terrarium_solo.py` | 引擎里的单个生物 | `Terrarium.with_creature()`、`Creature.chat()` |
+| `terrarium_recipe.py` | 用代码应用 Terrarium 配方 | `Terrarium.from_recipe()`、频道、引擎事件 |
+| `terrarium_hotplug.py` | 动态拓扑 | `Terrarium.add_creature()`、`connect()`、`disconnect()` |
+| `discord_adventure_bot.py` | 由 Bot 掌握交互流程 | `agent()`、动态创建、游戏状态 |
+| `debate_arena.py` | 多 Agent 轮流交互 | `agent()`、`>>`、`async for`、持久 Agent |
+| `task_orchestrator.py` | 动态 Agent 拓扑 | `factory()`、`>>`、`asyncio.gather` |
 | `ensemble_voting.py` | 以多样性实现冗余 | `&`、`>>` 自动包装、`\|`、`*` |
 | `review_loop.py` | 编写 → 审查 → 修订 | `.iterate()`、持久 `agent()` |
-| `smart_router.py` | 分类并派送 | `>> {dict}` 路由、`factory()`、`\|` 后备 |
-| `pipeline_transforms.py` | 数据提取管线 | `>>` 自动包装（`json.loads`、lambda）、代理 + 函式 |
+| `smart_router.py` | 分类并派发 | `>> {dict}` 路由、`factory()`、`\|` 回退 |
+| `pipeline_transforms.py` | 数据提取流水线 | `>>` 自动包装（`json.loads`、lambda）、Agent + 函数 |
 
 相关指南：[程序化使用指南](programmatic-usage.md)、[组合代数指南](composition.md)。
 
 ## 新读者建议阅读顺序
 
-1. **先运行一个**。 `kt run examples/agent-apps/swe_agent` —— 先感受 Creature 如何工作。
+1. **先运行一个**。 `kt run examples/agent-apps/swe_agent`，先感受 Creature 如何工作。
 2. **再从它继承**。 复制目录、调整 `config.yaml`，然后重新执行。
 3. **加入插件**。 把 `examples/plugins/tool_timer.py` 加到你的Creature `plugins:` 清单中。
 4. **进入 Python**。 打开 `examples/code/programmatic_chat.py` 并执行它。
@@ -94,6 +98,6 @@ kt terrarium run examples/terrariums/<name>
 
 ## 另请参阅
 
-- [快速开始指南](getting-started.md) —— 环境设置。
-- [`kt-biome`](https://github.com/Kohaku-Lab/kt-biome) —— 演示包；许多示例与它共用相同模式。
-- [开发指南教程](../tutorials/README.md) —— 与这些示例搭配的引导式教学。
+- [快速开始指南](getting-started.md)：环境设置。
+- [`kt-biome`](https://github.com/Kohaku-Lab/kt-biome)：演示包；许多示例与它共用相同模式。
+- [开发指南教程](../tutorials/README.md)：与这些示例搭配的引导式教学。

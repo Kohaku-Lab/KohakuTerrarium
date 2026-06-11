@@ -1,19 +1,19 @@
 ---
-title: 部署 — Docker
-summary: KohakuTerrarium 的三种 Docker compose 部署模式 — AIO、host + 同机 worker、分布式 host / worker。
+title: Docker 部署
+summary: KohakuTerrarium 的三种 Docker compose 部署模式：AIO、host + 同机 worker、分布式 host / worker。
 tags:
   - guides
   - deployment
   - docker
 ---
 
-# 部署 — Docker
+# Docker 部署
 
 KohakuTerrarium 在 GHCR 上提供三个官方 Docker 镜像：
 
 | 镜像 | 用途 | 端口 |
 |---|---|---|
-| `ghcr.io/kohaku-lab/kohakuterrarium` | **AIO** — lab-host + 内嵌 worker 在同一容器 | `8001` (HTTP)，`8100` (Lab WS) |
+| `ghcr.io/kohaku-lab/kohakuterrarium` | **AIO**：lab-host + 内嵌 worker 在同一容器 | `8001` (HTTP)，`8100` (Lab WS) |
 | `ghcr.io/kohaku-lab/kohakuterrarium-host` | 仅 lab-host（Studio + Web UI） | `8001`，`8100` |
 | `ghcr.io/kohaku-lab/kohakuterrarium-client` | 仅 worker（向外连接到 host） | （仅出站） |
 
@@ -25,9 +25,9 @@ cosign verify ghcr.io/kohaku-lab/kohakuterrarium:1.5.0 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-下文引用的 compose 文件位于源码 `examples/deployment/` 下 — 选取最接近你需求的模板并修改即可。
+下文引用的 compose 文件位于源码 `examples/deployment/` 下，选取最接近你需求的模板并修改即可。
 
-## 模式 1 — AIO（单容器）
+## 模式 1：AIO（单容器）
 
 最小可部署单元。一个容器；host + 一个 worker 共享同一 Python 解释器。所有状态持久化到单一卷。
 
@@ -38,7 +38,7 @@ services:
     image: ghcr.io/kohaku-lab/kohakuterrarium:1.5.0
     ports:
       - "8001:8001"   # Studio web UI + API
-      - "8100:8100"   # Lab — 可选，只有需要外部 worker 才需要
+      - "8100:8100"   # Lab：可选，只有需要外部 worker 才需要
     environment:
       # 若未设置，entrypoint 会自动生成并打印到 stderr。
       KT_HOST_TOKEN: "${KT_HOST_TOKEN:-}"
@@ -63,25 +63,25 @@ docker compose -f examples/deployment/compose-all.yml logs -f kt
 [kt-aio] To attach external workers: KT_HOST_URL=ws://<this-host>:8100 KT_HOST_TOKEN=8a3f7c…
 ```
 
-打开 `http://localhost:8001` — Studio UI 会显示一个名为 `local-1` 的已连接 worker。
+打开 `http://localhost:8001`，Studio UI 会显示一个名为 `local-1` 的已连接 worker。
 
 ### 何时使用 AIO
 
-- 单机开发 / staging — 无需集群规划。
+- 单机开发 / staging，无需集群规划。
 - 作为单镜像出货的自包含产品。
 - 演示：一条 `docker run` 即可。
 
 ### 局限
 
 - 无法超出单容器 CPU / 内存。
-- 内嵌 worker 与 host 容器共享文件系统与凭证 — 没有 per-worker 隔离。
+- 内嵌 worker 与 host 容器共享文件系统与凭证，没有 per-worker 隔离。
 
-## 模式 2 — host + N 个同机 worker
+## 模式 2：host + N 个同机 worker
 
 适用于你希望 worker 进程相互隔离（per-worker LLM 凭证 / per-worker 计算），但又不需要跨机器部署的情形。使用 Docker secret 让共享 token 永远不出现在 `docker inspect` 中。
 
 ```yaml
-# examples/deployment/compose-host-clients.yml — 节选
+# examples/deployment/compose-host-clients.yml（节选）
 services:
   host:
     image: ghcr.io/kohaku-lab/kohakuterrarium-host:1.5.0
@@ -137,13 +137,13 @@ docker compose -f examples/deployment/compose-host-clients.yml up -d
 
 ### 为何两个 worker 能找到 host
 
-两个 worker 的 `KT_HOST_URL` 指向 **服务名** `host`，由 compose 网络的内置 DNS 解析。host 服务无需对外暴露 — 只有 Studio UI 需要发布端口 `8001`。
+两个 worker 的 `KT_HOST_URL` 指向 **服务名** `host`，由 compose 网络的内置 DNS 解析。host 服务无需对外暴露，只有 Studio UI 需要发布端口 `8001`。
 
 ### 扩容
 
 添加 `worker-c` / `worker-d` 块，给它们独立的 `KT_CLIENT_NAME` 与命名卷。每个 worker 拥有自己的 `~/.kohakuterrarium/`，因此 LLM 配置与 API key 可按 worker 区分。
 
-## 模式 3 — 分布式：host 在边缘 VPS，worker 在家中机器
+## 模式 3：分布式（host 在边缘 VPS，worker 在家中机器）
 
 将 host 部署在拥有稳定公网地址的小型 VPS 上；worker 部署在拥有 GPU / API quota 的机器上。Worker 唯一所需的网络链路是 Lab WebSocket。
 
@@ -186,7 +186,7 @@ services:
       - kt-worker-home-data:/home/kt/.kohakuterrarium
 ```
 
-跨公网必须使用 `wss://`（TLS-WebSocket） — 共享 token 仅验证 worker 身份，不加密信道。
+跨公网必须使用 `wss://`（TLS-WebSocket）：共享 token 仅验证 worker 身份，不加密信道。
 
 ## 健康检测
 
@@ -196,7 +196,7 @@ services:
 - Kubernetes liveness / readiness 探针
 - 反向代理上游健康检查（滚动重启时 nginx 会自动剔除该后端）
 
-`/healthz` 表示「进程存活」。`/readyz` 表示「Lab 传输已绑定并接受 worker」 — 用它作为负载均衡轮转的依据。
+`/healthz` 表示「进程存活」。`/readyz` 表示「Lab 传输已绑定并接受 worker」，用它作为负载均衡轮转的依据。
 
 ## 持久化状态
 
@@ -221,13 +221,13 @@ docker compose up -d
 
 Compose 会逐个重建服务；只要 readiness healthcheck 已接好，host 会先完全启动再让 worker 重连。
 
-## 锁定 API — `[auth]` 配置
+## 锁定 API：`[auth]` 配置
 
 任何 compose 形态都可以通过 Docker secrets 添加四层认证配置，
 成为多用户 / 加锁主机。可直接套用的示例：
 
 ```yaml
-# examples/deployment/compose-host-auth.yml — 节选
+# examples/deployment/compose-host-auth.yml（节选）
 services:
   kohakuterrarium:
     image: ghcr.io/kohaku-lab/kohakuterrarium:1.5.0
@@ -279,7 +279,7 @@ chmod 600 secrets/*
 
 ## 另请参阅
 
-- [身份验证](authentication.md) — 四层认证模型 + ``kt admin`` 运营者命令。
-- [部署 — systemd](deployment-systemd.md) — 等价的非容器化方案。
-- [部署 — 反向代理](deployment-reverse-proxy.md) — 分布式模式的 TLS 终止。
-- [Laboratory](laboratory.md) — lab-host / lab-client 概念详解。
+- [身份验证](authentication.md)：四层认证模型 + ``kt admin`` 运营者命令。
+- [systemd 部署](deployment-systemd.md)：等价的非容器化方案。
+- [反向代理部署](deployment-reverse-proxy.md)：分布式模式的 TLS 终止。
+- [Laboratory](laboratory.md)：lab-host / lab-client 概念详解。

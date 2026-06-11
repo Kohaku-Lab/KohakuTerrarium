@@ -160,7 +160,7 @@ kt run creatures/my-swe --mode cli
 
 ## 接下来读什么
 
-- [Creatures 指南](../guides/creatures.md) —— 帮助你在上下文中理解各个配置字段。
-- [配置参考](../guides/configuration.md) —— 精确说明 schema 与继承规则。
-- [第一个自定义工具](first-custom-tool.md) —— 当 `builtin` 不够用时该怎么做。
-- [什么是 Agent](../concepts/foundations/what-is-an-agent.md) —— 帮助你理解这种配置形态背后的心智模型。
+- [Creatures 指南](../guides/creatures.md)：帮助你在上下文中理解各个配置字段。
+- [配置参考](../guides/configuration.md)：精确说明 schema 与继承规则。
+- [第一个自定义工具](first-custom-tool.md)：当 `builtin` 不够用时该怎么做。
+- [什么是 Agent](../concepts/foundations/what-is-an-agent.md)：帮助你理解这种配置形态背后的心智模型。

@@ -26,15 +26,15 @@ Serving 层和会话存储的结构请参见 [会话持久化概念](../concepts
 
 当 `create_app(static_dir=Path)` 收到有效的 SPA build 目录时：
 
-- `/assets/*` — 带 hash 的 build 资产。
-- `/{path}` — SPA fallback，对任何未比对的路径送 `index.html`。
+- `/assets/*`：带 hash 的 build 资产。
+- `/{path}`：SPA fallback，对任何未比对的路径送 `index.html`。
 - `/api/*` 与 WebSocket 路由优先。
 
 ## Response 惯例
 
-- 状态码：`200` 成功、`400` 输入错误、`404` 资源不存在、`500` server error。不用 `201`。
+- 状态码：`200` 成功、`400` 输入错误、`404` 资源不存在、`409` 冲突、`500` server error。不用 `201`。
 - Payload 除非另注明，都是 JSON。
-- 错误用 FastAPI `HTTPException`：`{"detail": "<message>"}`。
+- 错误体为 `{"detail": "<message>"}`。Studio 层抛类型化的 `kohakuterrarium.errors` 异常；`api/app.py` 里的单一适配器负责映射（`NotFoundError` → 404、`ConflictError` → 409、`InvalidRequestError`/`ValueError` → 400、其他 `KTError` → 500）。
 
 ---
 
@@ -65,7 +65,7 @@ Serving 层和会话存储的结构请参见 [会话持久化概念](../concepts
 
 执行期加一条频道。
 
-- Body：`ChannelAdd` (`name`、`channel_type` 默认 `"queue"`、`description`)。
+- Body：`ChannelAdd` (`name`、`description`；`channel_type` 仅为兼容旧载荷而保留，实际被忽略，所有频道都是广播)。
 - Response：`{"status": "created", "channel": <name>}`。
 
 ### `GET /api/terrariums/{terrarium_id}/channels`
@@ -345,7 +345,7 @@ Query 参数：
 |---|---|---|---|
 | `limit` | int | `20` | 最多返回几个。 |
 | `offset` | int | `0` | 跳过 N 个。 |
-| `search` | str | — | 依名字、config、代理、preview 过滤 (不分大小写)。 |
+| `search` | str | （无） | 依名字、config、代理、preview 过滤 (不分大小写)。 |
 | `refresh` | bool | `false` | 强制重建索引。 |
 
 Response：
@@ -402,7 +402,7 @@ Query 参数：
 | `q` | str | 必填 | Query。 |
 | `mode` | `auto\|fts\|semantic\|hybrid` | `auto` | 搜索模式。 |
 | `k` | int | `10` | 最多回几笔。 |
-| `agent` | str | — | 依代理过滤。 |
+| `agent` | str | （无） | 依代理过滤。 |
 
 Response：`{"session_name", "query", "mode", "k", "count", "results"}`。每笔 result：`{content, round, block, agent, block_type, score, ts, tool_name, channel}`。
 
@@ -567,7 +567,7 @@ Response：`{"status": "removed", "name"}`。
 
 ## WebSocket 端点
 
-所有 WebSocket 端点都是双向的，走标准 upgrade (没有自定义 header 或 subprotocol)。Client 收到一串 JSON frame，可以送 input frame。Server 出错会关连线；没有自动重连、没有 heartbeat — client 自己负责。
+所有 WebSocket 端点都是双向的，走标准 upgrade (没有自定义 header 或 subprotocol)。Client 收到一串 JSON frame，可以送 input frame。Server 出错会关连线；没有自动重连、没有 heartbeat，client 自己负责。
 
 ### `WS /ws/terrariums/{terrarium_id}`
 
@@ -575,16 +575,16 @@ Response：`{"status": "removed", "name"}`。
 
 送入 frame：
 
-- `{"type": "input", "target": "root"|<creature>, "content": str|list[dict], "message"?: str}` — 把 input 排进目标队列。Server 用 `{"type": "idle", "source": <target>, "ts": float}` 回应。
+- `{"type": "input", "target": "root"|<creature>, "content": str|list[dict], "message"?: str}`：把 input 排进目标队列。Server 用 `{"type": "idle", "source": <target>, "ts": float}` 回应。
 - 其他 message type 会被忽略。
 
 送出 frame：
 
-- `{"type": "activity", "activity_type": ..., "source", "ts", ...}` — activity type 包含 `session_info`、`tool_call`、`tool_result`、`token_usage`、`job_update`、`job_completed` 等等 (见 [事件型别](#事件型别))。
-- `{"type": "text", "content", "source", "ts"}` — 流式文本 chunk。
+- `{"type": "activity", "activity_type": ..., "source", "ts", ...}`：activity type 包含 `session_info`、`tool_call`、`tool_result`、`token_usage`、`job_update`、`job_completed` 等等 (见 [事件型别](#事件型别))。
+- `{"type": "text", "content", "source", "ts"}`：流式文本 chunk。
 - `{"type": "processing_start", "source", "ts"}`。
 - `{"type": "processing_end", "source", "ts"}`。
-- `{"type": "channel_message", "source": "channel", "channel", "sender", "content", "message_id", "timestamp", "ts", "history"?: bool}` — 重播连线前的旧消息时 `history` 为 `true`。
+- `{"type": "channel_message", "source": "channel", "channel", "sender", "content", "message_id", "timestamp", "ts", "history"?: bool}`：重播连线前的旧消息时 `history` 为 `true`。
 - `{"type": "error", "content", "source"?, "ts"}`。
 - `{"type": "idle", "source"?, "ts"}`。
 
@@ -625,8 +625,8 @@ Terrarium的只读频道 feed。
 
 送出：
 
-- `{"type": "ready", "root"}` — watcher 已启动。
-- `{"type": "change", "changes": [{"path", "abs_path", "action": "added"|"modified"|"deleted"}]}` — 每秒批次一次。隐藏 / 被忽略的目录 (`.git`、`node_modules`、`__pycache__`、`.venv`、`.mypy_cache` 等) 会被过滤。
+- `{"type": "ready", "root"}`：watcher 已启动。
+- `{"type": "change", "changes": [{"path", "abs_path", "action": "added"|"modified"|"deleted"}]}`：每秒批次一次。隐藏 / 被忽略的目录 (`.git`、`node_modules`、`__pycache__`、`.venv`、`.mypy_cache` 等) 会被过滤。
 - `{"type": "error", "text"}`。
 
 ### `WS /ws/logs`
@@ -635,8 +635,8 @@ Server 程序 log 档的即时 tail。
 
 送出：
 
-- `{"type": "meta", "path", "pid"}` — 连上时送。
-- `{"type": "line", "ts", "level", "module", "text"}` — 流式。
+- `{"type": "meta", "path", "pid"}`：连上时送。
+- `{"type": "line", "ts", "level", "module", "text"}`：流式。
 - `{"type": "error", "text"}`。
 
 Server 会先重播最后 ~200 行，再开始流式新行。
@@ -647,7 +647,7 @@ Server 会先重播最后 ~200 行，再开始流式新行。
 
 送入：
 
-- `{"type": "input", "data": str}` — shell 输入 (要送出请在尾端加 `\n`)。
+- `{"type": "input", "data": str}`：shell 输入 (要送出请在尾端加 `\n`)。
 - `{"type": "resize", "rows": int, "cols": int}`。
 
 送出：
@@ -705,7 +705,7 @@ Request / response 用到的 Pydantic 模型。
 | 字段 | 型别 | 必要 | 默认 |
 |---|---|---|---|
 | `name` | str | 是 | |
-| `channel_type` | str | 否 | `"queue"` |
+| `channel_type` | str | 否 | 兼容旧载荷保留，实际忽略（频道一律广播） |
 | `description` | str | 否 | `""` |
 
 ### `ChannelSend`
@@ -916,13 +916,13 @@ Request / response 用到的 Pydantic 模型。
 
 事件会持久化到 `SessionStore`，并通过 WebSocket 流式。每个事件都带 `type`、`source` (来源代理/Creature名称)、`ts` (Unix 秒)。
 
-- `text` — 流式文本 chunk。
+- `text`：流式文本 chunk。
   - `content: str`。
-- `activity` — 多种类型，以 `activity_type` 区分，例如 `session_info`、`tool_call`、`tool_result`、`token_usage`、`job_update`、`job_completed`、`model_switch`、`interrupt`、`regenerate`、`edit`、`rewind`、`promote`、`background_result`、`memory_compact`、`memory_search`、`memory_save`。
+- `activity`：多种类型，以 `activity_type` 区分，例如 `session_info`、`tool_call`、`tool_result`、`token_usage`、`job_update`、`job_completed`、`model_switch`、`interrupt`、`regenerate`、`edit`、`rewind`、`promote`、`background_result`、`memory_compact`、`memory_search`、`memory_save`。
   - 其他字段视 `activity_type` 而定：`args`、`job_id`、`tools_used`、`result`、`output`、`turns`、`duration`、`task`、`trigger_id`、`event_type`、`channel`、`sender`、`content`、`prompt_tokens`、`completion_tokens`、`total_tokens`、`cached_tokens`、`round`、`summary`、`messages_compacted`、`session_id`、`model`、`agent_name`、`max_context`、`compact_threshold`、`error_type`、`error`、`messages_cleared`、`background`、`subagent`、`tool`、`interrupted`、`final_state`。
 - `processing_start`、`processing_end`。
-- `user_input` — `content: str | list[dict]`。
-- `channel_message` — `channel`、`sender`、`content`、`message_id`、`timestamp`。
+- `user_input`：`content: str | list[dict]`。
+- `channel_message`：`channel`、`sender`、`content`、`message_id`、`timestamp`。
 
 ## 会话存储
 

@@ -1,6 +1,6 @@
 ---
 title: 给你的主机加锁
-summary: 一步步给 KohakuTerrarium 主机加上身份验证 — 从「局域网谁都能用」到「家人各自登录、只有我能改设置」。
+summary: 一步步给 KohakuTerrarium 主机加上身份验证，从「局域网谁都能用」到「家人各自登录、只有我能改设置」。
 tags:
   - tutorials
   - auth
@@ -26,16 +26,16 @@ tags:
 
 | 你想要 | 对应级别 |
 |---|---|
-| 自己机器上的桌面应用 — 零设置、零打扰 | **Level 0**（默认 — 什么都不用做） |
-| 只有知道共享密码的人才能连接 | **Level 1** — 主机令牌 |
-| 朋友可以聊天 / 使用主机；只有我能改 LLM key + 装包 | **Level 2** — 管理员密码 |
-| 每位家庭成员有自己的登录 + 隔离的对话会话 | **Level 3** — 多用户 |
+| 自己机器上的桌面应用：零设置、零打扰 | **Level 0**（默认，什么都不用做） |
+| 只有知道共享密码的人才能连接 | **Level 1**：主机令牌 |
+| 朋友可以聊天 / 使用主机；只有我能改 LLM key + 装包 | **Level 2**：管理员密码 |
+| 每位家庭成员有自己的登录 + 隔离的对话会话 | **Level 3**：多用户 |
 
 每个级别在前一级别之上叠加。需求达到了就停。
 
 ---
 
-## Level 0 — 桌面应用，默认就够了
+## Level 0：桌面应用，默认就够了
 
 **什么都别做。** 桌面应用绑在 `127.0.0.1`；网络上没人能连。操作
 系统用户就是信任边界。
@@ -53,12 +53,12 @@ curl http://你的局域网IP:8001/api/auth/capabilities
 
 ---
 
-## Level 1 — 主机令牌（5 分钟）
+## Level 1：主机令牌（5 分钟）
 
 主机现在要求每个 API 调用都带 `Authorization: Bearer <token>`。
 Loopback（`127.0.0.1`）默认依然旁路，所以桌面应用不用输令牌也能继续用。
 
-### 步骤 1 — 生成令牌
+### 步骤 1：生成令牌
 
 ```bash
 kt admin set-host-token
@@ -68,14 +68,14 @@ kt admin set-host-token
 
 这会生成 32 个随机字节并写入 `config.toml` 的 `[auth] host_token`。
 
-### 步骤 2 — 重启服务器
+### 步骤 2：重启服务器
 
 ```bash
 kt serve restart
 # (如果还没启动，就直接 kt serve start --host 0.0.0.0)
 ```
 
-### 步骤 3 — 验证
+### 步骤 3：验证
 
 从另一台机器：
 
@@ -92,7 +92,7 @@ curl -H "Authorization: Bearer $TOKEN" http://你的局域网IP:8001/api/version
 # → 200 OK
 ```
 
-### 步骤 4 — 把令牌发给朋友
+### 步骤 4：把令牌发给朋友
 
 通过安全渠道分享 `$TOKEN`（Signal / 1Password 分享 / 不要走微信）。
 任何拿到令牌的人都能通过 web 前端或 `curl` 连接。
@@ -119,12 +119,12 @@ kt serve restart             # 现有客户端掉线，需要新令牌
 
 ---
 
-## Level 2 — 管理员密码（再加 5 分钟）
+## Level 2：管理员密码（再加 5 分钟）
 
-拿到主机令牌的朋友现在能聊天 — 但他们也能点 Models 页面的"保存"
+拿到主机令牌的朋友现在能聊天，但他们也能点 Models 页面的"保存"
 按钮，把你的 OpenAI key 改了。再加一个用于配置修改的密码。
 
-### 步骤 1 — 生成管理员令牌
+### 步骤 1：生成管理员令牌
 
 ```bash
 kt admin set-admin-token
@@ -133,21 +133,21 @@ kt admin set-admin-token
 
 重启服务器。
 
-### 步骤 2 — 现在哪些路由被关卡
+### 步骤 2：现在哪些路由被关卡
 
 这些路由没有 `X-Admin-Token: <admin_token>` 就拒绝：
 
-- `POST /api/settings/keys` — 新增 / 修改 LLM API key
-- `POST /api/settings/profiles` — LLM 模型配置
-- `POST /api/settings/mcp` — MCP 服务器注册
-- `POST /api/registry/install` — 装包
-- `PUT /api/settings/config-files/{name}/content` — 直接编辑配置文件
+- `POST /api/settings/keys`：新增 / 修改 LLM API key
+- `POST /api/settings/profiles`：LLM 模型配置
+- `POST /api/settings/mcp`：MCP 服务器注册
+- `POST /api/registry/install`：装包
+- `PUT /api/settings/config-files/{name}/content`：直接编辑配置文件
 
 这些没受影响，照常工作（只读 / 聊天 / 会话）：
 
 - `/api/auth/capabilities`、`/me`、`/sessions/*`、聊天 WS
 
-### 步骤 3 — 验证
+### 步骤 3：验证
 
 ```bash
 HOST=$(kt admin show-host-token --yes)
@@ -168,21 +168,21 @@ curl -X POST http://localhost:8001/api/settings/keys \
   -d '{"provider":"openai","key":"sk-..."}'
 ```
 
-### 步骤 4 — 分享主机令牌，保留管理员令牌
+### 步骤 4：分享主机令牌，保留管理员令牌
 
 把 `$HOST` 发给朋友。**不要** 给 `$ADMIN`。前端要求他们登录时，
 他们粘贴主机令牌；他们想编辑配置时，UI 会灰掉（等 Vue 管理界面
-上线后会弹"管理员密码"提示框） — 只有你有那个。
+上线后会弹"管理员密码"提示框），只有你有那个。
 
 ---
 
-## Level 3 — 多用户（再加 10 分钟）
+## Level 3：多用户（再加 10 分钟）
 
 现在每个人用自己的用户名 + 密码登录。他们的聊天会话、标签页、
 UI 偏好都隔离到各自账户。共享资源（LLM key、配置文件、MCP 服务器、
 已装包）继续共享，因为管理员只需要管理一次。
 
-### 步骤 1 — 编辑 config.toml
+### 步骤 1：编辑 config.toml
 
 ```toml
 [auth]
@@ -195,7 +195,7 @@ loopback_bypass = false         # 在代理后面就关掉
 
 重启服务器。
 
-### 步骤 2 — 创建第一个管理员用户
+### 步骤 2：创建第一个管理员用户
 
 ```bash
 kt admin users add operator --role admin
@@ -206,7 +206,7 @@ kt admin users add operator --role admin
 
 写入 `~/.kohakuterrarium/auth.db`（sqlite、bcrypt 哈希）。
 
-### 步骤 3 — 邀请家庭成员
+### 步骤 3：邀请家庭成员
 
 每人生成一个邀请令牌：
 
@@ -219,7 +219,7 @@ kt admin invitations create --role user --expires-in-hours 168
 
 通过安全渠道把每个令牌发给对应的人。每个令牌一次性使用，可选时间限制。
 
-### 步骤 4 — 家庭成员注册
+### 步骤 4：家庭成员注册
 
 每人用自己的邀请令牌 POST 一次：
 
@@ -244,14 +244,14 @@ curl -X POST http://你的主机:8001/api/auth/login \
   -c alice-cookies.txt
 ```
 
-### 步骤 5 — 验证隔离
+### 步骤 5：验证隔离
 
 每个用户在磁盘上有自己的一块：
 
 ```
 ~/.kohakuterrarium/
 ├── auth.db
-├── api_keys.yaml           # 共享 — 管理员看 + 管
+├── api_keys.yaml           # 共享，管理员看 + 管
 ├── llm_profiles.yaml       # 共享
 ├── mcp_servers.yaml        # 共享
 └── users/
@@ -262,7 +262,7 @@ curl -X POST http://你的主机:8001/api/auth/login \
     └── 2/                  # alice
         ├── ui_prefs.json
         └── sessions/
-            └── *.kohakutr  # alice 的对话 — operator 看不到
+            └── *.kohakutr  # alice 的对话，operator 看不到
 ```
 
 ### 把现有会话迁到你的用户命名空间
@@ -271,7 +271,7 @@ curl -X POST http://你的主机:8001/api/auth/login \
 
 ```bash
 kt admin migrate --from-shared-state --to-user operator --dry-run
-# （展示会被移动的内容；安全 — 不改文件）
+# （展示会被移动的内容；安全，不改文件）
 
 kt admin migrate --from-shared-state --to-user operator
 # 把 <config_dir>/ui_prefs.json + <config_dir>/sessions/*.kohakutr
@@ -303,7 +303,7 @@ kt admin users delete alice --yes
 # note: per-user dir users/2/ kept (rm -rf to discard the user's sessions / prefs).
 ```
 
-磁盘目录**不会**被自动删除 — 想清掉他们的数据自己 `rm -rf`。
+磁盘目录**不会**被自动删除，想清掉他们的数据自己 `rm -rf`。
 
 ### 提升 / 降级管理员
 
@@ -327,7 +327,7 @@ kt admin users list
 
 ### 重置密码（管理员）
 
-目前没有"重置"动词 — 管理员通过 API 重新发：
+目前没有"重置"动词，管理员通过 API 重新发：
 
 ```bash
 # kt admin 暂时没有 password-reset；管理员先用自己的会话
@@ -349,7 +349,7 @@ curl -X PATCH http://localhost:8001/api/auth/users/2 \
 
 上面四个级别是同一套逻辑配置；不同的是按部署方式怎么传递令牌。
 
-### Docker compose — 通过 secrets 文件传递
+### Docker compose：通过 secrets 文件传递
 
 ```yaml
 services:
@@ -386,9 +386,9 @@ docker compose up -d
 docker compose exec kohakuterrarium kt admin users add operator --role admin
 ```
 
-完整 Compose 示例参见 [部署 — Docker](../guides/deployment-docker.md)。
+完整 Compose 示例参见 [Docker 部署](../guides/deployment-docker.md)。
 
-### systemd — 通过 `LoadCredential=`
+### systemd：通过 `LoadCredential=`
 
 ```bash
 sudo mkdir -p /etc/systemd/system/kohakuterrarium-host.service.d
@@ -408,7 +408,7 @@ sudo -u kohakuterrarium-host kt admin users add operator --role admin
 ```
 
 drop-in 用 `LoadCredential=`，所以密钥不会出现在 `/proc/<pid>/environ` 中。
-参见 [部署 — systemd](../guides/deployment-systemd.md)。
+参见 [systemd 部署](../guides/deployment-systemd.md)。
 
 ---
 
@@ -441,7 +441,7 @@ export KT_AUTH_LOOPBACK_BYPASS=0          # 0 = 始终要令牌
 curl http://你的主机:8001/api/auth/capabilities
 ```
 
-返回每层的启用标志 — 适合 shell 脚本和前端连接状态机。
+返回每层的启用标志，适合 shell 脚本和前端连接状态机。
 
 ---
 
@@ -455,7 +455,7 @@ curl http://你的主机:8001/api/auth/capabilities
 | `/me` 返回 `multi_user_disabled` | L4 没开；`/me` 没意义 | 要么开 L4，要么别调 `/me` |
 | 注册时 `invitation_invalid` | 令牌已被用 / 已过期 | 生成新邀请 |
 | `kt admin set-host-token` 报 "TOML shape ... cannot preserve" | 你的 `config.toml` 有顶层标量 / 嵌套表 | 把顶层 key 移到 `[section]` 下 |
-| 把自己锁在管理员外面 | 降级了唯一的管理员 | 任何 shell 跑 `kt admin users grant <name>` — 离线就能用 |
+| 把自己锁在管理员外面 | 降级了唯一的管理员 | 任何 shell 跑 `kt admin users grant <name>`，离线就能用 |
 
 ---
 
@@ -465,7 +465,7 @@ curl http://你的主机:8001/api/auth/capabilities
   [Phase H–K](../../../plans/1.5.0-roadmap/03-frontend-backend-connection/README.md)）。
   在那之前你用 `curl` + cookies，或者 `Authorization: Bearer` 配 API 令牌。
   后端已稳定可用。
-- 跨主机会话导入 / 导出、密码重置、2FA — 都推到 1.6+。
+- 跨主机会话导入 / 导出、密码重置、2FA，都推到 1.6+。
 
 架构 / 威胁模型 / 为什么这么设计的阅读，参见
 [身份验证指南](../guides/authentication.md)。

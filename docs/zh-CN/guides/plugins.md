@@ -1,6 +1,6 @@
 ---
 title: 插件
-summary: Prompt 插件与 lifecycle 插件——各自挂在哪里、怎么组合，以及什么时候该用。
+summary: Prompt 插件与 lifecycle 插件：各自挂在哪里、怎么组合，以及什么时候该用。
 tags:
  - guides
  - plugin
@@ -19,7 +19,7 @@ tags:
 
 - *tool* 是 LLM 可以用名字调用的东西。
 - *module*（input/output/trigger/sub-agent）是一整个执行时介面。
-- *plugin* 是在它们*之间*执行的规则——像 guard、accounting、prompt injection、memory retrieval。
+- *plugin* 是在它们*之间*执行的规则，像 guard、accounting、prompt injection、memory retrieval。
 
 如果你的需求是「每次在 X 前后，都做 Y」，答案几乎总是 plugin。
 
@@ -70,8 +70,8 @@ Priority 越低越早执行。你可以借此把插件插到正确位置。
 
 | Hook | Signature | 效果 |
 |---|---|---|
-| `on_load(context)` | agent 启动时初始化 | — |
-| `on_unload()` | 停止时清理 | — |
+| `on_load(context)` | agent 启动时初始化 | （无） |
+| `on_unload()` | 停止时清理 | （无） |
 | `pre_llm_call(messages, ** kwargs)` | 回传 `list[dict] \| None` | 取代送往 LLM 的消息 |
 | `post_llm_call(response)` | 回传 `ChatResponse \| None` | 取代回应 |
 | `pre_tool_execute(name, args)` | 回传 `dict \| None`；或 raise `PluginBlockError` | 取代参数或阻挡调用 |
@@ -125,7 +125,7 @@ plugins:
       deny_patterns: ["rm -rf /", "dd if=/dev/zero"]
 ```
 
-丢出 `PluginBlockError` 会中止该操作——错误消息会成为工具结果。
+丢出 `PluginBlockError` 会中止该操作，错误消息会成为工具结果。
 
 ## 示例：token accounting
 
@@ -142,7 +142,7 @@ class TokenAccountant(BasePlugin):
 
 ## 示例：seamless memory（在插件里用 agent）
 
-做一个 `pre_llm_call` 插件，先取回相关的历史事件，再把它们 prepend 到 messages 前面。你甚至可以调用一个小型巢状 agent 来判断哪些内容相关——plugin 就是普通 Python，所以里面用 agent 完全合法。可参考 [concepts/python-native/agent-as-python-object 概念](../concepts/python-native/agent-as-python-object.md)。
+做一个 `pre_llm_call` 插件，先取回相关的历史事件，再把它们 prepend 到 messages 前面。你甚至可以调用一个小型巢状 agent 来判断哪些内容相关；plugin 就是普通 Python，所以里面用 agent 完全合法。可参考 [concepts/python-native/agent-as-python-object 概念](../concepts/python-native/agent-as-python-object.md)。
 
 ## 内置运行时插件
 
@@ -249,14 +249,14 @@ assert any("Blocked" in act[1] for act in env.output.activities)
 
 ## 疑难排解
 
-- **找不到插件 class**。 检查 `class` 字段（不是 `class_name`——plugin 用的是 `class`）。设置加载器两者都接受，但 package manifest 用的是 `class`。
+- **找不到插件 class**。 检查 `class` 字段（不是 `class_name`，plugin 用的是 `class`）。设置加载器两者都接受，但 package manifest 用的是 `class`。
 - **Hook 从来没触发**。 确认 hook 名称拼对；像 `pre_llm_call` 与 `pre_tool_execute` 若拼错，会静默失效。
 - **`PluginBlockError` 抛出了，但调用还是执行了**。 你是在 `post_*` hook 里丢出的。要阻挡，请用 `pre_tool_execute`。
 - **对顺序敏感的插件堆叠行为不正确**。 `pre_*` hook 依注册顺序执行；请调整设置中 `plugins:` 清单的顺序。
 
 ## 延伸阅读
 
-- [examples/plugins/](../../examples/plugins/) — 每种 hook 类型各有一个示例。
-- [自定义模块指南](custom-modules.md) — 编写插件所包围的那些模块。
-- [参考 / plugin hooks](../reference/plugin-hooks.md) — 所有 hook 的完整 signature。
-- [概念 / plugin](../concepts/modules/plugin.md) — 设计理由。
+- [examples/plugins/](../../examples/plugins/)：每种 hook 类型各有一个示例。
+- [自定义模块指南](custom-modules.md)：编写插件所包围的那些模块。
+- [参考 / plugin hooks](../reference/plugin-hooks.md)：所有 hook 的完整 signature。
+- [概念 / plugin](../concepts/modules/plugin.md)：设计理由。

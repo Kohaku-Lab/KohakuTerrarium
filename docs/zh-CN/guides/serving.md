@@ -13,7 +13,7 @@ tags:
 
 共有三个指令：`kt web`（前景 Web 服务器）、`kt app`（通过 pywebview 开桌面视窗）、`kt serve`（分离式 daemon）。它们共用同一个 FastAPI 后端与 Vue 前端；差别在生命周期与传输方式。
 
-概念先读：[agent 作为 Python 物件](../concepts/python-native/agent-as-python-object.md) —— serving 这层本质上只是核心 runtime 的另一个 consumer。
+概念先读：[agent 作为 Python 物件](../concepts/python-native/agent-as-python-object.md)。serving 这层本质上只是核心 runtime 的另一个 consumer。
 
 ## 我该用哪一个？
 
@@ -38,7 +38,7 @@ kt web --log-level DEBUG
 - `--dev` 只提供 API；前端 HMR 请另外执行 `npm run dev --prefix src/kohakuterrarium-frontend`。
 - 会一直跑到你按 Ctrl+C。
 
-如果前端还没 build，你会看到 placeholder——从原始码建一次即可：
+如果前端还没 build，你会看到 placeholder，从原始码建一次即可：
 
 ```bash
 npm install --prefix src/kohakuterrarium-frontend
@@ -92,10 +92,10 @@ npm run dev --prefix src/kohakuterrarium-frontend
 
 ## 什么时候适合用 daemon
 
-- SSH session 常常断线——用 `kt serve start` 跑著，再通过 `ssh -L 8001:localhost:8001` 重连。
+- SSH session 常常断线：用 `kt serve start` 跑著，再通过 `ssh -L 8001:localhost:8001` 重连。
 - 远端机器上，你不想一直保留一个开著的终端机。
 - 长期监控型 agent，不该因为终端机消失就被杀掉。
-- 多个用户要连同一个实例（可绑 `--host 0.0.0.0`，但请搭配有验证的 reverse proxy——API 本身没有内置 auth）。
+- 多个用户要连同一个实例（可绑 `--host 0.0.0.0`，但请搭配有验证的 reverse proxy，API 本身没有内置 auth）。
 
 ## API 本身
 
@@ -117,7 +117,7 @@ npm run dev --prefix src/kohakuterrarium-frontend
 
 ## 延伸阅读
 
-- [前端布局指南](frontend-layout.md) — UI 中有哪些 panel 和 preset。
-- [参考 / HTTP API](../reference/http.md) — REST + WebSocket 端点。
-- [参考 / CLI](../reference/cli.md) — `kt web`、`kt app`、`kt serve` 的旗标。
-- [ROADMAP](../../ROADMAP.md) — 规划中的 daemon 驱动工作流程。
+- [前端布局指南](frontend-layout.md)：UI 中有哪些 panel 和 preset。
+- [参考 / HTTP API](../reference/http.md)：REST + WebSocket 端点。
+- [参考 / CLI](../reference/cli.md)：`kt web`、`kt app`、`kt serve` 的旗标。
+- [ROADMAP](../../ROADMAP.md)：规划中的 daemon 驱动工作流程。

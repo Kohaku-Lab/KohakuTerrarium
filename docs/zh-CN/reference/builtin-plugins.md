@@ -1,6 +1,6 @@
 ---
 title: 内建插件
-summary: 框架附带的四个运行时插件参考 —— sandbox、budget、permgate、compact.auto。
+summary: 框架附带的四个运行时插件参考：sandbox、budget、permgate、compact.auto。
 tags:
   - reference
   - plugins
@@ -9,12 +9,12 @@ tags:
 
 # 内建插件
 
-KohakuTerrarium 附带四个运行时插件。它们在框架里没有任何特权 —— 用的
+KohakuTerrarium 附带四个运行时插件。它们在框架里没有任何特权，用的
 是和使用者插件一样的 hook。它们在 agent 启动时被自动发现；config 用
 和其他插件一样的 `plugins:` 区块来启用。
 
 关于框架 / 插件边界的设计意图，以及 sandbox 插件的逐步示范，请见
-[guides/plugins —— 工作示例](../guides/plugins.md#worked-example-why-sandbox-is-a-plugin-not-a-framework-feature)。
+[guides/plugins 的工作示例](../guides/plugins.md#worked-example-why-sandbox-is-a-plugin-not-a-framework-feature)。
 
 | 名称 | Priority | Hooks | 实现 |
 |------|----------|-------|------|
@@ -58,20 +58,20 @@ KohakuTerrarium 附带四个运行时插件。它们在框架里没有任何特�
 
 ### 行为
 
-- **路径范围** —— `default` 允许 `cwd` 之下；`workspace` 允许 `cwd` 之
+- **路径范围**：`default` 允许 `cwd` 之下；`workspace` 允许 `cwd` 之
   下并拒绝向上穿越；`broad` 在 `fs_deny` 之外都允许；`deny` 全挡。
-- **网络闸门** —— 当 `network=allow` 且设定了 `network_allowlist` 时，
+- **网络闸门**：当 `network=allow` 且设定了 `network_allowlist` 时，
   只有清单上的主机能过；否则在网络允许时全过。当 `network=deny` 时，
   所有网络工具呼叫（`web_fetch`、`web_search`）都会抛
   `PluginBlockError`。
-- **子行程闸门** —— 插件透过 `runtime_services()` 发布
+- **子行程闸门**：插件透过 `runtime_services()` 发布
   `subprocess_runner` 服务。需要起子行程的工具（`bash` 等）从
   `ToolContext.runtime_services` 取用。Runner 会先检查 syscall 等级
   （`pure` 挡所有 spawn、`fs` 挡网路呼叫、`shell` 全允许）与网络白名
   单，然后才委派给 `asyncio.create_subprocess_exec`。
-- **`backend=audit`** —— 违规会透过 agent logger 记录而不抛出。适合
+- **`backend=audit`**：违规会透过 agent logger 记录而不抛出。适合
   在新 workload 上做第一轮发现。
-- **热重设** —— 呼叫插件的 `refresh_options()` 会重建内部能力结构；
+- **热重设**：呼叫插件的 `refresh_options()` 会重建内部能力结构；
   随后的 `pre_tool_execute` 呼叫看到的就是新政策，无须重启。
 
 ### 配置范例
@@ -155,7 +155,7 @@ plugins:
 
 每一次 LLM 呼叫之后，`post_llm_call` 都会拿 token 用量和门槛比较。如
 果超过，就呼叫 `context.compact_manager.trigger_compact()` 排程非同
-步压缩 —— 控制器继续跑，summariser 在背景工作，切换发生在回合之
+步压缩：控制器继续跑，summariser 在背景工作，切换发生在回合之
 间。见
 [非阻塞压缩](../concepts/impl-notes/non-blocking-compaction.md)。
 
@@ -226,6 +226,6 @@ plugins:
 
 ## 另见
 
-- [guides/plugins](../guides/plugins.md) —— 怎么写自己的插件。
-- [reference/plugin-hooks](plugin-hooks.md) —— 每个 hook 的 signature。
-- [concepts/modules/plugin](../concepts/modules/plugin.md) —— 设计理由。
+- [guides/plugins](../guides/plugins.md)：怎么写自己的插件。
+- [reference/plugin-hooks](plugin-hooks.md)：每个 hook 的 signature。
+- [concepts/modules/plugin](../concepts/modules/plugin.md)：设计理由。
