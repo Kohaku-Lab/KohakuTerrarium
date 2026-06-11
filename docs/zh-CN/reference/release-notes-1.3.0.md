@@ -24,12 +24,12 @@ Full comparison: [`v1.2.0...v1.3.0`](https://github.com/Kohaku-Lab/KohakuTerrari
 
 The framework is now documented and exposed around three clear layers:
 
-- **Creature** — a standalone agent runtime with its own controller, tools,
+- **Creature**：a standalone agent runtime with its own controller, tools,
   sub-agents, triggers, memory, plugins, and I/O.
-- **Terrarium** — the no-LLM engine that hosts creatures in graph topology. A
+- **Terrarium**：the no-LLM engine that hosts creatures in graph topology. A
   solo creature is a one-creature graph; teams are connected graphs wired by
   channels.
-- **Studio** — the management facade above the engine for catalog, identity,
+- **Studio**：the management facade above the engine for catalog, identity,
   active sessions, saved-session persistence, attach streams, and editors.
 
 Primary imports now include:
@@ -64,17 +64,17 @@ web dashboard, and embedding code.
 
 Studio namespaces cover:
 
-- `studio.catalog` — packages, built-ins, workspace creatures/modules, templates,
+- `studio.catalog`：packages, built-ins, workspace creatures/modules, templates,
   introspection.
-- `studio.identity` — API keys, Codex OAuth, LLM profiles/backends/defaults,
+- `studio.identity`：API keys, Codex OAuth, LLM profiles/backends/defaults,
   native-tool settings, MCP, UI preferences.
-- `studio.sessions` — active session lifecycle, per-creature chat/control/state,
+- `studio.sessions`：active session lifecycle, per-creature chat/control/state,
   topology, wiring, plugins, model switching, memory search.
-- `studio.persistence` — saved-session list/resolve/resume/fork/history/viewer,
+- `studio.persistence`：saved-session list/resolve/resume/fork/history/viewer,
   artifacts, exports.
-- `studio.attach` — live chat, channel observer, logs, trace, files, and PTY
+- `studio.attach`：live chat, channel observer, logs, trace, files, and PTY
   attach policies.
-- `studio.editors` — workspace creature/module CRUD, scaffolding, validators,
+- `studio.editors`：workspace creature/module CRUD, scaffolding, validators,
   templates, YAML helpers.
 
 ### Session viewer, live trace, and persistence improvements
@@ -266,13 +266,13 @@ accounting, viewer derivation, artifact handling, and long-session scans.
 
 ## Validation performed during release prep
 
-- `ruff check src/ tests/` — passed.
-- `black --check src/ tests/` — passed; Black emitted the known Python
+- `ruff check src/ tests/`：passed.
+- `black --check src/ tests/`：passed; Black emitted the known Python
   3.13-versus-3.14 safety-check warning.
-- `pytest` — `4012 passed, 13 skipped, 1 warning`.
-- `git diff --check` — clean.
-- `npm run format:check --prefix src/kohakuterrarium-frontend` — passed.
-- `npm run build --prefix src/kohakuterrarium-frontend` — passed with existing
+- `pytest`：`4012 passed, 13 skipped, 1 warning`.
+- `git diff --check`：clean.
+- `npm run format:check --prefix src/kohakuterrarium-frontend`：passed.
+- `npm run build --prefix src/kohakuterrarium-frontend`：passed with existing
   Vite chunk-size/component-name warnings.
-- `python -m build --wheel` — succeeded with the existing setuptools license
+- `python -m build --wheel`：succeeded with the existing setuptools license
   deprecation warning.

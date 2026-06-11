@@ -84,14 +84,14 @@ loop:
 
 ## 不要被它框住
 
-没有控制器的 Creature是说不通的 — 没有回圈就没有 Agent。但回圈的*形状*
+没有控制器的 Creature是说不通的：没有回圈就没有 Agent。但回圈的*形状*
 是可以谈的。plugin hook（`pre_llm_call`、`post_llm_call`、
 `pre_tool_execute`、…）让你能从外部重写回圈中的每一步，而不必碰
 `Controller` 类别本身。见 [插件](plugin.md)。
 
 ## 另见
 
-- [组成一个 Agent](../foundations/composing-an-agent.md) — 控制器位在什么位置。
-- [impl-notes/stream-parser](../impl-notes/stream-parser.md) — 为什么工具会在 LLM 停下前就开始。
-- [impl-notes/prompt-aggregation](../impl-notes/prompt-aggregation.md) — 控制器实际在驱动的是哪一份提示词。
-- [reference/python.md — Agent, Controller 参考](../../reference/python.md) — 签名。
+- [组成一个 Agent](../foundations/composing-an-agent.md)：控制器位在什么位置。
+- [impl-notes/stream-parser](../impl-notes/stream-parser.md)：为什么工具会在 LLM 停下前就开始。
+- [impl-notes/prompt-aggregation](../impl-notes/prompt-aggregation.md)：控制器实际在驱动的是哪一份提示词。
+- [reference/python.md 的 Agent、Controller 参考](../../reference/python.md)：签名。

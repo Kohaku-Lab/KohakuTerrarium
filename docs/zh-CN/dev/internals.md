@@ -11,9 +11,9 @@ tags:
 
 这里一共整理了 16 条流程，分为三组：
 
-1. **Agent runtime** — 生命周期、controller 循环、tool pipeline、sub-agent、trigger、prompt 聚合、plugin。
-2. **Persistence & memory** — session 持久化、压缩。
-3. **Multi-agent & serving** — terrarium runtime、channel、environment 和 session 的区别、serving 层、compose 代数、package 系统、MCP。
+1. **Agent runtime**：生命周期、controller 循环、tool pipeline、sub-agent、trigger、prompt 聚合、plugin。
+2. **Persistence & memory**：session 持久化、压缩。
+3. **Multi-agent & serving**：terrarium runtime、channel、environment 和 session 的区别、serving 层、compose 代数、package 系统、MCP。
 
 最后还有一节 [跨流程不变量](#跨流程不变量)，专门列出整个系统都必须遵守的硬规则。
 
@@ -23,14 +23,14 @@ tags:
 
 ### 1.1 Agent 生命周期（独立 creature）
 
-CLI 入口位于 `cli/run.py:run_agent_cli()`。它会先检查配置路径，再选择 I/O 模式（`cli` / `plain` / TUI），按需创建 `SessionStore`，然后调用 `Agent.from_path(config_path, …)`，最后进入 `_run_agent_rich_cli()` 或 `agent.run()`。
+CLI 入口位于 `cli/run.py:run_agent_cli()`。它会先检查配置路径，再选择 I/O 模式（`cli` / TUI），然后一切都走 Terrarium 引擎：`Terrarium(pwd=…)` 加 `engine.add_creature(…)`（配方则用 `engine.apply_recipe(…)`），再把引擎交给 `run_engine_with_rich_cli()` / `run_engine_with_tui()`。编程式嵌入方直接用 `await Agent.build(…)` 构造 agent。
 
-`Agent.__init__`（`src/kohakuterrarium/core/agent.py:146`）会按固定顺序初始化：`_init_llm`、`_init_registry`、`_init_executor`、`_init_subagents`、`_init_output`、`_init_controller`、`_init_input`、`_init_user_commands`、`_init_triggers`。mixin 布局为 `AgentInitMixin`（`bootstrap/agent_init.py`）+ `AgentHandlersMixin`（`core/agent_handlers.py`）+ `AgentToolsMixin`（`core/agent_tools.py`）。
+`Agent.__init__`（`src/kohakuterrarium/core/agent.py`）会按固定顺序初始化：`_init_llm`、`_init_registry`、`_init_executor`、`_init_subagents`、`_init_output`、`_init_controller`、`_init_input`、`_init_user_commands`、`_init_triggers`。mixin 布局为 `AgentInitMixin`（`bootstrap/agent_init.py`）+ `AgentHandlersMixin`（`core/agent_handlers.py`）+ `AgentToolsMixin`（`core/agent_tools.py`），外加 2.0 之后的 mixin：`AgentConstructMixin`（`Agent.build` / `Agent.from_path`）、`AgentTurnMixin`（带类型的 `run` / `run_stream`）、`AgentExtensionsMixin`、`AgentMessagesMixin`、`AgentModelMixin`、`AgentCompactMixin`、`AgentLifecycleMixin`。
 
-`await agent.start()`（`core/agent.py:186`）会启动 input 和 output 模块；如果存在 TUI，就挂上回调；接着启动 trigger manager、注册 completion callback、初始化 MCP、将 tool 描述注入 prompt、初始化 `CompactManager`、加载 plugin、发布 session 信息，最后启动 termination checker。
+`await agent.start()`（`core/agent.py`）会启动 input 和 output 模块；如果存在 TUI，就挂上回调；接着启动 trigger manager、注册 completion callback、初始化 MCP、将 tool 描述注入 prompt、初始化 `CompactManager`、加载 plugin、发布 session 信息，最后启动 termination checker。
 
-`await agent.run()`（`core/agent.py:684`）在恢复 session 时，会先重放 session event、恢复 triggers、触发 startup trigger，然后进入主循环：
-`event = await input.get_input()` → `_process_event(event)`。`stop()` 会按相反顺序拆除这些组件。agent 会一直持有这些对象：`llm`、`registry`、`executor`、`session`、`environment`、`subagent_manager`、`output_router`、`controller`、`input`、`trigger_manager`、`compact_manager`、`plugins`。
+`await agent.run_forever()`（`core/agent.py`）是自治主循环：恢复 session 时先重放 session event、恢复 triggers、触发 startup trigger，然后循环：
+`event = await input.get_input()` → `_process_event(event)`。（`agent.run(content)` 已经**不是**主循环，它是带类型的单轮驱动方法，返回 `TurnResult`；`run_stream` 是它的流式版本。）`stop()` 会按相反顺序拆除这些组件。agent 会一直持有这些对象：`llm`、`registry`、`executor`、`session`、`environment`、`subagent_manager`、`output_router`、`controller`、`input`、`trigger_manager`、`compact_manager`、`plugins`。
 
 概念层说明见 [concepts/foundations/composing-an-agent.md](../concepts/foundations/composing-an-agent.md)。
 
@@ -61,9 +61,9 @@ executor（`core/executor.py`）会维护 `{job_id: asyncio.Task}`，每次调�
 
 共有三种模式：
 
-- **Direct** — 当前轮就等待它执行完，结果会并入下一次 controller feedback event。
-- **Background** — 如果 tool 结果中包含 `run_in_background=true`，任务就会继续在后台运行；完成后再发出后续的 `tool_complete` event。
-- **Stateful** — 例如 sub-agent 这种长生命周期 handle。结果会存入 `jobs`，之后通过框架命令 `wait` 取回。
+- **Direct**：当前轮就等待它执行完，结果会并入下一次 controller feedback event。
+- **Background**：如果 tool 结果中包含 `run_in_background=true`，任务就会继续在后台运行；完成后再发出后续的 `tool_complete` event。
+- **Stateful**：例如 sub-agent 这种长生命周期 handle。结果会存入 `jobs`，之后通过框架命令 `wait` 取回。
 
 这里有几条硬规则，`agent_handlers.py` 和 `executor.py` 都在保证：
 
@@ -148,13 +148,13 @@ Session 都保存在单个 `.kohakutr` 文件中，底层是 KohakuVault（SQLit
 
 ### 3.1 Terrarium 引擎
 
-`terrarium/engine.py:Terrarium` 是运行时引擎 — 每进程一个，托管所有 Creature。引擎拥有：
+`terrarium/engine.py:Terrarium` 是运行时引擎，每进程一个，托管所有 Creature。引擎拥有：
 
-- `_topology: TopologyState` — 纯数据 graph 模型 (`terrarium/topology.py`)，记录哪些 Creature 共用哪个 graph、哪些频道存在、谁 listen / send。
-- `_creatures: dict[str, Creature]` — 运行中的 wrapper (`terrarium/creature_host.py`)。
-- `_environments: dict[str, Environment]` — 每个 graph 一份；持有 `shared_channels`。
-- `_session_stores: dict[str, SessionStore]` — 每个挂著 store 的 graph 一份。
-- `_subscribers: list[_Subscriber]` — `EngineEvent` 发布订阅。
+- `_topology: TopologyState`：纯数据 graph 模型 (`terrarium/topology.py`)，记录哪些 Creature 共用哪个 graph、哪些频道存在、谁 listen / send。
+- `_creatures: dict[str, Creature]`：运行中的 wrapper (`terrarium/creature_host.py`)。
+- `_environments: dict[str, Environment]`：每个 graph 一份；持有 `shared_channels`。
+- `_session_stores: dict[str, SessionStore]`：每个挂著 store 的 graph 一份。
+- `_subscribers: list[_Subscriber]`：`EngineEvent` 发布订阅。
 
 独立 Agent 是 1-creature graph；recipe 是用频道连起来的 connected graph。`Terrarium.with_creature(config)` 是独立 Agent 的捷径；`Terrarium.from_recipe(recipe)` 通过 `terrarium/recipe.py:apply_recipe` 走完一份 `TerrariumConfig` (宣告频道、为每只 Creature 加一条 direct channel、若有 root 加 `report_to_root`、接 listen / send 边、启动一切)。Creature 除了通过频道和 (可选的) 嵌进 system prompt 的 topology hint 外，不会知道自己处于 Terrarium 中。
 
@@ -166,7 +166,7 @@ Session 都保存在单个 `.kohakutr` 文件中，底层是 KohakuVault（SQLit
 
 **事件 bus**。`terrarium/events.py:EngineEvent` 是统一的可观测面。kind 涵盖 text chunk、频道消息、拓扑变更、session fork、creature 生命周期、processing start / end、error。`Terrarium.subscribe(filter)` 返回与 `EventFilter` 匹配的事件 async iterator。每个订阅者各有一个 queue；取消 iterator 会自动撤销订阅。
 
-旧版 `terrarium/runtime.py:TerrariumRuntime` 与 `serving/manager.py:KohakuManager` 在过渡期间还留在硬盘上 — 较旧的 HTTP route 与 CLI 还会用它们。`api/deps.py` 现在同时暴露 `get_engine()` (新) 与 `get_manager()` (旧) 这两个 singleton；route 会一条一条切过去。
+旧版的 `TerrariumRuntime` 与 `KohakuManager` 栈已经删除，引擎和 `group_*` 工具是仅有的路径。HTTP route 路径使用 `api/deps.py:get_engine()` 与 Studio 的 route / session 模块。
 
 相关文档见 [concepts/multi-agent/terrarium.md](../concepts/multi-agent/terrarium.md) 和 [concepts/multi-agent/privileged-node.md](../concepts/multi-agent/privileged-node.md)。
 
@@ -174,10 +174,10 @@ Session 都保存在单个 `.kohakutr` 文件中，底层是 KohakuVault（SQLit
 
 `core/channel.py` 定义了两个基础类型：
 
-- `SubAgentChannel` — 队列型，一个消息只会发送给一个 consumer，FIFO。支持 `send` / `receive` / `try_receive`。
-- `AgentChannel` — 广播型。每个订阅者都会通过 `ChannelSubscription` 拿到自己的队列。后订阅的消费者收不到历史消息。
+- `SubAgentChannel`：队列型，一个消息只会发送给一个 consumer，FIFO。支持 `send` / `receive` / `try_receive`。
+- `AgentChannel`：广播型。每个订阅者都会通过 `ChannelSubscription` 拿到自己的队列。后订阅的消费者收不到历史消息。
 
-Channel 都保存在 `ChannelRegistry` 中，要么挂在 `environment.shared_channels` 下（整个 terrarium 共用），要么挂在 `session.channels` 下（单个 creature 私有）。自动创建的 channel 包括每个 creature 自己的队列，以及 `report_to_root`。`ChannelTrigger` 会把某个 channel 绑定到 agent 的事件流上，将收到的消息转换为 `channel_message` event。
+Channel 都保存在 `ChannelRegistry` 中，要么挂在 `environment.shared_channels` 下（整个 terrarium 共用），要么挂在 `session.channels` 下（单个 creature 私有）。自动创建的 channel 包括每个 creature 一个广播频道，以及 `report_to_root`。`ChannelTrigger` 会把某个 channel 绑定到 agent 的事件流上，将收到的消息转换为 `channel_message` event。
 
 相关文档见 [concepts/modules/channel.md](../concepts/modules/channel.md)。
 
@@ -190,12 +190,13 @@ Channel 都保存在 `ChannelRegistry` 中，要么挂在 `environment.shared_ch
 
 相关文档见 [concepts/modules/session-and-environment.md](../concepts/modules/session-and-environment.md)。
 
-### 3.4 Serving 层
+### 3.4 Studio 与适配器层
 
-`serving/manager.py:KohakuManager` 会为传输层代码创建 `AgentSession` 或 `TerrariumSession` 这样的包装层。
-`AgentSession.send_input` 会将 user-input event 推入 agent，然后把 output-router event 转成 JSON dict 向外输出：`text`、`tool_start`、`tool_complete`、`activity`、`token_usage`、`compact_*`、`job_update` 等。
+`studio/` 是 Terrarium 引擎之上的管理门面。它掌管目录、身份/设置、活动会话、已保存会话的持久化、挂载策略和编辑器工作流。`api/` 路由和 CLI 命令应该把这些策略委托给 Studio 的命名空间，而不是各自复制。
 
-`api/` 中的 HTTP/WS API，以及所有 Python embedding，走的都是这一层，不会直接访问 `Agent` 内部。
+`api/deps.py:get_engine()` 为需要访问运行时图的路由处理器暴露进程级 `Terrarium` 单例。会话聊天/控制路由使用 Studio 的 session 模块和引擎支撑的 `Creature.chat()` 语义。
+
+`serving/` 保留的是 `web.py` 启动辅助（外加 `process_metrics.py` 和旧的事件 dataclass）；旧的 `AgentSession` / `KohakuManager` 包装层已经删除，请改用 `Creature.chat()`、`Agent.build` 或 Studio 的 session 模块。
 
 
 ### 3.5 Compose 代数内部实现
@@ -207,7 +208,7 @@ Channel 都保存在 `ChannelRegistry` 中，要么挂在 `environment.shared_ch
 - `__or__`（`|`）→ `Fallback`。
 - `__mul__`（`*`）→ `Retry`。
 
-普通 callable 会自动包装成 `Pure`。`agent()` 会创建持久化的 `AgentRunnable`（多次调用共享对话）；`factory()` 会创建 `AgentFactory`，每次调用都会新建一个 agent。`iterate(async_iter)` 会遍历异步数据源，并对每个元素等待整条 pipeline 执行完毕。`effects.Effects()` 用来记录挂在 pipeline 上的副作用，可通过 `pipeline.effects.get_all()` 读取。
+普通 callable 会自动包装成 `Pure`。`agent()` 会创建持久化的 `AgentRunnable`（多次调用共享对话）；`factory()` 会创建 `AgentFactory`，每次调用都会新建一个 agent。`iterate(async_iter)` 会遍历异步数据源，并对每个元素等待整条 pipeline 执行完毕。
 
 相关文档见 [concepts/python-native/composition-algebra.md](../concepts/python-native/composition-algebra.md)。
 
@@ -221,9 +222,9 @@ Channel 都保存在 `ChannelRegistry` 中，要么挂在 `environment.shared_ch
 
 下面几个词不要混淆：
 
-- **Extension** — package 提供的 Python 模块，例如 tool、plugin、LLM preset。
-- **Plugin** — 实现生命周期 hook 的那类组件。
-- **Package** — 可安装单元，可以包含前两者，也可以只包含配置。
+- **Extension**：package 提供的 Python 模块，例如 tool、plugin、LLM preset。
+- **Plugin**：实现生命周期 hook 的那类组件。
+- **Package**：可安装单元，可以包含前两者，也可以只包含配置。
 
 ### 3.7 MCP 集成
 

@@ -20,7 +20,7 @@ tags:
 2.**区块一关闭就立刻派送**。 每个工具都会与 LLM 其余输出并行执行；
   到 LLM 讲完时，有些工具可能已经完成。
 
-方案 2 的响应速度显着更好——尤其是在长串流轮次且包含多个工具调用时——
+方案 2 的响应速度显着更好（尤其是在长串流轮次且包含多个工具调用时），
 而这正是框架采用的做法。
 
 ## 曾考虑的方案
@@ -36,14 +36,14 @@ tags:
 LLM 输出的串流会逐块送入 parser 状态机。Parser 会依照目前配置的
 `tool_format`，追踪三种嵌套区块：
 
-- **工具调用**— 例如在 bracket（预设）格式中是
+- **工具调用**：例如在 bracket（预设）格式中是
   `[/bash]@@command=ls\n[bash/]`；在 XML 中是 `<bash command="ls"></bash>`；
   在 native 中则是 LLM provider 自己的 function-calling envelope。
-- **子 Agent派送**— 使用相同的格式家族，只是改用 Agent tag。
-- **Framework commands**— `info`、`jobs`、`wait`
+- **子 Agent派送**：使用相同的格式家族，只是改用 Agent tag。
+- **Framework commands**：`info`、`jobs`、`wait`
   （以及在 parser 的 DEFAULT_COMMANDS 集合中的 `read_job`）。
   这些和工具调用共享相同的 bracket/XML 框架。关于格式如何配置，
-  请参阅 [modules/tool — formats](../modules/tool.md) 与
+  请参阅 [modules/tool 的 formats 一节](../modules/tool.md) 与
   [modules/plugin](../modules/plugin.md)。
 
 当一个区块关闭时，parser 会在其输出 generator 上发出事件。
@@ -71,16 +71,16 @@ LLM 输出的串流会逐块送入 parser 状态机。Parser 会依照目前配�
 
 ## 代码中的位置
 
-- `src/kohakuterrarium/parsing/` — parser 状态机；每种 tool-format
+- `src/kohakuterrarium/parsing/`：parser 状态机；每种 tool-format
   变体（bracket、XML、native）各有一个模块。
-- `src/kohakuterrarium/core/controller.py` — 消费 parser 事件。
-- `src/kohakuterrarium/core/executor.py` — 把工具执行包成 tasks。
-- `src/kohakuterrarium/core/Agent_tools.py` — submit-from-event 路径，
+- `src/kohakuterrarium/core/controller.py`：消费 parser 事件。
+- `src/kohakuterrarium/core/executor.py`：把工具执行包成 tasks。
+- `src/kohakuterrarium/core/Agent_tools.py`：submit-from-event 路径，
   将 parser 输出接到 executor。
 
 ## 另请参阅
 
-- [Composing an Agent](../foundations/composing-an-agent.md) — 从轮次层级
+- [Composing an Agent](../foundations/composing-an-agent.md)：从轮次层级
   理解本页所放大的流程。
-- [Tool](../modules/tool.md) — 执行模式（direct / background /
+- [Tool](../modules/tool.md)：执行模式（direct / background /
   stateful）。

@@ -11,7 +11,7 @@ tags:
 
 ## 它是什么
 
-在 KohakuTerrarium 里，Agent 不是一份配置文件——配置文件只是描述它。主要的公开运行时句柄是一只运行中的 `Creature`：一个由 `Terrarium` 引擎托管的 async Python 对象。子代理是同一套 Agent runtime 在父 Creature 内部的嵌套实例。`Studio` 是引擎之上的管理 facade，负责 catalog、identity、active sessions、persistence、attach 与 editor 流程。更底层的 `kohakuterrarium.core.agent.Agent` 仍然存在，用于进阶事件 / 输出控制。
+在 KohakuTerrarium 里，Agent 不是一份配置文件，配置文件只是描述它。主要的公开运行时句柄是一只运行中的 `Creature`：一个由 `Terrarium` 引擎托管的 async Python 对象。子代理是同一套 Agent runtime 在父 Creature 内部的嵌套实例。`Studio` 是引擎之上的管理 facade，负责 catalog、identity、active sessions、persistence、attach 与 editor 流程。更底层的 `kohakuterrarium.core.agent.Agent` 仍然存在，用于进阶事件 / 输出控制。
 
 所有东西都可以被调用、被 await、被组合。
 
@@ -22,7 +22,7 @@ tags:
 1. 一层配置层（YAML、JSON）来描述「这只 Agent」。
 2. 一个 runtime（通常是 server 或 CLI）去读配置并产生行为。
 
-而你真正想建立在上面的行为，通常又得放进第三层——另一个 process、另一个 container、另一套 plugin system。为了做一件其实可以只是函数调用的事情，却多了很多跳跃。
+而你真正想建立在上面的行为，通常又得放进第三层：另一个 process、另一个 container、另一套 plugin system。为了做一件其实可以只是函数调用的事情，却多了很多跳跃。
 
 KohakuTerrarium 把这些层折叠起来：你可以直接 `import kohakuterrarium`、加载配置、启动 Creature、调用它，并且任意处理它吐出的事件。Agent 是一个 value；value 可以放进其他 value 里。
 
@@ -77,7 +77,7 @@ await agent.stop()
 
 ## 因此你可以做什么
 
-真正的回报不是「Agent 是 Python」——而是「因为 Agent 是 Python，而模块也是 Python，所以你可以把 Agent 放进任何模块里」。几个具体 pattern：
+真正的回报不是「Agent 是 Python」，而是「因为 Agent 是 Python，而模块也是 Python，所以你可以把 Agent 放进任何模块里」。几个具体 pattern：
 
 ### Plugin 里放 Agent（智慧护栏）
 
@@ -93,7 +93,7 @@ await agent.stop()
 
 ### Tool 里放 Agent（上下文隔离的专家）
 
-做一个工具，调用时会 spawn 一只全新的 Agent 来完成工作。对 LLM 来说，它调用这个工具的方式跟其他工具完全一样；但从实现面看，这个工具本身就是一整套子系统。当你需要完全隔离的子系统——不同模型、不同工具、不同 prompt——这就很好用。
+做一个工具，调用时会 spawn 一只全新的 Agent 来完成工作。对 LLM 来说，它调用这个工具的方式跟其他工具完全一样；但从实现面看，这个工具本身就是一整套子系统。当你需要完全隔离的子系统（不同模型、不同工具、不同 prompt）时，这就很好用。
 
 ### Output 模块里放 Agent（路由接待员）
 
@@ -105,11 +105,11 @@ await agent.stop()
 
 ## 不要被边界绑住
 
-你不一定要用 Python 来建立 Creature——在大多数情况下，只靠配置文件就够了。但如果某份 Creature 配置撞上墙，让你开始想要「在 Agent 正在执行的一个步骤里，再放进一只会做判断的 Agent」，那个 Python 基底其实早就在那里了，不需要再发明一套新的 plugin system。
+你不一定要用 Python 来建立 Creature，在大多数情况下，只靠配置文件就够了。但如果某份 Creature 配置撞上墙，让你开始想要「在 Agent 正在执行的一个步骤里，再放进一只会做判断的 Agent」，那个 Python 基底其实早就在那里了，不需要再发明一套新的 plugin system。
 
 ## 延伸阅读
 
-- [Composition algebra](composition-algebra.md) — 给 Python 端 pipeline 用的操作子。
-- [Patterns](../patterns.md) — 这些能力解锁出的意外用法。
-- [guides/programmatic-usage.md 指南](../../guides/programmatic-usage.md) — 这一页的任务导向版本。
-- [reference/python.md 参考](../../reference/python.md) — 签章与 API 索引。
+- [Composition algebra](composition-algebra.md)：给 Python 端 pipeline 用的操作子。
+- [Patterns](../patterns.md)：这些能力解锁出的意外用法。
+- [guides/programmatic-usage.md 指南](../../guides/programmatic-usage.md)：这一页的任务导向版本。
+- [reference/python.md 参考](../../reference/python.md)：签章与 API 索引。

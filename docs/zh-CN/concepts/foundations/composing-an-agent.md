@@ -41,7 +41,7 @@ tags:
   +------------+
 ```
 
-每一个唤醒来源都会把事件推进同一个队列。多个「同时」到达的事件可以是 **stackable** 的——控制器会把它们合并成同一轮的用户消息，因此一波活动高峰不会直接变成一波 LLM 调用高峰。
+每一个唤醒来源都会把事件推进同一个队列。多个「同时」到达的事件可以是 **stackable** 的：控制器会把它们合并成同一轮的用户消息，因此一波活动高峰不会直接变成一波 LLM 调用高峰。
 
 不可堆叠的事件（错误、优先讯号）会打断这个批次。它们会在自己的轮次里单独处理。
 
@@ -70,7 +70,7 @@ tags:
 
 有几个值得注意的不变条件：
 
-1.**工具会立刻开始**。 工具区块一解析完成——远在 LLM 还没说完之前——我们就会把它派发成一个新 task。同一轮里的多个工具会平行执行。详见 [impl-notes/stream-parser](../impl-notes/stream-parser.md)。
+1.**工具会立刻开始**。 工具区块一解析完成（远在 LLM 还没说完之前），我们就会把它派发成一个新 task。同一轮里的多个工具会平行执行。详见 [impl-notes/stream-parser](../impl-notes/stream-parser.md)。
 2.**同一时间只会有一轮 LLM**。 每个 Creature各自有一把 lock，保证控制器不会被重入。触发器可以自由触发，但它们只会进队列。
 3.**direct / background / stateful** 是派发模式，不是三套分离系统。参见 [modules/tool](../modules/tool.md)。
 
@@ -78,27 +78,27 @@ tags:
 
 - **输入 (Input)** 会把事件推进队列；除此之外它本身没有变。
 - **触发器 (Trigger)** 各自拥有一个背景 task，当条件成立时就把事件推进队列。
-- **工具与子 Agent** 透过 executor / sub-agent manager 执行。它们完成后会变成新的事件——回圈就这样闭合。
+- **工具与子 Agent** 透过 executor / sub-agent manager 执行。它们完成后会变成新的事件，回圈就这样闭合。
 - **输出 (Output)** 消费控制器产生的文字与工具活动串流，并把它送往一个或多个 sink（stdout、TTS、Discord，或任何你配置的目的地）。
 
 ## 在这个层级，概念文件有涵盖与没涵盖什么
 
 本页是架构总览。每个模块更深入的故事，都在各自的模块文件里：
 
-- [Controller](../modules/controller.md) — 回圈本身
-- [Input](../modules/input.md) — 第一个触发器
-- [Trigger](../modules/trigger.md) — 从世界到 Agent 的唤醒
-- [Output](../modules/output.md) — 从 Agent 到世界
-- [Tool](../modules/tool.md) — Agent 的手
-- [Sub-Agent](../modules/sub-agent.md) — 受上下文范围限制的委派者
+- [Controller](../modules/controller.md)：回圈本身
+- [Input](../modules/input.md)：第一个触发器
+- [Trigger](../modules/trigger.md)：从世界到 Agent 的唤醒
+- [Output](../modules/output.md)：从 Agent 到世界
+- [Tool](../modules/tool.md)：Agent 的手
+- [Sub-Agent](../modules/sub-agent.md)：受上下文范围限制的委派者
 
 另外有两个横切性的部分，适合放在独立章节，而不是压在某一个模块上：
 
-- [Channel](../modules/channel.md) — 工具、触发器与 terrarium 共同分享的通讯基底。
-- [Session and environment](../modules/session-and-environment.md) — 私有状态与共享状态的切分。
+- [Channel](../modules/channel.md)：工具、触发器与 terrarium 共同分享的通讯基底。
+- [Session and environment](../modules/session-and-environment.md)：私有状态与共享状态的切分。
 
 ## 延伸阅读
 
-- [Agent as a Python object](../python-native/agent-as-python-object.md) — 这张图在嵌入式使用时，如何映射回一般 Python。
-- [impl-notes/stream-parser](../impl-notes/stream-parser.md) — 为什么工具会在 LLM 停止之前就开始执行。
-- [impl-notes/prompt-aggregation](../impl-notes/prompt-aggregation.md) — 驱动这个回圈的 system prompt 是怎么建出来的。
+- [Agent as a Python object](../python-native/agent-as-python-object.md)：这张图在嵌入式使用时，如何映射回一般 Python。
+- [impl-notes/stream-parser](../impl-notes/stream-parser.md)：为什么工具会在 LLM 停止之前就开始执行。
+- [impl-notes/prompt-aggregation](../impl-notes/prompt-aggregation.md)：驱动这个回圈的 system prompt 是怎么建出来的。

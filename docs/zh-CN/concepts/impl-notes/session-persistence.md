@@ -37,17 +37,17 @@ tags:
 `.kohakutr` 文件是一个 SQLite 数据库（透过 KohakuVault 管理），
 其中包含下列表格：
 
-- `events` — 每个事件的 append-only 日志（文字区块、工具调用、
+- `events`：每个事件的 append-only 日志（文字区块、工具调用、
   工具结果、trigger 触发、频道消息、token 使用量）。永不改写。
-- `conversation` — 每个（Agent、轮次边界）对应一列快照，
+- `conversation`：每个（Agent、轮次边界）对应一列快照，
   储存消息列表（透过 msgpack，可保留 tool-call 结构）。
-- `state` — 草稿区与各 Agent 的计数器。
-- `channels` — 频道消息历史。
-- `sub-agents` — 已生成子 Agent的对话快照，会在销毁前储存。
-- `jobs` — 工具／子 Agent执行纪录（状态、参数、结果）。
-- `meta` — 会话中继数据、配置文件路径、执行识别资讯。
-- `fts` — 建立在 events 上的 SQLite FTS5 索引（关键字搜寻）。
-- 向量索引（选用，位于同一个 store 中）— 在需要时由
+- `state`：草稿区与各 Agent 的计数器。
+- `channels`：频道消息历史。
+- `sub-agents`：已生成子 Agent的对话快照，会在销毁前储存。
+- `jobs`：工具／子 Agent执行纪录（状态、参数、结果）。
+- `meta`：会话中继数据、配置文件路径、执行识别资讯。
+- `fts`：建立在 events 上的 SQLite FTS5 索引（关键字搜寻）。
+- 向量索引（选用，位于同一个 store 中）：在需要时由
   `kt embedding` 建立。
 
 ### Resume 路径
@@ -80,14 +80,14 @@ tags:
 - **快照以每轮为单位**。 不是每个事件一份。Resume 相对于快照是 O(1)，
   而不是相对于整段历史的 O(N)。
 - **不可序列化的状态会从 config 重建**。 像 sockets、pywebview
-  handles、LLM provider sessions —— 都是重新建立，而不是还原。
+  handles、LLM provider sessions，都是重新建立，而不是还原。
 - **每个会话一个文件**。 可携、可复制；`.kohakutr` 副档名也让工具
   能辨识它。
 - **Resume 可选择停用**。 `--no-session` 会完全停用这个 store。
 
 ## 列表用 sidecar
 
-`.kohakutr` 文件是数据的来源，但用来「列表」的形状不对 ——
+`.kohakutr` 文件是数据的来源，但用来「列表」的形状不对：
 当 `GET /api/sessions` 面对 1000 个 session 时，不应该为了渲染
 侧边栏就打开 1000 个 SQLite 文件。我们在上层加了一个 write-through
 cache：
@@ -109,18 +109,18 @@ cache：
 
 ### 索引怎么和磁盘保持一致
 
-三条独立路径让 entries 与磁盘上的文件同步 —— 任一条都不是单点：
+三条独立路径让 entries 与磁盘上的文件同步，任一条都不是单点：
 
 1. **Push hook**（`session_index/hooks.py`）。当 API server 自身
    拥有一个 `SessionStore` 时，`SessionIndexHook` 会订阅其事件流，
    每 20 个事件或 5 秒（先到先发）就 upsert 一次条目。同一个 store
-   既写事件也更新索引 —— 不会落后。
+   既写事件也更新索引，不会落后。
 
 2. **Pull reconcile**（`session_index/reconcile.py`）。走访 session
    目录，把每个文件做指纹比对，只打开 `(mtime, size)` 和索引不同
    （或索引中尚未存在）的文件，重新读取它们的 meta 与 preview。
    已删除的文件会从索引剔除。这就是 API 在 `?refresh=true` 时
-   触发的路径。`?full_rescan=true` 则强制重新读取所有文件 ——
+   触发的路径。`?full_rescan=true` 则强制重新读取所有文件，
    用在手动修改 `.kohakutr` 之后。
 
 3. **Startup reconcile**。`get_session_index_default` 这个 singleton
@@ -128,7 +128,7 @@ cache：
    reconcile（bootstrap）并设置 `bootstrap_completed` 旗标；之后的
    每次开启（server 重启）跑增量路径，于是另一个进程在 server
    关闭期间产出的 sessions（例如另一个终端跑的 `kt run`）会被自动
-   接进来。这里若失败会大声 log，但绝不挡 server 启动 —— 提供
+   接进来。这里若失败会大声 log，但绝不挡 server 启动：提供
    过期数据，仍比完全无法服务好。
 
 ### 为什么要用 sidecar（而不是只放在内存）
@@ -147,21 +147,21 @@ Sidecar 是可以直接删除的；下次调用 `get_session_index_default` 就�
 
 ## 代码中的位置
 
-- `src/kohakuterrarium/session/store.py` — `SessionStore` API。
-- `src/kohakuterrarium/session/output.py` — `SessionOutput` 透过
+- `src/kohakuterrarium/session/store.py`：`SessionStore` API。
+- `src/kohakuterrarium/session/output.py`：`SessionOutput` 透过
   `OutputModule` 协定记录事件，因此控制器层不需要特别处理。
-- `src/kohakuterrarium/session/resume.py` — 重建路径。
-- `src/kohakuterrarium/session/memory.py` — FTS 与向量查询。
-- `src/kohakuterrarium/session/embedding.py` — embedding providers。
-- `src/kohakuterrarium/studio/persistence/session_index/` — 列表用
+- `src/kohakuterrarium/session/resume.py`：重建路径。
+- `src/kohakuterrarium/session/memory.py`：FTS 与向量查询。
+- `src/kohakuterrarium/session/embedding.py`：embedding providers。
+- `src/kohakuterrarium/studio/persistence/session_index/`：列表用
   sidecar：`entry.py`（列结构）、`store.py`（KVault + TextVault 包装）、
   `reconcile.py`（指纹差异 + 并行重读）、`hooks.py`（来自运行中
   SessionStore 的 live push）、`__init__.py`（进程内 singleton +
   启动 reconcile）。
-- `src/kohakuterrarium/api/routes/persistence/saved.py` — HTTP 介面
+- `src/kohakuterrarium/api/routes/persistence/saved.py`：HTTP 介面
   （`GET /api/sessions`、`DELETE /api/sessions/{name}`）。
 
 ## 另请参阅
 
-- [记忆与压缩](../modules/memory-and-compaction.md) — 概念层面的说明。
-- [reference/cli.md — kt resume, kt search, kt embedding 参考](../../reference/cli.md) — 用户可见介面。
+- [记忆与压缩](../modules/memory-and-compaction.md)：概念层面的说明。
+- [reference/cli.md 的 kt resume、kt search、kt embedding 参考](../../reference/cli.md)：用户可见介面。

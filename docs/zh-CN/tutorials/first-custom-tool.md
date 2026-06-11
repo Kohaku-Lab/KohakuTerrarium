@@ -42,7 +42,7 @@ mkdir -p creatures/tutorial-creature/tools
 `creatures/tutorial-creature/tools/wordcount.py`：
 
 ```python
-"""Word count tool — counts words in a given text."""
+"""Word count tool: counts words in a given text."""
 
 from typing import Any
 
@@ -62,12 +62,12 @@ class WordCountTool(BaseTool):
 
     @property
     def description(self) -> str:
-        # One line — goes straight into the system prompt.
+        # One line; goes straight into the system prompt.
         return "Count the words in a given piece of text."
 
     @property
     def execution_mode(self) -> ExecutionMode:
-        # Pure, fast, in-memory — direct mode. See Step 5.
+        # Pure, fast, in-memory: direct mode. See Step 5.
         return ExecutionMode.DIRECT
 
     # The JSON schema the LLM sees for args.
@@ -118,9 +118,9 @@ tools:
 
 各字段的作用：
 
-- `type: custom` —— 从本地 Python 文件加载，而不是 `builtin` 或 `package`。
-- `module` —— `.py` 文件路径，会以 Agent 目录（`creatures/tutorial-creature/`）为相对基准解析。
-- `class` —— 模块中的类名。
+- `type: custom`：从本地 Python 文件加载，而不是 `builtin` 或 `package`。
+- `module`：`.py` 文件路径，会以 Agent 目录（`creatures/tutorial-creature/`）为相对基准解析。
+- `class`：模块中的类名。
 
 由于 `tools:` 会扩展继承来的列表，因此你会保留完整的 `general` 工具集，并在其基础上额外添加 `wordcount`。
 
@@ -159,7 +159,7 @@ controller 应该会用 `text="hello world foo bar"` 调用 `wordcount`，并显
 
 `BaseTool` 默认使用 `BACKGROUND`。如果这个默认值不合适，请像示例中那样覆写 `execution_mode`。纯计算、耗时低于 100ms 的工具应设为 `DIRECT`。
 
-执行管线位于 [工具概念 —— 我们如何实现](../concepts/modules/tool.md#how-we-implement-it)。流式输出在解析到结束块后会立即启动工具；多个 `DIRECT` 工具会通过 `asyncio.gather` 并行执行。
+执行管线位于 [工具概念的「我们怎么实现它」一节](../concepts/modules/tool.md#how-we-implement-it)。流式输出在解析到结束块后会立即启动工具；多个 `DIRECT` 工具会通过 `asyncio.gather` 并行执行。
 
 ## 第 6 步：使用 ScriptedLLM 测试它（可选）
 
@@ -176,7 +176,7 @@ async def test_wordcount() -> None:
     agent = Agent.from_path("creatures/tutorial-creature")
     agent.llm = ScriptedLLM([
         ScriptEntry('[/wordcount]{"text": "one two three"}[wordcount/]'),
-        ScriptEntry("Done — 3 words."),
+        ScriptEntry("Done: 3 words."),
     ])
 
     await agent.start()
@@ -202,6 +202,6 @@ asyncio.run(test_wordcount())
 
 ## 接下来读什么
 
-- [工具概念](../concepts/modules/tool.md) —— 工具 **可以** 是什么（消息总线、状态句柄、Agent 包装器等）。
-- [自定义模块指南](../guides/custom-modules.md) —— 一起了解工具、Sub-agent、Trigger 和 Output。
-- [第一个插件](first-plugin.md) —— 当你需要的行为发生在模块之间的接缝，而不是某个单独模块内部时。
+- [工具概念](../concepts/modules/tool.md)：工具 **可以** 是什么（消息总线、状态句柄、Agent 包装器等）。
+- [自定义模块指南](../guides/custom-modules.md)：一起了解工具、Sub-agent、Trigger 和 Output。
+- [第一个插件](first-plugin.md)：当你需要的行为发生在模块之间的接缝，而不是某个单独模块内部时。

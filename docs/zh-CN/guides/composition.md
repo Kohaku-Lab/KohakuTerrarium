@@ -1,52 +1,80 @@
 ---
 title: 组合代数
-summary: 在纯 Python 中使用序列／平行／后备／重试运算子，将 agent 与非同步 callable 串接在一起。
+summary: 用顺序 / 并行 / 回退 / 重试运算符，在纯 Python 里把 Agent 和异步可调用对象拼起来。
 tags:
- - guides
- - python
- - composition
+  - guides
+  - python
+  - composition
 ---
 
 # 组合
 
-给想直接从纯 Python 进行多 agent 编排、而不想先建立Terrarium的读者。
+写给想在纯 Python 里做多 Agent 编排、又不想搭一个 terrarium 的读者。
 
-组合代数将 agent 与非同步 callable 视为可组合的单元。四个运算子（`>>`、`&`、`|`、`*`）分别涵盖序列、平行、后备与重试。所有结果都会回传一个你可以继续组合的 `BaseRunnable`。
+组合代数把 Agent 和异步可调用对象当成可组合的单元。四个运算符
+（`>>`、`&`、`|`、`*`）覆盖顺序、并行、回退和重试。一切都返回
+`BaseRunnable`，可以继续往下组合。
 
-概念预习：[组合代数](../concepts/python-native/composition-algebra.md)、[作为 Python 物件的 agent](../concepts/python-native/agent-as-python-object.md)。
+概念入门：[组合代数](../concepts/python-native/composition-algebra.md)、
+[Agent 作为 Python 对象](../concepts/python-native/agent-as-python-object.md)。
 
-当你想把回圈放在 creature 外面时，请使用本指南——例如 writer ↔ reviewer 直到通过、平行 ensemble、由便宜到昂贵的后备链。若你要的是具有共享频道的横向多 agent 系统，请改用[Terrarium 指南](terrariums.md)。
+当你想要的循环在生物 (creature) 外面时用这份指南：作者 ↔ 评审循环到
+通过为止、并行集成、从便宜到昂贵的回退链。需要共享频道的横向多
+Agent 系统时，用 [Terrarium](terrariums.md)。
 
-## 运算子
+## 运算符
 
-| Op | 意义 |
+| 运算符 | 含义 |
 |---|---|
-| `a >> b` | 序列：`b(a(x))`。会自动摊平。右侧若为 dict，会转成 `Router`。 |
-| `a & b` | 平行：`asyncio.gather(a(x), b(x))`。回传 list。 |
-| `a \| b` | 后备：若 `a` 丢出例外，则改试 `b`。 |
-| `a * N` | 若发生例外，最多额外重试 `a` `N` 次。 |
+| `a >> b` | 顺序：`b(a(x))`。自动展平。右侧是 dict 则变成 `Router`。 |
+| `a & b` | 并行：两个并发运行，返回结果**元组**。首个失败发生时，存活的兄弟会先被取消并 await 完毕，异常才向外传播。 |
+| `a \| b` | 回退：`a` 抛错时，用原始输入运行 `b`。`b` 也失败时，`a` 的异常作为 `__cause__` 链上。 |
+| `a * N` | 重试：出异常时最多尝试 `N` 次（立即重试，无延迟）。 |
 
-优先顺序：`*` > `|` > `&` > `>>`。
+优先级遵循 Python 运算符：`*` 最紧，其次 `>>`，再 `&`，最后 `|`。
+所以 `a >> b & c` 是 `(a >> b) & c`，`a & b | c` 是 `(a & b) | c`。
+拿不准就加括号。
 
-组合器：
+组合子与方法：
 
-- `Pure(fn_or_value)` — 包装一般 callable。
-- `.map(fn)` — 对输出做后置转换。
-- `.contramap(fn)` — 对输入做前置转换。
-- `.fails_when(pred)` — 当 predicate 命中时丢出例外（可与 `|` 组合）。
-- `pipeline.iterate(stream)` — 将 pipeline 套用到 async iterable 的每个元素。
+- `Pure(fn)` / `pure(fn)`：包装一个普通的同步或异步可调用对象。
+- `.retry(max_attempts, *, backoff=0.0, max_backoff=30.0)`：类似
+  `* N`，但带指数退避：第一次失败后睡 `backoff` 秒，每次翻倍，
+  上限 `max_backoff`。
+- `.map(fn)`：后置变换输出（`self >> pure(fn)`）。
+- `.contramap(fn)`：前置变换输入（`pure(fn) >> self`）。
+- `.fails_when(pred)`：输出命中谓词时抛 `ValueError`
+  （可与 `|` 组合）。
+- `pipeline.iterate(initial_input)`：异步迭代器，把每次输出回喂为
+  下一次输入；`it.feed(value)` 可覆盖下一次输入。
 
 ## `agent` 与 `factory`
 
-两种 agent 包装器：
+两个 Agent 包装器，接受同样的关键字参数：
 
-- `agent(config_or_path)` — **持久型** agent（async context manager）。对话上下文会在多次调用间累积。适合单次较长的互动。
-- `factory(config)` — **逐次调用** agent。每次调用都建立全新的 agent；不会承接状态。适合无状态 worker。
+```python
+await agent(config, *, engine=None, pwd=None, llm=None)   # -> AgentRunnable
+factory(config, *, engine=None, pwd=None, llm=None)       # -> AgentFactory
+```
+
+- `config`：`AgentConfig`、文件系统路径，或
+  `@pkg/creatures/<name>` 引用。
+- `engine`：要生成到的共享 `Terrarium`。省略时，每个包装器会
+  自己起一个私有引擎、并随 runnable 一起拆掉；传共享引擎可以在多个
+  compose Agent 之间摊薄启动成本（此时关闭 runnable 只移除它的生物，
+  绝不动你的引擎）。
+- `pwd`：生物的工作目录（无全局 chdir）。
+- `llm`：profile 名、`LLMProfile` 或提供商实例，与
+  `Agent.build` / `Terrarium.add_creature` 的语法相同。
+
+`agent(...)` 是**持久的**：立即启动，对话跨调用累积，必须关闭
+（用 `async with`）。`factory(...)` 是**按调用的**：每次调用一个全新
+Agent，无状态延续，也没有需要管理的生命周期。
 
 ```python
 from kohakuterrarium.compose import agent, factory
 
-async with await agent("@kt-biome/creatures/swe") as swe:
+async with await agent("@kt-biome/creatures/swe", llm="fast") as swe:
     r1 = await swe("Read the repo.")
     r2 = await swe("Now fix the auth bug.")   # same conversation
 
@@ -55,9 +83,14 @@ r1 = await coder("Task 1")                    # fresh agent
 r2 = await coder("Task 2")                    # another fresh agent
 ```
 
-## Writer ↔ reviewer 回圈
+构造是严格的：错误路径抛 `ConfigNotFoundError`，未安装的包抛
+`PackageNotInstalledError`，错误的 `llm` 选择器抛
+`LLMNotConfiguredError`；这些都在 `agent()` / 第一次调用 `factory` 时就抛，
+而不是稍后变成一个空回复。
 
-反复执行一条双 agent pipeline，直到 reviewer 核准：
+## 作者 ↔ 评审循环
+
+迭代一条双 Agent 流水线，直到评审通过：
 
 ```python
 import asyncio
@@ -84,11 +117,12 @@ async def main():
 asyncio.run(main())
 ```
 
-`.iterate()` 会将 pipeline 的输出回灌为下一次输入，产生一个可用原生 `async for` 回圈处理的 async stream。
+`.iterate()` 把流水线的输出回喂为下一次输入，产生一个可以用原生
+`async for` 循环的异步流。
 
-## 平行 ensemble 与挑选最佳结果
+## 并行集成 + 择优
 
-平行执行三个 agent，保留最长的答案：
+三个 Agent 并行跑，留最长的答案：
 
 ```python
 from kohakuterrarium.compose import factory
@@ -101,90 +135,100 @@ ensemble = (fast & deep & creative) >> (lambda results: max(results, key=len))
 best = await ensemble("What is recursion?")
 ```
 
-`&` 会派发到 `asyncio.gather`，因此三者会并行执行，你付出的会是最大延迟，而不是总和。
+三个并发运行，你付出的是最大延迟，不是延迟之和。
+积的结果是元组，按分支顺序排列。某个分支抛错时，其他分支会先被
+取消（并 await 完毕），异常才向外传播，不会留下脱缰的 Agent 继续
+烧 LLM 轮次。
 
-## 重试 + 后备链
+## 重试 + 回退链
 
-先让昂贵的 expert 试两次，再后备到便宜的 generalist：
+昂贵的专家试两次，再回退到便宜的通才：
 
 ```python
 safe = (expert * 2) | generalist
 result = await safe("Explain JSON-RPC.")
 ```
 
-也可搭配基于错误条件的后备：
+带尝试间退避：
+
+```python
+safe = expert.retry(3, backoff=2.0, max_backoff=30.0) | generalist
+```
+
+再配上错误谓词式回退：
 
 ```python
 cheap = fast.fails_when(lambda r: len(r) < 50)
 pipeline = cheap | deep            # if fast returns < 50 chars, try deep
 ```
 
+整条链都失败时，你接到的异常会把主分支的失败带在 `__cause__` 上，
+调试时原始错误不会丢。
+
 ## 路由
 
-`>>` 右手边若是 dict，会变成 `Router`：
+`>>` 右侧的 dict 会变成 `Router`：
 
 ```python
 router = classifier >> {
     "code":   coder,
     "math":   solver,
     "prose":  writer,
+    "_default": generalist,       # optional catch-all
 }
 ```
 
-上游步骤应输出一个 dict `{classifier_key: payload}`；router 会挑选对应的分支。很适合「先分类，再派发」这类模式。
+路由器根据上游输出选键：二元组 `(key, payload)` 把 `payload` 路由到
+名为 `key` 的分支；其他值则同时作为键和载荷。没有匹配分支也没有
+`_default` 时抛 `KeyError`。
 
-## 混用 agent 与函式
+## Agent 与函数混搭
 
-一般 callable 会自动以 `Pure` 包装：
+普通可调用对象自动包成 `Pure`：
 
 ```python
 pipeline = (
     writer
-    >> str.strip                      # zero-arg callable on the output
-    >> (lambda t: {"text": t})        # lambda
+    >> str.strip                      # plain callable on the output
+    >> (lambda t: f"Review:\n{t}")    # lambda
     >> reviewer
     >> json.loads                     # parse reviewer's JSON response
 )
 ```
 
-同步与非同步 callable 都能使用；若为 async，会自动 await。
+同步、异步都行；异步会自动 await。
 
-## Side-effect logging
+## 什么时候改用 terrarium
 
-```python
-from kohakuterrarium.compose.effects import Effects
+选 terrarium，当：
 
-effects = Effects()
-logged = effects.wrap(pipeline, on_call=lambda step, x, y: print(f"{step}: {x!r} -> {y!r}"))
-result = await logged("input")
-```
+- 生物需要*持续*运行，按自己的节奏响应消息。
+- 你需要热插拔生物或外部可观测性。
+- 多个生物共享一个工作区（便笺、频道），需要 `Environment` 隔离。
 
-这对于除错 pipeline 流程很有用，而且不需要改动 pipeline 本身。
+选组合，当：
 
-## 何时应改用 terrarium
+- 你的应用是编排者，按需调用 Agent。
+- 流水线是短命的（请求级，不是长驻的）。
+- 你想要原生 Python 控制流（`for`、`if`、`try`、`gather`）。
 
-以下情况适合选 terrarium：
+两者可以混用：给 `agent()` / `factory()` 传 `engine=`，compose 流水线
+的生物就会生成到你长驻 terrarium 用的那个引擎里。
 
-- Creatures 需要*持续*执行，并依自己的排程对消息作出反应。
-- 你需要热插拔 creatures，或需要外部可观测性。
-- 多个 creatures 共用同一个工作空间（scratchpad、频道），且需要 `Environment` 隔离。
+## 故障排查
 
-以下情况适合选 composition：
+- **持久 `agent()` 关闭后复用就抛错。**它是异步上下文管理器，
+  所有调用都放在 `async with` 里。
+- **流水线莫名其妙返回元组。**你某处用了 `&`；结果是元组。加
+  `>> (lambda results: ...)` 来收拢。
+- **重试不重试。**`* N` 只在异常时触发。用
+  `.fails_when(pred)` 把“看着不对的成功”变成异常。
+- **步骤之间类型不匹配。**每一步的输出就是下一步的输入。插一个
+  `pure` 函数（或 lambda）做适配。
 
-- 你的应用程式本身就是协调者，并按需调用 agents。
-- pipeline 生命周期很短（以 request 为范围，而非长时间执行）。
-- 你想使用原生 Python 控制流程（`for`、`if`、`try`、`gather`）。
+## 另请参阅
 
-## 疑难排解
-
-- **持久型 `agent()` 在重复使用时抛出异常**。 它是 async context manager——请放在 `async with` 内使用。
-- **Pipeline 意外返回 list**。 你在某处用了 `&`；结果会是 list。加上 `>> (lambda results: ...)` 将其收敛。
-- **Retry 没有重试**。 `* N` 只会在发生例外时触发。请用 `.fails_when(pred)` 将「看起来像失败的成功」转成例外。
-- **步骤之间类型不兼容**。 每一步的输出都会成为下一步的输入。插入一个 `Pure` 函式（或 lambda）来转接。
-
-## 另请参见
-
-- [程序化使用指南](programmatic-usage.md) — `Terrarium`、`Creature`、`Studio` 与底层 `Agent` API。
-- [概念 / 组合代数](../concepts/python-native/composition-algebra.md) — 设计理由。
-- [参考 / Python API](../reference/python.md) — `compose.core`、`compose.agent`、运算子签章。
-- [examples/code/](../../examples/code/) — `review_loop.py`、`ensemble_voting.py`、`debate_arena.py`、`smart_router.py`、`pipeline_transforms.py`。
+- [编程式用法](programmatic-usage.md)：底层的 `Agent` / `Terrarium` / `Creature` API。
+- [概念 / 组合代数](../concepts/python-native/composition-algebra.md)：设计动机。
+- [参考 / Python API](../reference/python.md#compose)：导出与运算符签名。
+- [`examples/code/`](../../../examples/code/)：`review_loop.py`、`ensemble_voting.py`、`debate_arena.py`、`smart_router.py`、`pipeline_transforms.py`。

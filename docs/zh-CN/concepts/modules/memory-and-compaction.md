@@ -39,7 +39,7 @@ tags:
 ### 压缩
 
 上下文视窗虽然持续变大，但永远追不上需求增长。没有压缩的话，跑了几小时
-的 Creature最后一定会撞墙。天真的压缩方式会在摘要期间直接暂停 Agent — 在
+的 Creature最后一定会撞墙。天真的压缩方式会在摘要期间直接暂停 Agent：在
 Agent 框架里，这等于「控制器卡住，等待 50k token 被浓缩成 2k」。
 对 ambient Agents 来说，这是不能接受的。
 
@@ -52,14 +52,14 @@ Agent 框架里，这等于「控制器卡住，等待 50k token 被浓缩成 2k
 
 `.kohakutr` 是一个 SQLite 文件（透过 KohakuVault），里面有以下数据表：
 
-- `meta` — 会话中继数据、快照、配置
-- `events` — append-only 事件日志
-- `state` — scratchpad、计数器、每个 Agent 的状态
-- `channels` — 消息历史
-- `conversation` — 供快速 resume 使用的最新快照
-- `sub-agents` — 子 Agent的对话快照
-- `jobs` — 工具 / 子 Agent执行纪录
-- `fts` — 事件的全文索引
+- `meta`：会话中继数据、快照、配置
+- `events`：append-only 事件日志
+- `state`：scratchpad、计数器、每个 Agent 的状态
+- `channels`：消息历史
+- `conversation`：供快速 resume 使用的最新快照
+- `sub-agents`：子 Agent的对话快照
+- `jobs`：工具 / 子 Agent执行纪录
+- `fts`：事件的全文索引
 - （向量索引，可选，只有建立 embeddings 时才有）
 
 ### 压缩契约
@@ -75,13 +75,13 @@ compact manager 就会启动一个背景 task。
 
 ## 我们怎么实现它
 
-- `session/store.py` — 以 KohakuVault 为后端的持久化储存。
-- `session/output.py` — 负责写入事件的 output consumer。
-- `session/resume.py` — 把数据重播进新建好的 Agent。
-- `session/memory.py` — FTS5 查询与向量搜寻。
-- `session/embedding.py` — model2vec / sentence-transformer / API
+- `session/store.py`：以 KohakuVault 为后端的持久化储存。
+- `session/output.py`：负责写入事件的 output consumer。
+- `session/resume.py`：把数据重播进新建好的 Agent。
+- `session/memory.py`：FTS5 查询与向量搜寻。
+- `session/embedding.py`：model2vec / sentence-transformer / API
   provider 的 embeddings。
-- `core/compact.py` — 使用 atomic-splice 技巧的 `CompactManager`。
+- `core/compact.py`：使用 atomic-splice 技巧的 `CompactManager`。
   见 [impl-notes/non-blocking-compaction](../impl-notes/non-blocking-compaction.md)。
 
 Embedding provider（`kt embedding`）：
@@ -95,7 +95,7 @@ Embedding provider（`kt embedding`）：
 
 - **从任何地方恢复**。 `kt resume` / `kt resume --last` 可以接回数小时前
   被中断的会话。
-- **搜寻会话**。 `kt search <session> <query>` — 支持 FTS、语意、
+- **搜寻会话**。 `kt search <session> <query>` 支持 FTS、语意、
   hybrid 或自动侦测模式。
 - **Agent 端 RAG**。 Agent 在回合中调用 `search_memory`，取回相关过去事件，
   然后带着这些上下文继续。
@@ -107,12 +107,12 @@ Embedding provider（`kt embedding`）：
 ## 不要被它框住
 
 会话持久化是 opt-out（`--no-session`）。embeddings 是 opt-in。
-压缩则是每个 Creature各自 opt-out。Creature完全可以不使用这些功能 — 记忆是方便性，
+压缩则是每个 Creature各自 opt-out。Creature完全可以不使用这些功能：记忆是方便性，
 不是必要条件。
 
 ## 另见
 
-- [impl-notes/session-persistence](../impl-notes/session-persistence.md) — 双储存细节。
-- [impl-notes/non-blocking-compaction](../impl-notes/non-blocking-compaction.md) — atomic-splice 演算法。
-- [reference/cli.md — kt embedding, kt search, kt resume 参考](../../reference/cli.md) — 指令介面。
-- [guides/memory.md 指南](../../guides/memory.md) — 实现指南。
+- [impl-notes/session-persistence](../impl-notes/session-persistence.md)：双储存细节。
+- [impl-notes/non-blocking-compaction](../impl-notes/non-blocking-compaction.md)：atomic-splice 演算法。
+- [reference/cli.md 的 kt embedding、kt search、kt resume 参考](../../reference/cli.md)：指令介面。
+- [guides/memory.md 指南](../../guides/memory.md)：实现指南。

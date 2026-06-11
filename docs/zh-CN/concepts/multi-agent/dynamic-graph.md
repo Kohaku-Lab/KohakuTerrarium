@@ -1,6 +1,6 @@
 ---
 title: 动态图
-summary: terrarium 的图为何会在运行时变形 —— 连通分量、自动合并 / 自动分裂、图内的「图编辑器」、以及 session 血缘的代价与好处。
+summary: terrarium 的图为何会在运行时变形：连通分量、自动合并 / 自动分裂、图内的「图编辑器」、以及 session 血缘的代价与好处。
 tags:
   - concepts
   - multi-agent
@@ -13,7 +13,7 @@ tags:
 ## 它是什么
 
 [Terrarium](terrarium.md) 不是固定形状。运行中的 Creature 集合、它们
-之间的频道、谁与谁共享一个 session —— 这一切都可以在运行时变化，**不
+之间的频道、谁与谁共享一个 session，这一切都可以在运行时变化，**不
 需要重启**、不会重新建立未受影响的 Creature、也不会丢历史。
 
 引擎把活动系统建模为一张由 Creature 与频道组成的**图**。这张图的每个
@@ -28,7 +28,7 @@ tags:
   片段（session store 复制到每一边）。
 
 这一切都是引擎在收到 mutation 呼叫时确定性地执行的结构性工作。图内
-的 Creature 不做这些决定 —— 引擎做。
+的 Creature 不做这些决定，引擎做。
 
 ## 为什么它存在
 
@@ -43,7 +43,7 @@ tags:
 - 团队应该可以从外部观察，但团队内的人不知道自己被观察；而且观察必
   须在 Creature 来去之间持续追踪它们的身份。
 
-让图变成动态的 —— 并把记账责任交给引擎 —— 让这四件事都不需要在每个
+让图变成动态的（并把记账责任交给引擎），让这四件事都不需要在每个
 recipe 里特殊处理。
 
 ## 心智模型
@@ -76,8 +76,8 @@ recipe 里特殊处理。
 同样的 mutation 也透过[组工具](../glossary.md#group-tools--组工具)
 （`group_add_node`、`group_remove_node`、`group_start_node`、
 `group_stop_node`、`group_channel`、`group_wire`）暴露给图中的
-[特权节点](privileged-node.md)。它们合在一起就是图内的**图编辑器**
-—— LLM 驱动的特权节点可以靠呼叫工具在执行中演化团队，每一次 mutation
+[特权节点](privileged-node.md)。它们合在一起就是图内的**图编辑器**：
+LLM 驱动的特权节点可以靠呼叫工具在执行中演化团队，每一次 mutation
 都会发出 `EngineEvent`，让 observer 与运行时提示词保持同步。
 
 ## 自动合并
@@ -85,7 +85,7 @@ recipe 里特殊处理。
 合并发生在跨图 connect 时。引擎会：
 
 1. 在拓扑层联集两张图（creature id、频道宣告、listen / send 边）。
-2. 联集两个 `Environment` —— 每一个频道物件从被丢弃的图搬到存活的
+2. 联集两个 `Environment`：每一个频道物件从被丢弃的图搬到存活的
    environment，已存在的频道触发器对着存活的 env 重新注入。
 3. 把两个 session store 合并为存活图路径下一个新的 store。每一个事
    件从两个旧 store 复制到新 store；新 store 的 meta 记下
@@ -114,7 +114,7 @@ recipe 里特殊处理。
    `split_at` 时间戳。
 6. 发出 `TOPOLOGY_CHANGED` 事件，附 `kind="split"` 与新的 graph id。
 
-分裂时历史不会遗失 —— 只会被复制。分支 session 从同一起点分歧。
+分裂时历史不会遗失，只会被复制。分支 session 从同一起点分歧。
 
 ## Resume：recipe 是真理来源
 
@@ -138,10 +138,10 @@ recipe 里特殊处理。
 
 不是每一只 Creature 都该能变更图。引擎区分：
 
-- **特权 Creature** —— recipe 的 `root:` 节点、recipe 内 inline 标记
+- **特权 Creature**：recipe 的 `root:` 节点、recipe 内 inline 标记
   `privileged: true` 的成员、以及以 `is_privileged=True` 建立的
   Creature。它们持有[组工具](../glossary.md#group-tools--组工具)。
-- **工人** —— 由特权呼叫者透过 `group_add_node` 生成的 Creature。它
+- **工人**：由特权呼叫者透过 `group_add_node` 生成的 Creature。它
   们落在呼叫者的图里，但**不**拥有组工具。工人没被引擎显式提权前不
   能再分叉同侪或图边。
 
@@ -168,15 +168,15 @@ recipe 里特殊处理。
 ## 不要被它框住
 
 完全没有运行时变化的静态 recipe 是最简单的模式，也是好的预设。当工
-作本身是动态的 —— 团队形状在执行中才被发现的开放性研究、一个
-session 把另一个拉进来的临时救援、分支与合并并存的并行探索 —— 才会
+作本身是动态的（团队形状在执行中才被发现的开放性研究、一个
+session 把另一个拉进来的临时救援、分支与合并并存的并行探索）才会
 需要热插拔与组工具创作。
 
 ## 另见
 
-- [Terrarium](terrarium.md) —— 图所栖身的运行时引擎。
-- [特权节点](privileged-node.md) —— 使用组工具的特权 Creature。
-- [impl-notes / graph and sessions](../impl-notes/graph-and-sessions.md)
-  —— 合并 / 分裂记账的实际实现方式。
-- [reference / builtins — group_* 工具](../../reference/builtins.md)
-  —— 组工具表面。
+- [Terrarium](terrarium.md)：图所栖身的运行时引擎。
+- [特权节点](privileged-node.md)：使用组工具的特权 Creature。
+- [impl-notes / graph and sessions](../impl-notes/graph-and-sessions.md)：
+  合并 / 分裂记账的实际实现方式。
+- [reference / builtins 的 group_* 工具](../../reference/builtins.md)：
+  组工具表面。

@@ -13,7 +13,7 @@ tags:
 
 **输入 (input)** 模块是外部世界把工作交给Creature的方式。在正典推导中，
 它位于控制器之前，负责触发第一个事件。实务上，它只是一种特定型态
-的触发器 — 依惯例被标记为「用户输入」的那一种。
+的触发器：依惯例被标记为「用户输入」的那一种。
 
 ## 为什么它存在
 
@@ -27,7 +27,7 @@ tags:
 `TriggerEvent` 准备好。它返回的任何东西，都会像 timer 触发或 channel
 消息一样，被推进事件队列。
 
-这也是为什么文件一直说「input 也是 trigger」— 从结构上来看确实如此。
+这也是为什么文件一直说「input 也是 trigger」：从结构上来看确实如此。
 两者的差异主要在生命周期（input 通常在前景，trigger 通常在背景）
 以及意图（input 承载的是用户内容）。
 
@@ -35,12 +35,12 @@ tags:
 
 内建输入模块：
 
-- **`cli`**— 由 `prompt_toolkit` 驱动的行编辑器。支持历史纪录、
+- **`cli`**：由 `prompt_toolkit` 驱动的行编辑器。支持历史纪录、
   slash commands、多行输入与粘贴。
-- **`cli_nonblocking`**— 和 `cli` 表面相近，但会在每次按键之间把控制权还给
+- **`cli_nonblocking`**：和 `cli` 表面相近，但会在每次按键之间把控制权还给
   event loop，让 trigger 在输入过程中也能触发。
-- **`tui`**— 当Creature在 Textual 下执行时，TUI composer 就是输入来源。
-- **`none`**— 永远不产生事件的 stub；给纯 trigger 驱动的 Creature使用。
+- **`tui`**：当Creature在 Textual 下执行时，TUI composer 就是输入来源。
+- **`none`**：永远不产生事件的 stub；给纯 trigger 驱动的 Creature使用。
 
 音频/ASR 实现不会由核心包导入。请参考 `examples/agent-apps/conversational/custom/` 下 opt-in 的 ASR 与 Whisper 输入模块，并通过 `type: custom` 加载。
 
@@ -51,23 +51,23 @@ tags:
 
 - **纯 trigger Creature**。 `input: { type: none }` 加上一个或多个
   trigger：cron Creature、channel watcher、webhook receiver。
-- **多介面聊天**。 由 HTTP 驱动的部署不需要 CLI 输入 —
+- **多介面聊天**。 由 HTTP 驱动的部署不需要 CLI 输入：
   `Creature` / `Studio` transport 可以透过 `inject_input()` 以编程方式推送
   用户内容。
 - **感测器式输入**。 接上文件系统监控器、Discord listener，或 MQTT
   consumer。Creature本身不会知道差别。
 - **把输入当成策略层**。 输入模块可以在内容抵达控制器之前先转换
-  用户输入 — 翻译语言、做 moderation 检查、移除秘密资讯。
+  用户输入：翻译语言、做 moderation 检查、移除秘密资讯。
 
 ## 不要被它框住
 
 输入是可选的。没有「人类坐在终端机前」的 Discord bot Creature，可以完全
 省略 input，改由 HTTP WebSocket trigger 驱动自己。反过来说，一个 Creature
-也可以同时有多个有效输入介面 — 用户能在 CLI 打字，同时 webhook 在推
+也可以同时有多个有效输入介面：用户能在 CLI 打字，同时 webhook 在推
 事件，timer 也能一起触发。
 
 ## 另见
 
-- [触发器](trigger.md) — 一般情况；input 只是它的特定形状。
-- [reference/builtins.md — Inputs 参考](../../reference/builtins.md) — 内建输入模块完整列表。
-- [guides/custom-modules.md 指南](../../guides/custom-modules.md) — 如何写你自己的输入。
+- [触发器](trigger.md)：一般情况；input 只是它的特定形状。
+- [reference/builtins.md 的 Inputs 参考](../../reference/builtins.md)：内建输入模块完整列表。
+- [guides/custom-modules.md 指南](../../guides/custom-modules.md)：如何写你自己的输入。

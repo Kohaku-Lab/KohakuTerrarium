@@ -1,6 +1,6 @@
 ---
 title: 频道 (Channel)
-summary: 具名的广播管道 — 是多 Agent 与跨模块通讯的底层基础。
+summary: 具名的广播管道，是多 Agent 与跨模块通讯的底层基础。
 tags:
   - concepts
   - module
@@ -17,7 +17,7 @@ tags:
 [图](../glossary.md#graph--图)的共享 environment 里（图中的 Creature
 都看得到）。
 
-它严格来说不是Creature的「正典」模块之一 — 在 chat-bot → Agent 的
+它严格来说不是Creature的「正典」模块之一：在 chat-bot → Agent 的
 推导路径里，它从来没有出现过。它是让工具与触发器能在多个代理之
 间真正变得有用的通讯底层。
 
@@ -27,20 +27,20 @@ tags:
 摩擦最低的做法是：Agent A 的工具写入一则消息；Agent B 有一个触发
 器，当某个名字的消息到达时就触发。
 
-这正是频道。它不是什么新点子 — 它只是*命名惯例*加上一点点队列
+这正是频道。它不是什么新点子，它只是*命名惯例*加上一点点队列
 机制，让「这边写入、那边监听」能成立，而双方都不需要知道彼此是
 谁。
 
 ## 我们怎么定义它
 
 图频道是广播：每个订阅它的监听者都会收到任何 sender 写入的每一则
-消息。在图层级**没有**queue / broadcast 的选择 —— 所有
+消息。在图层级**没有**queue / broadcast 的选择：所有
 [terrarium](../multi-agent/terrarium.md) 频道都是广播。
 
 频道存在于 `ChannelRegistry` 里。Creature 的私有会话有一份 registry；
 图的共享 environment 有另一份。Creature 可以监听任一边的频道。
 
-`ChannelTrigger` 会把频道名称绑到 Creature 的事件流上 — 每当有消息
+`ChannelTrigger` 会把频道名称绑到 Creature 的事件流上：每当有消息
 到达，就会推入一个 `channel_message` 事件。
 
 ## 我们怎么实现它
@@ -49,7 +49,7 @@ tags:
 注册成广播（`terrarium/channels.py`），所以监听某条频道的 Creature 会
 按到达顺序看见每一次送出。`modules/trigger/channel.py` 实现了把频道
 桥接进 Creature 事件队列的触发器。在单一 Creature 内部还有一个 queue
-原语（`SubAgentChannel`）用于子 agent stdout / 父控制器接线 —— 那是
+原语（`SubAgentChannel`）用于子 agent stdout / 父控制器接线；那是
 私有实作细节，不是图频道。
 
 自动建立的频道（引擎在你不宣告的情况下会帮你加好）：
@@ -59,7 +59,7 @@ tags:
 - 当配方宣告 `root:` 时，会建立 `report_to_root` 频道，图中其他每只
   Creature 都被接线为可送往该频道，只有 root 监听。
 
-要非破坏性地观察频道流量，可以订阅引擎事件流 —— 每一次 send 都会
+要非破坏性地观察频道流量，可以订阅引擎事件流：每一次 send 都会
 发出 `CHANNEL_MESSAGE` `EngineEvent`，不会与任何 consumer 竞争。这
 就是 dashboard 在不参与监听的前提下观察流量的方式。
 
@@ -78,14 +78,14 @@ tags:
 
 ## 频道 vs. 输出接线
 
-频道不是Creature彼此沟通的唯一方法。另一个平行机制 —**输出接线
-(output wiring)**— 会在每个回合结束时，直接把一个
+频道不是Creature彼此沟通的唯一方法。另一个平行机制，**输出接线
+(output wiring)**，会在每个回合结束时，直接把一个
 `creature_output` `TriggerEvent` 发送到目标Creature的事件队列里，双方都
 不需要调用 `send_message`。该用哪一种：
 
-- **频道**— 条件式路由（approve 或 revise）、群聊、状态广播、
+- **频道**：条件式路由（approve 或 revise）、群聊、状态广播、
   延后 / 非必然流量、观察。由Creature自己决定要不要送、送去哪里。
-- **输出接线** — 确定性的 pipeline 边（「runner 的输出永远送给
+- **输出接线**：确定性的 pipeline 边（「runner 的输出永远送给
   analyzer」）。以宣告式配置，并在回合结束时自动触发。
 
 同一个 terrarium 可以自由混用两者。见
@@ -94,7 +94,7 @@ tags:
 
 ## 不要被它框住
 
-独立运作的 Creature其实不需要频道 — 它的工具不会 `send_message`，
+独立运作的 Creature其实不需要频道：它的工具不会 `send_message`，
 它的触发器也不会监听。频道不是推导里的一等模块；它是一种惯例，
 只是因为太多 multi-agent 使用情境最后都能化约成它，所以框架乾脆
 把它提供成 primitive。
@@ -105,7 +105,7 @@ tags:
 
 ## 另见
 
-- [工具](tool.md) — 传送端那一半。
-- [触发器](trigger.md) — 接收端那一半。
-- [多 Agent / terrarium](../multi-agent/terrarium.md) — 频道在那里真正亮起来成为连线。
-- [模式](../patterns.md) — 群聊、死信、observer。
+- [工具](tool.md)：传送端那一半。
+- [触发器](trigger.md)：接收端那一半。
+- [多 Agent / terrarium](../multi-agent/terrarium.md)：频道在那里真正亮起来成为连线。
+- [模式](../patterns.md)：群聊、死信、observer。

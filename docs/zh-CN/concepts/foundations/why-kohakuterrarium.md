@@ -35,7 +35,7 @@ tags:
 
 让 **打造一只目的明确的 Agent 变得便宜**。
 
-如果每一种新的 Agent 形状，只需要一份配置文件、几个自订模块，以及一个清楚的心智模型，这个领域就不会一直重造轮子。那层基底——每个 Agent 都需要，而且彼此几乎一样的部分——就可以集中留在同一个地方。真正新的部分，才是你自己去写的。
+如果每一种新的 Agent 形状，只需要一份配置文件、几个自订模块，以及一个清楚的心智模型，这个领域就不会一直重造轮子。那层基底（每个 Agent 都需要，而且彼此几乎一样的部分）就可以集中留在同一个地方。真正新的部分，才是你自己去写的。
 
 那层基底就是 KohakuTerrarium：一个 **给 Agents 用的 framework**，而不是另一个 Agent。
 
@@ -43,7 +43,7 @@ tags:
 
 给一份具体清单方便校准：
 
-- 一套统一的事件模型。用户输入、计时器触发、工具完成、频道消息——全都用同一种信封。
+- 一套统一的事件模型。用户输入、计时器触发、工具完成、频道消息，全都用同一种信封。
 - 六模块Creature 抽象。参见 [what-is-an-Agent](what-is-an-agent.md)。
 - 一层 session 系统，同时负责运行时持久化与可搜寻的知识库。
 - 一个多 Agent wiring 层（terrarium），它纯粹是结构性的，本身没有自己的 LLM。
@@ -64,6 +64,6 @@ tags:
 
 ## 延伸阅读
 
-- [什么是 Agent](what-is-an-agent.md) — 这个框架围绕的定义。
-- [边界](../boundaries.md) — 什么情况 KT 适合，什么情况不适合。
-- [kt-biome](https://github.com/Kohaku-Lab/kt-biome) — 展示用Creature与 plugin 套件。
+- [什么是 Agent](what-is-an-agent.md)：这个框架围绕的定义。
+- [边界](../boundaries.md)：什么情况 KT 适合，什么情况不适合。
+- [kt-biome](https://github.com/Kohaku-Lab/kt-biome)：展示用Creature与 plugin 套件。

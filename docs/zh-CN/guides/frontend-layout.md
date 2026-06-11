@@ -13,7 +13,7 @@ tags:
 
 Dashboard 用的是可设置的二元 split tree：每个区块不是 leaf (一个 panel) 就是 split (两个子节点加一个可拖的分隔线)。Preset 可以一次换掉整棵树；edit 模式可以就地调整。
 
-参考：[服务部署指南](serving.md) — 怎么把 dashboard 打开。
+参考：[服务部署指南](serving.md)，怎么把 dashboard 打开。
 
 ## 核心概念
 
@@ -144,5 +144,5 @@ Split tree 存成纯 JSON：
 
 ## 延伸阅读
 
-- [服务部署指南](serving.md) — 用 `kt web` / `kt app` / `kt serve` 打开 dashboard。
-- [Development / Frontend](../dev/frontend.md) — 给贡献者的架构文件。
+- [服务部署指南](serving.md)：用 `kt web` / `kt app` / `kt serve` 打开 dashboard。
+- [Development / Frontend](../dev/frontend.md)：给贡献者的架构文件。

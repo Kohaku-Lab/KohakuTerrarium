@@ -15,9 +15,9 @@ KohakuTerrarium 的 `kt` CLI 和 Vue 桌面应用是同一个引擎的两种界�
 
 图例：
 
-- ✅ — 已在 UI 提供，无需离开桌面应用。
-- ⚠️ — 部分支持；UI 覆盖常用路径，少数边缘场景仍需 CLI（见 *备注*）。
-- 🔧 — 故意保持 CLI-only（部署 / 运维）。UI 刻意不暴露。
+- ✅：已在 UI 提供，无需离开桌面应用。
+- ⚠️：部分支持；UI 覆盖常用路径，少数边缘场景仍需 CLI（见 *备注*）。
+- 🔧：故意保持 CLI-only（部署 / 运维）。UI 刻意不暴露。
 
 ## 身份 / 配置
 
@@ -40,7 +40,7 @@ KohakuTerrarium 的 `kt` CLI 和 Vue 桌面应用是同一个引擎的两种界�
 
 | `kt` 命令 | UI 入口 | 状态 |
 |---|---|---|
-| `kt list`（会话） | Sessions 标签 — 已保存会话列表 | ✅ |
+| `kt list`（会话） | Sessions 标签（已保存会话列表） | ✅ |
 | `kt resume <session>` | Sessions 标签 → 行 → **继续** | ✅ |
 | `kt search <session> <query> --mode --agent -k` | Session viewer → **Find** 标签 | ✅ |
 | `kt embedding <session> --provider --model --dimensions` | Sessions 标签 → 行 ⋮ 菜单 → **构建嵌入向量**（或 Find 标签空状态横幅） | ✅ |
@@ -90,11 +90,11 @@ KohakuTerrarium 的 `kt` CLI 和 Vue 桌面应用是同一个引擎的两种界�
 
 | `kt` 命令 | UI 入口 | 状态 |
 |---|---|---|
-| `kt service install/uninstall/status/edit` | （无） | 🔧 故意为之 — systemd 单元安装需要在服务器上以 root 运行。运维使用 CLI 或 Ansible / Docker。 |
+| `kt service install/uninstall/status/edit` | （无） | 🔧 故意为之：systemd 单元安装需要在服务器上以 root 运行。运维使用 CLI 或 Ansible / Docker。 |
 
 ## 另见
 
-- [桌面 UI 导览](desktop-ui-walkthrough.md) — 各标签的引导。
-- [App update](app-update.md) — 完整更新流程内部细节。
-- [Serving 指南](serving.md) — 守护进程如何接线。
-- [`kt --help`](../../README.md) — 终端侧参考。
+- [桌面 UI 导览](desktop-ui-walkthrough.md)：各标签的引导。
+- [App update](app-update.md)：完整更新流程内部细节。
+- [Serving 指南](serving.md)：守护进程如何接线。
+- [`kt --help`](../../README.md)：终端侧参考。

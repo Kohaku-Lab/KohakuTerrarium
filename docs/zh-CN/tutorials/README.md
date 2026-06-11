@@ -15,24 +15,24 @@ tags:
 
 ## 开始
 
-- [第一个 Creature](first-creature.md) — 编写一个最小 Agent，理解配置结构。
-- [第一个生态瓶（Terrarium）](first-terrarium.md) — 连接两个 Creature，并配置 Channel。
-- [第一个 Python 嵌入](first-python-embedding.md) — 在 Python 代码中运行 Agent。
-- [第一个自定义工具](first-custom-tool.md) — 编写自己的 Tool 类。
-- [第一个插件](first-plugin.md) — 拦截工具调用并添加审计。
+- [第一个 Creature](first-creature.md)：编写一个最小 Agent，理解配置结构。
+- [第一个生态瓶（Terrarium）](first-terrarium.md)：连接两个 Creature，并配置 Channel。
+- [第一个 Python 嵌入](first-python-embedding.md)：在 Python 代码中运行 Agent。
+- [第一个自定义工具](first-custom-tool.md)：编写自己的 Tool 类。
+- [第一个插件](first-plugin.md)：拦截工具调用并添加审计。
 
 ## 在服务器上跑起来之后
 
-- [给你的主机加锁](locking-down-your-host.md) — 四个递进的认证级别,
+- [给你的主机加锁](locking-down-your-host.md)：四个递进的认证级别,
   每个 30 秒就能配好。从 Level 0（桌面什么都不用做）开始,按需要
   爬到主机令牌 / 管理员密码 / 多用户。跳过
-  [身份验证](../guides/authentication.md) 里的理论 — 这篇教程就是
+  [身份验证](../guides/authentication.md) 里的理论，这篇教程就是
   复制粘贴的捷径。
 
 每篇教程都默认你已经完成 [快速开始](../guides/getting-started.md)。
 
 ## 参考
 
-- [指南](../guides/README.md) — 面向任务的文档。
-- [概念](../concepts/README.md) — 用于建立心智模型。
-- [参考](../reference/README.md) — 用于精确查阅字段和接口。
+- [指南](../guides/README.md)：面向任务的文档。
+- [概念](../concepts/README.md)：用于建立心智模型。
+- [参考](../reference/README.md)：用于精确查阅字段和接口。
