@@ -557,7 +557,15 @@ def parse_spec(spec: str) -> tuple[str | None, str, str | None]:
 
 
 def is_spec(value: str) -> bool:
-    """Cheap predicate — True if ``value`` looks like a marketplace spec."""
+    """Cheap predicate — True if ``value`` looks like a marketplace spec.
+
+    Syntactically identical to a ``@pkg/path`` config reference —
+    context routes the two: installers treat ``@`` as an install spec,
+    config loaders treat it as a path reference.
+    :func:`kohakuterrarium.packages.install.install_package_spec` raises
+    a disambiguating error when an install receives what is clearly a
+    path reference.
+    """
     return isinstance(value, str) and value.startswith("@")
 
 
@@ -700,20 +708,48 @@ def install_url(entry: MarketplaceEntry, version: MarketplaceVersion) -> str:
 
 
 # ──────────────────────────────────────────────────────────────────
-# Sync wrapper (CLI ergonomics — most CLI handlers are sync)
+# Sync wrappers (CLI ergonomics — most CLI handlers are sync)
 # ──────────────────────────────────────────────────────────────────
+
+
+def _run_blocking(coro, *, sync_name: str, async_name: str):
+    """``asyncio.run`` the coroutine, or fail clearly inside a loop.
+
+    ``asyncio.run`` raises a cryptic ``RuntimeError: asyncio.run()
+    cannot be called from a running event loop`` deep in the stack;
+    instead, name the sync wrapper and point at its async twin.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    coro.close()  # never awaited — silence the warning
+    raise RuntimeError(
+        f"marketplace.{sync_name}() cannot be called from a running "
+        f"event loop; await marketplace.{async_name}() instead"
+    )
 
 
 def resolve_sync(spec: str) -> tuple[MarketplaceEntry, MarketplaceVersion]:
     """Synchronous wrapper around :func:`resolve` for CLI handlers."""
-    return asyncio.run(resolve(spec))
+    return _run_blocking(resolve(spec), sync_name="resolve_sync", async_name="resolve")
 
 
 def fetch_marketplace_sync(*, force: bool = False) -> list[MarketplaceEntry]:
-    return asyncio.run(fetch_marketplace(force=force))
+    """Synchronous wrapper around :func:`fetch_marketplace`."""
+    return _run_blocking(
+        fetch_marketplace(force=force),
+        sync_name="fetch_marketplace_sync",
+        async_name="fetch_marketplace",
+    )
 
 
 def search_sync(
     query: str = "", *, tag: str | None = None, author: str | None = None
 ) -> list[MarketplaceEntry]:
-    return asyncio.run(search(query, tag=tag, author=author))
+    """Synchronous wrapper around :func:`search`."""
+    return _run_blocking(
+        search(query, tag=tag, author=author),
+        sync_name="search_sync",
+        async_name="search",
+    )

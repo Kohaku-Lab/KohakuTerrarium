@@ -132,7 +132,7 @@ def history(
     """
     engine = as_engine(service)
     if creature_id.startswith("ch:"):
-        return _channel_history(engine, session_id, creature_id[3:])
+        return channel_history(engine, session_id, creature_id[3:])
 
     creature = find_creature(engine, session_id, creature_id)
     agent = creature.agent
@@ -162,7 +162,7 @@ def history(
             (g.graph_id for g in engine.list_graphs() if creature_id in g.creature_ids),
             session_id,
         )
-        store = get_session_store(sid)
+        store = get_session_store(engine, sid)
         if store is not None:
             try:
                 events = store.get_resumable_events(
@@ -180,9 +180,7 @@ def history(
     }
 
 
-def _channel_history(
-    engine: Terrarium, session_id: str, channel: str
-) -> dict[str, Any]:
+def channel_history(engine: Terrarium, session_id: str, channel: str) -> dict[str, Any]:
     """Build a channel-history payload from the attached session store.
 
     Mirrors the legacy ``terrarium_history`` body for channel targets:
@@ -191,13 +189,13 @@ def _channel_history(
     tab.  Returns an empty event list when no store is attached or the
     channel has no recorded messages — the frontend tolerates that.
     """
-    store = get_session_store(session_id)
+    store = get_session_store(engine, session_id)
     if store is None:
         # Walk every active store as a last resort; useful when the
         # session id is the legacy "_" wildcard or when the studio
         # bookkeeping disagrees with the engine after a fork. Pick the
         # first active store that actually holds this channel.
-        for candidate in list_session_stores():
+        for candidate in list_session_stores(engine):
             try:
                 if candidate.get_channel_messages(channel):
                     store = candidate

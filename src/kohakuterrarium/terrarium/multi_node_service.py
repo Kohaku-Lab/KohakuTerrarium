@@ -320,7 +320,7 @@ class MultiNodeTerrariumService:
         parent_creature_id: str | None = None,
         start: bool = True,
         pwd: str | None = None,
-        llm_override: Any = None,
+        llm: Any = None,
         on_node: str = HOST_NODE,
         name: str | None = None,
     ) -> CreatureInfo:
@@ -340,7 +340,7 @@ class MultiNodeTerrariumService:
             parent_creature_id=parent_creature_id,
             start=start,
             pwd=pwd,
-            llm_override=llm_override,
+            llm=llm,
             name=name,
         )
         self._home[info.creature_id] = on_node

@@ -15,13 +15,17 @@ _DEFAULT_MCP_CONNECT_TIMEOUT = 20
 
 
 async def init_mcp(agent: Any) -> None:
-    """Initialize MCP client manager and connect configured servers."""
+    """Initialize MCP client manager and connect configured servers.
+
+    The manager is ALWAYS constructed (E7) — the ``mcp_connect``
+    runtime tool must work on a configless agent; the old
+    ``mcp_servers``-gated init left ``_mcp_manager = None`` so that
+    tool could never succeed.
+    """
+    agent._mcp_manager = MCPClientManager()
     mcp_configs = agent.config.mcp_servers
     if not mcp_configs:
-        agent._mcp_manager = None
         return
-
-    agent._mcp_manager = MCPClientManager()
 
     for srv_data in mcp_configs:
         if not isinstance(srv_data, dict):

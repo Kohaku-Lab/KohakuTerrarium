@@ -36,8 +36,7 @@ from kohakuterrarium.studio.persistence.resume import resume_session as studio_r
 from kohakuterrarium.studio.persistence.store import resolve_session_path_default
 from kohakuterrarium.studio.persistence.viewer.paths import normalize_session_stem
 from kohakuterrarium.studio.sessions.handles import Session
-from kohakuterrarium.studio.sessions.lifecycle import _meta as _lifecycle_meta
-from kohakuterrarium.studio.sessions.lifecycle import _now_iso
+from kohakuterrarium.studio.sessions.lifecycle import now_iso, register_session_meta
 from kohakuterrarium.terrarium.service import TerrariumService
 
 router = APIRouter()
@@ -220,15 +219,18 @@ async def resume_session(
         if resumed_creatures
         else (meta.get("agents") or [""])[0]
     )
-    _lifecycle_meta[sid] = {
-        "name": meta.get("terrarium_name") or meta.get("session_id") or sid,
-        "config_path": meta.get("config_path", ""),
-        "pwd": meta.get("pwd", ""),
-        "created_at": _now_iso(),
-        "on_node": on_node,
-        "resumed_from": str(path),
-        "creature_id": primary_cid,
-    }
+    register_session_meta(
+        service,
+        sid,
+        {
+            "name": meta.get("terrarium_name") or meta.get("session_id") or sid,
+            "config_path": meta.get("config_path", ""),
+            "pwd": meta.get("pwd", ""),
+            "on_node": on_node,
+            "resumed_from": str(path),
+            "creature_id": primary_cid,
+        },
+    )
 
     name = meta.get("terrarium_name") or session_name
     # Worker-side resume already attached the creature(s); surface a
@@ -247,7 +249,7 @@ async def resume_session(
         channels=[],
         has_root=bool(meta.get("terrarium_creatures")),
         pwd=meta.get("pwd", ""),
-        created_at=_now_iso(),
+        created_at=now_iso(),
         config_path=meta.get("config_path", ""),
         home_node=on_node,
     )
@@ -488,17 +490,20 @@ async def _resume_cluster(
         creature_id = new_creature_by_member.get(original_sid) or (
             (new_meta.get("agents") or [""])[0]
         )
-        _lifecycle_meta[new_sid] = {
-            "name": new_meta.get("terrarium_name")
-            or new_meta.get("session_id")
-            or new_sid,
-            "config_path": new_meta.get("config_path", ""),
-            "pwd": new_meta.get("pwd", ""),
-            "created_at": _now_iso(),
-            "on_node": node,
-            "resumed_from": str(paths[original_sid]),
-            "creature_id": creature_id,
-        }
+        register_session_meta(
+            service,
+            new_sid,
+            {
+                "name": new_meta.get("terrarium_name")
+                or new_meta.get("session_id")
+                or new_sid,
+                "config_path": new_meta.get("config_path", ""),
+                "pwd": new_meta.get("pwd", ""),
+                "on_node": node,
+                "resumed_from": str(paths[original_sid]),
+                "creature_id": creature_id,
+            },
+        )
 
     # Relink: call ``service.connect`` between the primary creature and
     # every other member's creature so cross_node_connect repopulates
@@ -547,7 +552,7 @@ async def _resume_cluster(
         channels=[],
         has_root=bool(primary_meta.get("terrarium_creatures")),
         pwd=primary_meta.get("pwd", ""),
-        created_at=_now_iso(),
+        created_at=now_iso(),
         config_path=primary_meta.get("config_path", ""),
         home_node=primary_member.on_node,
     )

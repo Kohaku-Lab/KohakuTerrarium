@@ -25,7 +25,6 @@ from typing import Any, Iterable
 from fastapi import WebSocket, WebSocketDisconnect
 
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.studio.sessions.lifecycle import list_session_stores
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -41,12 +40,14 @@ def _find_live_store(
 ) -> SessionStore | None:
     """Locate the live ``SessionStore`` for ``session_name``.
 
-    Iterates the studio's live store registry and matches on the file
-    stem so callers can pass the canonical name (no ``.kohakutr``
+    Iterates the caller-provided live store registry and matches on the
+    file stem so callers can pass the canonical name (no ``.kohakutr``
     extension, no version suffix). Returns ``None`` if no live
-    creature / session owns this name.
+    creature / session owns this name.  Session stores are
+    instance-scoped (``studio.sessions.registry``) so the caller — who
+    knows which runtime it serves — supplies the iterable.
     """
-    candidates = stores if stores is not None else list_session_stores()
+    candidates = stores if stores is not None else ()
     for store in candidates:
         if store is None:
             continue
@@ -88,8 +89,9 @@ async def run_trace_attach(
     whose status is ``"paused"`` so this close path is the exception,
     not the common case.
 
-    ``stores`` lets callers pin a specific iterable; when ``None`` the
-    studio's live registry is consulted directly.
+    ``stores`` is the runtime's live store registry (the WS shell passes
+    ``lifecycle.list_session_stores(service)``); ``None`` means no live
+    stores and rejects every session as not-live.
     """
     await websocket.accept()
     store = _find_live_store(session_name, stores)

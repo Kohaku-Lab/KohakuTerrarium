@@ -45,7 +45,7 @@ def build_runtime_graph_snapshot(engine: Terrarium) -> dict[str, Any]:
     """
 
     def _order_key(graph: GraphTopology) -> tuple[str, str]:
-        meta = lifecycle.get_session_meta(graph.graph_id)
+        meta = lifecycle.get_session_meta(engine, graph.graph_id)
         return (meta.get("created_at", ""), graph.graph_id)
 
     graphs = []
@@ -58,7 +58,7 @@ def build_runtime_graph_snapshot(engine: Terrarium) -> dict[str, Any]:
 
 
 def _graph_to_dict(engine: Terrarium, graph: GraphTopology) -> dict[str, Any]:
-    meta = lifecycle.get_session_meta(graph.graph_id)
+    meta = lifecycle.get_session_meta(engine, graph.graph_id)
     creatures = _creatures_for_graph(engine, graph)
     channels = _channels_for_graph(engine, graph)
     return {

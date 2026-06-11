@@ -17,9 +17,11 @@ from typing import Any
 from uuid import uuid4
 
 from kohakuterrarium.builtins.inputs.none import NoneInput
+from kohakuterrarium.builtins.outputs.none import NoneOutput
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config import AgentConfig, build_agent_config
 from kohakuterrarium.core.environment import Environment
+from kohakuterrarium.core.turn import AgentEventStream
 from kohakuterrarium.llm.profiles import _login_provider_for
 from kohakuterrarium.terrarium.config import CreatureConfig
 from kohakuterrarium.terrarium.output_log import LogEntry, OutputLogCapture
@@ -236,7 +238,44 @@ class Creature:
         return "idle"
 
     # ------------------------------------------------------------------
-    # chat — streaming inject_input + output drain
+    # typed turn drivers (E3) — the programmatic chat surface
+    # ------------------------------------------------------------------
+
+    async def run(self, content, **kwargs):
+        """Drive one full turn; return a
+        :class:`~kohakuterrarium.core.turn.TurnResult`.
+
+        Delegates to :meth:`Agent.run` — see it for ``timeout=`` /
+        ``raise_on_error=`` semantics (a failed turn RAISES by default,
+        a timed-out one is actually interrupted).
+        """
+        return await self.agent.run(content, **kwargs)
+
+    def run_stream(self, content, **kwargs):
+        """Drive one turn, yielding typed
+        :class:`~kohakuterrarium.core.turn.TurnEvent`\\ s live
+        (``TextChunk`` / ``Activity`` / final ``TurnEnded``).
+        """
+        return self.agent.run_stream(content, **kwargs)
+
+    def attach(self) -> AgentEventStream:
+        """Observe this creature's output as typed events.
+
+        Non-destructive and multi-consumer: every ``attach()`` gets its
+        own stream; the default output, session store, and concurrent
+        turns are unaffected.  Captures out-of-band turns (triggers,
+        channel messages) too — everything the output router fans out.
+
+        Usage::
+
+            async with creature.attach() as stream:
+                async for ev in stream:
+                    ...
+        """
+        return AgentEventStream(self.agent)
+
+    # ------------------------------------------------------------------
+    # chat — streaming inject_input + output drain (text-only sugar)
     # ------------------------------------------------------------------
 
     async def inject_input(
@@ -439,9 +478,12 @@ def build_creature(
     creature_id: str | None = None,
     graph_id: str = "",
     pwd: str | None = None,
-    llm_override: str | None = None,
+    llm: Any = None,
     environment: Environment | None = None,
-    suppress_io: bool = False,
+    io: str = "config",
+    strict: bool = True,
+    tools: list[Any] | None = None,
+    plugins: list[Any] | None = None,
 ) -> Creature:
     """Build a :class:`Creature` from any of the supported config shapes.
 
@@ -451,34 +493,49 @@ def build_creature(
 
     Accepted ``config`` types:
 
-    - ``str`` / ``Path`` — path to a creature config file.  Loaded via
-      ``Agent.from_path``.
+    - ``str`` / ``Path`` — path to a creature config file (or a
+      ``@pkg/...`` reference).  Loaded via ``Agent.from_path``.
     - ``AgentConfig`` — already-loaded standalone config.  Wrapped via
       ``Agent(config, ...)``.
     - ``CreatureConfig`` — in-recipe creature dict.  Loaded via
       ``build_agent_config(config_data, base_dir)`` then ``Agent(...)``.
 
-    ``suppress_io`` forces the agent's input module to :class:`NoneInput`
-    regardless of what the config declares.  A creature managed by the
-    Studio / Lab layer is driven entirely through the attach WebSocket —
-    it must NEVER boot its config's own ``input: cli`` loop, which on a
-    worker process (a foreground ``kt lab-client``) would hijack the
-    terminal's stdin.  Only the standalone ``kt run`` path leaves
-    ``suppress_io=False`` so the config's IO actually runs.
+    ``io`` selects how much of the config's I/O boots:
+
+    - ``"config"`` — the config's input + output run as declared (the
+      standalone ``kt run`` path).
+    - ``"none"`` — input forced to :class:`NoneInput`; config output
+      still boots.  A creature managed by the Studio / Lab layer is
+      driven entirely through the attach WebSocket — it must NEVER
+      boot its config's own ``input: cli`` loop, which on a worker
+      process would hijack the terminal's stdin.
+    - ``"headless"`` — input forced to :class:`NoneInput` AND the
+      default output forced to :class:`NoneOutput`.  For batch /
+      programmatic runs: agent text is consumed via ``run_stream`` /
+      the session store, and N concurrent agents must not interleave
+      writes on the console.  Named outputs from the config are
+      preserved.
     """
-    _io_override = NoneInput() if suppress_io else None
+    if io not in ("config", "none", "headless"):
+        raise ValueError(f"io= must be 'config', 'none', or 'headless' — got {io!r}")
+    _io_override = NoneInput() if io in ("none", "headless") else None
+    _out_override = NoneOutput() if io == "headless" else None
     if isinstance(config, (str, Path)):
         agent = Agent.from_path(
             str(config),
             input_module=_io_override,
+            output_module=_out_override,
             session=(
                 environment.get_session(creature_id or Path(config).stem)
                 if environment is not None
                 else None
             ),
             environment=environment,
-            llm_override=llm_override,
+            llm=llm,
             pwd=pwd,
+            strict=strict,
+            tools=tools,
+            plugins=plugins,
         )
         cid = creature_id or _safe_creature_id(agent.config.name)
         return Creature(
@@ -496,10 +553,14 @@ def build_creature(
         agent = Agent(
             config,
             input_module=_io_override,
+            output_module=_out_override,
             session=session,
             environment=environment,
-            llm_override=llm_override,
+            llm=llm,
             pwd=pwd,
+            strict=strict,
+            tools=tools,
+            plugins=plugins,
         )
         cid = creature_id or _safe_creature_id(config.name)
         return Creature(
@@ -513,14 +574,19 @@ def build_creature(
     if isinstance(config, CreatureConfig):
         agent_config = build_agent_config(config.config_data, config.base_dir)
         # CreatureConfig (in-recipe / hot-plug) is always engine-managed
-        # and channel-driven — its IO is suppressed unconditionally.
+        # and channel-driven — its input is suppressed unconditionally;
+        # ``io="headless"`` additionally silences the default output.
         agent = Agent(
             agent_config,
             input_module=NoneInput(),
+            output_module=_out_override,
             session=environment.get_session(config.name) if environment else None,
             environment=environment,
-            llm_override=llm_override,
+            llm=llm,
             pwd=pwd,
+            strict=strict,
+            tools=tools,
+            plugins=plugins,
         )
         cid = creature_id or _safe_creature_id(config.name)
         return Creature(

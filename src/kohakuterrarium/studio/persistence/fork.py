@@ -16,8 +16,12 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from fastapi import HTTPException
-
+from kohakuterrarium.errors import (
+    ConflictError,
+    InvalidRequestError,
+    SessionError,
+    SessionNotFoundError,
+)
 from kohakuterrarium.session.errors import ForkNotStableError
 from kohakuterrarium.session.migrations import path_for_version
 from kohakuterrarium.session.store import SessionStore
@@ -79,7 +83,8 @@ def mutation_from_payload(
     """Map the HTTP mutation payload to a local mutator callable.
 
     Validates that the requested mutation is compatible with the
-    fork-point event type. Raises ``HTTPException(400)`` on mismatch.
+    fork-point event type. Raises :class:`InvalidRequestError` on
+    mismatch.
     """
     args = args or {}
     fork_type = fork_point_event.get("type", "")
@@ -89,52 +94,37 @@ def mutation_from_payload(
 
     if kind == "edit_user_message":
         if fork_type != "user_message":
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "edit_user_message requires the fork-point event to be "
-                    f"a user_message, got {fork_type!r}"
-                ),
+            raise InvalidRequestError(
+                "edit_user_message requires the fork-point event to be "
+                f"a user_message, got {fork_type!r}"
             )
         content = args.get("content")
         if not isinstance(content, str):
-            raise HTTPException(
-                status_code=400,
-                detail="edit_user_message requires args.content: str",
-            )
+            raise InvalidRequestError("edit_user_message requires args.content: str")
         return _edit_user_message(content)
 
     if kind == "inject_user_message":
         content = args.get("content")
         if not isinstance(content, str):
-            raise HTTPException(
-                status_code=400,
-                detail="inject_user_message requires args.content: str",
-            )
+            raise InvalidRequestError("inject_user_message requires args.content: str")
         return _inject_user_message(content)
 
     if kind == "inject_tool_result":
         if fork_type != "assistant_tool_calls":
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "inject_tool_result requires the fork-point event to be "
-                    f"an assistant_tool_calls, got {fork_type!r}"
-                ),
+            raise InvalidRequestError(
+                "inject_tool_result requires the fork-point event to be "
+                f"an assistant_tool_calls, got {fork_type!r}"
             )
         tool_call_id = args.get("tool_call_id")
         output = args.get("output")
         if not isinstance(tool_call_id, str) or not isinstance(output, str):
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "inject_tool_result requires args.tool_call_id: str "
-                    "and args.output: str"
-                ),
+            raise InvalidRequestError(
+                "inject_tool_result requires args.tool_call_id: str "
+                "and args.output: str"
             )
         return _inject_tool_result(tool_call_id, output)
 
-    raise HTTPException(status_code=400, detail=f"Unknown mutate.kind: {kind}")
+    raise InvalidRequestError(f"Unknown mutate.kind: {kind}")
 
 
 def find_fork_point(store: SessionStore, at_event_id: int) -> dict[str, Any] | None:
@@ -158,17 +148,28 @@ async def fork_session_handler(
     Caller is responsible for resolving ``session_name`` to ``session_path``
     so this helper stays transport-agnostic. Returns a plain dict that
     the route layer wraps in the ``ForkResponse`` pydantic model.
+
+    Typed errors (the api adapter maps them onto 400/404/409/500):
+    :class:`SessionNotFoundError` for a missing source — raised BEFORE
+    any store open, since ``SessionStore(path)`` creates the file as a
+    side effect; :class:`InvalidRequestError` for a bad ``at_event_id``
+    / mutation payload; :class:`ConflictError` when the fork target
+    exists or the fork point splits an in-flight job;
+    :class:`SessionError` for anything else.
     """
+    session_path = Path(session_path)
+    if not session_path.exists():
+        raise SessionNotFoundError(f"Session not found: {session_path}")
     if at_event_id < 1:
-        raise HTTPException(400, "at_event_id must be >= 1")
+        raise InvalidRequestError("at_event_id must be >= 1")
 
     store: SessionStore | None = None
     try:
         store = SessionStore(session_path)
         fork_point_event = find_fork_point(store, at_event_id)
         if fork_point_event is None:
-            raise HTTPException(
-                400, f"No event with event_id={at_event_id} in this session"
+            raise InvalidRequestError(
+                f"No event with event_id={at_event_id} in this session"
             )
 
         mutate: Callable[[dict], dict | None] | None = None
@@ -178,7 +179,7 @@ async def fork_session_handler(
         fork_name = name or f"fork-{int(time.time())}"
         target_path = fork_target_path(session_path, fork_name)
         if target_path.exists():
-            raise HTTPException(409, f"Fork target already exists: {target_path.name}")
+            raise ConflictError(f"Fork target already exists: {target_path.name}")
 
         try:
             child_store = store.fork(
@@ -188,17 +189,17 @@ async def fork_session_handler(
                 name=name,
             )
         except ForkNotStableError as exc:
-            raise HTTPException(status_code=409, detail=str(exc))
+            raise ConflictError(str(exc)) from exc
         except (ValueError, FileExistsError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            raise InvalidRequestError(str(exc)) from exc
 
         child_session_id = child_store.session_id
         child_path = child_store.path
         child_store.close(update_status=False)
-    except HTTPException:
+    except (InvalidRequestError, ConflictError, SessionNotFoundError):
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Fork failed: {exc}")
+        raise SessionError(f"Fork failed: {exc}") from exc
     finally:
         if store is not None:
             store.close(update_status=False)

@@ -206,7 +206,7 @@ class TerrariumService(Protocol):
         parent_creature_id: str | None = None,
         start: bool = True,
         pwd: str | None = None,
-        llm_override: Any = None,
+        llm: Any = None,
         on_node: str = "_host",
         name: str | None = None,
     ) -> CreatureInfo:
@@ -599,7 +599,7 @@ class LocalTerrariumService:
         parent_creature_id: str | None = None,
         start: bool = True,
         pwd: str | None = None,
-        llm_override: Any = None,
+        llm: Any = None,
         on_node: str = "_host",
         name: str | None = None,
     ) -> CreatureInfo:
@@ -613,7 +613,7 @@ class LocalTerrariumService:
             config,
             graph=graph_id,
             creature_id=creature_id,
-            llm_override=llm_override,
+            llm=llm,
             pwd=pwd,
             start=start,
             is_privileged=is_privileged,

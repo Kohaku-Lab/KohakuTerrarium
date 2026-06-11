@@ -6,8 +6,7 @@ the trace timeline + the Cost tab's per-turn aggregation.
 
 from typing import Any
 
-from fastapi import HTTPException
-
+from kohakuterrarium.errors import NotFoundError
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.viewer.rollups import (
     aggregate_turn_rollups,
@@ -55,9 +54,9 @@ def build_turns_payload(
             elif main_agents:
                 agent = main_agents[0]
             else:
-                raise HTTPException(404, f"Session has no agents: {session_name}")
+                raise NotFoundError(f"Session has no agents: {session_name}")
         elif agent not in known_agents:
-            raise HTTPException(404, f"Agent not found in session: {agent}")
+            raise NotFoundError(f"Agent not found in session: {agent}")
         rows = rollups_or_derived(store, agent)
         agent_used = agent
 

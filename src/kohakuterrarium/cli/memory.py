@@ -79,7 +79,8 @@ def search_cli(
         print(f"Session not found: {session_query}")
         return 1
 
-    store = SessionStore(path)
+    # Read-only: searching must not bump the session's last_active.
+    store = SessionStore.open_readonly(path)
     try:
         # Try to create embedder for query encoding (semantic/hybrid)
         embedder = None
@@ -92,7 +93,7 @@ def search_cli(
                 )
 
         # SessionMemory discovers existing vector tables via saved dimensions
-        memory = SessionMemory(str(path), embedder=embedder, store=store)
+        memory = SessionMemory(str(path), embedder=embedder)
 
         if mode in ("semantic", "hybrid") and not memory.has_vectors:
             print("No vector index found. Run 'kt embedding' first, or use --mode fts")

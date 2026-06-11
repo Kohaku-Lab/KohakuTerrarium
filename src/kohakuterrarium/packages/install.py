@@ -20,6 +20,7 @@ import time
 import uuid
 from pathlib import Path
 
+from kohakuterrarium.errors import PackageError
 from kohakuterrarium.packages import git_backend
 from kohakuterrarium.packages import marketplace
 from kohakuterrarium.packages.locations import _packages_dir
@@ -27,6 +28,7 @@ from kohakuterrarium.packages.locations import get_package_root
 from kohakuterrarium.packages.locations import read_link
 from kohakuterrarium.packages.locations import remove_link
 from kohakuterrarium.packages.locations import write_link
+from kohakuterrarium.packages.manifest import DEP_POLICIES
 from kohakuterrarium.packages.manifest import _force_rmtree
 from kohakuterrarium.packages.manifest import _install_python_deps
 from kohakuterrarium.packages.manifest import _load_manifest
@@ -36,10 +38,70 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _check_deps_policy(deps: str) -> None:
+    """Reject an unknown ``deps`` policy BEFORE any clone/copy happens."""
+    if deps not in DEP_POLICIES:
+        raise PackageError(
+            f"Unknown deps policy: {deps!r} (expected one of {DEP_POLICIES})"
+        )
+
+
+def ensure(spec: str, *, deps: str = "auto") -> str:
+    """Idempotent install — return the package name, installing if needed.
+
+    The missing primitive for scripts: ``kt.packages.ensure("@kt-biome")``
+    at the top of a batch job guarantees the package is present without
+    re-resolving the marketplace (or re-cloning) on every run.
+
+    If a package with the spec's name is already installed, returns
+    immediately — **no version check is performed**, even for pinned
+    specs like ``@pkg@v1.2.0``. Use :func:`install_package_spec` to
+    force a specific version onto an existing install.
+
+    Args:
+        spec: Anything :func:`install_package_spec` accepts —
+            ``@name`` / ``@name@version`` / ``@source/name``, a git
+            URL, or a local directory path.
+        deps: Dependency policy for a fresh install (``"auto"`` /
+            ``"never"``); ignored when the package is already present.
+
+    Returns:
+        The installed package name (usable in ``@<name>/...`` refs).
+    """
+    _check_deps_policy(deps)
+    name: str | None = None
+    if marketplace.is_spec(spec):
+        _source, name, _version = marketplace.parse_spec(spec)
+        if "/" in name:
+            # ``@pkg/sub/path`` parses as ``@source/name`` — for the
+            # idempotency check, the candidate package is the first
+            # segment. install_package_spec raises the disambiguating
+            # error if it really is a path reference.
+            name = spec[1:].split("/", 1)[0]
+    elif not (
+        spec.startswith("http://")
+        or spec.startswith("https://")
+        or spec.endswith(".git")
+    ):
+        source_path = Path(spec)
+        if source_path.is_dir():
+            name = _load_manifest(source_path).get("name", source_path.name)
+    else:
+        repo_name = spec.rstrip("/").split("/")[-1]
+        name = repo_name[:-4] if repo_name.endswith(".git") else repo_name
+
+    if name and get_package_root(name) is not None:
+        logger.debug("Package already installed", package=name, spec=spec)
+        return name
+    return install_package_spec(spec, deps=deps)
+
+
 def install_package_spec(
     spec: str,
     editable: bool = False,
     name_override: str | None = None,
+    *,
+    deps: str = "auto",
 ) -> str:
     """Install by spec — ``@name`` / ``@name@version`` / ``@source/name`` / git URL / local path.
 
@@ -55,14 +117,33 @@ def install_package_spec(
     Editable installs of a marketplace package are unsupported — git
     clones cannot be ``-e`` linked; raise immediately rather than
     silently dropping the flag.
+
+    ``deps`` is the Python-dependency policy (``"auto"`` / ``"never"``)
+    threaded down to :func:`install_package`.
     """
+    _check_deps_policy(deps)
     if marketplace.is_spec(spec):
         if editable:
             raise ValueError(
                 "Cannot install a marketplace spec as editable; "
                 "use `kt install -e <local-path>` instead"
             )
-        entry, version = marketplace.resolve_sync(spec)
+        try:
+            entry, version = marketplace.resolve_sync(spec)
+        except marketplace.MarketplaceNotFoundError as exc:
+            # ``@pkg/sub/path`` is a config *path reference*, not an
+            # install spec — the slash makes parse_spec read it as
+            # ``@source/name``.  Point the user at the right command.
+            _source, name, _version = marketplace.parse_spec(spec)
+            if "/" in name:
+                pkg = spec[1:].split("/", 1)[0]
+                raise marketplace.MarketplaceNotFoundError(
+                    f"{exc} — {spec!r} looks like a package path "
+                    f"reference (used in configs / kt run), not an "
+                    f"install spec. To install the package, run: "
+                    f"kt install @{pkg}"
+                ) from exc
+            raise
         url = marketplace.install_url(entry, version)
         # Prefer ``version.commit`` (immutable) over ``version.tag``
         # (mutable upstream — a tag can be force-moved).  CI on the
@@ -83,8 +164,11 @@ def install_package_spec(
             editable=False,
             name_override=name_override or entry.name,
             ref=ref,
+            deps=deps,
         )
-    return install_package(spec, editable=editable, name_override=name_override)
+    return install_package(
+        spec, editable=editable, name_override=name_override, deps=deps
+    )
 
 
 def install_package(
@@ -92,6 +176,8 @@ def install_package(
     editable: bool = False,
     name_override: str | None = None,
     ref: str | None = None,
+    *,
+    deps: str = "auto",
 ) -> str:
     """Install a creature/terrarium package.
 
@@ -103,10 +189,14 @@ def install_package(
         ref: For git installs only — branch / tag / SHA to check out
              after clone.  Ignored for local-path installs.  Used by
              :func:`install_package_spec` to pin marketplace versions.
+        deps: Python-dependency policy — ``"auto"`` installs the
+              manifest's ``python_dependencies`` + ``requirements.txt``
+              via ``sys.executable -m pip``; ``"never"`` skips them.
 
     Returns:
         Installed package name.
     """
+    _check_deps_policy(deps)
     # Reference PACKAGES_DIR through the locations module so test
     # monkeypatches against ``locations.PACKAGES_DIR`` are honoured.
     _packages_dir().mkdir(parents=True, exist_ok=True)
@@ -119,10 +209,10 @@ def install_package(
         or source.endswith(".git")
     ):
         # Git clone
-        return _install_from_git(source, name_override, ref=ref)
+        return _install_from_git(source, name_override, ref=ref, deps=deps)
     elif source_path.is_dir():
         # Local directory
-        return _install_from_local(source_path, editable, name_override)
+        return _install_from_local(source_path, editable, name_override, deps=deps)
     else:
         raise ValueError(
             f"Cannot install from: {source}. "
@@ -130,7 +220,7 @@ def install_package(
         )
 
 
-def update_package(name: str) -> str:
+def update_package(name: str, *, deps: str = "auto") -> str:
     """Pull latest changes for a git-installed package.
 
     Unlike :func:`install_package`, this is only valid for an *already*
@@ -154,6 +244,7 @@ def update_package(name: str) -> str:
         If the package is not a git clone, or ``git pull`` fails, or
         the install was pinned to a specific ref.
     """
+    _check_deps_policy(deps)
     # Resolve through ``.link`` pointers / symlinks to the real
     # checkout. ``_packages_dir() / name`` alone misses editable
     # installs (which live as ``<name>.link`` siblings) and resolves
@@ -196,13 +287,17 @@ def update_package(name: str) -> str:
         raise RuntimeError(f"Git pull failed for {name}: {e}") from e
 
     _validate_package(target, name)
-    _install_python_deps(target)
+    _install_python_deps(target, deps=deps)
     logger.info("Package updated", package=name, path=str(target))
     return name
 
 
 def _install_from_git(
-    url: str, name_override: str | None = None, ref: str | None = None
+    url: str,
+    name_override: str | None = None,
+    ref: str | None = None,
+    *,
+    deps: str = "auto",
 ) -> str:
     """Clone a git repo into packages directory.
 
@@ -266,7 +361,7 @@ def _install_from_git(
             _force_rmtree(target)
             raise
 
-    _install_python_deps(target)
+    _install_python_deps(target, deps=deps)
     _write_install_info(target, source=url, ref=ref)
     logger.info("Package installed", package=name, path=str(target))
     return name
@@ -370,7 +465,11 @@ def _read_install_info(target: Path) -> dict | None:
 
 
 def _install_from_local(
-    source: Path, editable: bool, name_override: str | None = None
+    source: Path,
+    editable: bool,
+    name_override: str | None = None,
+    *,
+    deps: str = "auto",
 ) -> str:
     """Install from local directory (pointer file or copy)."""
     manifest = _load_manifest(source)
@@ -395,7 +494,7 @@ def _install_from_local(
         logger.info("Package installed (copy)", package=name, source=str(source))
 
     _validate_package(source if editable else target, name)
-    _install_python_deps(source if editable else target)
+    _install_python_deps(source if editable else target, deps=deps)
     return name
 
 

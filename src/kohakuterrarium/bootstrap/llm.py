@@ -9,6 +9,7 @@ Creates the correct LLM provider based on:
 from dataclasses import MISSING, fields
 from typing import Any
 
+from kohakuterrarium.errors import LLMNotConfiguredError
 from kohakuterrarium.core.config import AgentConfig
 from kohakuterrarium.llm.anthropic_provider import AnthropicProvider
 from kohakuterrarium.llm.base import LLMConfig, LLMProvider
@@ -47,7 +48,7 @@ def _is_meaningful_config_value(field_name: str, value: Any) -> bool:
 
 def create_llm_provider(
     config: AgentConfig,
-    llm_override: str | None = None,
+    llm: str | None = None,
 ) -> LLMProvider:
     """Create an LLM provider from agent config.
 
@@ -56,17 +57,53 @@ def create_llm_provider(
 
     Args:
         config: Agent configuration
-        llm_override: Override profile name (from --llm CLI flag)
+        llm: Override selector — a profile / preset name or
+            ``provider/model[@variations]`` string (the ``--llm`` CLI
+            flag and every ``llm=`` API param land here).
     """
     # Try profile resolution
     controller_data = _extract_controller_data(config)
-    profile = resolve_controller_llm(controller_data, llm_override)
+    profile = resolve_controller_llm(controller_data, llm)
 
     if profile:
         return _create_from_profile(profile)
 
     # Backward compat: inline config
     return _create_from_inline(config)
+
+
+def coerce_llm_provider(
+    llm: "LLMProvider | LLMProfile | str | None",
+    config: AgentConfig,
+) -> LLMProvider:
+    """Turn any accepted ``llm=`` value into a provider instance.
+
+    The single coercion point behind every ``llm=`` parameter
+    (``Agent.build``, ``Terrarium.add_creature``, ``compose.agent``):
+
+    - ``None`` → resolve from the agent config (profiles → inline).
+    - ``str`` → selector: profile / preset name or
+      ``provider/model[@variations]``.
+    - :class:`LLMProfile` → instantiate that profile directly.
+    - provider instance (anything with a ``chat`` coroutine, e.g.
+      ``ScriptedLLM``) → used as-is, no resolution.
+
+    Raises:
+        TypeError: For any other type.
+        LLMNotConfiguredError / ValueError: When resolution fails.
+    """
+    if llm is None:
+        return create_llm_provider(config)
+    if isinstance(llm, str):
+        return create_llm_provider(config, llm)
+    if isinstance(llm, LLMProfile):
+        return _create_from_profile(llm)
+    if callable(getattr(llm, "chat", None)):
+        return llm
+    raise TypeError(
+        f"llm= accepts a provider instance, a selector string, an "
+        f"LLMProfile, or None — got {type(llm).__name__}"
+    )
 
 
 def _extract_controller_data(config: AgentConfig) -> dict[str, Any]:
@@ -254,7 +291,7 @@ def create_llm_from_profile_name(name: str) -> LLMProvider:
     Raises:
         ValueError: If profile not found or API key missing.
     """
-    profile = resolve_controller_llm({}, llm_override=name)
+    profile = resolve_controller_llm({}, llm=name)
     if not profile:
         raise ValueError(f"Model profile not found: {name}")
     return _create_from_profile(profile)
@@ -288,8 +325,14 @@ def _create_from_inline(config: AgentConfig) -> LLMProvider:
     # configs keep using the OpenAI-compatible transport.
     api_key = config.get_api_key()
     if not api_key:
-        raise ValueError(
-            f"API key not found. Set {config.api_key_env} environment variable."
+        env_hint = (
+            f"Set the {config.api_key_env} environment variable."
+            if config.api_key_env
+            else "Configure an api_key_env in the agent config or use "
+            "'kt login <provider>'."
+        )
+        raise LLMNotConfiguredError(
+            f"API key not found for inline model {config.model!r}. {env_hint}"
         )
 
     if config.auth_mode == "anthropic":

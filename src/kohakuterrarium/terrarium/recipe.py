@@ -23,7 +23,7 @@ agent, so no recipe-side tool injection is needed.
 """
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import Any, Callable, TYPE_CHECKING
 
 import kohakuterrarium.terrarium.channels as _channels
 import kohakuterrarium.terrarium.topology as _topo
@@ -61,7 +61,8 @@ async def apply_recipe(
     *,
     graph: GraphTopology | str | None = None,
     pwd: str | None = None,
-    llm_override: str | None = None,
+    llm: Any = None,
+    strict: bool = True,
     creature_builder: CreatureBuilder | None = None,
 ) -> GraphTopology:
     """Load a terrarium recipe into ``engine`` and return the resulting
@@ -132,11 +133,15 @@ async def apply_recipe(
             cr_cfg,
             creature_id=cid,
             pwd=pwd,
-            llm_override=llm_override,
+            llm=llm,
             env=env,
             use_default_builder=use_default_builder,
+            strict=strict,
         )
-        await engine.add_creature(creature, graph=graph_id, start=False)
+        # ``session=False``: per-creature autosession is suppressed —
+        # ``engine.apply_recipe`` mints ONE terrarium-typed store for
+        # the whole graph (config_path = the recipe) after this loop.
+        await engine.add_creature(creature, graph=graph_id, start=False, session=False)
 
     root_creature: Creature | None = None
     if config.root is not None:
@@ -152,11 +157,14 @@ async def apply_recipe(
             root_cfg,
             creature_id="root",
             pwd=pwd,
-            llm_override=llm_override,
+            llm=llm,
             env=env,
             use_default_builder=use_default_builder,
+            strict=strict,
         )
-        await engine.add_creature(root_creature, graph=graph_id, start=False)
+        await engine.add_creature(
+            root_creature, graph=graph_id, start=False, session=False
+        )
 
     # 6. Wire listen/send edges + inject triggers.
     for cr_cfg in config.creatures:
@@ -258,17 +266,19 @@ def _build_recipe_creature(
     *,
     creature_id: str,
     pwd: str | None,
-    llm_override: str | None,
+    llm: Any,
     env: Environment,
     use_default_builder: bool,
+    strict: bool = True,
 ) -> Creature:
     if use_default_builder:
         return builder(
             cfg,
             creature_id=creature_id,
             pwd=pwd,
-            llm_override=llm_override,
+            llm=llm,
             environment=env,
+            strict=strict,
         )
     creature = builder(cfg, creature_id=creature_id, pwd=pwd)
     creature.agent.environment = env

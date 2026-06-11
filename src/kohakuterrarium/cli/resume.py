@@ -25,7 +25,7 @@ def resume_cli(
     log_level: str,
     last: bool = False,
     io_mode: str | None = None,
-    llm_override: str | None = None,
+    llm: str | None = None,
     log_stderr: str = "auto",
 ) -> int:
     """Resume an agent or terrarium session via the engine.
@@ -57,7 +57,7 @@ def resume_cli(
     announce_migration_if_needed(path)
 
     try:
-        return asyncio.run(_run(path, pwd_override, llm_override))
+        return asyncio.run(_run(path, pwd_override, llm))
     except KeyboardInterrupt:
         print("\nInterrupted")
         return 0
@@ -70,12 +70,10 @@ def resume_cli(
             print(f"  kt resume {path.stem}")
 
 
-async def _run(path, pwd_override, llm_override) -> int:
+async def _run(path, pwd_override, llm) -> int:
     store = SessionStore(path)
     try:
-        engine = await Terrarium.resume(
-            store, pwd=pwd_override, llm_override=llm_override
-        )
+        engine = await Terrarium.resume(store, pwd=pwd_override, llm=llm)
         async with engine:
             graph_id = next(iter(engine._topology.graphs.keys()), None)
             if graph_id is None:

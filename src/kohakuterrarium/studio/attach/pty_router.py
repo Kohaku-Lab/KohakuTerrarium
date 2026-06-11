@@ -31,7 +31,7 @@ def _find_shell() -> str:
     return "sh"
 
 
-def _session_cwd(holder) -> str:
+def session_cwd(holder) -> str:
     """Resolve a creature's (or legacy AgentSession's) working directory.
 
     ``holder`` is anything that exposes ``.agent`` — both

@@ -16,7 +16,7 @@ from kohakuterrarium.packages.install import (
     uninstall_package,
     update_package,
 )
-from kohakuterrarium.packages.locations import PACKAGES_DIR
+from kohakuterrarium.packages.locations import packages_dir as _locations_packages_dir
 from kohakuterrarium.packages.resolve import resolve_package_path
 from kohakuterrarium.packages.walk import list_packages
 from kohakuterrarium.studio.catalog.packages_scan import invalidate_scan_caches
@@ -40,7 +40,7 @@ def packages_dir() -> Path:
 
     Indirection so the CLI / API don't import ``packages.locations``.
     """
-    return PACKAGES_DIR
+    return _locations_packages_dir()
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +49,11 @@ def packages_dir() -> Path:
 
 
 def install_package_op(
-    source: str, editable: bool = False, name: str | None = None
+    source: str,
+    editable: bool = False,
+    name: str | None = None,
+    *,
+    deps: str = "auto",
 ) -> str:
     """Install a creature/terrarium package; returns its package name.
 
@@ -66,7 +70,9 @@ def install_package_op(
     that loop here keeps the contract tight regardless of which
     transport (HTTP, future Lab APP) called the op.
     """
-    name = install_package_spec(source, editable=editable, name_override=name)
+    name = install_package_spec(
+        source, editable=editable, name_override=name, deps=deps
+    )
     invalidate_scan_caches()
     return name
 
@@ -138,7 +144,7 @@ def update_all_packages_op() -> tuple[int, list[str], int, int]:
     """
     packages = list_packages()
     if not packages:
-        return 0, [f"No packages installed in {PACKAGES_DIR}"], 0, 0
+        return 0, [f"No packages installed in {packages_dir()}"], 0, 0
 
     messages: list[str] = []
     exit_code = 0

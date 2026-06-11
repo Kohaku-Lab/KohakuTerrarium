@@ -10,11 +10,12 @@ refreshed lazily on read (``get_session_async``) and eagerly after a
 This module owns the cache schema + read/write helpers. Keeping them
 out of :mod:`lifecycle` keeps that module under the 1000-line hard cap
 mandated by ``tests/unit/test_file_sizes.py`` while leaving the cache
-state (``lifecycle._meta``) where every other reader expects it.
+state (the per-runtime registry in ``studio.sessions.registry``)
+where every other reader expects it.
 
-The helpers are pure functions over the shared mutable ``_meta`` dict
-exported by :mod:`lifecycle`; importing here would be a cycle, so each
-function takes the registry as an argument from the lifecycle caller.
+The helpers are pure functions over the caller's per-runtime meta
+dict (``registry.meta_for(service)``); each function takes the registry
+as an argument from the lifecycle caller.
 """
 
 from typing import TYPE_CHECKING, Any

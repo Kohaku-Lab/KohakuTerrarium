@@ -69,7 +69,7 @@ class BaseTrigger(ABC):
     # Tool name the agent calls to install this trigger (e.g. "add_timer").
     setup_tool_name: ClassVar[str] = ""
     # One-line summary shown in the tool list. The adapter prepends
-    # "**Trigger** — " so the LLM knows this call installs a long-lived
+    # "**Trigger**: " so the LLM knows this call installs a long-lived
     # side-effect rather than returning an immediate result.
     setup_description: ClassVar[str] = ""
     # JSON-schema-like dict describing the args the agent should pass.

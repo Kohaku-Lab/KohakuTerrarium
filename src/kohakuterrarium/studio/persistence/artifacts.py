@@ -6,13 +6,12 @@ HTTP route layer wraps the resolved path in a ``FileResponse``.
 
 from pathlib import Path
 
-from fastapi import HTTPException
-
+from kohakuterrarium.errors import InvalidRequestError, NotFoundError
 from kohakuterrarium.studio.persistence.store import resolve_session_path_default
 
 
 def resolve_artifacts_dir(session_name: str, session_dir: Path) -> Path:
-    """Return the artifacts dir for a session, or 404 if it doesn't exist.
+    """Return the artifacts dir for a session; :class:`NotFoundError` if absent.
 
     Mirrors ``SessionStore.artifacts_dir``: sibling directory named
     ``<session-stem>.artifacts`` alongside the ``.kohakutr`` file.
@@ -30,27 +29,28 @@ def resolve_artifacts_dir(session_name: str, session_dir: Path) -> Path:
         sibling = session_path.parent / f"{session_path.stem}.artifacts"
         if sibling.is_dir():
             return sibling
-    raise HTTPException(status_code=404, detail="session artifacts not found")
+    raise NotFoundError("session artifacts not found")
 
 
 def resolve_artifact_file(artifacts: Path, filepath: str) -> Path:
     """Resolve ``filepath`` inside ``artifacts`` with traversal guards.
 
-    Returns the resolved file path. Raises ``HTTPException`` for any
-    invalid input (empty / absolute / parent-traversal / outside
-    ``artifacts`` / not a file).
+    Returns the resolved file path. Raises :class:`InvalidRequestError`
+    for any invalid input (empty / absolute / parent-traversal /
+    outside ``artifacts``) and :class:`NotFoundError` when the resolved
+    path is not a file.
     """
     if not filepath:
-        raise HTTPException(status_code=400, detail="empty filepath")
+        raise InvalidRequestError("empty filepath")
     rel = Path(filepath)
     if rel.is_absolute() or any(part in ("..", "") for part in rel.parts):
-        raise HTTPException(status_code=400, detail="invalid filepath")
+        raise InvalidRequestError("invalid filepath")
 
     candidate = (artifacts / rel).resolve()
     try:
         candidate.relative_to(artifacts.resolve())
     except ValueError:
-        raise HTTPException(status_code=400, detail="path escapes artifacts")
+        raise InvalidRequestError("path escapes artifacts")
     if not candidate.is_file():
-        raise HTTPException(status_code=404, detail="artifact not found")
+        raise NotFoundError("artifact not found")
     return candidate

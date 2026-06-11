@@ -10,6 +10,7 @@ from pathlib import Path
 
 import yaml
 
+from kohakuterrarium.packages.resolve import resolve_any_path
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -299,16 +300,19 @@ def load_terrarium_config(path: str | Path) -> TerrariumConfig:
     relative to the directory that holds the terrarium YAML file.
 
     Args:
-        path: File or directory path.
+        path: File or directory path, or a ``@pkg/...`` package
+            reference.
 
     Returns:
         Parsed TerrariumConfig.
 
     Raises:
         FileNotFoundError: If config file cannot be found.
+        PackageError: If a ``@pkg`` reference is malformed or names an
+            uninstalled package.
         ValueError: If required fields are missing.
     """
-    path = Path(path)
+    path = resolve_any_path(path)
     config_file = _find_terrarium_config(path)
     base_dir = config_file.parent
 

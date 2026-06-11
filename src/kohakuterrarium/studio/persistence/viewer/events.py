@@ -6,8 +6,7 @@ Verbatim port of ``_session_viewer.py:build_events_payload`` and the
 
 from typing import Any
 
-from fastapi import HTTPException
-
+from kohakuterrarium.errors import NotFoundError
 from kohakuterrarium.session.store import SessionStore
 
 
@@ -53,9 +52,9 @@ def build_events_payload(
         elif main_agents:
             agent = main_agents[0]
         else:
-            raise HTTPException(404, f"Session has no agents: {session_name}")
+            raise NotFoundError(f"Session has no agents: {session_name}")
     elif agent not in known_agents:
-        raise HTTPException(404, f"Agent not found in session: {agent}")
+        raise NotFoundError(f"Agent not found in session: {agent}")
 
     type_set = parse_type_filter(types)
     rows = store.get_events(agent)

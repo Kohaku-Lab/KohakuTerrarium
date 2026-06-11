@@ -31,6 +31,6 @@ async def switch_creature_model(
     # the model chip flips to "No model" if the worker stops
     # answering between switch and the next read (B4).
     _session_lifecycle.update_remote_creature_model_meta(
-        cid, model=model or "", llm_name=model or ""
+        service, cid, model=model or "", llm_name=model or ""
     )
     return {"status": "switched", "model": model}

@@ -21,7 +21,7 @@ class AgentModelMixin:
 
     Both methods read/write attributes owned by the main ``Agent``
     class (``self.llm``, ``self.controller``, ``self.compact_manager``,
-    ``self._llm_override``, ``self._llm_identifier``, ``self.config``).
+    ``self._llm_selector``, ``self._llm_identifier``, ``self.config``).
     Kept as a mixin rather than free functions so callers can still
     write ``agent.switch_model(...)`` / ``agent.llm_identifier()``.
     """
@@ -37,7 +37,7 @@ class AgentModelMixin:
     compact_manager: Any
     output_router: Any
     config: Any
-    _llm_override: str | None
+    _llm_selector: str | None
     _llm_identifier: str
 
     def switch_model(self, profile_name: str) -> str:
@@ -53,13 +53,13 @@ class AgentModelMixin:
             the same string the pickers emit, so a round-trip
             ``switch_model(picker_output) == picker_output`` is safe.
         """
-        profile = resolve_controller_llm({}, llm_override=profile_name)
+        profile = resolve_controller_llm({}, llm=profile_name)
         if profile is None:
             raise ValueError(f"Model profile not found: {profile_name}")
         new_llm = create_llm_from_profile_name(profile_name)
         identifier = profile_to_identifier(profile)
 
-        self._llm_override = profile_name
+        self._llm_selector = profile_name
         self._llm_identifier = identifier
         self.llm = new_llm
         self.controller.llm = new_llm
@@ -122,7 +122,7 @@ class AgentModelMixin:
         if self._llm_identifier:
             return self._llm_identifier
         controller_data: dict[str, Any] = {
-            "llm": self._llm_override or self.config.llm_profile or None,
+            "llm": self._llm_selector or self.config.llm_profile or None,
             "model": self.config.model,
             "provider": self.config.provider,
             "variation_selections": dict(self.config.variation_selections or {}),

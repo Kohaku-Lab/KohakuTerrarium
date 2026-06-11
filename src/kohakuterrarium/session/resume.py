@@ -16,6 +16,7 @@ from kohakuterrarium.core.config_serde import unpack_agent_config
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
+from kohakuterrarium.packages.resolve import resolve_any_path
 from kohakuterrarium.session.history import replay_conversation
 from kohakuterrarium.session.migrations import ensure_latest_version
 from kohakuterrarium.session.store import SessionStore
@@ -261,21 +262,33 @@ def _rebuild_agent(
     *,
     config_path: str,
     config_snapshot: dict[str, Any],
-    llm_override: str | None,
+    llm: Any,
     io_kwargs: dict[str, Any],
+    pwd: str | None = None,
 ) -> Agent:
     """Build the ``Agent`` from saved meta.
 
     Prefer ``config_path`` when present and points at a readable folder
-    on this machine.  Fall back to ``config_snapshot`` (set by the Lab
-    worker-side store attach for inline-spawn creatures and by the
+    on this machine (``@pkg/...`` refs resolve against this node's
+    installed packages).  Fall back to ``config_snapshot`` (set by the
+    Lab worker-side store attach for inline-spawn creatures and by the
     Studio attach for host spawns) — this is what makes resume work on
     a node that does not have the original recipe folder on disk.
+
+    Resume always builds ``strict=False``: the saved conversation is
+    the asset; a model whose key is gone must not block reopening it
+    (the deferred provider raises with a "pick a model" message on the
+    next turn instead).
     """
     if config_path:
-        path_obj = Path(config_path)
-        if path_obj.exists():
-            return Agent.from_path(config_path, llm_override=llm_override, **io_kwargs)
+        try:
+            path_obj = resolve_any_path(config_path)
+        except (FileNotFoundError, ValueError):
+            path_obj = None
+        if path_obj is not None and path_obj.exists():
+            return Agent.from_path(
+                str(path_obj), llm=llm, pwd=pwd, strict=False, **io_kwargs
+            )
     if not config_snapshot:
         # config_path was set but unreachable, and no snapshot to fall
         # back on — surface the original error so callers can deploy the
@@ -285,7 +298,7 @@ def _rebuild_agent(
             "session has no config_snapshot to rebuild from"
         )
     cfg = unpack_agent_config(config_snapshot)
-    return Agent(cfg, llm_override=llm_override, **io_kwargs)
+    return Agent(cfg, llm=llm, pwd=pwd, strict=False, **io_kwargs)
 
 
 def _open_store_with_migration(session_path: str | Path) -> SessionStore:
@@ -315,7 +328,7 @@ def resume_agent(
     session_path: str | Path,
     pwd_override: str | None = None,
     io_mode: str | None = None,
-    llm_override: str | None = None,
+    llm: Any = None,
     *,
     input_module: InputModule | None = None,
     output_module: OutputModule | None = None,
@@ -329,12 +342,12 @@ def resume_agent(
             Pass ``None`` to keep the config's defaults.  ``cli`` mode
             (the rich prompt_toolkit CLI) must be constructed by the
             caller — pass ``input_module`` / ``output_module`` directly.
-        llm_override: Override LLM profile (from --llm flag or saved session).
+        llm: Override LLM profile (from --llm flag or saved session).
         input_module: Pre-built input module (overrides ``io_mode``).
         output_module: Pre-built output module (overrides ``io_mode``).
 
     Returns:
-        (agent, store) tuple. Caller should run agent.run() then store.close().
+        (agent, store) tuple. Caller should run agent.run_forever() then store.close().
     """
     store = _open_store_with_migration(session_path)
     meta = store.load_meta()
@@ -362,9 +375,12 @@ def resume_agent(
     if not config_path and not config_snapshot:
         raise ValueError("Session has no config_path or config_snapshot in metadata")
 
+    # ``pwd`` flows into the rebuilt agent's workspace (E8) — the old
+    # process-wide ``os.chdir`` here raced concurrent multi-session
+    # programs and contradicted core/agent_workspace's design note.
     pwd = pwd_override or meta.get("pwd", ".")
-    if pwd and os.path.isdir(pwd):
-        os.chdir(pwd)
+    if not (pwd and os.path.isdir(pwd)):
+        pwd = None
 
     # IO module overrides — explicit instances win over io_mode shortcut.
     io_kwargs: dict[str, Any] = {}
@@ -379,7 +395,7 @@ def resume_agent(
         io_kwargs["output_module"] = out
 
     # Restore LLM profile: CLI override > saved session > default
-    effective_llm = llm_override
+    effective_llm = llm
     if not effective_llm:
         try:
             effective_llm = store.state.get(
@@ -394,8 +410,9 @@ def resume_agent(
     agent = _rebuild_agent(
         config_path=config_path,
         config_snapshot=config_snapshot,
-        llm_override=effective_llm,
+        llm=effective_llm,
         io_kwargs=io_kwargs,
+        pwd=pwd,
     )
     agent_name = meta.get("agents", [agent.config.name])[0]
 

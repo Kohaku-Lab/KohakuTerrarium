@@ -42,7 +42,6 @@ class ToolConfigItem:
     type: str = "builtin"  # "builtin", "custom", or "package"
     module: str | None = None  # For custom: "./custom/tools/my_tool.py"
     class_name: str | None = None  # Class name to instantiate
-    doc: str | None = None  # Override skill doc path
     options: dict[str, Any] = field(default_factory=dict)
 
 
@@ -100,8 +99,9 @@ class AgentConfig:
     name: str
     version: str = "1.0"
 
-    # Inheritance: path to base creature/agent config directory
-    base_config: str | None = None
+    # NOTE: inheritance is a *load-time* concern — the YAML
+    # ``base_config:`` key is consumed by ``config._resolve_inheritance``
+    # and never stored on the dataclass.
 
     # LLM profile reference (resolves from ~/.kohakuterrarium/llm_profiles.yaml)
     llm_profile: str = (

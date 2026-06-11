@@ -40,7 +40,7 @@ from kohakuterrarium.core.loader import (
     ModuleLoadError,
     load_custom_module,
 )
-from kohakuterrarium.core.registry import Registry, get_registry, register_tool
+from kohakuterrarium.core.registry import Registry
 
 __all__ = [
     # Agent
@@ -79,8 +79,6 @@ __all__ = [
     "generate_job_id",
     # Registry
     "Registry",
-    "get_registry",
-    "register_tool",
     # Loader
     "ModuleLoader",
     "ModuleLoadError",

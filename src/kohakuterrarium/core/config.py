@@ -10,6 +10,7 @@ from typing import Any
 
 import yaml
 
+from kohakuterrarium.errors import ConfigNotFoundError
 from kohakuterrarium.core.config_merge import merge_configs as _merge_configs
 from kohakuterrarium.core.config_types import (
     AgentConfig,
@@ -22,7 +23,7 @@ from kohakuterrarium.core.config_types import (
     _interpolate_env_vars,
 )
 from kohakuterrarium.core.output_wiring import parse_wiring_list
-from kohakuterrarium.packages.resolve import resolve_package_path
+from kohakuterrarium.packages.resolve import resolve_any_path, resolve_package_path
 
 try:
     import tomllib
@@ -188,14 +189,18 @@ def _parse_trigger_config(data: dict[str, Any]) -> TriggerConfig:
 
 
 def _parse_tool_config(data: dict[str, Any]) -> ToolConfigItem:
-    """Parse tool configuration."""
+    """Parse tool configuration.
+
+    ``doc`` stays reserved (never forwarded as a constructor option)
+    even though the never-implemented "override skill doc path" field
+    was removed — old configs carrying it must not break tools.
+    """
     reserved = {"name", "type", "module", "class", "doc"}
     return ToolConfigItem(
         name=data.get("name", ""),
         type=data.get("type", "builtin"),
         module=data.get("module"),
         class_name=data.get("class"),
-        doc=data.get("doc"),
         options={k: v for k, v in data.items() if k not in reserved},
     )
 
@@ -268,21 +273,25 @@ def load_agent_config(agent_path: str | Path) -> AgentConfig:
     Load agent configuration from a folder *or* a direct config file.
 
     Args:
-        agent_path: Path to the agent folder, or directly to its
-            ``config.{yaml,yml,json,toml}`` file. When a file path is
-            given, its parent directory is used as the agent folder.
+        agent_path: Path to the agent folder, a ``@pkg/...`` package
+            reference, or directly to its ``config.{yaml,yml,json,toml}``
+            file. When a file path is given, its parent directory is
+            used as the agent folder.
 
     Returns:
         Loaded AgentConfig
 
     Raises:
-        FileNotFoundError: If config file not found
+        ConfigNotFoundError: If the path / reference doesn't exist
+            (also catchable as ``FileNotFoundError``).
+        PackageError: If a ``@pkg`` reference is malformed or names an
+            uninstalled package.
         ValueError: If config is invalid
     """
-    agent_path = Path(agent_path)
+    agent_path = resolve_any_path(agent_path)
 
     if not agent_path.exists():
-        raise FileNotFoundError(f"Agent path not found: {agent_path}")
+        raise ConfigNotFoundError(f"Agent path not found: {agent_path}")
 
     # Accept either a folder or a direct config file. When the user
     # points at the file itself, treat its parent as the agent folder
@@ -293,7 +302,7 @@ def load_agent_config(agent_path: str | Path) -> AgentConfig:
     else:
         config_file = _find_config_file(agent_path)
         if config_file is None:
-            raise FileNotFoundError(f"No config file found in: {agent_path}")
+            raise ConfigNotFoundError(f"No config file found in: {agent_path}")
 
     logger.debug("Loading config", path=str(config_file))
     raw_config = _load_config_file(config_file)
@@ -314,6 +323,13 @@ def _resolve_inheritance(
 
     Returns:
         Merged config_data (with _base_path set if inheritance was resolved).
+
+    Raises:
+        ConfigNotFoundError: When ``base_config`` is declared but
+            cannot be resolved.  Building without the declared base
+            used to be a silent warn-and-continue — it produces an
+            agent missing its base prompt / tools / model, which then
+            "runs" and behaves like garbage with no visible cause.
     """
     base_config_ref = config_data.get("base_config")
     if not base_config_ref:
@@ -321,11 +337,11 @@ def _resolve_inheritance(
 
     base_path = _resolve_base_config_path(base_config_ref, agent_path)
     if not base_path:
-        logger.warning(
-            "Base config not found, continuing with child-only config",
-            base_config=base_config_ref,
+        raise ConfigNotFoundError(
+            f"base_config {base_config_ref!r} could not be resolved "
+            f"(from {agent_path}). Install the missing package or fix "
+            "the path."
         )
-        return config_data
 
     base_data = _load_base_config_data(base_path)
     if not base_data:
@@ -350,7 +366,16 @@ def _construct_agent_config(
     return AgentConfig(
         name=config_data.get("name", agent_path.name),
         version=config_data.get("version", "1.0"),
-        llm_profile=controller_data.get("llm", config_data.get("llm", "")),
+        # ``llm:`` is the canonical YAML key; ``llm_profile:`` (the
+        # dataclass field name) is accepted as an alias so writing the
+        # field name in YAML is no longer silently dropped.
+        llm_profile=controller_data.get(
+            "llm",
+            controller_data.get(
+                "llm_profile",
+                config_data.get("llm", config_data.get("llm_profile", "")),
+            ),
+        ),
         model=controller_data.get("model", config_data.get("model", "")),
         provider=controller_data.get("provider", config_data.get("provider", "")),
         variation_selections=dict(
@@ -393,9 +418,17 @@ def _construct_agent_config(
         include_hints_in_prompt=controller_data.get(
             "include_hints_in_prompt", config_data.get("include_hints_in_prompt", True)
         ),
-        max_messages=controller_data.get("max_messages", 0),
-        ephemeral=controller_data.get("ephemeral", False),
-        tool_format=controller_data.get("tool_format", "bracket"),
+        # Same two-scope rule as every other controller key: the
+        # ``controller:`` block wins, top-level is the fallback.
+        # (These three used to be controller-scope only — top-level
+        # values were silently ignored.)
+        max_messages=controller_data.get(
+            "max_messages", config_data.get("max_messages", 0)
+        ),
+        ephemeral=controller_data.get("ephemeral", config_data.get("ephemeral", False)),
+        tool_format=controller_data.get(
+            "tool_format", config_data.get("tool_format", "bracket")
+        ),
         input=_parse_input_config(config_data.get("input")),
         triggers=[_parse_trigger_config(t) for t in config_data.get("triggers", [])],
         tools=[_parse_tool_config(t) for t in config_data.get("tools", [])],
@@ -514,22 +547,31 @@ def _render_prompt_context(config: AgentConfig) -> None:
 
 def build_agent_config(
     config_data: dict[str, Any],
-    agent_path: Path,
+    agent_path: Path | None = None,
 ) -> AgentConfig:
     """
     Build AgentConfig from a raw config dict.
 
     Handles base_config inheritance, system prompt loading, and
-    template rendering. Used by load_agent_config (from file) and
-    by terrarium runtime (inline root agent config from dict).
+    template rendering. Used by load_agent_config (from file), by the
+    terrarium runtime (inline creature config from dict), and directly
+    by programmatic callers building an inline agent.
 
     Args:
         config_data: Raw config dict (env vars interpolated automatically)
-        agent_path: Path context for resolving relative paths
+        agent_path: Path context for resolving relative paths.  May be
+            omitted for fully-inline configs — relative references
+            (``base_config``, ``system_prompt_file``, custom modules)
+            then resolve against the process cwd, and the agent name
+            defaults to ``config_data["name"]`` or ``"agent"``.
 
     Returns:
         Loaded AgentConfig
     """
+    if agent_path is None:
+        config_data = dict(config_data)
+        config_data.setdefault("name", "agent")
+        agent_path = Path.cwd()
     config_data = _interpolate_env_vars(config_data)
     config_data = _resolve_inheritance(config_data, agent_path)
     config = _construct_agent_config(config_data, agent_path)

@@ -105,8 +105,11 @@ class SessionStore:
         flush_every_n_events: int | None = None,
         flush_every_n_seconds: float | None = None,
     ) -> None:
-        self._path = str(path)
+        self._path = str(Path(path).expanduser())
         Path(self._path).parent.mkdir(parents=True, exist_ok=True)
+        # Read-only opens never mutate meta on close (E8) — set via
+        # :meth:`open_readonly`.
+        self._readonly = False
 
         # Durability gates for the events cache.
         self._flush_every_n_events: int = (
@@ -625,7 +628,17 @@ class SessionStore:
         terrarium_channels: list[dict] | None = None,
         terrarium_creatures: list[dict] | None = None,
     ) -> None:
-        """Initialize session metadata. Called once when session is created."""
+        """Initialize session metadata. Called once when session is created.
+
+        Raises ``ValueError`` when ``config_type`` is not a resumable
+        literal — resume dispatches on this exact string; a free-form
+        value used to silently produce an UNRESUMABLE session file.
+        """
+        if config_type not in ("agent", "terrarium"):
+            raise ValueError(
+                f"config_type must be 'agent' or 'terrarium', got "
+                f"{config_type!r} — resume dispatches on this value"
+            )
 
         now = datetime.now(timezone.utc).isoformat()
 
@@ -845,14 +858,25 @@ class SessionStore:
         self._unflushed_event_count = 0
         self._last_flush_at = time.monotonic()
 
-    def close(self, update_status: bool = True) -> None:
-        """Flush and close all tables.
+    @classmethod
+    def open_readonly(cls, path: "str | Path") -> "SessionStore":
+        """Open for READING — close() never mutates meta.  Use for every
+        listing / preview / viewer consumer: a plain open+close bumps
+        ``last_active``, corrupting the recency ordering (E8)."""
+        store = cls(path)
+        store._readonly = True
+        return store
 
-        Args:
-            update_status: If True (default), mark session as paused and
-                update last_active. Set False for read-only access (e.g.,
-                listing sessions) to avoid corrupting timestamps.
+    def close(self, update_status: bool = True) -> None:
+        """Flush and close all tables.  Idempotent (a second close is a
+        no-op).  ``update_status=True`` marks the session paused +
+        bumps last_active; ignored for :meth:`open_readonly` stores.
         """
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
+        if self._readonly:
+            update_status = False
         if update_status:
             try:
                 self.update_status("paused")

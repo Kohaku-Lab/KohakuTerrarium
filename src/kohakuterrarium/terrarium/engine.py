@@ -13,8 +13,10 @@ union on graph merge, session-store copy on graph split).
 import asyncio
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
+import kohakuterrarium.terrarium.autosession as _autosession
 import kohakuterrarium.terrarium.channel_lifecycle as _lifecycle
 import kohakuterrarium.terrarium.channels as _channels
 import kohakuterrarium.terrarium.recipe as _recipe
@@ -83,6 +85,14 @@ class Terrarium:
         pwd: str | None = None,
         session_dir: str | None = None,
     ) -> None:
+        """Create an engine.
+
+        ``session_dir`` turns on **autosession**: every new graph gets a
+        ``<session_dir>/<graph_id>.kohakutr`` store automatically (and
+        merge/split children land there too).  Without it, persistence
+        is opt-in per call via ``add_creature(session=...)`` /
+        ``apply_recipe(session=...)`` / ``attach_session``.
+        """
         self._pwd = pwd
         self._session_dir = session_dir
         self._topology = TopologyState()
@@ -90,6 +100,8 @@ class Terrarium:
         self._environments: dict[str, Environment] = {}
         # graph_id -> attached SessionStore.
         self._session_stores: dict[str, "SessionStore"] = {}
+        # graph_ids whose stores THIS engine minted (closed on shutdown).
+        self._owned_sessions: set[str] = set()
         self._subscribers: list[_Subscriber] = []
         self._running = True
         # Live runtime-graph prompt block — refreshed reactively when the
@@ -119,7 +131,7 @@ class Terrarium:
         store: "SessionStore | str",
         *,
         pwd: str | None = None,
-        llm_override: str | None = None,
+        llm: Any = None,
     ) -> "Terrarium":
         """Build a fresh engine and adopt a saved session into it.
 
@@ -127,9 +139,7 @@ class Terrarium:
         """
         engine = cls(pwd=pwd)
         engine._running = True
-        await _resume.resume_into_engine(
-            engine, store, pwd=pwd, llm_override=llm_override
-        )
+        await _resume.resume_into_engine(engine, store, pwd=pwd, llm=llm)
         return engine
 
     async def adopt_session(
@@ -137,16 +147,14 @@ class Terrarium:
         store: "SessionStore | str",
         *,
         pwd: str | None = None,
-        llm_override: str | None = None,
+        llm: Any = None,
     ) -> str:
         """Adopt a saved session into this running engine.  Returns ``graph_id``.
 
         Same body as :meth:`resume` but on an existing engine instance —
         the HTTP / programmatic hot-resume entry point.
         """
-        return await _resume.resume_into_engine(
-            self, store, pwd=pwd, llm_override=llm_override
-        )
+        return await _resume.resume_into_engine(self, store, pwd=pwd, llm=llm)
 
     @classmethod
     async def with_creature(
@@ -188,31 +196,56 @@ class Terrarium:
         *,
         graph: GraphRef | None = None,
         creature_id: str | None = None,
-        llm_override: str | None = None,
+        llm: Any = None,
         pwd: str | None = None,
         start: bool = True,
         is_privileged: bool = False,
         parent_creature_id: str | None = None,
-        suppress_io: bool = False,
+        io: str = "config",
+        strict: bool = True,
+        session: "bool | str | Path | SessionStore | None" = None,
         name: str | None = None,
+        tools: list[Any] | None = None,
+        plugins: list[Any] | None = None,
     ) -> Creature:
         """Add a creature to the engine.
 
-        ``config`` may be a path, ``AgentConfig``, ``CreatureConfig``,
-        or a pre-built ``Creature`` (tests / advanced callers).  With
-        ``graph=None`` a fresh singleton graph is minted.  ``start``
-        toggles auto-start of the underlying agent.
+        ``config`` may be a path (or ``@pkg/...`` reference),
+        ``AgentConfig``, ``CreatureConfig``, or a pre-built ``Creature``
+        (tests / advanced callers).  With ``graph=None`` a fresh
+        singleton graph is minted.  ``start`` toggles auto-start of the
+        underlying agent.
 
-        ``suppress_io`` forces the creature's input module to
-        :class:`NoneInput` — set by Studio / Lab managed-spawn paths so
-        the creature is driven only through its attach WebSocket and
-        never boots its config's own ``input: cli`` loop.
+        ``llm`` binds the creature's LLM — a provider instance, a
+        selector string, an ``LLMProfile``, or None (resolve from the
+        config).
+
+        ``io`` selects how much of the config's I/O boots:
+        ``"config"`` (as declared), ``"none"`` (input suppressed —
+        Studio / Lab managed spawns driven via the attach WebSocket),
+        or ``"headless"`` (input suppressed AND default output
+        silenced — batch / programmatic runs).
+
+        ``session`` controls persistence (E2 — no more manual
+        ``SessionStore`` + ``init_meta`` + ``attach_session`` ceremony):
+        a path mints the store at exactly that file; ``True`` mints in
+        the default session dir; ``False`` disables persistence even
+        under autosession; a ``SessionStore`` attaches as-is; ``None``
+        (default) follows the engine — autosession when
+        ``Terrarium(session_dir=...)`` was set, joins the graph's
+        existing store otherwise, else no persistence.
 
         ``name`` is a spawn-time display-name override (the name the
         user typed in the Studio "new creature" form).  When set it is
         applied across the creature + its nested objects, so a creature
         spawned on a worker carries the user's chosen name — not the
         config file's own ``name``.
+
+        ``tools`` / ``plugins`` are INSTANCES (e.g. ``kt.tool``
+        adapters, ``BasePlugin`` subclass objects) injected into the
+        underlying agent at build time — same contract as
+        ``Agent.build(tools=, plugins=)``.  Not applicable to a
+        pre-built ``Creature`` (raises like the other build kwargs).
 
         ``is_privileged`` marks the creature as having access to the
         group_* tool surface — set by direct user actions (solo
@@ -230,14 +263,36 @@ class Terrarium:
         Example: ``alice = await t.add_creature("alice.yaml")``.
         """
         if isinstance(config, Creature):
+            # Build-time kwargs cannot apply to an already-built
+            # creature — silently ignoring them hid real caller bugs.
+            ignored = [
+                kw
+                for kw, val in (
+                    ("llm", llm),
+                    ("pwd", pwd),
+                    ("io", io),
+                    ("tools", tools),
+                    ("plugins", plugins),
+                )
+                if val not in (None, "config")
+            ]
+            if ignored:
+                raise ValueError(
+                    f"add_creature received a pre-built Creature; build-time "
+                    f"argument(s) {', '.join(ignored)} cannot be applied. "
+                    f"Pass them to build_creature / the config-based overload."
+                )
             creature = config
         else:
             creature = build_creature(
                 config,
                 creature_id=creature_id,
                 pwd=pwd if pwd is not None else self._pwd,
-                llm_override=llm_override,
-                suppress_io=suppress_io,
+                llm=llm,
+                io=io,
+                strict=strict,
+                tools=tools,
+                plugins=plugins,
             )
         if creature_id and creature.creature_id != creature_id:
             creature.creature_id = creature_id
@@ -276,15 +331,34 @@ class Terrarium:
         if creature.is_privileged:
             force_register_privileged_tools(creature.agent)
 
-        if start:
-            await creature.start()
         self._emit(
             EngineEvent(
-                kind=EventKind.CREATURE_STARTED,
+                kind=EventKind.CREATURE_ADDED,
                 creature_id=creature.creature_id,
                 graph_id=gid,
             )
         )
+        if start:
+            await creature.start()
+        # Persistence (E2): resolve the ``session=`` argument AFTER the
+        # agent starts (matching the Studio attach ordering the turn
+        # viewer depends on).  Minted meta is written BEFORE
+        # ``attach_session`` assigns ``_session_stores`` (the Lab
+        # worker's observing dict snapshots ``load_meta()`` on that
+        # assignment).
+        await _autosession.attach_for_new_creature(
+            self, creature, config=config, session=session
+        )
+        if start:
+            # STARTED fires only when the agent actually started —
+            # ``start=False`` adds used to emit it anyway.
+            self._emit(
+                EngineEvent(
+                    kind=EventKind.CREATURE_STARTED,
+                    creature_id=creature.creature_id,
+                    graph_id=gid,
+                )
+            )
         return creature
 
     async def remove_creature(self, creature: CreatureRef) -> None:
@@ -378,6 +452,25 @@ class Terrarium:
         )
         _topo_snap.snapshot(self, gid)
         return info
+
+    def environment(self, graph: GraphRef):
+        """Public handle for a graph's live :class:`Environment`.
+
+        Raises ``KeyError`` for an unknown graph.  The previous way to
+        reach a channel programmatically was ``engine._environments``
+        — a private dict that every example and e2e test poked anyway.
+        """
+        gid = self._resolve_graph_id(graph)
+        return self._environments[gid]
+
+    def channel(self, graph: GraphRef, name: str):
+        """Live channel handle (send / history) or ``None``.
+
+        The returned object is the broadcast channel itself — scripts
+        can ``await ch.send(ChannelMessage(...))`` to seed a graph or
+        read ``ch.history`` to observe traffic.
+        """
+        return self.environment(graph).shared_channels.get(name)
 
     async def remove_channel(self, graph: GraphRef, name: str) -> TopologyDelta:
         """Remove a channel from a graph.
@@ -540,18 +633,32 @@ class Terrarium:
         *,
         graph: GraphRef | None = None,
         pwd: str | None = None,
-        llm_override: str | None = None,
+        llm: Any = None,
+        strict: bool = True,
+        session: "bool | str | Path | SessionStore | None" = None,
         creature_builder=None,
     ) -> GraphTopology:
-        """Apply a terrarium recipe into this engine."""
+        """Apply a terrarium recipe into this engine.
+
+        ``session`` follows the same contract as ``add_creature`` but
+        mints ONE terrarium-typed store for the whole graph, with the
+        recipe path recorded as ``config_path`` so resume can rebuild
+        the topology.
+        """
         kwargs = {
             "graph": graph,
             "pwd": pwd if pwd is not None else self._pwd,
+            "strict": strict,
             "creature_builder": creature_builder,
         }
-        if llm_override is not None:
-            kwargs["llm_override"] = llm_override
-        return await _recipe.apply_recipe(self, recipe, **kwargs)
+        if llm is not None:
+            kwargs["llm"] = llm
+        topo = await _recipe.apply_recipe(self, recipe, **kwargs)
+        if topo is not None:
+            await _autosession.attach_for_recipe(
+                self, topo.graph_id, recipe=recipe, session=session
+            )
+        return topo
 
     # ------------------------------------------------------------------
     # lifecycle
@@ -593,21 +700,33 @@ class Terrarium:
                     await c.stop()
                 except Exception as e:  # pragma: no cover - defensive
                     _shutdown_log_warning(c.creature_id, str(e))
+        # Close every store this engine minted — without this, files
+        # stay status="running" forever (the HW4 case: 61 stuck files).
+        _autosession.close_owned_stores(self)
+        # Terminate live subscribers — ``async for ev in t.subscribe()``
+        # used to hang forever after shutdown.
+        for sub in list(self._subscribers):
+            try:
+                sub.queue.put_nowait(None)
+            except Exception:  # pragma: no cover - defensive
+                pass
         self._running = False
 
     # ------------------------------------------------------------------
     # observability
     # ------------------------------------------------------------------
 
-    async def subscribe(
+    def subscribe(
         self, filter: EventFilter | None = None
     ) -> AsyncIterator[EngineEvent]:
         """Async-iterate engine events matching ``filter``.
 
-        Each call returns a fresh async iterator with its own queue —
-        events emitted before the iterator is awaited are not buffered.
+        The subscriber registers IMMEDIATELY at this call (not on the
+        first ``await``) — events emitted between ``subscribe()`` and
+        the start of iteration are buffered, so the
+        subscribe-then-trigger pattern can't lose its first event.
         Cancelling / breaking out of the iterator de-registers the
-        subscriber automatically.
+        subscriber automatically; ``shutdown()`` terminates it.
 
         Example::
 
@@ -617,6 +736,11 @@ class Terrarium:
         """
         sub = _Subscriber(filter=filter)
         self._subscribers.append(sub)
+        return self._subscription_iter(sub)
+
+    async def _subscription_iter(
+        self, sub: "_Subscriber"
+    ) -> AsyncIterator[EngineEvent]:
         try:
             while True:
                 ev = await sub.queue.get()
@@ -654,10 +778,20 @@ class Terrarium:
     # session attach
     # ------------------------------------------------------------------
 
-    async def attach_session(self, graph: GraphRef, store: "SessionStore") -> None:
-        """Attach a :class:`SessionStore` to a graph.  See
-        ``terrarium.session_coord`` for merge/split details."""
+    async def attach_session(
+        self, graph: GraphRef, store: "SessionStore | str | Path"
+    ) -> None:
+        """Attach a :class:`SessionStore` to a graph.
+
+        ``store`` may also be a path — mint-mode: the engine creates the
+        store there with validated meta (and closes it on shutdown).
+        See ``terrarium.session_coord`` for merge/split details.
+        """
         gid = self._resolve_graph_id(graph)
+        if isinstance(store, (str, Path)):
+            names = [c.name for c in self._creatures.values() if c.graph_id == gid]
+            store = _autosession.mint_store(self, gid, path=store, agents=names)
+            self._owned_sessions.add(gid)
         self._session_stores[gid] = store
         g = self._topology.graphs.get(gid)
         if g is None:

@@ -443,6 +443,7 @@ async def _refresh_tui_on_topology_change(
     """
     filt = EventFilter(
         kinds={
+            EventKind.CREATURE_ADDED,
             EventKind.CREATURE_STARTED,
             EventKind.CREATURE_STOPPED,
             EventKind.TOPOLOGY_CHANGED,

@@ -7,9 +7,9 @@ this module owns the verbose tear-down comments (local + remote paths,
 SessionStore close + drop from engine registry, Windows WAL handle
 note).
 
-Module state — ``_meta`` and ``_session_stores`` — stays owned by
-``lifecycle``.  Callers reach them through the delegator there; this
-module receives them as parameters so it stays free of cycles back
+Session bookkeeping is instance-scoped (``studio.sessions.registry``).
+Callers reach it through the lifecycle delegator; this module receives
+the per-runtime dicts as parameters so it stays free of cycles back
 into lifecycle.
 """
 
@@ -52,9 +52,10 @@ async def stop_session(
     Protocol's ``remove_creature`` proxies the call to the creature's
     home node via the multi-node home registry.
 
-    ``meta`` and ``session_stores`` are the lifecycle module's registries
-    passed by reference so this function mutates the same state callers
-    observe through ``lifecycle._meta`` / ``lifecycle._session_stores``.
+    ``meta`` and ``session_stores`` are the runtime's per-instance
+    registries (``registry.meta_for`` / ``registry.stores_for``) passed
+    by reference so this function mutates the same state callers
+    observe through the lifecycle accessors.
     """
     # CF-6: snapshot cluster membership to the mirror BEFORE tear-down —
     # ``_cluster_links`` lives only on the live service instance.

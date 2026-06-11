@@ -16,8 +16,7 @@ import html as _html_lib
 import json
 from typing import Any
 
-from fastapi import HTTPException
-
+from kohakuterrarium.errors import InvalidRequestError, NotFoundError
 from kohakuterrarium.session.history import replay_conversation
 from kohakuterrarium.session.store import SessionStore
 
@@ -65,7 +64,7 @@ def _agents_for(meta: dict[str, Any], requested: str | None) -> list[str]:
     if requested is None:
         return all_agents
     if requested not in all_agents:
-        raise HTTPException(404, f"Agent not found in session: {requested}")
+        raise NotFoundError(f"Agent not found in session: {requested}")
     return [requested]
 
 
@@ -256,10 +255,9 @@ def build_export(
 ) -> tuple[str, str]:
     """Return ``(content_type, body)`` for the requested format."""
     if fmt not in SUPPORTED_FORMATS:
-        raise HTTPException(
-            400,
+        raise InvalidRequestError(
             f"Unsupported export format: {fmt!r}. "
-            f"Use one of {', '.join(SUPPORTED_FORMATS)}.",
+            f"Use one of {', '.join(SUPPORTED_FORMATS)}."
         )
     content_type = CONTENT_TYPES[fmt]
     if fmt == "md":

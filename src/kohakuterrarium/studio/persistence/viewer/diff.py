@@ -10,8 +10,7 @@ with a per-turn classification of changes. Driven by
 from pathlib import Path
 from typing import Any
 
-from fastapi import HTTPException
-
+from kohakuterrarium.errors import NotFoundError
 from kohakuterrarium.session.history import replay_conversation
 from kohakuterrarium.session.store import SessionStore
 
@@ -39,10 +38,10 @@ def _agents_for(
         if isinstance(default, str) and default in known_agents:
             return default
         if not main_agents:
-            raise HTTPException(404, "Session has no agents")
+            raise NotFoundError("Session has no agents")
         return main_agents[0]
     if requested not in known_agents:
-        raise HTTPException(404, f"Agent not found in session: {requested}")
+        raise NotFoundError(f"Agent not found in session: {requested}")
     return requested
 
 
@@ -97,7 +96,13 @@ def _summarize_msg(msg: dict[str, Any]) -> dict[str, Any]:
 
 
 def _load_messages(path: Path, agent_arg: str | None) -> tuple[list[dict], str, str]:
-    """Open the store, replay events, return ``(messages, name, agent)``."""
+    """Open the store, replay events, return ``(messages, name, agent)``.
+
+    Guards existence first — ``SessionStore(path)`` would otherwise
+    create an empty file as a side effect of the diff lookup.
+    """
+    if not Path(path).exists():
+        raise NotFoundError(f"Session not found: {path}")
     store = SessionStore(path)
     try:
         meta = store.load_meta()

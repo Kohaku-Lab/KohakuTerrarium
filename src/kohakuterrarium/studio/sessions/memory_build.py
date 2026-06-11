@@ -47,7 +47,7 @@ def index_status(path: Path) -> dict[str, Any]:
         agents = list(meta.get("agents", []))
         # No embedder — open in search-only mode so SessionMemory can
         # reflect whatever index has been written previously.
-        memory = SessionMemory(str(path), embedder=None, store=store)
+        memory = SessionMemory(str(path), embedder=None)
         try:
             stats = memory.get_stats()
             saved_provider = None
@@ -85,7 +85,7 @@ def index_status_quick(path: Path) -> bool:
     """
     store = SessionStore(path)
     try:
-        memory = SessionMemory(str(path), embedder=None, store=store)
+        memory = SessionMemory(str(path), embedder=None)
         try:
             return (
                 memory.has_vectors and (memory.get_stats().get("vec_blocks") or 0) > 0
@@ -172,7 +172,7 @@ def build_index(
         if dimensions:
             embed_config["dimensions"] = dimensions
         embedder = create_embedder(embed_config)
-        memory = SessionMemory(str(path), embedder=embedder, store=store)
+        memory = SessionMemory(str(path), embedder=embedder)
         try:
             # Force rebuild — clear the previous indexed-count so
             # ``index_events`` re-indexes from event 0.

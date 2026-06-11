@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.bootstrap.io import create_input, create_output
-from kohakuterrarium.bootstrap.llm import create_llm_provider
+from kohakuterrarium.bootstrap.llm import coerce_llm_provider, create_llm_provider
 from kohakuterrarium.llm.deferred_provider import DeferredLLMProvider
 from kohakuterrarium.bootstrap.subagents import init_subagents
 from kohakuterrarium.bootstrap.tools import init_tools
@@ -25,12 +25,14 @@ from kohakuterrarium.builtins.user_commands import (
     get_builtin_user_command,
     list_builtin_user_commands,
 )
+from kohakuterrarium.core.budget import IterationBudget
 from kohakuterrarium.core.config import AgentConfig
 from kohakuterrarium.core.controller import Controller, ControllerConfig
 from kohakuterrarium.core.executor import Executor
 from kohakuterrarium.core.loader import ModuleLoader
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.core.session import Session, get_session
+from kohakuterrarium.core.termination import TerminationChecker, TerminationConfig
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.modules.output.router import OutputRouter
@@ -71,24 +73,36 @@ class AgentInitMixin:
     _loader: ModuleLoader
 
     def _init_llm(self) -> None:
-        """Initialize LLM provider, deferring on missing credentials.
+        """Initialize the LLM provider from the ``llm=`` spec.
 
-        Model selection is a runtime concern — the user can pick a
-        model in the Studio UI or via ``switch_model`` after the
-        creature exists.  Gating creature **creation** on a working
-        provider locks the user out of an existing conversation just
-        because the host's identity store doesn't carry that profile's
-        key today.
+        A provider *instance* (or :class:`LLMProfile`) injected via
+        ``llm=`` binds directly — no resolution, no fallback; a broken
+        instance is the caller's bug and raises immediately.
 
-        So: catch every construction error here, log it, and install a
-        :class:`DeferredLLMProvider` placeholder.  The creature runs;
-        a chat turn raises with a clear "pick a model" message until
-        the user rebinds via ``switch_model``.
+        Selector strings / config-resolved providers may defer: model
+        selection is a runtime concern — the user can pick a model in
+        the Studio UI or via ``switch_model`` after the creature
+        exists.  Gating creature **creation** on a working provider
+        locks the user out of an existing conversation just because
+        the host's identity store doesn't carry that profile's key
+        today.  So construction errors install a
+        :class:`DeferredLLMProvider` placeholder; a chat turn raises
+        with a clear "pick a model" message until the user rebinds.
         """
-        llm_override = getattr(self, "_llm_override", None)
+        llm_spec = getattr(self, "_llm_spec", None)
+        if llm_spec is not None and not isinstance(llm_spec, str):
+            # Instance / LLMProfile injection — bind directly, raise on
+            # misuse (TypeError from the coercer).
+            self.llm = coerce_llm_provider(llm_spec, self.config)
+            return
         try:
-            self.llm = create_llm_provider(self.config, llm_override=llm_override)
+            self.llm = create_llm_provider(self.config, llm_spec)
         except (ValueError, RuntimeError) as exc:
+            if getattr(self, "_strict", True):
+                # Programmatic default: a misconfigured model is a
+                # caller bug — raise now instead of building an agent
+                # that "works" and says nothing.
+                raise
             logger.warning(
                 "agent build: no LLM provider yet, deferring (reason=%s)",
                 exc,
@@ -113,7 +127,12 @@ class AgentInitMixin:
            ``disable_provider_tools`` list.
         """
         self.registry = Registry()
-        init_tools(self.config, self.registry, self._loader)
+        init_tools(
+            self.config,
+            self.registry,
+            self._loader,
+            strict=getattr(self, "_strict", True),
+        )
         self._drop_unsupported_provider_native_tools()
         self._auto_inject_provider_native_tools()
 
@@ -188,6 +207,43 @@ class AgentInitMixin:
                 tool_name=name,
                 active_provider=getattr(llm, "provider_name", ""),
             )
+
+    def _init_iteration_budget(self) -> None:
+        """Create shared IterationBudget; parent + children consume it.
+
+        Sub-agents that inherit share this counter. The parent
+        controller also consumes one slot per turn in
+        ``AgentHandlersMixin._check_termination``.
+        """
+        cap = getattr(self.config, "max_iterations", None)
+        if not cap or cap <= 0:
+            self.iteration_budget = None
+            return
+        self.iteration_budget = IterationBudget(remaining=int(cap), total=int(cap))
+        if hasattr(self, "subagent_manager") and self.subagent_manager is not None:
+            self.subagent_manager.iteration_budget = self.iteration_budget
+        logger.info(
+            "Iteration budget configured",
+            agent_name=self.config.name,
+            max_iterations=cap,
+        )
+
+    def _init_termination(self) -> "TerminationChecker | None":
+        """Initialize termination checker from config."""
+        if not self.config.termination:
+            return None
+
+        tc = TerminationConfig(
+            max_turns=self.config.termination.get("max_turns", 0),
+            max_tokens=self.config.termination.get("max_tokens", 0),
+            max_duration=self.config.termination.get("max_duration", 0),
+            idle_timeout=self.config.termination.get("idle_timeout", 0),
+            keywords=self.config.termination.get("keywords", []),
+        )
+        checker = TerminationChecker(tc)
+        if checker.is_active:
+            logger.info("Termination conditions configured", config=str(tc))
+        return checker
 
     def _init_executor(self) -> None:
         """Initialize background executor."""
@@ -310,6 +366,40 @@ class AgentInitMixin:
 
     def _init_controller(self) -> None:
         """Initialize controller."""
+        system_prompt = self._build_aggregated_prompt()
+        tool_format_name = (
+            self.config.tool_format
+            if isinstance(self.config.tool_format, str)
+            else "custom"
+        )
+
+        # Store controller config for creating controllers on-demand (parallel mode)
+        self._controller_config = ControllerConfig(
+            system_prompt=system_prompt,
+            include_job_status=True,
+            include_tools_list=False,  # Already in aggregated prompt
+            max_messages=self.config.max_messages,
+            ephemeral=self.config.ephemeral,
+            known_outputs=getattr(self, "_known_outputs", set()),
+            tool_format=tool_format_name,
+            sanitize_orphan_tool_calls=self.config.sanitize_orphan_tool_calls,
+        )
+
+        # Primary controller (always exists)
+        # Note: Controller handles framework commands (read, info, jobs, wait)
+        # via its own _commands dict and ControllerContext
+        self.controller = self._create_controller()
+        if getattr(self, "plugins", None):
+            self.controller.plugins = self.plugins
+            self._apply_plugin_hooks()
+
+    def _build_aggregated_prompt(self) -> str:
+        """Aggregate the full system prompt for the CURRENT registry.
+
+        Used at construction and by ``refresh_system_prompt`` after a
+        runtime ``add_tool`` (E7) — the tool list inside the prompt is
+        recomputed from whatever the registry holds now.
+        """
         # Build system prompt
         # Aggregator auto-adds: tool list (name + description), framework hints
         # system.md should only contain agent personality/guidelines
@@ -371,7 +461,7 @@ class AgentInitMixin:
             "pwd": str(self.executor._working_dir) if self.executor else "",
             "model": getattr(self.llm, "model", ""),
         }
-        system_prompt = aggregate_system_prompt(
+        return aggregate_system_prompt(
             base_prompt,
             self.registry,
             include_tools=self.config.include_tools_in_prompt,
@@ -388,26 +478,6 @@ class AgentInitMixin:
             runtime_plugins=getattr(self, "plugins", None),
             plugin_context=plugin_context,
         )
-
-        # Store controller config for creating controllers on-demand (parallel mode)
-        self._controller_config = ControllerConfig(
-            system_prompt=system_prompt,
-            include_job_status=True,
-            include_tools_list=False,  # Already in aggregated prompt
-            max_messages=self.config.max_messages,
-            ephemeral=self.config.ephemeral,
-            known_outputs=getattr(self, "_known_outputs", set()),
-            tool_format=tool_format_name,
-            sanitize_orphan_tool_calls=self.config.sanitize_orphan_tool_calls,
-        )
-
-        # Primary controller (always exists)
-        # Note: Controller handles framework commands (read, info, jobs, wait)
-        # via its own _commands dict and ControllerContext
-        self.controller = self._create_controller()
-        if getattr(self, "plugins", None):
-            self.controller.plugins = self.plugins
-            self._apply_plugin_hooks()
 
     def _ensure_skill_tool_registered(self) -> None:
         """Expose procedural skills through the normal tool registry."""
@@ -437,6 +507,7 @@ class AgentInitMixin:
             cmd = get_builtin_user_command(name)
             if cmd:
                 commands[name] = cmd
+        commands.update(getattr(self, "_extra_user_commands", {}) or {})
         context = UserCommandContext(agent=self, session=getattr(self, "session", None))
         name, args = parse_slash_command(text)
         cmd = commands.get(name)
@@ -587,6 +658,8 @@ class AgentInitMixin:
             cmd = get_builtin_user_command(name)
             if cmd:
                 commands[name] = cmd
+        # Instance-injected slash commands (E7) — user_commands= kwarg.
+        commands.update(getattr(self, "_extra_user_commands", {}) or {})
 
         context = UserCommandContext(
             agent=self,

@@ -16,22 +16,26 @@ class EventKind(str, Enum):
     """Discriminator for :class:`EngineEvent`.
 
     Values are chosen so JSON serialization round-trips trivially.
+
+    The engine bus carries STRUCTURE events only (topology, lifecycle,
+    channels, wiring).  Per-creature content — text chunks, tool
+    activity, processing markers, errors — flows through the typed
+    :mod:`kohakuterrarium.core.turn` surface instead
+    (``Creature.run_stream`` / ``Creature.attach``).  The old
+    ``TEXT`` / ``ACTIVITY`` / ``PROCESSING_*`` / ``ERROR`` /
+    ``SESSION_FORKED`` kinds were declared here but never emitted by
+    anything — dead surface, removed.
     """
 
-    TEXT = "text"
-    ACTIVITY = "activity"
     CHANNEL_MESSAGE = "channel_message"
     TOPOLOGY_CHANGED = "topology_changed"
     SESSION_KIND_CHANGED = "session_kind_changed"
-    SESSION_FORKED = "session_forked"
+    CREATURE_ADDED = "creature_added"
     CREATURE_STARTED = "creature_started"
     CREATURE_STOPPED = "creature_stopped"
     OUTPUT_WIRE_ADDED = "output_wire_added"
     OUTPUT_WIRE_REMOVED = "output_wire_removed"
     PARENT_LINK_CHANGED = "parent_link_changed"
-    PROCESSING_START = "processing_start"
-    PROCESSING_END = "processing_end"
-    ERROR = "error"
 
 
 @dataclass

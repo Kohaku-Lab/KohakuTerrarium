@@ -18,7 +18,7 @@ from pathlib import Path
 import uvicorn
 
 from kohakuterrarium.api.app import create_app
-from kohakuterrarium.packages.locations import PACKAGES_DIR, get_package_root
+from kohakuterrarium.packages.locations import get_package_root, packages_dir
 from kohakuterrarium.packages.walk import list_packages
 from kohakuterrarium.utils.logging import (
     configure_utf8_stdio,
@@ -53,7 +53,7 @@ def _resolve_config_dirs() -> tuple[list[str], list[str]]:
         terrariums.extend(env_terrariums.split(","))
 
     # 2. Installed packages
-    if PACKAGES_DIR.exists():
+    if packages_dir().exists():
         for pkg in list_packages():
             pkg_root = get_package_root(pkg["name"])
             if pkg_root:

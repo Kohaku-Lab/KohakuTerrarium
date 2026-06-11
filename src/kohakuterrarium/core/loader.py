@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 from typing import Any, TypeVar
 
+from kohakuterrarium.packages.resolve import resolve_package_path
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -185,15 +186,24 @@ class ModuleLoader:
         return cls
 
     def _load_module_from_file(self, rel_path: str) -> Any:
-        """Load module from Python file."""
-        if self.agent_path is None:
-            raise ModuleLoadError(
-                "agent_path required for custom modules. "
-                "Set agent_path when creating ModuleLoader."
-            )
+        """Load module from Python file.
 
-        # Resolve path
-        full_path = (self.agent_path / rel_path).resolve()
+        ``rel_path`` may also be a ``@pkg/...`` package reference or an
+        absolute path — both bypass the agent-folder join.
+        """
+        if rel_path.startswith("@"):
+            full_path = resolve_package_path(rel_path)
+        else:
+            candidate = Path(rel_path).expanduser()
+            if candidate.is_absolute():
+                full_path = candidate.resolve()
+            else:
+                if self.agent_path is None:
+                    raise ModuleLoadError(
+                        "agent_path required for custom modules. "
+                        "Set agent_path when creating ModuleLoader."
+                    )
+                full_path = (self.agent_path / candidate).resolve()
 
         if not full_path.exists():
             raise ModuleLoadError(f"Module file not found: {full_path}")
@@ -211,9 +221,12 @@ class ModuleLoader:
         module_name = f"kohaku_custom_{self._module_counter}_{full_path.stem}"
 
         # Add agent folder to sys.path temporarily for relative imports
-        agent_custom_path = str(self.agent_path / "custom")
+        # (no agent folder for @pkg / absolute-path modules).
+        agent_custom_path = (
+            str(self.agent_path / "custom") if self.agent_path is not None else None
+        )
         path_added = False
-        if agent_custom_path not in sys.path:
+        if agent_custom_path is not None and agent_custom_path not in sys.path:
             sys.path.insert(0, agent_custom_path)
             path_added = True
 

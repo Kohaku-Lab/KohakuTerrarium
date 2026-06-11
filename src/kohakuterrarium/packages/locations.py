@@ -6,32 +6,46 @@ primitives. Higher-level package management (:mod:`.install`,
 it, avoiding a cycle between those public modules.
 """
 
-import sys
 from pathlib import Path
 
+from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Override hook — tests and embedders may set this (directly or via
+# ``monkeypatch.setattr``) to pin the packages directory.  When left at
+# its default, :func:`packages_dir` resolves fresh from ``config_dir()``
+# so ``KT_CONFIG_DIR`` re-homing applies to packages too.
 PACKAGES_DIR = Path.home() / ".kohakuterrarium" / "packages"
+_DEFAULT_PACKAGES_DIR = PACKAGES_DIR
 LINK_SUFFIX = ".link"
 
 
-def _packages_dir() -> Path:
+def packages_dir() -> Path:
     """Return the active packages directory.
 
-    Tests and legacy callers historically monkeypatch
-    ``kohakuterrarium.packages.locations.PACKAGES_DIR``. Consult that
-    module when present so the new split storage layer remains
-    compatible.
+    Resolution order:
+
+    1. A monkeypatched / reassigned :data:`PACKAGES_DIR` (the documented
+       test hook) wins.
+    2. Otherwise ``config_dir() / "packages"`` — which honours the
+       ``KT_CONFIG_DIR`` environment variable and falls back to
+       ``~/.kohakuterrarium/packages``.
+
+    The directory is NOT created here — read paths check existence,
+    install paths ``mkdir`` it themselves.
     """
-    pkg_mod = sys.modules.get("kohakuterrarium.packages.locations")
-    if pkg_mod is not None:
-        current = getattr(pkg_mod, "PACKAGES_DIR", PACKAGES_DIR)
-        if isinstance(current, Path):
-            return current
-        return Path(current)
-    return PACKAGES_DIR
+    current = PACKAGES_DIR
+    if current != _DEFAULT_PACKAGES_DIR:
+        # Legacy callers may assign a str — coerce.
+        return current if isinstance(current, Path) else Path(current)
+    return config_dir() / "packages"
+
+
+# Internal alias kept for the package-local modules that predate the
+# public name.
+_packages_dir = packages_dir
 
 
 def read_link(name: str) -> Path | None:
