@@ -55,9 +55,9 @@ class TestAttachSessionStore:
         group_hooks.register_store_attach(hook)
         eng, cr = object(), _Creature()
         group_hooks.attach_session_store(
-            eng, cr, config_path="/x/agent.yaml", config_type="creature"
+            eng, cr, config_path="/x/agent.yaml", config_type="agent"
         )
-        assert calls == [(eng, cr, "/x/agent.yaml", "creature")]
+        assert calls == [(eng, cr, "/x/agent.yaml", "agent")]
 
     def test_defaults_passed_through(self):
         seen = {}

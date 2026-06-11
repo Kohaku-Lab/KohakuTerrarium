@@ -384,7 +384,7 @@ def scripted_llm(monkeypatch):
 
     holder: dict[str, list] = {"script": ["OK"]}
 
-    def _fake_create(config, llm_override=None):
+    def _fake_create(config, llm=None):
         return ScriptedLLM(holder["script"])
 
     monkeypatch.setattr(_bootstrap_llm_mod, "create_llm_provider", _fake_create)

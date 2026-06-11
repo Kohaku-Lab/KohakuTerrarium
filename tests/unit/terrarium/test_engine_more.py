@@ -51,21 +51,21 @@ class TestConstructionClassmethods:
     async def test_resume_delegates(self, monkeypatch):
         captured = {}
 
-        async def fake_resume(engine, store, *, pwd=None, llm_override=None):
+        async def fake_resume(engine, store, *, pwd=None, llm=None):
             captured["store"] = store
             captured["pwd"] = pwd
-            captured["llm_override"] = llm_override
+            captured["llm"] = llm
             return "graph-1"
 
         monkeypatch.setattr(engine_mod._resume, "resume_into_engine", fake_resume)
-        t = await Terrarium.resume("s.kohakutr", pwd="/wd", llm_override="gpt")
+        t = await Terrarium.resume("s.kohakutr", pwd="/wd", llm="gpt")
         try:
             assert isinstance(t, Terrarium)
             assert t._running is True
             assert captured == {
                 "store": "s.kohakutr",
                 "pwd": "/wd",
-                "llm_override": "gpt",
+                "llm": "gpt",
             }
         finally:
             await t.shutdown()
@@ -73,7 +73,7 @@ class TestConstructionClassmethods:
     async def test_adopt_session_delegates(self, monkeypatch):
         captured = {}
 
-        async def fake_resume(engine, store, *, pwd=None, llm_override=None):
+        async def fake_resume(engine, store, *, pwd=None, llm=None):
             captured["store"] = store
             return "graph-xyz"
 
@@ -109,8 +109,11 @@ class TestAddCreatureBranches:
             *,
             creature_id=None,
             pwd=None,
-            llm_override=None,
-            suppress_io=False,
+            llm=None,
+            io="config",
+            strict=True,
+            tools=None,
+            plugins=None,
         ):
             assert config == "some-config-path"
             return built
@@ -266,11 +269,11 @@ class TestOutputWiring:
             await t.shutdown()
 
 
-# ── apply_recipe llm_override passthrough ──────────────────────
+# ── apply_recipe llm passthrough ──────────────────────
 
 
 class TestApplyRecipeOverride:
-    async def test_llm_override_forwarded(self, monkeypatch):
+    async def test_llm_forwarded(self, monkeypatch):
         captured = {}
 
         async def fake_apply(engine, recipe, **kwargs):
@@ -280,8 +283,8 @@ class TestApplyRecipeOverride:
         monkeypatch.setattr(engine_mod._recipe, "apply_recipe", fake_apply)
         t = Terrarium()
         try:
-            await t.apply_recipe("r.yaml", llm_override="claude")
-            assert captured["llm_override"] == "claude"
+            await t.apply_recipe("r.yaml", llm="claude")
+            assert captured["llm"] == "claude"
         finally:
             await t.shutdown()
 

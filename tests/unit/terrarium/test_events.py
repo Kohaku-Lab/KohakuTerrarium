@@ -14,12 +14,12 @@ from kohakuterrarium.terrarium.events import (
 
 class TestEventKind:
     def test_string_values(self):
-        assert EventKind.TEXT.value == "text"
-        assert EventKind.ACTIVITY.value == "activity"
+        assert EventKind.CHANNEL_MESSAGE.value == "channel_message"
+        assert EventKind.TOPOLOGY_CHANGED.value == "topology_changed"
 
     def test_str_enum(self):
         # EventKind is a str-Enum so comparison with str works.
-        assert EventKind.TEXT == "text"
+        assert EventKind.CHANNEL_MESSAGE == "channel_message"
 
 
 # ── EngineEvent ───────────────────────────────────────────────────
@@ -27,14 +27,14 @@ class TestEventKind:
 
 class TestEngineEvent:
     def test_defaults(self):
-        e = EngineEvent(kind=EventKind.TEXT)
+        e = EngineEvent(kind=EventKind.CHANNEL_MESSAGE)
         assert e.creature_id is None
         assert e.payload == {}
         assert isinstance(e.ts, float)
 
     def test_explicit_fields(self):
         e = EngineEvent(
-            kind=EventKind.ERROR,
+            kind=EventKind.CREATURE_STOPPED,
             creature_id="c1",
             graph_id="g",
             channel="ch",
@@ -51,45 +51,53 @@ class TestEngineEvent:
 class TestEventFilterMatches:
     def test_empty_matches_all(self):
         f = EventFilter()
-        assert f.matches(EngineEvent(kind=EventKind.TEXT))
+        assert f.matches(EngineEvent(kind=EventKind.CHANNEL_MESSAGE))
         assert f.matches(
             EngineEvent(
-                kind=EventKind.ERROR, creature_id="c", graph_id="g", channel="ch"
+                kind=EventKind.CREATURE_STOPPED,
+                creature_id="c",
+                graph_id="g",
+                channel="ch",
             )
         )
 
     def test_kind_filter(self):
-        f = EventFilter(kinds={EventKind.TEXT})
-        assert f.matches(EngineEvent(kind=EventKind.TEXT))
-        assert not f.matches(EngineEvent(kind=EventKind.ERROR))
+        f = EventFilter(kinds={EventKind.CHANNEL_MESSAGE})
+        assert f.matches(EngineEvent(kind=EventKind.CHANNEL_MESSAGE))
+        assert not f.matches(EngineEvent(kind=EventKind.CREATURE_STOPPED))
 
     def test_creature_filter(self):
         f = EventFilter(creature_ids={"c1"})
-        assert f.matches(EngineEvent(kind=EventKind.TEXT, creature_id="c1"))
-        assert not f.matches(EngineEvent(kind=EventKind.TEXT, creature_id="c2"))
+        assert f.matches(EngineEvent(kind=EventKind.CHANNEL_MESSAGE, creature_id="c1"))
+        assert not f.matches(
+            EngineEvent(kind=EventKind.CHANNEL_MESSAGE, creature_id="c2")
+        )
 
     def test_graph_filter(self):
         f = EventFilter(graph_ids={"g1"})
-        assert f.matches(EngineEvent(kind=EventKind.TEXT, graph_id="g1"))
-        assert not f.matches(EngineEvent(kind=EventKind.TEXT, graph_id="g2"))
+        assert f.matches(EngineEvent(kind=EventKind.CHANNEL_MESSAGE, graph_id="g1"))
+        assert not f.matches(EngineEvent(kind=EventKind.CHANNEL_MESSAGE, graph_id="g2"))
 
     def test_channel_filter(self):
         f = EventFilter(channels={"ch1"})
-        assert f.matches(EngineEvent(kind=EventKind.TEXT, channel="ch1"))
-        assert not f.matches(EngineEvent(kind=EventKind.TEXT, channel="ch2"))
+        assert f.matches(EngineEvent(kind=EventKind.CHANNEL_MESSAGE, channel="ch1"))
+        assert not f.matches(EngineEvent(kind=EventKind.CHANNEL_MESSAGE, channel="ch2"))
 
     def test_all_filters_and_combined(self):
         f = EventFilter(
-            kinds={EventKind.TEXT},
+            kinds={EventKind.CHANNEL_MESSAGE},
             creature_ids={"c"},
             graph_ids={"g"},
             channels={"ch"},
         )
         good = EngineEvent(
-            kind=EventKind.TEXT, creature_id="c", graph_id="g", channel="ch"
+            kind=EventKind.CHANNEL_MESSAGE, creature_id="c", graph_id="g", channel="ch"
         )
         bad = EngineEvent(
-            kind=EventKind.TEXT, creature_id="c", graph_id="g", channel="other"
+            kind=EventKind.CHANNEL_MESSAGE,
+            creature_id="c",
+            graph_id="g",
+            channel="other",
         )
         assert f.matches(good)
         assert not f.matches(bad)

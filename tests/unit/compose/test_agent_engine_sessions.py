@@ -39,7 +39,7 @@ output:
 
 @pytest.fixture(autouse=True)
 def _scripted_llm(monkeypatch):
-    def _fake_create(config, llm_override=None):
+    def _fake_create(config, llm=None):
         return ScriptedLLM([_REPLY, _REPLY])
 
     monkeypatch.setattr(_bootstrap_llm, "create_llm_provider", _fake_create)

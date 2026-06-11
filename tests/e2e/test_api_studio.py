@@ -39,6 +39,7 @@ from kohakuterrarium.api.app import create_app
 from kohakuterrarium.api.deps import set_service
 from kohakuterrarium.api.routes.catalog import _deps as catalog_deps
 from kohakuterrarium.bootstrap import agent_init as _agent_init
+from kohakuterrarium.studio.catalog import packages as _catalog_packages_ops
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM
@@ -64,7 +65,7 @@ def scripted_llm(monkeypatch: pytest.MonkeyPatch) -> ScriptedLLM:
     """
     llm = ScriptedLLM([_REPLY_ONE, _REPLY_TWO, _REPLY_TWO, _REPLY_TWO])
 
-    def _fake_create(config, llm_override=None):
+    def _fake_create(config, selector=None):
         return llm
 
     monkeypatch.setattr(_bootstrap_llm, "create_llm_provider", _fake_create)
@@ -155,6 +156,23 @@ def _scaffold_workspace_creature(
     return saved
 
 
+def _find_kt_biome_source() -> Path | None:
+    """Locate a kt-biome bundle to install into the isolated catalog."""
+    repo_local = Path(__file__).resolve().parents[2] / "kt-biome"
+    if (repo_local / "kohaku.yaml").exists():
+        return repo_local
+    real_pkgs = Path.home() / ".kohakuterrarium" / "packages"
+    link = real_pkgs / "kt-biome.link"
+    if link.exists():
+        target = Path(link.read_text(encoding="utf-8").strip())
+        if (target / "kohaku.yaml").exists():
+            return target
+    direct = real_pkgs / "kt-biome"
+    if (direct / "kohaku.yaml").exists():
+        return direct
+    return None
+
+
 class TestApiStudioJourney:
     """Fat end-to-end journeys over the HTTP Studio management surface."""
 
@@ -198,15 +216,22 @@ class TestApiStudioJourney:
         assert "add_timer" in {t["name"] for t in resp.json()}
         # Plugins / inputs / outputs catalogs surface the installed
         # ``kt-biome`` package's modules (workspace + package scope).
-        resp = client.get("/api/studio/catalog/plugins")
-        assert resp.status_code == 200
-        assert "checkpoint" in {p["name"] for p in resp.json()}
-        resp = client.get("/api/studio/catalog/inputs")
-        assert resp.status_code == 200
-        assert "discord_input" in {i["name"] for i in resp.json()}
-        resp = client.get("/api/studio/catalog/outputs")
-        assert resp.status_code == 200
-        assert "discord_output" in {o["name"] for o in resp.json()}
+        # The packages dir honours ``KT_CONFIG_DIR`` (per-test
+        # isolation) so kt-biome must be installed into the isolated
+        # catalog first; source is the repo-local checkout (dev) or the
+        # operator-level editable install CI provisions.
+        biome_src = _find_kt_biome_source()
+        if biome_src is not None:
+            _catalog_packages_ops.install_package_op(str(biome_src), editable=True)
+            resp = client.get("/api/studio/catalog/plugins")
+            assert resp.status_code == 200
+            assert "checkpoint" in {p["name"] for p in resp.json()}
+            resp = client.get("/api/studio/catalog/inputs")
+            assert resp.status_code == 200
+            assert "discord_input" in {i["name"] for i in resp.json()}
+            resp = client.get("/api/studio/catalog/outputs")
+            assert resp.status_code == 200
+            assert "discord_output" in {o["name"] for o in resp.json()}
 
         # Models — the LLM profile table is non-empty and entries carry
         # a usable selector ``name``.

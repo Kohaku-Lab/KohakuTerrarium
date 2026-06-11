@@ -57,7 +57,7 @@ def _build_agent(
         provider="",
         variation_selections={},
     )
-    a._llm_override = None
+    a._llm_selector = None
     a._llm_identifier = ""
     a._session_id = "sess"
     a._new_llm = new_llm
@@ -96,7 +96,7 @@ class TestSwitchModel:
         assert a.llm is new_llm
         assert a.controller.llm is new_llm
         assert a._llm_identifier == "openai/gpt-5"
-        assert a._llm_override == "openai/gpt-5"
+        assert a._llm_selector == "openai/gpt-5"
         # The swap MUST propagate to the sub-agent manager — sub-agents
         # resolve their LLM from ``subagent_manager.llm`` at spawn time,
         # so a sub-agent dispatched after a ``/model`` switch (or the
@@ -166,7 +166,7 @@ class TestLLMIdentifier:
         a.llm.model = "raw-name"
         assert a.llm_identifier() == "raw-name"
 
-    def test_uses_llm_override_when_present(self, monkeypatch):
+    def test_uses_llm_when_present(self, monkeypatch):
         captured = {}
 
         def fake_resolve(data, **k):
@@ -175,7 +175,7 @@ class TestLLMIdentifier:
 
         monkeypatch.setattr(am, "resolve_controller_llm", fake_resolve)
         a = _build_agent()
-        a._llm_override = "override/profile"
+        a._llm_selector = "override/profile"
         a.llm.model = "fallback"
         a.llm_identifier()
         assert captured["data"]["llm"] == "override/profile"

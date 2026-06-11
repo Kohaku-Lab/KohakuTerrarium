@@ -37,7 +37,6 @@ from kohakuterrarium.compose import (
     AgentFactory,
     AgentRunnable,
     BaseRunnable,
-    Effects,
     FailsWhen,
     Fallback,
     PipelineIterator,
@@ -73,7 +72,7 @@ _SCRIPTS: dict[str, list[ScriptEntry]] = {}
 def _install_llm_seam(monkeypatch) -> None:
     """Point both ``create_llm_provider`` import sites at the registry."""
 
-    def _fake_create(config, llm_override=None):
+    def _fake_create(config, llm=None):
         name = getattr(config, "name", "") or ""
         script = _SCRIPTS.get(name)
         if script is None:
@@ -224,30 +223,12 @@ class TestComposeIntegration:
             assert isinstance(explorer, Runnable)
             assert isinstance(explorer, BaseRunnable)
 
-            # The Effects semiring: a user annotates cost/latency and the
-            # combinator-composition rules add cost, max latency, multiply
-            # reliability for parallel; add latency for sequential.
-            a = Effects(cost=1.0, latency=2.0, reliability=0.9)
-            b = Effects(cost=3.0, latency=5.0, reliability=0.8)
-            seq_fx = a.sequential(b)
-            assert seq_fx.cost == 4.0
-            assert seq_fx.latency == 7.0
-            assert abs(seq_fx.reliability - 0.72) < 1e-9
-            par_fx = a.parallel(b)
-            assert par_fx.cost == 4.0
-            assert par_fx.latency == 5.0  # max, not sum
-            assert abs(par_fx.reliability - 0.72) < 1e-9
-            # A None field short-circuits the whole composed field to None.
-            partial_fx = Effects(cost=1.0).sequential(Effects(latency=2.0))
-            assert partial_fx.cost is None
-            assert partial_fx.latency is None
-            assert partial_fx.reliability is None
-            # ``parallel`` uses max() on latency — a None operand there
-            # short-circuits to None too (the _max None branch).
-            par_partial = Effects(cost=1.0).parallel(Effects(latency=2.0))
-            assert par_partial.cost is None
-            assert par_partial.latency is None
-            assert par_partial.reliability is None
+            # E11: Effects was deleted — it was exported dead surface
+            # (no combinator ever read it). The public package must
+            # not resurrect it silently.
+            import kohakuterrarium.compose as _compose_pkg
+
+            assert not hasattr(_compose_pkg, "Effects")
         finally:
             for r in (explorer, planner, critic, writer):
                 await r.close()
@@ -423,7 +404,7 @@ class TestComposeIntegration:
 
         # --- factory(config_path): the on-disk-config convenience path.
         # Write a real creature config dir and build a factory off the
-        # path string — ``_engine_session_from_path`` is the adapter.
+        # path string — ``_engine_session`` is the adapter.
         creature_dir = tmp_path / "pathcoder"
         creature_dir.mkdir()
         (creature_dir / "config.yaml").write_text(
@@ -444,6 +425,36 @@ class TestComposeIntegration:
         path_factory = factory(str(creature_dir))
         assert repr(path_factory).endswith("pathcoder>")
         assert await path_factory.run("go now") == "from-disk-config"
+
+        # --- E11: engine sharing + direct llm injection. One caller-
+        # owned engine hosts two compose agents; ``llm=`` bypasses the
+        # provider seam entirely (the instance binds directly). Closing
+        # one runnable removes only its creature — the shared engine and
+        # the sibling keep working — and the caller's engine is never
+        # shut down by compose.
+        from kohakuterrarium.terrarium import Terrarium
+
+        async with Terrarium() as shared_engine:
+            first = await agent(
+                _config("shared_a", tmp_path),
+                engine=shared_engine,
+                llm=ScriptedLLM([ScriptEntry(response="a-reply", match="ping")]),
+            )
+            second = await agent(
+                _config("shared_b", tmp_path),
+                engine=shared_engine,
+                llm=ScriptedLLM([ScriptEntry(response="b-reply", match="ping")]),
+            )
+            assert len(shared_engine.list_creatures()) == 2
+            assert await first.run("ping") == "a-reply"
+            assert await second.run("ping") == "b-reply"
+            # Close the first — ONLY its creature leaves the engine.
+            await first.close()
+            assert len(shared_engine.list_creatures()) == 1
+            # The sibling is untouched and still serves turns.
+            assert await second.run("ping") == "b-reply"
+            await second.close()
+            assert shared_engine.list_creatures() == []
 
     async def test_persistent_runnable_accumulates_conversation(self, tmp_path):
         """``agent()`` returns a *persistent* ``AgentRunnable``: the

@@ -102,9 +102,7 @@ class TestFoldSessionListings:
 class TestFoldSessionCreatures:
     def test_unions_members_with_distinct_home_nodes(self, monkeypatch):
         svc = _FakeMultiNodeService({frozenset({("w1", "ga"), ("w2", "gb")})})
-        monkeypatch.setattr(
-            lifecycle,
-            "_meta",
+        lifecycle.meta_for(svc).update(
             {
                 "ga": {
                     "name": "alpha",
@@ -139,9 +137,7 @@ class TestFoldSessionCreatures:
         rows have already been written."""
         svc = _FakeMultiNodeService({frozenset({("w1", "ga"), ("w2", "gb")})})
         # Only one member's _meta row exists (race window after spawn).
-        monkeypatch.setattr(
-            lifecycle,
-            "_meta",
+        lifecycle.meta_for(svc).update(
             {
                 "ga": {
                     "name": "alpha",
@@ -179,9 +175,7 @@ class TestFoldSessionCreatures:
 class TestGetSessionClusterFold:
     def test_primary_returns_all_creatures(self, monkeypatch):
         svc = _FakeMultiNodeService({frozenset({("w1", "ga"), ("w2", "gb")})})
-        monkeypatch.setattr(
-            lifecycle,
-            "_meta",
+        lifecycle.meta_for(svc).update(
             {
                 "ga": {
                     "name": "alpha",
@@ -210,9 +204,7 @@ class TestGetSessionClusterFold:
     def test_non_primary_member_redirects_to_primary(self, monkeypatch):
         svc = _FakeMultiNodeService({frozenset({("w1", "ga"), ("w2", "gb")})})
         primary, secondary = sorted(["ga", "gb"])
-        monkeypatch.setattr(
-            lifecycle,
-            "_meta",
+        lifecycle.meta_for(svc).update(
             {
                 primary: {
                     "name": "alpha",
@@ -290,9 +282,7 @@ class TestListSessionsClusterFold:
             {frozenset({("w1", "ga"), ("w2", "gb")})},
             connected={"w1", "w2"},
         )
-        monkeypatch.setattr(
-            lifecycle,
-            "_meta",
+        lifecycle.meta_for(svc).update(
             {
                 "ga": {
                     "name": "alpha",

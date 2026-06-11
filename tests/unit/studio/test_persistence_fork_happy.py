@@ -1,7 +1,11 @@
 """Happy-path tests for studio.persistence.fork.fork_session_handler."""
 
 import pytest
-from fastapi import HTTPException
+from kohakuterrarium.errors import (
+    ConflictError,
+    InvalidRequestError,
+    SessionError,
+)
 
 from kohakuterrarium.studio.persistence import fork as fork_mod
 from kohakuterrarium.session.errors import ForkNotStableError
@@ -78,7 +82,7 @@ class TestForkSessionHandlerHappyPaths:
         # Pre-create the target path so fork_target_path's result hits.
         existing = fork_mod.fork_target_path(path, "existing")
         existing.write_text("x")
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(ConflictError):
             await fork_mod.fork_session_handler(
                 path,
                 at_event_id=eid,
@@ -86,7 +90,6 @@ class TestForkSessionHandlerHappyPaths:
                 mutate_args=None,
                 name="existing",
             )
-        assert exc.value.status_code == 409
 
     async def test_fork_not_stable_409(self, monkeypatch, tmp_path):
         path, eid = _build_store_with_event(tmp_path)
@@ -95,7 +98,7 @@ class TestForkSessionHandlerHappyPaths:
             raise ForkNotStableError("not stable")
 
         monkeypatch.setattr(SessionStore, "fork", _fake_fork)
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(ConflictError):
             await fork_mod.fork_session_handler(
                 path,
                 at_event_id=eid,
@@ -103,7 +106,6 @@ class TestForkSessionHandlerHappyPaths:
                 mutate_args=None,
                 name=None,
             )
-        assert exc.value.status_code == 409
 
     async def test_fork_value_error_400(self, monkeypatch, tmp_path):
         path, eid = _build_store_with_event(tmp_path)
@@ -112,7 +114,7 @@ class TestForkSessionHandlerHappyPaths:
             raise ValueError("bad fork")
 
         monkeypatch.setattr(SessionStore, "fork", _fake_fork)
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(InvalidRequestError):
             await fork_mod.fork_session_handler(
                 path,
                 at_event_id=eid,
@@ -120,7 +122,6 @@ class TestForkSessionHandlerHappyPaths:
                 mutate_args=None,
                 name=None,
             )
-        assert exc.value.status_code == 400
 
     async def test_fork_unknown_exception_500(self, monkeypatch, tmp_path):
         path, eid = _build_store_with_event(tmp_path)
@@ -129,7 +130,7 @@ class TestForkSessionHandlerHappyPaths:
             raise RuntimeError("unexpected")
 
         monkeypatch.setattr(SessionStore, "fork", _fake_fork)
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(SessionError):
             await fork_mod.fork_session_handler(
                 path,
                 at_event_id=eid,
@@ -137,4 +138,3 @@ class TestForkSessionHandlerHappyPaths:
                 mutate_args=None,
                 name=None,
             )
-        assert exc.value.status_code == 500

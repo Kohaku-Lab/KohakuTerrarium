@@ -109,7 +109,7 @@ class _ScriptHandle:
 def script_handle(monkeypatch) -> _ScriptHandle:
     handle = _ScriptHandle()
 
-    def _fake_create(config, llm_override=None):
+    def _fake_create(config, llm=None):
         return ScriptedLLM(handle.script)
 
     monkeypatch.setattr(bootstrap_llm, "create_llm_provider", _fake_create)

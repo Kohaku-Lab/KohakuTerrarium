@@ -72,7 +72,7 @@ class TestConstruction:
     def test_metadata_derived_from_trigger_class(self):
         tool = CallableTriggerTool(TimerTrigger)
         assert tool.tool_name == "add_timer"
-        assert tool.description.startswith("**Trigger** —")
+        assert tool.description.startswith("**Trigger**:")
         assert tool.execution_mode is ExecutionMode.DIRECT
         # require_manual_read is derived from the class flag, not writable.
         assert tool.require_manual_read is False

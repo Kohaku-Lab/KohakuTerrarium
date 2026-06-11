@@ -5,12 +5,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.routes.catalog import packages as packages_mod
+from kohakuterrarium.packages import locations as loc_mod
 
 
 @pytest.fixture
 def app(tmp_path, monkeypatch):
-    """Build a FastAPI app pointing PACKAGES_DIR at a tmp scratch dir."""
-    monkeypatch.setattr(packages_mod, "PACKAGES_DIR", tmp_path)
+    """Build a FastAPI app pointing the packages dir at a tmp scratch dir."""
+    monkeypatch.setattr(loc_mod, "PACKAGES_DIR", tmp_path)
     app = FastAPI()
     app.state.lab_mode = "standalone"
     app.include_router(packages_mod.router, prefix="/api/registry")

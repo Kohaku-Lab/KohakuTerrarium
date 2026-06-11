@@ -611,6 +611,35 @@ class TestFlushClose:
         finally:
             s2.close()
 
+    def test_open_readonly_never_mutates_meta(self, tmp_path):
+        # E8: listing / preview consumers used plain opens whose close
+        # bumped last_active + flipped status — corrupting the recency
+        # ordering ``kt resume`` sorts by.
+        s = _store(tmp_path)
+        try:
+            s.init_meta("x", "agent", "/p", "/w", ["a"])
+        finally:
+            s.close(update_status=False)
+        before = SessionStore.open_readonly(s._path)
+        meta_before = dict(before.load_meta())
+        # Even an EXPLICIT update_status=True is ignored on a
+        # read-only store.
+        before.close(update_status=True)
+        after = SessionStore.open_readonly(s._path)
+        try:
+            meta_after = dict(after.load_meta())
+            assert meta_after["status"] == meta_before["status"] == "running"
+            assert meta_after["last_active"] == meta_before["last_active"]
+        finally:
+            after.close()
+
+    def test_double_close_is_noop(self, tmp_path):
+        s = _store(tmp_path)
+        s.init_meta("x", "agent", "/p", "/w", ["a"])
+        s.close()
+        # Second close (engine shutdown after caller close) — no error.
+        s.close()
+
     def test_flush_resets_counter(self, tmp_path):
         s = _store(tmp_path)
         try:

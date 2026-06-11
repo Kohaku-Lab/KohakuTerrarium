@@ -47,7 +47,7 @@ async def test_path_form_spawn_persists_config_path_in_meta(tmp_path):
         engine, _RecordingNode(), session_dir=tmp_path / "worker-sessions"
     )
     try:
-        creature = await engine.add_creature(str(cdir), suppress_io=True)
+        creature = await engine.add_creature(str(cdir), io="none", strict=False)
         attacher.attach(creature.creature_id)
 
         store = engine._session_stores[creature.graph_id]
@@ -105,7 +105,7 @@ async def test_meta_is_populated_before_session_store_publish(tmp_path):
 
         SessionEventTee._meta_item = _capture
         try:
-            creature = await engine.add_creature(str(cdir), suppress_io=True)
+            creature = await engine.add_creature(str(cdir), io="none", strict=False)
             attacher.attach(creature.creature_id)
             # Allow the pump one tick to send.
             import asyncio as _aio
@@ -146,7 +146,7 @@ async def test_inline_config_spawn_persists_snapshot(tmp_path):
         engine, _RecordingNode(), session_dir=tmp_path / "worker-sessions"
     )
     try:
-        creature = await engine.add_creature(cfg, suppress_io=True)
+        creature = await engine.add_creature(cfg, io="none", strict=False)
         attacher.attach(creature.creature_id)
 
         store = engine._session_stores[creature.graph_id]

@@ -169,7 +169,7 @@ def patched_llm(monkeypatch):
     """
     holder: dict[str, list] = {"script": ["OK"]}
 
-    def _fake_create(config, llm_override=None):
+    def _fake_create(config, llm=None):
         return ScriptedLLM(holder["script"])
 
     monkeypatch.setattr(_bootstrap_llm_mod, "create_llm_provider", _fake_create)
@@ -198,8 +198,8 @@ def patched_model_switch(monkeypatch):
     }
     built: list[ScriptedLLM] = []
 
-    def _resolve(data, llm_override=None):
-        key = llm_override or data.get("llm")
+    def _resolve(data, llm=None):
+        key = llm or data.get("llm")
         return profiles.get(key)
 
     def _create_from_name(name):
@@ -667,26 +667,28 @@ class TestProgCreatureJourney:
             await resumed_agent.stop()
 
         # ---- milestone 11: memory search over the session -----------
-        # FTS keyword search finds the EXACT recorded user turn.
-        fts_memory = SessionMemory(
-            str(session_path), embedder=None, store=resumed_store
-        )
+        # SessionMemory opens its own handles on the file (the old
+        # ``store=`` sharing param is gone) — read the events out and
+        # close the resume handle FIRST so there is a single owner.
         events = resumed_store.get_events("pilot")
+        resumed_store.close()
+
+        # FTS keyword search finds the EXACT recorded user turn.
+        fts_memory = SessionMemory(str(session_path), embedder=None)
         assert fts_memory.index_events("pilot", events) > 0
         fts_hits = fts_memory.search("recorded", mode="fts", k=5)
         assert fts_hits, "FTS search returned nothing"
         fts_contents = {h.content for h in fts_hits}
         assert "first recorded question" in fts_contents
         assert "second recorded question" in fts_contents
+        fts_memory.close()
 
         # Semantic search over the deterministic embedder: the exact
         # phrase embeds to the exact stored vector → top hit is itself.
-        sem_memory = SessionMemory(
-            str(session_path), embedder=_HashEmbedder(), store=resumed_store
-        )
+        sem_memory = SessionMemory(str(session_path), embedder=_HashEmbedder())
         sem_memory.index_events("pilot", events)
         assert sem_memory.has_vectors
         sem_hits = sem_memory.search("first recorded question", mode="semantic", k=5)
         assert sem_hits, "semantic search returned nothing"
         assert sem_hits[0].content == "first recorded question"
-        resumed_store.close()
+        sem_memory.close()

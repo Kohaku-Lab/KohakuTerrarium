@@ -4,7 +4,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from kohakuterrarium.errors import InvalidRequestError, NotFoundError
 
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.viewer import export as ex_mod
@@ -52,9 +52,8 @@ class TestAgentsFor:
         assert out == ["bob"]
 
     def test_filter_to_missing_raises(self):
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(NotFoundError):
             ex_mod._agents_for({"agents": ["alice"]}, "ghost")
-        assert exc.value.status_code == 404
 
 
 # ── render_* functions via build_export ─────────────────────
@@ -150,9 +149,8 @@ class TestBuildExport:
     def test_unknown_format(self, tmp_path):
         store, _ = _make_store(tmp_path)
         try:
-            with pytest.raises(HTTPException) as exc:
+            with pytest.raises(InvalidRequestError):
                 ex_mod.build_export(store, "s", "pdf", None)
-            assert exc.value.status_code == 400
         finally:
             store.close()
 

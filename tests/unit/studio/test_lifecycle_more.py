@@ -17,14 +17,9 @@ from kohakuterrarium.terrarium.service import LocalTerrariumService, CreatureInf
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder, _FakeAgent
 from kohakuterrarium.terrarium.creature_host import Creature
 
-
-@pytest.fixture(autouse=True)
-def _reset_module_state():
-    lifecycle._meta.clear()
-    lifecycle._session_stores.clear()
-    yield
-    lifecycle._meta.clear()
-    lifecycle._session_stores.clear()
+# Session bookkeeping is instance-scoped (studio.sessions.registry) —
+# each test builds its own engine/service, so no module-state reset is
+# needed between tests.
 
 
 # ── start_creature: package_ref + name application (96-98, 114) ──
@@ -62,8 +57,6 @@ class TestStartCreaturePackageRef:
         engine.get_creature = lambda cid: fake_creature
         engine._creatures = {"cid-x": fake_creature}
 
-        monkeypatch.setattr(lifecycle, "is_package_ref", lambda p: True)
-        monkeypatch.setattr(lifecycle, "resolve_package_path", lambda p: "/resolved")
         monkeypatch.setattr(
             lifecycle,
             "SessionStore",
@@ -77,8 +70,9 @@ class TestStartCreaturePackageRef:
             sess = await lifecycle.start_creature(
                 svc, config_path="@pkg/x", name="renamed"
             )
-            # Verified that the package ref got resolved.
-            assert captured["cfg"] == "/resolved"
+            # ``@pkg`` refs pass through verbatim — resolution happens
+            # at the config-loader chokepoint inside add_creature (E1).
+            assert captured["cfg"] == "@pkg/x"
             # Name was applied.
             assert sess.name == "renamed"
         finally:
@@ -104,15 +98,13 @@ class TestStartCreaturePackageRef:
             )
 
         svc.add_creature = _fake_add
-        monkeypatch.setattr(lifecycle, "is_package_ref", lambda p: True)
-        monkeypatch.setattr(
-            lifecycle, "resolve_package_path", lambda p: "/resolved-remote"
-        )
         try:
             await lifecycle.start_creature(
                 svc, config_path="@pkg/x", on_node="worker-1"
             )
-            assert captured["cfg"] == "/resolved-remote"
+            # Remote spawns ship the @ref verbatim — the WORKER node
+            # resolves it against its own installed packages.
+            assert captured["cfg"] == "@pkg/x"
             assert captured["on_node"] == "worker-1"
         finally:
             await engine.shutdown()
@@ -191,27 +183,6 @@ class TestAttachMetaUpdates:
             await t.shutdown()
 
 
-# ── _retro_install_channel_persistence with live channels (251) ──
-
-
-class TestRetroInstall:
-    async def test_walks_registered_channels(self):
-        t = await (
-            TestTerrariumBuilder().with_creature("alice").with_channel("chat").build()
-        )
-        try:
-            sid = t.get_creature("alice").graph_id
-            # Should not raise — exercises the loop body.
-            lifecycle._retro_install_channel_persistence(t, sid)
-        finally:
-            await t.shutdown()
-
-    def test_no_env_returns(self):
-        engine = SimpleNamespace(_environments={})
-        # No env for sid → early return.
-        lifecycle._retro_install_channel_persistence(engine, "ghost")
-
-
 # ── start_terrarium package ref + config (276-278) ───────────
 
 
@@ -224,10 +195,6 @@ class TestStartTerrariumPackageRef:
         cfg = TerrariumConfig(name="t", creatures=[], channels=[])
         captured = {}
 
-        monkeypatch.setattr(lifecycle, "is_package_ref", lambda p: True)
-        monkeypatch.setattr(
-            lifecycle, "resolve_package_path", lambda p: "/resolved/recipe.yaml"
-        )
         monkeypatch.setattr(
             lifecycle,
             "load_terrarium_config",
@@ -235,7 +202,7 @@ class TestStartTerrariumPackageRef:
         )
         monkeypatch.setattr(lifecycle, "_session_dir", lambda: str(tmp_path))
 
-        async def _apply(c, pwd=None, llm_override=None):
+        async def _apply(c, pwd=None, llm=None, strict=True):
             return SimpleNamespace(graph_id="g-new", creature_ids=set())
 
         engine.apply_recipe = _apply
@@ -246,7 +213,9 @@ class TestStartTerrariumPackageRef:
         engine._environments = {}
         try:
             await lifecycle.start_terrarium(svc, config_path="@pkg/t")
-            assert captured["path"] == "/resolved/recipe.yaml"
+            # The @ref reaches ``load_terrarium_config`` verbatim — that
+            # loader is the resolution chokepoint (E1).
+            assert captured["path"] == "@pkg/t"
         finally:
             await engine.shutdown()
 
@@ -260,7 +229,7 @@ class TestListSessionsFilter:
         svc = LocalTerrariumService(t)
         try:
             # A meta entry with no on_node should NOT appear in list.
-            lifecycle._meta["sid-x"] = {"name": "n"}
+            lifecycle.meta_for(svc)["sid-x"] = {"name": "n"}
             out = lifecycle.list_sessions(svc)
             assert not any(s.session_id == "sid-x" for s in out)
         finally:
@@ -304,7 +273,7 @@ class TestStopSessionSwallow:
             t.remove_creature = _boom
             # Should not raise — swallows internal KeyError.
             await lifecycle.stop_session(svc, gid)
-            assert gid not in lifecycle._meta
+            assert gid not in lifecycle.meta_for(svc)
         finally:
             await t.shutdown()
 
@@ -317,13 +286,13 @@ class TestStopSessionSwallow:
 
         svc.remove_creature = _boom
         try:
-            lifecycle._meta["sid-r"] = {
+            lifecycle.meta_for(svc)["sid-r"] = {
                 "on_node": "worker-1",
                 "creature_id": "cid-r",
             }
             # KeyError on worker is swallowed; meta is still cleaned.
             await lifecycle.stop_session(svc, "sid-r")
-            assert "sid-r" not in lifecycle._meta
+            assert "sid-r" not in lifecycle.meta_for(svc)
         finally:
             await t.shutdown()
 

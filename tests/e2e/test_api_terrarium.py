@@ -113,7 +113,7 @@ def scripted_llm(monkeypatch: pytest.MonkeyPatch) -> ScriptedLLM:
     """
     llm = ScriptedLLM([_REPLY_ONE, _REPLY_TWO, _REPLY_TWO, _REPLY_TWO])
 
-    def _fake_create(config, llm_override=None):
+    def _fake_create(config, selector=None):
         return llm
 
     monkeypatch.setattr(_bootstrap_llm, "create_llm_provider", _fake_create)

@@ -240,7 +240,7 @@ class TestHistoryBranches:
                 "events": [{"type": "channel_message", "content": "hi"}],
             }
 
-        monkeypatch.setattr(chat_mod, "_channel_history", fake_ch)
+        monkeypatch.setattr(chat_mod, "channel_history", fake_ch)
         client = _client(_FakeService())
         resp = client.get("/sessions/g/creatures/ch:chat-ch/history")
         assert resp.status_code == 200

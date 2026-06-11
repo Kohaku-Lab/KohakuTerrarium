@@ -10,7 +10,7 @@ Contract:
 
 * ``_find_shell`` returns a real, resolvable shell path for the current
   platform, falling back to a sentinel only when nothing is on PATH;
-* ``_session_cwd`` reads the creature's executor working dir and falls
+* ``session_cwd`` reads the creature's executor working dir and falls
   back to the server CWD when the executor doesn't advertise one;
 * ``pty_session`` routes to the Windows backend on win32 and the POSIX
   backend otherwise.
@@ -58,22 +58,22 @@ class TestSessionCwd:
         holder = SimpleNamespace(
             agent=SimpleNamespace(executor=SimpleNamespace(_working_dir=str(tmp_path)))
         )
-        assert pty_router._session_cwd(holder) == str(tmp_path)
+        assert pty_router.session_cwd(holder) == str(tmp_path)
 
     def test_falls_back_to_server_cwd_without_working_dir(self):
         # Executor exists but exposes no _working_dir attribute.
         holder = SimpleNamespace(agent=SimpleNamespace(executor=SimpleNamespace()))
-        assert pty_router._session_cwd(holder) == os.getcwd()
+        assert pty_router.session_cwd(holder) == os.getcwd()
 
     def test_falls_back_when_agent_has_no_executor(self):
         holder = SimpleNamespace(agent=SimpleNamespace())
-        assert pty_router._session_cwd(holder) == os.getcwd()
+        assert pty_router.session_cwd(holder) == os.getcwd()
 
     def test_none_working_dir_falls_back(self):
         holder = SimpleNamespace(
             agent=SimpleNamespace(executor=SimpleNamespace(_working_dir=None))
         )
-        assert pty_router._session_cwd(holder) == os.getcwd()
+        assert pty_router.session_cwd(holder) == os.getcwd()
 
 
 class TestPtySessionDispatch:

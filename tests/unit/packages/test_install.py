@@ -27,7 +27,7 @@ def pkg_dir(tmp_path, monkeypatch):
 @pytest.fixture
 def no_deps(monkeypatch):
     """Stop _install_python_deps from shelling out to pip."""
-    monkeypatch.setattr(install_mod, "_install_python_deps", lambda p: None)
+    monkeypatch.setattr(install_mod, "_install_python_deps", lambda p, **kw: None)
 
 
 def _source_pkg(tmp_path, name="srcpkg", body="version: 1.0"):
@@ -486,3 +486,68 @@ class TestUninstallPackage:
         # The symlink is gone; the real target survives.
         assert not link.exists()
         assert real.is_dir()
+
+
+class TestEnsure:
+    """``ensure(spec)`` — the idempotent install primitive (E10)."""
+
+    def test_local_path_installs_when_missing(self, pkg_dir, tmp_path, no_deps):
+        src = _source_pkg(tmp_path)
+        name = install_mod.ensure(str(src))
+        assert name == "srcpkg"
+        assert (pkg_dir / "srcpkg").is_dir()
+
+    def test_already_installed_is_a_no_op(
+        self, pkg_dir, tmp_path, no_deps, monkeypatch
+    ):
+        src = _source_pkg(tmp_path)
+        install_mod.ensure(str(src))
+        # Poison the install path — a second ensure() must never reach it.
+        monkeypatch.setattr(
+            install_mod,
+            "install_package_spec",
+            lambda *a, **kw: pytest.fail("ensure() re-installed an installed package"),
+        )
+        assert install_mod.ensure(str(src)) == "srcpkg"
+
+    def test_marketplace_spec_skips_network_when_installed(
+        self, pkg_dir, tmp_path, no_deps, monkeypatch
+    ):
+        # Pre-install under the marketplace name, then ensure("@name@ver").
+        src = _source_pkg(tmp_path, name="mkt-pkg")
+        install_package(str(src), editable=False, name_override="mkt-pkg")
+        monkeypatch.setattr(
+            install_mod.marketplace,
+            "resolve_sync",
+            lambda spec: pytest.fail("ensure() hit the marketplace resolver"),
+        )
+        # Pinned version is documented as NOT checked by ensure().
+        assert install_mod.ensure("@mkt-pkg@v9.9.9") == "mkt-pkg"
+
+    def test_marketplace_spec_installs_when_missing(self, pkg_dir, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            install_mod,
+            "install_package_spec",
+            lambda spec, **kw: calls.append((spec, kw)) or "fresh-pkg",
+        )
+        assert install_mod.ensure("@fresh-pkg", deps="never") == "fresh-pkg"
+        assert calls == [("@fresh-pkg", {"deps": "never"})]
+
+    def test_git_url_name_derived_for_idempotency(
+        self, pkg_dir, tmp_path, no_deps, monkeypatch
+    ):
+        # An installed dir matching the repo basename short-circuits.
+        (pkg_dir / "myrepo").mkdir(parents=True)
+        monkeypatch.setattr(
+            install_mod,
+            "install_package_spec",
+            lambda *a, **kw: pytest.fail("ensure() re-cloned an installed repo"),
+        )
+        assert install_mod.ensure("https://x/myrepo.git") == "myrepo"
+
+    def test_bad_deps_policy_rejected_before_any_work(self, pkg_dir):
+        from kohakuterrarium.errors import PackageError
+
+        with pytest.raises(PackageError, match="deps policy"):
+            install_mod.ensure("@whatever", deps="sometimes")

@@ -226,10 +226,8 @@ class TestResolveControllerLlm:
         assert profile is not None
         assert profile.model == "gpt-5.4"
 
-    def test_llm_override_arg_wins_over_config(self):
-        profile = resolve_controller_llm(
-            {"llm": "codex/gpt-5.4"}, llm_override="openai/gpt-4o"
-        )
+    def test_llm_arg_wins_over_config(self):
+        profile = resolve_controller_llm({"llm": "codex/gpt-5.4"}, llm="openai/gpt-4o")
         assert profile.provider == "openai"
         assert profile.model == "gpt-4o"
 

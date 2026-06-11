@@ -109,7 +109,7 @@ def install_scripted_llm(
     """
     holder: dict[str, list[Any]] = {"script": list(script or ["OK"])}
 
-    def _fake_create(config, llm_override=None):
+    def _fake_create(config, llm=None):
         return ScriptedLLM(holder["script"])
 
     def _fake_from_profile(name):

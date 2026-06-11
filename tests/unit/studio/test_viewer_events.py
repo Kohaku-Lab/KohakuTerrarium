@@ -1,7 +1,7 @@
 """Unit tests for :mod:`kohakuterrarium.studio.persistence.viewer.events`."""
 
 import pytest
-from fastapi import HTTPException
+from kohakuterrarium.errors import NotFoundError
 
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.viewer.events import (
@@ -71,7 +71,7 @@ class TestBuildEventsPayload:
         s = _store(tmp_path)
         try:
             s.init_meta("sess", "agent", "/p", "/w", ["alice"])
-            with pytest.raises(HTTPException) as exc:
+            with pytest.raises(NotFoundError):
                 build_events_payload(
                     s,
                     "sess",
@@ -83,7 +83,6 @@ class TestBuildEventsPayload:
                     limit=10,
                     cursor=None,
                 )
-            assert exc.value.status_code == 404
         finally:
             s.close()
 
@@ -91,7 +90,7 @@ class TestBuildEventsPayload:
         s = _store(tmp_path)
         try:
             s.init_meta("sess", "agent", "/p", "/w", [])
-            with pytest.raises(HTTPException) as exc:
+            with pytest.raises(NotFoundError):
                 build_events_payload(
                     s,
                     "sess",
@@ -103,7 +102,6 @@ class TestBuildEventsPayload:
                     limit=10,
                     cursor=None,
                 )
-            assert exc.value.status_code == 404
         finally:
             s.close()
 

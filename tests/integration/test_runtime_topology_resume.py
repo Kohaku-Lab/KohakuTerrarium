@@ -29,7 +29,7 @@ pytestmark = pytest.mark.timeout(30)
 
 @pytest.fixture
 def patched_llm(monkeypatch):
-    def _fake_create(config, llm_override=None):
+    def _fake_create(config, llm=None):
         return ScriptedLLM(["ack"])
 
     monkeypatch.setattr(_bootstrap_llm, "create_llm_provider", _fake_create)

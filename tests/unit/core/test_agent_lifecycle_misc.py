@@ -266,7 +266,7 @@ class TestBuildCompactLLM:
             variation_selections={},
             name="alice",
         )
-        a._llm_override = None
+        a._llm_selector = None
         from kohakuterrarium.core.compact import CompactConfig
 
         out = a._build_compact_llm(CompactConfig())
@@ -295,7 +295,7 @@ class TestBuildCompactLLM:
             variation_selections={},
             name="alice",
         )
-        a._llm_override = None
+        a._llm_selector = None
         from kohakuterrarium.core.compact import CompactConfig
 
         out = a._build_compact_llm(CompactConfig(compact_model="my-profile"))
@@ -322,7 +322,7 @@ class TestBuildCompactLLM:
             variation_selections={},
             name="alice",
         )
-        a._llm_override = None
+        a._llm_selector = None
         from kohakuterrarium.core.compact import CompactConfig
 
         out = a._build_compact_llm(CompactConfig(compact_model="bad-profile"))
@@ -362,7 +362,7 @@ class TestBuildCompactLLM:
             variation_selections={"k": "v"},
             name="alice",
         )
-        a._llm_override = None
+        a._llm_selector = None
         from kohakuterrarium.core.compact import CompactConfig
 
         out = a._build_compact_llm(CompactConfig())

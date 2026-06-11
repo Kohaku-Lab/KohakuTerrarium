@@ -30,7 +30,6 @@ from kohakuterrarium.studio.persistence import (
     session_index as _persistence_session_index,
     store as _persistence_store_mod,
 )
-from kohakuterrarium.studio.sessions import lifecycle as _lifecycle
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder
 
 # ---------------------------------------------------------------------------
@@ -45,13 +44,12 @@ async def studio_engine():
         TestTerrariumBuilder().with_creature("alice").with_creature("bob").build()
     )
     s = Studio(engine=engine)
-    _lifecycle._meta.clear()
-    _lifecycle._session_stores.clear()
+    # Session bookkeeping is instance-scoped (studio.sessions.registry);
+    # the per-test engine carries its own registry, so no module-state
+    # reset is needed.
     try:
         yield s, engine
     finally:
-        _lifecycle._meta.clear()
-        _lifecycle._session_stores.clear()
         await engine.shutdown()
 
 

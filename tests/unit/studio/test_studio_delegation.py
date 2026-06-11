@@ -141,11 +141,10 @@ class TestSessionsSearchMemoryForward:
         try:
             result = await s.sessions.search_memory(
                 path,
-                q="nothing-matches-this-query",
+                "nothing-matches-this-query",
                 mode="fts",
                 k=5,
                 agent=None,
-                engine=s.engine,
             )
             # Awaiting the forwarder yields a real dict payload, not a
             # coroutine — and a no-hit query resolves to count 0.

@@ -91,23 +91,23 @@ class TestGroupAddNode:
         r = await tool._execute({"config_path": ""})
         assert "config_path is required" in r.error
 
-    async def test_package_ref_resolution_failure(self, monkeypatch):
-        _patch_resolve(monkeypatch, _gctx())
-        monkeypatch.setattr(lifecycle_mod, "is_package_ref", lambda p: True)
-
-        def boom(p):
-            raise FileNotFoundError("no pkg")
-
-        monkeypatch.setattr(lifecycle_mod, "resolve_package_path", boom)
+    async def test_package_ref_passes_through_to_engine(self, monkeypatch):
+        # ``@pkg/...`` refs are NOT pre-resolved by the tool — the
+        # engine's config loader owns resolution (E1 chokepoint).  A
+        # bad ref surfaces as the loader's typed error in the result.
+        gctx = _gctx()
+        gctx.engine.add_creature.side_effect = FileNotFoundError("no pkg")
+        _patch_resolve(monkeypatch, gctx)
         tool = lifecycle_mod.GroupAddNodeTool()
         r = await tool._execute({"config_path": "@pkg/x"})
         assert "no pkg" in r.error
+        # The unresolved ref reached the engine verbatim.
+        assert gctx.engine.add_creature.call_args.args[0] == "@pkg/x"
 
     async def test_add_creature_failure(self, monkeypatch):
         gctx = _gctx()
         gctx.engine.add_creature.side_effect = RuntimeError("boom")
         _patch_resolve(monkeypatch, gctx)
-        monkeypatch.setattr(lifecycle_mod, "is_package_ref", lambda p: False)
         tool = lifecycle_mod.GroupAddNodeTool()
         r = await tool._execute({"config_path": "./c"})
         assert "failed to spawn" in r.error
@@ -119,7 +119,6 @@ class TestGroupAddNode:
         gctx = _gctx()
         gctx.engine.add_creature.return_value = new_creature
         _patch_resolve(monkeypatch, gctx)
-        monkeypatch.setattr(lifecycle_mod, "is_package_ref", lambda p: False)
         applied = {}
         monkeypatch.setattr(
             lifecycle_mod.group_hooks,

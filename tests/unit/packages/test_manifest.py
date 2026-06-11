@@ -5,8 +5,11 @@ Covers manifest IO, structural validation, dependency-install hooks
 """
 
 import subprocess
+import sys
 
+import pytest
 
+from kohakuterrarium.errors import PackageError
 from kohakuterrarium.packages import manifest as man_mod
 from kohakuterrarium.packages.manifest import (
     _force_rmtree,
@@ -82,7 +85,7 @@ class TestValidatePackage:
 
 
 class TestInstallPythonDeps:
-    def test_manifest_deps_invoke_pip(self, tmp_path, monkeypatch):
+    def test_manifest_deps_invoke_this_interpreters_pip(self, tmp_path, monkeypatch):
         (tmp_path / "kohaku.yaml").write_text(
             "name: p\npython_dependencies:\n  - requests\n  - httpx"
         )
@@ -93,8 +96,9 @@ class TestInstallPythonDeps:
             lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0),
         )
         _install_python_deps(tmp_path)
-        # pip install was called with the two declared deps.
-        assert calls == [["pip", "install", "requests", "httpx"]]
+        # ``sys.executable -m pip`` — a bare PATH ``pip`` may belong to
+        # a different interpreter entirely.
+        assert calls == [[sys.executable, "-m", "pip", "install", "requests", "httpx"]]
 
     def test_requirements_txt_invokes_pip(self, tmp_path, monkeypatch):
         (tmp_path / "requirements.txt").write_text("rich\n")
@@ -105,7 +109,14 @@ class TestInstallPythonDeps:
             lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0),
         )
         _install_python_deps(tmp_path)
-        assert ["pip", "install", "-r", str(tmp_path / "requirements.txt")] in calls
+        assert [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "-r",
+            str(tmp_path / "requirements.txt"),
+        ] in calls
 
     def test_no_deps_no_subprocess(self, tmp_path, monkeypatch):
         (tmp_path / "kohaku.yaml").write_text("name: p")
@@ -117,24 +128,49 @@ class TestInstallPythonDeps:
         # No deps, no requirements.txt → pip never invoked.
         assert called == []
 
-    def test_dep_install_failure_is_swallowed(self, tmp_path, monkeypatch):
+    def test_deps_never_skips_pip_entirely(self, tmp_path, monkeypatch):
+        (tmp_path / "kohaku.yaml").write_text("name: p\npython_dependencies:\n  - x")
+        (tmp_path / "requirements.txt").write_text("y\n")
+        called = []
+        monkeypatch.setattr(
+            man_mod.subprocess, "run", lambda *a, **kw: called.append(a)
+        )
+        _install_python_deps(tmp_path, deps="never")
+        # Declared deps present, but the policy says hands off.
+        assert called == []
+
+    def test_unknown_policy_raises_before_pip(self, tmp_path, monkeypatch):
+        (tmp_path / "kohaku.yaml").write_text("name: p\npython_dependencies:\n  - x")
+        called = []
+        monkeypatch.setattr(
+            man_mod.subprocess, "run", lambda *a, **kw: called.append(a)
+        )
+        with pytest.raises(PackageError, match="deps policy"):
+            _install_python_deps(tmp_path, deps="ask")
+        assert called == []
+
+    def test_dep_install_failure_raises_package_error(self, tmp_path, monkeypatch):
         (tmp_path / "kohaku.yaml").write_text("name: p\npython_dependencies:\n  - x")
 
         def boom(cmd, **kw):
             raise subprocess.CalledProcessError(1, cmd, stderr=b"boom")
 
         monkeypatch.setattr(man_mod.subprocess, "run", boom)
-        # A failed pip install must not propagate — install continues.
-        _install_python_deps(tmp_path)
+        # Failures used to downgrade to a warning — the package looked
+        # installed but its imports exploded later. Now it's typed +
+        # actionable, with pip's stderr included.
+        with pytest.raises(PackageError, match="boom"):
+            _install_python_deps(tmp_path)
 
-    def test_requirements_failure_is_swallowed(self, tmp_path, monkeypatch):
+    def test_requirements_failure_raises_package_error(self, tmp_path, monkeypatch):
         (tmp_path / "requirements.txt").write_text("x\n")
 
         def boom(cmd, **kw):
             raise subprocess.CalledProcessError(1, cmd, stderr=b"reqfail")
 
         monkeypatch.setattr(man_mod.subprocess, "run", boom)
-        _install_python_deps(tmp_path)
+        with pytest.raises(PackageError, match="reqfail"):
+            _install_python_deps(tmp_path)
 
 
 class TestGetPackageFrameworkHints:

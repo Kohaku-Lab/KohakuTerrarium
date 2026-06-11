@@ -306,7 +306,7 @@ def llm_box(monkeypatch):
 
     box = _Box()
 
-    def _fake_create(config, llm_override=None):
+    def _fake_create(config, llm=None):
         return ScriptedLLM(box.script)
 
     monkeypatch.setattr(_bootstrap_llm, "create_llm_provider", _fake_create)
@@ -584,7 +584,7 @@ class TestModulesIntegration:
         # exactly as the bootstrap layer exposes setup-able triggers.
         sched_tool = CallableTriggerTool(SchedulerTrigger)
         assert sched_tool.tool_name == "add_schedule"
-        assert sched_tool.description.startswith("**Trigger** —")
+        assert sched_tool.description.startswith("**Trigger**:")
         agent.registry.register_tool(sched_tool)
         agent.executor.register_tool(sched_tool)
 

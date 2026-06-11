@@ -57,12 +57,16 @@ class TestBuildCreatureDispatch:
             p,
             session=None,
             environment=None,
-            llm_override=None,
+            llm=None,
             pwd=None,
             input_module=None,
+            output_module=None,
+            strict=True,
+            tools=None,
+            plugins=None,
         ):
             # ``build_creature`` threads ``input_module`` to every branch
-            # (None unless ``suppress_io``).
+            # (None unless ``io="none"``).
             return fake_agent
 
         monkeypatch.setattr(ch_mod.Agent, "from_path", staticmethod(_from_path))
@@ -78,12 +82,16 @@ class TestBuildCreatureDispatch:
             cfg,
             session=None,
             environment=None,
-            llm_override=None,
+            llm=None,
             pwd=None,
             input_module=None,
+            output_module=None,
+            strict=True,
+            tools=None,
+            plugins=None,
         ):
             # ``build_creature`` now passes ``input_module`` to every
-            # branch (None unless ``suppress_io``) so the IO-suppression
+            # branch (None unless ``io="none"``) so the IO-suppression
             # contract is uniform.
             captured["cfg"] = cfg
             captured["input_module"] = input_module
@@ -98,9 +106,9 @@ class TestBuildCreatureDispatch:
         assert captured["cfg"] is cfg
         # Default spawn does NOT suppress IO — input_module stays None.
         assert captured["input_module"] is None
-        # ...but ``suppress_io=True`` forces a NoneInput override.
+        # ...but ``io="none"`` forces a NoneInput override.
         captured.clear()
-        build_creature(cfg, suppress_io=True)
+        build_creature(cfg, io="none")
         assert type(captured["input_module"]).__name__ == "NoneInput"
 
     def test_creature_config_path(self, monkeypatch):
@@ -109,10 +117,14 @@ class TestBuildCreatureDispatch:
         def _agent_ctor(
             cfg,
             input_module=None,
+            output_module=None,
             session=None,
             environment=None,
-            llm_override=None,
+            llm=None,
             pwd=None,
+            strict=True,
+            tools=None,
+            plugins=None,
         ):
             a = _FakeAgent(name=cfg.name)
             a.config = SimpleNamespace(name=cfg.name)

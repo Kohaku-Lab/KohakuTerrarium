@@ -105,7 +105,7 @@ class TestBuildSnapshot:
         monkeypatch.setattr(
             rg_mod.lifecycle,
             "get_session_meta",
-            lambda gid: {
+            lambda eng, gid: {
                 "g-late": {"created_at": "2025-12-31"},
                 "g-early": {"created_at": "2025-01-01"},
             }.get(gid, {}),
@@ -121,7 +121,7 @@ class TestBuildSnapshot:
         assert ids == ["g-early", "g-late"]
 
     def test_version_is_milliseconds(self, monkeypatch):
-        monkeypatch.setattr(rg_mod.lifecycle, "get_session_meta", lambda gid: {})
+        monkeypatch.setattr(rg_mod.lifecycle, "get_session_meta", lambda eng, gid: {})
         engine = _FakeEngine(graphs=[])
         out = rg_mod.build_runtime_graph_snapshot(engine)
         # Should be an int large enough to look like a ms timestamp.
@@ -138,7 +138,7 @@ class TestGraphToDict:
         monkeypatch.setattr(
             rg_mod.lifecycle,
             "get_session_meta",
-            lambda gid: {"kind": "creature", "name": "alice"},
+            lambda eng, gid: {"kind": "creature", "name": "alice"},
         )
         engine = _FakeEngine(graphs=[graph], creatures={"c1": c})
         out = rg_mod._graph_to_dict(engine, graph)
@@ -150,7 +150,7 @@ class TestGraphToDict:
         graph = GraphTopology(graph_id="g1", creature_ids={"c1", "c2"})
         c1 = _FakeCreature("c1")
         c2 = _FakeCreature("c2")
-        monkeypatch.setattr(rg_mod.lifecycle, "get_session_meta", lambda gid: {})
+        monkeypatch.setattr(rg_mod.lifecycle, "get_session_meta", lambda eng, gid: {})
         engine = _FakeEngine(graphs=[graph], creatures={"c1": c1, "c2": c2})
         out = rg_mod._graph_to_dict(engine, graph)
         assert out["kind"] == "terrarium"

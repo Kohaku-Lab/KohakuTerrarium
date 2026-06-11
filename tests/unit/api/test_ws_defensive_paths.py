@@ -222,7 +222,7 @@ class TestPtyWsDefensive:
             pty_mod, "find_creature", lambda e, s, c: _FakeCreature(object())
         )
         monkeypatch.setattr(pty_mod, "host_engine_or_none", lambda svc: object())
-        monkeypatch.setattr(pty_mod, "_session_cwd", lambda cr: "/tmp")
+        monkeypatch.setattr(pty_mod, "session_cwd", lambda cr: "/tmp")
 
         async def _boom(ws, cwd):
             raise WebSocketDisconnect()
@@ -238,7 +238,7 @@ class TestPtyWsDefensive:
             pty_mod, "find_creature", lambda e, s, c: _FakeCreature(object())
         )
         monkeypatch.setattr(pty_mod, "host_engine_or_none", lambda svc: object())
-        monkeypatch.setattr(pty_mod, "_session_cwd", lambda cr: "/tmp")
+        monkeypatch.setattr(pty_mod, "session_cwd", lambda cr: "/tmp")
 
         async def _boom(ws, cwd):
             raise RuntimeError("pty bad")

@@ -83,7 +83,7 @@ def scripted_llm(monkeypatch):
 
     holder = _Holder()
 
-    def _fake_create(config, llm_override=None):
+    def _fake_create(config, llm=None):
         llm = ScriptedLLM(holder.script)
         holder.built.append(llm)
         return llm
@@ -1074,7 +1074,9 @@ class TestBootstrapIntegration:
         )
 
         scripted_llm.set_script(["Degraded creature still works."])
-        agent = Agent.from_path(str(config_dir))
+        # E4: graceful degradation is the LENIENT (interactive-frontend)
+        # contract — explicitly opted into via strict=False.
+        agent = Agent.from_path(str(config_dir), strict=False)
 
         # The unknown-type tool entry + the custom tool with a missing
         # module were both dropped; the two valid builtins registered
@@ -1113,3 +1115,11 @@ class TestBootstrapIntegration:
             and "Degraded creature still works." in str(m.get("content", ""))
             for m in agent.conversation_history
         )
+
+        # The SAME broken config under the programmatic default
+        # (strict=True) refuses to build — the first bad tool entry is
+        # a loud ConfigError, not a silent drop.
+        from kohakuterrarium.errors import ConfigError
+
+        with pytest.raises(ConfigError):
+            Agent.from_path(str(config_dir))

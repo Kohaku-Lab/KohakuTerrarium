@@ -248,7 +248,7 @@ class TestHistoryCreature:
         creature = _FakeCreature(agent=agent)
         monkeypatch.setattr(chat_mod, "find_creature", lambda eng, sid, cid: creature)
         fallback = _FakeStore(events=[{"type": "fallback"}])
-        monkeypatch.setattr(chat_mod, "get_session_store", lambda sid: fallback)
+        monkeypatch.setattr(chat_mod, "get_session_store", lambda rt, sid: fallback)
         # The creature's graph is resolved by a direct local engine walk
         # now (no ``find_session_for_creature`` indirection) — the fake
         # engine exposes a graph whose creature_ids include "alice".
@@ -263,7 +263,7 @@ class TestHistoryCreature:
         agent = _FakeAgent(session_store=store)
         creature = _FakeCreature(agent=agent)
         monkeypatch.setattr(chat_mod, "find_creature", lambda eng, sid, cid: creature)
-        monkeypatch.setattr(chat_mod, "get_session_store", lambda sid: None)
+        monkeypatch.setattr(chat_mod, "get_session_store", lambda rt, sid: None)
         # No graph matches → the local walk falls back to session_id "g".
         eng = SimpleNamespace(list_graphs=lambda: [])
         out = chat_mod.history(eng, "g", "alice")
@@ -274,7 +274,7 @@ class TestHistoryCreature:
         agent = _FakeAgent(processing=True)
         creature = _FakeCreature(agent=agent)
         monkeypatch.setattr(chat_mod, "find_creature", lambda eng, sid, cid: creature)
-        monkeypatch.setattr(chat_mod, "get_session_store", lambda sid: None)
+        monkeypatch.setattr(chat_mod, "get_session_store", lambda rt, sid: None)
         eng = SimpleNamespace(list_graphs=lambda: [])
         out = chat_mod.history(eng, "g", "alice")
         assert out["is_processing"] is True
@@ -289,7 +289,7 @@ class TestHistoryCreature:
         broken = _FakeStore(
             raise_on={"get_resumable_events": RuntimeError("fallback dead")}
         )
-        monkeypatch.setattr(chat_mod, "get_session_store", lambda sid: broken)
+        monkeypatch.setattr(chat_mod, "get_session_store", lambda rt, sid: broken)
         eng = SimpleNamespace(
             list_graphs=lambda: [SimpleNamespace(graph_id="g1", creature_ids={"alice"})]
         )
@@ -306,8 +306,8 @@ class TestChannelHistoryLastResortScan:
         holder = _FakeStore(
             channel_messages=[{"sender": "bob", "content": "hey", "ts": 7.0}]
         )
-        monkeypatch.setattr(chat_mod, "get_session_store", lambda sid: None)
-        monkeypatch.setattr(chat_mod, "list_session_stores", lambda: [empty, holder])
+        monkeypatch.setattr(chat_mod, "get_session_store", lambda rt, sid: None)
+        monkeypatch.setattr(chat_mod, "list_session_stores", lambda rt: [empty, holder])
         out = chat_mod.history(SimpleNamespace(), "_", "ch:chat")
         # The message from the holder store surfaces in the payload.
         assert len(out["events"]) == 1
@@ -321,17 +321,19 @@ class TestChannelHistoryLastResortScan:
         good = _FakeStore(
             channel_messages=[{"sender": "alice", "content": "ok", "ts": 1.0}]
         )
-        monkeypatch.setattr(chat_mod, "get_session_store", lambda sid: None)
-        monkeypatch.setattr(chat_mod, "list_session_stores", lambda: [broken, good])
+        monkeypatch.setattr(chat_mod, "get_session_store", lambda rt, sid: None)
+        monkeypatch.setattr(chat_mod, "list_session_stores", lambda rt: [broken, good])
         out = chat_mod.history(SimpleNamespace(), "_", "ch:chat")
         assert len(out["events"]) == 1
         assert out["events"][0]["sender"] == "alice"
 
     def test_last_resort_scan_finds_nothing(self, monkeypatch):
         # No live store holds the channel → empty events, no error.
-        monkeypatch.setattr(chat_mod, "get_session_store", lambda sid: None)
+        monkeypatch.setattr(chat_mod, "get_session_store", lambda rt, sid: None)
         monkeypatch.setattr(
-            chat_mod, "list_session_stores", lambda: [_FakeStore(channel_messages=[])]
+            chat_mod,
+            "list_session_stores",
+            lambda rt: [_FakeStore(channel_messages=[])],
         )
         out = chat_mod.history(SimpleNamespace(), "_", "ch:chat")
         assert out["events"] == []
@@ -339,7 +341,7 @@ class TestChannelHistoryLastResortScan:
 
 class TestHistoryChannel:
     def test_no_store(self, monkeypatch):
-        monkeypatch.setattr(chat_mod, "get_session_store", lambda sid: None)
+        monkeypatch.setattr(chat_mod, "get_session_store", lambda rt, sid: None)
         out = chat_mod.history(SimpleNamespace(), "g", "ch:chat")
         assert out["creature_id"] == "ch:chat"
         assert out["events"] == []
@@ -348,7 +350,7 @@ class TestHistoryChannel:
         store = _FakeStore(
             channel_messages=[{"sender": "alice", "content": "hi", "ts": 100.0}]
         )
-        monkeypatch.setattr(chat_mod, "get_session_store", lambda sid: store)
+        monkeypatch.setattr(chat_mod, "get_session_store", lambda rt, sid: store)
         out = chat_mod.history(SimpleNamespace(), "g", "ch:chat")
         assert len(out["events"]) == 1
         assert out["events"][0]["type"] == "channel_message"
@@ -356,7 +358,7 @@ class TestHistoryChannel:
 
     def test_channel_lookup_failure(self, monkeypatch):
         store = _FakeStore(raise_on={"get_channel_messages": RuntimeError("boom")})
-        monkeypatch.setattr(chat_mod, "get_session_store", lambda sid: store)
+        monkeypatch.setattr(chat_mod, "get_session_store", lambda rt, sid: store)
         out = chat_mod.history(SimpleNamespace(), "g", "ch:chat")
         # Empty events on failure.
         assert out["events"] == []

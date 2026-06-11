@@ -90,7 +90,7 @@ def patched_llm(monkeypatch):
 
     scripts = _Scripts()
 
-    def _fake_create(config, llm_override=None):
+    def _fake_create(config, llm=None):
         return ScriptedLLM(scripts.by_name.get(config.name, ["ack"]))
 
     monkeypatch.setattr(_bootstrap_llm, "create_llm_provider", _fake_create)

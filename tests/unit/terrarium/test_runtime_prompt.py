@@ -301,7 +301,9 @@ class TestRunLoopBehavior:
             prompt = rp.RuntimeGraphPrompt(t)
             # An event whose kind is not a refresh-trigger must not
             # schedule any creature for a prompt refresh.
-            prompt._schedule_refresh_for_event(EngineEvent(kind=EventKind.TEXT))
+            prompt._schedule_refresh_for_event(
+                EngineEvent(kind=EventKind.CHANNEL_MESSAGE)
+            )
             assert prompt._pending == {}
         finally:
             await t.shutdown()

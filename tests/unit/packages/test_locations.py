@@ -157,3 +157,23 @@ class TestPackagesDirSeam:
         # Legacy callers may set PACKAGES_DIR to a str — it must be coerced.
         monkeypatch.setattr(loc_mod, "PACKAGES_DIR", str(tmp_path))
         assert loc_mod._packages_dir() == Path(tmp_path)
+
+    def test_default_honours_kt_config_dir(self, tmp_path, monkeypatch):
+        # E10: with PACKAGES_DIR untouched, the dir re-homes with
+        # KT_CONFIG_DIR — installs and reads agree with every other
+        # config_dir() consumer instead of pinning Path.home().
+        monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path / "home"))
+        assert loc_mod.packages_dir() == tmp_path / "home" / "packages"
+
+    def test_monkeypatched_constant_beats_env(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path / "env_home"))
+        pinned = tmp_path / "pinned"
+        monkeypatch.setattr(loc_mod, "PACKAGES_DIR", pinned)
+        # The explicit override (test seam / embedder pin) wins.
+        assert loc_mod.packages_dir() == pinned
+
+    def test_packages_dir_does_not_create_the_directory(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path / "home"))
+        resolved = loc_mod.packages_dir()
+        # Read paths check existence themselves; only installs mkdir.
+        assert not resolved.exists()

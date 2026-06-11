@@ -79,7 +79,7 @@ def patched_llm(monkeypatch):
 
     p = _Patch()
 
-    def _fake_create(config, llm_override=None):
+    def _fake_create(config, llm=None):
         return ScriptedLLM(p.script)
 
     monkeypatch.setattr(bootstrap_llm, "create_llm_provider", _fake_create)
@@ -145,6 +145,70 @@ async def _start_and_run(agent, event):
 
 
 # ── construction + lifecycle ─────────────────────────────────────
+
+
+class TestLLMInstanceInjection:
+    """``llm=`` instance injection (E5) — NO factory monkeypatch.
+
+    The headline contract of the API cleanup: handing the agent a
+    provider instance (``ScriptedLLM``) binds it directly, replacing
+    the old two-site ``create_llm_provider`` monkeypatch ceremony.
+    """
+
+    def _cfg(self, tmp_path):
+        return AgentConfig(
+            name="inject_agent",
+            system_prompt="You are a test agent.",
+            include_hints_in_prompt=False,
+            agent_path=tmp_path,
+            input=InputConfig(type="none"),
+            output=OutputConfig(type="stdout"),
+        )
+
+    async def test_instance_binds_directly(self, tmp_path):
+        scripted = ScriptedLLM(["Injected reply."])
+        agent = Agent(self._cfg(tmp_path), llm=scripted)
+        assert agent.llm is scripted
+        await _start_and_run(agent, create_user_input_event("hi"))
+        # The injected instance really served the turn.
+        assert scripted.call_count == 1
+        last = agent.controller.conversation.get_last_assistant_message()
+        assert last is not None
+        assert "Injected reply." in last.get_text_content()
+
+    async def test_build_classmethod_with_instance(self, tmp_path):
+        (tmp_path / "config.yaml").write_text(
+            "name: built\ninput:\n  type: none\noutput:\n  type: stdout\n",
+            encoding="utf-8",
+        )
+        scripted = ScriptedLLM(["ok"])
+        agent = await Agent.build(tmp_path, llm=scripted)
+        assert agent.llm is scripted
+        assert agent.config.name == "built"
+
+    async def test_build_accepts_loaded_config(self, tmp_path):
+        scripted = ScriptedLLM(["ok"])
+        agent = await Agent.build(self._cfg(tmp_path), llm=scripted)
+        assert agent.llm is scripted
+
+    async def test_invalid_llm_type_raises_immediately(self, tmp_path):
+        # Instance-injection misuse must NOT silently defer — it is a
+        # caller bug, surfaced at construction time.
+        with pytest.raises(TypeError, match="llm= accepts"):
+            Agent(self._cfg(tmp_path), llm=12345)
+
+    async def test_string_selector_records_for_identifier(self, tmp_path):
+        # A selector string still flows through profile resolution
+        # (which fails here → deferred under strict=False), but is
+        # recorded so llm_identifier()/resume see what was asked for.
+        agent = Agent(self._cfg(tmp_path), llm="ghost/selector", strict=False)
+        assert agent._llm_selector == "ghost/selector"
+
+    async def test_unresolvable_selector_raises_when_strict(self, tmp_path):
+        # Strict (default): a bad model selector is a caller bug —
+        # raise at construction, never a silent DeferredLLMProvider.
+        with pytest.raises(ValueError):
+            Agent(self._cfg(tmp_path), llm="ghost/selector")
 
 
 class TestAgentConstruction:
@@ -303,15 +367,35 @@ class TestTermination:
 
 
 class TestStoppedAgent:
-    async def test_event_dropped_when_not_running(self, make_agent):
+    async def test_event_on_stopped_strict_agent_raises(self, make_agent):
+        # E4: dropping input used to return True (the success value).
+        # Strict agents (the programmatic default) now raise.
+        from kohakuterrarium.errors import AgentNotRunningError
+
         agent = make_agent(script=["unused"])
-        # Don't start — _process_event should bail.
-        await agent._process_event(create_user_input_event("hi"))
+        with pytest.raises(AgentNotRunningError):
+            await agent._process_event(create_user_input_event("hi"))
         # No assistant message recorded.
         msgs = agent.controller.conversation.get_messages()
         roles = [m.role for m in msgs]
         # Only system survives.
         assert "assistant" not in roles
+
+    async def test_event_on_stopped_lenient_agent_returns_false(self, make_agent):
+        agent = make_agent(script=["unused"])
+        agent._strict = False
+        out = await agent._process_event(create_user_input_event("hi"))
+        # Honest drop signal — NOT the old ``True``.
+        assert out is False
+
+    async def test_internal_event_on_stopped_agent_drops_quietly(self, make_agent):
+        # Non-user events racing a shutdown stay benign even on strict
+        # agents (trigger tasks must not explode during stop()).
+        from kohakuterrarium.core.events import TriggerEvent
+
+        agent = make_agent(script=["unused"])
+        out = await agent._process_event(TriggerEvent(type="trigger", content="tick"))
+        assert out is False
 
 
 # ── regenerate_last_response + edit_and_rerun on real Agent ──────
@@ -1116,7 +1200,7 @@ class TestLLMExceptionDuringProcessing:
         from kohakuterrarium.bootstrap import llm as bootstrap_llm
         from kohakuterrarium.bootstrap import agent_init
 
-        def _fake_create(cfg, **kw):
+        def _fake_create(cfg, *a, **kw):
             return bad_llm
 
         # Patch the LLM factory so the next agent built picks up bad_llm.
@@ -1685,18 +1769,18 @@ class TestRunAgentWrapper:
             "output:\n"
             "  type: stdout\n"
         )
-        # Patch Agent.run so we exit immediately.
-        original_run = Agent.run
+        # Patch Agent.run_forever so we exit immediately.
+        original_run = Agent.run_forever
 
         async def _stub_run(self):
             self._running = True
             await self.stop()
 
-        Agent.run = _stub_run
+        Agent.run_forever = _stub_run
         try:
             await run_agent(str(config_dir))
         finally:
-            Agent.run = original_run
+            Agent.run_forever = original_run
 
 
 # ── _drive_input handles startup + multimodal log path ──────────
@@ -2197,9 +2281,12 @@ class TestRestoreTriggersFullPath:
 
 class TestProcessEventDropped:
     async def test_dropped_when_not_running(self, make_agent):
+        from kohakuterrarium.errors import AgentNotRunningError
+
         agent = make_agent()
-        # Don't start — agent._running is False.
-        await agent._process_event(create_user_input_event("hi"))
+        # Don't start — agent._running is False; strict agents raise.
+        with pytest.raises(AgentNotRunningError):
+            await agent._process_event(create_user_input_event("hi"))
         # No assistant turn appended.
         msgs = agent.controller.conversation.get_messages()
         assert all(m.role != "assistant" for m in msgs)
@@ -2533,7 +2620,7 @@ class TestOnEmergencyDropWiring:
 
         drop_llm = _DropLLM()
 
-        def _fake_create(cfg, **kw):
+        def _fake_create(cfg, *a, **kw):
             return drop_llm
 
         import unittest.mock as um
@@ -3813,11 +3900,11 @@ class TestPromoteHandleOffLoop:
         assert result is False
 
 
-# ── Agent.run() outer wrapper (lines 662-666) ───────────────────
+# ── Agent.run_forever() outer wrapper ────────────────────────────
 
 
-class TestAgentRun:
-    async def test_run_starts_and_stops(self, make_agent):
+class TestAgentRunForever:
+    async def test_run_forever_starts_and_stops(self, make_agent):
         agent = make_agent(script=["ack"])
 
         # Stub _drive_input to return immediately.
@@ -3825,8 +3912,8 @@ class TestAgentRun:
             return None
 
         agent._drive_input = fake_drive
-        await agent.run()
-        # Agent stopped after run.
+        await agent.run_forever()
+        # Agent stopped after the loop.
         assert agent.is_running is False
 
 

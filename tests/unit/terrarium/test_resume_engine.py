@@ -68,7 +68,7 @@ class TestResumeIntoEngine:
             path,
             pwd_override=None,
             io_mode=None,
-            llm_override=None,
+            llm=None,
             *,
             input_module=None,
             output_module=None,

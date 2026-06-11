@@ -412,10 +412,101 @@ class TestRunnableProtocol:
         assert isinstance(p, Runnable)
 
 
-# ── Effects attribute ────────────────────────────────────────────
+# ── E11 boundary fixes ───────────────────────────────────────────
 
 
-class TestEffectsAttribute:
-    def test_default_none(self):
-        b = BaseRunnable()
-        assert b.effects is None
+class TestPureAlias:
+    def test_pure_is_the_documented_lowercase_spelling(self):
+        from kohakuterrarium.compose import pure
+
+        p = pure(lambda x: x)
+        assert isinstance(p, Pure)
+
+    def test_effects_surface_is_gone(self):
+        # E11: Effects was exported dead surface — nothing composed it.
+        import kohakuterrarium.compose as compose
+
+        assert not hasattr(compose, "Effects")
+        assert not hasattr(BaseRunnable(), "effects")
+
+
+class TestFallbackChainsExceptions:
+    async def test_double_failure_chains_primary_as_cause(self):
+        async def primary(_x):
+            raise ValueError("primary boom")
+
+        async def backup(_x):
+            raise RuntimeError("backup boom")
+
+        fb = Pure(primary) | Pure(backup)
+        with pytest.raises(RuntimeError, match="backup boom") as exc_info:
+            await fb.run("x")
+        # The ORIGINAL failure is the explicit cause, not lost context.
+        cause = exc_info.value.__cause__
+        assert isinstance(cause, ValueError)
+        assert "primary boom" in str(cause)
+
+
+class TestProductCancelsSiblings:
+    async def test_failure_cancels_surviving_branches(self):
+        import asyncio
+
+        cancelled = asyncio.Event()
+
+        async def slow(_x):
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+            return "never"
+
+        async def fast_fail(_x):
+            raise RuntimeError("fast boom")
+
+        prod = Pure(slow) & Pure(fast_fail)
+        with pytest.raises(RuntimeError, match="fast boom"):
+            await prod.run("x")
+        # The sibling did NOT keep running detached — it was cancelled
+        # (and awaited) before the exception propagated.
+        assert cancelled.is_set()
+
+
+class TestRetryBackoff:
+    async def test_backoff_sleeps_between_attempts(self, monkeypatch):
+        from kohakuterrarium.compose import core as core_mod
+
+        sleeps: list[float] = []
+
+        async def fake_sleep(delay):
+            sleeps.append(delay)
+
+        monkeypatch.setattr(core_mod.asyncio, "sleep", fake_sleep)
+
+        calls = {"n": 0}
+
+        async def flaky(_x):
+            calls["n"] += 1
+            raise ValueError("nope")
+
+        r = Pure(flaky).retry(4, backoff=1.0, max_backoff=3.0)
+        with pytest.raises(ValueError):
+            await r.run("x")
+        assert calls["n"] == 4
+        # Exponential 1, 2, then capped at 3; no sleep after the LAST
+        # attempt (the exception propagates immediately).
+        assert sleeps == [1.0, 2.0, 3.0]
+
+    async def test_star_operator_has_no_backoff(self, monkeypatch):
+        from kohakuterrarium.compose import core as core_mod
+
+        async def fail_sleep(_d):  # pragma: no cover - must not run
+            raise AssertionError("* must not sleep")
+
+        monkeypatch.setattr(core_mod.asyncio, "sleep", fail_sleep)
+
+        async def flaky(_x):
+            raise ValueError("nope")
+
+        with pytest.raises(ValueError):
+            await (Pure(flaky) * 3).run("x")

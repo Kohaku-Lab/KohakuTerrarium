@@ -13,13 +13,11 @@ class TestStudioInitHooks:
     ):
         # The hook bridges engine creature-add into the session layer:
         # after it runs, the creature's graph must have a live store.
-        from kohakuterrarium.studio.sessions import lifecycle
+        from kohakuterrarium.studio.sessions import lifecycle, store_attach
         from kohakuterrarium.terrarium.service import LocalTerrariumService
         from kohakuterrarium.testing.terrarium import TestTerrariumBuilder
 
-        lifecycle._meta.clear()
-        lifecycle._session_stores.clear()
-        monkeypatch.setattr(lifecycle, "_session_dir", lambda: str(tmp_path))
+        monkeypatch.setattr(store_attach, "session_dir", lambda: str(tmp_path))
         t = await TestTerrariumBuilder().with_creature("alice").build()
         svc = LocalTerrariumService(t)
         creature = t.get_creature("alice")
@@ -28,12 +26,10 @@ class TestStudioInitHooks:
         try:
             studio_pkg._store_attach_hook(svc, creature, config_path="/tmp/cfg.yaml")
             sid = creature.graph_id
-            assert sid in lifecycle._session_stores
-            assert attached and attached[0] is lifecycle._session_stores[sid]
-            lifecycle._session_stores[sid].close()
+            assert sid in lifecycle.stores_for(svc)
+            assert attached and attached[0] is lifecycle.stores_for(svc)[sid]
+            lifecycle.stores_for(svc)[sid].close()
         finally:
-            lifecycle._meta.clear()
-            lifecycle._session_stores.clear()
             await t.shutdown()
 
     def test_spawnable_hook_lists_package_creatures(self):

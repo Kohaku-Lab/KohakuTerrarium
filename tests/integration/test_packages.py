@@ -35,6 +35,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from kohakuterrarium import Terrarium
+from kohakuterrarium.errors import PackageNotInstalledError
+from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.packages import locations
 from kohakuterrarium.packages.install import install_package, uninstall_package
 from kohakuterrarium.packages.locations import (
@@ -249,14 +252,13 @@ def packages_dir(tmp_path, monkeypatch):
     """Redirect the packages dir to a per-test tmpdir.
 
     ``packages.locations.PACKAGES_DIR`` is the documented test hook —
-    ``_packages_dir()`` reads it live, so ``install_package`` /
-    ``list_packages`` / ``resolve_package_path`` all land here. The
-    studio-tier module captured the constant by value at import time,
-    so patch it there too for the ``kt``-CLI workflow.
+    ``packages_dir()`` reads it live, so ``install_package`` /
+    ``list_packages`` / ``resolve_package_path`` AND every studio /
+    API consumer (all of which now call ``packages_dir()`` instead of
+    capturing the constant) land here.
     """
     target = tmp_path / "kt-packages"
     monkeypatch.setattr(locations, "PACKAGES_DIR", target)
-    monkeypatch.setattr(studio_packages, "PACKAGES_DIR", target, raising=False)
     return target
 
 
@@ -280,7 +282,7 @@ class TestPackagesIntegration:
     state and manifest content at each step, never a shape.
     """
 
-    def test_install_list_info_resolve_uninstall_lifecycle(
+    async def test_install_list_info_resolve_uninstall_lifecycle(
         self, packages_dir, bundle_root
     ):
         """The full ``kt install`` → ``list`` → ``info`` → ``resolve`` →
@@ -320,6 +322,24 @@ class TestPackagesIntegration:
         assert (installed / "creatures" / "swe" / "system.md").read_text(
             encoding="utf-8"
         ) == "You are the swe creature from alpha.\n"
+
+        # ---- the public façade (E10): the documented surface works ----
+        # ``kohakuterrarium.packages`` re-exports the whole programmatic
+        # API lazily; ``ensure()`` is the idempotent install primitive
+        # scripts put at the top of a batch job.
+        import kohakuterrarium.packages as kt_packages
+
+        assert kt_packages.packages_dir() == packages_dir
+        assert kt_packages.ensure(str(src)) == "alpha"  # installed → no-op
+        # The no-op really was a no-op: the mutated source did NOT get
+        # re-copied over the installed tree.
+        assert (installed / "creatures" / "swe" / "system.md").read_text(
+            encoding="utf-8"
+        ) == "You are the swe creature from alpha.\n"
+        assert [p["name"] for p in kt_packages.list_packages()] == ["alpha"]
+        assert kt_packages.resolve_package_path("@alpha") == installed.resolve()
+        with pytest.raises(kt_packages.PackageNotInstalledError):
+            kt_packages.resolve_package_path("@ghostpkg/x")
 
         # ---- kt list ----
         listed = studio_packages.list_installed_packages()
@@ -405,6 +425,27 @@ class TestPackagesIntegration:
         assert get_package_framework_hints(get_package_root("alpha")) == {}
         # None input -> empty dict (no manifest to read).
         assert get_package_framework_hints(None) == {}
+
+        # ---- the engine chokepoint: add_creature("@pkg/...") ----
+        # The headline E1 contract: every config-loading entry point
+        # accepts @refs because ``load_agent_config`` resolves them —
+        # no caller-side pre-resolution.  Drive the real engine.
+        engine = Terrarium()
+        try:
+            creature = await engine.add_creature(
+                "@alpha/creatures/swe", start=False, llm=ScriptedLLM(["ack"])
+            )
+            assert creature.name == "swe"
+            # The agent was really built from the INSTALLED copy.
+            assert (
+                creature.agent.config.agent_path
+                == (installed / "creatures" / "swe").resolve()
+            )
+            # A bad ref out of the same entry point is a typed error.
+            with pytest.raises(PackageNotInstalledError):
+                await engine.add_creature("@ghostpkg/creatures/x", start=False)
+        finally:
+            await engine.shutdown()
 
         # ---- install a second package ----
         src2 = _make_terrarium_bundle(bundle_root, "beta")
