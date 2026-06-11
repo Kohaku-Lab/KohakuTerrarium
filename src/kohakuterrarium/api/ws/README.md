@@ -7,13 +7,13 @@ clients.
 
 | File          | Route                                              | Responsibility                                                                                                                                |
 | ------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `__init__.py` | —                                                  | Package marker                                                                                                                                |
-| `chat.py`     | `/ws/terrariums/{tid}`, `/ws/creatures/{agent_id}` | **Primary unified stream** — all events (text chunks, tool activity, channel messages, tokens, triggers) tagged by source for one mount point |
+| `__init__.py` | (none) | Package marker                                                                                                                                |
+| `chat.py`     | `/ws/terrariums/{tid}`, `/ws/creatures/{agent_id}` | **Primary unified stream**: all events (text chunks, tool activity, channel messages, tokens, triggers) tagged by source for one mount point |
 | `agents.py`   | `/ws/agents/{agent_id}/chat`                       | Legacy bidirectional chat with a standalone agent (simpler, single-agent)                                                                     |
 | `channels.py` | `/ws/terrariums/{tid}/channels`                    | Stream ONLY channel messages for a terrarium                                                                                                  |
 | `files.py`    | `/ws/agents/{agent_id}/files`                      | Watch the agent's working directory (via `watchfiles`) and push change events                                                                 |
 | `logs.py`     | `/ws/logs`                                         | Tail the API server's own log file (parsed into `{ts, level, module, text}`)                                                                  |
-| `terminal.py` | `/ws/agents/{agent_id}/terminal`                   | PTY bridge — spawn a shell in the agent's working dir, stream stdin/stdout both ways                                                          |
+| `terminal.py` | `/ws/agents/{agent_id}/terminal`                   | PTY bridge: spawn a shell in the agent's working dir, stream stdin/stdout both ways                                                          |
 
 ## Dependency direction
 
@@ -24,15 +24,15 @@ on Windows and `pty` / `termios` / `fcntl` elsewhere.
 
 ## Key entry points
 
-- **`chat.py`** — start here. The unified stream endpoint attaches a
+- **`chat.py`**: start here. The unified stream endpoint attaches a
   `StreamOutput` (from `api/events`) as a secondary output on the target
   agent/terrarium, so every event the agent produces also flows through
   a `asyncio.Queue` that the WebSocket drains. Late-joining clients
   receive a replay from the per-mount event log.
-- `channels.py` — simpler, channel-only stream for UIs that only care
+- `channels.py`: simpler, channel-only stream for UIs that only care
   about cross-creature traffic.
-- `files.py:_watch_directory` — push diff events for filesystem changes.
-- `terminal.py:_pty_session` — full PTY bridge with resize + signal handling.
+- `files.py:_watch_directory`: push diff events for filesystem changes.
+- `terminal.py:_pty_session`: full PTY bridge with resize + signal handling.
 
 ## Notes
 
@@ -43,11 +43,11 @@ on Windows and `pty` / `termios` / `fcntl` elsewhere.
   edits). Everything else is server→client only.
 - `terminal.py` degrades on Windows: if `winpty` is installed it uses a
   real ConPTY; otherwise the route returns a friendly error.
-- Protocols are stable JSON frames with a `type` field — see the
+- Protocols are stable JSON frames with a `type` field; see the
   docstring at the top of each file for the exact schema.
 
 ## See also
 
-- `../events.py` — `StreamOutput` and shared event-log store
-- `../routes/README.md` — REST counterparts for non-streaming operations
-- `docs/en/guides/serving.md` — operator-facing serving + streaming docs
+- `../events.py`: `StreamOutput` and shared event-log store
+- `../routes/README.md`: REST counterparts for non-streaming operations
+- `docs/en/guides/serving.md`: operator-facing serving + streaming docs

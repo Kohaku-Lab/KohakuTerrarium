@@ -12,6 +12,7 @@ and multimodal content (images).
 | ------------- | ------------------------------------------------------------------------------------------------------------ |
 | `__init__.py` | Re-exports protocol, base class, and all data types                                                          |
 | `base.py`     | `Tool` protocol, `BaseTool` ABC, `ToolConfig`, `ToolContext`, `ToolResult`, `ToolInfo`, `ExecutionMode` enum |
+| `function.py` | `FunctionTool` + the `@kohakuterrarium.tool` decorator: wrap a plain function into a tool (schema from type hints, description from the docstring) |
 
 ## Dependencies
 
