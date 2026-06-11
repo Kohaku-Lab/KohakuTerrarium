@@ -10,7 +10,7 @@ tags:
 
 The test suite lives under `tests/` and splits into **three tiers**
 (`tests/unit/`, `tests/integration/`, `tests/e2e/`). Each tier is a
-*different shape of test*, not just a different size — see
+*different shape of test*, not just a different size; see
 [Three-tier discipline](#three-tier-discipline) below. A reusable
 harness under `src/kohakuterrarium/testing/` (and `tests/e2e/_lab_harness.py`)
 covers fake LLMs, real lab workers, and journey scaffolding.
@@ -20,7 +20,7 @@ covers fake LLMs, real lab workers, and journey scaffolding.
 The tiering is enforced by the [CLAUDE.md](../../../CLAUDE.md) test
 convention. Read `tests/README.md` for the full spec; the summary:
 
-### `tests/unit/` — one source file → one test (or test-class)
+### `tests/unit/`: one source file → one test (or test-class)
 
 Tests an individual class / method against its real dependencies
 (deterministic stubs only for genuine I/O). **Shape checks**
@@ -29,7 +29,7 @@ and only here**. Target: 95–100% line coverage per core-lib file;
 any sub-95% file needs a written justification in the test or a
 tracking issue.
 
-### `tests/integration/` — one core-lib folder → one test-class
+### `tests/integration/`: one core-lib folder → one test-class
 
 Each test method runs a **complete feature workflow end-to-end in a
 single function** (init → drive → read back → resume → verify),
@@ -39,7 +39,7 @@ unit-tier thinking and cannot catch cross-step bugs. The
 integration test for a folder *is* that folder's most comprehensive
 usage example.
 
-### `tests/e2e/` — whole project → a handful of fat journey tests
+### `tests/e2e/`: whole project → a handful of fat journey tests
 
 Each is a single function simulating an entire user session
 (chat → switch model → toggle plugin → interrupt → resume → branch
@@ -51,13 +51,13 @@ terrarium, studio}` plus multi-node. e2e answers one question:
 
 - **Behavior asserts, not shape asserts.** Every mutation test
   observes the side effect, not just the return shape.
-- **Real collaborators, not mocks.** The only seam is the LLM —
+- **Real collaborators, not mocks.** The only seam is the LLM:
   use `kohakuterrarium.testing.llm.ScriptedLLM`, monkeypatched at
   **both** `bootstrap.llm.create_llm_provider` and
   `bootstrap.agent_init.create_llm_provider`. Everything else is
   real (real session store, real engine, real lab clients).
 - **To raise integration / e2e coverage, fatten the existing
-  workflow functions — do NOT add more test functions.** This is
+  workflow functions; do NOT add more test functions.** This is
   the most common review comment for new contributors. A new
   scenario goes inside the existing journey via the
   [`_BugLog`](../../../tests/e2e/test_multinode_journey.py)
@@ -67,7 +67,7 @@ terrarium, studio}` plus multi-node. e2e answers one question:
 ### Carve-outs
 
 Some files are intentionally excluded from the 95% per-file
-coverage target — third-party providers (`llm/codex_provider.py`),
+coverage target: third-party providers (`llm/codex_provider.py`),
 platform PTY (`api/ws/pty.py`), the end-user CLI/UI
 (`builtins/cli_rich/*`, `builtins/tui/*`), the pywebview boot path.
 The full list is in `tests/README.md`.
@@ -84,14 +84,14 @@ For any task larger than a one-file change, do **not** stop at
 3. **Execute the full test suite** for the affected tiers
    (unit/integration/e2e + frontend vitest). Lint too (`black`,
    `ruff`, `prettier`).
-4. **Audit** the diff with a critical eye — three categories:
+4. **Audit** the diff with a critical eye, in three categories:
    - **Clear bugs:** typos, wrong field names, off-by-ones,
      `await` missing on async calls, dead branches.
-   - **Integrity bugs:** invariants you broke — state that's
+   - **Integrity bugs:** invariants you broke: state that's
      supposed to be in sync now drifts, two writers race a single
      dict, a cache outlives the thing it caches.
    - **Behavior bugs:** the code does what's typed but the wrong
-     thing for the spec — wrong default, silently-swallowed error,
+     thing for the spec: wrong default, silently-swallowed error,
      condition gates the wrong branch.
 5. **If you find any bug the tests didn't catch:** first augment
    the test so it *would* have caught it, confirm the augmented
@@ -118,7 +118,7 @@ pytest --no-header -q                     # quieter output
 ```
 
 Tests should run in full asyncio. Use `pytest-asyncio` (`@pytest.mark.asyncio`)
-for async test functions. Avoid `asyncio.run()` inside a test — let
+for async test functions. Avoid `asyncio.run()` inside a test; let
 the plugin own the loop.
 
 ## The testing harness
@@ -135,7 +135,7 @@ from kohakuterrarium.testing import (
 )
 ```
 
-### ScriptedLLM — deterministic LLM mock
+### ScriptedLLM: deterministic LLM mock
 
 `testing/llm.py`. Implements the `LLMProvider` protocol without a real
 API. Feed it a list of responses and it hands them out in order.
@@ -145,7 +145,7 @@ API. Feed it a list of responses and it hands them out in order.
 llm = ScriptedLLM(["Hello.", "I'll use a tool.", "Done."])
 
 # Advanced: ScriptEntry with match-based selection and streaming control.
-# Tool-call syntax must match the parser's tool_format — the default is
+# Tool-call syntax must match the parser's tool_format; the default is
 # bracket: [/name]@@arg=value\nbody[name/]
 llm = ScriptedLLM([
     ScriptEntry("I'll search.", match="find"),   # only fires if last user msg contains "find"
@@ -156,22 +156,22 @@ llm = ScriptedLLM([
 
 `ScriptEntry` (`testing/llm.py:12`) fields:
 
-- `response: str` — full text, may include framework-format tool calls.
-- `match: str | None` — if set, only this entry if the last user
+- `response: str`: full text, may include framework-format tool calls.
+- `match: str | None`: if set, only this entry if the last user
   message contains the substring; otherwise skipped.
-- `delay_per_chunk: float` — seconds between chunk yields.
-- `chunk_size: int` — characters per yield (default 10).
+- `delay_per_chunk: float`: seconds between chunk yields.
+- `chunk_size: int`: characters per yield (default 10).
 
 After a run, inspect:
 
 - `llm.call_count`
-- `llm.call_log` — list of message lists seen per call
-- `llm.last_user_message` — convenience extractor
+- `llm.call_log`: list of message lists seen per call
+- `llm.last_user_message`: convenience extractor
 
 If you need a single non-streaming response, call
 `await llm.chat_complete(messages)` (returns a `ChatResponse`).
 
-### TestAgentBuilder — lightweight agent wiring
+### TestAgentBuilder: lightweight agent wiring
 
 `testing/agent.py`. Builds a `Controller` + `Executor` + `OutputRouter`
 trio without loading a YAML config or running the full `Agent.start()`
@@ -209,12 +209,12 @@ Builder methods (see `testing/agent.py:19`):
 - `with_output(OutputRecorder)`
 - `with_system_prompt(str)`
 - `with_session(key)`
-- `with_builtin_tools(list[str])` — resolves via `get_builtin_tool`
-- `with_tool(instance)` — register a custom tool
+- `with_builtin_tools(list[str])`: resolves via `get_builtin_tool`
+- `with_tool(instance)`: register a custom tool
 - `with_named_output(name, output)`
 - `with_ephemeral(bool)`
 
-### OutputRecorder — capture for assertions
+### OutputRecorder: capture for assertions
 
 `testing/output.py`. A `BaseOutputModule` subclass that records every
 write, stream chunk, and activity notification.
@@ -241,7 +241,7 @@ also clears activities and lifecycle counts.
 Assertion helpers: `assert_no_text`, `assert_text_contains`,
 `assert_activity_count`.
 
-### EventRecorder — timing and ordering
+### EventRecorder: timing and ordering
 
 `testing/events.py`. Tracks events with monotonic timestamps and a
 source label.
@@ -270,7 +270,7 @@ the text content.
   that invoke `kt run`, pass `--no-session` (or its equivalent).
 - **Clean up.** Pytest fixtures should construct one agent per test
   and tear it down. `TestAgentBuilder.build()` calls `set_session`,
-  which writes to a module-level registry — if tests leak session
+  which writes to a module-level registry; if tests leak session
   keys, use distinct `with_session(...)` keys or clear in a
   `yield`-style fixture.
 - **No real network.** If something wants to hit an HTTP endpoint, mock
@@ -299,23 +299,23 @@ Mirror `src/` layout under `tests/unit/`:
 
 Cross-component flows go under `tests/integration/`:
 
-- channels — `test_channels.py`
-- output routing — `test_output_isolation.py`
-- full pipeline (controller → executor → output) — `test_pipeline.py`
+- channels: `test_channels.py`
+- output routing: `test_output_isolation.py`
+- full pipeline (controller → executor → output): `test_pipeline.py`
 
 If the subsystem has no existing test file, add one and match the
 naming convention.
 
-Full user journeys go under `tests/e2e/` — one fat function per
+Full user journeys go under `tests/e2e/`: one fat function per
 journey. Examples:
 
-- `test_multinode_journey.py` — `{programmatic, HTTP+WS} × multi-node`,
+- `test_multinode_journey.py`: `{programmatic, HTTP+WS} × multi-node`,
   drives two real lab workers (in-process via `RealLabWorker`)
   through the entire dashboard surface: spawn, chat, cross-node
   connect, hot-plug, close, list saved, resume, cluster resume.
-- `test_prog_studio.py`, `test_prog_terrarium.py` — programmatic
+- `test_prog_studio.py`, `test_prog_terrarium.py`: programmatic
   journeys exercising the Studio + Terrarium APIs directly.
-- `test_api_creature.py` — the dashboard's HTTP+WS surface for a
+- `test_api_creature.py`: the dashboard's HTTP+WS surface for a
   single creature.
 
 ## Testing multi-node code
@@ -330,7 +330,7 @@ When testing a worker-side adapter or `IdentityCache`, use a tiny
 fake that implements `LabSender` / `LabRegistrar`. Example:
 `tests/unit/laboratory/test_worker_session.py` builds a
 `_FakeEngine` + `_RecordingNode` and drives the attacher directly.
-No Lab transport is started — these are sub-millisecond.
+No Lab transport is started; these are sub-millisecond.
 
 ### Integration: `InProcTransport`
 
@@ -344,7 +344,7 @@ the canonical setup helper.
 
 ### E2E: `RealLabWorker`
 
-The journey tier uses `tests/e2e/_lab_harness.RealLabWorker` —
+The journey tier uses `tests/e2e/_lab_harness.RealLabWorker`. It
 spins up a real `ClientConnector` with the full ten-adapter
 stack (runtime, events, attach, pty, broadcast, output-wire,
 files, deploy, session, identity-cache, catalog, identity)
@@ -353,7 +353,7 @@ Despite "real lab," it shares the test's event loop, so
 breakpoints work.
 
 For full prod-like isolation (separate process), `_lab_harness.py`
-also has a subprocess-launched variant — used in the multinode
+also has a subprocess-launched variant, used in the multinode
 journey to verify Win32 process boundaries and signal handling.
 
 Conventions:
@@ -364,7 +364,7 @@ Conventions:
   `test_multinode_journey.py`) for journeys that should report
   multiple failures in one run instead of bailing on the first
   red assertion.
-- Multi-node tests live alongside single-node ones — there's no
+- Multi-node tests live alongside single-node ones; there's no
   separate `tests/multinode/` directory. Tag with descriptive
   test function names (`test_full_creature_session_on_subprocess_worker`).
 
@@ -373,7 +373,7 @@ Conventions:
 - **Fast unit tests** should use `TestAgentBuilder` (no file I/O, no
   real LLM) and complete in well under a second. Most of the suite
   should be this.
-- **Integration tests** exercise two or more subsystems together — for
+- **Integration tests** exercise two or more subsystems together; for
   example, the controller's feedback loop with a real executor and
   real tools. They can touch the filesystem and use real session
   stores, but should still finish in single-digit seconds.
@@ -392,7 +392,7 @@ python -m isort src/ tests/
 ```
 
 Ruff config lives in `pyproject.toml`. The `[dev]` extra installs all
-three. Import ordering follows [CLAUDE.md](../../CLAUDE.md) — built-in,
+three. Import ordering follows [CLAUDE.md](../../CLAUDE.md): built-in,
 third-party, then `kohakuterrarium.*`, alphabetical within groups,
 `import` before `from`, shorter dotted paths before longer.
 

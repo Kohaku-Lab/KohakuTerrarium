@@ -1,6 +1,6 @@
 ---
 title: Dynamic graph
-summary: Why the terrarium's graph mutates at runtime — connected components, auto-merge / auto-split, the in-graph "graph editor", and what session lineage costs and buys.
+summary: Why the terrarium's graph mutates at runtime. Covers connected components, auto-merge / auto-split, the in-graph "graph editor", and what session lineage costs and buys.
 tags:
   - concepts
   - multi-agent
@@ -14,7 +14,7 @@ tags:
 
 A [terrarium](terrarium.md) is not a fixed shape. The set of creatures
 running, the channels between them, and which creatures share a
-session can all change at runtime — without restart, without
+session can all change at runtime, without restart, without
 re-instantiating creatures that aren't affected, and without losing
 history.
 
@@ -33,7 +33,7 @@ session store. When the topology changes, the engine reacts:
 
 All of this is structural work the engine performs deterministically
 in response to mutation calls. The creatures inside the graph don't
-make these decisions — the engine does.
+make these decisions; the engine does.
 
 ## Why it exists
 
@@ -51,8 +51,8 @@ actually want to do at runtime:
   knowing they're being watched, and observation should track creature
   identity even as creatures come and go.
 
-Making the graph dynamic — and giving the engine the bookkeeping
-responsibility — lets all four work without per-recipe special
+Making the graph dynamic, and giving the engine the bookkeeping
+responsibility, lets all four work without per-recipe special
 casing.
 
 ## The mental model
@@ -87,7 +87,7 @@ The same mutations are surfaced to a [privileged node](privileged-node.md)
 inside the graph as the [group tools](../glossary.md#group-tools)
 (`group_add_node`, `group_remove_node`, `group_start_node`,
 `group_stop_node`, `group_channel`, `group_wire`). Together they act
-as the in-graph **graph editor** — an LLM-driven privileged node can
+as the in-graph **graph editor**: an LLM-driven privileged node can
 evolve the team mid-run by calling tools, with every mutation
 emitting an `EngineEvent` so observers and runtime prompts stay in
 sync.
@@ -98,7 +98,7 @@ A merge happens when a connect crosses two graphs. The engine:
 
 1. Unions the two graphs in the topology layer (creature ids, channel
    declarations, listen / send edges).
-2. Unions the two `Environment`s — every channel object from the
+2. Unions the two `Environment`s: every channel object from the
    dropped graph moves into the surviving environment, and existing
    channel triggers are re-injected against the surviving env.
 3. Merges the two session stores into one new store at the surviving
@@ -134,7 +134,7 @@ between two halves of a graph. The engine:
 6. Emits a `TOPOLOGY_CHANGED` event with `kind="split"` and the new
    graph ids.
 
-History is never lost on a split — only duplicated. Branching
+History is never lost on a split, only duplicated. Branching
 sessions diverge from the same starting point.
 
 ## Resume: the recipe is the source of truth
@@ -164,11 +164,11 @@ This means:
 Not every creature should be able to mutate the graph. The engine
 distinguishes:
 
-- **Privileged nodes** — the recipe `root:` node, recipe-declared
+- **Privileged nodes**: the recipe `root:` node, recipe-declared
   members marked `privileged: true`, and creatures created with
   explicit `is_privileged=True`. They carry the
   [group tools](../glossary.md#group-tools).
-- **Workers** — creatures spawned by `group_add_node` from a privileged
+- **Workers**: creatures spawned by `group_add_node` from a privileged
   caller. They land in the caller's graph but do not get the group
   tools. A worker cannot fork peers or graph edges without being
   promoted by the engine.
@@ -198,18 +198,18 @@ root's "graph awareness" block is always current).
 
 A static recipe with no runtime changes is the simplest mode and the
 right default. Reach for hot-plug and group-tool authoring when the
-work itself is dynamic — open-ended research where the team shape is
+work itself is dynamic: open-ended research where the team shape is
 discovered as you go, ad-hoc rescue where one session pulls another
 in, parallel exploration where branches split and merge.
 
 ## See also
 
-- [Terrarium](terrarium.md) — the runtime engine the graph lives
+- [Terrarium](terrarium.md): the runtime engine the graph lives
   inside.
-- [Privileged node](privileged-node.md) — the creature that carries
+- [Privileged node](privileged-node.md): the creature that carries
   the group tools; promoted via the `root:` recipe keyword or
   inline `privileged: true`.
-- [impl-notes / graph and sessions](../impl-notes/graph-and-sessions.md)
-  — how the merge / split bookkeeping is actually implemented.
-- [reference / builtins — group_* tools](../../reference/builtins.md)
-  — the group-tool surface.
+- [impl-notes / graph and sessions](../impl-notes/graph-and-sessions.md):
+  how the merge / split bookkeeping is actually implemented.
+- [group_* tools in reference / builtins](../../reference/builtins.md):
+  the group-tool surface.

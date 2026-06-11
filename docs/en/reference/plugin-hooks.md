@@ -113,12 +113,12 @@ name: str
 async def get_content(self, context: PromptContext) -> str | None
 ```
 
-- `get_content(context) -> str | None` — Return the text block to
+- `get_content(context) -> str | None`: Return the text block to
   insert, or `None` to contribute nothing.
-- `priority` — ordering key. Built-ins sit at 50/45/40/30.
+- `priority`: ordering key. Built-ins sit at 50/45/40/30.
 
 Built-in prompt plugins are listed in
-[builtins.md — Prompt plugins](builtins.md#prompt-plugins).
+[Prompt plugins in builtins.md](builtins.md#prompt-plugins).
 
 Register custom prompt plugins via the `plugins` field of a creature
 config (same as lifecycle plugins); the framework dispatches based on
@@ -152,7 +152,7 @@ plugins:
 ```
 
 Enable/disable at runtime via `/plugin toggle guard` (see
-[builtins.md — User commands](builtins.md#user-commands)) or the HTTP
+[User commands in builtins.md](builtins.md#user-commands)) or the HTTP
 plugin toggle endpoint.
 
 ---

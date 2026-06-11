@@ -1,6 +1,6 @@
 ---
 title: Plugins
-summary: Prompt plugins and lifecycle plugins — what each hooks, how they compose, and when to use them.
+summary: Prompt plugins and lifecycle plugins. What each hooks, how they compose, and when to use them.
 tags:
   - guides
   - plugin
@@ -11,7 +11,7 @@ tags:
 
 For readers adding behaviour at the *seams* between modules without forking any module.
 
-Plugins modify the connections between controller, tools, sub-agents, and LLM — not the modules themselves. Two flavours: **prompt plugins** contribute to the system prompt, **lifecycle plugins** hook into runtime events (pre/post LLM, pre/post tool dispatch/execution, sub-agent runs, compaction, interrupts, and more).
+Plugins modify the connections between controller, tools, sub-agents, and LLM, not the modules themselves. Two flavours: **prompt plugins** contribute to the system prompt, **lifecycle plugins** hook into runtime events (pre/post LLM, pre/post tool dispatch/execution, sub-agent runs, compaction, interrupts, and more).
 
 Concept primer: [plugin](../concepts/modules/plugin.md), [patterns](../concepts/patterns.md).
 
@@ -19,7 +19,7 @@ Concept primer: [plugin](../concepts/modules/plugin.md), [patterns](../concepts/
 
 - A *tool* is a thing the LLM can call by name.
 - A *module* (input/output/trigger/sub-agent) is a whole runtime surface.
-- A *plugin* is a rule that runs *between* them — guard, accounting, prompt injection, memory retrieval.
+- A *plugin* is a rule that runs *between* them: guard, accounting, prompt injection, memory retrieval.
 
 If your answer is "before/after every X, do Y," the answer is almost always a plugin.
 
@@ -76,8 +76,8 @@ Subclass `BasePlugin` and implement any of these hooks. All are async unless not
 
 | Hook | Signature | Effect |
 |---|---|---|
-| `on_load(context)` | setup at agent start | — |
-| `on_unload()` | teardown at stop | — |
+| `on_load(context)` | setup at agent start | (none) |
+| `on_unload()` | teardown at stop | (none) |
 | `should_apply(context)` | return `bool` | Dynamic per-agent/model gating |
 | `pre_llm_call(messages, **kwargs)` | return `list[dict] \| None` | Replace messages sent to LLM |
 | `post_llm_call(messages, response, usage, **kwargs)` | return `str \| None` | Rewrite final assistant text |
@@ -135,7 +135,7 @@ plugins:
       deny_patterns: ["rm -rf /", "dd if=/dev/zero"]
 ```
 
-Raising `PluginBlockError` aborts the operation — the message becomes the tool result.
+Raising `PluginBlockError` aborts the operation; the message becomes the tool result.
 
 ## Example: token accounting
 
@@ -154,12 +154,12 @@ class TokenAccountant(BasePlugin):
 
 ## Example: seamless memory (agent inside plugin)
 
-A `pre_llm_call` plugin that retrieves relevant past events and prepends them to the messages. You can call a small nested agent to decide what's relevant — plugins are plain Python, so agents are legal inside them. See [concepts/python-native/agent-as-python-object](../concepts/python-native/agent-as-python-object.md).
+A `pre_llm_call` plugin that retrieves relevant past events and prepends them to the messages. You can call a small nested agent to decide what's relevant; plugins are plain Python, so agents are legal inside them. See [concepts/python-native/agent-as-python-object](../concepts/python-native/agent-as-python-object.md).
 
 ## Built-in runtime plugins
 
 Four cross-cutting concerns ship as ordinary plugins. None of them
-have any special status in the framework — they use the same hooks
+have any special status in the framework; they use the same hooks
 your own plugins do. Full reference:
 [reference/builtin-plugins](../reference/builtin-plugins.md).
 
@@ -167,9 +167,9 @@ your own plugins do. Full reference:
 |---|---|---|---|
 | `sandbox` | plugin | `pre_tool_execute`, `runtime_services` | Hard capability gate: filesystem read / write scope, network allowlist, subprocess syscall level. Capability profile (`PURE` / `READ_ONLY` / `WORKSPACE` / `NETWORK` / `SHELL`) plus per-axis overrides. Hot-reconfigurable. |
 | `budget` | plugin | `pre_llm_call`, `post_llm_call`, `pre_tool_execute`, `pre_subagent_run`, `get_prompt_content` | Multi-axis budget accounting and enforcement (turns, tool calls, walltime). Configure axes under `options`. |
-| `permgate` | plugin | `pre_tool_execute`, `on_load` | Interactive user approval for tool calls — emits a confirmation prompt to the output bus and waits on the reply. |
+| `permgate` | plugin | `pre_tool_execute`, `on_load` | Interactive user approval for tool calls; emits a confirmation prompt to the output bus and waits on the reply. |
 | `compact.auto` | plugin | `post_llm_call`, `on_load` | Trigger context compaction after high-token LLM calls. |
-| `auto-compact` | pack | — | Expands to `compact.auto`. The only built-in runtime pack. |
+| `auto-compact` | pack | (none) | Expands to `compact.auto`. The only built-in runtime pack. |
 
 Use them in a creature:
 
@@ -213,7 +213,7 @@ full guide.
 Security gating is the kind of concern many frameworks bake in as a
 core feature. KohakuTerrarium ships it as an ordinary plugin. The
 sandbox plugin is the clearest single illustration of where the
-framework / plugin boundary lives — and why keeping the framework
+framework / plugin boundary lives, and why keeping the framework
 lean works.
 
 ### What sandbox actually does
@@ -232,17 +232,17 @@ Each axis is also overridable individually (`fs_read: deny`,
 `fs_write: workspace`, `network: allow`, …) and the plugin accepts
 a deny list, a network allowlist, and a list of hard-blocked tool
 names. Set `backend: audit` and violations are logged without being
-blocked — useful for first-pass discovery.
+blocked, which is useful for first-pass discovery.
 
 ### How sandbox plugs in
 
 Sandbox uses two hooks:
 
-- **`pre_tool_execute`** — runs before every tool call. It inspects
+- **`pre_tool_execute`**: runs before every tool call. It inspects
   the args (paths for file tools, URLs for `web_fetch` / `web_search`)
   and raises `PluginBlockError` when a path is denied or a URL is
   off-allowlist.
-- **`runtime_services`** — publishes a per-call subprocess runner
+- **`runtime_services`**: publishes a per-call subprocess runner
   service. Tools that need to spawn subprocesses (`bash`, etc.) read
   this from `ToolContext.runtime_services` and use it instead of
   spawning directly. The runner enforces syscall-level policy
@@ -346,14 +346,14 @@ assert any("Blocked" in act[1] for act in env.output.activities)
 
 ## Troubleshooting
 
-- **Plugin class not found.** Check `class` (not `class_name` — plugins use `class`). The config loader accepts both, but the package manifest uses `class`.
+- **Plugin class not found.** Check `class` (not `class_name`; plugins use `class`). The config loader accepts both, but the package manifest uses `class`.
 - **Hook never fires.** Confirm the hook name; typos in `pre_llm_call` vs `pre_tool_execute` silently do nothing.
 - **`PluginBlockError` raised but call still executes.** The error was raised from a `post_*` hook. Use `pre_tool_execute` to block.
 - **Order-sensitive stacking misbehaves.** `pre_*` hooks run in registration order; rearrange the `plugins:` list in config.
 
 ## See also
 
-- [examples/plugins/](../../examples/plugins/) — one example per hook category.
-- [Custom Modules](custom-modules.md) — writing the modules plugins hook around.
-- [Reference / plugin hooks](../reference/plugin-hooks.md) — every hook signature.
-- [Concepts / plugin](../concepts/modules/plugin.md) — design rationale.
+- [examples/plugins/](../../examples/plugins/): one example per hook category.
+- [Custom Modules](custom-modules.md): writing the modules plugins hook around.
+- [Reference / plugin hooks](../reference/plugin-hooks.md): every hook signature.
+- [Concepts / plugin](../concepts/modules/plugin.md): design rationale.

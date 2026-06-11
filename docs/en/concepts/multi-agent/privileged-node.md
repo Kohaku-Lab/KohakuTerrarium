@@ -1,6 +1,6 @@
 ---
 title: Privileged node
-summary: A creature in a graph with group tools registered — the `root:` recipe keyword promotes one node to this state.
+summary: A creature in a graph with group tools registered. The `root:` recipe keyword promotes one node to this state.
 tags:
   - concepts
   - multi-agent
@@ -16,7 +16,7 @@ A **privileged node** is a creature inside a [graph](../glossary.md#graph)
 that has been granted the [group tools](../glossary.md#group-tools)
 needed to mutate the graph it belongs to: spawn or remove other
 creatures, draw or delete channels, start or stop members, query
-graph status. Structurally it is just another creature — same config,
+graph status. Structurally it is just another creature: same config,
 same modules, same lifecycle. What makes it "privileged" is the
 runtime flag (`creature.is_privileged = True`) and the corresponding
 tool registration the engine performs at promotion time.
@@ -25,7 +25,7 @@ tool registration the engine performs at promotion time.
 privileged. Recipes can also mark members privileged inline; engine
 APIs accept a `privileged=True` flag at creature-add time. Tool-
 spawned worker creatures (via `group_add_node`) are *not* privileged
-by default — workers can't fork peers without explicit elevation.
+by default, so workers can't fork peers without explicit elevation.
 
 ## Why it exists
 
@@ -37,8 +37,8 @@ Two needs share the same answer:
    ones.
 2. **A user-facing surface.** When a human is interacting with a
    graph, they need a single counterparty to talk to. That node
-   typically wants the same authority — see what's happening, spawn
-   helpers, rewire channels — so it makes sense for the user-facing
+   typically wants the same authority (see what's happening, spawn
+   helpers, rewire channels), so it makes sense for the user-facing
    node to also be privileged.
 
 The `root:` recipe keyword captures the second case as a one-line
@@ -83,7 +83,7 @@ terrarium:
 ```
 
 Used when you want a privileged member that isn't the user-facing
-surface — for example, a privileged "supervisor" sitting alongside
+surface; for example, a privileged "supervisor" sitting alongside
 several workers, with a separate user-facing root.
 
 ### 3. Imperative promotion
@@ -103,12 +103,12 @@ assign_root_to(engine, sup)
 
 `engine.add_creature(..., is_privileged=True)` is the minimal
 promotion: the flag is set and `force_register_privileged_tools` runs.
-`assign_root_to(engine, creature)` is the full root-style helper —
+`assign_root_to(engine, creature)` is the full root-style helper:
 privilege plus the `report_to_root` channel plus listen-all wiring.
 
 ## How we implement it
 
-- **Privilege flag:** `Creature.is_privileged` — a runtime property of
+- **Privilege flag:** `Creature.is_privileged`, a runtime property of
   the creature handle, not the underlying agent config.
 - **Tool registration:** `terrarium/tools_group.py` exposes
   `force_register_basic_tools` (always) and
@@ -124,7 +124,7 @@ privilege plus the `report_to_root` channel plus listen-all wiring.
   privileged tool surface.
 - **Topology refresh:** the runtime-prompt subscriber listens for
   `TOPOLOGY_CHANGED` events and regenerates the "graph awareness"
-  block on every creature affected by the change — so a privileged
+  block on every creature affected by the change, so a privileged
   node's prompt always reflects the current creatures, channels, and
   wiring.
 
@@ -146,23 +146,23 @@ privilege plus the `report_to_root` channel plus listen-all wiring.
   be exactly one. A graph can carry a user-facing root plus a
   privileged supervisor, or several supervisors splitting the team.
 - **Observability pivot.** A root-style privileged node auto-listens
-  on every channel and receives `report_to_root` traffic — it's a
+  on every channel and receives `report_to_root` traffic, so it's a
   natural place to run summarisation plugins, alerting rules, etc.
 
 ## Don't be bounded
 
-Graphs without any privileged node are perfectly valid — think
+Graphs without any privileged node are perfectly valid: think
 headless pipelines, cron-driven coordination, batch jobs. Privilege
 is a convenience for runtime authoring; if your team shape is fixed
 by the recipe, you may never need it.
 
 ## See also
 
-- [Terrarium](terrarium.md) — the engine the graph and its
+- [Terrarium](terrarium.md): the engine the graph and its
   privileged nodes live inside.
-- [Dynamic graph](dynamic-graph.md) — how the group tools mutate
+- [Dynamic graph](dynamic-graph.md): how the group tools mutate
   topology and how the engine reacts.
-- [Multi-agent overview](README.md) — where privileged nodes fit in
+- [Multi-agent overview](README.md): where privileged nodes fit in
   the model.
-- [reference/builtins.md — group_* tools](../../reference/builtins.md)
-  — the privileged toolset.
+- [group_* tools in reference/builtins.md](../../reference/builtins.md):
+  the privileged toolset.

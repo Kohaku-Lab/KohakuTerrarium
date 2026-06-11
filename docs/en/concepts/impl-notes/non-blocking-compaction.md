@@ -14,7 +14,7 @@ tags:
 A creature that runs for hours accumulates conversation. Eventually
 the prompt exceeds the model's context budget. The standard fix is
 compaction: summarise old turns into a condensed note, keep recent
-turns raw. But compaction is itself an LLM call — if the controller
+turns raw. But compaction is itself an LLM call: if the controller
 is blocked while the summariser works, an ambient agent freezes for
 tens of seconds while 50 k tokens get rewritten.
 
@@ -52,7 +52,7 @@ Flow:
      dedicated cheaper `compact_model` if configured),
    - produces a summary that preserves decisions, file paths, error
      strings, and other high-signal tokens verbatim.
-4. Meanwhile the controller keeps processing events — tools run,
+4. Meanwhile the controller keeps processing events: tools run,
    sub-agents spawn, the user can keep typing.
 5. When the summary is ready, the manager waits for the current turn
    to end, then **atomically** rewrites the conversation:
@@ -75,18 +75,18 @@ Flow:
 
 ## Where it lives in the code
 
-- `src/kohakuterrarium/core/compact.py` — `CompactManager` with the
+- `src/kohakuterrarium/core/compact.py`: `CompactManager` with the
   start/pending/done state machine.
-- `src/kohakuterrarium/core/agent.py` — `_init_compact_manager()` wires
+- `src/kohakuterrarium/core/agent.py`: `_init_compact_manager()` wires
   the manager into the agent on `start()`.
-- `src/kohakuterrarium/core/controller.py` — the post-turn hook that
+- `src/kohakuterrarium/core/controller.py`: the post-turn hook that
   asks the manager to consider compaction.
-- `src/kohakuterrarium/builtins/user_commands/compact.py` — `/compact`
+- `src/kohakuterrarium/builtins/user_commands/compact.py`: `/compact`
   for manual trigger.
 
 ## See also
 
-- [Memory and compaction](../modules/memory-and-compaction.md) — the
+- [Memory and compaction](../modules/memory-and-compaction.md): the
   conceptual picture.
-- [reference/configuration.md — `compact`](../../reference/configuration.md) —
+- [`compact` in reference/configuration.md](../../reference/configuration.md):
   per-creature config knobs.

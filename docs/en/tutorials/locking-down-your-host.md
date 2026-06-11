@@ -1,6 +1,6 @@
 ---
 title: Locking down your host
-summary: Add auth to your KohakuTerrarium host step-by-step — from "anyone on my LAN can use it" to "my family logs in, only I can change settings."
+summary: Add auth to your KohakuTerrarium host step-by-step, from "anyone on my LAN can use it" to "my family logs in, only I can change settings."
 tags:
   - tutorials
   - auth
@@ -28,16 +28,16 @@ This tutorial skips the theory and shows the commands.
 
 | You want | Your level |
 |---|---|
-| Desktop app on my own machine — no setup, no nagging | **Level 0** (default — do nothing) |
-| Only people who know a shared password can connect | **Level 1** — host token |
-| Friends can chat / use the host; only I can change LLM keys + install packages | **Level 2** — admin password |
-| Each family member has their own login + isolated chat sessions | **Level 3** — multi-user |
+| Desktop app on my own machine, no setup, no nagging | **Level 0** (default; do nothing) |
+| Only people who know a shared password can connect | **Level 1**: host token |
+| Friends can chat / use the host; only I can change LLM keys + install packages | **Level 2**: admin password |
+| Each family member has their own login + isolated chat sessions | **Level 3**: multi-user |
 
 Each level builds on the previous.  Stop wherever your need is met.
 
 ---
 
-## Level 0 — Desktop app, defaults are fine
+## Level 0: Desktop app, defaults are fine
 
 **Do nothing.**  The desktop app binds to `127.0.0.1`; nothing on the
 network can reach it.  Your OS user is the trust boundary.
@@ -55,13 +55,13 @@ If you ever start running `kt serve --host 0.0.0.0`, jump to Level 1.
 
 ---
 
-## Level 1 — Host token (5 minutes)
+## Level 1: Host token (5 minutes)
 
 The host now requires `Authorization: Bearer <token>` on every API
 call.  Loopback (`127.0.0.1`) still bypasses by default so the
 desktop app keeps working without typing the token.
 
-### Step 1 — generate the token
+### Step 1: generate the token
 
 ```bash
 kt admin set-host-token
@@ -72,14 +72,14 @@ kt admin set-host-token
 This generates 32 random bytes and writes them into `[auth]
 host_token` in `config.toml`.
 
-### Step 2 — restart the server
+### Step 2: restart the server
 
 ```bash
 kt serve restart
 # (or just kt serve start --host 0.0.0.0 if not running yet)
 ```
 
-### Step 3 — verify
+### Step 3: verify
 
 From another machine:
 
@@ -96,7 +96,7 @@ curl -H "Authorization: Bearer $TOKEN" http://YOUR_LAN_IP:8001/api/version
 # → 200 OK
 ```
 
-### Step 4 — give friends the token
+### Step 4: give friends the token
 
 Share `$TOKEN` over a secure channel (Signal / 1Password share / not
 WhatsApp).  Anyone with the token can connect via the web frontend
@@ -124,13 +124,13 @@ kt serve restart             # existing clients drop, need the new token
 
 ---
 
-## Level 2 — Admin password (adds another 5 minutes)
+## Level 2: Admin password (adds another 5 minutes)
 
-Friends with the host token can now chat — but they can also click
+Friends with the host token can now chat, but they can also click
 "Save" on the Models page and burn through your OpenAI key.  Add a
 second password for config changes.
 
-### Step 1 — generate the admin token
+### Step 1: generate the admin token
 
 ```bash
 kt admin set-admin-token
@@ -139,22 +139,22 @@ kt admin set-admin-token
 
 Restart the server.
 
-### Step 2 — what's now gated
+### Step 2: what's now gated
 
 These routes refuse without `X-Admin-Token: <admin_token>`:
 
-- `POST /api/settings/keys` — adding / changing LLM API keys
-- `POST /api/settings/profiles` — LLM model profiles
-- `POST /api/settings/mcp` — MCP server registration
-- `POST /api/registry/install` — installing packages
-- `PUT /api/settings/config-files/{name}/content` — raw config edits
+- `POST /api/settings/keys`: adding / changing LLM API keys
+- `POST /api/settings/profiles`: LLM model profiles
+- `POST /api/settings/mcp`: MCP server registration
+- `POST /api/registry/install`: installing packages
+- `PUT /api/settings/config-files/{name}/content`: raw config edits
 
 These keep working without it (read-only / chat / sessions are
 unaffected):
 
 - Anything under `/api/auth/capabilities`, `/me`, `/sessions/*`, chat WS
 
-### Step 3 — verify
+### Step 3: verify
 
 ```bash
 HOST=$(kt admin show-host-token --yes)
@@ -175,23 +175,23 @@ curl -X POST http://localhost:8001/api/settings/keys \
   -d '{"provider":"openai","key":"sk-..."}'
 ```
 
-### Step 4 — share the host token, keep the admin token
+### Step 4: share the host token, keep the admin token
 
 Give friends `$HOST`.  Don't give them `$ADMIN`.  When the frontend
 asks them to log in they paste the host token; when they try to
 edit config, the UI greys out and (when the Vue admin UI lands)
-prompts for the admin password — only you have it.
+prompts for the admin password, and only you have it.
 
 ---
 
-## Level 3 — Multi-user (adds another 10 minutes)
+## Level 3: Multi-user (adds another 10 minutes)
 
 Now each person logs in with their own username + password.  Their
 chat sessions, tabs, and UI prefs are scoped to their account.
 Shared resources (LLM keys, profiles, MCP servers, installed
 packages) stay shared because the admin manages them once.
 
-### Step 1 — edit config.toml
+### Step 1: edit config.toml
 
 ```toml
 [auth]
@@ -204,7 +204,7 @@ loopback_bypass = false         # turn off if behind a proxy
 
 Restart the server.
 
-### Step 2 — create the first admin user
+### Step 2: create the first admin user
 
 ```bash
 kt admin users add operator --role admin
@@ -215,7 +215,7 @@ kt admin users add operator --role admin
 
 This writes to `~/.kohakuterrarium/auth.db` (sqlite, bcrypt-hashed).
 
-### Step 3 — invite family members
+### Step 3: invite family members
 
 Generate an invitation token per person:
 
@@ -229,7 +229,7 @@ kt admin invitations create --role user --expires-in-hours 168
 Send each token over a secure channel.  Each token is single-use,
 optionally time-bounded.
 
-### Step 4 — family members register
+### Step 4: family members register
 
 Each person POSTs once with their invite token:
 
@@ -255,14 +255,14 @@ curl -X POST http://YOUR_HOST:8001/api/auth/login \
   -c alice-cookies.txt
 ```
 
-### Step 5 — verify isolation
+### Step 5: verify isolation
 
 Each user gets their own slice of disk:
 
 ```
 ~/.kohakuterrarium/
 ├── auth.db
-├── api_keys.yaml           # shared — admin sees + manages
+├── api_keys.yaml           # shared; admin sees + manages
 ├── llm_profiles.yaml       # shared
 ├── mcp_servers.yaml        # shared
 └── users/
@@ -273,7 +273,7 @@ Each user gets their own slice of disk:
     └── 2/                  # alice
         ├── ui_prefs.json
         └── sessions/
-            └── *.kohakutr  # alice's chats — operator can't see them
+            └── *.kohakutr  # alice's chats; operator can't see them
 ```
 
 ### Migrating existing sessions to your user namespace
@@ -283,7 +283,7 @@ existing chats under your new account:
 
 ```bash
 kt admin migrate --from-shared-state --to-user operator --dry-run
-# (shows what would move; safe — no changes)
+# (shows what would move; safe, no changes)
 
 kt admin migrate --from-shared-state --to-user operator
 # moves <config_dir>/ui_prefs.json + <config_dir>/sessions/*.kohakutr
@@ -316,7 +316,7 @@ kt admin users delete alice --yes
 # note: per-user dir users/2/ kept (rm -rf to discard the user's sessions / prefs).
 ```
 
-The disk directory is intentionally NOT deleted — `rm -rf` it
+The disk directory is intentionally NOT deleted; `rm -rf` it
 yourself if you want their data gone.
 
 ### Promote / demote admins
@@ -342,7 +342,7 @@ kt admin users list
 
 ### Reset a password (admin)
 
-There's no "reset" verb — admin re-issues the user via the API:
+There's no "reset" verb; admin re-issues the user via the API:
 
 ```bash
 # kt admin doesn't have password-reset yet; for now, the admin
@@ -365,7 +365,7 @@ A `kt admin users reset-password` verb is on the roadmap.
 The four levels above are the same logical setup; how you provision
 the tokens differs by deployment.
 
-### Docker compose — secrets via files
+### Docker compose: secrets via files
 
 ```yaml
 services:
@@ -402,10 +402,10 @@ docker compose up -d
 docker compose exec kohakuterrarium kt admin users add operator --role admin
 ```
 
-See [Deployment — Docker](../guides/deployment-docker.md) for the
+See [Docker deployment](../guides/deployment-docker.md) for the
 full Compose example.
 
-### systemd — secrets via `LoadCredential=`
+### systemd: secrets via `LoadCredential=`
 
 ```bash
 sudo mkdir -p /etc/systemd/system/kohakuterrarium-host.service.d
@@ -425,7 +425,7 @@ sudo -u kohakuterrarium-host kt admin users add operator --role admin
 ```
 
 The drop-in uses `LoadCredential=` so secrets never appear in
-`/proc/<pid>/environ`.  See [Deployment — systemd](../guides/deployment-systemd.md).
+`/proc/<pid>/environ`.  See [systemd deployment](../guides/deployment-systemd.md).
 
 ---
 
@@ -458,7 +458,7 @@ export KT_AUTH_LOOPBACK_BYPASS=0          # 0 = always require token
 curl http://YOUR_HOST:8001/api/auth/capabilities
 ```
 
-Returns the enabled-flag for each layer — useful for shell scripts
+Returns the enabled-flag for each layer, useful for shell scripts
 and the frontend's connection state machine.
 
 ---
@@ -473,7 +473,7 @@ and the frontend's connection state machine.
 | `multi_user_disabled` on `/me` | L4 is off; `/me` makes no sense | Either enable L4 or stop calling `/me` |
 | `invitation_invalid` on register | Token already used or expired | Generate a new invitation |
 | `kt admin set-host-token` fails with "TOML shape ... cannot preserve" | Your `config.toml` has a top-level scalar or nested table | Move stray top-level keys into a `[section]` |
-| Locked myself out of admin | Demoted the only admin | `kt admin users grant <name>` from any shell — works offline |
+| Locked myself out of admin | Demoted the only admin | `kt admin users grant <name>` from any shell; works offline |
 
 ---
 
@@ -483,7 +483,7 @@ and the frontend's connection state machine.
   [roadmap](../../../plans/1.5.0-roadmap/03-frontend-backend-connection/README.md)).
   Until then, you use `curl` + cookies, or the API tokens via
   `Authorization: Bearer`.  The backend is stable and ready.
-- Cross-host session import / export, password reset, 2FA — all
+- Cross-host session import / export, password reset, 2FA: all
   deferred to 1.6+.
 
 For the architecture / threat model / why-it-works-this-way reading,

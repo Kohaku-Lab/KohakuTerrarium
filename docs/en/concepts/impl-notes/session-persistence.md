@@ -39,21 +39,21 @@ of them becomes expensive or impossible.
 A `.kohakutr` file is a SQLite database (managed through KohakuVault)
 with tables:
 
-- `events` — append-only log of every event (text chunk, tool call,
+- `events`: append-only log of every event (text chunk, tool call,
   tool result, trigger fire, channel message, token usage). Never
   rewritten.
-- `conversation` — one row per (agent, turn-boundary) snapshot of the
+- `conversation`: one row per (agent, turn-boundary) snapshot of the
   message list (via msgpack, preserves tool-call structures).
-- `state` — scratchpad and per-agent counters.
-- `channels` — channel message history.
-- `subagents` — conversation snapshots for spawned sub-agents, saved
+- `state`: scratchpad and per-agent counters.
+- `channels`: channel message history.
+- `subagents`: conversation snapshots for spawned sub-agents, saved
   before destruction.
-- `jobs` — tool/subagent execution records (status, args, result).
-- `meta` — session metadata, config path, run identifiers.
-- `fts` — SQLite FTS5 index over events (keyword search).
-- Vector index (optional, under the same store) — built by
+- `jobs`: tool/subagent execution records (status, args, result).
+- `meta`: session metadata, config path, run identifiers.
+- `fts`: SQLite FTS5 index over events (keyword search).
+- Vector index (optional, under the same store): built by
   `kt embedding` when requested.
-- `*.artifacts/` sibling directory — binary outputs such as generated
+- `*.artifacts/` sibling directory: binary outputs such as generated
   images, stored next to the `.kohakutr` file rather than inside SQLite.
 
 ### Resume path
@@ -87,7 +87,7 @@ them as the tool result.
 - **Snapshots are per-turn.** Not per-event. Resume is O(1) against
   the snapshot, not O(N) against history.
 - **Non-serialisable state is rebuilt from config.** Sockets, pywebview
-  handles, LLM provider sessions — recreated, not restored.
+  handles, LLM provider sessions are recreated, not restored.
 - **One logical bundle per session.** The SQLite file is the primary
   unit, but binary artifacts may live in a sibling `<session>.artifacts/`
   directory.
@@ -96,7 +96,7 @@ them as the tool result.
 ## The listing sidecar
 
 `.kohakutr` files are the source of truth, but they are the wrong
-shape for *listing* — `GET /api/sessions` on a 1000-session install
+shape for *listing*: `GET /api/sessions` on a 1000-session install
 must not open 1000 SQLite files just to render a sidebar. We layer
 a write-through cache on top:
 
@@ -119,13 +119,13 @@ search is a single FTS5 query.
 ### How the index stays honest
 
 Three independent paths keep entries in sync with the files on
-disk — none of them is load-bearing on its own:
+disk; none of them is load-bearing on its own:
 
 1. **Push hook** (`session_index/hooks.py`). When the API server
    itself owns a `SessionStore`, a `SessionIndexHook` subscribes to
    its event stream and re-upserts the entry on a debounce
    (every 20 events or 5 seconds, whichever first). The same store
-   instance both writes events and updates the index — no lag.
+   instance both writes events and updates the index, so there is no lag.
 
 2. **Pull reconcile** (`session_index/reconcile.py`). Walks the
    session directory, fingerprints every file, opens only the ones
@@ -133,7 +133,7 @@ disk — none of them is load-bearing on its own:
    no entry yet), and re-reads their meta + preview. Files that
    have been deleted are dropped from the index. This is the fallback
    the API surfaces as `?refresh=true`. `?full_rescan=true` forces
-   re-read of every file — use it after manually editing a
+   re-read of every file; use it after manually editing a
    `.kohakutr` on disk.
 
 3. **Startup reconcile**. The `get_session_index_default` singleton
@@ -143,7 +143,7 @@ disk — none of them is load-bearing on its own:
    path so sessions produced by sibling processes (`kt run` in
    another terminal while the server was down) get picked up
    automatically. A failure here logs loudly but never blocks
-   server startup — stale data is preferable to no service.
+   server startup; stale data is preferable to no service.
 
 ### Why a sidecar (not in-memory)
 
@@ -163,28 +163,28 @@ themselves) does not already hold.
 
 ## Where it lives in the code
 
-- `src/kohakuterrarium/session/store.py` — `SessionStore` API.
-- `src/kohakuterrarium/session/output.py` — `SessionOutput` records
+- `src/kohakuterrarium/session/store.py`: `SessionStore` API.
+- `src/kohakuterrarium/session/output.py`: `SessionOutput` records
   events via the `OutputModule` protocol, so nothing special is
   needed at the controller layer.
-- `src/kohakuterrarium/session/artifacts.py` — artifact path resolution
+- `src/kohakuterrarium/session/artifacts.py`: artifact path resolution
   and safe binary writes.
-- `src/kohakuterrarium/session/resume.py` — the rebuild path.
-- `src/kohakuterrarium/session/memory.py` — FTS and vector queries.
-- `src/kohakuterrarium/session/embedding.py` — embedding providers.
-- `src/kohakuterrarium/studio/persistence/session_index/` — listing
+- `src/kohakuterrarium/session/resume.py`: the rebuild path.
+- `src/kohakuterrarium/session/memory.py`: FTS and vector queries.
+- `src/kohakuterrarium/session/embedding.py`: embedding providers.
+- `src/kohakuterrarium/studio/persistence/session_index/`: listing
   sidecar: `entry.py` (row schema), `store.py` (KVault + TextVault
   wrapper), `reconcile.py` (fingerprint diff + parallel re-read),
   `hooks.py` (live push from a running SessionStore), `__init__.py`
   (process-wide singleton + startup reconcile).
-- `src/kohakuterrarium/api/routes/persistence/saved.py` — the
+- `src/kohakuterrarium/api/routes/persistence/saved.py`: the
   HTTP surface (`GET /api/sessions`, `DELETE /api/sessions/{name}`).
 
 ## See also
 
-- [Memory and compaction](../modules/memory-and-compaction.md) — the
+- [Memory and compaction](../modules/memory-and-compaction.md): the
   conceptual picture.
-- [Graph and sessions](graph-and-sessions.md) — how a session store
+- [Graph and sessions](graph-and-sessions.md): how a session store
   is rebuilt across terrarium merges and splits, and why the recipe
   is the source of truth on resume.
-- [reference/cli.md — kt resume, kt search, kt embedding](../../reference/cli.md) — user surfaces.
+- [kt resume, kt search, kt embedding in reference/cli.md](../../reference/cli.md): user surfaces.

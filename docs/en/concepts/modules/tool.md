@@ -1,6 +1,6 @@
 ---
 title: Tool
-summary: Named capabilities the LLM can invoke — shell commands, file edits, web searches, and more.
+summary: Named capabilities the LLM can invoke. Shell commands, file edits, web searches, and more.
 tags:
   - concepts
   - module
@@ -24,7 +24,7 @@ those at once.
 ## Why it exists
 
 A chat bot is just a mouth. Tools give the agent hands. Without them
-the LLM can only speak — with them it can do arbitrary work in the
+the LLM can only speak; with them it can do arbitrary work in the
 world.
 
 The framework's job is to make tool execution *cheap to use and cheap
@@ -43,16 +43,16 @@ A tool implements:
 - an **execution mode**: `direct`, `background`, or `stateful`
 - optional **full documentation** (`get_full_documentation()`) loaded
   on demand via the `info` framework command
-- optional **prompt contribution** — a short hint paragraph inserted once
+- optional **prompt contribution**: a short hint paragraph inserted once
   into the aggregated system prompt
-- optional **concurrency metadata** — whether this tool is safe to run in
+- optional **concurrency metadata**: whether this tool is safe to run in
   parallel with other mutating tools
 
 There are now two broad tool families:
 
-- **Runner-executed tools** — the normal case. The executor actually calls
+- **Runner-executed tools**: the normal case. The executor actually calls
   the tool's Python implementation.
-- **Provider-native tools** — the provider performs the capability itself.
+- **Provider-native tools**: the provider performs the capability itself.
   The tool still appears in the registry and prompt, but the executor must
   not run it. Instead the LLM provider translates it into its own wire-format
   tool declaration and returns structured content back. `image_gen` on Codex
@@ -60,10 +60,10 @@ There are now two broad tool families:
 
 Execution modes:
 
-- **Direct** — await the tool within the same turn; feed the result
+- **Direct**: await the tool within the same turn; feed the result
   back as a `tool_complete` event.
-- **Background** — submit and release; result arrives in a later event.
-- **Stateful** — multi-turn interaction; a generator-like tool that
+- **Background**: submit and release; result arrives in a later event.
+- **Stateful**: multi-turn interaction; a generator-like tool that
   yields intermediate results the agent can react to.
 
 Parallelism is split from execution mode. Multiple direct tools can still
@@ -110,7 +110,7 @@ privileged nodes only).
   API; any cooperating tools can rendezvous through it.
 - **Tools that install triggers.** Any universal trigger class
   (`TimerTrigger`, `ChannelTrigger`, `SchedulerTrigger` by default) can
-  be exposed as a tool of its own — listing it under `tools:` with
+  be exposed as a tool of its own: listing it under `tools:` with
   `type: trigger` makes `add_timer` / `watch_channel` / `add_schedule`
   show up in the tool list, and calling one installs that trigger on
   the live `TriggerManager`. `group_add_node` spawns a new creature
@@ -126,7 +126,7 @@ privileged nodes only).
 - **Tools that wrap sub-agents.** Any sub-agent invocation is itself
   tool-shaped, because the LLM calls it by name with args.
 - **Tools that run agents.** Because tools are plain Python, a tool can
-  contain an agent — e.g. a guard tool that runs a small judging agent
+  contain an agent, e.g. a guard tool that runs a small judging agent
   on the arguments before dispatching the real action. See
   [patterns](../patterns.md).
 
@@ -141,8 +141,8 @@ framework does not police what happens behind the call.
 
 ## See also
 
-- [impl-notes/stream-parser](../impl-notes/stream-parser.md) — why tools start before the LLM stops.
-- [Sub-agent](sub-agent.md) — the "also a tool" sibling.
-- [Channel](channel.md) — the other half of tool-as-message-bus.
-- [Patterns](../patterns.md) — surprising uses of tools.
-- [reference/builtins.md — Tools](../../reference/builtins.md) — the complete catalogue.
+- [impl-notes/stream-parser](../impl-notes/stream-parser.md): why tools start before the LLM stops.
+- [Sub-agent](sub-agent.md): the "also a tool" sibling.
+- [Channel](channel.md): the other half of tool-as-message-bus.
+- [Patterns](../patterns.md): surprising uses of tools.
+- [Tools in reference/builtins.md](../../reference/builtins.md): the complete catalogue.

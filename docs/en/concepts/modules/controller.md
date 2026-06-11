@@ -102,7 +102,7 @@ Key invariants:
 
 ## Don't be bounded
 
-A controller-less creature is nonsensical — you cannot have an agent
+A controller-less creature is nonsensical: you cannot have an agent
 without a loop. But the loop's *shape* is negotiable. Plugin hooks
 (`pre_llm_call`, `post_llm_call`, `pre_tool_execute`, …) let you rewrite
 every step of the loop from outside, without touching the controller
@@ -110,7 +110,7 @@ class. See [plugin](plugin.md).
 
 ## See also
 
-- [Composing an agent](../foundations/composing-an-agent.md) — where the controller sits.
-- [impl-notes/stream-parser](../impl-notes/stream-parser.md) — why tools start before the LLM stops.
-- [impl-notes/prompt-aggregation](../impl-notes/prompt-aggregation.md) — what prompt the controller is driving.
-- [reference/python.md — Agent, Controller](../../reference/python.md) — signatures.
+- [Composing an agent](../foundations/composing-an-agent.md): where the controller sits.
+- [impl-notes/stream-parser](../impl-notes/stream-parser.md): why tools start before the LLM stops.
+- [impl-notes/prompt-aggregation](../impl-notes/prompt-aggregation.md): what prompt the controller is driving.
+- [Agent and Controller in reference/python.md](../../reference/python.md): signatures.

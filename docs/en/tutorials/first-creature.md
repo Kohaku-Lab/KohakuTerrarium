@@ -19,11 +19,11 @@ prompt, added one tool, and run it again.
 **Prerequisites:** `kt` on your `PATH` (`uv pip install -e .` from the
 repo, or a released install) and an API-capable machine.
 
-A creature is a standalone agent — controller + input + output + tools
+A creature is a standalone agent: controller + input + output + tools
 (+ optional triggers, sub-agents, plugins). This tutorial walks the
 shortest path that touches all the relevant moving parts.
 
-## Step 1 — Install the default package
+## Step 1: Install the default package
 
 Goal: get the shipped creatures (swe, general, reviewer, root, …) onto
 your machine so you can reference them with `@kt-biome/...`.
@@ -45,7 +45,7 @@ kt list
 You should see `kt-biome` and the creatures it contains (`swe`,
 `general`, `reviewer`, `root`, `researcher`, `ops`, `creative`).
 
-## Step 2 — Authenticate to an LLM
+## Step 2: Authenticate to an LLM
 
 Goal: pick one provider and log in. The SWE creature uses the default
 model; you need a credential for it.
@@ -71,7 +71,7 @@ kt model list
 kt model default gpt-5.4
 ```
 
-## Step 3 — Run an out-of-the-box creature
+## Step 3: Run an out-of-the-box creature
 
 Goal: see a complete creature work before you change anything.
 
@@ -90,7 +90,7 @@ output. Exit with `/exit`, Ctrl+D, or Ctrl+C twice while idle. On exit,
 `kt` prints a resume hint that looks like `kt resume <session-name>`;
 sessions auto-save to `~/.kohakuterrarium/sessions/*.kohakutr`.
 
-## Step 4 — Resume the session
+## Step 4: Resume the session
 
 Goal: confirm that sessions are persistent and resumable.
 
@@ -102,7 +102,7 @@ This picks up the most recent session. You are back in the same
 conversation with the same scratchpad, tool history, and model. Exit
 again when you are done.
 
-## Step 5 — Fork the creature into a local folder
+## Step 5: Fork the creature into a local folder
 
 Goal: have a creature you own, layered on top of the SWE one.
 
@@ -133,7 +133,7 @@ House rules:
 - when unsure, ask rather than guess
 ```
 
-`base_config` pulls in everything from the SWE creature — LLM defaults,
+`base_config` pulls in everything from the SWE creature: LLM defaults,
 tool set, sub-agents, the upstream system prompt. Your `system.md` is
 appended to the inherited prompt (prompts concatenate along the
 inheritance chain). Everything else you did not set stays inherited.
@@ -142,7 +142,7 @@ That includes provider-native tools too. If the inherited creature runs on a
 backend that advertises native capabilities, those can appear automatically
 without being listed under `tools:`.
 
-## Step 6 — Add one tool
+## Step 6: Add one tool
 
 Goal: extend the inherited tool list by one entry. Web search is a
 useful one.
@@ -165,7 +165,7 @@ Lists like `tools:` and `subagents:` **extend** the inherited list
 adds `web_search` to the SWE tool set without re-declaring the other
 entries.
 
-## Step 7 — Run your creature
+## Step 7: Run your creature
 
 ```bash
 kt run creatures/my-swe --mode cli
@@ -194,10 +194,10 @@ session saves automatically.
 
 ## What to read next
 
-- [Creatures](../guides/creatures.md) — every config field, in context.
-- [Configuration reference](../guides/configuration.md) — the exact
+- [Creatures](../guides/creatures.md): every config field, in context.
+- [Configuration reference](../guides/configuration.md): the exact
   schema and inheritance rules.
-- [First custom tool](first-custom-tool.md) — when `builtin` is not
+- [First custom tool](first-custom-tool.md): when `builtin` is not
   enough.
-- [What is an agent](../concepts/foundations/what-is-an-agent.md) — the
+- [What is an agent](../concepts/foundations/what-is-an-agent.md): the
   mental model that makes the config shape make sense.

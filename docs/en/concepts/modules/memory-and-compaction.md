@@ -45,7 +45,7 @@ A single store, three consumers.
 
 Context windows grow but never fast enough. Without compaction, a
 creature that runs for hours eventually hits the wall. Naive
-compaction pauses the agent while it summarises — which in an agent
+compaction pauses the agent while it summarises, which in an agent
 framework means "the controller is frozen while 50k tokens get turned
 into 2k." That is unacceptable for ambient agents.
 
@@ -58,14 +58,14 @@ the result in atomically between turns. The controller never stops.
 
 `.kohakutr` is a SQLite file (via KohakuVault) with tables for:
 
-- `meta` — session metadata, snapshots, config
-- `events` — append-only event log
-- `state` — scratchpad, counters, per-agent state
-- `channels` — message history
-- `conversation` — latest snapshot for fast resume
-- `subagents` — conversation snapshots for sub-agents
-- `jobs` — tool/subagent execution records
-- `fts` — full-text index over events
+- `meta`: session metadata, snapshots, config
+- `events`: append-only event log
+- `state`: scratchpad, counters, per-agent state
+- `channels`: message history
+- `conversation`: latest snapshot for fast resume
+- `subagents`: conversation snapshots for sub-agents
+- `jobs`: tool/subagent execution records
+- `fts`: full-text index over events
 - (vector index, optional, when embeddings are built)
 
 ### Compaction contract
@@ -80,13 +80,13 @@ the compact manager kicks off a background task.
 
 ## How we implement it
 
-- `session/store.py` — KohakuVault-backed persistent store.
-- `session/output.py` — the output consumer that writes events.
-- `session/resume.py` — replay into a freshly built agent.
-- `session/memory.py` — FTS5 queries and vector search.
-- `session/embedding.py` — model2vec / sentence-transformer / API
+- `session/store.py`: KohakuVault-backed persistent store.
+- `session/output.py`: the output consumer that writes events.
+- `session/resume.py`: replay into a freshly built agent.
+- `session/memory.py`: FTS5 queries and vector search.
+- `session/embedding.py`: model2vec / sentence-transformer / API
   providers for embeddings.
-- `core/compact.py` — `CompactManager` with the atomic-splice trick.
+- `core/compact.py`: `CompactManager` with the atomic-splice trick.
   See [impl-notes/non-blocking-compaction](../impl-notes/non-blocking-compaction.md).
 
 Embedding providers (`kt embedding`):
@@ -100,7 +100,7 @@ Embedding providers (`kt embedding`):
 
 - **Resume anywhere.** `kt resume` / `kt resume --last` picks up a
   session that was interrupted hours ago.
-- **Search sessions.** `kt search <session> <query>` — FTS, semantic,
+- **Search sessions.** `kt search <session> <query>` with FTS, semantic,
   hybrid, or auto-detect mode.
 - **Agent-side RAG.** An agent calls `search_memory` during a turn,
   gets relevant prior events, and continues with context.
@@ -114,11 +114,11 @@ Embedding providers (`kt embedding`):
 
 Session persistence is opt-out (`--no-session`). Embeddings are opt-in.
 Compaction is opt-out per-creature. A creature can run with none of
-these — memory is a convenience, not a requirement.
+these; memory is a convenience, not a requirement.
 
 ## See also
 
-- [impl-notes/session-persistence](../impl-notes/session-persistence.md) — dual-store details.
-- [impl-notes/non-blocking-compaction](../impl-notes/non-blocking-compaction.md) — atomic-splice algorithm.
-- [reference/cli.md — kt embedding, kt search, kt resume](../../reference/cli.md) — command surfaces.
-- [guides/memory.md](../../guides/memory.md) — how-to guide.
+- [impl-notes/session-persistence](../impl-notes/session-persistence.md): dual-store details.
+- [impl-notes/non-blocking-compaction](../impl-notes/non-blocking-compaction.md): atomic-splice algorithm.
+- [kt embedding, kt search, kt resume in reference/cli.md](../../reference/cli.md): command surfaces.
+- [guides/memory.md](../../guides/memory.md): how-to guide.

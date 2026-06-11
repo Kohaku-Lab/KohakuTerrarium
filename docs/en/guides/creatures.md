@@ -30,7 +30,7 @@ creatures/my-agent/
   memory/                # optional text/markdown memory files (by convention)
 ```
 
-Lookup order: `config.yaml` → `config.yml` → `config.json` → `config.toml`. Env-var interpolation (`${VAR}` or `${VAR:default}`) works anywhere in the YAML. Subfolder names are a convention — the loader resolves `module:` paths relative to the agent folder but does not auto-scan `tools/` or `subagents/`.
+Lookup order: `config.yaml` → `config.yml` → `config.json` → `config.toml`. Env-var interpolation (`${VAR}` or `${VAR:default}`) works anywhere in the YAML. Subfolder names are a convention: the loader resolves `module:` paths relative to the agent folder but does not auto-scan `tools/` or `subagents/`.
 
 ### Minimal config
 
@@ -62,7 +62,7 @@ tools:
     module: ./tools/my_tool.py
 ```
 
-Rules — one unified model across all fields:
+Rules (one unified model across all fields):
 
 - **Scalars**: child wins.
 - **Dicts** (`controller`, `input`, `output`, `memory`, `compact`, …): shallow merge.
@@ -123,7 +123,7 @@ The child's `bash` replaces the base's `bash` in place; other inherited tools ar
 
 ## Prompt files
 
-Keep the system prompt in Markdown. Only put *personality and guidelines* there — the tool list, call syntax, and full tool docs are auto-aggregated.
+Keep the system prompt in Markdown. Only put *personality and guidelines* there; the tool list, call syntax, and full tool docs are auto-aggregated.
 
 ```markdown
 <!-- prompts/system.md -->
@@ -153,8 +153,8 @@ The aggregator appends tool-list, framework hints, env info, and `CLAUDE.md` aut
 
 ## Skill mode: dynamic vs static
 
-- `skill_mode: dynamic` (default) — tools show up in the prompt as one-line descriptions. The controller loads full docs on demand with the `info` framework command.
-- `skill_mode: static` — all tool docs are inlined upfront (larger system prompt, fewer round-trips).
+- `skill_mode: dynamic` (default): tools show up in the prompt as one-line descriptions. The controller loads full docs on demand with the `info` framework command.
+- `skill_mode: static`: all tool docs are inlined upfront (larger system prompt, fewer round-trips).
 
 Use `dynamic` unless you want a fixed, auditable prompt.
 
@@ -168,20 +168,20 @@ Controls the syntax the LLM emits to call tools (and to invoke framework command
 
 Concrete examples for a `bash` call with `command=ls`:
 
-- `bracket` (default) — opens with `[/name]`, closes with `[name/]`, args as `@@key=value` lines:
+- `bracket` (default): opens with `[/name]`, closes with `[name/]`, args as `@@key=value` lines:
   ```
   [/bash]
   @@command=ls
   [bash/]
   ```
-- `xml` — standard tag-with-attributes form:
+- `xml`: standard tag-with-attributes form:
   ```
   <bash command="ls"></bash>
   ```
-- `native` — provider-native function calling (OpenAI / Anthropic tool use). The LLM emits no text block; the API carries the call structurally.
-- dict — custom delimiters (see [configuration reference — `tool_format`](../reference/configuration.md)).
+- `native`: provider-native function calling (OpenAI / Anthropic tool use). The LLM emits no text block; the API carries the call structurally.
+- dict: custom delimiters (see [`tool_format` in the configuration reference](../reference/configuration.md)).
 
-All three formats are interchangeable — pick whichever your model handles best. `native` tends to be most reliable on major providers; `bracket` works everywhere including local models.
+All three formats are interchangeable; pick whichever your model handles best. `native` tends to be most reliable on major providers; `bracket` works everywhere including local models.
 
 ## Tools and sub-agents
 
@@ -196,10 +196,10 @@ tools:
   - name: web_search
     options:
       max_results: 5
-  # Expose a universal trigger as a setup tool — the LLM can install it
+  # Expose a universal trigger as a setup tool: the LLM can install it
   # at runtime by calling this tool name. The framework wraps the trigger
   # class with `CallableTriggerTool`; the short description is prefixed
-  # with "**Trigger** — " so the LLM knows it's installing a long-lived
+  # with "**Trigger**: " so the LLM knows it's installing a long-lived
   # side-effect rather than running an immediate action.
   - { name: add_timer, type: trigger }
   - { name: watch_channel, type: trigger }
@@ -218,11 +218,11 @@ subagents:
       budget_inherit: true
 ```
 
-Setup-able triggers opt in per-creature — a creature without any
+Setup-able triggers opt in per-creature: a creature without any
 `type: trigger` entries cannot install triggers at runtime. Each
 universal `BaseTrigger` subclass declares its own `setup_tool_name`
 (e.g. `add_timer`), `setup_description`, and `setup_param_schema`. To
-write your own, see [Custom Modules — Triggers](custom-modules.md).
+write your own, see the Triggers section of [Custom Modules](custom-modules.md).
 
 See [reference/builtins](../reference/builtins.md) for the complete tool and sub-agent catalog; [Custom Modules](custom-modules.md) for writing your own.
 
@@ -241,7 +241,7 @@ triggers:
     options: { channel: alerts }
   - type: context
     options: { debounce_ms: 200 }
-    prompt: "Context shifted — reconsider plan."
+    prompt: "Context shifted; reconsider plan."
   - type: custom
     module: ./triggers/webhook.py
     class: WebhookTrigger
@@ -290,13 +290,13 @@ Default is the creature's `name`. Inside a terrarium, each creature gets a priva
 
 The controller can emit inline directives that talk to the framework (no tool round-trip). They are documented in the framework-hints prompt block:
 
-Framework commands use the same syntax family as tool calls — whichever `tool_format` you've configured (bracket, XML, native). Default bracket examples, with placeholders as bare identifiers:
+Framework commands use the same syntax family as tool calls: whichever `tool_format` you've configured (bracket, XML, native). Default bracket examples, with placeholders as bare identifiers:
 
-- `[/info]tool_or_subagent[info/]` — load full documentation on demand.
-- `[/read_job]job_id[read_job/]` — read output from a background job (accepts `--lines N` and `--offset M` in the body).
-- `[/jobs][jobs/]` — list running jobs with their IDs.
-- `[/wait]job_id[wait/]` — block the current turn until a background job finishes.
-- `[/skill]skill_name [args][skill/]` — explicitly invoke a procedural skill body.
+- `[/info]tool_or_subagent[info/]`: load full documentation on demand.
+- `[/read_job]job_id[read_job/]`: read output from a background job (accepts `--lines N` and `--offset M` in the body).
+- `[/jobs][jobs/]`: list running jobs with their IDs.
+- `[/wait]job_id[wait/]`: block the current turn until a background job finishes.
+- `[/skill]skill_name [args][skill/]`: explicitly invoke a procedural skill body.
 
 Command names share a namespace with tool names; the read-job-output command is called `read_job` precisely to avoid colliding with the `read` file-reader tool.
 
@@ -316,7 +316,7 @@ Slash commands the *user* types at the CLI/TUI prompt. Built-ins:
 | `/regen` | `/regenerate` | Rerun last assistant turn |
 | `/plugin [list\|enable\|disable\|toggle] [name]` | `/plugins` | Manage lifecycle plugins |
 | `/skill [list\|enable\|disable\|toggle\|show] [name]` | `/skills` | Manage procedural skills |
-| `/<skill-name> [args]` | — | Direct user-invoke path for an enabled skill |
+| `/<skill-name> [args]` | (none) | Direct user-invoke path for an enabled skill |
 | `/exit` | `/quit`, `/q` | Graceful exit |
 
 Custom user commands live under `builtins/user_commands/` or ship inside packages. Authoring: [Custom Modules](custom-modules.md).
@@ -424,14 +424,14 @@ Push the repo to git and anyone can `kt install <url>`. Full workflow: [Packages
 ## Troubleshooting
 
 - **Agent ignores tool call syntax.** Check `tool_format`. If you set `native`, the underlying provider must support it.
-- **System prompt has two copies of the tool list.** You inlined one in `system.md`. Remove it — the aggregator adds it automatically.
+- **System prompt has two copies of the tool list.** You inlined one in `system.md`. Remove it; the aggregator adds it automatically.
 - **Inherited creature overrides everything.** Expected for scalars. To preserve a base list, don't redeclare it at the child level.
 - **`base_config: "@pkg/..."` fails to resolve.** `kt list` to confirm the package is installed; package refs live under `~/.kohakuterrarium/packages/`.
 
 ## See also
 
-- [Configuration](configuration.md) — task-oriented recipes.
-- [Custom Modules](custom-modules.md) — writing your own tools/inputs/outputs/triggers/sub-agents.
-- [Plugins](plugins.md) — hook behaviour without forking modules.
-- [Packages](packages.md) — shipping creatures for reuse.
-- [Reference / configuration](../reference/configuration.md) — every field.
+- [Configuration](configuration.md): task-oriented recipes.
+- [Custom Modules](custom-modules.md): writing your own tools/inputs/outputs/triggers/sub-agents.
+- [Plugins](plugins.md): hook behaviour without forking modules.
+- [Packages](packages.md): shipping creatures for reuse.
+- [Reference / configuration](../reference/configuration.md): every field.

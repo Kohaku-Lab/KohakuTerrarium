@@ -25,13 +25,13 @@ inside a terrarium. Full: [what is an agent](foundations/what-is-an-agent.md).
 The reasoning loop inside a creature. Pulls events off a queue, asks
 the LLM to respond, dispatches tool and sub-agent calls that come
 back, feeds their results in as new events, decides whether to loop.
-Not "the brain" — the LLM is the brain; the controller is the loop
+Not "the brain": the LLM is the brain; the controller is the loop
 that makes the LLM act over time. Full: [controller](modules/controller.md).
 
 ## Input
 
 How the outside world hands a user's message to the creature. In
-practice, just one specific kind of trigger — the one labelled
+practice, just one specific kind of trigger: the one labelled
 `user_input`. Built-ins include CLI, TUI, and `none` (trigger-only
 creatures); audio/ASR is provided as opt-in custom modules. Full:
 [input](modules/input.md).
@@ -47,34 +47,34 @@ event queue. Full: [trigger](modules/trigger.md).
 
 How a creature talks back to its world. A router receives everything
 the controller emits (text chunks, tool activity, token usage) and
-fans it out to one or more sinks — stdout, TTS, Discord, file. Full:
+fans it out to one or more sinks: stdout, TTS, Discord, file. Full:
 [output](modules/output.md).
 
 ## Tool
 
 A named capability the LLM can call with arguments. Shell commands,
 file edits, web searches. A tool can also be a message bus, a state
-handle, or a nested agent — the framework does not police what
+handle, or a nested agent; the framework does not police what
 happens behind the call. Full: [tool](modules/tool.md).
 
 ## Sub-agent
 
 A nested creature spawned by a parent for a bounded task. Has its own
 context and (usually) a subset of the parent's tools. Conceptually
-also a tool — from the LLM's side, calling a sub-agent looks like
+also a tool: from the LLM's side, calling a sub-agent looks like
 calling any tool. Full: [sub-agent](modules/sub-agent.md).
 
 ## TriggerEvent
 
 The single envelope all external signals arrive in. User input, timer
-fires, tool completions, channel messages, sub-agent outputs — all
+fires, tool completions, channel messages, sub-agent outputs: all
 become `TriggerEvent(type=..., content=..., ...)`. One envelope means
 one code path. Full: [composing an agent](foundations/composing-an-agent.md).
 
 ## Channel
 
 A named broadcast pipe. Every subscriber receives every message sent
-on it — there is no queue/consume semantics at the [graph](#graph)
+on it; there is no queue/consume semantics at the [graph](#graph)
 layer. Channels live either in a creature's private session or in a
 graph's shared environment. A `send_message` tool plus a
 `ChannelTrigger` is how cross-creature communication works. Full:
@@ -86,10 +86,10 @@ Configurable framework-level routing of a creature's turn-end output.
 Declared via `output_wiring:` in the creature config; at the end of
 every turn, the framework emits a `creature_output` `TriggerEvent`
 into each listed target creature's event queue. No `send_message`
-call required, no channel involved — it rides the same event path as
+call required, no channel involved: it rides the same event path as
 any other trigger. Use for deterministic pipeline edges; keep
 channels for conditional / broadcast / observation traffic. Full:
-[terrariums guide — output wiring](../guides/terrariums.md#output-wiring).
+[output wiring in the terrariums guide](../guides/terrariums.md#output-wiring).
 
 ## creature_output (event type)
 
@@ -109,7 +109,7 @@ One session per creature instance. Full:
 
 **Shared** state across a terrarium: the shared channel registry plus
 an optional shared context dict. Creatures get private-by-default,
-shared-by-opt-in behaviour — they only see shared channels they
+shared-by-opt-in behaviour: they only see shared channels they
 explicitly listen on. Full:
 [session and environment](modules/session-and-environment.md).
 
@@ -139,17 +139,17 @@ changes. Full: [prompt aggregation](impl-notes/prompt-aggregation.md).
 
 Inline directives the LLM can emit mid-turn to talk to the framework
 without a full tool round-trip. They use the **same syntax family as
-tool calls** — whatever `tool_format` the creature is configured with
+tool calls**: whatever `tool_format` the creature is configured with
 (bracket, XML, or native). The word "command" here is about the
 *intent* (talking to the framework rather than running a tool), not
 about a different syntax.
 
 In the default bracket format:
 
-- `[/info]tool_or_subagent_name[info/]` — load full documentation for a tool or sub-agent on demand.
-- `[/read_job]job_id[read_job/]` — read output from a running or completed background job (supports `--lines N` and `--offset M` flags in the body).
-- `[/jobs][jobs/]` — list currently running background jobs (with their IDs).
-- `[/wait]job_id[wait/]` — block the current turn until a background job finishes.
+- `[/info]tool_or_subagent_name[info/]`: load full documentation for a tool or sub-agent on demand.
+- `[/read_job]job_id[read_job/]`: read output from a running or completed background job (supports `--lines N` and `--offset M` flags in the body).
+- `[/jobs][jobs/]`: list currently running background jobs (with their IDs).
+- `[/wait]job_id[wait/]`: block the current turn until a background job finishes.
 
 Command names share a namespace with tool names; the "read job
 output" command is deliberately called `read_job` so it does not
@@ -158,9 +158,9 @@ collide with the `read` file-reader tool.
 ## Studio
 
 The management layer above the [terrarium](#terrarium) engine. A
-Python class (`kohakuterrarium.Studio`) that exposes six namespaces —
-`catalog`, `identity`, `sessions`, `persistence`, `editors`, `attach`
-— for the concerns every UI and automation otherwise re-implements:
+Python class (`kohakuterrarium.Studio`) that exposes six namespaces
+(`catalog`, `identity`, `sessions`, `persistence`, `editors`, `attach`)
+for the concerns every UI and automation otherwise re-implements:
 package discovery, LLM profiles and API keys, active session
 lifecycle, saved-session resume / fork / export, workspace
 creature / module CRUD, and attach-policy advertisement. The web
@@ -177,7 +177,7 @@ a multi-creature team is a connected graph wired by channels. The
 engine owns creature CRUD, channel CRUD, output wiring, [hot-plug](#hot-plug),
 and the topology + session bookkeeping that follows graph changes
 ([auto-split / auto-merge](#auto-split--auto-merge)). It does *not*
-run an LLM and does not have its own reasoning loop — that lives in
+run an LLM and does not have its own reasoning loop; that lives in
 creatures. What it does decide is structural: which creatures share a
 connected component, which session store backs which graph, where
 each turn-end output gets delivered. Creatures don't know they are
@@ -190,7 +190,7 @@ The YAML config file that populates a fresh [terrarium](#terrarium)
 engine with a specific multi-creature setup. The engine itself is
 always present; a recipe is a sequence of "add these creatures,
 declare these channels, wire these edges, optionally promote one to
-[root](#root)." Recipes are the source of truth on resume — when
+[root](#root)." Recipes are the source of truth on resume: when
 a saved multi-creature session is reopened, the engine rebuilds the
 topology from the recipe path stored in session metadata, not from a
 frozen snapshot of the live graph.
@@ -202,7 +202,7 @@ set of creatures that share at least one channel path. Two unrelated
 creatures live in two graphs; drawing a channel between them merges
 the graphs (and unions their session histories). Removing the last
 channel between two halves splits a graph (and copies the history
-into each side). The graph is the unit of session — creatures in the
+into each side). The graph is the unit of session: creatures in the
 same graph see the same `.kohakutr` file. Full:
 [terrarium](multi-agent/terrarium.md).
 
@@ -214,7 +214,7 @@ representing the user. The recipe loader marks it privileged, opens a
 `report_to_root` channel that every other creature is wired to send
 on, makes it listen on every other channel, and mounts it as the
 user-facing surface (TUI / CLI / web). "Root" is a config convention,
-not a separate runtime type — at runtime it is a privileged node with
+not a separate runtime type; at runtime it is a privileged node with
 the standard user-facing wiring. Full:
 [privileged node](multi-agent/privileged-node.md).
 
@@ -228,7 +228,7 @@ members privileged inline (`privileged: true`); engines accept
 `is_privileged=True` at creature-add time. Tool-spawned worker
 creatures (via `group_add_node`) are *not* privileged, so workers
 cannot fork peers without explicit elevation. Privilege is a property
-of the runtime creature handle, not the underlying agent config — the
+of the runtime creature handle, not the underlying agent config; the
 same config can run privileged in one terrarium and unprivileged in
 another. Full: [privileged node](multi-agent/privileged-node.md).
 
@@ -240,7 +240,7 @@ The set of built-in tools (`group_add_node`, `group_remove_node`,
 from inside it. Registered only on
 [privileged nodes](#privileged-node). Together they form the runtime
 "graph editor" an LLM-driven privileged node uses to evolve a team
-mid-run — every change emits an `EngineEvent` so observers and
+mid-run; every change emits an `EngineEvent` so observers and
 runtime prompts stay in sync. Full:
 [builtins reference](../reference/builtins.md).
 
@@ -257,11 +257,11 @@ for removed pieces. Available imperatively
 ## Auto-split / auto-merge
 
 The engine's response to topology changes that affect connectivity.
-When a `connect` crosses two graphs, the engine merges them — unions
-their environments, copies both session stores into a single merged
+When a `connect` crosses two graphs, the engine merges them: it unions
+their environments and copies both session stores into a single merged
 store with `parent_session_ids` tracking lineage. When a `disconnect`
 or a creature / channel removal severs the only path between two
-halves, the engine splits the graph — allocates a fresh environment
+halves, the engine splits the graph: it allocates a fresh environment
 per side, re-injects channel triggers against the new env, and
 duplicates the session store into each side. All bookkeeping is
 automatic; observers see new graph ids appear in `EngineEvent`
@@ -278,7 +278,7 @@ via `kt install`. Referenced in configs and on the CLI with
 ## kt-biome
 
 The official out-of-the-box pack of useful creatures, terrariums, and
-plugins, shipped as a package. Not part of the core framework — it's a
+plugins, shipped as a package. Not part of the core framework; it's a
 showcase + starting point. See
 [github.com/Kohaku-Lab/kt-biome](https://github.com/Kohaku-Lab/kt-biome).
 
@@ -292,7 +292,7 @@ are first-class async Python values. Full:
 
 ## MCP
 
-Model Context Protocol — an external protocol for exposing tools to
+Model Context Protocol, an external protocol for exposing tools to
 LLMs. KohakuTerrarium connects to MCP servers over stdio, streamable HTTP, or legacy HTTP/SSE,
 discovers their tools, and surfaces them to the LLM through meta-tools
 (`mcp_call`, `mcp_list`, …). Full: [mcp guide](../guides/mcp.md).
@@ -327,7 +327,7 @@ config directory, and ideally its own credentials store.
 
 ## Node
 
-A host or a worker — any process speaking the Lab protocol.
+A host or a worker; any process speaking the Lab protocol.
 Addressed by `node_id` (`_host` for the host, the client's
 `--name` for a worker).
 
@@ -356,6 +356,6 @@ The host-side replica of a worker's session file. Populated by the
 
 ## See also
 
-- [Concepts index](README.md) — the full section map.
-- [What is an agent](foundations/what-is-an-agent.md) — the deeper story that introduces most of these words together.
-- [Boundaries](boundaries.md) — when to treat any of the above as optional.
+- [Concepts index](README.md): the full section map.
+- [What is an agent](foundations/what-is-an-agent.md): the deeper story that introduces most of these words together.
+- [Boundaries](boundaries.md): when to treat any of the above as optional.

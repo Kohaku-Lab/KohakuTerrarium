@@ -18,17 +18,17 @@ This is not a coincidence. It is a deliberate property of the
 framework: because everything is Python, agents and their parts can
 be used as values inside *other* parts. A plugin can embed an agent.
 A trigger can embed an agent. A tool can embed an agent. That is how
-a lot of interesting patterns — smart guards, adaptive watchers,
-seamless memory — become a few dozen lines of composition instead of
+a lot of interesting patterns (smart guards, adaptive watchers,
+seamless memory) become a few dozen lines of composition instead of
 new frameworks.
 
 Two docs in this section:
 
-- [Agent as a Python object](agent-as-python-object.md) — the
+- [Agent as a Python object](agent-as-python-object.md): the
   first-class-value story; what "agents are Python" unlocks.
-- [Composition algebra](composition-algebra.md) — the ergonomic API
+- [Composition algebra](composition-algebra.md): the ergonomic API
   for stitching agents into pipelines (`>>`, `&`, `|`, `*`, `.iterate`).
 
 Read the first doc to get the principle. Read the second only if you
-plan to write pipelines of agents in Python — if you are writing
+plan to write pipelines of agents in Python; if you are writing
 creature configs, you can skip it.

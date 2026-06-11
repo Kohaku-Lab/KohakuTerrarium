@@ -1,6 +1,6 @@
 ---
 title: What is an agent
-summary: Build up a creature from a chat bot in four stages — controller, tools, triggers, sub-agents.
+summary: Build up a creature from a chat bot in four stages. Controller, tools, triggers, sub-agents.
 tags:
   - concepts
   - foundations
@@ -12,7 +12,7 @@ tags:
 An agent, in KohakuTerrarium, is a **creature**. To see why a creature
 looks the way it does, it helps to build one up from scratch.
 
-## Stage 0 — Chat bot
+## Stage 0: Chat bot
 
 ```
     +-------+      +-----+      +--------+
@@ -24,7 +24,7 @@ A user types, the model answers, the answer is printed. This is as
 simple as conversational AI gets. It can *say things*. It cannot *do
 things*.
 
-## Stage 1 — Add a tools system
+## Stage 1: Add a tools system
 
 ```
                  +--------------+
@@ -44,7 +44,7 @@ agent in the smolagent or swe-agent sense.
 This is already useful. It is also already limited: the only way to
 make this agent do anything is to *type at it*.
 
-## Stage 2 — Add a trigger system
+## Stage 2: Add a trigger system
 
 ```
                                 +--------------+
@@ -67,7 +67,7 @@ Once you have triggers, you notice that *user input itself is just
 another kind of trigger*. So "input" becomes a specific case of a more
 general wake-up mechanism. Claude Code and OpenClaw sit here.
 
-## Stage 3 — Add sub-agents
+## Stage 3: Add sub-agents
 
 ```
                                 +--------------+
@@ -92,7 +92,7 @@ conversation.
 The fix is to spawn a **sub-agent**: a nested creature that runs with
 its own context, reports back a condensed result, and disappears.
 Importantly, a sub-agent is *also just a tool* from the parent's
-perspective — you call it, it returns something. Modern coding agents
+perspective: you call it, it returns something. Modern coding agents
 all land here.
 
 ## The six-module creature
@@ -105,7 +105,7 @@ Putting it together:
 | **Input** | Tells the controller what to do (one specific kind of trigger). |
 | **Trigger** | Fires the controller when the world demands it. |
 | **Tool** | What the agent uses to do things. |
-| **Sub-agent** | A nested creature — conceptually also a tool. |
+| **Sub-agent** | A nested creature; conceptually also a tool. |
 | **Output** | How the agent talks back to its world. |
 
 A **creature** is the union of those six modules. This is the
@@ -114,7 +114,7 @@ every reference, and every other concept doc is ultimately about.
 
 One clarification worth making up front: when you see the root README
 or guides talk about "five module types" that you can extend, they
-mean the five user-swappable ones — Input, Trigger, Output, Tool,
+mean the five user-swappable ones: Input, Trigger, Output, Tool,
 Sub-agent. The sixth module, the Controller, is the reasoning loop
 the framework provides; you configure it (LLM, skill mode, tool
 format) rather than swap its implementation. Same six modules, one
@@ -135,7 +135,7 @@ The story above is a useful default, not a law. In practice:
 
 ## See also
 
-- [Composing an agent](composing-an-agent.md) — how the six modules
+- [Composing an agent](composing-an-agent.md): how the six modules
   actually wire up at runtime.
-- [Modules](../modules/README.md) — one doc per module, deep.
-- [Boundaries](../boundaries.md) — the abstraction as a default.
+- [Modules](../modules/README.md): one doc per module, deep.
+- [Boundaries](../boundaries.md): the abstraction as a default.

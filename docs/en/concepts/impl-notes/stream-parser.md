@@ -22,8 +22,8 @@ Two choices:
    parallel with the rest of the LLM's output; by the time the LLM
    finishes speaking, some tools are already done.
 
-Option 2 is dramatically more responsive — especially for
-long-streaming turns with multiple tool calls — and it is what the
+Option 2 is dramatically more responsive, especially for
+long-streaming turns with multiple tool calls, and it is what the
 framework does.
 
 ## Options considered
@@ -42,9 +42,9 @@ The output stream from the LLM is fed chunk-by-chunk into a parser
 state machine. The parser tracks three kinds of nested block, using
 the currently configured `tool_format`:
 
-- **Tool calls** — e.g. in bracket (default) `[/bash]@@command=ls\n[bash/]`; in XML `<bash command="ls"></bash>`; in native, the LLM provider's own function-calling envelope.
-- **Sub-agent dispatches** — same format family, using the agent tag.
-- **Framework commands** — `info`, `jobs`, `wait` (and, in the parser's DEFAULT_COMMANDS set, `read_job`). These share the same bracket/XML framing as tool calls. See [modules/tool — formats](../modules/tool.md) and [modules/plugin](../modules/plugin.md) for how the format is configured.
+- **Tool calls**: e.g. in bracket (default) `[/bash]@@command=ls\n[bash/]`; in XML `<bash command="ls"></bash>`; in native, the LLM provider's own function-calling envelope.
+- **Sub-agent dispatches**: same format family, using the agent tag.
+- **Framework commands**: `info`, `jobs`, `wait` (and, in the parser's DEFAULT_COMMANDS set, `read_job`). These share the same bracket/XML framing as tool calls. See the formats section of [modules/tool](../modules/tool.md) and [modules/plugin](../modules/plugin.md) for how the format is configured.
 
 When a block closes, the parser emits an event on its output
 generator. The controller reacts:
@@ -74,16 +74,16 @@ and feeds them back to the LLM for the next turn.
 
 ## Where it lives in the code
 
-- `src/kohakuterrarium/parsing/` — the parser state machine, one
+- `src/kohakuterrarium/parsing/`: the parser state machine, one
   module per tool-format variant (bracket, XML, native).
-- `src/kohakuterrarium/core/controller.py` — consumes parser events.
-- `src/kohakuterrarium/core/executor.py` — wraps tool runs as tasks.
-- `src/kohakuterrarium/core/agent_tools.py` — submit-from-event path
+- `src/kohakuterrarium/core/controller.py`: consumes parser events.
+- `src/kohakuterrarium/core/executor.py`: wraps tool runs as tasks.
+- `src/kohakuterrarium/core/agent_tools.py`: submit-from-event path
   that ties parser output to executor.
 
 ## See also
 
-- [Composing an agent](../foundations/composing-an-agent.md) — the
+- [Composing an agent](../foundations/composing-an-agent.md): the
   turn-level picture that this page zooms into.
-- [Tool](../modules/tool.md) — execution modes (direct / background /
+- [Tool](../modules/tool.md): execution modes (direct / background /
   stateful).

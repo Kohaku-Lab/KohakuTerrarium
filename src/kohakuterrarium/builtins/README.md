@@ -25,26 +25,19 @@ Core general-purpose tools:
 | `send_message`                                 | Send a message to a named channel                                                         |
 | `info`                                         | Load full documentation for a tool or sub-agent on demand                                 |
 | `stop_task`                                    | Cancel a running background tool, sub-agent, or trigger by id                             |
-| `add_timer` / `watch_channel` / `add_schedule` | Setup-able trigger tools (opt-in via `type: trigger`) — see `modules/trigger/callable.py` |
+| `add_timer` / `watch_channel` / `add_schedule` | Setup-able trigger tools (opt-in via `type: trigger`): see `modules/trigger/callable.py` |
 | `search_memory`                                | FTS5 + semantic search over the current session's event log                               |
 | `web_fetch`                                    | Fetch and clean a web page (crawl4ai → trafilatura → jina → naive fallback)               |
 | `web_search`                                   | DuckDuckGo web search (optional dep)                                                      |
 
-Terrarium management tools (registered lazily via `terrarium/tool_registration`,
-intended for a root agent):
-
-| Name                                                      | Description                                         |
-| --------------------------------------------------------- | --------------------------------------------------- |
-| `terrarium_create`                                        | Create and start a new terrarium from a config path |
-| `terrarium_status`                                        | Read status (creatures, channels, running state)    |
-| `terrarium_stop`                                          | Stop a running terrarium                            |
-| `terrarium_send`                                          | Send a message to a channel inside a terrarium      |
-| `terrarium_observe`                                       | Non-destructively observe a channel                 |
-| `terrarium_history`                                       | Read a channel's message history                    |
-| `creature_start` / `creature_stop` / `creature_interrupt` | Lifecycle control for individual creatures          |
+Graph management tools live in `terrarium/tools_group*.py`, not here:
+`send_channel` / `group_send` on every creature, and the privileged-node
+surface (`group_add_node`, `group_remove_node`, `group_start_node`,
+`group_stop_node`, `group_channel`, `group_wire`, `group_status`). The
+old `terrarium_*` / `creature_*` tool stack has been removed.
 
 MCP meta-tools (registered from `mcp/tools.py`): `mcp_list`, `mcp_call`,
-`mcp_connect`, `mcp_disconnect` — see `../mcp/README.md`.
+`mcp_connect`, `mcp_disconnect`; see `../mcp/README.md`.
 
 ## Sub-agents (10)
 
@@ -79,7 +72,7 @@ can be loaded explicitly as custom modules.
 | `inputs/`        | CLI, TUI registry, None input modules                                                             |
 | `outputs/`       | Stdout, TTS output modules                                                                        |
 | `tui/`           | Full-screen Textual terminal UI (session, input, output, widgets)                                 |
-| `cli_rich/`      | Inline rich CLI app (prompt_toolkit + rich) — see `cli_rich/README.md`                            |
+| `cli_rich/`      | Inline rich CLI app (prompt_toolkit + rich): see `cli_rich/README.md`                            |
 | `user_commands/` | Slash commands (`/help`, `/clear`, `/compact`, `/model`, `/plugin`, `/regen`, `/status`, `/exit`) |
 
 ## Catalogs
@@ -120,7 +113,7 @@ class MyTool(BaseTool):
 
 ## See also
 
-- `tools/README.md` — per-file breakdown of tool implementations
-- `cli_rich/README.md` — rich inline CLI architecture
-- `user_commands/README.md` — slash command layer and UI payloads
-- `../modules/tool/` — `BaseTool`, `ToolResult`, `ExecutionMode`
+- `tools/README.md`: per-file breakdown of tool implementations
+- `cli_rich/README.md`: rich inline CLI architecture
+- `user_commands/README.md`: slash command layer and UI payloads
+- `../modules/tool/`: `BaseTool`, `ToolResult`, `ExecutionMode`

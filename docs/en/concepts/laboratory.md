@@ -1,6 +1,6 @@
 ---
 title: Laboratory layer
-summary: How KohakuTerrarium spans multiple machines — the WebSocket-based transport, custom packet system, and the transparency tricks that let Studio and Terrarium treat a remote node as if it were local.
+summary: How KohakuTerrarium spans multiple machines. Covers the WebSocket-based transport, custom packet system, and the transparency tricks that let Studio and Terrarium treat a remote node as if it were local.
 tags:
   - concepts
   - laboratory
@@ -86,7 +86,7 @@ Studio still calls one `TerrariumService` Protocol. Behind the
 Protocol, `MultiNodeTerrariumService` fans out and routes per-creature
 operations to the right node. Studio never imports the Lab.
 
-The host process can also run agents in a "coordination engine" — a
+The host process can also run agents in a "coordination engine": a
 local Terrarium kept for cross-node channel routing and for hosting
 recipe-spawned creatures when no worker is targeted. Workers are
 identical processes (same `Terrarium` class, same adapters, same
@@ -102,14 +102,14 @@ gRPC, raw TCP, or QUIC. Three reasons:
    A single TCP/443 hop carries the entire protocol. No firewall
    rules, no separate signalling channel.
 2. **The browser can speak it.** Studio's web UI and the worker
-   client use the same wire format and the same envelope codec — the
+   client use the same wire format and the same envelope codec, so the
    browser dashboard could itself appear as a Lab client in a future
    release without re-implementing anything.
 3. **It's bidirectional and message-framed.** The L2 envelope sits
    one-to-one inside a WebSocket binary frame; we never have to
    reinvent message boundaries on top of a byte stream.
 
-WebSocket is not load-bearing on the design — the
+WebSocket is not load-bearing on the design: the
 [transport layer](#l1-transport) is a small Protocol that
 `InProcTransport` also implements (used by every test). Swapping in
 QUIC or a Unix socket would mean writing a new `_internal/transport_*.py`.
@@ -139,7 +139,7 @@ msgpack design would force.
 ```
 
 The header is msgpack (small, schema-flexible, fast). The payload is
-arbitrary bytes — the L4 codec decides how to interpret them.
+arbitrary bytes; the L4 codec decides how to interpret them.
 
 See `src/kohakuterrarium/laboratory/_internal/envelope.py` for the
 implementation.
@@ -157,8 +157,8 @@ implementation.
 
 | Kind | Purpose |
 |------|---------|
-| `SEND` | point-to-point delivery (L4 `Channel.send`) — load-balanced across subscribers |
-| `BROADCAST` | pub-sub fan-out (L4 `Topic.publish`) — every subscriber receives a copy |
+| `SEND` | point-to-point delivery (L4 `Channel.send`), load-balanced across subscribers |
+| `BROADCAST` | pub-sub fan-out (L4 `Topic.publish`); every subscriber receives a copy |
 | `APP` | structured application message: `{namespace, type, body}` with optional request/response correlation |
 | `ACK` | acknowledgement for ack-required `SEND` |
 | `HELLO` / `WELCOME` / `HEARTBEAT` | connection lifecycle |
@@ -179,11 +179,11 @@ machine. The `TerrariumService` Protocol
 `add_creature`, `list_creatures`, `chat`, `connect`. Three
 implementations satisfy it:
 
-- `LocalTerrariumService` — calls the in-process Terrarium directly.
-- `RemoteTerrariumService` — packs the arguments into an APP request
+- `LocalTerrariumService`: calls the in-process Terrarium directly.
+- `RemoteTerrariumService`: packs the arguments into an APP request
   on `terrarium.runtime`, sends it, unpacks the response. One
   instance per connected worker.
-- `MultiNodeTerrariumService` — owns a `LocalTerrariumService` plus
+- `MultiNodeTerrariumService`: owns a `LocalTerrariumService` plus
   one `RemoteTerrariumService` per worker, routes per-creature ops by
   a `creature_id → home_node` registry, fans out global ops.
 
@@ -195,7 +195,7 @@ once called `engine.add_creature(...)` now calls
 
 Channels and graph topology are also single-namespace. A creature
 calling `send_channel("ch1", "hello")` on worker-1 should deliver to
-every listener — including listeners on worker-2 — exactly as if both
+every listener (including listeners on worker-2) exactly as if both
 creatures lived in the same process. The Lab achieves this with two
 mechanisms:
 
@@ -214,7 +214,7 @@ mechanisms:
   Output-wire targets that point at creatures on other workers are
   resolved through the broadcast adapter the same way.
 
-After cross-node connect, the two workers' graphs form a *cluster* —
+After cross-node connect, the two workers' graphs form a *cluster*:
 a logical multi-creature graph spread across machines. The host's
 `MultiNodeTerrariumService` uses the cluster set to fold listings
 (`list_creatures` shows the union; `list_channels` deduplicates by
@@ -233,7 +233,7 @@ The most unique design choice in the Lab is how persistence works.
 ### Authoritative writer + read-side mirror
 
 Every running creature has exactly one **authoritative** `SessionStore`
-(a SQLite file via KohakuVault) — on the worker that hosts it. There
+(a SQLite file via KohakuVault) on the worker that hosts it. There
 is exactly one writer per session file. All events the creature
 generates land in that file first.
 
@@ -261,7 +261,7 @@ through ten thousand events doesn't round-trip per page.
 
 - The tee uses a per-session outbound asyncio queue. Events are
   delivered in append order to the host. If the link drops, the
-  pump retries with bounded backoff — events are buffered, not
+  pump retries with bounded backoff; events are buffered, not
   lost.
 - The mirror writer applies meta keys first (so `config_path` /
   `config_snapshot` land before any event), then appends events as
@@ -278,8 +278,8 @@ Two reasons it's mirror-by-event rather than mirror-by-snapshot:
    moment they arrive; no polling, no eventual-consistency
    surprises on the order of seconds.
 2. **Disconnection survival.** If a worker drops mid-conversation,
-   the host still has every event up to the disconnect — Studio
-   keeps responding to history queries — and when the worker
+   the host still has every event up to the disconnect (Studio
+   keeps responding to history queries), and when the worker
    reconnects, the mirror is already current; the tee picks up
    from the next event with no resync RPC.
 
@@ -300,7 +300,7 @@ fan-out to multiple mirrors and rejected it because:
 
 ## Resume: pushing the disk image back
 
-Resume runs the same `engine.adopt_session(path)` it always has —
+Resume runs the same `engine.adopt_session(path)` it always has,
 but in multi-node mode, the path lives on the host and the engine
 lives on a worker. The host bridges that gap:
 
@@ -360,8 +360,8 @@ host: register session in _meta; respond with the synthesized Session handle
 
 ### Multi-creature graph resume (CF-6 cluster)
 
-For a cluster spanning multiple workers — each worker hosts part of
-the cluster's connected component — the user passes a `members`
+For a cluster spanning multiple workers (each worker hosts part of
+the cluster's connected component), the user passes a `members`
 list:
 
 ```http
@@ -403,8 +403,8 @@ still routes correctly.
 
 A recipe (`terrarium.yaml`) describes the topology a graph starts
 with. Everything the user (or a privileged tool) adds AFTER the
-recipe loads — extra channels via `service.add_channel`, extra wires
-via `service.connect`, removals via `disconnect` / `unwire` — lives
+recipe loads (extra channels via `service.add_channel`, extra wires
+via `service.connect`, removals via `disconnect` / `unwire`) lives
 only in the engine's in-memory `GraphTopology`. Without persistence
 it would be lost on every close + resume.
 
@@ -426,7 +426,7 @@ recipe-described topology first, then calls
 `topology_snapshot.replay(engine, sid)` which adds every channel +
 wire from the saved snapshot that isn't already in the graph.
 Because the snapshot is *full* (not a delta log), user removals are
-also reflected — anything the user removed simply isn't in the
+also reflected: anything the user removed simply isn't in the
 snapshot.
 
 Implementation: `src/kohakuterrarium/terrarium/topology_snapshot.py`.
@@ -440,9 +440,9 @@ Tested by `tests/integration/test_runtime_topology_resume.py`.
 | Recipe-spawned multi-creature graph on coordination engine | ✅ uses standard `_resume_terrarium_into_engine` |
 | Cluster of N=2 workers, 1 creature each, cross-node bridged | ✅ tested (journey 32g / CF-6) |
 | Cluster of 3+ workers | ⚠ untested (same mechanism, just more members) |
-| Cluster with multiple creatures per worker | ⚠ untested but should work — each worker's resume rebuilds its own graph independently |
-| Per-creature `on_node` inside a recipe file | ❌ not supported — recipe schema has no node field. Compose manually via individual `add_creature(on_node=…)` + `service.connect` |
-| Resume while a target worker is offline | ❌ returns 404 with the missing worker's name — operator must reconnect first |
+| Cluster with multiple creatures per worker | ⚠ untested but should work; each worker's resume rebuilds its own graph independently |
+| Per-creature `on_node` inside a recipe file | ❌ not supported: recipe schema has no node field. Compose manually via individual `add_creature(on_node=…)` + `service.connect` |
+| Resume while a target worker is offline | ❌ returns 404 with the missing worker's name; operator must reconnect first |
 
 ## Identity: local-first
 
@@ -455,7 +455,7 @@ is **local-first**:
 2. Only on miss does it fall back to whatever the host most recently
    pushed via `studio.identity`.
 3. Codex OAuth tokens (`<KT_CONFIG_DIR>/codex-auth.json`) are the
-   same — local first, host second. **Codex tokens MUST be local**
+   same: local first, host second. **Codex tokens MUST be local**
    because OAuth refresh is process-bound: trying to use the host's
    token from a worker process always re-prompts the user.
 
@@ -467,25 +467,25 @@ In Settings → Providers, the user picks **Manage on:** to choose
 which node's credential store they're editing. Saving a key with a
 worker selected sends the write via Lab APP to that worker's
 `StudioIdentityAdapter`, which persists into the worker's local
-file. Codex login is the same — clicking **Codex login** while a
+file. Codex login is the same: clicking **Codex login** while a
 worker is selected runs the OAuth flow *on that worker*, so the
 browser opens on the worker's machine and the resulting token lives
 on the worker's disk.
 
 ## Files, deployment, and sandboxing
 
-- **`terrarium.files`** — scope-bounded file IO over Lab APP. Five
+- **`terrarium.files`**: scope-bounded file IO over Lab APP. Five
   scopes: `workspace://<creature>`, `memory://<creature>`,
   `package://<name>`, `recipe://<id>`, `config://`. Streamed
   read/write for >512 KB payloads; idempotent atomic commit (target
-  files held open by an adopted SessionStore aren't rewritten — see
+  files held open by an adopted SessionStore aren't rewritten; see
   `_op_write_commit`).
-- **`studio.deploy`** — `push_creature_bundle`: walks a creature
+- **`studio.deploy`**: `push_creature_bundle`: walks a creature
   folder, computes per-file SHA, pushes via `terrarium.files`,
   atomic rename into `recipe://<name>/...`. Re-pushes are
   idempotent via the hash check, so a worker that already has a
   recipe doesn't redownload it.
-- **`terrarium.pty`** — proxy a worker shell session to a host-side
+- **`terrarium.pty`**: proxy a worker shell session to a host-side
   WebSocket. Frontend's terminal panel works against a remote
   creature's working directory unchanged.
 - Path-form `add_creature("./my-creature/")` is REJECTED if the
@@ -516,7 +516,7 @@ fold happens in two places:
 | **Lab / Laboratory** | the `kohakuterrarium.laboratory` package; the network layer. |
 | **Host** | the process running `kt serve --mode lab-host`. Owns Studio + `HostEngine`. May also host agents via a coordination engine. |
 | **Worker** | a process running `kt lab-client`. Hosts creatures, exposes them over Lab adapters. |
-| **Node** | a host or a worker — anyone speaking the Lab protocol. Addressed by `node_id` (`_host` or the client's `--name`). |
+| **Node** | a host or a worker; anyone speaking the Lab protocol. Addressed by `node_id` (`_host` or the client's `--name`). |
 | **Adapter** | a class implementing one or more APP namespaces (e.g. `TerrariumRuntimeAdapter` serves the `terrarium.runtime` namespace). |
 | **`TerrariumService`** | the Protocol Studio calls. Three impls: `Local`, `Remote`, `MultiNode`. |
 | **Cluster** | a set of cross-node-connected graphs. Tracked in `MultiNodeTerrariumService._cluster_links`. One logical session from the user's perspective. |
@@ -525,8 +525,8 @@ fold happens in two places:
 
 ## Further reading
 
-- [Laboratory guide](../guides/laboratory.md) — how to actually run
+- [Laboratory guide](../guides/laboratory.md): how to actually run
   it.
-- [Sessions](../guides/sessions.md) — persistence basics
+- [Sessions](../guides/sessions.md): persistence basics
   (single-node).
-- [Terrarium](./multi-agent/terrarium.md) — the engine the Lab wraps.
+- [Terrarium](./multi-agent/terrarium.md): the engine the Lab wraps.

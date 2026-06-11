@@ -1,5 +1,5 @@
 ---
-title: Deployment — systemd
+title: "Deployment: systemd"
 summary: Install KohakuTerrarium as a systemd service via the bundled `kt service install` command.
 tags:
   - guides
@@ -8,7 +8,7 @@ tags:
   - linux
 ---
 
-# Deployment — systemd
+# systemd deployment
 
 For Linux hosts where Docker is overkill, KohakuTerrarium ships
 ready-to-install systemd units. The `kt service` subcommand renders
@@ -18,7 +18,7 @@ systemd.
 
 ## Prerequisites
 
-- Linux (any distro using systemd ≥ 240 — Ubuntu 20.04+, Debian 11+,
+- Linux (any distro using systemd ≥ 240: Ubuntu 20.04+, Debian 11+,
   Fedora 36+, RHEL 9+ all work).
 - A Python ≥ 3.10 install with the `kohakuterrarium` package and
   the `kt` / `kt-aio` console scripts on `PATH`. Install the wheel
@@ -41,9 +41,9 @@ systemd.
 The same three deployment shapes apply: AIO, host + workers, or
 distributed. Pick one.
 
-### Shape 1 — AIO
+### Shape 1: AIO
 
-One service running `kt-aio` — equivalent to the AIO Docker image:
+One service running `kt-aio`, equivalent to the AIO Docker image:
 
 ```bash
 sudo kt service install --all \
@@ -55,10 +55,10 @@ sudo systemctl status kohakuterrarium-all.service
 
 The installer writes:
 
-- `/etc/systemd/system/kohakuterrarium-all.service` — the unit
-- `/etc/kohakuterrarium/all.env` — `KT_HOST_TOKEN` + `KT_CONFIG_DIR`
+- `/etc/systemd/system/kohakuterrarium-all.service`: the unit
+- `/etc/kohakuterrarium/all.env`: `KT_HOST_TOKEN` + `KT_CONFIG_DIR`
 
-Both are owned by root mode `0600` — the token never appears in
+Both are owned by root mode `0600`, so the token never appears in
 process arguments, only in the protected `EnvironmentFile`.
 
 Curl the health endpoint to confirm:
@@ -67,10 +67,10 @@ Curl the health endpoint to confirm:
 curl http://localhost:8001/healthz
 ```
 
-### Shape 2 — host + N workers on the same box
+### Shape 2: host + N workers on the same box
 
 Install the host unit once, then install one client instance per
-worker. The client unit is an instance template (`@.service`) — one
+worker. The client unit is an instance template (`@.service`): one
 template, many instances.
 
 ```bash
@@ -104,15 +104,15 @@ The installer writes:
 - `/etc/systemd/system/kohakuterrarium-host.service`
 - `/etc/systemd/system/kohakuterrarium-client@.service` (template)
 - `/etc/kohakuterrarium/host.env`
-- `/etc/kohakuterrarium/client.env` — shared (URL + token)
-- `/etc/kohakuterrarium/client.worker-a.env` — per-instance
-- `/etc/kohakuterrarium/client.worker-b.env` — per-instance
+- `/etc/kohakuterrarium/client.env`: shared (URL + token)
+- `/etc/kohakuterrarium/client.worker-a.env`: per-instance
+- `/etc/kohakuterrarium/client.worker-b.env`: per-instance
 
 The shared `client.env` carries `KT_HOST_URL` + `KT_HOST_TOKEN`; the
 per-instance file carries `KT_CLIENT_NAME` and any worker-specific
 overrides.
 
-### Shape 3 — distributed (host on edge VPS, workers elsewhere)
+### Shape 3: distributed (host on edge VPS, workers elsewhere)
 
 Same commands as Shape 2, on different boxes. On the host VPS,
 install only the `--host` unit. On each worker box, install only
@@ -120,10 +120,10 @@ the `--client` instance with `--host-url wss://your-host/lab` and
 the shared token.
 
 Front the host's port `8001` (and `8100` if exposing the Lab WS
-directly) with nginx — see the
+directly) with nginx; see the
 [reverse-proxy guide](deployment-reverse-proxy.md).
 
-## Hardening — what the templates already do
+## Hardening: what the templates already do
 
 The shipped unit templates apply systemd best-practice hardening
 out of the box:
@@ -149,12 +149,12 @@ SystemCallArchitectures=native
 `DynamicUser=yes` allocates a transient UID at start; `StateDirectory`
 becomes the user's writable home (`/var/lib/kohakuterrarium-host`).
 Combined with `ProtectSystem=strict`, the service has no filesystem
-write access beyond its own state directory — even if compromised,
+write access beyond its own state directory; even if compromised,
 it cannot tamper with the rest of the system.
 
 If you need to deviate (e.g., add `ReadWritePaths=` for a
 shared dataset directory), use `sudo systemctl edit
-kohakuterrarium-host.service` — never modify the file the installer
+kohakuterrarium-host.service`; never modify the file the installer
 wrote, since the next `kt service install --host` would overwrite
 your changes.
 
@@ -185,7 +185,7 @@ The `--output cat` flag drops systemd's per-line metadata so the
 KohakuTerrarium logs render as-is. The
 [token-masking filter](../reference/cli.md) redacts any
 `?token=...` query strings and JSON `"token"` keys before they hit
-the journal — so `journalctl` is safe to share when troubleshooting.
+the journal, so `journalctl` is safe to share when troubleshooting.
 
 ## Uninstall
 
@@ -213,12 +213,12 @@ workers keep running.
   time, so a venv on `PATH` for the installer user works too.
 - **`/healthz` 200 but `/readyz` 503 for >30s** → the Lab transport
   did not bind. Check `journalctl -u kohakuterrarium-host -e` for
-  `address already in use` — port `8100` may be taken.
+  `address already in use`; port `8100` may be taken.
 - **Worker instance won't connect** → check the per-instance env
   file: `sudo cat /etc/kohakuterrarium/client.<name>.env`. The
   token and URL must match the host's.
 
-## Locking down the API — `[auth]` via systemd credentials
+## Locking down the API: `[auth]` via systemd credentials
 
 Any host unit becomes a locked-down host by installing the
 auth-secrets drop-in shipped under `packaging/systemd/`:
@@ -242,7 +242,7 @@ sudo systemctl restart kohakuterrarium-host
 sudo -u kohakuterrarium-host kt admin users add operator --role admin
 ```
 
-The drop-in uses systemd's ``LoadCredential=`` directive — secrets
+The drop-in uses systemd's ``LoadCredential=`` directive: secrets
 are read into the unit's runtime credential directory (``%d/...``)
 and exposed via ``KT_AUTH_*_FILE`` env vars.  They never appear in
 ``/proc/<pid>/environ``.
@@ -252,11 +252,11 @@ model + every ``kt admin`` verb.
 
 ## See also
 
-- [Authentication](authentication.md) — the four-layer auth model
+- [Authentication](authentication.md): the four-layer auth model
   + ``kt admin`` operator surface.
-- [Deployment — Docker](deployment-docker.md) — the containerised
+- [Docker deployment](deployment-docker.md): the containerised
   equivalent of these three shapes.
-- [Deployment — reverse proxy](deployment-reverse-proxy.md) — TLS
+- [Reverse-proxy deployment](deployment-reverse-proxy.md): TLS
   termination in front of `8001` / `8100`.
-- [Laboratory](laboratory.md) — what the lab-host / lab-client roles
+- [Laboratory](laboratory.md): what the lab-host / lab-client roles
   do once the units are running.

@@ -1,6 +1,6 @@
 ---
 title: Trigger
-summary: Anything that wakes the controller without explicit user input — timers, context updates, channels, and custom watchers.
+summary: Anything that wakes the controller without explicit user input. Timers, context updates, channels, and custom watchers.
 tags:
   - concepts
   - module
@@ -29,7 +29,7 @@ real agents need to:
 - poll a resource and fire when a condition flips.
 
 You could bolt each of these on as ad-hoc code. The framework says:
-they are all the same thing — event sources — and they deserve one
+they are all the same thing (event sources), and they deserve one
 abstraction.
 
 ## How we define it
@@ -48,10 +48,10 @@ Each task loops over `fire()` and pushes events.
 
 Built-in trigger types:
 
-- **`timer`** — fires every N seconds.
-- **`context`** — fires after debounced context updates.
-- **`channel`** — listens on a named channel; fires on message.
-- **`custom` / `package`** — your own trigger classes loaded from a
+- **`timer`**: fires every N seconds.
+- **`context`**: fires after debounced context updates.
+- **`channel`**: listens on a named channel; fires on message.
+- **`custom` / `package`**: your own trigger classes loaded from a
   module.
 
 A clock-aligned scheduler is also shipped as the universal
@@ -61,7 +61,7 @@ rather than as a config-time `triggers:` type.
 Common `TriggerEvent` types on the receiving side: `user_input`
 (from input modules), `timer`, `channel_message` (from a channel
 trigger), `tool_complete`, `subagent_output`, `creature_output` (a
-turn-end emission from another creature via `output_wiring` —
+turn-end emission from another creature via `output_wiring`;
 framework-emitted, not triggered by a module), and `error`.
 
 `TriggerManager` (`core/trigger_manager.py`) owns the running tasks,
@@ -69,10 +69,10 @@ wires completions into the agent's event callback, and persists
 trigger state to the session store so `kt resume` can re-create them.
 
 Config-time triggers are declared in `config.triggers[]`. Runtime
-triggers can be installed by the agent itself — each universal
+triggers can be installed by the agent itself (each universal
 trigger class (`universal = True` + `setup_*` metadata) is wrapped as
 its own tool (`add_timer`, `watch_channel`, `add_schedule`) that the
-creature lists under `tools: [{ name: add_timer, type: trigger }]` —
+creature lists under `tools: [{ name: add_timer, type: trigger }]`)
 and programmatically via `agent.add_trigger(...)`.
 
 ## What you can therefore do
@@ -82,7 +82,7 @@ and programmatically via `agent.add_trigger(...)`.
 - **Cross-creature wiring.** A `channel` trigger is the mechanism that
   makes channel-based terrarium communication work. For deterministic
   pipeline edges, the framework also emits `creature_output` events at
-  turn-end when a creature declares `output_wiring` — see
+  turn-end when a creature declares `output_wiring`; see
   [terrariums](../multi-agent/terrarium.md).
 - **Context-driven summaries.** A `context` trigger can debounce rapid
   updates, then dispatch a `summarize` sub-agent once the shared state
@@ -99,13 +99,13 @@ and programmatically via `agent.add_trigger(...)`.
 A creature can have zero triggers. It can also have only triggers
 (no input). The framework does not rank these configurations; it just
 supports them all. And because a trigger is itself a Python object,
-you can put an agent inside one — a watcher that *thinks* about
+you can put an agent inside one: a watcher that *thinks* about
 whether to fire rather than following a hand-coded rule. That pattern
 is what makes "agentic ambient behaviour" cheap to build.
 
 ## See also
 
-- [Input](input.md) — the specific-case trigger for user content.
-- [Channel](channel.md) — the trigger type that underpins multi-agent communication.
-- [reference/builtins.md — Triggers](../../reference/builtins.md) — full inventory.
-- [patterns.md — adaptive watcher](../patterns.md) — agent-inside-trigger.
+- [Input](input.md): the specific-case trigger for user content.
+- [Channel](channel.md): the trigger type that underpins multi-agent communication.
+- [Triggers in reference/builtins.md](../../reference/builtins.md): full inventory.
+- [Adaptive watcher in patterns.md](../patterns.md): agent-inside-trigger.

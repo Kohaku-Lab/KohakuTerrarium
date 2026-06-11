@@ -4,11 +4,13 @@ Root package for the KohakuTerrarium agent framework.
 
 ## Top-Level Files
 
-- `__init__.py` — public exports (`Studio`, `Terrarium`, `Creature`, events), version info
-- `__main__.py` — CLI entry point (`python -m kohakuterrarium ...`)
-- `__briefcase__.py` — Briefcase desktop-app bootstrap
-- `packages.py` — Package manager (install / uninstall / edit extension packages)
-- `registry.json` — Bundled curated package registry (used by `kt install`)
+- `__init__.py`: public exports (`Agent`, `Studio`, `Terrarium`, `Creature`,
+  `TurnResult` + turn events, `tool`, `errors`, `validate`), version info
+- `__main__.py`: CLI entry point (`python -m kohakuterrarium ...`)
+- `__briefcase__.py`: Briefcase desktop-app bootstrap
+- `errors.py`: typed exception hierarchy (`KTError` base; imports nothing from the framework)
+- `validate.py`: pre-flight validation (`config` / `llm` / `creature` / `ping`; `kt doctor` wraps it)
+- `registry.json`: Bundled curated package registry (used by `kt install`)
 
 ## Runtime hierarchy
 
@@ -34,10 +36,11 @@ Root package for the KohakuTerrarium agent framework.
 | `studio/`         | Management facade: catalog, identity, active sessions, persistence, attach, editors           |
 | `compose/`        | Agent composition algebra (`>>`, `&`, `\|`, `*`) for Python-side pipelines                   |
 | `mcp/`            | MCP client manager + meta-tools for external MCP servers                                      |
-| `serving/`        | Web/desktop launch helpers and legacy compatibility wrappers                                  |
+| `serving/`        | Web/desktop launch helpers + process-metrics aggregator                                       |
 | `api/`            | FastAPI HTTP + WebSocket adapters over Studio and Terrarium                                   |
 | `cli/`            | `kt` command dispatcher (run / resume / web / model / config / ...)                           |
 | `session/`        | Session persistence via KohakuVault (.kohakutr files) + memory/FTS5/vector search             |
+| `packages/`       | Package install / resolve / marketplace (`packages.ensure()` public façade)                   |
 | `llm/`            | LLM provider abstraction (OpenAI-compatible, Codex OAuth, native Anthropic, presets, profiles) |
 | `parsing/`        | Streaming state machine for LLM output (bracket, XML, native)                                 |
 | `prompt/`         | System prompt aggregation, Jinja2 templating, plugin/skill loading                            |
@@ -51,7 +54,7 @@ Root package for the KohakuTerrarium agent framework.
 api/, cli/, frontend, desktop
           |
           v
-       studio/          serving/ (launch + legacy compatibility)
+       studio/          serving/ (launch glue + process metrics)
           |
           v
       terrarium/
@@ -78,6 +81,6 @@ Key principles:
 
 ## See also
 
-- `docs/en/concepts/studio.md` — Studio management layer.
-- `docs/en/concepts/multi-agent/terrarium.md` — Terrarium runtime model.
-- `docs/en/guides/programmatic-usage.md` — public Python embedding surface.
+- `docs/en/concepts/studio.md`: Studio management layer.
+- `docs/en/concepts/multi-agent/terrarium.md`: Terrarium runtime model.
+- `docs/en/guides/programmatic-usage.md`: public Python embedding surface.

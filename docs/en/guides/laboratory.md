@@ -1,6 +1,6 @@
 ---
 title: Laboratory (multi-node)
-summary: Run KohakuTerrarium across two or more machines — kt lab-host + kt lab-client, per-worker credentials, programmatic usage, multi-node terrariums, and resume.
+summary: Run KohakuTerrarium across two or more machines. Covers kt lab-host + kt lab-client, per-worker credentials, programmatic usage, multi-node terrariums, and resume.
 tags:
   - guides
   - laboratory
@@ -22,7 +22,7 @@ Use lab-host mode when:
 - You want to run creatures on a different machine than the one
   serving the UI (a GPU box, a sandbox VM, a cloud node).
 - You need each creature to have its **own** OAuth login (Codex,
-  ChatGPT subscription) — OAuth is process-bound so it cannot be
+  ChatGPT subscription); OAuth is process-bound so it cannot be
   shared, and the local-first identity model on a worker means each
   worker can hold its own tokens.
 - You want a creature's filesystem actions (workspace files,
@@ -30,7 +30,7 @@ Use lab-host mode when:
   the dashboard.
 
 For everything else (single-user, single-machine), stay on
-`kt serve` / `kt web` / `kt app` — they're simpler.
+`kt serve` / `kt web` / `kt app`; they're simpler.
 
 ## Boot the host
 
@@ -51,17 +51,17 @@ kt serve start --mode lab-host \
 
 Flags:
 
-- `--mode lab-host` — accept worker connections in addition to the
+- `--mode lab-host`: accept worker connections in addition to the
   normal web stack. The host runs **no creatures by default** in
   lab-host mode; every spawn must target a worker (or fall back to
   the recipe-only coordination engine).
-- `--lab-bind host:port` — the WebSocket endpoint workers connect
+- `--lab-bind host:port`: the WebSocket endpoint workers connect
   to. Use a bind address reachable from your workers; for
   production put it behind nginx / Cloudflare with TLS termination.
-- `--lab-token` — shared secret. Every worker presents this in its
+- `--lab-token`: shared secret. Every worker presents this in its
   Hello handshake; mismatched tokens are rejected. **Always set
   this** when binding to a non-loopback address.
-- `--home-dir` — re-homes `KT_CONFIG_DIR`. API keys, OAuth tokens,
+- `--home-dir`: re-homes `KT_CONFIG_DIR`. API keys, OAuth tokens,
   LLM profiles, MCP servers, sessions all live under here. Defaults
   to `~/.kohakuterrarium` when omitted.
 
@@ -83,17 +83,17 @@ kt lab-client \
 
 Flags:
 
-- `--host` — `ws://` for plaintext or `wss://` for TLS. If you're
+- `--host`: `ws://` for plaintext or `wss://` for TLS. If you're
   using Cloudflare or an nginx proxy, this is the public endpoint;
   the Lab protocol traverses WebSocket-aware proxies unchanged.
-- `--token` — must match the host's `--lab-token`.
-- `--name` — the node id the host knows this worker by. Must be
+- `--token`: must match the host's `--lab-token`.
+- `--name`: the node id the host knows this worker by. Must be
   unique among connected workers.
-- `--home-dir` — **per-worker** config home. Give each worker its
+- `--home-dir`: **per-worker** config home. Give each worker its
   own directory so their `api_keys.yaml`, Codex OAuth tokens, and
   session files don't collide. This is the only sound way to use
   Codex from a worker.
-- `--session-dir` — optional override; defaults to
+- `--session-dir`: optional override; defaults to
   `<home-dir>/sessions`.
 
 When the worker connects, the host logs a CONTROL `register_creature`
@@ -104,9 +104,9 @@ trace and the dashboard's site picker gains a new entry.
 `Settings → Providers` has a **Manage on:** dropdown that picks the
 node whose credential store you're editing.
 
-- **Host** — keys + Codex tokens land on the host (the lab-host
+- **Host**: keys + Codex tokens land on the host (the lab-host
   process's `--home-dir`).
-- **A worker name** — keys + Codex login route to that worker via
+- **A worker name**: keys + Codex login route to that worker via
   Lab APP; the worker writes to its OWN `--home-dir/api_keys.yaml`
   and starts its OWN OAuth browser flow.
 
@@ -116,7 +116,7 @@ its OpenAI key in:
 1. `worker-gpu-1`'s `<--home-dir>/api_keys.yaml`
 2. `OPENAI_API_KEY` env on the worker
 3. The host's identity store (via the Lab APP `studio.identity`
-   namespace) — only if (1) and (2) miss.
+   namespace), only if (1) and (2) miss.
 
 For Codex specifically: the OAuth refresh token is process-bound, so
 **Codex must be logged in on the worker that uses it**. Hosts cannot
@@ -138,7 +138,7 @@ POST /api/sessions/active/creature
 }
 ```
 
-(In lab-host mode, `on_node` is required for `start_creature` —
+(In lab-host mode, `on_node` is required for `start_creature`;
 spawning on the host is rejected because the host runs no agents.)
 
 ### From the HTTP API
@@ -185,7 +185,7 @@ async def my_spawn(service: TerrariumService = Depends(get_service)):
 
 In lab-host mode the injected `service` is the running
 `MultiNodeTerrariumService`. **You cannot just call `get_service()`
-at module load** — it's a dependency provider whose result depends
+at module load**; it's a dependency provider whose result depends
 on the API boot path (`api/app.py`'s startup hook calls
 `set_service(...)` only when `--mode lab-host` was passed).
 
@@ -216,7 +216,7 @@ from kohakuterrarium.utils.config_dir import config_dir
 
 
 async def main():
-    # 1. Lab transport — accept worker WebSocket connections.
+    # 1. Lab transport: accept worker WebSocket connections.
     host = HostEngine(
         HostConfig(
             bind_host="0.0.0.0",
@@ -228,7 +228,7 @@ async def main():
     )
     await host.start()
 
-    # 2. Coordination engine — a bare Terrarium that holds cross-node
+    # 2. Coordination engine: a bare Terrarium that holds cross-node
     #    channel objects and (optionally) recipe-spawned creatures.
     #    Workers do the real agent work; this engine never receives
     #    add_creature for worker-bound spawns.
@@ -252,7 +252,7 @@ async def main():
         await asyncio.sleep(0.5)
     print("connected nodes:", list(service.connected_nodes()))
 
-    # 6. Now spawn. ``on_node`` MUST name a connected worker —
+    # 6. Now spawn. ``on_node`` MUST name a connected worker;
     #    spawning on the host is rejected by start_creature in
     #    lab-host mode (the coordination engine is recipe-only).
     info = await service.add_creature(
@@ -274,9 +274,9 @@ asyncio.run(main())
 
 Two ways to make the path resolvable on the worker:
 
-1. **Shared filesystem** — host and worker mount the same network
+1. **Shared filesystem**: host and worker mount the same network
    share; no deployment needed.
-2. **`studio.deploy`** — push the creature folder via Lab. The host
+2. **`studio.deploy`**: push the creature folder via Lab. The host
    walks the local folder, hashes every file, streams the bytes
    to the worker's `config://recipe/` scope, and returns the
    worker-side absolute path:
@@ -294,7 +294,7 @@ info = await service.add_creature(target_path, on_node="worker-gpu-1")
 ```
 
 For inline `AgentConfig` (no folder on disk anywhere), pass the
-config object directly — it crosses the wire as a packed dict:
+config object directly; it crosses the wire as a packed dict:
 
 ```python
 from kohakuterrarium.core.config_types import AgentConfig, InputConfig, OutputConfig
@@ -320,7 +320,7 @@ targeting, so build the topology imperatively:
 alpha = await service.add_creature(alpha_cfg, on_node="worker-1")
 bravo = await service.add_creature(bravo_cfg, on_node="worker-2")
 
-# Connect across nodes — auto-creates the channel on both sides,
+# Connect across nodes: auto-creates the channel on both sides,
 # wires send + listen, cross-subscribes via the broadcast adapter,
 # records the cluster link.
 result = await service.connect(alpha.creature_id, bravo.creature_id)
@@ -329,7 +329,7 @@ print(result.channel, result.delta_kind)  # "alpha_to_bravo", "cross_node"
 
 After `connect`, `alpha` and `bravo` form a **cluster**. From every
 read API (listing, history viewer, runtime graph snapshot, chat WS)
-the cluster looks like one logical session with two creatures —
+the cluster looks like one logical session with two creatures,
 even though each worker still owns its own engine graph + session
 file.
 
@@ -359,7 +359,7 @@ POST /api/sessions/{primary_sid}/resume
 ```
 
 The route auto-discovers `members` from the primary's persisted
-`cluster_members` meta when you omit it — saved at `stop_session`
+`cluster_members` meta when you omit it, saved at `stop_session`
 time so cluster topology survives a complete restart.
 
 > Resume requires every named worker to be connected. If one is
@@ -436,7 +436,7 @@ print(svc._cluster_links)               # set of frozenset((node, gid)) pairs
 ```
 
 If a worker shows up in `connected_nodes()` but its creatures
-aren't visible: check the worker's stderr — most boot-time
+aren't visible: check the worker's stderr; most boot-time
 adapter errors are logged at WARNING level on the worker side and
 won't appear in the host's logs.
 
@@ -461,6 +461,6 @@ won't appear in the host's logs.
 - Python: `kohakuterrarium.terrarium.MultiNodeTerrariumService`
   (lab-host mode), `RemoteTerrariumService` (per-worker handle),
   `kohakuterrarium.laboratory.ClientConnector` (the worker's
-  client object — drive your own embedded worker).
-- Concepts: [Laboratory](../concepts/laboratory.md) — wire format,
+  client object; drive your own embedded worker).
+- Concepts: [Laboratory](../concepts/laboratory.md): wire format,
   session sync, resume semantics, identity model.

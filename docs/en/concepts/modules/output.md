@@ -1,6 +1,6 @@
 ---
 title: Output
-summary: How a creature talks back — the output router that fans text, activity, and structured events to sinks.
+summary: How a creature talks back. The output router that fans text, activity, and structured events to sinks.
 tags:
   - concepts
   - module
@@ -12,9 +12,9 @@ tags:
 ## What it is
 
 The **output** module is how a creature talks back to its world. It
-receives everything the controller emits — text chunks from the LLM,
+receives everything the controller emits (text chunks from the LLM,
 tool start/complete events, activity notifications, token-usage
-updates — and routes each one to the right sink.
+updates) and routes each one to the right sink.
 
 There can be more than one sink. A creature can print to stdout, stream
 to TTS, push to Discord, and log to a file, all at once.
@@ -25,7 +25,7 @@ to TTS, push to Discord, and log to a file, all at once.
 have to answer questions the trivial case does not:
 
 - Where does a streamed LLM chunk go when there are three listeners?
-- What about tool activity — the same stream, or a different one?
+- What about tool activity: the same stream, or a different one?
 - Should user-facing text and log-facing text share a sink?
 - If the creature runs under the web UI, who is subscribing to events?
 
@@ -37,7 +37,7 @@ router that treats every sink as a named output.
 An `OutputModule` is an async consumer with methods like
 `on_text(chunk)`, `on_tool_start(...)`, `on_tool_complete(...)`,
 `on_resume(events)`, `start()`, `stop()`. The `OutputRouter` owns a set
-of them — a default and any number of `named_outputs` — and fans
+of them (a default and any number of `named_outputs`) and fans
 events out.
 
 `controller_direct: true` (the default) means the controller's text
@@ -48,15 +48,15 @@ lets you interpose a processor (rewriter, safety filter, summariser).
 
 Built-in outputs:
 
-- **`stdout`** — plain terminal, prefix/suffix/stream-suffix configurable.
-- **`stdout_prefixed`** — stdout with a per-line prefix, handy for
+- **`stdout`**: plain terminal, prefix/suffix/stream-suffix configurable.
+- **`stdout_prefixed`**: stdout with a per-line prefix, handy for
   tagged side outputs.
-- **`console_tts`** — console-only TTS shim that prints text
+- **`console_tts`**: console-only TTS shim that prints text
   character-by-character for demos and testing.
-- **`dummy_tts`** — silent TTS-shaped output for tests and lifecycle
+- **`dummy_tts`**: silent TTS-shaped output for tests and lifecycle
   wiring.
-- **`tui`** — Textual-based display when the creature runs under a TUI.
-- **(implicit) web streaming output** — used when the creature runs
+- **`tui`**: Textual-based display when the creature runs under a TUI.
+- **(implicit) web streaming output**: used when the creature runs
   inside the HTTP/WebSocket server.
 
 `TTSModule` still exists as a base class for richer custom/package TTS
@@ -69,7 +69,7 @@ events without routing them through the text channel.
 ## What you can therefore do
 
 - **Silent controller, streaming sub-agent.** Mark a sub-agent with
-  `output_to: external` — its text streams to the user while the
+  `output_to: external`: its text streams to the user while the
   parent controller stays internal. The user sees a coherent reply
   that was composed by a specialist.
 - **Per-purpose sinks.** Route user-visible answers to stdout, route
@@ -85,13 +85,13 @@ events without routing them through the text channel.
 
 A creature without output is legitimate: some triggers only cause
 side effects (write a file, send an email). Conversely, outputs are
-full modules — a Python module can decide to run a mini-agent that
+full modules: a Python module can decide to run a mini-agent that
 chooses how to format each chunk. That sounds excessive and mostly
 is, but it is an option.
 
 ## See also
 
-- [Sub-agent](sub-agent.md) — `output_to: external` streams directly through the router.
-- [Controller](controller.md) — what actually feeds the router.
-- [reference/builtins.md — Outputs](../../reference/builtins.md) — built-in list.
-- [guides/custom-modules.md](../../guides/custom-modules.md) — writing your own.
+- [Sub-agent](sub-agent.md): `output_to: external` streams directly through the router.
+- [Controller](controller.md): what actually feeds the router.
+- [Outputs in reference/builtins.md](../../reference/builtins.md): built-in list.
+- [guides/custom-modules.md](../../guides/custom-modules.md): writing your own.

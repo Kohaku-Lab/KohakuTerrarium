@@ -13,11 +13,11 @@ For readers sharing creatures, terrariums, tools, or plugins across projects.
 
 A KohakuTerrarium package is a directory with a `kohaku.yaml` manifest. It can contain creatures, terrariums, custom tools, plugins, triggers, I/O modules, procedural skills, controller commands, user slash commands, prompt fragments, framework-hint overrides, and LLM presets. `kt install` puts it under `~/.kohakuterrarium/packages/<name>/` and the `@<name>/path` syntax references anything inside it.
 
-Concept primer: [boundaries](../concepts/boundaries.md) — packages are how the framework makes "share reusable pieces" cheap.
+Concept primer: [boundaries](../concepts/boundaries.md). Packages are how the framework makes "share reusable pieces" cheap.
 
 ## The official pack: `kt-biome`
 
-The first package most people install is `kt-biome` — the showcase pack containing `swe`, `reviewer`, `researcher`, `ops`, `creative`, `general`, `root` creatures, terrariums like `swe_team` and `deep_research`, and a handful of plugins.
+The first package most people install is `kt-biome`, the showcase pack containing `swe`, `reviewer`, `researcher`, `ops`, `creative`, `general`, `root` creatures, terrariums like `swe_team` and `deep_research`, and a handful of plugins.
 
 ```bash
 kt install @kt-biome
@@ -113,19 +113,23 @@ my-pack/
 
 Python modules resolve by dotted path (`my_pack.tools.my_tool:MyTool`). Configs resolve via `@my-pack/creatures/researcher`.
 
-`python_dependencies` are installed by `kt install` when Python deps are declared.
+`python_dependencies` (plus a `requirements.txt`, if present) are
+installed by `kt install` via `sys.executable -m pip`, i.e. into the
+same environment KohakuTerrarium runs in. Pass `--no-deps` to skip
+them; a failed dependency install raises a `PackageError` instead of
+being downgraded to a warning.
 
 ### Newer manifest slots
 
 Beyond `tools`, `plugins`, and `llm_presets`, packages can now contribute:
 
-- `io:` — package-resolved input/output module classes
-- `triggers:` — package-resolved trigger classes
-- `skills:` — procedural skill bundles (`SKILL.md`) discoverable by creatures
-- `commands:` — controller `##name##` commands
-- `user_commands:` — slash commands the human can type
-- `prompts:` / `templates:` — reusable Jinja include fragments for prompts
-- `framework_hints:` — package-level overrides for the built-in framework-hint prose
+- `io:`: package-resolved input/output module classes
+- `triggers:`: package-resolved trigger classes
+- `skills:`: procedural skill bundles (`SKILL.md`) discoverable by creatures
+- `commands:`: controller `##name##` commands
+- `user_commands:`: slash commands the human can type
+- `prompts:` / `templates:`: reusable Jinja include fragments for prompts
+- `framework_hints:`: package-level overrides for the built-in framework-hint prose
 
 Collision policy is intentionally mixed:
 
@@ -144,7 +148,7 @@ kt install @kt-biome@v1.2.0       # explicit version pin
 kt install @myfork/kt-biome       # name restricted to a specific source
 ```
 
-The `@`-prefix form resolves through the marketplace ([see below](#the-marketplace-and-name-resolution)) to a git URL, then clones into `~/.kohakuterrarium/packages/<name>/` the same way `kt install <git-url>` does. **Editable mode is unsupported for `@` specs** — clone first, then install with `-e`.
+The `@`-prefix form resolves through the marketplace ([see below](#the-marketplace-and-name-resolution)) to a git URL, then clones into `~/.kohakuterrarium/packages/<name>/` the same way `kt install <git-url>` does. **Editable mode is unsupported for `@` specs**: clone first, then install with `-e`.
 
 ### Git URL (clone)
 
@@ -168,7 +172,7 @@ Copies the folder in. Update by re-running `kt install` or editing the copy dire
 kt install ./my-pack -e
 ```
 
-Writes `~/.kohakuterrarium/packages/my-pack.link` pointing at the source directory. Edits in the source are visible immediately — no re-install needed. Great for iterating during development.
+Writes `~/.kohakuterrarium/packages/my-pack.link` pointing at the source directory. Edits in the source are visible immediately, with no re-install needed. Great for iterating during development.
 
 ### Uninstall
 
@@ -183,7 +187,60 @@ kt uninstall my-pack
 - If `my-pack.link` exists: follow the pointer.
 - Else: `~/.kohakuterrarium/packages/my-pack/creatures/researcher/`.
 
-Used by `kt run`, `kt terrarium run`, `kt edit`, `kt update`, `base_config:` inheritance, and programmatic loaders such as `Terrarium.with_creature(...)`, `engine.add_creature(...)`, `Studio.sessions.start_creature(...)`, and lower-level `Agent.from_path(...)`.
+`@pkg/...` references resolve at the config-loading chokepoints, so
+every consumer accepts them uniformly: `kt run`, `kt edit`,
+`kt update`, `base_config:` inheritance, recipes, and the programmatic
+loaders: `Agent.build(...)`, `engine.add_creature(...)`,
+`Terrarium.from_recipe(...)`, `compose.agent(...)`,
+`Studio.sessions.start_creature(...)`. A reference to an uninstalled
+package raises `kt.errors.PackageNotInstalledError` (naming the
+package and the `kt install` hint); a malformed reference (bare `@`,
+path traversal outside the package root) raises
+`kt.errors.PackageRefError`.
+
+## Programmatic API: `kohakuterrarium.packages`
+
+Everything `kt install` / `kt list` do is importable from
+`kohakuterrarium.packages`, a lazy facade, so importing it doesn't
+drag in the marketplace / installer stack until you touch those names.
+
+```python
+from kohakuterrarium import packages
+
+# Idempotent install; the right call at the top of a batch script.
+# Returns the package name; if a package with that name is already
+# installed it returns immediately (no version check, even for pins).
+packages.ensure("@kt-biome")
+
+# Explicit installs (marketplace spec / git URL / local dir):
+packages.install_package_spec("@kt-biome@v1.2.0")
+packages.install_package("https://github.com/you/my-pack.git")
+packages.install_package("./my-pack", editable=True)
+
+packages.update_package("my-pack")        # git pull --ff-only; refuses pins
+packages.uninstall_package("my-pack")
+
+# Resolution and enumeration:
+path = packages.resolve_package_path("@kt-biome/creatures/swe")
+packages.is_package_ref("@kt-biome/creatures/swe")   # True
+packages.packages_dir()                   # honours KT_CONFIG_DIR
+for pkg in packages.list_packages():
+    print(pkg["name"], pkg["version"])
+```
+
+Dependency policy: the install functions take `deps="auto" | "never"`
+(`"auto"` is the default and runs `sys.executable -m pip`; `"never"`
+skips Python deps, the `--no-deps` equivalent). Failures raise typed
+errors from the `PackageError` family (`PackageRefError`,
+`PackageNotInstalledError`, `PackagePathNotFoundError`), re-exported
+from the facade for convenience.
+
+`packages.ensure(spec)` only guarantees *presence*, not version: to
+force a specific version onto an existing install, call
+`install_package_spec("@pkg@vX.Y.Z")`.
+
+The full symbol list (manifest-slot resolvers, package-root lookups)
+is in the [Python API reference](../reference/python.md#packages).
 
 ## The marketplace and `@name` resolution
 
@@ -259,13 +316,13 @@ Opens `config.yaml` in `$EDITOR` (falls back to `$VISUAL`, then `nano`). For edi
 
 ## Publishing
 
-1. Push the repo to git (GitHub, GitLab, self-hosted — anything `git clone` handles).
+1. Push the repo to git (GitHub, GitLab, self-hosted: anything `git clone` handles).
 2. Tag a version: `git tag v0.1.0 && git push --tags`.
 3. Bump `version:` in `kohaku.yaml` for each release.
 4. **Optional but recommended**: list your package on TerrariumMarket so users can install with `kt install @your-package`.  Open a PR adding `entries/<your-package>/entry.yaml` + `entries/<your-package>/README.md` to [Kohaku-Lab/TerrariumMarket](https://github.com/Kohaku-Lab/TerrariumMarket); CI validates the schema + tag existence; a maintainer merges.  See [the contributing guide](https://github.com/Kohaku-Lab/TerrariumMarket/blob/main/CONTRIBUTING.md) for the walkthrough.
 5. Otherwise, just share the URL: `kt install https://your/repo.git`.
 
-Listing on TerrariumMarket is **not required** — packages are still just git repos with a `kohaku.yaml`, and the direct-URL install path is unchanged.  The marketplace is a discovery layer over that, not a replacement.
+Listing on TerrariumMarket is **not required**: packages are still just git repos with a `kohaku.yaml`, and the direct-URL install path is unchanged.  The marketplace is a discovery layer over that, not a replacement.
 
 ### Versioning
 
@@ -318,7 +375,8 @@ This lets a creature inside one package reference extensions declared in another
 
 ## See also
 
-- [Creatures](creatures.md) — packaging a creature.
-- [Custom Modules](custom-modules.md) — writing tools/plugins to ship.
-- [Reference / CLI](../reference/cli.md) — `kt install`, `kt list`, `kt extension`.
-- [`kt-biome`](https://github.com/Kohaku-Lab/kt-biome) — reference package.
+- [Creatures](creatures.md): packaging a creature.
+- [Custom Modules](custom-modules.md): writing tools/plugins to ship.
+- [Reference / CLI](../reference/cli.md): `kt install`, `kt list`, `kt extension`.
+- [Reference / Python API](../reference/python.md#packages): the `kohakuterrarium.packages` facade.
+- [`kt-biome`](https://github.com/Kohaku-Lab/kt-biome): reference package.

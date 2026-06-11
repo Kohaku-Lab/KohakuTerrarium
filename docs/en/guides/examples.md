@@ -1,6 +1,6 @@
 ---
 title: Examples
-summary: Tour of the bundled example creatures, terrariums, and code — what to read first and why.
+summary: Tour of the bundled example creatures, terrariums, and code. What to read first and why.
 tags:
   - guides
   - examples
@@ -12,9 +12,9 @@ For readers looking for runnable code and config to learn from.
 
 The `examples/` tree groups runnable material by kind: standalone agent configs, terrarium configs, plugin implementations, and Python scripts that embed the framework. Each folder illustrates a pattern you can copy or inherit from.
 
-Concept primer: [boundaries](../concepts/boundaries.md) — examples intentionally cover the edges.
+Concept primer: [boundaries](../concepts/boundaries.md). Examples intentionally cover the edges.
 
-## `examples/agent-apps/` — standalone creatures
+## `examples/agent-apps/`: standalone creatures
 
 Single-creature configs. Run with:
 
@@ -34,7 +34,7 @@ kt run examples/agent-apps/<name>
 
 Related guides: [Creatures](creatures.md), [Configuration](configuration.md).
 
-## `examples/terrariums/` — multi-agent configs
+## `examples/terrariums/`: multi-agent configs
 
 ```bash
 kt terrarium run examples/terrariums/<name>
@@ -48,7 +48,7 @@ kt terrarium run examples/terrariums/<name>
 
 Related guide: [Terrariums](terrariums.md).
 
-## `examples/plugins/` — plugin hooks
+## `examples/plugins/`: plugin hooks
 
 One example per hook category. Use these as a reference when writing your own.
 
@@ -65,13 +65,15 @@ One example per hook category. Use these as a reference when writing your own.
 
 Related guide: [Plugins](plugins.md). See `examples/plugins/README.md` for the full field-by-field walk-through.
 
-## `examples/code/` — Python embedding
+## `examples/code/`: Python embedding
 
 Scripts that embed the framework with your code as the orchestrator. Each uses a different slice of the compose algebra or the `Studio` / `Terrarium` / `Creature` / `Agent` API.
 
 | Script | Pattern | Features used |
 |---|---|---|
-| `programmatic_chat.py` | Agent as library | `Agent` lifecycle and output handlers |
+| `programmatic_chat.py` | Agent as library | `Agent.build()`, `run()` → `TurnResult`, `run_stream()` |
+| `custom_tools.py` | Function tools from code | `@kt.tool`, `tools=[...]`, `add_tool`, `SessionReader` |
+| `batch_grading.py` | Batch over work folders | one shared engine, creature per folder, `TurnResult` |
 | `terrarium_solo.py` | Solo creature in an engine | `Terrarium.with_creature()`, `Creature.chat()` |
 | `terrarium_recipe.py` | Terrarium recipe from code | `Terrarium.from_recipe()`, channels, engine events |
 | `terrarium_hotplug.py` | Dynamic topology | `Terrarium.add_creature()`, `connect()`, `disconnect()` |
@@ -87,7 +89,7 @@ Related guides: [Programmatic Usage](programmatic-usage.md), [Composition](compo
 
 ## Reading order for new readers
 
-1. **Run something.** `kt run examples/agent-apps/swe_agent` — feel how a creature works.
+1. **Run something.** `kt run examples/agent-apps/swe_agent` to feel how a creature works.
 2. **Inherit from it.** Copy the folder, tweak `config.yaml`, run again.
 3. **Add a plugin.** Drop `examples/plugins/tool_timer.py` into your creature's `plugins:` list.
 4. **Go Python.** Open `examples/code/programmatic_chat.py` and run it.
@@ -96,6 +98,6 @@ Related guides: [Programmatic Usage](programmatic-usage.md), [Composition](compo
 
 ## See also
 
-- [Getting Started](getting-started.md) — environment setup.
-- [`kt-biome`](https://github.com/Kohaku-Lab/kt-biome) — the showcase package; examples share many of its patterns.
-- [Tutorials](../tutorials/README.md) — guided walk-throughs that pair with these examples.
+- [Getting Started](getting-started.md): environment setup.
+- [`kt-biome`](https://github.com/Kohaku-Lab/kt-biome): the showcase package; examples share many of its patterns.
+- [Tutorials](../tutorials/README.md): guided walk-throughs that pair with these examples.

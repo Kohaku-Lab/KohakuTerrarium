@@ -11,7 +11,7 @@ tags:
 
 For readers who want to tweak an existing creature or wire a new one without reading every field in the reference.
 
-Creature configs are YAML (JSON/TOML also supported). Each top-level key maps to an `AgentConfig` field; sub-blocks like `controller`, `input`, `output` are dataclasses with their own fields. This guide is task-oriented — for the full field list see [reference/configuration](../reference/configuration.md).
+Creature configs are YAML (JSON/TOML also supported). Each top-level key maps to an `AgentConfig` field; sub-blocks like `controller`, `input`, `output` are dataclasses with their own fields. This guide is task-oriented; for the full field list see [reference/configuration](../reference/configuration.md).
 
 Concept primer: [creatures](creatures.md), [composing an agent](../concepts/foundations/composing-an-agent.md).
 
@@ -27,7 +27,7 @@ controller:
   reasoning_effort: high
 ```
 
-You can also pin a **variation** of the preset — built-in presets expose groups like `reasoning`, `speed`, `thinking` (see [reference/builtins — Variation groups](../reference/builtins.md#variation-groups)):
+You can also pin a **variation** of the preset: built-in presets expose groups like `reasoning`, `speed`, `thinking` (see [Variation groups in reference/builtins](../reference/builtins.md#variation-groups)):
 
 ```yaml
 controller:
@@ -41,8 +41,8 @@ Each provider exposes the effort knob on a different path. Set
 `reasoning_effort` for Codex, `extra_body.reasoning.effort` for OpenAI
 direct and OpenRouter, `extra_body.output_config.effort` for Anthropic
 direct, and `extra_body.google.thinking_config.thinking_level` for Gemini
-direct. Variations wire these for you; see [reference/configuration —
-Provider-specific `extra_body` notes](../reference/configuration.md#provider-specific-extra_body-notes)
+direct. Variations wire these for you; see [Provider-specific `extra_body`
+notes in reference/configuration](../reference/configuration.md#provider-specific-extra_body-notes)
 if you are setting them by hand.
 
 Or override at the command line for one run:
@@ -203,13 +203,13 @@ triggers:
     options: { channel: alerts }
   - type: context
     options: { debounce_ms: 200 }
-    prompt: "Context changed — re-plan if needed."
+    prompt: "Context changed; re-plan if needed."
 ```
 
 Built-ins: `timer`, `context`, `channel`, `custom`, `package`. `prompt`
 is injected as the `TriggerEvent.prompt_override` when the trigger fires.
 For a clock-aligned scheduler, expose `SchedulerTrigger` as a setup tool
-instead — see [How do I add a tool?](#how-do-i-add-a-tool) and the
+instead; see [How do I add a tool?](#how-do-i-add-a-tool) and the
 `add_schedule` entry in [reference/builtins](../reference/builtins.md#setup-able-triggers-exposed-as-tools-via-type-trigger).
 
 ## How do I set up compaction?
@@ -260,7 +260,7 @@ output:
 ```
 
 Built-in output types: `stdout`, `stdout_prefixed`, `console_tts`,
-`dummy_tts`, `tui`. There is no plain `tts` type — `console_tts` and
+`dummy_tts`, `tui`. There is no plain `tts` type: `console_tts` and
 `dummy_tts` are the shipped TTS-shaped outputs; richer TTS backends are
 custom/package outputs.
 
@@ -308,12 +308,12 @@ tool_format: xml            # <name arg="value"></name>
 tool_format: native         # provider-native function calling
 ```
 
-See [creatures guide — Tool format](creatures.md) for the concrete shape of each, and [reference/configuration.md — `tool_format`](../reference/configuration.md) for fully custom delimiter configs.
+See the Tool format section of the [creatures guide](creatures.md) for the concrete shape of each, and [`tool_format` in reference/configuration.md](../reference/configuration.md) for fully custom delimiter configs.
 
 ## How do I choose dynamic vs static skill mode?
 
 ```yaml
-skill_mode: dynamic   # default — the `info` framework command loads full docs on demand
+skill_mode: dynamic   # default; the `info` framework command loads full docs on demand
 # or
 skill_mode: static    # full tool docs baked into system prompt
 ```
@@ -370,7 +370,7 @@ sub-agent with `budget_inherit: true`.
 
 When the creature runs inside a terrarium, `output_wiring` turns each
 turn-end into a `creature_output` event that lands directly in another
-creature's queue — bypassing channels entirely:
+creature's queue, bypassing channels entirely:
 
 ```yaml
 output_wiring:
@@ -381,8 +381,8 @@ output_wiring:
 ```
 
 Outside a terrarium, `output_wiring` is a no-op. See the full entry
-shape at [reference/configuration — Output wiring](../reference/configuration.md#output-wiring)
-and [terrariums guide — output wiring](terrariums.md#output-wiring)
+shape at [Output wiring in reference/configuration](../reference/configuration.md#output-wiring)
+and [output wiring in the terrariums guide](terrariums.md#output-wiring)
 for the terrarium-side view.
 
 ## How do I share state across creatures (without a terrarium)?
@@ -422,13 +422,13 @@ kt run path/to/creature --pwd /path/to/project
 
 - **Env var not expanding.** Use `${VAR}` (with braces). `$VAR` is left literal.
 - **Child config "lost" a tool from the parent.** You declared `no_inherit: [tools]`. Remove it to extend instead.
-- **Config loads but tool isn't present.** Shorthand names are resolved against the built-in tool catalog — typos fall through silently. Check `kt info path/to/creature`.
+- **Config loads but tool isn't present.** Shorthand names are resolved against the built-in tool catalog, so typos fall through silently. Check `kt info path/to/creature`.
 - **Provider-native tool didn't appear.** Confirm the backend advertises it through `provider_native_tools`, and that you didn't opt out with `disable_provider_tools`.
 - **Model switching feels ambiguous.** Use the canonical `provider/name` form (`/model codex/gpt-5.5`, `/model openai/gpt-5.4-api`).
 - **Two conflicting settings.** CLI overrides (`--llm`) win over config; config wins over `default_model` from `llm_profiles.yaml`.
 
 ## See also
 
-- [Reference / configuration](../reference/configuration.md) — every field, type, and default.
-- [Creatures](creatures.md) — folder layout and anatomy.
-- [Plugins](plugins.md), [Custom Modules](custom-modules.md), [MCP](mcp.md), [Memory](memory.md) — wiring specific surfaces.
+- [Reference / configuration](../reference/configuration.md): every field, type, and default.
+- [Creatures](creatures.md): folder layout and anatomy.
+- [Plugins](plugins.md), [Custom Modules](custom-modules.md), [MCP](mcp.md), [Memory](memory.md): wiring specific surfaces.

@@ -92,7 +92,9 @@ finally:
 ```
 
 A recipe creates one graph/session containing every creature declared in
-the terrarium config.
+the terrarium config. The session is fully registered: it has a session
+store, appears in `studio.sessions.list()` by name, and is resumable
+later, the same path `start_terrarium` takes.
 
 ### Resume saved session
 
@@ -122,7 +124,8 @@ async with Studio() as studio:
     session = await studio.sessions.start_creature(
         "@kt-biome/creatures/general",
         pwd="/tmp/my-project",
-        llm_override="openai/gpt-4.1-mini",
+        llm="openai/gpt-4.1-mini",     # profile / preset / selector
+        name="scratch-helper",         # display-name override
     )
 
     print(session.session_id)
@@ -132,12 +135,17 @@ async with Studio() as studio:
     await studio.sessions.stop(session.session_id)
 ```
 
+(In a multi-node lab deployment, `start_creature(..., on_node="worker-a")`
+places the creature on a specific worker; the default `"_host"` runs it
+locally.)
+
 Start a multi-creature recipe:
 
 ```python
 session = await studio.sessions.start_terrarium(
     "@kt-biome/terrariums/swe_team",
     pwd="/tmp/my-project",
+    llm="openai/gpt-4.1-mini",
 )
 ```
 
@@ -173,10 +181,14 @@ history = studio.sessions.chat.history(sid, cid)
 branches = studio.sessions.chat.branches(sid, cid)
 ```
 
-Regenerate, edit, and rewind:
+Regenerate, edit, and rewind: the branch-aware keywords
+(`turn_index=`, `user_position=`, `branch_view=`) match what the web
+viewer sends, so a script can target a specific branch of an edited
+conversation:
 
 ```python
 await studio.sessions.chat.regenerate(sid, cid)
+await studio.sessions.chat.regenerate(sid, cid, turn_index=3)
 await studio.sessions.chat.edit_message(sid, cid, msg_idx=4, content="better prompt")
 await studio.sessions.chat.rewind(sid, cid, msg_idx=2)
 ```
@@ -382,6 +394,33 @@ studio.editors.modules.scaffold(workspace, "tools", "my_tool")
 studio.editors.modules.save_doc(workspace, "tools", "my_tool", "# My tool")
 ```
 
+## Errors are typed Python exceptions
+
+Studio is plain Python; it never raises HTTP errors. Failures surface
+as the `kohakuterrarium.errors` hierarchy, so embedding code catches
+real exception types:
+
+```python
+from kohakuterrarium import errors
+
+try:
+    await studio.persistence.resume("no-such-session")
+except errors.NotFoundError as e:
+    print("nothing to resume:", e)
+except errors.KTError as e:
+    print("studio operation failed:", e)
+```
+
+The HTTP layer (`api/`) converts these in one adapter: `NotFoundError`
+→ 404, `ConflictError` → 409, `InvalidRequestError`/`ValueError` → 400,
+other `KTError` → 500. If you build your own transport on Studio, do
+the same mapping at your boundary.
+
+Two Studio instances are independent: session registries live on the
+instance (anchored to its engine), so embedding several studios in one
+process (or one per request in a multi-user server) does not
+cross-contaminate.
+
 ## Studio vs Terrarium
 
 Use `Terrarium` when you only need runtime mechanics:
@@ -419,7 +458,7 @@ operations.
 
 ## See also
 
-- [Programmatic Usage](programmatic-usage.md) — full Python embedding guide.
-- [Terrariums](terrariums.md) — runtime topology and recipes.
-- [Sessions](sessions.md) — saved `.kohakutr` files and resume.
-- [Python API](../reference/python.md) — method reference.
+- [Programmatic Usage](programmatic-usage.md): full Python embedding guide.
+- [Terrariums](terrariums.md): runtime topology and recipes.
+- [Sessions](sessions.md): saved `.kohakutr` files and resume.
+- [Python API](../reference/python.md): method reference.

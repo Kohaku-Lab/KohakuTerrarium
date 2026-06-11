@@ -13,7 +13,7 @@ For readers running KohakuTerrarium's web UI, the desktop app, or a long-lived d
 
 Three commands: `kt web` (foreground web server), `kt app` (desktop window via pywebview), `kt serve` (detached daemon). They share the same FastAPI backend and Vue frontend; they differ in lifecycle and transport.
 
-Concept primer: [agent as a Python object](../concepts/python-native/agent-as-python-object.md) — the serving layer is just another consumer of the core runtime.
+Concept primer: [agent as a Python object](../concepts/python-native/agent-as-python-object.md). The serving layer is just another consumer of the core runtime.
 
 ## Which one do I want?
 
@@ -38,7 +38,7 @@ kt web --log-level DEBUG
 - `--dev` serves API only; run `npm run dev --prefix src/kohakuterrarium-frontend` separately for HMR.
 - Runs until Ctrl+C.
 
-Without a built frontend you'll see a placeholder — build it once from source:
+Without a built frontend you'll see a placeholder; build it once from source:
 
 ```bash
 npm install --prefix src/kohakuterrarium-frontend
@@ -79,7 +79,7 @@ State files:
 ~/.kohakuterrarium/run/web.log    # stdout + stderr
 ```
 
-`kt serve status` reports `stale` if the PID file exists but the process doesn't — remove with `rm ~/.kohakuterrarium/run/web.*` or let `kt serve start` clean it.
+`kt serve status` reports `stale` if the PID file exists but the process doesn't; remove with `rm ~/.kohakuterrarium/run/web.*` or let `kt serve start` clean it.
 
 ### Dev daemon
 
@@ -92,10 +92,10 @@ Frontend HMR hits the daemon API, daemon outlives the terminal, you get both.
 
 ## When to prefer the daemon
 
-- SSH session keeps disconnecting — work in `kt serve start` + reconnect with `ssh -L 8001:localhost:8001`.
+- SSH session keeps disconnecting: work in `kt serve start` + reconnect with `ssh -L 8001:localhost:8001`.
 - Remote machine you don't always want to keep a terminal open on.
 - Long-lived monitoring agent that should never be killed by a lost terminal.
-- Multiple users connecting to the same instance (bind `--host 0.0.0.0`, but use a reverse proxy with auth — the API has no built-in auth).
+- Multiple users connecting to the same instance (bind `--host 0.0.0.0`, but use a reverse proxy with auth; the API has no built-in auth).
 
 ## The API itself
 
@@ -117,7 +117,7 @@ Full endpoint list: [Reference / HTTP API](../reference/http.md).
 
 ## See also
 
-- [Frontend Layout](frontend-layout.md) — what panels and presets are available in the UI.
-- [Reference / HTTP API](../reference/http.md) — REST + WebSocket endpoints.
-- [Reference / CLI](../reference/cli.md) — `kt web`, `kt app`, `kt serve` flags.
-- [ROADMAP](../../ROADMAP.md) — planned daemon-backed workflows.
+- [Frontend Layout](frontend-layout.md): what panels and presets are available in the UI.
+- [Reference / HTTP API](../reference/http.md): REST + WebSocket endpoints.
+- [Reference / CLI](../reference/cli.md): `kt web`, `kt app`, `kt serve` flags.
+- [ROADMAP](../../ROADMAP.md): planned daemon-backed workflows.

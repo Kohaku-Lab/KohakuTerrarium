@@ -1,6 +1,6 @@
 ---
 title: Plugin
-summary: Code that modifies the connections between modules without forking them — prompt plugins and lifecycle plugins.
+summary: Code that modifies the connections between modules without forking them. Prompt plugins and lifecycle plugins.
 tags:
   - concepts
   - module
@@ -19,7 +19,7 @@ There are two flavours, each solving a different problem:
 
 - **Prompt plugins** contribute content to the system prompt when the
   controller builds it.
-- **Lifecycle plugins** hook into runtime events — before/after an LLM
+- **Lifecycle plugins** hook into runtime events: before/after an LLM
   call, before/after tool dispatch/execution, before/after a sub-agent
   spawn, and at lifecycle checkpoints like compaction and interrupts.
 
@@ -28,7 +28,7 @@ any module*.
 
 ## Why it exists
 
-Most useful agent behaviours are not a new tool and not a new LLM —
+Most useful agent behaviours are not a new tool and not a new LLM;
 they are a rule that runs between them. Examples:
 
 - "Before every bash call, check it against a safety policy."
@@ -39,7 +39,7 @@ they are a rule that runs between them. Examples:
   prompt."
 
 Each of these could be done by subclassing a module. That is invasive
-and fragile — you fork, someone upstream ships a change, you rebase.
+and fragile: you fork, someone upstream ships a change, you rebase.
 Plugins let you hook the seams without touching the blocks.
 
 ## How we define it
@@ -80,7 +80,7 @@ A `BasePlugin` subclass with any of these hooks:
   `on_compact_end`.
 
 A `pre_*` hook can raise `PluginBlockError("message")` to abort the
-operation — the message becomes the tool result or a blocked
+operation; the message becomes the tool result or a blocked
 `tool_complete` event. `post_llm_call` rewrites are special: when a
 plugin changes the final assistant text, the runtime emits an
 `assistant_message_edited` activity marker so UIs can show that the text
@@ -107,7 +107,7 @@ Two newer extension points live alongside the hook surface:
 - **Token accounting.** `post_llm_call` counting tokens and writing to
   an external store.
 - **Seamless memory.** `pre_llm_call` running an embedding lookup over
-  past events and prepending relevant context — essentially RAG over
+  past events and prepending relevant context, essentially RAG over
   session history without tool calls.
 - **Smart guard.** A `pre_tool_execute` plugin that runs a small
   *nested agent* to decide whether the action is acceptable. Plugins
@@ -124,7 +124,7 @@ in the loop," the answer is almost always a plugin, not a new module.
 
 ## See also
 
-- [Controller](controller.md) — where the hooks fire.
-- [Prompt aggregation](../impl-notes/prompt-aggregation.md) — how prompt plugins slot in.
-- [Patterns — smart guard, seamless memory](../patterns.md) — agent-inside-plugin.
-- [reference/plugin-hooks.md](../../reference/plugin-hooks.md) — every hook signature.
+- [Controller](controller.md): where the hooks fire.
+- [Prompt aggregation](../impl-notes/prompt-aggregation.md): how prompt plugins slot in.
+- [Smart guard and seamless memory in Patterns](../patterns.md): agent-inside-plugin.
+- [reference/plugin-hooks.md](../../reference/plugin-hooks.md): every hook signature.

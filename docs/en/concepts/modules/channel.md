@@ -17,7 +17,7 @@ listener receives every send. Channels live either in a creature's
 private session or in a [graph](../glossary.md#graph)'s shared
 environment that multiple creatures see.
 
-They are not strictly a "canonical" module of the creature — they
+They are not strictly a "canonical" module of the creature; they
 never appeared in the chat-bot → agent derivation. They are the
 communication substrate that makes tools and triggers actually useful
 across agents.
@@ -29,7 +29,7 @@ other. The lowest-friction way is to say: agent A's tool writes a
 message; agent B has a trigger that fires when a message arrives on
 that name.
 
-That is exactly what a channel is. It is not a new idea — it is a
+That is exactly what a channel is. It is not a new idea; it is a
 *naming convention* plus a small amount of queueing machinery, so that
 "write here, listen there" works without either side knowing about
 the other.
@@ -38,14 +38,14 @@ the other.
 
 A graph channel is broadcast: every listener subscribed to it
 receives every message that any sender writes. There is no
-queue-vs-broadcast choice at the graph layer — all
+queue-vs-broadcast choice at the graph layer; all
 [terrarium](../multi-agent/terrarium.md) channels are broadcast.
 
 Channels live in a `ChannelRegistry`. A creature's private session
 has one registry; a graph's shared environment has another. A
 creature can listen on channels in either.
 
-`ChannelTrigger` binds a channel name to a creature's event stream —
+`ChannelTrigger` binds a channel name to a creature's event stream:
 whenever a message arrives, a `channel_message` event is pushed.
 
 ## How we implement it
@@ -57,7 +57,7 @@ every send to that channel, in the order they arrived.
 `modules/trigger/channel.py` implements the trigger that bridges a
 channel into a creature's event queue. There is also an internal
 queue primitive (`SubAgentChannel`) used inside a single creature
-for sub-agent stdout / parent-controller plumbing — that's a
+for sub-agent stdout / parent-controller plumbing; that's a
 private implementation detail, not a graph channel.
 
 Auto-created channels (the engine adds these without you declaring
@@ -69,7 +69,7 @@ them):
   creature wired to send on it and only root listening.
 
 You can subscribe to the engine event stream non-destructively to
-observe channel messages without competing with consumers — every
+observe channel messages without competing with consumers: every
 send emits a `CHANNEL_MESSAGE` `EngineEvent`. That's how dashboards
 watch traffic without participating in it.
 
@@ -90,15 +90,15 @@ watch traffic without participating in it.
 
 ## Channels vs. output wiring
 
-Channels aren't the only way creatures talk. A sibling mechanism —
-**output wiring** — emits a `creature_output` `TriggerEvent` straight
+Channels aren't the only way creatures talk. A sibling mechanism,
+**output wiring**, emits a `creature_output` `TriggerEvent` straight
 into a target creature's event queue at the end of every turn, with
 no `send_message` call on either side. Which one to use:
 
-- **Channels** — conditional routes (approve vs. revise), group chat,
+- **Channels**: conditional routes (approve vs. revise), group chat,
   status, late / optional traffic, observation. The creature chooses
   whether and where to send.
-- **Output wiring** — deterministic pipeline edges ("the runner's
+- **Output wiring**: deterministic pipeline edges ("the runner's
   output always goes to the analyzer"). Configured declaratively;
   fires automatically at turn-end.
 
@@ -108,7 +108,7 @@ A single terrarium freely mixes both. See
 
 ## Don't be bounded
 
-A standalone creature does not need channels — its tools do not
+A standalone creature does not need channels: its tools do not
 `send_message`, its triggers do not listen. A channel is not a
 first-class module in the derivation; it is a convention that the
 framework happens to provide as a primitive because so many multi-
@@ -121,7 +121,7 @@ fires" mixes layers on purpose. See [boundaries](../boundaries.md).
 
 ## See also
 
-- [Tool](tool.md) — the sending half.
-- [Trigger](trigger.md) — the receiving half.
-- [Multi-agent / terrarium](../multi-agent/terrarium.md) — where channels light up as wiring.
-- [Patterns](../patterns.md) — group chat, dead-letter, observer.
+- [Tool](tool.md): the sending half.
+- [Trigger](trigger.md): the receiving half.
+- [Multi-agent / terrarium](../multi-agent/terrarium.md): where channels light up as wiring.
+- [Patterns](../patterns.md): group chat, dead-letter, observer.

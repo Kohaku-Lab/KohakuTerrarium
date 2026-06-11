@@ -11,7 +11,7 @@ tags:
 
 ## What it is
 
-In KohakuTerrarium, an agent is not a config file — the config file
+In KohakuTerrarium, an agent is not a config file; the config file
 just describes one. The primary public handle is a running `Creature`: an
 async Python object hosted by a `Terrarium` engine. A sub-agent is the same
 agent runtime nested inside a parent creature. `Studio` is the management
@@ -30,7 +30,7 @@ Most agent systems expose two layers:
    produces behaviour.
 
 Behaviour you want to build on top usually has to live in a third
-layer — another process, another container, another plugin system.
+layer: another process, another container, another plugin system.
 That is a lot of hops to do something that could be a function call.
 
 KohakuTerrarium collapses the layers: you can `import
@@ -91,7 +91,7 @@ async with Studio() as studio:
 
 ## What you can therefore do
 
-The real payoff is not "agents are Python" — it is "because agents
+The real payoff is not "agents are Python"; it is "because agents
 are Python, and modules are Python, you can put an agent inside any
 module." Some concrete patterns:
 
@@ -121,7 +121,7 @@ that does not follow a fixed rule.
 A tool that, when called, spawns a fresh agent to do the work. The
 LLM calls the tool the same way it calls any tool, but the tool's
 implementation is an entire sub-system. Useful when the sub-system
-needs to be wholly isolated — different model, different tools,
+needs to be wholly isolated: different model, different tools,
 different prompt.
 
 ### Agent inside an output module (routing receptionist)
@@ -139,7 +139,7 @@ of them are special*. They are straightforward applications of
 
 ## Don't be bounded
 
-You do not have to use Python to build creatures — configs alone are
+You do not have to use Python to build creatures; configs alone are
 enough for most cases. But if a creature config runs into a wall and
 you find yourself wanting "an agent that judges, inside a step that
 the agent is taking," the Python substrate is already there, no new
@@ -147,7 +147,7 @@ plugin system required.
 
 ## See also
 
-- [Composition algebra](composition-algebra.md) — ergonomic operators for Python-side pipelines.
-- [Patterns](../patterns.md) — surprising uses that this unlocks.
-- [guides/programmatic-usage.md](../../guides/programmatic-usage.md) — the task-oriented version of this page.
-- [reference/python.md](../../reference/python.md) — signatures and API index.
+- [Composition algebra](composition-algebra.md): ergonomic operators for Python-side pipelines.
+- [Patterns](../patterns.md): surprising uses that this unlocks.
+- [guides/programmatic-usage.md](../../guides/programmatic-usage.md): the task-oriented version of this page.
+- [reference/python.md](../../reference/python.md): signatures and API index.

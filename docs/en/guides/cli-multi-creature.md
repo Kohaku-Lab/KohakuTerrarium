@@ -1,6 +1,6 @@
 ---
 title: Rich CLI multi-creature
-summary: Working with a multi-creature terrarium in `kt run --mode cli` — roster, focus switching, @name retargeting, slash commands, and the Ctrl+A overlay.
+summary: Working with a multi-creature terrarium in `kt run --mode cli`. Covers the roster, focus switching, @name retargeting, slash commands, and the Ctrl+A overlay.
 tags:
   - guides
   - cli
@@ -10,7 +10,7 @@ tags:
 # Rich CLI multi-creature
 
 `kt run --mode cli` opens the rich inline CLI. With a single-creature
-config nothing changes from 1.4 — you get the bordered input box,
+config nothing changes from 1.4: you get the bordered input box,
 live region, slash commands, prompt-toolkit history. With a
 **multi-creature terrarium**, the CLI surfaces every creature in a
 **roster row** above the input and gives you focus switching,
@@ -39,7 +39,7 @@ Each slot is `<focus-marker><name> <glyph> <activity>`:
 | `✗` | failed | last turn ended with an exception |
 | `■` | stopped | explicitly stopped |
 
-The `▸` arrow marks the **focused** creature — the one your input
+The `▸` arrow marks the **focused** creature, the one your input
 goes to. When a creature you're not focused on has new activity since
 you last viewed it, a `●N` badge appears next to its name.
 
@@ -67,28 +67,28 @@ the ones that need your attention).
 | `Ctrl+A` | Open agent overlay (see below) |
 
 When you switch focus, the rich CLI gives you a **full context
-swap** — you see only the newly-focused creature's history, not an
+swap**: you see only the newly-focused creature's history, not an
 interleaved log of every creature:
 
 - The input prompt prefix changes: `[clawd]> ` → `[physics]> `
 - The live region (in-flight streaming + active tools) swaps to the
   new creature's buffer
-- The **footer** repaints from the new creature's agent — model name,
+- The **footer** repaints from the new creature's agent: model name,
   context-size budget, token totals all reflect what `physics` is
   actually running, not what `clawd` was running
 - **Your in-progress input draft stays with the creature you were
-  targeting** — switch back, your half-written message is still there
+  targeting**: switch back, and your half-written message is still there
 - **The terminal scrollback is wiped and replayed**: every committed
   message, tool result panel, and notice for the new creature is
   re-emitted into scrollback. PgUp / mouse scroll then see only that
-  creature's history. The shared interleaved log is gone — Tab is a
+  creature's history. The shared interleaved log is gone; Tab is a
   true context switch, not a peek.
 
 The redraw is driven by a per-creature commit log captured in memory
 as the conversation runs. Streaming text that hasn't finished yet
 isn't captured (it's still in the live region of the creature that
-produced it), but everything committed to scrollback — user messages,
-finished assistant turns, tool blocks, sub-agent panels — replays
+produced it), but everything committed to scrollback (user messages,
+finished assistant turns, tool blocks, sub-agent panels) replays
 faithfully on each switch.
 
 A natural consequence: long sessions with many creatures means each
@@ -110,7 +110,7 @@ the input with `@<name>`:
 creature is **privileged** (recipe-root or user-spawned top-level).
 
 `@name` messages are recorded in the **recipient's** scrollback log,
-not the sender's — Tab to `physics` later and you'll see your question
+not the sender's: Tab to `physics` later and you'll see your question
 and physics's answer together rather than orphaned. `@all` broadcasts
 are recorded into every creature's log so each one carries the same
 visible context when you switch to it.
@@ -131,7 +131,7 @@ commands new in 1.5:
 | `/channels` | List channels the focused creature participates in |
 | `/scratchpad` | Show the focused creature's scratchpad |
 
-## Ctrl+A — agent overlay
+## Ctrl+A: agent overlay
 
 Press `Ctrl+A` to open a full-list overlay grouped by state:
 
@@ -169,7 +169,7 @@ Press `Ctrl+A` to open a full-list overlay grouped by state:
 
 `Space` on a selected row opens a right-side panel showing the last
 30 seconds of that creature's output. **Typing while peek is open
-routes your message to the peeked creature** — handy for replying to
+routes your message to the peeked creature**, handy for replying to
 an `ask_user` prompt without changing focus.
 
 ## When to use this vs other frontends
@@ -186,6 +186,6 @@ attach from a browser, the web UI is the right tool.
 
 ## See also
 
-- [`kt --help`](../../README.md) — full CLI reference
-- [CLI ↔ UI equivalents](cli-and-ui-equivalents.md) — every `kt` verb's UI surface
-- [Configuration guide](configuration.md) — what a terrarium recipe looks like
+- [`kt --help`](../../README.md): full CLI reference
+- [CLI ↔ UI equivalents](cli-and-ui-equivalents.md): every `kt` verb's UI surface
+- [Configuration guide](configuration.md): what a terrarium recipe looks like

@@ -187,5 +187,5 @@ provide/inject from the route page.
 
 ## See also
 
-- [Serving](serving.md) — opening the dashboard via `kt web` / `kt app` / `kt serve`.
-- [Development / Frontend](../dev/frontend.md) — architecture for contributors.
+- [Serving](serving.md): opening the dashboard via `kt web` / `kt app` / `kt serve`.
+- [Development / Frontend](../dev/frontend.md): architecture for contributors.

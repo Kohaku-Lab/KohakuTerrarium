@@ -1,6 +1,6 @@
 # `kohakuterrarium.laboratory`
 
-The Laboratory layer — cross-node coordination for KohakuTerrarium.
+The Laboratory layer: cross-node coordination for KohakuTerrarium.
 
 Sits between **Studio** (managing framework) and **Terrarium**
 (multi-agent runtime), enabling creatures to live on multiple machines
@@ -56,7 +56,7 @@ from kohakuterrarium.laboratory._internal.transport_inproc import (
 addressing, backpressure, auth, protocol, control) are framework-owned
 and not part of the user contract.
 
-## Quickstart — host + two clients in one process
+## Quickstart: host + two clients in one process
 
 ```python
 import asyncio
@@ -111,9 +111,9 @@ async def main():
 asyncio.run(main())
 ```
 
-## L4 surface — three verb-shapes for app traffic
+## L4 surface: three verb-shapes for app traffic
 
-### `Channel` — point-to-point Send
+### `Channel`: point-to-point Send
 
 One sender, one receiver. When multiple subscribers exist for the same
 channel name, the host load-balances (round-robin); one envelope lands
@@ -131,7 +131,7 @@ async for msg in ch.messages(): # iterator form; auto-subscribes
     ...
 ```
 
-### `Topic` — pub-sub Broadcast
+### `Topic`: pub-sub Broadcast
 
 Multiple senders, multiple subscribers. Every published payload lands
 on every subscriber.
@@ -145,7 +145,7 @@ async for msg in t.messages():
     ...
 ```
 
-### `APP` envelope + extensions — structured application messages
+### `APP` envelope + extensions: structured application messages
 
 For richer application protocols than opaque-byte channels can carry
 (Studio session management, metrics, custom RPC, …), use the
@@ -224,10 +224,10 @@ Built-in CONTROL types (``subscribe``, ``unsubscribe``,
 CONTROL envelopes addressed to a specific node (not the host) are
 forwarded like SEND, so peer-to-peer CONTROL works too.
 
-### `Replicate` — not in 1.5.0
+### `Replicate`: not in 1.5.0
 
-The third verb in the canonical design — **Replicate** (consensus log
-+ universal state system) — is **not in 1.5.0**. It ships with the
+The third verb in the canonical design, **Replicate** (consensus log
++ universal state system), is **not in 1.5.0**. It ships with the
 state system in a later release; see design.md §6.4 and §7.
 
 ## Configuration
@@ -305,7 +305,7 @@ Envelope = `[4-byte big-endian uint32 header_len][msgpack header][raw payload][r
 
 The msgpack header (via `kohakuvault.DataPacker('msgpack')`) carries
 routing metadata + `payload_len` + `sig_len`. Payload and signature
-ride on the wire raw — no base64, no string escaping for binary data.
+ride on the wire raw: no base64, no string escaping for binary data.
 
 Header fields:
 - **Required**: `from`, `to`, `kind`, `stream_id`, `seq`
@@ -313,14 +313,14 @@ Header fields:
 - **Optional**: `request_id`, `in_reply_to` (omitted when unset to
   keep the wire compact)
 
-Envelope kinds (extensible — peers running newer versions may add more
+Envelope kinds (extensible; peers running newer versions may add more
 kinds without breaking older receivers, which log unsupported kinds
 and ignore them):
-- `SEND`, `BROADCAST`, `APP`, `LOG` — L4 verbs
-- `ACK` — ack-required SEND response
-- `HELLO`, `WELCOME` — handshake
-- `HEARTBEAT` — liveness
-- `CONTROL` — framework-internal directives
+- `SEND`, `BROADCAST`, `APP`, `LOG`: L4 verbs
+- `ACK`: ack-required SEND response
+- `HELLO`, `WELCOME`: handshake
+- `HEARTBEAT`: liveness
+- `CONTROL`: framework-internal directives
 
 For APP envelopes the payload is a msgpack-encoded
 `{namespace, type, body}` dict; see the extension section above.
@@ -344,7 +344,7 @@ failure modes. Coverage is ≥ 92% on the laboratory module.
 
 ## What's NOT here yet
 
-- **Replicate verb + state system** — future work.
+- **Replicate verb + state system**: future work.
 - **Additional L4 paradigms** from design.md §8 (Agentic Raft, worker
   pool, sharded actors, hot standby, federation, …).
 

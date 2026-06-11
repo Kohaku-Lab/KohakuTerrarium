@@ -1,5 +1,5 @@
 ---
-title: Deployment — reverse proxy & TLS
+title: "Deployment: reverse proxy & TLS"
 summary: nginx and Cloudflare Tunnel configurations for fronting `kt serve --mode lab-host`.
 tags:
   - guides
@@ -9,7 +9,7 @@ tags:
   - cloudflare
 ---
 
-# Deployment — reverse proxy & TLS
+# Reverse-proxy & TLS deployment
 
 The KohakuTerrarium host binds plaintext HTTP and plaintext
 WebSocket by default. For anything beyond a single trusted LAN, put
@@ -18,9 +18,9 @@ and HTTP/2 multiplexing.
 
 This guide covers two production patterns:
 
-1. **nginx** — the operator owns the TLS certificate (Let's Encrypt
+1. **nginx**: the operator owns the TLS certificate (Let's Encrypt
    via `certbot`).
-2. **Cloudflare Tunnel** — Cloudflare terminates TLS; no public
+2. **Cloudflare Tunnel**: Cloudflare terminates TLS; no public
    port on the origin.
 
 Both are equally valid; the choice is operational.
@@ -32,18 +32,18 @@ Two upstream ports on the host:
 | Port | What it serves | URL paths |
 |---|---|---|
 | `8001` | Studio Web UI + REST + chat WebSockets | `/`, `/api/*`, `/ws/*`, `/healthz`, `/readyz` |
-| `8100` | Lab WebSocket — worker control plane | `/lab` (everything is upgraded to WebSocket) |
+| `8100` | Lab WebSocket: worker control plane | `/lab` (everything is upgraded to WebSocket) |
 
 The Lab connection from each worker is **a single long-lived
 WebSocket**. The proxy must:
 
 - Upgrade `Connection` + `Upgrade` headers (default WebSocket flow).
-- Disable response buffering — Lab frames must reach the worker
+- Disable response buffering: Lab frames must reach the worker
   the instant they arrive.
-- Not enforce a request timeout on the Lab path — connections
+- Not enforce a request timeout on the Lab path: connections
   legitimately live for days.
 
-## Pattern 1 — nginx
+## Pattern 1: nginx
 
 The shipped template at
 `examples/deployment/nginx-host.conf` is a complete starting point;
@@ -92,7 +92,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        # WebSocket upgrade headers — Studio's chat WS uses them.
+        # WebSocket upgrade headers; Studio's chat WS uses them.
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
         # Streaming responses must not be buffered.
@@ -100,7 +100,7 @@ server {
         proxy_read_timeout 1h;
     }
 
-    # Lab — worker control plane.  Single long-lived WS per worker.
+    # Lab: worker control plane.  Single long-lived WS per worker.
     location /lab {
         proxy_pass http://kt_lab;
         proxy_http_version 1.1;
@@ -135,7 +135,7 @@ certbot writes the renewal cron / systemd-timer automatically.
 
 ### Restricting Studio to a VPN
 
-Studio has no built-in authentication — anyone reaching port `8001`
+Studio has no built-in authentication: anyone reaching port `8001`
 sees the UI. The recommended pattern: keep `/` and `/api/*` reachable
 only via WireGuard / Tailscale (or `allow … deny all;` for a fixed
 IP), but expose `/lab` publicly so workers can reach it. Both can
@@ -151,7 +151,7 @@ location / {
 }
 ```
 
-## Pattern 2 — Cloudflare Tunnel
+## Pattern 2: Cloudflare Tunnel
 
 Cloudflare Tunnel exposes a service without opening a public port
 on the origin. The `cloudflared` daemon dials out to Cloudflare's
@@ -161,7 +161,7 @@ edge and answers requests over that pre-established tunnel.
 # 1. Authenticate
 cloudflared tunnel login
 cloudflared tunnel create kt-host
-# 2. DNS — point a hostname at the tunnel
+# 2. DNS: point a hostname at the tunnel
 cloudflared tunnel route dns kt-host kt.example.com
 ```
 
@@ -206,7 +206,7 @@ From outside the network:
 # Studio UI + /readyz over TLS
 curl -fsS https://kt.example.com/readyz
 
-# Worker WS — should accept the upgrade
+# Worker WS; should accept the upgrade
 curl -fsS -I -H "Connection: Upgrade" -H "Upgrade: websocket" \
      -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: $(openssl rand -base64 16)" \
      https://kt.example.com/lab
@@ -215,22 +215,22 @@ curl -fsS -I -H "Connection: Upgrade" -H "Upgrade: websocket" \
 
 ## Hardening checklist
 
-- [x] HTTPS only — the HTTP listener `301`s to HTTPS.
+- [x] HTTPS only; the HTTP listener `301`s to HTTPS.
 - [x] TLS 1.2+ (1.3 preferred); old ciphers disabled.
 - [x] HSTS (`Strict-Transport-Security`) once you are confident no
-      mixed-content callers remain — bake it into the certbot
+      mixed-content callers remain; bake it into the certbot
       `--hsts` flag.
 - [x] Studio (port `8001` paths `/` and `/api/*`) restricted to a
       trusted network OR fronted by an auth proxy.
-- [x] Lab path (`/lab`) reachable from worker boxes only — if all
+- [x] Lab path (`/lab`) reachable from worker boxes only; if all
       workers are behind a NAT, restrict by source IP.
 - [x] Cloudflare: enable "Bot Fight Mode" off on the Lab path (the
       WS handshake from a Python client trips heuristics).
 
 ## See also
 
-- [Deployment — Docker](deployment-docker.md) — what runs behind the
+- [Docker deployment](deployment-docker.md): what runs behind the
   proxy.
-- [Deployment — systemd](deployment-systemd.md) — the native install
+- [systemd deployment](deployment-systemd.md): the native install
   alternative.
-- [Laboratory](laboratory.md) — what the Lab WebSocket carries.
+- [Laboratory](laboratory.md): what the Lab WebSocket carries.

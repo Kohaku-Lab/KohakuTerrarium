@@ -1,7 +1,7 @@
 # Multi-chat groups
 
 KohakuTerrarium's chat panel can be split into multiple side-by-side
-tab groups, VSCode-style. Each *group* is a full chat surface — its
+tab groups, VSCode-style. Each *group* is a full chat surface: its
 own tab strip, active tab, transcript, and composer. Drag a tab to
 move it between groups; drag a tab to the edge of a group to split.
 
@@ -15,7 +15,7 @@ to watch (or talk to) more than one at a time:
 - Drive a `coordinator` while the `searcher` and `analyst` workers
   stream their progress in separate panels.
 
-Multi-chat groups are **always available** — there is no flag, no
+Multi-chat groups are **always available**: there is no flag, no
 opt-in, no toggle. Users who never drag a tab see exactly one group
 with one tab strip (visually identical to before this feature), but
 the gestures below are live the whole time. Drag a tab to split.
@@ -64,7 +64,7 @@ composer (browser default).
 ## Persistence
 
 The chat-internal split tree is per-scope (one creature / terrarium
-instance) and per-machine — it lives in `localStorage` under
+instance) and per-machine; it lives in `localStorage` under
 `kt.chat.groupTree.<scope>` with a `version: 1` envelope. Resuming
 the same session on a different machine starts with the default
 single-group layout. The conversation history itself is still
@@ -74,10 +74,10 @@ display layout.
 ## Limitations / not supported
 
 - **One WebSocket per scope.** Multiple groups onto the same
-  creature share the same stream — splits are purely a display
+  creature share the same stream; splits are purely a display
   projection, never a wire-level fork.
 - **Branch view is per-tab, not per-group.** If two groups show the
-  same tab, both follow the same branch — same model as VSCode
+  same tab, both follow the same branch, the same model as VSCode
   "same file in two editor groups". Per-group branch override is
   out of scope for now.
 - **Mobile / compact density** keeps the single-group layout. The

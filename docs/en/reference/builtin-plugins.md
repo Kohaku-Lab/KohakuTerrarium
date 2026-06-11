@@ -1,6 +1,6 @@
 ---
 title: Built-in plugins
-summary: Reference for the four runtime plugins shipped with the framework — sandbox, budget, permgate, compact.auto.
+summary: Reference for the four runtime plugins shipped with the framework. Sandbox, budget, permgate, compact.auto.
 tags:
   - reference
   - plugins
@@ -10,13 +10,13 @@ tags:
 # Built-in plugins
 
 Four runtime plugins ship with KohakuTerrarium. None of them are
-privileged in the framework — they use the same hooks user plugins
+privileged in the framework; they use the same hooks user plugins
 do. They are auto-discovered at agent start; configs activate them
 under `plugins:` like any other plugin.
 
 For the framework / plugin boundary lesson and a worked walkthrough
 of the sandbox plugin, see
-[guides/plugins — Worked example](../guides/plugins.md#worked-example-why-sandbox-is-a-plugin-not-a-framework-feature).
+[the worked example in guides/plugins](../guides/plugins.md#worked-example-why-sandbox-is-a-plugin-not-a-framework-feature).
 
 | Name | Priority | Hooks | Implements |
 |---|---|---|---|
@@ -64,24 +64,24 @@ presets: `src/kohakuterrarium/modules/sandbox/profile.py`.
 
 ### Behaviour
 
-- **Path scopes** — `default` allows under `cwd`; `workspace` allows
+- **Path scopes**: `default` allows under `cwd`; `workspace` allows
   under `cwd` and rejects parent traversal; `broad` allows anywhere
   except `fs_deny`; `deny` blocks all paths.
-- **Network gating** — when `network=allow` and `network_allowlist`
+- **Network gating**: when `network=allow` and `network_allowlist`
   is set, only listed hosts pass the check; otherwise all hosts pass.
   When `network=deny`, all network tool calls (`web_fetch`,
   `web_search`) raise `PluginBlockError`.
-- **Subprocess gating** — the plugin publishes a `subprocess_runner`
+- **Subprocess gating**: the plugin publishes a `subprocess_runner`
   service via `runtime_services()`. Tools that need to spawn
   subprocesses (`bash`, etc.) consume it from
   `ToolContext.runtime_services`. The runner checks syscall level
   (`pure` blocks all spawns, `fs` blocks network calls, `shell`
   allows everything) and the network allowlist before delegating to
   `asyncio.create_subprocess_exec`.
-- **`backend=audit`** — violations are logged via the agent logger
+- **`backend=audit`**: violations are logged via the agent logger
   rather than raised. Useful for first-pass discovery on a new
   workload.
-- **Hot reconfigure** — calling the plugin's `refresh_options()`
+- **Hot reconfigure**: calling the plugin's `refresh_options()`
   rebuilds the internal capability struct; subsequent
   `pre_tool_execute` calls see the new policy without restart.
 
@@ -169,7 +169,7 @@ Implementation: `src/kohakuterrarium/builtins/plugins/compact/auto.py`.
 After every LLM call, `post_llm_call` checks token usage against the
 configured threshold. If exceeded, it calls
 `context.compact_manager.trigger_compact()` which schedules
-compaction asynchronously — the controller keeps running while the
+compaction asynchronously: the controller keeps running while the
 summariser works, and the swap happens atomically between turns.
 See [non-blocking compaction](../concepts/impl-notes/non-blocking-compaction.md).
 
@@ -243,7 +243,7 @@ plugins:
 
 ## See also
 
-- [guides/plugins](../guides/plugins.md) — how to write your own.
-- [reference/plugin-hooks](plugin-hooks.md) — every hook signature.
-- [concepts/modules/plugin](../concepts/modules/plugin.md) — design
+- [guides/plugins](../guides/plugins.md): how to write your own.
+- [reference/plugin-hooks](plugin-hooks.md): every hook signature.
+- [concepts/modules/plugin](../concepts/modules/plugin.md): design
   rationale.

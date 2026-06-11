@@ -1,6 +1,6 @@
 ---
 title: Internals
-summary: How the runtime fits together — event queue, controller loop, executor, subagent manager, plugin wrap.
+summary: How the runtime fits together. Covers the event queue, controller loop, executor, subagent manager, and plugin wrap.
 tags:
   - dev
   - internals
@@ -15,10 +15,10 @@ doc. Concept docs under `../concepts/` explain *why*; this explains
 
 Sixteen flows are documented below. They are grouped as:
 
-1. **Agent runtime** — lifecycle, controller loop, tool pipeline,
+1. **Agent runtime**: lifecycle, controller loop, tool pipeline,
    sub-agents, triggers, prompt aggregation, plugins.
-2. **Persistence & memory** — session persistence, compaction.
-3. **Terrarium, Studio & adapters** — graph runtime, channels, environment
+2. **Persistence & memory**: session persistence, compaction.
+3. **Terrarium, Studio & adapters**: graph runtime, channels, environment
    vs session, Studio management facade, API/CLI adapters, compose algebra, package system, MCP.
 
 A final [Cross-cutting invariants](#cross-cutting-invariants) section
@@ -31,32 +31,41 @@ collects the rules that apply system-wide.
 ### 1.1 Agent lifecycle (standalone creature)
 
 The CLI entry is `cli/run.py:run_agent_cli()`. It validates the config
-path, picks an I/O mode (`cli` / `plain` / TUI), optionally builds a
-`SessionStore`, then calls `Agent.from_path(config_path, …)` and
-dispatches to `_run_agent_rich_cli()` or `agent.run()`.
+path, picks an I/O mode (`cli` / TUI), then drives everything through
+the Terrarium engine: `Terrarium(pwd=…)` plus `engine.add_creature(…)`
+(or `engine.apply_recipe(…)` for a recipe), handing the engine to
+`run_engine_with_rich_cli()` / `run_engine_with_tui()`. Programmatic
+embedders construct the agent directly with `await Agent.build(…)`.
 
-`Agent.__init__` (`src/kohakuterrarium/core/agent.py:146`) runs
+`Agent.__init__` (`src/kohakuterrarium/core/agent.py`) runs
 bootstrap in a fixed order: `_init_llm`, `_init_registry`,
 `_init_executor`, `_init_subagents`, `_init_output`, `_init_controller`,
 `_init_input`, `_init_user_commands`, `_init_triggers`. The mixin
 layout is `AgentInitMixin` (`bootstrap/agent_init.py`) + `AgentHandlersMixin`
-(`core/agent_handlers.py`) + `AgentToolsMixin` (`core/agent_tools.py`).
+(`core/agent_handlers.py`) + `AgentToolsMixin` (`core/agent_tools.py`),
+plus the post-2.0 mixins: `AgentConstructMixin` (`Agent.build` /
+`Agent.from_path`), `AgentTurnMixin` (typed `run` / `run_stream`),
+`AgentExtensionsMixin`, `AgentMessagesMixin`, `AgentModelMixin`,
+`AgentCompactMixin`, `AgentLifecycleMixin`.
 
 Registry init now has three distinct phases: wire creature-declared tools,
 drop any provider-native tools unsupported by the active provider, then
 auto-inject the provider-native tools advertised by that provider unless the
 creature opted them out.
 
-`await agent.start()` (`core/agent.py:186`) starts input and output
+`await agent.start()` (`core/agent.py`) starts input and output
 modules, wires TUI callbacks if any, starts the trigger manager, wires
 completion callbacks, initializes MCP (connects servers and injects
 tool descriptions into the prompt), initializes `CompactManager`,
 loads plugins, publishes session info, and starts the termination
 checker.
 
-`await agent.run()` (`core/agent.py:684`) replays session events if
-resuming, restores triggers, fires the startup trigger, then loops:
-`event = await input.get_input()` → `_process_event(event)`. `stop()`
+`await agent.run_forever()` (`core/agent.py`) is the autonomous main
+loop: it replays session events if resuming, restores triggers, fires
+the startup trigger, then loops: `event = await input.get_input()` →
+`_process_event(event)`. (`agent.run(content)` is NOT the loop anymore;
+it is the typed single-turn driver returning a `TurnResult`;
+`run_stream` is its streaming sibling.) `stop()`
 tears everything down in reverse order. The agent owns: `llm`,
 `registry`, `executor`, `session`, `environment`, `subagent_manager`,
 `output_router`, `controller`, `input`, `trigger_manager`,
@@ -95,7 +104,7 @@ and the [stream-parser impl-note](../concepts/impl-notes/stream-parser.md).
 ### 1.3 Tool execution pipeline
 
 The stream parser (`parsing/`) emits events when it detects a tool
-block in the configured `tool_format` — bracket (default:
+block in the configured `tool_format`: bracket (default:
 `[/bash]@@command=ls\n[bash/]`), XML (`<bash command="ls"></bash>`),
 or native (the LLM provider's own function-calling envelope). Each
 detected tool becomes an executor task via
@@ -108,16 +117,16 @@ store, and the agent name.
 
 Three modes:
 
-- **Direct** — awaited in the same turn. Results batch into the next
+- **Direct**: awaited in the same turn. Results batch into the next
   controller feedback event.
-- **Background** — `run_in_background=true` in the tool's result. The
+- **Background**: `run_in_background=true` in the tool's result. The
   task keeps running; completion emits a future `tool_complete` event.
-- **Stateful** — sub-agents and similar long-running handles. Results
+- **Stateful**: sub-agents and similar long-running handles. Results
   are stored in `jobs` and retrieved with the `wait` framework command.
 
 Invariants (enforced in `agent_handlers.py` and `executor.py`):
 
-- Tools start the moment their block parses — not queued until the LLM
+- Tools start the moment their block parses, not queued until the LLM
   stops talking.
 - Multiple tools in one turn run in parallel (`asyncio.gather`).
 - Tools marked `is_concurrency_safe = False` are serialized behind one
@@ -191,7 +200,7 @@ system prompt in this order:
 7. Named-output model (how to write to `discord`, `tts`, etc.).
 
 Parts are joined with double newlines. `system.md` must never contain
-the tool list, tool call syntax, or full tool docs — those are
+the tool list, tool call syntax, or full tool docs; those are
 auto-aggregated or loaded on demand via the `info` framework command.
 
 See [impl-notes/prompt-aggregation.md](../concepts/impl-notes/prompt-aggregation.md).
@@ -262,7 +271,7 @@ See [impl-notes/session-persistence.md](../concepts/impl-notes/session-persisten
 event, spawns a background task that runs the summarizer LLM
 (main LLM or the separate `compact_model` if configured), and
 atomically splices the summary into the conversation *between* turns.
-The live zone — last `keep_recent_turns` turns — is never summarized.
+The live zone (the last `keep_recent_turns` turns) is never summarized.
 
 The atomic-splice design means the controller never sees messages
 vanish mid-turn. See
@@ -275,18 +284,18 @@ for the full reasoning.
 
 ### 3.1 Terrarium engine
 
-`terrarium/engine.py:Terrarium` is the runtime engine — one per
+`terrarium/engine.py:Terrarium` is the runtime engine, one per
 process, hosting every creature. The engine owns:
 
-- `_topology: TopologyState` — pure-data graph model
+- `_topology: TopologyState`: pure-data graph model
   (`terrarium/topology.py`) tracking which creatures share which
   graphs, which channels exist, who listens / sends.
-- `_creatures: dict[str, Creature]` — live wrappers
+- `_creatures: dict[str, Creature]`: live wrappers
   (`terrarium/creature_host.py`).
-- `_environments: dict[str, Environment]` — one per graph; holds
+- `_environments: dict[str, Environment]`: one per graph; holds
   `shared_channels`.
-- `_session_stores: dict[str, SessionStore]` — one per attached graph.
-- `_subscribers: list[_Subscriber]` — `EngineEvent` pub-sub.
+- `_session_stores: dict[str, SessionStore]`: one per attached graph.
+- `_subscribers: list[_Subscriber]`: `EngineEvent` pub-sub.
 
 A standalone agent is a 1-creature graph; a recipe is a connected
 graph with channels. `Terrarium.with_creature(config)` is the solo
@@ -326,11 +335,10 @@ start / end, and errors. `Terrarium.subscribe(filter)` returns an
 async iterator over events matching `EventFilter`. Each subscriber
 gets its own queue; cancelling the iterator de-registers.
 
-The legacy `terrarium/runtime.py:TerrariumRuntime` and
-`serving/manager.py:KohakuManager` are still on disk for compatibility and
-legacy CLI/embedding paths. The v1.3 HTTP route path uses
-`api/deps.py:get_engine()` and the Studio route/session modules; there is no
-new `KohakuManager` route dependency.
+The legacy `TerrariumRuntime` and `KohakuManager` stacks have been
+removed; the engine and the `group_*` tool surface are the only
+paths. The HTTP route path uses `api/deps.py:get_engine()` and the
+Studio route/session modules.
 
 See [concepts/multi-agent/terrarium.md](../concepts/multi-agent/terrarium.md)
 and [concepts/multi-agent/privileged-node.md](../concepts/multi-agent/privileged-node.md).
@@ -339,14 +347,14 @@ and [concepts/multi-agent/privileged-node.md](../concepts/multi-agent/privileged
 
 `core/channel.py` defines two primitives:
 
-- `SubAgentChannel` — queue-backed, one consumer per message, FIFO.
+- `SubAgentChannel`: queue-backed, one consumer per message, FIFO.
   Supports `send` / `receive` / `try_receive`.
-- `AgentChannel` — broadcast. Each subscriber holds its own queue via
+- `AgentChannel`: broadcast. Each subscriber holds its own queue via
   `ChannelSubscription`. Late subscribers miss old messages.
 
 Channels live in a `ChannelRegistry` under `environment.shared_channels`
 (terrarium-wide) or `session.channels` (per-creature private). Auto-
-created channels: per-creature queues and `report_to_root`.
+created channels: one broadcast channel per creature and `report_to_root`.
 `ChannelTrigger` binds a channel to an agent's event stream, turning
 incoming messages into `channel_message` events.
 
@@ -362,7 +370,7 @@ See [concepts/modules/channel.md](../concepts/modules/channel.md).
 
 One session per agent instance. In terrariums, environment is shared
 across all creatures; sessions are private. Creatures never touch
-each other's sessions — shared state goes strictly through
+each other's sessions; shared state goes strictly through
 `environment.shared_channels`.
 
 See [concepts/modules/session-and-environment.md](../concepts/modules/session-and-environment.md).
@@ -378,9 +386,10 @@ those policies to Studio namespaces rather than duplicating them.
 route handlers that need runtime graph access. Session chat/control routes use
 Studio session modules and engine-backed `Creature.chat()` semantics.
 
-`serving/` remains for `web.py` launch helpers and compatibility wrappers such
-as `AgentSession` / `KohakuManager`; new route handlers should not build on
-those wrappers.
+`serving/` remains for `web.py` launch helpers (plus `process_metrics.py`
+and legacy event dataclasses); the old `AgentSession` / `KohakuManager`
+wrappers have been deleted; use `Creature.chat()`, `Agent.build`, or
+Studio session modules instead.
 
 ### 3.5 Compose algebra internals
 
@@ -397,15 +406,14 @@ Plain callables are auto-wrapped in `Pure`. `agent()` constructs a
 persistent `AgentRunnable` (shares conversation across calls);
 `factory()` constructs an `AgentFactory` that creates a fresh agent
 per call. `iterate(async_iter)` loops over an async source and awaits
-the full pipeline for each element. `effects.Effects()` records
-side-effects attached to a pipeline (`pipeline.effects.get_all()`).
+the full pipeline for each element.
 
 See [concepts/python-native/composition-algebra.md](../concepts/python-native/composition-algebra.md).
 
 ### 3.6 Package / extension system
 
 Install: `packages.py:install_package(source, editable=False)`. Three
-modes — git clone, local copy, or `.link` pointer for editable.
+modes: git clone, local copy, or `.link` pointer for editable.
 Landing dir: `~/.kohakuterrarium/packages/<name>/`.
 
 Resolution: `resolve_package_path("@<pkg>/<sub>")` follows `.link`
@@ -419,10 +427,10 @@ A `kohaku.yaml` manifest declares the package's `creatures`,
 
 Terminology:
 
-- **Extension** — a Python module contributed by a package
+- **Extension**: a Python module contributed by a package
   (tool / plugin / LLM preset).
-- **Plugin** — a lifecycle-hook implementation.
-- **Package** — the installable unit that may contain any of the
+- **Plugin**: a lifecycle-hook implementation.
+- **Package**: the installable unit that may contain any of the
   above plus configs.
 
 ### 3.7 MCP integration

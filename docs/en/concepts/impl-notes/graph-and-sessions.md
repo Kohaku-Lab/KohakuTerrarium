@@ -15,8 +15,8 @@ tags:
 A multi-creature terrarium is a graph that can change at runtime.
 Three properties have to hold simultaneously:
 
-1. **Reactive topology.** The runtime mental model — what shares an
-   environment, what shares a session — has to follow connectivity
+1. **Reactive topology.** The runtime mental model (what shares an
+   environment, what shares a session) has to follow connectivity
    automatically. If the user removes the last channel between two
    halves, those halves should become independent without operator
    intervention.
@@ -49,7 +49,7 @@ freeze the topology at start) breaks one of those three.
 - **Apply, then normalise.** Mutate the topology. After every change,
   recompute components only inside the affected graph and emit a
   `TopologyDelta` describing what happened. The engine reacts to the
-  delta — re-allocate environments, copy session stores, repoint
+  delta: re-allocate environments, copy session stores, repoint
   creatures, re-inject triggers, emit events. What we do.
 
 ## What we actually do
@@ -58,10 +58,10 @@ freeze the topology at start) breaks one of those three.
 
 Topology lives in a plain `TopologyState` value:
 
-- `state.graphs: dict[graph_id, GraphTopology]` — one entry per
+- `state.graphs: dict[graph_id, GraphTopology]`: one entry per
   connected component. Each `GraphTopology` carries its creature
   ids, channel declarations, and bipartite listen / send edge maps.
-- `state.creature_to_graph: dict[creature_id, graph_id]` — reverse
+- `state.creature_to_graph: dict[creature_id, graph_id]`: reverse
   index for "which graph does this creature live in?"
 
 Mutations are pure functions: `add_creature`, `remove_creature`,
@@ -69,7 +69,7 @@ Mutations are pure functions: `add_creature`, `remove_creature`,
 `set_listen`, `set_send`. Each returns a `TopologyDelta` describing
 what changed (`kind` ∈ {`nothing`, `merge`, `split`}, plus
 `old_graph_ids`, `new_graph_ids`, `affected_creatures`). No live
-agents, no asyncio — the whole module is testable as plain data.
+agents, no asyncio: the whole module is testable as plain data.
 
 ### Connected components (`find_components`, `_normalize_components`)
 
@@ -144,7 +144,7 @@ session store attached, an `on_send` callback is installed on the
 channel. The callback writes every send to the store via
 `store.save_channel_message()`. The callback is idempotent (replacing
 itself if installed again) and reads the current `_terrarium_graph_id`
-on the channel object on every call — so when the channel object
+on the channel object on every call, so when the channel object
 moves home during a merge, the callback automatically targets the
 surviving store without needing to be reinstalled.
 
@@ -202,37 +202,37 @@ topology returns to the recipe's natural shape.
 
 ## Where it lives in the code
 
-- `src/kohakuterrarium/terrarium/topology.py` — `TopologyState`,
+- `src/kohakuterrarium/terrarium/topology.py`: `TopologyState`,
   `GraphTopology`, `TopologyDelta`, pure mutation functions,
   `find_components`, `_normalize_components`, `_merge_graphs`.
-- `src/kohakuterrarium/terrarium/engine.py` — `Terrarium`
+- `src/kohakuterrarium/terrarium/engine.py`: `Terrarium`
   orchestrator. `add_creature`, `remove_creature`, `connect`,
   `disconnect`, `add_channel`, `remove_channel`, plus the
   environment / session-store registries.
-- `src/kohakuterrarium/terrarium/channels.py` — `connect_creatures`,
+- `src/kohakuterrarium/terrarium/channels.py`: `connect_creatures`,
   `_merge_environment_into`, `_ensure_channel_persistence`,
   `inject_channel_trigger`, `_teardown_existing_trigger`.
-- `src/kohakuterrarium/terrarium/channel_lifecycle.py` —
+- `src/kohakuterrarium/terrarium/channel_lifecycle.py`:
   `apply_split_bookkeeping`, channel removal flow, environment
   reallocation.
-- `src/kohakuterrarium/terrarium/session_coord.py` — `apply_merge`,
+- `src/kohakuterrarium/terrarium/session_coord.py`: `apply_merge`,
   `apply_split`, `merge_session_stores`, `split_session_store`,
   `copy_events_into`, meta refresh helpers.
-- `src/kohakuterrarium/terrarium/runtime_prompt.py` — event-driven
+- `src/kohakuterrarium/terrarium/runtime_prompt.py`: event-driven
   per-creature prompt refresh on `TOPOLOGY_CHANGED`,
   `CREATURE_STARTED`, `CREATURE_STOPPED`, `OUTPUT_WIRE_ADDED`,
   `OUTPUT_WIRE_REMOVED`, `PARENT_LINK_CHANGED`.
-- `src/kohakuterrarium/terrarium/resume.py` — `resume_into_engine`,
+- `src/kohakuterrarium/terrarium/resume.py`: `resume_into_engine`,
   recipe-driven topology reconstruction.
-- `src/kohakuterrarium/terrarium/events.py` — `EngineEvent` taxonomy,
+- `src/kohakuterrarium/terrarium/events.py`: `EngineEvent` taxonomy,
   `EventFilter`.
-- `src/kohakuterrarium/session/store.py` — `SessionStore` API used
+- `src/kohakuterrarium/session/store.py`: `SessionStore` API used
   by the coordinator.
 
 ## See also
 
-- [Dynamic graph](../multi-agent/dynamic-graph.md) — the user-facing
+- [Dynamic graph](../multi-agent/dynamic-graph.md): the user-facing
   mental model this implements.
-- [Session persistence](session-persistence.md) — the underlying
+- [Session persistence](session-persistence.md): the underlying
   `.kohakutr` file format and per-creature resume.
-- [Terrarium](../multi-agent/terrarium.md) — the engine contract.
+- [Terrarium](../multi-agent/terrarium.md): the engine contract.

@@ -1,6 +1,6 @@
 ---
 title: Why KohakuTerrarium
-summary: The observation that every agent product re-implements the same substrate — and the framework-shaped response.
+summary: The observation that every agent product re-implements the same substrate, and the framework-shaped response.
 tags:
   - concepts
   - foundations
@@ -47,8 +47,8 @@ Make **building a purpose-built agent cheap**.
 
 If every new agent shape only costs a config file, a few custom
 modules, and a clear mental model, the field stops re-inventing the
-wheel. The substrate — the parts that every agent needs and that are
-almost identical across them — stays in one place. The genuinely new
+wheel. The substrate (the parts that every agent needs and that are
+almost identical across them) stays in one place. The genuinely new
 part is what you write.
 
 That substrate is what KohakuTerrarium is. A **framework for agents**,
@@ -59,7 +59,7 @@ not another agent.
 A concrete list, for calibration:
 
 - A uniform event model. User input, timer fires, tool completion,
-  channel messages — all the same envelope.
+  channel messages: all the same envelope.
 - The six-module creature abstraction. See
   [what-is-an-agent](what-is-an-agent.md).
 - A session layer that is both runtime persistence and a searchable
@@ -95,6 +95,6 @@ new agent design.
 
 ## See also
 
-- [What is an agent](what-is-an-agent.md) — the definition the framework is built around.
-- [Boundaries](../boundaries.md) — when KT fits, when it doesn't.
-- [kt-biome](https://github.com/Kohaku-Lab/kt-biome) — the showcase creatures + plugin pack.
+- [What is an agent](what-is-an-agent.md): the definition the framework is built around.
+- [Boundaries](../boundaries.md): when KT fits, when it doesn't.
+- [kt-biome](https://github.com/Kohaku-Lab/kt-biome): the showcase creatures + plugin pack.
