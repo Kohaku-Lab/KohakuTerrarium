@@ -90,9 +90,9 @@ kt run @kt-biome/creatures/swe --mode cli
 
 模式：
 
-- `cli` — Rich 行內介面（TTY 時預設）
-- `tui` — 全螢幕 Textual 應用程式
-- `plain` — 純 stdout/stdin，適合 pipe 或 CI
+- `cli`：Rich 行內介面（TTY 時預設）
+- `tui`：全螢幕 Textual 應用程式
+- `plain`：純 stdout/stdin，適合 pipe 或 CI
 
 覆寫單次執行的模型：
 

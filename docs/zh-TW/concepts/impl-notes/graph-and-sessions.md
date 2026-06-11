@@ -15,8 +15,8 @@ tags:
 一個多生物 terrarium 是一張可在執行期變化的圖。三個特性必須同時成
 立：
 
-1. **反應式拓樸。** 執行期的心智模型 —— 誰共享 environment、誰共享
-   session —— 必須自動跟隨連通性。如果使用者拔掉兩半之間最後一條頻
+1. **反應式拓樸。** 執行期的心智模型（誰共享 environment、誰共享
+   session）必須自動跟隨連通性。如果使用者拔掉兩半之間最後一條頻
    道，那兩半應該在不需要操作員介入的前提下變成獨立的。
 2. **歷史不丟。** 合併與分裂是資訊轉換；一隻生物之前的對話應該仍然
    能從原圖的任何後代裡復原。
@@ -40,7 +40,7 @@ tags:
   可。
 - **套用，再 normalise。** 變更拓樸。每次變更後只在受影響的圖內重算
   分量，並發出一個 `TopologyDelta` 描述發生了什麼。引擎對 delta 反
-  應 —— 重新分配 environment、複製 session store、重指向生物、重新
+  應：重新分配 environment、複製 session store、重指向生物、重新
   注入觸發器、發事件。我們的做法。
 
 ## 我們實際怎麼做
@@ -49,18 +49,18 @@ tags:
 
 拓樸活在一個樸素的 `TopologyState` 值裡：
 
-- `state.graphs: dict[graph_id, GraphTopology]` —— 每個連通分量一筆。
+- `state.graphs: dict[graph_id, GraphTopology]`：每個連通分量一筆。
   每個 `GraphTopology` 裝它的 creature id、頻道宣告、二部
   listen / send 邊映射。
-- `state.creature_to_graph: dict[creature_id, graph_id]` —— 反向索
+- `state.creature_to_graph: dict[creature_id, graph_id]`：反向索
   引，回答「這隻生物在哪個圖？」。
 
 Mutation 是純函數：`add_creature`、`remove_creature`、
 `add_channel`、`remove_channel`、`connect`、`disconnect`、
 `set_listen`、`set_send`。每個回傳一個 `TopologyDelta` 描述發生了什麼
 （`kind` ∈ {`nothing`, `merge`, `split`}，加 `old_graph_ids`、
-`new_graph_ids`、`affected_creatures`）。沒有活動 agent，沒有 asyncio
-—— 整個模組可以純當資料測試。
+`new_graph_ids`、`affected_creatures`）。沒有活動 agent，沒有 asyncio，
+整個模組可以純當資料測試。
 
 ### 連通分量（`find_components`、`_normalize_components`）
 
@@ -98,7 +98,7 @@ delta 報告 `kind="split"` 與受影響的生物。
 
 新合併 store 立即撐住存活 environment 中每一個頻道的持久化 callback
 （因為第 2 步重新注入觸發器，而 callback 會閉包
-`engine.session_store_for(graph_id)` —— 現在解析到合併 store）。
+`engine.session_store_for(graph_id)`，現在解析到合併 store）。
 
 ### 分裂記帳（`channel_lifecycle.apply_split_bookkeeping`、`session_coord.apply_split`）
 
@@ -126,7 +126,7 @@ delta 報告 `kind="split"` 與受影響的生物。
 上會裝上一個 `on_send` callback。Callback 透過
 `store.save_channel_message()` 把每一次 send 寫入 store。Callback 是
 冪等的（再次安裝會替換自己），且每次呼叫時都會讀取頻道物件上當下的
-`_terrarium_graph_id` —— 因此當頻道物件因合併而搬家時，callback 會自
+`_terrarium_graph_id`，因此當頻道物件因合併而搬家時，callback 會自
 動指向存活 store，無需重裝。
 
 這就是合併路徑（上面第 2 步）能搬動頻道物件而不丟訊息持久化的原因。
@@ -172,36 +172,36 @@ scratchpad、觸發器）。
 
 ## 它住在程式碼哪裡
 
-- `src/kohakuterrarium/terrarium/topology.py` —— `TopologyState`、
+- `src/kohakuterrarium/terrarium/topology.py`：`TopologyState`、
   `GraphTopology`、`TopologyDelta`、純 mutation 函數、
   `find_components`、`_normalize_components`、`_merge_graphs`。
-- `src/kohakuterrarium/terrarium/engine.py` —— `Terrarium` 編排。
+- `src/kohakuterrarium/terrarium/engine.py`：`Terrarium` 編排。
   `add_creature`、`remove_creature`、`connect`、`disconnect`、
   `add_channel`、`remove_channel`，加 environment / session store
   registry。
-- `src/kohakuterrarium/terrarium/channels.py` —— `connect_creatures`、
+- `src/kohakuterrarium/terrarium/channels.py`：`connect_creatures`、
   `_merge_environment_into`、`_ensure_channel_persistence`、
   `inject_channel_trigger`、`_teardown_existing_trigger`。
-- `src/kohakuterrarium/terrarium/channel_lifecycle.py` ——
+- `src/kohakuterrarium/terrarium/channel_lifecycle.py`：
   `apply_split_bookkeeping`、頻道移除流程、environment 重新分配。
-- `src/kohakuterrarium/terrarium/session_coord.py` —— `apply_merge`、
+- `src/kohakuterrarium/terrarium/session_coord.py`：`apply_merge`、
   `apply_split`、`merge_session_stores`、`split_session_store`、
   `copy_events_into`、meta 刷新輔助函數。
-- `src/kohakuterrarium/terrarium/runtime_prompt.py` —— 事件驅動的
+- `src/kohakuterrarium/terrarium/runtime_prompt.py`：事件驅動的
   per-creature 提示詞刷新，監聽 `TOPOLOGY_CHANGED`、
   `CREATURE_STARTED`、`CREATURE_STOPPED`、`OUTPUT_WIRE_ADDED`、
   `OUTPUT_WIRE_REMOVED`、`PARENT_LINK_CHANGED`。
-- `src/kohakuterrarium/terrarium/resume.py` —— `resume_into_engine`、
+- `src/kohakuterrarium/terrarium/resume.py`：`resume_into_engine`、
   recipe 驅動的拓樸重建。
-- `src/kohakuterrarium/terrarium/events.py` —— `EngineEvent` 分類、
+- `src/kohakuterrarium/terrarium/events.py`：`EngineEvent` 分類、
   `EventFilter`。
-- `src/kohakuterrarium/session/store.py` —— 協調器使用的
+- `src/kohakuterrarium/session/store.py`：協調器使用的
   `SessionStore` API。
 
 ## 另見
 
-- [動態圖](../multi-agent/dynamic-graph.md) —— 這份實作支撐的使用者
+- [動態圖](../multi-agent/dynamic-graph.md)：這份實作支撐的使用者
   心智模型。
-- [Session 持久化](session-persistence.md) —— 底層的 `.kohakutr` 檔
+- [Session 持久化](session-persistence.md)：底層的 `.kohakutr` 檔
   案格式與 per-creature resume。
-- [生態瓶](../multi-agent/terrarium.md) —— 引擎契約。
+- [生態瓶](../multi-agent/terrarium.md)：引擎契約。

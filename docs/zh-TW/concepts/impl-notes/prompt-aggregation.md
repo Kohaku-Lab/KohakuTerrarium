@@ -21,7 +21,7 @@ tags:
   Discord、何時該送到 stdout），
 - 由外掛貢獻的區段（專案規則、環境資訊等），
 - 每個工具的完整文件（若使用 `static` skill
-  模式）——或者完全不包含這些內容（若使用 `dynamic` 模式）。
+  模式），或者完全不包含這些內容（若使用 `dynamic` 模式）。
 
 如果把這件事交給手寫 prompt，你就會把 bug 一起交付出去：
 工具清單過時、呼叫語法錯誤、區段重複。這個框架會以確定性的方式
@@ -30,7 +30,7 @@ tags:
 ## 曾考慮的方案
 
 - **手寫 prompts。** 很脆弱。每次新增工具都可能壞掉。
-- **永遠使用完整靜態 prompts。** 很完整，但也非常大——光是工具文件
+- **永遠使用完整靜態 prompts。** 很完整，但也非常大：光是工具文件
   就可能有數萬 tokens。
 - **按需載入文件。** 只提供名稱；需要時再讓代理透過 `info`
   framework command 拉取完整文件。
@@ -75,21 +75,21 @@ tags:
 - **自動區段不會取代手寫區段。** 如果你在 `system.md` 裡自行放入
   工具清單，aggregator 的工具清單仍然會被加入；框架不會依內容去重。
 - **Skill mode 是調節旋鈕，不是策略。** 系統中其他任何部分都不會因
-  `skill_mode` 而改變——它純粹是 prompt 大小上的取捨。
+  `skill_mode` 而改變，它純粹是 prompt 大小上的取捨。
 - **外掛順序是明確的。** 依優先級排序。若優先級相同，則保持穩定的
   插入順序。
 
 ## 程式碼中的位置
 
-- `src/kohakuterrarium/prompt/aggregator.py` — 組合函式。
-- `src/kohakuterrarium/prompt/plugins.py` — 內建 prompt plugins。
-- `src/kohakuterrarium/prompt/templates.py` — Jinja 安全渲染。
-- `src/kohakuterrarium/terrarium/config.py` — 頻道拓樸區塊。
-- `src/kohakuterrarium/core/agent.py` — `_init_controller()` 會在
+- `src/kohakuterrarium/prompt/aggregator.py`：組合函式。
+- `src/kohakuterrarium/prompt/plugins.py`：內建 prompt plugins。
+- `src/kohakuterrarium/prompt/templates.py`：Jinja 安全渲染。
+- `src/kohakuterrarium/terrarium/config.py`：頻道拓樸區塊。
+- `src/kohakuterrarium/core/agent.py`：`_init_controller()` 會在
   啟動時呼叫 aggregator 一次。
 
 ## 另請參閱
 
-- [Plugin](../modules/plugin.md) — 如何撰寫 prompt plugins。
-- [Tool](../modules/tool.md) — 工具文件如何被註冊。
-- [reference/configuration.md — skill_mode, tool_format, include_*](../../reference/configuration.md) — 相關設定旋鈕。
+- [Plugin](../modules/plugin.md)：如何撰寫 prompt plugins。
+- [Tool](../modules/tool.md)：工具文件如何被註冊。
+- [reference/configuration.md：skill_mode, tool_format, include_*](../../reference/configuration.md)：相關設定旋鈕。

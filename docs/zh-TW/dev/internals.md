@@ -1,6 +1,6 @@
 ---
 title: 內部結構
-summary: 執行期怎麼組裝起來 — 事件佇列、控制器迴圈、executor、子代理管理、外掛包裝。
+summary: 執行期怎麼組裝起來：事件佇列、控制器迴圈、executor、子代理管理、外掛包裝。
 tags:
   - dev
   - internals
@@ -12,9 +12,9 @@ tags:
 
 下面記錄 16 條流程，分組如下：
 
-1. **代理執行期** — 生命週期、控制器迴圈、工具管線、子代理、觸發器、提示詞組裝、外掛。
-2. **持久化與記憶** — 工作階段持久化、壓縮。
-3. **多代理與 serving** — 生態瓶執行期、頻道、environment 與 session、serving 層、compose 代數、套件系統、MCP。
+1. **代理執行期**：生命週期、控制器迴圈、工具管線、子代理、觸發器、提示詞組裝、外掛。
+2. **持久化與記憶**：工作階段持久化、壓縮。
+3. **多代理與 serving**：生態瓶執行期、頻道、environment 與 session、serving 層、compose 代數、套件系統、MCP。
 
 最後一節 [跨層不變條件](#跨層不變條件) 把適用於整個系統的規則整理在一起。
 
@@ -24,13 +24,15 @@ tags:
 
 ### 1.1 代理生命週期 (單隻生物)
 
-CLI 入口在 `cli/run.py:run_agent_cli()`。它會驗證設定檔路徑、挑一種 I/O 模式 (`cli` / `plain` / TUI)、選擇性地建一個 `SessionStore`、呼叫 `Agent.from_path(config_path, …)`，然後交給 `_run_agent_rich_cli()` 或 `agent.run()`。
+CLI 入口在 `cli/run.py:run_agent_cli()`。它會驗證設定檔路徑、挑一種 I/O 模式 (`cli` / TUI)，然後一切都走 Terrarium 引擎：`Terrarium(pwd=…)` 加 `engine.add_creature(…)` (配方則用 `engine.apply_recipe(…)`)，再把引擎交給 `run_engine_with_rich_cli()` / `run_engine_with_tui()`。程式化嵌入則直接用 `await Agent.build(…)` 建構 agent。
 
-`Agent.__init__` (`src/kohakuterrarium/core/agent.py:146`) 會依固定順序跑一連串 bootstrap：`_init_llm`、`_init_registry`、`_init_executor`、`_init_subagents`、`_init_output`、`_init_controller`、`_init_input`、`_init_user_commands`、`_init_triggers`。Mixin 的堆疊是 `AgentInitMixin` (`bootstrap/agent_init.py`) + `AgentHandlersMixin` (`core/agent_handlers.py`) + `AgentToolsMixin` (`core/agent_tools.py`)。
+`Agent.__init__` (`src/kohakuterrarium/core/agent.py`) 會依固定順序跑一連串 bootstrap：`_init_llm`、`_init_registry`、`_init_executor`、`_init_subagents`、`_init_output`、`_init_controller`、`_init_input`、`_init_user_commands`、`_init_triggers`。Mixin 的堆疊是 `AgentInitMixin` (`bootstrap/agent_init.py`) + `AgentHandlersMixin` (`core/agent_handlers.py`) + `AgentToolsMixin` (`core/agent_tools.py`)，加上 2.0 之後的 mixin：`AgentConstructMixin` (`Agent.build` / `Agent.from_path`)、`AgentTurnMixin` (有型別的 `run` / `run_stream`)、`AgentExtensionsMixin`、`AgentMessagesMixin`、`AgentModelMixin`、`AgentCompactMixin`、`AgentLifecycleMixin`。
 
-`await agent.start()` (`core/agent.py:186`) 會啟動輸入與輸出模組、在需要時接上 TUI callback、啟動 trigger manager、接完成事件的 callback、初始化 MCP (連線到 server 並把工具描述塞進 prompt)、初始化 `CompactManager`、載入外掛、發布 session info，最後啟動終止條件檢查器。
+Registry 初始化現在有三個明確的階段：接上生物宣告的工具、丟掉當前 provider 不支援的 provider-native 工具，再自動注入該 provider 宣告的 provider-native 工具 (除非生物明確退出)。
 
-`await agent.run()` (`core/agent.py:684`) — 如果是 resume，就先重播 session 事件、還原觸發器、發出 startup trigger，然後進入主迴圈：`event = await input.get_input()` → `_process_event(event)`。`stop()` 會反向拆掉每個東西。代理擁有這些欄位：`llm`、`registry`、`executor`、`session`、`environment`、`subagent_manager`、`output_router`、`controller`、`input`、`trigger_manager`、`compact_manager`、`plugins`。
+`await agent.start()` (`core/agent.py`) 會啟動輸入與輸出模組、在需要時接上 TUI callback、啟動 trigger manager、接完成事件的 callback、初始化 MCP (連線到 server 並把工具描述塞進 prompt)、初始化 `CompactManager`、載入外掛、發布 session info，最後啟動終止條件檢查器。
+
+`await agent.run_forever()` (`core/agent.py`) 是自主主迴圈：如果是 resume，就先重播 session 事件、還原觸發器、發出 startup trigger，然後進入迴圈：`event = await input.get_input()` → `_process_event(event)`。(`agent.run(content)` 已經不是主迴圈，而是有型別的單輪驅動，回傳 `TurnResult`；`run_stream` 是它的串流版本。) `stop()` 會反向拆掉每個東西。代理擁有這些欄位：`llm`、`registry`、`executor`、`session`、`environment`、`subagent_manager`、`output_router`、`controller`、`input`、`trigger_manager`、`compact_manager`、`plugins`。
 
 觀念層面的說明請看 [concepts/foundations/composing-an-agent.md](../concepts/foundations/composing-an-agent.md)。
 
@@ -45,7 +47,7 @@ CLI 入口在 `cli/run.py:run_agent_cli()`。它會驗證設定檔路徑、挑�
 1. 收集事件、建出這一回合的 context。
 2. 組 messages、從 LLM 串流。
 3. 串流進來時就邊剖析 tool / sub-agent / command 區塊。
-4. 每個偵測到的就透過 `asyncio.create_task` 派發 — 工具是**在串流過程中**啟動的，不是等 LLM 講完才跑。
+4. 每個偵測到的就透過 `asyncio.create_task` 派發：工具是**在串流過程中**啟動的，不是等 LLM 講完才跑。
 5. 串流結束後，`asyncio.gather` 等所有 direct 模式的完成。
 6. 把合併後的回饋事件推回去、決定要不要再跑一回合。
 
@@ -53,19 +55,19 @@ CLI 入口在 `cli/run.py:run_agent_cli()`。它會驗證設定檔路徑、挑�
 
 ### 1.3 工具執行管線
 
-串流 parser (`parsing/`) 在偵測到設定 `tool_format` 裡的工具區塊時就會發出事件 — bracket (預設：`[/bash]@@command=ls\n[bash/]`)、XML (`<bash command="ls"></bash>`)、或 native (LLM provider 自己的 function-calling 包裝)。每個偵測到的工具都會透過 `executor.submit_from_event()` 變成一個 executor task。
+串流 parser (`parsing/`) 在偵測到設定 `tool_format` 裡的工具區塊時就會發出事件：bracket (預設：`[/bash]@@command=ls\n[bash/]`)、XML (`<bash command="ls"></bash>`)、或 native (LLM provider 自己的 function-calling 包裝)。每個偵測到的工具都會透過 `executor.submit_from_event()` 變成一個 executor task。
 
 Executor (`core/executor.py`) 把 `{job_id: asyncio.Task}` 存起來，並為每次呼叫建一個 `ToolContext`，裡面有 `working_dir`、`session`、`environment`、file guards、檔案讀取狀態表、job store、代理名稱。
 
 三種模式：
 
-- **Direct** — 在同一回合 await 完成。結果會批次塞進下一個控制器回饋事件。
-- **Background** — 工具結果中設 `run_in_background=true`。Task 繼續跑，完成時發出未來的 `tool_complete` 事件。
-- **Stateful** — 子代理這類長期存在的 handle。結果會存在 `jobs` 裡，用 `wait` 框架指令取回。
+- **Direct**：在同一回合 await 完成。結果會批次塞進下一個控制器回饋事件。
+- **Background**：工具結果中設 `run_in_background=true`。Task 繼續跑，完成時發出未來的 `tool_complete` 事件。
+- **Stateful**：子代理這類長期存在的 handle。結果會存在 `jobs` 裡，用 `wait` 框架指令取回。
 
 不變條件 (在 `agent_handlers.py` 與 `executor.py` 裡強制)：
 
-- 工具在它的區塊被 parse 出來的那一刻就啟動 — 不是排隊等 LLM 講完。
+- 工具在它的區塊被 parse 出來的那一刻就啟動，不是排隊等 LLM 講完。
 - 同一回合的多個工具會平行跑 (`asyncio.gather`)。
 - LLM 串流從不會因為工具執行而被卡住。
 
@@ -101,7 +103,7 @@ Resume 時，觸發器的狀態會從 session store 的 `events[agent]:*` 列重
 4. 依工具格式產生的框架提示 (bracket / xml / native)。
 5. Named-output 模型 (怎麼寫到 `discord`、`tts` 等)。
 
-各段之間以雙換行串接。`system.md` **絕不**能放工具清單、工具呼叫語法、或完整工具說明 — 那些要嘛是自動組進來，要嘛用 `info` 框架指令按需載入。
+各段之間以雙換行串接。`system.md` **絕不**能放工具清單、工具呼叫語法、或完整工具說明：那些要嘛是自動組進來，要嘛用 `info` 框架指令按需載入。
 
 細節參考 [impl-notes/prompt-aggregation.md](../concepts/impl-notes/prompt-aggregation.md)。
 
@@ -140,7 +142,7 @@ Resume (`session/resume.py`)：載入 `meta`、每個代理的 conversation 快�
 
 ### 2.2 上下文壓縮
 
-`core/compact.py:CompactManager` 在每回合結束後執行。`should_compact(prompt_tokens)` 判斷 prompt tokens 有沒有超過 `max_context` 的 80% (可由 `compact.threshold` 與 `compact.max_tokens` 設定)。觸發時它會發一個 `compact_start` activity 事件、開一個背景 task 跑 summariser LLM (主 LLM，或設了 `compact_model` 時用那個)，然後在回合**之間**原子地把摘要塞進對話。活動區 — 最後 `keep_recent_turns` 個回合 — 永遠不會被摘要掉。
+`core/compact.py:CompactManager` 在每回合結束後執行。`should_compact(prompt_tokens)` 判斷 prompt tokens 有沒有超過 `max_context` 的 80% (可由 `compact.threshold` 與 `compact.max_tokens` 設定)。觸發時它會發一個 `compact_start` activity 事件、開一個背景 task 跑 summariser LLM (主 LLM，或設了 `compact_model` 時用那個)，然後在回合**之間**原子地把摘要塞進對話。活動區（最後 `keep_recent_turns` 個回合）永遠不會被摘要掉。
 
 原子替換的設計讓控制器永遠不會在回合中間看到訊息突然消失。完整推理請看 [impl-notes/non-blocking-compaction.md](../concepts/impl-notes/non-blocking-compaction.md)。
 
@@ -150,13 +152,13 @@ Resume (`session/resume.py`)：載入 `meta`、每個代理的 conversation 快�
 
 ### 3.1 生態瓶引擎
 
-`terrarium/engine.py:Terrarium` 是執行期引擎 — 每行程一個，托管所有生物。引擎擁有：
+`terrarium/engine.py:Terrarium` 是執行期引擎：每行程一個，托管所有生物。引擎擁有：
 
-- `_topology: TopologyState` — 純資料 graph 模型 (`terrarium/topology.py`)，記錄哪些生物共用哪個 graph、哪些頻道存在、誰 listen / send。
-- `_creatures: dict[str, Creature]` — 運行中的 wrapper (`terrarium/creature_host.py`)。
-- `_environments: dict[str, Environment]` — 每個 graph 一份；持有 `shared_channels`。
-- `_session_stores: dict[str, SessionStore]` — 每個掛著 store 的 graph 一份。
-- `_subscribers: list[_Subscriber]` — `EngineEvent` 發布訂閱。
+- `_topology: TopologyState`：純資料 graph 模型 (`terrarium/topology.py`)，記錄哪些生物共用哪個 graph、哪些頻道存在、誰 listen / send。
+- `_creatures: dict[str, Creature]`：運行中的 wrapper (`terrarium/creature_host.py`)。
+- `_environments: dict[str, Environment]`：每個 graph 一份；持有 `shared_channels`。
+- `_session_stores: dict[str, SessionStore]`：每個掛著 store 的 graph 一份。
+- `_subscribers: list[_Subscriber]`：`EngineEvent` 發布訂閱。
 
 獨立 agent 是 1-creature graph；recipe 是用頻道連起來的 connected graph。`Terrarium.with_creature(config)` 是獨立 agent 的捷徑；`Terrarium.from_recipe(recipe)` 透過 `terrarium/recipe.py:apply_recipe` 走完一份 `TerrariumConfig` (宣告頻道、為每隻生物加一條 direct channel、若有 root 加 `report_to_root`、接 listen / send 邊、啟動一切)。生物除了透過頻道和 (選擇性的) 嵌進 system prompt 的拓樸提示外，不會知道自己處於生態瓶中。
 
@@ -168,7 +170,7 @@ Resume (`session/resume.py`)：載入 `meta`、每個代理的 conversation 快�
 
 **事件 bus**。`terrarium/events.py:EngineEvent` 是統一的可觀測面。kind 涵蓋 text chunk、頻道訊息、拓樸變更、session fork、creature 生命週期、processing start / end、error。`Terrarium.subscribe(filter)` 回傳與 `EventFilter` 匹配的事件 async iterator。每個訂閱者各有一個 queue；取消 iterator 會自動撤銷訂閱。
 
-舊版 `terrarium/runtime.py:TerrariumRuntime` 與 `serving/manager.py:KohakuManager` 在過渡期間還留在硬碟上 — 較舊的 HTTP route 與 CLI 還會用它們。`api/deps.py` 現在同時暴露 `get_engine()` (新) 與 `get_manager()` (舊) 這兩個 singleton；route 會一條一條切過去。
+舊版的 `TerrariumRuntime` 與 `KohakuManager` 那兩疊已經移除；引擎與 `group_*` 工具面是僅存的路徑。HTTP route 走 `api/deps.py:get_engine()` 與 Studio 的 route / session 模組。
 
 細節參考 [concepts/multi-agent/terrarium.md](../concepts/multi-agent/terrarium.md) 與 [concepts/multi-agent/privileged-node.md](../concepts/multi-agent/privileged-node.md)。
 
@@ -176,10 +178,10 @@ Resume (`session/resume.py`)：載入 `meta`、每個代理的 conversation 快�
 
 `core/channel.py` 定義兩個原語：
 
-- `SubAgentChannel` — queue 結構，每則訊息一個消費者，FIFO。支援 `send` / `receive` / `try_receive`。
-- `AgentChannel` — broadcast。每個訂閱者透過 `ChannelSubscription` 持有自己的 queue。晚來的訂閱者拿不到舊訊息。
+- `SubAgentChannel`：queue 結構，每則訊息一個消費者，FIFO。支援 `send` / `receive` / `try_receive`。
+- `AgentChannel`：broadcast。每個訂閱者透過 `ChannelSubscription` 持有自己的 queue。晚來的訂閱者拿不到舊訊息。
 
-頻道存在 `ChannelRegistry` 裡，位置是 `environment.shared_channels` (生態瓶全域) 或 `session.channels` (生物私有)。自動建出來的頻道：每隻生物的 queue、以及 `report_to_root`。`ChannelTrigger` 把一條頻道接到代理的事件流，把進來的訊息轉成 `channel_message` 事件。
+頻道存在 `ChannelRegistry` 裡，位置是 `environment.shared_channels` (生態瓶全域) 或 `session.channels` (生物私有)。自動建出來的頻道：每隻生物一條廣播頻道、以及 `report_to_root`。`ChannelTrigger` 把一條頻道接到代理的事件流，把進來的訊息轉成 `channel_message` 事件。
 
 細節參考 [concepts/modules/channel.md](../concepts/modules/channel.md)。
 
@@ -188,15 +190,17 @@ Resume (`session/resume.py`)：載入 `meta`、每個代理的 conversation 快�
 - `Environment` (`core/environment.py`) 持有生態瓶全域的狀態：`shared_channels`、選用的共享 context dict、session 記帳。
 - `Session` (`core/session.py`) 持有每隻生物自己的狀態：私有頻道 registry (或 alias 到 environment 的)、`scratchpad`、`tui` 參照、`extra` dict。
 
-每隻代理一個 session。在生態瓶裡，environment 是全部生物共享的；session 是私有的。生物永遠不碰別人的 session — 共享狀態一律走 `environment.shared_channels`。
+每隻代理一個 session。在生態瓶裡，environment 是全部生物共享的；session 是私有的。生物永遠不碰別人的 session，共享狀態一律走 `environment.shared_channels`。
 
 細節參考 [concepts/modules/session-and-environment.md](../concepts/modules/session-and-environment.md)。
 
-### 3.4 Serving 層
+### 3.4 Studio 與 adapter 層
 
-`serving/manager.py:KohakuManager` 替 transport 層的程式碼建 `AgentSession` 或 `TerrariumSession` wrapper。`AgentSession.send_input` 把 user-input 事件推進代理，並 yield 出輸出 router 的事件，以 JSON dict 的形式：`text`、`tool_start`、`tool_complete`、`activity`、`token_usage`、`compact_*`、`job_update` 等等。
+`studio/` 是 Terrarium 引擎之上的管理門面。它擁有目錄、身份 / 設定、活動工作階段、已儲存工作階段的持久化、attach 政策與編輯器流程。`api/` 路由與 CLI 指令應該把這些政策委派給 Studio 的命名空間，而不是各自複製。
 
-`api/` 下的 HTTP/WS API 跟任何 Python 嵌入都走這層，不會直接碰 `Agent` 內部。
+`api/deps.py:get_engine()` 暴露行程內的 `Terrarium` singleton，給需要存取執行期圖的 route handler 用。Session 的聊天 / 控制路由走 Studio 的 session 模組與引擎支撐的 `Creature.chat()` 語意。
+
+`serving/` 只剩 `web.py` 的啟動輔助 (加上 `process_metrics.py` 與舊式事件 dataclass)；舊的 `AgentSession` / `KohakuManager` wrapper 已經刪除，改用 `Creature.chat()`、`Agent.build` 或 Studio 的 session 模組。
 
 
 ### 3.5 Compose 代數內部
@@ -208,13 +212,13 @@ Resume (`session/resume.py`)：載入 `meta`、每個代理的 conversation 快�
 - `__or__` (`|`) → `Fallback`。
 - `__mul__` (`*`) → `Retry`。
 
-純 callable 會自動包成 `Pure`。`agent()` 建一個持久的 `AgentRunnable` (跨呼叫共用對話)；`factory()` 建一個 `AgentFactory`，每次呼叫都產生新的代理。`iterate(async_iter)` 會走訪一個 async 來源，每個元素都 await 整條管線。`effects.Effects()` 記錄綁在管線上的副作用 (`pipeline.effects.get_all()`)。
+純 callable 會自動包成 `Pure`。`agent()` 建一個持久的 `AgentRunnable` (跨呼叫共用對話)；`factory()` 建一個 `AgentFactory`，每次呼叫都產生新的代理。`iterate(async_iter)` 會走訪一個 async 來源，每個元素都 await 整條管線。
 
 細節參考 [concepts/python-native/composition-algebra.md](../concepts/python-native/composition-algebra.md)。
 
 ### 3.6 套件 / extension 系統
 
-安裝：`packages.py:install_package(source, editable=False)`。三種模式 — git clone、本地複製、或用 `.link` 指標做 editable。落點：`~/.kohakuterrarium/packages/<name>/`。
+安裝：`packages.py:install_package(source, editable=False)`。三種模式：git clone、本地複製、或用 `.link` 指標做 editable。落點：`~/.kohakuterrarium/packages/<name>/`。
 
 解析：`resolve_package_path("@<pkg>/<sub>")` 會跟 `.link` 指標走、或沿資料夾走。設定載入器 (例如 `base_config: "@pkg/creatures/…"`) 與 CLI 指令都用這個。
 
@@ -222,9 +226,9 @@ Resume (`session/resume.py`)：載入 `meta`、每個代理的 conversation 快�
 
 術語：
 
-- **Extension** — 套件提供的一個 Python 模組 (tool / plugin / LLM preset)。
-- **Plugin** — 一個 lifecycle-hook 實作。
-- **Package** — 可安裝的單位，裡面可以裝上面任何東西加上 config。
+- **Extension**：套件提供的一個 Python 模組 (tool / plugin / LLM preset)。
+- **Plugin**：一個 lifecycle-hook 實作。
+- **Package**：可安裝的單位，裡面可以裝上面任何東西加上 config。
 
 ### 3.7 MCP 整合
 

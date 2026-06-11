@@ -1,6 +1,6 @@
 ---
 title: 工作階段與恢復
-summary: .kohakutr 工作階段檔怎麼運作、怎麼恢復一隻生物、以及怎麼重播對話歷程。
+summary: .kohakutr 工作階段檔怎麼運作、怎麼恢復一隻生物，以及怎麼重播對話歷程。
 tags:
   - guides
   - session
@@ -9,172 +9,255 @@ tags:
 
 # 工作階段
 
-給需要持久化、恢復、或把代理執行封存起來的讀者。
+寫給想持久化、恢復或封存 agent 執行紀錄的讀者。
 
-一個工作階段把一次執行的運作狀態抓下來 — 對話、事件、子代理對話、頻道歷程、草稿區、job、可恢復的觸發器、config metadata — 寫進一個 `.kohakutr` 檔。你可以隨時停掉一隻生物，之後再從同一個地方接回去。
+工作階段 (session) 把一次執行的操作狀態（對話、事件、子代理對話、頻道歷史、scratchpad、job、可恢復的觸發器、設定 metadata）全部收進一個 `.kohakutr` 檔案。你可以在任何時間點停掉一隻生物 (creature)，之後從同一個地方原封不動接回來。
 
-觀念預備：[記憶與壓縮](../concepts/modules/memory-and-compaction.md)、[工作階段與環境](../concepts/modules/session-and-environment.md)。
+概念入門：[記憶與壓縮](../concepts/modules/memory-and-compaction.md)、[工作階段與環境](../concepts/modules/session-and-environment.md)。
 
-## `.kohakutr` 檔
+## `.kohakutr` 檔案
 
-`.kohakutr` 是一個 SQLite 資料庫 (走 KohakuVault)，裡面九張表：
+`.kohakutr` 是一個 SQLite 資料庫 (透過 KohakuVault)，有九張表：
 
-| Table | 用途 |
+| 表 | 用途 |
 |---|---|
-| `meta` | 工作階段 metadata、config 快照、生態瓶拓樸 |
-| `state` | 每隻代理的草稿區、回合數、累積 token 用量、可恢復觸發器 |
-| `events` | Append-only 日誌，記下每個文字 chunk、工具呼叫、觸發器、token 用量事件 |
-| `channels` | 以頻道名為 key 的頻道訊息歷程 |
-| `subagents` | 子代理對話快照，key 是 parent + name + run |
-| `jobs` | 工具與子代理 job 紀錄 |
-| `conversation` | 每隻代理最新的對話快照 (用來快速 resume) |
-| `fts` | 事件上的 FTS5 索引 (給 `kt search`) |
+| `meta` | 工作階段 metadata、設定快照、terrarium 拓樸 |
+| `state` | 各 agent 的 scratchpad、輪次計數、累積 token 用量、可恢復的觸發器 |
+| `events` | append-only 日誌：每個文字 chunk、工具呼叫、觸發、token 用量事件 |
+| `channels` | 以頻道名稱為 key 的頻道訊息歷史 |
+| `subagents` | 以 parent + name + run 為 key 的子代理對話快照 |
+| `jobs` | 工具與子代理的 job 紀錄 |
+| `conversation` | 各 agent 最新的對話快照 (為了快速恢復) |
+| `fts` | events 的 FTS5 索引 (給 `kt search` 用) |
 | `vectors` | 選用的 embedding 欄位 (由 `kt embedding` 填入) |
 
-事件資料是 append-only，並透過 KohakuVault 的 auto-pack 做版本管理。你可以安全地複製、封存、寄 email 傳 `.kohakutr` 檔；它不相依任何外部東西。
+事件資料是 append-only 的，版本管理透過 KohakuVault 的 auto-pack。二進位產物可以放在旁邊的 `<session>.artifacts/` 目錄，所以如果一次執行產生了圖片或其他二進位輸出，封存時要把 `.kohakutr` 檔和它的 artifacts 目錄一起帶走。
 
-## 工作階段放在哪
+## 工作階段存在哪
 
 ```
 ~/.kohakuterrarium/sessions/<name>.kohakutr
 ```
 
-`<name>` 由生物或生態瓶的名字加上時間戳自動生成。用 `--session <path>` 覆寫，或用 `--no-session` 完全跳過。
+`<name>` 由生物 / 生態瓶名稱加時間戳自動產生。用 `--session <path>` 覆寫，或用 `--no-session` 完全不存。
 
-## 哪些東西會留下來
+## 存了什麼
 
-每回合 KohakuTerrarium 會記錄：
+每個輪次 KohakuTerrarium 會記錄：
 
-- **對話快照** — 原始 message dict，用 msgpack 存。保留 `tool_calls`、多模態內容、metadata。
-- **事件日誌** — 每個 chunk、工具呼叫、子代理輸出、觸發器觸發、頻道訊息、壓縮、interrupt、錯誤都各一筆。這是歷程的正本。
-- **子代理對話** — 在子代理被銷毀前存起來，事後你可以檢視它做了什麼。
-- **草稿區與頻道訊息** — 每隻代理與每條頻道分開存。
-- **Job 紀錄** — 長時間工具與子代理的輸出。
-- **可恢復觸發器** — 任何設 `resumable: True` 的 `BaseTrigger` 子類會序列化到 `state`，resume 時再建回來。
-- **Config 快照** — 執行期完整解析過的 config，所以就算磁碟上的 config 之後改了，resume 一樣能把代理建回來。
+- **對話快照**：原始 message dict，透過 msgpack。保留 `tool_calls`、多模態內容與 metadata。
+- **事件日誌**：每個 chunk、工具呼叫、子代理輸出、觸發器觸發、頻道訊息、壓縮、中斷或錯誤各一筆。這是正典的歷史。
+- **子代理對話**：在子代理被銷毀前保存，事後可以檢視它做了什麼。
+- **Scratchpad 與頻道訊息**：按 agent 與按頻道。
+- **Job 紀錄**：長時間執行的工具與子代理的輸出。
+- **可恢復的觸發器**：任何 `resumable: True` 的 `BaseTrigger` 子類別會序列化進 `state`，恢復時還原。
+- **設定快照**：執行當下完整解析後的設定，所以就算磁碟上的設定改了，恢復也能重建 agent。
+- **二進位產物**：產生的圖片等二進位輸出，寫在 session 檔旁邊的 `<session>.artifacts/` 下。
 
 ## 恢復
 
 ```bash
-kt resume --last            # 最近一個
-kt resume                   # 互動式挑選 (顯示最近 10 個)
-kt resume my-agent_20240101 # 用名字前綴
+kt resume --last            # 最近的工作階段
+kt resume                   # 互動選擇 (顯示最近 10 個)
+kt resume my-agent_20240101 # 用名稱前綴
 kt resume ~/backup/run.kohakutr
 ```
 
-會自動偵測類型：agent 工作階段掛一隻生物；terrarium 工作階段掛完整接線並強制走 TUI 模式。
+恢復會自動判斷類型：agent 的工作階段掛載單一生物；terrarium 的工作階段掛載完整接線，並強制 TUI 模式。
 
-旗標跟 `kt run` 一樣：`--mode`、`--llm`、`--log-level`，另外有 `--pwd <dir>` 可以覆寫工作目錄。
+旗標與 `kt run` 相同：`--mode`、`--llm`、`--log-level`，外加 `--pwd <dir>` 覆寫工作目錄。
 
-Resume 會做這些事：
+程式化恢復是同一套 (見[從 Python 操作工作階段](#從-python-操作工作階段))：
 
-1. 從 `meta` 讀 config 快照。
-2. 重新載入目前磁碟上的 config (你之後改的 prompt/工具會生效)。
-3. 合併：config 快照給身份，現行 config 給執行邏輯。
-4. 重建代理、接上同一個 `SessionStore`、重新灌回對話快照、重播草稿區/頻道/觸發器狀態。
-5. 控制器從頭起跑；先前的事件都在 context 裡。
+```python
+from kohakuterrarium import Terrarium
 
-所以小幅度的 config 漂移沒問題 (換 LLM、改 prompt 都 OK)。結構性的漂移 (改生物名字、拿掉一個正在用的工具) 會讓重播出錯 — 如果要完美還原，把工作階段釘在原本的 config 上。
+# 從已儲存的工作階段開一個新引擎...
+engine = await Terrarium.resume("runs/swe_20240101.kohakutr", pwd="/work", llm=None)
 
-## 中斷與恢復流程
+# ...或認領進一個已經在跑其他圖的引擎。
+graph_id = await engine.adopt_session("runs/other.kohakutr")
+```
+
+兩者都接受路徑或 `SessionStore`；`llm=` 是選用的選擇器字串覆寫。
+檔案存在但無法恢復 (未知的儲存類型、metadata 缺 config path) 會拋
+`ValueError`。
+
+恢復做的事：
+
+1. 從 `meta` 讀設定快照。
+2. 重新載入磁碟上目前的設定 (你後來改的提示詞 / 工具會生效)。
+3. 合併：設定快照提供工作階段身份；目前設定提供執行邏輯。
+4. 重建 agent、掛上同一個 `SessionStore`、回灌對話快照、重播 scratchpad / 頻道 / 觸發器狀態。
+5. 控制器全新啟動；先前的事件在上下文裡。
+
+也就是說小幅的設定漂移沒問題 (換 LLM、改提示詞)。結構性漂移 (改生物名稱、移除一個它正在用的工具) 可能造成重播錯誤；需要完全一致就把工作階段釘在原始設定上。
+
+## 中斷與恢復的工作流
 
 ```bash
 kt run @kt-biome/creatures/swe
-# 工作一下... 閒置時按兩次 Ctrl+C（或 Ctrl+D / /exit）
+# 工作中... 然後在閒置時連按兩次 Ctrl+C (或 Ctrl+D / /exit)
 # 之後：
 kt resume --last
 ```
 
-在 Rich CLI 模式下，Ctrl+C 會中斷目前 turn；閒置時按兩次 Ctrl+C（或 Ctrl+D / `/exit`）會乾淨離開、flush session store、印出 resume 提示。強制砍掉 (SIGKILL) 會跳過最後的 flush，但因為寫入是 append-only，最近的狀態大部分還是在磁碟上。
+Rich CLI 模式下，Ctrl+C 會中斷進行中的輪次；閒置時連按兩次 Ctrl+C (或 Ctrl+D / `/exit`) 會優雅退出、flush session store、印出恢復提示。被強制砍掉 (SIGKILL) 會跳過最後的 flush，但因為寫入是 append-only，最近的狀態大多還是在磁碟上。
 
 ## 複製或封存工作階段
 
 ```bash
 # 備份
 cp ~/.kohakuterrarium/sessions/swe_20240101.kohakutr ~/backups/
+cp -r ~/.kohakuterrarium/sessions/swe_20240101.artifacts ~/backups/   # 若存在
 
-# 從搬過的位置 resume
+# 從移動後的位置恢復
 kt resume ~/backups/swe_20240101.kohakutr
-
-# 不做完整 resume 只檢視 (純讀的 CLI 之後會上；目前先用 Python)
 ```
 
-用 Python 檢視：
+不恢復、只檢視，用下面的 `SessionReader`，它以唯讀模式開檔，
+檢視永遠不會動到 `status` 或 `last_active`。
+
+## 從 Python 操作工作階段
+
+### 建立工作階段：引擎持有的持久化
+
+持久化是引擎上的一個關鍵字參數；session metadata 由框架自己寫入並驗證：
 
 ```python
-from kohakuterrarium.session.store import SessionStore
-store = SessionStore("~/backups/swe_20240101.kohakutr")
-print(store.load_meta())
-for agent, event in store.get_all_events():
-    print(agent, event["type"])
-store.close()
+from kohakuterrarium import Terrarium
+
+# Autosession：每張圖自動拿到 <session_dir>/<graph_id>.kohakutr
+# (合併 / 分割產生的子圖也存在那裡)。
+engine = Terrarium(session_dir="runs/")
+
+# 用 session= 逐生物控制：
+c = await engine.add_creature(
+    "@kt-biome/creatures/general",
+    session="runs/student-42.kohakutr",   # 在這個精確路徑建立 store
+)
+# session=True   -> 在預設 session 目錄建立
+# session=False  -> 不持久化，即使 autosession 開著
+# session=<SessionStore> -> 直接掛上既有的 store
+# session=None (預設) -> 跟隨引擎 (autosession / 圖既有的 store / 不存)
+
+# 配方：整張圖一個 terrarium 型的 store。
+await engine.apply_recipe("@kt-biome/terrariums/swe_team", session="runs/team.kohakutr")
 ```
+
+`await engine.shutdown()` (或離開 `async with` 區塊) 會關閉引擎
+建立的每個 store，檔案不會再卡在 `status: "running"`。
+
+### 恢復
+
+- `await Terrarium.resume(store_or_path, *, pwd=None, llm=None)`：
+  建一個新引擎並認領已儲存的工作階段。
+- `await engine.adopt_session(store_or_path, *, pwd=None, llm=None)`：
+  恢復進運行中的引擎；回傳新的 `graph_id`。
+
+恢復從 session metadata 記錄的 config path (含 `@pkg` 參照)
+重建拓樸，並以各 agent 自己的工作目錄執行，不會對你的行程
+做 `os.chdir`。
+
+### 讀取：`SessionReader`
+
+`SessionReader` 是 `.kohakutr` 檔案的唯讀檢視介面。它透過
+`SessionStore.open_readonly` 開啟，讀取永遠不會更新 `last_active`
+或改動 `status`：
+
+```python
+from kohakuterrarium import SessionReader
+
+with SessionReader("~/backups/swe_20240101.kohakutr") as r:
+    print(r.meta["status"], r.agents)
+
+    for turn in r.turns():               # 重組出來的 live-branch 輪次
+        tools = [tc["name"] for tc in turn.tool_calls]
+        print(f"[{turn.source}] {turn.user_text!r} -> "
+              f"{turn.assistant_text[:60]!r} tools={tools}")
+
+    events = r.events()                  # 原始的 append-only 日誌
+    convo = r.conversation()             # 最終快照 (message dict)
+    chan = r.channel_messages("tasks")   # 一條頻道的歷史
+
+    r.index()                            # 臨時建 FTS 索引，然後：
+    hits = r.search("score.json", k=5)
+```
+
+`turns()` 會跳過重新生成 / 編輯過的兄弟分支：你看到的就是
+所有檢視器顯示的同一條 live branch。`search()` 只對已建索引的
+工作階段回傳結果 (`kt embedding`，或用 `reader.index()` 臨時建 FTS)。
+
+需要原始讀寫存取時，`SessionStore(path)` 還在，但任何列表 /
+預覽 / 檢視器用途請用 `SessionStore.open_readonly(path)` (或直接用
+`SessionReader`)：一般的開檔 + 關檔會把工作階段標成 paused 並更新
+`last_active`，把「最近使用」的排序弄亂。
 
 ## 壓縮
 
-上下文塞滿時，壓縮會把對話縮短。每隻生物自己設：
+上下文滿了之後，壓縮會縮小對話。逐生物設定：
 
 ```yaml
 compact:
   enabled: true
-  threshold: 0.8              # context 到 window 的 80% 就壓縮
-  target: 0.5                 # 壓完目標剩 50%
-  keep_recent_turns: 5        # 最後 N 回合一定保留原樣
-  compact_model: gpt-4o-mini  # 摘要用的便宜模型
+  threshold: 0.8              # 上下文到視窗的 80% 時壓縮
+  target: 0.5                 # 壓縮後目標 50%
+  keep_recent_turns: 5        # 永遠原樣保留最後 N 個輪次
+  compact_model: gpt-4o-mini  # 摘要這一步用便宜的模型
 ```
 
-壓縮在背景跑 (見 [concepts/modules/memory-and-compaction](../concepts/modules/memory-and-compaction.md)) — 控制器照常運作；新摘要好了再把對話替換掉。每次壓縮都會記成一個事件。
+壓縮在背景執行 (見 [concepts/modules/memory-and-compaction](../concepts/modules/memory-and-compaction.md))：控制器照常跑；新摘要好了，再把對話換過去。每次壓縮都會記錄成事件。
 
-手動壓縮：從 CLI/TUI 的 prompt 下
+手動壓縮：
 
 ```
 /compact
 ```
 
-要把長工作階段交給人接手、或把它當成下一次執行的 context 時很實用。
+在 CLI / TUI 提示符下。把長工作階段交接出去、或當成上下文丟給下一次執行之前，先壓一下很有用。
 
 ## 列表與搜尋工作階段
 
-`kt serve` 的 Web UI 與 `GET /api/sessions` 背後是一個 sidecar 索引
-—— 位於 `<session_dir>/.kt-index.kvault` 的一個 SQLite 檔案，
-會快取每隻工作階段的列表形 metadata（name、status、最後活動時間戳、
-agents、preview…），並對文字欄目做 BM25 搜尋。你不需要直接操作它；
-即便 server 重啟、或在 server 關閉期間用 `kt run` 起了工作階段，它都能
-維持一致。
+`kt serve` 的網頁 UI 與 `GET /api/sessions` 由一個 sidecar
+索引支撐：`<session_dir>/.kt-index.kvault` 這一個 SQLite 檔，
+快取每個工作階段列表所需的 metadata (名稱、狀態、最後活動時間、
+agent、預覽…)，並對文字欄位提供 BM25 搜尋。你不會直接跟它互動；
+它跨伺服器重啟與「伺服器沒開時啟動的 `kt run` 工作階段」
+都保持一致。
 
-`GET /api/sessions` 的 query 參數：
+`GET /api/sessions` 的查詢參數：
 
-| 參數 | 預設 | 說明 |
+| 參數 | 預設 | 備註 |
 |---|---|---|
-| `limit` | `20` | 單頁筆數 |
-| `offset` | `0` | 翻頁偏移 |
-| `search` | `""` | 對 `name` / `preview` / `config_path` / `agents` / `pwd` 做 FTS5 查詢 |
+| `limit` | `20` | 頁面大小 |
+| `offset` | `0` | 頁面位移 |
+| `search` | `""` | 對 `name` / `preview` / `config_path` / `agents` / `pwd` 的 FTS5 查詢 |
 | `sort` | `last_active` | `last_active` \| `created_at` \| `name` \| `status` \| `relevance` |
 | `order` | `desc` | `desc` \| `asc` |
-| `status` | （無） | 精確比對（`running`、`paused`…） |
-| `config_type` | （無） | 精確比對（`agent`、`terrarium`） |
-| `node_id` | （無） | 精確比對 —— 篩選哪個 lab node 執行了該工作階段 |
-| `refresh` | `false` | 列表前跑一次增量 reconcile，只重讀 `(mtime, size)` 改變的檔案 |
-| `full_rescan` | `false` | 強制重讀所有檔案（手動改了磁碟上的 `.kohakutr` 後使用） |
+| `status` | (無) | 精確比對 (`running`、`paused`…) |
+| `config_type` | (無) | 精確比對 (`agent`、`terrarium`) |
+| `node_id` | (無) | 精確比對，按執行該工作階段的 lab 節點過濾 |
+| `refresh` | `false` | 列表前先做增量 reconcile，只重讀 `(mtime, size)` 變過的檔案 |
+| `full_rescan` | `false` | 強制重讀每個檔案 (手動改過磁碟上的 `.kohakutr` 之後用) |
 
-`sort=relevance` 只有在帶 `search` 時才有意義；其他 sort 會先收集
-FTS hit-set，再依指定欄位排序。
+`sort=relevance` 只在有 `search` 時有意義；用其他排序時，
+會先收集 FTS 命中集合，再按指定欄位排序。
 
-索引在不需要手動 refresh 的情況下，如何保持同步：
+索引怎麼在不手動 refresh 的情況下保持同步：
 
-- **Push。** API server 執行期間，它名下的每個 `SessionStore` 都會在
-  debounce 之後把更新推進索引（每 20 個事件或 5 秒，先到先發），
-  正常使用時不會落後。
-- **啟動 reconcile。** 每次 server 啟動時，索引會針對 session 目錄
-  做指紋比對，只重讀改變了的檔案。第一次啟動時會做一次「bootstrap」
-  全量讀取，並記下成功。
-- **`?refresh=true`。** 可按需觸發同樣的增量 reconcile —— 適用於
-  剛把備份的 `.kohakutr` 複製進 session 目錄之後。
+- **推送。** API 伺服器運行期間，它持有的每個 `SessionStore`
+  以 debounce 方式把更新推進索引 (每 20 個事件或 5 秒，先到先算)，
+  正常使用下索引永遠跟得上。
+- **啟動時 reconcile。** 每次伺服器啟動，索引對 session 目錄做一輪
+  fingerprint-diff，只重讀變過的檔案。第一次啟動會完整讀過每個檔案
+  (bootstrap 步驟)，並記住已成功。
+- **`?refresh=true`。** 隨需觸發同樣的增量 reconcile：
+  剛把備份的 `.kohakutr` 複製進 session 目錄之後很好用。
 
-Sidecar 可以放心刪除：下次列表會從 `.kohakutr` 檔案重建。它裡面
-沒有任何獨立保存的狀態。
+Sidecar 可以放心刪掉：下一次列表會從 `.kohakutr` 檔重建。
+索引裡沒有任何獨一無二的狀態。
 
-不透過 HTTP 層的程式化列表：
+不經 HTTP 層的程式化列表：
 
 ```python
 from kohakuterrarium.studio.persistence.session_index import (
@@ -189,36 +272,38 @@ for row in page.rows:
 
 ## 記憶搜尋
 
-工作階段本身也是一個可搜尋的知識庫。建好索引後：
+工作階段也是一個可搜尋的知識庫。建好索引之後：
 
 ```bash
 kt embedding ~/.kohakuterrarium/sessions/swe.kohakutr
 kt search swe "auth bug"
 ```
 
-代理自己可以用 `search_memory` 工具搜尋。完整走一遍：[記憶](memory.md)。
+agent 自己可以用 `search_memory` 工具搜尋。完整走讀：[記憶](memory.md)。
 
-## 關掉持久化
+## 停用持久化
 
-有時候就只想跑一次不留痕跡：
+有時候你只想跑一次性的：
 
 ```bash
 kt run @kt-biome/creatures/swe --no-session
 ```
 
-不會產生 `.kohakutr`。這也會讓壓縮無法從磁碟回收之前的回合 (但記憶體裡還是會壓)。
+不會建立 `.kohakutr`。這也會讓壓縮無法從磁碟找回先前的輪次 (記憶體內的壓縮照常)。
 
 ## 疑難排解
 
-- **壓縮跑不完 / OOM。** Compact model 預設是跟控制器一樣的重模型。把 `compact_model` 設成便宜的 (`gpt-4o-mini`、`claude-haiku`)。
-- **Resume 出現 `tool not registered`。** 生物 config 改了 (某個工具被拿掉)，但對話還在參照它。手動把 `config.yaml` 裡的工具加回來，或開新工作階段。
-- **`kt resume` 找不到我剛剛看到的工作階段。** 工作階段是用檔名前綴去比對 `~/.kohakuterrarium/sessions/` 的。如果你改名或搬過，就傳完整路徑。
-- **`.kohakutr` 很大。** 事件日誌是 append-only；長工作階段會膨脹。封存舊的、或把工作切到不同工作階段。壓縮縮的是活動對話，完整事件歷程還是留著給搜尋用。
-- **Resume 看不到子代理輸出。** 子代理對話是在它完成時才存的。如果父代理在子代理跑到一半時被打斷，最新快照就只到上一個 checkpoint 為止。
+- **壓縮跑不完 / OOM。** 壓縮模型跟控制器用了同一個重模型。把 `compact_model` 設成便宜的 (`gpt-4o-mini`、`claude-haiku`)。
+- **恢復時報 `tool not registered`。** 生物設定變了 (某個工具被移除)，但對話還引用著它。手動編輯 `config.yaml` 把工具加回去，或開新的工作階段。
+- **`kt resume` 找不到我剛剛還看到的工作階段。** 工作階段用前綴比對 `~/.kohakuterrarium/sessions/` 下的檔名。檔案改名或搬走的話，傳完整路徑。
+- **複製工作階段後產生的圖片不見了。** 旁邊的 `<session>.artifacts/` 目錄也要一起複製，不只 `.kohakutr` 檔。
+- **`.kohakutr` 檔很大。** 事件日誌是 append-only 的；長工作階段會長大。封存舊的，或把工作拆成多個工作階段。壓縮會縮小活躍的對話，但完整事件歷史會留著供搜尋。
+- **恢復後子代理輸出不見了。** 子代理對話在子代理完成時保存。如果 parent 在子代理進行中被中斷，最新快照就是上一個 checkpoint 持久化的內容。
 
-## 延伸閱讀
+## 另見
 
-- [記憶](memory.md) — 在工作階段歷程上做 FTS、語意、混合搜尋。
-- [設定](configuration.md) — 壓縮 recipe 與工作階段旗標。
-- [程式化使用](programmatic-usage.md) — 給自訂檢視用的 `SessionStore` API。
-- [概念 / 記憶與壓縮](../concepts/modules/memory-and-compaction.md) — 壓縮怎麼運作。
+- [記憶](memory.md)：對工作階段歷史的 FTS、語意與混合搜尋。
+- [設定檔](configuration.md)：壓縮設定與工作階段旗標。
+- [程式化使用](programmatic-usage.md)：從 Python 驅動 agent 與引擎。
+- [參考 / Python API](../reference/python.md#工作階段)：`SessionReader` / `SessionStore` 簽名。
+- [概念 / 記憶與壓縮](../concepts/modules/memory-and-compaction.md)：壓縮怎麼運作。

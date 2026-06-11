@@ -1,6 +1,6 @@
 ---
 title: 應用更新
-summary: KohakuTerrarium 桌面 app 的更新機制 —— 下載預建的發布 tarball、版本並列安裝、原子指針切換、自訂鏡像、發布通道。
+summary: KohakuTerrarium 桌面 app 的更新機制：下載預建的發布 tarball、版本並列安裝、原子指針切換、自訂鏡像、發布通道。
 tags:
   - guides
   - update
@@ -13,7 +13,7 @@ tags:
 KohakuTerrarium 桌面 app 透過**下載與你的平台 + Python ABI 相符的預建
 發布 tarball**自我更新：在本機解壓到目前版本的並列目錄、做冒煙測試,
 再原子性地切換一個小指針檔來決定下次啟動哪一份。這個模型借鏡自
-Squirrel / Velopack / Sparkle 這類原生 app 更新器 —— 小、事務化,
+Squirrel / Velopack / Sparkle 這類原生 app 更新器：小、事務化,
 每次更新只需要一次 HTTPS GET + 一次解壓。
 
 更關鍵的是:你的機器**不需要**執行 `pip`、`venv`、`git` 或 `ensurepip`。
@@ -51,7 +51,7 @@ Squirrel / Velopack / Sparkle 這類原生 app 更新器 —— 小、事務化,
 ```
 
 每個版本都在自己的獨立目錄。切換版本只是改寫 50 byte 的 `active` 指針
-(在 POSIX 與 Windows 都是原子的)。目前執行中的行程不受影響 ——
+(在 POSIX 與 Windows 都是原子的)。目前執行中的行程不受影響，
 新版本在下次啟動時生效。
 
 ## 首次啟動
@@ -74,7 +74,7 @@ Squirrel / Velopack / Sparkle 這類原生 app 更新器 —— 小、事務化,
 | `kt self-update --dry-run` | 解析並印出將要安裝的內容 |
 | `kt self-update --rollback` | 指針回退到上一個已安裝版本 |
 
-更新不會修改目前執行的行程。更新成功後,離開並重新啟動 app —— 新指針
+更新不會修改目前執行的行程。更新成功後,離開並重新啟動 app，新指針
 會在下次啟動時讀取。
 
 ## 發布通道
@@ -86,7 +86,7 @@ Squirrel / Velopack / Sparkle 這類原生 app 更新器 —— 小、事務化,
 | `nightly` | 每日自動建置 | 追前緣 / 貢獻者 |
 
 通道選擇在 **Admin → Updates → Channel** 以及
-`kt self-update --channel <name>`(黏性 —— 會寫回設定)。
+`kt self-update --channel <name>`(黏性，會寫回設定)。
 
 ## 版本固定
 
@@ -203,12 +203,12 @@ kt self-update --rollback
 
 ## 啟動器**不**依賴的
 
-- `pip` —— 沒打包、也不呼叫
-- `venv` / `ensurepip` —— 不使用(Windows 上 briefcase 殼層會剝掉這些,
+- `pip`：沒打包、也不呼叫
+- `venv` / `ensurepip`：不使用(Windows 上 briefcase 殼層會剝掉這些,
   這就是之前的設計走不通的原因)
-- `git` —— 不呼叫
-- PyPI —— 只查詢配置的 feed(github_releases 或 custom)
-- 任何第三方 HTTP 客戶端 —— 只用 `urllib`
+- `git`：不呼叫
+- PyPI：只查詢配置的 feed(github_releases 或 custom)
+- 任何第三方 HTTP 客戶端：只用 `urllib`
 
 唯一可選的第三方依賴是 `zstandard`(用於 `.tar.zst`)。`.tar.gz` 是
 fallback 路徑;如果你的鏡像供應 `.tar.gz` 工件,沒有 `zstandard` 一切
@@ -233,5 +233,5 @@ fallback 路徑;如果你的鏡像供應 `.tar.gz` 工件,沒有 `zstandard` 一
 
 ## 參見
 
-- [設定參考](../reference/configuration.md) —— 所有設定欄位
-- [CLI 參考](../reference/cli.md) —— 全部 `kt self-update` 旗標
+- [設定參考](../reference/configuration.md)：所有設定欄位
+- [CLI 參考](../reference/cli.md)：全部 `kt self-update` 旗標

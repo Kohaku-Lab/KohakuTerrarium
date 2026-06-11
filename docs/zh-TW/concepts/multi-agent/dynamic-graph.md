@@ -1,6 +1,6 @@
 ---
 title: 動態圖
-summary: terrarium 的圖為何會在執行期變形 —— 連通分量、自動合併 / 自動分裂、圖內的「圖編輯器」、以及 session 血脈的代價與好處。
+summary: terrarium 的圖為何會在執行期變形：連通分量、自動合併 / 自動分裂、圖內的「圖編輯器」、以及 session 血脈的代價與好處。
 tags:
   - concepts
   - multi-agent
@@ -13,7 +13,7 @@ tags:
 ## 它是什麼
 
 [Terrarium](terrarium.md) 不是固定形狀。執行中的生物集合、它們之間
-的頻道、誰與誰共享一個 session —— 這一切都可以在執行期變化，**不需
+的頻道、誰與誰共享一個 session，這一切都可以在執行期變化，**不需
 要重啟**、不會重新建立未受影響的生物、也不會丟歷史。
 
 引擎把活動系統建模為一張由生物與頻道組成的**圖**。這張圖的每個連通
@@ -28,7 +28,7 @@ session store。當拓樸變化時，引擎做出反應：
   （session store 複製到每一邊）。
 
 這一切都是引擎在收到 mutation 呼叫時確定性地執行的結構性工作。圖內
-的生物不做這些決定 —— 引擎做。
+的生物不做這些決定，由引擎做。
 
 ## 為什麼它存在
 
@@ -43,7 +43,7 @@ session store。當拓樸變化時，引擎做出反應：
 - 團隊應該可以從外部觀察，但團隊內的人不知道自己被觀察；而且觀察必
   須在生物來去之間持續追蹤它們的身份。
 
-讓圖變成動態的 —— 並把記帳責任交給引擎 —— 讓這四件事都不需要在每個
+讓圖變成動態的（並把記帳責任交給引擎），讓這四件事都不需要在每個
 recipe 裡特殊處理。
 
 ## 心智模型
@@ -76,8 +76,8 @@ recipe 裡特殊處理。
 同樣的 mutation 也透過[群組工具](../glossary.md#group-tools--群組工具)
 （`group_add_node`、`group_remove_node`、`group_start_node`、
 `group_stop_node`、`group_channel`、`group_wire`）暴露給圖中的
-[特權節點](privileged-node.md)。它們合在一起就是圖內的**圖編輯器**
-—— LLM 驅動的特權節點可以靠呼叫工具在執行中演化團隊，每一次 mutation
+[特權節點](privileged-node.md)。它們合在一起就是圖內的**圖編輯器**：
+LLM 驅動的特權節點可以靠呼叫工具在執行中演化團隊，每一次 mutation
 都會發出 `EngineEvent`，讓 observer 與執行期提示詞保持同步。
 
 ## 自動合併
@@ -85,7 +85,7 @@ recipe 裡特殊處理。
 合併發生在跨圖 connect 時。引擎會：
 
 1. 在拓樸層聯集兩張圖（creature id、頻道宣告、listen / send 邊）。
-2. 聯集兩個 `Environment` —— 每一個頻道物件從被丟棄的圖搬到存活的
+2. 聯集兩個 `Environment`：每一個頻道物件從被丟棄的圖搬到存活的
    environment，已存在的頻道觸發器對著存活的 env 重新注入。
 3. 把兩個 session store 合併為存活圖路徑下一個新的 store。每一個事
    件從兩個舊 store 複製到新 store；新 store 的 meta 記下
@@ -114,7 +114,7 @@ recipe 裡特殊處理。
    `split_at` 時間戳。
 6. 發出 `TOPOLOGY_CHANGED` 事件，附 `kind="split"` 與新的 graph id。
 
-分裂時歷史不會遺失 —— 只會被複製。分支 session 從同一起點分歧。
+分裂時歷史不會遺失，只會被複製。分支 session 從同一起點分歧。
 
 ## Resume：recipe 是真理來源
 
@@ -138,10 +138,10 @@ recipe 裡特殊處理。
 
 不是每一隻生物都該能變更圖。引擎區分：
 
-- **特權生物** —— recipe 的 `root:` 節點、recipe 內 inline 標記
+- **特權生物**：recipe 的 `root:` 節點、recipe 內 inline 標記
   `privileged: true` 的成員、以及以 `is_privileged=True` 建立的生物。
   它們持有[群組工具](../glossary.md#group-tools--群組工具)。
-- **工人** —— 由特權呼叫者透過 `group_add_node` 生成的生物。它們落
+- **工人**：由特權呼叫者透過 `group_add_node` 生成的生物。它們落
   在呼叫者的圖裡，但**不**擁有群組工具。工人沒被引擎顯式提權前不能
   再分叉同儕或圖邊。
 
@@ -167,15 +167,15 @@ recipe 裡特殊處理。
 ## 不要被它框住
 
 完全沒有執行期變化的靜態 recipe 是最簡單的模式，也是好的預設。當工
-作本身是動態的 —— 團隊形狀在執行中才被發現的開放性研究、一個
-session 把另一個拉進來的臨時救援、分支與合併並存的並行探索 —— 才會
+作本身是動態的（團隊形狀在執行中才被發現的開放性研究、一個
+session 把另一個拉進來的臨時救援、分支與合併並存的並行探索），才會
 需要熱插拔與群組工具創作。
 
 ## 另見
 
-- [生態瓶](terrarium.md) —— 圖所棲身的執行期引擎。
-- [特權節點](privileged-node.md) —— 使用群組工具的特權生物。
-- [impl-notes / graph and sessions](../impl-notes/graph-and-sessions.md)
-  —— 合併 / 分裂記帳的實際實作方式。
-- [reference / builtins — group_* 工具](../../reference/builtins.md)
-  —— 群組工具表面。
+- [生態瓶](terrarium.md)：圖所棲身的執行期引擎。
+- [特權節點](privileged-node.md)：使用群組工具的特權生物。
+- [impl-notes / graph and sessions](../impl-notes/graph-and-sessions.md)：
+  合併 / 分裂記帳的實際實作方式。
+- [reference / builtins：group_* 工具](../../reference/builtins.md)：
+  群組工具表面。

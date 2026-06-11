@@ -39,7 +39,7 @@ tags:
 ### 壓縮
 
 上下文視窗雖然持續變大，但永遠追不上需求增長。沒有壓縮的話，跑了幾小時
-的生物最後一定會撞牆。天真的壓縮方式會在摘要期間直接暫停 agent — 在
+的生物最後一定會撞牆。天真的壓縮方式會在摘要期間直接暫停 agent；在
 agent 框架裡，這等於「控制器卡住，等待 50k token 被濃縮成 2k」。
 對 ambient agents 來說，這是不能接受的。
 
@@ -52,14 +52,14 @@ agent 框架裡，這等於「控制器卡住，等待 50k token 被濃縮成 2k
 
 `.kohakutr` 是一個 SQLite 檔案（透過 KohakuVault），裡面有以下資料表：
 
-- `meta` — 工作階段中繼資料、快照、設定
-- `events` — append-only 事件日誌
-- `state` — scratchpad、計數器、每個 agent 的狀態
-- `channels` — 訊息歷史
-- `conversation` — 供快速 resume 使用的最新快照
-- `subagents` — 子代理的對話快照
-- `jobs` — 工具 / 子代理執行紀錄
-- `fts` — 事件的全文索引
+- `meta`：工作階段中繼資料、快照、設定
+- `events`：append-only 事件日誌
+- `state`：scratchpad、計數器、每個 agent 的狀態
+- `channels`：訊息歷史
+- `conversation`：供快速 resume 使用的最新快照
+- `subagents`：子代理的對話快照
+- `jobs`：工具 / 子代理執行紀錄
+- `fts`：事件的全文索引
 - （向量索引，可選，只有建立 embeddings 時才有）
 
 ### 壓縮契約
@@ -75,13 +75,13 @@ compact manager 就會啟動一個背景 task。
 
 ## 我們怎麼實作它
 
-- `session/store.py` — 以 KohakuVault 為後端的持久化儲存。
-- `session/output.py` — 負責寫入事件的 output consumer。
-- `session/resume.py` — 把資料重播進新建好的 agent。
-- `session/memory.py` — FTS5 查詢與向量搜尋。
-- `session/embedding.py` — model2vec / sentence-transformer / API
+- `session/store.py`：以 KohakuVault 為後端的持久化儲存。
+- `session/output.py`：負責寫入事件的 output consumer。
+- `session/resume.py`：把資料重播進新建好的 agent。
+- `session/memory.py`：FTS5 查詢與向量搜尋。
+- `session/embedding.py`：model2vec / sentence-transformer / API
   provider 的 embeddings。
-- `core/compact.py` — 使用 atomic-splice 技巧的 `CompactManager`。
+- `core/compact.py`：使用 atomic-splice 技巧的 `CompactManager`。
   見 [impl-notes/non-blocking-compaction](../impl-notes/non-blocking-compaction.md)。
 
 Embedding provider（`kt embedding`）：
@@ -95,7 +95,7 @@ Embedding provider（`kt embedding`）：
 
 - **從任何地方恢復。** `kt resume` / `kt resume --last` 可以接回數小時前
   被中斷的工作階段。
-- **搜尋工作階段。** `kt search <session> <query>` — 支援 FTS、語意、
+- **搜尋工作階段。** `kt search <session> <query>`：支援 FTS、語意、
   hybrid 或自動偵測模式。
 - **agent 端 RAG。** agent 在回合中呼叫 `search_memory`，取回相關過去事件，
   然後帶著這些上下文繼續。
@@ -107,12 +107,12 @@ Embedding provider（`kt embedding`）：
 ## 不要被它框住
 
 工作階段持久化是 opt-out（`--no-session`）。embeddings 是 opt-in。
-壓縮則是每隻生物各自 opt-out。生物完全可以不使用這些功能 — 記憶是方便性，
+壓縮則是每隻生物各自 opt-out。生物完全可以不使用這些功能：記憶是方便性，
 不是必要條件。
 
 ## 另見
 
-- [impl-notes/session-persistence](../impl-notes/session-persistence.md) — 雙儲存細節。
-- [impl-notes/non-blocking-compaction](../impl-notes/non-blocking-compaction.md) — atomic-splice 演算法。
-- [reference/cli.md — kt embedding, kt search, kt resume](../../reference/cli.md) — 指令介面。
-- [guides/memory.md](../../guides/memory.md) — 實作指南。
+- [impl-notes/session-persistence](../impl-notes/session-persistence.md)：雙儲存細節。
+- [impl-notes/non-blocking-compaction](../impl-notes/non-blocking-compaction.md)：atomic-splice 演算法。
+- [reference/cli.md：kt embedding, kt search, kt resume](../../reference/cli.md)：指令介面。
+- [guides/memory.md](../../guides/memory.md)：實作指南。

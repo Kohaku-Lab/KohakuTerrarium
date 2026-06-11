@@ -1,6 +1,6 @@
 ---
 title: 內建外掛
-summary: 框架附帶的四個執行期外掛參考 —— sandbox、budget、permgate、compact.auto。
+summary: 框架附帶的四個執行期外掛參考：sandbox、budget、permgate、compact.auto。
 tags:
   - reference
   - plugins
@@ -9,12 +9,12 @@ tags:
 
 # 內建外掛
 
-KohakuTerrarium 附帶四個執行期外掛。它們在框架裡沒有任何特權 —— 用的
+KohakuTerrarium 附帶四個執行期外掛。它們在框架裡沒有任何特權，用的
 是和使用者外掛一樣的 hook。它們在 agent 啟動時被自動發現；config 用
 和其他外掛一樣的 `plugins:` 區塊來啟用。
 
 關於框架 / 外掛邊界的設計意圖，以及 sandbox 外掛的逐步示範，請見
-[guides/plugins —— 工作範例](../guides/plugins.md#worked-example-why-sandbox-is-a-plugin-not-a-framework-feature)。
+[guides/plugins：工作範例](../guides/plugins.md#worked-example-why-sandbox-is-a-plugin-not-a-framework-feature)。
 
 | 名稱 | Priority | Hooks | 實作 |
 |------|----------|-------|------|
@@ -58,20 +58,20 @@ KohakuTerrarium 附帶四個執行期外掛。它們在框架裡沒有任何特�
 
 ### 行為
 
-- **路徑範圍** —— `default` 允許 `cwd` 之下；`workspace` 允許 `cwd` 之
+- **路徑範圍**：`default` 允許 `cwd` 之下；`workspace` 允許 `cwd` 之
   下並拒絕向上穿越；`broad` 在 `fs_deny` 之外都允許；`deny` 全擋。
-- **網路閘門** —— 當 `network=allow` 且設定了 `network_allowlist` 時，
+- **網路閘門**：當 `network=allow` 且設定了 `network_allowlist` 時，
   只有清單上的主機能過；否則在網路允許時全過。當 `network=deny` 時，
   所有網路工具呼叫（`web_fetch`、`web_search`）都會拋
   `PluginBlockError`。
-- **子行程閘門** —— 外掛透過 `runtime_services()` 發布
+- **子行程閘門**：外掛透過 `runtime_services()` 發布
   `subprocess_runner` 服務。需要起子行程的工具（`bash` 等）從
   `ToolContext.runtime_services` 取用。Runner 會先檢查 syscall 等級
   （`pure` 擋所有 spawn、`fs` 擋網路呼叫、`shell` 全允許）與網路白名
   單，然後才委派給 `asyncio.create_subprocess_exec`。
-- **`backend=audit`** —— 違規會透過 agent logger 記錄而不拋出。適合
+- **`backend=audit`**：違規會透過 agent logger 記錄而不拋出。適合
   在新 workload 上做第一輪發現。
-- **熱重設** —— 呼叫外掛的 `refresh_options()` 會重建內部能力結構；
+- **熱重設**：呼叫外掛的 `refresh_options()` 會重建內部能力結構；
   隨後的 `pre_tool_execute` 呼叫看到的就是新政策，無須重啟。
 
 ### 設定範例
@@ -155,7 +155,7 @@ plugins:
 
 每一次 LLM 呼叫之後，`post_llm_call` 都會拿 token 用量和門檻比較。如
 果超過，就呼叫 `context.compact_manager.trigger_compact()` 排程非同
-步壓縮 —— 控制器繼續跑，summariser 在背景工作，切換發生在回合之
+步壓縮：控制器繼續跑，summariser 在背景工作，切換發生在回合之
 間。見
 [非阻塞壓縮](../concepts/impl-notes/non-blocking-compaction.md)。
 
@@ -226,6 +226,6 @@ plugins:
 
 ## 另見
 
-- [guides/plugins](../guides/plugins.md) —— 怎麼寫自己的外掛。
-- [reference/plugin-hooks](plugin-hooks.md) —— 每個 hook 的 signature。
-- [concepts/modules/plugin](../concepts/modules/plugin.md) —— 設計理由。
+- [guides/plugins](../guides/plugins.md)：怎麼寫自己的外掛。
+- [reference/plugin-hooks](plugin-hooks.md)：每個 hook 的 signature。
+- [concepts/modules/plugin](../concepts/modules/plugin.md)：設計理由。

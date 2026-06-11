@@ -1,6 +1,6 @@
 ---
 title: 特權節點
-summary: 圖中已註冊群組工具的生物 —— `root:` 配方關鍵字會把一個節點提升為該狀態。
+summary: 圖中已註冊群組工具的生物；`root:` 配方關鍵字會把一個節點提升為該狀態。
 tags:
   - concepts
   - multi-agent
@@ -15,14 +15,14 @@ tags:
 **特權節點**（privileged node）是位於[圖](../glossary.md#graph)中的一隻
 生物，被授予了變更所屬圖所需的[群組工具](../glossary.md#group-tools)：
 生成或移除其他生物、繪製或刪除頻道、啟動或停止成員、查詢圖的狀態。從
-結構上說，它就只是另一隻生物 —— 同樣的設定、同樣的模組、同樣的生命週
+結構上說，它就只是另一隻生物：同樣的設定、同樣的模組、同樣的生命週
 期。讓它「特權」的，是執行期的旗標（`creature.is_privileged = True`）
 以及引擎在提升時一併執行的工具註冊。
 
 `terrarium` 配方裡的 `root:` 是把一個節點標記為特權的其中一種方式。配
 方也可以在成員上 inline 標記特權；引擎 API 接受在建立生物時傳入
 `privileged=True`。透過工具生成的工人生物（經由 `group_add_node`）預設
-**不是** 特權 —— 工人沒有被顯式提權前不能再分叉同儕。
+**不是** 特權：工人沒有被顯式提權前不能再分叉同儕。
 
 ## 為什麼它存在
 
@@ -32,8 +32,8 @@ tags:
    形狀。某個節點必須被允許呼叫 `group_add_node`、`group_channel` 等
    工具。這個旗標就是用來標識「哪一個」。
 2. **面向使用者的介面。** 當人類在與圖互動時，需要一個單一的對話對
-   口。那個節點通常也想要同樣的權力 —— 看到正在發生什麼、生成助手、
-   重新接線頻道 —— 所以面向使用者的節點和特權節點常常是同一隻。
+   口。那個節點通常也想要同樣的權力（看到正在發生什麼、生成助手、
+   重新接線頻道），所以面向使用者的節點和特權節點常常是同一隻。
 
 `root:` 配方關鍵字把第二種情況收為一行簡寫：宣告一個特權節點，並套上
 標準的「面向使用者 root」接線（一條 `report_to_root` 頻道供所有人回
@@ -73,7 +73,7 @@ terrarium:
       ...
 ```
 
-適用於「我要一個不是面向使用者的特權成員」—— 例如，旁邊坐著幾位工人
+適用於「我要一個不是面向使用者的特權成員」：例如，旁邊坐著幾位工人
 的特權「主管」節點，獨立於另一個面向使用者的 root。
 
 ### 3. 程式化提權
@@ -93,12 +93,12 @@ assign_root_to(engine, sup)
 
 `engine.add_creature(..., is_privileged=True)` 是最小提權：旗標被設
 上、`force_register_privileged_tools` 被執行。`assign_root_to(engine,
-creature)` 是完整的 root 風格輔助 —— 特權 + `report_to_root` 頻道 + 全
+creature)` 是完整的 root 風格輔助：特權 + `report_to_root` 頻道 + 全
 監聽接線。
 
 ## 我們怎麼實作它
 
-- **特權旗標：** `Creature.is_privileged` —— 這是生物 handle 的執行期
+- **特權旗標：** `Creature.is_privileged`：這是生物 handle 的執行期
   屬性，與底層 agent 設定無關。
 - **工具註冊：** `terrarium/tools_group.py` 暴露
   `force_register_basic_tools`（每隻生物都有）與
@@ -110,7 +110,7 @@ creature)` 是完整的 root 風格輔助 —— 特權 + `report_to_root` 頻�
   在、把圖中其他每一隻生物接線為可送往該頻道、讓特權節點監聽每一條已
   存在的頻道、把它標記為特權，並註冊特權工具表面。
 - **拓樸刷新：** 執行期提示詞訂閱器會監聽 `TOPOLOGY_CHANGED` 事件，並
-  為每一隻受影響的生物重新產生「圖感知」區塊 —— 因此特權節點的提示詞
+  為每一隻受影響的生物重新產生「圖感知」區塊，因此特權節點的提示詞
   永遠反映當前的生物、頻道與接線。
 
 ## 因此你可以做什麼
@@ -122,24 +122,24 @@ creature)` 是完整的 root 風格輔助 —— 特權 + `report_to_root` 頻�
   `group_channel` 宣告頻道、`group_wire` 加入輸出接線、
   `group_remove_node` / `group_stop_node` 收掉成員。
 - **跨圖重接線。** `group_channel` 若指向呼叫者圖之外的目標，會經過
-  `Terrarium.connect` 路由 —— 兩個圖（與它們的 session store）會合
+  `Terrarium.connect` 路由：兩個圖（與它們的 session store）會合
   併，呼叫者就能接管原本獨立的生物。
 - **每個圖可以有多個特權節點。** 沒有規定只能有一個。一個圖可以同時有
   面向使用者的 root 和特權主管，或多位主管分攤團隊。
 - **可觀測性的樞紐。** root 風格的特權節點會自動監聽每一條頻道並接收
-  `report_to_root` 的流量 —— 這正是執行摘要外掛、告警規則等工作的最
+  `report_to_root` 的流量，這正是執行摘要外掛、告警規則等工作的最
   佳位置。
 
 ## 不要被它框住
 
-完全沒有特權節點的圖也合理 —— 像是無頭 pipeline、cron 驅動的協調、批
+完全沒有特權節點的圖也合理，像是無頭 pipeline、cron 驅動的協調、批
 次作業。特權只是為了執行期編輯而設的便利；如果你的團隊形狀由配方固定
 下來，可能根本用不到它。
 
 ## 另見
 
-- [Terrarium](terrarium.md) —— 圖與其特權節點所棲身的引擎。
-- [動態圖](dynamic-graph.md) —— 群組工具如何變更拓樸、引擎如何反應。
-- [多代理概覽](README.md) —— 特權節點在整個模型中的位置。
-- [reference/builtins.md — group_* 工具](../../reference/builtins.md)
-  —— 特權工具表面。
+- [Terrarium](terrarium.md)：圖與其特權節點所棲身的引擎。
+- [動態圖](dynamic-graph.md)：群組工具如何變更拓樸、引擎如何反應。
+- [多代理概覽](README.md)：特權節點在整個模型中的位置。
+- [reference/builtins.md：group_* 工具](../../reference/builtins.md)：
+  特權工具表面。

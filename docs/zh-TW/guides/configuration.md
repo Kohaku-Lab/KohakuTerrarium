@@ -11,7 +11,7 @@ tags:
 
 給想要微調一隻現成的生物、或接一隻新的生物，而不想把參考文件每個欄位都讀過的人。
 
-生物設定用 YAML (也支援 JSON/TOML)。每個頂層 key 對映到 `AgentConfig` 的一個欄位；`controller`、`input`、`output` 這類子區塊是自己的 dataclass、有自己的欄位。這份指南以任務為導向 — 完整的欄位清單請看 [reference/configuration](../reference/configuration.md)。
+生物設定用 YAML (也支援 JSON/TOML)。每個頂層 key 對映到 `AgentConfig` 的一個欄位；`controller`、`input`、`output` 這類子區塊是自己的 dataclass、有自己的欄位。這份指南以任務為導向，完整的欄位清單請看 [reference/configuration](../reference/configuration.md)。
 
 觀念預備：[撰寫生物](creatures.md)、[組合一個 agent](../concepts/foundations/composing-an-agent.md)。
 
@@ -27,7 +27,7 @@ controller:
   reasoning_effort: high
 ```
 
-你也可以釘住 preset 的某個 **variation** — 內建 preset 會暴露 `reasoning`、`speed`、`thinking` 這類 group (見 [reference/builtins — Variation groups](../reference/builtins.md#variation-groups))：
+你也可以釘住 preset 的某個 **variation**：內建 preset 會暴露 `reasoning`、`speed`、`thinking` 這類 group (見 [reference/builtins：Variation groups](../reference/builtins.md#variation-groups))：
 
 ```yaml
 controller:
@@ -37,7 +37,7 @@ controller:
     reasoning: xhigh
 ```
 
-每個 provider 的 effort 旋鈕路徑不同。Codex 設 `reasoning_effort`；OpenAI 直連與 OpenRouter 設 `extra_body.reasoning.effort`；Anthropic 直連設 `extra_body.output_config.effort`；Gemini 直連設 `extra_body.google.thinking_config.thinking_level`。用 variation 會自動幫你接好；如果要手動設，見 [reference/configuration — Provider 專屬 `extra_body` 說明](../reference/configuration.md#provider-專屬-extra_body-說明)。
+每個 provider 的 effort 旋鈕路徑不同。Codex 設 `reasoning_effort`；OpenAI 直連與 OpenRouter 設 `extra_body.reasoning.effort`；Anthropic 直連設 `extra_body.output_config.effort`；Gemini 直連設 `extra_body.google.thinking_config.thinking_level`。用 variation 會自動幫你接好；如果要手動設，見 [reference/configuration：Provider 專屬 `extra_body` 說明](../reference/configuration.md#provider-專屬-extra_body-說明)。
 
 或是在命令列只為這次執行覆寫：
 
@@ -178,10 +178,10 @@ triggers:
     options: { channel: alerts }
   - type: context
     options: { debounce_ms: 200 }
-    prompt: "Context changed — re-plan if needed."
+    prompt: "Context changed; re-plan if needed."
 ```
 
-內建：`timer`、`context`、`channel`、`custom`、`package`。觸發器觸發時 `prompt` 會塞進 `TriggerEvent.prompt_override`。需要時鐘對齊的 scheduler 時，請把 `SchedulerTrigger` 暴露成 setup 工具 — 見 [怎麼加工具？](#怎麼加工具) 以及 [reference/builtins](../reference/builtins.md#可安裝的-trigger以-type-trigger-形式暴露為工具) 裡的 `add_schedule`。
+內建：`timer`、`context`、`channel`、`custom`、`package`。觸發器觸發時 `prompt` 會塞進 `TriggerEvent.prompt_override`。需要時鐘對齊的 scheduler 時，請把 `SchedulerTrigger` 暴露成 setup 工具，見 [怎麼加工具？](#怎麼加工具) 以及 [reference/builtins](../reference/builtins.md#可安裝的-trigger以-type-trigger-形式暴露為工具) 裡的 `add_schedule`。
 
 ## 怎麼設定壓縮？
 
@@ -228,7 +228,7 @@ output:
       options: { webhook_url: "${DISCORD_WEBHOOK}" }
 ```
 
-內建輸出型別：`stdout`、`stdout_prefixed`、`console_tts`、`dummy_tts`、`tui`。沒有純 `tts` 型別 — `console_tts` 與 `dummy_tts` 是出廠的 TTS-shaped 輸出；更完整的 TTS 後端以 custom/package 輸出的形式出貨。
+內建輸出型別：`stdout`、`stdout_prefixed`、`console_tts`、`dummy_tts`、`tui`。沒有純 `tts` 型別：`console_tts` 與 `dummy_tts` 是出廠的 TTS-shaped 輸出；更完整的 TTS 後端以 custom/package 輸出的形式出貨。
 
 ## 怎麼用外掛擋工具？
 
@@ -274,12 +274,12 @@ tool_format: xml            # <name arg="value"></name>
 tool_format: native         # provider 原生的 function calling
 ```
 
-每種格式的具體樣子看 [生物指南 — 工具格式](creatures.md)；要做完全自訂的分隔符看 [reference/configuration.md — `tool_format`](../reference/configuration.md)。
+每種格式的具體樣子看 [生物指南：工具格式](creatures.md)；要做完全自訂的分隔符看 [reference/configuration.md：`tool_format`](../reference/configuration.md)。
 
 ## 怎麼選 dynamic 或 static skill mode？
 
 ```yaml
-skill_mode: dynamic   # 預設 — `info` 框架指令會在需要時才載完整文件
+skill_mode: dynamic   # 預設：`info` 框架指令會在需要時才載完整文件
 # 或
 skill_mode: static    # 完整工具文件直接塞進 system prompt
 ```
@@ -311,7 +311,7 @@ termination:
 
 ## 怎麼接一條確定性的 pipeline 邊？
 
-生物跑在生態瓶裡時，`output_wiring` 會把每一次回合結束變成一個 `creature_output` 事件，直接落到另一隻生物的佇列裡 — 完全繞過頻道：
+生物跑在生態瓶裡時，`output_wiring` 會把每一次回合結束變成一個 `creature_output` 事件，直接落到另一隻生物的佇列裡，完全繞過頻道：
 
 ```yaml
 output_wiring:
@@ -321,7 +321,7 @@ output_wiring:
   - { to: root, with_content: false }        # 只是 metadata ping
 ```
 
-生物不在生態瓶裡時，`output_wiring` 是 no-op。完整條目形狀見 [reference/configuration — 輸出接線](../reference/configuration.md#輸出接線)，生態瓶側的視角見 [生態瓶指南 — 輸出接線](terrariums.md#輸出接線)。
+生物不在生態瓶裡時，`output_wiring` 是 no-op。完整條目形狀見 [reference/configuration：輸出接線](../reference/configuration.md#輸出接線)，生態瓶側的視角見 [生態瓶指南：輸出接線](terrariums.md#輸出接線)。
 
 ## 怎麼讓多隻生物共用狀態 (不透過生態瓶)？
 
@@ -360,11 +360,11 @@ kt run path/to/creature --pwd /path/to/project
 
 - **環境變數沒展開。** 用 `${VAR}` (有大括號)。`$VAR` 會被當字面字串。
 - **子 config「搞丟」了父層的某個工具。** 因為你寫了 `no_inherit: [tools]`。拿掉就會改成延伸。
-- **Config 載入成功但工具不見。** 簡寫名稱會去查內建工具目錄 — 拼錯會靜靜 fall through。跑 `kt info path/to/creature` 檢查。
+- **Config 載入成功但工具不見。** 簡寫名稱會去查內建工具目錄，拼錯會靜靜 fall through。跑 `kt info path/to/creature` 檢查。
 - **兩個設定互相打架。** CLI 覆寫 (`--llm`) > config > `llm_profiles.yaml` 的 `default_model`。
 
 ## 延伸閱讀
 
-- [Reference / configuration](../reference/configuration.md) — 每個欄位、型別、預設值。
-- [撰寫生物](creatures.md) — 資料夾結構與解剖。
-- [外掛](plugins.md)、[自訂模組](custom-modules.md)、[MCP](mcp.md)、[記憶](memory.md) — 特定介面怎麼接。
+- [Reference / configuration](../reference/configuration.md)：每個欄位、型別、預設值。
+- [撰寫生物](creatures.md)：資料夾結構與解剖。
+- [外掛](plugins.md)、[自訂模組](custom-modules.md)、[MCP](mcp.md)、[記憶](memory.md)：特定介面怎麼接。

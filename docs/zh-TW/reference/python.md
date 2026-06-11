@@ -1,6 +1,6 @@
 ---
 title: Python API
-summary: kohakuterrarium 套件介面 — Terrarium 引擎、Creature、Agent、compose、測試 helper。
+summary: kohakuterrarium 的公開介面：errors、Agent、輪次結果、Terrarium 引擎、Creature、工作階段、packages、compose、validate 與 testing。
 tags:
   - reference
   - python
@@ -9,1140 +9,638 @@ tags:
 
 # Python API
 
-`kohakuterrarium` 套件裡所有公開的類別、函式、協定。條目依模組分組。簽名用現代 type hint。
+公開 Python 介面的正式參考。本頁的每一個簽名都由
+`tests/unit/test_docs_python_reference.py` 對照原始碼驗證：
+只要這裡的符號跟程式碼不一致，CI 就會失敗。
 
-架構請看 [concepts/README](../concepts/README.md)。任務走讀請看 [guides/programmatic-usage](../guides/programmatic-usage.md) 與 [guides/custom-modules](../guides/custom-modules.md)。
+平常需要的東西都可以從套件根目錄 import：
 
-## Import 介面
+```python
+import kohakuterrarium as kt
 
-| 想做什麼 | 用這個 |
-|---|---|
-| 執行期引擎 (獨立或多生物) | `kohakuterrarium.Terrarium` |
-| 一隻運行中生物的 handle | `kohakuterrarium.Creature` |
-| 引擎事件 | `kohakuterrarium.{EngineEvent, EventKind, EventFilter}` |
-| 拓樸結果 | `kohakuterrarium.{ConnectionResult, DisconnectionResult}` |
-| 直接控制代理 | `kohakuterrarium.core.agent.Agent` |
-| 串流聊天 (舊版 wrapper) | `kohakuterrarium.serving.agent_session.AgentSession` |
-| 載入 config | `kohakuterrarium.core.config.load_agent_config` / `kohakuterrarium.terrarium.config.load_terrarium_config` |
-| 持久化 / 搜尋 | `kohakuterrarium.session.store.SessionStore`、`kohakuterrarium.session.memory.SessionMemory` |
-| 寫 extension | `kohakuterrarium.modules.{tool,input,output,trigger,subagent}.base` |
-| 組管線 | `kohakuterrarium.compose` |
-| 寫測試 | `kohakuterrarium.testing` |
+kt.Agent          # single-agent runtime
+kt.Terrarium      # multi-agent engine
+kt.Creature       # running-agent handle inside the engine
+kt.Studio         # management facade (catalog / sessions / persistence)
+kt.tool           # @kt.tool: plain function -> agent tool
+kt.FunctionTool   # the class @kt.tool produces
+kt.SessionReader  # read-only .kohakutr inspection
+kt.SessionStore   # raw session persistence
+kt.TurnResult, kt.TextChunk, kt.Activity, kt.TurnEnded   # turn surface
+kt.EngineEvent, kt.EventKind, kt.EventFilter             # engine events
+kt.ConnectionResult, kt.DisconnectionResult              # topology results
+kt.errors         # typed exception hierarchy
+kt.validate       # pre-flight validation helpers
+kt.packages       # package install / resolve facade (subpackage)
+```
 
-舊版 `kohakuterrarium.terrarium.runtime.TerrariumRuntime` 與 `kohakuterrarium.serving.manager.KohakuManager` 在過渡期間仍存在，文件放在下面。
+`kt.compose` 與 `kt.testing` 以子套件方式 import
+(`from kohakuterrarium.compose import agent, factory, pure`、
+`from kohakuterrarium.testing.llm import ScriptedLLM`)。
+
+走讀式的說明在：[程式化使用](../guides/programmatic-usage.md)、
+[組合](../guides/composition.md)、[工作階段](../guides/sessions.md)、
+[套件](../guides/packages.md)。`Studio` 的說明在
+[guides/studio](../guides/studio.md) 與 [concepts/studio](../concepts/studio.md)。
 
 ---
 
-## 頂層套件 re-export
+## 錯誤與嚴格模式
 
-新的公開介面直接從 `kohakuterrarium` re-export：
+模組：`kohakuterrarium.errors`。框架在程式化介面上拋出的每個錯誤都繼承自
+`KTError`，所以一個 `except` 就能全部接住。許多子類別同時也繼承同一種失敗
+過去拋出的內建例外 (`FileNotFoundError` / `ValueError` / `TimeoutError`)，
+既有的 `except` 寫法不用改。
+
+- `KTError`：所有 KohakuTerrarium 錯誤的基底類別。
+- 設定：
+  - `ConfigError(KTError, ValueError)`：agent / terrarium 設定內容無效。
+  - `ConfigNotFoundError(ConfigError, FileNotFoundError)`：設定路徑或 `@pkg` 參照找不到。
+- 套件：
+  - `PackageError(KTError)`：套件系統錯誤的基底。
+  - `PackageRefError(PackageError, ValueError)`：`@` 參照格式錯誤。
+  - `PackageNotInstalledError(PackageError, FileNotFoundError)`：`@<pkg>/...` 指到未安裝的套件。
+  - `PackagePathNotFoundError(PackageError, FileNotFoundError)`：套件存在，但子路徑不存在。
+- LLM：
+  - `LLMError(KTError)`：provider 建構或呼叫失敗。
+  - `LLMNotConfiguredError(LLMError, ValueError)`：解析不出可用的 LLM (缺金鑰、profile 不存在)。
+- 工作階段：
+  - `SessionError(KTError)`：持久化 / 恢復失敗。
+  - `SessionNotResumableError(SessionError, ValueError)`：檔案存在但無法恢復。
+  - `SessionNotFoundError(SessionError, NotFoundError, FileNotFoundError)`：指名的工作階段不存在。
+- 輪次執行：
+  - `TurnError(KTError)`：輪次失敗 (provider 錯誤、工具無法復原的崩潰)。
+  - `TurnTimeoutError(TurnError, TimeoutError)`：輪次超出 `timeout=` 預算並被取消。
+  - `AgentNotRunningError(KTError, RuntimeError)`：操作需要已啟動的 agent。
+- 請求形 (給 studio 層用；HTTP adapter 會對應到狀態碼)：
+  `NotFoundError(KTError, KeyError)`、
+  `InvalidRequestError(KTError, ValueError)`、`ConflictError(KTError)`。
+
+**預設嚴格。** 程式化建構子 (`Agent.build`、`Agent.from_path`、
+`Terrarium.add_creature`、`Terrarium.apply_recipe`)
+都帶 `strict: bool = True`：解析不出的 LLM、不認識的工具、壞掉的外掛
+會直接拋錯，而不是默默降級。互動式前端會傳 `strict=False`。
+`Agent.run` / `Creature.run` 失敗時預設拋出
+`TurnError` / `TurnTimeoutError`，除非你傳 `raise_on_error=False`。
 
 ```python
-from kohakuterrarium import (
-    Terrarium,
-    Creature,
-    EngineEvent,
-    EventKind,
-    EventFilter,
-    ConnectionResult,
-    DisconnectionResult,
-)
+import kohakuterrarium as kt
+
+try:
+    agent = await kt.Agent.build("@kt-biome/creatures/general")
+except kt.errors.KTError as e:
+    print(f"setup failed: {e}")
 ```
 
-### `Terrarium`
+---
 
-模組：`kohakuterrarium.terrarium.engine`。執行期引擎 — 每行程一個。托管所有運行中生物，擁有 graph 級狀態。
+## Agent
 
-Classmethod factory：
+模組：`kohakuterrarium.core.agent` (re-export 為
+`kohakuterrarium.Agent`)。單 agent 執行期：LLM 控制器、
+工具、觸發器、子代理、I/O。
 
-- `async Terrarium.with_creature(config, *, pwd=None) -> tuple[Terrarium, Creature]` — 引擎 + 一隻生物。
-- `async Terrarium.from_recipe(recipe, *, pwd=None) -> Terrarium` — 引擎並套用一份 recipe。`recipe` 可以是 `TerrariumConfig` 或 YAML 路徑。
-- `async Terrarium.resume(store, *, recipe=None) -> Terrarium` — **尚未實作**；會丟 `NotImplementedError`。
+建構：
 
-建構函式：
-
-- `Terrarium(*, pwd=None, session_dir=None)` — 空引擎。用 `add_creature` / `apply_recipe` 填它。
-
-Async context manager：
-
-- `async with Terrarium() as engine: ...` — `__aexit__` 呼叫 `shutdown()`。
-
-生物 CRUD：
-
-- `async add_creature(config, *, graph=None, creature_id=None, llm_override=None, pwd=None, start=True) -> Creature`
-- `async remove_creature(creature) -> None`
-- `get_creature(creature_id) -> Creature`
-- `list_creatures() -> list[Creature]`
-- Pythonic accessor：`engine[id]`、`id in engine`、`for c in engine`、`len(engine)`。
-
-頻道 CRUD：
-
-- `async add_channel(graph, name, description="") -> ChannelInfo` —— 所有圖頻道都是廣播。
-- `async connect(sender, receiver, *, channel=None) -> ConnectionResult` —— 跨圖 connect 會合併圖（environment 取聯集、session store 合併）。
-- `async disconnect(sender, receiver, *, channel=None) -> DisconnectionResult` — 可能拆 graph (parent session 複製到兩邊)。
-
-輸出接線：
-
-- `async wire_output(creature, sink: OutputModule) -> str`
-- `async unwire_output(creature, sink_id: str) -> bool`
-
-Graphs：
-
-- `get_graph(graph_id) -> GraphTopology`
-- `list_graphs() -> list[GraphTopology]`
-
-Recipe：
-
-- `async apply_recipe(recipe, *, graph=None, pwd=None, creature_builder=None) -> GraphTopology`
+- `await Agent.build(config, *, llm=None, pwd=None, io="config", strict=True, tools=None, plugins=None, subagents=None, outputs=None, user_commands=None, input_module=None, output_module=None, session=None, environment=None) -> Agent`：
+  標準的程式化建構子。
+  - `config`：設定資料夾路徑、`@pkg/...` 參照，或一個
+    `AgentConfig` 實例。
+  - `llm`：provider 實例 (例如 `ScriptedLLM`)、選擇器字串
+    (profile / preset 名稱或 `provider/model[@variations]`)、
+    `LLMProfile`，或 `None` (從設定解析)。
+  - `io`：`"config"` (依宣告啟動 I/O)、`"none"` (停用輸入)、
+    `"headless"` (停用輸入且靜音預設輸出；批次任務的預設)。
+    明確指定的 `input_module` / `output_module` 優先於 `io`。
+  - `tools` / `plugins` / `subagents`：在系統提示詞聚合之前註冊的
+    實例 (`kt.tool` adapter、`BasePlugin` 物件、`SubAgentConfig`)。
+  - `outputs`：額外的具名輸出 `{name: OutputModule}`；
+    `user_commands`：額外的 slash 指令 `{name: UserCommand}`。
+  - 回傳已設定好、但**尚未啟動**的 agent。
+- `Agent.from_path(config_path, *, input_module=None, output_module=None, session=None, environment=None, llm=None, pwd=None, strict=True, tools=None, plugins=None) -> Agent`：
+  同步的低階建構子；新程式碼請優先用 `build`。
 
 生命週期：
 
-- `async start(creature) / async stop(creature)`
-- `async stop_graph(graph) -> None`
-- `async shutdown() -> None` — 冪等。
+- `await agent.start()` / `await agent.stop()`：一定要成對呼叫
+  (`Agent` 沒有 `async with`)。
+- `await agent.run_forever()`：舊式的自主主迴圈
+  (由輸入模組 + 觸發器驅動 agent，直到輸入結束)。
+  `kt run` 走的就是這條路；一次性腳本請改用 `run`。
+- `agent.interrupt()`：取消進行中的輪次 (非阻塞)。
+
+輪次驅動 (見[輪次結果與事件](#輪次結果與事件))：
+
+- `await agent.run(content, *, timeout=None, source="programmatic", raise_on_error=True) -> TurnResult`
+- `agent.run_stream(content, *, timeout=None, source="programmatic") -> AsyncIterator[TurnEvent]`
+
+執行期擴充 (每一項都會即時更新系統提示詞)：
+
+- `agent.add_tool(tool)`：registry + executor + prompt 一次搞定；對 `tool_name` 冪等。
+- `await agent.add_plugin(plugin, *, enabled=True)`：即使在 `start()` 之後加入，也會觸發外掛的 `on_load`。
+- `agent.add_subagent(config)`：註冊一個 `SubAgentConfig`。
+- `agent.refresh_system_prompt()`：手動重算聚合後的提示詞。
+
+其他執行期控制：
+
+- `await agent.inject_input(content, source="programmatic") -> bool`：推入輸入但不消費輸出。
+- `agent.switch_model(profile_name) -> str` / `agent.llm_identifier() -> str`
+- `agent.attach_session_store(store)`：接上一個 `SessionStore` sink。
+- `agent.set_output_handler(handler, replace_default=False)`
+- 屬性：`is_running`、`tools`、`subagents`、`conversation_history`。
+
+```python
+import kohakuterrarium as kt
+
+agent = await kt.Agent.build("@kt-biome/creatures/general", io="headless")
+await agent.start()
+try:
+    result = await agent.run("Summarize ./README.md", timeout=300)
+    print(result.text)
+finally:
+    await agent.stop()
+```
+
+### `@kt.tool` / `FunctionTool`
+
+模組：`kohakuterrarium.modules.tool.function` (re-export 為
+`kohakuterrarium.tool` / `kohakuterrarium.FunctionTool`)。把普通的
+同步或非同步函式變成 agent 工具：名稱取自函式名，
+描述取自 docstring 第一行，JSON-schema 參數從型別註記產生。
+同步函式透過 `asyncio.to_thread` 執行。`context`
+參數會收到 `ToolContext`。
+
+- `tool(fn=None, *, name=None, description=None, execution_mode=ExecutionMode.DIRECT) -> FunctionTool | decorator`：
+  可寫成 `@tool`、`@tool(name=..., description=...)`，或直接呼叫
+  `tool(existing_fn)`。
+- `FunctionTool(fn, *, name=None, description=None, execution_mode=...)`：背後的類別。
+
+```python
+import kohakuterrarium as kt
+
+@kt.tool
+def check_stock(item: str) -> str:
+    """Look up how many units of an item are in stock."""
+    return f"{item}: 3 in stock"
+
+agent = await kt.Agent.build(cfg, tools=[check_stock])
+```
+
+---
+
+## 輪次結果與事件
+
+模組：`kohakuterrarium.core.turn` (四個型別都從套件根目錄
+re-export)。`run`、`run_stream`、`attach` 回傳 / 產出的
+有型別觀察介面。
+
+- `TurnResult`：一個完整輪次的結果：
+  - `status: str`：`"ok"` | `"error"` | `"timeout"` | `"interrupted"`。
+  - `ok: bool`：property，等於 `status == "ok"`。
+  - `text: str`：串接後的 assistant 文字。
+  - `error: str | None`：status 非 ok 時的失敗細節。
+  - `tool_calls: list[Activity]`：`tool_start` / `tool_done` / `tool_error` 活動。
+  - `activities: list[Activity]`：該輪次的所有非文字事件。
+  - `usage: dict | None`：provider 有回報時的 token 用量。
+  - `duration_s: float`
+- `TextChunk`：`text: str`；一段串流出來的 assistant 文字。
+- `Activity`：`kind: str`、`detail: str`、`metadata: dict`；
+  非文字事件 (`tool_start`、`tool_done`、`tool_error`、
+  `subagent_start`、`subagent_done`、`processing_start`、
+  `processing_end`、`processing_error`、`session_info`、`ask_user`…)。
+- `TurnEnded`：`result: TurnResult`；`run_stream` 的終結事件。
+- `TurnEvent = TextChunk | Activity | TurnEnded`：串流產出的 union。
+- `AgentEventStream`：`Creature.attach()` 背後的開放式觀察者：
+  async context manager + `TurnEvent` 的 async iterator；
+  非破壞性、可多消費者。
+
+值得知道的語意：
+
+- `run` 預設拋出 `TurnError` / `TurnTimeoutError`；傳
+  `raise_on_error=False` 可以永遠拿到 `TurnResult`，自己依
+  `result.status` 分支。
+- `timeout=` 真的會**中斷**輪次 (控制器迴圈被取消並收尾)，
+  不是放任一個還在燒的輪次不管。
+- `run_stream` 迭代過程中永遠不拋錯：錯誤會以
+  `Activity(kind="processing_error")` 浮現，並出現在最後的
+  `TurnEnded(result)`。
+
+```python
+async for ev in agent.run_stream("Refactor utils.py"):
+    match ev:
+        case kt.TextChunk(text=t):
+            print(t, end="", flush=True)
+        case kt.Activity(kind="tool_start", detail=d):
+            print(f"\n[tool] {d}")
+        case kt.TurnEnded(result=r):
+            print(f"\n[done: {r.status}]")
+```
+
+---
+
+## Terrarium 引擎
+
+模組：`kohakuterrarium.terrarium.engine` (re-export 為
+`kohakuterrarium.Terrarium`)。多代理執行期引擎：托管行程內
+所有運行中的生物 (creature)；獨立 agent 就是一張單生物圖。
+
+建構：
+
+- `Terrarium(*, pwd=None, session_dir=None)`：裸引擎。
+  指定 `session_dir` 會開啟 **autosession**：每張新圖自動拿到一個
+  `<session_dir>/<graph_id>.kohakutr` store (合併 / 分割產生的
+  子圖也存在那裡)。
+- `await Terrarium.from_recipe(recipe, *, pwd=None) -> Terrarium`：
+  套用配方的引擎 (`TerrariumConfig` 或 YAML 路徑 / `@pkg` 參照)。
+- `await Terrarium.resume(store, *, pwd=None, llm=None) -> Terrarium`：
+  新引擎 + 認領一個已儲存的工作階段 (`SessionStore` 或路徑；
+  `llm` 是選擇器字串覆寫)。
+- `await Terrarium.with_creature(config, *, pwd=None) -> tuple[Terrarium, Creature]`：
+  一次建好引擎 + 一隻生物。
+- `async with Terrarium() as engine: ...`：`__aexit__` 會呼叫 `shutdown()`。
+
+生物的 CRUD：
+
+- `await engine.add_creature(config, *, graph=None, creature_id=None, llm=None, pwd=None, start=True, is_privileged=False, parent_creature_id=None, io="config", strict=True, session=None, name=None, tools=None, plugins=None) -> Creature`
+  - `config`：路徑 / `@pkg/...` 參照、`AgentConfig`、`CreatureConfig`，
+    或一個已建好的 `Creature` (對已建好的生物傳建構期 kwargs 會拋錯)。
+  - `session`：持久化控制：傳路徑就在那個檔案建立 store；
+    `True` 在預設 session 目錄建立；`False` 即使在 autosession 下
+    也停用持久化；傳 `SessionStore` 直接掛上；`None` (預設)
+    跟隨引擎 (autosession / 圖既有的 store / 不持久化)。
+  - `is_privileged`：授予 `group_*` 圖變更工具
+    (只升不降；不會把已建好的生物降權)。
+  - `llm` / `io` / `strict` / `tools` / `plugins`：契約同
+    `Agent.build`。
+  - `name`：生成時的顯示名稱覆寫。
+- `await engine.remove_creature(creature)`：停止 + 移除；可能觸發圖的自動分割。
+- `engine.get_creature(creature_id) -> Creature` / `engine.list_creatures() -> list[Creature]`
+- Pythonic 存取：`engine[id]`、`id in engine`、`for c in engine`、`len(engine)`。
+
+頻道與拓樸 (圖層的所有頻道都是廣播，每個監聽者都收到每一則訊息)：
+
+- `await engine.add_channel(graph, name, description="") -> ChannelInfo`
+- `await engine.remove_channel(graph, name) -> TopologyDelta`：可能觸發自動分割。
+- `await engine.connect(sender, receiver, *, channel=None) -> ConnectionResult`：
+  跨圖連接會自動合併 (環境取聯集、session store 合併)。
+- `await engine.disconnect(sender, receiver, *, channel=None) -> DisconnectionResult`：
+  可能觸發自動分割 (兩側各拿到一份 store 副本)。
+- `engine.environment(graph) -> Environment`：圖的即時環境公開
+  handle (不認識的圖會拋 `KeyError`)。
+- `engine.channel(graph, name)`：即時的廣播頻道 handle (或
+  `None`)：`await ch.send(ChannelMessage(...))` 可以替一張圖播種，
+  `ch.history` 可以觀察流量。
+- `engine.get_graph(graph_id) -> GraphTopology` / `engine.list_graphs() -> list[GraphTopology]`
+- `await engine.assign_root(creature, *, report_channel="report_to_root") -> RootAssignment`：
+  把一隻生物升為其所屬圖的特權節點，並接好回報頻道。
+
+配方與恢復進引擎：
+
+- `await engine.apply_recipe(recipe, *, graph=None, pwd=None, llm=None, strict=True, session=None, creature_builder=None) -> GraphTopology`：
+  `session` 遵循 `add_creature` 的契約，但會替整張圖建立一個
+  terrarium 型的 store。
+- `await engine.adopt_session(store, *, pwd=None, llm=None) -> str`：
+  把已儲存的工作階段恢復進這個運行中的引擎；回傳新的
+  `graph_id`。
+- `await engine.attach_session(graph, store)`：把一個
+  `SessionStore` 掛到圖上 (傳路徑則就地建立)。
+
+生命週期與輸出接線：
+
+- `await engine.start(creature)` / `await engine.stop(creature)` / `await engine.stop_graph(graph)`
+- `await engine.shutdown()`：停止一切、關閉引擎建立的每個 store、
+  終結所有訂閱者；冪等。
+- `await engine.wire_output(creature, target) -> str` / `await engine.unwire_output(creature, edge_id) -> bool`
+- `engine.list_output_wiring(creature) -> list[dict]`
+- `await engine.wire_output_sink(creature, sink) -> str` / `await engine.unwire_output_sink(creature, sink_id) -> bool`
 
 可觀測性：
 
-- `async subscribe(filter=None) -> AsyncIterator[EngineEvent]`
-- `status() -> dict` (整體) / `status(creature) -> dict`
+- `engine.subscribe(filter=None) -> AsyncIterator[EngineEvent]`：
+  訂閱者在呼叫當下就註冊 (`subscribe()` 到第一次 `await` 之間的
+  事件會被緩衝)；跳出迴圈即解除註冊；`shutdown()` 會終結它。
+- `engine.status()` (整體) / `engine.status(creature)` (單生物 dict)。
 
-Session：
+凡是接受 `CreatureRef` / `GraphRef` 的地方，傳物件本身或其字串 id 都行。
 
-- `async attach_session(graph, store: SessionStore) -> None`
+### 引擎事件
 
-接受 `CreatureRef` / `GraphRef` 的地方都可以傳物件本身或字串 ID。
+模組：`kohakuterrarium.terrarium.events` (從根目錄 re-export)。
+引擎匯流排只承載**結構**事件；各生物的內容
+(文字、工具活動) 走有型別的輪次介面。
 
-### `Creature`
+- `EventKind` (`str` enum)：`CHANNEL_MESSAGE`、`TOPOLOGY_CHANGED`、
+  `SESSION_KIND_CHANGED`、`CREATURE_ADDED`、`CREATURE_STARTED`、
+  `CREATURE_STOPPED`、`OUTPUT_WIRE_ADDED`、`OUTPUT_WIRE_REMOVED`、
+  `PARENT_LINK_CHANGED`。
+- `EngineEvent`：`kind`、`creature_id`、`graph_id`、`channel`、
+  `payload: dict`、`ts: float`。
+- `EventFilter(kinds=None, creature_ids=None, graph_ids=None, channels=None)`：
+  欄位以 AND 結合；`None` 表示「任意」；`matches(ev) -> bool`。
+- `ConnectionResult`：`channel`、`trigger_id`、`delta_kind`
+  (`"nothing"` | `"merge"`)、`graph_id`。
+- `DisconnectionResult`：`channels: list[str]`、`delta_kind`
+  (`"nothing"` | `"split"`)。
 
-模組：`kohakuterrarium.terrarium.creature_host`。一隻運行中的生物 handle。由 `add_creature` / `with_creature` 回傳；不要直接建構。
+```python
+import kohakuterrarium as kt
 
-屬性：
+async with kt.Terrarium(session_dir="runs/") as engine:
+    alice = await engine.add_creature("@kt-biome/creatures/general")
+    bob = await engine.add_creature("@kt-biome/creatures/general")
 
-- `creature_id: str`、`name: str`、`graph_id: str`
-- `agent: Agent` — 背後的 LLM 控制器。
-- `listen_channels: list[str]`、`send_channels: list[str]`
-- `is_running: bool`
-
-方法：
-
-- `async start() / async stop()` — 冪等。
-- `async inject_input(message, *, source="chat") -> None`
-- `async chat(message) -> AsyncIterator[str]` — 推輸入並串流文字回應。
-- `get_status() -> dict` — model、max_context、compact_threshold、provider、session_id、tools、subagents、pwd、graph_id、listen / send 頻道。
-- `get_log_entries(last_n=20) -> list[LogEntry]`
-- `get_log_text(last_n=10) -> str`
-
-### `EngineEvent`、`EventKind`、`EventFilter`
-
-模組：`kohakuterrarium.terrarium.events`。
-
-引擎裡所有可觀察的事都以 `EngineEvent` 形式浮現。
-
-**`EventKind`** (`str` 值的 enum)：
-
-- `TEXT`、`ACTIVITY`、`CHANNEL_MESSAGE`
-- `TOPOLOGY_CHANGED`、`SESSION_FORKED`
-- `CREATURE_STARTED`、`CREATURE_STOPPED`
-- `PROCESSING_START`、`PROCESSING_END`
-- `ERROR`
-
-**`EngineEvent`** dataclass：
-
-- `kind: EventKind`
-- `creature_id: str | None`
-- `graph_id: str | None`
-- `channel: str | None`
-- `payload: dict`
-- `ts: float`
-
-**`EventFilter`** dataclass：
-
-- `kinds: set[EventKind] | None`
-- `creature_ids: set[str] | None`
-- `graph_ids: set[str] | None`
-- `channels: set[str] | None`
-- `matches(ev: EngineEvent) -> bool`
-
-欄位 AND 組合；`None` 表示「任意」。傳 `EventFilter()` 或省略表示收全部。
-
-### `ConnectionResult`、`DisconnectionResult`
-
-模組：`kohakuterrarium.terrarium.events`。
-
-**`ConnectionResult`** — `Terrarium.connect` 回傳：
-
-- `channel: str` — 頻道名 (需要時建立)。
-- `trigger_id: str` — 接收端注入的 `ChannelTrigger` id。
-- `delta_kind: str` — `"nothing"` 或 `"merge"`。
-
-**`DisconnectionResult`** — `Terrarium.disconnect` 回傳：
-
-- `channels: list[str]` — 被斷開的頻道。
-- `delta_kind: str` — `"nothing"` 或 `"split"`。
-
-### `GraphTopology`、`ChannelInfo`
-
-模組：`kohakuterrarium.terrarium.topology`。純資料拓樸模型 — 沒有 live agent 參考。
-
-**`GraphTopology`** — 一個連通分量：
-
-- `graph_id: str`
-- `creature_ids: set[str]`
-- `channels: dict[str, ChannelInfo]`
-- `listen_edges: dict[str, set[str]]`
-- `send_edges: dict[str, set[str]]`
-- `has_creature(creature_id) -> bool`
-- `has_channel(name) -> bool`
-
-**`ChannelInfo`** — `name, description`。所有圖頻道都是廣播 —— 拓樸層不存在 kind 選擇。
-
-### Compose 互通
-
-`Creature` 設計上要滿足 `kohakuterrarium.compose.core` 的 `Runnable` 協定，讓生物可以用 `>>` / `&` / `|` / `*` 接進 pipeline。這條組合路徑的整合測試還需要補。
+    # 先訂閱、再變更：subscribe() 到第一次 await 之間發出的
+    # 事件會被緩衝，一個都不會漏。
+    events = engine.subscribe(kt.EventFilter(kinds={kt.EventKind.TOPOLOGY_CHANGED}))
+    result = await engine.connect(alice, bob, channel="alice_to_bob")
+    assert result.delta_kind == "merge"   # 兩張圖合而為一
+    ev = await anext(events)
+    print(ev.kind, ev.payload)
+```
 
 ---
 
-## `kohakuterrarium.core`
+## Creature
 
-### `Agent`
+模組：`kohakuterrarium.terrarium.creature_host` (re-export 為
+`kohakuterrarium.Creature`)。引擎對一隻運行中 agent 的 handle。
+由 `add_creature` / `with_creature` 回傳；不直接建構。
 
-模組：`kohakuterrarium.core.agent`。
+屬性：`creature_id`、`name`、`agent: Agent`、`graph_id`、
+`listen_channels`、`send_channels`、`is_privileged`、
+`parent_creature_id`、`is_running`、`status` (`"not_started"`、
+`"error"`、`"busy"`、`"idle"`、`"stopped"` 之一)。
 
-主 orchestrator：把 LLM、controller、executor、觸發器、I/O、外掛串起來。繼承 `AgentInitMixin`、`AgentHandlersMixin`、`AgentMessagesMixin`。
+輪次驅動 (委派給底層的 `Agent`)：
 
-Classmethod factory：
+- `await creature.run(content, **kwargs) -> TurnResult`：
+  `timeout=` / `raise_on_error=` 語意同 `Agent.run`。
+- `creature.run_stream(content, **kwargs) -> AsyncIterator[TurnEvent]`
+- `creature.attach() -> AgentEventStream`：非破壞性、可多消費者的
+  觀察者；連帶外 (out-of-band) 的輪次 (觸發器、頻道訊息)
+  也會捕捉到：
+
+  ```python
+  async with creature.attach() as stream:
+      async for ev in stream:
+          ...
+  ```
+
+- `await creature.chat(message) -> AsyncIterator[str]`：純文字的
+  語法糖 (注入 + 排空)；新程式碼請優先用 `run` / `run_stream`。
+- `await creature.inject_input(message, *, source="chat")`：推入
+  輸入但不消費輸出。
+
+生命週期 / 內省：
+
+- `await creature.start()` / `await creature.stop()`：冪等。
+- `creature.get_status() -> dict`：model、provider、session_id、
+  tools、subagents、pwd、channels、privilege。
+- `creature.get_log_entries(last_n=20)` / `creature.get_log_text(last_n=10)`。
+
+---
+
+## 工作階段
+
+### `SessionReader`：唯讀檢視
+
+模組：`kohakuterrarium.session.reader` (re-export 為
+`kohakuterrarium.SessionReader`)。針對 `.kohakutr` 檔案的一站式
+唯讀介面。透過 `SessionStore.open_readonly` 開啟，讀取永遠不會
+更新 `last_active` 或改動 `status`。支援 context manager。
+
+- `SessionReader(path)`：檔案不存在拋 `FileNotFoundError`；
+  `~` 會展開。
+- 屬性：`path: Path`、`meta: dict` (session_id、config_type /
+  config_path、status…)、`agents: list[str]`。
+- `reader.events(agent=None) -> list[dict]`：append-only 事件
+  日誌；`None` 會串接所有 agent 的事件。
+- `reader.conversation(agent=None) -> list[dict]`：最終的對話
+  快照 (OpenAI message dict)。
+- `reader.channel_messages(channel) -> list[dict]`：一條 terrarium
+  頻道的歷史。
+- `reader.turns(agent=None) -> list[TurnView]`：從事件日誌
+  重組出來的 live-branch 輪次。`TurnView`：`index`、`user_text`、
+  `assistant_text`、`tool_calls: list[dict]`、`source`、`ts`。
+- `reader.search(query, *, mode="fts", k=10, agent=None) -> list[SearchResult]`：
+  全文 (或已建索引時的向量) 搜尋；未建索引的工作階段
+  不會有結果。
+- `reader.index() -> int`：臨時替 `search` 建 FTS 索引。
+- `reader.close()`：或用 `with SessionReader(...) as r:`。
 
 ```python
-Agent.from_path(
-    config_path: str,
-    *,
-    input_module: InputModule | None = None,
-    output_module: OutputModule | None = None,
-    session: Session | None = None,
-    environment: Environment | None = None,
-    llm_override: str | None = None,
-    pwd: str | None = None,
-) -> Agent
+import kohakuterrarium as kt
+
+with kt.SessionReader("runs/student-42.kohakutr") as r:
+    print(r.meta["status"], r.agents)
+    for turn in r.turns():
+        print(turn.user_text, "->", turn.assistant_text[:80])
 ```
 
-生命週期：
+### 引擎持有的持久化與恢復
 
-- `async start() -> None` — 啟動 I/O、輸出、觸發器、LLM、外掛。
-- `async stop() -> None` — 乾淨地停下所有模組。
-- `async run() -> None` — 完整事件迴圈。若尚未 start 會先呼叫 `start()`。
-- `interrupt() -> None` — 非阻塞；任何 thread 呼叫都安全。
+持久化是引擎的功能，不需要手動的 `SessionStore` +
+`init_meta` + `attach_session` 儀式：
 
-輸入與事件：
+- `Terrarium(session_dir="runs/")`：每張圖自動 autosession。
+- `engine.add_creature(..., session="runs/x.kohakutr")`：單生物
+  store (路徑 | `True` | `False` | `SessionStore` | `None`)。
+- `engine.apply_recipe(..., session=...)`：整張配方圖一個 store。
+- `await Terrarium.resume(store_or_path, *, pwd=None, llm=None)`：
+  從已儲存的工作階段建一個新引擎。
+- `await engine.adopt_session(store_or_path, *, pwd=None, llm=None) -> str`：
+  恢復進運行中的引擎。
+- `await engine.shutdown()` 會關閉引擎建立的每個 store
+  (檔案不會再卡在 `status: "running"`)。
 
-- `async inject_input(content: str | list[ContentPart], source: str = "programmatic") -> None`
-- `async inject_event(event: TriggerEvent) -> None`
+`SessionStore` (模組 `kohakuterrarium.session.store`，從根目錄
+re-export) 仍是底層原語：
 
-執行期控制：
+- `SessionStore(path)`：以讀寫模式開啟。
+- `SessionStore.open_readonly(path)`：`close()` 永不改動 meta；
+  所有列表 / 預覽消費者都該用這個。
+- `store.close(update_status=True)`：冪等；`update_status=True`
+  會把工作階段標為 paused 並更新 `last_active` (唯讀 store 上忽略)。
+- 事件 / 對話 / 狀態 / 頻道 / job 的存取器，見
+  [工作階段使用指南](../guides/sessions.md)。
 
-- `switch_model(profile_name: str) -> str` — 回傳解析後的 model id。
-- `async add_trigger(trigger: BaseTrigger, trigger_id: str | None = None) -> str`
-- `async remove_trigger(trigger_id_or_trigger: str | BaseTrigger) -> bool`
-- `update_system_prompt(content: str, replace: bool = False) -> None`
-- `get_system_prompt() -> str`
-- `attach_session_store(store: Any) -> None`
-- `set_output_handler(handler: Any, replace_default: bool = False) -> None`
-- `get_state() -> dict[str, Any]` — name、running、tools、subagents、message count、pending jobs。
+---
 
-屬性：
+## Packages
 
-- `is_running: bool`
-- `tools: list[str]`
-- `subagents: list[str]`
-- `conversation_history: list[dict]`
+模組：`kohakuterrarium.packages`，惰性門面 (PEP 562)：名稱在第一次
+屬性存取時才解析，import 本身很便宜。
 
-Attribute：
+安裝生命週期：
 
-- `config: AgentConfig`
-- `llm: LLMProvider`
-- `controller: Controller`
-- `executor: Executor`
-- `registry: Registry`
-- `session: Session`
-- `environment: Environment | None`
-- `input: InputModule`
-- `output_router: OutputRouter`
-- `trigger_manager: TriggerManager`
-- `session_store: Any`
-- `compact_manager: Any`
-- `plugins: Any`
+- `ensure(spec, *, deps="auto") -> str`：冪等安裝；已安裝就直接
+  回傳套件名稱 (不做版本檢查，連鎖定版本的 spec 也一樣)。
+  批次腳本開頭就該呼叫這個。
+- `install_package_spec(spec, editable=False, name_override=None, *, deps="auto") -> str`：
+  `@name` / `@name@version` / `@source/name` 透過市集解析；
+  git URL 與本地路徑直接放行。
+- `install_package(source, editable=False, name_override=None, ref=None, *, deps="auto") -> str`：
+  git URL 或本地目錄。
+- `update_package(name, *, deps="auto") -> str`：原地
+  `git pull --ff-only`；鎖定版本的安裝會拒絕更新。
+- `uninstall_package(name) -> bool`
 
-補充：
+`deps` 是 Python 依賴政策：`"auto"` 用 `sys.executable -m pip`
+安裝 manifest 的 `python_dependencies` + `requirements.txt`；
+`"never"` 跳過。不認識的政策或安裝失敗會拋 `PackageError`。
 
-- `environment` 在多代理時由 `TerrariumRuntime` 提供；獨立代理時為 `None`。
-- `Agent` 實例 `stop()` 之後不能重用；要從 `SessionStore` 接回來，請建新的。
+參照解析與佈局：
+
+- `is_package_ref(path) -> bool`：是不是 `@pkg/...` 路徑參照？
+- `resolve_package_path(ref) -> Path` / `resolve_any_path(path) -> Path`
+- `packages_dir() -> Path`：作用中的套件目錄；尊重
+  `KT_CONFIG_DIR` (預設 `~/.kohakuterrarium/packages`)。
+- `get_package_root(name) -> Path | None` / `find_package_root_for_path(path) -> Path | None`
+- `list_packages()` / `get_package_modules(...)`
+
+Manifest 槽位解析器：`resolve_package_tool`、`resolve_package_io`、
+`resolve_package_trigger`、`resolve_package_command`、
+`resolve_package_user_command`、`resolve_package_prompt`、
+`resolve_package_skills`、`get_package_framework_hints`。
+
+re-export 的型別化錯誤：`PackageError`、`PackageRefError`、
+`PackageNotInstalledError`、`PackagePathNotFoundError`。
 
 ```python
-agent = Agent.from_path("creatures/my_agent", llm_override="claude-opus-4.7")
+from kohakuterrarium import packages
+
+packages.ensure("@kt-biome")                  # 冪等安裝
+path = packages.resolve_package_path("@kt-biome/creatures/swe")
+for pkg in packages.list_packages():
+    print(pkg["name"], pkg["version"])
+```
+
+---
+
+## Compose
+
+模組：`kohakuterrarium.compose`。建在 agent 與普通 callable 之上的
+pipeline 代數。匯出：`agent`、`factory`、`AgentRunnable`、
+`AgentFactory`、`BaseRunnable`、`Runnable`、`Pure`、`pure`、`Sequence`、
+`Product`、`Fallback`、`FailsWhen`、`Retry`、`Router`、
+`PipelineIterator`。
+
+Agent 包裝器：
+
+- `await agent(config, *, engine=None, pwd=None, llm=None) -> AgentRunnable`：
+  持久 agent (對話跨呼叫累積)；是 async context manager。
+  `config` 可以是 `AgentConfig`、路徑或 `@pkg/...` 參照；`llm`
+  遵循標準的選擇器文法。`engine=None` 時會建立一個私有的
+  `Terrarium`，並隨 runnable 一起收掉；傳入共用引擎可以攤平
+  啟動成本 (此時關閉只會移除該生物)。
+- `factory(config, *, engine=None, pwd=None, llm=None) -> AgentFactory`：
+  短命版：每次呼叫一個全新的 agent，用完即毀。
+
+運算子 (都回傳 `BaseRunnable`)：
+
+- `a >> b`：sequence；把輸出餵給下一個輸入。普通 callable
+  自動包成 `Pure`；右邊放 dict 會變成 `Router`。
+- `a & b`：平行 product；回傳 tuple。第一個失敗發生時，
+  其餘還活著的兄弟會被**取消並等待完成**，例外才往上傳。
+- `a | b`：fallback；發生例外時用原始輸入跑 `b`。
+  連 fallback 也失敗時，主要例外會以 `__cause__` 鏈上去。
+- `a * N`：最多重試 `N` 次 (立即重試)。
+- `.retry(max_attempts, *, backoff=0.0, max_backoff=30.0)`：指數
+  退避的重試 (每次睡眠加倍，有上限)。
+- `.iterate(initial_input)`：async iterator，把輸出回灌成下一次的
+  輸入 (`it.feed(value)` 可覆寫下一次輸入)。
+- `.map(fn)` / `.contramap(fn)`：後置 / 前置轉換。
+- `.fails_when(predicate)`：輸出符合 predicate 時拋
+  `ValueError` (把「錯誤的成功」變成 fallback 的觸發點)。
+
+```python
+from kohakuterrarium.compose import agent, factory, pure
+
+async with await agent("@kt-biome/creatures/swe", llm="fast") as swe:
+    pipeline = swe >> pure(str.strip) >> (lambda t: f"Review:\n{t}")
+    result = await (pipeline.retry(3, backoff=1.0))("Implement the feature")
+```
+
+---
+
+## Validate
+
+模組：`kohakuterrarium.validate` (re-export 為
+`kohakuterrarium.validate`)。事前檢查，遇到第一個問題就拋出
+型別化錯誤；`kt doctor` 是它的 CLI 包裝。
+
+- `validate.config(path) -> AgentConfig`：agent 設定資料夾 /
+  `@pkg` 參照能以完全嚴格模式解析。
+- `validate.terrarium_config(path) -> TerrariumConfig`：terrarium
+  配方能解析。
+- `validate.llm(selector=None) -> str`：選擇器能解析且
+  provider 能建構 (檢查憑證，不碰網路)；回傳標準的
+  `provider/name[@variations]` 識別字。會拋
+  `LLMNotConfiguredError` / `ValueError`。
+- `validate.creature(path, *, llm_binding=None) -> ValidationReport`：
+  完整的 dry-run 建構 (`strict=True`、headless IO、不啟動)。
+  `ValidationReport`：`name`、`config_path`、`model_identifier`、
+  `tools`、`plugins`、`subagents`。
+- `await validate.ping(selector_or_provider=None, *, timeout=30.0) -> str`：
+  唯一會碰網路的驗證器：跑一次最小的 LLM
+  來回；回傳回覆文字。
+
+```python
+import kohakuterrarium as kt
+
+kt.validate.config("./scoring-agent")
+kt.validate.llm("openai/gpt-5@reasoning=high")
+report = kt.validate.creature("./scoring-agent")
+await kt.validate.ping("openai/gpt-5")
+```
+
+---
+
+## Testing
+
+模組：`kohakuterrarium.testing`。
+
+- `ScriptedLLM(script: list[ScriptEntry] | list[str] | None = None)`
+  (模組 `kohakuterrarium.testing.llm`)，確定性的 provider。
+  **優先直接注入**：每個建構入口都接受實例的 `llm=`：
+  `Agent.build(cfg, llm=ScriptedLLM([...]))`、
+  `engine.add_creature(path, llm=...)`、`compose.agent(cfg, llm=...)`。
+  斷言介面：`call_count`、`call_log`。
+  `ScriptEntry(response, match=None, delay_per_chunk=0, chunk_size=10)`。
+- `OutputRecorder` (`testing.output`)：捕捉 `chunks`、`writes`、
+  `activities`、`all_text`。
+- `EventRecorder` (`testing.events`)：`record`、`get_all`、
+  `get_by_type`、`clear`。
+- `TestAgentBuilder` (`testing.agent`)：流暢式的單元測試 harness
+  (`with_llm_script`、`with_builtin_tools`、`build()`)。
+
+`bootstrap.llm.create_llm_provider` +
+`bootstrap.agent_init.create_llm_provider` 這個 monkeypatch 縫
+只剩框架內部建構 agent 的路徑會用到 (設定檔、恢復、配方)。
+
+```python
+import kohakuterrarium as kt
+from kohakuterrarium.testing.llm import ScriptedLLM
+
+agent = await kt.Agent.build(cfg, llm=ScriptedLLM(["Hello!"]), io="headless")
 await agent.start()
-await agent.inject_input("Hello")
+result = await agent.run("hi")
+assert result.text == "Hello!"
 await agent.stop()
 ```
 
-### `AgentConfig`
-
-模組：`kohakuterrarium.core.config_types`。Dataclass。
-
-生物設定的每一個欄位。YAML 形式見 [configuration.md](configuration.md)。
-
-欄位：
-
-- `name: str`
-- `version: str = "1.0"`
-- `base_config: str | None = None`
-- `llm_profile: str = ""`
-- `model: str = ""`
-- `auth_mode: str = ""`
-- `api_key_env: str = ""`
-- `base_url: str = ""`
-- `temperature: float = 0.7`
-- `max_tokens: int | None = None`
-- `reasoning_effort: str = "medium"`
-- `service_tier: str | None = None`
-- `extra_body: dict[str, Any]`
-- `system_prompt: str = "You are a helpful assistant."`
-- `system_prompt_file: str | None = None`
-- `prompt_context_files: dict[str, str]`
-- `skill_mode: str = "dynamic"`
-- `include_tools_in_prompt: bool = True`
-- `include_hints_in_prompt: bool = True`
-- `max_messages: int = 0`
-- `ephemeral: bool = False`
-- `input: InputConfig`
-- `triggers: list[TriggerConfig]`
-- `tools: list[ToolConfigItem]`
-- `subagents: list[SubAgentConfigItem]`
-- `output: OutputConfig`
-- `compact: dict[str, Any] | None = None`
-- `startup_trigger: dict[str, Any] | None = None`
-- `termination: dict[str, Any] | None = None`
-- `max_subagent_depth: int = 3`
-- `tool_format: str | dict = "bracket"`
-- `agent_path: Path | None = None`
-- `session_key: str | None = None`
-- `mcp_servers: list[dict[str, Any]]`
-- `plugins: list[dict[str, Any]]`
-
-方法：
-
-- `get_api_key() -> str | None` — 讀對應的環境變數。
-
-### `InputConfig`、`OutputConfig`、`OutputConfigItem`、`TriggerConfig`、`ToolConfigItem`、`SubAgentConfigItem`
-
-模組：`kohakuterrarium.core.config_types`。Dataclass。
-
-**`InputConfig`**
-
-- `type: str = "cli"` — 輸入模組型別（`cli`、`cli_nonblocking`、`tui`、`none`、`custom`、`package`）。
-- `module: str | None = None`
-- `class_name: str | None = None` — 由 YAML 的 `class` 鍵填入。
-- `prompt: str = "> "`
-- `options: dict[str, Any]`
-
-**`TriggerConfig`**
-
-- `type: str` — 內建型別是 `timer`、`context`、`channel`；custom/package trigger 用 `module` + YAML `class`。
-- `module, class_name: str | None`
-- `prompt: str | None = None`
-- `options: dict[str, Any]`
-- `name: str | None = None`
-
-**`ToolConfigItem`**
-
-- `name: str`
-- `type: str = "builtin"` — `builtin`、`trigger`、`custom`、或 `package`。
-- `module, class_name: str | None`
-- `doc: str | None = None` — 覆寫 skill doc 路徑。
-- `options: dict[str, Any]`
-
-**`OutputConfigItem`**
-
-- `type: str = "stdout"`
-- `module, class_name: str | None`
-- `options: dict[str, Any]`
-
-**`OutputConfig`**
-
-繼承 `OutputConfigItem` 加上：
-
-- `controller_direct: bool = True`
-- `named_outputs: dict[str, OutputConfigItem]`
-
-**`SubAgentConfigItem`**
-
-- `name: str`
-- `type: str = "builtin"`
-- `module, class_name, config_name, description: str | None` — `class_name` / `config_name` 分別由 YAML 的 `class` / `config` 鍵填入。
-- `tools: list[str]`
-- `can_modify: bool = False`
-- `interactive: bool = False`
-- `options: dict[str, Any]`
-
-`subagents:` YAML 條目可以是裸字串（`"explore"` → 內建 `SubAgentConfigItem(name="explore")`）或 dict。`type: custom` 且沒有 `module`/`config` 的 dict 條目會被當作內聯 `SubAgentConfig` 資料；額外欄位會透過 `options` 轉發，並由 `SubAgentConfig.from_dict` 解析。
-
-### `load_agent_config`
-
-模組：`kohakuterrarium.core.config`。
-
-```python
-load_agent_config(config_path: str) -> AgentConfig
-```
-
-解析 YAML/JSON/TOML (`config.yaml` → `.yml` → `.json` → `.toml`)、套 `base_config` 繼承、環境變數插值、路徑解析。
-
-### `Conversation`、`ConversationConfig`、`ConversationMetadata`
-
-模組：`kohakuterrarium.core.conversation`。
-
-Conversation 管訊息歷程與 OpenAI 格式序列化。
-
-方法：
-
-- `append(role, content, **kwargs) -> Message`
-- `append_message(message: Message) -> None`
-- `to_messages() -> list[dict]`
-- `get_messages() -> MessageList`
-- `get_context_length() -> int`
-- `get_image_count() -> int`
-- `get_system_message() -> Message | None`
-- `get_last_message() -> Message | None`
-- `get_last_assistant_message() -> Message | None`
-- `truncate_from(index: int) -> list[Message]`
-- `find_last_user_index() -> int`
-- `clear(keep_system: bool = True) -> None`
-- `to_json() -> str`
-- `from_json(json_str: str) -> Conversation`
-
-`ConversationConfig`：
-
-- `max_messages: int = 0`
-- `keep_system: bool = True`
-
-`ConversationMetadata`：
-
-- `created_at, updated_at: datetime`
-- `message_count: int = 0`
-- `total_chars: int = 0`
-
-### `TriggerEvent`、`EventType`
-
-模組：`kohakuterrarium.core.events`。
-
-在輸入、觸發器、工具、子代理之間流的通用事件。
-
-欄位：
-
-- `type: str`
-- `content: EventContent = ""` (`str` 或 `list[ContentPart]`)
-- `context: dict[str, Any]`
-- `timestamp: datetime`
-- `job_id: str | None = None`
-- `prompt_override: str | None = None`
-- `stackable: bool = True`
-
-方法：
-
-- `get_text_content() -> str`
-- `is_multimodal() -> bool`
-- `with_context(**kwargs) -> TriggerEvent` — 不會 mutate 原物件。
-
-`EventType` 常數：`USER_INPUT`、`IDLE`、`TIMER`、`CONTEXT_UPDATE`、`TOOL_COMPLETE`、`SUBAGENT_OUTPUT`、`CHANNEL_MESSAGE`、`MONITOR`、`ERROR`、`STARTUP`、`SHUTDOWN`。
-
-Factory：
-
-- `create_user_input_event(content, source="cli", **extra_context) -> TriggerEvent`
-- `create_tool_complete_event(job_id, content, exit_code=None, error=None, **extra_context) -> TriggerEvent`
-- `create_error_event(error_type, message, job_id=None, **extra_context) -> TriggerEvent` (`stackable=False`)。
-
-### Channel
-
-模組：`kohakuterrarium.core.channel`。
-
-**`ChannelMessage`**
-
-- `sender: str`
-- `content: str | dict | list[dict]`
-- `metadata: dict[str, Any]`
-- `timestamp: datetime`
-- `message_id: str`
-- `reply_to: str | None = None`
-- `channel: str | None = None`
-
-**`BaseChannel`** (抽象)
-
-- `async send(message: ChannelMessage) -> None`
-- `on_send(callback) -> None`
-- `remove_on_send(callback) -> None`
-- `channel_type: str` — `"queue"` 或 `"broadcast"`。
-- `empty: bool`
-- `qsize: int`
-
-**`SubAgentChannel`** (點對點 queue)
-
-- `async receive(timeout: float | None = None) -> ChannelMessage`
-- `try_receive() -> ChannelMessage | None`
-
-**`AgentChannel`** (broadcast)
-
-- `subscribe(subscriber_id: str) -> ChannelSubscription`
-- `unsubscribe(subscriber_id: str) -> None`
-- `subscriber_count: int`
-
-**`ChannelSubscription`**
-
-- `async receive(timeout=None) -> ChannelMessage`
-- `try_receive() -> ChannelMessage | None`
-- `unsubscribe() -> None`
-- `empty, qsize`
-
-**`ChannelRegistry`**
-
-- `get_or_create(name, channel_type="queue", maxsize=0, description="") -> BaseChannel`
-- `get(name) -> BaseChannel | None`
-- `list_channels() -> list[str]`
-- `remove(name) -> bool`
-- `get_channel_info() -> list[dict]` — 給 prompt 注入用。
-
-### `Session`、`Scratchpad`、`Environment`
-
-模組：`kohakuterrarium.core.session`、`core.scratchpad`、`core.environment`。
-
-**`Session`**
-
-單隻生物的共享狀態 dataclass。
-
-- `key: str`
-- `channels: ChannelRegistry`
-- `scratchpad: Scratchpad`
-- `tui: Any | None = None`
-- `extra: dict[str, Any]`
-
-Module-level 函式：
-
-- `get_session(key=None) -> Session`
-- `set_session(session, key=None) -> None`
-- `remove_session(key=None) -> None`
-- `list_sessions() -> list[str]`
-- `get_scratchpad() -> Scratchpad`
-- `get_channel_registry() -> ChannelRegistry`
-
-**`Scratchpad`**
-
-Key-value 字串 store。
-
-- `set(key, value) -> None`
-- `get(key) -> str | None`
-- `delete(key) -> bool`
-- `list_keys() -> list[str]`
-- `clear() -> None`
-- `to_dict() -> dict[str, str]`
-- `to_prompt_section() -> str`
-- `__len__`、`__contains__`
-
-**`Environment`**
-
-生態瓶的共享執行 context。
-
-- `env_id: str`
-- `shared_channels: ChannelRegistry`
-- `get_session(key) -> Session` — 生物私有。
-- `list_sessions() -> list[str]`
-- `register(key, value) -> None`
-- `get(key, default=None) -> Any`
-
-### Job
-
-模組：`kohakuterrarium.core.job`。
-
-**`JobType`** enum：`TOOL`、`SUBAGENT`、`COMMAND`。
-
-**`JobState`** enum：`PENDING`、`RUNNING`、`DONE`、`ERROR`、`CANCELLED`。
-
-**`JobStatus`**
-
-- `job_id: str`
-- `job_type: JobType`
-- `type_name: str`
-- `state: JobState = PENDING`
-- `start_time: datetime`
-- `end_time: datetime | None = None`
-- `output_lines: int = 0`
-- `output_bytes: int = 0`
-- `preview: str = ""`
-- `error: str | None = None`
-- `context: dict[str, Any]`
-
-Properties：`duration`、`is_complete`、`is_running`。
-
-方法：`to_context_string() -> str`。
-
-**`JobResult`**
-
-- `job_id: str`
-- `output: str = ""`
-- `exit_code: int | None = None`
-- `error: str | None = None`
-- `metadata: dict[str, Any]`
-- `success: bool` property。
-- `get_lines(start=0, count=None) -> list[str]`
-- `truncated(max_chars=1000) -> str`
-
-**`JobStore`**
-
-- `register(status) -> None`
-- `get_status(job_id) -> JobStatus | None`
-- `update_status(job_id, state=None, output_lines=None, ...) -> JobStatus | None`
-- `store_result(result) -> None`
-- `get_result(job_id) -> JobResult | None`
-- `get_running_jobs() -> list[JobStatus]`
-- `get_pending_jobs() -> list[JobStatus]`
-- `get_completed_jobs() -> list[JobStatus]`
-- `get_all_statuses() -> list[JobStatus]`
-- `format_context(include_completed=False) -> str`
-
-工具：
-
-- `generate_job_id(prefix="job") -> str`
-
-### 終止
-
-模組：`kohakuterrarium.core.termination`。
-
-**`TerminationConfig`**
-
-- `max_turns: int = 0`
-- `max_tokens: int = 0` (保留)
-- `max_duration: float = 0`
-- `idle_timeout: float = 0`
-- `keywords: list[str]`
-
-**`TerminationChecker`**
-
-- `start() -> None`
-- `record_turn() -> None`
-- `record_activity() -> None`
-- `should_terminate(last_output: str = "") -> bool`
-- `reason`、`turn_count`、`elapsed`、`is_active` properties。
-
 ---
 
-## `kohakuterrarium.llm`
-
-### `LLMProvider` (protocol)、`BaseLLMProvider`
-
-模組：`kohakuterrarium.llm.base`。
-
-Async protocol：
-
-- `async chat(messages, *, stream=True, tools=None, **kwargs) -> AsyncIterator[str]`
-- `async chat_complete(messages, **kwargs) -> ChatResponse`
-- property `last_tool_calls: list[NativeToolCall]`
-
-繼承 `BaseLLMProvider` 來實作：
-
-- `async _stream_chat(messages, *, tools=None, **kwargs)`
-- `async _complete_chat(messages, **kwargs) -> ChatResponse`
-
-Base 屬性：`config: LLMConfig`、`last_usage: dict[str, int]`。
-
-### Message 型別
-
-模組：`kohakuterrarium.llm.base` / `kohakuterrarium.llm.message`。
-
-**`LLMConfig`**
-
-- `model: str`
-- `temperature: float = 0.7`
-- `max_tokens: int | None = None`
-- `top_p: float = 1.0`
-- `stop: list[str] | None = None`
-- `extra: dict[str, Any] | None = None`
-
-**`ChatChunk`**
-
-- `content: str = ""`
-- `finish_reason: str | None = None`
-- `usage: dict[str, int] | None = None`
-
-**`ChatResponse`**
-
-- `content`、`finish_reason`、`model: str`
-- `usage: dict[str, int]`
-
-**`ToolSchema`**
-
-- `name`、`description: str`
-- `parameters: dict[str, Any]`
-- `to_api_format() -> dict`
-
-**`NativeToolCall`**
-
-- `id`、`name`、`arguments: str`
-- `parsed_arguments() -> dict`
-
-**`Message`**
-
-- `role: Role` (`"system"`、`"user"`、`"assistant"`、`"tool"`)
-- `content: str | list[ContentPart]`
-- `name`、`tool_call_id: str | None`
-- `tool_calls: list[dict] | None`
-- `metadata: dict`
-- `to_dict() / from_dict(data)`
-- `get_text_content() -> str`
-- `has_images() -> bool`
-- `get_images() -> list[ImagePart]`
-- `is_multimodal() -> bool`
-
-子類別 `SystemMessage`、`UserMessage`、`AssistantMessage`、`ToolMessage` 強制 role。
-
-**`TextPart`** — `text: str`、`type: "text"`。
-
-**`ImagePart`** — `url`、`detail ("auto"|"low"|"high")`、`source_type`、`source_name`；`get_description() -> str`。
-
-**`FilePart`** — 對應的檔案參照。
-
-Factory：
-
-- `create_message(role, content, **kwargs) -> Message`
-- `make_multimodal_content(text, images=None, prepend_images=False) -> str | list[ContentPart]`
-- `normalize_content_parts(content) -> str | list[ContentPart] | None`
-
-別名：`Role`、`MessageContent`、`ContentPart`、`MessageList`。
-
-### Profile
-
-模組：`kohakuterrarium.llm.profiles`、`kohakuterrarium.llm.profile_types`。
-
-**`LLMBackend`** — `name`、`backend_type`、`base_url`、`api_key_env`。
-
-**`LLMPreset`** — `name`、`model`、`provider`、`max_context`、`max_output`、`temperature`、`reasoning_effort`、`service_tier`、`extra_body`。
-
-**`LLMProfile`** — preset + backend 的執行期合併結果：`name`、`model`、`provider`、`backend_type`、`max_context`、`max_output`、`base_url`、`api_key_env`、`temperature`、`reasoning_effort`、`service_tier`、`extra_body`。
-
-Module-level 函式：
-
-- `load_backends() -> dict[str, LLMBackend]`
-- `load_presets() -> dict[str, LLMPreset]`
-- `load_profiles() -> dict[str, LLMProfile]`
-- `save_backend(backend) -> None`
-- `delete_backend(name) -> bool`
-- `save_profile(profile) -> None`
-- `delete_profile(name) -> bool`
-- `get_profile(name) -> LLMProfile | None`
-- `get_preset(name) -> LLMProfile | None`
-- `get_default_model() -> str`
-- `set_default_model(model_name) -> None`
-- `resolve_controller_llm(controller_config, llm_override=None) -> LLMProfile | None`
-- `list_all() -> list[dict]`
-
-內建 provider 名稱：`codex`、`openai`、`openrouter`、`anthropic`、`gemini`、`mimo`、`kimi-code`、`glm-coding`。
-
-### API key
-
-模組：`kohakuterrarium.llm.api_keys`。
-
-- `save_api_key(provider, key) -> None`
-- `get_api_key(provider_or_env) -> str`
-- `list_api_keys() -> dict[str, str]` (遮罩過)。
-- `KT_DIR: Path`
-- `KEYS_PATH: Path`
-- `PROVIDER_KEY_MAP: dict[str, str]`
-
----
-
-## `kohakuterrarium.session`
-
-### `SessionStore`
-
-模組：`kohakuterrarium.session.store`。底層 SQLite (KohakuVault)。
-
-資料表：`meta`、`state`、`events`、`channels`、`subagents`、`jobs`、`conversation`、`fts`。
-
-事件：
-
-- `append_event(agent, event_type, data) -> str`
-- `get_events(agent) -> list[dict]`
-- `get_resumable_events(agent) -> list[dict]`
-- `get_all_events() -> list[tuple[str, dict]]`
-
-對話快照：
-
-- `save_conversation(agent, messages) -> None`
-- `load_conversation(agent) -> list[dict] | None`
-
-狀態：
-
-- `save_state(agent, *, scratchpad=None, turn_count=None, token_usage=None, triggers=None, compact_count=None) -> None`
-- `load_scratchpad(agent) -> dict[str, str]`
-- `load_turn_count(agent) -> int`
-- `load_token_usage(agent) -> dict[str, int]`
-- `load_triggers(agent) -> list[dict]`
-
-頻道：
-
-- `save_channel_message(channel, data) -> str`
-- `get_channel_messages(channel) -> list[dict]`
-
-子代理：
-
-- `next_subagent_run(parent, name) -> int`
-- `save_subagent(parent, name, run, meta, conv_json=None) -> None`
-- `load_subagent_meta(parent, name, run) -> dict | None`
-- `load_subagent_conversation(parent, name, run) -> str | None`
-
-Job：
-
-- `save_job(job_id, data) -> None`
-- `load_job(job_id) -> dict | None`
-
-Metadata：
-
-- `init_meta(session_id, config_type, config_path, pwd, agents, config_snapshot=None, terrarium_name=None, terrarium_channels=None, terrarium_creatures=None) -> None`
-- `update_status(status) -> None`
-- `touch() -> None`
-- `load_meta() -> dict[str, Any]`
-
-雜項：
-
-- `search(query, k=10) -> list[dict]` — FTS5 BM25。
-- `flush() -> None`
-- `close(update_status=True) -> None`
-- `path: str` property。
-
-### `SessionMemory`
-
-模組：`kohakuterrarium.session.memory`。
-
-索引後搜尋 (FTS + 向量 + hybrid)。
-
-- `index_events(agent) -> None`
-- `async search(query, mode="hybrid", k=5) -> list[SearchResult]`
-
-**`SearchResult`**
-
-- `content: str`
-- `round_num`、`block_num: int`
-- `agent: str`
-- `block_type: str` — `"text"`、`"tool"`、`"trigger"`、`"user"`。
-- `score: float`
-- `ts: float`
-- `tool_name`、`channel: str`
-
-### Embedding provider
-
-模組：`kohakuterrarium.session.embedding`。
-
-Provider 類型：`model2vec`、`sentence-transformer`、`api`。API provider 含 `GeminiEmbedder`。別名：`@tiny`、`@base`、`@retrieval`、`@best`、`@multilingual`、`@multilingual-best`、`@science`、`@nomic`、`@gemma`。
-
----
-
-## `kohakuterrarium.terrarium` (舊版執行期)
-
-下面這些類別在統一的 `Terrarium` 引擎之前就存在，在過渡期間還在硬碟上；新程式碼請用上面的 `Terrarium`。
-
-### `TerrariumRuntime` (舊版)
-
-模組：`kohakuterrarium.terrarium.runtime`。多代理 orchestrator；繼承 `HotPlugMixin`。
-
-生命週期：
-
-- `async start() -> None`
-- `async stop() -> None`
-- `async run() -> None`
-
-熱插拔：
-
-- `async add_creature(name, creature: Agent, ...) -> CreatureHandle`
-- `async remove_creature(name) -> bool`
-- `async add_channel(name, channel_type) -> None`
-- `async wire_channel(creature_name, channel_name, direction) -> None`
-
-Properties：`api: TerrariumAPI`、`observer: ChannelObserver`。
-
-Attribute：`config: TerrariumConfig`、`environment: Environment`、`_creatures: dict[str, CreatureHandle]`。
-
-### `TerrariumConfig`、`CreatureConfig`、`ChannelConfig`、`RootConfig`
-
-模組：`kohakuterrarium.terrarium.config`。Dataclass。
-
-**`TerrariumConfig`**
-
-- `name: str`
-- `creatures: list[CreatureConfig]`
-- `channels: list[ChannelConfig]`
-- `root: RootConfig | None = None`
-
-**`CreatureConfig`**
-
-- `name: str`
-- `config_data: dict`
-- `base_dir: Path`
-- `listen_channels: list[str]`
-- `send_channels: list[str]`
-- `output_log: bool = False`
-- `output_log_size: int = 100`
-
-**`ChannelConfig`**
-
-- `name: str`
-- `channel_type: str = "queue"`
-- `description: str = ""`
-
-**`RootConfig`**
-
-- `config_data: dict`
-- `base_dir: Path`
-
-函式：
-
-- `load_terrarium_config(config_path: str) -> TerrariumConfig`
-- `build_channel_topology_prompt(config, creature) -> str`
-
-### `TerrariumAPI`、`ChannelObserver`、`CreatureHandle`
-
-程式化控制介面。`TerrariumAPI` 對映特權節點透過群組工具暴露的圖操作（`group_add_node`、`group_remove_node`、`group_channel`、`group_wire` 等）。`ChannelObserver` 提供非破壞性觀察。`CreatureHandle` 把一隻 `Agent` 加上它的生態瓶接線包起來。
-
----
-
-## `kohakuterrarium.serving`
-
-### `KohakuManager` (舊版)
-
-模組：`kohakuterrarium.serving.manager`。在 `Terrarium` 引擎之前的 transport-agnostic manager。較舊的 HTTP route 在過渡期間還會用；新程式碼請用 `Terrarium`。
-
-Agent 方法：
-
-- `async agent_create(config_path=None, config=None, llm_override=None, pwd=None) -> str`
-- `async agent_stop(agent_id) -> None`
-- `async agent_chat(agent_id, message) -> AsyncIterator[str]`
-- `agent_status(agent_id) -> dict`
-- `agent_list() -> list[dict]`
-- `agent_interrupt(agent_id) -> None`
-- `agent_get_jobs(agent_id) -> list[dict]`
-- `async agent_cancel_job(agent_id, job_id) -> bool`
-- `agent_switch_model(agent_id, profile_name) -> str`
-- `async agent_execute_command(agent_id, command, args="") -> dict`
-
-Terrarium 方法：
-
-- `async terrarium_create(config_path, ...) -> str`
-- `async terrarium_stop(terrarium_id) -> None`
-- `async terrarium_run(terrarium_id) -> AsyncIterator[str]`
-- 另外有 creature / channel / observer 操作，對映 HTTP 介面。
-
-### `AgentSession`
-
-模組：`kohakuterrarium.serving.agent_session`。`Agent` 的薄包裝，支援併發輸入注入與輸出串流。
-
-Factory：
-
-- `async from_path(config_path, llm_override=None, pwd=None) -> AgentSession`
-- `async from_config(config: AgentConfig) -> AgentSession`
-- `async from_agent(agent: Agent) -> AgentSession`
-
-方法：
-
-- `async start() / async stop()`
-- `async chat(message: str | list[dict]) -> AsyncIterator[str]`
-- `get_status() -> dict`
-
-Attribute：`agent_id: str`、`agent: Agent`。
-
----
-
-## 模組協定 (extension API)
-
-### `Tool`
-
-模組：`kohakuterrarium.modules.tool.base`。
-
-Protocol / `BaseTool` 基底類別。
-
-- `async execute(args: dict, context: ToolContext | None = None) -> ToolResult` — 必要。
-- `needs_context: bool = False`
-- `parallel_allowed: bool = True`
-- `timeout: float = 60.0`
-- `max_output: int = 0`
-
-### `InputModule`
-
-模組：`kohakuterrarium.modules.input.base`。`BaseInputModule` 提供 user command 派發。
-
-- `async start() / async stop()`
-- `async get_input() -> TriggerEvent | None`
-
-### `OutputModule`
-
-模組：`kohakuterrarium.modules.output.base`。`BaseOutputModule` 基底類別。
-
-- `async start() / async stop()`
-- `async write(content: str) -> None`
-- `async write_stream(chunk: str) -> None`
-- `async flush() -> None`
-- `async on_processing_start() / async on_processing_end()`
-- `on_activity(activity_type: str, detail: str) -> None`
-- `async on_user_input(text: str) -> None` (選用)
-- `async on_resume(events: list[dict]) -> None` (選用)
-
-Activity 類型：`tool_start`、`tool_done`、`tool_error`、`subagent_start`、`subagent_done`、`subagent_error`。
-
-### `BaseTrigger`
-
-模組：`kohakuterrarium.modules.trigger.base`。
-
-- `async wait_for_trigger() -> TriggerEvent | None` — 必要。
-- `async _on_start() / async _on_stop()` — 選用。
-- `_on_context_update(context: dict) -> None` — 選用。
-- `resumable: bool = False`
-- `universal: bool = False`
-- `to_resume_dict() -> dict` / `from_resume_dict(data) -> BaseTrigger`
-- `__init__(prompt: str | None = None, **options)`
-
-### `SubAgent`
-
-模組：`kohakuterrarium.modules.subagent.base`。
-
-- `async run(input_text: str) -> SubAgentResult`
-- `async cancel() -> None`
-- `get_status() -> SubAgentJob`
-- `get_pending_count() -> int`
-
-Attribute：`config: SubAgentConfig`、`llm`、`registry`、`executor`、`conversation`。
-
-`kohakuterrarium.modules.subagent` 底下的支援類別：`SubAgentResult`、`SubAgentJob`、`SubAgentManager`、`InteractiveSubAgent`、`InteractiveManagerMixin`、`SubAgentConfig`。
-
-### 外掛 hook
-
-模組：`kohakuterrarium.modules.plugin`。每一個 hook、簽名、時機請看 [plugin-hooks.md](plugin-hooks.md)。
-
----
-
-## `kohakuterrarium.compose`
-
-組合代理與純函式的管線代數。
-
-### `BaseRunnable`
-
-- `async run(input) -> Any`
-- `async __call__(input) -> Any`
-- `__rshift__(other)` — `>>` sequence。
-- `__and__(other)` — `&` parallel。
-- `__or__(other)` — `|` fallback。
-- `__mul__(n)` — `*` retry。
-- `iterate(initial_input) -> PipelineIterator`
-- `map(fn) -> BaseRunnable` — 輸出後變換。
-- `contramap(fn) -> BaseRunnable` — 輸入前變換。
-- `fails_when(predicate) -> BaseRunnable`
-
-### Factory
-
-模組：`kohakuterrarium.compose.core`。
-
-- `Pure(fn)` / `pure(fn)` — 包 sync 或 async callable。
-- `Sequence(*stages)` — 串接。
-- `Product(*stages)` — 平行 (`asyncio.gather`)。
-- `Fallback(*stages)`
-- `Retry(stage, attempts)`
-- `Router(mapping)` — dict 派發。
-- `Iterator(...)` — 對 async 來源做 iteration。
-- `effects.Effects()` — 副作用紀錄 handle。
-
-### 代理組合
-
-模組：`kohakuterrarium.compose.agent`。
-
-- `async agent(config_path: str) -> AgentRunnable` — 持久代理，跨呼叫重用 (async context manager)。
-- `factory(config: AgentConfig) -> AgentRunnable` — 臨時 factory；每次呼叫都生新代理。
-
-運算子優先順序：`* > | > & > >>`。
-
-```python
-from kohakuterrarium.compose import agent, pure
-
-async with await agent("@kt-biome/creatures/swe") as swe:
-    async with await agent("@kt-biome/creatures/researcher") as reviewer:
-        pipeline = swe >> pure(extract_code) >> reviewer
-        result = await pipeline("Implement feature")
-```
-
----
-
-## `kohakuterrarium.testing`
-
-### `TestAgentBuilder`
-
-模組：`kohakuterrarium.testing.agent`。供決定性代理測試用的 fluent builder。
-
-Builder 方法 (回傳 `self`)：
-
-- `with_llm_script(script)`
-- `with_llm(llm: ScriptedLLM)`
-- `with_output(output: OutputRecorder)`
-- `with_system_prompt(prompt)`
-- `with_session(key)`
-- `with_builtin_tools(tool_names)`
-- `with_tool(tool)`
-- `with_named_output(name, output)`
-- `with_ephemeral(ephemeral=True)`
-- `build() -> TestAgentEnv`
-
-`TestAgentEnv`：
-
-- Properties：`llm: ScriptedLLM`、`output: OutputRecorder`、`session: Session`。
-- 方法：`async inject(content)`、`async chat(content) -> str`。
-
-### `ScriptedLLM`
-
-模組：`kohakuterrarium.testing.llm`。
-
-建構子：`ScriptedLLM(script: list[ScriptEntry] | list[str] | None = None)`。
-
-**`ScriptEntry`**：`response: str`、`match: str | None = None`、`delay_per_chunk: float = 0`、`chunk_size: int = 10`。
-
-方法：`async chat`、`async chat_complete`。
-
-Assert 介面：`call_count: int`、`call_log: list[list[dict]]`。
-
-### `OutputRecorder`
-
-模組：`kohakuterrarium.testing.output`。
-
-- `all_text: str`
-- `chunks: list[str]`
-- `writes: list[str]`
-- `activities: list[tuple[str, str]]`
-
-### `EventRecorder`
-
-模組：`kohakuterrarium.testing.events`。
-
-- `record(event) -> None`
-- `get_all() -> list[TriggerEvent]`
-- `get_by_type(event_type) -> list[TriggerEvent]`
-- `clear() -> None`
-
----
-
-## 套件
-
-模組：`kohakuterrarium.packages`。
-
-- `is_package_ref(path: str) -> bool`
-- `resolve_package_path(ref: str) -> Path`
-- `list_packages() -> list[str]`
-- `install_package(source, name=None, editable=False) -> None`
-- `uninstall_package(name) -> bool`
-
-套件根目錄：`~/.kohakuterrarium/packages/`。Editable 安裝用 `<name>.link` 指標取代複製。
-
----
-
-## 延伸閱讀
-
-- 概念：[組合一個 agent](../concepts/foundations/composing-an-agent.md)、[modules/tool](../concepts/modules/tool.md)、[modules/sub-agent](../concepts/modules/sub-agent.md)、[impl-notes/session-persistence](../concepts/impl-notes/session-persistence.md)。
-- 指南：[程式化使用](../guides/programmatic-usage.md)、[自訂模組](../guides/custom-modules.md)、[外掛](../guides/plugins.md)。
-- 參考：[CLI](cli.md)、[HTTP](http.md)、[設定](configuration.md)、[內建模組](builtins.md)、[外掛 hook](plugin-hooks.md)。
+## 另見
+
+- 使用指南：[程式化使用](../guides/programmatic-usage.md)、
+  [組合](../guides/composition.md)、
+  [工作階段](../guides/sessions.md)、[套件](../guides/packages.md)、
+  [studio](../guides/studio.md)、[自訂模組](../guides/custom-modules.md)、
+  [外掛](../guides/plugins.md)。
+- 教學：[第一次 Python 嵌入](../tutorials/first-python-embedding.md)。
+- 參考：[cli](cli.md)、[http](http.md)、
+  [設定檔](configuration.md)、[內建模組](builtins.md)、
+  [外掛 hook](plugin-hooks.md)。
+- 可執行腳本：[`examples/code/`](../../../examples/code/)，
+  `batch_grading.py` 是批次模式的標準範例。

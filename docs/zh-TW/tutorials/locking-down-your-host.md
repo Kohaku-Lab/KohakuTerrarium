@@ -1,6 +1,6 @@
 ---
 title: 給你的主機加鎖
-summary: 一步步給 KohakuTerrarium 主機加上身份驗證 — 從「區網誰都能用」到「家人各自登入、只有我能改設定」。
+summary: 一步步給 KohakuTerrarium 主機加上身份驗證：從「區網誰都能用」到「家人各自登入、只有我能改設定」。
 tags:
   - tutorials
   - auth
@@ -26,16 +26,16 @@ tags:
 
 | 你想要 | 對應級別 |
 |---|---|
-| 自己機器上的桌面應用程式 — 零設定、零打擾 | **Level 0**（預設 — 什麼都不用做） |
-| 只有知道共用密碼的人才能連線 | **Level 1** — 主機權杖 |
-| 朋友可以聊天 / 使用主機；只有我能改 LLM key + 裝套件 | **Level 2** — 管理員密碼 |
-| 每位家庭成員有自己的登入 + 隔離的對話工作階段 | **Level 3** — 多使用者 |
+| 自己機器上的桌面應用程式，零設定、零打擾 | **Level 0**（預設，什麼都不用做） |
+| 只有知道共用密碼的人才能連線 | **Level 1**：主機權杖 |
+| 朋友可以聊天 / 使用主機；只有我能改 LLM key + 裝套件 | **Level 2**：管理員密碼 |
+| 每位家庭成員有自己的登入 + 隔離的對話工作階段 | **Level 3**：多使用者 |
 
 每個級別在前一級別之上疊加。需求達到了就停。
 
 ---
 
-## Level 0 — 桌面應用程式,預設就夠了
+## Level 0：桌面應用程式,預設就夠了
 
 **什麼都別做。** 桌面應用程式綁在 `127.0.0.1`；網路上沒人能連。
 作業系統使用者就是信任邊界。
@@ -53,12 +53,12 @@ curl http://你的區網IP:8001/api/auth/capabilities
 
 ---
 
-## Level 1 — 主機權杖（5 分鐘）
+## Level 1：主機權杖（5 分鐘）
 
 主機現在要求每個 API 呼叫都帶 `Authorization: Bearer <token>`。
 Loopback（`127.0.0.1`）預設依然旁路,所以桌面應用程式不用輸權杖也能繼續用。
 
-### 步驟 1 — 產生權杖
+### 步驟 1：產生權杖
 
 ```bash
 kt admin set-host-token
@@ -68,14 +68,14 @@ kt admin set-host-token
 
 這會產生 32 個隨機位元組並寫入 `config.toml` 的 `[auth] host_token`。
 
-### 步驟 2 — 重啟伺服器
+### 步驟 2：重啟伺服器
 
 ```bash
 kt serve restart
 # (如果還沒啟動,就直接 kt serve start --host 0.0.0.0)
 ```
 
-### 步驟 3 — 驗證
+### 步驟 3：驗證
 
 從另一台機器:
 
@@ -92,7 +92,7 @@ curl -H "Authorization: Bearer $TOKEN" http://你的區網IP:8001/api/version
 # → 200 OK
 ```
 
-### 步驟 4 — 把權杖發給朋友
+### 步驟 4：把權杖發給朋友
 
 透過安全管道分享 `$TOKEN`（Signal / 1Password 分享 / 不要走 LINE）。
 任何拿到權杖的人都能透過 web 前端或 `curl` 連線。
@@ -119,12 +119,12 @@ kt serve restart             # 現有用戶端掉線,需要新權杖
 
 ---
 
-## Level 2 — 管理員密碼（再加 5 分鐘）
+## Level 2：管理員密碼（再加 5 分鐘）
 
-拿到主機權杖的朋友現在能聊天 — 但他們也能點 Models 頁面的「儲存」
+拿到主機權杖的朋友現在能聊天，但他們也能點 Models 頁面的「儲存」
 按鈕,把你的 OpenAI key 改了。再加一個用於設定修改的密碼。
 
-### 步驟 1 — 產生管理員權杖
+### 步驟 1：產生管理員權杖
 
 ```bash
 kt admin set-admin-token
@@ -133,21 +133,21 @@ kt admin set-admin-token
 
 重啟伺服器。
 
-### 步驟 2 — 現在哪些路由被關卡
+### 步驟 2：現在哪些路由被關卡
 
 這些路由沒有 `X-Admin-Token: <admin_token>` 就拒絕:
 
-- `POST /api/settings/keys` — 新增 / 修改 LLM API key
-- `POST /api/settings/profiles` — LLM 模型設定
-- `POST /api/settings/mcp` — MCP 伺服器註冊
-- `POST /api/registry/install` — 裝套件
-- `PUT /api/settings/config-files/{name}/content` — 直接編輯設定檔
+- `POST /api/settings/keys`：新增 / 修改 LLM API key
+- `POST /api/settings/profiles`：LLM 模型設定
+- `POST /api/settings/mcp`：MCP 伺服器註冊
+- `POST /api/registry/install`：裝套件
+- `PUT /api/settings/config-files/{name}/content`：直接編輯設定檔
 
 這些沒受影響,照常運作（唯讀 / 聊天 / 工作階段）:
 
 - `/api/auth/capabilities`、`/me`、`/sessions/*`、聊天 WS
 
-### 步驟 3 — 驗證
+### 步驟 3：驗證
 
 ```bash
 HOST=$(kt admin show-host-token --yes)
@@ -168,21 +168,21 @@ curl -X POST http://localhost:8001/api/settings/keys \
   -d '{"provider":"openai","key":"sk-..."}'
 ```
 
-### 步驟 4 — 分享主機權杖,保留管理員權杖
+### 步驟 4：分享主機權杖,保留管理員權杖
 
 把 `$HOST` 發給朋友。**不要**給 `$ADMIN`。前端要求他們登入時,
 他們貼上主機權杖；他們想編輯設定時,UI 會灰掉（等 Vue 管理介面
-上線後會跳「管理員密碼」提示框）— 只有你有那個。
+上線後會跳「管理員密碼」提示框），而那個只有你有。
 
 ---
 
-## Level 3 — 多使用者（再加 10 分鐘）
+## Level 3：多使用者（再加 10 分鐘）
 
 現在每個人用自己的使用者名稱 + 密碼登入。他們的聊天工作階段、
 分頁、UI 偏好都隔離到各自帳號。共用資源（LLM key、設定檔、MCP
 伺服器、已裝套件）繼續共用,因為管理員只需要管理一次。
 
-### 步驟 1 — 編輯 config.toml
+### 步驟 1：編輯 config.toml
 
 ```toml
 [auth]
@@ -195,7 +195,7 @@ loopback_bypass = false         # 在代理後面就關掉
 
 重啟伺服器。
 
-### 步驟 2 — 建立第一個管理員使用者
+### 步驟 2：建立第一個管理員使用者
 
 ```bash
 kt admin users add operator --role admin
@@ -206,7 +206,7 @@ kt admin users add operator --role admin
 
 寫入 `~/.kohakuterrarium/auth.db`（sqlite、bcrypt 雜湊）。
 
-### 步驟 3 — 邀請家庭成員
+### 步驟 3：邀請家庭成員
 
 每人產生一個邀請權杖:
 
@@ -219,7 +219,7 @@ kt admin invitations create --role user --expires-in-hours 168
 
 透過安全管道把每個權杖發給對應的人。每個權杖一次性使用,可選時間限制。
 
-### 步驟 4 — 家庭成員註冊
+### 步驟 4：家庭成員註冊
 
 每人用自己的邀請權杖 POST 一次:
 
@@ -244,14 +244,14 @@ curl -X POST http://你的主機:8001/api/auth/login \
   -c alice-cookies.txt
 ```
 
-### 步驟 5 — 驗證隔離
+### 步驟 5：驗證隔離
 
 每個使用者在磁碟上有自己的一塊:
 
 ```
 ~/.kohakuterrarium/
 ├── auth.db
-├── api_keys.yaml           # 共用 — 管理員看 + 管
+├── api_keys.yaml           # 共用，管理員看 + 管
 ├── llm_profiles.yaml       # 共用
 ├── mcp_servers.yaml        # 共用
 └── users/
@@ -262,7 +262,7 @@ curl -X POST http://你的主機:8001/api/auth/login \
     └── 2/                  # alice
         ├── ui_prefs.json
         └── sessions/
-            └── *.kohakutr  # alice 的對話 — operator 看不到
+            └── *.kohakutr  # alice 的對話，operator 看不到
 ```
 
 ### 把現有工作階段遷到你的使用者命名空間
@@ -271,7 +271,7 @@ curl -X POST http://你的主機:8001/api/auth/login \
 
 ```bash
 kt admin migrate --from-shared-state --to-user operator --dry-run
-# （展示會被移動的內容；安全 — 不改檔案）
+# （展示會被移動的內容；安全，不改檔案）
 
 kt admin migrate --from-shared-state --to-user operator
 # 把 <config_dir>/ui_prefs.json + <config_dir>/sessions/*.kohakutr
@@ -303,7 +303,7 @@ kt admin users delete alice --yes
 # note: per-user dir users/2/ kept (rm -rf to discard the user's sessions / prefs).
 ```
 
-磁碟目錄**不會**被自動刪除 — 想清掉他們的資料自己 `rm -rf`。
+磁碟目錄**不會**被自動刪除，想清掉他們的資料自己 `rm -rf`。
 
 ### 提升 / 降級管理員
 
@@ -327,7 +327,7 @@ kt admin users list
 
 ### 重設密碼（管理員）
 
-目前沒有「重設」動詞 — 管理員透過 API 重新發:
+目前沒有「重設」動詞，管理員透過 API 重新發:
 
 ```bash
 # kt admin 暫時沒有 password-reset；管理員先用自己的工作階段
@@ -349,7 +349,7 @@ curl -X PATCH http://localhost:8001/api/auth/users/2 \
 
 上面四個級別是同一套邏輯設定；不同的是按部署方式怎麼傳遞權杖。
 
-### Docker compose — 透過 secrets 檔案傳遞
+### Docker compose：透過 secrets 檔案傳遞
 
 ```yaml
 services:
@@ -386,9 +386,9 @@ docker compose up -d
 docker compose exec kohakuterrarium kt admin users add operator --role admin
 ```
 
-完整 Compose 範例參見 [部署 — Docker](../guides/deployment-docker.md)。
+完整 Compose 範例參見 [Docker 部署](../guides/deployment-docker.md)。
 
-### systemd — 透過 `LoadCredential=`
+### systemd：透過 `LoadCredential=`
 
 ```bash
 sudo mkdir -p /etc/systemd/system/kohakuterrarium-host.service.d
@@ -408,7 +408,7 @@ sudo -u kohakuterrarium-host kt admin users add operator --role admin
 ```
 
 drop-in 用 `LoadCredential=`,所以密鑰不會出現在 `/proc/<pid>/environ` 中。
-參見 [部署 — systemd](../guides/deployment-systemd.md)。
+參見 [systemd 部署](../guides/deployment-systemd.md)。
 
 ---
 
@@ -441,7 +441,7 @@ export KT_AUTH_LOOPBACK_BYPASS=0          # 0 = 始終要權杖
 curl http://你的主機:8001/api/auth/capabilities
 ```
 
-回傳每層的啟用旗標 — 適合 shell 腳本和前端連線狀態機。
+回傳每層的啟用旗標，適合 shell 腳本和前端連線狀態機。
 
 ---
 
@@ -455,7 +455,7 @@ curl http://你的主機:8001/api/auth/capabilities
 | `/me` 回 `multi_user_disabled` | L4 沒開；`/me` 沒意義 | 要麼開 L4,要麼別呼叫 `/me` |
 | 註冊時 `invitation_invalid` | 權杖已被用 / 已過期 | 產生新邀請 |
 | `kt admin set-host-token` 報 「TOML shape ... cannot preserve」 | 你的 `config.toml` 有頂層純量 / 巢狀表 | 把頂層 key 移到 `[section]` 下 |
-| 把自己鎖在管理員外面 | 降級了唯一的管理員 | 任何 shell 跑 `kt admin users grant <name>` — 離線就能用 |
+| 把自己鎖在管理員外面 | 降級了唯一的管理員 | 任何 shell 跑 `kt admin users grant <name>`，離線就能用 |
 
 ---
 
@@ -465,7 +465,7 @@ curl http://你的主機:8001/api/auth/capabilities
   [Phase H–K](../../../plans/1.5.0-roadmap/03-frontend-backend-connection/README.md)）。
   在那之前你用 `curl` + cookies,或者 `Authorization: Bearer` 配 API 權杖。
   後端已穩定可用。
-- 跨主機工作階段匯入 / 匯出、密碼重設、2FA — 都推到 1.6+。
+- 跨主機工作階段匯入 / 匯出、密碼重設、2FA，都推到 1.6+。
 
 架構 / 威脅模型 / 為什麼這麼設計的閱讀,參見
 [身份驗證指南](../guides/authentication.md)。

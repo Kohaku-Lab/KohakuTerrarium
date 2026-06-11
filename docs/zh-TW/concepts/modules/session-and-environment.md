@@ -14,10 +14,10 @@ tags:
 
 狀態分成兩個層級：
 
-- **Session** — 屬於單一生物的私有狀態。包含該生物的
+- **Session**：屬於單一生物的私有狀態。包含該生物的
   scratchpad、私有 channel、TUI 參照、job store，以及任何
   自訂 extras。
-- **Environment** — 整個執行過程共用的狀態（更精確地說，是整個
+- **Environment**：整個執行過程共用的狀態（更精確地說，是整個
   terrarium 共用）。包含共用的 channel registry，以及一個小型的
   自訂 context dict。
 
@@ -90,6 +90,6 @@ Session（每個生物一個）
 
 ## 另請參考
 
-- [Channel](channel.md) — 需要明確 opt-in 的共享原語。
-- [多代理 / terrarium](../multi-agent/terrarium.md) — environment 真正重要的地方。
-- [impl-notes/session-persistence](../impl-notes/session-persistence.md) — session 狀態實際如何落在磁碟上。
+- [Channel](channel.md)：需要明確 opt-in 的共享原語。
+- [多代理 / terrarium](../multi-agent/terrarium.md)：environment 真正重要的地方。
+- [impl-notes/session-persistence](../impl-notes/session-persistence.md)：session 狀態實際如何落在磁碟上。

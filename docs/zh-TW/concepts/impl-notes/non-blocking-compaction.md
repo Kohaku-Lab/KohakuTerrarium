@@ -14,7 +14,7 @@ tags:
 一個連續執行數小時的生物，會不斷累積對話內容。最終，
 prompt 會超出模型的上下文預算。標準解法是進行壓縮：
 把較早的輪次摘要成一段精簡筆記，近期輪次則保留原始內容。
-但壓縮本身也是一次 LLM 呼叫——如果控制器在摘要器工作時
+但壓縮本身也是一次 LLM 呼叫，如果控制器在摘要器工作時
 被阻塞，一個常駐型代理就會在重寫 50k tokens 的期間凍結
 數十秒。
 
@@ -51,7 +51,7 @@ prompt 會超出模型的上下文預算。標準解法是進行壓縮：
      專用且更便宜的 `compact_model`），
    - 產生一份摘要，並原樣保留決策、檔案路徑、錯誤字串，以及
      其他高訊號 token。
-4. 與此同時，控制器會持續處理事件——工具照常執行、
+4. 與此同時，控制器會持續處理事件：工具照常執行、
    子代理照常生成、使用者也可以繼續輸入。
 5. 當摘要完成後，manager 會等待目前輪次結束，然後**以原子方式**
    重寫對話：
@@ -71,17 +71,17 @@ prompt 會超出模型的上下文預算。標準解法是進行壓縮：
 
 ## 程式碼中的位置
 
-- `src/kohakuterrarium/core/compact.py` — 帶有
+- `src/kohakuterrarium/core/compact.py`：帶有
   start/pending/done 狀態機的 `CompactManager`。
-- `src/kohakuterrarium/core/agent.py` — `_init_compact_manager()` 會在
+- `src/kohakuterrarium/core/agent.py`：`_init_compact_manager()` 會在
   `start()` 時把 manager 接到 agent 上。
-- `src/kohakuterrarium/core/controller.py` — 每輪結束後的 hook，
+- `src/kohakuterrarium/core/controller.py`：每輪結束後的 hook，
   會請 manager 評估是否需要壓縮。
-- `src/kohakuterrarium/builtins/user_commands/compact.py` — 手動觸發的
+- `src/kohakuterrarium/builtins/user_commands/compact.py`：手動觸發的
   `/compact`。
 
 ## 另請參閱
 
-- [記憶與壓縮](../modules/memory-and-compaction.md) — 概念層面的說明。
-- [reference/configuration.md — `compact`](../../reference/configuration.md) —
+- [記憶與壓縮](../modules/memory-and-compaction.md)：概念層面的說明。
+- [reference/configuration.md：`compact`](../../reference/configuration.md)：
   各生物可調整的設定項目。

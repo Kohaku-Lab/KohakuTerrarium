@@ -1,6 +1,6 @@
 ---
 title: 工具
-summary: LLM 可呼叫的具名能力——shell 命令、檔案編輯、網頁搜尋等等。
+summary: LLM 可呼叫的具名能力：shell 命令、檔案編輯、網頁搜尋等等。
 tags:
   - concepts
   - module
@@ -33,9 +33,9 @@ tags:
 
 執行模式：
 
-- **Direct** —— 在同一輪中等待工具完成；結果會作為 `tool_complete` 事件回饋。
-- **Background** —— 提交後立即返回；結果會在之後的事件中送達。
-- **Stateful** —— 跨多輪互動；像 generator 一樣的工具，可產出中間結果供 agent 回應。
+- **Direct**：在同一輪中等待工具完成；結果會作為 `tool_complete` 事件回饋。
+- **Background**：提交後立即返回；結果會在之後的事件中送達。
+- **Stateful**：跨多輪互動；像 generator 一樣的工具，可產出中間結果供 agent 回應。
 
 ## 我們怎麼實作它
 
@@ -57,9 +57,9 @@ tags:
 
 - **把工具當成訊息匯流排。** `send_message` 會寫入某個頻道；另一隻生物上的 `ChannelTrigger` 會讀取它。兩個工具加上一個 trigger，就能重現群聊模式，而不需要新增任何原語。
 - **把工具當成狀態控制柄。** `scratchpad` 工具就是典型的 KV API；任何協作中的工具都可以透過它會合。
-- **會安裝 trigger 的工具。** 任何通用 trigger 類別（預設為 `TimerTrigger`、`ChannelTrigger`、`SchedulerTrigger`）都能以工具形式暴露——在 `tools:` 下列出 `type: trigger`，就會讓 `add_timer` / `watch_channel` / `add_schedule` 出現在工具清單中，而呼叫它就會把該 trigger 安裝到活躍的 `TriggerManager` 上。`group_add_node` 則會把一隻新的生物生成到呼叫者的圖裡。
+- **會安裝 trigger 的工具。** 任何通用 trigger 類別（預設為 `TimerTrigger`、`ChannelTrigger`、`SchedulerTrigger`）都能以工具形式暴露：在 `tools:` 下列出 `type: trigger`，就會讓 `add_timer` / `watch_channel` / `add_schedule` 出現在工具清單中，而呼叫它就會把該 trigger 安裝到活躍的 `TriggerManager` 上。`group_add_node` 則會把一隻新的生物生成到呼叫者的圖裡。
 - **包裝子代理的工具。** 任何子代理呼叫本身就是工具形狀，因為 LLM 仍然是用名稱加參數去呼叫它。
-- **會執行 agent 的工具。** 因為工具就是普通 Python，某個工具可以內含一隻 agent——例如先用一個小型判斷 agent 檢查參數，再派發真正動作的 guard 工具。參見 [patterns](../patterns.md)。
+- **會執行 agent 的工具。** 因為工具就是普通 Python，某個工具可以內含一隻 agent，例如先用一個小型判斷 agent 檢查參數，再派發真正動作的 guard 工具。參見 [patterns](../patterns.md)。
 
 ## 不要被它框住
 
@@ -67,8 +67,8 @@ tags:
 
 ## 另見
 
-- [impl-notes/stream-parser](../impl-notes/stream-parser.md) —— 為什麼工具會在 LLM 停止前就開始執行。
-- [子代理](sub-agent.md) —— 那個「它也是一種工具」的兄弟概念。
-- [頻道](channel.md) —— 把工具當訊息匯流排的另一半。
-- [模式](../patterns.md) —— 工具的各種非常規用法。
-- [reference/builtins.md — Tools](../../reference/builtins.md) —— 完整目錄。
+- [impl-notes/stream-parser](../impl-notes/stream-parser.md)：為什麼工具會在 LLM 停止前就開始執行。
+- [子代理](sub-agent.md)：那個「它也是一種工具」的兄弟概念。
+- [頻道](channel.md)：把工具當訊息匯流排的另一半。
+- [模式](../patterns.md)：工具的各種非常規用法。
+- [reference/builtins.md：Tools](../../reference/builtins.md)：完整目錄。

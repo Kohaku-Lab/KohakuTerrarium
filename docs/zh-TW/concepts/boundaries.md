@@ -1,6 +1,6 @@
 ---
 title: 邊界
-summary: 生物抽象是預設值，不是緊身衣——框架會在哪裡彎曲自己的抽象，以及什麼時候它根本不適合。
+summary: 生物抽象是預設值，不是緊身衣：框架會在哪裡彎曲自己的抽象，以及什麼時候它根本不適合。
 tags:
   - concepts
   - philosophy
@@ -9,13 +9,13 @@ tags:
 # 邊界
 
 在 KohakuTerrarium 裡，生物抽象是 agent 的預設形狀。
-它**不是**法律。這一頁整理的是：什麼情況下忽略這個預設反而是正確做法——以及什麼情況下，這個框架根本不是好選擇。
+它**不是**法律。這一頁整理的是：什麼情況下忽略這個預設反而是正確做法，以及什麼情況下，這個框架根本不是好選擇。
 
 ## 抽象是預設值，不是緊身衣
 
 六個模組（Controller、Input、Trigger、Tool、Sub-agent、Output）在大多數生物裡都會一起出現，但每一個其實都可以獨立省略：
 
-- **沒有 input。** `input: { type: none }`。cron 生物、只收 webhook 的接收器、背景監控器——都不需要使用者打字。
+- **沒有 input。** `input: { type: none }`。cron 生物、只收 webhook 的接收器、背景監控器，這些都不需要使用者打字。
 - **沒有 triggers。** 純 request/response 的聊天生物，不靠任何環境喚醒也完全沒問題。
 - **沒有 tools。** 只負責回應的專家型生物（摘要、格式整理、翻譯）可以完全不帶工具。LLM 本身就已經很有能力。
 - **沒有 sub-agents。** 從不委派的短任務生物很常見。
@@ -37,7 +37,7 @@ tags:
 ## 什麼時候 KohakuTerrarium 適合你
 
 - 你的 agent 系統需求**還不穩定，或持續在演變**。你還不知道哪些工具、觸發器、提示詞能活過下一輪。當你在做的東西還會變形，框架就會開始回本。
-- 你想**嘗試新的 agent 設計**——某種新穎的工具、觸發器或 sub-agent 組合——而不想重蓋整個基底。
+- 你想**嘗試新的 agent 設計**（某種新穎的工具、觸發器或 sub-agent 組合），而不想重蓋整個基底。
 - 你想要**開箱即用、但可自訂的生物**。`kt-biome` 會給你起點；繼承它、換掉幾個模組，就完成了。
 - 你想把 **agent 行為嵌入現有 Python 程式碼**裡，而不是另外跑一個獨立服務。
 - 你想要一個**可分享可重用元件的框架**（例如：內含 creatures、plugins、tools、presets 的套件），在團隊之間或跨專案重複使用。
@@ -45,8 +45,8 @@ tags:
 ## 什麼時候它不適合
 
 - 你**已經很滿意某個現成 agent 產品**，而且你的需求也**很穩定**。如果 Claude Code、OpenClaw，或某個現成內部工具已經能滿足你的需求，而且你也不預期需求會變，切過來只會增加成本，不會帶來回報。
-- 你的**心智模型和框架對不上**。如果你對 agent 的理解無法自然映射到 controller / tools / triggers / sub-agents / channels，上硬套只會讓事情更糟，不會更好。這時候就用別的東西——或者自己寫另一個框架。
-- 你的工作負載需要**超低延遲**——你真的在意每個操作都低於 50 ms。KohakuTerrarium 優先優化的是正確性與靈活性；asyncio 開銷、事件佇列、output router、session persistence 都會帶來一些成本。大多數時候沒問題；有時候就是不行。
+- 你的**心智模型和框架對不上**。如果你對 agent 的理解無法自然映射到 controller / tools / triggers / sub-agents / channels，上硬套只會讓事情更糟，不會更好。這時候就用別的東西，或者自己寫另一個框架。
+- 你的工作負載需要**超低延遲**，你真的在意每個操作都低於 50 ms。KohakuTerrarium 優先優化的是正確性與靈活性；asyncio 開銷、事件佇列、output router、session persistence 都會帶來一些成本。大多數時候沒問題；有時候就是不行。
 - 你就是**不想用它**。這是完全合理的理由。若維護者對某個框架心生反感，那它就不該待在那個 codebase 裡。
 
 ## 把這一頁當成一種授權
@@ -55,7 +55,7 @@ tags:
 
 ## 延伸閱讀
 
-- [為什麼是 KohakuTerrarium](foundations/why-kohakuterrarium.md) — 這個框架背後的出發點。
-- [什麼是 agent](foundations/what-is-an-agent.md) — 這一頁允許你偏離的那條標準推導路徑。
-- [模式](patterns.md) — 一些刻意打破「一個模組 = 一個用途」直覺的模組組合方式。
-- [ROADMAP](../../ROADMAP.md) — 那些還很粗糙的部分，之後要往哪裡去。
+- [為什麼是 KohakuTerrarium](foundations/why-kohakuterrarium.md)：這個框架背後的出發點。
+- [什麼是 agent](foundations/what-is-an-agent.md)：這一頁允許你偏離的那條標準推導路徑。
+- [模式](patterns.md)：一些刻意打破「一個模組 = 一個用途」直覺的模組組合方式。
+- [ROADMAP](../../ROADMAP.md)：那些還很粗糙的部分，之後要往哪裡去。

@@ -21,12 +21,12 @@ tags:
 
 搜尋會回傳 `SearchResult` 紀錄，包含：
 
-- `content` — 命中的文字
-- `agent` — 由哪個生物產生
-- `block_type` — `text` / `tool` / `trigger` / `user`
-- `round_num`, `block_num` — 在工作階段中的位置
-- `score` — 命中品質
-- `ts` — 時間戳記
+- `content`：命中的文字
+- `agent`：由哪個生物產生
+- `block_type`：`text` / `tool` / `trigger` / `user`
+- `round_num`, `block_num`：在工作階段中的位置
+- `score`：命中品質
+- `ts`：時間戳記
 
 ## Embedding 提供者
 
@@ -37,16 +37,16 @@ tags:
 | `model2vec`（預設） | 不需要 torch、純 NumPy | 極快，安裝最精簡。對接近關鍵字的檢索品質不錯，但長文本語意搜尋較弱。 |
 | `sentence-transformer` | `torch` | 較慢，但語意品質強很多。也適合 GPU。 |
 | `api` | 網路 + API key | 遠端 embedder（OpenAI、Jina、Gemini）。品質最好，但按次計費。 |
-| `auto` | — | 若可用 API，優先用 `jina-v5-nano`，否則退回 `model2vec`。 |
+| `auto` |（無）| 若可用 API，優先用 `jina-v5-nano`，否則退回 `model2vec`。 |
 
 預設模型名稱（可跨 provider 使用）：
 
-- `@tiny` — 最小、最快
-- `@base` — 預設平衡
-- `@retrieval` — 為檢索調校
-- `@best` — 最高品質
-- `@multilingual`, `@multilingual-best` — 非英文工作階段
-- `@science`, `@nomic`, `@gemma` — 特化用途
+- `@tiny`：最小、最快
+- `@base`：預設平衡
+- `@retrieval`：為檢索調校
+- `@best`：最高品質
+- `@multilingual`, `@multilingual-best`：非英文工作階段
+- `@science`, `@nomic`, `@gemma`：特化用途
 
 你也可以直接傳入 Hugging Face 路徑。
 
@@ -65,7 +65,7 @@ kt embedding swe.kohakutr \
   --dimensions 384
 ```
 
-`--dimensions` 是 Matryoshka truncation——如果模型支援，可用它在執行時直接縮小向量維度。
+`--dimensions` 是 Matryoshka truncation：如果模型支援，可用它在執行時直接縮小向量維度。
 
 增量建立：再次執行 `kt embedding` 時，只會索引新增事件。
 
@@ -81,10 +81,10 @@ kt search swe "auth bug" --agent swe -k 5
 
 模式：
 
-- **`fts`** — 在 FTS5 上跑 BM25。不需要 embedding。最快，適合精確片語。
-- **`semantic`** — 純向量相似度。需要索引。適合同義改寫。
-- **`hybrid`** — 先用 BM25 找候選，再以向量相似度重排。當兩者都可用時會是預設。
-- **`auto`** — 自動選擇該工作階段支援的最完整模式。
+- **`fts`**：在 FTS5 上跑 BM25。不需要 embedding。最快，適合精確片語。
+- **`semantic`**：純向量相似度。需要索引。適合同義改寫。
+- **`hybrid`**：先用 BM25 找候選，再以向量相似度重排。當兩者都可用時會是預設。
+- **`auto`**：自動選擇該工作階段支援的最完整模式。
 
 `-k` 用來限制結果數量。`--agent` 可把搜尋範圍限制在生態瓶工作階段中的單一生物。
 
@@ -104,9 +104,9 @@ memory:
     model: "@base"
 ```
 
-當 LLM 呼叫 `search_memory` 時，工具會對 *目前* 工作階段的索引執行搜尋。這是 seamless-memory 的基本原語——agent 不需要額外搭 RAG 架構，就能查出自己（或隊友）在前幾輪說過什麼。
+當 LLM 呼叫 `search_memory` 時，工具會對 *目前* 工作階段的索引執行搜尋。這是 seamless-memory 的基本原語：agent 不需要額外搭 RAG 架構，就能查出自己（或隊友）在前幾輪說過什麼。
 
-工具參數（形狀；實際語法取決於你的 `tool_format`——下面示範預設 bracket 格式）：
+工具參數（形狀；實際語法取決於你的 `tool_format`，下面示範預設 bracket 格式）：
 
 ```
 [/search_memory]
@@ -128,7 +128,7 @@ memory:
     model: "@retrieval"      # preset 或 HF 路徑
 ```
 
-帶有這個區塊的 agent，事件一進來就會自動建立索引——不需要再手動呼叫 `kt embedding`。沒有這個區塊的 agent，仍然會保留未嵌入的工作階段（但還是能用 FTS 搜尋）。
+帶有這個區塊的 agent，事件一進來就會自動建立索引，不需要再手動呼叫 `kt embedding`。沒有這個區塊的 agent，仍然會保留未嵌入的工作階段（但還是能用 FTS 搜尋）。
 
 ## 用程式檢查
 
@@ -155,11 +155,11 @@ store.close()
 - **`kt embedding` 很慢。** `sentence-transformer` 預設是 CPU-bound。請安裝支援 CUDA 的 torch，或改用 `model2vec`。
 - **Provider 安裝失敗。** `kt embedding --provider model2vec` 沒有 native 依賴，在哪裡都能跑。`sentence-transformer` 需要 `torch`；`api` 需要對應 provider 的 SDK（`openai`、`google-generativeai` 等）。
 - **Hybrid 模式結果很多雜訊。** 把 `-k` 調低；如果查詢很多改寫語句，偏向用 `semantic` 而不是 `hybrid`；如果查的是精確片語，偏向用 `fts`。
-- **`search_memory` 沒有回傳任何結果。** 工作階段缺少 embedding 設定，或這個工作階段是在加入記憶設定之前啟動的——請用 `kt embedding` 重新建立。
+- **`search_memory` 沒有回傳任何結果。** 工作階段缺少 embedding 設定，或這個工作階段是在加入記憶設定之前啟動的，請用 `kt embedding` 重新建立。
 
 ## 延伸閱讀
 
-- [工作階段](sessions.md) — 記憶建立在 `.kohakutr` 格式之上。
-- [外掛](plugins.md) — seamless-memory 外掛模式（`pre_llm_call` 檢索）。
-- [參考 / CLI](../reference/cli.md) — `kt embedding`、`kt search` 的旗標。
-- [概念 / 記憶與壓縮](../concepts/modules/memory-and-compaction.md) — 背後的設計理由。
+- [工作階段](sessions.md)：記憶建立在 `.kohakutr` 格式之上。
+- [外掛](plugins.md)：seamless-memory 外掛模式（`pre_llm_call` 檢索）。
+- [參考 / CLI](../reference/cli.md)：`kt embedding`、`kt search` 的旗標。
+- [概念 / 記憶與壓縮](../concepts/modules/memory-and-compaction.md)：背後的設計理由。
