@@ -9,11 +9,7 @@ description = "A universal agent framework for building self-driven AI agents an
 authors = [
     { name = "Shih-Ying Yeh (KohakuBlueLeaf)", email = "apolloyeh0123@gmail.com" },
 ]
-# PEP 639 license format.  The license is custom (see ``LICENSE``),
-# so we use the SPDX ``LicenseRef-`` form rather than a registered
-# identifier.  Briefcase 0.3.21+ requires this shape; the older
-# ``license = { text = ... }`` + ``license.file = ...`` combo
-# triggers a deprecation warning and (in 0.3.22+) a hard error.
+# Custom license; SPDX LicenseRef- form is required by Briefcase 0.3.21+.
 license = "LicenseRef-KohakuTerrarium-1.0"
 license-files = ["LICENSE"]
 readme = "README.md"
@@ -34,142 +30,65 @@ dependencies = [
     "httpx>=0.27.0",
     "openai>=2.0.0",
     "anthropic>=0.68.0",
-    # Pin pydantic to ≥2.12,<2.13 because the matching pydantic-core
-    # (2.41.x) is what we have an Android wheel for in
-    # dep/android-dep-collection (release v2026.05.25).  pydantic
-    # 2.13.x demands pydantic-core==2.46.4 which would force pip on
-    # Android to backtrack — keeping the pin tight here makes the
-    # resolution one-step and matches the wheel we ship.  Bump both
-    # when bumping the android-dep-collection's pydantic-core
-    # version.
+    # Pinned <2.13 to match the pydantic-core Android wheel we ship.
     "pydantic>=2.12.0,<2.13",
-    # pydantic-core declared as a DIRECT dep (even though it's a
-    # transitive of pydantic) so Briefcase Android emits a
-    # ``pydantic-core>=...`` line into the generated requirements.txt
-    # — postcreate.py's ``_ANDROID_URL_REFS`` only rewrites lines
-    # that Briefcase actually emits.  Without this, the URL ref is
-    # dead code and Chaquopy pip fails with "no matching distributions
-    # available for pydantic-core" (Rust+PyO3, no Chaquopy wheel,
-    # no pure-Python wheel on PyPI).  Same rationale applies to
-    # jiter / rpds-py / safetensors / tokenizers / primp below.
+    # Direct dep (transitive of pydantic) so the Android build emits a wheel
+    # URL ref for it. Same reason for jiter / rpds-py / safetensors /
+    # tokenizers / primp below (all Rust/PyO3, no Chaquopy wheel).
     "pydantic-core>=2.41.0,<2.42",
     "rich>=14.0.0",
     "prompt_toolkit>=3.0.0",
     "pyyaml>=6.0.0",
     "ruamel.yaml>=0.18.0",
     "jinja2>=3.1.0",
-    # libcst — used by the studio codegen editors.  Pin allows
-    # both PyPI's 1.x (desktop / CI) and Chaquopy's back-ported
-    # 0.3.23 (the only version Chaquopy publishes a Python-3.13
-    # Android wheel for).  All ``cst.*`` symbols our codegen
-    # modules touch (``Module``, ``parse_module``, ``ClassDef``,
-    # ``CSTTransformer``, ``SimpleString``, ``IndentedBlock``,
-    # ``Return``, ``Name``, ``Attribute``, ``Call``, ``Tuple``,
-    # ``List``, ``Element``, …) are stable since 0.3.x, so a
-    # split-version policy across desktop + Android is safe.
-    # The audit-driven first ``briefcase build android`` failed on
-    # ``libcst>=1.4.0`` because Chaquopy's index tops at 0.3.23;
-    # relaxing the floor lets the resolver pick the highest
-    # available on each target.
+    # Wide pin: PyPI 1.x on desktop, Chaquopy's 0.3.23 on Android; the cst.*
+    # API our codegen uses is stable across both.
     "libcst>=0.3.23,<2",
     "aiofiles>=25.1.0",
     "python-dotenv>=1.0.0",
-    # 0.8.6+ is required because:
-    #   * 0.8.5 introduced the maturin v1.13.3 +
-    #     ``ANDROID_API_VERSION=24`` build path that emits
-    #     properly-tagged ``android_24_<abi>`` Android wheels
-    #     (PEP 738).  Earlier versions tagged Android wheels as
-    #     ``linux_<arch>`` which Chaquopy's pip rejects with
-    #     ``ERROR: ... is not a supported wheel on this platform``.
-    #   * 0.8.6 relaxed KV's own ``numpy>=2.0.0`` pin to
-    #     ``numpy>=1.26`` — Chaquopy 13.1 tops at numpy 1.26.2,
-    #     so the prior floor blocked the Android Chaquopy resolve
-    #     with ``No matching distribution found for numpy>=2.0.0``.
-    # postcreate.py reads the floor from pyproject and substitutes
-    # it into the KV URL-ref filename, so bumping here drives the
-    # Android wheel URL automatically.
+    # >=0.8.6 for PEP 738 Android wheel tags + the relaxed numpy>=1.26 floor
+    # (Chaquopy compat). The floor here drives the Android wheel URL ref.
     "kohakuvault>=0.8.6",
     "textual>=8.0.0",
     "html2text>=2025.0.0",
     "gitpython>=3.1.0",
-    # dulwich: pure-Python git impl used as the Android fallback for
-    # ``kt install <url>`` when no system ``git`` binary is on PATH.
-    # On Chaquopy Android there's no shellable ``git``; dulwich's
-    # ``py3-none-any`` wheel installs cleanly and the
-    # ``packages/git_backend.py`` shim auto-selects it when
-    # ``shutil.which('git')`` returns None.  Slightly slower than
-    # native git for big repos but fine for creature / terrarium /
-    # plugin package sizes.
+    # Pure-Python git fallback for `kt install <url>` where no `git` binary
+    # exists (e.g. Android).
     "dulwich>=0.22",
     # API server
     "fastapi>=0.115.0",
-    # ``[standard]`` pulls in uvloop + httptools + watchfiles for
-    # better perf on desktop / server.  On Android these have no
-    # Chaquopy wheels — ``postcreate.py`` strips the ``[standard]``
-    # extra from the generated requirements.txt at briefcase-build
-    # time, so the framework still installs (falling back to the
-    # stdlib asyncio loop + h11 parser).  General ``pip install
-    # kohakuterrarium`` gets the full ``[standard]`` set.
+    # [standard] (uvloop/httptools/watchfiles) is stripped on Android by
+    # packaging/android/postcreate.py; pip installs get the full set.
     "uvicorn[standard]>=0.34.0",
     "websockets>=10.4",
-    # API auth (L4 — multi-user accounts).  Used only by api/auth/crypto.py;
-    # CLI / TUI / framework core do not touch it.
+    # API auth (L4 multi-user accounts); used only under api/auth/.
     "bcrypt>=4.0.0",
-    # QR code generation for ``kt admin show-host-qr`` — tiny
-    # pure-Python (~80KB), zero deps.  Picked over ``qrcode`` so
-    # there's no transitive PIL.
+    # QR codes for `kt admin show-host-qr` (tiny, no PIL transitive).
     "segno>=1.6.0",
     # Web tools
     "trafilatura>=2.0.0",
     "ddgs>=9.0.0",
-    # PDF reading.  C bindings to MuPDF; no Chaquopy Android
-    # wheel.  ``postcreate.py`` strips this line from Android's
-    # requirements.txt at build time; the ``read_pdf`` tool's
-    # consumers already lazy-import, so absence on Android is a
-    # graceful "tool unavailable" not a boot crash.
+    # PDF reading; stripped on Android by postcreate.py (no Chaquopy wheel,
+    # consumers lazy-import so absence degrades gracefully).
     "pymupdf>=1.24.0",
-    # Image decode-verification for the read tool (PNG/JPEG/WEBP/GIF).
-    # Floor relaxed to 11.0.0 because Chaquopy 13.1 (the Briefcase
-    # Android Python runtime) ships Pillow 11.0.0 max and rejects
-    # ``>=12`` at install time.  The APIs we actually use
-    # (``Image.open`` + ``img.verify`` + ``img.format`` + ``img.load``
-    # — see ``builtins/tools/read.py``) are stable across Pillow 2.x→
-    # 12.x, so a single floor that works on both Chaquopy and PyPI is
-    # safe.  Same split-version policy as ``libcst>=0.3.23,<2``.
-    # Chaquopy version index: https://chaquo.com/pypi-13.1/pillow/
+    # >=11 floor for Chaquopy (Android) compat; the Image API we use is stable.
     "Pillow>=11.0.0",
     # MCP client
     "mcp>=1.0.0",
-    # rpds-py: hard transitive via mcp -> jsonschema -> referencing.
-    # Declared as direct dep so Briefcase emits the line into
-    # requirements.txt and postcreate's URL ref can fire on Android.
-    # Rust + PyO3, no pure-Python wheel.
+    # Direct dep for the Android wheel URL ref (transitive via mcp).
     "rpds-py>=0.30.0",
-    # jiter: hard transitive via openai (jiter<1,>=0.10.0) and
-    # anthropic.  Declared as direct dep so the Android URL ref
-    # fires.  Rust + PyO3 streaming JSON parser.
+    # Direct dep for the Android wheel URL ref (transitive via openai/anthropic).
     "jiter>=0.10.0,<1",
-    # primp: hard transitive via ddgs.  Direct-dep for Android URL ref.
+    # Direct dep for the Android wheel URL ref (transitive via ddgs).
     "primp>=1.3.0",
     # Lightweight embeddings (no pytorch)
     "model2vec>=0.8.0",
-    # safetensors + tokenizers: hard transitives via model2vec.
-    # Declared as direct deps so Briefcase emits the lines and
-    # postcreate's URL refs fire on Android.  On desktop / PyPI
-    # both packages have manylinux wheels.
-    #
-    # ``tokenizers`` floor must match what ``sentence-transformers``
-    # (in the ``full`` extra) can satisfy: it pulls
-    # ``transformers>=4.41.0`` which only accepts
-    # ``tokenizers<=0.23.0``.  Using ``>=0.23.1`` here makes
-    # ``uv pip install -e .[full]`` unsolvable.  Floor 0.20 matches
-    # model2vec's own pin and is satisfied by both PyPI's manylinux
-    # wheel chain AND our Android wheel (0.23.1 — version constraint
-    # on the wheel-filename URL ref is independent of the dep-spec
-    # range we accept here).
+    # Direct deps for the Android wheel URL refs (transitive via model2vec).
+    # tokenizers capped <0.24 so the [full] extra's sentence-transformers
+    # stays solvable.
     "safetensors>=0.7.0",
     "tokenizers>=0.20,<0.24",
-    # Windows PTY for terminal panel (Nerd Font / PowerShell theme support)
+    # Windows PTY for the terminal panel.
     "pywinpty>=2.0.0; sys_platform == 'win32'",
 ]
 
@@ -185,42 +104,22 @@ kt = "kohakuterrarium.__main__:main"
 # with an optional creature arg → startup picker).
 kt-cli = "kohakuterrarium.cli.entry_cli:main"
 kt-tui = "kohakuterrarium.cli.entry_tui:main"
-# `kt-aio` spawns lab-host + an embedded lab-client in one process.
-# Used by the kohaku/all Docker image's entrypoint and by the
-# `kohakuterrarium-all.service` systemd unit so the unit can call a
-# real ELF entry instead of bash.
+# Spawns a lab-host + embedded lab-client in one process (Docker entrypoint /
+# systemd unit).
 kt-aio = "kohakuterrarium.cli._aio_entrypoint:run"
 
 [project.optional-dependencies]
-# ── docs-only extras: these have no extra runtime deps, they're
-# named so operators can `pip install 'kohakuterrarium[host]'` /
-# `[client]` and have it work with the same wheel. Reserved for
-# future use if host- or client-specific deps appear.
+# No extra deps; named so `pip install kohakuterrarium[host]` / `[client]`
+# resolve against the same wheel.
 host = []
 client = []
 
-# ── desktop: deps the desktop bundles need (pywebview shell).
-# Excluded from the framework wheel's hard deps so the Android
-# build via Briefcase + Chaquopy doesn't try to install
-# pywebview (which has no Android wheel and would fail the
-# build).  Desktop builds opt in via this extra.
-#
-# Note: ``uvicorn[standard]`` and ``pymupdf`` are NOT in extras —
-# they're in core ``[project] dependencies`` because a normal
-# ``pip install kohakuterrarium`` should get them.  The Android
-# build's ``packaging/android/postcreate.py`` is what strips them
-# from the generated Chaquopy requirements.txt, since none of the
-# three native packages ``[standard]`` brings (uvloop / httptools
-# / watchfiles) nor pymupdf's MuPDF bindings have Android wheels.
-# Inverting the polarity — hard deps with an Android carve-out —
-# means the "Android special case" stays in one file
-# (``postcreate.py``), not spread across pyproject + briefcase
-# per-platform requires.
+# pywebview shell for desktop bundles. Kept out of core deps so the Android
+# build (native WebView) doesn't try to install it.
 desktop = [
     "pywebview==6.1",
 ]
 
-# ── demo: example agent-apps that need extra deps ────────────────────
 discord = [
     "discord.py>=2.0.0",
 ]
@@ -228,25 +127,25 @@ demo = [
     "KohakuTerrarium[discord]",
 ]
 
-# ── litellm: 100+ LLM providers via unified SDK ─────────────────────
+# 100+ LLM providers via a unified SDK.
 litellm = [
     "litellm>=1.60.0,<2.0.0",
 ]
 
-# ── browser: full browser rendering for web_fetch (heavy: lxml) ──────
+# Full browser rendering for web_fetch (heavy: lxml).
 browser = [
     "crawl4ai>=0.8.0",
 ]
 
-# ── full: everything including pytorch-based embeddings ──────────────
+# Everything, including pytorch-based embeddings.
 embeddings-heavy = [
     "sentence-transformers>=5.0.0",
 ]
 full = [
-    "KohakuTerrarium[demo,browser,embeddings-heavy]",
+    "KohakuTerrarium[demo,browser,embeddings-heavy,desktop,litellm]",
 ]
 
-# ── dev: testing and linting ─────────────────────────────────────────
+# Testing and linting.
 dev = [
     "pytest>=9.0.0",
     "pytest-asyncio>=1.3.0",
@@ -274,18 +173,9 @@ exclude = ["kohakuterrarium-frontend*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-# Three test tiers, all run by default.  ``tests/integration/`` covers
-# cross-module wiring through fakes; ``tests/e2e/`` covers full-stack
-# scenarios with a ScriptedLLM and (for multi-node tests)
-# real WebSocket-backed lab clusters.
 testpaths = ["tests/unit", "tests/integration", "tests/e2e"]
-# Default pytest-timeout: any test that exceeds 60s is killed.  Most
-# e2e tests finish in <2s with ScriptedLLM; the generous default is a
-# safety net for genuine deadlocks (a stream that never closes, a
-# subscribe that never delivers).  Bumped from 30 → 60 because the
-# multi-node + lab subprocess journeys legitimately need longer on
-# loaded CI workers (handshake + WebSocket bind latency stacks up).
-# Per-test overrides via ``@pytest.mark.timeout(120)`` when justified.
+# 60s per-test cap: a safety net for deadlocks. e2e/multi-node journeys need
+# the headroom on loaded CI workers; override per-test via @pytest.mark.timeout.
 timeout = 60
 timeout_method = "thread"
 
@@ -297,8 +187,6 @@ project_name = "KohakuTerrarium"
 bundle = "com.kohaku.terrarium"
 version = "2.0.0"
 url = "https://github.com/Kohaku-Lab/KohakuTerrarium"
-# License is read from PEP 639 ``[project]`` above; Briefcase
-# 0.3.21+ no longer accepts ``license.file`` here.
 author = "Shih-Ying Yeh (KohakuBlueLeaf)"
 author_email = "apolloyeh0123@gmail.com"
 
@@ -306,45 +194,29 @@ author_email = "apolloyeh0123@gmail.com"
 formal_name = "KohakuTerrarium"
 description = "Universal Agent Framework - Desktop App"
 icon = "src/kohakuterrarium/app_icons/app"
-# Parent-level sources contain ONLY the wrapper package.  The
-# ``bundled-release/`` directory (the 06b release-tarball update
-# mechanism — see plans/1.5.0-roadmap/06b-release-bundle-update/)
-# is desktop-specific, so it lives under each desktop platform's
-# ``sources`` rather than here.  Briefcase MERGES (not replaces)
-# platform-level ``sources`` into parent-level, so keeping
-# bundled-release here would force every platform — including
-# Android — to populate it.  Android doesn't (updates go through
-# Play Store), which would dupe-error or fail-source-not-found.
-# CI populates ``bundled-release/`` from the matrix
-# ``release-tree`` job before ``briefcase create`` on desktop
-# targets only.
+# Parent sources are the wrapper package only. `bundled-release/` (the 06b
+# release-tarball mechanism) is desktop-only, so it's added per-platform below;
+# Briefcase merges platform sources into the parent set.
 sources = ["src/kohakuterrarium"]
 startup_module = "kohakuterrarium.__briefcase__"
+# Launcher-only deps: no pip/venv/ensurepip (those are unavailable on the
+# Windows briefcase shell). pywebview = splash UI; zstandard = tarball decomp.
 requires = [
-    # Launcher needs only packaging (version compare), pywebview
-    # (splash UI — optional, Tk fallback), and zstandard (preferred
-    # tarball compression — .tar.gz fallback). NO pip, NO venv,
-    # NO ensurepip — the 06 design that depended on those was dead-on-
-    # arrival on Windows briefcase shells that strip stdlib modules.
-    "packaging>=23.0",
+    "packaging>=26.0",
     "pywebview==6.1",
     "zstandard>=0.22",
 ]
-# proxy_tools (pywebview dep) only has sdist on PyPI — pre-build wheel in CI.
+# proxy_tools (a pywebview dep) is sdist-only on PyPI — pre-built into wheels/ by CI.
 requirement_installer_args = ["--find-links", "wheels"]
 
 [tool.briefcase.app.kohakuterrarium.macOS]
 universal_build = false
-# ``bundled-release/`` is the 06b release-tarball directory the
-# launcher reads on first boot.  Per-desktop-platform so Android
-# doesn't inherit it.
+# 06b release-tarball dir the launcher reads on first boot (per-platform so
+# Android doesn't inherit it).
 sources = ["bundled-release"]
 requires = [
     "std-nslog~=1.0.0",
-    # Desktop bundles wrap the framework in a pywebview shell —
-    # pulled in via the ``[desktop]`` extra so the Android bundle
-    # (which uses a native WebView instead) doesn't try to install
-    # pywebview, which has no aarch64-Android wheel.
+    # pywebview shell via [desktop]; Android uses a native WebView instead.
     "KohakuTerrarium[desktop]",
 ]
 
@@ -360,89 +232,35 @@ requires = [
     "KohakuTerrarium[desktop]",
 ]
 
-# ── Android — Briefcase-driven APK / AAB ──────────────────────────────
-#
-# The Android bundle ships:
-#   * The framework wheel + its deps (Briefcase + Chaquopy wheel
-#     them; ``[project] dependencies`` is the source of truth).
-#   * The Vue web_dist (already pulled in by the setuptools
-#     ``package_data`` rule under ``kohakuterrarium``).
-#   * One static busybox per ABI for the bash tool — fetched by
-#     ``packaging/android/fetch_sandbox.py``, then copied into
-#     the generated project's ``assets/sandbox/bin/`` by
-#     ``packaging/android/postcreate.py``.
-#
-# Custom Java (MainActivity + KohakuHostService) lives under
-# ``packaging/android/template/`` and is copied into the
-# Briefcase-generated tree by ``postcreate.py``.  Briefcase does
-# NOT have native "merge tree" support — the post-create copy
-# step is the supported pattern.  CI runs it between
-# ``briefcase create android`` and ``briefcase update android``.
+# ── Android (Briefcase APK / AAB) ─────────────────────────────────────
+# Ships the framework wheel + deps (from [project] above, wheeled by
+# Chaquopy), the Vue web_dist, and a per-ABI busybox for the bash tool.
+# Custom Java (MainActivity + KohakuHostService) and the busybox are copied
+# in by packaging/android/postcreate.py after `briefcase create android`.
 [tool.briefcase.app.kohakuterrarium.android]
-# No ``sources`` override needed — the parent-level sources are
-# now wrapper-only (``src/kohakuterrarium``).  ``bundled-release``
-# lives under each desktop platform.
-
-# Briefcase pulls fastapi / uvicorn / httpx / pydantic /
-# sqlite-bound deps from ``[project] dependencies`` automatically
-# via the Chaquopy wheel installer.  ``requires`` here is for
-# Android-only extras — we have none.
+# No sources/requires overrides: deps come from [project], no Android-only extras.
 requires = []
 
-# Gradle dependencies — Briefcase ships a sensible default but
-# emits a WARNING if not pinned.  Pinning matches the default it
-# would have picked + makes a future bump explicit.  See
+# Pinned to Briefcase's own defaults (it warns when unset). See
 # https://briefcase.readthedocs.io/en/stable/reference/platforms/android/gradle.html
 build_gradle_dependencies = [
     "androidx.appcompat:appcompat:1.6.1",
     "androidx.constraintlayout:constraintlayout:2.1.4",
     "androidx.swiperefreshlayout:swiperefreshlayout:1.1.0",
 ]
-# Real Briefcase Android cookiecutter vars (verified against
-# https://github.com/beeware/briefcase-android-gradle-template/
-# cookiecutter.json):
-#
-# - ``min_os_version``: minSdk.  **26** = Android 8.0.  We use
-#   ``java.nio.file.Files.readAllBytes`` + ``String.join`` in
-#   ``MainActivity.java`` which require API 26+ without
-#   core-library desugaring — Briefcase Android doesn't ship that
-#   desugaring, so anything below 26 fails at runtime.
-#   ``startForegroundService`` also needs 26.  Cost: ~1% device
-#   coverage loss vs API 24 (Android 7), all in 2017-era hardware.
-# - ``target_os_version``: targetSdk + compileSdk.  35 = Android 15.
-#   Required because Briefcase's Android template ships
-#   ``res/values-v35/values-v35.xml`` referencing the API 35
-#   attribute ``android:attr/windowOptOutEdgeToEdgeEnforcement``
-#   (edge-to-edge enforcement opt-out, new in Android 15).  With
-#   compileSdk < 35, ``processDebugResources`` fails:
-#       error: style attribute
-#       'android:attr/windowOptOutEdgeToEdgeEnforcement' not found
-#   Bumping to 35 also matches the Play Store baseline for new
-#   uploads from August 2025 onward, so we'd need this anyway
-#   before Play Store submission.
-# - ``permissions`` / ``features``: empty here — we inject the
-#   full XML via the ``android_manifest_*_extra_content`` knobs
-#   below so we can express the foreground-service-type attr +
-#   the ktconnect:// intent filter, which the bare ``permissions``
-#   field cannot.
+# minSdk 26 (Android 8.0): MainActivity uses APIs (Files.readAllBytes,
+# String.join, startForegroundService) that need 26 without desugaring.
 min_os_version = "26"
+# targetSdk/compileSdk 35 (Android 15): the Briefcase template references an
+# API-35 attribute, and 35 is the Play Store baseline for new uploads.
 target_os_version = "35"
-# Version code: 1.5.0 → 1_05_000.  Encodes <major><MM><NN><PP>.
+# Version code encodes <major><MM><NN><PP>: 1.5.0 → 1_05_00_00.
 version_code = "10500000"
-# Restrict to arm64-v8a only.  x86_64 emulator support is not worth
-# the CI time + matrix complexity for a personal-agent app, and
-# pip/Chaquopy on x86_64 had a marker-eval quirk where our
-# ``platform_machine == 'x86_64'`` URL refs did not activate during
-# the per-ABI second pass (arm64 install resolved fine; x86_64 then
-# failed with "no matching distribution found for rpds-py==0.30.0"
-# because Chaquopy locks resolved versions across ABIs and the URL
-# ref line did not carry over).  arm64-v8a covers 99%+ of physical
-# Android devices in 2026; armv7 and x86 are not in our matrix
-# anyway.  If a real need for x86_64 (emulator-only debugging?)
-# arises, debug the marker-eval quirk first.
+# arm64-v8a only — covers ~99% of physical devices; x86_64 also tripped a
+# Chaquopy cross-ABI URL-ref resolution quirk.
 android_abis = ["arm64-v8a"]
-# Foreground service + camera + notification permissions, plus
-# the foreground-service-type sub-permission for Android 14+.
+# Foreground-service + camera + notification permissions (incl. the Android 14+
+# foreground-service-type sub-permission).
 android_manifest_extra_content = """
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
@@ -450,24 +268,9 @@ android_manifest_extra_content = """
 <uses-permission android:name="android.permission.CAMERA" />
 <uses-feature android:name="android.hardware.camera" android:required="false" />
 """
-# Foreground service declaration.  The class name MUST be the
-# fully-qualified ``org.kohaku.terrarium.KohakuHostService`` —
-# NOT a relative ``.KohakuHostService``, because:
-#
-#   * Briefcase Android generates the app under a separate
-#     ``applicationId`` derived from the cookiecutter bundle
-#     (typically ``<bundle>.<app_name>``), so the relative
-#     ``.`` prefix would resolve to ``<applicationId>.KohakuHostService``
-#     — which has no matching class anywhere, and Android
-#     would refuse to start the service as undeclared.
-#   * Our service class lives in ``org.kohaku.terrarium`` (the
-#     namespace the postcreate.py script drops Java into) which
-#     does NOT match Briefcase's auto-generated applicationId.
-#
-# The audit caught this drift after the launcher Activity
-# patcher already handled it via postcreate.py; the service
-# declaration is injected via Briefcase's cookiecutter knob
-# and so isn't patched the same way.
+# Fully-qualified class name required: Briefcase's generated applicationId
+# differs from our org.kohaku.terrarium namespace, so a relative `.` name
+# wouldn't resolve.
 android_manifest_application_extra_content = """
 <service
     android:name="org.kohaku.terrarium.KohakuHostService"
@@ -483,20 +286,13 @@ android_manifest_activity_extra_content = """
     <data android:scheme="ktconnect" />
 </intent-filter>
 """
-# Activity attributes — ``singleTop`` so a ``ktconnect://`` deep
-# link routed while the app is already running re-enters the
-# existing activity via ``onNewIntent`` instead of stacking a
-# second instance (which would attempt a second Python boot +
-# delete the port file).
+# singleTop so a ktconnect:// link re-enters the running activity via
+# onNewIntent instead of starting a second Python boot.
 android_manifest_activity_attrs_extra_content = """
 android:launchMode="singleTop"
 """
-# Cleartext traffic — needed for 127.0.0.1 (loopback host has no
-# TLS).  ``android:allowBackup`` is NOT injected here because
-# Briefcase's own template already emits it set to ``true`` and
-# duplicate attributes on ``<application>`` make AAPT fail.
-# Postcreate.py flips it to ``false`` via surgical attribute
-# replace instead.
+# Cleartext for 127.0.0.1 (loopback has no TLS). allowBackup is flipped to
+# false by postcreate.py instead (the template already emits it).
 android_manifest_application_attrs_extra_content = """
 android:usesCleartextTraffic="true"
 """
