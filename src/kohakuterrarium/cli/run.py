@@ -11,11 +11,13 @@ for a focused single-creature stream.
 """
 
 import asyncio
+import sys
 from pathlib import Path
 from uuid import uuid4
 
 import kohakuterrarium.terrarium.channels as _channels
 import kohakuterrarium.terrarium.topology as _topo
+from kohakuterrarium.cli.picker import pick_runnable
 from kohakuterrarium.packages.resolve import resolve_any_path
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.config import load_terrarium_config
@@ -115,6 +117,50 @@ def run_agent_cli(
         print(f"Error: {exc}")
         logger.warning("kt run failed", error=str(exc), exc_info=True)
         return 1
+
+
+def resolve_then_run(
+    agent_path: str | None,
+    *,
+    io_mode: str,
+    log_level: str = "INFO",
+    session: str | None = "__auto__",
+    llm: str | None = None,
+    log_stderr: str = "auto",
+    extra_creatures: list[str] | None = None,
+    extra_channels: list[str] | None = None,
+) -> int:
+    """Resolve a creature/recipe (or run the startup picker) then run it.
+
+    The shared core behind the ``kt-cli`` / ``kt-tui`` front doors and the
+    ``kt cli`` / ``kt tui`` subcommand aliases.  ``io_mode`` is forced by
+    the caller to ``"cli"`` or ``"tui"``.  When ``agent_path`` is ``None``
+    the startup picker runs — which requires an interactive terminal; in a
+    non-TTY context we print guidance and return non-zero instead of
+    hanging on a picker nobody can drive.
+    """
+    if agent_path is None:
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            print(
+                "kt-cli / kt-tui need an interactive terminal to pick an agent.\n"
+                "Pass a creature or recipe explicitly "
+                "(e.g. `kt-cli @kt-biome/creatures/general`),\n"
+                "or run a configured creature headless with `kt run <path>`."
+            )
+            return 2
+        agent_path = pick_runnable(io_mode)
+        if not agent_path:
+            return 0
+    return run_agent_cli(
+        agent_path,
+        log_level,
+        session=session,
+        io_mode=io_mode,
+        llm=llm,
+        log_stderr=log_stderr,
+        extra_creatures=extra_creatures or [],
+        extra_channels=extra_channels or [],
+    )
 
 
 async def _run(
