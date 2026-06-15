@@ -580,8 +580,11 @@ def create_app(
         catalog_commands.router, prefix="/api/configs/commands", tags=["configs"]
     )
 
-    # Studio (embedded authoring tool) — touch point T1
-    app.include_router(build_studio_router())
+    # Studio (embedded authoring tool) — touch point T1.
+    # Mounted under /api/studio: the composite uses relative /<slug>
+    # prefixes, and the non-empty mount prefix keeps its empty-path index
+    # routes legal under FastAPI's no-empty-prefix-and-path rule.
+    app.include_router(build_studio_router(), prefix="/api/studio")
 
     # Process-wide metrics snapshot — read by the Stats tab + the
     # Dashboard mini-strip. Subscribes the aggregator on first call so

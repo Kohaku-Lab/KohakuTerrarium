@@ -26,7 +26,9 @@ class TestBuildStudioRouter:
     def test_can_be_built_and_mounted(self):
         router = studio_app.build_studio_router()
         app = FastAPI()
-        app.include_router(router)
+        # The composite uses relative /<slug> prefixes; create_app mounts it
+        # under /api/studio. Mirror that here so the public URLs match.
+        app.include_router(router, prefix="/api/studio")
         app.dependency_overrides[get_service] = lambda: _LocalService()
         client = TestClient(app)
         resp = client.get("/api/studio/meta/health")

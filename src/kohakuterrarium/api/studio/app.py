@@ -26,57 +26,62 @@ from kohakuterrarium.api.studio.routes import meta, packages
 def build_studio_router() -> APIRouter:
     """Build the composite router for studio endpoints.
 
-    Each sub-router is included with its own ``/api/studio/<slug>``
-    prefix and a tag that groups routes in the OpenAPI doc.
+    Sub-routers are included with a *relative* ``/<slug>`` prefix; the
+    caller mounts this composite under ``/api/studio`` (see
+    ``create_app``), so the public URLs are ``/api/studio/<slug>/...``.
+
+    The ``/api/studio`` prefix must be applied at the *mount* point, not
+    here: several sub-routers expose an index route with an empty path
+    (``@router.get("")``), and FastAPI rejects a router that carries an
+    empty-path route when it is included without a prefix. Mounting the
+    composite under a non-empty prefix keeps those index routes legal.
     """
     r = APIRouter()
-    r.include_router(meta.router, prefix="/api/studio/meta", tags=["studio.meta"])
+    r.include_router(meta.router, prefix="/meta", tags=["studio.meta"])
     r.include_router(
         catalog_workspace.router,
-        prefix="/api/studio/workspace",
+        prefix="/workspace",
         tags=["studio.workspace"],
     )
     r.include_router(
         catalog_manifest.router,
-        prefix="/api/studio/workspace/manifest",
+        prefix="/workspace/manifest",
         tags=["studio.manifest"],
     )
     r.include_router(
         catalog_creatures.router,
-        prefix="/api/studio/creatures",
+        prefix="/creatures",
         tags=["studio.creatures"],
     )
     r.include_router(
         catalog_modules.router,
-        prefix="/api/studio/modules",
+        prefix="/modules",
         tags=["studio.modules"],
     )
     r.include_router(
         catalog_builtins.router,
-        prefix="/api/studio/catalog",
+        prefix="/catalog",
         tags=["studio.catalog"],
     )
-    r.include_router(
-        packages.router, prefix="/api/studio/packages", tags=["studio.packages"]
-    )
+    r.include_router(packages.router, prefix="/packages", tags=["studio.packages"])
     r.include_router(
         catalog_templates.router,
-        prefix="/api/studio/templates",
+        prefix="/templates",
         tags=["studio.templates"],
     )
     r.include_router(
         catalog_validate.router,
-        prefix="/api/studio/validate",
+        prefix="/validate",
         tags=["studio.validate"],
     )
     r.include_router(
         catalog_schema.router,
-        prefix="/api/studio/module_schema",
+        prefix="/module_schema",
         tags=["studio.schema"],
     )
     r.include_router(
         catalog_skills.router,
-        prefix="/api/studio/skills",
+        prefix="/skills",
         tags=["studio.skills"],
     )
     return r
