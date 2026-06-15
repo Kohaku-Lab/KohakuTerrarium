@@ -181,6 +181,10 @@ Issues = "https://github.com/Kohaku-Lab/KohakuTerrarium/issues"
 
 [project.scripts]
 kt = "kohakuterrarium.__main__:main"
+# Standalone interactive front doors (== `kt run <creature> --mode cli|tui`,
+# with an optional creature arg → startup picker).
+kt-cli = "kohakuterrarium.cli.entry_cli:main"
+kt-tui = "kohakuterrarium.cli.entry_tui:main"
 # `kt-aio` spawns lab-host + an embedded lab-client in one process.
 # Used by the kohaku/all Docker image's entrypoint and by the
 # `kohakuterrarium-all.service` systemd unit so the unit can call a

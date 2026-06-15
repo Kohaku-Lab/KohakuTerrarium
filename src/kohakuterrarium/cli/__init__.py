@@ -36,7 +36,8 @@ from kohakuterrarium.cli.packages import (
     update_cli,
 )
 from kohakuterrarium.cli.resume import resume_cli
-from kohakuterrarium.cli.run import run_agent_cli
+from kohakuterrarium.cli.run import resolve_then_run, run_agent_cli
+from kohakuterrarium.cli.select_args import add_run_like_args
 from kohakuterrarium.cli.self_update import add_self_update_subparser, self_update_cli
 from kohakuterrarium.cli.serve import add_serve_subparser, serve_cli
 from kohakuterrarium.cli.service import add_service_subparser, service_cli
@@ -143,6 +144,20 @@ def _build_parser() -> argparse.ArgumentParser:
             "--channel reviews``."
         ),
     )
+
+    # cli / tui — subcommand aliases for the standalone ``kt-cli`` /
+    # ``kt-tui`` front doors. Optional creature argument; omit it to pick
+    # one from the startup picker.
+    cli_parser = subparsers.add_parser(
+        "cli",
+        help="Interactive rich CLI (optional creature; picker when omitted)",
+    )
+    add_run_like_args(cli_parser)
+    tui_parser = subparsers.add_parser(
+        "tui",
+        help="Full-screen Textual TUI (optional creature; picker when omitted)",
+    )
+    add_run_like_args(tui_parser)
 
     # List command
     list_parser = subparsers.add_parser("list", help="List available agents")
@@ -492,6 +507,31 @@ def _dispatch_run(args: argparse.Namespace) -> int:
     )
 
 
+def _resolve_then_run_from_args(args: argparse.Namespace, io_mode: str) -> int:
+    """Shared dispatch for the ``kt cli`` / ``kt tui`` subcommand aliases."""
+    session = None if args.no_session else args.session
+    return resolve_then_run(
+        args.agent_path,
+        io_mode=io_mode,
+        log_level=args.log_level,
+        session=session,
+        llm=args.llm,
+        log_stderr=args.log_stderr,
+        extra_creatures=list(getattr(args, "add_creatures", None) or []),
+        extra_channels=list(getattr(args, "add_channels", None) or []),
+    )
+
+
+def _dispatch_cli_mode(args: argparse.Namespace) -> int:
+    """Handle the 'cli' subcommand alias (rich inline mode)."""
+    return _resolve_then_run_from_args(args, "cli")
+
+
+def _dispatch_tui_mode(args: argparse.Namespace) -> int:
+    """Handle the 'tui' subcommand alias (full-screen mode)."""
+    return _resolve_then_run_from_args(args, "tui")
+
+
 def _dispatch_resume(args: argparse.Namespace) -> int:
     """Handle the 'resume' command."""
     return resume_cli(
@@ -560,6 +600,8 @@ def _dispatch_mcp(args: argparse.Namespace) -> int:
 # Command dispatch table: command name -> handler function
 COMMANDS: dict[str, callable] = {
     "run": _dispatch_run,
+    "cli": _dispatch_cli_mode,
+    "tui": _dispatch_tui_mode,
     "resume": _dispatch_resume,
     "doctor": dispatch_doctor,
     "list": lambda args: list_cli(args.path),
