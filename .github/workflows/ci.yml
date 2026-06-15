@@ -147,3 +147,4 @@ jobs:
           kt app --help
           kt-cli --help
           kt-tui --help
+          kt shims status

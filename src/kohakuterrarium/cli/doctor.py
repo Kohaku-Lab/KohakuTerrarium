@@ -8,6 +8,7 @@ is 0 only when every executed check passed.
 import asyncio
 
 from kohakuterrarium import validate
+from kohakuterrarium.cli.shims import shims_summary
 from kohakuterrarium.llm.profiles import get_default_model
 from kohakuterrarium.packages.walk import list_packages
 from kohakuterrarium.utils.config_dir import config_dir
@@ -63,6 +64,10 @@ def doctor_cli(
         "installed packages",
         lambda: ", ".join(p.get("name", "?") for p in list_packages()) or "(none)",
     )
+
+    # 2b. Terminal shims (kt / kt-cli / kt-tui on PATH). Informational —
+    # never fails the report; just reports install + PATH status.
+    run("terminal shims", shims_summary)
 
     # 3. Model resolution (+ credentials), default or explicit.
     selector = llm or get_default_model() or None

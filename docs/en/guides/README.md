@@ -17,6 +17,7 @@ If you want a guided first walk-through, go to [Tutorials](../tutorials/README.m
 ## Start here
 
 - [Getting Started](getting-started.md): install, authenticate, run your first creature, resume, and open the web UI.
+- [Terminal commands](terminal-commands.md): `kt-cli` / `kt-tui`, the startup agent picker, and putting the commands on your PATH with `kt shims`.
 - [Creatures](creatures.md): anatomy, inheritance, prompt files, tool/subagent wiring, packaging.
 - [Terrariums](terrariums.md): the runtime engine for solo and multi-creature graphs.
 - [Studio](studio.md): the management layer for catalog, identity, sessions, persistence, attach, and editors.
