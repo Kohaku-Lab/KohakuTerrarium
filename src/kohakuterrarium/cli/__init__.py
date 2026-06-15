@@ -39,6 +39,7 @@ from kohakuterrarium.cli.resume import resume_cli
 from kohakuterrarium.cli.run import resolve_then_run, run_agent_cli
 from kohakuterrarium.cli.select_args import add_run_like_args
 from kohakuterrarium.cli.self_update import add_self_update_subparser, self_update_cli
+from kohakuterrarium.cli.shims import add_shims_subparser, shims_cli
 from kohakuterrarium.cli.serve import add_serve_subparser, serve_cli
 from kohakuterrarium.cli.service import add_service_subparser, service_cli
 from kohakuterrarium.cli.version import format_version_report
@@ -158,6 +159,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Full-screen Textual TUI (optional creature; picker when omitted)",
     )
     add_run_like_args(tui_parser)
+
+    # shims — expose kt / kt-cli / kt-tui on the terminal PATH.
+    add_shims_subparser(subparsers)
 
     # List command
     list_parser = subparsers.add_parser("list", help="List available agents")
@@ -602,6 +606,7 @@ COMMANDS: dict[str, callable] = {
     "run": _dispatch_run,
     "cli": _dispatch_cli_mode,
     "tui": _dispatch_tui_mode,
+    "shims": shims_cli,
     "resume": _dispatch_resume,
     "doctor": dispatch_doctor,
     "list": lambda args: list_cli(args.path),
