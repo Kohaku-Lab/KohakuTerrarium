@@ -71,29 +71,27 @@ def _route_has_admin_dep(route: APIRoute) -> bool:
     return False
 
 
-def _walk_routes(app: FastAPI) -> list[APIRoute]:
-    return [r for r in app.routes if isinstance(r, APIRoute)]
-
-
 class TestCatalogueCoverage:
     """Every catalogued (prefix, method) has at least one matching
     route carrying the dep."""
 
     @pytest.mark.parametrize("prefix,method", _ADMIN_GATED_ROUTES)
-    def test_catalogued_path_has_admin_dep(self, real_app, prefix, method):
+    def test_catalogued_path_has_admin_dep(
+        self, real_app, iter_api_routes, prefix, method
+    ):
         matching = [
-            r
-            for r in _walk_routes(real_app)
-            if r.path.startswith(prefix) and method in r.methods
+            (path, r)
+            for path, r in iter_api_routes(real_app)
+            if path.startswith(prefix) and method in r.methods
         ]
         # We don't require EVERY route under a prefix; only assert
         # that at least one match exists AND carries the dep.  This
         # tolerates intermediate routes that aren't mutations.
         assert matching, f"no route found for {method} {prefix} — catalogue out of date"
-        gated = [r for r in matching if _route_has_admin_dep(r)]
+        gated = [(p, r) for p, r in matching if _route_has_admin_dep(r)]
         assert gated, (
             f"{method} {prefix} routes exist but none carry verify_admin_token: "
-            f"{[r.path for r in matching]}"
+            f"{[p for p, _ in matching]}"
         )
 
 
@@ -111,14 +109,14 @@ class TestReadRoutesUngated:
             "/api/registry/",
         ],
     )
-    def test_read_routes_pass_freely(self, real_app, prefix):
-        for route in _walk_routes(real_app):
-            if not route.path.startswith(prefix):
+    def test_read_routes_pass_freely(self, real_app, iter_api_routes, prefix):
+        for path, route in iter_api_routes(real_app):
+            if not path.startswith(prefix):
                 continue
             if "GET" not in route.methods:
                 continue
             assert not _route_has_admin_dep(route), (
-                f"GET route {route.path} should NOT have admin dep "
+                f"GET route {path} should NOT have admin dep "
                 f"(reads are not config mutations)"
             )
 
@@ -135,13 +133,15 @@ class TestUnrelatedRoutesUngated:
             ("/api/sessions/", "DELETE"),
         ],
     )
-    def test_session_mutations_pass_freely(self, real_app, prefix, method):
-        for route in _walk_routes(real_app):
-            if not route.path.startswith(prefix):
+    def test_session_mutations_pass_freely(
+        self, real_app, iter_api_routes, prefix, method
+    ):
+        for path, route in iter_api_routes(real_app):
+            if not path.startswith(prefix):
                 continue
             if method not in route.methods:
                 continue
             assert not _route_has_admin_dep(route), (
-                f"{method} {route.path} should NOT have admin dep "
+                f"{method} {path} should NOT have admin dep "
                 f"(session ops aren't config mutations)"
             )

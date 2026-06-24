@@ -55,7 +55,7 @@ class TestMakeOutputWireTargetResolver:
 
 
 class TestCreateApp:
-    def test_standalone_basic_boot(self):
+    def test_standalone_basic_boot(self, iter_api_routes):
         # Only assert the factory builds something with the expected
         # state. Skip TestClient because lifespan attaches a real
         # engine and uses asyncio resources.
@@ -63,8 +63,10 @@ class TestCreateApp:
         assert app.state.lab_mode == "standalone"
         assert app.state.lab_bind == "127.0.0.1:8100"
         assert app.state.lab_token == ""
-        # Routers wired.
-        paths = {r.path for r in app.routes if hasattr(r, "path")}
+        # Routers wired. ``iter_api_routes`` flattens FastAPI's lazy
+        # ``_IncludedRouter`` wrappers (see conftest) so the effective
+        # served paths are visible.
+        paths = {path for path, _ in iter_api_routes(app)}
         assert any(p.startswith("/api/catalog/") for p in paths)
         assert any(p.startswith("/api/sessions/") for p in paths)
         assert any(p.startswith("/api/persistence/") for p in paths)
