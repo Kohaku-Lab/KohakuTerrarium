@@ -269,6 +269,43 @@ describe("multi-chat-panel — setFocusedGroup + setGroupActiveTab", () => {
   })
 })
 
+describe("multi-chat-panel — openTab drives the per-group active tab", () => {
+  // Regression: the CreaturesPanel / StatusDashboard "open tab" affordance
+  // routes through ``openTab``. The chat view renders from
+  // ``groups[gid].activeTab``, so ``openTab`` must update THAT (not just the
+  // legacy ``activeTab``) or clicking an already-open creature wouldn't
+  // switch the visible chat.
+  it("switches the focused group's active tab for an already-open creature", () => {
+    const chat = useChatStore()
+    chat._loadHistory = () => {} // avoid network in unit test
+    chat.tabs = ["a", "b"]
+    const g1 = chat.enableGroups() // g1 = [a, b], focused
+    chat.setGroupActiveTab(g1, "a")
+    expect(chat.groups[g1].activeTab).toBe("a")
+
+    chat.openTab("b") // "b" already open in g1
+
+    expect(chat.groups[g1].activeTab).toBe("b")
+    expect(chat.activeTab).toBe("b") // legacy field derived from the group
+  })
+
+  it("focuses the owning group when the creature lives in another group", () => {
+    const chat = useChatStore()
+    chat._loadHistory = () => {}
+    chat.tabs = ["a", "b", "c"]
+    const g1 = chat.enableGroups()
+    const g2 = chat.splitGroup(g1, "horizontal", "after", "c") // g1=[a,b], g2=[c]
+    chat.setFocusedGroup(g1)
+    expect(chat.focusedGroupId).toBe(g1)
+
+    chat.openTab("c") // "c" lives in g2
+
+    expect(chat.focusedGroupId).toBe(g2)
+    expect(chat.groups[g2].activeTab).toBe("c")
+    expect(chat.activeTab).toBe("c")
+  })
+})
+
 describe("multi-chat-panel — setGroupSplitRatio", () => {
   it("updates the ratio at the given path", () => {
     const chat = useChatStore()

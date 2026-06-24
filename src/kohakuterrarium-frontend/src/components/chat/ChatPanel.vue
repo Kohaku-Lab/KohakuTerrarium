@@ -241,6 +241,7 @@ import { useI18n } from "@/utils/i18n"
 import { terrariumAPI, agentAPI } from "@/utils/api"
 import { buildMessageParts, formatBytes, MAX_ATTACHMENT_BYTES, MAX_IMAGE_BYTES } from "@/utils/chatAttachments"
 import { getHybridPref, removeHybridPref, setHybridPref } from "@/utils/uiPrefs"
+import { shouldSendOnEnter } from "@/utils/chatInput"
 // How many queued-while-processing messages to show before collapsing.
 const QUEUE_VISIBLE = 5
 
@@ -548,15 +549,15 @@ function closeTab(tab) {
 
 function onInputKeydown(e) {
   if (props.readOnly) return
-  // Skip if IME composition is active (e.g. Chinese/Japanese/Korean input).
-  // During composition, Enter confirms the selected candidate — not send.
-  if (e.isComposing || e.keyCode === 229) return
-
-  if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey) {
+  // The send-vs-newline decision lives in ``shouldSendOnEnter`` (pure +
+  // unit-tested): it skips IME composition, never sends on the touch /
+  // compact shell (mobile soft keyboards have no Shift+Enter; the send
+  // button is used instead — fixes iOS Safari fire-on-Enter), and
+  // otherwise sends only on an unmodified Enter.
+  if (shouldSendOnEnter(e, { isCompact: isCompact.value })) {
     e.preventDefault()
     send()
   }
-  // Shift+Enter and Ctrl+Enter insert newline (default textarea behavior)
 }
 
 function autoResize() {
