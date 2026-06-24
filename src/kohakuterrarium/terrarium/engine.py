@@ -788,6 +788,20 @@ class Terrarium:
         See ``terrarium.session_coord`` for merge/split details.
         """
         gid = self._resolve_graph_id(graph)
+        # Replacing a graph's store: close the previous one first so its
+        # native handles + writer lock are released before the new (or a
+        # freshly-minted) store opens the same file. Without this, an
+        # autosession-minted store that is then re-attached gets orphaned
+        # with its writer lock still held, which blocks a later resume.
+        previous = self._session_stores.get(gid)
+        if previous is not None and previous is not store:
+            try:
+                previous.close(update_status=False)
+            except Exception:  # pragma: no cover - defensive
+                _logger.warning(
+                    "attach_session: closing replaced store failed", exc_info=True
+                )
+            self._owned_sessions.discard(gid)
         if isinstance(store, (str, Path)):
             names = [c.name for c in self._creatures.values() if c.graph_id == gid]
             store = _autosession.mint_store(self, gid, path=store, agents=names)

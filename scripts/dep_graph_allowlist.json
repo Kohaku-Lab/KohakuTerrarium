@@ -330,6 +330,18 @@
     "reason": "Win32-only msvcrt import inside the `if sys.platform == 'win32'` branch of the cross-platform flock wrapper"
   },
   {
+    "file": "src/kohakuterrarium/utils/file_lock.py",
+    "line": 113,
+    "function": "_acquire",
+    "reason": "Win32-only msvcrt import inside the `if sys.platform == 'win32'` branch of the cross-platform flock wrapper"
+  },
+  {
+    "file": "src/kohakuterrarium/utils/file_lock.py",
+    "line": 136,
+    "function": "_release",
+    "reason": "Win32-only msvcrt import inside the `if sys.platform == 'win32'` branch of the cross-platform flock wrapper"
+  },
+  {
     "file": "src/kohakuterrarium/launcher/splash_window.py",
     "line": 86,
     "function": "_try_tk",

@@ -106,7 +106,7 @@ class TestResumeIntoEngine:
         )
 
         monkeypatch.setattr(
-            resume_mod, "_open_store_with_migration", lambda p: fake_store
+            resume_mod, "_open_store_with_migration", lambda p, **_kw: fake_store
         )
 
         from kohakuterrarium.terrarium.config import TerrariumConfig
@@ -138,7 +138,7 @@ class TestResumeIntoEngine:
             update_status=lambda s: None,
         )
         monkeypatch.setattr(
-            resume_mod, "_open_store_with_migration", lambda p: fake_store
+            resume_mod, "_open_store_with_migration", lambda p, **_kw: fake_store
         )
 
         t = await TestTerrariumBuilder().build()
@@ -163,7 +163,7 @@ class TestResumeIntoEngine:
             update_status=lambda s: None,
         )
         monkeypatch.setattr(
-            resume_mod, "_open_store_with_migration", lambda p: fake_store
+            resume_mod, "_open_store_with_migration", lambda p, **_kw: fake_store
         )
 
         from kohakuterrarium.terrarium.config import (
@@ -233,7 +233,7 @@ class TestResumeIntoEngine:
             update_status=lambda s: None,
         )
         monkeypatch.setattr(
-            resume_mod, "_open_store_with_migration", lambda p: fake_store
+            resume_mod, "_open_store_with_migration", lambda p, **_kw: fake_store
         )
 
         from kohakuterrarium.terrarium.config import TerrariumConfig

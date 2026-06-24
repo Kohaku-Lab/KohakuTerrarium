@@ -336,7 +336,7 @@ async def start_terrarium(
     try:
         sess_dir = _session_dir()
         Path(sess_dir).mkdir(parents=True, exist_ok=True)
-        store = SessionStore(Path(sess_dir) / f"{sid}.kohakutr")
+        store = SessionStore(Path(sess_dir) / f"{sid}.kohakutr", writer_lock=True)
         store.init_meta(
             session_id=sid,
             config_type="terrarium",

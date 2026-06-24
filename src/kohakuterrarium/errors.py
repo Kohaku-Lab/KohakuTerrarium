@@ -110,6 +110,22 @@ class SessionNotFoundError(SessionError, NotFoundError, FileNotFoundError):
     """The named / referenced session does not exist on disk or in-engine."""
 
 
+class SessionLockedError(SessionError, RuntimeError):
+    """Another process already holds the write lock on this session file.
+
+    Raised when a second writer tries to open a ``.kohakutr`` that is
+    already attached to a running engine (in this or another process).
+    Concurrent writers would overwrite each other's conversation
+    snapshots + collide on event counters, so the second open is refused
+    rather than silently corrupting the session. Read-only opens
+    (viewers, listing, history) are unaffected — they never take the lock.
+    """
+
+    def __init__(self, message: str, holder_pid: int | None = None) -> None:
+        super().__init__(message)
+        self.holder_pid = holder_pid
+
+
 # ---------------------------------------------------------------------------
 # Turn execution
 # ---------------------------------------------------------------------------

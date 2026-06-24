@@ -610,3 +610,40 @@ class TestAddCreatureExtensionInjection:
                 await t.add_creature(prebuilt, tools=[x])
         finally:
             await t.shutdown()
+
+
+class TestAttachSessionReplace:
+    """Re-attaching a store to a graph closes the previous one, releasing
+    its native handles + writer lock (otherwise an autosession-minted,
+    writer-locked store leaks its lock and blocks later resume)."""
+
+    async def test_replacing_store_closes_previous_and_frees_lock(self, tmp_path):
+        from kohakuterrarium.session.store import SessionStore
+
+        t = Terrarium()
+        p = tmp_path / "g.kohakutr"
+        first = SessionStore(p, writer_lock=True)
+        await t.attach_session("g1", first)
+
+        second = SessionStore(p)  # no lock; replaces the first
+        await t.attach_session("g1", second)
+
+        # Previous store closed + dropped from the engine map.
+        assert first._closed is True
+        assert t._session_stores["g1"] is second
+
+        # The replaced store's writer lock was released: a fresh
+        # writer-locked open on the same file now succeeds.
+        third = SessionStore(p, writer_lock=True)
+        third.close()
+        second.close()
+
+    async def test_same_store_reattach_is_noop(self, tmp_path):
+        from kohakuterrarium.session.store import SessionStore
+
+        t = Terrarium()
+        s = SessionStore(tmp_path / "g.kohakutr", writer_lock=True)
+        await t.attach_session("g1", s)
+        await t.attach_session("g1", s)  # same object — must NOT close it
+        assert getattr(s, "_closed", False) is False
+        s.close()

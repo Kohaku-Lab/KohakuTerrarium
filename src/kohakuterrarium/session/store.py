@@ -38,6 +38,11 @@ from kohakuterrarium.session.store_counters import (
     restore_suffix_counters,
 )
 from kohakuterrarium.session.store_fork import perform_fork
+from kohakuterrarium.session.store_lock import (
+    acquire_writer_lock,
+    close_tables,
+    release_writer_lock,
+)
 from kohakuterrarium.session.token_views import (
     token_usage as _token_usage_impl,
     token_usage_all_loops as _token_usage_all_loops_impl,
@@ -104,12 +109,16 @@ class SessionStore:
         *,
         flush_every_n_events: int | None = None,
         flush_every_n_seconds: float | None = None,
+        writer_lock: bool = False,
     ) -> None:
         self._path = str(Path(path).expanduser())
         Path(self._path).parent.mkdir(parents=True, exist_ok=True)
         # Read-only opens never mutate meta on close (E8) — set via
         # :meth:`open_readonly`.
         self._readonly = False
+
+        # Cross-process writer lock (see ``store_lock``); released in close.
+        self._writer_lock = acquire_writer_lock(self._path) if writer_lock else None
 
         # Durability gates for the events cache.
         self._flush_every_n_events: int = (
@@ -125,7 +134,32 @@ class SessionStore:
         self._unflushed_event_count: int = 0
         self._last_flush_at: float = time.monotonic()
 
-        # Core tables
+        # Sequence counters + Wave B global monotonic event id.
+        self._event_seq: dict[str, int] = {}
+        self._channel_seq: dict[str, int] = {}
+        self._subagent_runs: dict[str, int] = {}
+        self._global_event_id: int = 0
+        # Artifacts directory — created lazily.
+        self._artifacts_dir: Path | None = None
+        # Append-event subscribers — each callback gets ``(key, data)``
+        # after the row is written + FTS-indexed (see ``append_event``).
+        self._event_subscribers: list[Callable[[str, dict], None]] = []
+
+        # Opening the tables can fail on a corrupt / unreadable file;
+        # release the writer lock if construction aborts so an in-process
+        # retry isn't wedged by a leaked lock.
+        try:
+            self._open_tables()
+            self._restore_counters()
+        except BaseException:
+            release_writer_lock(self._writer_lock)
+            self._writer_lock = None
+            raise
+
+        logger.debug("SessionStore opened", path=self._path)
+
+    def _open_tables(self) -> None:
+        """Open every KVault / TextVault table backing this store."""
         self.meta = KVault(self._path, table="meta")
         self.meta.enable_auto_pack()
         self.state = KVault(self._path, table="state")
@@ -147,29 +181,9 @@ class SessionStore:
         # counters, cheap for viewers without reducing the event log.
         self.turn_rollup = KVault(self._path, table="turn_rollup")
         self.turn_rollup.enable_auto_pack()
-        # FTS for search
+        # FTS for search.
         self.fts = TextVault(self._path, table="fts")
         self.fts.enable_auto_pack()
-
-        # Sequence counters + Wave B global monotonic event id
-        self._event_seq: dict[str, int] = {}
-        self._channel_seq: dict[str, int] = {}
-        self._subagent_runs: dict[str, int] = {}
-        self._global_event_id: int = 0
-
-        self._restore_counters()
-        # Artifacts directory — created lazily.
-        self._artifacts_dir: Path | None = None
-
-        # Append-event subscribers. Each callback receives ``(key, data)``
-        # after the row has been written and FTS has indexed (so any
-        # reader call from the callback sees the event). Callbacks run
-        # in-process, on the appending thread, wrapped in try/except so
-        # one slow / failing listener cannot stall ``append_event``.
-        # Used by the live-attach WebSocket in ``api/ws/sessions.py``.
-        self._event_subscribers: list[Callable[[str, dict], None]] = []
-
-        logger.debug("SessionStore opened", path=self._path)
 
     @property
     def session_id(self) -> str:
@@ -896,26 +910,10 @@ class SessionStore:
             self.conversation,
             self.turn_rollup,
         )
-        for table in tables:
-            table.close()
-        # ``KVault.close()`` flushes + checkpoints + marks the wrapper
-        # closed, but it does NOT release the underlying native
-        # ``_KVault`` SQLite handle — that only happens when the wrapper
-        # is garbage-collected. ``TextVault`` (the FTS table) has no
-        # ``close()`` at all. On Windows a lingering handle keeps the
-        # ``.kohakutr`` file locked, so a subsequent delete / rename of a
-        # just-closed session fails with WinError 32. Drop the native
-        # references explicitly so CPython refcounting frees every handle
-        # now, not at some arbitrary later GC.
-        for table in tables:
-            try:
-                del table._inner
-            except AttributeError:
-                pass
-        try:
-            del self.fts._vault
-        except AttributeError:
-            pass
+        # Closes tables + drops native handles, then releases the writer
+        # lock in ``finally`` (a table-close error can't strand the lock).
+        close_tables(tables, self.fts, self._writer_lock)
+        self._writer_lock = None
         logger.debug("SessionStore closed", path=self._path)
 
     # ─── Fork / Branch (Wave E) ─────────────────────────────────────

@@ -187,7 +187,7 @@ class WorkerSessionAttacher:
         # publishing it via the engine's dict.
         if store is None:
             path = self._session_dir / f"{graph_id}.kohakutr"
-            store = SessionStore(str(path))
+            store = SessionStore(str(path), writer_lock=True)
             # A worker engine has no Studio layer to call ``init_meta``,
             # so do it here BEFORE the observer fires.  Mirror what
             # ``lifecycle.attach_session_store_for_creature`` does.

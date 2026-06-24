@@ -137,7 +137,7 @@ async def _resume_terrarium_into_engine(
     llm: Any = None,
 ) -> str:
     """Multi-creature recipe resume: rebuild graph, inject per-creature."""
-    store = _open_store_with_migration(path)
+    store = _open_store_with_migration(path, writer_lock=True)
     meta = store.load_meta()
     config_path = meta.get("config_path", "")
     if not config_path:
