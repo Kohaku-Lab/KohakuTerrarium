@@ -8,7 +8,7 @@ resolution to data URLs (with on-disk fixtures).
 
 import base64
 
-from kohakuterrarium.llm import codex_format
+from kohakuterrarium.llm import artifact_resolve
 from kohakuterrarium.llm.codex_format import (
     _resolve_artifact_url,
     fix_tool_call_pairing,
@@ -194,7 +194,7 @@ class TestResolveArtifactUrl:
         artifacts = session_dir / "sid123.artifacts"
         artifacts.mkdir(parents=True)
         (artifacts / "pic.png").write_bytes(b"PNGDATA")
-        monkeypatch.setattr(codex_format, "_session_dir", lambda: session_dir)
+        monkeypatch.setattr(artifact_resolve, "_session_dir", lambda: session_dir)
 
         out = _resolve_artifact_url("/api/sessions/sid123/artifacts/pic.png")
         assert out.startswith("data:image/png;base64,")
@@ -204,7 +204,7 @@ class TestResolveArtifactUrl:
     def test_missing_artifact_file_falls_back_to_original_url(
         self, tmp_path, monkeypatch
     ):
-        monkeypatch.setattr(codex_format, "_session_dir", lambda: tmp_path)
+        monkeypatch.setattr(artifact_resolve, "_session_dir", lambda: tmp_path)
         url = "/api/sessions/sid/artifacts/nope.png"
         # file does not exist → resolver swallows the error and returns input
         assert _resolve_artifact_url(url) == url

@@ -9,6 +9,7 @@ from kohakuterrarium.llm.anthropic_pairing import (
     SYNTHETIC_TOOL_RESULT_TEXT,
     fix_anthropic_tool_block_pairing,
 )
+from kohakuterrarium.llm.artifact_resolve import resolve_artifact_url
 from kohakuterrarium.llm.base import NativeToolCall, ToolSchema
 
 # Re-exported for back-compat with any callers that imported it from
@@ -179,6 +180,10 @@ def user_content(content: Any) -> str | list[dict[str, Any]]:
 def image_part(part: dict[str, Any]) -> dict[str, Any]:
     image = part.get("image_url") if isinstance(part.get("image_url"), dict) else {}
     url = str(image.get("url") or part.get("url") or "")
+    # Local ``/api/sessions/.../artifacts/...`` URLs aren't fetchable by
+    # the remote API; resolve to an inline ``data:`` URL so the image is
+    # sent as base64 instead of being dropped (issue #70).
+    url = resolve_artifact_url(url)
     if url.startswith("data:"):
         match = DATA_IMAGE_RE.match(url)
         if match:
