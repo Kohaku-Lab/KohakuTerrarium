@@ -1,7 +1,6 @@
 """Agent configuration type definitions."""
 
 import os
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -247,24 +246,3 @@ class AgentConfig:
     def get_api_key(self) -> str | None:
         """Get API key from environment."""
         return os.environ.get(self.api_key_env)
-
-
-# Environment variable pattern: ${VAR} or ${VAR:default}
-ENV_VAR_PATTERN = re.compile(r"\$\{([^}:]+)(?::([^}]*))?\}")
-
-
-def _interpolate_env_vars(value: Any) -> Any:
-    """Recursively interpolate environment variables in config values."""
-    if isinstance(value, str):
-
-        def replace_env(match: re.Match) -> str:
-            var_name = match.group(1)
-            default = match.group(2)
-            return os.environ.get(var_name, default if default is not None else "")
-
-        return ENV_VAR_PATTERN.sub(replace_env, value)
-    elif isinstance(value, dict):
-        return {k: _interpolate_env_vars(v) for k, v in value.items()}
-    elif isinstance(value, list):
-        return [_interpolate_env_vars(v) for v in value]
-    return value

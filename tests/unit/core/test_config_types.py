@@ -8,7 +8,6 @@ from kohakuterrarium.core.config_types import (
     SubAgentConfigItem,
     ToolConfigItem,
     TriggerConfig,
-    _interpolate_env_vars,
 )
 
 # ── default factories isolated per instance ──────────────────────
@@ -92,42 +91,3 @@ class TestGetApiKey:
         monkeypatch.delenv("ABSENT_KEY_XYZ", raising=False)
         c = AgentConfig(name="x", api_key_env="ABSENT_KEY_XYZ")
         assert c.get_api_key() is None
-
-
-# ── _interpolate_env_vars ────────────────────────────────────────
-
-
-class TestInterpolation:
-    def test_str_passthrough(self, monkeypatch):
-        monkeypatch.setenv("X", "ok")
-        assert _interpolate_env_vars("hello ${X}") == "hello ok"
-
-    def test_default_when_missing(self, monkeypatch):
-        monkeypatch.delenv("MISSING_X", raising=False)
-        assert _interpolate_env_vars("${MISSING_X:fallback}") == "fallback"
-
-    def test_missing_no_default_becomes_empty(self, monkeypatch):
-        monkeypatch.delenv("MISSING_Y", raising=False)
-        assert _interpolate_env_vars("${MISSING_Y}") == ""
-
-    def test_no_var_returned_verbatim(self):
-        assert _interpolate_env_vars("plain") == "plain"
-
-    def test_dict_recursive(self, monkeypatch):
-        monkeypatch.setenv("K", "v")
-        out = _interpolate_env_vars({"a": "${K}", "b": {"c": "${K}"}})
-        assert out == {"a": "v", "b": {"c": "v"}}
-
-    def test_list_recursive(self, monkeypatch):
-        monkeypatch.setenv("Z", "zz")
-        assert _interpolate_env_vars(["${Z}", "plain"]) == ["zz", "plain"]
-
-    def test_non_str_non_collection_untouched(self):
-        assert _interpolate_env_vars(42) == 42
-        assert _interpolate_env_vars(None) is None
-        assert _interpolate_env_vars(True) is True
-
-    def test_multiple_vars_in_one_string(self, monkeypatch):
-        monkeypatch.setenv("A", "1")
-        monkeypatch.setenv("B", "2")
-        assert _interpolate_env_vars("${A}-${B}") == "1-2"
