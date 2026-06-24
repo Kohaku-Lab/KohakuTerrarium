@@ -1,74 +1,14 @@
 """Codex Responses API message-shape helpers."""
 
-import base64
 import json as _json
-import re
 from typing import Any
 
-from kohakuterrarium.studio.persistence.artifacts import (
-    resolve_artifact_file,
-    resolve_artifacts_dir,
+from kohakuterrarium.llm.artifact_resolve import (
+    resolve_artifact_url as _resolve_artifact_url,
 )
-from kohakuterrarium.studio.persistence.store import _session_dir
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
-
-
-# Tool images are materialized by the controller to ``/api/sessions/{sid}/
-# artifacts/{path}`` — a relative URL that points at our local FastAPI
-# server. Codex's URL validator rejects it ("Expected a valid URL"), so
-# we resolve it back to a ``data:`` URL at send time. ``data:`` URLs
-# *are* accepted by Codex in user-role ``input_image`` parts.
-_ARTIFACT_URL_RE = re.compile(r"^/api/sessions/(?P<sid>[^/]+)/artifacts/(?P<path>.+)$")
-
-_ARTIFACT_MIME_BY_EXT = {
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".gif": "image/gif",
-    ".webp": "image/webp",
-    ".bmp": "image/bmp",
-    ".tiff": "image/tiff",
-    ".tif": "image/tiff",
-    ".svg": "image/svg+xml",
-    ".heif": "image/heif",
-    ".heic": "image/heic",
-    ".avif": "image/avif",
-}
-
-
-def _resolve_artifact_url(url: str) -> str:
-    """Resolve a relative ``/api/sessions/.../artifacts/...`` URL to a data URL.
-
-    Returns the original URL when it can't be resolved (already a
-    ``data:`` URL, fully-qualified http(s), missing on disk, etc.).
-    Failures are logged at debug; the caller falls back to the
-    original string and lets the LLM provider surface any error.
-    """
-    if not isinstance(url, str) or not url.startswith("/api/sessions/"):
-        return url
-    match = _ARTIFACT_URL_RE.match(url)
-    if not match:
-        return url
-    sid = match.group("sid")
-    rel = match.group("path")
-    try:
-        artifacts = resolve_artifacts_dir(sid, _session_dir())
-        path = resolve_artifact_file(artifacts, rel)
-        data = path.read_bytes()
-    except Exception as exc:
-        logger.warning(
-            "Codex artifact URL resolve failed — sending as-is",
-            url=url,
-            error=str(exc),
-            exc_info=True,
-        )
-        return url
-    ext = path.suffix.lower()
-    mime = _ARTIFACT_MIME_BY_EXT.get(ext, "application/octet-stream")
-    b64 = base64.b64encode(data).decode("ascii")
-    return f"data:{mime};base64,{b64}"
 
 
 def to_responses_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -21,6 +21,7 @@ from kohakuterrarium.llm.base import (
     LLMConfig,
     ToolSchema,
 )
+from kohakuterrarium.llm.artifact_resolve import resolve_message_image_urls
 from kohakuterrarium.llm.openai_helpers import (
     delta_field,
     delta_field_present,
@@ -294,7 +295,13 @@ class OpenAIProvider(BaseLLMProvider):
         Step 2: for Anthropic endpoints (and unless the user opts out
         via ``disable_prompt_caching``), tag system + the last three
         non-tool messages with cache_control markers.
+
+        Before either step, resolve any local ``/api/sessions/.../
+        artifacts/...`` image URL to an inline ``data:`` URL — remote
+        OpenAI-compatible providers can't fetch our relative local path
+        and reject the request (see issue #70).
         """
+        messages = resolve_message_image_urls(messages)
         messages = strip_kt_extras(messages)
         messages = normalize_stateful_assistant_fields(messages)
         if not is_anthropic_endpoint(self.base_url, None):

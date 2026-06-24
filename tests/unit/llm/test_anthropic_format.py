@@ -7,6 +7,9 @@ tool-call blocks, tool-result coalescing, streaming-delta accumulation,
 usage accounting, and the cache-marker placement helpers.
 """
 
+import base64
+
+from kohakuterrarium.llm import artifact_resolve
 from kohakuterrarium.llm.anthropic_format import (
     KT_CONTENT_KEY,
     anthropic_tools,
@@ -236,6 +239,31 @@ class TestUserContent:
         assert out[0] == {
             "type": "text",
             "text": "[image omitted: unsupported image URL]",
+        }
+
+    def test_local_artifact_url_inlined_as_base64(self, tmp_path, monkeypatch):
+        # Issue #70: a local /api/sessions/.../artifacts/... URL must be
+        # resolved to base64 and inlined, NOT dropped as a placeholder.
+        session_dir = tmp_path / "sessions"
+        artifacts = session_dir / "sid9.artifacts"
+        artifacts.mkdir(parents=True)
+        (artifacts / "p.png").write_bytes(b"PNGDATA")
+        monkeypatch.setattr(artifact_resolve, "_session_dir", lambda: session_dir)
+        out = user_content(
+            [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "/api/sessions/sid9/artifacts/p.png"},
+                }
+            ]
+        )
+        assert out[0] == {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": "image/png",
+                "data": base64.b64encode(b"PNGDATA").decode(),
+            },
         }
 
     def test_file_part_with_content_inlined_as_text(self):
