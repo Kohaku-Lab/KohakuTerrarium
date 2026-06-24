@@ -36,12 +36,12 @@
                   </div>
                   <div class="text-[11px] text-warm-400 font-mono truncate mt-1">
                     <span v-if="backend.env_var">{{ backend.env_var }}</span>
-                    <span v-if="backend.masked_key && backend.backend_type !== 'codex'"> · {{ backend.masked_key }}</span>
-                    <span v-if="backend.backend_type === 'codex'">{{ t("settings.keys.oauthHint") }}</span>
+                    <span v-if="backend.masked_key && !isOAuthCodex(backend)"> · {{ backend.masked_key }}</span>
+                    <span v-if="isOAuthCodex(backend)">{{ t("settings.keys.oauthHint") }}</span>
                   </div>
                 </div>
                 <div class="flex flex-wrap items-center justify-end gap-2 shrink-0">
-                  <template v-if="backend.backend_type !== 'codex'">
+                  <template v-if="!isOAuthCodex(backend)">
                     <el-input v-if="editingKey === backend.name" v-model="keyInput" size="small" type="password" show-password :placeholder="t('settings.keys.enterKey')" class="!w-60" @keyup.enter="saveKey(backend.name)" />
                     <el-button v-if="editingKey === backend.name" size="small" type="primary" @click="saveKey(backend.name)">
                       {{ t("common.save") }}
@@ -98,8 +98,8 @@
                   </div>
                   <div class="text-[11px] text-warm-400 font-mono truncate mt-1">
                     <span v-if="backend.env_var">{{ backend.env_var }}</span>
-                    <span v-if="backend.masked_key && backend.backend_type !== 'codex'"> · {{ backend.masked_key }}</span>
-                    <span v-if="backend.backend_type === 'codex'">{{ t("settings.keys.oauthHint") }}</span>
+                    <span v-if="backend.masked_key && !isOAuthCodex(backend)"> · {{ backend.masked_key }}</span>
+                    <span v-if="isOAuthCodex(backend)">{{ t("settings.keys.oauthHint") }}</span>
                   </div>
                   <div v-if="backend.provider_name || backend.provider_native_tools?.length" class="text-[10px] text-warm-400 mt-1 flex items-center gap-2 flex-wrap">
                     <span v-if="backend.provider_name" class="font-mono">identity: {{ backend.provider_name }}</span>
@@ -107,7 +107,7 @@
                   </div>
                 </div>
                 <div class="flex flex-wrap items-center justify-end gap-2 shrink-0">
-                  <template v-if="backend.backend_type !== 'codex'">
+                  <template v-if="!isOAuthCodex(backend)">
                     <el-input v-if="editingKey === backend.name" v-model="keyInput" size="small" type="password" show-password :placeholder="t('settings.keys.enterKey')" class="!w-60" @keyup.enter="saveKey(backend.name)" />
                     <el-button v-if="editingKey === backend.name" size="small" type="primary" @click="saveKey(backend.name)">
                       {{ t("common.save") }}
@@ -517,6 +517,13 @@ async function deleteKey(provider) {
 const codexLoggingIn = ref(false)
 const codexModalOpen = ref(false)
 const codexModalNode = ref("_host")
+
+// A codex (Responses-API) backend uses ChatGPT OAuth login ONLY when it
+// has no custom endpoint. With a base_url it authenticates via an API key,
+// so we show the normal key-entry UI instead of the OAuth-only login.
+function isOAuthCodex(backend) {
+  return backend.backend_type === "codex" && !backend.base_url
+}
 
 function runCodexLogin() {
   // Worker-side login still uses the one-shot REST endpoint (the

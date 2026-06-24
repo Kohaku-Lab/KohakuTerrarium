@@ -17,9 +17,33 @@ from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
 from kohakuterrarium.llm.openai import OpenAIProvider
 from kohakuterrarium.llm import api_keys as _api_keys
 from kohakuterrarium.llm.profiles import LLMProfile, get_api_key, resolve_controller_llm
+from kohakuterrarium.utils.env_interp import interpolate_env_vars
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _resolved_base_url(profile: LLMProfile) -> str | None:
+    """Interpolate ``${VAR}`` in a profile's ``base_url`` at consume time.
+
+    Provider config keeps ``${VAR}`` templates raw on disk (see
+    ``llm.backends.load_backends``); they resolve here, when the provider
+    is built, against the live environment. Returns ``None`` for an
+    empty/unset url, and warns if a template resolved to empty (likely a
+    missing env var) so an empty base_url isn't sent silently.
+    """
+    raw = (getattr(profile, "base_url", "") or "").strip()
+    if not raw:
+        return None
+    resolved = interpolate_env_vars(raw).strip()
+    if "${" in raw and not resolved:
+        logger.warning(
+            "base_url env interpolation resolved to empty",
+            profile=getattr(profile, "name", "?"),
+            raw=raw,
+        )
+    return resolved or None
+
 
 _AGENT_CONFIG_FIELDS = {field.name: field for field in fields(AgentConfig)}
 
@@ -173,11 +197,31 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
         return provider
 
     if profile.backend_type == "codex":
+        # OpenAI Responses-API transport. ``base_url`` is the single
+        # discriminator: set -> custom endpoint, API-key auth, NO OAuth
+        # (key required); unset -> ChatGPT-subscription OAuth flow (no key
+        # consulted, so a stray stored ``codex`` key can't hijack it).
+        codex_base_url = _resolved_base_url(profile)
+        codex_key: str | None = None
+        if codex_base_url:
+            resolved = get_api_key(profile.provider) if profile.provider else ""
+            if not resolved and profile.api_key_env:
+                resolved = get_api_key(profile.api_key_env)
+            codex_key = interpolate_env_vars(resolved or "") or None
+            if not codex_key:
+                raise LLMNotConfiguredError(
+                    f"API key required for the custom OpenAI Responses "
+                    f"endpoint '{profile.name}' ({codex_base_url}). Set it "
+                    f"via 'kt login {profile.provider or profile.name}' or "
+                    f"the {profile.api_key_env or 'provider'} key."
+                )
         provider = CodexOAuthProvider(
             model=profile.model,
             reasoning_effort=profile.reasoning_effort or "medium",
             service_tier=profile.service_tier or None,
             retry_policy=getattr(profile, "retry_policy", None),
+            api_key=codex_key,
+            base_url=codex_base_url,
         )
         provider._profile_max_context = profile.max_context
         _apply_backend_native_identity(provider, profile)
@@ -186,6 +230,8 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
     api_key = get_api_key(profile.provider) if profile.provider else ""
     if not api_key and profile.api_key_env:
         api_key = get_api_key(profile.api_key_env)
+    # Resolve ``${VAR}`` if the stored key is itself a template.
+    api_key = interpolate_env_vars(api_key or "")
     if not api_key:
         # Worker mode: ``llm.api_keys._resolver`` is set; the controller's
         # identity store is the only valid source.  Setting the env var
@@ -228,10 +274,11 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
         _apply_backend_native_identity(provider, profile)
         return provider
 
+    base_url = _resolved_base_url(profile)
     if profile.backend_type == "anthropic":
         provider = AnthropicProvider(
             api_key=api_key,
-            base_url=profile.base_url or None,
+            base_url=base_url,
             model=profile.model,
             temperature=profile.temperature,
             max_tokens=profile.max_output or None,
@@ -242,7 +289,7 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
     else:
         provider = OpenAIProvider(
             api_key=api_key,
-            base_url=profile.base_url or None,
+            base_url=base_url,
             model=profile.model,
             temperature=profile.temperature,
             max_tokens=profile.max_output or None,

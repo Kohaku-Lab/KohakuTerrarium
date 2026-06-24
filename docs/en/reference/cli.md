@@ -388,8 +388,9 @@ Authenticate with a provider.
 kt login <provider>
 ```
 
-- For `codex` backend: OAuth device-code flow. Tokens stored at
-  `~/.kohakuterrarium/codex-auth.json`.
+- For `codex` backend with no `base_url`: OAuth device-code flow. Tokens
+  stored at `~/.kohakuterrarium/codex-auth.json`. With a `base_url` set
+  (custom OpenAI-Responses endpoint), it prompts for an API key instead.
 - For API-key backends: prompts (masked) and saves to
   `~/.kohakuterrarium/api_keys.yaml`.
 

@@ -109,6 +109,8 @@ class CodexOAuthProvider(BaseLLMProvider):
         timeout: float = 300.0,
         max_retries: int = 2,
         retry_policy: RetryPolicy | dict[str, Any] | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
     ):
         super().__init__(LLMConfig(model=model, retry_policy=retry_policy))
         self.model = model
@@ -117,6 +119,13 @@ class CodexOAuthProvider(BaseLLMProvider):
         self.timeout = timeout
         self.max_retries = max_retries
         self._retry_policy = RetryPolicy.from_value(retry_policy)
+        # API-key mode: when ``api_key`` is set, this provider speaks the
+        # OpenAI Responses API against ``base_url`` (default: the Codex
+        # ChatGPT backend) using API-key auth and SKIPS the Codex OAuth
+        # login entirely. When ``api_key`` is None it falls back to the
+        # ChatGPT-subscription OAuth flow (the historical behaviour).
+        self._api_key = api_key
+        self._base_url = base_url
         self._tokens: CodexTokens | None = None
         self._client: Any = None  # AsyncOpenAI
         self._last_tool_calls: list[NativeToolCall] = []
@@ -125,7 +134,16 @@ class CodexOAuthProvider(BaseLLMProvider):
         self.prompt_cache_key: str | None = None
 
     async def ensure_authenticated(self) -> None:
-        """Ensure valid tokens exist. Opens browser/device code if needed."""
+        """Ensure the client is ready.
+
+        API-key mode builds the client straight away (no OAuth). OAuth
+        mode loads/refreshes Codex tokens, opening the browser/device-code
+        login if none exist.
+        """
+        if self._api_key:
+            self._rebuild_client()
+            return
+
         self._tokens = CodexTokens.load()
 
         if self._tokens and self._tokens.is_expired():
@@ -151,7 +169,9 @@ class CodexOAuthProvider(BaseLLMProvider):
         """
         if not HAS_OPENAI:
             raise ImportError("openai not installed. Install with: pip install openai")
-        if not self._tokens:
+        # Resolve auth: explicit API key wins; otherwise the OAuth token.
+        key = self._api_key or (self._tokens.access_token if self._tokens else None)
+        if not key:
             return
 
         # Custom httpx client with a response hook so we can observe
@@ -162,15 +182,19 @@ class CodexOAuthProvider(BaseLLMProvider):
             timeout=self.timeout,
         )
         self._client = AsyncOpenAI(
-            api_key=self._tokens.access_token,
-            base_url=CODEX_BASE_URL,
+            api_key=key,
+            base_url=self._base_url or CODEX_BASE_URL,
             timeout=self.timeout,
             max_retries=self.max_retries,
             http_client=http_client,
         )
 
     async def _ensure_valid_token(self) -> None:
-        """Refresh token if expired and rebuild client."""
+        """Refresh token if expired and rebuild client (OAuth mode only)."""
+        if self._api_key:
+            if not self._client:
+                self._rebuild_client()
+            return
         if not self._tokens:
             await self.ensure_authenticated()
             return
@@ -214,6 +238,8 @@ class CodexOAuthProvider(BaseLLMProvider):
             timeout=self.timeout,
             max_retries=self.max_retries,
             retry_policy=self._retry_policy,
+            api_key=self._api_key,
+            base_url=self._base_url,
         )
         clone._tokens = self._tokens
         clone._client = self._client
@@ -377,7 +403,12 @@ class CodexOAuthProvider(BaseLLMProvider):
             self.prompt_cache_key
             or hashlib.sha256(instr_text.encode()).hexdigest()[:32]
         )
-        extra_headers = {"session_id": cache_key}
+        # ``session_id`` is a ChatGPT/Codex-internal routing header; a
+        # third-party OpenAI-compatible Responses endpoint may reject it,
+        # so only send it in OAuth mode. ``prompt_cache_key`` is a standard
+        # OpenAI Responses param and stays in both modes.
+        if not self._api_key:
+            extra_params["extra_headers"] = {"session_id": cache_key}
 
         try:
             stream = await self._client.responses.create(
@@ -388,7 +419,6 @@ class CodexOAuthProvider(BaseLLMProvider):
                 store=False,
                 stream=True,
                 prompt_cache_key=cache_key,
-                extra_headers=extra_headers,
                 **extra_params,
             )
         except Exception as e:

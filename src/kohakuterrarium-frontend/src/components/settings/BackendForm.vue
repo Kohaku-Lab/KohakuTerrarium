@@ -8,7 +8,7 @@
       <label class="text-[11px] text-warm-400 mb-1 block">{{ t("settings.backends.backendType") }}</label>
       <el-select :model-value="form.backend_type" size="small" class="w-full" @update:model-value="updateField('backend_type', $event)">
         <el-option value="openai" label="openai" />
-        <el-option value="codex" label="codex" />
+        <el-option value="codex" label="openai-responses (codex)" />
         <el-option value="anthropic" label="anthropic" />
       </el-select>
     </div>

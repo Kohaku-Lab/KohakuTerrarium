@@ -629,7 +629,10 @@ Canonical `backend_type` values are:
 - `anthropic`: Anthropic-compatible Messages API endpoints via the official
   `anthropic` Python package (Claude, MiniMax's `/anthropic/v1/messages`, and
   compatible proxies).
-- `codex`: ChatGPT-subscription Codex OAuth.
+- `codex`: OpenAI Responses-API transport. With no `base_url` it uses the
+  ChatGPT-subscription Codex OAuth flow; set a `base_url` (a custom
+  OpenAI-Responses-compatible endpoint) and it uses API-key auth instead —
+  no OAuth. `base_url` is the single discriminator.
 
 Legacy `codex-oauth` is accepted for back-compat and normalized to `codex`.
 
