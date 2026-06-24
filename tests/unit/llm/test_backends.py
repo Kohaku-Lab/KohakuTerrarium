@@ -236,3 +236,36 @@ class TestValidateBackendType:
     def test_unknown_backend_type_rejected(self):
         with pytest.raises(ValueError, match="Unsupported backend_type"):
             validate_backend_type("ollama")
+
+
+class TestEnvInterpolation:
+    """``${VAR}`` in provider config stays RAW at the backends layer;
+    interpolation happens at consume time (see bootstrap.llm)."""
+
+    def test_load_backends_keeps_literal(self, monkeypatch):
+        # load_backends must NOT expand ${VAR} — the UI shows the template
+        # and disk keeps it. Expansion is a consume-time concern.
+        monkeypatch.setenv("KT_BE_HOST", "myhost.example")
+        save_yaml_store({"backends": {"custom": {"base_url": "${KT_BE_HOST}/v1"}}})
+        assert load_backends()["custom"].base_url == "${KT_BE_HOST}/v1"
+
+    def test_crud_roundtrip_preserves_literal(self, monkeypatch):
+        # The C1 regression guard: a CRUD save (which round-trips the whole
+        # store through load_backends) must NOT freeze the resolved value
+        # — that would destroy the template AND leak the secret to disk.
+        from kohakuterrarium.llm.profiles import set_default_model
+
+        monkeypatch.setenv("KT_BE_HOST", "myhost.example")
+        save_yaml_store(
+            {
+                "backends": {
+                    "custom": {
+                        "backend_type": "openai",
+                        "base_url": "${KT_BE_HOST}/v1",
+                    }
+                }
+            }
+        )
+        set_default_model("gpt-x")  # a save path that re-serialises backends
+        raw = load_yaml_store()
+        assert raw["backends"]["custom"]["base_url"] == "${KT_BE_HOST}/v1"

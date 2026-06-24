@@ -239,7 +239,15 @@ def clear_remote_backends() -> None:
 
 
 def load_backends() -> dict[str, LLMBackend]:
-    """Return merged built-in + user-defined + remote-fetched providers."""
+    """Return merged built-in + user-defined + remote-fetched providers.
+
+    Values are returned RAW — any ``${VAR}`` / ``${VAR:default}`` markers
+    in ``base_url`` etc. are left literal here. Interpolation happens at
+    consume time (``bootstrap.llm`` when the provider is built), so the
+    on-disk YAML keeps its templates, CRUD round-trips never freeze a
+    resolved value, and the Settings UI shows the ``${VAR}`` the user
+    wrote rather than the resolved secret.
+    """
     data = load_yaml_store()
     backends = _built_in_providers()
 

@@ -20,7 +20,6 @@ from kohakuterrarium.core.config_types import (
     SubAgentConfigItem,
     ToolConfigItem,
     TriggerConfig,
-    _interpolate_env_vars,
 )
 from kohakuterrarium.core.output_wiring import parse_wiring_list
 from kohakuterrarium.packages.resolve import resolve_any_path, resolve_package_path
@@ -31,6 +30,9 @@ except ImportError:  # pragma: no cover - Python <3.11 fallback
     import tomli as tomllib  # type: ignore
 
 from kohakuterrarium.prompt.template import render_template_safe
+from kohakuterrarium.utils.env_interp import (
+    interpolate_env_vars as _interpolate_env_vars,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
