@@ -1685,6 +1685,27 @@ const _chatStoreOptions = {
 
     openTab(tabKey) {
       this._addTab(tabKey)
+      // When groups are active, the chat view renders from the per-group
+      // active tab (``groups[gid].activeTab``); the legacy ``activeTab``
+      // is DERIVED from the focused group by ``_syncLegacyFromGroups``.
+      // ``_addTab`` only sets a group's activeTab when it was empty, so
+      // clicking an already-open creature (CreaturesPanel / StatusDashboard
+      // / AttachTab) wouldn't switch the visible chat. Drive the owning
+      // group's focus + active tab explicitly, mirroring
+      // ``ChatPanel.onTabClick``, so every "open tab" entry point switches.
+      if (this.groupTree) {
+        let targetId = this.focusedGroupId || _firstLeafGroupId(this.groupTree)
+        for (const [gid, g] of Object.entries(this.groups)) {
+          if (g.tabs.includes(tabKey)) {
+            targetId = gid
+            break
+          }
+        }
+        if (targetId && this.groups[targetId]?.tabs.includes(tabKey)) {
+          this.setFocusedGroup(targetId)
+          this.setGroupActiveTab(targetId, tabKey)
+        }
+      }
       this.activeTab = tabKey
       this._saveTabs()
       // Always load history — the unified session endpoint handles
