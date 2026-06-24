@@ -432,6 +432,26 @@ class TestIsAvailable:
         )
         assert _is_available("codex") is True
 
+    def test_custom_codex_backend_available_via_api_key(self):
+        # A codex (Responses-API) backend with a custom endpoint + key is
+        # available even with no OAuth token (CodexTokens.load -> None).
+        from kohakuterrarium.llm.api_keys import save_api_key
+        from kohakuterrarium.llm.backends import save_yaml_store
+
+        save_yaml_store(
+            {
+                "backends": {
+                    "myresp": {
+                        "backend_type": "codex",
+                        "base_url": "https://my.host/v1",
+                        "api_key_env": "MYRESP_KEY",
+                    }
+                }
+            }
+        )
+        save_api_key("myresp", "sk-resp")
+        assert _is_available("myresp") is True
+
     def test_provider_available_with_stored_key(self):
         from kohakuterrarium.llm.api_keys import save_api_key
 

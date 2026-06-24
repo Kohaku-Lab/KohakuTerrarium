@@ -351,7 +351,7 @@ Built-in provider types (backends):
 
 | Provider | Backend type | Transport | Notes |
 |---|---|---|---|
-| `codex` | `codex` | Codex OAuth (ChatGPT subscription) | `kt login codex`; routed via `CodexOAuthProvider`. Ships provider-native tool support such as `image_gen`. |
+| `codex` | `codex` | OpenAI Responses API | Routed via `CodexOAuthProvider`. No `base_url` → ChatGPT-subscription OAuth (`kt login codex`); with a `base_url` → API-key auth against a custom OpenAI-Responses endpoint (no OAuth). Ships provider-native tools such as `image_gen`. |
 | `openai` | `openai` | OpenAI `/chat/completions` | API-key auth (`OPENAI_API_KEY`). |
 | `openrouter` | `openai` | OpenAI-compat against OpenRouter | API-key auth (`OPENROUTER_API_KEY`); unified `reasoning` param. |
 | `anthropic` | `anthropic` | Anthropic-compatible Messages API | API-key auth (`ANTHROPIC_API_KEY`). Uses the official `anthropic` SDK. Claude-specific knobs go through `extra_body` (`thinking.*`, `output_config.*`). Prompt-caching markers are auto-applied unless disabled. |

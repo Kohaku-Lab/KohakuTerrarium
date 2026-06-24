@@ -565,6 +565,13 @@ def _is_available(provider_name: str) -> bool:
     backends = load_backends()
     backend = backends.get(provider_name)
     if backend and backend.backend_type == "codex":
+        if backend.base_url:
+            # Custom Responses endpoint -> API-key auth (base_url is the
+            # single discriminator, matching bootstrap + cli + frontend).
+            if get_api_key(provider_name):
+                return True
+            return bool(backend.api_key_env and get_api_key(backend.api_key_env))
+        # ChatGPT-subscription -> OAuth token.
         return CodexTokens.load() is not None
     if provider_name == "codex":
         return CodexTokens.load() is not None

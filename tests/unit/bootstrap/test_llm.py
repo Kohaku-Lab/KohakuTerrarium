@@ -104,6 +104,8 @@ class TestCreateLLMProviderProfilePath:
             max_context = 8000
             backend_provider_name = "openai"
             backend_native_tools = None
+            api_key_env = ""
+            base_url = ""
 
         def fake_resolve(data, override=None):
             captured["data"] = data
@@ -544,3 +546,29 @@ class TestDeferredOnMissingKey:
         stub._init_llm()
         assert isinstance(stub.llm, DeferredLLMProvider)
         assert "defprofile" in stub.llm.reason
+
+
+class TestResolvedBaseUrl:
+    """Consume-time ``${VAR}`` interpolation of a profile's base_url."""
+
+    class _P:
+        def __init__(self, base_url, name="p"):
+            self.base_url = base_url
+            self.name = name
+
+    def test_interpolates_env_var(self, monkeypatch):
+        monkeypatch.setenv("KT_BU_HOST", "host.example")
+        assert (
+            llm_mod._resolved_base_url(self._P("${KT_BU_HOST}/v1")) == "host.example/v1"
+        )
+
+    def test_default_used_when_unset(self, monkeypatch):
+        monkeypatch.delenv("KT_BU_MISSING", raising=False)
+        assert (
+            llm_mod._resolved_base_url(self._P("${KT_BU_MISSING:https://fb/v1}"))
+            == "https://fb/v1"
+        )
+
+    def test_none_when_empty(self):
+        assert llm_mod._resolved_base_url(self._P("")) is None
+        assert llm_mod._resolved_base_url(self._P(None)) is None
