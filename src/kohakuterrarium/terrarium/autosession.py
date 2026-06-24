@@ -87,7 +87,7 @@ def mint_store(
         path = Path(path).expanduser()
         path.parent.mkdir(parents=True, exist_ok=True)
 
-    store = SessionStore(path)
+    store = SessionStore(path, writer_lock=True)
     existing = store.load_meta()
     if not existing.get("session_id"):
         store.init_meta(

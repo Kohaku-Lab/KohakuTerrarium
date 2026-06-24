@@ -301,13 +301,21 @@ def _rebuild_agent(
     return Agent(cfg, llm=llm, pwd=pwd, strict=False, **io_kwargs)
 
 
-def _open_store_with_migration(session_path: str | Path) -> SessionStore:
+def _open_store_with_migration(
+    session_path: str | Path, *, writer_lock: bool = False
+) -> SessionStore:
     """Open a session file, auto-migrating older formats upward first.
 
     Wraps ``ensure_latest_version`` so resume transparently uses the
     newest readable version on disk. If migration raises, the error
     message carries the original v1 path so the user can re-run
     against the preserved file after fixing the cause.
+
+    ``writer_lock=True`` is passed by the resume paths that hand the
+    store to a live engine, so a second writer on the same file is
+    refused (:class:`~kohakuterrarium.errors.SessionLockedError`).
+    Read-only callers (status/preview, e.g. ``open_store``) leave it
+    ``False``.
     """
     try:
         resolved = ensure_latest_version(session_path)
@@ -321,7 +329,7 @@ def _open_store_with_migration(session_path: str | Path) -> SessionStore:
             original=str(session_path),
             opened=str(resolved),
         )
-    return SessionStore(resolved)
+    return SessionStore(resolved, writer_lock=writer_lock)
 
 
 def resume_agent(
@@ -349,7 +357,7 @@ def resume_agent(
     Returns:
         (agent, store) tuple. Caller should run agent.run_forever() then store.close().
     """
-    store = _open_store_with_migration(session_path)
+    store = _open_store_with_migration(session_path, writer_lock=True)
     meta = store.load_meta()
 
     # Accept "agent" (worker-spawned single creature, host-spawned solo

@@ -2,6 +2,9 @@
 
 from pathlib import Path
 
+import pytest
+
+from kohakuterrarium.errors import SessionLockedError
 from kohakuterrarium.session.store import SessionStore, iter_kv_keys
 
 # ── helpers ───────────────────────────────────────────────────────
@@ -1024,3 +1027,75 @@ class TestDefensiveReadFailures:
             assert isinstance(out, dict)
         finally:
             s._closed = True
+
+
+class TestWriterLock:
+    """``writer_lock=True`` refuses a second concurrent writer (detect +
+    error) while leaving read-only / viewer opens unaffected."""
+
+    def test_second_writer_refused(self, tmp_path):
+        p = tmp_path / "s.kohakutr"
+        w1 = SessionStore(p, writer_lock=True)
+        try:
+            with pytest.raises(SessionLockedError) as exc:
+                SessionStore(p, writer_lock=True)
+            assert exc.value.holder_pid is not None
+        finally:
+            w1.close()
+
+    def test_readonly_open_coexists_with_writer(self, tmp_path):
+        p = tmp_path / "s.kohakutr"
+        w = SessionStore(p, writer_lock=True)
+        try:
+            # open_readonly never takes the lock — viewing a running
+            # session must not raise.
+            r = SessionStore.open_readonly(p)
+            r.close()
+        finally:
+            w.close()
+
+    def test_plain_open_coexists_with_writer(self, tmp_path):
+        # The viewer / index-reconciler path uses the default
+        # (writer_lock=False) constructor and must not contend.
+        p = tmp_path / "s.kohakutr"
+        w = SessionStore(p, writer_lock=True)
+        try:
+            v = SessionStore(p)
+            v.close()
+        finally:
+            w.close()
+
+    def test_lock_released_on_close(self, tmp_path):
+        p = tmp_path / "s.kohakutr"
+        w1 = SessionStore(p, writer_lock=True)
+        w1.close()
+        # Lock is free again -> a new writer can take it. (The .lock
+        # sidecar is intentionally left on disk; see FileLock.release.)
+        w2 = SessionStore(p, writer_lock=True)
+        w2.close()
+
+    def test_no_lock_without_flag(self, tmp_path):
+        # Two default opens never contend (back-compat for the many
+        # transient read/peek opens across the codebase).
+        p = tmp_path / "s.kohakutr"
+        a = SessionStore(p)
+        b = SessionStore(p)
+        a.close()
+        b.close()
+
+    def test_lock_released_if_construction_fails(self, tmp_path, monkeypatch):
+        # If table-opening raises AFTER the lock is acquired, __init__ must
+        # release it — otherwise an in-process retry is wedged by a leaked
+        # lock (the "OS frees on exit" net doesn't help a live process).
+        p = tmp_path / "s.kohakutr"
+
+        def _boom(self):
+            raise RuntimeError("table open failed")
+
+        monkeypatch.setattr(SessionStore, "_open_tables", _boom)
+        with pytest.raises(RuntimeError):
+            SessionStore(p, writer_lock=True)
+        monkeypatch.undo()
+        # Lock is free -> a fresh writer-locked open succeeds (no leak).
+        w = SessionStore(p, writer_lock=True)
+        w.close()
