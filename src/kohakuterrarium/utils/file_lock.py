@@ -10,6 +10,14 @@ crashes, so a lock left behind by a killed process does not wedge the
 next opener — this is the key advantage over a status flag written into
 a data file.
 
+Byte-0 is reserved as the locked *anchor*; the holder pid is written
+starting at byte 1. This matters on Windows, where ``msvcrt.locking``
+takes a **mandatory** byte-range lock: a process holding byte 0 would
+make byte 0 unreadable by any other handle. Keeping the pid out of the
+locked byte lets :meth:`read_holder_pid` read it (by seeking past byte 0)
+from a contending process for diagnostics. POSIX ``flock`` is whole-file
++ advisory, so the same layout works there unchanged.
+
 The platform-specific ``fcntl`` / ``msvcrt`` imports live inside the
 acquire/release methods on purpose: only one of the two modules exists
 on any given OS, so importing both at module top would fail.
@@ -20,6 +28,10 @@ import sys
 import time
 from pathlib import Path
 from typing import IO
+
+# Byte 0 is the locked anchor; the pid line lives at this offset so the
+# (Windows-mandatory) lock never overlaps the pid payload.
+_PID_OFFSET = 1
 
 
 class FileLockBusy(RuntimeError):
@@ -47,11 +59,19 @@ class FileLock:
         return self._fh is not None
 
     def read_holder_pid(self) -> int | None:
-        """Best-effort: the pid recorded in the lock file, if any."""
+        """Best-effort: the pid recorded in the lock file, if any.
+
+        Reads from byte ``_PID_OFFSET`` so it never touches the locked
+        anchor byte — on Windows the anchor is a mandatory lock and
+        reading it from a contending process would raise ``Permission
+        denied``.
+        """
         try:
-            first = self.path.read_text(encoding="utf-8").splitlines()[0]
-            return int(first.strip())
-        except (OSError, ValueError, IndexError):
+            with open(self.path, "rb") as fh:
+                fh.seek(_PID_OFFSET)
+                first = fh.readline().strip()
+            return int(first)
+        except (OSError, ValueError):
             return None
 
     def acquire(self) -> None:
@@ -70,10 +90,13 @@ class FileLock:
         except BaseException:
             fh.close()
             raise
-        # Record holder pid + acquisition time for diagnostics.
+        # Record holder pid + acquisition time for diagnostics. Byte 0 is
+        # a one-byte anchor (the locked byte); the pid line starts at
+        # byte ``_PID_OFFSET`` so it stays readable while the lock is held.
         try:
             fh.seek(0)
             fh.truncate()
+            fh.write(b"\n")  # anchor byte (offset 0)
             fh.write(f"{os.getpid()}\n{time.time()}\n".encode())
             fh.flush()
         except OSError:
@@ -88,7 +111,7 @@ class FileLock:
         same path, and the unlink would then orphan its inode so a third
         opener creates a fresh file and locks a different inode —
         split-brain. The OS advisory lock (released on ``close``) is the
-        real token; a leftover empty ``.lock`` sidecar is harmless.
+        real token; a leftover ``.lock`` sidecar is harmless.
         """
         if self._fh is None:
             return
@@ -113,10 +136,9 @@ class FileLock:
             import msvcrt
 
             # ``msvcrt.locking`` locks ``nbytes`` from the CURRENT file
-            # position. The file is opened in append mode (position = EOF),
-            # so seek to 0 first — otherwise a stale, non-empty ``.lock``
-            # left by a crash would lock a non-zero offset and two writers
-            # could lock disjoint byte ranges and both "succeed".
+            # position, so seek to 0 and lock exactly the anchor byte.
+            # Seeking first also avoids a stale, non-empty ``.lock`` left
+            # by a crash causing a lock at EOF (a non-zero offset).
             try:
                 fh.seek(0)
                 msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
