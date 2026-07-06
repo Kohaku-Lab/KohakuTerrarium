@@ -51,9 +51,9 @@
            text remains for non-compact contexts (where the
            StatusBar handles model switching) and for read-only
            viewers (no instance id). -->
-      <div v-if="activeTokens > 0 || (!isCompact && chat.modelDisplay) || (!props.instance?.id && chat.modelDisplay) || readOnly" class="flex items-center gap-2 px-2 py-2 -mb-px text-[10px] text-warm-400 font-mono">
-        <template v-if="(!isCompact || !props.instance?.id || readOnly) && chat.modelDisplay">
-          <span class="text-warm-500 dark:text-warm-400">{{ chat.modelDisplay }}</span>
+      <div v-if="activeTokens > 0 || (!isCompact && viewModelDisplay) || (!props.instance?.id && viewModelDisplay) || readOnly" class="flex items-center gap-2 px-2 py-2 -mb-px text-[10px] text-warm-400 font-mono">
+        <template v-if="(!isCompact || !props.instance?.id || readOnly) && viewModelDisplay">
+          <span class="text-warm-500 dark:text-warm-400">{{ viewModelDisplay }}</span>
           <span v-if="activeTokens > 0" class="text-warm-300 dark:text-warm-600">|</span>
         </template>
         <template v-if="activeTokens > 0">
@@ -62,9 +62,9 @@
           <span v-if="activeUsage.cached > 0" class="text-aquamarine" :title="t('chat.cachedInputTokens')">(cache {{ formatTokens(activeUsage.cached) }})</span>
           <span :title="t('chat.cumulativeOutputTokens')">{{ t("common.out") }}: {{ formatTokens(activeUsage.completion) }}</span>
         </template>
-        <template v-if="chat.sessionInfo.compactThreshold > 0 && activeUsage.prompt > 0">
+        <template v-if="viewModelInfo.compactThreshold > 0 && activeUsage.prompt > 0">
           <span class="text-warm-300 dark:text-warm-600">|</span>
-          <span :class="contextPct >= 80 ? 'text-coral' : contextPct >= 60 ? 'text-amber' : ''" :title="t('chat.contextTitle', { current: formatTokens(activeUsage.lastPrompt || 0), limit: formatTokens(chat.sessionInfo.compactThreshold) })">{{ t("common.context") }}: {{ contextPct }}%</span>
+          <span :class="contextPct >= 80 ? 'text-coral' : contextPct >= 60 ? 'text-amber' : ''" :title="t('chat.contextTitle', { current: formatTokens(activeUsage.lastPrompt || 0), limit: formatTokens(viewModelInfo.compactThreshold) })">{{ t("common.context") }}: {{ contextPct }}%</span>
         </template>
       </div>
 
@@ -240,7 +240,7 @@ import { useChatTabDrag } from "@/composables/useChatTabDrag"
 import { useI18n } from "@/utils/i18n"
 import { terrariumAPI, agentAPI } from "@/utils/api"
 import { buildMessageParts, formatBytes, MAX_ATTACHMENT_BYTES, MAX_IMAGE_BYTES } from "@/utils/chatAttachments"
-import { getHybridPref, removeHybridPref, setHybridPref } from "@/utils/uiPrefs"
+import { readLocalPref, writeLocalPref } from "@/utils/uiPrefs"
 import { shouldSendOnEnter } from "@/utils/chatInput"
 // How many queued-while-processing messages to show before collapsing.
 const QUEUE_VISIBLE = 5
@@ -315,6 +315,20 @@ const viewProcessing = computed(() => {
   const t = viewActiveTab.value
   return t ? !!chat.processingByTab[t] : false
 })
+// Model info for THIS panel's active tab. In group mode the panel's
+// tab can differ from the store's global activeTab, so resolve the
+// per-tab entry locally instead of using ``chat.activeModelInfo``.
+const viewModelInfo = computed(() => {
+  const t = viewActiveTab.value
+  const info = (t && chat.modelByTab[t]) || {}
+  return {
+    model: info.model || chat.sessionInfo.model || "",
+    llmName: info.llmName || chat.sessionInfo.llmName || "",
+    maxContext: info.maxContext || chat.sessionInfo.maxContext || 0,
+    compactThreshold: info.compactThreshold || chat.sessionInfo.compactThreshold || 0,
+  }
+})
+const viewModelDisplay = computed(() => viewModelInfo.value.llmName || viewModelInfo.value.model || "")
 const isFocusedGroup = computed(() => !!(props.groupId && chat.focusedGroupId === props.groupId))
 
 // Whether the chat-internal tree has more than one leaf — drives
@@ -408,45 +422,25 @@ function draftKey() {
   return `kt.chat.draft.${instanceId}.${tab}${suffix}`
 }
 
-// Monotonic counter incremented on every tab/instance change.  The
-// in-flight ``restoreDraft`` captures the value at call time and
-// checks it again after the async storage read — if a newer switch
-// has happened (i.e. the user moved to a different tab while the
-// read was pending), the resolved value is dropped instead of
-// overwriting the current tab's input.  Without this guard a
-// late-resolving restore for tab B can stomp the user's typing in
-// tab C, and the ``watch(inputText, persistDraft)`` below would
-// then write B's content to C's storage key — silent corruption.
-let _draftRestoreGen = 0
-
-async function restoreDraft() {
-  const myGen = ++_draftRestoreGen
+// Drafts are keystroke-frequency state, so they live in localStorage
+// ONLY — never the backend ui-prefs store. The synchronous read also
+// removes the async restore/typing race the old hybrid path had to
+// generation-guard against.
+function restoreDraft() {
   const key = draftKey()
-  // Snapshot what the input held when the restore started.  Same
-  // tab can produce its own race: user starts typing into a freshly-
-  // mounted ChatPanel while the initial restore is still in flight;
-  // when storage resolves it would overwrite that fresh typing.
-  // Only apply the restored value if the input is still at the
-  // pre-restore snapshot.
-  const preInput = inputText.value
   if (!key) {
-    if (myGen === _draftRestoreGen && inputText.value === preInput) {
-      inputText.value = ""
-    }
+    inputText.value = ""
     return
   }
-  const value = (await getHybridPref(key, "")) || ""
-  if (myGen !== _draftRestoreGen) return
-  if (inputText.value !== preInput) return
-  inputText.value = value
+  inputText.value = readLocalPref(key) || ""
   nextTick(autoResize)
 }
 
 function persistDraft() {
   const key = draftKey()
   if (!key) return
-  if (inputText.value) setHybridPref(key, inputText.value)
-  else removeHybridPref(key)
+  // writeLocalPref(key, null) removes the entry.
+  writeLocalPref(key, inputText.value || null)
 }
 
 const activeUsage = computed(() => {
@@ -459,7 +453,7 @@ const activeTokens = computed(() => activeUsage.value.total)
 const inputCanSend = computed(() => inputText.value.trim() || attachments.value.length > 0)
 
 const contextPct = computed(() => {
-  const threshold = chat.sessionInfo.compactThreshold
+  const threshold = viewModelInfo.value.compactThreshold
   const lastPrompt = activeUsage.value.lastPrompt || 0
   if (!threshold || !lastPrompt) return 0
   return Math.round((lastPrompt / threshold) * 100)

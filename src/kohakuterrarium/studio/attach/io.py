@@ -38,6 +38,43 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _session_info_frame(creature: Any) -> dict[str, Any]:
+    """Build the per-creature ``session_info`` WS frame sent at attach.
+
+    Mirrors the metadata shape :meth:`AgentModelMixin.switch_model`
+    emits so the frontend's per-tab model map gets identical fields
+    from both paths: canonical ``llm_name``, raw ``model`` id, and the
+    context/compaction numbers. ``source`` carries the creature name —
+    the frontend keys its per-tab model info by it.
+    """
+    agent = creature.agent
+    try:
+        llm_name = agent.llm_identifier()
+    except Exception:
+        llm_name = ""
+    llm = getattr(agent, "llm", None)
+    model = getattr(llm, "model", "") or getattr(agent.config, "model", "") or ""
+    max_context = getattr(llm, "_profile_max_context", 0) or 0
+    compact_manager = getattr(agent, "compact_manager", None)
+    compact_at = 0
+    if compact_manager is not None and max_context:
+        try:
+            compact_at = int(max_context * compact_manager.config.threshold)
+        except Exception:
+            compact_at = 0
+    return {
+        "type": "activity",
+        "activity_type": "session_info",
+        "source": creature.name,
+        "model": model,
+        "llm_name": llm_name,
+        "agent_name": creature.name,
+        "max_context": max_context,
+        "compact_threshold": compact_at,
+        "ts": time.time(),
+    }
+
+
 def _normalize_input_content(data: dict[str, Any]) -> str | list[dict[str, Any]]:
     """Normalize incoming WS input payload."""
     content = data.get("content")
@@ -390,6 +427,7 @@ async def attach_io(
     # this connection too. Without this every sibling tab would be
     # silent until the user clicks back to the bound creature.
     sibling_modules: list[tuple[Any, Any]] = []
+    siblings: list[Any] = []
     if creature.graph_id and creature.graph_id in engine._topology.graphs:
         graph = engine._topology.graphs[creature.graph_id]
         for cid in graph.creature_ids:
@@ -402,6 +440,7 @@ async def attach_io(
             sib_module = StreamOutput(sibling.name, queue, log, agent=sibling.agent)
             sibling.agent.output_router.add_secondary(sib_module)
             sibling_modules.append((sibling.agent, sib_module))
+            siblings.append(sibling)
 
     # Surface graph-level channels for multi-creature sessions.
     env = engine._environments.get(creature.graph_id)
@@ -410,17 +449,17 @@ async def attach_io(
         channel_cbs = _register_channel_callbacks(env, queue)
         await _send_channel_history(websocket, env)
 
-    # Send a session_info frame so the frontend identifies the creature.
-    await websocket.send_json(
-        {
-            "type": "activity",
-            "activity_type": "session_info",
-            "source": creature.name,
-            "model": agent.config.model,
-            "agent_name": creature.name,
-            "ts": time.time(),
-        }
-    )
+    # Send a session_info frame per creature (bound + siblings) so the
+    # frontend's per-tab model map starts correct for EVERY tab.  An
+    # agent's own init-time session_info fires before this WS attaches,
+    # so without the sibling frames a non-bound creature's model was
+    # only delivered after its next model switch.
+    await websocket.send_json(_session_info_frame(creature))
+    for sibling in siblings:
+        try:
+            await websocket.send_json(_session_info_frame(sibling))
+        except Exception:  # pragma: no cover - defensive per-sibling
+            logger.debug("sibling session_info frame failed", exc_info=True)
 
     fwd_task = asyncio.create_task(_forward_queue(queue, websocket))
 

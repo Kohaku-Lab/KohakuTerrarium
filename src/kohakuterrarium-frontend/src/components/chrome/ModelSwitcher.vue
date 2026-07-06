@@ -142,6 +142,14 @@ const targetOptions = computed(() => {
 const selectedTarget = computed(() => terrariumTarget.value || targetOptions.value[0]?.value || null)
 const canPickModel = computed(() => !!activeInstanceId.value && (!isTerrarium.value || !!selectedTarget.value))
 
+// Resolve a target key to its creature record. ``root`` is a tab
+// alias for the privileged creature in recipe terrariums.
+function creatureForTarget(inst, target) {
+  if (!inst || !target) return null
+  if (target === "root") return inst.creatures?.find((c) => c.is_root) || null
+  return inst.creatures?.find((c) => c.name === target) || null
+}
+
 const currentModel = computed(() => {
   const inst = currentInstance.value
   // ``llm_name`` carries the canonical ``provider/name[@variations]`` —
@@ -149,18 +157,19 @@ const currentModel = computed(() => {
   // survive a page refresh with the full identifier intact.
   if (inst?.type === "terrarium") {
     const target = selectedTarget.value
-    if (target === "root") {
-      const fallback = inst.llm_name || inst.model || ""
-      return terrariumTarget.value === target ? chat.sessionInfo.llmName || chat.sessionInfo.model || fallback : fallback
-    }
-    if (target) {
-      const creature = inst.creatures?.find((c) => c.name === target)
-      const fallback = creature?.llm_name || creature?.model || ""
-      return terrariumTarget.value === target ? chat.sessionInfo.llmName || chat.sessionInfo.model || fallback : fallback
-    }
-    return ""
+    if (!target) return ""
+    // The pill must ALWAYS track the SELECTED creature: live per-tab
+    // info (WS session_info, keyed by source name) first, then the
+    // instance snapshot. The global chat.sessionInfo is deliberately
+    // NOT consulted here — it tracks the primary creature only, and
+    // preferring it made every target show the primary's model.
+    const creature = creatureForTarget(inst, target)
+    const live = chat.modelByTab[target] || (creature?.name && chat.modelByTab[creature.name]) || null
+    return live?.llmName || live?.model || creature?.llm_name || creature?.model || (target === "root" ? inst.llm_name || inst.model || "" : "")
   }
-  return chat.sessionInfo.llmName || chat.sessionInfo.model || inst?.llm_name || inst?.model || ""
+  const soloTab = inst?.creatures?.[0]?.name || chat.terrariumTarget
+  const live = (soloTab && chat.modelByTab[soloTab]) || null
+  return live?.llmName || live?.model || chat.sessionInfo.llmName || chat.sessionInfo.model || inst?.llm_name || inst?.model || ""
 })
 
 const currentParsed = computed(() => parseSelector(currentModel.value))
@@ -359,13 +368,31 @@ async function applySelection() {
       ElMessage.error("Select a creature first")
       return
     }
-    await terrariumAPI.switchCreatureModel(sid, target, modelName)
+    const res = await terrariumAPI.switchCreatureModel(sid, target, modelName)
+    // The backend returns the canonical ``provider/name[@variations]``
+    // identifier — use it so the pill matches what /model would show.
+    const canonical = res?.model || modelName
     await instances.fetchOne(id)
-    if (chat.terrariumTarget === target || (inst?.creatures?.length || 0) <= 1) {
-      chat.sessionInfo.llmName = modelName
-      chat.sessionInfo.model = modelName
+    // Update the per-creature entry immediately; the creature's own
+    // ``session_info`` event confirms (and adds max_context) later.
+    const creature = creatureForTarget(inst, target)
+    const entry = { ...(chat.modelByTab[target] || {}), model: canonical, llmName: canonical }
+    chat.modelByTab[target] = entry
+    if (creature?.name && creature.name !== target) {
+      chat.modelByTab[creature.name] = { ...entry }
     }
-    ElMessage.success(`Switched to ${modelName}`)
+    if (creature?.is_root && inst?.has_root) {
+      chat.modelByTab["root"] = { ...entry }
+    }
+    // Keep the session-level fallback in sync only when the primary
+    // creature (or a solo session's lone creature) was the target.
+    const isPrimary = (inst?.creatures?.length || 0) <= 1 || chat.tabs[0] === target || (chat.tabs[0] === "root" && (target === "root" || creature?.is_root))
+    if (isPrimary) {
+      chat.sessionInfo.llmName = canonical
+      chat.sessionInfo.model = canonical
+    }
+    const label = isTerrarium.value ? `Switched ${target} to ${canonical}` : `Switched to ${canonical}`
+    ElMessage.success(label)
     popoverVisible.value = false
   } catch (err) {
     ElMessage.error(`Model switch failed: ${err?.message || err}`)
