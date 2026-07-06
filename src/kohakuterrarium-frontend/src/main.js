@@ -40,7 +40,11 @@ router.beforeEach((to) => {
 })
 
 async function bootstrap() {
-  await ensureUIPrefsLoaded()
+  // Bounded wait: prefs from the backend are nice-to-have at first
+  // paint (theme/zoom without flash), but a slow or dead backend
+  // must never block app mount. The fetch keeps running past the
+  // timeout and fills the cache when it lands.
+  await ensureUIPrefsLoaded({ timeoutMs: 2500 })
 
   const pinia = createPinia()
   const app = createApp(App)

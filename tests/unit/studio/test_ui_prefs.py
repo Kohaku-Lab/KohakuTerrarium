@@ -81,3 +81,20 @@ class TestSavePrefs:
         result = save_prefs({})
         assert result["theme"] == DEFAULTS["theme"]
         assert _redirect_path.exists()
+
+    def test_null_value_deletes_key(self, _redirect_path):
+        # The frontend's ``removeHybridPref`` sends ``null`` — the key
+        # must drop out of the file instead of persisting as JSON null
+        # litter (one entry per removed chat-draft/tab key, forever).
+        save_prefs({"kt.chat.draft.inst.main": "half-typed"})
+        save_prefs({"kt.chat.draft.inst.main": None})
+        on_disk = json.loads(_redirect_path.read_text(encoding="utf-8"))
+        assert "kt.chat.draft.inst.main" not in on_disk
+
+    def test_null_on_default_key_resets_to_default(self, _redirect_path):
+        save_prefs({"theme": "dark"})
+        result = save_prefs({"theme": None})
+        # Dropped from the response/merged view…
+        assert "theme" not in result
+        # …and the next load falls back to the default.
+        assert load_prefs()["theme"] == DEFAULTS["theme"]
