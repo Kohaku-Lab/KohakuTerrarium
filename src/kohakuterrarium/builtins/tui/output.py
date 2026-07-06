@@ -7,6 +7,7 @@ from textual.containers import VerticalScroll
 from textual.widgets import Markdown
 
 from kohakuterrarium.builtins.tui._injection import handle_user_input_injected
+from kohakuterrarium.builtins.tui.model_info import handle_session_info
 from kohakuterrarium.builtins.tui.session import CULL_KEEP, TUISession
 from kohakuterrarium.builtins.tui.widgets import (
     CompactSummaryBlock,
@@ -552,14 +553,7 @@ class TUIOutput(BaseOutputModule):
         handle_user_input_injected(self._tui, metadata, target)
 
     def _handle_session_info(self, metadata: dict) -> None:
-        session_id = metadata.get("session_id", "")
-        model = metadata.get("model", "")
-        agent_name = metadata.get("agent_name", "")
-        max_context = metadata.get("max_context", 0)
-        compact_threshold = metadata.get("compact_threshold", 0)
-        self._tui.update_session_info(session_id, model, agent_name)
-        if max_context:
-            self._tui.set_context_limits(max_context, compact_threshold)
+        handle_session_info(self._tui, self, metadata)
 
     # -- Resume history -----------------------------------------------------
 

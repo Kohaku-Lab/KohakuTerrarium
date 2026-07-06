@@ -170,6 +170,16 @@ class SessionInfoPanel(Static):
         self._agent_name = agent_name
         self._refresh()
 
+    def set_model(self, model: str) -> None:
+        """Partial update — only the ``Model:`` line.
+
+        Used by the per-tab model registry so switching tabs (or a
+        creature switching its own model) doesn't clobber the
+        session-id / agent-name lines.
+        """
+        self._model = model
+        self._refresh()
+
     def add_usage(
         self,
         prompt_tokens: int = 0,
