@@ -67,10 +67,14 @@ def load_prefs(user_id: int | None = None) -> dict[str, Any]:
 
 def save_prefs(values: dict[str, Any], *, user_id: int | None = None) -> dict[str, Any]:
     """Merge ``values`` over existing prefs and persist.  Returns
-    the merged view.  ``user_id`` selects per-user vs shared
-    storage; the API route binds this from
-    ``Depends(get_optional_user)`` when L4 is on."""
+    the merged view.  A ``None`` value deletes the key (the
+    frontend's ``removeHybridPref`` sends ``null``) — non-default
+    keys drop out of the file instead of accumulating as ``null``
+    litter, and default keys fall back to ``DEFAULTS``.  ``user_id``
+    selects per-user vs shared storage; the API route binds this
+    from ``Depends(get_optional_user)`` when L4 is on."""
     merged = {**load_prefs(user_id), **(values or {})}
+    merged = {k: v for k, v in merged.items() if v is not None}
     path = ui_prefs_path(user_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
