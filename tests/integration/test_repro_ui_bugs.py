@@ -797,6 +797,114 @@ class TestTuiStdinStealFix:
                 handled is False
             ), f"{variant!r} should fall through to agent slash dispatch"
 
+    def test_handle_tui_slash_targets_active_tab_agent(self):
+        # Multi-creature: ``/model`` (no args) must open the picker for
+        # the ACTIVE tab's creature — not the launch-time focus agent.
+        # Before this, the picker was hard-bound to ``focus``, so
+        # switching to bob's tab and typing /model still changed the
+        # root's model.
+        import asyncio as _asyncio
+
+        from kohakuterrarium.terrarium.engine_cli import _handle_tui_slash
+
+        focus_agent = object()
+        bob_agent = object()
+        modal_calls: list[tuple[str, Any]] = []
+
+        class _TabAwareTUI:
+            def agent_for_tab(self, tab: str | None = None) -> Any:
+                return bob_agent
+
+            async def show_model_picker_modal(self, agent: Any) -> None:
+                modal_calls.append(("model_picker", agent))
+
+            async def show_modules_modal(self, agent: Any) -> None:
+                modal_calls.append(("modules", agent))
+
+            async def show_module_edit_modal(self, agent: Any, name: str) -> bool:
+                modal_calls.append(("module_edit", (agent, name)))
+                return True
+
+        handled = _asyncio.run(_handle_tui_slash("/model", _TabAwareTUI(), focus_agent))
+        assert handled is True
+        assert modal_calls == [("model_picker", bob_agent)]
+
+    def test_tui_session_agent_for_tab_resolution(self):
+        # ``agent_for_tab`` is the seam that binds F2/F3 modals and the
+        # slash intercepts to the active tab's creature. Channel tabs
+        # and unresolvable tabs fall back to host_agent; no resolver
+        # (standalone TUI) means host_agent always.
+        from kohakuterrarium.builtins.tui.session import TUISession
+
+        tui = TUISession(agent_name="g")
+        tui.set_terrarium_tabs(["alice", "bob", "#chat"])
+        host = object()
+        bob_agent = object()
+        tui.host_agent = host
+        tui.resolve_tab_agent = lambda tab: bob_agent if tab == "bob" else None
+
+        assert tui.agent_for_tab("bob") is bob_agent
+        assert tui.agent_for_tab("alice") is host  # resolver → None → fallback
+        assert tui.agent_for_tab("#chat") is host  # channel tab → host
+        assert tui.agent_for_tab() is host  # active tab is alice
+
+        # Standalone TUI: no resolver installed.
+        solo = TUISession(agent_name="a")
+        solo.host_agent = host
+        assert solo.agent_for_tab() is host
+
+    def test_tui_session_per_target_model_registry(self):
+        # A sibling creature's model switch must NOT stomp the visible
+        # tab's ``Model:`` line; switching tabs re-renders the line
+        # from the per-target registry.
+        from kohakuterrarium.builtins.tui.session import TUISession
+
+        tui = TUISession(agent_name="g")
+        tui.set_terrarium_tabs(["alice", "bob"])
+        tui._pending_session_info = ("sid", "old-model", "g")
+
+        # bob (NOT the active tab): registry updated, visible line kept.
+        tui.update_target_model("bob", "openai/gpt-5")
+        assert tui._model_by_target["bob"] == "openai/gpt-5"
+        assert tui._pending_session_info[1] == "old-model"
+
+        # alice (the active tab): visible model line updated.
+        tui.update_target_model("alice", "anthropic/claude-fable-5", 200000, 160000)
+        assert tui._pending_session_info[1] == "anthropic/claude-fable-5"
+        assert tui._context_by_target["alice"] == (200000, 160000)
+
+        # Switching to bob's tab re-renders bob's model.
+        tui.refresh_model_for_tab("bob")
+        assert tui._pending_session_info[1] == "openai/gpt-5"
+
+        # Channel tabs keep whatever the panel is showing.
+        tui.refresh_model_for_tab("#chat")
+        assert tui._pending_session_info[1] == "openai/gpt-5"
+
+    def test_engine_cli_routes_slash_to_active_tab_creature(self):
+        # Regression (source pin, same style as the mid-turn-injection
+        # pins above): a slash command typed while a NON-focus creature
+        # tab is active must be injected into THAT creature's own slash
+        # pipeline. The old code wrapped it as an LLM instruction to the
+        # focus creature ("Send this to bob: /model x"), which turned a
+        # model switch into a prompt.
+        from pathlib import Path
+
+        engine_cli_py = (
+            Path(__file__).resolve().parents[2]
+            / "src"
+            / "kohakuterrarium"
+            / "terrarium"
+            / "engine_cli.py"
+        )
+        text = engine_cli_py.read_text(encoding="utf-8")
+        try_idx = text.index(
+            "try:\n        while True:\n            text = await tui.get_input()"
+        )
+        loop_block = text[try_idx : try_idx + 4000]
+        assert "target_agent = tui.agent_for_tab(active_tab)" in loop_block
+        assert "_spawn_inject(target_agent.inject_input(text" in loop_block
+
     def test_run_engine_with_tui_publishes_session_under_creature_keys(self):
         # Regression: ``run_engine_with_tui`` must publish its
         # TUISession under each routed creature's session_key BEFORE

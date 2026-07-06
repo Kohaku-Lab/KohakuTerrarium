@@ -12,6 +12,7 @@ from textual.containers import VerticalScroll
 from textual.widgets import Markdown, Static
 
 from kohakuterrarium.builtins.tui.app import IDLE_STATUS, AgentTUI, _safe_id
+from kohakuterrarium.builtins.tui.model_info import TabModelRegistryMixin
 from kohakuterrarium.builtins.tui.widgets import (
     CompactSummaryBlock,
     ConfirmModal,
@@ -51,11 +52,14 @@ CULL_KEEP = DEFAULT_CULL_KEEP  # Module-level for import by output.py
 # ────────────────────────────────────────────────────────────────
 
 
-class TUISession:
+class TUISession(TabModelRegistryMixin):
     """Shared TUI state between input and output modules.
 
     In terrarium mode, each tab (root, creature, channel) has its own
     chat scroll. Widgets are routed to the correct tab via `target`.
+    The per-tab model registry (``agent_for_tab`` / ``update_target_model``
+    / ``refresh_model_for_tab``) comes from :class:`TabModelRegistryMixin`;
+    its backing state is initialised below.
     """
 
     def __init__(
@@ -91,6 +95,18 @@ class TUISession:
         # so modal screens (Modules, etc.) can mutate state without
         # round-tripping the slash-command pipeline.
         self.host_agent: Any = None
+        # Optional resolver installed by the engine runner: tab name →
+        # live agent. Lets the F2/F3 modals and the ``/model`` slash
+        # intercept act on the ACTIVE tab's creature instead of always
+        # the host/focus agent. ``None`` (standalone TUI) falls back to
+        # ``host_agent``.
+        self.resolve_tab_agent: Any = None
+        # Per-tab model registry (terrarium mode). ``session_info``
+        # events carry the emitting creature via TUIOutput's target;
+        # the panel's ``Model:`` line must follow the ACTIVE tab, not
+        # whichever creature emitted last.
+        self._model_by_target: dict[str, str] = {}
+        self._context_by_target: dict[str, tuple[int, int]] = {}
         # Widget mutations scheduled BEFORE ``app.is_running`` flips
         # True (early-startup activities from the agent's controller
         # task). Replayed on the first ``_safe_call`` invocation that

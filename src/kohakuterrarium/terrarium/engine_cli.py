@@ -59,12 +59,18 @@ async def _handle_tui_slash(text: str, tui: "TUISession", focus: Any) -> bool:
     (stdin-contention fix), that path is gone — so the dispatch moves
     here, the runner-level loop where the engine already has the
     TUISession + focus agent in scope.
+
+    Modal-backed commands act on the ACTIVE tab's creature (resolved
+    via ``tui.agent_for_tab``), so ``/model`` on bob's tab picks a
+    model for bob — not for the launch-time focus creature.
     """
     name, args = parse_slash_command(text)
     stripped_args = (args or "").strip()
+    resolver = getattr(tui, "agent_for_tab", None)
+    target_agent = (resolver() if callable(resolver) else None) or focus
 
     if name == "model" and not stripped_args:
-        await tui.show_model_picker_modal(focus)
+        await tui.show_model_picker_modal(target_agent)
         return True
 
     if name in ("module", "modules", "mod"):
@@ -74,10 +80,10 @@ async def _handle_tui_slash(text: str, tui: "TUISession", focus: Any) -> bool:
             tokens = []
         sub = tokens[0].lower() if tokens else "list"
         if sub in ("", "list"):
-            await tui.show_modules_modal(focus)
+            await tui.show_modules_modal(target_agent)
             return True
         if sub == "edit" and len(tokens) > 1:
-            opened = await tui.show_module_edit_modal(focus, tokens[1])
+            opened = await tui.show_module_edit_modal(target_agent, tokens[1])
             if opened:
                 return True
             # Fall through if name didn't resolve — text command will
@@ -220,6 +226,19 @@ async def run_engine_with_tui(
     # ``NoneInput`` to avoid stdin contention, so engine_cli takes over.
     tui.host_agent = focus
 
+    # Per-tab agent resolution: F3 model picker, F2 modules, and the
+    # slash intercepts act on the ACTIVE tab's creature. Tab keys are
+    # creature_ids, so the engine lookup is direct; anything outside
+    # this graph (or unknown) resolves to None → host_agent fallback.
+    def _tab_agent(tab: str):
+        try:
+            creature = engine.get_creature(tab)
+        except KeyError:
+            return None
+        return creature.agent if creature.graph_id == graph_id else None
+
+    tui.resolve_tab_agent = _tab_agent
+
     # Publish this TUISession under each routed creature's session_key
     # BEFORE the creatures start. Otherwise ``TUIOutput._on_start``
     # (fired on the first ``output_router.start()``) does
@@ -257,6 +276,7 @@ async def run_engine_with_tui(
     await tui.wait_ready()
 
     _update_session_info(tui, focus, graph_id, store)
+    _seed_tab_models(tui, graph_creatures)
     _update_terrarium_panel(tui, graph_creatures, env, focus_creature_id)
     wired_channels: set[str] = set()
     _wire_new_channels(env, tui, wired_channels)
@@ -323,11 +343,19 @@ async def run_engine_with_tui(
                 await _send_to_channel_tab(tui, env, active_tab, text)
             else:
                 tui.set_active_target(active_tab)
-                _spawn_inject(
-                    focus.inject_input(
-                        f"Send this to {active_tab}: {text}", source="tui"
+                target_agent = tui.agent_for_tab(active_tab)
+                if text.startswith("/") and target_agent is not None:
+                    # Slash commands act on the active creature's OWN
+                    # command pipeline. Wrapping them as an instruction
+                    # to the focus creature ("Send this to bob: /model
+                    # x") turned a model switch into an LLM prompt.
+                    _spawn_inject(target_agent.inject_input(text, source="tui"))
+                else:
+                    _spawn_inject(
+                        focus.inject_input(
+                            f"Send this to {active_tab}: {text}", source="tui"
+                        )
                     )
-                )
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     finally:
@@ -350,12 +378,43 @@ async def run_engine_with_tui(
             agent.input = original
 
 
+def _agent_model_identifier(agent: Any) -> str:
+    """Canonical ``provider/name[@variations]`` for ``agent``, falling
+    back to the raw model id — same string the web pill and ``/model``
+    show, so every surface displays one identifier."""
+    try:
+        identifier = agent.llm_identifier()
+    except Exception:
+        identifier = ""
+    return (
+        identifier
+        or getattr(getattr(agent, "llm", None), "model", "")
+        or getattr(getattr(getattr(agent, "llm", None), "config", None), "model", "")
+        or ""
+    )
+
+
+def _seed_tab_models(tui: TUISession, graph_creatures: Iterable[Any]) -> None:
+    """Seed the TUI's per-tab model registry from live agents so every
+    tab shows ITS creature's model before any session_info event."""
+    for creature in graph_creatures:
+        agent = creature.agent
+        model = _agent_model_identifier(agent)
+        if not model:
+            continue
+        max_ctx = 0
+        compact_at = 0
+        compact_mgr = getattr(agent, "compact_manager", None)
+        if compact_mgr and compact_mgr.config.max_tokens:
+            max_ctx = compact_mgr.config.max_tokens
+            compact_at = int(max_ctx * compact_mgr.config.threshold)
+        tui.update_target_model(creature.creature_id, model, max_ctx, compact_at)
+
+
 def _update_session_info(
     tui: TUISession, focus, graph_id: str, store: SessionStore | None
 ) -> None:
-    model = getattr(focus.llm, "model", "") or getattr(
-        getattr(focus.llm, "config", None), "model", ""
-    )
+    model = _agent_model_identifier(focus)
     session_id = ""
     if store:
         try:
@@ -486,6 +545,9 @@ async def _refresh_tui_on_topology_change(
                 creature_out._default_target = creature.creature_id
                 creature.agent.output_router.default_output = creature_out
                 routed_creatures.add(creature.creature_id)
+                # New tab → seed its model line so the panel is right
+                # the first time the user switches to it.
+                _seed_tab_models(tui, [creature])
     except asyncio.CancelledError:
         return
     except Exception as exc:

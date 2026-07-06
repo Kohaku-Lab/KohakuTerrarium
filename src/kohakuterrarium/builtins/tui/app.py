@@ -261,23 +261,50 @@ class AgentTUI(App):
         self._input_queue.put_nowait("")  # empty string signals exit
         self.exit()
 
+    def _active_tab_agent(self) -> Any:
+        """Agent behind the ACTIVE tab, falling back to ``host_agent``.
+
+        Multi-creature sessions bind each tab to its own creature; the
+        F2/F3 modals must act on the creature the user is looking at,
+        not the launch-time focus agent.
+        """
+        if not self.tui_session:
+            return None
+        resolver = getattr(self.tui_session, "agent_for_tab", None)
+        if callable(resolver):
+            try:
+                agent = resolver()
+            except Exception as e:
+                logger.warning("active-tab agent resolve failed", error=str(e))
+                agent = None
+            if agent is not None:
+                return agent
+        return getattr(self.tui_session, "host_agent", None)
+
     def action_open_modules(self) -> None:
         """Push the Modules modal screen (F2 keybinding)."""
-        agent = (
-            getattr(self.tui_session, "host_agent", None) if self.tui_session else None
-        )
+        agent = self._active_tab_agent()
         if agent is None:
             return
         self.push_screen(ModulesModal(agent))
 
     def action_open_model_picker(self) -> None:
         """Push the model-picker modal (F3 keybinding)."""
-        agent = (
-            getattr(self.tui_session, "host_agent", None) if self.tui_session else None
-        )
+        agent = self._active_tab_agent()
         if agent is None:
             return
         self.push_screen(ModelPickerModal(agent))
+
+    def on_tabbed_content_tab_activated(
+        self, event: TabbedContent.TabActivated
+    ) -> None:
+        """Tab switched — re-render the session panel's model line for
+        the newly visible creature."""
+        if not self.tui_session:
+            return
+        refresh = getattr(self.tui_session, "refresh_model_for_tab", None)
+        if callable(refresh):
+            refresh(self.get_active_tab_name())
 
     # ── Thinking animation ──────────────────────────────────────
 
