@@ -135,6 +135,52 @@ class TestRender:
         Console(file=buf, color_system=None, width=80).print(render_overlay(s))
         assert "No creatures match" in buf.getvalue()
 
+    def test_render_shows_per_creature_model(self):
+        # The overlay is where per-creature models become visible in a
+        # multi-model graph — each row must carry ITS creature's model.
+        statuses = [
+            CreatureStatus(
+                creature_id="c1",
+                name="alpha",
+                state="idle",
+                activity="idle",
+                model="openai/gpt-5",
+            ),
+            CreatureStatus(
+                creature_id="c2",
+                name="beta",
+                state="idle",
+                activity="idle",
+                model="anthropic/claude-fable-5",
+            ),
+        ]
+        s = AgentOverlayState(statuses=statuses)
+        s.ensure_valid_selection()
+        buf = StringIO()
+        Console(file=buf, color_system=None, width=120).print(render_overlay(s))
+        out = buf.getvalue()
+        assert "openai/gpt-5" in out
+        assert "anthropic/claude-fable-5" in out
+
+    def test_render_truncates_long_model(self):
+        long_model = "openrouter/provider/very-long-model-name@effort=high,verbose=on"
+        statuses = [
+            CreatureStatus(
+                creature_id="c1",
+                name="alpha",
+                state="idle",
+                activity="idle",
+                model=long_model,
+            )
+        ]
+        s = AgentOverlayState(statuses=statuses)
+        s.ensure_valid_selection()
+        buf = StringIO()
+        Console(file=buf, color_system=None, width=200).print(render_overlay(s))
+        out = buf.getvalue()
+        assert long_model not in out
+        assert long_model[:20] in out
+
 
 class TestAgentOverlayLifecycle:
     def test_open_close_toggles_visible(self):

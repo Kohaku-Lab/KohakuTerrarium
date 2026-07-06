@@ -50,6 +50,11 @@ class CreatureStatus:
     # ``LiveRegionState.unread_since_focus``; default 0 keeps the
     # field optional for callers that don't track unread.
     unread: int = 0
+    # Canonical ``provider/name[@variations]`` for the creature's LLM
+    # (best-effort; "" when unresolvable). Shown in the Ctrl+A agent
+    # overlay so per-creature models are visible without focusing
+    # each creature one by one.
+    model: str = ""
 
 
 # Priority order for the roster compression algorithm — lower number
@@ -83,6 +88,25 @@ def _format_duration(seconds: int) -> str:
         m = (seconds % 3600) // 60
         return f"{h}h {m}m" if m else f"{h}h"
     return f"{seconds // 86400}d"
+
+
+def _model_identifier(agent: Any) -> str:
+    """Canonical ``provider/name[@variations]`` for ``agent``'s LLM.
+
+    Best-effort and cheap: ``llm_identifier`` caches after first
+    resolution, and the raw model id is the fallback.
+    """
+    if agent is None:
+        return ""
+    ident = getattr(agent, "llm_identifier", None)
+    if callable(ident):
+        try:
+            value = ident()
+        except Exception:
+            value = ""
+        if value:
+            return value
+    return getattr(getattr(agent, "llm", None), "model", "") or ""
 
 
 def _is_processing(agent: Any) -> bool:
@@ -164,6 +188,7 @@ def derive_status(creature: Any, now: float | None = None) -> CreatureStatus:
     now = now if now is not None else time.time()
     cid = getattr(creature, "creature_id", "") or ""
     name = getattr(creature, "name", "") or cid or "creature"
+    model = _model_identifier(getattr(creature, "agent", None))
 
     if not getattr(creature, "is_running", False):
         last = _last_event_time(getattr(creature, "agent", None))
@@ -176,6 +201,7 @@ def derive_status(creature: Any, now: float | None = None) -> CreatureStatus:
                 f"stopped {_format_duration(duration)} ago" if duration else "stopped"
             ),
             duration_seconds=duration,
+            model=model,
         )
 
     agent = getattr(creature, "agent", None)
@@ -188,6 +214,7 @@ def derive_status(creature: Any, now: float | None = None) -> CreatureStatus:
             name=name,
             state="failed",
             activity=_truncate(getattr(creature, "_last_turn_error", "failed")),
+            model=model,
         )
 
     replies = _pending_replies(agent)
@@ -197,6 +224,7 @@ def derive_status(creature: Any, now: float | None = None) -> CreatureStatus:
             name=name,
             state="waiting",
             activity=_pending_reply_summary(replies),
+            model=model,
         )
 
     if _is_processing(agent):
@@ -207,7 +235,7 @@ def derive_status(creature: Any, now: float | None = None) -> CreatureStatus:
                 f"Generating response ({tokens}t)" if tokens else "Generating response"
             )
         return CreatureStatus(
-            creature_id=cid, name=name, state="working", activity=summary
+            creature_id=cid, name=name, state="working", activity=summary, model=model
         )
 
     last = _last_event_time(agent)
@@ -219,6 +247,7 @@ def derive_status(creature: Any, now: float | None = None) -> CreatureStatus:
         state="idle",
         activity=activity,
         duration_seconds=duration,
+        model=model,
     )
 
 

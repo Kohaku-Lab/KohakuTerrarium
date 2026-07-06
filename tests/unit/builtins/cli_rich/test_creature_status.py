@@ -146,3 +146,38 @@ class TestActivityTruncation:
         # _ACTIVITY_MAX is 40; truncation appends "…"
         assert len(s.activity) <= 50
         assert s.activity.endswith("…")
+
+
+class TestModelField:
+    def test_model_from_llm_identifier(self):
+        c = _fake_creature()
+        c.agent.llm_identifier = lambda: "openai/gpt-5@effort=high"
+        s = derive_status(c)
+        assert s.model == "openai/gpt-5@effort=high"
+
+    def test_model_falls_back_to_raw_id(self):
+        c = _fake_creature()
+        c.agent.llm = SimpleNamespace(model="gpt-4o")
+        s = derive_status(c)
+        assert s.model == "gpt-4o"
+
+    def test_model_empty_when_unresolvable(self):
+        s = derive_status(_fake_creature())
+        assert s.model == ""
+
+    def test_identifier_error_falls_back(self):
+        def _boom():
+            raise RuntimeError("no profile")
+
+        c = _fake_creature()
+        c.agent.llm_identifier = _boom
+        c.agent.llm = SimpleNamespace(model="gpt-4o")
+        s = derive_status(c)
+        assert s.model == "gpt-4o"
+
+    def test_stopped_creature_still_reports_model(self):
+        c = _fake_creature(is_running=False)
+        c.agent.llm_identifier = lambda: "openai/gpt-5"
+        s = derive_status(c, now=100.0)
+        assert s.state == "stopped"
+        assert s.model == "openai/gpt-5"
