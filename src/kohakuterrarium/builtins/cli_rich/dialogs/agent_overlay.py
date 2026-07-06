@@ -183,6 +183,13 @@ def _row_text(status: CreatureStatus, is_selected: bool) -> Text:
     out = Text(f" {marker} ")
     out.append(_GLYPH[status.state], style=_GROUP_STYLE[status.state])
     out.append(f"  {status.name:<16}", style="bold" if is_selected else "")
+    model = getattr(status, "model", "")
+    if model:
+        # Per-creature model — the whole point of the overlay in a
+        # multi-model graph. Truncated so long variation selectors
+        # don't push the activity column off-screen.
+        shown = model if len(model) <= 32 else model[:31] + "…"
+        out.append(f"  {shown}", style="cyan")
     out.append(f"  {status.activity}", style="dim")
     return out
 
