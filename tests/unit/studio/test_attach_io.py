@@ -509,6 +509,44 @@ class TestAttachIoLocal:
         finally:
             await t.shutdown()
 
+    async def test_attach_sends_session_info_per_creature(self):
+        # The frontend keys its per-tab model map off ``source`` — every
+        # graph member must get its own session_info frame at attach,
+        # not just the bound creature. (The old single-frame behaviour
+        # left sibling tabs showing the primary creature's model until
+        # that sibling's next model switch.)
+        t = await (
+            TestTerrariumBuilder().with_creature("alice").with_creature("bob").build()
+        )
+        svc = LocalTerrariumService(t)
+        try:
+            for cid in ("alice", "bob"):
+                ag = t.get_creature(cid).agent
+                ag.output_router = SimpleNamespace(
+                    add_secondary=lambda x: None,
+                    remove_secondary=lambda x: None,
+                    submit_reply_with_status=lambda r: (True, "ok"),
+                )
+            gid = t.get_creature("alice").graph_id
+            ws = _FakeWebSocket()
+            with pytest.raises(RuntimeError):
+                await io_mod.attach_io(ws, svc, gid, "alice")
+            infos = {
+                s["source"]: s
+                for s in ws.sent
+                if s.get("activity_type") == "session_info"
+            }
+            assert set(infos) == {"alice", "bob"}
+            # Frames mirror the switch_model metadata shape so the
+            # frontend per-tab map gets identical fields either way.
+            for frame in infos.values():
+                assert "llm_name" in frame
+                assert "model" in frame
+                assert "max_context" in frame
+                assert "compact_threshold" in frame
+        finally:
+            await t.shutdown()
+
     async def test_cleanup_swallows_secondary_removal_failures(self):
         # On disconnect, attach_io detaches its output sinks + channel
         # callbacks. If remove_secondary / remove_on_send raise, those

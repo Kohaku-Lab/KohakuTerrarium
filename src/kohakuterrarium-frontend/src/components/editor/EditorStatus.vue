@@ -113,14 +113,14 @@ const totalUsage = computed(() => {
   return { prompt, completion, cached, lastPrompt }
 })
 
-const maxContext = computed(() => chat.sessionInfo.maxContext || props.instance?.max_context || 0)
+const maxContext = computed(() => chat.activeModelInfo.maxContext || props.instance?.max_context || 0)
 
 const contextPct = computed(() => {
   if (!maxContext.value || !totalUsage.value.lastPrompt) return 0
   return Math.round((totalUsage.value.lastPrompt / maxContext.value) * 100)
 })
 
-const compactThreshold = computed(() => chat.sessionInfo.compactThreshold || 0)
+const compactThreshold = computed(() => chat.activeModelInfo.compactThreshold || 0)
 const compactPct = computed(() => {
   if (!maxContext.value || !compactThreshold.value) return 0
   return Math.min(100, Math.round((compactThreshold.value / maxContext.value) * 100))
