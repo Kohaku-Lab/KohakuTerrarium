@@ -7,6 +7,7 @@ defined here; nothing in this module touches FastAPI's routing
 decorators, so the helpers are reusable from non-HTTP entry points.
 """
 
+import os
 import shutil
 import sys
 from datetime import datetime, timezone
@@ -76,12 +77,31 @@ _SKIP_NAMES: set[str] = {
 }
 
 
+# Workspace root — all file operations are restricted to this directory.
+# Defaults to the current working directory; override via KT_WORKSPACE_ROOT env var.
+WORKSPACE_ROOT: Path = Path(os.environ.get("KT_WORKSPACE_ROOT", str(Path.cwd()))).resolve()
+
+
 def _validate_path(path_str: str) -> Path:
-    """Validate and resolve a file path."""
+    """Validate and resolve a file path, restricting to the workspace root."""
     try:
-        return Path(path_str).resolve()
+        resolved = Path(path_str).resolve()
     except (ValueError, OSError) as e:
         raise HTTPException(400, f"Invalid path: {e}")
+    if not _is_relative_to(resolved, WORKSPACE_ROOT):
+        raise HTTPException(
+            403, f"Path is outside the workspace root: {path_str}"
+        )
+    return resolved
+
+
+def _is_relative_to(path: Path, base: Path) -> bool:
+    """Check whether *path* is inside *base* (both must be resolved)."""
+    try:
+        path.relative_to(base)
+        return True
+    except ValueError:
+        return False
 
 
 def _list_browse_roots() -> list[Path]:
