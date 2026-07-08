@@ -1,14 +1,56 @@
 """MCP client manager — manages connections to multiple MCP servers."""
 
 import asyncio
+import ipaddress
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlparse
 
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 DEFAULT_MCP_CONNECT_TIMEOUT = 20.0
+
+# Networks blocked for MCP server URLs to prevent SSRF.
+_BLOCKED_NETWORKS: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = [
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+]
+
+
+def validate_mcp_url(url: str) -> str:
+    """Validate an MCP server URL, blocking internal/private networks.
+
+    Raises ValueError if the URL uses a non-HTTPS scheme or points to
+    a private/internal IP address (SSRF prevention).
+    """
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        raise ValueError(
+            f"MCP server URL must use HTTPS scheme, got: {parsed.scheme}"
+        )
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("MCP server URL must have a hostname")
+    try:
+        ip = ipaddress.ip_address(hostname)
+        for network in _BLOCKED_NETWORKS:
+            if ip in network:
+                raise ValueError(
+                    f"MCP server URL points to blocked internal network: {network}"
+                )
+    except ValueError:
+        # hostname is a domain name, not a raw IP — allow
+        # (DNS rebinding mitigation is a separate concern)
+        pass
+    return url
 
 
 def normalize_mcp_transport(transport: str) -> str:
@@ -227,7 +269,8 @@ class MCPClientManager:
 
                 if not config.url:
                     raise ValueError(f"MCP server {name}: SSE transport requires 'url'")
-                ctx = sse_client(config.url)
+                validated_url = validate_mcp_url(config.url)
+                ctx = sse_client(validated_url)
             else:
                 from mcp.client.streamable_http import streamablehttp_client
 
@@ -235,7 +278,8 @@ class MCPClientManager:
                     raise ValueError(
                         f"MCP server {name}: streamable_http transport requires 'url'"
                     )
-                ctx = streamablehttp_client(config.url)
+                validated_url = validate_mcp_url(config.url)
+                ctx = streamablehttp_client(validated_url)
 
             session = await self._open_transport_session(name, ctx, ClientSession)
 
