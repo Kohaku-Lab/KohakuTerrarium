@@ -159,14 +159,14 @@ def load_profiles() -> dict[tuple[str, str], LLMProfile]:
 # ``(provider_name, preferred_bare_preset_name)``; the bare name
 # reflects the new naming — no ``-api`` / ``-or`` suffixes.
 _PROVIDER_DEFAULT_MODELS: list[tuple[str, str]] = [
-    ("codex", "gpt-5.4"),
-    ("openrouter", "mimo-v2-pro"),
-    ("anthropic", "claude-opus-4.7"),
-    ("openai", "gpt-5.4"),
+    ("codex", "gpt-5.5"),
+    ("openrouter", "mimo-v2.5-pro"),
+    ("anthropic", "claude-opus-4.8"),
+    ("openai", "gpt-5.5"),
     ("gemini", "gemini-3.1-pro"),
-    ("mimo", "mimo-v2-pro"),
+    ("mimo", "mimo-v2.5-pro"),
     ("kimi-code", "kimi-for-coding"),
-    ("glm-coding", "glm-5.1"),
+    ("glm-coding", "glm-5.2"),
 ]
 
 

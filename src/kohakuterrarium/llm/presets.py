@@ -12,25 +12,53 @@ fast mode, thinking level, …) without duplicating the entry. Selection is
 ``preset_name@group=option,group2=option2``. Patches target one of:
 ``temperature``, ``reasoning_effort``, ``service_tier``, ``max_context``,
 ``max_output``, ``extra_body``. Variation values were researched against
-the relevant provider docs (effective 2026-04-20) — see the per-provider
+the relevant provider docs (effective 2026-07-09) — see the per-provider
 notes inline below.
 
 Naming convention (post-2026-04 refactor):
     - The **direct / native-API** variant is the primary name
-      (``claude-opus-4.7``, ``gemini-3.1-pro``, ``mimo-v2-pro``).
+      (``claude-opus-4.8``, ``gemini-3.1-pro``, ``mimo-v2.5-pro``).
     - The **OpenRouter-routed** variant uses the ``-or`` suffix
-      (``claude-opus-4.7-or``).
-    - OpenAI is an exception: the primary ``gpt-5.4`` stays bound to
+      (``claude-opus-4.8-or``).
+    - OpenAI is an exception: the primary ``gpt-5.5`` stays bound to
       the **codex OAuth** provider (ChatGPT-subscription path — the
       headline feature); the direct OpenAI API variant uses ``-api``,
       and OpenRouter uses ``-or``.
     - Legacy names (``claude-opus-4.6-direct``, ``or-gpt-5.4``, …) are
       preserved via ``ALIASES`` at the bottom of this file.
+
+NOTE on ``max_context``: values are the *operating point we choose*, not
+always the vendor-advertised maximum. Notable deliberate caps:
+    - ``gpt-5.5``: 272K usable input (128K output) — the ~1M figure some
+      aggregators list is not the real input capacity.
+    - ``gpt-5.4``: advertises 1M but degrades hard at long context; we
+      cap it at the 400K sweet spot.
 """
 
 from typing import Any
 
 from kohakuterrarium.llm.preset_aliases import _CANONICAL_NAMES, ALIASES
+from kohakuterrarium.llm.preset_groups import (
+    _ANTHROPIC_EFFORT_46_GROUP,
+    _ANTHROPIC_EFFORT_47_GROUP,
+    _CODEX_REASONING_GROUP,
+    _CODEX_SPEED_GROUP,
+    _GEMINI_THINKING_GROUP,
+    _GEMINI_THINKING_GROUP_WITH_MINIMAL,
+    _GEMINI_THINKING_LITE_GROUP,
+    _GLM_EFFORT_GROUP,
+    _GPT56_LUNA_REASONING_GROUP,
+    _GPT56_REASONING_GROUP,
+    _GROK_EFFORT_GROUP,
+    _MIMO_THINKING_GROUP,
+    _MISTRAL_REASONING_GROUP,
+    _OPENAI_56_REASONING_GROUP,
+    _OPENAI_REASONING_GROUP,
+    _OR_REASONING_GROUP,
+    _OR_REASONING_GROUP_56,
+    _OR_REASONING_GROUP_WITH_XHIGH,
+    _OR_REASONING_TOGGLE_GROUP,
+)
 from kohakuterrarium.packages.walk import list_packages
 from kohakuterrarium.utils.logging import get_logger
 
@@ -44,117 +72,57 @@ __all__ = [
 
 logger = get_logger(__name__)
 
-# ── Reusable variation blocks ────────────────────────────────────
-# Declaring the canonical shapes once avoids copy-paste drift. Each block
-# is inlined into the presets below via ``**`` splat or nested lookup.
-
-# Codex OAuth (ChatGPT-subscription): top-level ``reasoning_effort`` field.
-# GPT-5.4 docs: effort = ``none | low | medium | high | xhigh`` (no
-# ``minimal`` — that's OpenRouter-only terminology; and no ``max`` — that's
-# Anthropic-only).
-_CODEX_REASONING_GROUP: dict[str, dict[str, Any]] = {
-    "none": {"reasoning_effort": "none"},
-    "low": {"reasoning_effort": "low"},
-    "medium": {"reasoning_effort": "medium"},
-    "high": {"reasoning_effort": "high"},
-    "xhigh": {"reasoning_effort": "xhigh"},
-}
-
-# Codex "fast mode" on GPT-5.4.
-#
-# The API accepts ``service_tier="priority"`` (Priority processing — the only
-# valid non-default tier values are ``priority`` and ``default``). The Codex
-# CLI's own ``config.toml`` uses a separate ``[features].fast_mode = true``
-# flag + ``service_tier = "fast"`` literal that the CLI translates into the
-# API-level priority header — the literal ``"fast"`` value is NOT accepted
-# by the OpenAI API itself (observed: 400 ``Unsupported service_tier: fast``).
-_CODEX_SPEED_GROUP: dict[str, dict[str, Any]] = {
-    "normal": {},
-    "fast": {"service_tier": "priority"},
-}
-
-# OpenAI direct API reasoning: extra_body.reasoning.effort. Full scale per the
-# 2026-04 GPT-5.4 docs: ``none | low | medium | high | xhigh``. OpenAI's docs
-# use ``none`` (not ``minimal`` — ``minimal`` is OpenRouter's unified name).
-_OPENAI_REASONING_GROUP: dict[str, dict[str, Any]] = {
-    "none": {"extra_body.reasoning.effort": "none"},
-    "low": {"extra_body.reasoning.effort": "low"},
-    "medium": {"extra_body.reasoning.effort": "medium"},
-    "high": {"extra_body.reasoning.effort": "high"},
-    "xhigh": {"extra_body.reasoning.effort": "xhigh"},
-}
-
-# OpenRouter unified reasoning. ``xhigh`` is only accepted by Claude Opus 4.7+,
-# GPT-5.x, and a handful of recent models — most models silently clamp to
-# ``high``. Including it in the common block is fine: per-model behavior is
-# the user's concern.
-_OR_REASONING_GROUP: dict[str, dict[str, Any]] = {
-    "minimal": {"extra_body.reasoning.effort": "minimal"},
-    "low": {"extra_body.reasoning.effort": "low"},
-    "medium": {"extra_body.reasoning.effort": "medium"},
-    "high": {"extra_body.reasoning.effort": "high"},
-}
-
-# Same as above plus xhigh, for the models that actually honor it.
-_OR_REASONING_GROUP_WITH_XHIGH: dict[str, dict[str, Any]] = {
-    **_OR_REASONING_GROUP,
-    "xhigh": {"extra_body.reasoning.effort": "xhigh"},
-}
-
-# Anthropic direct (native Anthropic-compatible Messages API).
-#
-# The built-in ``anthropic`` provider uses ``backend_type=anthropic`` and the
-# official ``anthropic`` SDK. Claude-specific request fields such as
-# ``thinking`` and ``output_config`` are passed through from ``extra_body``.
-# Availability by model:
-#   - Opus 4.6 / Sonnet 4.6:   low / medium / high / max
-#   - Opus 4.7 (2026-04-16):   low / medium / high / xhigh / max
-# Fast mode may require provider beta headers and is not enabled by default.
-_ANTHROPIC_EFFORT_46_GROUP: dict[str, dict[str, Any]] = {
-    "low": {"extra_body.output_config.effort": "low"},
-    "medium": {"extra_body.output_config.effort": "medium"},
-    "high": {"extra_body.output_config.effort": "high"},
-    "max": {"extra_body.output_config.effort": "max"},
-}
-
-_ANTHROPIC_EFFORT_47_GROUP: dict[str, dict[str, Any]] = {
-    "low": {"extra_body.output_config.effort": "low"},
-    "medium": {"extra_body.output_config.effort": "medium"},
-    "high": {"extra_body.output_config.effort": "high"},
-    "xhigh": {"extra_body.output_config.effort": "xhigh"},
-    "max": {"extra_body.output_config.effort": "max"},
-}
-
-# Gemini direct ``thinking_level``.
-#   Gemini 3.1 Pro:         LOW / MEDIUM / HIGH
-#   Gemini 3 Flash:         MINIMAL / LOW / MEDIUM / HIGH
-#   Gemini 3.1 Flash-Lite:  MINIMAL / LOW / MEDIUM / HIGH
-# (All per the 2026-04 Google AI for Developers docs.)
-_GEMINI_THINKING_GROUP: dict[str, dict[str, Any]] = {
-    "low": {"extra_body.google.thinking_config.thinking_level": "LOW"},
-    "medium": {"extra_body.google.thinking_config.thinking_level": "MEDIUM"},
-    "high": {"extra_body.google.thinking_config.thinking_level": "HIGH"},
-}
-
-_GEMINI_THINKING_GROUP_WITH_MINIMAL: dict[str, dict[str, Any]] = {
-    "minimal": {"extra_body.google.thinking_config.thinking_level": "MINIMAL"},
-    **_GEMINI_THINKING_GROUP,
-}
-
-
 # ── Built-in Presets ──────────────────────────────────────────
 
 PRESETS: dict[str, dict[str, Any]] = {
     # ═══════════════════════════════════════════════════════
     #  OpenAI via Codex OAuth (ChatGPT subscription auth)
     #  reasoning_effort is a top-level field consumed directly
-    #  by CodexOAuthProvider. GPT-5.4 additionally supports
-    #  fast mode via ``service_tier="fast"`` (ChatGPT-sub only).
+    #  by CodexOAuthProvider. GPT-5.4/5.5 additionally support
+    #  fast mode (priority tier). The Codex/GPT lines merged at
+    #  5.4 — there is no separate ``-codex`` model anymore.
     # ═══════════════════════════════════════════════════════
+    "gpt-5.6-sol": {
+        "provider": "codex",
+        "model": "gpt-5.6-sol",
+        "max_context": 372000,
+        "max_output": 128000,
+        "reasoning_effort": "xhigh",
+        "variation_groups": {
+            "reasoning": _GPT56_REASONING_GROUP,
+            "speed": _CODEX_SPEED_GROUP,
+        },
+    },
+    "gpt-5.6-terra": {
+        "provider": "codex",
+        "model": "gpt-5.6-terra",
+        "max_context": 372000,
+        "max_output": 128000,
+        "reasoning_effort": "xhigh",
+        "variation_groups": {
+            "reasoning": _GPT56_REASONING_GROUP,
+            "speed": _CODEX_SPEED_GROUP,
+        },
+    },
+    "gpt-5.6-luna": {
+        "provider": "codex",
+        "model": "gpt-5.6-luna",
+        "max_context": 372000,
+        "max_output": 128000,
+        "reasoning_effort": "xhigh",
+        "variation_groups": {
+            # Luna has no ``ultra`` level (catalog-verified).
+            "reasoning": _GPT56_LUNA_REASONING_GROUP,
+            "speed": _CODEX_SPEED_GROUP,
+        },
+    },
     "gpt-5.5": {
         "provider": "codex",
         "model": "gpt-5.5",
+        # Real usable input is 272K (output 128K); ignore the ~1M figure
+        # some aggregators list.
         "max_context": 272000,
+        "max_output": 128000,
         "reasoning_effort": "xhigh",
         "variation_groups": {
             "reasoning": _CODEX_REASONING_GROUP,
@@ -164,95 +132,131 @@ PRESETS: dict[str, dict[str, Any]] = {
     "gpt-5.4": {
         "provider": "codex",
         "model": "gpt-5.4",
+        # Advertised 1M, but long-context quality falls off a cliff —
+        # deliberately capped at the 400K sweet spot.
         "max_context": 400000,
+        "max_output": 128000,
         "reasoning_effort": "xhigh",
         "variation_groups": {
             "reasoning": _CODEX_REASONING_GROUP,
             "speed": _CODEX_SPEED_GROUP,
         },
     },
-    "gpt-5.3-codex": {
+    "gpt-5.4-mini": {
         "provider": "codex",
-        "model": "gpt-5.3-codex",
+        "model": "gpt-5.4-mini",
         "max_context": 400000,
-        "reasoning_effort": "xhigh",
+        "max_output": 128000,
+        "reasoning_effort": "high",
+        # Fast mode is documented for gpt-5.5 / gpt-5.4 only.
         "variation_groups": {"reasoning": _CODEX_REASONING_GROUP},
-    },
-    "gpt-5.1": {
-        "provider": "codex",
-        "model": "gpt-5.1",
-        "max_context": 400000,
-        "reasoning_effort": "xhigh",
-        "variation_groups": {"reasoning": _CODEX_REASONING_GROUP},
-    },
-    "gpt-4o-codex": {
-        "provider": "codex",
-        "model": "gpt-4o",
-        "max_context": 128000,
-        # gpt-4o is not a reasoning model.
-    },
-    "gpt-4o-mini-codex": {
-        "provider": "codex",
-        "model": "gpt-4o-mini",
-        "max_context": 128000,
     },
     # ═══════════════════════════════════════════════════════
     #  OpenAI Direct API (-api suffix, api-key auth).
-    #  reasoning.effort = minimal | low | medium | high | xhigh
+    #  5.6 family: reasoning.effort = none…xhigh | max (no ultra)
+    #  5.4/5.5:    reasoning.effort = none…xhigh
     # ═══════════════════════════════════════════════════════
+    # GPT-5.6 (Sol/Terra/Luna): API context is 1.05M per the OpenAI model
+    # pages (the 372K on the codex presets is the Codex-app operating
+    # point, not the API limit). All three: 128K output, priority/flex
+    # service tiers, limited preview (approved orgs) as of 2026-07-10.
+    "gpt-5.6-sol-api": {
+        "provider": "openai",
+        "model": "gpt-5.6-sol",
+        "max_context": 1050000,
+        "max_output": 128000,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "variation_groups": {"reasoning": _OPENAI_56_REASONING_GROUP},
+    },
+    "gpt-5.6-terra-api": {
+        "provider": "openai",
+        "model": "gpt-5.6-terra",
+        "max_context": 1050000,
+        "max_output": 128000,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "variation_groups": {"reasoning": _OPENAI_56_REASONING_GROUP},
+    },
+    "gpt-5.6-luna-api": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "max_context": 1050000,
+        "max_output": 128000,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "variation_groups": {"reasoning": _OPENAI_56_REASONING_GROUP},
+    },
+    "gpt-5.5-api": {
+        "provider": "openai",
+        "model": "gpt-5.5",
+        "max_context": 272000,
+        "max_output": 128000,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "variation_groups": {"reasoning": _OPENAI_REASONING_GROUP},
+    },
     "gpt-5.4-api": {
         "provider": "openai",
         "model": "gpt-5.4",
-        "max_context": 272000,
+        "max_context": 400000,
+        "max_output": 128000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
         "variation_groups": {"reasoning": _OPENAI_REASONING_GROUP},
     },
     "gpt-5.4-mini-api": {
         "provider": "openai",
         "model": "gpt-5.4-mini",
-        "max_context": 272000,
+        "max_context": 400000,
+        "max_output": 128000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
         "variation_groups": {"reasoning": _OPENAI_REASONING_GROUP},
     },
     "gpt-5.4-nano-api": {
         "provider": "openai",
         "model": "gpt-5.4-nano",
-        "max_context": 272000,
+        "max_context": 400000,
+        "max_output": 128000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
         "variation_groups": {"reasoning": _OPENAI_REASONING_GROUP},
-    },
-    "gpt-5.3-codex-api": {
-        "provider": "openai",
-        "model": "gpt-5.3-codex",
-        "max_context": 272000,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OPENAI_REASONING_GROUP},
-    },
-    "gpt-5.1-api": {
-        "provider": "openai",
-        "model": "gpt-5.1",
-        "max_context": 272000,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OPENAI_REASONING_GROUP},
-    },
-    "gpt-4o-api": {
-        "provider": "openai",
-        "model": "gpt-4o",
-        "max_context": 128000,
-    },
-    "gpt-4o-mini-api": {
-        "provider": "openai",
-        "model": "gpt-4o-mini",
-        "max_context": 128000,
     },
     # ═══════════════════════════════════════════════════════
     #  OpenAI via OpenRouter (-or suffix).
-    #  Uses OR context windows, not Codex's.
+    #  Same deliberate context caps as the direct variants.
     # ═══════════════════════════════════════════════════════
+    "gpt-5.6-sol-or": {
+        "provider": "openrouter",
+        "model": "openai/gpt-5.6-sol",
+        "max_context": 1050000,
+        "max_output": 128000,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_56},
+    },
+    "gpt-5.6-terra-or": {
+        "provider": "openrouter",
+        "model": "openai/gpt-5.6-terra",
+        "max_context": 1050000,
+        "max_output": 128000,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_56},
+    },
+    "gpt-5.6-luna-or": {
+        "provider": "openrouter",
+        "model": "openai/gpt-5.6-luna",
+        "max_context": 1050000,
+        "max_output": 128000,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_56},
+    },
+    "gpt-5.5-or": {
+        "provider": "openrouter",
+        "model": "openai/gpt-5.5",
+        "max_context": 272000,
+        "max_output": 128000,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_WITH_XHIGH},
+    },
     "gpt-5.4-or": {
         "provider": "openrouter",
         "model": "openai/gpt-5.4",
-        "max_context": 1050000,
+        "max_context": 400000,
+        "max_output": 128000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
         "variation_groups": {"reasoning": _OR_REASONING_GROUP_WITH_XHIGH},
     },
@@ -260,6 +264,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "provider": "openrouter",
         "model": "openai/gpt-5.4-mini",
         "max_context": 400000,
+        "max_output": 128000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
         "variation_groups": {"reasoning": _OR_REASONING_GROUP_WITH_XHIGH},
     },
@@ -267,50 +272,54 @@ PRESETS: dict[str, dict[str, Any]] = {
         "provider": "openrouter",
         "model": "openai/gpt-5.4-nano",
         "max_context": 400000,
+        "max_output": 128000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
         "variation_groups": {"reasoning": _OR_REASONING_GROUP_WITH_XHIGH},
-    },
-    "gpt-5.3-codex-or": {
-        "provider": "openrouter",
-        "model": "openai/gpt-5.3-codex",
-        "max_context": 400000,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP_WITH_XHIGH},
-    },
-    "gpt-5.1-or": {
-        "provider": "openrouter",
-        "model": "openai/gpt-5.1",
-        "max_context": 400000,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP_WITH_XHIGH},
-    },
-    "gpt-4o-or": {
-        "provider": "openrouter",
-        "model": "openai/gpt-4o",
-        "max_context": 128000,
-    },
-    "gpt-4o-mini-or": {
-        "provider": "openrouter",
-        "model": "openai/gpt-4o-mini",
-        "max_context": 128000,
     },
     # ═══════════════════════════════════════════════════════
     #  Anthropic Claude Direct API (primary — non-OpenAI format,
     #  requires the dedicated ``anthropic`` backend_type client).
     #
-    #  Adaptive thinking is the recommended mode for 4.6+ models:
-    #    Opus 4.7:  effort = low / medium / high / xhigh / max
-    #    Opus 4.6:  effort = low / medium / high / max
-    #    Sonnet 4.6: effort = low / medium / high / max
-    #  Fast mode is Opus-only (speed=fast + betas header).
+    #  Adaptive thinking is the only thinking mode on 4.7+:
+    #    Fable 5:    thinking always on; effort low…xhigh/max
+    #    Opus 4.7/4.8, Sonnet 5: adaptive; effort low…xhigh/max
+    #    Opus 4.6 / Sonnet 4.6:  adaptive; effort low…high/max
+    #  ``thinking.display`` defaults to "omitted" on Fable 5 /
+    #  Opus 4.7/4.8 / Sonnet 5 — we opt in to "summarized" so the
+    #  UI can show the reasoning trace.
     # ═══════════════════════════════════════════════════════
+    "claude-fable-5": {
+        "provider": "anthropic",
+        "model": "claude-fable-5",
+        "max_context": 1000000,
+        # Thinking is always on for Fable 5 (explicit ``adaptive`` is
+        # accepted; ``disabled`` is rejected with a 400). The raw chain of
+        # thought is never returned — "summarized" is the visible option.
+        # NOTE: requires 30-day data retention on the org (no ZDR).
+        "extra_body": {
+            "thinking": {"type": "adaptive", "display": "summarized"},
+            "output_config": {"effort": "high"},
+        },
+        "variation_groups": {"reasoning": _ANTHROPIC_EFFORT_47_GROUP},
+    },
+    "claude-opus-4.8": {
+        "provider": "anthropic",
+        "model": "claude-opus-4-8",
+        "max_context": 1000000,
+        # 4.8 guidance: start at ``high`` and sweep — reflexive xhigh is
+        # no longer the best default (higher ceiling than 4.7).
+        "extra_body": {
+            "thinking": {"type": "adaptive", "display": "summarized"},
+            "output_config": {"effort": "high"},
+        },
+        "variation_groups": {"reasoning": _ANTHROPIC_EFFORT_47_GROUP},
+    },
     "claude-opus-4.7": {
         "provider": "anthropic",
         "model": "claude-opus-4-7",
         "max_context": 1000000,
-        # Opus 4.7 defaults ``thinking.display`` to ``"omitted"`` — we explicitly
-        # opt in to summarized thinking so the UI can show the reasoning trace.
-        # Fast mode may require provider beta headers and is not enabled by default.
+        # Opus 4.7 defaults ``thinking.display`` to ``"omitted"`` — we
+        # explicitly opt in to summarized thinking for the UI trace.
         "extra_body": {
             "thinking": {"type": "adaptive", "display": "summarized"},
             "output_config": {"effort": "xhigh"},
@@ -326,6 +335,19 @@ PRESETS: dict[str, dict[str, Any]] = {
             "output_config": {"effort": "high"},
         },
         "variation_groups": {"reasoning": _ANTHROPIC_EFFORT_46_GROUP},
+    },
+    "claude-sonnet-5": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-5",
+        "max_context": 1000000,
+        # Sonnet 5 runs adaptive thinking even when the field is omitted;
+        # we keep it explicit + summarized for a visible trace. Full effort
+        # scale incl. xhigh (first Sonnet with it).
+        "extra_body": {
+            "thinking": {"type": "adaptive", "display": "summarized"},
+            "output_config": {"effort": "high"},
+        },
+        "variation_groups": {"reasoning": _ANTHROPIC_EFFORT_47_GROUP},
     },
     "claude-sonnet-4.6": {
         "provider": "anthropic",
@@ -347,8 +369,29 @@ PRESETS: dict[str, dict[str, Any]] = {
     # ═══════════════════════════════════════════════════════
     #  Anthropic Claude via OpenRouter (-or suffix).
     #  OR normalizes reasoning knobs via its unified param.
-    #  xhigh is only honored by Opus 4.7.
+    #  xhigh is honored by Fable 5 / Opus 4.7+ / Sonnet 5.
     # ═══════════════════════════════════════════════════════
+    "claude-fable-5-or": {
+        "provider": "openrouter",
+        "model": "anthropic/claude-fable-5",
+        "max_context": 1000000,
+        "max_output": 128000,
+        "extra_body": {
+            "reasoning": {"enabled": True, "effort": "high"},
+            "cache_control": {"type": "ephemeral"},
+        },
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_WITH_XHIGH},
+    },
+    "claude-opus-4.8-or": {
+        "provider": "openrouter",
+        "model": "anthropic/claude-opus-4.8",
+        "max_context": 1000000,
+        "extra_body": {
+            "reasoning": {"enabled": True, "effort": "high"},
+            "cache_control": {"type": "ephemeral"},
+        },
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_WITH_XHIGH},
+    },
     "claude-opus-4.7-or": {
         "provider": "openrouter",
         "model": "anthropic/claude-opus-4.7",
@@ -369,19 +412,19 @@ PRESETS: dict[str, dict[str, Any]] = {
         },
         "variation_groups": {"reasoning": _OR_REASONING_GROUP},
     },
-    "claude-sonnet-4.6-or": {
+    "claude-sonnet-5-or": {
         "provider": "openrouter",
-        "model": "anthropic/claude-sonnet-4.6",
+        "model": "anthropic/claude-sonnet-5",
         "max_context": 1000000,
         "extra_body": {
             "reasoning": {"enabled": True, "effort": "high"},
             "cache_control": {"type": "ephemeral"},
         },
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_WITH_XHIGH},
     },
-    "claude-sonnet-4.5-or": {
+    "claude-sonnet-4.6-or": {
         "provider": "openrouter",
-        "model": "anthropic/claude-sonnet-4.5",
+        "model": "anthropic/claude-sonnet-4.6",
         "max_context": 1000000,
         "extra_body": {
             "reasoning": {"enabled": True, "effort": "high"},
@@ -393,6 +436,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "provider": "openrouter",
         "model": "anthropic/claude-haiku-4.5",
         "max_context": 200000,
+        "max_output": 64000,
         "extra_body": {
             "cache_control": {"type": "ephemeral"},
         },
@@ -414,25 +458,10 @@ PRESETS: dict[str, dict[str, Any]] = {
             }
         },
     },
-    # Legacy 4.0 aliases kept for backward compat.
-    "claude-sonnet-4-or": {
-        "provider": "openrouter",
-        "model": "anthropic/claude-sonnet-4",
-        "max_context": 200000,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP},
-    },
-    "claude-opus-4-or": {
-        "provider": "openrouter",
-        "model": "anthropic/claude-opus-4",
-        "max_context": 200000,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP},
-    },
     # ═══════════════════════════════════════════════════════
     #  Google Gemini Direct API (primary — OpenAI-compat endpoint).
-    #  Pro / Flash:      thinking_level = LOW / MEDIUM / HIGH
-    #  Flash-Lite (3.1): thinking_level = MINIMAL / LOW / MEDIUM / HIGH
+    #  3.1 Pro is still the Pro tier (3.5 Pro not GA yet, ~mid-July
+    #  2026); Flash moved to 3.5 (GA); Flash-Lite 3.1 id is stable.
     # ═══════════════════════════════════════════════════════
     "gemini-3.1-pro": {
         "provider": "gemini",
@@ -441,24 +470,29 @@ PRESETS: dict[str, dict[str, Any]] = {
         "extra_body": {"google": {"thinking_config": {"thinking_level": "HIGH"}}},
         "variation_groups": {"thinking": _GEMINI_THINKING_GROUP},
     },
-    "gemini-3-flash": {
+    "gemini-3.5-flash": {
         "provider": "gemini",
-        "model": "gemini-3-flash-preview",
+        "model": "gemini-3.5-flash",
         "max_context": 1048576,
+        "max_output": 65536,
         "extra_body": {"google": {"thinking_config": {"thinking_level": "HIGH"}}},
-        # Flash supports the full set MINIMAL/LOW/MEDIUM/HIGH (verified
-        # 2026-04 Google AI for Developers docs).
+        # Flash supports the full set MINIMAL/LOW/MEDIUM/HIGH (default
+        # MEDIUM per the 2026-07 docs).
         "variation_groups": {"thinking": _GEMINI_THINKING_GROUP_WITH_MINIMAL},
     },
     "gemini-3.1-flash-lite": {
         "provider": "gemini",
-        "model": "gemini-3.1-flash-lite-preview",
+        "model": "gemini-3.1-flash-lite",
         "max_context": 1048576,
-        "extra_body": {"google": {"thinking_config": {"thinking_level": "HIGH"}}},
-        "variation_groups": {"thinking": _GEMINI_THINKING_GROUP_WITH_MINIMAL},
+        "max_output": 65536,
+        # Lite accepts MINIMAL/LOW/MEDIUM only (no HIGH; default MINIMAL).
+        "extra_body": {"google": {"thinking_config": {"thinking_level": "MEDIUM"}}},
+        "variation_groups": {"thinking": _GEMINI_THINKING_LITE_GROUP},
     },
     # ═══════════════════════════════════════════════════════
     #  Google Gemini via OpenRouter (-or suffix).
+    #  OR keeps the ``-preview`` suffix on flash-lite even though
+    #  the direct API id is stable.
     # ═══════════════════════════════════════════════════════
     "gemini-3.1-pro-or": {
         "provider": "openrouter",
@@ -467,9 +501,9 @@ PRESETS: dict[str, dict[str, Any]] = {
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
         "variation_groups": {"reasoning": _OR_REASONING_GROUP},
     },
-    "gemini-3-flash-or": {
+    "gemini-3.5-flash-or": {
         "provider": "openrouter",
-        "model": "google/gemini-3-flash-preview",
+        "model": "google/gemini-3.5-flash",
         "max_context": 1048576,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
         "variation_groups": {"reasoning": _OR_REASONING_GROUP},
@@ -481,11 +515,20 @@ PRESETS: dict[str, dict[str, Any]] = {
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
         "variation_groups": {"reasoning": _OR_REASONING_GROUP},
     },
+    # Image generation — reasoning doesn't apply.
     "nano-banana": {
         "provider": "openrouter",
+        # "Nano Banana 2" (Gemini 3.1 Flash Image).
         "model": "google/gemini-3.1-flash-image-preview",
+        "max_context": 131072,
+        "max_output": 32768,
+    },
+    "nano-banana-pro": {
+        "provider": "openrouter",
+        # "Nano Banana Pro" (Gemini 3 Pro Image) — 2K/4K output support.
+        "model": "google/gemini-3-pro-image",
         "max_context": 65536,
-        # Image-generation model — reasoning doesn't apply.
+        "max_output": 32768,
     },
     # ═══════════════════════════════════════════════════════
     #  Gemma 4 (open models, OpenRouter).
@@ -507,19 +550,30 @@ PRESETS: dict[str, dict[str, Any]] = {
         "variation_groups": {"reasoning": _OR_REASONING_GROUP},
     },
     # ═══════════════════════════════════════════════════════
-    #  Qwen 3.5 / 3.6 series (OpenRouter only).
+    #  Qwen (OpenRouter only). 3.7 is the closed flagship tier,
+    #  3.6-flash the fast tier; the 3.5 open-weight releases are
+    #  still the current open models. Coder line stays qwen3-*.
     # ═══════════════════════════════════════════════════════
-    "qwen3.5-plus": {
+    "qwen3.7-max": {
         "provider": "openrouter",
-        "model": "qwen/qwen3.5-plus-02-15",
+        "model": "qwen/qwen3.7-max",
+        "max_context": 1000000,
+        "max_output": 65536,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP},
+    },
+    "qwen3.7-plus": {
+        "provider": "openrouter",
+        "model": "qwen/qwen3.7-plus",
         "max_context": 1000000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
         "variation_groups": {"reasoning": _OR_REASONING_GROUP},
     },
-    "qwen3.5-flash": {
+    "qwen3.6-flash": {
         "provider": "openrouter",
-        "model": "qwen/qwen3.5-flash-02-23",
+        "model": "qwen/qwen3.6-flash",
         "max_context": 1000000,
+        "max_output": 65536,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
         "variation_groups": {"reasoning": _OR_REASONING_GROUP},
     },
@@ -537,13 +591,6 @@ PRESETS: dict[str, dict[str, Any]] = {
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
         "variation_groups": {"reasoning": _OR_REASONING_GROUP},
     },
-    "qwen3-coder": {
-        "provider": "openrouter",
-        "model": "qwen/qwen3-coder",
-        "max_context": 262144,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP},
-    },
     "qwen3-coder-plus": {
         "provider": "openrouter",
         "model": "qwen/qwen3-coder-plus",
@@ -553,7 +600,8 @@ PRESETS: dict[str, dict[str, Any]] = {
     },
     # ═══════════════════════════════════════════════════════
     #  Moonshot Kimi Code Direct API (Anthropic-compatible).
-    #  Kimi Code's documented fixed model id is ``kimi-for-coding``.
+    #  Kimi Code's documented fixed model id is ``kimi-for-coding``
+    #  (now served by K2.7 Code under the hood).
     # ═══════════════════════════════════════════════════════
     "kimi-for-coding": {
         "provider": "kimi-code",
@@ -562,158 +610,128 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_output": 32768,
     },
     # ═══════════════════════════════════════════════════════
-    #  Moonshot Kimi K2.5 / K2-thinking (OpenRouter).
-    #   K2.5:          configurable reasoning via OR unified.
-    #   K2-thinking:   always-on thinking — no variation group.
+    #  Moonshot Kimi K2.6 / K2.7 Code (OpenRouter).
+    #   K2.6:       latest general model — configurable reasoning.
+    #   K2.7 Code:  coding-specialized — always-on thinking, no
+    #               variation group. (No plain "k2.7" exists.)
     # ═══════════════════════════════════════════════════════
-    "kimi-k2.5": {
+    "kimi-k2.7-code": {
         "provider": "openrouter",
-        "model": "moonshotai/kimi-k2.5",
+        "model": "moonshotai/kimi-k2.7-code",
+        "max_context": 262144,
+        "max_output": 32768,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+    },
+    "kimi-k2.6": {
+        "provider": "openrouter",
+        "model": "moonshotai/kimi-k2.6",
         "max_context": 262144,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
         "variation_groups": {"reasoning": _OR_REASONING_GROUP},
     },
-    "kimi-k2-thinking": {
-        "provider": "openrouter",
-        "model": "moonshotai/kimi-k2-thinking",
-        "max_context": 131072,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-    },
     # ═══════════════════════════════════════════════════════
-    #  MiniMax (OpenRouter). Reasoning is mandatory on both
-    #  endpoints as of April 2026 — no variation group.
+    #  MiniMax M3 (OpenRouter). 1M context; thinking is a toggle
+    #  (disabled / adaptive / budget) — adaptive is the API default,
+    #  we pin it on and expose an off switch.
     # ═══════════════════════════════════════════════════════
-    "minimax-m2.7": {
+    "minimax-m3": {
         "provider": "openrouter",
-        "model": "minimax/minimax-m2.7",
-        "max_context": 204800,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-    },
-    "minimax-m2.5": {
-        "provider": "openrouter",
-        "model": "minimax/minimax-m2.5",
-        "max_context": 197000,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "model": "minimax/minimax-m3",
+        "max_context": 1048576,
+        "max_output": 65536,
+        "extra_body": {"reasoning": {"enabled": True}},
+        "variation_groups": {"reasoning": _OR_REASONING_TOGGLE_GROUP},
     },
     # ═══════════════════════════════════════════════════════
     #  GLM Coding Plan Direct API (Anthropic-compatible).
     #  GLM's Anthropic-compatible endpoint uses Bearer-token auth.
+    #  GLM-5.2 ids are lowercase; the 1M-context variant is a
+    #  SEPARATE model id with a literal ``[1m]`` suffix.
     # ═══════════════════════════════════════════════════════
-    "glm-5.1": {
+    "glm-5.2": {
         "provider": "glm-coding",
-        "model": "GLM-5.1",
-        "max_context": 204800,
-        "max_output": 131072,
-        "extra_body": {"auth_as_bearer": True},
-    },
-    "glm-5-turbo": {
-        "provider": "glm-coding",
-        "model": "GLM-5-Turbo",
-        "max_context": 204800,
-        "max_output": 131072,
-        "extra_body": {"auth_as_bearer": True},
-    },
-    "glm-4.7": {
-        "provider": "glm-coding",
-        "model": "GLM-4.7",
-        "max_context": 204800,
-        "max_output": 131072,
-        "extra_body": {"auth_as_bearer": True},
-    },
-    "glm-4.5-air": {
-        "provider": "glm-coding",
-        "model": "GLM-4.5-Air",
-        "max_context": 131072,
-        "max_output": 98304,
-        "extra_body": {"auth_as_bearer": True},
-    },
-    # ═══════════════════════════════════════════════════════
-    #  Xiaomi MiMo Direct API (primary — ``kt login mimo``).
-    # ═══════════════════════════════════════════════════════
-    "mimo-v2-pro": {
-        "provider": "mimo",
-        "model": "MiMo-V2-Pro",
-        "max_context": 1048576,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP},
-    },
-    "mimo-v2-flash": {
-        "provider": "mimo",
-        "model": "MiMo-V2-Flash",
+        "model": "glm-5.2",
         "max_context": 262144,
+        "max_output": 131072,
+        "extra_body": {"auth_as_bearer": True},
+    },
+    "glm-5.2-1m": {
+        "provider": "glm-coding",
+        "model": "glm-5.2[1m]",
+        "max_context": 1000000,
+        "max_output": 131072,
+        "extra_body": {"auth_as_bearer": True},
+    },
+    # ═══════════════════════════════════════════════════════
+    #  GLM (Z.ai, OpenRouter). Thinking effort is high / xhigh only.
+    # ═══════════════════════════════════════════════════════
+    "glm-5.2-or": {
+        "provider": "openrouter",
+        "model": "z-ai/glm-5.2",
+        "max_context": 1000000,
+        "max_output": 131072,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP},
+        "variation_groups": {"reasoning": _GLM_EFFORT_GROUP},
+    },
+    # ═══════════════════════════════════════════════════════
+    #  Xiaomi MiMo 2.5 Direct API (primary — ``kt login mimo``).
+    #  MiMo-V2 was deprecated by the official API on 2026-06-30.
+    #  Model ids are lowercase on the platform; thinking is a
+    #  binary toggle (default disabled — we enable it).
+    # ═══════════════════════════════════════════════════════
+    "mimo-v2.5-pro": {
+        "provider": "mimo",
+        "model": "mimo-v2.5-pro",
+        "max_context": 1048576,
+        "extra_body": {"thinking": {"type": "enabled"}},
+        "variation_groups": {"thinking": _MIMO_THINKING_GROUP},
+    },
+    "mimo-v2.5": {
+        "provider": "mimo",
+        "model": "mimo-v2.5",
+        "max_context": 1048576,
+        "extra_body": {"thinking": {"type": "enabled"}},
+        "variation_groups": {"thinking": _MIMO_THINKING_GROUP},
     },
     # ═══════════════════════════════════════════════════════
     #  Xiaomi MiMo via OpenRouter (-or suffix).
     # ═══════════════════════════════════════════════════════
-    "mimo-v2-pro-or": {
+    "mimo-v2.5-pro-or": {
         "provider": "openrouter",
-        "model": "xiaomi/mimo-v2-pro",
+        "model": "xiaomi/mimo-v2.5-pro",
         "max_context": 1048576,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP},
+        "extra_body": {"reasoning": {"enabled": True}},
+        "variation_groups": {"reasoning": _OR_REASONING_TOGGLE_GROUP},
     },
-    "mimo-v2-flash-or": {
+    "mimo-v2.5-or": {
         "provider": "openrouter",
-        "model": "xiaomi/mimo-v2-flash",
-        "max_context": 262144,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP},
-    },
-    # ═══════════════════════════════════════════════════════
-    #  GLM (Z.ai, OpenRouter).
-    # ═══════════════════════════════════════════════════════
-    "glm-5-or": {
-        "provider": "openrouter",
-        "model": "z-ai/glm-5",
-        "max_context": 80000,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP},
-    },
-    "glm-5-turbo-or": {
-        "provider": "openrouter",
-        "model": "z-ai/glm-5-turbo",
-        "max_context": 202752,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP},
+        "model": "xiaomi/mimo-v2.5",
+        "max_context": 1048576,
+        "extra_body": {"reasoning": {"enabled": True}},
+        "variation_groups": {"reasoning": _OR_REASONING_TOGGLE_GROUP},
     },
     # ═══════════════════════════════════════════════════════
     #  xAI Grok series (OpenRouter).
-    #   - grok-4:       reasoning mandatory and NOT configurable.
-    #   - grok-4.20:    reasoning on/off only — not a variation scale.
-    #   - grok-*-fast:  reasoning mandatory on the fast endpoints.
-    #   - grok-3/3-mini: legacy, no reasoning.
+    #   - grok-4.5:      the agent-oriented flagship. Reasoning
+    #                    effort low/medium/high (default high),
+    #                    cannot be disabled.
+    #   - grok-4.1-fast: cheap 2M-context agentic/tool-calling
+    #                    model; reasoning is an on/off toggle.
+    #   - grok-code-fast: cheap coding model, reasoning mandatory.
     # ═══════════════════════════════════════════════════════
-    "grok-4": {
+    "grok-4.5": {
         "provider": "openrouter",
-        "model": "x-ai/grok-4",
-        "max_context": 256000,
+        "model": "x-ai/grok-4.5",
+        "max_context": 500000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-    },
-    "grok-4.20": {
-        "provider": "openrouter",
-        "model": "x-ai/grok-4.20",
-        "max_context": 272000,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-    },
-    "grok-4.20-multi": {
-        "provider": "openrouter",
-        "model": "x-ai/grok-4.20-multi-agent",
-        "max_context": 272000,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-    },
-    "grok-4-fast": {
-        "provider": "openrouter",
-        "model": "x-ai/grok-4-fast",
-        "max_context": 272000,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "variation_groups": {"reasoning": _GROK_EFFORT_GROUP},
     },
     "grok-4.1-fast": {
         "provider": "openrouter",
         "model": "x-ai/grok-4.1-fast",
-        "max_context": 272000,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "max_context": 2000000,
+        "extra_body": {"reasoning": {"enabled": True}},
+        "variation_groups": {"reasoning": _OR_REASONING_TOGGLE_GROUP},
     },
     "grok-code-fast": {
         "provider": "openrouter",
@@ -721,96 +739,43 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_context": 256000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
-    "grok-3": {
-        "provider": "openrouter",
-        "model": "x-ai/grok-3",
-        "max_context": 131072,
-    },
-    "grok-3-mini": {
-        "provider": "openrouter",
-        "model": "x-ai/grok-3-mini",
-        "max_context": 131072,
-    },
     # ═══════════════════════════════════════════════════════
-    #  Mistral (OpenRouter).
-    #  Most Mistral instruct / coding models are NOT reasoning
-    #  models. Mistral Small 4 (2026-03) is the first to expose
-    #  a ``reasoning_effort`` param — values are "none" and "high"
-    #  only (no "low" / "medium" per Mistral docs).
-    #  Magistral Small/Medium have always-on reasoning — no variation.
+    #  Mistral (OpenRouter), post-2026-03 consolidation:
+    #  Small 4 + Medium 3.5 are hybrid models that folded in
+    #  Magistral (reasoning) and Pixtral (vision); the standalone
+    #  Magistral/Pixtral lines are retiring. ``reasoning_effort``
+    #  on the hybrids = none | low | medium | high. Large 3 is
+    #  instruct-only (no reasoning knob).
     # ═══════════════════════════════════════════════════════
+    "mistral-medium-3.5": {
+        "provider": "openrouter",
+        "model": "mistralai/mistral-medium-3-5",
+        "max_context": 262144,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "variation_groups": {"reasoning": _MISTRAL_REASONING_GROUP},
+    },
     "mistral-large-3": {
         "provider": "openrouter",
         "model": "mistralai/mistral-large-2512",
         "max_context": 262144,
-    },
-    "mistral-medium-3.1": {
-        "provider": "openrouter",
-        "model": "mistralai/mistral-medium-3.1",
-        "max_context": 131072,
-    },
-    "mistral-medium-3": {
-        "provider": "openrouter",
-        "model": "mistralai/mistral-medium-3",
-        "max_context": 131072,
     },
     "mistral-small-4": {
         "provider": "openrouter",
         "model": "mistralai/mistral-small-2603",
         "max_context": 262144,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {
-            "reasoning": {
-                "none": {"extra_body.reasoning.enabled": False},
-                "high": {
-                    "extra_body.reasoning.enabled": True,
-                    "extra_body.reasoning.effort": "high",
-                },
-            }
-        },
-    },
-    "mistral-small-3.2": {
-        "provider": "openrouter",
-        "model": "mistralai/mistral-small-3.2-24b-instruct",
-        "max_context": 128000,
-    },
-    "magistral-medium": {
-        "provider": "openrouter",
-        "model": "mistralai/magistral-medium-2506",
-        "max_context": 40960,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-    },
-    "magistral-small": {
-        "provider": "openrouter",
-        "model": "mistralai/magistral-small-2506",
-        "max_context": 40000,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "variation_groups": {"reasoning": _MISTRAL_REASONING_GROUP},
     },
     # Non-reasoning Mistral specialists.
-    "codestral": {
-        "provider": "openrouter",
-        "model": "mistralai/codestral-2508",
-        "max_context": 256000,
-    },
     "devstral-2": {
         "provider": "openrouter",
         "model": "mistralai/devstral-2512",
         "max_context": 262144,
     },
-    "devstral-medium": {
+    "codestral": {
         "provider": "openrouter",
-        "model": "mistralai/devstral-medium",
-        "max_context": 131072,
-    },
-    "devstral-small": {
-        "provider": "openrouter",
-        "model": "mistralai/devstral-small",
-        "max_context": 131072,
-    },
-    "pixtral-large": {
-        "provider": "openrouter",
-        "model": "mistralai/pixtral-large-2411",
-        "max_context": 131072,
+        "model": "mistralai/codestral-2508",
+        "max_context": 262144,
     },
     "ministral-3-14b": {
         "provider": "openrouter",

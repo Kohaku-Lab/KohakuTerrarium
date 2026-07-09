@@ -49,9 +49,10 @@ class TestAliases:
     def test_friendly_short_names_present(self):
         # the docstring promises short friendly names for frequent picks
         assert ALIASES["opus"][0] == "anthropic"
-        assert ALIASES["gpt5"] == ("codex", "gpt-5.4")
+        assert ALIASES["fable"] == ("anthropic", "claude-fable-5")
+        assert ALIASES["gpt5"] == ("codex", "gpt-5.5")
         assert ALIASES["kimi-code"] == ("kimi-code", "kimi-for-coding")
-        assert ALIASES["glm-code"] == ("glm-coding", "glm-5.1")
+        assert ALIASES["glm-code"] == ("glm-coding", "glm-5.2")
 
     def test_canonical_name_keys_appear_in_flat_presets(self):
         # legacy keys in _CANONICAL_NAMES come from the flat PRESETS dict

@@ -1438,7 +1438,7 @@ async def test_spawn_chat_model_stop_creature_on_worker(tmp_path, monkeypatch):
             model_resp = await asyncio.wait_for(
                 host.http.post(
                     f"/api/sessions/{session_id}/creatures/{creature_id}/model",
-                    json={"model": "openai/gpt-4o-mini"},
+                    json={"model": "openai/gpt-5.4-nano"},
                 ),
                 timeout=OP_TIMEOUT,
             )
