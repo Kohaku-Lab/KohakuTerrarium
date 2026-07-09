@@ -803,15 +803,15 @@ class TestApiIntegration:
         #     so the target must be a genuine profile selector.
         resp = client.post(
             f"/api/sessions/{session_id}/creatures/{creature_id}/model",
-            json={"model": "openai/gpt-4o-mini"},
+            json={"model": "openai/gpt-5.4-nano"},
         )
         assert resp.status_code == 200
-        assert resp.json() == {"status": "switched", "model": "openai/gpt-4o-mini"}
+        assert resp.json() == {"status": "switched", "model": "openai/gpt-5.4-nano"}
         # Read-back: the active-session getter reflects the switch via
         # the creature's canonical ``llm_name`` identifier.
         resp = client.get(f"/api/sessions/active/{session_id}")
         assert resp.status_code == 200
-        assert resp.json()["creatures"][0]["llm_name"] == "openai/gpt-4o-mini"
+        assert resp.json()["creatures"][0]["llm_name"] == "openai/gpt-5.4-nano"
         # A chat turn AFTER the model switch still runs: ``switch_model``
         # rebinds the provider via ``create_llm_from_profile_name``,
         # which the ``scripted_llm`` fixture also seams — so the switched
@@ -830,7 +830,7 @@ class TestApiIntegration:
         # Model switch on an unknown creature → 404.
         resp = client.post(
             f"/api/sessions/{session_id}/creatures/ghost/model",
-            json={"model": "openai/gpt-4o-mini"},
+            json={"model": "openai/gpt-5.4-nano"},
         )
         assert resp.status_code == 404
 

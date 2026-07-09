@@ -122,11 +122,11 @@ class TestGetProfile:
             get_profile("gpt-5.4")
 
     def test_alias_resolves(self):
-        # 'opus' alias -> (anthropic, claude-opus-4.7)
+        # 'opus' alias -> (anthropic, claude-opus-4.8)
         profile = get_profile("opus")
         assert profile is not None
         assert profile.provider == "anthropic"
-        assert profile.model == "claude-opus-4-7"
+        assert profile.model == "claude-opus-4-8"
 
     def test_unknown_name_returns_none(self):
         assert get_profile("totally-made-up-model") is None
@@ -150,11 +150,11 @@ class TestGetProfile:
         assert profile.api_key_env == "KIMI_CODE_API_KEY"
 
     def test_glm_coding_direct_profile_resolves_with_bearer_auth(self):
-        profile = get_profile("glm-coding/glm-5.1")
+        profile = get_profile("glm-coding/glm-5.2")
         assert profile is not None
         assert profile.provider == "glm-coding"
         assert profile.backend_type == "anthropic"
-        assert profile.model == "GLM-5.1"
+        assert profile.model == "glm-5.2"
         assert profile.base_url == "https://open.bigmodel.cn/api/anthropic"
         assert profile.api_key_env == "GLM_CODING_API_KEY"
         assert profile.extra_body["auth_as_bearer"] is True
@@ -227,9 +227,9 @@ class TestResolveControllerLlm:
         assert profile.model == "gpt-5.4"
 
     def test_llm_arg_wins_over_config(self):
-        profile = resolve_controller_llm({"llm": "codex/gpt-5.4"}, llm="openai/gpt-4o")
+        profile = resolve_controller_llm({"llm": "codex/gpt-5.4"}, llm="openai/gpt-5.5")
         assert profile.provider == "openai"
-        assert profile.model == "gpt-4o"
+        assert profile.model == "gpt-5.5"
 
     def test_provider_field_disambiguates_bare_llm(self):
         profile = resolve_controller_llm({"llm": "gpt-5.4", "provider": "openrouter"})
@@ -347,7 +347,9 @@ class TestFindProfileByModel:
         assert _find_profile_by_model("no-such-model-id") is None
 
     def test_provider_filter_narrows_match(self):
-        profile = _find_profile_by_model("gpt-4o", provider="openai")
+        # 'gpt-5.4-nano' model id exists under openai + openrouter
+        # (as 'openai/gpt-5.4-nano'); the provider filter pins it.
+        profile = _find_profile_by_model("gpt-5.4-nano", provider="openai")
         assert profile.provider == "openai"
 
     def test_ambiguous_model_uses_preference_order(self):
@@ -370,8 +372,8 @@ class TestDefaultModel:
         assert get_default_model() == ""
 
     def test_explicit_qualified_default_returned_verbatim(self):
-        set_default_model("openrouter/mimo-v2-pro")
-        assert get_default_model() == "openrouter/mimo-v2-pro"
+        set_default_model("openrouter/mimo-v2.5-pro")
+        assert get_default_model() == "openrouter/mimo-v2.5-pro"
 
     def test_explicit_bare_default_upgraded_to_qualified(self):
         # legacy bare default written by old builds. 'claude-opus-4.7'
@@ -387,7 +389,7 @@ class TestDefaultModel:
 
         save_api_key("openrouter", "sk-or-key")
         # codex unavailable (no tokens), openrouter is first available
-        assert get_default_model() == "openrouter/mimo-v2-pro"
+        assert get_default_model() == "openrouter/mimo-v2.5-pro"
 
     def test_default_picks_kimi_code_when_only_kimi_key_available(self):
         from kohakuterrarium.llm.api_keys import save_api_key
@@ -399,7 +401,7 @@ class TestDefaultModel:
         from kohakuterrarium.llm.api_keys import save_api_key
 
         save_api_key("glm-coding", "glm-key")
-        assert get_default_model() == "glm-coding/glm-5.1"
+        assert get_default_model() == "glm-coding/glm-5.2"
 
     def test_upgrade_bare_default_via_alias(self):
         # 'gpt-5.4-or' is an alias -> (openrouter, gpt-5.4)
@@ -411,6 +413,19 @@ class TestDefaultModel:
     def test_upgrade_bare_default_prefers_provider_order(self):
         # bare 'gpt-5.4' exists under codex/openai/openrouter; codex first
         assert _upgrade_bare_default("gpt-5.4") == "codex/gpt-5.4"
+
+    def test_provider_default_models_point_at_real_presets(self):
+        # every fallback entry must name an existing (provider, name)
+        # preset — a stale entry here silently breaks default-model
+        # selection for that provider (caught nowhere else).
+        from kohakuterrarium.llm.profiles import _PROVIDER_DEFAULT_MODELS
+
+        catalogue = presets_mod.get_all_presets()
+        for provider, name in _PROVIDER_DEFAULT_MODELS:
+            assert (
+                provider,
+                name,
+            ) in catalogue, f"default entry ({provider}, {name}) not in preset view"
 
 
 # ---------------------------------------------------------------------------
@@ -651,13 +666,13 @@ class TestLoadProfilesAndListAll:
         # a legacy unqualified default falls back to name/model matching
         from kohakuterrarium.llm.backends import save_yaml_store
 
-        save_yaml_store({"version": 3, "default_model": "gpt-4o"})
+        save_yaml_store({"version": 3, "default_model": "gpt-5.5"})
         entries = list_all()
-        # 'gpt-4o' is a bare name shared across providers — every entry
+        # 'gpt-5.5' is a bare name shared across providers — every entry
         # with that name is flagged (documented bare-name fallback)
-        gpt4o = [e for e in entries if e["is_default"]]
-        assert gpt4o
-        assert all(e["name"] == "gpt-4o" for e in gpt4o)
+        gpt55 = [e for e in entries if e["is_default"]]
+        assert gpt55
+        assert all(e["name"] == "gpt-5.5" for e in gpt55)
 
 
 # ---------------------------------------------------------------------------

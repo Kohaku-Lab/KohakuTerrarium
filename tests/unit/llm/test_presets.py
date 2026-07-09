@@ -112,10 +112,12 @@ class TestGetAllPresets:
 
 class TestResolveAlias:
     def test_short_friendly_alias(self):
-        assert resolve_alias("opus") == ("anthropic", "claude-opus-4.7")
-        assert resolve_alias("gpt5") == ("codex", "gpt-5.4")
+        assert resolve_alias("opus") == ("anthropic", "claude-opus-4.8")
+        assert resolve_alias("fable") == ("anthropic", "claude-fable-5")
+        assert resolve_alias("sonnet") == ("anthropic", "claude-sonnet-5")
+        assert resolve_alias("gpt5") == ("codex", "gpt-5.5")
         assert resolve_alias("kimi-code") == ("kimi-code", "kimi-for-coding")
-        assert resolve_alias("glm-coding") == ("glm-coding", "glm-5.1")
+        assert resolve_alias("glm-coding") == ("glm-coding", "glm-5.2")
 
     def test_legacy_suffixed_alias(self):
         assert resolve_alias("gpt-5.4-or") == ("openrouter", "gpt-5.4")
@@ -180,10 +182,36 @@ class TestPresetsDataIntegrity:
         # the headline ChatGPT-subscription presets bind to the codex provider
         assert PRESETS["gpt-5.4"]["provider"] == "codex"
         assert PRESETS["gpt-5.5"]["provider"] == "codex"
+        assert PRESETS["gpt-5.6-sol"]["provider"] == "codex"
+
+    def test_gpt56_effort_scales_match_codex_catalog(self):
+        # Codex catalog (models.json, 2026-07-10): Sol/Terra go up to
+        # ``ultra``; Luna stops at ``max``. ``ultra`` is Codex-only, so
+        # the direct-API (-api) variants must NOT expose it.
+        sol = PRESETS["gpt-5.6-sol"]["variation_groups"]["reasoning"]
+        terra = PRESETS["gpt-5.6-terra"]["variation_groups"]["reasoning"]
+        luna = PRESETS["gpt-5.6-luna"]["variation_groups"]["reasoning"]
+        assert "ultra" in sol and "max" in sol
+        assert "ultra" in terra
+        assert "ultra" not in luna and "max" in luna
+        # 'ultra' is not a wire value — the API rejects the literal string.
+        # Mirror the Codex CLI, which rewrites Ultra -> Max before sending.
+        assert sol["ultra"] == {"reasoning_effort": "max"}
+        assert terra["ultra"] == {"reasoning_effort": "max"}
+        for name in ("gpt-5.6-sol-api", "gpt-5.6-terra-api", "gpt-5.6-luna-api"):
+            api_group = PRESETS[name]["variation_groups"]["reasoning"]
+            assert "ultra" not in api_group
+            assert "max" in api_group
 
     def test_anthropic_direct_presets_use_anthropic_provider(self):
         assert PRESETS["claude-opus-4.7"]["provider"] == "anthropic"
         assert PRESETS["claude-opus-4.7"]["model"] == "claude-opus-4-7"
+        assert PRESETS["claude-opus-4.8"]["provider"] == "anthropic"
+        assert PRESETS["claude-opus-4.8"]["model"] == "claude-opus-4-8"
+        assert PRESETS["claude-fable-5"]["provider"] == "anthropic"
+        assert PRESETS["claude-fable-5"]["model"] == "claude-fable-5"
+        assert PRESETS["claude-sonnet-5"]["provider"] == "anthropic"
+        assert PRESETS["claude-sonnet-5"]["model"] == "claude-sonnet-5"
 
     def test_kimi_code_direct_preset_uses_kimi_code_provider(self):
         preset = PRESETS["kimi-for-coding"]
@@ -194,10 +222,8 @@ class TestPresetsDataIntegrity:
 
     def test_glm_coding_direct_presets_use_bearer_auth(self):
         expected = {
-            "glm-5.1": ("GLM-5.1", 204800, 131072),
-            "glm-5-turbo": ("GLM-5-Turbo", 204800, 131072),
-            "glm-4.7": ("GLM-4.7", 204800, 131072),
-            "glm-4.5-air": ("GLM-4.5-Air", 131072, 98304),
+            "glm-5.2": ("glm-5.2", 262144, 131072),
+            "glm-5.2-1m": ("glm-5.2[1m]", 1000000, 131072),
         }
         for name, (model, max_context, max_output) in expected.items():
             preset = PRESETS[name]
@@ -208,8 +234,8 @@ class TestPresetsDataIntegrity:
             assert preset["extra_body"]["auth_as_bearer"] is True
 
     def test_glm_coding_legacy_suffixed_aliases_resolve(self):
-        assert resolve_alias("glm-5.1-coding") == ("glm-coding", "glm-5.1")
-        assert resolve_alias("glm-4.7-coding") == ("glm-coding", "glm-4.7")
+        assert resolve_alias("glm-5.2-coding") == ("glm-coding", "glm-5.2")
+        assert resolve_alias("glm-5.2-1m-coding") == ("glm-coding", "glm-5.2-1m")
 
 
 # ---------------------------------------------------------------------------

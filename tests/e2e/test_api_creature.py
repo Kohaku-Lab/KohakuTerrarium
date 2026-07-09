@@ -141,7 +141,7 @@ def client(
     session_dir = tmp_path / "sessions"
     session_dir.mkdir()
     monkeypatch.setenv("KT_SESSION_DIR", str(session_dir))
-    # The model-switch journey flips the creature to ``openai/gpt-4o-mini``;
+    # The model-switch journey flips the creature to ``openai/gpt-5.4-nano``;
     # the provider builder checks ``OPENAI_API_KEY`` before returning,
     # so without a value the switch raises ValueError -> 400.  The
     # ScriptedLLM intercepts the actual ``chat()`` call so this key is
@@ -603,13 +603,13 @@ class TestApiCreatureJourney:
         #     not run before the chat-driven legs above.
         resp = client.post(
             f"/api/sessions/{session_id}/creatures/{creature_id}/model",
-            json={"model": "openai/gpt-4o-mini"},
+            json={"model": "openai/gpt-5.4-nano"},
         )
         assert resp.status_code == 200
-        assert resp.json() == {"status": "switched", "model": "openai/gpt-4o-mini"}
+        assert resp.json() == {"status": "switched", "model": "openai/gpt-5.4-nano"}
         resp = client.get(f"/api/sessions/active/{session_id}")
         assert resp.status_code == 200
-        assert resp.json()["creatures"][0]["llm_name"] == "openai/gpt-4o-mini"
+        assert resp.json()["creatures"][0]["llm_name"] == "openai/gpt-5.4-nano"
 
         # 9. DELETE the session — it leaves the active list, the
         #    ``.kohakutr`` survives on disk, and the saved-sessions list
