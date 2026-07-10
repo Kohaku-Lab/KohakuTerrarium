@@ -1,6 +1,7 @@
 """FastAPI application factory."""
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from functools import partial
 from pathlib import Path
@@ -19,6 +20,10 @@ from kohakuterrarium.api.auth.middleware import HostTokenMiddleware
 from kohakuterrarium.api.deps import _session_dir, get_engine, set_service
 from kohakuterrarium.errors import ConflictError, KTError, NotFoundError
 from kohakuterrarium.laboratory import HostConfig
+from kohakuterrarium.laboratory._internal.client import (
+    RequestAbortedError,
+    RequestTimeoutError,
+)
 from kohakuterrarium.laboratory._internal.host import HostEngine
 from kohakuterrarium.laboratory._internal.membership import MembershipEvent
 from kohakuterrarium.laboratory._internal.transport_ws import WebSocketTransport
@@ -370,6 +375,20 @@ async def kt_error_handler(request: Request, exc: KTError) -> JSONResponse:
     return JSONResponse(status_code=kt_error_status(exc), content={"detail": str(exc)})
 
 
+async def lab_transport_error_handler(
+    request: Request, exc: TimeoutError
+) -> JSONResponse:
+    """Map Laboratory transport failures onto gateway statuses: a
+    worker that vanished mid-request is 502, a deadline expiry 504 —
+    neither is an internal server error."""
+    _ = request
+    status = 502 if isinstance(exc, RequestAbortedError) else 504
+    return JSONResponse(
+        status_code=status,
+        content={"detail": str(exc) or type(exc).__name__},
+    )
+
+
 def _parse_bind(bind: str) -> tuple[str, int]:
     """Parse ``host:port`` into a tuple; ``port == 0`` selects ephemeral."""
     if ":" not in bind:
@@ -430,6 +449,34 @@ async def _watch_membership(
         logger.exception("membership watcher crashed; multi-node routing stale")
 
 
+class PollingAccessLogFilter(logging.Filter):
+    """Drop uvicorn access-log lines for successful GET polls of
+    high-frequency endpoints. Failures, other methods, and lookalike
+    paths (path-boundary check) always stay visible."""
+
+    _SUPPRESSED_PATHS = ("/api/sessions/active",)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = getattr(record, "args", None)
+        if not isinstance(args, tuple) or len(args) < 5:
+            return True
+        method, path, status = args[1], args[2], args[4]
+        if method != "GET" or not isinstance(path, str):
+            return True
+        if not isinstance(status, int) or status >= 400:
+            return True
+        for base in self._SUPPRESSED_PATHS:
+            if path == base or path.startswith((base + "/", base + "?")):
+                return False
+        return True
+
+
+def _install_access_log_filter() -> None:
+    access = logging.getLogger("uvicorn.access")
+    if not any(isinstance(f, PollingAccessLogFilter) for f in access.filters):
+        access.addFilter(PollingAccessLogFilter())
+
+
 def create_app(
     creatures_dirs: list[str] | None = None,
     terrariums_dirs: list[str] | None = None,
@@ -451,6 +498,7 @@ def create_app(
             (lab-host only).
         lab_token: Shared token clients must present (lab-host only).
     """
+    _install_access_log_filter()
     app = FastAPI(
         title="KohakuTerrarium API",
         description="HTTP API for managing agents and terrariums",
@@ -460,6 +508,9 @@ def create_app(
     # Typed-error adapter: studio raises ``kohakuterrarium.errors``
     # types; this single handler maps them onto HTTP status codes.
     app.add_exception_handler(KTError, kt_error_handler)
+    # RequestAbortedError subclasses RequestTimeoutError, so this one
+    # registration covers both (Starlette dispatches by MRO).
+    app.add_exception_handler(RequestTimeoutError, lab_transport_error_handler)
 
     # Lifespan reads these off app.state to start the Lab transport.
     app.state.lab_mode = lab_mode

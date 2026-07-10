@@ -19,6 +19,8 @@ Mounted under both ``/api/persistence/saved`` and ``/api/sessions``
 (URL preservation for the existing frontend ``sessionAPI`` callers).
 """
 
+import os
+
 from fastapi import APIRouter, HTTPException
 
 from kohakuterrarium.api.routes.persistence._executor import (
@@ -112,7 +114,16 @@ def _list_via_index(
         limit=limit,
         offset=offset,
     )
-    return page.to_dict()
+    result = page.to_dict()
+    # Pre-resume missing-workdir signal. Only rows that live on THIS
+    # host can be stat'd here — worker-hosted rows get the flag from
+    # the worker's own resume response instead.
+    for row in result.get("sessions", []):
+        if row.get("node_id"):
+            continue
+        pwd = row.get("pwd") or ""
+        row["pwd_exists"] = (not pwd) or os.path.isdir(pwd)
+    return result
 
 
 @router.get("")

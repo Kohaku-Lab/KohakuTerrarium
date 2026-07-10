@@ -140,6 +140,49 @@ class TestRemoteWritePath:
         assert "write_commit" in pushed
         assert "write" not in pushed
 
+    def test_pwd_override_threads_to_worker(self, monkeypatch, tmp_path):
+        p = tmp_path / "x.kohakutr"
+        p.write_bytes(b"data")
+        monkeypatch.setattr(resume_mod, "resolve_session_path_default", lambda n: p)
+        host = _FakeHost(
+            responses={
+                "terrarium.files:stat": {"ok": True},
+                "terrarium.session:resume": {
+                    "session_id": "sid",
+                    "meta": {"agents": ["a"], "pwd": "/p"},
+                },
+            }
+        )
+        client = TestClient(_app(service=_Svc(host)))
+        resp = client.post(
+            "/sessions/x/resume", json={"on_node": "w1", "pwd": "/new/dir"}
+        )
+        assert resp.status_code == 200
+        resume_calls = [c for c in host.calls if c["namespace"] == "terrarium.session"]
+        assert resume_calls[0]["body"]["pwd_override"] == "/new/dir"
+
+    def test_worker_pwd_exists_overrides_controller_stat(self, monkeypatch, tmp_path):
+        # meta pwd "" makes the controller-side __post_init__ compute
+        # True — but the session lives on the worker, whose report of a
+        # missing dir must win.
+        p = tmp_path / "x.kohakutr"
+        p.write_bytes(b"data")
+        monkeypatch.setattr(resume_mod, "resolve_session_path_default", lambda n: p)
+        host = _FakeHost(
+            responses={
+                "terrarium.files:stat": {"ok": True},
+                "terrarium.session:resume": {
+                    "session_id": "sid",
+                    "meta": {"agents": ["a"], "pwd": ""},
+                    "pwd_exists": False,
+                },
+            }
+        )
+        client = TestClient(_app(service=_Svc(host)))
+        resp = client.post("/sessions/x/resume", json={"on_node": "w1"})
+        assert resp.status_code == 200
+        assert resp.json()["session"]["pwd_exists"] is False
+
     def test_remote_no_session_id_502(self, monkeypatch, tmp_path):
         p = tmp_path / "x.kohakutr"
         p.write_bytes(b"data")

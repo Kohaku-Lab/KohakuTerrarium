@@ -50,9 +50,18 @@ class TestSession:
             "created_at": "2026-01-01",
             "config_path": "/cfg",
             "pwd": "/work",
+            "pwd_exists": False,
             "has_root": True,
             "home_node": "worker-1",
         }
+
+    def test_pwd_exists_derivation(self, tmp_path):
+        # False only when a saved pwd is set but missing on disk.
+        assert Session(session_id="s", name="n", pwd=str(tmp_path)).pwd_exists is True
+        assert Session(session_id="s", name="n", pwd="").pwd_exists is True
+        missing = Session(session_id="s", name="n", pwd=str(tmp_path / "gone"))
+        assert missing.pwd_exists is False
+        assert missing.to_dict()["pwd_exists"] is False
 
 
 class TestSessionListing:

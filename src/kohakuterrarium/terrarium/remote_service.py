@@ -31,6 +31,10 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from kohakuterrarium.laboratory.protocols import LabSender
+from kohakuterrarium.laboratory._internal.client import (
+    RequestAbortedError,
+    RequestTimeoutError,
+)
 from kohakuterrarium.laboratory.streams import RemoteStream, StreamDemux
 from kohakuterrarium.terrarium.creature_host import Creature
 from kohakuterrarium.terrarium.events import (
@@ -57,6 +61,11 @@ from kohakuterrarium.terrarium.wire import (
     unpack_graph_topology,
     unpack_topology_delta,
 )
+
+# ``regenerate`` / ``edit_message`` block through an entire LLM turn on
+# the worker — they need a far larger ceiling than the 30s
+# control-plane default.
+TURN_REQUEST_TIMEOUT = 3600.0
 
 
 class RemoteEngineError(RuntimeError):
@@ -298,7 +307,7 @@ class RemoteTerrariumService:
         branch_view: dict[int, int] | None = None,
     ) -> dict[str, Any]:
         body = _maybe_raise(
-            await self._req(
+            await self._req_turn_mutation(
                 "regenerate",
                 {
                     "creature_id": creature_id,
@@ -320,7 +329,7 @@ class RemoteTerrariumService:
         branch_view: dict[int, int] | None = None,
     ) -> bool | dict[str, Any]:
         body = _maybe_raise(
-            await self._req(
+            await self._req_turn_mutation(
                 "edit_message",
                 {
                     "creature_id": creature_id,
@@ -830,14 +839,48 @@ class RemoteTerrariumService:
     # Internal
     # ------------------------------------------------------------------
 
-    async def _req(self, type_: str, body: dict[str, Any]) -> Any:
+    async def _req(
+        self,
+        type_: str,
+        body: dict[str, Any],
+        *,
+        timeout: float | None = None,
+    ) -> Any:
         return await self._sender.request(
             to_node=self._target_node,
             namespace="terrarium.runtime",
             type=type_,
             body=body,
-            timeout=self._timeout,
+            timeout=timeout if timeout is not None else self._timeout,
         )
+
+    async def _req_turn_mutation(self, type_: str, body: dict[str, Any]) -> Any:
+        """Turn-length branch mutation (regenerate / edit_message).
+
+        On deadline expiry the worker-side handler task keeps running
+        and would commit the branch long after the caller saw the
+        failure (and possibly retried) — best-effort interrupt the
+        creature so the orphaned mutation cannot land. A dead link
+        (``RequestAbortedError``) skips the interrupt: nothing to send
+        it over.
+        """
+        try:
+            return await self._req(type_, body, timeout=TURN_REQUEST_TIMEOUT)
+        except RequestAbortedError:
+            raise
+        except RequestTimeoutError:
+            creature_id = body.get("creature_id")
+            if creature_id:
+                try:
+                    await self.interrupt(creature_id)
+                except Exception as exc:
+                    logger.warning(
+                        "Post-timeout interrupt of remote creature failed",
+                        creature_id=creature_id,
+                        op=type_,
+                        error=str(exc),
+                    )
+            raise
 
 
 __all__ = [

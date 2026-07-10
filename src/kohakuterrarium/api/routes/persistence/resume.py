@@ -65,6 +65,10 @@ class ResumeRequest(BaseModel):
 
     on_node: str = "_host"
     members: list[ClusterMember] | None = None
+    # Replacement working dir when the saved one no longer exists —
+    # applied to EVERY rebuilt creature BEFORE it starts (flows into
+    # ``adopt_session(pwd=...)`` / the worker's ``pwd_override``).
+    pwd: str | None = None
 
 
 @router.post("/{session_name}/resume")
@@ -110,7 +114,9 @@ async def resume_session(
         # Standalone-only branch — lab-host rejected ``_host`` above.
         engine = get_engine()
         try:
-            session = await studio_resume(engine, path)
+            session = await studio_resume(
+                engine, path, pwd_override=req.pwd if req is not None else None
+            )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
@@ -171,13 +177,15 @@ async def resume_session(
             on_node,
             session_name,
             primary_sid=normalize_session_stem(path),
+            pwd_override=req.pwd if req is not None else None,
         )
 
-    sid, meta = await _push_and_resume_member(
+    sid, meta, worker_pwd_exists = await _push_and_resume_member(
         host=host,
         request=request,
         path=path,
         on_node=on_node,
+        pwd_override=req.pwd if req is not None else None,
     )
 
     # The worker adopted the session and now hosts its creature(s) — but
@@ -253,6 +261,10 @@ async def resume_session(
         config_path=meta.get("config_path", ""),
         home_node=on_node,
     )
+    # __post_init__ stat'd the CONTROLLER's filesystem — the session
+    # lives on the worker; prefer its report when present.
+    if worker_pwd_exists is not None:
+        synthetic.pwd_exists = worker_pwd_exists
     instance_type = "terrarium" if (meta.get("config_type") == "terrarium") else "agent"
     return {
         "instance_id": sid,
@@ -321,12 +333,15 @@ async def _push_and_resume_member(
     request: Request,
     path: Path,
     on_node: str,
-) -> tuple[str, dict]:
+    pwd_override: str | None = None,
+) -> tuple[str, dict, bool | None]:
     """Push one ``.kohakutr`` to ``on_node`` and call its resume RPC.
 
-    Returns the worker-reported ``(session_id, meta)`` tuple. Raises
-    :class:`HTTPException` on any push / resume failure (same shape
-    the single-member path used inline before CF-6).
+    Returns the worker-reported ``(session_id, meta, pwd_exists)``
+    tuple — ``pwd_exists`` is evaluated on the WORKER's filesystem
+    (``None`` from legacy workers). Raises :class:`HTTPException` on
+    any push / resume failure (same shape the single-member path used
+    inline before CF-6).
     """
     # The session file may be a *live* mirror store the
     # ``SessionMirrorWriter`` still holds open — its meta + recent
@@ -368,7 +383,10 @@ async def _push_and_resume_member(
             to_node=on_node,
             namespace="terrarium.session",
             type="resume",
-            body={"path": _worker_absolute_for(rel)},
+            body={
+                "path": _worker_absolute_for(rel),
+                "pwd_override": pwd_override,
+            },
             timeout=60.0,
         )
         if isinstance(worker_path_resp, dict) and "error" in worker_path_resp:
@@ -404,7 +422,10 @@ async def _push_and_resume_member(
             status_code=502,
             detail=f"worker {on_node!r} returned no session_id",
         )
-    return sid, meta
+    worker_pwd_exists = worker_path_resp.get("pwd_exists")
+    if not isinstance(worker_pwd_exists, bool):
+        worker_pwd_exists = None
+    return sid, meta, worker_pwd_exists
 
 
 async def _resume_cluster(
@@ -416,6 +437,7 @@ async def _resume_cluster(
     session_name: str,
     *,
     primary_sid: str,
+    pwd_override: str | None = None,
 ) -> dict:
     """CF-6 — resume every cluster member then relink them.
 
@@ -456,11 +478,12 @@ async def _resume_cluster(
         {}
     )  # original_sid -> (new_sid, meta, on_node)
     for m in ordered:
-        new_sid, new_meta = await _push_and_resume_member(
+        new_sid, new_meta, _member_pwd_exists = await _push_and_resume_member(
             host=host,
             request=request,
             path=paths[m.sid],
             on_node=m.on_node,
+            pwd_override=pwd_override,
         )
         resumed[m.sid] = (new_sid, new_meta, m.on_node)
 

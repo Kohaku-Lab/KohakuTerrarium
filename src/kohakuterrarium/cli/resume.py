@@ -6,6 +6,8 @@ creature in the resumed graph.
 """
 
 import asyncio
+import os
+import sys
 
 from kohakuterrarium.cli.run import _resolve_session
 from kohakuterrarium.session.store import SessionStore
@@ -55,6 +57,7 @@ def resume_cli(
         return 1
 
     announce_migration_if_needed(path)
+    pwd_override = _resolve_missing_pwd(path, pwd_override)
 
     try:
         return asyncio.run(_run(path, pwd_override, llm))
@@ -68,6 +71,34 @@ def resume_cli(
         if path.exists():
             print("\nSession saved. To resume:")
             print(f"  kt resume {path.stem}")
+
+
+def _resolve_missing_pwd(path, pwd_override: str | None) -> str | None:
+    """When the saved working dir no longer exists, ask for a new one
+    (interactive only); an explicit ``--pwd`` always wins."""
+    if pwd_override:
+        return pwd_override
+    try:
+        store = SessionStore(path)
+        try:
+            saved = (store.load_meta() or {}).get("pwd", "")
+        finally:
+            store.close()
+    except Exception:
+        return pwd_override
+    if not saved or os.path.isdir(saved):
+        return pwd_override
+    if not sys.stdin.isatty():
+        print(f"Warning: saved working dir missing: {saved} (using current dir)")
+        return pwd_override
+    print(f"Saved working dir no longer exists: {saved}")
+    while True:
+        entered = input("New working dir (empty = current dir): ").strip()
+        if not entered:
+            return os.getcwd()
+        if os.path.isdir(entered):
+            return entered
+        print(f"Not a directory: {entered}")
 
 
 async def _run(path, pwd_override, llm) -> int:

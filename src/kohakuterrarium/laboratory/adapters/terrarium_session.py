@@ -22,6 +22,7 @@ on its mirror directly without round-tripping.
 Errors translate to the standard structured envelope.
 """
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -150,9 +151,14 @@ class TerrariumSessionAdapter:
         )
         store = getattr(self._engine, "_session_stores", {}).get(sid)
         meta = store.load_meta() if store is not None else {}
+        # Evaluated on THIS worker's filesystem — the controller cannot
+        # stat a worker-side path, so its handle-level check is wrong
+        # for remote sessions.
+        saved_pwd = str(meta.get("pwd", "") or "")
         return {
             "session_id": sid,
             "meta": dict(meta),
+            "pwd_exists": (not saved_pwd) or os.path.isdir(saved_pwd),
         }
 
     # ------------------------------------------------------------------
