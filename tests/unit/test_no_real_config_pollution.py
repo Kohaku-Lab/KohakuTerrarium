@@ -104,12 +104,23 @@ def test_no_writes_to_real_kohakuterrarium_dir():
     flagged as test leaks.
     """
     after = _snapshot()
+    sessions_prefix = str(_REAL_CONFIG_DIR / "sessions")
     leaks: list[str] = []
     for path, digest in after.items():
         before = _BEFORE.get(path)
         if before is None:
             leaks.append(f"NEW: {path}")
         elif before != digest:
+            # A live operator agent continuously rewrites its OWN
+            # pre-existing session files (WAL/SHM churn, periodic
+            # checkpoints into the base .kohakutr and the .kt-index
+            # sidecar). That is operator activity, not a test leak — a
+            # broken KT_CONFIG_DIR redirect mints NEW session files
+            # (random session names), which stays flagged above.
+            if path.startswith(sessions_prefix) or path.endswith(
+                ("-wal", "-shm", "-journal")
+            ):
+                continue
             leaks.append(f"CONTENT-CHANGED: {path}")
     assert not leaks, (
         "tests wrote to the operator's real ~/.kohakuterrarium/ — every "

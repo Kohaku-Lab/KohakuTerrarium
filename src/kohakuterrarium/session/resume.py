@@ -17,7 +17,12 @@ from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.packages.resolve import resolve_any_path
-from kohakuterrarium.session.history import replay_conversation
+from kohakuterrarium.session.history import (
+    _index_parent_paths,
+    _resolve_selected_branches,
+    normalize_resumable_events,
+    replay_conversation,
+)
 from kohakuterrarium.session.migrations import ensure_latest_version
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.logging import get_logger
@@ -75,6 +80,13 @@ def _build_conversation(messages: list[dict]) -> Conversation:
         if msg.get("metadata"):
             kwargs["metadata"] = msg["metadata"]
         conv.append(role, content, **kwargs)
+    # Old snapshots / replays may carry orphan tool fragments — drop
+    # them once here so every later ``to_messages`` stops re-warning.
+    # The trailing announcement is preserved: a compact snapshot saved
+    # mid-turn legitimately ends with an in-flight call whose result
+    # arrives via the post-watermark tail (or a stop-sweep terminal).
+    # Wire serialization still drops a genuinely dead one per call.
+    conv.prune_orphan_tool_pairs(preserve_pending_tail=True)
     return conv
 
 
@@ -104,9 +116,52 @@ def _load_conversation_with_replay_fallback(
     if snapshot is not None and isinstance(cached_up_to, int):
         if cached_up_to >= last_event_id:
             return snapshot
+        # The snapshot is the only artifact reflecting compaction — a
+        # full replay would resurrect compacted history. Keep the
+        # snapshot as the prefix and replay only the post-watermark
+        # tail (normalized so tool results arrive paired).
+        tail = [
+            evt
+            for evt in events
+            if isinstance(evt.get("event_id"), int) and evt["event_id"] > cached_up_to
+        ]
+        # A branch fork in the tail (edit / regenerate after the
+        # snapshot) rewrites EARLIER turns — blind append would retain
+        # the superseded turns from the snapshot AND add the fork's.
+        # Fall back to full replay for those sessions; it loses any
+        # compaction splice but keeps branch semantics coherent.
+        # A fork is a (turn, branch) pair the pre-watermark log never
+        # saw — ordinary continuation events on an ALREADY-forked
+        # branch must not discard the compacted snapshot.
+        pre_pairs = {
+            (evt.get("turn_index"), evt.get("branch_id"))
+            for evt in events
+            if isinstance(evt.get("event_id"), int) and evt["event_id"] <= cached_up_to
+        }
+        tail_has_forks = any(
+            isinstance(evt.get("branch_id"), int)
+            and evt["branch_id"] > 1
+            and (evt.get("turn_index"), evt["branch_id"]) not in pre_pairs
+            for evt in tail
+        )
+        if not tail_has_forks:
+            appended = replay_conversation(normalize_resumable_events(tail))
+            logger.info(
+                "Resume appended post-snapshot tail",
+                agent=agent_name,
+                snapshot_event_id=cached_up_to,
+                last_event_id=last_event_id,
+                appended=len(appended),
+            )
+            return list(snapshot) + appended
+        logger.info(
+            "Post-snapshot tail contains branch forks — full replay",
+            agent=agent_name,
+            snapshot_event_id=cached_up_to,
+        )
     if snapshot is not None and cached_up_to is None:
         return snapshot
-    replayed = replay_conversation(events)
+    replayed = replay_conversation(normalize_resumable_events(events))
     if replayed:
         logger.info(
             "Resume rebuilt conversation via replay",
@@ -136,25 +191,20 @@ def _restore_turn_branch_state(agent, store: SessionStore, agent_name: str) -> N
             exc_info=True,
         )
         return
-    # Walk events: track the most recent live branch of every turn so
-    # we can derive both the leaf (turn, branch) and the parent path
-    # leading to it.
-    latest_by_turn: dict[int, int] = {}
-    for evt in events:
-        ti = evt.get("turn_index")
-        bi = evt.get("branch_id")
-        if not isinstance(ti, int) or not isinstance(bi, int):
-            continue
-        prev = latest_by_turn.get(ti, 0)
-        if bi > prev:
-            latest_by_turn[ti] = bi
-    if not latest_by_turn:
+    # Use the SAME path-aware selector replay_conversation uses — a
+    # per-turn independent max can compose an ancestry that never
+    # existed (turn N's only branch living under an unselected prior
+    # branch), and new events would then stamp into an orphan subtree.
+    events_list = list(events)
+    parent_paths = _index_parent_paths(events_list)
+    selected = _resolve_selected_branches(events_list, parent_paths, None)
+    if not selected:
         return
-    max_turn = max(latest_by_turn.keys())
+    max_turn = max(selected.keys())
     agent._turn_index = max_turn
-    agent._branch_id = latest_by_turn[max_turn]
+    agent._branch_id = selected[max_turn]
     agent._parent_branch_path = [
-        (t, latest_by_turn[t]) for t in sorted(latest_by_turn.keys()) if t < max_turn
+        (t, selected[t]) for t in sorted(selected.keys()) if t < max_turn
     ]
     logger.debug(
         "Turn/branch state restored",
@@ -358,6 +408,46 @@ def resume_agent(
         (agent, store) tuple. Caller should run agent.run_forever() then store.close().
     """
     store = _open_store_with_migration(session_path, writer_lock=True)
+    try:
+        return _resume_agent_from_open_store(
+            store,
+            session_path,
+            pwd_override=pwd_override,
+            io_mode=io_mode,
+            llm=llm,
+            input_module=input_module,
+            output_module=output_module,
+        )
+    except BaseException:
+        # Any failure after the store opened (invalid metadata, config
+        # rebuild, state injection, or task cancellation) must release the
+        # writer lock; a leaked lock leaves the .kohakutr unopenable by a
+        # fresh writer on Windows.
+        try:
+            store.close(update_status=False)
+        except Exception:
+            logger.warning(
+                "resume_agent: closing store after failed resume failed",
+                exc_info=True,
+            )
+        raise
+
+
+def _resume_agent_from_open_store(
+    store: SessionStore,
+    session_path: str | Path,
+    *,
+    pwd_override: str | None,
+    io_mode: str | None,
+    llm: Any,
+    input_module: InputModule | None,
+    output_module: OutputModule | None,
+) -> tuple[Agent, SessionStore]:
+    """Rebuild + rehydrate the agent from an already-open ``store``.
+
+    Split out of :func:`resume_agent` so the caller can guard the whole
+    post-open flow with one close-on-failure handler.
+    """
     meta = store.load_meta()
 
     # Accept "agent" (worker-spawned single creature, host-spawned solo
@@ -388,6 +478,11 @@ def resume_agent(
     # programs and contradicted core/agent_workspace's design note.
     pwd = pwd_override or meta.get("pwd", ".")
     if not (pwd and os.path.isdir(pwd)):
+        if pwd and not pwd_override:
+            logger.warning(
+                "Saved working dir no longer exists; falling back to cwd",
+                saved_pwd=pwd,
+            )
         pwd = None
 
     # IO module overrides — explicit instances win over io_mode shortcut.

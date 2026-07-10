@@ -157,6 +157,78 @@ class TestBuildConversation:
         assert out[1]["name"] == "bash"
 
 
+class TestPendingTailAcrossResume:
+    def test_pending_call_survives_snapshot_rebuild_and_completes(self):
+        # Full lifecycle: a compact snapshot saved mid-turn carries an
+        # in-flight announcement → the resume REBUILD must keep it →
+        # the arriving result pairs with it → ordinary serialization
+        # keeps the completed pair.
+        saved = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "q"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "pending_1",
+                        "type": "function",
+                        "function": {"name": "bash", "arguments": "{}"},
+                    }
+                ],
+            },
+        ]
+        conv = _build_conversation(saved)
+        announced = [
+            tc["id"]
+            for m in conv.get_messages()
+            if getattr(m, "role", None) == "assistant"
+            and getattr(m, "tool_calls", None)
+            for tc in m.tool_calls
+        ]
+        assert (
+            "pending_1" in announced
+        ), "resume rebuild must keep the in-flight announcement"
+        # The result lands (post-watermark tail / stop-sweep terminal).
+        conv.append("tool", "done", tool_call_id="pending_1", name="bash")
+        wire = conv.to_messages()
+        assert any(
+            m.get("role") == "tool" and m.get("tool_call_id") == "pending_1"
+            for m in wire
+        )
+        assert any(
+            tc["id"] == "pending_1"
+            for m in wire
+            if m.get("role") == "assistant" and m.get("tool_calls")
+            for tc in m["tool_calls"]
+        )
+
+    def test_wire_serialization_still_drops_dead_pending_call(self):
+        # Provider payloads must NOT carry an unanswered announcement.
+        saved = [
+            {"role": "system", "content": "sys"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "dead_1",
+                        "type": "function",
+                        "function": {"name": "bash", "arguments": "{}"},
+                    }
+                ],
+            },
+        ]
+        conv = _build_conversation(saved)
+        wire = conv.to_messages()
+        assert all(
+            tc["id"] != "dead_1"
+            for m in wire
+            if m.get("role") == "assistant" and m.get("tool_calls")
+            for tc in m["tool_calls"]
+        )
+
+
 # ── _restore_turn_branch_state ────────────────────────────────────
 
 
@@ -207,6 +279,47 @@ class TestRestoreTurnBranchState:
             _restore_turn_branch_state(agent, store, "alice")
             assert agent._turn_index == 3
             assert agent._parent_branch_path == [(1, 1), (2, 1)]
+        finally:
+            store.close()
+
+    def test_restores_one_coherent_ancestry_path(self, tmp_path):
+        # Turn 1 has branches 1+2; turn 2 branch 1 exists ONLY under
+        # turn1/branch1. Per-turn independent max produced
+        # (turn 2, branch 1, parent [(1, 2)]) — an ancestry that never
+        # existed. The restore must mirror replay's path-aware pick.
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "a"},
+                turn_index=1,
+                branch_id=1,
+            )
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "a-regen"},
+                turn_index=1,
+                branch_id=2,
+            )
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "b under old branch"},
+                turn_index=2,
+                branch_id=1,
+                parent_branch_path=[(1, 1)],
+            )
+            store.flush()
+            agent = _FakeAgent()
+            _restore_turn_branch_state(agent, store, "alice")
+            # Path-aware selection: turn1 → branch 2 (latest); turn 2's
+            # only branch lives under (1,1) — incompatible — so the
+            # coherent leaf is turn 1 / branch 2 with an empty parent
+            # path, exactly what replay_conversation renders.
+            assert (agent._turn_index, agent._branch_id) == (1, 2)
+            assert agent._parent_branch_path == []
         finally:
             store.close()
 
@@ -307,22 +420,158 @@ class TestLoadConversationFallback:
         finally:
             store.close()
 
-    def test_snapshot_stale_falls_back_to_replay(self, tmp_path):
+    def test_snapshot_stale_appends_post_watermark_tail(self, tmp_path):
+        # The snapshot is the only artifact reflecting compaction — a
+        # full replay would resurrect compacted history. A stale
+        # snapshot keeps its prefix; only events past the watermark
+        # replay on top of it.
         store = SessionStore(str(tmp_path / "x.kohakutr"))
         try:
             store.append_event("alice", "user_message", {"content": "fresh"})
             store.append_event("alice", "user_message", {"content": "newer"})
-            # Snapshot is older than the last event.
             store.save_conversation("alice", [{"role": "user", "content": "stale"}])
             store.state["alice:snapshot_event_id"] = 1
             store.flush()
             out = _load_conversation_with_replay_fallback(store, "alice")
-            # Replay rebuilds from events; "fresh" and "newer" appear.
             contents = [m["content"] for m in out if m["role"] == "user"]
-            assert "fresh" in contents
-            assert "newer" in contents
+            assert contents == ["stale", "newer"]
         finally:
             store.close()
+
+    def test_snapshot_stale_tail_with_branch_fork_falls_back_to_replay(self, tmp_path):
+        # An edit / regenerate after the snapshot REWRITES earlier
+        # turns; blind snapshot+tail append would keep the superseded
+        # turn AND the fork. Fork-bearing tails must full-replay.
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "original"},
+                turn_index=1,
+                branch_id=1,
+            )
+            store.save_conversation("alice", [{"role": "user", "content": "original"}])
+            store.state["alice:snapshot_event_id"] = 1
+            # Fork of turn 1 landed AFTER the snapshot.
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "edited"},
+                turn_index=1,
+                branch_id=2,
+            )
+            store.flush()
+            out = _load_conversation_with_replay_fallback(store, "alice")
+            contents = [m["content"] for m in out if m["role"] == "user"]
+            assert contents.count("original") + contents.count("edited") == 1, (
+                "the superseded turn and its fork must not BOTH appear: " f"{contents}"
+            )
+        finally:
+            store.close()
+
+    def test_continuation_on_existing_branch_keeps_snapshot(self, tmp_path):
+        # A tail event on an ALREADY-forked branch (pair seen before
+        # the watermark) is ordinary continuation — discarding the
+        # compacted snapshot for it resurrects pre-compact history.
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "on-branch-2"},
+                turn_index=1,
+                branch_id=2,
+            )
+            store.save_conversation(
+                "alice", [{"role": "user", "content": "compacted-prefix"}]
+            )
+            store.state["alice:snapshot_event_id"] = 1
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "continuation"},
+                turn_index=1,
+                branch_id=2,
+            )
+            store.flush()
+            out = _load_conversation_with_replay_fallback(store, "alice")
+            contents = [m["content"] for m in out if m["role"] == "user"]
+            assert "compacted-prefix" in contents, (
+                "snapshot must be kept for a non-fork tail; got " f"{contents}"
+            )
+            assert "continuation" in contents
+        finally:
+            store.close()
+
+    def test_snapshot_stale_tail_tool_events_replay_paired(self, tmp_path):
+        # Live streams carry tool_call/tool_result (never
+        # assistant_tool_calls); the tail replay must normalize them so
+        # tool results arrive paired instead of orphaned.
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event("alice", "user_message", {"content": "q"})
+            store.save_conversation("alice", [{"role": "user", "content": "q"}])
+            store.state["alice:snapshot_event_id"] = 1
+            store.append_event(
+                "alice", "tool_call", {"name": "grep", "call_id": "grep_1", "args": {}}
+            )
+            store.append_event(
+                "alice",
+                "tool_result",
+                {"name": "grep", "call_id": "grep_1", "output": "hit"},
+            )
+            store.flush()
+            out = _load_conversation_with_replay_fallback(store, "alice")
+            tools = [m for m in out if m.get("role") == "tool"]
+            assert tools and tools[0]["tool_call_id"] == "grep_1"
+            announced = [
+                tc.get("id")
+                for m in out
+                if m.get("role") == "assistant" and m.get("tool_calls")
+                for tc in m["tool_calls"]
+            ]
+            assert "grep_1" in announced
+        finally:
+            store.close()
+
+    def test_missing_snapshot_replay_is_normalized(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event("alice", "user_message", {"content": "q"})
+            store.append_event(
+                "alice", "tool_call", {"name": "bash", "call_id": "bash_1", "args": {}}
+            )
+            store.append_event(
+                "alice",
+                "tool_result",
+                {"name": "bash", "call_id": "bash_1", "output": "ok"},
+            )
+            store.flush()
+            out = _load_conversation_with_replay_fallback(store, "alice")
+            announced = [
+                tc.get("id")
+                for m in out
+                if m.get("role") == "assistant" and m.get("tool_calls")
+                for tc in m["tool_calls"]
+            ]
+            assert "bash_1" in announced
+        finally:
+            store.close()
+
+    def test_build_conversation_prunes_orphan_tool_messages(self):
+        # Old snapshots can carry orphans; they must be dropped ONCE at
+        # build time so every later to_messages() stops re-warning.
+        conv = _build_conversation(
+            [
+                {"role": "user", "content": "hi"},
+                {"role": "tool", "content": "zombie", "tool_call_id": "dead_1"},
+                {"role": "assistant", "content": "reply"},
+            ]
+        )
+        roles = [getattr(m, "role", None) for m in conv.get_messages()]
+        assert "tool" not in roles
+        assert roles == ["user", "assistant"]
 
     def test_missing_snapshot_event_id_uses_snapshot(self, tmp_path):
         # When there's a snapshot but no recorded snapshot_event_id,
@@ -710,6 +959,41 @@ class TestResumeAgent:
             s.close()
         with pytest.raises(ValueError, match="no config_path"):
             resume_agent(path)
+
+    def test_failed_resume_releases_writer_lock(
+        self, tmp_path, patched_llm, monkeypatch
+    ):
+        # A resume that fails after opening the store (here: invalid meta
+        # with no config_path/snapshot) must close it, releasing the
+        # writer lock — otherwise the .kohakutr can never be re-opened by
+        # a fresh writer (and on Windows the file itself can't be removed).
+        import kohakuterrarium.session.resume as resume_mod
+
+        path = tmp_path / "sess.kohakutr.v2"
+        s = SessionStore(str(path))
+        try:
+            s.meta["format_version"] = 2
+            s.init_meta("sess", "agent", "", str(tmp_path), ["resumee"])
+        finally:
+            s.close()
+        # Hold a reference to the opened store so a leaked handle can't be
+        # GC-collected before the assertion (that would release the OS
+        # lock and mask the bug).
+        opened = {}
+        real_open = resume_mod._open_store_with_migration
+
+        def _capture_open(p, **kw):
+            store = real_open(p, **kw)
+            opened["store"] = store
+            return store
+
+        monkeypatch.setattr(resume_mod, "_open_store_with_migration", _capture_open)
+        with pytest.raises(ValueError, match="no config_path"):
+            resume_agent(path)
+        # The store was closed → its writer lock released.
+        assert getattr(opened["store"], "_closed", False) is True
+        reopened = SessionStore(str(path), writer_lock=True)
+        reopened.close()
 
     def test_io_mode_override_builds_modules(self, tmp_path, patched_llm):
         # Passing io_mode="plain" makes resume build + wire the plain

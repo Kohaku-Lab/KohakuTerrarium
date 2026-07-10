@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kohakuterrarium.builtins.inputs.none import NoneInput
+from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium import resume as resume_mod
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder, _FakeAgent
 from kohakuterrarium.terrarium.creature_host import Creature
@@ -215,6 +216,77 @@ class TestResumeIntoEngine:
         finally:
             await t.shutdown()
 
+    async def test_saved_state_injected_before_creatures_start(
+        self, monkeypatch, tmp_path
+    ):
+        # A started creature schedules its input drive + startup
+        # triggers immediately — injection after start races them
+        # against an empty conversation.
+        monkeypatch.setattr(resume_mod, "detect_session_type", lambda p: "terrarium")
+        fake_store = SimpleNamespace(
+            load_meta=lambda: {
+                "config_path": "/tmp/recipe.yaml",
+                "pwd": ".",
+                "agents": ["alice"],
+            },
+            update_status=lambda s: None,
+        )
+        monkeypatch.setattr(
+            resume_mod, "_open_store_with_migration", lambda p, **_kw: fake_store
+        )
+
+        from kohakuterrarium.terrarium.config import TerrariumConfig
+
+        fake_config = TerrariumConfig(name="t", creatures=[], channels=[])
+        monkeypatch.setattr(resume_mod, "load_terrarium_config", lambda p: fake_config)
+
+        engine_holder = {}
+        running_at_inject = []
+
+        async def _fake_apply_recipe(config, pwd=None, start=True, **_):
+            t = engine_holder["t"]
+            agent = _FakeAgent(name="alice")
+            agent.attach_session_store = lambda s: None
+            c = Creature(
+                creature_id="alice",
+                name="alice",
+                agent=agent,
+                config=agent.config,
+            )
+            await t.add_creature(c, start=start)
+            return t._topology.graphs[c.graph_id]
+
+        def _inject(agent, store, name):
+            running_at_inject.append(agent.is_running)
+
+        monkeypatch.setattr(resume_mod, "inject_saved_state", _inject)
+
+        running_at_replay = []
+
+        async def _fake_replay(engine, sid):
+            for cid in engine.get_graph(sid).creature_ids:
+                running_at_replay.append(engine.get_creature(cid).agent.is_running)
+
+        monkeypatch.setattr(resume_mod._topo_snap, "replay", _fake_replay)
+
+        t = await TestTerrariumBuilder().build()
+        engine_holder["t"] = t
+        t.apply_recipe = _fake_apply_recipe
+        t.attach_session = AsyncMock()
+        try:
+            await resume_mod.resume_into_engine(t, tmp_path / "saved.kohakutr")
+            assert running_at_inject == [
+                False
+            ], "state must be injected BEFORE the creature starts"
+            # Startup triggers must see restored channels/wires — the
+            # topology replay has to land before any creature starts.
+            assert running_at_replay == [
+                False
+            ], "topology must be replayed BEFORE the creature starts"
+            assert t.get_creature("alice").agent.is_running is True
+        finally:
+            await t.shutdown()
+
     async def test_terrarium_resume_no_autosession_ghost(self, monkeypatch, tmp_path):
         # REGRESSION PIN: resuming a terrarium into an engine that has
         # autosession configured (``Terrarium(session_dir=...)`` — every
@@ -253,9 +325,247 @@ class TestResumeIntoEngine:
             # SessionStore.
             t.attach_session = AsyncMock()
             await resume_mod.resume_into_engine(t, tmp_path / "saved.kohakutr")
-            # No ghost store file was minted next to the saved session,
-            # and the engine claims ownership of nothing.
+            # No ghost store file was minted next to the saved session.
             assert list(session_dir.glob("*.kohakutr")) == []
-            assert t._owned_sessions == set()
+            # The engine owns exactly the RESUMED store (it opened the
+            # file, so shutdown must close it — a leaked writer lock
+            # blocks any later adopt) and nothing else.
+            assert len(t._owned_sessions) == 1
+        finally:
+            await t.shutdown()
+
+    def _write_terrarium_session(self, tmp_path) -> "Path":
+        # A real terrarium-typed session file so the resume path opens it
+        # under a writer lock (the leak surfaces as an un-reopenable file).
+        path = tmp_path / "saved.kohakutr.v2"
+        s = SessionStore(str(path))
+        try:
+            s.meta["format_version"] = 2
+            s.init_meta(
+                "sess", "terrarium", "/tmp/recipe.yaml", str(tmp_path), ["alice"]
+            )
+            s.flush()
+        finally:
+            s.close()
+        return path
+
+    async def test_terrarium_resume_config_load_failure_closes_store(
+        self, monkeypatch, tmp_path
+    ):
+        # A failure AFTER the store opens (here: the recipe fails to load)
+        # must release the writer lock the resume held, or the .kohakutr
+        # can never be re-opened by a fresh writer.
+        path = self._write_terrarium_session(tmp_path)
+
+        # Hold a reference to the opened store so a leaked handle can't be
+        # silently GC-collected before the assertion (that would release
+        # the OS lock and mask the bug).
+        opened = {}
+        real_open = resume_mod._open_store_with_migration
+
+        def _capture_open(p, **kw):
+            store = real_open(p, **kw)
+            opened["store"] = store
+            return store
+
+        monkeypatch.setattr(resume_mod, "_open_store_with_migration", _capture_open)
+
+        def _boom(_cfg_path):
+            raise RuntimeError("recipe load failed")
+
+        monkeypatch.setattr(resume_mod, "load_terrarium_config", _boom)
+
+        t = await TestTerrariumBuilder().build()
+        try:
+            with pytest.raises(RuntimeError, match="recipe load failed"):
+                await resume_mod.resume_into_engine(t, path)
+            # The store the resume opened was closed (writer lock released).
+            assert getattr(opened["store"], "_closed", False) is True
+            # A fresh writer can reopen the file.
+            reopened = SessionStore(str(path), writer_lock=True)
+            reopened.close()
+        finally:
+            await t.shutdown()
+
+    async def test_terrarium_resume_inject_failure_rolls_back(
+        self, monkeypatch, tmp_path
+    ):
+        # A failure DURING per-creature injection must both release the
+        # store's writer lock AND remove the creatures this adoption
+        # already added — a half-resumed graph must not survive.
+        path = self._write_terrarium_session(tmp_path)
+
+        from kohakuterrarium.terrarium.config import TerrariumConfig
+
+        fake_config = TerrariumConfig(name="t", creatures=[], channels=[])
+        monkeypatch.setattr(resume_mod, "load_terrarium_config", lambda p: fake_config)
+
+        opened = {}
+        real_open = resume_mod._open_store_with_migration
+
+        def _capture_open(p, **kw):
+            store = real_open(p, **kw)
+            opened["store"] = store
+            return store
+
+        monkeypatch.setattr(resume_mod, "_open_store_with_migration", _capture_open)
+
+        engine_holder = {}
+
+        async def _fake_apply_recipe(config, pwd=None, created_ids=None, **_):
+            t = engine_holder["t"]
+            agent = _FakeAgent(name="alice")
+            agent.attach_session_store = lambda s: None
+            c = Creature(
+                creature_id="alice",
+                name="alice",
+                agent=agent,
+                config=agent.config,
+            )
+            added = await t.add_creature(c, start=False)
+            if created_ids is not None:
+                created_ids.append(added.creature_id)
+            return t._topology.graphs[c.graph_id]
+
+        def _boom(agent, store, name):
+            raise RuntimeError("inject failed")
+
+        monkeypatch.setattr(resume_mod, "inject_saved_state", _boom)
+
+        t = await TestTerrariumBuilder().build()
+        engine_holder["t"] = t
+        t.apply_recipe = _fake_apply_recipe
+        try:
+            with pytest.raises(RuntimeError, match="inject failed"):
+                await resume_mod.resume_into_engine(t, path)
+            # The creature the failed adoption added was rolled back.
+            assert "alice" not in t._creatures
+            # The store the resume opened was closed (writer lock released).
+            assert getattr(opened["store"], "_closed", False) is True
+            reopened = SessionStore(str(path), writer_lock=True)
+            reopened.close()
+        finally:
+            await t.shutdown()
+
+    async def test_terrarium_resume_rollback_spares_concurrent_creature(
+        self, monkeypatch, tmp_path
+    ):
+        # Reviewer repro: a creature a CONCURRENT task adds mid-adoption
+        # must NOT be swept by the failed adoption's rollback. Only the
+        # exact ids this adoption created are removed — never a global
+        # before/after diff of the engine's creatures.
+        import kohakuterrarium.terrarium.topology as _topo
+
+        path = self._write_terrarium_session(tmp_path)
+
+        from kohakuterrarium.terrarium.config import TerrariumConfig
+
+        fake_config = TerrariumConfig(name="t", creatures=[], channels=[])
+        monkeypatch.setattr(resume_mod, "load_terrarium_config", lambda p: fake_config)
+
+        opened = {}
+        real_open = resume_mod._open_store_with_migration
+
+        def _capture_open(p, **kw):
+            store = real_open(p, **kw)
+            opened["store"] = store
+            return store
+
+        monkeypatch.setattr(resume_mod, "_open_store_with_migration", _capture_open)
+
+        engine_holder = {}
+
+        async def _fake_apply_recipe(config, pwd=None, created_ids=None, **_):
+            t = engine_holder["t"]
+            agent = _FakeAgent(name="alice")
+            agent.attach_session_store = lambda s: None
+            c = Creature(
+                creature_id="alice",
+                name="alice",
+                agent=agent,
+                config=agent.config,
+            )
+            added = await t.add_creature(c, start=False)
+            if created_ids is not None:
+                created_ids.append(added.creature_id)
+            return t._topology.graphs[c.graph_id]
+
+        def _boom_inject(agent, store, name):
+            # Stand in for a concurrent task landing an unrelated creature
+            # after this adoption's own creature was added.
+            t = engine_holder["t"]
+            cc_agent = _FakeAgent(name="concurrent")
+            cc = Creature(
+                creature_id="concurrent",
+                name="concurrent",
+                agent=cc_agent,
+                config=cc_agent.config,
+            )
+            cc.graph_id = _topo.add_creature(t._topology, "concurrent")
+            t._creatures["concurrent"] = cc
+            raise RuntimeError("inject failed")
+
+        monkeypatch.setattr(resume_mod, "inject_saved_state", _boom_inject)
+
+        t = await TestTerrariumBuilder().with_creature("preexisting").build()
+        engine_holder["t"] = t
+        t.apply_recipe = _fake_apply_recipe
+        try:
+            with pytest.raises(RuntimeError, match="inject failed"):
+                await resume_mod.resume_into_engine(t, path)
+            # (a) the adoption's own creature is rolled back;
+            assert "alice" not in t._creatures
+            # (b) the concurrent creature SURVIVES;
+            assert "concurrent" in t._creatures
+            # (c) the pre-existing creature survives;
+            assert "preexisting" in t._creatures
+            # (d) the store's writer lock was released.
+            assert getattr(opened["store"], "_closed", False) is True
+        finally:
+            await t.shutdown()
+
+    async def test_agent_resume_rollback_when_start_fails(self, monkeypatch, tmp_path):
+        # Standalone-agent resume: ``add_creature`` inserts the creature
+        # into the topology + ``_creatures`` BEFORE awaiting startup. If
+        # ``start()`` fails, the creature must still be rolled back — the
+        # id is recorded at insertion, not after ``add_creature`` returns.
+        monkeypatch.setattr(resume_mod, "detect_session_type", lambda p: "agent")
+        # Deterministic id so the leak is observable — the default mints a
+        # random suffix, which would make an ``"alice" in`` check vacuous.
+        monkeypatch.setattr(resume_mod, "_safe_creature_id", lambda name: name)
+
+        store = SessionStore(str(tmp_path / "agent.kohakutr.v2"), writer_lock=True)
+
+        fake_agent = _FakeAgent(name="alice")
+        fake_agent.config = SimpleNamespace(name="alice")
+
+        async def _boom_start():
+            raise RuntimeError("start failed")
+
+        fake_agent.start = _boom_start
+
+        def _resume_agent(
+            path,
+            pwd_override=None,
+            io_mode=None,
+            llm=None,
+            *,
+            input_module=None,
+            output_module=None,
+        ):
+            return fake_agent, store
+
+        monkeypatch.setattr(resume_mod, "resume_agent", _resume_agent)
+
+        t = await TestTerrariumBuilder().with_creature("preexisting").build()
+        try:
+            with pytest.raises(RuntimeError, match="start failed"):
+                await resume_mod.resume_into_engine(t, tmp_path / "agent.kohakutr.v2")
+            # The half-adopted creature was rolled back; only the
+            # pre-existing creature remains.
+            assert "alice" not in t._creatures
+            assert set(t._creatures) == {"preexisting"}
+            # The store's writer lock was released.
+            assert getattr(store, "_closed", False) is True
         finally:
             await t.shutdown()
