@@ -15,6 +15,7 @@ from kohakuterrarium.core.compact import (
     CompactManager,
 )
 from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.llm.message import create_message
 
 # ── stubs ────────────────────────────────────────────────────────
 
@@ -427,6 +428,339 @@ class TestRunCompact:
         # Nothing happened.
         assert mgr._compact_count == 0
 
+    async def test_full_flow_clears_stale_last_usage(self):
+        # The next round's usage still measures the pre-splice prompt —
+        # it must not be able to re-trigger on that stale number.
+        conv = _build_conversation(n_user=12)
+        mgr = _build_mgr(conversation=conv, llm=_LLM(chunks=["S"]))
+        mgr._controller._last_usage = {"prompt_tokens": 999_999}
+        await mgr._run_compact()
+        assert mgr._compact_count == 1
+        assert mgr._controller._last_usage == {}
+
+
+# ── stale-usage guard (compact double-fire) ──────────────────────
+
+
+class TestStaleUsageGuard:
+    def _mgr_with_conv(self, conv):
+        mgr = _build_mgr(conversation=conv)
+        mgr.config.max_tokens = 100_000
+        return mgr
+
+    def test_post_splice_stale_usage_suppressed(self):
+        import time as _t
+
+        # A round that started pre-splice can deliver its huge
+        # prompt_tokens after the cooldown expired — the tiny spliced
+        # conversation must veto the re-fire.
+        conv = Conversation()
+        conv.append("system", "sys")
+        conv.append("assistant", "[summary]")
+        conv.append("user", "next")
+        mgr = self._mgr_with_conv(conv)
+        mgr._last_compact_time = _t.time() - mgr.config.cooldown_seconds - 1
+        assert mgr.should_compact(prompt_tokens=999_999) is False
+
+    def test_post_splice_genuinely_large_conversation_fires(self):
+        import time as _t
+
+        conv = Conversation()
+        conv.append("system", "sys")
+        for _ in range(20):
+            conv.append("user", "x" * 20_000)
+        mgr = self._mgr_with_conv(conv)
+        mgr._last_compact_time = _t.time() - mgr.config.cooldown_seconds - 1
+        assert mgr.should_compact(prompt_tokens=95_000) is True
+
+    def test_stale_window_expiry_restores_trust(self):
+        import time as _t
+
+        conv = Conversation()
+        conv.append("system", "sys")
+        conv.append("user", "small")
+        mgr = self._mgr_with_conv(conv)
+        mgr._last_compact_time = _t.time() - 10_000
+        assert mgr.should_compact(prompt_tokens=95_000) is True
+
+
+# ── splice safety ────────────────────────────────────────────────
+
+
+class TestSpliceSafety:
+    def test_splice_aborts_when_conversation_shrank(self):
+        conv = _build_conversation(n_user=6)
+        msgs = conv.get_messages()
+        boundary = 9
+        expected_last = msgs[boundary - 1]
+        # Rewind / emergency drop landed while the summary LLM ran.
+        conv._messages = conv._messages[:4]
+        mgr = _build_mgr(conversation=conv)
+        before = list(conv.get_messages())
+        assert (
+            mgr._splice_conversation(conv, boundary, "S", expected_last=expected_last)
+            is False
+        )
+        assert conv.get_messages() == before
+
+    def test_splice_rejects_boundary_on_tool_result(self):
+        # The boundary is made tool-safe BEFORE summarization; a
+        # tool-result head reaching the splice means the conversation
+        # changed shape — silently walking it back would keep
+        # already-summarized content raw (duplicated).
+        conv = Conversation()
+        conv.append("system", "sys")
+        for i in range(4):
+            conv.append("user", f"u{i}")
+            conv.append(
+                "assistant",
+                "",
+                tool_calls=[
+                    {
+                        "id": f"tc_{i}",
+                        "type": "function",
+                        "function": {"name": "t", "arguments": "{}"},
+                    }
+                ],
+            )
+            conv.append("tool", f"r{i}", tool_call_id=f"tc_{i}")
+        msgs = conv.get_messages()
+        boundary = next(i for i, m in enumerate(msgs) if m.role == "tool" and i > 3)
+        mgr = _build_mgr(conversation=conv)
+        before = list(conv.get_messages())
+        assert (
+            mgr._splice_conversation(
+                conv, boundary, "S", expected_last=msgs[boundary - 1]
+            )
+            is False
+        )
+        assert conv.get_messages() == before
+
+    async def test_boundary_walkback_happens_before_summary(self):
+        # The tool-safe adjustment must run BEFORE the summarizer:
+        # content kept raw in the live zone must never also appear in
+        # the summarizer's input (double representation).
+        conv = Conversation()
+        conv.append("system", "sys")
+        conv.append("user", "u0")
+        conv.append("assistant", "a0")
+        conv.append("user", "u1")
+        conv.append(
+            "assistant",
+            "I will run bash now",
+            tool_calls=[
+                {
+                    "id": "tc_x",
+                    "type": "function",
+                    "function": {"name": "bash", "arguments": "{}"},
+                }
+            ],
+        )
+        conv.append("tool", "done", tool_call_id="tc_x")
+        conv.append("user", "u2")
+        conv.append("assistant", "a2")
+        conv.append("user", "u3")
+        conv.append("assistant", "a3")
+        llm = _LLM(chunks=["S"])
+        mgr = _build_mgr(conversation=conv, llm=llm)
+        # keep_recent_turns high → half-cap fallback puts the raw
+        # boundary exactly ON the tool result (index 5 of 10).
+        mgr.config.keep_recent_turns = 99
+        await mgr._run_compact()
+        assert mgr._compact_count == 1
+        summary_inputs = "".join(str(messages) for messages, _kw in llm.calls)
+        assert "I will run bash now" not in summary_inputs, (
+            "announcement kept raw in the live zone must not ALSO be " "summarized"
+        )
+        final = [str(m.content) for m in conv.get_messages()]
+        assert sum("I will run bash now" in c for c in final) == 1
+
+    async def test_inplace_prefix_edit_aborts_splice(self):
+        # An edit that rewrites a summarized message IN PLACE keeps
+        # object identity — only a content fingerprint catches it.
+        conv = _build_conversation(n_user=10)
+        router = _Router()
+
+        class _MutatingLLM(_LLM):
+            async def chat(self, messages, **kwargs):
+                conv._messages[1].content = "EDITED while summarizing"
+                yield "S"
+
+        mgr = _build_mgr(conversation=conv, llm=_MutatingLLM(), router=router)
+        await mgr._run_compact()
+        assert mgr._compact_count == 0
+        contents = [str(m.content) for m in conv.get_messages()]
+        assert "EDITED while summarizing" in contents, (
+            "the in-place edit must survive — not be discarded under a "
+            "summary generated from the old content"
+        )
+        terminals = [
+            (k, (m or {}).get("reason"))
+            for k, _msg, m in router.calls
+            if k in ("compact_complete", "compact_skipped")
+        ]
+        assert terminals == [("compact_skipped", "conversation_changed")]
+
+    def test_splice_preserves_inflight_tail_announcement(self):
+        # The splice runs mid-turn: the live tail can end with an
+        # assistant tool announcement whose results are still
+        # executing. Pruning it orphans the results when they arrive.
+        conv = _build_conversation(n_user=6)
+        conv.append(
+            "assistant",
+            "",
+            tool_calls=[
+                {
+                    "id": "pending_1",
+                    "type": "function",
+                    "function": {"name": "bash", "arguments": "{}"},
+                }
+            ],
+        )
+        msgs = conv.get_messages()
+        boundary = 5
+        mgr = _build_mgr(conversation=conv)
+        assert (
+            mgr._splice_conversation(
+                conv, boundary, "S", expected_last=msgs[boundary - 1]
+            )
+            is True
+        )
+        tail = conv.get_messages()[-1]
+        assert getattr(tail, "role", None) == "assistant"
+        calls = getattr(tail, "tool_calls", None)
+        assert (
+            calls and calls[0]["id"] == "pending_1"
+        ), "in-flight announcement must survive the splice"
+
+    def test_splice_preserves_partially_answered_tail(self):
+        # Two calls announced, one result landed, one still running —
+        # the pending id must stay in the announcement's tool_calls.
+        conv = _build_conversation(n_user=6)
+        conv.append(
+            "assistant",
+            "",
+            tool_calls=[
+                {
+                    "id": "done_1",
+                    "type": "function",
+                    "function": {"name": "bash", "arguments": "{}"},
+                },
+                {
+                    "id": "pending_2",
+                    "type": "function",
+                    "function": {"name": "grep", "arguments": "{}"},
+                },
+            ],
+        )
+        conv.append("tool", "result", tool_call_id="done_1")
+        msgs = conv.get_messages()
+        boundary = 5
+        mgr = _build_mgr(conversation=conv)
+        assert (
+            mgr._splice_conversation(
+                conv, boundary, "S", expected_last=msgs[boundary - 1]
+            )
+            is True
+        )
+        announce = conv.get_messages()[-2]
+        ids = {tc["id"] for tc in (getattr(announce, "tool_calls", None) or [])}
+        assert ids == {"done_1", "pending_2"}
+
+    async def test_persisted_snapshot_keeps_inflight_tail(self):
+        # to_messages() re-sanitizes for the WIRE (correctly dropping
+        # unanswered tool_calls) — the persisted snapshot must not, or
+        # resume can't reconstruct the active native round.
+        conv = _build_conversation(n_user=10)
+        conv.append(
+            "assistant",
+            "",
+            tool_calls=[
+                {
+                    "id": "pending_1",
+                    "type": "function",
+                    "function": {"name": "bash", "arguments": "{}"},
+                }
+            ],
+        )
+        store = _Store()
+        mgr = _build_mgr(conversation=conv, llm=_LLM(chunks=["s"]), store=store)
+        await mgr._run_compact()
+        assert store.saved_conversations, "compact must persist a snapshot"
+        _, saved = store.saved_conversations[-1]
+        announced = [
+            tc["id"]
+            for m in saved
+            if m.get("role") == "assistant" and m.get("tool_calls")
+            for tc in m["tool_calls"]
+        ]
+        assert "pending_1" in announced
+
+    async def test_replaced_conversation_aborts_without_success(self):
+        # /clear or attach can swap controller.conversation while the
+        # summarizer runs — the captured object must NOT be spliced,
+        # persisted, or counted as a successful round.
+        conv = _build_conversation(n_user=10)
+        router = _Router()
+        store = _Store()
+
+        replacement = _build_conversation(n_user=2)
+        mgr = _build_mgr(conversation=conv, router=router, store=store)
+
+        class _SwappingLLM(_LLM):
+            async def chat(self, messages, **kwargs):
+                mgr._controller.conversation = replacement
+                yield "s"
+
+        mgr._llm = _SwappingLLM()
+        await mgr._run_compact()
+        assert mgr._compact_count == 0
+        assert store.saved_conversations == []
+        terminals = [
+            (k, (m or {}).get("reason"))
+            for k, _msg, m in router.calls
+            if k in ("compact_complete", "compact_skipped")
+        ]
+        assert terminals == [("compact_skipped", "conversation_replaced")]
+        # Neither object carries a summary splice.
+        assert all(
+            "Previous context summary" not in str(m.content)
+            for m in conv.get_messages() + replacement.get_messages()
+        )
+
+    async def test_inplace_tool_call_id_edit_aborts_splice(self):
+        # The fingerprint must cover the CANONICAL message dict — a
+        # role=tool message's ``tool_call_id`` is provider-relevant but
+        # absent from (role, content, tool_calls); mutating it in place
+        # must still abort the splice.
+        conv = _build_conversation(n_user=10)
+        conv._messages[2].tool_calls = [
+            {
+                "id": "orig_1",
+                "type": "function",
+                "function": {"name": "bash", "arguments": "{}"},
+            }
+        ]
+        conv._messages.insert(
+            3, create_message("tool", "r", tool_call_id="orig_1", name="bash")
+        )
+        router = _Router()
+
+        class _MutatingLLM(_LLM):
+            async def chat(self, messages, **kwargs):
+                conv._messages[3].tool_call_id = "swapped_1"
+                yield "S"
+
+        mgr = _build_mgr(conversation=conv, llm=_MutatingLLM(), router=router)
+        await mgr._run_compact()
+        assert mgr._compact_count == 0
+        terminals = [
+            (k, (m or {}).get("reason"))
+            for k, _msg, m in router.calls
+            if k in ("compact_complete", "compact_skipped")
+        ]
+        assert terminals == [("compact_skipped", "conversation_changed")]
+
     async def test_lease_acquired_when_caller_passes_none(self):
         conv = _build_conversation(n_user=10)
         mgr = _build_mgr(conversation=conv, llm=_LLM(chunks=["s"]))
@@ -438,6 +772,85 @@ class TestRunCompact:
             assert mgr._compact_count == 0
         finally:
             mgr._dispatch.release(first)
+
+
+class TestCompactTerminalGuarantee:
+    """Every started round must emit exactly one terminal
+    (``compact_complete`` or ``compact_skipped``) — FE / TUI / rich CLI
+    keep a "compacting…" indicator open until one lands."""
+
+    @staticmethod
+    def _terminals(router):
+        return [
+            (k, (m or {}).get("reason"))
+            for k, _msg, m in router.calls
+            if k in ("compact_complete", "compact_skipped")
+        ]
+
+    async def test_success_emits_single_complete_terminal(self):
+        conv = _build_conversation(n_user=10)
+        router = _Router()
+        mgr = _build_mgr(conversation=conv, llm=_LLM(chunks=["s"]), router=router)
+        await mgr._run_compact()
+        assert [k for k, _ in self._terminals(router)] == ["compact_complete"]
+
+    async def test_insufficient_boundary_emits_skipped(self):
+        conv = _build_conversation(n_user=1)
+        router = _Router()
+        mgr = _build_mgr(conversation=conv, llm=_LLM(), router=router)
+        await mgr._run_compact()
+        assert self._terminals(router) == [("compact_skipped", "nothing_to_compact")]
+
+    async def test_summary_failure_emits_skipped(self):
+        conv = _build_conversation(n_user=10)
+        router = _Router()
+        mgr = _build_mgr(
+            conversation=conv, llm=_LLM(raises=RuntimeError("boom")), router=router
+        )
+        await mgr._run_compact()
+        assert self._terminals(router) == [("compact_skipped", "summary_failed")]
+
+    async def test_splice_race_emits_skipped(self):
+        conv = _build_conversation(n_user=10)
+        router = _Router()
+
+        class _MutatingLLM(_LLM):
+            async def chat(self, messages, **kwargs):
+                conv._messages = conv._messages[:3]
+                yield "s"
+
+        mgr = _build_mgr(conversation=conv, llm=_MutatingLLM(), router=router)
+        await mgr._run_compact()
+        assert self._terminals(router) == [("compact_skipped", "conversation_changed")]
+
+    async def test_cancel_emits_skipped(self):
+        conv = _build_conversation(n_user=10)
+        router = _Router()
+        gate = asyncio.Event()
+
+        class _BlockingLLM(_LLM):
+            async def chat(self, messages, **kwargs):
+                await gate.wait()
+                yield "s"
+
+        mgr = _build_mgr(conversation=conv, llm=_BlockingLLM(), router=router)
+        task = asyncio.create_task(mgr._run_compact())
+        await asyncio.sleep(0.05)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        assert self._terminals(router) == [("compact_skipped", "cancelled")]
+
+    async def test_plugin_veto_emits_skipped(self):
+        conv = _build_conversation(n_user=10)
+        router = _Router()
+        mgr = _build_mgr(
+            conversation=conv,
+            llm=_LLM(),
+            router=router,
+            plugins=_Plugins(proceed=False),
+        )
+        await mgr._run_compact()
+        assert self._terminals(router) == [("compact_skipped", "plugin_veto")]
 
 
 # ── cancel ───────────────────────────────────────────────────────

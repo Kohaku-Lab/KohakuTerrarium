@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable, Protocol, runtime_checkable
 
 from kohakuterrarium.llm.message import Message
-from kohakuterrarium.llm.recovery import RetryPolicy
+from kohakuterrarium.llm.recovery import RetryPolicy, drop_last_tool_round
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -219,6 +219,16 @@ class LLMProvider(Protocol):
         ...
 
 
+@dataclass
+class OverflowRecoveryState:
+    """Per-request overflow-recovery bookkeeping for provider retry
+    loops. Rescue and drop are independent single-shot stages — see
+    :meth:`BaseLLMProvider._recover_from_overflow`."""
+
+    rescue_attempted: bool = False
+    drop_attempted: bool = False
+
+
 class BaseLLMProvider:
     """
     Base class for LLM providers with common utilities.
@@ -247,6 +257,72 @@ class BaseLLMProvider:
         self._emergency_drop_callbacks: list[Callable[[list[dict[str, Any]]], None]] = (
             []
         )
+        # Optional async hook consulted on context overflow BEFORE the
+        # emergency tool-round drop — e.g. the agent waits out an
+        # in-flight compaction and returns the spliced messages.
+        self._overflow_rescue: Callable[[], Any] | None = None
+
+    async def _try_overflow_rescue(
+        self, current: list[dict[str, Any]] | None = None
+    ) -> list[dict[str, Any]] | None:
+        """Ask the host for a smaller message list before dropping data.
+
+        A rescue that did not shrink the conversation (aborted / no-op
+        compact) returns ``None`` so the emergency drop still runs
+        instead of burning the single recovery retry.
+        """
+        rescue = getattr(self, "_overflow_rescue", None)
+        if rescue is None:
+            return None
+        try:
+            rescued = await rescue()
+        except Exception as e:
+            logger.warning("overflow rescue hook failed", error=str(e), exc_info=True)
+            return None
+        if not rescued:
+            return None
+        if current is not None and len(rescued) >= len(current):
+            logger.warning(
+                "overflow rescue did not shrink the conversation; ignoring",
+                rescued_messages=len(rescued),
+                current_messages=len(current),
+            )
+            return None
+        logger.warning("provider_overflow_rescued", messages=len(rescued))
+        return list(rescued)
+
+    async def _recover_from_overflow(
+        self,
+        current: list[dict[str, Any]],
+        state: "OverflowRecoveryState",
+    ) -> list[dict[str, Any]] | None:
+        """One overflow-recovery step for the provider retry loops.
+
+        Two independent single-shot stages: the compact rescue, then
+        the emergency tool-round drop. A successful rescue must NOT
+        consume the drop — if the rescued conversation still overflows,
+        the next call falls through to the drop instead of re-raising.
+
+        Returns the replacement message list to retry with, or ``None``
+        when both stages are spent.
+        """
+        if not state.rescue_attempted:
+            state.rescue_attempted = True
+            rescued = await self._try_overflow_rescue(current)
+            if rescued is not None:
+                return rescued
+        if not state.drop_attempted:
+            state.drop_attempted = True
+            dropped, recovered = drop_last_tool_round(current)
+            if dropped:
+                self._notify_emergency_drop(recovered)
+                logger.warning(
+                    "provider_emergency_drop",
+                    dropped=dropped,
+                    recovered_messages=len(recovered),
+                )
+                return recovered
+        return None
 
     @property
     def last_tool_calls(self) -> list[NativeToolCall]:

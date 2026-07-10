@@ -181,6 +181,14 @@ class AppOutputMixin:
         self.committer.text("[yellow]⚠ interrupted[/yellow]")
         self._invalidate()
 
+    def on_background_result(self, kind: str, label: str) -> None:
+        """Commit a background-result delivery banner to scrollback."""
+        self._flush_assistant_message()
+        self.committer.text(
+            f"[cyan]⟲ background {kind} result delivered: {label}[/cyan]"
+        )
+        self._invalidate()
+
     # ── Phase B UI events (display-only in CLI v1) ──
 
     def on_ui_event_panel(self, event_type: str, payload: dict) -> None:

@@ -328,6 +328,8 @@ class SessionOutput(OutputModule):
         "token_usage": "_handle_token_usage",
         "compact_start": "_handle_compact_start",
         "compact_complete": "_handle_compact_complete",
+        "compact_skipped": "_handle_compact_skipped",
+        "background_result": "_handle_background_result",
         "processing_complete": "_handle_processing_complete",
         "processing_error": "_handle_processing_error",
         "context_cleared": "_handle_context_cleared",
@@ -590,6 +592,25 @@ class SessionOutput(OutputModule):
                 "round": metadata.get("round", 0),
                 "summary": metadata.get("summary", ""),
                 "messages_compacted": metadata.get("messages_compacted", 0),
+            },
+        )
+
+    def _handle_compact_skipped(self, name: str, detail: str, metadata: dict) -> None:
+        self._record(
+            "compact_skipped",
+            {
+                "round": metadata.get("round", 0),
+                "reason": metadata.get("reason", ""),
+            },
+        )
+
+    def _handle_background_result(self, name: str, detail: str, metadata: dict) -> None:
+        self._record(
+            "background_result",
+            {
+                "job_id": metadata.get("job_id", ""),
+                "kind": metadata.get("kind", "tool"),
+                "label": metadata.get("label", ""),
             },
         )
 

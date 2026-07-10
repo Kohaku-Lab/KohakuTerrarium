@@ -17,12 +17,19 @@ Design:
 import asyncio
 import time
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 
-from kohakuterrarium.core.compact_text import extract_message_text
+from kohakuterrarium.core.compact_splice import (
+    count_keep_messages,
+    prefix_fingerprint,
+    splice_conversation,
+)
+from kohakuterrarium.core.compact_text import (
+    COMPACT_PROMPT,
+    extract_message_text,
+    format_messages_for_summary,
+)
 from kohakuterrarium.core.single_flight import SingleFlightDispatch, SingleFlightLease
-from kohakuterrarium.llm.message import create_message
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -37,40 +44,10 @@ DEFAULT_THRESHOLD = 0.80  # compact when prompt_tokens >= 80% of max_tokens
 DEFAULT_TARGET = 0.40  # aim for 40% of max_tokens after compact
 DEFAULT_KEEP_RECENT = 8  # keep last 8 turns raw (not summarized)
 
-
-COMPACT_PROMPT = """You are summarizing a conversation between an AI agent and a user (or between agents in a team).
-
-Create a structured summary with these exact sections:
-
-### Current Goal
-What is the agent currently trying to achieve?
-
-### Key Decisions
-What important choices were made, and why? Include approximate position (early/mid/late in conversation).
-
-### Progress
-List completed, in-progress, and pending tasks. Use [DONE], [IN PROGRESS], [PENDING] markers.
-
-### Files Modified
-List files that were read, written, or edited with brief context.
-
-### Key Facts
-Important details that the agent needs to remember to continue working.
-
-### Keywords
-Comma-separated list of important terms for keyword search.
-
-### Key Sentences
-Exact quotes from the conversation that should be preserved verbatim.
-
-Rules:
-- Preserve decision rationale ("X because Y", not just "decided X")
-- Keep exact file paths, line numbers, error codes verbatim
-- Use relative temporal markers ("early in session", "after fixing X")
-- Do NOT include raw tool output (it's searchable in session history)
-- Focus on what the agent needs to CONTINUE working, not a narrative
-- If there is a previous summary included, merge its information with new content
-"""
+# Usage from an LLM round that STARTED before a splice can land long
+# after it (long rounds outlive the cooldown). Within this window after
+# a splice, a trigger must be corroborated by the live conversation.
+STALE_USAGE_WINDOW_SECONDS = 900.0
 
 
 @dataclass
@@ -136,10 +113,28 @@ class CompactManager:
             if elapsed < self.config.cooldown_seconds:
                 return False
 
-        if prompt_tokens > 0:
-            return prompt_tokens >= self.config.max_tokens * self.config.threshold
+        if prompt_tokens <= 0:
+            return False
+        if prompt_tokens < self.config.max_tokens * self.config.threshold:
+            return False
+        return not self._usage_is_stale_after_splice()
 
-        return False
+    def _usage_is_stale_after_splice(self) -> bool:
+        """True when a claimed over-threshold usage can't be justified
+        by the live conversation shortly after a splice (the usage came
+        from a round that started pre-splice)."""
+        if not self._last_compact_time or not self._controller:
+            return False
+        if time.time() - self._last_compact_time > STALE_USAGE_WINDOW_SECONDS:
+            return False
+        try:
+            messages = self._controller.conversation.get_messages()
+        except Exception:
+            return False
+        chars = sum(len(extract_message_text(m) or "") for m in messages)
+        # ``chars // 2`` deliberately over-estimates tokens so only a
+        # conversation FAR below threshold vetoes the trigger.
+        return chars // 2 < self.config.max_tokens * self.config.threshold
 
     def trigger_compact(self) -> bool:
         """Start compaction as a background task.
@@ -253,6 +248,21 @@ class CompactManager:
         )
         return True
 
+    def _emit_compact_skipped(self, reason: str, message: str) -> None:
+        """Terminal for a started round that did not complete. Every
+        ``compact_start`` must be closed by exactly one terminal
+        (``compact_complete`` or ``compact_skipped``) — FE / TUI / rich
+        CLI all keep a "compacting…" indicator open until one lands."""
+        if self._output_router:
+            self._output_router.notify_activity(
+                "compact_skipped",
+                message,
+                metadata={
+                    "reason": reason,
+                    "round": self._compact_count + 1,
+                },
+            )
+
     async def _run_compact(self, lease: SingleFlightLease | None = None) -> None:
         """Background compaction task."""
         if lease is None:
@@ -264,6 +274,8 @@ class CompactManager:
                 )
                 return
         self._active_lease = lease
+        terminal_sent = False
+        abort_reason = "aborted"
         try:
             conversation = self._controller.conversation
             messages = conversation.get_messages()
@@ -272,9 +284,16 @@ class CompactManager:
             # A "turn" is roughly: user message + assistant response + tool calls
             keep_count = self._count_keep_messages(messages)
             boundary = len(messages) - keep_count
+            # Tool-safe boundary BEFORE summarization — adjusting at
+            # splice time would keep already-summarized content raw
+            # (duplicated in summary AND live zone).
+            while boundary > 1 and getattr(messages[boundary], "role", None) == "tool":
+                boundary -= 1
 
             if boundary <= 1:
                 logger.debug("Not enough messages to compact")
+                self._emit_compact_skipped("nothing_to_compact", "Nothing to compact")
+                terminal_sent = True
                 return
 
             # Compact zone: messages[1:boundary] (skip system at index 0)
@@ -282,6 +301,8 @@ class CompactManager:
             compact_messages = messages[1:boundary]
 
             if not compact_messages:
+                self._emit_compact_skipped("nothing_to_compact", "Nothing to compact")
+                terminal_sent = True
                 return
 
             # Plugin veto: ``on_compact_start`` is a vetoable callback.
@@ -295,15 +316,10 @@ class CompactManager:
                     context_length=context_length,
                 )
                 if not proceed:
-                    if self._output_router:
-                        self._output_router.notify_activity(
-                            "compact_skipped",
-                            "Compaction vetoed by plugin",
-                            metadata={
-                                "reason": "plugin_veto",
-                                "round": self._compact_count + 1,
-                            },
-                        )
+                    self._emit_compact_skipped(
+                        "plugin_veto", "Compaction vetoed by plugin"
+                    )
+                    terminal_sent = True
                     logger.info(
                         "Compact vetoed by plugin(s)",
                         agent=self._agent_name,
@@ -318,6 +334,7 @@ class CompactManager:
 
             # Build the text to summarize
             summary_input = self._format_messages_for_summary(compact_messages)
+            expected_fingerprint = prefix_fingerprint(compact_messages)
 
             # Call LLM to summarize
             summary = await self._summarize(summary_input)
@@ -336,13 +353,62 @@ class CompactManager:
                             or "Summarization LLM call failed. Context was NOT modified.",
                         },
                     )
+                self._emit_compact_skipped(
+                    "summary_failed",
+                    "Summarization failed — context preserved unchanged",
+                )
+                terminal_sent = True
+                return
+
+            # The summarizer ran for a while — /clear, attach, or an
+            # edit flow may have REPLACED the controller's conversation
+            # object. Splicing (and persisting) the captured detached
+            # object would report success without compacting anything.
+            if (
+                self._controller is not None
+                and self._controller.conversation is not conversation
+            ):
+                logger.warning(
+                    "Compact aborted — conversation object replaced "
+                    "while summarizing",
+                    agent=self._agent_name,
+                )
+                self._emit_compact_skipped(
+                    "conversation_replaced",
+                    "Conversation was replaced while summarizing",
+                )
+                terminal_sent = True
+                self._last_compact_time = time.time()
                 return
 
             # Atomic splice: replace compact zone with summary
-            self._splice_conversation(conversation, boundary, summary)
+            applied = self._splice_conversation(
+                conversation,
+                boundary,
+                summary,
+                expected_last=compact_messages[-1],
+                expected_fingerprint=expected_fingerprint,
+            )
+            if not applied:
+                logger.warning(
+                    "Compact splice aborted — conversation changed shape "
+                    "while summarizing",
+                    agent=self._agent_name,
+                )
+                self._emit_compact_skipped(
+                    "conversation_changed",
+                    "Conversation changed while summarizing — will retry later",
+                )
+                terminal_sent = True
+                self._last_compact_time = time.time()
+                return
 
             self._compact_count += 1
             self._last_compact_time = time.time()
+            # The next round's usage still measures the pre-splice
+            # prompt — drop it so it can't re-trigger a compact.
+            if self._controller is not None:
+                self._controller._last_usage = {}
 
             # Notify output for TUI/frontend display
             if self._output_router:
@@ -355,6 +421,7 @@ class CompactManager:
                         "messages_compacted": boundary - 1,
                     },
                 )
+            terminal_sent = True
 
             # Save conversation snapshot with post-compact version
             # (The compact_complete event is already recorded by SessionOutput
@@ -362,10 +429,12 @@ class CompactManager:
             if self._session_store:
                 # Overwrite conversation snapshot with post-compact version
                 # so resume gets the compacted conversation, not the full one
+                # The splice runs mid-turn: keep the in-flight tail
+                # announcement so resume can reconstruct the active round.
                 try:
                     self._session_store.save_conversation(
                         self._agent_name,
-                        conversation.to_messages(),
+                        conversation.to_messages(preserve_pending_tail=True),
                     )
                 except Exception as e:
                     logger.warning(
@@ -421,95 +490,29 @@ class CompactManager:
                 )
 
         except asyncio.CancelledError:
+            abort_reason = "cancelled"
             logger.info("Compact cancelled", agent=self._agent_name)
         except Exception as e:
+            abort_reason = "error"
             logger.error("Compact failed", agent=self._agent_name, error=str(e))
         finally:
+            if not terminal_sent:
+                try:
+                    self._emit_compact_skipped(
+                        abort_reason, f"Compaction {abort_reason}"
+                    )
+                except Exception:  # pragma: no cover - defensive
+                    pass
             self._dispatch.release(lease)
             if self._active_lease is lease:
                 self._active_lease = None
             self._compact_task = None
 
     def _count_keep_messages(self, messages: list) -> int:
-        """Count how many messages from the end to keep (live zone).
-
-        Two-phase policy:
-
-        1. **Walk back ``keep_recent_turns`` user turns.** This is the
-           normal case — preserve the recent turns + assistant/tool
-           messages between them.
-
-        2. **Half-cap fallback** when phase 1 cannot find enough user
-           turns. Without this an agent run with 100 tool calls but
-           only 2 user turns would always report ``boundary = 1``
-           ("too_short") even though there is plenty to summarise. The
-           fallback only applies once the conversation has at least
-           ``MIN_COMPACTABLE`` messages so a tiny chat (a couple
-           messages) is still considered too small to bother with.
-        """
-        # Below this many messages the compact zone is so small there
-        # is nothing useful to summarise — skip and report ``too_short``.
-        MIN_COMPACTABLE = 8
-
-        n = len(messages)
-        if n <= 1:
-            return 0
-        turns = 0
-        by_turn_count = 0
-        found_target = False
-        for msg in reversed(messages):
-            by_turn_count += 1
-            if msg.role == "user":
-                turns += 1
-                if turns >= self.config.keep_recent_turns:
-                    found_target = True
-                    break
-
-        if found_target:
-            # Normal path — keep the requested user-turn window plus
-            # whatever tool / assistant messages sit inside it.
-            return min(by_turn_count, n - 1)
-
-        # Fallback only kicks in when the conversation is long enough
-        # that the half-cap leaves a non-trivial compact zone.
-        if n < MIN_COMPACTABLE:
-            return min(by_turn_count, n - 1)
-
-        half_cap = max(1, n // 2)
-        return min(half_cap, n - 1)
+        return count_keep_messages(messages, self.config.keep_recent_turns)
 
     def _format_messages_for_summary(self, messages: list) -> str:
-        """Format messages into text for the summarization prompt.
-
-        ``msg.content`` arrives in three shapes from upstream:
-
-        * ``str`` — plain text, the easy case.
-        * ``list[ContentPart]`` — multimodal parts produced by the
-          framework's own message helpers; each part has a ``.text``
-          attribute (or is non-textual, in which case it carries no
-          summarisable content).
-        * ``list[dict]`` — the raw shape the web frontend POSTs and
-          ``conversation.append`` stores verbatim. Each dict looks like
-          ``{"type": "text", "text": "..."}`` for text and similar for
-          other modalities. **This case used to silently drop user
-          messages** because the old code asked for ``.text`` via
-          ``hasattr(p, "text")`` which is False for dicts — so a
-          conversation built entirely from web POSTs had no user
-          instructions reach the compact LLM.
-        """
-        parts = []
-        for msg in messages:
-            role = msg.role
-            content = extract_message_text(msg)
-
-            # Truncate very long tool results
-            if role == "tool" and len(content) > 500:
-                content = content[:500] + f"... ({len(content)} chars total)"
-
-            if content:
-                parts.append(f"[{role}]: {content}")
-
-        return "\n\n".join(parts)
+        return format_messages_for_summary(messages)
 
     def _summary_max_tokens(self) -> int:
         """Return a conservative output cap for the summarization request.
@@ -558,34 +561,31 @@ class CompactManager:
             return ""
 
     def _splice_conversation(
-        self, conversation: Any, boundary: int, summary: str
-    ) -> None:
-        """Atomic splice: replace compact zone with summary message."""
-        messages = conversation.get_messages()
-
-        # Build new message list:
-        # [system_prompt] + [summary_as_assistant] + [live_zone]
-        system_msg = messages[0]  # Always keep system prompt
-        live_zone = messages[boundary:]  # Everything after boundary
-
-        # Clear and rebuild
-        conversation._messages.clear()
-        conversation._messages.append(system_msg)
-
-        # Add summary as an assistant message with a marker
-        summary_msg = create_message(
-            "assistant",
-            f"[Previous context summary (compact round {self._compact_count + 1})]\n\n{summary}",
+        self,
+        conversation: Any,
+        boundary: int,
+        summary: str,
+        expected_last: Any = None,
+        expected_fingerprint: tuple | None = None,
+    ) -> bool:
+        """Atomic splice — see :func:`compact_splice.splice_conversation`."""
+        return splice_conversation(
+            conversation,
+            boundary,
+            summary,
+            self._compact_count + 1,
+            expected_last=expected_last,
+            expected_fingerprint=expected_fingerprint,
         )
-        conversation._messages.append(summary_msg)
 
-        # Restore live zone
-        conversation._messages.extend(live_zone)
-
-        # Update metadata
-        conversation._metadata.message_count = len(conversation._messages)
-        conversation._metadata.total_chars = conversation.get_context_length()
-        conversation._metadata.updated_at = datetime.now()
+    async def wait_for_current(self) -> None:
+        """Await the in-flight compact round, if any."""
+        task = self._compact_task
+        if task is not None and not task.done():
+            try:
+                await asyncio.shield(task)
+            except Exception:
+                pass
 
     async def cancel(self) -> None:
         """Cancel any running compaction."""

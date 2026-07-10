@@ -10,13 +10,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from kohakuterrarium.core.budget import IterationBudget
-from kohakuterrarium.core.job import (
-    JobState,
-    JobStatus,
-    JobStore,
-    JobType,
-    generate_job_id,
-)
+from kohakuterrarium.core.job import JobState, JobStatus, JobStore, JobType
+from kohakuterrarium.core.job import generate_job_id
 from kohakuterrarium.core.loader import ModuleLoader
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.base import LLMProvider
@@ -514,18 +509,21 @@ class SubAgentManager(InteractiveManagerMixin):
             }
 
     async def cancel_all(self) -> int:
-        """Cancel all running sub-agent tasks."""
-        cancelled = 0
+        """Cancel all running sub-agent tasks and wait them out —
+        returning while they still unwind lets them race the owner's
+        shutdown (closed routers / providers)."""
+        pending: list[asyncio.Task] = []
         for job_id, task in list(self._tasks.items()):
             if not task.done():
-                job = self._jobs.get(job_id)
-                if job and hasattr(job, "subagent"):
+                if (job := self._jobs.get(job_id)) and hasattr(job, "subagent"):
                     job.subagent.cancel()
                 task.cancel()
-                cancelled += 1
+                pending.append(task)
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
         # Also stop all interactive sub-agents
         await self.stop_all_interactive()
-        return cancelled
+        return len(pending)
 
     async def cancel(self, job_id: str) -> bool:
         """

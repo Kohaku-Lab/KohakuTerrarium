@@ -124,15 +124,17 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin):
         renders and the session log would interleave events from two
         turns. Holding the lock around them serializes everything.
 
-        **Opportunistic mid-turn buffering (Feat 3)**: ``user_input``
-        and ``trigger`` events that arrive while the lock is held by
-        another turn DON'T block on the lock. They're appended to
-        ``_pending_mid_turn_inputs`` and drained from inside the
-        current turn's ``_collect_and_push_feedback`` after tool
-        results land. This keeps user follow-ups (typed while the
-        agent is busy) and live triggers (timer fired mid-turn)
-        visible to the LLM on the next round inside the same turn,
-        instead of waiting for the current turn to fully end.
+        **Opportunistic mid-turn buffering (Feat 3)**: events that
+        arrive while the lock is held by another turn DON'T block on
+        the lock — ALL types except ``startup``/``shutdown`` (and the
+        rerun / await_turn bypasses below). They're appended to
+        ``_pending_mid_turn_inputs`` and drained *as one batch* from
+        inside the current turn's ``_collect_and_push_feedback`` after
+        tool results land. This keeps user follow-ups, live triggers,
+        background completions, and channel traffic visible to the LLM
+        on the next round inside the same turn — instead of each
+        queued event running its own serial turn afterwards (which
+        would take one interrupt per event to clear).
 
         Rerun events (regenerate / edit-and-rerun) BYPASS the buffer
         — they must run against the original lock-held turn because
@@ -152,7 +154,9 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin):
             self._running
             and not is_rerun
             and not awaits_turn
-            and event.type in ("user_input", "trigger")
+            and event.stackable
+            and getattr(self, "_active_turn_stackable", True)
+            and event.type not in ("startup", "shutdown")
             and self._processing_lock.locked()
         ):
             buffer = getattr(self, "_pending_mid_turn_inputs", None)
@@ -165,6 +169,11 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin):
                 )
                 return False
         async with self._processing_lock:
+            self._turn_lock_holder = asyncio.current_task()
+            # A non-stackable turn (startup, error) prohibits folding
+            # buffered events into it — the incoming-event check alone
+            # can't see the ACTIVE turn's flag.
+            self._active_turn_stackable = event.stackable
             if not self._running:
                 # E4: dropping an event used to return ``True`` — the
                 # same value as success — so a script injecting into a
@@ -275,9 +284,20 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin):
             # Procedural-skill ``paths:`` auto-activate (D.6 + Qd).
             if event.type == "user_input":
                 inject_skill_path_hint(self)
+            # Background completion starting its own turn — banner the
+            # delivery so the UI shows why the agent speaks again.
+            if event.type in ("tool_complete", "subagent_output"):
+                self._notify_background_result(event)
 
-            await self._process_event_with_controller(event, self.controller)
-            return True
+            try:
+                await self._process_event_with_controller(event, self.controller)
+            finally:
+                self._turn_lock_holder = None
+                self._active_turn_stackable = True
+        # Lock released — events that buffered AFTER this turn's last
+        # mid-turn drain would otherwise sit until the next turn starts.
+        self._schedule_leftover_buffer_flush()
+        return True
 
     # ------------------------------------------------------------------
     # Main processing loop (split into phases)
@@ -331,6 +351,9 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin):
         """Reset state at the start of a new processing cycle."""
         self._interrupt_requested = False
         controller._interrupted = False
+        # Text-mode background-dispatch acknowledgments, delivered via
+        # the next feedback round (native mode uses role=tool instead).
+        self._bg_dispatch_acks: list[str] = []
         self.trigger_manager.set_context_all(event.context)
         if self._termination_checker:
             self._termination_checker.record_activity()
@@ -517,6 +540,13 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin):
                     tool_call_id=tool_call_id,
                     name=parse_event.name,
                 )
+            else:
+                # Text mode has no role=tool slot — deliver the same
+                # acknowledgment through the feedback round instead of
+                # leaving the model with no dispatch confirmation.
+                self._bg_dispatch_acks.append(
+                    f"[{parse_event.name} → {job_id}] {_BG_PLACEHOLDER}"
+                )
         else:
             # Direct — track for gathering (promotable mid-wait)
             handles[job_id] = handle
@@ -583,6 +613,10 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin):
                     f"[{parse_event.name}] {_BG_PLACEHOLDER}",
                     tool_call_id=sa_tool_call_id,
                     name=parse_event.name,
+                )
+            else:
+                self._bg_dispatch_acks.append(
+                    f"[{parse_event.name} → {job_id}] {_BG_PLACEHOLDER}"
                 )
         elif handle and handles is not None and handle_order is not None:
             handles[job_id] = handle
@@ -671,6 +705,14 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin):
         if output_feedback:
             feedback_parts.append(output_feedback)
 
+        # Text-mode background-dispatch acks (native mode already put
+        # the placeholder in the conversation as the tool result).
+        # Consumed further down ONLY if a feedback round happens anyway
+        # — an ack must never force an extra LLM round: if the turn is
+        # ending, the model already stopped, which is the ack's goal.
+        acks = list(getattr(self, "_bg_dispatch_acks", None) or [])
+        self._bg_dispatch_acks = []
+
         # Wait for handles (direct tools + sub-agents)
         native_results_added = False
         had_promotions = False
@@ -714,10 +756,18 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin):
         if injected_count:
             native_results_added = True
 
-        # No feedback means we're done
+        # No feedback means we're done. Pending acks alone do NOT
+        # continue the loop — the turn ending is exactly the "stop
+        # outputting" the ack asks for; the running-jobs context covers
+        # the next turn.
         if not feedback_parts and not native_results_added:
             logger.debug("No feedback, exiting process loop")
             return False
+
+        # A feedback round is happening anyway — let the acks ride
+        # along so the model knows the dispatch succeeded.
+        if acks:
+            feedback_parts.extend(acks)
 
         # Push feedback to controller for next turn
         if native_results_added and not feedback_parts:

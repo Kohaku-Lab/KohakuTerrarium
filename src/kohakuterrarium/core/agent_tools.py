@@ -406,6 +406,10 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
 
     def _emit_direct_completion_activity(self, job_id: str, result: Any) -> None:
         """Emit terminal activity immediately when a direct job finishes."""
+        # Post-stop the sweep already emitted the job's terminal — a
+        # second emission here would contradict it (mirrors _on_bg_complete).
+        if not self._running:
+            return
         # Record for plugin termination checkers that want to peek at
         # the recent tool-result tail (cluster C.2 TerminationContext).
         checker = getattr(self, "_termination_checker", None)

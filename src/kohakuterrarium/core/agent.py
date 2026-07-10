@@ -136,6 +136,7 @@ class Agent(
         self._shutdown_event = asyncio.Event()
         self._processing_lock = asyncio.Lock()
         self._pending_mid_turn_inputs: list[TriggerEvent] = []
+        self._bg_dispatch_acks: list[str] = []
         self.trigger_manager = TriggerManager(self._process_event)
 
         # Raw llm= argument (instance | selector string | profile | None).
@@ -259,6 +260,7 @@ class Agent(
         self._wire_completion_callbacks()
 
         self._running = True
+        self._stopped = False
         self._shutdown_event.clear()
 
         # Initialize MCP client manager if mcp_servers configured
@@ -377,6 +379,7 @@ class Agent(
         self.compact_manager._llm = self._build_compact_llm(compact_cfg)
         self.compact_manager._output_router = self.output_router
         self.compact_manager._agent_name = self.config.name
+        self._wire_overflow_rescue()
         if self.session_store:
             self.compact_manager._session_store = self.session_store
             restore_compact_state_from_session(
@@ -532,8 +535,8 @@ class Agent(
 
     def interrupt(self) -> None:
         """Cancel the active processing task; background jobs untouched.
-        Buffered mid-turn events get re-fired as fresh turns via
-        ``_flush_buffer_after_interrupt`` (Bug 3)."""
+        Buffered mid-turn events get re-fired as ONE fresh batched turn
+        via ``_flush_buffer_after_interrupt``."""
         self._interrupt_requested = True
         self.controller._interrupted = True
         processing = getattr(self, "_processing_task", None)

@@ -247,6 +247,79 @@ class TestRestoreCompactState:
         assert not hasattr(mgr, "_compact_count")
 
 
+class TestCompactOverflowRescue:
+    def _agent(self):
+        class _Agent(AgentCompactMixin):
+            pass
+
+        a = _Agent()
+        a.config = types.SimpleNamespace(name="alice")
+        return a
+
+    async def test_returns_none_when_no_compact_running(self):
+        a = self._agent()
+        a.compact_manager = types.SimpleNamespace(is_compacting=False)
+        assert await a._compact_overflow_rescue() is None
+
+    async def test_rescue_from_inside_compact_task_returns_none(self):
+        # Compactor fell back to the ACTIVE provider: the overflow hook
+        # fires from within the compact task — waiting on ourselves
+        # deadlocks. The drop path must run instead.
+        import asyncio
+
+        a = self._agent()
+
+        async def probe():
+            a.compact_manager = types.SimpleNamespace(
+                is_compacting=True,
+                _compact_task=asyncio.current_task(),
+                wait_for_current=None,
+            )
+            return await a._compact_overflow_rescue()
+
+        assert await asyncio.wait_for(asyncio.ensure_future(probe()), 2) is None
+
+    async def test_waits_for_compact_and_returns_spliced_messages(self):
+        a = self._agent()
+        waited = []
+
+        async def wait():
+            waited.append(True)
+
+        spliced = [{"role": "system", "content": "s"}]
+        a.compact_manager = types.SimpleNamespace(
+            is_compacting=True, wait_for_current=wait
+        )
+        a.controller = types.SimpleNamespace(
+            conversation=types.SimpleNamespace(to_messages=lambda: spliced)
+        )
+        assert await a._compact_overflow_rescue() == spliced
+        assert waited == [True]
+
+    def test_wire_overflow_rescue_attaches_hook(self):
+        a = self._agent()
+        a.llm = types.SimpleNamespace()
+        a.compact_manager = types.SimpleNamespace()
+        a._wire_overflow_rescue()
+        assert a.llm._overflow_rescue == a._compact_overflow_rescue
+
+    def test_wire_overflow_rescue_tolerates_slotted_provider(self):
+        # The injected-LLM contract is the LLMProvider protocol, which
+        # does not guarantee writable attributes — a __slots__ provider
+        # must not blow up Agent.start().
+        class _SlottedLLM:
+            __slots__ = ("config",)
+
+            async def chat(self, messages, **kwargs):
+                yield "x"
+
+        a = self._agent()
+        a.llm = _SlottedLLM()
+        a.compact_manager = types.SimpleNamespace()
+        a._wire_overflow_rescue()
+        assert not hasattr(a.llm, "_overflow_rescue")
+
+
 class TestBuildCompactLLM:
     def test_falls_back_to_main_when_profile_resolution_fails(self, monkeypatch):
         # When no profile name is resolvable, falls back to ``self.llm``.

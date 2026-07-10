@@ -268,6 +268,11 @@ class JobStore:
             lines.append("## Running Jobs")
             for job in running:
                 lines.append(f"- {job.to_context_string()}")
+            lines.append(
+                "(These background tasks are ALIVE — results arrive "
+                "automatically in later turns. Do NOT restart or "
+                "duplicate them, and do NOT treat them as failed.)"
+            )
 
         pending = self.get_pending_jobs()
         if pending:

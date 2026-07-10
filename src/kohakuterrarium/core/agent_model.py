@@ -63,6 +63,12 @@ class AgentModelMixin:
         self._llm_identifier = identifier
         self.llm = new_llm
         self.controller.llm = new_llm
+        # Fresh provider needs the same emergency-drop sync the boot
+        # provider got — without it a drop after a model switch leaves
+        # the controller holding the original oversized conversation.
+        drop_sync = getattr(self, "_on_provider_emergency_drop", None)
+        if drop_sync is not None and hasattr(new_llm, "on_emergency_drop"):
+            new_llm.on_emergency_drop(drop_sync)
         # Sub-agents resolve their LLM from the manager's ``llm`` at spawn
         # time — ``resolve_llm(self.subagent_manager.llm, config)`` for
         # task sub-agents, and ``llm=self.llm`` directly for interactive
@@ -78,6 +84,7 @@ class AgentModelMixin:
             new_max = getattr(context_source, "_profile_max_context", 0)
             if new_max:
                 self.compact_manager.config.max_tokens = new_max
+            self._wire_overflow_rescue()
 
         model_name = getattr(new_llm, "model", profile_name)
         logger.info(

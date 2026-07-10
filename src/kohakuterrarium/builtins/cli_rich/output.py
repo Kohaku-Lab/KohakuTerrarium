@@ -344,7 +344,7 @@ class RichCLIOutput(BaseOutputModule):
             self.app.on_compact_start()
             return
 
-        if activity_type in ("compact_complete", "compact_done"):
+        if activity_type in ("compact_complete", "compact_done", "compact_skipped"):
             self.app.on_compact_end()
             return
 
@@ -356,6 +356,12 @@ class RichCLIOutput(BaseOutputModule):
 
         if activity_type == "interrupt":
             self.app.on_interrupt_notice(detail)
+            return
+
+        if activity_type == "background_result":
+            label = metadata.get("label") or metadata.get("job_id", "")
+            kind = metadata.get("kind", "tool")
+            self.app.on_background_result(kind, label)
             return
 
         if activity_type == "session_info":

@@ -41,6 +41,7 @@ from kohakuterrarium.llm.base import (
     ChatResponse,
     LLMConfig,
     NativeToolCall,
+    OverflowRecoveryState,
     ToolSchema,
 )
 from kohakuterrarium.llm.openai_sanitize import log_request_shape, strip_surrogates
@@ -49,7 +50,6 @@ from kohakuterrarium.llm.recovery import (
     RetryPolicy,
     backoff_delay,
     classify_openai_error,
-    drop_last_tool_round,
 )
 from kohakuterrarium.utils.logging import get_logger
 
@@ -234,7 +234,7 @@ class AnthropicProvider(BaseLLMProvider):
         """Stream a native Anthropic Messages response with KT retries."""
         current = messages
         attempt = 0
-        overflow_recovered = False
+        overflow_state = OverflowRecoveryState()
         while True:
             try:
                 async for chunk in self._raw_stream_chat(
@@ -244,17 +244,12 @@ class AnthropicProvider(BaseLLMProvider):
                 return
             except Exception as exc:
                 cls = classify_openai_error(exc)
-                if cls is ErrorClass.OVERFLOW and not overflow_recovered:
-                    dropped, recovered = drop_last_tool_round(current)
-                    if dropped:
-                        overflow_recovered = True
-                        current = recovered
-                        self._notify_emergency_drop(recovered)
-                        logger.warning(
-                            "provider_emergency_drop",
-                            dropped=dropped,
-                            recovered_messages=len(recovered),
-                        )
+                if cls is ErrorClass.OVERFLOW:
+                    replacement = await self._recover_from_overflow(
+                        current, overflow_state
+                    )
+                    if replacement is not None:
+                        current = replacement
                         continue
                 if (
                     cls in self._retry_policy.retry_classes
@@ -354,23 +349,18 @@ class AnthropicProvider(BaseLLMProvider):
     ) -> ChatResponse:
         current = messages
         attempt = 0
-        overflow_recovered = False
+        overflow_state = OverflowRecoveryState()
         while True:
             try:
                 return await self._raw_complete_chat(current, **kwargs)
             except Exception as exc:
                 cls = classify_openai_error(exc)
-                if cls is ErrorClass.OVERFLOW and not overflow_recovered:
-                    dropped, recovered = drop_last_tool_round(current)
-                    if dropped:
-                        overflow_recovered = True
-                        current = recovered
-                        self._notify_emergency_drop(recovered)
-                        logger.warning(
-                            "provider_emergency_drop",
-                            dropped=dropped,
-                            recovered_messages=len(recovered),
-                        )
+                if cls is ErrorClass.OVERFLOW:
+                    replacement = await self._recover_from_overflow(
+                        current, overflow_state
+                    )
+                    if replacement is not None:
+                        current = replacement
                         continue
                 if (
                     cls in self._retry_policy.retry_classes
