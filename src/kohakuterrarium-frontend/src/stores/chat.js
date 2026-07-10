@@ -15,6 +15,11 @@ import { readLocalJsonPref, writeLocalJsonPref } from "@/utils/uiPrefs"
 import { wsUrl } from "@/utils/wsUrl"
 
 const BRANCH_RESYNC_DELAY_MS = 350
+// A pending branch op whose expected branch never lands (e.g. the edit
+// request was lost before dispatch) must not keep the stale-history
+// guard alive forever — after this many incomplete retries the guard is
+// dropped and the view reconciles to whatever the backend has.
+const BRANCH_RESYNC_MAX_RETRIES = 40
 
 function normalizeContentParts(content) {
   if (!Array.isArray(content)) return null
@@ -408,7 +413,11 @@ export function _replayEvents(messages, events, branchView = null, liveRunningJo
     }
   }
 
-  function addTool(name, kind, args, jobId) {
+  function _evtStartedTs(evt) {
+    return typeof evt?.ts === "number" ? Math.round(evt.ts * 1000) : null
+  }
+
+  function addTool(name, kind, args, jobId, startedTs) {
     const c = ensureCur()
     const tail = c.parts.length ? c.parts[c.parts.length - 1] : null
     if (tail && tail.type === "text") tail._streaming = false
@@ -432,6 +441,9 @@ export function _replayEvents(messages, events, branchView = null, liveRunningJo
       tools_used: [],
       children: [],
     }
+    // Real start time from the persisted event — a rebuild mid-run
+    // must not reset the visible elapsed timer to 0.
+    if (startedTs) tool.startedAt = startedTs
     c.parts.push(tool)
     if (jobId) startedJobs[jobId] = tool
     return tool
@@ -759,7 +771,13 @@ export function _replayEvents(messages, events, branchView = null, liveRunningJo
           timestamp: "",
         })
       } else if (at === "subagent_start") {
-        addTool(evt.name, "subagent", evt.args || { info: evt.detail }, evt.job_id)
+        addTool(
+          evt.name,
+          "subagent",
+          evt.args || { info: evt.detail },
+          evt.job_id,
+          _evtStartedTs(evt),
+        )
       } else if (at === "subagent_done") {
         updateTool(
           evt.name,
@@ -792,7 +810,7 @@ export function _replayEvents(messages, events, branchView = null, liveRunningJo
           evt.job_id,
         )
       } else if (at === "tool_start") {
-        addTool(evt.name, "tool", evt.args || { info: evt.detail }, evt.job_id)
+        addTool(evt.name, "tool", evt.args || { info: evt.detail }, evt.job_id, _evtStartedTs(evt))
       } else if (at === "tool_done") {
         updateTool(
           evt.name,
@@ -860,7 +878,7 @@ export function _replayEvents(messages, events, branchView = null, liveRunningJo
         timestamp: "",
       })
     } else if (t === "tool_call") {
-      addTool(evt.name, "tool", evt.args || {}, evt.call_id || evt.job_id)
+      addTool(evt.name, "tool", evt.args || {}, evt.call_id || evt.job_id, _evtStartedTs(evt))
     } else if (t === "tool_result") {
       updateTool(
         evt.name,
@@ -881,7 +899,7 @@ export function _replayEvents(messages, events, branchView = null, liveRunningJo
         evt.call_id || evt.job_id,
       )
     } else if (t === "subagent_call") {
-      addTool(evt.name, "subagent", { task: evt.task || "" }, evt.job_id)
+      addTool(evt.name, "subagent", { task: evt.task || "" }, evt.job_id, _evtStartedTs(evt))
     } else if (t === "subagent_result") {
       updateTool(
         evt.name,
@@ -943,6 +961,25 @@ export function _replayEvents(messages, events, branchView = null, liveRunningJo
     } else if (t === "compact_start") {
       cur = null
       upsertCompactMessage(evt.compact_round || evt.round || 0, "", "running", 0)
+    } else if (t === "background_result") {
+      cur = null
+      result.push({
+        id: "bgres_" + result.length,
+        role: "bg_result",
+        label: evt.label || evt.job_id || "",
+        kind: evt.kind || "tool",
+        jobId: evt.job_id || "",
+        timestamp: "",
+      })
+    } else if (t === "compact_skipped") {
+      // Terminal for a started round that didn't complete — without it
+      // the bubble from compact_start spins forever on replay.
+      cur = null
+      const skipped = findCompactMessage(evt.compact_round || evt.round || 0, true)
+      if (skipped) {
+        skipped.status = "skipped"
+        skipped.reason = evt.reason || ""
+      }
     } else if (t === "processing_error") {
       cur = null
       result.push({
@@ -991,11 +1028,12 @@ export function _replayEvents(messages, events, branchView = null, liveRunningJo
   for (const [jobId, toolPart] of Object.entries(startedJobs)) {
     if (!completedJobs.has(jobId)) {
       toolPart.status = "running"
-      toolPart.startedAt = Date.now() // approximate
+      // Prefer the event-derived start; Date.now() only as last resort.
+      toolPart.startedAt = toolPart.startedAt || Date.now()
       pendingJobs[jobId] = {
         name: toolPart.name,
         type: toolPart.kind === "subagent" ? "subagent" : "tool",
-        startedAt: Date.now(),
+        startedAt: toolPart.startedAt,
       }
       if (toolPart.children) {
         for (const child of toolPart.children) {
@@ -1426,6 +1464,10 @@ const _chatStoreOptions = {
     _branchResyncPendingByTab: {},
     /** @type {Record<string, number>} Debounce timers for post-branch history resync */
     _branchResyncTimers: {},
+    /** @type {Record<string, number>} Per-tab monotonic history-request id; a resync whose id is stale when it resolves has been superseded */
+    _historyRequestSeqByTab: {},
+    /** @type {Record<string, number>} Per-tab watermark: max event_id last applied by a resync; a lower-max response is stale (branch ops exempt) */
+    _appliedMaxEventIdByTab: {},
     /**
      * Per-tab streaming target — the (turn_index, branch_id) the
      * backend is currently writing to. Set by ``regenerateLastResponse`` /
@@ -1480,6 +1522,11 @@ const _chatStoreOptions = {
       return state.messagesByTab[state.activeTab] || []
     },
     hasRunningJobs: (state) => Object.keys(state.runningJobs).length > 0,
+    // Jobs owned by one tab must not light up indicators / stop
+    // buttons in every other tab. Legacy entries without a tab stamp
+    // stay visible everywhere.
+    runningJobCountForTab: (state) => (tab) =>
+      Object.values(state.runningJobs).filter((j) => !j.tab || !tab || j.tab === tab).length,
     /**
      * Back-compat shim — true when the active tab is processing. Most
      * UI code that used to read ``chat.processing`` actually wanted
@@ -2113,17 +2160,61 @@ const _chatStoreOptions = {
       }
     },
 
+    /**
+     * Reconcile ``runningJobs`` for one tab against a replay's
+     * ``pendingJobs`` — the authoritative "still running per canonical
+     * history" set for that tab.
+     *
+     * Additions/merges ALWAYS apply: stamp ``tab``, keep the earliest
+     * known ``startedAt`` (a live entry pre-dates any rebuild
+     * approximation and must not be pushed forward).
+     *
+     * Removals apply ONLY when ``fetchedAt`` is given (a history fetch
+     * drove this rebuild) and only for tab-owned jobs whose
+     * ``startedAt`` pre-dates the fetch: a job that started after the
+     * fetch began is newer live state the stale history can't speak to.
+     * Pure branch-switch rebuilds pass ``fetchedAt = null`` and never
+     * remove.
+     */
+    _reconcileRunningJobs(tab, pendingJobs, fetchedAt = null) {
+      const pendingIds = new Set(Object.keys(pendingJobs))
+      for (const [jobId, job] of Object.entries(pendingJobs)) {
+        const existing = this.runningJobs[jobId]
+        // Keep the earliest known start — a live entry pre-dates any
+        // rebuild approximation and must not be pushed forward.
+        let startedAt = job.startedAt
+        if (existing?.startedAt && (startedAt == null || existing.startedAt < startedAt)) {
+          startedAt = existing.startedAt
+        }
+        // Merge, not replace: replay carries canonical fields (name,
+        // type, startedAt) and wins for those, but UI-only fields set on
+        // the live entry (promotable, cancelling, …) that the replay
+        // never carries must survive.
+        this.runningJobs[jobId] = {
+          ...existing,
+          ...job,
+          tab: job.tab || existing?.tab || tab || undefined,
+          startedAt,
+        }
+      }
+      if (fetchedAt != null) {
+        for (const [jobId, job] of Object.entries(this.runningJobs)) {
+          if (job.tab !== tab) continue
+          if (pendingIds.has(jobId)) continue
+          if (job.startedAt == null || job.startedAt >= fetchedAt) continue
+          delete this.runningJobs[jobId]
+        }
+      }
+      if (pendingIds.size > 0) this._ensureJobTimer()
+      this._checkJobTimer()
+    },
+
     /** Restore running jobs from replay result. */
     _restoreRunningState(tabKey, pendingJobs, isProcessing = false) {
-      for (const [jobId, job] of Object.entries(pendingJobs)) {
-        this.runningJobs[jobId] = job
-      }
+      this._reconcileRunningJobs(tabKey, pendingJobs, null)
       if (tabKey) {
         this.processingByTab[tabKey] = !!isProcessing
         this._rehydrateRunningParts(tabKey, pendingJobs)
-      }
-      if (Object.keys(pendingJobs).length > 0) {
-        this._ensureJobTimer()
       }
     },
 
@@ -2510,6 +2601,34 @@ const _chatStoreOptions = {
         return
       }
 
+      if (at === "background_result") {
+        msgs.push({
+          id: "bgres_" + Date.now(),
+          role: "bg_result",
+          label: data.label || data.job_id || "",
+          kind: data.kind || "tool",
+          jobId: data.job_id || "",
+          timestamp: new Date().toISOString(),
+        })
+        return
+      }
+
+      if (at === "compact_skipped") {
+        const round = data.compact_round || data.round || 0
+        const existing =
+          [...msgs]
+            .reverse()
+            .find(
+              (msg) => msg.role === "compact" && msg.round === round && msg.status === "running",
+            ) ||
+          [...msgs].reverse().find((msg) => msg.role === "compact" && msg.status === "running")
+        if (existing) {
+          existing.status = "skipped"
+          existing.reason = data.reason || ""
+        }
+        return
+      }
+
       if (at === "compact_complete") {
         const round = data.compact_round || data.round || 0
         const existing =
@@ -2608,6 +2727,7 @@ const _chatStoreOptions = {
           type: at === "subagent_start" ? "subagent" : "tool",
           startedAt: Date.now(),
           promotable: !isBg,
+          tab: source,
         }
         this._ensureJobTimer()
       } else if (at === "tool_done" || at === "subagent_done") {
@@ -2745,16 +2865,69 @@ const _chatStoreOptions = {
       }
     },
 
+    /** True when a failed edit/regen request plausibly reached the
+     *  backend and may still be executing (these POSTs block through
+     *  the whole rerun): a gateway timeout, or no HTTP response with
+     *  either a post-dispatch cut (timeout) or a demonstrably
+     *  reachable server (chat WS open). Offline/DNS/refused failures
+     *  with a dead WS count as never-dispatched. */
+    _requestMayStillBeRunning(err) {
+      const status = err?.response?.status
+      // 502/504: the proxy gave up while the backend kept going.
+      if (status === 502 || status === 504) return true
+      if (err?.response != null) return false
+      if (err?.code === "ECONNABORTED" || err?.code === "ETIMEDOUT") return true
+      return this.wsStatus === "open"
+    },
+
+    /** Highest persisted event_id in an event list (optimistic
+     *  placeholders excluded); null when none carry one. */
+    _maxEventId(events) {
+      let max = null
+      for (const ev of events || []) {
+        if (ev?._optimistic) continue
+        const id = ev?.event_id
+        if (typeof id === "number" && (max == null || id > max)) max = id
+      }
+      return max
+    },
+
+    /** Highest branch_id recorded for a turn in the cached event log
+     *  (1 when the turn exists but never branched; null when the turn
+     *  is unknown). */
+    _latestBranchForTurn(tab, turnIndex) {
+      if (tab == null || turnIndex == null) return null
+      let latest = null
+      for (const ev of this.eventsByTab[tab] || []) {
+        if (ev?.turn_index !== turnIndex) continue
+        const b = ev?.branch_id
+        if (typeof b === "number" && (latest == null || b > latest)) latest = b
+      }
+      return latest
+    },
+
     _markBranchResyncPending(tab = this.activeTab, expected = null) {
       if (!tab) return
       const pending = this._branchResyncPendingByTab[tab] || {}
-      this._branchResyncPendingByTab[tab] = {
+      const next = {
         active: true,
+        retries: pending.retries || 0,
         expectedBranchByTurn: {
           ...(pending.expectedBranchByTurn || {}),
           ...(expected?.expectedBranchByTurn || {}),
         },
       }
+      if (pending.baselineMaxEventId != null) {
+        next.baselineMaxEventId = pending.baselineMaxEventId
+      }
+      // Metadata-poor branch ops (no turnIndex / branch metadata) have
+      // no expected branch to verify against — fingerprint the pre-op
+      // event log instead, so a stale fetch can't clobber the local
+      // optimistic state before the backend commits anything.
+      if (expected?.baselineFromCache && next.baselineMaxEventId == null) {
+        next.baselineMaxEventId = this._maxEventId(this.eventsByTab[tab])
+      }
+      this._branchResyncPendingByTab[tab] = next
     },
 
     _scheduleBranchResync(tab) {
@@ -2769,7 +2942,21 @@ const _chatStoreOptions = {
       if (this._branchResyncTimers[tab]) clearTimeout(this._branchResyncTimers[tab])
       this._branchResyncTimers[tab] = setTimeout(async () => {
         delete this._branchResyncTimers[tab]
-        await this._resyncHistory(tab)
+        const pending = this._branchResyncPendingByTab[tab]
+        if (pending?.active) {
+          pending.retries = (pending.retries || 0) + 1
+          if (pending.retries > BRANCH_RESYNC_MAX_RETRIES) {
+            this._dropStaleBranchOp(tab, pending)
+          }
+        }
+        try {
+          await this._resyncHistory(tab)
+        } catch (e) {
+          // A failed fetch must not end the retry chain mid-branch-op.
+          if (this._branchResyncPendingByTab[tab]?.active) {
+            this._scheduleBranchResync(tab)
+          }
+        }
       }, BRANCH_RESYNC_DELAY_MS)
     },
 
@@ -2778,6 +2965,30 @@ const _chatStoreOptions = {
         clearTimeout(timer)
       }
       this._branchResyncTimers = {}
+    },
+
+    /** Drop a branch op whose expected branch never landed, INCLUDING
+     *  its speculative view state — a dangling ``branchView`` entry
+     *  for a nonexistent branch renders blank under strict selection,
+     *  and the processing flag would spin forever. */
+    _dropStaleBranchOp(tab, pending) {
+      const view = this.branchViewByTab[tab]
+      for (const [turn, branch] of Object.entries(pending?.expectedBranchByTurn || {})) {
+        if (view && view[turn] === branch) delete view[turn]
+        const streaming = this._streamingBranchByTab[tab]
+        if (streaming && streaming.turnIndex === Number(turn) && streaming.branchId === branch) {
+          delete this._streamingBranchByTab[tab]
+        }
+      }
+      // Purge the synthetic events too — if the follow-up canonical
+      // fetch fails there is no later overwrite to retire them.
+      const events = this.eventsByTab[tab]
+      if (events?.some((ev) => ev?._optimistic)) {
+        this.eventsByTab[tab] = events.filter((ev) => !ev?._optimistic)
+      }
+      this.processingByTab[tab] = false
+      delete this._branchResyncPendingByTab[tab]
+      this._rebuildMessages(tab)
     },
 
     /**
@@ -2991,8 +3202,11 @@ const _chatStoreOptions = {
       // event log so the navigator promotes to <N+1/N+1> immediately
       // and the KohakUwUing label binds to the right branch. The next
       // resync replaces these with canonical backend events.
-      const predictedBranch =
-        typeof targetUserMsg?.latestBranch === "number" ? targetUserMsg.latestBranch + 1 : null
+      const knownLatestBranch =
+        typeof targetUserMsg?.latestBranch === "number"
+          ? targetUserMsg.latestBranch
+          : this._latestBranchForTurn(tab, resolvedTurnIndex)
+      const predictedBranch = typeof knownLatestBranch === "number" ? knownLatestBranch + 1 : null
       let optimisticApplied = false
       if (typeof resolvedTurnIndex === "number" && predictedBranch != null) {
         const originalContent = targetUserMsg?.contentParts || targetUserMsg?.content || ""
@@ -3011,6 +3225,11 @@ const _chatStoreOptions = {
           this.processingByTab[tab] = true
           this._rebuildMessages(tab)
           optimisticApplied = true
+          // Arm the stale-history guard with the prediction (same as
+          // editMessage).
+          this._markBranchResyncPending(tab, {
+            expectedBranchByTurn: { [resolvedTurnIndex]: predictedBranch },
+          })
         }
       }
       try {
@@ -3027,10 +3246,36 @@ const _chatStoreOptions = {
         // we set above is only for our own navigator; the backend
         // doesn't know about it yet (it opens that branch itself).
         const branchView = previousBranchView
-        const regenResponse = await agentAPI.regenerate(sid, cid, {
-          turnIndex,
-          branchView,
-        })
+        let regenResponse
+        try {
+          regenResponse = await agentAPI.regenerate(sid, cid, {
+            turnIndex,
+            branchView,
+          })
+        } catch (e) {
+          // No HTTP response ≠ rejected (this POST blocks through the
+          // whole rerun) — keep the optimistic branch; only a real HTTP
+          // error or a never-dispatched request rolls back.
+          if (optimisticApplied && tab && this._requestMayStillBeRunning(e)) {
+            console.warn("Regenerate transport error; keeping optimistic branch:", e)
+            this._scheduleBranchResync(tab)
+            return
+          }
+          console.warn("Failed to regenerate:", e)
+          delete this._branchResyncPendingByTab[tab]
+          if (optimisticApplied && tab) {
+            if (previousEvents == null) delete this.eventsByTab[tab]
+            else this.eventsByTab[tab] = previousEvents
+            if (previousBranchView != null) this.branchViewByTab[tab] = previousBranchView
+            else delete this.branchViewByTab[tab]
+            if (previousStreaming != null) this._streamingBranchByTab[tab] = previousStreaming
+            else delete this._streamingBranchByTab[tab]
+            this.processingByTab[tab] = previousProcessing
+            this._rebuildMessages(tab)
+          }
+          this._scheduleBranchResync(tab)
+          return
+        }
         if (regenResponse?.branch_id != null && regenResponse?.turn_index != null) {
           // Trust the backend's exact branch_id over our prediction —
           // the latest seen by the user might lag the persisted state
@@ -3043,21 +3288,19 @@ const _chatStoreOptions = {
             this.branchViewByTab[tab][realTurn] = realBranch
           }
           this._streamingBranchByTab[tab] = { turnIndex: realTurn, branchId: realBranch }
+          this._markBranchResyncPending(tab, {
+            expectedBranchByTurn: { [realTurn]: realBranch },
+          })
         }
-        await this._resyncHistory(tab)
+        // The regen is committed server-side from here on — resync
+        // failures must not roll it back.
+        try {
+          await this._resyncHistory(tab)
+        } catch (e) {
+          this._scheduleBranchResync(tab)
+        }
       } catch (e) {
         console.warn("Failed to regenerate:", e)
-        if (optimisticApplied && tab) {
-          if (previousEvents == null) delete this.eventsByTab[tab]
-          else this.eventsByTab[tab] = previousEvents
-          if (previousBranchView != null) this.branchViewByTab[tab] = previousBranchView
-          else delete this.branchViewByTab[tab]
-          if (previousStreaming != null) this._streamingBranchByTab[tab] = previousStreaming
-          else delete this._streamingBranchByTab[tab]
-          this.processingByTab[tab] = previousProcessing
-          this._rebuildMessages(tab)
-        }
-        this._scheduleBranchResync(tab)
       } finally {
         this._regenInFlight = false
       }
@@ -3086,12 +3329,16 @@ const _chatStoreOptions = {
       let backendIdx = messageIdx
       let userPosition = target.userPosition
       const turnIndex = target.turnIndex
-      const expectedLatestBranch = target.latestBranch
+      // Never-branched messages carry no ``latestBranch`` metadata —
+      // derive the current max from the cached event log so the
+      // prediction (and the stale-history guard) still arm.
+      const expectedLatestBranch = target.latestBranch ?? this._latestBranchForTurn(tab, turnIndex)
       this._markBranchResyncPending(tab, {
         expectedBranchByTurn:
           turnIndex != null && expectedLatestBranch != null
             ? { [turnIndex]: expectedLatestBranch + 1 }
             : {},
+        baselineFromCache: turnIndex == null || expectedLatestBranch == null,
       })
       let validTarget = false
       if (tab) {
@@ -3179,11 +3426,45 @@ const _chatStoreOptions = {
         // above is only for our own navigator; the backend doesn't
         // know about it yet (it opens that branch itself).
         const branchView = previousBranchView
-        const editResponse = await agentAPI.editMessage(sid, cid, backendIdx, newContent, {
-          turnIndex,
-          userPosition,
-          branchView,
-        })
+        let editResponse
+        try {
+          editResponse = await agentAPI.editMessage(sid, cid, backendIdx, newContent, {
+            turnIndex,
+            userPosition,
+            branchView,
+          })
+        } catch (e) {
+          // No HTTP response ≠ rejected: this POST blocks through the
+          // whole rerun, so the backend may still be running the edit.
+          // Keep the optimistic branch; the pending-resync loop
+          // reconciles once the new branch lands.
+          if (tab && (optimisticApplied || validTarget) && this._requestMayStillBeRunning(e)) {
+            console.warn("Edit transport error; keeping optimistic branch:", e)
+            this._scheduleBranchResync(tab)
+            return true
+          }
+          delete this._branchResyncPendingByTab[tab]
+          if (previousMessages && tab) this.messagesByTab[tab] = previousMessages
+          if (optimisticApplied && tab) {
+            if (previousEvents !== undefined) {
+              if (previousEvents == null) delete this.eventsByTab[tab]
+              else this.eventsByTab[tab] = previousEvents
+            }
+            if (previousBranchView != null) {
+              this.branchViewByTab[tab] = previousBranchView
+            } else {
+              delete this.branchViewByTab[tab]
+            }
+            if (previousStreaming != null) {
+              this._streamingBranchByTab[tab] = previousStreaming
+            } else {
+              delete this._streamingBranchByTab[tab]
+            }
+            this.processingByTab[tab] = previousProcessing
+          }
+          console.warn("Failed to edit message:", e)
+          return false
+        }
         if (turnIndex != null && editResponse?.branch_id != null) {
           this._markBranchResyncPending(tab, {
             expectedBranchByTurn: { [turnIndex]: editResponse.branch_id },
@@ -3198,30 +3479,15 @@ const _chatStoreOptions = {
             branchId: editResponse.branch_id,
           }
         }
-        const resynced = await this._resyncHistory(tab)
-        return resynced !== false
-      } catch (e) {
-        delete this._branchResyncPendingByTab[tab]
-        if (previousMessages && tab) this.messagesByTab[tab] = previousMessages
-        if (optimisticApplied && tab) {
-          if (previousEvents !== undefined) {
-            if (previousEvents == null) delete this.eventsByTab[tab]
-            else this.eventsByTab[tab] = previousEvents
-          }
-          if (previousBranchView != null) {
-            this.branchViewByTab[tab] = previousBranchView
-          } else {
-            delete this.branchViewByTab[tab]
-          }
-          if (previousStreaming != null) {
-            this._streamingBranchByTab[tab] = previousStreaming
-          } else {
-            delete this._streamingBranchByTab[tab]
-          }
-          this.processingByTab[tab] = previousProcessing
+        // The edit is committed server-side from here on — resync
+        // failures must not roll it back or reopen the editor.
+        try {
+          const resynced = await this._resyncHistory(tab)
+          if (resynced === false) this._scheduleBranchResync(tab)
+        } catch (e) {
+          this._scheduleBranchResync(tab)
         }
-        console.warn("Failed to edit message:", e)
-        return false
+        return true
       } finally {
         this._regenInFlight = false
       }
@@ -3263,10 +3529,43 @@ const _chatStoreOptions = {
      */
     async _resyncHistory(tab = this.activeTab) {
       if (!this._instanceId || !tab) return false
+      // Per-tab request sequence. Two resyncs for the same tab can be in
+      // flight at once (e.g. a processing_end resync racing a branch-op
+      // retry); the one that STARTED LATER is authoritative. Capture our
+      // id now and, after the await, bail if a newer request has since
+      // bumped the counter — applying our older payload would clobber
+      // the newer view (resurrect old branch content / prune jobs the
+      // newer resync restored).
+      const requestId = (this._historyRequestSeqByTab[tab] =
+        (this._historyRequestSeqByTab[tab] || 0) + 1)
       try {
         const { terrariumAPI } = await import("@/utils/api")
+        // Capture BEFORE the fetch: a tab-owned job that starts while
+        // this request is in flight is newer than the history it
+        // returns, so job-reconciliation must not prune it.
+        const fetchedAt = Date.now()
         const data = await terrariumAPI.getHistory(this._instanceGraphId, tab)
+        if (requestId !== this._historyRequestSeqByTab[tab]) return false
         if (!data?.events) return false
+
+        // Out-of-order guard by content: a response whose newest
+        // persisted event predates what we already applied for this tab
+        // is stale and must not clobber it. event_id is monotonic and
+        // append-only, so a lower max means an earlier backend snapshot.
+        // Branch ops are exempt — a pending regen/edit legitimately
+        // presents a smaller live view until the new branch lands, and
+        // the completeness logic below governs that case.
+        const branchOpActive = !!this._branchResyncPendingByTab[tab]?.active
+        const incomingMax = this._maxEventId(data.events)
+        const watermark = this._appliedMaxEventIdByTab[tab]
+        if (
+          !branchOpActive &&
+          incomingMax != null &&
+          watermark != null &&
+          incomingMax < watermark
+        ) {
+          return true
+        }
 
         // Check completeness BEFORE touching state. If a branch op is
         // pending (regen / edit-and-rerun) and the expected new branch
@@ -3287,13 +3586,27 @@ const _chatStoreOptions = {
         const expectedBranchByTurn = pending?.expectedBranchByTurn || {}
         let complete = true
         if (Object.keys(expectedBranchByTurn).length) {
-          const { branchMeta } = _replayEvents([], data.events)
+          // Resolve under the USER's branch view — a new branch below a
+          // selected older ancestor exists but is invisible under the
+          // default-latest ancestry, which would stall the resync until
+          // retry exhaustion.
+          const { branchMeta } = _replayEvents([], data.events, this.branchViewByTab[tab] || null)
           const branchSelection = branchMeta?.branchSelection || new Map()
           for (const [turn, branch] of Object.entries(expectedBranchByTurn)) {
             if (branchSelection.get(Number(turn)) !== branch) {
               complete = false
               break
             }
+          }
+        } else if (pending?.active && pending.baselineMaxEventId != null) {
+          // Metadata-poor op: no expected branch to look for. The op,
+          // once committed, always APPENDS events — history whose max
+          // event_id hasn't grown past the pre-op baseline is stale.
+          // The retry cap (_dropStaleBranchOp) ends the wait if the op
+          // truly never dispatched.
+          const fetchedMax = this._maxEventId(data.events)
+          if (fetchedMax != null && fetchedMax <= pending.baselineMaxEventId) {
+            complete = false
           }
         }
 
@@ -3314,7 +3627,13 @@ const _chatStoreOptions = {
         // and was yanked back to the latest branch."
         this.eventsByTab[tab] = data.events
         if (!this.branchViewByTab[tab]) this.branchViewByTab[tab] = {}
-        this._rebuildMessages(tab)
+        this._rebuildMessages(tab, fetchedAt)
+        // Advance the applied-history watermark so a later out-of-order
+        // response carrying an older snapshot is rejected above.
+        if (incomingMax != null) this._appliedMaxEventIdByTab[tab] = incomingMax
+        // Restore a running turn's flag (e.g. after a cap-drop forced
+        // it off); the false edge stays WS-owned (idle frame).
+        if (data.is_processing === true) this.processingByTab[tab] = true
         delete this._branchResyncPendingByTab[tab]
         return true
       } catch (e) {
@@ -3327,7 +3646,7 @@ const _chatStoreOptions = {
      * Rebuild ``messagesByTab[tab]`` from the cached event log,
      * applying the current ``branchViewByTab[tab]`` override.
      */
-    _rebuildMessages(tab) {
+    _rebuildMessages(tab, fetchedAt = null) {
       const events = this.eventsByTab[tab]
       if (!events) return
       const branchView = this.branchViewByTab[tab] || null
@@ -3335,8 +3654,13 @@ const _chatStoreOptions = {
       // a sub-agent is still live must not clobber its "running"
       // status with a stale terminal event from the cached log.
       const liveRunning = new Set(Object.keys(this.runningJobs || {}))
-      const { messages } = _replayEvents([], events, branchView, liveRunning)
+      const { messages, pendingJobs } = _replayEvents([], events, branchView, liveRunning)
       this.messagesByTab[tab] = messages
+      // Canonical history is authoritative for this tab's running jobs.
+      // ``fetchedAt`` (set only by _resyncHistory) unlocks removals of
+      // tab-owned jobs the history no longer lists; branch-switch
+      // rebuilds pass null and only add/merge.
+      this._reconcileRunningJobs(tab, pendingJobs, fetchedAt)
     },
 
     /**
@@ -3748,6 +4072,8 @@ const _chatStoreOptions = {
       this._recentUserInputs = {}
       this._branchResyncPendingByTab = {}
       this._streamingBranchByTab = {}
+      this._historyRequestSeqByTab = {}
+      this._appliedMaxEventIdByTab = {}
       this._clearBranchResyncTimers()
       // Drop multi-group state along with the legacy buckets — the
       // next ``initForInstance`` runs for a different scope.
@@ -3776,6 +4102,8 @@ const _chatStoreOptions = {
       this._wsBuffer = []
       this._branchResyncPendingByTab = {}
       this._streamingBranchByTab = {}
+      this._historyRequestSeqByTab = {}
+      this._appliedMaxEventIdByTab = {}
       this._clearBranchResyncTimers()
       if (this._reconnectTimer) {
         clearTimeout(this._reconnectTimer)

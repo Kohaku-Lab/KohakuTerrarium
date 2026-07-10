@@ -609,6 +609,8 @@ export const useTabsStore = defineStore("tabs", {
         const { sessionAPI } = await import("@/utils/api")
         const result = await sessionAPI.resume(sessionName, { onNode })
         id = result.instance_id
+        const { promptForMissingWorkdirAfterResume } = await import("@/utils/workdirPrompt")
+        await promptForMissingWorkdirAfterResume(result)
       } else {
         if (!configPath) throw new Error("createSession: configPath required")
         if (!pwd) throw new Error("createSession: pwd required")

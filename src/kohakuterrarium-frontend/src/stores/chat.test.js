@@ -328,6 +328,168 @@ describe("chat store — refresh/reconnect running state", () => {
   })
 })
 
+describe("chat store — running-job elapsed timer stability", () => {
+  it("replay derives startedAt from the event's persisted ts, not Date.now()", () => {
+    // A resync fires on every processing_end; if the rebuild stamps
+    // still-running jobs with Date.now(), the visible elapsed timer
+    // flashes back to 0 mid-run.
+    const startedSecs = Math.floor(Date.now() / 1000) - 75
+    const events = [
+      { type: "user_input", event_id: 1, content: "go" },
+      { type: "processing_start", event_id: 2 },
+      {
+        type: "subagent_call",
+        event_id: 3,
+        name: "explore",
+        task: "look around",
+        job_id: "agent_x1",
+        ts: startedSecs,
+      },
+      { type: "processing_end", event_id: 4 },
+    ]
+    const { messages, pendingJobs } = _replayEvents([], events)
+    expect(pendingJobs.agent_x1).toBeTruthy()
+    expect(pendingJobs.agent_x1.startedAt).toBe(startedSecs * 1000)
+    const part = messages.flatMap((m) => m.parts || []).find((p) => p.jobId === "agent_x1")
+    expect(part.status).toBe("running")
+    expect(part.startedAt).toBe(startedSecs * 1000)
+  })
+
+  it("_restoreRunningState keeps the earliest live startedAt", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = { main: [] }
+    const liveStart = Date.now() - 80_000
+    chat.runningJobs = {
+      agent_x1: { name: "explore", type: "subagent", startedAt: liveStart },
+    }
+    chat._restoreRunningState("main", {
+      agent_x1: { name: "explore", type: "subagent", startedAt: Date.now() },
+    })
+    expect(chat.runningJobs.agent_x1.startedAt).toBe(liveStart)
+  })
+})
+
+describe("chat store — resync completeness under user branch view", () => {
+  it("accepts a new branch beneath a user-selected OLDER ancestor", async () => {
+    // Turn 1 has branches 1 and 2; the user views branch 1. An edit on
+    // turn 2 opens branch 1 under that older ancestor. Completeness
+    // resolved under DEFAULT-latest ancestry (turn1→2) filters the new
+    // branch out and stalls the resync until retry exhaustion.
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.messagesByTab = { main: [] }
+    chat.eventsByTab = { main: [] }
+    chat.branchViewByTab = { main: { 1: 1 } }
+    chat._branchResyncPendingByTab = {
+      main: { active: true, expectedBranchByTurn: { 2: 1 } },
+    }
+
+    const events = [
+      {
+        type: "user_input",
+        event_id: 1,
+        turn_index: 1,
+        branch_id: 1,
+        parent_branch_path: [],
+        content: "A",
+      },
+      {
+        type: "user_input",
+        event_id: 2,
+        turn_index: 1,
+        branch_id: 2,
+        parent_branch_path: [],
+        content: "A-regen",
+      },
+      {
+        type: "user_input",
+        event_id: 3,
+        turn_index: 2,
+        branch_id: 1,
+        parent_branch_path: [[1, 1]],
+        content: "B under old ancestor",
+      },
+    ]
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockResolvedValue({ events })
+
+    const ok = await chat._resyncHistory("main")
+    expect(ok).toBe(true)
+    expect(chat._branchResyncPendingByTab.main).toBeUndefined()
+
+    chat._clearBranchResyncTimers()
+    getHistorySpy.mockRestore()
+  })
+})
+
+describe("chat store — tab-scoped running jobs", () => {
+  it("scopes running-job counts to the owning tab", () => {
+    // A job in tab A must not light the indicator / stop button in
+    // tab B — jobs carry their owning tab.
+    const chat = useChatStore()
+    chat.messagesByTab = { a: [], b: [] }
+    chat.activeTab = "a"
+    chat._handleActivity("a", {
+      activity_type: "tool_start",
+      name: "bash",
+      job_id: "bash_1",
+    })
+    expect(chat.runningJobCountForTab("a")).toBe(1)
+    expect(chat.runningJobCountForTab("b")).toBe(0)
+    // Global getter still reports for cross-tab overlays.
+    expect(chat.hasRunningJobs).toBe(true)
+  })
+
+  it("legacy entries without a tab stamp stay visible everywhere", () => {
+    const chat = useChatStore()
+    chat.runningJobs = { bash_1: { name: "bash", type: "tool", startedAt: 1 } }
+    expect(chat.runningJobCountForTab("a")).toBe(1)
+    expect(chat.runningJobCountForTab("b")).toBe(1)
+  })
+})
+
+describe("chat store — background result banner", () => {
+  it("replays background_result events as bg_result rows", () => {
+    const { messages } = _replayEvents(
+      [],
+      [
+        { type: "user_input", event_id: 1, content: "go" },
+        {
+          type: "background_result",
+          event_id: 2,
+          job_id: "agent_x1",
+          kind: "subagent",
+          label: "explore[x1]",
+        },
+      ],
+    )
+    const banner = messages.find((m) => m.role === "bg_result")
+    expect(banner).toBeTruthy()
+    expect(banner.kind).toBe("subagent")
+    expect(banner.label).toBe("explore[x1]")
+  })
+
+  it("live background_result activity appends a bg_result row", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = { main: [] }
+    chat.activeTab = "main"
+    chat._handleActivity("main", {
+      activity_type: "background_result",
+      job_id: "bash_a1",
+      kind: "tool",
+      label: "bash[a1]",
+    })
+    const banner = chat.messagesByTab.main.find((m) => m.role === "bg_result")
+    expect(banner).toBeTruthy()
+    expect(banner.label).toBe("bash[a1]")
+  })
+})
+
 describe("chat store — compact round handling", () => {
   it("replays compact start/complete as a single merged compact message", () => {
     const { messages: replayed } = _replayEvents(
@@ -377,6 +539,63 @@ describe("chat store — compact round handling", () => {
       status: "done",
       messagesCompacted: 12,
     })
+  })
+
+  it("finishes the live bubble as skipped on compact_skipped", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = { main: [] }
+    chat.activeTab = "main"
+
+    chat._handleActivity("main", {
+      activity_type: "compact_start",
+      round: 3,
+    })
+    expect(chat.messagesByTab.main[0].status).toBe("running")
+    chat._handleActivity("main", {
+      activity_type: "compact_skipped",
+      round: 3,
+      reason: "conversation_changed",
+    })
+
+    expect(chat.messagesByTab.main).toHaveLength(1)
+    expect(chat.messagesByTab.main[0]).toMatchObject({
+      role: "compact",
+      round: 3,
+      status: "skipped",
+      reason: "conversation_changed",
+    })
+  })
+
+  it("replays compact_start + compact_skipped as a skipped bubble, not running", () => {
+    const { messages: replayed } = _replayEvents(
+      [],
+      [
+        { type: "compact_start", round: 4 },
+        { type: "compact_skipped", round: 4, reason: "cancelled" },
+      ],
+    )
+
+    expect(replayed).toHaveLength(1)
+    expect(replayed[0]).toMatchObject({
+      role: "compact",
+      round: 4,
+      status: "skipped",
+      reason: "cancelled",
+    })
+  })
+
+  it("ignores compact_skipped with no open bubble", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = { main: [] }
+    chat.activeTab = "main"
+
+    chat._handleActivity("main", {
+      activity_type: "compact_skipped",
+      round: 1,
+      reason: "nothing_to_compact",
+    })
+
+    expect(chat.messagesByTab.main).toHaveLength(0)
   })
 })
 
@@ -722,7 +941,7 @@ describe("chat store — multimodal edit + branch resync", () => {
 
     // Second poll: branch=2 events landed. Rebuild now safe; pending cleared.
     await expect(chat._resyncHistory("main")).resolves.toBe(true)
-    expect(rebuildSpy).toHaveBeenCalledWith("main")
+    expect(rebuildSpy).toHaveBeenCalledWith("main", expect.any(Number))
     expect(chat._branchResyncPendingByTab.main).toBeUndefined()
 
     rebuildSpy.mockRestore()
@@ -782,7 +1001,7 @@ describe("chat store — multimodal edit + branch resync", () => {
     await chat._resyncHistory("main")
 
     expect(chat.branchViewByTab.main).toEqual({ 2: 1 })
-    expect(rebuildSpy).toHaveBeenCalledWith("main")
+    expect(rebuildSpy).toHaveBeenCalledWith("main", expect.any(Number))
 
     rebuildSpy.mockRestore()
     getHistory.mockRestore()
@@ -1254,6 +1473,700 @@ describe("chat store — user_input_injected (Feat 3 mid-turn)", () => {
 
     editSpy.mockRestore()
     getHistorySpy.mockRestore()
+  })
+
+  it("REPRO edit-regen timeout: transport failure keeps the new branch and returns true", async () => {
+    // The edit POST blocks through the entire rerun, so a slow turn
+    // can outlive the client timeout (response-less ECONNABORTED)
+    // while the backend keeps streaming the new branch over WS. The
+    // store must keep the optimistic branch and return true — not
+    // roll back to the old branch and reopen the editor.
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat._ws = { readyState: 1, send: () => {} }
+
+    const originalEvents = [
+      { type: "user_input", event_id: 1, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "user_message", event_id: 2, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "processing_start", event_id: 3, turn_index: 1, branch_id: 1 },
+      { type: "text_chunk", event_id: 4, turn_index: 1, branch_id: 1, content: "old-to-A" },
+      { type: "processing_end", event_id: 5, turn_index: 1, branch_id: 1 },
+    ]
+    chat.eventsByTab = { main: [...originalEvents] }
+    chat.branchViewByTab = {}
+    const { messages: initialMsgs } = _replayEvents([], originalEvents)
+    chat.messagesByTab = { main: initialMsgs }
+
+    const importActual = await vi.importActual("@/utils/api")
+    const transportErr = Object.assign(new Error("timeout of 30000ms exceeded"), {
+      code: "ECONNABORTED",
+    })
+    const editSpy = vi.spyOn(importActual.agentAPI, "editMessage").mockRejectedValue(transportErr)
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockResolvedValue({ events: [...originalEvents] })
+
+    const userIdx = chat.messagesByTab.main.findIndex((m) => m.role === "user")
+    const ok = await chat.editMessage(userIdx, "A-edit", {
+      turnIndex: 1,
+      userPosition: 0,
+      latestBranch: 1,
+    })
+
+    expect(ok).toBe(true)
+    const allText = JSON.stringify(chat.messagesByTab.main)
+    expect(allText).not.toContain("old-to-A")
+    expect(allText).toContain("A-edit")
+    expect(chat.branchViewByTab.main[1]).toBe(2)
+    expect(chat._branchResyncPendingByTab.main?.active).toBe(true)
+
+    chat._clearBranchResyncTimers()
+    editSpy.mockRestore()
+    getHistorySpy.mockRestore()
+  })
+
+  it("metadata-poor edit + transport failure: stale resync must not clobber the local edit", async () => {
+    // No turnIndex / branch metadata → no expected-branch guard. The
+    // pre-op event-log fingerprint stands in: history whose max
+    // event_id hasn't grown past the baseline is stale and must not
+    // replace the optimistic edit.
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat._ws = { readyState: 1, send: () => {} }
+
+    const originalEvents = [
+      { type: "user_input", event_id: 1, content: "A" },
+      { type: "user_message", event_id: 2, content: "A" },
+      { type: "processing_start", event_id: 3 },
+      { type: "text_chunk", event_id: 4, content: "old-to-A" },
+      { type: "processing_end", event_id: 5 },
+    ]
+    chat.eventsByTab = { main: [...originalEvents] }
+    chat.branchViewByTab = {}
+    const { messages: initialMsgs } = _replayEvents([], originalEvents)
+    chat.messagesByTab = { main: initialMsgs }
+
+    const importActual = await vi.importActual("@/utils/api")
+    const transportErr = Object.assign(new Error("timeout of 30000ms exceeded"), {
+      code: "ECONNABORTED",
+    })
+    const editSpy = vi.spyOn(importActual.agentAPI, "editMessage").mockRejectedValue(transportErr)
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockResolvedValue({ events: [...originalEvents] })
+
+    const userIdx = chat.messagesByTab.main.findIndex((m) => m.role === "user")
+    // Legacy row: NO turnIndex / userPosition / latestBranch metadata.
+    const ok = await chat.editMessage(userIdx, "A-edit", {})
+    expect(ok).toBe(true)
+    expect(chat._branchResyncPendingByTab.main?.baselineMaxEventId).toBe(5)
+
+    // First resync races ahead of persistence and returns the OLD log.
+    const resyncOk = await chat._resyncHistory("main")
+    expect(resyncOk).toBe(true)
+    const allText = JSON.stringify(chat.messagesByTab.main)
+    expect(allText).toContain("A-edit")
+    expect(allText).not.toContain("old-to-A")
+    expect(chat._branchResyncPendingByTab.main?.active).toBe(true)
+
+    // Backend commits: new events past the baseline → resync accepts.
+    getHistorySpy.mockResolvedValue({
+      events: [
+        ...originalEvents,
+        { type: "user_input", event_id: 6, content: "A-edit" },
+        { type: "user_message", event_id: 7, content: "A-edit" },
+        { type: "text_chunk", event_id: 8, content: "new-to-A-edit" },
+      ],
+    })
+    await chat._resyncHistory("main")
+    expect(chat._branchResyncPendingByTab.main).toBeUndefined()
+    expect(JSON.stringify(chat.messagesByTab.main)).toContain("new-to-A-edit")
+
+    chat._clearBranchResyncTimers()
+    editSpy.mockRestore()
+    getHistorySpy.mockRestore()
+  })
+
+  it("edit rejected by the backend (HTTP error response) still rolls back and reopens the editor", async () => {
+    // A genuine backend rejection (HTTP 4xx — no branch was opened)
+    // must roll back and return false so the editor reopens.
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat._ws = { readyState: 1, send: () => {} }
+
+    const originalEvents = [
+      { type: "user_input", event_id: 1, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "user_message", event_id: 2, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "processing_start", event_id: 3, turn_index: 1, branch_id: 1 },
+      { type: "text_chunk", event_id: 4, turn_index: 1, branch_id: 1, content: "old-to-A" },
+      { type: "processing_end", event_id: 5, turn_index: 1, branch_id: 1 },
+    ]
+    chat.eventsByTab = { main: [...originalEvents] }
+    chat.branchViewByTab = {}
+    const { messages: initialMsgs } = _replayEvents([], originalEvents)
+    chat.messagesByTab = { main: initialMsgs }
+
+    const importActual = await vi.importActual("@/utils/api")
+    const httpErr = Object.assign(new Error("Request failed with status code 400"), {
+      response: { status: 400 },
+    })
+    const editSpy = vi.spyOn(importActual.agentAPI, "editMessage").mockRejectedValue(httpErr)
+
+    const userIdx = chat.messagesByTab.main.findIndex((m) => m.role === "user")
+    const ok = await chat.editMessage(userIdx, "A-edit", {
+      turnIndex: 1,
+      userPosition: 0,
+      latestBranch: 1,
+    })
+
+    expect(ok).toBe(false)
+    const allText = JSON.stringify(chat.messagesByTab.main)
+    expect(allText).toContain("old-to-A")
+    expect(chat.branchViewByTab.main?.[1]).toBeUndefined()
+    expect(chat._branchResyncPendingByTab.main).toBeUndefined()
+
+    chat._clearBranchResyncTimers()
+    editSpy.mockRestore()
+  })
+
+  it("regen POST transport failure keeps the optimistic branch", async () => {
+    // Same contract as edit: a response-less regenerate failure must
+    // not flip the view back to the old branch.
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat._ws = { readyState: 1, send: () => {} }
+
+    const originalEvents = [
+      { type: "user_input", event_id: 1, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "user_message", event_id: 2, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "processing_start", event_id: 3, turn_index: 1, branch_id: 1 },
+      { type: "text_chunk", event_id: 4, turn_index: 1, branch_id: 1, content: "old-to-A" },
+      { type: "processing_end", event_id: 5, turn_index: 1, branch_id: 1 },
+    ]
+    chat.eventsByTab = { main: [...originalEvents] }
+    chat.branchViewByTab = {}
+    const { messages: initialMsgs } = _replayEvents([], originalEvents)
+    // Regen's optimistic promotion needs the turn/branch metadata the
+    // branch navigator normally carries on the user row.
+    for (const m of initialMsgs) {
+      if (m.role === "user") {
+        m.turnIndex = 1
+        m.latestBranch = 1
+      }
+    }
+    chat.messagesByTab = { main: initialMsgs }
+
+    const importActual = await vi.importActual("@/utils/api")
+    const transportErr = Object.assign(new Error("timeout of 30000ms exceeded"), {
+      code: "ECONNABORTED",
+    })
+    const regenSpy = vi.spyOn(importActual.agentAPI, "regenerate").mockRejectedValue(transportErr)
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockResolvedValue({ events: [...originalEvents] })
+
+    await chat.regenerateLastResponse({ turnIndex: 1 })
+
+    expect(chat.branchViewByTab.main[1]).toBe(2)
+    expect(chat.processingByTab.main).toBe(true)
+    const allText = JSON.stringify(chat.messagesByTab.main)
+    expect(allText).not.toContain("old-to-A")
+
+    // A resync against a stale snapshot (old branch only) must not
+    // clobber the optimistic state.
+    expect(chat._branchResyncPendingByTab.main.expectedBranchByTurn[1]).toBe(2)
+    await chat._resyncHistory("main")
+    expect(chat.branchViewByTab.main[1]).toBe(2)
+    expect(JSON.stringify(chat.messagesByTab.main)).not.toContain("old-to-A")
+
+    chat._clearBranchResyncTimers()
+    regenSpy.mockRestore()
+    getHistorySpy.mockRestore()
+  })
+
+  it("edit failure that never reached the backend (dead WS) rolls back", async () => {
+    // ERR_NETWORK + dead WS = never dispatched → roll back.
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.wsStatus = "closed"
+
+    const originalEvents = [
+      { type: "user_input", event_id: 1, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "user_message", event_id: 2, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "processing_start", event_id: 3, turn_index: 1, branch_id: 1 },
+      { type: "text_chunk", event_id: 4, turn_index: 1, branch_id: 1, content: "old-to-A" },
+      { type: "processing_end", event_id: 5, turn_index: 1, branch_id: 1 },
+    ]
+    chat.eventsByTab = { main: [...originalEvents] }
+    chat.branchViewByTab = {}
+    const { messages: initialMsgs } = _replayEvents([], originalEvents)
+    chat.messagesByTab = { main: initialMsgs }
+
+    const importActual = await vi.importActual("@/utils/api")
+    const editSpy = vi
+      .spyOn(importActual.agentAPI, "editMessage")
+      .mockRejectedValue(Object.assign(new Error("Network Error"), { code: "ERR_NETWORK" }))
+
+    const userIdx = chat.messagesByTab.main.findIndex((m) => m.role === "user")
+    const ok = await chat.editMessage(userIdx, "A-edit", {
+      turnIndex: 1,
+      userPosition: 0,
+      latestBranch: 1,
+    })
+
+    expect(ok).toBe(false)
+    expect(JSON.stringify(chat.messagesByTab.main)).toContain("old-to-A")
+    expect(chat._branchResyncPendingByTab.main).toBeUndefined()
+
+    chat._clearBranchResyncTimers()
+    editSpy.mockRestore()
+  })
+
+  it("edit connection-drop with a live WS keeps the optimistic branch", async () => {
+    // ERR_NETWORK + open WS = plausibly still running → keep optimistic.
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.wsStatus = "open"
+
+    const originalEvents = [
+      { type: "user_input", event_id: 1, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "user_message", event_id: 2, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "processing_start", event_id: 3, turn_index: 1, branch_id: 1 },
+      { type: "text_chunk", event_id: 4, turn_index: 1, branch_id: 1, content: "old-to-A" },
+      { type: "processing_end", event_id: 5, turn_index: 1, branch_id: 1 },
+    ]
+    chat.eventsByTab = { main: [...originalEvents] }
+    chat.branchViewByTab = {}
+    const { messages: initialMsgs } = _replayEvents([], originalEvents)
+    chat.messagesByTab = { main: initialMsgs }
+
+    const importActual = await vi.importActual("@/utils/api")
+    const editSpy = vi
+      .spyOn(importActual.agentAPI, "editMessage")
+      .mockRejectedValue(Object.assign(new Error("Network Error"), { code: "ERR_NETWORK" }))
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockResolvedValue({ events: [...originalEvents] })
+
+    const userIdx = chat.messagesByTab.main.findIndex((m) => m.role === "user")
+    const ok = await chat.editMessage(userIdx, "A-edit", {
+      turnIndex: 1,
+      userPosition: 0,
+      latestBranch: 1,
+    })
+
+    expect(ok).toBe(true)
+    expect(chat.branchViewByTab.main[1]).toBe(2)
+    expect(JSON.stringify(chat.messagesByTab.main)).not.toContain("old-to-A")
+
+    chat._clearBranchResyncTimers()
+    editSpy.mockRestore()
+    getHistorySpy.mockRestore()
+  })
+
+  it("pending-branch guard self-heals after the retry cap", async () => {
+    vi.useFakeTimers()
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+
+    const originalEvents = [
+      { type: "user_input", event_id: 1, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "user_message", event_id: 2, turn_index: 1, branch_id: 1, content: "A" },
+    ]
+    chat.eventsByTab = { main: [...originalEvents] }
+    chat.messagesByTab = { main: [] }
+    // Speculative state from the op whose branch never landed — must
+    // be dropped with the guard, or strict branch selection renders a
+    // nonexistent branch (blank view) behind a stuck spinner.
+    chat.branchViewByTab = { main: { 1: 99 } }
+    chat._streamingBranchByTab.main = { turnIndex: 1, branchId: 99 }
+    chat.processingByTab.main = true
+
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockResolvedValue({ events: [...originalEvents] })
+
+    chat._branchResyncPendingByTab.main = {
+      active: true,
+      expectedBranchByTurn: { 1: 99 },
+      retries: 40,
+    }
+    chat._scheduleBranchResync("main")
+    await vi.advanceTimersByTimeAsync(400)
+
+    expect(chat._branchResyncPendingByTab.main).toBeUndefined()
+    expect(chat._branchResyncTimers.main).toBeUndefined()
+    expect(chat.branchViewByTab.main[1]).toBeUndefined()
+    expect(chat._streamingBranchByTab.main).toBeUndefined()
+    expect(chat.processingByTab.main).toBe(false)
+    // View reconciled to server truth (old branch renders again).
+    expect(JSON.stringify(chat.messagesByTab.main)).toContain("A")
+
+    getHistorySpy.mockRestore()
+    vi.useRealTimers()
+  })
+
+  it("edit on a never-branched turn derives the predicted branch from the event log", async () => {
+    // The ordinary UI path: a message that was never branched carries
+    // no ``latestBranch`` metadata — the prediction must come from the
+    // cached event log instead of silently skipping the guard.
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.wsStatus = "open"
+
+    const originalEvents = [
+      { type: "user_input", event_id: 1, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "user_message", event_id: 2, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "processing_start", event_id: 3, turn_index: 1, branch_id: 1 },
+      { type: "text_chunk", event_id: 4, turn_index: 1, branch_id: 1, content: "old-to-A" },
+      { type: "processing_end", event_id: 5, turn_index: 1, branch_id: 1 },
+    ]
+    chat.eventsByTab = { main: [...originalEvents] }
+    chat.branchViewByTab = {}
+    const { messages: initialMsgs } = _replayEvents([], originalEvents)
+    chat.messagesByTab = { main: initialMsgs }
+
+    const importActual = await vi.importActual("@/utils/api")
+    const editSpy = vi
+      .spyOn(importActual.agentAPI, "editMessage")
+      .mockRejectedValue(
+        Object.assign(new Error("timeout of 30000ms exceeded"), { code: "ECONNABORTED" }),
+      )
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockResolvedValue({ events: [...originalEvents] })
+
+    const userIdx = chat.messagesByTab.main.findIndex((m) => m.role === "user")
+    // No latestBranch passed.
+    const ok = await chat.editMessage(userIdx, "A-edit", { turnIndex: 1, userPosition: 0 })
+
+    expect(ok).toBe(true)
+    expect(chat.branchViewByTab.main[1]).toBe(2)
+    expect(chat._branchResyncPendingByTab.main.expectedBranchByTurn[1]).toBe(2)
+    expect(JSON.stringify(chat.messagesByTab.main)).not.toContain("old-to-A")
+
+    chat._clearBranchResyncTimers()
+    editSpy.mockRestore()
+    getHistorySpy.mockRestore()
+  })
+
+  it("successful edit POST is never rolled back by a failed history resync", async () => {
+    // Once the POST returns, the edit is committed server-side — a
+    // 500/network error on the follow-up /history GET must not restore
+    // the old branch or reopen the editor.
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+
+    const originalEvents = [
+      { type: "user_input", event_id: 1, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "user_message", event_id: 2, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "processing_start", event_id: 3, turn_index: 1, branch_id: 1 },
+      { type: "text_chunk", event_id: 4, turn_index: 1, branch_id: 1, content: "old-to-A" },
+      { type: "processing_end", event_id: 5, turn_index: 1, branch_id: 1 },
+    ]
+    chat.eventsByTab = { main: [...originalEvents] }
+    chat.branchViewByTab = {}
+    const { messages: initialMsgs } = _replayEvents([], originalEvents)
+    chat.messagesByTab = { main: initialMsgs }
+
+    const importActual = await vi.importActual("@/utils/api")
+    const editSpy = vi
+      .spyOn(importActual.agentAPI, "editMessage")
+      .mockResolvedValue({ branch_id: 2, turn_index: 1, status: "edited" })
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockRejectedValue(Object.assign(new Error("boom"), { response: { status: 500 } }))
+
+    const userIdx = chat.messagesByTab.main.findIndex((m) => m.role === "user")
+    const ok = await chat.editMessage(userIdx, "A-edit", {
+      turnIndex: 1,
+      userPosition: 0,
+      latestBranch: 1,
+    })
+
+    expect(ok).toBe(true)
+    expect(chat.branchViewByTab.main[1]).toBe(2)
+    expect(JSON.stringify(chat.messagesByTab.main)).not.toContain("old-to-A")
+
+    chat._clearBranchResyncTimers()
+    editSpy.mockRestore()
+    getHistorySpy.mockRestore()
+  })
+
+  it("gateway timeout (504) on the edit POST keeps the optimistic branch", async () => {
+    // A reverse proxy can give up on the long-blocking POST while the
+    // backend keeps running the rerun — same contract as a client
+    // timeout even though an HTTP response exists.
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+
+    const originalEvents = [
+      { type: "user_input", event_id: 1, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "user_message", event_id: 2, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "processing_start", event_id: 3, turn_index: 1, branch_id: 1 },
+      { type: "text_chunk", event_id: 4, turn_index: 1, branch_id: 1, content: "old-to-A" },
+      { type: "processing_end", event_id: 5, turn_index: 1, branch_id: 1 },
+    ]
+    chat.eventsByTab = { main: [...originalEvents] }
+    chat.branchViewByTab = {}
+    const { messages: initialMsgs } = _replayEvents([], originalEvents)
+    chat.messagesByTab = { main: initialMsgs }
+
+    const importActual = await vi.importActual("@/utils/api")
+    const editSpy = vi
+      .spyOn(importActual.agentAPI, "editMessage")
+      .mockRejectedValue(Object.assign(new Error("Gateway Timeout"), { response: { status: 504 } }))
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockResolvedValue({ events: [...originalEvents] })
+
+    const userIdx = chat.messagesByTab.main.findIndex((m) => m.role === "user")
+    const ok = await chat.editMessage(userIdx, "A-edit", {
+      turnIndex: 1,
+      userPosition: 0,
+      latestBranch: 1,
+    })
+
+    expect(ok).toBe(true)
+    expect(chat.branchViewByTab.main[1]).toBe(2)
+    expect(JSON.stringify(chat.messagesByTab.main)).not.toContain("old-to-A")
+
+    chat._clearBranchResyncTimers()
+    editSpy.mockRestore()
+    getHistorySpy.mockRestore()
+  })
+
+  it("cap expiration with a failed final fetch leaves no optimistic leftovers", async () => {
+    vi.useFakeTimers()
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+
+    const originalEvents = [
+      { type: "user_input", event_id: 1, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "user_message", event_id: 2, turn_index: 1, branch_id: 1, content: "A" },
+    ]
+    chat.eventsByTab = {
+      main: [
+        ...originalEvents,
+        {
+          type: "user_message",
+          event_id: -1,
+          turn_index: 1,
+          branch_id: 99,
+          content: "ghost",
+          _optimistic: true,
+        },
+      ],
+    }
+    chat.messagesByTab = { main: [] }
+    chat.branchViewByTab = { main: { 1: 99 } }
+    chat._streamingBranchByTab.main = { turnIndex: 1, branchId: 99 }
+    chat.processingByTab.main = true
+
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockRejectedValue(new Error("net"))
+
+    chat._branchResyncPendingByTab.main = {
+      active: true,
+      expectedBranchByTurn: { 1: 99 },
+      retries: 40,
+    }
+    chat._scheduleBranchResync("main")
+    await vi.advanceTimersByTimeAsync(400)
+
+    expect(chat._branchResyncPendingByTab.main).toBeUndefined()
+    expect(chat.eventsByTab.main.some((ev) => ev._optimistic)).toBe(false)
+    expect(JSON.stringify(chat.messagesByTab.main)).not.toContain("ghost")
+    expect(chat.branchViewByTab.main[1]).toBeUndefined()
+    expect(chat.processingByTab.main).toBe(false)
+
+    getHistorySpy.mockRestore()
+    vi.useRealTimers()
+  })
+
+  it("resync restores a running turn's processing flag from is_processing", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+
+    const originalEvents = [
+      { type: "user_input", event_id: 1, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "user_message", event_id: 2, turn_index: 1, branch_id: 1, content: "A" },
+    ]
+    chat.eventsByTab = { main: [...originalEvents] }
+    chat.messagesByTab = { main: [] }
+    chat.processingByTab.main = false
+
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockResolvedValue({ events: [...originalEvents], is_processing: true })
+
+    await chat._resyncHistory("main")
+
+    expect(chat.processingByTab.main).toBe(true)
+
+    getHistorySpy.mockRestore()
+  })
+
+  it("regen on a never-branched turn derives the predicted branch from the event log", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.wsStatus = "open"
+
+    const originalEvents = [
+      { type: "user_input", event_id: 1, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "user_message", event_id: 2, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "processing_start", event_id: 3, turn_index: 1, branch_id: 1 },
+      { type: "text_chunk", event_id: 4, turn_index: 1, branch_id: 1, content: "old-to-A" },
+      { type: "processing_end", event_id: 5, turn_index: 1, branch_id: 1 },
+    ]
+    chat.eventsByTab = { main: [...originalEvents] }
+    chat.branchViewByTab = {}
+    const { messages: initialMsgs } = _replayEvents([], originalEvents)
+    // turnIndex only — no latestBranch metadata on the row.
+    for (const m of initialMsgs) {
+      if (m.role === "user") m.turnIndex = 1
+    }
+    chat.messagesByTab = { main: initialMsgs }
+
+    const importActual = await vi.importActual("@/utils/api")
+    const regenSpy = vi
+      .spyOn(importActual.agentAPI, "regenerate")
+      .mockRejectedValue(
+        Object.assign(new Error("timeout of 30000ms exceeded"), { code: "ECONNABORTED" }),
+      )
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockResolvedValue({ events: [...originalEvents] })
+
+    await chat.regenerateLastResponse({ turnIndex: 1 })
+
+    expect(chat.branchViewByTab.main[1]).toBe(2)
+    expect(chat._branchResyncPendingByTab.main.expectedBranchByTurn[1]).toBe(2)
+    expect(JSON.stringify(chat.messagesByTab.main)).not.toContain("old-to-A")
+
+    chat._clearBranchResyncTimers()
+    regenSpy.mockRestore()
+    getHistorySpy.mockRestore()
+  })
+
+  it("successful regen POST is never rolled back by a failed history resync", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+
+    const originalEvents = [
+      { type: "user_input", event_id: 1, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "user_message", event_id: 2, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "processing_start", event_id: 3, turn_index: 1, branch_id: 1 },
+      { type: "text_chunk", event_id: 4, turn_index: 1, branch_id: 1, content: "old-to-A" },
+      { type: "processing_end", event_id: 5, turn_index: 1, branch_id: 1 },
+    ]
+    chat.eventsByTab = { main: [...originalEvents] }
+    chat.branchViewByTab = {}
+    const { messages: initialMsgs } = _replayEvents([], originalEvents)
+    for (const m of initialMsgs) {
+      if (m.role === "user") {
+        m.turnIndex = 1
+        m.latestBranch = 1
+      }
+    }
+    chat.messagesByTab = { main: initialMsgs }
+
+    const importActual = await vi.importActual("@/utils/api")
+    const regenSpy = vi
+      .spyOn(importActual.agentAPI, "regenerate")
+      .mockResolvedValue({ branch_id: 2, turn_index: 1, status: "regenerating" })
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockRejectedValue(Object.assign(new Error("boom"), { response: { status: 500 } }))
+
+    await chat.regenerateLastResponse({ turnIndex: 1 })
+
+    expect(chat.branchViewByTab.main[1]).toBe(2)
+    expect(chat.processingByTab.main).toBe(true)
+    expect(JSON.stringify(chat.messagesByTab.main)).not.toContain("old-to-A")
+
+    chat._clearBranchResyncTimers()
+    regenSpy.mockRestore()
+    getHistorySpy.mockRestore()
+  })
+
+  it("resync retry loop survives a failed fetch while a branch op is pending", async () => {
+    vi.useFakeTimers()
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+
+    const originalEvents = [
+      { type: "user_input", event_id: 1, turn_index: 1, branch_id: 1, content: "A" },
+      { type: "user_message", event_id: 2, turn_index: 1, branch_id: 1, content: "A" },
+    ]
+    chat.eventsByTab = { main: [...originalEvents] }
+    chat.messagesByTab = { main: [] }
+
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockRejectedValueOnce(new Error("net"))
+      .mockResolvedValue({ events: [...originalEvents] })
+
+    chat._branchResyncPendingByTab.main = { active: true, expectedBranchByTurn: {} }
+    chat._scheduleBranchResync("main")
+    await vi.advanceTimersByTimeAsync(400)
+    expect(getHistorySpy).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(400)
+    expect(getHistorySpy).toHaveBeenCalledTimes(2)
+    expect(chat._branchResyncPendingByTab.main).toBeUndefined()
+
+    getHistorySpy.mockRestore()
+    vi.useRealTimers()
   })
 
   it("REPRO edit-regen + rebuild: branchView override is HONORED STRICTLY", () => {
@@ -2075,9 +2988,12 @@ describe("chat store — optimistic branch promotion", () => {
     chat.eventsByTab = { main: [...originalEvents] }
 
     const importActual = await vi.importActual("@/utils/api")
+    // An HTTP error response = the backend rejected the edit outright
+    // (a response-less transport error keeps the optimistic state
+    // instead — see the transport-failure tests).
     const editSpy = vi
       .spyOn(importActual.agentAPI, "editMessage")
-      .mockRejectedValue(new Error("boom"))
+      .mockRejectedValue(Object.assign(new Error("boom"), { response: { status: 500 } }))
 
     const ok = await chat.editMessage(0, "edited", {
       turnIndex: 1,
@@ -2120,12 +3036,13 @@ describe("chat store — optimistic branch promotion", () => {
     const importActual = await vi.importActual("@/utils/api")
     const regenSpy = vi
       .spyOn(importActual.agentAPI, "regenerate")
-      .mockRejectedValue(new Error("net"))
+      .mockRejectedValue(Object.assign(new Error("net"), { response: { status: 500 } }))
 
     await chat.regenerateLastResponse({ turnIndex: 1 })
 
     expect(chat.processingByTab.main).toBe(false)
     expect(chat._streamingBranchByTab.main).toBeUndefined()
+    expect(chat._branchResyncPendingByTab.main).toBeUndefined()
     regenSpy.mockRestore()
   })
 })
@@ -2494,5 +3411,310 @@ describe("chat store — queued-message UI freeze regressions", () => {
     // forever with a "running" assistant bubble whose _streaming flag
     // was never cleared by a finaliser.
     expect(chat._streamingBranchByTab.main).toEqual({ turnIndex: 2, branchId: 1 })
+  })
+})
+
+describe("chat store — canonical history reconciles tab-owned running jobs", () => {
+  it("_resyncHistory removes a tab-owned job that history shows as terminal", async () => {
+    // A terminal WS frame was missed, so runningJobs still lists job_1
+    // as running. Canonical history contains its tool_result, so a
+    // fetch-driven rebuild must prune it (its startedAt pre-dates the
+    // fetch).
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.messagesByTab = { main: [] }
+    chat.branchViewByTab = {}
+    chat.runningJobs = {
+      job_1: { name: "bash", type: "tool", startedAt: Date.now() - 60_000, tab: "main" },
+    }
+
+    const events = [
+      { type: "processing_start", event_id: 1 },
+      { type: "tool_call", name: "bash", call_id: "job_1", event_id: 2, args: {} },
+      { type: "tool_result", name: "bash", call_id: "job_1", event_id: 3, output: "done" },
+      { type: "processing_end", event_id: 4 },
+    ]
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockResolvedValue({ events })
+
+    await chat._resyncHistory("main")
+    expect(chat.runningJobs.job_1).toBeUndefined()
+
+    chat._clearBranchResyncTimers()
+    getHistorySpy.mockRestore()
+  })
+
+  it("_resyncHistory adds a still-running job discovered only in history", async () => {
+    // No local runningJobs entry, but history has a subagent_call with
+    // no terminal — the replay's pendingJobs is authoritative and the
+    // job must be added, stamped with the tab.
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.messagesByTab = { main: [] }
+    chat.branchViewByTab = {}
+    chat.runningJobs = {}
+
+    const events = [
+      { type: "processing_start", event_id: 1 },
+      { type: "subagent_call", name: "explore", job_id: "agent_1", event_id: 2, task: "scan" },
+    ]
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockResolvedValue({ events })
+
+    await chat._resyncHistory("main")
+    expect(chat.runningJobs.agent_1).toMatchObject({
+      name: "explore",
+      type: "subagent",
+      tab: "main",
+    })
+
+    chat.runningJobs = {}
+    chat._checkJobTimer()
+    chat._clearBranchResyncTimers()
+    getHistorySpy.mockRestore()
+  })
+
+  it("_resyncHistory keeps a job that started AFTER the fetch began", async () => {
+    // A job started while the /history request was in flight is newer
+    // than the returned history; even though history doesn't list it,
+    // reconciliation must not prune it (startedAt >= fetchedAt).
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.messagesByTab = { main: [] }
+    chat.branchViewByTab = {}
+    chat.runningJobs = {
+      job_future: { name: "bash", type: "tool", startedAt: Date.now() + 60_000, tab: "main" },
+    }
+
+    const events = [
+      { type: "user_input", event_id: 1, content: "hi" },
+      { type: "processing_start", event_id: 2 },
+      { type: "text_chunk", event_id: 3, content: "hello" },
+      { type: "processing_end", event_id: 4 },
+    ]
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockResolvedValue({ events })
+
+    await chat._resyncHistory("main")
+    expect(chat.runningJobs.job_future).toBeDefined()
+
+    chat.runningJobs = {}
+    chat._checkJobTimer()
+    chat._clearBranchResyncTimers()
+    getHistorySpy.mockRestore()
+  })
+
+  it("branch-switch _rebuildMessages adds jobs but never removes (no fetchedAt)", async () => {
+    // A pure branch switch rebuilds from the cached event log with no
+    // fetchedAt: it may add jobs found in the replay but must not prune
+    // a tab-owned job absent from the (possibly stale) cache.
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.messagesByTab = { main: [] }
+    chat.branchViewByTab = { main: {} }
+    chat.runningJobs = {
+      stale_1: { name: "bash", type: "tool", startedAt: Date.now() - 60_000, tab: "main" },
+    }
+    chat.eventsByTab = {
+      main: [
+        { type: "processing_start", event_id: 1 },
+        { type: "subagent_call", name: "explore", job_id: "agent_2", event_id: 2, task: "scan" },
+      ],
+    }
+
+    chat._rebuildMessages("main")
+    // Added from the replay.
+    expect(chat.runningJobs.agent_2).toMatchObject({ type: "subagent", tab: "main" })
+    // NOT removed despite being absent from the cache.
+    expect(chat.runningJobs.stale_1).toBeDefined()
+
+    chat.runningJobs = {}
+    chat._checkJobTimer()
+  })
+
+  it("_resyncHistory preserves UI-only fields (promotable) on a kept job", async () => {
+    // A live entry carries promotable/cancelling that the replay never
+    // emits. A fetch-driven reconcile that KEEPS the job (still running
+    // in history) must merge, not replace — the UI-only flags survive.
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.messagesByTab = { main: [] }
+    chat.branchViewByTab = {}
+    const liveStart = Date.now() - 60_000
+    chat.runningJobs = {
+      agent_1: {
+        name: "explore",
+        type: "subagent",
+        startedAt: liveStart,
+        tab: "main",
+        promotable: true,
+      },
+    }
+
+    const events = [
+      { type: "processing_start", event_id: 1 },
+      { type: "subagent_call", name: "explore", job_id: "agent_1", event_id: 2, task: "scan" },
+    ]
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockResolvedValue({ events })
+
+    await chat._resyncHistory("main")
+    // Kept (still running in history), promotable survives, earliest
+    // startedAt preserved.
+    expect(chat.runningJobs.agent_1).toBeDefined()
+    expect(chat.runningJobs.agent_1.promotable).toBe(true)
+    expect(chat.runningJobs.agent_1.startedAt).toBe(liveStart)
+
+    chat.runningJobs = {}
+    chat._checkJobTimer()
+    chat._clearBranchResyncTimers()
+    getHistorySpy.mockRestore()
+  })
+})
+
+describe("chat store — interrupt targets the given tab", () => {
+  it("interrupt(tab) interrupts only the named creature, leaving other tabs", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "graph_1"
+    chat.activeTab = "root_a"
+    chat.tabs = ["root_a", "root_b"]
+    chat.processingByTab = { root_a: true, root_b: true }
+
+    const importActual = await vi.importActual("@/utils/api")
+    const spy = vi.spyOn(importActual.terrariumAPI, "interruptCreature").mockResolvedValue({})
+
+    await chat.interrupt("root_b")
+
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy).toHaveBeenCalledWith("graph_1", "root_b")
+    expect(chat.processingByTab.root_b).toBe(false)
+    // The globally-active tab (root_a) was NOT interrupted.
+    expect(chat.processingByTab.root_a).toBe(true)
+
+    spy.mockRestore()
+  })
+})
+
+describe("chat store — concurrent history resyncs apply in order", () => {
+  it("a superseded (older) resync must not clobber the newer one's result", async () => {
+    // Two resyncs for the same tab overlap. B starts after A, so B is
+    // authoritative. B resolves first with newer events; A resolves
+    // second with older events. A must refuse to apply (superseded),
+    // leaving B's messages on screen.
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.messagesByTab = { main: [] }
+    chat.branchViewByTab = {}
+
+    let resolveA
+    let resolveB
+    const pA = new Promise((r) => (resolveA = r))
+    const pB = new Promise((r) => (resolveB = r))
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockReturnValueOnce(pA)
+      .mockReturnValueOnce(pB)
+
+    const older = [
+      { type: "user_input", event_id: 1, content: "q1" },
+      { type: "processing_start", event_id: 2 },
+      { type: "text_chunk", event_id: 3, content: "old-answer" },
+      { type: "processing_end", event_id: 4 },
+    ]
+    const newer = [
+      ...older,
+      { type: "user_input", event_id: 5, content: "q2" },
+      { type: "processing_start", event_id: 6 },
+      { type: "text_chunk", event_id: 7, content: "new-answer" },
+      { type: "processing_end", event_id: 8 },
+    ]
+
+    // A starts first (requestId 1), B second (requestId 2).
+    const callA = chat._resyncHistory("main")
+    const callB = chat._resyncHistory("main")
+
+    // B (newer) resolves first and applies.
+    resolveB({ events: newer })
+    expect(await callB).toBe(true)
+    // A (older) resolves second — superseded, must refuse.
+    resolveA({ events: older })
+    const aResult = await callA
+
+    expect(aResult).toBe(false)
+    const text = JSON.stringify(chat.messagesByTab.main)
+    expect(text).toContain("new-answer")
+    // A's events never replaced B's.
+    expect(chat.eventsByTab.main).toEqual(newer)
+
+    chat._clearBranchResyncTimers()
+    getHistorySpy.mockRestore()
+  })
+
+  it("a stale duplicate fetch (max event_id below the watermark) is rejected", async () => {
+    // Non-branch-op resync whose newest event predates the applied
+    // watermark is a stale snapshot and must not clobber current state.
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.messagesByTab = { main: [] }
+    chat.branchViewByTab = {}
+
+    const newer = [
+      { type: "user_input", event_id: 1, content: "q1" },
+      { type: "processing_start", event_id: 2 },
+      { type: "text_chunk", event_id: 3, content: "new-answer" },
+      { type: "processing_end", event_id: 4 },
+    ]
+    const stale = [
+      { type: "user_input", event_id: 1, content: "q1" },
+      { type: "processing_start", event_id: 2 },
+      { type: "text_chunk", event_id: 3, content: "old-answer" },
+    ]
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistorySpy = vi.spyOn(importActual.terrariumAPI, "getHistory")
+
+    getHistorySpy.mockResolvedValueOnce({ events: newer })
+    expect(await chat._resyncHistory("main")).toBe(true)
+    expect(chat._appliedMaxEventIdByTab.main).toBe(4)
+
+    getHistorySpy.mockResolvedValueOnce({ events: stale })
+    const staleResult = await chat._resyncHistory("main")
+    expect(staleResult).toBe(true)
+    // State untouched by the stale response.
+    expect(chat.eventsByTab.main).toEqual(newer)
+    expect(JSON.stringify(chat.messagesByTab.main)).toContain("new-answer")
+
+    chat._clearBranchResyncTimers()
+    getHistorySpy.mockRestore()
   })
 })

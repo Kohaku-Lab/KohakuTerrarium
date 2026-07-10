@@ -115,7 +115,7 @@
           <ChatMessage v-for="(msg, idx) in viewMessages" :key="msg.id" :message="msg" :prev-message="idx > 0 ? viewMessages[idx - 1] : null" :is-first="idx === 0" :message-idx="idx" :is-last-assistant="msg.role === 'assistant' && idx === viewMessages.length - 1" />
           <div v-if="showKohakUwUingIndicator" class="flex items-center gap-2.5 py-2 pl-1">
             <span class="w-2 h-2 rounded-full bg-amber kohaku-pulse" />
-            <span class="text-sm text-amber/80 kohaku-pulse">{{ t("chat.processing") }}</span>
+            <span class="text-sm text-amber/80 kohaku-pulse">{{ kohakuwuingLabel }}</span>
           </div>
         </div>
       </div>
@@ -190,7 +190,7 @@
             <button v-if="!(isCompact && inputActive)" class="kt-input-pill-btn text-warm-400 hover:text-coral hover:bg-coral/10" :title="t('chat.clearContext')" :aria-label="t('chat.clearContext')" @click="triggerClear">
               <span class="i-carbon-clean" />
             </button>
-            <button v-if="chat.processing || chat.hasRunningJobs" class="kt-input-send-btn bg-coral/90 text-white hover:bg-coral shadow-sm shadow-coral/20" :title="`${t('chat.stopGeneration')} (Esc)`" :aria-label="t('chat.stopGeneration')" @click="chat.interrupt()">
+            <button v-if="viewProcessing" class="kt-input-send-btn bg-coral/90 text-white hover:bg-coral shadow-sm shadow-coral/20" :title="`${t('chat.stopGeneration')} (Esc)`" :aria-label="t('chat.stopGeneration')" @click="chat.interrupt(viewActiveTab)">
               <span class="i-carbon-stop-filled" />
             </button>
             <button v-else class="kt-input-send-btn" :class="inputCanSend ? 'bg-iolite text-white hover:bg-iolite-shadow shadow-sm shadow-iolite/20' : 'text-warm-300 dark:text-warm-600 cursor-not-allowed'" :disabled="!inputCanSend" :aria-label="t('chat.sendMessage')" @click="send">
@@ -498,12 +498,26 @@ const showPendingBanner = computed(() => pendingCount.value > 0 && inputText.val
 // chat.activeTab — which equals THIS group's activeTab only when this
 // group is focused. Unfocused groups fall back to the per-tab
 // processing flag alone (no branch-anchor narrowing).
+const viewRunningJobCount = computed(() => chat.runningJobCountForTab(viewActiveTab.value))
+
 const showKohakUwUingIndicator = computed(() => {
-  if (chat.hasRunningJobs) return true
+  if (viewRunningJobCount.value > 0) return true
   if (!props.groupId || isFocusedGroup.value) {
     return chat.processing && chat.viewingRunningBranch
   }
   return viewProcessing.value
+})
+
+// State-aware label: distinguish an active main stream from "only
+// background tools/sub-agents are alive" so a paused stream doesn't
+// read as still generating.
+const kohakuwuingLabel = computed(() => {
+  const streaming = !props.groupId || isFocusedGroup.value ? chat.processing && chat.viewingRunningBranch : viewProcessing.value
+  const bgCount = viewRunningJobCount.value
+  if (streaming && bgCount) return t("chat.processingStreamingBg", { n: bgCount })
+  if (streaming) return t("chat.processingStreaming")
+  if (bgCount) return t("chat.processingWaitingBg", { n: bgCount })
+  return t("chat.processing")
 })
 
 function scrollToPending() {
@@ -935,8 +949,8 @@ async function stopTask(jobId, jobName) {
 function onGlobalKeydown(e) {
   if (props.readOnly) return
   if (props.groupId && !isFocusedGroup.value) return
-  if (e.key === "Escape" && (viewProcessing.value || chat.hasRunningJobs)) {
-    chat.interrupt()
+  if (e.key === "Escape" && viewProcessing.value) {
+    chat.interrupt(viewActiveTab.value)
   }
 }
 onMounted(() => window.addEventListener("keydown", onGlobalKeydown))

@@ -500,9 +500,11 @@ export const agentAPI = {
     const body = {}
     if (turnIndex != null) body.turn_index = turnIndex
     if (branchView && Object.keys(branchView).length) body.branch_view = branchView
+    // This POST blocks through the whole rerun turn — no client timeout.
     const { data } = await api.post(
       `/sessions/${encodeTarget(sid)}/creatures/${encodeTarget(cid)}/regenerate`,
       body,
+      { timeout: 0 },
     )
     return data
   },
@@ -517,9 +519,11 @@ export const agentAPI = {
     }
     const sid = sessionId || "_"
     const cid = creatureId || sessionId
+    // This POST blocks through the whole rerun turn — no client timeout.
     const { data } = await api.post(
       `/sessions/${encodeTarget(sid)}/creatures/${encodeTarget(cid)}/messages/${msgIdx}/edit`,
       body,
+      { timeout: 0 },
     )
     return data
   },
@@ -672,6 +676,7 @@ export const sessionAPI = {
   async resume(sessionName, opts = {}) {
     const body = {}
     if (opts.onNode && opts.onNode !== "_host") body.on_node = opts.onNode
+    if (opts.pwd) body.pwd = opts.pwd
     const { data } = await api.post(`/sessions/${sessionName}/resume`, body)
     return data
   },

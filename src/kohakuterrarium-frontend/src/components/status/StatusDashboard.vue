@@ -283,9 +283,12 @@ function formatTokens(value) {
 async function stopTask(jobId, jobName) {
   try {
     const sid = chat._instanceGraphId || chat._instanceId
-    const tab = chat.activeTab || "root"
-    await terrariumAPI.stopCreatureTask(sid, tab, jobId)
     const job = chat.runningJobs[jobId]
+    // Route to the job's OWN creature, not whatever tab is active — a
+    // background job started on tab A must be cancellable while the user
+    // is looking at tab B.
+    const tab = job?.tab || chat.activeTab || "root"
+    await terrariumAPI.stopCreatureTask(sid, tab, jobId)
     if (job) job.cancelling = true
   } catch (err) {
     console.error("Failed to stop task:", err)
