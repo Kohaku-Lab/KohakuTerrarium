@@ -90,6 +90,52 @@ class TestConstruction:
         assert "terrarium.session" in node.unregistered
 
 
+# ── resume op ───────────────────────────────────────────────────
+
+
+class TestResumeOp:
+    async def test_resume_reports_worker_side_pwd_exists(
+        self, _adapter, _engine, tmp_path
+    ):
+        kohakutr = tmp_path / "s.kohakutr"
+        store = SessionStore(str(kohakutr))
+        missing = tmp_path / "gone"
+        store.init_meta(
+            session_id="s1",
+            config_type="agent",
+            config_path="x",
+            pwd=str(missing),
+            agents=["a"],
+        )
+        _engine._adopt_result = "sid1"
+        _engine._session_stores["sid1"] = store
+        out = await _adapter._op_resume(
+            {"path": str(kohakutr), "pwd_override": str(tmp_path)}
+        )
+        assert out["session_id"] == "sid1"
+        # Evaluated on the worker (this process) — the saved dir does
+        # not exist here, whatever the controller might think.
+        assert out["pwd_exists"] is False
+        assert _engine._adopt_calls[-1]["pwd"] == str(tmp_path)
+
+    async def test_resume_pwd_exists_true_when_dir_present(
+        self, _adapter, _engine, tmp_path
+    ):
+        kohakutr = tmp_path / "s2.kohakutr"
+        store = SessionStore(str(kohakutr))
+        store.init_meta(
+            session_id="s2",
+            config_type="agent",
+            config_path="x",
+            pwd=str(tmp_path),
+            agents=["a"],
+        )
+        _engine._adopt_result = "sid2"
+        _engine._session_stores["sid2"] = store
+        out = await _adapter._op_resume({"path": str(kohakutr)})
+        assert out["pwd_exists"] is True
+
+
 # ── error mapping ───────────────────────────────────────────────
 
 

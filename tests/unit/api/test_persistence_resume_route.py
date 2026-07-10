@@ -66,7 +66,7 @@ class TestHostResume:
             lambda n: Path("/x/s.kohakutr"),
         )
 
-        async def fake_resume(engine, path):
+        async def fake_resume(engine, path, pwd_override=None):
             return _session()
 
         monkeypatch.setattr(resume_mod, "studio_resume", fake_resume)
@@ -84,7 +84,7 @@ class TestHostResume:
             lambda n: Path("/x/s.kohakutr"),
         )
 
-        async def fake_resume(engine, path):
+        async def fake_resume(engine, path, pwd_override=None):
             return _session(
                 creatures=[
                     {"creature_id": "c1", "name": "alice"},
@@ -105,7 +105,7 @@ class TestHostResume:
             lambda n: Path("/x/s.kohakutr"),
         )
 
-        async def boom(engine, path):
+        async def boom(engine, path, pwd_override=None):
             raise FileNotFoundError("no such file")
 
         monkeypatch.setattr(resume_mod, "studio_resume", boom)
@@ -120,7 +120,7 @@ class TestHostResume:
             lambda n: Path("/x/s.kohakutr"),
         )
 
-        async def boom(engine, path):
+        async def boom(engine, path, pwd_override=None):
             raise ValueError("bad payload")
 
         monkeypatch.setattr(resume_mod, "studio_resume", boom)
@@ -137,8 +137,9 @@ class TestHostResume:
 
         called_with = {}
 
-        async def fake_resume(engine, path):
+        async def fake_resume(engine, path, pwd_override=None):
             called_with["path"] = path
+            called_with["pwd_override"] = pwd_override
             return _session()
 
         monkeypatch.setattr(resume_mod, "studio_resume", fake_resume)
@@ -147,6 +148,28 @@ class TestHostResume:
         resp = client.post("/sessions/sess/resume")
         assert resp.status_code == 200
         assert called_with["path"] == Path("/x/s.kohakutr")
+        assert called_with["pwd_override"] is None
+
+    def test_host_resume_threads_pwd_override(self, monkeypatch):
+        # The replacement dir must reach adopt_session BEFORE creatures
+        # start — not be patched on afterwards.
+        monkeypatch.setattr(
+            resume_mod,
+            "resolve_session_path_default",
+            lambda n: Path("/x/s.kohakutr"),
+        )
+
+        called_with = {}
+
+        async def fake_resume(engine, path, pwd_override=None):
+            called_with["pwd_override"] = pwd_override
+            return _session()
+
+        monkeypatch.setattr(resume_mod, "studio_resume", fake_resume)
+        client = TestClient(_app())
+        resp = client.post("/sessions/sess/resume", json={"pwd": "/new/dir"})
+        assert resp.status_code == 200
+        assert called_with["pwd_override"] == "/new/dir"
 
 
 # ── remote-node resume ─────────────────────────────────────────

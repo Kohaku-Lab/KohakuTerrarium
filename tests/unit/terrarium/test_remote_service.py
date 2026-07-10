@@ -12,6 +12,7 @@ from kohakuterrarium.core.config_types import AgentConfig
 from kohakuterrarium.terrarium.creature_host import Creature
 from kohakuterrarium.terrarium.events import EventFilter, EventKind
 from kohakuterrarium.terrarium.remote_service import (
+    TURN_REQUEST_TIMEOUT,
     CreatureNotHostedHere,
     RemoteEngineError,
     RemoteTerrariumService,
@@ -31,9 +32,11 @@ class _FakeSender:
     def __init__(self, responses=None):
         self.responses: dict[str, Any] = responses or {}
         self.calls: list[tuple[str, str, dict]] = []
+        self.timeouts: dict[str, float] = {}
 
     async def request(self, *, to_node, namespace, type, body, timeout=None):
         self.calls.append((namespace, type, dict(body)))
+        self.timeouts[type] = timeout
         if type in self.responses:
             return self.responses[type]
         return {}
@@ -320,6 +323,74 @@ class TestChatOps:
     async def test_rewind(self):
         svc = _make_service({"rewind": {}})
         await svc.rewind("cid", 0)
+
+    async def test_turn_blocking_requests_use_long_timeout(self):
+        svc = _make_service(
+            {
+                "regenerate": {"ok": True},
+                "edit_message": {"edited": True},
+                "chat_history": {"history": {}},
+            }
+        )
+        await svc.regenerate("cid", turn_index=2)
+        await svc.edit_message("cid", 0, "hi")
+        await svc.chat_history("cid")
+        timeouts = svc._sender.timeouts
+        assert timeouts["regenerate"] == TURN_REQUEST_TIMEOUT
+        assert timeouts["edit_message"] == TURN_REQUEST_TIMEOUT
+        # Control-plane reads keep the default.
+        assert timeouts["chat_history"] == 30.0
+
+    async def test_timeout_fires_best_effort_interrupt_then_reraises(self):
+        # The worker's handler task keeps running past the host's
+        # deadline and would commit the branch later — the timeout must
+        # interrupt the creature so the orphaned mutation can't land.
+        import pytest
+
+        from kohakuterrarium.laboratory._internal.client import (
+            RequestTimeoutError,
+        )
+
+        svc = _make_service()
+
+        async def request(*, to_node, namespace, type, body, timeout=None):
+            svc._sender.calls.append((namespace, type, dict(body)))
+            if type in ("regenerate", "edit_message"):
+                raise RequestTimeoutError("deadline expired")
+            return {}
+
+        svc._sender.request = request
+        with pytest.raises(RequestTimeoutError):
+            await svc.regenerate("cid", turn_index=2)
+        ops = [c[1] for c in svc._sender.calls]
+        assert ops == ["regenerate", "interrupt"]
+        assert svc._sender.calls[1][2] == {"creature_id": "cid"}
+
+        svc._sender.calls.clear()
+        with pytest.raises(RequestTimeoutError):
+            await svc.edit_message("cid", 0, "hi")
+        ops = [c[1] for c in svc._sender.calls]
+        assert ops == ["edit_message", "interrupt"]
+
+    async def test_dead_link_skips_interrupt(self):
+        # RequestAbortedError = the link is gone; sending an interrupt
+        # over it is pointless. Re-raise untouched.
+        import pytest
+
+        from kohakuterrarium.laboratory._internal.client import (
+            RequestAbortedError,
+        )
+
+        svc = _make_service()
+
+        async def request(*, to_node, namespace, type, body, timeout=None):
+            svc._sender.calls.append((namespace, type, dict(body)))
+            raise RequestAbortedError("client disconnected")
+
+        svc._sender.request = request
+        with pytest.raises(RequestAbortedError):
+            await svc.regenerate("cid")
+        assert [c[1] for c in svc._sender.calls] == ["regenerate"]
 
 
 # ── State ops ────────────────────────────────────────────────────

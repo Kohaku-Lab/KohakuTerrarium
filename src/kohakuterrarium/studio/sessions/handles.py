@@ -12,6 +12,7 @@ Mutations live in :mod:`studio.sessions.lifecycle`,
 :mod:`studio.sessions.topology`, etc.
 """
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -36,6 +37,12 @@ class Session:
     pwd: str = ""
     has_root: bool = False
     home_node: str = "_host"
+    # Derived: False only when a saved pwd is set but missing on disk —
+    # the "offer a new working dir" signal for resume UIs.
+    pwd_exists: bool = True
+
+    def __post_init__(self) -> None:
+        self.pwd_exists = (not self.pwd) or os.path.isdir(self.pwd)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -46,6 +53,7 @@ class Session:
             "created_at": self.created_at,
             "config_path": self.config_path,
             "pwd": self.pwd,
+            "pwd_exists": self.pwd_exists,
             "has_root": self.has_root,
             "home_node": self.home_node,
         }
