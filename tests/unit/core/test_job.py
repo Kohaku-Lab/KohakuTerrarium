@@ -316,6 +316,18 @@ class TestJobStoreFormatContext:
         # Completed not included unless asked.
         assert "Recent Completed" not in out
 
+    def test_running_section_carries_dont_duplicate_hint(self, store):
+        # A completion arriving while siblings run reads as "the others
+        # failed" without explicit guidance.
+        store.register(_make_status("r", JobState.RUNNING))
+        out = store.format_context()
+        assert "do NOT restart or" in out.lower() or "Do NOT restart or" in out
+        assert "treat them as failed" in out
+
+    def test_no_hint_without_running_jobs(self, store):
+        store.register(_make_status("d", JobState.DONE))
+        assert "treat them as failed" not in store.format_context()
+
     def test_pending_section_emitted(self, store):
         store.register(_make_status("p", JobState.PENDING))
         out = store.format_context()

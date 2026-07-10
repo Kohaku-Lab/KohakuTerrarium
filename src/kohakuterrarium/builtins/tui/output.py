@@ -391,8 +391,14 @@ class TUIOutput(BaseOutputModule):
                 self._handle_trigger_fired(name, t, metadata)
             case "token_usage":
                 self._handle_token_usage(metadata)
-            case "compact_start" | "compact_complete":
+            case "compact_start" | "compact_complete" | "compact_skipped":
                 self._handle_compact_activity(activity_type, t, metadata)
+            case "background_result":
+                label = metadata.get("label") or metadata.get("job_id", "")
+                kind = metadata.get("kind", "tool")
+                self._tui.add_trigger_message(
+                    f"background {kind} result delivered: {label}", "", target=t
+                )
             case "session_info":
                 self._handle_session_info(metadata)
             case "job_cancelled":
@@ -543,9 +549,12 @@ class TUIOutput(BaseOutputModule):
             round_num = metadata.get("round", 0)
             self._tui.add_compact_summary(round_num, "(compacting...)", target=t)
             self._tui.update_running("compact", "compacting context")
-        else:  # compact_complete
+        else:  # compact_complete / compact_skipped — both terminal
             round_num = metadata.get("round", 0)
-            summary = metadata.get("summary", "")
+            if activity_type == "compact_skipped":
+                summary = f"(skipped: {metadata.get('reason', 'skipped')})"
+            else:
+                summary = metadata.get("summary", "")
             self._tui.update_compact_summary(round_num, summary, target=t)
             self._tui.update_running("compact", "", remove=True)
 
@@ -709,7 +718,7 @@ def _group_into_turns(events: list[dict]) -> list[dict]:
                 "trigger_content": content,
                 "steps": [],
             }
-        elif etype in ("compact_start", "compact_complete"):
+        elif etype in ("compact_start", "compact_complete", "compact_skipped"):
             # Compact events may fire between turns (background task)
             target = current if current else (turns[-1] if turns else None)
             if target:
@@ -908,6 +917,12 @@ def _build_turn_widgets(
         elif step_type == "compact_complete":
             summary = data.get("summary", "") if isinstance(data, dict) else ""
             widgets.append(CompactSummaryBlock(summary, done=True))
+
+        elif step_type == "compact_skipped":
+            reason = data.get("reason", "skipped") if isinstance(data, dict) else ""
+            widgets.append(
+                CompactSummaryBlock(f"(skipped: {reason or 'skipped'})", done=True)
+            )
 
     return widgets, current_subagent, sa_pending_tools
 

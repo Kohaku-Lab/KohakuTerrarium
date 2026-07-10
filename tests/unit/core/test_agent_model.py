@@ -113,6 +113,28 @@ class TestSwitchModel:
         assert meta["max_context"] == 20000
         assert meta["compact_threshold"] == 16000  # 20000 * 0.8
 
+    def test_switch_registers_emergency_drop_on_new_provider(self, monkeypatch):
+        # A drop after the switch must sync the controller conversation
+        # like the boot provider does — the new provider needs the same
+        # callback registration.
+        registered = []
+        new_llm = types.SimpleNamespace(
+            model="gpt-5",
+            _profile_max_context=0,
+            on_emergency_drop=lambda cb: registered.append(cb),
+        )
+        monkeypatch.setattr(am, "resolve_controller_llm", lambda *a, **k: object())
+        monkeypatch.setattr(am, "create_llm_from_profile_name", lambda n: new_llm)
+        monkeypatch.setattr(am, "profile_to_identifier", lambda p: "openai/gpt-5")
+        monkeypatch.setattr(
+            AgentCompactMixin, "_build_compact_llm", lambda self, cfg: new_llm
+        )
+
+        a = _build_agent()
+        a._on_provider_emergency_drop = lambda msgs: None
+        a.switch_model("openai/gpt-5")
+        assert registered == [a._on_provider_emergency_drop]
+
     def test_compact_manager_optional(self, monkeypatch):
         new_llm = types.SimpleNamespace(model="x", _profile_max_context=0)
         monkeypatch.setattr(am, "resolve_controller_llm", lambda *a, **k: object())

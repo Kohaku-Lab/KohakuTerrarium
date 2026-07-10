@@ -936,6 +936,461 @@ class TestBackgroundTool:
         assert agent.controller.conversation.get_last_assistant_message() is not None
 
 
+class _HangingBgTool(BaseTool):
+    """Background tool that blocks until released — simulates a job
+    still running when the agent is stopped."""
+
+    def __init__(self, release: asyncio.Event):
+        self._release = release
+
+    @property
+    def tool_name(self):
+        return "hangbg"
+
+    @property
+    def description(self):
+        return "hanging bg tool"
+
+    @property
+    def execution_mode(self):
+        return ExecutionMode.BACKGROUND
+
+    async def _execute(self, args, **kwargs):
+        await self._release.wait()
+        return ToolResult(output="done")
+
+
+class _HangingDirectTool(BaseTool):
+    """Direct tool that blocks until released (forever by default) —
+    simulates an in-flight direct job."""
+
+    def __init__(self, started: asyncio.Event, release: asyncio.Event | None = None):
+        self._started = started
+        self._release = release
+
+    @property
+    def tool_name(self):
+        return "hangdirect"
+
+    @property
+    def description(self):
+        return "hanging direct tool"
+
+    @property
+    def execution_mode(self):
+        return ExecutionMode.DIRECT
+
+    async def _execute(self, args, **kwargs):
+        self._started.set()
+        if self._release is not None:
+            await self._release.wait()
+        else:
+            await asyncio.sleep(3600)
+        return ToolResult(output="done")
+
+
+class TestStopFinalizesInflightJobs:
+    async def test_stop_emits_single_terminal_for_inflight_direct_job(self, make_agent):
+        # The stop sweep emits an "interrupted" terminal for the
+        # in-flight direct job; when the cancelled direct-wait resumes
+        # it must NOT emit a second, contradictory ("error") terminal.
+        started = asyncio.Event()
+        agent = make_agent(
+            script=[
+                "[/hangdirect]msg=x[hangdirect/]",
+                "after direct",
+            ]
+        )
+        tool = _HangingDirectTool(started)
+        agent.registry.register_tool(tool)
+        agent.executor.register_tool(tool)
+        emitted: list[tuple[str, dict]] = []
+        orig_notify = agent.output_router.notify_activity
+
+        def spy(kind, message, metadata=None, **kwargs):
+            emitted.append((kind, dict(metadata or {})))
+            return orig_notify(kind, message, metadata=metadata, **kwargs)
+
+        agent.output_router.notify_activity = spy
+        await agent.start()
+        turn = asyncio.create_task(
+            agent._process_event(create_user_input_event("kick off"))
+        )
+        try:
+            await asyncio.wait_for(started.wait(), timeout=5)
+            running = agent.executor.get_running_jobs()
+            assert running, "direct job must still be running pre-stop"
+            job_id = running[0].job_id
+
+            await agent.stop()
+            await asyncio.wait_for(
+                asyncio.gather(turn, return_exceptions=True), timeout=5
+            )
+
+            terminals = [
+                (kind, meta)
+                for kind, meta in emitted
+                if meta.get("job_id") == job_id and kind in ("tool_done", "tool_error")
+            ]
+            assert len(terminals) == 1, (
+                "expected exactly one terminal for the swept direct job; "
+                f"got: {terminals}"
+            )
+            assert terminals[0][1].get("final_state") == "interrupted"
+        finally:
+            if not turn.done():
+                turn.cancel()
+                await asyncio.gather(turn, return_exceptions=True)
+
+    async def test_stop_unwinds_live_turn_before_returning(self, make_agent):
+        # stop() must cancel and await the live controller loop —
+        # returning while it unwinds lets it run an LLM round against
+        # closed routers/providers after shutdown.
+        started = asyncio.Event()
+        agent = make_agent(
+            script=[
+                "[/hangdirect]msg=x[hangdirect/]",
+                "must not stream after stop",
+            ]
+        )
+        tool = _HangingDirectTool(started)
+        agent.registry.register_tool(tool)
+        agent.executor.register_tool(tool)
+        await agent.start()
+        turn = asyncio.create_task(agent._process_event(create_user_input_event("go")))
+        try:
+            await asyncio.wait_for(started.wait(), timeout=5)
+            await agent.stop()
+            await asyncio.wait_for(
+                asyncio.gather(turn, return_exceptions=True), timeout=5
+            )
+            assistants = [
+                str(m.content)
+                for m in agent.controller.conversation.get_messages()
+                if getattr(m, "role", None) == "assistant"
+            ]
+            assert all("must not stream after stop" not in a for a in assistants)
+        finally:
+            if not turn.done():
+                turn.cancel()
+                await asyncio.gather(turn, return_exceptions=True)
+
+    async def test_stop_pairs_inflight_native_announcement(self, make_agent, tmp_path):
+        # Native round in flight at stop(): the conversation holds an
+        # unanswered assistant.tool_calls announcement. The sweep must
+        # append the interrupted role=tool result (provider call id) so
+        # the pair survives provider-safe serialization + snapshot +
+        # resume rebuild.
+        from kohakuterrarium.core.job import JobState, JobStatus, JobType
+        from kohakuterrarium.session.resume import _build_conversation
+
+        agent = make_agent()
+        await agent.start()
+        try:
+            agent.controller.conversation.append(
+                "assistant",
+                "",
+                tool_calls=[
+                    {
+                        "id": "provider_1",
+                        "type": "function",
+                        "function": {"name": "bash", "arguments": "{}"},
+                    }
+                ],
+            )
+            agent.executor.job_store.register(
+                JobStatus(
+                    job_id="bash_internal",
+                    job_type=JobType.TOOL,
+                    type_name="bash",
+                    state=JobState.RUNNING,
+                )
+            )
+            agent._register_direct_job(
+                "bash_internal",
+                kind="tool",
+                name="bash",
+                tool_call_id="provider_1",
+            )
+            await agent.stop()
+            wire = agent.controller.conversation.to_messages()
+            results = [
+                m
+                for m in wire
+                if m.get("role") == "tool" and m.get("tool_call_id") == "provider_1"
+            ]
+            assert results, "interrupted role=tool must pair the announcement"
+            assert "stopped" in str(results[0].get("content", "")).lower()
+            announced = [
+                tc["id"]
+                for m in wire
+                if m.get("role") == "assistant" and m.get("tool_calls")
+                for tc in m["tool_calls"]
+            ]
+            assert "provider_1" in announced
+            # The snapshot→resume rebuild keeps the completed pair.
+            rebuilt = _build_conversation(wire).to_messages()
+            assert any(
+                m.get("role") == "tool" and m.get("tool_call_id") == "provider_1"
+                for m in rebuilt
+            )
+        finally:
+            pass
+
+    async def test_native_stop_snapshot_survives_real_resume(
+        self, make_agent, tmp_path
+    ):
+        # FULL persisted lifecycle: live native round → stop() →
+        # processing-end snapshot lands in a real SessionStore → store
+        # closed → a fresh agent resumes via the actual entry point
+        # (inject_saved_state) and sees the announcement + interrupted
+        # result pair.
+        from kohakuterrarium.session.resume import inject_saved_state
+        from kohakuterrarium.session.store import SessionStore
+
+        store = SessionStore(str(tmp_path / "native.kohakutr.v2"))
+        store.init_meta(
+            session_id="n1",
+            config_type="agent",
+            config_path="x",
+            pwd=str(tmp_path),
+            agents=["test_agent"],
+        )
+        started = asyncio.Event()
+        agent = make_agent(script=["[/hangdirect]msg=x[hangdirect/]", "x"])
+        tool = _HangingDirectTool(started)
+        agent.registry.register_tool(tool)
+        agent.executor.register_tool(tool)
+        agent.attach_session_store(store)
+        await agent.start()
+        turn = asyncio.create_task(agent._process_event(create_user_input_event("go")))
+        try:
+            await asyncio.wait_for(started.wait(), timeout=5)
+            job_id = agent.executor.get_running_jobs()[0].job_id
+            agent.controller.conversation.append(
+                "assistant",
+                "",
+                tool_calls=[
+                    {
+                        "id": "provider_1",
+                        "type": "function",
+                        "function": {"name": "hangdirect", "arguments": "{}"},
+                    }
+                ],
+            )
+            agent._register_direct_job(
+                job_id,
+                kind="tool",
+                name="hangdirect",
+                tool_call_id="provider_1",
+            )
+            await agent.stop()
+            await asyncio.wait_for(
+                asyncio.gather(turn, return_exceptions=True), timeout=5
+            )
+
+            snap = store.load_conversation("test_agent")
+            assert snap, "processing-end snapshot must be persisted"
+            assert any(
+                m.get("role") == "tool" and m.get("tool_call_id") == "provider_1"
+                for m in snap
+            ), f"persisted snapshot lost the interrupted pair: {snap}"
+
+            # Close the original handle and REOPEN from the path — the
+            # pair must survive a genuine cold restore, not just the
+            # still-open store object.
+            store_path = str(tmp_path / "native.kohakutr.v2")
+            store.close()
+            reopened = SessionStore(store_path)
+            try:
+                fresh = make_agent()
+                inject_saved_state(fresh, reopened, "test_agent")
+                wire = fresh.controller.conversation.to_messages()
+                announced = [
+                    tc["id"]
+                    for m in wire
+                    if m.get("role") == "assistant" and m.get("tool_calls")
+                    for tc in m["tool_calls"]
+                ]
+                assert "provider_1" in announced
+                assert any(
+                    m.get("role") == "tool" and m.get("tool_call_id") == "provider_1"
+                    for m in wire
+                )
+            finally:
+                reopened.close()
+        finally:
+            if not turn.done():
+                turn.cancel()
+                await asyncio.gather(turn, return_exceptions=True)
+            store.close()
+
+    async def test_stop_does_not_orphan_text_mode_jobs(self, make_agent):
+        # Text-mode jobs have no announcement — the sweep must not
+        # append an orphan role=tool message for them.
+        from kohakuterrarium.core.job import JobState, JobStatus, JobType
+
+        agent = make_agent()
+        await agent.start()
+        agent.executor.job_store.register(
+            JobStatus(
+                job_id="bash_txt",
+                job_type=JobType.TOOL,
+                type_name="bash",
+                state=JobState.RUNNING,
+            )
+        )
+        agent._register_direct_job("bash_txt", kind="tool", name="bash")
+        await agent.stop()
+        assert all(
+            getattr(m, "role", None) != "tool"
+            for m in agent.controller.conversation.get_messages()
+        )
+
+    async def test_stop_waits_for_outer_finalization(self, make_agent):
+        # Cancelling the inner loop is not enough — the OUTER turn task
+        # still runs _finalize_processing; stop() returning first lets
+        # finalization emit into closed sinks.
+        started = asyncio.Event()
+        finalize_done = asyncio.Event()
+        agent = make_agent(script=["[/hangdirect]msg=x[hangdirect/]", "x"])
+        tool = _HangingDirectTool(started)
+        agent.registry.register_tool(tool)
+        agent.executor.register_tool(tool)
+        orig_finalize = agent._finalize_processing
+
+        async def slow_finalize(*args, **kwargs):
+            await asyncio.sleep(0.15)
+            result = await orig_finalize(*args, **kwargs)
+            finalize_done.set()
+            return result
+
+        agent._finalize_processing = slow_finalize
+        await agent.start()
+        turn = asyncio.create_task(agent._process_event(create_user_input_event("go")))
+        try:
+            await asyncio.wait_for(started.wait(), timeout=5)
+            await agent.stop()
+            assert finalize_done.is_set(), (
+                "stop() must not return before the outer turn's "
+                "finalization completed"
+            )
+        finally:
+            if not turn.done():
+                turn.cancel()
+                await asyncio.gather(turn, return_exceptions=True)
+
+    async def test_concurrent_stops_are_serialized(self, make_agent):
+        agent = make_agent()
+        await agent.start()
+        results = await asyncio.gather(
+            agent.stop(), agent.stop(), return_exceptions=True
+        )
+        assert all(not isinstance(r, Exception) for r in results)
+        assert agent._running is False
+
+    async def test_sweep_is_idempotent_against_running_status(self, make_agent):
+        # A repeat sweep (second stop(), engine + CLI both stopping)
+        # must not emit a second terminal: the first sweep transitions
+        # the job status off RUNNING.
+        from kohakuterrarium.core.job import JobState, JobStatus, JobType
+
+        agent = make_agent()
+        await agent.start()
+        try:
+            agent.executor.job_store.register(
+                JobStatus(
+                    job_id="bash_zz",
+                    job_type=JobType.TOOL,
+                    type_name="bash",
+                    state=JobState.RUNNING,
+                )
+            )
+            emitted: list[str] = []
+            orig = agent.output_router.notify_activity
+
+            def spy(kind, message, metadata=None, **kwargs):
+                if (metadata or {}).get("job_id") == "bash_zz":
+                    emitted.append(kind)
+                return orig(kind, message, metadata=metadata, **kwargs)
+
+            agent.output_router.notify_activity = spy
+            agent._finalize_inflight_jobs_for_stop()
+            agent._finalize_inflight_jobs_for_stop()
+            assert emitted == ["tool_error"], (
+                "repeat sweep must find nothing — the first sweep "
+                f"transitions the status off RUNNING; got {emitted}"
+            )
+            status = agent.executor.job_store.get_status("bash_zz")
+            assert status is not None and not status.is_running
+        finally:
+            await agent.stop()
+
+    async def test_stop_persists_genuine_terminal_for_running_job(
+        self, make_agent, tmp_path
+    ):
+        # A job with no genuine terminal in the store renders as
+        # "running" forever after resume (the FE ignores synthetic
+        # resume terminals) — stop() must persist a real one.
+        from kohakuterrarium.session.store import SessionStore
+
+        path = tmp_path / "sess.kohakutr.v2"
+        store = SessionStore(str(path))
+        store.init_meta(
+            session_id="s1",
+            config_type="agent",
+            config_path="x",
+            pwd=str(tmp_path),
+            agents=["test_agent"],
+        )
+        release = asyncio.Event()
+        agent = make_agent(
+            script=[
+                "[/hangbg]msg=x[hangbg/]",
+                "after bg dispatch",
+            ]
+        )
+        tool = _HangingBgTool(release)
+        agent.registry.register_tool(tool)
+        agent.executor.register_tool(tool)
+        agent.attach_session_store(store)
+        # NOT _start_and_run — its finally-stop would fire the sweep
+        # before the pre-stop assertions run.
+        await agent.start()
+        try:
+            await agent._process_event(create_user_input_event("kick off"))
+            running = agent.executor.get_running_jobs()
+            assert running, "background job must still be running pre-stop"
+            job_id = running[0].job_id
+
+            await agent.stop()
+
+            events = store.get_events("test_agent")
+            calls = [e for e in events if e.get("type") == "tool_call"]
+            assert calls, f"expected a tool_call event; got: {events}"
+            # The terminal must pair with the PERSISTED call's id — a
+            # terminal under any other id leaves the call unterminated
+            # and the FE renders it running forever.
+            call_id = calls[-1].get("call_id")
+            terminals = [
+                e
+                for e in events
+                if e.get("type") == "tool_result" and e.get("call_id") == call_id
+            ]
+            assert terminals, (
+                "stop() must persist a genuine terminal tool_result paired "
+                f"with tool_call id {call_id!r} (job_id {job_id!r}); got "
+                f"events: {events}"
+            )
+            data = terminals[-1]
+            assert data.get("interrupted") is True
+            assert data.get("final_state") == "interrupted"
+            assert not data.get("_synthetic_resume")
+        finally:
+            release.set()
+            store.close()
+
+
 # ── _cancel_job paths ────────────────────────────────────────────
 
 
@@ -3502,6 +3957,55 @@ class TestOpportunisticInputInjection:
         finally:
             await agent.stop()
 
+    async def test_interrupt_flush_waits_out_slow_lock_release(self, make_agent):
+        # Regression (livelock): interrupt() with a buffered event while
+        # the cancelled turn still holds the processing lock BEYOND the
+        # flush task's grace window. The flush loop then popped the
+        # event, ``_process_event`` re-buffered it on a synchronous path
+        # (no await), and the pop/re-append cycle never yielded — the
+        # event loop starved, the lock holder could never resume to
+        # release it, and the "Event buffered for mid-turn injection"
+        # log flooded at 100% CPU until the process was killed.
+        agent = make_agent(script=["after-slow-interrupt reply"])
+        await agent.start()
+        try:
+            release = asyncio.Event()
+
+            async def hold_lock():
+                async with agent._processing_lock:
+                    await release.wait()
+
+            holder = asyncio.create_task(hold_lock())
+            await asyncio.sleep(0)
+            assert agent._processing_lock.locked()
+            await agent.inject_input("queued while held", source="web")
+            assert len(agent._pending_mid_turn_inputs) == 1
+
+            agent.interrupt()
+            # Keep the lock held well past any fixed grace window. Under
+            # the buggy code this sleep never returns (the spin blocks
+            # the loop) and the test times out instead of failing fast.
+            await asyncio.sleep(0.1)
+            release.set()
+            await holder
+
+            for _ in range(100):
+                await asyncio.sleep(0.01)
+                if (
+                    not agent._pending_mid_turn_inputs
+                    and not agent._processing_lock.locked()
+                ):
+                    break
+            assert agent._pending_mid_turn_inputs == []
+            user_msgs = [
+                m
+                for m in agent.controller.conversation.get_messages()
+                if getattr(m, "role", None) == "user"
+            ]
+            assert "queued while held" in [m.content for m in user_msgs]
+        finally:
+            await agent.stop()
+
 
 # ── TUI callbacks wired in start (lines 269, 271-272) ───────────
 
@@ -4142,4 +4646,495 @@ class TestAttachSessionStoreCompactCountBadValue:
             )
             assert ok is True
         finally:
+            await agent.stop()
+
+
+# ── mid-turn batch drain: all event types, one turn per flush ────
+
+
+class TestMidTurnBatchDrain:
+    async def test_all_event_types_buffer_while_lock_held(self, make_agent):
+        # Every event type except startup/shutdown must buffer instead
+        # of queueing on the lock — a queued-on-lock event runs its own
+        # serial turn afterwards, each needing its own interrupt.
+        from kohakuterrarium.core.events import (
+            TriggerEvent,
+            create_tool_complete_event,
+        )
+
+        agent = make_agent()
+        await agent.start()
+        try:
+            events = [
+                create_tool_complete_event(job_id="bash_1", content="out"),
+                TriggerEvent(
+                    type="subagent_output", content="sub out", job_id="agent_x"
+                ),
+                TriggerEvent(
+                    type="creature_output",
+                    content="peer says hi",
+                    prompt_override="[from peer] peer says hi",
+                ),
+            ]
+            async with agent._processing_lock:
+                for evt in events:
+                    accepted = await agent._process_event(evt)
+                    assert accepted is False, f"{evt.type} must buffer, not block"
+                assert agent._pending_mid_turn_inputs == events
+        finally:
+            await agent.stop()
+
+    async def test_nonstackable_active_turn_rejects_fold_ins(self, make_agent):
+        # A non-stackable ACTIVE turn (startup, error) must not absorb
+        # buffered events — the incoming-event stackable check alone
+        # can't see the active turn's flag.
+        agent = make_agent()
+        await agent.start()
+        try:
+            agent._active_turn_stackable = False
+            async with agent._processing_lock:
+                try:
+                    await asyncio.wait_for(
+                        agent.inject_input("queued", source="web"), timeout=0.05
+                    )
+                except asyncio.TimeoutError:
+                    pass
+                assert agent._pending_mid_turn_inputs == []
+        finally:
+            agent._active_turn_stackable = True
+            await agent.stop()
+
+    async def test_drain_preserves_multimodal_completion_parts(self, make_agent):
+        # A multimodal background result drained mid-turn must keep its
+        # image parts — get_text_content() flattening dropped them.
+        from kohakuterrarium.core.events import TriggerEvent
+        from kohakuterrarium.llm.message import ImagePart, TextPart
+
+        agent = make_agent()
+        await agent.start()
+        try:
+            agent._pending_mid_turn_inputs.append(
+                TriggerEvent(
+                    type="tool_complete",
+                    content=[
+                        TextPart(text="rendered chart"),
+                        ImagePart(url="data:image/png;base64,xyz"),
+                    ],
+                    job_id="plot_1",
+                )
+            )
+            await agent._drain_mid_turn_pending_inputs(agent.controller)
+            last_user = [
+                m
+                for m in agent.controller.conversation.get_messages()
+                if getattr(m, "role", None) == "user"
+            ][-1]
+            content = last_user.content
+            assert isinstance(content, list)
+            assert any(
+                isinstance(p, dict) and p.get("type") != "text" for p in content
+            ), f"image part must survive the drain: {content}"
+            texts = " ".join(p.get("text", "") for p in content if isinstance(p, dict))
+            assert "[Tool plot_1 completed]" in texts
+            assert "rendered chart" in texts
+        finally:
+            await agent.stop()
+
+    def test_coalesce_preserves_typed_content_parts(self):
+        # ``normalize_content_parts`` produces typed ContentPart
+        # instances; the mixed-modal coalesce used to keep only dicts,
+        # silently dropping the text AND the image of a typed entry.
+        from kohakuterrarium.core.agent_mid_turn import _coalesce_user_contents
+        from kohakuterrarium.llm.message import ImagePart, TextPart
+
+        combined = _coalesce_user_contents(
+            [
+                [TextPart(text="look at this"), ImagePart(url="http://x/i.png")],
+                "second message",
+            ]
+        )
+        assert isinstance(combined, list)
+        texts = [p.get("text", "") for p in combined if p.get("type") == "text"]
+        assert any("look at this" in t for t in texts)
+        assert any("second message" in t for t in texts)
+        assert any(
+            p.get("type") != "text" for p in combined
+        ), "the image part must survive the coalesce"
+
+    async def test_non_stackable_events_bypass_buffer(self, make_agent):
+        # ``stackable=False`` marks events that need immediate,
+        # standalone attention (errors, shutdown-ish signals) — they
+        # must queue on the lock, not fold into another turn's context.
+        from kohakuterrarium.core.events import create_error_event
+
+        agent = make_agent()
+        await agent.start()
+        try:
+            err = create_error_event("RuntimeError", "boom")
+            async with agent._processing_lock:
+                try:
+                    await asyncio.wait_for(agent._process_event(err), timeout=0.05)
+                except asyncio.TimeoutError:
+                    pass
+                assert agent._pending_mid_turn_inputs == []
+        finally:
+            await agent.stop()
+
+    async def test_drain_formats_non_user_events_and_skips_their_records(
+        self, make_agent
+    ):
+        from kohakuterrarium.core.events import (
+            TriggerEvent,
+            create_tool_complete_event,
+        )
+
+        agent = make_agent()
+        await agent.start()
+        try:
+            captured: list[tuple] = []
+            original = agent.output_router.notify_activity
+
+            def spy(activity_type, detail, metadata=None):
+                captured.append((activity_type, dict(metadata or {})))
+                return original(activity_type, detail, metadata)
+
+            agent.output_router.notify_activity = spy  # type: ignore[assignment]
+            agent._pending_mid_turn_inputs.extend(
+                [
+                    TriggerEvent(type="user_input", content="hello"),
+                    create_tool_complete_event(job_id="bash_1", content="tool out"),
+                    TriggerEvent(
+                        type="subagent_output", content="sub out", job_id="agent_x"
+                    ),
+                ]
+            )
+            count = await agent._drain_mid_turn_pending_inputs(agent.controller)
+            assert count == 3
+            user_msgs = [
+                m
+                for m in agent.controller.conversation.get_messages()
+                if getattr(m, "role", None) == "user"
+            ]
+            combined = user_msgs[-1].content
+            assert "hello" in combined
+            assert "[Tool bash_1 completed]\ntool out" in combined
+            assert "[Sub-agent agent_x output]\nsub out" in combined
+            # Only the user-facing entry records a queued-banner frame —
+            # tool/sub-agent completions already have their own
+            # persisted activity events.
+            injected = [c for c in captured if c[0] == "user_input_injected"]
+            assert len(injected) == 1
+            assert injected[0][1]["content"] == "hello"
+        finally:
+            await agent.stop()
+
+    async def test_drain_attaches_background_status_hint(self, make_agent):
+        # A completion drained while a sibling background job is still
+        # alive must carry the live-jobs status so the model doesn't
+        # re-dispatch or assume the sibling failed.
+        from kohakuterrarium.core.events import create_tool_complete_event
+        from kohakuterrarium.core.job import JobState, JobStatus, JobType
+
+        agent = make_agent()
+        await agent.start()
+        try:
+            agent.executor.job_store.register(
+                JobStatus(
+                    job_id="bash_sibling",
+                    job_type=JobType.TOOL,
+                    type_name="bash",
+                    state=JobState.RUNNING,
+                )
+            )
+            agent._pending_mid_turn_inputs.append(
+                create_tool_complete_event(job_id="grep_done", content="42 hits")
+            )
+            await agent._drain_mid_turn_pending_inputs(agent.controller)
+            user_msgs = [
+                m
+                for m in agent.controller.conversation.get_messages()
+                if getattr(m, "role", None) == "user"
+            ]
+            combined = str(user_msgs[-1].content)
+            assert "[Tool grep_done completed]" in combined
+            assert "[background status] Still running:" in combined
+            assert "bash_sibling" in combined
+            assert "treat them as failed" in combined
+        finally:
+            await agent.stop()
+
+    async def test_drain_emits_background_result_banner(self, make_agent, tmp_path):
+        # A drained background completion must surface a
+        # ``background_result`` banner (live activity + persisted
+        # event) instead of rendering as a phantom user bubble.
+        from kohakuterrarium.core.events import create_tool_complete_event
+        from kohakuterrarium.session.store import SessionStore
+
+        store = SessionStore(str(tmp_path / "s.kohakutr.v2"))
+        store.init_meta(
+            session_id="s1",
+            config_type="agent",
+            config_path="x",
+            pwd=str(tmp_path),
+            agents=["test_agent"],
+        )
+        agent = make_agent()
+        agent.attach_session_store(store)
+        await agent.start()
+        try:
+            emitted: list[tuple[str, dict]] = []
+            orig = agent.output_router.notify_activity
+
+            def spy(kind, message, metadata=None, **kwargs):
+                emitted.append((kind, dict(metadata or {})))
+                return orig(kind, message, metadata=metadata, **kwargs)
+
+            agent.output_router.notify_activity = spy
+            agent._pending_mid_turn_inputs.append(
+                create_tool_complete_event(job_id="grep_abc123", content="done")
+            )
+            await agent._drain_mid_turn_pending_inputs(agent.controller)
+            banners = [m for k, m in emitted if k == "background_result"]
+            assert len(banners) == 1
+            assert banners[0]["job_id"] == "grep_abc123"
+            assert banners[0]["kind"] == "tool"
+            events = store.get_events("test_agent")
+            persisted = [e for e in events if e.get("type") == "background_result"]
+            assert len(persisted) == 1
+            assert persisted[0].get("job_id") == "grep_abc123"
+        finally:
+            await agent.stop()
+            store.close()
+
+    async def test_own_turn_bg_completion_emits_banner(self, make_agent):
+        # A background completion that starts its own turn (agent was
+        # idle) banners the delivery before processing.
+        from kohakuterrarium.core.events import create_tool_complete_event
+
+        agent = make_agent(script=["ack"])
+        await agent.start()
+        try:
+            emitted: list[str] = []
+            orig = agent.output_router.notify_activity
+
+            def spy(kind, message, metadata=None, **kwargs):
+                emitted.append(kind)
+                return orig(kind, message, metadata=metadata, **kwargs)
+
+            agent.output_router.notify_activity = spy
+            await agent._process_event(
+                create_tool_complete_event(job_id="agent_xyz789", content="report")
+            )
+            assert "background_result" in emitted
+        finally:
+            await agent.stop()
+
+    async def test_drain_omits_hint_when_nothing_running(self, make_agent):
+        from kohakuterrarium.core.events import create_tool_complete_event
+
+        agent = make_agent()
+        await agent.start()
+        try:
+            agent._pending_mid_turn_inputs.append(
+                create_tool_complete_event(job_id="grep_done", content="42 hits")
+            )
+            await agent._drain_mid_turn_pending_inputs(agent.controller)
+            user_msgs = [
+                m
+                for m in agent.controller.conversation.get_messages()
+                if getattr(m, "role", None) == "user"
+            ]
+            assert "[background status]" not in str(user_msgs[-1].content)
+        finally:
+            await agent.stop()
+
+    async def test_text_mode_bg_dispatch_ack_rides_existing_feedback_round(
+        self, make_agent
+    ):
+        # Text mode has no role=tool slot — when a feedback round
+        # happens anyway (a direct tool also ran), the ack rides along
+        # so the model learns the dispatch succeeded.
+        release = asyncio.Event()
+        agent = make_agent(
+            script=[
+                "[/hangbg]msg=x[hangbg/][/echo]msg=y[echo/]",
+                "ok, waiting for background",
+            ]
+        )
+        tool = _HangingBgTool(release)
+        agent.registry.register_tool(tool)
+        agent.executor.register_tool(tool)
+        echo = _EchoTool()
+        agent.registry.register_tool(echo)
+        agent.executor.register_tool(echo)
+        await agent.start()
+        try:
+            await agent._process_event(create_user_input_event("kick off bg"))
+            all_user = "\n".join(
+                str(m.content)
+                for m in agent.controller.conversation.get_messages()
+                if getattr(m, "role", None) == "user"
+            )
+            assert "Running in background" in all_user
+            assert "hangbg" in all_user
+        finally:
+            release.set()
+            await agent.stop()
+
+    async def test_text_mode_bg_only_dispatch_never_forces_extra_round(
+        self, make_agent
+    ):
+        # A bg-only dispatch must NOT create a feedback round for the
+        # ack: the turn ending IS the "stop outputting" the ack asks
+        # for. Forcing a round both wastes an LLM call and lets the
+        # model reply before the real result arrives.
+        release = asyncio.Event()
+        agent = make_agent(
+            script=[
+                "[/hangbg]msg=x[hangbg/]",
+                "this round must never run",
+            ]
+        )
+        tool = _HangingBgTool(release)
+        agent.registry.register_tool(tool)
+        agent.executor.register_tool(tool)
+        await agent.start()
+        try:
+            await agent._process_event(create_user_input_event("kick off bg"))
+            assistants = [
+                str(m.content)
+                for m in agent.controller.conversation.get_messages()
+                if getattr(m, "role", None) == "assistant"
+            ]
+            assert all("this round must never run" not in a for a in assistants)
+        finally:
+            release.set()
+            await agent.stop()
+
+    async def test_leftover_buffer_flushes_after_turn_ends(self, make_agent):
+        # An event that buffers AFTER the turn's last mid-turn drain
+        # must not sit in the buffer until the next unrelated turn —
+        # the ending turn kicks a leftover flush.
+        started = asyncio.Event()
+        release = asyncio.Event()
+        agent = make_agent(
+            script=[
+                "[/hangdirect]msg=x[hangdirect/]",
+                "after tool",
+                "leftover turn",
+            ]
+        )
+        tool = _HangingDirectTool(started, release)
+        agent.registry.register_tool(tool)
+        agent.executor.register_tool(tool)
+        await agent.start()
+
+        async def no_drain(controller):
+            return 0
+
+        real_drain = agent._drain_mid_turn_pending_inputs
+        agent._drain_mid_turn_pending_inputs = no_drain  # type: ignore[assignment]
+        turn = asyncio.create_task(
+            agent._process_event(create_user_input_event("kick off"))
+        )
+        try:
+            await asyncio.wait_for(started.wait(), timeout=5)
+            accepted = await agent.inject_input("late msg", source="web")
+            assert accepted is False
+            release.set()
+            await asyncio.wait_for(
+                asyncio.gather(turn, return_exceptions=True), timeout=5
+            )
+            agent._drain_mid_turn_pending_inputs = real_drain  # type: ignore[assignment]
+            for _ in range(200):
+                if (
+                    not agent._pending_mid_turn_inputs
+                    and not agent._processing_lock.locked()
+                ):
+                    break
+                await asyncio.sleep(0.02)
+            assert agent._pending_mid_turn_inputs == [], (
+                "leftover buffered event must be flushed when the turn "
+                "that outran it ends"
+            )
+            user_texts = [
+                str(m.content)
+                for m in agent.controller.conversation.get_messages()
+                if getattr(m, "role", None) == "user"
+            ]
+            assert any("late msg" in t for t in user_texts)
+        finally:
+            release.set()
+            if not turn.done():
+                turn.cancel()
+                await asyncio.gather(turn, return_exceptions=True)
+            await agent.stop()
+
+    async def test_interrupt_flush_batches_whole_buffer_into_one_turn(self, make_agent):
+        # Interrupting with N buffered events must produce ONE new
+        # turn (first event starts it, the rest drain into it) — not N
+        # serial turns each needing its own interrupt.
+        started = asyncio.Event()
+        agent = make_agent(
+            script=[
+                "[/hangdirect]msg=x[hangdirect/]",
+                "resumed",
+                "drained rest",
+            ]
+        )
+        tool = _HangingDirectTool(started)
+        agent.registry.register_tool(tool)
+        agent.executor.register_tool(tool)
+        await agent.start()
+        turns: list[str] = []
+        original_pewc = agent._process_event_with_controller
+
+        async def counting_pewc(event, controller):
+            turns.append(event.type)
+            return await original_pewc(event, controller)
+
+        agent._process_event_with_controller = counting_pewc  # type: ignore[assignment]
+        turn = asyncio.create_task(
+            agent._process_event(create_user_input_event("kick off"))
+        )
+        try:
+            await asyncio.wait_for(started.wait(), timeout=5)
+            for text in ("one", "two", "three"):
+                accepted = await agent.inject_input(text, source="web")
+                assert accepted is False
+            assert len(agent._pending_mid_turn_inputs) == 3
+
+            agent.interrupt()
+            await asyncio.wait_for(
+                asyncio.gather(turn, return_exceptions=True), timeout=5
+            )
+            for _ in range(200):
+                if (
+                    not agent._pending_mid_turn_inputs
+                    and not agent._processing_lock.locked()
+                ):
+                    break
+                await asyncio.sleep(0.02)
+
+            assert agent._pending_mid_turn_inputs == []
+            # kick-off turn + exactly ONE flush turn.
+            assert len(turns) == 2, (
+                "flush must batch all buffered events into one turn; "
+                f"saw turn starters: {turns}"
+            )
+            all_user_text = "\n".join(
+                str(m.content)
+                for m in agent.controller.conversation.get_messages()
+                if getattr(m, "role", None) == "user"
+            )
+            for text in ("one", "two", "three"):
+                assert text in all_user_text
+            # The wake event that continues the loop after a drain must
+            # not fabricate a completion in the conversation.
+            assert "[Tool None completed]" not in all_user_text
+            assert "[Tool  completed]" not in all_user_text
+        finally:
+            if not turn.done():
+                turn.cancel()
+                await asyncio.gather(turn, return_exceptions=True)
             await agent.stop()

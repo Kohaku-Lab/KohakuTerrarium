@@ -412,7 +412,9 @@ def replay_conversation(
         if etype in (
             "compact_start",
             "compact_complete",
+            "compact_skipped",
             "compact_decision",
+            "background_result",
             "token_usage",
             "turn_token_usage",
             "cache_stats",

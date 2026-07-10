@@ -5,6 +5,7 @@ repository file-size guard while keeping compaction-specific LLM logic in one
 place.
 """
 
+import asyncio
 from typing import Any
 
 from kohakuterrarium.bootstrap.llm import create_llm_from_profile_name
@@ -21,6 +22,40 @@ class AgentCompactMixin:
     llm: Any
     config: Any
     _llm_selector: str | None
+
+    def _wire_overflow_rescue(self) -> None:
+        """Point the active provider's overflow hook at the compact manager.
+
+        The rescue is best-effort: an injected provider only needs the
+        ``LLMProvider`` protocol, which doesn't guarantee writable
+        attributes (``__slots__`` classes reject the assignment)."""
+        if getattr(self, "compact_manager", None) is None:
+            return
+        try:
+            self.llm._overflow_rescue = self._compact_overflow_rescue
+        except (AttributeError, TypeError):
+            logger.debug(
+                "Provider does not accept the overflow-rescue hook; skipping",
+                provider=type(self.llm).__name__,
+            )
+
+    async def _compact_overflow_rescue(self) -> list[dict[str, Any]] | None:
+        """Wait out an in-flight compact and retry with the spliced
+        conversation instead of dropping tool data."""
+        manager = getattr(self, "compact_manager", None)
+        if manager is None or not manager.is_compacting:
+            return None
+        # When the compactor fell back to the ACTIVE provider, an
+        # overflow inside the summarization call fires this hook from
+        # within the compact task itself — waiting would deadlock on
+        # our own task. Let the emergency drop handle it instead.
+        if getattr(manager, "_compact_task", None) is asyncio.current_task():
+            return None
+        await manager.wait_for_current()
+        controller = getattr(self, "controller", None)
+        if controller is None:
+            return None
+        return controller.conversation.to_messages()
 
     def _build_compact_llm(self, compact_cfg: CompactConfig) -> Any:
         """Build an isolated LLM instance for compaction.
