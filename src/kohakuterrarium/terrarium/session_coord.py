@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from kohakuterrarium.session.store import SessionStore
+import kohakuterrarium.terrarium.topology_leftovers as _topo_leftovers
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -207,6 +208,21 @@ def _store_path_for(engine: "Terrarium", graph_id: str) -> Path | None:
     return Path(base) / f"{graph_id}.kohakutr"
 
 
+def _close_superseded(store: SessionStore) -> None:
+    """Close a store that merge/split has replaced.
+
+    ``update_status=False``: the history moved to the survivor, so the
+    superseded file must not flip to ``paused`` and reappear as a
+    resumable ghost.
+    """
+    try:
+        store.close(update_status=False)
+    except Exception:
+        logger.warning(
+            "session merge/split: superseded store close failed", exc_info=True
+        )
+
+
 def apply_merge(
     engine: "Terrarium",
     delta: "TopologyDelta",
@@ -216,19 +232,30 @@ def apply_merge(
         return
     keep_gid = delta.new_graph_ids[0]
     drop_gids = [g for g in delta.old_graph_ids if g != keep_gid]
-    old_stores: list[SessionStore] = []
-    for gid in (keep_gid, *drop_gids):
+    source_gids = [keep_gid, *drop_gids]
+    # Snapshot each source graph's store + ownership BEFORE remapping —
+    # the survivor is reused, but every other owned store is superseded
+    # and must be closed (else its handle/writer-lock leaks forever).
+    source_stores: dict[str, SessionStore] = {}
+    for gid in source_gids:
         s = engine._session_stores.get(gid)
         if s is not None:
-            old_stores.append(s)
-    if not old_stores:
+            source_stores[gid] = s
+    if not source_stores:
         return
+    old_stores = list(source_stores.values())
+    owned = getattr(engine, "_owned_sessions", None)
+    owned_source_gids = {
+        gid for gid in source_gids if owned is not None and gid in owned
+    }
     new_path = _store_path_for(engine, keep_gid)
     if new_path is None:
         # No persistence configured — keep the first store as the
         # "merged" one; later writes simply land in it.  Drop the others'
         # references from the engine.
         kept = old_stores[0]
+        first_source_gid = next(iter(source_stores))
+        kept_owned = first_source_gid in owned_source_gids
     else:
         kept_store = engine._session_stores.get(keep_gid)
         kept_path = (
@@ -263,11 +290,30 @@ def apply_merge(
                 kept.meta["merged_at"] = time.time()
             except Exception:
                 logger.warning("merge: meta write failed", exc_info=True)
+            kept_owned = keep_gid in owned_source_gids
         else:
+            # A brand-new file is minted here; the engine now holds its
+            # handle, so it is engine-owned regardless of the sources.
             kept = merge_session_stores(old_stores, new_path)
+            kept_owned = True
     engine._session_stores[keep_gid] = kept
     for gid in drop_gids:
         engine._session_stores.pop(gid, None)
+    # Close every superseded store the engine owned; the survivor stays
+    # open (it now backs the merged graph).
+    for gid, store in source_stores.items():
+        if store is kept:
+            continue
+        if gid in owned_source_gids:
+            _close_superseded(store)
+    if owned is not None:
+        for gid in source_gids:
+            owned.discard(gid)
+        if kept_owned:
+            owned.add(keep_gid)
+    # Unresolved replay remnants follow the surviving graph — the
+    # post-merge snapshot would otherwise erase them.
+    _topo_leftovers.transfer_leftovers(engine, source_gids, keep_gid)
     _attach_store_to_graph(engine, keep_gid, kept)
 
 
@@ -282,19 +328,42 @@ def apply_split(
     parent = engine._session_stores.get(parent_gid)
     if parent is None:
         return
+    owned = getattr(engine, "_owned_sessions", None)
+    parent_owned = owned is not None and parent_gid in owned
     new_paths = [_store_path_for(engine, gid) for gid in delta.new_graph_ids]
     if any(p is None for p in new_paths):
         # No session_dir — keep the parent on the largest new graph
         # (the kept one, which by topology convention is
         # ``new_graph_ids[0]``) and copy nothing onto the others.
-        engine._session_stores[delta.new_graph_ids[0]] = parent
-        _refresh_meta_for_split_graph(engine, delta.new_graph_ids[0], parent)
+        keep_gid = delta.new_graph_ids[0]
+        engine._session_stores[keep_gid] = parent
+        _refresh_meta_for_split_graph(engine, keep_gid, parent)
+        if owned is not None:
+            for gid in delta.old_graph_ids:
+                owned.discard(gid)
+            if parent_owned:
+                owned.add(keep_gid)
+        _topo_leftovers.distribute_leftovers(engine, parent_gid, [keep_gid])
         return
     new_stores = split_session_store(parent, new_paths)
     for gid, store in zip(delta.new_graph_ids, new_stores):
         engine._session_stores[gid] = store
         _attach_store_to_graph(engine, gid, store)
         _refresh_meta_for_split_graph(engine, gid, store)
+    # Every child got a FRESH duplicated store the engine minted, so the
+    # parent is superseded: drop + close it (if owned) and hand ownership
+    # to the children.  A child reusing ``parent_gid`` already overwrote
+    # the map entry above, so only pop when it did not.
+    if parent_gid not in delta.new_graph_ids:
+        engine._session_stores.pop(parent_gid, None)
+    if parent_owned:
+        _close_superseded(parent)
+    if owned is not None:
+        for gid in delta.old_graph_ids:
+            owned.discard(gid)
+        for gid in delta.new_graph_ids:
+            owned.add(gid)
+    _topo_leftovers.distribute_leftovers(engine, parent_gid, list(delta.new_graph_ids))
 
 
 def _refresh_meta_for_split_graph(

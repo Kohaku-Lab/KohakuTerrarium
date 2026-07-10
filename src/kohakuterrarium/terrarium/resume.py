@@ -98,6 +98,8 @@ async def _resume_agent_into_engine(
     # session.resume.resume_agent does the heavy lifting: opens store
     # with migration, rebuilds Agent from the saved config, injects
     # every state slot, and calls agent.attach_session_store(store).
+    # Its own handler closes the store if the rebuild fails; the guard
+    # below covers the adopt-into-engine steps that run after it returns.
     agent, store = resume_agent(
         path,
         pwd_override=pwd,
@@ -105,28 +107,43 @@ async def _resume_agent_into_engine(
         llm=llm,
         input_module=NoneInput(),
     )
-    creature_obj = Creature(
-        creature_id=_safe_creature_id(agent.config.name),
-        name=agent.config.name,
-        agent=agent,
-        config=agent.config,
-    )
-    # ``session=False``: the SAVED store attaches below — autosession
-    # minting a fresh sibling file here would orphan it on disk.
-    creature = await engine.add_creature(creature_obj, start=True, session=False)
+    created: list[str] = []
+    try:
+        creature_obj = Creature(
+            creature_id=_safe_creature_id(agent.config.name),
+            name=agent.config.name,
+            agent=agent,
+            config=agent.config,
+        )
+        # ``session=False``: the SAVED store attaches below — autosession
+        # minting a fresh sibling file here would orphan it on disk.
+        # ``start=False``: ``add_creature`` inserts into the topology +
+        # ``_creatures`` before awaiting startup, so the id must be
+        # recorded at insertion — a start failure would else leave the
+        # creature adopted but absent from the rollback list.
+        creature = await engine.add_creature(creature_obj, start=False, session=False)
+        created.append(creature.creature_id)
 
-    # Attach at graph level. ``Agent.attach_session_store`` is
-    # idempotent for the same store, so this updates graph bookkeeping
-    # without adding a duplicate SessionOutput sink.
-    await engine.attach_session(creature.graph_id, store)
+        # Attach at graph level. ``Agent.attach_session_store`` is
+        # idempotent for the same store, so this updates graph bookkeeping
+        # without adding a duplicate SessionOutput sink. Resume OPENED this
+        # store — register it as engine-owned so shutdown closes it (a
+        # leaked writer lock blocks any later adopt of the same file).
+        await engine.attach_session(creature.graph_id, store)
+        engine._owned_sessions.add(creature.graph_id)
 
-    logger.info(
-        "Agent session resumed into engine",
-        session_id=creature.graph_id,
-        creature_id=creature.creature_id,
-        path=str(path),
-    )
-    return creature.graph_id
+        await creature.start()
+
+        logger.info(
+            "Agent session resumed into engine",
+            session_id=creature.graph_id,
+            creature_id=creature.creature_id,
+            path=str(path),
+        )
+        return creature.graph_id
+    except BaseException:
+        await _rollback_failed_adoption(engine, store, created)
+        raise
 
 
 async def _resume_terrarium_into_engine(
@@ -138,6 +155,34 @@ async def _resume_terrarium_into_engine(
 ) -> str:
     """Multi-creature recipe resume: rebuild graph, inject per-creature."""
     store = _open_store_with_migration(path, writer_lock=True)
+    # ``apply_recipe`` appends every creature it adds here, so a failure
+    # rolls back exactly this adoption's creatures — never one a
+    # concurrent task added meanwhile.
+    created: list[str] = []
+    try:
+        return await _resume_terrarium_body(
+            engine, path, store, created, pwd=pwd, llm=llm
+        )
+    except BaseException:
+        await _rollback_failed_adoption(engine, store, created)
+        raise
+
+
+async def _resume_terrarium_body(
+    engine: "Terrarium",
+    path: Path,
+    store: SessionStore,
+    created: list[str],
+    *,
+    pwd: str | None,
+    llm: Any = None,
+) -> str:
+    """Rebuild + rehydrate the terrarium graph from an already-open store.
+
+    Split out of :func:`_resume_terrarium_into_engine` so the caller can
+    guard the whole flow with one close-and-rollback handler.  ``created``
+    accumulates the ids of the creatures this adoption adds.
+    """
     meta = store.load_meta()
     config_path = meta.get("config_path", "")
     if not config_path:
@@ -145,17 +190,23 @@ async def _resume_terrarium_into_engine(
 
     # ``pwd`` flows into ``apply_recipe`` (per-creature workspaces) —
     # no process-wide ``os.chdir`` (E8).
-    pwd = pwd or meta.get("pwd", ".")
+    saved_pwd = meta.get("pwd", ".")
+    pwd = pwd or saved_pwd
     if not (pwd and os.path.isdir(pwd)):
+        if pwd and pwd == saved_pwd:
+            logger.warning(
+                "Saved working dir no longer exists; falling back to cwd",
+                saved_pwd=pwd,
+            )
         pwd = None
 
     config = load_terrarium_config(config_path)
 
-    # Build the topology via the engine — creates every creature,
-    # wires channels, assigns root, and starts the agents.  Each agent
-    # begins with an empty conversation; we inject the saved state
-    # below.  Since input hasn't started flowing yet, injection lands
-    # before any new turn begins.
+    # Build the topology via the engine — creates every creature and
+    # wires channels, but ``start=False``: a started creature schedules
+    # its input drive and startup triggers immediately, which would run
+    # against an EMPTY conversation before the saved state lands. The
+    # per-creature start happens below, after injection.
     #
     # ``session=False``: the SAVED store attaches below.  Under
     # autosession (``Terrarium(session_dir=...)`` — every API-server
@@ -164,7 +215,9 @@ async def _resume_terrarium_into_engine(
     # orphans: an empty ghost file stuck at ``status="running"`` in
     # the saved-session list, plus a leaked open handle.  Mirrors the
     # ``session=False`` in ``_resume_agent_into_engine``.
-    graph = await engine.apply_recipe(config, pwd=pwd, llm=llm, session=False)
+    graph = await engine.apply_recipe(
+        config, pwd=pwd, llm=llm, session=False, start=False, created_ids=created
+    )
     sid = graph.graph_id
 
     # Per-creature state injection.
@@ -213,16 +266,30 @@ async def _resume_terrarium_into_engine(
     # Attach at graph level. Each creature was already attached just
     # above, but ``Agent.attach_session_store`` is idempotent for the
     # same store so this preserves graph/session bookkeeping safely.
+    # Must precede the topology replay — the replay reads
+    # ``runtime_topology`` off the engine-attached store. Resume OPENED
+    # this store — register it as engine-owned so shutdown closes it.
     await engine.attach_session(sid, store)
+    engine._owned_sessions.add(sid)
     store.update_status("running")
 
     # Replay runtime topology mutations on top of the recipe-rebuilt
-    # graph: any channel the user added via ``service.add_channel`` /
-    # any wire from ``service.connect`` after the original spawn lives
-    # in ``meta["runtime_topology"]`` (written by every engine topology
-    # method). Without this replay, those user-added channels + wires
-    # are lost on every resume.
+    # graph BEFORE anything starts: any channel the user added via
+    # ``service.add_channel`` / any wire from ``service.connect`` after
+    # the original spawn lives in ``meta["runtime_topology"]``. A
+    # startup trigger must see the restored channels + wires, not the
+    # bare recipe topology.
     await _topo_snap.replay(engine, sid)
+
+    # Saved state, session, and topology are in — NOW the creatures may
+    # start (startup triggers and inbound input see the restored
+    # conversation and graph, not the bare recipe).
+    for cid in graph.creature_ids:
+        try:
+            creature = engine.get_creature(cid)
+        except KeyError:
+            continue
+        await creature.start()
 
     logger.info(
         "Terrarium session resumed into engine",
@@ -231,3 +298,38 @@ async def _resume_terrarium_into_engine(
         creatures=len(graph.creature_ids),
     )
     return sid
+
+
+async def _rollback_failed_adoption(
+    engine: "Terrarium",
+    store: SessionStore,
+    created_ids: list[str],
+) -> None:
+    """Best-effort undo of a partial session adoption.
+
+    Detaches ``store`` from the engine by identity FIRST so the creature
+    removals below don't run split coordination against it, removes only
+    the creatures this adoption created (by exact id, so a creature a
+    concurrent task added mid-adoption is never touched), then closes the
+    store to release its writer lock.  Pre-existing graphs are left
+    untouched.
+    """
+    for gid, s in list(engine._session_stores.items()):
+        if s is store:
+            engine._session_stores.pop(gid, None)
+            engine._owned_sessions.discard(gid)
+    for cid in created_ids:
+        if cid not in engine._creatures:
+            continue
+        try:
+            await engine.remove_creature(cid)
+        except Exception:
+            logger.warning(
+                "resume rollback: remove_creature failed",
+                creature_id=cid,
+                exc_info=True,
+            )
+    try:
+        store.close(update_status=False)
+    except Exception:
+        logger.warning("resume rollback: store close failed", exc_info=True)

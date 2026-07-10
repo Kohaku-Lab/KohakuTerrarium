@@ -6,6 +6,8 @@ the failure modes that ceremony used to invite (free-string
 ``config_type`` corrupting resumability, files stuck ``running``).
 """
 
+import asyncio
+
 import pytest
 
 from kohakuterrarium.session.resume import detect_session_type
@@ -54,6 +56,31 @@ class TestAutosessionViaSessionDir:
             assert reopened.load_meta()["status"] == "paused"
         finally:
             reopened.close(update_status=False)
+
+    async def test_shutdown_closes_owned_store_when_stop_cancelled(self, tmp_path):
+        # The stop loop can be cancelled mid-await; store closure runs in
+        # a ``finally`` so a leaked writer lock (which blocks any later
+        # adopt of the same file) can't outlive shutdown.
+        t = Terrarium(session_dir=str(tmp_path / "runs"))
+        c = await t.add_creature(_prebuilt("alice"), start=False)
+        store = t._session_stores[c.graph_id]
+        assert c.graph_id in t._owned_sessions
+        # Force the shutdown loop to enter the stop branch, then have the
+        # stop itself get cancelled.
+        c._running = True
+        c.agent._running = True
+        t._running = True
+
+        async def _cancelled_stop():
+            raise asyncio.CancelledError()
+
+        c.stop = _cancelled_stop
+        with pytest.raises(asyncio.CancelledError):
+            await t.shutdown()
+        # Cancellation propagated, but the owned store was still closed
+        # and the engine still marked itself stopped.
+        assert getattr(store, "_closed", False) is True
+        assert t._running is False
 
     async def test_session_false_disables_autosession(self, tmp_path):
         t = Terrarium(session_dir=str(tmp_path / "runs"))

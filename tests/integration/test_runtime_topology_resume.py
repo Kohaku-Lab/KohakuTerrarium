@@ -165,3 +165,29 @@ class TestRuntimeTopologyResume:
             f"bob wiring lost after resume; listen_channels = "
             f"{info_bob2.listen_channels!r}"
         )
+
+        # --- phase 3: SECOND cold resume off the same store -------------
+        # The first replay used to overwrite the saved snapshot mid-
+        # restore (channels written while edges were still empty), so
+        # the wiring survived cycle 1 but vanished on cycle 2.
+        engine3 = Terrarium(pwd=str(tmp_path), session_dir=str(sess_dir))
+        sid3 = await engine3.adopt_session(store_path, pwd=str(tmp_path))
+
+        service3 = LocalTerrariumService(engine3)
+        chans3 = {c.name for c in await service3.list_channels(sid3)}
+        info_alice3 = await service3.get_creature_info("alice")
+        info_bob3 = await service3.get_creature_info("bob")
+
+        await engine3.shutdown()
+
+        assert (
+            "manual_chat" in chans3
+        ), f"channel lost on SECOND resume; channels = {chans3!r}"
+        assert "manual_chat" in info_alice3.send_channels, (
+            f"alice wiring lost on SECOND resume; send_channels = "
+            f"{info_alice3.send_channels!r}"
+        )
+        assert "manual_chat" in info_bob3.listen_channels, (
+            f"bob wiring lost on SECOND resume; listen_channels = "
+            f"{info_bob3.listen_channels!r}"
+        )

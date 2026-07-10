@@ -635,8 +635,10 @@ class Terrarium:
         pwd: str | None = None,
         llm: Any = None,
         strict: bool = True,
+        start: bool = True,
         session: "bool | str | Path | SessionStore | None" = None,
         creature_builder=None,
+        created_ids: list[str] | None = None,
     ) -> GraphTopology:
         """Apply a terrarium recipe into this engine.
 
@@ -644,12 +646,17 @@ class Terrarium:
         mints ONE terrarium-typed store for the whole graph, with the
         recipe path recorded as ``config_path`` so resume can rebuild
         the topology.
+
+        ``created_ids`` collects the id of every creature this call adds
+        (for precise rollback by the resume path).
         """
         kwargs = {
             "graph": graph,
             "pwd": pwd if pwd is not None else self._pwd,
             "strict": strict,
+            "start": start,
             "creature_builder": creature_builder,
+            "created_ids": created_ids,
         }
         if llm is not None:
             kwargs["llm"] = llm
@@ -694,23 +701,28 @@ class Terrarium:
         """
         if not self._creatures and not self._running:
             return
-        for c in list(self._creatures.values()):
-            if c.is_running:
+        # The stop loop can be cancelled mid-await; run store closure +
+        # subscriber teardown in ``finally`` so a leaked writer lock (which
+        # blocks any later adopt of the same file) can't outlive shutdown.
+        try:
+            for c in list(self._creatures.values()):
+                if c.is_running:
+                    try:
+                        await c.stop()
+                    except Exception as e:  # pragma: no cover - defensive
+                        _shutdown_log_warning(c.creature_id, str(e))
+        finally:
+            # Close every store this engine minted — without this, files
+            # stay status="running" forever (the HW4 case: 61 stuck files).
+            _autosession.close_owned_stores(self)
+            # Terminate live subscribers — ``async for ev in t.subscribe()``
+            # used to hang forever after shutdown.
+            for sub in list(self._subscribers):
                 try:
-                    await c.stop()
-                except Exception as e:  # pragma: no cover - defensive
-                    _shutdown_log_warning(c.creature_id, str(e))
-        # Close every store this engine minted — without this, files
-        # stay status="running" forever (the HW4 case: 61 stuck files).
-        _autosession.close_owned_stores(self)
-        # Terminate live subscribers — ``async for ev in t.subscribe()``
-        # used to hang forever after shutdown.
-        for sub in list(self._subscribers):
-            try:
-                sub.queue.put_nowait(None)
-            except Exception:  # pragma: no cover - defensive
-                pass
-        self._running = False
+                    sub.queue.put_nowait(None)
+                except Exception:  # pragma: no cover - defensive
+                    pass
+            self._running = False
 
     # ------------------------------------------------------------------
     # observability

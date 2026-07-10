@@ -63,7 +63,9 @@ async def apply_recipe(
     pwd: str | None = None,
     llm: Any = None,
     strict: bool = True,
+    start: bool = True,
     creature_builder: CreatureBuilder | None = None,
+    created_ids: list[str] | None = None,
 ) -> GraphTopology:
     """Load a terrarium recipe into ``engine`` and return the resulting
     :class:`GraphTopology`.
@@ -72,6 +74,11 @@ async def apply_recipe(
     is None).  ``creature_builder`` defaults to
     :func:`terrarium.creature_host.build_creature`; tests pass a stub
     that returns fake-Agent creatures.
+
+    When ``created_ids`` is provided, each creature's final id is appended
+    to it as the add succeeds, so a caller that fails mid-recipe can roll
+    back exactly the creatures this call created — never one a concurrent
+    task added meanwhile.
     """
     config = _resolve_recipe(recipe)
     builder = creature_builder or build_creature
@@ -141,7 +148,11 @@ async def apply_recipe(
         # ``session=False``: per-creature autosession is suppressed —
         # ``engine.apply_recipe`` mints ONE terrarium-typed store for
         # the whole graph (config_path = the recipe) after this loop.
-        await engine.add_creature(creature, graph=graph_id, start=False, session=False)
+        added = await engine.add_creature(
+            creature, graph=graph_id, start=False, session=False
+        )
+        if created_ids is not None:
+            created_ids.append(added.creature_id)
 
     root_creature: Creature | None = None
     if config.root is not None:
@@ -162,9 +173,11 @@ async def apply_recipe(
             use_default_builder=use_default_builder,
             strict=strict,
         )
-        await engine.add_creature(
+        added_root = await engine.add_creature(
             root_creature, graph=graph_id, start=False, session=False
         )
+        if created_ids is not None:
+            created_ids.append(added_root.creature_id)
 
     # 6. Wire listen/send edges + inject triggers.
     for cr_cfg in config.creatures:
@@ -220,10 +233,13 @@ async def apply_recipe(
 
     _wiring.install_output_wiring_resolver(engine)
 
-    # 8. Start every creature now that wiring is complete.
-    for cid in list(engine.get_graph(graph_id).creature_ids):
-        creature = engine.get_creature(cid)
-        await creature.start()
+    # 8. Start every creature now that wiring is complete. Resume
+    # passes ``start=False`` so saved state can be injected BEFORE any
+    # startup trigger or input runs against an empty conversation.
+    if start:
+        for cid in list(engine.get_graph(graph_id).creature_ids):
+            creature = engine.get_creature(cid)
+            await creature.start()
 
     logger.info(
         "Recipe applied",

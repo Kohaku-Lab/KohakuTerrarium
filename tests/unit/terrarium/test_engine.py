@@ -489,10 +489,13 @@ class TestApplyRecipe:
             pwd=None,
             llm=None,
             strict=True,
+            start=True,
             creature_builder=None,
+            created_ids=None,
         ):
             captured["recipe"] = recipe
             captured["pwd"] = pwd
+            captured["start"] = start
             return None
 
         from kohakuterrarium.terrarium import engine as engine_mod
@@ -503,6 +506,7 @@ class TestApplyRecipe:
             await t.apply_recipe("/some/recipe.yaml", pwd="/cwd")
             assert captured["recipe"] == "/some/recipe.yaml"
             assert captured["pwd"] == "/cwd"
+            assert captured["start"] is True
         finally:
             await t.shutdown()
 
