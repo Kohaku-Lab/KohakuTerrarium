@@ -125,6 +125,11 @@ export default {
   "sessions.daysAgo": ({ count }) => `${count} 天前`,
   "sessions.resumed": "已恢复会话：{name}",
   "sessions.resumeFailed": "恢复失败：{message}",
+  "sessions.workdirMissingTitle": "工作目录不存在",
+  "sessions.workdirMissingPrompt":
+    "保存的工作目录已不存在：{pwd}。请输入新的工作目录（留空则使用服务器默认目录）：",
+  "sessions.workdirSet": "工作目录已设置：{path}",
+  "sessions.workdirSetFailed": "设置工作目录失败：{message}",
   "sessions.deleteConfirm": "要删除会话“{name}”吗？",
   "sessions.deleted": "会话已删除",
   "sessions.deleteFailed": "删除失败：{message}",
@@ -337,6 +342,11 @@ export default {
   "chat.noMessagesYet": "尚无消息",
   "chat.getStarted": "发送消息开始使用",
   "chat.processing": "KohakUwUing...",
+  "chat.bgResultTool": "后台工具结果已送达：{label}",
+  "chat.bgResultSubagent": "后台子代理结果已送达：{label}",
+  "chat.processingStreaming": "KohakUwUing...（生成中）",
+  "chat.processingStreamingBg": "KohakUwUing...（生成中 + {n} 个后台任务）",
+  "chat.processingWaitingBg": "KohakUwUing...（等待 {n} 个后台任务）",
   "chat.queued": "排队中",
   "chat.pendingBanner": ({ count }) =>
     count === 1 ? "有 1 个待处理请求等待回复" : `有 ${count} 个待处理请求等待回复`,

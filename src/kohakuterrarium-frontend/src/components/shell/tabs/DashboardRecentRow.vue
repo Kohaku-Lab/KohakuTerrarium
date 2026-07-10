@@ -34,6 +34,7 @@ import { useInstancesStore } from "@/stores/instances"
 import { useTabsStore } from "@/stores/tabs"
 import { sessionAPI } from "@/utils/api"
 import { useI18n } from "@/utils/i18n"
+import { promptForMissingWorkdirAfterResume } from "@/utils/workdirPrompt"
 import { extractTextPreview } from "@/utils/multimodal"
 
 const props = defineProps({ session: { type: Object, required: true } })
@@ -79,6 +80,7 @@ async function onResume() {
   try {
     const result = await sessionAPI.resume(sessionId.value)
     await instances.fetchAll()
+    await promptForMissingWorkdirAfterResume(result)
     const id = result?.instance_id
     if (id) {
       tabs.openTab({

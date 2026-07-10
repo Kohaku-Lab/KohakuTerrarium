@@ -129,6 +129,11 @@ export default {
   "sessions.daysAgo": ({ count }) => `vor ${count} T.`,
   "sessions.resumed": "Sitzung fortgesetzt: {name}",
   "sessions.resumeFailed": "Fortsetzen fehlgeschlagen: {message}",
+  "sessions.workdirMissingTitle": "Arbeitsverzeichnis fehlt",
+  "sessions.workdirMissingPrompt":
+    "Das gespeicherte Arbeitsverzeichnis existiert nicht mehr: {pwd}. Neues Arbeitsverzeichnis eingeben (leer lassen für Server-Standard):",
+  "sessions.workdirSet": "Arbeitsverzeichnis gesetzt: {path}",
+  "sessions.workdirSetFailed": "Arbeitsverzeichnis konnte nicht gesetzt werden: {message}",
   "sessions.deleteConfirm": 'Sitzung "{name}" loeschen?',
   "sessions.deleted": "Sitzung geloescht",
   "sessions.deleteFailed": "Loeschen fehlgeschlagen: {message}",

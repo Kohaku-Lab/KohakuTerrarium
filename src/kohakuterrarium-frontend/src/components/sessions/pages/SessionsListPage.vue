@@ -158,7 +158,7 @@ import GemBadge from "@/components/common/GemBadge.vue"
 import { useInstancesStore } from "@/stores/instances"
 import { GEM } from "@/utils/colors"
 import { useI18n } from "@/utils/i18n"
-import { sessionAPI } from "@/utils/api"
+import { sessionAPI, terrariumAPI } from "@/utils/api"
 import { extractTextPreview } from "@/utils/multimodal"
 
 function previewText(session, limit = 200) {
@@ -252,9 +252,21 @@ function viewSession(session) {
 async function resumeSession(session) {
   resuming.value = session.name
   try {
-    const result = await sessionAPI.resume(session.name)
+    // Local sessions carry pwd_exists on the list row — resolve the
+    // replacement dir BEFORE resume so every creature starts in it
+    // (no trigger/input ever runs in the fallback dir).
+    let pwdOverride
+    if (session.pwd_exists === false) {
+      pwdOverride = await promptForWorkdir(session.pwd || "")
+    }
+    const result = await sessionAPI.resume(session.name, pwdOverride ? { pwd: pwdOverride } : {})
     await instances.fetchAll()
     ElMessage.success(t("sessions.resumed", { name: session.name }))
+    if (!pwdOverride) {
+      // Remote sessions can't be pre-checked from the host — the
+      // worker reports the missing dir in the resume response.
+      await promptForMissingWorkdirAfterResume(result)
+    }
     if (typeof props.onResume === "function") {
       props.onResume({ session, result })
       return
@@ -264,6 +276,15 @@ async function resumeSession(session) {
     ElMessage.error(t("sessions.resumeFailed", { message: err.response?.data?.detail || err.message }))
   } finally {
     resuming.value = null
+  }
+}
+
+async function promptForWorkdir(savedPwd) {
+  try {
+    const { value } = await ElMessageBox.prompt(t("sessions.workdirMissingPrompt", { pwd: savedPwd }), t("sessions.workdirMissingTitle"), { inputValue: "" })
+    return (value || "").trim() || undefined
+  } catch {
+    return undefined // keep the server-side fallback dir
   }
 }
 

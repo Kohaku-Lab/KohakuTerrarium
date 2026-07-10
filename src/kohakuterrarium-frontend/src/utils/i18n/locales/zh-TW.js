@@ -125,6 +125,11 @@ export default {
   "sessions.daysAgo": ({ count }) => `${count} 天前`,
   "sessions.resumed": "已恢復工作階段：{name}",
   "sessions.resumeFailed": "恢復失敗：{message}",
+  "sessions.workdirMissingTitle": "工作目錄不存在",
+  "sessions.workdirMissingPrompt":
+    "儲存的工作目錄已不存在：{pwd}。請輸入新的工作目錄（留空則使用伺服器預設目錄）：",
+  "sessions.workdirSet": "工作目錄已設定：{path}",
+  "sessions.workdirSetFailed": "設定工作目錄失敗：{message}",
   "sessions.deleteConfirm": "要刪除工作階段「{name}」嗎？",
   "sessions.deleted": "工作階段已刪除",
   "sessions.deleteFailed": "刪除失敗：{message}",
@@ -337,6 +342,11 @@ export default {
   "chat.noMessagesYet": "尚無訊息",
   "chat.getStarted": "傳送訊息開始使用",
   "chat.processing": "KohakUwUing...",
+  "chat.bgResultTool": "背景工具結果已送達：{label}",
+  "chat.bgResultSubagent": "背景子代理結果已送達：{label}",
+  "chat.processingStreaming": "KohakUwUing...（生成中）",
+  "chat.processingStreamingBg": "KohakUwUing...（生成中 + {n} 個背景任務）",
+  "chat.processingWaitingBg": "KohakUwUing...（等待 {n} 個背景任務）",
   "chat.queued": "排隊中",
   "chat.pendingBanner": ({ count }) =>
     count === 1 ? "有 1 個待處理請求等待回覆" : `有 ${count} 個待處理請求等待回覆`,

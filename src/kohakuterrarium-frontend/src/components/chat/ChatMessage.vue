@@ -16,7 +16,7 @@
     <div role="button" tabindex="0" :aria-expanded="!!expandedTools['compact_' + message.id]" class="flex items-center gap-2 py-1.5 px-3 cursor-pointer select-none" @click="toggleTool('compact_' + message.id)" @keydown.enter="toggleTool('compact_' + message.id)" @keydown.space.prevent="toggleTool('compact_' + message.id)">
       <span v-if="message.status === 'running'" class="w-1.5 h-1.5 rounded-full bg-amber kohaku-pulse shrink-0" />
       <span class="text-xs font-medium" :class="message.status === 'running' ? 'text-amber dark:text-amber-light' : 'text-iolite dark:text-iolite-light'">
-        {{ message.status === "running" ? "Compacting context..." : `Context Compacted (round ${message.round || "?"})` }}
+        {{ message.status === "running" ? "Compacting context..." : message.status === "skipped" ? `Compaction skipped${message.reason ? ` (${message.reason})` : ""}` : `Context Compacted (round ${message.round || "?"})` }}
       </span>
       <span v-if="message.messagesCompacted" class="text-[10px] text-warm-400"> {{ message.messagesCompacted }} messages summarized </span>
       <span class="flex-1" />
@@ -25,6 +25,13 @@
     <div v-if="expandedTools['compact_' + message.id] && message.summary" class="px-3 py-2 border-t border-iolite/10 dark:border-iolite/15 text-xs max-h-48 overflow-y-auto">
       <MarkdownRenderer :content="message.summary" />
     </div>
+  </div>
+
+  <!-- Background result delivered -->
+  <div v-else-if="message.role === 'bg_result'" class="flex items-center gap-2 py-0.5">
+    <div class="flex-1 border-t border-iolite/20 dark:border-iolite/25 border-dashed" />
+    <span class="text-xs text-iolite/80 dark:text-iolite-light/80 shrink-0"> <span class="i-carbon-arrow-down-left text-[10px] mr-0.5" />{{ message.kind === "subagent" ? t("chat.bgResultSubagent", { label: message.label }) : t("chat.bgResultTool", { label: message.label }) }} </span>
+    <div class="flex-1 border-t border-iolite/20 dark:border-iolite/25 border-dashed" />
   </div>
 
   <!-- Processing error -->
