@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from kohakuterrarium.api.auth import verify_admin_token
+from kohakuterrarium.api.ssrf_guard import validate_url_against_ssrf
 from kohakuterrarium.mcp.client import MCPClientManager, MCPServerConfig
 from kohakuterrarium.studio.identity.mcp_servers import (
     delete_server,
@@ -66,6 +67,9 @@ async def list_mcp_servers():
 
 @router.post("/mcp", dependencies=[Depends(verify_admin_token)])
 async def add_mcp_server(req: MCPServerRequest):
+    # SSRF protection: validate URL for HTTP/SSE transports
+    if req.url and req.transport in ("http", "sse", "streamable_http"):
+        validate_url_against_ssrf(req.url)
     try:
         upsert_server(req.model_dump())
     except ValueError as e:

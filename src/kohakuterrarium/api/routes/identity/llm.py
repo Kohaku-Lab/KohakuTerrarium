@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from kohakuterrarium.api.auth import verify_admin_token
+from kohakuterrarium.api.ssrf_guard import validate_url_against_ssrf
 from kohakuterrarium.studio.identity.llm_backends import (
     list_backends,
     remove_backend,
@@ -59,6 +60,9 @@ async def get_backends():
 
 @router.post("/backends", dependencies=[Depends(verify_admin_token)])
 async def create_backend(req: BackendRequest):
+    # SSRF protection: validate base_url before persisting
+    if req.base_url:
+        validate_url_against_ssrf(req.base_url)
     try:
         save_backend_record(
             name=req.name,
