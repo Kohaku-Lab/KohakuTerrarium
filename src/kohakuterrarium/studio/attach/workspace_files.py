@@ -7,6 +7,7 @@ defined here; nothing in this module touches FastAPI's routing
 decorators, so the helpers are reusable from non-HTTP entry points.
 """
 
+import os
 import shutil
 import sys
 from datetime import datetime, timezone
@@ -76,25 +77,47 @@ _SKIP_NAMES: set[str] = {
 }
 
 
+# Default workspace root — override via WORKSPACE_ROOT env var.
+# All file operations are sandboxed to this directory tree.
+_DEFAULT_WORKSPACE_ROOT = Path.cwd()
+
+
+def _get_workspace_root() -> Path:
+    """Return the configured workspace root (from WORKSPACE_ROOT env or cwd)."""
+    env_root = os.environ.get("WORKSPACE_ROOT")
+    if env_root:
+        root = Path(env_root).resolve()
+        if root.is_dir():
+            return root
+    return _DEFAULT_WORKSPACE_ROOT.resolve()
+
+
 def _validate_path(path_str: str) -> Path:
-    """Validate and resolve a file path."""
+    """Validate, resolve, and sandbox a file path to the workspace root.
+
+    Raises HTTPException 403 if the resolved path escapes the workspace root.
+    """
     try:
-        return Path(path_str).resolve()
+        resolved = Path(path_str).resolve()
     except (ValueError, OSError) as e:
         raise HTTPException(400, f"Invalid path: {e}")
+    workspace_root = _get_workspace_root()
+    try:
+        resolved.relative_to(workspace_root)
+    except ValueError:
+        raise HTTPException(
+            403,
+            f"Path escapes workspace root ({workspace_root}): {path_str}",
+        )
+    return resolved
 
 
 def _list_browse_roots() -> list[Path]:
-    """Return top-level filesystem roots for the current platform."""
-    if sys.platform == "win32":
-        roots = []
-        for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
-            drive = Path(f"{letter}:/")
-            if drive.exists():
-                roots.append(drive)
-        return roots
+    """Return top-level filesystem roots for the current platform.
 
-    return [Path("/")]
+    Sandboxed: only returns the workspace root, not the entire filesystem.
+    """
+    return [_get_workspace_root()]
 
 
 def _parent_directory(path: Path) -> str | None:
