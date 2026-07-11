@@ -57,6 +57,18 @@ def edit_config(name: str | None) -> int:
         print("$EDITOR is not set.")
         print(path)
         return 1
+    # Validate editor: must be a single executable name (no shell metacharacters)
+    # to prevent command injection via crafted $EDITOR values.
+    if not editor.isidentifier() and "/" not in editor and "\\" not in editor:
+        # Allow simple names (vim, nano) and paths (/usr/bin/vim) but reject
+        # shell metacharacters that could break out of the intended command.
+        safe_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/-_.")
+        if not all(c in safe_chars for c in editor):
+            print(f"$EDITOR contains unsafe characters: {editor!r}")
+            print(path)
+            return 1
     path.parent.mkdir(parents=True, exist_ok=True)
     path.touch(exist_ok=True)
-    return os.system(f'{editor} "{path}"')
+    # Use subprocess.run with a list to avoid shell interpretation of $EDITOR.
+    import subprocess
+    return subprocess.run([editor, str(path)]).returncode
