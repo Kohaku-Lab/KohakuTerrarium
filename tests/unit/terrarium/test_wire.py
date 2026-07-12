@@ -337,3 +337,78 @@ class TestPackContent:
 
     def test_unpack_passthrough(self):
         assert unpack_content("hi") == "hi"
+
+
+# ── Drive typed-error round-trip across the wire ────────────────
+
+
+class TestDriveErrorWire:
+    def _round_trip(self, exc):
+        from kohakuterrarium.terrarium.wire import (
+            drive_error_from_body,
+            pack_drive_error,
+        )
+
+        return drive_error_from_body({"error": pack_drive_error(exc)})
+
+    def test_conflict_preserves_revisions(self):
+        from kohakuterrarium.terrarium.drive.errors import DriveConflictError
+
+        got = self._round_trip(
+            DriveConflictError("stale", expected_revision=3, actual_revision=5)
+        )
+        assert isinstance(got, DriveConflictError)
+        assert got.expected_revision == 3 and got.actual_revision == 5
+        assert str(got) == "stale"
+
+    def test_idempotency_conflict_preserves_key(self):
+        from kohakuterrarium.terrarium.drive.errors import (
+            DriveIdempotencyConflictError,
+        )
+
+        got = self._round_trip(
+            DriveIdempotencyConflictError("dup", idempotency_key="k1")
+        )
+        assert isinstance(got, DriveIdempotencyConflictError)
+        assert got.idempotency_key == "k1"
+
+    def test_transition_preserves_statuses(self):
+        from kohakuterrarium.terrarium.drive.errors import DriveTransitionError
+
+        got = self._round_trip(
+            DriveTransitionError("bad", from_status="active", to_status="completed")
+        )
+        assert isinstance(got, DriveTransitionError)
+        assert got.from_status == "active" and got.to_status == "completed"
+
+    def test_each_kind_reconstructs_its_subtype(self):
+        from kohakuterrarium.terrarium.drive import errors as drive_errors
+
+        cases = [
+            drive_errors.DriveNotFoundError("nf"),
+            drive_errors.DriveValidationError("val"),
+            drive_errors.DrivePermissionError("perm"),
+            drive_errors.DriveRegistrationDisabledError("disabled"),
+            drive_errors.DriveBackpressureError("bp"),
+            drive_errors.DriveDeliveryError("del"),
+            drive_errors.CrossNodeDriveNotSupportedError("xnode"),
+            drive_errors.DriveError("base"),
+        ]
+        for exc in cases:
+            got = self._round_trip(exc)
+            assert type(got) is type(exc), f"{exc!r} lost its subtype"
+            assert str(got) == str(exc)
+
+    def test_non_drive_body_returns_none(self):
+        from kohakuterrarium.terrarium.wire import drive_error_from_body
+
+        assert drive_error_from_body({"error": {"kind": "not_found"}}) is None
+        assert drive_error_from_body({"ok": True}) is None
+        assert drive_error_from_body("nope") is None
+
+    def test_is_drive_error_kind(self):
+        from kohakuterrarium.terrarium.wire import is_drive_error_kind
+
+        assert is_drive_error_kind("drive_conflict")
+        assert not is_drive_error_kind("not_found")
+        assert not is_drive_error_kind(None)
