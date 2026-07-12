@@ -4,10 +4,10 @@
 generic Drive runtime: it contributes the ``/goal`` user command and a bounded
 prompt fragment explaining Goal completion semantics. It owns no Drive record,
 queue, scheduler, or repository, and holds no canonical Goal state. It ships
-DISABLED by default like the other built-in plugins (sandbox / budget / permgate
-/ compact); a creature opts in through the plugin panel or its ``plugins:``
-config. Disabling it removes ``/goal`` and the prompt fragment while leaving Goal
-Drives untouched — Goal-kind runtime semantics live in the separately-enabled
+registered and enabled automatically for every Terrarium-hosted creature. A
+standalone Agent may still opt in explicitly. Disabling it removes ``/goal`` and
+the prompt fragment while leaving Goal Drives untouched — Goal-kind runtime
+semantics live in the separately-enabled
 :class:`~kohakuterrarium.terrarium.drive.goal.GoalDriveRegistration`. Enabling
 this plugin does NOT enable that registration; they are independent toggles
 (design §11.3): the plugin is a plugin-panel decision, the registration a

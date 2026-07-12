@@ -100,6 +100,9 @@ class PluginManager(PluginCommandRefreshMixin):
     # ── Registration ──
 
     def register(self, plugin: BasePlugin) -> None:
+        name = getattr(plugin, "name", "")
+        if name:
+            self.unregister(name)
         self._plugins.append(plugin)
         self._plugins.sort(key=lambda p: getattr(p, "priority", 50))
         logger.info(

@@ -17,6 +17,7 @@ from typing import Any
 
 from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.builtins.outputs.none import NoneOutput
+from kohakuterrarium.builtins.plugins.goal.plugin import GoalPlugin
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config import AgentConfig, build_agent_config
 from kohakuterrarium.core.environment import Environment
@@ -635,6 +636,10 @@ def build_creature(
         raise ValueError(f"io= must be 'config', 'none', or 'headless' — got {io!r}")
     _io_override = NoneInput() if io in ("none", "headless") else None
     _out_override = NoneOutput() if io == "headless" else None
+    # Every Terrarium-hosted creature gets the Goal adapter by default. Agent's
+    # plugin loader deduplicates by name, so an explicit Goal config is replaced
+    # by this enabled instance rather than registered twice.
+    terrarium_plugins = [*(plugins or []), GoalPlugin()]
     if isinstance(config, (str, Path)):
         agent = Agent.from_path(
             str(config),
@@ -650,7 +655,7 @@ def build_creature(
             pwd=pwd,
             strict=strict,
             tools=tools,
-            plugins=plugins,
+            plugins=terrarium_plugins,
         )
         cid = creature_id or _safe_creature_id(agent.config.name)
         return Creature(
@@ -675,7 +680,7 @@ def build_creature(
             pwd=pwd,
             strict=strict,
             tools=tools,
-            plugins=plugins,
+            plugins=terrarium_plugins,
         )
         cid = creature_id or _safe_creature_id(config.name)
         return Creature(
@@ -701,7 +706,7 @@ def build_creature(
             pwd=pwd,
             strict=strict,
             tools=tools,
-            plugins=plugins,
+            plugins=terrarium_plugins,
         )
         cid = creature_id or _safe_creature_id(config.name)
         return Creature(

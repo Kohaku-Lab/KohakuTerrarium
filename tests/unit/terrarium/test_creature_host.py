@@ -36,6 +36,11 @@ class TestBuildCreatureLLMInjection:
         scripted = ScriptedLLM(["hi"])
         creature = build_creature(str(tmp_path), llm=scripted, io="none")
         assert creature.agent.llm is scripted
+        assert creature.agent.plugins.is_enabled("goal")
+        assert sum(
+            plugin["name"] == "goal"
+            for plugin in creature.agent.plugins.list_plugins()
+        ) == 1
 
 
 # ── typed turn drivers on Creature (E3) ────────────────────────
