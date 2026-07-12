@@ -14,6 +14,8 @@ path helpers, ``session_targets`` / ``session_history_payload``,
 
 from pathlib import Path
 
+import pytest
+
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence import store as store_mod
 
@@ -172,6 +174,161 @@ class TestDeleteSessionFiles:
         assert not wal.exists(), "WAL sidecar leaked after delete"
         assert not shm.exists(), "SHM sidecar leaked after delete"
 
+    def test_deletes_drive_sidecar_family(self, tmp_path, monkeypatch):
+        # R1-13: the Drive sidecar family (<name>.kohakutr.drives + its own
+        # -wal/-shm) must be deleted too, or sensitive Drive rows survive and a
+        # same-name recreate reopens an orphan sidecar.
+        path = _make_session(tmp_path)
+        drives = path.with_name(path.name + ".drives")
+        drives_wal = path.with_name(path.name + ".drives-wal")
+        drives_shm = path.with_name(path.name + ".drives-shm")
+        for f in (drives, drives_wal, drives_shm):
+            f.write_bytes(b"sensitive drive rows")
+        monkeypatch.setattr(store_mod, "_SESSION_DIR", tmp_path)
+        deleted = store_mod.delete_session_files("alice")
+        assert not path.exists()
+        assert not drives.exists(), ".drives sidecar leaked after delete"
+        assert not drives_wal.exists(), ".drives-wal leaked after delete"
+        assert not drives_shm.exists(), ".drives-shm leaked after delete"
+        # deletion accounting includes the drive sidecars.
+        assert drives in deleted
+
+    def test_locked_drive_sidecar_is_quarantined_and_main_deleted(
+        self, tmp_path, monkeypatch
+    ):
+        # R1-13: a locked .drives sidecar that cannot be unlinked is quarantined
+        # (renamed aside) so a same-name recreate cannot reopen it, and the main
+        # session is still deleted.
+        path = _make_session(tmp_path)
+        drives = path.with_name(path.name + ".drives")
+        drives.write_bytes(b"sensitive drive rows")
+        monkeypatch.setattr(store_mod, "_SESSION_DIR", tmp_path)
+
+        real_unlink = store_mod._unlink_with_retry
+
+        def fake_unlink(p, *a, **kw):
+            if ".drives" in p.name:
+                raise PermissionError(13, "simulated locked drive sidecar")
+            return real_unlink(p, *a, **kw)
+
+        monkeypatch.setattr(store_mod, "_unlink_with_retry", fake_unlink)
+
+        deleted = store_mod.delete_session_files("alice")
+        assert not path.exists()  # main session removed
+        assert not drives.exists()  # original .drives renamed away
+        orphans = list(tmp_path.glob(f"{path.name}.drives.orphan-*"))
+        assert len(orphans) == 1  # quarantined so a recreate cannot reopen it
+        assert any(".orphan-" in p.name for p in deleted)
+
+    def test_unquarantinable_drive_sidecar_blocks_main_deletion(
+        self, tmp_path, monkeypatch
+    ):
+        # R1-13: a .drives sidecar that can be neither unlinked NOR quarantined
+        # (a truly locked handle) must fail the delete BEFORE the main session is
+        # removed, so no reopenable orphan survives under a deleted session name.
+        path = _make_session(tmp_path)
+        drives = path.with_name(path.name + ".drives")
+        drives.write_bytes(b"sensitive drive rows")
+        monkeypatch.setattr(store_mod, "_SESSION_DIR", tmp_path)
+
+        real_unlink = store_mod._unlink_with_retry
+
+        def fake_unlink(p, *a, **kw):
+            if ".drives" in p.name:
+                raise PermissionError(13, "simulated locked drive sidecar")
+            return real_unlink(p, *a, **kw)
+
+        monkeypatch.setattr(store_mod, "_unlink_with_retry", fake_unlink)
+
+        real_replace = Path.replace
+
+        def fake_replace(self, target):
+            if ".drives" in self.name:
+                raise PermissionError(13, "cannot rename a locked sidecar")
+            return real_replace(self, target)
+
+        monkeypatch.setattr(Path, "replace", fake_replace)
+
+        with pytest.raises(OSError):
+            store_mod.delete_session_files("alice")
+        # Both the main session and its live .drives survive — consistent pair.
+        assert path.exists()
+        assert drives.exists()
+
+    def test_same_name_recreate_after_delete_has_no_drives(self, tmp_path):
+        # Deleting then recreating a session with the same name must NOT surface
+        # stale Drive records from an orphan sidecar (R1-13).
+        import asyncio
+
+        from kohakuterrarium.terrarium.drive.models import ActorRef
+        from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
+        from kohakuterrarium.terrarium.drive.store import (
+            open_session_drive_repository,
+        )
+
+        worker = ActorRef("creature", "worker")
+
+        async def _run():
+            path = tmp_path / "sess.kohakutr"
+            store = SessionStore(str(path))
+            store.init_meta("sid", "agent", "cfg.yaml", str(tmp_path), ["worker"])
+            repo = open_session_drive_repository(store)
+            await repo.create_drive(
+                CreateDriveRequest(
+                    kind="generic",
+                    title="secret",
+                    scope_type="creature",
+                    scope_id="worker",
+                    owner=worker,
+                    owner_scope="creature",
+                    created_by=worker,
+                ),
+                actor=worker,
+                graph_id="g1",
+            )
+            store.close()
+
+            import kohakuterrarium.studio.persistence.store as smod
+
+            orig = smod._SESSION_DIR
+            smod._SESSION_DIR = tmp_path
+            try:
+                smod.delete_session_files("sess")
+            finally:
+                smod._SESSION_DIR = orig
+
+            store2 = SessionStore(str(path))
+            store2.init_meta("sid2", "agent", "cfg.yaml", str(tmp_path), ["worker"])
+            repo2 = open_session_drive_repository(store2)
+            from kohakuterrarium.terrarium.drive.requests import DriveQuery
+
+            rows = await repo2.list_drives(DriveQuery())
+            store2.close()
+            return rows
+
+        rows = asyncio.run(_run())
+        assert rows == ()
+
+    def test_busy_migration_prevents_any_session_deletion(self, tmp_path, monkeypatch):
+        from kohakuterrarium.terrarium.drive import store_migration as migration
+        from kohakuterrarium.utils.file_lock import FileLock
+
+        path = _make_session(tmp_path)
+        sidecar = Path(str(path) + ".drives")
+        sidecar.write_bytes(b"not yet complete")
+        monkeypatch.setattr(store_mod, "_SESSION_DIR", tmp_path)
+        monkeypatch.setattr(migration, "_MIGRATE_LOCK_TIMEOUT_S", 0.05)
+        monkeypatch.setattr(migration, "_MIGRATE_POLL_S", 0.005)
+        holder = FileLock(str(sidecar) + ".migrate-lock")
+        holder.acquire()
+        try:
+            with pytest.raises(TimeoutError):
+                store_mod.delete_session_files("alice")
+            assert path.exists()
+            assert sidecar.exists()
+        finally:
+            holder.release()
+
     def test_retries_on_transient_permission_error(self, tmp_path, monkeypatch):
         # Bug #59 (Windows-only repro in production): the close-handles
         # nudge happens via Python refcounting which can lag a few ms
@@ -197,4 +354,4 @@ class TestDeleteSessionFiles:
         deleted = store_mod.delete_session_files("alice")
         assert len(deleted) >= 1
         assert not path.exists()
-        assert calls["n"] == 1, "the flaky path should have been retried"
+        assert calls["n"] == 0, "deletion stages names before unlinking detached files"

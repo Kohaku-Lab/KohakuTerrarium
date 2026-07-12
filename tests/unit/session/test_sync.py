@@ -2,7 +2,9 @@
 
 import asyncio
 import base64
+import logging
 
+import pytest
 
 from kohakuterrarium.laboratory._internal.app import AppMessage
 from kohakuterrarium.session.store import SessionStore
@@ -202,6 +204,71 @@ class TestSessionMirrorWriter:
             assert events[0]["content"] == "hi"
         finally:
             writer.close()
+
+    def test_real_vault_meta_setdefault_raises_on_str(self, tmp_path):
+        # Canary documenting WHY the mirror stamps ``on_node`` by assignment,
+        # not ``meta.setdefault``: the installed KohakuVault meta proxy's
+        # setdefault does ``bytes(default)``, which raises on a str default.
+        # Real store, no vault mock. If this ever stops raising, the workaround
+        # in ``sync.py`` may no longer be needed.
+        store = SessionStore(str(tmp_path / "canary.kohakutr"), writer_lock=True)
+        try:
+            with pytest.raises(TypeError):
+                store.meta.setdefault("on_node", "worker-1")
+        finally:
+            store.close()
+
+    async def test_dispatch_stamps_on_node_without_append_failure(self, tmp_path):
+        # Regression for BUG #127/#137: the mirror append must stamp ``on_node``
+        # via plain assignment (not ``meta.setdefault``) so the KohakuVault
+        # ``bytes(str)`` TypeError never aborts the handler. On the unfixed code
+        # the setdefault raises and the except-block logs "append failed" for THIS
+        # session — the only observable difference (the buggy setdefault writes
+        # on_node BEFORE raising, so the meta value alone can't distinguish it).
+        #
+        # De-flaked vs a raw shared-logger capture: the "append failed for %s/%s"
+        # record embeds the session_id, so filtering to this test's UNIQUE id
+        # ignores any concurrent/leftover mirror record from other tests under
+        # full-tier load.
+        session_id = "regress-on-node-7f3a"
+        records: list[logging.LogRecord] = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record):
+                records.append(record)
+
+        log = logging.getLogger("kohakuterrarium.session.sync")
+        handler = _Capture(level=logging.WARNING)
+        log.addHandler(handler)
+        node = _FakeNode()
+        writer = SessionMirrorWriter(node, tmp_path / "mirror")
+        try:
+            msg = AppMessage(
+                namespace=NAMESPACE,
+                type="event",
+                body={
+                    "session_id": session_id,
+                    "key": "alice:e000000",
+                    "data": {"type": "user_message", "content": "hi"},
+                },
+                sender_node="worker-7",
+                request_id=None,
+                in_reply_to=None,
+            )
+            await writer._dispatch(msg)
+            store = writer.store_for(session_id)
+            assert [e["content"] for e in store.get_events("alice")] == ["hi"]
+            assert store.load_meta().get("on_node") == "worker-7"
+        finally:
+            log.removeHandler(handler)
+            writer.close()
+        # Scoped to THIS session's id — deterministic under load.
+        mine = [
+            r.getMessage()
+            for r in records
+            if "append failed" in r.getMessage() and session_id in r.getMessage()
+        ]
+        assert not mine, mine
 
     async def test_dispatch_applies_meta(self, tmp_path):
         # A ``meta`` message initialises the mirror store's meta from

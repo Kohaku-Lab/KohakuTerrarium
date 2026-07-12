@@ -52,14 +52,10 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# KVault's ``keys()`` defaults to ``limit=10000``; once a session crosses
-# that threshold (~10 long turns of streaming chunks) every read path
-# silently truncates and the latest events become invisible. We pass a
-# very large explicit cap so the read covers any realistic session
-# while staying well below the 64-bit overflow line. Use the helper
-# :func:`iter_kv_keys` from this module instead of calling ``keys()``
-# directly — every site in ``session/`` and ``studio/persistence/``
-# routes through it.
+# KVault's ``keys()`` defaults to ``limit=10000``; past that a session's
+# reads silently truncate and the latest events vanish. Every site in
+# ``session/`` and ``studio/persistence/`` routes through :func:`iter_kv_keys`
+# with this large cap (well below the 64-bit overflow line) instead.
 _KV_KEYS_LIMIT: int = 2**31 - 1
 
 
@@ -141,6 +137,8 @@ class SessionStore:
         self._global_event_id: int = 0
         # Artifacts directory — created lazily.
         self._artifacts_dir: Path | None = None
+        # Closers for sidecar resources sharing this file (drained at close()).
+        self._companion_closers: list[Callable[[], None]] = []
         # Append-event subscribers — each callback gets ``(key, data)``
         # after the row is written + FTS-indexed (see ``append_event``).
         self._event_subscribers: list[Callable[[str, dict], None]] = []
@@ -203,6 +201,12 @@ class SessionStore:
     def write_artifact(self, filename: str, data: bytes) -> Path:
         """Write raw bytes to ``artifacts_dir/<filename>``. Traversal-safe."""
         return write_artifact_bytes(self.artifacts_dir, filename, data)
+
+    def register_companion_closer(self, closer: Callable[[], None]) -> None:
+        # Zero-arg callable drained LIFO at close() (generic sidecar hook);
+        # idempotent — re-registering the same callable is a no-op.
+        if closer not in self._companion_closers:
+            self._companion_closers.append(closer)
 
     def _restore_counters(self) -> None:
         """Scan existing keys to restore sequence counters after restart."""
@@ -910,9 +914,9 @@ class SessionStore:
             self.conversation,
             self.turn_rollup,
         )
-        # Closes tables + drops native handles, then releases the writer
-        # lock in ``finally`` (a table-close error can't strand the lock).
-        close_tables(tables, self.fts, self._writer_lock)
+        # Drains companion closers + closes tables + drops native handles, then
+        # releases the writer lock in ``finally`` (an error can't strand it).
+        close_tables(tables, self.fts, self._writer_lock, self._companion_closers)
         self._writer_lock = None
         logger.debug("SessionStore closed", path=self._path)
 

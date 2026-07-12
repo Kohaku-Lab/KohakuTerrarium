@@ -270,6 +270,71 @@ class TestPerformForkHappy:
         finally:
             s.close()
 
+
+# ── Drive-table purge on fork (design §6.8) ──────────────────────
+
+
+class TestForkDriveTablePurge:
+    def test_purge_drops_drive_tables_keeps_others(self, tmp_path):
+        import sqlite3
+
+        from kohakuterrarium.session.store_fork import _purge_drive_tables
+
+        path = str(tmp_path / "x.sqlite")
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE drives(drive_id TEXT)")
+        conn.execute("CREATE TABLE drive_audit(seq INTEGER)")
+        conn.execute("CREATE TABLE meta(k TEXT)")  # a non-Drive table
+        conn.execute("INSERT INTO drives VALUES('d1')")
+        conn.commit()
+        conn.close()
+
+        _purge_drive_tables(path)
+
+        conn = sqlite3.connect(path)
+        names = {
+            r[0]
+            for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        conn.close()
+        # Every ``drive_*`` table is gone; unrelated tables are untouched.
+        assert "drives" not in names
+        assert "drive_audit" not in names
+        assert "meta" in names
+
+    def test_forked_file_carries_no_drive_tables(self, tmp_path):
+        import sqlite3
+
+        s = _store(tmp_path)
+        try:
+            s.init_meta("parent", "agent", "/p", "/w", ["alice"])
+            s.append_event("alice", "user_message", {"content": "hi"})
+            s.flush()
+            # A Drive sidecar table present in the parent must NOT ride along
+            # into the fork (§6.8): two branches mutating one Drive is the bug.
+            conn = sqlite3.connect(s.path)
+            conn.execute("CREATE TABLE IF NOT EXISTS drives(drive_id TEXT)")
+            conn.execute("INSERT INTO drives VALUES('d1')")
+            conn.commit()
+            conn.close()
+
+            child = perform_fork(s, str(tmp_path / "child.kohakutr"), at_event_id=1)
+            try:
+                conn = sqlite3.connect(child.path)
+                drive_tables = {
+                    r[0]
+                    for r in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' "
+                        "AND name LIKE 'drive%'"
+                    )
+                }
+                conn.close()
+                assert drive_tables == set()
+            finally:
+                child.close(update_status=False)
+        finally:
+            s.close()
+
     def test_fork_skips_malformed_events_in_scan(self, tmp_path):
         """Contract: the fork range-scan tolerates a corrupt events
         table — an event value that isn't a dict, and a dict event with

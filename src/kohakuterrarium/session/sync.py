@@ -371,15 +371,16 @@ class SessionMirrorWriter:
             # re-stamps these.  Keep everything else.
             payload = {k: v for k, v in data.items() if k not in ("type",)}
             store.append_event(agent, event_type, payload)
-            # Stamp the originating worker once AFTER the event is
-            # durably persisted — otherwise a partial-failure path
-            # could leave a session advertised with ``node_id``
-            # despite never having committed an event.  ``setdefault``
-            # makes the write idempotent and avoids a TOCTOU under
-            # concurrent dispatch.
+            # Stamp the originating worker once AFTER the event is durably
+            # persisted — otherwise a partial-failure path could leave a session
+            # advertised with ``node_id`` despite never having committed an event.
+            # Membership-check + plain assignment, NOT ``meta.setdefault``: the
+            # KohakuVault meta proxy's ``setdefault`` does ``bytes(default)``,
+            # which raises ``TypeError: string argument without an encoding`` on a
+            # str default and would abort the mirror append. Idempotent as before.
             source_node = getattr(msg, "sender_node", "") or body.get("node_id", "")
-            if source_node:
-                store.meta.setdefault("on_node", source_node)
+            if source_node and "on_node" not in store.meta:
+                store.meta["on_node"] = source_node
         except Exception:  # pragma: no cover - defensive
             logger.exception(
                 "session-sync mirror: append failed for %s/%s", session_id, key

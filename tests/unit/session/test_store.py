@@ -1099,3 +1099,54 @@ class TestWriterLock:
         # Lock is free -> a fresh writer-locked open succeeds (no leak).
         w = SessionStore(p, writer_lock=True)
         w.close()
+
+
+# ── Companion closers (generic sidecar hook; no Drive knowledge) ───
+
+
+class TestCompanionCloser:
+    def test_registered_closer_runs_once_at_close(self, tmp_path):
+        s = _store(tmp_path)
+        calls = []
+        s.register_companion_closer(lambda: calls.append("x"))
+        s.close()
+        assert calls == ["x"]
+
+    def test_closers_run_lifo(self, tmp_path):
+        s = _store(tmp_path)
+        calls = []
+        s.register_companion_closer(lambda: calls.append("a"))
+        s.register_companion_closer(lambda: calls.append("b"))
+        s.close()
+        # last registered closes first (LIFO)
+        assert calls == ["b", "a"]
+
+    def test_register_is_idempotent(self, tmp_path):
+        s = _store(tmp_path)
+        calls = []
+
+        def closer():
+            calls.append("x")
+
+        s.register_companion_closer(closer)
+        s.register_companion_closer(closer)  # re-register is a no-op
+        s.close()
+        assert calls == ["x"]
+
+    def test_failing_closer_does_not_strand_the_store(self, tmp_path):
+        # One bad closer is logged, never fatal: tables still close and the
+        # writer lock still releases (a fresh writer-locked open succeeds).
+        path = tmp_path / "s.kohakutr"
+        s = SessionStore(path, writer_lock=True)
+
+        def boom():
+            raise RuntimeError("closer boom")
+
+        s.register_companion_closer(boom)
+        s.close()
+        w = SessionStore(path, writer_lock=True)
+        w.close()
+
+    def test_no_closers_is_noop(self, tmp_path):
+        s = _store(tmp_path)
+        s.close()  # empty companion list closes cleanly

@@ -14,10 +14,16 @@ disk-usage.
 import gc
 import os
 import time
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.session.store_lock import acquire_writer_lock, release_writer_lock
+from kohakuterrarium.studio.persistence.delete_family import (
+    detach_file_family,
+    remove_detached_family,
+)
 from kohakuterrarium.studio.persistence.session_index import (
     get_session_index_default,
 )
@@ -136,6 +142,16 @@ def disk_usage() -> dict[str, Any]:
 def resolve_session_path_default(session_name: str) -> Path | None:
     """Resolve ``session_name`` against the default ``_SESSION_DIR``."""
     return resolve_session_path(session_name, _session_dir())
+
+
+def resolve_session_path_in(session_name: str, session_dir: Path) -> Path | None:
+    """Resolve ``session_name`` against an explicit ``session_dir``.
+
+    The saved-session Drive viewer resolves inside the authenticated user's L4
+    namespace (R1-01); it must never fall back to the process-global directory,
+    so this takes the directory explicitly rather than reading the module global.
+    """
+    return resolve_session_path(session_name, session_dir)
 
 
 def all_versions_for_session_default(session_name: str) -> list[Path]:
@@ -258,6 +274,19 @@ def _sidecars_for(path: Path) -> list[Path]:
     return out
 
 
+def _drive_sidecars_for(path: Path) -> list[Path]:
+    """Existing, deletable Drive sidecars paired with a session database.
+
+    The persistent ``.drives.migrate-lock`` is deliberately excluded; deleting
+    it can let two processes lock different inodes.
+    """
+    return [
+        candidate
+        for suffix in (".drives", ".drives-wal", ".drives-shm")
+        if (candidate := path.with_name(path.name + suffix)).exists()
+    ]
+
+
 def delete_session_files(session_name: str) -> list[Path]:
     """Delete every on-disk file belonging to ``session_name``.
 
@@ -282,28 +311,31 @@ def delete_session_files(session_name: str) -> list[Path]:
     if not targets:
         return []
 
-    # Each main file may have ``-wal`` + ``-shm`` sidecars.  Delete
-    # them too — orphan sidecars don't show up as phantom list rows
-    # (the listing globs ``*.kohakutr*``, not ``-wal``) but they
-    # waste disk and would confuse a re-create of a session with the
-    # same name.  Sidecars first so the main file's lock can release
-    # cleanly.
-    for path in targets:
-        for sidecar in _sidecars_for(path):
-            try:
-                _unlink_with_retry(sidecar)
-            except OSError as e:
-                logger.warning(
-                    "Failed to remove SQLite sidecar",
-                    sidecar=str(sidecar),
-                    error=str(e),
-                )
+    # Acquire every target's Drive migration lock before inspecting any sidecar
+    # or removing a parent. This closes the check/delete/rename race: a migrator
+    # cannot publish a newly built sidecar after deletion. Acquisition is bounded
+    # by the migration timeout and therefore fails before deleting anything when
+    # a live migration remains busy.
+    # Local import avoids making the low-level persistence module initialize the
+    # terrarium package during the application's existing import cycle.
+    from kohakuterrarium.terrarium.drive.store_migration import drive_migration_guard
 
-    for path in targets:
-        _unlink_with_retry(path)
+    with ExitStack() as guards:
+        for path in sorted(targets, key=str):
+            lock = acquire_writer_lock(str(path))
+            guards.callback(release_writer_lock, lock)
+        for path in sorted(targets, key=str):
+            guards.enter_context(drive_migration_guard(path))
+
+        family = []
+        for path in targets:
+            family.extend([path, *_sidecars_for(path), *_drive_sidecars_for(path)])
+            family.extend(path.parent.glob(f"{path.name}.drives.split-intent.json*"))
+        detached = detach_file_family(family)
+        deleted = remove_detached_family(detached, _unlink_with_retry)
 
     _purge_index_entries(targets)
-    return targets
+    return deleted
 
 
 def _purge_index_entries(deleted_paths: list[Path]) -> None:

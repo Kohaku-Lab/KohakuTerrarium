@@ -8,6 +8,7 @@ Kept out of ``session/store.py`` so the store module stays under the
 """
 
 import shutil
+import sqlite3
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -266,6 +267,32 @@ def _child_session_id(parent_session_id: str) -> str:
     return f"{parent_session_id}-fork-{short}"
 
 
+def _purge_drive_tables(target_path: str) -> None:
+    """Drop any ``drive_*`` tables from a forked session file (design §6.8).
+
+    A conversation fork must carry ZERO Drives: two branches mutating one
+    commitment is the §6.8 bug. The Drive runtime keeps its rows in sidecar
+    ``drive_*`` tables opened by Terrarium (see ``terrarium.drive.store``), which
+    this logical KVault row copy never duplicates — so a forked file normally
+    has none. This purge makes the invariant explicit and robust to any future
+    physical-copy fork, using raw SQL so ``session`` stays free of any Drive
+    import (the dependency only ever points terrarium -> session)."""
+    conn = sqlite3.connect(target_path)
+    try:
+        conn.execute("PRAGMA busy_timeout = 5000")
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'drive%'"
+        ).fetchall()
+        for (name,) in rows:
+            conn.execute(f'DROP TABLE IF EXISTS "{name}"')
+        if rows:
+            conn.commit()
+    except sqlite3.Error as exc:  # pragma: no cover - defensive
+        logger.warning("Fork drive-table purge failed", error=str(exc))
+    finally:
+        conn.close()
+
+
 def perform_fork(
     source: SessionStoreLike,
     target_path: str,
@@ -452,6 +479,10 @@ def perform_fork(
         raise
 
     _copy_artifacts(Path(source.path), target)
+
+    # A conversation fork carries ZERO Drives by default (design §6.8): purge
+    # any sidecar ``drive_*`` tables so two branches can't mutate one Drive.
+    _purge_drive_tables(str(target))
 
     # Record the child in the parent's meta so tree walks can find it.
     try:

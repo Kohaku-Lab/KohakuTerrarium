@@ -12,8 +12,13 @@ running session stays viewable. The OS frees the lock when the holder
 exits or crashes, so a killed process never wedges the next opener.
 """
 
+from collections.abc import Callable, Iterable
+
 from kohakuterrarium.errors import SessionLockedError
 from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
+from kohakuterrarium.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def acquire_writer_lock(path: str) -> FileLock:
@@ -42,17 +47,31 @@ def release_writer_lock(lock: "FileLock | None") -> None:
         lock.release()
 
 
-def close_tables(tables, fts, lock: "FileLock | None") -> None:
+def close_tables(
+    tables,
+    fts,
+    lock: "FileLock | None",
+    companion_closers: Iterable[Callable[[], None]] = (),
+) -> None:
     """Close every KVault table, drop native handles, release the lock.
 
-    The lock release runs in ``finally`` so a failing ``table.close()``
-    can never strand the writer lock. Dropping the native ``_KVault`` /
-    ``_vault`` handles is required on Windows: ``KVault.close()`` leaves
-    the SQLite handle open until GC (and ``TextVault`` has no ``close()``
-    at all), which keeps the ``.kohakutr`` locked so a later delete /
-    rename fails with WinError 32.
+    ``companion_closers`` are zero-arg callables registered by sidecar
+    resources that share the store's file (e.g. the Drive runtime's own
+    ``sqlite3`` connection); they run FIRST, in LIFO order (last registered
+    closes first), so their native handles drop too — a failing one logged
+    rather than fatal. The lock release runs in ``finally`` so a failing
+    ``table.close()`` / closer can never strand the writer lock. Dropping the
+    native ``_KVault`` / ``_vault`` handles is required on Windows:
+    ``KVault.close()`` leaves the SQLite handle open until GC (and ``TextVault``
+    has no ``close()`` at all), which keeps the ``.kohakutr`` locked so a later
+    delete / rename fails with WinError 32.
     """
     try:
+        for closer in reversed(list(companion_closers)):
+            try:
+                closer()
+            except Exception:
+                logger.warning("Companion closer failed at close", exc_info=True)
         for table in tables:
             table.close()
         for table in tables:
