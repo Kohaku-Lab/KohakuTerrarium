@@ -835,3 +835,207 @@ class TestSyncPluginMethods:
         mgr = PluginManager()
         mgr.register(_CallbackPlugin("cb"))
         assert await mgr.should_proceed("on_compact_start") is True
+
+
+class _UserCommandPlugin(BasePlugin):
+    def __init__(self, name, cmd_name, cmd=None):
+        super().__init__()
+        self.name = name
+        self._cmd_name = cmd_name
+        self._cmd = cmd if cmd is not None else object()
+
+    def contribute_user_commands(self):
+        return {self._cmd_name: self._cmd}
+
+
+class TestCollectUserCommands:
+    def test_collects_active_plugin_commands_with_plugin_provenance(self):
+        mgr = PluginManager()
+        cmd = object()
+        mgr.register(_UserCommandPlugin("goal", "goal", cmd))
+        contribs = mgr.collect_user_commands()
+        assert len(contribs) == 1
+        c = contribs[0]
+        assert c.name == "goal"
+        assert c.command is cmd
+        assert c.provenance.source == "plugin"
+        assert c.provenance.origin == "goal"
+
+    def test_disabled_plugin_contributes_nothing(self):
+        mgr = PluginManager()
+        mgr.register(_UserCommandPlugin("goal", "goal"))
+        mgr.disable("goal")
+        assert mgr.collect_user_commands() == []
+
+    def test_override_attr_propagates_to_contribution(self):
+        class _Cmd:
+            override = True
+
+        mgr = PluginManager()
+        mgr.register(_UserCommandPlugin("g", "goal", _Cmd()))
+        assert mgr.collect_user_commands()[0].override is True
+
+    async def test_raising_contributor_is_skipped(self):
+        class _Bad(BasePlugin):
+            name = "bad"
+
+            def contribute_user_commands(self):
+                raise RuntimeError("boom")
+
+        mgr = PluginManager()
+        mgr.register(_Bad())
+        mgr.register(_UserCommandPlugin("ok", "ok"))
+        contribs = mgr.collect_user_commands()
+        assert [c.name for c in contribs] == ["ok"]
+
+    def test_unregister_removes_plugin_and_clears_toggle_state(self):
+        mgr = PluginManager()
+        mgr.register(_UserCommandPlugin("goal", "goal"))
+        mgr.disable("goal")
+        assert mgr.unregister("goal") is True
+        assert mgr.get_plugin("goal") is None
+        assert "goal" not in mgr._disabled
+        # No such name → returns False.
+        assert mgr.unregister("nope") is False
+
+    def test_unregister_fires_host_refresh(self):
+        calls = []
+
+        class _Host:
+            def refresh_user_commands(self):
+                calls.append(True)
+
+        mgr = PluginManager()
+        mgr.register(_UserCommandPlugin("goal", "goal"))
+        mgr._load_context = PluginContext(_host_agent=_Host())
+        assert mgr.unregister("goal") is True
+        assert calls == [True]
+
+    def test_notify_command_change_calls_host_refresh_on_toggle(self):
+        # enable/disable fire the host Agent's refresh_user_commands only once
+        # a load context with a host agent exists (i.e. at runtime, not boot).
+        calls = []
+
+        class _Host:
+            def refresh_user_commands(self):
+                calls.append(True)
+
+        mgr = PluginManager()
+        mgr.register(_UserCommandPlugin("goal", "goal"))
+        # No load context yet: a disable does not reach the host.
+        mgr.disable("goal")
+        assert calls == []
+        # Wire a runtime load context, then a re-enable refreshes the host.
+        mgr._load_context = PluginContext(_host_agent=_Host())
+        mgr.enable("goal")
+        assert calls == [True]
+
+
+class _RefreshHost:
+    """Records prompt + command refreshes; optionally raises on command
+    refresh to simulate an aggregation collision (R1-23)."""
+
+    def __init__(self, *, raise_on_commands=False):
+        self.calls: list[str] = []
+        self._raise = raise_on_commands
+
+    def refresh_user_commands(self):
+        self.calls.append("commands")
+        if self._raise:
+            from kohakuterrarium.modules.user_command.aggregate import (
+                UserCommandCollisionError,
+            )
+
+            raise UserCommandCollisionError("simulated collision")
+
+    def refresh_system_prompt(self):
+        self.calls.append("prompt")
+
+
+class _StatefulRefreshHost:
+    """Host whose command registry is rebuilt from the live manager on every
+    refresh, so a STALE registry (out of sync with plugin membership) is
+    observable; its system-prompt refresh can be made to fail on demand (R1-23).
+    """
+
+    def __init__(self, *, fail_prompt=False):
+        self._manager = None
+        self._fail_prompt = fail_prompt
+        self.commands: set[str] = set()
+        self.prompt_refreshes = 0
+
+    def bind(self, manager):
+        self._manager = manager
+
+    def refresh_user_commands(self):
+        self.commands = {c.name for c in self._manager.collect_user_commands()}
+
+    def refresh_system_prompt(self):
+        self.prompt_refreshes += 1
+        if self._fail_prompt:
+            raise RuntimeError("prompt build failed")
+
+
+class TestAtomicToggleRefresh:
+    def test_toggle_refreshes_commands_and_prompt_together(self):
+        # R1-23: enable/disable must refresh BOTH surfaces, not commands only.
+        host = _RefreshHost()
+        mgr = PluginManager()
+        mgr.register(_UserCommandPlugin("goal", "goal"))
+        mgr._load_context = PluginContext(_host_agent=host)
+        mgr.disable("goal")
+        assert host.calls == ["commands", "prompt"]
+        host.calls.clear()
+        mgr.enable("goal")
+        assert host.calls == ["commands", "prompt"]
+
+    def test_enable_collision_rolls_back_state(self):
+        # R1-23: a collision on enable leaves the plugin disabled + unqueued and
+        # propagates the typed error rather than swallowing it.
+        from kohakuterrarium.modules.user_command.aggregate import (
+            UserCommandCollisionError,
+        )
+
+        host = _RefreshHost(raise_on_commands=True)
+        mgr = PluginManager()
+        mgr.register(_UserCommandPlugin("goal", "goal"))
+        mgr.disable("goal")  # host not wired yet → no refresh
+        mgr._load_context = PluginContext(_host_agent=host)
+        with pytest.raises(UserCommandCollisionError):
+            mgr.enable("goal")
+        assert mgr.is_enabled("goal") is False
+        assert "goal" not in mgr._needs_load
+
+    def test_disable_collision_rolls_back_state(self):
+        from kohakuterrarium.modules.user_command.aggregate import (
+            UserCommandCollisionError,
+        )
+
+        host = _RefreshHost(raise_on_commands=True)
+        mgr = PluginManager()
+        mgr.register(_UserCommandPlugin("goal", "goal"))
+        mgr._load_context = PluginContext(_host_agent=host)
+        with pytest.raises(UserCommandCollisionError):
+            mgr.disable("goal")
+        assert mgr.is_enabled("goal") is True
+
+    def test_prompt_refresh_failure_leaves_command_registry_consistent(self):
+        # R1-23: the toggle refreshes commands BEFORE the prompt. If the prompt
+        # refresh fails AFTER the command registry was rebuilt for the enabled
+        # plugin, the rollback must restore the plugin state AND rebuild the
+        # command registry — otherwise the registry keeps the rejected plugin's
+        # command while the plugin itself is disabled again (stale inventory).
+        host = _StatefulRefreshHost(fail_prompt=True)
+        mgr = PluginManager()
+        mgr.register(_UserCommandPlugin("goal", "goal"))
+        mgr.disable("goal")  # host not wired yet → no refresh
+        host.bind(mgr)
+        mgr._load_context = PluginContext(_host_agent=host)
+        with pytest.raises(RuntimeError, match="prompt build failed"):
+            mgr.enable("goal")
+        # State rolled back...
+        assert mgr.is_enabled("goal") is False
+        assert "goal" not in mgr._needs_load
+        # ...and the command registry is NOT stale: it reflects the disabled
+        # plugin (no "goal" command), even though the prompt refresh kept failing.
+        assert host.commands == set()

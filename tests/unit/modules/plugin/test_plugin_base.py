@@ -373,6 +373,12 @@ class TestBasePluginDefaultHooks:
         assert plugin.contribute_commands() == {}
         assert plugin.contribute_termination_check() is None
 
+    def test_contribute_user_commands_default_empty(self):
+        # Distinct from contribute_commands (controller ##name## commands):
+        # the default user-command contribution is an empty mapping so a
+        # plain plugin adds no slash commands.
+        assert BasePlugin().contribute_user_commands() == {}
+
 
 class TestPluginBlockError:
     def test_is_an_exception(self):

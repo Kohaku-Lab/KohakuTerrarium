@@ -1,17 +1,14 @@
 """Plugin manager — pre/post hook wrapping and callback dispatch.
 
-Hooks use ``wrap_method()`` to decorate a real method at init time.
-The wrapper runs all pre_* plugins (by priority), calls the original,
-then runs all post_* plugins. Linear, not recursive.
-
-Callbacks use ``notify()`` for fire-and-forget notifications.
-
-When no plugins are registered, ``wrap_method()`` returns the original
-function unchanged — zero overhead.
+Hooks use ``wrap_method()`` to decorate a real method at init time: it runs all
+pre_* plugins (by priority), calls the original, then all post_* plugins —
+linear, not recursive. Callbacks use ``notify()`` for fire-and-forget
+notifications. With no plugins registered, ``wrap_method()`` returns the original
+unchanged (zero overhead). User-command collection + runtime refresh live in the
+:class:`~kohakuterrarium.modules.plugin.manager_commands.PluginCommandRefreshMixin`.
 """
 
 import functools
-import inspect
 import time
 from typing import Any, Callable
 
@@ -19,6 +16,13 @@ from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
     PluginBlockError,
     PluginContext,
+)
+from kohakuterrarium.modules.plugin.dispatch import (
+    call_method as _call_method,
+    has_override as _has_override,
+)
+from kohakuterrarium.modules.plugin.manager_commands import (
+    PluginCommandRefreshMixin,
 )
 from kohakuterrarium.utils.logging import get_logger
 
@@ -47,7 +51,7 @@ def _plugin_applies(plugin: BasePlugin, context: PluginContext | None) -> bool:
         return True
 
 
-class PluginManager:
+class PluginManager(PluginCommandRefreshMixin):
     """Manages plugin lifecycle, hook wrapping, and callback dispatch."""
 
     def __init__(self) -> None:
@@ -66,10 +70,9 @@ class PluginManager:
     ) -> None:
         """Attach a ``plugin_hook_timing`` observer.
 
-        Signature: ``cb(hook_name, plugin_name, duration_ms, blocked)``.
-        Called fire-and-forget after every plugin hook / callback /
-        vetoable-callback invocation. ``blocked`` is True for a
-        ``PluginBlockError`` raised by a pre-hook.
+        Signature ``cb(hook_name, plugin_name, duration_ms, blocked)``; called
+        fire-and-forget after every plugin hook / callback / vetoable-callback.
+        ``blocked`` is True for a ``PluginBlockError`` raised by a pre-hook.
         """
         self._on_hook_timing = cb
 
@@ -108,10 +111,23 @@ class PluginManager:
     # ── Enable / Disable ──
 
     def enable(self, name: str) -> bool:
-        """Enable a plugin. Returns True if found and was disabled."""
+        """Enable a plugin. Returns True if found and was disabled.
+
+        The state flip + inventory/prompt refresh is atomic (R1-23): if the
+        refresh raises (a command collision OR a failing prompt rebuild), the flip
+        is rolled back AND both host inventories are rebuilt to the restored
+        membership, so plugin state, commands, and prompt stay consistent.
+        """
         if name in self._disabled:
             self._disabled.discard(name)
             self._needs_load.add(name)
+            try:
+                self._refresh_host_inventories()
+            except Exception:
+                self._disabled.add(name)
+                self._needs_load.discard(name)
+                self._restore_host_inventories()
+                raise
             logger.info("Plugin enabled", plugin_name=name)
             return True
         return any(getattr(p, "name", "") == name for p in self._plugins)
@@ -120,6 +136,12 @@ class PluginManager:
         for p in self._plugins:
             if getattr(p, "name", "") == name:
                 self._disabled.add(name)
+                try:
+                    self._refresh_host_inventories()
+                except Exception:
+                    self._disabled.discard(name)
+                    self._restore_host_inventories()
+                    raise
                 logger.info("Plugin disabled", plugin_name=name)
                 return True
         return False
@@ -386,12 +408,9 @@ class PluginManager:
     ) -> Callable:
         """Wrap a method with pre/post hooks from all plugins.
 
-        Creates a single wrapper that:
-        1. Runs pre_* on all active plugins (can transform first arg)
-        2. Calls the original function
-        3. Runs post_* on all active plugins (can transform result)
-
-        If no plugins override the hooks, returns original unchanged.
+        Creates one wrapper that runs pre_* on all active plugins (can transform
+        the first arg), calls the original, then runs post_* (can transform the
+        result). Returns the original unchanged if no plugin overrides the hooks.
 
         Args:
             pre_hook: Method name for pre-processing (e.g. "pre_llm_call")
@@ -579,22 +598,3 @@ class PluginManager:
             )
             return False
         return True
-
-
-def _has_override(plugin: BasePlugin, method_name: str) -> bool:
-    """Check if a plugin overrides a method (not the default BasePlugin no-op)."""
-    method = getattr(type(plugin), method_name, None)
-    base_method = getattr(BasePlugin, method_name, None)
-    return method is not None and method is not base_method
-
-
-async def _call_method(
-    plugin: BasePlugin, method_name: str, *args: Any, **kwargs: Any
-) -> Any:
-    """Call a plugin method, handling both sync and async."""
-    method = getattr(plugin, method_name, None)
-    if method is None:
-        return None
-    if inspect.iscoroutinefunction(method):
-        return await method(*args, **kwargs)
-    return method(*args, **kwargs)

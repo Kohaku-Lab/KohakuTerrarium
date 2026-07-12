@@ -137,6 +137,22 @@ class TestInitPluginsBuiltinCatalog:
         assert "catalog_fake" in names
         assert mgr.is_enabled("catalog_fake") is False
 
+    def test_builtin_goal_registered_disabled_from_real_catalog(self, monkeypatch):
+        """The built-in GoalPlugin is discovered from the real catalog and
+        registered available-but-disabled, identically to the other built-ins."""
+        from kohakuterrarium.builtins.plugin_catalog import (
+            list_catalog_plugins,
+            lookup_plugin,
+        )
+
+        monkeypatch.setattr(plug_mod, "list_catalog_plugins", list_catalog_plugins)
+        monkeypatch.setattr(plug_mod, "lookup_plugin", lookup_plugin)
+        mgr = init_plugins([], loader=None)
+        names = [getattr(p, "name", "") for p in mgr._plugins]
+        for builtin in ("goal", "budget", "permgate", "sandbox", "compact.auto"):
+            assert builtin in names, builtin
+            assert mgr.is_enabled(builtin) is False, builtin
+
 
 class TestPackageDiscovery:
     def test_no_packages_no_op(self, monkeypatch):

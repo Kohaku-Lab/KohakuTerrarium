@@ -19,6 +19,7 @@ from kohakuterrarium.builtins.user_commands.branch import BranchCommand
 from kohakuterrarium.builtins.user_commands.channels import ChannelsCommand
 from kohakuterrarium.builtins.user_commands.clear import ClearCommand
 from kohakuterrarium.builtins.user_commands.compact import CompactCommand
+from kohakuterrarium.builtins.user_commands.drives import DrivesCommand
 from kohakuterrarium.builtins.user_commands.edit import EditCommand
 from kohakuterrarium.builtins.user_commands.env import EnvCommand
 from kohakuterrarium.builtins.user_commands.exit import ExitCommand
@@ -49,6 +50,7 @@ __all__ = [
     "ChannelsCommand",
     "ClearCommand",
     "CompactCommand",
+    "DrivesCommand",
     "EditCommand",
     "EnvCommand",
     "ExitCommand",

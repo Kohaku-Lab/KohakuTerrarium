@@ -444,6 +444,22 @@ class BasePlugin:
         """
         return {}
 
+    def contribute_user_commands(self) -> dict[str, Any]:
+        """Return a mapping of ``/name`` → ``BaseUserCommand`` instance.
+
+        Distinct from :meth:`contribute_commands`, which contributes
+        model-facing ``##name##`` controller commands. This hook
+        contributes human-facing slash commands into the Agent's user-
+        command registry; the aggregation runs the collision policy and
+        the CLI / TUI / web inventories refresh whenever the plugin is
+        enabled, disabled, added, or removed.
+
+        Each returned command may set a class attribute ``override =
+        True`` to explicitly win a name collision with a built-in or
+        package command; otherwise a duplicate name is a hard error.
+        """
+        return {}
+
     # ── Termination voting ──
 
     def contribute_termination_check(

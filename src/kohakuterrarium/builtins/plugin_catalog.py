@@ -15,6 +15,10 @@ _PLUGINS: dict[str, dict[str, str]] = {
         "module": "kohakuterrarium.builtins.plugins.compact.auto",
         "class": "AutoCompactPlugin",
     },
+    "goal": {
+        "module": "kohakuterrarium.builtins.plugins.goal.plugin",
+        "class": "GoalPlugin",
+    },
     "permgate": {
         "module": "kohakuterrarium.builtins.plugins.permgate.plugin",
         "class": "PermGatePlugin",
