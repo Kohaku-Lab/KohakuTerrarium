@@ -18,22 +18,16 @@ from typing import Any
 from uuid import uuid4
 
 from kohakuterrarium.terrarium.drive.errors import DriveSchemaVersionError
+from kohakuterrarium.utils.drive_migration_lock import (
+    _MIGRATE_LOCK_TIMEOUT_S,
+    _MIGRATE_POLL_S,
+)
 from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 DRIVE_SCHEMA_VERSION = 1
-
-# Bounds for the inter-process migration lock (R1-14). The lock is an OS-level
-# exclusive lock (fcntl.flock / msvcrt.locking) held via an open handle for the
-# whole migration, so the OS frees it automatically on holder death — there is no
-# unlink-based takeover for a replacement/unstamped lock file to race. A contending
-# opener polls for the handle; a lock still held past the timeout is a live-but-stuck
-# migrator (a dead holder's lock is already freed), so the waiter fails loudly
-# rather than wait forever.
-_MIGRATE_LOCK_TIMEOUT_S = 30.0
-_MIGRATE_POLL_S = 0.02
 
 # Additive sidecar tables; ``IF NOT EXISTS`` so an old session file with no
 # Drive tables opens cleanly and gains them on first Drive use (no session
@@ -95,42 +89,6 @@ def drive_sidecar_family(session_path: str | Path) -> list[str]:
     """
     base = str(session_path)
     return [base + suffix for suffix in _DRIVE_SIDECAR_SUFFIXES]
-
-
-def drive_migration_lock_path(session_path: str | Path) -> Path:
-    """Return the persistent migration-lock path for a session file."""
-    return Path(drive_sidecar_path(session_path) + ".migrate-lock")
-
-
-@contextmanager
-def drive_migration_guard(session_path: str | Path, *, timeout_s: float | None = None):
-    """Hold the same lock used by Drive migration, with bounded waiting.
-
-    Session deletion uses this before inspecting or removing either half of the
-    session/Drive pair. The lock file is intentionally persistent. On POSIX the
-    advisory lock cannot stop unrelated code from explicitly unlinking its open
-    pathname, so all official cleanup paths must exclude it.
-    """
-    lock = FileLock(drive_migration_lock_path(session_path))
-    deadline = time.monotonic() + (
-        _MIGRATE_LOCK_TIMEOUT_S if timeout_s is None else max(timeout_s, 0.0)
-    )
-    while True:
-        try:
-            lock.acquire()
-            break
-        except FileLockBusy:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError(
-                    f"Drive migration lock {lock.path.name!r} is held past the "
-                    "deadline; refusing to modify the session"
-                )
-            time.sleep(min(_MIGRATE_POLL_S, remaining))
-    try:
-        yield
-    finally:
-        lock.release()
 
 
 # Drive data tables copied by the one-way legacy migration (drive_meta holds

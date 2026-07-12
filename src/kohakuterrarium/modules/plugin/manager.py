@@ -4,7 +4,7 @@ Hooks use ``wrap_method()`` to decorate a real method at init time: it runs all
 pre_* plugins (by priority), calls the original, then all post_* plugins —
 linear, not recursive. Callbacks use ``notify()`` for fire-and-forget
 notifications. With no plugins registered, ``wrap_method()`` returns the original
-unchanged (zero overhead). User-command collection + runtime refresh live in the
+unchanged. User-command collection + runtime refresh live in the
 :class:`~kohakuterrarium.modules.plugin.manager_commands.PluginCommandRefreshMixin`.
 """
 
@@ -97,11 +97,8 @@ class PluginManager(PluginCommandRefreshMixin):
     def __len__(self) -> int:
         return len(self._plugins)
 
-    # ── Registration ──
-
     def register(self, plugin: BasePlugin) -> None:
-        name = getattr(plugin, "name", "")
-        if name:
+        if name := getattr(plugin, "name", ""):
             self.unregister(name)
         self._plugins.append(plugin)
         self._plugins.sort(key=lambda p: getattr(p, "priority", 50))

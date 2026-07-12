@@ -813,7 +813,9 @@ class TestAbandonedMigrationTempSweep:
         path = tmp_path / "legacy.kohakutr"
         sidecar = str(path) + ".drives"
         attempt = sidecar + ".migrating." + ("a" * 32)
-        orphans = [Path(attempt + suffix) for suffix in ("", "-journal", "-wal", "-shm")]
+        orphans = [
+            Path(attempt + suffix) for suffix in ("", "-journal", "-wal", "-shm")
+        ]
         for orphan in orphans:
             orphan.write_bytes(b"killed process")
 

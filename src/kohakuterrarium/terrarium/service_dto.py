@@ -8,9 +8,21 @@ Remote / MultiNode services all use at their boundary. The live
 """
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
-from kohakuterrarium.terrarium.creature_host import Creature
+
+class CreatureLike(Protocol):
+    """Structural subset required to build a serializable creature snapshot."""
+
+    creature_id: str
+    name: str
+    graph_id: str
+    is_running: bool
+    is_privileged: bool
+    parent_creature_id: str | None
+    listen_channels: list[str]
+    send_channels: list[str]
+    agent: Any
 
 
 @dataclass(frozen=True)
@@ -56,7 +68,7 @@ def _channel_message_to_dict(m: Any) -> dict[str, Any]:
     }
 
 
-def creature_to_info(creature: Creature) -> CreatureInfo:
+def creature_to_info(creature: CreatureLike) -> CreatureInfo:
     """Build a :class:`CreatureInfo` snapshot from a live Creature."""
     agent = getattr(creature, "agent", None)
     llm = getattr(agent, "llm", None) if agent is not None else None

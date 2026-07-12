@@ -34,6 +34,7 @@ from kohakuterrarium.studio.persistence.viewer.paths import (
     pick_canonical_per_session,
     resolve_session_path,
 )
+from kohakuterrarium.utils import drive_migration_lock
 from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import get_logger
 
@@ -316,16 +317,12 @@ def delete_session_files(session_name: str) -> list[Path]:
     # cannot publish a newly built sidecar after deletion. Acquisition is bounded
     # by the migration timeout and therefore fails before deleting anything when
     # a live migration remains busy.
-    # Local import avoids making the low-level persistence module initialize the
-    # terrarium package during the application's existing import cycle.
-    from kohakuterrarium.terrarium.drive.store_migration import drive_migration_guard
-
     with ExitStack() as guards:
         for path in sorted(targets, key=str):
             lock = acquire_writer_lock(str(path))
             guards.callback(release_writer_lock, lock)
         for path in sorted(targets, key=str):
-            guards.enter_context(drive_migration_guard(path))
+            guards.enter_context(drive_migration_lock.drive_migration_guard(path))
 
         family = []
         for path in targets:

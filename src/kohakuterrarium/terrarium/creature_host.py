@@ -17,9 +17,12 @@ from typing import Any
 
 from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.builtins.outputs.none import NoneOutput
-from kohakuterrarium.builtins.plugins.goal.plugin import GoalPlugin
 from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.core.config import AgentConfig, build_agent_config
+from kohakuterrarium.core.config import (
+    AgentConfig,
+    build_agent_config,
+    load_agent_config,
+)
 from kohakuterrarium.core.environment import Environment
 from kohakuterrarium.core.events import TriggerEvent
 from kohakuterrarium.core.turn import AgentEventStream, TurnResult
@@ -545,6 +548,15 @@ class Creature:
 CreatureBuildInput = AgentConfig | CreatureConfig | str | Path
 
 
+def _with_terrarium_plugin_defaults(config: AgentConfig) -> AgentConfig:
+    """Enable Terrarium-wide plugin defaults without importing implementations."""
+    defaults = list(config.default_plugins)
+    if "goal" not in defaults:
+        defaults.append("goal")
+    config.default_plugins = defaults
+    return config
+
+
 def apply_creature_name(creature: "Creature", name: str) -> None:
     """Push a display-name change onto every nested object that caches it.
 
@@ -636,13 +648,10 @@ def build_creature(
         raise ValueError(f"io= must be 'config', 'none', or 'headless' — got {io!r}")
     _io_override = NoneInput() if io in ("none", "headless") else None
     _out_override = NoneOutput() if io == "headless" else None
-    # Every Terrarium-hosted creature gets the Goal adapter by default. Agent's
-    # plugin loader deduplicates by name, so an explicit Goal config is replaced
-    # by this enabled instance rather than registered twice.
-    terrarium_plugins = [*(plugins or []), GoalPlugin()]
     if isinstance(config, (str, Path)):
-        agent = Agent.from_path(
-            str(config),
+        agent_config = _with_terrarium_plugin_defaults(load_agent_config(config))
+        agent = Agent(
+            agent_config,
             input_module=_io_override,
             output_module=_out_override,
             session=(
@@ -655,7 +664,7 @@ def build_creature(
             pwd=pwd,
             strict=strict,
             tools=tools,
-            plugins=terrarium_plugins,
+            plugins=plugins,
         )
         cid = creature_id or _safe_creature_id(agent.config.name)
         return Creature(
@@ -667,6 +676,7 @@ def build_creature(
         )
 
     if isinstance(config, AgentConfig):
+        config = _with_terrarium_plugin_defaults(config)
         session = (
             environment.get_session(creature_id or config.name) if environment else None
         )
@@ -680,7 +690,7 @@ def build_creature(
             pwd=pwd,
             strict=strict,
             tools=tools,
-            plugins=terrarium_plugins,
+            plugins=plugins,
         )
         cid = creature_id or _safe_creature_id(config.name)
         return Creature(
@@ -692,7 +702,9 @@ def build_creature(
         )
 
     if isinstance(config, CreatureConfig):
-        agent_config = build_agent_config(config.config_data, config.base_dir)
+        agent_config = _with_terrarium_plugin_defaults(
+            build_agent_config(config.config_data, config.base_dir)
+        )
         # CreatureConfig (in-recipe / hot-plug) is always engine-managed
         # and channel-driven — its input is suppressed unconditionally;
         # ``io="headless"`` additionally silences the default output.
@@ -706,7 +718,7 @@ def build_creature(
             pwd=pwd,
             strict=strict,
             tools=tools,
-            plugins=terrarium_plugins,
+            plugins=plugins,
         )
         cid = creature_id or _safe_creature_id(config.name)
         return Creature(

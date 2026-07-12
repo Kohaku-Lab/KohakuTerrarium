@@ -319,6 +319,10 @@ class TestDeleteSessionFiles:
         monkeypatch.setattr(store_mod, "_SESSION_DIR", tmp_path)
         monkeypatch.setattr(migration, "_MIGRATE_LOCK_TIMEOUT_S", 0.05)
         monkeypatch.setattr(migration, "_MIGRATE_POLL_S", 0.005)
+        monkeypatch.setattr(
+            store_mod.drive_migration_lock, "_MIGRATE_LOCK_TIMEOUT_S", 0.05
+        )
+        monkeypatch.setattr(store_mod.drive_migration_lock, "_MIGRATE_POLL_S", 0.005)
         holder = FileLock(str(sidecar) + ".migrate-lock")
         holder.acquire()
         try:

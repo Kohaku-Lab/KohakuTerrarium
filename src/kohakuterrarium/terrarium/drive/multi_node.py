@@ -31,7 +31,10 @@ from kohakuterrarium.terrarium.drive.errors import (
     DriveNotFoundError,
     DriveValidationError,
 )
-from kohakuterrarium.terrarium.drive.fencing import FencingRegistry, monotonic_token_counter
+from kohakuterrarium.terrarium.drive.fencing import (
+    FencingRegistry,
+    monotonic_token_counter,
+)
 from kohakuterrarium.terrarium.drive.models import SYSTEM_ACTOR, ActorRef
 from kohakuterrarium.utils.logging import get_logger
 
@@ -128,9 +131,7 @@ class VerifiedHome:
     generation: Any
 
 
-# ---------------------------------------------------------------------------
 # Route cache
-# ---------------------------------------------------------------------------
 
 
 class DriveRouteCache:
@@ -236,9 +237,7 @@ class DriveRouteCache:
             self.invalidate("proposal", pid)
 
 
-# ---------------------------------------------------------------------------
 # Resolution + routing (operate on a MultiNodeTerrariumService)
-# ---------------------------------------------------------------------------
 
 
 def _topology_generation(service: Any) -> int:
@@ -301,6 +300,7 @@ def _verdict(
     cache.clear_quarantine(kind, object_id)
     cache.bind_home(kind, object_id, home_node, generation=generation)
     return VerifiedHome(home_node, generation)
+
 
 async def resolve_unique_home(
     cache: DriveRouteCache,
