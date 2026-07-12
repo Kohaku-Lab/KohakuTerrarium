@@ -51,7 +51,9 @@ class _FakeService:
             raise self._switch_raises
         return self._switch_returns
 
-    async def execute_command(self, cid, command, args):
+    async def execute_command(
+        self, cid, command, args, *, principal="user:local", is_operator=False
+    ):
         if self._execute_raises is not None:
             raise self._execute_raises
         return self._execute_returns
