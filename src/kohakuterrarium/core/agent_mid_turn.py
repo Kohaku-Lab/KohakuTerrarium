@@ -94,6 +94,16 @@ class AgentMidTurnMixin:
     Agent. See module docstring for the full state surface.
     """
 
+    @property
+    def has_pending_mid_turn_inputs(self) -> bool:
+        """Whether any event is buffered awaiting the mid-turn drain.
+
+        Public read-only probe over the private
+        ``_pending_mid_turn_inputs`` buffer. The Terrarium Drive fairness
+        check reads this rather than the private field so a rename breaks
+        loudly here instead of silently degrading its probe."""
+        return bool(self._pending_mid_turn_inputs)
+
     async def _drain_mid_turn_pending_inputs(self, controller: Controller) -> int:
         """Drain ``Agent._pending_mid_turn_inputs`` into the CURRENT
         turn. Called from ``_collect_and_push_feedback`` AFTER tool

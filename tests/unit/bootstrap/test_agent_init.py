@@ -11,8 +11,11 @@ documented contract of that method.
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 
 from kohakuterrarium.bootstrap.agent_init import AgentInitMixin
+from kohakuterrarium.modules.plugin.base import BasePlugin
+from kohakuterrarium.modules.plugin.manager import PluginManager
 from kohakuterrarium.builtins.tool_catalog import get_builtin_tool
 from kohakuterrarium.core.config_types import AgentConfig
 from kohakuterrarium.core.executor import Executor
@@ -747,3 +750,131 @@ class TestInitUserCommands:
         # An input module lacking set_user_commands must not crash.
         fake = _FakeAgent(input=SimpleNamespace(), session=None)
         AgentInitMixin._init_user_commands(fake)
+
+
+class _RecordingInput:
+    def __init__(self):
+        self.commands = None
+        self.context = None
+        self.calls = 0
+
+    def set_user_commands(self, commands, context):
+        self.commands = commands
+        self.context = context
+        self.calls += 1
+
+
+class _StubUserCommand:
+    def __init__(self, name, override=False):
+        self.name = name
+        self.override = override
+
+
+class _CommandPlugin(BasePlugin):
+    def __init__(self, name, cmd_name, override=False):
+        super().__init__()
+        self.name = name
+        self._cmd = _StubUserCommand(cmd_name, override=override)
+        self._cmd_name = cmd_name
+
+    def contribute_user_commands(self):
+        return {self._cmd_name: self._cmd}
+
+
+class TestUserCommandAggregation:
+    def _agent(self, monkeypatch, plugins=None, extra=None, pkg_entries=()):
+        from kohakuterrarium.bootstrap import agent_init as ai_mod
+
+        monkeypatch.setattr(
+            ai_mod, "iter_package_user_command_entries", lambda: list(pkg_entries)
+        )
+        return _FakeAgent(
+            input=_RecordingInput(),
+            session=None,
+            plugins=plugins,
+            _extra_user_commands=extra or {},
+        )
+
+    def test_aggregation_includes_builtins_and_plugin_command(self, monkeypatch):
+        mgr = PluginManager()
+        mgr.register(_CommandPlugin("goal", "goal"))
+        fake = self._agent(monkeypatch, plugins=mgr)
+        AgentInitMixin._init_user_commands(fake)
+        assert "goal" in fake._user_command_registry
+        assert "clear" in fake._user_command_registry  # a builtin
+        assert fake._user_command_provenance["goal"].source == "plugin"
+        # Wired into the input module.
+        assert fake.input.commands is fake._user_command_registry
+
+    def test_collision_builtin_vs_plugin_is_hard_error(self, monkeypatch):
+        from kohakuterrarium.modules.user_command.aggregate import (
+            UserCommandCollisionError,
+        )
+
+        mgr = PluginManager()
+        mgr.register(_CommandPlugin("dup", "clear"))  # shadows a builtin
+        fake = self._agent(monkeypatch, plugins=mgr)
+        with pytest.raises(UserCommandCollisionError):
+            AgentInitMixin._init_user_commands(fake)
+
+    def test_plugin_override_wins_over_builtin(self, monkeypatch):
+        mgr = PluginManager()
+        mgr.register(_CommandPlugin("dup", "clear", override=True))
+        fake = self._agent(monkeypatch, plugins=mgr)
+        AgentInitMixin._init_user_commands(fake)
+        assert fake._user_command_provenance["clear"].source == "plugin"
+
+    def test_constructor_injected_command_present(self, monkeypatch):
+        injected = {"mycmd": _StubUserCommand("mycmd")}
+        fake = self._agent(monkeypatch, extra=injected)
+        AgentInitMixin._init_user_commands(fake)
+        assert fake._user_command_registry["mycmd"] is injected["mycmd"]
+
+    def test_refresh_reflects_plugin_disable_and_fires_listener(self, monkeypatch):
+        mgr = PluginManager()
+        mgr.register(_CommandPlugin("goal", "goal"))
+        fake = self._agent(monkeypatch, plugins=mgr)
+        AgentInitMixin._init_user_commands(fake)
+        seen = []
+        AgentInitMixin.add_user_command_listener(fake, lambda cmds: seen.append(cmds))
+        assert "goal" in fake._user_command_registry
+        # Disable the plugin and refresh: /goal disappears everywhere.
+        mgr.disable("goal")
+        AgentInitMixin.refresh_user_commands(fake)
+        assert "goal" not in fake._user_command_registry
+        assert "goal" not in fake.input.commands
+        assert seen and "goal" not in seen[-1]
+
+    def test_load_package_command_class_and_skip_bad_module(self, monkeypatch):
+        # One resolvable entry (points at a real builtin command class) plus one
+        # broken entry that must be logged-and-skipped, not fatal.
+        good = (
+            "pkg-a",
+            {
+                "name": "pkgcmd",
+                "module": "kohakuterrarium.builtins.user_commands.clear",
+                "class": "ClearCommand",
+            },
+        )
+        bad = (
+            "pkg-b",
+            {"name": "broken", "module": "no.such.module", "class": "Nope"},
+        )
+        from kohakuterrarium.bootstrap import agent_init as ai_mod
+
+        monkeypatch.setattr(ai_mod, "ensure_package_importable", lambda _n: None)
+        fake = self._agent(monkeypatch, pkg_entries=(good, bad))
+        contribs = AgentInitMixin._load_package_user_command_contributions(fake)
+        names = {c.name for c in contribs}
+        assert "pkgcmd" in names
+        assert "broken" not in names
+        assert next(c for c in contribs if c.name == "pkgcmd").provenance.origin == (
+            "pkg-a"
+        )
+
+    def test_list_user_commands_returns_copy(self, monkeypatch):
+        fake = self._agent(monkeypatch)
+        AgentInitMixin._init_user_commands(fake)
+        snap = AgentInitMixin.list_user_commands(fake)
+        snap["injected_after"] = object()
+        assert "injected_after" not in fake._user_command_registry

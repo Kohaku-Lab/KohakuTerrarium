@@ -524,6 +524,55 @@ class TestResumeIntoEngine:
         finally:
             await t.shutdown()
 
+    # ── Drive reconcile wiring (Phase F, design §6.5) ─────────────
+
+    def test_schedule_drive_reconcile_calls_runtime(self):
+        calls = []
+        engine = SimpleNamespace(
+            _drive_runtime=SimpleNamespace(schedule_reconcile=calls.append)
+        )
+        creature = object()
+        resume_mod._schedule_drive_reconcile(engine, creature)
+        assert calls == [creature]
+
+    def test_schedule_drive_reconcile_noop_when_disabled(self):
+        # A Drive-disabled engine must not raise.
+        resume_mod._schedule_drive_reconcile(
+            SimpleNamespace(_drive_runtime=None), object()
+        )
+
+    async def test_agent_resume_schedules_drive_reconcile(self, monkeypatch, tmp_path):
+        # Resume starts creatures directly (not via add_creature), so it must
+        # itself arm the restoration-barrier-gated Drive reconcile (§6.5).
+        from kohakuterrarium.terrarium.drive.config import (
+            DriveRuntimeConfig,
+            default_registrations,
+        )
+        from kohakuterrarium.terrarium.engine import Terrarium
+
+        monkeypatch.setattr(resume_mod, "detect_session_type", lambda p: "agent")
+        fake_agent = _FakeAgent(name="alice")
+        fake_agent.config = SimpleNamespace(name="alice")
+        fake_store = SimpleNamespace(path=str(tmp_path / "a.kohakutr"))
+        monkeypatch.setattr(
+            resume_mod, "resume_agent", lambda *a, **k: (fake_agent, fake_store)
+        )
+
+        t = Terrarium(
+            drive_config=DriveRuntimeConfig(enabled=True),
+            drive_registrations=default_registrations(),
+        )
+        await t.__aenter__()
+        calls: list = []
+        t._drive_runtime.schedule_reconcile = calls.append
+        t.attach_session = AsyncMock()  # fake_store has no real Drive tables
+        try:
+            await resume_mod.resume_into_engine(t, tmp_path / "a.kohakutr")
+            # Exactly one creature resumed -> one reconcile armed.
+            assert len(calls) == 1
+        finally:
+            await t.shutdown()
+
     async def test_agent_resume_rollback_when_start_fails(self, monkeypatch, tmp_path):
         # Standalone-agent resume: ``add_creature`` inserts the creature
         # into the topology + ``_creatures`` BEFORE awaiting startup. If

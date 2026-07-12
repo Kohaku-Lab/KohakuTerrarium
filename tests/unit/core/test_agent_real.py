@@ -571,6 +571,17 @@ class TestAgentAccessors:
         # model-less ScriptedLLM stub.
         assert out == getattr(agent.llm, "model", "")
 
+    async def test_has_pending_mid_turn_inputs_probe(self, make_agent):
+        # The public read-only probe over ``_pending_mid_turn_inputs`` that
+        # the Terrarium Drive fairness check reads instead of the private
+        # buffer field.
+        agent = make_agent()
+        assert agent.has_pending_mid_turn_inputs is False
+        agent._pending_mid_turn_inputs.append(create_user_input_event("buffered"))
+        assert agent.has_pending_mid_turn_inputs is True
+        agent._pending_mid_turn_inputs.clear()
+        assert agent.has_pending_mid_turn_inputs is False
+
 
 # ── trigger_manager + on_trigger_fired callback ──────────────────
 

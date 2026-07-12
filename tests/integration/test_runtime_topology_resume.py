@@ -12,6 +12,7 @@ After the fix lands: the runtime-added channel + wiring should
 survive resume.
 """
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -19,12 +20,40 @@ import yaml
 
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
+from kohakuterrarium.core import agent_compact as _agent_compact
+from kohakuterrarium.core import agent_model as _agent_model
 from kohakuterrarium.terrarium.config import load_terrarium_config
+from kohakuterrarium.terrarium.drive.config import (
+    DriveRuntimeConfig,
+    default_registrations,
+)
+from kohakuterrarium.terrarium.drive.models import ActorRef
+from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.testing.llm import ScriptedLLM
 
-pytestmark = pytest.mark.timeout(30)
+pytestmark = pytest.mark.timeout(60)
+
+SERVICE = ActorRef("service", "ops")
+
+
+def _drive_kwargs() -> dict:
+    return dict(
+        drive_config=DriveRuntimeConfig(enabled=True),
+        drive_registrations=default_registrations(),
+    )
+
+
+async def _wait_for(predicate, *, timeout: float = 8.0):
+    """Poll ``predicate`` (async) until truthy or timeout — returns the value."""
+    deadline = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < deadline:
+        value = await predicate()
+        if value:
+            return value
+        await asyncio.sleep(0.05)
+    return await predicate()
 
 
 @pytest.fixture
@@ -34,6 +63,55 @@ def patched_llm(monkeypatch):
 
     monkeypatch.setattr(_bootstrap_llm, "create_llm_provider", _fake_create)
     monkeypatch.setattr(_agent_init, "create_llm_provider", _fake_create)
+
+
+@pytest.fixture
+def patched_llm_drive(monkeypatch):
+    # Drive delivery drives several controller turns; give the fake plenty.
+    def _fake_create(config, llm=None):
+        return ScriptedLLM(["ack"] * 50)
+
+    monkeypatch.setattr(_bootstrap_llm, "create_llm_provider", _fake_create)
+    monkeypatch.setattr(_agent_init, "create_llm_provider", _fake_create)
+
+
+@pytest.fixture
+def patched_llm_resume(monkeypatch):
+    # Resume rebuilds the agent by profile name, so the profile-resolution
+    # factories must be seamed too (not just create_llm_provider) — otherwise
+    # a resumed creature's LLM build escapes to a real provider. Mirrors the
+    # e2e ``install_scripted_llm`` five-site patch.
+    def _fake_create(config, llm=None):
+        return ScriptedLLM(["ack"] * 50)
+
+    def _fake_from_profile(name):
+        return ScriptedLLM(["ack"] * 50)
+
+    monkeypatch.setattr(_bootstrap_llm, "create_llm_provider", _fake_create)
+    monkeypatch.setattr(_agent_init, "create_llm_provider", _fake_create)
+    monkeypatch.setattr(
+        _bootstrap_llm, "create_llm_from_profile_name", _fake_from_profile
+    )
+    monkeypatch.setattr(
+        _agent_model, "create_llm_from_profile_name", _fake_from_profile
+    )
+    monkeypatch.setattr(
+        _agent_compact, "create_llm_from_profile_name", _fake_from_profile
+    )
+
+
+async def _has_reason_delivery(manager, drive_id, reasons):
+    for delivery in await manager.list_deliveries(drive_id):
+        if delivery.reason in reasons:
+            return delivery
+    return None
+
+
+async def _has_acked_delivery(manager, drive_id):
+    for delivery in await manager.list_deliveries(drive_id):
+        if delivery.state == "acknowledged":
+            return delivery
+    return None
 
 
 def _write_creature_dir(root: Path, name: str) -> Path:
@@ -191,3 +269,239 @@ class TestRuntimeTopologyResume:
             f"bob wiring lost on SECOND resume; listen_channels = "
             f"{info_bob3.listen_channels!r}"
         )
+
+    async def test_live_drive_redelivers_after_creature_restart(
+        self, patched_llm_drive, tmp_path
+    ):
+        """A live Drive assigned to a real creature redelivers after that
+        creature stops and restarts (§6.1 reconcile), while a runtime-added
+        channel (a topology leftover) keeps working.
+
+        Ephemeral drives keep this fast + deterministic: session-backed drives
+        share the ``.kohakutr`` file with KVault, so a live dispatcher serializes
+        against conversation writes (Phase 0 busy_timeout tradeoff); the durable
+        path is pinned by the unit persistent-merge + resume-reconcile tests."""
+        recipe_path = _write_recipe(tmp_path)
+
+        engine = Terrarium(pwd=str(tmp_path), **_drive_kwargs())
+        async with engine:
+            graph = await engine.apply_recipe(str(recipe_path), pwd=str(tmp_path))
+            gid = graph.graph_id
+            assert engine.drives.durability == "ephemeral"
+
+            service = LocalTerrariumService(engine)
+            await service.add_channel(gid, "manual_chat", "runtime")
+            await service.connect("alice", "bob", channel="manual_chat")
+
+            alice = next(c for c in engine.list_creatures() if c.name == "alice")
+            manager = engine.drives.manager_for(gid)
+            rec = await manager.create_drive(
+                CreateDriveRequest(
+                    kind="generic",
+                    title="watch deploy",
+                    scope_type="graph",
+                    scope_id=gid,
+                    owner=SERVICE,
+                    owner_scope="service",
+                    created_by=SERVICE,
+                    assignee_creature_id=alice.creature_id,
+                    spec={"instruction": "monitor"},
+                ),
+                actor=SERVICE,
+                graph_id=gid,
+                is_privileged=True,
+            )
+            did = rec.drive_id
+            # The activated delivery reaches alice and settles (acknowledged).
+            assert await _wait_for(
+                lambda: _has_acked_delivery(manager, did), timeout=25.0
+            ), "activated Drive delivery never settled"
+
+            # Restart alice (stable creature id): reconcile redelivers (§6.1) —
+            # the prior delivery is settled, so it is not counted as still-live.
+            await engine.stop(alice)
+            await engine.start(alice)
+            assert await _wait_for(
+                lambda: _has_reason_delivery(manager, did, {"resume", "recovery"}),
+                timeout=25.0,
+            ), "Drive did not redeliver after creature restart"
+
+            # The Drive record is intact and the runtime channel (a leftover)
+            # still routes.
+            still = await manager.get_drive(did)
+            assert still is not None and still.title == "watch deploy"
+            chans = {c.name for c in await service.list_channels(gid)}
+            assert "manual_chat" in chans
+
+    async def test_resume_drive_enabled_session_completes(
+        self, patched_llm_resume, tmp_path
+    ):
+        """Resuming a session on a Drive-ENABLED engine with a session-backed
+        (persistent) Drive must COMPLETE, not hang (the 32d/32g journey repro).
+
+        The persisted Drive's repository shares the ``.kohakutr`` with KVault, so
+        a dispatcher/reconcile started during ``adopt_session`` must not stall the
+        resume against the store writes. ``adopt_session`` is bounded here; before
+        the fix it never returns."""
+        recipe = _write_recipe(tmp_path)
+        sess = tmp_path / "sessions"
+
+        engine1 = Terrarium(pwd=str(tmp_path), session_dir=str(sess), **_drive_kwargs())
+        async with engine1:
+            graph = await engine1.apply_recipe(str(recipe), pwd=str(tmp_path))
+            gid = graph.graph_id
+            # session_dir -> the Drive repo is session-backed (persistent).
+            assert engine1.drives.durability == "persistent"
+            alice = next(c for c in engine1.list_creatures() if c.name == "alice")
+            manager = engine1.drives.manager_for(gid)
+            rec = await manager.create_drive(
+                CreateDriveRequest(
+                    kind="generic",
+                    title="watch deploy",
+                    scope_type="graph",
+                    scope_id=gid,
+                    owner=SERVICE,
+                    owner_scope="service",
+                    created_by=SERVICE,
+                    assignee_creature_id=alice.creature_id,
+                    spec={"instruction": "monitor"},
+                ),
+                actor=SERVICE,
+                graph_id=gid,
+                is_privileged=True,
+            )
+            did = rec.drive_id
+            store_path = engine1._session_stores[gid].path
+
+        # Resume into a fresh Drive-enabled engine — MUST complete within bound.
+        engine2 = Terrarium(
+            pwd=str(tmp_path), session_dir=str(tmp_path / "resumed"), **_drive_kwargs()
+        )
+        try:
+            sid = await asyncio.wait_for(
+                engine2.adopt_session(store_path, pwd=str(tmp_path)), timeout=25.0
+            )
+            assert sid, "adopt_session returned no graph id"
+            # The persisted Drive came back on the resumed engine.
+            rmgr = engine2.drives.manager_for(sid)
+            assert await rmgr.get_drive(did) is not None
+        finally:
+            await engine2.shutdown()
+
+    async def test_agent_resume_remaps_assigned_drive_to_reminted_creature(
+        self, patched_llm_resume, tmp_path
+    ):
+        """R1-43: a standalone-agent resume re-mints the creature's runtime id
+        (``_safe_creature_id``), so a persisted assignment naming the OLD id must
+        be remapped to the resumed creature — else reconcile runs for the new id
+        and the saved assignment never redelivers (a silent failure)."""
+        _write_creature_dir(tmp_path, "solo")
+        agent_yaml = str(tmp_path / "creature_solo" / "agent.yaml")
+        store_path = str(tmp_path / "solo.kohakutr")
+
+        engine1 = Terrarium(pwd=str(tmp_path), **_drive_kwargs())
+        async with engine1:
+            solo = await engine1.add_creature(
+                agent_yaml, session=store_path, start=True
+            )
+            gid = solo.graph_id
+            old_id = solo.creature_id
+            assert old_id != "solo"  # standalone add re-mints <name>_<random>
+            rec = await engine1.drives.manager_for(gid).create_drive(
+                CreateDriveRequest(
+                    kind="generic",
+                    title="watch",
+                    scope_type="graph",
+                    scope_id=gid,
+                    owner=SERVICE,
+                    owner_scope="service",
+                    created_by=SERVICE,
+                    assignee_creature_id=old_id,
+                    spec={"instruction": "monitor"},
+                ),
+                actor=SERVICE,
+                graph_id=gid,
+                is_privileged=True,
+            )
+            did = rec.drive_id
+
+        engine2 = Terrarium(
+            pwd=str(tmp_path), session_dir=str(tmp_path / "resumed"), **_drive_kwargs()
+        )
+        try:
+            sid = await asyncio.wait_for(
+                engine2.adopt_session(store_path, pwd=str(tmp_path)), timeout=25.0
+            )
+            rmgr = engine2.drives.manager_for(sid)
+            resumed = engine2.list_creatures()[0]
+            assert resumed.creature_id != old_id  # id was re-minted on resume
+
+            async def _remapped():
+                a = await rmgr.get_assignment(did)
+                if a is not None and a.assignee_creature_id == resumed.creature_id:
+                    return a
+                return None
+
+            assert await _wait_for(
+                _remapped, timeout=25.0
+            ), "assignment was not remapped to the resumed creature (R1-43)"
+        finally:
+            await engine2.shutdown()
+
+    async def test_cross_graph_wire_drains_drive_rows_immediately(
+        self, patched_llm, tmp_path
+    ):
+        """R1-12: a cross-graph merge through ``ensure_same_graph`` (the
+        ``group_wire`` path) must drain pending Drive row movement BEFORE
+        returning, so the survivor lists both graphs' Drives immediately —
+        not only after some later unrelated topology operation."""
+        import kohakuterrarium.terrarium.channels as channels
+
+        _write_creature_dir(tmp_path, "alice")
+        _write_creature_dir(tmp_path, "bob")
+        engine = Terrarium(pwd=str(tmp_path), **_drive_kwargs())
+
+        def _graph_drive(gid, assignee):
+            return CreateDriveRequest(
+                kind="generic",
+                title=f"watch {gid}",
+                scope_type="graph",
+                scope_id=gid,
+                owner=SERVICE,
+                owner_scope="service",
+                created_by=SERVICE,
+                assignee_creature_id=assignee,
+                spec={"instruction": "monitor"},
+            )
+
+        async with engine:
+            alice = await engine.add_creature(
+                str(tmp_path / "creature_alice" / "agent.yaml"), start=False
+            )
+            bob = await engine.add_creature(
+                str(tmp_path / "creature_bob" / "agent.yaml"), start=False
+            )
+            assert alice.graph_id != bob.graph_id  # two disconnected graphs
+            a_gid, b_gid = alice.graph_id, bob.graph_id
+            rec_a = await engine.drives.manager_for(a_gid).create_drive(
+                _graph_drive(a_gid, alice.creature_id),
+                actor=SERVICE,
+                graph_id=a_gid,
+                is_privileged=True,
+            )
+            rec_b = await engine.drives.manager_for(b_gid).create_drive(
+                _graph_drive(b_gid, bob.creature_id),
+                actor=SERVICE,
+                graph_id=b_gid,
+                is_privileged=True,
+            )
+
+            keep_gid = await channels.ensure_same_graph(engine, alice, bob)
+
+            # Drained inside ensure_same_graph: the survivor lists BOTH Drives.
+            survivor = engine.drives.manager_for(keep_gid)
+            assert await survivor.get_drive(rec_a.drive_id) is not None
+            assert await survivor.get_drive(rec_b.drive_id) is not None
+            # The absorbed graph's manager is gone (one canonical repo/Drive).
+            dropped = b_gid if keep_gid != b_gid else a_gid
+            assert engine.drives.peek_manager(dropped) is None

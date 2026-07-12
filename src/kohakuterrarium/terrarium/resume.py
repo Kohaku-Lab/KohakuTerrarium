@@ -38,6 +38,17 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _schedule_drive_reconcile(engine: "Terrarium", creature: "Creature") -> None:
+    """Arm Drive reconciliation for a resumed creature (design §6.5, §9.6).
+
+    Resume starts creatures directly (not via ``engine.add_creature``), so it
+    must wire the restoration-barrier-gated reconcile itself. A no-op on a
+    Drive-disabled engine."""
+    runtime = getattr(engine, "_drive_runtime", None)
+    if runtime is not None:
+        runtime.schedule_reconcile(creature)
+
+
 async def resume_into_engine(
     engine: "Terrarium",
     store: SessionStore | str | Path,
@@ -133,6 +144,10 @@ async def _resume_agent_into_engine(
         engine._owned_sessions.add(creature.graph_id)
 
         await creature.start()
+        # Drive reconcile is gated on the restoration barrier (design §6.5): the
+        # session store + Drive repository are already attached above, so the
+        # persisted Drives redeliver only after startup settles.
+        _schedule_drive_reconcile(engine, creature)
 
         logger.info(
             "Agent session resumed into engine",
@@ -290,6 +305,10 @@ async def _resume_terrarium_body(
         except KeyError:
             continue
         await creature.start()
+        # Drive reconcile is gated on the restoration barrier (design §6.5):
+        # session + Drive repository are attached above (attach_session), so
+        # persisted Drives redeliver only once each creature's startup settles.
+        _schedule_drive_reconcile(engine, creature)
 
     logger.info(
         "Terrarium session resumed into engine",

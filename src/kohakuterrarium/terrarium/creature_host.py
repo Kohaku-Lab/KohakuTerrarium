@@ -14,20 +14,30 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.builtins.outputs.none import NoneOutput
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config import AgentConfig, build_agent_config
 from kohakuterrarium.core.environment import Environment
-from kohakuterrarium.core.turn import AgentEventStream
+from kohakuterrarium.core.events import TriggerEvent
+from kohakuterrarium.core.turn import AgentEventStream, TurnResult
 from kohakuterrarium.llm.profiles import _login_provider_for
 from kohakuterrarium.terrarium.config import CreatureConfig
+from kohakuterrarium.terrarium.creature_ids import _safe_creature_id
 from kohakuterrarium.terrarium.output_log import LogEntry, OutputLogCapture
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+# Runtime-only readiness barrier (design §6.5, Phase E). NOT an Agent
+# cognitive state — pure engine bookkeeping that gates Drive delivery until
+# the creature has started and its startup trigger has settled.
+RESTORATION_ADDED = "added"
+RESTORATION_RESTORING = "restoring"
+RESTORATION_STARTED = "started"
+RESTORATION_STARTUP_SETTLED = "startup_settled"
+RESTORATION_READY = "restoration_ready"
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +100,12 @@ class Creature:
     # is captured here so :attr:`status` can report ``"error"`` until
     # the next ``start()`` clears it.
     _input_loop_error: BaseException | None = None
+    # Restoration barrier (design §6.5) — runtime-only readiness state the
+    # engine's Drive runtime gates reconciliation on. Transitions:
+    # added -> restoring -> started -> startup_settled -> restoration_ready.
+    _restoration_state: str = RESTORATION_ADDED
+    _restoration_ready_event: "asyncio.Event | None" = None
+    _restoration_task: "asyncio.Task[None] | None" = None
 
     # ------------------------------------------------------------------
     # lifecycle
@@ -114,10 +130,12 @@ class Creature:
         if self._running:
             return
         self._ensure_chat_pipe()
+        self._restoration_state = RESTORATION_RESTORING
         await self.agent.start()
         self._running = True
         self._ever_started = True
         self._input_loop_error = None
+        self._restoration_state = RESTORATION_STARTED
         drive_input = getattr(self.agent, "_drive_input", None)
         if callable(drive_input):
             self._input_task = asyncio.create_task(
@@ -125,9 +143,57 @@ class Creature:
                 name=f"creature-input-{self.creature_id}",
             )
             self._input_task.add_done_callback(self._on_input_task_done)
+        self._arm_restoration_barrier()
         logger.info(
             "Creature started", creature_id=self.creature_id, creature_name=self.name
         )
+
+    def _ensure_restoration_event(self) -> "asyncio.Event":
+        if self._restoration_ready_event is None:
+            self._restoration_ready_event = asyncio.Event()
+        return self._restoration_ready_event
+
+    def _arm_restoration_barrier(self) -> None:
+        """Spawn the task that waits for the agent's startup trigger to
+        settle, then flips the creature to ``restoration_ready``."""
+        self._ensure_restoration_event().clear()
+        self._restoration_task = asyncio.create_task(
+            self._run_restoration_barrier(),
+            name=f"creature-barrier-{self.creature_id}",
+        )
+
+    async def _run_restoration_barrier(self) -> None:
+        """Await startup-trigger settlement, then mark restoration-ready.
+
+        An agent-like without the ``_startup_settled`` observable (test
+        fakes) is treated as settled immediately — there is no startup
+        turn to wait for."""
+        settled = getattr(self.agent, "_startup_settled", None)
+        if settled is not None and hasattr(settled, "wait"):
+            try:
+                await settled.wait()
+            except asyncio.CancelledError:
+                return
+        self._restoration_state = RESTORATION_STARTUP_SETTLED
+        self._restoration_state = RESTORATION_READY
+        self._ensure_restoration_event().set()
+
+    @property
+    def restoration_state(self) -> str:
+        """Current restoration-barrier state (design §6.5)."""
+        return self._restoration_state
+
+    @property
+    def restoration_ready(self) -> bool:
+        """Whether the restoration barrier has been crossed — Drive
+        reconciliation for this creature is gated on it."""
+        return self._restoration_state == RESTORATION_READY
+
+    async def wait_restoration_ready(self) -> None:
+        """Await the restoration barrier. Returns immediately once ready."""
+        if self.restoration_ready:
+            return
+        await self._ensure_restoration_event().wait()
 
     def _on_input_task_done(self, task: "asyncio.Task[None]") -> None:
         """Mark the creature stopped once its input loop exits.
@@ -157,6 +223,8 @@ class Creature:
         if not self._running and self._input_task is None:
             return
         self._running = False
+        self._restoration_state = RESTORATION_ADDED
+        self._teardown_restoration_barrier()
         if self._output_queue is not None:
             self._output_queue.put_nowait(None)
         # Stopping the agent flips ``Agent._running`` and stops the
@@ -167,6 +235,15 @@ class Creature:
         logger.info(
             "Creature stopped", creature_id=self.creature_id, creature_name=self.name
         )
+
+    def _teardown_restoration_barrier(self) -> None:
+        """Cancel the barrier task and clear the ready signal on stop."""
+        task = self._restoration_task
+        self._restoration_task = None
+        if task is not None and not task.done():
+            task.cancel()
+        if self._restoration_ready_event is not None:
+            self._restoration_ready_event.clear()
 
     async def _reap_input_task(self) -> None:
         """Wait for the input-driver task to exit, cancelling on timeout."""
@@ -286,6 +363,32 @@ class Creature:
     ) -> None:
         """Push input into the agent without consuming output."""
         await self.agent.inject_input(message, source=source)
+
+    async def inject_event(
+        self,
+        event: TriggerEvent,
+        *,
+        correlation_id: str | None = None,
+        timeout: float | None = None,
+        raise_on_error: bool = False,
+    ) -> TurnResult:
+        """Drive a pre-built :class:`TriggerEvent` and return its correlated
+        :class:`TurnResult` (public creature ingress, design §5.1-5.2).
+
+        This is the seam the Terrarium Drive dispatcher delivers over. It
+        distinguishes *rejected-because-stopped* (``status="rejected"``,
+        never silent) from an admitted turn that settled
+        ``ok``/``error``/``timeout``/``interrupted``; ``correlation_id``
+        (the delivery id) rides ``event.context`` to turn finalization and
+        back onto the result.  No private ``Agent._process_event`` call.
+        """
+        if correlation_id is not None:
+            if event.context is None:
+                event.context = {}
+            event.context.setdefault("correlation_id", correlation_id)
+        return await self.agent.run_event(
+            event, timeout=timeout, raise_on_error=raise_on_error
+        )
 
     async def chat(self, message: str | list[dict]) -> AsyncIterator[str]:
         """Inject ``message`` and stream the agent's text response.
@@ -616,13 +719,7 @@ def build_creature(
     )
 
 
-def _safe_creature_id(name: str) -> str:
-    """Mint a unique creature id from a config name.
-
-    Names from a recipe are usually meaningful and unique within the
-    recipe, but the engine namespace is process-wide — append a short
-    random suffix so two recipes with the same creature name don't
-    collide.
-    """
-    cleaned = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in name)
-    return f"{cleaned or 'creature'}_{uuid4().hex[:8]}"
+# ``_safe_creature_id`` / ``_clean_creature_name`` / ``_decode_creature_name``
+# live in the leaf :mod:`terrarium.creature_ids` (shared with the Drive resume
+# remap without cross-importing the heavy Agent graph); re-exported here for
+# existing callers (``resume.py`` imports ``_safe_creature_id`` from here).

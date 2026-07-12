@@ -12,6 +12,7 @@ with its siblings (``channels.py``, ``wiring.py``).
 from typing import TYPE_CHECKING
 
 import kohakuterrarium.terrarium.channels as _channels
+import kohakuterrarium.terrarium.drive.injection as _drive_injection
 import kohakuterrarium.terrarium.topology as _topo
 import kohakuterrarium.terrarium.wiring as _wiring
 from kohakuterrarium.terrarium.events import RootAssignment
@@ -106,6 +107,11 @@ async def assign_root_to(
     # freshly-elevated creature. Basic comm tools (``send_channel`` /
     # ``group_send``) were already attached at ``add_creature`` time.
     force_register_privileged_tools(root.agent)
+    # Drive-enabled engines inject the privileged ``group_drive`` tool on
+    # elevation too (design §9.3); idempotent re-run now that the creature is
+    # privileged. A Drive-disabled engine has no runtime and skips this.
+    if engine._drive_runtime is not None:
+        await _drive_injection.install_drive_runtime(root.agent, engine._drive_runtime)
 
     return RootAssignment(
         graph_id=gid,

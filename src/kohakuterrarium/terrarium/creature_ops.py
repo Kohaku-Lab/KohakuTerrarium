@@ -511,17 +511,40 @@ async def agent_execute_command(
     agent: Any,
     command: str,
     args: str = "",
+    *,
+    service: Any = None,
+    engine: Any = None,
+    creature_id: str | None = None,
+    principal: str = "user:local",
+    is_operator: bool = False,
 ) -> dict[str, Any]:
-    """Run a built-in slash command against ``agent``.
+    """Run a slash command against ``agent`` with a trusted context (R1-20).
 
-    Raises ``ValueError`` for an unknown command name; the
-    ``UserCommandResult`` is normalized to a plain dict suitable for
-    JSON response / Lab wire transit.
+    Resolves a built-in first, then the agent's LIVE aggregated registry so
+    plugin-contributed commands (e.g. ``/goal``) are reachable over web/Lab.
+    The trusted context DTO (service / engine / focused creature / principal /
+    operator) rides in ``UserCommandContext.extra`` so Drive-aware commands can
+    act; the caller derives ``principal`` / ``is_operator`` from its authenticated
+    context and MUST pass ``is_operator`` explicitly (missing means unprivileged,
+    R1-21). Raises ``ValueError`` for an unknown command name.
     """
     cmd = get_builtin_user_command(command)
     if cmd is None:
+        lister = getattr(agent, "list_user_commands", None)
+        registry = lister() if callable(lister) else {}
+        cmd = registry.get(command)
+    if cmd is None:
         raise ValueError(f"Unknown command: /{command}")
-    ctx = UserCommandContext(agent=agent, session=getattr(agent, "session", None))
+    extra: dict[str, Any] = {"principal": principal, "is_operator": is_operator}
+    if service is not None:
+        extra["service"] = service
+    if engine is not None:
+        extra["engine"] = engine
+    if creature_id is not None:
+        extra["creature_id"] = creature_id
+    ctx = UserCommandContext(
+        agent=agent, session=getattr(agent, "session", None), extra=extra
+    )
     result = await cmd.execute(args, ctx)
     resp: dict[str, Any] = {
         "command": command,

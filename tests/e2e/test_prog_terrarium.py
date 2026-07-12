@@ -33,6 +33,12 @@ from kohakuterrarium.core.config_types import (
 from kohakuterrarium.modules.tool.base import ToolContext
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.config import load_terrarium_config
+from kohakuterrarium.terrarium.drive.config import (
+    DriveRuntimeConfig,
+    default_registrations,
+)
+from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
+from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest, DrivePatch
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.events import EventKind
 from kohakuterrarium.terrarium.service import LocalTerrariumService
@@ -891,3 +897,216 @@ class TestProgTerrariumJourney:
             assert solo_creatures[0].is_running is True
         finally:
             await resumed_engine.shutdown()
+
+    async def test_drive_runtime_local_journey(self, patched_llm, tmp_path):
+        """M1 Drive journey through explicit constructor args (persistent=False).
+
+        Build a Drive-enabled engine, add a creature (self-service tools +
+        generic prompt injected), create a graph-scoped drive assigned to it,
+        watch the ``drive_ready`` deliver as an ordinary event and settle,
+        then move it to COMPLETED — end to end over the real engine, sink,
+        dispatcher, and public creature ingress. The default ScriptedLLM
+        answers each drive turn with a plain ack."""
+        engine = Terrarium(
+            pwd=str(tmp_path),
+            drive_config=DriveRuntimeConfig(enabled=True),
+            drive_registrations=default_registrations(),
+        )
+        async with engine:
+            worker = await engine.add_creature(
+                _agent_config("worker", tmp_path), creature_id="worker"
+            )
+            # In-memory (no session): ephemeral durability.
+            assert engine.drives.durability == "ephemeral"
+            # Injection landed on the real creature.
+            tools = worker.agent.registry.list_tools()
+            for name in (
+                "drive_create",
+                "drive_status",
+                "drive_update",
+                "drive_report",
+                "drive_transition",
+            ):
+                assert name in tools
+            assert "Drive runtime" in worker.agent.get_system_prompt()
+
+            manager = engine.drives.manager
+            actor = ActorRef("user", "alice")
+            record = await manager.create_drive(
+                CreateDriveRequest(
+                    kind="generic",
+                    title="watch the deploy",
+                    scope_type="graph",
+                    scope_id=worker.graph_id,
+                    owner=actor,
+                    owner_scope="graph",
+                    created_by=actor,
+                    spec={"instruction": "monitor until stable"},
+                    assignee_creature_id="worker",
+                ),
+                actor=actor,
+                graph_id=worker.graph_id,
+                is_privileged=True,
+            )
+            assert record.status is DriveStatus.ACTIVE
+
+            # The drive_ready delivered as an ordinary TriggerEvent and settled.
+            conv_before = len(worker.agent.conversation_history)
+            for _ in range(200):
+                deliveries = await manager.list_deliveries(record.drive_id)
+                if any(d.state == "acknowledged" for d in deliveries):
+                    break
+                await asyncio.sleep(0.03)
+            deliveries = await manager.list_deliveries(record.drive_id)
+            admitted = [
+                d for d in deliveries if d.state in ("admitted", "acknowledged")
+            ]
+            assert len(admitted) == 1, [d.state for d in deliveries]
+            # The creature processed a real turn off the drive event.
+            assert len(worker.agent.conversation_history) > conv_before
+
+            # --- close / reopen: the active Drive CONTINUES (§6.1). Stopping
+            # the creature keeps the canonical Drive durable; restarting it
+            # reconciles behind the restoration barrier (§6.5) and redelivers.
+            await engine.stop("worker")
+            assert (
+                await manager.get_drive(record.drive_id)
+            ).status is DriveStatus.ACTIVE
+            await engine.start("worker")
+            for _ in range(300):
+                deliveries = await manager.list_deliveries(record.drive_id)
+                if any(d.reason in ("resume", "recovery") for d in deliveries):
+                    break
+                await asyncio.sleep(0.03)
+            deliveries = await manager.list_deliveries(record.drive_id)
+            assert any(
+                d.reason in ("resume", "recovery") for d in deliveries
+            ), "active Drive did not continue (redeliver) after creature restart"
+
+            # Terminal proposal -> COMPLETED in the repository (generic kind
+            # has verifier "none", so the authorized proposal is accepted).
+            current = await manager.get_drive(record.drive_id)
+            await manager.propose_transition(
+                record.drive_id,
+                DriveStatus.COMPLETED,
+                actor=actor,
+                evidence={"stable": True},
+                expected_revision=current.revision,
+            )
+            final = await manager.get_drive(record.drive_id)
+            assert final.status is DriveStatus.COMPLETED
+
+    async def test_goal_continuation_journey(self, patched_llm, tmp_path):
+        """M3 Goal journey: the built-in GoalPlugin + goal registration drive
+        a durable objective across multiple Drive events, a budget stops the
+        continuation without ever completing the goal, and a creature restart
+        preserves it.
+
+        Continuation is the generic Drive dispatcher re-arming autonomously as
+        each turn settles (a fresh readiness generation mints the next logical
+        delivery key); the Goal autonomy / budget policy decides *whether* to
+        re-arm. No manual update/wake drives the AUTONOMOUS loop; reviving a
+        budget-stopped goal is an explicit user act (budget raise + wake) —
+        the whole thing runs on the real engine + sink + dispatcher; only the
+        LLM is scripted."""
+        from kohakuterrarium.builtins.plugins.goal import GoalPlugin
+        from kohakuterrarium.terrarium.drive.goal import (
+            GoalDriveRegistration,
+            build_goal_spec,
+        )
+
+        engine = Terrarium(
+            pwd=str(tmp_path),
+            drive_config=DriveRuntimeConfig(enabled=True),
+            drive_registrations=[*default_registrations(), GoalDriveRegistration()],
+        )
+        actor = ActorRef("user", "alice")
+        async with engine:
+            worker = await engine.add_creature(
+                _agent_config("worker", tmp_path), creature_id="worker"
+            )
+            agent = engine.get_creature("worker").agent
+            await agent.add_plugin(GoalPlugin())
+            assert "goal" in agent.list_user_commands()
+
+            service = LocalTerrariumService(engine)
+            spec = build_goal_spec(
+                "Fix the auth race and prove it with tests",
+                autonomy="continue_when_ready",
+                budgets={"max_turns": 2},
+            )
+            view = await service.create_drive(
+                CreateDriveRequest(
+                    kind="goal",
+                    title="Fix the auth race",
+                    scope_type="graph",
+                    scope_id=worker.graph_id,
+                    owner=actor,
+                    owner_scope="actor",
+                    created_by=actor,
+                    spec=spec,
+                    assignee_creature_id="worker",
+                ),
+                graph_id=worker.graph_id,
+                actor=actor,
+                operator=True,
+            )
+            drive_id = view.record.drive_id
+            assert view.record.owner.format() == "user:alice"
+
+            async def _acked() -> list:
+                ds = await service.list_drive_deliveries(drive_id)
+                return [d for d in ds if d.state == "acknowledged"]
+
+            # Autonomous continuation: the dispatcher re-arms the goal as each
+            # turn settles — no manual update/wake — until the turn budget
+            # stops it at exactly two turns.
+            for _ in range(300):
+                if len(await _acked()) >= 2:
+                    break
+                await asyncio.sleep(0.03)
+            acked = await _acked()
+            assert len(acked) == 2  # budget caps continuation at two turns
+            # Budget cap reached: continuation stops and the goal is NOT
+            # completed — a budget never implies success (design §11).
+            mid = await service.get_drive(drive_id, actor=actor, is_privileged=True)
+            assert mid.record.status is DriveStatus.ACTIVE
+
+            # Restart preserves the Goal but must NOT redeliver it: readiness
+            # gates every admission (design §5.2), and this goal's budget is
+            # exhausted — a restart never revives pursuit that policy stopped.
+            await engine.stop("worker")
+            after_stop = await service.get_drive(
+                drive_id, actor=actor, is_privileged=True
+            )
+            assert after_stop.record.status is DriveStatus.ACTIVE
+            await engine.start("worker")
+            await asyncio.sleep(0.5)
+            ds = await service.list_drive_deliveries(drive_id)
+            assert not any(d.reason in ("resume", "recovery") for d in ds)
+            assert len(await _acked()) == 2
+
+            # Reviving a budget-stopped goal is an EXPLICIT user act: raise the
+            # budget (CAS) + wake — the third turn then settles, and the goal
+            # still never self-completes.
+            current = await service.get_drive(drive_id, actor=actor)
+            await service.update_drive(
+                drive_id,
+                DrivePatch(
+                    spec=build_goal_spec(
+                        "Fix the auth race and prove it with tests",
+                        autonomy="continue_when_ready",
+                        budgets={"max_turns": 3},
+                    )
+                ),
+                expected_revision=current.record.revision,
+                actor=actor,
+            )
+            await service.wake_drive(drive_id, actor=actor)
+            for _ in range(300):
+                if len(await _acked()) >= 3:
+                    break
+                await asyncio.sleep(0.03)
+            assert len(await _acked()) == 3
+            final = await service.get_drive(drive_id, actor=actor)
+            assert final.record.status is DriveStatus.ACTIVE

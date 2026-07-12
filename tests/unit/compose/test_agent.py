@@ -49,9 +49,17 @@ class _FakeSession:
 def _stub_engine_session(monkeypatch, sess, created=None):
     """Patch ``_engine_session`` to return ``sess`` and log its args."""
 
-    async def fake_session(config, *, engine, pwd, llm):
+    async def fake_session(config, *, engine, pwd, llm, drive=(None, (), None)):
         if created is not None:
-            created.append({"config": config, "engine": engine, "pwd": pwd, "llm": llm})
+            created.append(
+                {
+                    "config": config,
+                    "engine": engine,
+                    "pwd": pwd,
+                    "llm": llm,
+                    "drive": drive,
+                }
+            )
         return sess
 
     monkeypatch.setattr(compose_agent, "_engine_session", fake_session)
@@ -143,6 +151,7 @@ class TestAgentFactory:
                 "engine": shared_engine,
                 "pwd": "/work",
                 "llm": provider,
+                "drive": (None, (), None),
             }
         ]
 

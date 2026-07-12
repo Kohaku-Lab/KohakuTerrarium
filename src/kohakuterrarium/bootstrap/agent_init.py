@@ -9,8 +9,9 @@ Heavy initialization logic is delegated to bootstrap.* factory modules
 to reduce import fan-out.
 """
 
+import importlib
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from kohakuterrarium.bootstrap.io import create_input, create_output
 from kohakuterrarium.bootstrap.llm import coerce_llm_provider, create_llm_provider
@@ -38,6 +39,11 @@ from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.modules.output.router import OutputRouter
 from kohakuterrarium.modules.plugin.base import PluginContext
 from kohakuterrarium.modules.subagent import SubAgentManager
+from kohakuterrarium.modules.user_command.aggregate import (
+    CommandContribution,
+    CommandProvenance,
+    aggregate_user_commands,
+)
 from kohakuterrarium.modules.user_command.base import (
     UserCommandContext,
     UserCommandResult,
@@ -45,6 +51,8 @@ from kohakuterrarium.modules.user_command.base import (
 )
 from kohakuterrarium.packages.locations import find_package_root_for_path
 from kohakuterrarium.packages.manifest import get_package_framework_hints
+from kohakuterrarium.packages.resolve import ensure_package_importable
+from kohakuterrarium.packages.slots import iter_package_user_command_entries
 from kohakuterrarium.parsing.format import BRACKET_FORMAT, XML_FORMAT, ToolCallFormat
 from kohakuterrarium.prompt.aggregator import aggregate_system_prompt
 from kohakuterrarium.prompt.framework_hints import merge_overrides
@@ -502,12 +510,14 @@ class AgentInitMixin:
         if input_module is not None and hasattr(input_module, "try_user_command"):
             return await input_module.try_user_command(text)
 
-        commands: dict[str, Any] = {}
-        for name in list_builtin_user_commands():
-            cmd = get_builtin_user_command(name)
-            if cmd:
-                commands[name] = cmd
-        commands.update(getattr(self, "_extra_user_commands", {}) or {})
+        commands = getattr(self, "_user_command_registry", None)
+        if not commands:
+            commands = {}
+            for name in list_builtin_user_commands():
+                cmd = get_builtin_user_command(name)
+                if cmd:
+                    commands[name] = cmd
+            commands.update(getattr(self, "_extra_user_commands", {}) or {})
         context = UserCommandContext(agent=self, session=getattr(self, "session", None))
         name, args = parse_slash_command(text)
         cmd = commands.get(name)
@@ -651,25 +661,149 @@ class AgentInitMixin:
         self.output_router = OutputRouter(default_output, named_outputs=named_outputs)
 
     def _init_user_commands(self) -> None:
-        """Wire user commands (slash commands) into the input module."""
-        # Load all builtins by default
-        commands: dict = {}
-        for name in list_builtin_user_commands():
-            cmd = get_builtin_user_command(name)
-            if cmd:
-                commands[name] = cmd
-        # Instance-injected slash commands (E7) — user_commands= kwarg.
-        commands.update(getattr(self, "_extra_user_commands", {}) or {})
+        """Wire the aggregated user-command registry into the input module.
 
+        The registry is the collision-checked union of built-ins, package
+        ``user_commands:`` entries, constructor-injected commands, and active
+        plugin contributions (design §8.9). It is rebuilt on plugin
+        enable/disable/add/remove by :meth:`refresh_user_commands`.
+        """
+        commands, provenance = self._aggregate_user_commands()
+        self._user_command_registry = commands
+        self._user_command_provenance = provenance
         context = UserCommandContext(
             agent=self,
             session=getattr(self, "session", None),
             input_module=self.input,
         )
-
-        # Wire into input module (if it supports commands)
+        self._user_command_context = context
         if hasattr(self.input, "set_user_commands"):
             self.input.set_user_commands(commands, context)
+
+    def _aggregate_user_commands(
+        self,
+    ) -> tuple[dict[str, Any], dict[str, CommandProvenance]]:
+        """Collision-checked union of every user-command source (design §8.9).
+
+        Order of sources does not change the outcome: a name claimed by two
+        sources is a hard error unless exactly one carries ``override=True``.
+        Constructor-injected commands are implicit overriders so an
+        application's ``user_commands=`` may still shadow a built-in.
+        """
+        contributions: list[CommandContribution] = []
+        for name in list_builtin_user_commands():
+            cmd = get_builtin_user_command(name)
+            if cmd is not None:
+                contributions.append(
+                    CommandContribution(
+                        name=name,
+                        command=cmd,
+                        provenance=CommandProvenance(source="builtin"),
+                        override=bool(getattr(cmd, "override", False)),
+                    )
+                )
+        contributions.extend(self._load_package_user_command_contributions())
+        for name, cmd in (getattr(self, "_extra_user_commands", {}) or {}).items():
+            contributions.append(
+                CommandContribution(
+                    name=name,
+                    command=cmd,
+                    provenance=CommandProvenance(source="constructor"),
+                    override=True,
+                )
+            )
+        plugins = getattr(self, "plugins", None)
+        if plugins is not None:
+            contributions.extend(plugins.collect_user_commands())
+        return aggregate_user_commands(contributions)
+
+    def _load_package_user_command_contributions(self) -> list[CommandContribution]:
+        """Import package ``user_commands:`` classes into contributions.
+
+        A failing import is logged and skipped so one broken package cannot
+        strip every slash command; the collision policy still runs over the
+        successfully loaded set.
+        """
+        out: list[CommandContribution] = []
+        for pkg_name, entry in iter_package_user_command_entries():
+            name = entry.get("name")
+            module = entry.get("module", "")
+            class_name = entry.get("class") or entry.get("class_name", "")
+            if not name or not module or not class_name:
+                continue
+            try:
+                ensure_package_importable(pkg_name)
+                mod = importlib.import_module(module)
+                cmd = getattr(mod, class_name)()
+            except Exception as exc:
+                logger.warning(
+                    "Failed to load package user command",
+                    command=name,
+                    package=pkg_name,
+                    module_path=module,
+                    class_name=class_name,
+                    error=str(exc),
+                    exc_info=True,
+                )
+                continue
+            out.append(
+                CommandContribution(
+                    name=name,
+                    command=cmd,
+                    provenance=CommandProvenance(source="package", origin=pkg_name),
+                    override=bool(getattr(cmd, "override", False)),
+                )
+            )
+        return out
+
+    def refresh_user_commands(self) -> dict[str, Any]:
+        """Rebuild the aggregated registry and re-wire every live inventory.
+
+        Called after a plugin is enabled / disabled / added / removed so a
+        plugin-contributed ``/command`` appears or disappears in the input
+        layer, the rich CLI, the TUI, and the web command inventory at once
+        (design §11.3). Returns the new registry.
+        """
+        commands, provenance = self._aggregate_user_commands()
+        self._user_command_registry = commands
+        self._user_command_provenance = provenance
+        context = getattr(self, "_user_command_context", None)
+        if context is None:
+            context = UserCommandContext(
+                agent=self,
+                session=getattr(self, "session", None),
+                input_module=getattr(self, "input", None),
+            )
+            self._user_command_context = context
+        input_module = getattr(self, "input", None)
+        if input_module is not None and hasattr(input_module, "set_user_commands"):
+            input_module.set_user_commands(commands, context)
+        for listener in list(getattr(self, "_user_command_listeners", []) or []):
+            try:
+                listener(commands)
+            except Exception as exc:  # pragma: no cover — defensive
+                logger.warning(
+                    "user-command listener failed", error=str(exc), exc_info=True
+                )
+        return commands
+
+    def list_user_commands(self) -> dict[str, Any]:
+        """The live aggregated ``name -> command`` registry (a copy)."""
+        return dict(getattr(self, "_user_command_registry", {}) or {})
+
+    def add_user_command_listener(self, listener: "Callable[[dict], None]") -> None:
+        """Register a callback fired with the new registry on every refresh.
+
+        Interactive front-ends (rich CLI, TUI) use this so their help /
+        completer / palette follow plugin toggles instead of a boot-time
+        snapshot.
+        """
+        listeners = getattr(self, "_user_command_listeners", None)
+        if listeners is None:
+            listeners = []
+            self._user_command_listeners = listeners
+        if listener not in listeners:
+            listeners.append(listener)
 
     def _init_triggers(self) -> None:
         """Initialize trigger modules from config into trigger_manager."""

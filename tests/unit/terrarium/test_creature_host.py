@@ -431,6 +431,117 @@ class TestReapInputTask:
         assert c._input_task is None
 
 
+# ── restoration barrier (design §6.5, Phase E) ────────────────
+
+
+class _BarrierAgent(_FakeAgent):
+    """Fake agent that exposes the ``_startup_settled`` observable."""
+
+    def __init__(self, name="barrier"):
+        super().__init__(name=name)
+        self._startup_settled = asyncio.Event()
+
+
+class TestRestorationBarrier:
+    async def test_starts_at_added(self):
+        c = _creature()
+        assert c.restoration_state == "added"
+        assert c.restoration_ready is False
+
+    async def test_fresh_creature_reaches_ready_when_no_startup(self):
+        # A fake agent with no startup-settle observable is treated as
+        # settled at once — a session-less fresh creature is promptly ready.
+        c = _creature()
+        await c.start()
+        await c.wait_restoration_ready()
+        assert c.restoration_state == "restoration_ready"
+        assert c.restoration_ready is True
+        await c.stop()
+
+    async def test_barrier_waits_for_startup_settlement(self):
+        agent = _BarrierAgent()
+        c = _creature(agent=agent)
+        await c.start()
+        await asyncio.sleep(0)  # let the barrier task reach the wait
+        # Startup has not settled — the barrier is not crossed yet.
+        assert c.restoration_state == "started"
+        assert c.restoration_ready is False
+        agent._startup_settled.set()
+        await c.wait_restoration_ready()
+        assert c.restoration_ready is True
+        await c.stop()
+
+    async def test_stop_resets_barrier(self):
+        c = _creature()
+        await c.start()
+        await c.wait_restoration_ready()
+        await c.stop()
+        # Stop tears the barrier down — a restart must re-arm it.
+        assert c.restoration_ready is False
+        assert c.restoration_state == "added"
+
+    async def test_restart_rearms_barrier(self):
+        agent = _BarrierAgent()
+        c = _creature(agent=agent)
+        await c.start()
+        agent._startup_settled.set()
+        await c.wait_restoration_ready()
+        await c.stop()
+        # Fresh cycle: the observable is re-cleared by agent.start(), so a
+        # new barrier gates the second run.
+        agent._startup_settled.clear()
+        await c.start()
+        await asyncio.sleep(0)
+        assert c.restoration_ready is False
+        agent._startup_settled.set()
+        await c.wait_restoration_ready()
+        assert c.restoration_ready is True
+        await c.stop()
+
+
+# ── inject_event (public creature ingress) ────────────────────
+
+
+class TestInjectEvent:
+    def _cfg(self, tmp_path):
+        (tmp_path / "config.yaml").write_text(
+            "name: injc\ninput:\n  type: none\noutput:\n  type: none\n",
+            encoding="utf-8",
+        )
+        return str(tmp_path)
+
+    async def test_runs_event_and_echoes_correlation(self, tmp_path):
+        from kohakuterrarium.core.events import TriggerEvent
+
+        c = build_creature(
+            self._cfg(tmp_path), llm=ScriptedLLM(["drive done"]), io="headless"
+        )
+        await c.start()
+        try:
+            event = TriggerEvent(
+                type="drive_ready", content="pursue", context={}, stackable=False
+            )
+            result = await c.inject_event(event, correlation_id="d-7")
+            assert result.status == "ok"
+            assert "drive done" in result.text
+            assert result.correlation_id == "d-7"
+        finally:
+            await c.stop()
+
+    async def test_rejects_when_stopped_not_silently(self, tmp_path):
+        from kohakuterrarium.core.events import TriggerEvent
+
+        c = build_creature(
+            self._cfg(tmp_path), llm=ScriptedLLM(["never"]), io="headless"
+        )
+        # Never started — the event must not run.
+        event = TriggerEvent(type="drive_ready", content="x", stackable=False)
+        result = await c.inject_event(event, correlation_id="d-1")
+        assert result.status == "rejected"
+        assert result.correlation_id == "d-1"
+        assert result.text == ""
+
+
 class TestApplyCreatureName:
     """P0 regression pins — the display-name rename must follow onto
     every name-keyed recorder, INCLUDING a SessionOutput attached

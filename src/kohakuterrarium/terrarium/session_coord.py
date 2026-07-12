@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from kohakuterrarium.session.store import SessionStore
+import kohakuterrarium.terrarium.drive.topology as _drive_topology
 import kohakuterrarium.terrarium.topology_leftovers as _topo_leftovers
 from kohakuterrarium.utils.logging import get_logger
 
@@ -232,6 +233,10 @@ def apply_merge(
         return
     keep_gid = delta.new_graph_ids[0]
     drop_gids = [g for g in delta.old_graph_ids if g != keep_gid]
+    # Capture the Drive rows of every source graph (sync, before any store
+    # closes) so the engine's async topology drain can move them into the
+    # survivor's repository (design §6.6). No-op on a Drive-disabled engine.
+    _drive_topology.stash_merge(engine, keep_gid, list(delta.old_graph_ids))
     source_gids = [keep_gid, *drop_gids]
     # Snapshot each source graph's store + ownership BEFORE remapping —
     # the survivor is reused, but every other owned store is superseded
@@ -325,6 +330,10 @@ def apply_split(
     if delta.kind != "split" or not delta.old_graph_ids:
         return
     parent_gid = delta.old_graph_ids[0]
+    # Capture the parent graph's Drive rows (sync, before its store closes) so
+    # the async drain can redistribute them to the child graphs per the split
+    # placement policy (design §6.7). No-op on a Drive-disabled engine.
+    _drive_topology.stash_split(engine, parent_gid, list(delta.new_graph_ids))
     parent = engine._session_stores.get(parent_gid)
     if parent is None:
         return

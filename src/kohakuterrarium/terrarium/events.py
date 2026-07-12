@@ -37,6 +37,26 @@ class EventKind(str, Enum):
     OUTPUT_WIRE_REMOVED = "output_wire_removed"
     PARENT_LINK_CHANGED = "parent_link_changed"
 
+    # Drive runtime structural events (design §9.4). Payloads carry ids /
+    # revision / status / actor / reason / timestamps — never the full
+    # ``spec``; a subscriber fetches an authorized DTO for details.
+    DRIVE_CREATED = "drive_created"
+    DRIVE_UPDATED = "drive_updated"
+    DRIVE_ASSIGNED = "drive_assigned"
+    DRIVE_UNASSIGNED = "drive_unassigned"
+    DRIVE_STATUS_CHANGED = "drive_status_changed"
+    DRIVE_PROPOSAL_PENDING = "drive_proposal_pending"
+    DRIVE_PROGRESS = "drive_progress"
+    DRIVE_READY = "drive_ready"
+    DRIVE_DELIVERY_ADMITTED = "drive_delivery_admitted"
+    DRIVE_DELIVERY_ACKNOWLEDGED = "drive_delivery_acknowledged"
+    DRIVE_DELIVERY_RETRYING = "drive_delivery_retrying"
+    DRIVE_DELIVERY_DEAD_LETTERED = "drive_delivery_dead_lettered"
+    DRIVE_REGISTRATION_CHANGED = "drive_registration_changed"
+    DRIVE_RUNTIME_RECONFIGURE_REQUIRED = "drive_runtime_reconfigure_required"
+    DRIVE_ORPHANED = "drive_orphaned"
+    DRIVE_RETIRED = "drive_retired"
+
 
 @dataclass
 class EngineEvent:

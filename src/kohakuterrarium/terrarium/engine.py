@@ -25,6 +25,7 @@ import kohakuterrarium.terrarium.root as _root
 import kohakuterrarium.terrarium.topology as _topo
 import kohakuterrarium.terrarium.topology_snapshot as _topo_snap
 import kohakuterrarium.terrarium.wiring as _wiring
+import kohakuterrarium.terrarium.drive.runtime as _drive_runtime
 from kohakuterrarium.core.environment import Environment
 from kohakuterrarium.terrarium.creature_host import (
     Creature,
@@ -84,6 +85,9 @@ class Terrarium:
         *,
         pwd: str | None = None,
         session_dir: str | None = None,
+        drive_config: Any = None,
+        drive_registrations: "tuple[Any, ...] | list[Any]" = (),
+        drive_store: Any = None,
     ) -> None:
         """Create an engine.
 
@@ -92,9 +96,21 @@ class Terrarium:
         merge/split children land there too).  Without it, persistence
         is opt-in per call via ``add_creature(session=...)`` /
         ``apply_recipe(session=...)`` / ``attach_session``.
+
+        ``drive_config`` / ``drive_registrations`` / ``drive_store`` are the
+        explicit Drive runtime injection (design §8.3): ``drive_config=None``
+        (default) builds no Drive manager, tools, prompt, or dispatcher — zero
+        overhead. An enabled config with an empty registration set fails
+        validation here, at construction. ``drive_store`` overrides the
+        default in-memory repository. The engine never reads Studio settings
+        or ``~/.kohakuterrarium``.
         """
         self._pwd = pwd
         self._session_dir = session_dir
+        # Built only when drive_config is enabled; None means "no Drive runtime".
+        self._drive_runtime = _drive_runtime.build_drive_runtime(
+            self, drive_config, drive_registrations, drive_store
+        )
         self._topology = TopologyState()
         self._creatures: dict[str, Creature] = {}
         self._environments: dict[str, Environment] = {}
@@ -116,12 +132,18 @@ class Terrarium:
         recipe: "TerrariumConfig | str",
         *,
         pwd: str | None = None,
+        drive_config: Any = None,
+        drive_registrations: "tuple[Any, ...] | list[Any]" = (),
+        drive_store: Any = None,
     ) -> "Terrarium":
-        """Build a Terrarium from a recipe.  See :meth:`apply_recipe`.
-
-        Example: ``async with await Terrarium.from_recipe("t.yaml") as t``.
-        """
-        engine = cls(pwd=pwd)
+        """Build a Terrarium from a recipe; Drive args go to the constructor
+        (§8.3), the recipe stays Drive-unaware (§9.6). See :meth:`apply_recipe`."""
+        engine = cls(
+            pwd=pwd,
+            drive_config=drive_config,
+            drive_registrations=drive_registrations,
+            drive_store=drive_store,
+        )
         await engine.apply_recipe(recipe, pwd=pwd)
         return engine
 
@@ -132,12 +154,19 @@ class Terrarium:
         *,
         pwd: str | None = None,
         llm: Any = None,
+        drive_config: Any = None,
+        drive_registrations: "tuple[Any, ...] | list[Any]" = (),
+        drive_store: Any = None,
     ) -> "Terrarium":
-        """Build a fresh engine and adopt a saved session into it.
-
-        Example: ``async with await Terrarium.resume("s.kohakutr") as t``.
-        """
-        engine = cls(pwd=pwd)
+        """Build a fresh engine and adopt a saved session into it. Drive args go
+        to the constructor (§8.3); the resumed graph opens + reconciles its
+        persisted Drive state, never reapplying recipe seeds — none exist (§9.6)."""
+        engine = cls(
+            pwd=pwd,
+            drive_config=drive_config,
+            drive_registrations=drive_registrations,
+            drive_store=drive_store,
+        )
         engine._running = True
         await _resume.resume_into_engine(engine, store, pwd=pwd, llm=llm)
         return engine
@@ -152,7 +181,9 @@ class Terrarium:
         """Adopt a saved session into this running engine.  Returns ``graph_id``.
 
         Same body as :meth:`resume` but on an existing engine instance —
-        the HTTP / programmatic hot-resume entry point.
+        the HTTP / programmatic hot-resume entry point.  The adopted graph
+        inherits THIS engine's already-configured Drive runtime (design §8.3);
+        no Drive args are read from the saved recipe.
         """
         return await _resume.resume_into_engine(self, store, pwd=pwd, llm=llm)
 
@@ -162,14 +193,21 @@ class Terrarium:
         config: "CreatureBuildInput | Creature",
         *,
         pwd: str | None = None,
+        drive_config: Any = None,
+        drive_registrations: "tuple[Any, ...] | list[Any]" = (),
+        drive_store: Any = None,
     ) -> "tuple[Terrarium, Creature]":
-        """Construct a Terrarium and add a single creature in one call.
-
-        Returns ``(terrarium, creature)``.  One-liner for solo agents::
+        """Construct a Terrarium and add a single creature in one call; Drive
+        args go to the constructor (§8.3). Returns ``(terrarium, creature)``::
 
             t, alice = await Terrarium.with_creature("alice.yaml")
         """
-        engine = cls(pwd=pwd)
+        engine = cls(
+            pwd=pwd,
+            drive_config=drive_config,
+            drive_registrations=drive_registrations,
+            drive_store=drive_store,
+        )
         creature = await engine.add_creature(config)
         return engine, creature
 
@@ -180,11 +218,35 @@ class Terrarium:
     async def __aenter__(self) -> "Terrarium":
         self._running = True
         self._runtime_prompt.attach()
+        if self._drive_runtime is not None:
+            await self._drive_runtime.start()
         return self
 
     async def __aexit__(self, *exc) -> None:
         self._runtime_prompt.detach()
         await self.shutdown()
+
+    # ------------------------------------------------------------------
+    # Drive runtime (optional; None when the engine is Drive-disabled)
+    # ------------------------------------------------------------------
+
+    @property
+    def drives(self):
+        """The engine's :class:`DriveRuntime`, or ``None`` when Drive-disabled.
+
+        The façade over the DriveManager (create / list / update / assign /
+        transition Drives, reconcile, reconfigure).  ``None`` means the engine
+        was constructed without ``drive_config`` — no manager exists.
+        """
+        return self._drive_runtime
+
+    def reconfigure_drives(self, drive_registrations) -> str:
+        """Apply a Drive registry change; returns ``applied_live`` /
+        ``restart_required`` / ``rejected`` (design §8.6).  Raises when the
+        engine has no Drive runtime."""
+        if self._drive_runtime is None:
+            raise RuntimeError("this terrarium has no Drive runtime to reconfigure")
+        return self._drive_runtime.reconfigure(drive_registrations)
 
     # ------------------------------------------------------------------
     # creature CRUD
@@ -331,6 +393,12 @@ class Terrarium:
         if creature.is_privileged:
             force_register_privileged_tools(creature.agent)
 
+        # Drive-enabled engines inject the self-service Drive tools + prompt
+        # and register the Drive service on the graph environment. A
+        # Drive-disabled engine skips this entirely.
+        if self._drive_runtime is not None:
+            await self._drive_runtime.attach_creature(creature, graph_env)
+
         self._emit(
             EngineEvent(
                 kind=EventKind.CREATURE_ADDED,
@@ -359,6 +427,10 @@ class Terrarium:
                     graph_id=gid,
                 )
             )
+            # Reconcile this creature's Drives once it crosses the
+            # restoration barrier (design §6.5) — gated, never on start().
+            if self._drive_runtime is not None:
+                self._drive_runtime.schedule_reconcile(creature)
         return creature
 
     async def remove_creature(self, creature: CreatureRef) -> None:
@@ -373,12 +445,28 @@ class Terrarium:
         old_gid = c.graph_id
         if c.is_running:
             await c.stop()
+        # Drive lifecycle (§6.2): a creature-scoped Drive orphans-and-blocks,
+        # a graph-scoped one unassigns / auto-assigns among the remaining
+        # graph members — never a silent semantic reassignment.
+        if self._drive_runtime is not None:
+            old_graph = self._topology.graphs.get(old_gid)
+            members = (
+                frozenset(old_graph.creature_ids) - {cid}
+                if old_graph is not None
+                else frozenset()
+            )
+            await self._drive_runtime.on_creature_removed(
+                cid, graph_id=old_gid, graph_member_ids=members
+            )
         delta = _topo.remove_creature(self._topology, cid)
         self._creatures.pop(cid, None)
         _wiring.install_output_wiring_resolver(self)
-        # Drop the environment if its graph went away.
+        # Drop the environment + the graph's Drive manager if the graph went
+        # away entirely (a split re-homes the manager instead).
         if old_gid not in self._topology.graphs:
             self._environments.pop(old_gid, None)
+            if self._drive_runtime is not None:
+                self._drive_runtime.registry.drop_graph(old_gid)
         self._emit(
             EngineEvent(
                 kind=EventKind.CREATURE_STOPPED,
@@ -392,6 +480,7 @@ class Terrarium:
         # their new graph_id, and session stores are coordinated.
         # ``apply_split_bookkeeping`` is a no-op for non-split deltas.
         _lifecycle.apply_split_bookkeeping(self, delta)
+        await self._drain_drive_topology()
 
     def get_creature(self, creature_id: str) -> Creature:
         """Return the creature with the given id.  Raises ``KeyError``."""
@@ -485,6 +574,7 @@ class Terrarium:
         # remove_channel may auto-split; snapshot every store-attached
         # graph so each one reflects its post-removal topology.
         _topo_snap.snapshot_all(self)
+        await self._drain_drive_topology()
         return delta
 
     async def connect(
@@ -509,6 +599,7 @@ class Terrarium:
         # connect may merge graphs; snapshot every store-attached graph
         # so each one reflects the post-connect topology.
         _topo_snap.snapshot_all(self)
+        await self._drain_drive_topology()
         return result
 
     async def disconnect(
@@ -532,6 +623,7 @@ class Terrarium:
         # store-attached graph so each one's saved topology reflects
         # the post-disconnect wires.
         _topo_snap.snapshot_all(self)
+        await self._drain_drive_topology()
         return result
 
     # ------------------------------------------------------------------
@@ -676,12 +768,17 @@ class Terrarium:
         deferred via ``add_creature(..., start=False)``."""
         c = self._creature(creature)
         await c.start()
+        # Re-arm Drive reconciliation behind the restoration barrier.
+        if self._drive_runtime is not None:
+            self._drive_runtime.schedule_reconcile(c)
 
     async def stop(self, creature: CreatureRef) -> None:
         """Stop a running creature without removing it from the graph."""
         c = self._creature(creature)
         if c.is_running:
             await c.stop()
+            if self._drive_runtime is not None:
+                await self._drive_runtime.on_creature_stopped(c.creature_id)
 
     async def stop_graph(self, graph: GraphRef) -> None:
         """Stop every creature in a graph (without removing them)."""
@@ -693,6 +790,8 @@ class Terrarium:
             c = self._creatures.get(cid)
             if c is not None and c.is_running:
                 await c.stop()
+                if self._drive_runtime is not None:
+                    await self._drive_runtime.on_creature_stopped(cid)
 
     async def shutdown(self) -> None:
         """Stop every creature in every graph.  Safe to call repeatedly.
@@ -705,6 +804,13 @@ class Terrarium:
         # subscriber teardown in ``finally`` so a leaked writer lock (which
         # blocks any later adopt of the same file) can't outlive shutdown.
         try:
+            # Stop claiming new Drive deliveries + drain settlements BEFORE
+            # creatures stop and owned stores close (design §6.4).
+            if self._drive_runtime is not None:
+                try:
+                    await self._drive_runtime.stop()
+                except Exception as e:  # pragma: no cover - defensive
+                    _logger.warning("drive runtime stop failed", error=str(e))
             for c in list(self._creatures.values()):
                 if c.is_running:
                     try:
@@ -802,11 +908,13 @@ class Terrarium:
         gid = self._resolve_graph_id(graph)
         # Replacing a graph's store: close the previous one first so its
         # native handles + writer lock are released before the new (or a
-        # freshly-minted) store opens the same file. Without this, an
-        # autosession-minted store that is then re-attached gets orphaned
-        # with its writer lock still held, which blocks a later resume.
+        # freshly-minted) store opens the same file. Detach the graph's Drive
+        # manager first so its dispatcher releases claims against a LIVE
+        # connection, not the companion repo the store close is about to drop.
         previous = self._session_stores.get(gid)
         if previous is not None and previous is not store:
+            if self._drive_runtime is not None:
+                await self._drive_runtime.detach_graph(gid)
             try:
                 previous.close(update_status=False)
             except Exception:  # pragma: no cover - defensive
@@ -819,6 +927,10 @@ class Terrarium:
             store = _autosession.mint_store(self, gid, path=store, agents=names)
             self._owned_sessions.add(gid)
         self._session_stores[gid] = store
+        # Bind the graph's session-backed Drive repository here (design §7.1) —
+        # before its creatures reach restoration-ready (§6.5).
+        if self._drive_runtime is not None:
+            await self._drive_runtime.bind_graph_store(gid, store)
         g = self._topology.graphs.get(gid)
         if g is None:
             return
@@ -855,6 +967,11 @@ class Terrarium:
 
     def _creature(self, ref: CreatureRef) -> Creature:
         return self.get_creature(self._resolve_creature_id(ref))
+
+    async def _drain_drive_topology(self) -> None:
+        """Apply any Drive row movement a merge/split just stashed (§6.6-6.7)."""
+        if self._drive_runtime is not None:
+            await self._drive_runtime.drain_topology()
 
     def _emit(self, event: EngineEvent) -> None:
         """Fan out an event to every subscriber whose filter matches."""

@@ -240,6 +240,11 @@ async def apply_recipe(
         for cid in list(engine.get_graph(graph_id).creature_ids):
             creature = engine.get_creature(cid)
             await creature.start()
+            # Arm the barrier-gated Drive reconcile/dispatcher start, as every
+            # other creature-start site does (engine.add_creature / engine.start
+            # / resume). Recipe apply starts creatures directly, not via those.
+            if engine._drive_runtime is not None:
+                engine._drive_runtime.schedule_reconcile(creature)
 
     logger.info(
         "Recipe applied",

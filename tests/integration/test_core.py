@@ -1667,3 +1667,29 @@ class TestCoreIntegration:
                 str(m.get("content", "")) for m in file_call_msgs
             )
             assert "inline-file-marker" in joined_file_call
+
+            # --- run_event: correlated custom-event ingress (Phase E) ---
+            # ``Agent.run_event`` drives a pre-built TriggerEvent (a Drive
+            # delivery shape) and returns a correlated TurnResult whose
+            # ``correlation_id`` echoes the event's ``delivery_id`` through
+            # context -> finalization -> result. It is NOT user input, so
+            # ``turn_index`` is left untouched — the public ingress the Drive
+            # dispatcher delivers over.
+            drive_llm = ScriptedLLM(
+                [ScriptEntry("drive turn settled", match="correlated-ingress")]
+            )
+            agent.llm = drive_llm
+            agent.controller.llm = drive_llm
+            turn_before = agent._turn_index
+            drive_event = TriggerEvent(
+                type="drive_ready",
+                content="correlated-ingress marker",
+                context={"delivery_id": "corr-77"},
+                stackable=False,
+            )
+            result = await agent.run_event(drive_event)
+            assert result.status == "ok"
+            assert result.correlation_id == "corr-77"
+            assert "drive turn settled" in result.text
+            assert drive_llm.call_count == 1
+            assert agent._turn_index == turn_before

@@ -134,6 +134,11 @@ class Agent(
         self._strict = strict
         self._running = False
         self._shutdown_event = asyncio.Event()
+        # Set once the startup trigger's awaited turn has settled inside
+        # ``_drive_input`` (or immediately when no startup trigger is
+        # configured). The Terrarium restoration barrier waits on this so
+        # Drive reconciliation never runs against an un-settled creature.
+        self._startup_settled = asyncio.Event()
         self._processing_lock = asyncio.Lock()
         self._pending_mid_turn_inputs: list[TriggerEvent] = []
         self._bg_dispatch_acks: list[str] = []
@@ -262,6 +267,8 @@ class Agent(
         self._running = True
         self._stopped = False
         self._shutdown_event.clear()
+        # Fresh run: the startup trigger has not settled yet.
+        self._startup_settled.clear()
 
         # Initialize MCP client manager if mcp_servers configured
         await self._init_mcp()
@@ -675,6 +682,9 @@ class Agent(
 
             # Fire startup trigger if configured
             await self._fire_startup_trigger()
+            # Startup turn (if any) has now settled — release the
+            # restoration barrier so engine-side Drive reconciliation runs.
+            self._startup_settled.set()
 
             idle_logged = False
             while self._running:

@@ -496,6 +496,54 @@ class TestComposeIntegration:
             assert "second message" in joined
             assert "third message" in joined
 
+    async def test_agent_forwards_drive_args_to_private_engine(self, tmp_path):
+        """``agent(...)`` mints a PRIVATE Terrarium when no engine is passed;
+        explicit Drive runtime args must forward to it (design §8.3). A plain
+        ``agent(...)`` stays Drive-disabled."""
+        from kohakuterrarium.terrarium.drive.config import (
+            DriveRuntimeConfig,
+            default_registrations,
+        )
+        from kohakuterrarium.terrarium.drive.models import ActorRef
+        from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
+
+        # A plain private-engine agent is Drive-free.
+        async with await agent(_config("plain", tmp_path)) as plain:
+            assert plain._session._engine.drives is None
+
+        async with await agent(
+            _config("driven", tmp_path),
+            drive_config=DriveRuntimeConfig(enabled=True),
+            drive_registrations=default_registrations(),
+        ) as driven:
+            engine = driven._session._engine
+            creature = driven._session._creature
+            assert engine.drives is not None
+            # The forwarded runtime injected the self-service tools + prompt.
+            assert "drive_create" in creature.agent.registry.list_tools()
+            assert "Drive kind: generic" in creature.agent.get_system_prompt()
+            # And the private engine's per-graph manager actually works.
+            svc = ActorRef("service", "ops")
+            rec = await engine.drives.manager_for(creature.graph_id).create_drive(
+                CreateDriveRequest(
+                    kind="generic",
+                    title="composed",
+                    scope_type="graph",
+                    scope_id=creature.graph_id,
+                    owner=svc,
+                    owner_scope="service",
+                    created_by=svc,
+                    spec={},
+                ),
+                actor=svc,
+                graph_id=creature.graph_id,
+                is_privileged=True,
+            )
+            got = await engine.drives.manager_for(creature.graph_id).get_drive(
+                rec.drive_id
+            )
+            assert got is not None and got.title == "composed"
+
     async def test_iterate_loops_a_pipeline_until_condition(self, tmp_path):
         """``BaseRunnable.iterate`` — the native-control-flow loop from
         the ``compose/__init__`` docstring:

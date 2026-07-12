@@ -88,15 +88,23 @@ class AgentFactory(BaseRunnable):
         engine: Terrarium | None = None,
         pwd: str | Path | None = None,
         llm: Any = None,
+        drive_config: Any = None,
+        drive_registrations: "tuple[Any, ...] | list[Any]" = (),
+        drive_store: Any = None,
     ):
         self._config = config
         self._engine = engine
         self._pwd = pwd
         self._llm = llm
+        self._drive = (drive_config, tuple(drive_registrations), drive_store)
 
     async def run(self, input: Any) -> str:
         session = await _engine_session(
-            self._config, engine=self._engine, pwd=self._pwd, llm=self._llm
+            self._config,
+            engine=self._engine,
+            pwd=self._pwd,
+            llm=self._llm,
+            drive=self._drive,
         )
         try:
             parts: list[str] = []
@@ -121,6 +129,9 @@ async def agent(
     engine: Terrarium | None = None,
     pwd: str | Path | None = None,
     llm: Any = None,
+    drive_config: Any = None,
+    drive_registrations: "tuple[Any, ...] | list[Any]" = (),
+    drive_store: Any = None,
 ) -> AgentRunnable:
     """Create a persistent AgentRunnable (starts immediately).
 
@@ -130,13 +141,23 @@ async def agent(
             engine is created and torn down with the runnable.
         pwd: Working directory for the creature (no global chdir).
         llm: Profile name / :class:`LLMProfile` / provider instance.
+        drive_config / drive_registrations / drive_store: explicit Drive
+            runtime args forwarded to the PRIVATE engine when ``engine`` is
+            ``None`` (design §8.3); ignored when a shared engine is passed —
+            that engine keeps its own Drive configuration.
 
     Usage::
 
         async with await agent("@kt-biome/creatures/swe", llm="fast") as a:
             result = await (a >> process)(task)
     """
-    session = await _engine_session(config, engine=engine, pwd=pwd, llm=llm)
+    session = await _engine_session(
+        config,
+        engine=engine,
+        pwd=pwd,
+        llm=llm,
+        drive=(drive_config, tuple(drive_registrations), drive_store),
+    )
     return AgentRunnable(session)
 
 
@@ -146,19 +167,30 @@ def factory(
     engine: Terrarium | None = None,
     pwd: str | Path | None = None,
     llm: Any = None,
+    drive_config: Any = None,
+    drive_registrations: "tuple[Any, ...] | list[Any]" = (),
+    drive_store: Any = None,
 ) -> AgentFactory:
     """Create an ephemeral AgentFactory (no startup cost).
 
     Each call to ``run()`` creates a fresh agent and destroys it after.
-    Takes the same ``engine`` / ``pwd`` / ``llm`` keywords as
-    :func:`agent`.
+    Takes the same ``engine`` / ``pwd`` / ``llm`` and explicit Drive runtime
+    keywords as :func:`agent` (the Drive args apply only to the private engine).
 
     Usage::
 
         specialist = factory(make_config("coder"), llm=my_provider)
         result = await specialist("Write a function that ...")
     """
-    return AgentFactory(config, engine=engine, pwd=pwd, llm=llm)
+    return AgentFactory(
+        config,
+        engine=engine,
+        pwd=pwd,
+        llm=llm,
+        drive_config=drive_config,
+        drive_registrations=drive_registrations,
+        drive_store=drive_store,
+    )
 
 
 # ── Engine-backed adapter ────────────────────────────────────────────
@@ -199,10 +231,16 @@ async def _engine_session(
     engine: Terrarium | None,
     pwd: str | Path | None,
     llm: Any,
+    drive: "tuple[Any, tuple[Any, ...], Any]" = (None, (), None),
 ) -> _EngineChatSession:
     owns_engine = engine is None
     if owns_engine:
-        engine = Terrarium()
+        drive_config, drive_registrations, drive_store = drive
+        engine = Terrarium(
+            drive_config=drive_config,
+            drive_registrations=drive_registrations,
+            drive_store=drive_store,
+        )
         await engine.__aenter__()
     try:
         spec = str(config) if isinstance(config, (str, Path)) else config

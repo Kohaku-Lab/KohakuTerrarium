@@ -18,6 +18,7 @@ import pytest
 from kohakuterrarium.errors import AgentNotRunningError, TurnError, TurnTimeoutError
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config_types import AgentConfig, InputConfig, OutputConfig
+from kohakuterrarium.core.events import TriggerEvent
 from kohakuterrarium.core.turn import (
     Activity,
     AgentEventStream,
@@ -25,6 +26,16 @@ from kohakuterrarium.core.turn import (
     TurnEnded,
 )
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
+
+
+def _drive_event(delivery_id="d-1", *, corr_key="delivery_id"):
+    """A pre-built non-stackable ingress event (a Drive delivery shape)."""
+    return TriggerEvent(
+        type="drive_ready",
+        content="pursue the drive",
+        context={corr_key: delivery_id},
+        stackable=False,
+    )
 
 
 class _ExplodingLLM(ScriptedLLM):
@@ -114,6 +125,55 @@ class TestRun:
         agent = await Agent.build(_cfg(tmp_path), llm=ScriptedLLM(["x"]))
         with pytest.raises(AgentNotRunningError):
             await agent.run("hello")
+
+
+class TestRunEvent:
+    """``Agent.run_event`` — the additive public ingress the Drive dispatcher
+    delivers over (design §5.1-5.2)."""
+
+    async def test_prebuilt_event_runs_and_echoes_correlation(self, tmp_path):
+        agent = await _build(tmp_path, ScriptedLLM(["drive acknowledged"]))
+        try:
+            result = await agent.run_event(_drive_event("d-42"))
+            assert result.status == "ok"
+            assert "drive acknowledged" in result.text
+            # The delivery id survives context -> finalization -> result.
+            assert result.correlation_id == "d-42"
+        finally:
+            await agent.stop()
+
+    async def test_correlation_id_context_fallback(self, tmp_path):
+        agent = await _build(tmp_path, ScriptedLLM(["ok"]))
+        try:
+            result = await agent.run_event(
+                _drive_event("c-9", corr_key="correlation_id")
+            )
+            assert result.correlation_id == "c-9"
+        finally:
+            await agent.stop()
+
+    async def test_stopped_agent_rejects_not_silently(self, tmp_path):
+        # Never started: the event must not run, and the result says so
+        # distinctly (status="rejected"), never a hollow ok.
+        agent = await Agent.build(_cfg(tmp_path), llm=ScriptedLLM(["never"]))
+        result = await agent.run_event(_drive_event("d-x"), raise_on_error=True)
+        assert result.status == "rejected"
+        assert result.correlation_id == "d-x"
+        assert result.text == ""
+        # ScriptedLLM was never invoked.
+        assert agent.llm.call_count == 0
+
+    async def test_error_turn_raises_when_requested(self, tmp_path):
+        agent = await _build(tmp_path, _ExplodingLLM([]))
+        try:
+            with pytest.raises(TurnError, match="provider exploded"):
+                await agent.run_event(_drive_event("d-err"), raise_on_error=True)
+            # Without raise_on_error the settled error is returned.
+            result = await agent.run_event(_drive_event("d-err2"))
+            assert result.status == "error"
+            assert result.correlation_id == "d-err2"
+        finally:
+            await agent.stop()
 
 
 class TestRunStream:

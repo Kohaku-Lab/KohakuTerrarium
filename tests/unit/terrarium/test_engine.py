@@ -14,6 +14,16 @@ from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.events import EventFilter, EventKind
 from kohakuterrarium.testing.terrarium import _FakeAgent, TestTerrariumBuilder
 
+
+async def _wait_true(predicate, *, timeout: float = 5.0) -> None:
+    """Yield to the loop until ``predicate()`` holds (barrier-gated async work)."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not predicate():
+        if asyncio.get_running_loop().time() > deadline:
+            raise AssertionError("condition not met within timeout")
+        await asyncio.sleep(0.005)
+
+
 # ── construction / context manager ─────────────────────────────
 
 
@@ -651,3 +661,124 @@ class TestAttachSessionReplace:
         await t.attach_session("g1", s)  # same object — must NOT close it
         assert getattr(s, "_closed", False) is False
         s.close()
+
+
+# ── Drive runtime (Phase E) ────────────────────────────────────
+
+
+class TestDriveRuntime:
+    """Explicit Drive args, zero-Drive no-op behavior, and shutdown drain."""
+
+    def _enabled(self, **over):
+        from kohakuterrarium.terrarium.drive.config import (
+            DriveRuntimeConfig,
+            default_registrations,
+        )
+
+        return dict(
+            drive_config=DriveRuntimeConfig(enabled=True, **over),
+            drive_registrations=default_registrations(),
+        )
+
+    def test_zero_drive_engine_has_no_runtime(self):
+        assert Terrarium().drives is None
+
+    def test_enabled_empty_registrations_rejected_at_construction(self):
+        from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
+        from kohakuterrarium.terrarium.drive.errors import DriveValidationError
+
+        with pytest.raises(DriveValidationError):
+            Terrarium(drive_config=DriveRuntimeConfig(enabled=True))
+
+    def test_disabled_config_builds_no_runtime(self):
+        from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
+
+        assert Terrarium(drive_config=DriveRuntimeConfig(enabled=False)).drives is None
+
+    async def test_zero_drive_creature_gets_no_drive_service(self):
+        from kohakuterrarium.terrarium.channels import DRIVE_SERVICE_KEY
+
+        t = await TestTerrariumBuilder().with_creature("alice").build()
+        try:
+            env = t._environments[t.get_creature("alice").graph_id]
+            assert env.get(DRIVE_SERVICE_KEY) is None
+        finally:
+            await t.shutdown()
+
+    async def test_drive_enabled_registers_service_and_starts_dispatcher(self):
+        from kohakuterrarium.terrarium.channels import DRIVE_SERVICE_KEY
+
+        t = Terrarium(**self._enabled())
+        async with t:
+            c = Creature(creature_id="w", name="w", agent=_FakeAgent(name="w"))
+            await t.add_creature(c)
+            env = t._environments[c.graph_id]
+            assert env.get(DRIVE_SERVICE_KEY) is t.drives
+            # Dispatcher start is barrier-gated (design §6.5): it starts once the
+            # creature crosses the restoration barrier (async), not eagerly on add.
+            await _wait_true(lambda: t.drives.manager.dispatcher._task is not None)
+        # __aexit__ -> shutdown drained + stopped the dispatcher.
+        assert t.drives.manager.dispatcher._task is None
+
+    async def test_shutdown_drains_before_stopping_creatures(self):
+        t = Terrarium(**self._enabled())
+        await t.__aenter__()
+        c = Creature(creature_id="w", name="w", agent=_FakeAgent(name="w"))
+        await t.add_creature(c)
+        # Barrier-gated start (design §6.5): wait for the reconcile to start it.
+        await _wait_true(lambda: t.drives.manager.dispatcher._task is not None)
+        await t.shutdown()
+        assert t.drives.manager.dispatcher._task is None
+
+    async def test_reconfigure_on_disabled_engine_raises(self):
+        with pytest.raises(RuntimeError):
+            Terrarium().reconfigure_drives([])
+
+    async def test_reconfigure_delegates_to_runtime(self):
+        from kohakuterrarium.terrarium.drive.config import default_registrations
+        from kohakuterrarium.terrarium.drive.runtime import APPLIED_LIVE
+
+        t = Terrarium(**self._enabled())
+        async with t:
+            # Re-applying the same set is a live no-op-shaped apply.
+            assert t.reconfigure_drives(default_registrations()) == APPLIED_LIVE
+
+    async def test_from_recipe_forwards_drive_args(self):
+        # Constructor forwarding (design §8.3): the recipe itself stays
+        # Drive-unaware, but the engine it builds is Drive-enabled.
+        from kohakuterrarium.terrarium.config import TerrariumConfig
+
+        recipe = TerrariumConfig(name="t", creatures=[], channels=[])
+        t = await Terrarium.from_recipe(recipe, **self._enabled())
+        try:
+            assert t.drives is not None
+        finally:
+            await t.shutdown()
+
+    async def test_with_creature_forwards_drive_args(self):
+        c = Creature(creature_id="w", name="w", agent=_FakeAgent(name="w"))
+        t, creature = await Terrarium.with_creature(c, **self._enabled())
+        try:
+            assert t.drives is not None
+            # The creature's graph got a manager + started dispatcher.
+            assert t.drives.peek_manager(creature.graph_id) is not None
+        finally:
+            await t.shutdown()
+
+    async def test_two_disconnected_graphs_have_isolated_managers(self):
+        # Per-graph partitioning (design §3.1): each disconnected graph owns
+        # its own manager + repository.
+        t = Terrarium(**self._enabled())
+        async with t:
+            a = await t.add_creature(
+                Creature(creature_id="a", name="a", agent=_FakeAgent(name="a"))
+            )
+            b = await t.add_creature(
+                Creature(creature_id="b", name="b", agent=_FakeAgent(name="b"))
+            )
+            assert a.graph_id != b.graph_id
+            ma = t.drives.peek_manager(a.graph_id)
+            mb = t.drives.peek_manager(b.graph_id)
+            assert ma is not None and mb is not None
+            assert ma is not mb
+            assert ma.repository is not mb.repository

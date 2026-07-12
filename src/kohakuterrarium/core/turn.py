@@ -57,8 +57,12 @@ class TurnResult:
     """Outcome of one full turn.
 
     ``status`` is one of ``"ok"`` / ``"error"`` / ``"timeout"`` /
-    ``"interrupted"``.  ``text`` is the concatenated assistant text.
-    ``error`` carries the failure detail when status != ok.
+    ``"interrupted"`` / ``"rejected"`` (the last means the event never ran
+    because the agent was stopped — see ``Agent.run_event``).  ``text`` is
+    the concatenated assistant text.  ``error`` carries the failure detail
+    when status != ok.  ``correlation_id`` echoes the driving event's
+    delivery/correlation id (``run_event`` ingress) so an out-of-band
+    consumer can match a settlement to the event it drove.
     """
 
     status: str
@@ -68,6 +72,7 @@ class TurnResult:
     activities: list[Activity] = field(default_factory=list)
     usage: dict[str, Any] | None = None
     duration_s: float = 0.0
+    correlation_id: str | None = None
 
     @property
     def ok(self) -> bool:

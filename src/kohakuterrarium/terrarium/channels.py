@@ -48,6 +48,18 @@ logger = get_logger(__name__)
 # resolve the engine without a global singleton.
 TERRARIUM_ENGINE_KEY = "terrarium_engine"
 
+# Environment registration key for the Drive runtime handle. Registered
+# only on a Drive-enabled engine's graph environments; the self-service
+# Drive tools read it via ``ToolContext.environment.get(DRIVE_SERVICE_KEY)``
+# to reach the DriveManager (a disabled engine never registers it, so the
+# tools fail closed there).
+DRIVE_SERVICE_KEY = "drive_service"
+
+
+def register_drive_service(env: "Environment", service: Any) -> None:
+    """Register the Drive runtime handle on a graph environment (enabled only)."""
+    env.register(DRIVE_SERVICE_KEY, service)
+
 
 def register_channel_in_environment(
     registry: ChannelRegistry,
@@ -485,6 +497,13 @@ async def ensure_same_graph(
     # between agentAPI.list and terrariumAPI.list as snapshots roll in.
     _promote_session_kind_after_merge(keep_gid)
     _emit_session_kind_changed(engine, keep_gid, drop_gids, delta)
+    # Drain the Drive row movement this merge stashed BEFORE returning (R1-12).
+    # ``apply_merge`` only stashes the capture; without draining here a caller
+    # like ``group_wire`` that invokes this primitive directly (not through
+    # ``Terrarium.connect``) would leave the absorbed graph's Drive rows in its
+    # obsolete manager until some unrelated later topology op. Idempotent — a
+    # subsequent engine-level drain finds nothing pending.
+    await engine._drain_drive_topology()
     engine._emit(
         EngineEvent(
             kind=EventKind.TOPOLOGY_CHANGED,

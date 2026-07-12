@@ -135,6 +135,80 @@ class TestRuntimeAdds:
         finally:
             await agent.stop()
 
+    async def test_add_plugin_refreshes_prompt_contribution(self, tmp_path):
+        # Q5 fix: add_plugin now recomputes the aggregated prompt so a
+        # plugin's get_prompt_content lands in the LIVE system message.
+        class ProsePlugin(BasePlugin):
+            name = "prose_probe"
+
+            def get_prompt_content(self, context):
+                return "PROSE-PROBE-MARKER guidance."
+
+        agent = await kt.Agent.build(_cfg(tmp_path), llm=ScriptedLLM(["x"]))
+        await agent.start()
+        try:
+            assert "PROSE-PROBE-MARKER" not in agent.get_system_prompt()
+            await agent.add_plugin(ProsePlugin())
+            assert "PROSE-PROBE-MARKER" in agent.get_system_prompt()
+            # Idempotent-ish: a second refresh must not duplicate the block.
+            agent.refresh_system_prompt()
+            assert agent.get_system_prompt().count("PROSE-PROBE-MARKER") == 1
+        finally:
+            await agent.stop()
+
+    async def test_add_plugin_contributes_user_command_and_disable_removes(
+        self, tmp_path
+    ):
+        # A plugin's user-command contribution enters the live registry on add
+        # and leaves it on disable (design §11.3).
+        class _Cmd:
+            name = "probecmd"
+
+        class UserCmdPlugin(BasePlugin):
+            name = "usercmd_probe"
+
+            def contribute_user_commands(self):
+                return {"probecmd": _Cmd()}
+
+        agent = await kt.Agent.build(_cfg(tmp_path), llm=ScriptedLLM(["x"]))
+        await agent.start()
+        try:
+            assert "probecmd" not in agent.list_user_commands()
+            await agent.add_plugin(UserCmdPlugin())
+            assert "probecmd" in agent.list_user_commands()
+            agent.plugins.disable("usercmd_probe")
+            assert "probecmd" not in agent.list_user_commands()
+        finally:
+            await agent.stop()
+
+    async def test_add_plugin_replaces_same_named_disabled_instance(self, tmp_path):
+        # Regression: a same-named plugin registered *disabled* (as packages do
+        # for installed-but-not-enabled plugins) must not shadow a subsequent
+        # enabled add_plugin — the add replaces it, and its command appears.
+        class _Cmd:
+            name = "dupcmd"
+
+        class DupPlugin(BasePlugin):
+            name = "dup_probe"
+
+            def contribute_user_commands(self):
+                return {"dupcmd": _Cmd()}
+
+        agent = await kt.Agent.build(_cfg(tmp_path), llm=ScriptedLLM(["x"]))
+        await agent.start()
+        try:
+            # Simulate a package having registered it disabled.
+            agent.plugins.register(DupPlugin())
+            agent.plugins.disable("dup_probe")
+            assert "dupcmd" not in agent.list_user_commands()
+            await agent.add_plugin(DupPlugin())
+            # Exactly one active instance now, contributing its command.
+            names = [getattr(p, "name", "") for p in agent.plugins._plugins]
+            assert names.count("dup_probe") == 1
+            assert "dupcmd" in agent.list_user_commands()
+        finally:
+            await agent.stop()
+
 
 class TestPluginConstructorContract:
     def test_no_loader_path_uses_kwargs_contract(self, tmp_path, monkeypatch):
