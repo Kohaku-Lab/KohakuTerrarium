@@ -511,9 +511,15 @@ class SessionIndex:
         """
         if self._closed:
             return
+        # Release each table via its actual API. The FTS ``_search`` vault is a
+        # ``TextVault`` with no ``close()`` — the ``del self._search._vault``
+        # below drops its handle — so hasattr-guard rather than call+warn.
         for table in (self._entries, self._search, self._meta):
+            close = getattr(table, "close", None)
+            if not callable(close):
+                continue
             try:
-                table.close()
+                close()
             except Exception as exc:  # noqa: BLE001
                 logger.warning("close table failed", error=str(exc), exc_info=True)
         for table in (self._entries, self._meta):

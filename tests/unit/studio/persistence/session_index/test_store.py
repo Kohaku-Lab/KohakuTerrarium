@@ -1,5 +1,7 @@
 """Unit tests for ``session_index.store`` — every code path."""
 
+import logging
+
 import pytest
 
 from kohakuterrarium.studio.persistence.session_index.entry import (
@@ -393,6 +395,32 @@ class TestSchema:
 
     def test_path_property(self, idx, tmp_path):
         assert idx.path == str(tmp_path / ".kt-index.kvault")
+
+    def test_close_logs_no_warning_for_fts_vault(self, tmp_path):
+        # The FTS ``_search`` TextVault has no ``close()``; close() must release
+        # it via the del-pattern without logging a "close table failed" warning
+        # on every teardown. (Framework loggers set propagate=False, so attach a
+        # handler directly rather than relying on caplog.)
+        records: list[logging.LogRecord] = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record):
+                records.append(record)
+
+        log = logging.getLogger(
+            "kohakuterrarium.studio.persistence.session_index.store"
+        )
+        handler = _Capture(level=logging.WARNING)
+        log.addHandler(handler)
+        try:
+            i = SessionIndex(tmp_path / ".kt-index.kvault")
+            i.upsert(_entry(filename="a.kohakutr"))
+            i.close()
+        finally:
+            log.removeHandler(handler)
+        assert not any("close table failed" in r.getMessage() for r in records), [
+            r.getMessage() for r in records
+        ]
 
 
 # ── Mutations ─────────────────────────────────────────────────────
