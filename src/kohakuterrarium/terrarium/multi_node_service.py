@@ -9,9 +9,6 @@ engine.  Local is local, multi-node is multi-node — never mixed.
 
 It keeps:
 
-- A dict ``{node_id: RemoteTerrariumService}`` for every connected
-  worker.  Entries are added when a client joins membership and
-  removed when it leaves.
 - A ``creature_id → home_node`` registry rebuilt from ``list_creatures``
   fan-out, and kept up-to-date as ``add_creature`` / ``remove_creature``
   succeed.
@@ -36,6 +33,11 @@ from typing import Any
 
 from kohakuterrarium.laboratory._internal.host import HostEngine
 from kohakuterrarium.laboratory.streams import StreamDemux
+from kohakuterrarium.terrarium.drive.multi_node import DriveRouteCache
+from kohakuterrarium.terrarium.drive.multi_node_ops import MultiNodeDriveServiceMixin
+from kohakuterrarium.terrarium.drive.service_protocol import (
+    DriveServiceUnsupportedMixin,
+)
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.events import (
     ConnectionResult,
@@ -89,12 +91,14 @@ class CrossNodeNotSupportedError(RuntimeError):
     """Raised for ops that would require cross-node wiring (deferred)."""
 
 
-class MultiNodeTerrariumService:
+class MultiNodeTerrariumService(
+    MultiNodeDriveServiceMixin, DriveServiceUnsupportedMixin
+):
     """Composite TerrariumService for the controller (lab-host mode).
-
     Routes every agent operation to a connected worker.  The host runs
     no agents — :attr:`engine` raises and ``service_for("_host")`` is a
-    ``KeyError``.
+    ``KeyError``.  Drive ops route to the graph-repository home worker via
+    ``MultiNodeDriveServiceMixin`` + the ``drive_id -> home_node`` route cache.
     """
 
     def __init__(
@@ -104,14 +108,12 @@ class MultiNodeTerrariumService:
         coordination_engine: Terrarium | None = None,
     ) -> None:
         self._host = host
-        # Coordination-only engine — holds cross-node channel objects
-        # for the broadcast / output-wire forwarders.  NEVER runs an
-        # agent: no code path calls ``add_creature`` on it.
         self._coordination_engine = coordination_engine
-        # Demux installed once on the host; shared by every remote service.
         self._demux = StreamDemux(host)
         self._remotes: dict[str, RemoteTerrariumService] = {}
+        self._membership_epoch = 0
         self._home: dict[str, str] = {}  # creature_id → node_id
+        self._drive_routes = DriveRouteCache()  # drive/delivery/proposal → home
         # name → (node_id, creature_id).  Populated as a side effect of
         # ``list_creatures``.  Read by the controller's
         # :class:`TerrariumOutputWireAdapter` target resolver to route
@@ -200,6 +202,7 @@ class MultiNodeTerrariumService:
             return self._remotes[node_id]
         remote = RemoteTerrariumService(self._host, node_id, demux=self._demux)
         self._remotes[node_id] = remote
+        self._membership_epoch = getattr(self, "_membership_epoch", 0) + 1
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -217,9 +220,15 @@ class MultiNodeTerrariumService:
     def drop_remote(self, node_id: str) -> None:
         """Remove a client and purge every per-node cache.
 
-        Thin delegator to :func:`multi_node_routing.purge_node_caches`.
+        Delegates to :func:`multi_node_routing.purge_node_caches`, then drops the
+        Drive route cache's active routes (sticky last-home survives so a read can
+        still report "home offline").
         """
+        if node_id not in self._remotes:
+            return
         purge_node_caches(self, node_id)
+        self._drive_routes.purge_node(node_id)
+        self._membership_epoch = getattr(self, "_membership_epoch", 0) + 1
 
     def connected_nodes(self) -> tuple[str, ...]:
         """The connected *worker* nodes — the host is not in this set.
@@ -718,9 +727,12 @@ class MultiNodeTerrariumService:
         creature_id: str,
         command: str,
         args: dict[str, Any] | str | None = None,
+        **kwargs: Any,
     ) -> dict[str, Any]:
+        # ``principal`` / ``is_operator`` (R1-20) ride to the home worker.
         return await self._route_per_creature(
-            creature_id, lambda svc: svc.execute_command(creature_id, command, args)
+            creature_id,
+            lambda svc: svc.execute_command(creature_id, command, args, **kwargs),
         )
 
     async def list_output_wiring(self, creature_id: str) -> list[dict[str, Any]]:

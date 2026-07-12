@@ -37,6 +37,10 @@ from kohakuterrarium.laboratory._internal.client import (
 )
 from kohakuterrarium.laboratory.streams import RemoteStream, StreamDemux
 from kohakuterrarium.terrarium.creature_host import Creature
+from kohakuterrarium.terrarium.drive.remote_ops import RemoteDriveServiceMixin
+from kohakuterrarium.terrarium.drive.service_protocol import (
+    DriveServiceUnsupportedMixin,
+)
 from kohakuterrarium.terrarium.events import (
     ConnectionResult,
     DisconnectionResult,
@@ -61,6 +65,9 @@ from kohakuterrarium.terrarium.wire import (
     unpack_graph_topology,
     unpack_topology_delta,
 )
+from kohakuterrarium.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 # ``regenerate`` / ``edit_message`` block through an entire LLM turn on
 # the worker — they need a far larger ceiling than the 30s
@@ -108,12 +115,17 @@ def _maybe_raise(body: Any) -> dict[str, Any]:
     return body
 
 
-class RemoteTerrariumService:
+class RemoteTerrariumService(RemoteDriveServiceMixin, DriveServiceUnsupportedMixin):
     """Controller-side proxy for a worker node's Terrarium engine.
 
     Implements the :class:`TerrariumService` Protocol over Lab APP
     requests.  Construct one per remote node the controller knows
     about; typically managed by :class:`MultiNodeTerrariumService`.
+
+    The Drive surface comes from
+    :class:`~kohakuterrarium.terrarium.drive.remote_ops.RemoteDriveServiceMixin`,
+    which routes every ``drive_*`` op to this worker's ``terrarium.runtime``
+    adapter; the unsupported stubs remain a defensive MRO floor.
     """
 
     def __init__(
@@ -549,8 +561,13 @@ class RemoteTerrariumService:
         creature_id: str,
         command: str,
         args: dict[str, Any] | str | None = None,
+        *,
+        principal: str = "user:local",
+        is_operator: bool = False,
     ) -> dict[str, Any]:
-        # Args is conventionally a string; accept dict for forward-compat.
+        # Args is conventionally a string; accept dict for forward-compat. The
+        # host-authorized principal/operator ride the trusted host->worker link
+        # (R1-20); the worker rejects a non-host origin (R1-04).
         body = _maybe_raise(
             await self._req(
                 "execute_command",
@@ -558,6 +575,8 @@ class RemoteTerrariumService:
                     "creature_id": creature_id,
                     "command": command,
                     "args": args if args is not None else "",
+                    "principal": principal,
+                    "is_operator": is_operator,
                 },
             )
         )

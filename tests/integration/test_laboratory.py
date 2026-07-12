@@ -17,12 +17,17 @@ import pytest
 from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
 from kohakuterrarium.laboratory.config import ClientConfig, HostConfig
-from kohakuterrarium.laboratory._internal.client import ClientConnector
+from kohakuterrarium.laboratory._internal.client import (
+    ClientConnector,
+    RequestAbortedError,
+    RequestTimeoutError,
+)
 from kohakuterrarium.laboratory._internal.host import HostEngine
 from kohakuterrarium.laboratory._internal.transport_inproc import InProcTransport
 from kohakuterrarium.laboratory.adapters import (
     StudioCatalogAdapter,
     StudioDeployAdapter,
+    StudioSettingsAdapter,
     TerrariumAttachAdapter,
     TerrariumBroadcastAdapter,
     TerrariumEventsAdapter,
@@ -38,7 +43,19 @@ from kohakuterrarium.llm.api_keys import (
     clear_api_key_resolver,
     register_api_key_resolver,
 )
+from kohakuterrarium.studio.nodes import NodeMap
 from kohakuterrarium.terrarium import Terrarium
+from kohakuterrarium.terrarium.drive.config import (
+    DriveRuntimeConfig,
+    default_registrations,
+)
+from kohakuterrarium.terrarium.drive.errors import (
+    CrossNodeDriveNotSupportedError,
+    DrivePermissionError,
+)
+from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
+from kohakuterrarium.terrarium.drive.multi_node import DriveHomeUnavailableError
+from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
 from kohakuterrarium.terrarium.multi_node_service import MultiNodeTerrariumService
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
@@ -129,6 +146,9 @@ def _attach_worker_stack(engine: Terrarium, client: ClientConnector, session_dir
     StudioDeployAdapter(engine, client, files_adapter=files_adapter)
     TerrariumSessionAdapter(engine, client)
     StudioCatalogAdapter(client)
+    # Node-targeted Drive settings surface (Phase H) — harmless on a
+    # Drive-disabled worker (apply/status report disabled).
+    StudioSettingsAdapter(engine, client)
     return session_attacher, identity_cache
 
 
@@ -528,6 +548,205 @@ class TestLaboratoryMultiNodeService:
                     attacher.close_all()
                 except Exception:
                     pass
+            await asyncio.gather(
+                _safe(w1_client.stop()),
+                _safe(w2_client.stop()),
+                _safe(w1_engine.shutdown()),
+                _safe(w2_engine.shutdown()),
+                _safe(host_terrarium.shutdown()),
+                _safe(host_engine_lab.stop()),
+                return_exceptions=True,
+            )
+
+    async def test_distributed_drive_workflow(
+        self, tmp_path, monkeypatch, scripted_llm, _reset_inproc
+    ):
+        """One fat Drive-over-lab journey (design §8.5, §10):
+
+        set worker settings via the node-targeted surface -> spawn a privileged
+        creature on each Drive-enabled worker -> create a Drive through the
+        MultiNode service (routed to the graph's home worker) -> read it back via
+        fan-out + route cache -> route a write to home -> refuse cross-node
+        assignment -> drop the home worker (home-loss typed error, no second
+        writer) -> reconnect and rebuild the route via fan-out. Every assertion
+        observes a routed side effect, not a shape.
+        """
+        monkeypatch.setenv("KT_SESSION_DIR", str(tmp_path / "sessions"))
+        cfg_a = _write_creature_config(tmp_path, "drv_a")
+        cfg_b = _write_creature_config(tmp_path, "drv_b")
+        admin = ActorRef("service", "ops")
+
+        host_cfg = HostConfig(
+            bind_host="labdrv",
+            bind_port=1,
+            token=LAB_TOKEN,
+            heartbeat_timeout_seconds=10.0,
+        )
+        host_engine_lab = HostEngine(host_cfg, InProcTransport())
+        await host_engine_lab.start()
+        # The host coordination engine is Drive-free — it hosts channel objects,
+        # never agents, so it must own no DriveManager (design §8.5).
+        host_terrarium = Terrarium(session_dir=str(tmp_path / "host-sessions"))
+        assert getattr(host_terrarium, "drives", None) is None
+        service = MultiNodeTerrariumService(
+            host=host_engine_lab, coordination_engine=host_terrarium
+        )
+
+        async def start_drive_worker(name: str, session_dir):
+            cfg = ClientConfig(
+                client_name=name,
+                host_url="labdrv:1",
+                token=LAB_TOKEN,
+                reconnect_initial_delay_seconds=0.1,
+            )
+            client = ClientConnector(cfg, InProcTransport())
+            engine = Terrarium(
+                session_dir=str(session_dir),
+                drive_config=DriveRuntimeConfig(enabled=True),
+                drive_registrations=default_registrations(),
+            )
+            await client.start()
+            attacher, identity = _attach_worker_stack(engine, client, session_dir)
+            return engine, client, attacher
+
+        w1_engine, w1_client, w1_att = await start_drive_worker("w1", tmp_path / "w1")
+        w2_engine, w2_client, w2_att = await start_drive_worker("w2", tmp_path / "w2")
+
+        for _ in range(20):
+            if {"w1", "w2"} <= set(host_engine_lab.alive_clients()):
+                break
+            await asyncio.sleep(0.05)
+        assert {"w1", "w2"} <= set(host_engine_lab.alive_clients())
+        service.add_remote("w1")
+        service.add_remote("w2")
+
+        try:
+            # Real privileged creatures on each worker; capture their graph ids.
+            c1 = await w1_engine.add_creature(
+                cfg_a, is_privileged=True, io="none", strict=False, session=False
+            )
+            c2 = await w2_engine.add_creature(
+                cfg_b, is_privileged=True, io="none", strict=False, session=False
+            )
+            g1, g2 = c1.graph_id, c2.graph_id
+
+            # ── node-targeted settings reach the RIGHT worker's adapter ──
+            node_map = NodeMap(service)
+            w1_status = await node_map["w1"].settings.drives.status()
+            assert w1_status["node"] == "w1"
+            w1_runtime = await node_map["w1"].settings.drives.runtime_status()
+            assert w1_runtime["enabled"] is True  # w1 engine is Drive-enabled
+
+            # ── create routes to the graph's home worker ──
+            req = CreateDriveRequest(
+                kind="generic",
+                title="watch-w1",
+                scope_type="graph",
+                scope_id=g1,
+                owner=admin,
+                owner_scope="service",
+                created_by=admin,
+                spec={"target": "deploy"},
+            )
+            view = await service.create_drive(
+                req, graph_id=g1, actor=admin, is_privileged=True
+            )
+            did = view.record.drive_id
+
+            # ── read back: fan-out list + route-cache home resolution ──
+            got = await service.get_drive(did, actor=admin, is_privileged=True)
+            assert got.record.drive_id == did
+            assert service._drive_routes.get_drive_home(did) == "w1"
+            listed = await service.list_drives(actor=admin, is_privileged=True)
+            assert did in {v.record.drive_id for v in listed}
+
+            # ── write routes to home; runtime status aggregates ──
+            paused = await service.transition_drive(
+                did,
+                DriveStatus.PAUSED,
+                expected_revision=view.record.revision,
+                actor=admin,
+                is_privileged=True,
+            )
+            assert paused.record.status is DriveStatus.PAUSED
+            agg = await service.drive_runtime_status()
+            assert agg.enabled is True and agg.counts.get("paused", 0) >= 1
+
+            # ── R1-15: operator authority threads over the real host→worker
+            #    wire. A non-privileged actor with operator=True can create a
+            #    graph-scoped Drive on w1; the same actor without it is denied. ──
+            op_actor = ActorRef("user", "op1")
+            op_req = CreateDriveRequest(
+                kind="generic",
+                title="op-created",
+                scope_type="graph",
+                scope_id=g1,
+                owner=op_actor,
+                owner_scope="actor",
+                created_by=op_actor,
+                spec={},
+            )
+            op_view = await service.create_drive(
+                op_req, graph_id=g1, actor=op_actor, is_privileged=False, operator=True
+            )
+            assert op_view.record.owner == op_actor
+            with pytest.raises(DrivePermissionError):
+                await service.create_drive(
+                    op_req,
+                    graph_id=g1,
+                    actor=op_actor,
+                    is_privileged=False,
+                    operator=False,
+                )
+
+            # ── R1-04: the host refuses to forward a control-plane APP envelope
+            #    peer-to-peer. w2 tries to reach w1's studio.settings adapter
+            #    directly; the host drops it, so the request times out. ──
+            with pytest.raises((RequestTimeoutError, RequestAbortedError)):
+                await w2_client.request(
+                    to_node="w1",
+                    namespace="studio.settings",
+                    type="drive_status",
+                    body={},
+                    timeout=1.0,
+                )
+
+            # ── cross-node assignment is refused (design §10.1) ──
+            with pytest.raises(CrossNodeDriveNotSupportedError):
+                await service.assign_drive(
+                    did,
+                    c2.creature_id,
+                    g2,  # assignee graph lives on w2; Drive homed on w1
+                    expected_revision=paused.record.revision,
+                    actor=admin,
+                    is_privileged=True,
+                )
+
+            # ── home worker drops: write is a typed error, no second writer ──
+            service.drop_remote("w1")
+            with pytest.raises(DriveHomeUnavailableError):
+                await service.wake_drive(did, actor=admin, is_privileged=True)
+            # w2 never became a writer for w1's Drive.
+            assert not await service.list_drives(
+                actor=admin, graph_id=g1, is_privileged=True
+            )
+
+            # ── reconnect: host rebuilds the route via fan-out ──
+            service._drive_routes.invalidate_drive(did)
+            service.add_remote("w1")
+            got2 = await service.get_drive(did, actor=admin, is_privileged=True)
+            assert got2 is not None and got2.record.drive_id == did
+            assert service._drive_routes.get_drive_home(did) == "w1"
+        finally:
+            for attacher in (w1_att, w2_att):
+                try:
+                    attacher.close_all()
+                except Exception:
+                    pass
+            try:
+                clear_api_key_resolver()
+            except Exception:
+                pass
             await asyncio.gather(
                 _safe(w1_client.stop()),
                 _safe(w2_client.stop()),

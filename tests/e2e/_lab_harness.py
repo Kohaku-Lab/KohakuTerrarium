@@ -58,6 +58,7 @@ from kohakuterrarium.laboratory._internal.transport_ws import WebSocketTransport
 from kohakuterrarium.laboratory.adapters import (
     StudioCatalogAdapter,
     StudioDeployAdapter,
+    StudioSettingsAdapter,
     TerrariumAttachAdapter,
     TerrariumBroadcastAdapter,
     TerrariumEventsAdapter,
@@ -74,6 +75,10 @@ from kohakuterrarium.llm.api_keys import (
     register_api_key_resolver,
 )
 from kohakuterrarium.terrarium import Terrarium
+from kohakuterrarium.terrarium.drive.config import (
+    DriveRuntimeConfig,
+    default_registrations,
+)
 from kohakuterrarium.testing.llm import ScriptedLLM
 
 # Generous-but-finite: a healthy multi-node op (spawn / chat turn / stop)
@@ -259,11 +264,13 @@ class RealLabWorker:
         session_dir,
         *,
         token: str = LAB_TOKEN,
+        drive_enabled: bool = False,
     ) -> None:
         self.node_id = name
         self._host_ws_url = host_ws_url
         self._session_dir = str(session_dir)
         self._token = token
+        self._drive_enabled = drive_enabled
         self.engine: Terrarium | None = None
         self.client: ClientConnector | None = None
         self.identity_cache: IdentityCache | None = None
@@ -280,7 +287,15 @@ class RealLabWorker:
             ),
             WebSocketTransport(),
         )
-        self.engine = Terrarium(session_dir=self._session_dir)
+        drive_kwargs = (
+            {
+                "drive_config": DriveRuntimeConfig(enabled=True),
+                "drive_registrations": default_registrations(),
+            }
+            if self._drive_enabled
+            else {}
+        )
+        self.engine = Terrarium(session_dir=self._session_dir, **drive_kwargs)
         self._session_attacher = WorkerSessionAttacher(
             self.engine, self.client, session_dir=self._session_dir
         )
@@ -305,6 +320,7 @@ class RealLabWorker:
         StudioDeployAdapter(self.engine, self.client, files_adapter=files_adapter)
         TerrariumSessionAdapter(self.engine, self.client)
         StudioCatalogAdapter(self.client)
+        StudioSettingsAdapter(self.engine, self.client)
 
         await asyncio.wait_for(self.client.start(), timeout=OP_TIMEOUT)
         return self
@@ -380,6 +396,7 @@ class RealLabSubprocessWorker:
         log_level: str = "WARNING",
         extra_env: dict[str, str] | None = None,
         use_test_llm_seam: bool = True,
+        drive_enabled: bool = False,
     ) -> None:
         self.node_id = name
         self._host_ws_url = host_ws_url
@@ -387,6 +404,7 @@ class RealLabSubprocessWorker:
         self._token = token
         self._log_level = log_level
         self._extra_env = dict(extra_env or {})
+        self._drive_enabled = drive_enabled
         # When ``False``, the ``KT_TEST_LLM_SCRIPT`` env var is NOT
         # exported and the env-var seam at the top of ``_run_worker``
         # stays inactive — the worker takes the real
@@ -400,6 +418,17 @@ class RealLabSubprocessWorker:
         self._kt_session_dir = self._base_dir / "kt-sessions"
         self._kt_config_dir.mkdir(parents=True, exist_ok=True)
         self._kt_session_dir.mkdir(parents=True, exist_ok=True)
+        if drive_enabled:
+            # The subprocess resolves its OWN drive-settings.yaml at boot
+            # (cli/lab_client.py::resolve_drive_kwargs), so writing an enabled
+            # file here makes THIS worker Drive-enabled without touching the
+            # host — proving per-node settings isolation (design §8.4 Scope).
+            (self._kt_config_dir / "drive-settings.yaml").write_text(
+                "schema_version: 1\n"
+                "runtime:\n  enabled: true\n"
+                "registrations:\n  generic:\n    enabled: true\n    options: {}\n",
+                encoding="utf-8",
+            )
 
         self._script_path = self._base_dir / "llm_script.json"
         self.set_script(script if script is not None else ["OK"])

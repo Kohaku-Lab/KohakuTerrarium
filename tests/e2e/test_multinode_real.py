@@ -209,6 +209,60 @@ async def test_subprocess_harness_boots_host_and_worker(tmp_path, monkeypatch):
         )
 
 
+async def test_node_targeted_drive_settings_over_real_ws(tmp_path, monkeypatch):
+    """Node-targeted Drive settings resolve to the WORKER's own config home.
+
+    A subprocess worker boots Drive-enabled from its OWN ``drive-settings.yaml``
+    (via ``cli/lab_client.py`` resolving it at boot). The host's node-targeted
+    settings API then reaches that worker's ``studio.settings`` adapter over real
+    WS, while the host's own settings stay untouched — the per-node scope
+    isolation (design §8.4/§8.5) that in-process harnesses cannot show because
+    they share ``KT_CONFIG_DIR``.
+    """
+    monkeypatch.setenv("KT_SESSION_DIR", str(tmp_path / "host-sessions"))
+    install_scripted_llm(monkeypatch)
+
+    async with RealLabHost(tmp_path) as host:
+        async with RealLabSubprocessWorker(
+            "drv-worker", host.lab_ws_url, tmp_path / "drv-worker", drive_enabled=True
+        ) as worker:
+            await worker.wait_for_join(host, timeout=OP_TIMEOUT * 4)
+
+            # Node-targeted status routes to the worker's config home over WS.
+            r = await host.http.get(
+                "/api/settings/drives", params={"node": "drv-worker"}
+            )
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["node"] == "drv-worker"
+            assert body["runtime"]["enabled"] is True  # worker booted Drive-enabled
+
+            # The worker's LIVE Drive runtime is up (proves boot-time resolution).
+            r = await host.http.get(
+                "/api/settings/drives/runtime-status", params={"node": "drv-worker"}
+            )
+            assert r.status_code == 200 and r.json()["enabled"] is True
+
+            # The host's OWN settings are a DIFFERENT config home — still disabled.
+            r_host = await host.http.get("/api/settings/drives")
+            assert r_host.status_code == 200
+            assert r_host.json()["runtime"]["enabled"] is False
+
+            # A node-targeted save is worker-scoped and round-trips.
+            good = {
+                "schema_version": 1,
+                "runtime": {"enabled": True},
+                "registrations": {"generic": {"enabled": True, "options": {}}},
+            }
+            r = await host.http.put(
+                "/api/settings/drives",
+                params={"node": "drv-worker"},
+                json={"settings": good},
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["revision"]
+
+
 async def test_cross_node_user_named_channel_wires_both_sides(tmp_path, monkeypatch):
     """User-named channel must survive the cross-node wire path.
 

@@ -478,3 +478,156 @@ class TestAuthEmptyTokenAcceptsAnything:
                 await client.stop()
         finally:
             await host.stop()
+
+
+# ──────────────────────────────────────────────────────────────────
+# Drive multi-node invariants (Phase H): single canonical writer, the
+# host coordination engine is never a Drive runtime, and settings scope
+# never configures the agent-free host engine (design §8.5, §10).
+# ──────────────────────────────────────────────────────────────────
+
+from kohakuterrarium.bootstrap import agent_init as _agent_init_mod  # noqa: E402
+from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod  # noqa: E402
+from kohakuterrarium.studio.nodes import _LocalNodeDriveSettings  # noqa: E402
+from kohakuterrarium.terrarium import Terrarium  # noqa: E402
+from kohakuterrarium.terrarium.drive.config import (  # noqa: E402
+    DriveRuntimeConfig,
+    default_registrations,
+)
+from kohakuterrarium.terrarium.drive.models import ActorRef  # noqa: E402
+from kohakuterrarium.terrarium.drive.multi_node import (  # noqa: E402
+    DriveHomeUnavailableError,
+)
+from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest  # noqa: E402
+from kohakuterrarium.terrarium.multi_node_service import (  # noqa: E402
+    MultiNodeTerrariumService,
+)
+from kohakuterrarium.terrarium.service import LocalTerrariumService  # noqa: E402
+from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry  # noqa: E402
+from tests.integration.test_laboratory import (  # noqa: E402
+    _attach_worker_stack,
+    _write_creature_config,
+)
+
+
+class TestDriveHostCoordinationEngineIsDriveFree:
+    async def test_coordination_engine_owns_no_drive_manager(self):
+        # The lab-host coordination engine hosts cross-node channel objects,
+        # never agents; even when workers run Drive, it must own no DriveManager
+        # and expose no Drive writer surface (design §8.5).
+        host = await _start_host(port=140)
+        coord = Terrarium()
+        try:
+            svc = MultiNodeTerrariumService(host=host, coordination_engine=coord)
+            assert getattr(coord, "drives", None) is None
+            assert svc.coordination_engine is coord
+            with pytest.raises(RuntimeError):
+                _ = svc.engine  # host runs no agent engine → cannot be a writer
+        finally:
+            await coord.shutdown()
+            await host.stop()
+
+
+class TestDriveSettingsScope:
+    async def test_apply_on_agentless_host_reports_restart_not_live(self):
+        # Applying host Drive settings must never silently configure the
+        # agent-free coordination engine as a live runtime; with no host agent
+        # engine the result is restart_required, not applied_live (design §8.4).
+        host = await _start_host(port=141)
+        coord = Terrarium()
+        try:
+            svc = MultiNodeTerrariumService(host=host, coordination_engine=coord)
+            result = await _LocalNodeDriveSettings(svc, "_host").apply()
+            assert result["result"] == "restart_required"
+        finally:
+            await coord.shutdown()
+            await host.stop()
+
+
+class TestDriveSingleCanonicalWriter:
+    async def test_home_loss_yields_no_second_writer(self, tmp_path, monkeypatch):
+        # A Drive homed on w1 must have exactly one writer: when w1 drops, a
+        # mutation is a typed home-unavailable error and w2 never becomes a
+        # writer for w1's Drive (design §10.1/§10.2).
+        def _create(config, llm=None):
+            return ScriptedLLM([ScriptEntry(response="ok")])
+
+        monkeypatch.setattr(_bootstrap_llm_mod, "create_llm_provider", _create)
+        monkeypatch.setattr(_agent_init_mod, "create_llm_provider", _create)
+        cfg = _write_creature_config(tmp_path, "auditdrv")
+        admin = ActorRef("service", "ops")
+
+        host = await _start_host(port=142)
+        coord = Terrarium()
+        service = MultiNodeTerrariumService(host=host, coordination_engine=coord)
+
+        async def worker(name, sdir):
+            client = await _start_client(port=142, name=name, token="secret")
+            engine = Terrarium(
+                session_dir=str(sdir),
+                drive_config=DriveRuntimeConfig(enabled=True),
+                drive_registrations=default_registrations(),
+            )
+            attacher, _ = _attach_worker_stack(engine, client, sdir)
+            return engine, client, attacher
+
+        w1_engine, w1_client, w1_att = await worker("w1", tmp_path / "w1")
+        w2_engine, w2_client, w2_att = await worker("w2", tmp_path / "w2")
+        for _ in range(20):
+            if {"w1", "w2"} <= set(host.alive_clients()):
+                break
+            await asyncio.sleep(0.05)
+        service.add_remote("w1")
+        service.add_remote("w2")
+        try:
+            c1 = await w1_engine.add_creature(
+                cfg, is_privileged=True, io="none", strict=False, session=False
+            )
+            view = await service.create_drive(
+                CreateDriveRequest(
+                    kind="generic",
+                    title="one-writer",
+                    scope_type="graph",
+                    scope_id=c1.graph_id,
+                    owner=admin,
+                    owner_scope="service",
+                    created_by=admin,
+                ),
+                graph_id=c1.graph_id,
+                actor=admin,
+                is_privileged=True,
+            )
+            did = view.record.drive_id
+            await service.get_drive(did, actor=admin, is_privileged=True)
+            assert service._drive_routes.get_drive_home(did) == "w1"
+
+            service.drop_remote("w1")
+            with pytest.raises(DriveHomeUnavailableError):
+                await service.wake_drive(did, actor=admin, is_privileged=True)
+            # w2 never held this Drive — no second writer materialised.
+            w2_view = await LocalTerrariumService(w2_engine).get_drive(
+                did, actor=admin, is_privileged=True
+            )
+            assert w2_view is None
+        finally:
+            for att in (w1_att, w2_att):
+                try:
+                    att.close_all()
+                except Exception:
+                    pass
+            await asyncio.gather(
+                _safe_stop(w1_client),
+                _safe_stop(w2_client),
+                return_exceptions=True,
+            )
+            await w1_engine.shutdown()
+            await w2_engine.shutdown()
+            await coord.shutdown()
+            await host.stop()
+
+
+async def _safe_stop(client):
+    try:
+        await client.stop()
+    except Exception:
+        pass

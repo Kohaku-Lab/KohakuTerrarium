@@ -475,9 +475,11 @@ class TestModuleCatalogOps:
 
             captured = {}
 
-            async def _exec(ag, command, args):
+            async def _exec(ag, command, args, **kwargs):
                 captured["command"] = command
                 captured["args"] = args
+                captured["is_operator"] = kwargs.get("is_operator")
+                captured["principal"] = kwargs.get("principal")
                 return {"ran": command}
 
             orig = mod.agent_execute_command
@@ -490,14 +492,21 @@ class TestModuleCatalogOps:
                             "creature_id": "alice",
                             "command": "status",
                             "args": "verbose",
+                            "principal": "user:7",
+                            "is_operator": True,
                         },
+                        # execute_command is host-only (R1-04): a peer origin is
+                        # rejected, so the trusted control message comes from _host.
+                        sender="_host",
                     )
                 )
             finally:
                 mod.agent_execute_command = orig
             assert out == {"ran": "status"}
-            # The string arg survives _normalize_command_args unchanged.
-            assert captured == {"command": "status", "args": "verbose"}
+            # The string arg survives; host-authorized principal/operator thread.
+            assert captured["command"] == "status" and captured["args"] == "verbose"
+            assert captured["is_operator"] is True
+            assert captured["principal"] == "user:7"
         finally:
             await adapter._engine.shutdown()
 

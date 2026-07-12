@@ -64,6 +64,7 @@ from kohakuterrarium.laboratory._internal.app import (
     new_request_id,
     parse_app_envelope,
 )
+from kohakuterrarium.laboratory._internal.app_acl import is_host_only_client_forward
 from kohakuterrarium.laboratory._internal.auth import TokenAuth
 from kohakuterrarium.laboratory._internal.client import (
     RequestAbortedError,
@@ -718,13 +719,12 @@ class HostEngine:
             case EnvelopeKind.APP:
                 if env.to_node == HOST_NODE_ID:
                     await self._handle_app(sender, env)
-                else:
-                    _log.debug(
-                        "forwarding APP envelope",
-                        from_node=env.from_node,
-                        to_node=env.to_node,
-                        seq=env.seq,
+                elif is_host_only_client_forward(env):
+                    _log.warning(
+                        "dropping client-to-client control-plane APP to %s",
+                        env.to_node,
                     )
+                else:
                     await self._route_send_forwarded(env)
             case EnvelopeKind.BROADCAST:
                 await self._fanout_broadcast(env)

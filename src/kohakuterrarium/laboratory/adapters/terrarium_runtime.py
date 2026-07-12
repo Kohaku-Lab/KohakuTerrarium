@@ -21,6 +21,11 @@ from typing import Any
 from kohakuterrarium.core.channel import ChannelMessage
 from kohakuterrarium.core.config import load_agent_config
 from kohakuterrarium.laboratory._internal.app import AppMessage
+from kohakuterrarium.laboratory._internal.protocol import HOST_NODE_ID
+from kohakuterrarium.laboratory.adapters.terrarium_runtime_drive import (
+    handle_drive_request,
+    is_drive_verb,
+)
 from kohakuterrarium.laboratory.protocols import LabRegistrar
 from kohakuterrarium.llm.backends import set_remote_backend
 from kohakuterrarium.llm.preset_store import preset_from_data, set_remote_preset
@@ -52,6 +57,7 @@ from kohakuterrarium.terrarium.creature_ops import (
 )
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.service import (
+    LocalTerrariumService,
     _normalize_command_args,
     creature_to_info,
 )
@@ -142,6 +148,9 @@ class TerrariumRuntimeAdapter:
         # before the engine builds the creature's LLM provider.  Workers
         # pass one; the host-side adapter (when present) doesn't.
         self._identity_cache = identity_cache
+        # Lazily-built local Drive surface bound to this engine — the same
+        # in-process service Studio uses on a single host (design §9.2).
+        self._drive_service: LocalTerrariumService | None = None
         lab_node.register_app_extension(self.NAMESPACE, self._dispatch)
         logger.info(
             "lab adapter registered",
@@ -328,7 +337,20 @@ class TerrariumRuntimeAdapter:
             return
         set_remote_preset(provider, name_part, preset)
 
+    def _local_service(self) -> LocalTerrariumService:
+        """The engine-bound Drive service, built once per adapter."""
+        if self._drive_service is None:
+            self._drive_service = LocalTerrariumService(
+                self._engine, node_id=self._node_id
+            )
+        return self._drive_service
+
     async def _handle(self, msg: AppMessage) -> dict[str, Any]:
+        # Drive verbs run against the engine-bound local Drive service; the
+        # handler maps typed Drive errors itself so the generic KeyError/
+        # ValueError mapping below never mislabels one.
+        if is_drive_verb(msg.type):
+            return await handle_drive_request(self._local_service(), msg)
         match msg.type:
             case "node_id":
                 # Refresh from the live node in case the host assigned
@@ -839,13 +861,32 @@ class TerrariumRuntimeAdapter:
                 )
 
             case "execute_command":
+                # execute_command carries host-derived principal/operator
+                # authority; a peer is never trusted for it (R1-04/R1-20).
+                if msg.sender_node != HOST_NODE_ID:
+                    return {
+                        "error": {
+                            "kind": "forbidden",
+                            "message": (
+                                "execute_command refused from non-host origin "
+                                f"{msg.sender_node!r}"
+                            ),
+                        }
+                    }
                 cid = msg.body["creature_id"]
                 creature = self._require_hosted(cid)
                 # Use the shared coercion so dict-form args don't get
                 # silently dropped — matches LocalImpl behaviour.
                 args = _normalize_command_args(msg.body.get("args"))
                 return await agent_execute_command(
-                    creature.agent, msg.body["command"], args
+                    creature.agent,
+                    msg.body["command"],
+                    args,
+                    service=self._local_service(),
+                    engine=self._engine,
+                    creature_id=cid,
+                    principal=msg.body.get("principal", "user:local"),
+                    is_operator=msg.body.get("is_operator", False),
                 )
 
             case _:

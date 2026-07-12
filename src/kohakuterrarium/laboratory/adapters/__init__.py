@@ -27,6 +27,9 @@ from kohakuterrarium.laboratory.adapters.studio_deploy import (
 from kohakuterrarium.laboratory.adapters.studio_identity import (
     StudioIdentityAdapter,
 )
+from kohakuterrarium.laboratory.adapters.studio_settings import (
+    StudioSettingsAdapter,
+)
 from kohakuterrarium.laboratory.adapters.terrarium_attach import (
     TerrariumAttachAdapter,
 )
@@ -56,6 +59,7 @@ __all__ = [
     "StudioCatalogAdapter",
     "StudioDeployAdapter",
     "StudioIdentityAdapter",
+    "StudioSettingsAdapter",
     "TerrariumAttachAdapter",
     "TerrariumBroadcastAdapter",
     "TerrariumEventsAdapter",

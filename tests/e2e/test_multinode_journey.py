@@ -48,6 +48,8 @@ from tests.e2e._lab_harness import (
 )
 from kohakuterrarium.api.deps import get_service_legacy as get_service
 from kohakuterrarium.studio.sessions import cluster_fold
+from kohakuterrarium.terrarium.drive.models import ActorRef
+from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
 from kohakuterrarium.testing.llm import ScriptEntry
 
 pytestmark = pytest.mark.timeout(900)
@@ -378,7 +380,9 @@ class TestMultinodeJourney:
 
         async with RealLabHost(tmp_path) as host:
             async with (
-                RealLabWorker("w1", host.lab_ws_url, tmp_path / "w1") as w1,
+                RealLabWorker(
+                    "w1", host.lab_ws_url, tmp_path / "w1", drive_enabled=True
+                ) as w1,
                 RealLabWorker("w2", host.lab_ws_url, tmp_path / "w2") as w2,
             ):
                 # In-process workers auto-join on ``__aenter__``;
@@ -2921,6 +2925,85 @@ async def _drive_journey(
                 if isinstance(c, dict)
             ),
             f"{rr.status_code} body={rr.text[:400]}",
+        )
+
+    # === 29f. Drive over lab: node-targeted settings + routed Drive ======
+    async with bugs.step("29f Drive node-settings + routed create/read"):
+        svc = get_service()
+        admin = ActorRef("service", "ops")
+        # Node-targeted settings reach w1's studio.settings adapter over real WS.
+        rr = await host.http.get("/api/settings/drives", params={"node": "w1"})
+        bugs.check(
+            "29f node drive settings status 200 for w1",
+            rr.status_code == 200 and rr.json().get("node") == "w1",
+            f"{rr.status_code} {rr.text[:200]}",
+        )
+        good = {
+            "schema_version": 1,
+            "runtime": {"enabled": True},
+            "registrations": {"generic": {"enabled": True, "options": {}}},
+        }
+        rr = await host.http.put(
+            "/api/settings/drives", params={"node": "w1"}, json={"settings": good}
+        )
+        bugs.check(
+            "29f node drive settings save 200",
+            rr.status_code == 200,
+            f"{rr.status_code} {rr.text[:200]}",
+        )
+        # Create a Drive on alpha's (w1) graph through the MultiNode service; it
+        # must route to the home worker and read back with home == w1.
+        info = await svc.get_creature_info(a_id)
+        gid = getattr(info, "graph_id", None)
+        if bugs.check("29f resolved alpha graph id", bool(gid), str(info)):
+            view = await svc.create_drive(
+                CreateDriveRequest(
+                    kind="generic",
+                    title="watch-deploy",
+                    scope_type="graph",
+                    scope_id=gid,
+                    owner=admin,
+                    owner_scope="service",
+                    created_by=admin,
+                ),
+                graph_id=gid,
+                actor=admin,
+                is_privileged=True,
+            )
+            did = view.record.drive_id
+            got = await svc.get_drive(did, actor=admin, is_privileged=True)
+            bugs.check(
+                "29f drive routed create+read over WS",
+                got is not None and got.record.drive_id == did,
+                str(got),
+            )
+            bugs.check(
+                "29f drive home resolves to w1",
+                svc._drive_routes.get_drive_home(did) == "w1",
+                str(svc._drive_routes.get_drive_home(did)),
+            )
+            listed = await svc.list_drives(actor=admin, is_privileged=True)
+            bugs.check(
+                "29f drive appears in cluster fan-out list",
+                did in {v.record.drive_id for v in listed},
+                "",
+            )
+        # Unavailable-registration path: enabling a registration the worker
+        # cannot load makes apply reject, never silently substitute (design §8.6).
+        bogus = {
+            "schema_version": 1,
+            "runtime": {"enabled": True},
+            "registrations": {"no-such-reg": {"enabled": True, "options": {}}},
+        }
+        await host.http.put(
+            "/api/settings/drives", params={"node": "w1"}, json={"settings": bogus}
+        )
+        rr = await host.http.post("/api/settings/drives/apply", params={"node": "w1"})
+        bugs.check(
+            "29f unavailable-registration apply is typed non-live",
+            rr.status_code == 200
+            and rr.json().get("result") in {"rejected", "restart_required"},
+            f"{rr.status_code} {rr.text[:200]}",
         )
 
     # === 30. user stops bravo; alpha keeps running ==============

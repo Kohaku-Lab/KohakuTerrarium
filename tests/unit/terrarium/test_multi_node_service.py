@@ -9,6 +9,7 @@ StreamDemux.
 
 import pytest
 
+from kohakuterrarium.terrarium.drive.multi_node import DriveRouteCache
 from kohakuterrarium.terrarium.events import (
     ConnectionResult,
     DisconnectionResult,
@@ -217,6 +218,7 @@ def _make_service(remote_specs=None) -> MultiNodeTerrariumService:
     svc._cross_subs = {}
     svc._cluster_links = set()
     svc._runtime_graph_meta_lookup = None
+    svc._drive_routes = DriveRouteCache()
     for node_id, creatures in (remote_specs or {}).items():
         svc._remotes[node_id] = _FakeService(node_id=node_id, creatures=creatures)
     return svc

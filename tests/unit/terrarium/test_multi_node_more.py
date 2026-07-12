@@ -281,6 +281,20 @@ class TestResolveGraphHome:
         with pytest.raises(KeyError, match="not found"):
             await svc._resolve_graph_home("ghost")
 
+    async def test_duplicate_homes_fail_closed(self):
+        # Two workers both report g1 — a create must NOT pick an arbitrary
+        # writer; home resolution fails closed with a typed integrity error.
+        from kohakuterrarium.terrarium.multi_node_routing import (
+            GraphHomeIntegrityError,
+        )
+
+        g = GraphTopology(graph_id="g1", creature_ids=set(), channels={})
+        svc = _make_service()
+        svc._remotes["w1"] = _FakeService(node_id="w1", graphs=[g])
+        svc._remotes["w2"] = _FakeService(node_id="w2", graphs=[g])
+        with pytest.raises(GraphHomeIntegrityError):
+            await svc._resolve_graph_home("g1")
+
 
 # ── routing through _route_per_creature ──────────────────────
 

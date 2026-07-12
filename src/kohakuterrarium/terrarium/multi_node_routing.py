@@ -22,6 +22,7 @@ the 1000-line hard cap without changing public behavior.
 import asyncio
 from typing import TYPE_CHECKING, Any
 
+from kohakuterrarium.errors import ConflictError
 from kohakuterrarium.terrarium.remote_service import CreatureNotHostedHere
 from kohakuterrarium.terrarium.service import CreatureInfo
 from kohakuterrarium.utils.logging import get_logger
@@ -32,6 +33,15 @@ if TYPE_CHECKING:
     )
 
 logger = get_logger(__name__)
+
+
+class GraphHomeIntegrityError(ConflictError):
+    """Two connected workers claim the same graph — a double-writer hazard.
+
+    A graph has exactly one home worker (its canonical repository). If more than
+    one worker reports the same graph id, routing a write to an arbitrary one
+    would race two writers, so home resolution fails closed (R1-42).
+    """
 
 
 def purge_node_caches(service: "MultiNodeTerrariumService", node_id: str) -> None:
@@ -138,11 +148,37 @@ async def resolve_home(
 async def resolve_graph_home(
     service: "MultiNodeTerrariumService", graph_id: str
 ) -> str:
-    for node_id, svc in list(service._remotes.items()):
-        g = await svc.get_graph(graph_id)
-        if g is not None:
-            return node_id
-    raise KeyError(f"graph {graph_id!r} not found on any connected worker")
+    """The single worker that homes ``graph_id``.
+
+    Probes every connected worker (not just the first) so two workers claiming
+    the same graph fail closed with :class:`GraphHomeIntegrityError` rather than
+    letting a create pick an arbitrary writer (R1-42). ``KeyError`` when no
+    worker hosts the graph.
+    """
+    for attempt in range(2):
+        epoch = getattr(service, "_membership_epoch", 0)
+        nodes = list(service._remotes.items())
+        homes: list[str] = []
+        for node_id, svc in nodes:
+            g = await svc.get_graph(graph_id)
+            if g is not None:
+                homes.append(node_id)
+        if getattr(service, "_membership_epoch", 0) != epoch:
+            if attempt == 0:
+                continue
+            raise GraphHomeIntegrityError(
+                f"graph {graph_id!r} membership changed during home resolution; "
+                "refusing to route on incomplete evidence"
+            )
+        if len(homes) > 1:
+            raise GraphHomeIntegrityError(
+                f"graph {graph_id!r} is claimed by multiple homes {sorted(homes)!r}; "
+                "refusing to route (single home-writer invariant)"
+            )
+        if homes:
+            return homes[0]
+        raise KeyError(f"graph {graph_id!r} not found on any connected worker")
+    raise AssertionError("unreachable")
 
 
 async def route_per_creature(
@@ -260,6 +296,7 @@ async def runtime_graph_snapshot_fanout(
 
 
 __all__ = [
+    "GraphHomeIntegrityError",
     "creature_graph_id",
     "list_creatures_fanout",
     "purge_node_caches",
