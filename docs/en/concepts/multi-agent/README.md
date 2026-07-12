@@ -89,6 +89,23 @@ cooperating. Use sub-agents when the task decomposes naturally inside
 one creature; vertical stays simpler for most "I need context
 isolation" instincts. The framework doesn't pick between them.
 
+## Runtime resources: session, channel, drive
+
+The engine owns a small set of runtime resources — mechanics it
+coordinates without ever reasoning. A creature supplies the meaning;
+the engine supplies identity, persistence, and delivery.
+
+| Resource | Engine owns | Creature / app supplies |
+|---|---|---|
+| [Session](../modules/session-and-environment.md) | durable history, attachment, merge/split lineage | what remembered content means |
+| [Channel](../modules/channel.md) | identity, wiring, broadcast delivery | what messages mean and whether to act |
+| [Drive](drive.md) | identity, assignment, readiness, durable delivery, recovery | what the commitment means and how to pursue it |
+
+Drive is the newest and the most opt-in: a durable, assignable
+commitment the engine delivers as ordinary events. It exists only when
+the Terrarium is constructed with a Drive config, and a creature is
+fully valid with zero Drives.
+
 ## What's in this section
 
 - [Terrarium](terrarium.md): the runtime engine for horizontal
@@ -99,6 +116,9 @@ isolation" instincts. The framework doesn't pick between them.
 - [Dynamic graph](dynamic-graph.md): auto-merge / auto-split, the
   in-graph "graph editor", and how the recipe stays the source of
   truth on resume.
+- [Drive](drive.md): the optional durable-commitment runtime resource
+  beside session and channel; at-least-once delivery, ownership
+  boundary, and registration enablement.
 
 ## See also
 

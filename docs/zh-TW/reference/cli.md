@@ -344,6 +344,25 @@ kt config key delete <provider>
 - `edit <name>`：互動式編輯。
 - `delete <name>`：移除條目。
 
+### `kt config drive`
+
+經 Studio 設定門面管理 [Drive 執行期設定](configuration.md#drive-設定-drive-settingsyaml)
+（`~/.kohakuterrarium/drive-settings.yaml`）。儲存與套用是分離的——純
+CLI 沒有執行中的引擎，所以 `apply` 報告有效性，而不是一次活替換。
+
+```
+kt config drive {show | registrations | set <field> <value> | apply}
+```
+
+- `show`：執行期 enabled 狀態 + tuning + 每個註冊項的 enabled 狀態。
+- `registrations`：列出已安裝的 Drive 註冊項及其 enabled / 載入狀態。
+- `set <field> <value>`：設一個執行期欄位或切換一個註冊項，然後儲存
+  （CAS 檢查）。欄位形式：執行期欄位（`enabled true`、
+  `max_active_per_creature 8`）或 `registration:<name> on|off`（例如
+  `registration:generic on`）。
+- `apply`：校驗已儲存設定能否解析；報告 `applied_live` /
+  `restart_required` / `rejected`（執行中的伺服器在重啟時才拾取有效檔案）。
+
 ---
 
 ## Auth
@@ -404,6 +423,37 @@ kt search <session> <query> [flags]
 | `--mode` | `fts\|semantic\|hybrid\|auto` | `auto` | 搜尋模式。Auto 有向量就走 semantic，否則走 FTS。 |
 | `--agent` | str |（無）| 只看某隻代理的事件。 |
 | `-k` | int | `10` | 最多回傳幾筆。 |
+
+---
+
+## Drive 記錄
+
+`kt drive` 非互動式地管理一個已保存 session 裡的
+[Drive](../concepts/multi-agent/drive.md) 記錄——它經 Studio resume 該
+session（Studio 解析該節點的 Drive 設定）、跑一個操作、印出穩定表格或
+`--json`，然後關停。
+
+```
+kt drive --session <id> [--json] {list | show | create | assign | transition | deliveries | replay}
+```
+
+- `--session <id>`（必填）：session 名稱/前綴或 `.kohakutr` 路徑。
+- `--json`：輸出 service DTO 形狀而非表格。
+
+| 子命令 | 形式 | 說明 |
+|---|---|---|
+| `list` | `list [--status active,blocked] [--kind K] [--mine]` | 遮蔽後的列。 |
+| `show` | `show <drive_id>` | 完整記錄（用它讀當前 revision）。 |
+| `create` | `create --kind K --title T [--scope graph\|creature] [--priority N] [--spec-json JSON]` | operator 擁有的 Drive。 |
+| `assign` | `assign <drive_id> <creature> --revision N` | 指派給一個圖成員。 |
+| `transition` | `transition <drive_id> <status> --revision N [--reason R]` | pause/resume/cancel/… |
+| `deliveries` | `deliveries <drive_id>` | 投遞歷史。 |
+| `replay` | `replay <delivery_id>` | 重放一個死信投遞。 |
+
+變更（`assign`、`transition`）需要 `--revision N`；省略它會帶著重新拉取
+的指示失敗，而不是悄悄覆寫。exit code 對腳本有意義（見
+[Exit code](#exit-code)）。終態 `propose`/`approve`、`unassign` 與所有權
+轉移透過 HTTP API 和互動式 `/drives` 命令暴露，而不是這個頂層自動化 CLI。
 
 ---
 
@@ -538,6 +588,8 @@ MCP server 也可以放在 `~/.kohakuterrarium/mcp_servers.yaml` 的全域目錄
 - `0`：成功。
 - `1`：一般錯誤。
 - 編輯器的 exit code，用於 `kt edit` / `kt config edit`。
+- `kt drive` 用一套擴充碼好讓腳本分支：`0` ok、`1` 錯誤、`2` 用法、
+  `3` 衝突（revision 變了——重新拉取）、`4` 未找到、`5` 權限拒絕。
 
 ## 互動式 prompt
 

@@ -24,6 +24,8 @@ tags:
 - [生態瓶](terrariums.md)：橫向多代理，頻道、輸出接線、特權節點、熱插拔、觀察。
 - [組合代數](composition.md)：用 Python 的 `>>`、`&`、`|`、`*` 把 agent 與 async callable 串起來。
 - [程式化使用](programmatic-usage.md)：在你自己的 Python 程式碼裡驅動 `Terrarium`、`Creature`、`Studio` 與底層 `Agent`。
+- [Programmatic Drive](programmatic-drive.md)：持久承諾執行期——啟用它、建立/管理 Drive、提議完成、sidecar 持久化、resume。
+- [Goal](goal.md)：`/goal` 作為 Drive 之上的選用組合——註冊項與外掛開關、命令集、完成語義。
 
 ## 存續
 

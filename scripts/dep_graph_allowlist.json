@@ -283,9 +283,9 @@
   },
   {
     "file": "src/kohakuterrarium/cli/lab_client.py",
-    "line": 186,
     "function": "_run_worker",
-    "reason": "test-only seam guarded by KT_TEST_LLM_SCRIPT env var; production runs never import the testing package"
+    "target": "kohakuterrarium.testing.subprocess_seam",
+    "reason": "test-only seam guarded by KT_TEST_LLM_SCRIPT env var; production runs never import the testing package (its __init__ eagerly loads the whole test harness). A fresh subprocess has no injection point, so an env-guarded lazy import is the only mechanism. Matched by function+target (not line) so unrelated edits do not re-break the gate."
   },
   {
     "file": "src/kohakuterrarium/mcp/client.py",
@@ -352,5 +352,11 @@
     "line": 87,
     "function": "_try_tk",
     "reason": "tkinter.ttk sibling — same fallback rationale"
+  },
+  {
+    "file": "src/kohakuterrarium/builtins/tui/app.py",
+    "function": "action_open_drives",
+    "target": "kohakuterrarium.builtins.tui.widgets.drive_panel",
+    "reason": "Lazy import of the DriveScreen panel. It transitively imports terrarium.* and studio, whose package __init__ pulls builtins.outputs -> tui.output -> tui.session; a module-top import would be a runtime import cycle (CULL_KEEP partial-init) since tui.app is imported during tui.session init. The TerrariumService is injected duck-typed onto TUISession by the engine_cli runner, so this lazy widget import is the only remaining terrarium-reaching seam. Matched by function+target (not line) so unrelated edits do not re-break the gate."
   }
 ]

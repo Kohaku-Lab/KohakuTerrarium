@@ -444,6 +444,39 @@ adapter 會把它持久化到 worker 本地的檔案。Codex 登入也一樣：
 OAuth 流程，所以瀏覽器是在 worker 的機器上開啟、產生的 token
 住在 worker 的磁碟上。
 
+## 節點定向的設定
+
+有些執行期設定是按 **執行節點** 的，而不是按 cluster。
+[Drive 執行期](./multi-agent/drive.md)是當前的例子，它遵循和 identity
+相同的「在執行它的節點上解析」規則。
+
+每個 worker 在它自己的 `KT_CONFIG_DIR` 下擁有自己的 `drive-settings.yaml`。
+一個 worker 在啟動時從*它本地的* Studio 設定解析器建構它的 `Terrarium`——
+host 的協調引擎不是 worker creature 的 Drive home，它保持 Drive 停用。
+一次設定讀/寫攜帶一個 **目標節點**：
+
+```text
+user -> host Studio / API 設定（已選目標節點）
+     -> Laboratory studio.settings 請求
+     -> worker 端的設定轉接器讀/寫那個 worker 的 config home
+```
+
+因為套件安裝是按節點的，*可用* 註冊項的集合是節點特定的：設定 UI 必須
+拉取目標 worker 的目錄，絕不假設 host 的。套用一次變更會路由到那個
+worker，然後要麼重新設定它的活 Terrarium，要麼回傳 `restart_required`——
+host 從不直接編輯 worker 的檔案，也從不假裝 host 安裝的註冊程式碼在遠端
+存在。
+
+兩條從 Lab 設計的其餘部分延續下來的不變式：
+
+- **`DriveRuntimeSpec` 僅在程序內。** 它持有活的註冊項實例，所以它絕不
+  上線傳輸。Laboratory 傳輸可序列化的註冊項 **名稱 + 選項 + 執行期
+  設定**，worker 把它們解析成它自己的 spec——和 identity 的 local-first
+  憑證解析同一套路。
+- **`TerrariumService` 仍是唯一的執行期控制介面。** Drive 記錄操作路由到
+  擁有該圖的 worker，正如 `chat` 和 `connect`；host 的鏡像事件副本是唯讀
+  的，絕不是可寫的 Drive 權威。
+
 ## Files、deployment 與 sandboxing
 
 - **`terrarium.files`**：透過 Lab APP 做 scope 受限的檔案 IO。

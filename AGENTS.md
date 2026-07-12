@@ -445,6 +445,68 @@ from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 agent = await Agent.build(cfg, llm=ScriptedLLM(["reply 1", "reply 2"]))
 ```
 
+### 2.7 Drives (durable commitments)
+
+A **Drive** is an optional Terrarium runtime resource (beside session /
+channel): a durable, assignable commitment the engine delivers as
+ordinary events. Opt-in — a Terrarium with no `drive_config` has no
+Drive machinery. Delivery is **at least once**, logically deduped; there
+is **no exactly-once**, and recovery events warn that a prior attempt
+*may* have run side effects. The engine never reasons about a Drive.
+
+Explicit Python (no Studio): enable the runtime, then create/administer
+through the service.
+
+```python
+from kohakuterrarium import Terrarium
+from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig, default_registrations
+from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
+from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest, DrivePatch
+
+async with Terrarium(
+    session_dir="runs/",                          # Drives persist to a sidecar:
+    drive_config=DriveRuntimeConfig(enabled=True),#   runs/<name>.kohakutr.drives
+    drive_registrations=default_registrations(),  # enabled=True + no regs -> error
+) as engine:
+    w = await engine.add_creature("@kt-biome/creatures/swe", start=True)
+    svc = LocalTerrariumService(engine)
+    who = ActorRef("service", "deploy-bot")       # "<kind>:<identity>"
+    view = await svc.create_drive(
+        CreateDriveRequest(
+            kind="generic", title="Watch the deploy",
+            scope_type="graph", scope_id=w.graph_id,
+            owner=who, owner_scope="service", created_by=who,
+            spec={"instruction": "Monitor until stable"},
+            assignee_creature_id=w.creature_id,
+        ),
+        graph_id=w.graph_id, actor=who, operator=True,  # graph-scoped create = graph authority
+    )
+    await svc.update_drive(view.record.drive_id, DrivePatch(priority=5),
+                           expected_revision=view.record.revision, actor=who)  # CAS
+    # completion is a *proposal*, never a direct terminal write:
+    await svc.propose_drive_transition(view.record.drive_id, DriveStatus.COMPLETED,
+                                       evidence={"ok": True},
+                                       expected_revision=view.record.revision, actor=who)
+```
+
+- Every creature in a Drive-enabled Terrarium gets 5 self-service tools
+  (`drive_create` / `drive_status` / `drive_update` / `drive_report` /
+  `drive_transition`); a privileged node also gets `group_drive`.
+- Managed surfaces resolve `drive_config` from Studio's
+  `drive-settings.yaml` (`runtime.enabled` + per-registration `enabled`;
+  save and apply are separate: `applied_live` / `restart_required` /
+  `rejected`). Recipes carry **no** Drive fields.
+- **`/goal` is not a framework feature.** It is an optional **built-in**
+  composition (disabled by default): a `goal` Drive registration
+  (`kohakuterrarium.terrarium.drive.goal`, enabled in Drive settings)
+  *and* a `GoalPlugin` (`kohakuterrarium.builtins.plugins.goal`, enabled
+  in the plugin panel / a creature `plugins:` entry) — two independent
+  toggles. Budgets pause a goal, never complete it; `user_confirm`
+  completion is user-authoritative.
+- Full model: `docs/en/concepts/multi-agent/drive.md`; APIs:
+  `docs/en/guides/programmatic-drive.md`; goal: `docs/en/guides/goal.md`.
+
 ---
 
 ## Part 3: Working on the framework itself

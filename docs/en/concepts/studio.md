@@ -95,6 +95,41 @@ Saved sessions are different: they are `.kohakutr` files on disk.
 Studio persistence can list them, resume them into a running engine,
 fork them, and build post-hoc viewer payloads.
 
+## Managed settings ownership
+
+Some runtime capabilities are configured by the operator, not by a
+recipe or a creature config. The [Drive runtime](multi-agent/drive.md)
+is the current example, and it demonstrates the ownership rule.
+
+The engine is **dependency-injected**: `Terrarium` accepts explicit
+`drive_config` / `drive_registrations` / `drive_store` arguments and
+never reads `~/.kohakuterrarium` or asks Studio for anything. **Studio
+is the managed settings owner**: it loads and validates the settings
+file ([`drive-settings.yaml`](../reference/configuration.md#drive-settings-drive-settingsyaml)),
+joins it with the installed-registration catalog, and resolves an
+explicit spec that Studio-backed construction paths inject into the
+engine they build.
+
+```text
+web / CLI / TUI adapter
+  -> Studio settings + catalog
+  -> resolve explicit Drive arguments
+  -> Terrarium(drive_config=..., drive_registrations=...)
+  -> creature injection
+```
+
+Consequences that follow from this direction:
+
+- A programmatic caller can bypass Studio entirely and pass explicit
+  objects (see [Programmatic Drive](../guides/programmatic-drive.md)).
+  Passing an existing engine to `Studio(engine=...)` never overwrites
+  that engine's explicit configuration with the settings file.
+- Saving settings and applying them to a live engine are **separate**
+  typed operations, so a UI reports `applied_live` / `restart_required`
+  / `rejected` truthfully rather than pretending a saved file is running.
+- HTTP routes and the web Settings panel delegate to the same Studio
+  façade; they are not a second settings owner.
+
 ## Attach policies
 
 Not every creature is a chat bot. A monitor might have no user input; a

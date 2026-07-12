@@ -54,6 +54,41 @@ terrarium:
 
 字段参考：[配置参考](../reference/configuration.md)。
 
+## recipe 只管图结构
+
+recipe 描述的是 **结构**：哪些 Creature 存在、哪些频道存在、接哪些边。
+它从不携带运行时资源配置。特别是，recipe **不携带任何
+[Drive](../concepts/multi-agent/drive.md) 字段**——没有运行时开关、没有
+注册选择、没有种子 Drive 记录。所有既有 recipe 在零 Drive 感知下仍然
+有效。
+
+Drive 运行时配置是一个显式的 `Terrarium(...)` 构造函数参数，应用在 recipe
+应用*之外*，而不是在它*之内*：
+
+```python
+from kohakuterrarium import Terrarium
+from kohakuterrarium.terrarium.drive.config import (
+    DriveRuntimeConfig,
+    default_registrations,
+)
+
+# 引擎被配置上它的运行时能力；recipe 只添加 creature/频道/接线。
+# 已经配置好的引擎把它的 Drive 能力注入到 recipe 创建的每只 creature。
+async with Terrarium(
+    session_dir="runs/",
+    drive_config=DriveRuntimeConfig(enabled=True),
+    drive_registrations=default_registrations(),
+) as engine:
+    await engine.apply_recipe("@kt-biome/terrariums/swe_team")
+    # ... 之后在这里通过 service 显式创建 Drive 记录 ...
+```
+
+`from_recipe`、`resume` 与 `with_creature` 把这同样的显式 Drive 参数转发
+给构造函数；recipe 对象不变。因此把一个 recipe 应用到两个配置不同的引擎上
+可能得到不同的 Drive 能力。被托管的产品（web、TUI、`kt`）通过 Studio 从
+[`drive-settings.yaml`](../reference/configuration.md)解析这些参数；低层
+引擎从不读那个文件。见 [Programmatic Drive](programmatic-drive.md)。
+
 ## 自动建立的频道
 
 执行期一定会建：

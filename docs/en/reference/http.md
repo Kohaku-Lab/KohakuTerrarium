@@ -465,6 +465,76 @@ provider-native tools such as `image_gen`.
 
 ---
 
+## Drive records
+
+Records for the [Drive runtime](../concepts/multi-agent/drive.md). A
+*session* is a Terrarium graph, so `{session_id}` is the graph id the
+operation runs against. The actor is derived from the authenticated
+request (a single-tenant caller is the operator console; an L4 user acts
+as itself, `admin` role granting graph-authority elevation) — never from
+the body. List rows redact `spec`/`evidence`; detail is returned only to
+an authorized caller. These endpoints exist only when the target
+Terrarium was constructed with a Drive runtime.
+
+| Method + path | Purpose |
+|---|---|
+| `GET /api/sessions/{session_id}/drives` | List redacted rows. Query: `status`, `kind`, `owner`, `assignee`, `mine` (bool), `include_terminal` (bool). |
+| `POST /api/sessions/{session_id}/drives` | Create a Drive owned by the caller by default. |
+| `GET /api/sessions/{session_id}/drives/{drive_id}` | Full detail (or a redacted row for an unauthorized caller). |
+| `PATCH /api/sessions/{session_id}/drives/{drive_id}` | CAS-checked non-identity patch (title/spec/priority/…). |
+| `POST /api/sessions/{session_id}/drives/{drive_id}/assign` | Assign/reassign to a graph member (graph authority). |
+| `POST /api/sessions/{session_id}/drives/{drive_id}/unassign` | Unassign (graph authority). |
+| `POST /api/sessions/{session_id}/drives/{drive_id}/owner` | Transfer the ownership boundary (audited). |
+| `POST /api/sessions/{session_id}/drives/{drive_id}/transition` | Pause/resume/wait/block/cancel (generic transition). |
+| `POST /api/sessions/{session_id}/drives/{drive_id}/propose` | Propose a terminal transition (complete/fail) with evidence. |
+| `POST /api/sessions/{session_id}/drives/{drive_id}/approve` | Approve a pending terminal proposal. |
+| `POST /api/sessions/{session_id}/drives/{drive_id}/progress` | Append a progress observation (append-only). |
+| `GET /api/sessions/{session_id}/drives/{drive_id}/deliveries` | Delivery history (retry / recovery / dead-letter). |
+| `GET /api/sessions/{session_id}/drives/{drive_id}/progress` | Append-only progress observations. |
+| `POST /api/sessions/{session_id}/drives/deliveries/{delivery_id}/replay` | Replay a dead-letter delivery (mints a new delivery). |
+
+Bodies and semantics:
+
+- Every mutating body carries `expected_revision` (except `progress`,
+  which is append-only) and an optional `idempotency_key`. A stale
+  revision is `409`; a reused idempotency key with different content is
+  also `409`.
+- Detail/response shapes are the service `DriveView` serialization
+  (record + assignment + derived `availability`/`durability` +
+  actor-scoped `allowed_actions`).
+- `propose` returns the updated detail when policy accepts immediately,
+  or `{"proposal_id": ..., "target_status": ..., "pending": true}` when
+  a verifier or a distinct approver must finalize — then call `approve`
+  with that `proposal_id`.
+- Drive is delivered at least once with logical dedupe; there is no
+  exactly-once guarantee, and a resumed attempt may surface a recovery
+  warning (see [Drive](../concepts/multi-agent/drive.md#delivery-at-least-once-logically-deduplicated)).
+
+### `GET /api/persistence/viewer/{session_name}/drives`
+
+Read-only persisted Drive rows for a **saved** (non-live) session, read
+straight from the session's Drive sidecar (`<name>.kohakutr.drives`)
+without resuming it. Rows are redacted and carry no `allowed_actions`
+(the viewer is read-only). `404` if the session file does not exist.
+
+### Status codes for Drive endpoints
+
+Beyond the generic table, Drive errors map through the `DriveError`
+adapter in `api/app.py`:
+
+| Status | When |
+|---|---|
+| `409` | revision conflict / idempotency conflict |
+| `403` | permission denied (actor lacks the capability) |
+| `422` | registration disabled / incompatible / not found, or an invalid transition |
+| `404` | Drive / session not found |
+| `400` | malformed body |
+| `429` | backpressure (per-graph / per-creature limit exceeded) |
+
+Error bodies are `{"detail": "<message>"}` like every other route.
+
+---
+
 ## Files
 
 ### `GET /api/files/tree`
@@ -628,6 +698,36 @@ Same as `GET /api/configs/models`.
 #### `DELETE /api/settings/mcp/{name}`
 
 Response: `{"status": "removed", "name"}`.
+
+### Drive runtime
+
+Node-targeted [Drive](../concepts/multi-agent/drive.md) settings over the
+Studio settings façade (never a raw file edit). Every endpoint takes an
+optional `?node=<id>` query param (absent / `_host` = the host's own
+config home; a connected worker id routes to that worker's settings
+adapter). Reads are open; **save and apply are admin-gated** and are
+deliberately separate operations. See the
+[`drive-settings.yaml` schema](configuration.md#drive-settings-drive-settingsyaml).
+
+| Method + path | Purpose |
+|---|---|
+| `GET /api/settings/drives` | Settings-file view: available/enabled registrations + load status. |
+| `GET /api/settings/drives/config` | The raw validated settings + content-hash `revision`. |
+| `GET /api/settings/drives/runtime-status` | The *running* Drive runtime snapshot on the node. |
+| `POST /api/settings/drives/validate` | Validate a candidate settings mapping (`{settings}`). |
+| `PUT /api/settings/drives` | Persist validated settings. Admin. Body `{settings, expected_revision}`; a stale `expected_revision` is `409`. |
+| `POST /api/settings/drives/apply` | Apply persisted settings to the live runtime. Admin. |
+
+- **Save ≠ apply.** `PUT` only writes the file (optimistic-concurrency
+  checked). `POST .../apply` returns
+  `{"result": "applied_live" | "restart_required" | "rejected", "desired_revision", "running_revision", "warnings"}`
+  so a UI never claims a saved file is running.
+- The registration catalog DTO (in the status payload) carries
+  `option_schema` / `option_defaults` / `prompt_preview` for the Settings
+  editor.
+- Availability is node-specific because package installation is
+  node-specific; a settings mutation is an operator/admin control-plane
+  action, not an ordinary Drive permission.
 
 ---
 

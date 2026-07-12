@@ -52,6 +52,8 @@ You want to run a team of creatures.
 5. [Dynamic graph](multi-agent/dynamic-graph.md) *(when the team
    shape changes at runtime)*
 6. [Channel](modules/channel.md) *(the primitive they rely on)*
+7. [Drive](multi-agent/drive.md) *(optional durable commitments the
+   engine delivers as events)*
 
 ### Embedding / dashboard builder
 

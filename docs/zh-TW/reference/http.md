@@ -413,6 +413,70 @@ Side effect：未建索引的事件會索引起來 (冪等)；代理執行中會
 
 ---
 
+## Drive 記錄
+
+[Drive 執行期](../concepts/multi-agent/drive.md)的記錄。一個 *session*
+就是一個生態瓶圖，所以 `{session_id}` 是操作所針對的 graph id。actor
+從已認證的請求推導（單租戶呼叫者是 operator 主控台；L4 使用者以自身
+身份行動，`admin` 角色授予圖權限提升）——絕不從 body 取。列表列遮蔽
+`spec`/`evidence`；detail 只回傳給被授權的呼叫者。這些端點只在目標
+生態瓶帶 Drive 執行期建構時才存在。
+
+| 方法 + 路徑 | 用途 |
+|---|---|
+| `GET /api/sessions/{session_id}/drives` | 列出遮蔽後的列。Query：`status`、`kind`、`owner`、`assignee`、`mine`(bool)、`include_terminal`(bool)。 |
+| `POST /api/sessions/{session_id}/drives` | 建立一個預設由呼叫者擁有的 Drive。 |
+| `GET /api/sessions/{session_id}/drives/{drive_id}` | 完整 detail（未授權呼叫者得到遮蔽列）。 |
+| `PATCH /api/sessions/{session_id}/drives/{drive_id}` | CAS 檢查的非身份 patch（title/spec/priority/…）。 |
+| `POST /api/sessions/{session_id}/drives/{drive_id}/assign` | 指派/重新指派給一個圖成員（圖權限）。 |
+| `POST /api/sessions/{session_id}/drives/{drive_id}/unassign` | 取消指派（圖權限）。 |
+| `POST /api/sessions/{session_id}/drives/{drive_id}/owner` | 轉移所有權邊界（經稽核）。 |
+| `POST /api/sessions/{session_id}/drives/{drive_id}/transition` | pause/resume/wait/block/cancel（通用轉換）。 |
+| `POST /api/sessions/{session_id}/drives/{drive_id}/propose` | 帶證據提議一次終態轉換（complete/fail）。 |
+| `POST /api/sessions/{session_id}/drives/{drive_id}/approve` | 批准一個待定的終態提議。 |
+| `POST /api/sessions/{session_id}/drives/{drive_id}/progress` | 追加一條進度觀測（僅追加）。 |
+| `GET /api/sessions/{session_id}/drives/{drive_id}/deliveries` | 投遞歷史（重試 / 復原 / 死信）。 |
+| `GET /api/sessions/{session_id}/drives/{drive_id}/progress` | 僅追加的進度觀測。 |
+| `POST /api/sessions/{session_id}/drives/deliveries/{delivery_id}/replay` | 重放一個死信投遞（產生新的投遞）。 |
+
+Body 與語義：
+
+- 每個變更 body 都攜帶 `expected_revision`（`progress` 例外，它僅追加）
+  和可選的 `idempotency_key`。陳舊的 revision 是 `409`；用同一個冪等鍵
+  配不同內容也是 `409`。
+- detail/回應形狀是 service 的 `DriveView` 序列化（record + assignment
+  + 衍生的 `availability`/`durability` + 按 actor 限定的
+  `allowed_actions`）。
+- `propose` 在策略立即接受時回傳更新後的 detail，或在需要驗證器/另一個
+  審批者定案時回傳 `{"proposal_id": ..., "target_status": ..., "pending": true}`——
+  然後用那個 `proposal_id` 呼叫 `approve`。
+- Drive 至少一次投遞並邏輯去重；沒有恰好一次保證，一個被 resume 的嘗試
+  可能浮現一個復原警告（見
+  [Drive](../concepts/multi-agent/drive.md)）。
+
+### `GET /api/persistence/viewer/{session_name}/drives`
+
+一個 **已保存**（非活）session 的唯讀持久 Drive 列，直接從 session 的
+Drive sidecar（`<name>.kohakutr.drives`）讀取而不 resume 它。列是遮蔽的，
+且不攜帶 `allowed_actions`（檢視器是唯讀的）。session 檔案不存在則 `404`。
+
+### Drive 端點的狀態碼
+
+除通用表外，Drive 錯誤透過 `api/app.py` 的 `DriveError` 轉接器映射：
+
+| 狀態 | 何時 |
+|---|---|
+| `409` | revision 衝突 / 冪等衝突 |
+| `403` | 權限拒絕（actor 無此能力） |
+| `422` | 註冊項被停用 / 不相容 / 未找到，或無效轉換 |
+| `404` | Drive / session 未找到 |
+| `400` | body 格式錯誤 |
+| `429` | 背壓（超出每圖 / 每 creature 限制） |
+
+錯誤 body 和其他路由一樣是 `{"detail": "<message>"}`。
+
+---
+
 ## 檔案
 
 ### `GET /api/files/tree`
@@ -565,6 +629,33 @@ Response：`{"status": "deleted", "name"}`。
 #### `DELETE /api/settings/mcp/{name}`
 
 Response：`{"status": "removed", "name"}`。
+
+### Drive 執行期
+
+經 Studio 設定門面的、節點定向的 [Drive](../concepts/multi-agent/drive.md)
+設定（絕不是裸檔案編輯）。每個端點取一個可選的 `?node=<id>` query 參數
+（缺省 / `_host` = host 自己的 config home；一個已連線的 worker id 路由
+到那個 worker 的設定轉接器）。讀取是開放的；**儲存與套用都需要 admin**，
+且是刻意分離的操作。見
+[`drive-settings.yaml` schema](configuration.md#drive-設定-drive-settingsyaml)。
+
+| 方法 + 路徑 | 用途 |
+|---|---|
+| `GET /api/settings/drives` | 設定檔檢視：可用/已啟用註冊項 + 載入狀態。 |
+| `GET /api/settings/drives/config` | 原始已校驗設定 + 內容雜湊 `revision`。 |
+| `GET /api/settings/drives/runtime-status` | 節點上*執行中*的 Drive 執行期快照。 |
+| `POST /api/settings/drives/validate` | 校驗一份候選設定映射（`{settings}`）。 |
+| `PUT /api/settings/drives` | 持久化已校驗設定。Admin。Body `{settings, expected_revision}`；陳舊的 `expected_revision` 是 `409`。 |
+| `POST /api/settings/drives/apply` | 把已持久化設定套用到活執行期。Admin。 |
+
+- **儲存 ≠ 套用。** `PUT` 只寫檔案（樂觀並行檢查）。`POST .../apply`
+  回傳
+  `{"result": "applied_live" | "restart_required" | "rejected", "desired_revision", "running_revision", "warnings"}`，
+  所以 UI 絕不會聲稱一個已儲存檔案正在執行。
+- 註冊項目錄 DTO（在 status 載荷裡）攜帶 `option_schema` /
+  `option_defaults` / `prompt_preview` 供設定編輯器使用。
+- 可用性是節點特定的，因為套件安裝是節點特定的；一次設定變更是
+  operator / admin 的控制平面操作，不是普通的 Drive 權限。
 
 ---
 

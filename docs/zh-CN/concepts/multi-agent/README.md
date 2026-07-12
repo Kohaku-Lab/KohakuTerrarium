@@ -55,11 +55,27 @@ CrewAI、AutoGen、MetaGPT 瞄准的就是这个轴。
 
 当你真的要让不同Creature合作时用Terrarium。当任务在一个 Creature内部可以自然拆解时用子 Agent：对多数「我需要上下文隔离」的直觉而言，纵向比较简单。框架不替你挑，你自己看情况。
 
+## 运行时资源：session、频道、Drive
+
+引擎拥有一小组运行时资源——它协调却从不推理的机制。Creature 提供含义；
+引擎提供身份、持久化与投递。
+
+| 资源 | 引擎拥有 | Creature / 应用提供 |
+|---|---|---|
+| [Session](../modules/session-and-environment.md) | 持久历史、附着、合并/分裂谱系 | 记住的内容意味着什么 |
+| [频道](../modules/channel.md) | 身份、接线、广播投递 | 消息意味着什么、是否行动 |
+| [Drive](drive.md) | 身份、指派、就绪、持久投递、恢复 | 承诺意味着什么、如何追求 |
+
+Drive 是最新也最选用的：一份持久、可指派的承诺，由引擎以普通事件投递。
+它只在 Terrarium 带 Drive 配置构建时才存在，一只 Creature 在零个 Drive
+下也完全有效。
+
 ## 这一节有什么
 
 - [Terrarium](terrarium.md)：横向多创造物图的运行时引擎。
 - [特权节点](privileged-node.md)：图中持有组工具的 Creature；`root:` 配方关键字会把一个节点提升为特权。
 - [动态图](dynamic-graph.md)：自动合并 / 自动分裂、图编辑器，以及 recipe 在 resume 时是真理来源的设计。
+- [Drive](drive.md)：与 session、频道并列的选用持久承诺运行时资源；至少一次投递、所有权边界、注册启用。
 
 ## 延伸阅读
 

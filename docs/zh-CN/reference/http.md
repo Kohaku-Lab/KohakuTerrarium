@@ -410,6 +410,70 @@ Side effect：未建索引的事件会索引起来 (幂等)；代理执行中会
 
 ---
 
+## Drive 记录
+
+[Drive 运行时](../concepts/multi-agent/drive.md)的记录。一个 *session*
+就是一个 Terrarium 图，所以 `{session_id}` 是操作所针对的 graph id。
+actor 从已认证的请求推导（单租户调用者是 operator 控制台；L4 用户以
+自身身份行动，`admin` 角色授予图权限提升）——绝不从 body 取。列表行
+遮蔽 `spec`/`evidence`；detail 只返回给被授权的调用者。这些端点只在
+目标 Terrarium 带 Drive 运行时构建时才存在。
+
+| 方法 + 路径 | 用途 |
+|---|---|
+| `GET /api/sessions/{session_id}/drives` | 列出遮蔽后的行。Query：`status`、`kind`、`owner`、`assignee`、`mine`(bool)、`include_terminal`(bool)。 |
+| `POST /api/sessions/{session_id}/drives` | 创建一个默认由调用者拥有的 Drive。 |
+| `GET /api/sessions/{session_id}/drives/{drive_id}` | 完整 detail（未授权调用者得到遮蔽行）。 |
+| `PATCH /api/sessions/{session_id}/drives/{drive_id}` | CAS 检查的非身份 patch（title/spec/priority/…）。 |
+| `POST /api/sessions/{session_id}/drives/{drive_id}/assign` | 指派/重新指派给一个图成员（图权限）。 |
+| `POST /api/sessions/{session_id}/drives/{drive_id}/unassign` | 取消指派（图权限）。 |
+| `POST /api/sessions/{session_id}/drives/{drive_id}/owner` | 转移所有权边界（经审计）。 |
+| `POST /api/sessions/{session_id}/drives/{drive_id}/transition` | pause/resume/wait/block/cancel（通用转换）。 |
+| `POST /api/sessions/{session_id}/drives/{drive_id}/propose` | 带证据提议一次终态转换（complete/fail）。 |
+| `POST /api/sessions/{session_id}/drives/{drive_id}/approve` | 批准一个待定的终态提议。 |
+| `POST /api/sessions/{session_id}/drives/{drive_id}/progress` | 追加一条进度观测（仅追加）。 |
+| `GET /api/sessions/{session_id}/drives/{drive_id}/deliveries` | 投递历史（重试 / 恢复 / 死信）。 |
+| `GET /api/sessions/{session_id}/drives/{drive_id}/progress` | 仅追加的进度观测。 |
+| `POST /api/sessions/{session_id}/drives/deliveries/{delivery_id}/replay` | 重放一个死信投递（生成新的投递）。 |
+
+Body 与语义：
+
+- 每个变更 body 都携带 `expected_revision`（`progress` 例外，它仅追加）
+  和可选的 `idempotency_key`。陈旧的 revision 是 `409`；用同一个幂等键
+  配不同内容也是 `409`。
+- detail/响应形状是 service 的 `DriveView` 序列化（record + assignment
+  + 派生的 `availability`/`durability` + 按 actor 限定的
+  `allowed_actions`）。
+- `propose` 在策略立即接受时返回更新后的 detail，或在需要验证器/另一个
+  审批者定案时返回 `{"proposal_id": ..., "target_status": ..., "pending": true}`——
+  然后用那个 `proposal_id` 调用 `approve`。
+- Drive 至少一次投递并逻辑去重；没有恰好一次保证，一个被 resume 的尝试
+  可能浮现一个恢复警告（见
+  [Drive](../concepts/multi-agent/drive.md)）。
+
+### `GET /api/persistence/viewer/{session_name}/drives`
+
+一个 **已保存**（非活）session 的只读持久 Drive 行，直接从 session 的
+Drive sidecar（`<name>.kohakutr.drives`）读取而不 resume 它。行是遮蔽的，
+且不携带 `allowed_actions`（查看器是只读的）。session 文件不存在则 `404`。
+
+### Drive 端点的状态码
+
+除通用表外，Drive 错误通过 `api/app.py` 的 `DriveError` 适配器映射：
+
+| 状态 | 何时 |
+|---|---|
+| `409` | revision 冲突 / 幂等冲突 |
+| `403` | 权限拒绝（actor 无此能力） |
+| `422` | 注册项被禁用 / 不兼容 / 未找到，或无效转换 |
+| `404` | Drive / session 未找到 |
+| `400` | body 格式错误 |
+| `429` | 背压（超出每图 / 每 creature 限制） |
+
+错误 body 和其他路由一样是 `{"detail": "<message>"}`。
+
+---
+
 ## 文件
 
 ### `GET /api/files/tree`
@@ -562,6 +626,33 @@ Response：`{"status": "deleted", "name"}`。
 #### `DELETE /api/settings/mcp/{name}`
 
 Response：`{"status": "removed", "name"}`。
+
+### Drive 运行时
+
+经 Studio 设置门面的、节点定向的 [Drive](../concepts/multi-agent/drive.md)
+设置（绝不是裸文件编辑）。每个端点取一个可选的 `?node=<id>` query 参数
+（缺省 / `_host` = host 自己的 config home；一个已连接的 worker id 路由
+到那个 worker 的设置适配器）。读取是开放的；**保存与应用都需要 admin**，
+且是刻意分离的操作。见
+[`drive-settings.yaml` schema](configuration.md#drive-设置-drive-settingsyaml)。
+
+| 方法 + 路径 | 用途 |
+|---|---|
+| `GET /api/settings/drives` | 设置文件视图：可用/已启用注册项 + 加载状态。 |
+| `GET /api/settings/drives/config` | 原始已校验设置 + 内容哈希 `revision`。 |
+| `GET /api/settings/drives/runtime-status` | 节点上*运行中*的 Drive 运行时快照。 |
+| `POST /api/settings/drives/validate` | 校验一份候选设置映射（`{settings}`）。 |
+| `PUT /api/settings/drives` | 持久化已校验设置。Admin。Body `{settings, expected_revision}`；陈旧的 `expected_revision` 是 `409`。 |
+| `POST /api/settings/drives/apply` | 把已持久化设置应用到活运行时。Admin。 |
+
+- **保存 ≠ 应用。** `PUT` 只写文件（乐观并发检查）。`POST .../apply`
+  返回
+  `{"result": "applied_live" | "restart_required" | "rejected", "desired_revision", "running_revision", "warnings"}`，
+  所以 UI 绝不会声称一个已保存文件正在运行。
+- 注册项目录 DTO（在 status 载荷里）携带 `option_schema` /
+  `option_defaults` / `prompt_preview` 供设置编辑器使用。
+- 可用性是节点特定的，因为包安装是节点特定的；一次设置变更是 operator /
+  admin 的控制平面操作，不是普通的 Drive 权限。
 
 ---
 

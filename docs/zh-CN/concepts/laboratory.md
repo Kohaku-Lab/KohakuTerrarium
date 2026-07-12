@@ -450,6 +450,39 @@ Codex login 也是一样：在选中工作节点时点击 **Codex
 login**，会在 *那个工作节点上* 跑 OAuth 流程，所以浏览器在
 工作节点机器上打开，最终的 token 落在工作节点的磁盘上。
 
+## 节点定向的设置
+
+有些运行时配置是按 **执行节点** 的，而不是按集群。
+[Drive 运行时](./multi-agent/drive.md)是当前的例子，它遵循和 identity
+相同的「在运行它的节点上解析」规则。
+
+每个 worker 在它自己的 `KT_CONFIG_DIR` 下拥有自己的 `drive-settings.yaml`。
+一个 worker 在启动时从*它本地的* Studio 设置解析器构建它的 `Terrarium`——
+host 的协调引擎不是 worker creature 的 Drive home，它保持 Drive 禁用。
+一次设置读/写携带一个 **目标节点**：
+
+```text
+user -> host Studio / API 设置（已选目标节点）
+     -> Laboratory studio.settings 请求
+     -> worker 端的设置适配器读/写那个 worker 的 config home
+```
+
+因为包安装是按节点的，*可用* 注册项的集合是节点特定的：设置 UI 必须
+拉取目标 worker 的目录，绝不假设 host 的。应用一次变更会路由到那个
+worker，然后要么重新配置它的活 Terrarium，要么返回 `restart_required`——
+host 从不直接编辑 worker 的文件，也从不假装 host 安装的注册代码在远程
+存在。
+
+两条从 Lab 设计的其余部分延续下来的不变式：
+
+- **`DriveRuntimeSpec` 仅在进程内。** 它持有活的注册项实例，所以它绝不
+  上线传输。Laboratory 传输可序列化的注册项 **名称 + 选项 + 运行时
+  配置**，worker 把它们解析成它自己的 spec——和 identity 的本地优先
+  凭据解析同一套路。
+- **`TerrariumService` 仍是唯一的运行时控制界面。** Drive 记录操作路由到
+  拥有该图的 worker，正如 `chat` 和 `connect`；host 的镜像事件副本是只读
+  的，绝不是可写的 Drive 权威。
+
 ## 文件、部署与沙箱
 
 - **`terrarium.files`**：通过 Lab APP 的 scope 受限文件

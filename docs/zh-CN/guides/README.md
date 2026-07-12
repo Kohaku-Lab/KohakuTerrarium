@@ -24,6 +24,8 @@ tags:
 - [Terrarium 指南](terrariums.md)：横向多代理协作，频道、输出接线、特权节点、热插拔、观察。
 - [组合代数](composition.md)：用 Python 的 `>>`、`&`、`|`、`*` 把 agent 与 async callable 串起来。
 - [程序化使用指南](programmatic-usage.md)：在你自己的 Python 代码里驱动 `Terrarium`、`Creature`、`Studio` 与底层 `Agent`。
+- [Programmatic Drive](programmatic-drive.md)：持久承诺运行时——启用它、创建/管理 Drive、提议完成、sidecar 持久化、resume。
+- [Goal](goal.md)：`/goal` 作为 Drive 之上的选用组合——注册项与插件开关、命令集、完成语义。
 
 ## 存续
 

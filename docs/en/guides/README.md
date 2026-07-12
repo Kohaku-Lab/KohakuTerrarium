@@ -39,6 +39,8 @@ If you want a guided first walk-through, go to [Tutorials](../tutorials/README.m
 - [Studio](studio.md): manage running sessions and saved state through the `Studio` class.
 - [Composition](composition.md): `>>`, `&`, `|`, `*` pipelines from Python.
 - [Programmatic Usage](programmatic-usage.md): embedding `Terrarium`, `Studio`, `Creature`, and lower-level `Agent` objects.
+- [Programmatic Drive](programmatic-drive.md): the durable-commitment runtime — enable it, create/administer Drives, propose completion, sidecar persistence, resume.
+- [Goal](goal.md): `/goal` as an optional composition over Drive — the registration vs plugin toggles, command set, and completion semantics.
 
 ## Persist and search
 

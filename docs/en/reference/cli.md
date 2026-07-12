@@ -376,6 +376,28 @@ Manage the global MCP server catalog
 - `edit <name>`: interactive edit.
 - `delete <name>`: remove entry.
 
+### `kt config drive`
+
+Manage the [Drive runtime settings](configuration.md#drive-settings-drive-settingsyaml)
+(`~/.kohakuterrarium/drive-settings.yaml`) through the Studio settings
+façade. Save and apply are distinct — the plain CLI owns no running
+engine, so `apply` reports validity, not a live swap.
+
+```
+kt config drive {show | registrations | set <field> <value> | apply}
+```
+
+- `show`: runtime enabled state + tuning + per-registration enabled state.
+- `registrations`: list installed Drive registrations and their
+  enabled / load status.
+- `set <field> <value>`: set a runtime field or toggle a registration,
+  then save (CAS-checked). Field forms: a runtime field (`enabled true`,
+  `max_active_per_creature 8`) or `registration:<name> on|off` (e.g.
+  `registration:generic on`).
+- `apply`: validate that the saved settings resolve; reports
+  `applied_live` / `restart_required` / `rejected` (a running server
+  picks up a valid file on restart).
+
 ---
 
 ## Auth
@@ -443,6 +465,39 @@ kt search <session> <query> [flags]
 | `--mode` | `fts\|semantic\|hybrid\|auto` | `auto` | Search mode. Auto picks semantic when vectors exist, else FTS. |
 | `--agent` | str | (none) | Restrict to events from one agent. |
 | `-k` | int | `10` | Max results. |
+
+---
+
+## Drive records
+
+`kt drive` administers [Drive](../concepts/multi-agent/drive.md) records
+in a saved session non-interactively — it resumes the session through
+Studio (which resolves that node's Drive settings), runs one operation,
+prints a stable table or `--json`, and shuts down.
+
+```
+kt drive --session <id> [--json] {list | show | create | assign | transition | deliveries | replay}
+```
+
+- `--session <id>` (required): session name/prefix or `.kohakutr` path.
+- `--json`: emit the service DTO shape instead of a table.
+
+| Subcommand | Form | Notes |
+|---|---|---|
+| `list` | `list [--status active,blocked] [--kind K] [--mine]` | Redacted rows. |
+| `show` | `show <drive_id>` | Full record (use it to read the current revision). |
+| `create` | `create --kind K --title T [--scope graph\|creature] [--priority N] [--spec-json JSON]` | Operator-owned Drive. |
+| `assign` | `assign <drive_id> <creature> --revision N` | Assign to a graph member. |
+| `transition` | `transition <drive_id> <status> --revision N [--reason R]` | Pause/resume/cancel/… |
+| `deliveries` | `deliveries <drive_id>` | Delivery history. |
+| `replay` | `replay <delivery_id>` | Replay a dead-letter delivery. |
+
+Mutations (`assign`, `transition`) require `--revision N`; omitting it
+fails with a refetch instruction rather than silently overwriting. Exit
+codes are meaningful for scripting (see [Exit codes](#exit-codes)).
+Terminal `propose`/`approve`, `unassign`, and owner transfer are exposed
+through the HTTP API and the interactive `/drives` command rather than
+this top-level automation CLI.
 
 ---
 
@@ -586,6 +641,9 @@ auto-attached but can be referenced by name.
 - `0`: success.
 - `1`: generic error.
 - Editor exit code, for `kt edit` / `kt config edit`.
+- `kt drive` uses an extended set so scripts can branch: `0` ok, `1`
+  error, `2` usage, `3` conflict (revision moved — refetch), `4` not
+  found, `5` permission denied.
 
 ## Interactive prompts
 

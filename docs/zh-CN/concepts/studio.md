@@ -84,6 +84,37 @@ HTTP API 序列化 JSON，前端渲染面板，但干活的都是 Studio。
 persistence 可以列出它们、把它们恢复进运行中的引擎、fork 它们，
 以及构建事后的查看器载荷。
 
+## 被托管的设置归属
+
+有些运行时能力由 operator 配置，而不是由 recipe 或 Creature 配置。
+[Drive 运行时](multi-agent/drive.md)是当前的例子，它演示了归属规则。
+
+引擎是 **依赖注入的**：`Terrarium` 接受显式的 `drive_config` /
+`drive_registrations` / `drive_store` 参数，从不读 `~/.kohakuterrarium`
+或向 Studio 要什么。**Studio 是被托管的设置归属方**：它加载并校验设置
+文件（[`drive-settings.yaml`](../reference/configuration.md)），把它和
+已安装注册项目录联合起来，并解析出一份显式的 spec，由 Studio 支持的
+构建路径注入到它构建的引擎里。
+
+```text
+web / CLI / TUI 适配器
+  -> Studio 设置 + 目录
+  -> 解析显式 Drive 参数
+  -> Terrarium(drive_config=..., drive_registrations=...)
+  -> creature 注入
+```
+
+由这个方向而来的后果：
+
+- 一个程序化调用者可以完全绕过 Studio 并传显式对象（见
+  [Programmatic Drive](../guides/programmatic-drive.md)）。把一个既有引擎
+  传给 `Studio(engine=...)` 绝不会用设置文件覆盖那个引擎的显式配置。
+- 保存设置和把它们应用到一个活引擎是 **分离的** 类型化操作，所以 UI
+  真实地报告 `applied_live` / `restart_required` / `rejected`，而不是
+  假装一个已保存的文件正在运行。
+- HTTP 路由和 web 设置面板委托给同一个 Studio 门面；它们不是第二个设置
+  归属方。
+
 ## 挂载策略
 
 不是每个生物都是聊天机器人。监控器可能没有用户输入；调度器可能只

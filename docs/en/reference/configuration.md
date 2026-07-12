@@ -543,6 +543,16 @@ terrarium:
 > send. The previously-supported `type:` field is ignored at the
 > engine layer; new configs should omit it.
 
+> **Recipes carry no Drive fields.** A `terrarium.yaml` recipe is
+> graph-construction glue only — creatures, channels, wiring. It never
+> configures the Drive runtime, selects registrations, or seeds Drive
+> records. Drive runtime configuration is an explicit `Terrarium(...)`
+> constructor argument (managed products resolve it from
+> [`drive-settings.yaml`](#drive-settings-drive-settingsyaml)). Applying
+> the same recipe to two engines can therefore produce different Drive
+> capabilities. All existing recipes remain byte-for-byte valid with no
+> Drive awareness.
+
 Terrarium field summary:
 
 | Field | Type | Default | Description |
@@ -590,6 +600,136 @@ Root (privileged user-facing node):
   `group_stop_node`, `group_channel`, `group_wire`, `group_status`).
 - Auto-listens to every creature channel; receives `report_to_root`.
 - Inheritance / merge rules are the same as for creatures.
+
+---
+
+## Drive settings (`drive-settings.yaml`)
+
+The [Drive runtime](../concepts/multi-agent/drive.md) is configured by
+explicit `Terrarium(...)` constructor arguments
+(`drive_config` / `drive_registrations` / `drive_store`). The low-level
+engine never reads any file. For managed surfaces (web, TUI, `kt`,
+desktop), **Studio** owns a settings file and resolves it into those
+explicit arguments:
+
+- Canonical path: `config_dir() / "drive-settings.yaml"`, normally
+  `~/.kohakuterrarium/drive-settings.yaml` (honours `KT_CONFIG_DIR`). It
+  is **not** the launcher's `app-settings.json`.
+- Loaded/validated by `kohakuterrarium.studio.identity.drive_settings`.
+- Stores serializable selections and options only — never live Python
+  objects and never Drive records (those live in the Drive repository /
+  session sidecar).
+- An **absent** file resolves to a runtime-**disabled** default. A
+  **malformed** file raises a typed validation error and the last valid
+  file is left untouched — a bad setting never silently enables code.
+
+Full schema (all fields optional; omitted fields use the documented
+defaults shown):
+
+```yaml
+schema_version: 1
+runtime:
+  enabled: false                  # off by default; nothing runs until true
+  max_active_per_creature: 8
+  max_pending_per_graph: 100
+  max_consecutive_drive_turns: 3
+  dispatcher_concurrency: 4
+  spec_max_bytes: 16384
+  presentation_max_bytes: 8192
+  metadata_max_bytes: 4096
+  evidence_max_bytes: 16384
+  retry:
+    max_attempts: 5
+    initial_backoff_s: 2.0
+    max_backoff_s: 300.0          # must be >= initial_backoff_s
+    jitter: 0.1                   # within [0, 1]
+  retention:
+    terminal_days: 90
+    acknowledged_delivery_days: 30
+    superseded_delivery_days: 7
+    dead_letter_days: 90
+    progress_max_count: 500
+    progress_max_age_days: 90
+registrations:
+  generic:                        # a registration is keyed by its stable name
+    enabled: true
+    options: {}
+  goal:
+    enabled: false                # installed != enabled (see below)
+    options: {}
+```
+
+### `runtime` fields
+
+`runtime` reuses the same validation as the `DriveRuntimeConfig`
+constructor argument — nonsense values fail at load, not after a Drive
+is already active.
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `enabled` | bool | `false` | Master switch. `false` = the engine owns no Drive manager, tools, prompt, or dispatcher. |
+| `max_active_per_creature` | int ≥ 1 | `8` | Cap on concurrently active Drives per assignee. |
+| `max_pending_per_graph` | int ≥ 1 | `100` | Backpressure cap on pending deliveries per graph. |
+| `max_consecutive_drive_turns` | int ≥ 1 | `3` | After this many back-to-back Drive turns, dispatch yields one slot to queued user / channel / trigger work. |
+| `dispatcher_concurrency` | int ≥ 1 | `4` | Max concurrent delivery claims. |
+| `spec_max_bytes` / `presentation_max_bytes` / `metadata_max_bytes` / `evidence_max_bytes` | int ≥ 1 | `16384` / `8192` / `4096` / `16384` | Independent per-payload byte limits. |
+| `retry.max_attempts` | int ≥ 1 | `5` | Delivery attempts before dead-letter. |
+| `retry.initial_backoff_s` / `retry.max_backoff_s` | number ≥ 0 | `2.0` / `300.0` | Exponential backoff bounds (`max` ≥ `initial`). |
+| `retry.jitter` | number 0–1 | `0.1` | Backoff jitter fraction. |
+| `retention.terminal_days` | int ≥ 0 | `90` | Days a terminal Drive is kept before it is eligible for retirement. |
+| `retention.acknowledged_delivery_days` | int ≥ 0 | `30` | Retention for acknowledged deliveries. |
+| `retention.superseded_delivery_days` | int ≥ 0 | `7` | Retention for superseded deliveries. |
+| `retention.dead_letter_days` | int ≥ 0 | `90` | Retention for dead letters. |
+| `retention.progress_max_count` | int ≥ 1 | `500` | Max retained progress records per Drive. |
+| `retention.progress_max_age_days` | int ≥ 0 | `90` | Max age of retained progress records. |
+
+### `registrations`: installed is not enabled
+
+Each key under `registrations` is a registration's stable **name** with
+`{ enabled: bool, options: {...} }`. A registration must be **installed**
+(declared by a package's [`drive_registrations:`](#package-manifest-kohakuyaml)
+manifest slot, or passed directly to `Terrarium`) *and* enabled here
+before its `kind` can be created, validated, projected, or scheduled.
+Installation alone never enables anything. Enabling the runtime with no
+enabled registration is rejected. Only enabled registrations are
+imported and only they contribute prompt prose.
+
+### Save is not apply
+
+Persisting settings and applying them to a running engine are **two
+distinct operations**, so a UI can never pass off "saved for next start"
+as "running now":
+
+- **Save** validates and atomically writes the file
+  (`save_settings`). It is optimistic-concurrency protected by a
+  content-hash `revision`; a stale write raises a conflict error and the
+  caller must refetch.
+- **Apply** (`apply_runtime`) is separate and returns one of:
+
+  | Result | When |
+  |---|---|
+  | `applied_live` | A registration-set change on an already-enabled runtime with unchanged tuning — loaded, validated, and swapped atomically. |
+  | `restart_required` | Turning the runtime on or off, or changing runtime tuning — the v1 conservative boundary. The file becomes the desired next-start config; the running engine is unchanged. |
+  | `rejected` | Settings failed to resolve (e.g. an enabled registration that will not import). |
+
+The apply result reports both the **desired** settings revision and the
+**running** runtime revision, so surfaces can show desired-versus-running
+state honestly. Disabling a persisted registration never deletes its
+Drive records; those become non-deliverable and inspectable until a
+compatible registration is restored (see
+[when a registration is disabled](../concepts/multi-agent/drive.md#when-a-registration-is-disabled-or-unavailable)).
+
+### Node-targeted settings (Laboratory)
+
+Settings scope is **per execution node / config home**, not per recipe
+and not per creature. In a Laboratory deployment each worker has its own
+`drive-settings.yaml` under its own `KT_CONFIG_DIR`, and a settings
+operation carries a target node so it routes to the worker that will run
+the Drives — never to the host's agent-free coordination engine.
+Availability is node-specific because package installation is
+node-specific. In L4 multi-user mode the operator policy is shared by
+default; each per-user engine receives a fresh immutable resolution of
+it while its Drive records stay per-user.
 
 ---
 
@@ -758,6 +898,12 @@ user_commands:
   - name: deploy
     module: my_package.user_commands.deploy
     class: DeployCommand
+drive_registrations:
+  - name: goal
+    kind: goal
+    module: my_package.drive.goal
+    class: GoalDriveRegistration
+    description: Durable objective pursuit policy
 prompts:
   - name: git-safety
     path: prompts/git-safety.md
@@ -783,6 +929,7 @@ python_dependencies:
 | `skills` | list | `[{name, path, description?}]`: contributed procedural skill bundles. |
 | `commands` | list | `[{name, module, class, override?}]`: controller `##name##` commands. |
 | `user_commands` | list | `[{name, module, class}]`: human-facing slash commands. |
+| `drive_registrations` | list | `[{name, kind, module, class, description?}]`: deterministic [Drive](../concepts/multi-agent/drive.md) kind/policy registrations. Discovered here but **inert until enabled** in [`drive-settings.yaml`](#drive-settings-drive-settingsyaml); the catalog scan lists them without importing the module. |
 | `prompts` / `templates` | list | `[{name, path}]`: reusable prompt fragments for Jinja `{% include %}`. |
 | `framework_hints` | dict[str,str] | Package-level override map for framework-hint prose blocks. |
 | `llm_presets` | list | `[{name}]`: contributed LLM presets (values live in the package). |

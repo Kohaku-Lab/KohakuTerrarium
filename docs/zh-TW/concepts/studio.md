@@ -89,6 +89,37 @@ Studio 做的。
 Studio 的 persistence 可以列出它們、恢復進運行中的引擎、
 fork 它們，並產生事後檢視用的 payload。
 
+## 被托管的設定歸屬
+
+有些執行期能力由 operator 設定，而不是由 recipe 或生物設定。
+[Drive 執行期](multi-agent/drive.md)是當前的例子，它演示了歸屬規則。
+
+引擎是 **相依注入的**：`Terrarium` 接受顯式的 `drive_config` /
+`drive_registrations` / `drive_store` 參數，從不讀 `~/.kohakuterrarium`
+或向 Studio 要什麼。**Studio 是被托管的設定歸屬方**：它載入並校驗設定
+檔案（[`drive-settings.yaml`](../reference/configuration.md)），把它和
+已安裝註冊項目錄聯合起來，並解析出一份顯式的 spec，由 Studio 支援的
+建構路徑注入到它建構的引擎裡。
+
+```text
+web / CLI / TUI 轉接器
+  -> Studio 設定 + 目錄
+  -> 解析顯式 Drive 參數
+  -> Terrarium(drive_config=..., drive_registrations=...)
+  -> creature 注入
+```
+
+由這個方向而來的後果：
+
+- 一個程式化呼叫者可以完全繞過 Studio 並傳顯式物件（見
+  [Programmatic Drive](../guides/programmatic-drive.md)）。把一個既有引擎
+  傳給 `Studio(engine=...)` 絕不會用設定檔覆寫那個引擎的顯式設定。
+- 儲存設定和把它們套用到一個活引擎是 **分離的** 型別化操作，所以 UI
+  真實地報告 `applied_live` / `restart_required` / `rejected`，而不是
+  假裝一個已儲存的檔案正在執行。
+- HTTP 路由和 web 設定面板委託給同一個 Studio 門面；它們不是第二個設定
+  歸屬方。
+
 ## Attach 政策
 
 不是每隻生物都是聊天機器人。監控生物可能沒有使用者輸入；

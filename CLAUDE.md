@@ -18,6 +18,12 @@ KohakuTerrarium is a Python framework that enables building any kind of agent sy
 - Max lines per file: 600 (hard max: 1000, enforced by `tests/unit/test_file_sizes.py`)
 - Highly modularized - one responsibility per module
 
+### Coding style rules
+1. NO memo/noting/editorial comments (existing codebase may still violate this, but new code should not)
+2. comment is for "explain when the code itself can't explain"
+3. AVOID long-multi-line inline comments
+4. doc-string for whole functino quick intro, inline comments for indicare corresopnding stuff
+
 ### Import Rules
 1. No imports inside functions (except optional dep and lazy import to avoid long init time)
 2. Import grouping order:

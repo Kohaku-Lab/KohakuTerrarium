@@ -91,5 +91,6 @@ Session（每個生物一個）
 ## 另請參考
 
 - [Channel](channel.md)：需要明確 opt-in 的共享原語。
+- [Drive](../multi-agent/drive.md)：在 session 旁邊持久化的持久承諾執行期資源（在它自己的 sidecar 檔案裡）。
 - [多代理 / terrarium](../multi-agent/terrarium.md)：environment 真正重要的地方。
 - [impl-notes/session-persistence](../impl-notes/session-persistence.md)：session 狀態實際如何落在磁碟上。

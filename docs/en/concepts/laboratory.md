@@ -472,6 +472,43 @@ worker is selected runs the OAuth flow *on that worker*, so the
 browser opens on the worker's machine and the resulting token lives
 on the worker's disk.
 
+## Node-targeted settings
+
+Some runtime configuration is per **execution node**, not per cluster.
+The [Drive runtime](./multi-agent/drive.md) is the current example, and
+it follows the same "resolve on the node that runs it" rule as identity.
+
+Each worker owns its own `drive-settings.yaml` under its own
+`KT_CONFIG_DIR`. A worker constructs its `Terrarium` from *its local*
+Studio settings resolver at boot — the host's coordination engine is not
+the Drive home for worker creatures, and it stays Drive-disabled. A
+settings read/write carries a **target node**:
+
+```text
+user -> host Studio / API Settings (target node selected)
+     -> Laboratory studio.settings request
+     -> worker-side settings adapter reads/writes that worker's config home
+```
+
+Because package installation is per-node, the set of *available*
+registrations is node-specific: the Settings UI must fetch the target
+worker's catalog, never assume the host's. Applying a change routes to
+that worker and then either reconfigures its live Terrarium or returns
+`restart_required` — the host never edits a worker's file directly and
+never pretends host-installed registration code exists remotely.
+
+Two invariants carry over from the rest of the Lab design:
+
+- **`DriveRuntimeSpec` is in-process only.** It holds live registration
+  instances, so it is never sent over the wire. Laboratory transports
+  serializable registration **names + options + runtime config**, and
+  the worker resolves those into its own spec — the same pattern as
+  identity's local-first credential resolution.
+- **`TerrariumService` stays the only runtime-control surface.** Drive
+  record operations route to the worker that owns the graph, exactly
+  like `chat` and `connect`; the host's mirror event replicas are
+  read-only and are never a writable Drive authority.
+
 ## Files, deployment, and sandboxing
 
 - **`terrarium.files`**: scope-bounded file IO over Lab APP. Five

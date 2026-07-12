@@ -91,5 +91,6 @@ Session（每个 Creature一个）
 ## 另请参考
 
 - [Channel](channel.md)：需要明确 opt-in 的共享原语。
+- [Drive](../multi-agent/drive.md)：在 session 旁边持久化的持久承诺运行时资源（在它自己的 sidecar 文件里）。
 - [多 Agent / terrarium](../multi-agent/terrarium.md)：environment 真正重要的地方。
 - [impl-notes/session-persistence](../impl-notes/session-persistence.md)：session 状态实际如何落在磁碟上。

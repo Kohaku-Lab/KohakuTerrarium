@@ -443,6 +443,14 @@ terrarium:
 > 所有图频道都是广播：每个监听者都收到每一次 send。旧的 `type:`
 > 字段在引擎层被忽略，新 config 应该省略。
 
+> **recipe 不携带任何 Drive 字段。** 一个 `terrarium.yaml` recipe 只是
+> 图构建的粘合——creature、频道、接线。它从不配置 Drive 运行时、选择
+> 注册项或播种 Drive 记录。Drive 运行时配置是一个显式的 `Terrarium(...)`
+> 构造函数参数（被托管的产品从
+> [`drive-settings.yaml`](#drive-设置-drive-settingsyaml) 解析它）。因此
+> 把同一个 recipe 应用到两个引擎上可能产生不同的 Drive 能力。所有既有
+> recipe 在零 Drive 感知下仍逐字节有效。
+
 Terrarium字段摘要：
 
 | 字段 | 型别 | 默认 | 说明 |
@@ -485,6 +493,123 @@ Root（面向用户的特权节点）：
   `group_stop_node`、`group_channel`、`group_wire`、`group_status`）。
 - 自动 listen 每一条 Creature 频道、收 `report_to_root`。
 - 继承 / 合并规则跟 Creature 相同。
+
+---
+
+## Drive 设置 (`drive-settings.yaml`)
+
+[Drive 运行时](../concepts/multi-agent/drive.md)由显式的 `Terrarium(...)`
+构造函数参数（`drive_config` / `drive_registrations` / `drive_store`）
+配置。低层引擎从不读任何文件。对于被托管的界面（web、TUI、`kt`、桌面），
+**Studio** 拥有一个设置文件并把它解析成那些显式参数：
+
+- 规范路径：`config_dir() / "drive-settings.yaml"`，通常是
+  `~/.kohakuterrarium/drive-settings.yaml`（尊重 `KT_CONFIG_DIR`）。它
+  **不是** launcher 的 `app-settings.json`。
+- 由 `kohakuterrarium.studio.identity.drive_settings` 加载 / 校验。
+- 只存可序列化的选择和选项——绝不存活的 Python 对象，也绝不存 Drive
+  记录（那些活在 Drive 仓库 / session sidecar 里）。
+- **缺失** 的文件解析为运行时 **禁用** 的默认。**格式错误** 的文件抛一个
+  类型化校验错误，最后一个有效文件保持不动——一个坏设置绝不会悄悄启用
+  代码。
+
+完整 schema（所有字段都可选；省略的字段用下面显示的文档默认值）：
+
+```yaml
+schema_version: 1
+runtime:
+  enabled: false                  # 默认关闭；在变 true 之前什么都不跑
+  max_active_per_creature: 8
+  max_pending_per_graph: 100
+  max_consecutive_drive_turns: 3
+  dispatcher_concurrency: 4
+  spec_max_bytes: 16384
+  presentation_max_bytes: 8192
+  metadata_max_bytes: 4096
+  evidence_max_bytes: 16384
+  retry:
+    max_attempts: 5
+    initial_backoff_s: 2.0
+    max_backoff_s: 300.0          # 必须 >= initial_backoff_s
+    jitter: 0.1                   # 在 [0, 1] 内
+  retention:
+    terminal_days: 90
+    acknowledged_delivery_days: 30
+    superseded_delivery_days: 7
+    dead_letter_days: 90
+    progress_max_count: 500
+    progress_max_age_days: 90
+registrations:
+  generic:                        # 一个注册项以它的稳定 name 为键
+    enabled: true
+    options: {}
+  goal:
+    enabled: false                # 已安装 != 已启用（见下）
+    options: {}
+```
+
+### `runtime` 字段
+
+`runtime` 复用和 `DriveRuntimeConfig` 构造函数参数相同的校验——荒谬的值在
+加载时失败，而不是在一个 Drive 已经活跃之后。
+
+| 字段 | 型别 | 默认 | 含义 |
+|---|---|---|---|
+| `enabled` | bool | `false` | 主开关。`false` = 引擎不拥有 Drive manager、tools、prompt 或分发器。 |
+| `max_active_per_creature` | int ≥ 1 | `8` | 每个受指派者并发活跃 Drive 的上限。 |
+| `max_pending_per_graph` | int ≥ 1 | `100` | 每个图待投递的背压上限。 |
+| `max_consecutive_drive_turns` | int ≥ 1 | `3` | 连续这么多个 Drive 回合后，分发让出一个位置给排队的 user / 频道 / trigger 工作。 |
+| `dispatcher_concurrency` | int ≥ 1 | `4` | 并发投递认领的最大数。 |
+| `spec_max_bytes` / `presentation_max_bytes` / `metadata_max_bytes` / `evidence_max_bytes` | int ≥ 1 | `16384` / `8192` / `4096` / `16384` | 各载荷字段独立的字节限制。 |
+| `retry.max_attempts` | int ≥ 1 | `5` | 死信之前的投递尝试次数。 |
+| `retry.initial_backoff_s` / `retry.max_backoff_s` | number ≥ 0 | `2.0` / `300.0` | 指数退避边界（`max` ≥ `initial`）。 |
+| `retry.jitter` | number 0–1 | `0.1` | 退避抖动比例。 |
+| `retention.terminal_days` | int ≥ 0 | `90` | 一个终态 Drive 在可被退休之前保留的天数。 |
+| `retention.acknowledged_delivery_days` | int ≥ 0 | `30` | 已确认投递的保留。 |
+| `retention.superseded_delivery_days` | int ≥ 0 | `7` | 被作废投递的保留。 |
+| `retention.dead_letter_days` | int ≥ 0 | `90` | 死信的保留。 |
+| `retention.progress_max_count` | int ≥ 1 | `500` | 每个 Drive 保留的最大进度记录数。 |
+| `retention.progress_max_age_days` | int ≥ 0 | `90` | 保留进度记录的最大年龄。 |
+
+### `registrations`：已安装不等于已启用
+
+`registrations` 下每个键是一个注册项的稳定 **name**，值为
+`{ enabled: bool, options: {...} }`。一个注册项必须被 **安装**（由某个包的
+[`drive_registrations:`](#套件-manifest-kohakuyaml) manifest 槽位声明，或
+直接传给 `Terrarium`）*并且* 在这里启用，它的 `kind` 才能被创建、校验、
+投影或调度。仅安装绝不启用任何东西。启用运行时却没有已启用的注册项会被
+拒绝。只有已启用的注册项才被 import，也只有它们贡献 prompt 散文。
+
+### 保存不是应用
+
+持久化设置和把它们应用到一个运行中的引擎是 **两个分离的操作**，所以 UI
+绝不能把「已为下次启动保存」冒充成「现在正在运行」：
+
+- **保存** 校验并原子写入文件（`save_settings`）。它由一个内容哈希
+  `revision` 做乐观并发保护；一次陈旧的写会抛冲突错误，调用者必须重新
+  拉取。
+- **应用**（`apply_runtime`）是分离的，返回其一：
+
+  | 结果 | 何时 |
+  |---|---|
+  | `applied_live` | 在一个已启用、tuning 未变的运行时上的一次注册项集变更——被加载、校验并原子替换。 |
+  | `restart_required` | 打开或关闭运行时，或改变运行时 tuning——v1 保守边界。文件成为期望的下次启动配置；运行中的引擎不变。 |
+  | `rejected` | 设置解析失败（例如一个将无法 import 的已启用注册项）。 |
+
+应用结果同时报告 **期望的** 设置 revision 和 **运行中的** 运行时 revision，
+好让各界面诚实地展示期望与运行的对比。禁用一个已持久化的注册项绝不删除
+它的 Drive 记录；那些变为不可投递且可检视，直到一个兼容的注册项被恢复
+（见 [概念 / Drive：当注册项被禁用](../concepts/multi-agent/drive.md)）。
+
+### 节点定向的设置（Laboratory）
+
+设置作用范围是 **按执行节点 / config home** 的，不是按 recipe，也不是按
+Creature。在一个 Laboratory 部署里每个 worker 在它自己的 `KT_CONFIG_DIR`
+下有自己的 `drive-settings.yaml`，一次设置操作携带一个目标节点，好让它
+路由到将运行这些 Drive 的 worker——绝不路由到 host 那个无 agent 的协调
+引擎。可用性是节点特定的，因为包安装是节点特定的。在 L4 多用户模式里
+operator 策略默认共享；每个按用户的引擎收到它的一份全新不可变解析，而它的
+Drive 记录保持按用户隔离。
 
 ---
 
@@ -601,6 +726,12 @@ plugins:
   - name: my_plugin
     module: my_package.plugins
     class: MyPlugin
+drive_registrations:
+  - name: goal
+    kind: goal
+    module: my_package.drive.goal
+    class: GoalDriveRegistration
+    description: Durable objective pursuit policy
 llm_presets:
   - name: my_preset
 python_dependencies:
@@ -616,6 +747,7 @@ python_dependencies:
 | `terrariums` | list | `[{name}]`，`terrariums/<name>/` 下的Terrarium config。 |
 | `tools` | list | `[{name, module, class}]`，提供的工具类别。 |
 | `plugins` | list | `[{name, module, class}]`，提供的插件。 |
+| `drive_registrations` | list | `[{name, kind, module, class, description?}]`，确定性的 [Drive](../concepts/multi-agent/drive.md) kind/策略注册项。在这里被发现但 **在 [`drive-settings.yaml`](#drive-设置-drive-settingsyaml) 里启用之前是惰性的**；目录扫描列出它们而不 import 模块。 |
 | `llm_presets` | list | `[{name}]`，提供的 LLM preset (实际值在套件里)。 |
 | `python_dependencies` | list[str] | Pip requirement 字符串。 |
 

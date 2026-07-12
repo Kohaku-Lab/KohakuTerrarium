@@ -54,6 +54,44 @@ terrarium:
 
 Field reference: [reference/configuration](../reference/configuration.md).
 
+## Recipes stay graph-only
+
+A recipe describes **structure**: which creatures exist, which channels
+exist, which edges are wired. It never carries runtime resource
+configuration. In particular, a recipe carries **no [Drive](../concepts/multi-agent/drive.md)
+fields** — no runtime toggle, no registration selection, no seed Drive
+records. All existing recipes remain valid with zero Drive awareness.
+
+Drive runtime configuration is an explicit `Terrarium(...)` constructor
+argument, applied *around* recipe application, not inside it:
+
+```python
+from kohakuterrarium import Terrarium
+from kohakuterrarium.terrarium.drive.config import (
+    DriveRuntimeConfig,
+    default_registrations,
+)
+
+# The engine is configured with its runtime capabilities; the recipe only
+# adds creatures/channels/wiring. The already-configured engine injects its
+# Drive capabilities into every creature the recipe creates.
+async with Terrarium(
+    session_dir="runs/",
+    drive_config=DriveRuntimeConfig(enabled=True),
+    drive_registrations=default_registrations(),
+) as engine:
+    await engine.apply_recipe("@kt-biome/terrariums/swe_team")
+    # ... create Drive records explicitly here via the service ...
+```
+
+`from_recipe`, `resume`, and `with_creature` forward the same explicit
+Drive arguments to the constructor; the recipe object is untouched.
+Applying one recipe to two differently-configured engines can therefore
+produce different Drive capabilities. Managed products (web, TUI, `kt`)
+resolve these arguments from [`drive-settings.yaml`](../reference/configuration.md#drive-settings-drive-settingsyaml)
+through Studio; the low-level engine never reads that file. See
+[Programmatic Drive](programmatic-drive.md).
+
 ## Auto-created channels
 
 The runtime always creates:

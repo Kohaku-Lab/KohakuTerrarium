@@ -95,5 +95,7 @@ single-creature session as the only state.
 ## See also
 
 - [Channel](channel.md): the opt-in sharing primitive.
+- [Drive](../multi-agent/drive.md): the durable-commitment runtime
+  resource that persists beside a session (in its own sidecar file).
 - [Multi-agent / terrarium](../multi-agent/terrarium.md): where environments matter.
 - [impl-notes/session-persistence](../impl-notes/session-persistence.md): how session state actually lives on disk.
