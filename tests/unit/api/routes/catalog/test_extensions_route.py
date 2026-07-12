@@ -40,6 +40,9 @@ def app(monkeypatch):
                 "commands": [],
                 "user_commands": [],
                 "prompts": [],
+                "drive_registrations": [
+                    {"name": "goal", "kind": "goal", "description": "objective pursuit"}
+                ],
             },
         ],
     )
@@ -66,6 +69,7 @@ class TestList:
         assert ("trigger", "nightly") in names
         assert ("llm-preset", "claude-opus") in names
         assert ("skill", "plan") in names
+        assert ("drive-registration", "goal") in names
         # Editable flag propagates from package.
         beta_tool = next(e for e in entries if e["name"] == "grep_tool")
         assert beta_tool["editable"] is True

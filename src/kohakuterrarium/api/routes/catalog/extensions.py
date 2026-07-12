@@ -35,6 +35,7 @@ _EXTENSION_SLOTS: dict[str, str] = {
     "commands": "command",
     "user_commands": "user-command",
     "prompts": "prompt",
+    "drive_registrations": "drive-registration",
 }
 
 
@@ -48,6 +49,7 @@ ExtensionKind = Literal[
     "command",
     "user-command",
     "prompt",
+    "drive-registration",
 ]
 
 
