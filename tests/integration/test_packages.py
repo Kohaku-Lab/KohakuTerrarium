@@ -60,16 +60,21 @@ from kohakuterrarium.packages.resolve import (
 )
 from kohakuterrarium.packages.slots import (
     list_package_commands,
+    list_package_drive_registrations,
     list_package_prompts,
     list_package_skills,
     list_package_user_commands,
     resolve_package_command,
+    resolve_package_drive_registration,
     resolve_package_prompt,
     resolve_package_skills,
     resolve_package_user_command,
 )
 from kohakuterrarium.packages.walk import get_package_modules, list_packages
+from kohakuterrarium.studio.catalog import drive_registrations as drive_catalog
 from kohakuterrarium.studio.catalog import packages as studio_packages
+from kohakuterrarium.terrarium.drive.errors import DriveValidationError
+from kohakuterrarium.terrarium.drive.registration import resolve_registration
 
 pytestmark = pytest.mark.timeout(30)
 
@@ -229,6 +234,44 @@ def _make_extension_bundle(
             f"Shared prompt fragment {slot_suffix}.\n",
         )
     _write(src / "kohaku.yaml", yaml.safe_dump(manifest, sort_keys=False))
+    return src
+
+
+def _make_drive_registration_bundle(
+    root: Path, pkg_name: str, *, reg_name: str = "watch"
+) -> Path:
+    """Build a bundle declaring a ``drive_registrations:`` manifest slot plus a
+    real, importable registration module. The manifest lists the descriptor;
+    the module is imported only on an explicit resolve (design §8.2)."""
+    src = root / f"{pkg_name}-src"
+    manifest = {
+        "name": pkg_name,
+        "version": "0.1.0",
+        "description": f"{pkg_name} drive bundle",
+        "drive_registrations": [
+            {
+                "name": reg_name,
+                "kind": reg_name,
+                "module": "kt_watch_reg",
+                "class": "WatchDriveRegistration",
+                "description": "watch until stable",
+            }
+        ],
+    }
+    _write(src / "kohaku.yaml", yaml.safe_dump(manifest, sort_keys=False))
+    _write(
+        src / "kt_watch_reg.py",
+        "from kohakuterrarium.terrarium.drive.registration import (\n"
+        "    DriveRegistrationDescriptor,\n)\n\n\n"
+        "class WatchDriveRegistration:\n"
+        f"    name = {reg_name!r}\n"
+        f"    kind = {reg_name!r}\n"
+        "    schema_version = 1\n\n"
+        "    def descriptor(self):\n"
+        "        return DriveRegistrationDescriptor(\n"
+        f"            name={reg_name!r}, kind={reg_name!r}, schema_version=1\n"
+        "        )\n",
+    )
     return src
 
 
@@ -584,6 +627,66 @@ class TestPackagesIntegration:
         assert list_package_skills() == {}
         assert resolve_package_command("cmd_one") is None
         assert resolve_package_prompt("frag_one") is None
+
+        # ---- drive_registrations: slot (Drive runtime resource, design §8.2) ----
+        # A package declares a Drive kind registration. Discovery lists the
+        # descriptor WITHOUT importing the implementation module; the import
+        # happens only on an explicit resolve/validate.
+        drv_src = _make_drive_registration_bundle(bundle_root, "drivepkg")
+        assert install_package(str(drv_src)) == "drivepkg"
+        entry = resolve_package_drive_registration("watch")
+        assert entry["kind"] == "watch"
+        assert entry["module"] == "kt_watch_reg"
+        assert set(list_package_drive_registrations()) == {"watch"}
+        # Studio catalog surfaces builtin generic + this installed registration,
+        # with provenance, still without importing the module.
+        catalog_names = {e["name"] for e in drive_catalog.list_drive_registrations()}
+        assert {"generic", "watch"} <= catalog_names
+        installed = drive_catalog.installed_descriptors()
+        assert [d.name for d in installed] == ["watch"]
+        assert installed[0].source_package == "drivepkg"
+        # R1-19: with the package root OFF sys.path, discovery stays import-free
+        # AND the catalog's own resolution boundary prepares the import path —
+        # the caller does NOT pre-call ensure_package_importable.
+        import sys as _sys
+
+        before_path = list(_sys.path)
+        _sys.modules.pop("kt_watch_reg", None)
+        pkg_root = str((packages_dir / "drivepkg").resolve())
+        if pkg_root in _sys.path:
+            _sys.path.remove(pkg_root)
+        try:
+            # Discovery imports nothing.
+            drive_catalog.list_drive_registrations()
+            drive_catalog.installed_descriptors()
+            assert "kt_watch_reg" not in _sys.modules
+            assert pkg_root not in _sys.path
+            # Enable/validate through the supported resolver succeeds even though
+            # the root was never manually added to sys.path.
+            reg = drive_catalog.instantiate_registration("watch")
+            assert reg.name == "watch" and reg.kind == "watch"
+            validated = drive_catalog.validate_drive_registration("watch")
+            assert validated["loaded"] is True
+            assert validated["kind"] == "watch"
+            # The low-level resolver still works when handed a ready descriptor.
+            assert ensure_package_importable("drivepkg") is True
+            assert resolve_registration(installed[0]).kind == "watch"
+        finally:
+            _sys.path[:] = before_path
+            _sys.modules.pop("kt_watch_reg", None)
+        # Collision variant: a second package re-declaring the name is a hard
+        # error for both the slots resolver and the studio catalog (§8.2).
+        drv_src2 = _make_drive_registration_bundle(bundle_root, "drivepkg2")
+        assert install_package(str(drv_src2)) == "drivepkg2"
+        with pytest.raises(ValueError, match="Collision for drive_registrations"):
+            resolve_package_drive_registration("watch")
+        with pytest.raises(
+            DriveValidationError, match="duplicate drive registration name 'watch'"
+        ):
+            drive_catalog.installed_descriptors()
+        uninstall_package("drivepkg")
+        uninstall_package("drivepkg2")
+        assert list_package_drive_registrations() == {}
 
         # ---- a bare bundle (no creatures/terrariums/extensions) ----
         # Install still succeeds (validation only WARNS); the manifest is

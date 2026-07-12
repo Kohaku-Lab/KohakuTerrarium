@@ -1,4 +1,5 @@
-"""Extra manifest-slot resolvers — skills, commands, user_commands, prompts.
+"""Extra manifest-slot resolvers — skills, commands, user_commands, prompts,
+drive_registrations.
 
 Cluster 1 of the extension-point decisions adds four new manifest
 fields to ``kohaku.yaml`` beyond the existing
@@ -9,6 +10,13 @@ fields to ``kohaku.yaml`` beyond the existing
 - ``user_commands:``  — user-facing slash commands
 - ``prompts:`` / ``templates:``
                       — shared prompt fragment files (include target)
+
+The Drive runtime resource adds one more (design §8.2):
+
+- ``drive_registrations:`` — deterministic Drive kind/policy registrations
+  (name + kind + module + class). Scanned WITHOUT importing the
+  implementation module; the import happens only on explicit enable/validate
+  via :func:`kohakuterrarium.terrarium.drive.registration.resolve_registration`.
 
 These resolvers scan every installed package, enforce the cross-cutting
 collision policy (hard error when two packages declare the same name —
@@ -196,6 +204,53 @@ def resolve_package_user_command(name: str) -> dict | None:
 def list_package_user_commands() -> dict[str, dict]:
     """Return every declared slash command across installed packages."""
     return _list_manifest_field("user_commands")
+
+
+def iter_package_user_command_entries() -> list[tuple[str, dict]]:
+    """Return ``(package_name, entry)`` for every declared slash command.
+
+    Unlike :func:`list_package_user_commands` this preserves the owning
+    package so the Agent's command-registry aggregation can report
+    provenance and call ``ensure_package_importable`` before importing the
+    class. Cross-package duplicate names are resolved by the Agent's
+    collision policy (same hard-error contract as §8.9), so this iterator
+    does not itself dedupe.
+    """
+    out: list[tuple[str, dict]] = []
+    for pkg in list_packages():
+        pkg_name = pkg.get("name", "?")
+        for entry in pkg.get("user_commands", []) or []:
+            if not isinstance(entry, dict) or not entry.get("name"):
+                continue
+            out.append((pkg_name, entry))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# drive_registrations: (Drive kind/policy registrations, design §8.2)
+# ---------------------------------------------------------------------------
+
+
+def resolve_package_drive_registration(name: str) -> dict | None:
+    """Resolve a ``drive_registrations:`` entry by name across packages.
+
+    Returns the full manifest entry dict — expected keys: ``name``, ``kind``,
+    ``module``, ``class`` (or ``class_name``), ``description``, optional
+    ``schema_version``. Does NOT import the implementation module; the caller
+    imports it via ``resolve_registration`` only when enabling/validating.
+    Collisions across packages raise :class:`ValueError` (design §8.2: a
+    duplicate registration name is always a hard error).
+    """
+    found = _scan_manifest_field("drive_registrations", name)
+    if found is None:
+        return None
+    return found[1]
+
+
+def list_package_drive_registrations() -> dict[str, dict]:
+    """Return every declared Drive registration across installed packages,
+    keyed by name. Duplicate names raise :class:`ValueError` (§8.2)."""
+    return _list_manifest_field("drive_registrations")
 
 
 # ---------------------------------------------------------------------------

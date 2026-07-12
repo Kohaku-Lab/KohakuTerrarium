@@ -26,6 +26,8 @@ does not drag in the marketplace / installer stack)::
   :func:`resolve_package_io`, :func:`resolve_package_trigger`,
   :func:`resolve_package_command`, :func:`resolve_package_user_command`,
   :func:`resolve_package_prompt`, :func:`resolve_package_skills`,
+  :func:`resolve_package_drive_registration`,
+  :func:`list_package_drive_registrations`,
   :func:`get_package_framework_hints`.
 - Typed errors (re-exported from :mod:`kohakuterrarium.errors`):
   :class:`PackageError`, :class:`PackageRefError`,
@@ -77,6 +79,8 @@ _EXPORTS = {
     "resolve_package_user_command": "kohakuterrarium.packages.slots",
     "resolve_package_prompt": "kohakuterrarium.packages.slots",
     "resolve_package_skills": "kohakuterrarium.packages.slots",
+    "resolve_package_drive_registration": "kohakuterrarium.packages.slots",
+    "list_package_drive_registrations": "kohakuterrarium.packages.slots",
     # walk
     "list_packages": "kohakuterrarium.packages.walk",
     "get_package_modules": "kohakuterrarium.packages.walk",

@@ -10,10 +10,12 @@ import pytest
 from kohakuterrarium.packages import slots as slots_mod
 from kohakuterrarium.packages.slots import (
     list_package_commands,
+    list_package_drive_registrations,
     list_package_prompts,
     list_package_skills,
     list_package_user_commands,
     resolve_package_command,
+    resolve_package_drive_registration,
     resolve_package_prompt,
     resolve_package_skills,
     resolve_package_user_command,
@@ -147,6 +149,57 @@ class TestResolvePackageUserCommand:
             [{"name": "p", "user_commands": [{"name": "u1"}]}],
         )
         assert set(list_package_user_commands()) == {"u1"}
+
+
+class TestResolvePackageDriveRegistration:
+    def test_resolves_registration_entry(self, monkeypatch):
+        _patch_packages(
+            monkeypatch,
+            [
+                {
+                    "name": "p",
+                    "drive_registrations": [
+                        {"name": "goal", "kind": "goal", "module": "m", "class": "C"}
+                    ],
+                }
+            ],
+        )
+        assert resolve_package_drive_registration("goal") == {
+            "name": "goal",
+            "kind": "goal",
+            "module": "m",
+            "class": "C",
+        }
+
+    def test_unknown_returns_none(self, monkeypatch):
+        _patch_packages(monkeypatch, [{"name": "p", "drive_registrations": []}])
+        assert resolve_package_drive_registration("nope") is None
+
+    def test_list_aggregates(self, monkeypatch):
+        _patch_packages(
+            monkeypatch,
+            [{"name": "p", "drive_registrations": [{"name": "g1"}, {"name": "g2"}]}],
+        )
+        assert set(list_package_drive_registrations()) == {"g1", "g2"}
+
+    def test_duplicate_name_is_hard_error(self, monkeypatch):
+        _patch_packages(
+            monkeypatch,
+            [
+                {
+                    "name": "a",
+                    "drive_registrations": [{"name": "goal", "kind": "goal"}],
+                },
+                {
+                    "name": "b",
+                    "drive_registrations": [{"name": "goal", "kind": "goal"}],
+                },
+            ],
+        )
+        with pytest.raises(
+            ValueError, match="Collision for drive_registrations name 'goal'"
+        ):
+            resolve_package_drive_registration("goal")
 
 
 class TestResolvePackagePrompt:

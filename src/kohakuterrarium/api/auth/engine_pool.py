@@ -25,7 +25,9 @@ prevent racing a teardown against an in-flight request.
 import asyncio
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from kohakuterrarium.terrarium import Terrarium
 from kohakuterrarium.utils.config_dir import config_dir
@@ -60,9 +62,15 @@ class EnginePool:
         *,
         max_active: int = 10,
         idle_timeout_s: int = 1800,
+        drive_resolver: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self._max_active = max(1, int(max_active))
         self._idle_timeout_s = max(0, int(idle_timeout_s))
+        # Resolves the shared operator Drive policy into explicit Terrarium
+        # kwargs (design §8.4). Called ONCE per engine build so each per-user
+        # engine gets a *fresh immutable* resolution — no registration/config
+        # instance is shared across users. ``None`` -> Drive-disabled engines.
+        self._drive_resolver = drive_resolver
         self._engines: dict[str, Terrarium] = {}
         self._last_used: dict[str, float] = {}
         # Threading lock — sync get_or_create() can be called from
@@ -115,7 +123,8 @@ class EnginePool:
 
             session_dir = _user_session_dir(user_id)
             session_dir.mkdir(parents=True, exist_ok=True)
-            engine = Terrarium(session_dir=str(session_dir))
+            drive_kwargs = self._drive_resolver() if self._drive_resolver else {}
+            engine = Terrarium(session_dir=str(session_dir), **drive_kwargs)
             self._engines[key] = engine
             self._last_used[key] = self._monotonic()
             logger.info(
@@ -140,6 +149,22 @@ class EnginePool:
             return False
         _try_shutdown_sync(engine)
         return True
+
+    def evict_others(self, keep: Terrarium | None) -> list[int | None]:
+        """Evict every pooled engine except ``keep``; return evicted user ids.
+
+        Shared host Drive settings apply live only to the requesting user's
+        engine under L4 (R1-30). The rest are left on stale policy, so evict them
+        here: each rebuilds from the freshly-persisted settings on its next
+        request. ``None`` in the returned list is the anonymous slot.
+        """
+        with self._lock:
+            victims = [k for k, e in self._engines.items() if e is not keep]
+            engines = [self._evict_key_locked(k) for k in victims]
+        for engine in engines:
+            if engine is not None:
+                _try_shutdown_sync(engine)
+        return [None if k == _ANONYMOUS_KEY else int(k) for k in victims]
 
     def evict_all(self) -> int:
         """Shut down every live engine.  Returns the count torn down.

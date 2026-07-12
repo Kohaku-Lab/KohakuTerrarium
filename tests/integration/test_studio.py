@@ -1177,3 +1177,155 @@ class TestStudioIntegration:
             # leak this delete raises PermissionError on Windows.
             removed = studio.persistence.delete(saved_stem)
             assert all(not p.exists() for p in removed)
+
+    async def test_drive_settings_resolver_and_service_lifecycle(
+        self, scripted_llm, isolated_paths
+    ):
+        """The Drive management flow, end-to-end through the Studio façade:
+
+        identity.drives.save (operator settings)
+            -> Studio()-owned engine resolves the settings -> Drive-enabled
+            -> identity.drives.status joins catalog + enabled state
+            -> sessions.start_creature mints a graph
+            -> service.create_drive / assign / report / transition / status
+               administer a Drive WITHOUT the engine escape hatch
+            -> identity.drives.save round-trips a new revision
+
+        Mirrors the managed CLI/TUI/web path: Studio is the settings owner and
+        every Drive op funnels through ``TerrariumService`` (design §8.4, §9.2).
+        """
+        from kohakuterrarium.studio.identity import drive_settings as ds
+        from kohakuterrarium.studio.identity.drive_settings import (
+            DriveSettings,
+            RegistrationSetting,
+        )
+        from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
+        from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
+        from kohakuterrarium.terrarium.drive.requests import (
+            CreateDriveRequest,
+            DrivePatch,
+        )
+
+        scripted_llm["script"] = ["ok"] * 12
+        workspace_root = isolated_paths["tmp_path"] / "drive_workspace"
+        workspace_root.mkdir()
+        actor = ActorRef("user", "operator")
+
+        # Operator enables the generic Drive runtime BEFORE the engine is built.
+        ds.save_settings(
+            DriveSettings(
+                runtime=DriveRuntimeConfig(enabled=True),
+                registrations={"generic": RegistrationSetting(enabled=True)},
+            )
+        )
+
+        async with Studio() as studio:
+            # The Studio-owned engine resolved the managed settings.
+            assert studio.engine.drives is not None
+            status = studio.identity.drives.status()
+            assert any(
+                r["name"] == "generic" and r["enabled"] for r in status["registrations"]
+            )
+
+            creature_dir = _scaffold_creature(studio, workspace_root, "scout")
+            session = await studio.sessions.start_creature(str(creature_dir))
+            creature_id = session.creatures[0]["creature_id"]
+            gid = (await studio.service.get_creature_info(creature_id)).graph_id
+            svc = studio.service
+
+            # Create + administer a graph Drive through the service surface only.
+            view = await svc.create_drive(
+                CreateDriveRequest(
+                    kind="generic",
+                    title="watch deploy",
+                    scope_type="graph",
+                    scope_id=gid,
+                    owner=actor,
+                    owner_scope="service",
+                    created_by=actor,
+                    spec={"instruction": "monitor"},
+                ),
+                graph_id=gid,
+                actor=actor,
+                is_privileged=True,
+            )
+            did = view.record.drive_id
+            assert view.record.status is DriveStatus.ACTIVE
+
+            renamed = await svc.update_drive(
+                did,
+                DrivePatch(title="watch prod deploy"),
+                expected_revision=view.record.revision,
+                actor=actor,
+                is_privileged=True,
+            )
+            assert renamed.record.title == "watch prod deploy"
+
+            assigned = await svc.assign_drive(
+                did,
+                creature_id,
+                gid,
+                expected_revision=renamed.record.revision,
+                actor=actor,
+                is_privileged=True,
+            )
+            assert assigned.assignee_creature_id == creature_id
+
+            progress = await svc.report_drive_progress(
+                did,
+                summary="halfway",
+                evidence={"pct": 50},
+                actor=actor,
+                is_privileged=True,
+            )
+            assert progress.drive_id == did
+
+            current = await svc.get_drive(did, actor=actor, is_privileged=True)
+            paused = await svc.transition_drive(
+                did,
+                DriveStatus.PAUSED,
+                expected_revision=current.record.revision,
+                actor=actor,
+                is_privileged=True,
+            )
+            assert paused.record.status is DriveStatus.PAUSED
+
+            runtime_status = await svc.drive_runtime_status()
+            assert runtime_status.enabled is True
+            assert runtime_status.counts.get("paused") == 1
+            assert {r["name"] for r in runtime_status.registrations} == {"generic"}
+
+            # A settings save is distinct from apply and round-trips a revision.
+            saved = studio.identity.drives.save(
+                {
+                    "runtime": {"enabled": True, "max_active_per_creature": 4},
+                    "registrations": {"generic": {"enabled": True}},
+                }
+            )
+            assert saved.revision == ds.current_revision()
+
+            # The session-scoped record façade (studio.sessions.drives) is the
+            # surface the HTTP routes / CLI / /drives command all delegate to:
+            # session_id == graph_id, rows redact spec, detail keeps it.
+            drive_ns = studio.sessions.drives
+            new_detail = await drive_ns.create(
+                gid,
+                {"kind": "generic", "title": "second watch", "spec": {"s": 1}},
+                actor="user:operator",
+            )
+            assert new_detail["spec"] == {"s": 1}  # detail keeps spec
+            rows = await drive_ns.list(gid, actor="user:operator")
+            listed = next(r for r in rows if r["drive_id"] == new_detail["drive_id"])
+            assert "spec" not in listed  # rows redact spec
+            assert listed["allowed_actions"]
+            fetched = await drive_ns.get(new_detail["drive_id"], actor="user:operator")
+            assert fetched["drive_id"] == new_detail["drive_id"]
+            cancelled = await drive_ns.transition(
+                new_detail["drive_id"],
+                "cancelled",
+                expected_revision=new_detail["revision"],
+                actor="user:operator",
+            )
+            assert cancelled["status"] == "cancelled"
+
+            await studio.sessions.stop(session.session_id)

@@ -63,17 +63,12 @@ def list_packages() -> list[dict]:
                 "llm_presets": manifest.get("llm_presets", []),
                 "io": manifest.get("io", []),
                 "triggers": manifest.get("triggers", []),
-                # Cluster 1 manifest slots (A.2 / A.3 / A.4 / A.5):
-                # skills + controller commands + user slash commands +
-                # shared prompt fragments. The ``templates`` field is
-                # surfaced as an alias for ``prompts`` so resolvers can
-                # scan both without two round-trips through
-                # list_packages().
                 "skills": manifest.get("skills", []),
                 "commands": manifest.get("commands", []),
                 "user_commands": manifest.get("user_commands", []),
                 "prompts": manifest.get("prompts", []),
                 "templates": manifest.get("templates", []),
+                "drive_registrations": manifest.get("drive_registrations", []),
             }
         )
     return results

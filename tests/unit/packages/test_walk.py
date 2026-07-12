@@ -48,15 +48,22 @@ class TestListPackages:
         _make_pkg(
             pkg_dir,
             "rich",
-            "tools:\n  - name: t\nskills:\n  - name: s\ncommands:\n  - name: c",
+            "tools:\n  - name: t\nskills:\n  - name: s\ncommands:\n  - name: c\n"
+            "drive_registrations:\n  - name: goal\n    kind: goal",
         )
         pkg = list_packages()[0]
         assert pkg["tools"] == [{"name": "t"}]
         assert pkg["skills"] == [{"name": "s"}]
         assert pkg["commands"] == [{"name": "c"}]
+        assert pkg["drive_registrations"] == [{"name": "goal", "kind": "goal"}]
         # Missing slots default to empty lists, not KeyError.
         assert pkg["plugins"] == []
         assert pkg["templates"] == []
+
+    def test_drive_registrations_slot_defaults_empty(self, pkg_dir):
+        _make_pkg(pkg_dir, "plain", "version: '1.0'")
+        # A package that declares no drive_registrations still carries the key.
+        assert list_packages()[0]["drive_registrations"] == []
 
     def test_link_file_package_listed_as_editable(self, pkg_dir, tmp_path):
         src = tmp_path / "editable_src"

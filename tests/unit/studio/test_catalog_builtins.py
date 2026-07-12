@@ -102,7 +102,51 @@ class TestExtensionModuleTypes:
             "tools",
             "plugins",
             "llm_presets",
+            "drive_registrations",
         )
+
+
+class TestListBuiltinDriveRegistrationEntries:
+    def test_includes_generic_with_catalog_shape(self):
+        out = builtins_mod.list_builtin_drive_registration_entries()
+        by_name = {e["name"]: e for e in out}
+        assert "generic" in by_name
+        generic = by_name["generic"]
+        assert generic["kind"] == "generic"
+        assert generic["source"] == "builtin"
+        # generic is always-on and carries no import target.
+        assert generic["module"] is None
+
+    def test_includes_goal_beside_generic_with_import_target(self):
+        out = builtins_mod.list_builtin_drive_registration_entries()
+        by_name = {e["name"]: e for e in out}
+        assert "goal" in by_name
+        goal = by_name["goal"]
+        assert goal["kind"] == "goal"
+        assert goal["source"] == "builtin"
+        # goal ships available-but-disabled, so it records its import target
+        # for the Drive-settings enablement path.
+        assert goal["module"] == "kohakuterrarium.terrarium.drive.goal"
+        assert goal["class_name"] == "GoalDriveRegistration"
+
+    def test_pinned_to_authoritative_descriptor(self):
+        # The hardcoded builtin catalog entries (kept terrarium-free for the CLI)
+        # must not drift from the authoritative ``*.descriptor()``.
+        from kohakuterrarium.terrarium.drive.goal import GoalDriveRegistration
+        from kohakuterrarium.terrarium.drive.registration import (
+            GenericDriveRegistration,
+        )
+
+        by_name = {
+            e["name"]: e for e in builtins_mod.list_builtin_drive_registration_entries()
+        }
+        for reg in (GenericDriveRegistration(), GoalDriveRegistration()):
+            d = reg.descriptor()
+            entry = by_name[d.name]
+            assert entry["name"] == d.name
+            assert entry["kind"] == d.kind
+            assert entry["schema_version"] == d.schema_version
+            assert entry["description"] == d.description
 
 
 # ── list_builtins ────────────────────────────────────────────
@@ -145,8 +189,18 @@ class TestListBuiltins:
         tools = builtins_mod.list_builtins("tools")
         subagents = builtins_mod.list_builtins("subagents")
         triggers = builtins_mod.list_builtins("triggers")
-        # None == tools ++ subagents ++ triggers, exactly.
+        # None == tools ++ subagents ++ triggers, exactly (Drive registrations
+        # are a separate axis and stay out of the union).
         assert builtins_mod.list_builtins(None) == tools + subagents + triggers
+
+    def test_drive_registration_kind_dispatches(self):
+        assert (
+            builtins_mod.list_builtins("drive_registrations")
+            == builtins_mod.list_builtin_drive_registration_entries()
+        )
+        assert builtins_mod.list_builtins(
+            "drive-registration"
+        ) == builtins_mod.list_builtins("drive_registrations")
 
     def test_unknown_raises(self):
         with pytest.raises(ValueError, match="Unknown builtin kind"):
@@ -192,6 +246,12 @@ class TestBuiltinInfo:
         )
         out = builtins_mod.builtin_info("tick")
         assert out["name"] == "tick"
+
+    def test_drive_registration_lookup(self):
+        # The builtin generic registration is discoverable via builtin_info.
+        out = builtins_mod.builtin_info("generic")
+        assert out is not None
+        assert out["kind"] == "generic"
 
 
 # ── exception path in tool entry ─────────────────────────────

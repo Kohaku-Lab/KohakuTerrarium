@@ -197,7 +197,19 @@ def client(
     session_dir.mkdir()
     monkeypatch.setenv("KT_SESSION_DIR", str(session_dir))
 
-    engine = Terrarium(session_dir=str(session_dir))
+    # Drive-enabled so the journey can exercise the web Drive record surface
+    # (design §12.3). Injection is additive — existing creature panels/tools are
+    # unaffected — and the generic registration is all the record lifecycle needs.
+    from kohakuterrarium.terrarium.drive.config import (
+        DriveRuntimeConfig,
+        default_registrations,
+    )
+
+    engine = Terrarium(
+        session_dir=str(session_dir),
+        drive_config=DriveRuntimeConfig(enabled=True),
+        drive_registrations=default_registrations(),
+    )
     service = LocalTerrariumService(engine)
     set_service(service)
 
@@ -678,6 +690,73 @@ class TestApiTerrariumJourney:
         # The merged graph pools the channels from both recipes.
         merged_channels = {c["name"] for c in graphs[survivor]["channels"]}
         assert {"relay", "relay2"} <= merged_channels
+
+        # 8c. Drive record surface — the web Drives panel's own calls against
+        #     the live survivor graph (design §12.3): create -> redacted list ->
+        #     detail -> CAS patch -> assign to a real creature -> transition ->
+        #     conflict -> disabled-kind 422 -> deliveries. session_id == graph_id.
+        alice_id = next(
+            c["creature_id"]
+            for c in graphs[survivor]["creatures"]
+            if c["name"] == "alice"
+        )
+        created = client.post(
+            f"/api/sessions/{survivor}/drives",
+            json={"kind": "generic", "title": "watch deploy", "spec": {"k": 1}},
+        )
+        assert created.status_code == 200
+        drive = created.json()
+        did, drive_rev = drive["drive_id"], drive["revision"]
+        assert drive["spec"] == {"k": 1} and drive["created_by"] == "user:local"
+
+        rows = client.get(f"/api/sessions/{survivor}/drives").json()["drives"]
+        listed = next(r for r in rows if r["drive_id"] == did)
+        assert "spec" not in listed and listed["allowed_actions"]
+
+        detail = client.get(f"/api/sessions/{survivor}/drives/{did}").json()
+        assert detail["spec"] == {"k": 1}
+
+        renamed = client.patch(
+            f"/api/sessions/{survivor}/drives/{did}",
+            json={"expected_revision": drive_rev, "title": "watch prod"},
+        )
+        assert renamed.status_code == 200 and renamed.json()["title"] == "watch prod"
+        assigned = client.post(
+            f"/api/sessions/{survivor}/drives/{did}/assign",
+            json={
+                "assignee_creature_id": alice_id,
+                "expected_revision": renamed.json()["revision"],
+            },
+        )
+        assert assigned.status_code == 200
+        assert assigned.json()["assignee_creature_id"] == alice_id
+        paused = client.post(
+            f"/api/sessions/{survivor}/drives/{did}/transition",
+            json={
+                "target_status": "paused",
+                "expected_revision": assigned.json()["revision"],
+            },
+        )
+        assert paused.status_code == 200 and paused.json()["status"] == "paused"
+        # A stale revision + a disabled kind are honest 409 / 422.
+        assert (
+            client.patch(
+                f"/api/sessions/{survivor}/drives/{did}",
+                json={"expected_revision": drive_rev, "title": "x"},
+            ).status_code
+            == 409
+        )
+        assert (
+            client.post(
+                f"/api/sessions/{survivor}/drives",
+                json={"kind": "goal", "title": "t"},
+            ).status_code
+            == 422
+        )
+        assert (
+            client.get(f"/api/sessions/{survivor}/drives/{did}/deliveries").status_code
+            == 200
+        )
 
         # 9. Stop the session — it leaves the active list. After the
         #    merge the two original sessions collapsed into one survivor,

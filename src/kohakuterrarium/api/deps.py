@@ -30,8 +30,9 @@ from fastapi import Depends, HTTPException
 from starlette.requests import HTTPConnection
 
 from kohakuterrarium.api.auth.dependencies import get_auth_config, get_optional_user
-from kohakuterrarium.api.auth.engine_pool import EnginePool
+from kohakuterrarium.api.auth.engine_pool import EnginePool, _user_session_dir
 from kohakuterrarium.api.auth.models import User
+from kohakuterrarium.studio.identity import drive_settings as _drive_settings
 from kohakuterrarium.studio.sessions.lifecycle import get_session_meta
 from kohakuterrarium.terrarium import (
     LocalTerrariumService,
@@ -66,6 +67,15 @@ def _session_dir() -> str:
 
 # Back-compat — display only; live reads use ``_session_dir()``.
 _DEFAULT_SESSION_DIR = str(Path.home() / ".kohakuterrarium" / "sessions")
+
+
+def _host_drive_kwargs() -> dict:
+    """Managed host Drive kwargs for the singleton / lazy local engine.
+
+    Resolves the host node's Drive settings exactly once per engine build
+    (design §8.4). Absent/disabled settings degrade to a Drive-disabled engine.
+    """
+    return _drive_settings.resolve_drive_kwargs()
 
 
 def set_service(service: TerrariumService | None) -> None:
@@ -151,10 +161,38 @@ def get_service(
 
     # Legacy single-engine path — standalone mode without L4.
     if _service is None:
-        engine = Terrarium(session_dir=_session_dir())
+        engine = Terrarium(session_dir=_session_dir(), **_host_drive_kwargs())
         _service = LocalTerrariumService(engine)
         _service.set_runtime_graph_meta_lookup(partial(get_session_meta, _service))
     return _service
+
+
+def resolve_request_session_dir(
+    conn_info: HTTPConnection,
+    user: User | None = Depends(get_optional_user),
+) -> Path:
+    """The on-disk session directory for the current request's L4 namespace.
+
+    Mirrors :func:`get_service`'s routing so a saved-session read resolves in
+    the SAME namespace a live request would: L4 disabled → the shared session
+    dir; L4 enabled → the per-user dir. ``required`` + anonymous raises 401
+    rather than silently falling through to the shared dir (R1-01/R1-03).
+    """
+    pool: EnginePool | None = getattr(conn_info.app.state, "engine_pool", None)
+    auth_config = get_auth_config(conn_info)
+    if pool is not None and auth_config.multi_user_enabled:
+        if user is None and auth_config.multi_user == "required":
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": "auth_required",
+                    "message": "user authentication required",
+                },
+                headers={"X-Auth-Required": "user"},
+            )
+        user_id = user.id if user is not None else None
+        return _user_session_dir(user_id)
+    return Path(_session_dir())
 
 
 def get_service_legacy() -> TerrariumService:
@@ -166,7 +204,7 @@ def get_service_legacy() -> TerrariumService:
     """
     global _service
     if _service is None:
-        engine = Terrarium(session_dir=_session_dir())
+        engine = Terrarium(session_dir=_session_dir(), **_host_drive_kwargs())
         _service = LocalTerrariumService(engine)
         _service.set_runtime_graph_meta_lookup(partial(get_session_meta, _service))
     return _service

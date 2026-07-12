@@ -15,11 +15,151 @@ when accessed so call sites get a helpful pointer at the unit that
 lands the feature.
 """
 
+import asyncio
 from typing import Any
 
 from kohakuterrarium.studio.deploy import deploy_creature_to_node
 from kohakuterrarium.studio.files import RemoteFiles
+from kohakuterrarium.studio.identity import drive_settings as _drive_settings
 from kohakuterrarium.terrarium.service import LocalTerrariumService, TerrariumService
+from kohakuterrarium.terrarium.wire import drive_error_from_body
+
+
+def _raise_settings_error(body: Any) -> Any:
+    """Reconstruct a typed Drive/settings error from a worker envelope, else pass."""
+    err = drive_error_from_body(body)
+    if err is not None:
+        raise err
+    if isinstance(body, dict) and isinstance(body.get("error"), dict):
+        e = body["error"]
+        raise RuntimeError(f"{e.get('kind', 'error')}: {e.get('message', '')}")
+    return body
+
+
+class _RemoteNodeDriveSettings:
+    """Client over a worker's ``studio.settings`` Drive surface (design §8.5)."""
+
+    def __init__(self, sender: Any, node_id: str, *, timeout: float = 30.0) -> None:
+        self._sender = sender
+        self._node_id = node_id
+        self._timeout = timeout
+
+    async def _req(self, type_: str, body: dict[str, Any] | None = None) -> Any:
+        result = await self._sender.request(
+            to_node=self._node_id,
+            namespace="studio.settings",
+            type=type_,
+            body=body or {},
+            timeout=self._timeout,
+        )
+        return _raise_settings_error(result)
+
+    async def status(self) -> dict[str, Any]:
+        return (await self._req("drive_status"))["status"]
+
+    async def get(self) -> dict[str, Any]:
+        return await self._req("drive_get")
+
+    async def validate(self, settings: dict[str, Any]) -> dict[str, Any]:
+        return await self._req("drive_validate", {"settings": settings})
+
+    async def save(
+        self,
+        settings: dict[str, Any],
+        *,
+        expected_revision: str | None = None,
+        expected_exists: bool | None = None,
+    ) -> dict[str, Any]:
+        return await self._req(
+            "drive_save",
+            {
+                "settings": settings,
+                "expected_revision": expected_revision,
+                "expected_exists": expected_exists,
+            },
+        )
+
+    async def apply(self) -> dict[str, Any]:
+        return (await self._req("drive_apply"))["result"]
+
+    async def runtime_status(self) -> dict[str, Any]:
+        return (await self._req("drive_runtime_status"))["runtime_status"]
+
+
+class _LocalNodeDriveSettings:
+    """Local (host-process) Drive settings surface for a ``LocalTerrariumService``.
+
+    Reads/writes the host's own ``drive-settings.yaml`` and applies against the
+    host's live engine. In lab-host mode the ``_host`` coordination engine runs
+    no agents, so ``apply`` there reports ``restart_required`` rather than
+    configuring the agent-free engine (design §8.4 Scope).
+    """
+
+    def __init__(self, runtime: TerrariumService, node_id: str = "_host") -> None:
+        self._runtime = runtime
+        self._node_id = node_id
+
+    async def status(self) -> dict[str, Any]:
+        return _drive_settings.settings_status(self._node_id)
+
+    async def get(self) -> dict[str, Any]:
+        settings = _drive_settings.load_settings()
+        return {
+            "settings": _drive_settings.settings_to_dict(settings),
+            "revision": settings.revision,
+        }
+
+    async def validate(self, settings: dict[str, Any]) -> dict[str, Any]:
+        _drive_settings.parse_settings(settings)
+        return {"ok": True}
+
+    async def save(
+        self,
+        settings: dict[str, Any],
+        *,
+        expected_revision: str | None = None,
+        expected_exists: bool | None = None,
+    ) -> dict[str, Any]:
+        saved = await asyncio.to_thread(
+            _drive_settings.save_settings,
+            settings,
+            expected_revision=expected_revision,
+            expected_exists=expected_exists,
+        )
+        return {
+            "ok": True,
+            "revision": saved.settings.revision,
+            "durability": saved.durability.value,
+        }
+
+    async def apply(self) -> dict[str, Any]:
+        # ``.engine`` raises on a lab-host coordination service (no agent engine).
+        try:
+            engine = self._runtime.engine
+        except Exception:
+            engine = None
+        if engine is None:
+            return {
+                "result": _drive_settings.RESTART_REQUIRED,
+                "desired_revision": _drive_settings.current_revision(),
+                "running_revision": None,
+                "warnings": [
+                    "this node runs no Drive-capable engine; settings apply on a "
+                    "real execution node"
+                ],
+            }
+        return _drive_settings.apply_runtime(engine, node=self._node_id)
+
+    async def runtime_status(self) -> dict[str, Any]:
+        status = await self._runtime.drive_runtime_status()
+        return status.to_dict()
+
+
+class _NodeSettings:
+    """The ``.settings`` namespace on a :class:`NodeHandle` (Drive settings)."""
+
+    def __init__(self, drives: Any) -> None:
+        self.drives = drives
 
 
 class _Pending:
@@ -87,9 +227,15 @@ class NodeHandle:
         if sender is not None and not isinstance(runtime, LocalTerrariumService):
             self.files: Any = RemoteFiles(sender, node_id)
             self.deploy: Any = _Deploy(sender, node_id)
+            # Node-targeted Drive settings ride the worker's ``studio.settings``
+            # adapter (design §8.5); the local node reaches its own config home.
+            self.settings: Any = _NodeSettings(
+                _RemoteNodeDriveSettings(sender, node_id)
+            )
         else:
             self.files = _Pending("files", "available only on remote nodes")
             self.deploy = _Pending("deploy", "available only on remote nodes")
+            self.settings = _NodeSettings(_LocalNodeDriveSettings(runtime, node_id))
         self.identity = _Pending("identity", "Unit E")
         self.catalog = _Pending("catalog", "Unit F")
 

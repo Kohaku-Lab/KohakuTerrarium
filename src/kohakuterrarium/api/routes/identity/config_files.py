@@ -19,7 +19,12 @@ from pydantic import BaseModel
 from kohakuterrarium.api._io_executor import run_in_io_executor
 from kohakuterrarium.api.auth import verify_admin_token
 from kohakuterrarium.studio.identity import api_keys as _api_keys_mod
+from kohakuterrarium.studio.identity import drive_settings as _drive_settings_mod
 from kohakuterrarium.studio.identity import llm_profiles as _llm_profiles_mod
+from kohakuterrarium.terrarium.drive.errors import (
+    DriveSettingsConflictError,
+    DriveValidationError,
+)
 from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import get_logger
 
@@ -49,6 +54,7 @@ def _known_files() -> dict[str, Path]:
         "app-settings": base / "app-settings.json",
         "ui-prefs": base / "ui-prefs.yaml",
         "default-model": base / "default_model.txt",
+        "drive-settings": base / "drive-settings.yaml",
     }
 
 
@@ -147,13 +153,22 @@ def _validate_and_reload(name: str, path: Path, content: str) -> None:
     kind = _kind_for(path)
     try:
         if kind == "yaml":
-            yaml.safe_load(content)
+            parsed = yaml.safe_load(content)
         elif kind == "json":
             json.loads(content) if content.strip() else None
     except yaml.YAMLError as e:
         raise HTTPException(400, f"YAML parse error: {e}") from e
     except json.JSONDecodeError as e:
         raise HTTPException(400, f"JSON parse error: {e}") from e
+
+    # drive-settings is schema-validated on raw save (design §8.4): a raw editor
+    # write only *persists validated config* — it never applies live. Live
+    # application is the separate typed ``studio.identity.drives.apply`` op.
+    if name == "drive-settings":
+        try:
+            _drive_settings_mod.parse_settings(parsed)
+        except DriveValidationError as e:
+            raise HTTPException(400, f"drive-settings schema error: {e}") from e
 
     try:
         if name == "llm_profiles":
@@ -170,6 +185,41 @@ def _validate_and_reload(name: str, path: Path, content: str) -> None:
         logger.warning("config hot-reload failed", name=name, error=str(e))
 
 
+def _write_drive_settings(path: Path, body: ConfigFileWrite, new_bytes: bytes) -> dict:
+    """Route raw editor writes through the canonical locked settings writer."""
+    try:
+        if body.sha256_expected is None:
+            raise HTTPException(
+                400,
+                "drive-settings write requires sha256_expected for optimistic concurrency",
+            )
+        parsed = yaml.safe_load(body.content)
+        # The editor's absent-file token is sha256(empty), not an on-disk
+        # revision. Map it explicitly to expect-absent rather than overloading
+        # None, which remains the backwards-compatible unconditional mode.
+        empty_revision = hashlib.sha256(b"").hexdigest()
+        expected_absent = body.sha256_expected == empty_revision and not path.is_file()
+        saved = _drive_settings_mod.save_settings(
+            parsed,
+            expected_revision=None if expected_absent else body.sha256_expected,
+            expected_exists=False if expected_absent else None,
+        )
+    except yaml.YAMLError as exc:
+        raise HTTPException(400, f"YAML parse error: {exc}") from exc
+    except DriveValidationError as exc:
+        raise HTTPException(400, f"drive-settings schema error: {exc}") from exc
+    except DriveSettingsConflictError as exc:
+        raise HTTPException(409, "file changed externally since you opened it") from exc
+    return {
+        "status": "ok",
+        "name": "drive-settings",
+        "path": str(path),
+        "sha256": saved.settings.revision,
+        "size": len(new_bytes),
+        "durability": saved.durability.value,
+    }
+
+
 def _write_sync(name: str, body: ConfigFileWrite) -> dict:
     files = _known_files()
     if name not in files:
@@ -178,6 +228,8 @@ def _write_sync(name: str, body: ConfigFileWrite) -> dict:
     new_bytes = body.content.encode("utf-8")
     if len(new_bytes) > _MAX_BYTES:
         raise HTTPException(413, "file too large to write via editor (>1 MiB)")
+    if name == "drive-settings":
+        return _write_drive_settings(path, body, new_bytes)
     if body.sha256_expected is not None and path.exists():
         actual = hashlib.sha256(path.read_bytes()).hexdigest()
         if actual != body.sha256_expected:

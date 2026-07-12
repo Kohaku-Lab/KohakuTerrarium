@@ -63,6 +63,8 @@ class TestFacadeExports:
             "resolve_package_user_command",
             "resolve_package_prompt",
             "resolve_package_skills",
+            "resolve_package_drive_registration",
+            "list_package_drive_registrations",
             "find_package_root_for_path",
             "get_package_framework_hints",
         ):

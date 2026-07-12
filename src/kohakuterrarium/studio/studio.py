@@ -48,6 +48,7 @@ from kohakuterrarium.studio.facade_sessions import _SessionsNS
 from kohakuterrarium.studio.identity import (
     api_keys as _identity_keys,
     codex_oauth as _identity_codex,
+    drive_settings as _identity_drives,
     llm_backends as _identity_backends,
     llm_default as _identity_default,
     llm_native_tools as _identity_native_tools,
@@ -112,9 +113,18 @@ class Studio:
             # lazy-imports MultiNodeTerrariumService so this branch is
             # the single trigger for that import.
             self.nodes: NodeMap | None = build_node_map_if_multi_node(service)
+        elif engine is not None:
+            # Explicit programmatic engine — never overwrite its Drive runtime
+            # with managed settings (design §8.5).
+            self._service = LocalTerrariumService(engine)
+            self.nodes = None
         else:
+            # Studio owns the engine -> it is the managed surface, so it resolves
+            # the node's Drive settings into explicit constructor args (design
+            # §8.4/§8.5). Absent/disabled settings degrade to a Drive-disabled
+            # engine, so this is behaviourally identical to a bare Terrarium().
             self._service = LocalTerrariumService(
-                engine if engine is not None else Terrarium()
+                Terrarium(**_identity_drives.resolve_drive_kwargs())
             )
             # Standalone path — we just built a LocalTerrariumService.
             # Skip the helper entirely so the laboratory layer never
@@ -329,6 +339,7 @@ class _IdentityNS:
         self.mcp = _IdentityMCP()
         self.ui_prefs = _IdentityUIPrefs()
         self.settings = _IdentitySettings()
+        self.drives = _IdentityDrives(studio)
 
 
 class _IdentityLLM:
@@ -438,6 +449,46 @@ class _IdentitySettings:
 
     def paths(self) -> dict[str, Path]:
         return _identity_settings.config_paths()
+
+
+class _IdentityDrives:
+    """Managed Drive runtime settings — the Studio settings owner (design §8.4).
+
+    ``save`` persists validated config; ``apply`` is the distinct live-application
+    operation against the Studio-owned engine (design §8.6). ``resolve`` returns
+    the explicit :class:`DriveRuntimeSpec` managed construction paths inject.
+    """
+
+    def __init__(self, studio: Studio) -> None:
+        self._studio = studio
+
+    def path(self) -> Path:
+        return _identity_drives.drive_settings_path()
+
+    def load(self) -> Any:
+        return _identity_drives.load_settings()
+
+    def save(
+        self,
+        values: dict[str, Any],
+        *,
+        expected_revision: str | None = None,
+        expected_exists: bool | None = None,
+    ) -> Any:
+        return _identity_drives.save_settings(
+            values,
+            expected_revision=expected_revision,
+            expected_exists=expected_exists,
+        )
+
+    def resolve(self, node: str = _identity_drives.DEFAULT_NODE) -> Any:
+        return _identity_drives.resolve_runtime(node)
+
+    def status(self, node: str = _identity_drives.DEFAULT_NODE) -> dict[str, Any]:
+        return _identity_drives.settings_status(node)
+
+    def apply(self, node: str = _identity_drives.DEFAULT_NODE) -> dict[str, Any]:
+        return _identity_drives.apply_runtime(self._studio.engine, node=node)
 
 
 # ---------------------------------------------------------------------------

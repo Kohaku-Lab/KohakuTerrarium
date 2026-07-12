@@ -258,57 +258,51 @@ class TestMaybeRaise:
 
 class TestCreatureCommand:
     async def test_unknown_command_raises(self, monkeypatch):
-        agent = SimpleNamespace()
+        # No builtin, and the agent's live registry is empty → Unknown command.
+        agent = SimpleNamespace(list_user_commands=lambda: {})
         creature = SimpleNamespace(agent=agent)
         engine = SimpleNamespace()
         monkeypatch.setattr(cc_mod, "find_creature", lambda e, s, c: creature)
         monkeypatch.setattr(cc_mod, "as_engine", lambda s: engine)
-        monkeypatch.setattr(cc_mod, "get_builtin_user_command", lambda n: None)
         with pytest.raises(ValueError, match="Unknown command"):
-            await cc_mod.execute_command(SimpleNamespace(), "_", "alice", "ghost")
+            await cc_mod.execute_command(
+                SimpleNamespace(), "_", "alice", "ghost-cmd-xyz"
+            )
 
     async def test_known_command_executes(self, monkeypatch):
         from types import SimpleNamespace as SN
 
-        agent = SN(session=None)
-        creature = SN(agent=agent)
-        engine = SN()
-
-        # Fake command with async execute.
-        result = SN(
-            output="hello",
-            error="",
-            success=True,
-            data={"k": "v"},
-        )
+        result = SN(output="hello", error="", success=True, data={"k": "v"})
 
         class _Cmd:
             async def execute(self, args, ctx):
                 return result
 
+        # A plugin-contributed command resolved from the agent's LIVE registry.
+        agent = SN(session=None, list_user_commands=lambda: {"mycmd": _Cmd()})
+        creature = SN(agent=agent)
+        engine = SN()
         monkeypatch.setattr(cc_mod, "find_creature", lambda e, s, c: creature)
         monkeypatch.setattr(cc_mod, "as_engine", lambda s: engine)
-        monkeypatch.setattr(cc_mod, "get_builtin_user_command", lambda n: _Cmd())
-        out = await cc_mod.execute_command(SN(), "_", "alice", "info", "arg")
-        assert out["command"] == "info"
+        out = await cc_mod.execute_command(SN(), "_", "alice", "mycmd", "arg")
+        assert out["command"] == "mycmd"
         assert out["data"] == {"k": "v"}
 
     async def test_no_data_omitted(self, monkeypatch):
         from types import SimpleNamespace as SN
 
-        agent = SN(session=None)
-        creature = SN(agent=agent)
-        engine = SN()
         result = SN(output="x", error="", success=True, data=None)
 
         class _Cmd:
             async def execute(self, args, ctx):
                 return result
 
+        agent = SN(session=None, list_user_commands=lambda: {"mycmd": _Cmd()})
+        creature = SN(agent=agent)
+        engine = SN()
         monkeypatch.setattr(cc_mod, "find_creature", lambda e, s, c: creature)
         monkeypatch.setattr(cc_mod, "as_engine", lambda s: engine)
-        monkeypatch.setattr(cc_mod, "get_builtin_user_command", lambda n: _Cmd())
-        out = await cc_mod.execute_command(SN(), "_", "alice", "info")
+        out = await cc_mod.execute_command(SN(), "_", "alice", "mycmd")
         assert "data" not in out
 
 

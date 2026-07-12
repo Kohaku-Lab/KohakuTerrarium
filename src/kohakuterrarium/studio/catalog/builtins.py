@@ -17,7 +17,36 @@ from kohakuterrarium.builtins.tool_catalog import get_builtin_tool, list_builtin
 from kohakuterrarium.modules.trigger.universal import list_universal_trigger_classes
 from kohakuterrarium.packages.walk import get_package_modules, list_packages
 
-_EXTENSION_MODULE_TYPES = ("tools", "plugins", "llm_presets")
+_EXTENSION_MODULE_TYPES = ("tools", "plugins", "llm_presets", "drive_registrations")
+
+# Builtin Drive registrations surfaced in the catalog. Hardcoded like
+# ``builtins/plugin_catalog._PLUGINS`` so the lightweight ``kt extension`` /
+# catalog path never imports the terrarium engine; a unit test pins these fields
+# to the authoritative ``*.descriptor()``. ``generic`` is always enabled and
+# carries no import target; ``goal`` ships available-but-disabled, so it records
+# its import target for the Drive-settings enablement path.
+_BUILTIN_DRIVE_REGISTRATIONS: tuple[dict, ...] = (
+    {
+        "name": "generic",
+        "kind": "generic",
+        "schema_version": 1,
+        "source": "builtin",
+        "type": "drive-registration",
+        "module": None,
+        "class_name": None,
+        "description": "Opaque-spec drive with manual terminal proposals.",
+    },
+    {
+        "name": "goal",
+        "kind": "goal",
+        "schema_version": 1,
+        "source": "builtin",
+        "type": "drive-registration",
+        "module": "kohakuterrarium.terrarium.drive.goal",
+        "class_name": "GoalDriveRegistration",
+        "description": "Durable objective pursuit policy.",
+    },
+)
 
 
 # ----------------------------------------------------------------------
@@ -100,6 +129,11 @@ def list_universal_trigger_entries() -> list[dict]:
     return out
 
 
+def list_builtin_drive_registration_entries() -> list[dict]:
+    """Return catalog entries for every builtin Drive registration (design §8.2)."""
+    return [dict(e) for e in _BUILTIN_DRIVE_REGISTRATIONS]
+
+
 def get_tool_doc(name: str) -> str | None:
     """Return the builtin skill doc for *name* (or None)."""
     return get_builtin_tool_doc(name)
@@ -153,6 +187,8 @@ def list_builtins(kind: str | None = None) -> list[dict]:
             return list_builtin_subagent_entries()
         case "triggers" | "trigger":
             return list_universal_trigger_entries()
+        case "drive_registrations" | "drive_registration" | "drive-registration":
+            return list_builtin_drive_registration_entries()
         case None:
             return (
                 list_builtin_tool_entries()
@@ -162,7 +198,7 @@ def list_builtins(kind: str | None = None) -> list[dict]:
         case _:
             raise ValueError(
                 f"Unknown builtin kind: {kind!r} "
-                "(expected tools / subagents / triggers / None)"
+                "(expected tools / subagents / triggers / drive_registrations / None)"
             )
 
 
@@ -178,6 +214,9 @@ def builtin_info(name: str) -> dict | None:
         if entry["name"] == name:
             return entry
     for entry in list_universal_trigger_entries():
+        if entry["name"] == name:
+            return entry
+    for entry in list_builtin_drive_registration_entries():
         if entry["name"] == name:
             return entry
     return None

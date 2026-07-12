@@ -22,12 +22,14 @@ from kohakuterrarium.studio.sessions import (
     creature_model as _session_model,
     creature_plugins as _session_plugins,
     creature_state as _session_state,
+    drives as _session_drives,
     handles as _session_handles,
     lifecycle as _session_lifecycle,
     memory_search as _session_memory,
     topology as _session_topology,
     wiring as _session_wiring,
 )
+from kohakuterrarium.terrarium.drive.models import ActorRef
 
 if TYPE_CHECKING:
     from kohakuterrarium.studio.studio import Studio
@@ -44,6 +46,7 @@ class _SessionsNS:
         self.plugins = _SessionsPlugins(studio)
         self.model = _SessionsModel(studio)
         self.command = _SessionsCommand(studio)
+        self.drives = _SessionsDrives(studio)
 
     async def start_creature(
         self,
@@ -391,4 +394,191 @@ class _SessionsCommand:
     ) -> dict:
         return await _session_command.execute_command(
             self._studio._service, session_id, creature_id, command, args
+        )
+
+
+class _SessionsDrives:
+    """Session/graph-scoped Drive record ops over ``TerrariumService`` (§9.2, §12).
+
+    A *session* is a graph, so ``session_id`` is the ``graph_id``. ``actor`` is the
+    programmatic operator (default ``user:local``); ``operator`` defaults on so the
+    trusted Python surface can create/assign graph-scoped Drives. Returns JSON-safe
+    row/detail dicts, redacting spec/evidence in list rows (design §12.1).
+    """
+
+    def __init__(self, studio: Studio) -> None:
+        self._studio = studio
+
+    @staticmethod
+    def _actor(actor: ActorRef | str | None) -> ActorRef:
+        if isinstance(actor, ActorRef):
+            return actor
+        if isinstance(actor, str) and actor:
+            return ActorRef.parse(actor)
+        return ActorRef("user", "local")
+
+    async def list(
+        self,
+        session_id: str,
+        *,
+        actor: ActorRef | str | None = None,
+        is_privileged: bool = True,
+        statuses: Any = None,
+        kinds: Any = None,
+        owner: Any = None,
+        assignee_creature_id: str | None = None,
+        mine: bool = False,
+        include_terminal: bool = True,
+    ) -> list[dict]:
+        return await _session_drives.list_records(
+            self._studio._service,
+            graph_id=session_id,
+            actor=self._actor(actor),
+            is_privileged=is_privileged,
+            statuses=statuses,
+            kinds=kinds,
+            owner=owner,
+            assignee_creature_id=assignee_creature_id,
+            mine=mine,
+            include_terminal=include_terminal,
+        )
+
+    async def get(
+        self,
+        drive_id: str,
+        *,
+        actor: ActorRef | str | None = None,
+        is_privileged: bool = True,
+    ) -> dict | None:
+        return await _session_drives.get_record(
+            self._studio._service,
+            drive_id,
+            actor=self._actor(actor),
+            is_privileged=is_privileged,
+        )
+
+    async def create(
+        self,
+        session_id: str,
+        body: dict,
+        *,
+        actor: ActorRef | str | None = None,
+        is_privileged: bool = True,
+        operator: bool = True,
+    ) -> dict:
+        return await _session_drives.create_record(
+            self._studio._service,
+            graph_id=session_id,
+            actor=self._actor(actor),
+            body=body,
+            is_privileged=is_privileged,
+            operator=operator,
+        )
+
+    async def update(
+        self,
+        drive_id: str,
+        body: dict,
+        *,
+        expected_revision: int,
+        actor: ActorRef | str | None = None,
+        idempotency_key: str | None = None,
+        is_privileged: bool = True,
+    ) -> dict:
+        return await _session_drives.update_record(
+            self._studio._service,
+            drive_id,
+            expected_revision=expected_revision,
+            actor=self._actor(actor),
+            body=body,
+            idempotency_key=idempotency_key,
+            is_privileged=is_privileged,
+        )
+
+    async def assign(
+        self,
+        drive_id: str,
+        assignee_creature_id: str,
+        assignee_graph_id: str,
+        *,
+        expected_revision: int,
+        actor: ActorRef | str | None = None,
+        is_privileged: bool = True,
+        operator: bool = True,
+    ) -> dict:
+        return await _session_drives.assign_record(
+            self._studio._service,
+            drive_id,
+            assignee_creature_id=assignee_creature_id,
+            assignee_graph_id=assignee_graph_id,
+            expected_revision=expected_revision,
+            actor=self._actor(actor),
+            is_privileged=is_privileged,
+            operator=operator,
+        )
+
+    async def transition(
+        self,
+        drive_id: str,
+        target_status: str,
+        *,
+        expected_revision: int,
+        actor: ActorRef | str | None = None,
+        status_reason: str | None = None,
+        is_privileged: bool = True,
+    ) -> dict:
+        return await _session_drives.transition_record(
+            self._studio._service,
+            drive_id,
+            target_status=target_status,
+            expected_revision=expected_revision,
+            actor=self._actor(actor),
+            status_reason=status_reason,
+            is_privileged=is_privileged,
+        )
+
+    async def report_progress(
+        self,
+        drive_id: str,
+        *,
+        summary: str,
+        evidence: dict | None = None,
+        actor: ActorRef | str | None = None,
+        is_privileged: bool = True,
+    ) -> dict:
+        return await _session_drives.report_progress_record(
+            self._studio._service,
+            drive_id,
+            summary=summary,
+            evidence=evidence,
+            actor=self._actor(actor),
+            is_privileged=is_privileged,
+        )
+
+    async def deliveries(
+        self,
+        drive_id: str,
+        *,
+        actor: ActorRef | str | None = None,
+        is_privileged: bool = True,
+    ) -> list[dict]:
+        return await _session_drives.list_deliveries_records(
+            self._studio._service,
+            drive_id,
+            actor=self._actor(actor),
+            is_privileged=is_privileged,
+        )
+
+    async def replay(
+        self,
+        delivery_id: str,
+        *,
+        actor: ActorRef | str | None = None,
+        is_privileged: bool = True,
+    ) -> dict:
+        return await _session_drives.replay_delivery_record(
+            self._studio._service,
+            delivery_id,
+            actor=self._actor(actor),
+            is_privileged=is_privileged,
         )

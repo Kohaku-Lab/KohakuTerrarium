@@ -102,3 +102,43 @@ class TestWrite:
             json={"content": "openai: b\n", "sha256_expected": "0" * 64},
         )
         assert resp.status_code == 409
+
+
+class TestDriveSettings:
+    def test_drive_settings_whitelisted(self, client):
+        names = {f["name"] for f in client.get("/api/settings/config-files").json()}
+        assert "drive-settings" in names
+
+    def test_write_valid_drive_settings_persists(self, client, tmp_path):
+        expected = client.get(
+            "/api/settings/config-files/drive-settings/content"
+        ).json()["sha256"]
+        resp = client.put(
+            "/api/settings/config-files/drive-settings/content",
+            json={
+                "content": (
+                    "schema_version: 1\n"
+                    "runtime:\n  enabled: true\n"
+                    "registrations:\n  generic:\n    enabled: true\n"
+                ),
+                "sha256_expected": expected,
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        assert (tmp_path / "drive-settings.yaml").is_file()
+
+    def test_write_schema_invalid_drive_settings_rejected(self, client):
+        # Raw editor save is validated-persist only: a schema violation is a 400,
+        # never a silent enable (design §8.4).
+        expected = client.get(
+            "/api/settings/config-files/drive-settings/content"
+        ).json()["sha256"]
+        resp = client.put(
+            "/api/settings/config-files/drive-settings/content",
+            json={
+                "content": "runtime:\n  enabled: not-a-bool\n",
+                "sha256_expected": expected,
+            },
+        )
+        assert resp.status_code == 400
+        assert "drive-settings schema error" in resp.json()["detail"]

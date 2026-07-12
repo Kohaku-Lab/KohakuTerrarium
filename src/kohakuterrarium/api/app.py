@@ -19,6 +19,15 @@ from kohakuterrarium.api.auth.engine_pool import EnginePool
 from kohakuterrarium.api.auth.middleware import HostTokenMiddleware
 from kohakuterrarium.api.deps import _session_dir, get_engine, set_service
 from kohakuterrarium.errors import ConflictError, KTError, NotFoundError
+from kohakuterrarium.terrarium.drive.errors import (
+    DriveBackpressureError,
+    DriveError,
+    DrivePermissionError,
+    DriveRegistrationDisabledError,
+    DriveRegistrationIncompatibleError,
+    DriveRegistrationNotFoundError,
+    DriveTransitionError,
+)
 from kohakuterrarium.laboratory import HostConfig
 from kohakuterrarium.laboratory._internal.client import (
     RequestAbortedError,
@@ -35,6 +44,7 @@ from kohakuterrarium.laboratory.adapters import (
 )
 from kohakuterrarium.serving.process_metrics import get_aggregator
 from kohakuterrarium.session.sync import SessionMirrorWriter
+from kohakuterrarium.studio.identity import drive_settings as _drive_settings
 from kohakuterrarium.studio.sessions.lifecycle import get_session_meta
 from kohakuterrarium.terrarium import MultiNodeTerrariumService, Terrarium
 from kohakuterrarium.utils.logging import get_logger
@@ -90,6 +100,7 @@ from kohakuterrarium.api.routes.persistence import (
 from kohakuterrarium.api.routes.persistence import resume as persistence_resume
 from kohakuterrarium.api.routes.persistence import saved as persistence_saved
 from kohakuterrarium.api.routes.persistence import viewer as persistence_viewer
+from kohakuterrarium.api.routes.persistence import saved_drives as persistence_drives
 from kohakuterrarium.api.routes import runtime_graph as runtime_graph_route
 from kohakuterrarium.api.routes.sessions_v2 import active as sessions_active
 from kohakuterrarium.api.routes.sessions_v2 import (
@@ -113,6 +124,7 @@ from kohakuterrarium.api.routes.sessions_v2 import (
 from kohakuterrarium.api.routes.sessions_v2 import (
     creatures_state as sessions_creatures_state,
 )
+from kohakuterrarium.api.routes.sessions_v2 import drives as sessions_drives
 from kohakuterrarium.api.routes.sessions_v2 import memory as sessions_memory
 from kohakuterrarium.api.routes.sessions_v2 import topology as sessions_topology
 from kohakuterrarium.api.routes.sessions_v2 import wiring as sessions_wiring
@@ -197,6 +209,9 @@ async def lifespan(app: FastAPI):
         # broadcast / output-wire forwarders.  Nothing ever calls
         # ``add_creature`` on it; ``MultiNodeTerrariumService`` routes
         # every agent op to a connected worker.
+        # NO drive args: the lab-host coordination engine is agent-free and
+        # must stay Drive-disabled (design §8.4/§8.5 — it is not an execution
+        # runtime). Workers resolve their own node-local Drive settings.
         coordination_engine = Terrarium(session_dir=_session_dir())
         multi_node_service = MultiNodeTerrariumService(
             host=host_engine, coordination_engine=coordination_engine
@@ -375,6 +390,41 @@ async def kt_error_handler(request: Request, exc: KTError) -> JSONResponse:
     return JSONResponse(status_code=kt_error_status(exc), content={"detail": str(exc)})
 
 
+def drive_error_status(exc: DriveError) -> int:
+    """Map a typed Drive error onto an HTTP status (design §12.5; impl-plan J).
+
+    Registration-missing/disabled/incompatible and invalid transitions are 422
+    (semantically unprocessable, not a plain 400); permission is 403; the
+    ``ConflictError`` family (revision/idempotency/settings) is 409; backpressure
+    is 429. Everything else falls back to the generic ``KTError`` table so the
+    ordering (not-found before value) stays consistent.
+    """
+    if isinstance(exc, DrivePermissionError):
+        return 403
+    if isinstance(
+        exc,
+        (
+            DriveTransitionError,
+            DriveRegistrationNotFoundError,
+            DriveRegistrationDisabledError,
+            DriveRegistrationIncompatibleError,
+        ),
+    ):
+        return 422
+    if isinstance(exc, DriveBackpressureError):
+        return 429
+    return kt_error_status(exc)
+
+
+async def drive_error_handler(request: Request, exc: DriveError) -> JSONResponse:
+    """Drive-specific ``KTError`` → HTTP status (403/422/429 beyond the generic
+    table), same ``{"detail": ...}`` body shape as :func:`kt_error_handler`."""
+    _ = request
+    return JSONResponse(
+        status_code=drive_error_status(exc), content={"detail": str(exc)}
+    )
+
+
 async def lab_transport_error_handler(
     request: Request, exc: TimeoutError
 ) -> JSONResponse:
@@ -508,6 +558,9 @@ def create_app(
     # Typed-error adapter: studio raises ``kohakuterrarium.errors``
     # types; this single handler maps them onto HTTP status codes.
     app.add_exception_handler(KTError, kt_error_handler)
+    # Drive errors need 403/422/429 beyond the generic table; Starlette picks
+    # the most specific handler by MRO, so this wins for every ``DriveError``.
+    app.add_exception_handler(DriveError, drive_error_handler)
     # RequestAbortedError subclasses RequestTimeoutError, so this one
     # registration covers both (Starlette dispatches by MRO).
     app.add_exception_handler(RequestTimeoutError, lab_transport_error_handler)
@@ -531,7 +584,13 @@ def create_app(
     # pool here unconditionally keeps the lifespan path identical
     # across modes.  Capacity values are tunable via future
     # ``[auth]`` config knobs; defaults work for family-server scale.
-    app.state.engine_pool = EnginePool(max_active=10, idle_timeout_s=1800)
+    # Each per-user engine gets a fresh immutable resolution of the shared
+    # operator Drive policy (design §8.4) via the resolver.
+    app.state.engine_pool = EnginePool(
+        max_active=10,
+        idle_timeout_s=1800,
+        drive_resolver=_drive_settings.resolve_drive_kwargs,
+    )
 
     app.add_middleware(
         CORSMiddleware,
@@ -820,6 +879,9 @@ def _mount_phase0_stubs(app: FastAPI) -> None:
         sessions_creatures_command.router, prefix="/api/sessions", tags=["sessions"]
     )
     app.include_router(
+        sessions_drives.router, prefix="/api/sessions", tags=["sessions"]
+    )
+    app.include_router(
         sessions_memory.router, prefix="/api/sessions/memory", tags=["sessions"]
     )
 
@@ -847,6 +909,11 @@ def _mount_phase0_stubs(app: FastAPI) -> None:
     )
     app.include_router(
         persistence_viewer.router,
+        prefix="/api/persistence/viewer",
+        tags=["persistence"],
+    )
+    app.include_router(
+        persistence_drives.router,
         prefix="/api/persistence/viewer",
         tags=["persistence"],
     )

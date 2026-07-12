@@ -75,8 +75,10 @@ class TestServiceSingleton:
         """When no service is installed, get_service constructs a default."""
         created = []
 
-        def fake_terrarium(session_dir=None):
-            created.append(session_dir)
+        def fake_terrarium(session_dir=None, **drive_kwargs):
+            # deps now forwards the host's resolved Drive kwargs into the engine
+            # (design §8.4); the stub accepts and records them.
+            created.append((session_dir, drive_kwargs))
 
             class _T:
                 pass

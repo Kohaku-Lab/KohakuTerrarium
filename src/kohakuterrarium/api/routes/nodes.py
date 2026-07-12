@@ -71,12 +71,20 @@ async def node_status(node_id: str, service: TerrariumService = Depends(get_serv
         creatures = await svc.list_creatures()
     except Exception as e:
         raise HTTPException(503, f"node {node_id!r} unreachable: {e}")
+    # Additive: the node's live Drive runtime (enabled / registrations / counts)
+    # so the per-node admin tab can show Drive availability. Best-effort — a
+    # Drive-disabled or older worker simply reports ``enabled: false`` / ``null``.
+    try:
+        drive = (await svc.drive_runtime_status()).to_dict()
+    except Exception:
+        drive = None
     return {
         "node_id": node_id,
         "is_host": node_id == "_host",
         "ok": True,
         "creatures": len(creatures),
         "status_snapshot": snapshot,
+        "drive": drive,
     }
 
 
