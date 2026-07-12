@@ -19,7 +19,7 @@ import { getCurrentInstance } from "vue"
 import { injectScope, registerScopeDisposer } from "@/composables/useScope"
 import { sessionAPI } from "@/utils/api"
 
-const VALID_TABS = new Set(["overview", "trace", "conv", "cost", "find", "diff"])
+const VALID_TABS = new Set(["overview", "trace", "conv", "cost", "find", "diff", "drives"])
 
 const _sessionDetailOptions = {
   state: () => ({

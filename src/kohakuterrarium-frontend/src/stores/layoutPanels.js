@@ -14,6 +14,7 @@ import FileTree from "@/components/editor/FileTree.vue"
 import CanvasPanel from "@/components/panels/CanvasPanel.vue"
 import CreaturesPanel from "@/components/panels/CreaturesPanel.vue"
 import DebugPanel from "@/components/panels/DebugPanel.vue"
+import DrivesPanel from "@/components/panels/DrivesPanel.vue"
 import FilesPanel from "@/components/panels/FilesPanel.vue"
 import ActivityPanel from "@/components/panels/ActivityPanel.vue"
 import SettingsPanel from "@/components/panels/SettingsPanel.vue"
@@ -217,6 +218,15 @@ export function registerBuiltinPanels() {
     id: "modules",
     label: "Modules",
     component: ModulesPanel,
+  })
+  // Drive record panel. Registered so it's reachable from the panel
+  // picker for every session, but deliberately NOT part of any default
+  // preset: a session with zero Drives must look byte-identical to today
+  // (no new chrome forcing itself open).
+  layout.registerPanel({
+    id: "drives",
+    label: "Drives",
+    component: DrivesPanel,
   })
 
   // ── Presets ──

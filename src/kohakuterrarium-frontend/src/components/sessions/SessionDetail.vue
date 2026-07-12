@@ -6,6 +6,7 @@
     <CostTab v-else-if="detail.activeTab === 'cost'" />
     <FindTab v-else-if="detail.activeTab === 'find'" />
     <DiffTab v-else-if="detail.activeTab === 'diff'" />
+    <DrivesTab v-else-if="detail.activeTab === 'drives'" />
   </div>
 </template>
 
@@ -13,6 +14,7 @@
 import ConvTab from "@/components/sessions/tabs/ConvTab.vue"
 import CostTab from "@/components/sessions/tabs/CostTab.vue"
 import DiffTab from "@/components/sessions/tabs/DiffTab.vue"
+import DrivesTab from "@/components/sessions/tabs/DrivesTab.vue"
 import FindTab from "@/components/sessions/tabs/FindTab.vue"
 import OverviewTab from "@/components/sessions/tabs/OverviewTab.vue"
 import TraceTab from "@/components/sessions/tabs/TraceTab.vue"

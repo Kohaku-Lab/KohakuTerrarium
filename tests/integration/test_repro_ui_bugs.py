@@ -677,6 +677,31 @@ class TestTuiStdinStealFix:
                 "modules"
             ], f"variant {variant!r} should open the modules modal"
 
+    def test_handle_tui_slash_opens_drive_panel(self):
+        # ``/drives`` and ``/drive`` open the Drive record + settings panel.
+        import asyncio as _asyncio
+
+        from kohakuterrarium.terrarium.engine_cli import _handle_tui_slash
+
+        for variant in ("/drives", "/drive"):
+            calls: list[str] = []
+
+            class _RecordingTUI:
+                async def show_model_picker_modal(self, agent: Any) -> None:
+                    calls.append("model")
+
+                async def show_modules_modal(self, agent: Any) -> None:
+                    calls.append("modules")
+
+                async def show_drive_panel(self) -> None:
+                    calls.append("drives")
+
+            handled = _asyncio.run(
+                _handle_tui_slash(variant, _RecordingTUI(), object())
+            )
+            assert handled is True
+            assert calls == ["drives"], f"{variant!r} should open the Drive panel"
+
     def test_tui_wiring_order_pins_post_start_on_interrupt_binding(self):
         # Regression: ``tui._app.on_interrupt = focus.interrupt`` MUST
         # land AFTER ``await tui.start()`` because ``tui.start`` is

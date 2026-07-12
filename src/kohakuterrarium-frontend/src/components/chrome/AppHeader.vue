@@ -5,6 +5,7 @@
       {{ instanceName }}
     </span>
     <GraphCounts v-if="instance" :instance="instance" compact />
+    <DriveHeaderBadge v-if="instance" :instance="instance" />
 
     <button v-if="instance" class="w-5 h-5 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" :title="t('appHeader.instanceSettings')" @click="settingsOpen = true">
       <div class="i-carbon-settings text-[11px]" />
@@ -56,6 +57,7 @@ import { computed, ref } from "vue"
 
 import InstanceSettingsModal from "@/components/chrome/InstanceSettingsModal.vue"
 import { useInstanceContext } from "@/components/chrome/instanceContext"
+import DriveHeaderBadge from "@/components/drives/DriveHeaderBadge.vue"
 import GraphCounts from "@/components/common/GraphCounts.vue"
 import StatusDot from "@/components/common/StatusDot.vue"
 import { useInstancesStore } from "@/stores/instances"

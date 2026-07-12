@@ -354,6 +354,13 @@
         <SitesPane />
       </el-tab-pane>
 
+      <!-- ════════════════════════ Drives ════════════════════════ -->
+      <el-tab-pane label="Drives" name="drives">
+        <div class="settings-pane">
+          <DriveSettingsPanel @open-drives="onOpenDrives" />
+        </div>
+      </el-tab-pane>
+
       <!-- ════════════════════════ Updates ════════════════════════ -->
       <el-tab-pane label="Updates" name="updates">
         <div class="settings-pane max-w-2xl">
@@ -431,6 +438,7 @@ import AboutPanel from "@/components/settings/AboutPanel.vue"
 import AdvancedPanel from "@/components/settings/AdvancedPanel.vue"
 import BackendForm from "@/components/settings/BackendForm.vue"
 import CodexLoginModal from "@/components/settings/CodexLoginModal.vue"
+import DriveSettingsPanel from "@/components/settings/DriveSettingsPanel.vue"
 import MCPServerEditModal from "@/components/settings/modals/MCPServerEditModal.vue"
 import PresetEditor from "@/components/settings/PresetEditor.vue"
 import SitesPane from "@/components/settings/SitesPane.vue"
@@ -971,6 +979,12 @@ onMounted(async () => {
 watch(activeTab, (tab) => {
   if (tab === "account" && !codexUsage.value && !codexUsageLoading.value) loadCodexUsage()
 })
+
+// The Drives *record* panel lives in a workspace, not in global Settings.
+// Point the operator there rather than force a cross-context navigation.
+function onOpenDrives() {
+  ElMessage.info("Open a running creature or terrarium workspace and use its Drives panel to review active records.")
+}
 </script>
 
 <style scoped>

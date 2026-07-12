@@ -46,13 +46,14 @@
 </template>
 
 <script setup>
-import { computed, onUnmounted, watch } from "vue"
+import { computed, onUnmounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 
 import SessionDetail from "@/components/sessions/SessionDetail.vue"
 import SessionTreePane from "@/components/sessions/SessionTreePane.vue"
 import { provideScope } from "@/composables/useScope"
 import { useSessionDetailStore } from "@/stores/sessionDetail"
+import { drivesAPI } from "@/utils/drivesApi"
 import { useI18n } from "@/utils/i18n"
 
 const { t } = useI18n()
@@ -78,14 +79,44 @@ provideScope(sessionName.value)
 // ``useScope.js``.)
 const detail = useSessionDetailStore(sessionName.value)
 
-const tabs = computed(() => [
-  { id: "overview", label: t("sessionViewer.tabs.overview"), icon: "i-carbon-dashboard" },
-  { id: "trace", label: t("sessionViewer.tabs.trace"), icon: "i-carbon-chart-line" },
-  { id: "conv", label: t("sessionViewer.tabs.conv"), icon: "i-carbon-chat" },
-  { id: "cost", label: t("sessionViewer.tabs.cost"), icon: "i-carbon-currency-dollar" },
-  { id: "find", label: t("sessionViewer.tabs.find"), icon: "i-carbon-search" },
-  { id: "diff", label: t("sessionViewer.tabs.diff"), icon: "i-carbon-compare" },
-])
+// Only surface the Drives tab when the session actually recorded Drives —
+// a session with none must look byte-identical to today (no new chrome).
+const hasDrives = ref(false)
+
+const tabs = computed(() => {
+  const base = [
+    { id: "overview", label: t("sessionViewer.tabs.overview"), icon: "i-carbon-dashboard" },
+    { id: "trace", label: t("sessionViewer.tabs.trace"), icon: "i-carbon-chart-line" },
+    { id: "conv", label: t("sessionViewer.tabs.conv"), icon: "i-carbon-chat" },
+    { id: "cost", label: t("sessionViewer.tabs.cost"), icon: "i-carbon-currency-dollar" },
+    { id: "find", label: t("sessionViewer.tabs.find"), icon: "i-carbon-search" },
+    { id: "diff", label: t("sessionViewer.tabs.diff"), icon: "i-carbon-compare" },
+  ]
+  if (hasDrives.value) base.push({ id: "drives", label: "Drives", icon: "i-carbon-flow" })
+  return base
+})
+
+// Bumped on every probe so a slow response for a previously-selected
+// session cannot commit to the shared ``hasDrives`` after the user has
+// switched tabs (mirrors the chat store's request-generation idiom).
+let probeGeneration = 0
+
+async function probeDrives(name) {
+  const generation = ++probeGeneration
+  hasDrives.value = false
+  if (!name) return
+  try {
+    // Saved-session viewer reads the persisted sidecar, not the live route.
+    const data = await drivesAPI.savedList(name)
+    if (generation !== probeGeneration) return
+    const items = Array.isArray(data) ? data : data.drives || data.items || []
+    hasDrives.value = items.length > 0
+  } catch {
+    // No persisted Drives (or session file missing) — the tab stays hidden.
+    if (generation !== probeGeneration) return
+    hasDrives.value = false
+  }
+}
 
 // In v1 (page-routed) we deep-link the inner tab via ``?tab=trace`` etc.
 // In v2 (embedded as a SessionViewerTab) the URL is owned by the macro
@@ -124,6 +155,7 @@ watch(
   (name) => {
     if (!name) return
     detail.load(name)
+    probeDrives(name)
   },
   { immediate: true },
 )
