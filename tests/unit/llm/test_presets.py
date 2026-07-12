@@ -184,24 +184,20 @@ class TestPresetsDataIntegrity:
         assert PRESETS["gpt-5.5"]["provider"] == "codex"
         assert PRESETS["gpt-5.6-sol"]["provider"] == "codex"
 
-    def test_gpt56_effort_scales_match_codex_catalog(self):
-        # Codex catalog (models.json, 2026-07-10): Sol/Terra go up to
-        # ``ultra``; Luna stops at ``max``. ``ultra`` is Codex-only, so
-        # the direct-API (-api) variants must NOT expose it.
-        sol = PRESETS["gpt-5.6-sol"]["variation_groups"]["reasoning"]
-        terra = PRESETS["gpt-5.6-terra"]["variation_groups"]["reasoning"]
-        luna = PRESETS["gpt-5.6-luna"]["variation_groups"]["reasoning"]
-        assert "ultra" in sol and "max" in sol
-        assert "ultra" in terra
-        assert "ultra" not in luna and "max" in luna
-        # 'ultra' is not a wire value — the API rejects the literal string.
-        # Mirror the Codex CLI, which rewrites Ultra -> Max before sending.
-        assert sol["ultra"] == {"reasoning_effort": "max"}
-        assert terra["ultra"] == {"reasoning_effort": "max"}
-        for name in ("gpt-5.6-sol-api", "gpt-5.6-terra-api", "gpt-5.6-luna-api"):
-            api_group = PRESETS[name]["variation_groups"]["reasoning"]
-            assert "ultra" not in api_group
-            assert "max" in api_group
+    def test_gpt56_effort_scales_top_out_at_max(self):
+        # ``ultra`` is deliberately not exposed on any GPT-5.6 variant:
+        # it is not a wire value (the Codex CLI rewrites Ultra -> Max).
+        for name in (
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.6-sol-api",
+            "gpt-5.6-terra-api",
+            "gpt-5.6-luna-api",
+        ):
+            group = PRESETS[name]["variation_groups"]["reasoning"]
+            assert "ultra" not in group, name
+            assert "max" in group, name
 
     def test_anthropic_direct_presets_use_anthropic_provider(self):
         assert PRESETS["claude-opus-4.7"]["provider"] == "anthropic"

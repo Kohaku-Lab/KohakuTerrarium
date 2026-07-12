@@ -41,7 +41,6 @@ _GPT56_REASONING_GROUP: dict[str, dict[str, Any]] = {
     "high": {"reasoning_effort": "high"},
     "xhigh": {"reasoning_effort": "xhigh"},
     "max": {"reasoning_effort": "max"},
-    "ultra": {"reasoning_effort": "max"},
 }
 
 _GPT56_LUNA_REASONING_GROUP: dict[str, dict[str, Any]] = {
