@@ -1,0 +1,210 @@
+"""Explicit Drive runtime configuration DTOs (design §8.3, §7.4, §13).
+
+Terrarium is dependency-injected: it accepts a :class:`DriveRuntimeConfig`,
+concrete registration instances, and an optional store through its constructor
+and never reads Studio settings or ``~/.kohakuterrarium`` itself (design §2.4).
+These DTOs are the explicit values a Studio-managed entry point resolves and
+passes down.
+
+Everything here is frozen and validated on construction, so nonsense values
+fail at engine build time rather than after a Drive is already active. No recipe
+imports and no Studio imports — this is a leaf runtime-config module.
+"""
+
+from dataclasses import dataclass, field
+from typing import Literal
+
+from kohakuterrarium.terrarium.drive.errors import DriveValidationError
+from kohakuterrarium.terrarium.drive.registration import (
+    DriveRegistration,
+    GenericDriveRegistration,
+)
+
+_PERSISTENCE_MODES = frozenset({"auto", "persistent", "ephemeral"})
+
+
+# ---------------------------------------------------------------------------
+# validation helpers
+# ---------------------------------------------------------------------------
+
+
+def _require_int(value: object, name: str, *, minimum: int) -> None:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise DriveValidationError(f"{name} must be an int, got {value!r}")
+    if value < minimum:
+        raise DriveValidationError(f"{name} must be >= {minimum}, got {value}")
+
+
+def _require_number(value: object, name: str, *, minimum: float) -> None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise DriveValidationError(f"{name} must be a number, got {value!r}")
+    if value < minimum:
+        raise DriveValidationError(f"{name} must be >= {minimum}, got {value}")
+
+
+# ---------------------------------------------------------------------------
+# Retry and retention
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DriveRetryConfig:
+    """Delivery retry/backoff policy (design §5.6)."""
+
+    max_attempts: int = 5
+    initial_backoff_s: float = 2.0
+    max_backoff_s: float = 300.0
+    jitter: float = 0.1
+
+    def __post_init__(self) -> None:
+        _require_int(self.max_attempts, "max_attempts", minimum=1)
+        _require_number(self.initial_backoff_s, "initial_backoff_s", minimum=0.0)
+        _require_number(self.max_backoff_s, "max_backoff_s", minimum=0.0)
+        if self.max_backoff_s < self.initial_backoff_s:
+            raise DriveValidationError("max_backoff_s must be >= initial_backoff_s")
+        _require_number(self.jitter, "jitter", minimum=0.0)
+        if self.jitter > 1.0:
+            raise DriveValidationError("jitter must be within [0, 1]")
+
+
+@dataclass(frozen=True)
+class DriveRetentionConfig:
+    """Retention windows (design §7.4). Day counts are non-negative; ``0``
+    means immediately eligible for compaction/retirement."""
+
+    terminal_days: int = 90
+    acknowledged_delivery_days: int = 30
+    superseded_delivery_days: int = 7
+    dead_letter_days: int = 90
+    progress_max_count: int = 500
+    progress_max_age_days: int = 90
+
+    def __post_init__(self) -> None:
+        _require_int(self.terminal_days, "terminal_days", minimum=0)
+        _require_int(
+            self.acknowledged_delivery_days, "acknowledged_delivery_days", minimum=0
+        )
+        _require_int(
+            self.superseded_delivery_days, "superseded_delivery_days", minimum=0
+        )
+        _require_int(self.dead_letter_days, "dead_letter_days", minimum=0)
+        _require_int(self.progress_max_count, "progress_max_count", minimum=1)
+        _require_int(self.progress_max_age_days, "progress_max_age_days", minimum=0)
+
+
+# ---------------------------------------------------------------------------
+# Runtime config
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DriveRuntimeConfig:
+    """Explicit Drive runtime tuning passed to ``Terrarium(...)`` (design §8.3).
+
+    ``enabled=False`` (the default) means the engine owns no DriveManager,
+    tools, prompt, or dispatcher. Byte limits are independent per payload field
+    (design §13).
+    """
+
+    enabled: bool = False
+    max_active_per_creature: int = 8
+    max_pending_per_graph: int = 100
+    max_consecutive_drive_turns: int = 3
+    dispatcher_concurrency: int = 4
+    # Minimum wall-clock gap between a settled Drive turn and the next
+    # readiness-driven continuation (design §5.5 per-Drive cooldown). ``0.0``
+    # re-arms as soon as the prior turn settles, still gated by fairness.
+    readiness_cooldown_s: float = 0.0
+    retry: DriveRetryConfig = field(default_factory=DriveRetryConfig)
+    retention: DriveRetentionConfig = field(default_factory=DriveRetentionConfig)
+    spec_max_bytes: int = 16384
+    presentation_max_bytes: int = 8192
+    metadata_max_bytes: int = 4096
+    evidence_max_bytes: int = 16384
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise DriveValidationError("enabled must be a bool")
+        _require_int(self.max_active_per_creature, "max_active_per_creature", minimum=1)
+        _require_int(self.max_pending_per_graph, "max_pending_per_graph", minimum=1)
+        _require_int(
+            self.max_consecutive_drive_turns, "max_consecutive_drive_turns", minimum=1
+        )
+        _require_int(self.dispatcher_concurrency, "dispatcher_concurrency", minimum=1)
+        _require_number(self.readiness_cooldown_s, "readiness_cooldown_s", minimum=0.0)
+        if not isinstance(self.retry, DriveRetryConfig):
+            raise DriveValidationError("retry must be a DriveRetryConfig")
+        if not isinstance(self.retention, DriveRetentionConfig):
+            raise DriveValidationError("retention must be a DriveRetentionConfig")
+        _require_int(self.spec_max_bytes, "spec_max_bytes", minimum=1)
+        _require_int(self.presentation_max_bytes, "presentation_max_bytes", minimum=1)
+        _require_int(self.metadata_max_bytes, "metadata_max_bytes", minimum=1)
+        _require_int(self.evidence_max_bytes, "evidence_max_bytes", minimum=1)
+
+
+# ---------------------------------------------------------------------------
+# Runtime selection helpers + in-process spec
+# ---------------------------------------------------------------------------
+
+
+def default_registrations() -> list[DriveRegistration]:
+    """Convenience enable set: ``[GenericDriveRegistration()]`` (design §8.3).
+
+    A caller must still pass this explicitly; the low-level engine never invents
+    an enable set on its own.
+    """
+    return [GenericDriveRegistration()]
+
+
+def validate_runtime_selection(
+    config: DriveRuntimeConfig,
+    registrations: "list[DriveRegistration] | tuple[DriveRegistration, ...]",
+) -> None:
+    """Raise if the runtime is enabled with no registrations (design §8.3)."""
+    if config.enabled and not registrations:
+        raise DriveValidationError(
+            "drive runtime is enabled but no registrations were supplied "
+            "(design §8.3); pass default_registrations() explicitly to enable the "
+            "generic kind"
+        )
+
+
+@dataclass(frozen=True)
+class DriveRuntimeSpec:
+    """In-process grouping of the resolved runtime pieces (design §8.6).
+
+    Groups the config, concrete registration instances, the repository/store
+    selection, the settings revision it was resolved from, and the target node.
+    It holds live Python objects (``registrations``, ``store``) and is therefore
+    **in-process only**: Laboratory transports serializable names/options and
+    the worker resolves its own :class:`DriveRuntimeSpec`. Nothing here is
+    wire-serialized (there is deliberately no packer in ``drive_wire``).
+    """
+
+    config: DriveRuntimeConfig
+    registrations: tuple[DriveRegistration, ...] = ()
+    store: object | None = None
+    persistence: Literal["auto", "persistent", "ephemeral"] = "auto"
+    source_revision: str | None = None
+    target_node: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.config, DriveRuntimeConfig):
+            raise DriveValidationError("config must be a DriveRuntimeConfig")
+        if not isinstance(self.registrations, tuple):
+            raise DriveValidationError("registrations must be a tuple")
+        if self.persistence not in _PERSISTENCE_MODES:
+            raise DriveValidationError(
+                f"persistence must be one of {sorted(_PERSISTENCE_MODES)}"
+            )
+        validate_runtime_selection(self.config, self.registrations)
+
+
+__all__ = [
+    "DriveRetentionConfig",
+    "DriveRetryConfig",
+    "DriveRuntimeConfig",
+    "DriveRuntimeSpec",
+    "default_registrations",
+    "validate_runtime_selection",
+]
