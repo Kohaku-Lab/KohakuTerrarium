@@ -34,13 +34,16 @@ from kohakuterrarium.builtins.user_commands import (
 )
 from kohakuterrarium.core.channel import BaseChannel, ChannelMessage
 from kohakuterrarium.modules.input.base import InputModule
-from kohakuterrarium.modules.user_command.base import (
-    UserCommandContext,
-    parse_slash_command,
-)
+from kohakuterrarium.modules.user_command.base import parse_slash_command
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine_cli_commands import (
+    _build_command_aliases,
+    _dispatch_active_engine_command,
+    _engine_command_context,
+)
 from kohakuterrarium.terrarium.events import EventFilter, EventKind
+from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.utils.logging import get_logger, restore_logging, suppress_logging
 
 logger = get_logger(__name__)
@@ -71,6 +74,12 @@ async def _handle_tui_slash(text: str, tui: "TUISession", focus: Any) -> bool:
 
     if name == "model" and not stripped_args:
         await tui.show_model_picker_modal(target_agent)
+        return True
+
+    # Intercept ONLY the bare command — subcommands (`/drives list|show|…`)
+    # fall through to the agent's command registry for scriptable text output.
+    if name in ("drives", "drive") and not stripped_args:
+        await tui.show_drive_panel()
         return True
 
     if name in ("module", "modules", "mod"):
@@ -197,6 +206,10 @@ async def run_engine_with_tui(
     tui_tabs.extend(f"#{ch_info.name}" for ch_info in graph.channels.values())
 
     tui = TUISession(agent_name=graph_id)
+    # Inject a ready service (record panel) + engine (settings live-apply); the
+    # TUI consumes these duck-typed handles instead of importing terrarium.service.
+    tui.engine = engine
+    tui.drive_service = LocalTerrariumService(engine)
     tui.set_terrarium_tabs(tui_tabs)
 
     focus_output = TUIOutput(session_key=focus_creature_id)
@@ -293,8 +306,7 @@ async def run_engine_with_tui(
 
     commands = {n: get_builtin_user_command(n) for n in list_builtin_user_commands()}
     aliases = _build_command_aliases(commands)
-    cmd_context = UserCommandContext(agent=focus, session=focus.session)
-    cmd_context.extra["command_registry"] = commands
+    cmd_context = _engine_command_context(focus, engine, focus_creature_id, commands)
     _set_command_hints(tui, commands)
 
     # Track in-flight inject_input tasks so we can drain them on exit
@@ -334,6 +346,17 @@ async def run_engine_with_tui(
             # text (the modal IS the response to this input).
             if text.startswith("/"):
                 if await _handle_tui_slash(text, tui, focus):
+                    continue
+                # Engine-aware subcommands (`/drives list`, `/goal …`) run
+                # against the trusted local-console context so they reach the
+                # live Drive service instead of the engine-agnostic agent
+                # pipeline that returns "unavailable" (R1-32). The registry +
+                # context are resolved from the ACTIVE tab per dispatch so
+                # plugin commands (/goal) are seen and both the service target
+                # and the rendered notice follow that tab (R1-32 §6+§7).
+                if await _dispatch_active_engine_command(
+                    text, tui, engine, focus, focus_creature_id, graph_id, commands
+                ):
                     continue
             active_tab = tui.get_active_tab()
             if not active_tab or active_tab == focus_creature_id:
@@ -446,14 +469,6 @@ def _update_terrarium_panel(
         if creature.creature_id != focus_creature_id
     ]
     tui.update_terrarium(creature_info, env.shared_channels.get_channel_info())
-
-
-def _build_command_aliases(commands: dict) -> dict[str, str]:
-    aliases: dict[str, str] = {}
-    for name, cmd in commands.items():
-        for alias in getattr(cmd, "aliases", []):
-            aliases[alias] = name
-    return aliases
 
 
 def _set_command_hints(tui: TUISession, commands: dict) -> None:

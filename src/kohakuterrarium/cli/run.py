@@ -20,6 +20,7 @@ import kohakuterrarium.terrarium.topology as _topo
 from kohakuterrarium.cli.picker import pick_runnable
 from kohakuterrarium.packages.resolve import resolve_any_path
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.studio.identity import drive_settings as _drive_settings
 from kohakuterrarium.terrarium.config import load_terrarium_config
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.engine_cli import run_engine_with_tui
@@ -175,7 +176,10 @@ async def _run(
     pwd = str(Path.cwd())
     is_recipe = _looks_like_recipe(agent_path)
 
-    async with Terrarium(pwd=pwd) as engine:
+    # Managed local path (Q4 #6): resolve the host node's Drive settings once
+    # into explicit engine args. Absent/disabled settings -> Drive-disabled.
+    drive_kwargs = _drive_settings.resolve_drive_kwargs()
+    async with Terrarium(pwd=pwd, **drive_kwargs) as engine:
         store: SessionStore | None = None
         focus_creature_id = ""
 

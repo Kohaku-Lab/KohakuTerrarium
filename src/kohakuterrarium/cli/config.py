@@ -17,6 +17,10 @@ from kohakuterrarium.cli.identity_llm import show_cli as _llm_show_cli
 from kohakuterrarium.cli.identity_mcp import add_or_update_cli as _mcp_add_cli
 from kohakuterrarium.cli.identity_mcp import delete_cli as _mcp_delete_cli
 from kohakuterrarium.cli.identity_mcp import list_cli as _mcp_list_cli
+from kohakuterrarium.cli.identity_drive import apply_cli as _drive_apply_cli
+from kohakuterrarium.cli.identity_drive import registrations_cli as _drive_regs_cli
+from kohakuterrarium.cli.identity_drive import set_cli as _drive_set_cli
+from kohakuterrarium.cli.identity_drive import show_cli as _drive_show_cli
 from kohakuterrarium.cli.identity_settings import edit_cli as _settings_edit_cli
 from kohakuterrarium.cli.identity_settings import path_cli as _settings_path_cli
 from kohakuterrarium.cli.identity_settings import show_cli as _settings_show_cli
@@ -84,6 +88,19 @@ def add_config_subparser(subparsers):
 
     login_parser = sub.add_parser("login", help="Authenticate with a provider")
     login_parser.add_argument("provider")
+
+    drive_parser = sub.add_parser("drive", help="Manage Drive runtime settings")
+    drive_sub = drive_parser.add_subparsers(dest="config_drive_command")
+    drive_sub.add_parser("show", help="Show Drive runtime + registration settings")
+    drive_sub.add_parser("registrations", help="List installed Drive registrations")
+    d_set = drive_sub.add_parser(
+        "set", help="Set a runtime field or toggle a registration"
+    )
+    d_set.add_argument("field", nargs="?", default=None)
+    d_set.add_argument("value", nargs="?", default=None)
+    drive_sub.add_parser(
+        "apply", help="Validate saved settings (reports restart_required)"
+    )
 
     mcp_parser = sub.add_parser("mcp", help="Manage MCP servers")
     mcp_sub = mcp_parser.add_subparsers(dest="config_mcp_command")
@@ -164,6 +181,23 @@ def _dispatch_mcp(args):
     return 1
 
 
+def _dispatch_drive(args):
+    sub = getattr(args, "config_drive_command", None) or "show"
+    match sub:
+        case "show":
+            return _drive_show_cli()
+        case "registrations":
+            return _drive_regs_cli()
+        case "set":
+            return _drive_set_cli(
+                getattr(args, "field", None), getattr(args, "value", None)
+            )
+        case "apply":
+            return _drive_apply_cli()
+    print("Usage: kt config drive {show|registrations|set|apply}")
+    return 1
+
+
 def config_cli(args):
     command = getattr(args, "config_command", None)
     match command:
@@ -183,5 +217,7 @@ def config_cli(args):
             return login_cli(getattr(args, "provider", ""))
         case "mcp":
             return _dispatch_mcp(args)
+        case "drive":
+            return _dispatch_drive(args)
     print("Usage: kt config")
     return 1

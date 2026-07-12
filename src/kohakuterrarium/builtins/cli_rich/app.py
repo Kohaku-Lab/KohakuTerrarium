@@ -42,12 +42,14 @@ from prompt_toolkit.styles import Style
 from rich.console import Console
 from rich.text import Text
 
+from kohakuterrarium.builtins.cli_rich.app_drive import AppDriveMixin
 from kohakuterrarium.builtins.cli_rich.app_multi import AppMultiCreatureMixin
 from kohakuterrarium.builtins.cli_rich.app_output import AppOutputMixin
 from kohakuterrarium.builtins.cli_rich.app_pickers import AppPickersMixin
 from kohakuterrarium.builtins.cli_rich.commit import ScrollbackCommitter, SessionReplay
 from kohakuterrarium.builtins.cli_rich.composer import Composer
 from kohakuterrarium.builtins.cli_rich.dialogs.bus_overlay import BusInteractiveOverlay
+from kohakuterrarium.builtins.cli_rich.dialogs.drive_overlay import DriveOverlay
 from kohakuterrarium.builtins.cli_rich.dialogs.model_picker import ModelPicker
 from kohakuterrarium.builtins.cli_rich.dialogs.module_picker import ModulePicker
 from kohakuterrarium.builtins.cli_rich.dialogs.settings import SettingsOverlay
@@ -75,7 +77,7 @@ logger = get_logger(__name__)
 DEFAULT_WIDTH = 100
 
 
-class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin):
+class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin, AppDriveMixin):
     """Single-Application orchestrator for ``--mode cli``.
 
     Output events from the agent's OutputRouter (``on_text_chunk``,
@@ -91,7 +93,15 @@ class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin):
             load_presets=self._load_presets_for_picker,
             on_apply=self._apply_model_selector,
         )
-        self.settings_overlay = SettingsOverlay()
+        self.settings_overlay = SettingsOverlay(get_engine=lambda: self.engine)
+        self.drive_overlay = DriveOverlay(
+            get_engine=lambda: self.engine,
+            get_creature_id=self._drive_focus_id,
+            schedule=lambda coro: spawn(coro),
+            on_invalidate=self._invalidate,
+            on_close=self._stop_drive_watch,
+        )
+        self._drive_watch_task: asyncio.Task | None = None
         self.module_picker = ModulePicker(get_agent=lambda: self.agent)
         self.bus_overlay = BusInteractiveOverlay(
             get_router=lambda: getattr(self.agent, "output_router", None),
@@ -156,6 +166,20 @@ class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin):
         self.roster = None
         self.agent_overlay = None
         self.peek_panel = None
+
+    # ── Engine / focus context ──
+    def setup_single_creature(self, engine: Any, focus_creature_id: str) -> None:
+        """Bind engine + focus context for a single-creature engine-backed run.
+
+        Every engine-backed Rich CLI run needs engine/service/focus wired so
+        ``/drives`` and live settings apply can resolve the runtime;
+        :meth:`setup_multi_creature` layers roster behavior on top rather than
+        being the only dependency-injection path.
+        """
+        self.engine = engine
+        self.focus_controller = FocusController(
+            creature_ids=[focus_creature_id], focus_id=focus_creature_id
+        )
 
     # ── Public lifecycle ──
     async def run(self) -> None:
@@ -295,6 +319,7 @@ class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin):
                 or self.model_picker.visible
                 or self.module_picker.visible
                 or self.settings_overlay.visible
+                or self.drive_overlay.visible
                 or (self.agent_overlay is not None and self.agent_overlay.visible)
                 or self.live_region.has_content
             ),
@@ -428,6 +453,9 @@ class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin):
             return ANSI(ansi) if ansi else ""
         if self.settings_overlay.visible:
             ansi = self.settings_overlay.render(width)
+            return ANSI(ansi) if ansi else ""
+        if self.drive_overlay.visible:
+            ansi = self.drive_overlay.render(width)
             return ANSI(ansi) if ansi else ""
         if self.agent_overlay is not None and self.agent_overlay.visible:
             ansi = self.agent_overlay_ansi(width)
@@ -569,15 +597,43 @@ class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin):
     # ── Slash command dispatch ──
 
     def _wire_command_registry(self) -> None:
+        # Prefer the Agent's live aggregated registry (built-ins + package +
+        # constructor + active plugin contributions) so plugin-contributed
+        # slash commands like /goal show up in help / completion / palette.
+        # Fall back to built-ins only for agent-like objects without it.
+        registry = self._agent_command_registry()
+        self.composer.set_command_registry(registry)
+        self.composer.set_command_context(agent=self.agent)
+        self.hint_bar.set_registry(registry)
+        self._command_registry = registry
+        # Follow plugin enable/disable/add so the inventory stays truthful.
+        add_listener = getattr(self.agent, "add_user_command_listener", None)
+        if callable(add_listener):
+            add_listener(self._on_user_commands_changed)
+
+    def _agent_command_registry(self) -> dict:
+        lister = getattr(self.agent, "list_user_commands", None)
+        if callable(lister):
+            live = lister()
+            if live:
+                return dict(live)
         registry: dict = {}
         for name in list_builtin_user_commands():
             cmd = get_builtin_user_command(name)
             if cmd:
                 registry[name] = cmd
-        self.composer.set_command_registry(registry)
-        self.composer.set_command_context(agent=self.agent)
-        self.hint_bar.set_registry(registry)
+        return registry
+
+    def _on_user_commands_changed(self, commands: dict) -> None:
+        """Re-point the composer / hint bar at a refreshed command registry."""
+        registry = dict(commands)
         self._command_registry = registry
+        try:
+            self.composer.set_command_registry(registry)
+            self.hint_bar.set_registry(registry)
+        except Exception:  # pragma: no cover — defensive UI wiring
+            pass
+        self._invalidate()
 
     async def _handle_slash(self, text: str) -> None:
         name, args = parse_slash_command(text)
@@ -596,6 +652,15 @@ class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin):
         # so the command shows up in /help and the slash-hint bar.
         if name in ("settings", "config") and not args.strip():
             self.settings_overlay.open()
+            self._invalidate()
+            return
+
+        # Special path: bare `/drives` opens the live record overlay. With
+        # subcommands (`/drives list|show|pause …`) it falls through to the
+        # generic user command for scriptable text output (design §12.5).
+        if name in ("drives", "drive") and not args.strip():
+            self.drive_overlay.open()
+            self._start_drive_watch()
             self._invalidate()
             return
 
@@ -657,6 +722,8 @@ class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin):
             self._exit_requested = True
             if self.app:
                 self.app.exit()
+
+    # Drive-overlay live-refresh wiring lives in ``AppDriveMixin`` (app_drive.py).
 
     # Output event handlers (on_text_chunk, on_tool_start, etc.) live in
     # ``AppOutputMixin`` (app_output.py). Kept separate so this file stays

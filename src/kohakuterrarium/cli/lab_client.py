@@ -23,6 +23,7 @@ from kohakuterrarium.laboratory.adapters import (
     StudioCatalogAdapter,
     StudioDeployAdapter,
     StudioIdentityAdapter,
+    StudioSettingsAdapter,
     TerrariumAttachAdapter,
     TerrariumBroadcastAdapter,
     TerrariumEventsAdapter,
@@ -44,6 +45,7 @@ from kohakuterrarium.llm.codex_auth import (
     clear_codex_resolver,
     register_codex_resolver,
 )
+from kohakuterrarium.studio.identity import drive_settings as _drive_settings
 from kohakuterrarium.terrarium import Terrarium
 from kohakuterrarium.utils.logging import (
     configure_utf8_stdio,
@@ -206,7 +208,13 @@ async def _run_worker(args: argparse.Namespace) -> None:
         ),
         WebSocketTransport(),
     )
-    engine = Terrarium()
+    # Resolve THIS worker's Drive settings from its own config home
+    # (``KT_CONFIG_DIR`` was re-homed above) into explicit engine args, exactly
+    # like ``kt run`` does for the managed local path. Absent/disabled settings
+    # resolve to a Drive-disabled engine; a bad setting degrades to disabled
+    # with a logged warning rather than crashing worker boot.
+    drive_kwargs = _drive_settings.resolve_drive_kwargs()
+    engine = Terrarium(**drive_kwargs)
     # Auto-attach SessionStore + SessionEventTee per spawned creature
     # so events persist on this worker AND mirror to the controller.
     # Constructed BEFORE the runtime adapter so the adapter can hand
@@ -275,6 +283,12 @@ async def _run_worker(args: argparse.Namespace) -> None:
     # the resulting token is process-local and Codex calls from this
     # worker actually succeed (host's token would mismatch).
     StudioIdentityAdapter(client)
+    # ``studio.settings`` adapter — exposes THIS worker's ``drive-settings.yaml``
+    # and live Drive runtime so the host's per-node Settings > Drives surface can
+    # read/validate/save/apply Drive settings against the worker's own config
+    # home (design §8.4/§8.5).  Node-targeted mutation is operator-gated at the
+    # host; the worker trusts its authenticated Lab peer.
+    StudioSettingsAdapter(engine, client)
 
     stop_event = asyncio.Event()
     loop = asyncio.get_event_loop()

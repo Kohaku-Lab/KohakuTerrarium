@@ -55,6 +55,11 @@ class AppPickersMixin:
             if consumed:
                 self._invalidate()
             return consumed
+        if self.drive_overlay.visible:
+            consumed = self.drive_overlay.handle_key(key)
+            if consumed:
+                self._invalidate()
+            return consumed
         if self.agent_overlay is not None and self.agent_overlay.visible:
             consumed = self.agent_overlay.handle_key(key)
             if consumed:
@@ -96,6 +101,11 @@ class AppPickersMixin:
             if consumed:
                 self._invalidate()
             return consumed
+        if self.drive_overlay.visible:
+            consumed = self.drive_overlay.handle_text(char)
+            if consumed:
+                self._invalidate()
+            return consumed
         if self.agent_overlay is not None and self.agent_overlay.visible:
             consumed = self.agent_overlay.handle_text(char)
             if consumed:
@@ -124,6 +134,10 @@ class AppPickersMixin:
             # printable chars into the active field. Either way the
             # composer's textarea must NOT receive these keystrokes,
             # so claim them unconditionally while the overlay is up.
+            return True
+        if self.drive_overlay.visible:
+            # Modal like settings — reserve letters for actions/filters and
+            # keep every keystroke out of the chat textarea behind it.
             return True
         if self.agent_overlay is not None and self.agent_overlay.visible:
             # Topic 08 — printable chars go into the overlay's filter.

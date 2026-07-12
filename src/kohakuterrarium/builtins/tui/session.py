@@ -95,6 +95,14 @@ class TUISession(TabModelRegistryMixin):
         # so modal screens (Modules, etc.) can mutate state without
         # round-tripping the slash-command pipeline.
         self.host_agent: Any = None
+        # Live Terrarium engine + a ready ``TerrariumService``, injected by the
+        # engine TUI runner. The Drive panel consumes ``drive_service`` as a
+        # duck-typed handle (so this package never imports terrarium.service);
+        # ``engine`` backs the settings pane's live-apply. Both ``None`` in
+        # standalone TUI mode, where the panel degrades to a "runtime
+        # unavailable" notice. See ``DriveScreen``.
+        self.engine: Any = None
+        self.drive_service: Any = None
         # Optional resolver installed by the engine runner: tab name →
         # live agent. Lets the F2/F3 modals and the ``/model`` slash
         # intercept act on the ACTIVE tab's creature instead of always
@@ -924,6 +932,17 @@ class TUISession(TabModelRegistryMixin):
         if not self._app or not self._app.is_running:
             return
         self._app.call_later(lambda: self._app.push_screen(ModulesModal(agent)))
+
+    async def show_drive_panel(self) -> None:
+        """Open the Drive record + settings panel.
+
+        Reuses the app's F4 action (which resolves the injected
+        ``drive_service``/``engine``) so the ``/drives`` slash intercept and the
+        key binding share one path.
+        """
+        if not self._app or not self._app.is_running:
+            return
+        self._app.call_later(self._app.action_open_drives)
 
     async def show_module_edit_modal(self, agent: Any, name: str) -> bool:
         """Resolve ``name`` to a module record and push the edit modal.

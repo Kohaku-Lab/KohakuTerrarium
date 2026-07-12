@@ -44,17 +44,25 @@ def render_overlay(overlay: "SettingsOverlay", width: int) -> str:
 
 def _build_panel(overlay: "SettingsOverlay") -> RenderableType:
     tab_line = _render_tab_line(overlay)
-    if overlay.mode == "confirm":
+    drives_tab = overlay.tab == "Drives" and overlay.mode == "list"
+    if drives_tab:
+        body = overlay.drive_section.render_body()
+    elif overlay.mode == "confirm":
         body = _render_confirm_body(overlay._confirm)
     elif overlay.mode == "form":
         body = _render_form_body(overlay._form)
     else:
         body = _render_list_body(overlay)
 
-    hint = _render_hint(overlay.mode)
+    if drives_tab:
+        hint = _render_drives_hint(overlay.drive_section)
+        flash = overlay.drive_section.flash
+    else:
+        hint = _render_hint(overlay.mode)
+        flash = overlay._flash
     flash_line = Text()
-    if overlay._flash:
-        flash_line.append("  " + overlay._flash, style="yellow")
+    if flash:
+        flash_line.append("  " + flash, style="yellow")
 
     panel_body = Group(tab_line, Text(""), body, Text(""), flash_line, hint)
     title = Text("Settings", style="bold magenta")
@@ -199,6 +207,27 @@ def _render_confirm_body(confirm) -> RenderableType:
         Text(""),
         Text("  [Y]es   [N]o / esc", style="dim"),
     )
+
+
+def _render_drives_hint(section: Any) -> Text:
+    hint = Text()
+    if section.editing:
+        segments = [("digits", "value"), ("enter", "commit"), ("esc", "cancel")]
+    else:
+        segments = [
+            ("↑↓", "navigate"),
+            ("enter/space", "toggle/edit"),
+            ("s", "save"),
+            ("a", "apply"),
+            ("tab", "switch tab"),
+            ("esc", "close"),
+        ]
+    for i, (k, label) in enumerate(segments):
+        if i > 0:
+            hint.append("  ")
+        hint.append(k, style="cyan")
+        hint.append(f" {label}", style="dim")
+    return hint
 
 
 def _render_hint(mode: str) -> Text:

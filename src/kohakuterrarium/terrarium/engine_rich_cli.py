@@ -134,6 +134,9 @@ async def run_engine_with_rich_cli(
         for c in all_creatures:
             app.mount_creature_sink(c)
     else:
+        # Single-creature still needs engine/service/focus wired so /drives and
+        # live settings apply resolve the runtime (multi setup adds roster only).
+        app.setup_single_creature(engine, focus_creature_id)
         rich_output = RichCLIOutput(app)
         agent.output_router.default_output = rich_output
 

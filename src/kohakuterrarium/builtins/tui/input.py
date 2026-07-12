@@ -48,7 +48,12 @@ class TUIInput(BaseInputModule):
         self._exit_requested = False
 
     def set_user_commands(self, commands: dict, context: Any) -> None:
-        """Override to also store command names for TUI hint display."""
+        """Override to also store command names for TUI hint display.
+
+        Re-invoked at runtime by ``Agent.refresh_user_commands`` when a
+        plugin is toggled, so a plugin-contributed ``/goal`` must appear /
+        disappear from the live completion hints, not just the boot snapshot.
+        """
         super().set_user_commands(commands, context)
         # Build command names list (including aliases) for later
         all_names: list[str] = list(commands.keys())
@@ -61,6 +66,22 @@ class TUIInput(BaseInputModule):
         host_agent = getattr(context, "agent", None) if context else None
         if self._tui is not None and host_agent is not None:
             self._tui.host_agent = host_agent
+        # If the app is already running, push the refreshed hints to the
+        # live input box (boot-time application happens in ``_on_start``).
+        self._apply_command_hints()
+
+    def _apply_command_hints(self) -> None:
+        """Push the current command-hint names to the live ChatInput."""
+        tui = self._tui
+        app = getattr(tui, "_app", None) if tui is not None else None
+        hint_names = getattr(self, "_command_hint_names", [])
+        if app is None:
+            return
+        try:
+            inp = app.query_one("#input-box", ChatInput)
+            inp.command_names = hint_names
+        except Exception as e:
+            logger.debug("Deferred command-hint refresh skipped", error=str(e))
 
     async def try_user_command(self, text: str) -> UserCommandResult | None:
         """Intercept ``/module`` and ``/model`` for native modal screens.
@@ -199,15 +220,7 @@ class TUIInput(BaseInputModule):
         await self._tui.wait_ready()
 
         # Apply command hint names to ChatInput (now that app is ready)
-        hint_names = getattr(self, "_command_hint_names", [])
-        if hint_names and self._tui._app:
-            try:
-                inp = self._tui._app.query_one("#input-box", ChatInput)
-                inp.command_names = hint_names
-            except Exception as e:
-                logger.warning(
-                    "Failed to set command hints on input", error=str(e), exc_info=True
-                )
+        self._apply_command_hints()
 
         logger.debug("TUI input started", session_key=self._session_key)
 

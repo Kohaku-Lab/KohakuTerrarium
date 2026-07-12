@@ -54,6 +54,7 @@ from kohakuterrarium.builtins.cli_rich.multiplex import MultiplexedRichOutput
 from kohakuterrarium.builtins.cli_rich.roster import RosterWidget
 from kohakuterrarium.modules.user_command.base import UserCommandContext
 from kohakuterrarium.terrarium.events import EventFilter, EventKind
+from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.utils.logging import get_logger
 
 # Slash commands that need the engine + creature_id in their context;
@@ -403,6 +404,7 @@ class AppMultiCreatureMixin:
             or self.model_picker.visible
             or self.module_picker.visible
             or self.settings_overlay.visible
+            or self.drive_overlay.visible
             or (self.agent_overlay is not None and self.agent_overlay.visible)
         ):
             return False
@@ -669,23 +671,39 @@ class AppMultiCreatureMixin:
             self.restore_creature_sink(cid)
 
     async def dispatch_topology_command(self, name: str, args: str) -> bool:
-        """Run a topology-aware command locally with the right context.
+        """Run an engine-aware command locally with the right context.
 
-        Returns ``True`` if the command was handled (caller should
-        return) and ``False`` if the caller should fall through to
-        the agent-level dispatcher.
+        Handles the fixed topology commands plus any command that marks
+        itself ``needs_engine`` (e.g. a plugin-contributed ``/goal``): both
+        need the engine + focused creature in ``UserCommandContext.extra``.
+        Returns ``True`` if the command was handled (caller should return)
+        and ``False`` if the caller should fall through to the agent-level
+        dispatcher.
         """
-        if not self.multi_creature_enabled or name not in _TOPOLOGY_COMMANDS:
+        if not self.multi_creature_enabled:
             return False
         cmd = self._command_registry.get(name)
         if cmd is None:
             return False
+        if name not in _TOPOLOGY_COMMANDS and not getattr(cmd, "needs_engine", False):
+            return False
+        # Built-in Drive commands cannot import terrarium.service (dep-graph
+        # guard), so the dispatch supplies a ready service in ``extra``.
+        service = (
+            LocalTerrariumService(self.engine) if self.engine is not None else None
+        )
         ctx = UserCommandContext(
             agent=self.agent,
             session=getattr(self.agent, "session", None),
             extra={
+                "service": service,
                 "engine": self.engine,
                 "creature_id": self.focus_controller.focus_id,
+                "principal": "user:local",
+                # Trusted local single-user console: graph-authority verbs
+                # (/goal set, /drives create) are permitted here (R1-21 — the
+                # command default is now unprivileged, so this must be explicit).
+                "is_operator": True,
             },
         )
         try:

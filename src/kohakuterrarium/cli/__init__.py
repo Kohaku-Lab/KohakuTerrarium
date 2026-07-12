@@ -21,6 +21,7 @@ from kohakuterrarium.cli.admin import add_admin_subparser, admin_cli
 from kohakuterrarium.cli.auth import login_cli
 from kohakuterrarium.cli.config import add_config_subparser, config_cli
 from kohakuterrarium.cli.doctor import add_doctor_subparser, dispatch_doctor
+from kohakuterrarium.cli.drive import add_drive_subparser, drive_cli
 from kohakuterrarium.cli.extension import extension_info_cli, extension_list_cli
 from kohakuterrarium.cli.identity_mcp import list_for_agent_cli as mcp_list_cli
 from kohakuterrarium.cli.lab_client import add_lab_client_subparser, lab_client_cli
@@ -436,6 +437,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "--agent", required=True, help="Path to agent config folder"
     )
 
+    # Drive record automation
+    add_drive_subparser(subparsers)
+
     # Config command group
     add_config_subparser(subparsers)
 
@@ -623,6 +627,7 @@ COMMANDS: dict[str, callable] = {
     "web": _dispatch_web,
     "app": _dispatch_app,
     "model": lambda args: model_cli(args),
+    "drive": drive_cli,
     "config": lambda args: config_cli(args),
     "serve": lambda args: serve_cli(args),
     "__run-server": lambda args: serve_cli(

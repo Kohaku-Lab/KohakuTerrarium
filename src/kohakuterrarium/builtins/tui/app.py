@@ -5,9 +5,10 @@ import threading
 import time
 from typing import Any
 
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.screen import Screen
 from textual.widgets import Footer, Header, Static, TabbedContent, TabPane
 
 from kohakuterrarium.builtins.tui.widgets import (
@@ -71,6 +72,7 @@ class AgentTUI(App):
         # which is why F2/F3 went nowhere when chat input had focus.
         Binding("f2", "open_modules", "Modules", show=True, priority=True),
         Binding("f3", "open_model_picker", "Model", show=True, priority=True),
+        Binding("f4", "open_drives", "Drives", show=True, priority=True),
     ]
 
     def __init__(
@@ -294,6 +296,39 @@ class AgentTUI(App):
         if agent is None:
             return
         self.push_screen(ModelPickerModal(agent))
+
+    def action_open_drives(self) -> None:
+        """Push the Drive record panel (F4 keybinding + command palette).
+
+        The panel scopes ``assigned to me`` to the focused creature and builds a
+        service from the engine wired onto the session; without an engine it
+        degrades to a runtime-unavailable notice (the Settings tab still works).
+        """
+        # Lazy import: DriveScreen transitively imports terrarium.*/studio, whose
+        # package __init__ pulls builtins.outputs -> tui.output -> tui.session, so
+        # a module-top import here is a runtime import cycle (allowlisted).
+        from kohakuterrarium.builtins.tui.widgets.drive_panel import DriveScreen
+
+        session = self.tui_session
+        service = getattr(session, "drive_service", None) if session else None
+        engine = getattr(session, "engine", None) if session else None
+        self.push_screen(
+            DriveScreen(service, engine, creature_id=self._focused_creature_id())
+        )
+
+    def _focused_creature_id(self) -> str:
+        """Creature id behind the active tab (channel tabs fall back to focus)."""
+        active = self.get_active_tab_name() if self._terrarium_tabs else ""
+        if active and not active.startswith("#"):
+            return active
+        return self._terrarium_tabs[0] if self._terrarium_tabs else ""
+
+    def get_system_commands(self, screen: Screen):
+        """Add a Drives entry to the Ctrl+P command palette."""
+        yield from super().get_system_commands(screen)
+        yield SystemCommand(
+            "Drives", "Open the Drive record + settings panel", self.action_open_drives
+        )
 
     def on_tabbed_content_tab_activated(
         self, event: TabbedContent.TabActivated

@@ -25,6 +25,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from kohakuterrarium.studio.identity.mcp_servers import load_servers, save_servers
+from kohakuterrarium.builtins.cli_rich.dialogs.settings_drives import (
+    DriveSettingsSection,
+)
 from kohakuterrarium.builtins.cli_rich.dialogs.settings_model import TABS
 from kohakuterrarium.builtins.cli_rich.dialogs.settings_render import render_overlay
 from kohakuterrarium.llm.api_keys import PROVIDER_KEY_MAP, get_api_key, save_api_key
@@ -95,7 +98,7 @@ class ConfirmState:
 class SettingsOverlay:
     """Tabbed settings editor with list/form/confirm modes."""
 
-    def __init__(self) -> None:
+    def __init__(self, get_engine: Any = None) -> None:
         self.visible = False
         self.mode = "list"  # list | form | confirm
         self.tab = TABS[0]
@@ -104,6 +107,9 @@ class SettingsOverlay:
         self._form: FormState | None = None
         self._confirm: ConfirmState | None = None
         self._flash: str = ""  # transient status line under the tab row
+        # The Drives tab is a self-contained section over the Studio Drive
+        # settings façade; it needs the live engine only for the Apply action.
+        self.drive_section = DriveSettingsSection(get_engine=get_engine)
 
     # ── Lifecycle ───────────────────────────────────────────────
 
@@ -142,6 +148,8 @@ class SettingsOverlay:
                 self._entries[tab] = self._load_models()
             elif tab == "MCP":
                 self._entries[tab] = self._load_mcp()
+            elif tab == "Drives":
+                self.drive_section.reload()
         except Exception as e:
             logger.warning("settings: refresh failed", tab=tab, error=str(e))
             self._entries[tab] = []
@@ -252,16 +260,35 @@ class SettingsOverlay:
         """Route named keys (up/down/enter/escape/tab/backspace/…)."""
         if not self.visible:
             return False
+        if self.tab == "Drives" and self.mode == "list":
+            return self._drives_key(key)
         if self.mode == "confirm":
             return self._confirm_key(key)
         if self.mode == "form":
             return self._form_key(key)
         return self._list_key(key)
 
+    def _drives_key(self, key: str) -> bool:
+        """Named-key routing for the Drives tab (tab switch + section)."""
+        section = self.drive_section
+        if not section.editing:
+            if key == "escape":
+                self.close()
+                return True
+            if key == "tab":
+                self._cycle_tab(1)
+                return True
+            if key in ("s-tab", "backtab"):
+                self._cycle_tab(-1)
+                return True
+        return section.handle_key(key)
+
     def handle_text(self, char: str) -> bool:
         """Route a printable char (single-character ``event.data``)."""
         if not self.visible or not char:
             return False
+        if self.tab == "Drives" and self.mode == "list":
+            return self.drive_section.handle_text(char)
         if self.mode == "confirm":
             if char in ("y", "Y"):
                 self._confirm_apply(True)
@@ -346,6 +373,8 @@ class SettingsOverlay:
         idx = (idx + delta) % len(TABS)
         self.tab = TABS[idx]
         self._flash = ""
+        if self.tab == "Drives" and not self.drive_section.editing:
+            self.drive_section.reload()
 
     def _list_activate(self) -> None:
         row = self._current_row()
