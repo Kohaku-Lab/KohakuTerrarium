@@ -545,7 +545,16 @@ class TestApiStudioJourney:
         assert resp.status_code == 200
         plugin_names = {p["name"] for p in resp.json()}
         assert "sandbox" in plugin_names
-        assert all(p["enabled"] is False for p in resp.json())
+        # A Drive-enabled Terrarium turns on its always-on Drive plugins on
+        # every creature (the ``goal`` composition + the ``drive_runtime``
+        # prompt contributor); every other builtin (sandbox, budget, permgate,
+        # …) stays off until explicitly toggled.
+        terrarium_defaults = {"goal", "drive_runtime"}
+        assert all(
+            p["enabled"] is False
+            for p in resp.json()
+            if p["name"] not in terrarium_defaults
+        )
         # The HTTP toggle takes an explicit ``enabled`` — turn it on,
         # confirm via the list, then turn it back off.
         resp = client.post(f"{base}/plugins/sandbox/toggle", json={"enabled": True})
