@@ -15,6 +15,7 @@ initial system prompt with zero extra calls.
 from typing import Any
 
 from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.trigger.base import BaseTrigger
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -109,3 +110,32 @@ class AgentExtensionsMixin:
         sys_msg = get_system() if callable(get_system) else None
         if sys_msg is not None:
             sys_msg.content = system_prompt
+
+    async def add_trigger(
+        self, trigger: BaseTrigger, trigger_id: str | None = None
+    ) -> str:
+        """Add and start a trigger on a running agent.
+
+        Returns:
+            The trigger_id
+        """
+        return await self.trigger_manager.add(trigger, trigger_id=trigger_id)
+
+    async def remove_trigger(self, trigger_id_or_trigger: str | BaseTrigger) -> bool:
+        """Stop and remove a trigger.
+
+        Args:
+            trigger_id_or_trigger: Trigger ID string, or BaseTrigger instance
+                                   (for backward compat, searches by identity)
+
+        Returns:
+            True if removed
+        """
+        if isinstance(trigger_id_or_trigger, str):
+            return await self.trigger_manager.remove(trigger_id_or_trigger)
+
+        # Backward compat: find by instance identity
+        for tid, t in self.trigger_manager._triggers.items():
+            if t is trigger_id_or_trigger:
+                return await self.trigger_manager.remove(tid)
+        return False
