@@ -20,9 +20,9 @@ from kohakuterrarium.terrarium.drive.registration import GenericDriveRegistratio
 
 
 class TestRuntimeConfig:
-    def test_defaults_are_disabled(self):
+    def test_defaults_are_enabled(self):
         cfg = DriveRuntimeConfig()
-        assert cfg.enabled is False
+        assert cfg.enabled is True
         assert cfg.max_active_per_creature == 8
         assert cfg.max_consecutive_drive_turns == 3
         assert cfg.spec_max_bytes == 16384
@@ -89,9 +89,10 @@ class TestRetentionConfig:
 
 
 class TestRuntimeSelection:
-    def test_default_registrations_is_generic(self):
+    def test_default_registrations_include_generic_and_goal(self):
         regs = default_registrations()
-        assert [r.name for r in regs] == ["generic"]
+        assert [r.name for r in regs] == ["generic", "goal"]
+        assert default_registrations()[0] is not regs[0]
 
     def test_enabled_with_no_registrations_rejected(self):
         with pytest.raises(DriveValidationError, match="no registrations"):

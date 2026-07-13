@@ -56,6 +56,25 @@ function contentSignature(content) {
   return JSON.stringify(normalized)
 }
 
+export function _parseSlashCommand(content) {
+  let text = null
+  if (typeof content === "string") {
+    text = content
+  } else if (
+    Array.isArray(content) &&
+    content.length === 1 &&
+    content[0]?.type === "text" &&
+    typeof content[0].text === "string"
+  ) {
+    text = content[0].text
+  }
+
+  if (!text?.startsWith("/")) return null
+  const match = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(text)
+  if (!match) return null
+  return { command: match[1].toLowerCase(), args: match[2] || "" }
+}
+
 function textSignature(content) {
   // Coarser comparator used as a fallback by ``_handleUserInputInjected``
   // when the strict ``contentSignature`` comparison fails. Strips
@@ -1929,10 +1948,22 @@ const _chatStoreOptions = {
     },
 
     async send(text) {
-      if (!this.activeTab || !this._ws) return
+      if (!this.activeTab) return
       if (typeof text === "string" ? !text.trim() : !text.length) return
 
       const tab = this.activeTab
+      const slashCommand = _parseSlashCommand(text)
+      if (slashCommand && !tab.startsWith("ch:")) {
+        const result = await terrariumAPI.executeCreatureCommand(
+          this._instanceGraphId || this._instanceId,
+          tab,
+          slashCommand.command,
+          slashCommand.args,
+        )
+        return { handled: "command", result }
+      }
+      if (!this._ws) return
+
       const now = Date.now()
       const contentParts = typeof text === "string" ? [{ type: "text", text }] : text
       const normalized = normalizeMessageContent(contentParts)

@@ -756,7 +756,13 @@ class TestStudioIntegration:
             # --- plugin toggle: flip on, then back off ------------------
             plugins = studio.sessions.plugins.list(session_id, creature_id)
             assert any(p["name"] == "sandbox" for p in plugins)
-            assert all(p["enabled"] is False for p in plugins)
+            assert any(p["name"] == "goal" and p["enabled"] for p in plugins)
+            assert any(p["name"] == "drive_runtime" and p["enabled"] for p in plugins)
+            assert all(
+                p["enabled"] is False
+                for p in plugins
+                if p["name"] not in {"goal", "drive_runtime"}
+            )
             toggled_on = await studio.sessions.plugins.toggle(
                 session_id, creature_id, "sandbox"
             )

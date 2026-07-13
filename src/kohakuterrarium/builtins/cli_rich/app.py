@@ -29,6 +29,7 @@ redraws the app area below the cursor's new position.
 
 import asyncio
 import sys
+import weakref
 from typing import Any
 
 from prompt_toolkit.application import Application
@@ -111,6 +112,7 @@ class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin, AppDriv
         self._exit_requested = False
         self._processing = False
         self._command_registry: dict = {}
+        self._command_registry_agents: list[weakref.ReferenceType] = []
         self._pending_task: asyncio.Task | None = None
         self._ctrl_c_armed = False
         self._ctrl_c_reset_task: asyncio.Task | None = None
@@ -607,9 +609,23 @@ class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin, AppDriv
         self.hint_bar.set_registry(registry)
         self._command_registry = registry
         # Follow plugin enable/disable/add so the inventory stays truthful.
-        add_listener = getattr(self.agent, "add_user_command_listener", None)
-        if callable(add_listener):
-            add_listener(self._on_user_commands_changed)
+        self._command_registry_agents = [
+            ref for ref in self._command_registry_agents if ref() is not None
+        ]
+        if not any(ref() is self.agent for ref in self._command_registry_agents):
+            add_listener = getattr(self.agent, "add_user_command_listener", None)
+            if callable(add_listener):
+                app_ref = weakref.ref(self)
+                agent_ref = weakref.ref(self.agent)
+
+                def on_commands_changed(commands: dict) -> None:
+                    app = app_ref()
+                    agent = agent_ref()
+                    if app is not None and agent is not None:
+                        app._on_agent_user_commands_changed(agent, commands)
+
+                add_listener(on_commands_changed)
+            self._command_registry_agents.append(weakref.ref(self.agent))
 
     def _agent_command_registry(self) -> dict:
         lister = getattr(self.agent, "list_user_commands", None)
@@ -623,6 +639,12 @@ class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin, AppDriv
             if cmd:
                 registry[name] = cmd
         return registry
+
+    def _on_agent_user_commands_changed(self, agent: Any, commands: dict) -> None:
+        """Apply command refreshes only for the currently focused agent."""
+        if agent is not self.agent:
+            return
+        self._on_user_commands_changed(commands)
 
     def _on_user_commands_changed(self, commands: dict) -> None:
         """Re-point the composer / hint bar at a refreshed command registry."""
@@ -681,8 +703,8 @@ class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin, AppDriv
                 self._invalidate()
                 return
 
-        # Multi-creature topology commands route through the mixin so
-        # the engine + creature_id reach their context.
+        # Engine-aware commands route through the mixin in both single- and
+        # multi-creature runs so engine + focused creature reach their context.
         if await self.dispatch_topology_command(name, args):
             return
 

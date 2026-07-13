@@ -1009,24 +1009,15 @@ class TestProgTerrariumJourney:
         budget-stopped goal is an explicit user act (budget raise + wake) —
         the whole thing runs on the real engine + sink + dispatcher; only the
         LLM is scripted."""
-        from kohakuterrarium.builtins.plugins.goal import GoalPlugin
-        from kohakuterrarium.terrarium.drive.goal import (
-            GoalDriveRegistration,
-            build_goal_spec,
-        )
+        from kohakuterrarium.terrarium.drive.goal import build_goal_spec
 
-        engine = Terrarium(
-            pwd=str(tmp_path),
-            drive_config=DriveRuntimeConfig(enabled=True),
-            drive_registrations=[*default_registrations(), GoalDriveRegistration()],
-        )
+        engine = Terrarium(pwd=str(tmp_path))
         actor = ActorRef("user", "alice")
         async with engine:
             worker = await engine.add_creature(
                 _agent_config("worker", tmp_path), creature_id="worker"
             )
             agent = engine.get_creature("worker").agent
-            await agent.add_plugin(GoalPlugin())
             assert "goal" in agent.list_user_commands()
 
             service = LocalTerrariumService(engine)

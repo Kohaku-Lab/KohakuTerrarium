@@ -1601,8 +1601,8 @@ class TestTerrariumIntegration:
             collector_a.cancel()
             collector.cancel()
 
-        # A Drive-disabled engine is untouched — no manager, no recipe change.
-        assert Terrarium().drives is None
+        # Bare engines now enable the generic + goal Drive runtime by default.
+        assert Terrarium().drives is not None
 
     @pytest.mark.timeout(60)
     async def test_drive_topology_merge_then_split_moves_rows(

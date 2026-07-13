@@ -25,9 +25,9 @@ def _enable_generic():
     )
 
 
-async def test_owned_engine_disabled_by_default():
+async def test_owned_engine_enabled_by_default():
     async with Studio() as s:
-        assert s.engine.drives is None
+        assert s.engine.drives is not None
 
 
 async def test_owned_engine_resolves_enabled_settings():
@@ -39,9 +39,10 @@ async def test_owned_engine_resolves_enabled_settings():
 
 async def test_explicit_engine_is_never_resolved():
     _enable_generic()
-    engine = Terrarium()  # explicit programmatic engine, Drive-disabled
+    engine = Terrarium()
     async with Studio(engine=engine) as s:
-        assert s.engine.drives is None
+        assert s.engine.drives is engine.drives
+        assert s.engine.drives is not None
 
 
 async def test_drives_facade_save_status_apply():
@@ -56,8 +57,8 @@ async def test_drives_facade_save_status_apply():
         assert status["runtime"]["enabled"] is True
         names = {r["name"] for r in status["registrations"]}
         assert "generic" in names
-        # apply is distinct from save; the owned engine was built Drive-disabled,
-        # so enabling the runtime needs a restart.
+        # Apply is distinct from save. Removing the default goal registration
+        # requires a restart because it changes the enabled kind set.
         result = s.identity.drives.apply()
         assert result["result"] == ds.RESTART_REQUIRED
         assert result["desired_revision"] == ds.current_revision()

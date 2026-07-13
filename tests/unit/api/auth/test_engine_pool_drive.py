@@ -2,8 +2,8 @@
 
 Each per-user engine must get a FRESH IMMUTABLE resolution of the shared operator
 policy — no registration/config instance may be shared across users — while its
-Drive records/session repository stay per-user. A pool with no resolver keeps
-building Drive-disabled engines (backward compatible).
+Drive records/session repository stay per-user. A pool with no resolver inherits
+fresh default generic + goal runtimes from ``Terrarium``.
 """
 
 import pytest
@@ -24,10 +24,15 @@ def fresh_dirs(tmp_path, monkeypatch):
     yield tmp_path
 
 
-def test_no_resolver_builds_drive_disabled_engines(fresh_dirs):
+def test_no_resolver_builds_default_drive_engines(fresh_dirs):
     pool = EnginePool(max_active=4, idle_timeout_s=0)
     try:
-        assert pool.get_or_create(1).drives is None
+        runtime = pool.get_or_create(1).drives
+        assert runtime is not None
+        assert [entry.descriptor.name for entry in runtime.snapshot.entries] == [
+            "generic",
+            "goal",
+        ]
     finally:
         pool.evict_all()
 

@@ -131,24 +131,41 @@ class TestPathAndDefaults:
     def test_path_honours_config_dir(self):
         assert ds.drive_settings_path() == config_dir() / "drive-settings.yaml"
 
-    def test_absent_file_is_disabled_default(self):
+    def test_absent_file_writes_enabled_defaults(self):
         settings = ds.load_settings()
-        assert settings.runtime.enabled is False
-        assert settings.registrations == {}
-        assert settings.revision is None
+        assert settings.runtime.enabled is True
+        assert settings.enabled_registration_names() == ["generic", "goal"]
+        assert settings.revision is not None
+        assert ds.drive_settings_path().exists()
 
-    def test_resolve_disabled_yields_disabled_spec(self):
+    def test_absent_file_init_conflict_without_winner_propagates(self, monkeypatch):
+        conflict = DriveSettingsConflictError("locked by another writer")
+        monkeypatch.setattr(
+            ds, "save_settings", lambda *args, **kwargs: (_ for _ in ()).throw(conflict)
+        )
+        with pytest.raises(
+            DriveSettingsConflictError, match="locked by another writer"
+        ):
+            ds.load_settings()
+
+    def test_resolve_default_yields_enabled_spec(self):
         spec = ds.resolve_runtime()
-        assert spec.config.enabled is False
-        assert spec.registrations == ()
+        assert spec.config.enabled is True
+        assert [registration.name for registration in spec.registrations] == [
+            "generic",
+            "goal",
+        ]
 
-    def test_resolve_kwargs_disabled_by_default(self):
+    def test_resolve_kwargs_enabled_by_default(self):
         kwargs = ds.resolve_drive_kwargs()
-        assert kwargs == {
-            "drive_config": ds.load_settings().runtime,
-            "drive_registrations": (),
-            "drive_store": None,
-        }
+        assert kwargs["drive_config"].enabled is True
+        assert [
+            registration.name for registration in kwargs["drive_registrations"]
+        ] == [
+            "generic",
+            "goal",
+        ]
+        assert kwargs["drive_store"] is None
 
 
 class TestSaveLoad:
@@ -176,6 +193,18 @@ class TestSaveLoad:
         )
         assert ds.load_settings().registrations["generic"].enabled is True
         assert saved.revision == ds.current_revision()
+
+    def test_partial_runtime_inherits_enabled_defaults(self):
+        saved = ds.save_settings(
+            {
+                "schema_version": 1,
+                "runtime": {"max_active_per_creature": 4},
+            }
+        )
+        assert saved.settings.runtime.enabled is True
+        assert saved.settings.runtime.max_active_per_creature == 4
+        assert saved.settings.enabled_registration_names() == ["generic", "goal"]
+        assert ds.resolve_runtime().config.enabled is True
 
 
 class TestOptimisticConcurrency:
@@ -372,9 +401,11 @@ class TestResolve:
         )
         with pytest.raises(DriveRegistrationNotFoundError):
             ds.resolve_drive_kwargs(strict=True)
-        # Lenient (construction-path default) degrades to a disabled runtime.
+        # Lenient construction degrades to an explicit opt-out that remains
+        # valid under the default-on Terrarium constructor contract.
         kwargs = ds.resolve_drive_kwargs()
-        assert kwargs["drive_config"] is None
+        assert kwargs["drive_config"] == DriveRuntimeConfig(enabled=False)
+        assert kwargs["drive_registrations"] == ()
 
     def test_disabled_settings_skip_catalog_scan(self, monkeypatch):
         # When the runtime is disabled the resolver must not import registrations.
@@ -388,6 +419,7 @@ class TestResolve:
         monkeypatch.setattr(cat, "instantiate_registration", boom)
         # drive_settings imported the name at module load; patch there too.
         monkeypatch.setattr(ds, "instantiate_registration", boom)
+        ds.save_settings(DriveSettings(runtime=DriveRuntimeConfig(enabled=False)))
         ds.resolve_runtime()
         assert called["n"] == 0
 
@@ -506,7 +538,7 @@ class TestRunningRevision:
 class TestApply:
     async def test_apply_enable_on_disabled_engine_is_restart_required(self):
         ds.save_settings(_enabled_settings())
-        engine = Terrarium()  # Drive-disabled
+        engine = Terrarium(drive_config=DriveRuntimeConfig(enabled=False))
         async with engine:
             result = ds.apply_runtime(engine)
         assert result["result"] == ds.RESTART_REQUIRED

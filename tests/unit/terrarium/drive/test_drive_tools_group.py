@@ -87,7 +87,7 @@ class TestPrivilegeGate:
             await engine.shutdown()
 
     async def test_disabled_runtime_fails_closed(self):
-        engine = Terrarium()  # Drive-disabled
+        engine = Terrarium(drive_config=DriveRuntimeConfig(enabled=False))
         await engine.__aenter__()
         try:
             root = await _add(engine, "root", privileged=True)

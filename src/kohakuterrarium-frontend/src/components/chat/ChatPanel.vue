@@ -846,7 +846,11 @@ async function send() {
   // currently focused instead of the one whose composer was used.
   if (props.groupId) onGroupFocus()
   const parts = await buildMessageParts(inputText.value, attachments.value)
-  chat.send(parts)
+  const commandTarget = {
+    sessionId: chat._instanceGraphId || chat._instanceId,
+    creatureId: viewActiveTab.value || "root",
+  }
+  const outcomePromise = chat.send(parts)
   inputText.value = ""
   attachments.value = []
   persistDraft()
@@ -855,6 +859,13 @@ async function send() {
     if (inputEl.value) inputEl.value.style.height = "auto"
     scrollToBottom()
   })
+  try {
+    const outcome = await outcomePromise
+    if (outcome?.handled === "command") await surfaceCommandResult(outcome.result, commandTarget)
+  } catch (err) {
+    console.error("Command failed:", err)
+    ElMessage.error(`Command failed: ${err?.message || err}`)
+  }
 }
 
 async function triggerCompact() {
@@ -868,7 +879,7 @@ async function triggerCompact() {
     // four outcomes: triggered, no-controller, too-short, busy. Without
     // surfacing it the user has no signal that the click did anything
     // — the compact runs (or doesn't) silently in the background.
-    surfaceCommandResult(response)
+    await surfaceCommandResult(response)
   } catch (err) {
     console.error("Compact failed:", err)
     ElMessage.error(`Compact failed: ${err?.message || err}`)
@@ -881,11 +892,11 @@ async function triggerCompact() {
  * Backend command results carry a ``data`` block built by ``ui_notify``
  * (and friends) in ``modules/user_command/base.py``. CLI/TUI commit
  * ``output`` to their own surfaces; the web frontend is responsible
- * for translating the typed payload into UI. This helper covers the
- * "notify" case — additional types (``select``, ``confirm``, …) get
- * wired up when the command needing them surfaces in the chat header.
+ * for translating the typed payload into UI. Notifications surface as
+ * toasts; confirmations execute the payload's follow-up command only after
+ * the user accepts the dialog.
  */
-function surfaceCommandResult(response) {
+async function surfaceCommandResult(response, target = null) {
   if (!response) return
   if (response.error) {
     ElMessage.error(response.error)
@@ -896,6 +907,22 @@ function surfaceCommandResult(response) {
     const level = payload.level || "info"
     const fn = ElMessage[level] || ElMessage.info
     fn(payload.message)
+    return
+  }
+  if (payload && payload.type === "confirm" && payload.message && payload.action) {
+    try {
+      await ElMessageBox.confirm(payload.message, response.output || payload.action, {
+        type: "warning",
+        confirmButtonText: t("common.confirm"),
+        cancelButtonText: t("common.cancel"),
+      })
+    } catch {
+      return
+    }
+    const sid = target?.sessionId || chat._instanceGraphId || chat._instanceId
+    const tab = target?.creatureId || viewActiveTab.value || "root"
+    const confirmed = await terrariumAPI.executeCreatureCommand(sid, tab, payload.action, payload.action_args || "")
+    await surfaceCommandResult(confirmed, { sessionId: sid, creatureId: tab })
     return
   }
   // Fall back to plain ``output`` text when no structured payload —
@@ -921,7 +948,7 @@ async function triggerClear() {
     const sid = chat._instanceGraphId || chat._instanceId
     const tab = viewActiveTab.value || "root"
     const response = await terrariumAPI.executeCreatureCommand(sid, tab, "clear", "--force")
-    surfaceCommandResult(response)
+    await surfaceCommandResult(response)
   } catch (err) {
     console.error("Clear failed:", err)
     ElMessage.error(`Clear failed: ${err?.message || err}`)

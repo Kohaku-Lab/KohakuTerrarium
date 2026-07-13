@@ -86,7 +86,7 @@ class Terrarium:
         pwd: str | None = None,
         session_dir: str | None = None,
         drive_config: Any = None,
-        drive_registrations: "tuple[Any, ...] | list[Any]" = (),
+        drive_registrations: "tuple[Any, ...] | list[Any] | None" = None,
         drive_store: Any = None,
     ) -> None:
         """Create an engine.
@@ -97,17 +97,15 @@ class Terrarium:
         is opt-in per call via ``add_creature(session=...)`` /
         ``apply_recipe(session=...)`` / ``attach_session``.
 
-        ``drive_config`` / ``drive_registrations`` / ``drive_store`` are the
-        explicit Drive runtime injection (design §8.3): ``drive_config=None``
-        (default) builds no Drive manager, tools, prompt, or dispatcher — zero
-        overhead. An enabled config with an empty registration set fails
-        validation here, at construction. ``drive_store`` overrides the
-        default in-memory repository. The engine never reads Studio settings
-        or ``~/.kohakuterrarium``.
+        Drive is enabled by default with fresh generic and goal registrations.
+        ``DriveRuntimeConfig(enabled=False)`` explicitly opts out, while an
+        explicitly empty registration set is invalid for an enabled runtime.
+        ``drive_store`` overrides the default in-memory repository. The engine
+        never reads Studio settings or ``~/.kohakuterrarium``.
         """
         self._pwd = pwd
         self._session_dir = session_dir
-        # Built only when drive_config is enabled; None means "no Drive runtime".
+        # Built by default; an explicitly disabled config opts out.
         self._drive_runtime = _drive_runtime.build_drive_runtime(
             self, drive_config, drive_registrations, drive_store
         )
@@ -133,7 +131,7 @@ class Terrarium:
         *,
         pwd: str | None = None,
         drive_config: Any = None,
-        drive_registrations: "tuple[Any, ...] | list[Any]" = (),
+        drive_registrations: "tuple[Any, ...] | list[Any] | None" = None,
         drive_store: Any = None,
     ) -> "Terrarium":
         """Build a Terrarium from a recipe; Drive args go to the constructor
@@ -155,7 +153,7 @@ class Terrarium:
         pwd: str | None = None,
         llm: Any = None,
         drive_config: Any = None,
-        drive_registrations: "tuple[Any, ...] | list[Any]" = (),
+        drive_registrations: "tuple[Any, ...] | list[Any] | None" = None,
         drive_store: Any = None,
     ) -> "Terrarium":
         """Build a fresh engine and adopt a saved session into it. Drive args go
@@ -194,7 +192,7 @@ class Terrarium:
         *,
         pwd: str | None = None,
         drive_config: Any = None,
-        drive_registrations: "tuple[Any, ...] | list[Any]" = (),
+        drive_registrations: "tuple[Any, ...] | list[Any] | None" = None,
         drive_store: Any = None,
     ) -> "tuple[Terrarium, Creature]":
         """Construct a Terrarium and add a single creature in one call; Drive

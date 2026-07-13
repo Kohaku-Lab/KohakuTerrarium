@@ -1,10 +1,93 @@
 import { createPinia, setActivePinia } from "pinia"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { _replayEvents, useChatStore } from "./chat.js"
+import { _parseSlashCommand, _replayEvents, useChatStore } from "./chat.js"
 
 beforeEach(() => {
   setActivePinia(createPinia())
+})
+
+describe("chat store — slash commands", () => {
+  it("executes a pure-text /goal command without sending websocket input", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "session_1"
+    chat._instanceGraphId = "graph_1"
+    chat.activeTab = "kohaku"
+    chat.messagesByTab = { kohaku: [] }
+    const wsSend = vi.fn()
+    chat._ws = { readyState: WebSocket.OPEN, send: wsSend }
+
+    const importActual = await vi.importActual("@/utils/api")
+    const result = { output: "Goal set" }
+    const commandSpy = vi
+      .spyOn(importActual.terrariumAPI, "executeCreatureCommand")
+      .mockResolvedValue(result)
+
+    const outcome = await chat.send([{ type: "text", text: "/goal set X" }])
+
+    expect(commandSpy).toHaveBeenCalledWith("graph_1", "kohaku", "goal", "set X")
+    expect(outcome).toEqual({ handled: "command", result })
+    expect(wsSend).not.toHaveBeenCalled()
+    expect(chat.messagesByTab.kohaku).toEqual([])
+    commandSpy.mockRestore()
+  })
+
+  it("continues sending normal text over the websocket", async () => {
+    const chat = useChatStore()
+    chat._instanceGraphId = "graph_1"
+    chat.activeTab = "kohaku"
+    chat.messagesByTab = { kohaku: [] }
+    const wsSend = vi.fn()
+    chat._ws = { readyState: WebSocket.OPEN, send: wsSend }
+
+    await chat.send([{ type: "text", text: "hello" }])
+
+    expect(wsSend).toHaveBeenCalledOnce()
+    expect(JSON.parse(wsSend.mock.calls[0][0])).toEqual({
+      type: "input",
+      target: "kohaku",
+      content: [{ type: "text", text: "hello" }],
+    })
+    expect(chat.messagesByTab.kohaku).toHaveLength(1)
+  })
+
+  it("does not treat multimodal or channel messages as creature commands", () => {
+    expect(
+      _parseSlashCommand([
+        { type: "text", text: "/goal set X" },
+        { type: "file", file: { name: "notes.txt" } },
+      ]),
+    ).toBeNull()
+    expect(_parseSlashCommand([{ type: "text", text: " /goal set X" }])).toBeNull()
+    expect(_parseSlashCommand([{ type: "text", text: "/Goal set X" }])).toEqual({
+      command: "goal",
+      args: "set X",
+    })
+  })
+
+  it("sends slash-prefixed channel text to the channel instead", async () => {
+    const chat = useChatStore()
+    chat._instanceGraphId = "graph_1"
+    chat.activeTab = "ch:team"
+    chat.messagesByTab = { "ch:team": [] }
+    chat._ws = { readyState: WebSocket.OPEN, send: vi.fn() }
+
+    const importActual = await vi.importActual("@/utils/api")
+    const channelSpy = vi.spyOn(importActual.terrariumAPI, "sendToChannel").mockResolvedValue({})
+    const commandSpy = vi.spyOn(importActual.terrariumAPI, "executeCreatureCommand")
+
+    await chat.send([{ type: "text", text: "/goal set X" }])
+
+    expect(channelSpy).toHaveBeenCalledWith(
+      "graph_1",
+      "team",
+      [{ type: "text", text: "/goal set X" }],
+      "human",
+    )
+    expect(commandSpy).not.toHaveBeenCalled()
+    commandSpy.mockRestore()
+    channelSpy.mockRestore()
+  })
 })
 
 describe("chat store — interrupted task handling", () => {

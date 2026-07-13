@@ -11,8 +11,9 @@ Locked semantics (design §8.4):
   ``KT_CONFIG_DIR``); it is NOT the launcher's ``app-settings.json``;
 - the file stores serializable selections/options only — never live Python
   objects or Drive records;
-- an absent file resolves to the runtime-disabled default; a malformed file
-  raises a typed validation error and the last valid file is left untouched;
+- an absent file is atomically initialized with the runtime and built-in generic
+  and goal registrations enabled; a malformed file raises a typed validation
+  error and the last valid file is left untouched;
 - writes are atomic (tmp + replace) and optimistic-concurrency protected by a
   content-hash ``revision``; a stale write raises :class:`DriveSettingsConflictError`;
 - **save and apply are distinct**: :func:`save_settings` only persists validated
@@ -45,7 +46,11 @@ from kohakuterrarium.terrarium.drive.config import (
     DriveRuntimeConfig,
     DriveRuntimeSpec,
 )
-from kohakuterrarium.terrarium.drive.errors import DriveError, DriveValidationError
+from kohakuterrarium.terrarium.drive.errors import (
+    DriveError,
+    DriveSettingsConflictError,
+    DriveValidationError,
+)
 from kohakuterrarium.terrarium.drive.registration import effective_options
 from kohakuterrarium.terrarium.drive.registration_options import (
     implementation_fingerprint,
@@ -85,11 +90,6 @@ def drive_settings_path() -> Path:
     return config_dir() / "drive-settings.yaml"
 
 
-# ---------------------------------------------------------------------------
-# schema
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class RegistrationSetting:
     """Per-registration selection: whether it is enabled and its options."""
@@ -118,8 +118,13 @@ class DriveSettings:
 
 
 def default_settings() -> DriveSettings:
-    """The runtime-disabled default used when no file exists (design §8.4)."""
-    return DriveSettings()
+    """Default-on runtime with the built-in generic and goal kinds enabled."""
+    return DriveSettings(
+        registrations={
+            "generic": RegistrationSetting(enabled=True),
+            "goal": RegistrationSetting(enabled=True),
+        }
+    )
 
 
 class SaveDurability(Enum):
@@ -147,11 +152,6 @@ class SaveSettingsResult:
         return self.settings.revision
 
 
-# ---------------------------------------------------------------------------
-# parse / serialize
-# ---------------------------------------------------------------------------
-
-
 def _require_dict(value: object, name: str) -> dict[str, Any]:
     if value is None:
         return {}
@@ -163,7 +163,7 @@ def _require_dict(value: object, name: str) -> dict[str, Any]:
 
 
 def _parse_runtime(raw: dict[str, Any]) -> DriveRuntimeConfig:
-    enabled = raw.get("enabled", False)
+    enabled = raw.get("enabled", True)
     if not isinstance(enabled, bool):
         raise DriveValidationError("runtime.enabled must be a boolean")
     kwargs: dict[str, Any] = {"enabled": enabled}
@@ -226,8 +226,10 @@ def parse_settings(raw: object, *, revision: str | None = None) -> DriveSettings
             f"({CURRENT_SCHEMA_VERSION}); upgrade KohakuTerrarium"
         )
     runtime = _parse_runtime(_require_dict(raw.get("runtime"), "runtime"))
-    registrations = _parse_registrations(
-        _require_dict(raw.get("registrations"), "registrations")
+    registrations = (
+        default_settings().registrations
+        if "registrations" not in raw
+        else _parse_registrations(_require_dict(raw["registrations"], "registrations"))
     )
     return DriveSettings(
         runtime=runtime,
@@ -285,20 +287,22 @@ def _revision_of(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-# ---------------------------------------------------------------------------
-# load / save
-# ---------------------------------------------------------------------------
-
-
 def load_settings() -> DriveSettings:
     """Load + validate the settings file (design §8.4).
 
-    Absent file -> :func:`default_settings` (runtime disabled). A malformed file
-    raises :class:`DriveValidationError`; the file itself is left untouched.
+    An absent file is initialized atomically to :func:`default_settings`, then
+    loaded normally so callers always receive its content-hash revision. A
+    malformed file raises :class:`DriveValidationError` and is left untouched.
     """
     path = drive_settings_path()
     if not path.exists():
-        return default_settings()
+        try:
+            save_settings(default_settings(), expected_exists=False)
+        except DriveSettingsConflictError:
+            # A conflict means another process won only if its file now exists;
+            # lock timeouts without a winner must remain visible to the caller.
+            if not path.exists():
+                raise
     data = path.read_bytes()
     try:
         raw = yaml.safe_load(data.decode("utf-8"))
@@ -426,7 +430,11 @@ def resolve_drive_kwargs(
         logger.warning(
             "drive settings resolution failed; runtime disabled", error=str(exc)
         )
-        return {"drive_config": None, "drive_registrations": (), "drive_store": None}
+        return {
+            "drive_config": DriveRuntimeConfig(enabled=False),
+            "drive_registrations": (),
+            "drive_store": None,
+        }
     return {
         "drive_config": spec.config,
         "drive_registrations": spec.registrations,

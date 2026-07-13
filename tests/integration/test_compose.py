@@ -498,8 +498,8 @@ class TestComposeIntegration:
 
     async def test_agent_forwards_drive_args_to_private_engine(self, tmp_path):
         """``agent(...)`` mints a PRIVATE Terrarium when no engine is passed;
-        explicit Drive runtime args must forward to it (design §8.3). A plain
-        ``agent(...)`` stays Drive-disabled."""
+        Drive overrides must forward to it (design §8.3). A plain
+        ``agent(...)`` inherits the default generic + goal runtime."""
         from kohakuterrarium.terrarium.drive.config import (
             DriveRuntimeConfig,
             default_registrations,
@@ -507,9 +507,12 @@ class TestComposeIntegration:
         from kohakuterrarium.terrarium.drive.models import ActorRef
         from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
 
-        # A plain private-engine agent is Drive-free.
+        # A plain private-engine agent inherits the default Drive surface.
         async with await agent(_config("plain", tmp_path)) as plain:
-            assert plain._session._engine.drives is None
+            assert plain._session._engine.drives is not None
+            assert (
+                "drive_create" in plain._session._creature.agent.registry.list_tools()
+            )
 
         async with await agent(
             _config("driven", tmp_path),

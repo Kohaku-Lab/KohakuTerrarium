@@ -533,6 +533,15 @@ async def agent_execute_command(
         lister = getattr(agent, "list_user_commands", None)
         registry = lister() if callable(lister) else {}
         cmd = registry.get(command)
+        if cmd is None:
+            cmd = next(
+                (
+                    candidate
+                    for candidate in registry.values()
+                    if command in (getattr(candidate, "aliases", None) or [])
+                ),
+                None,
+            )
     if cmd is None:
         raise ValueError(f"Unknown command: /{command}")
     extra: dict[str, Any] = {"principal": principal, "is_operator": is_operator}

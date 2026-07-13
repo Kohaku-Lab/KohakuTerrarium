@@ -17,13 +17,28 @@ and is gated to manual / e2e per design.md §9). What we DO test:
 """
 
 import asyncio
+import weakref
 from types import SimpleNamespace
 
 import pytest
 
 from kohakuterrarium.builtins.cli_rich.app import RichCLIApp
 from kohakuterrarium.builtins.cli_rich.multiplex import MultiplexedRichOutput
+from kohakuterrarium.builtins.plugins.goal.plugin import GoalCommand
+from kohakuterrarium.builtins.user_commands.drives import DrivesCommand
+from kohakuterrarium.modules.user_command.base import (
+    UserCommandContext,
+    UserCommandResult,
+)
+from kohakuterrarium.terrarium.creature_host import Creature
+from kohakuterrarium.terrarium.drive.config import (
+    DriveRuntimeConfig,
+    default_registrations,
+)
+from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.events import EngineEvent, EventKind
+from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.testing.terrarium import _FakeAgent as _EngineFakeAgent
 
 
 class _FakeAgent:
@@ -123,6 +138,139 @@ class TestSetup:
         assert app.peek_panel is not None
 
 
+class _EngineCommand:
+    name = "engine-command"
+    aliases = ["engine-alias"]
+    needs_engine = True
+
+    def __init__(self):
+        self.contexts = []
+
+    async def execute(self, args, context):
+        self.contexts.append(context)
+        return UserCommandResult(output=f"handled {args}")
+
+
+class TestEngineAwareCommandDispatch:
+    @staticmethod
+    def _assert_trusted_context(context, engine, creature_id, agent):
+        assert context.agent is agent
+        assert context.extra["engine"] is engine
+        assert isinstance(context.extra["service"], LocalTerrariumService)
+        assert context.extra["service"].engine is engine
+        assert context.extra["creature_id"] == creature_id
+        assert context.extra["principal"] == "user:local"
+        assert context.extra["is_operator"] is True
+
+    @pytest.mark.asyncio
+    async def test_goal_agent_context_reproduces_running_terrarium_error(self):
+        result = await GoalCommand().execute("list", UserCommandContext())
+
+        assert result.error == (
+            "/goal needs a running terrarium; none is available in this context"
+        )
+
+    @pytest.mark.asyncio
+    async def test_single_creature_goal_uses_running_terrarium(self):
+        engine = Terrarium(
+            drive_config=DriveRuntimeConfig(enabled=True),
+            drive_registrations=default_registrations(),
+        )
+        await engine.__aenter__()
+        agent = _EngineFakeAgent(name="solo")
+        agent.session = None
+        creature = Creature(
+            creature_id="solo", name="solo", agent=agent, is_privileged=True
+        )
+        await engine.add_creature(creature)
+        app = RichCLIApp(agent)
+        app.setup_single_creature(engine, "solo")
+        app._command_registry = {"goal": GoalCommand()}
+        committed = []
+        app._commit_text = committed.append
+        try:
+            handled = await app.dispatch_topology_command("goal", "list")
+
+            assert handled is True
+            assert committed == ["No goals for this creature."]
+            assert "running terrarium" not in committed[0]
+        finally:
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_single_creature_drives_subcommand_uses_running_terrarium(self):
+        engine = Terrarium(
+            drive_config=DriveRuntimeConfig(enabled=True),
+            drive_registrations=default_registrations(),
+        )
+        await engine.__aenter__()
+        agent = _EngineFakeAgent(name="solo")
+        agent.session = None
+        creature = Creature(
+            creature_id="solo", name="solo", agent=agent, is_privileged=True
+        )
+        await engine.add_creature(creature)
+        app = RichCLIApp(agent)
+        app.setup_single_creature(engine, "solo")
+        app._command_registry = {"drives": DrivesCommand()}
+        committed = []
+        app._commit_text = committed.append
+        try:
+            handled = await app.dispatch_topology_command("drives", "list")
+
+            assert handled is True
+            assert committed == ["No drives in this graph."]
+        finally:
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_single_creature_needs_engine_command_gets_trusted_context(self):
+        creature = _FakeCreature(creature_id="solo", name="solo")
+        engine = _FakeEngine([creature])
+        command = _EngineCommand()
+        app = RichCLIApp(creature.agent)
+        app.setup_single_creature(engine, "solo")
+        app._command_registry = {command.name: command}
+
+        handled = await app.dispatch_topology_command(command.name, "list")
+
+        assert handled is True
+        assert app.multi_creature_enabled is False
+        self._assert_trusted_context(
+            command.contexts[-1], engine, "solo", creature.agent
+        )
+
+    @pytest.mark.asyncio
+    async def test_multi_creature_command_tracks_focused_creature(self, app_and_engine):
+        app, engine, creatures = app_and_engine
+        command = _EngineCommand()
+        creatures[1].agent.list_user_commands = lambda: {command.name: command}
+        app.set_focus("c2")
+
+        handled = await app.dispatch_topology_command(command.name, "show")
+
+        assert handled is True
+        self._assert_trusted_context(
+            command.contexts[-1], engine, "c2", creatures[1].agent
+        )
+
+    @pytest.mark.asyncio
+    async def test_needs_engine_alias_is_dispatched_locally(self):
+        creature = _FakeCreature(creature_id="solo", name="solo")
+        engine = _FakeEngine([creature])
+        command = _EngineCommand()
+        app = RichCLIApp(creature.agent)
+        app.setup_single_creature(engine, "solo")
+        app._command_registry = {command.name: command}
+
+        handled = await app.dispatch_topology_command("engine-alias", "list")
+
+        assert handled is True
+        self._assert_trusted_context(
+            command.contexts[-1], engine, "solo", creature.agent
+        )
+
+
 class TestHandleCreatureEventRouting:
     @pytest.mark.asyncio
     async def test_text_for_non_focus_bumps_unread(self, app_and_engine):
@@ -158,6 +306,50 @@ class TestFocusSwap:
         assert app.focus_controller.focus_id == "c2"
         assert app.agent is creatures[1].agent
         assert app.live_regions["c2"].unread_since_focus == 0
+
+    def test_focus_next_refreshes_command_registry(self, app_and_engine):
+        app, _, creatures = app_and_engine
+        first = {"first": object()}
+        second = {"second": object()}
+        creatures[0].agent.list_user_commands = lambda: first
+        creatures[1].agent.list_user_commands = lambda: second
+        creatures[0].agent.add_user_command_listener = lambda listener: None
+        creatures[1].agent.add_user_command_listener = lambda listener: None
+        app._wire_command_registry()
+
+        app.focus_next()
+
+        assert app._command_registry == second
+        assert app.composer._completer._registry == second
+
+    def test_focus_cycle_registers_each_agent_listener_once(self, app_and_engine):
+        app, _, creatures = app_and_engine
+        listeners = {id(creature.agent): [] for creature in creatures}
+        for creature in creatures:
+            agent = creature.agent
+            agent.list_user_commands = lambda: {"status": object()}
+            agent.add_user_command_listener = listeners[id(agent)].append
+
+        app._wire_command_registry()
+        app.focus_next()
+        app.focus_prev()
+        app.focus_next()
+
+        assert len(listeners[id(creatures[0].agent)]) == 1
+        assert len(listeners[id(creatures[1].agent)]) == 1
+
+    def test_command_listener_closure_uses_weak_references(self, app_and_engine):
+        app, _, creatures = app_and_engine
+        listeners = []
+        creatures[0].agent.list_user_commands = lambda: {"status": object()}
+        creatures[0].agent.add_user_command_listener = listeners.append
+        app._wire_command_registry()
+
+        closure = listeners[0].__closure__ or ()
+        assert closure
+        assert all(
+            isinstance(cell.cell_contents, weakref.ReferenceType) for cell in closure
+        )
 
     def test_focus_prev_wraps(self, app_and_engine):
         app, _, _ = app_and_engine

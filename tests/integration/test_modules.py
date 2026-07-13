@@ -1539,20 +1539,14 @@ class TestModulesIntegration:
         ``/goal`` into a creature's live command registry, and the command drives
         real Goal Drives over the generic Drive service.
 
-        Full workflow: enable the built-in goal registration + plugin on a live
-        creature → ``/goal set`` through the resolved command → the drive_ready
-        turn settles → ``/goal complete`` → verify the repository → disable the
-        plugin → ``/goal`` disappears while the Drive + registration remain. Only
-        the LLM is scripted."""
+        Full workflow: use a plain default Terrarium → verify automatic Goal
+        registration, plugin, command, and tools → ``/goal set`` through the live
+        command → the drive_ready turn settles → ``/goal complete`` → verify the
+        repository → disable the plugin → ``/goal`` disappears while the Drive +
+        registration remain. Only the LLM is scripted."""
         import asyncio
 
-        from kohakuterrarium.builtins.plugins.goal import GoalPlugin
         from kohakuterrarium.modules.user_command.base import UserCommandContext
-        from kohakuterrarium.terrarium.drive.config import (
-            DriveRuntimeConfig,
-            default_registrations,
-        )
-        from kohakuterrarium.terrarium.drive.goal import GoalDriveRegistration
         from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
         from kohakuterrarium.terrarium.engine import Terrarium
         from kohakuterrarium.terrarium.service import LocalTerrariumService
@@ -1572,25 +1566,28 @@ class TestModulesIntegration:
             input=InputConfig(type="none"),
             output=OutputConfig(type="none"),
         )
-        engine = Terrarium(
-            pwd=str(tmp_path),
-            drive_config=DriveRuntimeConfig(enabled=True),
-            # The goal registration is enabled explicitly, independently of the
-            # plugin (design §11.3).
-            drive_registrations=[*default_registrations(), GoalDriveRegistration()],
-        )
+        engine = Terrarium(pwd=str(tmp_path))
         async with engine:
             worker = await engine.add_creature(cfg, creature_id="goal_worker")
             agent = engine.get_creature(worker.creature_id).agent
             service = LocalTerrariumService(engine)
 
-            # Enabling the plugin makes /goal appear in the live registry AND
-            # its prompt prose appear in the live system prompt together (R1-23).
-            assert "goal" not in agent.list_user_commands()
-            assert "durable Goal" not in agent._controller_config.system_prompt
-            await agent.add_plugin(GoalPlugin())
             assert "goal" in agent.list_user_commands()
             assert "durable Goal" in agent._controller_config.system_prompt
+            assert {
+                "drive_create",
+                "drive_status",
+                "drive_update",
+                "drive_report",
+                "drive_transition",
+            }.issubset(agent.registry.list_tools())
+            assert {
+                registration["kind"]
+                for registration in await service.list_drive_registrations()
+            } == {
+                "generic",
+                "goal",
+            }
 
             extra = {
                 "service": service,

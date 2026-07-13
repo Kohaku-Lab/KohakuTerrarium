@@ -258,9 +258,9 @@ class AppMultiCreatureMixin:
         except Exception:
             pass
         try:
-            self.composer.set_command_context(agent=self.agent)
+            self._wire_command_registry()
         except Exception:
-            pass
+            self.composer.set_command_context(agent=self.agent)
         # B2 redraw — wipe scrollback and re-emit only the focused
         # creature's captured commits. Then re-point the capture target
         # so future commits land in the right bucket.
@@ -673,25 +673,29 @@ class AppMultiCreatureMixin:
     async def dispatch_topology_command(self, name: str, args: str) -> bool:
         """Run an engine-aware command locally with the right context.
 
-        Handles the fixed topology commands plus any command that marks
-        itself ``needs_engine`` (e.g. a plugin-contributed ``/goal``): both
-        need the engine + focused creature in ``UserCommandContext.extra``.
+        In an engine-backed single- or multi-creature run, handles the fixed
+        topology commands plus any command that marks itself ``needs_engine``
+        (e.g. a plugin-contributed ``/goal``). Both need the engine + focused
+        creature in ``UserCommandContext.extra``.
         Returns ``True`` if the command was handled (caller should return)
         and ``False`` if the caller should fall through to the agent-level
         dispatcher.
         """
-        if not self.multi_creature_enabled:
+        if self.engine is None:
             return False
         cmd = self._command_registry.get(name)
+        if cmd is None:
+            for candidate in self._command_registry.values():
+                if name in (getattr(candidate, "aliases", None) or []):
+                    cmd = candidate
+                    break
         if cmd is None:
             return False
         if name not in _TOPOLOGY_COMMANDS and not getattr(cmd, "needs_engine", False):
             return False
         # Built-in Drive commands cannot import terrarium.service (dep-graph
         # guard), so the dispatch supplies a ready service in ``extra``.
-        service = (
-            LocalTerrariumService(self.engine) if self.engine is not None else None
-        )
+        service = LocalTerrariumService(self.engine)
         ctx = UserCommandContext(
             agent=self.agent,
             session=getattr(self.agent, "session", None),

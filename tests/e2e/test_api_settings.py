@@ -668,9 +668,15 @@ class TestApiSettingsJourney:
         from kohakuterrarium.api.deps import get_service_legacy
         from kohakuterrarium.studio.identity import drive_settings as ds
 
+        current_drive_file = client.get(
+            "/api/settings/config-files/drive-settings/content"
+        ).json()
         bad = client.put(
             "/api/settings/config-files/drive-settings/content",
-            json={"content": "runtime:\n  enabled: not-a-bool\n"},
+            json={
+                "content": "runtime:\n  enabled: not-a-bool\n",
+                "sha256_expected": current_drive_file["sha256"],
+            },
         )
         assert bad.status_code == 400
         assert "drive-settings schema error" in bad.json()["detail"]
@@ -682,16 +688,16 @@ class TestApiSettingsJourney:
                     "schema_version: 1\n"
                     "runtime:\n  enabled: true\n"
                     "registrations:\n  generic:\n    enabled: true\n"
-                )
+                ),
+                "sha256_expected": current_drive_file["sha256"],
             },
         )
         assert good.status_code == 200, good.text
         read = client.get("/api/settings/config-files/drive-settings/content").json()
         assert "enabled: true" in read["content"]
 
-        # Resolve + apply against the (Drive-disabled) running engine: enabling
-        # the runtime live is not supported, so apply reports restart_required
-        # while the desired settings revision advances (design §8.6).
+        # Resolve + apply against the default-on running engine. Removing the
+        # default goal kind requires a restart (design §8.6).
         engine = get_service_legacy().engine
         result = ds.apply_runtime(engine)
         assert result["result"] == ds.RESTART_REQUIRED

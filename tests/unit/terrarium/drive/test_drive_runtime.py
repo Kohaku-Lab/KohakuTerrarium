@@ -118,8 +118,13 @@ def _runtime(engine=None, registrations=None, clock=None):
 
 
 class TestBuildDriveRuntime:
-    def test_none_config_builds_nothing(self):
-        assert build_drive_runtime(_FakeEngine(), None, (), None) is None
+    def test_omitted_config_and_registrations_build_defaults(self):
+        runtime = build_drive_runtime(_FakeEngine(), None, None, None)
+        assert runtime is not None
+        assert [entry.descriptor.name for entry in runtime.snapshot.entries] == [
+            "generic",
+            "goal",
+        ]
 
     def test_enabled_empty_registrations_raises(self):
         with pytest.raises(DriveValidationError):

@@ -89,14 +89,18 @@ class AgentFactory(BaseRunnable):
         pwd: str | Path | None = None,
         llm: Any = None,
         drive_config: Any = None,
-        drive_registrations: "tuple[Any, ...] | list[Any]" = (),
+        drive_registrations: "tuple[Any, ...] | list[Any] | None" = None,
         drive_store: Any = None,
     ):
         self._config = config
         self._engine = engine
         self._pwd = pwd
         self._llm = llm
-        self._drive = (drive_config, tuple(drive_registrations), drive_store)
+        self._drive = (
+            drive_config,
+            None if drive_registrations is None else tuple(drive_registrations),
+            drive_store,
+        )
 
     async def run(self, input: Any) -> str:
         session = await _engine_session(
@@ -130,7 +134,7 @@ async def agent(
     pwd: str | Path | None = None,
     llm: Any = None,
     drive_config: Any = None,
-    drive_registrations: "tuple[Any, ...] | list[Any]" = (),
+    drive_registrations: "tuple[Any, ...] | list[Any] | None" = None,
     drive_store: Any = None,
 ) -> AgentRunnable:
     """Create a persistent AgentRunnable (starts immediately).
@@ -141,8 +145,8 @@ async def agent(
             engine is created and torn down with the runnable.
         pwd: Working directory for the creature (no global chdir).
         llm: Profile name / :class:`LLMProfile` / provider instance.
-        drive_config / drive_registrations / drive_store: explicit Drive
-            runtime args forwarded to the PRIVATE engine when ``engine`` is
+        drive_config / drive_registrations / drive_store: Drive runtime
+            overrides forwarded to the PRIVATE engine when ``engine`` is
             ``None`` (design §8.3); ignored when a shared engine is passed —
             that engine keeps its own Drive configuration.
 
@@ -156,7 +160,11 @@ async def agent(
         engine=engine,
         pwd=pwd,
         llm=llm,
-        drive=(drive_config, tuple(drive_registrations), drive_store),
+        drive=(
+            drive_config,
+            None if drive_registrations is None else tuple(drive_registrations),
+            drive_store,
+        ),
     )
     return AgentRunnable(session)
 
@@ -168,7 +176,7 @@ def factory(
     pwd: str | Path | None = None,
     llm: Any = None,
     drive_config: Any = None,
-    drive_registrations: "tuple[Any, ...] | list[Any]" = (),
+    drive_registrations: "tuple[Any, ...] | list[Any] | None" = None,
     drive_store: Any = None,
 ) -> AgentFactory:
     """Create an ephemeral AgentFactory (no startup cost).
@@ -231,7 +239,7 @@ async def _engine_session(
     engine: Terrarium | None,
     pwd: str | Path | None,
     llm: Any,
-    drive: "tuple[Any, tuple[Any, ...], Any]" = (None, (), None),
+    drive: "tuple[Any, tuple[Any, ...] | None, Any]" = (None, None, None),
 ) -> _EngineChatSession:
     owns_engine = engine is None
     if owns_engine:

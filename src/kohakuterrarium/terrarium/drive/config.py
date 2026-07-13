@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from kohakuterrarium.terrarium.drive.errors import DriveValidationError
+from kohakuterrarium.terrarium.drive.goal import GoalDriveRegistration
 from kohakuterrarium.terrarium.drive.registration import (
     DriveRegistration,
     GenericDriveRegistration,
@@ -101,12 +102,12 @@ class DriveRetentionConfig:
 class DriveRuntimeConfig:
     """Explicit Drive runtime tuning passed to ``Terrarium(...)`` (design §8.3).
 
-    ``enabled=False`` (the default) means the engine owns no DriveManager,
-    tools, prompt, or dispatcher. Byte limits are independent per payload field
+    ``enabled=False`` explicitly opts the engine out of Drive. Byte limits are
+    independent per payload field
     (design §13).
     """
 
-    enabled: bool = False
+    enabled: bool = True
     max_active_per_creature: int = 8
     max_pending_per_graph: int = 100
     max_consecutive_drive_turns: int = 3
@@ -148,12 +149,8 @@ class DriveRuntimeConfig:
 
 
 def default_registrations() -> list[DriveRegistration]:
-    """Convenience enable set: ``[GenericDriveRegistration()]`` (design §8.3).
-
-    A caller must still pass this explicitly; the low-level engine never invents
-    an enable set on its own.
-    """
-    return [GenericDriveRegistration()]
+    """Return fresh instances of the default generic and goal registrations."""
+    return [GenericDriveRegistration(), GoalDriveRegistration()]
 
 
 def validate_runtime_selection(
@@ -164,8 +161,8 @@ def validate_runtime_selection(
     if config.enabled and not registrations:
         raise DriveValidationError(
             "drive runtime is enabled but no registrations were supplied "
-            "(design §8.3); pass default_registrations() explicitly to enable the "
-            "generic kind"
+            "(design §8.3); omit drive_registrations to use the default generic "
+            "and goal registrations"
         )
 
 

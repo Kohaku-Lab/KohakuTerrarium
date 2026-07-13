@@ -29,6 +29,7 @@ from kohakuterrarium.terrarium.creature_ids import (
 )
 from kohakuterrarium.terrarium.drive.config import (
     DriveRuntimeConfig,
+    default_registrations,
     validate_runtime_selection,
 )
 from kohakuterrarium.terrarium.drive.requests import DriveQuery
@@ -81,22 +82,22 @@ _INTERNAL_OBSERVATION_KINDS = frozenset(
 def build_drive_runtime(
     engine: Any,
     drive_config: DriveRuntimeConfig | None,
-    drive_registrations: "list[DriveRegistration] | tuple[DriveRegistration, ...]",
+    drive_registrations: "list[DriveRegistration] | tuple[DriveRegistration, ...] | None",
     drive_store: Any,
 ) -> "DriveRuntime | None":
     """Construct the engine's Drive runtime, or ``None`` when disabled.
 
-    ``drive_config=None`` builds nothing (zero overhead). A config with
-    ``enabled=True`` and no registrations fails validation here — at engine
-    construction, not after a Drive is already active (design §8.3)."""
-    if drive_config is None:
-        return None
-    validate_runtime_selection(drive_config, drive_registrations)
-    if not drive_config.enabled:
-        return None
-    return DriveRuntime(
-        engine, drive_config, tuple(drive_registrations), store=drive_store
+    Omitted config and registrations select the default-on runtime. Explicitly
+    passing ``DriveRuntimeConfig(enabled=False)`` builds nothing; an explicitly
+    empty registration collection remains invalid for an enabled runtime."""
+    config = drive_config if drive_config is not None else DriveRuntimeConfig()
+    registrations = (
+        default_registrations() if drive_registrations is None else drive_registrations
     )
+    validate_runtime_selection(config, registrations)
+    if not config.enabled:
+        return None
+    return DriveRuntime(engine, config, tuple(registrations), store=drive_store)
 
 
 def _result_to_settlement(result: Any) -> Settlement:

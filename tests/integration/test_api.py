@@ -642,7 +642,8 @@ class TestApiIntegration:
         # against the host's own config home + engine.
         resp = client.get("/api/settings/drives")
         assert resp.status_code == 200
-        assert resp.json()["runtime"]["enabled"] is False  # default: disabled
+        assert resp.json()["runtime"]["enabled"] is True
+        drive_revision = client.get("/api/settings/drives/config").json()["revision"]
 
         # Validation is a distinct typed step: a bad mapping 400s, a good one oks.
         resp = client.post(
@@ -661,7 +662,7 @@ class TestApiIntegration:
         # Save persists validated config (admin gate is a no-op in standalone).
         resp = client.put(
             "/api/settings/drives",
-            json={"settings": good, "expected_exists": False},
+            json={"settings": good, "expected_revision": drive_revision},
         )
         assert resp.status_code == 200
         saved_rev = resp.json()["revision"]
@@ -671,8 +672,8 @@ class TestApiIntegration:
         assert resp.json()["settings"]["runtime"]["enabled"] is True
         assert resp.json()["revision"] == saved_rev
 
-        # Saving is NOT applying: the engine started Drive-disabled, so enabling
-        # the runtime reports restart_required rather than a false live success.
+        # Saving remains distinct from applying; changing the enabled registry
+        # may apply live or report that a restart is required.
         resp = client.post("/api/settings/drives/apply")
         assert resp.status_code == 200
         assert resp.json()["result"] in {
@@ -2063,7 +2064,7 @@ async def test_managed_local_engine_receives_settings_derived_drive_runtime(
     """The API's managed lazy engine resolves the host Drive settings into an
     explicit runtime (design §8.4): with the runtime enabled in settings the
     deps-built engine is Drive-enabled and its service exposes the running
-    registry; disabled/absent settings keep it Drive-disabled.
+    registry; absent settings create and use enabled generic + goal defaults.
     """
     from kohakuterrarium.api.deps import get_service_legacy, set_service
     from kohakuterrarium.studio.identity import drive_settings as ds
@@ -2077,8 +2078,15 @@ async def test_managed_local_engine_receives_settings_derived_drive_runtime(
     monkeypatch.setenv("KT_SESSION_DIR", str(tmp_path / "managed-sess"))
     set_service(None)
     try:
-        # Absent settings -> the managed engine is Drive-disabled.
-        assert get_service_legacy().engine.drives is None
+        # Absent settings are atomically initialized to enabled defaults.
+        default_runtime = get_service_legacy().engine.drives
+        assert default_runtime is not None
+        assert {
+            entry.descriptor.name for entry in default_runtime.snapshot.entries
+        } == {
+            "generic",
+            "goal",
+        }
         set_service(None)
         # Operator enables the generic runtime; the next managed build resolves it.
         ds.save_settings(
@@ -2104,16 +2112,14 @@ def test_drive_record_http_lifecycle(monkeypatch, tmp_path) -> None:
     missing id -> 422 for a disabled kind -> delivery history. The engine is
     entered by the TestClient lifespan so every async primitive lives in one loop.
     """
-    from kohakuterrarium.terrarium.drive.config import (
-        DriveRuntimeConfig,
-        default_registrations,
-    )
+    from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
+    from kohakuterrarium.terrarium.drive.registration import GenericDriveRegistration
 
     monkeypatch.setenv("KT_SESSION_DIR", str(tmp_path / "drive-sessions"))
     engine = Terrarium(
         session_dir=str(tmp_path / "drive-sessions"),
         drive_config=DriveRuntimeConfig(enabled=True),
-        drive_registrations=default_registrations(),
+        drive_registrations=(GenericDriveRegistration(),),
     )
     set_service(LocalTerrariumService(engine))
     app = create_app()

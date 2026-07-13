@@ -667,7 +667,7 @@ class TestAttachSessionReplace:
 
 
 class TestDriveRuntime:
-    """Explicit Drive args, zero-Drive no-op behavior, and shutdown drain."""
+    """Default-on Drive behavior, explicit opt-out, and shutdown drain."""
 
     def _enabled(self, **over):
         from kohakuterrarium.terrarium.drive.config import (
@@ -680,28 +680,36 @@ class TestDriveRuntime:
             drive_registrations=default_registrations(),
         )
 
-    def test_zero_drive_engine_has_no_runtime(self):
-        assert Terrarium().drives is None
+    def test_default_engine_has_runtime(self):
+        runtime = Terrarium().drives
+        assert runtime is not None
+        assert [item.descriptor.name for item in runtime.snapshot.entries] == [
+            "generic",
+            "goal",
+        ]
 
     def test_enabled_empty_registrations_rejected_at_construction(self):
         from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
         from kohakuterrarium.terrarium.drive.errors import DriveValidationError
 
         with pytest.raises(DriveValidationError):
-            Terrarium(drive_config=DriveRuntimeConfig(enabled=True))
+            Terrarium(
+                drive_config=DriveRuntimeConfig(enabled=True),
+                drive_registrations=[],
+            )
 
     def test_disabled_config_builds_no_runtime(self):
         from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
 
         assert Terrarium(drive_config=DriveRuntimeConfig(enabled=False)).drives is None
 
-    async def test_zero_drive_creature_gets_no_drive_service(self):
+    async def test_default_creature_gets_drive_service(self):
         from kohakuterrarium.terrarium.channels import DRIVE_SERVICE_KEY
 
         t = await TestTerrariumBuilder().with_creature("alice").build()
         try:
             env = t._environments[t.get_creature("alice").graph_id]
-            assert env.get(DRIVE_SERVICE_KEY) is None
+            assert env.get(DRIVE_SERVICE_KEY) is t.drives
         finally:
             await t.shutdown()
 
@@ -731,8 +739,12 @@ class TestDriveRuntime:
         assert t.drives.manager.dispatcher._task is None
 
     async def test_reconfigure_on_disabled_engine_raises(self):
+        from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
+
         with pytest.raises(RuntimeError):
-            Terrarium().reconfigure_drives([])
+            Terrarium(
+                drive_config=DriveRuntimeConfig(enabled=False)
+            ).reconfigure_drives([])
 
     async def test_reconfigure_delegates_to_runtime(self):
         from kohakuterrarium.terrarium.drive.config import default_registrations

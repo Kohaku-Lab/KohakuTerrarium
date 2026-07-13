@@ -47,6 +47,7 @@ from kohakuterrarium.session.sync import SessionMirrorWriter
 from kohakuterrarium.studio.identity import drive_settings as _drive_settings
 from kohakuterrarium.studio.sessions.lifecycle import get_session_meta
 from kohakuterrarium.terrarium import MultiNodeTerrariumService, Terrarium
+from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -209,10 +210,12 @@ async def lifespan(app: FastAPI):
         # broadcast / output-wire forwarders.  Nothing ever calls
         # ``add_creature`` on it; ``MultiNodeTerrariumService`` routes
         # every agent op to a connected worker.
-        # NO drive args: the lab-host coordination engine is agent-free and
-        # must stay Drive-disabled (design §8.4/§8.5 — it is not an execution
-        # runtime). Workers resolve their own node-local Drive settings.
-        coordination_engine = Terrarium(session_dir=_session_dir())
+        # This coordination engine is agent-free and explicitly opts out of
+        # Drive. Workers resolve their own node-local Drive settings.
+        coordination_engine = Terrarium(
+            session_dir=_session_dir(),
+            drive_config=DriveRuntimeConfig(enabled=False),
+        )
         multi_node_service = MultiNodeTerrariumService(
             host=host_engine, coordination_engine=coordination_engine
         )

@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from kohakuterrarium.modules.user_command.base import UserCommandResult
 from kohakuterrarium.terrarium import creature_ops as co
 
 # ── _redact_env / agent_env ───────────────────────────────────
@@ -479,6 +480,21 @@ class TestExecuteCommand:
         ag = SimpleNamespace()
         with pytest.raises(ValueError, match="Unknown command"):
             await co.agent_execute_command(ag, "no-such-cmd")
+
+    async def test_live_command_alias_resolves(self):
+        async def execute(args, context):
+            return UserCommandResult(output=args)
+
+        command = SimpleNamespace(aliases=["objective"], execute=execute)
+        ag = SimpleNamespace(
+            session=None,
+            list_user_commands=lambda: {"goal": command},
+        )
+
+        result = await co.agent_execute_command(ag, "objective", "set X")
+
+        assert result["success"] is True
+        assert result["output"] == "set X"
 
 
 # ── chat_history_for ───────────────────────────────────────────
