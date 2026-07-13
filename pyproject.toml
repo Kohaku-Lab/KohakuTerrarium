@@ -150,6 +150,8 @@ dev = [
     "pytest>=9.0.0",
     "pytest-asyncio>=1.3.0",
     "pytest-timeout>=2.3.0",
+    # Starlette 1.2+ uses HTTPX2 for TestClient and deprecates the HTTPX fallback.
+    "httpx2>=2.0.0",
     "black>=26.3.0",
     "isort>=8.0.0",
     "ruff>=0.9.0",

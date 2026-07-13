@@ -128,7 +128,7 @@ def test_run_update_happy_path(monkeypatch, cfg_home):
             _sh.rmtree(extract_dir)
         extract_dir.mkdir(parents=True)
         with _tf.open(str(new_tar), mode="r:gz") as t:
-            t.extractall(str(extract_dir))
+            t.extractall(str(extract_dir), filter="data")
 
     monkeypatch.setattr(_r, "fetch_and_extract", fake_fetch_and_extract)
     monkeypatch.setattr(_r, "smoke_test_tree", lambda d: "2.0.0")
@@ -165,7 +165,7 @@ def test_run_update_aborts_on_smoke_failure(monkeypatch, cfg_home):
             _sh.rmtree(extract_dir)
         extract_dir.mkdir(parents=True)
         with _tf.open(str(new_tar), mode="r:gz") as t:
-            t.extractall(str(extract_dir))
+            t.extractall(str(extract_dir), filter="data")
 
     monkeypatch.setattr(_r, "fetch_and_extract", fake_fetch_and_extract)
 

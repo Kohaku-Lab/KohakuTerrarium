@@ -53,8 +53,8 @@ class TestBuildCreatureDispatch:
         fake_agent = _FakeAgent(name="alice")
         fake_agent.config = SimpleNamespace(name="alice")
 
-        def _from_path(
-            p,
+        def _agent_ctor(
+            config,
             session=None,
             environment=None,
             llm=None,
@@ -65,11 +65,11 @@ class TestBuildCreatureDispatch:
             tools=None,
             plugins=None,
         ):
-            # ``build_creature`` threads ``input_module`` to every branch
-            # (None unless ``io="none"``).
+            assert config.name == "alice"
+            assert "goal" in config.default_plugins
             return fake_agent
 
-        monkeypatch.setattr(ch_mod.Agent, "from_path", staticmethod(_from_path))
+        monkeypatch.setattr(ch_mod, "Agent", _agent_ctor)
         out = build_creature(str(cfg_file))
         assert out.name == "alice"
 

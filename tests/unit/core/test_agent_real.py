@@ -1659,6 +1659,8 @@ class TestLLMExceptionDuringProcessing:
     async def test_llm_error_emits_processing_error(self, make_agent, patched_llm):
         class _BadLLM(ScriptedLLM):
             async def chat(self, messages, **kwargs):
+                if False:
+                    yield ""
                 raise RuntimeError("API outage")
 
         bad_llm = _BadLLM([])
