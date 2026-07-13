@@ -738,7 +738,9 @@ class TestApiTerrariumJourney:
             },
         )
         assert paused.status_code == 200 and paused.json()["status"] == "paused"
-        # A stale revision + a disabled kind are honest 409 / 422.
+        # A stale revision is an honest 409; a malformed goal spec (the goal
+        # registration is enabled by default and requires a non-empty
+        # 'objective') is a typed 400.
         assert (
             client.patch(
                 f"/api/sessions/{survivor}/drives/{did}",
@@ -751,7 +753,7 @@ class TestApiTerrariumJourney:
                 f"/api/sessions/{survivor}/drives",
                 json={"kind": "goal", "title": "t"},
             ).status_code
-            == 422
+            == 400
         )
         assert (
             client.get(f"/api/sessions/{survivor}/drives/{did}/deliveries").status_code

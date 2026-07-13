@@ -431,7 +431,15 @@ class TestProgStudioJourney:
             # --- sessions.plugins: toggle a plugin on then off ----------
             plugins = studio.sessions.plugins.list(session_id, creature_id)
             assert any(p["name"] == "sandbox" for p in plugins)
-            assert all(p["enabled"] is False for p in plugins)
+            # A Drive-enabled Terrarium turns on its always-on Drive plugins on
+            # every creature (the ``goal`` composition + the ``drive_runtime``
+            # prompt contributor); every other builtin stays off until toggled.
+            terrarium_defaults = {"goal", "drive_runtime"}
+            assert all(
+                p["enabled"] is False
+                for p in plugins
+                if p["name"] not in terrarium_defaults
+            )
             toggled_on = await studio.sessions.plugins.toggle(
                 session_id, creature_id, "sandbox"
             )

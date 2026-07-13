@@ -2684,34 +2684,57 @@ async def _drive_journey(
     # — see temp/bugs/CF7.md.
     async with bugs.step("29c3b CF-7: cross-cluster group_remove_node error shape"):
         # Drive alpha to emit the cross-cluster ``group_remove_node`` call,
-        # then read the recorded ``tool_result`` event via the persistence
-        # /events endpoint. The CF-7 fix surfaces the cross-cluster
-        # diagnosis via ``ToolResult.error``, which is persisted as the
-        # ``error`` field on the ``tool_result`` event in the worker's
-        # session store. The chat-WS proxy chain forwards ``tool_error``
-        # activity frames best-effort and may not relay them before the
-        # receiver's idle timeout in the cluster-mux path, so the
-        # session events log is the canonical surface to assert on.
+        # then read the recorded ``tool_result`` event from alpha's worker
+        # session store. The CF-7 fix surfaces the cross-cluster diagnosis via
+        # ``ToolResult.error``, persisted as the ``error`` field on the
+        # ``tool_result`` event in the worker that hosts alpha. The host-side
+        # event mirror forwards a worker's failed group_* tool_result only
+        # best-effort and may not relay it within a test deadline, so the
+        # worker's own store — where the tool executes and records
+        # synchronously — is the authoritative surface to assert on.
         cross_err_seen = False
-        last_tool_results: list[dict] = []
+        observed: list[dict] = []
+
+        def _worker_cross_cluster_result() -> tuple[bool, list[dict]]:
+            """Scan alpha's OWN worker session store for the group_remove_node
+            tool_result.  The tool runs on the worker that hosts alpha, so the
+            worker's local store — not the host's event mirror — is the
+            authoritative surface for the recorded ``ToolResult.error``: the host
+            forwards a worker's failed group_* tool_result only best-effort and
+            may not relay it within a test deadline, whereas the worker store
+            records it synchronously with the tool execution."""
+            try:
+                creature = w1.engine.get_creature(a_id)
+                store = w1.engine._session_stores.get(creature.graph_id)
+            except Exception:
+                return False, []
+            if store is None:
+                return False, []
+            rows: list[dict] = []
+            seen = False
+            for _agent, ev in store.get_all_events():
+                if not isinstance(ev, dict) or ev.get("type") != "tool_result":
+                    continue
+                if "group_remove_node" not in str(ev.get("name") or ""):
+                    continue
+                err_text = str(ev.get("error") or "")
+                rows.append({"name": ev.get("name"), "error": err_text[:200]})
+                if "cross-cluster" in err_text and "CF-7" in err_text:
+                    seen = True
+            return seen, rows
+
         try:
-            # Some platforms (occasionally macOS) race the ScriptedLLM
-            # match-gated lookup with prior async chats, so the first
-            # ``please remove bravo`` send may not emit the
-            # ``group_remove_node`` tool call.  Retry the chat up to
-            # three times — between attempts we forcibly reset the
-            # alpha worker's LLM ``_used_indices`` so the match-gated
-            # entry is reachable even if a phantom earlier match
-            # consumed it.
+            # The ScriptedLLM match-gated ``please remove bravo`` entry can race
+            # a prior async turn on some platforms, so the first send may not
+            # emit ``group_remove_node``.  Retry the chat up to three times,
+            # rearming alpha's match-gated entry between attempts (test-only
+            # surgery; production never reaches into ScriptedLLM internals).
             for attempt in range(3):
                 if attempt > 0:
-                    # Reach into the in-process alpha worker's LLM
-                    # state and rearm the match-gated entry.  This is
-                    # test-only surgery; production never reaches into
-                    # ScriptedLLM internals.
                     try:
-                        alpha_creature = w1.engine.get_creature("alpha")
-                        alpha_llm = getattr(alpha_creature.agent, "llm", None)
+                        alpha_llm = getattr(
+                            w1.engine.get_creature(a_id).agent, "llm", None
+                        )
                         if alpha_llm is not None and hasattr(
                             alpha_llm, "_used_indices"
                         ):
@@ -2723,89 +2746,13 @@ async def _drive_journey(
                         _drain_chat(ws, "please remove bravo"),
                         timeout=OP_TIMEOUT * 3,
                     )
-                # Per-attempt drain settle before deciding whether to
-                # retry — the tool_result may already be in flight.
+                # Tool execution -> event write into the worker store is a short
+                # async hop after the chat WS closes; settle briefly, then read
+                # the authoritative worker store.
                 await asyncio.sleep(0.5)
-                rr_probe = await asyncio.wait_for(
-                    host.http.get(
-                        f"/api/sessions/{graph_a}/events",
-                        params={"limit": 1000},
-                    ),
-                    timeout=OP_TIMEOUT,
-                )
-                if rr_probe.status_code == 200:
-                    for e in rr_probe.json().get("events") or ():
-                        if (
-                            isinstance(e, dict)
-                            and e.get("type") == "tool_result"
-                            and "group_remove_node" in str(e.get("name") or "")
-                        ):
-                            break
-                    else:
-                        # No group_remove_node tool_result yet — retry.
-                        continue
-                # Saw group_remove_node tool_result; fall through to
-                # the long poll below to confirm the cross-cluster
-                # marker.
-                break
-
-            # Tool execution -> event write -> session.sync notify ->
-            # host mirror append is a multi-hop async pipeline that
-            # finishes some time AFTER the chat WS closes.  Fixed
-            # sleeps race the pipeline on slow Windows / 3.13+ CI
-            # runners.  Poll the /events endpoint until the tool_result
-            # carrying the cross-cluster marker arrives or a generous
-            # deadline expires.  macOS 3.13 specifically has been seen
-            # to need >10s for the kqueue selector + lab WebSocket to
-            # drain the tool_result event through the mirror writer.
-            deadline = asyncio.get_event_loop().time() + 30.0
-            while asyncio.get_event_loop().time() < deadline and not cross_err_seen:
-                rr2 = await asyncio.wait_for(
-                    host.http.get(
-                        f"/api/sessions/{graph_a}/events",
-                        params={"limit": 1000},
-                    ),
-                    timeout=OP_TIMEOUT,
-                )
-                if rr2.status_code == 200:
-                    evts = rr2.json().get("events") or []
-                    # Snapshot every tool_result we see so the failure
-                    # message shows whether the tool fired at all and
-                    # what error it actually carried — invaluable for
-                    # diagnosing macOS-only timing regressions where
-                    # the script may have desynced (off-by-one LLM
-                    # call) or the engine_is_in_cluster gate flipped.
-                    last_tool_results = [
-                        {"name": e.get("name"), "error": e.get("error")}
-                        for e in evts
-                        if isinstance(e, dict) and e.get("type") == "tool_result"
-                    ]
-                    # If we see no tool_results AT ALL, also capture
-                    # the tail of every event so a CI failure tells
-                    # us whether the LLM emitted the tool call or
-                    # returned filler instead (different fix paths).
-                    if not last_tool_results and len(evts) >= 4:
-                        last_tool_results = [
-                            {
-                                "_diagnostic_no_tool_result": True,
-                                "last_event_types": [
-                                    e.get("type")
-                                    for e in evts[-12:]
-                                    if isinstance(e, dict)
-                                ],
-                            }
-                        ]
-                    for e in evts:
-                        if not isinstance(e, dict):
-                            continue
-                        if e.get("type") != "tool_result":
-                            continue
-                        err_text = str(e.get("error") or "")
-                        if "cross-cluster" in err_text and "CF-7" in err_text:
-                            cross_err_seen = True
-                            break
-                if not cross_err_seen:
-                    await asyncio.sleep(0.25)
+                cross_err_seen, observed = _worker_cross_cluster_result()
+                if cross_err_seen:
+                    break
         except asyncio.TimeoutError:
             bugs.record(
                 "29c3b alpha chat hung while emitting cross-cluster group_remove_node",
@@ -2815,10 +2762,10 @@ async def _drive_journey(
             "CF-7: group_remove_node on a cross-cluster target returns a "
             "cross-cluster-flagged error (not a vague 'not in your group')",
             cross_err_seen,
-            "expected a tool_result event on graph_a with error mentioning "
-            "'cross-cluster' and 'CF-7' so the LLM/user can distinguish a "
-            "typo from a cross-worker miss; observed tool_results="
-            f"{last_tool_results!r}",
+            "expected alpha's worker session store to carry a group_remove_node "
+            "tool_result whose error mentions 'cross-cluster' and 'CF-7' so the "
+            "LLM/user can distinguish a typo from a cross-worker miss; observed "
+            f"group_remove_node tool_results={observed!r}",
         )
 
     # === 29c4. /command framework command (compact / status) ====
@@ -2933,9 +2880,10 @@ async def _drive_journey(
         admin = ActorRef("service", "ops")
         # Node-targeted settings reach w1's studio.settings adapter over real WS.
         rr = await host.http.get("/api/settings/drives", params={"node": "w1"})
+        status_body = rr.json()
         bugs.check(
             "29f node drive settings status 200 for w1",
-            rr.status_code == 200 and rr.json().get("node") == "w1",
+            rr.status_code == 200 and status_body.get("node") == "w1",
             f"{rr.status_code} {rr.text[:200]}",
         )
         good = {
@@ -2943,14 +2891,20 @@ async def _drive_journey(
             "runtime": {"enabled": True},
             "registrations": {"generic": {"enabled": True, "options": {}}},
         }
+        # The save API demands an explicit optimistic precondition (design §8.4):
+        # pass the current on-disk revision, exactly as every real UI adapter does.
+        cur_rev = status_body.get("settings_revision")
         rr = await host.http.put(
-            "/api/settings/drives", params={"node": "w1"}, json={"settings": good}
+            "/api/settings/drives",
+            params={"node": "w1"},
+            json={"settings": good, "expected_revision": cur_rev},
         )
         bugs.check(
             "29f node drive settings save 200",
             rr.status_code == 200,
             f"{rr.status_code} {rr.text[:200]}",
         )
+        good_rev = rr.json().get("revision") if rr.status_code == 200 else None
         # Create a Drive on alpha's (w1) graph through the MultiNode service; it
         # must route to the home worker and read back with home == w1.
         info = await svc.get_creature_info(a_id)
@@ -2996,7 +2950,9 @@ async def _drive_journey(
             "registrations": {"no-such-reg": {"enabled": True, "options": {}}},
         }
         await host.http.put(
-            "/api/settings/drives", params={"node": "w1"}, json={"settings": bogus}
+            "/api/settings/drives",
+            params={"node": "w1"},
+            json={"settings": bogus, "expected_revision": good_rev},
         )
         rr = await host.http.post("/api/settings/drives/apply", params={"node": "w1"})
         bugs.check(

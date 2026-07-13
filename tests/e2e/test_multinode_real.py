@@ -243,12 +243,17 @@ async def test_node_targeted_drive_settings_over_real_ws(tmp_path, monkeypatch):
             )
             assert r.status_code == 200 and r.json()["enabled"] is True
 
-            # The host's OWN settings are a DIFFERENT config home — still disabled.
+            # The host's OWN settings are a DIFFERENT config home. Both nodes
+            # default to the drive-enabled ``default_settings()``; isolation is
+            # proven below by the worker-scoped save leaving the host untouched.
             r_host = await host.http.get("/api/settings/drives")
             assert r_host.status_code == 200
-            assert r_host.json()["runtime"]["enabled"] is False
+            assert r_host.json()["runtime"]["enabled"] is True
+            host_rev_before = r_host.json()["settings_revision"]
 
-            # A node-targeted save is worker-scoped and round-trips.
+            # A node-targeted save is worker-scoped and round-trips. The save API
+            # demands an optimistic precondition (design §8.4): pass the worker's
+            # current on-disk revision, exactly as every real UI adapter does.
             good = {
                 "schema_version": 1,
                 "runtime": {"enabled": True},
@@ -257,10 +262,15 @@ async def test_node_targeted_drive_settings_over_real_ws(tmp_path, monkeypatch):
             r = await host.http.put(
                 "/api/settings/drives",
                 params={"node": "drv-worker"},
-                json={"settings": good},
+                json={"settings": good, "expected_revision": body["settings_revision"]},
             )
             assert r.status_code == 200, r.text
             assert r.json()["revision"]
+
+            # The worker-scoped save did not touch the host's own config home.
+            r_host2 = await host.http.get("/api/settings/drives")
+            assert r_host2.status_code == 200
+            assert r_host2.json()["settings_revision"] == host_rev_before
 
 
 async def test_cross_node_user_named_channel_wires_both_sides(tmp_path, monkeypatch):
