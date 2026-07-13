@@ -66,9 +66,11 @@ class TestAutosessionViaSessionDir:
         store = t._session_stores[c.graph_id]
         assert c.graph_id in t._owned_sessions
         # Force the shutdown loop to enter the stop branch, then have the
-        # stop itself get cancelled.
+        # stop itself get cancelled. is_running now derives from status, so
+        # the creature must look started (idle) — set _ever_started too.
         c._running = True
         c.agent._running = True
+        c._ever_started = True
         t._running = True
 
         async def _cancelled_stop():

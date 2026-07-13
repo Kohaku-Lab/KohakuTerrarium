@@ -200,7 +200,7 @@ class Creature:
         await self._ensure_restoration_event().wait()
 
     def _on_input_task_done(self, task: "asyncio.Task[None]") -> None:
-        """Mark the creature stopped once its input loop exits.
+        """Mark the creature host stopped once its input loop exits.
 
         The loop ends naturally when the input module signals
         ``exit_requested``, when ``Agent.stop`` flips ``_running``, or
@@ -282,7 +282,10 @@ class Creature:
 
     @property
     def is_running(self) -> bool:
-        return self._running and self.agent.is_running
+        """Convenience shortcut over the ground-truth :attr:`status`: the
+        creature is alive and message-eligible (``status`` is ``"idle"`` or
+        ``"busy"``).  ``status`` is authoritative; this is derived from it."""
+        return self.status in ("idle", "busy")
 
     @property
     def status(self) -> str:
@@ -304,8 +307,12 @@ class Creature:
           live ``_processing_task``).
         - ``"idle"``: the agent is alive and waiting for input / a
           trigger / a channel message.
-        - ``"stopped"``: ``stop()`` was called or the input loop
-          finished naturally; the agent is no longer servicing events.
+        - ``"stopped"``: the agent is no longer running (``stop()`` was
+          called, or a standalone ``run_forever`` loop finished); it is no
+          longer servicing events. NOTE: an engine worker whose ``_drive_input``
+          task idles out keeps a live agent (``agent.is_running`` stays True),
+          so it stays ``"idle"`` — still able to receive channel / group_send
+          messages — not ``"stopped"``.
         """
         if not self._ever_started:
             return "not_started"
