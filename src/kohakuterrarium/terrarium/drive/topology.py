@@ -157,7 +157,14 @@ def stash_split(engine: Any, parent_gid: str, child_gids: list[str]) -> None:
 
 
 async def drain(runtime: Any) -> None:
-    """Apply every pending Drive topology op stashed on the engine, in order."""
+    """Apply every pending Drive topology op stashed on the engine, in order.
+
+    Each op first drains (cancel + await) the in-flight ``_reconcile_when_ready``
+    tasks of every graph whose repository it is about to rebind or close, so a
+    reconcile never starts a manager on a repository being torn down (mirrors
+    ``engine.detach_graph``; design §6.4/§6.6-6.7). The sync coordinator ran with
+    no ``await`` between closing the superseded stores and this drain, so those
+    tasks are still suspended here and are cancelled before they can resume."""
     engine = runtime._engine
     pending = getattr(engine, "_pending_drive_topology", None)
     if not pending:
@@ -165,8 +172,13 @@ async def drain(runtime: Any) -> None:
     engine._pending_drive_topology = None
     for entry in pending:
         if entry[0] == "merge":
-            await _apply_merge(runtime, entry[1], entry[2])
+            keep_gid, sources = entry[1], entry[2]
+            await runtime._drain_reconcile(keep_gid)
+            for gid in sources:
+                await runtime._drain_reconcile(gid)
+            await _apply_merge(runtime, keep_gid, sources)
         elif entry[0] == "split":
+            await runtime._drain_reconcile(entry[1])
             await _apply_split(runtime, entry[1], entry[2], entry[3])
 
 
