@@ -22,7 +22,8 @@ class TestShow:
         code = cd.show_cli()
         out = capsys.readouterr().out
         assert code == 0
-        assert "runtime.enabled: False" in out
+        assert "runtime.enabled: True" in out
+        assert "goal" in out
 
     def test_registrations_lists_generic(self, config_home, capsys):
         code = cd.registrations_cli()
@@ -57,6 +58,7 @@ class TestSet:
 
 class TestApply:
     def test_apply_disabled_is_live(self, config_home, capsys):
+        cd.set_cli("enabled", "false")
         code = cd.apply_cli()
         out = capsys.readouterr().out
         assert code == 0

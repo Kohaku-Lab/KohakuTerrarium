@@ -110,7 +110,10 @@ async def test_route_reads_saved_session(tmp_path, monkeypatch):
 
 async def _make_saved_session_no_drive(session_dir: Path) -> None:
     """Persist a session that has NO Drive at all, so it carries no sidecar."""
-    engine = Terrarium(session_dir=str(session_dir))
+    engine = Terrarium(
+        session_dir=str(session_dir),
+        drive_config=DriveRuntimeConfig(enabled=False),
+    )
     await engine.__aenter__()
     root = Creature(
         creature_id="root",

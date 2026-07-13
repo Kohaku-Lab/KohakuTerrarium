@@ -88,11 +88,14 @@ class TestConstruction:
 
 
 class TestNodeSettingsFlow:
-    async def test_status_defaults_disabled(self):
+    async def test_status_returns_enabled_defaults(self):
         engine, node, client = await _wired()
         try:
             status = await client.status()
-            assert status["runtime"]["enabled"] is False
+            assert status["runtime"]["enabled"] is True
+            assert {
+                row["name"] for row in status["registrations"] if row["enabled"]
+            } == {"generic", "goal"}
             assert status["node"] == "worker-1"
         finally:
             await engine.shutdown()

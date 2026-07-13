@@ -39,11 +39,11 @@ def test_reload_builds_runtime_and_registration_rows(isolated_config):
     section.reload()
     types = {r["type"] for r in section.rows}
     assert {"toggle", "int", "registration", "action"} <= types
-    # The builtin generic registration is always discoverable.
+    # The builtin generic and Goal registrations are enabled by default.
     regs = [r for r in section.rows if r["type"] == "registration"]
-    assert any(r["name"] == "generic" for r in regs)
+    assert {r["name"] for r in regs} == {"generic", "goal"}
     enabled = _row(section, type="toggle", key="enabled")
-    assert enabled["value"] is False  # default runtime is disabled
+    assert enabled["value"] is True
 
 
 def test_toggle_and_int_edit(isolated_config):
@@ -52,7 +52,7 @@ def test_toggle_and_int_edit(isolated_config):
     enabled = _row(section, type="toggle", key="enabled")
     _cursor_to(section, enabled)
     section._activate()
-    assert enabled["value"] is True
+    assert enabled["value"] is False
     field = _row(section, type="int", key="max_active_per_creature")
     _cursor_to(section, field)
     section._activate()
@@ -67,23 +67,20 @@ def test_save_persists_runtime_and_registration(isolated_config):
     section = DriveSettingsSection()
     section.reload()
     _cursor_to(section, _row(section, type="toggle", key="enabled"))
-    section._activate()  # enable runtime
+    section._activate()  # disable the default-on runtime
     reg = _row(section, type="registration")
     reg["enabled"] = True  # enable the generic registration
     section._save()
     assert "saved" in section.flash
     persisted = load_settings()
-    assert persisted.runtime.enabled is True
+    assert persisted.runtime.enabled is False
     assert persisted.registrations[reg["name"]].enabled is True
 
 
 def test_apply_reports_restart_required_when_enabling_without_engine(isolated_config):
     section = DriveSettingsSection(get_engine=lambda: None)
     section.reload()
-    _cursor_to(section, _row(section, type="toggle", key="enabled"))
-    section._activate()  # enable runtime in the rows
-    _row(section, type="registration")["enabled"] = True  # runtime needs a registration
-    section._save()  # persist so apply reads the enabled file
+    section._save()  # persist default-on settings so apply reads the file
     section._apply()
     assert section.apply_result["result"] == "restart_required"
     body = section.render_body()
@@ -93,5 +90,8 @@ def test_apply_reports_restart_required_when_enabling_without_engine(isolated_co
 def test_apply_applied_live_when_runtime_stays_disabled(isolated_config):
     section = DriveSettingsSection(get_engine=lambda: None)
     section.reload()
-    section._apply()  # nothing enabled, no engine -> applied_live (no-op)
+    _cursor_to(section, _row(section, type="toggle", key="enabled"))
+    section._activate()
+    section._save()
+    section._apply()  # explicitly disabled, no engine -> applied_live (no-op)
     assert section.apply_result["result"] == "applied_live"

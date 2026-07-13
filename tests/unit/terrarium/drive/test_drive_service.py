@@ -192,9 +192,9 @@ class TestLocalReadsAndWrites:
             assert isinstance(status, DriveRuntimeStatus)
             assert status.enabled is True
             assert status.counts.get("active") == 1
-            assert {r["name"] for r in status.registrations} == {"generic"}
+            assert {r["name"] for r in status.registrations} == {"generic", "goal"}
             regs = await svc.list_drive_registrations()
-            assert regs[0]["kind"] == "generic"
+            assert {r["kind"] for r in regs} == {"generic", "goal"}
         finally:
             await engine.shutdown()
 
@@ -283,9 +283,9 @@ class TestMultiGraph:
             await engine.shutdown()
 
 
-class TestDisabledEngine:
+class TestExplicitlyDisabledEngine:
     async def test_runtime_status_disabled(self):
-        engine = Terrarium()
+        engine = Terrarium(drive_config=DriveRuntimeConfig(enabled=False))
         async with engine:
             svc = LocalTerrariumService(engine)
             status = await svc.drive_runtime_status()
@@ -293,7 +293,7 @@ class TestDisabledEngine:
             assert await svc.list_drive_registrations() == ()
 
     async def test_mutation_on_disabled_fails_closed(self):
-        engine = Terrarium()
+        engine = Terrarium(drive_config=DriveRuntimeConfig(enabled=False))
         async with engine:
             svc = LocalTerrariumService(engine)
             with pytest.raises(DriveError):

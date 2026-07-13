@@ -48,12 +48,10 @@ async def _drive_run(monkeypatch):
     return _CapturingTerrarium.last_kwargs
 
 
-async def test_run_forwards_disabled_by_default(monkeypatch):
-    # Absent settings resolve to an explicit *disabled* config (which builds no
-    # Drive runtime) — never an accidental enable.
+async def test_run_forwards_enabled_defaults(monkeypatch):
     kwargs = await _drive_run(monkeypatch)
-    assert kwargs["drive_config"].enabled is False
-    assert kwargs["drive_registrations"] == ()
+    assert kwargs["drive_config"].enabled is True
+    assert [r.name for r in kwargs["drive_registrations"]] == ["generic", "goal"]
 
 
 async def test_run_forwards_enabled_settings(monkeypatch):

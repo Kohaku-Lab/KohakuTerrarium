@@ -135,6 +135,7 @@ async def test_studio_settings_rejects_peer_sender(tmp_path, monkeypatch):
     )
     await engine.__aenter__()
     try:
+        baseline = _ds.load_settings()
         node = _FakeNode()
         StudioSettingsAdapter(engine, node)
         handler = node.registered["studio.settings"]
@@ -152,10 +153,14 @@ async def test_studio_settings_rejects_peer_sender(tmp_path, monkeypatch):
         resp = await handler(peer)
         assert "error" in resp  # rejected
 
-        # Nothing persisted — no settings revision was written to disk.
+        # The rejected request did not alter the initialized default settings.
         status = _ds.settings_status("worker-1")
-        assert status["settings_revision"] is None
-        assert status["runtime"]["enabled"] is False
+        assert status["settings_revision"] == baseline.revision
+        assert status["runtime"]["enabled"] is True
+        assert {row["name"] for row in status["registrations"] if row["enabled"]} == {
+            "generic",
+            "goal",
+        }
     finally:
         await engine.shutdown()
 
