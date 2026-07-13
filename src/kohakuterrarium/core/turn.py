@@ -73,6 +73,7 @@ class TurnResult:
     usage: dict[str, Any] | None = None
     duration_s: float = 0.0
     correlation_id: str | None = None
+    interrupted_by_user: bool = False
 
     @property
     def ok(self) -> bool:

@@ -3970,6 +3970,25 @@ class TestOpportunisticInputInjection:
         finally:
             await agent.stop()
 
+    async def test_interrupt_drops_buffered_drive_events(self, make_agent):
+        from kohakuterrarium.core.events import TriggerEvent
+
+        agent = make_agent(script=[])
+        await agent.start()
+        try:
+            agent._pending_mid_turn_inputs.extend(
+                [
+                    TriggerEvent(type="drive_ready", content="goal"),
+                    TriggerEvent(type="user_input", content="keep me"),
+                ]
+            )
+            agent.interrupt()
+            assert [event.type for event in agent._pending_mid_turn_inputs] == [
+                "user_input"
+            ]
+        finally:
+            await agent.stop()
+
     async def test_interrupt_flush_waits_out_slow_lock_release(self, make_agent):
         # Regression (livelock): interrupt() with a buffered event while
         # the cancelled turn still holds the processing lock BEYOND the

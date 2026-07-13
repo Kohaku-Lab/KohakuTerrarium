@@ -47,6 +47,7 @@ def test_generic_contract_always_present():
     text = plugin.get_prompt_content(_ctx())
     assert text is not None
     assert "Drive runtime" in text
+    assert "do not begin by listing or inspecting Drives" in text
     # An empty snapshot contributes NO kind prose.
     assert "Drive kind:" not in text
 

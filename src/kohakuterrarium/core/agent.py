@@ -554,7 +554,20 @@ class Agent(
         if self.plugins:
             asyncio.create_task(self.plugins.notify("on_interrupt"))
         if self._pending_mid_turn_inputs:
-            asyncio.create_task(self._flush_buffer_after_interrupt())
+            retained = [
+                event
+                for event in self._pending_mid_turn_inputs
+                if not event.type.startswith("drive_")
+            ]
+            dropped = len(self._pending_mid_turn_inputs) - len(retained)
+            self._pending_mid_turn_inputs[:] = retained
+            if dropped:
+                logger.info(
+                    "Dropped buffered Drive events after user interrupt",
+                    count=dropped,
+                )
+            if retained:
+                asyncio.create_task(self._flush_buffer_after_interrupt())
         logger.info("Agent interrupted", agent_name=self.config.name)
 
     def _cancel_job(self, job_id: str, job_name: str) -> None:

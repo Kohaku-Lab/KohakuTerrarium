@@ -199,6 +199,20 @@ class TestRetry:
         delivery = (await h.repo.list_deliveries(did))[0]
         assert delivery.state == "retry_wait" and delivery.attempt == 1
 
+    async def test_user_interrupt_acknowledges_without_retry(self):
+        sink = FakeSink(default=SettlementStatus.INTERRUPTED)
+        h = build_manager(sink=sink)
+        did = await _create_worker(h)
+        delivery = (await h.repo.list_deliveries(did))[0]
+        sink.per_delivery_detail[delivery.delivery_id] = {"interrupted_by_user": True}
+
+        await _round(h)
+
+        settled = (await h.repo.list_deliveries(did))[0]
+        assert settled.state == "acknowledged"
+        assert settled.attempt == 0
+        assert (await h.repo.get(did)).status is DriveStatus.ACTIVE
+
     async def test_settled_error_never_auto_completes(self):
         h = build_manager(sink=FakeSink(default=SettlementStatus.ERROR))
         did = await _create_worker(h)

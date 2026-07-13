@@ -58,7 +58,9 @@ _PLUGIN_PROMPT = (
     "rather than asserting it. Completion is authoritative only through the "
     "goal's completion policy — a user_confirm goal completes only when the "
     "human confirms via /goal complete. If a budget is exhausted, propose "
-    "pausing; a budget never means success."
+    "pausing; a budget never means success. When a Goal event starts a turn, its "
+    "objective and ID are already in that event: act directly instead of calling "
+    "drive_status or group_drive just to rediscover the assigned Goal."
 )
 
 

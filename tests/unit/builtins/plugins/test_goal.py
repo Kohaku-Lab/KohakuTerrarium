@@ -30,6 +30,8 @@ class TestGoalPlugin:
     def test_prompt_content_is_bounded_str(self):
         content = GoalPlugin().get_prompt_content(PluginContext())
         assert isinstance(content, str) and len(content) < 2048
+        assert "act directly" in content
+        assert "drive_status or group_drive" in content
 
     def test_contribute_commands_is_empty(self):
         # It contributes a USER command, not a controller ##command##.

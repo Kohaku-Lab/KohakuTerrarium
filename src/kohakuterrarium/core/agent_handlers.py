@@ -343,6 +343,8 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin):
             metrics.observe_error("controller")
         finally:
             self._processing_task = None
+        if self._interrupt_requested:
+            event.context["interrupted_by_user"] = True
         await self._finalize_processing(event, controller, all_round_text)
 
     def _prepare_processing_cycle(

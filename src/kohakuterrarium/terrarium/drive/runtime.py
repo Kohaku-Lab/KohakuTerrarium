@@ -107,6 +107,9 @@ def _result_to_settlement(result: Any) -> Settlement:
     correlation = getattr(result, "correlation_id", None)
     if correlation:
         detail["correlation_id"] = correlation
+    if getattr(result, "interrupted_by_user", False):
+        detail["interrupted_by_user"] = True
+        return Settlement(SettlementStatus.INTERRUPTED, detail)
     if status == "ok":
         return Settlement(SettlementStatus.OK, detail)
     if status in ("interrupted", "rejected"):

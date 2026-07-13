@@ -368,9 +368,27 @@ class DriveDispatcher:
                         now,
                     )
                 case SettlementStatus.INTERRUPTED:
-                    await self._on_failure(
-                        delivery, DeliveryFailureKind.TRANSIENT, "interrupted", now
-                    )
+                    if settlement.detail.get("interrupted_by_user"):
+                        await self._repo.mark_delivery(
+                            delivery.delivery_id,
+                            "acknowledged",
+                            reason="user_interrupted",
+                            detail=settlement.detail,
+                            now=now,
+                        )
+                        emit_observation(
+                            self._observer,
+                            "drive_delivery_acknowledged",
+                            delivery.drive_id,
+                            {
+                                "delivery_id": delivery.delivery_id,
+                                "outcome": settlement.detail,
+                            },
+                        )
+                    else:
+                        await self._on_failure(
+                            delivery, DeliveryFailureKind.TRANSIENT, "interrupted", now
+                        )
         finally:
             self._inflight.pop(assignee, None)
             self._wake.set()

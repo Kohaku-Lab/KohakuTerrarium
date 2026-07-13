@@ -73,6 +73,7 @@ class FakeSink:
         self.no_settle = False
         self.default = default
         self.per_delivery: dict[str, SettlementStatus] = {}
+        self.per_delivery_detail: dict[str, dict] = {}
         self.gate: asyncio.Event | None = None
 
     async def deliver(self, creature_id, event, *, delivery_id) -> DeliveryOutcome:
@@ -93,7 +94,7 @@ class FakeSink:
         async def _settle() -> Settlement:
             if gate is not None:
                 await gate.wait()
-            return Settlement(status)
+            return Settlement(status, self.per_delivery_detail.get(delivery_id, {}))
 
         return DeliveryOutcome.accepted(_settle)
 

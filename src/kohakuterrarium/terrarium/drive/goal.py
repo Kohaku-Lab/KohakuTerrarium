@@ -249,13 +249,20 @@ class GoalDriveRegistration:
         criteria = [str(c) for c in (spec.get("success_criteria") or [])][
             :_MAX_CRITERIA
         ]
-        lines = [f"Goal objective: {objective}"]
+        lines = [
+            f"Goal ID: {getattr(drive, 'drive_id', '-')}",
+            f"Goal objective: {objective}",
+        ]
         if criteria:
             lines.append("Success criteria:")
             lines.extend(f"- {c}" for c in criteria)
         lines.append(
-            "This is a continuing commitment. Report progress with evidence and "
-            "propose completion with evidence; do not assert it."
+            "Act on this objective directly with your normal tools. The current "
+            "objective and Goal ID are already provided here; do not call "
+            "drive_status or group_drive merely to rediscover them. Use Drive "
+            "tools only when reporting progress, changing state, or when missing "
+            "details actually block the work. Propose completion with evidence; "
+            "do not assert it."
         )
         return DriveProjection(
             event_type="drive_ready",

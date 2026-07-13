@@ -217,6 +217,11 @@ class TestSettlementMapping:
         s = _result_to_settlement(TurnResult(status="timeout"))
         assert s.status is SettlementStatus.ERROR
 
+    def test_user_interrupt_is_preserved_for_dispatcher_policy(self):
+        s = _result_to_settlement(TurnResult(status="ok", interrupted_by_user=True))
+        assert s.status is SettlementStatus.INTERRUPTED
+        assert s.detail["interrupted_by_user"] is True
+
     def test_rejected_and_interrupted_are_transient(self):
         assert (
             _result_to_settlement(TurnResult(status="rejected")).status

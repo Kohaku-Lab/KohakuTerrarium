@@ -84,7 +84,7 @@ class TestGoalSpec:
 
 
 def _record(**spec):
-    return SimpleNamespace(spec=spec)
+    return SimpleNamespace(drive_id="goal-test01", spec=spec)
 
 
 class TestGoalRegistration:
@@ -132,7 +132,9 @@ class TestGoalRegistration:
             "ready",
         )
         assert proj.event_type == "drive_ready"
+        assert "Goal ID: goal-test01" in proj.prompt_override
         assert "fix auth race" in proj.prompt_override
+        assert "do not call drive_status or group_drive" in proj.prompt_override
         assert proj.context["kind"] == "goal"
 
     def test_verify_self_propose_accepts(self):

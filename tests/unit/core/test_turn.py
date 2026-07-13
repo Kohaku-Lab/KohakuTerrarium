@@ -142,6 +142,16 @@ class TestRunEvent:
         finally:
             await agent.stop()
 
+    async def test_user_interrupt_marker_reaches_turn_result(self, tmp_path):
+        agent = await _build(tmp_path, ScriptedLLM(["ok"]))
+        try:
+            event = _drive_event("d-stop")
+            event.context["interrupted_by_user"] = True
+            result = await agent.run_event(event)
+            assert result.interrupted_by_user is True
+        finally:
+            await agent.stop()
+
     async def test_correlation_id_context_fallback(self, tmp_path):
         agent = await _build(tmp_path, ScriptedLLM(["ok"]))
         try:

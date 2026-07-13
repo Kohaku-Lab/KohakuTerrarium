@@ -159,6 +159,7 @@ class AgentTurnMixin:
         capture = TurnCapture()
         result = await self._drive_turn_event(event, capture, timeout=timeout)
         result.correlation_id = correlation
+        result.interrupted_by_user = bool(event.context.get("interrupted_by_user"))
         if raise_on_error:
             if result.status == "timeout":
                 raise TurnTimeoutError(
