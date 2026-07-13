@@ -17,7 +17,6 @@ interpretation, no ``datetime.now``/``random`` outside the injected clock/rng.
 """
 
 import asyncio
-import json
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -41,6 +40,7 @@ from kohakuterrarium.terrarium.drive.policy import (
     is_delivery_stale,
     schedule_sort_key,
 )
+from kohakuterrarium.terrarium.drive.registration_options import json_bytes
 from kohakuterrarium.terrarium.drive.repository import Mutation
 from kohakuterrarium.terrarium.drive.sink import (
     DriveDeliverySink,
@@ -76,10 +76,6 @@ BLOCKABLE_STATUSES = frozenset(
 )
 # Delivery states that still hold a claim/lease this dispatcher must release.
 _CLAIMED_STATE = "claimed"
-
-
-def _json_bytes(obj: object) -> int:
-    return len(json.dumps(obj, ensure_ascii=False, default=str).encode("utf-8"))
 
 
 # ---------------------------------------------------------------------------
@@ -520,7 +516,7 @@ class DriveDispatcher:
                 if projection is not None:
                     projected = dict(getattr(projection, "context", {}) or {})
                     prompt_override = getattr(projection, "prompt_override", None)
-                    if _json_bytes(projected) > self._config.presentation_max_bytes:
+                    if json_bytes(projected) > self._config.presentation_max_bytes:
                         raise ValueError("projected view exceeds presentation budget")
         context = {
             "drive_id": record.drive_id if record else delivery.drive_id,

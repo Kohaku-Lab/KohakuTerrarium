@@ -133,7 +133,10 @@ def json_type_equal(want: Any, got: Any) -> bool:
 
 
 def json_bytes(obj: object) -> int:
-    return len(json.dumps(obj, ensure_ascii=False).encode("utf-8"))
+    # default=str keeps this a pure byte-sizer for non-JSON-native values
+    # (e.g. datetimes in a projection context); JSON-safety is enforced
+    # separately by require_json_safe where it matters.
+    return len(json.dumps(obj, ensure_ascii=False, default=str).encode("utf-8"))
 
 
 def require_json_safe(obj: object, name: str) -> None:
