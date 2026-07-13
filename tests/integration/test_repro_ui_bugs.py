@@ -950,11 +950,11 @@ class TestTuiStdinStealFix:
         )
         text = engine_cli_py.read_text(encoding="utf-8")
         # The pre-publish loop must exist and run BEFORE the
-        # ``await creature.start()`` loop.
+        # ``await engine.start(creature)`` loop.
         assert "session_for_creature = get_session(creature.creature_id)" in text
         assert "session_for_creature.tui = tui" in text
         pub_idx = text.index("session_for_creature.tui = tui")
-        start_idx = text.index("await creature.start()")
+        start_idx = text.index("await engine.start(creature)")
         assert pub_idx < start_idx, (
             "engine_cli must publish the TUISession under each creature's "
             "session_key BEFORE starting any creature — otherwise "

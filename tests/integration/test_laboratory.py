@@ -585,8 +585,12 @@ class TestLaboratoryMultiNodeService:
         host_engine_lab = HostEngine(host_cfg, InProcTransport())
         await host_engine_lab.start()
         # The host coordination engine is Drive-free — it hosts channel objects,
-        # never agents, so it must own no DriveManager (design §8.5).
-        host_terrarium = Terrarium(session_dir=str(tmp_path / "host-sessions"))
+        # never agents, so it is built with Drive disabled and owns no
+        # DriveManager (design §8.5).
+        host_terrarium = Terrarium(
+            session_dir=str(tmp_path / "host-sessions"),
+            drive_config=DriveRuntimeConfig(enabled=False),
+        )
         assert getattr(host_terrarium, "drives", None) is None
         service = MultiNodeTerrariumService(
             host=host_engine_lab, coordination_engine=host_terrarium

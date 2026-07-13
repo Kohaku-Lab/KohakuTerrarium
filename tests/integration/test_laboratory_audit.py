@@ -514,9 +514,10 @@ class TestDriveHostCoordinationEngineIsDriveFree:
     async def test_coordination_engine_owns_no_drive_manager(self):
         # The lab-host coordination engine hosts cross-node channel objects,
         # never agents; even when workers run Drive, it must own no DriveManager
-        # and expose no Drive writer surface (design §8.5).
+        # and expose no Drive writer surface (design §8.5), so it is built with
+        # Drive disabled.
         host = await _start_host(port=140)
-        coord = Terrarium()
+        coord = Terrarium(drive_config=DriveRuntimeConfig(enabled=False))
         try:
             svc = MultiNodeTerrariumService(host=host, coordination_engine=coord)
             assert getattr(coord, "drives", None) is None
