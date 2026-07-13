@@ -151,9 +151,21 @@ class TestStartStop:
 
     async def test_is_running_property(self):
         c = _creature()
-        assert c.is_running is False
+        assert c.is_running is False  # not_started
         await c.start()
-        # _FakeAgent.is_running is also True after start.
+        # is_running is a shortcut over status: idle/busy → True.
+        assert c.is_running is True
+
+    async def test_input_loop_exit_keeps_creature_message_eligible(self):
+        # The creature-host _running flag flips when its _drive_input task
+        # idles out, but the agent stays alive. is_running derives from status
+        # (agent liveness), so the creature stays "idle" and message-eligible
+        # rather than falsely reporting "not running" to group_send.
+        c = _creature()
+        await c.start()
+        assert c.is_running is True
+        c._running = False  # _drive_input idled out; agent still alive
+        assert c.status == "idle"
         assert c.is_running is True
 
     async def test_drive_input_skipped_when_absent(self):
