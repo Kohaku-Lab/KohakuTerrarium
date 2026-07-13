@@ -70,6 +70,9 @@ class _FakeMulti(MultiNodeDriveServiceMixin):
                 continue
         raise KeyError(graph_id)
 
+    def _cluster_members_for(self, graph_id):
+        return []
+
 
 async def _worker(node_id: str):
     engine = Terrarium(
@@ -159,6 +162,29 @@ class TestRoutedReadsWrites:
                 actor=ADMIN, graph_id=ga, is_privileged=True
             )
             assert {v.record.drive_id for v in only_a} == {va.record.drive_id}
+        finally:
+            await ea.shutdown()
+            await eb.shutdown()
+
+    async def test_cluster_graph_list_fans_out_to_member_graphs(self):
+        multi, ea, eb, ga, gb = await _cluster()
+        try:
+            va = await multi.create_drive(
+                _create_req(ga), graph_id=ga, actor=ADMIN, is_privileged=True
+            )
+            vb = await multi.create_drive(
+                _create_req(gb), graph_id=gb, actor=ADMIN, is_privileged=True
+            )
+            multi._cluster_members_for = lambda graph_id: [("A", ga), ("B", gb)]
+
+            listed = await multi.list_drives(
+                actor=ADMIN, graph_id="cluster-session", is_privileged=True
+            )
+
+            assert {view.record.drive_id for view in listed} == {
+                va.record.drive_id,
+                vb.record.drive_id,
+            }
         finally:
             await ea.shutdown()
             await eb.shutdown()

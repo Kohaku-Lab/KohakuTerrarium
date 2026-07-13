@@ -274,7 +274,7 @@ async def run_engine_with_tui(
     # begins routing user input to ``focus.inject_input``.
     for creature in engine.list_creatures():
         if creature.graph_id == graph_id and not creature.is_running:
-            await creature.start()
+            await engine.start(creature)
 
     await tui.start()
     # Wire ESC → interrupt AFTER tui.start() creates the AgentTUI.

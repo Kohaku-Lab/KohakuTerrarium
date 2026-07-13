@@ -141,7 +141,7 @@ async def run_engine_with_rich_cli(
         agent.output_router.default_output = rich_output
 
     if not focus_creature.is_running:
-        await focus_creature.start()
+        await engine.start(focus_creature)
 
     if is_multi:
         # Engine subscription starts after the focus creature is up so

@@ -47,6 +47,7 @@ class _FocusCreature:
 class _FakeEngine:
     def __init__(self, creature: _FocusCreature) -> None:
         self._creature = creature
+        self.start_calls: list[str] = []
 
     def get_creature(self, creature_id: str) -> _FocusCreature:
         assert creature_id == self._creature.creature_id
@@ -54,6 +55,10 @@ class _FakeEngine:
 
     def list_creatures(self) -> list[_FocusCreature]:
         return [self._creature]
+
+    async def start(self, creature: _FocusCreature) -> None:
+        self.start_calls.append(creature.creature_id)
+        await creature.start()
 
 
 class TestInputConflictsWithTerminal:
@@ -125,6 +130,7 @@ class TestRunEngineWithRichCli:
         assert "clear" in during_run["commands"]
         assert "help" in during_run["commands"]
         assert isinstance(creature.agent.input, CLIInput)
+        assert engine.start_calls == [creature.creature_id]
 
 
 class TestSingleCreatureDriveWiring:

@@ -320,6 +320,20 @@ class TestReadsAndRedaction:
         assert "spec" not in rows[0] and "presentation" not in rows[0]
         assert rows[0]["allowed_actions"] == ["read", "update", "transition"]
 
+    def test_list_on_legacy_drive_disabled_runtime_is_empty(self):
+        client = _client(
+            _FakeService(
+                raise_on={
+                    "list_drives": DriveError(
+                        "the Drive runtime is not enabled on this terrarium"
+                    )
+                }
+            )
+        )
+        resp = client.get("/api/sessions/g1/drives")
+        assert resp.status_code == 200
+        assert resp.json() == {"drives": []}
+
     def test_detail_includes_spec_for_operator(self):
         client = _client(_FakeService())  # user=None -> local operator (privileged)
         resp = client.get("/api/sessions/g1/drives/d1")

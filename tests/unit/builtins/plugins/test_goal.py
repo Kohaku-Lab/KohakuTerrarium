@@ -75,6 +75,7 @@ class _FakeService:
         self.create_call = None
         self.propose_call = None
         self.transition_call = None
+        self.wake_call = None
         self.assign_call = None
         self._drive_kind = drive_kind
         self._views = (
@@ -95,6 +96,17 @@ class _FakeService:
             operator=operator,
         )
         return _fake_view(spec=request.spec)
+
+    async def wake_drive(
+        self, drive_id, *, actor, expected_revision=None, is_privileged=False
+    ):
+        self.wake_call = SimpleNamespace(
+            drive_id=drive_id,
+            actor=actor,
+            expected_revision=expected_revision,
+            is_privileged=is_privileged,
+        )
+        return _fake_view(drive_id=drive_id)
 
     async def list_drives(self, *, actor, assignee_creature_id=None, **kw):
         return tuple(self._views)
@@ -192,6 +204,21 @@ class TestGoalCommand:
         # as an operator (graph-authority is denied downstream, not defaulted on).
         assert svc.create_call.operator is False
 
+    async def test_set_defaults_to_continuing_autonomy(self):
+        svc = _FakeService()
+        res = await GoalCommand()._execute(
+            "set Fix the auth race",
+            _ctx(
+                service=svc,
+                creature_id="worker",
+                principal="user:alice",
+                is_operator=True,
+            ),
+        )
+        assert res.success, res.error
+        assert svc.create_call.request.spec["autonomy"] == "continue_when_ready"
+        assert svc.wake_call.drive_id == "d1"
+
     async def test_set_creates_user_owned_drive_with_user_actor(self):
         svc = _FakeService()
         cmd = GoalCommand()
@@ -217,6 +244,10 @@ class TestGoalCommand:
         assert call.request.kind == "goal"
         assert call.request.assignee_creature_id == "worker"
         assert call.request.spec["autonomy"] == "continue_when_ready"
+        assert svc.wake_call.drive_id == "d1"
+        assert svc.wake_call.actor == ActorRef("user", "alice")
+        assert svc.wake_call.expected_revision == 0
+        assert svc.wake_call.is_privileged is False
 
     async def test_complete_proposes_as_user_owner_without_privilege(self):
         # Completion goes through the owner's propose_terminal capability — no

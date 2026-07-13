@@ -24,6 +24,7 @@ from kohakuterrarium.api.auth.dependencies import get_auth_config, get_optional_
 from kohakuterrarium.api.auth.models import User
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.studio.sessions import drives as _drives
+from kohakuterrarium.terrarium.drive.errors import DriveError
 from kohakuterrarium.terrarium.drive.models import ActorRef
 from kohakuterrarium.terrarium.service import TerrariumService
 
@@ -178,18 +179,23 @@ async def list_drives(
 ):
     """Redacted Drive rows for a session/graph, filtered by the query."""
     actor, is_privileged, _ = principal
-    rows = await _drives.list_records(
-        service,
-        graph_id=session_id,
-        actor=actor,
-        is_privileged=is_privileged,
-        statuses=status,
-        kinds=kind,
-        owner=owner,
-        assignee_creature_id=assignee,
-        mine=mine,
-        include_terminal=include_terminal,
-    )
+    try:
+        rows = await _drives.list_records(
+            service,
+            graph_id=session_id,
+            actor=actor,
+            is_privileged=is_privileged,
+            statuses=status,
+            kinds=kind,
+            owner=owner,
+            assignee_creature_id=assignee,
+            mine=mine,
+            include_terminal=include_terminal,
+        )
+    except DriveError as exc:
+        if "Drive runtime is not enabled" not in str(exc):
+            raise
+        rows = []
     return {"drives": rows}
 
 

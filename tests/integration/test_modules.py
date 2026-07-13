@@ -1598,8 +1598,8 @@ class TestModulesIntegration:
             }
             cmd = agent.list_user_commands()["goal"]
 
-            # /goal set through the resolved command object. A manual goal
-            # delivers once and awaits the human — no autonomous continuation.
+            # /goal set through the resolved command object. It immediately
+            # wakes the assigned creature and defaults to continuing autonomy.
             set_res = await cmd.execute(
                 "set Fix the auth race",
                 UserCommandContext(agent=agent, extra=dict(extra)),
@@ -1614,6 +1614,7 @@ class TestModulesIntegration:
             assert len(drives) == 1
             drive_id = drives[0].record.drive_id
             assert drives[0].record.owner.format() == "user:alice"
+            assert drives[0].record.spec["autonomy"] == "continue_when_ready"
 
             # The drive_ready delivered and settled as an ordinary turn.
             for _ in range(200):

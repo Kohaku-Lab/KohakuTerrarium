@@ -88,6 +88,29 @@ class MultiNodeDriveServiceMixin:
             )
 
         if graph_id is not None:
+            cluster_members = getattr(self, "_cluster_members_for", None)
+            members = (
+                list(cluster_members(graph_id)) if callable(cluster_members) else []
+            )
+            if len(members) > 1:
+                views = []
+                seen: set[str] = set()
+                for node_id, member_graph_id in members:
+                    rows = await self.service_for(node_id).list_drives(
+                        actor=actor,
+                        graph_id=member_graph_id,
+                        statuses=statuses,
+                        kinds=kinds,
+                        assignee_creature_id=assignee_creature_id,
+                        owner=owner,
+                        include_terminal=include_terminal,
+                        is_privileged=is_privileged,
+                    )
+                    for view in rows:
+                        if view.record.drive_id not in seen:
+                            seen.add(view.record.drive_id)
+                            views.append(view)
+                return tuple(views)
             try:
                 node_id = await self._resolve_graph_home(graph_id)
             except KeyError:

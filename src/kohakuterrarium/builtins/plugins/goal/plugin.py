@@ -180,7 +180,7 @@ class GoalCommand(BaseUserCommand):
                 objective,
                 success_criteria=_split_criteria(opts.get("criteria")),
                 completion_policy=opts.get("policy", "self_propose"),
-                autonomy=opts.get("autonomy", "manual"),
+                autonomy=opts.get("autonomy", "continue_when_ready"),
             )
         except GoalSpecError as exc:
             return UserCommandResult(error=f"invalid goal: {exc}")
@@ -206,6 +206,12 @@ class GoalCommand(BaseUserCommand):
             graph_id=graph_id,
             actor=ctx.principal,
             operator=ctx.is_operator,
+        )
+        await ctx.service.wake_drive(
+            view.record.drive_id,
+            actor=ctx.principal,
+            expected_revision=view.record.revision,
+            is_privileged=False,
         )
         return _panel("Goal created", view)
 
