@@ -189,6 +189,27 @@ def split_session_store(
     return new_stores
 
 
+def _stamp_split_meta(store: SessionStore) -> None:
+    """Stamp split lineage onto a store reused in place for a split child.
+
+    Mirrors what :func:`split_session_store` writes on a fresh duplicate so the
+    reused store carries the same ``parent_session_ids`` / ``split_at`` lineage
+    (the child that keeps the parent's graph_id descends from the same session).
+    """
+    try:
+        meta = store.load_meta()
+    except Exception:
+        meta = {}
+        logger.warning("split: reused-store load_meta failed", exc_info=True)
+    parent_id = meta.get("session_id", "")
+    try:
+        store.meta["parent_session_ids"] = [str(parent_id)] if parent_id else []
+        store.meta["split_at"] = time.time()
+        _inherit_resumable_meta(meta, store)
+    except Exception:
+        logger.warning("split: reused-store meta write failed", exc_info=True)
+
+
 # ---------------------------------------------------------------------------
 # engine-level hooks — called from channels.connect_creatures /
 # channels.disconnect_creatures.
@@ -354,24 +375,51 @@ def apply_split(
                 owned.add(keep_gid)
         _topo_leftovers.distribute_leftovers(engine, parent_gid, [keep_gid])
         return
-    new_stores = split_session_store(parent, new_paths)
-    for gid, store in zip(delta.new_graph_ids, new_stores):
+    # The largest child keeps the original graph_id, so when the parent's own
+    # file IS ``<parent_gid>.kohakutr`` one child's target path equals the
+    # parent's still-open path. Opening a second ``SessionStore`` there would
+    # duplicate every event and race the parent's live connection (surfacing as
+    # ``SQLite error: disk I/O error`` under WAL); reuse the live parent store
+    # for that child instead. Only the OTHER children get a fresh duplicate.
+    # Mirrors the same-path reuse ``apply_merge`` already performs.
+    parent_path = Path(getattr(parent, "_path", "")).resolve()
+    reuse_gid = next(
+        (
+            gid
+            for gid, p in zip(delta.new_graph_ids, new_paths)
+            if Path(p).resolve() == parent_path
+        ),
+        None,
+    )
+    fresh = [
+        (gid, p) for gid, p in zip(delta.new_graph_ids, new_paths) if gid != reuse_gid
+    ]
+    new_stores = split_session_store(parent, [p for _, p in fresh]) if fresh else []
+    for (gid, _), store in zip(fresh, new_stores):
         engine._session_stores[gid] = store
         _attach_store_to_graph(engine, gid, store)
         _refresh_meta_for_split_graph(engine, gid, store)
-    # Every child got a FRESH duplicated store the engine minted, so the
-    # parent is superseded: drop + close it (if owned) and hand ownership
-    # to the children.  A child reusing ``parent_gid`` already overwrote
-    # the map entry above, so only pop when it did not.
-    if parent_gid not in delta.new_graph_ids:
+    if reuse_gid is not None:
+        _stamp_split_meta(parent)
+        engine._session_stores[reuse_gid] = parent
+        _attach_store_to_graph(engine, reuse_gid, parent)
+        _refresh_meta_for_split_graph(engine, reuse_gid, parent)
+    elif parent_gid not in delta.new_graph_ids:
+        # The parent's graph_id is not among the children (defensive — the
+        # largest child normally keeps it); drop its stale map entry.
         engine._session_stores.pop(parent_gid, None)
-    if parent_owned:
+    # The parent is superseded ONLY when no child reused its live store; the
+    # fresh children each got their own duplicate. Hand ownership to the
+    # children (the reused store keeps the parent's ownership state).
+    if reuse_gid is None and parent_owned:
         _close_superseded(parent)
     if owned is not None:
         for gid in delta.old_graph_ids:
             owned.discard(gid)
-        for gid in delta.new_graph_ids:
+        for gid, _ in fresh:
             owned.add(gid)
+        if reuse_gid is not None and parent_owned:
+            owned.add(reuse_gid)
     _topo_leftovers.distribute_leftovers(engine, parent_gid, list(delta.new_graph_ids))
 
 

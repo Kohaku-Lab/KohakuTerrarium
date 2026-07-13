@@ -51,6 +51,7 @@ from kohakuterrarium.terrarium.drive.sink import (
 )
 from kohakuterrarium.terrarium.drive.snapshot import EnabledRegistrySnapshot
 from kohakuterrarium.terrarium.drive.split_intent import recover_split_intents
+from kohakuterrarium.terrarium.drive.store import DriveRepositoryClosedError
 from kohakuterrarium.terrarium.events import EngineEvent, EventKind
 from kohakuterrarium.utils.logging import get_logger
 
@@ -399,13 +400,24 @@ class DriveRuntime:
         session_dir = getattr(self._engine, "_session_dir", None)
         if session_dir is not None:
             await recover_split_intents(session_dir)
+        # A topology split/merge (or store replacement) can tear the graph's
+        # repository down between scheduling and here. ``drain`` cancels this
+        # task before that happens on the normal path; this pre-check + guard
+        # keeps a raced task on any other path from starting a manager on a
+        # closed executor (prevented, not merely logged, design §6.4).
+        repo = self._registry.repository_for(creature.graph_id)
+        if getattr(repo, "_closed", False):
+            return
         # Barrier crossed: NOW start the graph's dispatcher (deferred from
         # attach/bind so it never contends with resume writes, design §6.5), then
         # remap any persisted assignee whose runtime id was re-minted on resume
         # (R1-43), and reconcile so persisted Drives redeliver.
-        manager = await self._registry.ensure_started(creature.graph_id)
-        await self._remap_resumed_assignees(creature.graph_id)
-        await manager.reconcile(creature_id=creature.creature_id)
+        try:
+            manager = await self._registry.ensure_started(creature.graph_id)
+            await self._remap_resumed_assignees(creature.graph_id)
+            await manager.reconcile(creature_id=creature.creature_id)
+        except DriveRepositoryClosedError:
+            return
 
     async def _remap_resumed_assignees(self, graph_id: str) -> None:
         """Restore persisted Drive assignments after a cold resume re-minted

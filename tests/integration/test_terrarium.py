@@ -37,6 +37,11 @@ from kohakuterrarium.core.config_types import (
 )
 from kohakuterrarium.modules.tool.base import ToolContext
 from kohakuterrarium.session.store import SessionStore
+import kohakuterrarium.terrarium.session_coord as _session_coord
+from kohakuterrarium.terrarium.drive.store import (
+    DriveRepositoryClosedError,
+    SqliteDriveRepository,
+)
 from kohakuterrarium.terrarium.config import (
     ChannelConfig,
     CreatureConfig,
@@ -895,6 +900,127 @@ class TestTerrariumIntegration:
         snap = await service.status_snapshot()
         assert set(snap["creatures"]) == {"alice", "carol"}
         assert len(snap["graphs"]) == 2
+
+    async def test_split_drive_lifecycle_no_repo_race(
+        self, make_service, tmp_path, monkeypatch
+    ):
+        """Regression: a Drive-default-on split must not open a second store at
+        the parent's live path, nor let a barrier-gated reconcile race the
+        repository teardown.
+
+        Two lifecycle bugs collided here. (1) The largest split child keeps the
+        original graph_id, so its target file equals the parent's still-open
+        ``<gid>.kohakutr``; ``apply_split`` used to open a SECOND ``SessionStore``
+        there, duplicating events and racing the live connection
+        (``SQLite error: disk I/O error`` under WAL). (2) an in-flight
+        ``_reconcile_when_ready`` task was not drained before the split rebound
+        the graph's Drive repository, so it started a manager on a shut executor
+        (``DriveRepositoryClosedError``). This drives a real split with an
+        in-flight reconcile forced and asserts NEITHER escapes."""
+        service = make_service()
+        engine = service.engine
+
+        alice = await service.add_creature(
+            _agent_config("alice", tmp_path), creature_id="alice"
+        )
+        gid = alice.graph_id
+        await service.add_creature(
+            _agent_config("bob", tmp_path), graph_id=gid, creature_id="bob"
+        )
+        await service.add_creature(
+            _agent_config("carol", tmp_path), graph_id=gid, creature_id="carol"
+        )
+        await service.add_channel(gid, "ab", "")
+        await service.add_channel(gid, "bc", "")
+        await service.connect("alice", "bob", channel="ab")
+        await service.connect("bob", "carol", channel="bc")
+
+        # Attach the session at exactly ``<gid>.kohakutr`` so the largest split
+        # child's target path equals the parent's live path (the collision case).
+        store = SessionStore(tmp_path / "sessions" / f"{gid}.kohakutr")
+        store.init_meta(
+            session_id=gid,
+            config_type="terrarium",
+            config_path="",
+            pwd=str(tmp_path),
+            agents=["alice", "bob", "carol"],
+        )
+        await engine.attach_session(gid, store)
+        for _ in range(20):  # settle: managers started, initial reconciles done
+            await asyncio.sleep(0)
+
+        # Detect the double-open: a fresh split store minted at the parent's own
+        # live path (would duplicate events + race the open connection).
+        parent_live = str(store.path)
+        collisions: list[str] = []
+        orig_split = _session_coord.split_session_store
+
+        def _probe_split(old_store, new_paths):
+            for p in new_paths:
+                if str(p) == parent_live:
+                    collisions.append(str(p))
+            return orig_split(old_store, new_paths)
+
+        monkeypatch.setattr(_session_coord, "split_session_store", _probe_split)
+
+        # Capture any orphaned-task crash (the reconcile racing a closed repo).
+        loop_errors: list[BaseException] = []
+        loop = asyncio.get_running_loop()
+        prev_handler = loop.get_exception_handler()
+
+        def _handler(lp, context):
+            exc = context.get("exception")
+            if exc is not None:
+                loop_errors.append(exc)
+
+        loop.set_exception_handler(_handler)
+
+        # Widen the reconcile window: slow the Drive repo's worker hops so a
+        # freshly scheduled reconcile is suspended inside ``manager.start`` when
+        # the split tears its repository down.
+        slow = {"on": False}
+        orig_run = SqliteDriveRepository._run
+
+        async def _slow_run(self, fn):
+            if slow["on"]:
+                await asyncio.sleep(0.02)
+            return await orig_run(self, fn)
+
+        monkeypatch.setattr(SqliteDriveRepository, "_run", _slow_run)
+
+        try:
+            slow["on"] = True
+            engine._drive_runtime.schedule_reconcile(engine.get_creature("alice"))
+            engine._drive_runtime.schedule_reconcile(engine.get_creature("carol"))
+            await asyncio.sleep(0.005)  # let reconciles suspend inside start()
+
+            await service.remove_creature("bob")
+
+            for _ in range(30):  # let any orphaned task resume + (pre-fix) crash
+                await asyncio.sleep(0.01)
+        finally:
+            loop.set_exception_handler(prev_handler)
+            slow["on"] = False
+
+        # Fix A: no second store opened at the parent's live path.
+        assert collisions == []
+        # Fix A: the child keeping the original graph_id reuses the live parent
+        # store object in place (not a re-opened duplicate).
+        assert engine._session_stores[gid] is store
+        # Fix B: no reconcile crashed against a torn-down repository.
+        closed = [e for e in loop_errors if isinstance(e, DriveRepositoryClosedError)]
+        assert closed == [], f"reconcile raced repo teardown: {closed}"
+        assert loop_errors == [], f"unexpected orphaned-task errors: {loop_errors}"
+
+        # The split still produced the correct topology + lineage.
+        graphs = await service.list_graphs()
+        assert len(graphs) == 2
+        members = sorted(sorted(g.creature_ids) for g in graphs)
+        assert members == [["alice"], ["carol"]]
+        alice_gid = (await service.get_creature_info("alice")).graph_id
+        carol_gid = (await service.get_creature_info("carol")).graph_id
+        assert engine._session_stores[alice_gid].meta["parent_session_ids"] == [gid]
+        assert engine._session_stores[carol_gid].meta["parent_session_ids"] == [gid]
 
         await service.shutdown()
 

@@ -65,16 +65,7 @@ jobs:
         # protection come from the unit + integration tiers; e2e is
         # the developer surface for reproducing real user behavior
         # locally (see tests/README.md).
-        #
-        # macOS runners default to a 256 open-file limit; each autosession
-        # graph opens both a session store and a Drive sidecar SQLite file,
-        # so the split-heavy suite can exhaust it and surface as
-        # "SQLite error: disk I/O error".  Raise the soft limit first
-        # (no-op / harmless where unsupported).
-        shell: bash
-        run: |
-          ulimit -n 8192 || true
-          pytest tests/integration/ -v --tb=short
+        run: pytest tests/integration/ -v --tb=short
 
   test-format-guards:
     runs-on: ubuntu-latest
