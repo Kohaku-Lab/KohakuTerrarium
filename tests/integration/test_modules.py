@@ -1455,8 +1455,6 @@ class TestModulesIntegration:
         This is the real-Agent + real-engine + injection + execution path the
         _FakeAgent unit tests can't cover end-to-end (design §9.3).
         """
-        import json
-
         from kohakuterrarium.modules.tool.base import ToolContext
         from kohakuterrarium.terrarium.drive.config import (
             DriveRuntimeConfig,
@@ -1515,9 +1513,9 @@ class TestModulesIntegration:
                 {"title": "self drive"}, context=_ctx(root)
             )
             assert self_res.error is None, self_res.error
-            assert (
-                json.loads(self_res.output)["owner"] == f"creature:{root.creature_id}"
-            )
+            assert self_res.metadata["drive"]["owner"] == f"creature:{root.creature_id}"
+            assert self_res.output.startswith("Drive generic-")
+            assert not self_res.output.lstrip().startswith("{")
 
             # Privileged group_drive creates a graph-owned drive and lists it.
             grp = root_agent.registry.get_tool("group_drive")
@@ -1526,12 +1524,13 @@ class TestModulesIntegration:
                 context=_ctx(root),
             )
             assert created.error is None, created.error
-            body = json.loads(created.output)
+            body = created.metadata["drive"]
             assert body["scope_type"] == "graph"
             assert body["assignee"] == worker.creature_id
 
             listed = await grp._execute({"action": "list"}, context=_ctx(root))
-            ids = {d["drive_id"] for d in json.loads(listed.output)["drives"]}
+            assert not created.output.lstrip().startswith("{")
+            ids = {d["drive_id"] for d in listed.metadata["drive"]["drives"]}
             assert body["drive_id"] in ids
 
     async def test_goal_plugin_contributes_command_over_drive(self, llm_box, tmp_path):

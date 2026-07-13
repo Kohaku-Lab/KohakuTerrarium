@@ -7,7 +7,6 @@ refused even for a privileged caller), and that the actor is the trusted caller,
 never an argument.
 """
 
-import json
 from pathlib import Path
 
 import pytest
@@ -54,12 +53,18 @@ def _ctx(engine, creature) -> ToolContext:
     )
 
 
+def _body(result):
+    assert result.error is None, result.error
+    return result.metadata["drive"]
+
+
 async def _create(tool, engine, caller, **args):
     payload = {"action": "create", "title": "watch"}
     payload.update(args)
     res = await tool._execute(payload, context=_ctx(engine, caller))
     assert res.error is None, res.error
-    return json.loads(res.output)
+    assert not res.output.lstrip().startswith("{")
+    return res.metadata["drive"]
 
 
 class TestPrivilegeGate:
@@ -115,10 +120,8 @@ class TestGraphAdmin:
             assert created["assignee"] == "worker"
             did = created["drive_id"]
             # list shows the graph drive.
-            lst = json.loads(
-                (
-                    await tool._execute({"action": "list"}, context=_ctx(engine, root))
-                ).output
+            lst = _body(
+                await tool._execute({"action": "list"}, context=_ctx(engine, root))
             )
             assert did in {d["drive_id"] for d in lst["drives"]}
             # unassign then reassign under CAS.
@@ -132,7 +135,7 @@ class TestGraphAdmin:
                 context=_ctx(engine, root),
             )
             assert un.error is None, un.error
-            assert json.loads(un.output)["assignee"] is None
+            assert _body(un)["assignee"] is None
         finally:
             await engine.shutdown()
 
@@ -154,7 +157,7 @@ class TestGraphAdmin:
                 context=_ctx(engine, root),
             )
             assert tr.error is None, tr.error
-            assert json.loads(tr.output)["owner"] == "user:bob"
+            assert _body(tr)["owner"] == "user:bob"
             # wake (idempotent on an active drive).
             wake = await tool._execute(
                 {"action": "wake", "drive_id": did}, context=_ctx(engine, root)
@@ -201,7 +204,7 @@ class TestGraphAdmin:
                 context=_ctx(engine, root),
             )
             assert ret.error is None, ret.error
-            assert json.loads(ret.output)["status"] == "retired"
+            assert _body(ret)["status"] == "retired"
         finally:
             await engine.shutdown()
 
@@ -240,12 +243,8 @@ class TestGraphScopeGuard:
                 assert res.error is not None, action
                 assert "not in your graph" in res.error, action
             # root_b's list must not show root_a's drive.
-            lst = json.loads(
-                (
-                    await tool._execute(
-                        {"action": "list"}, context=_ctx(engine, root_b)
-                    )
-                ).output
+            lst = _body(
+                await tool._execute({"action": "list"}, context=_ctx(engine, root_b))
             )
             assert did not in {d["drive_id"] for d in lst["drives"]}
         finally:
@@ -308,10 +307,8 @@ class TestGroupPerRecordDurability:
             tool = GroupDriveTool()
             created = await _create(tool, engine, root)
             assert created["durability"] == "ephemeral"  # root's graph, not "mixed"
-            lst = json.loads(
-                (
-                    await tool._execute({"action": "list"}, context=_ctx(engine, root))
-                ).output
+            lst = _body(
+                await tool._execute({"action": "list"}, context=_ctx(engine, root))
             )
             assert lst["drives"]
             assert all(d["durability"] == "ephemeral" for d in lst["drives"])

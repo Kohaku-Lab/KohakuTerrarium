@@ -7,7 +7,6 @@ kind, and — the security invariant — the ActorRef comes from the trusted cal
 context, never from tool arguments.
 """
 
-import json
 from pathlib import Path
 
 import pytest
@@ -68,13 +67,15 @@ class TestDriveCreate:
                 context=ctx,
             )
             assert res.error is None, res.error
-            body = json.loads(res.output)
+            body = res.metadata["drive"]
             assert body["kind"] == "generic"
             assert body["status"] == "active"
             assert body["owner"] == "creature:worker"
             assert body["scope_type"] == "creature"
             # The caller can manage its own drive.
             assert "update" in body["allowed_actions"]
+            assert res.output.startswith(f"Drive {body['drive_id']}: watch the deploy")
+            assert not res.output.lstrip().startswith("{")
         finally:
             await engine.shutdown()
 
@@ -95,7 +96,7 @@ class TestDriveCreate:
                 context=ctx,
             )
             assert res.error is None, res.error
-            body = json.loads(res.output)
+            body = res.metadata["drive"]
             record = await engine.drives.manager.get_drive(body["drive_id"])
             assert record.owner == ActorRef("creature", "worker")
             assert record.created_by == ActorRef("creature", "worker")
@@ -104,7 +105,7 @@ class TestDriveCreate:
         finally:
             await engine.shutdown()
 
-    async def test_disabled_kind_fails_closed(self):
+    async def test_goal_kind_validates_its_spec(self):
         engine, worker = await _engine_with_worker()
         try:
             ctx = _ctx(engine, worker)
@@ -112,7 +113,7 @@ class TestDriveCreate:
                 {"title": "goal drive", "kind": "goal"}, context=ctx
             )
             assert res.error is not None
-            assert "registration unavailable" in res.error
+            assert "objective" in res.error
         finally:
             await engine.shutdown()
 
@@ -127,7 +128,7 @@ class TestDriveCreate:
     async def test_no_drive_runtime_fails_closed(self):
         # A ToolContext whose environment lacks the Drive service handle
         # (Drive-disabled engine) fails closed.
-        engine = Terrarium()
+        engine = Terrarium(drive_config=DriveRuntimeConfig(enabled=False))
         await engine.__aenter__()
         try:
             creature = Creature(
@@ -148,9 +149,9 @@ class TestDriveUpdateStatusReport:
         engine, worker = await _engine_with_worker()
         try:
             ctx = _ctx(engine, worker)
-            created = json.loads(
-                (await DriveCreateTool()._execute({"title": "t"}, context=ctx)).output
-            )
+            created = (
+                await DriveCreateTool()._execute({"title": "t"}, context=ctx)
+            ).metadata["drive"]
             did, rev = created["drive_id"], created["revision"]
             # Happy update at the current revision.
             ok = await DriveUpdateTool()._execute(
@@ -158,7 +159,7 @@ class TestDriveUpdateStatusReport:
                 context=ctx,
             )
             assert ok.error is None, ok.error
-            assert json.loads(ok.output)["title"] == "renamed"
+            assert ok.metadata["drive"]["title"] == "renamed"
             # Stale revision -> distinct conflict error.
             conflict = await DriveUpdateTool()._execute(
                 {"drive_id": did, "expected_revision": rev, "title": "again"},
@@ -173,21 +174,19 @@ class TestDriveUpdateStatusReport:
         engine, worker = await _engine_with_worker()
         try:
             ctx = _ctx(engine, worker)
-            created = json.loads(
-                (
-                    await DriveCreateTool()._execute({"title": "listme"}, context=ctx)
-                ).output
-            )
+            created = (
+                await DriveCreateTool()._execute({"title": "listme"}, context=ctx)
+            ).metadata["drive"]
             res = await DriveStatusTool()._execute({}, context=ctx)
             assert res.error is None
-            body = json.loads(res.output)
+            body = res.metadata["drive"]
             ids = {d["drive_id"] for d in body["drives"]}
             assert created["drive_id"] in ids
             # get-by-id path.
             one = await DriveStatusTool()._execute(
                 {"drive_id": created["drive_id"]}, context=ctx
             )
-            assert json.loads(one.output)["drive_id"] == created["drive_id"]
+            assert one.metadata["drive"]["drive_id"] == created["drive_id"]
         finally:
             await engine.shutdown()
 
@@ -195,9 +194,9 @@ class TestDriveUpdateStatusReport:
         engine, worker = await _engine_with_worker()
         try:
             ctx = _ctx(engine, worker)
-            created = json.loads(
-                (await DriveCreateTool()._execute({"title": "t"}, context=ctx)).output
-            )
+            created = (
+                await DriveCreateTool()._execute({"title": "t"}, context=ctx)
+            ).metadata["drive"]
             res = await DriveReportTool()._execute(
                 {
                     "drive_id": created["drive_id"],
@@ -207,7 +206,7 @@ class TestDriveUpdateStatusReport:
                 context=ctx,
             )
             assert res.error is None, res.error
-            assert "progress_id" in json.loads(res.output)
+            assert "progress_id" in res.metadata["drive"]
         finally:
             await engine.shutdown()
 
@@ -217,9 +216,9 @@ class TestDriveTransition:
         engine, worker = await _engine_with_worker()
         try:
             ctx = _ctx(engine, worker)
-            created = json.loads(
-                (await DriveCreateTool()._execute({"title": "t"}, context=ctx)).output
-            )
+            created = (
+                await DriveCreateTool()._execute({"title": "t"}, context=ctx)
+            ).metadata["drive"]
             did = created["drive_id"]
             # Control transition needs expected_revision.
             paused = await DriveTransitionTool()._execute(
@@ -231,7 +230,7 @@ class TestDriveTransition:
                 context=ctx,
             )
             assert paused.error is None, paused.error
-            assert json.loads(paused.output)["status"] == "paused"
+            assert paused.metadata["drive"]["status"] == "paused"
             # Resume, then propose completion (generic kind = verifier none ->
             # accepted immediately).
             record = await engine.drives.manager.get_drive(did)
@@ -254,7 +253,7 @@ class TestDriveTransition:
                 context=ctx,
             )
             assert done.error is None, done.error
-            body = json.loads(done.output)
+            body = done.metadata["drive"]
             assert body["proposal"] == "accepted"
             assert body["status"] == "completed"
         finally:
@@ -264,9 +263,9 @@ class TestDriveTransition:
         engine, worker = await _engine_with_worker()
         try:
             ctx = _ctx(engine, worker)
-            created = json.loads(
-                (await DriveCreateTool()._execute({"title": "t"}, context=ctx)).output
-            )
+            created = (
+                await DriveCreateTool()._execute({"title": "t"}, context=ctx)
+            ).metadata["drive"]
             res = await DriveTransitionTool()._execute(
                 {"drive_id": created["drive_id"], "status": "paused"}, context=ctx
             )
@@ -355,11 +354,11 @@ class TestPerRecordDurability:
             ctx = _ctx(engine, worker)
             created = await DriveCreateTool()._execute({"title": "watch"}, context=ctx)
             assert created.error is None, created.error
-            body = json.loads(created.output)
+            body = created.metadata["drive"]
             assert body["durability"] == "ephemeral"  # worker's graph, not "mixed"
             got = await DriveStatusTool()._execute(
                 {"drive_id": body["drive_id"]}, context=ctx
             )
-            assert json.loads(got.output)["durability"] == "ephemeral"
+            assert got.metadata["drive"]["durability"] == "ephemeral"
         finally:
             await engine.shutdown()

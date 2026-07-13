@@ -152,6 +152,26 @@ class TestCreate:
         )
         assert rec.status is DriveStatus.DRAFT
 
+    async def test_drive_id_is_short_kind_prefixed_and_preserves_other_ids(self, repo):
+        rec = await repo.create_drive(_req(kind="goal"), actor=WORKER, graph_id="g1")
+        assert rec.drive_id.startswith("goal-")
+        assert len(rec.drive_id) == len("goal-") + 6
+        audit = await repo.list_audit(rec.drive_id)
+        outbox = await repo.list_outbox()
+        assert audit[0].audit_id.startswith("id")
+        assert outbox[0].outbox_id.startswith("id")
+
+    async def test_drive_id_collision_retries_inside_create_transaction(
+        self, repo, monkeypatch
+    ):
+        monkeypatch.setattr(repo, "_new_drive_id", lambda kind: f"{kind}-repeat")
+        first = await repo.create_drive(_req(), actor=WORKER, graph_id="g1")
+        ids = iter(("generic-repeat", "generic-fresh"))
+        monkeypatch.setattr(repo, "_new_drive_id", lambda kind: next(ids))
+        second = await repo.create_drive(_req(), actor=WORKER, graph_id="g1")
+        assert first.drive_id == "generic-repeat"
+        assert second.drive_id == "generic-fresh"
+
 
 # ── update + CAS ──────────────────────────────────────────────────
 

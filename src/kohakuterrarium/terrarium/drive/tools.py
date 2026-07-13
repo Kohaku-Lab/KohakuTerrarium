@@ -9,10 +9,10 @@ re-checks owner/assignee/scope/registration on every call (rule §4.15), so thes
 are safe on non-privileged creatures. ``group_drive`` (privileged) is Phase G.
 
 Conflicts (stale ``expected_revision``), permission denials, and disabled/unknown
-registrations surface as distinct, model-shaped errors. Output is bounded JSON.
+registrations surface as distinct, model-shaped errors. Output is concise text with
+its structured payload retained in :attr:`ToolResult.metadata`.
 """
 
-import json
 from typing import Any
 
 from kohakuterrarium.modules.tool.base import (
@@ -98,8 +98,68 @@ def _err(message: str) -> ToolResult:
     return ToolResult(error=message)
 
 
+def _format_value(value: Any) -> str:
+    if value is None:
+        return "none"
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(item) for item in value) or "none"
+    return str(value)
+
+
+def _format_drive(summary: dict[str, Any]) -> str:
+    lines = [
+        f"Drive {summary['drive_id']}: {summary['title']}",
+        f"Status: {summary['status']} | Kind: {summary['kind']} | Revision: {summary['revision']}",
+        f"Owner: {summary['owner']} | Assignee: {_format_value(summary.get('assignee'))}",
+        f"Scope: {summary['scope_type']}:{summary['scope_id']} | Priority: {summary['priority']}",
+    ]
+    if summary.get("availability") is not None:
+        lines.append(f"Availability: {summary['availability']}")
+    if summary.get("durability") is not None:
+        lines.append(f"Durability: {summary['durability']}")
+    if summary.get("proposal") is not None:
+        lines.append(f"Proposal: {summary['proposal']}")
+    actions = summary.get("allowed_actions") or []
+    if actions:
+        lines.append(f"Allowed actions: {_format_value(actions)}")
+    return "\n".join(lines)
+
+
+def _format_payload(payload: dict[str, Any]) -> str:
+    drives = payload.get("drives")
+    if isinstance(drives, list):
+        if not drives:
+            return "No matching drives."
+        return "\n\n".join(_format_drive(item) for item in drives)
+    if {"drive_id", "title", "status", "kind"}.issubset(payload):
+        return _format_drive(payload)
+    if "progress_id" in payload:
+        return (
+            f"Progress recorded for drive {payload['drive_id']}.\n"
+            f"Progress ID: {payload['progress_id']}"
+        )
+    if "proposal_id" in payload:
+        return (
+            f"Transition proposed for drive {payload['drive_id']}: "
+            f"{payload['target_status']} ({payload.get('proposal', 'pending')}).\n"
+            f"Proposal ID: {payload['proposal_id']}"
+        )
+    if "delivery_id" in payload:
+        return (
+            f"Delivery {payload['delivery_id']} replayed for drive "
+            f"{payload['drive_id']}."
+        )
+    return "\n".join(f"{key}: {_format_value(value)}" for key, value in payload.items())
+
+
 def _ok(payload: dict[str, Any]) -> ToolResult:
-    return ToolResult(output=json.dumps(payload, default=str), exit_code=0)
+    return ToolResult(
+        output=_format_payload(payload),
+        exit_code=0,
+        metadata={"drive": payload},
+    )
 
 
 def _drive_error_result(exc: DriveError) -> ToolResult:

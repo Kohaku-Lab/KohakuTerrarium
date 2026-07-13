@@ -47,6 +47,10 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+_DRIVE_ID_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
+_DRIVE_ID_LENGTH = 6
+_DRIVE_ID_ATTEMPTS = 32
+
 
 class BaseDriveRepository(DeliveryOpsMixin):
     """Shared Drive orchestration over a :class:`DriveTransaction` backend."""
@@ -143,6 +147,22 @@ class BaseDriveRepository(DeliveryOpsMixin):
             raise DriveNotFoundError(f"no Drive {drive_id!r}")
         return record
 
+    def _new_drive_id(self, kind: str) -> str:
+        token = "".join(
+            _DRIVE_ID_ALPHABET[byte % len(_DRIVE_ID_ALPHABET)]
+            for byte in uuid.uuid4().bytes[:_DRIVE_ID_LENGTH]
+        )
+        return f"{kind}-{token}"
+
+    async def _mint_drive_id(self, txn: DriveTransaction, kind: str) -> str:
+        for _ in range(_DRIVE_ID_ATTEMPTS):
+            drive_id = self._new_drive_id(kind)
+            if await txn.get_drive(drive_id) is None:
+                return drive_id
+        raise DriveIdempotencyConflictError(
+            "could not mint a unique Drive ID after repeated collisions"
+        )
+
     # -- canonical mutations -------------------------------------------------
 
     async def create_drive(
@@ -165,6 +185,7 @@ class BaseDriveRepository(DeliveryOpsMixin):
             )
             if replay is not None:
                 return replay
+            drive_id = await self._mint_drive_id(txn, request.kind)
             mutation, record = build_create(
                 request,
                 actor=actor,
@@ -172,6 +193,7 @@ class BaseDriveRepository(DeliveryOpsMixin):
                 status=initial_status,
                 now=self._clock(),
                 mint=self._mint,
+                drive_id=drive_id,
                 operator_grant=operator_grant,
             )
             await txn.apply(

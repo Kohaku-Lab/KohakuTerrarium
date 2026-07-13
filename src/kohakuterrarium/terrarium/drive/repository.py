@@ -285,13 +285,14 @@ def build_create(
     status: DriveStatus,
     now: datetime,
     mint: Mint,
+    drive_id: str | None = None,
     operator_grant: dict[str, Any] | None = None,
 ) -> tuple[Mutation, DriveRecord]:
     if request.scope_type == "graph" and request.scope_id != graph_id:
         raise DriveValidationError(
             "graph-scoped Drive scope_id must equal its graph_id"
         )
-    drive_id = mint()
+    drive_id = drive_id or mint()
     record = DriveRecord(
         drive_id=drive_id,
         kind=request.kind,

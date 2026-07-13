@@ -40,7 +40,14 @@ class TestGoalPlugin:
 
 
 def _fake_view(
-    *, drive_id="d1", revision=0, status=DriveStatus.ACTIVE, spec=None, kind="goal"
+    *,
+    drive_id="d1",
+    revision=0,
+    status=DriveStatus.ACTIVE,
+    spec=None,
+    kind="goal",
+    title="obj",
+    created_at=0,
 ):
     return SimpleNamespace(
         record=SimpleNamespace(
@@ -48,10 +55,10 @@ def _fake_view(
             revision=revision,
             status=status,
             kind=kind,
-            spec=spec or {"objective": "obj", "autonomy": "manual"},
-            title="obj",
+            spec=spec or {"objective": title, "autonomy": "manual"},
+            title=title,
             owner=ActorRef("user", "alice"),
-            created_at=0,
+            created_at=created_at,
         ),
         assignee_creature_id="worker",
     )
@@ -64,12 +71,15 @@ class _FakeService:
     non-goal kind to prove ``/goal`` refuses to mutate foreign-kind records.
     """
 
-    def __init__(self, drive_kind="goal"):
+    def __init__(self, drive_kind="goal", *, views=None):
         self.create_call = None
         self.propose_call = None
         self.transition_call = None
         self.assign_call = None
         self._drive_kind = drive_kind
+        self._views = (
+            list(views) if views is not None else [_fake_view(kind=self._drive_kind)]
+        )
 
     async def get_creature_info(self, creature_id):
         return SimpleNamespace(creature_id=creature_id, graph_id="g1")
@@ -87,9 +97,12 @@ class _FakeService:
         return _fake_view(spec=request.spec)
 
     async def list_drives(self, *, actor, assignee_creature_id=None, **kw):
-        return (_fake_view(),)
+        return tuple(self._views)
 
     async def get_drive(self, drive_id, *, actor, is_privileged=False):
+        for view in self._views:
+            if view.record.drive_id == drive_id:
+                return view
         return _fake_view(drive_id=drive_id, kind=self._drive_kind)
 
     async def assign_drive(
@@ -231,10 +244,138 @@ class TestGoalCommand:
         assert svc.transition_call.target == DriveStatus.PAUSED
         assert svc.transition_call.is_privileged is False
 
-    async def test_bad_subcommand_shows_usage(self):
+    async def test_list_shows_only_live_goals_with_explicit_status(self):
+        svc = _FakeService(
+            views=[
+                _fake_view(
+                    drive_id="active", status=DriveStatus.ACTIVE, title="Current"
+                ),
+                _fake_view(
+                    drive_id="paused", status=DriveStatus.PAUSED, title="Paused"
+                ),
+                _fake_view(drive_id="done", status=DriveStatus.COMPLETED, title="Old"),
+                _fake_view(
+                    drive_id="cancelled",
+                    status=DriveStatus.CANCELLED,
+                    title="Dropped",
+                ),
+            ]
+        )
+        res = await GoalCommand()._execute(
+            "list", _ctx(service=svc, creature_id="worker", principal="user:alice")
+        )
+        assert res.success, res.error
+        assert "active  [status: active]  Current" in res.output
+        assert "paused  [status: paused]  Paused" in res.output
+        assert "done" not in res.output
+        assert "cancelled" not in res.output
+        labels = [item["label"] for item in res.data["items"]]
+        assert labels == ["Current [status: active]", "Paused [status: paused]"]
+
+    async def test_list_reports_when_there_are_no_live_goals(self):
+        svc = _FakeService(views=[_fake_view(status=DriveStatus.COMPLETED)])
+        res = await GoalCommand()._execute(
+            "list", _ctx(service=svc, creature_id="worker", principal="user:alice")
+        )
+        assert res.output == "No live goals for this creature."
+
+    async def test_bare_goal_skips_newer_terminal_history(self):
+        svc = _FakeService(
+            views=[
+                _fake_view(drive_id="live", status=DriveStatus.ACTIVE, created_at=1),
+                _fake_view(
+                    drive_id="stale", status=DriveStatus.COMPLETED, created_at=2
+                ),
+            ]
+        )
+        res = await GoalCommand()._execute(
+            "", _ctx(service=svc, creature_id="worker", principal="user:alice")
+        )
+        assert res.success, res.error
+        assert "Goal: live [status: active]" in res.output
+
+    async def test_show_by_id_keeps_terminal_history_available(self):
+        svc = _FakeService(
+            views=[_fake_view(drive_id="old", status=DriveStatus.CANCELLED)]
+        )
+        res = await GoalCommand()._execute(
+            "show old",
+            _ctx(service=svc, creature_id="worker", principal="user:alice"),
+        )
+        assert res.success, res.error
+        assert "Goal: old [status: cancelled]" in res.output
+
+    @pytest.mark.parametrize(
+        ("command", "eligible", "target", "wording"),
+        [
+            ("pause", DriveStatus.ACTIVE, DriveStatus.PAUSED, "Goal paused"),
+            ("resume", DriveStatus.PAUSED, DriveStatus.ACTIVE, "Goal resumed"),
+            ("cancel", DriveStatus.PAUSED, DriveStatus.CANCELLED, "Goal cancelled"),
+        ],
+    )
+    async def test_implicit_transition_selects_eligible_live_goal(
+        self, command, eligible, target, wording
+    ):
+        svc = _FakeService(
+            views=[
+                _fake_view(drive_id="eligible", status=eligible, created_at=1),
+                _fake_view(
+                    drive_id="terminal", status=DriveStatus.COMPLETED, created_at=2
+                ),
+            ]
+        )
+        res = await GoalCommand()._execute(
+            command,
+            _ctx(service=svc, creature_id="worker", principal="user:alice"),
+        )
+        assert res.success, res.error
+        assert svc.transition_call.target is target
+        assert res.output.startswith(f"{wording}: eligible [status: {target.value}]")
+        assert "canceld" not in res.output
+
+    async def test_implicit_complete_selects_active_not_paused_or_terminal(self):
+        svc = _FakeService(
+            views=[
+                _fake_view(drive_id="active", status=DriveStatus.ACTIVE, created_at=1),
+                _fake_view(drive_id="paused", status=DriveStatus.PAUSED, created_at=2),
+                _fake_view(drive_id="done", status=DriveStatus.COMPLETED, created_at=3),
+            ]
+        )
+        res = await GoalCommand()._execute(
+            "complete",
+            _ctx(service=svc, creature_id="worker", principal="user:alice"),
+        )
+        assert res.success, res.error
+        assert "Goal completed: active [status: completed]" in res.output
+
+    @pytest.mark.parametrize(
+        ("command", "status"),
+        [
+            ("pause", DriveStatus.PAUSED),
+            ("resume", DriveStatus.ACTIVE),
+            ("cancel", DriveStatus.CANCELLED),
+            ("complete", DriveStatus.PAUSED),
+        ],
+    )
+    async def test_explicit_transition_rejects_ineligible_status(self, command, status):
+        svc = _FakeService(views=[_fake_view(drive_id="d1", status=status)])
+        res = await GoalCommand()._execute(
+            f"{command} d1",
+            _ctx(service=svc, creature_id="worker", principal="user:alice"),
+        )
+        assert res.error and f"cannot {command}" in res.error
+        assert f"status is {status.value}" in res.error
+        assert svc.transition_call is None
+        assert svc.propose_call is None
+
+    async def test_bad_subcommand_shows_accurate_usage(self):
         cmd = GoalCommand()
         res = await cmd._execute("frobnicate", _ctx())
         assert res.error and res.error.startswith("usage:")
+        assert "show [id]" in res.error
+        assert "list shows live goals" in res.error
+        assert "show <id> can display terminal history" in res.error
+        assert "actions without an id select an eligible live goal" in res.error
 
 
 class TestGoalKindGuard:

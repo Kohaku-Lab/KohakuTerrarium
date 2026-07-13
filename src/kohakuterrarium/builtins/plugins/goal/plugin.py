@@ -91,10 +91,29 @@ _TERMINAL = frozenset(
         DriveStatus.RETIRED,
     }
 )
+_LIVE = frozenset(DriveStatus) - _TERMINAL
+_ELIGIBLE_STATUSES = {
+    "pause": frozenset({DriveStatus.ACTIVE, DriveStatus.WAITING, DriveStatus.BLOCKED}),
+    "resume": frozenset({DriveStatus.WAITING, DriveStatus.BLOCKED, DriveStatus.PAUSED}),
+    "cancel": _LIVE,
+    "complete": frozenset({DriveStatus.ACTIVE}),
+}
+_TRANSITION_TARGETS = {
+    "pause": DriveStatus.PAUSED,
+    "resume": DriveStatus.ACTIVE,
+    "cancel": DriveStatus.CANCELLED,
+}
+_TRANSITION_TITLES = {
+    "pause": "Goal paused",
+    "resume": "Goal resumed",
+    "cancel": "Goal cancelled",
+}
 _SET_FLAG_KEYS = frozenset({"autonomy", "policy", "criteria"})
 _USAGE = (
     "usage: /goal set <objective> | show [id] | list | pause [id] | "
-    "resume [id] | cancel [id] | complete [id] | assign <id> <creature>"
+    "resume [id] | cancel [id] | complete [id] | assign <id> <creature>\n"
+    "list shows live goals; show <id> can display terminal history; "
+    "actions without an id select an eligible live goal"
 )
 
 
@@ -193,12 +212,12 @@ class GoalCommand(BaseUserCommand):
     # -- show / list ---------------------------------------------------------
 
     async def _list(self, ctx: "_Resolved") -> UserCommandResult:
-        views = await _list_goals(ctx)
+        views = [view for view in await _list_goals(ctx) if view.record.status in _LIVE]
         if not views:
-            return UserCommandResult(output="No goals for this creature.")
+            return UserCommandResult(output="No live goals for this creature.")
         items = [
             {
-                "label": f"{v.record.title} [{v.record.status.value}]",
+                "label": f"{v.record.title} [status: {v.record.status.value}]",
                 "description": f"id={v.record.drive_id} owner={v.record.owner.format()}",
             }
             for v in views
@@ -219,29 +238,24 @@ class GoalCommand(BaseUserCommand):
     async def _transition(
         self, sub: str, drive_id: str, ctx: "_Resolved"
     ) -> UserCommandResult:
-        target = {
-            "pause": DriveStatus.PAUSED,
-            "resume": DriveStatus.ACTIVE,
-            "cancel": DriveStatus.CANCELLED,
-        }[sub]
-        view = await _select(ctx, drive_id)
+        view = await _select_eligible(ctx, drive_id, sub)
         if view is None:
-            return UserCommandResult(error="no matching goal (give an id)")
+            return _no_eligible_goal(sub)
         # Owner capability: the user owns the goal, so pause/resume/cancel need
         # no operator privilege.
         updated = await ctx.service.transition_drive(
             view.record.drive_id,
-            target,
+            _TRANSITION_TARGETS[sub],
             expected_revision=view.record.revision,
             actor=ctx.principal,
             is_privileged=False,
         )
-        return _panel(f"Goal {sub}d", updated)
+        return _panel(_TRANSITION_TITLES[sub], updated)
 
     async def _complete(self, drive_id: str, ctx: "_Resolved") -> UserCommandResult:
-        view = await _select(ctx, drive_id)
+        view = await _select_eligible(ctx, drive_id, "complete")
         if view is None:
-            return UserCommandResult(error="no matching goal (give an id)")
+            return _no_eligible_goal("complete")
         # User-authoritative completion: the owner proposes (owner holds
         # propose_terminal — no operator privilege) with evidence so
         # self_propose / user_confirm / verifier all finalize (design §11.2).
@@ -388,17 +402,54 @@ def _require_goal(view: Any, drive_id: str) -> Any:
 
 
 async def _select(ctx: _Resolved, drive_id: str) -> Any | None:
-    """Resolve an explicit id, or the single active goal for the creature."""
+    """Resolve an explicit goal, or the newest live goal for the creature.
+
+    Explicit ``show`` keeps terminal history addressable. All implicit selection
+    excludes terminal records so a stale completed/cancelled goal cannot become
+    the current goal.
+    """
     if drive_id:
         view = await ctx.service.get_drive(
             drive_id, actor=ctx.principal, is_privileged=False
         )
         return _require_goal(view, drive_id)
-    live = [v for v in await _list_goals(ctx) if v.record.status not in _TERMINAL]
-    if not live:
+    return await _select_latest(ctx, _LIVE)
+
+
+async def _select_eligible(ctx: _Resolved, drive_id: str, action: str) -> Any | None:
+    """Select a goal whose current status permits ``action``."""
+    eligible = _ELIGIBLE_STATUSES[action]
+    if drive_id:
+        view = await _select(ctx, drive_id)
+        if view is None:
+            return None
+        if view.record.status not in eligible:
+            allowed = ", ".join(sorted(status.value for status in eligible))
+            raise _GoalUnavailable(
+                f"cannot {action} goal {drive_id}: status is "
+                f"{view.record.status.value}; eligible statuses: {allowed}"
+            )
+        return view
+    return await _select_latest(ctx, eligible)
+
+
+async def _select_latest(
+    ctx: _Resolved, statuses: frozenset[DriveStatus]
+) -> Any | None:
+    matches = [
+        view for view in await _list_goals(ctx) if view.record.status in statuses
+    ]
+    if not matches:
         return None
-    live.sort(key=lambda v: v.record.created_at)
-    return live[-1]
+    matches.sort(key=lambda view: view.record.created_at)
+    return matches[-1]
+
+
+def _no_eligible_goal(action: str) -> UserCommandResult:
+    allowed = ", ".join(sorted(status.value for status in _ELIGIBLE_STATUSES[action]))
+    return UserCommandResult(
+        error=f"no goal eligible to {action} (statuses: {allowed}; give an id)"
+    )
 
 
 def _parse_set(rest: str) -> tuple[dict[str, str], str]:
@@ -435,7 +486,9 @@ def _panel(title: str, view: Any) -> UserCommandResult:
         {"key": "autonomy", "value": str(spec.get("autonomy", "-"))},
         {"key": "completion", "value": str(spec.get("completion_policy", "-"))},
     ]
-    text = f"{title}: {record.drive_id} [{record.status.value}] — {record.title}"
+    text = (
+        f"{title}: {record.drive_id} [status: {record.status.value}] — {record.title}"
+    )
     return UserCommandResult(output=text, data=ui_info_panel(title, fields))
 
 
@@ -443,7 +496,7 @@ def _list_text(views: list[Any]) -> str:
     lines = ["Goals:"]
     for v in views:
         lines.append(
-            f"  {v.record.drive_id}  [{v.record.status.value}]  {v.record.title}"
+            f"  {v.record.drive_id}  [status: {v.record.status.value}]  {v.record.title}"
         )
     return "\n".join(lines)
 
