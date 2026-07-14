@@ -11,8 +11,10 @@
     <div class="flex items-center gap-3 text-xs text-warm-500 mt-1">
       <span v-if="model">{{ model }}</span>
       <span v-if="contextPercent > 0">{{ contextPercent }}% ctx</span>
+      <span v-if="tokenCount > 0">{{ tokenCount.toLocaleString() }} tok</span>
       <span v-if="costLine">${{ costLine }} spent</span>
-      <span v-if="jobCount > 0">{{ jobCount }} job{{ jobCount === 1 ? "" : "s" }}</span>
+      <span v-if="jobCount > 0" :title="jobTitle">{{ jobCount }} job{{ jobCount === 1 ? "" : "s" }} running</span>
+      <span v-if="scratchpadCount > 0">{{ scratchpadCount }} scratchpad</span>
       <span v-if="age">{{ age }}</span>
     </div>
   </header>
@@ -21,14 +23,35 @@
 <script setup>
 import { computed } from "vue"
 
+import { useChatStore } from "@/stores/chat"
+import { useSessionDetailStore } from "@/stores/sessionDetail"
 import { useStatusStore } from "@/stores/status"
 
 const props = defineProps({
   target: { type: String, required: true },
   instance: { type: Object, default: null },
+  // Session name the embedded viewer is scoped by — the header reads its
+  // session-detail summary so its token total is the SAME backend
+  // graph total the Cost/Overview tabs show. Defaults to the instance's
+  // session id / target so the header still resolves standalone.
+  sessionName: { type: String, default: "" },
 })
 
 const status = useStatusStore()
+const chat = useChatStore()
+// Prefer the backend graph total (all creatures + their sub-agents) from
+// the same scoped session-detail summary the embedded Cost tab uses, so a
+// hard refresh that only restored one creature's live usage into the chat
+// store can't leave the header undercounting. Fall back to the live chat
+// total until the first summary poll lands.
+const detail = useSessionDetailStore(props.sessionName || props.instance?.session_id || props.target)
+const tokenCount = computed(() => {
+  const t = detail.summary?.totals?.tokens
+  if (t) return (Number(t.prompt) || 0) + (Number(t.completion) || 0)
+  return chat.sessionTokenTotals.prompt + chat.sessionTokenTotals.completion
+})
+const scratchpadCount = computed(() => Object.keys(status.scratchpad || {}).length)
+const jobTitle = computed(() => status.runningJobs.map((j) => j.name).join(", "))
 
 const name = computed(() => props.instance?.config_name ?? props.target)
 const kind = computed(() => props.instance?.type ?? "agent")

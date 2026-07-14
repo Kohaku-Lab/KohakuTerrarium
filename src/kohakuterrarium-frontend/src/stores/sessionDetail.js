@@ -33,10 +33,39 @@ const _sessionDetailOptions = {
     loadingTree: false,
     loadingSummary: false,
     error: "",
+    // True when the bound session is LIVE (the inspector embeds the
+    // viewer for a running graph): the Drives tab then reads the live
+    // ``/sessions/{sid}/drives`` route, whose offline saved counterpart
+    // returns [] under the live writer lock (UXI-01). Saved viewers keep
+    // it false and read the persisted sidecar.
+    live: false,
+    // Bumped by ``requestReload`` to tell the per-tab loaders (Cost /
+    // Trace / Conversation) to refetch their data as a LIVE session
+    // progresses. Never bumped for a saved session (UXI-01 live viewer).
+    reloadKey: 0,
   }),
 
   getters: {
-    agents: (state) => (state.meta && state.meta.agents) || [],
+    // Enumerate EVERY creature in the graph, not just the root. The
+    // no-agent ``/summary`` lists all creatures (+ attached namespaces)
+    // and the history-index ``targets`` are the exact source the
+    // conversation dropdown uses; union both (summary first for the
+    // viewer-default ordering) and fall back to ``meta.agents`` before
+    // either has loaded (UXI-03). Channel targets (``ch:``) are excluded.
+    agents: (state) => {
+      const names = []
+      const seen = new Set()
+      const add = (n) => {
+        if (typeof n === "string" && n && !n.startsWith("ch:") && !seen.has(n)) {
+          seen.add(n)
+          names.push(n)
+        }
+      }
+      for (const n of (state.summary && state.summary.agents) || []) add(n)
+      for (const n of state.targets || []) add(n)
+      for (const n of (state.meta && state.meta.agents) || []) add(n)
+      return names
+    },
     primaryAgent() {
       return this.agents[0] || null
     },
@@ -47,6 +76,18 @@ const _sessionDetailOptions = {
   actions: {
     setTab(tab) {
       this.activeTab = VALID_TABS.has(tab) ? tab : "overview"
+    },
+
+    /**
+     * Refresh the viewer's data in place as a live session advances:
+     * refetch meta / tree / summary (Overview) and bump ``reloadKey`` so
+     * the per-tab loaders (Cost / Trace / Conversation) refetch too.
+     * ``load`` keeps the existing meta/summary while refetching (no
+     * ``isSwitch``), so there is no spinner flash / scroll reset.
+     */
+    requestReload() {
+      this.reloadKey++
+      if (this.name) this.load(this.name)
     },
 
     async load(name) {
@@ -71,7 +112,14 @@ const _sessionDetailOptions = {
         this.meta = data.meta || null
         this.targets = data.targets || []
       } catch (err) {
-        this.error = `Failed to load session metadata: ${err.message || err}`
+        // A just-started / unpersisted live session has no saved index
+        // yet — a 404 is a benign empty state, not a load failure.
+        if (err?.response?.status === 404) {
+          this.meta = null
+          this.targets = []
+        } else {
+          this.error = `Failed to load session metadata: ${err.message || err}`
+        }
       } finally {
         this.loadingMeta = false
       }

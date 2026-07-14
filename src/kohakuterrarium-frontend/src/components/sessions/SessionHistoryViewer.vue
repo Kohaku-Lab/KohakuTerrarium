@@ -161,9 +161,11 @@ async function loadTarget(tab) {
   if (!tab) return
   const data = await sessionAPI.getHistory(sessionName.value, tab)
   if (data.events?.length) {
-    const { messages, pendingJobs } = _replayEvents(data.messages || [], data.events)
+    // Read-only saved history: never populate ``runningJobs`` — a frozen
+    // session has no live work, and its unfinished jobs already replay as
+    // ``interrupted`` via the backend's synthetic terminals (UXI-04).
+    const { messages } = _replayEvents(data.messages || [], data.events)
     chat.messagesByTab[tab] = messages
-    chat.runningJobs = pendingJobs || {}
   } else {
     chat.messagesByTab[tab] = _convertHistory(data.messages || [])
   }
@@ -213,6 +215,16 @@ watch(
     loadSession()
   },
   { immediate: true },
+)
+
+// Live-session refresh signal (UXI-01): repull the active target's
+// history so new conversation appears without a full reset. Only bumps
+// for a live inspector; a saved session never fires this.
+watch(
+  () => detail.reloadKey,
+  () => {
+    if (chat.activeTab) loadTarget(chat.activeTab).catch(() => {})
+  },
 )
 
 // The viewer borrows the live chat store as its render surface (it

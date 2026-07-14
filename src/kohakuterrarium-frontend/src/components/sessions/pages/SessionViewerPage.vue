@@ -60,7 +60,14 @@ const { t } = useI18n()
 // Optional prop — when this page is embedded as a SessionViewerTab in
 // the v2 macro shell, the route params are not available; the tab passes
 // the session name directly. Falls back to route.params.name in v1.
-const props = defineProps({ sessionNameProp: { type: String, default: null } })
+const props = defineProps({
+  sessionNameProp: { type: String, default: null },
+  // The inspector embeds this page for a LIVE session (addressed by its
+  // graph_id): the Drives tab must read the live route, since the saved
+  // sidecar read returns [] under the live writer lock. Saved viewers
+  // leave this false and read the persisted sidecar (UXI-01 / item 17).
+  live: { type: Boolean, default: false },
+})
 const route = useRoute()
 const router = useRouter()
 
@@ -106,8 +113,10 @@ async function probeDrives(name) {
   hasDrives.value = false
   if (!name) return
   try {
-    // Saved-session viewer reads the persisted sidecar, not the live route.
-    const data = await drivesAPI.savedList(name)
+    // A live session (inspector) reads the live route — its saved sidecar
+    // read returns [] under the writer lock; a saved viewer reads the
+    // persisted sidecar (UXI-01 / item 17).
+    const data = props.live ? await drivesAPI.list(name) : await drivesAPI.savedList(name)
     if (generation !== probeGeneration) return
     const items = Array.isArray(data) ? data : data.drives || data.items || []
     hasDrives.value = items.length > 0
@@ -154,6 +163,9 @@ watch(
   sessionName,
   (name) => {
     if (!name) return
+    // Publish the live/saved source on the shared scoped store BEFORE
+    // load so the Drives tab (grandchild) picks the matching route.
+    detail.live = props.live
     detail.load(name)
     probeDrives(name)
   },

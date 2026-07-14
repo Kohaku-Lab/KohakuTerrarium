@@ -8,13 +8,9 @@
  *             "catalog", "settings", "code-editor"
  */
 
-import { registerTabKind, registerInspectorInnerTab } from "@/stores/tabKindRegistry"
+import { registerTabKind } from "@/stores/tabKindRegistry"
 
 import AgentInspectorTab from "@/components/shell/tabs/AgentInspectorTab.vue"
-import InspectorOverview from "@/components/shell/tabs/inspector/InspectorOverview.vue"
-import InspectorActivity from "@/components/shell/tabs/inspector/InspectorActivity.vue"
-import InspectorTrace from "@/components/shell/tabs/inspector/InspectorTrace.vue"
-import InspectorLog from "@/components/shell/tabs/inspector/InspectorLog.vue"
 import Dashboard from "@/components/shell/tabs/Dashboard.vue"
 import AttachTab from "@/components/shell/tabs/AttachTab.vue"
 import SessionViewerTab from "@/components/shell/tabs/SessionViewerTab.vue"
@@ -34,31 +30,9 @@ export function registerBuiltinTabKinds() {
   _registered = true
 
   // ── Phase 3 — Inspector ───────────────────────────────────────
+  // The inspector IS the session-history-viewer bound to the live
+  // session id (UXI-01); there are no separate inner tabs.
   registerTabKind({ kind: "inspector", component: AgentInspectorTab })
-  registerInspectorInnerTab({
-    id: "overview",
-    component: InspectorOverview,
-    label: "Overview",
-    order: 10,
-  })
-  registerInspectorInnerTab({
-    id: "activity",
-    component: InspectorActivity,
-    label: "Activity",
-    order: 20,
-  })
-  registerInspectorInnerTab({
-    id: "trace",
-    component: InspectorTrace,
-    label: "Trace",
-    order: 30,
-  })
-  registerInspectorInnerTab({
-    id: "log",
-    component: InspectorLog,
-    label: "Log",
-    order: 40,
-  })
 
   // ── Phase 4 — Dashboard ───────────────────────────────────────
   registerTabKind({ kind: "dashboard", component: Dashboard })

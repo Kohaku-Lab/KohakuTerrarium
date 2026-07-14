@@ -149,9 +149,10 @@ watch(liveEvents, (arr) => {
   if (last && last.event) stream.appendLive(last.event)
 })
 
-// Drive the rollup loader when name / agent changes.
+// Drive the rollup loader when name / agent changes. ``detail.reloadKey``
+// re-runs it so a live session's new turns appear without a refresh (UXI-01).
 watch(
-  () => [detail.name, filters.value.agent],
+  () => [detail.name, filters.value.agent, detail.reloadKey],
   async ([name, agent]) => {
     if (!name) return
     const a = agent || agents.value[0] || null
