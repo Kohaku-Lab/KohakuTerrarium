@@ -15,7 +15,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from kohakuterrarium.api.deps import resolve_request_session_dir
+from kohakuterrarium.api.deps import get_service, resolve_request_session_dir
+from kohakuterrarium.api.routes.persistence.live_paths import live_store_path
 from kohakuterrarium.errors import SessionError
 from kohakuterrarium.studio.persistence.store import resolve_session_path_in
 from kohakuterrarium.terrarium.drive.errors import DriveError
@@ -23,6 +24,7 @@ from kohakuterrarium.terrarium.drive.requests import DriveQuery
 from kohakuterrarium.terrarium.drive.saved_snapshot import DriveSidecarMissingError
 from kohakuterrarium.terrarium.drive.store import open_drive_repository_readonly
 from kohakuterrarium.terrarium.drive.store_migration import drive_sidecar_path
+from kohakuterrarium.terrarium.service import TerrariumService
 
 router = APIRouter()
 
@@ -89,16 +91,30 @@ async def _read_saved_drives(path: str | Path) -> list[dict[str, Any]]:
 async def saved_session_drives(
     session_name: str,
     session_dir: Path = Depends(resolve_request_session_dir),
+    service: TerrariumService = Depends(get_service),
 ):
-    """Read-only persisted Drive records for a saved session.
+    """Read-only persisted Drive records for a saved OR live session.
 
-    Resolves the session strictly inside the caller's L4 session namespace
-    (R1-01): an anonymous ``required``-mode request is rejected upstream by the
-    dependency, and no user namespace ever falls back to the global directory.
-    404 if the session file does not exist; a live/locked or corrupt sidecar is
-    refused with 409 (typed) rather than a partial/stale read or a raw storage
-    error (use the live ``/api/sessions/{sid}/drives`` surface for a running one).
+    A live session is addressed by its graph_id (its file is named by
+    creature_id), so its attached store is resolved first — otherwise the
+    Drives tab 404s for a running session. Its parent writer lock is held,
+    so the offline sidecar read may refuse; that degrades to an empty list
+    rather than crashing the tab (the live ``/api/sessions/{sid}/drives``
+    surface serves a running session's live records).
+
+    Saved sessions resolve strictly inside the caller's L4 session namespace
+    (R1-01): an anonymous ``required``-mode request is rejected upstream by
+    the dependency, and no user namespace falls back to the global directory.
+    404 if the session file does not exist; a live/locked or corrupt sidecar
+    of a saved session is refused with 409 (typed).
     """
+    live = live_store_path(service, session_name)
+    if live is not None:
+        try:
+            return {"drives": await _read_saved_drives(live)}
+        except (SessionError, DriveError):
+            return {"drives": []}
+
     path = await asyncio.to_thread(resolve_session_path_in, session_name, session_dir)
     if path is None:
         raise HTTPException(404, f"Session not found: {session_name}")
