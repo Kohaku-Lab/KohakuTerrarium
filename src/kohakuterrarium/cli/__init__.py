@@ -200,9 +200,9 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["cli", "plain", "tui"],
         default=None,
         help=(
-            "Input/output mode. cli=rich inline (default if TTY), "
-            "plain=dumb stdout/stdin, tui=full-screen Textual app. "
-            "Defaults match `kt run`: cli on a TTY, plain otherwise."
+            "Input/output surface. cli/plain=rich inline CLI, "
+            "tui=full-screen Textual app. Omit for the default "
+            "full-screen TUI."
         ),
     )
     resume_parser.add_argument(

@@ -3,7 +3,11 @@
 import argparse
 import sys
 
-from kohakuterrarium.cli.select_args import add_run_like_args, parse_standalone_args
+from kohakuterrarium.cli.select_args import (
+    add_resume_like_args,
+    add_run_like_args,
+    parse_standalone_args,
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -65,3 +69,45 @@ class TestParseStandaloneArgs:
         monkeypatch.setattr(sys, "argv", ["kt-tui"])
         ns = parse_standalone_args("kt-tui")
         assert ns.agent_path is None
+
+    def test_run_like_path_marks_resume_false(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["kt-cli", "foo"])
+        ns = parse_standalone_args("kt-cli")
+        assert ns.resume is False
+        assert ns.agent_path == "foo"
+
+
+class TestResumeVerb:
+    def test_defaults(self):
+        p = argparse.ArgumentParser()
+        add_resume_like_args(p)
+        ns = p.parse_args([])
+        assert ns.query is None
+        assert ns.pwd is None
+        assert ns.last is False
+        assert ns.llm is None
+        assert ns.log_level == "INFO"
+        assert ns.log_stderr == "auto"
+
+    def test_leading_resume_selects_resume_surface(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["kt-cli", "resume", "mysess", "--last"])
+        ns = parse_standalone_args("kt-cli")
+        assert ns.resume is True
+        assert ns.query == "mysess"
+        assert ns.last is True
+
+    def test_resume_without_query_lists(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["kt-tui", "resume"])
+        ns = parse_standalone_args("kt-tui")
+        assert ns.resume is True
+        assert ns.query is None
+        assert ns.last is False
+
+    def test_resume_passes_llm_and_pwd(self, monkeypatch):
+        monkeypatch.setattr(
+            sys, "argv", ["kt-cli", "resume", "s", "--llm", "m", "--pwd", "/w"]
+        )
+        ns = parse_standalone_args("kt-cli")
+        assert ns.resume is True
+        assert ns.llm == "m"
+        assert ns.pwd == "/w"
