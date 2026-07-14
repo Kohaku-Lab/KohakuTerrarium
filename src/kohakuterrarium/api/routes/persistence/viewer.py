@@ -8,7 +8,10 @@ All handlers open the store read-only (``close(update_status=False)``)
 so browsing never bumps ``last_active``. Every payload builder is
 sync (SQLite + filesystem), so each route dispatches the open +
 build + close sequence to a worker thread via ``asyncio.to_thread`` —
-the event loop stays free for concurrent API traffic.
+the event loop stays free for concurrent API traffic. The exception is
+a LIVE session (still attached to the engine): its reads reuse the
+engine's open store on the event loop instead of opening the file a
+second time — see :func:`_build_single`.
 
 CF-5 follow-up — cluster fan-out. In multi-node mode each cluster
 member writes events to its OWN per-worker store, mirrored host-side
@@ -31,7 +34,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
 from kohakuterrarium.api.deps import get_service
-from kohakuterrarium.api.routes.persistence.live_paths import live_store_path
+from kohakuterrarium.api.routes.persistence.live_paths import (
+    live_store_for,
+    live_store_path,
+)
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.store import resolve_session_path_default
 from kohakuterrarium.studio.persistence.viewer.diff import build_diff_payload
@@ -118,6 +124,26 @@ def _run_with_store(path, builder: Callable[[SessionStore, str], Any]) -> Any:
         return builder(store, normalize_session_stem(path))
     finally:
         store.close(update_status=False)
+
+
+async def _build_single(
+    service: TerrariumService,
+    session_name: str,
+    path: Path,
+    builder: Callable[[SessionStore, str], Any],
+) -> Any:
+    """Build one session's payload, reusing the live store when attached.
+
+    A second same-file open of an actively-written store is unreliable on
+    POSIX (``SQLITE_IOERR`` on the tables the live writer touched), so a
+    live session's reads go through the engine's open store on the event
+    loop — serialized with the writer. Saved sessions keep the off-loop
+    open/build/close unit.
+    """
+    store = live_store_for(service, session_name)
+    if store is not None and str(getattr(store, "_path", "")) == str(path):
+        return builder(store, normalize_session_stem(path))
+    return await asyncio.to_thread(_run_with_store, path, builder)
 
 
 def _run_per_member(
@@ -400,8 +426,8 @@ async def get_session_tree(
     members = await _resolve_cluster_or_404(session_name, service)
     if len(members) == 1:
         # Standalone fast path — preserves single-store unit-test stubs.
-        return await asyncio.to_thread(
-            _run_with_store, members[0][1], build_tree_payload
+        return await _build_single(
+            service, members[0][0], members[0][1], build_tree_payload
         )
     per_member = await asyncio.to_thread(_run_per_member, members, build_tree_payload)
     return _merge_tree(per_member, session_name)
@@ -419,7 +445,7 @@ async def get_session_summary(
         return build_summary_payload(store, canonical, agent)
 
     if len(members) == 1:
-        return await asyncio.to_thread(_run_with_store, members[0][1], _build)
+        return await _build_single(service, members[0][0], members[0][1], _build)
     per_member = await asyncio.to_thread(_run_per_member, members, _build)
     return _merge_summary(per_member, session_name)
 
@@ -458,7 +484,7 @@ async def get_session_turns(
         )
 
     if len(members) == 1:
-        return await asyncio.to_thread(_run_with_store, members[0][1], _build)
+        return await _build_single(service, members[0][0], members[0][1], _build)
     per_member = await asyncio.to_thread(_run_per_member, members, _build)
     return _merge_turns(
         per_member,
@@ -490,7 +516,7 @@ async def get_session_export(
     def _build(store: SessionStore, canonical: str) -> tuple[str, bytes | str]:
         return build_export(store, canonical, format.lower(), agent)
 
-    content_type, body = await asyncio.to_thread(_run_with_store, path, _build)
+    content_type, body = await _build_single(service, members[0][0], path, _build)
     ext = "md" if format == "md" else format.lower()
     filename = f"{normalize_session_stem(path)}.{ext}"
     return Response(
@@ -513,10 +539,20 @@ async def get_session_diff(
     store; multi-member diff needs a per-pair strategy (likely
     per-member-pair diff with caller choosing).
     """
+    a_store = live_store_for(service, session_name)
     a_path = await _resolve_or_404(session_name, service)
-    b_path = await asyncio.to_thread(resolve_session_path_default, other)
-    if b_path is None:
-        raise HTTPException(404, f"Other session not found: {other}")
+    b_store = live_store_for(service, other)
+    if b_store is not None:
+        b_path = Path(getattr(b_store, "_path"))
+    else:
+        b_path = await asyncio.to_thread(resolve_session_path_default, other)
+        if b_path is None:
+            raise HTTPException(404, f"Other session not found: {other}")
+    if a_store is not None or b_store is not None:
+        # Live-store reads stay on the loop (see _build_single).
+        return build_diff_payload(
+            a_path, b_path, agent=agent, a_store=a_store, b_store=b_store
+        )
     return await asyncio.to_thread(build_diff_payload, a_path, b_path, agent=agent)
 
 
@@ -549,7 +585,7 @@ async def get_session_events(
         )
 
     if len(members) == 1:
-        return await asyncio.to_thread(_run_with_store, members[0][1], _build)
+        return await _build_single(service, members[0][0], members[0][1], _build)
 
     # In cluster fan-out each member's payload is built for whatever
     # ``agent`` defaulting that member's meta picks. Errors from one

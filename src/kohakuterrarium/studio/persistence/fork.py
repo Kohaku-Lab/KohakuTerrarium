@@ -142,12 +142,19 @@ async def fork_session_handler(
     mutate_kind: str | None,
     mutate_args: dict | None,
     name: str | None,
+    store: SessionStore | None = None,
 ) -> dict[str, Any]:
     """Shared handler body for ``POST /sessions/{id}/fork``.
 
     Caller is responsible for resolving ``session_name`` to ``session_path``
     so this helper stays transport-agnostic. Returns a plain dict that
     the route layer wraps in the ``ForkResponse`` pydantic model.
+
+    ``store``: an already-open LIVE store to fork from — a second open
+    of an actively-written file is unreliable on POSIX
+    (``SQLITE_IOERR``). The caller keeps ownership; it is NOT closed
+    here. ``store.fork`` reads the source through this object (logical
+    row copy), so the source file is never re-opened.
 
     Typed errors (the api adapter maps them onto 400/404/409/500):
     :class:`SessionNotFoundError` for a missing source — raised BEFORE
@@ -163,9 +170,10 @@ async def fork_session_handler(
     if at_event_id < 1:
         raise InvalidRequestError("at_event_id must be >= 1")
 
-    store: SessionStore | None = None
+    owned = store is None
     try:
-        store = SessionStore(session_path)
+        if store is None:
+            store = SessionStore(session_path)
         fork_point_event = find_fork_point(store, at_event_id)
         if fork_point_event is None:
             raise InvalidRequestError(
@@ -201,7 +209,7 @@ async def fork_session_handler(
     except Exception as exc:
         raise SessionError(f"Fork failed: {exc}") from exc
     finally:
-        if store is not None:
+        if store is not None and owned:
             store.close(update_status=False)
 
     return {
