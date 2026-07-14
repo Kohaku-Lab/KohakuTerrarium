@@ -381,14 +381,29 @@ export default {
   "settings.account.inHoursMinutes": "in {hours}h {minutes}m",
   "settings.account.inMinutes": "in {minutes}m",
   "settings.account.notLoggedIn": "Not logged into Codex. Run `kt login codex` first.",
-  "settings.account.noDataYet":
-    "No usage data yet. Send one chat turn using the Codex provider to populate it — usage ships on response headers, not a separate endpoint.",
+  "settings.account.noDataYet": "No usage data captured yet. Refresh to fetch the latest snapshot.",
   "settings.account.capturedAt": "Captured {value}",
-  "settings.account.refreshHint": "Send another Codex request to refresh.",
+  "settings.account.refreshHint": "Refresh to fetch the latest usage snapshot.",
   "settings.account.defaultLimit": "Default limit",
+  "settings.account.resetCredits": "Reset credits",
+  "settings.account.resetCredit": "Rate-limit reset",
+  "settings.account.resetRedeem": "Redeem",
+  "settings.account.resetExpires": "Expires {value}",
+  "settings.account.resetRedeemed": "Reset credit redeemed",
+  "settings.account.resetNothing": "Nothing to reset right now",
+  "settings.account.resetNoCredit": "No reset credit available",
+  "settings.account.resetAlready": "Reset credit already redeemed",
+  "settings.account.resetFailed": "Failed to redeem reset credit",
 
   "chat.noMessagesYet": "No messages yet",
   "chat.getStarted": "Send a message to get started",
+  "chat.subagent.conversation": "Conversation",
+  "chat.subagent.empty": "(no messages)",
+  "chat.subagent.readOnly": "Read-only — this sub-agent run has finished.",
+  "chat.subagent.placeholder": "Message this sub-agent…",
+  "chat.subagent.send": "Send",
+  "chat.subagent.unavailable": "Conversation not available.",
+  "chat.subagent.sendFailed": "Failed to send message.",
   "chat.processing": "KohakUwUing...",
   "chat.bgResultTool": "background tool result delivered: {label}",
   "chat.bgResultSubagent": "background sub-agent result delivered: {label}",
@@ -412,6 +427,8 @@ export default {
   "chat.dropToAttach": "Drop files to attach",
   "chat.queueShowMore": ({ count }) => `+${count} more queued`,
   "chat.queueCollapse": "Show fewer",
+  "chat.queueEdit": "Edit queued message",
+  "chat.queueCancel": "Cancel queued message",
   "chat.pendingBanner": ({ count }) =>
     count === 1
       ? "1 pending request needs your reply"
@@ -896,6 +913,10 @@ export default {
   "studio.module.form.subagentName": "Sub-agent name",
   "studio.module.form.subagentNameHint":
     "Snake-case. The controller dispatches to this sub-agent by this name.",
+  "studio.module.form.subagentModel": "Model",
+  "studio.module.form.subagentModelHint":
+    "Runs this sub-agent on a specific model. Leave as inherit to use the parent creature's model.",
+  "studio.module.form.subagentModelInherit": "Inherit from parent (default)",
   "studio.module.form.subagentFlags": "Flags",
   "studio.module.form.stateless":
     "Stateless — a fresh context every run (recommended for tool-use sub-agents)",

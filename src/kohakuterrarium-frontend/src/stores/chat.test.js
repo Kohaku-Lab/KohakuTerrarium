@@ -43,11 +43,15 @@ describe("chat store — slash commands", () => {
     await chat.send([{ type: "text", text: "hello" }])
 
     expect(wsSend).toHaveBeenCalledOnce()
-    expect(JSON.parse(wsSend.mock.calls[0][0])).toEqual({
+    const frame = JSON.parse(wsSend.mock.calls[0][0])
+    expect(frame).toMatchObject({
       type: "input",
       target: "kohaku",
       content: [{ type: "text", text: "hello" }],
     })
+    // Client-minted id rides on the input frame (UXI-08a).
+    expect(typeof frame.event_id).toBe("string")
+    expect(frame.event_id.length).toBeGreaterThan(0)
     expect(chat.messagesByTab.kohaku).toHaveLength(1)
   })
 
@@ -87,6 +91,107 @@ describe("chat store — slash commands", () => {
     expect(commandSpy).not.toHaveBeenCalled()
     commandSpy.mockRestore()
     channelSpy.mockRestore()
+  })
+})
+
+describe("chat store — queued message edit/cancel (UXI-08a)", () => {
+  function busyChat() {
+    const chat = useChatStore()
+    chat._instanceGraphId = "graph_1"
+    chat.activeTab = "kohaku"
+    chat.messagesByTab = { kohaku: [] }
+    // Busy → the next send is buffered into the queue, not sent to chat.
+    chat.processingByTab = { kohaku: true }
+    const wsSend = vi.fn()
+    chat._ws = { readyState: WebSocket.OPEN, send: wsSend }
+    return { chat, wsSend }
+  }
+
+  it("queues with a client event_id echoed on the input frame", async () => {
+    const { chat, wsSend } = busyChat()
+    await chat.send([{ type: "text", text: "later" }])
+    const frame = JSON.parse(wsSend.mock.calls[0][0])
+    expect(frame.event_id).toBeTruthy()
+    const q = chat.queuedMessagesByTab.kohaku
+    expect(q).toHaveLength(1)
+    expect(q[0].eventId).toBe(frame.event_id)
+    expect(q[0].queued).toBe(true)
+  })
+
+  it("editQueuedMessage sends input_edit and optimistically updates content", async () => {
+    const { chat, wsSend } = busyChat()
+    await chat.send([{ type: "text", text: "orig" }])
+    const eid = chat.queuedMessagesByTab.kohaku[0].eventId
+    wsSend.mockClear()
+    chat.editQueuedMessage("kohaku", eid, "edited")
+    expect(chat.queuedMessagesByTab.kohaku[0].content).toBe("edited")
+    expect(JSON.parse(wsSend.mock.calls[0][0])).toMatchObject({
+      type: "input_edit",
+      target: "kohaku",
+      event_id: eid,
+      content: [{ type: "text", text: "edited" }],
+    })
+  })
+
+  it("input_edit_ack 'edited' keeps the entry; 'already_sent' drops it", async () => {
+    const { chat } = busyChat()
+    await chat.send([{ type: "text", text: "a" }])
+    await chat.send([{ type: "text", text: "b" }])
+    const [ea, eb] = chat.queuedMessagesByTab.kohaku.map((m) => m.eventId)
+    chat._onMessage({ type: "input_edit_ack", source: "kohaku", event_id: ea, status: "edited" })
+    chat._onMessage({
+      type: "input_edit_ack",
+      source: "kohaku",
+      event_id: eb,
+      status: "already_sent",
+    })
+    const ids = chat.queuedMessagesByTab.kohaku.map((m) => m.eventId)
+    expect(ids).toEqual([ea])
+  })
+
+  it("cancelQueuedMessage sends input_cancel; the ack removes the entry", async () => {
+    const { chat, wsSend } = busyChat()
+    await chat.send([{ type: "text", text: "nope" }])
+    const eid = chat.queuedMessagesByTab.kohaku[0].eventId
+    wsSend.mockClear()
+    chat.cancelQueuedMessage("kohaku", eid)
+    expect(JSON.parse(wsSend.mock.calls[0][0])).toMatchObject({
+      type: "input_cancel",
+      target: "kohaku",
+      event_id: eid,
+    })
+    expect(chat.queuedMessagesByTab.kohaku[0].cancelling).toBe(true)
+    chat._onMessage({
+      type: "input_cancel_ack",
+      source: "kohaku",
+      event_id: eid,
+      status: "cancelled",
+    })
+    expect(chat.queuedMessagesByTab.kohaku).toHaveLength(0)
+  })
+
+  it("input_queued marks the slot backend-confirmed", async () => {
+    const { chat } = busyChat()
+    await chat.send([{ type: "text", text: "hold" }])
+    const eid = chat.queuedMessagesByTab.kohaku[0].eventId
+    chat._onMessage({ type: "input_queued", source: "kohaku", event_id: eid })
+    expect(chat.queuedMessagesByTab.kohaku[0].backendQueued).toBe(true)
+  })
+})
+
+describe("chat store — UI reply routing (UXI-09)", () => {
+  it("submitUIReply routes to the prompt's creature via target", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = { worker: [{ role: "ui_event", eventId: "e1", replied: false }] }
+    const wsSend = vi.fn()
+    chat._ws = { readyState: WebSocket.OPEN, send: wsSend }
+    chat.submitUIReply("worker", "e1", "submit", { text: "hi" })
+    expect(JSON.parse(wsSend.mock.calls[0][0])).toMatchObject({
+      type: "ui_reply",
+      target: "worker",
+      event_id: "e1",
+      action_id: "submit",
+    })
   })
 })
 
@@ -243,15 +348,18 @@ describe("chat store — interrupted task handling", () => {
     expect(tool.status).toBe("done")
   })
 
-  it("replay does NOT mark a still-live sub-agent as 'interrupted' (stale terminal guard)", () => {
-    // Bug 1 regression: a background sub-agent is actively running
-    // (its job_id is in the live ``runningJobs`` map). A history
-    // reload finds a stale ``subagent_result{interrupted:true}``
-    // event in the persisted log (e.g. from a previous run with the
-    // same name, or a race during a reconnect). Without the guard,
-    // ``updateTool`` would flip the live-running part's status to
-    // "interrupted" even though the live truth says it's still
-    // running and its accordion is still streaming.
+  it("chat-store replay keeps a still-live sub-agent running when no terminal is present", () => {
+    // Scope: the CHAT-STORE replay contract only (``_replayEvents``).
+    // Given terminal-less history, replay must render the part
+    // "running" + pending rather than sweep it to "interrupted" — it is
+    // the backend that decides liveness by withholding the terminal, and
+    // this test hand-omits it to exercise that render branch. Which
+    // backend paths actually withhold the terminal is pinned elsewhere:
+    // the chat-store live paths (WS feed + ``creature_chat.history``)
+    // pass ``live_job_ids``, and the inspector/persistence history route
+    // is covered by the backend tests (test_persistence_store +
+    // test_persistence_fork_history_routes). This test does NOT prove
+    // the viewer path.
     const events = [
       { type: "processing_start" },
       {
@@ -260,47 +368,10 @@ describe("chat store — interrupted task handling", () => {
         job_id: "agent_researcher_5",
         task: "deep dive",
       },
-      {
-        type: "subagent_result",
-        name: "researcher",
-        job_id: "agent_researcher_5",
-        output: "User manually interrupted this job.",
-        error: "User manually interrupted this job.",
-        interrupted: true,
-        final_state: "interrupted",
-      },
     ]
-    // Live truth: the job is still active.
-    const liveRunning = new Set(["agent_researcher_5"])
-    const { messages: replayed, pendingJobs } = _replayEvents([], events, null, liveRunning)
-    const tool = replayed[0].parts[0]
-    // Guard MUST preserve "running" — replay's interrupted flip is
-    // suppressed because the live WS still tracks this job.
-    expect(tool.status).toBe("running")
-    // Pending-job tracking must NOT mark the job as completed, so
-    // _restoreRunningState keeps it on the radar.
+    const { messages: replayed, pendingJobs } = _replayEvents([], events)
+    expect(replayed[0].parts[0].status).toBe("running")
     expect(pendingJobs).toHaveProperty("agent_researcher_5")
-  })
-
-  it("replay still applies 'done' to a sub-agent the live truth no longer tracks", () => {
-    // Counterpart to the stale-interrupt guard: when the job is NOT
-    // in ``liveRunning`` (i.e. the live WS already saw subagent_done
-    // and deleted runningJobs[J]), the replay must STILL set the
-    // status to "done" — otherwise Bug 2 would resurface.
-    const events = [
-      { type: "processing_start" },
-      { type: "subagent_call", name: "explore", job_id: "agent_explore_6", task: "scan" },
-      {
-        type: "subagent_result",
-        name: "explore",
-        job_id: "agent_explore_6",
-        output: "found it",
-      },
-      { type: "processing_end" },
-    ]
-    const liveRunning = new Set() // empty — live truth says nothing is running
-    const { messages: replayed } = _replayEvents([], events, null, liveRunning)
-    expect(replayed[0].parts[0].status).toBe("done")
   })
 
   it("live tool_error with interrupted metadata clears running job as interrupted", () => {
@@ -331,6 +402,138 @@ describe("chat store — interrupted task handling", () => {
     expect(tool.status).toBe("interrupted")
     expect(tool.result).toBe("User manually interrupted this job.")
     expect(chat.runningJobs.job_1).toBeUndefined()
+  })
+})
+
+describe("chat store — session token totals include sub-agents (UXI-03)", () => {
+  it("sums every creature's usage plus each sub-agent job's latest cumulative snapshot", () => {
+    const chat = useChatStore()
+    chat.tokenUsage = {
+      root: { prompt: 1000, completion: 200, cached: 50, total: 1200 },
+      worker: { prompt: 300, completion: 100, cached: 0, total: 400 },
+    }
+    chat.subagentUsageByJob = {
+      j1: { prompt: 400, completion: 80, cached: 10, total: 480 },
+      j2: { prompt: 100, completion: 20, cached: 0, total: 120 },
+    }
+    const totals = chat.sessionTokenTotals
+    expect(totals.prompt).toBe(1800)
+    expect(totals.completion).toBe(400)
+    expect(totals.cached).toBe(60)
+    expect(totals.total).toBe(2200)
+  })
+
+  it("keeps the highest cumulative snapshot per job — a re-emitted update never double-counts", () => {
+    const chat = useChatStore()
+    // Two cumulative updates for the SAME job: the total must be the
+    // latest snapshot (500), NOT 300+500 — snapshots are running totals.
+    chat._recordSubagentUsage("root", "j1", {
+      total_tokens: 300,
+      prompt_tokens: 250,
+      completion_tokens: 50,
+    })
+    chat._recordSubagentUsage("root", "j1", {
+      total_tokens: 500,
+      prompt_tokens: 420,
+      completion_tokens: 80,
+    })
+    expect(chat.subagentUsageByJob["root:j1"].total).toBe(500)
+    expect(chat.sessionTokenTotals.total).toBe(500)
+    // A stale, smaller snapshot arriving late must not shrink the total.
+    chat._recordSubagentUsage("root", "j1", {
+      total_tokens: 400,
+      prompt_tokens: 330,
+      completion_tokens: 70,
+    })
+    expect(chat.subagentUsageByJob["root:j1"].total).toBe(500)
+  })
+
+  it("keys usage by source+job so two creatures' colliding job_ids don't overwrite (UXI-03)", () => {
+    const chat = useChatStore()
+    // Same bare job_id under two different creatures in one graph-scoped
+    // store — each must be counted, not collapsed to the higher one.
+    chat._recordSubagentUsage("root", "agent_1", { total_tokens: 300 })
+    chat._recordSubagentUsage("worker", "agent_1", { total_tokens: 200 })
+    expect(chat.subagentUsageByJob["root:agent_1"].total).toBe(300)
+    expect(chat.subagentUsageByJob["worker:agent_1"].total).toBe(200)
+    expect(chat.sessionTokenTotals.total).toBe(500)
+  })
+
+  it("live subagent_done records the job's final cumulative usage into the total", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = { main: [{ id: "m1", role: "assistant", parts: [] }] }
+    chat.activeTab = "main"
+
+    chat._handleActivity("main", {
+      activity_type: "subagent_start",
+      name: "explore",
+      job_id: "agent_x",
+      args: { task: "scan" },
+    })
+    chat._handleActivity("main", {
+      activity_type: "subagent_done",
+      name: "explore",
+      job_id: "agent_x",
+      output: "done",
+      total_tokens: 900,
+      prompt_tokens: 700,
+      completion_tokens: 200,
+      cached_tokens: 30,
+    })
+
+    expect(chat.subagentUsageByJob["main:agent_x"]).toMatchObject({
+      total: 900,
+      prompt: 700,
+      completion: 200,
+    })
+    expect(chat.sessionTokenTotals.total).toBe(900)
+  })
+
+  it("_restoreTokenUsage folds persisted sub-agent snapshots into the total (refresh)", () => {
+    const chat = useChatStore()
+    const events = [
+      { type: "token_usage", prompt_tokens: 500, completion_tokens: 100, total_tokens: 600 },
+      {
+        type: "subagent_token_usage",
+        job_id: "agent_y",
+        prompt_tokens: 100,
+        completion_tokens: 20,
+        total_tokens: 120,
+      },
+      {
+        type: "subagent_result",
+        job_id: "agent_y",
+        prompt_tokens: 300,
+        completion_tokens: 60,
+        total_tokens: 360,
+      },
+    ]
+    chat._restoreTokenUsage("main", events)
+    // Parent = 600; sub-agent collapses to its highest snapshot (360).
+    expect(chat.tokenUsage.main.total).toBe(600)
+    expect(chat.subagentUsageByJob["main:agent_y"].total).toBe(360)
+    expect(chat.sessionTokenTotals.total).toBe(960)
+  })
+
+  it("a reconnect re-running _restoreTokenUsage does NOT double-count (UXI-03)", () => {
+    const chat = useChatStore()
+    const events = [
+      { type: "token_usage", prompt_tokens: 250, completion_tokens: 90, total_tokens: 340 },
+      {
+        type: "subagent_result",
+        job_id: "j9",
+        prompt_tokens: 120,
+        completion_tokens: 30,
+        total_tokens: 150,
+      },
+    ]
+    // Same canonical history re-applied (reconnect on the same generation
+    // re-runs _loadHistory) — the parent must rebuild, not accumulate.
+    chat._restoreTokenUsage("root", events)
+    chat._restoreTokenUsage("root", events)
+    expect(chat.tokenUsage.root.total).toBe(340)
+    expect(chat.subagentUsageByJob["root:j9"].total).toBe(150)
+    expect(chat.sessionTokenTotals.total).toBe(490)
   })
 })
 
@@ -570,6 +773,45 @@ describe("chat store — background result banner", () => {
     const banner = chat.messagesByTab.main.find((m) => m.role === "bg_result")
     expect(banner).toBeTruthy()
     expect(banner.label).toBe("bash[a1]")
+  })
+
+  it("combined delivery banner joins all labels into one row", () => {
+    // The queue-first backend folds simultaneous completions into ONE
+    // banner carrying `labels`; the row shows all of them, not one per.
+    const chat = useChatStore()
+    chat.messagesByTab = { main: [] }
+    chat.activeTab = "main"
+    chat._handleActivity("main", {
+      activity_type: "background_result",
+      job_id: "bash_a",
+      kind: "tool",
+      label: "bash[a], bash[b], bash[c]",
+      labels: ["bash[a]", "bash[b]", "bash[c]"],
+      count: 3,
+    })
+    const banners = chat.messagesByTab.main.filter((m) => m.role === "bg_result")
+    expect(banners).toHaveLength(1)
+    expect(banners[0].label).toBe("bash[a], bash[b], bash[c]")
+  })
+
+  it("combined banner replays as a single bg_result row", () => {
+    const { messages } = _replayEvents(
+      [],
+      [
+        { type: "user_input", event_id: 1, content: "go" },
+        {
+          type: "background_result",
+          event_id: 2,
+          job_id: "grep_1",
+          kind: "mixed",
+          labels: ["grep[1]", "explore[2]"],
+          count: 2,
+        },
+      ],
+    )
+    const banners = messages.filter((m) => m.role === "bg_result")
+    expect(banners).toHaveLength(1)
+    expect(banners[0].label).toBe("grep[1], explore[2]")
   })
 })
 
@@ -1318,17 +1560,16 @@ describe("chat store — focus-return resync", () => {
   })
 })
 
-describe("chat store — synthetic-resume drop (Bug 1)", () => {
-  // Regression: when the backend's ``normalize_resumable_events`` can't
-  // see a still-live job (e.g. a background-promoted sub-agent that
-  // the worker's ``_direct_job_meta`` no longer tracks), it
-  // synthesises a terminal ``subagent_result{interrupted:true,
-  // error:"Interrupted by session resume", _synthetic_resume:true}``.
-  // The FE used to honour that and flip the live sub-agent bubble to
-  // "interrupted". The fix: drop ``_synthetic_resume`` events in the
-  // replay and let the unfinished-job sweep mark the part as
-  // "running" — that's what a live background sub-agent actually is.
-  it("drops _synthetic_resume terminals and keeps the running sub-agent as 'running'", () => {
+describe("chat store — synthetic-resume terminals render interrupted (UXI-04)", () => {
+  // The backend's ``normalize_resumable_events`` synthesises a terminal
+  // ``subagent_result{interrupted:true, _synthetic_resume:true}`` ONLY
+  // for a job it no longer sees as live (``live_job_ids``). So a
+  // synthetic terminal that reaches the replay belongs to a genuinely
+  // dead job and must render as "interrupted" — dead in-flight work
+  // resumed from a saved session reads as interrupted, not stuck
+  // "running" forever. A still-live job has NO terminal (the backend
+  // withholds it) and stays "running" through the pendingJobs sweep.
+  it("renders a _synthetic_resume sub-agent terminal as interrupted with no pending job", () => {
     const events = [
       { type: "processing_start" },
       {
@@ -1348,17 +1589,30 @@ describe("chat store — synthetic-resume drop (Bug 1)", () => {
         _synthetic_resume: true,
       },
     ]
-    const { messages: replayed, pendingJobs } = _replayEvents([], events, null, null)
+    const { messages: replayed, pendingJobs } = _replayEvents([], events)
     const tool = replayed[0].parts[0]
     expect(tool.kind).toBe("subagent")
-    expect(tool.status).toBe("running")
+    expect(tool.status).toBe("interrupted")
+    expect(pendingJobs).not.toHaveProperty("agent_explore_99")
+  })
+
+  it("leaves a still-live sub-agent (terminal withheld) running + pending", () => {
+    // Live-exemption counterpart: the backend withholds the terminal for
+    // a job it still sees as live, so history ends at subagent_call and
+    // the part stays "running" on the pending radar.
+    const events = [
+      { type: "processing_start" },
+      { type: "subagent_call", name: "explore", job_id: "agent_explore_99", task: "scan" },
+    ]
+    const { messages: replayed, pendingJobs } = _replayEvents([], events)
+    expect(replayed[0].parts[0].status).toBe("running")
     expect(pendingJobs.agent_explore_99).toBeTruthy()
   })
 
-  it("drops _synthetic_resume terminals for an ask_user-style tool too", () => {
+  it("renders a _synthetic_resume ask_user-style terminal as interrupted", () => {
     // UI event tools like ask_user share the same code path — a
-    // synthetic resume terminal for a still-awaiting ask_user must
-    // not freeze the prompt widget as "interrupted".
+    // synthetic resume terminal for an ask_user that never got answered
+    // is dead work and must read as "interrupted".
     const events = [
       { type: "processing_start" },
       { type: "tool_call", name: "ask_user", call_id: "ask_42", args: {} },
@@ -1373,9 +1627,9 @@ describe("chat store — synthetic-resume drop (Bug 1)", () => {
         _synthetic_resume: true,
       },
     ]
-    const { messages: replayed, pendingJobs } = _replayEvents([], events, null, null)
-    expect(replayed[0].parts[0].status).toBe("running")
-    expect(pendingJobs.ask_42).toBeTruthy()
+    const { messages: replayed, pendingJobs } = _replayEvents([], events)
+    expect(replayed[0].parts[0].status).toBe("interrupted")
+    expect(pendingJobs).not.toHaveProperty("ask_42")
   })
 
   it("does NOT drop genuine (non-synthetic) interrupted terminals", () => {
@@ -1396,7 +1650,7 @@ describe("chat store — synthetic-resume drop (Bug 1)", () => {
         final_state: "interrupted",
       },
     ]
-    const { messages: replayed } = _replayEvents([], events, null, null)
+    const { messages: replayed } = _replayEvents([], events)
     expect(replayed[0].parts[0].status).toBe("interrupted")
   })
 })
@@ -3674,6 +3928,87 @@ describe("chat store — canonical history reconciles tab-owned running jobs", (
     chat.runningJobs = {}
     chat._checkJobTimer()
     chat._clearBranchResyncTimers()
+    getHistorySpy.mockRestore()
+  })
+
+  it("_loadHistory prunes a stale tab-owned job the reconnect history shows dead (UXI-04)", async () => {
+    // A terminal WS frame was missed before the WS dropped, so the
+    // browser still lists agent_dead as running. The reconnect history
+    // carries the backend's synthetic-resume terminal (the job is dead);
+    // _loadHistory must render it interrupted AND prune the stale job.
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.messagesByTab = { main: [] }
+    chat.branchViewByTab = {}
+    chat.runningJobs = {
+      agent_dead: {
+        name: "explore",
+        type: "subagent",
+        startedAt: Date.now() - 60_000,
+        tab: "main",
+      },
+    }
+
+    const events = [
+      { type: "processing_start", event_id: 1 },
+      { type: "subagent_call", name: "explore", job_id: "agent_dead", event_id: 2, task: "scan" },
+      {
+        type: "subagent_result",
+        name: "explore",
+        job_id: "agent_dead",
+        event_id: 3,
+        output: "",
+        error: "Interrupted by session resume",
+        interrupted: true,
+        final_state: "interrupted",
+        _synthetic_resume: true,
+      },
+    ]
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockResolvedValue({ events, is_processing: false })
+
+    await chat._loadHistory("main")
+    expect(chat.runningJobs.agent_dead).toBeUndefined()
+    expect(chat.messagesByTab.main[0].parts[0].status).toBe("interrupted")
+
+    chat.runningJobs = {}
+    chat._checkJobTimer()
+    getHistorySpy.mockRestore()
+  })
+
+  it("_loadHistory keeps a live tab job the reconnect history has no terminal for (UXI-04)", async () => {
+    // The genuinely-live counterpart: the backend withholds the
+    // synthetic terminal for a job it still sees as live, so history has
+    // subagent_call with no terminal — the job stays running.
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.messagesByTab = { main: [] }
+    chat.branchViewByTab = {}
+    chat.runningJobs = {}
+
+    const events = [
+      { type: "processing_start", event_id: 1 },
+      { type: "subagent_call", name: "explore", job_id: "agent_live", event_id: 2, task: "scan" },
+    ]
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockResolvedValue({ events, is_processing: true })
+
+    await chat._loadHistory("main")
+    expect(chat.runningJobs.agent_live).toMatchObject({ type: "subagent", tab: "main" })
+    expect(chat.messagesByTab.main[0].parts[0].status).toBe("running")
+
+    chat.runningJobs = {}
+    chat._checkJobTimer()
     getHistorySpy.mockRestore()
   })
 })
