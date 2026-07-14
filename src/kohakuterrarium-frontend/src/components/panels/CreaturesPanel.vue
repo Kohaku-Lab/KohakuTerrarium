@@ -12,13 +12,22 @@
       <div v-if="creatures.length" class="mb-3">
         <div class="text-[10px] uppercase tracking-wider text-warm-400 font-medium mb-1">{{ t("common.creatures") }}</div>
         <div class="flex flex-col gap-1">
-          <div v-for="creature in creatures" :key="creature.name" class="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors hover:bg-warm-100 dark:hover:bg-warm-800" :class="activeTab === creature.name ? 'bg-iolite/10' : ''" @click="onOpenTab(creature.name)">
-            <StatusDot :status="creature.status" />
-            <span class="font-medium text-warm-700 dark:text-warm-300 truncate">{{ creature.name }}</span>
-            <span class="flex-1" />
-            <span class="text-[10px] px-1.5 py-0.5 rounded" :class="creature.status === 'running' ? 'bg-aquamarine/10 text-aquamarine' : 'bg-warm-100 dark:bg-warm-800 text-warm-400'">
-              {{ statusLabel(creature.status, creature.status) }}
-            </span>
+          <div v-for="creature in creatures" :key="creature.name" class="flex flex-col gap-0.5">
+            <div class="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors hover:bg-warm-100 dark:hover:bg-warm-800" :class="activeTab === creature.name ? 'bg-iolite/10' : ''" @click="onOpenTab(creature.name)">
+              <StatusDot :status="creature.status" />
+              <span class="font-medium text-warm-700 dark:text-warm-300 truncate">{{ creature.name }}</span>
+              <span class="flex-1" />
+              <span class="text-[10px] px-1.5 py-0.5 rounded" :class="creature.status === 'running' ? 'bg-aquamarine/10 text-aquamarine' : 'bg-warm-100 dark:bg-warm-800 text-warm-400'">
+                {{ statusLabel(creature.status, creature.status) }}
+              </span>
+            </div>
+            <!-- Configured sub-agents (vertical delegation, read-only here) -->
+            <div v-if="creature.subagents?.length" class="ml-4 flex flex-col gap-0.5">
+              <div v-for="sa in creature.subagents" :key="`${creature.name}:${sa}`" class="flex items-center gap-2 px-2 py-1 rounded text-[11px] text-warm-500 dark:text-warm-400 border-l border-dotted border-warm-300 dark:border-warm-600">
+                <div class="i-carbon-arrow-right text-[10px] text-warm-400 shrink-0" />
+                <span class="truncate">{{ sa }}</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>

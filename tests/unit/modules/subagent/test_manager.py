@@ -5,6 +5,8 @@ that actually run against a ScriptedLLM, tracks job status, enforces the
 depth limit, resolves child budgets per config, and cleans up jobs.
 """
 
+import asyncio
+
 import pytest
 
 from kohakuterrarium.core.budget import IterationBudget
@@ -151,6 +153,65 @@ class TestSpawn:
         assert is_background is False
         result = await mgr.wait_for(job_id)
         assert result.output == "event-driven result"
+
+
+class TestSubAgentConversationRead:
+    async def test_live_conversation_read_by_job_id(self):
+        # A live sub-agent's inner conversation is readable by job id while
+        # the job is still tracked (before cleanup).
+        mgr = _manager(ScriptedLLM(["the sub-agent answer"]))
+        mgr.register(SubAgentConfig(name="explore", max_turns=1))
+        job_id = await mgr.spawn("explore", "find the bug", background=False)
+        messages = mgr.get_subagent_conversation(job_id)
+        assert messages is not None
+        roles = {m["role"] for m in messages}
+        assert {"user", "assistant"} <= roles
+        joined = " ".join(str(m.get("content", "")) for m in messages)
+        assert "find the bug" in joined
+        assert "the sub-agent answer" in joined
+
+    def test_unknown_job_id_returns_none(self):
+        # A job id the manager never tracked → None so the caller can fall
+        # back to the persisted snapshot instead of erroring.
+        assert _manager().get_subagent_conversation("never-spawned") is None
+
+    async def test_conversation_gone_after_cleanup(self):
+        mgr = _manager(ScriptedLLM(["done"]))
+        mgr.register(SubAgentConfig(name="explore", max_turns=1))
+        job_id = await mgr.spawn("explore", "task", background=False)
+        mgr.cleanup(job_id)
+        # Cleanup drops the live job; the live read now misses (persisted
+        # snapshot is the fallback, owned by the caller).
+        assert mgr.get_subagent_conversation(job_id) is None
+
+
+class TestInteractiveModelResolution:
+    async def test_start_interactive_resolves_child_model(self, monkeypatch):
+        # An interactive child must run on its resolved ``config.model``
+        # provider, not the parent's LLM.
+        from kohakuterrarium.modules.subagent import interactive_mgr
+
+        child_llm = ScriptedLLM(["child"])
+        seen: dict[str, str] = {}
+
+        def fake_resolve(parent_llm, config):
+            seen["model"] = config.model
+            return child_llm
+
+        monkeypatch.setattr(interactive_mgr, "resolve_subagent_llm", fake_resolve)
+
+        mgr = _manager(ScriptedLLM(["parent"]))
+        mgr.register(
+            SubAgentConfig(
+                name="chat", interactive=True, model="anthropic/claude-opus-4.8"
+            )
+        )
+        agent = await mgr.start_interactive("chat")
+        try:
+            assert agent.llm is child_llm
+            assert seen["model"] == "anthropic/claude-opus-4.8"
+        finally:
+            await mgr.stop_interactive("chat")
 
 
 class TestChildBudget:
@@ -424,3 +485,102 @@ class TestRunSubagentOutcomes:
         await asyncio.sleep(0.05)
         cancelled = await mgr.cancel_all()
         assert cancelled == 2
+
+
+class _PausableLLM:
+    """Blocks turn 1 on ``release`` so a message can be sent mid-run;
+    later turns return immediately. Emits plain text (no tool calls)."""
+
+    model = "pausable"
+
+    def __init__(self, responses):
+        self._responses = responses
+        self._calls = 0
+        self.turn1_started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def chat(self, messages, *, stream=True, **kwargs):
+        index = self._calls
+        self._calls += 1
+        if index == 0:
+            self.turn1_started.set()
+            await self.release.wait()
+        yield self._responses[min(index, len(self._responses) - 1)]
+
+
+class TestLiveMessaging:
+    async def test_running_subagent_receives_injected_message_and_responds(self):
+        # A live one-shot sub-agent absorbs a pushed user message as a new
+        # turn and answers it — yet still completes and returns its result.
+        llm = _PausableLLM(["initial answer", "reply to the user"])
+        mgr = _manager(llm)
+        mgr.register(SubAgentConfig(name="explore", max_turns=5))
+        job_id = await mgr.spawn("explore", "do the task", background=True)
+        await llm.turn1_started.wait()
+        subagent = mgr._jobs[job_id].subagent
+        subagent.push_message("also handle the follow-up")
+        llm.release.set()
+        result = await mgr.wait_for(job_id)
+        assert result.success is True
+        assert result.turns >= 2
+        joined = " ".join(
+            str(m.get("content", "")) for m in subagent.conversation.to_messages()
+        )
+        assert "also handle the follow-up" in joined
+        assert "reply to the user" in joined
+
+    async def test_idle_run_still_completes_without_a_message(self):
+        # The inbox does NOT make sub-agents non-terminating: with nothing
+        # pushed, a no-tool-call turn finishes as before.
+        mgr = _manager(ScriptedLLM(["all done"]))
+        mgr.register(SubAgentConfig(name="explore", max_turns=5))
+        job_id = await mgr.spawn("explore", "task", background=False)
+        result = mgr.get_result(job_id)
+        assert result.success is True
+        assert result.turns == 1
+
+    async def test_send_by_job_id_reaches_live_inbox(self):
+        llm = _PausableLLM(["turn one", "reply to send"])
+        mgr = _manager(llm)
+        mgr.register(SubAgentConfig(name="explore", max_turns=5))
+        job_id = await mgr.spawn("explore", "task", background=True)
+        await llm.turn1_started.wait()
+        assert await mgr.send_to_subagent("hello mid-run", job_id=job_id) is True
+        llm.release.set()
+        result = await mgr.wait_for(job_id)
+        joined = " ".join(
+            str(m.get("content", ""))
+            for m in mgr._jobs[job_id].subagent.conversation.to_messages()
+        )
+        assert "hello mid-run" in joined
+        assert result.turns >= 2
+
+    async def test_send_by_name_targets_live_task_run(self):
+        llm = _PausableLLM(["turn one", "named reply"])
+        mgr = _manager(llm)
+        mgr.register(SubAgentConfig(name="explore", max_turns=5))
+        job_id = await mgr.spawn("explore", "task", background=True)
+        await llm.turn1_started.wait()
+        assert await mgr.send_to_subagent("by name", name="explore") is True
+        llm.release.set()
+        result = await mgr.wait_for(job_id)
+        joined = " ".join(
+            str(m.get("content", ""))
+            for m in mgr._jobs[job_id].subagent.conversation.to_messages()
+        )
+        assert "by name" in joined
+        assert result.turns >= 2
+
+    async def test_send_to_completed_run_is_rejected(self):
+        mgr = _manager(ScriptedLLM(["done"]))
+        mgr.register(SubAgentConfig(name="explore", max_turns=1))
+        job_id = await mgr.spawn("explore", "task", background=False)
+        # The run finished → not live → no delivery (read-only).
+        assert await mgr.send_to_subagent("too late", job_id=job_id) is False
+
+    async def test_send_with_no_live_target_returns_false(self):
+        mgr = _manager(ScriptedLLM(["x"]))
+        assert (
+            await mgr.send_to_subagent("nobody", job_id="agent_ghost_deadbeef") is False
+        )
+        assert await mgr.send_to_subagent("nobody", name="ghost") is False
