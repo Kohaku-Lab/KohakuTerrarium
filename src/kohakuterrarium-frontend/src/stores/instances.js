@@ -165,6 +165,9 @@ function _mapSession(data) {
     listen_channels: c.listen_channels || [],
     send_channels: c.send_channels || [],
     is_root: !!c.is_root,
+    // Configured sub-agent names — the roster surfaces creature → sub-agent
+    // rows (UXI-05). Backend sends ``agent.subagents`` (a name list).
+    subagents: Array.isArray(c.subagents) ? c.subagents : [],
     // Per-creature lab cluster site; fall back to session-level home.
     home_node: c.home_node || sessionHome,
   }))

@@ -103,32 +103,21 @@ from kohakuterrarium.api.routes.persistence import saved as persistence_saved
 from kohakuterrarium.api.routes.persistence import viewer as persistence_viewer
 from kohakuterrarium.api.routes.persistence import saved_drives as persistence_drives
 from kohakuterrarium.api.routes import runtime_graph as runtime_graph_route
-from kohakuterrarium.api.routes.sessions_v2 import active as sessions_active
 from kohakuterrarium.api.routes.sessions_v2 import (
+    active as sessions_active,
     creatures_chat as sessions_creatures_chat,
-)
-from kohakuterrarium.api.routes.sessions_v2 import (
     creatures_command as sessions_creatures_command,
-)
-from kohakuterrarium.api.routes.sessions_v2 import (
     creatures_ctl as sessions_creatures_ctl,
-)
-from kohakuterrarium.api.routes.sessions_v2 import (
     creatures_model as sessions_creatures_model,
-)
-from kohakuterrarium.api.routes.sessions_v2 import (
     creatures_modules as sessions_creatures_modules,
-)
-from kohakuterrarium.api.routes.sessions_v2 import (
     creatures_plugins as sessions_creatures_plugins,
-)
-from kohakuterrarium.api.routes.sessions_v2 import (
     creatures_state as sessions_creatures_state,
+    creatures_subagents as sessions_creatures_subagents,
+    drives as sessions_drives,
+    memory as sessions_memory,
+    topology as sessions_topology,
+    wiring as sessions_wiring,
 )
-from kohakuterrarium.api.routes.sessions_v2 import drives as sessions_drives
-from kohakuterrarium.api.routes.sessions_v2 import memory as sessions_memory
-from kohakuterrarium.api.routes.sessions_v2 import topology as sessions_topology
-from kohakuterrarium.api.routes.sessions_v2 import wiring as sessions_wiring
 from kohakuterrarium.api.studio import build_studio_router
 from kohakuterrarium.studio.persistence.session_index import close_session_index
 from kohakuterrarium.api.ws import daemon_logs as ws_daemon_logs
@@ -868,6 +857,9 @@ def _mount_phase0_stubs(app: FastAPI) -> None:
     )
     app.include_router(
         sessions_creatures_state.router, prefix="/api/sessions", tags=["sessions"]
+    )
+    app.include_router(
+        sessions_creatures_subagents.router, prefix="/api/sessions", tags=["sessions"]
     )
     app.include_router(
         sessions_creatures_plugins.router, prefix="/api/sessions", tags=["sessions"]

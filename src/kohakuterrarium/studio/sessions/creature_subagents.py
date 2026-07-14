@@ -1,0 +1,265 @@
+"""Per-creature sub-agent inspection + interactive send.
+
+Read a sub-agent run's inner conversation — a LIVE ``SubAgent`` via the
+running manager (by ``job_id``, or by ``name`` for a live interactive
+child), or the persisted ``<parent>:<name>:<run>`` snapshot via the
+session store — and push a live user message to a RUNNING sub-agent
+(one-shot included) via its inbox.
+
+Single-host: reaches the creature's ``Agent`` through the host engine,
+mirroring ``creature_chat.history``. There is no ``TerrariumService``
+Protocol method for sub-agent internals, so this unwraps ``as_engine``.
+"""
+
+import re
+from typing import Any
+
+from kohakuterrarium.errors import ConflictError, InvalidRequestError, NotFoundError
+from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.studio._runtime import host_engine_or_none
+from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.modules.subagent.interactive import InteractiveSubAgent
+from kohakuterrarium.studio.sessions.lifecycle import find_creature
+
+# ``generate_job_id(f"agent_{name}")`` → ``agent_<name>_<8 hex>``; the name
+# itself may contain underscores, so anchor on the trailing uuid segment.
+_JOB_ID_RE = re.compile(r"^agent_(?P<name>.+)_[0-9a-f]{8}$")
+
+
+def _agent(service: "TerrariumService", session_id: str, creature_id: str) -> Any:
+    # Sub-agent internals live on the host-local ``Agent``; in lab-host /
+    # multi-node mode there is no host agent engine, so degrade cleanly
+    # instead of letting ``as_engine`` raise a 500.
+    engine = host_engine_or_none(service)
+    if engine is None:
+        raise NotFoundError("sub-agent inspection is not available in multi-node mode")
+    return find_creature(engine, session_id, creature_id).agent
+
+
+def _parent_name(agent: Any) -> str:
+    """The key ``SubAgent`` persists under — the agent's config name,
+    recorded on the manager as ``_parent_name`` in ``attach_session_store``.
+    """
+    return getattr(getattr(agent, "subagent_manager", None), "_parent_name", "") or (
+        getattr(getattr(agent, "config", None), "name", "") or ""
+    )
+
+
+def _subagent_name_from_job_id(job_id: str) -> str | None:
+    match = _JOB_ID_RE.match(job_id)
+    return match.group("name") if match else None
+
+
+def _latest_persisted_run(store: Any, parent: str, name: str) -> int | None:
+    """Highest persisted run index for ``(parent, name)``, or ``None``.
+
+    The store's ``_subagent_runs`` counter holds the NEXT index (restored
+    from persisted ``:meta`` keys on resume); an allocated-but-unsaved run
+    can leave it one ahead, so probe downward to the first run that
+    actually persisted.
+    """
+    upper = getattr(store, "_subagent_runs", {}).get(f"{parent}:{name}", 0)
+    for run in range(int(upper) - 1, -1, -1):
+        if store.load_subagent_meta(parent, name, run) is not None:
+            return run
+    return None
+
+
+def _payload(
+    creature_id: str,
+    session_id: str,
+    *,
+    name: str,
+    run: int | None,
+    job_id: str | None,
+    live: bool,
+    interactive: bool,
+    can_receive: bool,
+    messages: list[dict[str, Any]],
+    meta: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return {
+        "creature_id": creature_id,
+        "session_id": session_id,
+        "name": name,
+        "run": run,
+        "job_id": job_id,
+        "live": live,
+        # ``interactive`` = the child is an InteractiveSubAgent (typing info).
+        # ``can_receive`` = a live instance the user can message right now —
+        # the flag the frontend gates its chat box on. Any live sub-agent
+        # (one-shot included) can receive a direct message via its inbox.
+        "interactive": interactive,
+        "can_receive": can_receive,
+        "messages": messages,
+        "meta": meta,
+    }
+
+
+def read_subagent_conversation(
+    service: "TerrariumService",
+    session_id: str,
+    creature_id: str,
+    *,
+    job_id: str | None = None,
+    name: str | None = None,
+    run: int | None = None,
+) -> dict[str, Any]:
+    """Return a sub-agent run's conversation.
+
+    ``job_id`` reads a live task sub-agent, falling back to the LATEST
+    persisted run for the name encoded in the job id when the job is no
+    longer live (e.g. a resumed process, whose ``_jobs`` is empty — the
+    event log carries only the job id, not the run index). ``name`` alone
+    reads a live interactive child, else falls back to the LATEST
+    persisted run for that name; ``name`` + ``run`` reads a specific
+    persisted snapshot. Raises :class:`NotFoundError` when the referenced
+    run cannot be found and :class:`InvalidRequestError` when no usable
+    identifier was supplied.
+
+    ``can_receive`` is ``True`` for ANY live, still-running instance — a
+    one-shot sub-agent is messageable via its inbox while it runs, not
+    only an interactive child — so the frontend shows the chat box for
+    any live sub-agent. Completed / persisted runs are read-only.
+    """
+    agent = _agent(service, session_id, creature_id)
+    manager = getattr(agent, "subagent_manager", None)
+
+    if job_id:
+        subagent = manager.get_live_subagent(job_id) if manager is not None else None
+        if subagent is not None:
+            conversation = getattr(subagent, "conversation", None)
+            messages = conversation.to_messages() if conversation is not None else []
+            return _payload(
+                creature_id,
+                session_id,
+                name=subagent.config.name,
+                run=None,
+                job_id=job_id,
+                live=True,
+                interactive=isinstance(subagent, InteractiveSubAgent),
+                can_receive=bool(getattr(subagent, "is_running", False)),
+                messages=messages,
+                meta=None,
+            )
+        fallback = _read_persisted_by_job_id(agent, creature_id, session_id, job_id)
+        if fallback is not None:
+            return fallback
+        raise NotFoundError(f"sub-agent for job {job_id!r} not found")
+
+    if not name:
+        raise InvalidRequestError("provide job_id, or name (with optional run)")
+
+    if run is None and manager is not None:
+        interactive = manager.get_interactive(name)
+        if interactive is not None:
+            conversation = getattr(interactive, "conversation", None)
+            messages = conversation.to_messages() if conversation is not None else []
+            return _payload(
+                creature_id,
+                session_id,
+                name=name,
+                run=None,
+                job_id=None,
+                live=True,
+                interactive=True,
+                can_receive=bool(getattr(interactive, "is_active", False)),
+                messages=messages,
+                meta=None,
+            )
+
+    if run is None:
+        # No live interactive child: fall back to the latest persisted run
+        # for this name (a resumed block whose event carried the name but
+        # no job_id) rather than 404 a transcript that exists on disk.
+        store = getattr(agent, "session_store", None)
+        latest = (
+            _latest_persisted_run(store, _parent_name(agent), name)
+            if store is not None
+            else None
+        )
+        if latest is None:
+            raise NotFoundError(
+                f"no live sub-agent {name!r} and no saved run; pass a run "
+                "index for a specific saved conversation"
+            )
+        run = latest
+
+    return _read_persisted(agent, creature_id, session_id, name, run)
+
+
+def _read_persisted(
+    agent: Any,
+    creature_id: str,
+    session_id: str,
+    name: str,
+    run: int,
+) -> dict[str, Any]:
+    store = getattr(agent, "session_store", None)
+    if store is None:
+        raise NotFoundError("session store not available for sub-agent read")
+    parent = _parent_name(agent)
+    conv_json = store.load_subagent_conversation(parent, name, run)
+    meta = store.load_subagent_meta(parent, name, run)
+    if conv_json is None and meta is None:
+        raise NotFoundError(f"sub-agent run {parent}:{name}:{run} not found")
+    messages = Conversation.from_json(conv_json).to_messages() if conv_json else []
+    return _payload(
+        creature_id,
+        session_id,
+        name=name,
+        run=run,
+        job_id=None,
+        live=False,
+        interactive=False,
+        can_receive=False,
+        messages=messages,
+        meta=meta,
+    )
+
+
+def _read_persisted_by_job_id(
+    agent: Any,
+    creature_id: str,
+    session_id: str,
+    job_id: str,
+) -> dict[str, Any] | None:
+    """Resolve a non-live ``job_id`` to the latest persisted run for the
+    sub-agent name it encodes, or ``None`` when nothing is persisted."""
+    name = _subagent_name_from_job_id(job_id)
+    store = getattr(agent, "session_store", None)
+    if not name or store is None:
+        return None
+    run = _latest_persisted_run(store, _parent_name(agent), name)
+    if run is None:
+        return None
+    return _read_persisted(agent, creature_id, session_id, name, run)
+
+
+async def send_to_subagent(
+    service: "TerrariumService",
+    session_id: str,
+    creature_id: str,
+    name: str,
+    content: str,
+    *,
+    job_id: str | None = None,
+) -> dict[str, Any]:
+    """Deliver a live user message to a RUNNING sub-agent.
+
+    ``job_id`` targets one exact live run (preferred — unambiguous across
+    concurrent same-name runs); ``name`` is the fallback. Rejects with
+    :class:`ConflictError` when there is no live target — completed /
+    persisted runs are read-only.
+    """
+    agent = _agent(service, session_id, creature_id)
+    manager = getattr(agent, "subagent_manager", None)
+    delivered = False
+    if manager is not None:
+        delivered = await manager.send_to_subagent(content, job_id=job_id, name=name)
+    if not delivered:
+        raise ConflictError(
+            f"no live sub-agent to receive the message (job_id={job_id!r}, "
+            f"name={name!r}); completed runs are read-only"
+        )
+    return {"status": "sent", "name": name, "job_id": job_id}

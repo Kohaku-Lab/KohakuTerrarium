@@ -98,6 +98,11 @@ class SubAgent:
         # Conversation for this sub-agent
         self.conversation = Conversation()
 
+        # Inbox for live direct user messages (drained between turns in
+        # ``_run_internal``). A running sub-agent — one-shot included —
+        # responds to a pushed message without ending its dispatched task.
+        self._inbox: asyncio.Queue = asyncio.Queue()
+
         # Token usage tracking
         self._total_tokens = 0
         self._prompt_tokens = 0
@@ -279,6 +284,10 @@ class SubAgent:
                     cached_tokens=self._cached_tokens,
                     metadata={"tools_used": tools_used},
                 )
+            # Absorb any live user messages pushed into the inbox before
+            # spending the next LLM call, so a running sub-agent responds
+            # to a direct message without ending its dispatched task.
+            self._drain_inbox_into_conversation()
             # Charge one unit against the shared iteration budget before
             # spending an LLM call. On exhaustion we return a failed
             # SubAgentResult so the parent controller sees a tool-result
@@ -312,16 +321,22 @@ class SubAgent:
                     metadata={"tools_used": tools_used},
                 )
 
-            if not tool_calls:
-                logger.info(
-                    "Sub-agent no tools called, finishing",
-                    subagent_name=self.config.name,
-                )
-                break
+            if tool_calls:
+                tools_used.extend(tc.name for tc in tool_calls)
+                tool_results = await self._execute_and_report_tools(tool_calls)
+                self._append_tool_results(tool_calls, tool_results)
+                continue
 
-            tools_used.extend(tc.name for tc in tool_calls)
-            tool_results = await self._execute_and_report_tools(tool_calls)
-            self._append_tool_results(tool_calls, tool_results)
+            # No tool calls: the dispatched work is done. Stay alive for
+            # one more turn ONLY if a live user message arrived during this
+            # turn; otherwise finish and return the result to the parent.
+            if self._inbox_has_pending():
+                continue
+            logger.info(
+                "Sub-agent no tools called, finishing",
+                subagent_name=self.config.name,
+            )
+            break
 
         return self._build_result(output_parts, tools_used)
 
@@ -775,6 +790,40 @@ class SubAgent:
                     "budget": budget.snapshot(),
                 },
             )
+
+    def push_message(self, content: str) -> None:
+        """Queue a live user message for a RUNNING sub-agent.
+
+        Drained before the next LLM call (see ``_run_internal``) so the
+        sub-agent responds to a direct user message mid-run. This does
+        NOT change the completion contract: the sub-agent still finishes
+        and returns its result to the parent once its work is done and
+        the inbox is empty.
+        """
+        if content:
+            self._inbox.put_nowait({"role": "user", "content": content})
+
+    def _drain_inbox_into_conversation(self) -> int:
+        """Append every queued inbox message as a user turn; returns the
+        number appended."""
+        count = 0
+        while True:
+            try:
+                message = self._inbox.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            content = (
+                message.get("content", "")
+                if isinstance(message, dict)
+                else str(message)
+            )
+            if content:
+                self.conversation.append("user", content)
+                count += 1
+        return count
+
+    def _inbox_has_pending(self) -> bool:
+        return not self._inbox.empty()
 
     def cancel(self) -> None:
         """Request cancellation. Checked during LLM streaming and between turns."""
