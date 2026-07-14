@@ -327,6 +327,75 @@ class TestByTurnFromEvents:
         finally:
             s.close()
 
+    def test_cumulative_subagent_snapshots_counted_once(self, tmp_path):
+        # UXI-03: subagent_token_usage snapshots are cumulative for one
+        # job; the final subagent_result repeats the last snapshot. Summing
+        # them all triple-counts. They must collapse by job_id (latest
+        # snapshot), added once — parent token_usage still sums directly.
+        s = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            s.append_event(
+                "alice",
+                "token_usage",
+                {"prompt_tokens": 10, "completion_tokens": 5},
+                turn_index=1,
+            )
+            for pt, ct in ((30, 10), (60, 20)):
+                s.append_event(
+                    "alice",
+                    "subagent_token_usage",
+                    {
+                        "job_id": "j1",
+                        "name": "explore",
+                        "prompt_tokens": pt,
+                        "completion_tokens": ct,
+                        "total_tokens": pt + ct,
+                    },
+                    turn_index=1,
+                )
+            s.append_event(
+                "alice",
+                "subagent_result",
+                {
+                    "job_id": "j1",
+                    "name": "explore",
+                    "prompt_tokens": 60,
+                    "completion_tokens": 20,
+                    "total_tokens": 80,
+                },
+                turn_index=1,
+            )
+            s.flush()
+            rows = _by_turn_from_events(s, "alice")
+            assert len(rows) == 1
+            # parent 10/5 + child once 60/20 = 70/25 (NOT 10+30+60+60 = ...).
+            assert rows[0]["prompt"] == 70
+            assert rows[0]["completion"] == 25
+        finally:
+            s.close()
+
+    def test_distinct_jobs_each_counted(self, tmp_path):
+        # Two different sub-agent jobs in one turn each contribute once.
+        s = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            s.append_event(
+                "alice",
+                "subagent_result",
+                {"job_id": "j1", "name": "a", "prompt_tokens": 40},
+                turn_index=1,
+            )
+            s.append_event(
+                "alice",
+                "subagent_result",
+                {"job_id": "j2", "name": "b", "prompt_tokens": 15},
+                turn_index=1,
+            )
+            s.flush()
+            rows = _by_turn_from_events(s, "alice")
+            assert rows[0]["prompt"] == 55
+        finally:
+            s.close()
+
 
 class TestSubagentUsageMap:
     def test_records_subagent_run(self, tmp_path):

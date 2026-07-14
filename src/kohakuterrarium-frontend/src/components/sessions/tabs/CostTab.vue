@@ -115,10 +115,20 @@ const agents = computed(() => detail.agents || [])
 const turns = computed(() => rollup.turns)
 const lastTurnIndex = computed(() => (turns.value.length ? turns.value[turns.value.length - 1].turn_index : 0))
 
-const totalIn = computed(() => turns.value.reduce((s, r) => s + (Number(r.tokens_in) || 0), 0))
-const totalOut = computed(() => turns.value.reduce((s, r) => s + (Number(r.tokens_out) || 0), 0))
-const totalCached = computed(() => turns.value.reduce((s, r) => s + (Number(r.tokens_cached) || 0), 0))
-const totalCost = computed(() => turns.value.reduce((s, r) => s + (Number(r.cost_usd) || 0), 0))
+// In aggregate mode the HEADER totals come from the same graph-wide
+// ``summary.totals`` the Overview tab uses — the per-turn rollup rows
+// drop turn_index<=0 (channel-driven, turn-less usage), so summing them
+// under-reports a multi-creature graph. The per-turn rows below stay
+// rollup-driven for the breakdown table (UXI-03).
+const summaryTotals = computed(() => detail.summary?.totals || null)
+const useSummary = computed(() => aggregateMode.value && !!summaryTotals.value)
+
+const totalIn = computed(() => (useSummary.value ? Number(summaryTotals.value.tokens?.prompt) || 0 : turns.value.reduce((s, r) => s + (Number(r.tokens_in) || 0), 0)))
+const totalOut = computed(() => (useSummary.value ? Number(summaryTotals.value.tokens?.completion) || 0 : turns.value.reduce((s, r) => s + (Number(r.tokens_out) || 0), 0)))
+const totalCached = computed(() => (useSummary.value ? Number(summaryTotals.value.tokens?.cached) || 0 : turns.value.reduce((s, r) => s + (Number(r.tokens_cached) || 0), 0)))
+const totalCost = computed(() => (useSummary.value && summaryTotals.value.cost_usd != null ? Number(summaryTotals.value.cost_usd) || 0 : turns.value.reduce((s, r) => s + (Number(r.cost_usd) || 0), 0)))
+// Left rollup-based: it drives the per-turn bar chart's cost-vs-tokens
+// mode, which must match the per-turn rows (not the summary header).
 const costAvailable = computed(() => turns.value.some((r) => r.cost_usd != null))
 
 const maxCost = computed(() => Math.max(...turns.value.map((r) => Number(r.cost_usd) || 0), 1e-9))
@@ -172,7 +182,9 @@ function openTurn(turnIndex) {
 }
 
 watch(
-  () => [detail.name, agent.value, agents.value, aggregateMode.value],
+  // ``detail.reloadKey`` re-runs this with the CURRENT agent/aggregate so
+  // a live session's new rounds refetch without a manual refresh (UXI-01).
+  () => [detail.name, agent.value, agents.value, aggregateMode.value, detail.reloadKey],
   async ([name, a, list, agg]) => {
     if (!name) return
     const target = agg ? null : a || list[0] || null

@@ -329,15 +329,18 @@ def _by_turn_from_events(store: "SessionStore", agent: str) -> list[dict[str, in
     on every code path. Events without a ``turn_index`` land under turn
     ``0`` — consumers should treat ``0`` as "pre-conversation / unknown"
     per Q6 in the plan.
+
+    Parent ``token_usage`` rows are per-call deltas and sum directly.
+    Sub-agent ``subagent_token_usage`` / ``subagent_result`` rows are
+    cumulative snapshots for one job — summing them all double-counts, so
+    they collapse by ``job_id`` (keep the highest-total snapshot) and add
+    once, in the turn of the kept snapshot.
     """
     buckets: dict[int, dict[str, int]] = {}
-    for evt in store.get_events(agent):
-        if evt.get("type") not in (
-            "token_usage",
-            "subagent_result",
-            "subagent_token_usage",
-        ):
-            continue
+    subagent_latest: dict[str, dict] = {}
+    anonymous_subagent: list[dict] = []
+
+    def _add(evt: dict) -> None:
         turn = int(evt.get("turn_index", 0) or evt.get("spawned_in_turn", 0) or 0)
         usage = _usage_to_shape(evt)
         slot = buckets.setdefault(
@@ -347,6 +350,25 @@ def _by_turn_from_events(store: "SessionStore", agent: str) -> list[dict[str, in
         slot["prompt"] += usage["prompt_tokens"]
         slot["completion"] += usage["completion_tokens"]
         slot["cached"] += usage["cached_tokens"]
+
+    for evt in store.get_events(agent):
+        etype = evt.get("type")
+        if etype == "token_usage":
+            _add(evt)
+        elif etype in ("subagent_result", "subagent_token_usage"):
+            job_id = str(evt.get("job_id") or "")
+            if not job_id:
+                anonymous_subagent.append(evt)
+                continue
+            previous = subagent_latest.get(job_id)
+            if previous is None or (
+                _usage_to_shape(evt)["total_tokens"]
+                >= _usage_to_shape(previous)["total_tokens"]
+            ):
+                subagent_latest[job_id] = evt
+
+    for evt in list(subagent_latest.values()) + anonymous_subagent:
+        _add(evt)
     return [buckets[t] for t in sorted(buckets.keys())]
 
 

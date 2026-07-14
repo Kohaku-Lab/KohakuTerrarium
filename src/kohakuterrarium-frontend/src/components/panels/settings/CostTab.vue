@@ -62,17 +62,9 @@ const chat = useChatStore()
 
 const model = computed(() => chat.modelDisplay || props.instance?.llm_name || props.instance?.model || "")
 
-const totals = computed(() => {
-  let prompt = 0
-  let completion = 0
-  let cached = 0
-  for (const u of Object.values(chat.tokenUsage || {})) {
-    prompt += u.prompt || 0
-    completion += u.completion || 0
-    cached += u.cached || 0
-  }
-  return { prompt, completion, cached }
-})
+// Session totals include sub-agent usage (chat.sessionTokenTotals folds
+// every creature's own usage + each sub-agent job's cumulative snapshot).
+const totals = computed(() => chat.sessionTokenTotals)
 
 const cost = computed(() => {
   const m = model.value
