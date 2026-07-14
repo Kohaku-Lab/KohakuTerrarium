@@ -187,10 +187,24 @@ def _quarantine_incomplete_sidecar(sidecar_path: str) -> None:
 
 
 def _legacy_same_file_drives(kohakutr_path: str) -> bool:
-    """True if a pre-sidecar ``.kohakutr`` still holds same-file Drive rows."""
-    if not Path(kohakutr_path).exists():
+    """True if a pre-sidecar ``.kohakutr`` still holds same-file Drive rows.
+
+    Opened ``immutable=1``: this probe runs while kohakuvault's own SQLite
+    library may hold LIVE connections on the file, and a second SQLite
+    library (CPython's) must never take POSIX locks on it or
+    checkpoint-and-unlink its WAL/SHM on close — that destroys the live
+    writer's state and every later reader gets ``SQLITE_IOERR``. An
+    immutable open touches neither locks nor WAL. A file actively written
+    by current code cannot hold legacy rows, so a torn read answering
+    ``False`` is correct.
+    """
+    path = Path(kohakutr_path)
+    if not path.exists():
         return False
-    conn = sqlite3.connect(kohakutr_path)
+    try:
+        conn = sqlite3.connect(path.resolve().as_uri() + "?immutable=1", uri=True)
+    except sqlite3.Error:
+        return False
     try:
         present = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='drives'"
@@ -198,6 +212,8 @@ def _legacy_same_file_drives(kohakutr_path: str) -> bool:
         if present is None:
             return False
         return conn.execute("SELECT 1 FROM drives LIMIT 1").fetchone() is not None
+    except sqlite3.Error:
+        return False
     finally:
         conn.close()
 
@@ -368,14 +384,21 @@ def _rebuild_sidecar_from_legacy(kohakutr_path: str, sidecar_path: str) -> None:
     copied = 0
     renamed = False
     try:
-        dest = sqlite3.connect(str(tmp), isolation_level=None)
+        # uri=True so the legacy ATTACH below can be ``immutable=1`` — the
+        # copy is read-only by design, and CPython's SQLite must never take
+        # POSIX locks on a ``.kohakutr`` kohakuvault may hold live (see
+        # ``_legacy_same_file_drives``).
+        dest = sqlite3.connect(tmp.resolve().as_uri(), uri=True, isolation_level=None)
         try:
             dest.executescript(_SCHEMA)
             dest.execute(
                 "INSERT INTO drive_meta(key, value) VALUES('schema_version', ?)",
                 (str(DRIVE_SCHEMA_VERSION),),
             )
-            dest.execute("ATTACH DATABASE ? AS legacy", (kohakutr_path,))
+            dest.execute(
+                "ATTACH DATABASE ? AS legacy",
+                (Path(kohakutr_path).resolve().as_uri() + "?immutable=1",),
+            )
             dest.execute("BEGIN IMMEDIATE")
             for table in _DRIVE_DATA_TABLES:
                 in_legacy = dest.execute(
