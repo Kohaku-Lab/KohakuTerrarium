@@ -30,7 +30,31 @@ that need this:
 
 from fastapi import HTTPException
 
+from kohakuterrarium.terrarium.multi_node_cluster import cluster_groups
 from kohakuterrarium.terrarium.service import TerrariumService
+
+
+def _cluster_scope(service: TerrariumService, session_id: str) -> set[str]:
+    """Return every graph_id sharing ``session_id``'s cluster.
+
+    In multi-node lab-host mode a cross-node ``connect()`` folds several
+    worker-local engine graphs into ONE cluster addressed by its
+    lex-smallest sid (the "cluster primary").  A creature that lives on a
+    peer worker keeps that worker's LOCAL graph_id, not the primary the
+    UI URL carries.  When ``session_id`` belongs to a cluster (as the
+    primary or any member) expand it to the full membership set so a
+    per-creature route addressed via the primary still resolves members
+    that physically live on another worker — mirroring the cluster-fold
+    fallback ``studio.attach.io.attach_io`` already uses for chat.
+
+    Standalone services expose no ``_cluster_links`` — ``cluster_groups``
+    returns ``{}`` and the scope collapses to ``{session_id}``, so
+    single-host resolution stays byte-identical.
+    """
+    for members in cluster_groups(service).values():
+        if session_id in members:
+            return set(members)
+    return {session_id}
 
 
 async def resolve_creature_id(
@@ -62,6 +86,15 @@ async def resolve_creature_id(
     with (or the frontend kept a stale handle); 404 is the right
     answer in both cases.
 
+    Cluster exception: in multi-node lab-host mode the UI addresses a
+    whole cluster by its primary sid, but a member creature lives on a
+    peer worker under that worker's LOCAL graph_id.  The filter graph is
+    therefore widened by :func:`_cluster_scope` to the full cluster
+    membership when ``session_id`` is a cluster primary/member, so a
+    per-creature op via the cluster URL resolves creatures on any member
+    worker.  Standalone (no ``_cluster_links``) collapses back to the
+    exact-sid filter above.
+
     ``session_id=None`` retains the global-search semantics for
     legacy callers + tests that pre-date the v2 session-scoped
     routes; new code paths SHOULD pass the session_id.
@@ -76,7 +109,8 @@ async def resolve_creature_id(
         raise HTTPException(503, f"service unavailable: {exc}") from exc
 
     if session_id:
-        creatures = tuple(c for c in creatures if c.graph_id == session_id)
+        allowed = _cluster_scope(service, session_id)
+        creatures = tuple(c for c in creatures if c.graph_id in allowed)
 
     # Exact id match wins.
     for info in creatures:
