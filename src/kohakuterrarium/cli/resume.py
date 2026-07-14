@@ -1,8 +1,10 @@
 """CLI resume command — resume a session via the Terrarium engine.
 
 Uses :meth:`Terrarium.resume` to rebuild creatures from a saved
-``.kohakutr`` store, then runs the engine TUI focused on the privileged
-creature in the resumed graph.
+``.kohakutr`` store, then runs a user-facing surface focused on the
+privileged creature in the resumed graph.  ``io_mode`` selects the
+surface: ``cli`` / ``plain`` mount the rich inline CLI, everything else
+mounts the full-screen TUI.
 """
 
 import asyncio
@@ -14,6 +16,7 @@ from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.resume import announce_migration_if_needed
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.engine_cli import run_engine_with_tui
+from kohakuterrarium.terrarium.engine_rich_cli import run_engine_with_rich_cli
 from kohakuterrarium.utils.logging import (
     configure_utf8_stdio,
     enable_stderr_logging,
@@ -32,18 +35,13 @@ def resume_cli(
 ) -> int:
     """Resume an agent or terrarium session via the engine.
 
-    ``io_mode`` is accepted but ignored — every resume runs the engine
-    TUI. ``log_stderr="auto"`` skips stderr mirroring because the TUI
-    owns the terminal.
+    ``io_mode`` selects the resumed surface: ``"cli"`` / ``"plain"``
+    mount the rich inline CLI, everything else mounts the full-screen
+    TUI. ``log_stderr="auto"`` skips stderr mirroring because both
+    surfaces own the terminal.
     """
     configure_utf8_stdio(log=True)
     set_level(log_level)
-
-    if io_mode in ("cli", "plain"):
-        print(
-            f"Warning: --mode {io_mode} is not yet supported on the engine "
-            "path; using the TUI instead."
-        )
 
     if log_stderr == "on":
         enable_stderr_logging(log_level)
@@ -60,7 +58,7 @@ def resume_cli(
     pwd_override = _resolve_missing_pwd(path, pwd_override)
 
     try:
-        return asyncio.run(_run(path, pwd_override, llm))
+        return asyncio.run(_run(path, pwd_override, llm, io_mode))
     except KeyboardInterrupt:
         print("\nInterrupted")
         return 0
@@ -101,7 +99,7 @@ def _resolve_missing_pwd(path, pwd_override: str | None) -> str | None:
         print(f"Not a directory: {entered}")
 
 
-async def _run(path, pwd_override, llm) -> int:
+async def _run(path, pwd_override, llm, io_mode: str | None) -> int:
     store = SessionStore(path)
     try:
         engine = await Terrarium.resume(store, pwd=pwd_override, llm=llm)
@@ -111,7 +109,14 @@ async def _run(path, pwd_override, llm) -> int:
                 print("Resume produced no graphs; session is empty.")
                 return 1
             focus = _pick_focus(engine, graph_id)
-            await run_engine_with_tui(engine, focus, store)
+            # Resume rebuilds the focus creature with NoneInput and starts
+            # it, so neither launcher's stdin-swap fires; both drive input
+            # via ``inject_input``. ``plain`` has no distinct engine surface
+            # — alias it to the rich inline CLI.
+            if io_mode in ("cli", "plain"):
+                await run_engine_with_rich_cli(engine, focus, store)
+            else:
+                await run_engine_with_tui(engine, focus, store)
             return 0
     finally:
         store.close()
