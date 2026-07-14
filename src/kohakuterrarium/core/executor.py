@@ -235,6 +235,25 @@ class Executor:
         """
         return await self.submit(event.name, event.args, is_direct=is_direct)
 
+    def _manual_read_gate_active(self) -> bool:
+        """Whether the ``require_manual_read`` block should apply.
+
+        The gate forces an ``info`` read before first use. It is moot —
+        and would make the tool permanently undispatchable — when the full
+        docs are already in the prompt (static skill mode) or when no
+        ``info`` tool is registered to read them.
+        """
+        agent = self._agent
+        if agent is None:
+            return True
+        config = getattr(agent, "config", None)
+        if getattr(config, "skill_mode", "dynamic") == "static":
+            return False
+        registry = getattr(agent, "registry", None)
+        if registry is not None and registry.get_tool("info") is None:
+            return False
+        return True
+
     async def _run_tool(
         self,
         job_id: str,
@@ -249,6 +268,7 @@ class Executor:
                 isinstance(tool, BaseTool)
                 and tool.require_manual_read
                 and not tool._manual_read
+                and self._manual_read_gate_active()
             ):
                 error_msg = f"Call info(name={tool.tool_name}) first to read tool docs"
                 output_msg = (
