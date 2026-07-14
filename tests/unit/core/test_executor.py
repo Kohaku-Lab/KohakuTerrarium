@@ -179,6 +179,45 @@ class TestErrorPaths:
         assert status.state == JobState.ERROR
 
 
+def _agent(skill_mode="dynamic", has_info=True):
+    """Minimal agent stub exposing the fields the manual-read gate reads."""
+    tools = {"info": object()} if has_info else {}
+    registry = types.SimpleNamespace(get_tool=tools.get)
+    return types.SimpleNamespace(
+        config=types.SimpleNamespace(skill_mode=skill_mode),
+        registry=registry,
+    )
+
+
+class TestManualReadGate:
+    async def test_dynamic_with_info_still_blocks(self):
+        ex = Executor()
+        ex._agent = _agent(skill_mode="dynamic", has_info=True)
+        ex.register_tool(_ManualReadTool())
+        result = await ex.wait_for(await ex.submit("manual", {}))
+        assert result.error is not None
+        assert result.exit_code == 1
+
+    async def test_static_mode_bypasses_gate(self):
+        # Full docs already live in the prompt — the info-read gate is moot.
+        ex = Executor()
+        ex._agent = _agent(skill_mode="static")
+        ex.register_tool(_ManualReadTool())
+        result = await ex.wait_for(await ex.submit("manual", {}))
+        assert result.error is None
+        assert result.output == "never reached"
+
+    async def test_missing_info_tool_bypasses_gate(self):
+        # Without an ``info`` tool the block is unsatisfiable, so the tool
+        # would be permanently undispatchable — the gate must relax.
+        ex = Executor()
+        ex._agent = _agent(skill_mode="dynamic", has_info=False)
+        ex.register_tool(_ManualReadTool())
+        result = await ex.wait_for(await ex.submit("manual", {}))
+        assert result.error is None
+        assert result.output == "never reached"
+
+
 # ── on_complete callback + event queue ───────────────────────────
 
 
