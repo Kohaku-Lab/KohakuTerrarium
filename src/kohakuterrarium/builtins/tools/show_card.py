@@ -30,6 +30,7 @@ from kohakuterrarium.modules.tool.base import (
     ExecutionMode,
     ToolContext,
     ToolResult,
+    has_interactive_responder,
 )
 from kohakuterrarium.utils.logging import get_logger
 
@@ -73,6 +74,17 @@ class ShowCardTool(BaseTool):
     def execution_mode(self) -> ExecutionMode:
         return ExecutionMode.DIRECT
 
+    def prompt_contribution(self) -> str | None:
+        return (
+            "Show a styled card for structured display (plan preview, "
+            "status, key/value facts) or a small **pick-one** gate. With "
+            "non-`link` `actions` and `wait_for_reply` (on by default when "
+            "actions exist) it blocks for the click and returns the "
+            "chosen `action` id; with no actions it displays and returns "
+            "at once. `link` actions only open a URL — a link-only card "
+            "never waits. Use `ask_user` when the answer is free text."
+        )
+
     async def _execute(
         self, args: dict[str, Any], context: ToolContext | None = None
     ) -> ToolResult:
@@ -82,7 +94,11 @@ class ShowCardTool(BaseTool):
 
         payload = self._build_payload(args)
         actions = payload.get("actions") or []
+        # Link actions open a URL client-side and never post a reply, so
+        # only non-link buttons can resolve an interactive wait.
+        actionable = [a for a in actions if a.get("style") != "link"]
         wait_for_reply = bool(args.get("wait_for_reply", bool(actions)))
+        wants_reply = bool(actionable) and wait_for_reply
         timeout_s_arg = args.get("timeout_s")
         timeout_s = (
             float(timeout_s_arg) if isinstance(timeout_s_arg, (int, float)) else None
@@ -99,8 +115,8 @@ class ShowCardTool(BaseTool):
                 exit_code=0,
             )
 
+        interactive = wants_reply and has_interactive_responder(router)
         event_id = f"card_{uuid4().hex[:12]}"
-        interactive = bool(actions) and wait_for_reply
         event = OutputEvent(
             type="card",
             interactive=interactive,
@@ -113,13 +129,22 @@ class ShowCardTool(BaseTool):
         if not interactive:
             try:
                 await router.emit(event)
-                return ToolResult(output="card displayed", exit_code=0)
             except Exception as e:
                 logger.warning("show_card emit failed", error=str(e), exc_info=True)
                 return ToolResult(
                     error=f"failed to emit card: {e}",
                     output=self._fallback_text(payload),
                 )
+            if wants_reply:
+                # Wanted a button reply but no renderer can collect one.
+                return ToolResult(
+                    output=(
+                        "card displayed; no interactive responder is attached "
+                        "to collect a reply"
+                    ),
+                    exit_code=0,
+                )
+            return ToolResult(output="card displayed", exit_code=0)
 
         try:
             reply = await router.emit_and_wait(event, timeout_s=timeout_s)

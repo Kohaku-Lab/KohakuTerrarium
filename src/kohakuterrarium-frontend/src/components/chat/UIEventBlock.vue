@@ -230,15 +230,11 @@ function confirmButtonType(style) {
   return ""
 }
 
-// ── Collapse state derivations ──────────────────────────────────
-const interactive = computed(() => {
-  if (props.message.uiEventType === "ask_text") return true
-  if (props.message.uiEventType === "confirm") return true
-  if (props.message.uiEventType === "selection") return true
-  if (props.message.uiEventType === "card") return hasActions.value
-  if (props.message.uiEventType === "notification") return Boolean(props.message.payload?.action)
-  return false
-})
+// Whether this event is still awaiting a reply. Use the backend's
+// authoritative ``interactive`` flag — a link-only card carries actions
+// (link buttons) but is NOT interactive, so deriving from ``hasActions``
+// would show a false "pending" badge (UXI-09).
+const interactive = computed(() => props.message.interactive === true)
 
 // All event kinds support local collapse — including non-interactive
 // progress / notification / card so users can quietly tidy chat.

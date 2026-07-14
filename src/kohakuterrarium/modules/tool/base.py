@@ -104,6 +104,26 @@ def resolve_tool_path(path_str: str, context: ToolContext | None = None) -> Path
     return Path(path_str).expanduser().resolve()
 
 
+def has_interactive_responder(router: Any) -> bool:
+    """Whether *router* has an output that can answer an interactive prompt.
+
+    ``ask_user`` / ``show_card`` block on ``router.emit_and_wait`` for a
+    reply. The default renderer answers unless it opts out with
+    ``supports_interactive = False`` (headless ``NoneOutput``). A secondary
+    output only counts when it joins the reply race — i.e. exposes
+    ``on_supersede`` (an attached web / TUI bridge); passive taps such as
+    session capture never reply. Without this guard a headless run waits
+    on a reply that can never arrive.
+    """
+    default = getattr(router, "default_output", None)
+    if default is not None and getattr(default, "supports_interactive", True):
+        return True
+    return any(
+        getattr(out, "on_supersede", None) is not None
+        for out in getattr(router, "_secondary_outputs", [])
+    )
+
+
 @dataclass
 class ToolResult:
     """

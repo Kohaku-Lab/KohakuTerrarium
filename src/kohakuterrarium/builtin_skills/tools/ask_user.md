@@ -47,9 +47,13 @@ The question text is passed as the content body.
 
 ## Arguments
 
-| Arg      | Type    | Description                                    |
-| -------- | ------- | ---------------------------------------------- |
-| question | content | The question to present to the user (required) |
+| Arg         | Type    | Description                                                    |
+| ----------- | ------- | ------------------------------------------------------------- |
+| question    | content | The question to present to the user (required)                |
+| placeholder | str     | Optional grey hint text shown inside the input box            |
+| multiline   | bool    | Render a multi-line text area instead of a single line        |
+| timeout_s   | float   | Seconds to wait for a reply. Default `null` = wait forever    |
+| surface     | str     | `chat` (default) or `modal`                                   |
 
 ## Examples
 
@@ -85,6 +89,12 @@ What database host should I use for the staging environment?
 Returns the user's raw text response as a string.
 
 If the user provides an empty response, returns `(no response)`.
+
+If a `timeout_s` elapses first, returns `(no response within timeout)`.
+
+In a headless run (no interactive UI attached), returns immediately with
+`(no responder: no interactive UI is attached to answer)` instead of
+blocking forever.
 
 ## LIMITATIONS
 

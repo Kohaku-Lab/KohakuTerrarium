@@ -58,6 +58,15 @@ class TestBuiltinSchemas:
         assert bash["required"] == ["command"]
         assert bash["properties"]["command"]["type"] == "string"
 
+    def test_ask_user_schema_matches_runtime_args(self):
+        # Parity guard: every optional arg AskUserTool._execute reads must
+        # be a declared property so the provider doesn't strip it on the
+        # wire. ``question`` stays the sole required field.
+        schema = _BUILTIN_SCHEMAS["ask_user"]
+        props = set(schema["properties"])
+        assert {"question", "placeholder", "multiline", "timeout_s", "surface"} <= props
+        assert schema["required"] == ["question"]
+
     def test_property_types_are_valid_json_schema_types(self):
         valid = {"string", "integer", "number", "boolean", "object", "array"}
         for name, schema in _BUILTIN_SCHEMAS.items():
