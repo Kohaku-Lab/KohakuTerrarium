@@ -19,6 +19,7 @@ import pytest
 from pathlib import Path
 
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.terrarium.drive import store_migration
 from kohakuterrarium.terrarium.drive.errors import (
     DriveConflictError,
     DriveSchemaVersionError,
@@ -527,6 +528,34 @@ class TestAttachToSessionStore:
             assert again is not None and again.title == "watch"
         finally:
             store3.close()
+
+    def test_legacy_probe_leaves_live_writer_wal_intact(self, tmp_path):
+        # The probe runs while kohakuvault holds live connections; a CPython
+        # SQLite open of the same file must not touch its locks or WAL/SHM
+        # (POSIX: same-pid fcntl locks never conflict, so a non-immutable
+        # close checkpoints + unlinks them under the writer). A fresh reader
+        # after the probe must still see every write.
+        path = tmp_path / "live.kohakutr"
+        store = SessionStore(path, writer_lock=True)
+        try:
+            store.init_meta("sid", "agent", "cfg.yaml", str(tmp_path), ["worker"])
+            for i in range(3):
+                store.append_event("worker", "user_message", {"content": f"m{i}"})
+            store.flush()
+
+            assert store_migration._legacy_same_file_drives(str(path)) is False
+
+            for i in range(3, 6):
+                store.append_event("worker", "user_message", {"content": f"m{i}"})
+            store.flush()
+
+            reader = SessionStore(path)
+            try:
+                assert len(reader.get_events("worker")) == 6
+            finally:
+                reader.close(update_status=False)
+        finally:
+            store.close()
 
     async def test_sidecar_isolates_drive_and_session_writes(self, tmp_path):
         # Steady-state (32d/32g root cause): concurrent Drive writes and session
