@@ -5,6 +5,7 @@ from kohakuterrarium.studio.persistence.viewer.rollups import (
     ERROR_EVENT_TYPES,
     _as_float,
     _as_int,
+    _creature_total_usage,
     _empty_aggregate,
     _empty_row,
     _event_turn_index,
@@ -20,6 +21,7 @@ from kohakuterrarium.studio.persistence.viewer.rollups import (
     derive_own_turns_from_events,
     derive_subagent_turns_from_events,
     derive_turns_from_events,
+    graph_total_usage,
     list_agent_namespaces,
     rollups_or_derived,
 )
@@ -795,6 +797,113 @@ class TestAddUsageCost:
         # Two usages with cost → the row's cost_usd is the running sum.
         assert row["cost_usd"] == 0.75
         assert row["tokens_in"] == 3
+
+
+# ── _creature_total_usage / graph_total_usage (graph total) ────
+
+
+class TestCreatureTotalUsage:
+    def test_turnless_and_turnful_both_counted(self):
+        # The graph total is turn-agnostic: turn-ful AND turn-less parent
+        # usage both count.
+        events = [
+            {
+                "type": "turn_token_usage",
+                "prompt_tokens": 100,
+                "completion_tokens": 40,
+                "turn_index": 1,
+            },
+            {"type": "turn_token_usage", "prompt_tokens": 50, "completion_tokens": 20},
+        ]
+        u = _creature_total_usage(events, [])
+        assert u["tokens_in"] == 150
+        assert u["tokens_out"] == 60
+
+    def test_turn_token_usage_preferred_over_call_deltas_per_turn(self):
+        # Per turn, the per-cycle turn_token_usage wins over the per-call
+        # token_usage deltas (no double add), summed across turns.
+        events = [
+            {
+                "type": "token_usage",
+                "prompt_tokens": 30,
+                "completion_tokens": 10,
+                "turn_index": 1,
+            },
+            {
+                "type": "turn_token_usage",
+                "prompt_tokens": 30,
+                "completion_tokens": 10,
+                "turn_index": 1,
+            },
+            {"type": "token_usage", "prompt_tokens": 20, "completion_tokens": 5},
+        ]
+        u = _creature_total_usage(events, [])
+        # turn 1 uses turn_token_usage (30/10); turn-less uses token_usage
+        # (20/5) since no turn_token_usage there.
+        assert u["tokens_in"] == 50
+        assert u["tokens_out"] == 15
+
+    def test_straddling_subagent_job_collapses_once_across_boundary(self):
+        # A sub-agent job with a turn-ful snapshot AND a turn-less final
+        # result must collapse to ONE contribution (highest total), not be
+        # counted on both sides of the turn boundary.
+        events = [
+            {
+                "type": "subagent_token_usage",
+                "job_id": "j1",
+                "turn_index": 1,
+                "prompt_tokens": 30,
+                "completion_tokens": 20,
+                "total_tokens": 50,
+            },
+            {
+                "type": "subagent_result",
+                "job_id": "j1",
+                "prompt_tokens": 48,
+                "completion_tokens": 32,
+                "total_tokens": 80,
+            },
+        ]
+        u = _creature_total_usage(events, [])
+        assert u["tokens_in"] == 48
+        assert u["tokens_out"] == 32
+
+    def test_parent_cost_from_rollups_subagent_cost_from_events(self):
+        events = [
+            {
+                "type": "subagent_result",
+                "job_id": "j1",
+                "prompt_tokens": 10,
+                "cost_usd": 0.02,
+            }
+        ]
+        rollups = [{"turn_index": 1, "cost_usd": 0.05}]
+        u = _creature_total_usage(events, rollups)
+        assert u["cost_usd"] == 0.07
+
+
+class TestGraphTotalUsage:
+    def test_sums_turnful_and_turnless_creatures(self, tmp_path):
+        s = SessionStore(str(tmp_path / "s.kohakutr"))
+        try:
+            s.init_meta("sess", "terrarium", "/p", "/w", ["root", "worker"])
+            s.append_event(
+                "root",
+                "turn_token_usage",
+                {"prompt_tokens": 100, "completion_tokens": 40},
+                turn_index=1,
+            )
+            s.append_event(
+                "worker",
+                "token_usage",
+                {"prompt_tokens": 50, "completion_tokens": 20},
+            )
+            s.flush()
+            total = graph_total_usage(s)
+            assert total["tokens_in"] == 150
+            assert total["tokens_out"] == 60
+        finally:
+            s.close()
 
 
 # ── _own_rollups_or_derived: stored-rollup short-circuit ───────

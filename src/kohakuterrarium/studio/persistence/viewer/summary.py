@@ -13,6 +13,7 @@ from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.viewer.rollups import (
     ERROR_EVENT_TYPES,
     aggregate_turn_rollups,
+    graph_total_usage,
     rollups_or_derived,
 )
 
@@ -41,6 +42,10 @@ def _agents_for_summary(
     Wave F attached namespace, with ``meta["viewer_default_agent"]``
     moved to the front when set so attach-driven sessions surface the
     active namespace first in the Overview tab.
+
+    ``meta["agents"]`` already unions ``discover_agents_from_events``
+    (folded in by ``SessionStore.load_meta``), so event-only creatures —
+    the ones the graph token total aggregates over — are listed here too.
     """
     main_agents = list(meta.get("agents") or [])
     attached_namespaces = [
@@ -152,6 +157,22 @@ def build_summary_payload(
         flat_rollups = rollups_or_derived(store, agents[0])
 
     totals = _aggregate_rollups(flat_rollups, count_by_agent=agent is None)
+
+    if agent is None:
+        # The turn-bucketed aggregate omits turn-less usage — channel-
+        # driven creatures never bump turn_index, so their spend would
+        # leave the graph total counting only the (user-driven) root.
+        # Replace the token/cost total with the turn-agnostic graph sum
+        # (each sub-agent job counted once across all turns); ``turns``
+        # and ``hot_turns`` keep their turn_index > 0 semantics.
+        graph = graph_total_usage(store)
+        totals["tokens"] = {
+            "prompt": graph["tokens_in"],
+            "completion": graph["tokens_out"],
+            "cached": graph["tokens_cached"],
+        }
+        if graph["cost_usd"] is not None:
+            totals["cost_usd"] = graph["cost_usd"]
 
     # Hot turns — by cost when available, else by token volume.
     def _hot_key(r: dict) -> tuple[int, float]:

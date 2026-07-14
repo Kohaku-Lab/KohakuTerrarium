@@ -495,3 +495,71 @@ def aggregate_turn_rollups(store: SessionStore) -> list[dict]:
                 }
             )
     return [by_turn[k] for k in sorted(by_turn.keys())]
+
+
+def _creature_total_usage(events: list[dict], rollups: list[dict]) -> dict[str, Any]:
+    """Turn-agnostic own + sub-agent token/cost total for one creature.
+
+    The turn-bucketed aggregate drops events with no positive turn bucket,
+    hiding channel-driven creatures (they never bump ``turn_index``). This
+    counts every cycle: parent usage is resolved per cycle — per-cycle
+    ``turn_token_usage`` preferred over per-call ``token_usage`` — bucketed
+    by turn INCLUDING the turn-less bucket. Sub-agent cumulative snapshots
+    collapse by ``job_id`` ONCE across ALL turns (highest total wins), so a
+    job whose snapshots straddle the turn-ful/turn-less boundary is counted
+    once. Parent cost comes from the rollup rows (events carry no parent
+    cost); sub-agent cost rides its collapsed event.
+    """
+    turn_usage: dict[int, dict] = {}
+    call_usage: dict[int, dict] = {}
+    subagent_latest: dict[str, dict] = {}
+    anonymous: list[dict] = []
+
+    for evt in events:
+        etype = evt.get("type")
+        if etype == "turn_token_usage":
+            _add_usage_bucket(
+                turn_usage, _event_turn_index(evt) or 0, _usage_from_event(evt)
+            )
+        elif etype == "token_usage":
+            _add_usage_bucket(
+                call_usage, _event_turn_index(evt) or 0, _usage_from_event(evt)
+            )
+        elif etype in _SUBAGENT_TOKEN_EVENT_TYPES:
+            job_id = str(evt.get("job_id") or "")
+            if not job_id:
+                anonymous.append(evt)
+                continue
+            previous = subagent_latest.get(job_id)
+            if previous is None or _usage_from_event(evt).get(
+                "total_tokens", 0
+            ) >= _usage_from_event(previous).get("total_tokens", 0):
+                subagent_latest[job_id] = evt
+
+    total = {"tokens_in": 0, "tokens_out": 0, "tokens_cached": 0, "cost_usd": None}
+    for bucket in set(turn_usage) | set(call_usage):
+        _add_usage(total, turn_usage.get(bucket) or call_usage.get(bucket))
+    for row in rollups:
+        cost = _as_float(row.get("cost_usd"))
+        if cost is not None:
+            total["cost_usd"] = float(total["cost_usd"] or 0) + cost
+    for evt in list(subagent_latest.values()) + anonymous:
+        _add_usage(total, _usage_from_event(evt))
+    return total
+
+
+def graph_total_usage(store: SessionStore) -> dict[str, Any]:
+    """Graph-wide token + cost total across every creature loop.
+
+    The turn-bucketed aggregate omits usage with no positive turn bucket,
+    so a channel-driven creature (never bumps ``turn_index``) would leave
+    the Overview/Cost total counting only the user-driven root. This sums
+    each creature's complete own + sub-agent usage turn-agnostically,
+    collapsing each sub-agent job once across all turns. Matches the
+    turn-bucketed total when every creature is user-driven.
+    """
+    total = {"tokens_in": 0, "tokens_out": 0, "tokens_cached": 0, "cost_usd": None}
+    for name, _kind in list_agent_namespaces(store):
+        events = dedupe_adjacent_duplicate_events(store.get_events(name))
+        _add_usage(total, _creature_total_usage(events, store.list_turn_rollups(name)))
+    return total

@@ -168,6 +168,28 @@ class TestAgentsForSummary:
         finally:
             s.close()
 
+    def test_event_only_creature_appears_in_agent_list(self, tmp_path):
+        # A creature that wrote events but was never added to meta["agents"]
+        # is counted in the graph token total; it must also appear in the
+        # agent list. load_meta() folds discover_agents_from_events into
+        # meta["agents"], so both sources agree — this pins that guarantee.
+        s = _store(tmp_path)
+        try:
+            s.init_meta("sess", "terrarium", "/p", "/w", ["root"])
+            s.append_event(
+                "worker",
+                "turn_token_usage",
+                {"prompt_tokens": 5, "completion_tokens": 2},
+                turn_index=1,
+            )
+            s.flush()
+            meta = s.load_meta()
+            out = _agents_for_summary(meta, s, None)
+            assert "root" in out
+            assert "worker" in out
+        finally:
+            s.close()
+
     def test_viewer_default_at_front(self, tmp_path):
         s = _store(tmp_path)
         try:
@@ -229,6 +251,104 @@ class TestBuildSummaryPayload:
             s.init_meta("sess", "agent", "/p", "/w", ["alice"])
             with pytest.raises(NotFoundError):
                 build_summary_payload(s, "sess", "ghost")
+        finally:
+            s.close()
+
+    def test_multi_creature_total_includes_turnless_creature(self, tmp_path):
+        # UXI-03: a channel-driven creature never bumps turn_index, so its
+        # usage is turn-less and the turn-bucketed aggregate drops it —
+        # the graph TOTAL would then count only the (user-driven) root.
+        # The total must sum EVERY creature.
+        s = _store(tmp_path)
+        try:
+            s.init_meta("sess", "terrarium", "/p", "/w", ["root", "worker"])
+            s.append_event(
+                "root",
+                "turn_token_usage",
+                {"prompt_tokens": 100, "completion_tokens": 40},
+                turn_index=1,
+            )
+            # worker: no turn_index (channel-driven) — per-call token_usage.
+            s.append_event(
+                "worker",
+                "token_usage",
+                {"prompt_tokens": 50, "completion_tokens": 20},
+            )
+            s.flush()
+            out = build_summary_payload(s, "sess", None)
+            assert out["totals"]["tokens"]["prompt"] == 150
+            assert out["totals"]["tokens"]["completion"] == 60
+        finally:
+            s.close()
+
+    def test_straddling_subagent_job_not_double_counted_in_total(self, tmp_path):
+        # UXI-03: a sub-agent job with a turn-ful snapshot AND a turn-less
+        # result must be counted ONCE in the graph total — the turn-bucketed
+        # aggregate and the turn-less fold used to each count it.
+        s = _store(tmp_path)
+        try:
+            s.init_meta("sess", "terrarium", "/p", "/w", ["root"])
+            s.append_event(
+                "root",
+                "turn_token_usage",
+                {"prompt_tokens": 100, "completion_tokens": 40},
+                turn_index=1,
+            )
+            s.append_event(
+                "root",
+                "subagent_token_usage",
+                {
+                    "job_id": "j1",
+                    "name": "explore",
+                    "prompt_tokens": 30,
+                    "completion_tokens": 20,
+                    "total_tokens": 50,
+                },
+                turn_index=1,
+            )
+            # Final result recorded turn-less (job straddles the boundary).
+            s.append_event(
+                "root",
+                "subagent_result",
+                {
+                    "job_id": "j1",
+                    "name": "explore",
+                    "prompt_tokens": 48,
+                    "completion_tokens": 32,
+                    "total_tokens": 80,
+                },
+            )
+            s.flush()
+            out = build_summary_payload(s, "sess", None)
+            # parent 100/40 + sub-agent ONCE at its max 48/32 = 148/72
+            # (NOT 100/40 + 30/20 + 48/32 = 178/92).
+            assert out["totals"]["tokens"]["prompt"] == 148
+            assert out["totals"]["tokens"]["completion"] == 72
+        finally:
+            s.close()
+
+    def test_multi_creature_turned_total_not_double_counted(self, tmp_path):
+        # Regression: when both creatures DO have turn_index, the turn-less
+        # fold-in adds nothing — the total must not double count.
+        s = _store(tmp_path)
+        try:
+            s.init_meta("sess", "terrarium", "/p", "/w", ["root", "worker"])
+            s.append_event(
+                "root",
+                "turn_token_usage",
+                {"prompt_tokens": 100, "completion_tokens": 40},
+                turn_index=1,
+            )
+            s.append_event(
+                "worker",
+                "turn_token_usage",
+                {"prompt_tokens": 50, "completion_tokens": 20},
+                turn_index=1,
+            )
+            s.flush()
+            out = build_summary_payload(s, "sess", None)
+            assert out["totals"]["tokens"]["prompt"] == 150
+            assert out["totals"]["tokens"]["completion"] == 60
         finally:
             s.close()
 
