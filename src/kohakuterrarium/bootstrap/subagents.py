@@ -18,6 +18,27 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _apply_option_overrides(config: SubAgentConfig, options: dict[str, Any]) -> None:
+    """Overlay a creature's inline ``options`` onto a resolved sub-agent config.
+
+    Applied to both builtin configs and module-loaded ``custom`` /
+    ``package`` configs so a creature-level ``model`` (and the other
+    overlay fields) is honoured regardless of how the base config was
+    obtained.
+    """
+    if options.get("extra_prompt"):
+        config.extra_prompt = options["extra_prompt"]
+    if options.get("extra_prompt_file"):
+        config.extra_prompt_file = options["extra_prompt_file"]
+    for field_name in ("default_plugins", "plugins", "compact", "model"):
+        if field_name in options:
+            setattr(config, field_name, options[field_name])
+    if "notify_controller_on_background_complete" in options:
+        config.notify_controller_on_background_complete = bool(
+            options["notify_controller_on_background_complete"]
+        )
+
+
 def create_subagent_config(
     item: Any,
     loader: ModuleLoader | None,
@@ -35,22 +56,7 @@ def create_subagent_config(
                 return None
 
             # Overlay selected inline options onto builtin config
-            if item.options.get("extra_prompt"):
-                config.extra_prompt = item.options["extra_prompt"]
-            if item.options.get("extra_prompt_file"):
-                config.extra_prompt_file = item.options["extra_prompt_file"]
-            for field_name in (
-                "default_plugins",
-                "plugins",
-                "compact",
-                "model",
-            ):
-                if field_name in item.options:
-                    setattr(config, field_name, item.options[field_name])
-            if "notify_controller_on_background_complete" in item.options:
-                config.notify_controller_on_background_complete = bool(
-                    item.options["notify_controller_on_background_complete"]
-                )
+            _apply_option_overrides(config, item.options)
 
             return config
 
@@ -64,7 +70,7 @@ def create_subagent_config(
                     )
                     return None
                 try:
-                    return loader.load_config_object(
+                    config = loader.load_config_object(
                         module_path=item.module,
                         object_name=item.config_name,
                         module_type=item.type,
@@ -72,6 +78,10 @@ def create_subagent_config(
                 except ModuleLoadError as e:
                     logger.error("Failed to load custom sub-agent", error=str(e))
                     return None
+                # A module-loaded config still honours creature-level inline
+                # overrides (notably ``model``) — same overlay as builtins.
+                _apply_option_overrides(config, item.options)
+                return config
 
             # Otherwise, create inline config from options. This supports
             # nested YAML-only sub-agent configs without a Python module:

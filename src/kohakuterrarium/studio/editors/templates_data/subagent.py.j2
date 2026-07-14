@@ -16,4 +16,7 @@ from kohakuterrarium.modules.subagent.config import SubAgentConfig
 {%- if interactive %}
     interactive=True,
 {%- endif %}
+{%- if model %}
+    model={{ model | tojson }},
+{%- endif %}
 )

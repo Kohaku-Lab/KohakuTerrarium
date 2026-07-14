@@ -32,6 +32,7 @@ _FORM_FIELDS = (
     "can_modify",
     "stateless",
     "interactive",
+    "model",
 )
 
 
@@ -51,6 +52,7 @@ def render_new(form: dict) -> str:
         can_modify=bool(form.get("can_modify", False)),
         stateless=bool(form.get("stateless", True)),
         interactive=bool(form.get("interactive", False)),
+        model=form.get("model") or "",
     )
 
 
@@ -97,6 +99,7 @@ def parse_back(source: str) -> dict:
         "can_modify": False,
         "stateless": True,
         "interactive": False,
+        "model": "",
     }
 
     # Also resolve SYSTEM_PROMPT = "..." if the call references a name
@@ -273,6 +276,7 @@ def _raw_envelope(reason: str) -> dict:
             "can_modify": False,
             "stateless": True,
             "interactive": False,
+            "model": "",
         },
         "execute_body": "",
         "warnings": [{"code": "ast_roundtrip_unsafe", "message": reason}],

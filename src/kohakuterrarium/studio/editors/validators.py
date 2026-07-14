@@ -50,6 +50,11 @@ class SubAgentConfigItemIn(BaseModel):
     tools: list[str] = Field(default_factory=list)
     can_modify: bool = False
     interactive: bool = False
+    # Per-sub-agent LLM selector (``provider/name[@variations]`` or a
+    # legacy raw model id); empty = inherit the parent creature's model.
+    # Config-loading folds this top-level key into ``options`` where
+    # ``bootstrap.subagents`` reads it (see ``config._parse_subagent_config``).
+    model: str = ""
     options: dict[str, Any] = Field(default_factory=dict)
 
 

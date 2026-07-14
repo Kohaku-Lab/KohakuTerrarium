@@ -38,6 +38,15 @@ class TestRenderNew:
         # Defaults from render_new: stateless True, can_modify False.
         assert back["form"]["stateless"] is True
         assert back["form"]["can_modify"] is False
+        # No model selector configured → the kwarg is omitted, not "".
+        assert "model=" not in out
+        assert back["form"]["model"] == ""
+
+    def test_model_selector_round_trips(self):
+        out = cg.render_new({"name": "explore", "model": "anthropic/claude-opus-4.8"})
+        assert "model=" in out
+        back = cg.parse_back(out)
+        assert back["form"]["model"] == "anthropic/claude-opus-4.8"
 
 
 # ── update_existing ─────────────────────────────────────────
@@ -73,6 +82,12 @@ class TestUpdateExisting:
         # description was absent in source; update_existing must add it.
         assert back["form"]["name"] == "x"
         assert back["form"]["description"] == "added"
+
+    def test_rewrites_model_kwarg(self):
+        src = 'CFG = SubAgentConfig(\n    name="x",\n    model="old/model",\n)\n'
+        out = cg.update_existing(src, {"name": "x", "model": "codex/gpt-5.5"}, "")
+        back = cg.parse_back(out)
+        assert back["form"]["model"] == "codex/gpt-5.5"
 
 
 # ── parse_back ──────────────────────────────────────────────
