@@ -357,32 +357,18 @@ function _dedupeAdjacentDuplicateEvents(events) {
   return out
 }
 
-export function _replayEvents(messages, events, branchView = null, liveRunningJobIds = null) {
-  // ``liveRunningJobIds`` (optional Set of job_ids) is the
-  // authoritative "still running according to the live WS" signal.
-  // When the replay encounters a terminal event for a job that the
-  // live truth says is still running (i.e. a stale interrupted /
-  // error event from history that contradicts the live state), the
-  // terminal-state flip is suppressed so the part stays "running".
-  // Bugs this fixes:
-  //   - background sub-agents rendering as "interrupted" while
-  //     their accordion is still streaming, after a tab switch /
-  //     WS reconnect that triggered a history reload (Bug 1).
+export function _replayEvents(messages, events, branchView = null) {
+  // A terminal event is authoritative: liveness comes from the backend,
+  // which withholds a job's terminal (``normalize_resumable_events`` with
+  // ``live_job_ids``) for as long as it sees the job running. A job with
+  // no terminal falls through to the pendingJobs sweep as "running"; a
+  // terminal that reaches here (real OR ``_synthetic_resume``) belongs to
+  // a job that is genuinely dead and renders "interrupted"/"error"/"done"
+  // — dead work resumed from a saved session reads as interrupted, never
+  // stuck "running" forever (UXI-04).
   if (!events?.length) return { messages: _convertHistory(messages), pendingJobs: {} }
 
   events = _dedupeAdjacentDuplicateEvents(events)
-  // Drop ``_synthetic_resume``-marked events emitted by the backend's
-  // ``normalize_resumable_events`` when it sees an unfinished
-  // tool_call / subagent_call AND the caller failed to flag that job
-  // as live. These synthetic terminals were the source of Bug 1: a
-  // background-promoted sub-agent (no longer in ``_direct_job_meta``
-  // but still alive in ``subagent_manager``) was wrongly synthesized
-  // as ``interrupted`` and the running bubble flipped to "interrupted
-  // by session resume". The defensive fix is on the FE side because
-  // backend can lag in tracking promoted jobs; the still-live jobs
-  // then fall through to the pendingJobs sweep below and surface
-  // as "running" with no terminal event consumed.
-  events = events.filter((evt) => !evt?._synthetic_resume)
   const { byTurn, liveIds, branchSelection } = _collectBranchMetadata(events, branchView)
 
   // Pre-pass: compact_replace ranges hide every event whose event_id
@@ -580,33 +566,15 @@ export function _replayEvents(messages, events, branchView = null, liveRunningJo
       tc.result = payload.result
       tc.resultParts = payload.resultParts
       tc.resultMeta = payload.resultMeta
-      // Stale-interrupt guard: if the live WS still tracks this job
-      // as running, a "history says interrupted" replay must NOT
-      // overwrite the live "running" status. This is the root cause
-      // of "background sub-agent shows 'interrupted' while its
-      // accordion is still streaming" (Bug 1).  The guard only fires
-      // for the interrupt branch — a genuine error / completion is
-      // always honoured because the live truth would already have
-      // moved on too.
       const isInterrupted = opts?.interrupted || opts?.finalState === "interrupted"
-      const effectiveJobId = jobId || tc.jobId
-      const stillLive = !!(
-        isInterrupted &&
-        effectiveJobId &&
-        liveRunningJobIds &&
-        liveRunningJobIds.has(effectiveJobId)
-      )
-      if (isInterrupted && !stillLive) {
+      if (isInterrupted) {
         tc.status = "interrupted"
-      } else if (opts?.error && !stillLive) {
+      } else if (opts?.error) {
         tc.status = "error"
-      } else if (!stillLive) {
-        // Successful completion (subagent_done / tool_done with no
-        // error / interrupt flags). The replay path was previously
-        // missing this branch — sub-agents whose initial status is
-        // "running" (chat.js:359) would stay "running" forever after
-        // any history reload (Bug 2). Mirror the live handler's
-        // unconditional ``tc.status = "done"`` at line 2032.
+      } else {
+        // Successful completion — sub-agents default to "running" in
+        // ``addTool`` so a stream walked before ``subagent_result`` isn't
+        // wrongly "done"; the terminal flips them to "done" here.
         tc.status = "done"
       }
       if (opts?.tools_used) tc.tools_used = opts.tools_used
@@ -615,13 +583,8 @@ export function _replayEvents(messages, events, branchView = null, liveRunningJo
       if (opts?.total_tokens != null) tc.total_tokens = opts.total_tokens
       if (opts?.prompt_tokens != null) tc.prompt_tokens = opts.prompt_tokens
       if (opts?.completion_tokens != null) tc.completion_tokens = opts.completion_tokens
-      // Track completion for pending-job detection — unless the live
-      // truth says this job is still running (in which case the
-      // pendingJobs sweep at line 862 must keep it on the radar).
-      if (!stillLive) {
-        if (tc.jobId) completedJobs.add(tc.jobId)
-        if (jobId) completedJobs.add(jobId)
-      }
+      if (tc.jobId) completedJobs.add(tc.jobId)
+      if (jobId) completedJobs.add(jobId)
     }
   }
 
@@ -982,10 +945,12 @@ export function _replayEvents(messages, events, branchView = null, liveRunningJo
       upsertCompactMessage(evt.compact_round || evt.round || 0, "", "running", 0)
     } else if (t === "background_result") {
       cur = null
+      // A combined delivery banner carries `labels` (one per folded
+      // completion); older single-event frames carry only `label`.
       result.push({
         id: "bgres_" + result.length,
         role: "bg_result",
-        label: evt.label || evt.job_id || "",
+        label: (Array.isArray(evt.labels) ? evt.labels.join(", ") : evt.label) || evt.job_id || "",
         kind: evt.kind || "tool",
         jobId: evt.job_id || "",
         timestamp: "",
@@ -1067,12 +1032,9 @@ export function _replayEvents(messages, events, branchView = null, liveRunningJo
   // Sub-agents are async / often background — ``addTool`` defaults
   // their initial status to "running" so a rebuild that walks the
   // stream before the (eventual) ``subagent_result`` arrives leaves
-  // them as "running" rather than "done with no result". The legacy
-  // "promote done-with-no-result-and-no-jobId to interrupted" sweep
-  // is intentionally NOT applied to sub-agents — a missing result
-  // for a background sub-agent means *still running*, not interrupted,
-  // and the live ``runningJobs`` map is the authoritative signal of
-  // actual interruption (the user clicked Stop).
+  // them as "running" rather than "done with no result". A missing
+  // terminal means *still running*; the backend emits a terminal (real
+  // or synthetic) once the job is actually done or interrupted.
 
   // Clean up empty parts
   for (const msg of result) {
@@ -1400,6 +1362,17 @@ const _chatStoreOptions = {
     processingByTab: {},
     /** @type {Object<string, {prompt: number, completion: number, total: number, cached: number}>} Per-source token usage */
     tokenUsage: {},
+    /**
+     * Latest CUMULATIVE token snapshot per sub-agent ``job_id``. The
+     * backend emits ``subagent_token_update`` / ``subagent_result`` as
+     * running totals for one job (never per-turn deltas) and NEVER folds
+     * a sub-agent's spend into its parent creature's ``token_usage``, so
+     * the session total is ``sum(tokenUsage) + sum(subagentUsageByJob)``
+     * with no double-count. Keyed by job so re-emitted snapshots replace
+     * (not add) — see ``sessionTokenTotals`` (UXI-03).
+     * @type {Object<string, {prompt: number, completion: number, total: number, cached: number}>}
+     */
+    subagentUsageByJob: {},
     /** @type {Object<string, {name: string, type: string, startedAt: number}>} Running background jobs */
     runningJobs: {},
     /** @type {Object<string, number>} Unread message counts per tab */
@@ -1539,6 +1512,28 @@ const _chatStoreOptions = {
     currentMessages: (state) => {
       if (!state.activeTab) return []
       return state.messagesByTab[state.activeTab] || []
+    },
+    /**
+     * Session token totals INCLUDING sub-agents: every creature's own
+     * usage (``tokenUsage``, parent-controller LLM only) plus each
+     * sub-agent job's latest cumulative snapshot. The two are disjoint
+     * on the backend, so this sums each exactly once (UXI-03).
+     */
+    sessionTokenTotals: (state) => {
+      const totals = { prompt: 0, completion: 0, cached: 0, total: 0 }
+      for (const u of Object.values(state.tokenUsage || {})) {
+        totals.prompt += u.prompt || 0
+        totals.completion += u.completion || 0
+        totals.cached += u.cached || 0
+        totals.total += u.total || 0
+      }
+      for (const u of Object.values(state.subagentUsageByJob || {})) {
+        totals.prompt += u.prompt || 0
+        totals.completion += u.completion || 0
+        totals.cached += u.cached || 0
+        totals.total += u.total || 0
+      }
+      return totals
     },
     hasRunningJobs: (state) => Object.keys(state.runningJobs).length > 0,
     // Jobs owned by one tab must not light up indicators / stop
@@ -1701,6 +1696,7 @@ const _chatStoreOptions = {
       this.tabs = []
       this.messagesByTab = {}
       this.tokenUsage = {}
+      this.subagentUsageByJob = {}
       this.runningJobs = {}
       this.unreadCounts = {}
       this.queuedMessagesByTab = {}
@@ -1968,11 +1964,16 @@ const _chatStoreOptions = {
       const contentParts = typeof text === "string" ? [{ type: "text", text }] : text
       const normalized = normalizeMessageContent(contentParts)
       const signature = contentSignature(contentParts)
+      // Client-minted stable id so a message that gets buffered mid-turn
+      // can be edited / cancelled by id (UXI-08a). The backend echoes it
+      // as the pending id; the ``input_queued`` ack confirms the slot.
+      const eventId = `c_${now}_${Math.random().toString(36).slice(2, 8)}`
       const msg = {
         id: "u_" + now,
         role: "user",
         content: normalized.content,
         contentParts: normalized.contentParts,
+        eventId,
         timestamp: new Date(now).toISOString(),
       }
 
@@ -1999,7 +2000,9 @@ const _chatStoreOptions = {
       } else {
         const target = tab
         if (this._ws.readyState === WebSocket.OPEN) {
-          this._ws.send(JSON.stringify({ type: "input", target, content: contentParts }))
+          this._ws.send(
+            JSON.stringify({ type: "input", target, content: contentParts, event_id: eventId }),
+          )
           // Flip processing optimistically — the backend's
           // processing_start event will confirm it; this ensures the
           // indicator and interrupt button appear immediately on the
@@ -2010,6 +2013,10 @@ const _chatStoreOptions = {
     },
 
     async _loadHistory(target, generation = this._instanceGeneration) {
+      // Capture BEFORE the fetch: a tab-owned job that starts while this
+      // request is in flight is newer than the history it returns, so
+      // job-reconciliation must not prune it (UXI-04 stale-job pruning).
+      const fetchedAt = Date.now()
       try {
         const data = await terrariumAPI.getHistory(this._instanceGraphId, target)
         if (generation !== this._instanceGeneration) return
@@ -2020,19 +2027,14 @@ const _chatStoreOptions = {
           // without a network round-trip after the user clicks <prev/next>.
           this.eventsByTab[target] = normalizedEvents
           const view = this.branchViewByTab[target] || null
-          // Pass the live-running job set so the replay's terminal-
-          // event handling won't overwrite a still-live "running"
-          // part with a stale "interrupted" from history (Bug 1).
-          const liveRunning = new Set(Object.keys(this.runningJobs || {}))
-          const { messages: msgs, pendingJobs } = _replayEvents(
-            messages,
-            normalizedEvents,
-            view,
-            liveRunning,
-          )
+          // Canonical history — NOT the browser's ``runningJobs`` — is the
+          // liveness authority: the backend already withholds synthetic
+          // terminals for jobs it still sees as live, so a terminal that
+          // survives to here means the job is dead (UXI-04).
+          const { messages: msgs, pendingJobs } = _replayEvents(messages, normalizedEvents, view)
           this.messagesByTab[target] = msgs
           this._restoreTokenUsage(target, normalizedEvents)
-          this._restoreRunningState(target, pendingJobs, isProcessing)
+          this._restoreRunningState(target, pendingJobs, isProcessing, fetchedAt)
         } else if (messages?.length) {
           this.messagesByTab[target] = _convertHistory(messages)
           // No event stream but the agent might still be mid-turn —
@@ -2240,9 +2242,11 @@ const _chatStoreOptions = {
       this._checkJobTimer()
     },
 
-    /** Restore running jobs from replay result. */
-    _restoreRunningState(tabKey, pendingJobs, isProcessing = false) {
-      this._reconcileRunningJobs(tabKey, pendingJobs, null)
+    /** Restore running jobs from replay result. A fetch-driven load
+     *  passes ``fetchedAt`` so stale tab-owned jobs the fresh history no
+     *  longer lists are pruned (reconnect after a missed terminal). */
+    _restoreRunningState(tabKey, pendingJobs, isProcessing = false, fetchedAt = null) {
+      this._reconcileRunningJobs(tabKey, pendingJobs, fetchedAt)
       if (tabKey) {
         this.processingByTab[tabKey] = !!isProcessing
         this._rehydrateRunningParts(tabKey, pendingJobs)
@@ -2266,18 +2270,17 @@ const _chatStoreOptions = {
 
     /** Restore token usage from event log (for page refresh) */
     _restoreTokenUsage(source, events) {
+      // Canonical history is authoritative — rebuild this source's total
+      // from scratch so a reconnect (which re-runs _loadHistory on the
+      // same generation) does not add the persisted token_usage rows a
+      // second time and double the count.
+      this.tokenUsage[source] = { prompt: 0, completion: 0, total: 0, cached: 0, lastPrompt: 0 }
       for (const evt of _dedupeAdjacentDuplicateEvents(events)) {
         const isTokenEvt =
           (evt.type === "activity" && evt.activity_type === "token_usage") ||
           evt.type === "token_usage"
         if (isTokenEvt) {
-          const prev = this.tokenUsage[source] || {
-            prompt: 0,
-            completion: 0,
-            total: 0,
-            cached: 0,
-            lastPrompt: 0,
-          }
+          const prev = this.tokenUsage[source]
           this.tokenUsage[source] = {
             prompt: prev.prompt + (evt.prompt_tokens || 0),
             completion: prev.completion + (evt.completion_tokens || 0),
@@ -2286,6 +2289,32 @@ const _chatStoreOptions = {
             lastPrompt: evt.prompt_tokens || prev.lastPrompt,
           }
         }
+        // Sub-agent cumulative snapshots persist as ``subagent_token_usage``
+        // (running updates) and ``subagent_result`` (final); fold the
+        // highest per job back into the session total (UXI-03).
+        if (evt.type === "subagent_token_usage" || evt.type === "subagent_result") {
+          this._recordSubagentUsage(source, evt.job_id, evt)
+        }
+      }
+    },
+
+    /** Record the latest cumulative token snapshot for a sub-agent job.
+     *  Snapshots are cumulative per job (never deltas); keep the
+     *  highest-total one so an out-of-order or older frame can't shrink
+     *  the running total (UXI-03). */
+    _recordSubagentUsage(source, jobId, data) {
+      if (!jobId || data?.total_tokens == null) return
+      // Key by source+job so two creatures in one terrarium-scoped store
+      // with colliding job_ids don't max-overwrite each other (UXI-03).
+      const key = `${source || ""}:${jobId}`
+      const total = Number(data.total_tokens) || 0
+      const prev = this.subagentUsageByJob[key]
+      if (prev && total < (prev.total || 0)) return
+      this.subagentUsageByJob[key] = {
+        prompt: Number(data.prompt_tokens) || 0,
+        completion: Number(data.completion_tokens) || 0,
+        cached: Number(data.cached_tokens) || 0,
+        total,
       }
     },
 
@@ -2351,6 +2380,12 @@ const _chatStoreOptions = {
         this._handleUISupersede(source, data)
       } else if (data.type === "ui_reply_ack") {
         this._handleUIReplyAck(source, data)
+      } else if (data.type === "input_queued") {
+        this._handlePendingAck(source, data, "queued")
+      } else if (data.type === "input_edit_ack") {
+        this._handlePendingAck(source, data, "edit")
+      } else if (data.type === "input_cancel_ack") {
+        this._handlePendingAck(source, data, "cancel")
       } else if (data.type === "error") {
         this._addMsg(source, {
           id: "err_" + Date.now(),
@@ -2476,6 +2511,11 @@ const _chatStoreOptions = {
         this._ws.send(
           JSON.stringify({
             type: "ui_reply",
+            // Route to the creature that raised the prompt — a sibling
+            // that isn't the WS-bound creature would otherwise hang its
+            // tool forever waiting on a reply delivered to the wrong
+            // router (UXI-09). Mirrors the input frame's ``target``.
+            target: tab,
             event_id: eventId,
             action_id: actionId,
             values: values || {},
@@ -2485,6 +2525,77 @@ const _chatStoreOptions = {
       } catch (err) {
         console.error("submitUIReply failed:", err)
       }
+    },
+
+    /**
+     * Edit a still-queued mid-turn message by id (UXI-08a). Optimistically
+     * updates the banner's shown content — the backend edits its buffer,
+     * and the drain's ``user_input_injected`` (carrying the edited content)
+     * pops this exact entry. An ``input_edit_ack{already_sent}`` means the
+     * edit lost the race and clears the (now-stale) banner entry.
+     */
+    editQueuedMessage(tab, eventId, newContent) {
+      const queue = this.queuedMessagesByTab[tab] || []
+      const msg = queue.find((m) => m.eventId === eventId)
+      if (!msg) return
+      const empty = typeof newContent === "string" ? !newContent.trim() : !newContent?.length
+      if (empty) return
+      const contentParts =
+        typeof newContent === "string" ? [{ type: "text", text: newContent }] : newContent
+      const normalized = normalizeMessageContent(contentParts)
+      msg.content = normalized.content
+      msg.contentParts = normalized.contentParts
+      if (this._ws?.readyState === WebSocket.OPEN) {
+        this._ws.send(
+          JSON.stringify({
+            type: "input_edit",
+            target: tab,
+            event_id: eventId,
+            content: contentParts,
+          }),
+        )
+      }
+    },
+
+    /**
+     * Cancel a still-queued mid-turn message by id (UXI-08a). Marks the
+     * entry cancelling and lets the ``input_cancel_ack`` remove it; with no
+     * live socket the message never reached the backend, so drop it locally.
+     */
+    cancelQueuedMessage(tab, eventId) {
+      const queue = this.queuedMessagesByTab[tab] || []
+      const idx = queue.findIndex((m) => m.eventId === eventId)
+      if (idx === -1) return
+      if (this._ws?.readyState === WebSocket.OPEN) {
+        queue[idx].cancelling = true
+        this._ws.send(JSON.stringify({ type: "input_cancel", target: tab, event_id: eventId }))
+      } else {
+        queue.splice(idx, 1)
+      }
+    },
+
+    /**
+     * Handle the queued-input acks. ``queued`` confirms the backend
+     * buffered the slot (client id adopted). ``edit``/``cancel`` acks
+     * carry ``status``: ``edited`` keeps the (optimistically edited)
+     * entry for the drain to pop; ``cancelled`` / ``already_sent`` drop
+     * the banner entry — cancelled won't run, already_sent is promoted
+     * into chat by the drain's ``user_input_injected``.
+     */
+    _handlePendingAck(source, data, kind) {
+      const queue = this.queuedMessagesByTab[source || ""]
+      if (!queue) return
+      const idx = queue.findIndex((m) => m.eventId === data.event_id)
+      if (idx === -1) return
+      if (kind === "queued") {
+        queue[idx].backendQueued = true
+        return
+      }
+      // Edit committed — keep the (optimistically edited) entry for the
+      // drain's user_input_injected to promote. Every other outcome
+      // (cancelled, or already_sent for edit/cancel) drops the slot.
+      if (kind === "edit" && data.status === "edited") return
+      queue.splice(idx, 1)
     },
 
     _handleActivity(source, data) {
@@ -2633,10 +2744,13 @@ const _chatStoreOptions = {
       }
 
       if (at === "background_result") {
+        // Combined delivery banner: `labels` lists every folded
+        // completion; older single-event frames carry only `label`.
         msgs.push({
           id: "bgres_" + Date.now(),
           role: "bg_result",
-          label: data.label || data.job_id || "",
+          label:
+            (Array.isArray(data.labels) ? data.labels.join(", ") : data.label) || data.job_id || "",
           kind: data.kind || "tool",
           jobId: data.job_id || "",
           timestamp: new Date().toISOString(),
@@ -2790,6 +2904,7 @@ const _chatStoreOptions = {
         if (data.total_tokens != null) tc.total_tokens = data.total_tokens
         if (data.prompt_tokens != null) tc.prompt_tokens = data.prompt_tokens
         if (data.completion_tokens != null) tc.completion_tokens = data.completion_tokens
+        if (at === "subagent_done") this._recordSubagentUsage(source, data.job_id, data)
         delete this.runningJobs[tc.jobId || tc.id]
         this._checkJobTimer()
       } else if (at === "tool_error" || at === "subagent_error") {
@@ -2821,12 +2936,14 @@ const _chatStoreOptions = {
         if (data.total_tokens != null) tc.total_tokens = data.total_tokens
         if (data.prompt_tokens != null) tc.prompt_tokens = data.prompt_tokens
         if (data.completion_tokens != null) tc.completion_tokens = data.completion_tokens
+        if (at === "subagent_error") this._recordSubagentUsage(source, data.job_id, data)
         delete this.runningJobs[tc.jobId || tc.id]
         this._checkJobTimer()
       } else if (at === "subagent_token_update") {
         // Live token usage update from a running sub-agent
         const saName = data.subagent || ""
         const saJobId = data.job_id || ""
+        this._recordSubagentUsage(source, saJobId, data)
         const sa = this._findSubagentPart(msgs, saName, saJobId)
         if (sa) {
           if (data.total_tokens) sa.total_tokens = data.total_tokens
@@ -3681,11 +3798,10 @@ const _chatStoreOptions = {
       const events = this.eventsByTab[tab]
       if (!events) return
       const branchView = this.branchViewByTab[tab] || null
-      // Same stale-interrupt guard as _loadHistory: a rebuild while
-      // a sub-agent is still live must not clobber its "running"
-      // status with a stale terminal event from the cached log.
-      const liveRunning = new Set(Object.keys(this.runningJobs || {}))
-      const { messages, pendingJobs } = _replayEvents([], events, branchView, liveRunning)
+      // Canonical history is the liveness authority (see _loadHistory):
+      // the backend withholds synthetic terminals for still-live jobs,
+      // so a terminal in the cached log means the job is dead.
+      const { messages, pendingJobs } = _replayEvents([], events, branchView)
       this.messagesByTab[tab] = messages
       // Canonical history is authoritative for this tab's running jobs.
       // ``fetchedAt`` (set only by _resyncHistory) unlocks removals of
@@ -4094,6 +4210,7 @@ const _chatStoreOptions = {
       this.tabs = []
       this.messagesByTab = {}
       this.tokenUsage = {}
+      this.subagentUsageByJob = {}
       this.runningJobs = {}
       this.unreadCounts = {}
       this.queuedMessagesByTab = {}

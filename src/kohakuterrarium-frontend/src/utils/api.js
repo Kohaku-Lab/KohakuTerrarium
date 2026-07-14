@@ -376,6 +376,36 @@ export const terrariumAPI = {
     return data
   },
 
+  /**
+   * Read a creature sub-agent's inner conversation. Identify by live
+   * ``job_id``, live-interactive ``name``, or persisted ``name`` + ``run``.
+   * @returns {Promise<{name, run, job_id, live, interactive, messages, meta}>}
+   */
+  async getSubagentConversation(id, creature, { jobId, name, run } = {}) {
+    const params = {}
+    if (jobId) params.job_id = jobId
+    if (name) params.name = name
+    if (run != null) params.run = run
+    const { data } = await api.get(
+      `/sessions/${id}/creatures/${encodeTarget(creature)}/subagents/conversation`,
+      { params },
+    )
+    return data
+  },
+
+  /** Send a message to a LIVE sub-agent. ``jobId`` targets the exact live
+   *  run (disambiguates repeated runs of the same name); 409 when the run
+   *  is not live. */
+  async sendSubagentMessage(id, creature, name, content, jobId = "") {
+    const body = { content }
+    if (jobId) body.job_id = jobId
+    const { data } = await api.post(
+      `/sessions/${id}/creatures/${encodeTarget(creature)}/subagents/${encodeTarget(name)}/send`,
+      body,
+    )
+    return data
+  },
+
   /** Execute a slash command on a terrarium creature */
   async executeCreatureCommand(id, name, command, args = "") {
     const { data } = await api.post(`/sessions/${id}/creatures/${encodeTarget(name)}/command`, {
@@ -994,8 +1024,19 @@ export const settingsAPI = {
     const { data } = await api.get(`/settings/mcp/${name}/usage`)
     return data
   },
-  async getCodexUsage() {
-    const { data } = await api.get("/settings/codex-usage")
+  async getCodexUsage(node = "_host") {
+    const { data } = await api.get("/settings/codex-usage", _nodeQuery(node))
+    return data
+  },
+  /**
+   * Redeem a Codex rate-limit reset credit. ``idempotency_key`` must be
+   * stable across retries of the same redeem so a double-submit can't
+   * double-spend; ``credit_id`` targets a specific credit when known.
+   * @returns {Promise<{outcome: 'reset'|'nothingToReset'|'noCredit'|'alreadyRedeemed', idempotency_key: string}>}
+   */
+  async codexResetConsume({ idempotencyKey, creditId } = {}, node = "_host") {
+    const body = { idempotency_key: idempotencyKey || null, credit_id: creditId || null }
+    const { data } = await api.post("/settings/codex-reset-consume", body, _nodeQuery(node))
     return data
   },
   async getCodexStatus(node = "_host") {
