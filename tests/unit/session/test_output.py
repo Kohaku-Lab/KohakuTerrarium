@@ -183,16 +183,47 @@ class TestCurrentTurnBranch:
 
 
 class TestStreaming:
-    async def test_write_emits_text_chunk(self, tmp_path):
+    async def test_streamed_writes_coalesce_to_one_event(self, tmp_path):
+        # UXI-02: N streaming writes are buffered and flushed as ONE
+        # text_chunk at the segment boundary, not one row per write.
         store, out = _make(tmp_path)
         try:
-            await out.write("hello")
+            await out.write_stream("Hello, ")
+            await out.write_stream("world")
+            await out.write_stream("!")
+            # Nothing is persisted until a boundary closes the segment.
             store.flush()
-            evts = store.get_events("alice")
-            assert len(evts) == 1
-            assert evts[0]["type"] == "text_chunk"
-            assert evts[0]["content"] == "hello"
-            assert evts[0]["chunk_seq"] == 0
+            assert [
+                e for e in store.get_events("alice") if e["type"] == "text_chunk"
+            ] == []
+            await out.on_processing_end()
+            store.flush()
+            tcs = [e for e in store.get_events("alice") if e["type"] == "text_chunk"]
+            assert len(tcs) == 1
+            assert tcs[0]["content"] == "Hello, world!"
+            assert tcs[0]["chunk_seq"] == 0
+        finally:
+            store.close()
+
+    async def test_non_text_event_closes_the_segment_in_order(self, tmp_path):
+        # A routed non-text event flushes the buffered text FIRST, so the
+        # assistant text keeps its place before the tool call.
+        store, out = _make(tmp_path)
+        try:
+            await out.write("before ")
+            await out.write("tool")
+            out.on_activity_with_metadata("tool_start", "[bash] x", {"job_id": "j1"})
+            await out.write("after")
+            await out.on_processing_end()
+            store.flush()
+            types = [e["type"] for e in store.get_events("alice")]
+            assert types[:3] == ["text_chunk", "tool_call", "text_chunk"]
+            tcs = [
+                e["content"]
+                for e in store.get_events("alice")
+                if e["type"] == "text_chunk"
+            ]
+            assert tcs == ["before tool", "after"]
         finally:
             store.close()
 
@@ -200,31 +231,133 @@ class TestStreaming:
         store, out = _make(tmp_path)
         try:
             await out.write("")
+            await out.on_processing_end()
             store.flush()
-            assert store.get_events("alice") == []
-        finally:
-            store.close()
-
-    async def test_write_stream_increments_seq(self, tmp_path):
-        store, out = _make(tmp_path)
-        try:
-            await out.write_stream("a")
-            await out.write_stream("b")
-            store.flush()
-            evts = store.get_events("alice")
-            assert [e["chunk_seq"] for e in evts] == [0, 1]
+            assert [
+                e for e in store.get_events("alice") if e["type"] == "text_chunk"
+            ] == []
         finally:
             store.close()
 
     async def test_processing_start_resets_chunk_seq(self, tmp_path):
+        # chunk_seq numbers segments within one response and resets each
+        # processing_start.
         store, out = _make(tmp_path)
         try:
-            await out.write_stream("a")
             await out.on_processing_start()
+            await out.write_stream("a")
+            out.on_activity_with_metadata("tool_start", "[bash] x", {})
             await out.write_stream("b")
+            await out.on_processing_end()
+            await out.on_processing_start()
+            await out.write_stream("c")
+            await out.on_processing_end()
             store.flush()
-            evts = [e for e in store.get_events("alice") if e["type"] == "text_chunk"]
-            assert [e["chunk_seq"] for e in evts] == [0, 0]
+            seqs = [
+                e["chunk_seq"]
+                for e in store.get_events("alice")
+                if e["type"] == "text_chunk"
+            ]
+            # First response: two segments (0, 1); second response resets (0).
+            assert seqs == [0, 1, 0]
+        finally:
+            store.close()
+
+    async def test_start_recovers_crashed_segment(self, tmp_path):
+        # UXI-02 crash case: streamed text past the durable-slot flush gate
+        # with no boundary, then the process dies. Reopening the store and
+        # calling start() flushes the buffered text as one finalized event.
+        crashed = "partial " + "x" * 600  # exceeds the slot flush gate
+        path = str(tmp_path / "x.kohakutr")
+        store = SessionStore(path)
+        out = SessionOutput("alice", store, None)
+        await out.write_stream(crashed)
+        store.close()  # simulate shutdown mid-stream
+
+        store2 = SessionStore(path)
+        out2 = SessionOutput("alice", store2, None)
+        try:
+            await out2.start()
+            store2.flush()
+            tcs = [e for e in store2.get_events("alice") if e["type"] == "text_chunk"]
+            assert len(tcs) == 1
+            assert tcs[0]["content"] == crashed
+            assert tcs[0]["finalize"] == "recovered"
+        finally:
+            store2.close()
+
+    async def test_recovery_fires_without_start_being_called(self, tmp_path):
+        # start() is not wired for secondary outputs in production, so the
+        # recovery must also fire on the first real activity after resume.
+        orphaned = "orphaned " + "y" * 600  # exceeds the slot flush gate
+        path = str(tmp_path / "x.kohakutr")
+        store = SessionStore(path)
+        out = SessionOutput("alice", store, None)
+        await out.write_stream(orphaned)
+        store.close()
+
+        store2 = SessionStore(path)
+        out2 = SessionOutput("alice", store2, None)
+        try:
+            await out2.on_processing_start()  # start() intentionally skipped
+            await out2.write_stream("fresh turn")
+            await out2.on_processing_end()
+            store2.flush()
+            tcs = [
+                (e["content"], e.get("finalize"))
+                for e in store2.get_events("alice")
+                if e["type"] == "text_chunk"
+            ]
+            assert (orphaned, "recovered") in tcs
+            assert ("fresh turn", None) in tcs
+        finally:
+            store2.close()
+
+    async def test_crash_recovery_at_construction_attributes_to_interrupted_turn(
+        self, tmp_path
+    ):
+        # UXI-02: a crashed segment is recovered when the sink is built on
+        # resume (so a view-only resume shows it, no new turn needed), and
+        # is stamped from the interrupted turn — not the resumed agent's
+        # already-advanced current turn.
+        path = str(tmp_path / "x.kohakutr")
+        agent1 = _FakeAgent(turn=2, branch=1)
+        store = SessionStore(path)
+        out = SessionOutput("alice", store, agent1)
+        await out.on_processing_start()  # processing_start at turn 2
+        await out.write_stream("crashed " + "x" * 600)  # past the slot gate
+        store.close()  # crash mid-stream
+
+        # Resume: the agent has advanced to a new turn (3).
+        agent2 = _FakeAgent(turn=3, branch=1)
+        store2 = SessionStore(path)
+        # Constructing the sink is what triggers recovery (no start needed).
+        SessionOutput("alice", store2, agent2)
+        try:
+            store2.flush()
+            events = store2.get_events("alice")
+            tcs = [e for e in events if e["type"] == "text_chunk"]
+            assert len(tcs) == 1
+            assert tcs[0]["content"] == "crashed " + "x" * 600
+            assert tcs[0]["finalize"] == "recovered"
+            # Interrupted turn (2), NOT the resumed agent's live turn (3).
+            assert tcs[0]["turn_index"] == 2
+            assert tcs[0]["branch_id"] == 1
+            # Recovered at construction — no new turn / processing event needed.
+            assert not any(e.get("turn_index") == 3 for e in events)
+        finally:
+            store2.close()
+
+    async def test_short_segment_below_gate_still_flushes_at_boundary(self, tmp_path):
+        # A short segment never trips the durable-slot gate, but the
+        # boundary flush still emits it from the in-memory buffer.
+        store, out = _make(tmp_path)
+        try:
+            await out.write_stream("tiny")
+            await out.on_processing_end()
+            store.flush()
+            tcs = [e for e in store.get_events("alice") if e["type"] == "text_chunk"]
+            assert [e["content"] for e in tcs] == ["tiny"]
         finally:
             store.close()
 
@@ -254,13 +387,25 @@ class TestProcessingLifecycle:
         finally:
             store.close()
 
-    async def test_end_saves_token_usage_state(self, tmp_path):
+    async def test_end_does_not_overwrite_cumulative_token_state(self, tmp_path):
+        # UXI-03: _handle_token_usage owns the cumulative token_usage slot.
+        # on_processing_end must NOT clobber those running totals with the
+        # controller's last per-call usage (which lacks total_* keys, so
+        # resume restored ~zero).
         agent = _FakeAgent(last_usage={"prompt_tokens": 7, "completion_tokens": 3})
         store, out = _make(tmp_path, agent=agent)
         try:
+            out.on_activity_with_metadata(
+                "token_usage",
+                "[llm]",
+                {"prompt_tokens": 100, "completion_tokens": 40, "cached_tokens": 5},
+            )
             await out.on_processing_end()
             usage = store.state.get("alice:token_usage")
-            assert usage["prompt_tokens"] == 7
+            # Cumulative totals survive; not replaced by the 7/3 last-call.
+            assert usage["total_input_tokens"] == 100
+            assert usage["total_output_tokens"] == 40
+            assert usage["total_cached_tokens"] == 5
         finally:
             store.close()
 
@@ -307,8 +452,10 @@ class TestStart:
     async def test_stop_is_noop(self, tmp_path):
         store, out = _make(tmp_path)
         try:
+            # stop() is a no-op: the router never starts/stops secondary
+            # outputs, so an interrupt is recovered from the durable slot
+            # on resume rather than flushed here.
             await out.stop()
-            # A no-op: writes no events to the store.
             store.flush()
             assert store.get_events("alice") == []
         finally:
@@ -733,6 +880,8 @@ class TestEmitMatch:
         store, out = _make(tmp_path)
         try:
             await out.emit(OutputEvent(type="text", content="hi"))
+            # Buffered until the segment boundary.
+            await out.emit(OutputEvent(type="processing_end", content=""))
             store.flush()
             evts = [e for e in store.get_events("alice") if e["type"] == "text_chunk"]
             assert evts[0]["content"] == "hi"
@@ -879,6 +1028,41 @@ class TestStartTokenRestore:
         finally:
             store.close()
 
+    async def test_totals_restored_before_first_accumulate_without_start(
+        self, tmp_path
+    ):
+        # UXI-03: resume must CONTINUE the running total. start() is never
+        # called on secondary outputs in prod, so the restore is lazy —
+        # the first token_usage seeds from the persisted slot instead of
+        # overwriting it with this run's tokens.
+        path = str(tmp_path / "x.kohakutr")
+        store = SessionStore(path)
+        out = SessionOutput("alice", store, None)
+        for _ in range(20):
+            out.on_activity_with_metadata(
+                "token_usage",
+                "[llm]",
+                {"prompt_tokens": 500, "completion_tokens": 100, "cached_tokens": 5},
+            )
+        assert out._total_input_tokens == 10000
+        store.close()
+
+        store2 = SessionStore(path)
+        out2 = SessionOutput("alice", store2, None)
+        try:
+            # No start() — mirrors the live secondary-output path.
+            out2.on_activity_with_metadata(
+                "token_usage",
+                "[llm]",
+                {"prompt_tokens": 500, "completion_tokens": 100, "cached_tokens": 5},
+            )
+            assert out2._total_input_tokens == 10500
+            assert out2._total_output_tokens == 2100
+            usage = store2.state.get("alice:token_usage")
+            assert usage["total_input_tokens"] == 10500
+        finally:
+            store2.close()
+
 
 # -- _token_metadata defensive total coercion ---------------------
 
@@ -963,17 +1147,24 @@ class TestActivityMethods:
 
 class TestStoreFailureBranches:
     async def test_write_stream_record_failure_swallowed(self, tmp_path):
-        # If append_event raises while recording a text chunk,
-        # write_stream logs + swallows it (output keeps streaming).
+        # If the durable open_text slot write raises while buffering a
+        # chunk, write_stream logs + swallows it (output keeps streaming).
         store, out = _make(tmp_path)
         try:
+            original_setitem = type(store.state).__setitem__
 
-            def _boom(*a, **kw):
-                raise RuntimeError("append exploded")
+            def _flaky_setitem(self_state, key, value):
+                if key.endswith(":open_text"):
+                    raise RuntimeError("slot write exploded")
+                return original_setitem(self_state, key, value)
 
-            store.append_event = _boom
-            # Must not raise.
-            await out.write_stream("a chunk")
+            store.state.__class__.__setitem__ = _flaky_setitem
+            try:
+                # A chunk past the flush gate forces the slot write, which
+                # raises — write_stream must swallow it.
+                await out.write_stream("z" * 600)
+            finally:
+                store.state.__class__.__setitem__ = original_setitem
         finally:
             store.close()
 

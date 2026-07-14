@@ -12,6 +12,10 @@ from typing import Any
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.session.history import replay_conversation
+from kohakuterrarium.session.text_buffer import (
+    OpenTextSegment,
+    last_persisted_turn_branch,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -20,8 +24,11 @@ logger = get_logger(__name__)
 class SessionOutput(OutputModule):
     """Output module that records events to a SessionStore.
 
-    Accumulates streaming text chunks and flushes as one event
-    on processing_end. Tool/subagent activity can be recorded immediately
+    Streamed text is coalesced into ONE ``text_chunk`` event per segment:
+    chunks accumulate in a durable slot and flush at the next boundary (a
+    routed non-text event or ``on_processing_end``); a crash mid-stream is
+    recovered when this sink is next constructed (attach/resume), stamped
+    to the interrupted turn. Tool/subagent activity is recorded immediately
     when enabled. Saves conversation snapshot and agent state after each
     processing cycle.
     """
@@ -43,19 +50,30 @@ class SessionOutput(OutputModule):
         # (``<host>:attached:<role>:<attach_seq>``). Defaults to the
         # agent's own name for the standard one-agent-per-store case.
         self._event_key_prefix = event_key_prefix or agent_name
-        # Wave C: streaming chunks land as ``text_chunk`` events on the
-        # append bus directly; the old ``_text_buffer`` flush-on-turn-end
-        # path is gone. ``_chunk_seq`` counts within one assistant
-        # response and resets at each ``processing_start``.
+        # UXI-02: streamed text is coalesced into ONE ``text_chunk`` event
+        # per segment. The in-flight segment lives in a durable state slot
+        # so a crash mid-stream is recovered on resume (never in-memory
+        # only). ``_chunk_seq`` numbers the flushed segments within one
+        # assistant response and resets at each ``processing_start``.
+        self._open_text = OpenTextSegment(store, self._event_key_prefix)
+        self._recovered_open_text: bool = False
         self._chunk_seq: int = 0
         # Wave C: track ``subagent_start`` tasks so a later
         # ``subagent_done`` can persist a minimal conversation record
         # for child agents that ran outside SubAgentManager.
         self._subagent_tasks: dict[str, dict] = {}
-        # Cumulative API token usage across the session
+        # Cumulative API token usage across the session. Restored lazily
+        # (one-shot) from the persisted slot before the first accumulate
+        # — ``start`` is not called on secondary outputs in prod, so
+        # relying on it alone would zero the total on every resume.
+        self._token_totals_restored: bool = False
         self._total_input_tokens: int = 0
         self._total_output_tokens: int = 0
         self._total_cached_tokens: int = 0
+        # A sink is constructed at every attach/resume point; flush any
+        # segment a crashed process left in the durable slot right away, so
+        # viewing a resumed session shows the partial text immediately.
+        self._recover_open_text()
 
     def _current_turn_branch(self) -> tuple[int | None, int | None]:
         """Return ``(turn_index, branch_id)`` from the agent, or
@@ -85,29 +103,58 @@ class SessionOutput(OutputModule):
         return [tuple(p) for p in path]
 
     def _record(self, event_type: str, data: dict) -> None:
-        """Record an event under this sink's event-key prefix.
+        """Record a non-text event, closing the open text segment first.
+
+        UXI-02: a routed non-text event is a segment boundary — flush the
+        buffered streaming text as one ``text_chunk`` event before this
+        event so the assistant text keeps its place in the log.
+        """
+        self._recover_open_text()
+        self._flush_text_segment()
+        self._append_event(event_type, data)
+
+    def _append_event(self, event_type: str, data: dict) -> None:
+        """Append one event under this sink's event-key prefix.
 
         Wave F: ``event_key_prefix`` replaces the agent-name namespace
         when the agent is attached to a host session. Defaults to the
         agent's own name (the pre-Wave-F behavior).
         """
         ti, bi = self._current_turn_branch()
+        self._append_event_at(event_type, data, ti, bi, self._current_parent_path())
+
+    def _append_event_at(
+        self,
+        event_type: str,
+        data: dict,
+        turn_index: int | None,
+        branch_id: int | None,
+        parent_branch_path: list[tuple[int, int]] | None,
+    ) -> None:
+        """Append one event with explicit turn/branch/path stamps."""
         try:
             self._store.append_event(
                 self._event_key_prefix,
                 event_type,
                 data,
-                turn_index=ti,
-                branch_id=bi,
-                parent_branch_path=self._current_parent_path(),
+                turn_index=turn_index,
+                branch_id=branch_id,
+                parent_branch_path=parent_branch_path,
             )
         except Exception as e:
             logger.warning("Session record failed", error=str(e), exc_info=True)
 
-    async def start(self) -> None:
-        # Restore cumulative token totals from session state. Wave F:
-        # attached agents have their own ``<host>:attached:<role>:<seq>``
-        # prefix so restart restores each sink's own counters.
+    def _ensure_token_totals_restored(self) -> None:
+        """Seed cumulative totals from the persisted slot, exactly once.
+
+        Wave F: keyed by ``event_key_prefix`` so each sink restores its
+        own counters. Runs before the first accumulate (and from
+        ``start``) so resume continues the running total instead of
+        overwriting it with this run's tokens.
+        """
+        if self._token_totals_restored:
+            return
+        self._token_totals_restored = True
         try:
             usage = self._store.state.get(f"{self._event_key_prefix}:token_usage")
             if isinstance(usage, dict):
@@ -117,40 +164,77 @@ class SessionOutput(OutputModule):
         except (KeyError, TypeError):
             pass
 
+    async def start(self) -> None:
+        self._ensure_token_totals_restored()
+        # UXI-02: a process that died mid-stream left its partial segment
+        # in the durable slot — flush it as one finalized event.
+        self._recover_open_text()
+
     async def stop(self) -> None:
         pass
 
     async def write(self, text: str) -> None:
-        # Wave C: non-streaming writes still go to the append bus as a
-        # ``text_chunk`` event. Replay collapses consecutive chunks
-        # into one logical assistant message.
-        if text:
-            self._emit_text_chunk(text)
+        self._ingest_text(text)
 
     async def write_stream(self, chunk: str) -> None:
-        if chunk:
-            self._emit_text_chunk(chunk)
+        self._ingest_text(chunk)
 
-    def _emit_text_chunk(self, chunk: str) -> None:
-        """Append a Wave C ``text_chunk`` event.
+    def _ingest_text(self, chunk: str) -> None:
+        """Buffer a streamed text chunk into the open segment.
 
-        Wave F: honours ``event_key_prefix`` so attached agents write
-        streaming chunks under their attached namespace.
+        UXI-02: chunks accumulate in a durable slot and flush as ONE
+        ``text_chunk`` event at the next segment boundary (a non-text
+        event or ``on_processing_end``) — not one event per transport
+        write. Wave F ``event_key_prefix`` still scopes the slot/event.
         """
-        seq = self._chunk_seq
+        self._recover_open_text()
+        if chunk:
+            self._open_text.append(chunk)
+
+    def _recover_open_text(self) -> None:
+        """Flush a segment orphaned by a crashed process, exactly once.
+
+        The durable slot is authoritative: a sink created on resume has
+        an empty in-memory buffer, so recovery reads whatever the prior
+        process left behind. Runs at construction (so a view-only resume
+        surfaces the text without waiting for a new turn) and is idempotent
+        — ``start`` / ``on_processing_start`` / the first write re-trigger
+        it, only the first run acts. The recovered chunk is stamped from
+        the last persisted event's turn (the interrupted turn), not the
+        resumed agent's advanced current turn.
+        """
+        if self._recovered_open_text:
+            return
+        self._recovered_open_text = True
+        recovered = self._open_text.recover()
+        if not recovered:
+            return
+        ti, bi, ppath = last_persisted_turn_branch(self._store, self._event_key_prefix)
+        self._append_event_at(
+            "text_chunk",
+            {
+                "content": recovered,
+                "chunk_seq": self._chunk_seq,
+                "finalize": "recovered",
+            },
+            ti,
+            bi,
+            ppath,
+        )
         self._chunk_seq += 1
-        ti, bi = self._current_turn_branch()
-        try:
-            self._store.append_event(
-                self._event_key_prefix,
-                "text_chunk",
-                {"content": chunk, "chunk_seq": seq},
-                turn_index=ti,
-                branch_id=bi,
-                parent_branch_path=self._current_parent_path(),
-            )
-        except Exception as e:
-            logger.warning("text_chunk record failed", error=str(e), exc_info=True)
+
+    def _flush_text_segment(self, *, finalize: str | None = None) -> None:
+        """Write the open segment as one ``text_chunk`` event and clear it."""
+        text = self._open_text.take()
+        if text:
+            self._append_text_chunk(text, finalize=finalize)
+
+    def _append_text_chunk(self, content: str, *, finalize: str | None = None) -> None:
+        data: dict[str, Any] = {"content": content, "chunk_seq": self._chunk_seq}
+        if finalize:
+            data["finalize"] = finalize
+        self._chunk_seq += 1
+        self._append_event("text_chunk", data)
 
     async def flush(self) -> None:
         pass
@@ -205,11 +289,9 @@ class SessionOutput(OutputModule):
                     if hasattr(pad, "to_dict"):
                         state_kwargs["scratchpad"] = pad.to_dict()
 
-                # Token usage from controller
-                if hasattr(self._agent, "controller"):
-                    usage = getattr(self._agent.controller, "_last_usage", {})
-                    if usage:
-                        state_kwargs["token_usage"] = usage
+                # The cumulative ``<prefix>:token_usage`` slot is owned by
+                # ``_handle_token_usage``; never write it here (a per-call
+                # shape would clobber the running totals).
 
                 if state_kwargs:
                     self._store.save_state(self._event_key_prefix, **state_kwargs)
@@ -287,7 +369,7 @@ class SessionOutput(OutputModule):
             case "text":
                 content = event.content
                 if isinstance(content, str) and content:
-                    self._emit_text_chunk(content)
+                    self._ingest_text(content)
             case "processing_start":
                 await self.on_processing_start()
             case "processing_end":
@@ -546,6 +628,7 @@ class SessionOutput(OutputModule):
             )
 
     def _handle_token_usage(self, name: str, detail: str, metadata: dict) -> None:
+        self._ensure_token_totals_restored()
         prompt = metadata.get("prompt_tokens", 0)
         completion = metadata.get("completion_tokens", 0)
         cached = metadata.get("cached_tokens", 0)
