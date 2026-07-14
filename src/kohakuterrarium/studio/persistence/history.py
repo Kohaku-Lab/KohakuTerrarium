@@ -40,8 +40,18 @@ def history_index_payload(path: Path) -> dict[str, Any]:
             store.close(update_status=False)
 
 
-def history_payload(path: Path, target: str) -> dict[str, Any]:
-    """Return read-only saved history for an agent/root/channel target.
+def history_payload(
+    path: Path,
+    target: str,
+    live_job_ids: set[str] | None = None,
+) -> dict[str, Any]:
+    """Return read-only history for an agent/root/channel target.
+
+    ``live_job_ids`` — in-flight job ids on the live agent backing this
+    session. The live-store history route passes them so an in-flight
+    tool / sub-agent isn't rendered as ``interrupted``; the saved path
+    leaves it ``None`` (read-only semantics: unmatched starts →
+    interrupted).
 
     Raises :class:`SessionNotFoundError` for a missing session file,
     :class:`NotFoundError` for an unknown target, and
@@ -57,7 +67,7 @@ def history_payload(path: Path, target: str) -> dict[str, Any]:
         valid_targets = set(session_targets(store, meta))
         if target not in valid_targets:
             raise NotFoundError(f"Target not found in session: {target}")
-        payload = session_history_payload(store, target)
+        payload = session_history_payload(store, target, live_job_ids=live_job_ids)
         payload["session_name"] = path.stem
         payload["meta"] = meta
         return payload

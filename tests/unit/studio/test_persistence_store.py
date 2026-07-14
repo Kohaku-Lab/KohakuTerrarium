@@ -140,6 +140,45 @@ class TestSessionHistoryPayload:
         finally:
             s.close()
 
+    def test_saved_read_synthesizes_interrupted_for_unfinished_job(self, tmp_path):
+        # Saved read (no ``live_job_ids``): an unfinished sub-agent job
+        # is a genuinely dead in-flight job → the payload carries a
+        # synthetic ``interrupted`` terminal so replay doesn't leave it
+        # stuck "running".
+        path = tmp_path / "s.kohakutr"
+        s = SessionStore(str(path))
+        try:
+            s.init_meta("sess", "agent", "/p", "/w", ["alice"])
+            s.append_event(
+                "alice", "subagent_call", {"name": "explore", "job_id": "j1"}
+            )
+            s.flush()
+            out = store_mod.session_history_payload(s, "alice")
+            terminals = [e for e in out["events"] if e.get("type") == "subagent_result"]
+            assert terminals, "saved read must synthesise the interrupted terminal"
+            assert all(e.get("_synthetic_resume") for e in terminals)
+            assert all(e.get("job_id") == "j1" for e in terminals)
+        finally:
+            s.close()
+
+    def test_live_read_keeps_running_job_terminal_free(self, tmp_path):
+        # Live read (job id in ``live_job_ids``): the SAME store must NOT
+        # synthesise a terminal — the job is still running, so the
+        # inspector renders it "running", not "interrupted" (Bug 2).
+        path = tmp_path / "s.kohakutr"
+        s = SessionStore(str(path))
+        try:
+            s.init_meta("sess", "agent", "/p", "/w", ["alice"])
+            s.append_event(
+                "alice", "subagent_call", {"name": "explore", "job_id": "j1"}
+            )
+            s.flush()
+            out = store_mod.session_history_payload(s, "alice", live_job_ids={"j1"})
+            terminals = [e for e in out["events"] if e.get("type") == "subagent_result"]
+            assert terminals == [], "live job must not get a synthetic terminal"
+        finally:
+            s.close()
+
 
 # ── delete_session_files ──────────────────────────────────────
 

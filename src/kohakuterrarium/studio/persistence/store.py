@@ -201,8 +201,21 @@ def session_targets(store: SessionStore, meta: dict[str, Any]) -> list[str]:
     return targets
 
 
-def session_history_payload(store: SessionStore, target: str) -> dict[str, Any]:
-    """Read-only history slice for a given agent/root/channel target."""
+def session_history_payload(
+    store: SessionStore,
+    target: str,
+    *,
+    live_job_ids: set[str] | None = None,
+) -> dict[str, Any]:
+    """Read-only history slice for a given agent/root/channel target.
+
+    ``live_job_ids`` — currently-in-flight job ids on the LIVE agent(s)
+    backing this session. The live history route passes them so an
+    in-flight background tool / sub-agent isn't synthesised as
+    ``interrupted``; the saved-session path leaves it ``None`` (at read
+    time every unfinished job is genuinely dead, so the synthetic
+    terminal is correct).
+    """
     if target.startswith("ch:"):
         channel = target[3:]
         messages = store.get_channel_messages(channel)
@@ -221,11 +234,15 @@ def session_history_payload(store: SessionStore, target: str) -> dict[str, Any]:
             ],
         }
 
-    get_events = getattr(store, "get_resumable_events", None) or store.get_events
+    resumable = getattr(store, "get_resumable_events", None)
+    if resumable is not None:
+        events = resumable(target, live_job_ids=live_job_ids)
+    else:
+        events = store.get_events(target)
     return {
         "target": target,
         "messages": store.load_conversation(target) or [],
-        "events": get_events(target),
+        "events": events,
     }
 
 

@@ -31,6 +31,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
 from kohakuterrarium.api.deps import get_service
+from kohakuterrarium.api.routes.persistence.live_paths import live_store_path
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.store import resolve_session_path_default
 from kohakuterrarium.studio.persistence.viewer.diff import build_diff_payload
@@ -46,8 +47,16 @@ from kohakuterrarium.terrarium.service import TerrariumService
 router = APIRouter()
 
 
-async def _resolve_or_404(session_name: str):
-    """Resolve a session path off-loop; raise 404 if missing."""
+async def _resolve_or_404(session_name: str, service: TerrariumService | None = None):
+    """Resolve a session path off-loop; raise 404 if missing.
+
+    A live session's graph_id resolves to its attached store first (its
+    on-disk file is named by creature_id, so name resolution misses it).
+    """
+    if service is not None:
+        live = live_store_path(service, session_name)
+        if live is not None:
+            return live
     path = await asyncio.to_thread(resolve_session_path_default, session_name)
     if path is None:
         raise HTTPException(404, f"Session not found: {session_name}")
@@ -69,7 +78,14 @@ def _resolve_cluster_paths(
     scalar fast path. Empty list means the sid is unknown on disk and
     the caller raises 404. Members whose mirror has not yet
     materialised are silently skipped (matching memory search).
+
+    A live session is addressed by its graph_id, whose on-disk file is
+    named by creature_id — so it is resolved from the engine's attached
+    store first, before the on-disk name fallback.
     """
+    live = live_store_path(service, session_name)
+    if live is not None:
+        return [(session_name, live)]
     primary = cluster_fold.sid_to_primary(service).get(session_name, session_name)
     members = cluster_fold.cluster_groups(service).get(primary, {session_name})
     out: list[tuple[str, Path]] = []
@@ -489,6 +505,7 @@ async def get_session_diff(
     session_name: str,
     other: str,
     agent: str | None = None,
+    service: TerrariumService = Depends(get_service),
 ) -> dict[str, Any]:
     """Structured diff against another saved session.
 
@@ -496,7 +513,7 @@ async def get_session_diff(
     store; multi-member diff needs a per-pair strategy (likely
     per-member-pair diff with caller choosing).
     """
-    a_path = await _resolve_or_404(session_name)
+    a_path = await _resolve_or_404(session_name, service)
     b_path = await asyncio.to_thread(resolve_session_path_default, other)
     if b_path is None:
         raise HTTPException(404, f"Other session not found: {other}")

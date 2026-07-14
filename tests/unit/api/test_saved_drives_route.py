@@ -262,3 +262,104 @@ async def test_route_live_session_writer_returns_409(tmp_path, monkeypatch):
         assert "live writer" in resp.json()["detail"]
     finally:
         holder.release()
+
+
+# ── live-session resolution by graph_id (inspector Drives tab) ──
+
+
+def _live_app(engine):
+    from kohakuterrarium.api.deps import get_service
+
+    app = FastAPI()
+    app.include_router(mod.router, prefix="/api/persistence/viewer")
+    app.dependency_overrides[get_service] = lambda: engine
+    return app
+
+
+async def test_route_live_session_by_graph_id_returns_rows(tmp_path, monkeypatch):
+    # A live session is addressed by its graph_id (≠ creature_id file stem).
+    # The route resolves it to the attached store's sidecar and returns rows
+    # (pre-fix this 404'd via resolve_session_path_in).
+    import types
+
+    from kohakuterrarium.session.store import SessionStore
+
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+    monkeypatch.setenv("KT_SESSION_DIR", str(session_dir))
+    await _make_saved_session(session_dir)
+    saved_path = next(session_dir.glob("*.kohakutr"))
+
+    graph_id = "graph_e627ece2f20a"
+    # Attached store not holding the writer lock, so the offline read proceeds.
+    store = SessionStore(str(saved_path))
+    engine = types.SimpleNamespace(_session_stores={graph_id: store})
+    client = TestClient(_live_app(engine))
+    try:
+        resp = client.get(f"/api/persistence/viewer/{graph_id}/drives")
+        assert resp.status_code == 200
+        drives = resp.json()["drives"]
+        assert len(drives) == 1 and drives[0]["title"] == "persisted watch"
+    finally:
+        store.close()
+
+
+async def test_route_live_session_writer_locked_degrades_to_empty(
+    tmp_path, monkeypatch
+):
+    # A genuinely-live store holds the parent writer lock, so the offline
+    # sidecar read refuses — the tab degrades to an empty list, not 404/409.
+    import types
+
+    from kohakuterrarium.session.store import SessionStore
+
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+    monkeypatch.setenv("KT_SESSION_DIR", str(session_dir))
+    await _make_saved_session(session_dir)
+    saved_path = next(session_dir.glob("*.kohakutr"))
+
+    graph_id = "graph_locked00001"
+    store = SessionStore(str(saved_path), writer_lock=True)  # holds path + ".lock"
+    engine = types.SimpleNamespace(_session_stores={graph_id: store})
+    client = TestClient(_live_app(engine))
+    try:
+        resp = client.get(f"/api/persistence/viewer/{graph_id}/drives")
+        assert resp.status_code == 200
+        assert resp.json()["drives"] == []
+    finally:
+        store.close()
+
+
+async def test_route_live_session_no_sidecar_returns_empty(tmp_path, monkeypatch):
+    import types
+
+    from kohakuterrarium.session.store import SessionStore
+
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+    monkeypatch.setenv("KT_SESSION_DIR", str(session_dir))
+    await _make_saved_session_no_drive(session_dir)
+    saved_path = next(session_dir.glob("*.kohakutr"))
+
+    graph_id = "graph_nodrive0001"
+    store = SessionStore(str(saved_path))
+    engine = types.SimpleNamespace(_session_stores={graph_id: store})
+    client = TestClient(_live_app(engine))
+    try:
+        resp = client.get(f"/api/persistence/viewer/{graph_id}/drives")
+        assert resp.status_code == 200
+        assert resp.json()["drives"] == []
+    finally:
+        store.close()
+
+
+def test_route_unknown_graph_id_404_with_live_engine(tmp_path, monkeypatch):
+    # An id that is neither a live graph nor an on-disk session still 404s.
+    import types
+
+    monkeypatch.setenv("KT_SESSION_DIR", str(tmp_path))
+    engine = types.SimpleNamespace(_session_stores={})
+    client = TestClient(_live_app(engine))
+    resp = client.get("/api/persistence/viewer/graph_ghost/drives")
+    assert resp.status_code == 404

@@ -104,6 +104,62 @@ class TestSummary:
         assert captured["agent"] == "alice"
 
 
+# ── live-session resolution (graph_id ≠ on-disk file stem) ──────
+
+
+class TestLiveSessionResolution:
+    def test_viewer_and_history_resolve_a_live_graph_id(self, monkeypatch, tmp_path):
+        # A live session is addressed by its graph_id, but its autosession
+        # file is named by creature_id — so on-disk name resolution misses
+        # it. The routes must resolve it from the engine's attached store.
+        import types
+
+        from kohakuterrarium.api.deps import get_service
+        from kohakuterrarium.api.routes.persistence import history as history_mod
+        from kohakuterrarium.session.store import SessionStore
+
+        graph_id = "graph_abcdef123456"
+        # Deliberately creature_id-named, NOT the graph_id.
+        store_path = tmp_path / "alice_3f2a9c11.kohakutr"
+        store = SessionStore(str(store_path))
+        store.init_meta("alice", "agent", "/p", "/w", ["alice"])
+        store.append_event(
+            "alice",
+            "turn_token_usage",
+            {"prompt_tokens": 10, "completion_tokens": 4},
+            turn_index=1,
+        )
+        store.checkpoint()  # flush + WAL checkpoint so the read store sees it
+
+        engine = types.SimpleNamespace(_session_stores={graph_id: store})
+
+        # On-disk name resolution must MISS the graph_id, proving the live
+        # lookup is what resolves it.
+        monkeypatch.setattr(viewer_mod, "resolve_session_path_default", lambda n: None)
+        monkeypatch.setattr(history_mod, "resolve_session_path_default", lambda n: None)
+
+        app = FastAPI()
+        app.include_router(viewer_mod.router, prefix="/sessions")
+        app.include_router(history_mod.router, prefix="/sessions")
+        app.dependency_overrides[get_service] = lambda: engine
+        client = TestClient(app)
+        try:
+            # Viewer tab (Overview summary) — 200 + real data, not 404.
+            summary = client.get(f"/sessions/{graph_id}/summary")
+            assert summary.status_code == 200
+            assert "alice" in summary.json()["agents"]
+
+            # History index (Overview metadata) — 200, not 404.
+            history = client.get(f"/sessions/{graph_id}/history")
+            assert history.status_code == 200
+
+            # A genuinely-unknown id still 404s (falls through to on-disk).
+            missing = client.get("/sessions/graph_ghost/summary")
+            assert missing.status_code == 404
+        finally:
+            store.close()
+
+
 # ── turns ──────────────────────────────────────────────────────
 
 
