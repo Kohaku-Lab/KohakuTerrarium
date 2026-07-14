@@ -94,11 +94,16 @@ actions:
 
 ## Output Format
 
-- **Display-only** (no actions, or `wait_for_reply=false`): returns
-  `card displayed`.
+- **Display-only** (no actions, `wait_for_reply=false`, or every action
+  is a `link`): returns `card displayed`. A link-only card never waits —
+  `link` actions can't post a reply.
 - **Interactive**: returns `action: <action_id>` (or `action: <id>`
   + the submitted values on a second line if any).
 - **Timeout**: returns `card timed out without reply`.
+- **No interactive responder** (headless run, but the card wanted a
+  reply): displays the card and returns
+  `card displayed; no interactive responder is attached to collect a
+  reply` instead of blocking forever.
 - **No router attached**: returns a plain-text rendering of the card
   so the model still sees the content it tried to display.
 

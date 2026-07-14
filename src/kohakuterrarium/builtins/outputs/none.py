@@ -21,6 +21,10 @@ class NoneOutput(BaseOutputModule):
     NoneOutput default loses nothing except console spam.
     """
 
+    # Headless sink: nothing surfaces a prompt, so interactive tools
+    # (ask_user / show_card) must not block waiting for a reply here.
+    supports_interactive: bool = False
+
     async def _on_start(self) -> None:
         logger.debug("None output started (all writes discarded)")
 

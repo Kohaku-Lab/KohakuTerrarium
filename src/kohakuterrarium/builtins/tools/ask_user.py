@@ -22,6 +22,7 @@ from kohakuterrarium.modules.tool.base import (
     ExecutionMode,
     ToolContext,
     ToolResult,
+    has_interactive_responder,
 )
 from kohakuterrarium.utils.logging import get_logger
 
@@ -39,11 +40,6 @@ class AskUserTool(BaseTool):
     """
 
     needs_context: bool = True
-    # ``ask_user`` and ``show_card`` cover overlapping interaction
-    # patterns; force the model to read the manual once so it picks
-    # the right tool (free-text vs button choice) and uses the right
-    # arg shape — same pattern as ``edit`` / ``multi_edit``.
-    require_manual_read: bool = True
 
     @property
     def tool_name(self) -> str:
@@ -56,6 +52,16 @@ class AskUserTool(BaseTool):
     @property
     def execution_mode(self) -> ExecutionMode:
         return ExecutionMode.DIRECT
+
+    def prompt_contribution(self) -> str | None:
+        return (
+            "Ask the user for a **free-text** reply and wait for it — "
+            "clarification, a missing value, a typed approval. For a "
+            "pick-one-of-N choice or a styled panel use `show_card` "
+            "instead. Waits forever by default; pass `timeout_s` for a "
+            "bounded wait. With no UI attached (headless) it returns a "
+            "no-responder note immediately rather than blocking."
+        )
 
     async def _execute(
         self, args: dict[str, Any], context: ToolContext | None = None
@@ -79,6 +85,12 @@ class AskUserTool(BaseTool):
             # No bus available — legacy stdin fallback for programmatic
             # / test contexts. Mirrors the pre-Phase-B behaviour.
             return await self._stdin_fallback(question)
+
+        if not has_interactive_responder(router):
+            return ToolResult(
+                output="(no responder: no interactive UI is attached to answer)",
+                exit_code=0,
+            )
 
         event_id = f"ask_{uuid4().hex[:12]}"
         event = OutputEvent(

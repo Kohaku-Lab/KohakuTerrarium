@@ -355,6 +355,25 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
         "type": "object",
         "properties": {
             "question": {"type": "string", "description": "Question to ask the user"},
+            "placeholder": {
+                "type": "string",
+                "description": "Optional grey hint text shown inside the input box.",
+            },
+            "multiline": {
+                "type": "boolean",
+                "description": "Render a multi-line text area instead of a single line.",
+            },
+            "timeout_s": {
+                "type": "number",
+                "description": (
+                    "Seconds to wait for a reply. Default null = wait forever."
+                ),
+            },
+            "surface": {
+                "type": "string",
+                "enum": ["chat", "modal"],
+                "description": "Where to render the prompt. Default 'chat'.",
+            },
         },
         "required": ["question"],
     },
